@@ -1,0 +1,68 @@
+{
+	"name": "@deviltea/uiux",
+	"version": "0.1.0",
+	"description": "A local-first UI/UX specification, preview, and review workbench.",
+	"type": "module",
+	"packageManager": "pnpm@10.34.4",
+	"engines": {
+		"node": "^24.11.0"
+	},
+	"homepage": "https://github.com/DevilTea/uiux#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/DevilTea/uiux.git"
+	},
+	"bugs": {
+		"url": "https://github.com/DevilTea/uiux/issues"
+	},
+	"keywords": [
+		"uiux",
+		"design",
+		"workbench",
+		"nuxt"
+	],
+	"bin": {
+		"uiux": "./bin/uiux.mjs"
+	},
+	"files": [
+		".output",
+		"app",
+		"bin",
+		"nuxt.config.ts",
+		"public",
+		"server",
+		"src"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"build": "nuxt build",
+		"check": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run smoke:package && pnpm run smoke:server",
+		"dev": "nuxt dev --host 127.0.0.1",
+		"lint": "eslint . --max-warnings=0",
+		"prepack": "pnpm run build",
+		"preview": "node .output/server/index.mjs",
+		"smoke:package": "node ./scripts/smoke-package.mjs",
+		"smoke:server": "node ./scripts/smoke-server.mjs",
+		"test": "vitest run",
+		"typecheck": "nuxt typecheck"
+	},
+	"dependencies": {
+		"@nuxt/ui": "4.11.2",
+		"h3": "1.15.11",
+		"nuxt": "4.5.2"
+	},
+	"devDependencies": {
+		"@eslint/js": "10.0.1",
+		"@playwright/test": "1.63.0",
+		"@types/node": "^24.13.2",
+		"eslint": "10.6.0",
+		"eslint-plugin-vue": "10.11.1",
+		"globals": "17.3.0",
+		"typescript": "6.0.3",
+		"typescript-eslint": "8.71.0",
+		"vitest": "4.1.11",
+		"vue-tsc": "3.3.6"
+	}
+}

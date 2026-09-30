@@ -1,0 +1,6 @@
+# The public package ships the production Nitro bundle and CLI.
+coverage/
+playwright-report/
+test-results/
+tests/
+scripts/
