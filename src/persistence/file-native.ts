@@ -105,9 +105,9 @@ export class FileNativePersistence {
 		this.fault = options.fault
 		this.lockWaitMilliseconds = options.lockWaitMilliseconds ?? MAX_LOCK_WAIT_MS
 		this.workspace = new WorkspaceFileRepository(this)
-		this.views = new JsonResourceRepository(this, viewRelativePath, 'id', (resource, filename) => validateViewResource(resource, filename).diagnostics)
-		this.flows = new JsonResourceRepository(this, flowRelativePath, 'id', (resource, filename) => validateFlowResource(resource, filename).diagnostics)
-		this.reviews = new JsonResourceRepository(this, reviewRelativePath, 'id', (resource, filename) => validateReviewThread(resource, filename).diagnostics)
+		this.views = new JsonResourceRepository(this, viewRelativePath, 'id', (resource, filename) => validateViewResource(resource, filename).diagnostics, { directory: 'views', suffix: '.view.json' })
+		this.flows = new JsonResourceRepository(this, flowRelativePath, 'id', (resource, filename) => validateFlowResource(resource, filename).diagnostics, { directory: 'flows', suffix: '.flow.json' })
+		this.reviews = new JsonResourceRepository(this, reviewRelativePath, 'id', (resource, filename) => validateReviewThread(resource, filename).diagnostics, { directory: 'reviews', suffix: '.review.json' })
 		this.locales = new LocaleFileRepository(this)
 		this.assets = new AuthoredAssetFileRepository(this)
 		this.artifacts = new ImmutableArtifactStore(this)
@@ -682,12 +682,36 @@ export class JsonResourceRepository<Key extends string, Resource> implements Mut
 		private readonly pathFor: (key: Key) => string,
 		private readonly identityField: string,
 		private readonly validate: JsonValidator,
+		private readonly discovery: Readonly<{ directory: string; suffix: string }>,
 	) {}
+
+	async discoverKeys(): Promise<readonly Key[]> {
+		return this.persistence.withLock(async () => {
+			const absolute = resolveWorkspacePath(this.persistence.root, this.discovery.directory)
+			await assertSafePath(this.persistence.root, `${this.discovery.directory}/.placeholder`, true)
+			let entries: import('node:fs').Dirent[]
+			try { entries = await fs.readdir(absolute, { withFileTypes: true }) }
+			catch (error) { if (isNotFound(error)) return []; throw error }
+			return entries
+				.filter(entry => entry.isFile() && entry.name.endsWith(this.discovery.suffix))
+				.map(entry => entry.name.slice(0, -this.discovery.suffix.length))
+				.filter(isFullUuid)
+				.sort() as Key[]
+		})
+	}
 
 	async read(key: Key): Promise<RevisionedResourceRead<Resource> | undefined> {
 		const inspected = await this.readInspected(key)
 		return inspected && { resource: inspected.resource, revision: inspected.revision }
 	}
+
+	async readRevision(key: Key): Promise<ResourceRevision | undefined> {
+		return this.persistence.withLock(async () => {
+			const bytes = await this.persistence.readOptionalBytesUnlocked(this.pathFor(key))
+			return bytes ? revisionForBytes(bytes) : undefined
+		})
+	}
+
 
 	async readInspected(key: Key): Promise<InspectedResource<Resource> | undefined> {
 		return this.persistence.withLock(async () => {
@@ -787,6 +811,14 @@ export class LocaleFileRepository implements MutableResourceRepository<string, I
 		const result = await this.readInspected(locale)
 		return result && { resource: result.resource, revision: result.revision }
 	}
+
+	async readRevision(locale: string): Promise<ResourceRevision | undefined> {
+		return this.persistence.withLock(async () => {
+			const bytes = await this.persistence.readOptionalBytesUnlocked(localeRelativePath(locale))
+			return bytes ? revisionForBytes(bytes) : undefined
+		})
+	}
+
 
 	async readInspected(locale: string): Promise<InspectedResource<I18nResource> | undefined> {
 		return this.persistence.withLock(async () => {

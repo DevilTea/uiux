@@ -60,7 +60,8 @@
 		"motion-dom": "13.4.5",
 		"motion-utils": "13.3.0",
 		"nuxt": "4.5.2",
-		"vue": "3.5.43"
+		"vue": "3.5.43",
+		"zod": "4.6.5"
 	},
 	"devDependencies": {
 		"@eslint/js": "10.0.1",
