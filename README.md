@@ -29,3 +29,7 @@ This runs ESLint, Nuxt typechecking, Vitest, the production build, and a live Ni
 It also packs the public npm artifact from source, installs that tarball into an isolated temporary project, verifies the installed `uiux` CLI, starts the packed Nitro runtime, and probes `GET /api/health`.
 
 The Playwright configuration is included as the future browser-test and capture baseline. Browser capture behavior is not implemented by this bootstrap.
+
+## Domain contracts
+
+Canonical Workspace resources and their validators live under `src/domain/`. The Widget executable IR remains Adapter/Widget-owned; UIUX validates only its reserved `RootShell` identity boundary. Application revision envelopes are separate from persisted resources, and Preview cross-iframe DTOs live under `src/preview/protocol/`.
