@@ -122,6 +122,25 @@ function validateAdapterCatalog(input: unknown, path: string, v: Validator): voi
 	}
 }
 
+export function validateAdapterConfigSchema(
+	schema: JsonSchema2020_12 | undefined,
+): ValidationResult<JsonSchema2020_12 | undefined> {
+	const v = new Validator()
+	if (schema === undefined)
+		return v.finish<JsonSchema2020_12 | undefined>(undefined)
+	if (typeof schema !== 'boolean' && schema.$schema !== DRAFT_2020_12_URI) {
+		v.issue('adapter.unsupported_config_schema_dialect', '/configSchema/$schema', 'Adapter config schema must declare JSON Schema Draft 2020-12.')
+		return v.finish<JsonSchema2020_12 | undefined>(schema)
+	}
+	try {
+		draft202012Ajv.compile(schema as AnySchema)
+	}
+	catch {
+		v.issue('adapter.invalid_config_schema', '/configSchema', 'Adapter config schema could not be compiled as Draft 2020-12.')
+	}
+	return v.finish<JsonSchema2020_12 | undefined>(schema)
+}
+
 /** Applies the adapter-owned schema through its Draft 2020-12 implementation. */
 export function validateAdapterConfig(
 	config: unknown,
@@ -135,12 +154,13 @@ export function validateAdapterConfig(
 		v.issue('adapter.config_not_json_value', '/config', 'Adapter config must be a JSON-compatible JSON value.')
 		return v.finish<JsonValue | undefined>(config)
 	}
-	if (!schema) {
+	if (schema === undefined) {
 		v.issue('adapter.config_schema_required', '/config', 'Adapter-specific config is not accepted without an adapter-provided schema.')
 		return v.finish<JsonValue | undefined>(config)
 	}
-	if (typeof schema !== 'boolean' && schema.$schema !== DRAFT_2020_12_URI) {
-		v.issue('adapter.unsupported_config_schema_dialect', '/configSchema/$schema', 'Adapter config schema must declare JSON Schema Draft 2020-12.')
+	const schemaValidation = validateAdapterConfigSchema(schema)
+	if (!schemaValidation.ok) {
+		v.diagnostics.push(...schemaValidation.diagnostics)
 		return v.finish<JsonValue | undefined>(config)
 	}
 	try {

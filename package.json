@@ -52,6 +52,7 @@
 		"@nuxt/ui": "4.11.2",
 		"ajv": "8.20.0",
 		"h3": "1.15.11",
+		"import-meta-resolve": "4.2.0",
 		"nuxt": "4.5.2"
 	},
 	"devDependencies": {
