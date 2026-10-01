@@ -49,11 +49,14 @@
 		"typecheck": "nuxt typecheck"
 	},
 	"dependencies": {
+		"@deviltea/widget-core": "0.0.1",
+		"@deviltea/widget-vue": "0.0.1",
 		"@nuxt/ui": "4.11.2",
 		"ajv": "8.20.0",
 		"h3": "1.15.11",
 		"import-meta-resolve": "4.2.0",
-		"nuxt": "4.5.2"
+		"nuxt": "4.5.2",
+		"vue": "3.5.43"
 	},
 	"devDependencies": {
 		"@eslint/js": "10.0.1",

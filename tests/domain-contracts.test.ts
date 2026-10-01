@@ -12,7 +12,7 @@ import { validateReference, validateViewSpec, transitionDecision, validateDecisi
 import { validateResourceRevision, validateRevisionConflict } from '../src/application/dto/revisions'
 import { validateUniqueFullUuidClaims } from '../src/domain/identity-index'
 import { isAbsoluteUri, isCanonicalLocaleFilename, isFullUuid, isSha256Digest } from '../src/domain/validation'
-import { validateRootShellContentSlot, validateRootShellIdentity, validateViewResource } from '../src/domain/views/schema'
+import { validateRootShellContentSlot, validateRootShellIdentity, validateRootShellStructure, validateViewResource } from '../src/domain/views/schema'
 import { discoverLocaleFiles, validateWorkspaceManifest } from '../src/domain/workspace/schema'
 import { responseMeetsRequestedPrecision, validateGeometryMessage, validatePartialResponseAgainstRequest, validatePreviewFailureDiagnostic, type Contour, type PartialContourRequest, type PartialContourResponse } from '../src/preview/protocol/schema'
 
@@ -39,7 +39,7 @@ const workspace = {
 const view = {
 	id: VIEW_ID,
 	name: 'Checkout',
-	ir: { type: 'RootShell', id: 'root', content: [] },
+	ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 	variants: { Empty: { state: {} } },
 	spec: {
 		intent: '',
@@ -123,6 +123,10 @@ describe('canonical resource primitives', () => {
 		expect(validateRootShellIdentity({ type: 'RootShell', id: 'not-root' }).ok).toBe(false)
 		expect(validateRootShellContentSlot([]).ok).toBe(true)
 		expect(validateRootShellContentSlot(undefined).ok).toBe(false)
+		expect(validateRootShellStructure({ type: 'RootShell', id: 'root', slots: { content: [] } }).ok).toBe(true)
+		expect(validateRootShellStructure({ type: 'RootShell', id: 'root' }).ok).toBe(false)
+		expect(validateRootShellStructure({ type: 'RootShell', id: 'root', slots: { content: [], extra: [] } }).ok).toBe(false)
+		expect(validateRootShellStructure({ type: 'RootShell', id: 'root', slots: { content: [{ type: 'RootShell', id: 'nested', slots: { content: [] } }] } }).diagnostics.some(item => item.code === 'view.nested_root_shell')).toBe(true)
 	})
 
 	it('validates typed references and full View Spec presence', () => {

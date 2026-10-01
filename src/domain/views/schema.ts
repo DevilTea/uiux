@@ -16,6 +16,7 @@ export type ViewResource = Readonly<{
 }>
 
 export type RootShellIdentity = Readonly<{ type: 'RootShell'; id: 'root' }>
+export type RootShellSource = Readonly<{ type: 'RootShell'; id: 'root'; slots: Readonly<{ content: readonly JsonValue[] }> }>
 
 /**
  * UIUX validates its reserved root identity while the Widget plugin owns the
@@ -34,11 +35,41 @@ export function validateRootShellIdentity(input: unknown, path = '/ir'): Validat
 }
 
 /** Called after the Widget contract resolves RootShell's required content Slot. */
-export function validateRootShellContentSlot(children: unknown, path = '/ir/content'): ValidationResult<readonly JsonValue[]> {
+export function validateRootShellContentSlot(children: unknown, path = '/ir/slots/content'): ValidationResult<readonly JsonValue[]> {
 	const v = new Validator()
 	const list = v.array(children, path)
 	list?.forEach((child, index) => validateJsonValue(child, jsonPointer(path, index), v))
 	return v.finish<readonly JsonValue[]>(children)
+}
+
+/** RootShell's persisted structure is stricter than Widget Core's recoverable slot projection. */
+export function validateRootShellStructure(input: unknown, path = '/ir'): ValidationResult<RootShellSource> {
+	const v = new Validator()
+	const root = v.object(input, path)
+	if (!root) return v.finish<RootShellSource>(input)
+	v.diagnostics.push(...validateRootShellIdentity(input, path).diagnostics)
+	rejectUnknownKeys(root, ['type', 'id', 'slots'], path, v)
+	const slots = v.object(root.slots, `${path}/slots`)
+	if (slots) {
+		rejectUnknownKeys(slots, ['content'], `${path}/slots`, v)
+		v.diagnostics.push(...validateRootShellContentSlot(slots.content, `${path}/slots/content`).diagnostics)
+		if (Array.isArray(slots.content))
+			scanNestedRootShells(slots.content, `${path}/slots/content`, v)
+	}
+	return v.finish<RootShellSource>(input)
+}
+
+function scanNestedRootShells(children: readonly unknown[], path: string, v: Validator): void {
+	children.forEach((child, index) => {
+		const childPath = jsonPointer(path, index)
+		if (typeof child !== 'object' || child === null || Array.isArray(child)) return
+		const node = child as Record<string, unknown>
+		if (node.type === 'RootShell')
+			v.issue('view.nested_root_shell', `${childPath}/type`, 'RootShell is reserved to the single canonical View root.')
+		if (typeof node.slots !== 'object' || node.slots === null || Array.isArray(node.slots)) return
+		for (const [slot, nested] of Object.entries(node.slots as Record<string, unknown>))
+			if (Array.isArray(nested)) scanNestedRootShells(nested, jsonPointer(`${childPath}/slots`, slot), v)
+	})
 }
 
 export function validateViewResource(input: unknown, filename?: string): ValidationResult<ViewResource> {
@@ -52,7 +83,7 @@ export function validateViewResource(input: unknown, filename?: string): Validat
 	v.string(view.name, '/name', true)
 	if (Object.hasOwn(view, 'feature'))
 		v.string(view.feature, '/feature', true)
-	validateRootShellIdentity(view.ir)
+	validateRootShellStructure(view.ir)
 		.diagnostics.forEach(diagnostic => v.diagnostics.push(diagnostic))
 	validateVariants(view.variants, v)
 	const specResult = validateViewSpec(view.spec, '/spec')

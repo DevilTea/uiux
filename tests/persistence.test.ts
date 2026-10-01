@@ -491,7 +491,7 @@ function viewFixture(): ViewResource {
 	return {
 		id: VIEW_ID,
 		name: 'Checkout',
-		ir: { type: 'RootShell', id: 'root' },
+		ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 		variants: {},
 		spec: {
 			intent: '',
