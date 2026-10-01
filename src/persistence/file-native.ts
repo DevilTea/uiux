@@ -6,7 +6,7 @@ import { basename, dirname, resolve } from 'node:path'
 import type { ResourceRevision, RevisionedResourceRead, RevisionConflict } from '../application/dto/revisions'
 import type { MutableResourceRepository } from '../application/ports/resources'
 import { sha256Identity } from '../domain/artifacts/schema'
-import { validateAssetContentFiles, validateAssetContentMetadata, validateAssetMetadata, type AuthoredAsset } from '../domain/assets/schema'
+import { validateAssetContentFiles, validateAssetContentMetadata, validateAssetMetadata, type AuthoredAsset, type AuthoredAssetResource } from '../domain/assets/schema'
 import { validateFlowResource, type FlowResource } from '../domain/flows/schema'
 import { validateI18nResource, type I18nResource } from '../domain/i18n/schema'
 import { isCanonicalLocaleFilename, isFullUuid, isJsonValue, isRecord, type Diagnostic } from '../domain/validation'
@@ -65,11 +65,6 @@ export type WorkspaceReadInspection = Readonly<{
 	revision?: ResourceRevision
 	inspection: WorkspaceInspection
 	diagnostics: readonly Diagnostic[]
-}>
-
-export type AuthoredAssetResource = Readonly<{
-	metadata: AuthoredAsset
-	content: Uint8Array
 }>
 
 export type AuthoredAssetInspection = Readonly<{
@@ -1212,7 +1207,7 @@ function assertTransactionalPath(relativePath: string): void {
 	if (segments.length === 2 && segments[0] === 'flows' && /^[0-9a-f-]+\.flow\.json$/iu.test(segments[1]!) && isFullUuid(segments[1]!.slice(0, -'.flow.json'.length))) return
 	if (segments.length === 2 && segments[0] === 'reviews' && /^[0-9a-f-]+\.review\.json$/iu.test(segments[1]!) && isFullUuid(segments[1]!.slice(0, -'.review.json'.length))) return
 	if (segments.length === 2 && segments[0] === 'i18n' && isCanonicalLocaleFilename(segments[1])) return
-	if (segments.length === 3 && segments[0] === 'assets' && isFullUuid(segments[1]!) && isSafeAssetContentFilename(segments[2])) return
+	if (segments.length === 3 && segments[0] === 'assets' && isFullUuid(segments[1]!) && (segments[2] === 'asset.json' || isSafeAssetContentFilename(segments[2]))) return
 	throw new PersistenceError('persistence.path_rejected', `Path ${relativePath} is outside the allowed canonical Workspace layout.`)
 }
 

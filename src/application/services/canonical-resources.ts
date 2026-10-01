@@ -1,5 +1,5 @@
-import type { AuthoredAsset } from '../../domain/assets/schema'
-import { validateAssetMetadata } from '../../domain/assets/schema'
+import type { AuthoredAssetResource } from '../../domain/assets/schema'
+import { validateAuthoredAssetResource } from '../../domain/assets/schema'
 import type { FlowResource } from '../../domain/flows/schema'
 import { validateFlowResource } from '../../domain/flows/schema'
 import type { ViewResource } from '../../domain/views/schema'
@@ -32,8 +32,8 @@ export type FlowApplicationService<Impact> = Readonly<{
 	mutateFlow(command: ResourceMutationCommand<FlowKey, FlowResource>): Promise<ResourceMutationResult<FlowKey, Impact>>
 }>
 export type AssetApplicationService<Impact> = Readonly<{
-	readAsset(key: AssetKey): Promise<ResourceReadResult<AuthoredAsset> | undefined>
-	mutateAsset(command: ResourceMutationCommand<AssetKey, AuthoredAsset>): Promise<ResourceMutationResult<AssetKey, Impact>>
+	readAsset(key: AssetKey): Promise<ResourceReadResult<AuthoredAssetResource> | undefined>
+	mutateAsset(command: ResourceMutationCommand<AssetKey, AuthoredAssetResource>): Promise<ResourceMutationResult<AssetKey, Impact>>
 }>
 
 function validationPort<Resource>(validate: (resource: Resource) => ValidationResult<Resource>): ResourceValidationPort<Resource> {
@@ -77,14 +77,20 @@ export function createFlowService<Impact>(input: Readonly<{
 }
 
 export function createAssetService<Impact>(input: Readonly<{
-	repository: MutableResourceRepository<AssetKey, AuthoredAsset>
-	diagnostics?: ResourceDiagnosticPort<AssetKey, AuthoredAsset>
-	impact: ReferenceImpactAnalyzer<AssetKey, AuthoredAsset, Impact>
+	repository: MutableResourceRepository<AssetKey, AuthoredAssetResource>
+	diagnostics?: ResourceDiagnosticPort<AssetKey, AuthoredAssetResource>
+	impact: ReferenceImpactAnalyzer<AssetKey, AuthoredAssetResource, Impact>
 }>): AssetApplicationService<Impact> {
 	const service = createResourceService({
 		...input,
-		validation: validationPort(resource => validateAssetMetadata(resource)),
-		transitionValidation: immutableIdTransition('asset.immutable_id_changed', 'Asset'),
+		validation: validationPort(resource => validateAuthoredAssetResource(resource)),
+		transitionValidation: {
+			validate({ current, next }) {
+				return current.metadata.id === next.metadata.id
+					? []
+					: [{ code: 'asset.immutable_id_changed', path: '/metadata/id', message: 'Asset id is immutable.' }]
+			},
+		},
 	})
 	return { readAsset: service.read, mutateAsset: service.mutate }
 }

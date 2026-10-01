@@ -66,6 +66,7 @@ export function isSafeAssetContentFilename(filename: unknown): filename is strin
 		&& filename.length > 0
 		&& filename !== '.'
 		&& filename !== '..'
+		&& filename !== 'asset.json'
 		&& !filename.includes('/')
 		&& !filename.includes('\\')
 		&& !filename.includes('\0')

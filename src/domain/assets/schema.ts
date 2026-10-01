@@ -1,6 +1,7 @@
 import {
 	validateUuid,
 	Validator,
+	type Diagnostic,
 	type ValidationResult,
 } from '../validation'
 
@@ -9,6 +10,10 @@ export type AuthoredAsset = Readonly<{
 	name: string
 	contentFilename: string
 	mediaType: string
+}>
+export type AuthoredAssetResource = Readonly<{
+	metadata: AuthoredAsset
+	content: Uint8Array
 }>
 export type AssetBinding = Readonly<{ $asset: string }>
 export type AssetCapability = Readonly<{
@@ -28,12 +33,27 @@ export function validateAssetMetadata(input: unknown, directoryId?: string): Val
 	}
 	v.string(asset.name, '/name', true)
 	const contentFilename = v.string(asset.contentFilename, '/contentFilename', true)
-	if (contentFilename !== undefined && (contentFilename === '.' || contentFilename === '..' || contentFilename.includes('/') || contentFilename.includes('\\') || [...contentFilename].some(character => character.charCodeAt(0) === 0)))
+	if (contentFilename !== undefined && (contentFilename === '.' || contentFilename === '..' || contentFilename === 'asset.json' || contentFilename.includes('/') || contentFilename.includes('\\') || [...contentFilename].some(character => character.charCodeAt(0) === 0)))
 		v.issue('asset.invalid_content_filename', '/contentFilename', 'Canonical source content must be a single filename inside the asset directory.')
 	const mediaType = v.string(asset.mediaType, '/mediaType', true)
 	if (mediaType !== undefined && !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+\/[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u.test(mediaType))
 		v.issue('asset.invalid_media_type', '/mediaType', 'Declared mediaType must use the type/subtype form.')
 	return v.finish<AuthoredAsset>(input)
+}
+
+export function validateAuthoredAssetResource(input: unknown): ValidationResult<AuthoredAssetResource> {
+	const diagnostics: Diagnostic[] = []
+	if (typeof input !== 'object' || input === null || Array.isArray(input))
+		return { ok: false, diagnostics: [{ code: 'schema.expected_object', path: '', message: 'Expected an authored Asset resource object.' }] }
+	const candidate = input as { metadata?: unknown; content?: unknown }
+	const metadata = validateAssetMetadata(candidate.metadata)
+	if (!metadata.ok) diagnostics.push(...metadata.diagnostics.map(item => ({ ...item, path: `/metadata${item.path}` })))
+	if (!(candidate.content instanceof Uint8Array))
+		diagnostics.push({ code: 'asset.invalid_content_bytes', path: '/content', message: 'Authored Asset source content must be byte data.' })
+	if (metadata.ok && candidate.content instanceof Uint8Array)
+		diagnostics.push(...validateAssetContentMetadata(metadata.value, metadata.value.contentFilename, candidate.content).diagnostics.map(item => ({ ...item, path: `/metadata${item.path}` })))
+	if (diagnostics.length > 0) return { ok: false, diagnostics }
+	return { ok: true, value: input as AuthoredAssetResource, diagnostics: [] }
 }
 
 /** The directory contains metadata plus exactly the one filename named by asset.json. */

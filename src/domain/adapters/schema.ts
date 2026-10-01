@@ -96,10 +96,25 @@ function validateAdapterCatalog(input: unknown, path: string, v: Validator): voi
 		const i18n = v.object(catalog.i18n, `${path}/i18n`)
 		const fields = i18n ? v.object(i18n.fields, `${path}/i18n/fields`) : undefined
 		if (fields) {
+			const mappedNames = new Map<string, string>()
 			for (const [field, mapping] of Object.entries(fields)) {
+				const fieldPath = jsonPointer(`${path}/i18n/fields`, field)
 				if (!field)
 					v.issue('adapter.empty_catalog_field', `${path}/i18n/fields`, 'Catalog author-field identities must be non-empty.')
-				v.diagnostics.push(...validateI18nFieldMapping(mapping, jsonPointer(`${path}/i18n/fields`, field)).diagnostics)
+				const validation = validateI18nFieldMapping(mapping, fieldPath)
+				v.diagnostics.push(...validation.diagnostics)
+				if (!validation.ok) continue
+				for (const [role, name] of [
+					['configField', validation.value.configField],
+					['resultProperty', validation.value.resultProperty],
+					['textProperty', validation.value.textProperty],
+				] as const) {
+					const owner = mappedNames.get(name)
+					if (owner !== undefined)
+						v.issue('adapter.i18n_mapping_collision', `${fieldPath}/${role}`, `Mapped runtime member ${name} conflicts with ${owner}; i18n mapping names must be unique and non-conflicting.`)
+					else
+						mappedNames.set(name, `${field}.${role}`)
+				}
 			}
 		}
 	}
