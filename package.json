@@ -51,6 +51,7 @@
 	"dependencies": {
 		"@deviltea/widget-core": "0.0.1",
 		"@deviltea/widget-vue": "0.0.1",
+		"@modelcontextprotocol/server": "2.2.0",
 		"@nuxt/ui": "4.11.2",
 		"ajv": "8.20.0",
 		"framer-motion": "13.4.6",
@@ -63,6 +64,7 @@
 	},
 	"devDependencies": {
 		"@eslint/js": "10.0.1",
+		"@modelcontextprotocol/client": "2.2.0",
 		"@playwright/test": "1.63.0",
 		"@types/node": "^24.13.2",
 		"eslint": "10.6.0",
