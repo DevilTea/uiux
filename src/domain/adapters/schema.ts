@@ -18,9 +18,14 @@ export type AdapterAssetCapability = Readonly<{
 	acceptedMediaTypes?: readonly string[]
 	acceptedCategories?: readonly string[]
 }>
-export type AdapterCatalog = Readonly<{
+export type AdapterWidgetCatalogEntry = Readonly<{
 	i18n?: Readonly<{ fields: Readonly<Record<string, I18nFieldMapping>>; [key: string]: JsonValue }>
 	assetFields?: Readonly<Record<string, AdapterAssetCapability>>
+	[key: string]: JsonValue
+}>
+
+export type AdapterCatalog = Readonly<{
+	widgets: Readonly<Record<string, AdapterWidgetCatalogEntry>>
 	[key: string]: JsonValue
 }>
 
@@ -90,17 +95,32 @@ export function validateAdapterManifest(input: unknown): ValidationResult<Adapte
 
 function validateAdapterCatalog(input: unknown, path: string, v: Validator): void {
 	const catalog = v.object(input, path)
-	if (!catalog)
-		return
-	if (Object.hasOwn(catalog, 'i18n')) {
-		const i18n = v.object(catalog.i18n, `${path}/i18n`)
+	if (!catalog) return
+	validateJsonValue(catalog, path, v)
+	for (const misplaced of ['i18n', 'assetFields'] as const) {
+		if (Object.hasOwn(catalog, misplaced))
+			v.issue('adapter.catalog_widget_metadata_misplaced', `${path}/${misplaced}`, `Catalog ${misplaced} metadata must be declared under catalog.widgets.<widgetType>.`)
+	}
+	const widgets = v.object(catalog.widgets, `${path}/widgets`)
+	if (!widgets) return
+	for (const [widgetType, entryValue] of Object.entries(widgets)) {
+		const entryPath = jsonPointer(`${path}/widgets`, widgetType)
+		if (!widgetType) v.issue('adapter.empty_catalog_widget_type', `${path}/widgets`, 'Catalog Widget type identities must be non-empty.')
+		const entry = v.object(entryValue, entryPath)
+		if (!entry) continue
+		validateAdapterWidgetCatalogEntry(entry, entryPath, v)
+	}
+}
+
+function validateAdapterWidgetCatalogEntry(entry: Record<string, unknown>, path: string, v: Validator): void {
+	if (Object.hasOwn(entry, 'i18n')) {
+		const i18n = v.object(entry.i18n, `${path}/i18n`)
 		const fields = i18n ? v.object(i18n.fields, `${path}/i18n/fields`) : undefined
 		if (fields) {
 			const mappedNames = new Map<string, string>()
 			for (const [field, mapping] of Object.entries(fields)) {
 				const fieldPath = jsonPointer(`${path}/i18n/fields`, field)
-				if (!field)
-					v.issue('adapter.empty_catalog_field', `${path}/i18n/fields`, 'Catalog author-field identities must be non-empty.')
+				if (!field) v.issue('adapter.empty_catalog_field', `${path}/i18n/fields`, 'Catalog author-field identities must be non-empty.')
 				const validation = validateI18nFieldMapping(mapping, fieldPath)
 				v.diagnostics.push(...validation.diagnostics)
 				if (!validation.ok) continue
@@ -110,28 +130,23 @@ function validateAdapterCatalog(input: unknown, path: string, v: Validator): voi
 					['textProperty', validation.value.textProperty],
 				] as const) {
 					const owner = mappedNames.get(name)
-					if (owner !== undefined)
-						v.issue('adapter.i18n_mapping_collision', `${fieldPath}/${role}`, `Mapped runtime member ${name} conflicts with ${owner}; i18n mapping names must be unique and non-conflicting.`)
-					else
-						mappedNames.set(name, `${field}.${role}`)
+					if (owner !== undefined) v.issue('adapter.i18n_mapping_collision', `${fieldPath}/${role}`, `Mapped runtime member ${name} conflicts with ${owner}; i18n mapping names must be unique and non-conflicting within one Widget Catalog entry.`)
+					else mappedNames.set(name, `${field}.${role}`)
 				}
 			}
 		}
 	}
-	if (Object.hasOwn(catalog, 'assetFields')) {
-		const assetFields = v.object(catalog.assetFields, `${path}/assetFields`)
+	if (Object.hasOwn(entry, 'assetFields')) {
+		const assetFields = v.object(entry.assetFields, `${path}/assetFields`)
 		if (assetFields) {
 			for (const [field, capabilityValue] of Object.entries(assetFields)) {
 				const fieldPath = jsonPointer(`${path}/assetFields`, field)
-				if (!field)
-					v.issue('adapter.empty_catalog_field', fieldPath, 'Catalog author-field identities must be non-empty.')
+				if (!field) v.issue('adapter.empty_catalog_field', fieldPath, 'Catalog author-field identities must be non-empty.')
 				const capability = v.object(capabilityValue, fieldPath)
-				if (!capability)
-					continue
+				if (!capability) continue
 				const types = validateStringArray(capability.acceptedMediaTypes, `${fieldPath}/acceptedMediaTypes`, v)
 				const categories = validateStringArray(capability.acceptedCategories, `${fieldPath}/acceptedCategories`, v)
-				if (!types && !categories)
-					v.issue('adapter.asset_capability_unbounded', fieldPath, 'An asset-capable field must declare accepted media types or categories.')
+				if (!types && !categories) v.issue('adapter.asset_capability_unbounded', fieldPath, 'An asset-capable field must declare accepted media types or categories.')
 			}
 		}
 	}

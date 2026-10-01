@@ -137,10 +137,14 @@ describe('i18n runtime and Checks semantics', () => {
 		const result = validateAdapterManifest({
 			id: 'catalog', apiVersion: 'fixture-api', widgetPlugins: [], renderers: [], providers: [], styles: [], tokens: [],
 			catalog: {
-				i18n: {
-					fields: {
-						title: { configField: 'titleKey', resultProperty: 'localized', textProperty: 'titleText' },
-						subtitle: { configField: 'subtitleKey', resultProperty: 'localized', textProperty: 'subtitleText' },
+				widgets: {
+					Label: {
+						i18n: {
+							fields: {
+								title: { configField: 'titleKey', resultProperty: 'localized', textProperty: 'titleText' },
+								subtitle: { configField: 'subtitleKey', resultProperty: 'localized', textProperty: 'subtitleText' },
+							},
+						},
 					},
 				},
 			},

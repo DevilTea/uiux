@@ -62,7 +62,6 @@ export interface AdapterApiCompatibilityPolicy {
 export type AdapterRegistryOwnership = Readonly<{
 	widgetTypes: readonly string[]
 	rendererKeys: readonly string[]
-	catalogKeys: readonly string[]
 }>
 
 /** Widget/runtime integration owns extracting semantic registry identities from opaque manifest members. */
@@ -233,7 +232,11 @@ export async function resolveWorkspaceAdapterSet(input: ResolveWorkspaceAdapterS
 			continue
 		}
 
-		const registryRecord: ResolvedAdapterRegistries = { id: manifest.id, ...registryOwnership }
+		const registryRecord: ResolvedAdapterRegistries = {
+			id: manifest.id,
+			...registryOwnership,
+			catalogKeys: Object.keys(manifest.catalog.widgets),
+		}
 		const localRegistryValidation = validateResolvedAdapterSet([registryRecord])
 		if (!localRegistryValidation.ok) {
 			diagnostics.push(...prefixDiagnostics(localRegistryValidation.diagnostics, `${basePath}/registries`))

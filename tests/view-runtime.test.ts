@@ -242,14 +242,14 @@ async function runtimeBundle(plugin: typeof counterPlugin | typeof rootWriterPlu
 }
 
 async function validatedSet(type: string) {
-	const manifest: AdapterManifest = { id: 'fixture', apiVersion: 'test', widgetPlugins: [type], catalog: {}, renderers: [type], providers: [], styles: [], tokens: [] }
+	const manifest: AdapterManifest = { id: 'fixture', apiVersion: 'test', widgetPlugins: [type], catalog: { widgets: {} }, renderers: [type], providers: [], styles: [], tokens: [] }
 	const result = await resolveWorkspaceAdapterSet({
 		workspaceRoot: '/fixture',
 		adapters: [{ moduleSpecifier: '@fixture/adapter' }],
 		resolver: { async resolve(_root, moduleSpecifier) { return { moduleSpecifier, resolvedPath: '/fixture/adapter.mjs', moduleIdentity: 'file:///fixture/adapter.mjs' } } },
 		loader: { async loadManifest() { return manifest } },
 		apiCompatibility: { isCompatible() { return true } },
-		registryInspector: { async inspect() { return { widgetTypes: [type], rendererKeys: [type], catalogKeys: [] } } },
+		registryInspector: { async inspect() { return { widgetTypes: [type], rendererKeys: [type] } } },
 	})
 	if (result.state !== 'valid') throw new Error(JSON.stringify(result.diagnostics))
 	return result.set

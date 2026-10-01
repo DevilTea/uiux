@@ -198,9 +198,24 @@ describe('adapters, flows, reviews, and authored assets', () => {
 		}
 		const adapter = {
 			id: '@deviltea/base', apiVersion: '1', widgetPlugins: [], renderers: [], providers: [], styles: [], tokens: [],
-			catalog: { i18n: { fields: {} }, assetFields: { image: { acceptedMediaTypes: ['image/png'] } } }, configSchema: schema,
+			catalog: { widgets: { Image: { i18n: { fields: {} }, assetFields: { image: { acceptedMediaTypes: ['image/png'] } } } } }, configSchema: schema,
 		}
 		expect(validateAdapterManifest(adapter).ok).toBe(true)
+		expect(validateAdapterManifest({ ...adapter, catalog: { i18n: { fields: {} } } })).toEqual(expect.objectContaining({ ok: false }))
+		expect(validateAdapterManifest({ ...adapter, catalog: { widgets: {}, i18n: { fields: {} } } }).diagnostics.some(item => item.code === 'adapter.catalog_widget_metadata_misplaced')).toBe(true)
+		expect(validateAdapterManifest({ ...adapter, catalog: { widgets: {}, assetFields: { image: { acceptedMediaTypes: ['image/png'] } } } }).diagnostics.some(item => item.code === 'adapter.catalog_widget_metadata_misplaced')).toBe(true)
+		expect(validateAdapterManifest({ ...adapter, catalog: { widgets: {}, documentation: { label: 'Base catalog' } } }).ok).toBe(true)
+		expect(validateAdapterManifest({ ...adapter, catalog: { widgets: { '': {} } } }).ok).toBe(false)
+		expect(validateAdapterManifest({ ...adapter, catalog: { widgets: {}, extension: () => 'not-json' } }).ok).toBe(false)
+		expect(validateAdapterManifest({
+			...adapter,
+			catalog: {
+				widgets: {
+					Button: { i18n: { fields: { title: { configField: 'key', resultProperty: 'result', textProperty: 'text' } } } },
+					Label: { i18n: { fields: { title: { configField: 'key', resultProperty: 'result', textProperty: 'text' } } } },
+				},
+			},
+		})).toEqual(expect.objectContaining({ ok: true }))
 		expect(validateAdapterConfig({ enabled: true }, undefined).ok).toBe(false)
 		expect(validateAdapterConfig({ enabled: true }, schema).ok).toBe(true)
 		expect(validateAdapterConfig({ enabled: 'yes' }, schema).ok).toBe(false)

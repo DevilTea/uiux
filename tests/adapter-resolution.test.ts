@@ -145,14 +145,17 @@ describe('Workspace adapter resolution and validated-set installation', () => {
 		for (const collision of ['id', 'widgetTypes', 'rendererKeys', 'catalogKeys'] as const) {
 			const manifests = collision === 'id'
 				? { first: manifest('same'), second: manifest('same') }
-				: { first: manifest('first'), second: manifest('second') }
+				: collision === 'catalogKeys'
+					? {
+						first: manifest('first', { catalog: { widgets: { shared: {} } } }),
+						second: manifest('second', { catalog: { widgets: { shared: {} } } }),
+					}
+					: { first: manifest('first'), second: manifest('second') }
 			const inspector = ownershipInspector({
-				first: collision === 'widgetTypes' ? { widgetTypes: ['shared'], rendererKeys: [], catalogKeys: [] }
-					: collision === 'rendererKeys' ? { widgetTypes: [], rendererKeys: ['shared'], catalogKeys: [] }
-						: collision === 'catalogKeys' ? { widgetTypes: [], rendererKeys: [], catalogKeys: ['shared'] } : emptyOwnership(),
-				second: collision === 'widgetTypes' ? { widgetTypes: ['shared'], rendererKeys: [], catalogKeys: [] }
-					: collision === 'rendererKeys' ? { widgetTypes: [], rendererKeys: ['shared'], catalogKeys: [] }
-						: collision === 'catalogKeys' ? { widgetTypes: [], rendererKeys: [], catalogKeys: ['shared'] } : emptyOwnership(),
+				first: collision === 'widgetTypes' ? { widgetTypes: ['shared'], rendererKeys: [] }
+					: collision === 'rendererKeys' ? { widgetTypes: [], rendererKeys: ['shared'] } : emptyOwnership(),
+				second: collision === 'widgetTypes' ? { widgetTypes: ['shared'], rendererKeys: [] }
+					: collision === 'rendererKeys' ? { widgetTypes: [], rendererKeys: ['shared'] } : emptyOwnership(),
 			})
 			const result = await resolveWorkspaceAdapterSet(fixtureInput(
 				[{ moduleSpecifier: 'first' }, { moduleSpecifier: 'second' }], manifests, { registryInspector: inspector },
@@ -170,8 +173,8 @@ describe('Workspace adapter resolution and validated-set installation', () => {
 				{ base: manifest('base'), project: manifest('project') },
 				{
 					registryInspector: ownershipInspector({
-						base: { widgetTypes: ['Button'], rendererKeys: ['Button'], catalogKeys: ['Button'] },
-						project: { widgetTypes: ['ProductCard'], rendererKeys: ['ProductCard'], catalogKeys: ['ProductCard'] },
+						base: { widgetTypes: ['Button'], rendererKeys: ['Button'] },
+						project: { widgetTypes: ['ProductCard'], rendererKeys: ['ProductCard'] },
 					}),
 				},
 			),
@@ -249,7 +252,7 @@ function manifest(
 		id,
 		apiVersion: 'compatible',
 		widgetPlugins: [],
-		catalog: {},
+		catalog: { widgets: {} },
 		renderers: [],
 		providers: [],
 		styles: [],
@@ -259,9 +262,9 @@ function manifest(
 }
 
 function emptyOwnership() {
-	return { widgetTypes: [], rendererKeys: [], catalogKeys: [] } as const
+	return { widgetTypes: [], rendererKeys: [] } as const
 }
 
-function ownershipInspector(byId: Record<string, ReturnType<typeof emptyOwnership> | { widgetTypes: readonly string[]; rendererKeys: readonly string[]; catalogKeys: readonly string[] }>): AdapterRegistryInspector {
+function ownershipInspector(byId: Record<string, ReturnType<typeof emptyOwnership> | { widgetTypes: readonly string[]; rendererKeys: readonly string[] }>): AdapterRegistryInspector {
 	return { async inspect(adapter) { return byId[adapter.id] ?? emptyOwnership() } }
 }
