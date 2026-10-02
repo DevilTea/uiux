@@ -22,7 +22,11 @@ export type ResourceDiscoveryOutcome =
 	| Readonly<{ status: 'ok'; page: ResourceDiscoveryPage }>
 	| Readonly<{ status: 'invalid'; diagnostics: readonly Diagnostic[] }>
 
-export function validateResourceDiscoveryRequest(input: unknown, mode: 'list' | 'search'): ResourceDiscoveryOutcome | Readonly<{ status: 'valid'; request: ResourceDiscoveryRequest }> {
+export type ResourceDiscoveryRequestValidation =
+	| Readonly<{ status: 'valid'; request: ResourceDiscoveryRequest }>
+	| Readonly<{ status: 'invalid'; diagnostics: readonly Diagnostic[] }>
+
+export function validateResourceDiscoveryRequest(input: unknown, mode: 'list' | 'search'): ResourceDiscoveryRequestValidation {
 	const v = new Validator()
 	const value = v.object(input, '')
 	if (!value) return { status: 'invalid', diagnostics: v.diagnostics }

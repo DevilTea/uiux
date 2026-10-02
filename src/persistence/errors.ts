@@ -22,7 +22,7 @@ export type PersistenceErrorCode =
 export class PersistenceError extends Error {
 	readonly code: PersistenceErrorCode
 	readonly diagnostics: readonly Diagnostic[]
-	readonly cause?: unknown
+	override readonly cause?: unknown
 
 	constructor(code: PersistenceErrorCode, message: string, options: { diagnostics?: readonly Diagnostic[]; cause?: unknown } = {}) {
 		super(message)

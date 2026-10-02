@@ -16,13 +16,11 @@ export type WorkspaceManifest = {
 	adapters: WorkspaceAdapterSelection[]
 	viewports: Record<string, ViewportPreset>
 	themes: Record<string, ThemeEntry>
-	[key: string]: JsonValue
 }
 
 export type WorkspaceAdapterSelection = {
 	moduleSpecifier: string
 	config?: JsonValue
-	[key: string]: JsonValue
 }
 
 export type ViewportPreset = {
