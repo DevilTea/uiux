@@ -2,7 +2,7 @@
 
 `@deviltea/uiux` is the single-package home for the UIUX local-first UI/UX specification, preview, and review workbench.
 
-The bootstrap currently provides a Nuxt SPA, a Nitro health endpoint, and the `uiux --help` / `uiux --version` CLI surface. Workspace initialization and the unified development command are not implemented yet.
+The package provides a Nuxt SPA and a unified Nitro server. `uiux dev --workspace <dir>` explicitly selects one file-native Workspace and starts the Workbench/API/MCP process against it. Workspace initialization is not implemented yet.
 
 ## Requirements
 
@@ -16,7 +16,13 @@ pnpm install
 pnpm dev
 ```
 
-The Nuxt SPA runs at `http://127.0.0.1:3000`. Nitro also serves `GET /api/health`, which returns `{ "status": "ok" }`.
+For product use, start the unified server with:
+
+```sh
+uiux dev --workspace ./design
+```
+
+Nitro serves `GET /api/health`, selected-Workspace point reads under `/api/resources/:kind/:key`, discovery endpoints under `/api/resources/list` and `/api/resources/search`, and MCP at `/mcp`. Host/port selection remains the standard Nitro runtime concern rather than a separate UIUX Workspace contract.
 
 ## Checks
 
@@ -26,7 +32,7 @@ pnpm check
 
 This runs ESLint, Nuxt typechecking, Vitest, the production build, and a live Nitro health-route smoke check.
 
-It also packs the public npm artifact from source, installs that tarball into an isolated temporary project, verifies the installed `uiux` CLI, starts the packed Nitro runtime, and probes `GET /api/health`.
+It also packs the public npm artifact from source, installs that tarball into an isolated temporary project, starts the installed package through `uiux dev --workspace <dir>`, and probes both the health endpoint and selected-Workspace API behavior.
 
 The Playwright configuration is included as the future browser-test and capture baseline. Browser capture behavior is not implemented by this bootstrap.
 
