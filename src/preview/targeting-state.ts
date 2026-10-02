@@ -12,6 +12,7 @@ export type TargetingGesture = Readonly<{
 
 export type TargetingStateSnapshot<Candidate extends JsonValue = JsonValue> = Readonly<{
 	purpose?: TargetingPurpose
+	targetingInteractionId?: string
 	input: TargetingInputState
 	runtimeGenerationId?: string
 	candidatePreview?: Candidate
@@ -25,30 +26,43 @@ export type TargetingEventResult<Candidate extends JsonValue = JsonValue> =
 	| Readonly<{ status: 'cancelled'; purpose: TargetingPurpose; reason: 'explicit' | 'escape-intent' | 'authoritative-transition' }>
 	| Readonly<{ status: 'gesture-cancelled'; reason: 'pointer-capture-loss' }>
 	| Readonly<{ status: 'transient-cancelled'; reason: 'focus-transfer' | 'generation-teardown' }>
-	| Readonly<{ status: 'inactive' | 'suspended' | 'stale-generation' | 'stale-gesture' | 'touch-hover-ignored' | 'gesture-already-active' | 'no-gesture' }>
+	| Readonly<{ status: 'inactive' | 'suspended' | 'stale-generation' | 'stale-interaction' | 'stale-gesture' | 'touch-hover-ignored' | 'gesture-already-active' | 'no-gesture' }>
 
 /**
- * Wire-independent targeting lifecycle coordinator.
- * Candidate identity/geometry remains opaque JSON because Part 3 specifies ownership and
- * lifecycle semantics but does not currently define an external targeting payload schema.
- * Event methods assume the bridge has already correlated the event to the active targeting
- * interaction; Part 3 does not yet provide a wire identity that can reject same-generation
- * delayed events from an older targeting-purpose interaction.
- * Event methods assume the bridge has already correlated the event to the active targeting
- * interaction; Part 3 does not yet provide a wire identity that can reject same-generation
- * delayed events from an older targeting-purpose interaction.
+ * Targeting lifecycle coordinator with Workbench-owned opaque interaction correlation.
+ * Stable persisted Review identity remains { viewId, widgetId }; candidate/range geometry stays transient.
+ * Every runtime-originated event must match both the active generation and targetingInteractionId so
+ * delayed traffic from a replaced/re-entered interaction cannot mutate the current mode.
  */
 export class PreviewTargetingState<Candidate extends JsonValue = JsonValue> {
 	private purpose?: TargetingPurpose
+	private targetingInteractionId?: string
+	private readonly retiredTargetingInteractionIds = new Set<string>()
 	private runtimeGenerationId?: string
 	private generationReady = false
 	private candidatePreview?: Candidate
 	private gesture?: TargetingGesture
 
-	enterMode(purpose: TargetingPurpose): TargetingEventResult<Candidate> {
-		if (this.purpose !== undefined && this.purpose !== purpose)
-			this.clearTransient()
+	enterMode(purpose: TargetingPurpose, targetingInteractionId: string): TargetingEventResult<Candidate> {
+		assertOpaqueId(targetingInteractionId, 'targetingInteractionId')
+		if (!this.purpose) {
+			this.assertInteractionAvailable(targetingInteractionId)
+			this.purpose = purpose
+			this.targetingInteractionId = targetingInteractionId
+			return { status: 'accepted' }
+		}
+
+		if (this.targetingInteractionId === targetingInteractionId) {
+			if (this.purpose !== purpose)
+				throw new TypeError('Replacing targeting purpose requires a fresh targetingInteractionId.')
+			return { status: 'accepted' }
+		}
+
+		this.assertInteractionAvailable(targetingInteractionId)
+		this.retireActiveInteraction()
+		this.clearTransient()
 		this.purpose = purpose
+		this.targetingInteractionId = targetingInteractionId
 		return { status: 'accepted' }
 	}
 
@@ -59,17 +73,30 @@ export class PreviewTargetingState<Candidate extends JsonValue = JsonValue> {
 		return { status: 'cancelled', purpose, reason: 'explicit' }
 	}
 
-	authoritativeModeTransition(nextPurpose?: TargetingPurpose): TargetingEventResult<Candidate> {
+	authoritativeModeTransition(nextPurpose?: TargetingPurpose, targetingInteractionId?: string): TargetingEventResult<Candidate> {
 		if (!this.purpose) {
-			if (nextPurpose) {
-				this.purpose = nextPurpose
-				return { status: 'accepted' }
-			}
-			return { status: 'inactive' }
+			if (!nextPurpose) return { status: 'inactive' }
+			if (!targetingInteractionId) throw new TypeError('targetingInteractionId is required when entering targeting mode.')
+			assertOpaqueId(targetingInteractionId, 'targetingInteractionId')
+			this.assertInteractionAvailable(targetingInteractionId)
+			this.purpose = nextPurpose
+			this.targetingInteractionId = targetingInteractionId
+			return { status: 'accepted' }
 		}
+
+		if (nextPurpose) {
+			if (!targetingInteractionId) throw new TypeError('targetingInteractionId is required when replacing targeting mode.')
+			assertOpaqueId(targetingInteractionId, 'targetingInteractionId')
+			if (targetingInteractionId === this.targetingInteractionId)
+				throw new TypeError('Authoritative targeting replacement requires a fresh targetingInteractionId.')
+			this.assertInteractionAvailable(targetingInteractionId)
+		}
+
 		const previous = this.purpose
+		this.retireActiveInteraction()
 		this.clearTransient()
 		this.purpose = nextPurpose
+		this.targetingInteractionId = nextPurpose ? targetingInteractionId : undefined
 		return { status: 'cancelled', purpose: previous, reason: 'authoritative-transition' }
 	}
 
@@ -92,8 +119,8 @@ export class PreviewTargetingState<Candidate extends JsonValue = JsonValue> {
 		return { status: 'accepted' }
 	}
 
-	reportHoverCandidate(runtimeGenerationId: string, pointerType: TargetingPointerType, candidate: Candidate): TargetingEventResult<Candidate> {
-		const gate = this.eventGate(runtimeGenerationId)
+	reportHoverCandidate(runtimeGenerationId: string, targetingInteractionId: string, pointerType: TargetingPointerType, candidate: Candidate): TargetingEventResult<Candidate> {
+		const gate = this.eventGate(runtimeGenerationId, targetingInteractionId)
 		if (gate) return gate
 		if (pointerType === 'touch') return { status: 'touch-hover-ignored' }
 		if (this.gesture) return { status: 'gesture-already-active' }
@@ -101,16 +128,16 @@ export class PreviewTargetingState<Candidate extends JsonValue = JsonValue> {
 		return { status: 'candidate', candidate: cloneJson(candidate) }
 	}
 
-	clearHoverCandidate(runtimeGenerationId: string): TargetingEventResult<Candidate> {
-		const gate = this.eventGate(runtimeGenerationId)
+	clearHoverCandidate(runtimeGenerationId: string, targetingInteractionId: string): TargetingEventResult<Candidate> {
+		const gate = this.eventGate(runtimeGenerationId, targetingInteractionId)
 		if (gate) return gate
 		if (this.gesture) return { status: 'gesture-already-active' }
 		this.candidatePreview = undefined
 		return { status: 'accepted' }
 	}
 
-	beginGesture(runtimeGenerationId: string, pointerId: number, pointerType: TargetingPointerType): TargetingEventResult<Candidate> {
-		const gate = this.eventGate(runtimeGenerationId)
+	beginGesture(runtimeGenerationId: string, targetingInteractionId: string, pointerId: number, pointerType: TargetingPointerType): TargetingEventResult<Candidate> {
+		const gate = this.eventGate(runtimeGenerationId, targetingInteractionId)
 		if (gate) return gate
 		assertPointerId(pointerId)
 		if (this.gesture) return { status: 'gesture-already-active' }
@@ -119,8 +146,8 @@ export class PreviewTargetingState<Candidate extends JsonValue = JsonValue> {
 		return { status: 'accepted' }
 	}
 
-	reportGestureCandidate(runtimeGenerationId: string, pointerId: number, candidate: Candidate): TargetingEventResult<Candidate> {
-		const gate = this.eventGate(runtimeGenerationId)
+	reportGestureCandidate(runtimeGenerationId: string, targetingInteractionId: string, pointerId: number, candidate: Candidate): TargetingEventResult<Candidate> {
+		const gate = this.eventGate(runtimeGenerationId, targetingInteractionId)
 		if (gate) return gate
 		if (!this.gesture) return { status: 'no-gesture' }
 		if (this.gesture.pointerId !== pointerId) return { status: 'stale-gesture' }
@@ -128,8 +155,8 @@ export class PreviewTargetingState<Candidate extends JsonValue = JsonValue> {
 		return { status: 'candidate', candidate: cloneJson(candidate) }
 	}
 
-	commitFinalTarget(runtimeGenerationId: string, candidate: Candidate): TargetingEventResult<Candidate> {
-		const gate = this.eventGate(runtimeGenerationId)
+	commitFinalTarget(runtimeGenerationId: string, targetingInteractionId: string, candidate: Candidate): TargetingEventResult<Candidate> {
+		const gate = this.eventGate(runtimeGenerationId, targetingInteractionId)
 		if (gate) return gate
 		const purpose = this.purpose!
 		const committed = cloneJson(candidate)
@@ -137,8 +164,8 @@ export class PreviewTargetingState<Candidate extends JsonValue = JsonValue> {
 		return { status: 'committed', purpose, candidate: committed }
 	}
 
-	onPointerCaptureLost(runtimeGenerationId: string, pointerId: number): TargetingEventResult<Candidate> {
-		const gate = this.eventGate(runtimeGenerationId)
+	onPointerCaptureLost(runtimeGenerationId: string, targetingInteractionId: string, pointerId: number): TargetingEventResult<Candidate> {
+		const gate = this.eventGate(runtimeGenerationId, targetingInteractionId)
 		if (gate) return gate
 		if (!this.gesture) return { status: 'no-gesture' }
 		if (this.gesture.pointerId !== pointerId) return { status: 'stale-gesture' }
@@ -155,8 +182,8 @@ export class PreviewTargetingState<Candidate extends JsonValue = JsonValue> {
 			: { status: 'accepted' }
 	}
 
-	applyRuntimeEscapeIntent(runtimeGenerationId: string): TargetingEventResult<Candidate> {
-		const gate = this.eventGate(runtimeGenerationId)
+	applyRuntimeEscapeIntent(runtimeGenerationId: string, targetingInteractionId: string): TargetingEventResult<Candidate> {
+		const gate = this.eventGate(runtimeGenerationId, targetingInteractionId)
 		if (gate) return gate
 		const purpose = this.purpose!
 		this.exitMode()
@@ -166,6 +193,7 @@ export class PreviewTargetingState<Candidate extends JsonValue = JsonValue> {
 	snapshot(): TargetingStateSnapshot<Candidate> {
 		return Object.freeze({
 			...(this.purpose ? { purpose: this.purpose } : {}),
+			...(this.targetingInteractionId ? { targetingInteractionId: this.targetingInteractionId } : {}),
 			input: this.purpose === undefined ? 'inactive' : this.generationReady ? 'ready' : 'suspended',
 			...(this.runtimeGenerationId ? { runtimeGenerationId: this.runtimeGenerationId } : {}),
 			...(this.candidatePreview !== undefined ? { candidatePreview: cloneJson(this.candidatePreview) } : {}),
@@ -173,17 +201,30 @@ export class PreviewTargetingState<Candidate extends JsonValue = JsonValue> {
 		})
 	}
 
-	private eventGate(runtimeGenerationId: string): Extract<TargetingEventResult<Candidate>, { status: 'inactive' | 'suspended' | 'stale-generation' }> | undefined {
+	private eventGate(runtimeGenerationId: string, targetingInteractionId: string): Extract<TargetingEventResult<Candidate>, { status: 'inactive' | 'suspended' | 'stale-generation' | 'stale-interaction' }> | undefined {
 		assertOpaqueId(runtimeGenerationId, 'runtimeGenerationId')
+		assertOpaqueId(targetingInteractionId, 'targetingInteractionId')
 		if (!this.purpose) return { status: 'inactive' }
 		if (!this.generationReady || !this.runtimeGenerationId) return { status: 'suspended' }
 		if (this.runtimeGenerationId !== runtimeGenerationId) return { status: 'stale-generation' }
+		if (this.targetingInteractionId !== targetingInteractionId) return { status: 'stale-interaction' }
 		return undefined
 	}
 
 	private exitMode(): void {
+		this.retireActiveInteraction()
 		this.clearTransient()
 		this.purpose = undefined
+		this.targetingInteractionId = undefined
+	}
+
+	private assertInteractionAvailable(targetingInteractionId: string): void {
+		if (this.retiredTargetingInteractionIds.has(targetingInteractionId))
+			throw new TypeError('targetingInteractionId must be fresh and cannot reuse a retired interaction identity.')
+	}
+
+	private retireActiveInteraction(): void {
+		if (this.targetingInteractionId) this.retiredTargetingInteractionIds.add(this.targetingInteractionId)
 	}
 
 	private clearTransient(): void {

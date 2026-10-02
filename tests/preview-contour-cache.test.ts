@@ -14,6 +14,8 @@ const scope = {
 	widgetId: 'widget-a',
 } as const
 
+const rect = { x: 0, y: 0, width: 10, height: 10 } as const
+
 const square: Contour = { commands: [
 	{ op: 'moveTo', x: 0, y: 0 },
 	{ op: 'lineTo', x: 10, y: 0 },
@@ -46,14 +48,17 @@ describe('Preview authoritative contour cache', () => {
 		const source = [region('r1', 0.8)]
 		controller.beginAcquisition()
 		const committed = controller.commitAcquisition({
-			type: 'geometry.acquire.response', context: context(7), payload: { regions: source },
+			type: 'geometry.acquire.response', context: context(7), payload: { rect, regions: source },
 		})
 		expect(committed.status).toBe('committed')
 		expect(versions.calls).toBe(1)
 		expect(controller.getSnapshot()).toMatchObject({ geometryRevision: 7, snapshotVersion: 40 })
+		expect(controller.getSnapshot()?.rect).toEqual(rect)
+		;(rect as { x: number }).x = 999
 		source[0] = region('evil', 99)
 		expect(controller.getSnapshot()?.regions[0]?.regionId).toBe('r1')
-		expect(controller.commitAcquisition({ type: 'geometry.acquire.response', context: context(8), payload: { regions: [] } }).status).toBe('stale')
+		expect(controller.getSnapshot()?.rect.x).toBe(0)
+		expect(controller.commitAcquisition({ type: 'geometry.acquire.response', context: context(8), payload: { rect, regions: [] } }).status).toBe('stale')
 		expect(versions.calls).toBe(1)
 	})
 
@@ -62,11 +67,11 @@ describe('Preview authoritative contour cache', () => {
 		const controller = new ContourCacheController(scope, () => versions.allocate())
 		controller.beginAcquisition()
 		expect(controller.commitAcquisition({
-			type: 'geometry.acquire.response', context: context(1, { widgetId: 'other' }), payload: { regions: [] },
+			type: 'geometry.acquire.response', context: context(1, { widgetId: 'other' }), payload: { rect, regions: [] },
 		}).status).toBe('stale-context')
 		expect(versions.calls).toBe(0)
 		expect(controller.commitAcquisition({
-			type: 'geometry.acquire.response', context: context(1), payload: { regions: [region('r1', -1)] },
+			type: 'geometry.acquire.response', context: context(1), payload: { rect, regions: [region('r1', -1)] },
 		}).status).toBe('invalid')
 		expect(versions.calls).toBe(0)
 	})
@@ -76,11 +81,11 @@ describe('Preview authoritative contour cache', () => {
 		const controller = seededController(versions)
 		controller.beginAcquisition()
 		expect(controller.commitAcquisition({
-			type: 'geometry.acquire.response', context: context(1), payload: { regions: [region('r1', 0.2)] },
+			type: 'geometry.acquire.response', context: context(1), payload: { rect, regions: [region('r1', 0.2)] },
 		}).status).toBe('non-advancing-geometry-revision')
 		expect(versions.calls).toBe(1)
 		const committed = controller.commitAcquisition({
-			type: 'geometry.acquire.response', context: context(2), payload: { regions: [region('n1', 0.2)] },
+			type: 'geometry.acquire.response', context: context(2), payload: { rect, regions: [region('n1', 0.2)] },
 		})
 		expect(committed.status).toBe('committed')
 		expect(controller.getSnapshot()).toMatchObject({ geometryRevision: 2, snapshotVersion: 41 })
@@ -247,6 +252,7 @@ describe('Preview authoritative contour cache', () => {
 		})
 		expect(result.status).toBe('committed')
 		expect(controller.getSnapshot()).toMatchObject({ snapshotVersion: 41 })
+		expect(controller.getSnapshot()?.rect).toEqual(rect)
 		expect(controller.getSnapshot()?.regions.map(item => [item.regionId, item.maxError])).toEqual([['r1', 0.1], ['r2', 0.6]])
 	})
 
@@ -258,7 +264,7 @@ describe('Preview authoritative contour cache', () => {
 			payload: { sequence: 1, baseSnapshotVersion: 40, regionIds: ['r1'], targetMaxError: 0.2 },
 		})
 		controller.beginAcquisition()
-		controller.commitAcquisition({ type: 'geometry.acquire.response', context: context(2), payload: { regions: [region('n1', 0.2)] } })
+		controller.commitAcquisition({ type: 'geometry.acquire.response', context: context(2), payload: { rect, regions: [region('n1', 0.2)] } })
 		expect(controller.commitPartial({
 			type: 'contour.partial.response', context: context(1),
 			payload: { sequence: 1, baseSnapshotVersion: 40, regions: [region('r1', 0.1)] },
@@ -277,11 +283,28 @@ describe('Preview authoritative contour cache', () => {
 		expect(versions.calls).toBe(1)
 	})
 
+	it('keeps acquisition uncommitted when snapshot allocation fails before the rect/cache commit boundary', () => {
+		let call = 0
+		const controller = new ContourCacheController(scope, () => call++ === 0 ? -1 : 50)
+		controller.beginAcquisition()
+		expect(() => controller.commitAcquisition({
+			type: 'geometry.acquire.response', context: context(1),
+			payload: { rect: { x: 1, y: 2, width: 30, height: 40 }, regions: [region('r1', 0.2)] },
+		})).toThrow(/non-negative/)
+		expect(controller.getSnapshot()).toBeUndefined()
+		const committed = controller.commitAcquisition({
+			type: 'geometry.acquire.response', context: context(1),
+			payload: { rect: { x: 5, y: 6, width: 70, height: 80 }, regions: [region('r1', 0.2)] },
+		})
+		expect(committed.status).toBe('committed')
+		expect(controller.getSnapshot()?.rect).toEqual({ x: 5, y: 6, width: 70, height: 80 })
+	})
+
 	it('requires snapshot allocation to be safe and strictly increasing only when a commit succeeds', () => {
 		const controller = new ContourCacheController(scope, previous => previous === undefined ? 4 : previous)
 		controller.beginAcquisition()
 		expect(controller.commitAcquisition({
-			type: 'geometry.acquire.response', context: context(1), payload: { regions: [] },
+			type: 'geometry.acquire.response', context: context(1), payload: { rect, regions: [] },
 		}).status).toBe('committed')
 		controller.startFull({ type: 'contour.full.request', context: context(1), payload: { sequence: 1, targetMaxError: 0.2 } })
 		expect(() => controller.commitFull({
@@ -294,7 +317,7 @@ function seededController(versions: ReturnType<typeof allocator>): ContourCacheC
 	const controller = new ContourCacheController(scope, () => versions.allocate())
 	controller.beginAcquisition()
 	const result = controller.commitAcquisition({
-		type: 'geometry.acquire.response', context: context(1), payload: { regions: [region('r1', 0.8), region('r2', 0.6)] },
+		type: 'geometry.acquire.response', context: context(1), payload: { rect, regions: [region('r1', 0.8), region('r2', 0.6)] },
 	})
 	if (result.status !== 'committed') throw new Error('seed failed')
 	return controller

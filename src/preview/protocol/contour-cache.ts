@@ -10,6 +10,7 @@ import {
 	type PartialContourResponse,
 	type ProtocolContext,
 	type VisibleRegion,
+	type WidgetRect,
 } from './schema'
 
 export type SnapshotVersionAllocator = (previous: number | undefined) => number
@@ -17,6 +18,7 @@ export type SnapshotVersionAllocator = (previous: number | undefined) => number
 export type ContourCacheSnapshot = Readonly<{
 	geometryRevision: number
 	snapshotVersion: number
+	rect: WidgetRect
 	regions: readonly VisibleRegion[]
 }>
 
@@ -52,6 +54,7 @@ export class ContourCacheController {
 	private lastSequence?: number
 	private lastGeometryRevision?: number
 	private lastSnapshotVersion?: number
+	private currentRect?: WidgetRect
 
 	constructor(scope: Omit<ProtocolContext, 'geometryRevision'>, allocateSnapshotVersion: SnapshotVersionAllocator) {
 		this.scope = { ...scope }
@@ -64,6 +67,7 @@ export class ContourCacheController {
 		this.activeWork = undefined
 		this.lastSequence = undefined
 		this.cache = undefined
+		this.currentRect = undefined
 		return supersededSequence === undefined ? {} : { supersededSequence }
 	}
 
@@ -77,7 +81,11 @@ export class ContourCacheController {
 		if (this.lastGeometryRevision !== undefined && decoded.value.context.geometryRevision <= this.lastGeometryRevision)
 			return { status: 'non-advancing-geometry-revision' }
 
-		const snapshot = this.commitComplete(decoded.value.context.geometryRevision, decoded.value.payload.regions)
+		const snapshot = this.commitComplete(
+			decoded.value.context.geometryRevision,
+			decoded.value.payload.regions,
+			decoded.value.payload.rect,
+		)
 		this.lastGeometryRevision = decoded.value.context.geometryRevision
 		this.acquisitionPending = false
 		this.lastSequence = undefined
@@ -174,7 +182,12 @@ export class ContourCacheController {
 			: { status: 'started', sequence, supersededSequence }
 	}
 
-	private commitComplete(geometryRevision: number, regions: readonly VisibleRegion[]): ContourCacheSnapshot {
+	private commitComplete(
+		geometryRevision: number,
+		regions: readonly VisibleRegion[],
+		rect: WidgetRect | undefined = this.currentRect,
+	): ContourCacheSnapshot {
+		if (!rect) throw new Error('Cannot commit contour cache without an acquired Widget rectangle.')
 		const nextVersion = this.allocateSnapshotVersion(this.lastSnapshotVersion)
 		if (!Number.isSafeInteger(nextVersion) || nextVersion < 0)
 			throw new RangeError('Snapshot allocator must return a non-negative JSON safe integer.')
@@ -183,9 +196,11 @@ export class ContourCacheController {
 		const snapshot = Object.freeze({
 			geometryRevision,
 			snapshotVersion: nextVersion,
+			rect: Object.freeze({ ...rect }),
 			regions: cloneRegions(regions),
 		})
 		this.cache = snapshot
+		this.currentRect = snapshot.rect
 		this.lastSnapshotVersion = nextVersion
 		return cloneSnapshot(snapshot)
 	}
@@ -238,6 +253,7 @@ function cloneSnapshot(snapshot: ContourCacheSnapshot): ContourCacheSnapshot {
 	return Object.freeze({
 		geometryRevision: snapshot.geometryRevision,
 		snapshotVersion: snapshot.snapshotVersion,
+		rect: Object.freeze({ ...snapshot.rect }),
 		regions: cloneRegions(snapshot.regions),
 	})
 }

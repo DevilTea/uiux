@@ -7,6 +7,22 @@ import {
 } from '../../domain/validation'
 
 export type ProtocolFailureCategory = 'transport' | 'protocol' | 'runtime' | 'capability'
+export type CapabilityBootstrapContext = Readonly<{
+	previewSessionId: string
+	runtimeGenerationId: string
+	[key: string]: unknown
+}>
+export type CapabilityDeclareMessage = Readonly<{
+	type: 'capability.declare'
+	context: CapabilityBootstrapContext
+	payload: Readonly<{ protocolVersion: number; features: readonly string[] }>
+}>
+export type CapabilityAckMessage = Readonly<{
+	type: 'capability.ack'
+	context: CapabilityBootstrapContext
+	payload: JsonObject
+}>
+export type CapabilityMessage = CapabilityDeclareMessage | CapabilityAckMessage
 export type ProtocolContext = Readonly<{
 	previewSessionId: string
 	runtimeGenerationId: string
@@ -30,6 +46,7 @@ export type ProtocolEnvelope<
 }>
 
 export type Point = Readonly<{ x: number; y: number }>
+export type WidgetRect = Readonly<{ x: number; y: number; width: number; height: number }>
 export type ContourCommand =
 	| Readonly<{ op: 'moveTo'; x: number; y: number }>
 	| Readonly<{ op: 'lineTo'; x: number; y: number }>
@@ -42,7 +59,7 @@ type PathSegment =
 	| Readonly<{ kind: 'cubic'; from: Point; c1: Point; c2: Point; to: Point }>
 
 export type GeometryAcquireRequest = ProtocolEnvelope<Record<string, never>, GeometryAcquireContext> & Readonly<{ type: 'geometry.acquire.request' }>
-export type GeometryAcquireResponse = ProtocolEnvelope<{ regions: readonly VisibleRegion[] }, GeometryRevisionContext> & Readonly<{ type: 'geometry.acquire.response' }>
+export type GeometryAcquireResponse = ProtocolEnvelope<{ rect: WidgetRect; regions: readonly VisibleRegion[] }, GeometryRevisionContext> & Readonly<{ type: 'geometry.acquire.response' }>
 export type FullContourRequest = ProtocolEnvelope<{ sequence: number; targetMaxError: number }, GeometryRevisionContext> & Readonly<{ type: 'contour.full.request' }>
 export type FullContourResponse = ProtocolEnvelope<{ sequence: number; regions: readonly VisibleRegion[] }, GeometryRevisionContext> & Readonly<{ type: 'contour.full.response' }>
 export type PartialContourRequest = ProtocolEnvelope<{ sequence: number; baseSnapshotVersion: number; regionIds: readonly string[]; targetMaxError: number }, GeometryRevisionContext> & Readonly<{ type: 'contour.partial.request' }>
@@ -76,6 +93,45 @@ const INITIAL_REASON_CODES = new Set([
 	'capability.missing_required_feature',
 ])
 
+export function validateCapabilityMessage(input: unknown): ValidationResult<CapabilityMessage> {
+	const v = new Validator()
+	const envelope = v.object(input, '')
+	if (!envelope) return v.finish<CapabilityMessage>(input)
+	const type = v.string(envelope.type, '/type', true)
+	validateCapabilityContext(envelope.context, '/context', v)
+	const payload = v.object(envelope.payload, '/payload')
+	if (!type || !payload) return v.finish<CapabilityMessage>(input)
+
+	if (type === 'capability.declare') {
+		validateSequence(payload.protocolVersion, '/payload/protocolVersion', v)
+		const features = v.array(payload.features, '/payload/features')
+		const seen = new Set<string>()
+		features?.forEach((feature, index) => {
+			const path = jsonPointer('/payload/features', index)
+			const value = v.string(feature, path, true)
+			if (value !== undefined) {
+				if (seen.has(value)) v.issue('protocol.duplicate_capability_feature', path, 'Capability feature names must be unique within one declaration.')
+				seen.add(value)
+			}
+		})
+	}
+	else if (type === 'capability.ack') {
+		// ACK defines no known payload members. Unknown additive fields remain forward-compatible.
+	}
+	else v.issue('protocol.unknown_message_type', '/type', 'This decoder accepts only capability.declare and capability.ack.')
+	return v.finish<CapabilityMessage>(input)
+}
+
+function validateCapabilityContext(input: unknown, path: string, v: Validator): void {
+	const context = v.object(input, path)
+	if (!context) return
+	for (const key of ['previewSessionId', 'runtimeGenerationId'] as const) {
+		if (!Object.hasOwn(context, key)) v.issue('protocol.missing_context_identity', `${path}/${key}`, `Capability messages require context.${key}.`)
+		else v.string(context[key], `${path}/${key}`, true)
+	}
+	// Unknown additive context fields are ignored for forward compatibility.
+}
+
 export function validateGeometryMessage(input: unknown): ValidationResult<GeometryMessage> {
 	const v = new Validator()
 	const envelope = v.object(input, '')
@@ -90,6 +146,7 @@ export function validateGeometryMessage(input: unknown): ValidationResult<Geomet
 			break
 		case 'geometry.acquire.response':
 			forbidRuntimeSnapshotVersion(payload, '/payload', v)
+			validateWidgetRect(payload.rect, '/payload/rect', v)
 			validateRegions(payload.regions, '/payload/regions', v, true)
 			break
 		case 'contour.full.request':
@@ -153,6 +210,16 @@ function validateGeometryContext(
 			v.issue('protocol.identity_in_wrong_envelope', `${path}/${key}`, `${key} belongs in a message payload or is Workbench-local, not in shared context.`)
 		if (!KNOWN_CONTEXT_KEYS.has(key) && value === null)
 			v.issue('protocol.null_optional_field', `${path}/${key}`, 'Optional protocol fields are omitted instead of encoded as null.')
+	}
+}
+
+function validateWidgetRect(input: unknown, path: string, v: Validator): void {
+	const rect = v.object(input, path)
+	if (!rect) return
+	for (const key of ['x', 'y', 'width', 'height'] as const) {
+		const value = v.finiteNumber(rect[key], `${path}/${key}`)
+		if ((key === 'width' || key === 'height') && value !== undefined && value < 0)
+			v.issue('protocol.invalid_widget_rect_extent', `${path}/${key}`, 'Widget rectangle width/height must be greater than or equal to zero.')
 	}
 }
 

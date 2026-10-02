@@ -14,7 +14,7 @@ import { validateUniqueFullUuidClaims } from '../src/domain/identity-index'
 import { isAbsoluteUri, isCanonicalLocaleFilename, isFullUuid, isSha256Digest } from '../src/domain/validation'
 import { validateRootShellContentSlot, validateRootShellIdentity, validateRootShellStructure, validateViewResource } from '../src/domain/views/schema'
 import { discoverLocaleFiles, validateWorkspaceManifest } from '../src/domain/workspace/schema'
-import { responseMeetsRequestedPrecision, validateGeometryMessage, validatePartialResponseAgainstRequest, validatePreviewFailureDiagnostic, type Contour, type PartialContourRequest, type PartialContourResponse } from '../src/preview/protocol/schema'
+import { responseMeetsRequestedPrecision, validateCapabilityMessage, validateGeometryMessage, validatePartialResponseAgainstRequest, validatePreviewFailureDiagnostic, type Contour, type PartialContourRequest, type PartialContourResponse } from '../src/preview/protocol/schema'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const STEP_A = '22222222-2222-4222-8222-222222222222'
@@ -389,10 +389,21 @@ describe('derived evidence, render context, and handoff', () => {
 })
 
 describe('Preview cross-iframe protocol', () => {
+	it('validates explicit capability declare/ack envelopes and rejects malformed declarations', () => {
+		const context = { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a' }
+		expect(validateCapabilityMessage({ type: 'capability.declare', context, payload: { protocolVersion: 1, features: ['geometry', 'contour'] } }).ok).toBe(true)
+		expect(validateCapabilityMessage({ type: 'capability.ack', context, payload: {} }).ok).toBe(true)
+		expect(validateCapabilityMessage({ type: 'capability.declare', context, payload: { protocolVersion: 1.5, features: [] } }).ok).toBe(false)
+		expect(validateCapabilityMessage({ type: 'capability.declare', context, payload: { protocolVersion: 1, features: ['geometry', 'geometry'] } }).diagnostics.some(item => item.code === 'protocol.duplicate_capability_feature')).toBe(true)
+		expect(validateCapabilityMessage({ type: 'capability.ack', context, payload: { futureAdditiveField: 'ignored' } }).ok).toBe(true)
+		expect(validateCapabilityMessage({ type: 'capability.ack', context: { ...context, futureNullableField: null }, payload: {} }).ok).toBe(true)
+		expect(validateCapabilityMessage({ type: 'capability.ack', context: { previewSessionId: 'session-a' }, payload: {} }).ok).toBe(false)
+	})
+
 	it('validates the fully specified geometry and contour messages', () => {
 		const messages = [
 			{ type: 'geometry.acquire.request', context: acquisitionContext, payload: {} },
-			{ type: 'geometry.acquire.response', context: protocolContext, payload: { regions: [] } },
+			{ type: 'geometry.acquire.response', context: protocolContext, payload: { rect: { x: 0, y: 0, width: 10, height: 10 }, regions: [] } },
 			{ type: 'contour.full.request', context: protocolContext, payload: { sequence: 0, targetMaxError: 0.25 } },
 			{ type: 'contour.full.response', context: protocolContext, payload: { sequence: 0, regions: [{ regionId: 'r-1', contour: square, maxError: 0 }] } },
 			{ type: 'contour.partial.request', context: protocolContext, payload: { sequence: 1, baseSnapshotVersion: 0, regionIds: ['r-1'], targetMaxError: 0.25 } },
@@ -415,7 +426,9 @@ describe('Preview cross-iframe protocol', () => {
 		] }
 		expect(validateGeometryMessage({ type: 'contour.full.response', context: protocolContext, payload: { sequence: Number.MAX_SAFE_INTEGER + 1, regions: [] } }).ok).toBe(false)
 		expect(validateGeometryMessage({ type: 'contour.full.response', context: protocolContext, payload: { sequence: 1, snapshotVersion: 4, regions: [] } }).ok).toBe(false)
-		expect(validateGeometryMessage({ type: 'geometry.acquire.response', context: protocolContext, payload: { regions: [{ regionId: 'r', contour: square, maxError: 0 }, { regionId: 'r', contour: square, maxError: 0 }] } }).ok).toBe(false)
+		expect(validateGeometryMessage({ type: 'geometry.acquire.response', context: protocolContext, payload: { rect: { x: 0, y: 0, width: 10, height: 10 }, regions: [{ regionId: 'r', contour: square, maxError: 0 }, { regionId: 'r', contour: square, maxError: 0 }] } }).ok).toBe(false)
+		expect(validateGeometryMessage({ type: 'geometry.acquire.response', context: protocolContext, payload: { regions: [] } }).ok).toBe(false)
+		expect(validateGeometryMessage({ type: 'geometry.acquire.response', context: protocolContext, payload: { rect: { x: 0, y: 0, width: -1, height: 10 }, regions: [] } }).diagnostics.some(item => item.code === 'protocol.invalid_widget_rect_extent')).toBe(true)
 		expect(validateGeometryMessage({ type: 'contour.full.response', context: protocolContext, payload: { sequence: 1, regions: [{ regionId: 'r', contour: bowtie, maxError: 0 }] } }).ok).toBe(false)
 		const cubicLoop: Contour = { commands: [
 			{ op: 'moveTo', x: 0, y: 0 },

@@ -1,4 +1,4 @@
-import type { JsonValue } from '../../domain/validation'
+import type { CapabilityDeclareMessage } from './schema'
 
 export type CapabilityFailureReason = `capability.${string}`
 export type GenerationAdmissionCause = 'initial' | 'reload' | 'restart' | 'automatic-recovery' | 'explicit-retry'
@@ -48,14 +48,12 @@ type ActiveGeneration = {
 	cause: GenerationAdmissionCause
 	recoveryAttempt: RecoveryAttempt
 	phase: GenerationPhase
-	declaration?: JsonValue
+	declaration?: CapabilityDeclareMessage['payload']
 }
 
 /**
- * Wire-independent Preview session/runtime-generation state machine.
- *
- * Capability declaration/ACK message names and concrete payload fields are intentionally absent:
- * Part 2 fixes their lifecycle semantics but does not yet define those external wire schemas.
+ * Preview session/runtime-generation state machine bound to the canonical capability payload.
+ * The bridge validates capability.declare / capability.ack envelopes before applying lifecycle transitions here.
  */
 export class PreviewProtocolSession {
 	readonly previewSessionId: string
@@ -128,21 +126,21 @@ export class PreviewProtocolSession {
 
 	receiveCapabilityDeclaration(
 		generationId: string,
-		declaration: JsonValue,
+		declaration: CapabilityDeclareMessage['payload'],
 		compatibility: CapabilityCompatibility,
 	): CapabilityDeclarationResult {
 		const current = this.current
 		if (!current || current.id !== generationId) return { status: 'stale', generationId }
 
 		if (current.declaration !== undefined) {
-			if (!jsonEqual(current.declaration, declaration)) {
+			if (!declarationEqual(current.declaration, declaration)) {
 				this.failCurrentGeneration('protocol-invalid')
 				return { status: 'capability-conflict', generationId }
 			}
 			return { status: 'ack-required', generationId }
 		}
 
-		current.declaration = cloneJson(declaration)
+		current.declaration = cloneDeclaration(declaration)
 		if (!compatibility.ok) {
 			this.failCurrentGeneration('capability-unavailable')
 			return { status: 'capability-failure', generationId, reason: compatibility.reason }
@@ -262,22 +260,12 @@ export class PreviewSessionRegistry {
 	}
 }
 
-function cloneJson(value: JsonValue): JsonValue {
-	if (Array.isArray(value)) return value.map(cloneJson)
-	if (value !== null && typeof value === 'object')
-		return Object.fromEntries(Object.entries(value).map(([key, member]) => [key, cloneJson(member)]))
-	return value
+function cloneDeclaration(value: CapabilityDeclareMessage['payload']): CapabilityDeclareMessage['payload'] {
+	return Object.freeze({ protocolVersion: value.protocolVersion, features: Object.freeze([...value.features].sort()) })
 }
 
-function jsonEqual(left: JsonValue, right: JsonValue): boolean {
-	if (Object.is(left, right)) return true
-	if (Array.isArray(left) || Array.isArray(right)) {
-		if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false
-		return left.every((member, index) => jsonEqual(member, right[index]!))
-	}
-	if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') return false
-	const leftKeys = Object.keys(left).sort()
-	const rightKeys = Object.keys(right).sort()
-	if (leftKeys.length !== rightKeys.length || leftKeys.some((key, index) => key !== rightKeys[index])) return false
-	return leftKeys.every(key => jsonEqual(left[key]!, right[key]!))
+function declarationEqual(left: CapabilityDeclareMessage['payload'], right: CapabilityDeclareMessage['payload']): boolean {
+	if (left.protocolVersion !== right.protocolVersion || left.features.length !== right.features.length) return false
+	const normalized = [...right.features].sort()
+	return left.features.every((feature, index) => feature === normalized[index])
 }

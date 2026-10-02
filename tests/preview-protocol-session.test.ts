@@ -10,7 +10,7 @@ describe('Preview protocol session/generation lineage', () => {
 		const session = new PreviewProtocolSession('session-a')
 		expect(session.beginGeneration('generation-a', 'initial')).toMatchObject({ status: 'admitted' })
 		expect(session.classifyGeometryTraffic('session-a', 'generation-a')).toBe('gated')
-		expect(session.receiveCapabilityDeclaration('generation-a', { protocol: 1, features: ['geometry'] }, compatible)).toEqual({ status: 'ack-required', generationId: 'generation-a' })
+		expect(session.receiveCapabilityDeclaration('generation-a', { protocolVersion: 1, features: ['geometry'] }, compatible)).toEqual({ status: 'ack-required', generationId: 'generation-a' })
 		expect(session.classifyGeometryTraffic('session-a', 'generation-a')).toBe('gated')
 		expect(session.observeCapabilityAcknowledgement('generation-a')).toEqual({ status: 'opened', generationId: 'generation-a' })
 		expect(session.classifyGeometryTraffic('session-a', 'generation-a')).toBe('open')
@@ -20,11 +20,12 @@ describe('Preview protocol session/generation lineage', () => {
 	it('pins the first declaration before ACK, treats identical retransmission as idempotent, and rejects same-generation change', () => {
 		const session = new PreviewProtocolSession('session-a')
 		session.beginGeneration('generation-a', 'initial')
-		const declaration = { features: ['geometry', 'contour'], protocol: 1 }
+		const declaration = { features: ['geometry', 'contour'], protocolVersion: 1 }
 		expect(session.receiveCapabilityDeclaration('generation-a', declaration, compatible).status).toBe('ack-required')
 		declaration.features.push('mutated-after-send')
-		expect(session.receiveCapabilityDeclaration('generation-a', { protocol: 1, features: ['geometry', 'contour'] }, compatible).status).toBe('ack-required')
-		expect(session.receiveCapabilityDeclaration('generation-a', { protocol: 1, features: ['geometry'] }, compatible)).toEqual({ status: 'capability-conflict', generationId: 'generation-a' })
+		expect(session.receiveCapabilityDeclaration('generation-a', { protocolVersion: 1, features: ['geometry', 'contour'] }, compatible).status).toBe('ack-required')
+		expect(session.receiveCapabilityDeclaration('generation-a', { protocolVersion: 1, features: ['contour', 'geometry'] }, compatible).status).toBe('ack-required')
+		expect(session.receiveCapabilityDeclaration('generation-a', { protocolVersion: 1, features: ['geometry'] }, compatible)).toEqual({ status: 'capability-conflict', generationId: 'generation-a' })
 		const snapshot = session.snapshot()
 		expect(snapshot).toMatchObject({ recoveryNeeded: true, recoveryExhausted: false })
 		expect('currentGenerationId' in snapshot).toBe(false)
@@ -33,7 +34,7 @@ describe('Preview protocol session/generation lineage', () => {
 	it('keeps an open gate open when an identical declaration is retransmitted and requires the same ACK again', () => {
 		const session = new PreviewProtocolSession('session-a')
 		session.beginGeneration('generation-a', 'initial')
-		const declaration = { protocol: 1, features: ['geometry'] }
+		const declaration = { protocolVersion: 1, features: ['geometry'] }
 		session.receiveCapabilityDeclaration('generation-a', declaration, compatible)
 		session.observeCapabilityAcknowledgement('generation-a')
 
@@ -45,7 +46,7 @@ describe('Preview protocol session/generation lineage', () => {
 	it('keeps ACK/pending state unchanged across pure reconnect and requires a fresh generation after reload/restart', () => {
 		const session = new PreviewProtocolSession('session-a')
 		session.beginGeneration('generation-a', 'initial')
-		session.receiveCapabilityDeclaration('generation-a', { protocol: 1 }, compatible)
+		session.receiveCapabilityDeclaration('generation-a', { protocolVersion: 1, features: [] }, compatible)
 		session.onPureTransportReconnect()
 		expect(session.snapshot().currentGenerationPhase).toBe('awaiting-ack')
 		session.observeCapabilityAcknowledgement('generation-a')
@@ -61,10 +62,10 @@ describe('Preview protocol session/generation lineage', () => {
 	it('discards late ACK/declaration traffic from retired or non-current generations without reviving them', () => {
 		const session = new PreviewProtocolSession('session-a')
 		session.beginGeneration('generation-a', 'initial')
-		session.receiveCapabilityDeclaration('generation-a', { protocol: 1 }, compatible)
+		session.receiveCapabilityDeclaration('generation-a', { protocolVersion: 1, features: [] }, compatible)
 		session.replaceGenerationForLifecycle('generation-b', 'restart')
 		expect(session.observeCapabilityAcknowledgement('generation-a')).toEqual({ status: 'stale', generationId: 'generation-a' })
-		expect(session.receiveCapabilityDeclaration('generation-a', { protocol: 1 }, compatible)).toEqual({ status: 'stale', generationId: 'generation-a' })
+		expect(session.receiveCapabilityDeclaration('generation-a', { protocolVersion: 1, features: [] }, compatible)).toEqual({ status: 'stale', generationId: 'generation-a' })
 		expect(session.snapshot().currentGenerationId).toBe('generation-b')
 	})
 
@@ -73,8 +74,8 @@ describe('Preview protocol session/generation lineage', () => {
 		expect(session.snapshot()).toMatchObject({ recoveryNeeded: true, recoveryExhausted: false, automaticRecoveryUsed: false })
 
 		expect(session.beginGeneration('generation-b', 'automatic-recovery')).toMatchObject({ status: 'admitted' })
-		session.receiveCapabilityDeclaration('generation-b', { protocol: 1 }, compatible)
-		expect(session.receiveCapabilityDeclaration('generation-b', { protocol: 2 }, compatible).status).toBe('capability-conflict')
+		session.receiveCapabilityDeclaration('generation-b', { protocolVersion: 1, features: [] }, compatible)
+		expect(session.receiveCapabilityDeclaration('generation-b', { protocolVersion: 2, features: [] }, compatible).status).toBe('capability-conflict')
 		expect(session.snapshot()).toMatchObject({ recoveryNeeded: false, recoveryExhausted: true, automaticRecoveryUsed: true })
 
 		expect(session.beginGeneration('generation-c', 'restart')).toEqual({ status: 'unauthorized', generationId: 'generation-c' })
@@ -83,7 +84,7 @@ describe('Preview protocol session/generation lineage', () => {
 		expect(session.authorizeRetry()).toBe('coalesced')
 		expect(session.beginGeneration('generation-d', 'explicit-retry')).toMatchObject({ status: 'admitted' })
 		expect(session.authorizeRetry()).toBe('ignored-active-bootstrap')
-		expect(session.receiveCapabilityDeclaration('generation-d', { protocol: 1 }, compatible).status).toBe('ack-required')
+		expect(session.receiveCapabilityDeclaration('generation-d', { protocolVersion: 1, features: [] }, compatible).status).toBe('ack-required')
 		expect(session.observeCapabilityAcknowledgement('generation-d').status).toBe('opened')
 		expect(session.snapshot()).toMatchObject({ recoveryExhausted: false, automaticRecoveryUsed: false, retryAuthorizationPending: false })
 	})
@@ -93,8 +94,8 @@ describe('Preview protocol session/generation lineage', () => {
 
 		expect(session.replaceGenerationForLifecycle('generation-b', 'reload')).toMatchObject({ status: 'admitted' })
 		expect(session.snapshot()).toMatchObject({ automaticRecoveryUsed: true, recoveryNeeded: false })
-		session.receiveCapabilityDeclaration('generation-b', { protocol: 1 }, compatible)
-		expect(session.receiveCapabilityDeclaration('generation-b', { protocol: 2 }, compatible).status).toBe('capability-conflict')
+		session.receiveCapabilityDeclaration('generation-b', { protocolVersion: 1, features: [] }, compatible)
+		expect(session.receiveCapabilityDeclaration('generation-b', { protocolVersion: 2, features: [] }, compatible).status).toBe('capability-conflict')
 		expect(session.snapshot()).toMatchObject({ recoveryExhausted: true, automaticRecoveryUsed: true })
 
 		expect(session.replaceGenerationForLifecycle('generation-c', 'restart')).toEqual({ status: 'unauthorized', generationId: 'generation-c' })
@@ -120,7 +121,7 @@ describe('Preview protocol session/generation lineage', () => {
 		expect(session.authorizeRetry()).toBe('authorized')
 		expect(session.beginGeneration('generation-c', 'explicit-retry')).toMatchObject({ status: 'admitted' })
 		expect(session.snapshot().retryAuthorizationPending).toBe(false)
-		expect(session.receiveCapabilityDeclaration('generation-c', { protocol: 99 }, unsupported).status).toBe('capability-failure')
+		expect(session.receiveCapabilityDeclaration('generation-c', { protocolVersion: 99, features: [] }, unsupported).status).toBe('capability-failure')
 		expect(session.snapshot().recoveryExhausted).toBe(true)
 		expect(session.beginGeneration('generation-d', 'automatic-recovery')).toEqual({ status: 'unauthorized', generationId: 'generation-d' })
 	})
@@ -129,14 +130,14 @@ describe('Preview protocol session/generation lineage', () => {
 		const session = protocolInvalidSession()
 		session.beginGeneration('generation-b', 'automatic-recovery')
 		expect(session.snapshot().automaticRecoveryUsed).toBe(true)
-		session.receiveCapabilityDeclaration('generation-b', { protocol: 1 }, compatible)
+		session.receiveCapabilityDeclaration('generation-b', { protocolVersion: 1, features: [] }, compatible)
 		expect(session.snapshot().automaticRecoveryUsed).toBe(true)
 		expect(session.observeCapabilityAcknowledgement('generation-b').status).toBe('opened')
 		expect(session.snapshot()).toMatchObject({ automaticRecoveryUsed: false, recoveryExhausted: false })
 
 		session.replaceGenerationForLifecycle('generation-c', 'restart')
-		session.receiveCapabilityDeclaration('generation-c', { protocol: 1 }, compatible)
-		session.receiveCapabilityDeclaration('generation-c', { protocol: 2 }, compatible)
+		session.receiveCapabilityDeclaration('generation-c', { protocolVersion: 1, features: [] }, compatible)
+		session.receiveCapabilityDeclaration('generation-c', { protocolVersion: 2, features: [] }, compatible)
 		expect(session.snapshot()).toMatchObject({ recoveryNeeded: true, automaticRecoveryUsed: false })
 		expect(session.beginGeneration('generation-d', 'automatic-recovery').status).toBe('admitted')
 	})
@@ -144,7 +145,7 @@ describe('Preview protocol session/generation lineage', () => {
 	it('does not spend automatic recovery on an incompatible capability declaration and requires explicit authorization', () => {
 		const session = new PreviewProtocolSession('session-a')
 		session.beginGeneration('generation-a', 'initial')
-		expect(session.receiveCapabilityDeclaration('generation-a', { protocol: 99 }, unsupported).status).toBe('capability-failure')
+		expect(session.receiveCapabilityDeclaration('generation-a', { protocolVersion: 99, features: [] }, unsupported).status).toBe('capability-failure')
 		expect(session.snapshot()).toMatchObject({
 			recoveryNeeded: false,
 			recoveryExhausted: true,
@@ -177,7 +178,7 @@ describe('Preview protocol session/generation lineage', () => {
 	it('rejects retired generation ID reuse without reviving or replacing the current generation', () => {
 		const session = new PreviewProtocolSession('session-a')
 		session.beginGeneration('generation-a', 'initial')
-		session.receiveCapabilityDeclaration('generation-a', { protocol: 1 }, compatible)
+		session.receiveCapabilityDeclaration('generation-a', { protocolVersion: 1, features: [] }, compatible)
 		session.observeCapabilityAcknowledgement('generation-a')
 		session.replaceGenerationForLifecycle('generation-b', 'restart')
 
@@ -205,15 +206,15 @@ describe('Preview protocol session/generation lineage', () => {
 function protocolInvalidSession(previewSessionId = 'session-a'): PreviewProtocolSession {
 	const session = new PreviewProtocolSession(previewSessionId)
 	session.beginGeneration('generation-a', 'initial')
-	session.receiveCapabilityDeclaration('generation-a', { protocol: 1 }, compatible)
-	session.receiveCapabilityDeclaration('generation-a', { protocol: 2 }, compatible)
+	session.receiveCapabilityDeclaration('generation-a', { protocolVersion: 1, features: [] }, compatible)
+	session.receiveCapabilityDeclaration('generation-a', { protocolVersion: 2, features: [] }, compatible)
 	return session
 }
 
 function exhaustedSession(): PreviewProtocolSession {
 	const session = protocolInvalidSession()
 	session.beginGeneration('generation-b', 'automatic-recovery')
-	session.receiveCapabilityDeclaration('generation-b', { protocol: 1 }, compatible)
-	session.receiveCapabilityDeclaration('generation-b', { protocol: 2 }, compatible)
+	session.receiveCapabilityDeclaration('generation-b', { protocolVersion: 1, features: [] }, compatible)
+	session.receiveCapabilityDeclaration('generation-b', { protocolVersion: 2, features: [] }, compatible)
 	return session
 }
