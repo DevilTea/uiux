@@ -6,6 +6,7 @@ import { validateResolvedRenderContext, type ResolvedRenderContext } from '../do
 import type { VariantEntry, ViewResource } from '../domain/views/schema'
 import { validateViewResource } from '../domain/views/schema'
 import type { RuntimeAdapterBundle } from './adapter-runtime'
+import { buildEffectiveViewSource } from './effective-view-source'
 import type { RootShellViewport } from './root-shell'
 
 export type ViewRuntimeBuildResult =
@@ -117,18 +118,23 @@ export function buildViewRuntime(input: Readonly<{
 	if (input.context.viewId !== input.view.id)
 		return { state: 'invalid', diagnostics: [{ code: 'render_context.view_mismatch', path: '/viewId', message: 'Render context viewId must match the View being executed.' }] }
 
-	const blueprint = input.adapters.system.createBlueprint(input.view.ir)
+	const effectiveSource = buildEffectiveViewSource(input.view.ir, input.adapters.catalogByType)
+	if (effectiveSource.state === 'invalid') return effectiveSource
+	const blueprint = input.adapters.system.createBlueprint(effectiveSource.source)
 	if (blueprint.status !== 'valid') return { state: 'invalid', diagnostics: blueprintDiagnostics(blueprint.diagnostics) }
 
 	const boundaryDiagnostics = validateRootShellWriteBoundary(blueprint)
 	const variant = selectVariant(input.view, input.context.variantName)
 	if (variant.state === 'invalid') return { state: 'invalid', diagnostics: [...boundaryDiagnostics, ...variant.diagnostics] }
 	const authoredDiagnostics = validateVariantAuthoring(blueprint, variant.variant, input.context.variantName)
+	const preRuntimeDiagnostics = [...boundaryDiagnostics, ...authoredDiagnostics]
+	if (preRuntimeDiagnostics.length > 0)
+		return { state: 'invalid', diagnostics: deduplicate(preRuntimeDiagnostics) }
 
 	const overrideStateDefaults = mergeRootContextOverrides(input.context, variant.variant)
 	const candidate = blueprint.createRuntime({ overrideStateDefaults })
 	const runtimeDiagnostics = coreDiagnostics(candidate.getDiagnostics(), '/runtime')
-	const diagnostics = [...boundaryDiagnostics, ...authoredDiagnostics, ...runtimeDiagnostics]
+	const diagnostics = runtimeDiagnostics
 	if (diagnostics.length > 0) {
 		candidate.dispose()
 		return { state: 'invalid', diagnostics: deduplicate(diagnostics) }
@@ -152,6 +158,7 @@ function validateVariantAuthoring(
 ): Diagnostic[] {
 	if (!variant || !variantName) return []
 	const diagnostics: Diagnostic[] = []
+	const inspection = inspectBlueprint(blueprint)
 	for (const [widgetId, members] of Object.entries(variant.state)) {
 		const basePath = `/variants/${escapePointer(variantName)}/state/${escapePointer(widgetId)}`
 		if (widgetId === 'root') {
@@ -160,17 +167,17 @@ function validateVariantAuthoring(
 		}
 		const node = blueprint.getWidget(widgetId)
 		if (!node || !node.resolved) continue
-		const inspection = inspectBlueprint(blueprint)
 		const nodeId = inspection.getNodeId(node)
 		const inspected = nodeId === null ? null : inspection.getNode(nodeId)
 		if (!inspected?.resolved) continue
-		const stateNames = new Set(inspected.state.map(member => member.name))
+		const stateMembers = new Map(inspected.state.map(member => [member.name, member] as const))
 		for (const member of Object.keys(members)) {
-			if (!stateNames.has(member)) continue
+			const state = stateMembers.get(member)
+			if (!state || state.authorWritable) continue
 			diagnostics.push({
-				code: 'variant.author_writable_schema_unavailable',
+				code: 'variant.state_not_author_writable',
 				path: `${basePath}/${escapePointer(member)}`,
-				message: 'Current Widget Core cannot prove this State member is author-writable; Variant execution fails closed until Core exposes that schema fact.',
+				message: `State member ${member} is not declared author-writable by Widget plugin ${inspected.node.type}.`,
 			})
 		}
 	}
