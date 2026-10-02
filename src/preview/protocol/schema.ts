@@ -66,6 +66,8 @@ export type PartialContourRequest = ProtocolEnvelope<{ sequence: number; baseSna
 export type PartialContourResponse = ProtocolEnvelope<{ sequence: number; baseSnapshotVersion: number; regions: readonly VisibleRegion[] }, GeometryRevisionContext> & Readonly<{ type: 'contour.partial.response' }>
 export type ContourCancel = ProtocolEnvelope<{ sequence: number }, GeometryRevisionContext> & Readonly<{ type: 'contour.cancel' }>
 export type GeometryMessage = GeometryAcquireRequest | GeometryAcquireResponse | FullContourRequest | FullContourResponse | PartialContourRequest | PartialContourResponse | ContourCancel
+export type GeometryRequestMessage = GeometryAcquireRequest | FullContourRequest | PartialContourRequest | ContourCancel
+export type GeometryResponseMessage = GeometryAcquireResponse | FullContourResponse | PartialContourResponse
 
 export type FailureReasonCode = string
 export type PreviewFailureDiagnostic = Readonly<{
