@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@deviltea/widget-core':
-        specifier: 0.0.1
-        version: 0.0.1
+        specifier: 0.0.2
+        version: 0.0.2
       '@deviltea/widget-vue':
-        specifier: 0.0.1
-        version: 0.0.1(vue@3.5.43(typescript@6.0.3))
+        specifier: 0.0.2
+        version: 0.0.2(vue@3.5.43(typescript@6.0.3))
       '@modelcontextprotocol/server':
         specifier: 2.2.0
         version: 2.2.0
@@ -242,12 +242,12 @@ packages:
   '@colordx/core@5.8.0':
     resolution: {integrity: sha512-cG0QJAO6VkaRUlIb0zOzX9gfJgs1pjoOL9gZ/PK1kfvBs0GCkADu5oQh6gPxXgQnZ3gV575h+lQRC0NlMDTclA==}
 
-  '@deviltea/widget-core@0.0.1':
-    resolution: {integrity: sha512-RTYn+vcZY0OHjWUzNKO3b+qelooIiQdjoiv6wq0HQJxt/d4kjXFTWl9zuzv+57Olo6nzVkQbprGnS2BsqBrX1g==}
+  '@deviltea/widget-core@0.0.2':
+    resolution: {integrity: sha512-wJMms5tNMU0q+ZU31qA79AEScVdWzm6GqWdQR1DH+h9iAHD1FA+6MoRoMLBN9AcNaul82PMTJ3o47ZbrbHPIsg==}
     engines: {node: ^22.14.0 || ^24.0.0}
 
-  '@deviltea/widget-vue@0.0.1':
-    resolution: {integrity: sha512-IR0/yiZyxN38AXOOZgM3jXTyIt4ne1IiQnQMRZX86S7li44BEyU3Sj0HtLAAXyPFvFc89pxC7LjWFtpnsLNWEg==}
+  '@deviltea/widget-vue@0.0.2':
+    resolution: {integrity: sha512-i+QqaY42aEG4FdmYlZhteKfHAUp2XL2R0grXYdI2xIFj9Ic0DNjk79TKdiytkPreeFaZYGSORHjq6Yaj61+3Gw==}
     engines: {node: ^22.14.0 || ^24.0.0}
     peerDependencies:
       vue: ^3.5.0
@@ -2944,6 +2944,9 @@ packages:
   json-schema-traverse@1.0.0:
     resolution: {integrity: sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug==}
 
+  json-schema-typed@8.0.2:
+    resolution: {integrity: sha512-fQhoXdcvc3V28x7C7BMs4P5+kNlgUURe2jmUT1T//oBRMDrqy1QPelJimwZGo7Hg9VPV3EQV5Bnq4hbFy2vetA==}
+
   json-stable-stringify-without-jsonify@1.0.1:
     resolution: {integrity: sha512-Bdboy+l7tA3OGW6FjyFHWkP5LuByj1Tk33Ljyq0axyzdk9//JSi2u3fP1QSmd1KNwq6VOKYGlAu87CisVir6Pw==}
 
@@ -4902,13 +4905,14 @@ snapshots:
 
   '@colordx/core@5.8.0': {}
 
-  '@deviltea/widget-core@0.0.1':
+  '@deviltea/widget-core@0.0.2':
     dependencies:
       alien-signals: 3.2.1
+      json-schema-typed: 8.0.2
 
-  '@deviltea/widget-vue@0.0.1(vue@3.5.43(typescript@6.0.3))':
+  '@deviltea/widget-vue@0.0.2(vue@3.5.43(typescript@6.0.3))':
     dependencies:
-      '@deviltea/widget-core': 0.0.1
+      '@deviltea/widget-core': 0.0.2
       vue: 3.5.43(typescript@6.0.3)
 
   '@dxup/nuxt@0.5.10(esbuild@0.28.2)(magicast@0.5.5)(rolldown@1.2.11)(rollup@4.63.5)(vite@8.3.1(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2))':
@@ -7830,6 +7834,8 @@ snapshots:
   json-schema-traverse@0.4.1: {}
 
   json-schema-traverse@1.0.0: {}
+
+  json-schema-typed@8.0.2: {}
 
   json-stable-stringify-without-jsonify@1.0.1: {}
 
