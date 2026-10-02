@@ -17,20 +17,31 @@ describe('bootstrap', () => {
 		expect(packageJson.bin).toEqual({ uiux: './bin/uiux.mjs' })
 	})
 
-	it('prints useful CLI help and marks product commands as unavailable', () => {
+	it('prints useful CLI help and exposes the canonical selected-Workspace dev command', () => {
 		const output = execFileSync(process.execPath, [cliPath, '--help'], { encoding: 'utf8' })
 
 		expect(output).toContain('Usage: uiux <command>')
-		expect(output).toContain('init           Initialize a Workspace (not implemented yet)')
-		expect(output).toContain('dev            Start the UIUX workbench (not implemented yet)')
+		expect(output).toContain('init --workspace <dir>  Initialize a Workspace (not implemented yet)')
+		expect(output).toContain('dev --workspace <dir>   Start the unified UIUX Workbench/Nitro server')
 	})
 
-	it('fails clearly when a placeholder product command is invoked', () => {
-		const result = spawnSync(process.execPath, [cliPath, 'init'], { encoding: 'utf8' })
+	it('keeps init unavailable while rejecting malformed dev Workspace selection before server launch', () => {
+		const init = spawnSync(process.execPath, [cliPath, 'init', '--workspace', '.'], { encoding: 'utf8' })
+		expect(init.status).toBe(2)
+		expect(init.stdout).toBe('')
+		expect(init.stderr).toContain('uiux: init is not implemented yet.')
 
+		for (const args of [['dev'], ['dev', '--workspace'], ['dev', '--workspace', '.', 'extra'], ['dev', '--other', '.']]) {
+			const result = spawnSync(process.execPath, [cliPath, ...args], { encoding: 'utf8' })
+			expect(result.status).toBe(2)
+			expect(result.stderr).toContain('uiux: dev requires exactly --workspace <dir>.')
+		}
+	})
+
+	it('rejects a dev Workspace root that does not exist instead of silently creating it', () => {
+		const result = spawnSync(process.execPath, [cliPath, 'dev', '--workspace', './definitely-missing-uiux-workspace'], { encoding: 'utf8' })
 		expect(result.status).toBe(2)
-		expect(result.stdout).toBe('')
-		expect(result.stderr).toContain('uiux: init is not implemented yet.')
+		expect(result.stderr).toContain('Workspace root does not exist')
 	})
 
 	it('prints the package version through the CLI', () => {

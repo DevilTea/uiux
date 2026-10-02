@@ -325,6 +325,9 @@ describe('derived evidence, render context, and handoff', () => {
 		expect(validateArtifactIdentity(identity).ok).toBe(true)
 		expect(await artifactBytesMatch(identity, bytes)).toBe(true)
 		expect(await artifactBytesMatch(identity, new TextEncoder().encode('different bytes'))).toBe(false)
+		const padded = Uint8Array.from([0, ...bytes, 0])
+		expect(await sha256Identity(padded.subarray(1, -1))).toBe(identity)
+		expect(await sha256Identity(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength))).toBe(identity)
 		expect(artifactStoreRelativePath(identity)).toContain('/sha256/')
 	})
 
