@@ -296,7 +296,7 @@ function validateContour(input: unknown, path: string, v: Validator): void {
 				v.issue('protocol.close_must_be_final', `${commandPath}/op`, 'close is the unique final contour command.')
 			if (Object.hasOwn(command, 'x') || Object.hasOwn(command, 'y'))
 				v.issue('protocol.close_has_no_coordinates', commandPath, 'close implicitly connects the current point to the starting point.')
-			if (start && current)
+			if (start && current && !samePoint(start, current))
 				segments.push({ kind: 'line', from: current, to: start })
 		}
 		else {

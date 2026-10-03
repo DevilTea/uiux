@@ -465,6 +465,35 @@ describe('Preview cross-iframe protocol', () => {
 			{ op: 'cubicBezierTo', c1x: 10, c1y: -2, c2x: 2, c2y: -5, x: 0, y: -5 },
 			{ op: 'close' },
 		] }
+		const lineEquivalentCubics: Contour = { commands: [
+			{ op: 'moveTo', x: 0, y: 0 },
+			{ op: 'cubicBezierTo', c1x: 0, c1y: 0, c2x: 10, c2y: 0, x: 10, y: 0 },
+			{ op: 'cubicBezierTo', c1x: 10, c1y: 0, c2x: 10, c2y: 10, x: 10, y: 10 },
+			{ op: 'cubicBezierTo', c1x: 10, c1y: 10, c2x: 0, c2y: 10, x: 0, y: 10 },
+			{ op: 'cubicBezierTo', c1x: 0, c1y: 10, c2x: 0, c2y: 0, x: 0, y: 0 },
+			{ op: 'close' },
+		] }
+		const crossingLineEquivalentCubics: Contour = { commands: [
+			{ op: 'moveTo', x: 0, y: 0 },
+			{ op: 'cubicBezierTo', c1x: 0, c1y: 0, c2x: 10, c2y: 10, x: 10, y: 10 },
+			{ op: 'cubicBezierTo', c1x: 10, c1y: 10, c2x: 0, c2y: 10, x: 0, y: 10 },
+			{ op: 'cubicBezierTo', c1x: 0, c1y: 10, c2x: 10, c2y: 0, x: 10, y: 0 },
+			{ op: 'cubicBezierTo', c1x: 10, c1y: 0, c2x: 0, c2y: 0, x: 0, y: 0 },
+			{ op: 'close' },
+		] }
+		const lineEquivalentResult = validateGeometryMessage({
+			type: 'contour.full.response',
+			context: protocolContext,
+			payload: { sequence: 1, regions: [{ regionId: 'line-equivalent', contour: lineEquivalentCubics, maxError: 0 }] },
+		})
+		expect(lineEquivalentResult.ok, JSON.stringify(lineEquivalentResult)).toBe(true)
+		const crossingLineEquivalentResult = validateGeometryMessage({
+			type: 'contour.full.response',
+			context: protocolContext,
+			payload: { sequence: 1, regions: [{ regionId: 'crossing-line-equivalent', contour: crossingLineEquivalentCubics, maxError: 0 }] },
+		})
+		expect(crossingLineEquivalentResult.diagnostics.some(item => item.code === 'protocol.self_intersecting_contour'),
+			JSON.stringify(crossingLineEquivalentResult)).toBe(true)
 		const validMultiCurve: Contour = { commands: [
 			{ op: 'moveTo', x: 0, y: 0 },
 			{ op: 'cubicBezierTo', c1x: 2, c1y: -3, c2x: 8, c2y: -3, x: 10, y: 0 },
