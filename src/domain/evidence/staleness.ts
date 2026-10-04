@@ -6,10 +6,12 @@ export type EvidenceStalenessContext = Readonly<{
 	workspace?: {
 		resource?: {
 			i18n?: { defaultLocale?: string }
-			viewports?: Record<string, unknown>
+			viewports?: Record<string, { dimensions?: { width?: number; height?: number } }>
+			themes?: Record<string, unknown>
 		}
 	}
 	discoveredLocales?: readonly string[]
+	localeRevisions?: Readonly<Record<string, string>>
 }>
 
 export type EvidenceStalenessAssessment = Readonly<{
@@ -73,11 +75,33 @@ export function evaluateEvidenceStaleness(
 		if (!validLocales.has(ctx.locale)) {
 			return { isStale: true, reason: `Locale '${ctx.locale}' is not in workspace` }
 		}
+		const currentLocaleRevision = context.localeRevisions?.[ctx.locale]
+		if (currentLocaleRevision) {
+			const provLocale = record.provenance.resources.find((resource) => {
+				const identity = resource.identity as Record<string, unknown>
+				return identity.type === 'locale' && identity.id === ctx.locale
+			})
+			if (!provLocale || provLocale.revision !== currentLocaleRevision) {
+				return { isStale: true, reason: `Locale '${ctx.locale}' revision has changed since capture` }
+			}
+		}
 	}
 
 	if (typeof ctx.viewportId === 'string' && context.workspace?.resource?.viewports) {
-		if (!context.workspace.resource.viewports[ctx.viewportId]) {
+		const preset = context.workspace.resource.viewports[ctx.viewportId]
+		if (!preset) {
 			return { isStale: true, reason: `Viewport preset '${ctx.viewportId}' was removed` }
+		}
+		const resolved = ctx.viewport as { width?: number; height?: number } | undefined
+		if (resolved && preset.dimensions
+			&& (resolved.width !== preset.dimensions.width || resolved.height !== preset.dimensions.height)) {
+			return { isStale: true, reason: `Viewport preset '${ctx.viewportId}' dimensions changed since capture` }
+		}
+	}
+
+	if (typeof ctx.themeId === 'string' && context.workspace?.resource?.themes) {
+		if (!Object.hasOwn(context.workspace.resource.themes, ctx.themeId)) {
+			return { isStale: true, reason: `Theme '${ctx.themeId}' was removed` }
 		}
 	}
 

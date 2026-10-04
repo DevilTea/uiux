@@ -4,12 +4,14 @@ import { fileURLToPath } from 'node:url'
 import packageJson from '../../../package.json' with { type: 'json' }
 import { canonicalJsonBytes } from '../../domain/canonical-json'
 import { sha256Identity } from '../../domain/artifacts/schema'
-import type { AdapterProvenance } from '../../domain/adapters/schema'
+import type { AdapterProvenance, AdapterWidgetCatalogEntry } from '../../domain/adapters/schema'
+import { validateAssetBinding } from '../../domain/assets/schema'
 import {
 	validateFormalEvidenceRecord,
 	type EvidenceReference,
 	type FormalEvidenceRecord,
 } from '../../domain/evidence/schema'
+import { evaluateEvidenceStaleness } from '../../domain/evidence/staleness'
 import {
 	mayClaimImplementationReady,
 	validateHandoffManifest,
@@ -214,6 +216,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 		// 2. Process Views -> transitively add referenced Assets
 		const viewSnapshots = new Map<string, HandoffResourceSnapshot>()
 		const usedWidgetTypes = new Set<string>()
+		const viewIrSources: unknown[] = []
 
 		for (const viewId of viewsToInclude) {
 			const viewRead = await persistence.views.readInspected(viewId)
@@ -244,6 +247,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 				revision: viewRead.revision,
 				snapshot: viewRead.resource as unknown as JsonObject,
 			})
+			viewIrSources.push(viewRead.resource.ir)
 
 			// Collect widget types
 			const types = collectWidgetTypesFromIr(viewRead.resource.ir)
@@ -265,6 +269,53 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			}
 		}
 
+		// Adapter Catalog assetFields declare which authored Config fields may contain
+		// canonical {$asset} bindings. Discover those references from View IR before
+		// materializing the Asset closure; do not guess from arbitrary strings.
+		const assetCatalogByWidgetType = new Map<string, AdapterWidgetCatalogEntry[]>()
+		const rawAdaptersForAssetDiscovery = wsRead.resource.adapters ?? []
+		const nonRootWidgetTypes = new Set([...usedWidgetTypes].filter(type => type !== 'RootShell'))
+		if (nonRootWidgetTypes.size > 0 && rawAdaptersForAssetDiscovery.length > 0) {
+			for (const selection of rawAdaptersForAssetDiscovery) {
+				try {
+					const single = await resolveWorkspaceAdapterSet({
+						workspaceRoot: persistence.root,
+						adapters: [selection],
+						resolver: new NodeWorkspaceAdapterModuleResolver(),
+						loader: new NodeAdapterManifestLoader(extractProductAdapterManifest),
+						apiCompatibility: productAdapterApiCompatibility,
+						registryInspector: productAdapterRegistryInspector,
+					})
+					if (single.state !== 'valid' || !single.set.entries[0]) continue
+					const entry = single.set.entries[0]
+					for (const widgetType of entry.ownership.widgetTypes) {
+						if (!nonRootWidgetTypes.has(widgetType)) continue
+						const catalog = entry.manifest.catalog.widgets[widgetType]
+						if (!catalog?.assetFields) continue
+						const catalogs = assetCatalogByWidgetType.get(widgetType) ?? []
+						catalogs.push(catalog)
+						assetCatalogByWidgetType.set(widgetType, catalogs)
+					}
+				}
+				catch {
+					// Adapter validity/ownership is enforced later by the implementation-source gate.
+				}
+			}
+		}
+
+		for (const ir of viewIrSources) {
+			const discovered = collectAssetReferencesFromIr(ir, assetCatalogByWidgetType)
+			discovered.assetIds.forEach(assetId => assetsToInclude.add(assetId))
+			if (discovered.diagnostics.length > 0) {
+				closureValid = false
+				blockingDiagnostics.push(...discovered.diagnostics.map(diagnostic => ({
+					code: diagnostic.code,
+					message: diagnostic.message,
+					path: diagnostic.path,
+					blocking: true,
+				})))
+			}
+		}
 		// 3. Process Assets -> ensure content is in artifact store
 		const assetSnapshots = new Map<string, HandoffResourceSnapshot>()
 		const referencedArtifacts = new Map<string, HandoffArtifactReference>()
@@ -372,6 +423,14 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			}
 		}
 
+		// Evidence freshness uses the same current-context semantics as Workbench.
+		// Discover locale revisions independently of closure roots so a non-default
+		// capture locale can be validated before it is admitted into the closure.
+		const currentLocaleRevisions: Record<string, string> = {}
+		for (const locale of await persistence.locales.discover()) {
+			const localeRead = await persistence.locales.readInspected(locale)
+			if (localeRead?.resource) currentLocaleRevisions[locale] = localeRead.revision
+		}
 		// 7. Evidence Records in closure
 		const evidenceRefs: EvidenceReference[] = []
 		const contextsInClosure: ResolvedRenderContext[] = []
@@ -388,13 +447,14 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			const execCtx = formalRec.executionContext as Record<string, unknown> | undefined
 			const evViewId = execCtx?.viewId as string | undefined
 			if (evViewId && viewsToInclude.has(evViewId)) {
-				const expectedViewRev = viewSnapshots.get(evViewId)?.revision
-				const provView = formalRec.provenance?.resources?.find(
-					r => (r.identity as Record<string, unknown>)?.type === 'view' && (r.identity as Record<string, unknown>)?.id === evViewId,
-				)
-				const isFresh = Boolean(expectedViewRev && provView && provView.revision === expectedViewRev)
+				const staleness = evaluateEvidenceStaleness(formalRec, {
+					allViews: [...viewSnapshots.entries()].map(([key, snapshot]) => ({ key, revision: snapshot.revision })),
+					workspace: wsRead,
+					discoveredLocales: Object.keys(currentLocaleRevisions),
+					localeRevisions: currentLocaleRevisions,
+				})
 
-				if (isFresh) {
+				if (!staleness.isStale) {
 					evidenceRefs.push({
 						kind: formalRec.kind,
 						evidence: identity,
@@ -414,6 +474,18 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 					const list = viewEvidenceMap.get(evViewId) ?? []
 					list.push(formalRec)
 					viewEvidenceMap.set(evViewId, list)
+					const evidenceLocale = typeof execCtx?.locale === 'string' ? execCtx.locale : undefined
+					if (evidenceLocale && !localeSnapshots.has(evidenceLocale)) {
+						const localeRead = await persistence.locales.readInspected(evidenceLocale)
+						if (localeRead?.resource) {
+							localeSnapshots.set(evidenceLocale, {
+								type: 'locale',
+								identity: { id: evidenceLocale },
+								revision: localeRead.revision,
+								snapshot: localeRead.resource as JsonObject,
+							})
+						}
+					}
 
 					if (execCtx) {
 						contextsInClosure.push({
@@ -736,6 +808,11 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			return a.locale.localeCompare(b.locale)
 		})
 
+		blockingDiagnostics.sort((left, right) => {
+			const leftKey = `${left.code}\u0000${left.path ?? ''}\u0000${left.message}\u0000${left.blocking ? '1' : '0'}`
+			const rightKey = `${right.code}\u0000${right.path ?? ''}\u0000${right.message}\u0000${right.blocking ? '1' : '0'}`
+			return leftKey.localeCompare(rightKey)
+		})
 		const assessment: HandoffReadinessAssessment = {
 			rootsReadable,
 			closureValid,
@@ -893,6 +970,51 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 	}
 }
 
+function collectAssetReferencesFromIr(
+	ir: unknown,
+	catalogByWidgetType: ReadonlyMap<string, readonly AdapterWidgetCatalogEntry[]>,
+): Readonly<{ assetIds: ReadonlySet<string>; diagnostics: readonly Diagnostic[] }> {
+	const assetIds = new Set<string>()
+	const diagnostics: Diagnostic[] = []
+
+	function scan(node: unknown, path: string): void {
+		if (!isObjectRecord(node)) return
+		const widgetType = typeof node.type === 'string' ? node.type : undefined
+		const config = isObjectRecord(node.config) ? node.config : undefined
+		if (widgetType && config) {
+			const assetFields = new Set<string>()
+			for (const catalog of catalogByWidgetType.get(widgetType) ?? []) {
+				for (const field of Object.keys(catalog.assetFields ?? {})) assetFields.add(field)
+			}
+			for (const field of assetFields) {
+				if (!Object.hasOwn(config, field)) continue
+				const authored = config[field]
+				if (!isObjectRecord(authored) || !Object.hasOwn(authored, '$asset')) continue
+				const fieldPath = `${path}/config/${escapeJsonPointer(field)}`
+				const binding = validateAssetBinding(authored, fieldPath)
+				if (!binding.ok) diagnostics.push(...binding.diagnostics)
+				else assetIds.add(binding.value.$asset)
+			}
+		}
+
+		if (!isObjectRecord(node.slots)) return
+		for (const [slotName, children] of Object.entries(node.slots)) {
+			if (!Array.isArray(children)) continue
+			children.forEach((child, index) => scan(child, `${path}/slots/${escapeJsonPointer(slotName)}/${index}`))
+		}
+	}
+
+	scan(ir, '/ir')
+	return { assetIds, diagnostics }
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function escapeJsonPointer(value: string): string {
+	return value.replaceAll('~', '~0').replaceAll('/', '~1')
+}
 function rootIdentityKey(input: HandoffRoot): string | undefined {
 	switch (input.type) {
 		case 'workspace': return 'workspace'

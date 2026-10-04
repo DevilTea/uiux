@@ -73,12 +73,9 @@ const isRootContentEmpty = computed(() => {
 })
 
 function findTargetWidgetId(target: EventTarget | null): string {
-	if (!target || !(target instanceof HTMLElement)) return 'root'
-	const widgetEl = target.closest('[data-widget-id]')
-	if (widgetEl instanceof HTMLElement && widgetEl.dataset.widgetId) {
-		return widgetEl.dataset.widgetId
-	}
-	return 'root'
+	if (!target || !(target instanceof Element)) return 'root'
+	const widgetEl = target.closest<HTMLElement>('[data-widget-id]')
+	return widgetEl?.dataset.widgetId || 'root'
 }
 
 function handlePreviewPointerMove(event: PointerEvent) {
@@ -376,8 +373,11 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="min-h-screen p-4 transition-colors"
-    :class="themeId === 'dark' ? 'bg-neutral-900 text-neutral-100' : 'bg-neutral-50 text-neutral-900'"
+    class="min-h-screen transition-colors"
+    :class="[
+      themeId === 'dark' ? 'bg-neutral-900 text-neutral-100' : 'bg-neutral-50 text-neutral-900',
+      harnessMode ? '' : 'p-4',
+    ]"
   >
     <!-- Loading state -->
     <div
@@ -475,16 +475,16 @@ onUnmounted(() => {
     >
       <!-- RootShell boundary container -->
       <div
-        class="relative min-h-[300px] rounded-lg transition-all duration-150"
+        class="relative transition-all duration-150"
         :class="[
-          harnessMode ? '' : (highlightedWidgetId === 'root'
+          harnessMode ? '' : ['min-h-[300px] rounded-lg', highlightedWidgetId === 'root'
             ? 'border border-primary ring-2 ring-primary/40'
-            : 'border border-dashed border-neutral-300 dark:border-neutral-700'),
+            : 'border border-dashed border-neutral-300 dark:border-neutral-700'],
           isCommentMode ? 'cursor-crosshair ring-2 ring-amber-400/60' : '',
         ]"
         data-widget-id="root"
         @pointermove="handlePreviewPointerMove"
-        @click="handlePreviewPointerClick"
+        @click.capture="handlePreviewPointerClick"
       >
         <!-- RootShell indicator tag (hidden in formal capture harness) -->
         <div
@@ -507,7 +507,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Rendered component tree through standalone preview bundle -->
-        <div class="p-4">
+        <div :class="harnessMode ? '' : 'p-4'">
           <div
             ref="previewHostElement"
             class="preview-runtime-host"

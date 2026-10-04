@@ -4,6 +4,7 @@ import { validateResourceRevision } from '../dto/revisions'
 import { isFullUuid, type Diagnostic, type JsonObject } from '../../domain/validation'
 import {
 	isAllowedReviewTransition,
+	validateReviewEvidenceRef,
 	validateReviewThread,
 	type ReviewActor,
 	type ReviewAnchor,
@@ -16,6 +17,8 @@ import {
 } from '../../domain/reviews/schema'
 import type { Decision, DecisionActor, DecisionHistoryEntry, DecisionOutcome, DecisionStatus } from '../../domain/spec/schema'
 import type { ViewResource } from '../../domain/views/schema'
+import { validateFormalEvidenceRecord } from '../../domain/evidence/schema'
+import { isCompleteEvidenceForViewRevision } from '../../domain/evidence/staleness'
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
 
@@ -272,6 +275,84 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 				diagnostics: [{ code: 'review.invalid_transition', path: '/status', message: `Review cannot transition from ${current.resource.status} to ready-for-review.` }],
 			}
 		}
+		const targetViewId = current.resource.anchor.viewId
+		const targetView = await persistence.views.readInspected(targetViewId)
+		if (!targetView) {
+			return {
+				status: 'invalid',
+				key: command.reviewId,
+				diagnostics: [{ code: 'review.target_view_missing', path: '/resources', message: `Review target View ${targetViewId} does not exist.` }],
+			}
+		}
+		if (targetView.diagnostics.length > 0) {
+			return {
+				status: 'invalid',
+				key: command.reviewId,
+				diagnostics: targetView.diagnostics.map(diagnostic => ({
+					...diagnostic,
+					path: `/resources${diagnostic.path || ''}`,
+				})),
+			}
+		}
+
+		const hasCurrentTargetView = command.resources.some((resource) => {
+			const identity = resource.identity as Record<string, unknown>
+			const identifiesTarget = (identity.type === 'view' && identity.id === targetViewId)
+				|| (identity.kind === 'view' && identity.key === targetViewId)
+			return identifiesTarget && resource.revision === targetView.revision
+		})
+		if (!hasCurrentTargetView) {
+			return {
+				status: 'invalid',
+				key: command.reviewId,
+				diagnostics: [{
+					code: 'review.target_view_revision_missing',
+					path: '/resources',
+					message: `Ready-for-review submission must include current target View ${targetViewId} revision ${targetView.revision}.`,
+				}],
+			}
+		}
+
+		const evidenceDiagnostics: Diagnostic[] = []
+		for (const [index, ref] of command.evidenceRefs.entries()) {
+			const path = `/evidenceRefs/${index}`
+			const validation = validateReviewEvidenceRef(ref, path)
+			if (!validation.ok) {
+				evidenceDiagnostics.push(...validation.diagnostics)
+				continue
+			}
+			try {
+				const artifact = await persistence.artifacts.read(validation.value.evidence)
+				if (!artifact) {
+					evidenceDiagnostics.push({
+						code: 'review.evidence_not_found',
+						path: `${path}/evidence`,
+						message: `Referenced Review evidence artifact ${validation.value.evidence} does not exist in the selected Workspace.`,
+					})
+					continue
+				}
+				if (validation.value.kind === 'formal_capture') {
+					const candidate = await persistence.artifacts.readCandidateJson(validation.value.evidence)
+					const formal = validateFormalEvidenceRecord(candidate)
+					if (!formal.ok || formal.value.kind !== 'formal_capture' || !isCompleteEvidenceForViewRevision(formal.value, targetViewId, targetView.revision)) {
+						evidenceDiagnostics.push({
+							code: 'review.formal_evidence_not_current',
+							path: `${path}/evidence`,
+							message: `Formal evidence ${validation.value.evidence} must be complete and match current target View ${targetViewId} revision ${targetView.revision}.`,
+						})
+					}
+				}
+			}
+			catch (cause) {
+				evidenceDiagnostics.push({
+					code: 'review.evidence_unreadable',
+					path: `${path}/evidence`,
+					message: cause instanceof Error ? cause.message : 'Referenced Review evidence artifact could not be read.',
+				})
+			}
+		}
+		if (evidenceDiagnostics.length > 0)
+			return { status: 'invalid', key: command.reviewId, diagnostics: evidenceDiagnostics }
 
 		const submissionId = command.submissionId ?? randomUUID()
 		const at = command.at ?? new Date().toISOString()
@@ -482,6 +563,37 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 
 		const view = await persistence.views.read(command.viewId)
 		if (!view) return { status: 'not_found', key: command.viewId }
+		if (review.resource.anchor.viewId !== command.viewId) {
+			return {
+				status: 'invalid',
+				key: command.reviewId,
+				diagnostics: [{
+					code: 'review.decision_target_mismatch',
+					path: '/viewId',
+					message: `Review ${command.reviewId} is anchored to View ${review.resource.anchor.viewId} and cannot be promoted into View ${command.viewId}.`,
+				}],
+			}
+		}
+
+		// Idempotency precedes revision conflicts: retrying an already-committed promotion
+		// with the original expected revisions returns the existing Decision instead of 409.
+		const existingDecision = view.resource.spec.decisions?.find(d =>
+			d.provenance?.reviewId === command.reviewId
+			|| d.provenance?.sourceReviewThreadId === command.reviewId
+			|| (command.decisionId && d.id === command.decisionId),
+		)
+		if (existingDecision) {
+			const inspected = await persistence.views.readInspected(command.viewId)
+			return {
+				status: 'updated',
+				key: command.reviewId,
+				revision: review.revision,
+				view: { key: command.viewId, revision: view.revision, resourceUri: `uiux://view/${command.viewId}` },
+				targetView: { key: command.viewId, revision: view.revision, resourceUri: `uiux://view/${command.viewId}` },
+				decision: existingDecision,
+				diagnostics: inspected?.diagnostics ?? [],
+			}
+		}
 
 		if (review.revision !== expectedReviewRevision.value && view.revision !== expectedViewRevision.value) {
 			return {
@@ -499,32 +611,6 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		if (view.revision !== expectedViewRevision.value)
 			return { status: 'conflict', key: command.viewId, currentRevision: view.revision }
 
-		// Idempotency: check if View already has a Decision with provenance for this reviewId
-		const existingDecision = view.resource.spec.decisions?.find(d =>
-			d.provenance?.reviewId === command.reviewId
-			|| d.provenance?.sourceReviewThreadId === command.reviewId
-			|| (command.decisionId && d.id === command.decisionId),
-		)
-		if (existingDecision) {
-			const inspected = await persistence.views.readInspected(command.viewId)
-			return {
-				status: 'updated',
-				key: command.reviewId,
-				revision: review.revision,
-				view: {
-					key: command.viewId,
-					revision: view.revision,
-					resourceUri: `uiux://view/${command.viewId}`,
-				},
-				targetView: {
-					key: command.viewId,
-					revision: view.revision,
-					resourceUri: `uiux://view/${command.viewId}`,
-				},
-				decision: existingDecision,
-				diagnostics: inspected?.diagnostics ?? [],
-			}
-		}
 
 		const decisionId = command.decisionId ?? randomUUID()
 		const now = new Date().toISOString()

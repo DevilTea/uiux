@@ -36,6 +36,7 @@ const props = defineProps<{
 	allViews: readonly ViewSummary[]
 	workspace?: WorkspaceRead
 	discoveredLocales: readonly string[]
+	localeRevisions: Readonly<Record<string, string>>
 	activeContext?: {
 		viewId: string
 		variantName?: string
@@ -162,6 +163,7 @@ function checkStaleness(record: FormalEvidenceRecord): { isStale: boolean; reaso
 		selectedView: props.selectedView ? { key: props.selectedView.key, revision: props.selectedView.revision } : undefined,
 		workspace: props.workspace,
 		discoveredLocales: props.discoveredLocales,
+		localeRevisions: props.localeRevisions,
 	})
 }
 

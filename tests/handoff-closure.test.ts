@@ -61,7 +61,7 @@ export const manifest = {
   id: 'my-counter',
   apiVersion: '1',
   widgetPlugins: [counterPlugin],
-  catalog: { widgets: { Counter: {} } },
+  catalog: { widgets: { Counter: { assetFields: { image: { acceptedMediaTypes: ['image/png'] } } } } },
   renderers: [{ type: 'Counter', component: CounterRenderer }],
   providers: [],
   styles: [],
@@ -235,6 +235,9 @@ async function putFormalEvidence(
 ): Promise<string> {
 	const dummyScreenshotBytes = new TextEncoder().encode(`screenshot-bytes-for-${viewId}`)
 	const screenshotPut = await persistence.artifacts.put(dummyScreenshotBytes)
+	const workspaceRead = await persistence.workspace.readInspected()
+	const localeRead = await persistence.locales.readInspected('en-US')
+	if (!workspaceRead.revision || !localeRead) throw new Error('Test Workspace provenance is incomplete.')
 
 	const record: FormalEvidenceRecord = {
 		schemaVersion: 1,
@@ -249,7 +252,11 @@ async function putFormalEvidence(
 		coverage: { complete },
 		provenance: {
 			workspaceSchemaVersion: 1,
-			resources: [{ identity: { type: 'view', id: viewId }, revision: viewRevision }],
+			resources: [
+				{ identity: { type: 'view', id: viewId }, revision: viewRevision },
+				{ identity: { type: 'workspace', id: 'workspace' }, revision: workspaceRead.revision },
+				{ identity: { type: 'locale', id: 'en-US' }, revision: localeRead.revision },
+			],
 			versions: { uiux: '0.1.0' },
 		},
 		artifactRefs: [screenshotPut.identity],
@@ -299,6 +306,26 @@ describe('Handoff closure export and readiness evaluation', () => {
 		const validation = validateHandoffManifest(result1.manifest)
 		expect(validation.ok).toBe(true)
 		expect(validateHandoffRoot(roots[0]!).ok).toBe(true)
+	})
+	it('keeps draft bundle identity deterministic when equivalent root order changes', async () => {
+		const { persistence } = await createTestWorkspace()
+		await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'One'))
+		await persistence.views.create(VIEW_2_ID, createSampleView(VIEW_2_ID, 'Two'))
+		const service = createHandoffExportService(persistence)
+
+		const first = await service.exportHandoff({ roots: [
+			{ type: 'view', viewId: VIEW_1_ID },
+			{ type: 'view', viewId: VIEW_2_ID },
+		] })
+		const second = await service.exportHandoff({ roots: [
+			{ type: 'view', viewId: VIEW_2_ID },
+			{ type: 'view', viewId: VIEW_1_ID },
+		] })
+
+		expect(first.status).toBe('exported')
+		expect(first.readiness?.implementationReady).toBe(false)
+		expect(second.bundleIdentity).toBe(first.bundleIdentity)
+		expect(second.readiness?.blockingDiagnostics).toEqual(first.readiness?.blockingDiagnostics)
 	})
 
 	it('changes bundle identity when canonical content or revision changes', async () => {
@@ -501,6 +528,48 @@ describe('Handoff closure export and readiness evaluation', () => {
 		expect(invalidResult.diagnostics?.some(d => d.code === 'handoff.invalid_root_type')).toBe(true)
 	})
 
+	it('includes authored Assets referenced only through Adapter Catalog assetFields in View IR', async () => {
+		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+		await mkdir(join(root, 'adapters'), { recursive: true })
+		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+
+		const assetData = createSampleAsset(ASSET_1_ID)
+		await persistence.assets.create(ASSET_1_ID, assetData)
+
+		const view: ViewResource = {
+			...createSampleView(VIEW_1_ID, 'IR Asset Binding'),
+			ir: {
+				type: 'RootShell',
+				id: 'root',
+				slots: {
+					content: [{
+						type: 'Counter',
+						id: 'counter-with-asset',
+						config: { image: { $asset: ASSET_1_ID } },
+						slots: {},
+					}],
+				},
+			},
+			spec: {
+				...createSampleView(VIEW_1_ID, 'IR Asset Binding').spec,
+				references: [],
+			},
+		}
+		const viewRev = await persistence.views.create(VIEW_1_ID, view)
+		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
+
+		const result = await createHandoffExportService(persistence).exportHandoff({
+			roots: [{ type: 'view', viewId: VIEW_1_ID }],
+		})
+		expect(result.status).toBe('exported')
+		const assetSnapshot = result.manifest?.resources.find(resource =>
+			resource.type === 'asset' && resource.identity.id === ASSET_1_ID)
+		expect(assetSnapshot).toBeDefined()
+		expect(assetSnapshot?.contentDigest).toBeDefined()
+		expect(result.manifest?.artifactRefs).toEqual(expect.arrayContaining([
+			expect.objectContaining({ kind: 'asset-content', artifact: assetSnapshot?.contentDigest }),
+		]))
+	})
 	it('materializes widget implementation references and flags unavailable widget types', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
 		await mkdir(join(root, 'adapters'), { recursive: true })
@@ -871,6 +940,29 @@ describe('Handoff closure export and readiness evaluation', () => {
 		expect(assessR2Fresh.readiness?.implementationReady).toBe(true)
 	})
 
+	it('treats evidence as stale when its locale revision changes without a View revision change', async () => {
+		const { persistence } = await createTestWorkspace()
+		const view = createSampleView(VIEW_1_ID, 'Localized View')
+		const viewRev = await persistence.views.create(VIEW_1_ID, view)
+		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
+
+		const locale = await persistence.locales.read('en-US')
+		if (!locale) throw new Error('Expected en-US locale')
+		const localeUpdate = await persistence.locales.compareAndSwap({
+			key: 'en-US',
+			expectedRevision: locale.revision,
+			resource: { 'app.title': 'Changed after capture' },
+		})
+		expect(localeUpdate.ok).toBe(true)
+
+		const service = createHandoffExportService(persistence)
+		const assessed = await service.assessReadiness({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(assessed.status).toBe('ok')
+		expect(assessed.readiness?.implementationReady).toBe(false)
+		expect(assessed.readiness?.blockingDiagnostics).toEqual(expect.arrayContaining([
+			expect.objectContaining({ code: 'handoff.stale_view_evidence' }),
+		]))
+	})
 	it('safely ignores binaries, oversized files, and invalid JSON without misclassifying as evidence', async () => {
 		const { persistence } = await createTestWorkspace()
 

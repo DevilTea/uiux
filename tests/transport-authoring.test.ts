@@ -37,6 +37,8 @@ const DECISION_ID = '22222222-2222-4222-8222-222222222222'
 const FLOW_ID = '33333333-3333-4333-8333-333333333333'
 const REVIEW_ID = '44444444-4444-4444-8444-444444444444'
 const ASSET_ID = '55555555-5555-4555-8555-555555555555'
+const OTHER_VIEW_ID = '66666666-6666-4666-8666-666666666666'
+const SECOND_REVIEW_ID = '77777777-7777-4777-8777-777777777777'
 const roots: string[] = []
 
 afterEach(async () => {
@@ -863,7 +865,10 @@ describe('UX Flow authoring', () => {
 
 describe('Review thread domain authoring', () => {
 	it('creates an open review thread, appends messages, re-anchors, submits ready, and resolves with human actor', async () => {
-		const { app } = await emptySession()
+		const { app, persistence } = await emptySession()
+		const createdView = await app.createView({ id: VIEW_ID, name: 'Reviewed View', spec: spec('Review target') })
+		expect(createdView.status).toBe('created')
+		if (createdView.status !== 'created') return
 		const { client, close } = await connectedClient(app)
 		try {
 			// 1. Create thread
@@ -929,7 +934,28 @@ describe('Review thread domain authoring', () => {
 			expect(read3?.kind === 'review' ? read3.resource.history : undefined).toHaveLength(1)
 			expect(read3?.kind === 'review' ? read3.resource.history[0]?.kind : undefined).toBe('reanchor')
 
-			// 4. Submit ready-for-review
+			// 4. A syntactically valid but nonexistent digest cannot satisfy the evidence gate.
+			const missingEvidence = await client.callTool({
+				name: 'submit_ready_for_review',
+				arguments: {
+					reviewId: REVIEW_ID,
+					expectedRevision: reanchorRev,
+					actor: { type: 'agent', displayName: 'CoderAgent' },
+					changeDomains: ['view-structure'],
+					resources: [{ identity: { type: 'view', id: VIEW_ID }, revision: createdView.revision }],
+					evidenceRefs: [{ kind: 'screenshot', evidence: 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' }],
+					reason: 'Applied padding fix',
+				},
+			})
+			expect(missingEvidence.isError).toBe(true)
+			expect(missingEvidence.structuredContent).toMatchObject({
+				status: 'invalid',
+				diagnostics: expect.arrayContaining([expect.objectContaining({ code: 'review.evidence_not_found' })]),
+			})
+			const stillOpen = await app.readPointResource('review', REVIEW_ID)
+			expect(stillOpen?.kind === 'review' ? stillOpen.resource.status : undefined).toBe('open')
+
+			const evidenceArtifact = await persistence.artifacts.put(new TextEncoder().encode('review-evidence'))
 			const submitResult = await client.callTool({
 				name: 'submit_ready_for_review',
 				arguments: {
@@ -937,8 +963,8 @@ describe('Review thread domain authoring', () => {
 					expectedRevision: reanchorRev,
 					actor: { type: 'agent', displayName: 'CoderAgent' },
 					changeDomains: ['view-structure'],
-					resources: [{ identity: { type: 'view', id: VIEW_ID }, revision: 'r_dummy' }],
-					evidenceRefs: [{ kind: 'screenshot', evidence: 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' }],
+					resources: [{ identity: { type: 'view', id: VIEW_ID }, revision: createdView.revision }],
+					evidenceRefs: [{ kind: 'screenshot', evidence: evidenceArtifact.identity }],
 					reason: 'Applied padding fix',
 				},
 			})
@@ -1054,14 +1080,14 @@ describe('Review thread domain authoring', () => {
 			const reviewAfterFresh = await app.readPointResource('review', REVIEW_ID)
 			expect(reviewAfterFresh?.kind === 'review' ? reviewAfterFresh.resource.status : undefined).toBe('open')
 
-			// Idempotent call: recognizes existing decision with matching provenance and succeeds
+			// Idempotent retry uses the original pre-commit revisions, as a network retry would.
 			const idempotentResult = await client.callTool({
 				name: 'promote_review_to_decision',
 				arguments: {
 					reviewId: REVIEW_ID,
 					expectedReviewRevision: createdReview.revision,
 					viewId: VIEW_ID,
-					expectedViewRevision: targetView.revision as string,
+					expectedViewRevision: createdView.revision,
 					question: 'Keep header padding?',
 				},
 			})
@@ -1075,15 +1101,20 @@ describe('Review thread domain authoring', () => {
 			const viewAfterIdempotent = await app.readPointResource('view', VIEW_ID)
 			expect(viewAfterIdempotent?.kind === 'view' ? viewAfterIdempotent.resource.spec.decisions?.length : 0).toBe(1)
 
-			// Stale revision call via MCP tool returns structured error
+			// A different, not-yet-promoted Review still enforces stale revision CAS.
+			const secondReview = await app.createReviewThread({
+				id: SECOND_REVIEW_ID,
+				anchor: { viewId: VIEW_ID, widgetId: 'root' },
+			})
+			expect(secondReview.status).toBe('created')
 			const conflictResult = await client.callTool({
 				name: 'promote_review_to_decision',
 				arguments: {
-					reviewId: REVIEW_ID,
+					reviewId: SECOND_REVIEW_ID,
 					expectedReviewRevision: 'stale-review-rev',
 					viewId: VIEW_ID,
 					expectedViewRevision: targetView.revision as string,
-					question: 'Keep header padding?',
+					question: 'Separate stale request',
 				},
 			})
 			expect(conflictResult.isError).toBe(true)
@@ -1091,6 +1122,32 @@ describe('Review thread domain authoring', () => {
 			expect(conflictContent.status).toBe('conflict')
 		}
 		finally { await close() }
+	})
+
+	it('rejects Decision promotion into a View different from the Review anchor', async () => {
+		const { app } = await emptySession()
+		const review = await app.createReviewThread({ id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' } })
+		const anchoredView = await app.createView({ id: VIEW_ID, name: 'Anchored View', spec: spec('A') })
+		const otherView = await app.createView({ id: OTHER_VIEW_ID, name: 'Other View', spec: spec('B') })
+		expect(review.status).toBe('created')
+		expect(anchoredView.status).toBe('created')
+		expect(otherView.status).toBe('created')
+		if (review.status !== 'created' || otherView.status !== 'created') return
+
+		const result = await app.promoteReviewToDecision({
+			reviewId: REVIEW_ID,
+			expectedReviewRevision: review.revision,
+			viewId: OTHER_VIEW_ID,
+			expectedViewRevision: otherView.revision,
+			question: 'This must not leak across Views',
+		})
+		expect(result).toMatchObject({
+			status: 'invalid',
+			key: REVIEW_ID,
+			diagnostics: expect.arrayContaining([expect.objectContaining({ code: 'review.decision_target_mismatch' })]),
+		})
+		const unchanged = await app.readPointResource('view', OTHER_VIEW_ID)
+		expect(unchanged?.kind === 'view' ? unchanged.resource.spec.decisions : undefined).toEqual([])
 	})
 })
 

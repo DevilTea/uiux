@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { deriveWidgetTree, findWidgetInTree, flattenWidgetTree, type WidgetTreeNode } from '../../src/preview/widget-tree'
 import { deriveRenderContextOptions } from '../../src/preview/render-context-options'
 import { WorkbenchPreviewProtocolBridge } from '../../src/preview/protocol/bridge'
@@ -38,7 +38,7 @@ type ViewSummary = Readonly<{
 	summary: { name?: string; feature?: string }
 }>
 type DiscoveryPage = Readonly<{ items: readonly ViewSummary[]; nextCursor?: string }>
-type LocaleSummary = Readonly<{ kind: 'locale'; key: string }>
+type LocaleSummary = Readonly<{ kind: 'locale'; key: string; revision: string }>
 type LocaleDiscoveryPage = Readonly<{ items: readonly LocaleSummary[] }>
 type DecisionRead = Readonly<{
 	id: string
@@ -74,6 +74,7 @@ type ViewRead = Readonly<{
 const workspace = ref<WorkspaceRead>()
 const views = ref<readonly ViewSummary[]>([])
 const discoveredLocales = ref<readonly string[]>([])
+const localeRevisions = ref<Readonly<Record<string, string>>>({})
 const selectedViewId = ref<string>()
 const selectedView = ref<ViewRead>()
 const filter = ref('')
@@ -276,7 +277,7 @@ function initWorkbenchBridge() {
 	}
 }
 
-function onWindowMessage(event: MessageEvent) {
+async function onWindowMessage(event: MessageEvent) {
 	const data = event.data
 	if (!data || typeof data !== 'object') return
 
@@ -305,6 +306,7 @@ function onWindowMessage(event: MessageEvent) {
 					payload: { commentMode: false },
 				}, '*')
 			}
+			await nextTick()
 			reviewsPanelRef.value?.openCreateModal(payload.widgetId)
 		}
 		else if (payload.type === 'escape') {
@@ -469,6 +471,7 @@ async function refresh() {
 		workspace.value = workspaceRead
 		views.value = viewPage.items
 		discoveredLocales.value = localePage.items.map(i => i.key)
+		localeRevisions.value = Object.fromEntries(localePage.items.map(item => [item.key, item.revision]))
 		assetCount.value = assetPage.items.length
 		flowCount.value = flowPage.items.length
 		reviewCount.value = reviewPage.items.length
@@ -999,6 +1002,7 @@ onUnmounted(() => {
           :all-views="views"
           :workspace="workspace"
           :discovered-locales="discoveredLocales"
+          :locale-revisions="localeRevisions"
           :active-context="currentActiveContext"
           @apply-context="onApplyEvidenceContext"
           @refresh="refresh"

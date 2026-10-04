@@ -113,6 +113,60 @@ describe('evidence staleness evaluation', () => {
 		expect(result.reason).toContain('not in workspace')
 	})
 
+	it('returns isStale=true when the resolved viewport dimensions change under the same preset id', () => {
+		const result = evaluateEvidenceStaleness(sampleRecord, {
+			allViews: [{ key: 'v1', revision: 'r1' }],
+			workspace: {
+				resource: {
+					i18n: { defaultLocale: 'en-US' },
+					viewports: { desktop: { dimensions: { width: 1440, height: 900 } } },
+				},
+			},
+		})
+		expect(result).toMatchObject({ isStale: true })
+		expect(result.reason).toContain('dimensions changed')
+	})
+
+	it('returns isStale=true when the captured theme id is removed', () => {
+		const result = evaluateEvidenceStaleness(sampleRecord, {
+			allViews: [{ key: 'v1', revision: 'r1' }],
+			workspace: {
+				resource: {
+					i18n: { defaultLocale: 'en-US' },
+					viewports: { desktop: { dimensions: { width: 1280, height: 800 } } },
+					themes: { dark: {} },
+				},
+			},
+		})
+		expect(result).toMatchObject({ isStale: true })
+		expect(result.reason).toContain("Theme 'light' was removed")
+	})
+
+	it('returns isStale=true when the captured locale resource revision changes', () => {
+		const localizedRecord: FormalEvidenceRecord = {
+			...sampleRecord,
+			provenance: {
+				...sampleRecord.provenance,
+				resources: [
+					...sampleRecord.provenance.resources,
+					{ identity: { type: 'locale', id: 'en-US' }, revision: 'locale-r1' },
+				],
+			},
+		}
+		const result = evaluateEvidenceStaleness(localizedRecord, {
+			allViews: [{ key: 'v1', revision: 'r1' }],
+			workspace: {
+				resource: {
+					i18n: { defaultLocale: 'en-US' },
+					viewports: { desktop: { dimensions: { width: 1280, height: 800 } } },
+				},
+			},
+			discoveredLocales: ['en-US'],
+			localeRevisions: { 'en-US': 'locale-r2' },
+		})
+		expect(result).toMatchObject({ isStale: true })
+		expect(result.reason).toContain('revision has changed')
+	})
 	describe('review evidence matching', () => {
 		it('accepts only complete evidence for the exact View revision', () => {
 			expect(isCompleteEvidenceForViewRevision(sampleRecord, 'v1', 'r1')).toBe(true)
