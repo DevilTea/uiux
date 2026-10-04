@@ -9,6 +9,7 @@ import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 
 export type SelectedWorkspaceServerRuntime = Readonly<{
 	root: string
+	serverOrigin: string
 	persistence: FileNativePersistence
 	app: WorkspaceApplicationSession
 	mcp: McpHttpHandler
@@ -16,17 +17,33 @@ export type SelectedWorkspaceServerRuntime = Readonly<{
 }>
 
 let selectedRuntime: SelectedWorkspaceServerRuntime | undefined
+let configuredServerOrigin: string | undefined
 
-export function createSelectedWorkspaceServerRuntime(root: string): SelectedWorkspaceServerRuntime {
+export function setInternalServerOrigin(origin: string): void {
+	configuredServerOrigin = origin
+}
+
+export function resolveInternalServerOrigin(): string {
+	if (configuredServerOrigin) return configuredServerOrigin
+	if (process.env.UIUX_SERVER_ORIGIN) return process.env.UIUX_SERVER_ORIGIN
+	const port = process.env.NITRO_PORT || process.env.PORT || '3000'
+	const host = process.env.NITRO_HOST || process.env.HOST || '127.0.0.1'
+	const normalizedHost = (host === '0.0.0.0' || host === '::' || host === '') ? '127.0.0.1' : host
+	return `http://${normalizedHost}:${port}`
+}
+
+export function createSelectedWorkspaceServerRuntime(root: string, options?: { serverOrigin?: string }): SelectedWorkspaceServerRuntime {
 	const selectedRoot = resolve(root)
 	const persistence = new FileNativePersistence({
 		root: selectedRoot,
 		schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY,
 	})
-	const app = createWorkspaceApplicationSession(persistence)
+	const serverOrigin = options?.serverOrigin ?? resolveInternalServerOrigin()
+	const app = createWorkspaceApplicationSession(persistence, { serverOrigin })
 	const mcp = createUiuxMcpHttpHandler(app)
 	return Object.freeze({
 		root: selectedRoot,
+		serverOrigin,
 		persistence,
 		app,
 		mcp,

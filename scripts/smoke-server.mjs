@@ -3,16 +3,42 @@
 import { spawn } from 'node:child_process'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const host = '127.0.0.1'
-const workspaceRoot = await mkdtemp(join(tmpdir(), 'uiux-server-smoke-'))
+// Keep the temporary Workspace under the repository so its Adapter resolves the
+// repository's widget-core copy, while Nitro resolves its external from
+// .output/server/node_modules. This deliberately exercises the production-only
+// duplicate-module boundary that unit tests cannot reproduce.
+const workspaceRoot = await mkdtemp(join(process.cwd(), '.uiux-server-smoke-'))
 await mkdir(join(workspaceRoot, '.uiux'), { recursive: true })
+await mkdir(join(workspaceRoot, 'adapters'), { recursive: true })
+await writeFile(join(workspaceRoot, 'adapters', 'smoke.mjs'), [
+	"import { createWidgetPlugin } from '@deviltea/widget-core'",
+	'',
+	"export const smokePlugin = createWidgetPlugin('SmokeWidget')",
+	"  .description('Production Nitro adapter identity smoke plugin.')",
+	'  .interfaces()',
+	'  .done()',
+	'',
+	'export const manifest = {',
+	"  id: 'production-identity-smoke',",
+	"  apiVersion: '1',",
+	'  widgetPlugins: [smokePlugin],',
+	'  catalog: { widgets: { SmokeWidget: {} } },',
+	'  renderers: [],',
+	'  providers: [],',
+	'  styles: [],',
+	'  tokens: [],',
+	'}',
+	'',
+	'export default manifest',
+	'',
+].join('\n'))
 await writeFile(join(workspaceRoot, '.uiux', 'workspace.json'), `${JSON.stringify({
 	schemaVersion: 1,
 	i18n: { defaultLocale: 'en-US' },
-	adapters: [],
+	adapters: [{ moduleSpecifier: './adapters/smoke.mjs' }],
 	viewports: {},
 	themes: {},
 }, null, 2)}\n`)
@@ -56,7 +82,18 @@ try {
 	const body = await workspace.json()
 	if (body.resource?.schemaVersion !== 1 || body.inspection?.state !== 'current')
 		throw new Error(`Selected Workspace route returned an unexpected body: ${JSON.stringify(body)}`)
-	console.log('Nitro smoke passed: health and selected Workspace API are live against schemaVersion 1.')
+
+	const adapters = await fetch(`http://${host}:${port}/api/preview/adapters`)
+	if (adapters.status !== 200) throw new Error(`Preview adapters route returned HTTP ${adapters.status}.`)
+	const adapterBody = await adapters.json()
+	if (adapterBody.state !== 'valid' || adapterBody.summaries?.[0]?.adapterId !== 'production-identity-smoke' || !adapterBody.bundleUrl)
+		throw new Error(`Production Nitro failed to resolve a Workspace Adapter created by the repository widget-core runtime: ${JSON.stringify(adapterBody)}`)
+
+	const runtime = await fetch(new URL(adapterBody.bundleUrl, `http://${host}:${port}/`))
+	if (!runtime.ok || !(await runtime.text()).includes('mountPreviewRuntime'))
+		throw new Error('Preview runtime bundle was not materialized for the production identity smoke Adapter.')
+
+	console.log('Nitro smoke passed: health, selected Workspace API, and cross-module Workspace Adapter preview resolution are live against schemaVersion 1.')
 }
 finally {
 	server.kill('SIGTERM')

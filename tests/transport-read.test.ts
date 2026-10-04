@@ -1,12 +1,14 @@
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { ResourceNotFoundError } from '@modelcontextprotocol/server'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
+import type { AuthoredAssetResource } from '../src/domain/assets/schema'
 import type { FlowResource } from '../src/domain/flows/schema'
+import type { ReviewThread } from '../src/domain/reviews/schema'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { WorkspaceManifest } from '../src/domain/workspace/schema'
 import { createUiuxMcpHttpHandler } from '../src/mcp/server'
@@ -19,6 +21,8 @@ import { listResourcesForHttp, searchResourcesForHttp } from '../src/server/reso
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const FLOW_ID = '22222222-2222-4222-8222-222222222222'
 const VIEW_ID_2 = '33333333-3333-4333-8333-333333333333'
+const REVIEW_ID = '55555555-5555-4555-8555-555555555555'
+const ASSET_ID = '66666666-6666-4666-8666-666666666666'
 const MISSING_VIEW_ID = '99999999-9999-4999-8999-999999999999'
 const MISMATCHED_VIEW_ID = '88888888-8888-4888-8888-888888888888'
 const roots: string[] = []
@@ -109,8 +113,35 @@ describe('shared HTTP/MCP point-resource reads', () => {
 			expect(content?.uri).toBe(`uiux://view/${VIEW_ID}`)
 			expect(content && 'text' in content ? JSON.parse(content.text) : undefined).toEqual(expected)
 			const tools = await client.listTools()
-			expect(tools.tools.map(tool => tool.name).sort()).toEqual(['list_resources', 'search_resources'])
-			expect(tools.tools.every(tool => tool.annotations?.readOnlyHint === true && tool.annotations?.destructiveHint === false)).toBe(true)
+			expect(tools.tools.map(tool => tool.name).sort()).toEqual([
+				'append_review_message',
+				'assess_handoff_readiness',
+				'capture_formal_evidence',
+				'create_asset',
+				'create_flow',
+				'create_locale',
+				'create_review_thread',
+				'create_view',
+				'export_handoff',
+				'list_resources',
+				'promote_review_to_decision',
+				'reanchor_review_thread',
+				'reopen_review_thread',
+				'replace_asset',
+				'resolve_review_thread',
+				'search_resources',
+				'submit_ready_for_review',
+				'update_flow',
+				'update_locale',
+				'update_view_spec',
+				'update_view_structure',
+				'update_workspace_settings',
+			])
+			expect(tools.tools.find(tool => tool.name === 'list_resources')?.annotations?.readOnlyHint).toBe(true)
+			expect(tools.tools.find(tool => tool.name === 'search_resources')?.annotations?.readOnlyHint).toBe(true)
+			expect(tools.tools.find(tool => tool.name === 'create_view')?.annotations?.readOnlyHint).toBe(false)
+			expect(tools.tools.find(tool => tool.name === 'update_view_spec')?.annotations?.destructiveHint).toBe(true)
+			expect(tools.tools.find(tool => tool.name === 'update_view_structure')?.annotations?.destructiveHint).toBe(true)
 			expect(tools.tools.some(tool => /write|patch|filesystem/iu.test(tool.name))).toBe(false)
 		}
 		finally {
@@ -243,6 +274,122 @@ describe('shared HTTP/MCP point-resource reads', () => {
 		expect(flow).toMatchObject({ kind: 'flow', key: FLOW_ID, diagnostics: [] })
 		expect(locale).toMatchObject({ kind: 'locale', key: 'en-US', resource: { title: 'Title' }, diagnostics: [] })
 	})
+
+	it('reads canonical Review thread and authored Asset through application, HTTP and MCP with safe descriptor and no raw bytes', async () => {
+		const { app, persistence } = await seededSession()
+		await persistence.reviews.create(REVIEW_ID, reviewFixture())
+		await persistence.assets.create(ASSET_ID, assetFixture())
+
+		// Application point reads
+		const reviewApp = await app.readPointResource('review', REVIEW_ID)
+		expect(reviewApp).toMatchObject({ kind: 'review', key: REVIEW_ID, diagnostics: [] })
+		expect(reviewApp?.kind === 'review' ? reviewApp.resource.status : undefined).toBe('open')
+
+		const assetApp = await app.readPointResource('asset', ASSET_ID)
+		expect(assetApp).toMatchObject({
+			kind: 'asset',
+			key: ASSET_ID,
+			diagnostics: [],
+			content: {
+				mediaType: 'application/octet-stream',
+				size: 5,
+				contentUrl: `/api/assets/${ASSET_ID}/content`,
+			},
+		})
+		expect(assetApp?.kind === 'asset' ? assetApp.content.digest : undefined).toMatch(/^sha256:[0-9a-f]{64}$/u)
+		// Ensure raw Uint8Array is NOT serialized into generic JSON
+		const serializedAsset = JSON.stringify(assetApp)
+		expect(serializedAsset).not.toContain('"0":')
+		expect(serializedAsset).toContain('"contentUrl":')
+
+		// HTTP transport reads
+		const reviewHttp = await readPointResourceForHttp(app, 'review', REVIEW_ID)
+		expect(reviewHttp.status).toBe(200)
+		expect(reviewHttp.body).toEqual(reviewApp)
+
+		const assetHttp = await readPointResourceForHttp(app, 'asset', ASSET_ID)
+		expect(assetHttp.status).toBe(200)
+		expect(assetHttp.body).toEqual(assetApp)
+
+		// MCP transport reads
+		const handler = createUiuxMcpHttpHandler(app)
+		const client = new Client({ name: 'uiux-review-asset-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto', probe: { timeoutMs: 2_000 } } })
+		const transport = new StreamableHTTPClientTransport(new URL('http://uiux.test/mcp'), { fetch: async (input, init) => handler.fetch(new Request(input, init)) })
+		try {
+			await client.connect(transport)
+			const readReviewMcp = await client.readResource({ uri: pointResourceUri({ kind: 'review', key: REVIEW_ID }) })
+			const mcpReview = JSON.parse(readReviewMcp.contents[0]?.text ?? '{}')
+			expect(mcpReview).toEqual(reviewApp)
+
+			const readAssetMcp = await client.readResource({ uri: pointResourceUri({ kind: 'asset', key: ASSET_ID }) })
+			const mcpAsset = JSON.parse(readAssetMcp.contents[0]?.text ?? '{}')
+			expect(mcpAsset).toEqual(assetApp)
+		}
+		finally {
+			await client.close()
+			await handler.close()
+		}
+	})
+
+	it('summarizes Review anchor, status, and message count in list and search discovery', async () => {
+		const { app, persistence } = await seededSession()
+		await persistence.reviews.create(REVIEW_ID, reviewFixture())
+		await persistence.assets.create(ASSET_ID, assetFixture())
+
+		const list = await app.listPointResources({ kinds: ['review', 'asset'], limit: 10 })
+		expect(list.status).toBe('ok')
+		if (list.status !== 'ok') return
+
+		const reviewItem = list.page.items.find(item => item.kind === 'review' && item.key === REVIEW_ID)
+		expect(reviewItem).toMatchObject({
+			kind: 'review',
+			key: REVIEW_ID,
+			summary: {
+				anchor: { viewId: VIEW_ID, widgetId: 'root' },
+				status: 'open',
+				messageCount: 1,
+			},
+		})
+
+		const assetItem = list.page.items.find(item => item.kind === 'asset' && item.key === ASSET_ID)
+		expect(assetItem).toMatchObject({
+			kind: 'asset',
+			key: ASSET_ID,
+			summary: {
+				name: 'Sample Icon',
+				mediaType: 'application/octet-stream',
+				contentFilename: 'icon.bin',
+			},
+		})
+
+		const search = await app.searchPointResources({ query: 'Sample Icon', limit: 10 })
+		expect(search.status).toBe('ok')
+		if (search.status !== 'ok') return
+		expect(search.page.items.map(item => item.key)).toContain(ASSET_ID)
+	})
+
+	it('preserves unreadable/repairable invalid states with diagnostics for Review and Asset', async () => {
+		const { root, app } = await seededSession()
+		const corruptReviewId = '77777777-1111-4777-8777-777777777777'
+		const corruptAssetId = '77777777-2222-4777-8777-777777777777'
+
+		await mkdir(join(root, 'reviews'), { recursive: true })
+		await writeFile(join(root, 'reviews', `${corruptReviewId}.review.json`), '{corrupt-json')
+		await mkdir(join(root, 'assets', corruptAssetId), { recursive: true })
+		await writeFile(join(root, 'assets', corruptAssetId, 'asset.json'), '{corrupt-asset-json')
+
+		const result = await app.listPointResources({ kinds: ['review', 'asset'], limit: 10 })
+		expect(result.status).toBe('ok')
+		if (result.status !== 'ok') return
+
+		const reviewItem = result.page.items.find(item => item.key === corruptReviewId)
+		expect(reviewItem).toMatchObject({ kind: 'review', key: corruptReviewId, summary: {} })
+		expect(reviewItem?.diagnosticCount).toBeGreaterThan(0)
+
+		const assetItem = result.page.items.find(item => item.key === corruptAssetId)
+		expect(assetItem).toMatchObject({ kind: 'asset', key: corruptAssetId, summary: {} })
+		expect(assetItem?.diagnosticCount).toBeGreaterThan(0)
+	})
 })
 
 async function seededSession() {
@@ -282,4 +429,23 @@ function viewFixture(id = VIEW_ID, name = 'Transport fixture', feature?: string)
 function flowFixture(): FlowResource {
 	const step = '44444444-4444-4444-8444-444444444444'
 	return { id: FLOW_ID, name: 'Transport flow', entryStepId: step, steps: { [step]: { target: { viewId: VIEW_ID }, transitions: [] } } }
+}
+
+function reviewFixture(id = REVIEW_ID): ReviewThread {
+	return {
+		id,
+		anchor: { viewId: VIEW_ID, widgetId: 'root' },
+		variantNames: [],
+		status: 'open',
+		messages: [{ id: '99999999-1111-4111-8111-111111111111', actor: { type: 'agent', displayName: 'Antigravity' }, at: '2026-10-04T00:00:00.000Z', body: 'Review message fixture' }],
+		history: [],
+		submissions: [],
+	}
+}
+
+function assetFixture(id = ASSET_ID): AuthoredAssetResource {
+	return {
+		metadata: { id, name: 'Sample Icon', contentFilename: 'icon.bin', mediaType: 'application/octet-stream' },
+		content: new Uint8Array([1, 2, 3, 4, 5]),
+	}
 }

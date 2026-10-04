@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
-import { readFile, stat } from 'node:fs/promises'
+import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+const workspaceSchemaVersion = packageJson.uiuxWorkspaceSchemaVersion
+
+if (!Number.isInteger(workspaceSchemaVersion) || workspaceSchemaVersion < 1)
+	throw new Error('package.json uiuxWorkspaceSchemaVersion must be a positive integer.')
 
 function showHelp() {
 	console.log(`Usage: uiux <command>
@@ -15,12 +19,56 @@ Options:
   -v, --version  Show version
 
 Commands:
-  init --workspace <dir>  Initialize a Workspace (not implemented yet)
+  init --workspace <dir>  Initialize a Workspace
   dev --workspace <dir>   Start the unified UIUX Workbench/Nitro server`)
 }
 
 function parseWorkspaceArgument(args) {
 	return args.length === 2 && args[0] === '--workspace' && args[1] ? args[1] : undefined
+}
+
+async function runInit(workspaceArgument) {
+	const workspaceRoot = resolve(process.cwd(), workspaceArgument)
+	try {
+		const rootStat = await stat(workspaceRoot)
+		if (!rootStat.isDirectory()) {
+			console.error(`uiux: Workspace root is not a directory: ${workspaceRoot}`)
+			process.exitCode = 2
+			return
+		}
+	}
+	catch (error) {
+		if (error?.code !== 'ENOENT') throw error
+		await mkdir(workspaceRoot, { recursive: true })
+	}
+
+	const metadataRoot = join(workspaceRoot, '.uiux')
+	await mkdir(metadataRoot, { recursive: true })
+	const metadataStat = await lstat(metadataRoot)
+	if (!metadataStat.isDirectory() || metadataStat.isSymbolicLink()) {
+		console.error(`uiux: Workspace metadata path must be a real directory: ${metadataRoot}`)
+		process.exitCode = 2
+		return
+	}
+
+	const manifestPath = join(metadataRoot, 'workspace.json')
+	const manifest = {
+		schemaVersion: workspaceSchemaVersion,
+		i18n: { defaultLocale: 'en-US' },
+		adapters: [],
+		viewports: {},
+		themes: {},
+	}
+	try {
+		await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' })
+	}
+	catch (error) {
+		if (error?.code !== 'EEXIST') throw error
+		console.error(`uiux: Workspace is already initialized: ${manifestPath}`)
+		process.exitCode = 2
+		return
+	}
+	console.log(`Initialized UIUX Workspace at ${workspaceRoot}`)
 }
 
 async function runDev(workspaceArgument) {
@@ -44,7 +92,7 @@ async function runDev(workspaceArgument) {
 	const serverEntry = resolve(packageRoot, '.output/server/index.mjs')
 	const child = spawn(process.execPath, [serverEntry], {
 		stdio: 'inherit',
-		env: { ...process.env, UIUX_WORKSPACE_ROOT: workspaceRoot },
+		env: { ...process.env, UIUX_WORKSPACE_ROOT: workspaceRoot, UIUX_PACKAGE_ROOT: packageRoot },
 	})
 	const forwardSignal = signal => {
 		if (child.exitCode === null && child.signalCode === null) child.kill(signal)
@@ -76,8 +124,13 @@ if (extraArgs.length === 0 && (command === undefined || command === '--help' || 
 } else if (extraArgs.length === 0 && (command === '--version' || command === '-v')) {
 	console.log(`uiux ${packageJson.version}`)
 } else if (command === 'init') {
-	console.error('uiux: init is not implemented yet.')
-	process.exitCode = 2
+	const workspace = parseWorkspaceArgument(extraArgs)
+	if (!workspace) {
+		console.error('uiux: init requires exactly --workspace <dir>.')
+		process.exitCode = 2
+	} else {
+		await runInit(workspace)
+	}
 } else if (command === 'dev') {
 	const workspace = parseWorkspaceArgument(extraArgs)
 	if (!workspace) {

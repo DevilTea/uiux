@@ -436,6 +436,258 @@ describe('file-native persistence', () => {
 		})
 		expect(await readFile(join(root, viewRelativePath(VIEW_ID)))).toEqual(invalidBytes)
 	})
+
+	it('executes atomic Review and View CAS in a single transaction, detecting individual and simultaneous stale revisions with zero partial writes', async () => {
+		const { persistence } = await newWorkspace()
+		await persistence.views.create(VIEW_ID, viewFixture())
+		await persistence.reviews.create(REVIEW_ID, reviewFixture())
+
+		const initialView = await persistence.views.read(VIEW_ID)
+		const initialReview = await persistence.reviews.read(REVIEW_ID)
+		expect(initialView).toBeDefined()
+		expect(initialReview).toBeDefined()
+
+		const nextView: ViewResource = {
+			...viewFixture(),
+			spec: {
+				...viewFixture().spec,
+				decisions: [{
+					id: '99999999-9999-4999-8999-999999999999',
+					question: 'Promoted question?',
+					status: 'pending',
+					history: [],
+					provenance: { reviewId: REVIEW_ID, sourceReviewThreadId: REVIEW_ID },
+				}],
+			},
+		}
+		const nextReview: ReviewThread = {
+			...reviewFixture(),
+			messages: [{
+				id: '88888888-8888-4888-8888-888888888888',
+				actor: { type: 'human', id: 'reviewer' },
+				at: new Date().toISOString(),
+				body: 'Promotion noted.',
+			}],
+		}
+
+		// 1. Simultaneous stale revisions: both mismatch
+		const bothStale = await persistence.atomicReviewViewPromotionCas({
+			reviewId: REVIEW_ID,
+			expectedReviewRevision: 'rev-stale-review',
+			reviewResource: nextReview,
+			viewId: VIEW_ID,
+			expectedViewRevision: 'rev-stale-view',
+			viewResource: nextView,
+		})
+		expect(bothStale.ok).toBe(false)
+		if (!bothStale.ok) {
+			expect(bothStale.conflict.resource).toBe('both')
+			expect(bothStale.conflict.conflicts).toHaveLength(2)
+			expect(bothStale.conflict.conflicts.map(c => c.resource).sort()).toEqual(['review', 'view'])
+		}
+
+		// Verify disk bytes are completely untouched
+		expect((await persistence.views.read(VIEW_ID))?.revision).toBe(initialView!.revision)
+		expect((await persistence.reviews.read(REVIEW_ID))?.revision).toBe(initialReview!.revision)
+
+		// 2. Stale Review revision alone
+		const staleReview = await persistence.atomicReviewViewPromotionCas({
+			reviewId: REVIEW_ID,
+			expectedReviewRevision: 'rev-stale-review',
+			reviewResource: nextReview,
+			viewId: VIEW_ID,
+			expectedViewRevision: initialView!.revision,
+			viewResource: nextView,
+		})
+		expect(staleReview.ok).toBe(false)
+		if (!staleReview.ok) {
+			expect(staleReview.conflict.resource).toBe('review')
+			expect(staleReview.conflict.conflicts).toHaveLength(1)
+			expect(staleReview.conflict.conflicts[0]!.resource).toBe('review')
+		}
+		expect((await persistence.views.read(VIEW_ID))?.revision).toBe(initialView!.revision)
+		expect((await persistence.reviews.read(REVIEW_ID))?.revision).toBe(initialReview!.revision)
+
+		// 3. Stale View revision alone
+		const staleView = await persistence.atomicReviewViewPromotionCas({
+			reviewId: REVIEW_ID,
+			expectedReviewRevision: initialReview!.revision,
+			reviewResource: nextReview,
+			viewId: VIEW_ID,
+			expectedViewRevision: 'rev-stale-view',
+			viewResource: nextView,
+		})
+		expect(staleView.ok).toBe(false)
+		if (!staleView.ok) {
+			expect(staleView.conflict.resource).toBe('view')
+			expect(staleView.conflict.conflicts).toHaveLength(1)
+			expect(staleView.conflict.conflicts[0]!.resource).toBe('view')
+		}
+		expect((await persistence.views.read(VIEW_ID))?.revision).toBe(initialView!.revision)
+		expect((await persistence.reviews.read(REVIEW_ID))?.revision).toBe(initialReview!.revision)
+
+		// 4. Successful atomic CAS with matching revisions
+		const success = await persistence.atomicReviewViewPromotionCas({
+			reviewId: REVIEW_ID,
+			expectedReviewRevision: initialReview!.revision,
+			reviewResource: nextReview,
+			viewId: VIEW_ID,
+			expectedViewRevision: initialView!.revision,
+			viewResource: nextView,
+		})
+		expect(success.ok).toBe(true)
+		if (success.ok) {
+			expect(success.viewRevision).not.toBe(initialView!.revision)
+			expect(success.reviewRevision).not.toBe(initialReview!.revision)
+
+			const readView = await persistence.views.read(VIEW_ID)
+			const readReview = await persistence.reviews.read(REVIEW_ID)
+			expect(readView?.revision).toBe(success.viewRevision)
+			expect(readReview?.revision).toBe(success.reviewRevision)
+			expect(readView?.resource.spec.decisions?.[0]?.question).toBe('Promoted question?')
+			expect(readReview?.resource.messages?.[0]?.body).toBe('Promotion noted.')
+		}
+	})
+
+	it('rolls back BOTH files during atomicReviewViewPromotionCas on transaction.before_apply and transaction.after_apply fault injection', async () => {
+		const root = await makeRoot()
+		let injectedFault: { point: PersistenceFaultPoint; index: number } | undefined
+		const persistence = new FileNativePersistence({
+			root,
+			schemaPolicy: policy(),
+			fault(point, details) {
+				if (injectedFault && point === injectedFault.point && details.index === injectedFault.index && details.operation === 'decision-promotion') {
+					injectedFault = undefined
+					throw new Error(`Injected fault at ${point} index ${details.index}`)
+				}
+			},
+		})
+		await persistence.workspace.create(workspaceFixture())
+		await persistence.views.create(VIEW_ID, viewFixture())
+		await persistence.reviews.create(REVIEW_ID, reviewFixture())
+
+		const viewPath = join(root, viewRelativePath(VIEW_ID))
+		const reviewPath = join(root, reviewRelativePath(REVIEW_ID))
+		const origViewBytes = await readFile(viewPath)
+		const origReviewBytes = await readFile(reviewPath)
+
+		const vRev = (await persistence.views.read(VIEW_ID))!.revision
+		const rRev = (await persistence.reviews.read(REVIEW_ID))!.revision
+
+		const nextView: ViewResource = {
+			...viewFixture(),
+			spec: {
+				...viewFixture().spec,
+				decisions: [{
+					id: '99999999-9999-4999-8999-999999999999',
+					question: 'Q?',
+					status: 'pending',
+					history: [],
+					provenance: { reviewId: REVIEW_ID },
+				}],
+			},
+		}
+		const nextReview: ReviewThread = {
+			...reviewFixture(),
+			messages: [{
+				id: '88888888-8888-4888-8888-888888888888',
+				actor: { type: 'human', id: 'reviewer' },
+				at: new Date().toISOString(),
+				body: 'Msg',
+			}],
+		}
+
+		// Inject before apply at index 1 (during second file apply)
+		injectedFault = { point: 'transaction.before_apply', index: 1 }
+		await expect(persistence.atomicReviewViewPromotionCas({
+			reviewId: REVIEW_ID,
+			expectedReviewRevision: rRev,
+			reviewResource: nextReview,
+			viewId: VIEW_ID,
+			expectedViewRevision: vRev,
+			viewResource: nextView,
+		})).rejects.toMatchObject({ code: 'persistence.write_failed' })
+
+		// Verify BOTH files were completely restored
+		expect(await readFile(viewPath)).toEqual(origViewBytes)
+		expect(await readFile(reviewPath)).toEqual(origReviewBytes)
+
+		// Inject after apply at index 0 (first file was renamed, then fault threw before second file finished)
+		injectedFault = { point: 'transaction.after_apply', index: 0 }
+		await expect(persistence.atomicReviewViewPromotionCas({
+			reviewId: REVIEW_ID,
+			expectedReviewRevision: rRev,
+			reviewResource: nextReview,
+			viewId: VIEW_ID,
+			expectedViewRevision: vRev,
+			viewResource: nextView,
+		})).rejects.toMatchObject({ code: 'persistence.write_failed' })
+
+		// Verify BOTH files were restored, no partial state
+		expect(await readFile(viewPath)).toEqual(origViewBytes)
+		expect(await readFile(reviewPath)).toEqual(origReviewBytes)
+	})
+
+	it('cleans up and recovers pending transactions where COMMITTED marker exists', async () => {
+		const { root, persistence } = await newWorkspace()
+		const txId = '77777777-7777-4777-8777-777777777777'
+		const txDir = join(root, '.uiux', '.transactions', txId)
+		await mkdir(txDir, { recursive: true })
+		await writeFile(join(txDir, 'COMMITTED'), 'committed')
+		await writeFile(join(txDir, 'journal.json'), JSON.stringify({ operation: 'decision-promotion', changes: [] }))
+
+		// Any locked operation recovers pending transactions
+		await persistence.withLock(async () => {})
+
+		// Verify txDir was cleaned up
+		const remaining = await readdir(join(root, '.uiux', '.transactions'))
+		expect(remaining).not.toContain(txId)
+	})
+
+	it('discovers real UUID asset directories only and ignores symlinks', async () => {
+		const { root, persistence } = await newWorkspace()
+		await persistence.assets.create(ASSET_ID, { metadata: assetFixture('file.bin', 'Real'), content: Buffer.from('data') })
+
+		const targetDir = join(root, 'target-dir')
+		await mkdir(targetDir, { recursive: true })
+		const symlinkUuid = '66666666-6666-4666-8666-666666666666'
+		await symlink(targetDir, join(root, 'assets', symlinkUuid), 'dir')
+
+		const keys = await persistence.assets.discoverKeys()
+		expect(keys).toContain(ASSET_ID)
+		expect(keys).not.toContain(symlinkUuid)
+	})
+
+	it('refuses to serve mismatched or missing content bytes under declared asset metadata', async () => {
+		const { root, persistence } = await newWorkspace()
+		const assetDir = join(root, 'assets', ASSET_ID)
+		await mkdir(assetDir, { recursive: true })
+		// Asset metadata declares contentFilename: 'declared.png'
+		const metadata: AuthoredAsset = {
+			id: ASSET_ID,
+			name: 'Mismatch Asset',
+			contentFilename: 'declared.png',
+			mediaType: 'image/png',
+		}
+		await writeFile(join(assetDir, 'asset.json'), JSON.stringify(metadata, null, 2))
+		// But on disk, only 'different.png' exists
+		await writeFile(join(assetDir, 'different.png'), Buffer.from('different content'))
+
+		const inspected = await persistence.assets.readInspected(ASSET_ID)
+		expect(inspected).toBeDefined()
+		// Content must be empty, NEVER different.png
+		expect(inspected?.resource.content.length).toBe(0)
+		expect(inspected?.diagnostics.some(d => d.code === 'asset.content_filename_mismatch' || d.code === 'asset.invalid_content_file_count')).toBe(true)
+
+		// When both declared and an extra unexpected file exist
+		await writeFile(join(assetDir, 'declared.png'), Buffer.from('declared content'))
+		const inspectedMultiple = await persistence.assets.readInspected(ASSET_ID)
+		expect(inspectedMultiple).toBeDefined()
+		// Must select declared.png bytes
+		expect(Buffer.from(inspectedMultiple!.resource.content).toString('utf8')).toBe('declared content')
+		// But preserve diagnostic about invalid content file count
+		expect(inspectedMultiple?.diagnostics.some(d => d.code === 'asset.invalid_content_file_count')).toBe(true)
+	})
 })
 
 async function newWorkspace(): Promise<{ root: string; persistence: FileNativePersistence }> {
@@ -517,6 +769,18 @@ function flowFixture(): FlowResource {
 
 function assetFixture(contentFilename: string, name: string): AuthoredAsset {
 	return { id: ASSET_ID, name, contentFilename, mediaType: 'application/octet-stream' }
+}
+
+function reviewFixture(): ReviewThread {
+	return {
+		id: REVIEW_ID,
+		anchor: { viewId: VIEW_ID, widgetId: 'root' },
+		variantNames: [],
+		status: 'open',
+		messages: [],
+		history: [],
+		submissions: [],
+	}
 }
 
 async function seedOldWorkspace(root: string, manifest: Uint8Array, view: Uint8Array): Promise<void> {

@@ -15,9 +15,16 @@ export default tseslint.config(
 		languageOptions: {
 			globals: globals.node,
 		},
+		rules: {
+			'vue/one-component-per-file': 'off',
+		},
 	},
 	{
 		files: ['**/*.vue'],
+		languageOptions: {
+			parserOptions: { parser: tseslint.parser },
+			globals: { ...globals.browser, $fetch: 'readonly' },
+		},
 		rules: {
 			'vue/multi-word-component-names': 'off',
 		},
