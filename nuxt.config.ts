@@ -21,7 +21,19 @@ export default defineNuxtConfig({
 			uiuxMode: publicationMode ? 'publication' : 'live',
 		},
 	},
-	modules: ['@nuxt/ui'],
+	modules: ['@nuxt/ui', '@nuxtjs/i18n'],
+	i18n: {
+		// Workbench chrome catalogs only. Workspace locales live in the selected Workspace's i18n/*.json.
+		restructureDir: 'app/i18n',
+		langDir: 'locales',
+		strategy: 'no_prefix',
+		defaultLocale: 'en-US',
+		detectBrowserLanguage: false,
+		locales: [
+			{ code: 'en-US', language: 'en-US', name: 'English', file: 'en-US.json' },
+			{ code: 'zh-TW', language: 'zh-TW', name: '繁體中文', file: 'zh-TW.json' },
+		],
+	},
 	icon: publicationMode
 		? {
 				provider: 'none',
