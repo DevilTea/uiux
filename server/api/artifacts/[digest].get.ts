@@ -1,8 +1,11 @@
 import { defineEventHandler, getRouterParam, setResponseHeader, setResponseStatus } from 'h3'
 import { getSelectedWorkspaceServerRuntime } from '../../../src/server/selected-workspace'
 import { readArtifactForHttp } from '../../../src/server/authoring-http'
+import { denyUnlessAllowed } from '../../../src/server/access/http'
 
 export default defineEventHandler(async (event) => {
+	const denied = denyUnlessAllowed(event, 'readArtifact')
+	if (denied) return denied
 	const digest = getRouterParam(event, 'digest', { decode: true }) ?? ''
 	const runtime = getSelectedWorkspaceServerRuntime()
 	const result = await readArtifactForHttp(runtime.persistence, digest)

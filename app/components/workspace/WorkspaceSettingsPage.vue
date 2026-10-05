@@ -8,7 +8,7 @@ import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { useAuthoringAccess } from '../../composables/useAuthoringAccess'
 import { useUnsavedGuard } from '../../composables/useUnsavedGuard'
 import { createSettingsSection } from '../../composables/useSettingsSection'
-import { describeFetchError } from '../../utils/fetch-error'
+import { describeFetchError, isLockedError, type FetchErrorLock } from '../../utils/fetch-error'
 import {
 	adapterRows,
 	adapterSelections,
@@ -20,6 +20,8 @@ import {
 } from '../../utils/workspace-authoring'
 import WorkbenchPage from '../workbench/WorkbenchPage.vue'
 import AuthoringAccessNotice from './AuthoringAccessNotice.vue'
+import LockBadge from '../workbench/LockBadge.vue'
+import LockedSaveAlert from '../workbench/LockedSaveAlert.vue'
 import UnsavedLeaveModal from './UnsavedLeaveModal.vue'
 import SettingsGeneralSection from './SettingsGeneralSection.vue'
 import SettingsRegistrySection from './SettingsRegistrySection.vue'
@@ -39,7 +41,10 @@ const workbench = useWorkbench()
 const { workspace, discoveredLocales } = workbench
 const uiux = useUiuxClient()
 const feedback = useWorkbenchFeedback()
-const { access, canEdit } = useAuthoringAccess()
+// The Workspace settings document is one lockable resource (accepted identity decision 11).
+const { access, canEdit } = useAuthoringAccess({ kind: 'workspace', key: 'workspace' })
+/** A save refused by someone else's edit lease; every section's draft is kept. */
+const lockRefusal = shallowRef<Readonly<{ lock?: FetchErrorLock }>>()
 
 const general = createSettingsSection({
 	id: 'general',
@@ -98,6 +103,7 @@ async function save(id: SettingsSectionId): Promise<void> {
 	if (!canEdit.value || !read?.resource || !section.base || section.conflict || section.saving || !section.dirty) return
 	section.saving = true
 	section.clearError()
+	lockRefusal.value = undefined
 	try {
 		await $fetch('/api/workspace/settings', {
 			method: 'PUT',
@@ -116,6 +122,9 @@ async function save(id: SettingsSectionId): Promise<void> {
 		if (details.statusCode === 409 || details.status === 'conflict') {
 			section.conflict = true
 			await workbench.refreshAll()
+		}
+		else if (isLockedError(details)) {
+			lockRefusal.value = { lock: details.lock }
 		}
 		else {
 			section.error = details
@@ -278,6 +287,15 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
               </template>
             </i18n-t>
             <AuthoringAccessNotice :access="access" />
+            <LockBadge
+              kind="workspace"
+              resource-key="workspace"
+            />
+            <LockedSaveAlert
+              v-if="lockRefusal"
+              :lock="lockRefusal.lock"
+              @dismiss="lockRefusal = undefined"
+            />
           </header>
 
           <template v-if="workspace?.resource">

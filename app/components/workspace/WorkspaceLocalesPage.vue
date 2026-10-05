@@ -8,7 +8,8 @@ import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { useAuthoringAccess } from '../../composables/useAuthoringAccess'
 import { useUnsavedGuard } from '../../composables/useUnsavedGuard'
 import type { Diagnostic } from '../../composables/workbench-types'
-import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
+import { useAccess } from '../../composables/useAccess'
+import { describeFetchError, isLockedError, type FetchErrorDetails, type FetchErrorLock } from '../../utils/fetch-error'
 import {
 	countMessageChanges,
 	isReminder,
@@ -19,6 +20,8 @@ import {
 } from '../../utils/workspace-authoring'
 import WorkbenchPage from '../workbench/WorkbenchPage.vue'
 import AuthoringAccessNotice from './AuthoringAccessNotice.vue'
+import LockBadge from '../workbench/LockBadge.vue'
+import LockedSaveAlert from '../workbench/LockedSaveAlert.vue'
 import AuthoringConflictAlert from './AuthoringConflictAlert.vue'
 import AuthoringErrorAlert from './AuthoringErrorAlert.vue'
 import AuthoringSaveBar from './AuthoringSaveBar.vue'
@@ -44,6 +47,8 @@ type LocaleState = {
 	theirs?: { revision: string; messages: Record<string, string> }
 	saving: boolean
 	error?: FetchErrorDetails
+	/** A save refused by someone else's edit lease (`423 resource.locked`); the draft is kept. */
+	locked?: Readonly<{ lock?: FetchErrorLock }>
 }
 
 const { t } = useI18n()
@@ -52,6 +57,14 @@ const { workspace } = workbench
 const uiux = useUiuxClient()
 const feedback = useWorkbenchFeedback()
 const { access, canEdit, isMobile } = useAuthoringAccess()
+const member = useAccess()
+/** Each Locale is its own lockable resource: someone else's edit lease makes just that column read-only. */
+function isLocaleLocked(locale: string): boolean {
+	return !!member.lockFor('locale', locale)
+}
+function canEditLocale(locale: string): boolean {
+	return canEdit.value && !isLocaleLocked(locale)
+}
 
 const primary = computed(() => workspace.value?.resource?.i18n?.defaultLocale ?? 'en-US')
 const states = ref<LocaleState[]>([])
@@ -177,7 +190,7 @@ function focusCell(row: number, col: number): void {
 	void nextTick(() => document.querySelector<HTMLElement>(`[data-locale-cell="${cellId(row, col)}"]`)?.focus())
 }
 function startEdit(key: string, locale: string): void {
-	if (!canEdit.value) return
+	if (!canEditLocale(locale)) return
 	const state = byKey.value.get(locale)
 	if (!state || state.saving) return
 	editing.value = { key, locale, value: state.draft[key] ?? '' }
@@ -285,10 +298,11 @@ const dirtyCount = computed(() => dirtyStates.value.reduce((sum, state) => sum +
 const guard = useUnsavedGuard(() => dirtyCount.value > 0)
 
 async function save(state: LocaleState): Promise<void> {
-	if (!canEdit.value || state.saving || state.conflict) return
+	if (!canEditLocale(state.key) || state.saving || state.conflict) return
 	commit()
 	state.saving = true
 	state.error = undefined
+	state.locked = undefined
 	try {
 		await $fetch(`/api/locales/${encodeURIComponent(state.key)}`, {
 			method: 'PUT',
@@ -310,6 +324,9 @@ async function save(state: LocaleState): Promise<void> {
 			state.conflict = true
 			const read = await readLocale(state.key).catch(() => undefined)
 			if (read) state.theirs = { revision: read.revision, messages: { ...read.resource } }
+		}
+		else if (isLockedError(details)) {
+			state.locked = { lock: details.lock }
 		}
 		else {
 			state.error = details
@@ -377,6 +394,7 @@ async function onCreated(locale: string): Promise<void> {
 watch(canEdit, (value) => { if (!value) editing.value = undefined })
 
 const conflictStates = computed(() => ordered.value.filter(state => state.conflict))
+const lockedStates = computed(() => ordered.value.filter(state => state.locked))
 const errorStates = computed(() => ordered.value.filter(state => state.error))
 const diagnosticStates = computed(() => ordered.value.filter(state => state.diagnostics.length))
 </script>
@@ -417,6 +435,18 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
           </div>
         </div>
         <AuthoringAccessNotice :access="access" />
+        <LockBadge
+          v-for="state in ordered"
+          :key="`lock-${state.key}`"
+          kind="locale"
+          :resource-key="state.key"
+        />
+        <LockedSaveAlert
+          v-for="state in lockedStates"
+          :key="`locked-${state.key}`"
+          :lock="state.locked?.lock"
+          @dismiss="state.locked = undefined"
+        />
 
         <UAlert
           v-if="!loading && !loadError && states.length && !primaryState"
@@ -796,16 +826,16 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
             />
           </div>
           <component
-            :is="canEdit ? 'button' : 'div'"
+            :is="canEditLocale(locale) ? 'button' : 'div'"
             v-else
-            :type="canEdit ? 'button' : undefined"
+            :type="canEditLocale(locale) ? 'button' : undefined"
             class="flex min-h-10 w-full items-start gap-2 px-4 py-2 text-start"
-            :class="canEdit ? 'hover:bg-muted' : ''"
-            :data-locale-cell="canEdit ? cellId(row.index, localeKeys.indexOf(locale)) : undefined"
+            :class="canEditLocale(locale) ? 'hover:bg-muted' : ''"
+            :data-locale-cell="canEditLocale(locale) ? cellId(row.index, localeKeys.indexOf(locale)) : undefined"
             :data-locale="locale"
-            :aria-label="canEdit ? t('locales.editCell', { key: row.original.key, locale }) : undefined"
+            :aria-label="canEditLocale(locale) ? t('locales.editCell', { key: row.original.key, locale }) : undefined"
             @click="startEdit(row.original.key, locale)"
-            @keydown="canEdit && onCellKeydown($event, row.original.key, locale)"
+            @keydown="canEditLocale(locale) && onCellKeydown($event, row.original.key, locale)"
           >
             <UBadge
               v-if="localeCellState(byKey.get(locale)?.draft[row.original.key]) !== 'value'"
@@ -839,7 +869,7 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
           :key="state.key"
           :count="countMessageChanges(state.saved, state.draft)"
           :saving="state.saving"
-          :disabled="state.conflict"
+          :disabled="state.conflict || isLocaleLocked(state.key)"
           :note="t('locales.savePerFile', { locale: state.key })"
           :save-label="t('locales.saveLocale', { locale: state.key })"
           @discard="discard(state)"

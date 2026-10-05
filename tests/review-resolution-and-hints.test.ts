@@ -4,13 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import type { ReviewThread } from '../src/domain/reviews/schema'
-import { createUiuxMcpHttpHandler, RESOLVE_REVIEW_THREAD_DESCRIPTION } from '../src/mcp/server'
+import { RESOLVE_REVIEW_THREAD_DESCRIPTION } from '../src/mcp/server'
 import { FileNativePersistence } from '../src/persistence'
 import { SERVER_HOLD_RELATIVE_PATH } from '../src/persistence/server-hold'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
@@ -23,14 +22,19 @@ import {
 	submitReadyForReviewForHttp,
 } from '../src/server/authoring-http'
 import { startWorkbenchServer } from './support/workbench-server'
+import { AGENT_EDITOR, connectMcp, scoped, testMember } from './support/access'
+import { principalActor, type MemberPrincipal } from '../src/application/access/principal'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const REVIEW_ID = '44444444-4444-4444-8444-444444444444'
 const SECOND_REVIEW_ID = '77777777-7777-4777-8777-777777777777'
 const THIRD_REVIEW_ID = '88888888-8888-4888-8888-888888888888'
 const CLI = join(fileURLToPath(new URL('..', import.meta.url)), 'bin', 'uiux.mjs')
-const human = { type: 'human', displayName: 'Mei' }
-const agent = { type: 'agent', displayName: 'CoderAgent' }
+/** The Workbench reviewer: a human member on a cookie session; actors are server-stamped from it. */
+const MEI = testMember({ nickname: 'mei', kind: 'human', role: 'reviewer', credential: 'session' })
+const AGENT_SESSION = testMember({ nickname: 'qa-bot', kind: 'agent', role: 'editor', credential: 'session' })
+const human = principalActor(MEI)
+const agent = principalActor(AGENT_EDITOR)
 const roots: string[] = []
 
 afterEach(async () => {
@@ -52,11 +56,8 @@ async function session() {
 	return { root, persistence, app, viewRevision: view.revision }
 }
 
-async function connectedClient(app: ReturnType<typeof createWorkspaceApplicationSession>) {
-	const handler = createUiuxMcpHttpHandler(app)
-	const client = new Client({ name: 'uiux-review-v2-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto', probe: { timeoutMs: 2_000 } } })
-	await client.connect(new StreamableHTTPClientTransport(new URL('http://uiux.test/mcp'), { fetch: async (input, init) => handler.fetch(new Request(input, init)) }))
-	return { client, async close() { await client.close(); await handler.close() } }
+async function connectedClient(app: ReturnType<typeof createWorkspaceApplicationSession>, principal: MemberPrincipal = AGENT_EDITOR) {
+	return connectMcp(app, principal)
 }
 
 async function readThread(app: ReturnType<typeof createWorkspaceApplicationSession>, key: string) {
@@ -75,7 +76,7 @@ function codesOf(result: { body: unknown }): string[] {
 
 async function submitReady(ctx: Awaited<ReturnType<typeof session>>, key: string, expectedRevision: string) {
 	const evidence = await ctx.persistence.artifacts.put(new TextEncoder().encode(`evidence-${expectedRevision}`))
-	const result = await submitReadyForReviewForHttp(ctx.app, key, {
+	const result = await submitReadyForReviewForHttp(scoped(ctx.app, AGENT_EDITOR), key, {
 		expectedRevision,
 		actor: agent,
 		changeDomains: ['view-structure'],
@@ -89,30 +90,30 @@ async function submitReady(ctx: Awaited<ReturnType<typeof session>>, key: string
 describe('direct resolve through the Workbench HTTP surface', () => {
 	it('requires an explicit non-verified resolution on open threads and enforces the decided validation codes', async () => {
 		const ctx = await session()
-		const created = await createReviewThreadForHttp(ctx.app, { id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' } })
+		const created = await createReviewThreadForHttp(scoped(ctx.app, MEI), { id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' } })
 		expect(created.status).toBe(201)
 		const rev = revisionOf(created)
 
-		const omitted = await resolveReviewThreadForHttp(ctx.app, REVIEW_ID, { expectedRevision: rev, actor: human })
+		const omitted = await resolveReviewThreadForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: rev, actor: human })
 		expect(omitted.status).toBe(400)
 		expect(codesOf(omitted)).toEqual(['review.resolution_required'])
-		const verifiedFromOpen = await resolveReviewThreadForHttp(ctx.app, REVIEW_ID, { expectedRevision: rev, actor: human, resolution: 'verified' })
+		const verifiedFromOpen = await resolveReviewThreadForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: rev, actor: human, resolution: 'verified' })
 		expect(verifiedFromOpen.status).toBe(400)
 		expect(codesOf(verifiedFromOpen)).toEqual(['review.invalid_transition'])
-		const withSubmission = await resolveReviewThreadForHttp(ctx.app, REVIEW_ID, { expectedRevision: rev, actor: human, resolution: 'answered', submissionId: SECOND_REVIEW_ID })
+		const withSubmission = await resolveReviewThreadForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: rev, actor: human, resolution: 'answered', submissionId: SECOND_REVIEW_ID })
 		expect(codesOf(withSubmission)).toEqual(['review.direct_resolve_submission_forbidden'])
-		const duplicateWithoutReason = await resolveReviewThreadForHttp(ctx.app, REVIEW_ID, { expectedRevision: rev, actor: human, resolution: 'duplicate', reason: '  ' })
+		const duplicateWithoutReason = await resolveReviewThreadForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: rev, actor: human, resolution: 'duplicate', reason: '  ' })
 		expect(codesOf(duplicateWithoutReason)).toEqual(['review.resolution_reason_required'])
-		const byAgent = await resolveReviewThreadForHttp(ctx.app, REVIEW_ID, { expectedRevision: rev, actor: agent, resolution: 'answered' })
+		const byAgent = await resolveReviewThreadForHttp(scoped(ctx.app, AGENT_SESSION), REVIEW_ID, { expectedRevision: rev, resolution: 'answered' })
 		expect(codesOf(byAgent)).toEqual(['review.resolve_requires_human'])
-		const unknownKind = await resolveReviewThreadForHttp(ctx.app, REVIEW_ID, { expectedRevision: rev, actor: human, resolution: 'promoted' })
+		const unknownKind = await resolveReviewThreadForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: rev, actor: human, resolution: 'promoted' })
 		expect(unknownKind.status).toBe(400)
 		expect(unknownKind.body).toMatchObject({ code: 'malformed_payload' })
 		expect((await readThread(ctx.app, REVIEW_ID)).revision).toBe(rev)
 		expect(await ctx.app.resolveReviewThread({ reviewId: REVIEW_ID, expectedRevision: rev, actor: human, resolution: 'promoted' as never }))
 			.toMatchObject({ status: 'invalid', diagnostics: [{ code: 'review.invalid_resolution' }] })
 
-		const answered = await resolveReviewThreadForHttp(ctx.app, REVIEW_ID, { expectedRevision: rev, actor: human, resolution: 'answered', reason: 'Secondary by design.' })
+		const answered = await resolveReviewThreadForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: rev, actor: human, resolution: 'answered', reason: 'Secondary by design.' })
 		expect(answered.status).toBe(200)
 		const thread = await readThread(ctx.app, REVIEW_ID)
 		expect(thread.diagnostics).toEqual([])
@@ -122,11 +123,11 @@ describe('direct resolve through the Workbench HTTP surface', () => {
 		expect(thread.resource.history[0]).toMatchObject({ kind: 'lifecycle', from: 'open', to: 'resolved', resolution: 'answered', reason: 'Secondary by design.', actor: human })
 		expect(thread.resource.history[0]).not.toHaveProperty('submissionId')
 
-		const again = await resolveReviewThreadForHttp(ctx.app, REVIEW_ID, { expectedRevision: revisionOf(answered), actor: human, resolution: 'answered' })
+		const again = await resolveReviewThreadForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: revisionOf(answered), actor: human, resolution: 'answered' })
 		expect(codesOf(again)).toEqual(['review.invalid_transition'])
 
 		// Reopen keeps the prior resolution event intact.
-		const reopened = await reopenReviewThreadForHttp(ctx.app, REVIEW_ID, { expectedRevision: revisionOf(answered), actor: human, reason: 'Needs a change after all' })
+		const reopened = await reopenReviewThreadForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: revisionOf(answered), actor: human, reason: 'Needs a change after all' })
 		expect(reopened.status).toBe(200)
 		const afterReopen = await readThread(ctx.app, REVIEW_ID)
 		expect(afterReopen.resource.status).toBe('open')
@@ -135,10 +136,10 @@ describe('direct resolve through the Workbench HTTP surface', () => {
 
 	it('declines a ready-for-review submission without accepting it, and keeps the backward-compatible verified default', async () => {
 		const ctx = await session()
-		const created = await createReviewThreadForHttp(ctx.app, { id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' } })
+		const created = await createReviewThreadForHttp(scoped(ctx.app, MEI), { id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' } })
 		const ready = await submitReady(ctx, REVIEW_ID, revisionOf(created))
 
-		const declined = await resolveReviewThreadForHttp(ctx.app, REVIEW_ID, { expectedRevision: ready, actor: human, resolution: 'wont-fix' })
+		const declined = await resolveReviewThreadForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: ready, actor: human, resolution: 'wont-fix' })
 		expect(declined.status).toBe(200)
 		const declinedThread = await readThread(ctx.app, REVIEW_ID)
 		expect(declinedThread.diagnostics).toEqual([])
@@ -146,14 +147,14 @@ describe('direct resolve through the Workbench HTTP surface', () => {
 		expect(declinedThread.resource.history.at(-1)).toMatchObject({ from: 'ready-for-review', to: 'resolved', resolution: 'wont-fix' })
 		expect(declinedThread.resource.history.at(-1)).not.toHaveProperty('submissionId')
 
-		const reopened = await reopenReviewThreadForHttp(ctx.app, REVIEW_ID, { expectedRevision: revisionOf(declined), actor: human })
+		const reopened = await reopenReviewThreadForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: revisionOf(declined), actor: human })
 		const readyAgain = await submitReady(ctx, REVIEW_ID, revisionOf(reopened))
 		const latestSubmission = (await readThread(ctx.app, REVIEW_ID)).resource.submissions.at(-1)!.id
-		const forbidden = await resolveReviewThreadForHttp(ctx.app, REVIEW_ID, { expectedRevision: readyAgain, actor: human, resolution: 'obsolete', submissionId: latestSubmission })
+		const forbidden = await resolveReviewThreadForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: readyAgain, actor: human, resolution: 'obsolete', submissionId: latestSubmission })
 		expect(codesOf(forbidden)).toEqual(['review.direct_resolve_submission_forbidden'])
 
 		// Omitted resolution from ready-for-review is `verified`, accepting the latest submission.
-		const verified = await resolveReviewThreadForHttp(ctx.app, REVIEW_ID, { expectedRevision: readyAgain, actor: human, reason: 'Looks right' })
+		const verified = await resolveReviewThreadForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: readyAgain, actor: human, reason: 'Looks right' })
 		expect(verified.status).toBe(200)
 		const verifiedThread = await readThread(ctx.app, REVIEW_ID)
 		expect(verifiedThread.diagnostics).toEqual([])
@@ -175,19 +176,25 @@ describe('resolve_review_thread on /mcp always refuses', () => {
 			expect(RESOLVE_REVIEW_THREAD_DESCRIPTION).toBe('Resolution is human-only and happens in the UIUX Workbench. This tool always refuses. Reply on the thread, or submit it ready for review, and a human will resolve it.')
 			expect((tool?.inputSchema.properties as Record<string, { enum?: string[] }>).resolution?.enum).toEqual(['verified', 'answered', 'wont-fix', 'duplicate', 'obsolete'])
 
-			const cases: Array<[Record<string, unknown>, string]> = [
-				[{ actor: human }, 'review.resolve_requires_workbench'],
-				[{ actor: human, resolution: 'answered' }, 'review.resolve_requires_workbench'],
-				[{ actor: agent, resolution: 'answered' }, 'review.direct_resolve_requires_workbench'],
-				[{ actor: agent, resolution: 'wont-fix' }, 'review.direct_resolve_requires_workbench'],
-				[{ actor: agent, resolution: 'verified' }, 'review.resolve_requires_human'],
-				[{ actor: agent }, 'review.resolve_requires_human'],
+			// The refusal order is keyed on the principal, not on the payload (identity decision 7):
+			// a claimed `actor` changes nothing.
+			const humanClient = await connectedClient(ctx.app, testMember({ nickname: 'lead', kind: 'human', role: 'owner', credential: 'token' }))
+			const cases: Array<[typeof client, Record<string, unknown>, string]> = [
+				[humanClient.client, {}, 'review.resolve_requires_workbench'],
+				[humanClient.client, { resolution: 'answered' }, 'review.resolve_requires_workbench'],
+				[humanClient.client, { actor: agent, resolution: 'answered' }, 'review.resolve_requires_workbench'],
+				[client, { resolution: 'answered' }, 'review.direct_resolve_requires_workbench'],
+				[client, { resolution: 'wont-fix' }, 'review.direct_resolve_requires_workbench'],
+				[client, { resolution: 'verified' }, 'review.resolve_requires_human'],
+				[client, {}, 'review.resolve_requires_human'],
+				[client, { actor: { type: 'human', displayName: 'Spoofed' } }, 'review.resolve_requires_human'],
 			]
-			for (const [args, code] of cases) {
-				const result = await client.callTool({ name: 'resolve_review_thread', arguments: { reviewId: REVIEW_ID, expectedRevision: ready, ...args } })
+			for (const [caller, args, code] of cases) {
+				const result = await caller.callTool({ name: 'resolve_review_thread', arguments: { reviewId: REVIEW_ID, expectedRevision: ready, ...args } })
 				expect(result.isError).toBe(true)
 				expect(result.structuredContent).toMatchObject({ status: 'blocked', key: REVIEW_ID, code, diagnostics: [expect.objectContaining({ code })] })
 			}
+			await humanClient.close()
 			expect((await readThread(ctx.app, REVIEW_ID)).revision).toBe(ready)
 
 			// Reopen is unchanged on /mcp.
@@ -243,18 +250,18 @@ describe('Review list summary and resolution filter', () => {
 describe('Review pin display hint', () => {
 	it('creates with a writer-normalized hint beside the strict anchor', async () => {
 		const ctx = await session()
-		const created = await createReviewThreadForHttp(ctx.app, { id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' }, displayHint: { pin: { x: 0.123456, y: 1.5 } } })
+		const created = await createReviewThreadForHttp(scoped(ctx.app, MEI), { id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' }, displayHint: { pin: { x: 0.123456, y: 1.5 } } })
 		expect(created.status).toBe(201)
 		const thread = await readThread(ctx.app, REVIEW_ID)
 		expect(thread.resource.displayHint).toEqual({ pin: { x: 0.1235, y: 1 } })
 		expect(thread.resource.anchor).toEqual({ viewId: VIEW_ID, widgetId: 'root' })
 		expect(thread.diagnostics).toEqual([])
 
-		const insideAnchor = await createReviewThreadForHttp(ctx.app, { anchor: { viewId: VIEW_ID, widgetId: 'root', displayHint: { x: 0.5, y: 0.5 } } })
+		const insideAnchor = await createReviewThreadForHttp(scoped(ctx.app, MEI), { anchor: { viewId: VIEW_ID, widgetId: 'root', displayHint: { x: 0.5, y: 0.5 } } })
 		expect(insideAnchor.status).toBe(400)
 		expect(insideAnchor.body).toMatchObject({ code: 'malformed_payload' })
 		for (const displayHint of [{}, { pin: { x: 0.5 } }, { pin: { x: 0.5, y: 0.5, z: 1 } }, { pin: { x: '0.5', y: 0.5 } }]) {
-			const invalid = await createReviewThreadForHttp(ctx.app, { anchor: { viewId: VIEW_ID, widgetId: 'root' }, displayHint })
+			const invalid = await createReviewThreadForHttp(scoped(ctx.app, MEI), { anchor: { viewId: VIEW_ID, widgetId: 'root' }, displayHint })
 			expect(invalid.status).toBe(400)
 		}
 		expect(await ctx.app.createReviewThread({ anchor: { viewId: VIEW_ID, widgetId: 'root' }, displayHint: {} as never }))
@@ -265,21 +272,21 @@ describe('Review pin display hint', () => {
 
 	it('moves and clears the hint over HTTP and MCP without history, with revision CAS', async () => {
 		const ctx = await session()
-		const created = await createReviewThreadForHttp(ctx.app, { id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' } })
+		const created = await createReviewThreadForHttp(scoped(ctx.app, MEI), { id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' } })
 		const rev = revisionOf(created)
-		const moved = await setReviewDisplayHintForHttp(ctx.app, REVIEW_ID, { expectedRevision: rev, displayHint: { pin: { x: 0.7, y: 0.33333 } } })
+		const moved = await setReviewDisplayHintForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: rev, displayHint: { pin: { x: 0.7, y: 0.33333 } } })
 		expect(moved.status).toBe(200)
 		const movedThread = await readThread(ctx.app, REVIEW_ID)
 		expect(movedThread.resource.displayHint).toEqual({ pin: { x: 0.7, y: 0.3333 } })
 		expect(movedThread.resource.history).toEqual([])
 		expect(movedThread.revision).toBe(revisionOf(moved))
 
-		const stale = await setReviewDisplayHintForHttp(ctx.app, REVIEW_ID, { expectedRevision: rev, displayHint: null })
+		const stale = await setReviewDisplayHintForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: rev, displayHint: null })
 		expect(stale.status).toBe(409)
 		expect(stale.body).toMatchObject({ status: 'conflict', currentRevision: revisionOf(moved) })
-		expect((await setReviewDisplayHintForHttp(ctx.app, REVIEW_ID, { expectedRevision: revisionOf(moved) })).status).toBe(400)
-		expect((await setReviewDisplayHintForHttp(ctx.app, REVIEW_ID, { expectedRevision: revisionOf(moved), displayHint: {} })).status).toBe(400)
-		expect((await setReviewDisplayHintForHttp(ctx.app, SECOND_REVIEW_ID, { expectedRevision: revisionOf(moved), displayHint: null })).status).toBe(404)
+		expect((await setReviewDisplayHintForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: revisionOf(moved) })).status).toBe(400)
+		expect((await setReviewDisplayHintForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: revisionOf(moved), displayHint: {} })).status).toBe(400)
+		expect((await setReviewDisplayHintForHttp(scoped(ctx.app, MEI), SECOND_REVIEW_ID, { expectedRevision: revisionOf(moved), displayHint: null })).status).toBe(404)
 
 		const { client, close } = await connectedClient(ctx.app)
 		try {
@@ -301,10 +308,10 @@ describe('Review pin display hint', () => {
 
 	it('re-anchors with the decided tri-state hint rule and never records hints in history', async () => {
 		const ctx = await session()
-		const created = await createReviewThreadForHttp(ctx.app, { id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' }, displayHint: { pin: { x: 0.2, y: 0.4 } } })
+		const created = await createReviewThreadForHttp(scoped(ctx.app, MEI), { id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' }, displayHint: { pin: { x: 0.2, y: 0.4 } } })
 		let rev = revisionOf(created)
 		const reanchor = async (body: Record<string, unknown>) => {
-			const result = await reanchorReviewThreadForHttp(ctx.app, REVIEW_ID, { expectedRevision: rev, actor: human, ...body })
+			const result = await reanchorReviewThreadForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: rev, actor: human, ...body })
 			expect(result.status).toBe(200)
 			rev = revisionOf(result)
 			return (await readThread(ctx.app, REVIEW_ID)).resource
@@ -355,13 +362,13 @@ describe('packaged Workbench server routes (requires pnpm build)', () => {
 		try {
 			await access(join(server.workspaceRoot, SERVER_HOLD_RELATIVE_PATH))
 			const post = async (path: string, body: unknown) => {
-				const response = await fetch(`${server.origin}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+				const response = await fetch(`${server.origin}${path}`, { method: 'POST', headers: { ...server.headers, 'content-type': 'application/json' }, body: JSON.stringify(body) })
 				return { status: response.status, body: await response.json() as Record<string, unknown> }
 			}
-			const workspace = await (await fetch(`${server.origin}/api/resources/workspace/workspace`)).json() as { resource: { schemaVersion: number }; inspection: { state: string } }
+			const workspace = await (await fetch(`${server.origin}/api/resources/workspace/workspace`, { headers: server.headers })).json() as { resource: { schemaVersion: number }; inspection: { state: string } }
 			expect(workspace.resource.schemaVersion).toBe(2)
 			expect(workspace.inspection.state).toBe('current')
-			const views = await (await fetch(`${server.origin}/api/resources/list`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kinds: ['view'], limit: 1 }) })).json() as { items: { key: string }[] }
+			const views = await (await fetch(`${server.origin}/api/resources/list`, { method: 'POST', headers: { ...server.headers, 'content-type': 'application/json' }, body: JSON.stringify({ kinds: ['view'], limit: 1 }) })).json() as { items: { key: string }[] }
 			const viewId = views.items[0]!.key
 
 			const created = await post('/api/reviews', { anchor: { viewId, widgetId: 'root' }, displayHint: { pin: { x: 0.5, y: 0.25 } } })
@@ -373,7 +380,7 @@ describe('packaged Workbench server routes (requires pnpm build)', () => {
 			expect(missingResolution.status).toBe(400)
 			const resolved = await post(`/api/reviews/${key}/resolve`, { expectedRevision: moved.body.revision, actor: human, resolution: 'answered' })
 			expect(resolved.status).toBe(200)
-			const read = await (await fetch(`${server.origin}/api/resources/review/${key}`)).json() as { resource: ReviewThread; diagnostics: unknown[] }
+			const read = await (await fetch(`${server.origin}/api/resources/review/${key}`, { headers: server.headers })).json() as { resource: ReviewThread; diagnostics: unknown[] }
 			expect(read.diagnostics).toEqual([])
 			expect(read.resource.displayHint).toEqual({ pin: { x: 0.75, y: 0.25 } })
 			expect(read.resource.history.at(-1)).toMatchObject({ to: 'resolved', resolution: 'answered' })

@@ -1306,5 +1306,137 @@
     "editSection": "Edit the focused Spec section",
     "saveSection": "Save or cancel the Spec section",
     "copyId": "Copy the selected Widget id"
+  },
+  "access": {
+    "login": {
+      "title": "Sign in to UIUX",
+      "description": "Open the sign-in link that uiux dev or your Owner gave you, or paste a member token.",
+      "signingIn": "Signing you in…",
+      "tokenLabel": "Member token",
+      "tokenHelp": "A token stays valid after you sign in. Paste it only into this Workbench.",
+      "submit": "Sign in",
+      "recoverTitle": "No link?",
+      "recover": "On the host, run {command} for a fresh single-use link.",
+      "plainHttp": "This page uses plain HTTP. Anyone on this network can capture sign-in links, session cookies and LAN tokens and reuse them.",
+      "workspaceLabel": "Workspace roster {hint}",
+      "errors": {
+        "invalid": "That link or token is not valid for this Workspace. Sign-in links work once and expire after 24 hours.",
+        "rateLimited": "Too many failed attempts from this address. Wait a minute and try again.",
+        "failed": "Sign-in failed. Try again."
+      }
+    },
+    "role": {
+      "owner": "Owner",
+      "editor": "Editor",
+      "reviewer": "Reviewer",
+      "viewer": "Viewer"
+    },
+    "kind": {
+      "human": "Human",
+      "agent": "Agent"
+    },
+    "chip": {
+      "label": "Signed in as {nickname}, {role}",
+      "signedInAs": "Signed in as",
+      "members": "Members",
+      "signOut": "Sign out",
+      "signedOut": "Signed out."
+    },
+    "requiresRole": "Requires the {role} role.",
+    "members": {
+      "title": "Members",
+      "subtitle": "Who can open this Workspace, and with which role.",
+      "rosterLabel": "Roster {hint}",
+      "rosterHelp": "Stored on this host, never in the Workspace or Git.",
+      "ownerOnly": "Only an Owner can manage members.",
+      "add": "Add member",
+      "addTitle": "Add a member",
+      "addDescription": "Give a person a sign-in link afterwards, or an agent a token.",
+      "nicknameLabel": "Nickname",
+      "nicknameHelp": "Lowercase letters, digits, dot, underscore and hyphen. Up to 32 characters.",
+      "roleLabel": "Role",
+      "kindLabel": "Kind",
+      "kindHelp": "Fixed after creation. Agents are capped at Editor and never resolve.",
+      "added": "{nickname} added.",
+      "you": "You",
+      "remove": "Remove",
+      "removeTitle": "Remove {nickname}?",
+      "removeDescription": "Their tokens, sign-in links and sessions stop working at once. Records they wrote keep their name.",
+      "removed": "{nickname} removed.",
+      "roleChanged": "{nickname} is now {role}.",
+      "actionsLabel": "Actions for {nickname}",
+      "createToken": "Create token",
+      "invite": "Sign-in link",
+      "columns": {
+        "member": "Member",
+        "role": "Role",
+        "tokens": "Tokens",
+        "sessions": "Sessions"
+      },
+      "errorTitle": "Couldn't update the roster"
+    },
+    "tokens": {
+      "title": "Tokens",
+      "empty": "No active tokens.",
+      "createTitle": "Create a token for {nickname}",
+      "createDescription": "MCP clients and scripts send it as a bearer token. It acts with the member's current role.",
+      "labelLabel": "Label",
+      "labelPlaceholder": "e.g. laptop or CI",
+      "expiresLabel": "Expires",
+      "expires90": "In 90 days",
+      "expires30": "In 30 days",
+      "expiresNever": "Never",
+      "revealTitle": "Copy this token now",
+      "revealDescription": "It is shown only once. Keep it in an environment variable such as UIUX_MCP_TOKEN and never commit it.",
+      "mcpHint": "In the MCP client config, send the header Authorization: Bearer followed by this token.",
+      "copy": "Copy",
+      "copied": "Copied.",
+      "copyFailed": "Couldn't copy. Select the text and copy it manually.",
+      "revoke": "Revoke",
+      "revoked": "Token {id} revoked.",
+      "never": "Never",
+      "unused": "Not used yet",
+      "lan": "LAN",
+      "columns": {
+        "token": "Token",
+        "member": "Member",
+        "label": "Label",
+        "expires": "Expires",
+        "lastUsed": "Last used"
+      }
+    },
+    "invites": {
+      "title": "Sign-in link for {nickname}",
+      "description": "Single use, expires {time}. It signs one browser in as {nickname}.",
+      "humansOnly": "Agents sign in with a token, not a link."
+    },
+    "sessions": {
+      "title": "Sessions",
+      "empty": "No active sessions.",
+      "current": "This browser",
+      "revoke": "End session",
+      "revoked": "Session ended.",
+      "columns": {
+        "member": "Member",
+        "lastSeen": "Last seen",
+        "expires": "Expires",
+        "device": "Browser"
+      }
+    },
+    "mcpAttempts": {
+      "title": "MCP clients without a token",
+      "description": "{n} request to /mcp had no valid token. The latest came {time} from {agent}. | {n} requests to /mcp had no valid token. The latest came {time} from {agent}.",
+      "action": "Create an agent token",
+      "unknownAgent": "an unnamed client"
+    },
+    "lock": {
+      "badge": "Locked by {nickname} · until {time}",
+      "tooltip": "{nickname} ({kind}) is editing this. Editing here is paused until the lock is released or expires.",
+      "release": "Release lock",
+      "released": "Lock released.",
+      "releaseFailed": "Couldn't release the lock.",
+      "saveRefused": "{nickname} holds the edit lock until {time}",
+      "saveRefusedBody": "Your changes are kept. Save again after the lock is released or expires."
+    }
   }
 }

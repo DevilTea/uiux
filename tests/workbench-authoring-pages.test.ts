@@ -17,7 +17,7 @@ type LocaleRead = { revision: string; resource: Record<string, string> }
 type AssetRead = { revision: string; resource: { metadata: { name: string; contentFilename: string; mediaType: string }; content: { digest: string } } }
 
 async function api<T>(path: string): Promise<T> {
-	return await (await fetch(`${server.origin}${path}`)).json() as T
+	return await (await fetch(`${server.origin}${path}`, { headers: server.headers })).json() as T
 }
 
 async function readWorkspace(): Promise<WorkspaceRead> {
@@ -26,7 +26,7 @@ async function readWorkspace(): Promise<WorkspaceRead> {
 
 /** An agent-side write through the same authoring route, outside the page. */
 async function agentPut(path: string, body: unknown): Promise<void> {
-	const response = await fetch(`${server.origin}${path}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+	const response = await fetch(`${server.origin}${path}`, { method: 'PUT', headers: { ...server.headers, 'content-type': 'application/json' }, body: JSON.stringify(body) })
 	if (!response.ok) throw new Error(`Agent write failed: ${response.status} ${await response.text()}`)
 }
 
@@ -36,6 +36,7 @@ async function open(path: string, width = 1920, height = 1080): Promise<{ contex
 		localStorage.setItem('nuxt-color-mode', 'light')
 		localStorage.setItem('uiux.workbench.locale', 'en-US')
 	})
+	await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
 	const page = await context.newPage()
 	await page.goto(`${server.origin}${path}`, { waitUntil: 'networkidle' })
 	await page.locator('main').first().waitFor()
@@ -168,7 +169,7 @@ describe('Locales page (R10)', () => {
 
 describe('Assets page (R10)', () => {
 	it('edits metadata through the Asset replace operation and keeps the content bytes', async () => {
-		const list = await (await fetch(`${server.origin}/api/resources/list`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kinds: ['asset'], limit: 10 }) })).json() as { items: { key: string }[] }
+		const list = await (await fetch(`${server.origin}/api/resources/list`, { method: 'POST', headers: { ...server.headers, 'content-type': 'application/json' }, body: JSON.stringify({ kinds: ['asset'], limit: 10 }) })).json() as { items: { key: string }[] }
 		const id = list.items[0]!.key
 		const before = await api<AssetRead>(`/api/resources/asset/${id}`)
 		const { context, page } = await open('/workspace/assets')

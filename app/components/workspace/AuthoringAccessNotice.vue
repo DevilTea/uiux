@@ -5,8 +5,9 @@ import type { AuthoringAccess } from '../../composables/useAuthoringAccess'
 
 /**
  * Why a Workspace authoring page is read-only. Tablet and mobile get "Edit on desktop";
- * a migration-required Workspace names the reason. Publication already has its banner,
- * so it shows nothing here.
+ * a migration-required Workspace names the reason, and a member below Editor names the role
+ * required. Publication already has its banner and a held edit lock its Lock badge, so they
+ * show nothing here.
  */
 const props = defineProps<{ access: AuthoringAccess }>()
 const { t } = useI18n()
@@ -16,6 +17,8 @@ const notice = computed(() => {
 		return { icon: 'i-lucide-monitor', title: t('common.editOnDesktop'), description: t('authoring.access.device') }
 	if (props.access === 'migration')
 		return { icon: 'i-lucide-lock', title: t('common.readOnly'), description: t('authoring.access.migration') }
+	if (props.access === 'role')
+		return { icon: 'i-lucide-user-lock', title: t('common.readOnly'), description: t('access.requiresRole', { role: t('access.role.editor') }) }
 	return undefined
 })
 </script>

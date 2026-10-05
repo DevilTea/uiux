@@ -21,7 +21,7 @@ const steps = { entry: crypto.randomUUID(), payment: crypto.randomUUID(), done: 
 async function api<T = unknown>(method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> {
 	const response = await fetch(`${server.origin}${path}`, {
 		method,
-		headers: { 'content-type': 'application/json', origin: server.origin },
+		headers: { ...server.headers, 'content-type': 'application/json', origin: server.origin },
 		...(body === undefined ? {} : { body: JSON.stringify(body) }),
 	})
 	const text = await response.text()
@@ -88,6 +88,7 @@ async function open(path: string, size: { width: number; height: number } = { wi
 		localStorage.setItem('nuxt-color-mode', 'light')
 		localStorage.setItem('uiux.workbench.locale', 'en-US')
 	})
+	await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
 	const page = await context.newPage()
 	await page.goto(`${server.origin}${path}`, { waitUntil: 'networkidle' })
 	await page.locator('main').first().waitFor()

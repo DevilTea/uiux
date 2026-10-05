@@ -11,7 +11,7 @@ import WorkbenchPage from '../components/workbench/WorkbenchPage.vue'
  */
 const { t } = useI18n()
 const workbench = useWorkbench()
-const { isReadOnly } = workbench
+const { reviewReadOnly } = workbench
 
 function openInCanvas(thread: { threadId: string; viewId: string; widgetId: string }): void {
 	void navigateTo(viewLocation(thread.viewId, { widget: thread.widgetId, thread: thread.threadId }))
@@ -25,7 +25,7 @@ function openInCanvas(thread: { threadId: string; viewId: string; widgetId: stri
   >
     <div class="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col border-default lg:border-x">
       <ReviewsPanel
-        :read-only="isReadOnly"
+        :read-only="reviewReadOnly"
         hide-comment-mode
         show-open-in-canvas
         @open-in-canvas="openInCanvas"

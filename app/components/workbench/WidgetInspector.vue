@@ -20,7 +20,7 @@ const emit = defineEmits<{
 const { t, locale } = useI18n()
 const toast = useToast()
 const workbench = useWorkbench()
-const { selectedView, selectedWidgetId, isReadOnly, workspace } = workbench
+const { selectedView, selectedWidgetId, reviewReadOnly, workspace } = workbench
 const inspection = useWidgetInspection(workbench)
 const {
 	hasSelection, node, missing, irNode, ancestry, label, variantName, variantInvalid, variantFaults,
@@ -192,7 +192,7 @@ function onKeydown(event: KeyboardEvent): void {
         </div>
         <div class="flex items-center gap-1">
           <UButton
-            v-if="!isReadOnly"
+            v-if="!reviewReadOnly"
             color="annotation"
             variant="soft"
             size="sm"

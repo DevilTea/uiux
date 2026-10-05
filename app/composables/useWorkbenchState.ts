@@ -4,6 +4,7 @@ import { deriveRenderContextOptions } from '../../src/preview/render-context-opt
 import { deriveWidgetTree, findWidgetInTree, flattenWidgetTree, type WidgetTreeNode } from '../../src/preview/widget-tree'
 import { describeFetchError } from '../utils/fetch-error'
 import { useUiuxClient } from './useUiuxClient'
+import { useAccess } from './useAccess'
 import type {
 	Diagnostic,
 	EvidenceContextSelection,
@@ -27,6 +28,10 @@ export function createWorkbenchState() {
 	const uiux = useUiuxClient()
 	const { t } = useI18n()
 	const isReadOnly = uiux.isReadOnly
+	// Role-aware controls (accepted identity decision 12). The server remains the authority.
+	const access = useAccess()
+	const authorReadOnly = computed(() => isReadOnly.value || !access.canAuthor.value)
+	const reviewReadOnly = computed(() => isReadOnly.value || !access.canReview.value)
 
 	const publicationInfo = shallowRef<PublicationInfo>()
 	const workspace = ref<WorkspaceRead>()
@@ -224,6 +229,8 @@ export function createWorkbenchState() {
 
 	return {
 		isReadOnly,
+		authorReadOnly,
+		reviewReadOnly,
 		publicationInfo,
 		workspace,
 		views,

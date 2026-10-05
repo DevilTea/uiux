@@ -3,11 +3,13 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n, useToast } from '#imports'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
-import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
+import { describeFetchError, isLockedError, type FetchErrorDetails, type FetchErrorLock } from '../../utils/fetch-error'
 import { viewPath } from '../../utils/workbench-routes'
 import { blobToBase64, isImageMediaType } from '../../utils/workspace-authoring'
 import type { AssetEntry } from './asset-types'
 import AuthoringConflictAlert from './AuthoringConflictAlert.vue'
+import LockBadge from '../workbench/LockBadge.vue'
+import LockedSaveAlert from '../workbench/LockedSaveAlert.vue'
 import AuthoringErrorAlert from './AuthoringErrorAlert.vue'
 import AuthoringSaveBar from './AuthoringSaveBar.vue'
 
@@ -38,6 +40,8 @@ const saving = ref(false)
 const conflict = ref(false)
 const theirs = ref<{ name: string; contentFilename: string; mediaType: string }>()
 const error = ref<FetchErrorDetails>()
+/** A save refused by someone else's edit lease (`423 resource.locked`); the form keeps the draft. */
+const locked = ref<Readonly<{ lock?: FetchErrorLock }>>()
 
 function adopt(entry: AssetEntry): void {
 	base.value = { revision: entry.revision, name: entry.name, contentFilename: entry.contentFilename, mediaType: entry.mediaType }
@@ -48,6 +52,7 @@ function adopt(entry: AssetEntry): void {
 	conflict.value = false
 	theirs.value = undefined
 	error.value = undefined
+	locked.value = undefined
 }
 
 watch(() => props.entry.key, () => adopt(props.entry), { immediate: true })
@@ -73,6 +78,7 @@ async function save(): Promise<void> {
 	if (!props.canEdit || saving.value || conflict.value || !dirty.value || invalid.value) return
 	saving.value = true
 	error.value = undefined
+	locked.value = undefined
 	try {
 		const bytes: Blob = replacement.value ? replacement.value : await fetch(props.contentUrl, { credentials: 'same-origin' }).then((response) => {
 			if (!response.ok) throw new Error(t('assets.contentUnreadable'))
@@ -100,6 +106,9 @@ async function save(): Promise<void> {
 			conflict.value = true
 			const latest = await props.reread(props.entry.key).catch(() => undefined)
 			if (latest) theirs.value = { name: latest.name, contentFilename: latest.contentFilename, mediaType: latest.mediaType }
+		}
+		else if (isLockedError(details)) {
+			locked.value = { lock: details.lock }
 		}
 		else {
 			error.value = details
@@ -161,6 +170,15 @@ const details = computed(() => [
     :ui="{ content: 'max-w-lg', body: 'flex flex-col gap-6' }"
   >
     <template #body>
+      <LockBadge
+        kind="asset"
+        :resource-key="entry.key"
+      />
+      <LockedSaveAlert
+        v-if="locked"
+        :lock="locked.lock"
+        @dismiss="locked = undefined"
+      />
       <AuthoringConflictAlert
         v-if="conflict"
         :title="t('assets.conflictTitle')"

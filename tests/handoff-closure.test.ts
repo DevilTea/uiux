@@ -12,7 +12,9 @@ import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema
 import { createHandoffExportService } from '../src/application/services/handoff-export'
 import { createFormalCaptureService } from '../src/application/services/formal-capture'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
-import { createUiuxMcpHttpHandler } from '../src/mcp/server'
+import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
+import { createLeaseManager } from '../src/application/access/leases'
+import { AGENT_EDITOR, provisionToken, sessionCookieFor } from './support/access'
 import {
 	validateHandoffManifest,
 	validateHandoffRoot,
@@ -103,7 +105,8 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 	return { root, persistence }
 }
 
-async function startTestServer(workspaceRoot: string): Promise<{ url: string; close: () => void }> {
+async function startTestServer(workspaceRoot: string): Promise<{ url: string; close: () => void; token: string; cookie: { name: string; value: string }; headers: Record<string, string> }> {
+	const token = await provisionToken(workspaceRoot, { nickname: 'tester', kind: 'human', role: 'owner' })
 	const probe = createServer()
 	await new Promise<void>((res, rej) => { probe.once('error', rej); probe.listen(0, '127.0.0.1', () => res()) })
 	const address = probe.address() as AddressInfo
@@ -152,9 +155,13 @@ async function startTestServer(workspaceRoot: string): Promise<{ url: string; cl
 		throw new Error(`Test Nitro server timed out waiting for /api/health:\n${serverOutput}`)
 	}
 
+	const cookie = await sessionCookieFor(baseUrl, token)
 	return {
 		url: baseUrl,
 		close: () => server.kill('SIGTERM'),
+		token,
+		cookie,
+		headers: { cookie: `${cookie.name}=${cookie.value}` },
 	}
 }
 
@@ -841,14 +848,15 @@ describe('Handoff closure export and readiness evaluation', () => {
 		const viewRev = await persistence.views.create(VIEW_1_ID, view)
 		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
 
-		const { url: serverUrl } = await startTestServer(root)
-		const app = createWorkspaceApplicationSession(persistence)
+		const server = await startTestServer(root)
+		const serverUrl = server.url
+		const app = createWorkspaceApplicationSession(persistence, { captureCookie: () => server.cookie })
 
 		// 1. Test MCP client connection and tools
-		const handler = createUiuxMcpHttpHandler(app)
+		const handler = createUiuxMcpHttpHandler(app, { leases: createLeaseManager() })
 		const client = new Client({ name: 'mcp-handoff-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto' } })
 		const transport = new StreamableHTTPClientTransport(new URL(`${serverUrl}/api/mcp`), {
-			fetch: async (input, init) => handler.fetch(new Request(input, init)),
+			fetch: async (input, init) => handler.fetch(new Request(input, init), { authInfo: principalAuthInfo(AGENT_EDITOR) }),
 		})
 		await client.connect(transport)
 
@@ -882,7 +890,7 @@ describe('Handoff closure export and readiness evaluation', () => {
 			// POST /api/handoff/assess
 			const httpAssess = await fetch(`${serverUrl}/api/handoff/assess`, {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
+				headers: { ...server.headers, 'Content-Type': 'application/json' },
 				body: JSON.stringify({ roots: [{ type: 'view', viewId: VIEW_1_ID }] }),
 			})
 			expect(httpAssess.status).toBe(200)
@@ -892,7 +900,7 @@ describe('Handoff closure export and readiness evaluation', () => {
 			// POST /api/handoff/export
 			const httpExport = await fetch(`${serverUrl}/api/handoff/export`, {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
+				headers: { ...server.headers, 'Content-Type': 'application/json' },
 				body: JSON.stringify({ roots: [{ type: 'view', viewId: VIEW_1_ID }] }),
 			})
 			expect(httpExport.status).toBe(200)
@@ -905,7 +913,7 @@ describe('Handoff closure export and readiness evaluation', () => {
 			expect(httpExportJson.bundleIdentity).toBeDefined()
 
 			// GET /api/artifacts/[digest] to download exported manifest
-			const httpArtifact = await fetch(`${serverUrl}/api/artifacts/${httpExportJson.manifestArtifactDigest}`)
+			const httpArtifact = await fetch(`${serverUrl}/api/artifacts/${httpExportJson.manifestArtifactDigest}`, { headers: server.headers })
 			expect(httpArtifact.status).toBe(200)
 			expect(httpArtifact.headers.get('content-type')).toContain('application/json')
 			expect(httpArtifact.headers.get('x-content-type-options')).toBe('nosniff')
@@ -1109,8 +1117,9 @@ describe('Handoff closure export and readiness evaluation', () => {
 		const view = createSampleView(VIEW_1_ID, 'Real Capture Handoff View')
 		await persistence.views.create(VIEW_1_ID, view)
 
-		const { url: serverUrl } = await startTestServer(root)
-		const formalCapture = createFormalCaptureService(persistence)
+		const server = await startTestServer(root)
+		const serverUrl = server.url
+		const formalCapture = createFormalCaptureService(persistence, { captureCookie: () => server.cookie })
 
 		// 1. Run REAL formal capture via Playwright against running server
 		const captureBatch = await formalCapture.capture({

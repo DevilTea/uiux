@@ -17,7 +17,7 @@ let browser: Browser
 type ViewRead = { revision: string; resource: { ir: unknown; variants: Record<string, unknown>; spec: Record<string, unknown> } }
 
 async function readView(): Promise<ViewRead> {
-	return await (await fetch(`${server.origin}/api/resources/view/${VIEW_ID}`)).json() as ViewRead
+	return await (await fetch(`${server.origin}/api/resources/view/${VIEW_ID}`, { headers: server.headers })).json() as ViewRead
 }
 
 /** Writes through `update_view_spec` over HTTP, as another reviewer or agent would. */
@@ -27,7 +27,7 @@ async function writeIntent(intent: string): Promise<void> {
 	const content = Object.fromEntries(Object.entries(read.resource.spec).filter(([key]) => key !== 'decisions'))
 	const response = await fetch(`${server.origin}/api/views/${VIEW_ID}/spec`, {
 		method: 'PUT',
-		headers: { 'content-type': 'application/json' },
+		headers: { ...server.headers, 'content-type': 'application/json' },
 		body: JSON.stringify({ expectedRevision: read.revision, spec: { ...content, intent } }),
 	})
 	if (!response.ok) throw new Error(`Could not write the Spec: ${response.status} ${await response.text()}`)
@@ -39,7 +39,7 @@ beforeAll(async () => {
 	const read = await readView()
 	const response = await fetch(`${server.origin}/api/views/${VIEW_ID}/structure`, {
 		method: 'PUT',
-		headers: { 'content-type': 'application/json' },
+		headers: { ...server.headers, 'content-type': 'application/json' },
 		body: JSON.stringify({ expectedRevision: read.revision, ir: read.resource.ir, variants: { ...read.resource.variants, 'error-state': { state: { [WIDGET_ID]: { disabled: true } } } } }),
 	})
 	if (!response.ok) throw new Error(`Could not author the test Variant: ${response.status}`)
@@ -58,6 +58,7 @@ async function open(path: string, width = 1920, height = 1080): Promise<{ contex
 		localStorage.setItem('uiux.workbench.rightPanelHidden', '0')
 	})
 	await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: server.origin })
+	await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
 	const page = await context.newPage()
 	await page.goto(`${server.origin}${path}`, { waitUntil: 'networkidle' })
 	await page.locator('main').first().waitFor()

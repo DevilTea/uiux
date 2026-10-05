@@ -4,7 +4,6 @@ import { useI18n } from '#imports'
 import { useUiuxClient } from '../composables/useUiuxClient'
 import { useWorkbenchFeedback } from '../composables/useWorkbenchFeedback'
 import { useWorkbenchFormat } from '../composables/useWorkbenchFormat'
-import { useReviewerIdentity } from '../composables/useReviewerIdentity'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
 import type { FormalEvidenceRecord } from '../../src/domain/evidence/schema'
 import { isCompleteEvidenceForViewRevision } from '../../src/domain/evidence/staleness'
@@ -33,8 +32,8 @@ interface FormalEvidenceItem {
 
 type FormError = { name: string; message: string }
 
-// Actor display name and Decision defaults are authored Workspace data, not Workbench chrome.
-const DEFAULT_ACTOR_NAME = 'Reviewer'
+// Decision defaults are authored Workspace data, not Workbench chrome. The actor is never sent:
+// the server stamps it from the signed-in member (accepted identity decision 6).
 const DEFAULT_OUTCOME_SUMMARY = 'Decision accepted.'
 const DEFAULT_OUTCOME_RATIONALE = 'Consensus reached in review thread.'
 
@@ -75,12 +74,6 @@ const loadError = ref<FetchErrorDetails>()
 
 // Action form states
 const newMessageBody = ref('')
-// The reviewer's name is shared with the navbar identity picker and kept in this browser only.
-const identity = useReviewerIdentity()
-const authorName = computed({
-	get: () => identity.name.value,
-	set: (value: string) => identity.setName(value),
-})
 const sendingMessage = ref(false)
 
 const reanchorReason = ref('')
@@ -145,10 +138,6 @@ function statusLabel(status: ReviewStatus | undefined): string {
 	if (status === 'resolved') return t('reviews.status.resolved')
 	if (status === 'ready-for-review') return t('reviews.status.readyForReview')
 	return t('reviews.status.open')
-}
-
-function actorName(): string {
-	return authorName.value.trim() || DEFAULT_ACTOR_NAME
 }
 
 function shorten(value: string, length: number): string {
@@ -246,7 +235,6 @@ async function handleAppendMessage() {
 			method: 'POST',
 			body: {
 				expectedRevision: selectedReviewData.value.revision,
-				actor: { type: 'human', displayName: actorName() },
 				body: newMessageBody.value.trim(),
 			},
 		})
@@ -278,7 +266,6 @@ async function handleReanchor() {
 					viewId: props.currentViewId,
 					widgetId,
 				},
-				actor: { type: 'human', displayName: actorName() },
 				reason: reanchorReason.value.trim() || undefined,
 			},
 		})
@@ -330,7 +317,6 @@ async function handleSubmitReady() {
 			method: 'POST',
 			body: {
 				expectedRevision: selectedReviewData.value.revision,
-				actor: { type: 'human', displayName: actorName() },
 				changeDomains: ['views'],
 				resources: [{ identity: { kind: 'view', key: targetViewId }, revision: targetRev }],
 				evidenceRefs,
@@ -359,7 +345,6 @@ async function handleResolve() {
 			method: 'POST',
 			body: {
 				expectedRevision: selectedReviewData.value.revision,
-				actor: { type: 'human', displayName: actorName() },
 				// Accept & resolve from ready-for-review: the evidence-gated `verified` resolution.
 				resolution: 'verified',
 				...(latestSub?.id ? { submissionId: latestSub.id } : {}),
@@ -389,7 +374,6 @@ async function handleReopen() {
 			method: 'POST',
 			body: {
 				expectedRevision: selectedReviewData.value.revision,
-				actor: { type: 'human', displayName: actorName() },
 				reason: reopenReason.value.trim() || undefined,
 			},
 		})
@@ -448,7 +432,6 @@ async function handlePromoteToDecision() {
 					summary: promoteForm.outcomeSummary.trim() || DEFAULT_OUTCOME_SUMMARY,
 					rationale: promoteForm.outcomeRationale.trim() || DEFAULT_OUTCOME_RATIONALE,
 				},
-				actor: { type: 'human', displayName: actorName() },
 			},
 		})
 		isPromoting.value = false
@@ -498,7 +481,6 @@ async function handleCreateReviewThread(targetWidgetIdOverride?: string) {
 					method: 'POST',
 					body: {
 						expectedRevision: res.revision,
-						actor: { type: 'human', displayName: actorName() },
 						body: createForm.firstMessage.trim(),
 					},
 				})
@@ -825,19 +807,6 @@ watch(() => props.currentViewId, () => {
           class="space-y-2"
           @submit.prevent="handleAppendMessage"
         >
-          <UFormField
-            :label="t('reviews.reply.authorLabel')"
-            size="xs"
-            orientation="horizontal"
-          >
-            <UInput
-              v-model="authorName"
-              size="xs"
-              :placeholder="t('reviews.reply.authorPlaceholder')"
-              class="w-32"
-            />
-          </UFormField>
-
           <UFormField
             :label="t('reviews.reply.messageLabel')"
             size="xs"

@@ -1,8 +1,11 @@
 import { defineEventHandler } from 'h3'
 import { getSelectedWorkspaceServerRuntime } from '../../../src/server/selected-workspace'
 import { resolveSelectedWorkspaceAdapters, getSelectedWorkspacePreviewBundle } from '../../../src/server/workspace-adapters'
+import { denyUnlessAllowed } from '../../../src/server/access/http'
 
-export default defineEventHandler(async () => {
+export default defineEventHandler(async (event) => {
+	const denied = denyUnlessAllowed(event, 'readPreview')
+	if (denied) return denied
 	const workspaceRuntime = getSelectedWorkspaceServerRuntime()
 	const resolution = await resolveSelectedWorkspaceAdapters(workspaceRuntime.root)
 

@@ -4,6 +4,7 @@ import { useI18n } from '#imports'
 import type { SelectItem } from '@nuxt/ui'
 import type { SpecDraft, SpecEditor } from '../../composables/useSpecEditor'
 import type { ReferenceDraft } from '../../utils/widget-inspection'
+import LockedSaveAlert from './LockedSaveAlert.vue'
 
 /**
  * The edit form for one Spec section (desktop only). Saves through `update_view_spec` with the
@@ -18,7 +19,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const root = ref<HTMLElement>()
-const { draft, saving, conflict, theirs, invalid, fieldErrors } = props.editor
+const { draft, saving, conflict, locked, heldByOther, theirs, invalid, fieldErrors } = props.editor
 
 const typeItems = computed<SelectItem[]>(() => [
 	{ label: t('spec.ref.external'), value: 'external' },
@@ -108,6 +109,11 @@ const conflictActions = computed(() => [
     data-spec-editor
     @keydown="onKeydown"
   >
+    <LockedSaveAlert
+      v-if="locked"
+      :lock="locked.lock"
+      @dismiss="locked = undefined"
+    />
     <UAlert
       v-if="conflict"
       color="warning"
@@ -393,7 +399,7 @@ const conflictActions = computed(() => [
             size="sm"
             :label="saving ? t('common.saving') : t('common.save')"
             :loading="saving"
-            :disabled="!!conflict"
+            :disabled="!!conflict || heldByOther"
             data-spec-save
           />
         </UTooltip>

@@ -10,7 +10,7 @@ import { flowPath, viewLocation } from '../../utils/workbench-routes'
 const { t } = useI18n()
 const workbench = useWorkbench()
 const shell = useWorkbenchShell()
-const { views, flows, reviews, isReadOnly } = workbench
+const { views, flows, reviews, reviewReadOnly } = workbench
 
 function statusLabel(status: string | undefined): string {
 	if (status === 'resolved') return t('reviews.status.resolved')
@@ -83,7 +83,7 @@ const groups = computed<CommandPaletteGroup<CommandPaletteItem>[]>(() => {
 		})
 	}
 	const actions: CommandPaletteItem[] = []
-	if (!isReadOnly.value && shell.canToggleCommentMode.value)
+	if (!reviewReadOnly.value && shell.canToggleCommentMode.value)
 		actions.push({ label: t('palette.toggleComment'), icon: 'i-lucide-message-circle-plus', kbds: ['C'], onSelect: () => shell.toggleCommentMode() })
 	actions.push(
 		{ label: t('palette.toggleTheme'), icon: 'i-lucide-sun-moon', kbds: ['meta', '.'], onSelect: () => shell.toggleWorkbenchTheme() },

@@ -70,7 +70,7 @@ const openFlowId = computed(() => typeof route.params.flowId === 'string' ? rout
 
 /** `create_flow` is desktop authoring (brief g, section 7). */
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
-const canCreateFlow = computed(() => !workbench.isReadOnly.value && isDesktop.value && workbench.workspace.value?.inspection?.state !== 'migration_required')
+const canCreateFlow = computed(() => !workbench.authorReadOnly.value && isDesktop.value && workbench.workspace.value?.inspection?.state !== 'migration_required')
 const createFlowOpen = ref(false)
 </script>
 

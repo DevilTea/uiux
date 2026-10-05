@@ -1,7 +1,7 @@
 import { computed, inject, provide, ref, shallowRef, watch, type InjectionKey, type Ref } from 'vue'
 import { useI18n } from '#imports'
 import { deriveWidgetTree, flattenWidgetTree } from '../../src/preview/widget-tree'
-import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
+import { describeFetchError, isLockedError, type FetchErrorDetails, type FetchErrorLock } from '../utils/fetch-error'
 import {
 	cloneDraft,
 	draftToCanonical,
@@ -60,6 +60,8 @@ export function useFlowEditor(flowId: Ref<string>) {
 	const saving = ref(false)
 	const conflict = ref(false)
 	const saveError = ref<FetchErrorDetails>()
+	/** A save refused by someone else's edit lease (`423 resource.locked`); the draft is kept, as with 409. */
+	const locked = shallowRef<Readonly<{ lock?: FetchErrorLock }>>()
 	let loadSequence = 0
 
 	async function load(): Promise<void> {
@@ -91,6 +93,7 @@ export function useFlowEditor(flowId: Ref<string>) {
 			lossless.value = projected.lossless
 			conflict.value = false
 			saveError.value = undefined
+			locked.value = undefined
 		}
 		catch (cause) {
 			if (sequence !== loadSequence) return
@@ -303,6 +306,7 @@ export function useFlowEditor(flowId: Ref<string>) {
 	function discard(): void {
 		if (saved.value) draft.value = cloneDraft(saved.value)
 		saveError.value = undefined
+		locked.value = undefined
 	}
 
 	/** One atomic `update_flow` with the revision this draft started from. A 409 keeps the draft. */
@@ -312,6 +316,7 @@ export function useFlowEditor(flowId: Ref<string>) {
 		if (!current || !base || saving.value || !dirty.value || saveBlockers.value.length) return false
 		saving.value = true
 		saveError.value = undefined
+		locked.value = undefined
 		const sent = cloneDraft(current)
 		try {
 			await $fetch(`/api/flows/${encodeURIComponent(base.key)}`, {
@@ -328,6 +333,7 @@ export function useFlowEditor(flowId: Ref<string>) {
 		catch (cause) {
 			const details = describeFetchError(cause, t('flows.save.failed'))
 			if (details.statusCode === 409 || details.status === 'conflict') conflict.value = true
+			else if (isLockedError(details)) locked.value = { lock: details.lock }
 			else saveError.value = details
 			return false
 		}
@@ -353,6 +359,7 @@ export function useFlowEditor(flowId: Ref<string>) {
 		saving,
 		conflict,
 		saveError,
+		locked,
 		dirty,
 		problems,
 		savedProblems,

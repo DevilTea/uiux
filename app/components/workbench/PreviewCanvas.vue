@@ -50,7 +50,7 @@ const { t } = useI18n()
 const workbench = useWorkbench()
 const shell = useWorkbenchShell()
 const uiux = useUiuxClient()
-const { selectedView, contextOptions, loading, isReadOnly, preview, widgetTreeResult, selectedWidgetId, selectedVariant } = workbench
+const { selectedView, contextOptions, loading, reviewReadOnly, preview, widgetTreeResult, selectedWidgetId, selectedVariant } = workbench
 
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const isPhone = useMediaQuery('(max-width: 767.98px)')
@@ -300,7 +300,7 @@ const hoverNode = computed<WidgetTreeNode | undefined>(() => widgetTreeResult.va
 // Tools
 // ---------------------------------------------------------------------------------------------
 
-const showComment = computed(() => !isReadOnly.value && !isPhone.value)
+const showComment = computed(() => !reviewReadOnly.value && !isPhone.value)
 const activeTool = computed<CanvasToolId>(() => preview.isCommentMode.value ? 'comment' : preview.canvasTool.value)
 const toolsDisabledReason = computed(() => {
 	if (!selectedView.value) return t('tool.disabledNoView')

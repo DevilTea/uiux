@@ -7,6 +7,7 @@ import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { useSpecEditor } from '../../composables/useSpecEditor'
+import { useAccess } from '../../composables/useAccess'
 import type { DecisionRead, ReferenceRead } from '../../composables/workbench-types'
 import { flattenWidgetTree } from '../../../src/preview/widget-tree'
 import { viewLocation } from '../../utils/workbench-routes'
@@ -25,14 +26,20 @@ const { t } = useI18n()
 const fmt = useWorkbenchFormat()
 const workbench = useWorkbench()
 const shell = useWorkbenchShell()
-const { selectedView, views, isReadOnly, workspace, widgetTreeResult } = workbench
+const { selectedView, selectedViewId, views, authorReadOnly, workspace, widgetTreeResult } = workbench
+const access = useAccess()
 const editor = useSpecEditor(workbench)
 
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const notMobile = useMediaQuery('(min-width: 768px)')
 const isMobile = computed(() => !notMobile.value)
-/** Editing is a desktop task; tablet is review-focused and mobile reads. */
-const canEdit = computed(() => isDesktop.value && !isReadOnly.value)
+/**
+ * Editing is a desktop task for Editors and above; tablet is review-focused and mobile reads. An
+ * open section stays open while someone else's edit lease arrives (its Save waits, the draft is
+ * kept); only starting a new edit needs the View to be free.
+ */
+const canAuthor = computed(() => isDesktop.value && !authorReadOnly.value)
+const canEdit = computed(() => canAuthor.value && !access.lockFor('view', selectedViewId.value))
 
 const spec = computed(() => selectedView.value?.resource.spec)
 const authoredLang = computed(() => workspace.value?.resource.i18n?.defaultLocale || undefined)
@@ -163,7 +170,7 @@ function isHttp(uri: string): boolean {
           {{ t('spec.title', { name: selectedView.resource.name || t('common.unnamed') }) }}
         </h2>
         <span
-          v-if="!isDesktop && !isMobile && !isReadOnly"
+          v-if="!isDesktop && !isMobile && !authorReadOnly"
           class="shrink-0 text-xs text-dimmed"
           data-spec-edit-on-desktop
         >{{ t('common.editOnDesktop') }}</span>
@@ -243,7 +250,7 @@ function isHttp(uri: string): boolean {
           class="col-start-2 min-w-0 max-w-[68ch] text-body text-default"
         >
           <SpecSectionEditor
-            v-if="canEdit && editor.editing.value === section.key"
+            v-if="canAuthor && editor.editing.value === section.key"
             :editor="editor"
             :title="section.title"
             :view-items="viewItems"

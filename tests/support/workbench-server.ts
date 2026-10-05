@@ -3,9 +3,17 @@ import { cp, mkdtemp, rm } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 
+import { provisionToken, sessionCookieFor } from './access'
+
 export type WorkbenchServer = Readonly<{
 	origin: string
 	workspaceRoot: string
+	/** A human Owner's bearer token in the private Workspace copy's roster (test UIUX_HOME). */
+	token: string
+	/** That Owner's Workbench session cookie, for browsers and Workbench-only routes such as resolve. */
+	cookie: Readonly<{ name: string; value: string }>
+	/** `cookie` header value for `fetch`. */
+	headers: Readonly<Record<string, string>>
 	close: () => Promise<void>
 }>
 
@@ -31,6 +39,7 @@ async function freePort(): Promise<number> {
 export async function startWorkbenchServer(): Promise<WorkbenchServer> {
 	const workspaceRoot = await mkdtemp(join(REPOSITORY_ROOT, '.uiux-browser-test-'))
 	await cp(join(REPOSITORY_ROOT, 'design'), workspaceRoot, { recursive: true })
+	const token = await provisionToken(workspaceRoot, { nickname: 'tester', kind: 'human', role: 'owner' })
 	const port = await freePort()
 	const child: ChildProcess = spawn(process.execPath, [join(REPOSITORY_ROOT, '.output', 'server', 'index.mjs')], {
 		stdio: ['ignore', 'pipe', 'pipe'],
@@ -65,7 +74,10 @@ export async function startWorkbenchServer(): Promise<WorkbenchServer> {
 		}
 		try {
 			const response = await fetch(`${origin}/api/health`)
-			if (response.ok) return { origin, workspaceRoot, close }
+			if (response.ok) {
+				const cookie = await sessionCookieFor(origin, token)
+				return { origin, workspaceRoot, token, cookie, headers: { cookie: `${cookie.name}=${cookie.value}` }, close }
+			}
 		}
 		catch {
 			// not listening yet

@@ -134,7 +134,7 @@ export interface WorkspaceApplicationSession {
  */
 export function createWorkspaceApplicationSession(
 	persistence: FileNativePersistence,
-	options?: { serverOrigin?: string },
+	options?: { serverOrigin?: string; captureCookie?: () => Readonly<{ name: string; value: string }> | undefined },
 ): WorkspaceApplicationSession {
 	const viewAuthoring = createViewAuthoringService(persistence)
 	const workspaceAuthoring = createWorkspaceAuthoringService(persistence)
@@ -142,7 +142,7 @@ export function createWorkspaceApplicationSession(
 	const flowAuthoring = createFlowAuthoringService(persistence)
 	const reviewAuthoring = createReviewAuthoringService(persistence)
 	const assetAuthoring = createAssetAuthoringService(persistence)
-	const formalCapture = createFormalCaptureService(persistence, { serverOrigin: options?.serverOrigin })
+	const formalCapture = createFormalCaptureService(persistence, { serverOrigin: options?.serverOrigin, captureCookie: options?.captureCookie })
 	const handoffExport = createHandoffExportService(persistence)
 
 	async function readPointResource(kind: PointResourceKind, key: string): Promise<PointResourceRead | undefined> {

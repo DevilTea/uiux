@@ -1306,5 +1306,137 @@
     "editSection": "編輯目前聚焦的 Spec 段落",
     "saveSection": "儲存或取消 Spec 段落",
     "copyId": "複製所選 Widget 的 id"
+  },
+  "access": {
+    "login": {
+      "title": "登入 UIUX",
+      "description": "開啟 uiux dev 或 Owner 提供的登入連結，或貼上成員 token。",
+      "signingIn": "正在登入…",
+      "tokenLabel": "成員 token",
+      "tokenHelp": "登入後 token 仍然有效。請只貼到這個 Workbench。",
+      "submit": "登入",
+      "recoverTitle": "沒有連結？",
+      "recover": "在主機上執行 {command} 以取得新的單次登入連結。",
+      "plainHttp": "此頁面使用未加密的 HTTP。同一網路上的任何人都能擷取並重複使用登入連結、工作階段 cookie 與 LAN token。",
+      "workspaceLabel": "Workspace 名冊 {hint}",
+      "errors": {
+        "invalid": "此連結或 token 對這個 Workspace 無效。登入連結只能使用一次，並於 24 小時後失效。",
+        "rateLimited": "此位址的失敗嘗試過多，請稍候一分鐘再試。",
+        "failed": "登入失敗，請再試一次。"
+      }
+    },
+    "role": {
+      "owner": "Owner",
+      "editor": "Editor",
+      "reviewer": "Reviewer",
+      "viewer": "Viewer"
+    },
+    "kind": {
+      "human": "人員",
+      "agent": "Agent"
+    },
+    "chip": {
+      "label": "已以 {nickname}（{role}）登入",
+      "signedInAs": "目前登入",
+      "members": "成員",
+      "signOut": "登出",
+      "signedOut": "已登出。"
+    },
+    "requiresRole": "需要 {role} 角色。",
+    "members": {
+      "title": "成員",
+      "subtitle": "誰能開啟這個 Workspace，以及各自的角色。",
+      "rosterLabel": "名冊 {hint}",
+      "rosterHelp": "儲存在這台主機上，不會進入 Workspace 或 Git。",
+      "ownerOnly": "只有 Owner 能管理成員。",
+      "add": "新增成員",
+      "addTitle": "新增成員",
+      "addDescription": "之後可以給人員登入連結，或給 Agent 一個 token。",
+      "nicknameLabel": "暱稱",
+      "nicknameHelp": "小寫英文字母、數字、句點、底線與連字號，最多 32 個字元。",
+      "roleLabel": "角色",
+      "kindLabel": "類型",
+      "kindHelp": "建立後無法變更。Agent 最高為 Editor，且永遠不能標記為已解決。",
+      "added": "已新增 {nickname}。",
+      "you": "你",
+      "remove": "移除",
+      "removeTitle": "要移除 {nickname} 嗎？",
+      "removeDescription": "其 token、登入連結與工作階段會立即失效。其寫下的紀錄會保留原名稱。",
+      "removed": "已移除 {nickname}。",
+      "roleChanged": "{nickname} 現在是 {role}。",
+      "actionsLabel": "{nickname} 的操作",
+      "createToken": "建立 token",
+      "invite": "登入連結",
+      "columns": {
+        "member": "成員",
+        "role": "角色",
+        "tokens": "Token",
+        "sessions": "工作階段"
+      },
+      "errorTitle": "無法更新名冊"
+    },
+    "tokens": {
+      "title": "Token",
+      "empty": "沒有有效的 token。",
+      "createTitle": "為 {nickname} 建立 token",
+      "createDescription": "MCP 用戶端與指令碼以 bearer token 傳送它，並依成員目前的角色運作。",
+      "labelLabel": "標籤",
+      "labelPlaceholder": "例如 laptop 或 CI",
+      "expiresLabel": "到期",
+      "expires90": "90 天後",
+      "expires30": "30 天後",
+      "expiresNever": "永不",
+      "revealTitle": "請立即複製此 token",
+      "revealDescription": "它只會顯示一次。請存放在 UIUX_MCP_TOKEN 等環境變數中，切勿提交到版本庫。",
+      "mcpHint": "在 MCP 用戶端設定中，傳送標頭 Authorization: Bearer 加上這個 token。",
+      "copy": "複製",
+      "copied": "已複製。",
+      "copyFailed": "無法複製，請選取文字後手動複製。",
+      "revoke": "撤銷",
+      "revoked": "已撤銷 token {id}。",
+      "never": "永不",
+      "unused": "尚未使用",
+      "lan": "LAN",
+      "columns": {
+        "token": "Token",
+        "member": "成員",
+        "label": "標籤",
+        "expires": "到期",
+        "lastUsed": "最後使用"
+      }
+    },
+    "invites": {
+      "title": "{nickname} 的登入連結",
+      "description": "只能使用一次，於 {time} 失效。它會讓一個瀏覽器以 {nickname} 登入。",
+      "humansOnly": "Agent 以 token 登入，而非連結。"
+    },
+    "sessions": {
+      "title": "工作階段",
+      "empty": "沒有有效的工作階段。",
+      "current": "此瀏覽器",
+      "revoke": "結束工作階段",
+      "revoked": "已結束工作階段。",
+      "columns": {
+        "member": "成員",
+        "lastSeen": "最後活動",
+        "expires": "到期",
+        "device": "瀏覽器"
+      }
+    },
+    "mcpAttempts": {
+      "title": "沒有 token 的 MCP 用戶端",
+      "description": "{n} 個 /mcp 請求沒有有效的 token。最近一次在 {time}，來自 {agent}。 | {n} 個 /mcp 請求沒有有效的 token。最近一次在 {time}，來自 {agent}。",
+      "action": "建立 Agent token",
+      "unknownAgent": "未具名的用戶端"
+    },
+    "lock": {
+      "badge": "{nickname} 鎖定中 · 至 {time}",
+      "tooltip": "{nickname}（{kind}）正在編輯。在鎖定解除或到期前，這裡暫停編輯。",
+      "release": "解除鎖定",
+      "released": "已解除鎖定。",
+      "releaseFailed": "無法解除鎖定。",
+      "saveRefused": "{nickname} 持有編輯鎖，至 {time}",
+      "saveRefusedBody": "你的變更已保留。鎖定解除或到期後再儲存一次。"
+    }
   }
 }

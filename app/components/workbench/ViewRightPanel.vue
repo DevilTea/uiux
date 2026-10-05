@@ -23,7 +23,7 @@ const { t } = useI18n()
 const workbench = useWorkbench()
 const {
 	selectedView, selectedViewId, selectedWidgetId, reviews, views, workspace,
-	discoveredLocales, localeRevisions, currentActiveContext, isReadOnly, preview,
+	discoveredLocales, localeRevisions, currentActiveContext, authorReadOnly, reviewReadOnly, preview,
 } = workbench
 
 const reviewsPanel = ref<InstanceType<typeof ReviewsPanel>>()
@@ -98,7 +98,7 @@ defineExpose({
         :selected-widget-id="selectedWidgetId"
         :current-view-revision="selectedView?.revision"
         :is-comment-mode="preview.isCommentMode.value"
-        :read-only="isReadOnly"
+        :read-only="reviewReadOnly"
         @highlight-widget="workbench.selectWidget"
         @toggle-comment-mode="preview.toggleCommentMode"
         @view-promoted="onViewPromoted"
@@ -134,7 +134,7 @@ defineExpose({
             :discovered-locales="discoveredLocales"
             :locale-revisions="localeRevisions"
             :active-context="currentActiveContext"
-            :read-only="isReadOnly"
+            :read-only="authorReadOnly"
             @apply-context="applyEvidenceContext"
             @refresh="workbench.refreshAll()"
           />

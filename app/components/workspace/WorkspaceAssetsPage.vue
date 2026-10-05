@@ -7,6 +7,7 @@ import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import { useAuthoringAccess } from '../../composables/useAuthoringAccess'
+import { useAccess } from '../../composables/useAccess'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { collectAssetReferences, isImageMediaType } from '../../utils/workspace-authoring'
 import WorkbenchPage from '../workbench/WorkbenchPage.vue'
@@ -27,6 +28,8 @@ const uiux = useUiuxClient()
 const feedback = useWorkbenchFeedback()
 const fmt = useWorkbenchFormat()
 const { access, canEdit, isMobile } = useAuthoringAccess()
+/** Each Asset is its own lockable resource; someone else's edit lease makes its detail read-only. */
+const member = useAccess()
 
 const entries = ref<AssetEntry[]>([])
 const usage = shallowRef(new Map<string, AssetUse[]>())
@@ -465,7 +468,7 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
       v-if="selected"
       v-model:open="detailOpen"
       :entry="selected"
-      :can-edit="canEdit"
+      :can-edit="canEdit && !member.lockFor('asset', selected.key)"
       :content-url="contentUrl(selected)"
       :reread="reread"
       @changed="onChanged"

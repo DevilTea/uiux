@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeFetchError, formatFetchError } from '../app/utils/fetch-error'
+import { describeFetchError, formatFetchError, isLockedError } from '../app/utils/fetch-error'
 
 function fetchError(statusCode: number, data: unknown, message = `[POST] "/api/evidence/capture": ${statusCode} Unprocessable Entity`) {
 	return Object.assign(new Error(message), { statusCode, status: statusCode, data })
@@ -47,5 +47,16 @@ describe('describeFetchError', () => {
 
 	it('keeps meaningful non-transport error messages', () => {
 		expect(describeFetchError(new Error('Selected View is unavailable.'), 'Load failed').message).toBe('Selected View is unavailable.')
+	})
+
+	it('carries the holder and expiry of a 423 resource.locked refusal', () => {
+		const lock = { kind: 'flow', key: 'checkout', holder: { nickname: 'codex', kind: 'agent' }, expiresAt: '2026-10-05T10:05:00.000Z' }
+		const details = describeFetchError(fetchError(423, { status: 'locked', key: 'checkout', code: 'resource.locked', message: 'Locked by codex.', lock }), 'Save failed')
+		expect(isLockedError(details)).toBe(true)
+		expect(details.lock).toEqual(lock)
+		expect(details.message).toBe('Locked by codex.')
+		const fromList = describeFetchError(fetchError(423, { status: 'locked', code: 'resource.locked', message: 'Locked.', locks: [lock] }), 'Save failed')
+		expect(fromList.lock?.holder.nickname).toBe('codex')
+		expect(isLockedError(describeFetchError(fetchError(409, { status: 'conflict' }), 'Save failed'))).toBe(false)
 	})
 })

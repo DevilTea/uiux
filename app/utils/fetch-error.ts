@@ -17,7 +17,17 @@ export type FetchErrorDetails = Readonly<{
 	statusCode?: number
 	/** Domain status reported in the body (e.g. 'conflict', 'blocked', 'failed'). */
 	status?: string
+	/** The edit lease that refused the write: `423 resource.locked` (accepted identity decision 11). */
+	lock?: FetchErrorLock
 }>
+
+/** Who holds the edit lease on the resource, and until when. */
+export type FetchErrorLock = Readonly<{ kind: string; key: string; holder: Readonly<{ nickname: string; kind: string }>; expiresAt: string }>
+
+/** True when the write was refused because someone else holds the resource's edit lease. */
+export function isLockedError(details: FetchErrorDetails): boolean {
+	return details.statusCode === 423 || details.status === 'locked'
+}
 
 export function describeFetchError(cause: unknown, fallback: string): FetchErrorDetails {
 	const record = isRecord(cause) ? cause : undefined
@@ -27,6 +37,7 @@ export function describeFetchError(cause: unknown, fallback: string): FetchError
 	const bodyRecord = isRecord(body) ? body : undefined
 	const bodyMessage = stringField(bodyRecord, 'message') ?? stringField(bodyRecord, 'statusMessage')
 	const status = stringField(bodyRecord, 'status')
+	const lock = lockField(bodyRecord)
 
 	const message = bodyMessage
 		?? diagnostics[0]?.message
@@ -38,6 +49,22 @@ export function describeFetchError(cause: unknown, fallback: string): FetchError
 		diagnostics: Object.freeze(diagnostics),
 		...(statusCode !== undefined ? { statusCode } : {}),
 		...(status ? { status } : {}),
+		...(lock ? { lock } : {}),
+	})
+}
+
+function lockField(body: Record<string, unknown> | undefined): FetchErrorLock | undefined {
+	const candidate = isRecord(body?.lock) ? body.lock : Array.isArray(body?.locks) && isRecord(body.locks[0]) ? body.locks[0] : undefined
+	if (!candidate) return undefined
+	const holder = isRecord(candidate.holder) ? candidate.holder : undefined
+	const nickname = stringField(holder, 'nickname')
+	const expiresAt = stringField(candidate, 'expiresAt')
+	if (!nickname || !expiresAt) return undefined
+	return Object.freeze({
+		kind: stringField(candidate, 'kind') ?? '',
+		key: stringField(candidate, 'key') ?? '',
+		holder: Object.freeze({ nickname, kind: stringField(holder, 'kind') ?? 'agent' }),
+		expiresAt,
 	})
 }
 

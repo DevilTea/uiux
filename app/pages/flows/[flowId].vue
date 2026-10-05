@@ -12,6 +12,9 @@ import FlowStepList from '../../components/flows/FlowStepList.vue'
 import FlowInspector from '../../components/flows/FlowInspector.vue'
 import FlowAddStepModal from '../../components/flows/FlowAddStepModal.vue'
 import FlowPlayer from '../../components/flows/FlowPlayer.vue'
+import LockBadge from '../../components/workbench/LockBadge.vue'
+import LockedSaveAlert from '../../components/workbench/LockedSaveAlert.vue'
+import { useAccess } from '../../composables/useAccess'
 
 /**
  * One UX Flow (brief g): the graph with a structured editor for the selected step or transition, an
@@ -31,11 +34,15 @@ const flowId = computed(() => String(route.params.flowId ?? ''))
 
 const editor = useFlowEditor(flowId)
 provideFlowEditor(editor)
-const { draft, saved, dirty, problems, saveBlockers, playBlockedReason, checkingReferences, conflict, saveError, saving, loading, notFound, loadError, lossless } = editor
+const { draft, saved, dirty, problems, saveBlockers, playBlockedReason, checkingReferences, conflict, saveError, locked, saving, loading, notFound, loadError, lossless } = editor
 
+const access = useAccess()
 const migrationRequired = computed(() => workbench.workspace.value?.inspection?.state === 'migration_required')
-const canEdit = computed(() => !workbench.isReadOnly.value && isDesktop.value && lossless.value && !migrationRequired.value)
-const showEditOnDesktop = computed(() => !workbench.isReadOnly.value && !isDesktop.value)
+/** Someone else (an agent) holds this Flow's edit lease: read-only beside the Lock badge (identity decision 11). */
+const lockedByOther = computed(() => !!access.lockFor('flow', flowId.value))
+// Editing needs Editor or above (authorReadOnly also covers a publication), a desktop window and no foreign lease.
+const canEdit = computed(() => !workbench.authorReadOnly.value && !lockedByOther.value && isDesktop.value && lossless.value && !migrationRequired.value)
+const showEditOnDesktop = computed(() => !workbench.authorReadOnly.value && !isDesktop.value)
 
 // ---------------------------------------------------------------------------------------------
 // Selection (ephemeral; dropped when the selected step or transition no longer exists)
@@ -314,7 +321,18 @@ const stepCount = computed(() => Object.keys(draft.value?.steps ?? {}).length)
               </template>
             </UDashboardToolbar>
 
+            <LockBadge
+              kind="flow"
+              :resource-key="flowId"
+              class="border-b border-default px-3 py-2"
+            />
             <div class="shrink-0 space-y-px empty:hidden">
+              <LockedSaveAlert
+                v-if="locked"
+                :lock="locked.lock"
+                class="rounded-none"
+                @dismiss="locked = undefined"
+              />
               <UAlert
                 v-if="conflict"
                 color="warning"

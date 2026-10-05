@@ -12,10 +12,10 @@ import FlowCreateModal from '../../components/flows/FlowCreateModal.vue'
  */
 const { t } = useI18n()
 const workbench = useWorkbench()
-const { flows, loading, isReadOnly } = workbench
+const { flows, loading, authorReadOnly } = workbench
 const isTablet = useMediaQuery(WORKBENCH_BREAKPOINTS.tablet)
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
-const canCreate = computed(() => !isReadOnly.value && isDesktop.value && workbench.workspace.value?.inspection?.state !== 'migration_required')
+const canCreate = computed(() => !authorReadOnly.value && isDesktop.value && workbench.workspace.value?.inspection?.state !== 'migration_required')
 const createOpen = ref(false)
 
 watch([flows, isTablet, loading], () => {

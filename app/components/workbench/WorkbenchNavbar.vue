@@ -6,10 +6,10 @@ import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
 import { flowPath, viewPath } from '../../utils/workbench-routes'
 import WorkbenchPreferences from './WorkbenchPreferences.vue'
-import ReviewerIdentity from './ReviewerIdentity.vue'
+import MemberChip from './MemberChip.vue'
 import WorkspaceMenu from './WorkspaceMenu.vue'
 
-/** The 48px global top bar: location, search, reviewer identity and Workbench preferences. */
+/** The 48px global top bar: location, search, the signed-in member and Workbench preferences. */
 const { t } = useI18n()
 const route = useRoute()
 const workbench = useWorkbench()
@@ -46,6 +46,7 @@ const breadcrumb = computed<BreadcrumbItem[]>(() => {
 		return items
 	}
 	if (path.startsWith('/reviews')) return [{ label: t('nav.reviews') }]
+	if (path === '/members') return [{ label: t('access.members.title') }]
 	if (path.startsWith('/workspace')) {
 		const page = WORKSPACE_PAGES[path]
 		return [{ label: t('nav.workspace') }, ...(page ? [{ label: t(page) }] : [])]
@@ -100,7 +101,7 @@ const breadcrumb = computed<BreadcrumbItem[]>(() => {
         class="md:hidden"
         :aria-label="t('shell.search')"
       />
-      <ReviewerIdentity v-if="!isReadOnly" />
+      <MemberChip v-if="!isReadOnly" />
       <WorkbenchPreferences />
       <UTooltip :text="t('common.refresh')">
         <UButton
