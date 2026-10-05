@@ -20,6 +20,8 @@ const tokens: Record<string, string> = {}
 const seeded: Record<string, string> = {}
 
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+/** `expect.poll` with room for a loaded machine: a mutation plus the summary reload can take seconds. */
+const poll = <T>(read: () => T | Promise<T>, options: Readonly<{ timeout?: number }> = {}) => expect.poll(read, { timeout: 10_000, ...options })
 
 async function api<T>(who: string, path: string, body?: unknown): Promise<T> {
 	const headers = { 'content-type': 'application/json', ...(who === 'tester' ? server.headers : bearer(tokens[who]!)) }
@@ -121,7 +123,7 @@ describe('Reviews inbox (R8)', () => {
 
 			// Resolved threads are reachable through the explicit tab, in their own group.
 			await page.locator('[data-review-tabs] [role="tab"]', { hasText: 'Resolved' }).click()
-			await expect.poll(() => groups(page)).toEqual(['resolved'])
+			await poll(() => groups(page)).toEqual(['resolved'])
 			expect(new URL(page.url()).searchParams.get('status')).toBe('resolved')
 			expect(await rowIds(page)).toEqual([seeded.answered, seeded.declined, DOGFOOD_THREAD])
 		}
@@ -133,19 +135,19 @@ describe('Reviews inbox (R8)', () => {
 		try {
 			const detail = page.locator(`[data-review-detail][data-thread-id="${seeded.declined}"]`)
 			await detail.waitFor()
-			await expect.poll(() => detail.locator('[data-timeline-kind]').evaluateAll(items => items.map(item => item.getAttribute('data-timeline-kind'))))
+			await poll(() => detail.locator('[data-timeline-kind]').evaluateAll(items => items.map(item => item.getAttribute('data-timeline-kind'))))
 				.toEqual(['message', 'submission', 'resolved'])
 			expect(await detail.locator('[data-submission-not-accepted]').textContent()).toBe('Not accepted')
 			expect(await detail.locator('[data-resolution="wont-fix"]').textContent()).toContain('Won\'t fix')
 			expect(await detail.locator('[data-timeline-kind="resolved"]').textContent()).toContain('We keep the authoring order.')
 			// Submissions expand to their evidence references.
 			await detail.locator('[data-submission-evidence-toggle]').click()
-			await expect.poll(() => detail.locator('[data-timeline-kind="submission"]').textContent()).toContain('sha256:db5e…a3f7')
+			await poll(() => detail.locator('[data-timeline-kind="submission"]').textContent()).toContain('sha256:db5e…a3f7')
 
 			// The dogfood thread: two verified submissions, a reopen between them, all in time order.
 			await page.goto(`${server.origin}/reviews?status=resolved&thread=${DOGFOOD_THREAD}`, { waitUntil: 'networkidle' })
 			const dogfood = page.locator(`[data-review-detail][data-thread-id="${DOGFOOD_THREAD}"]`)
-			await expect.poll(() => dogfood.locator('[data-timeline-kind]').evaluateAll(items => items.map(item => item.getAttribute('data-timeline-kind'))), { timeout: 10_000 })
+			await poll(() => dogfood.locator('[data-timeline-kind]').evaluateAll(items => items.map(item => item.getAttribute('data-timeline-kind'))), { timeout: 10_000 })
 				.toEqual(['message', 'message', 'submission', 'resolved', 'reopened', 'submission', 'resolved'])
 			expect(await dogfood.locator('[data-resolution="verified"]').first().textContent()).toContain('Verified · submission')
 		}
@@ -158,29 +160,29 @@ describe('Reviews inbox (R8)', () => {
 			// Author is a client-side filter over the loaded threads.
 			const mei = (await api<{ resource: { messages: { actor: { id: string } }[] } }>('tester', `/api/resources/review/${seeded.openOld}`)).resource.messages[0]!.actor.id
 			await page.goto(`${server.origin}/reviews?author=${encodeURIComponent(mei)}`, { waitUntil: 'networkidle' })
-			await expect.poll(() => rowIds(page)).toEqual([seeded.openOld])
+			await poll(() => rowIds(page)).toEqual([seeded.openOld])
 			expect(await page.locator('[data-review-chip]').textContent()).toContain('Author: mei')
 			await page.locator('[data-review-chip]').click()
-			await expect.poll(() => new URL(page.url()).searchParams.has('author')).toBe(false)
-			await expect.poll(async () => (await rowIds(page)).length).toBe(5)
+			await poll(() => new URL(page.url()).searchParams.has('author')).toBe(false)
+			await poll(async () => (await rowIds(page)).length).toBe(5)
 
 			// Mine: threads the signed-in member started or took part in (tester replied on and resolved "answered").
 			await page.locator('[data-review-toggle="mine"]').click()
-			await expect.poll(() => new URL(page.url()).searchParams.get('mine')).toBe('1')
-			await expect.poll(() => page.locator('[data-review-empty="no-match"]').count()).toBe(1)
+			await poll(() => new URL(page.url()).searchParams.get('mine')).toBe('1')
+			await poll(() => page.locator('[data-review-empty="no-match"]').count()).toBe(1)
 			await page.locator('[data-review-tabs] [role="tab"]', { hasText: 'Resolved' }).click()
-			await expect.poll(() => rowIds(page)).toEqual([seeded.answered, seeded.declined])
+			await poll(() => rowIds(page)).toEqual([seeded.answered, seeded.declined])
 
 			// Resolution narrows resolved threads.
 			await page.locator('[data-review-resolution-filter="answered"]').click()
-			await expect.poll(() => rowIds(page)).toEqual([seeded.answered])
-			await expect.poll(() => new URL(page.url()).searchParams.get('resolution')).toBe('answered')
+			await poll(() => rowIds(page)).toEqual([seeded.answered])
+			await poll(() => new URL(page.url()).searchParams.get('resolution')).toBe('answered')
 
 			// A filtered inbox is a shareable link.
 			await page.reload({ waitUntil: 'networkidle' })
-			await expect.poll(() => rowIds(page)).toEqual([seeded.answered])
+			await poll(() => rowIds(page)).toEqual([seeded.answered])
 			await page.locator('[data-review-clear]').click()
-			await expect.poll(() => [...new URL(page.url()).searchParams.keys()]).toEqual(['status'])
+			await poll(() => [...new URL(page.url()).searchParams.keys()]).toEqual(['status'])
 
 			// Search narrows without reordering; `/` focuses it.
 			await page.locator('[data-review-tabs] [role="tab"]', { hasText: 'Inbox' }).click()
@@ -188,7 +190,7 @@ describe('Reviews inbox (R8)', () => {
 			await page.keyboard.press('/')
 			expect(await page.evaluate(() => document.activeElement?.closest('[data-review-search]') !== null)).toBe(true)
 			await page.keyboard.type('title')
-			await expect.poll(() => rowIds(page)).toEqual([seeded.readyOld])
+			await poll(() => rowIds(page)).toEqual([seeded.readyOld])
 		}
 		finally { await context.close() }
 	}, 60_000)
@@ -206,25 +208,25 @@ describe('Reviews inbox (R8)', () => {
 			expect(order[2]).toBe(target)
 			await page.locator('[data-review-list]').focus()
 			await page.keyboard.press('j')
-			await expect.poll(() => new URL(page.url()).searchParams.get('thread')).toBe(order[0])
+			await poll(() => new URL(page.url()).searchParams.get('thread')).toBe(order[0])
 			await page.keyboard.press('j')
 			await page.keyboard.press('j')
 			await page.keyboard.press('k')
 			await page.keyboard.press('j')
-			await expect.poll(() => new URL(page.url()).searchParams.get('thread')).toBe(target)
+			await poll(() => new URL(page.url()).searchParams.get('thread')).toBe(target)
 			await page.locator(`[data-review-detail][data-thread-id="${target}"] [data-review-resolve]`).waitFor()
 			expect(await page.locator('[data-review-resolve]').textContent()).toContain('Resolve')
 
 			const queue = await rowIds(page)
 			const next = queue[queue.indexOf(target) + 1]
 			await page.keyboard.press('e')
-			await expect.poll(() => posts.find(post => post.url.endsWith('/resolve'))?.body, { timeout: 10_000 })
+			await poll(() => posts.find(post => post.url.endsWith('/resolve'))?.body, { timeout: 10_000 })
 				.toMatchObject({ resolution: 'answered', expectedRevision: expect.any(String) })
 			expect(posts.find(post => post.url.endsWith('/resolve'))!.body).not.toHaveProperty('submissionId')
 			expect(posts.find(post => post.url.endsWith('/resolve'))!.body).not.toHaveProperty('actor')
 			// The resolved thread leaves the default queue and the next one opens.
-			await expect.poll(() => new URL(page.url()).searchParams.get('thread')).toBe(next)
-			await expect.poll(() => rowIds(page)).not.toContain(target)
+			await poll(() => new URL(page.url()).searchParams.get('thread')).toBe(next)
+			await poll(() => rowIds(page)).not.toContain(target)
 			const stored = await api<{ resource: { status: string; history: { resolution?: string; actor: { displayName: string } }[] } }>('tester', `/api/resources/review/${target}`)
 			expect(stored.resource.status).toBe('resolved')
 			expect(stored.resource.history.at(-1)).toMatchObject({ resolution: 'answered', actor: { displayName: 'tester' } })
@@ -234,12 +236,12 @@ describe('Reviews inbox (R8)', () => {
 			expect(await page.evaluate(() => document.activeElement?.closest('[data-review-reply]') !== null)).toBe(true)
 			await page.keyboard.type('Looking at it.')
 			await page.keyboard.press('Control+Enter')
-			await expect.poll(() => posts.some(post => post.url.endsWith('/messages') && post.body.body === 'Looking at it.')).toBe(true)
+			await poll(() => posts.some(post => post.url.endsWith('/messages') && post.body.body === 'Looking at it.')).toBe(true)
 
 			// Shift+E opens the other ways to resolve.
 			await page.locator('[data-review-list]').focus()
 			await page.keyboard.press('Shift+E')
-			await expect.poll(() => page.locator('[role="menu"]').count()).toBe(1)
+			await poll(() => page.locator('[role="menu"]').count()).toBe(1)
 			expect(await page.locator('[role="menu"]').textContent()).toContain('Won\'t fix')
 			await page.keyboard.press('Escape')
 		}
@@ -279,11 +281,11 @@ describe('Reviews inbox (R8)', () => {
 			await sheet.waitFor()
 			await sheet.locator('[data-review-reply]').fill('收到，我來看。')
 			await sheet.locator('[data-review-send]').click()
-			await expect.poll(() => sheet.locator('[data-timeline-kind="message"]').count(), { timeout: 10_000 }).toBe(2)
+			await poll(() => sheet.locator('[data-timeline-kind="message"]').count(), { timeout: 10_000 }).toBe(2)
 			await sheet.locator('[data-review-resolve]').click()
 			// Resolving returns to the list, where the thread has left the queue.
-			await expect.poll(() => page.locator('[role="dialog"] [data-review-detail]').count(), { timeout: 10_000 }).toBe(0)
-			await expect.poll(() => rowIds(page)).not.toContain(target)
+			await poll(() => page.locator('[role="dialog"] [data-review-detail]').count(), { timeout: 10_000 }).toBe(0)
+			await poll(() => rowIds(page)).not.toContain(target)
 			// No structural editing on a phone: no Re-anchor or Promote in the sheet's menu.
 			await page.locator('[data-review-row]').first().click()
 			await sheet.locator('button[aria-label="更多"]').click()
