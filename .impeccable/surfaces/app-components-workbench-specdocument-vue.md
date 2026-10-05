@@ -1,8 +1,8 @@
 ---
 version: 1
-slug: "app-components-workbench-specpanel-vue"
-primary_target: "app/components/workbench/SpecPanel.vue"
-related_targets: ["app/components/workbench/InspectorPanel.vue"]
+slug: "app-components-workbench-specdocument-vue"
+primary_target: "app/components/workbench/SpecDocument.vue"
+related_targets: ["app/components/workbench/WidgetInspector.vue","app/components/workbench/SpecSectionEditor.vue"]
 ---
 
 # Shape brief (e): Inspector and Spec
