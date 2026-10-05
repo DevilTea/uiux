@@ -1,25 +1,9 @@
 <script setup lang="ts">
-import { useI18n } from '#imports'
-import { useWorkbench } from '../../composables/useWorkbench'
-import AssetsPanel from '../../components/AssetsPanel.vue'
-import WorkbenchPage from '../../components/workbench/WorkbenchPage.vue'
+import WorkspaceAssetsPage from '../../components/workspace/WorkspaceAssetsPage.vue'
 
-/** Workspace Assets, mounted here until the Assets page (brief g, R10) replaces the panel. */
-const { t } = useI18n()
-const workbench = useWorkbench()
-const { isReadOnly } = workbench
+/** Workspace Assets (brief g): the library, upload and per-Asset detail. */
 </script>
 
 <template>
-  <WorkbenchPage
-    id="workspace-assets"
-    :title="t('nav.assets')"
-  >
-    <div class="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col border-default lg:border-x">
-      <AssetsPanel
-        :read-only="isReadOnly"
-        @changed="workbench.refreshCounts()"
-      />
-    </div>
-  </WorkbenchPage>
+  <WorkspaceAssetsPage />
 </template>

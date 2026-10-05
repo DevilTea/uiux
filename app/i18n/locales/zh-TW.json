@@ -21,7 +21,8 @@
       "filename": "檔名",
       "mediaType": "媒體類型",
       "size": "大小",
-      "digest": "摘要值"
+      "digest": "摘要值",
+      "id": "ID"
     },
     "placeholders": {
       "name": "例如：頁首標誌"
@@ -30,7 +31,7 @@
     "fileUploadLabel": "拖放檔案，或按一下以瀏覽",
     "fileUploadDescription": "支援任何檔案類型，圖片可預覽。",
     "preview": "預覽",
-    "previewAlt": "Asset 預覽",
+    "previewAlt": "{name} 的預覽",
     "noPreviewTitle": "無法預覽",
     "noPreviewDescription": "僅支援預覽圖片，此檔案為 {mediaType}。",
     "download": "下載",
@@ -42,10 +43,10 @@
     "createFailed": "無法建立 Asset。",
     "replaceTitle": "取代檔案",
     "replaceDescription": "為「{name}」上傳新檔案。若期間有其他人變更此 Asset，將無法儲存。",
-    "commitReplacement": "取代檔案",
+    "commitReplacement": "取代內容",
     "replaced": "已取代檔案。",
     "replaceFailed": "無法取代檔案。",
-    "conflictTitle": "Asset 已在其他地方變更",
+    "conflictTitle": "開啟後這個 Asset 已有變更。",
     "conflictDescription": "你開啟後有其他人更新了此 Asset。請重新載入，再取代一次檔案。",
     "validation": {
       "fileRequired": "請選擇要上傳的檔案。",
@@ -57,7 +58,38 @@
     "upload": "上傳",
     "replace": "取代內容…",
     "unused": "未使用",
-    "usedBy": "被 {n} 個 View 使用 | 被 {n} 個 View 使用"
+    "usedBy": "被 {n} 個 View 使用 | 被 {n} 個 View 使用",
+    "filter": {
+      "search": "依名稱或檔名篩選",
+      "type": "類型",
+      "usage": "使用情形",
+      "allTypes": "所有類型",
+      "images": "圖片",
+      "otherFiles": "其他檔案",
+      "anyUsage": "不限使用情形",
+      "used": "使用中",
+      "noMatch": "沒有符合篩選條件的 Asset。",
+      "clear": "清除篩選"
+    },
+    "layout": {
+      "grid": "格狀",
+      "list": "清單"
+    },
+    "openDetail": "開啟 {name}",
+    "downloadName": "下載 {name}",
+    "problems": "{n} 個問題 | {n} 個問題",
+    "usage": "使用位置",
+    "unusedDescription": "沒有 View 使用這個 Asset。它會留在 Workspace 中，直到有人移除。",
+    "metadata": "中繼資料",
+    "metadataSaved": "Asset 已儲存。",
+    "saveFailed": "無法儲存 Asset",
+    "replaceHelp": "新檔案會取代內容。Asset ID 不變，綁定會繼續有效。",
+    "contentUnreadable": "無法讀取目前內容，請取代內容後再儲存。",
+    "detailDescription": "預覽、中繼資料與使用位置",
+    "previewUnavailable": "內容有問題，無法預覽。",
+    "diagnosticsTitle": "問題",
+    "details": "詳細資料",
+    "copyValue": "複製{label}"
   },
   "checks": {
     "title": "檢查",
@@ -352,15 +384,15 @@
     "diagnosticCount": "沒有診斷 | {n} 項診斷 | {n} 項診斷",
     "defaultBadge": "預設",
     "emptyTitle": "尚無 Locale",
-    "emptyDescription": "建立 Locale，開始翻譯預覽中的產品。",
+    "emptyDescription": "新增主要 Locale 以開始翻譯。",
     "emptyDescriptionReadOnly": "此快照沒有 Locale。",
     "selectPrompt": "選取 Locale 以編輯其字串。",
     "loadListFailed": "無法載入 Locale。",
     "loadDetailFailed": "無法載入此 Locale。",
     "unavailable": "此 Locale 無法使用。",
     "defaultMissing": {
-      "title": "缺少預設 Locale",
-      "description": "尚未建立預設 Locale {locale}。",
+      "title": "主要 Locale 沒有檔案",
+      "description": "{locale} 是主要 Locale，但還沒有檔案。",
       "action": "建立 Locale"
     },
     "searchLabel": "搜尋鍵與字串",
@@ -382,17 +414,59 @@
     },
     "create": {
       "title": "新增 Locale",
-      "description": "為預覽中的產品新增一組空白翻譯。",
+      "description": "為預覽產品建立 Locale 檔案。",
       "tagLabel": "Locale 標籤",
       "tagHelp": "BCP 47 語言標籤，例如 en-US、zh-TW、ja-JP。",
       "tagRequired": "請輸入 Locale 標籤。",
       "created": "已建立 Locale {locale}。",
-      "failed": "無法建立 Locale。"
+      "failed": "無法建立 Locale。",
+      "sourceLabel": "沿用鍵自",
+      "sourceHelp": "沿用的鍵會是空值，並各自顯示為提醒。",
+      "startEmpty": "不沿用",
+      "keysFrom": "{locale}（{n} 個鍵） | {locale}（{n} 個鍵）",
+      "submit": "建立 Locale",
+      "tagInvalid": "請使用 BCP 47 代碼，例如 zh-TW。",
+      "tagSuggest": "請使用標準格式 {tag}。",
+      "tagExists": "{tag} 已存在。"
     },
     "primary": "主要 Locale",
     "onlyReminders": "只顯示提醒",
     "empty": "空字串",
-    "whitespace": "只有空白"
+    "whitespace": "只有空白",
+    "pageTitle": "Locale",
+    "pageSubtitle": "預覽產品的翻譯，每個 Locale 一個檔案。Workbench 介面語言請在偏好設定中調整。",
+    "keyColumn": "鍵",
+    "filterPlaceholder": "篩選鍵或文字",
+    "filterLabel": "篩選鍵",
+    "filter": {
+      "all": "所有鍵",
+      "reminders": "提醒",
+      "missing": "缺少",
+      "extra": "多出"
+    },
+    "missing": "缺少",
+    "extraBadge": "{locale} 沒有",
+    "diff": {
+      "title": "與 {locale} 比對鍵",
+      "match": "所有鍵一致。",
+      "missing": "缺少 {n} 個",
+      "extra": "多出 {n} 個",
+      "addMissing": "加入缺少的鍵",
+      "removeExtra": "移除多出的鍵"
+    },
+    "newKeyHelp": "會以空值加入每個 Locale。",
+    "addKeyRequired": "請輸入鍵。",
+    "addKeyTaken": "{key} 已存在。",
+    "cellLabel": "{key}（{locale}）",
+    "editCell": "編輯 {key}（{locale}）",
+    "edited": "已編輯",
+    "editedCount": "已編輯 {n} 項",
+    "conflictTitle": "開啟後 {locale} 已有變更。",
+    "saveFailedLocale": "無法儲存 {locale}",
+    "savePerFile": "只會儲存至 {locale}.json。",
+    "saveLocale": "儲存 {locale}",
+    "diagnosticsTitle": "{locale} 有 {n} 個問題 | {locale} 有 {n} 個問題",
+    "emptyAction": "新增 Locale"
   },
   "preview": {
     "loading": "正在載入 View…",
@@ -640,59 +714,6 @@
     "migration": {
       "title": "此 Workspace 使用較舊的格式",
       "description": "完成遷移前為唯讀。請停止此伺服器，執行 {command}，然後重新啟動 uiux dev。"
-    }
-  },
-  "workspaceSettings": {
-    "title": "Workspace 設定",
-    "subtitle": "儲存於 {file}",
-    "revisionBadge": "修訂 {revision}",
-    "saved": "已儲存設定",
-    "saveFailed": "無法儲存設定",
-    "reset": "捨棄變更",
-    "save": "儲存設定",
-    "conflict": {
-      "title": "設定已在其他地方變更",
-      "description": "你載入後有其他人變更了 Workspace 設定。你的變更尚未儲存，請重新載入以取得最新版本。",
-      "reload": "重新載入設定"
-    },
-    "defaultLocale": {
-      "label": "預設 Locale",
-      "description": "主要 Locale 的 BCP 47 標籤。"
-    },
-    "adapters": {
-      "title": "Adapter",
-      "description": "Widget 套件或本機 Adapter 模組。",
-      "add": "新增 Adapter",
-      "item": "Adapter {n}",
-      "remove": "移除 Adapter {n}",
-      "moduleSpecifier": "模組指定字串",
-      "config": "設定",
-      "configHint": "選填 JSON",
-      "empty": "尚未設定 Adapter，僅可使用 RootShell。"
-    },
-    "viewports": {
-      "title": "檢視區",
-      "description": "預覽中可用的畫布尺寸。",
-      "add": "新增檢視區",
-      "id": "預設集 ID",
-      "idPlaceholder": "例如：mobile",
-      "remove": "移除檢視區 {id}",
-      "width": "寬度（px）",
-      "height": "高度（px）",
-      "empty": "尚未定義自訂檢視區，預設為 1280 × 800。"
-    },
-    "themes": {
-      "title": "預覽主題",
-      "description": "在預覽中渲染 View 時使用的主題 ID。",
-      "notAppearance": "這些主題只影響預覽，不影響 Workbench 外觀。",
-      "add": "新增主題",
-      "idPlaceholder": "例如：light、dark",
-      "idLabel": "主題 ID {n}",
-      "remove": "移除主題 {id}",
-      "empty": "尚未設定預覽主題。"
-    },
-    "diagnostics": {
-      "title": "沒有診斷 | {n} 項診斷 | {n} 項診斷"
     }
   },
   "nav": {
@@ -987,11 +1008,130 @@
     "adapters": "Adapter",
     "keyChange": "重新命名鍵會變更其識別，請先檢查參照。",
     "unsaved": "{n} 項未儲存 | {n} 項未儲存",
-    "conflict": "開啟後設定已有變更。"
+    "conflict": "開啟後設定已有變更。",
+    "subtitle": "儲存於 {file}。",
+    "sectionIndex": "設定區段",
+    "saved": "設定已儲存",
+    "saveFailed": "無法儲存",
+    "locale": {
+      "description": "預覽產品的主要 Locale。",
+      "primaryLocale": "主要 Locale",
+      "primaryLocaleHelp": "預覽預設使用此 Locale，Locale 頁面也以它比對其他 Locale 的鍵。",
+      "searchLocale": "搜尋或輸入標籤",
+      "tagInvalid": "請使用 BCP 47 代碼，例如 zh-TW。",
+      "noFile": "{locale} 還沒有 Locale 檔案，請到{link}建立。"
+    },
+    "registry": {
+      "viewportsDescription": "預覽可使用的畫布尺寸，由寬到窄排列。",
+      "themesDescription": "預覽可用來繪製 View 的主題。",
+      "notAppearance": "這些只會改變預覽中的 View。Workbench 外觀請在偏好設定中調整。",
+      "addViewport": "新增檢視區",
+      "addTheme": "新增主題",
+      "key": "鍵",
+      "label": "標籤",
+      "size": "寬 × 高",
+      "actions": "動作",
+      "actionsFor": "{key} 的動作",
+      "labelPlaceholder": "顯示於選單",
+      "labelFor": "{key} 的標籤",
+      "widthFor": "{key} 的寬度（px）",
+      "heightFor": "{key} 的高度（px）",
+      "noLabel": "無標籤",
+      "new": "新項目",
+      "renamedFrom": "原為 {key}",
+      "viewportsEmpty": "沒有檢視區，預覽使用 1280 × 800。",
+      "themesEmpty": "還沒有主題。",
+      "rename": "重新命名鍵…",
+      "renameTitle": "重新命名 {key}",
+      "removeTitle": "移除 {key}",
+      "removeDescription": "移除鍵會改變可繪製的內容，請先檢查參照。",
+      "newKey": "新鍵",
+      "newKeyHelp": "鍵是識別碼，使用者看到的是標籤。",
+      "references": "參照",
+      "checking": "正在檢查 Evidence…",
+      "evidenceUnknown": "無法檢查 Evidence，可能有以此鍵擷取的紀錄。",
+      "evidence": "沒有以 {key} 擷取的 Evidence。 | 有 {n} 筆以 {key} 擷取的 Evidence，之後會顯示為過期。 | 有 {n} 筆以 {key} 擷取的 Evidence，之後會顯示為過期。",
+      "links": "指定 {key} 的連結將不再對應。",
+      "acknowledge": "我了解指向 {key} 的參照不會跟著變更。",
+      "confirmRename": "重新命名",
+      "confirmRemove": "移除"
+    },
+    "validation": {
+      "keyRequired": "請輸入鍵。",
+      "keyWhitespace": "鍵不能包含空白。",
+      "keyTaken": "{key} 已被使用。",
+      "dimensionRequired": "請輸入至少為 1 的寬與高。"
+    }
+  },
+  "authoring": {
+    "discard": "捨棄",
+    "saveChanges": "儲存變更",
+    "unsavedShort": "未儲存",
+    "conflict": {
+      "kept": "你的編輯內容已保留。",
+      "reload": "載入對方版本",
+      "compare": "比較"
+    },
+    "compare": {
+      "title": "比較版本",
+      "description": "對方版本是已儲存的內容，你的版本是此頁上的草稿。",
+      "field": "欄位",
+      "theirs": "對方版本（已儲存）",
+      "yours": "你的版本（草稿）",
+      "absent": "未設定",
+      "none": "這裡沒有差異，變更發生在其他地方。你可以保留草稿並儲存。",
+      "keepTheirs": "保留對方版本",
+      "keepMine": "保留我的版本"
+    },
+    "leave": {
+      "title": "不儲存就離開？",
+      "description": "{n} 項未儲存的變更將會遺失。 | {n} 項未儲存的變更將會遺失。",
+      "stay": "繼續編輯",
+      "discard": "捨棄並離開"
+    },
+    "access": {
+      "device": "編輯需要至少 1280px 寬的視窗。",
+      "migration": "這個 Workspace 使用舊版格式，執行 uiux migrate 後才能編輯。"
+    }
   },
   "adapters": {
     "invalid": "Adapter 組合無效，修正前會暫停預覽與 Catalog。",
-    "repair": "請在專案中執行以下指令修正："
+    "repair": "請在專案中執行以下指令修正：",
+    "description": "提供 Widget 的套件或 Workspace 模組，依解析順序排列。",
+    "add": "新增 Adapter",
+    "moduleSpecifier": "模組指定符",
+    "unnamed": "新 Adapter",
+    "status": {
+      "loaded": "已載入",
+      "failed": "無法載入",
+      "unsaved": "尚未儲存",
+      "unknown": "尚未檢查"
+    },
+    "adapterId": "ID",
+    "version": "版本",
+    "apiVersion": "API",
+    "config": "組態",
+    "configLabel": "{name} 的組態",
+    "configHelp": "JSON 格式，儲存時以 Adapter 自身的 schema 驗證。留白表示不設定。",
+    "moveUp": "上移",
+    "moveDown": "下移",
+    "moveUpLabel": "上移 {name}",
+    "moveDownLabel": "下移 {name}",
+    "removeLabel": "移除 {name}",
+    "orderLabel": "依解析順序排列的 Adapter",
+    "empty": "沒有 Adapter，只能使用 RootShell。",
+    "repairFile": "請確認 Workspace 中有 {path}。",
+    "noInstall": "Workbench 不會安裝套件。請自行執行指令後重新載入。",
+    "copyCommand": "複製 {command}",
+    "copied": "已複製",
+    "copyFailed": "無法複製",
+    "resolutionUnknown": "無法檢查 Adapter 組合。",
+    "saveNote": "儲存後會重新檢查 Adapter 組合。",
+    "validation": {
+      "required": "請輸入模組指定符。",
+      "specifier": "請使用套件名稱，或 Workspace 內以 ./ 開頭的路徑。",
+      "json": "這不是有效的 JSON。"
+    }
   },
   "comment": {
     "modeOn": "已進入留言模式。點選 Widget，或按 Esc 取消。",
