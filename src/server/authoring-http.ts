@@ -9,11 +9,13 @@ import type { VariantEntry } from '../domain/views/schema'
 import type { WorkspaceSettingsUpdate } from '../application/services/workspace-authoring'
 import type { I18nResource } from '../domain/i18n/schema'
 import type { FlowStep } from '../domain/flows/schema'
-import type {
-	ReviewActor,
-	ReviewAnchor,
-	ReviewEvidenceRef,
-	ReviewResourceRevision,
+import {
+	REVIEW_RESOLUTIONS,
+	type ReviewActor,
+	type ReviewAnchor,
+	type ReviewDisplayHint,
+	type ReviewEvidenceRef,
+	type ReviewResourceRevision,
 } from '../domain/reviews/schema'
 import type { DecisionActor, DecisionOutcome } from '../domain/spec/schema'
 
@@ -135,10 +137,17 @@ const reviewActorSchema = z.object({
 	displayName: z.string().optional(),
 }).strict()
 
+// Non-authoritative pin placement, beside (never inside) the strict anchor. Services clamp to 0..1
+// and quantize to 1e-4 before persisting.
+const reviewDisplayHintSchema = z.object({
+	pin: z.object({ x: z.number(), y: z.number() }).strict(),
+}).strict()
+
 const createReviewThreadHttpSchema = z.object({
 	id: z.string().min(1).optional(),
 	anchor: reviewAnchorSchema,
 	variantNames: z.array(z.string()).optional(),
+	displayHint: reviewDisplayHintSchema.optional(),
 }).strict()
 
 const appendReviewMessageHttpSchema = z.object({
@@ -153,10 +162,16 @@ const reanchorReviewThreadHttpSchema = z.object({
 	expectedRevision: z.string(),
 	anchor: reviewAnchorSchema,
 	variantNames: z.array(z.string()).optional(),
+	displayHint: reviewDisplayHintSchema.nullable().optional(),
 	actor: reviewActorSchema,
 	reason: z.string().optional(),
 	id: z.string().min(1).optional(),
 	at: z.string().optional(),
+}).strict()
+
+const setReviewDisplayHintHttpSchema = z.object({
+	expectedRevision: z.string(),
+	displayHint: reviewDisplayHintSchema.nullable(),
 }).strict()
 
 const submitReadyForReviewHttpSchema = z.object({
@@ -181,6 +196,7 @@ const submitReadyForReviewHttpSchema = z.object({
 const resolveReviewThreadHttpSchema = z.object({
 	expectedRevision: z.string(),
 	actor: reviewActorSchema,
+	resolution: z.enum(REVIEW_RESOLUTIONS).optional(),
 	submissionId: z.string().min(1).optional(),
 	reason: z.string().optional(),
 	id: z.string().min(1).optional(),
@@ -383,6 +399,7 @@ export async function createReviewThreadForHttp(app: WorkspaceApplicationSession
 		...(data.id ? { id: data.id } : {}),
 		anchor: data.anchor as ReviewAnchor,
 		...(data.variantNames ? { variantNames: data.variantNames } : {}),
+		...(data.displayHint ? { displayHint: data.displayHint as ReviewDisplayHint } : {}),
 	})
 	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
 }
@@ -411,6 +428,7 @@ export async function reanchorReviewThreadForHttp(app: WorkspaceApplicationSessi
 		expectedRevision: data.expectedRevision,
 		anchor: data.anchor as ReviewAnchor,
 		...(data.variantNames ? { variantNames: data.variantNames } : {}),
+		...(data.displayHint !== undefined ? { displayHint: data.displayHint as ReviewDisplayHint | null } : {}),
 		actor: data.actor as ReviewActor,
 		...(data.reason ? { reason: data.reason } : {}),
 		...(data.id ? { id: data.id } : {}),
@@ -447,10 +465,23 @@ export async function resolveReviewThreadForHttp(app: WorkspaceApplicationSessio
 		reviewId,
 		expectedRevision: data.expectedRevision,
 		actor: data.actor as ReviewActor,
+		...(data.resolution ? { resolution: data.resolution } : {}),
 		...(data.submissionId ? { submissionId: data.submissionId } : {}),
 		...(data.reason ? { reason: data.reason } : {}),
 		...(data.id ? { id: data.id } : {}),
 		...(data.at ? { at: data.at } : {}),
+	})
+	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+}
+
+export async function setReviewDisplayHintForHttp(app: WorkspaceApplicationSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
+	const parsed = parseHttpPayload(setReviewDisplayHintHttpSchema, body)
+	if (!parsed.ok) return parsed.result
+	const data = parsed.data
+	const result = await app.setReviewDisplayHint({
+		reviewId,
+		expectedRevision: data.expectedRevision,
+		displayHint: data.displayHint as ReviewDisplayHint | null,
 	})
 	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
 }

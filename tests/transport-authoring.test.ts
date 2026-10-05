@@ -1000,7 +1000,7 @@ describe('Review thread domain authoring', () => {
 			expect(read4?.kind === 'review' ? read4.resource.status : undefined).toBe('ready-for-review')
 			expect(read4?.kind === 'review' ? read4.resource.submissions : undefined).toHaveLength(1)
 
-			// 5. Negative: resolve by non-human actor must fail
+			// 5. Negative: resolve by non-human actor must fail (and /mcp never resolves)
 			const agentResolve = await client.callTool({
 				name: 'resolve_review_thread',
 				arguments: {
@@ -1011,13 +1011,14 @@ describe('Review thread domain authoring', () => {
 			})
 			expect(agentResolve.isError).toBe(true)
 			expect(agentResolve.structuredContent).toMatchObject({
-				status: 'invalid',
+				status: 'blocked',
 				key: REVIEW_ID,
+				code: 'review.resolve_requires_human',
 				diagnostics: expect.arrayContaining([expect.objectContaining({ code: 'review.resolve_requires_human' })]),
 			})
 
-			// 6. Resolve with human actor
-			const resolveResult = await client.callTool({
+			// 6. A human actor on /mcp is refused too: resolution is Workbench-only.
+			const mcpHumanResolve = await client.callTool({
 				name: 'resolve_review_thread',
 				arguments: {
 					reviewId: REVIEW_ID,
@@ -1026,8 +1027,18 @@ describe('Review thread domain authoring', () => {
 					reason: 'Looks great!',
 				},
 			})
-			expect(resolveResult.isError).not.toBe(true)
-			const resolveRev = (resolveResult.structuredContent as { revision: string }).revision
+			expect(mcpHumanResolve.isError).toBe(true)
+			expect(mcpHumanResolve.structuredContent).toMatchObject({ status: 'blocked', code: 'review.resolve_requires_workbench' })
+			expect((await app.readPointResource('review', REVIEW_ID))?.revision).toBe(submitRev)
+
+			// The Workbench surface (/api) resolves; an omitted resolution from ready-for-review is `verified`.
+			const resolveResult = await resolveReviewThreadForHttp(app, REVIEW_ID, {
+				expectedRevision: submitRev,
+				actor: { type: 'human', displayName: 'Lead Designer' },
+				reason: 'Looks great!',
+			})
+			expect(resolveResult.status).toBe(200)
+			const resolveRev = (resolveResult.body as { revision: string }).revision
 
 			const read5 = await app.readPointResource('review', REVIEW_ID)
 			expect(read5?.kind === 'review' ? read5.resource.status : undefined).toBe('resolved')

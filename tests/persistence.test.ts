@@ -349,6 +349,21 @@ describe('file-native persistence', () => {
 		expect(JSON.parse(resultA.view).name).toBe('Checkout migrated')
 	})
 
+	it('migrates a Workspace containing an authored Asset (result validation checks Asset filenames, not the directory UUID)', async () => {
+		const root = await makeRoot()
+		await seedOldWorkspace(root, Buffer.from(JSON.stringify(workspaceFixture(1), null, 2)), Buffer.from(JSON.stringify(viewFixture(), null, 2)))
+		await mkdir(join(root, 'assets', ASSET_ID), { recursive: true })
+		await writeFile(join(root, assetMetadataRelativePath(ASSET_ID)), JSON.stringify(assetFixture('logo.svg', 'Logo')))
+		await writeFile(join(root, 'assets', ASSET_ID, 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
+		const persistence = new FileNativePersistence({ root, schemaPolicy: policy() })
+		const plan = await persistence.planWorkspaceMigration()
+		expect(plan.changedFiles).toEqual(['.uiux/workspace.json', `views/${VIEW_ID}.view.json`])
+		expect((await persistence.inspectWorkspace()).inspection.state).toBe('migration_required')
+		const migration = await persistence.migrateWorkspace()
+		expect(migration.steps).toEqual(['synthetic-1-to-2'])
+		expect((await persistence.inspectWorkspace()).inspection.state).toBe('current')
+	})
+
 	it('aborts migration if canonical files change out of band during migration planning', async () => {
 		const root = await makeRoot()
 		const oldManifest = Buffer.from(JSON.stringify(workspaceFixture(1), null, 2))

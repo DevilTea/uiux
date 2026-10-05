@@ -360,6 +360,8 @@ async function handleResolve() {
 			body: {
 				expectedRevision: selectedReviewData.value.revision,
 				actor: { type: 'human', displayName: actorName() },
+				// Accept & resolve from ready-for-review: the evidence-gated `verified` resolution.
+				resolution: 'verified',
 				...(latestSub?.id ? { submissionId: latestSub.id } : {}),
 				reason: resolveReason.value.trim() || undefined,
 			},

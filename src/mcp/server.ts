@@ -10,7 +10,7 @@ import type { WorkspaceApplicationSession } from '../application/services/worksp
 import type { ViewSpecContent } from '../application/services/view-authoring'
 import type { ViewResource } from '../domain/views/schema'
 import type { FlowStep } from '../domain/flows/schema'
-import type { ReviewActor, ReviewAnchor, ReviewEvidenceRef, ReviewResourceRevision } from '../domain/reviews/schema'
+import { REVIEW_RESOLUTIONS, type ReviewActor, type ReviewAnchor, type ReviewDisplayHint, type ReviewEvidenceRef, type ReviewResolution, type ReviewResourceRevision } from '../domain/reviews/schema'
 import type { WorkspaceAdapterSelection, ThemeEntry, ViewportPreset } from '../domain/workspace/schema'
 import { isSha256Digest, type JsonObject } from '../domain/validation'
 import type { ResolvedRenderContext } from '../domain/render-context/schema'
@@ -21,6 +21,7 @@ const dynamicKinds = ['view', 'flow', 'locale', 'review', 'asset'] as const sati
 const discoveryKindsSchema = z.array(z.enum(DISCOVERABLE_RESOURCE_KINDS)).optional()
 const discoveryBaseShape = {
 	kinds: discoveryKindsSchema,
+	resolution: z.array(z.enum(REVIEW_RESOLUTIONS)).min(1).optional(),
 	cursor: z.string().min(1).optional(),
 	limit: z.number().int().min(1).max(MAX_RESOURCE_DISCOVERY_LIMIT),
 }
@@ -129,10 +130,19 @@ const reviewActorSchema = z.object({
 	displayName: z.string().optional(),
 }).strict()
 
+// Non-authoritative pin placement, beside (never inside) the strict anchor. Services clamp to 0..1
+// and quantize to 1e-4 before persisting.
+const reviewDisplayHintSchema = z.object({
+	pin: z.object({ x: z.number(), y: z.number() }).strict(),
+}).strict()
+
+const reviewResolutionSchema = z.enum(REVIEW_RESOLUTIONS)
+
 const createReviewThreadSchema = z.object({
 	id: z.string().optional(),
 	anchor: reviewAnchorSchema,
 	variantNames: z.array(z.string()).optional(),
+	displayHint: reviewDisplayHintSchema.optional(),
 }).strict()
 
 const appendReviewMessageSchema = z.object({
@@ -149,10 +159,17 @@ const reanchorReviewThreadSchema = z.object({
 	expectedRevision: z.string(),
 	anchor: reviewAnchorSchema,
 	variantNames: z.array(z.string()).optional(),
+	displayHint: reviewDisplayHintSchema.nullable().optional(),
 	actor: reviewActorSchema,
 	reason: z.string().optional(),
 	id: z.string().optional(),
 	at: z.string().optional(),
+}).strict()
+
+const setReviewDisplayHintSchema = z.object({
+	reviewId: z.string(),
+	expectedRevision: z.string(),
+	displayHint: reviewDisplayHintSchema.nullable(),
 }).strict()
 
 const submitReadyForReviewSchema = z.object({
@@ -179,6 +196,7 @@ const resolveReviewThreadSchema = z.object({
 	reviewId: z.string(),
 	expectedRevision: z.string(),
 	actor: reviewActorSchema,
+	resolution: reviewResolutionSchema.optional(),
 	submissionId: z.string().optional(),
 	reason: z.string().optional(),
 	id: z.string().optional(),
@@ -458,7 +476,7 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 		'create_review_thread',
 		{
 			title: 'Create UIUX Review Thread',
-			description: 'Create an initial open Review thread anchored to a View and widget with optional variant scope.',
+			description: 'Create an initial open Review thread anchored to a View and widget with optional variant scope. The optional displayHint.pin {x, y} is a non-authoritative pin position normalized (0..1) within the anchored Widget\'s rendered rect; agents have no pointer and should normally omit it.',
 			inputSchema: createReviewThreadSchema,
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},
@@ -466,6 +484,7 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 			...(input.id ? { id: input.id } : {}),
 			anchor: input.anchor as ReviewAnchor,
 			...(input.variantNames ? { variantNames: input.variantNames } : {}),
+			...(input.displayHint ? { displayHint: input.displayHint as ReviewDisplayHint } : {}),
 		})),
 	)
 
@@ -491,7 +510,7 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 		'reanchor_review_thread',
 		{
 			title: 'Re-anchor UIUX Review Thread',
-			description: 'Re-anchor a Review thread to a new widget or variant scope, appending a re-anchor history event with revision CAS.',
+			description: 'Re-anchor a Review thread to a new widget or variant scope, appending a re-anchor history event with revision CAS. displayHint: an object sets the pin hint for the new anchor, null clears it, and omitting it clears the hint when the Widget changes and keeps it when only Variants change.',
 			inputSchema: reanchorReviewThreadSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
@@ -500,10 +519,26 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 			expectedRevision: input.expectedRevision,
 			anchor: input.anchor as ReviewAnchor,
 			...(input.variantNames ? { variantNames: input.variantNames } : {}),
+			...(input.displayHint !== undefined ? { displayHint: input.displayHint as ReviewDisplayHint | null } : {}),
 			actor: input.actor as ReviewActor,
 			...(input.reason ? { reason: input.reason } : {}),
 			...(input.id ? { id: input.id } : {}),
 			...(input.at ? { at: input.at } : {}),
+		})),
+	)
+
+	server.registerTool(
+		'set_review_display_hint',
+		{
+			title: 'Set UIUX Review Display Hint',
+			description: 'Move or clear the non-authoritative pin hint of a Review thread within the same Widget (displayHint.pin {x, y} normalized 0..1 within the anchored Widget\'s rendered rect, or null to clear) with revision CAS. Appends no history event and records no actor. Moving a pin to another Widget is reanchor_review_thread.',
+			inputSchema: setReviewDisplayHintSchema,
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async input => authoringToolResult('review', await app.setReviewDisplayHint({
+			reviewId: input.reviewId,
+			expectedRevision: input.expectedRevision,
+			displayHint: input.displayHint as ReviewDisplayHint | null,
 		})),
 	)
 
@@ -534,19 +569,11 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 		'resolve_review_thread',
 		{
 			title: 'Resolve UIUX Review Thread',
-			description: 'Resolve a Review thread by a human actor referencing the current accepted submission with revision CAS.',
+			description: RESOLVE_REVIEW_THREAD_DESCRIPTION,
 			inputSchema: resolveReviewThreadSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
-		async input => authoringToolResult('review', await app.resolveReviewThread({
-			reviewId: input.reviewId,
-			expectedRevision: input.expectedRevision,
-			actor: input.actor as ReviewActor,
-			...(input.submissionId ? { submissionId: input.submissionId } : {}),
-			...(input.reason ? { reason: input.reason } : {}),
-			...(input.id ? { id: input.id } : {}),
-			...(input.at ? { at: input.at } : {}),
-		})),
+		async input => authoringToolResult('review', refuseMcpResolution(input.reviewId, input.actor as ReviewActor, input.resolution)),
 	)
 
 	server.registerTool(
@@ -705,6 +732,25 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 	)
 
 	return server
+}
+
+export const RESOLVE_REVIEW_THREAD_DESCRIPTION = 'Resolution is human-only and happens in the UIUX Workbench. This tool always refuses. Reply on the thread, or submit it ready for review, and a human will resolve it.'
+
+/**
+ * Resolution is Workbench-only (accepted direct-resolve decision 9): `/mcp` keeps the tool registered
+ * so agents get an actionable refusal, and refuses before calling the domain service, in this order.
+ */
+export function refuseMcpResolution(reviewId: string, actor: ReviewActor, resolution: ReviewResolution | undefined) {
+	if (actor?.type === 'human') {
+		const message = 'Resolution is performed by a human in the UIUX Workbench, not through MCP.'
+		return { status: 'blocked' as const, key: reviewId, code: 'review.resolve_requires_workbench', message, diagnostics: [{ code: 'review.resolve_requires_workbench', path: '/actor/type', message }] }
+	}
+	if (resolution !== undefined && resolution !== 'verified') {
+		const message = 'Closing a thread without a verified change is a human decision made in the UIUX Workbench. Reply on the thread instead.'
+		return { status: 'blocked' as const, key: reviewId, code: 'review.direct_resolve_requires_workbench', message, diagnostics: [{ code: 'review.direct_resolve_requires_workbench', path: '/resolution', message }] }
+	}
+	const message = 'Only a human actor may resolve a Review thread, in the UIUX Workbench. Submit the thread ready for review and a human will resolve it.'
+	return { status: 'blocked' as const, key: reviewId, code: 'review.resolve_requires_human', message, diagnostics: [{ code: 'review.resolve_requires_human', path: '/actor/type', message }] }
 }
 
 export function createUiuxMcpHttpHandler(app: WorkspaceApplicationSession): McpHttpHandler {

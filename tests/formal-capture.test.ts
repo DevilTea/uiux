@@ -84,7 +84,7 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 	await symlink(vuePath, join(root, 'node_modules', 'vue')).catch(() => undefined)
 
 	await writeFile(join(root, '.uiux', 'workspace.json'), JSON.stringify({
-		schemaVersion: 1,
+		schemaVersion: 2,
 		i18n: { defaultLocale: 'en-US' },
 		adapters,
 		viewports: {

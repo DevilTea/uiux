@@ -636,6 +636,10 @@
       "viewUnavailable": "此 View 無法使用。",
       "viewLoadFailed": "無法載入 View。",
       "bridgeInitFailed": "預覽無法連線至 Workbench，請重新載入。"
+    },
+    "migration": {
+      "title": "此 Workspace 使用較舊的格式",
+      "description": "完成遷移前為唯讀。請停止此伺服器，執行 {command}，然後重新啟動 uiux dev。"
     }
   },
   "workspaceSettings": {

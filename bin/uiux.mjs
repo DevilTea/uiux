@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
-import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
+import { lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join, resolve } from 'node:path'
 import { parsePublishArguments, runPublish } from './publish.mjs'
 
@@ -23,6 +24,9 @@ Commands:
   init --workspace <dir>  Initialize a Workspace
   dev --workspace <dir>   Start the unified UIUX Workbench/Nitro server on loopback
                            only (127.0.0.1; PORT selects the port, default 3000)
+  migrate --workspace <dir> [--dry-run]
+                           Migrate an older Workspace schema to schemaVersion ${workspaceSchemaVersion};
+                           --dry-run prints the steps and changed files without writing
   publish --workspace <dir> --out <dir> [--base <path>] [--source-revision <rev>]
                            Publish a read-only static UIUX Workspace`)
 }
@@ -56,6 +60,46 @@ function resolveLoopbackBindHost(env) {
 
 function parseWorkspaceArgument(args) {
 	return args.length === 2 && args[0] === '--workspace' && args[1] ? args[1] : undefined
+}
+
+function parseMigrateArguments(args) {
+	const dryRun = args.includes('--dry-run')
+	const rest = args.filter(arg => arg !== '--dry-run')
+	if (args.length - rest.length > 1) return undefined
+	const workspace = parseWorkspaceArgument(rest)
+	return workspace ? { workspace, dryRun } : undefined
+}
+
+/**
+ * Migration reuses the TypeScript persistence and product schema modules shipped in `src/`.
+ * They are bundled on demand with the packaged esbuild dependency into a private temporary
+ * module, so the CLI applies exactly the policy the server enforces.
+ */
+async function runMigrate(options) {
+	const { default: esbuild } = await import('esbuild')
+	const packageRoot = fileURLToPath(new URL('..', import.meta.url))
+	const build = await esbuild.build({
+		entryPoints: [resolve(packageRoot, 'src/cli/migrate.ts')],
+		bundle: true,
+		platform: 'node',
+		format: 'esm',
+		target: 'node24',
+		write: false,
+		logLevel: 'silent',
+	})
+	const directory = await mkdtemp(join(tmpdir(), 'uiux-migrate-'))
+	try {
+		const modulePath = join(directory, 'migrate.mjs')
+		await writeFile(modulePath, build.outputFiles[0].contents)
+		const { runMigrateCommand } = await import(pathToFileURL(modulePath).href)
+		process.exitCode = await runMigrateCommand({
+			workspaceRoot: resolve(process.cwd(), options.workspace),
+			dryRun: options.dryRun,
+		})
+	}
+	finally {
+		await rm(directory, { recursive: true, force: true })
+	}
 }
 
 async function runInit(workspaceArgument) {
@@ -182,6 +226,20 @@ if (extraArgs.length === 0 && (command === undefined || command === '--help' || 
 		process.exitCode = 2
 	} else {
 		await runDev(workspace)
+	}
+} else if (command === 'migrate') {
+	const options = parseMigrateArguments(extraArgs)
+	if (!options) {
+		console.error('uiux: migrate requires --workspace <dir> and accepts --dry-run.')
+		process.exitCode = 2
+	} else {
+		try {
+			await runMigrate(options)
+		}
+		catch (error) {
+			console.error('uiux: migrate failed: ' + (error instanceof Error ? error.message : String(error)))
+			process.exitCode = 1
+		}
 	}
 } else if (command === 'publish') {
 	const options = parsePublishArguments(extraArgs)

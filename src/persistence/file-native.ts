@@ -78,6 +78,17 @@ export type AuthoredAssetInspection = Readonly<{
 
 export type ArtifactWriteResult = Readonly<{ identity: `sha256:${string}`; created: boolean }>
 
+export type WorkspaceMigrationPlanResult = Readonly<{
+	/** The opened manifest version. */
+	fromVersion: number
+	/** The version the Workspace would have after applying the plan (the current one when no steps run). */
+	version: number
+	/** Current manifest revision; a real run reports the new manifest revision instead. */
+	revision: ResourceRevision
+	changedFiles: readonly string[]
+	steps: readonly string[]
+}>
+
 export type AtomicReviewViewPromotionCasInput = Readonly<{
 	reviewId: string
 	expectedReviewRevision: ResourceRevision
@@ -113,7 +124,8 @@ export type AtomicReviewViewPromotionResult =
 
 type FileChange = Readonly<{ path: string; bytes?: Uint8Array }>
 type TransactionJournal = Readonly<{ changes: readonly Readonly<{ path: string; existed: boolean }>[] }>
-type JsonValidator = (resource: unknown, filename: string) => readonly Diagnostic[]
+/** `schemaVersion` is the selected Workspace manifest version every canonical file is decoded under. */
+type JsonValidator = (resource: unknown, filename: string, schemaVersion: number) => readonly Diagnostic[]
 
 const TRANSACTION_ROOT = '.uiux/.transactions'
 const PERSISTENCE_LOCK = '.uiux/.persistence.lock'
@@ -141,7 +153,7 @@ export class FileNativePersistence {
 		this.workspace = new WorkspaceFileRepository(this)
 		this.views = new JsonResourceRepository(this, viewRelativePath, 'id', (resource, filename) => validateViewResource(resource, filename).diagnostics, { directory: 'views', suffix: '.view.json' })
 		this.flows = new JsonResourceRepository(this, flowRelativePath, 'id', (resource, filename) => validateFlowResource(resource, filename).diagnostics, { directory: 'flows', suffix: '.flow.json' })
-		this.reviews = new JsonResourceRepository(this, reviewRelativePath, 'id', (resource, filename) => validateReviewThread(resource, filename).diagnostics, { directory: 'reviews', suffix: '.review.json' })
+		this.reviews = new JsonResourceRepository(this, reviewRelativePath, 'id', (resource, filename, schemaVersion) => validateReviewThread(resource, { filename, schemaVersion }).diagnostics, { directory: 'reviews', suffix: '.review.json' })
 		this.locales = new LocaleFileRepository(this)
 		this.assets = new AuthoredAssetFileRepository(this)
 		this.artifacts = new ImmutableArtifactStore(this)
@@ -152,58 +164,96 @@ export class FileNativePersistence {
 		return this.withLock(async () => this.inspectWorkspaceUnlocked())
 	}
 
-	/** The only operation that applies injected Workspace schema migrations. */
-	async migrateWorkspace(): Promise<Readonly<{ version: number; revision: ResourceRevision; changedFiles: readonly string[]; steps: readonly string[] }>> {
+	/**
+	 * Plans the injected Workspace schema migration entirely in memory, without writing anything.
+	 * Returns the step ids that would run and the canonical files whose bytes would change.
+	 */
+	async planWorkspaceMigration(): Promise<WorkspaceMigrationPlanResult> {
 		return this.withLock(async () => {
-			const read = await this.inspectWorkspaceUnlocked()
-			if (!read.resource || !read.revision)
-				throw new PersistenceError('workspace.manifest_missing', 'Cannot migrate a Workspace without .uiux/workspace.json.', { diagnostics: read.diagnostics })
-			if (read.inspection.state === 'unsupported')
-				throw new PersistenceError('workspace.schema_unsupported', 'Workspace schema is not supported by the injected policy.', { diagnostics: read.inspection.diagnostics })
-			if (read.inspection.state === 'missing_manifest')
-				throw new PersistenceError('workspace.manifest_missing', 'Cannot migrate a Workspace without .uiux/workspace.json.', { diagnostics: read.diagnostics })
-			if (read.inspection.state === 'current')
-				return { version: read.inspection.version, revision: read.revision, changedFiles: [], steps: [] }
+			const planned = await this.planWorkspaceMigrationUnlocked()
+			return {
+				fromVersion: planned.fromVersion,
+				version: planned.toVersion,
+				revision: planned.revision,
+				changedFiles: planned.changes.map(change => change.path),
+				steps: planned.steps,
+			}
+		})
+	}
 
-			const initialSnapshot = await this.scanCanonicalSnapshotUnlocked()
-			let snapshot = cloneSnapshot(initialSnapshot)
-			const stepIds: string[] = []
-			try {
-				for (const step of read.inspection.migrationPlan) {
-					const inputSnapshot = cloneSnapshot(snapshot)
-					const next = await step.apply(inputSnapshot)
-					if (!(next instanceof Map))
-						throw new TypeError(`Migration step ${step.id} did not return a WorkspaceSnapshot Map.`)
-					snapshot = cloneSnapshot(next)
-					validateCanonicalSnapshot(snapshot, step.toVersion, this.schemaPolicy)
-					stepIds.push(step.id)
-				}
-				validateCanonicalSnapshot(snapshot, this.schemaPolicy.currentVersion, this.schemaPolicy)
-			}
-			catch (cause) {
-				if (cause instanceof PersistenceError)
-					throw cause
-				throw new PersistenceError('workspace.migration_failed', 'Workspace migration planning failed before canonical files were changed.', { cause })
-			}
+	/** The only operation that applies injected Workspace schema migrations. */
+	async migrateWorkspace(): Promise<Readonly<{ fromVersion: number; version: number; revision: ResourceRevision; changedFiles: readonly string[]; steps: readonly string[] }>> {
+		return this.withLock(async () => {
+			const planned = await this.planWorkspaceMigrationUnlocked()
+			if (planned.steps.length === 0)
+				return { fromVersion: planned.fromVersion, version: planned.toVersion, revision: planned.revision, changedFiles: [], steps: [] }
 
 			const beforeApplySnapshot = await this.scanCanonicalSnapshotUnlocked()
-			if (!snapshotsEqual(initialSnapshot, beforeApplySnapshot))
+			if (!snapshotsEqual(planned.initialSnapshot, beforeApplySnapshot))
 				throw new PersistenceError('workspace.migration_failed', 'Canonical Workspace files changed while migration was being planned; no migration writes were applied.')
-			const changes = diffSnapshots(initialSnapshot, snapshot)
-			const changedFiles = changes.map(change => change.path)
-			await this.applyFileTransaction(changes, 'migration')
+			const changedFiles = planned.changes.map(change => change.path)
+			await this.applyFileTransaction(planned.changes, 'migration')
 			const manifestBytes = await this.readBytesUnlocked(workspaceRelativePath())
 			const finalManifest = parseJsonBytes(manifestBytes, workspaceRelativePath())
 			const finalInspection = inspectWorkspaceManifest(finalManifest, this.schemaPolicy)
 			if (finalInspection.state !== 'current')
 				throw new PersistenceError('workspace.migration_failed', 'Workspace migration transaction completed without reaching the current policy version.', { diagnostics: finalInspection.diagnostics })
 			return {
+				fromVersion: planned.fromVersion,
 				version: finalInspection.version,
 				revision: revisionForBytes(manifestBytes),
 				changedFiles,
-				steps: stepIds,
+				steps: planned.steps,
 			}
 		})
+	}
+
+	private async planWorkspaceMigrationUnlocked(): Promise<Readonly<{
+		fromVersion: number
+		toVersion: number
+		revision: ResourceRevision
+		steps: readonly string[]
+		changes: readonly FileChange[]
+		initialSnapshot: WorkspaceSnapshot
+	}>> {
+		const read = await this.inspectWorkspaceUnlocked()
+		if (!read.resource || !read.revision)
+			throw new PersistenceError('workspace.manifest_missing', 'Cannot migrate a Workspace without .uiux/workspace.json.', { diagnostics: read.diagnostics })
+		if (read.inspection.state === 'unsupported')
+			throw new PersistenceError('workspace.schema_unsupported', 'Workspace schema is not supported by the injected policy.', { diagnostics: read.inspection.diagnostics })
+		if (read.inspection.state === 'missing_manifest')
+			throw new PersistenceError('workspace.manifest_missing', 'Cannot migrate a Workspace without .uiux/workspace.json.', { diagnostics: read.diagnostics })
+		if (read.inspection.state === 'current')
+			return { fromVersion: read.inspection.version, toVersion: read.inspection.version, revision: read.revision, steps: [], changes: [], initialSnapshot: new Map() }
+		const initialSnapshot = await this.scanCanonicalSnapshotUnlocked()
+
+		let snapshot = cloneSnapshot(initialSnapshot)
+		const stepIds: string[] = []
+		try {
+			for (const step of read.inspection.migrationPlan) {
+				const inputSnapshot = cloneSnapshot(snapshot)
+				const next = await step.apply(inputSnapshot)
+				if (!(next instanceof Map))
+					throw new TypeError(`Migration step ${step.id} did not return a WorkspaceSnapshot Map.`)
+				snapshot = cloneSnapshot(next)
+				validateCanonicalSnapshot(snapshot, step.toVersion, this.schemaPolicy)
+				stepIds.push(step.id)
+			}
+			validateCanonicalSnapshot(snapshot, this.schemaPolicy.currentVersion, this.schemaPolicy)
+		}
+		catch (cause) {
+			if (cause instanceof PersistenceError)
+				throw cause
+			throw new PersistenceError('workspace.migration_failed', 'Workspace migration planning failed before canonical files were changed.', { cause })
+		}
+		return {
+			fromVersion: read.inspection.version,
+			toVersion: this.schemaPolicy.currentVersion,
+			revision: read.revision,
+			steps: stepIds,
+			changes: diffSnapshots(initialSnapshot, snapshot),
+			initialSnapshot,
+		}
 	}
 
 	/**
@@ -255,7 +305,7 @@ export class FileNativePersistence {
 				}
 			}
 
-			const reviewValidation = validateReviewThread(input.reviewResource, `${input.reviewId}.review.json`)
+			const reviewValidation = validateReviewThread(input.reviewResource, { filename: `${input.reviewId}.review.json`, schemaVersion: this.schemaPolicy.currentVersion })
 			if (!reviewValidation.ok) {
 				throw new PersistenceError('persistence.invalid_resource', 'ReviewThread resource failed schema validation before atomic promotion write.', { diagnostics: reviewValidation.diagnostics })
 			}
@@ -334,6 +384,23 @@ export class FileNativePersistence {
 			: []
 		const diagnostics = [...validationDiagnostics, ...extraDiagnostics]
 		return { resource: resource as WorkspaceManifest, revision: revisionForBytes(bytes), inspection, diagnostics }
+	}
+
+	/**
+	 * The schemaVersion canonical files are decoded under: the selected manifest's integer version,
+	 * or the policy currentVersion when the manifest is missing or has no usable version.
+	 */
+	async readDecodeSchemaVersionUnlocked(): Promise<number> {
+		const bytes = await this.readOptionalBytesUnlocked(workspaceRelativePath())
+		if (!bytes) return this.schemaPolicy.currentVersion
+		try {
+			const manifest = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown
+			const version = isRecord(manifest) ? manifest.schemaVersion : undefined
+			return typeof version === 'number' && Number.isInteger(version) && version >= 1 ? version : this.schemaPolicy.currentVersion
+		}
+		catch {
+			return this.schemaPolicy.currentVersion
+		}
 	}
 
 	async readBytesUnlocked(relativePath: string): Promise<Buffer> {
@@ -832,7 +899,8 @@ export class JsonResourceRepository<Key extends string, Resource> implements Mut
 			const bytes = await this.persistence.readOptionalBytesUnlocked(path)
 			if (!bytes) return undefined
 			const resource = parseJsonBytes(bytes, path)
-			return { resource: resource as Resource, revision: revisionForBytes(bytes), diagnostics: this.validate(resource, basename(path)) }
+			const schemaVersion = await this.persistence.readDecodeSchemaVersionUnlocked()
+			return { resource: resource as Resource, revision: revisionForBytes(bytes), diagnostics: this.validate(resource, basename(path), schemaVersion) }
 		})
 	}
 
@@ -1472,10 +1540,11 @@ function validateCanonicalSnapshot(snapshot: WorkspaceSnapshot, expectedVersion:
 		if (directory === 'assets') {
 			if (segments.length !== 3 || !isFullUuid(segments[1]!))
 				throw new PersistenceError('workspace.migration_failed', `Migration result contains non-canonical Asset path ${relativePath}.`)
+			const assetFilename = segments[2]!
 			const files = assetFiles.get(segments[1]!) ?? []
-			files.push(filename!)
+			files.push(assetFilename)
 			assetFiles.set(segments[1]!, files)
-			if (filename === 'asset.json') {
+			if (assetFilename === 'asset.json') {
 				const metadata = parseJsonBytes(bytes, relativePath)
 				if (!isRecord(metadata) || metadata.id !== segments[1] || !isSafeAssetContentFilename(metadata.contentFilename))
 					throw new PersistenceError('workspace.migration_failed', `Migrated Asset metadata at ${relativePath} must retain its directory UUID and safe contentFilename.`)

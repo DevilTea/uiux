@@ -18,7 +18,12 @@ const { t } = useI18n()
 const route = useRoute()
 const workbench = provideWorkbench()
 const shell = provideWorkbenchShell()
-const { error, isReadOnly, publicationInfo } = workbench
+const { error, isReadOnly, publicationInfo, workspace } = workbench
+
+// Read-only banner for an older Workspace schema. Migration is a CLI-only operator act
+// (`uiux migrate`), so the banner names the command and offers no in-app action.
+const migrationRequired = computed(() => workspace.value?.inspection?.state === 'migration_required')
+const MIGRATE_COMMAND = 'uiux migrate --workspace <dir>'
 
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const sidebarOpen = ref(false)
@@ -95,6 +100,18 @@ onUnmounted(() => {
       close
       :ui="{ root: 'border-b border-default bg-muted', title: 'text-xs text-muted font-medium' }"
       @close="dismissPublicationBanner"
+    />
+
+    <UAlert
+      v-if="migrationRequired"
+      id="uiux-migration-required"
+      color="warning"
+      variant="subtle"
+      icon="i-lucide-database"
+      role="status"
+      :title="t('workbench.migration.title')"
+      :description="t('workbench.migration.description', { command: MIGRATE_COMMAND })"
+      :ui="{ root: 'rounded-none border-b border-default' }"
     />
 
     <UAlert

@@ -40,6 +40,7 @@ import {
 	productAdapterRegistryInspector,
 } from '../../adapters/product-integration'
 import { collectWidgetTypesFromIr } from '../../preview/preview-runtime'
+import { deriveReviewResolution, REVIEW_RESOLUTIONS, type ReviewResolution } from '../../domain/reviews/schema'
 
 export type ExportHandoffCommand = Readonly<{
 	roots: readonly HandoffRoot[]
@@ -83,6 +84,8 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 				adaptersInClosure: readonly AdapterProvenance[]
 				contextsInClosure: readonly ResolvedRenderContext[]
 				wsSchemaVersion: number
+				/** `coverage.review`: completeness plus per-resolution counts over the closure. */
+				reviewCoverage: Readonly<{ complete: boolean; threads: number; resolved: Readonly<Record<ReviewResolution, number>> }>
 		  }
 		| {
 				ok: false
@@ -397,6 +400,10 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 		const reviewSnapshots = new Map<string, HandoffResourceSnapshot>()
 		const allReviewIds = await persistence.reviews.discoverKeys()
 		let reviewCoverageComplete = true
+		let reviewThreadCount = 0
+		// Machine-readable breakdown over the closure: only `verified` means a change was evidence-checked;
+		// every other kind is closed without a verified change and never counts as verified.
+		const resolvedReviewCounts = Object.fromEntries(REVIEW_RESOLUTIONS.map(kind => [kind, 0])) as Record<ReviewResolution, number>
 
 		for (const revId of allReviewIds) {
 			const revRead = await persistence.reviews.readInspected(revId)
@@ -411,7 +418,8 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 				snapshot: revRead.resource as unknown as JsonObject,
 			})
 
-			// Review readiness: open threads block implementationReady
+			reviewThreadCount += 1
+			// Review readiness: open threads block implementationReady; every resolution kind is closed.
 			if (revRead.resource.status === 'open' || revRead.resource.status === 'ready-for-review') {
 				reviewCoverageComplete = false
 				blockingDiagnostics.push({
@@ -420,6 +428,19 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 					blocking: true,
 					path: `/reviews/${revId}`,
 				})
+			}
+			else {
+				const resolution = deriveReviewResolution(revRead.resource)
+				if (resolution) resolvedReviewCounts[resolution] += 1
+				if (resolution === 'wont-fix') {
+					// Advisory only: a declined request is what downstream implementers most need to see.
+					blockingDiagnostics.push({
+						code: 'handoff.review_declined',
+						message: `Review thread ${revId} anchored to View ${targetViewId} was resolved as won't fix: the requested change was declined.`,
+						blocking: false,
+						path: `/reviews/${revId}`,
+					})
+				}
 			}
 		}
 
@@ -820,10 +841,16 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			reviewCoverageComplete,
 			blockingDiagnostics,
 		}
+		const reviewCoverage = {
+			complete: reviewCoverageComplete,
+			threads: reviewThreadCount,
+			resolved: resolvedReviewCounts,
+		}
 
 		return {
 			ok: true,
 			assessment,
+			reviewCoverage,
 			resources,
 			artifactRefs,
 			evidenceRefs,
@@ -843,14 +870,14 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			}
 		}
 
-		const { assessment } = closureRes
+		const { assessment, reviewCoverage } = closureRes
 		const implementationReady = mayClaimImplementationReady(assessment)
 		const readiness: HandoffReadiness = {
 			implementationReady,
 			coverage: {
 				validation: { complete: assessment.closureValid },
 				evidence: { complete: assessment.requiredEvidenceComplete },
-				review: { complete: assessment.reviewCoverageComplete },
+				review: reviewCoverage,
 			},
 			blockingDiagnostics: assessment.blockingDiagnostics,
 		}
@@ -881,6 +908,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			adaptersInClosure,
 			contextsInClosure,
 			wsSchemaVersion,
+			reviewCoverage,
 		} = closureRes
 
 		const implementationReady = mayClaimImplementationReady(assessment)
@@ -889,7 +917,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			coverage: {
 				validation: { complete: assessment.closureValid },
 				evidence: { complete: assessment.requiredEvidenceComplete },
-				review: { complete: assessment.reviewCoverageComplete },
+				review: reviewCoverage,
 			},
 			blockingDiagnostics: assessment.blockingDiagnostics,
 		}

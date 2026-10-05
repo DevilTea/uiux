@@ -130,6 +130,7 @@ describe('shared HTTP/MCP point-resource reads', () => {
 				'replace_asset',
 				'resolve_review_thread',
 				'search_resources',
+				'set_review_display_hint',
 				'submit_ready_for_review',
 				'update_flow',
 				'update_locale',
