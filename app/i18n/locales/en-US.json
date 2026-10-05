@@ -53,7 +53,11 @@
       "nameRequired": "Enter a name.",
       "filenameRequired": "Enter a filename.",
       "fileNotReady": "Still reading the file. Try again in a moment."
-    }
+    },
+    "upload": "Upload",
+    "replace": "Replace content…",
+    "unused": "Unused",
+    "usedBy": "Used by {n} View | Used by {n} Views"
   },
   "checks": {
     "title": "Checks",
@@ -103,7 +107,8 @@
     "readOnly": "Read-only",
     "revision": "Revision",
     "errorTitle": "Something went wrong",
-    "unexpectedError": "An unexpected error occurred."
+    "unexpectedError": "An unexpected error occurred.",
+    "editOnDesktop": "Edit on desktop"
   },
   "evidence": {
     "title": "Formal Evidence",
@@ -120,16 +125,6 @@
     "copyDigest": "Copy SHA-256",
     "applyContext": "Apply context to preview",
     "selectPrompt": "Select a record to inspect it.",
-    "capture": {
-      "succeeded": "Evidence captured",
-      "failed": "Could not capture Evidence.",
-      "failedTitle": "Capture failed",
-      "incompleteTitle": "Capture incomplete",
-      "summary": "Captured {captured} of {total} contexts.",
-      "executedAt": "Ran at {time}.",
-      "unknownContext": "Unknown context",
-      "noDetails": "No details reported for this context."
-    },
     "empty": {
       "title": "No Formal Evidence yet",
       "description": "Use “Capture current context” to record Evidence for the current preview.",
@@ -138,19 +133,6 @@
     "status": {
       "stale": "Stale",
       "current": "Current"
-    },
-    "stale": {
-      "title": "This Evidence is stale",
-      "unknown": "It no longer matches the current Workspace.",
-      "missingViewId": "This record does not name a View.",
-      "viewMissing": "The View no longer exists.",
-      "provenanceMissing": "This record's source info is missing its View.",
-      "viewRevisionChanged": "The View changed after this capture.",
-      "localeMissing": "Locale “{locale}” is no longer in the Workspace.",
-      "localeRevisionChanged": "Locale “{locale}” changed after this capture.",
-      "viewportRemoved": "Viewport “{viewport}” was removed.",
-      "viewportChanged": "Viewport “{viewport}” changed size after this capture.",
-      "themeRemoved": "Theme “{theme}” was removed."
     },
     "context": {
       "title": "Render context",
@@ -178,7 +160,34 @@
       "schemaVersion": "Schema version",
       "unknown": "Unknown",
       "resources": "Resources"
-    }
+    },
+    "captureResult": {
+      "succeeded": "Evidence captured",
+      "failed": "Could not capture Evidence.",
+      "failedTitle": "Capture failed",
+      "incompleteTitle": "Capture incomplete",
+      "summary": "Captured {captured} of {total} contexts.",
+      "executedAt": "Ran at {time}.",
+      "unknownContext": "Unknown context",
+      "noDetails": "No details reported for this context."
+    },
+    "staleReason": {
+      "title": "This Evidence is stale",
+      "unknown": "It no longer matches the current Workspace.",
+      "missingViewId": "This record does not name a View.",
+      "viewMissing": "The View no longer exists.",
+      "provenanceMissing": "This record's source info is missing its View.",
+      "viewRevisionChanged": "The View changed after this capture.",
+      "localeMissing": "Locale “{locale}” is no longer in the Workspace.",
+      "localeRevisionChanged": "Locale “{locale}” changed after this capture.",
+      "viewportRemoved": "Viewport “{viewport}” was removed.",
+      "viewportChanged": "Viewport “{viewport}” changed size after this capture.",
+      "themeRemoved": "Theme “{theme}” was removed."
+    },
+    "stale": "Stale: View changed after capture",
+    "capture": "Capture…",
+    "captureN": "Capture {n} context | Capture {n} contexts",
+    "selectAll": "All Variants · All locales · All viewports · All themes"
   },
   "flows": {
     "title": "UX Flows",
@@ -261,7 +270,13 @@
       "nameRequired": "Enter a Flow name.",
       "viewRequired": "Select a View for the first step.",
       "noViews": "Create a View first. The first step needs one."
-    }
+    },
+    "play": "Play prototype",
+    "restart": "Restart",
+    "exit": "Exit",
+    "next": "Next: {event}",
+    "unreachable": "Unreachable step",
+    "cantPlay": "Fix {n} problem to play this Flow. | Fix {n} problems to play this Flow."
   },
   "handoff": {
     "title": "Handoff",
@@ -291,7 +306,8 @@
       "flows": "UX Flows",
       "assets": "Assets",
       "selected": "None selected | {n} selected | {n} selected",
-      "noneSelected": "Select at least one item to check readiness."
+      "noneSelected": "Select at least one item to check readiness.",
+      "workspace": "Whole Workspace"
     },
     "readiness": {
       "ready": "Ready to implement",
@@ -314,7 +330,7 @@
       "title": "No blocking issues | {n} blocking issue | {n} blocking issues",
       "path": "Path: {path}"
     },
-    "exported": {
+    "exportResult": {
       "title": "Exported Handoff",
       "at": "Exported {time}",
       "bundleIdentity": "Bundle ID",
@@ -322,7 +338,10 @@
       "copyBundleIdentity": "Copy bundle ID",
       "copyManifestDigest": "Copy manifest digest",
       "download": "Download manifest JSON"
-    }
+    },
+    "diagnosticNote": "You can still export a diagnostic snapshot. It won't claim readiness.",
+    "exported": "Snapshot exported",
+    "diagnostic": "Diagnostic snapshot"
   },
   "locales": {
     "title": "Workspace Locales",
@@ -369,7 +388,11 @@
       "tagRequired": "Enter a Locale tag.",
       "created": "Locale {locale} created.",
       "failed": "Could not create the Locale."
-    }
+    },
+    "primary": "Primary",
+    "onlyReminders": "Only reminders",
+    "empty": "Empty",
+    "whitespace": "Whitespace only"
   },
   "preview": {
     "loading": "Loading View…",
@@ -389,7 +412,7 @@
       "bridgeInitFailed": "The preview could not connect to the Workbench. Try reloading.",
       "viewUnavailable": "This View is unavailable.",
       "viewLoadFailed": "Could not load the View.",
-      "bundleInvalid": "The preview runtime is invalid: the bundle does not expose mountPreviewRuntime.",
+      "bundleInvalid": "The preview runtime is incomplete. Rebuild UIUX, then reload.",
       "bundleLoadFailed": "Could not load the preview runtime."
     }
   },
@@ -516,8 +539,8 @@
       "viewportOption": "{name} · {width}×{height}",
       "defaultThemeOption": "Default ({theme})",
       "noVariantsHint": "This View has no Variants.",
-      "noViewportsHint": "No viewports in workspace.json. Using the default 1280 × 800.",
-      "noThemesHint": "No themes in workspace.json. Themes affect only the previewed View, not the Workbench.",
+      "noViewportsHint": "No viewport presets in this Workspace. Using 1280 × 800.",
+      "noThemesHint": "No themes in this Workspace. Themes change only the previewed View, not the Workbench.",
       "themeHint": "Theme used to render the previewed View. Separate from the Workbench appearance."
     },
     "session": {
@@ -561,7 +584,7 @@
     "tree": {
       "title": "Widget tree",
       "label": "Widget tree of the selected View",
-      "emptyContentSlot": "(empty content slot)",
+      "emptyContentSlot": "No Widgets in content yet",
       "unavailable": "No Widget tree"
     },
     "canvas": {
@@ -688,5 +711,216 @@
     "diagnostics": {
       "title": "No diagnostics | {n} diagnostic | {n} diagnostics"
     }
+  },
+  "nav": {
+    "overview": "Overview",
+    "views": "Views",
+    "flows": "UX Flows",
+    "reviews": "Reviews",
+    "workspace": "Workspace",
+    "settings": "Settings",
+    "locales": "Locales",
+    "assets": "Assets",
+    "adapters": "Adapters"
+  },
+  "shell": {
+    "search": "Search or jump to…",
+    "skipToCanvas": "Skip to canvas"
+  },
+  "prefs": {
+    "theme": "Workbench theme",
+    "themeHint": "Changes the Workbench only, not the previewed View.",
+    "language": "Workbench language",
+    "system": "Match system"
+  },
+  "identity": {
+    "commentingAs": "Commenting as {name}",
+    "setName": "Set your name"
+  },
+  "publication": {
+    "banner": "Published snapshot · read-only"
+  },
+  "server": {
+    "unreachable": "Can't reach the UIUX server."
+  },
+  "inbox": {
+    "title": "Reviews",
+    "group": {
+      "ready": "Ready for review",
+      "open": "Open",
+      "resolved": "Resolved"
+    },
+    "search": "Search threads",
+    "filters": "Filters",
+    "filter": {
+      "anchor": "Anchor",
+      "anchorValid": "Valid",
+      "stale": "Stale",
+      "missing": "Missing",
+      "scope": "Variant scope",
+      "viewWide": "View-wide",
+      "domain": "Change domain",
+      "author": "Author"
+    },
+    "openInCanvas": "Open in canvas",
+    "empty": {
+      "title": "No Reviews yet",
+      "body": "Comments made on a View's canvas show up here."
+    },
+    "noMatch": "No threads match these filters.",
+    "caughtUp": "Nothing waiting for review"
+  },
+  "timeline": {
+    "submitted": "Submitted for review",
+    "current": "Current",
+    "reanchored": "Re-anchored from {from} to {to}",
+    "resolvedBy": "Resolved by {name} · accepted submission {id}",
+    "reopenedBy": "Reopened by {name}",
+    "agent": "agent"
+  },
+  "action": {
+    "resolveDisabled": "Resolve becomes available after a fix is submitted for review.",
+    "promote": "Promote to Decision"
+  },
+  "decision": {
+    "pending": "Pending",
+    "decided": "Decided",
+    "deferred": "Deferred"
+  },
+  "conflict": {
+    "thread": "This thread changed since you opened it."
+  },
+  "ctx": {
+    "variant": "Variant",
+    "base": "Base state",
+    "locale": "Locale",
+    "viewport": "Viewport",
+    "theme": "Theme",
+    "themeHint": "Theme of the previewed View"
+  },
+  "tool": {
+    "select": "Select",
+    "comment": "Comment",
+    "interact": "Interact"
+  },
+  "zoom": {
+    "fit": "Fit"
+  },
+  "session": {
+    "live": "Live",
+    "reconnecting": "Reconnecting…",
+    "stopped": "Preview stopped"
+  },
+  "canvas": {
+    "variantInvalid": "This Variant can't run.",
+    "switchToBase": "Switch to base state",
+    "mappingPaused": "Precise highlight paused. The preview can't be measured right now.",
+    "widgetMissing": "Widget {id} isn't in this View anymore.",
+    "viewMissing": "View not found. Stayed on the current page.",
+    "notVisible": "Not visible in this state"
+  },
+  "panel": {
+    "comments": "Comments",
+    "inspect": "Inspect",
+    "spec": "Spec",
+    "readiness": "Readiness"
+  },
+  "inspect": {
+    "empty": {
+      "title": "Select a Widget",
+      "body": "Click a Widget in the View or the Layers list."
+    },
+    "identity": "Identity",
+    "slot": "Slot",
+    "size": "Size",
+    "inVariant": "In this Variant",
+    "base": "Base",
+    "noOverrides": "No overrides in this Variant.",
+    "findings": "Findings",
+    "commentsHere": "Comments on this Widget",
+    "details": "Details",
+    "copied": "Copied {id}"
+  },
+  "spec": {
+    "intent": "Intent",
+    "entry": "Entry conditions",
+    "rules": "Interaction rules",
+    "constraints": "Constraints",
+    "a11y": "Accessibility",
+    "decisions": "Decisions",
+    "refs": "References",
+    "emptySection": "No {section} yet.",
+    "fromReview": "from Review",
+    "conflict": "The Spec changed since you started editing."
+  },
+  "settings": {
+    "title": "Workspace settings",
+    "general": "General",
+    "viewports": "Viewports",
+    "themes": "Themes",
+    "adapters": "Adapters",
+    "keyChange": "Renaming a key changes its identity. Check references first.",
+    "unsaved": "{n} unsaved change | {n} unsaved changes",
+    "conflict": "Settings changed since you opened them."
+  },
+  "adapters": {
+    "invalid": "The Adapter set is invalid. Preview and Catalog are paused until it's fixed.",
+    "repair": "Run this in your project to fix it:"
+  },
+  "comment": {
+    "modeOn": "Comment mode on. Click a Widget, or press Esc to cancel.",
+    "hoverChip": "Comment on {type}",
+    "placeholder": "Add a comment",
+    "send": "Comment",
+    "scopeThis": "This Variant",
+    "scopeAll": "All Variants",
+    "commentingAs": "Commenting as {name}",
+    "discard": "Discard this comment?"
+  },
+  "thread": {
+    "reply": "Reply…",
+    "resolve": "Resolve",
+    "resolveHint": "Accepts submission {id}",
+    "reopen": "Reopen",
+    "submit": "Submit for review…",
+    "status": {
+      "open": "Open",
+      "ready": "Ready for review",
+      "resolved": "Resolved"
+    },
+    "copyLink": "Copy link",
+    "reanchor": "Re-anchor",
+    "promote": "Promote to Decision"
+  },
+  "pins": {
+    "unplaced": "{n} comment can't be placed | {n} comments can't be placed",
+    "otherVariants": "Other Variants · {n}",
+    "notVisible": "Not visible in this state",
+    "variantMissing": "Variant missing: {name}"
+  },
+  "empty": {
+    "title": "No comments yet",
+    "body": "Press C and click anything in the View to comment."
+  },
+  "allCaughtUp": "All caught up · {n} resolved",
+  "overview": {
+    "title": "Overview",
+    "attention": "{ready} waiting for review · {open} open · {findings} Checks findings",
+    "allClear": "Nothing waiting. {n} View ready. | Nothing waiting. {n} Views ready.",
+    "tab": {
+      "views": "Views",
+      "checks": "Checks",
+      "activity": "Activity"
+    },
+    "updated": "Updated since you last looked"
+  },
+  "ready": {
+    "validation": "Validation",
+    "evidence": "Evidence",
+    "reviews": "Reviews",
+    "handoff": "Handoff",
+    "blockedBy": "Blocked by {n} issue | Blocked by {n} issues",
+    "ready": "Ready",
+    "notReady": "Not implementation-ready"
   }
 }

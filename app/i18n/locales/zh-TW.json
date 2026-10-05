@@ -53,7 +53,11 @@
       "nameRequired": "請輸入名稱。",
       "filenameRequired": "請輸入檔名。",
       "fileNotReady": "仍在讀取檔案，請稍候再試。"
-    }
+    },
+    "upload": "上傳",
+    "replace": "取代內容…",
+    "unused": "未使用",
+    "usedBy": "被 {n} 個 View 使用 | 被 {n} 個 View 使用"
   },
   "checks": {
     "title": "檢查",
@@ -103,7 +107,8 @@
     "readOnly": "唯讀",
     "revision": "修訂版本",
     "errorTitle": "發生錯誤",
-    "unexpectedError": "發生未預期的錯誤。"
+    "unexpectedError": "發生未預期的錯誤。",
+    "editOnDesktop": "請在桌面版編輯"
   },
   "evidence": {
     "title": "Formal Evidence",
@@ -120,16 +125,6 @@
     "copyDigest": "複製 SHA-256",
     "applyContext": "將情境套用到預覽",
     "selectPrompt": "選取一筆紀錄以檢視。",
-    "capture": {
-      "succeeded": "已擷取 Evidence",
-      "failed": "無法擷取 Evidence。",
-      "failedTitle": "擷取失敗",
-      "incompleteTitle": "擷取未完成",
-      "summary": "已擷取 {captured} / {total} 個情境。",
-      "executedAt": "執行時間：{time}。",
-      "unknownContext": "未知的情境",
-      "noDetails": "此情境沒有回報詳細資訊。"
-    },
     "empty": {
       "title": "尚無 Formal Evidence",
       "description": "使用「擷取目前情境」為目前的預覽記錄 Evidence。",
@@ -138,19 +133,6 @@
     "status": {
       "stale": "過時",
       "current": "最新"
-    },
-    "stale": {
-      "title": "此 Evidence 已過時",
-      "unknown": "已與目前的 Workspace 不一致。",
-      "missingViewId": "此紀錄未指定 View。",
-      "viewMissing": "此 View 已不存在。",
-      "provenanceMissing": "此紀錄的來源資訊缺少 View。",
-      "viewRevisionChanged": "View 在擷取後已變更。",
-      "localeMissing": "Locale「{locale}」已不在 Workspace 中。",
-      "localeRevisionChanged": "Locale「{locale}」在擷取後已變更。",
-      "viewportRemoved": "檢視區「{viewport}」已移除。",
-      "viewportChanged": "檢視區「{viewport}」的尺寸在擷取後已變更。",
-      "themeRemoved": "主題「{theme}」已移除。"
     },
     "context": {
       "title": "渲染情境",
@@ -178,7 +160,34 @@
       "schemaVersion": "結構描述版本",
       "unknown": "未知",
       "resources": "資源"
-    }
+    },
+    "captureResult": {
+      "succeeded": "已擷取 Evidence",
+      "failed": "無法擷取 Evidence。",
+      "failedTitle": "擷取失敗",
+      "incompleteTitle": "擷取未完成",
+      "summary": "已擷取 {captured} / {total} 個情境。",
+      "executedAt": "執行時間：{time}。",
+      "unknownContext": "未知的情境",
+      "noDetails": "此情境沒有回報詳細資訊。"
+    },
+    "staleReason": {
+      "title": "此 Evidence 已過時",
+      "unknown": "已與目前的 Workspace 不一致。",
+      "missingViewId": "此紀錄未指定 View。",
+      "viewMissing": "此 View 已不存在。",
+      "provenanceMissing": "此紀錄的來源資訊缺少 View。",
+      "viewRevisionChanged": "View 在擷取後已變更。",
+      "localeMissing": "Locale「{locale}」已不在 Workspace 中。",
+      "localeRevisionChanged": "Locale「{locale}」在擷取後已變更。",
+      "viewportRemoved": "檢視區「{viewport}」已移除。",
+      "viewportChanged": "檢視區「{viewport}」的尺寸在擷取後已變更。",
+      "themeRemoved": "主題「{theme}」已移除。"
+    },
+    "stale": "已過時：擷取後 View 已變更",
+    "capture": "擷取…",
+    "captureN": "擷取 {n} 個情境 | 擷取 {n} 個情境",
+    "selectAll": "所有 Variant・所有 Locale・所有檢視區・所有主題"
   },
   "flows": {
     "title": "UX Flow",
@@ -261,7 +270,13 @@
       "nameRequired": "請輸入 Flow 名稱。",
       "viewRequired": "請為第一個步驟選取 View。",
       "noViews": "請先建立 View，第一個步驟需要 View。"
-    }
+    },
+    "play": "播放原型",
+    "restart": "重新開始",
+    "exit": "離開",
+    "next": "下一步：{event}",
+    "unreachable": "無法抵達的步驟",
+    "cantPlay": "修正 {n} 個問題後才能播放此 Flow。 | 修正 {n} 個問題後才能播放此 Flow。"
   },
   "handoff": {
     "title": "Handoff",
@@ -291,7 +306,8 @@
       "flows": "UX Flow",
       "assets": "Asset",
       "selected": "未選取 | 已選取 {n} 個 | 已選取 {n} 個",
-      "noneSelected": "請至少選取一個項目以檢查就緒狀態。"
+      "noneSelected": "請至少選取一個項目以檢查就緒狀態。",
+      "workspace": "整個 Workspace"
     },
     "readiness": {
       "ready": "可進行實作",
@@ -314,7 +330,7 @@
       "title": "沒有阻擋性問題 | {n} 項阻擋性問題 | {n} 項阻擋性問題",
       "path": "路徑：{path}"
     },
-    "exported": {
+    "exportResult": {
       "title": "已匯出的 Handoff",
       "at": "匯出時間：{time}",
       "bundleIdentity": "套件 ID",
@@ -322,7 +338,10 @@
       "copyBundleIdentity": "複製套件 ID",
       "copyManifestDigest": "複製 Manifest 摘要值",
       "download": "下載 Manifest JSON"
-    }
+    },
+    "diagnosticNote": "仍可匯出診斷用快照，但不會標示為已就緒。",
+    "exported": "已匯出快照",
+    "diagnostic": "診斷用快照"
   },
   "locales": {
     "title": "Workspace Locale",
@@ -369,7 +388,11 @@
       "tagRequired": "請輸入 Locale 標籤。",
       "created": "已建立 Locale {locale}。",
       "failed": "無法建立 Locale。"
-    }
+    },
+    "primary": "主要 Locale",
+    "onlyReminders": "只顯示提醒",
+    "empty": "空字串",
+    "whitespace": "只有空白"
   },
   "preview": {
     "loading": "正在載入 View…",
@@ -380,7 +403,7 @@
       "title": "無法預覽此 View",
       "seam": "尚未支援",
       "description": "此 View 使用了外部 Adapter 的 Widget 類型（{types}），預覽目前還無法載入外部 Adapter 程式碼。",
-      "note": "目前預覽僅支援內建的 {rootShell}。"
+      "note": "目前預覽只能渲染內建的 {rootShell}。"
     },
     "invalidTitle": "無法渲染此 View",
     "emptySlotTitle": "尚無 Widget",
@@ -389,7 +412,7 @@
       "bridgeInitFailed": "預覽無法連線至 Workbench，請重新載入。",
       "viewUnavailable": "此 View 無法使用。",
       "viewLoadFailed": "無法載入 View。",
-      "bundleInvalid": "預覽執行環境無效：套件未提供 mountPreviewRuntime。",
+      "bundleInvalid": "預覽執行環境不完整。請重新建置 UIUX 後重新載入。",
       "bundleLoadFailed": "無法載入預覽執行環境。"
     }
   },
@@ -413,8 +436,8 @@
       "tooltip": "在預覽中點選 Widget 以建立討論串，按 Esc 取消。"
     },
     "status": {
-      "open": "開啟",
-      "readyForReview": "待 Review",
+      "open": "未解決",
+      "readyForReview": "待審核",
       "resolved": "已解決"
     },
     "empty": {
@@ -443,7 +466,7 @@
       "reanchorDescription": "將此討論串移至選取的 Widget（#{widgetId}）。",
       "reanchorNeedsWidget": "請在目前 View 中選取 Widget，以將討論串移至該處。",
       "reanchorAction": "移至 #{widgetId}",
-      "markReady": "標記為待 Review",
+      "markReady": "標記為待審核",
       "resolve": "標記為已解決",
       "requestChanges": "要求修改",
       "reopen": "重新開啟"
@@ -475,7 +498,7 @@
     "feedback": {
       "messagePosted": "已送出留言。",
       "reanchored": "已將討論串移至 #{widgetId}。",
-      "markedReady": "已標記為待 Review，附上 {n} 筆目前的 Formal Evidence。 | 已標記為待 Review，附上 {n} 筆目前的 Formal Evidence。",
+      "markedReady": "已標記為待審核，附上 {n} 筆目前的 Formal Evidence。 | 已標記為待審核，附上 {n} 筆目前的 Formal Evidence。",
       "resolved": "已將討論串標記為已解決。",
       "reopened": "已重新開啟討論串。",
       "promoted": "已升級為 Decision。",
@@ -488,14 +511,14 @@
       "threadUnavailable": "此討論串無法使用。",
       "postMessageFailed": "無法送出留言。",
       "reanchorFailed": "無法移動討論串。",
-      "readyFailed": "無法將討論串標記為待 Review。",
+      "readyFailed": "無法將討論串標記為待審核。",
       "resolveFailed": "無法將討論串標記為已解決。",
       "reopenFailed": "無法重新開啟討論串。",
       "promoteFailed": "無法升級為 Decision。",
       "createFailed": "無法建立討論串。",
       "initialMessageFailed": "已建立討論串，但無法送出第一則留言。",
       "targetViewUnresolved": "找不到 View {viewId} 的目前版本。",
-      "noCurrentEvidence": "沒有符合目前 View 的 Formal Evidence。請先擷取 Evidence，再將討論串標記為待 Review。",
+      "noCurrentEvidence": "沒有符合目前 View 的 Formal Evidence。請先擷取 Evidence，再將討論串標記為待審核。",
       "noViewSelected": "請先選取 View 以建立討論串。"
     }
   },
@@ -516,8 +539,8 @@
       "viewportOption": "{name} · {width}×{height}",
       "defaultThemeOption": "預設（{theme}）",
       "noVariantsHint": "此 View 沒有 Variant。",
-      "noViewportsHint": "workspace.json 未定義檢視區，使用預設的 1280 × 800。",
-      "noThemesHint": "workspace.json 未定義主題。主題只影響預覽的 View，不影響 Workbench。",
+      "noViewportsHint": "此 Workspace 沒有檢視區預設集，使用 1280 × 800。",
+      "noThemesHint": "此 Workspace 沒有主題。主題只影響預覽的 View，不影響 Workbench。",
       "themeHint": "用來渲染預覽 View 的主題，與 Workbench 外觀分開設定。"
     },
     "session": {
@@ -561,7 +584,7 @@
     "tree": {
       "title": "Widget 樹狀結構",
       "label": "所選 View 的 Widget 樹狀結構",
-      "emptyContentSlot": "（content 插槽為空）",
+      "emptyContentSlot": "content 中尚無 Widget",
       "unavailable": "沒有 Widget 樹狀結構"
     },
     "canvas": {
@@ -601,8 +624,8 @@
       "outcome": "結果：",
       "historyEvents": "沒有歷程事件 | {n} 筆歷程事件 | {n} 筆歷程事件",
       "decisionStatus": {
-        "pending": "待決定",
-        "deferred": "已延後",
+        "pending": "待定",
+        "deferred": "延後",
         "decided": "已決定"
       },
       "jumpToWidget": "選取 #{id}",
@@ -688,5 +711,216 @@
     "diagnostics": {
       "title": "沒有診斷 | {n} 項診斷 | {n} 項診斷"
     }
+  },
+  "nav": {
+    "overview": "總覽",
+    "views": "Views",
+    "flows": "UX Flows",
+    "reviews": "Reviews",
+    "workspace": "Workspace",
+    "settings": "設定",
+    "locales": "Locale",
+    "assets": "Asset",
+    "adapters": "Adapter"
+  },
+  "shell": {
+    "search": "搜尋或前往…",
+    "skipToCanvas": "跳至畫布"
+  },
+  "prefs": {
+    "theme": "Workbench 主題",
+    "themeHint": "只變更 Workbench，不影響預覽中的 View。",
+    "language": "Workbench 語言",
+    "system": "跟隨系統"
+  },
+  "identity": {
+    "commentingAs": "以 {name} 的身分留言",
+    "setName": "設定你的名稱"
+  },
+  "publication": {
+    "banner": "已發佈的快照・唯讀"
+  },
+  "server": {
+    "unreachable": "無法連線到 UIUX 伺服器。"
+  },
+  "inbox": {
+    "title": "Reviews",
+    "group": {
+      "ready": "待審核",
+      "open": "未解決",
+      "resolved": "已解決"
+    },
+    "search": "搜尋討論串",
+    "filters": "篩選",
+    "filter": {
+      "anchor": "錨點",
+      "anchorValid": "有效",
+      "stale": "過時",
+      "missing": "遺失",
+      "scope": "Variant 範圍",
+      "viewWide": "整個 View",
+      "domain": "變更範圍",
+      "author": "作者"
+    },
+    "openInCanvas": "在畫布中開啟",
+    "empty": {
+      "title": "還沒有 Review",
+      "body": "在 View 畫布上留下的留言會顯示在這裡。"
+    },
+    "noMatch": "沒有符合篩選條件的討論串。",
+    "caughtUp": "沒有待審核的項目"
+  },
+  "timeline": {
+    "submitted": "已提交 Review",
+    "current": "目前",
+    "reanchored": "已從 {from} 重新錨定至 {to}",
+    "resolvedBy": "由 {name} 解決・已接受提交 {id}",
+    "reopenedBy": "由 {name} 重新開啟",
+    "agent": "agent"
+  },
+  "action": {
+    "resolveDisabled": "修正提交 Review 後即可標記為已解決。",
+    "promote": "升級為 Decision"
+  },
+  "decision": {
+    "pending": "待定",
+    "decided": "已決定",
+    "deferred": "延後"
+  },
+  "conflict": {
+    "thread": "開啟後這個討論串已有變更。"
+  },
+  "ctx": {
+    "variant": "Variant",
+    "base": "基本狀態",
+    "locale": "Locale",
+    "viewport": "檢視區",
+    "theme": "主題",
+    "themeHint": "預覽中 View 的主題"
+  },
+  "tool": {
+    "select": "選取",
+    "comment": "留言",
+    "interact": "互動"
+  },
+  "zoom": {
+    "fit": "符合畫布"
+  },
+  "session": {
+    "live": "即時",
+    "reconnecting": "重新連線中…",
+    "stopped": "預覽已停止"
+  },
+  "canvas": {
+    "variantInvalid": "這個 Variant 無法執行。",
+    "switchToBase": "切換為基本狀態",
+    "mappingPaused": "已暫停精確標示。目前無法量測預覽畫面。",
+    "widgetMissing": "Widget {id} 已不在這個 View 中。",
+    "viewMissing": "找不到 View，已停留在目前頁面。",
+    "notVisible": "在此狀態下不可見"
+  },
+  "panel": {
+    "comments": "留言",
+    "inspect": "屬性",
+    "spec": "Spec",
+    "readiness": "就緒狀態"
+  },
+  "inspect": {
+    "empty": {
+      "title": "選取 Widget",
+      "body": "在 View 或圖層清單中點選 Widget。"
+    },
+    "identity": "識別碼",
+    "slot": "Slot",
+    "size": "尺寸",
+    "inVariant": "在此 Variant 中",
+    "base": "基本",
+    "noOverrides": "此 Variant 沒有覆寫。",
+    "findings": "問題",
+    "commentsHere": "此 Widget 的留言",
+    "details": "詳細資料",
+    "copied": "已複製 {id}"
+  },
+  "spec": {
+    "intent": "意圖",
+    "entry": "進入條件",
+    "rules": "互動規則",
+    "constraints": "限制",
+    "a11y": "無障礙",
+    "decisions": "Decision",
+    "refs": "參考資料",
+    "emptySection": "尚無{section}。",
+    "fromReview": "來自 Review",
+    "conflict": "你開始編輯後，Spec 已有變更。"
+  },
+  "settings": {
+    "title": "Workspace 設定",
+    "general": "一般",
+    "viewports": "檢視區",
+    "themes": "主題",
+    "adapters": "Adapter",
+    "keyChange": "重新命名鍵會變更其識別，請先檢查參照。",
+    "unsaved": "{n} 項未儲存 | {n} 項未儲存",
+    "conflict": "開啟後設定已有變更。"
+  },
+  "adapters": {
+    "invalid": "Adapter 組合無效，修正前會暫停預覽與 Catalog。",
+    "repair": "請在專案中執行以下指令修正："
+  },
+  "comment": {
+    "modeOn": "已進入留言模式。點選 Widget，或按 Esc 取消。",
+    "hoverChip": "在 {type} 上留言",
+    "placeholder": "新增留言",
+    "send": "留言",
+    "scopeThis": "此 Variant",
+    "scopeAll": "所有 Variant",
+    "commentingAs": "以 {name} 的身分留言",
+    "discard": "要捨棄這則留言嗎？"
+  },
+  "thread": {
+    "reply": "回覆…",
+    "resolve": "標記為已解決",
+    "resolveHint": "接受提交 {id}",
+    "reopen": "重新開啟",
+    "submit": "提交 Review…",
+    "status": {
+      "open": "未解決",
+      "ready": "待審核",
+      "resolved": "已解決"
+    },
+    "copyLink": "複製連結",
+    "reanchor": "重新錨定",
+    "promote": "升級為 Decision"
+  },
+  "pins": {
+    "unplaced": "{n} 則留言無法定位 | {n} 則留言無法定位",
+    "otherVariants": "其他 Variant・{n}",
+    "notVisible": "在此狀態下不可見",
+    "variantMissing": "找不到 Variant：{name}"
+  },
+  "empty": {
+    "title": "還沒有留言",
+    "body": "按 C，再點選 View 中的任何地方即可留言。"
+  },
+  "allCaughtUp": "已全部處理・{n} 則已解決",
+  "overview": {
+    "title": "總覽",
+    "attention": "{ready} 則待審核・{open} 則未解決・{findings} 個檢查問題",
+    "allClear": "沒有待處理項目，{n} 個 View 已就緒。 | 沒有待處理項目，{n} 個 View 已就緒。",
+    "tab": {
+      "views": "Views",
+      "checks": "檢查",
+      "activity": "動態"
+    },
+    "updated": "自你上次查看後已更新"
+  },
+  "ready": {
+    "validation": "驗證",
+    "evidence": "Evidence",
+    "reviews": "Review",
+    "handoff": "Handoff",
+    "blockedBy": "有 {n} 項阻擋 | 有 {n} 項阻擋",
+    "ready": "已就緒",
+    "notReady": "尚未達到 implementation-ready"
   }
 }

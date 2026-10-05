@@ -544,7 +544,7 @@ onMounted(async () => {
           >
             <template #header>
               <div class="flex items-center justify-between gap-2">
-                <span class="text-xs font-semibold text-highlighted">{{ t('handoff.exported.title') }}</span>
+                <span class="text-xs font-semibold text-highlighted">{{ t('handoff.exportResult.title') }}</span>
                 <UBadge
                   :color="exportedReady ? 'success' : 'neutral'"
                   variant="subtle"
@@ -557,13 +557,13 @@ onMounted(async () => {
                 v-if="exportedResult.manifest?.exportedAt"
                 class="mt-0.5 text-xs text-muted"
               >
-                {{ t('handoff.exported.at', { time: fmt.dateTime(exportedResult.manifest.exportedAt) }) }}
+                {{ t('handoff.exportResult.at', { time: fmt.dateTime(exportedResult.manifest.exportedAt) }) }}
               </p>
             </template>
 
             <div class="space-y-2 text-xs">
               <div>
-                <span class="text-muted">{{ t('handoff.exported.bundleIdentity') }}</span>
+                <span class="text-muted">{{ t('handoff.exportResult.bundleIdentity') }}</span>
                 <div class="mt-0.5 flex items-center justify-between gap-1 rounded border border-default bg-default p-1.5">
                   <span class="truncate font-mono">{{ exportedResult.bundleIdentity }}</span>
                   <UButton
@@ -571,14 +571,14 @@ onMounted(async () => {
                     color="neutral"
                     variant="ghost"
                     icon="i-lucide-copy"
-                    :aria-label="t('handoff.exported.copyBundleIdentity')"
+                    :aria-label="t('handoff.exportResult.copyBundleIdentity')"
                     @click="copyText(exportedResult.bundleIdentity || '')"
                   />
                 </div>
               </div>
 
               <div>
-                <span class="text-muted">{{ t('handoff.exported.manifestDigest') }}</span>
+                <span class="text-muted">{{ t('handoff.exportResult.manifestDigest') }}</span>
                 <div class="mt-0.5 flex items-center justify-between gap-1 rounded border border-default bg-default p-1.5">
                   <span class="truncate font-mono">{{ exportedResult.manifestArtifactDigest }}</span>
                   <UButton
@@ -586,7 +586,7 @@ onMounted(async () => {
                     color="neutral"
                     variant="ghost"
                     icon="i-lucide-copy"
-                    :aria-label="t('handoff.exported.copyManifestDigest')"
+                    :aria-label="t('handoff.exportResult.copyManifestDigest')"
                     @click="copyText(exportedResult.manifestArtifactDigest || '')"
                   />
                 </div>
@@ -602,7 +602,7 @@ onMounted(async () => {
               :disabled="!exportedResult.manifest"
               @click="downloadManifest"
             >
-              {{ t('handoff.exported.download') }}
+              {{ t('handoff.exportResult.download') }}
             </UButton>
           </UCard>
         </div>

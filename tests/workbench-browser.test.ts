@@ -71,6 +71,8 @@ describe('Workbench type floor', () => {
 				const { context, page } = await openWorkbench(route, { mode: 'light', locale })
 				try {
 					await page.waitForTimeout(500)
+					// The chrome language drives <html lang>, which selects the zh-TW type overrides.
+					expect(await page.evaluate(() => document.documentElement.lang)).toBe(locale)
 					const offenders = await page.evaluate(() => {
 						const found: string[] = []
 						for (const element of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {

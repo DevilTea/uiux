@@ -555,7 +555,7 @@ watch(() => props.currentViewId, () => {
       >
         <UTooltip :text="t('reviews.commentMode.tooltip')">
           <UButton
-            :color="isCommentMode ? 'warning' : 'neutral'"
+            :color="isCommentMode ? 'annotation' : 'neutral'"
             :variant="isCommentMode ? 'solid' : 'outline'"
             :icon="isCommentMode ? 'i-lucide-crosshair' : 'i-lucide-message-square-plus'"
             :aria-pressed="isCommentMode"

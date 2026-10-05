@@ -208,10 +208,10 @@ async function loadEvidence() {
 }
 
 function contextLabel(context: Readonly<Record<string, unknown>> | undefined): string {
-	if (!context) return t('evidence.capture.unknownContext')
+	if (!context) return t('evidence.captureResult.unknownContext')
 	const parts = [context.viewId, context.variantName, context.locale, context.viewportId, context.themeId]
 		.filter(part => typeof part === 'string' && part.length > 0)
-	return parts.length ? parts.join(' · ') : t('evidence.capture.unknownContext')
+	return parts.length ? parts.join(' · ') : t('evidence.captureResult.unknownContext')
 }
 
 function collectFailures(results: readonly CaptureContextResult[] | undefined): CaptureFailure[] {
@@ -225,19 +225,19 @@ function collectFailures(results: readonly CaptureContextResult[] | undefined): 
 			]
 			return {
 				label: contextLabel(result.context),
-				messages: messages.length ? messages : [t('evidence.capture.noDetails')],
+				messages: messages.length ? messages : [t('evidence.captureResult.noDetails')],
 			}
 		})
 }
 
 function captureSummary(res: CaptureResponse | undefined): string | undefined {
 	if (!res?.summary) return undefined
-	const summary = t('evidence.capture.summary', {
+	const summary = t('evidence.captureResult.summary', {
 		captured: fmt.number(res.summary.captured),
 		total: fmt.number(res.summary.total),
 	})
 	if (!res.executedAt) return summary
-	return `${summary} ${t('evidence.capture.executedAt', { time: fmt.dateTime(res.executedAt) })}`
+	return `${summary} ${t('evidence.captureResult.executedAt', { time: fmt.dateTime(res.executedAt) })}`
 }
 
 function selectCapturedDigest(res: CaptureResponse) {
@@ -262,8 +262,8 @@ async function captureCurrentContext() {
 			await loadEvidence()
 			selectCapturedDigest(res)
 			feedback.success(
-				t('evidence.capture.succeeded'),
-				res.executedAt ? t('evidence.capture.executedAt', { time: fmt.dateTime(res.executedAt) }) : undefined,
+				t('evidence.captureResult.succeeded'),
+				res.executedAt ? t('evidence.captureResult.executedAt', { time: fmt.dateTime(res.executedAt) }) : undefined,
 			)
 			emit('refresh')
 			emit('changed')
@@ -275,7 +275,7 @@ async function captureCurrentContext() {
 			emit('changed')
 			captureIssue.value = {
 				color: 'warning',
-				title: t('evidence.capture.incompleteTitle'),
+				title: t('evidence.captureResult.incompleteTitle'),
 				description: captureSummary(res),
 				failures: collectFailures(res.results),
 			}
@@ -283,20 +283,20 @@ async function captureCurrentContext() {
 		else {
 			captureIssue.value = {
 				color: 'error',
-				title: t('evidence.capture.failedTitle'),
+				title: t('evidence.captureResult.failedTitle'),
 				description: captureSummary(res),
 				failures: collectFailures(res.results),
 			}
-			feedback.error({ data: res }, t('evidence.capture.failed'))
+			feedback.error({ data: res }, t('evidence.captureResult.failed'))
 		}
 	}
 	catch (cause) {
-		const details = feedback.error(cause, t('evidence.capture.failed'))
+		const details = feedback.error(cause, t('evidence.captureResult.failed'))
 		const body = (cause as { data?: unknown } | undefined)?.data as CaptureResponse | undefined
 		const failures = collectFailures(body?.results)
 		captureIssue.value = {
 			color: 'error',
-			title: t('evidence.capture.failedTitle'),
+			title: t('evidence.captureResult.failedTitle'),
 			description: failures.length ? captureSummary(body) : details.message,
 			failures: failures.length
 				? failures
@@ -322,25 +322,25 @@ function checkStaleness(record: FormalEvidenceRecord): { isStale: boolean; reaso
 
 /** Maps the domain staleness reasons to Workbench chrome messages; unknown reasons are shown as-is. */
 function stalenessReason(reason: string | undefined): string {
-	if (!reason) return t('evidence.stale.unknown')
+	if (!reason) return t('evidence.staleReason.unknown')
 	const fixed: Record<string, string> = {
-		'Missing executionContext.viewId': t('evidence.stale.missingViewId'),
-		'View no longer exists': t('evidence.stale.viewMissing'),
-		'Evidence provenance missing View reference': t('evidence.stale.provenanceMissing'),
-		'View revision has changed since capture': t('evidence.stale.viewRevisionChanged'),
+		'Missing executionContext.viewId': t('evidence.staleReason.missingViewId'),
+		'View no longer exists': t('evidence.staleReason.viewMissing'),
+		'Evidence provenance missing View reference': t('evidence.staleReason.provenanceMissing'),
+		'View revision has changed since capture': t('evidence.staleReason.viewRevisionChanged'),
 	}
 	const fixedReason = fixed[reason]
 	if (fixedReason) return fixedReason
 	let match = /^Locale '(.+)' is not in workspace$/.exec(reason)
-	if (match) return t('evidence.stale.localeMissing', { locale: match[1] })
+	if (match) return t('evidence.staleReason.localeMissing', { locale: match[1] })
 	match = /^Locale '(.+)' revision has changed since capture$/.exec(reason)
-	if (match) return t('evidence.stale.localeRevisionChanged', { locale: match[1] })
+	if (match) return t('evidence.staleReason.localeRevisionChanged', { locale: match[1] })
 	match = /^Viewport preset '(.+)' was removed$/.exec(reason)
-	if (match) return t('evidence.stale.viewportRemoved', { viewport: match[1] })
+	if (match) return t('evidence.staleReason.viewportRemoved', { viewport: match[1] })
 	match = /^Viewport preset '(.+)' dimensions changed since capture$/.exec(reason)
-	if (match) return t('evidence.stale.viewportChanged', { viewport: match[1] })
+	if (match) return t('evidence.staleReason.viewportChanged', { viewport: match[1] })
 	match = /^Theme '(.+)' was removed$/.exec(reason)
-	if (match) return t('evidence.stale.themeRemoved', { theme: match[1] })
+	if (match) return t('evidence.staleReason.themeRemoved', { theme: match[1] })
 	return reason
 }
 
@@ -554,7 +554,7 @@ watch(() => props.selectedView?.key, () => {
           color="warning"
           variant="subtle"
           icon="i-lucide-clock-alert"
-          :title="t('evidence.stale.title')"
+          :title="t('evidence.staleReason.title')"
           :description="stalenessReason(selectedStaleness.reason)"
         />
 
