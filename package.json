@@ -48,7 +48,8 @@
 		"smoke:publication": "node ./scripts/smoke-publication.mjs",
 		"smoke:server": "node ./scripts/smoke-server.mjs",
 		"test": "pnpm run build && vitest run",
-		"typecheck": "nuxt typecheck"
+		"typecheck": "nuxt typecheck",
+		"typecheck:adapters": "tsc -p tsconfig.adapters.json"
 	},
 	"dependencies": {
 		"@deviltea/widget-core": "0.0.2",
