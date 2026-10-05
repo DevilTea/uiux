@@ -155,7 +155,26 @@ export function createPreviewSession(state: WorkbenchState) {
 		requestFrame: callback => requestAnimationFrame(callback),
 		cancelFrame: handle => cancelAnimationFrame(handle),
 	})
-	geometryStreams.subscribe(() => { geometryVersion.value++ })
+	/**
+	 * Reports arrive as one message task each (up to one per stream per frame), so applying them is
+	 * coalesced to one animation frame: every overlay consumer recomputes once per frame from the
+	 * latest accepted reports. A report that disappears (release, supersession, content-box resize,
+	 * generation boundary) applies at once, so nothing is drawn from geometry that is no longer current.
+	 */
+	let geometryFrame: number | undefined
+	geometryStreams.subscribe((changed) => {
+		const removed = [...changed].some(widgetId => !geometryStreams.report(widgetId))
+		if (removed || typeof requestAnimationFrame === 'undefined') {
+			if (geometryFrame !== undefined) cancelAnimationFrame(geometryFrame)
+			geometryFrame = undefined
+			geometryVersion.value++
+			return
+		}
+		geometryFrame ??= requestAnimationFrame(() => {
+			geometryFrame = undefined
+			geometryVersion.value++
+		})
+	})
 	const pinEngine = new PinPlacementEngine()
 
 	/**
@@ -635,10 +654,17 @@ export function createPreviewSession(state: WorkbenchState) {
 		const source = previewIframe.value?.contentWindow
 		if (!source || event.source !== source) return
 		const data = event.data
-		if (!data || typeof data !== 'object' || data.channel !== PREVIEW_WIRE_CHANNEL || !data.message || !workbenchBridge) return
-		const result = workbenchBridge.receive(data.message)
+		if (!data || typeof data !== 'object' || data.channel !== PREVIEW_WIRE_CHANNEL || !workbenchBridge) return
+		// One envelope, or a transport batch of envelopes from one runtime task, each received on its own.
+		if (Array.isArray(data.messages)) for (const message of data.messages as unknown[]) receiveWire(message)
+		else if (data.message) receiveWire(data.message)
+	}
+
+	function receiveWire(input: unknown): void {
+		if (!workbenchBridge) return
+		const result = workbenchBridge.receive(input)
 		if (result.status === 'ack-dispatched') {
-			const features = (data.message as { payload?: { features?: unknown } }).payload?.features
+			const features = (input as { payload?: { features?: unknown } }).payload?.features
 			onCapabilityAcknowledged(Array.isArray(features) ? features.filter((feature): feature is string => typeof feature === 'string') : [])
 		}
 		else if (result.status === 'accepted') {

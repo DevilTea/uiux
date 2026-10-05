@@ -221,12 +221,16 @@ export function withSpecSection(content: SpecContent, section: SpecSectionKey, v
 }
 
 /** "2h ago" style relative time in the chrome locale, for compact thread rows. */
+/** One formatter per locale: constructing `Intl.RelativeTimeFormat` costs far more than formatting. */
+const relativeFormats = new Map<string, Intl.RelativeTimeFormat>()
+
 export function relativeTime(at: string, locale: string, now = Date.now()): string {
 	const time = new Date(at).getTime()
 	if (Number.isNaN(time)) return ''
 	const seconds = Math.round((time - now) / 1000)
 	const steps: ReadonlyArray<readonly [Intl.RelativeTimeFormatUnit, number]> = [['year', 31_536_000], ['month', 2_592_000], ['week', 604_800], ['day', 86_400], ['hour', 3600], ['minute', 60]]
-	const format = new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'narrow' })
+	let format = relativeFormats.get(locale)
+	if (!format) relativeFormats.set(locale, format = new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'narrow' }))
 	for (const [unit, size] of steps) {
 		if (Math.abs(seconds) >= size) return format.format(Math.round(seconds / size), unit)
 	}
