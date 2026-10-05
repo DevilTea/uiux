@@ -8,6 +8,7 @@ import { useWorkbenchFeedback } from '../../../composables/useWorkbenchFeedback'
 import { threadAuthorInitials, statusKey, useCanvasComments } from '../../../composables/useCanvasComments'
 import type { ReviewActor, ReviewResolution } from '../../../../src/domain/reviews/schema'
 import { flattenWidgetTree } from '../../../../src/preview/widget-tree'
+import { buildReviewTimeline, type ReviewTimelineItem } from '../../../utils/review-timeline'
 
 /**
  * The thread bubble (brief c, section 6; direct-resolve decision 10): status, the compact typed
@@ -65,52 +66,10 @@ const placementNote = computed(() => {
 })
 
 // ---------------------------------------------------------------------------------------------
-// Timeline (Part 7 10b): messages, submissions, lifecycle and re-anchor events by time
+// Timeline (Part 7 10b): the shared chronological projection of the Reviews inbox (R8)
 // ---------------------------------------------------------------------------------------------
 
-type TimelineItem =
-	| Readonly<{ kind: 'message'; id: string; at: string; actor: ReviewActor; body: string }>
-	| Readonly<{ kind: 'submission'; id: string; at: string; actor: ReviewActor; domains: readonly string[]; evidence: number; current: boolean; notAccepted: boolean }>
-	| Readonly<{ kind: 'resolved'; id: string; at: string; actor: ReviewActor; resolution?: ReviewResolution; submissionId?: string; reason?: string }>
-	| Readonly<{ kind: 'reopened'; id: string; at: string; actor: ReviewActor; reason?: string }>
-	| Readonly<{ kind: 'reanchored'; id: string; at: string; actor: ReviewActor; from: string; to: string }>
-
-const timeline = computed<readonly TimelineItem[]>(() => {
-	const resource = detail.value
-	if (!resource) return []
-	const items: TimelineItem[] = []
-	const lastSubmission = resource.submissions.at(-1)
-	// A non-verified close straight from ready-for-review declines its submission (decision 4).
-	const declined = new Set<string>()
-	let pending: string | undefined
-	for (const event of resource.history) {
-		if (event.kind !== 'lifecycle') continue
-		if (event.to === 'ready-for-review') pending = event.submissionId
-		else if (event.from === 'ready-for-review' && event.to === 'resolved' && event.resolution !== 'verified' && pending) declined.add(pending)
-	}
-	for (const message of resource.messages) items.push({ kind: 'message', id: message.id, at: message.at, actor: message.actor, body: message.body })
-	for (const submission of resource.submissions) {
-		items.push({
-			kind: 'submission',
-			id: submission.id,
-			at: submission.at,
-			actor: submission.actor,
-			domains: submission.changeDomains,
-			evidence: submission.evidenceRefs.length,
-			current: resource.status === 'ready-for-review' && submission.id === lastSubmission?.id,
-			notAccepted: declined.has(submission.id),
-		})
-	}
-	for (const event of resource.history) {
-		if (event.kind === 'reanchor' && event.before && event.after)
-			items.push({ kind: 'reanchored', id: event.id, at: event.at, actor: event.actor, from: event.before.anchor.widgetId, to: event.after.anchor.widgetId })
-		else if (event.kind === 'lifecycle' && event.to === 'resolved')
-			items.push({ kind: 'resolved', id: event.id, at: event.at, actor: event.actor, ...(event.resolution ? { resolution: event.resolution } : {}), ...(event.submissionId ? { submissionId: event.submissionId } : {}), ...(event.reason ? { reason: event.reason } : {}) })
-		else if (event.kind === 'lifecycle' && event.to === 'open' && event.from)
-			items.push({ kind: 'reopened', id: event.id, at: event.at, actor: event.actor, ...(event.reason ? { reason: event.reason } : {}) })
-	}
-	return items.sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
-})
+const timeline = computed<readonly ReviewTimelineItem[]>(() => detail.value ? buildReviewTimeline(detail.value) : [])
 
 const activeSubmission = computed(() => thread.value?.status === 'ready-for-review' ? detail.value?.submissions.at(-1) : undefined)
 
@@ -414,7 +373,7 @@ watch(() => props.threadId, () => {
                   :key="domain"
                   class="rounded-sm border border-default px-1 font-mono"
                 >{{ domain }}</span>
-                <span>{{ t('comments.evidenceCount', item.evidence) }}</span>
+                <span>{{ t('comments.evidenceCount', item.evidence.length) }}</span>
                 <span class="font-mono">{{ shortId(item.id) }}</span>
               </span>
             </template>
@@ -436,7 +395,7 @@ watch(() => props.threadId, () => {
               >{{ item.reason }}</span>
             </template>
             <template v-else>
-              {{ t('comments.reanchoredEvent', { from: `#${item.from}`, to: `#${item.to}` }) }} · <time :datetime="item.at">{{ relativeTime(item.at, locale) }}</time>
+              {{ t('comments.reanchoredEvent', { from: `#${item.from.widgetId}`, to: `#${item.to.widgetId}` }) }} · <time :datetime="item.at">{{ relativeTime(item.at, locale) }}</time>
             </template>
           </div>
         </template>
