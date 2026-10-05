@@ -1,13 +1,13 @@
 ---
 version: 1
-slug: "app-components-reviewspanel-vue"
-primary_target: "app/components/ReviewsPanel.vue"
-related_targets: ["app/pages/reviews.vue","app/components/workbench/ReviewInboxList.vue","app/components/workbench/ReviewThreadDetail.vue","app/components/workbench/ReviewTimeline.vue"]
+slug: "app-pages-reviews-vue"
+primary_target: "app/pages/reviews.vue"
+related_targets: ["app/components/workbench/ReviewInboxFilters.vue","app/components/workbench/ReviewInboxList.vue","app/components/workbench/ReviewThreadDetail.vue","app/components/workbench/ReviewTimeline.vue","app/composables/useReviewInbox.ts","app/utils/review-inbox.ts","app/utils/review-timeline.ts"]
 ---
 
 # Shape brief (d): Reviews inbox
 
-Mode: **Operate**. Visual authority: `DESIGN.md`. Target: the new `/reviews` page (`app/pages/reviews.vue`) and `ReviewInboxList.vue`, `ReviewThreadDetail.vue`, `ReviewTimeline.vue`. This absorbs the list and conversation parts of today's `ReviewsPanel.vue`.
+Mode: **Operate**. Visual authority: `DESIGN.md`. Target: the new `/reviews` page (`app/pages/reviews.vue`) and `ReviewInboxList.vue`, `ReviewThreadDetail.vue`, `ReviewTimeline.vue`. It absorbed the list and conversation parts of the former `ReviewsPanel.vue`, which R8 removed.
 
 ## 1. Job and audience
 
