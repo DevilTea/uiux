@@ -215,13 +215,15 @@ describe('Reviews inbox (R8)', () => {
 			await page.locator(`[data-review-detail][data-thread-id="${target}"] [data-review-resolve]`).waitFor()
 			expect(await page.locator('[data-review-resolve]').textContent()).toContain('Resolve')
 
+			const queue = await rowIds(page)
+			const next = queue[queue.indexOf(target) + 1]
 			await page.keyboard.press('e')
 			await expect.poll(() => posts.find(post => post.url.endsWith('/resolve'))?.body, { timeout: 10_000 })
 				.toMatchObject({ resolution: 'answered', expectedRevision: expect.any(String) })
 			expect(posts.find(post => post.url.endsWith('/resolve'))!.body).not.toHaveProperty('submissionId')
 			expect(posts.find(post => post.url.endsWith('/resolve'))!.body).not.toHaveProperty('actor')
 			// The resolved thread leaves the default queue and the next one opens.
-			await expect.poll(() => new URL(page.url()).searchParams.get('thread')).toBe(order[3])
+			await expect.poll(() => new URL(page.url()).searchParams.get('thread')).toBe(next)
 			await expect.poll(() => rowIds(page)).not.toContain(target)
 			const stored = await api<{ resource: { status: string; history: { resolution?: string; actor: { displayName: string } }[] } }>('tester', `/api/resources/review/${target}`)
 			expect(stored.resource.status).toBe('resolved')

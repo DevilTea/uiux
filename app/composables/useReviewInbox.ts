@@ -76,8 +76,15 @@ function createReviewInbox() {
 	// never read a query that the router has not committed yet.
 	const filterState = shallowRef<InboxFilter>(parseInboxQuery(route.query))
 	const selectedState = ref<string | undefined>(parseThread(route.query))
+	/** The query this inbox asked for last; commits of older, superseded replaces are ignored. */
+	let requested: string | undefined
+	const queryKey = (query: Record<string, unknown>) => JSON.stringify(Object.entries(query).filter(([, value]) => value !== undefined && value !== '').sort(([a], [b]) => a.localeCompare(b)))
 	watch(() => route.fullPath, () => {
 		if (route.path !== '/reviews') return
+		if (requested !== undefined) {
+			if (queryKey(route.query) !== requested) return
+			requested = undefined
+		}
 		filterState.value = parseInboxQuery(route.query)
 		selectedState.value = parseThread(route.query)
 	})
@@ -88,7 +95,12 @@ function createReviewInbox() {
 		if (route.path !== '/reviews') return
 		filterState.value = next
 		selectedState.value = thread
-		void router.replace({ query: inboxQuery(next, thread) })
+		const query = inboxQuery(next, thread)
+		requested = queryKey(query)
+		void router.replace({ query }).finally(() => {
+			// The newest request settled (committed, cancelled or a no-op): route changes apply again.
+			if (requested === queryKey(query)) requested = undefined
+		})
 	}
 	function setFilter(patch: Partial<InboxFilter>): void {
 		replaceQuery({ ...filter.value, ...patch }, selectedId.value)
