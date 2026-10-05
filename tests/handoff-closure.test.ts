@@ -87,7 +87,7 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 	await symlink(vuePath, join(root, 'node_modules', 'vue')).catch(() => undefined)
 
 	await writeFile(join(root, '.uiux', 'workspace.json'), JSON.stringify({
-		schemaVersion: 1,
+		schemaVersion: 2,
 		i18n: { defaultLocale: 'en-US' },
 		adapters,
 		viewports: {
@@ -450,6 +450,79 @@ describe('Handoff closure export and readiness evaluation', () => {
 		const resolvedExport = await service.exportHandoff({ roots })
 		expect(resolvedExport.readiness?.implementationReady).toBe(true)
 		expect(resolvedExport.readiness?.blockingDiagnostics).toHaveLength(0)
+	})
+
+	it('reports per-resolution review counts, never blocks on closed threads, and flags wont-fix as advisory only', async () => {
+		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+		await mkdir(join(root, 'adapters'), { recursive: true })
+		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		const viewRev = await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'View With Closed Reviews'))
+		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
+
+		const human = { type: 'human', displayName: 'Mei' }
+		const submissionId = 'f0000000-0000-4000-8000-000000000001'
+		const closed = (index: number, resolution: string, reason?: string): ReviewThread => ({
+			id: `e0000000-0000-4000-8000-00000000000${index}`,
+			anchor: { viewId: VIEW_1_ID, widgetId: 'root' },
+			variantNames: [],
+			status: 'resolved',
+			messages: [],
+			submissions: [],
+			history: [{ id: `d0000000-0000-4000-8000-00000000000${index}`, kind: 'lifecycle', from: 'open', to: 'resolved', actor: human, at: '2026-10-05T09:00:00Z', resolution: resolution as never, ...(reason ? { reason } : {}) }],
+		})
+		const verified: ReviewThread = {
+			id: 'e0000000-0000-4000-8000-000000000009',
+			anchor: { viewId: VIEW_1_ID, widgetId: 'root' },
+			variantNames: [],
+			status: 'resolved',
+			messages: [],
+			submissions: [{
+				id: submissionId, actor: { type: 'agent' }, at: '2026-10-05T08:00:00Z', changeDomains: ['view-structure'],
+				resources: [{ identity: { type: 'view', id: VIEW_1_ID }, revision: viewRev }], scope: {}, evidenceRefs: [{ kind: 'screenshot', evidence: `sha256:${'d'.repeat(64)}` }],
+			}],
+			history: [
+				{ id: 'd0000000-0000-4000-8000-000000000008', kind: 'lifecycle', from: 'open', to: 'ready-for-review', actor: { type: 'agent' }, at: '2026-10-05T08:00:00Z', submissionId },
+				{ id: 'd0000000-0000-4000-8000-000000000009', kind: 'lifecycle', from: 'ready-for-review', to: 'resolved', actor: human, at: '2026-10-05T08:30:00Z', submissionId, resolution: 'verified' },
+			],
+		}
+		const threads = [closed(1, 'answered'), closed(2, 'wont-fix', 'Out of scope'), closed(3, 'duplicate', 'Same as e…9'), closed(4, 'obsolete'), closed(5, 'answered'), verified]
+		for (const thread of threads) {
+			await persistence.reviews.create(thread.id, thread)
+			expect((await persistence.reviews.readInspected(thread.id))?.diagnostics).toEqual([])
+		}
+
+		const service = createHandoffExportService(persistence)
+		const roots = [{ type: 'view' as const, viewId: VIEW_1_ID }]
+		const assessed = await service.assessReadiness({ roots })
+		expect(assessed.status).toBe('ok')
+		expect(assessed.readiness?.implementationReady).toBe(true)
+		expect(assessed.readiness?.coverage.review).toEqual({
+			complete: true,
+			threads: 6,
+			resolved: { 'verified': 1, 'answered': 2, 'wont-fix': 1, 'duplicate': 1, 'obsolete': 1 },
+		})
+		expect(assessed.readiness?.blockingDiagnostics).toEqual([{
+			code: 'handoff.review_declined',
+			message: expect.stringContaining('e0000000-0000-4000-8000-000000000002'),
+			blocking: false,
+			path: '/reviews/e0000000-0000-4000-8000-000000000002',
+		}])
+
+		const exported = await service.exportHandoff({ roots })
+		expect(exported.status).toBe('exported')
+		expect(validateHandoffManifest(exported.manifest).ok).toBe(true)
+		expect(exported.manifest?.readiness.implementationReady).toBe(true)
+		expect(exported.manifest?.readiness.coverage.review).toEqual(assessed.readiness?.coverage.review)
+		expect(exported.manifest?.provenance.workspaceSchemaVersion).toBe(2)
+		const snapshot = exported.manifest?.resources.find(resource => resource.type === 'review' && resource.identity.id === verified.id)
+		expect((snapshot?.snapshot as unknown as ReviewThread).history.at(-1)?.resolution).toBe('verified')
+
+		// An open thread still blocks; its count is not part of any resolution bucket.
+		await persistence.reviews.create('e0000000-0000-4000-8000-00000000000a', { ...closed(0, 'answered'), id: 'e0000000-0000-4000-8000-00000000000a', status: 'open', history: [] })
+		const blocked = await service.assessReadiness({ roots })
+		expect(blocked.readiness?.implementationReady).toBe(false)
+		expect(blocked.readiness?.coverage.review).toMatchObject({ complete: false, threads: 7, resolved: { answered: 2 } })
+		expect(blocked.readiness?.blockingDiagnostics.filter(d => d.blocking).map(d => d.code)).toEqual(['handoff.unresolved_review_thread'])
 	})
 
 	it('blocks implementation-ready when formal evidence is missing or incomplete', async () => {

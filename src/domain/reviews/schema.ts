@@ -11,6 +11,19 @@ import {
 } from '../validation'
 
 export type ReviewStatus = 'open' | 'ready-for-review' | 'resolved'
+/**
+ * How a thread entered `resolved` (Workspace schemaVersion >= 2). Only `verified` accepts an
+ * evidence-gated ready-for-review submission; every other kind explicitly closes the thread
+ * without a verified change. Closed vocabulary: adding a value needs an architecture decision.
+ */
+export type ReviewResolution = 'verified' | 'answered' | 'wont-fix' | 'duplicate' | 'obsolete'
+export const REVIEW_RESOLUTIONS = ['verified', 'answered', 'wont-fix', 'duplicate', 'obsolete'] as const satisfies readonly ReviewResolution[]
+/** Normalized point inside the anchored Widget's full rendered rect; 0..1 on each axis, physical coordinates. */
+export type ReviewPinHint = Readonly<{ x: number; y: number }>
+/** Non-authoritative, closed display-hint container (schemaVersion >= 2). Never part of anchor identity. */
+export type ReviewDisplayHint = Readonly<{ pin: ReviewPinHint }>
+/** Decoding context: every Review file is decoded under the selected Workspace's manifest schemaVersion. */
+export type ReviewDecodeContext = Readonly<{ schemaVersion: number; filename?: string }>
 export type ReviewActor = Readonly<{ type: string; id?: string; displayName?: string }>
 export type ReviewAnchor = Readonly<{ viewId: string; widgetId: string }>
 export type ReviewEvidenceRef = Readonly<{ kind: string; evidence: string }>
@@ -36,11 +49,15 @@ export type ReviewHistoryEvent = Readonly<{
 	before?: Readonly<{ anchor: ReviewAnchor; variantNames: readonly string[] }>
 	after?: Readonly<{ anchor: ReviewAnchor; variantNames: readonly string[] }>
 	reason?: string
+	/** Lifecycle events only; required exactly when `to === 'resolved'` (schemaVersion >= 2). */
+	resolution?: ReviewResolution
 }>
 export type ReviewThread = Readonly<{
 	id: string
 	anchor: ReviewAnchor
 	variantNames: readonly string[]
+	/** Optional non-authoritative pin placement (schemaVersion >= 2); never anchor identity. */
+	displayHint?: ReviewDisplayHint
 	status: ReviewStatus
 	messages: readonly ReviewMessage[]
 	history: readonly ReviewHistoryEvent[]
@@ -48,6 +65,28 @@ export type ReviewThread = Readonly<{
 }>
 
 const REVIEW_STATUSES = new Set<ReviewStatus>(['open', 'ready-for-review', 'resolved'])
+const REVIEW_RESOLUTION_SET = new Set<string>(REVIEW_RESOLUTIONS)
+
+/** First Workspace schemaVersion that decodes `resolution` on lifecycle events and thread `displayHint`. */
+export const REVIEW_SCHEMA_V2 = 2
+
+function decodesReviewV2(schemaVersion: number): boolean {
+	return schemaVersion >= REVIEW_SCHEMA_V2
+}
+
+export function isReviewResolution(value: unknown): value is ReviewResolution {
+	return typeof value === 'string' && REVIEW_RESOLUTION_SET.has(value)
+}
+
+/**
+ * Current resolution, derived (never stored): the `resolution` of the final lifecycle event while
+ * the thread is `resolved`. Returns undefined for unresolved threads and for legacy events without it.
+ */
+export function deriveReviewResolution(thread: Pick<ReviewThread, 'status' | 'history'>): ReviewResolution | undefined {
+	if (thread.status !== 'resolved' || !Array.isArray(thread.history)) return undefined
+	const finalLifecycle = [...thread.history].reverse().find(event => isObject(event) && event.kind === 'lifecycle')
+	return finalLifecycle && isReviewResolution(finalLifecycle.resolution) ? finalLifecycle.resolution : undefined
+}
 
 export function validateReviewEvidenceRef(input: unknown, path = ''): ValidationResult<ReviewEvidenceRef> {
 	const v = new Validator()
@@ -60,13 +99,17 @@ export function validateReviewEvidenceRef(input: unknown, path = ''): Validation
 	return v.finish<ReviewEvidenceRef>(input)
 }
 
-export function validateReviewThread(input: unknown, filename?: string): ValidationResult<ReviewThread> {
+export function validateReviewThread(input: unknown, context: ReviewDecodeContext): ValidationResult<ReviewThread> {
 	const v = new Validator()
 	const thread = v.object(input, '')
 	if (!thread)
 		return v.finish<ReviewThread>(input)
+	const { filename } = context
+	const v2 = decodesReviewV2(context.schemaVersion)
 	validateJsonValue(input, '', v)
-	rejectUnknownKeys(thread, ['id', 'anchor', 'variantNames', 'status', 'messages', 'history', 'submissions'], '', v)
+	rejectUnknownKeys(thread, v2
+		? ['id', 'anchor', 'variantNames', 'displayHint', 'status', 'messages', 'history', 'submissions']
+		: ['id', 'anchor', 'variantNames', 'status', 'messages', 'history', 'submissions'], '', v)
 	const idIsUuid = validateUuid(thread.id, '/id', v, 'Review thread id')
 	if (filename !== undefined && idIsUuid) {
 		const match = /^([0-9a-f-]+)\.review\.json$/iu.exec(filename)
@@ -76,6 +119,7 @@ export function validateReviewThread(input: unknown, filename?: string): Validat
 	validateAnchor(thread.anchor, '/anchor', v)
 	const variantNames = validateStringArray(thread.variantNames, '/variantNames', v)
 	if (variantNames) validateUnique(variantNames, '/variantNames', v)
+	if (v2 && Object.hasOwn(thread, 'displayHint')) validateDisplayHint(thread.displayHint, '/displayHint', v)
 	const status = validateReviewStatus(thread.status, '/status', v)
 
 	const messages = v.array(thread.messages, '/messages')
@@ -107,7 +151,7 @@ export function validateReviewThread(input: unknown, filename?: string): Validat
 	const lifecycleEvents: { event: Record<string, unknown>; index: number }[] = []
 	history?.forEach((entry, index) => {
 		const path = jsonPointer('/history', index)
-		const parsed = validateReviewHistoryEvent(entry, path)
+		const parsed = validateReviewHistoryEvent(entry, path, v2)
 		v.diagnostics.push(...parsed.diagnostics)
 		if (isObjectWithStringId(entry)) {
 			if (historyIds.has(entry.id)) v.issue('identity.duplicate_uuid', `${path}/id`, 'Review history event UUID is duplicated.')
@@ -115,7 +159,7 @@ export function validateReviewThread(input: unknown, filename?: string): Validat
 		}
 		if (isObject(entry) && entry.kind === 'lifecycle') lifecycleEvents.push({ event: entry, index })
 	})
-	validateReviewLifecycle(status, lifecycleEvents, submissionIds, submissions, v)
+	validateReviewLifecycle(status, lifecycleEvents, submissionIds, submissions, v2, v)
 	const allIds = new Set<string>(typeof thread.id === 'string' ? [thread.id] : [])
 	for (const [index, message] of (messages ?? []).entries()) {
 		if (!isObjectWithStringId(message)) continue
@@ -184,30 +228,56 @@ function validateReviewSubmission(input: unknown, path: string): ValidationResul
 	return v.finish<ReviewSubmission>(input)
 }
 
-function validateReviewHistoryEvent(input: unknown, path: string): ValidationResult<ReviewHistoryEvent> {
+function validateReviewHistoryEvent(input: unknown, path: string, v2: boolean): ValidationResult<ReviewHistoryEvent> {
 	const v = new Validator()
 	const event = v.object(input, path)
 	if (!event) return v.finish<ReviewHistoryEvent>(input)
-	rejectUnknownKeys(event, ['id', 'kind', 'actor', 'at', 'from', 'to', 'submissionId', 'before', 'after', 'reason'], path, v)
+	const lifecycleKeys = v2
+		? ['id', 'kind', 'actor', 'at', 'from', 'to', 'submissionId', 'reason', 'resolution']
+		: ['id', 'kind', 'actor', 'at', 'from', 'to', 'submissionId', 'reason']
+	rejectUnknownKeys(event, [...new Set([...lifecycleKeys, 'before', 'after'])], path, v)
 	validateUuid(event.id, `${path}/id`, v, 'Review history event id')
 	validateActor(event.actor, `${path}/actor`, v)
 	validateUtcTimestamp(event.at, `${path}/at`, v)
 	if (Object.hasOwn(event, 'reason')) v.string(event.reason, `${path}/reason`)
 	if (event.kind === 'lifecycle') {
-		rejectUnknownKeys(event, ['id', 'kind', 'actor', 'at', 'from', 'to', 'submissionId', 'reason'], path, v)
+		rejectUnknownKeys(event, lifecycleKeys, path, v)
 		const from = validateReviewStatus(event.from, `${path}/from`, v)
 		const to = validateReviewStatus(event.to, `${path}/to`, v)
 		if (Object.hasOwn(event, 'submissionId')) validateUuid(event.submissionId, `${path}/submissionId`, v, 'submissionId')
 		if (to === 'ready-for-review' && !Object.hasOwn(event, 'submissionId'))
 			v.issue('review.ready_missing_submission', `${path}/submissionId`, 'Entering ready-for-review must reference its new immutable submission.')
+		let resolution: ReviewResolution | undefined
+		if (v2) {
+			const hasResolution = Object.hasOwn(event, 'resolution')
+			if (hasResolution && to !== 'resolved')
+				v.issue('review.resolution_unexpected', `${path}/resolution`, 'Only a lifecycle event entering resolved records a resolution.')
+			if (to === 'resolved') {
+				if (!hasResolution)
+					v.issue('review.resolution_required', `${path}/resolution`, 'Entering resolved must record how the thread was resolved.')
+				else if (!isReviewResolution(event.resolution))
+					v.issue('review.invalid_resolution', `${path}/resolution`, 'Resolution must be verified, answered, wont-fix, duplicate, or obsolete.')
+				else resolution = event.resolution
+			}
+		}
 		if (to === 'resolved') {
 			if (!isObject(event.actor) || event.actor.type !== 'human')
 				v.issue('review.resolve_requires_human', `${path}/actor/type`, 'Only a human actor may resolve a Review thread.')
-			if (!Object.hasOwn(event, 'submissionId'))
-				v.issue('review.resolve_missing_submission', `${path}/submissionId`, 'Resolution must identify the accepted ready-for-review submission.')
+			if (resolution === undefined || resolution === 'verified') {
+				// v1, a missing/invalid v2 resolution, and `verified` all keep the evidence-gated rule.
+				if (!Object.hasOwn(event, 'submissionId'))
+					v.issue('review.resolve_missing_submission', `${path}/submissionId`, 'Resolution must identify the accepted ready-for-review submission.')
+			}
+			else {
+				if (Object.hasOwn(event, 'submissionId'))
+					v.issue('review.direct_resolve_submission_forbidden', `${path}/submissionId`, 'A non-verified resolution accepts no submission and must not carry submissionId.')
+				if (resolution === 'duplicate' && (typeof event.reason !== 'string' || event.reason.trim().length === 0))
+					v.issue('review.resolution_reason_required', `${path}/reason`, 'A duplicate resolution must name the thread it duplicates in a non-empty reason.')
+			}
 		}
-		if (from && to && !isAllowedReviewTransition(from, to))
-			v.issue('review.invalid_transition', path, `Review transition ${from} -> ${to} is not allowed.`)
+		const invalidResolutionValue = v2 && to === 'resolved' && Object.hasOwn(event, 'resolution') && resolution === undefined
+		if (from && to && !invalidResolutionValue && !isAllowedReviewTransition(from, to, resolution))
+			v.issue('review.invalid_transition', path, `Review transition ${from} -> ${to}${resolution ? ` (${resolution})` : ''} is not allowed.`)
 	}
 	else if (event.kind === 'reanchor') {
 		rejectUnknownKeys(event, ['id', 'kind', 'actor', 'at', 'before', 'after', 'reason'], path, v)
@@ -225,6 +295,7 @@ function validateReviewLifecycle(
 	events: readonly { event: Record<string, unknown>; index: number }[],
 	submissionIds: ReadonlySet<string>,
 	submissions: readonly unknown[] | undefined,
+	v2: boolean,
 	v: Validator,
 ): void {
 	if (events.length === 0) {
@@ -263,10 +334,13 @@ function validateReviewLifecycle(
 			}
 		}
 		else if (to === 'resolved') {
-			if (typeof submissionId !== 'string' || !submissionIds.has(submissionId))
-				v.issue('review.unknown_submission', `${path}/submissionId`, 'Resolution must reference a stored ready-for-review submission.')
-			if (submissionId !== activeReadySubmission)
-				v.issue('review.resolve_stale_submission', `${path}/submissionId`, 'Resolution must accept the currently applicable ready-for-review submission.')
+			if (acceptsSubmission(event, v2)) {
+				if (typeof submissionId !== 'string' || !submissionIds.has(submissionId))
+					v.issue('review.unknown_submission', `${path}/submissionId`, 'Resolution must reference a stored ready-for-review submission.')
+				if (submissionId !== activeReadySubmission)
+					v.issue('review.resolve_stale_submission', `${path}/submissionId`, 'Resolution must accept the currently applicable ready-for-review submission.')
+			}
+			// A non-verified close clears any pending submission without accepting it.
 			activeReadySubmission = undefined
 		}
 		else if (to === 'open') {
@@ -282,8 +356,10 @@ function validateReviewLifecycle(
 		|| storedSubmissionIds.some((id, index) => id !== readySubmissionIds[index]))
 		v.issue('review.submission_history_mismatch', '/submissions',
 			'Submissions must correspond one-to-one and in order with transitions into ready-for-review.')
-	if ((currentStatus === 'ready-for-review' || currentStatus === 'resolved') && submissions?.length) {
-		const finalEvent = events.at(-1)?.event
+	const finalEvent = events.at(-1)?.event
+	const checksCurrentSubmission = currentStatus === 'ready-for-review'
+		|| (currentStatus === 'resolved' && finalEvent !== undefined && acceptsSubmission(finalEvent, v2))
+	if (checksCurrentSubmission && submissions?.length) {
 		const currentSubmissionId = currentStatus === 'resolved' ? finalEvent?.submissionId : activeReadySubmission
 		if (typeof currentSubmissionId !== 'string' || (submissions.at(-1) as Record<string, unknown> | undefined)?.id !== currentSubmissionId)
 			v.issue('review.current_submission_mismatch', '/submissions', 'Current Review state refers to the latest applicable immutable submission.')
@@ -348,10 +424,57 @@ function validateReviewStatus(value: unknown, path: string, v: Validator): Revie
 	return value as ReviewStatus
 }
 
-export function isAllowedReviewTransition(from: ReviewStatus, to: ReviewStatus): boolean {
+/**
+ * Lifecycle edges. Entering `resolved` is resolution-aware: `verified` (or a legacy event without a
+ * resolution) is allowed only from ready-for-review; every other resolution is allowed from open or
+ * ready-for-review. Invariant: resolution = verified <=> submissionId present <=> from = ready-for-review.
+ */
+export function isAllowedReviewTransition(from: ReviewStatus, to: ReviewStatus, resolution?: ReviewResolution): boolean {
+	if (to === 'resolved') {
+		if (resolution === undefined || resolution === 'verified') return from === 'ready-for-review'
+		return isReviewResolution(resolution) && (from === 'open' || from === 'ready-for-review')
+	}
 	return (from === 'open' && to === 'ready-for-review')
-		|| (from === 'ready-for-review' && (to === 'resolved' || to === 'open'))
+		|| (from === 'ready-for-review' && to === 'open')
 		|| (from === 'resolved' && to === 'open')
+}
+
+/** Resolve events that accept a submission: every v1 resolve, and v2 `verified` (or a missing resolution). */
+function acceptsSubmission(event: Record<string, unknown>, v2: boolean): boolean {
+	return !v2 || !Object.hasOwn(event, 'resolution') || event.resolution === 'verified'
+}
+
+/**
+ * Closed `displayHint` container. Validators diagnose and never repair: they check shape and the
+ * inclusive 0..1 range only (writers clamp and quantize to 1e-4; unquantized values stay valid).
+ */
+function validateDisplayHint(value: unknown, path: string, v: Validator): void {
+	const hint = v.object(value, path)
+	if (!hint) return
+	rejectUnknownKeys(hint, ['pin'], path, v)
+	if (Object.keys(hint).length === 0) {
+		v.issue('review.display_hint_empty', path, 'A displayHint must contain at least one member; omit the field instead of writing {}.')
+		return
+	}
+	if (!Object.hasOwn(hint, 'pin')) return
+	const pinPath = `${path}/pin`
+	const pin = v.object(hint.pin, pinPath)
+	if (!pin) return
+	rejectUnknownKeys(pin, ['x', 'y'], pinPath, v)
+	for (const axis of ['x', 'y'] as const) {
+		const axisPath = `${pinPath}/${axis}`
+		// Both members are required; a missing or non-number value gets the existing type diagnostic.
+		const number = v.finiteNumber(pin[axis], axisPath)
+		if (number !== undefined && (number < 0 || number > 1))
+			v.issue('review.display_hint_out_of_range', axisPath, `Pin hint ${axis} must be within 0..1 inclusive.`)
+	}
+}
+
+/** Writer normalization for pin hints: clamp to [0, 1] and quantize to 4 fractional digits. */
+export function normalizeReviewPinCoordinate(value: number): number {
+	const clamped = Math.min(1, Math.max(0, value))
+	const quantized = Math.round(clamped * 10_000) / 10_000
+	return quantized === 0 ? 0 : quantized
 }
 
 function validateStringArray(value: unknown, path: string, v: Validator): string[] | undefined {

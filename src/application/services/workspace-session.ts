@@ -2,7 +2,7 @@ import { sha256Identity } from '../../domain/artifacts/schema'
 import type { AuthoredAsset } from '../../domain/assets/schema'
 import type { FlowResource } from '../../domain/flows/schema'
 import type { I18nResource } from '../../domain/i18n/schema'
-import type { ReviewThread } from '../../domain/reviews/schema'
+import { deriveReviewResolution, type ReviewResolution, type ReviewThread } from '../../domain/reviews/schema'
 import type { Diagnostic } from '../../domain/validation'
 import type { ViewResource } from '../../domain/views/schema'
 import type { WorkspaceManifest } from '../../domain/workspace/schema'
@@ -51,6 +51,7 @@ import {
 	type ReopenReviewThreadCommand,
 	type ResolveReviewThreadCommand,
 	type ReviewAuthoringResult,
+	type SetReviewDisplayHintCommand,
 	type SubmitReadyForReviewCommand,
 } from './review-authoring'
 import {
@@ -116,6 +117,7 @@ export interface WorkspaceApplicationSession {
 	submitReadyForReview(command: SubmitReadyForReviewCommand): Promise<ReviewAuthoringResult>
 	resolveReviewThread(command: ResolveReviewThreadCommand): Promise<ReviewAuthoringResult>
 	reopenReviewThread(command: ReopenReviewThreadCommand): Promise<ReviewAuthoringResult>
+	setReviewDisplayHint(command: SetReviewDisplayHintCommand): Promise<ReviewAuthoringResult>
 	promoteReviewToDecision(command: PromoteReviewToDecisionCommand): Promise<ReviewAuthoringResult>
 	createAsset(command: CreateAssetCommand): Promise<AssetAuthoringResult>
 	replaceAsset(command: ReplaceAssetCommand): Promise<AssetAuthoringResult>
@@ -217,6 +219,7 @@ export function createWorkspaceApplicationSession(
 					if (!item) continue
 				}
 				if (request.query !== undefined && !matchesQuery(item, request.query)) continue
+				if (request.resolution !== undefined && !matchesResolution(item, request.resolution)) continue
 				items.push(item)
 			}
 		}
@@ -277,6 +280,7 @@ export function createWorkspaceApplicationSession(
 		submitReadyForReview: reviewAuthoring.submitReadyForReview,
 		resolveReviewThread: reviewAuthoring.resolveReviewThread,
 		reopenReviewThread: reviewAuthoring.reopenReviewThread,
+		setReviewDisplayHint: reviewAuthoring.setReviewDisplayHint,
 		promoteReviewToDecision: reviewAuthoring.promoteReviewToDecision,
 		createAsset: assetAuthoring.createAsset,
 		replaceAsset: assetAuthoring.replaceAsset,
@@ -291,6 +295,7 @@ export function createWorkspaceApplicationSession(
 type NormalizedDiscoveryRequest = Readonly<{
 	kinds: readonly DiscoverableResourceKind[]
 	query?: string
+	resolution?: readonly ReviewResolution[]
 	cursor?: string
 	limit: number
 }>
@@ -301,6 +306,7 @@ function normalizeDiscoveryRequest(request: ResourceDiscoveryRequest, mode: 'lis
 	return {
 		kinds,
 		...(mode === 'search' ? { query: request.query!.trim().toLowerCase() } : {}),
+		...(request.resolution !== undefined ? { resolution: [...request.resolution].sort() } : {}),
 		...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
 		limit: request.limit,
 	}
@@ -320,11 +326,7 @@ function summarize(read: Exclude<PointResourceRead, { kind: 'workspace' }>): Res
 				key: read.key,
 				revision: read.revision,
 				diagnosticCount: read.diagnostics.length,
-				summary: {
-					anchor: read.resource.anchor,
-					status: read.resource.status,
-					messageCount: read.resource.messages?.length ?? 0,
-				},
+				summary: reviewSummary(read.resource),
 			}
 		case 'asset':
 			return {
@@ -339,6 +341,27 @@ function summarize(read: Exclude<PointResourceRead, { kind: 'workspace' }>): Res
 				},
 			}
 	}
+}
+
+/**
+ * Compact Review summary. `displayHint` sits beside `anchor`, never inside it; `variantNames` is the
+ * accepted anchor/Variant scope; `resolution` is derived from the final lifecycle event while resolved.
+ */
+function reviewSummary(thread: ReviewThread): Extract<ResourceDiscoveryItem, { kind: 'review' }>['summary'] {
+	const resolution = deriveReviewResolution(thread)
+	return {
+		anchor: thread.anchor,
+		...(Array.isArray(thread.variantNames) ? { variantNames: thread.variantNames } : {}),
+		...(thread.displayHint ? { displayHint: thread.displayHint } : {}),
+		status: thread.status,
+		...(resolution ? { resolution } : {}),
+		messageCount: thread.messages?.length ?? 0,
+	}
+}
+
+/** A resolution filter selects only resolved Review threads whose derived resolution is listed. */
+function matchesResolution(item: ResourceDiscoveryItem, resolutions: readonly ReviewResolution[]): boolean {
+	return item.kind === 'review' && item.summary.resolution !== undefined && resolutions.includes(item.summary.resolution)
 }
 
 function matchesQuery(item: ResourceDiscoveryItem, query: string): boolean {
@@ -359,7 +382,7 @@ function sortKey(item: ResourceDiscoveryItem): string {
 }
 
 function discoveryScope(request: NormalizedDiscoveryRequest): string {
-	return JSON.stringify({ kinds: request.kinds, query: request.query ?? null })
+	return JSON.stringify({ kinds: request.kinds, query: request.query ?? null, ...(request.resolution ? { resolution: request.resolution } : {}) })
 }
 
 function encodeCursor(after: string, scope: string): string {

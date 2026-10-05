@@ -38,7 +38,7 @@ await writeFile(join(workspaceRoot, 'adapters', 'smoke.mjs'), [
 	'',
 ].join('\n'))
 await writeFile(join(workspaceRoot, '.uiux', 'workspace.json'), `${JSON.stringify({
-	schemaVersion: 1,
+	schemaVersion: 2,
 	i18n: { defaultLocale: 'en-US' },
 	adapters: [{ moduleSpecifier: './adapters/smoke.mjs' }],
 	viewports: {},
@@ -82,7 +82,7 @@ try {
 	const workspace = await fetch(`http://${host}:${port}/api/resources/workspace/workspace`)
 	if (workspace.status !== 200) throw new Error(`Selected Workspace route returned HTTP ${workspace.status}.`)
 	const body = await workspace.json()
-	if (body.resource?.schemaVersion !== 1 || body.inspection?.state !== 'current')
+	if (body.resource?.schemaVersion !== 2 || body.inspection?.state !== 'current')
 		throw new Error(`Selected Workspace route returned an unexpected body: ${JSON.stringify(body)}`)
 
 	const adapters = await fetch(`http://${host}:${port}/api/preview/adapters`)
@@ -95,7 +95,7 @@ try {
 	if (!runtime.ok || !(await runtime.text()).includes('mountPreviewRuntime'))
 		throw new Error('Preview runtime bundle was not materialized for the production identity smoke Adapter.')
 
-	console.log('Nitro smoke passed: health, selected Workspace API, and cross-module Workspace Adapter preview resolution are live against schemaVersion 1.')
+	console.log('Nitro smoke passed: health, selected Workspace API, and cross-module Workspace Adapter preview resolution are live against schemaVersion 2.')
 }
 catch (error) {
 	server.kill('SIGTERM')

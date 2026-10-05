@@ -1,5 +1,6 @@
 import type { ViewResource } from '../../src/domain/views/schema'
 import type { WorkspaceManifest } from '../../src/domain/workspace/schema'
+import type { ReviewDisplayHint, ReviewResolution } from '../../src/domain/reviews/schema'
 
 export type Diagnostic = Readonly<{ code: string; path: string; message: string }>
 
@@ -9,6 +10,8 @@ export type WorkspaceRead = Readonly<{
 	revision: string
 	diagnostics: readonly Diagnostic[]
 	resource: WorkspaceManifest
+	/** Schema-policy state of the opened manifest; `migration_required` blocks every mutation. */
+	inspection?: Readonly<{ state: 'current' | 'migration_required' | 'unsupported' | 'missing_manifest'; version?: number; targetVersion: number }>
 }>
 
 export type ViewSummary = Readonly<{
@@ -36,7 +39,13 @@ export type ReviewSummary = Readonly<{
 	diagnosticCount: number
 	summary: {
 		anchor?: Readonly<{ viewId: string; widgetId: string }>
+		/** Anchor Variant scope; `[]` means View-wide. */
+		variantNames?: readonly string[]
+		/** Non-authoritative pin placement, normalized 0..1 within the anchored Widget's rect. */
+		displayHint?: ReviewDisplayHint
 		status?: 'open' | 'ready-for-review' | 'resolved'
+		/** Derived from the final lifecycle event while resolved. */
+		resolution?: ReviewResolution
 		messageCount?: number
 	}
 }>

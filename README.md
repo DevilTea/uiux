@@ -32,10 +32,23 @@ MCP exposes compact read-only discovery plus domain-specific authoring operation
 - Workspace settings: `update_workspace_settings`
 - Locales: `create_locale`, `update_locale`
 - UX Flows: `create_flow`, `update_flow`
-- Reviews: `create_review_thread`, `append_review_message`, `reanchor_review_thread`, `submit_ready_for_review`, `resolve_review_thread`, `reopen_review_thread`, `promote_review_to_decision`
+- Reviews: `create_review_thread`, `append_review_message`, `reanchor_review_thread`, `set_review_display_hint`, `submit_ready_for_review`, `resolve_review_thread`, `reopen_review_thread`, `promote_review_to_decision`
 - Authored Assets: `create_asset`, `replace_asset`
 
 These are domain-specific operations rather than generic Resource writes or JSON Patch surfaces.
+
+Resolving a Review thread is a human act performed in the Workbench (`POST /api/reviews/:id/resolve`). `resolve_review_thread` stays registered on `/mcp` but always refuses with guidance: agents reply on the thread or submit it ready for review. A resolution is `verified` (accepts the evidence-gated ready-for-review submission) or closes the thread without a verified change: `answered`, `wont-fix`, `duplicate` (requires a reason) or `obsolete`.
+
+### Workspace schema migration
+
+A Workspace records its format in `.uiux/workspace.json` `schemaVersion`. An older recognized Workspace opens read-only (`migration_required`) until it is migrated explicitly, from the command line only:
+
+```sh
+uiux migrate --workspace ./design --dry-run   # print the steps and changed files, write nothing
+uiux migrate --workspace ./design             # apply atomically and print the new manifest revision
+```
+
+`uiux migrate` refuses while a running UIUX server holds the Workspace; stop `uiux dev` first. There is no MCP or HTTP migration entrypoint.
 
 ### Loopback-only access
 

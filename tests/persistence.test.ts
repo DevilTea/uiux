@@ -356,10 +356,11 @@ describe('file-native persistence', () => {
 		await writeFile(join(root, assetMetadataRelativePath(ASSET_ID)), JSON.stringify(assetFixture('logo.svg', 'Logo')))
 		await writeFile(join(root, 'assets', ASSET_ID, 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
 		const persistence = new FileNativePersistence({ root, schemaPolicy: policy() })
+		const plan = await persistence.planWorkspaceMigration()
+		expect(plan.changedFiles).toEqual(['.uiux/workspace.json', `views/${VIEW_ID}.view.json`])
 		expect((await persistence.inspectWorkspace()).inspection.state).toBe('migration_required')
 		const migration = await persistence.migrateWorkspace()
 		expect(migration.steps).toEqual(['synthetic-1-to-2'])
-		expect(migration.changedFiles).toEqual(['.uiux/workspace.json', `views/${VIEW_ID}.view.json`])
 		expect((await persistence.inspectWorkspace()).inspection.state).toBe('current')
 	})
 

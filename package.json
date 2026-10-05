@@ -1,7 +1,7 @@
 {
 	"name": "@deviltea/uiux",
 	"version": "0.1.0",
-	"uiuxWorkspaceSchemaVersion": 1,
+	"uiuxWorkspaceSchemaVersion": 2,
 	"description": "A local-first UI/UX specification, preview, and review workbench.",
 	"type": "module",
 	"packageManager": "pnpm@10.34.4",

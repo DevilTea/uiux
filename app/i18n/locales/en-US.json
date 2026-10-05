@@ -633,6 +633,10 @@
       "viewUnavailable": "This View is unavailable.",
       "viewLoadFailed": "Could not load the View.",
       "bridgeInitFailed": "The preview could not connect to the Workbench. Try reloading."
+    },
+    "migration": {
+      "title": "This Workspace uses an older format",
+      "description": "It's read-only until it's migrated. Stop this server, run {command}, then start uiux dev again."
     }
   },
   "workspaceSettings": {

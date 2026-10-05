@@ -27,6 +27,8 @@ const HISTORY_ID = '99999999-9999-4999-8999-999999999999'
 const DIGEST = `sha256:${'a'.repeat(64)}`
 const TIME = '2026-09-30T12:30:00Z'
 const DRAFT_2020_12 = 'https://json-schema.org/draft/2020-12/schema'
+/** Review files are decoded under the selected Workspace schemaVersion; these cases pin the v1 rules. */
+const REVIEW_V1 = { schemaVersion: 1 } as const
 
 const workspace = {
 	schemaVersion: 1,
@@ -249,15 +251,15 @@ describe('adapters, flows, reviews, and authored assets', () => {
 
 	it('preserves Review identity, typed actors, submission history, and immutable evidence refs', () => {
 		const open = { id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'submit' }, variantNames: [], status: 'open', messages: [], history: [], submissions: [] }
-		expect(validateReviewThread(open, `${REVIEW_ID}.review.json`).ok).toBe(true)
+		expect(validateReviewThread(open, { ...REVIEW_V1, filename: `${REVIEW_ID}.review.json` }).ok).toBe(true)
 		const ready = {
 			...open, status: 'ready-for-review', submissions: [reviewSubmission],
 			history: [{ id: HISTORY_ID, kind: 'lifecycle', from: 'open', to: 'ready-for-review', actor: { type: 'agent' }, at: TIME, submissionId: SUBMISSION_ID }],
 		}
-		expect(validateReviewThread(ready).ok).toBe(true)
-		expect(validateReviewThread({ ...ready, submissions: [{ ...reviewSubmission, evidenceRefs: [] }] }).ok).toBe(false)
-		expect(validateReviewThread({ ...open, submissions: [reviewSubmission] }).diagnostics.some(item => item.code === 'review.orphan_submission')).toBe(true)
-		expect(validateReviewThread({ ...ready, submissions: [] }).ok).toBe(false)
+		expect(validateReviewThread(ready, REVIEW_V1).ok).toBe(true)
+		expect(validateReviewThread({ ...ready, submissions: [{ ...reviewSubmission, evidenceRefs: [] }] }, REVIEW_V1).ok).toBe(false)
+		expect(validateReviewThread({ ...open, submissions: [reviewSubmission] }, REVIEW_V1).diagnostics.some(item => item.code === 'review.orphan_submission')).toBe(true)
+		expect(validateReviewThread({ ...ready, submissions: [] }, REVIEW_V1).ok).toBe(false)
 		const secondTime = '2026-09-30T12:31:00Z'
 		const secondSubmission = { ...reviewSubmission, id: STEP_B, at: secondTime }
 		const twiceReady = {
@@ -270,8 +272,8 @@ describe('adapters, flows, reviews, and authored assets', () => {
 				{ id: STEP_A, kind: 'lifecycle', from: 'open', to: 'ready-for-review', actor: { type: 'agent' }, at: secondTime, submissionId: STEP_B },
 			],
 		}
-		expect(validateReviewThread(twiceReady).ok).toBe(true)
-		expect(validateReviewThread({ ...twiceReady, submissions: [secondSubmission, reviewSubmission] })
+		expect(validateReviewThread(twiceReady, REVIEW_V1).ok).toBe(true)
+		expect(validateReviewThread({ ...twiceReady, submissions: [secondSubmission, reviewSubmission] }, REVIEW_V1)
 			.diagnostics.some(item => item.code === 'review.submission_history_mismatch')).toBe(true)
 		const reusedSubmission = {
 			...twiceReady,
@@ -279,14 +281,14 @@ describe('adapters, flows, reviews, and authored assets', () => {
 			history: twiceReady.history.map((event, index) =>
 				index === 2 ? { ...event, submissionId: SUBMISSION_ID, at: TIME } : event),
 		}
-		expect(validateReviewThread(reusedSubmission).diagnostics.some(item => item.code === 'review.submission_reused')).toBe(true)
-		expect(validateReviewThread({ ...open, history: [{ id: HISTORY_ID, kind: 'lifecycle', from: 'resolved', to: 'open', actor: { type: 'human' }, at: TIME }] }).ok).toBe(false)
+		expect(validateReviewThread(reusedSubmission, REVIEW_V1).diagnostics.some(item => item.code === 'review.submission_reused')).toBe(true)
+		expect(validateReviewThread({ ...open, history: [{ id: HISTORY_ID, kind: 'lifecycle', from: 'resolved', to: 'open', actor: { type: 'human' }, at: TIME }] }, REVIEW_V1).ok).toBe(false)
 		expect(validateReviewEvidenceRef({ kind: 'capture', evidence: 'not-a-digest' }).ok).toBe(false)
 		const resolvedByAgent = {
 			...ready, status: 'resolved',
 			history: [{ id: HISTORY_ID, kind: 'lifecycle', from: 'ready-for-review', to: 'resolved', actor: { type: 'agent' }, at: TIME, submissionId: SUBMISSION_ID }],
 		}
-		expect(validateReviewThread(resolvedByAgent).diagnostics.some(item => item.code === 'review.resolve_requires_human')).toBe(true)
+		expect(validateReviewThread(resolvedByAgent, REVIEW_V1).diagnostics.some(item => item.code === 'review.resolve_requires_human')).toBe(true)
 
 		const reanchored = {
 			...open,
@@ -296,10 +298,10 @@ describe('adapters, flows, reviews, and authored assets', () => {
 				{ id: STEP_A, kind: 'reanchor', actor: { type: 'human' }, at: TIME, before: { anchor: { viewId: VIEW_ID, widgetId: 'second' }, variantNames: [] }, after: { anchor: { viewId: VIEW_ID, widgetId: 'third' }, variantNames: [] } },
 			],
 		}
-		expect(validateReviewThread(reanchored).ok).toBe(true)
+		expect(validateReviewThread(reanchored, REVIEW_V1).ok).toBe(true)
 		const discontinuousReanchor = structuredClone(reanchored)
 		discontinuousReanchor.history[1]!.before.anchor.widgetId = 'wrong'
-		expect(validateReviewThread(discontinuousReanchor).diagnostics.some(item => item.code === 'review.discontinuous_reanchor_history')).toBe(true)
+		expect(validateReviewThread(discontinuousReanchor, REVIEW_V1).diagnostics.some(item => item.code === 'review.discontinuous_reanchor_history')).toBe(true)
 	})
 
 	it('validates authored asset identity, layout, binding shape, and explicit media capability', () => {
