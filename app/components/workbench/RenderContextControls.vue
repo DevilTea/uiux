@@ -13,7 +13,11 @@ import type { ViewportOption } from '../../../src/preview/render-context-options
  *
  * `layout="bar"` is the desktop toolbar row; `layout="stacked"` is the compact summary popover.
  */
-const props = withDefaults(defineProps<{ layout?: 'bar' | 'stacked' }>(), { layout: 'bar' })
+const props = withDefaults(defineProps<{
+	layout?: 'bar' | 'stacked'
+	/** The Prototype player: each Flow step fixes the Variant, so it is shown but not selectable. */
+	lockVariant?: boolean
+}>(), { layout: 'bar', lockVariant: false })
 
 const { t } = useI18n()
 const workbench = useWorkbench()
@@ -143,6 +147,7 @@ const selectUi = computed(() => ({
       icon="i-lucide-layers"
       trailing-icon="i-lucide-chevron-down"
       :search-input="variantItems.length > 8 ? { placeholder: t('ctx.searchVariants') } : false"
+      :disabled="props.lockVariant"
       :color="contextOptions.variants.isInvalid ? 'error' : 'neutral'"
       :highlight="contextOptions.variants.isInvalid"
       :aria-label="t('workbench.context.variant')"

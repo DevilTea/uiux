@@ -40,6 +40,11 @@ import CanvasOverlay from './CanvasOverlay.vue'
  * it, the overlay is `pointer-events: none`, and Ctrl/⌘ + wheel or pinch zoom only over the gutter.
  */
 const emit = defineEmits<{ (e: 'openPanel', tab: 'readiness'): void }>()
+/**
+ * `prototype`: the Prototype player reuses this frame (brief g). The Flow step fixes the Variant
+ * and the View receives every click, so the tool pill gives way to the player's `dock` slot.
+ */
+const props = defineProps<{ prototype?: boolean }>()
 
 const { t } = useI18n()
 const workbench = useWorkbench()
@@ -427,7 +432,7 @@ defineShortcuts(computed(() => ({
 	'alt_arrowdown': () => walkTree('child'),
 	'alt_arrowleft': () => walkTree('previous'),
 	'alt_arrowright': () => walkTree('next'),
-	...(shell.singleKeyShortcuts.value && selectedView.value
+	...(shell.singleKeyShortcuts.value && selectedView.value && !props.prototype
 		? {
 				v: () => selectTool('select'),
 				i: () => selectTool('interact'),
@@ -470,6 +475,7 @@ function switchToBase(): void {
           <RenderContextControls
             v-if="isDesktop"
             ref="contextControls"
+            :lock-variant="props.prototype"
           />
           <UPopover
             v-else
@@ -489,7 +495,10 @@ function switchToBase(): void {
             />
             <template #content>
               <div class="w-[min(20rem,calc(100vw-2rem))] p-2">
-                <RenderContextControls layout="stacked" />
+                <RenderContextControls
+                  layout="stacked"
+                  :lock-variant="props.prototype"
+                />
               </div>
             </template>
           </UPopover>
@@ -673,7 +682,12 @@ function switchToBase(): void {
         v-if="showFrame"
         class="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center px-3"
       >
+        <slot
+          v-if="props.prototype"
+          name="dock"
+        />
         <CanvasToolPill
+          v-else
           class="pointer-events-auto"
           :active="activeTool"
           :show-comment="showComment"

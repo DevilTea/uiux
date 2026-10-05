@@ -222,93 +222,155 @@
     "selectAll": "所有 Variant・所有 Locale・所有檢視區・所有主題"
   },
   "flows": {
-    "title": "UX Flow",
-    "subtitle": "跨 View 的步驟與轉場",
+    "title": "UX Flows",
     "newFlow": "新增 Flow",
-    "list": {
-      "label": "UX Flow",
-      "empty": "尚無 Flow",
-      "emptyHint": "建立 Flow，描述使用者跨 View 的旅程。",
-      "loadFailed": "無法載入 Flow。",
-      "unnamed": "未命名 Flow"
-    },
-    "detail": {
-      "metadata": "Flow 詳細資料",
-      "revision": "修訂版本 {revision}",
-      "loadFailed": "無法載入此 Flow。",
-      "unavailable": "此 Flow 無法使用。",
-      "selectTitle": "尚未選取 Flow",
-      "selectDescription": "選取 Flow 以檢視其步驟與轉場。"
-    },
-    "fields": {
-      "name": "Flow 名稱",
-      "namePlaceholder": "例如：註冊引導",
-      "entryStep": "起始步驟",
-      "entryStepPlaceholder": "選取起始步驟",
-      "entryStepId": "起始步驟 ID",
-      "entryStepIdHelp": "第一個步驟的固定 ID，使用自動產生的即可。",
-      "initialView": "第一個步驟的 View",
-      "targetView": "目標 View",
-      "variant": "Variant",
-      "variantPlaceholder": "例如：mobile-expanded",
-      "optional": "選填",
-      "event": "事件",
-      "widgetId": "Widget ID",
-      "targetStep": "前往步驟",
-      "targetStepPlaceholder": "選取步驟"
-    },
-    "views": {
-      "placeholder": "選取 View",
-      "search": "搜尋 View…",
-      "missing": "{id}（找不到 View）",
-      "none": "沒有 View"
-    },
-    "steps": {
-      "title": "步驟",
-      "count": "沒有步驟 | {n} 個步驟 | {n} 個步驟",
-      "ordinal": "步驟 {n}",
-      "optionLabel": "步驟 {n}：{view}",
-      "entry": "起始",
-      "add": "新增步驟",
-      "remove": "移除步驟",
-      "previewView": "預覽此 View",
-      "empty": "尚無步驟",
-      "emptyHint": "新增一個步驟以開始。"
-    },
-    "transitions": {
-      "count": "沒有轉場 | {n} 個轉場 | {n} 個轉場",
-      "add": "新增轉場",
-      "remove": "移除轉場",
-      "terminal": "沒有轉場，此步驟為 Flow 的終點。"
-    },
-    "diagnostics": {
-      "count": "沒有診斷 | {n} 項診斷 | {n} 項診斷"
-    },
-    "conflict": {
-      "title": "Flow 已在其他地方變更",
-      "description": "請重新載入以取得最新版本，尚未儲存的編輯將會捨棄。"
-    },
-    "save": {
-      "submit": "儲存 Flow",
-      "saved": "已儲存 Flow。",
-      "failed": "無法儲存 Flow。"
-    },
-    "create": {
-      "title": "新增 Flow",
-      "description": "第一個步驟會開啟一個 View。",
-      "submit": "建立 Flow",
-      "created": "已建立 Flow。",
-      "failed": "無法建立 Flow。",
-      "nameRequired": "請輸入 Flow 名稱。",
-      "viewRequired": "請為第一個步驟選取 View。",
-      "noViews": "請先建立 View，第一個步驟需要 View。"
-    },
     "play": "播放原型",
     "restart": "重新開始",
     "exit": "離開",
     "next": "下一步：{event}",
     "unreachable": "無法抵達的步驟",
-    "cantPlay": "修正 {n} 個問題後才能播放此 Flow。 | 修正 {n} 個問題後才能播放此 Flow。"
+    "cantPlay": "修正 {n} 個問題後才能播放此 Flow。 | 修正 {n} 個問題後才能播放此 Flow。",
+    "list": {
+      "label": "UX Flows",
+      "steps": "依序排列的步驟",
+      "transitionsOf": "{step} 的轉場",
+      "goesTo": "前往",
+      "empty": "尚無 UX Flow",
+      "emptyHint": "Flow 會把 View 串成可播放的路徑。請 agent 執行 {tool}，或在這裡建立。",
+      "emptyHintReadOnly": "Flow 會把 View 串成可播放的路徑。請 agent 執行 {tool}。",
+      "unnamed": "未命名 Flow"
+    },
+    "detail": {
+      "loadFailed": "無法載入此 Flow。",
+      "notFound": "找不到 Flow",
+      "notFoundHint": "此 Workspace 中沒有它，可能已在磁碟上移除或更名。",
+      "allFlows": "所有 Flow"
+    },
+    "graph": {
+      "label": "Flow 圖",
+      "layout": "Flow 顯示方式",
+      "graphView": "圖",
+      "listView": "清單",
+      "keyboardHint": "方向鍵沿轉場移動：右鍵到下一個步驟，左鍵到上一個步驟，上下鍵在同一欄內移動。按 Enter 開啟步驟。",
+      "entry": "起始",
+      "end": "結束",
+      "variant": "Variant {variant}",
+      "edgeLabel": "轉場 {trigger}，前往 {target}",
+      "missingStep": "不存在的步驟",
+      "missingView": "不存在的 View"
+    },
+    "toolbar": {
+      "steps": "{n} 個步驟 | {n} 個步驟",
+      "problems": "{n} 個問題 | {n} 個問題",
+      "unsaved": "有未儲存的變更",
+      "discard": "捨棄",
+      "addStep": "新增步驟"
+    },
+    "inspector": {
+      "label": "Flow 詳細資料",
+      "flow": "Flow",
+      "name": "名稱",
+      "entryStep": "起始步驟",
+      "transitionCount": "{n} 個轉場 | {n} 個轉場",
+      "selectHint": "選取步驟或轉場以編輯。",
+      "view": "View",
+      "noView": "沒有 View",
+      "viewMissing": "{id}（不存在的 View）",
+      "variantMissing": "{name}（不在此 View 中）",
+      "widgetMissing": "#{id}（不在此 View 中）",
+      "searchViews": "搜尋 View",
+      "searchWidgets": "搜尋 Widget",
+      "openView": "開啟 View",
+      "makeEntry": "設為起始步驟",
+      "transitions": "轉場",
+      "noOutgoing": "沒有轉場，此步驟為 Flow 的終點。",
+      "incoming": "由 {n} 個轉場抵達 | 由 {n} 個轉場抵達",
+      "addTransition": "新增轉場",
+      "widget": "Widget",
+      "widgetPlaceholder": "選取 Widget",
+      "event": "事件",
+      "eventPlaceholder": "例如：click",
+      "eventHelp": "Widget 宣告的事件名稱。",
+      "target": "前往步驟",
+      "stepOption": "{n}. {step}",
+      "selectTarget": "選取目標步驟",
+      "removeStep": "移除步驟",
+      "removeStepConfirm": "要移除此步驟嗎？ | 要移除此步驟及抵達它的轉場嗎？ | 要移除此步驟及抵達它的 {n} 個轉場嗎？",
+      "entryCantRemove": "請先將其他步驟設為起始步驟，再移除此步驟。",
+      "removeTransition": "移除轉場",
+      "details": "詳細資料",
+      "stepId": "步驟 ID",
+      "viewId": "View ID",
+      "flowId": "Flow ID",
+      "scenario": "情境參照"
+    },
+    "addStep": {
+      "title": "新增步驟",
+      "description": "新步驟由現有步驟的轉場抵達。",
+      "trigger": "進入新步驟的轉場",
+      "from": "來源步驟",
+      "newStep": "新步驟",
+      "viewPlaceholder": "選取 View",
+      "widgetRequired": "請選取觸發轉場的 Widget。",
+      "eventRequired": "請輸入事件名稱。",
+      "viewRequired": "請為新步驟選取 View。",
+      "submit": "新增步驟"
+    },
+    "problems": {
+      "unreachable": "從起始步驟無法抵達 {step}。",
+      "ambiguous": "同一步驟有兩個轉場使用 {trigger}。每個 Widget 事件只能前往一個步驟。",
+      "missingTargetStep": "轉場 {trigger} 前往的步驟不在此 Flow 中。",
+      "missingEntry": "起始步驟不在此 Flow 中。",
+      "nameRequired": "Flow 需要名稱。",
+      "incompleteTrigger": "轉場 {trigger} 需要 Widget 與事件。",
+      "incompleteStep": "{step} 需要目標 View。",
+      "structure": "此 Flow 在 {path} 不符合標準結構。",
+      "missingView": "此 Workspace 中沒有 View {id}。",
+      "missingVariant": "{view} 未定義 Variant {variant}。",
+      "missingWidget": "{view} 中沒有 Widget {widgetId}。",
+      "saveBlocked": "修正 {n} 個問題後才能儲存。 | 修正 {n} 個問題後才能儲存。",
+      "lossy": "此 Flow 檔案含有編輯器無法呈現的內容，因此在這裡為唯讀。請以 update_flow 修復。"
+    },
+    "conflict": {
+      "title": "開啟後此 Flow 已有變更。",
+      "description": "重新載入前會保留你的編輯。重新載入會顯示目前的 Flow，並捨棄你的編輯。",
+      "reload": "載入對方版本"
+    },
+    "save": {
+      "saved": "已儲存 Flow",
+      "failed": "無法儲存 Flow。"
+    },
+    "leave": {
+      "title": "不儲存就離開？",
+      "description": "此 Flow 未儲存的變更將被捨棄。",
+      "stay": "繼續編輯",
+      "confirm": "捨棄並離開"
+    },
+    "create": {
+      "title": "新增 Flow",
+      "description": "為 Flow 命名，並選擇起始步驟開啟的 View。",
+      "namePlaceholder": "例如：結帳失敗復原",
+      "firstView": "起始步驟的 View",
+      "noViews": "請先建立 View，起始步驟需要一個 View。",
+      "submit": "建立 Flow",
+      "created": "已建立 Flow",
+      "failed": "無法建立 Flow。",
+      "nameRequired": "請輸入名稱。",
+      "viewRequired": "請為起始步驟選取 View。"
+    },
+    "player": {
+      "label": "原型播放器",
+      "path": "已播放的步驟",
+      "earlier": "較早的 {n} 個步驟 | 較早的 {n} 個步驟",
+      "stepWithVariant": "{step} · {variant}",
+      "nextGroup": "此步驟的轉場",
+      "goesTo": "前往 {step}。該步驟會從全新狀態開始。",
+      "end": "Flow 結束",
+      "entered": "第 {n} 步：{step}",
+      "unavailable": "此 Flow 尚未載入。",
+      "saveFirst": "請先儲存變更再播放。",
+      "checking": "正在檢查參照…"
+    }
   },
   "handoff": {
     "title": "Handoff",

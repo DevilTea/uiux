@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useI18n, useRoute } from '#imports'
+import { navigateTo, useI18n, useRoute } from '#imports'
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { useWorkbench } from '../../composables/useWorkbench'
+import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { flowPath, viewLocation } from '../../utils/workbench-routes'
 import WidgetTree from './WidgetTree.vue'
+import FlowCreateModal from '../flows/FlowCreateModal.vue'
 
 /**
  * Sidebar content: the four primary areas, the current area's navigator (brief a,
@@ -65,6 +67,11 @@ const filteredViews = computed(() => {
 })
 
 const openFlowId = computed(() => typeof route.params.flowId === 'string' ? route.params.flowId : undefined)
+
+/** `create_flow` is desktop authoring (brief g, section 7). */
+const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
+const canCreateFlow = computed(() => !workbench.isReadOnly.value && isDesktop.value && workbench.workspace.value?.inspection?.state !== 'migration_required')
+const createFlowOpen = ref(false)
 </script>
 
 <template>
@@ -173,6 +180,22 @@ const openFlowId = computed(() => typeof route.params.flowId === 'string' ? rout
       class="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2"
       :aria-label="t('flows.list.label')"
     >
+      <li v-if="canCreateFlow">
+        <UButton
+          color="neutral"
+          variant="ghost"
+          size="sm"
+          icon="i-lucide-plus"
+          class="w-full text-muted"
+          :label="t('flows.newFlow')"
+          data-flow-new
+          @click="createFlowOpen = true"
+        />
+        <FlowCreateModal
+          v-model:open="createFlowOpen"
+          @created="(id: string) => navigateTo(flowPath(id))"
+        />
+      </li>
       <li
         v-for="flow in flows"
         :key="flow.key"
