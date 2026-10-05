@@ -25,6 +25,13 @@ const rows = computed(() => [
 	{ keys: [['E']], label: t('shortcuts.editSection') },
 	{ keys: [['meta', '↵'], ['Esc']], label: t('shortcuts.saveSection') },
 	{ keys: [['Esc']], label: t('shortcuts.exitComment') },
+	{ keys: [['J'], ['K']], label: t('shortcuts.nextThread') },
+	{ keys: [['R']], label: t('shortcuts.replyThread') },
+	{ keys: [['E']], label: t('shortcuts.resolveThread') },
+	{ keys: [['shift', 'E']], label: t('shortcuts.resolveThreadAs') },
+	{ keys: [['O']], label: t('shortcuts.openThreadInCanvas') },
+	{ keys: [['shift', 'meta', 'E']], label: t('shortcuts.exportHandoff') },
+	{ keys: [['shift', 'meta', 'P']], label: t('shortcuts.captureEvidence') },
 	{ keys: [['?']], label: t('shortcuts.help') },
 ])
 </script>
