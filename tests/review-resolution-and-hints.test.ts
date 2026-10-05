@@ -218,9 +218,10 @@ describe('Review list summary and resolution filter', () => {
 		const all = await ctx.app.listPointResources({ kinds: ['review'], limit: 10 })
 		if (all.status !== 'ok') throw new Error('list failed')
 		const summaries = Object.fromEntries(all.page.items.map(item => [item.key, item.summary]))
-		expect(summaries[REVIEW_ID]).toEqual({ anchor: { viewId: VIEW_ID, widgetId: 'root' }, variantNames: ['Empty'], displayHint: { pin: { x: 0.25, y: 0.5 } }, status: 'resolved', resolution: 'answered', messageCount: 0 })
+		expect(summaries[REVIEW_ID]).toEqual({ anchor: { viewId: VIEW_ID, widgetId: 'root' }, variantNames: ['Empty'], displayHint: { pin: { x: 0.25, y: 0.5 } }, status: 'resolved', resolution: 'answered', messageCount: 0, latestActivityAt: expect.any(String) })
 		expect(summaries[SECOND_REVIEW_ID]).toMatchObject({ status: 'resolved', resolution: 'duplicate', variantNames: [] })
 		expect(summaries[SECOND_REVIEW_ID]).not.toHaveProperty('displayHint')
+		// No message, submission or history event yet: no latest activity to report.
 		expect(summaries[THIRD_REVIEW_ID]).toEqual({ anchor: { viewId: VIEW_ID, widgetId: 'root' }, variantNames: [], status: 'open', messageCount: 0 })
 
 		const answeredOnly = await ctx.app.listPointResources({ resolution: ['answered'], limit: 10 })

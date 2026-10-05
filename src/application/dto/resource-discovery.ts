@@ -32,6 +32,8 @@ export type ReviewDiscoverySummary = Readonly<{
 	/** Derived from the final lifecycle event; present only while `status` is resolved. */
 	resolution?: ReviewResolution
 	messageCount?: number
+	/** Latest canonical activity (newest message, submission or history event), ISO 8601. */
+	latestActivityAt?: string
 }>
 
 export type ResourceDiscoveryPage = Readonly<{ items: readonly ResourceDiscoveryItem[]; nextCursor?: string }>

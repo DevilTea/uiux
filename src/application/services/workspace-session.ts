@@ -356,7 +356,22 @@ function reviewSummary(thread: ReviewThread): Extract<ResourceDiscoveryItem, { k
 		status: thread.status,
 		...(resolution ? { resolution } : {}),
 		messageCount: thread.messages?.length ?? 0,
+		...latestActivity(thread),
 	}
+}
+
+/** Latest canonical activity (Part 7 9b): the newest message, submission or history timestamp. */
+function latestActivity(thread: ReviewThread): { latestActivityAt?: string } {
+	let latest: string | undefined
+	let latestMs = Number.NEGATIVE_INFINITY
+	for (const entry of [...(thread.messages ?? []), ...(thread.submissions ?? []), ...(thread.history ?? [])]) {
+		const ms = Date.parse(entry.at)
+		if (Number.isFinite(ms) && ms > latestMs) {
+			latestMs = ms
+			latest = entry.at
+		}
+	}
+	return latest ? { latestActivityAt: latest } : {}
 }
 
 /** A resolution filter selects only resolved Review threads whose derived resolution is listed. */

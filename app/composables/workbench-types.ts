@@ -47,6 +47,8 @@ export type ReviewSummary = Readonly<{
 		/** Derived from the final lifecycle event while resolved. */
 		resolution?: ReviewResolution
 		messageCount?: number
+		/** Latest canonical activity (newest message, submission or history event), ISO 8601. */
+		latestActivityAt?: string
 	}
 }>
 
