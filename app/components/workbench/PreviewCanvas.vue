@@ -30,6 +30,10 @@ import SessionStatus from './SessionStatus.vue'
 import CanvasZoomControls from './CanvasZoomControls.vue'
 import CanvasToolPill, { type CanvasToolId } from './CanvasToolPill.vue'
 import CanvasOverlay from './CanvasOverlay.vue'
+import CommentPinLayer from './comments/CommentPinLayer.vue'
+import CommentBubbleHost from './comments/CommentBubbleHost.vue'
+import { useCanvasComments } from '../../composables/useCanvasComments'
+import { mapPointAffine } from '../../../src/preview/outer-precision'
 
 /**
  * The View canvas (brief b): the render-context bar, the stage with the scaled frame, the overlay
@@ -51,6 +55,8 @@ const workbench = useWorkbench()
 const shell = useWorkbenchShell()
 const uiux = useUiuxClient()
 const { selectedView, contextOptions, loading, reviewReadOnly, preview, widgetTreeResult, selectedWidgetId, selectedVariant } = workbench
+/** The View page's comments layer; the Prototype player has none. */
+const comments = props.prototype ? undefined : useCanvasComments()
 
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const isPhone = useMediaQuery('(max-width: 767.98px)')
@@ -261,6 +267,8 @@ const hoverCandidate = computed(() => {
 	return candidate
 })
 const pinsTracked = computed(() => preview.pinPlacements.value.length > 0)
+/** Threads whose Widget is gone (never drawn, never rebound): the unplaced tray (brief c, section 6). */
+const unplacedThreads = computed(() => comments?.threads.value.filter(item => !item.anchorValid && item.status !== 'resolved' && comments.inFilter(item)) ?? [])
 const overlayActive = computed(() => !!highlightGeometry.value || !!hoverCandidate.value || pinsTracked.value)
 /** Highlight and targeting overlays keep the accepted per-frame loop; pins alone are event-driven. */
 const mappingMode = computed(() => highlightGeometry.value || hoverCandidate.value ? 'continuous' as const : 'event-driven' as const)
@@ -289,6 +297,25 @@ watch([mapping, stageBounds], ([nextMapping, stageArea]) => {
 	preview.canvasMapping.value = Object.freeze({ ...(nextMapping ? { mapping: nextMapping } : {}), stage: stageArea })
 }, { immediate: true })
 
+// A list pick pans the stage to the pin when it is drawn but outside the stage. The iframe is never scrolled.
+watch(() => comments?.revealRequest.value, (request) => {
+	if (!request || !comments) return
+	void nextTick(() => {
+		const placement = comments.placementById.value.get(request.threadId)
+		const element = stage.value
+		if (!placement?.innerPoint || !mapping.value || !element || placement.state === 'hidden' || placement.state === 'invalid') return
+		if (placement.state === 'offscreen' && placement.edge?.scope === 'frame') return
+		const point = mapPointAffine(placement.innerPoint, mapping.value)
+		const bounds = stageBounds.value
+		if (point.x >= bounds.left + 40 && point.x <= bounds.right - 340 && point.y >= bounds.top + 40 && point.y <= bounds.bottom - 40) return
+		element.scrollTo({
+			left: Math.max(0, point.x - stageSize.value.width / 3),
+			top: Math.max(0, point.y - stageSize.value.height / 2),
+			behavior: reducedMotion.value ? 'instant' : 'smooth',
+		})
+	})
+})
+
 const widgetNode = computed<WidgetTreeNode | undefined>(() => widgetTreeResult.value?.status === 'valid'
 	? findWidgetInTree(widgetTreeResult.value.root, selectedWidgetId.value)
 	: undefined)
@@ -300,8 +327,9 @@ const hoverNode = computed<WidgetTreeNode | undefined>(() => widgetTreeResult.va
 // Tools
 // ---------------------------------------------------------------------------------------------
 
-const showComment = computed(() => !reviewReadOnly.value && !isPhone.value)
-const activeTool = computed<CanvasToolId>(() => preview.isCommentMode.value ? 'comment' : preview.canvasTool.value)
+/** Viewers, the publication and phones get no Comment tool (phones read, reply and resolve only). */
+const showComment = computed(() => !!comments && !reviewReadOnly.value && !isPhone.value)
+const activeTool = computed<CanvasToolId>(() => preview.canvasTool.value)
 const toolsDisabledReason = computed(() => {
 	if (!selectedView.value) return t('tool.disabledNoView')
 	if (preview.sessionStatus.value === 'live') return undefined
@@ -310,7 +338,9 @@ const toolsDisabledReason = computed(() => {
 
 function selectTool(tool: CanvasToolId): void {
 	if (tool === 'comment') {
-		if (showComment.value) preview.toggleCommentMode()
+		// C toggles the Comment tool; leaving it returns to the tool it was entered from.
+		if (preview.isCommentMode.value) preview.exitCommentMode()
+		else if (showComment.value) preview.setCanvasTool('comment')
 		return
 	}
 	preview.setCanvasTool(tool)
@@ -416,7 +446,7 @@ function onCanvasKeydown(event: KeyboardEvent): void {
 	const command = event.metaKey || event.ctrlKey
 	if (event.key === 'Escape') {
 		// Comment mode is left by the session's own Escape handler; menus close themselves.
-		if (preview.isCommentMode.value || event.defaultPrevented || document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return
+		if (preview.isCommentMode.value || comments?.composer.value || comments?.openThreadId.value || event.defaultPrevented || document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return
 		if (selectedWidgetId.value !== 'root') workbench.selectWidget('root')
 		return
 	}
@@ -443,6 +473,7 @@ defineShortcuts(computed(() => ({
 				v: () => selectTool('select'),
 				i: () => selectTool('interact'),
 				c: () => selectTool('comment'),
+				shift_c: () => { if (comments) comments.pinsHidden.value = !comments.pinsHidden.value },
 				shift_v: () => openContextMenu('variant'),
 				shift_l: () => openContextMenu('locale'),
 				shift_t: () => openContextMenu('theme'),
@@ -456,6 +487,7 @@ shell.onCanvasCommands({
 	zoomOut,
 	actualSize: zoomActual,
 	selectTool: tool => selectTool(tool),
+	canComment: () => showComment.value,
 })
 
 function switchToBase(): void {
@@ -617,8 +649,13 @@ function switchToBase(): void {
               :widget-type="widgetNode?.type"
               :hover="hoverCandidate"
               :hover-type="hoverNode?.type"
+              :reanchor="!!preview.reanchorThreadId.value"
               :viewport="dims"
               :bounds="stageBounds"
+            />
+            <CommentPinLayer
+              v-if="showFrame && comments && mapping"
+              :mapping="mapping"
             />
           </div>
         </div>
@@ -684,6 +721,34 @@ function switchToBase(): void {
           </i18n-t>
         </template>
       </UEmpty>
+
+      <template v-if="showFrame && comments">
+        <!-- The bubble's last-resort reference: the canvas corner, for threads with no pin to point at. -->
+        <span
+          class="pointer-events-none absolute bottom-14 left-3 size-px max-md:bottom-26"
+          aria-hidden="true"
+          data-comment-fallback
+        />
+        <UButton
+          v-if="unplacedThreads.length"
+          class="absolute bottom-4 left-3 z-20 shadow-overlay max-md:bottom-16"
+          color="warning"
+          variant="soft"
+          size="sm"
+          icon="i-lucide-triangle-alert"
+          :label="t('pins.unplaced', unplacedThreads.length)"
+          data-comment-tray
+          @click="comments.open(unplacedThreads[0]!.id)"
+        />
+        <CommentBubbleHost />
+        <p
+          class="sr-only"
+          role="status"
+          aria-live="polite"
+        >
+          {{ comments.announcement.value }}
+        </p>
+      </template>
 
       <div
         v-if="showFrame"

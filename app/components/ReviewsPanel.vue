@@ -42,9 +42,6 @@ const props = defineProps<{
 	currentViewId?: string
 	selectedWidgetId?: string
 	currentViewRevision?: string
-	isCommentMode?: boolean
-	/** Hides the canvas comment-mode toggle where no canvas is mounted (the Reviews page). */
-	hideCommentMode?: boolean
 	/** Shows "Open in canvas" for the selected thread (the Reviews page). */
 	showOpenInCanvas?: boolean
 }>()
@@ -56,7 +53,6 @@ const fmt = useWorkbenchFormat()
 
 const emit = defineEmits<{
 	(e: 'highlightWidget', widgetId: string): void
-	(e: 'toggleCommentMode'): void
 	(e: 'viewPromoted'): void
 	(e: 'changed'): void
 	(e: 'threadSelected', threadId: string): void
@@ -93,11 +89,6 @@ const promoteForm = reactive({ question: '', outcomeSummary: '', outcomeRational
 const promoting = ref(false)
 const promoteError = ref<FetchErrorDetails>()
 
-// New thread modal
-const isCreatingThread = ref(false)
-const createForm = reactive({ widgetId: props.selectedWidgetId || 'root', firstMessage: '' })
-const creatingThread = ref(false)
-const createError = ref<FetchErrorDetails>()
 
 const conflict = ref(false)
 
@@ -116,9 +107,6 @@ const threadItems = computed(() => visibleReviews.value.map(thread => ({
 const messageCount = computed(() => selectedReviewData.value?.resource.messages?.length ?? 0)
 const reanchorTarget = computed(() => props.selectedWidgetId || 'root')
 
-watch(() => props.selectedWidgetId, (newWidget) => {
-	if (newWidget) createForm.widgetId = newWidget
-})
 
 /** Review status roles: open is human annotation (Marker), ready waits for a verdict (info), resolved closed (success). */
 function statusColor(status: ReviewStatus | undefined): 'success' | 'info' | 'annotation' {
@@ -453,76 +441,9 @@ async function handlePromoteToDecision() {
 	}
 }
 
-async function handleCreateReviewThread(targetWidgetIdOverride?: string) {
-	if (props.readOnly) return
-	createError.value = undefined
-	if (!props.currentViewId) {
-		createError.value = feedback.error(undefined, t('reviews.errors.noViewSelected'))
-		return
-	}
-	const targetWidget = targetWidgetIdOverride || createForm.widgetId.trim() || 'root'
-	creatingThread.value = true
-
-	try {
-		const res = await $fetch<{ status: string; key: string; revision: string }>('/api/reviews', {
-			method: 'POST',
-			body: {
-				anchor: {
-					viewId: props.currentViewId,
-					widgetId: targetWidget,
-				},
-			},
-		})
-		emit('changed')
-
-		if (createForm.firstMessage.trim() && res.key && res.revision) {
-			try {
-				await $fetch(`/api/reviews/${encodeURIComponent(res.key)}/messages`, {
-					method: 'POST',
-					body: {
-						expectedRevision: res.revision,
-						body: createForm.firstMessage.trim(),
-					},
-				})
-				emit('changed')
-			}
-			catch (cause: unknown) {
-				// The thread exists; report the lost initial message instead of swallowing it.
-				feedback.error(cause, t('reviews.errors.initialMessageFailed'))
-			}
-		}
-
-		isCreatingThread.value = false
-		createForm.firstMessage = ''
-		feedback.success(t('reviews.feedback.threadCreated', { widgetId: targetWidget }))
-		await fetchReviews()
-		if (res.key) await selectReview(res.key)
-	}
-	catch (err: unknown) {
-		createError.value = feedback.error(err, t('reviews.errors.createFailed'))
-	}
-	finally {
-		creatingThread.value = false
-	}
-}
-
-function openCreateModal(widgetId?: string) {
-	if (props.readOnly) return
-	createForm.widgetId = widgetId || props.selectedWidgetId || 'root'
-	createError.value = undefined
-	isCreatingThread.value = true
-}
-
-function pickWidgetInPreview() {
-	// Close the modal so the preview can be clicked; the shell reopens it via openCreateModal(widgetId).
-	isCreatingThread.value = false
-	if (!props.isCommentMode) emit('toggleCommentMode')
-}
 
 defineExpose({
-	openCreateModal,
 	selectReview: (id: string) => id === selectedReviewId.value ? Promise.resolve() : selectReview(id),
-	createThreadForWidget: (widgetId: string) => handleCreateReviewThread(widgetId),
 })
 
 onMounted(() => {
@@ -545,38 +466,6 @@ watch(() => props.currentViewId, () => {
         <p class="text-xs text-muted">
           {{ t('reviews.subtitle') }}
         </p>
-      </div>
-
-      <div
-        v-if="!readOnly"
-        class="flex items-center gap-1.5"
-      >
-        <UTooltip
-          v-if="!hideCommentMode"
-          :text="t('reviews.commentMode.tooltip')"
-        >
-          <UButton
-            :color="isCommentMode ? 'annotation' : 'neutral'"
-            :variant="isCommentMode ? 'solid' : 'outline'"
-            :icon="isCommentMode ? 'i-lucide-crosshair' : 'i-lucide-message-square-plus'"
-            :aria-pressed="isCommentMode"
-            :disabled="!currentViewId"
-            size="xs"
-            @click="emit('toggleCommentMode')"
-          >
-            {{ isCommentMode ? t('reviews.commentMode.active') : t('reviews.commentMode.start') }}
-          </UButton>
-        </UTooltip>
-        <UButton
-          v-if="currentViewId"
-          color="primary"
-          variant="solid"
-          size="xs"
-          icon="i-lucide-plus"
-          @click="openCreateModal()"
-        >
-          {{ t('reviews.newThread') }}
-        </UButton>
       </div>
     </div>
 
@@ -978,100 +867,6 @@ watch(() => props.currentViewId, () => {
       />
     </div>
 
-    <!-- New Thread Modal -->
-    <UModal
-      v-if="!readOnly"
-      v-model:open="isCreatingThread"
-      :title="t('reviews.create.title')"
-      :description="t('reviews.create.description')"
-    >
-      <template #body>
-        <UForm
-          :state="createForm"
-          class="space-y-4"
-          @submit="handleCreateReviewThread()"
-        >
-          <UAlert
-            v-if="createError"
-            color="error"
-            variant="subtle"
-            icon="i-lucide-circle-alert"
-            :title="createError.message"
-          >
-            <template
-              v-if="createError.diagnostics.length"
-              #description
-            >
-              <ul class="list-disc space-y-0.5 ps-4">
-                <li
-                  v-for="(diagnostic, dIdx) in createError.diagnostics"
-                  :key="dIdx"
-                >
-                  {{ diagnostic.message }}
-                </li>
-              </ul>
-            </template>
-          </UAlert>
-
-          <UFormField
-            name="widgetId"
-            :label="t('reviews.create.widgetLabel')"
-            :help="t('reviews.create.widgetHelp')"
-          >
-            <div class="flex gap-2">
-              <UInput
-                v-model="createForm.widgetId"
-                class="flex-1"
-                :ui="{ base: 'font-mono' }"
-                :placeholder="t('reviews.create.widgetPlaceholder')"
-              />
-              <UButton
-                color="neutral"
-                variant="outline"
-                icon="i-lucide-crosshair"
-                @click="pickWidgetInPreview"
-              >
-                {{ t('reviews.create.pick') }}
-              </UButton>
-            </div>
-          </UFormField>
-
-          <UFormField
-            name="firstMessage"
-            :label="t('reviews.create.messageLabel')"
-            :hint="t('reviews.optional')"
-          >
-            <UTextarea
-              v-model="createForm.firstMessage"
-              :rows="3"
-              autoresize
-              class="w-full"
-              :placeholder="t('reviews.create.messagePlaceholder')"
-            />
-          </UFormField>
-
-          <div class="flex justify-end gap-2">
-            <UButton
-              color="neutral"
-              variant="ghost"
-              @click="isCreatingThread = false"
-            >
-              {{ t('common.cancel') }}
-            </UButton>
-            <UButton
-              type="submit"
-              color="primary"
-              variant="solid"
-              icon="i-lucide-plus"
-              :loading="creatingThread"
-              :disabled="!currentViewId"
-            >
-              {{ t('reviews.create.submit') }}
-            </UButton>
-          </div>
-        </UForm>
-      </template>
-    </UModal>
 
     <!-- Promote to Decision Modal -->
     <UModal

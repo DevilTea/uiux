@@ -13,11 +13,10 @@ import { attachGeometrySignals, type GeometrySignalSubscription } from '../../sr
 import {
 	PREVIEW_WIRE_CHANNEL,
 	PREVIEW_CONTEXT_CHANNEL,
-	PREVIEW_TARGETING_CHANNEL,
 	type PreviewContextPayload,
-	type PreviewTargetingPayload,
 	type PreviewTargetingPurpose,
 } from '../../src/preview/protocol/transport'
+import type { TargetingContext, TargetingRuntimeMessage } from '../../src/preview/protocol/targeting'
 import type {
 	PreviewMaterializationResult,
 } from '../../src/preview/preview-runtime'
@@ -103,9 +102,21 @@ function findTargetWidgetId(target: EventTarget | null): string {
 	return widgetEl?.dataset.widgetId || 'root'
 }
 
-function postTargetingToWorkbench(payload: PreviewTargetingPayload) {
-	if (!window.parent || window.parent === window) return
-	window.parent.postMessage({ channel: PREVIEW_TARGETING_CHANNEL, payload }, window.location.origin)
+function targetingContext(): TargetingContext {
+	return {
+		previewSessionId: previewSessionId.value,
+		runtimeGenerationId: runtimeGenerationId.value,
+		viewId: viewId.value,
+		...(variantName.value ? { variantId: variantName.value } : {}),
+	}
+}
+
+/**
+ * Targeting goes out in the protocol envelope through the bridge, so nothing crosses before the
+ * capability ACK and every message carries session, generation and interaction identity.
+ */
+function sendTargeting(message: TargetingRuntimeMessage) {
+	runtimeBridge?.sendTargeting(message)
 }
 
 /** Reports a changed hover candidate for the active interaction; touch has no hover (Part 3). */
@@ -114,13 +125,13 @@ function reportHoverCandidate(widgetId: string | undefined, pointerType: string)
 	if (!targetingPurpose.value || !targetingInteractionId) return
 	if (widgetId === hoverCandidateWidgetId) return
 	hoverCandidateWidgetId = widgetId
-	postTargetingToWorkbench({
-		type: 'hover',
-		...(widgetId ? { widgetId } : {}),
-		viewId: viewId.value,
-		targetingInteractionId,
-		runtimeGenerationId: runtimeGenerationId.value,
-		...(pointerType === 'mouse' || pointerType === 'pen' ? { pointerType } : {}),
+	sendTargeting({
+		type: 'targeting.hover',
+		context: { ...targetingContext(), ...(widgetId ? { widgetId } : {}) },
+		payload: {
+			targetingInteractionId,
+			...(pointerType === 'mouse' || pointerType === 'pen' ? { pointerType } : {}),
+		},
 	})
 }
 
@@ -134,42 +145,35 @@ function handlePreviewPointerLeave(event: PointerEvent) {
 	reportHoverCandidate(undefined, event.pointerType)
 }
 
+/**
+ * A click commits the hit-tested Widget for the active interaction only. The Interact tool holds
+ * no interaction, so its clicks belong to the View and never cross the boundary (item 2.3).
+ */
 function handlePreviewPointerClick(event: MouseEvent) {
 	const targetingInteractionId = activeTargetingInteractionId.value
-	if (!isCommentMode.value) {
-		// Outside comment mode a click selects the hit-tested widget in the Workbench tree and Inspector.
-		// The widget's own interaction still runs; nothing is prevented.
-		if (harnessMode.value) return
-		postTargetingToWorkbench({
-			type: 'select',
-			purpose: 'inspection',
-			widgetId: findTargetWidgetId(event.target),
-			viewId: viewId.value,
-			...(targetingInteractionId ? { targetingInteractionId } : {}),
-			runtimeGenerationId: runtimeGenerationId.value,
-		})
+	const purpose = targetingPurpose.value
+	if (!purpose || !targetingInteractionId || harnessMode.value) return
+	const widgetId = findTargetWidgetId(event.target)
+	if (purpose === 'inspection') {
+		// Select: the click also selects the Widget in the Workbench; the Widget's own interaction still runs.
+		sendTargeting({ type: 'targeting.select', context: { ...targetingContext(), widgetId }, payload: { targetingInteractionId } })
 		return
 	}
 	event.preventDefault()
 	event.stopPropagation()
-	postTargetingToWorkbench({
-		type: 'select',
-		widgetId: findTargetWidgetId(event.target),
-		viewId: viewId.value,
-		...(targetingInteractionId ? { targetingInteractionId } : {}),
-		runtimeGenerationId: runtimeGenerationId.value,
+	// The transient click point of the final target, in inner content-viewport CSS px.
+	sendTargeting({
+		type: 'targeting.select',
+		context: { ...targetingContext(), widgetId },
+		payload: { targetingInteractionId, point: { x: event.clientX, y: event.clientY } },
 	})
 }
 
 function handleKeydown(event: KeyboardEvent) {
-	if (event.key === 'Escape' && isCommentMode.value) {
+	const targetingInteractionId = activeTargetingInteractionId.value
+	if (event.key === 'Escape' && isCommentMode.value && targetingInteractionId) {
 		// Workbench owns the mode exit (Part 3); the runtime only reports the intent.
-		const targetingInteractionId = activeTargetingInteractionId.value
-		postTargetingToWorkbench({
-			type: 'escape',
-			...(targetingInteractionId ? { targetingInteractionId } : {}),
-			runtimeGenerationId: runtimeGenerationId.value,
-		})
+		sendTargeting({ type: 'targeting.escape', context: targetingContext(), payload: { targetingInteractionId } })
 	}
 }
 
@@ -358,6 +362,8 @@ async function evaluateRuntime() {
 }
 
 function onWindowMessage(event: MessageEvent) {
+	// Only the embedding Workbench document of this origin talks to the runtime (item 2.3).
+	if (event.origin !== window.location.origin || event.source !== window.parent || window.parent === window) return
 	const data = event.data
 	if (!data || typeof data !== 'object') return
 
@@ -369,6 +375,17 @@ function onWindowMessage(event: MessageEvent) {
 		else if ((message.type === 'geometry.acquire.request' || message.type === 'geometry.release') && geometryProducer) {
 			geometryProducer.receive(message)
 			geometrySignals?.refreshObservedWidgets()
+		}
+		else if (message.type === 'targeting.enter') {
+			// A new interaction supersedes the previous one at once; its hover candidate starts empty.
+			targetingPurpose.value = message.payload.purpose
+			activeTargetingInteractionId.value = message.payload.targetingInteractionId
+			hoverCandidateWidgetId = undefined
+		}
+		else if (message.type === 'targeting.exit') {
+			targetingPurpose.value = undefined
+			activeTargetingInteractionId.value = undefined
+			hoverCandidateWidgetId = undefined
 		}
 	}
 	else if (data.channel === PREVIEW_CONTEXT_CHANNEL && data.payload) {
@@ -397,20 +414,6 @@ function onWindowMessage(event: MessageEvent) {
 			activeBridge.updateContext(activeContext.value)
 		}
 		else evaluateRuntime()
-	}
-	else if (data.channel === PREVIEW_TARGETING_CHANNEL && data.payload) {
-		const payload = data.payload as PreviewTargetingPayload
-		if (payload.type === 'enter' && payload.targetingInteractionId) {
-			// A new interaction supersedes the previous one at once; its hover candidate starts empty.
-			targetingPurpose.value = payload.purpose ?? 'comment-range'
-			activeTargetingInteractionId.value = payload.targetingInteractionId
-			hoverCandidateWidgetId = undefined
-		}
-		else if (payload.type === 'exit') {
-			targetingPurpose.value = undefined
-			activeTargetingInteractionId.value = undefined
-			hoverCandidateWidgetId = undefined
-		}
 	}
 }
 

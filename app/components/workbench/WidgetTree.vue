@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from '#imports'
-import type { TreeItem } from '@nuxt/ui'
+import type { ContextMenuItem, TreeItem } from '@nuxt/ui'
 import { useWorkbench } from '../../composables/useWorkbench'
+import { useMediaQuery } from '../../composables/useMediaQuery'
 import type { WidgetTreeNode } from '../../../src/preview/widget-tree'
 
 /**
@@ -15,7 +16,8 @@ import type { WidgetTreeNode } from '../../../src/preview/widget-tree'
  */
 const { t } = useI18n()
 const workbench = useWorkbench()
-const { widgetTreeResult, selectedWidgetId, selectedView, selectedViewId, reviews } = workbench
+const { widgetTreeResult, selectedWidgetId, selectedView, selectedViewId, reviews, reviewReadOnly, preview } = workbench
+const isPhone = useMediaQuery('(max-width: 767.98px)')
 
 type WidgetTreeItem = TreeItem & {
 	id: string
@@ -117,6 +119,35 @@ const selectedModel = computed<WidgetTreeItem | undefined>({
 	},
 })
 
+// ---------------------------------------------------------------------------------------------
+// "Comment on this Widget": C on a focused row, or the row's context menu (brief c, section 8)
+// ---------------------------------------------------------------------------------------------
+
+const canComment = computed(() => !reviewReadOnly.value && !isPhone.value)
+const contextRowId = ref<string>()
+
+function rowIdOf(target: EventTarget | null): string | undefined {
+	const row = target instanceof Element ? target.closest('[role="treeitem"]') : null
+	return row?.querySelector<HTMLElement>('[data-widget-row]')?.dataset.widgetRow
+}
+
+function onTreeContextMenu(event: MouseEvent): void {
+	contextRowId.value = rowIdOf(event.target)
+}
+
+const contextItems = computed<ContextMenuItem[]>(() => contextRowId.value && canComment.value
+	? [{ label: t('comments.commentOnWidget'), icon: 'i-lucide-message-circle-plus', kbds: ['C'], onSelect: () => { preview.commentOnWidget(contextRowId.value!) } }]
+	: [])
+
+function onTreeKeydown(event: KeyboardEvent): void {
+	if (event.key !== 'c' || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || !canComment.value) return
+	const id = rowIdOf(event.target)
+	if (!id || !preview.commentOnWidget(id)) return
+	// The row's own C wins over the global Comment tool shortcut.
+	event.preventDefault()
+	event.stopPropagation()
+}
+
 const hasEmptyRoot = computed(() => rootItem.value && !rootItem.value.children?.length)
 
 /** A deep link to a Widget that is no longer in the View (Part 3): a persistent inline notice. */
@@ -150,7 +181,11 @@ const missingWidgetId = computed(() => rootItem.value && selectedWidgetId.value 
 
     <!-- Deep Views scroll sideways instead of squeezing the deepest labels to nothing. -->
     <div class="flex-1 overflow-auto px-2 pb-2">
-      <template v-if="rootItem">
+      <UContextMenu
+        v-if="rootItem"
+        :items="contextItems"
+        :disabled="!contextItems.length"
+      >
         <UTree
           v-model="selectedModel"
           v-model:expanded="expanded"
@@ -160,11 +195,14 @@ const missingWidgetId = computed(() => rootItem.value && selectedWidgetId.value 
           color="primary"
           selection-behavior="replace"
           :aria-label="t('workbench.tree.label')"
+          :aria-keyshortcuts="canComment ? 'C' : undefined"
           :ui="{
             root: 'min-w-max',
             listWithChildren: 'ms-2.5',
             link: 'group/row min-w-max data-selected:text-selection-text data-selected:before:bg-selection-subtle hover:not-data-selected:before:bg-muted text-default',
           }"
+          @contextmenu.capture="onTreeContextMenu"
+          @keydown="onTreeKeydown"
         >
           <template #item-leading="{ item }">
             <UIcon
@@ -209,6 +247,8 @@ const missingWidgetId = computed(() => rootItem.value && selectedWidgetId.value 
             </span>
           </template>
         </UTree>
+      </UContextMenu>
+      <template v-if="rootItem">
         <p
           v-if="hasEmptyRoot"
           class="ms-6 border-s border-default py-1 ps-2 text-xs text-dimmed italic"

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
 	PREVIEW_WIRE_CHANNEL,
 	PREVIEW_CONTEXT_CHANNEL,
-	PREVIEW_TARGETING_CHANNEL,
 	isPreviewTransportEnvelope,
 	createInMemoryTransportPair,
 } from '../src/preview/protocol/transport'
@@ -60,10 +59,11 @@ describe('preview protocol transport & runtime materialization', () => {
 				payload: { widgetId: 'root' },
 			})).toBe(false)
 
+			// The ad hoc targeting channel is retired: targeting travels in the protocol envelope.
 			expect(isPreviewTransportEnvelope({
-				channel: PREVIEW_TARGETING_CHANNEL,
+				channel: 'uiux:preview:targeting',
 				payload: { type: 'select', widgetId: 'root', viewId: VIEW_ID },
-			})).toBe(true)
+			})).toBe(false)
 
 			expect(isPreviewTransportEnvelope(null)).toBe(false)
 			expect(isPreviewTransportEnvelope({})).toBe(false)

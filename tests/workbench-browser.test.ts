@@ -3,6 +3,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import { composite, contrastRatio, parseCssColor } from './support/color'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 import { PREVIEW_WIRE_RECORDER, type WireRecord, type WireRecorderWindow } from './support/preview-wire-recorder'
+import { provisionToken, sessionCookieFor } from './support/access'
 
 /**
  * Browser checks against the built Workbench (`pnpm build` output) serving a copy of the
@@ -40,7 +41,7 @@ afterAll(async () => {
 	await server?.close()
 })
 
-type ChromeSetup = Readonly<{ mode: 'light' | 'dark'; os?: 'light' | 'dark'; locale?: 'en-US' | 'zh-TW'; width?: number; height?: number; recordWire?: boolean }>
+type ChromeSetup = Readonly<{ mode: 'light' | 'dark'; os?: 'light' | 'dark'; locale?: 'en-US' | 'zh-TW'; width?: number; height?: number; recordWire?: boolean; cookie?: Readonly<{ name: string; value: string }> }>
 
 async function openWorkbench(path: string, setup: ChromeSetup): Promise<{ context: BrowserContext; page: Page }> {
 	const context = await browser.newContext({
@@ -52,7 +53,7 @@ async function openWorkbench(path: string, setup: ChromeSetup): Promise<{ contex
 		localStorage.setItem('uiux.workbench.locale', locale)
 	}, [setup.mode, setup.locale ?? 'en-US'] as const)
 	if (setup.recordWire) await context.addInitScript(PREVIEW_WIRE_RECORDER)
-	await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
+	await context.addCookies([{ ...(setup.cookie ?? server.cookie), url: server.origin, httpOnly: true, sameSite: 'Strict' }])
 	const page = await context.newPage()
 	await page.goto(`${server.origin}${path}`, { waitUntil: 'networkidle' })
 	await page.waitForFunction(() => document.documentElement.classList.contains('light') || document.documentElement.classList.contains('dark'))
@@ -300,6 +301,8 @@ describe('Workbench shell (R3)', () => {
 			expect(url.searchParams.get('thread')).toBe(THREAD_ID)
 			expect(url.searchParams.get('variant')).toBe('compact')
 			await page.getByRole('tab', { name: /Comments/ }).and(page.locator('[aria-selected="true"]')).waitFor()
+			// The deep-linked thread opens its bubble on the canvas, even though resolved threads are filtered out.
+			await page.waitForSelector(`[data-thread-bubble][data-thread-status="resolved"]`, { timeout: 15_000 })
 		}
 		finally { await context.close() }
 	}, 60_000)
@@ -672,9 +675,12 @@ describe('Runtime geometry producer (multi-target streams)', () => {
 			await page.waitForSelector('[data-overlay-hover][data-hover-purpose="comment-range"]', { timeout: 10_000 })
 			expect(await page.locator('[data-hover-chip]').textContent()).toBe('Comment on Button')
 			expect(await page.locator('[data-overlay-hover] path').first().getAttribute('stroke-dasharray')).toBe('4 3')
-			// The hover report carries the active targeting interaction and generation.
-			const hover = (await page.evaluate(() => (window as unknown as WireRecorderWindow).__wire.targeting)).filter(payload => payload.type === 'hover').at(-1)!
-			expect(hover).toMatchObject({ widgetId: 'btn-run-checks', targetingInteractionId: expect.any(String), runtimeGenerationId: expect.any(String) })
+			// The hover report travels in the protocol envelope with session, generation and interaction identity.
+			const hover = (await page.evaluate(() => (window as unknown as WireRecorderWindow).__wire.targeting)).filter(message => message.type === 'targeting.hover').at(-1)!
+			expect(hover).toMatchObject({
+				context: { widgetId: 'btn-run-checks', previewSessionId: expect.any(String), runtimeGenerationId: expect.any(String), viewId: VIEW_ID },
+				payload: { targetingInteractionId: expect.any(String) },
+			})
 
 			await page.keyboard.press('Escape')
 			await page.keyboard.press('i')
@@ -735,6 +741,244 @@ describe('Runtime geometry producer (multi-target streams)', () => {
 			await page.waitForTimeout(1000)
 			expect(await page.evaluate(() => (window as unknown as WireRecorderWindow).__rafCallbacks)).toBe(start)
 			expect(await page.locator('[data-overlay-selection]').count()).toBe(0)
+		}
+		finally { await context.close() }
+	}, 60_000)
+})
+
+/** The screen point of an inner-viewport point of the Preview (the frame scales; the iframe keeps its logical size). */
+async function screenPoint(page: Page, frame: Awaited<ReturnType<typeof previewFrame>>, inner: { x: number; y: number }) {
+	const box = (await page.locator('iframe[src*="/preview"]').boundingBox())!
+	const width = await frame.evaluate(() => window.innerWidth)
+	const scale = box.width / width
+	return { x: box.x + inner.x * scale, y: box.y + inner.y * scale, scale }
+}
+
+async function widgetRect(frame: Awaited<ReturnType<typeof previewFrame>>, widgetId: string) {
+	return frame.evaluate((id) => {
+		const rect = document.querySelector(`[data-widget-id="${id}"]`)!.getBoundingClientRect()
+		return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+	}, widgetId)
+}
+
+/** The bottom-left tip of a pin: the exact anchor point (DESIGN.md "Comment pin"). */
+async function pinTip(page: Page, threadId: string) {
+	const box = (await page.locator(`[data-pin-thread="${threadId}"]`).boundingBox())!
+	return { x: box.x, y: box.y + box.height }
+}
+
+async function api<T>(path: string, body?: unknown): Promise<T> {
+	const response = await fetch(`${server.origin}${path}`, {
+		method: body === undefined ? 'GET' : 'POST',
+		headers: { ...server.headers, 'content-type': 'application/json' },
+		...(body === undefined ? {} : { body: JSON.stringify(body) }),
+	})
+	if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`)
+	return await response.json() as T
+}
+
+/** Seeds a thread through the Review authoring API (never by hand). */
+async function seedThread(widgetId: string, message: string): Promise<string> {
+	const created = await api<{ key: string; revision: string }>('/api/reviews', { anchor: { viewId: VIEW_ID, widgetId } })
+	await api(`/api/reviews/${created.key}/messages`, { expectedRevision: created.revision, body: message })
+	return created.key
+}
+
+describe('Canvas comments (R6 targeting and composer, R7a pins and bubble)', () => {
+	it('comments with C, a click and Ctrl+Enter at the click point, keeps the pin there after reload, replies, resolves and filters', async () => {
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}`, { mode: 'light' })
+		try {
+			const frame = await waitForLivePreview(page)
+			const posts: { url: string; body: Record<string, unknown> }[] = []
+			page.on('request', (request) => {
+				if (request.method() === 'POST' && new URL(request.url()).pathname.startsWith('/api/reviews'))
+					posts.push({ url: new URL(request.url()).pathname, body: JSON.parse(request.postData() ?? '{}') as Record<string, unknown> })
+			})
+
+			// 1–2. C enters Comment mode; hovering a Widget names it.
+			await page.keyboard.press('c')
+			await frame.locator('[data-widget-id="btn-run-checks"]').hover()
+			await page.waitForSelector('[data-overlay-hover][data-hover-purpose="comment-range"]', { timeout: 10_000 })
+			expect(await page.locator('[data-hover-chip]').textContent()).toBe('Comment on Button')
+
+			// 3. A click at a specific offset inside the Widget drops the pending pin and the composer there.
+			const rect = await widgetRect(frame, 'btn-run-checks')
+			const offset = { x: 0.3, y: 0.6 }
+			const click = await screenPoint(page, frame, { x: rect.x + offset.x * rect.width, y: rect.y + offset.y * rect.height })
+			// The click point the View actually received (input coordinates are rounded to device pixels).
+			await frame.evaluate(() => {
+				window.addEventListener('click', (event) => { (window as unknown as { __click: { x: number; y: number } }).__click = { x: event.clientX, y: event.clientY } }, { capture: true, once: true })
+			})
+			await page.mouse.click(click.x, click.y)
+			const received = await frame.evaluate(() => (window as unknown as { __click: { x: number; y: number } }).__click)
+			const clicked = { x: (received.x - rect.x) / rect.width, y: (received.y - rect.y) / rect.height }
+			expect(Math.abs(clicked.x - offset.x)).toBeLessThan(0.02)
+			expect(Math.abs(clicked.y - offset.y)).toBeLessThan(0.05)
+			await page.waitForSelector('[data-comment-composer]', { timeout: 10_000 })
+			const pending = await pinTip(page, 'pending')
+			expect(Math.abs(pending.x - click.x)).toBeLessThan(2)
+			expect(Math.abs(pending.y - click.y)).toBeLessThan(2)
+			// The composer has focus: no other dialog, no form page.
+			expect(await page.evaluate(() => document.activeElement?.hasAttribute('data-composer-text'))).toBe(true)
+			await page.keyboard.type('Label should say Pay now')
+			await page.keyboard.press('Control+Enter')
+			await page.waitForSelector('[data-thread-bubble]', { timeout: 10_000 })
+
+			// The persisted thread is the accepted model only: anchor, scope and the normalized hint; never an actor or raw px.
+			const create = posts.find(post => post.url === '/api/reviews')!
+			expect(Object.keys(create.body).sort()).toEqual(['anchor', 'displayHint', 'variantNames'])
+			expect(create.body.anchor).toEqual({ viewId: VIEW_ID, widgetId: 'btn-run-checks' })
+			expect(create.body.variantNames).toEqual([])
+			const hint = (create.body.displayHint as { pin: { x: number; y: number } }).pin
+			expect(Math.abs(hint.x - clicked.x)).toBeLessThan(1e-3)
+			expect(Math.abs(hint.y - clicked.y)).toBeLessThan(1e-3)
+			const message = posts.find(post => post.url.endsWith('/messages'))!
+			expect(Object.keys(message.body).sort()).toEqual(['body', 'expectedRevision'])
+			const threadId = message.url.split('/')[3]!
+			const stored = await api<{ resource: { displayHint: { pin: { x: number; y: number } }; messages: { actor: { displayName?: string } }[] } }>(`/api/resources/review/${threadId}`)
+			expect(Math.abs(stored.resource.displayHint.pin.x - clicked.x)).toBeLessThan(1e-3)
+			expect(Math.abs(stored.resource.displayHint.pin.y - clicked.y)).toBeLessThan(1e-3)
+			expect(stored.resource.messages[0]!.actor.displayName).toBe('tester')
+			// The tool stays in Comment mode after commenting (Figma).
+			expect(await page.locator('[role="toolbar"] button[aria-pressed="true"]').textContent()).toContain('Comment')
+
+			// 4. After a reload the pin renders at the same spot, within 2px.
+			await page.reload({ waitUntil: 'networkidle' })
+			const reloaded = await waitForLivePreview(page)
+			await page.waitForSelector(`[data-pin-thread="${threadId}"]`, { timeout: 15_000 })
+			const after = await pinTip(page, threadId)
+			const expectedTip = await screenPoint(page, reloaded, received)
+			expect(Math.abs(after.x - expectedTip.x)).toBeLessThan(2)
+			expect(Math.abs(after.y - expectedTip.y)).toBeLessThan(2)
+			// No transparent layer over the iframe: away from the pin (and its bubble, on the right), the frame itself is hit.
+			expect(await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.tagName, [expectedTip.x - 24, expectedTip.y + 16])).toBe('IFRAME')
+
+			// 5. Reply from the bubble. The open thread rides in the URL, so the reload reopened it; a pin click toggles it.
+			expect(new URL(page.url()).searchParams.get('thread')).toBe(threadId)
+			await page.waitForSelector('[data-thread-bubble]')
+			await page.locator(`[data-pin-thread="${threadId}"]`).click()
+			await expect.poll(() => page.locator('[data-thread-bubble]').count()).toBe(0)
+			await page.locator(`[data-pin-thread="${threadId}"]`).click()
+			await page.waitForSelector('[data-thread-bubble]')
+			await page.locator('textarea[data-thread-reply]').fill('Agreed, updating it.')
+			await page.keyboard.press('Control+Enter')
+			await expect.poll(() => page.locator('[data-timeline-kind="message"]').count(), { timeout: 10_000 }).toBe(2)
+
+			// 6. One click on Resolve closes an open thread as answered.
+			posts.length = 0
+			await page.locator('[data-thread-resolve]').click()
+			await expect.poll(() => posts.find(post => post.url.endsWith('/resolve'))?.body, { timeout: 10_000 })
+				.toMatchObject({ resolution: 'answered', expectedRevision: expect.any(String) })
+			expect(posts.find(post => post.url.endsWith('/resolve'))!.body).not.toHaveProperty('submissionId')
+
+			// 7. The default filter hides resolved threads; turning Resolved on shows the graphite pin.
+			await expect.poll(() => page.locator(`[data-pin-thread="${threadId}"]`).count(), { timeout: 10_000 }).toBe(0)
+			await page.locator('[data-comment-filter="resolved"]').click()
+			await page.waitForSelector(`[data-pin-thread="${threadId}"][data-pin-variant="resolved"]`, { timeout: 10_000 })
+			await page.locator('[data-comment-filter="resolved"]').click()
+			await expect.poll(() => page.locator(`[data-pin-thread="${threadId}"]`).count()).toBe(0)
+		}
+		finally { await context.close() }
+	}, 120_000)
+
+	it('lists a thread whose Widget was deleted in the unplaced tray and never draws its pin', async () => {
+		const threadId = await seedThread('promo-banner-removed', 'Is the promo banner gone on purpose?')
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}`, { mode: 'light' })
+		try {
+			await waitForLivePreview(page)
+			const tray = page.locator('[data-comment-tray]')
+			await tray.waitFor({ timeout: 15_000 })
+			expect(await tray.textContent()).toContain('1 comment can\'t be placed')
+			expect(await page.locator(`[data-pin-thread="${threadId}"]`).count()).toBe(0)
+			expect(await page.locator(`[data-comment-group="unplaced"] [data-comment-row="${threadId}"]`).count()).toBe(1)
+			await tray.click()
+			await page.waitForSelector('[data-thread-bubble] [data-thread-missing]', { timeout: 10_000 })
+			await page.locator('[data-thread-close]').click()
+			// Resolve it so later checks see a clean View.
+			const read = await api<{ revision: string }>(`/api/resources/review/${threadId}`)
+			await api(`/api/reviews/${threadId}/resolve`, { expectedRevision: read.revision, resolution: 'obsolete' })
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('shows an edge indicator for a Widget scrolled out of the View and opens its thread without scrolling the iframe', async () => {
+		const threadId = await seedThread('spec-pill-badge', 'Badge contrast looks low.')
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}?viewport=mobile`, { mode: 'light' })
+		try {
+			const frame = await waitForLivePreview(page)
+			const edge = page.locator(`[data-edge-threads~="${threadId}"]`)
+			await edge.waitFor({ timeout: 15_000 })
+			expect(await edge.getAttribute('data-edge-side')).toBe('bottom')
+			expect(await page.locator(`[data-pin-thread="${threadId}"]`).count()).toBe(0)
+			await edge.click()
+			await page.waitForSelector('[data-thread-bubble]', { timeout: 10_000 })
+			expect(await page.locator('[data-thread-placement]').textContent()).toContain('Scrolled out of view')
+			expect(await frame.evaluate(() => window.scrollY)).toBe(0)
+			const read = await api<{ revision: string }>(`/api/resources/review/${threadId}`)
+			await api(`/api/reviews/${threadId}/resolve`, { expectedRevision: read.revision, resolution: 'answered' })
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('gives the Viewer role no comment tool', async () => {
+		const token = await provisionToken(server.workspaceRoot, { nickname: 'viewer', kind: 'human', role: 'viewer' })
+		const cookie = await sessionCookieFor(server.origin, token)
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}`, { mode: 'light', cookie })
+		try {
+			const frame = await waitForLivePreview(page)
+			const tools = await page.locator('[role="toolbar"] button').allTextContents()
+			expect(tools.some(text => text.includes('Select'))).toBe(true)
+			expect(tools.some(text => text.includes('Comment'))).toBe(false)
+			await page.keyboard.press('c')
+			await frame.locator('[data-widget-id="btn-run-checks"]').hover()
+			await page.waitForTimeout(400)
+			expect(await page.locator('[data-overlay-hover][data-hover-purpose="comment-range"]').count()).toBe(0)
+			expect(await page.locator('[data-comment-composer]').count()).toBe(0)
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('rejects legacy, incomplete and superseded targeting messages', async () => {
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}`, { mode: 'light', recordWire: true })
+		try {
+			const frame = await waitForLivePreview(page)
+			await page.keyboard.press('c')
+			const enter = async () => {
+				await expect.poll(async () => (await frame.evaluate(() => (window as unknown as WireRecorderWindow).__wire.targeting))
+					.filter(message => message.type === 'targeting.enter' && message.payload.purpose === 'comment-range').length).toBeGreaterThan(0)
+				return (await frame.evaluate(() => (window as unknown as WireRecorderWindow).__wire.targeting)).filter(message => message.type === 'targeting.enter').at(-1)!
+			}
+			const superseded = await enter()
+			// Leave and re-enter Comment mode: the earlier interaction is superseded.
+			await page.keyboard.press('Escape')
+			await page.keyboard.press('c')
+			await expect.poll(async () => (await enter()).payload.targetingInteractionId).not.toBe(superseded.payload.targetingInteractionId)
+			const context_ = superseded.context
+			const forged = [
+				// The retired ad hoc channel.
+				{ channel: 'uiux:preview:targeting', payload: { type: 'select', widgetId: 'btn-run-checks', viewId: VIEW_ID } },
+				// No targetingInteractionId.
+				{ channel: 'uiux:preview:wire', message: { type: 'targeting.select', context: { ...context_, widgetId: 'btn-run-checks' }, payload: {} } },
+				// No session identity.
+				{ channel: 'uiux:preview:wire', message: { type: 'targeting.select', context: { runtimeGenerationId: context_.runtimeGenerationId, viewId: VIEW_ID, widgetId: 'btn-run-checks' }, payload: { targetingInteractionId: superseded.payload.targetingInteractionId } } },
+				// A late event of the superseded interaction.
+				{ channel: 'uiux:preview:wire', message: { type: 'targeting.select', context: { ...context_, widgetId: 'btn-run-checks' }, payload: { targetingInteractionId: superseded.payload.targetingInteractionId, point: { x: 10, y: 10 } } } },
+				{ channel: 'uiux:preview:wire', message: { type: 'targeting.escape', context: context_, payload: { targetingInteractionId: superseded.payload.targetingInteractionId } } },
+			]
+			await frame.evaluate((messages) => { for (const message of messages) window.parent.postMessage(message, window.location.origin) }, forged)
+			// The same well-formed message from the Workbench document itself fails the source check.
+			const current = await enter()
+			await page.evaluate((message) => { window.postMessage({ channel: 'uiux:preview:wire', message }, window.location.origin) }, { type: 'targeting.select', context: { ...current.context, widgetId: 'btn-run-checks' }, payload: { targetingInteractionId: current.payload.targetingInteractionId, point: { x: 10, y: 10 } } })
+			await page.waitForTimeout(600)
+			expect(await page.locator('[data-comment-composer]').count()).toBe(0)
+			expect(await page.locator('[role="toolbar"] button[aria-pressed="true"]').textContent()).toContain('Comment')
+			// The Interact tool holds no interaction: View clicks never cross the boundary.
+			await page.keyboard.press('Escape')
+			await page.keyboard.press('i')
+			const before = (await page.evaluate(() => (window as unknown as WireRecorderWindow).__wire.targeting)).length
+			await frame.locator('[data-widget-id="btn-run-checks"]').click()
+			await page.waitForTimeout(400)
+			expect((await page.evaluate(() => (window as unknown as WireRecorderWindow).__wire.targeting)).slice(before).filter(message => message.type === 'targeting.select')).toEqual([])
 		}
 		finally { await context.close() }
 	}, 60_000)

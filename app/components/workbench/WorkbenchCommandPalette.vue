@@ -83,8 +83,8 @@ const groups = computed<CommandPaletteGroup<CommandPaletteItem>[]>(() => {
 		})
 	}
 	const actions: CommandPaletteItem[] = []
-	if (!reviewReadOnly.value && shell.canToggleCommentMode.value)
-		actions.push({ label: t('palette.toggleComment'), icon: 'i-lucide-message-circle-plus', kbds: ['C'], onSelect: () => shell.toggleCommentMode() })
+	if (!reviewReadOnly.value && canvas?.canComment())
+		actions.push({ label: t('palette.toggleComment'), icon: 'i-lucide-message-circle-plus', kbds: ['C'], onSelect: () => canvas.selectTool('comment') })
 	actions.push(
 		{ label: t('palette.toggleTheme'), icon: 'i-lucide-sun-moon', kbds: ['meta', '.'], onSelect: () => shell.toggleWorkbenchTheme() },
 		{ label: t('palette.switchLanguage'), icon: 'i-lucide-languages', onSelect: () => shell.switchWorkbenchLanguage() },

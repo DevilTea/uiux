@@ -26,7 +26,7 @@ export type PinPlacementsApi = Readonly<{
  * The pins consumer of the Preview geometry streams (Part 2/3, 2026-10-05 multi-target group).
  *
  * Give it the in-scope comment threads; it tracks their Widgets (decision 6 priority, the open
- * thread first) and returns each thread's placement: `visible` with the pin tip `point` in the
+ * thread and the pending composer first) and returns each thread's placement: `visible` with the pin tip `point` in the
  * canvas overlay layer's CSS px, `offscreen` with an `edge` indicator, `hidden` with a `reason`,
  * or `invalid` for an anchor whose Widget is gone. It draws nothing: the pin visuals are the
  * caller's. Must be used below `provideWorkbench()`, inside a component or effect scope; the
@@ -34,11 +34,11 @@ export type PinPlacementsApi = Readonly<{
  */
 export function usePinPlacements(
 	threads: Ref<readonly PinThreadInput[]>,
-	options: Readonly<{ openThreadId?: Ref<string | undefined> }> = {},
+	options: Readonly<{ openThreadId?: Ref<string | undefined>; pendingThreadId?: Ref<string | undefined> }> = {},
 ): PinPlacementsApi {
 	const { preview } = useWorkbench()
-	watch([threads, () => options.openThreadId?.value], ([next, openThreadId]) => {
-		preview.setPinThreads(next, openThreadId ? { openThreadId } : {})
+	watch([threads, () => options.openThreadId?.value, () => options.pendingThreadId?.value], ([next, openThreadId, pendingThreadId]) => {
+		preview.setPinThreads(next, { ...(openThreadId ? { openThreadId } : {}), ...(pendingThreadId ? { pendingThreadId } : {}) })
 	}, { immediate: true })
 	onScopeDispose(() => preview.setPinThreads([]))
 

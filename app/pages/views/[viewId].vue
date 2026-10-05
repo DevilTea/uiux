@@ -9,6 +9,7 @@ import { parseThread, parseViewPanel, parseViewRouteContext, sameQuery, viewQuer
 import PreviewCanvas from '../../components/workbench/PreviewCanvas.vue'
 import ViewRightPanel from '../../components/workbench/ViewRightPanel.vue'
 import LockBadge from '../../components/workbench/LockBadge.vue'
+import { provideCanvasComments } from '../../composables/useCanvasComments'
 
 /**
  * A View: the canvas and its right panel. The render context, selected Widget, open thread
@@ -32,6 +33,9 @@ const viewId = computed(() => String(route.params.viewId ?? ''))
 const panelTab = ref<ViewPanelTab>(parseViewPanel(route.query) ?? 'comments')
 const thread = ref<string | undefined>(parseThread(route.query))
 const rightPanel = ref<InstanceType<typeof ViewRightPanel>>()
+// The canvas pins, composer and bubble, and the Comments tab, share one comments layer; the open
+// thread is the route's `thread`, so a deep link opens its pin and bubble.
+provideCanvasComments(thread)
 
 // Desktop: an inline, resizable right panel that `]` hides. Below desktop: a slide-over on demand.
 const PANEL_HIDDEN_KEY = 'uiux.workbench.rightPanelHidden'
@@ -86,21 +90,15 @@ watch(stateQuery, (query) => {
 	if (!sameQuery(query, route.query)) void router.replace({ query })
 })
 
-// Open the deep-linked thread once the Comments panel and the thread list exist.
+// A deep-linked thread also shows the Comments tab on desktop, beside its pin and bubble.
 let openedThread: string | undefined
-watch([thread, reviews], async ([threadId]) => {
-	if (!threadId || threadId === openedThread) return
+watch([thread, reviews], ([threadId]) => {
+	if (!threadId || threadId === openedThread || !isDesktop.value) return
 	if (!reviews.value.some(review => review.key === threadId)) return
 	openedThread = threadId
-	const panel = await showPanel('comments')
-	await panel?.selectThread(threadId)
+	panelTab.value = 'comments'
+	panelHidden.value = false
 }, { immediate: true })
-
-/** A thread picked inside the panel is already open: record it so the deep-link watcher leaves the tab alone. */
-function onThreadSelected(threadId: string): void {
-	openedThread = threadId
-	thread.value = threadId
-}
 
 // A View that does not exist: say so and stay on the View index, never a blank canvas.
 watch([views, loading, viewId], () => {
@@ -111,11 +109,6 @@ watch([views, loading, viewId], () => {
 	void navigateTo('/views', { replace: true })
 })
 
-preview.onCommentTarget(async (widgetId) => {
-	const panel = await showPanel('comments')
-	panel?.openCreateModal(widgetId)
-})
-
 shell.onToggleRightPanel(togglePanel)
 // ⌥1–⌥4: Comments, Inspect, Spec, Readiness (brief e, section 8).
 defineShortcuts({
@@ -124,10 +117,8 @@ defineShortcuts({
 	alt_3: () => { void showPanel('spec') },
 	alt_4: () => { void showPanel('readiness') },
 })
-shell.onToggleCommentMode(() => preview.toggleCommentMode())
 onBeforeUnmount(() => {
 	shell.onToggleRightPanel(undefined)
-	shell.onToggleCommentMode(undefined)
 	preview.exitCommentMode()
 })
 </script>
@@ -190,7 +181,6 @@ onBeforeUnmount(() => {
         <ViewRightPanel
           ref="rightPanel"
           v-model:tab="panelTab"
-          @thread-selected="onThreadSelected"
         />
       </aside>
     </UDashboardSidebar>
@@ -211,7 +201,6 @@ onBeforeUnmount(() => {
           <ViewRightPanel
             ref="rightPanel"
             v-model:tab="panelTab"
-            @thread-selected="onThreadSelected"
           />
         </aside>
       </template>
