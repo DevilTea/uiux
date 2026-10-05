@@ -35,7 +35,13 @@ MCP exposes compact read-only discovery plus domain-specific authoring operation
 - Reviews: `create_review_thread`, `append_review_message`, `reanchor_review_thread`, `submit_ready_for_review`, `resolve_review_thread`, `reopen_review_thread`, `promote_review_to_decision`
 - Authored Assets: `create_asset`, `replace_asset`
 
-These are domain-specific operations rather than generic Resource writes or JSON Patch surfaces. Host/port selection remains the standard Nitro runtime concern rather than a separate UIUX Workspace contract.
+These are domain-specific operations rather than generic Resource writes or JSON Patch surfaces.
+
+### Loopback-only access
+
+The first version is single-user and unauthenticated, so `uiux dev` listens on loopback only: `127.0.0.1` by default, with the port taken from the standard Nitro `PORT` / `NITRO_PORT` variables (default `3000`). It prints the address it actually listens on. Setting `HOST` or `NITRO_HOST` to a loopback address (`127.0.0.1`, `::1` or `localhost`) is allowed; any other value makes `uiux dev` refuse to start, because LAN exposure requires authentication, which is not yet available.
+
+Every request, including `/mcp`, `/api/*` and Workbench assets, must address the server as `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`; any other `Host` gets `421` (DNS-rebinding protection). State-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`), and every `/mcp` request, are refused with `403` when a browser marks them as cross-origin (`Origin` not equal to the server's own origin, or `Sec-Fetch-Site` other than `same-origin` / `none`). State-changing requests that carry a body must send `Content-Type: application/json` (otherwise `415`). Non-browser clients such as curl, scripts and MCP CLIs that send no `Origin` keep working. The server sends no CORS headers, and pages are served with `Content-Security-Policy: frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`, so only the Workbench itself can frame them (as it does for `/preview`).
 
 ## Static publication
 
