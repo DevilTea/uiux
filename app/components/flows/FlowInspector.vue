@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import { injectFlowEditor } from '../../composables/useFlowEditor'
 import { useWorkbench } from '../../composables/useWorkbench'
+import { useDeclaredWidgetEvents } from '../../composables/useDeclaredWidgetEvents'
 import { viewLocation } from '../../utils/workbench-routes'
 import { edgeKey, orderSteps, parseEdgeKey, triggerLabel, type FlowSelection } from '../../utils/flow-graph'
 
@@ -17,6 +18,7 @@ const emit = defineEmits<{ (e: 'select', selection: FlowSelection | undefined): 
 const { t } = useI18n()
 const editor = injectFlowEditor()
 const workbench = useWorkbench()
+const declaredEvents = useDeclaredWidgetEvents()
 const { draft, read, problems, saving } = editor
 
 /** reka-ui items cannot use '' as a value, so the base (no Variant) state uses a sentinel. */
@@ -66,6 +68,23 @@ function widgetItems(viewId: string, current?: string) {
 	const widgets = editor.viewWidgets(viewId)
 	const items = [...widgets].map(([id, type]) => ({ label: `#${id}`, description: type, value: id }))
 	if (current && !widgets.has(current)) items.push({ label: t('flows.inspector.widgetMissing', { id: current }), description: '', value: current })
+	return items
+}
+
+/**
+ * The Events a trigger's Widget declares, or undefined when that is unknown (the declared Events
+ * could not be read, or the Widget is not in the View): then the Event stays a free-text field.
+ */
+function declaredEventsOf(viewId: string, widgetId: string): readonly { name: string; description: string }[] | undefined {
+	const type = widgetId ? editor.viewWidgets(viewId).get(widgetId) : undefined
+	return type ? declaredEvents.eventsOf(type) : undefined
+}
+
+/** The Event picker's items. An existing value the Widget doesn't declare stays, labelled, and is never rebound. */
+function eventItems(viewId: string, widgetId: string, current?: string) {
+	const declared = declaredEventsOf(viewId, widgetId) ?? []
+	const items: Array<{ label: string; description?: string; value: string }> = declared.map(event => ({ label: event.name, ...(event.description ? { description: event.description } : {}), value: event.name }))
+	if (current && !declared.some(event => event.name === current)) items.push({ label: t('flows.inspector.eventNotDeclared', { event: current }), value: current })
 	return items
 }
 
@@ -125,6 +144,16 @@ function openAddTransition(): void {
 }
 
 const canAddTransition = computed(() => !!newTransition.widgetId && !!newTransition.event.trim() && !!newTransition.targetStepId)
+
+// A new trigger's Event is chosen from what its Widget declares: picking another Widget clears an
+// Event that Widget doesn't declare, and preselects the only Event when there is exactly one.
+watch(() => newTransition.widgetId, (widgetId) => {
+	if (!step.value || !widgetId) return
+	const declared = declaredEventsOf(step.value.value.target.viewId, widgetId)
+	if (!declared) return
+	if (declared.length === 1) newTransition.event = declared[0]!.name
+	else if (!declared.some(event => event.name === newTransition.event)) newTransition.event = ''
+})
 
 function submitTransition(): void {
 	if (!step.value || !canAddTransition.value) return
@@ -187,6 +216,9 @@ const entryModel = computed({
 const transitionCount = computed(() => Object.values(draft.value?.steps ?? {}).reduce((sum, item) => sum + item.transitions.length, 0))
 
 const viewSearch = computed(() => ({ placeholder: t('flows.inspector.searchViews') }))
+const eventSearch = computed(() => ({ placeholder: t('flows.inspector.searchEvents') }))
+/** Declared Events could be read; otherwise the Event stays a free-text field. */
+const catalogKnown = computed(() => typeof declaredEvents.catalog.value === 'object')
 const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWidgets') }))
 </script>
 
@@ -366,6 +398,24 @@ const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWid
             />
           </UFormField>
           <UFormField
+            v-if="catalogKnown"
+            :label="t('flows.inspector.event')"
+            :help="!newTransition.widgetId || eventItems(step.value.target.viewId, newTransition.widgetId).length ? t('flows.inspector.eventPickHelp') : t('flows.inspector.eventsNone')"
+          >
+            <USelectMenu
+              v-model="newTransition.event"
+              :items="eventItems(step.value.target.viewId, newTransition.widgetId, newTransition.event)"
+              value-key="value"
+              :search-input="eventSearch"
+              :placeholder="t('flows.inspector.eventPick')"
+              :disabled="!newTransition.widgetId"
+              class="w-full"
+              :ui="{ base: 'font-mono', itemLabel: 'font-mono text-xs', itemDescription: 'text-xs' }"
+              data-flow-event-picker
+            />
+          </UFormField>
+          <UFormField
+            v-else
             :label="t('flows.inspector.event')"
             :help="t('flows.inspector.eventHelp')"
           >
@@ -529,6 +579,24 @@ const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWid
             />
           </UFormField>
           <UFormField
+            v-if="declaredEventsOf(transition.source.target.viewId, transition.value.trigger.widgetId)"
+            :label="t('flows.inspector.event')"
+            :help="declaredEventsOf(transition.source.target.viewId, transition.value.trigger.widgetId)?.length ? t('flows.inspector.eventPickHelp') : t('flows.inspector.eventsNone')"
+          >
+            <USelectMenu
+              v-model="eventModel"
+              :items="eventItems(transition.source.target.viewId, transition.value.trigger.widgetId, transition.value.trigger.event)"
+              value-key="value"
+              :search-input="eventSearch"
+              :placeholder="t('flows.inspector.eventPick')"
+              :disabled="locked"
+              class="w-full"
+              :ui="{ base: 'font-mono', itemLabel: 'font-mono text-xs', itemDescription: 'text-xs' }"
+              data-flow-event-picker
+            />
+          </UFormField>
+          <UFormField
+            v-else
             :label="t('flows.inspector.event')"
             :help="t('flows.inspector.eventHelp')"
           >
