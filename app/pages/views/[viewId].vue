@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { navigateTo, useI18n, useRoute, useRouter, useToast } from '#imports'
+import { defineShortcuts, navigateTo, useI18n, useRoute, useRouter, useToast } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
@@ -95,6 +95,12 @@ watch([thread, reviews], async ([threadId]) => {
 	await panel?.selectThread(threadId)
 }, { immediate: true })
 
+/** A thread picked inside the panel is already open: record it so the deep-link watcher leaves the tab alone. */
+function onThreadSelected(threadId: string): void {
+	openedThread = threadId
+	thread.value = threadId
+}
+
 // A View that does not exist: say so and stay on the View index, never a blank canvas.
 watch([views, loading, viewId], () => {
 	if (loading.value || !viewId.value) return
@@ -110,6 +116,13 @@ preview.onCommentTarget(async (widgetId) => {
 })
 
 shell.onToggleRightPanel(togglePanel)
+// ⌥1–⌥4: Comments, Inspect, Spec, Readiness (brief e, section 8).
+defineShortcuts({
+	alt_1: () => { void showPanel('comments') },
+	alt_2: () => { void showPanel('inspect') },
+	alt_3: () => { void showPanel('spec') },
+	alt_4: () => { void showPanel('readiness') },
+})
 shell.onToggleCommentMode(() => preview.toggleCommentMode())
 onBeforeUnmount(() => {
 	shell.onToggleRightPanel(undefined)
@@ -171,7 +184,7 @@ onBeforeUnmount(() => {
         <ViewRightPanel
           ref="rightPanel"
           v-model:tab="panelTab"
-          @thread-selected="thread = $event"
+          @thread-selected="onThreadSelected"
         />
       </aside>
     </UDashboardSidebar>
@@ -192,7 +205,7 @@ onBeforeUnmount(() => {
           <ViewRightPanel
             ref="rightPanel"
             v-model:tab="panelTab"
-            @thread-selected="thread = $event"
+            @thread-selected="onThreadSelected"
           />
         </aside>
       </template>

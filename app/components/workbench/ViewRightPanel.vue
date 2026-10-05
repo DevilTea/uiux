@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { navigateTo, useI18n } from '#imports'
 import type { TabsItem } from '@nuxt/ui'
 import { useWorkbench } from '../../composables/useWorkbench'
@@ -8,13 +8,13 @@ import { viewLocation } from '../../utils/workbench-routes'
 import ReviewsPanel from '../ReviewsPanel.vue'
 import ChecksPanel from '../ChecksPanel.vue'
 import EvidencePanel from '../EvidencePanel.vue'
-import InspectorPanel from './InspectorPanel.vue'
-import SpecPanel from './SpecPanel.vue'
+import WidgetInspector from './WidgetInspector.vue'
+import SpecDocument from './SpecDocument.vue'
 
 /**
- * The View page's right panel: Comments, Inspect, Spec and Readiness (brief e). The existing
- * Reviews, Inspector, Spec, Checks and Evidence panels are mounted here until R5, R7 and R9
- * replace them.
+ * The View page's right panel: Comments, Inspect, Spec and Readiness (brief e). Inspect and Spec
+ * are the R5 property sheet and Spec document; the Reviews, Checks and Evidence panels stay
+ * mounted here until R7 and R9 replace them.
  */
 const tab = defineModel<ViewPanelTab>('tab', { required: true })
 const emit = defineEmits<{ (e: 'threadSelected', threadId: string): void }>()
@@ -43,6 +43,19 @@ const tabModel = computed({
 	get: () => tab.value,
 	set: (value: string | number) => { tab.value = value as ViewPanelTab },
 })
+
+/** Inspector and Spec links into the thread list: switch to Comments, then open the thread. */
+async function openThread(threadId: string): Promise<void> {
+	tab.value = 'comments'
+	await nextTick()
+	if (threadId) await reviewsPanel.value?.selectReview(threadId)
+}
+
+async function commentOn(widgetId: string): Promise<void> {
+	tab.value = 'comments'
+	await nextTick()
+	reviewsPanel.value?.openCreateModal(widgetId)
+}
 
 async function onViewPromoted(): Promise<void> {
 	await workbench.loadSelectedView(preview.notifyIframeContext)
@@ -94,10 +107,14 @@ defineExpose({
       />
     </template>
     <template #inspect>
-      <InspectorPanel />
+      <WidgetInspector
+        @comment="commentOn"
+        @open-thread="openThread"
+        @open-checks="tab = 'readiness'"
+      />
     </template>
     <template #spec>
-      <SpecPanel />
+      <SpecDocument @open-thread="openThread" />
     </template>
     <template #readiness>
       <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
