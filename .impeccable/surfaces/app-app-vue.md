@@ -2,7 +2,7 @@
 version: 1
 slug: "app-app-vue"
 primary_target: "app/app.vue"
-related_targets: ["app/layouts/default.vue","app/components/workbench/WorkbenchHeader.vue","app/components/workbench/WorkbenchNav.vue","app/components/workbench/WorkbenchPreferences.vue"]
+related_targets: ["app/layouts/default.vue","app/components/workbench/WorkbenchNavbar.vue","app/components/workbench/WorkbenchSidebar.vue","app/components/workbench/WorkbenchPreferences.vue","app/components/workbench/WorkbenchCommandPalette.vue","app/components/workbench/ReviewerIdentity.vue"]
 ---
 
 # Shape brief (a): App shell and information architecture

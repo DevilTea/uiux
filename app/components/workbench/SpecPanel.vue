@@ -5,10 +5,13 @@ import type { TabsItem } from '@nuxt/ui'
 import { useWorkbench } from '../../composables/useWorkbench'
 import type { DecisionRead, Diagnostic, SpecTab } from '../../composables/workbench-types'
 
-/** Bottom panel below the canvas: the selected View's Spec, References, Decisions and Checks. */
+/**
+ * The selected View's Spec, References, Decisions and Checks. Mounted in the View page's
+ * right panel (Spec tab) until the Spec document work (brief e, R5) replaces it.
+ */
 const { t } = useI18n()
 const workbench = useWorkbench()
-const { selectedView, activeSpecTab, specPanelExpanded } = workbench
+const { selectedView, activeSpecTab } = workbench
 
 const spec = computed(() => selectedView.value?.resource.spec)
 
@@ -57,31 +60,18 @@ function jumpTo(diagnostic: Diagnostic) {
 
 <template>
   <section
-    class="relative shrink-0 border-t border-default bg-default"
+    class="flex min-h-0 flex-1 flex-col bg-default"
     :aria-label="t('workbench.spec.label')"
   >
-    <UButton
-      color="neutral"
-      variant="ghost"
-      size="xs"
-      class="absolute top-1.5 right-3 z-10"
-      :icon="specPanelExpanded ? 'i-lucide-chevron-down' : 'i-lucide-chevron-up'"
-      :aria-expanded="specPanelExpanded"
-      @click="specPanelExpanded = !specPanelExpanded"
-    >
-      {{ specPanelExpanded ? t('workbench.spec.collapse') : t('workbench.spec.expand') }}
-    </UButton>
-
     <UTabs
       v-model="tabModel"
       :items="items"
-      :content="specPanelExpanded"
       variant="link"
       size="xs"
       :ui="{
-        root: 'gap-0',
-        list: 'border-b border-default px-4 pe-32',
-        content: 'max-h-56 overflow-y-auto p-4 text-xs focus-visible:outline-2 focus-visible:-outline-offset-2',
+        root: 'min-h-0 flex-1 gap-0',
+        list: 'border-b border-default px-3',
+        content: 'min-h-0 flex-1 overflow-y-auto p-3 text-xs',
       }"
     >
       <template #spec>
@@ -98,7 +88,7 @@ function jumpTo(diagnostic: Diagnostic) {
             </p>
           </div>
 
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 gap-3">
             <UCard
               variant="outline"
               :ui="{ body: 'p-2.5 sm:p-2.5' }"
@@ -163,7 +153,7 @@ function jumpTo(diagnostic: Diagnostic) {
       <template #references>
         <div
           v-if="spec?.references.length"
-          class="grid grid-cols-2 gap-2"
+          class="grid grid-cols-1 gap-2"
         >
           <UCard
             v-for="item in spec.references"

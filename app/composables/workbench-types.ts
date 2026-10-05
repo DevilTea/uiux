@@ -21,6 +21,26 @@ export type ViewSummary = Readonly<{
 
 export type LocaleSummary = Readonly<{ kind: 'locale'; key: string; revision: string }>
 
+export type FlowSummary = Readonly<{
+	kind: 'flow'
+	key: string
+	revision: string
+	diagnosticCount: number
+	summary: { name?: string }
+}>
+
+export type ReviewSummary = Readonly<{
+	kind: 'review'
+	key: string
+	revision: string
+	diagnosticCount: number
+	summary: {
+		anchor?: Readonly<{ viewId: string; widgetId: string }>
+		status?: 'open' | 'ready-for-review' | 'resolved'
+		messageCount?: number
+	}
+}>
+
 export type DecisionRead = Readonly<{
 	id: string
 	question: string
@@ -54,9 +74,19 @@ export type ViewRead = Readonly<{
 	}
 }>
 
-export type ActivePanel = 'views' | 'workspace' | 'locales' | 'assets' | 'flows' | 'reviews' | 'checks' | 'evidence' | 'handoff'
-
 export type SpecTab = 'spec' | 'references' | 'decisions' | 'checks'
+
+/** Right-panel tabs of a View page (brief e). */
+export type ViewPanelTab = 'comments' | 'inspect' | 'spec' | 'readiness'
+
+/** Render context carried in a View deep link (`/views/:id?variant=&locale=&viewport=&theme=&widget=`). */
+export type ViewRouteContext = Readonly<{
+	variant: string
+	locale: string
+	viewport: string
+	theme: string
+	widget: string
+}>
 
 /** Preview session handshake state; `idle` means no View is mounted, so no session is expected. */
 export type SessionPhase = 'idle' | 'initiating' | 'open' | 'failed'

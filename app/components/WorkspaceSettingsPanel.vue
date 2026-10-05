@@ -286,7 +286,10 @@ async function handleSave() {
     <USeparator />
 
     <!-- Form Section: Adapters -->
-    <section class="space-y-2">
+    <section
+      id="workspace-adapters"
+      class="scroll-mt-4 space-y-2"
+    >
       <div class="flex items-start justify-between gap-2">
         <div class="min-w-0">
           <h3 class="flex items-center gap-1.5 font-medium text-highlighted">

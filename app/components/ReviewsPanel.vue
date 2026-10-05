@@ -4,6 +4,7 @@ import { useI18n } from '#imports'
 import { useUiuxClient } from '../composables/useUiuxClient'
 import { useWorkbenchFeedback } from '../composables/useWorkbenchFeedback'
 import { useWorkbenchFormat } from '../composables/useWorkbenchFormat'
+import { useReviewerIdentity } from '../composables/useReviewerIdentity'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
 import type { FormalEvidenceRecord } from '../../src/domain/evidence/schema'
 import { isCompleteEvidenceForViewRevision } from '../../src/domain/evidence/staleness'
@@ -43,6 +44,10 @@ const props = defineProps<{
 	selectedWidgetId?: string
 	currentViewRevision?: string
 	isCommentMode?: boolean
+	/** Hides the canvas comment-mode toggle where no canvas is mounted (the Reviews page). */
+	hideCommentMode?: boolean
+	/** Shows "Open in canvas" for the selected thread (the Reviews page). */
+	showOpenInCanvas?: boolean
 }>()
 
 const uiux = useUiuxClient()
@@ -55,6 +60,8 @@ const emit = defineEmits<{
 	(e: 'toggleCommentMode'): void
 	(e: 'viewPromoted'): void
 	(e: 'changed'): void
+	(e: 'threadSelected', threadId: string): void
+	(e: 'openInCanvas', thread: { threadId: string; viewId: string; widgetId: string }): void
 }>()
 
 const reviews = ref<readonly ReviewSummary[]>([])
@@ -68,7 +75,12 @@ const loadError = ref<FetchErrorDetails>()
 
 // Action form states
 const newMessageBody = ref('')
-const authorName = ref(DEFAULT_ACTOR_NAME)
+// The reviewer's name is shared with the navbar identity picker and kept in this browser only.
+const identity = useReviewerIdentity()
+const authorName = computed({
+	get: () => identity.name.value,
+	set: (value: string) => identity.setName(value),
+})
 const sendingMessage = ref(false)
 
 const reanchorReason = ref('')
@@ -176,6 +188,7 @@ async function fetchReviews() {
 
 async function selectReview(id: string) {
 	selectedReviewId.value = id
+	emit('threadSelected', id)
 	conflict.value = false
 	await loadSelectedReviewDetail()
 }
@@ -524,6 +537,7 @@ function pickWidgetInPreview() {
 
 defineExpose({
 	openCreateModal,
+	selectReview: (id: string) => id === selectedReviewId.value ? Promise.resolve() : selectReview(id),
 	createThreadForWidget: (widgetId: string) => handleCreateReviewThread(widgetId),
 })
 
@@ -553,7 +567,10 @@ watch(() => props.currentViewId, () => {
         v-if="!readOnly"
         class="flex items-center gap-1.5"
       >
-        <UTooltip :text="t('reviews.commentMode.tooltip')">
+        <UTooltip
+          v-if="!hideCommentMode"
+          :text="t('reviews.commentMode.tooltip')"
+        >
           <UButton
             :color="isCommentMode ? 'annotation' : 'neutral'"
             :variant="isCommentMode ? 'solid' : 'outline'"
@@ -567,11 +584,11 @@ watch(() => props.currentViewId, () => {
           </UButton>
         </UTooltip>
         <UButton
+          v-if="currentViewId"
           color="primary"
           variant="solid"
           size="xs"
           icon="i-lucide-plus"
-          :disabled="!currentViewId"
           @click="openCreateModal()"
         >
           {{ t('reviews.newThread') }}
@@ -582,6 +599,7 @@ watch(() => props.currentViewId, () => {
     <!-- Filter Bar: Current View vs All -->
     <div class="flex items-center justify-between gap-2 border-b border-default bg-muted px-3 py-1.5">
       <USwitch
+        v-if="currentViewId"
         v-model="scopeToCurrentView"
         size="xs"
         :label="t('reviews.scopeToCurrentView')"
@@ -677,7 +695,7 @@ watch(() => props.currentViewId, () => {
     <!-- Active Review Thread Detail -->
     <div
       v-if="selectedReviewData"
-      class="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto p-3"
+      class="min-h-0 flex-1 space-y-4 overflow-y-auto p-3"
     >
       <!-- Thread Anchor & Status Header -->
       <UCard
@@ -696,7 +714,20 @@ watch(() => props.currentViewId, () => {
               {{ statusLabel(selectedReviewData.resource.status) }}
             </UBadge>
           </div>
-          <UTooltip :text="t('reviews.highlightTooltip')">
+          <UButton
+            v-if="showOpenInCanvas"
+            color="neutral"
+            variant="outline"
+            size="xs"
+            icon="i-lucide-app-window"
+            @click="emit('openInCanvas', { threadId: selectedReviewData.key, viewId: selectedReviewData.resource.anchor.viewId, widgetId: selectedReviewData.resource.anchor.widgetId })"
+          >
+            {{ t('inbox.openInCanvas') }}
+          </UButton>
+          <UTooltip
+            v-else
+            :text="t('reviews.highlightTooltip')"
+          >
             <UButton
               color="neutral"
               variant="outline"

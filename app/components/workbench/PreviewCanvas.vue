@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
+import RenderContextControls from './RenderContextControls.vue'
 
 /**
  * The preview canvas: a real iframe at the canonical RenderContext viewport size,
@@ -62,19 +63,17 @@ onUnmounted(() => {
     class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-canvas"
     :aria-label="t('workbench.canvas.label')"
   >
-    <div class="flex h-9 shrink-0 items-center justify-between border-b border-default bg-default px-4 text-xs">
-      <div class="flex items-center gap-2">
-        <h2 class="font-medium text-muted">
-          {{ t('workbench.canvas.title') }}
-        </h2>
-        <USeparator
-          orientation="vertical"
-          class="h-4"
-        />
-        <span class="font-mono text-toned">{{ t('workbench.canvas.dimensions', { width: dimensions.width, height: dimensions.height }) }}</span>
-      </div>
+    <div class="flex min-h-10 shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-default bg-default px-3 py-1">
+      <RenderContextControls
+        v-if="selectedView"
+        class="min-w-0"
+      />
+      <span
+        v-else
+        class="text-xs text-muted"
+      >{{ t('workbench.canvas.title') }}</span>
 
-      <div class="flex items-center gap-3">
+      <div class="ms-auto flex items-center gap-2">
         <UTooltip
           v-if="!isReadOnly"
           :text="selectedView ? t('workbench.canvas.commentHint') : t('workbench.canvas.commentDisabledHint')"
@@ -112,6 +111,7 @@ onUnmounted(() => {
             {{ t('workbench.canvas.scale', { percent: scalePercent }) }}
           </UBadge>
         </UTooltip>
+        <slot name="actions" />
       </div>
     </div>
 

@@ -5,10 +5,11 @@ import { deriveWidgetTree, findWidgetInTree, flattenWidgetTree, type WidgetTreeN
 import { describeFetchError } from '../utils/fetch-error'
 import { useUiuxClient } from './useUiuxClient'
 import type {
-	ActivePanel,
 	Diagnostic,
 	EvidenceContextSelection,
+	FlowSummary,
 	LocaleSummary,
+	ReviewSummary,
 	SpecTab,
 	ViewRead,
 	ViewSummary,
@@ -46,13 +47,19 @@ export function createWorkbenchState() {
 	const selectedThemeId = ref('')
 
 	const selectedWidgetId = ref('root')
-	const activeNav = ref<ActivePanel>('views')
 	const activeSpecTab = ref<SpecTab>('spec')
-	const specPanelExpanded = ref(true)
 
 	const assetCount = ref(0)
-	const flowCount = ref(0)
-	const reviewCount = ref(0)
+	const flows = ref<readonly FlowSummary[]>([])
+	const reviews = ref<readonly ReviewSummary[]>([])
+	const flowCount = computed(() => flows.value.length)
+	const reviewCount = computed(() => reviews.value.length)
+	/** Threads waiting for a human: open plus ready-for-review (resolved threads are done). */
+	const unresolvedReviewCount = computed(() => reviews.value.filter(review => review.summary.status !== 'resolved').length)
+	const readyReviewCount = computed(() => reviews.value.filter(review => review.summary.status === 'ready-for-review').length)
+	const openReviewCount = computed(() => reviews.value.filter(review => (review.summary.status ?? 'open') === 'open').length)
+	/** Checks findings across the Workspace manifest and every View. */
+	const workspaceFindingCount = computed(() => (workspace.value?.diagnostics?.length || 0) + views.value.reduce((sum, view) => sum + (view.diagnosticCount || 0), 0))
 	const localeCount = computed(() => discoveredLocales.value.length)
 	const checkCount = computed(() => (selectedView.value?.diagnostics?.length || 0) + (workspace.value?.diagnostics?.length || 0))
 
@@ -162,8 +169,8 @@ export function createWorkbenchState() {
 			uiux.listResources<ViewSummary>(['view'], { limit: 100 }).catch(() => undefined),
 			uiux.listResources<LocaleSummary>(['locale'], { limit: 100 }).catch(() => undefined),
 			uiux.listResources<unknown>(['asset'], { limit: 100 }).catch(() => undefined),
-			uiux.listResources<unknown>(['flow'], { limit: 100 }).catch(() => undefined),
-			uiux.listResources<unknown>(['review'], { limit: 100 }).catch(() => undefined),
+			uiux.listResources<FlowSummary>(['flow'], { limit: 100 }).catch(() => undefined),
+			uiux.listResources<ReviewSummary>(['review'], { limit: 100 }).catch(() => undefined),
 		])
 		if (viewPage) views.value = viewPage.items
 		if (localePage) {
@@ -171,8 +178,8 @@ export function createWorkbenchState() {
 			localeRevisions.value = Object.fromEntries(localePage.items.map(item => [item.key, item.revision]))
 		}
 		if (assetPage) assetCount.value = assetPage.items.length
-		if (flowPage) flowCount.value = flowPage.items.length
-		if (reviewPage) reviewCount.value = reviewPage.items.length
+		if (flowPage) flows.value = flowPage.items
+		if (reviewPage) reviews.value = reviewPage.items
 	}
 
 	async function refresh(onViewLoaded?: () => void): Promise<void> {
@@ -184,8 +191,8 @@ export function createWorkbenchState() {
 				uiux.listResources<ViewSummary>(['view'], { limit: 100 }),
 				uiux.listResources<LocaleSummary>(['locale'], { limit: 100 }),
 				uiux.listResources<unknown>(['asset'], { limit: 100 }).catch(() => ({ items: [] })),
-				uiux.listResources<unknown>(['flow'], { limit: 100 }).catch(() => ({ items: [] })),
-				uiux.listResources<unknown>(['review'], { limit: 100 }).catch(() => ({ items: [] })),
+				uiux.listResources<FlowSummary>(['flow'], { limit: 100 }).catch(() => ({ items: [] as FlowSummary[] })),
+				uiux.listResources<ReviewSummary>(['review'], { limit: 100 }).catch(() => ({ items: [] as ReviewSummary[] })),
 			])
 			if (!workspaceRead) throw new Error(t('workbench.errors.workspaceUnavailable'))
 			if (isReadOnly.value) {
@@ -201,8 +208,8 @@ export function createWorkbenchState() {
 			discoveredLocales.value = localePage.items.map(item => item.key)
 			localeRevisions.value = Object.fromEntries(localePage.items.map(item => [item.key, item.revision]))
 			assetCount.value = assetPage.items.length
-			flowCount.value = flowPage.items.length
-			reviewCount.value = reviewPage.items.length
+			flows.value = flowPage.items
+			reviews.value = reviewPage.items
 			const selectedStillExists = selectedViewId.value && viewPage.items.some(item => item.key === selectedViewId.value)
 			selectedViewId.value = selectedStillExists ? selectedViewId.value : viewPage.items[0]?.key
 			await loadSelectedView(onViewLoaded)
@@ -232,12 +239,16 @@ export function createWorkbenchState() {
 		selectedViewportId,
 		selectedThemeId,
 		selectedWidgetId,
-		activeNav,
 		activeSpecTab,
-		specPanelExpanded,
 		assetCount,
+		flows,
+		reviews,
 		flowCount,
 		reviewCount,
+		unresolvedReviewCount,
+		readyReviewCount,
+		openReviewCount,
+		workspaceFindingCount,
 		localeCount,
 		checkCount,
 		contextOptions,

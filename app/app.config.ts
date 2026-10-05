@@ -83,6 +83,11 @@ export default defineAppConfig({
 		tooltip: { slots: { content: 'text-xs/4 h-auto py-1 shadow-overlay ring-0' } },
 		navigationMenu: {
 			slots: { link: 'min-h-(--wb-target)', linkLeadingIcon: 'size-4' },
+			compoundVariants: [
+				// Active area: elevated fill, highlighted text and a 2px Iris bar on the leading edge.
+				{ color: 'neutral', variant: 'pill', active: true, orientation: 'vertical', class: { link: 'before:bg-elevated text-highlighted after:absolute after:inset-y-1.5 after:start-0 after:w-0.5 after:rounded-full after:bg-primary' } },
+				{ color: 'neutral', variant: 'pill', active: false, class: { link: 'hover:before:bg-muted' } },
+			],
 		},
 		// The Workbench shell sits below a fixed header, so dashboard panes fill
 		// their flex parent instead of the full viewport height.
@@ -91,8 +96,8 @@ export default defineAppConfig({
 		},
 		dashboardSidebar: {
 			slots: {
-				// Always visible (the Workbench is a desktop tool; no slide-over menu).
-				root: 'flex min-h-0 h-full bg-default',
+				// Inline from the tablet breakpoint; a slide-over menu below it (brief a).
+				root: 'min-h-0 h-auto bg-default',
 				header: 'h-auto px-0',
 				body: 'gap-0 p-0 overflow-hidden',
 			},

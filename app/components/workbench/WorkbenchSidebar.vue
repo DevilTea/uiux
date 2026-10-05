@@ -1,0 +1,222 @@
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+import { useI18n, useRoute } from '#imports'
+import type { NavigationMenuItem } from '@nuxt/ui'
+import { useWorkbench } from '../../composables/useWorkbench'
+import { flowPath, viewLocation } from '../../utils/workbench-routes'
+import WidgetTree from './WidgetTree.vue'
+
+/**
+ * Sidebar content: the four primary areas, the current area's navigator (brief a,
+ * section 3) and the secondary Workspace group at the foot.
+ */
+const props = defineProps<{ collapsed?: boolean }>()
+
+const { t } = useI18n()
+const route = useRoute()
+const workbench = useWorkbench()
+const { views, flows, selectedView, unresolvedReviewCount, loading } = workbench
+
+function count(value: number, color: 'neutral' | 'annotation' = 'neutral') {
+	return value > 0 ? { label: String(value), color, variant: 'soft' as const, size: 'sm' as const } : undefined
+}
+
+const primary = computed<NavigationMenuItem[]>(() => [
+	{ label: t('nav.overview'), icon: 'i-lucide-layout-dashboard', to: '/', exact: true },
+	{ label: t('nav.views'), icon: 'i-lucide-app-window', to: '/views', badge: count(views.value.length), 'aria-label': t('nav.countLabel', { label: t('nav.views'), n: views.value.length }) },
+	{ label: t('nav.flows'), icon: 'i-lucide-workflow', to: '/flows', badge: count(flows.value.length), 'aria-label': t('nav.countLabel', { label: t('nav.flows'), n: flows.value.length }) },
+	{ label: t('nav.reviews'), icon: 'i-lucide-inbox', to: '/reviews', badge: count(unresolvedReviewCount.value, 'annotation'), 'aria-label': t('nav.reviewsLabel', unresolvedReviewCount.value) },
+])
+
+const secondary = computed<NavigationMenuItem[]>(() => [
+	{ label: t('nav.workspace'), type: 'label' },
+	{ label: t('nav.settings'), icon: 'i-lucide-settings-2', to: '/workspace/settings' },
+	{ label: t('nav.locales'), icon: 'i-lucide-globe', to: '/workspace/locales' },
+	{ label: t('nav.assets'), icon: 'i-lucide-image', to: '/workspace/assets' },
+	{ label: t('nav.adapters'), icon: 'i-lucide-puzzle', to: '/workspace/adapters' },
+])
+
+const NAV_UI = {
+	root: 'w-full',
+	list: 'gap-0.5',
+	label: 'text-xs font-medium text-muted px-2 pt-3',
+	link: 'px-2 py-1.5 text-sm before:inset-x-0',
+	linkLeadingIcon: 'size-4',
+	linkTrailingBadge: 'font-medium',
+}
+
+const area = computed(() => {
+	if (route.path.startsWith('/views')) return 'views'
+	if (route.path.startsWith('/flows')) return 'flows'
+	return undefined
+})
+
+const openViewId = computed(() => typeof route.params.viewId === 'string' ? route.params.viewId : undefined)
+/** On a View page the navigator shows its Widget layers; "All Views" flips back to the list. */
+const showViewList = ref(!openViewId.value)
+watch(openViewId, (id) => { showViewList.value = !id })
+
+const viewFilter = ref('')
+const filteredViews = computed(() => {
+	const query = viewFilter.value.trim().toLowerCase()
+	return views.value.filter(view => !query
+		|| (view.summary.name ?? '').toLowerCase().includes(query)
+		|| (view.summary.feature ?? '').toLowerCase().includes(query))
+})
+
+const openFlowId = computed(() => typeof route.params.flowId === 'string' ? route.params.flowId : undefined)
+</script>
+
+<template>
+  <nav
+    data-landmark="navigation"
+    :aria-label="t('shell.primaryNav')"
+    class="flex min-h-0 flex-1 flex-col"
+  >
+    <div class="shrink-0 px-2 pt-2">
+      <UNavigationMenu
+        :items="primary"
+        orientation="vertical"
+        :collapsed="props.collapsed"
+        color="neutral"
+        :tooltip="props.collapsed"
+        :ui="NAV_UI"
+      />
+    </div>
+
+    <USeparator class="my-2 shrink-0" />
+
+    <div
+      v-if="!props.collapsed && area === 'views'"
+      class="flex min-h-0 flex-1 flex-col"
+    >
+      <template v-if="openViewId && !showViewList">
+        <div class="shrink-0 px-2">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            icon="i-lucide-arrow-left"
+            class="text-muted"
+            @click="showViewList = true"
+          >
+            {{ t('shell.allViews') }}
+          </UButton>
+          <p class="truncate px-2 pt-1 text-title font-semibold text-highlighted">
+            {{ selectedView?.resource.name || t('common.unnamed') }}
+          </p>
+        </div>
+        <WidgetTree />
+      </template>
+
+      <template v-else>
+        <div class="shrink-0 px-3 pb-2">
+          <UInput
+            v-model="viewFilter"
+            icon="i-lucide-search"
+            size="sm"
+            variant="outline"
+            class="w-full"
+            :placeholder="t('workbench.views.filterPlaceholder')"
+            :aria-label="t('workbench.views.filterPlaceholder')"
+          />
+        </div>
+        <ul
+          class="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2"
+          :aria-label="t('workbench.views.listLabel')"
+        >
+          <li
+            v-for="view in filteredViews"
+            :key="view.key"
+          >
+            <ULink
+              :to="viewLocation(view.key)"
+              class="flex min-h-7 items-center gap-2 rounded-md px-2 py-1 text-sm text-default hover:bg-muted"
+              active-class="bg-selection-subtle text-selection-text"
+              @click="showViewList = false"
+            >
+              <UIcon
+                name="i-lucide-app-window"
+                class="size-4 shrink-0 text-dimmed"
+              />
+              <span class="min-w-0 flex-1">
+                <span class="block truncate">{{ view.summary.name || t('common.unnamed') }}</span>
+                <span
+                  v-if="view.summary.feature"
+                  class="block truncate font-mono text-xs text-dimmed"
+                >{{ view.summary.feature }}</span>
+              </span>
+              <UBadge
+                v-if="view.diagnosticCount"
+                color="warning"
+                variant="subtle"
+                size="sm"
+                icon="i-lucide-triangle-alert"
+                :aria-label="t('workbench.views.diagnosticCount', view.diagnosticCount)"
+              >
+                {{ view.diagnosticCount }}
+              </UBadge>
+            </ULink>
+          </li>
+          <li
+            v-if="!filteredViews.length && !loading"
+            class="px-2 py-1 text-xs text-muted"
+          >
+            {{ views.length ? t('workbench.views.noMatches', { query: viewFilter }) : t('workbench.views.emptyTitle') }}
+          </li>
+        </ul>
+      </template>
+    </div>
+
+    <ul
+      v-else-if="!props.collapsed && area === 'flows'"
+      class="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2"
+      :aria-label="t('flows.list.label')"
+    >
+      <li
+        v-for="flow in flows"
+        :key="flow.key"
+      >
+        <ULink
+          :to="flowPath(flow.key)"
+          class="flex min-h-7 items-center gap-2 rounded-md px-2 py-1 text-sm text-default hover:bg-muted"
+          :class="openFlowId === flow.key ? 'bg-selection-subtle text-selection-text' : ''"
+        >
+          <UIcon
+            name="i-lucide-workflow"
+            class="size-4 shrink-0 text-dimmed"
+          />
+          <span class="truncate">{{ flow.summary.name || t('flows.list.unnamed') }}</span>
+        </ULink>
+      </li>
+      <li
+        v-if="!flows.length && !loading"
+        class="px-2 py-1 text-xs text-muted"
+      >
+        {{ t('flows.list.empty') }}
+      </li>
+    </ul>
+
+    <div
+      v-else
+      class="flex-1"
+    />
+
+    <div class="shrink-0 border-t border-default px-2 pb-2">
+      <UNavigationMenu
+        :items="secondary"
+        orientation="vertical"
+        :collapsed="props.collapsed"
+        color="neutral"
+        :tooltip="props.collapsed"
+        :ui="NAV_UI"
+      />
+      <UTooltip :text="props.collapsed ? t('shell.expandSidebar') : t('shell.collapseSidebar')">
+        <UDashboardSidebarCollapse
+          class="mt-1 hidden lg:inline-flex"
+          :aria-label="props.collapsed ? t('shell.expandSidebar') : t('shell.collapseSidebar')"
+        />
+      </UTooltip>
+    </div>
+  </nav>
+</template>

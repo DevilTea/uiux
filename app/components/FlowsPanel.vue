@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, useId } from 'vue'
+import { computed, onMounted, reactive, ref, useId, watch } from 'vue'
 import { useI18n } from '#imports'
 import { useUiuxClient } from '../composables/useUiuxClient'
 import { useWorkbenchFeedback } from '../composables/useWorkbenchFeedback'
@@ -44,6 +44,10 @@ const props = defineProps<{
 	readOnly?: boolean
 	availableViews?: ReadonlyArray<{ key: string; name?: string; summary?: { name?: string; feature?: string } }>
 	currentViewId?: string
+	/** The selected Flow, owned by the route on the UX Flows page. */
+	flowId?: string
+	/** Hides the built-in list where the sidebar already lists the Flows. */
+	hideList?: boolean
 }>()
 
 const uiux = useUiuxClient()
@@ -53,6 +57,7 @@ const feedback = useWorkbenchFeedback()
 const emit = defineEmits<{
 	(e: 'selectView', viewId: string): void
 	(e: 'changed'): void
+	(e: 'update:flowId', flowId: string): void
 }>()
 
 const flows = ref<readonly FlowSummary[]>([])
@@ -143,7 +148,10 @@ async function fetchFlows() {
 	try {
 		const res = await uiux.listResources<FlowSummary>(['flow'], { limit: 100 })
 		flows.value = res.items
-		if (!selectedFlowId.value && res.items.length > 0) {
+		if (props.flowId && props.flowId !== selectedFlowId.value) {
+			await selectFlow(props.flowId)
+		}
+		else if (!selectedFlowId.value && res.items.length > 0) {
 			await selectFlow(res.items[0]!.key)
 		}
 		else if (selectedFlowId.value) {
@@ -161,6 +169,7 @@ async function fetchFlows() {
 async function selectFlow(id: string | undefined) {
 	if (!id) return
 	selectedFlowId.value = id
+	if (id !== props.flowId) emit('update:flowId', id)
 	conflict.value = false
 	saveError.value = undefined
 	await loadSelectedFlowDetail()
@@ -365,6 +374,10 @@ async function handleCreateFlow() {
 onMounted(() => {
 	fetchFlows()
 })
+
+watch(() => props.flowId, (id) => {
+	if (id && id !== selectedFlowId.value) void selectFlow(id)
+})
 </script>
 
 <template>
@@ -487,7 +500,10 @@ onMounted(() => {
     </UModal>
 
     <!-- Flows List -->
-    <div class="border-b border-default p-2">
+    <div
+      v-if="!hideList || listError || !flowItems.length"
+      class="border-b border-default p-2"
+    >
       <UAlert
         v-if="listError"
         color="error"

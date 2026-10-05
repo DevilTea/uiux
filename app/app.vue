@@ -19,6 +19,8 @@ useHead({
     :locale="uiLocale"
     :tooltip="{ delayDuration: 300 }"
   >
-    <NuxtPage />
+    <NuxtLayout>
+      <NuxtPage />
+    </NuxtLayout>
   </UApp>
 </template>

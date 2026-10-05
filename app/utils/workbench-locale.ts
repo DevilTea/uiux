@@ -57,3 +57,13 @@ export function saveWorkbenchLocale(locale: WorkbenchLocale): void {
 		// Storage may be unavailable (private mode); the choice still applies for this session.
 	}
 }
+
+/** Forgets the saved choice so the Workbench follows the browser language again. */
+export function clearSavedWorkbenchLocale(): void {
+	try {
+		globalThis.localStorage?.removeItem(WORKBENCH_LOCALE_STORAGE_KEY)
+	}
+	catch {
+		// Storage may be unavailable (private mode).
+	}
+}

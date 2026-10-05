@@ -523,10 +523,6 @@
     }
   },
   "workbench": {
-    "header": {
-      "modeLocal": "Local",
-      "modePublished": "Published · read-only"
-    },
     "context": {
       "groupLabel": "Preview context",
       "variant": "Variant",
@@ -553,24 +549,6 @@
       "initiatingHint": "Connecting to the preview…",
       "openHint": "The preview is connected.",
       "failedHint": "The preview could not connect. Try refreshing."
-    },
-    "preferences": {
-      "language": "Workbench language",
-      "languageHint": "Language of the Workbench interface. Choose the preview Locale under Locale.",
-      "appearance": "Workbench appearance",
-      "appearanceHint": "Light, dark or system. Does not affect the preview theme."
-    },
-    "nav": {
-      "label": "Workbench sections",
-      "views": "Views",
-      "workspace": "Workspace",
-      "locales": "Locales",
-      "assets": "Assets",
-      "flows": "Flows",
-      "reviews": "Reviews",
-      "checks": "Checks",
-      "evidence": "Evidence",
-      "handoff": "Handoff"
     },
     "views": {
       "title": "Views",
@@ -611,8 +589,6 @@
         "decisions": "Decisions",
         "checks": "Checks"
       },
-      "collapse": "Collapse",
-      "expand": "Expand",
       "noView": "Select a View to see its Spec.",
       "intent": "Intent",
       "noIntent": "No intent yet.",
@@ -721,24 +697,50 @@
     "settings": "Settings",
     "locales": "Locales",
     "assets": "Assets",
-    "adapters": "Adapters"
+    "adapters": "Adapters",
+    "countLabel": "{label}, {n}",
+    "reviewsLabel": "Reviews, none unresolved | Reviews, {n} unresolved | Reviews, {n} unresolved"
   },
   "shell": {
     "search": "Search or jump to…",
-    "skipToCanvas": "Skip to canvas"
+    "skipToCanvas": "Skip to canvas",
+    "skipToContent": "Skip to content",
+    "primaryNav": "Primary",
+    "toggleSidebar": "Toggle sidebar",
+    "breadcrumb": "Location",
+    "allViews": "All Views",
+    "togglePanel": "Show or hide the panel",
+    "openPanel": "Open panel",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar"
   },
   "prefs": {
     "theme": "Workbench theme",
     "themeHint": "Changes the Workbench only, not the previewed View.",
     "language": "Workbench language",
-    "system": "Match system"
+    "system": "Match system",
+    "title": "Workbench preferences",
+    "light": "Light",
+    "dark": "Dark",
+    "languageHint": "Changes the Workbench only. The previewed View keeps its Locale.",
+    "singleKey": "Single-key shortcuts",
+    "shortcuts": "Keyboard shortcuts",
+    "english": "English",
+    "traditionalChinese": "繁體中文"
   },
   "identity": {
     "commentingAs": "Commenting as {name}",
-    "setName": "Set your name"
+    "setName": "Set your name",
+    "noName": "No name set",
+    "change": "Change name",
+    "title": "Your name",
+    "description": "Shown on comments and Review actions you make in this browser.",
+    "nameLabel": "Display name",
+    "placeholder": "e.g. Mei Lin"
   },
   "publication": {
-    "banner": "Published snapshot · read-only"
+    "banner": "Published snapshot · read-only",
+    "bannerRevision": "Published snapshot · read-only · {revision}"
   },
   "server": {
     "unreachable": "Can't reach the UIUX server."
@@ -823,7 +825,8 @@
     "comments": "Comments",
     "inspect": "Inspect",
     "spec": "Spec",
-    "readiness": "Readiness"
+    "readiness": "Readiness",
+    "label": "View details"
   },
   "inspect": {
     "empty": {
@@ -910,9 +913,17 @@
     "tab": {
       "views": "Views",
       "checks": "Checks",
-      "activity": "Activity"
+      "activity": "Activity",
+      "evidence": "Evidence",
+      "handoff": "Handoff"
     },
-    "updated": "Updated since you last looked"
+    "updated": "Updated since you last looked",
+    "columns": {
+      "view": "View",
+      "feature": "Feature",
+      "threads": "Unresolved",
+      "findings": "Findings"
+    }
   },
   "ready": {
     "validation": "Validation",
@@ -922,5 +933,36 @@
     "blockedBy": "Blocked by {n} issue | Blocked by {n} issues",
     "ready": "Ready",
     "notReady": "Not implementation-ready"
+  },
+  "workspaceMenu": {
+    "label": "Workspace",
+    "local": "Local Workspace",
+    "published": "Published snapshot · read-only",
+    "copyRevision": "Copy Workspace revision",
+    "copyPublication": "Copy publication ID",
+    "copied": "Copied",
+    "copyFailed": "Could not copy to the clipboard."
+  },
+  "palette": {
+    "goTo": "Go to",
+    "threads": "Threads",
+    "actions": "Actions",
+    "toggleComment": "Toggle comment mode",
+    "toggleTheme": "Switch Workbench theme",
+    "switchLanguage": "Switch Workbench language",
+    "description": "Search Views, Flows and threads, or run an action."
+  },
+  "shortcuts": {
+    "title": "Keyboard shortcuts",
+    "description": "Single-key shortcuts are ignored while you type in a field.",
+    "singleKeyOff": "Single-key shortcuts are off. Turn them on in Workbench preferences.",
+    "search": "Search or jump to",
+    "goTo": "Go to Overview, Views, UX Flows or Reviews",
+    "toggleSidebar": "Toggle the sidebar",
+    "togglePanel": "Toggle the right panel",
+    "toggleTheme": "Switch the Workbench theme",
+    "landmarks": "Move between regions",
+    "exitComment": "Leave comment mode",
+    "help": "Show these shortcuts"
   }
 }

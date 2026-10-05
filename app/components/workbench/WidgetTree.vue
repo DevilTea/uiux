@@ -106,16 +106,10 @@ const hasEmptyRoot = computed(() => rootItem.value && !rootItem.value.children?.
             />
           </template>
           <template #item-label="{ item }">
-            <span class="flex min-w-0 items-center gap-1.5">
-              <UBadge
-                v-if="item.slotName"
-                color="neutral"
-                variant="soft"
-                size="xs"
-                class="font-mono"
-              >
-                {{ item.slotName }}
-              </UBadge>
+            <span
+              class="flex min-w-0 items-center gap-1.5"
+              :title="item.slotName ? `${item.slotName}[${item.slotIndex ?? 0}]` : undefined"
+            >
               <span class="shrink-0 font-medium">{{ item.type }}</span>
               <span class="truncate font-mono text-xs text-muted">#{{ item.id }}</span>
             </span>

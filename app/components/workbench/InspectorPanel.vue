@@ -13,7 +13,7 @@ function shortRevision(revision: string) {
 </script>
 
 <template>
-  <aside
+  <section
     class="flex h-full min-h-0 flex-col bg-default p-4"
     :aria-label="t('workbench.inspector.title')"
   >
@@ -199,5 +199,5 @@ function shortRevision(revision: string) {
         variant="naked"
       />
     </div>
-  </aside>
+  </section>
 </template>

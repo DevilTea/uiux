@@ -9,14 +9,29 @@ import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-
  * the independence of the Workbench chrome from the Preview render context.
  */
 
-const MAIN_ROUTES = ['/']
+const VIEW_ID = '7f3d7780-3cb9-4e57-8f0b-2e8d569905c1'
+const THREAD_ID = '140f4e87-cc50-4768-a82b-56b663609321'
+/** The main screens of the shell (brief a, section 5). */
+const MAIN_ROUTES = ['/', `/views/${VIEW_ID}`, '/flows', '/reviews', '/workspace/settings', '/workspace/locales', '/workspace/assets']
 
 let server: WorkbenchServer
 let browser: Browser
 
+/** Adds a Variant to the private Workspace copy through the authoring API (never by hand). */
+async function authorVariant(name: string): Promise<void> {
+	const read = await (await fetch(`${server.origin}/api/resources/view/${VIEW_ID}`)).json() as { revision: string; resource: { ir: unknown; variants: Record<string, unknown> } }
+	const response = await fetch(`${server.origin}/api/views/${VIEW_ID}/structure`, {
+		method: 'PUT',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ expectedRevision: read.revision, ir: read.resource.ir, variants: { ...read.resource.variants, [name]: { state: {} } } }),
+	})
+	if (!response.ok) throw new Error(`Could not author the test Variant: ${response.status} ${await response.text()}`)
+}
+
 beforeAll(async () => {
 	server = await startWorkbenchServer()
 	browser = await chromium.launch({ headless: true })
+	await authorVariant('compact')
 }, 60_000)
 
 afterAll(async () => {
@@ -38,6 +53,7 @@ async function openWorkbench(path: string, setup: ChromeSetup): Promise<{ contex
 	const page = await context.newPage()
 	await page.goto(`${server.origin}${path}`, { waitUntil: 'networkidle' })
 	await page.waitForFunction(() => document.documentElement.classList.contains('light') || document.documentElement.classList.contains('dark'))
+	await page.locator('main').first().waitFor()
 	return { context, page }
 }
 
@@ -96,7 +112,7 @@ describe('Workbench type floor', () => {
 describe('Workbench theme independence', () => {
 	for (const [mode, os] of [['dark', 'light'], ['light', 'dark']] as const) {
 		it(`keeps every control in the Workbench ${mode} theme when the OS prefers ${os}`, async () => {
-			const { context, page } = await openWorkbench('/', { mode, os })
+			const { context, page } = await openWorkbench(`/views/${VIEW_ID}`, { mode, os })
 			try {
 				const frame = await previewFrame(page)
 				const report = await page.evaluate(() => {
@@ -238,5 +254,138 @@ describe('Workbench focus', () => {
 			expect(checked).toBeGreaterThan(5)
 			expect(failures).toEqual([])
 		}, 180_000)
+	}
+})
+
+type FrameContext = { locale: string | null; themeId: string | null; viewportId: string | null; variant: string | null }
+
+async function iframeContext(page: Page): Promise<FrameContext> {
+	return page.evaluate(() => {
+		const src = document.querySelector('iframe')?.getAttribute('src') ?? ''
+		const params = new URL(src, location.href).searchParams
+		return { locale: params.get('locale'), themeId: params.get('themeId'), viewportId: params.get('viewportId'), variant: params.get('variant') }
+	})
+}
+
+describe('Workbench shell (R3)', () => {
+	it('replaces the nine-tab grid with four primary areas and a Workspace group', async () => {
+		const { context, page } = await openWorkbench('/', { mode: 'light' })
+		try {
+			const nav = page.locator('[data-landmark="navigation"]')
+			for (const name of ['Overview', 'Views', 'UX Flows', 'Reviews', 'Settings', 'Locales', 'Assets', 'Adapters'])
+				expect(await nav.getByRole('link', { name: new RegExp(`^${name}`) }).count(), name).toBe(1)
+			const largestTablist = await page.evaluate(() => Math.max(0, ...Array.from(document.querySelectorAll('[role="tablist"]')).map(list => list.querySelectorAll('[role="tab"]').length)))
+			expect(largestTablist).toBeLessThan(9)
+			for (const role of ['banner', 'navigation', 'main'])
+				expect(await page.locator(`[data-landmark="${role}"]`).count(), role).toBe(1)
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('reproduces a deep-linked render context, Widget and thread after reload', async () => {
+		const query = `?variant=compact&locale=zh-TW&viewport=tablet&theme=light&widget=root&thread=${THREAD_ID}`
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}${query}`, { mode: 'light' })
+		try {
+			const expected = { locale: 'zh-TW', themeId: 'light', viewportId: 'tablet', variant: 'compact' }
+			await previewFrame(page)
+			expect(await iframeContext(page)).toEqual(expected)
+			await page.getByRole('tab', { name: /Comments/ }).and(page.locator('[aria-selected="true"]')).waitFor()
+			await page.reload({ waitUntil: 'networkidle' })
+			await previewFrame(page)
+			expect(await iframeContext(page)).toEqual(expected)
+			const url = new URL(page.url())
+			expect(url.searchParams.get('thread')).toBe(THREAD_ID)
+			expect(url.searchParams.get('variant')).toBe('compact')
+			await page.getByRole('tab', { name: /Comments/ }).and(page.locator('[aria-selected="true"]')).waitFor()
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('keeps the Workbench language and theme independent of the Preview Locale and theme', async () => {
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}?locale=en-US&theme=dark`, { mode: 'light', locale: 'en-US' })
+		try {
+			let frame = await previewFrame(page)
+			const before = await iframeContext(page)
+			const previewHostClass = () => frame.evaluate(() => document.querySelector('[data-preview-ready]')?.parentElement?.className ?? '')
+			const hostBefore = await previewHostClass()
+			expect(hostBefore).toContain('dark')
+
+			// Workbench theme and language change: the Preview context does not.
+			await page.getByRole('button', { name: 'Workbench preferences' }).click()
+			await page.getByRole('menuitemcheckbox', { name: 'Dark' }).click()
+			await page.keyboard.press('Escape')
+			await page.waitForFunction(() => document.documentElement.classList.contains('dark'))
+			await page.getByRole('button', { name: 'Workbench preferences' }).click()
+			await page.getByRole('menuitemcheckbox', { name: '繁體中文' }).click()
+			await page.keyboard.press('Escape')
+			await page.waitForFunction(() => document.documentElement.lang === 'zh-TW')
+			await page.waitForTimeout(300)
+			expect(await iframeContext(page)).toEqual(before)
+			frame = await previewFrame(page)
+			expect(await previewHostClass()).toBe(hostBefore)
+			expect(await frame.evaluate(() => document.documentElement.className)).not.toContain('dark')
+
+			// Preview theme changes: the Workbench theme and language do not.
+			await page.getByRole('combobox', { name: '預覽主題' }).click()
+			await page.getByRole('option', { name: 'Light' }).click()
+			await page.waitForFunction(() => document.querySelector('iframe')?.getAttribute('src')?.includes('themeId=light'))
+			expect(await page.evaluate(() => ({ dark: document.documentElement.classList.contains('dark'), lang: document.documentElement.lang })))
+				.toEqual({ dark: true, lang: 'zh-TW' })
+			expect(new URL(page.url()).searchParams.get('theme')).toBe('light')
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('keeps at least 60% of a 1920px window for the canvas with both panels open', async () => {
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}`, { mode: 'light' })
+		try {
+			await previewFrame(page)
+			const widths = await page.evaluate(() => ({
+				canvas: document.querySelector('#canvas')!.getBoundingClientRect().width,
+				sidebar: document.querySelector('[data-landmark="navigation"]')!.getBoundingClientRect().width,
+				panel: document.querySelector('[data-landmark="complementary"]')!.getBoundingClientRect().width,
+			}))
+			expect(widths.sidebar).toBeGreaterThan(200)
+			expect(widths.panel).toBeGreaterThan(280)
+			expect(widths.canvas / 1920).toBeGreaterThanOrEqual(0.6)
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('persists sidebar collapse and resize across reloads', async () => {
+		const { context, page } = await openWorkbench('/', { mode: 'light' })
+		try {
+			const sidebarWidth = () => page.evaluate(() => document.querySelector('[data-landmark="navigation"]')!.closest('[data-slot="root"]')!.getBoundingClientRect().width)
+			const handle = page.locator('[data-slot="handle"]').first()
+			const box = (await handle.boundingBox())!
+			await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+			await page.mouse.down()
+			await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2, { steps: 6 })
+			await page.mouse.up()
+			const resized = await sidebarWidth()
+			expect(resized).toBeGreaterThan(300)
+			await page.reload({ waitUntil: 'networkidle' })
+			expect(Math.abs(await sidebarWidth() - resized)).toBeLessThan(2)
+
+			await page.getByRole('button', { name: 'Collapse sidebar' }).click()
+			await page.waitForFunction(() => document.querySelector('[data-landmark="navigation"]')!.closest('[data-slot="root"]')!.getBoundingClientRect().width < 80)
+			await page.reload({ waitUntil: 'networkidle' })
+			expect(await sidebarWidth()).toBeLessThan(80)
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	for (const [width, height] of [[1024, 768], [390, 844]] as const) {
+		it(`does not overflow horizontally at ${width}×${height}`, async () => {
+			for (const route of MAIN_ROUTES) {
+				const { context, page } = await openWorkbench(route, { mode: 'light', width, height })
+				try {
+					await page.waitForTimeout(300)
+					const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+					expect(overflow, route).toBeLessThanOrEqual(0)
+				}
+				finally { await context.close() }
+			}
+		}, 120_000)
 	}
 })

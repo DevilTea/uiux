@@ -23,9 +23,9 @@ import type { ViewResource } from '../../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../../src/domain/render-context/schema'
 import type { I18nResource } from '../../src/domain/i18n/schema'
 
-// The Preview document never follows the Workbench color mode: pin the document to light and
-// scope the host's own status chrome to the brightness of the Workspace theme being rendered.
-definePageMeta({ colorMode: 'light' })
+// The Preview document has no Workbench shell and never follows the Workbench color mode: pin
+// the document to light and scope the host's own status chrome to the Workspace theme rendered.
+definePageMeta({ layout: false, colorMode: 'light' })
 
 const route = useRoute()
 const uiux = useUiuxClient()

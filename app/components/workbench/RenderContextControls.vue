@@ -81,7 +81,7 @@ const themeHint = computed(() => contextOptions.value.themes.isEmpty ? t('workbe
   <div
     role="group"
     :aria-label="t('workbench.context.groupLabel')"
-    class="flex min-w-0 items-center gap-2.5"
+    class="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1"
   >
     <UFormField
       :label="t('workbench.context.variant')"

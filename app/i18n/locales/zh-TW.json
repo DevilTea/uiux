@@ -523,10 +523,6 @@
     }
   },
   "workbench": {
-    "header": {
-      "modeLocal": "本機",
-      "modePublished": "已發布 · 唯讀"
-    },
     "context": {
       "groupLabel": "預覽情境",
       "variant": "Variant",
@@ -553,24 +549,6 @@
       "initiatingHint": "正在連線至預覽…",
       "openHint": "預覽已連線。",
       "failedHint": "預覽無法連線，請重新整理。"
-    },
-    "preferences": {
-      "language": "Workbench 語言",
-      "languageHint": "Workbench 介面的語言。預覽使用的 Locale 請在「Locale」中選擇。",
-      "appearance": "Workbench 外觀",
-      "appearanceHint": "淺色、深色或跟隨系統，不影響預覽主題。"
-    },
-    "nav": {
-      "label": "Workbench 區段",
-      "views": "View",
-      "workspace": "Workspace",
-      "locales": "Locale",
-      "assets": "Asset",
-      "flows": "Flow",
-      "reviews": "Review",
-      "checks": "檢查",
-      "evidence": "Evidence",
-      "handoff": "Handoff"
     },
     "views": {
       "title": "View",
@@ -611,8 +589,6 @@
         "decisions": "Decision",
         "checks": "檢查"
       },
-      "collapse": "收合",
-      "expand": "展開",
       "noView": "請選取 View 以檢視其 Spec。",
       "intent": "意圖",
       "noIntent": "尚無意圖。",
@@ -721,24 +697,50 @@
     "settings": "設定",
     "locales": "Locale",
     "assets": "Asset",
-    "adapters": "Adapter"
+    "adapters": "Adapter",
+    "countLabel": "{label}，{n}",
+    "reviewsLabel": "Reviews，沒有未解決 | Reviews，{n} 則未解決 | Reviews，{n} 則未解決"
   },
   "shell": {
     "search": "搜尋或前往…",
-    "skipToCanvas": "跳至畫布"
+    "skipToCanvas": "跳至畫布",
+    "skipToContent": "跳至內容",
+    "primaryNav": "主要導覽",
+    "toggleSidebar": "切換側邊欄",
+    "breadcrumb": "目前位置",
+    "allViews": "所有 View",
+    "togglePanel": "顯示或隱藏面板",
+    "openPanel": "開啟面板",
+    "collapseSidebar": "收合側邊欄",
+    "expandSidebar": "展開側邊欄"
   },
   "prefs": {
     "theme": "Workbench 主題",
     "themeHint": "只變更 Workbench，不影響預覽中的 View。",
     "language": "Workbench 語言",
-    "system": "跟隨系統"
+    "system": "跟隨系統",
+    "title": "Workbench 偏好設定",
+    "light": "淺色",
+    "dark": "深色",
+    "languageHint": "只變更 Workbench，預覽中的 View 維持自己的 Locale。",
+    "singleKey": "單鍵快捷鍵",
+    "shortcuts": "鍵盤快捷鍵",
+    "english": "English",
+    "traditionalChinese": "繁體中文"
   },
   "identity": {
     "commentingAs": "以 {name} 的身分留言",
-    "setName": "設定你的名稱"
+    "setName": "設定你的名稱",
+    "noName": "尚未設定名稱",
+    "change": "變更名稱",
+    "title": "你的名稱",
+    "description": "會顯示在你於此瀏覽器中的留言與 Review 操作上。",
+    "nameLabel": "顯示名稱",
+    "placeholder": "例如：林美"
   },
   "publication": {
-    "banner": "已發佈的快照・唯讀"
+    "banner": "已發佈的快照・唯讀",
+    "bannerRevision": "已發佈的快照・唯讀・{revision}"
   },
   "server": {
     "unreachable": "無法連線到 UIUX 伺服器。"
@@ -823,7 +825,8 @@
     "comments": "留言",
     "inspect": "屬性",
     "spec": "Spec",
-    "readiness": "就緒狀態"
+    "readiness": "就緒狀態",
+    "label": "View 詳細資料"
   },
   "inspect": {
     "empty": {
@@ -910,9 +913,17 @@
     "tab": {
       "views": "Views",
       "checks": "檢查",
-      "activity": "動態"
+      "activity": "動態",
+      "evidence": "Evidence",
+      "handoff": "Handoff"
     },
-    "updated": "自你上次查看後已更新"
+    "updated": "自你上次查看後已更新",
+    "columns": {
+      "view": "View",
+      "feature": "功能",
+      "threads": "未解決",
+      "findings": "問題"
+    }
   },
   "ready": {
     "validation": "驗證",
@@ -922,5 +933,36 @@
     "blockedBy": "有 {n} 項阻擋 | 有 {n} 項阻擋",
     "ready": "已就緒",
     "notReady": "尚未達到 implementation-ready"
+  },
+  "workspaceMenu": {
+    "label": "Workspace",
+    "local": "本機 Workspace",
+    "published": "已發佈的快照・唯讀",
+    "copyRevision": "複製 Workspace 修訂版本",
+    "copyPublication": "複製發佈 ID",
+    "copied": "已複製",
+    "copyFailed": "無法複製到剪貼簿。"
+  },
+  "palette": {
+    "goTo": "前往",
+    "threads": "討論串",
+    "actions": "動作",
+    "toggleComment": "切換留言模式",
+    "toggleTheme": "切換 Workbench 主題",
+    "switchLanguage": "切換 Workbench 語言",
+    "description": "搜尋 View、Flow 與討論串，或執行動作。"
+  },
+  "shortcuts": {
+    "title": "鍵盤快捷鍵",
+    "description": "在欄位中輸入時，單鍵快捷鍵不會作用。",
+    "singleKeyOff": "單鍵快捷鍵已關閉，可在 Workbench 偏好設定中開啟。",
+    "search": "搜尋或前往",
+    "goTo": "前往總覽、Views、UX Flows 或 Reviews",
+    "toggleSidebar": "切換側邊欄",
+    "togglePanel": "切換右側面板",
+    "toggleTheme": "切換 Workbench 主題",
+    "landmarks": "在區域間移動",
+    "exitComment": "離開留言模式",
+    "help": "顯示這些快捷鍵"
   }
 }
