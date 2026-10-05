@@ -242,15 +242,21 @@ onBeforeUnmount(() => {
 // Overlay
 // ---------------------------------------------------------------------------------------------
 
-/** The Checks/selection highlight; Comment mode hides it (Part 3). The RootShell is the frame itself. */
+/**
+ * The Checks/selection highlight; Comment mode hides it (Part 3). The RootShell is the frame itself.
+ * The Prototype player draws no selection: playback is the View itself, not an inspection of it.
+ */
 const highlightGeometry = computed(() => {
 	const geometry = preview.selectionGeometry.value
-	return preview.isCommentMode.value || geometry?.widgetId === 'root' ? undefined : geometry
+	return props.prototype || preview.isCommentMode.value || geometry?.widgetId === 'root' ? undefined : geometry
 })
-/** The runtime's hover candidate, drawn by the overlay (Part 3); the selected Widget needs no hover outline. */
+/**
+ * The runtime's hover candidate, drawn by the overlay (Part 3); the selected Widget needs no hover
+ * outline, and the Prototype player (Interact, every click goes to the View) draws none at all.
+ */
 const hoverCandidate = computed(() => {
 	const candidate = preview.hoverCandidate.value
-	if (!candidate || candidate.widgetId === 'root') return undefined
+	if (props.prototype || !candidate || candidate.widgetId === 'root') return undefined
 	if (candidate.purpose === 'inspection' && candidate.widgetId === highlightGeometry.value?.widgetId) return undefined
 	return candidate
 })
@@ -612,6 +618,7 @@ function switchToBase(): void {
               :hover="hoverCandidate"
               :hover-type="hoverNode?.type"
               :viewport="dims"
+              :bounds="stageBounds"
             />
           </div>
         </div>

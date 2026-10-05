@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import { mapContourAffine, mapPointAffine, type AffineOuterMapping } from '../../../src/preview/outer-precision'
 import type { Contour } from '../../../src/preview/protocol/schema'
@@ -22,12 +22,70 @@ const props = defineProps<{
 	hoverType?: string
 	/** Inner content viewport (the logical View size), for clipping the label anchors. */
 	viewport: Readonly<{ width: number; height: number }>
+	/** The visible stage in overlay-layer px; chips flip or clamp to stay inside it. */
+	bounds?: Readonly<{ left: number; top: number; right: number; bottom: number }>
 }>()
 
 const { t } = useI18n()
 
 const CHIP_HEIGHT = 22
 const CHIP_GAP = 4
+/** Minimum distance between a chip and the stage edge. */
+const CHIP_INSET = 4
+
+// Chip widths are measured so a chip can flip or clamp inside the stage (a narrow phone stage
+// would otherwise clip a label anchored near its right edge).
+type ChipName = 'type' | 'size' | 'hover'
+const chipWidths = reactive<Record<ChipName, number>>({ type: 0, size: 0, hover: 0 })
+const typeChip = ref<HTMLElement>()
+const sizeChip = ref<HTMLElement>()
+const hoverChip = ref<HTMLElement>()
+const chipNames = new WeakMap<Element, ChipName>()
+const chipObserver = typeof ResizeObserver === 'undefined'
+	? undefined
+	: new ResizeObserver((entries) => {
+		for (const entry of entries) {
+			const name = chipNames.get(entry.target)
+			if (name) chipWidths[name] = (entry.target as HTMLElement).offsetWidth
+		}
+	})
+function observeChip(name: ChipName, element: HTMLElement | undefined, previous: HTMLElement | undefined): void {
+	if (previous) chipObserver?.unobserve(previous)
+	if (!element) return
+	chipNames.set(element, name)
+	chipWidths[name] = element.offsetWidth
+	chipObserver?.observe(element)
+}
+watch(typeChip, (element, previous) => observeChip('type', element, previous), { flush: 'post' })
+watch(sizeChip, (element, previous) => observeChip('size', element, previous), { flush: 'post' })
+watch(hoverChip, (element, previous) => observeChip('hover', element, previous), { flush: 'post' })
+onBeforeUnmount(() => chipObserver?.disconnect())
+
+/** Keeps a chip of `width` starting at `left` inside the stage; with no stage, it is unchanged. */
+function clampChip(left: number, width: number): number {
+	const bounds = props.bounds
+	if (!bounds) return left
+	const min = bounds.left + CHIP_INSET
+	const max = bounds.right - width - CHIP_INSET
+	return max < min ? min : Math.min(Math.max(left, min), max)
+}
+
+/**
+ * A start-aligned chip over a mark spanning `start`..`end`: left-aligned with the outline, flipped
+ * to end-align with it when that would cross the stage's right edge, then clamped inside the stage.
+ */
+function placeStartChip(start: number, end: number, width: number): number {
+	const bounds = props.bounds
+	const aligned = start - 1
+	if (!bounds || aligned + width <= bounds.right - CHIP_INSET) return clampChip(aligned, width)
+	return clampChip(end + 1 - width, width)
+}
+
+/** The chip row above a mark, or just inside it when the stage top leaves no room. */
+function chipTop(markTop: number): number {
+	const floor = props.bounds?.top ?? 0
+	return markTop - CHIP_HEIGHT - CHIP_GAP >= floor ? markTop - CHIP_HEIGHT - CHIP_GAP : markTop + CHIP_GAP
+}
 
 function pathOf(contour: Contour): string {
 	return contour.commands.map((command) => {
@@ -51,15 +109,17 @@ const hoverMark = computed(() => {
 	if (!mapping || !hover || !geometry || !geometry.regions.length) return undefined
 	const left = Math.max(0, geometry.rect.x)
 	const top = Math.max(0, geometry.rect.y)
+	const right = Math.min(props.viewport.width, geometry.rect.x + geometry.rect.width)
 	const topLeft = mapPointAffine({ x: left, y: top }, mapping)
+	const topRight = mapPointAffine({ x: right, y: top }, mapping)
 	const comment = hover.purpose === 'comment-range'
 	const type = props.hoverType ?? ''
 	return {
 		comment,
 		paths: geometry.regions.map(region => ({ id: region.regionId, d: pathOf(mapContourAffine(region.contour, mapping)) })),
 		chip: {
-			left: topLeft.x - 1,
-			top: topLeft.y - CHIP_HEIGHT - CHIP_GAP >= 0 ? topLeft.y - CHIP_HEIGHT - CHIP_GAP : topLeft.y + CHIP_GAP,
+			left: placeStartChip(topLeft.x, topRight.x, chipWidths.hover),
+			top: chipTop(topLeft.y),
 			text: comment ? t('comment.hoverChip', { type: type || `#${hover.widgetId}` }) : type || `#${hover.widgetId}`,
 		},
 	}
@@ -79,12 +139,14 @@ const selection = computed(() => {
 	const bottomRight = mapPointAffine({ x: right, y: bottom }, mapping)
 	// The type chip sits above the outline (over the gutter if need be), or just inside it at the
 	// very top of the stage. The dimension chip sits below; the stage always keeps room under the frame.
-	const typeTop = topLeft.y - CHIP_HEIGHT - CHIP_GAP >= 0 ? topLeft.y - CHIP_HEIGHT - CHIP_GAP : topLeft.y + CHIP_GAP
+	// Both flip or clamp horizontally so neither is clipped at a stage edge.
+	const typeTop = chipTop(topLeft.y)
 	const sizeTop = bottomRight.y + CHIP_GAP
+	const sizeWidth = chipWidths.size
 	return {
 		paths,
-		type: { left: topLeft.x - 1, top: typeTop },
-		size: { left: (topLeft.x + bottomRight.x) / 2, top: sizeTop },
+		type: { left: placeStartChip(topLeft.x, bottomRight.x, chipWidths.type), top: typeTop },
+		size: { left: clampChip((topLeft.x + bottomRight.x) / 2 - sizeWidth / 2, sizeWidth), top: sizeTop },
 		dimensions: t('canvas.dimensions', { width: Math.round(geometry.rect.width), height: Math.round(geometry.rect.height) }),
 	}
 })
@@ -115,6 +177,7 @@ const selection = computed(() => {
         </g>
       </svg>
       <span
+        ref="hoverChip"
         class="blueprint-chip"
         :class="hoverMark.comment ? 'text-annotation' : ''"
         data-hover-chip
@@ -146,6 +209,7 @@ const selection = computed(() => {
         </g>
       </svg>
       <span
+        ref="typeChip"
         class="blueprint-chip"
         data-blueprint="type"
         :style="{ left: `${selection.type.left}px`, top: `${selection.type.top}px` }"
@@ -156,7 +220,8 @@ const selection = computed(() => {
         >{{ widgetType }} · </span>#{{ geometry!.widgetId }}
       </span>
       <span
-        class="blueprint-chip -translate-x-1/2"
+        ref="sizeChip"
+        class="blueprint-chip"
         data-blueprint="size"
         :style="{ left: `${selection.size.left}px`, top: `${selection.size.top}px` }"
       >{{ selection.dimensions }}</span>
