@@ -1,2 +1,43 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
+
+/*
+ * Workbench semantic design tokens.
+ *
+ * These describe the Workbench chrome only (light / dark / system color mode).
+ * They are deliberately separate from Workspace `themes`, which an adapter uses
+ * to render a View inside the preview iframe.
+ */
+:root {
+  --wb-selection: var(--ui-primary);
+  --wb-selection-subtle: color-mix(in oklab, var(--ui-primary) 14%, transparent);
+  --wb-highlight: var(--ui-primary);
+  --wb-comment: var(--ui-warning);
+  --wb-comment-subtle: color-mix(in oklab, var(--ui-warning) 18%, transparent);
+  --wb-canvas: var(--ui-bg-muted);
+  --wb-canvas-dot: var(--ui-border-accented);
+  --wb-frame: var(--ui-bg);
+}
+
+.dark {
+  --wb-selection-subtle: color-mix(in oklab, var(--ui-primary) 22%, transparent);
+  --wb-comment-subtle: color-mix(in oklab, var(--ui-warning) 24%, transparent);
+  --wb-canvas: var(--ui-bg);
+}
+
+@theme inline {
+  --color-selection: var(--wb-selection);
+  --color-selection-subtle: var(--wb-selection-subtle);
+  --color-highlight: var(--wb-highlight);
+  --color-comment: var(--wb-comment);
+  --color-comment-subtle: var(--wb-comment-subtle);
+  --color-canvas: var(--wb-canvas);
+  --color-canvas-dot: var(--wb-canvas-dot);
+  --color-frame: var(--wb-frame);
+}
+
+/* Visible keyboard focus for any focusable chrome element Nuxt UI does not style itself. */
+:where(a, button, [role="tab"], [role="treeitem"], [tabindex]):focus-visible {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: 2px;
+}

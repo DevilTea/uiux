@@ -19,6 +19,7 @@ import {
 	productAdapterRuntimeMemberDecoder,
 } from '../adapters/product-integration'
 import { collectWidgetTypesFromIr } from './preview-runtime'
+import { FALLBACK_LOCALE } from './render-context-options'
 
 export type StandaloneAdapterDescriptor = Readonly<{
 	index: number
@@ -56,6 +57,24 @@ export interface PreviewRuntimeMountOptions {
 	context: ResolvedRenderContext
 	onStatusChange?: (status: PreviewRuntimeStatus) => void
 	locales?: ReadonlyMap<string, I18nResource> | Record<string, I18nResource>
+	/** The Workspace `i18n.defaultLocale`: the fallback for keys missing from the requested locale. */
+	defaultLocale?: string
+}
+
+/**
+ * Chooses the translation runtime's default (fallback) locale: the Workspace
+ * default locale when its resource is loaded, otherwise the requested locale.
+ * Callers that do not know the Workspace default get the same fallback the
+ * render context uses when no Workspace manifest is available.
+ */
+export function resolveTranslationFallbackLocale(
+	requestedLocale: string,
+	workspaceDefaultLocale: string | undefined,
+	resources: ReadonlyMap<string, unknown>,
+): string {
+	const fallback = workspaceDefaultLocale || FALLBACK_LOCALE
+	if (resources.has(fallback)) return fallback
+	return requestedLocale
 }
 
 export type StandalonePreviewMountFactory = Readonly<{
@@ -209,9 +228,9 @@ export function createStandalonePreviewMount(input: Readonly<{
 		}
 
 		function getTranslationRuntime(currentLocale: string): TranslationRuntime {
-			const hasPrimary = resourceMap.has(currentLocale)
-			const hasFallback = resourceMap.has('en-US')
-			const primaryLocale = hasPrimary ? currentLocale : (hasFallback ? 'en-US' : currentLocale)
+			// The runtime's default locale is the fallback for keys missing from the requested locale,
+			// so it must be the Workspace default locale, not the requested one.
+			const primaryLocale = resolveTranslationFallbackLocale(currentLocale, options.defaultLocale, resourceMap)
 			const res = createTranslationRuntime(primaryLocale, resourceMap)
 			if (res.state === 'ready') {
 				return res.runtime

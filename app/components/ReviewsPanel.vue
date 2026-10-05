@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useI18n } from '#imports'
 import { useUiuxClient } from '../composables/useUiuxClient'
+import { useWorkbenchFeedback } from '../composables/useWorkbenchFeedback'
+import { useWorkbenchFormat } from '../composables/useWorkbenchFormat'
+import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
 import type { FormalEvidenceRecord } from '../../src/domain/evidence/schema'
 import { isCompleteEvidenceForViewRevision } from '../../src/domain/evidence/staleness'
 import type { ReviewAnchor, ReviewStatus, ReviewThread } from '../../src/domain/reviews/schema'
@@ -12,7 +16,6 @@ interface ReviewSummary {
 	diagnosticCount: number
 	summary: { anchor?: ReviewAnchor; status?: ReviewStatus; messageCount?: number }
 }
-
 
 interface ReviewRead {
 	kind: 'review'
@@ -27,6 +30,13 @@ interface FormalEvidenceItem {
 	record: FormalEvidenceRecord
 }
 
+type FormError = { name: string; message: string }
+
+// Actor display name and Decision defaults are authored Workspace data, not Workbench chrome.
+const DEFAULT_ACTOR_NAME = 'Reviewer'
+const DEFAULT_OUTCOME_SUMMARY = 'Decision accepted.'
+const DEFAULT_OUTCOME_RATIONALE = 'Consensus reached in review thread.'
+
 const props = defineProps<{
 	readOnly?: boolean
 	currentViewId?: string
@@ -36,11 +46,15 @@ const props = defineProps<{
 }>()
 
 const uiux = useUiuxClient()
+const { t } = useI18n()
+const feedback = useWorkbenchFeedback()
+const fmt = useWorkbenchFormat()
 
 const emit = defineEmits<{
 	(e: 'highlightWidget', widgetId: string): void
 	(e: 'toggleCommentMode'): void
 	(e: 'viewPromoted'): void
+	(e: 'changed'): void
 }>()
 
 const reviews = ref<readonly ReviewSummary[]>([])
@@ -50,11 +64,11 @@ const scopeToCurrentView = ref(true)
 const loadingList = ref(false)
 const loadingDetail = ref(false)
 const reviewLoadSequence = ref(0)
-const error = ref<string>()
+const loadError = ref<FetchErrorDetails>()
 
 // Action form states
 const newMessageBody = ref('')
-const authorName = ref('Reviewer')
+const authorName = ref(DEFAULT_ACTOR_NAME)
 const sendingMessage = ref(false)
 
 const reanchorReason = ref('')
@@ -70,33 +84,70 @@ const readying = ref(false)
 
 // Promotion to Decision state
 const isPromoting = ref(false)
-const promoteQuestion = ref('')
-const promoteOutcomeSummary = ref('')
-const promoteOutcomeRationale = ref('')
+const promoteForm = reactive({ question: '', outcomeSummary: '', outcomeRationale: '' })
 const promoting = ref(false)
-const promotionResult = ref<{ status: string; revision: string; viewRevision?: string }>()
+const promoteError = ref<FetchErrorDetails>()
 
-// New thread modal / inline
+// New thread modal
 const isCreatingThread = ref(false)
-const newThreadWidgetId = ref(props.selectedWidgetId || 'root')
-const newThreadFirstMessage = ref('')
+const createForm = reactive({ widgetId: props.selectedWidgetId || 'root', firstMessage: '' })
 const creatingThread = ref(false)
+const createError = ref<FetchErrorDetails>()
 
 const conflict = ref(false)
-const actionSuccess = ref<string>()
 
 const visibleReviews = computed(() => {
 	if (!scopeToCurrentView.value || !props.currentViewId) return reviews.value
 	return reviews.value.filter(r => r.summary.anchor?.viewId === props.currentViewId)
 })
 
+const threadItems = computed(() => visibleReviews.value.map(thread => ({
+	value: thread.key,
+	label: `#${thread.summary.anchor?.widgetId || 'root'}`,
+	description: t('reviews.messageCount', thread.summary.messageCount ?? 0),
+	status: thread.summary.status ?? 'open',
+})))
+
+const messageCount = computed(() => selectedReviewData.value?.resource.messages?.length ?? 0)
+const reanchorTarget = computed(() => props.selectedWidgetId || 'root')
+
 watch(() => props.selectedWidgetId, (newWidget) => {
-	if (newWidget) newThreadWidgetId.value = newWidget
+	if (newWidget) createForm.widgetId = newWidget
 })
+
+function statusColor(status: ReviewStatus | undefined): 'success' | 'info' | 'neutral' {
+	if (status === 'resolved') return 'success'
+	if (status === 'ready-for-review') return 'info'
+	return 'neutral'
+}
+
+function statusLabel(status: ReviewStatus | undefined): string {
+	if (status === 'resolved') return t('reviews.status.resolved')
+	if (status === 'ready-for-review') return t('reviews.status.readyForReview')
+	return t('reviews.status.open')
+}
+
+function actorName(): string {
+	return authorName.value.trim() || DEFAULT_ACTOR_NAME
+}
+
+function shorten(value: string, length: number): string {
+	return value.length > length ? `${value.slice(0, length)}…` : value
+}
+
+/** Shows a stale-revision conflict inline, otherwise an error toast with the server diagnostics. */
+function reportMutationError(cause: unknown, fallback: string): FetchErrorDetails | undefined {
+	const details = describeFetchError(cause, fallback)
+	if (details.statusCode === 409 || details.status === 'conflict') {
+		conflict.value = true
+		return undefined
+	}
+	return feedback.error(cause, fallback)
+}
 
 async function fetchReviews() {
 	loadingList.value = true
-	error.value = undefined
+	loadError.value = undefined
 	try {
 		const res = await uiux.listResources<ReviewSummary>(['review'], { limit: 100 })
 		reviews.value = res.items
@@ -108,7 +159,7 @@ async function fetchReviews() {
 		}
 	}
 	catch (err: unknown) {
-		error.value = err instanceof Error ? err.message : 'Failed to fetch reviews'
+		loadError.value = describeFetchError(err, t('reviews.errors.loadListFailed'))
 	}
 	finally {
 		loadingList.value = false
@@ -118,9 +169,12 @@ async function fetchReviews() {
 async function selectReview(id: string) {
 	selectedReviewId.value = id
 	conflict.value = false
-	actionSuccess.value = undefined
-	promotionResult.value = undefined
 	await loadSelectedReviewDetail()
+}
+
+function onSelectThread(value: unknown) {
+	// Ignore deselection (clicking the selected item again) so a thread stays open.
+	if (typeof value === 'string' && value && value !== selectedReviewId.value) void selectReview(value)
 }
 
 async function loadSelectedReviewDetail() {
@@ -134,19 +188,24 @@ async function loadSelectedReviewDetail() {
 	loadingDetail.value = true
 	try {
 		const data = await uiux.readResource<ReviewRead>('review', id)
-		if (!data) throw new Error('Review thread is unavailable.')
+		if (!data) throw new Error(t('reviews.errors.threadUnavailable'))
 		if (reviewLoadSequence.value !== currentSeq) return
 		selectedReviewData.value = data
 	}
 	catch (err: unknown) {
 		if (reviewLoadSequence.value !== currentSeq) return
-		error.value = err instanceof Error ? err.message : 'Failed to load review thread'
+		loadError.value = describeFetchError(err, t('reviews.errors.loadThreadFailed'))
 		selectedReviewData.value = undefined
 	}
 	finally {
 		if (reviewLoadSequence.value === currentSeq)
 			loadingDetail.value = false
 	}
+}
+
+async function reloadAfterConflict() {
+	await fetchReviews()
+	if (!loadError.value) conflict.value = false
 }
 
 function highlightAnchor() {
@@ -157,9 +216,8 @@ function highlightAnchor() {
 }
 
 async function handleAppendMessage() {
-	if (!selectedReviewData.value || !newMessageBody.value.trim()) return
+	if (!selectedReviewData.value || !newMessageBody.value.trim() || sendingMessage.value) return
 	sendingMessage.value = true
-	error.value = undefined
 	conflict.value = false
 
 	try {
@@ -167,18 +225,17 @@ async function handleAppendMessage() {
 			method: 'POST',
 			body: {
 				expectedRevision: selectedReviewData.value.revision,
-				actor: { type: 'human', displayName: authorName.value.trim() || 'Reviewer' },
+				actor: { type: 'human', displayName: actorName() },
 				body: newMessageBody.value.trim(),
 			},
 		})
 		newMessageBody.value = ''
-		actionSuccess.value = 'Message posted.'
+		emit('changed')
+		feedback.success(t('reviews.feedback.messagePosted'))
 		await fetchReviews()
 	}
 	catch (err: unknown) {
-		const errorObj = err as { status?: number; statusCode?: number; data?: { message?: string } }
-		if (errorObj?.status === 409 || errorObj?.statusCode === 409) conflict.value = true
-		else error.value = errorObj?.data?.message || (err instanceof Error ? err.message : 'Failed to post message')
+		reportMutationError(err, t('reviews.errors.postMessageFailed'))
 	}
 	finally {
 		sendingMessage.value = false
@@ -187,8 +244,8 @@ async function handleAppendMessage() {
 
 async function handleReanchor() {
 	if (!selectedReviewData.value || !props.currentViewId || !props.selectedWidgetId) return
+	const widgetId = props.selectedWidgetId
 	reanchoring.value = true
-	error.value = undefined
 	conflict.value = false
 
 	try {
@@ -198,20 +255,19 @@ async function handleReanchor() {
 				expectedRevision: selectedReviewData.value.revision,
 				anchor: {
 					viewId: props.currentViewId,
-					widgetId: props.selectedWidgetId,
+					widgetId,
 				},
-				actor: { type: 'human', displayName: authorName.value.trim() || 'Reviewer' },
+				actor: { type: 'human', displayName: actorName() },
 				reason: reanchorReason.value.trim() || undefined,
 			},
 		})
 		reanchorReason.value = ''
-		actionSuccess.value = `Thread reanchored to #${props.selectedWidgetId}.`
+		emit('changed')
+		feedback.success(t('reviews.feedback.reanchored', { widgetId }))
 		await fetchReviews()
 	}
 	catch (err: unknown) {
-		const errorObj = err as { status?: number; statusCode?: number; data?: { message?: string } }
-		if (errorObj?.status === 409 || errorObj?.statusCode === 409) conflict.value = true
-		else error.value = errorObj?.data?.message || (err instanceof Error ? err.message : 'Failed to reanchor')
+		reportMutationError(err, t('reviews.errors.reanchorFailed'))
 	}
 	finally {
 		reanchoring.value = false
@@ -221,7 +277,6 @@ async function handleReanchor() {
 async function handleSubmitReady() {
 	if (!selectedReviewData.value) return
 	readying.value = true
-	error.value = undefined
 	conflict.value = false
 
 	try {
@@ -232,8 +287,8 @@ async function handleSubmitReady() {
 				const targetView = await $fetch<{ revision: string }>(`/api/resources/view/${encodeURIComponent(targetViewId)}`)
 				targetRev = targetView.revision
 			}
-			catch {
-				error.value = `Target View ${targetViewId} could not be resolved to a current canonical revision.`
+			catch (cause: unknown) {
+				feedback.error(cause, t('reviews.errors.targetViewUnresolved', { viewId: targetViewId }))
 				return
 			}
 		}
@@ -246,7 +301,7 @@ async function handleSubmitReady() {
 		)].map(digest => ({ kind: 'formal_capture', evidence: digest }))
 
 		if (evidenceRefs.length === 0) {
-			error.value = 'No complete Formal Evidence matches the current target View revision. Capture current evidence before marking this Review ready.'
+			feedback.error(undefined, t('reviews.errors.noCurrentEvidence'))
 			return
 		}
 
@@ -254,19 +309,18 @@ async function handleSubmitReady() {
 			method: 'POST',
 			body: {
 				expectedRevision: selectedReviewData.value.revision,
-				actor: { type: 'human', displayName: authorName.value.trim() || 'Reviewer' },
+				actor: { type: 'human', displayName: actorName() },
 				changeDomains: ['views'],
 				resources: [{ identity: { kind: 'view', key: targetViewId }, revision: targetRev }],
 				evidenceRefs,
 			},
 		})
-		actionSuccess.value = `Review marked as ready with ${evidenceRefs.length} current Formal Evidence record${evidenceRefs.length === 1 ? '' : 's'}.`
+		emit('changed')
+		feedback.success(t('reviews.feedback.markedReady', evidenceRefs.length))
 		await fetchReviews()
 	}
 	catch (err: unknown) {
-		const errorObj = err as { status?: number; statusCode?: number; data?: { message?: string } }
-		if (errorObj?.status === 409 || errorObj?.statusCode === 409) conflict.value = true
-		else error.value = errorObj?.data?.message || (err instanceof Error ? err.message : 'Failed to mark ready')
+		reportMutationError(err, t('reviews.errors.readyFailed'))
 	}
 	finally {
 		readying.value = false
@@ -276,7 +330,6 @@ async function handleSubmitReady() {
 async function handleResolve() {
 	if (!selectedReviewData.value) return
 	resolving.value = true
-	error.value = undefined
 	conflict.value = false
 
 	try {
@@ -285,19 +338,18 @@ async function handleResolve() {
 			method: 'POST',
 			body: {
 				expectedRevision: selectedReviewData.value.revision,
-				actor: { type: 'human', displayName: authorName.value.trim() || 'Reviewer' },
+				actor: { type: 'human', displayName: actorName() },
 				...(latestSub?.id ? { submissionId: latestSub.id } : {}),
 				reason: resolveReason.value.trim() || undefined,
 			},
 		})
 		resolveReason.value = ''
-		actionSuccess.value = 'Review thread resolved.'
+		emit('changed')
+		feedback.success(t('reviews.feedback.resolved'))
 		await fetchReviews()
 	}
 	catch (err: unknown) {
-		const errorObj = err as { status?: number; statusCode?: number; data?: { message?: string } }
-		if (errorObj?.status === 409 || errorObj?.statusCode === 409) conflict.value = true
-		else error.value = errorObj?.data?.message || (err instanceof Error ? err.message : 'Failed to resolve review')
+		reportMutationError(err, t('reviews.errors.resolveFailed'))
 	}
 	finally {
 		resolving.value = false
@@ -307,7 +359,6 @@ async function handleResolve() {
 async function handleReopen() {
 	if (!selectedReviewData.value) return
 	reopening.value = true
-	error.value = undefined
 	conflict.value = false
 
 	try {
@@ -315,26 +366,35 @@ async function handleReopen() {
 			method: 'POST',
 			body: {
 				expectedRevision: selectedReviewData.value.revision,
-				actor: { type: 'human', displayName: authorName.value.trim() || 'Reviewer' },
+				actor: { type: 'human', displayName: actorName() },
 				reason: reopenReason.value.trim() || undefined,
 			},
 		})
 		reopenReason.value = ''
-		actionSuccess.value = 'Review thread reopened.'
+		emit('changed')
+		feedback.success(t('reviews.feedback.reopened'))
 		await fetchReviews()
 	}
 	catch (err: unknown) {
-		const errorObj = err as { status?: number; statusCode?: number; data?: { message?: string } }
-		if (errorObj?.status === 409 || errorObj?.statusCode === 409) conflict.value = true
-		else error.value = errorObj?.data?.message || (err instanceof Error ? err.message : 'Failed to reopen review')
+		reportMutationError(err, t('reviews.errors.reopenFailed'))
 	}
 	finally {
 		reopening.value = false
 	}
 }
 
+function validatePromoteForm(state: Partial<typeof promoteForm>): FormError[] {
+	return state.question?.trim() ? [] : [{ name: 'question', message: t('reviews.promote.questionRequired') }]
+}
+
+function openPromoteModal() {
+	promoteError.value = undefined
+	isPromoting.value = true
+}
+
 async function handlePromoteToDecision() {
-	if (!selectedReviewData.value || !promoteQuestion.value.trim()) return
+	if (!selectedReviewData.value || !promoteForm.question.trim() || promoting.value) return
+	promoteError.value = undefined
 
 	// Fetch current target view revision if not provided or different view
 	let targetViewRev = props.currentViewRevision
@@ -344,14 +404,13 @@ async function handlePromoteToDecision() {
 			const viewRead = await $fetch<{ revision: string }>(`/api/resources/view/${encodeURIComponent(targetViewId)}`)
 			targetViewRev = viewRead.revision
 		}
-		catch {
-			error.value = `Target view ${targetViewId} could not be resolved.`
+		catch (cause: unknown) {
+			promoteError.value = feedback.error(cause, t('reviews.errors.targetViewUnresolved', { viewId: targetViewId }))
 			return
 		}
 	}
 
 	promoting.value = true
-	error.value = undefined
 	conflict.value = false
 
 	try {
@@ -361,24 +420,27 @@ async function handlePromoteToDecision() {
 				expectedReviewRevision: selectedReviewData.value.revision,
 				viewId: targetViewId,
 				expectedViewRevision: targetViewRev,
-				question: promoteQuestion.value.trim(),
+				question: promoteForm.question.trim(),
 				outcome: {
-					summary: promoteOutcomeSummary.value.trim() || 'Decision accepted.',
-					rationale: promoteOutcomeRationale.value.trim() || 'Consensus reached in review thread.',
+					summary: promoteForm.outcomeSummary.trim() || DEFAULT_OUTCOME_SUMMARY,
+					rationale: promoteForm.outcomeRationale.trim() || DEFAULT_OUTCOME_RATIONALE,
 				},
-				actor: { type: 'human', displayName: authorName.value.trim() || 'Reviewer' },
+				actor: { type: 'human', displayName: actorName() },
 			},
 		})
-		promotionResult.value = res
 		isPromoting.value = false
-		actionSuccess.value = 'Promoted to Decision atomically!'
+		emit('changed')
+		feedback.success(
+			t('reviews.feedback.promoted'),
+			res.viewRevision ? t('reviews.feedback.promotedViewRevision', { revision: shorten(res.viewRevision, 12) }) : undefined,
+		)
 		await fetchReviews()
 		emit('viewPromoted')
 	}
 	catch (err: unknown) {
-		const errorObj = err as { status?: number; statusCode?: number; data?: { message?: string } }
-		if (errorObj?.status === 409 || errorObj?.statusCode === 409) conflict.value = true
-		else error.value = errorObj?.data?.message || (err instanceof Error ? err.message : 'Promotion failed')
+		const details = reportMutationError(err, t('reviews.errors.promoteFailed'))
+		if (details) promoteError.value = details
+		else isPromoting.value = false
 	}
 	finally {
 		promoting.value = false
@@ -387,13 +449,13 @@ async function handlePromoteToDecision() {
 
 async function handleCreateReviewThread(targetWidgetIdOverride?: string) {
 	if (props.readOnly) return
+	createError.value = undefined
 	if (!props.currentViewId) {
-		error.value = 'No view selected to anchor review thread.'
+		createError.value = feedback.error(undefined, t('reviews.errors.noViewSelected'))
 		return
 	}
-	const targetWidget = targetWidgetIdOverride || newThreadWidgetId.value || 'root'
+	const targetWidget = targetWidgetIdOverride || createForm.widgetId.trim() || 'root'
 	creatingThread.value = true
-	error.value = undefined
 
 	try {
 		const res = await $fetch<{ status: string; key: string; revision: string }>('/api/reviews', {
@@ -405,26 +467,34 @@ async function handleCreateReviewThread(targetWidgetIdOverride?: string) {
 				},
 			},
 		})
+		emit('changed')
 
-		if (newThreadFirstMessage.value.trim() && res.key && res.revision) {
-			await $fetch(`/api/reviews/${encodeURIComponent(res.key)}/messages`, {
-				method: 'POST',
-				body: {
-					expectedRevision: res.revision,
-					actor: { type: 'human', displayName: authorName.value.trim() || 'Reviewer' },
-					body: newThreadFirstMessage.value.trim(),
-				},
-			}).catch(() => undefined)
+		if (createForm.firstMessage.trim() && res.key && res.revision) {
+			try {
+				await $fetch(`/api/reviews/${encodeURIComponent(res.key)}/messages`, {
+					method: 'POST',
+					body: {
+						expectedRevision: res.revision,
+						actor: { type: 'human', displayName: actorName() },
+						body: createForm.firstMessage.trim(),
+					},
+				})
+				emit('changed')
+			}
+			catch (cause: unknown) {
+				// The thread exists; report the lost initial message instead of swallowing it.
+				feedback.error(cause, t('reviews.errors.initialMessageFailed'))
+			}
 		}
 
 		isCreatingThread.value = false
-		newThreadFirstMessage.value = ''
+		createForm.firstMessage = ''
+		feedback.success(t('reviews.feedback.threadCreated', { widgetId: targetWidget }))
 		await fetchReviews()
 		if (res.key) await selectReview(res.key)
 	}
 	catch (err: unknown) {
-		const errorObj = err as { data?: { message?: string } }
-		error.value = errorObj?.data?.message || (err instanceof Error ? err.message : 'Failed to create thread')
+		createError.value = feedback.error(err, t('reviews.errors.createFailed'))
 	}
 	finally {
 		creatingThread.value = false
@@ -433,8 +503,15 @@ async function handleCreateReviewThread(targetWidgetIdOverride?: string) {
 
 function openCreateModal(widgetId?: string) {
 	if (props.readOnly) return
-	newThreadWidgetId.value = widgetId || props.selectedWidgetId || 'root'
+	createForm.widgetId = widgetId || props.selectedWidgetId || 'root'
+	createError.value = undefined
 	isCreatingThread.value = true
+}
+
+function pickWidgetInPreview() {
+	// Close the modal so the preview can be clicked; the shell reopens it via openCreateModal(widgetId).
+	isCreatingThread.value = false
+	if (!props.isCommentMode) emit('toggleCommentMode')
 }
 
 defineExpose({
@@ -452,15 +529,15 @@ watch(() => props.currentViewId, () => {
 </script>
 
 <template>
-  <div class="flex h-full flex-col overflow-hidden text-xs text-neutral-200">
+  <div class="flex min-h-0 flex-1 flex-col overflow-hidden text-xs text-default">
     <!-- Header -->
-    <div class="flex items-center justify-between border-b border-neutral-800 p-3">
-      <div>
-        <h2 class="text-sm font-semibold text-white">
-          Reviews & Comments
+    <div class="flex flex-wrap items-start justify-between gap-2 border-b border-default p-3">
+      <div class="min-w-0">
+        <h2 class="text-sm font-semibold text-highlighted">
+          {{ t('reviews.title') }}
         </h2>
-        <p class="text-[11px] text-neutral-400">
-          Threaded feedback with atomic Decision promotion
+        <p class="text-[11px] text-muted">
+          {{ t('reviews.subtitle') }}
         </p>
       </div>
 
@@ -468,330 +545,349 @@ watch(() => props.currentViewId, () => {
         v-if="!readOnly"
         class="flex items-center gap-1.5"
       >
-        <UButton
-          :color="isCommentMode ? 'warning' : 'neutral'"
-          :variant="isCommentMode ? 'solid' : 'outline'"
-          size="xs"
-          title="Toggle click-to-comment mode in preview"
-          @click="emit('toggleCommentMode')"
-        >
-          {{ isCommentMode ? 'Targeting Active' : '🎯 Comment' }}
-        </UButton>
+        <UTooltip :text="t('reviews.commentMode.tooltip')">
+          <UButton
+            :color="isCommentMode ? 'warning' : 'neutral'"
+            :variant="isCommentMode ? 'solid' : 'outline'"
+            :icon="isCommentMode ? 'i-lucide-crosshair' : 'i-lucide-message-square-plus'"
+            :aria-pressed="isCommentMode"
+            :disabled="!currentViewId"
+            size="xs"
+            @click="emit('toggleCommentMode')"
+          >
+            {{ isCommentMode ? t('reviews.commentMode.active') : t('reviews.commentMode.start') }}
+          </UButton>
+        </UTooltip>
         <UButton
           color="primary"
           variant="solid"
           size="xs"
-          @click="isCreatingThread = !isCreatingThread"
+          icon="i-lucide-plus"
+          :disabled="!currentViewId"
+          @click="openCreateModal()"
         >
-          + Thread
+          {{ t('reviews.newThread') }}
         </UButton>
       </div>
     </div>
 
     <!-- Filter Bar: Current View vs All -->
-    <div class="flex items-center justify-between border-b border-neutral-800 bg-neutral-950 px-3 py-1.5 text-[11px]">
-      <div class="flex items-center gap-2">
-        <label class="flex items-center gap-1.5 cursor-pointer text-neutral-300">
-          <input
-            v-model="scopeToCurrentView"
-            type="checkbox"
-            class="rounded border-neutral-700 bg-neutral-900 text-primary"
-          >
-          <span>Scope to current View</span>
-        </label>
-      </div>
-      <span class="text-neutral-500 font-mono">{{ visibleReviews.length }} threads</span>
+    <div class="flex items-center justify-between gap-2 border-b border-default bg-muted px-3 py-1.5">
+      <USwitch
+        v-model="scopeToCurrentView"
+        size="xs"
+        :label="t('reviews.scopeToCurrentView')"
+      />
+      <UBadge
+        color="neutral"
+        variant="subtle"
+        size="sm"
+      >
+        {{ t('reviews.threadCount', visibleReviews.length) }}
+      </UBadge>
     </div>
 
-    <!-- New Thread Inline Form -->
+    <!-- Load failure -->
     <div
-      v-if="isCreatingThread && !readOnly"
-      class="border-b border-neutral-800 bg-neutral-900/90 p-3 space-y-2.5"
+      v-if="loadError"
+      class="border-b border-default p-2"
     >
-      <div class="flex items-center justify-between">
-        <span class="font-semibold text-white">New Review Thread</span>
-        <button
-          type="button"
-          class="text-neutral-500 hover:text-neutral-300"
-          @click="isCreatingThread = false"
+      <UAlert
+        color="error"
+        variant="subtle"
+        icon="i-lucide-circle-alert"
+        :title="loadError.message"
+        :actions="[{ label: t('common.retry'), color: 'error', variant: 'outline', size: 'xs', icon: 'i-lucide-refresh-cw', loading: loadingList, onClick: () => { void fetchReviews() } }]"
+      >
+        <template
+          v-if="loadError.diagnostics.length"
+          #description
         >
-          ✕
-        </button>
-      </div>
-
-      <div class="space-y-1.5">
-        <div>
-          <span class="text-[10px] text-neutral-400">Target Widget Anchor:</span>
-          <div class="flex gap-2">
-            <UInput
-              v-model="newThreadWidgetId"
-              size="xs"
-              placeholder="root or widgetId"
-              class="flex-1 font-mono mt-0.5"
-            />
-            <UButton
-              color="neutral"
-              variant="outline"
-              size="xs"
-              title="Pick in preview"
-              @click="emit('toggleCommentMode')"
+          <ul class="list-disc space-y-0.5 ps-4">
+            <li
+              v-for="(diagnostic, dIdx) in loadError.diagnostics"
+              :key="dIdx"
             >
-              🎯 Pick
-            </UButton>
-          </div>
-        </div>
-
-        <div>
-          <span class="text-[10px] text-neutral-400">Initial Message (Optional):</span>
-          <textarea
-            v-model="newThreadFirstMessage"
-            rows="2"
-            class="mt-0.5 w-full rounded border border-neutral-700 bg-neutral-900 p-1.5 text-xs text-neutral-200 outline-none"
-            placeholder="Feedback or question for discussion…"
-          />
-        </div>
-      </div>
-
-      <div class="flex justify-end gap-2 pt-1">
-        <UButton
-          color="neutral"
-          variant="ghost"
-          size="xs"
-          @click="isCreatingThread = false"
-        >
-          Cancel
-        </UButton>
-        <UButton
-          color="primary"
-          variant="solid"
-          size="xs"
-          :loading="creatingThread"
-          @click="handleCreateReviewThread()"
-        >
-          Create Thread
-        </UButton>
-      </div>
+              {{ diagnostic.message }}
+            </li>
+          </ul>
+        </template>
+      </UAlert>
     </div>
 
     <!-- Review Threads List -->
-    <div class="max-h-44 overflow-y-auto border-b border-neutral-800 p-2">
-      <div
-        v-if="visibleReviews.length"
-        class="space-y-1"
+    <div class="border-b border-default p-2">
+      <UListbox
+        v-if="threadItems.length"
+        :model-value="selectedReviewId || undefined"
+        :items="threadItems"
+        value-key="value"
+        selection-behavior="replace"
+        size="sm"
+        :aria-label="t('reviews.threadListLabel')"
+        :ui="{
+          root: 'ring-0',
+          content: 'max-h-44',
+          group: 'p-0 space-y-0.5',
+          item: 'rounded-md data-[state=checked]:bg-selection-subtle data-[state=checked]:text-selection',
+          itemLabel: 'font-mono',
+          itemDescription: 'text-[10px]',
+          itemTrailingIcon: 'hidden',
+        }"
+        @update:model-value="onSelectThread"
       >
-        <button
-          v-for="thread in visibleReviews"
-          :key="thread.key"
-          type="button"
-          class="flex w-full items-center justify-between rounded px-2.5 py-1.5 text-left text-xs transition"
-          :class="selectedReviewId === thread.key ? 'bg-primary/20 text-white font-medium' : 'text-neutral-300 hover:bg-neutral-800/60'"
-          @click="selectReview(thread.key)"
-        >
-          <div class="truncate">
-            <span class="font-mono text-neutral-400">#{{ thread.summary.anchor?.widgetId || 'root' }}</span>
-            <span class="ml-2 font-mono text-[10px] text-neutral-500">({{ thread.summary.messageCount || 0 }} msgs)</span>
-          </div>
+        <template #item-trailing="{ item }">
           <UBadge
-            :color="thread.summary.status === 'resolved' ? 'success' : thread.summary.status === 'ready-for-review' ? 'info' : 'neutral'"
+            :color="statusColor(item.status)"
             variant="soft"
-            size="xs"
+            size="sm"
           >
-            {{ thread.summary.status || 'open' }}
+            {{ statusLabel(item.status) }}
           </UBadge>
-        </button>
-      </div>
+        </template>
+      </UListbox>
+      <UEmpty
+        v-else-if="!loadingList && !loadError"
+        size="xs"
+        variant="naked"
+        icon="i-lucide-messages-square"
+        :title="scopeToCurrentView && currentViewId ? t('reviews.empty.noThreadsInView') : t('reviews.empty.noThreadsInWorkspace')"
+      />
       <div
-        v-else-if="!loadingList"
-        class="py-4 text-center text-xs text-neutral-500"
+        v-else-if="loadingList"
+        class="flex items-center justify-center gap-1.5 py-3 text-muted"
       >
-        {{ scopeToCurrentView ? 'No review threads on this View.' : 'No review threads in Workspace.' }}
+        <UIcon
+          name="i-lucide-loader-circle"
+          class="size-4 animate-spin"
+        />
+        {{ t('common.loading') }}
       </div>
     </div>
 
     <!-- Active Review Thread Detail -->
     <div
       v-if="selectedReviewData"
-      class="flex min-h-0 flex-1 flex-col overflow-y-auto p-3 space-y-4"
+      class="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto p-3"
     >
       <!-- Thread Anchor & Status Header -->
-      <div class="rounded border border-neutral-800 bg-neutral-900/70 p-3 space-y-2">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <span class="font-mono font-medium text-white">#{{ selectedReviewData.resource.anchor.widgetId }}</span>
+      <UCard
+        variant="subtle"
+        :ui="{ body: 'space-y-2 p-3 sm:p-3' }"
+      >
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex min-w-0 items-center gap-2">
+            <span class="truncate font-mono font-medium text-highlighted">#{{ selectedReviewData.resource.anchor.widgetId }}</span>
             <UBadge
-              :color="selectedReviewData.resource.status === 'resolved' ? 'success' : selectedReviewData.resource.status === 'ready-for-review' ? 'info' : 'neutral'"
+              :color="statusColor(selectedReviewData.resource.status)"
               variant="soft"
-              size="xs"
+              size="sm"
             >
-              {{ selectedReviewData.resource.status }}
+              {{ statusLabel(selectedReviewData.resource.status) }}
             </UBadge>
           </div>
-          <UButton
-            color="neutral"
-            variant="outline"
-            size="xs"
-            title="Highlight target widget in preview"
-            @click="highlightAnchor"
-          >
-            🔍 Highlight
-          </UButton>
+          <UTooltip :text="t('reviews.highlightTooltip')">
+            <UButton
+              color="neutral"
+              variant="outline"
+              size="xs"
+              icon="i-lucide-scan-search"
+              @click="highlightAnchor"
+            >
+              {{ t('reviews.highlight') }}
+            </UButton>
+          </UTooltip>
         </div>
 
-        <div class="flex items-center justify-between text-[11px] text-neutral-400">
-          <span class="truncate">View: {{ selectedReviewData.resource.anchor.viewId.slice(0, 14) }}…</span>
-          <span class="font-mono text-[10px] text-neutral-500">Rev: {{ selectedReviewData.revision.slice(0, 10) }}…</span>
-        </div>
-      </div>
+        <!-- Key/value metadata: a compact definition list, no Nuxt UI component fits. -->
+        <dl class="flex items-center justify-between gap-2 text-[11px] text-muted">
+          <div class="flex min-w-0 gap-1">
+            <dt>{{ t('reviews.viewLabel') }}</dt>
+            <dd
+              class="truncate font-mono"
+              :title="selectedReviewData.resource.anchor.viewId"
+            >
+              {{ shorten(selectedReviewData.resource.anchor.viewId, 14) }}
+            </dd>
+          </div>
+          <div class="flex shrink-0 gap-1 text-[10px] text-dimmed">
+            <dt>{{ t('common.revision') }}</dt>
+            <dd
+              class="font-mono"
+              :title="selectedReviewData.revision"
+            >
+              {{ shorten(selectedReviewData.revision, 10) }}
+            </dd>
+          </div>
+        </dl>
+      </UCard>
 
-      <!-- Action Feedback / Conflict Banner -->
-      <div
+      <!-- Stale revision conflict -->
+      <UAlert
         v-if="conflict"
-        class="border border-amber-500/30 bg-amber-500/10 p-2.5 text-amber-300 text-[11px] rounded flex items-center justify-between"
-      >
-        <span>⚠ Stale revision conflict: This review thread was modified concurrently.</span>
-        <UButton
-          color="warning"
-          variant="soft"
-          size="xs"
-          @click="loadSelectedReviewDetail"
-        >
-          Reload
-        </UButton>
-      </div>
-
-      <div
-        v-else-if="actionSuccess"
-        class="border border-emerald-500/30 bg-emerald-500/10 p-2 text-emerald-300 text-[11px] rounded"
-      >
-        ✓ {{ actionSuccess }}
-      </div>
-
-      <div
-        v-else-if="error"
-        class="border border-red-500/30 bg-red-500/10 p-2 text-red-300 text-[11px] rounded"
-      >
-        {{ error }}
-      </div>
-
-      <!-- Promotion Result Banner -->
-      <div
-        v-if="promotionResult"
-        class="rounded border border-primary/40 bg-primary/10 p-3 space-y-1 text-primary-200"
-      >
-        <span class="font-semibold text-white">✓ Promoted to Canonical Decision!</span>
-        <p class="text-[11px]">
-          Target View updated (viewRevision: {{ promotionResult.viewRevision ? promotionResult.viewRevision.slice(0, 12) + '…' : 'updated' }}).
-        </p>
-      </div>
+        color="error"
+        variant="subtle"
+        icon="i-lucide-git-compare-arrows"
+        :title="t('reviews.conflict.title')"
+        :description="t('reviews.conflict.description')"
+        :actions="[{ label: t('common.reload'), color: 'error', variant: 'outline', size: 'xs', icon: 'i-lucide-refresh-cw', loading: loadingList || loadingDetail, onClick: () => { void reloadAfterConflict() } }]"
+      />
 
       <!-- Messages Thread Stream -->
-      <div class="space-y-2">
-        <span class="font-semibold text-white">Conversation ({{ selectedReviewData.resource.messages?.length || 0 }})</span>
+      <section class="space-y-2">
+        <h3 class="font-semibold text-highlighted">
+          {{ t('reviews.conversation') }}
+          <span class="font-normal text-muted">· {{ t('reviews.messageCount', messageCount) }}</span>
+        </h3>
         <div
-          v-if="selectedReviewData.resource.messages?.length"
+          v-if="messageCount"
           class="space-y-2"
         >
-          <div
+          <UCard
             v-for="(msg, mIdx) in selectedReviewData.resource.messages"
             :key="mIdx"
-            class="rounded border border-neutral-800 bg-neutral-900/50 p-2.5 space-y-1"
+            variant="outline"
+            :ui="{ body: 'space-y-1 p-2.5 sm:p-2.5' }"
           >
-            <div class="flex items-center justify-between text-[10px]">
-              <span class="font-medium text-neutral-300">{{ msg.actor?.displayName || msg.actor?.type || 'User' }}</span>
-              <span class="font-mono text-neutral-500">{{ msg.at ? new Date(msg.at).toLocaleTimeString() : '' }}</span>
+            <div class="flex items-center justify-between gap-2 text-[10px]">
+              <span class="truncate font-medium text-toned">{{ msg.actor?.displayName || msg.actor?.type || t('reviews.unknownAuthor') }}</span>
+              <time
+                v-if="msg.at"
+                class="shrink-0 text-dimmed"
+                :datetime="msg.at"
+                :title="fmt.dateTime(msg.at, { dateStyle: 'full', timeStyle: 'long' })"
+              >{{ fmt.dateTime(msg.at) }}</time>
             </div>
-            <p class="text-[11px] text-neutral-200 whitespace-pre-wrap leading-relaxed">
+            <p class="whitespace-pre-wrap text-[11px] leading-relaxed text-default">
               {{ msg.body }}
             </p>
-          </div>
+          </UCard>
         </div>
-        <p
+        <UEmpty
           v-else
-          class="text-neutral-500 text-[11px] italic"
-        >
-          No messages posted yet.
-        </p>
-      </div>
+          size="xs"
+          variant="naked"
+          icon="i-lucide-message-circle"
+          :title="t('reviews.empty.noMessages')"
+        />
+      </section>
 
       <!-- Post New Message Form -->
-      <div
+      <UCard
         v-if="!readOnly"
-        class="rounded border border-neutral-800 bg-neutral-900/60 p-2.5 space-y-2"
+        variant="subtle"
+        :ui="{ body: 'space-y-2 p-2.5 sm:p-2.5' }"
       >
-        <div class="flex items-center justify-between">
-          <span class="text-[10px] font-semibold text-neutral-400">Post Reply</span>
-          <div class="flex items-center gap-1 text-[10px]">
-            <span class="text-neutral-500">As:</span>
+        <form
+          class="space-y-2"
+          @submit.prevent="handleAppendMessage"
+        >
+          <UFormField
+            :label="t('reviews.reply.authorLabel')"
+            size="xs"
+            orientation="horizontal"
+          >
             <UInput
               v-model="authorName"
               size="xs"
-              placeholder="Name"
-              class="w-24"
+              :placeholder="t('reviews.reply.authorPlaceholder')"
+              class="w-32"
             />
-          </div>
-        </div>
+          </UFormField>
 
-        <textarea
-          v-model="newMessageBody"
-          rows="2"
-          class="w-full rounded border border-neutral-700 bg-neutral-950 p-2 text-xs text-neutral-200 outline-none"
-          placeholder="Write feedback message…"
-          @keydown.enter.ctrl="handleAppendMessage"
-        />
-
-        <div class="flex justify-end">
-          <UButton
-            color="primary"
-            variant="solid"
+          <UFormField
+            :label="t('reviews.reply.messageLabel')"
             size="xs"
-            :loading="sendingMessage"
-            :disabled="!newMessageBody.trim()"
-            @click="handleAppendMessage"
           >
-            Send Reply
-          </UButton>
-        </div>
-      </div>
+            <UTextarea
+              v-model="newMessageBody"
+              :rows="2"
+              autoresize
+              :maxrows="8"
+              size="sm"
+              class="w-full"
+              :placeholder="t('reviews.reply.messagePlaceholder')"
+              @keydown.enter.ctrl.prevent="handleAppendMessage"
+              @keydown.enter.meta.prevent="handleAppendMessage"
+            />
+          </UFormField>
 
-      <!-- Lifecycle Actions Toolbar -->
-      <div
+          <div class="flex items-center justify-between gap-2">
+            <span class="flex items-center gap-1 text-[10px] text-dimmed">
+              <UKbd
+                value="meta"
+                size="sm"
+              />
+              <UKbd
+                value="enter"
+                size="sm"
+              />
+              {{ t('reviews.reply.shortcutHint') }}
+            </span>
+            <UButton
+              type="submit"
+              color="primary"
+              variant="solid"
+              size="xs"
+              icon="i-lucide-send"
+              :loading="sendingMessage"
+              :disabled="!newMessageBody.trim()"
+            >
+              {{ t('reviews.reply.send') }}
+            </UButton>
+          </div>
+        </form>
+      </UCard>
+
+      <!-- Lifecycle Actions -->
+      <UCard
         v-if="!readOnly"
-        class="rounded border border-neutral-800 bg-neutral-950 p-3 space-y-3"
+        variant="outline"
+        :ui="{ header: 'px-3 py-2 sm:px-3', body: 'space-y-3 p-3 sm:p-3' }"
       >
-        <span class="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">Lifecycle Operations</span>
+        <template #header>
+          <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted">
+            {{ t('reviews.lifecycle.title') }}
+          </h3>
+        </template>
 
-        <!-- Reanchor -->
-        <div class="flex items-center justify-between border-b border-neutral-800/80 pb-2">
-          <div>
-            <p class="font-medium text-neutral-300">
-              Reanchor Target
+        <!-- Re-anchor -->
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="min-w-0">
+            <p class="font-medium text-toned">
+              {{ t('reviews.lifecycle.reanchorTitle') }}
             </p>
-            <p class="text-[10px] text-neutral-500">
-              Move anchor to currently selected widget ({{ selectedWidgetId || 'root' }})
+            <p class="text-[10px] text-dimmed">
+              {{ selectedWidgetId && currentViewId ? t('reviews.lifecycle.reanchorDescription', { widgetId: reanchorTarget }) : t('reviews.lifecycle.reanchorNeedsWidget') }}
             </p>
           </div>
           <UButton
             color="neutral"
             variant="outline"
             size="xs"
+            icon="i-lucide-anchor"
             :loading="reanchoring"
+            :disabled="!selectedWidgetId || !currentViewId"
             @click="handleReanchor"
           >
-            Reanchor to #{{ selectedWidgetId || 'root' }}
+            {{ t('reviews.lifecycle.reanchorAction', { widgetId: reanchorTarget }) }}
           </UButton>
         </div>
 
+        <USeparator />
+
         <!-- Status Transitions -->
-        <div class="flex flex-wrap gap-2 border-b border-neutral-800/80 pb-2">
+        <div class="flex flex-wrap gap-2">
           <UButton
             v-if="selectedReviewData.resource.status === 'open'"
             color="neutral"
             variant="outline"
             size="xs"
+            icon="i-lucide-send-horizontal"
             :loading="readying"
             @click="handleSubmitReady"
           >
-            Ready for Review
+            {{ t('reviews.lifecycle.markReady') }}
           </UButton>
 
           <UButton
@@ -799,10 +895,11 @@ watch(() => props.currentViewId, () => {
             color="success"
             variant="soft"
             size="xs"
+            icon="i-lucide-check"
             :loading="resolving"
             @click="handleResolve"
           >
-            Resolve Thread
+            {{ t('reviews.lifecycle.resolve') }}
           </UButton>
 
           <UButton
@@ -810,89 +907,255 @@ watch(() => props.currentViewId, () => {
             color="warning"
             variant="soft"
             size="xs"
+            icon="i-lucide-rotate-ccw"
             :loading="reopening"
             @click="handleReopen"
           >
-            {{ selectedReviewData.resource.status === 'ready-for-review' ? 'Reopen (Request Changes)' : 'Reopen Thread' }}
+            {{ selectedReviewData.resource.status === 'ready-for-review' ? t('reviews.lifecycle.requestChanges') : t('reviews.lifecycle.reopen') }}
           </UButton>
         </div>
 
+        <USeparator />
+
         <!-- Promote to Decision -->
-        <div class="space-y-2 pt-1">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="font-medium text-white">
-                Promote to View Decision
-              </p>
-              <p class="text-[10px] text-neutral-500">
-                Atomic CAS promotion recording outcome in View.spec
-              </p>
-            </div>
-            <UButton
-              color="primary"
-              variant="outline"
-              size="xs"
-              @click="isPromoting = !isPromoting"
-            >
-              {{ isPromoting ? 'Cancel' : 'Promote…' }}
-            </UButton>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="min-w-0">
+            <p class="font-medium text-highlighted">
+              {{ t('reviews.promote.title') }}
+            </p>
+            <p class="text-[10px] text-dimmed">
+              {{ t('reviews.promote.description') }}
+            </p>
           </div>
-
-          <div
-            v-if="isPromoting"
-            class="rounded border border-primary/30 bg-primary/5 p-3 space-y-2 mt-2"
+          <UButton
+            color="primary"
+            variant="outline"
+            size="xs"
+            icon="i-lucide-gavel"
+            @click="openPromoteModal"
           >
-            <div>
-              <span class="text-[10px] text-neutral-300 font-medium">Decision Question:</span>
-              <UInput
-                v-model="promoteQuestion"
-                size="xs"
-                placeholder="e.g. Keep three-column workspace layout?"
-                class="mt-0.5"
-              />
-            </div>
-            <div>
-              <span class="text-[10px] text-neutral-300 font-medium">Outcome Summary:</span>
-              <UInput
-                v-model="promoteOutcomeSummary"
-                size="xs"
-                placeholder="e.g. Approved with collapsible side panels"
-                class="mt-0.5"
-              />
-            </div>
-            <div>
-              <span class="text-[10px] text-neutral-300 font-medium">Outcome Rationale:</span>
-              <textarea
-                v-model="promoteOutcomeRationale"
-                rows="2"
-                class="mt-0.5 w-full rounded border border-neutral-700 bg-neutral-900 p-1.5 text-xs text-neutral-200 outline-none"
-                placeholder="Rationale from discussion consensus…"
-              />
-            </div>
-
-            <div class="flex justify-end pt-1">
-              <UButton
-                color="primary"
-                variant="solid"
-                size="xs"
-                :loading="promoting"
-                :disabled="!promoteQuestion.trim()"
-                @click="handlePromoteToDecision"
-              >
-                Execute Atomic Promotion
-              </UButton>
-            </div>
-          </div>
+            {{ t('reviews.promote.open') }}
+          </UButton>
         </div>
-      </div>
+      </UCard>
+    </div>
+
+    <!-- Detail loading -->
+    <div
+      v-else-if="loadingDetail"
+      class="flex flex-1 items-center justify-center gap-1.5 p-6 text-muted"
+    >
+      <UIcon
+        name="i-lucide-loader-circle"
+        class="size-4 animate-spin"
+      />
+      {{ t('common.loading') }}
     </div>
 
     <!-- Empty Detail State -->
     <div
       v-else-if="!loadingList"
-      class="flex flex-1 items-center justify-center p-6 text-center text-xs text-neutral-500"
+      class="flex flex-1 items-center justify-center p-4"
     >
-      {{ readOnly ? 'Select a published review thread to inspect its history.' : 'Select a review thread or click "🎯 Comment" to add feedback.' }}
+      <UEmpty
+        size="sm"
+        variant="naked"
+        icon="i-lucide-message-square-text"
+        :title="t('reviews.empty.noSelectionTitle')"
+        :description="readOnly ? t('reviews.empty.noSelectionReadOnly') : t('reviews.empty.noSelection')"
+      />
     </div>
+
+    <!-- New Thread Modal -->
+    <UModal
+      v-if="!readOnly"
+      v-model:open="isCreatingThread"
+      :title="t('reviews.create.title')"
+      :description="t('reviews.create.description')"
+    >
+      <template #body>
+        <UForm
+          :state="createForm"
+          class="space-y-4"
+          @submit="handleCreateReviewThread()"
+        >
+          <UAlert
+            v-if="createError"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-circle-alert"
+            :title="createError.message"
+          >
+            <template
+              v-if="createError.diagnostics.length"
+              #description
+            >
+              <ul class="list-disc space-y-0.5 ps-4">
+                <li
+                  v-for="(diagnostic, dIdx) in createError.diagnostics"
+                  :key="dIdx"
+                >
+                  {{ diagnostic.message }}
+                </li>
+              </ul>
+            </template>
+          </UAlert>
+
+          <UFormField
+            name="widgetId"
+            :label="t('reviews.create.widgetLabel')"
+            :help="t('reviews.create.widgetHelp')"
+          >
+            <div class="flex gap-2">
+              <UInput
+                v-model="createForm.widgetId"
+                class="flex-1"
+                :ui="{ base: 'font-mono' }"
+                :placeholder="t('reviews.create.widgetPlaceholder')"
+              />
+              <UButton
+                color="neutral"
+                variant="outline"
+                icon="i-lucide-crosshair"
+                @click="pickWidgetInPreview"
+              >
+                {{ t('reviews.create.pick') }}
+              </UButton>
+            </div>
+          </UFormField>
+
+          <UFormField
+            name="firstMessage"
+            :label="t('reviews.create.messageLabel')"
+            :hint="t('reviews.optional')"
+          >
+            <UTextarea
+              v-model="createForm.firstMessage"
+              :rows="3"
+              autoresize
+              class="w-full"
+              :placeholder="t('reviews.create.messagePlaceholder')"
+            />
+          </UFormField>
+
+          <div class="flex justify-end gap-2">
+            <UButton
+              color="neutral"
+              variant="ghost"
+              @click="isCreatingThread = false"
+            >
+              {{ t('common.cancel') }}
+            </UButton>
+            <UButton
+              type="submit"
+              color="primary"
+              variant="solid"
+              icon="i-lucide-plus"
+              :loading="creatingThread"
+              :disabled="!currentViewId"
+            >
+              {{ t('reviews.create.submit') }}
+            </UButton>
+          </div>
+        </UForm>
+      </template>
+    </UModal>
+
+    <!-- Promote to Decision Modal -->
+    <UModal
+      v-if="!readOnly && selectedReviewData"
+      v-model:open="isPromoting"
+      :title="t('reviews.promote.title')"
+      :description="t('reviews.promote.description')"
+    >
+      <template #body>
+        <UForm
+          :state="promoteForm"
+          :validate="validatePromoteForm"
+          class="space-y-4"
+          @submit="handlePromoteToDecision"
+        >
+          <UAlert
+            v-if="promoteError"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-circle-alert"
+            :title="promoteError.message"
+          >
+            <template
+              v-if="promoteError.diagnostics.length"
+              #description
+            >
+              <ul class="list-disc space-y-0.5 ps-4">
+                <li
+                  v-for="(diagnostic, dIdx) in promoteError.diagnostics"
+                  :key="dIdx"
+                >
+                  {{ diagnostic.message }}
+                </li>
+              </ul>
+            </template>
+          </UAlert>
+
+          <UFormField
+            name="question"
+            :label="t('reviews.promote.questionLabel')"
+            required
+          >
+            <UInput
+              v-model="promoteForm.question"
+              class="w-full"
+              :placeholder="t('reviews.promote.questionPlaceholder')"
+            />
+          </UFormField>
+
+          <UFormField
+            name="outcomeSummary"
+            :label="t('reviews.promote.summaryLabel')"
+            :hint="t('reviews.optional')"
+          >
+            <UInput
+              v-model="promoteForm.outcomeSummary"
+              class="w-full"
+              :placeholder="t('reviews.promote.summaryPlaceholder')"
+            />
+          </UFormField>
+
+          <UFormField
+            name="outcomeRationale"
+            :label="t('reviews.promote.rationaleLabel')"
+            :hint="t('reviews.optional')"
+          >
+            <UTextarea
+              v-model="promoteForm.outcomeRationale"
+              :rows="3"
+              autoresize
+              class="w-full"
+              :placeholder="t('reviews.promote.rationalePlaceholder')"
+            />
+          </UFormField>
+
+          <div class="flex justify-end gap-2">
+            <UButton
+              color="neutral"
+              variant="ghost"
+              @click="isPromoting = false"
+            >
+              {{ t('common.cancel') }}
+            </UButton>
+            <UButton
+              type="submit"
+              color="primary"
+              variant="solid"
+              icon="i-lucide-gavel"
+              :loading="promoting"
+              :disabled="!promoteForm.question.trim()"
+            >
+              {{ t('reviews.promote.submit') }}
+            </UButton>
+          </div>
+        </UForm>
+      </template>
+    </UModal>
   </div>
 </template>

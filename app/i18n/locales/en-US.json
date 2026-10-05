@@ -1,0 +1,692 @@
+{
+  "assets": {
+    "title": "Assets",
+    "subtitle": "Images and files referenced by Views",
+    "newAsset": "New Asset",
+    "listLabel": "Workspace Assets",
+    "unnamedAsset": "Unnamed Asset",
+    "diagnosticCount": "No diagnostics | {n} diagnostic | {n} diagnostics",
+    "emptyTitle": "No Assets yet",
+    "emptyDescription": "Upload an image or file to use it in Views.",
+    "emptyDescriptionReadOnly": "No Assets in this snapshot.",
+    "selectPrompt": "Select an Asset to see its details and preview.",
+    "loadListFailed": "Could not load Assets.",
+    "loadDetailFailed": "Could not load this Asset.",
+    "unavailable": "This Asset is unavailable.",
+    "notSet": "Not set",
+    "fields": {
+      "file": "File",
+      "replacementFile": "New file",
+      "name": "Name",
+      "filename": "Filename",
+      "mediaType": "Media type",
+      "size": "Size",
+      "digest": "Digest"
+    },
+    "placeholders": {
+      "name": "e.g. Header logo"
+    },
+    "mediaTypeHelp": "Detected from the file. Defaults to application/octet-stream.",
+    "fileUploadLabel": "Drop a file or click to browse",
+    "fileUploadDescription": "Any file type. Images show a preview.",
+    "preview": "Preview",
+    "previewAlt": "Asset preview",
+    "noPreviewTitle": "No preview",
+    "noPreviewDescription": "Only images can be previewed. This file is {mediaType}.",
+    "download": "Download",
+    "replaceContent": "Replace file",
+    "createTitle": "Upload Asset",
+    "createDescription": "Add an image or file to this Workspace.",
+    "saveAsset": "Save Asset",
+    "created": "Asset “{name}” created.",
+    "createFailed": "Could not create the Asset.",
+    "replaceTitle": "Replace file",
+    "replaceDescription": "Upload a new file for “{name}”. Saving fails if someone changed the Asset in the meantime.",
+    "commitReplacement": "Replace file",
+    "replaced": "File replaced.",
+    "replaceFailed": "Could not replace the file.",
+    "conflictTitle": "Asset changed elsewhere",
+    "conflictDescription": "Someone updated this Asset after you opened it. Reload, then replace the file again.",
+    "validation": {
+      "fileRequired": "Choose a file to upload.",
+      "replacementFileRequired": "Choose a new file.",
+      "nameRequired": "Enter a name.",
+      "filenameRequired": "Enter a filename.",
+      "fileNotReady": "Still reading the file. Try again in a moment."
+    }
+  },
+  "checks": {
+    "title": "Checks",
+    "subtitle": "Issues found in the Workspace and the current View",
+    "listLabel": "Findings",
+    "findingCount": "No findings | {n} finding | {n} findings",
+    "clean": "Clean",
+    "source": {
+      "view": "View",
+      "workspace": "Workspace"
+    },
+    "jump": {
+      "label": "Select {id}",
+      "ariaLabel": "Select Widget {id} in the preview",
+      "tooltip": "Select and highlight this Widget in the preview"
+    },
+    "unresolved": {
+      "label": "No Widget",
+      "tooltip": "This finding is not linked to a Widget."
+    },
+    "allPassed": {
+      "title": "All checks passed",
+      "description": "No issues in this Workspace or View."
+    }
+  },
+  "app": {
+    "title": "UIUX Workbench"
+  },
+  "common": {
+    "add": "Add",
+    "back": "Back",
+    "cancel": "Cancel",
+    "close": "Close",
+    "create": "Create",
+    "delete": "Delete",
+    "dismiss": "Dismiss",
+    "edit": "Edit",
+    "loading": "Loading…",
+    "none": "None",
+    "refresh": "Refresh",
+    "reload": "Reload",
+    "remove": "Remove",
+    "retry": "Retry",
+    "save": "Save",
+    "saving": "Saving…",
+    "unnamed": "Unnamed",
+    "readOnly": "Read-only",
+    "revision": "Revision",
+    "errorTitle": "Something went wrong",
+    "unexpectedError": "An unexpected error occurred."
+  },
+  "evidence": {
+    "title": "Formal Evidence",
+    "subtitle": "Screenshots recorded for each render context",
+    "captureActive": "Capture current context",
+    "captureUnavailable": "Select a View to capture Evidence.",
+    "copied": "Copied to clipboard",
+    "copyFailed": "Could not copy to the clipboard.",
+    "loadFailed": "Could not load Formal Evidence",
+    "onlyCurrentView": "Current View only",
+    "recordCount": "No records | {n} record | {n} records",
+    "listLabel": "Formal Evidence records",
+    "identity": "Evidence ID",
+    "copyDigest": "Copy SHA-256",
+    "applyContext": "Apply context to preview",
+    "selectPrompt": "Select a record to inspect it.",
+    "capture": {
+      "succeeded": "Evidence captured",
+      "failed": "Could not capture Evidence.",
+      "failedTitle": "Capture failed",
+      "incompleteTitle": "Capture incomplete",
+      "summary": "Captured {captured} of {total} contexts.",
+      "executedAt": "Ran at {time}.",
+      "unknownContext": "Unknown context",
+      "noDetails": "No details reported for this context."
+    },
+    "empty": {
+      "title": "No Formal Evidence yet",
+      "description": "Use “Capture current context” to record Evidence for the current preview.",
+      "readOnly": "No Formal Evidence in this snapshot."
+    },
+    "status": {
+      "stale": "Stale",
+      "current": "Current"
+    },
+    "stale": {
+      "title": "This Evidence is stale",
+      "unknown": "It no longer matches the current Workspace.",
+      "missingViewId": "This record does not name a View.",
+      "viewMissing": "The View no longer exists.",
+      "provenanceMissing": "This record's source info is missing its View.",
+      "viewRevisionChanged": "The View changed after this capture.",
+      "localeMissing": "Locale “{locale}” is no longer in the Workspace.",
+      "localeRevisionChanged": "Locale “{locale}” changed after this capture.",
+      "viewportRemoved": "Viewport “{viewport}” was removed.",
+      "viewportChanged": "Viewport “{viewport}” changed size after this capture.",
+      "themeRemoved": "Theme “{theme}” was removed."
+    },
+    "context": {
+      "title": "Render context",
+      "view": "View:",
+      "locale": "Locale:",
+      "theme": "Theme:",
+      "viewId": "View ID",
+      "variant": "Variant",
+      "baseVariant": "(base)",
+      "localeLabel": "Locale",
+      "viewport": "Viewport",
+      "viewportValue": "{id} ({width} × {height})",
+      "themeLabel": "Theme"
+    },
+    "screenshot": {
+      "title": "Screenshot",
+      "enlarge": "Enlarge screenshot",
+      "alt": "Captured screenshot",
+      "enlargedTitle": "Screenshot",
+      "enlargedAlt": "Captured screenshot, enlarged"
+    },
+    "provenance": {
+      "title": "Source revisions",
+      "uiuxVersion": "UIUX version",
+      "schemaVersion": "Schema version",
+      "unknown": "Unknown",
+      "resources": "Resources"
+    }
+  },
+  "flows": {
+    "title": "UX Flows",
+    "subtitle": "Steps and transitions across Views",
+    "newFlow": "New Flow",
+    "list": {
+      "label": "UX Flows",
+      "empty": "No Flows yet",
+      "emptyHint": "Create a Flow to map a user journey across Views.",
+      "loadFailed": "Could not load Flows.",
+      "unnamed": "Unnamed Flow"
+    },
+    "detail": {
+      "metadata": "Flow details",
+      "revision": "Rev. {revision}",
+      "loadFailed": "Could not load this Flow.",
+      "unavailable": "This Flow is unavailable.",
+      "selectTitle": "No Flow selected",
+      "selectDescription": "Select a Flow to see its steps and transitions."
+    },
+    "fields": {
+      "name": "Flow name",
+      "namePlaceholder": "e.g. Signup onboarding",
+      "entryStep": "Entry step",
+      "entryStepPlaceholder": "Select entry step",
+      "entryStepId": "Entry step ID",
+      "entryStepIdHelp": "A stable ID for the first step. The generated one is fine.",
+      "initialView": "First step View",
+      "targetView": "Target View",
+      "variant": "Variant",
+      "variantPlaceholder": "e.g. mobile-expanded",
+      "optional": "Optional",
+      "event": "Event",
+      "widgetId": "Widget ID",
+      "targetStep": "Go to step",
+      "targetStepPlaceholder": "Select a step"
+    },
+    "views": {
+      "placeholder": "Select a View",
+      "search": "Search Views…",
+      "missing": "{id} (missing View)",
+      "none": "No View"
+    },
+    "steps": {
+      "title": "Steps",
+      "count": "No steps | {n} step | {n} steps",
+      "ordinal": "Step {n}",
+      "optionLabel": "Step {n}: {view}",
+      "entry": "Entry",
+      "add": "Add step",
+      "remove": "Remove step",
+      "previewView": "Preview this View",
+      "empty": "No steps yet",
+      "emptyHint": "Add a step to begin."
+    },
+    "transitions": {
+      "count": "No transitions | {n} transition | {n} transitions",
+      "add": "Add transition",
+      "remove": "Remove transition",
+      "terminal": "No transitions. This step ends the Flow."
+    },
+    "diagnostics": {
+      "count": "No diagnostics | {n} diagnostic | {n} diagnostics"
+    },
+    "conflict": {
+      "title": "Flow changed elsewhere",
+      "description": "Reload to get the latest version. Unsaved edits will be lost."
+    },
+    "save": {
+      "submit": "Save Flow",
+      "saved": "Flow saved.",
+      "failed": "Could not save the Flow."
+    },
+    "create": {
+      "title": "New Flow",
+      "description": "The first step opens a View.",
+      "submit": "Create Flow",
+      "created": "Flow created.",
+      "failed": "Could not create the Flow.",
+      "nameRequired": "Enter a Flow name.",
+      "viewRequired": "Select a View for the first step.",
+      "noViews": "Create a View first. The first step needs one."
+    }
+  },
+  "handoff": {
+    "title": "Handoff",
+    "subtitle": "Check readiness and export a snapshot for implementation.",
+    "reassess": "Recheck",
+    "export": "Export snapshot",
+    "exportSucceeded": "Handoff exported",
+    "exportFailed": "Could not export the Handoff",
+    "assessFailed": "Could not check readiness",
+    "assessing": "Checking readiness…",
+    "copied": "Copied to clipboard",
+    "copyFailed": "Could not copy to the clipboard.",
+    "readOnlyNotice": "Readiness was computed when this snapshot was published.",
+    "closureNote": "Referenced Assets, the default Locale, Flow target Views and required adapters are included automatically.",
+    "empty": {
+      "title": "Nothing to hand off yet",
+      "description": "This Workspace has no Views. Create one with the MCP {tool} tool.",
+      "readOnly": "This snapshot has no Views to hand off."
+    },
+    "scope": {
+      "legend": "Export scope",
+      "workspace": "Entire Workspace",
+      "custom": "Selected items"
+    },
+    "roots": {
+      "views": "Views",
+      "flows": "UX Flows",
+      "assets": "Assets",
+      "selected": "None selected | {n} selected | {n} selected",
+      "noneSelected": "Select at least one item to check readiness."
+    },
+    "readiness": {
+      "ready": "Ready to implement",
+      "notReady": "Not ready to implement",
+      "readyDescription": "Everything resolves, required Evidence is complete and all Review threads are resolved.",
+      "notReadyDescription": "You can still export a snapshot to inspect. Fix the blocking issues before handing it off."
+    },
+    "coverage": {
+      "validation": "Validation",
+      "passed": "Passed",
+      "issues": "Issues",
+      "evidence": "Evidence",
+      "complete": "Complete",
+      "missing": "Missing",
+      "reviews": "Reviews",
+      "resolved": "Resolved",
+      "open": "Open"
+    },
+    "blocking": {
+      "title": "No blocking issues | {n} blocking issue | {n} blocking issues",
+      "path": "Path: {path}"
+    },
+    "exported": {
+      "title": "Exported Handoff",
+      "at": "Exported {time}",
+      "bundleIdentity": "Bundle ID",
+      "manifestDigest": "Manifest digest",
+      "copyBundleIdentity": "Copy bundle ID",
+      "copyManifestDigest": "Copy manifest digest",
+      "download": "Download manifest JSON"
+    }
+  },
+  "locales": {
+    "title": "Workspace Locales",
+    "subtitle": "Translations for the previewed product. The Workbench language is set separately.",
+    "newLocale": "New Locale",
+    "listLabel": "Workspace Locales",
+    "stringCount": "No strings | {n} string | {n} strings",
+    "diagnosticCount": "No diagnostics | {n} diagnostic | {n} diagnostics",
+    "defaultBadge": "Default",
+    "emptyTitle": "No Locales yet",
+    "emptyDescription": "Create a Locale to start translating the previewed product.",
+    "emptyDescriptionReadOnly": "No Locales in this snapshot.",
+    "selectPrompt": "Select a Locale to edit its strings.",
+    "loadListFailed": "Could not load Locales.",
+    "loadDetailFailed": "Could not load this Locale.",
+    "unavailable": "This Locale is unavailable.",
+    "defaultMissing": {
+      "title": "Default Locale missing",
+      "description": "The default Locale {locale} has not been created yet.",
+      "action": "Create Locale"
+    },
+    "searchLabel": "Search keys and strings",
+    "searchPlaceholder": "Search keys or strings…",
+    "unsaved": "Unsaved changes",
+    "valuePlaceholder": "Translation",
+    "removeKey": "Remove key",
+    "removeKeyLabel": "Remove key {key}",
+    "noMatches": "No matching keys.",
+    "noMessages": "No strings yet.",
+    "newKeyLabel": "New key",
+    "newValueLabel": "String",
+    "addKey": "Add key",
+    "saved": "Locale {locale} saved.",
+    "saveFailed": "Could not save the Locale.",
+    "conflict": {
+      "title": "Locale changed elsewhere",
+      "description": "Someone updated it after you opened it. Reload to get the latest version. Unsaved edits will be lost."
+    },
+    "create": {
+      "title": "New Locale",
+      "description": "Adds an empty set of translations for the previewed product.",
+      "tagLabel": "Locale tag",
+      "tagHelp": "BCP 47 language tag, e.g. en-US, zh-TW, ja-JP.",
+      "tagRequired": "Enter a Locale tag.",
+      "created": "Locale {locale} created.",
+      "failed": "Could not create the Locale."
+    }
+  },
+  "preview": {
+    "loading": "Loading View…",
+    "errorTitle": "Could not load preview",
+    "noViewTitle": "No View selected",
+    "noViewDescription": "Select a View to preview it.",
+    "adapterUnavailable": {
+      "title": "Preview not available for this View",
+      "seam": "Not supported yet",
+      "description": "This View uses Widget types from external adapters ({types}). The preview cannot load external adapter code yet.",
+      "note": "Only the built-in {rootShell} renders in the preview for now."
+    },
+    "invalidTitle": "This View cannot be rendered",
+    "emptySlotTitle": "No Widgets yet",
+    "emptySlotDescription": "Add child Widgets to the {slot} slot to render them with {core}.",
+    "errors": {
+      "bridgeInitFailed": "The preview could not connect to the Workbench. Try reloading.",
+      "viewUnavailable": "This View is unavailable.",
+      "viewLoadFailed": "Could not load the View.",
+      "bundleInvalid": "The preview runtime is invalid: the bundle does not expose mountPreviewRuntime.",
+      "bundleLoadFailed": "Could not load the preview runtime."
+    }
+  },
+  "reviews": {
+    "title": "Reviews",
+    "subtitle": "Discuss Widgets and turn outcomes into Decisions.",
+    "newThread": "New thread",
+    "scopeToCurrentView": "Current View only",
+    "threadCount": "No threads | {n} thread | {n} threads",
+    "messageCount": "No messages | {n} message | {n} messages",
+    "threadListLabel": "Review threads",
+    "optional": "Optional",
+    "unknownAuthor": "Unknown author",
+    "highlight": "Highlight",
+    "highlightTooltip": "Highlight this Widget in the preview",
+    "viewLabel": "View",
+    "conversation": "Conversation",
+    "commentMode": {
+      "start": "Comment",
+      "active": "Pick a Widget…",
+      "tooltip": "Click a Widget in the preview to start a thread. Press Esc to cancel."
+    },
+    "status": {
+      "open": "Open",
+      "readyForReview": "Ready for review",
+      "resolved": "Resolved"
+    },
+    "empty": {
+      "noThreadsInView": "No threads on this View.",
+      "noThreadsInWorkspace": "No threads in this Workspace.",
+      "noMessages": "No messages yet.",
+      "noSelectionTitle": "No thread selected",
+      "noSelection": "Select a thread, or use Comment to give feedback on a Widget.",
+      "noSelectionReadOnly": "Select a thread to see its history."
+    },
+    "conflict": {
+      "title": "Thread changed elsewhere",
+      "description": "Reload and try again."
+    },
+    "reply": {
+      "authorLabel": "Post as",
+      "authorPlaceholder": "Your name",
+      "messageLabel": "Reply",
+      "messagePlaceholder": "Write a reply…",
+      "shortcutHint": "to send",
+      "send": "Send"
+    },
+    "lifecycle": {
+      "title": "Status",
+      "reanchorTitle": "Move to another Widget",
+      "reanchorDescription": "Move this thread to the selected Widget (#{widgetId}).",
+      "reanchorNeedsWidget": "Select a Widget in the current View to move this thread there.",
+      "reanchorAction": "Move to #{widgetId}",
+      "markReady": "Mark ready for review",
+      "resolve": "Resolve",
+      "requestChanges": "Request changes",
+      "reopen": "Reopen"
+    },
+    "promote": {
+      "title": "Promote to Decision",
+      "description": "Record the outcome as a Decision in the View Spec.",
+      "open": "Promote…",
+      "questionLabel": "Question",
+      "questionPlaceholder": "e.g. Keep the three-column layout?",
+      "questionRequired": "Enter the question this Decision answers.",
+      "summaryLabel": "Outcome",
+      "summaryPlaceholder": "e.g. Approved with collapsible side panels",
+      "rationaleLabel": "Rationale",
+      "rationalePlaceholder": "Why the discussion landed here…",
+      "submit": "Promote"
+    },
+    "create": {
+      "title": "New Review thread",
+      "description": "Anchor feedback to a Widget in the current View.",
+      "widgetLabel": "Widget",
+      "widgetHelp": "Enter a Widget ID, root for the whole View, or pick one in the preview.",
+      "widgetPlaceholder": "root or Widget ID",
+      "pick": "Pick",
+      "messageLabel": "First message",
+      "messagePlaceholder": "Feedback or question…",
+      "submit": "Create thread"
+    },
+    "feedback": {
+      "messagePosted": "Message posted.",
+      "reanchored": "Thread moved to #{widgetId}.",
+      "markedReady": "Marked ready for review with {n} current Formal Evidence record. | Marked ready for review with {n} current Formal Evidence records.",
+      "resolved": "Thread resolved.",
+      "reopened": "Thread reopened.",
+      "promoted": "Promoted to Decision.",
+      "promotedViewRevision": "View updated to revision {revision}.",
+      "threadCreated": "Thread created on #{widgetId}."
+    },
+    "errors": {
+      "loadListFailed": "Could not load Review threads.",
+      "loadThreadFailed": "Could not load this thread.",
+      "threadUnavailable": "This thread is unavailable.",
+      "postMessageFailed": "Could not post the message.",
+      "reanchorFailed": "Could not move the thread.",
+      "readyFailed": "Could not mark the thread ready for review.",
+      "resolveFailed": "Could not resolve the thread.",
+      "reopenFailed": "Could not reopen the thread.",
+      "promoteFailed": "Could not promote to a Decision.",
+      "createFailed": "Could not create the thread.",
+      "initialMessageFailed": "Thread created, but the first message could not be posted.",
+      "targetViewUnresolved": "Could not find the current version of View {viewId}.",
+      "noCurrentEvidence": "No Formal Evidence matches the current View. Capture Evidence, then mark the thread ready for review.",
+      "noViewSelected": "Select a View to start a thread."
+    }
+  },
+  "workbench": {
+    "header": {
+      "modeLocal": "Local",
+      "modePublished": "Published · read-only"
+    },
+    "context": {
+      "groupLabel": "Preview context",
+      "variant": "Variant",
+      "locale": "Locale",
+      "viewport": "Viewport",
+      "theme": "Preview theme",
+      "baseVariant": "Base",
+      "defaultLocaleOption": "{locale} (default)",
+      "defaultViewportName": "Default",
+      "viewportOption": "{name} · {width}×{height}",
+      "defaultThemeOption": "Default ({theme})",
+      "noVariantsHint": "This View has no Variants.",
+      "noViewportsHint": "No viewports in workspace.json. Using the default 1280 × 800.",
+      "noThemesHint": "No themes in workspace.json. Themes affect only the previewed View, not the Workbench.",
+      "themeHint": "Theme used to render the previewed View. Separate from the Workbench appearance."
+    },
+    "session": {
+      "label": "Preview: {phase}",
+      "idle": "No View",
+      "initiating": "Connecting",
+      "open": "Connected",
+      "failed": "Failed",
+      "idleHint": "No View is open.",
+      "initiatingHint": "Connecting to the preview…",
+      "openHint": "The preview is connected.",
+      "failedHint": "The preview could not connect. Try refreshing."
+    },
+    "preferences": {
+      "language": "Workbench language",
+      "languageHint": "Language of the Workbench interface. Choose the preview Locale under Locale.",
+      "appearance": "Workbench appearance",
+      "appearanceHint": "Light, dark or system. Does not affect the preview theme."
+    },
+    "nav": {
+      "label": "Workbench sections",
+      "views": "Views",
+      "workspace": "Workspace",
+      "locales": "Locales",
+      "assets": "Assets",
+      "flows": "Flows",
+      "reviews": "Reviews",
+      "checks": "Checks",
+      "evidence": "Evidence",
+      "handoff": "Handoff"
+    },
+    "views": {
+      "title": "Views",
+      "listLabel": "Views in this Workspace",
+      "filterPlaceholder": "Filter Views…",
+      "noMatches": "No Views match “{query}”.",
+      "emptyTitle": "No Views yet",
+      "emptyDescription": "Create a View with the MCP {tool} tool.",
+      "diagnosticCount": "No diagnostics | {n} diagnostic | {n} diagnostics"
+    },
+    "tree": {
+      "title": "Widget tree",
+      "label": "Widget tree of the selected View",
+      "emptyContentSlot": "(empty content slot)",
+      "unavailable": "No Widget tree"
+    },
+    "canvas": {
+      "label": "Preview canvas",
+      "title": "Preview canvas",
+      "dimensions": "{width} × {height} px",
+      "comment": "Comment",
+      "commentActive": "Commenting",
+      "commentHint": "Click a Widget in the preview to comment on it.",
+      "commentDisabledHint": "Select a View to comment.",
+      "scale": "{percent}%",
+      "scaleHint": "Canvas zoom. The preview keeps its exact viewport size.",
+      "iframeTitle": "Preview of {name}",
+      "noSelectionTitle": "No View selected",
+      "noSelectionDescription": "Select a View from the list to preview it.",
+      "noViewsTitle": "No Views yet",
+      "noViewsDescription": "Create a View with the MCP {tool} tool. It appears here once created."
+    },
+    "spec": {
+      "label": "View Spec",
+      "tabs": {
+        "spec": "Spec",
+        "references": "References",
+        "decisions": "Decisions",
+        "checks": "Checks"
+      },
+      "collapse": "Collapse",
+      "expand": "Expand",
+      "noView": "Select a View to see its Spec.",
+      "intent": "Intent",
+      "noIntent": "No intent yet.",
+      "entryConditions": "Entry conditions | Entry condition ({n}) | Entry conditions ({n})",
+      "interactionRules": "Interaction rules | Interaction rule ({n}) | Interaction rules ({n})",
+      "noReferences": "No references for this View.",
+      "opensInNewTab": "(opens in a new tab)",
+      "noDecisions": "No Decisions for this View.",
+      "outcome": "Outcome:",
+      "historyEvents": "No history events | {n} history event | {n} history events",
+      "decisionStatus": {
+        "pending": "Pending",
+        "deferred": "Deferred",
+        "decided": "Decided"
+      },
+      "jumpToWidget": "Select #{id}",
+      "unresolvedLocation": "No location",
+      "allChecksPassed": "All checks passed."
+    },
+    "inspector": {
+      "title": "Inspector",
+      "view": "View",
+      "selectedWidget": "Selected Widget",
+      "identity": "Identity",
+      "type": "Type",
+      "slot": "Slot",
+      "depth": "Depth",
+      "stateOverrides": "Variant state overrides",
+      "noStateOverrides": "No state overrides for this Widget in this Variant.",
+      "findings": "Widget findings",
+      "cleanWidget": "No findings for this Widget",
+      "viewMetadata": "View details",
+      "id": "ID",
+      "variants": "Variants",
+      "emptyTitle": "Nothing selected",
+      "emptyDescription": "Select a View or Widget to inspect it."
+    },
+    "errors": {
+      "title": "Could not load Workbench data",
+      "workspaceUnavailable": "This Workspace is unavailable.",
+      "workspaceReadFailed": "Could not read the Workspace.",
+      "viewUnavailable": "This View is unavailable.",
+      "viewLoadFailed": "Could not load the View.",
+      "bridgeInitFailed": "The preview could not connect to the Workbench. Try reloading."
+    }
+  },
+  "workspaceSettings": {
+    "title": "Workspace settings",
+    "subtitle": "Stored in {file}",
+    "revisionBadge": "Rev {revision}",
+    "saved": "Settings saved",
+    "saveFailed": "Could not save settings",
+    "reset": "Discard changes",
+    "save": "Save settings",
+    "conflict": {
+      "title": "Settings changed elsewhere",
+      "description": "Someone changed the Workspace settings after you loaded them. Your changes were not saved. Reload to get the latest version.",
+      "reload": "Reload settings"
+    },
+    "defaultLocale": {
+      "label": "Default Locale",
+      "description": "BCP 47 tag of the primary Locale."
+    },
+    "adapters": {
+      "title": "Adapters",
+      "description": "Widget packages or local adapter modules.",
+      "add": "Add adapter",
+      "item": "Adapter {n}",
+      "remove": "Remove adapter {n}",
+      "moduleSpecifier": "Module specifier",
+      "config": "Config",
+      "configHint": "Optional JSON",
+      "empty": "No adapters configured. Only RootShell is available."
+    },
+    "viewports": {
+      "title": "Viewports",
+      "description": "Canvas sizes available in the preview.",
+      "add": "Add viewport",
+      "id": "Preset ID",
+      "idPlaceholder": "e.g. mobile",
+      "remove": "Remove viewport {id}",
+      "width": "Width (px)",
+      "height": "Height (px)",
+      "empty": "No custom viewports. Default is 1280 × 800."
+    },
+    "themes": {
+      "title": "Preview themes",
+      "description": "Theme IDs used to render Views in the preview.",
+      "notAppearance": "These themes affect only the preview, not the Workbench appearance.",
+      "add": "Add theme",
+      "idPlaceholder": "e.g. light, dark",
+      "idLabel": "Theme ID {n}",
+      "remove": "Remove theme {id}",
+      "empty": "No preview themes."
+    },
+    "diagnostics": {
+      "title": "No diagnostics | {n} diagnostic | {n} diagnostics"
+    }
+  }
+}

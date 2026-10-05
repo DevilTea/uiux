@@ -48,7 +48,8 @@
 		"smoke:publication": "node ./scripts/smoke-publication.mjs",
 		"smoke:server": "node ./scripts/smoke-server.mjs",
 		"test": "pnpm run build && vitest run",
-		"typecheck": "nuxt typecheck"
+		"typecheck": "nuxt typecheck",
+		"typecheck:adapters": "tsc -p tsconfig.adapters.json"
 	},
 	"dependencies": {
 		"@deviltea/widget-core": "0.0.2",
@@ -56,6 +57,7 @@
 		"@iconify-json/lucide": "1.2.139",
 		"@modelcontextprotocol/server": "2.2.0",
 		"@nuxt/ui": "4.11.2",
+		"@nuxtjs/i18n": "10.6.0",
 		"ajv": "8.20.0",
 		"esbuild": "0.28.2",
 		"framer-motion": "13.4.6",
