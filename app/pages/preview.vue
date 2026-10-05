@@ -13,6 +13,8 @@ import { attachGeometrySignals, type GeometrySignalSubscription } from '../../sr
 import {
 	PREVIEW_WIRE_CHANNEL,
 	PREVIEW_CONTEXT_CHANNEL,
+	createBatchingWireSender,
+	readPreviewWirePost,
 	type PreviewContextPayload,
 	type PreviewTargetingPurpose,
 } from '../../src/preview/protocol/transport'
@@ -234,15 +236,6 @@ function reportWidgetEvent(report: WidgetEventReport) {
 	})
 }
 
-/** Envelopes waiting for the end of the current task (see `send` in `initBridge`). */
-let outbox: unknown[] = []
-function flushOutbox() {
-	const batch = outbox
-	outbox = []
-	if (!batch.length || !window.parent || window.parent === window) return
-	window.parent.postMessage(batch.length === 1 ? { channel: PREVIEW_WIRE_CHANNEL, message: batch[0] } : { channel: PREVIEW_WIRE_CHANNEL, messages: batch }, window.location.origin)
-}
-
 function initBridge() {
 	if (typeof window === 'undefined') return
 	try {
@@ -252,15 +245,11 @@ function initBridge() {
 			// `widget.events` ships with the mount factory (decision 10). A formal capture has no
 			// Workbench parent and is never armed, so it does not declare it.
 			{ protocolVersion: 1, features: harnessMode.value ? ['geometry', MULTI_TARGET_GEOMETRY_FEATURE] : ['geometry', MULTI_TARGET_GEOMETRY_FEATURE, WIDGET_EVENTS_FEATURE] },
-			{
-				send(message) {
-					// Transport-level batching (multi-target decision group, alternative 2): every
-					// envelope of one task (a frame's geometry reports) leaves in one postMessage, in
-					// order. Each envelope stays complete and is validated on its own by the Workbench.
-					if (!outbox.length) queueMicrotask(flushOutbox)
-					outbox.push(message)
-				},
-			},
+			// Transport-level batching (see `PreviewWireBatchEnvelope`): every envelope of one task (a
+			// frame's geometry reports, a Widget Event occurrence) leaves in one post, in order.
+			createBatchingWireSender((post) => {
+				if (window.parent && window.parent !== window) window.parent.postMessage(post, window.location.origin)
+			}),
 		)
 		const bridge = runtimeBridge
 		// The geometry producer of this runtime generation (Part 2, multi-target geometry streams).
@@ -416,33 +405,40 @@ async function evaluateRuntime() {
 	}
 }
 
+/** One inbound envelope, alone or from a batch, through the runtime bridge's gates. */
+function receiveWire(input: unknown) {
+	if (!runtimeBridge) return
+	const bridgeResult = runtimeBridge.receive(input)
+	if (bridgeResult.status !== 'accepted') return
+	const message = bridgeResult.message
+	if (message.type === 'capability.ack') handshakeStatus.value = 'open'
+	else if ((message.type === 'geometry.acquire.request' || message.type === 'geometry.release') && geometryProducer) {
+		geometryProducer.receive(message)
+		geometrySignals?.refreshObservedWidgets()
+	}
+	else if (message.type === 'targeting.enter') {
+		// A new interaction supersedes the previous one at once; its hover candidate starts empty.
+		targetingPurpose.value = message.payload.purpose
+		activeTargetingInteractionId.value = message.payload.targetingInteractionId
+		hoverCandidateWidgetId = undefined
+	}
+	else if (message.type === 'targeting.exit') {
+		targetingPurpose.value = undefined
+		activeTargetingInteractionId.value = undefined
+		hoverCandidateWidgetId = undefined
+	}
+	else if (message.type === 'widget.event.arm') receiveWidgetEventArm(message)
+}
+
 function onWindowMessage(event: MessageEvent) {
 	// Only the embedding Workbench document of this origin talks to the runtime (item 2.3).
 	if (event.origin !== window.location.origin || event.source !== window.parent || window.parent === window) return
 	const data = event.data
 	if (!data || typeof data !== 'object') return
 
-	if (data.channel === PREVIEW_WIRE_CHANNEL && data.message && runtimeBridge) {
-		const bridgeResult = runtimeBridge.receive(data.message)
-		if (bridgeResult.status !== 'accepted') return
-		const message = bridgeResult.message
-		if (message.type === 'capability.ack') handshakeStatus.value = 'open'
-		else if ((message.type === 'geometry.acquire.request' || message.type === 'geometry.release') && geometryProducer) {
-			geometryProducer.receive(message)
-			geometrySignals?.refreshObservedWidgets()
-		}
-		else if (message.type === 'targeting.enter') {
-			// A new interaction supersedes the previous one at once; its hover candidate starts empty.
-			targetingPurpose.value = message.payload.purpose
-			activeTargetingInteractionId.value = message.payload.targetingInteractionId
-			hoverCandidateWidgetId = undefined
-		}
-		else if (message.type === 'targeting.exit') {
-			targetingPurpose.value = undefined
-			activeTargetingInteractionId.value = undefined
-			hoverCandidateWidgetId = undefined
-		}
-		else if (message.type === 'widget.event.arm') receiveWidgetEventArm(message)
+	if (data.channel === PREVIEW_WIRE_CHANNEL) {
+		// One envelope or a batch: each envelope passes the bridge's gates on its own, in order.
+		for (const input of readPreviewWirePost(data) ?? []) receiveWire(input)
 	}
 	else if (data.channel === PREVIEW_CONTEXT_CHANNEL && data.payload) {
 		const payload = data.payload as PreviewContextPayload

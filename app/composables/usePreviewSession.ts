@@ -19,7 +19,8 @@ import {
 } from '../../src/preview/protocol/schema'
 import {
 	PREVIEW_CONTEXT_CHANNEL,
-	PREVIEW_WIRE_CHANNEL,
+	createPreviewWirePost,
+	readPreviewWirePost,
 	type PreviewTargetingPurpose,
 } from '../../src/preview/protocol/transport'
 import type { TargetingContext, TargetingRuntimeMessage } from '../../src/preview/protocol/targeting'
@@ -592,8 +593,10 @@ export function createPreviewSession(state: WorkbenchState) {
 			workbenchBridge = new WorkbenchPreviewProtocolBridge(
 				previewSessionId.value,
 				{
+					// One envelope per post: Workbench sends stay in step with its context-channel posts.
 					send(message) {
-						post(PREVIEW_WIRE_CHANNEL, { message })
+						const target = previewIframe.value?.contentWindow
+						if (target) target.postMessage(createPreviewWirePost([message]), window.location.origin)
 					},
 				},
 				// `geometry.multi-target` is optional: a runtime without it gets the single-stream fallback.
@@ -679,11 +682,11 @@ export function createPreviewSession(state: WorkbenchState) {
 		if (event.origin !== window.location.origin) return
 		const source = previewIframe.value?.contentWindow
 		if (!source || event.source !== source) return
-		const data = event.data
-		if (!data || typeof data !== 'object' || data.channel !== PREVIEW_WIRE_CHANNEL || !workbenchBridge) return
-		// One envelope, or a transport batch of envelopes from one runtime task, each received on its own.
-		if (Array.isArray(data.messages)) for (const message of data.messages as unknown[]) receiveWire(message)
-		else if (data.message) receiveWire(data.message)
+		if (!workbenchBridge) return
+		// One envelope, or a transport batch from one runtime task: each envelope passes the bridge's
+		// gates on its own, in order, exactly as consecutive single posts would.
+		const messages = readPreviewWirePost(event.data)
+		if (messages) for (const message of messages) receiveWire(message)
 	}
 
 	function receiveWire(input: unknown): void {
