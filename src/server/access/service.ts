@@ -227,9 +227,14 @@ export class AccessService {
 		}
 		if (this.rateLimited(address)) return this.rateLimitFailure()
 
-		const file = this.store.data
 		const now = this.now()
-		const verification = verifyCredential(file, presented, now, { lastSeen: id => this.sessionUsage.get(id) })
+		let verification = verifyCredential(this.store.data, presented, now, { lastSeen: id => this.sessionUsage.get(id) })
+		// A credential of this roster that is not known yet was usually just created by the CLI
+		// (reloads are throttled to once a second): re-read the store once before refusing it.
+		if (!verification.ok && verification.reason === 'unknown' && parseCredential(presented)?.hint === this.hint) {
+			await this.refresh(true)
+			verification = verifyCredential(this.store.data, presented, now, { lastSeen: id => this.sessionUsage.get(id) })
+		}
 		const expectedKind = bearer.value !== undefined ? 'token' : 'session'
 		if (!verification.ok || verification.kind !== expectedKind) {
 			this.recordFailure(address, presented)
@@ -272,7 +277,11 @@ export class AccessService {
 		if (typeof credential !== 'string' || credential.trim() === '') return this.required('api')
 		const presented = credential.trim()
 		if (this.rateLimited(address)) return this.rateLimitFailure()
-		const check = verifyCredential(this.store.data, presented, this.now())
+		let check = verifyCredential(this.store.data, presented, this.now())
+		if (!check.ok && check.reason === 'unknown' && parseCredential(presented)?.hint === this.hint) {
+			await this.refresh(true)
+			check = verifyCredential(this.store.data, presented, this.now())
+		}
 		if (!check.ok || check.kind === 'session') {
 			this.recordFailure(address, presented)
 			return this.invalid(presented, 'api')

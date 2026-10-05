@@ -251,6 +251,10 @@ describe('Owner administration over the loopback cookie session', () => {
 	})
 
 	it('applies a CLI revoke on the running server without a restart', async () => {
+		// A token the CLI just created works on the very next request, despite the throttled reload.
+		expect((await fetch(`${origin}/api/health`)).status).toBe(200)
+		const fresh = await provisionToken(root, { nickname: 'fresh-agent', kind: 'agent', role: 'viewer' })
+		expect((await fetch(`${origin}/api/resources/workspace/workspace`, { headers: bearer(fresh) })).status).toBe(200)
 		const store = (await AccessStore.open({ workspaceRoot: root }))!
 		const id = agentToken.split('_')[3]!
 		expect((await fetch(`${origin}/api/resources/workspace/workspace`, { headers: bearer(agentToken) })).status).toBe(200)
