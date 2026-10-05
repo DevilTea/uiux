@@ -553,109 +553,25 @@
     }
   },
   "reviews": {
-    "title": "Review",
-    "subtitle": "針對 Widget 討論，並將結論升級為 Decision。",
-    "newThread": "新增討論串",
-    "scopeToCurrentView": "僅限目前 View",
-    "threadCount": "沒有討論串 | {n} 則討論串 | {n} 則討論串",
     "messageCount": "沒有留言 | {n} 則留言 | {n} 則留言",
-    "threadListLabel": "Review 討論串",
-    "optional": "選填",
-    "unknownAuthor": "未知作者",
-    "highlight": "標示",
-    "highlightTooltip": "在預覽中標示此 Widget",
-    "viewLabel": "View",
-    "conversation": "對話",
-    "commentMode": {
-      "start": "留言",
-      "active": "選取 Widget…",
-      "tooltip": "在預覽中點選 Widget 以建立討論串，按 Esc 取消。"
-    },
     "status": {
       "open": "未解決",
       "readyForReview": "待審核",
       "resolved": "已解決"
     },
-    "empty": {
-      "noThreadsInView": "此 View 尚無討論串。",
-      "noThreadsInWorkspace": "此 Workspace 尚無討論串。",
-      "noMessages": "尚無留言。",
-      "noSelectionTitle": "尚未選取討論串",
-      "noSelection": "選取討論串，或使用「留言」為 Widget 提供回饋。",
-      "noSelectionReadOnly": "選取討論串以檢視其歷程。"
-    },
-    "conflict": {
-      "title": "討論串已在其他地方變更",
-      "description": "請重新載入後再試一次。"
-    },
-    "reply": {
-      "authorLabel": "留言身分",
-      "authorPlaceholder": "你的名稱",
-      "messageLabel": "回覆",
-      "messagePlaceholder": "輸入回覆…",
-      "shortcutHint": "送出",
-      "send": "送出"
-    },
-    "lifecycle": {
-      "title": "狀態",
-      "reanchorTitle": "移至其他 Widget",
-      "reanchorDescription": "將此討論串移至選取的 Widget（#{widgetId}）。",
-      "reanchorNeedsWidget": "請在目前 View 中選取 Widget，以將討論串移至該處。",
-      "reanchorAction": "移至 #{widgetId}",
-      "markReady": "標記為待審核",
-      "resolve": "標記為已解決",
-      "requestChanges": "要求修改",
-      "reopen": "重新開啟"
-    },
     "promote": {
       "title": "升級為 Decision",
       "description": "將結論記錄為 View Spec 中的 Decision。",
-      "open": "升級…",
       "questionLabel": "問題",
       "questionPlaceholder": "例如：是否保留三欄式版面？",
-      "questionRequired": "請輸入此 Decision 要回答的問題。",
       "summaryLabel": "結論",
       "summaryPlaceholder": "例如：核准，側邊面板改為可收合",
       "rationaleLabel": "理由",
       "rationalePlaceholder": "討論得出此結論的原因…",
       "submit": "升級"
     },
-    "create": {
-      "title": "新增 Review 討論串",
-      "description": "將回饋錨定至目前 View 中的 Widget。",
-      "widgetLabel": "Widget",
-      "widgetHelp": "輸入 Widget ID、輸入 root 代表整個 View，或在預覽中點選。",
-      "widgetPlaceholder": "root 或 Widget ID",
-      "pick": "點選",
-      "messageLabel": "第一則留言",
-      "messagePlaceholder": "回饋或問題…",
-      "submit": "建立討論串"
-    },
     "feedback": {
-      "messagePosted": "已送出留言。",
-      "reanchored": "已將討論串移至 #{widgetId}。",
-      "markedReady": "已標記為待審核，附上 {n} 筆目前的 Formal Evidence。 | 已標記為待審核，附上 {n} 筆目前的 Formal Evidence。",
-      "resolved": "已將討論串標記為已解決。",
-      "reopened": "已重新開啟討論串。",
-      "promoted": "已升級為 Decision。",
-      "promotedViewRevision": "View 已更新至修訂版本 {revision}。",
-      "threadCreated": "已在 #{widgetId} 建立討論串。"
-    },
-    "errors": {
-      "loadListFailed": "無法載入 Review 討論串。",
-      "loadThreadFailed": "無法載入此討論串。",
-      "threadUnavailable": "此討論串無法使用。",
-      "postMessageFailed": "無法送出留言。",
-      "reanchorFailed": "無法移動討論串。",
-      "readyFailed": "無法將討論串標記為待審核。",
-      "resolveFailed": "無法將討論串標記為已解決。",
-      "reopenFailed": "無法重新開啟討論串。",
-      "promoteFailed": "無法升級為 Decision。",
-      "createFailed": "無法建立討論串。",
-      "initialMessageFailed": "已建立討論串，但無法送出第一則留言。",
-      "targetViewUnresolved": "找不到 View {viewId} 的目前版本。",
-      "noCurrentEvidence": "沒有符合目前 View 的 Formal Evidence。請先擷取 Evidence，再將討論串標記為待審核。",
-      "noViewSelected": "請先選取 View 以建立討論串。"
+      "promoted": "已升級為 Decision。"
     }
   },
   "workbench": {
@@ -852,7 +768,12 @@
       "scope": "Variant 範圍",
       "viewWide": "整個 View",
       "domain": "變更範圍",
-      "author": "作者"
+      "author": "作者",
+      "view": "View",
+      "any": "不限",
+      "find": "尋找…",
+      "noOptions": "目前沒有可篩選的項目。",
+      "noDomains": "還沒有提交 Review 的變更。"
     },
     "openInCanvas": "在畫布中開啟",
     "empty": {
@@ -860,7 +781,79 @@
       "body": "在 View 畫布上留下的留言會顯示在這裡。"
     },
     "noMatch": "沒有符合篩選條件的討論串。",
-    "caughtUp": "沒有待審核的項目"
+    "caughtUp": "沒有待審核的項目",
+    "tab": {
+      "inbox": "收件匣",
+      "ready": "待審核"
+    },
+    "waiting": "沒有待處理 | {n} 則待處理 | {n} 則待處理",
+    "filtersActive": "篩選，{n} 項啟用中",
+    "quickFilters": "快速篩選",
+    "mine": "我的",
+    "mineHint": "你發起或參與的討論串",
+    "updated": "有更新",
+    "updatedHint": "自你上次在此瀏覽器查看後有更新",
+    "removeFilter": "移除篩選條件 {filter}",
+    "clearAll": "全部清除",
+    "clearFilters": "清除篩選",
+    "statusLabel": "狀態",
+    "resolutionLabel": "解決方式",
+    "listLabel": "Review 討論串",
+    "groupLabel": "{group}，{n}",
+    "anchorMissing": "找不到 Widget",
+    "viewMissing": "找不到 View",
+    "resolvedCount": "沒有已解決的討論串 | {n} 則已解決 | {n} 則已解決",
+    "goToViews": "前往 Views",
+    "keys": {
+      "move": "移動",
+      "reply": "回覆",
+      "resolve": "解決",
+      "open": "在畫布中開啟"
+    },
+    "chip": {
+      "view": "View：{value}",
+      "scope": "Variant：{value}",
+      "author": "作者：{value}",
+      "anchor": "錨點：{value}",
+      "domain": "變更：{value}"
+    },
+    "threadPane": "討論串",
+    "sheetDescription": "閱讀、回覆並解決這個討論串。",
+    "selectTitle": "選擇一個討論串",
+    "selectHint": "按 J 或 K 在佇列中移動。",
+    "selectHintNoKeys": "從佇列中選擇討論串，即可在這裡閱讀。",
+    "threadMissing": "這個 Workspace 中沒有這個討論串。",
+    "threadMissingHint": "連結可能來自其他 Workspace，或討論串 ID 不完整。",
+    "backToQueue": "回到佇列",
+    "unreadableTitle": "無法讀取這個討論串",
+    "viewGone": "這個討論串的 View 已不存在。",
+    "viewGoneHint": "可以標記為已過時，或保留以供記錄。",
+    "resolveObsolete": "標記為已過時",
+    "reanchorOnCanvas": "在畫布上重新錨定",
+    "acceptResolve": "接受並解決",
+    "readOnly": "你可以閱讀這個討論串，但無法回覆或變更狀態。",
+    "copied": "已複製",
+    "errors": {
+      "loadFailed": "無法載入 Review 討論串。",
+      "threadUnreadable": "無法讀取這個討論串。",
+      "viewMissing": "這個討論串的 View 已不存在。"
+    },
+    "announce": {
+      "replied": "已送出回覆。",
+      "resolved": "討論串已以「{resolution}」解決。"
+    },
+    "timeline": {
+      "accepted": "已接受",
+      "changes": "變更",
+      "submission": "提交",
+      "copySubmission": "複製提交 ID {id}",
+      "copyDigest": "複製 Evidence 摘要值",
+      "openEvidence": "開啟 View 的就緒狀態",
+      "verifiedChip": "已驗證・提交 {id}",
+      "resolvedChip": "已解決・{resolution}",
+      "by": "由 {name}",
+      "scopeChanged": "Variant 範圍：{from} → {to}"
+    }
   },
   "timeline": {
     "submitted": "已提交 Review",
