@@ -45,7 +45,9 @@ export type PersistenceFaultPoint =
 	| 'migration.before_apply'
 	| 'migration.after_apply'
 
-export type PersistenceFaultHook = (point: PersistenceFaultPoint, details: Readonly<{ path?: string; index?: number; operation?: 'asset' | 'migration' }>) => void | Promise<void>
+export type TransactionOperation = 'asset' | 'migration' | 'decision-promotion'
+
+export type PersistenceFaultHook = (point: PersistenceFaultPoint, details: Readonly<{ path?: string; index?: number; operation?: TransactionOperation }>) => void | Promise<void>
 
 export type FileNativePersistenceOptions = Readonly<{
 	root: string
@@ -76,7 +78,39 @@ export type AuthoredAssetInspection = Readonly<{
 
 export type ArtifactWriteResult = Readonly<{ identity: `sha256:${string}`; created: boolean }>
 
-type TransactionOperation = 'asset' | 'migration'
+export type AtomicReviewViewPromotionCasInput = Readonly<{
+	reviewId: string
+	expectedReviewRevision: ResourceRevision
+	reviewResource: ReviewThread
+	viewId: string
+	expectedViewRevision: ResourceRevision
+	viewResource: ViewResource
+}>
+
+export type AtomicReviewViewConflictDetail = Readonly<{
+	resource: 'review' | 'view'
+	key: string
+	expectedRevision: ResourceRevision
+	currentRevision: ResourceRevision
+}>
+
+export type AtomicReviewViewPromotionConflict = Readonly<{
+	code: 'revision_conflict'
+	resource: 'review' | 'view' | 'both'
+	conflicts: readonly AtomicReviewViewConflictDetail[]
+}>
+
+export type AtomicReviewViewPromotionResult =
+	| Readonly<{
+			ok: true
+			reviewRevision: ResourceRevision
+			viewRevision: ResourceRevision
+	  }>
+	| Readonly<{
+			ok: false
+			conflict: AtomicReviewViewPromotionConflict
+	  }>
+
 type FileChange = Readonly<{ path: string; bytes?: Uint8Array }>
 type TransactionJournal = Readonly<{ changes: readonly Readonly<{ path: string; existed: boolean }>[] }>
 type JsonValidator = (resource: unknown, filename: string) => readonly Diagnostic[]
@@ -168,6 +202,84 @@ export class FileNativePersistence {
 				revision: revisionForBytes(manifestBytes),
 				changedFiles,
 				steps: stepIds,
+			}
+		})
+	}
+
+	/**
+	 * Domain primitive for atomic CAS across Review and View resources.
+	 * Executes under one persistence lock, validates both revisions and complete resources,
+	 * and commits changes atomically via applyFileTransaction journal.
+	 */
+	async atomicReviewViewPromotionCas(input: AtomicReviewViewPromotionCasInput): Promise<AtomicReviewViewPromotionResult> {
+		return this.withLock(async () => {
+			await this.assertWritableUnlocked()
+			const reviewPath = reviewRelativePath(input.reviewId)
+			const viewPath = viewRelativePath(input.viewId)
+
+			const reviewBytes = await this.readOptionalBytesUnlocked(reviewPath)
+			if (!reviewBytes)
+				throw new PersistenceError('persistence.resource_not_found', `Review resource ${reviewPath} does not exist.`)
+			const currentReviewRevision = revisionForBytes(reviewBytes)
+
+			const viewBytes = await this.readOptionalBytesUnlocked(viewPath)
+			if (!viewBytes)
+				throw new PersistenceError('persistence.resource_not_found', `View resource ${viewPath} does not exist.`)
+			const currentViewRevision = revisionForBytes(viewBytes)
+
+			const conflicts: AtomicReviewViewConflictDetail[] = []
+			if (input.expectedReviewRevision !== currentReviewRevision) {
+				conflicts.push({
+					resource: 'review',
+					key: input.reviewId,
+					expectedRevision: input.expectedReviewRevision,
+					currentRevision: currentReviewRevision,
+				})
+			}
+			if (input.expectedViewRevision !== currentViewRevision) {
+				conflicts.push({
+					resource: 'view',
+					key: input.viewId,
+					expectedRevision: input.expectedViewRevision,
+					currentRevision: currentViewRevision,
+				})
+			}
+			if (conflicts.length > 0) {
+				return {
+					ok: false,
+					conflict: {
+						code: 'revision_conflict',
+						resource: conflicts.length === 2 ? 'both' : conflicts[0]!.resource,
+						conflicts,
+					},
+				}
+			}
+
+			const reviewValidation = validateReviewThread(input.reviewResource, `${input.reviewId}.review.json`)
+			if (!reviewValidation.ok) {
+				throw new PersistenceError('persistence.invalid_resource', 'ReviewThread resource failed schema validation before atomic promotion write.', { diagnostics: reviewValidation.diagnostics })
+			}
+
+			const viewValidation = validateViewResource(input.viewResource, `${input.viewId}.view.json`)
+			if (!viewValidation.ok) {
+				throw new PersistenceError('persistence.invalid_resource', 'ViewResource resource failed schema validation before atomic promotion write.', { diagnostics: viewValidation.diagnostics })
+			}
+
+			assertEmbeddedIdentity(input.reviewId, input.reviewResource, 'id', `${input.reviewId}.review.json`)
+			assertEmbeddedIdentity(input.viewId, input.viewResource, 'id', `${input.viewId}.view.json`)
+
+			const serializedReview = this.serializeJson(input.reviewResource, reviewPath)
+			const serializedView = this.serializeJson(input.viewResource, viewPath)
+
+			await this.applyFileTransaction([
+				{ path: reviewPath, bytes: serializedReview },
+				{ path: viewPath, bytes: serializedView },
+			], 'decision-promotion')
+
+			return {
+				ok: true,
+				reviewRevision: revisionForBytes(serializedReview),
+				viewRevision: revisionForBytes(serializedView),
 			}
 		})
 	}
@@ -658,6 +770,7 @@ export class FileNativePersistence {
 		let owner: { pid?: unknown; token?: unknown }
 		try { owner = JSON.parse(await fs.readFile(lockAbsolute, 'utf8')) as { pid?: unknown; token?: unknown } }
 		catch (cause) {
+			if (isNotFound(cause)) return true
 			throw new PersistenceError('persistence.lock_busy', 'Persistence lock owner record is unreadable; refusing to remove it automatically.', { cause })
 		}
 		if (typeof owner.pid !== 'number' || !Number.isInteger(owner.pid) || typeof owner.token !== 'string' || !isFullUuid(owner.token))
@@ -894,6 +1007,46 @@ export class LocaleFileRepository implements MutableResourceRepository<string, I
 export class AuthoredAssetFileRepository implements MutableResourceRepository<string, AuthoredAssetResource> {
 	constructor(private readonly persistence: FileNativePersistence) {}
 
+	async discoverKeys(): Promise<readonly string[]> {
+		return this.persistence.withLock(async () => {
+			const absolute = resolveWorkspacePath(this.persistence.root, 'assets')
+			await assertSafePath(this.persistence.root, 'assets/.placeholder', true)
+			let entries: import('node:fs').Dirent[]
+			try { entries = await fs.readdir(absolute, { withFileTypes: true }) }
+			catch (error) { if (isNotFound(error)) return []; throw error }
+			const keys: string[] = []
+			for (const entry of entries) {
+				if (!isFullUuid(entry.name)) continue
+				if (entry.isSymbolicLink()) continue
+				const entryAbsolute = resolve(absolute, entry.name)
+				try {
+					const stat = await fs.lstat(entryAbsolute)
+					if (!stat.isDirectory() || stat.isSymbolicLink()) continue
+					keys.push(entry.name)
+				}
+				catch {
+					continue
+				}
+			}
+			return keys.sort()
+		})
+	}
+
+	async readRevision(id: string): Promise<ResourceRevision | undefined> {
+		return this.persistence.withLock(async () => {
+			const metadataPath = assetMetadataRelativePath(id)
+			const metadataBytes = await this.persistence.readOptionalBytesUnlocked(metadataPath)
+			if (!metadataBytes) return undefined
+			try {
+				const inspected = await this.readAssetUnlocked(id)
+				return inspected?.revision
+			}
+			catch {
+				return revisionForBytes(metadataBytes)
+			}
+		})
+	}
+
 	async read(id: string): Promise<RevisionedResourceRead<AuthoredAssetResource> | undefined> {
 		const inspected = await this.readInspected(id)
 		return inspected && { resource: inspected.resource, revision: inspected.revision }
@@ -1015,9 +1168,10 @@ export class AuthoredAssetFileRepository implements MutableResourceRepository<st
 			}
 			contentFiles.push({ filename: entry.name, bytes: await this.persistence.readBytesUnlocked(`${directory}/${entry.name}`) })
 		}
-		if (isRecord(metadataValue) && contentFiles.length === 1 && isSafeAssetContentFilename(metadata.contentFilename))
-			diagnostics.push(...validateAssetContentMetadata(metadata, metadata.contentFilename, contentFiles[0]!.bytes).diagnostics)
-		const selected = contentFiles[0]?.bytes ?? Buffer.alloc(0)
+		const matchingFile = contentFiles.find(file => file.filename === metadata?.contentFilename)
+		if (isRecord(metadataValue) && contentFiles.length === 1 && isSafeAssetContentFilename(metadata.contentFilename) && matchingFile)
+			diagnostics.push(...validateAssetContentMetadata(metadata, metadata.contentFilename, matchingFile.bytes).diagnostics)
+		const selected = matchingFile?.bytes ?? Buffer.alloc(0)
 		const revision = assetRevision(metadataBytes, contentFiles)
 		return {
 			resource: { metadata, content: Uint8Array.from(selected) },
@@ -1063,6 +1217,92 @@ export class ImmutableArtifactStore {
 			if (digestBytes(bytes) !== identity)
 				throw new PersistenceError('persistence.artifact_corrupt', `Existing immutable artifact ${identity} does not match its content identity.`)
 			return Uint8Array.from(bytes)
+		})
+	}
+
+	async readCandidateJson<T = unknown>(identity: string, maxBytes = 512 * 1024): Promise<T | undefined> {
+		return this.persistence.withLock(async () => {
+			const relativePath = artifactRelativePath(identity)
+			const absolutePath = resolveWorkspacePath(this.persistence.root, relativePath)
+			let stats: import('node:fs').Stats
+			try {
+				stats = await fs.stat(absolutePath)
+			}
+			catch (error) {
+				if (isNotFound(error)) return undefined
+				throw error
+			}
+			if (stats.size === 0 || stats.size > maxBytes) {
+				return undefined
+			}
+			const bytes = await this.persistence.readOptionalBytesUnlocked(relativePath)
+			if (!bytes) return undefined
+			if (digestBytes(bytes) !== identity)
+				throw new PersistenceError('persistence.artifact_corrupt', `Existing immutable artifact ${identity} does not match its content identity.`)
+
+			// Quick binary magic / prefix check: JSON object/array must begin with whitespace or { / [
+			let firstNonWhitespace = -1
+			for (let i = 0; i < Math.min(bytes.length, 64); i++) {
+				const b = bytes[i]!
+				if (b !== 0x20 && b !== 0x09 && b !== 0x0A && b !== 0x0D) {
+					firstNonWhitespace = b
+					break
+				}
+			}
+			if (firstNonWhitespace !== 0x7B && firstNonWhitespace !== 0x5B) {
+				return undefined
+			}
+
+			let text: string
+			try {
+				const decoder = new TextDecoder('utf8', { fatal: true })
+				text = decoder.decode(bytes)
+			}
+			catch {
+				return undefined
+			}
+
+			try {
+				return JSON.parse(text) as T
+			}
+			catch {
+				return undefined
+			}
+		})
+	}
+
+	async listIdentities(): Promise<readonly string[]> {
+		return this.persistence.withLock(async () => {
+			const artifactsRelative = '.uiux/artifacts/sha256'
+			const artifactsAbsolute = resolveWorkspacePath(this.persistence.root, artifactsRelative)
+			let shards: import('node:fs').Dirent[]
+			try {
+				await assertSafePath(this.persistence.root, `${artifactsRelative}/.placeholder`, true)
+				shards = await fs.readdir(artifactsAbsolute, { withFileTypes: true })
+			}
+			catch (error) {
+				if (isNotFound(error)) return []
+				throw error
+			}
+			const identities: string[] = []
+			for (const shard of shards) {
+				if (!shard.isDirectory() || shard.isSymbolicLink() || shard.name.length !== 2) continue
+				const shardRelative = `${artifactsRelative}/${shard.name}`
+				const shardAbsolute = resolveWorkspacePath(this.persistence.root, shardRelative)
+				let entries: import('node:fs').Dirent[]
+				try {
+					entries = await fs.readdir(shardAbsolute, { withFileTypes: true })
+				}
+				catch (error) {
+					if (isNotFound(error)) continue
+					throw error
+				}
+				for (const entry of entries) {
+					if (!entry.isFile() || entry.isSymbolicLink() || entry.name.length !== 64) continue
+					identities.push(`sha256:${entry.name}`)
+				}
+			}
+			return identities.sort()
 		})
 	}
 }

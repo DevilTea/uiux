@@ -35,9 +35,9 @@ export type ProtocolContext = Readonly<{
 	[key: string]: unknown
 }>
 type GeometryRevisionContext = ProtocolContext & Readonly<{ geometryRevision: number }>
-type GeometryAcquireContext = Omit<ProtocolContext, 'geometryRevision'> & Readonly<{ geometryRevision?: never }>
+type GeometryAcquireContext = ProtocolContext & Readonly<{ geometryRevision?: never }>
 export type ProtocolEnvelope<
-	Payload extends JsonObject = JsonObject,
+	Payload extends Readonly<Record<string, unknown>> = JsonObject,
 	Context extends ProtocolContext = ProtocolContext,
 > = Readonly<{
 	type: string
@@ -470,11 +470,13 @@ function pathSegmentsIntersect(
 ): boolean {
 	if (left.kind === 'line' && right.kind === 'line')
 		return lineSegmentsIntersectBeyondSharedEndpoints(left.from, left.to, right.from, right.to, sharedEndpoints)
-	if (left.kind === 'line')
+	if (left.kind === 'line' && right.kind === 'cubic')
 		return lineCubicIntersects(left, right, sharedEndpoints, 0, budget)
-	if (right.kind === 'line')
+	if (right.kind === 'line' && left.kind === 'cubic')
 		return lineCubicIntersects(right, left, sharedEndpoints, 0, budget)
-	return cubicPairIntersects(left, right, sharedEndpoints, 0, budget)
+	if (left.kind === 'cubic' && right.kind === 'cubic')
+		return cubicPairIntersects(left, right, sharedEndpoints, 0, budget)
+	return false
 }
 
 function lineCubicIntersects(

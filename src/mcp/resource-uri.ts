@@ -16,7 +16,7 @@ export function parsePointResourceUri(input: string | URL): UiuxResourceAddress 
 	if (url.protocol !== 'uiux:' || url.username || url.password || url.port || url.search || url.hash) return undefined
 	if (url.hostname === 'workspace')
 		return url.pathname === '' || url.pathname === '/' ? { kind: 'workspace', key: 'workspace' } : undefined
-	if (url.hostname !== 'view' && url.hostname !== 'flow' && url.hostname !== 'locale') return undefined
+	if (url.hostname !== 'view' && url.hostname !== 'flow' && url.hostname !== 'locale' && url.hostname !== 'review' && url.hostname !== 'asset') return undefined
 	if (!url.pathname.startsWith('/') || url.pathname.slice(1).includes('/')) return undefined
 	try {
 		const key = decodeURIComponent(url.pathname.slice(1))

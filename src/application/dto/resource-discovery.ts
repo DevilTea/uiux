@@ -1,7 +1,8 @@
+import type { ReviewAnchor, ReviewStatus } from '../../domain/reviews/schema'
 import { jsonPointer, rejectUnknownKeys, Validator, type Diagnostic } from '../../domain/validation'
 import type { ResourceRevision } from './revisions'
 
-export const DISCOVERABLE_RESOURCE_KINDS = ['view', 'flow', 'locale'] as const
+export const DISCOVERABLE_RESOURCE_KINDS = ['view', 'flow', 'locale', 'review', 'asset'] as const
 export const MAX_RESOURCE_DISCOVERY_LIMIT = 100
 
 export type DiscoverableResourceKind = typeof DISCOVERABLE_RESOURCE_KINDS[number]
@@ -16,6 +17,8 @@ export type ResourceDiscoveryItem =
 	| Readonly<{ kind: 'view'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ name?: string; feature?: string }> }>
 	| Readonly<{ kind: 'flow'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ name?: string }> }>
 	| Readonly<{ kind: 'locale'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ messageCount?: number }> }>
+	| Readonly<{ kind: 'review'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ anchor?: ReviewAnchor; status?: ReviewStatus; messageCount?: number }> }>
+	| Readonly<{ kind: 'asset'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ name?: string; mediaType?: string; contentFilename?: string }> }>
 
 export type ResourceDiscoveryPage = Readonly<{ items: readonly ResourceDiscoveryItem[]; nextCursor?: string }>
 export type ResourceDiscoveryOutcome =
@@ -38,7 +41,7 @@ export function validateResourceDiscoveryRequest(input: unknown, mode: 'list' | 
 		kinds?.forEach((kind, index) => {
 			const path = jsonPointer('/kinds', index)
 			if (typeof kind !== 'string' || !DISCOVERABLE_RESOURCE_KINDS.includes(kind as DiscoverableResourceKind))
-				v.issue('discovery.invalid_kind', path, 'Discovery kind must be view, flow, or locale.')
+				v.issue('discovery.invalid_kind', path, 'Discovery kind must be view, flow, locale, review, or asset.')
 			else if (seen.has(kind))
 				v.issue('discovery.duplicate_kind', path, 'Discovery kinds must not repeat.')
 			else seen.add(kind)

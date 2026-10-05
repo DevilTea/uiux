@@ -1,4 +1,4 @@
-import Ajv2020 from 'ajv/dist/2020'
+import Ajv2020 from 'ajv/dist/2020.js'
 import type { AnySchema } from 'ajv'
 import {
 	jsonPointer,
@@ -21,11 +21,13 @@ export type AdapterAssetCapability = Readonly<{
 export type AdapterWidgetCatalogEntry = Readonly<{
 	i18n?: Readonly<{ fields: Readonly<Record<string, I18nFieldMapping>>; [key: string]: JsonValue }>
 	assetFields?: Readonly<Record<string, AdapterAssetCapability>>
+}> & Readonly<{
 	[key: string]: JsonValue
 }>
 
 export type AdapterCatalog = Readonly<{
 	widgets: Readonly<Record<string, AdapterWidgetCatalogEntry>>
+}> & Readonly<{
 	[key: string]: JsonValue
 }>
 

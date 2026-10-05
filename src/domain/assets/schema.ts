@@ -21,6 +21,23 @@ export type AssetCapability = Readonly<{
 	acceptedCategories?: readonly string[]
 }>
 
+export function decodeStrictBase64(base64: unknown, path = '/contentBase64'): { ok: true; bytes: Uint8Array } | { ok: false; diagnostics: readonly Diagnostic[] } {
+	if (typeof base64 !== 'string')
+		return { ok: false, diagnostics: [{ code: 'asset.invalid_base64', path, message: 'Asset contentBase64 must be a string.' }] }
+	if (base64.length === 0)
+		return { ok: false, diagnostics: [{ code: 'asset.invalid_base64', path, message: 'Asset contentBase64 must not be empty.' }] }
+	if (base64.length % 4 !== 0)
+		return { ok: false, diagnostics: [{ code: 'asset.invalid_base64', path, message: 'Asset contentBase64 length must be a multiple of 4.' }] }
+	if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})$/u.test(base64))
+		return { ok: false, diagnostics: [{ code: 'asset.invalid_base64', path, message: 'Asset contentBase64 contains invalid base64 characters, whitespace, or misplaced padding.' }] }
+	const buf = Buffer.from(base64, 'base64')
+	if (buf.length === 0)
+		return { ok: false, diagnostics: [{ code: 'asset.invalid_base64', path, message: 'Asset contentBase64 decoded to zero bytes.' }] }
+	if (buf.toString('base64') !== base64)
+		return { ok: false, diagnostics: [{ code: 'asset.invalid_base64', path, message: 'Asset contentBase64 is not canonical RFC 4648 base64 (contains non-canonical unused bits).' }] }
+	return { ok: true, bytes: Uint8Array.from(buf) }
+}
+
 export function validateAssetMetadata(input: unknown, directoryId?: string): ValidationResult<AuthoredAsset> {
 	const v = new Validator()
 	const asset = v.object(input, '')
