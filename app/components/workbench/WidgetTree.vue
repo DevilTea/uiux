@@ -82,7 +82,6 @@ const hasEmptyRoot = computed(() => rootItem.value && !rootItem.value.children?.
       <h2 class="text-xs font-semibold tracking-wider text-muted uppercase">
         {{ t('workbench.tree.title') }}
       </h2>
-      <span class="font-mono text-[10px] text-dimmed">View.ir</span>
     </div>
 
     <div class="flex-1 overflow-y-auto p-2">

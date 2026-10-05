@@ -112,7 +112,6 @@ onUnmounted(() => {
             {{ t('workbench.canvas.scale', { percent: scalePercent }) }}
           </UBadge>
         </UTooltip>
-        <span class="text-muted">{{ t('workbench.canvas.iframeBoundary') }}</span>
       </div>
     </div>
 

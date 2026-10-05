@@ -61,11 +61,14 @@ const modeLabel = computed(() => isReadOnly.value ? t('workbench.header.modePubl
     />
 
     <div class="flex shrink-0 items-center gap-2">
-      <SessionStatus />
-      <USeparator
-        orientation="vertical"
-        class="h-5"
-      />
+      <!-- The preview session is protocol plumbing: only surface it while connecting or when it fails. -->
+      <template v-if="workbench.preview.sessionPhase.value === 'initiating' || workbench.preview.sessionPhase.value === 'failed'">
+        <SessionStatus />
+        <USeparator
+          orientation="vertical"
+          class="h-5"
+        />
+      </template>
       <WorkbenchPreferences />
       <UButton
         color="neutral"

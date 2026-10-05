@@ -159,12 +159,12 @@ try {
 			throw new Error('Published Workspace settings still expose editable fields.')
 
 		await nav(page, 'Locales')
-		await expectNoButton(page, 'New locale')
+		await expectNoButton(page, 'New Locale')
 		await expectNoButton(page, 'Save')
 
 		await nav(page, 'Assets')
-		await expectNoButton(page, 'New asset')
-		await expectNoButton(page, 'Replace content')
+		await expectNoButton(page, 'New Asset')
+		await expectNoButton(page, 'Replace file')
 		const assetDownload = activePanel(page).getByRole('link', { name: 'Download' })
 		await assetDownload.waitFor()
 		const assetHref = await assetDownload.getAttribute('href')
@@ -172,9 +172,9 @@ try {
 			throw new Error(`Published Asset download did not resolve to static content: ${assetHref}`)
 
 		await nav(page, 'Flows')
-		await expectNoButton(page, 'New flow')
+		await expectNoButton(page, 'New Flow')
 		await expectNoButton(page, 'Add step')
-		await expectNoButton(page, 'Save flow')
+		await expectNoButton(page, 'Save Flow')
 
 		await nav(page, 'Reviews')
 		await expectNoButton(page, 'New thread')
@@ -183,17 +183,17 @@ try {
 			throw new Error('Published viewer exposed the canvas Comment button.')
 
 		await nav(page, 'Evidence')
-		await expectNoButton(page, 'Capture active context')
-		const evidenceImage = activePanel(page).locator('img[alt="Formal capture screenshot"]')
+		await expectNoButton(page, 'Capture current context')
+		const evidenceImage = activePanel(page).locator('img[alt="Captured screenshot"]')
 		await evidenceImage.waitFor()
 		const evidenceSrc = await evidenceImage.getAttribute('src')
 		if (!evidenceSrc?.includes('/uiux/_uiux/artifacts/'))
 			throw new Error(`Published Evidence screenshot did not resolve to a static artifact: ${evidenceSrc}`)
 
 		await nav(page, 'Handoff')
-		await expectNoButton(page, 'Re-assess')
+		await expectNoButton(page, 'Recheck')
 		await expectNoButton(page, 'Export snapshot')
-		await activePanel(page).getByText('Implementation ready', { exact: true }).waitFor()
+		await activePanel(page).getByText('Ready to implement', { exact: true }).waitFor()
 
 		await page.waitForTimeout(200)
 		const runtimeApiRequests = requests.filter((requestUrl) => {
