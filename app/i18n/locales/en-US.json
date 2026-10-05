@@ -21,7 +21,8 @@
       "filename": "Filename",
       "mediaType": "Media type",
       "size": "Size",
-      "digest": "Digest"
+      "digest": "Digest",
+      "id": "ID"
     },
     "placeholders": {
       "name": "e.g. Header logo"
@@ -30,7 +31,7 @@
     "fileUploadLabel": "Drop a file or click to browse",
     "fileUploadDescription": "Any file type. Images show a preview.",
     "preview": "Preview",
-    "previewAlt": "Asset preview",
+    "previewAlt": "Preview of {name}",
     "noPreviewTitle": "No preview",
     "noPreviewDescription": "Only images can be previewed. This file is {mediaType}.",
     "download": "Download",
@@ -42,10 +43,10 @@
     "createFailed": "Could not create the Asset.",
     "replaceTitle": "Replace file",
     "replaceDescription": "Upload a new file for “{name}”. Saving fails if someone changed the Asset in the meantime.",
-    "commitReplacement": "Replace file",
+    "commitReplacement": "Replace content",
     "replaced": "File replaced.",
     "replaceFailed": "Could not replace the file.",
-    "conflictTitle": "Asset changed elsewhere",
+    "conflictTitle": "This Asset changed since you opened it.",
     "conflictDescription": "Someone updated this Asset after you opened it. Reload, then replace the file again.",
     "validation": {
       "fileRequired": "Choose a file to upload.",
@@ -57,7 +58,38 @@
     "upload": "Upload",
     "replace": "Replace content…",
     "unused": "Unused",
-    "usedBy": "Used by {n} View | Used by {n} Views"
+    "usedBy": "Used by {n} View | Used by {n} Views",
+    "filter": {
+      "search": "Filter by name or filename",
+      "type": "Type",
+      "usage": "Usage",
+      "allTypes": "All types",
+      "images": "Images",
+      "otherFiles": "Other files",
+      "anyUsage": "Any usage",
+      "used": "Used",
+      "noMatch": "No Assets match these filters.",
+      "clear": "Clear filters"
+    },
+    "layout": {
+      "grid": "Grid",
+      "list": "List"
+    },
+    "openDetail": "Open {name}",
+    "downloadName": "Download {name}",
+    "problems": "{n} problem | {n} problems",
+    "usage": "Used by",
+    "unusedDescription": "No View binds this Asset. It stays in the Workspace until someone removes it.",
+    "metadata": "Metadata",
+    "metadataSaved": "Asset saved.",
+    "saveFailed": "Couldn't save the Asset",
+    "replaceHelp": "The new file replaces the content. The Asset ID stays, so bindings keep working.",
+    "contentUnreadable": "Couldn't read the current content. Replace the content to save.",
+    "detailDescription": "Preview, metadata and usage",
+    "previewUnavailable": "No preview: the content has problems.",
+    "diagnosticsTitle": "Problems",
+    "details": "Details",
+    "copyValue": "Copy {label}"
   },
   "checks": {
     "title": "Checks",
@@ -352,15 +384,15 @@
     "diagnosticCount": "No diagnostics | {n} diagnostic | {n} diagnostics",
     "defaultBadge": "Default",
     "emptyTitle": "No Locales yet",
-    "emptyDescription": "Create a Locale to start translating the previewed product.",
+    "emptyDescription": "Add the primary Locale to start translating.",
     "emptyDescriptionReadOnly": "No Locales in this snapshot.",
     "selectPrompt": "Select a Locale to edit its strings.",
     "loadListFailed": "Could not load Locales.",
     "loadDetailFailed": "Could not load this Locale.",
     "unavailable": "This Locale is unavailable.",
     "defaultMissing": {
-      "title": "Default Locale missing",
-      "description": "The default Locale {locale} has not been created yet.",
+      "title": "Primary Locale has no file",
+      "description": "{locale} is the primary Locale but has no file yet.",
       "action": "Create Locale"
     },
     "searchLabel": "Search keys and strings",
@@ -382,17 +414,59 @@
     },
     "create": {
       "title": "New Locale",
-      "description": "Adds an empty set of translations for the previewed product.",
+      "description": "Creates a Locale file for the previewed product.",
       "tagLabel": "Locale tag",
       "tagHelp": "BCP 47 language tag, e.g. en-US, zh-TW, ja-JP.",
       "tagRequired": "Enter a Locale tag.",
       "created": "Locale {locale} created.",
-      "failed": "Could not create the Locale."
+      "failed": "Could not create the Locale.",
+      "sourceLabel": "Start with keys from",
+      "sourceHelp": "Copied keys start empty, so each one shows as a reminder.",
+      "startEmpty": "No keys",
+      "keysFrom": "{locale} ({n} key) | {locale} ({n} keys)",
+      "submit": "Create Locale",
+      "tagInvalid": "Use a BCP 47 code, like zh-TW.",
+      "tagSuggest": "Use the canonical form {tag}.",
+      "tagExists": "{tag} already exists."
     },
     "primary": "Primary",
     "onlyReminders": "Only reminders",
     "empty": "Empty",
-    "whitespace": "Whitespace only"
+    "whitespace": "Whitespace only",
+    "pageTitle": "Locales",
+    "pageSubtitle": "Translations for the previewed product, one file per Locale. The Workbench language is set in Preferences.",
+    "keyColumn": "Key",
+    "filterPlaceholder": "Filter keys or text",
+    "filterLabel": "Filter keys",
+    "filter": {
+      "all": "All keys",
+      "reminders": "Reminders",
+      "missing": "Missing",
+      "extra": "Extra"
+    },
+    "missing": "Missing",
+    "extraBadge": "Not in {locale}",
+    "diff": {
+      "title": "Keys against {locale}",
+      "match": "Every key matches.",
+      "missing": "{n} missing",
+      "extra": "{n} extra",
+      "addMissing": "Add missing keys",
+      "removeExtra": "Remove extra keys"
+    },
+    "newKeyHelp": "Added to every Locale with an empty value.",
+    "addKeyRequired": "Enter a key.",
+    "addKeyTaken": "{key} already exists.",
+    "cellLabel": "{key} in {locale}",
+    "editCell": "Edit {key} in {locale}",
+    "edited": "Edited",
+    "editedCount": "{n} edited",
+    "conflictTitle": "{locale} changed since you opened it.",
+    "saveFailedLocale": "Couldn't save {locale}",
+    "savePerFile": "Saves to {locale}.json only.",
+    "saveLocale": "Save {locale}",
+    "diagnosticsTitle": "{locale} has {n} problem | {locale} has {n} problems",
+    "emptyAction": "Add Locale"
   },
   "preview": {
     "loading": "Loading View…",
@@ -642,59 +716,6 @@
       "description": "It's read-only until it's migrated. Stop this server, run {command}, then start uiux dev again."
     }
   },
-  "workspaceSettings": {
-    "title": "Workspace settings",
-    "subtitle": "Stored in {file}",
-    "revisionBadge": "Rev {revision}",
-    "saved": "Settings saved",
-    "saveFailed": "Could not save settings",
-    "reset": "Discard changes",
-    "save": "Save settings",
-    "conflict": {
-      "title": "Settings changed elsewhere",
-      "description": "Someone changed the Workspace settings after you loaded them. Your changes were not saved. Reload to get the latest version.",
-      "reload": "Reload settings"
-    },
-    "defaultLocale": {
-      "label": "Default Locale",
-      "description": "BCP 47 tag of the primary Locale."
-    },
-    "adapters": {
-      "title": "Adapters",
-      "description": "Widget packages or local adapter modules.",
-      "add": "Add adapter",
-      "item": "Adapter {n}",
-      "remove": "Remove adapter {n}",
-      "moduleSpecifier": "Module specifier",
-      "config": "Config",
-      "configHint": "Optional JSON",
-      "empty": "No adapters configured. Only RootShell is available."
-    },
-    "viewports": {
-      "title": "Viewports",
-      "description": "Canvas sizes available in the preview.",
-      "add": "Add viewport",
-      "id": "Preset ID",
-      "idPlaceholder": "e.g. mobile",
-      "remove": "Remove viewport {id}",
-      "width": "Width (px)",
-      "height": "Height (px)",
-      "empty": "No custom viewports. Default is 1280 × 800."
-    },
-    "themes": {
-      "title": "Preview themes",
-      "description": "Theme IDs used to render Views in the preview.",
-      "notAppearance": "These themes affect only the preview, not the Workbench appearance.",
-      "add": "Add theme",
-      "idPlaceholder": "e.g. light, dark",
-      "idLabel": "Theme ID {n}",
-      "remove": "Remove theme {id}",
-      "empty": "No preview themes."
-    },
-    "diagnostics": {
-      "title": "No diagnostics | {n} diagnostic | {n} diagnostics"
-    }
-  },
   "nav": {
     "overview": "Overview",
     "views": "Views",
@@ -904,11 +925,130 @@
     "adapters": "Adapters",
     "keyChange": "Renaming a key changes its identity. Check references first.",
     "unsaved": "{n} unsaved change | {n} unsaved changes",
-    "conflict": "Settings changed since you opened them."
+    "conflict": "Settings changed since you opened them.",
+    "subtitle": "Stored in {file}.",
+    "sectionIndex": "Settings sections",
+    "saved": "Settings saved",
+    "saveFailed": "Couldn't save",
+    "locale": {
+      "description": "The primary Locale of the previewed product.",
+      "primaryLocale": "Primary Locale",
+      "primaryLocaleHelp": "The Preview renders it by default, and the Locales page diffs every other Locale against it.",
+      "searchLocale": "Find or type a tag",
+      "tagInvalid": "Use a BCP 47 code, like zh-TW.",
+      "noFile": "{locale} has no Locale file yet. Create it on {link}."
+    },
+    "registry": {
+      "viewportsDescription": "Canvas sizes the Preview can render at, widest first.",
+      "themesDescription": "Themes the Preview can render Views in.",
+      "notAppearance": "These change the previewed View only. The Workbench appearance is in Preferences.",
+      "addViewport": "Add viewport",
+      "addTheme": "Add theme",
+      "key": "Key",
+      "label": "Label",
+      "size": "Width × height",
+      "actions": "Actions",
+      "actionsFor": "Actions for {key}",
+      "labelPlaceholder": "Shown in menus",
+      "labelFor": "Label for {key}",
+      "widthFor": "Width of {key} in px",
+      "heightFor": "Height of {key} in px",
+      "noLabel": "No label",
+      "new": "New",
+      "renamedFrom": "Was {key}",
+      "viewportsEmpty": "No viewports. The Preview uses 1280 × 800.",
+      "themesEmpty": "No themes yet.",
+      "rename": "Rename key…",
+      "renameTitle": "Rename {key}",
+      "removeTitle": "Remove {key}",
+      "removeDescription": "Removing a key changes what can render. Check references first.",
+      "newKey": "New key",
+      "newKeyHelp": "Keys are identities. People read the label.",
+      "references": "References",
+      "checking": "Checking Evidence…",
+      "evidenceUnknown": "Couldn't check Evidence. Records captured with this key may exist.",
+      "evidence": "No Evidence was captured with {key}. | {n} Evidence record was captured with {key}. It will read as stale. | {n} Evidence records were captured with {key}. They will read as stale.",
+      "links": "Links that name {key} stop matching it.",
+      "acknowledge": "I understand references to {key} won't follow this change.",
+      "confirmRename": "Rename",
+      "confirmRemove": "Remove"
+    },
+    "validation": {
+      "keyRequired": "Enter a key.",
+      "keyWhitespace": "Keys can't contain spaces.",
+      "keyTaken": "{key} is already used.",
+      "dimensionRequired": "Enter a width and height of at least 1."
+    }
+  },
+  "authoring": {
+    "discard": "Discard",
+    "saveChanges": "Save changes",
+    "unsavedShort": "Unsaved",
+    "conflict": {
+      "kept": "Your edits are kept.",
+      "reload": "Reload theirs",
+      "compare": "Compare"
+    },
+    "compare": {
+      "title": "Compare versions",
+      "description": "Theirs is the saved version. Yours is the draft on this page.",
+      "field": "Field",
+      "theirs": "Theirs (saved)",
+      "yours": "Yours (draft)",
+      "absent": "Not set",
+      "none": "No differences here. The change was elsewhere, so you can keep your draft and save.",
+      "keepTheirs": "Keep theirs",
+      "keepMine": "Keep mine"
+    },
+    "leave": {
+      "title": "Leave without saving?",
+      "description": "{n} unsaved change will be lost. | {n} unsaved changes will be lost.",
+      "stay": "Keep editing",
+      "discard": "Discard and leave"
+    },
+    "access": {
+      "device": "Editing needs a window at least 1280px wide.",
+      "migration": "This Workspace uses an older format. Run uiux migrate to edit it."
+    }
   },
   "adapters": {
     "invalid": "The Adapter set is invalid. Preview and Catalog are paused until it's fixed.",
-    "repair": "Run this in your project to fix it:"
+    "repair": "Run this in your project to fix it:",
+    "description": "Packages or Workspace modules that supply Widgets, in resolution order.",
+    "add": "Add adapter",
+    "moduleSpecifier": "Module specifier",
+    "unnamed": "New Adapter",
+    "status": {
+      "loaded": "Loaded",
+      "failed": "Can't load",
+      "unsaved": "Not saved yet",
+      "unknown": "Not checked"
+    },
+    "adapterId": "ID",
+    "version": "Version",
+    "apiVersion": "API",
+    "config": "Config",
+    "configLabel": "Config for {name}",
+    "configHelp": "JSON. The Adapter's own schema validates it on save. Leave it empty for none.",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "moveUpLabel": "Move {name} up",
+    "moveDownLabel": "Move {name} down",
+    "removeLabel": "Remove {name}",
+    "orderLabel": "Adapters in resolution order",
+    "empty": "No Adapters. Only RootShell is available.",
+    "repairFile": "Check that {path} exists in the Workspace.",
+    "noInstall": "The Workbench never installs packages. Run the command yourself, then reload.",
+    "copyCommand": "Copy {command}",
+    "copied": "Copied",
+    "copyFailed": "Couldn't copy",
+    "resolutionUnknown": "Couldn't check the Adapter set.",
+    "saveNote": "Saving checks the Adapter set again.",
+    "validation": {
+      "required": "Enter a module specifier.",
+      "specifier": "Use a package name or a ./ path inside the Workspace.",
+      "json": "This isn't valid JSON."
+    }
   },
   "comment": {
     "modeOn": "Comment mode on. Click a Widget, or press Esc to cancel.",
