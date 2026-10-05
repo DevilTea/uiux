@@ -56,8 +56,21 @@ export interface PreviewRuntimeMountOptions {
 	context: ResolvedRenderContext
 	onStatusChange?: (status: PreviewRuntimeStatus) => void
 	locales?: ReadonlyMap<string, I18nResource> | Record<string, I18nResource>
-	/** The Workspace default locale used when the selected locale has no resource. Defaults to en-US. */
+	/** The Workspace `i18n.defaultLocale`: the fallback for keys missing from the requested locale. */
 	defaultLocale?: string
+}
+
+/**
+ * Chooses the translation runtime's default (fallback) locale: the Workspace
+ * default locale when its resource is loaded, otherwise the requested locale.
+ */
+export function resolveTranslationFallbackLocale(
+	requestedLocale: string,
+	workspaceDefaultLocale: string | undefined,
+	resources: ReadonlyMap<string, unknown>,
+): string {
+	if (workspaceDefaultLocale && resources.has(workspaceDefaultLocale)) return workspaceDefaultLocale
+	return requestedLocale
 }
 
 export type StandalonePreviewMountFactory = Readonly<{
@@ -211,10 +224,9 @@ export function createStandalonePreviewMount(input: Readonly<{
 		}
 
 		function getTranslationRuntime(currentLocale: string): TranslationRuntime {
-			const hasPrimary = resourceMap.has(currentLocale)
-			const fallbackLocale = options.defaultLocale || 'en-US'
-			const hasFallback = resourceMap.has(fallbackLocale)
-			const primaryLocale = hasPrimary ? currentLocale : (hasFallback ? fallbackLocale : currentLocale)
+			// The runtime's default locale is the fallback for keys missing from the requested locale,
+			// so it must be the Workspace default locale, not the requested one.
+			const primaryLocale = resolveTranslationFallbackLocale(currentLocale, options.defaultLocale, resourceMap)
 			const res = createTranslationRuntime(primaryLocale, resourceMap)
 			if (res.state === 'ready') {
 				return res.runtime
