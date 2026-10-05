@@ -155,7 +155,7 @@ const adapterDescriptors = [
 ${descriptors}
 ];
 
-export const { mountPreviewRuntime } = createStandalonePreviewMount({
+export const { mountPreviewRuntime, describeDeclaredWidgetEvents } = createStandalonePreviewMount({
   adapterDescriptors,
 });
 
