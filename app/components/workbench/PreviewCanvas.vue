@@ -277,8 +277,8 @@ const notOnCanvasCount = computed(() => comments?.pinsHidden.value ? 0 : comment
  */
 async function showNotOnCanvas(): Promise<void> {
 	if (props.prototype) {
-		const first = comments.notOnCanvas.value.ids[0]
-		if (first) comments.open(first)
+		const first = comments?.notOnCanvas.value.ids[0]
+		if (first) comments?.open(first)
 		return
 	}
 	emit('openPanel', 'comments')
@@ -503,7 +503,7 @@ defineShortcuts(computed(() => ({
 	...(shell.singleKeyShortcuts.value && selectedView.value
 		? {
 				c: () => selectTool('comment'),
-				shift_c: () => comments.togglePins(),
+				shift_c: () => comments?.togglePins(),
 			}
 		: {}),
 })))
