@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute } from '#imports'
+import { useI18n, useRoute } from '#imports'
 import { useUiuxClient } from '../composables/useUiuxClient'
+import { describeFetchError } from '../utils/fetch-error'
+import { resolveDefaultLocale, resolveDefaultThemeId } from '../../src/preview/render-context-options'
+import type { WorkspaceManifest } from '../../src/domain/workspace/schema'
 import { RuntimePreviewProtocolBridge } from '../../src/preview/protocol/bridge'
 import {
 	PREVIEW_WIRE_CHANNEL,
@@ -22,6 +25,7 @@ import type { I18nResource } from '../../src/domain/i18n/schema'
 
 const route = useRoute()
 const uiux = useUiuxClient()
+const { t } = useI18n()
 const localesMap = new Map<string, I18nResource>()
 
 type Diagnostic = Readonly<{ code: string; path: string; message: string }>
@@ -36,11 +40,15 @@ type ViewRead = Readonly<{
 const previewSessionId = ref<string>((route.query.session as string) || 'default-session')
 const runtimeGenerationId = ref<string>((route.query.generation as string) || 'default-generation')
 const viewId = ref<string>((route.query.viewId as string) || '')
-const locale = ref<string>((route.query.locale as string) || 'en-US')
+// Locale and theme are resolved from the Workspace (same rules as the Workbench header) when not supplied.
+const locale = ref<string>((route.query.locale as string) || '')
 const viewportId = ref<string>((route.query.viewportId as string) || 'default')
 const viewportWidth = ref<number>(Number(route.query.viewportWidth) || 1280)
 const viewportHeight = ref<number>(Number(route.query.viewportHeight) || 800)
-const themeId = ref<string>((route.query.themeId as string) || 'light')
+const themeId = ref<string>((route.query.themeId as string) || '')
+const workspaceDefaultLocale = ref<string>()
+/** The preview host follows the brightness of the Workspace theme it renders, not the Workbench appearance. */
+const hostColorScope = computed(() => themeId.value === 'dark' ? 'dark' : 'light')
 const variantName = ref<string | undefined>((route.query.variant as string) || undefined)
 const harnessMode = computed(() => route.query.harness === 'formal')
 
@@ -98,7 +106,23 @@ function handlePreviewPointerMove(event: PointerEvent) {
 }
 
 function handlePreviewPointerClick(event: MouseEvent) {
-	if (!isCommentMode.value) return
+	if (!isCommentMode.value) {
+		// Outside comment mode a click selects the hit-tested widget in the Workbench tree and Inspector.
+		// The widget's own interaction still runs; nothing is prevented.
+		if (harnessMode.value || !window.parent || window.parent === window) return
+		const targetId = findTargetWidgetId(event.target)
+		highlightedWidgetId.value = targetId
+		window.parent.postMessage({
+			channel: PREVIEW_TARGETING_CHANNEL,
+			payload: {
+				type: 'select',
+				purpose: 'inspection',
+				widgetId: targetId,
+				viewId: viewId.value,
+			},
+		}, window.location.origin)
+		return
+	}
 	event.preventDefault()
 	event.stopPropagation()
 	const targetId = findTargetWidgetId(event.target)
@@ -150,8 +174,23 @@ function initBridge() {
 	}
 	catch (cause) {
 		handshakeStatus.value = 'failed'
-		error.value = cause instanceof Error ? cause.message : 'Bridge init failed'
+		error.value = cause instanceof Error ? cause.message : t('preview.errors.bridgeInitFailed')
 	}
+}
+
+/** Resolves the Workspace default locale and, when not supplied, the effective locale and theme. */
+async function resolveWorkspaceDefaults() {
+	if (workspaceDefaultLocale.value && locale.value && themeId.value) return
+	let manifest: WorkspaceManifest | undefined
+	try {
+		manifest = (await uiux.readResource<{ resource?: WorkspaceManifest }>('workspace', 'workspace'))?.resource
+	}
+	catch {
+		manifest = undefined
+	}
+	workspaceDefaultLocale.value = resolveDefaultLocale(manifest)
+	if (!locale.value) locale.value = workspaceDefaultLocale.value
+	if (!themeId.value) themeId.value = resolveDefaultThemeId(manifest)
 }
 
 async function loadView() {
@@ -162,13 +201,14 @@ async function loadView() {
 	loading.value = true
 	error.value = undefined
 	try {
+		await resolveWorkspaceDefaults()
 		const result = await uiux.readResource<ViewRead>('view', viewId.value)
-		if (!result) throw new Error('Preview View is unavailable.')
+		if (!result) throw new Error(t('preview.errors.viewUnavailable'))
 		viewData.value = result
 		await evaluateRuntime()
 	}
 	catch (cause) {
-		error.value = cause instanceof Error ? cause.message : 'Failed to load View'
+		error.value = describeFetchError(cause, t('preview.errors.viewLoadFailed')).message
 		disposeCurrentRuntime()
 		materializationResult.value = undefined
 	}
@@ -217,7 +257,7 @@ async function evaluateRuntime() {
 				diagnostics: [{
 					code: 'adapter.bundle_invalid',
 					path: '/adapters',
-					message: 'Preview runtime bundle did not expose mountPreviewRuntime.',
+					message: t('preview.errors.bundleInvalid'),
 				}],
 			}
 			return
@@ -232,11 +272,12 @@ async function evaluateRuntime() {
 		catch {
 			// preserve accepted missing-key behavior
 		}
-		if (locale.value !== 'en-US') {
+		const fallbackLocale = workspaceDefaultLocale.value
+		if (fallbackLocale && locale.value !== fallbackLocale) {
 			try {
-				const defRes = await uiux.readResource<{ resource?: I18nResource }>('locale', 'en-US')
+				const defRes = await uiux.readResource<{ resource?: I18nResource }>('locale', fallbackLocale)
 				if (defRes?.resource) {
-					localesMap.set('en-US', defRes.resource)
+					localesMap.set(fallbackLocale, defRes.resource)
 				}
 			}
 			catch {
@@ -251,6 +292,7 @@ async function evaluateRuntime() {
 			view: viewData.value.resource,
 			context: activeContext.value,
 			locales: localesMap,
+			...(workspaceDefaultLocale.value ? { defaultLocale: workspaceDefaultLocale.value } : {}),
 			onStatusChange(status: PreviewMaterializationResult) {
 				materializationResult.value = status
 			},
@@ -262,7 +304,7 @@ async function evaluateRuntime() {
 			diagnostics: [{
 				code: 'adapter.bundle_load_failed',
 				path: '/adapters',
-				message: cause instanceof Error ? cause.message : 'Failed to load preview runtime bundle',
+				message: cause instanceof Error ? cause.message : t('preview.errors.bundleLoadFailed'),
 			}],
 		}
 	}
@@ -375,10 +417,16 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <!--
+    The preview host renders inside the Workspace theme being previewed, so its own
+    status chrome is scoped to that theme's brightness (.light / .dark token scope)
+    instead of the Workbench appearance setting.
+  -->
   <div
-    class="min-h-screen transition-colors"
+    class="min-h-screen text-default transition-colors"
     :class="[
-      themeId === 'dark' ? 'bg-neutral-900 text-neutral-100' : 'bg-neutral-50 text-neutral-900',
+      hostColorScope,
+      hostColorScope === 'dark' ? 'bg-default' : 'bg-muted',
       harnessMode ? '' : 'p-4',
     ]"
   >
@@ -388,10 +436,16 @@ onUnmounted(() => {
       data-preview-status="loading"
       class="flex h-64 items-center justify-center"
     >
-      <div class="space-y-3 text-center">
-        <div class="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        <p class="text-xs text-neutral-500">
-          Materializing View Runtime…
+      <div
+        class="space-y-3 text-center"
+        role="status"
+      >
+        <UIcon
+          name="i-lucide-loader-circle"
+          class="mx-auto size-8 animate-spin text-primary motion-reduce:animate-none"
+        />
+        <p class="text-xs text-muted">
+          {{ t('preview.loading') }}
         </p>
       </div>
     </div>
@@ -400,73 +454,101 @@ onUnmounted(() => {
     <div
       v-else-if="error"
       data-preview-status="error"
-      class="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-600"
     >
-      <p class="font-medium">
-        Preview Load Error
-      </p>
-      <p class="mt-1 text-xs">
-        {{ error }}
-      </p>
+      <UAlert
+        color="error"
+        variant="subtle"
+        icon="i-lucide-circle-alert"
+        :title="t('preview.errorTitle')"
+        :description="error"
+      />
     </div>
 
     <!-- No View Selected -->
     <div
       v-else-if="!viewId"
       data-preview-status="no_view"
-      class="flex h-64 items-center justify-center text-center text-neutral-400"
+      class="flex h-64 items-center justify-center"
     >
-      <div>
-        <p class="text-sm font-medium">
-          No View Selected
-        </p>
-        <p class="mt-1 text-xs">
-          Select a View from the left navigation tree to mount in preview.
-        </p>
-      </div>
+      <UEmpty
+        icon="i-lucide-monitor-dot"
+        :title="t('preview.noViewTitle')"
+        :description="t('preview.noViewDescription')"
+        variant="naked"
+      />
     </div>
 
     <!-- Adapter Browser Materialization Unavailable State -->
     <div
       v-else-if="materializationResult?.status === 'adapter_unavailable'"
       data-preview-status="adapter_unavailable"
-      class="rounded-xl border border-amber-500/40 bg-amber-500/10 p-5 text-amber-900 dark:text-amber-200"
     >
-      <div class="flex items-center gap-2">
-        <span class="rounded bg-amber-500/20 px-2 py-0.5 font-mono text-xs font-semibold">adapter.materialization_unavailable</span>
-        <span class="text-xs font-semibold uppercase tracking-wider">Accepted Architecture Seam</span>
-      </div>
-      <h3 class="mt-3 text-base font-semibold">
-        Adapter Browser Materialization Unavailable
-      </h3>
-      <p class="mt-2 text-sm leading-relaxed">
-        This View uses widget types (<code class="font-mono font-medium">{{ materializationResult.unsupportedTypes.join(', ') }}</code>) requiring external adapters.
-        Loading arbitrary external adapter code in the browser preview iframe is blocked by the absence of an accepted server-to-browser module transport/bundler contract.
-      </p>
-      <div class="mt-4 rounded-lg bg-black/5 p-3 dark:bg-white/5">
-        <p class="font-mono text-xs">
-          Only the UIUX-managed <code>RootShell</code> plugin and renderer are currently materialized in this browser environment.
-        </p>
-      </div>
+      <UAlert
+        color="warning"
+        variant="subtle"
+        icon="i-lucide-puzzle"
+        :title="t('preview.adapterUnavailable.title')"
+      >
+        <template #description>
+          <div class="space-y-2">
+            <p class="flex flex-wrap items-center gap-2">
+              <UBadge
+                color="warning"
+                variant="soft"
+                size="sm"
+                class="font-mono"
+              >
+                adapter.materialization_unavailable
+              </UBadge>
+              <span class="text-xs font-semibold tracking-wider uppercase">{{ t('preview.adapterUnavailable.seam') }}</span>
+            </p>
+            <i18n-t
+              keypath="preview.adapterUnavailable.description"
+              tag="p"
+              class="text-sm leading-relaxed"
+              scope="global"
+            >
+              <template #types>
+                <code class="font-mono font-medium">{{ materializationResult.unsupportedTypes.join(', ') }}</code>
+              </template>
+            </i18n-t>
+            <i18n-t
+              keypath="preview.adapterUnavailable.note"
+              tag="p"
+              class="rounded-md bg-elevated p-3 font-mono text-xs"
+              scope="global"
+            >
+              <template #rootShell>
+                <code>RootShell</code>
+              </template>
+            </i18n-t>
+          </div>
+        </template>
+      </UAlert>
     </div>
 
     <!-- Runtime Invalid State -->
     <div
       v-else-if="materializationResult?.status === 'invalid'"
       data-preview-status="invalid"
-      class="rounded-xl border border-red-500/40 bg-red-500/10 p-5 text-red-900 dark:text-red-200"
     >
-      <p class="font-semibold">
-        Runtime Execution Invalid
-      </p>
-      <ul class="mt-2 space-y-1 text-xs">
-        <li
-          v-for="diag in materializationResult.diagnostics"
-          :key="diag.code + diag.path"
-        >
-          <span class="font-mono font-medium">[{{ diag.code }}]</span> {{ diag.path }}: {{ diag.message }}
-        </li>
-      </ul>
+      <UAlert
+        color="error"
+        variant="subtle"
+        icon="i-lucide-octagon-alert"
+        :title="t('preview.invalidTitle')"
+      >
+        <template #description>
+          <ul class="mt-1 space-y-1 text-xs">
+            <li
+              v-for="diag in materializationResult.diagnostics"
+              :key="diag.code + diag.path"
+            >
+              <span class="font-mono font-medium">[{{ diag.code }}]</span> {{ diag.path }}: {{ diag.message }}
+            </li>
+          </ul>
+        </template>
+      </UAlert>
     </div>
 
     <!-- Ready / Materialized View IR State -->
@@ -481,9 +563,9 @@ onUnmounted(() => {
         class="relative transition-all duration-150"
         :class="[
           harnessMode ? '' : ['min-h-[300px] rounded-lg', highlightedWidgetId === 'root'
-            ? 'border border-primary ring-2 ring-primary/40'
-            : 'border border-dashed border-neutral-300 dark:border-neutral-700'],
-          isCommentMode ? 'cursor-crosshair ring-2 ring-amber-400/60' : '',
+            ? 'border border-highlight ring-2 ring-highlight/40'
+            : 'border border-dashed border-accented'],
+          isCommentMode ? 'cursor-crosshair ring-2 ring-comment/60' : '',
         ]"
         data-widget-id="root"
         @pointermove="handlePreviewPointerMove"
@@ -492,19 +574,22 @@ onUnmounted(() => {
         <!-- RootShell indicator tag (hidden in formal capture harness) -->
         <div
           v-if="!harnessMode"
-          class="flex items-center justify-between border-b border-neutral-200/60 px-3 py-1.5 text-[11px] text-neutral-400 dark:border-neutral-800"
+          class="flex items-center justify-between border-b border-default px-3 py-1.5 text-[11px] text-dimmed"
         >
           <div class="flex items-center gap-1.5">
-            <span class="font-mono font-medium text-neutral-600 dark:text-neutral-300">RootShell</span>
+            <span class="font-mono font-medium text-toned">RootShell</span>
             <span class="text-[10px]">#root</span>
           </div>
           <div class="flex items-center gap-2">
-            <span
+            <UBadge
               v-if="isCommentMode"
-              class="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-500 animate-pulse"
+              color="warning"
+              variant="soft"
+              size="sm"
+              icon="i-lucide-message-square-plus"
             >
-              💬 Click to comment (Esc cancels)
-            </span>
+              {{ t('preview.commentHint') }}
+            </UBadge>
             <span class="font-mono text-[10px]">{{ locale }} · {{ themeId }}</span>
           </div>
         </div>
@@ -517,17 +602,28 @@ onUnmounted(() => {
           />
 
           <!-- Empty content slot visual indication -->
-          <div
+          <UEmpty
             v-if="isRootContentEmpty"
-            class="flex min-h-[200px] flex-col items-center justify-center rounded-lg border border-dashed border-neutral-200 p-6 text-center text-neutral-400 dark:border-neutral-800"
+            icon="i-lucide-square-dashed"
+            :title="t('preview.emptySlotTitle')"
+            variant="outline"
+            :ui="{ root: 'min-h-[200px] border-dashed' }"
           >
-            <p class="text-sm font-medium text-neutral-500 dark:text-neutral-400">
-              Empty content slot
-            </p>
-            <p class="mt-1 max-w-sm text-xs text-neutral-400 dark:text-neutral-500">
-              RootShell is active and running under <code>@deviltea/widget-core</code>. No child widgets are currently authored in the <code>content</code> slot.
-            </p>
-          </div>
+            <template #description>
+              <i18n-t
+                keypath="preview.emptySlotDescription"
+                tag="span"
+                scope="global"
+              >
+                <template #core>
+                  <code>{{ '@deviltea/widget-core' }}</code>
+                </template>
+                <template #slot>
+                  <code>content</code>
+                </template>
+              </i18n-t>
+            </template>
+          </UEmpty>
         </div>
       </div>
     </div>
@@ -536,7 +632,7 @@ onUnmounted(() => {
 
 <style scoped>
 :deep([data-widget-id][data-preview-highlighted='true']) {
-  outline: 2px solid var(--color-primary-500, #3b82f6) !important;
+  outline: 2px solid var(--wb-highlight, var(--ui-primary)) !important;
   outline-offset: 2px !important;
   border-radius: 4px;
 }

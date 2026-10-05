@@ -56,6 +56,8 @@ export interface PreviewRuntimeMountOptions {
 	context: ResolvedRenderContext
 	onStatusChange?: (status: PreviewRuntimeStatus) => void
 	locales?: ReadonlyMap<string, I18nResource> | Record<string, I18nResource>
+	/** The Workspace default locale used when the selected locale has no resource. Defaults to en-US. */
+	defaultLocale?: string
 }
 
 export type StandalonePreviewMountFactory = Readonly<{
@@ -210,8 +212,9 @@ export function createStandalonePreviewMount(input: Readonly<{
 
 		function getTranslationRuntime(currentLocale: string): TranslationRuntime {
 			const hasPrimary = resourceMap.has(currentLocale)
-			const hasFallback = resourceMap.has('en-US')
-			const primaryLocale = hasPrimary ? currentLocale : (hasFallback ? 'en-US' : currentLocale)
+			const fallbackLocale = options.defaultLocale || 'en-US'
+			const hasFallback = resourceMap.has(fallbackLocale)
+			const primaryLocale = hasPrimary ? currentLocale : (hasFallback ? fallbackLocale : currentLocale)
 			const res = createTranslationRuntime(primaryLocale, resourceMap)
 			if (res.state === 'ready') {
 				return res.runtime
