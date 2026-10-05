@@ -1,19 +1,25 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
 import type { ViewportOption } from '../../../src/preview/render-context-options'
 
 /**
- * Render context selection for the previewed View (Workspace variant, locale,
- * viewport preset and theme). Every select shows the effective value the
- * preview actually renders, never a blank placeholder.
+ * The render-context bar (brief b, sections 5 and 6): Variant, Locale, viewport and theme of the
+ * previewed View. Each control is a ghost select showing icon, label and the effective value, never
+ * a blank placeholder. A dimension with nothing authored says so in its menu; an invalid selection is
+ * listed disabled with the reason. The bar changes only the Preview render context, never the
+ * Workbench chrome locale or appearance.
+ *
+ * `layout="bar"` is the desktop toolbar row; `layout="stacked"` is the compact summary popover.
  */
+const props = withDefaults(defineProps<{ layout?: 'bar' | 'stacked' }>(), { layout: 'bar' })
+
 const { t } = useI18n()
 const workbench = useWorkbench()
 const { contextOptions, selectedVariant, selectedLocale, selectedViewportId, selectedThemeId } = workbench
 
-// reka-ui Select items cannot use '' as a value, so the base (no variant) state uses a sentinel.
+// reka-ui Select items cannot use '' as a value, so the base (no Variant) state uses a sentinel.
 const BASE_VARIANT = '__uiux_base_variant__'
 
 const variantModel = computed({
@@ -33,159 +39,228 @@ const themeModel = computed({
 	set: (value: string) => { selectedThemeId.value = value },
 })
 
-const variantItems = computed(() => [
-	{ label: t('workbench.context.baseVariant'), value: BASE_VARIANT },
-	...contextOptions.value.variants.available.map(name => ({ label: name, value: name })),
-	...(contextOptions.value.variants.isInvalid && contextOptions.value.variants.selected
-		? [{ label: contextOptions.value.variants.selected, value: contextOptions.value.variants.selected, disabled: true }]
-		: []),
-])
-
-const localeItems = computed(() => {
-	const items = contextOptions.value.locales.available.map(code => ({
-		label: code === contextOptions.value.locales.defaultLocale ? t('workbench.context.defaultLocaleOption', { locale: code }) : code,
-		value: code,
-	}))
-	if (contextOptions.value.locales.isInvalid)
-		items.push({ label: contextOptions.value.locales.selected, value: contextOptions.value.locales.selected })
-	return items
-})
-
-function viewportLabel(option: ViewportOption): string {
-	const name = option.isDefault ? t('workbench.context.defaultViewportName') : (option.label ?? option.id)
-	return t('workbench.context.viewportOption', { name, width: option.width, height: option.height })
+type ContextItem = {
+	label: string
+	value?: string
+	type?: 'label' | 'item'
+	disabled?: boolean
+	description?: string
+	icon?: string
+	dims?: string
+	primary?: boolean
 }
 
-const viewportItems = computed(() => {
-	const items = contextOptions.value.viewports.available.map(option => ({ label: viewportLabel(option), value: option.id }))
-	if (contextOptions.value.viewports.isInvalid)
-		items.push({ label: contextOptions.value.viewports.selectedId, value: contextOptions.value.viewports.selectedId })
+const invalidItem = (value: string): ContextItem => ({ label: value, value, disabled: true, icon: 'i-lucide-circle-alert', description: t('ctx.notInWorkspace') })
+
+const variantItems = computed<ContextItem[]>(() => {
+	const options = contextOptions.value.variants
+	const items: ContextItem[] = [
+		{ label: t('ctx.base'), value: BASE_VARIANT },
+		...options.available.map(name => ({ label: name, value: name })),
+	]
+	if (!options.hasVariants) items.push({ type: 'label', label: t('workbench.context.noVariantsHint') })
+	if (options.isInvalid && options.selected) items.push(invalidItem(options.selected))
 	return items
 })
 
-const themeItems = computed(() => {
-	if (contextOptions.value.themes.isEmpty)
-		return [{ label: t('workbench.context.defaultThemeOption', { theme: contextOptions.value.themes.selected }), value: contextOptions.value.themes.selected }]
-	const items = contextOptions.value.themes.options.map(option => ({ label: option.label ?? option.id, value: option.id }))
-	if (contextOptions.value.themes.isInvalid)
-		items.push({ label: contextOptions.value.themes.selected, value: contextOptions.value.themes.selected })
+const localeItems = computed<ContextItem[]>(() => {
+	const options = contextOptions.value.locales
+	const items: ContextItem[] = options.available.map(code => ({ label: code, value: code, primary: code === options.defaultLocale }))
+	if (options.isInvalid) items.push(invalidItem(options.selected))
 	return items
 })
 
-const variantHint = computed(() => contextOptions.value.variants.hasVariants ? undefined : t('workbench.context.noVariantsHint'))
-const viewportHint = computed(() => contextOptions.value.viewports.isEmpty ? t('workbench.context.noViewportsHint') : undefined)
-const themeHint = computed(() => contextOptions.value.themes.isEmpty ? t('workbench.context.noThemesHint') : t('workbench.context.themeHint'))
+function viewportName(option: ViewportOption): string {
+	return option.isDefault ? t('workbench.context.defaultViewportName') : (option.label ?? option.id)
+}
+
+function viewportDims(width: number, height: number): string {
+	return t('canvas.dimensions', { width, height })
+}
+
+const viewportItems = computed<ContextItem[]>(() => {
+	const options = contextOptions.value.viewports
+	const items: ContextItem[] = options.available.map(option => ({ label: viewportName(option), value: option.id, dims: viewportDims(option.width, option.height) }))
+	if (options.isEmpty) items.push({ type: 'label', label: t('workbench.context.noViewportsHint') })
+	if (options.isInvalid) items.push(invalidItem(options.selectedId))
+	return items
+})
+
+const themeItems = computed<ContextItem[]>(() => {
+	const options = contextOptions.value.themes
+	if (options.isEmpty)
+		return [
+			{ label: t('workbench.context.defaultThemeOption', { theme: options.selected }), value: options.selected },
+			{ type: 'label', label: t('workbench.context.noThemesHint') },
+		]
+	const items: ContextItem[] = options.options.map(option => ({ label: option.label ?? option.id, value: option.id }))
+	if (options.isInvalid) items.push(invalidItem(options.selected))
+	return items
+})
+
+const values = computed(() => {
+	const options = contextOptions.value
+	const viewport = options.viewports.available.find(option => option.id === options.viewports.selectedId)
+	const theme = options.themes.options.find(option => option.id === options.themes.selected)
+	return {
+		variant: options.variants.selected || t('ctx.base'),
+		locale: options.locales.selected,
+		viewport: viewport ? viewportName(viewport) : options.viewports.selectedId,
+		viewportDims: viewportDims(options.viewports.selectedDimensions.width, options.viewports.selectedDimensions.height),
+		theme: theme?.label ?? options.themes.selected,
+	}
+})
+
+/** Opened by `Shift V`, `Shift L` and `Shift T` from the canvas. */
+const open = ref({ variant: false, locale: false, viewport: false, theme: false })
+defineExpose({ openMenu: (dimension: keyof typeof open.value) => { open.value[dimension] = true } })
+
+const isBar = computed(() => props.layout === 'bar')
+const selectUi = computed(() => ({
+	base: isBar.value ? 'h-7 hover:bg-elevated max-w-72' : 'w-full hover:bg-elevated',
+	leadingIcon: 'size-4 text-dimmed',
+	trailingIcon: 'size-3.5 text-dimmed',
+	content: 'min-w-60 w-auto max-w-[min(24rem,90vw)]',
+	itemDescription: 'text-xs',
+	label: 'font-normal text-muted text-xs/4 whitespace-normal',
+}))
 </script>
 
 <template>
   <div
     role="group"
     :aria-label="t('workbench.context.groupLabel')"
-    class="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1"
+    :class="isBar ? 'flex min-w-0 items-center gap-0.5' : 'grid gap-2'"
+    data-render-context
   >
-    <UFormField
-      :label="t('workbench.context.variant')"
-      orientation="horizontal"
-      size="xs"
-      :ui="{ root: 'items-center', label: 'text-muted font-normal whitespace-nowrap', container: 'flex items-center gap-1' }"
+    <USelectMenu
+      v-model="variantModel"
+      v-model:open="open.variant"
+      :items="variantItems"
+      value-key="value"
+      variant="ghost"
+      size="sm"
+      icon="i-lucide-layers"
+      trailing-icon="i-lucide-chevron-down"
+      :search-input="variantItems.length > 8 ? { placeholder: t('ctx.searchVariants') } : false"
+      :color="contextOptions.variants.isInvalid ? 'error' : 'neutral'"
+      :highlight="contextOptions.variants.isInvalid"
+      :aria-label="t('workbench.context.variant')"
+      :ui="selectUi"
+      data-context="variant"
     >
-      <USelect
-        v-model="variantModel"
-        :items="variantItems"
-        size="xs"
-        :disabled="!contextOptions.variants.hasVariants"
-        :color="contextOptions.variants.isInvalid ? 'error' : undefined"
-        :highlight="contextOptions.variants.isInvalid"
-        class="w-36"
-      />
-      <UTooltip
-        v-if="variantHint"
-        :text="variantHint"
-      >
-        <UIcon
-          name="i-lucide-info"
-          class="size-3.5 text-dimmed"
-          tabindex="0"
-          role="img"
-          :aria-label="variantHint"
-        />
-      </UTooltip>
-    </UFormField>
+      <span class="flex min-w-0 items-baseline gap-1.5">
+        <span class="shrink-0 text-muted">{{ t('ctx.variant') }}</span>
+        <span
+          class="truncate font-medium"
+          :class="contextOptions.variants.isInvalid ? 'text-error' : 'text-highlighted'"
+        >{{ values.variant }}</span>
+      </span>
+    </USelectMenu>
 
-    <UFormField
-      :label="t('workbench.context.locale')"
-      orientation="horizontal"
-      size="xs"
-      :ui="{ root: 'items-center', label: 'text-muted font-normal whitespace-nowrap', container: 'flex items-center gap-1' }"
-    >
-      <USelect
-        v-model="localeModel"
-        :items="localeItems"
-        size="xs"
-        :disabled="!contextOptions.locales.hasAdditionalLocales && !contextOptions.locales.isInvalid"
-        :color="contextOptions.locales.isInvalid ? 'error' : undefined"
-        :highlight="contextOptions.locales.isInvalid"
-        class="w-32"
-      />
-    </UFormField>
+    <USeparator
+      v-if="isBar"
+      orientation="vertical"
+      class="mx-1 h-4"
+    />
 
-    <UFormField
-      :label="t('workbench.context.viewport')"
-      orientation="horizontal"
-      size="xs"
-      :ui="{ root: 'items-center', label: 'text-muted font-normal whitespace-nowrap', container: 'flex items-center gap-1' }"
+    <USelect
+      v-model="localeModel"
+      v-model:open="open.locale"
+      :items="localeItems"
+      variant="ghost"
+      size="sm"
+      icon="i-lucide-languages"
+      trailing-icon="i-lucide-chevron-down"
+      :color="contextOptions.locales.isInvalid ? 'error' : 'neutral'"
+      :highlight="contextOptions.locales.isInvalid"
+      :aria-label="t('workbench.context.locale')"
+      :ui="selectUi"
+      data-context="locale"
     >
-      <USelect
-        v-model="viewportModel"
-        :items="viewportItems"
-        size="xs"
-        :disabled="contextOptions.viewports.isEmpty"
-        :color="contextOptions.viewports.isInvalid ? 'error' : contextOptions.viewports.isEmpty ? 'warning' : undefined"
-        :highlight="contextOptions.viewports.isInvalid || contextOptions.viewports.isEmpty"
-        class="w-56"
-      />
-      <UTooltip
-        v-if="viewportHint"
-        :text="viewportHint"
-      >
-        <UIcon
-          name="i-lucide-info"
-          class="size-3.5 text-dimmed"
-          tabindex="0"
-          role="img"
-          :aria-label="viewportHint"
-        />
-      </UTooltip>
-    </UFormField>
+      <span class="flex min-w-0 items-baseline gap-1.5">
+        <span class="shrink-0 text-muted">{{ t('ctx.locale') }}</span>
+        <span
+          class="truncate font-medium"
+          :class="contextOptions.locales.isInvalid ? 'text-error' : 'text-highlighted'"
+        >{{ values.locale }}</span>
+      </span>
+      <template #item-trailing="{ item }">
+        <UBadge
+          v-if="(item as ContextItem).primary"
+          color="neutral"
+          variant="soft"
+          size="sm"
+        >
+          {{ t('ctx.primaryLocale') }}
+        </UBadge>
+      </template>
+    </USelect>
 
-    <UFormField
-      :label="t('workbench.context.theme')"
-      orientation="horizontal"
-      size="xs"
-      :ui="{ root: 'items-center', label: 'text-muted font-normal whitespace-nowrap', container: 'flex items-center gap-1' }"
+    <USeparator
+      v-if="isBar"
+      orientation="vertical"
+      class="mx-1 h-4"
+    />
+
+    <USelect
+      v-model="viewportModel"
+      v-model:open="open.viewport"
+      :items="viewportItems"
+      variant="ghost"
+      size="sm"
+      icon="i-lucide-monitor-smartphone"
+      trailing-icon="i-lucide-chevron-down"
+      :color="contextOptions.viewports.isInvalid ? 'error' : 'neutral'"
+      :highlight="contextOptions.viewports.isInvalid"
+      :aria-label="t('workbench.context.viewport')"
+      :ui="selectUi"
+      data-context="viewport"
     >
-      <USelect
-        v-model="themeModel"
-        :items="themeItems"
-        size="xs"
-        icon="i-lucide-swatch-book"
-        :disabled="contextOptions.themes.isEmpty"
-        :color="contextOptions.themes.isInvalid ? 'error' : undefined"
-        :highlight="contextOptions.themes.isInvalid"
-        class="w-28"
-      />
-      <UTooltip
-        v-if="themeHint"
-        :text="themeHint"
-      >
-        <UIcon
-          name="i-lucide-info"
-          class="size-3.5 text-dimmed"
-          tabindex="0"
-          role="img"
-          :aria-label="themeHint"
-        />
-      </UTooltip>
-    </UFormField>
+      <span class="flex min-w-0 items-baseline gap-1.5">
+        <span class="shrink-0 text-muted">{{ t('ctx.viewport') }}</span>
+        <span
+          class="truncate font-medium"
+          :class="contextOptions.viewports.isInvalid ? 'text-error' : 'text-highlighted'"
+        >{{ values.viewport }}</span>
+        <span class="shrink-0 font-mono text-xs text-muted">{{ values.viewportDims }}</span>
+      </span>
+      <template #item-trailing="{ item }">
+        <span
+          v-if="(item as ContextItem).dims"
+          class="font-mono text-xs text-muted"
+        >{{ (item as ContextItem).dims }}</span>
+      </template>
+    </USelect>
+
+    <USeparator
+      v-if="isBar"
+      orientation="vertical"
+      class="mx-1 h-4"
+    />
+
+    <USelect
+      v-model="themeModel"
+      v-model:open="open.theme"
+      :items="themeItems"
+      variant="ghost"
+      size="sm"
+      icon="i-lucide-sun-moon"
+      trailing-icon="i-lucide-chevron-down"
+      :color="contextOptions.themes.isInvalid ? 'error' : 'neutral'"
+      :highlight="contextOptions.themes.isInvalid"
+      :aria-label="t('workbench.context.theme')"
+      :title="t('ctx.themeHint')"
+      :ui="selectUi"
+      data-context="theme"
+    >
+      <span class="flex min-w-0 items-baseline gap-1.5">
+        <span class="shrink-0 text-muted">{{ t('ctx.theme') }}</span>
+        <span
+          class="truncate font-medium"
+          :class="contextOptions.themes.isInvalid ? 'text-error' : 'text-highlighted'"
+        >{{ values.theme }}</span>
+      </span>
+    </USelect>
   </div>
 </template>

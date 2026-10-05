@@ -8,6 +8,15 @@ import { isWorkbenchLocale, saveWorkbenchLocale } from '../utils/workbench-local
  */
 export type WorkbenchShell = ReturnType<typeof createWorkbenchShell>
 
+/** What the open View canvas offers the command palette (brief b, section 9). */
+export type CanvasCommands = Readonly<{
+	fit: () => void
+	zoomIn: () => void
+	zoomOut: () => void
+	actualSize: () => void
+	selectTool: (tool: 'select' | 'comment' | 'interact') => void
+}>
+
 const SHELL_KEY: InjectionKey<WorkbenchShell> = Symbol('uiux-workbench-shell')
 const SINGLE_KEY_STORAGE_KEY = 'uiux.workbench.singleKeyShortcuts'
 
@@ -29,6 +38,7 @@ function createWorkbenchShell() {
 	let toggleSidebarHandler: (() => void) | undefined
 	let toggleRightPanelHandler: (() => void) | undefined
 	const toggleCommentModeHandler = shallowRef<() => void>()
+	const canvasCommands = shallowRef<CanvasCommands>()
 
 	function setSingleKeyShortcuts(enabled: boolean): void {
 		singleKeyShortcuts.value = enabled
@@ -90,6 +100,9 @@ function createWorkbenchShell() {
 		/** The View page registers comment mode for the command palette. */
 		onToggleCommentMode: (handler: (() => void) | undefined) => { toggleCommentModeHandler.value = handler },
 		toggleCommentMode: () => toggleCommentModeHandler.value?.(),
+		/** The mounted canvas registers its zoom and tool commands; `undefined` on unmount. */
+		onCanvasCommands: (commands: CanvasCommands | undefined) => { canvasCommands.value = commands },
+		canvasCommands,
 		canToggleCommentMode: computed(() => !!toggleCommentModeHandler.value),
 		toggleSidebar: () => toggleSidebarHandler?.(),
 	}

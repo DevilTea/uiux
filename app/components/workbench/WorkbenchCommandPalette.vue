@@ -67,9 +67,24 @@ const groups = computed<CommandPaletteGroup<CommandPaletteItem>[]>(() => {
 				})),
 		},
 	]
+	const canvas = shell.canvasCommands.value
+	if (canvas) {
+		result.push({
+			id: 'canvas',
+			label: t('palette.canvas'),
+			items: [
+				{ label: t('palette.fit'), icon: 'i-lucide-scan', kbds: ['shift', '1'], onSelect: canvas.fit },
+				{ label: t('palette.actualSize'), icon: 'i-lucide-square', kbds: ['shift', '0'], onSelect: canvas.actualSize },
+				{ label: t('palette.zoomIn'), icon: 'i-lucide-zoom-in', kbds: ['meta', '='], onSelect: canvas.zoomIn },
+				{ label: t('palette.zoomOut'), icon: 'i-lucide-zoom-out', kbds: ['meta', '-'], onSelect: canvas.zoomOut },
+				{ label: t('palette.selectTool'), icon: 'i-lucide-mouse-pointer-2', kbds: ['V'], onSelect: () => canvas.selectTool('select') },
+				{ label: t('palette.interactTool'), icon: 'i-lucide-hand', kbds: ['I'], onSelect: () => canvas.selectTool('interact') },
+			],
+		})
+	}
 	const actions: CommandPaletteItem[] = []
 	if (!isReadOnly.value && shell.canToggleCommentMode.value)
-		actions.push({ label: t('palette.toggleComment'), icon: 'i-lucide-message-circle-plus', onSelect: () => shell.toggleCommentMode() })
+		actions.push({ label: t('palette.toggleComment'), icon: 'i-lucide-message-circle-plus', kbds: ['C'], onSelect: () => shell.toggleCommentMode() })
 	actions.push(
 		{ label: t('palette.toggleTheme'), icon: 'i-lucide-sun-moon', kbds: ['meta', '.'], onSelect: () => shell.toggleWorkbenchTheme() },
 		{ label: t('palette.switchLanguage'), icon: 'i-lucide-languages', onSelect: () => shell.switchWorkbenchLanguage() },

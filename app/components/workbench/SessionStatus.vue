@@ -3,35 +3,83 @@ import { computed } from 'vue'
 import { useI18n } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
 
+/**
+ * The preview session chip in the canvas bar (brief b, sections 6 and 8): "Live", "Connecting
+ * preview…", "Reconnecting…" or "Preview stopped". The session and generation identities stay one
+ * click away in a popover, never in the default reading path.
+ */
 const { t } = useI18n()
 const { preview } = useWorkbench()
 
 const status = computed(() => {
-	switch (preview.sessionPhase.value) {
-		case 'open':
-			return { color: 'success' as const, icon: 'i-lucide-plug-zap', label: t('workbench.session.open'), hint: t('workbench.session.openHint') }
-		case 'initiating':
-			return { color: 'warning' as const, icon: 'i-lucide-loader-circle', label: t('workbench.session.initiating'), hint: t('workbench.session.initiatingHint') }
-		case 'failed':
-			return { color: 'error' as const, icon: 'i-lucide-unplug', label: t('workbench.session.failed'), hint: t('workbench.session.failedHint') }
+	switch (preview.sessionStatus.value) {
+		case 'live':
+			return { color: 'neutral' as const, dot: 'bg-success', label: t('session.live'), hint: t('session.liveHint') }
+		case 'reconnecting':
+			return { color: 'warning' as const, dot: 'bg-warning', label: t('session.reconnecting'), hint: t('session.reconnectingHint') }
+		case 'stopped':
+			return { color: 'error' as const, dot: 'bg-error', label: t('session.stopped'), hint: t('session.stoppedHint') }
 		default:
-			return { color: 'neutral' as const, icon: 'i-lucide-circle-dashed', label: t('workbench.session.idle'), hint: t('workbench.session.idleHint') }
+			return { color: 'neutral' as const, dot: 'bg-accented', label: t('session.connecting'), hint: t('session.connectingHint') }
 	}
 })
+const pending = computed(() => preview.sessionStatus.value === 'connecting' || preview.sessionStatus.value === 'reconnecting')
 </script>
 
 <template>
-  <UTooltip :text="status.hint">
-    <UBadge
+  <UPopover :content="{ align: 'end', sideOffset: 6 }">
+    <UButton
       :color="status.color"
-      variant="subtle"
+      variant="ghost"
       size="sm"
-      :icon="status.icon"
-      :ui="{ leadingIcon: preview.sessionPhase.value === 'initiating' ? 'animate-spin motion-reduce:animate-none' : '' }"
-      role="status"
-      tabindex="0"
+      class="gap-1.5 px-2 font-medium"
+      :class="status.color === 'neutral' ? 'text-muted' : ''"
+      :aria-label="t('session.chipLabel', { status: status.label })"
+      data-session-status
+      :data-status="preview.sessionStatus.value"
     >
-      {{ t('workbench.session.label', { phase: status.label }) }}
-    </UBadge>
-  </UTooltip>
+      <span
+        class="size-2 shrink-0 rounded-full"
+        :class="[status.dot, pending ? 'animate-pulse motion-reduce:animate-none' : '']"
+        aria-hidden="true"
+      />
+      <span
+        role="status"
+        class="text-xs"
+      >{{ status.label }}</span>
+    </UButton>
+
+    <template #content>
+      <div class="grid w-72 gap-3 p-3">
+        <p class="text-sm text-default">
+          {{ status.hint }}
+        </p>
+        <dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+          <dt class="text-muted">
+            {{ t('session.sessionId') }}
+          </dt>
+          <dd class="truncate font-mono text-toned">
+            {{ preview.previewSessionId.value }}
+          </dd>
+          <dt class="text-muted">
+            {{ t('session.generation') }}
+          </dt>
+          <dd class="truncate font-mono text-toned">
+            {{ preview.runtimeGenerationId.value }}
+          </dd>
+        </dl>
+        <UButton
+          v-if="preview.sessionStatus.value !== 'live'"
+          color="neutral"
+          variant="outline"
+          size="sm"
+          icon="i-lucide-rotate-ccw"
+          class="justify-self-start"
+          @click="preview.retry()"
+        >
+          {{ t('session.retry') }}
+        </UButton>
+      </div>
+    </template>
+  </UPopover>
 </template>

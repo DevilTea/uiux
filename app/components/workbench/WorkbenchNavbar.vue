@@ -5,7 +5,6 @@ import type { BreadcrumbItem } from '@nuxt/ui'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
 import { flowPath, viewPath } from '../../utils/workbench-routes'
-import SessionStatus from './SessionStatus.vue'
 import WorkbenchPreferences from './WorkbenchPreferences.vue'
 import ReviewerIdentity from './ReviewerIdentity.vue'
 import WorkspaceMenu from './WorkspaceMenu.vue'
@@ -53,9 +52,6 @@ const breadcrumb = computed<BreadcrumbItem[]>(() => {
 	}
 	return []
 })
-
-const showSession = computed(() => route.path.startsWith('/views/')
-	&& (workbench.preview.sessionPhase.value === 'initiating' || workbench.preview.sessionPhase.value === 'failed'))
 </script>
 
 <template>
@@ -92,7 +88,6 @@ const showSession = computed(() => route.path.startsWith('/views/')
     <div class="min-w-0 flex-1 sm:hidden" />
 
     <div class="flex shrink-0 items-center gap-1.5">
-      <SessionStatus v-if="showSession" />
       <UDashboardSearchButton
         :label="t('shell.search')"
         :kbds="['meta', 'K']"

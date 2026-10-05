@@ -563,7 +563,10 @@
       "title": "Widget 樹狀結構",
       "label": "所選 View 的 Widget 樹狀結構",
       "emptyContentSlot": "content 中尚無 Widget",
-      "unavailable": "沒有 Widget 樹狀結構"
+      "unavailable": "沒有 Widget 樹狀結構",
+      "commentCount": "沒有未解決留言 | {n} 則未解決留言 | {n} 則未解決留言",
+      "hasError": "有錯誤檢查結果",
+      "hasWarning": "有警告檢查結果"
     },
     "canvas": {
       "label": "預覽畫布",
@@ -798,20 +801,44 @@
     "locale": "Locale",
     "viewport": "檢視區",
     "theme": "主題",
-    "themeHint": "預覽中 View 的主題"
+    "themeHint": "預覽中 View 的主題",
+    "notInWorkspace": "不在這個 Workspace 中",
+    "searchVariants": "搜尋 Variant",
+    "primaryLocale": "主要",
+    "summary": "{variant} · {locale} · {viewport} · {theme}",
+    "summaryLabel": "預覽情境：{variant}、{locale}、{viewport}、{theme}。點選以變更"
   },
   "tool": {
     "select": "選取",
     "comment": "留言",
-    "interact": "互動"
+    "interact": "互動",
+    "label": "畫布工具",
+    "disabledNoView": "開啟 View 後即可使用畫布工具。",
+    "disabledConnecting": "預覽連線後即可使用。",
+    "disabledStopped": "預覽已停止，請從工作階段狀態重試。"
   },
   "zoom": {
-    "fit": "符合畫布"
+    "fit": "符合畫布",
+    "label": "縮放",
+    "percent": "{percent}%",
+    "in": "放大",
+    "out": "縮小",
+    "menuLabel": "縮放 {percent}%。選擇縮放比例",
+    "fitHint": "讓 View 符合畫布大小"
   },
   "session": {
     "live": "即時",
     "reconnecting": "重新連線中…",
-    "stopped": "預覽已停止"
+    "stopped": "預覽已停止",
+    "connecting": "正在連線預覽…",
+    "connectingHint": "預覽正在啟動，連線後即可使用工具。",
+    "liveHint": "預覽正在執行，並回應畫布操作。",
+    "reconnectingHint": "預覽已重新啟動，重新連線後會恢復選取。",
+    "stoppedHint": "預覽已停止回應。重試會啟動新的預覽。",
+    "chipLabel": "預覽工作階段：{status}",
+    "sessionId": "工作階段",
+    "generation": "Runtime 世代",
+    "retry": "重試"
   },
   "canvas": {
     "variantInvalid": "這個 Variant 無法執行。",
@@ -819,7 +846,16 @@
     "mappingPaused": "已暫停精確標示。目前無法量測預覽畫面。",
     "widgetMissing": "Widget {id} 已不在這個 View 中。",
     "viewMissing": "找不到 View，已停留在目前頁面。",
-    "notVisible": "在此狀態下不可見"
+    "notVisible": "在此狀態下不可見",
+    "dimensions": "{width} × {height}",
+    "iframeTitle": "{name} 的預覽 · {variant} · {locale} · {viewport} · {theme}",
+    "announceContext": "{label}：{value}",
+    "announceSelection": "已選取 {type} #{id}，{width} × {height}",
+    "adapterInvalid": "無法預覽。Adapter 組合無效。",
+    "adapterInvalidHint": "Widget 樹狀結構與 Spec 仍可使用。修正 Adapter 後即可看到 View。",
+    "openAdapters": "開啟 Adapter",
+    "variantInvalidHint": "這個 View 沒有定義 Variant {variant}。",
+    "openInChecks": "在檢查中開啟"
   },
   "panel": {
     "comments": "留言",
@@ -950,7 +986,14 @@
     "toggleComment": "切換留言模式",
     "toggleTheme": "切換 Workbench 主題",
     "switchLanguage": "切換 Workbench 語言",
-    "description": "搜尋 View、Flow 與討論串，或執行動作。"
+    "description": "搜尋 View、Flow 與討論串，或執行動作。",
+    "canvas": "畫布",
+    "fit": "讓 View 符合畫布大小",
+    "actualSize": "縮放至 100%",
+    "zoomIn": "放大",
+    "zoomOut": "縮小",
+    "selectTool": "選取工具",
+    "interactTool": "互動工具"
   },
   "shortcuts": {
     "title": "鍵盤快捷鍵",
@@ -963,6 +1006,12 @@
     "toggleTheme": "切換 Workbench 主題",
     "landmarks": "在區域間移動",
     "exitComment": "離開留言模式",
-    "help": "顯示這些快捷鍵"
+    "help": "顯示這些快捷鍵",
+    "tools": "選取、留言或互動工具",
+    "fit": "讓 View 符合畫布大小",
+    "actualSize": "縮放至 100%",
+    "zoom": "放大或縮小",
+    "walkTree": "選取上層、第一個子層或相鄰的 Widget",
+    "contextMenus": "開啟 Variant、Locale 或主題選單"
   }
 }

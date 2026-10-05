@@ -563,7 +563,10 @@
       "title": "Widget tree",
       "label": "Widget tree of the selected View",
       "emptyContentSlot": "No Widgets in content yet",
-      "unavailable": "No Widget tree"
+      "unavailable": "No Widget tree",
+      "commentCount": "No open comments | {n} open comment | {n} open comments",
+      "hasError": "Has an error finding",
+      "hasWarning": "Has a warning finding"
     },
     "canvas": {
       "label": "Preview canvas",
@@ -798,20 +801,44 @@
     "locale": "Locale",
     "viewport": "Viewport",
     "theme": "Theme",
-    "themeHint": "Theme of the previewed View"
+    "themeHint": "Theme of the previewed View",
+    "notInWorkspace": "Not in this Workspace",
+    "searchVariants": "Search Variants",
+    "primaryLocale": "Primary",
+    "summary": "{variant} · {locale} · {viewport} · {theme}",
+    "summaryLabel": "Preview context: {variant}, {locale}, {viewport}, {theme}. Change it"
   },
   "tool": {
     "select": "Select",
     "comment": "Comment",
-    "interact": "Interact"
+    "interact": "Interact",
+    "label": "Canvas tools",
+    "disabledNoView": "Open a View to use the canvas tools.",
+    "disabledConnecting": "Available once the preview is live.",
+    "disabledStopped": "The preview stopped. Retry from the session status."
   },
   "zoom": {
-    "fit": "Fit"
+    "fit": "Fit",
+    "label": "Zoom",
+    "percent": "{percent}%",
+    "in": "Zoom in",
+    "out": "Zoom out",
+    "menuLabel": "Zoom {percent}%. Choose a zoom level",
+    "fitHint": "Fit the View to the canvas"
   },
   "session": {
     "live": "Live",
     "reconnecting": "Reconnecting…",
-    "stopped": "Preview stopped"
+    "stopped": "Preview stopped",
+    "connecting": "Connecting preview…",
+    "connectingHint": "The preview is starting. The tools work once it is live.",
+    "liveHint": "The preview is running and answers the canvas.",
+    "reconnectingHint": "The preview restarted. Selection comes back once it reconnects.",
+    "stoppedHint": "The preview stopped responding. Retry starts a fresh preview.",
+    "chipLabel": "Preview session: {status}",
+    "sessionId": "Session",
+    "generation": "Runtime generation",
+    "retry": "Retry"
   },
   "canvas": {
     "variantInvalid": "This Variant can't run.",
@@ -819,7 +846,16 @@
     "mappingPaused": "Precise highlight paused. The preview can't be measured right now.",
     "widgetMissing": "Widget {id} isn't in this View anymore.",
     "viewMissing": "View not found. Stayed on the current page.",
-    "notVisible": "Not visible in this state"
+    "notVisible": "Not visible in this state",
+    "dimensions": "{width} × {height}",
+    "iframeTitle": "Preview of {name} · {variant} · {locale} · {viewport} · {theme}",
+    "announceContext": "{label}: {value}",
+    "announceSelection": "Selected {type} #{id}, {width} by {height}",
+    "adapterInvalid": "Preview unavailable. The Adapter set is invalid.",
+    "adapterInvalidHint": "The Widget tree and the Spec stay available. Fix the Adapters to see the View.",
+    "openAdapters": "Open Adapters",
+    "variantInvalidHint": "The Variant {variant} isn't defined in this View.",
+    "openInChecks": "Open in Checks"
   },
   "panel": {
     "comments": "Comments",
@@ -950,7 +986,14 @@
     "toggleComment": "Toggle comment mode",
     "toggleTheme": "Switch Workbench theme",
     "switchLanguage": "Switch Workbench language",
-    "description": "Search Views, Flows and threads, or run an action."
+    "description": "Search Views, Flows and threads, or run an action.",
+    "canvas": "Canvas",
+    "fit": "Fit the View to the canvas",
+    "actualSize": "Zoom to 100%",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "selectTool": "Select tool",
+    "interactTool": "Interact tool"
   },
   "shortcuts": {
     "title": "Keyboard shortcuts",
@@ -963,6 +1006,12 @@
     "toggleTheme": "Switch the Workbench theme",
     "landmarks": "Move between regions",
     "exitComment": "Leave comment mode",
-    "help": "Show these shortcuts"
+    "help": "Show these shortcuts",
+    "tools": "Select, Comment or Interact tool",
+    "fit": "Fit the View to the canvas",
+    "actualSize": "Zoom to 100%",
+    "zoom": "Zoom in or out",
+    "walkTree": "Select the parent, first child or a sibling Widget",
+    "contextMenus": "Open the Variant, Locale or theme menu"
   }
 }

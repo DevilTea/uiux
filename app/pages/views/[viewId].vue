@@ -132,7 +132,7 @@ onBeforeUnmount(() => {
           class="flex min-h-0 flex-1 flex-col"
           :aria-label="selectedView ? t('workbench.canvas.iframeTitle', { name: selectedView.resource.name }) : t('workbench.canvas.label')"
         >
-          <PreviewCanvas>
+          <PreviewCanvas @open-panel="showPanel">
             <template #actions>
               <UTooltip :text="isDesktop ? t('shell.togglePanel') : t('shell.openPanel')">
                 <UButton

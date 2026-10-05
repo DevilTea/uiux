@@ -5,7 +5,7 @@ import { useWorkbench } from '../../composables/useWorkbench'
 /** Right rail: details for the selected Widget, or the selected View's metadata. */
 const { t } = useI18n()
 const workbench = useWorkbench()
-const { selectedView, selectedWidgetNode, widgetStateOverrides, selectedWidgetDiagnostics } = workbench
+const { selectedView, selectedWidgetNode, widgetStateOverrides, selectedWidgetDiagnostics, preview } = workbench
 
 function shortRevision(revision: string) {
 	return revision.length > 18 ? `${revision.slice(0, 18)}…` : revision
@@ -36,6 +36,18 @@ function shortRevision(revision: string) {
         v-if="selectedWidgetNode"
         class="space-y-4"
       >
+        <!-- The runtime reported no rendered box for this Widget in the current state (R4). -->
+        <p
+          v-if="preview.selectionVisibility.value === 'hidden'"
+          class="flex items-center gap-1.5 text-xs text-muted"
+          data-widget-not-visible
+        >
+          <UIcon
+            name="i-lucide-eye-off"
+            class="size-3.5 shrink-0"
+          />
+          {{ t('canvas.notVisible') }}
+        </p>
         <section>
           <h3 class="font-semibold text-muted">
             {{ t('workbench.inspector.selectedWidget') }}

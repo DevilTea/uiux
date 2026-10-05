@@ -14,6 +14,12 @@ const rows = computed(() => [
 	{ keys: [[']']], label: t('shortcuts.togglePanel') },
 	{ keys: [['meta', '.']], label: t('shortcuts.toggleTheme') },
 	{ keys: [['F6'], ['shift', 'F6']], label: t('shortcuts.landmarks') },
+	{ keys: [['V'], ['C'], ['I']], label: t('shortcuts.tools') },
+	{ keys: [['shift', '1'], ['meta', '0']], label: t('shortcuts.fit') },
+	{ keys: [['shift', '0']], label: t('shortcuts.actualSize') },
+	{ keys: [['meta', '='], ['meta', '-']], label: t('shortcuts.zoom') },
+	{ keys: [['alt', '↑'], ['alt', '↓'], ['alt', '←'], ['alt', '→']], label: t('shortcuts.walkTree') },
+	{ keys: [['shift', 'V'], ['shift', 'L'], ['shift', 'T']], label: t('shortcuts.contextMenus') },
 	{ keys: [['Esc']], label: t('shortcuts.exitComment') },
 	{ keys: [['?']], label: t('shortcuts.help') },
 ])

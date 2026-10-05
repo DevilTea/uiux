@@ -39,8 +39,8 @@ export function provideWorkbench(): Workbench {
 		state.selectedWidgetId.value = 'root'
 		state.selectedVariant.value = ''
 		saveLastView(id)
+		// The preview session starts a fresh runtime generation once the new View is loaded.
 		await state.loadSelectedView(preview.notifyIframeContext)
-		preview.replaceGeneration()
 	}
 
 	async function openView(id: string, context: ViewRouteContext): Promise<void> {
@@ -54,7 +54,6 @@ export function provideWorkbench(): Workbench {
 		if (!changingView) return
 		state.selectedViewId.value = id
 		await state.loadSelectedView(preview.notifyIframeContext)
-		preview.replaceGeneration()
 	}
 
 	async function applyEvidenceContext(context: EvidenceContextSelection): Promise<void> {

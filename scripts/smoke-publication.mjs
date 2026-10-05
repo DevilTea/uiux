@@ -169,12 +169,15 @@ try {
 		// /views opens the most recent View; its render context rides in the query.
 		await open(page, '/views')
 		await page.waitForURL(/\/uiux\/views\/[^/?]+/)
-		await previewFrame(page)
-		await page.getByText('en-US · dark · desktop', { exact: true }).waitFor()
+		const frame = await previewFrame(page)
+		const iframeTitleIncludes = context => page.waitForFunction(text => globalThis.document.querySelector('iframe')?.getAttribute('title')?.includes(text), context)
+		await iframeTitleIncludes('en-US · desktop · dark')
 		await page.getByRole('combobox', { name: 'Preview theme' }).click()
 		await page.getByRole('option', { name: 'Light' }).click()
-		await page.getByText('en-US · light · desktop', { exact: true }).waitFor()
+		await iframeTitleIncludes('en-US · desktop · light')
 		await page.waitForURL(/[?&]theme=light/)
+		// A theme change re-renders the same Preview document; it is never reloaded.
+		await frame.waitForFunction(() => globalThis.document.querySelector('[data-preview-ready]')?.parentElement?.classList.contains('light'))
 		if (await page.getByRole('button', { name: 'Comment', exact: true }).count() !== 0)
 			throw new Error('Published viewer exposed the canvas Comment button.')
 
@@ -183,7 +186,7 @@ try {
 		await page.goto(deepLink, { waitUntil: 'networkidle' })
 		await previewFrame(page)
 		await page.waitForFunction(() => globalThis.document.querySelector('iframe')?.getAttribute('src')?.includes('themeId=light'))
-		await page.getByText('en-US · light · desktop', { exact: true }).waitFor()
+		await iframeTitleIncludes('en-US · desktop · light')
 
 		await open(page, '/workspace/settings')
 		await expectNoButton(page, 'Add adapter')

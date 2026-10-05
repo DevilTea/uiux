@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import { composite, contrastRatio, parseCssColor } from './support/color'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
+import { FAKE_GEOMETRY_PRODUCER } from './support/fake-geometry-producer'
 
 /**
  * Browser checks against the built Workbench (`pnpm build` output) serving a copy of the
@@ -39,7 +40,7 @@ afterAll(async () => {
 	await server?.close()
 })
 
-type ChromeSetup = Readonly<{ mode: 'light' | 'dark'; os?: 'light' | 'dark'; locale?: 'en-US' | 'zh-TW'; width?: number; height?: number }>
+type ChromeSetup = Readonly<{ mode: 'light' | 'dark'; os?: 'light' | 'dark'; locale?: 'en-US' | 'zh-TW'; width?: number; height?: number; geometryProducer?: boolean }>
 
 async function openWorkbench(path: string, setup: ChromeSetup): Promise<{ context: BrowserContext; page: Page }> {
 	const context = await browser.newContext({
@@ -50,6 +51,7 @@ async function openWorkbench(path: string, setup: ChromeSetup): Promise<{ contex
 		localStorage.setItem('nuxt-color-mode', mode)
 		localStorage.setItem('uiux.workbench.locale', locale)
 	}, [setup.mode, setup.locale ?? 'en-US'] as const)
+	if (setup.geometryProducer) await context.addInitScript(FAKE_GEOMETRY_PRODUCER)
 	const page = await context.newPage()
 	await page.goto(`${server.origin}${path}`, { waitUntil: 'networkidle' })
 	await page.waitForFunction(() => document.documentElement.classList.contains('light') || document.documentElement.classList.contains('dark'))
@@ -328,7 +330,8 @@ describe('Workbench shell (R3)', () => {
 			// Preview theme changes: the Workbench theme and language do not.
 			await page.getByRole('combobox', { name: '預覽主題' }).click()
 			await page.getByRole('option', { name: 'Light' }).click()
-			await page.waitForFunction(() => document.querySelector('iframe')?.getAttribute('src')?.includes('themeId=light'))
+			// A theme change is a presentation change: the same document re-renders, it is not reloaded.
+			await frame.waitForFunction(() => document.querySelector('[data-preview-ready]')?.parentElement?.classList.contains('light'))
 			expect(await page.evaluate(() => ({ dark: document.documentElement.classList.contains('dark'), lang: document.documentElement.lang })))
 				.toEqual({ dark: true, lang: 'zh-TW' })
 			expect(new URL(page.url()).searchParams.get('theme')).toBe('light')
@@ -388,4 +391,188 @@ describe('Workbench shell (R3)', () => {
 			}
 		}, 120_000)
 	}
+})
+
+/** The dogfood Workspace viewport presets (design/.uiux/workspace.json). */
+const VIEWPORT_PRESETS = { desktop: [1920, 1080], tablet: [1024, 768], mobile: [390, 844] } as const
+
+type CanvasMetrics = Readonly<{
+	iframe: { styleWidth: string; styleHeight: string; clientWidth: number; clientHeight: number }
+	scale: number
+	frame: { left: number; top: number; width: number; height: number }
+	stage: { left: number; top: number; width: number; height: number }
+	percent: string
+	fitted: boolean
+}>
+
+async function canvasMetrics(page: Page): Promise<CanvasMetrics> {
+	return page.evaluate(() => {
+		const iframe = document.querySelector<HTMLIFrameElement>('[data-canvas-frame] iframe')!
+		const frame = document.querySelector<HTMLElement>('[data-canvas-frame]')!
+		const box = (element: Element) => { const r = element.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height } }
+		return {
+			iframe: { styleWidth: iframe.style.width, styleHeight: iframe.style.height, clientWidth: iframe.clientWidth, clientHeight: iframe.clientHeight },
+			scale: Number(/scale\(([^)]+)\)/.exec(frame.style.transform)?.[1] ?? Number.NaN),
+			frame: box(document.querySelector('[data-canvas-frame-box]')!),
+			stage: box(document.querySelector('[data-canvas-stage]')!),
+			percent: document.querySelector('[data-zoom-percent]')!.textContent!.trim(),
+			fitted: document.querySelector('[data-zoom-fit]')!.getAttribute('aria-pressed') === 'true',
+		}
+	})
+}
+
+async function waitForLivePreview(page: Page) {
+	const frame = await previewFrame(page)
+	await page.waitForSelector('[data-session-status][data-status="live"]', { timeout: 15_000 })
+	return frame
+}
+
+describe('View canvas core (R4)', () => {
+	for (const [windowWidth, windowHeight] of [[1920, 1080], [1024, 768], [390, 844]] as const) {
+		it(`fits every Workspace viewport and scales only the frame in a ${windowWidth}×${windowHeight} window`, async () => {
+			for (const [viewportId, [width, height]] of Object.entries(VIEWPORT_PRESETS)) {
+				const { context, page } = await openWorkbench(`/views/${VIEW_ID}?viewport=${viewportId}`, { mode: 'light', width: windowWidth, height: windowHeight })
+				try {
+					await waitForLivePreview(page)
+					await page.waitForTimeout(150)
+					const fit = await canvasMetrics(page)
+					// The iframe keeps the logical viewport size; only the outer frame scales.
+					expect(fit.iframe, viewportId).toEqual({ styleWidth: `${width}px`, styleHeight: `${height}px`, clientWidth: width, clientHeight: height })
+					expect(fit.fitted, viewportId).toBe(true)
+					expect(fit.scale, viewportId).toBeGreaterThan(0)
+					expect(fit.scale, viewportId).toBeLessThanOrEqual(1)
+					expect(fit.frame.width, viewportId).toBeCloseTo(width * fit.scale, 0)
+					expect(fit.frame.height, viewportId).toBeCloseTo(height * fit.scale, 0)
+					expect(fit.percent, viewportId).toBe(`${Math.round(fit.scale * 100)}%`)
+					// At Fit the whole frame is inside the stage, clear of the tool pill.
+					expect(fit.frame.left, viewportId).toBeGreaterThanOrEqual(fit.stage.left + 11)
+					expect(fit.frame.top, viewportId).toBeGreaterThanOrEqual(fit.stage.top + 11)
+					expect(fit.frame.left + fit.frame.width, viewportId).toBeLessThanOrEqual(fit.stage.left + fit.stage.width - 11)
+					expect(fit.frame.top + fit.frame.height, viewportId).toBeLessThanOrEqual(fit.stage.top + fit.stage.height - 60)
+
+					// 100% from the zoom menu: the frame is the logical size, the stage scrolls.
+					await page.locator('[data-zoom-percent]').click()
+					await page.getByRole('menuitemcheckbox', { name: '100%' }).click()
+					await page.waitForFunction(() => /scale\(1\)/.test(document.querySelector<HTMLElement>('[data-canvas-frame]')!.style.transform))
+					const actual = await canvasMetrics(page)
+					expect(actual.iframe.clientWidth, viewportId).toBe(width)
+					expect(actual.frame.width, viewportId).toBeCloseTo(width, 0)
+					expect(actual.fitted, viewportId).toBe(false)
+
+					// Fit returns, and is remembered per View and viewport only for this session.
+					await page.locator('[data-zoom-fit]').click()
+					await page.waitForFunction(() => document.querySelector('[data-zoom-fit]')?.getAttribute('aria-pressed') === 'true')
+					await page.waitForTimeout(250)
+					expect((await canvasMetrics(page)).scale, viewportId).toBeCloseTo(fit.scale, 3)
+				}
+				finally { await context.close() }
+			}
+		}, 180_000)
+	}
+
+	it('never layers a transparent capture surface over the iframe', async () => {
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}?widget=btn-run-checks`, { mode: 'light', geometryProducer: true })
+		try {
+			await waitForLivePreview(page)
+			await page.waitForSelector('[data-blueprint="type"]')
+			const hits = await page.evaluate(() => {
+				const frame = document.querySelector('[data-canvas-frame-box]')!.getBoundingClientRect()
+				const result: string[] = []
+				for (let i = 1; i < 20; i++) for (let j = 1; j < 20; j++) {
+					const element = document.elementFromPoint(frame.left + frame.width * i / 20, frame.top + frame.height * j / 20)
+					if (!element || element.closest('[data-blueprint], [role="toolbar"]')) continue
+					result.push(element.tagName)
+				}
+				return result
+			})
+			expect(hits.length).toBeGreaterThan(300)
+			expect(new Set(hits)).toEqual(new Set(['IFRAME']))
+			// The overlay itself never takes input.
+			expect(await page.evaluate(() => getComputedStyle(document.querySelector('[data-canvas-overlay]')!).pointerEvents)).toBe('none')
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('shares the selection between the Widget tree and the canvas', async () => {
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}`, { mode: 'light', geometryProducer: true })
+		try {
+			const frame = await waitForLivePreview(page)
+			// Canvas → tree: the iframe hit-tests the click; the tree expands to and selects the Widget.
+			await frame.click('[data-widget-id="btn-run-checks"]')
+			await page.waitForFunction(() => new URL(location.href).searchParams.get('widget') === 'btn-run-checks')
+			await expect.poll(() => page.locator('[role="treeitem"][aria-selected="true"]').textContent()).toContain('btn-run-checks')
+			await page.waitForFunction(() => document.querySelector('[data-blueprint="type"]')?.textContent?.includes('Button · #btn-run-checks'))
+			expect(await page.locator('[data-blueprint="size"]').textContent()).toMatch(/^\d+ × \d+$/)
+
+			// Tree → canvas: selecting a row highlights its Widget once the runtime reports it.
+			await page.locator('[data-widget-row="mock-hero-title"]').scrollIntoViewIfNeeded()
+			await page.locator('[data-widget-row="mock-hero-title"]').click()
+			await page.waitForFunction(() => document.querySelector('[data-blueprint="type"]')?.textContent?.includes('#mock-hero-title'))
+			expect(new URL(page.url()).searchParams.get('widget')).toBe('mock-hero-title')
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('keeps the selection across theme and locale changes and restores it after a Variant switch', async () => {
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}?widget=btn-run-checks`, { mode: 'light', geometryProducer: true })
+		try {
+			const frame = await waitForLivePreview(page)
+			await page.waitForSelector('[data-blueprint="type"]')
+			await frame.evaluate(() => { (window as unknown as { __sameDocument: boolean }).__sameDocument = true })
+
+			await page.getByRole('combobox', { name: 'Preview theme' }).click()
+			await page.getByRole('option', { name: 'Light' }).click()
+			await frame.waitForFunction(() => document.querySelector('[data-preview-ready]')?.parentElement?.classList.contains('light'))
+			await page.getByRole('combobox', { name: 'Locale' }).click()
+			await page.getByRole('option', { name: /zh-TW/ }).click()
+			await page.waitForFunction(() => new URL(location.href).searchParams.get('locale') === 'zh-TW')
+			// Presentation changes keep the document (runtime state) and the selection.
+			expect(await frame.evaluate(() => (window as unknown as { __sameDocument?: boolean }).__sameDocument)).toBe(true)
+			expect(new URL(page.url()).searchParams.get('widget')).toBe('btn-run-checks')
+			expect(await page.locator('[data-blueprint="type"]').textContent()).toContain('#btn-run-checks')
+
+			// A Variant switch reopens geometry under the new runtime context and restores the selection.
+			const requestsBefore = await frame.evaluate(() => (window as unknown as { __fakeGeometryRequests: unknown[] }).__fakeGeometryRequests.length)
+			await page.locator('[data-context="variant"]').click()
+			await page.getByRole('option', { name: 'compact' }).click()
+			await page.waitForFunction(() => new URL(location.href).searchParams.get('variant') === 'compact')
+			await expect.poll(() => frame.evaluate(() => (window as unknown as { __fakeGeometryRequests: { context: { variantId?: string } }[] }).__fakeGeometryRequests.at(-1)?.context.variantId)).toBe('compact')
+			expect(await frame.evaluate(() => (window as unknown as { __fakeGeometryRequests: unknown[] }).__fakeGeometryRequests.length)).toBeGreaterThan(requestsBefore)
+			await page.waitForSelector('[data-blueprint="type"]')
+			expect(await page.locator('[data-blueprint="type"]').textContent()).toContain('#btn-run-checks')
+			expect(new URL(page.url()).searchParams.get('widget')).toBe('btn-run-checks')
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('drives tools, zoom and tree walking from the keyboard', async () => {
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}`, { mode: 'light' })
+		try {
+			await waitForLivePreview(page)
+			const pressed = (name: string) => page.getByRole('toolbar', { name: 'Canvas tools' }).getByRole('button', { name }).getAttribute('aria-pressed')
+			await page.keyboard.press('i')
+			await expect.poll(() => pressed('Interact')).toBe('true')
+			await page.keyboard.press('v')
+			await expect.poll(() => pressed('Select')).toBe('true')
+
+			await page.keyboard.press('Shift+Digit0')
+			await expect.poll(() => page.locator('[data-zoom-percent]').textContent()).toContain('100%')
+			await page.keyboard.press('Shift+Digit1')
+			await expect.poll(() => page.locator('[data-zoom-fit]').getAttribute('aria-pressed')).toBe('true')
+			await page.keyboard.press('Control+Equal')
+			await expect.poll(() => page.locator('[data-zoom-fit]').getAttribute('aria-pressed')).toBe('false')
+			await page.keyboard.press('Control+Digit0')
+			await expect.poll(() => page.locator('[data-zoom-fit]').getAttribute('aria-pressed')).toBe('true')
+
+			await page.keyboard.press('Alt+ArrowDown')
+			await page.waitForFunction(() => new URL(location.href).searchParams.get('widget') === 'workbench-shell')
+			await page.keyboard.press('Alt+ArrowDown')
+			await page.waitForFunction(() => new URL(location.href).searchParams.get('widget') === 'workbench-top-bar')
+			await page.keyboard.press('Alt+ArrowRight')
+			await page.waitForFunction(() => new URL(location.href).searchParams.get('widget') === 'workbench-body-layout')
+			await page.keyboard.press('Alt+ArrowUp')
+			await page.waitForFunction(() => new URL(location.href).searchParams.get('widget') === 'workbench-shell')
+		}
+		finally { await context.close() }
+	}, 60_000)
 })
