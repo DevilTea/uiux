@@ -34,10 +34,65 @@ MCP exposes compact read-only discovery plus domain-specific authoring operation
 - UX Flows: `create_flow`, `update_flow`
 - Reviews: `create_review_thread`, `append_review_message`, `reanchor_review_thread`, `set_review_display_hint`, `submit_ready_for_review`, `resolve_review_thread`, `reopen_review_thread`, `promote_review_to_decision`
 - Authored Assets: `create_asset`, `replace_asset`
+- Agent edit leases: `acquire_lock`, `release_lock`
 
 These are domain-specific operations rather than generic Resource writes or JSON Patch surfaces.
 
 Resolving a Review thread is a human act performed in the Workbench (`POST /api/reviews/:id/resolve`). `resolve_review_thread` stays registered on `/mcp` but always refuses with guidance: agents reply on the thread or submit it ready for review. A resolution is `verified` (accepts the evidence-gated ready-for-review submission) or closes the thread without a verified change: `answered`, `wont-fix`, `duplicate` (requires a reason) or `obsolete`.
+
+### Members, roles and tokens
+
+Every `/api/*` and `/mcp` request needs a credential. Each Workspace has its own roster of members on this host, at `$UIUX_HOME/workspaces/<sha256(realpath)>/access.json` (`UIUX_HOME` defaults to `~/.uiux`). The roster never lives in the Workspace or in Git, and it stores only hashes of secrets. A member has a nickname, a kind (`human` or `agent`, fixed at creation) and one cumulative role: Viewer ⊂ Reviewer ⊂ Editor ⊂ Owner. Agents are capped at Editor and can never resolve Review threads.
+
+The first `uiux dev` of a Workspace creates its Owner, named after your OS user, and prints a single-use sign-in link (valid for 24 hours). Open it in the browser to sign in. The session lasts 14 days idle and 30 days at most, and it survives restarts. Lost the link? Run `uiux invite create --workspace <dir> --member <nick>` for a new one.
+
+Manage the roster with the CLI (each command needs `--workspace <dir>` and works while the server runs), or as the Owner on the Workbench **Members** page:
+
+```sh
+uiux member add|list|set|remove ...
+uiux token create|list|revoke ...      # tokens print once; 90 days by default, --expires never to opt out
+uiux invite create --member <nick>     # a single-use browser sign-in link
+uiux session list|revoke ...
+uiux access copy --from <old-dir> --workspace <new-dir> [--replace]
+```
+
+A moved or renamed Workspace, and every git worktree, starts with an empty roster. `uiux access copy` carries members and tokens over once, so existing agent tokens keep working.
+
+Review actors and times on `/api/*` and `/mcp` are stamped by the server from the signed-in member (`member:<uuid>`). A supplied `actor` or `at` is ignored with the warnings `auth.actor_ignored` and `auth.time_ignored`. Resolving needs a human member on a Workbench session; bearer tokens get `review.resolve_requires_workbench`. Role refusals are `403 auth.scope_denied`, naming the required role.
+
+### Connect an agent
+
+`/mcp` always requires `Authorization: Bearer <token>`, loopback included. Give every concurrently running agent its own member:
+
+```sh
+uiux member add claude --workspace ./design --kind agent --role editor
+uiux token create --workspace ./design --member claude
+export UIUX_MCP_TOKEN=uiux_t_...   # in your shell profile or a gitignored .envrc, never in Git
+```
+
+Then point the MCP client at the server. For Claude Code, this project-scope `.mcp.json` carries no secret and is safe to commit, because Claude Code expands `${UIUX_MCP_TOKEN}` from the environment:
+
+```json
+{
+  "mcpServers": {
+    "uiux": {
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer ${UIUX_MCP_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+The CLI equivalent is `claude mcp add --transport http uiux http://127.0.0.1:3000/mcp --header "Authorization: Bearer $UIUX_MCP_TOKEN"`. With `--scope project`, single-quote the header so `${UIUX_MCP_TOKEN}` stays literal. MCP clients read their config at startup, so restart the agent session after changing it.
+
+Without a valid token `/mcp` answers `401` with `WWW-Authenticate: Bearer realm="uiux"` and a body that names the fix, and the Owner sees "MCP clients without a token" on the Members page. UIUX advertises no OAuth metadata (`/.well-known/*` is a JSON `404`). The per-request MCP instructions tell the agent its nickname and role.
+
+An agent's first successful write to a View, Flow, Locale, Asset or the Workspace settings takes a 5-minute edit lease, renewed by each of its writes. Other writers get `423` with `resource.locked`, the holder's nickname and the expiry, and the Workbench shows "Locked by <nickname>". For a multi-step task, call `acquire_lock` up front for every resource it will write and finish with `release_lock`. Leases complement `expectedRevision`; they never replace it. Review threads are never locked, and an Owner can release a lock from the Workbench.
+
+Consider denying `uiux member`, `token`, `invite`, `session` and `access` in your agent's permission settings: shell access as the host user is Owner-equivalent.
 
 ### Workspace schema migration
 
@@ -52,9 +107,9 @@ uiux migrate --workspace ./design             # apply atomically and print the n
 
 ### Loopback-only access
 
-The first version is single-user and unauthenticated, so `uiux dev` listens on loopback only: `127.0.0.1` by default, with the port taken from the standard Nitro `PORT` / `NITRO_PORT` variables (default `3000`). It prints the address it actually listens on. Setting `HOST` or `NITRO_HOST` to a loopback address (`127.0.0.1`, `::1` or `localhost`) is allowed; any other value makes `uiux dev` refuse to start, because LAN exposure requires authentication, which is not yet available.
+The LAN listener is not yet available, so `uiux dev` listens on loopback only: `127.0.0.1` by default, with the port taken from the standard Nitro `PORT` / `NITRO_PORT` variables (default `3000`). It prints the address it actually listens on. Setting `HOST` or `NITRO_HOST` to a loopback address (`127.0.0.1`, `::1` or `localhost`) is allowed; any other value makes `uiux dev` refuse to start.
 
-Every request, including `/mcp`, `/api/*` and Workbench assets, must address the server as `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`; any other `Host` gets `421` (DNS-rebinding protection). State-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`), and every `/mcp` request, are refused with `403` when a browser marks them as cross-origin (`Origin` not equal to the server's own origin, or `Sec-Fetch-Site` other than `same-origin` / `none`). State-changing requests that carry a body must send `Content-Type: application/json` (otherwise `415`). Non-browser clients such as curl, scripts and MCP CLIs that send no `Origin` keep working. The server sends no CORS headers, and pages are served with `Content-Security-Policy: frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`, so only the Workbench itself can frame them (as it does for `/preview`).
+Every request, including `/mcp`, `/api/*` and Workbench assets, must address the server as `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`; any other `Host` gets `421` (DNS-rebinding protection). State-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`), and every `/mcp` request, are refused with `403` when a browser marks them as cross-origin (`Origin` not equal to the server's own origin, or `Sec-Fetch-Site` other than `same-origin` / `none`). State-changing requests that carry a body must send `Content-Type: application/json` (otherwise `415`). Non-browser clients such as curl, scripts and MCP CLIs that send no `Origin` keep working; they authenticate with `Authorization: Bearer <token>`. The server sends no CORS headers, and pages are served with `Content-Security-Policy: frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`, so only the Workbench itself can frame them (as it does for `/preview`).
 
 ## Static publication
 

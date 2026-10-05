@@ -12,6 +12,8 @@ const temporaryDirectory = await mkdtemp(join(tmpdir(), 'uiux-package-smoke-'))
 const packDirectory = join(temporaryDirectory, 'pack')
 const installDirectory = join(temporaryDirectory, 'install')
 const workspaceDirectory = join(temporaryDirectory, 'workspace')
+// Every CLI and server process below uses a private access store, never the developer's ~/.uiux.
+process.env.UIUX_HOME = join(temporaryDirectory, 'uiux-home')
 
 async function selectPort() {
 	const probe = createServer()
@@ -82,6 +84,13 @@ try {
 	const initializedManifest = JSON.parse(await readFile(join(workspaceDirectory, '.uiux', 'workspace.json'), 'utf8'))
 	if (initializedManifest.schemaVersion !== installedPackage.uiuxWorkspaceSchemaVersion)
 		throw new Error('Packed CLI init did not use the package Workspace schema authority.')
+	for (const command of ['member add <nick>', 'token create --member <nick>', 'invite create --member <nick>', 'session list', 'access copy --from <old-dir>']) {
+		if (!helpOutput.includes(command)) throw new Error(`Packed CLI help did not expose ${command}.`)
+	}
+	execFileSync(cliPath, ['member', 'add', 'package-agent', '--kind', 'agent', '--role', 'editor', '--workspace', workspaceDirectory], { encoding: 'utf8' })
+	const token = execFileSync(cliPath, ['token', 'create', '--member', 'package-agent', '--workspace', workspaceDirectory], { encoding: 'utf8' }).match(/uiux_t_\S+/u)?.[0]
+	if (!token) throw new Error('Packed CLI token create printed no token.')
+	const auth = { authorization: `Bearer ${token}` }
 	if (!helpOutput.includes('migrate --workspace <dir> [--dry-run]'))
 		throw new Error('Packed CLI help did not expose Workspace migration.')
 	const legacyWorkspace = join(temporaryDirectory, 'legacy-workspace')
@@ -133,7 +142,9 @@ try {
 		if (!combinedStyles.includes('--ui-bg:') || !combinedStyles.includes('.min-h-screen'))
 			throw new Error('Packed Workbench stylesheets are missing Nuxt UI theme tokens or Tailwind utilities.')
 
-		const workspaceResponse = await fetch(`http://${host}:${port}/api/resources/workspace/workspace`)
+		if ((await fetch(`http://${host}:${port}/api/resources/workspace/workspace`)).status !== 401)
+			throw new Error('Packed selected-Workspace API answered without a credential.')
+		const workspaceResponse = await fetch(`http://${host}:${port}/api/resources/workspace/workspace`, { headers: auth })
 		if (workspaceResponse.status !== 200)
 			throw new Error(`Packed selected-Workspace API returned HTTP ${workspaceResponse.status}.`)
 		const workspaceRead = await workspaceResponse.json()
@@ -141,7 +152,10 @@ try {
 			throw new Error(`Packed selected-Workspace API returned an unexpected body: ${JSON.stringify(workspaceRead)}`)
 
 		client = new Client({ name: 'uiux-package-smoke', version: '1.0.0' }, { versionNegotiation: { mode: 'auto', probe: { timeoutMs: 2_000 } } })
-		const transport = new StreamableHTTPClientTransport(new URL(`http://${host}:${port}/mcp`))
+		const unauthenticatedMcp = await fetch(`http://${host}:${port}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: '{"jsonrpc":"2.0","id":1,"method":"ping"}' })
+		if (unauthenticatedMcp.status !== 401 || unauthenticatedMcp.headers.get('www-authenticate') !== 'Bearer realm="uiux"')
+			throw new Error(`Packed /mcp without a token returned HTTP ${unauthenticatedMcp.status}, expected 401.`)
+		const transport = new StreamableHTTPClientTransport(new URL(`http://${host}:${port}/mcp`), { requestInit: { headers: auth } })
 		await client.connect(transport)
 		const created = await client.callTool({
 			name: 'create_view',
@@ -217,7 +231,7 @@ try {
 
 		const listResponse = await fetch(`http://${host}:${port}/api/resources/list`, {
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers: { 'content-type': 'application/json', ...auth },
 			body: JSON.stringify({ kinds: ['view'], limit: 10 }),
 		})
 		if (listResponse.status !== 200) throw new Error(`Packed resource-list API returned HTTP ${listResponse.status}.`)
@@ -227,7 +241,7 @@ try {
 
 		const searchResponse = await fetch(`http://${host}:${port}/api/resources/search`, {
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers: { 'content-type': 'application/json', ...auth },
 			body: JSON.stringify({ query: 'package smoke', kinds: ['view'], limit: 10 }),
 		})
 		if (searchResponse.status !== 200) throw new Error(`Packed resource-search API returned HTTP ${searchResponse.status}.`)
@@ -235,7 +249,7 @@ try {
 		if (searchPage.items?.length !== 1 || searchPage.items[0]?.key !== viewId)
 			throw new Error(`Packed resource-search API returned an unexpected page: ${JSON.stringify(searchPage)}`)
 
-		const viewResponse = await fetch(`http://${host}:${port}/api/resources/view/${viewId}`)
+		const viewResponse = await fetch(`http://${host}:${port}/api/resources/view/${viewId}`, { headers: auth })
 		if (viewResponse.status !== 200) throw new Error(`Packed authored View read returned HTTP ${viewResponse.status}.`)
 		const viewRead = await viewResponse.json()
 		if (viewRead.resource?.spec?.intent !== 'Exercise installed UIUX init, MCP authoring, and Workbench reads.')
@@ -367,7 +381,7 @@ try {
 		if (exportData?.status !== 'exported' || !exportData.manifestArtifactDigest || !exportData.bundleIdentity)
 			throw new Error(`Packed MCP export_handoff failed: ${JSON.stringify(exportData)}`)
 
-		const manifestRes = await fetch(`http://${host}:${port}/api/artifacts/${exportData.manifestArtifactDigest}`)
+		const manifestRes = await fetch(`http://${host}:${port}/api/artifacts/${exportData.manifestArtifactDigest}`, { headers: auth })
 		if (!manifestRes.ok)
 			throw new Error(`Failed to download exported handoff manifest artifact: HTTP ${manifestRes.status}`)
 		const manifestJson = await manifestRes.json()
@@ -404,7 +418,7 @@ try {
 	if (!previewHtml.includes('/uiux/_nuxt/'))
 		throw new Error('Packed publication did not generate a base-path-safe /preview entry point.')
 
-	console.log(`Package smoke passed: packed @deviltea/uiux@${installedPackage.version} serves styled Workbench assets, initializes and authors a Workspace through MCP, captures/evaluates evidence and handoff, and publishes a portable /uiux/ static viewer.`)
+	console.log(`Package smoke passed: packed @deviltea/uiux@${installedPackage.version} serves styled Workbench assets, initializes a Workspace, authenticates /api and /mcp with a CLI-created token, authors through MCP, captures/evaluates evidence and handoff, and publishes a portable /uiux/ static viewer.`)
 }
 finally {
 	await rm(temporaryDirectory, { recursive: true, force: true })

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
-import { spawn, spawnSync } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { request as httpRequest } from 'node:http'
 import { connect, createServer } from 'node:net'
-import { networkInterfaces } from 'node:os'
+import { networkInterfaces, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const host = '127.0.0.1'
@@ -45,6 +45,23 @@ await writeFile(join(workspaceRoot, '.uiux', 'workspace.json'), `${JSON.stringif
 	themes: {},
 }, null, 2)}\n`)
 
+// Access rosters live in a private UIUX_HOME, never the developer's ~/.uiux. Tokens are created
+// through the CLI exactly as a user would (accepted identity decision D17).
+const uiuxHome = await mkdtemp(join(tmpdir(), 'uiux-smoke-home-'))
+const cliBaseEnv = { ...process.env, UIUX_HOME: uiuxHome }
+function uiuxCli(...args) {
+	return execFileSync(process.execPath, ['bin/uiux.mjs', ...args], { encoding: 'utf8', env: cliBaseEnv })
+}
+uiuxCli('member', 'add', 'smoke-agent', '--kind', 'agent', '--role', 'editor', '--workspace', workspaceRoot)
+const token = uiuxCli('token', 'create', '--member', 'smoke-agent', '--workspace', workspaceRoot).match(/uiux_t_\S+/u)?.[0]
+if (!token) throw new Error('uiux token create printed no token.')
+const auth = { authorization: `Bearer ${token}` }
+// A token from another Workspace's roster must be refused.
+const otherWorkspace = await mkdtemp(join(tmpdir(), 'uiux-smoke-other-'))
+uiuxCli('init', '--workspace', otherWorkspace)
+uiuxCli('member', 'add', 'other-agent', '--kind', 'agent', '--role', 'editor', '--workspace', otherWorkspace)
+const foreignToken = uiuxCli('token', 'create', '--member', 'other-agent', '--workspace', otherWorkspace).match(/uiux_t_\S+/u)?.[0]
+
 const probe = createServer()
 await new Promise((resolve, reject) => { probe.once('error', reject); probe.listen(0, host, resolve) })
 const address = probe.address()
@@ -56,6 +73,7 @@ const server = spawn(process.execPath, ['.output/server/index.mjs'], {
 	stdio: ['ignore', 'pipe', 'pipe'],
 	env: {
 		...process.env,
+		UIUX_HOME: uiuxHome,
 		HOST: host,
 		PORT: String(port),
 		NITRO_HOST: host,
@@ -79,27 +97,46 @@ try {
 	if (health.status !== 200 || JSON.stringify(await health.json()) !== JSON.stringify({ status: 'ok' }))
 		throw new Error('GET /api/health returned an unexpected response.')
 
-	const workspace = await fetch(`http://${host}:${port}/api/resources/workspace/workspace`)
+	const anonymous = await fetch(`http://${host}:${port}/api/resources/workspace/workspace`)
+	if (anonymous.status !== 401 || (await anonymous.json()).code !== 'auth.required')
+		throw new Error(`An unauthenticated /api read returned HTTP ${anonymous.status}, expected 401 auth.required.`)
+	const mcpInit = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } })
+	const mcpHeaders = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }
+	const anonymousMcp = await fetch(`http://${host}:${port}/mcp`, { method: 'POST', headers: mcpHeaders, body: mcpInit })
+	if (anonymousMcp.status !== 401 || anonymousMcp.headers.get('www-authenticate') !== 'Bearer realm="uiux"')
+		throw new Error(`/mcp without a token returned HTTP ${anonymousMcp.status}, expected 401 with WWW-Authenticate.`)
+	const foreignMcp = await fetch(`http://${host}:${port}/mcp`, { method: 'POST', headers: { ...mcpHeaders, authorization: `Bearer ${foreignToken}` }, body: mcpInit })
+	if (foreignMcp.status !== 401 || !(await foreignMcp.json()).message?.includes('belongs to roster'))
+		throw new Error(`/mcp with another Workspace's token returned HTTP ${foreignMcp.status}, expected 401 naming the other roster.`)
+	const tokenMcp = await fetch(`http://${host}:${port}/mcp`, { method: 'POST', headers: { ...mcpHeaders, ...auth }, body: mcpInit })
+	if (tokenMcp.status !== 200) throw new Error(`/mcp with a CLI-created token returned HTTP ${tokenMcp.status}.`)
+	const wellKnown = await fetch(`http://${host}:${port}/.well-known/oauth-authorization-server`)
+	if (wellKnown.status !== 404 || !wellKnown.headers.get('content-type')?.includes('application/json'))
+		throw new Error(`/.well-known/* returned HTTP ${wellKnown.status}, expected a JSON 404.`)
+
+	const workspace = await fetch(`http://${host}:${port}/api/resources/workspace/workspace`, { headers: auth })
 	if (workspace.status !== 200) throw new Error(`Selected Workspace route returned HTTP ${workspace.status}.`)
 	const body = await workspace.json()
 	if (body.resource?.schemaVersion !== 2 || body.inspection?.state !== 'current')
 		throw new Error(`Selected Workspace route returned an unexpected body: ${JSON.stringify(body)}`)
 
-	const adapters = await fetch(`http://${host}:${port}/api/preview/adapters`)
+	const adapters = await fetch(`http://${host}:${port}/api/preview/adapters`, { headers: auth })
 	if (adapters.status !== 200) throw new Error(`Preview adapters route returned HTTP ${adapters.status}.`)
 	const adapterBody = await adapters.json()
 	if (adapterBody.state !== 'valid' || adapterBody.summaries?.[0]?.adapterId !== 'production-identity-smoke' || !adapterBody.bundleUrl)
 		throw new Error(`Production Nitro failed to resolve a Workspace Adapter created by the repository widget-core runtime: ${JSON.stringify(adapterBody)}`)
 
-	const runtime = await fetch(new URL(adapterBody.bundleUrl, `http://${host}:${port}/`))
+	const runtime = await fetch(new URL(adapterBody.bundleUrl, `http://${host}:${port}/`), { headers: auth })
 	if (!runtime.ok || !(await runtime.text()).includes('mountPreviewRuntime'))
 		throw new Error('Preview runtime bundle was not materialized for the production identity smoke Adapter.')
 
-	console.log('Nitro smoke passed: health, selected Workspace API, and cross-module Workspace Adapter preview resolution are live against schemaVersion 2.')
+	console.log('Nitro smoke passed: health, 401 without a token and for another Workspace\'s token, a CLI-created token on /api and /mcp, selected Workspace API, and cross-module Workspace Adapter preview resolution against schemaVersion 2.')
 }
 catch (error) {
 	server.kill('SIGTERM')
 	await rm(workspaceRoot, { recursive: true, force: true })
+	await rm(otherWorkspace, { recursive: true, force: true })
+	await rm(uiuxHome, { recursive: true, force: true })
 	throw error
 }
 server.kill('SIGTERM')
@@ -110,12 +147,14 @@ try {
 }
 finally {
 	await rm(workspaceRoot, { recursive: true, force: true })
+	await rm(otherWorkspace, { recursive: true, force: true })
+	await rm(uiuxHome, { recursive: true, force: true })
 }
 
-// `uiux dev` must bind loopback only, even when no HOST/NITRO_HOST is set (Part 1 item 12), and
-// must refuse an explicit non-loopback bind instead of exposing unauthenticated /api and /mcp.
+// `uiux dev` must bind loopback only, even when no HOST/NITRO_HOST is set (the LAN listener is not
+// yet available), and must refuse an explicit non-loopback bind.
 async function smokeLoopbackOnlyCli() {
-	const cliEnv = { ...process.env }
+	const cliEnv = { ...process.env, UIUX_HOME: uiuxHome }
 	for (const name of ['HOST', 'NITRO_HOST', 'NITRO_PORT', 'NITRO_UNIX_SOCKET']) delete cliEnv[name]
 
 	const refused = spawnSync(process.execPath, ['bin/uiux.mjs', 'dev', '--workspace', workspaceRoot], {
@@ -123,7 +162,7 @@ async function smokeLoopbackOnlyCli() {
 		env: { ...cliEnv, HOST: '0.0.0.0', PORT: String(port) },
 		timeout: 15_000,
 	})
-	if (refused.status !== 2 || !refused.stderr.includes('LAN exposure requires authentication, which is not yet available'))
+	if (refused.status !== 2 || !refused.stderr.includes('the LAN listener is not yet available'))
 		throw new Error(`uiux dev did not refuse HOST=0.0.0.0 (exit ${refused.status}).\n${refused.stdout}${refused.stderr}`)
 
 	const cli = spawn(process.execPath, ['bin/uiux.mjs', 'dev', '--workspace', workspaceRoot], {
@@ -164,8 +203,9 @@ async function smokeLoopbackOnlyCli() {
 			['POST', '/api/resources/list', { 'content-type': 'application/json', 'origin': 'https://attacker.test' }, 403],
 			['POST', '/api/resources/list', { 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' }, 403],
 			['POST', '/api/resources/list', { 'content-type': 'text/plain' }, 415],
-			['POST', '/api/resources/list', { 'content-type': 'application/json' }, 200],
-			['POST', '/api/resources/list', { 'content-type': 'application/json', 'origin': `http://127.0.0.1:${port}`, 'sec-fetch-site': 'same-origin' }, 200],
+			['POST', '/api/resources/list', { 'content-type': 'application/json' }, 401],
+			['POST', '/api/resources/list', { 'content-type': 'application/json', ...auth }, 200],
+			['POST', '/api/resources/list', { 'content-type': 'application/json', ...auth, 'origin': `http://127.0.0.1:${port}`, 'sec-fetch-site': 'same-origin' }, 200],
 		]
 		for (const [method, path, headers, expected] of checks) {
 			const response = await request(method, path, headers, method === 'POST' ? JSON.stringify({ kinds: ['view'], limit: 1 }) : undefined)
@@ -174,7 +214,7 @@ async function smokeLoopbackOnlyCli() {
 			if (Object.keys(response.headers).some(name => name.startsWith('access-control-')))
 				throw new Error(`${method} ${path} sent CORS headers: ${JSON.stringify(response.headers)}`)
 		}
-		console.log(`Loopback smoke passed: uiux dev listens on 127.0.0.1 only (${addresses.length} non-loopback address(es) refused), refuses HOST=0.0.0.0, and gates Host, Origin, Sec-Fetch-Site and Content-Type.`)
+		console.log(`Loopback smoke passed: uiux dev listens on 127.0.0.1 only (${addresses.length} non-loopback address(es) refused), refuses HOST=0.0.0.0, gates Host, Origin, Sec-Fetch-Site and Content-Type, and requires a credential.`)
 	}
 	finally {
 		cli.kill('SIGTERM')
