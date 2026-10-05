@@ -917,6 +917,18 @@ export class WorkspaceFileRepository implements MutableResourceRepository<'works
 	}
 }
 
+/**
+ * How the `i18n/` directory holds one canonical locale filename. Locale identity is the exact,
+ * case-sensitive canonical tag (discovery accepts only exactly cased canonical filenames), but a
+ * case-insensitive volume resolves `i18n/zh-TW.json` to a case variant such as `zh-tw.json`.
+ * Every locale read and write therefore checks the directory entry, not just the path.
+ */
+type LocaleEntryState =
+	| Readonly<{ kind: 'exact' }>
+	| Readonly<{ kind: 'absent' }>
+	/** Only a case variant exists and the volume aliases the canonical path to it. */
+	| Readonly<{ kind: 'aliased_variant'; entryName: string }>
+
 export class LocaleFileRepository implements MutableResourceRepository<string, I18nResource> {
 	constructor(private readonly persistence: FileNativePersistence) {}
 
@@ -927,7 +939,7 @@ export class LocaleFileRepository implements MutableResourceRepository<string, I
 
 	async readRevision(locale: string): Promise<ResourceRevision | undefined> {
 		return this.persistence.withLock(async () => {
-			const bytes = await this.persistence.readOptionalBytesUnlocked(localeRelativePath(locale))
+			const bytes = await this.readExactBytesUnlocked(locale)
 			return bytes ? revisionForBytes(bytes) : undefined
 		})
 	}
@@ -936,7 +948,7 @@ export class LocaleFileRepository implements MutableResourceRepository<string, I
 	async readInspected(locale: string): Promise<InspectedResource<I18nResource> | undefined> {
 		return this.persistence.withLock(async () => {
 			const path = localeRelativePath(locale)
-			const bytes = await this.persistence.readOptionalBytesUnlocked(path)
+			const bytes = await this.readExactBytesUnlocked(locale)
 			if (!bytes) return undefined
 			const resource = parseJsonBytes(bytes, path)
 			return { resource: resource as I18nResource, revision: revisionForBytes(bytes), diagnostics: validateI18nResource(resource, basename(path)).diagnostics }
@@ -949,14 +961,7 @@ export class LocaleFileRepository implements MutableResourceRepository<string, I
 
 	async discoverInspected(): Promise<Readonly<{ locales: readonly string[]; diagnostics: readonly Diagnostic[] }>> {
 		return this.persistence.withLock(async () => {
-			const absolute = resolveWorkspacePath(this.persistence.root, 'i18n')
-			let entries: import('node:fs').Dirent[]
-			await assertSafePath(this.persistence.root, 'i18n/.placeholder', true)
-			try { entries = await fs.readdir(absolute, { withFileTypes: true }) }
-			catch (error) {
-				if (isNotFound(error)) return { locales: [], diagnostics: [] }
-				throw error
-			}
+			const entries = await this.readLocaleDirectoryUnlocked()
 			const locales: string[] = []
 			const diagnostics: Diagnostic[] = []
 			for (const entry of entries) {
@@ -978,11 +983,18 @@ export class LocaleFileRepository implements MutableResourceRepository<string, I
 		return this.persistence.withLock(async () => {
 			await this.persistence.assertWritableUnlocked()
 			const path = localeRelativePath(locale)
-			if (await this.persistence.readOptionalBytesUnlocked(path))
+			const entry = await this.localeEntryUnlocked(locale)
+			if (entry.kind === 'exact')
 				throw new PersistenceError('persistence.resource_exists', `Locale resource ${path} already exists.`)
+			if (entry.kind === 'aliased_variant')
+				throw caseVariantCollision(locale, entry.entryName)
 			const bytes = this.persistence.serializeJson(resource, path)
-			if (!await this.persistence.atomicCreateUnlocked(path, bytes))
+			if (!await this.persistence.atomicCreateUnlocked(path, bytes)) {
+				// Lost a race to a writer outside this process; re-check which name now holds the slot.
+				const after = await this.localeEntryUnlocked(locale)
+				if (after.kind === 'aliased_variant') throw caseVariantCollision(locale, after.entryName)
 				throw new PersistenceError('persistence.resource_exists', `Locale resource ${path} already exists.`)
+			}
 			return revisionForBytes(bytes)
 		})
 	}
@@ -991,7 +1003,7 @@ export class LocaleFileRepository implements MutableResourceRepository<string, I
 		return this.persistence.withLock(async () => {
 			await this.persistence.assertWritableUnlocked()
 			const path = localeRelativePath(input.key)
-			const currentBytes = await this.persistence.readOptionalBytesUnlocked(path)
+			const currentBytes = await this.readExactBytesUnlocked(input.key)
 			if (!currentBytes)
 				throw new PersistenceError('persistence.resource_not_found', `Locale resource ${path} does not exist.`)
 			const currentRevision = revisionForBytes(currentBytes)
@@ -1002,6 +1014,49 @@ export class LocaleFileRepository implements MutableResourceRepository<string, I
 			return { ok: true, revision: revisionForBytes(bytes) }
 		})
 	}
+
+	private async readLocaleDirectoryUnlocked(): Promise<import('node:fs').Dirent[]> {
+		const absolute = resolveWorkspacePath(this.persistence.root, 'i18n')
+		await assertSafePath(this.persistence.root, 'i18n/.placeholder', true)
+		try { return await fs.readdir(absolute, { withFileTypes: true }) }
+		catch (error) {
+			if (isNotFound(error)) return []
+			throw error
+		}
+	}
+
+	private async localeEntryUnlocked(locale: string): Promise<LocaleEntryState> {
+		const expected = basename(localeRelativePath(locale))
+		const entries = await this.readLocaleDirectoryUnlocked()
+		if (entries.some(entry => entry.name === expected)) return { kind: 'exact' }
+		const folded = expected.toLowerCase()
+		const variant = entries.find(entry => entry.name.toLowerCase() === folded)
+		// On a case-sensitive volume a variant is just another (invalid) file and does not occupy the slot.
+		if (variant && await fileExists(resolveWorkspacePath(this.persistence.root, localeRelativePath(locale))))
+			return { kind: 'aliased_variant', entryName: variant.name }
+		return { kind: 'absent' }
+	}
+
+	/** Reads the canonical locale file only when the directory entry carries the exact canonical casing. */
+	private async readExactBytesUnlocked(locale: string): Promise<Buffer | undefined> {
+		const path = localeRelativePath(locale)
+		if ((await this.localeEntryUnlocked(locale)).kind !== 'exact') return undefined
+		return this.persistence.readOptionalBytesUnlocked(path)
+	}
+}
+
+function caseVariantCollision(locale: string, entryName: string): PersistenceError {
+	return new PersistenceError(
+		'persistence.path_rejected',
+		`Locale ${locale} cannot be created: this volume is case-insensitive and i18n/${entryName} already occupies i18n/${locale}.json.`,
+		{
+			diagnostics: [{
+				code: 'i18n.invalid_locale_filename',
+				path: `/i18n/${entryName}`,
+				message: `This noncanonically cased file occupies the path of locale ${locale} on a case-insensitive volume. Rename it to ${locale}.json or remove it before creating ${locale}.`,
+			}],
+		},
+	)
 }
 
 export class AuthoredAssetFileRepository implements MutableResourceRepository<string, AuthoredAssetResource> {

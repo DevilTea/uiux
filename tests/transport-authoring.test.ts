@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -12,6 +12,7 @@ import type { ViewResource } from '../src/domain/views/schema'
 import { createUiuxMcpHttpHandler } from '../src/mcp/server'
 import { FileNativePersistence } from '../src/persistence'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { isCaseSensitiveDirectory } from './support/filesystem'
 import {
 	appendReviewMessageForHttp,
 	createAssetForHttp,
@@ -710,6 +711,30 @@ describe('Locale authoring', () => {
 			expect(read?.kind === 'locale' ? read.resource.title : undefined).toBe('First')
 		}
 		finally { await close() }
+	})
+
+	it('reports a case-variant locale file instead of aliasing it on create and update', async () => {
+		const { root, app } = await emptySession()
+		await mkdir(join(root, 'i18n'), { recursive: true })
+		await writeFile(join(root, 'i18n', 'ja-jp.json'), '{"title":"variant"}')
+		const caseSensitive = await isCaseSensitiveDirectory(root)
+
+		const updated = await app.updateLocale({ locale: 'ja-JP', expectedRevision: `r_${'a'.repeat(43)}`, messages: { title: 'Updated' } })
+		expect(updated.status).toBe('not_found')
+
+		const created = await app.createLocale({ locale: 'ja-JP', messages: { title: 'Canonical' } })
+		if (caseSensitive) {
+			expect(created.status).toBe('created')
+		}
+		else {
+			expect(created).toMatchObject({
+				status: 'invalid',
+				key: 'ja-JP',
+				diagnostics: [expect.objectContaining({ code: 'i18n.invalid_locale_filename', path: '/i18n/ja-jp.json' })],
+			})
+			expect(await app.readPointResource('locale', 'ja-JP')).toBeUndefined()
+		}
+		expect(await readFile(join(root, 'i18n', 'ja-jp.json'), 'utf8')).toBe('{"title":"variant"}')
 	})
 
 	it('rejects stale revision CAS conflict on update without mutating persistence', async () => {
