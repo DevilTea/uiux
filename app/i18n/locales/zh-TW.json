@@ -1,4 +1,84 @@
 {
+  "assets": {
+    "title": "素材",
+    "subtitle": "已撰寫的媒體與二進位資源",
+    "newAsset": "新增素材",
+    "listLabel": "Workspace 素材",
+    "unnamedAsset": "未命名素材",
+    "diagnosticCount": "沒有診斷 | {n} 項診斷 | {n} 項診斷",
+    "emptyTitle": "尚無素材",
+    "emptyDescription": "上傳圖片或檔案，即可在 View 中引用。",
+    "emptyDescriptionReadOnly": "此快照沒有已撰寫的素材。",
+    "selectPrompt": "選取素材以檢視中繼資料與預覽。",
+    "loadListFailed": "無法載入素材。",
+    "loadDetailFailed": "無法載入此素材。",
+    "unavailable": "此素材無法使用。",
+    "notSet": "未設定",
+    "fields": {
+      "file": "檔案",
+      "replacementFile": "新檔案",
+      "name": "素材名稱",
+      "filename": "檔名",
+      "mediaType": "媒體類型",
+      "size": "大小",
+      "digest": "摘要值"
+    },
+    "placeholders": {
+      "name": "例如：頁首標誌"
+    },
+    "mediaTypeHelp": "依檔案自動偵測，預設為 application/octet-stream。",
+    "fileUploadLabel": "將檔案拖放到這裡，或按一下以瀏覽",
+    "fileUploadDescription": "支援任何檔案類型，圖片可預覽。",
+    "preview": "內容預覽",
+    "previewAlt": "素材預覽",
+    "noPreviewTitle": "無法預覽",
+    "noPreviewDescription": "二進位內容（{mediaType}）。僅支援預覽圖片媒體類型。",
+    "download": "下載",
+    "replaceContent": "取代內容",
+    "createTitle": "上傳新素材",
+    "createDescription": "在此 Workspace 新增媒體或二進位資源。",
+    "saveAsset": "儲存素材",
+    "created": "已建立素材「{name}」。",
+    "createFailed": "無法建立素材。",
+    "replaceTitle": "取代素材內容",
+    "replaceDescription": "為「{name}」上傳新檔案。只有在你開啟後沒有其他人變更此素材時，才能儲存成功。",
+    "commitReplacement": "取代內容",
+    "replaced": "已取代素材內容。",
+    "replaceFailed": "無法取代素材內容。",
+    "conflictTitle": "此素材已在其他地方變更",
+    "conflictDescription": "你開啟此素材後，有其他操作更新了它。請重新載入以檢視目前的修訂版本，再重新取代。",
+    "validation": {
+      "fileRequired": "請選擇要上傳的檔案。",
+      "replacementFileRequired": "請選擇用來取代內容的新檔案。",
+      "nameRequired": "請輸入素材名稱。",
+      "filenameRequired": "請輸入檔名。",
+      "fileNotReady": "仍在讀取檔案，請稍候再試。"
+    }
+  },
+  "checks": {
+    "title": "檢查",
+    "subtitle": "Workspace 與目前 View 的驗證問題",
+    "listLabel": "問題",
+    "findingCount": "沒有問題 | {n} 個問題 | {n} 個問題",
+    "clean": "無問題",
+    "source": {
+      "view": "View",
+      "workspace": "Workspace"
+    },
+    "jump": {
+      "label": "選取 {id}",
+      "ariaLabel": "在預覽中選取 Widget {id}",
+      "tooltip": "在預覽中選取並標示此 Widget"
+    },
+    "unresolved": {
+      "label": "無 Widget 位置",
+      "tooltip": "此問題未對應到任何 Widget。"
+    },
+    "allPassed": {
+      "title": "所有檢查皆已通過",
+      "description": "目前的 Workspace 與 View 沒有任何診斷。"
+    }
+  },
   "app": {
     "title": "UIUX Workbench"
   },
@@ -24,5 +104,591 @@
     "revision": "修訂版本",
     "errorTitle": "發生錯誤",
     "unexpectedError": "發生未預期的錯誤。"
+  },
+  "evidence": {
+    "title": "正式證據",
+    "subtitle": "具決定性的螢幕截圖成品與正式執行紀錄",
+    "captureActive": "擷取目前情境",
+    "captureUnavailable": "請先在預覽中選取 View，才能擷取其渲染情境的證據。",
+    "copied": "已複製到剪貼簿",
+    "copyFailed": "無法複製到剪貼簿。",
+    "loadFailed": "無法載入正式證據",
+    "onlyCurrentView": "僅顯示目前的 View",
+    "recordCount": "沒有紀錄 | {n} 筆紀錄 | {n} 筆紀錄",
+    "listLabel": "正式證據紀錄",
+    "identity": "證據識別",
+    "copyDigest": "複製 SHA-256",
+    "applyContext": "將情境套用到預覽",
+    "selectPrompt": "請選取一筆證據紀錄以檢視。",
+    "capture": {
+      "succeeded": "已擷取證據",
+      "failed": "證據擷取失敗。",
+      "failedTitle": "擷取失敗",
+      "incompleteTitle": "擷取未完成",
+      "summary": "已擷取 {captured} / {total} 個情境。",
+      "executedAt": "執行時間：{time}。",
+      "unknownContext": "未知的情境",
+      "noDetails": "此情境沒有回報詳細資訊。"
+    },
+    "empty": {
+      "title": "尚無正式證據",
+      "description": "使用「擷取目前情境」為目前的渲染情境記錄具決定性的證據。",
+      "readOnly": "此發布快照未包含任何正式證據。"
+    },
+    "status": {
+      "stale": "過時",
+      "current": "最新"
+    },
+    "stale": {
+      "title": "此證據已過時",
+      "unknown": "此證據已與目前的 Workspace 不一致。",
+      "missingViewId": "此證據紀錄未指定 View。",
+      "viewMissing": "此 View 已不存在。",
+      "provenanceMissing": "此證據的來源資訊缺少 View 參考資料。",
+      "viewRevisionChanged": "此 View 在擷取後已有變更。",
+      "localeMissing": "語系「{locale}」已不在 Workspace 中。",
+      "localeRevisionChanged": "語系「{locale}」在擷取後已有變更。",
+      "viewportRemoved": "檢視區預設「{viewport}」已被移除。",
+      "viewportChanged": "檢視區預設「{viewport}」的尺寸在擷取後已有變更。",
+      "themeRemoved": "主題「{theme}」已被移除。"
+    },
+    "context": {
+      "title": "渲染情境",
+      "view": "View：",
+      "locale": "語系：",
+      "theme": "主題：",
+      "viewId": "View ID",
+      "variant": "變體",
+      "baseVariant": "（基礎）",
+      "localeLabel": "語系",
+      "viewport": "檢視區",
+      "viewportValue": "{id}（{width} × {height}）",
+      "themeLabel": "主題"
+    },
+    "screenshot": {
+      "title": "螢幕截圖成品",
+      "enlarge": "放大螢幕截圖",
+      "alt": "正式擷取的螢幕截圖",
+      "enlargedTitle": "螢幕截圖成品",
+      "enlargedAlt": "放大的正式擷取螢幕截圖"
+    },
+    "provenance": {
+      "title": "來源修訂版本",
+      "uiuxVersion": "UIUX 版本",
+      "schemaVersion": "結構描述版本",
+      "unknown": "未知",
+      "resources": "資源"
+    }
+  },
+  "flows": {
+    "title": "UX 流程",
+    "subtitle": "使用者旅程的步驟與轉場",
+    "newFlow": "新增流程",
+    "list": {
+      "label": "UX 流程",
+      "empty": "尚無 UX 流程",
+      "emptyHint": "建立流程，描述使用者在各個 View 之間的旅程。",
+      "loadFailed": "無法載入 UX 流程。",
+      "unnamed": "未命名流程"
+    },
+    "detail": {
+      "metadata": "流程詳細資料",
+      "revision": "修訂版本 {revision}",
+      "loadFailed": "無法載入此 UX 流程。",
+      "unavailable": "此 UX 流程無法使用。",
+      "selectTitle": "尚未選取流程",
+      "selectDescription": "選取一個 UX 流程以檢視其步驟與轉場。"
+    },
+    "fields": {
+      "name": "流程名稱",
+      "namePlaceholder": "例如：使用者註冊引導",
+      "entryStep": "起始步驟",
+      "entryStepPlaceholder": "選取起始步驟",
+      "entryStepId": "起始步驟 ID",
+      "entryStepIdHelp": "第一個步驟的固定識別碼，使用自動產生的 ID 即可。",
+      "initialView": "起始步驟的 View",
+      "targetView": "目標 View",
+      "variant": "變體",
+      "variantPlaceholder": "例如：mobile-expanded",
+      "optional": "選填",
+      "event": "事件",
+      "widgetId": "Widget ID",
+      "targetStep": "前往步驟",
+      "targetStepPlaceholder": "選取步驟"
+    },
+    "views": {
+      "placeholder": "選取 View",
+      "search": "搜尋 View…",
+      "missing": "{id}（找不到 View）",
+      "none": "沒有 View"
+    },
+    "steps": {
+      "title": "步驟",
+      "count": "沒有步驟 | {n} 個步驟 | {n} 個步驟",
+      "ordinal": "步驟 {n}",
+      "optionLabel": "步驟 {n}：{view}",
+      "entry": "起始",
+      "add": "新增步驟",
+      "remove": "移除步驟",
+      "previewView": "預覽此 View",
+      "empty": "此流程沒有步驟",
+      "emptyHint": "新增一個步驟以開始。"
+    },
+    "transitions": {
+      "count": "沒有轉場 | {n} 個轉場 | {n} 個轉場",
+      "add": "新增轉場",
+      "remove": "移除轉場",
+      "terminal": "沒有轉場，這是終點步驟。"
+    },
+    "diagnostics": {
+      "count": "沒有診斷 | {n} 則診斷 | {n} 則診斷"
+    },
+    "conflict": {
+      "title": "修訂版本已過時",
+      "description": "此流程已在其他地方變更。請重新載入以取得最新修訂版本；尚未儲存的編輯將會捨棄。"
+    },
+    "save": {
+      "submit": "儲存流程",
+      "saved": "UX 流程已儲存。",
+      "failed": "無法儲存 UX 流程。"
+    },
+    "create": {
+      "title": "新增 UX 流程",
+      "description": "建立一個流程，其第一個步驟以某個 View 為目標。",
+      "submit": "建立流程",
+      "created": "UX 流程已建立。",
+      "failed": "無法建立 UX 流程。",
+      "nameRequired": "請輸入流程名稱。",
+      "viewRequired": "請為起始步驟選取 View。",
+      "noViews": "請先建立 View，起始步驟需要以 View 為目標。"
+    }
+  },
+  "handoff": {
+    "title": "交付",
+    "subtitle": "具決定性的相依封閉集合、就緒狀態宣告與不可變更的匯出",
+    "reassess": "重新評估",
+    "export": "匯出快照",
+    "exportSucceeded": "已匯出交付套件",
+    "exportFailed": "交付匯出失敗",
+    "assessFailed": "就緒狀態評估失敗",
+    "assessing": "正在評估就緒狀態…",
+    "copied": "已複製到剪貼簿",
+    "copyFailed": "無法複製到剪貼簿。",
+    "readOnlyNotice": "已發布 Workspace 的就緒狀態，於發布時依據正式快照預先計算。",
+    "closureNote": "遞移的正式相依項目（參照的素材、預設語系、流程目標 View 與必要的 Adapter）會自動納入封閉集合。",
+    "empty": {
+      "title": "目前沒有可交付的內容",
+      "description": "此 Workspace 尚無任何 View，因此沒有可評估或匯出的內容。View 需透過 MCP {tool} 工具建立。",
+      "readOnly": "此發布快照未包含任何 View，因此沒有可交付的內容。"
+    },
+    "scope": {
+      "legend": "匯出範圍",
+      "workspace": "整個 Workspace",
+      "custom": "選取的根項目"
+    },
+    "roots": {
+      "views": "View",
+      "flows": "UX 流程",
+      "assets": "素材",
+      "selected": "未選取 | 已選取 {n} 個 | 已選取 {n} 個",
+      "noneSelected": "請至少選取一個根項目以評估就緒狀態。"
+    },
+    "readiness": {
+      "ready": "可進行實作",
+      "notReady": "尚未可進行實作",
+      "readyDescription": "所有根項目皆可讀取、封閉集合有效、必要的正式證據已齊全，且審查涵蓋範圍內沒有未解決的討論串。",
+      "notReadyDescription": "仍可匯出一致的快照供檢視，但在阻擋性診斷排除前，無法宣告為可進行實作。"
+    },
+    "coverage": {
+      "validation": "驗證",
+      "passed": "通過",
+      "issues": "有問題",
+      "evidence": "證據",
+      "complete": "齊全",
+      "missing": "缺少",
+      "reviews": "審查",
+      "resolved": "已解決",
+      "open": "未解決"
+    },
+    "blocking": {
+      "title": "沒有阻擋性診斷 | {n} 項阻擋性診斷 | {n} 項阻擋性診斷",
+      "path": "路徑：{path}"
+    },
+    "exported": {
+      "title": "已匯出的交付套件",
+      "at": "匯出時間：{time}",
+      "bundleIdentity": "套件識別碼",
+      "manifestDigest": "Manifest 成品摘要",
+      "copyBundleIdentity": "複製套件識別碼",
+      "copyManifestDigest": "複製 Manifest 成品摘要",
+      "download": "下載 Manifest JSON"
+    }
+  },
+  "locales": {
+    "title": "Workspace 語系",
+    "subtitle": "為預覽中的產品撰寫的翻譯目錄，不會變更 Workbench 的介面語言。",
+    "newLocale": "新增語系",
+    "listLabel": "Workspace 語系",
+    "stringCount": "沒有字串 | {n} 個字串 | {n} 個字串",
+    "diagnosticCount": "沒有診斷 | {n} 項診斷 | {n} 項診斷",
+    "defaultBadge": "預設",
+    "emptyTitle": "尚無 Workspace 語系",
+    "emptyDescription": "建立 Workspace 語系，開始為預覽中的產品撰寫翻譯。",
+    "emptyDescriptionReadOnly": "此快照沒有已撰寫的 Workspace 語系。",
+    "selectPrompt": "選取 Workspace 語系以檢視及編輯其字串。",
+    "loadListFailed": "無法載入 Workspace 語系。",
+    "loadDetailFailed": "無法載入此 Workspace 語系。",
+    "unavailable": "此 Workspace 語系無法使用。",
+    "defaultMissing": {
+      "title": "缺少預設 Workspace 語系",
+      "description": "Workspace 的預設語系 {locale} 尚未建立翻譯目錄。",
+      "action": "立即建立"
+    },
+    "searchLabel": "搜尋鍵與字串",
+    "searchPlaceholder": "搜尋鍵或字串…",
+    "unsaved": "尚未儲存",
+    "valuePlaceholder": "翻譯字串",
+    "removeKey": "移除鍵",
+    "removeKeyLabel": "移除鍵 {key}",
+    "noMatches": "沒有符合的鍵。",
+    "noMessages": "此 Workspace 語系尚未撰寫任何字串。",
+    "newKeyLabel": "新鍵",
+    "newValueLabel": "字串",
+    "addKey": "新增鍵",
+    "saved": "已儲存 Workspace 語系 {locale}。",
+    "saveFailed": "無法儲存 Workspace 語系。",
+    "conflict": {
+      "title": "此 Workspace 語系已在其他地方變更",
+      "description": "你開啟後，有其他操作更新了它。請重新載入以取得目前的修訂版本；此處尚未儲存的編輯將會捨棄。"
+    },
+    "create": {
+      "title": "建立 Workspace 語系",
+      "description": "為預覽中的產品新增一個空白的翻譯目錄。",
+      "tagLabel": "語系標籤",
+      "tagHelp": "標準的 BCP 47 語言標籤，例如 en-US、zh-TW、ja-JP。",
+      "tagRequired": "請輸入語系標籤。",
+      "created": "已建立 Workspace 語系 {locale}。",
+      "failed": "無法建立 Workspace 語系。"
+    }
+  },
+  "preview": {
+    "loading": "正在具現化 View 執行環境…",
+    "errorTitle": "預覽載入錯誤",
+    "noViewTitle": "尚未選擇 View",
+    "noViewDescription": "請在 Workbench 中選擇 View，以在預覽中載入。",
+    "adapterUnavailable": {
+      "title": "無法在瀏覽器中具現化 Adapter",
+      "seam": "已接受的架構接縫",
+      "description": "這個 View 使用的 Widget 類型（{types}）需要外部 Adapter。在正式接受伺服器到瀏覽器的模組傳輸與打包契約之前，預覽 iframe 不會在瀏覽器中載入任意外部 Adapter 程式碼。",
+      "note": "目前在此瀏覽器環境中，只會具現化由 UIUX 管理的 {rootShell} 外掛與渲染器。"
+    },
+    "invalidTitle": "執行環境無效",
+    "commentHint": "點選即可留言（按 Esc 取消）",
+    "emptySlotTitle": "content 插槽為空",
+    "emptySlotDescription": "RootShell 已在 {core} 下啟用並執行，但 {slot} 插槽中尚未撰寫任何子 Widget。",
+    "errors": {
+      "bridgeInitFailed": "無法初始化預覽協定橋接。",
+      "viewUnavailable": "無法取得預覽的 View。",
+      "viewLoadFailed": "無法載入 View。",
+      "bundleInvalid": "預覽執行環境套件未提供 mountPreviewRuntime。",
+      "bundleLoadFailed": "無法載入預覽執行環境套件。"
+    }
+  },
+  "reviews": {
+    "title": "審查",
+    "subtitle": "以討論串收集回饋，並可原子化升級為決策",
+    "newThread": "新增討論串",
+    "scopeToCurrentView": "僅顯示目前 View",
+    "threadCount": "沒有討論串 | {n} 則討論串 | {n} 則討論串",
+    "messageCount": "沒有留言 | {n} 則留言 | {n} 則留言",
+    "threadListLabel": "審查討論串",
+    "optional": "選填",
+    "unknownAuthor": "未知作者",
+    "highlight": "標示",
+    "highlightTooltip": "在預覽中標示錨定的 Widget",
+    "viewLabel": "View",
+    "conversation": "對話",
+    "commentMode": {
+      "start": "留言",
+      "active": "選取中…",
+      "tooltip": "在預覽中點選 Widget 以建立審查討論串（按 Esc 取消）"
+    },
+    "status": {
+      "open": "開啟",
+      "readyForReview": "待審查",
+      "resolved": "已解決"
+    },
+    "empty": {
+      "noThreadsInView": "此 View 尚無審查討論串。",
+      "noThreadsInWorkspace": "此 Workspace 尚無審查討論串。",
+      "noMessages": "尚未有任何留言。",
+      "noSelectionTitle": "未選取討論串",
+      "noSelection": "請選取審查討論串，或使用「留言」為 Widget 新增回饋。",
+      "noSelectionReadOnly": "請選取已發布的審查討論串以檢視其歷程。"
+    },
+    "conflict": {
+      "title": "修訂版本衝突（已過時）",
+      "description": "此審查討論串已在其他地方被修改。請重新載入後再試一次。"
+    },
+    "reply": {
+      "authorLabel": "留言身分",
+      "authorPlaceholder": "你的名稱",
+      "messageLabel": "回覆",
+      "messagePlaceholder": "輸入回饋留言…",
+      "shortcutHint": "送出",
+      "send": "送出回覆"
+    },
+    "lifecycle": {
+      "title": "生命週期",
+      "reanchorTitle": "重新錨定討論串",
+      "reanchorDescription": "將錨點移至目前選取的 Widget（#{widgetId}）。",
+      "reanchorNeedsWidget": "請在目前 View 中選取 Widget，以將錨點移至該處。",
+      "reanchorAction": "重新錨定至 #{widgetId}",
+      "markReady": "標記為待審查",
+      "resolve": "解決討論串",
+      "requestChanges": "重新開啟（要求修改）",
+      "reopen": "重新開啟討論串"
+    },
+    "promote": {
+      "title": "升級為 View 決策",
+      "description": "以原子操作將結論記錄為 View 規格中的決策。",
+      "open": "升級…",
+      "questionLabel": "決策問題",
+      "questionPlaceholder": "例如：是否保留三欄式版面？",
+      "questionRequired": "請輸入此決策所回答的問題。",
+      "summaryLabel": "結論摘要",
+      "summaryPlaceholder": "例如：核准，側邊面板改為可收合",
+      "rationaleLabel": "結論理由",
+      "rationalePlaceholder": "討論共識所依據的理由…",
+      "submit": "升級為決策"
+    },
+    "create": {
+      "title": "新增審查討論串",
+      "description": "將回饋錨定至目前 View 中的 Widget。",
+      "widgetLabel": "目標 Widget",
+      "widgetHelp": "輸入 Widget ID，輸入 root 代表整個 View，或在預覽中點選。",
+      "widgetPlaceholder": "root 或 Widget ID",
+      "pick": "點選",
+      "messageLabel": "第一則留言",
+      "messagePlaceholder": "要討論的回饋或問題…",
+      "submit": "建立討論串"
+    },
+    "feedback": {
+      "messagePosted": "已送出留言。",
+      "reanchored": "已將討論串重新錨定至 #{widgetId}。",
+      "markedReady": "已標記為待審查，附上 {n} 筆目前的正式證據。 | 已標記為待審查，附上 {n} 筆目前的正式證據。",
+      "resolved": "已解決審查討論串。",
+      "reopened": "已重新開啟審查討論串。",
+      "promoted": "已升級為 View 決策。",
+      "promotedViewRevision": "View 已更新至修訂版本 {revision}。",
+      "threadCreated": "已在 #{widgetId} 建立審查討論串。"
+    },
+    "errors": {
+      "loadListFailed": "無法載入審查討論串。",
+      "loadThreadFailed": "無法載入此審查討論串。",
+      "threadUnavailable": "此審查討論串無法使用。",
+      "postMessageFailed": "無法送出留言。",
+      "reanchorFailed": "無法重新錨定討論串。",
+      "readyFailed": "無法將討論串標記為待審查。",
+      "resolveFailed": "無法解決討論串。",
+      "reopenFailed": "無法重新開啟討論串。",
+      "promoteFailed": "無法將討論串升級為決策。",
+      "createFailed": "無法建立審查討論串。",
+      "initialMessageFailed": "討論串已建立，但無法送出第一則留言。",
+      "targetViewUnresolved": "無法取得目標 View {viewId} 的目前修訂版本。",
+      "noCurrentEvidence": "沒有完整的正式證據符合目標 View 的目前修訂版本。請先擷取目前的證據，再將此討論串標記為待審查。",
+      "noViewSelected": "請先選取 View 以錨定審查討論串。"
+    }
+  },
+  "workbench": {
+    "header": {
+      "modeLocal": "本機優先",
+      "modePublished": "已發布 · 唯讀"
+    },
+    "context": {
+      "groupLabel": "預覽渲染情境",
+      "variant": "變體",
+      "locale": "語系",
+      "viewport": "檢視區",
+      "theme": "預覽主題",
+      "baseVariant": "基本（無變體）",
+      "defaultLocaleOption": "{locale}（預設）",
+      "defaultViewportName": "預設",
+      "viewportOption": "{name}（{width} × {height}）",
+      "defaultThemeOption": "預設（{theme}）",
+      "noVariantsHint": "這個 View 沒有撰寫任何變體。",
+      "noViewportsHint": "workspace.json 未定義檢視區預設值，因此使用內建的 1280 × 800。",
+      "noThemesHint": "workspace.json 未定義主題。Workspace 主題只會影響預覽中的 View，不會改變 Workbench 外觀。",
+      "themeHint": "Adapter 用來渲染預覽 View 的 Workspace 主題，與 Workbench 外觀（淺色／深色／系統）是不同的設定。"
+    },
+    "session": {
+      "label": "預覽：{phase}",
+      "idle": "無 View",
+      "initiating": "連線中",
+      "open": "已連線",
+      "failed": "失敗",
+      "idleHint": "目前沒有載入 View，因此沒有預覽工作階段。",
+      "initiatingHint": "正在等待預覽 iframe 完成協定交握。",
+      "openHint": "預覽 iframe 已完成協定交握。",
+      "failedHint": "預覽 iframe 協定交握失敗，請嘗試重新整理。"
+    },
+    "preferences": {
+      "language": "Workbench 介面語言",
+      "languageHint": "Workbench 介面的顯示語言。預覽 View 使用的 Workspace 語系請在「語系」中選擇。",
+      "appearance": "Workbench 外觀",
+      "appearanceHint": "Workbench 本身的淺色、深色或跟隨系統外觀，不會改變 Workspace 預覽主題。"
+    },
+    "nav": {
+      "label": "Workbench 區段",
+      "views": "View",
+      "workspace": "Workspace",
+      "locales": "語系",
+      "assets": "素材",
+      "flows": "流程",
+      "reviews": "審查",
+      "checks": "檢查",
+      "evidence": "證據",
+      "handoff": "交付"
+    },
+    "views": {
+      "title": "View",
+      "listLabel": "此 Workspace 中的 View",
+      "filterPlaceholder": "篩選 View…",
+      "noMatches": "沒有符合「{query}」的 View。",
+      "emptyTitle": "尚無 View",
+      "emptyDescription": "請透過 MCP 的 {tool} 工具撰寫 View。",
+      "diagnosticCount": "沒有診斷 | {n} 項診斷 | {n} 項診斷"
+    },
+    "tree": {
+      "title": "Widget 樹狀結構",
+      "label": "所選 View 的 Widget 樹狀結構",
+      "emptyContentSlot": "（content 插槽為空）",
+      "unavailable": "沒有可用的 Widget 樹狀結構"
+    },
+    "canvas": {
+      "label": "預覽畫布",
+      "title": "預覽畫布",
+      "dimensions": "{width} × {height} px",
+      "comment": "留言",
+      "commentActive": "留言中",
+      "commentHint": "點選預覽中的 Widget，即可在該處錨定審查留言。",
+      "commentDisabledHint": "請先選擇 View 才能留言。",
+      "scale": "{percent}%",
+      "scaleHint": "畫布縮放比例。iframe 會維持精確的檢視區尺寸。",
+      "iframeBoundary": "真實 iframe 邊界",
+      "iframeTitle": "{name} 的預覽",
+      "noSelectionTitle": "尚未選擇 View",
+      "noSelectionDescription": "請在左側欄選擇 View，以載入互動式預覽。",
+      "noViewsTitle": "此 Workspace 尚無 View",
+      "noViewsDescription": "請使用 MCP 的 {tool} 工具建立第一個 View，撰寫完成後就會顯示在這裡。"
+    },
+    "spec": {
+      "label": "View 規格",
+      "tabs": {
+        "spec": "規格",
+        "references": "參考資料",
+        "decisions": "決策",
+        "checks": "檢查"
+      },
+      "collapse": "收合",
+      "expand": "展開",
+      "noView": "請選擇 View 以查看其規格。",
+      "intent": "意圖",
+      "noIntent": "尚未撰寫意圖。",
+      "entryConditions": "進入條件 | 進入條件（{n}） | 進入條件（{n}）",
+      "interactionRules": "互動規則 | 互動規則（{n}） | 互動規則（{n}）",
+      "noReferences": "這個 View 尚未撰寫參考資料。",
+      "opensInNewTab": "（在新分頁開啟）",
+      "noDecisions": "這個 View 尚未記錄任何決策。",
+      "outcome": "結果：",
+      "historyEvents": "沒有歷程事件 | {n} 筆歷程事件 | {n} 筆歷程事件",
+      "decisionStatus": {
+        "pending": "待決定",
+        "deferred": "已延後",
+        "decided": "已決定"
+      },
+      "jumpToWidget": "選取 #{id}",
+      "unresolvedLocation": "無法解析位置",
+      "allChecksPassed": "所有檢查皆通過，沒有任何診斷問題。"
+    },
+    "inspector": {
+      "title": "屬性面板",
+      "view": "View",
+      "selectedWidget": "已選取的 Widget",
+      "identity": "識別碼",
+      "type": "類型",
+      "slot": "插槽",
+      "depth": "深度",
+      "stateOverrides": "變體狀態覆寫",
+      "noStateOverrides": "目前的變體沒有覆寫這個 Widget 的狀態。",
+      "findings": "Widget 問題",
+      "cleanWidget": "這個 Widget 沒有任何問題",
+      "viewMetadata": "View 中繼資料",
+      "id": "ID",
+      "variants": "變體",
+      "emptyTitle": "尚未選取任何項目",
+      "emptyDescription": "請選擇 View 或 Widget 以檢視其屬性。"
+    },
+    "errors": {
+      "title": "Workbench 無法載入資料",
+      "workspaceUnavailable": "無法取得所選 Workspace 的資訊清單。",
+      "workspaceReadFailed": "Workbench 無法讀取所選的 Workspace。",
+      "viewUnavailable": "無法取得所選的 View。",
+      "viewLoadFailed": "無法載入 View 詳細資料。",
+      "bridgeInitFailed": "無法初始化預覽協定橋接。"
+    }
+  },
+  "workspaceSettings": {
+    "title": "Workspace 設定",
+    "subtitle": "正式 Manifest 設定（{file}）",
+    "revisionBadge": "修訂 {revision}",
+    "saved": "已儲存 Workspace 設定",
+    "saveFailed": "無法儲存 Workspace 設定",
+    "reset": "重設變更",
+    "save": "儲存設定",
+    "conflict": {
+      "title": "修訂版本衝突",
+      "description": "在你載入後，Workspace Manifest 已在其他地方被變更。你的變更尚未儲存；請重新載入最新的 Manifest，以免覆寫他人的變更。",
+      "reload": "重新載入最新 Manifest"
+    },
+    "defaultLocale": {
+      "label": "預設語系",
+      "description": "Workspace 主要語系的 BCP 47 標記。"
+    },
+    "adapters": {
+      "title": "Adapter",
+      "description": "已註冊的 Widget 套件或本機 Adapter 模組指定字串。",
+      "add": "新增 Adapter",
+      "item": "Adapter {n}",
+      "remove": "移除 Adapter {n}",
+      "moduleSpecifier": "模組指定字串",
+      "config": "設定",
+      "configHint": "選填 JSON",
+      "empty": "尚未設定任何 Adapter，目前僅啟用 RootShell。"
+    },
+    "viewports": {
+      "title": "檢視區",
+      "description": "渲染情境中可使用的預設畫布尺寸。",
+      "add": "新增檢視區",
+      "id": "預設 ID",
+      "idPlaceholder": "例如 mobile",
+      "remove": "移除檢視區 {id}",
+      "width": "寬度（px）",
+      "height": "高度（px）",
+      "empty": "尚未定義自訂檢視區，預設為 1280 × 800。"
+    },
+    "themes": {
+      "title": "預覽主題",
+      "description": "Adapter 在預覽中渲染 View 時使用的主題 ID。",
+      "notAppearance": "這些 Workspace 主題只影響 View 的渲染方式，與頁首中 Workbench 的淺色／深色外觀設定無關。",
+      "add": "新增主題",
+      "idPlaceholder": "例如 light、dark",
+      "idLabel": "主題 ID {n}",
+      "remove": "移除主題 {id}",
+      "empty": "尚未設定任何預覽主題。"
+    },
+    "diagnostics": {
+      "title": "沒有 Manifest 診斷 | {n} 項 Manifest 診斷 | {n} 項 Manifest 診斷"
+    }
   }
 }

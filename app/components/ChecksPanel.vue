@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from '#imports'
 import { deriveWidgetTree, flattenWidgetTree } from '../../src/preview/widget-tree'
 import { resolveAllChecks, type DiagnosticItem } from '../../src/preview/checks-navigation'
 
@@ -12,6 +13,8 @@ const props = defineProps<{
 const emit = defineEmits<{
 	(e: 'selectWidget', widgetId: string): void
 }>()
+
+const { t } = useI18n()
 
 const widgetTree = computed(() => {
 	if (!props.viewIr) return undefined
@@ -40,88 +43,112 @@ function handleJump(widgetId: string) {
 </script>
 
 <template>
-  <div class="flex h-full flex-col overflow-hidden text-xs text-neutral-200">
+  <div class="flex min-h-0 flex-1 flex-col overflow-hidden text-xs text-default">
     <!-- Header -->
-    <div class="flex items-center justify-between border-b border-neutral-800 p-3">
-      <div>
-        <h2 class="text-sm font-semibold text-white">
-          Checks & Diagnostics
+    <div class="flex items-center justify-between gap-2 border-b border-default p-3">
+      <div class="min-w-0">
+        <h2 class="text-sm font-semibold text-highlighted">
+          {{ t('checks.title') }}
         </h2>
-        <p class="text-[11px] text-neutral-400">
-          Actionable validation findings across Workspace & Views
+        <p class="text-[11px] text-muted">
+          {{ t('checks.subtitle') }}
         </p>
       </div>
 
       <UBadge
         :color="allCheckItems.length ? 'warning' : 'success'"
-        variant="soft"
-        size="xs"
+        variant="subtle"
+        size="sm"
+        :icon="allCheckItems.length ? 'i-lucide-triangle-alert' : 'i-lucide-circle-check'"
+        class="shrink-0"
       >
-        {{ allCheckItems.length ? `${allCheckItems.length} findings` : 'Clean' }}
+        {{ allCheckItems.length ? t('checks.findingCount', allCheckItems.length) : t('checks.clean') }}
       </UBadge>
     </div>
 
     <!-- Findings List -->
-    <div class="flex-1 overflow-y-auto p-3 space-y-2">
-      <div
+    <div class="min-h-0 flex-1 overflow-y-auto p-3">
+      <ul
         v-if="allCheckItems.length"
         class="space-y-2"
+        :aria-label="t('checks.listLabel')"
       >
-        <div
+        <li
           v-for="(item, idx) in allCheckItems"
-          :key="idx"
-          class="rounded border border-amber-500/30 bg-amber-500/10 p-3 text-amber-200 space-y-1.5"
+          :key="`${item.source}:${item.code}:${item.path}:${idx}`"
         >
-          <div class="flex items-center justify-between gap-2">
-            <div class="flex items-center gap-1.5 font-mono text-[11px]">
-              <span class="rounded bg-neutral-800 px-1.5 py-0.5 text-[9px] text-neutral-400 uppercase font-sans font-medium">
-                {{ item.source }}
-              </span>
-              <span class="font-semibold text-amber-400">[{{ item.code }}]</span>
-              <span class="text-neutral-400">{{ item.path }}</span>
-            </div>
+          <UAlert
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-triangle-alert"
+            :ui="{ title: 'flex flex-wrap items-center gap-1.5', description: 'space-y-1', actions: 'mt-2' }"
+          >
+            <template #title>
+              <UBadge
+                color="neutral"
+                variant="outline"
+                size="sm"
+              >
+                {{ item.source === 'View' ? t('checks.source.view') : t('checks.source.workspace') }}
+              </UBadge>
+              <span class="font-mono text-[11px] font-semibold">{{ item.code }}</span>
+            </template>
 
-            <!-- Actionable Jump button or Unresolved badge -->
-            <div>
-              <button
+            <template #description>
+              <p class="leading-relaxed text-default">
+                {{ item.message }}
+              </p>
+              <p
+                v-if="item.path"
+                class="font-mono text-[10px] break-all text-muted"
+              >
+                {{ item.path }}
+              </p>
+            </template>
+
+            <template #actions>
+              <UTooltip
                 v-if="item.resolvedWidgetId"
-                type="button"
-                class="inline-flex items-center gap-1 rounded bg-primary/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-primary-300 hover:bg-primary/30 transition"
-                title="Select and highlight widget in Preview Canvas"
-                @click="handleJump(item.resolvedWidgetId)"
+                :text="t('checks.jump.tooltip')"
               >
-                🎯 #{{ item.resolvedWidgetId }}
-              </button>
-              <span
+                <UButton
+                  color="primary"
+                  variant="soft"
+                  size="xs"
+                  icon="i-lucide-crosshair"
+                  :label="t('checks.jump.label', { id: item.resolvedWidgetId })"
+                  :aria-label="t('checks.jump.ariaLabel', { id: item.resolvedWidgetId })"
+                  @click="handleJump(item.resolvedWidgetId)"
+                />
+              </UTooltip>
+              <UTooltip
                 v-else
-                class="rounded bg-neutral-800/80 px-1.5 py-0.5 font-mono text-[9px] text-neutral-500"
-                title="No widget location identity associated with this finding"
+                :text="t('checks.unresolved.tooltip')"
               >
-                [unresolved location]
-              </span>
-            </div>
-          </div>
+                <UBadge
+                  color="neutral"
+                  variant="soft"
+                  size="sm"
+                  icon="i-lucide-map-pin-off"
+                  tabindex="0"
+                >
+                  {{ t('checks.unresolved.label') }}
+                </UBadge>
+              </UTooltip>
+            </template>
+          </UAlert>
+        </li>
+      </ul>
 
-          <p class="text-[11px] text-neutral-200 leading-relaxed">
-            {{ item.message }}
-          </p>
-        </div>
-      </div>
-
-      <div
+      <UEmpty
         v-else
-        class="flex flex-col items-center justify-center p-8 text-center"
-      >
-        <div class="text-emerald-400 text-lg mb-1">
-          ✓
-        </div>
-        <p class="font-medium text-neutral-200">
-          All checks passed
-        </p>
-        <p class="text-[11px] text-neutral-500 mt-0.5">
-          No diagnostic errors or warnings found in current Workspace and View.
-        </p>
-      </div>
+        icon="i-lucide-circle-check"
+        variant="naked"
+        size="sm"
+        :title="t('checks.allPassed.title')"
+        :description="t('checks.allPassed.description')"
+        :avatar="{ color: 'success' }"
+      />
     </div>
   </div>
 </template>

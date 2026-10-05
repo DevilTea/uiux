@@ -1,6 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import type { FormError } from '@nuxt/ui'
+import { useI18n } from '#imports'
+import { computed, reactive, ref, watch } from 'vue'
 import { useUiuxClient } from '../composables/useUiuxClient'
+import { useWorkbenchFeedback } from '../composables/useWorkbenchFeedback'
+import { useWorkbenchFormat } from '../composables/useWorkbenchFormat'
+import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
 
 interface LocaleSummary {
 	kind: 'locale'
@@ -9,7 +14,6 @@ interface LocaleSummary {
 	diagnosticCount: number
 	summary: { messageCount?: number }
 }
-
 
 interface LocaleRead {
 	kind: 'locale'
@@ -24,11 +28,15 @@ const props = defineProps<{
 	readOnly?: boolean
 }>()
 
-const uiux = useUiuxClient()
-
 const emit = defineEmits<{
-	(e: 'localesChanged'): void
+	localesChanged: []
+	changed: []
 }>()
+
+const { t } = useI18n()
+const uiux = useUiuxClient()
+const feedback = useWorkbenchFeedback()
+const fmt = useWorkbenchFormat()
 
 const locales = ref<readonly LocaleSummary[]>([])
 const selectedLocaleKey = ref<string>('')
@@ -36,28 +44,37 @@ const selectedLocaleData = ref<LocaleRead>()
 const loadingList = ref(false)
 const loadingDetail = ref(false)
 const localeLoadSequence = ref(0)
-const error = ref<string>()
+const listError = ref<FetchErrorDetails>()
+const detailError = ref<FetchErrorDetails>()
 
 const searchQuery = ref('')
 const saving = ref(false)
 const conflict = ref(false)
-const saveSuccess = ref(false)
 
 // In-progress edit state: array of { key: string, value: string }
 const localMessages = ref<Array<{ key: string; value: string }>>([])
 const newKeyInput = ref('')
 const newValueInput = ref('')
 
-// Create locale modal / form
+// Create locale modal
 const isCreatingLocale = ref(false)
-const newLocaleTag = ref('')
-const createError = ref<string>()
+const createState = reactive({ tag: '' })
+const createError = ref<FetchErrorDetails>()
 const creating = ref(false)
 
 const isDefaultLocaleMissing = computed(() => {
 	if (!props.defaultLocale) return false
+	if (loadingList.value && !locales.value.length) return false
 	return !locales.value.some(l => l.key === props.defaultLocale)
 })
+
+const localeItems = computed(() => locales.value.map(loc => ({
+	label: loc.key,
+	description: t('locales.stringCount', loc.summary.messageCount || 0),
+	value: loc.key,
+	isDefault: loc.key === props.defaultLocale,
+	diagnosticCount: loc.diagnosticCount,
+})))
 
 const filteredMessages = computed(() => {
 	const q = searchQuery.value.trim().toLowerCase()
@@ -65,9 +82,16 @@ const filteredMessages = computed(() => {
 	return localMessages.value.filter(m => m.key.toLowerCase().includes(q) || m.value.toLowerCase().includes(q))
 })
 
+const isDirty = computed(() => {
+	const saved = selectedLocaleData.value?.resource ?? {}
+	const savedKeys = Object.keys(saved)
+	if (savedKeys.length !== localMessages.value.length) return true
+	return localMessages.value.some(m => saved[m.key] === undefined || String(saved[m.key]) !== m.value)
+})
+
 async function fetchLocales() {
 	loadingList.value = true
-	error.value = undefined
+	listError.value = undefined
 	try {
 		const res = await uiux.listResources<LocaleSummary>(['locale'], { limit: 100 })
 		locales.value = res.items
@@ -82,18 +106,21 @@ async function fetchLocales() {
 		}
 	}
 	catch (err: unknown) {
-		error.value = err instanceof Error ? err.message : 'Failed to fetch locales'
+		listError.value = describeFetchError(err, t('locales.loadListFailed'))
 	}
 	finally {
 		loadingList.value = false
 	}
 }
 
+function onSelectLocale(value: unknown) {
+	if (typeof value === 'string' && value && value !== selectedLocaleKey.value) void selectLocale(value)
+}
+
 async function selectLocale(key: string) {
 	selectedLocaleKey.value = key
 	conflict.value = false
-	saveSuccess.value = false
-	error.value = undefined
+	detailError.value = undefined
 	await loadSelectedLocaleDetail()
 }
 
@@ -107,16 +134,17 @@ async function loadSelectedLocaleDetail() {
 	}
 
 	loadingDetail.value = true
+	detailError.value = undefined
 	try {
 		const data = await uiux.readResource<LocaleRead>('locale', key)
-		if (!data) throw new Error('Locale is unavailable.')
+		if (!data) throw new Error(t('locales.unavailable'))
 		if (localeLoadSequence.value !== currentSeq) return
 		selectedLocaleData.value = data
 		localMessages.value = Object.entries(data.resource || {}).map(([k, v]) => ({ key: k, value: String(v) }))
 	}
 	catch (err: unknown) {
 		if (localeLoadSequence.value !== currentSeq) return
-		error.value = err instanceof Error ? err.message : 'Failed to load locale detail'
+		detailError.value = describeFetchError(err, t('locales.loadDetailFailed'))
 		selectedLocaleData.value = undefined
 		localMessages.value = []
 	}
@@ -124,6 +152,11 @@ async function loadSelectedLocaleDetail() {
 		if (localeLoadSequence.value === currentSeq)
 			loadingDetail.value = false
 	}
+}
+
+async function reloadAfterConflict() {
+	conflict.value = false
+	await loadSelectedLocaleDetail()
 }
 
 function addMessageRow() {
@@ -141,18 +174,18 @@ function addMessageRow() {
 	newValueInput.value = ''
 }
 
-function removeMessageRow(index: number) {
+function removeMessageRow(key: string) {
 	if (props.readOnly) return
-	localMessages.value.splice(index, 1)
+	// Remove by key: the rendered list may be filtered, so its indices do not match localMessages.
+	const index = localMessages.value.findIndex(m => m.key === key)
+	if (index !== -1) localMessages.value.splice(index, 1)
 }
 
 async function handleSaveLocale() {
 	if (props.readOnly) return
 	if (!selectedLocaleData.value) return
 	saving.value = true
-	error.value = undefined
 	conflict.value = false
-	saveSuccess.value = false
 
 	const messagesRecord: Record<string, string> = {}
 	for (const m of localMessages.value) {
@@ -169,17 +202,18 @@ async function handleSaveLocale() {
 				messages: messagesRecord,
 			},
 		})
-		saveSuccess.value = true
+		feedback.success(t('locales.saved', { locale: selectedLocaleData.value.key }))
 		await fetchLocales()
 		emit('localesChanged')
+		emit('changed')
 	}
 	catch (err: unknown) {
-		const errorObj = err as { status?: number; statusCode?: number; data?: { message?: string } }
-		if (errorObj?.status === 409 || errorObj?.statusCode === 409) {
+		const details = describeFetchError(err, t('locales.saveFailed'))
+		if (details.statusCode === 409 || details.status === 'conflict') {
 			conflict.value = true
 		}
 		else {
-			error.value = errorObj?.data?.message || (err instanceof Error ? err.message : 'Failed to save locale')
+			feedback.error(err, t('locales.saveFailed'))
 		}
 	}
 	finally {
@@ -187,9 +221,19 @@ async function handleSaveLocale() {
 	}
 }
 
+function openCreate(tag = '') {
+	createState.tag = tag
+	createError.value = undefined
+	isCreatingLocale.value = true
+}
+
+function validateCreate(state: Partial<typeof createState>): FormError[] {
+	return state.tag?.trim() ? [] : [{ name: 'tag', message: t('locales.create.tagRequired') }]
+}
+
 async function handleCreateLocale() {
 	if (props.readOnly) return
-	const tag = newLocaleTag.value.trim()
+	const tag = createState.tag.trim()
 	if (!tag) return
 	creating.value = true
 	createError.value = undefined
@@ -202,15 +246,16 @@ async function handleCreateLocale() {
 				messages: {},
 			},
 		})
-		newLocaleTag.value = ''
+		createState.tag = ''
 		isCreatingLocale.value = false
+		feedback.success(t('locales.create.created', { locale: tag }))
 		await fetchLocales()
 		await selectLocale(tag)
 		emit('localesChanged')
+		emit('changed')
 	}
 	catch (err: unknown) {
-		const errorObj = err as { data?: { message?: string } }
-		createError.value = errorObj?.data?.message || (err instanceof Error ? err.message : 'Failed to create locale')
+		createError.value = feedback.error(err, t('locales.create.failed'))
 	}
 	finally {
 		creating.value = false
@@ -223,15 +268,15 @@ watch(() => props.defaultLocale, () => {
 </script>
 
 <template>
-  <div class="flex h-full flex-col overflow-hidden text-xs text-neutral-200">
-    <!-- Panel Header -->
-    <div class="flex items-center justify-between border-b border-neutral-800 p-3">
-      <div>
-        <h2 class="text-sm font-semibold text-white">
-          Locales
+  <div class="flex min-h-0 flex-1 flex-col overflow-hidden text-xs text-default">
+    <!-- Panel header -->
+    <div class="flex items-center justify-between gap-2 border-b border-default p-3">
+      <div class="min-w-0">
+        <h2 class="text-sm font-semibold text-highlighted">
+          {{ t('locales.title') }}
         </h2>
-        <p class="text-[11px] text-neutral-400">
-          Flat canonical i18n translation catalogs
+        <p class="text-[11px] text-muted">
+          {{ t('locales.subtitle') }}
         </p>
       </div>
       <UButton
@@ -239,259 +284,386 @@ watch(() => props.defaultLocale, () => {
         color="primary"
         variant="solid"
         size="xs"
-        @click="isCreatingLocale = !isCreatingLocale"
+        icon="i-lucide-plus"
+        @click="openCreate()"
       >
-        + New Locale
+        {{ t('locales.newLocale') }}
       </UButton>
     </div>
 
-    <!-- Missing Primary Default Locale Warning Banner -->
+    <!-- Missing Workspace default locale -->
     <div
       v-if="isDefaultLocaleMissing"
-      class="border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-300 flex items-center justify-between"
+      class="border-b border-default p-2"
     >
-      <span class="text-[11px]">
-        ⚠ Workspace defaultLocale "<span class="font-mono font-semibold">{{ defaultLocale }}</span>" is not yet authored!
-      </span>
-      <UButton
-        v-if="!readOnly"
+      <UAlert
         color="warning"
-        variant="soft"
-        size="xs"
-        @click="newLocaleTag = defaultLocale || ''; isCreatingLocale = true"
+        variant="subtle"
+        icon="i-lucide-triangle-alert"
+        :title="t('locales.defaultMissing.title')"
+        :actions="readOnly ? [] : [{ label: t('locales.defaultMissing.action'), color: 'warning', variant: 'outline', size: 'xs', onClick: () => openCreate(defaultLocale || '') }]"
       >
-        Create Now
-      </UButton>
-    </div>
-
-    <!-- Create Locale inline form -->
-    <div
-      v-if="isCreatingLocale && !readOnly"
-      class="border-b border-neutral-800 bg-neutral-900/80 p-3 space-y-2"
-    >
-      <div class="flex items-center justify-between">
-        <span class="font-semibold text-white">Create New Locale</span>
-        <button
-          type="button"
-          class="text-neutral-500 hover:text-neutral-300"
-          @click="isCreatingLocale = false"
-        >
-          ✕
-        </button>
-      </div>
-      <p class="text-[11px] text-neutral-400">
-        Must be a canonical BCP 47 language tag (e.g. en-US, zh-TW, ja-JP).
-      </p>
-      <div class="flex gap-2">
-        <UInput
-          v-model="newLocaleTag"
-          :disabled="readOnly"
-          size="xs"
-          placeholder="zh-TW"
-          class="flex-1 font-mono"
-        />
-        <UButton
-          v-if="!readOnly"
-          color="primary"
-          variant="solid"
-          size="xs"
-          :loading="creating"
-          @click="handleCreateLocale"
-        >
-          Create
-        </UButton>
-      </div>
-      <p
-        v-if="createError"
-        class="text-[11px] text-red-400"
-      >
-        {{ createError }}
-      </p>
-    </div>
-
-    <!-- Locales list bar -->
-    <div class="border-b border-neutral-800 bg-neutral-950 p-2">
-      <div class="flex flex-wrap gap-1.5">
-        <button
-          v-for="loc in locales"
-          :key="loc.key"
-          type="button"
-          class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs transition"
-          :class="selectedLocaleKey === loc.key ? 'bg-primary text-white font-medium shadow-sm' : 'bg-neutral-900 text-neutral-300 hover:bg-neutral-800'"
-          @click="selectLocale(loc.key)"
-        >
-          <span class="font-mono">{{ loc.key }}</span>
-          <span
-            v-if="loc.key === defaultLocale"
-            class="rounded bg-black/30 px-1 text-[9px] text-amber-300"
-            title="Workspace default locale"
+        <template #description>
+          <i18n-t
+            keypath="locales.defaultMissing.description"
+            tag="span"
+            scope="global"
           >
-            default
-          </span>
-          <span class="text-[10px] opacity-70">({{ loc.summary.messageCount || 0 }})</span>
-        </button>
-      </div>
-      <div
-        v-if="!locales.length && !loadingList"
-        class="py-2 text-center text-xs text-neutral-500"
-      >
-        No authored locales. Click "+ New Locale" above.
-      </div>
+            <template #locale>
+              <code class="font-mono font-semibold">{{ defaultLocale }}</code>
+            </template>
+          </i18n-t>
+        </template>
+      </UAlert>
     </div>
 
-    <!-- Active Locale Details & Flat Key/Value Editor -->
+    <!-- List load failure -->
+    <div
+      v-if="listError"
+      class="border-b border-default p-2"
+    >
+      <UAlert
+        color="error"
+        variant="subtle"
+        icon="i-lucide-circle-alert"
+        :title="t('locales.loadListFailed')"
+        :description="listError.message"
+        :actions="[{ label: t('common.retry'), color: 'error', variant: 'outline', size: 'xs', icon: 'i-lucide-refresh-cw', onClick: () => fetchLocales() }]"
+      />
+    </div>
+
+    <!-- Workspace locale list -->
+    <div class="border-b border-default p-2">
+      <UListbox
+        v-if="localeItems.length"
+        :model-value="selectedLocaleKey || undefined"
+        :items="localeItems"
+        value-key="value"
+        size="sm"
+        :aria-label="t('locales.listLabel')"
+        :ui="{
+          content: 'max-h-36',
+          item: 'data-[state=checked]:text-selection data-[state=checked]:before:bg-selection-subtle',
+          itemLabel: 'font-mono font-medium',
+          itemDescription: 'text-[10px]',
+        }"
+        @update:model-value="onSelectLocale"
+      >
+        <template #item-trailing="{ item }">
+          <UBadge
+            v-if="item.diagnosticCount"
+            color="warning"
+            variant="subtle"
+            size="xs"
+            icon="i-lucide-triangle-alert"
+            :aria-label="t('locales.diagnosticCount', item.diagnosticCount)"
+          >
+            {{ fmt.number(item.diagnosticCount) }}
+          </UBadge>
+          <UBadge
+            v-if="item.isDefault"
+            color="neutral"
+            variant="subtle"
+            size="xs"
+          >
+            {{ t('locales.defaultBadge') }}
+          </UBadge>
+        </template>
+      </UListbox>
+      <UEmpty
+        v-else-if="loadingList"
+        size="sm"
+        variant="naked"
+        loading
+        :title="t('common.loading')"
+      />
+      <UEmpty
+        v-else-if="!listError"
+        size="sm"
+        variant="naked"
+        icon="i-lucide-languages"
+        :title="t('locales.emptyTitle')"
+        :description="readOnly ? t('locales.emptyDescriptionReadOnly') : t('locales.emptyDescription')"
+      />
+    </div>
+
+    <!-- Detail load failure -->
+    <div
+      v-if="detailError"
+      class="p-3"
+    >
+      <UAlert
+        color="error"
+        variant="subtle"
+        icon="i-lucide-circle-alert"
+        :title="t('locales.loadDetailFailed')"
+        :description="detailError.message"
+        :actions="[{ label: t('common.retry'), color: 'error', variant: 'outline', size: 'xs', icon: 'i-lucide-refresh-cw', onClick: () => loadSelectedLocaleDetail() }]"
+      />
+    </div>
+
+    <!-- Active locale: flat key/value editor -->
     <div
       v-if="selectedLocaleData"
       class="flex min-h-0 flex-1 flex-col overflow-hidden"
     >
-      <!-- Sub-header: Revision & Search -->
-      <div class="flex items-center justify-between border-b border-neutral-800 bg-neutral-900/40 p-2.5">
-        <div class="flex items-center gap-2">
-          <span class="font-mono font-semibold text-white">{{ selectedLocaleData.key }}</span>
-          <span class="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-400">
-            Rev: {{ selectedLocaleData.revision.slice(0, 12) }}…
-          </span>
-        </div>
-        <div class="w-48">
-          <UInput
-            v-model="searchQuery"
-            :disabled="readOnly"
+      <!-- Sub-header: locale, revision and search -->
+      <div class="flex flex-col gap-2 border-b border-default bg-muted/40 p-2.5">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex min-w-0 items-center gap-2">
+            <span class="truncate font-mono font-semibold text-highlighted">{{ selectedLocaleData.key }}</span>
+            <UTooltip :text="selectedLocaleData.revision">
+              <UBadge
+                color="neutral"
+                variant="subtle"
+                size="xs"
+                class="shrink-0 font-mono"
+              >
+                {{ t('common.revision') }} {{ selectedLocaleData.revision.slice(0, 12) }}…
+              </UBadge>
+            </UTooltip>
+          </div>
+          <UBadge
+            v-if="!readOnly && isDirty"
+            color="warning"
+            variant="subtle"
             size="xs"
-            placeholder="Search keys/values…"
-          />
+            icon="i-lucide-pencil"
+            class="shrink-0"
+          >
+            {{ t('locales.unsaved') }}
+          </UBadge>
         </div>
+        <UInput
+          v-model="searchQuery"
+          size="xs"
+          icon="i-lucide-search"
+          :placeholder="t('locales.searchPlaceholder')"
+          :aria-label="t('locales.searchLabel')"
+          class="w-full"
+        />
       </div>
 
-      <!-- Conflict Banner -->
+      <!-- Stale revision conflict -->
       <div
         v-if="conflict"
-        class="border-b border-amber-500/30 bg-amber-500/10 p-2 text-amber-300 text-[11px] flex items-center justify-between"
+        class="border-b border-default p-2"
       >
-        <span>⚠ Stale revision conflict: This locale was modified by another operation.</span>
-        <UButton
-          color="warning"
-          variant="soft"
-          size="xs"
-          @click="loadSelectedLocaleDetail"
-        >
-          Reload
-        </UButton>
+        <UAlert
+          color="error"
+          variant="subtle"
+          icon="i-lucide-git-compare"
+          :title="t('locales.conflict.title')"
+          :description="t('locales.conflict.description')"
+          :actions="[{ label: t('common.reload'), color: 'error', variant: 'outline', size: 'xs', icon: 'i-lucide-refresh-cw', onClick: () => reloadAfterConflict() }]"
+        />
       </div>
 
-      <div
-        v-else-if="saveSuccess"
-        class="border-b border-emerald-500/30 bg-emerald-500/10 p-2 text-emerald-300 text-[11px]"
-      >
-        ✓ Saved successfully.
-      </div>
-
-      <div
-        v-else-if="error"
-        class="border-b border-red-500/30 bg-red-500/10 p-2 text-red-300 text-[11px]"
-      >
-        {{ error }}
-      </div>
-
-      <!-- Messages Table / Flat Key-Value list -->
-      <div class="flex-1 overflow-y-auto p-3 space-y-2">
+      <!-- Messages -->
+      <div class="flex-1 overflow-y-auto p-3">
         <div
           v-if="filteredMessages.length"
-          class="space-y-1.5"
+          class="flex flex-col gap-2.5"
         >
-          <div
-            v-for="(msg, idx) in filteredMessages"
+          <UFormField
+            v-for="msg in filteredMessages"
             :key="msg.key"
-            class="flex items-center gap-2 rounded border border-neutral-800 bg-neutral-900/60 p-1.5"
+            :label="msg.key"
+            size="xs"
+            :ui="{ label: 'block truncate font-mono text-[11px] text-toned', labelWrapper: 'gap-1' }"
           >
-            <div
-              class="w-2/5 truncate font-mono text-[11px] text-neutral-300"
-              :title="msg.key"
-            >
-              {{ msg.key }}
-            </div>
-            <div class="flex-1">
-              <UInput
-                v-model="msg.value"
-                :disabled="readOnly"
-                size="xs"
-                placeholder="Translated text"
-                class="w-full"
-              />
-            </div>
-            <button
+            <template
               v-if="!readOnly"
-              type="button"
-              class="text-neutral-500 hover:text-red-400 text-xs px-1"
-              title="Delete key"
-              @click="removeMessageRow(idx)"
+              #hint
             >
-              ✕
-            </button>
+              <UTooltip :text="t('locales.removeKey')">
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  size="xs"
+                  icon="i-lucide-x"
+                  :aria-label="t('locales.removeKeyLabel', { key: msg.key })"
+                  @click="removeMessageRow(msg.key)"
+                />
+              </UTooltip>
+            </template>
+            <UTextarea
+              v-model="msg.value"
+              :readonly="readOnly"
+              size="xs"
+              autoresize
+              :rows="1"
+              :maxrows="6"
+              :placeholder="t('locales.valuePlaceholder')"
+              class="w-full"
+            />
+          </UFormField>
+        </div>
+
+        <UEmpty
+          v-else
+          size="sm"
+          variant="naked"
+          :icon="searchQuery.trim() ? 'i-lucide-search-x' : 'i-lucide-file-text'"
+          :title="searchQuery.trim() ? t('locales.noMatches') : t('locales.noMessages')"
+        />
+      </div>
+
+      <!-- Add key and save -->
+      <div class="flex flex-col gap-2 border-t border-default bg-muted/40 p-3">
+        <div
+          v-if="!readOnly"
+          class="grid grid-cols-2 gap-2"
+        >
+          <UFormField
+            :label="t('locales.newKeyLabel')"
+            size="xs"
+          >
+            <UInput
+              v-model="newKeyInput"
+              size="xs"
+              placeholder="new.translation.key"
+              class="w-full font-mono"
+              @keydown.enter.prevent="addMessageRow"
+            />
+          </UFormField>
+          <UFormField
+            :label="t('locales.newValueLabel')"
+            size="xs"
+          >
+            <UInput
+              v-model="newValueInput"
+              size="xs"
+              :placeholder="t('locales.valuePlaceholder')"
+              class="w-full"
+              @keydown.enter.prevent="addMessageRow"
+            />
+          </UFormField>
+        </div>
+
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-[11px] text-muted">
+            {{ t('locales.stringCount', localMessages.length) }}
+          </span>
+          <div
+            v-if="!readOnly"
+            class="flex items-center gap-1.5"
+          >
+            <UButton
+              color="neutral"
+              variant="outline"
+              size="xs"
+              icon="i-lucide-plus"
+              :disabled="!newKeyInput.trim()"
+              @click="addMessageRow"
+            >
+              {{ t('locales.addKey') }}
+            </UButton>
+            <UButton
+              color="primary"
+              variant="solid"
+              size="xs"
+              icon="i-lucide-save"
+              :loading="saving"
+              @click="handleSaveLocale"
+            >
+              {{ saving ? t('common.saving') : t('common.save') }}
+            </UButton>
           </div>
         </div>
-
-        <div
-          v-else
-          class="py-6 text-center text-xs text-neutral-500"
-        >
-          {{ searchQuery.trim() ? 'No matching keys found.' : 'No messages authored in this locale yet.' }}
-        </div>
-      </div>
-
-      <!-- Add New Key Row & Save Actions -->
-      <div class="border-t border-neutral-800 bg-neutral-950 p-3 space-y-2">
-        <div class="flex items-center gap-2">
-          <UInput
-            v-model="newKeyInput"
-            :disabled="readOnly"
-            size="xs"
-            placeholder="new.translation.key"
-            class="w-2/5 font-mono"
-            @keyup.enter="addMessageRow"
-          />
-          <UInput
-            v-model="newValueInput"
-            :disabled="readOnly"
-            size="xs"
-            placeholder="Translation text"
-            class="flex-1"
-            @keyup.enter="addMessageRow"
-          />
-          <UButton
-            v-if="!readOnly"
-            color="neutral"
-            variant="outline"
-            size="xs"
-            @click="addMessageRow"
-          >
-            + Add
-          </UButton>
-        </div>
-
-        <div class="flex items-center justify-between pt-1">
-          <span class="text-[11px] text-neutral-500">
-            Total {{ localMessages.length }} messages
-          </span>
-          <UButton
-            v-if="!readOnly"
-            color="primary"
-            variant="solid"
-            size="xs"
-            :loading="saving"
-            @click="handleSaveLocale"
-          >
-            Save Changes
-          </UButton>
-        </div>
       </div>
     </div>
 
-    <!-- Empty Detail State -->
+    <!-- Empty detail state -->
     <div
-      v-else-if="!loadingList"
-      class="flex flex-1 items-center justify-center p-6 text-center text-xs text-neutral-500"
+      v-else-if="!loadingList && !detailError && localeItems.length"
+      class="flex flex-1 items-center justify-center p-6"
     >
-      Select a locale to inspect and edit messages.
+      <UEmpty
+        size="sm"
+        variant="naked"
+        icon="i-lucide-mouse-pointer-click"
+        :title="t('locales.selectPrompt')"
+        :loading="loadingDetail"
+      />
     </div>
+
+    <!-- Create Workspace locale -->
+    <UModal
+      v-if="!readOnly"
+      v-model:open="isCreatingLocale"
+      :title="t('locales.create.title')"
+      :description="t('locales.create.description')"
+    >
+      <template #body>
+        <UForm
+          :state="createState"
+          :validate="validateCreate"
+          class="flex flex-col gap-3"
+          @submit="handleCreateLocale"
+        >
+          <UFormField
+            name="tag"
+            :label="t('locales.create.tagLabel')"
+            :help="t('locales.create.tagHelp')"
+            required
+          >
+            <UInput
+              v-model="createState.tag"
+              size="sm"
+              placeholder="zh-TW"
+              class="w-full font-mono"
+            />
+          </UFormField>
+
+          <UAlert
+            v-if="createError"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-circle-alert"
+            :title="t('locales.create.failed')"
+            :description="createError.message"
+          >
+            <template
+              v-if="createError.diagnostics.length"
+              #description
+            >
+              <p>{{ createError.message }}</p>
+              <ul class="mt-1 list-disc ps-4">
+                <li
+                  v-for="(diag, index) in createError.diagnostics"
+                  :key="index"
+                >
+                  <span
+                    v-if="diag.path"
+                    class="font-mono"
+                  >{{ diag.path }}: </span>{{ diag.message }}
+                </li>
+              </ul>
+            </template>
+          </UAlert>
+
+          <div class="flex justify-end gap-2">
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="sm"
+              @click="isCreatingLocale = false"
+            >
+              {{ t('common.cancel') }}
+            </UButton>
+            <UButton
+              type="submit"
+              color="primary"
+              variant="solid"
+              size="sm"
+              :loading="creating"
+            >
+              {{ t('common.create') }}
+            </UButton>
+          </div>
+        </UForm>
+      </template>
+    </UModal>
   </div>
 </template>

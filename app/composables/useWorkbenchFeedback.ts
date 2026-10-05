@@ -1,4 +1,4 @@
-import { useI18n, useToast } from '#imports'
+import { useToast } from '#imports'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
 
 /**
@@ -8,7 +8,6 @@ import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error
  */
 export function useWorkbenchFeedback() {
 	const toast = useToast()
-	const { t } = useI18n()
 
 	function success(title: string, description?: string): void {
 		toast.add({
@@ -30,7 +29,6 @@ export function useWorkbenchFeedback() {
 			color: 'error',
 			icon: 'i-lucide-circle-alert',
 			duration: 8000,
-			close: { 'aria-label': t('common.dismiss') },
 		})
 		return details
 	}
