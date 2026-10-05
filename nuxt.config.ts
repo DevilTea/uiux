@@ -22,6 +22,16 @@ export default defineNuxtConfig({
 		},
 	},
 	modules: ['@nuxt/ui', '@nuxtjs/i18n'],
+	ui: {
+		theme: {
+			// `annotation` is a first-class Nuxt UI color (Marker magenta, human comments only).
+			colors: ['primary', 'secondary', 'annotation', 'success', 'info', 'warning', 'error'],
+		},
+		// Inter and JetBrains Mono ship as npm packages bundled by Vite (see `css` below), so
+		// builds, including `uiux publish` on a user's machine, never fetch fonts from a network
+		// provider and a missing package fails the build instead of silently falling back.
+		fonts: false,
+	},
 	i18n: {
 		// Workbench chrome catalogs only. Workspace locales live in the selected Workspace's i18n/*.json.
 		restructureDir: 'app/i18n',
@@ -43,7 +53,14 @@ export default defineNuxtConfig({
 				},
 			}
 		: {},
-	css: ['~/assets/css/main.css'],
+	css: [
+		'@fontsource-variable/inter/wght.css',
+		'@fontsource/jetbrains-mono/latin-400.css',
+		'@fontsource/jetbrains-mono/latin-500.css',
+		'@fontsource/jetbrains-mono/latin-ext-400.css',
+		'@fontsource/jetbrains-mono/latin-ext-500.css',
+		'~/assets/css/main.css',
+	],
 	nitro: {
 		preset: publicationMode ? 'static' : 'node-server',
 		...(publicationOutput ? { output: { dir: publicationOutput } } : {}),

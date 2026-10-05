@@ -115,10 +115,18 @@ watch(() => props.selectedWidgetId, (newWidget) => {
 	if (newWidget) createForm.widgetId = newWidget
 })
 
-function statusColor(status: ReviewStatus | undefined): 'success' | 'info' | 'neutral' {
+/** Review status roles: open is human annotation (Marker), ready waits for a verdict (info), resolved closed (success). */
+function statusColor(status: ReviewStatus | undefined): 'success' | 'info' | 'annotation' {
 	if (status === 'resolved') return 'success'
 	if (status === 'ready-for-review') return 'info'
-	return 'neutral'
+	return 'annotation'
+}
+
+/** Every status badge carries an icon so color is never the only signal. */
+function statusIcon(status: ReviewStatus | undefined): string {
+	if (status === 'resolved') return 'i-lucide-circle-check'
+	if (status === 'ready-for-review') return 'i-lucide-eye'
+	return 'i-lucide-circle-dot'
 }
 
 function statusLabel(status: ReviewStatus | undefined): string {
@@ -536,7 +544,7 @@ watch(() => props.currentViewId, () => {
         <h2 class="text-sm font-semibold text-highlighted">
           {{ t('reviews.title') }}
         </h2>
-        <p class="text-[11px] text-muted">
+        <p class="text-xs text-muted">
           {{ t('reviews.subtitle') }}
         </p>
       </div>
@@ -631,7 +639,7 @@ watch(() => props.currentViewId, () => {
           group: 'p-0 space-y-0.5',
           item: 'rounded-md data-[state=checked]:bg-selection-subtle data-[state=checked]:text-selection',
           itemLabel: 'font-mono',
-          itemDescription: 'text-[10px]',
+          itemDescription: 'text-xs',
           itemTrailingIcon: 'hidden',
         }"
         @update:model-value="onSelectThread"
@@ -639,7 +647,8 @@ watch(() => props.currentViewId, () => {
         <template #item-trailing="{ item }">
           <UBadge
             :color="statusColor(item.status)"
-            variant="soft"
+            :icon="statusIcon(item.status)"
+            variant="subtle"
             size="sm"
           >
             {{ statusLabel(item.status) }}
@@ -680,7 +689,8 @@ watch(() => props.currentViewId, () => {
             <span class="truncate font-mono font-medium text-highlighted">#{{ selectedReviewData.resource.anchor.widgetId }}</span>
             <UBadge
               :color="statusColor(selectedReviewData.resource.status)"
-              variant="soft"
+              :icon="statusIcon(selectedReviewData.resource.status)"
+              variant="subtle"
               size="sm"
             >
               {{ statusLabel(selectedReviewData.resource.status) }}
@@ -700,7 +710,7 @@ watch(() => props.currentViewId, () => {
         </div>
 
         <!-- Key/value metadata: a compact definition list, no Nuxt UI component fits. -->
-        <dl class="flex items-center justify-between gap-2 text-[11px] text-muted">
+        <dl class="flex items-center justify-between gap-2 text-xs text-muted">
           <div class="flex min-w-0 gap-1">
             <dt>{{ t('reviews.viewLabel') }}</dt>
             <dd
@@ -710,7 +720,7 @@ watch(() => props.currentViewId, () => {
               {{ shorten(selectedReviewData.resource.anchor.viewId, 14) }}
             </dd>
           </div>
-          <div class="flex shrink-0 gap-1 text-[10px] text-dimmed">
+          <div class="flex shrink-0 gap-1 text-xs text-dimmed">
             <dt>{{ t('common.revision') }}</dt>
             <dd
               class="font-mono"
@@ -749,7 +759,7 @@ watch(() => props.currentViewId, () => {
             variant="outline"
             :ui="{ body: 'space-y-1 p-2.5 sm:p-2.5' }"
           >
-            <div class="flex items-center justify-between gap-2 text-[10px]">
+            <div class="flex items-center justify-between gap-2 text-xs">
               <span class="truncate font-medium text-toned">{{ msg.actor?.displayName || msg.actor?.type || t('reviews.unknownAuthor') }}</span>
               <time
                 v-if="msg.at"
@@ -758,7 +768,7 @@ watch(() => props.currentViewId, () => {
                 :title="fmt.dateTime(msg.at, { dateStyle: 'full', timeStyle: 'long' })"
               >{{ fmt.dateTime(msg.at) }}</time>
             </div>
-            <p class="whitespace-pre-wrap text-[11px] leading-relaxed text-default">
+            <p class="whitespace-pre-wrap text-xs leading-relaxed text-default">
               {{ msg.body }}
             </p>
           </UCard>
@@ -813,7 +823,7 @@ watch(() => props.currentViewId, () => {
           </UFormField>
 
           <div class="flex items-center justify-between gap-2">
-            <span class="flex items-center gap-1 text-[10px] text-dimmed">
+            <span class="flex items-center gap-1 text-xs text-dimmed">
               <UKbd
                 value="meta"
                 size="sm"
@@ -846,7 +856,7 @@ watch(() => props.currentViewId, () => {
         :ui="{ header: 'px-3 py-2 sm:px-3', body: 'space-y-3 p-3 sm:p-3' }"
       >
         <template #header>
-          <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted">
+          <h3 class="text-xs font-semibold text-muted">
             {{ t('reviews.lifecycle.title') }}
           </h3>
         </template>
@@ -857,7 +867,7 @@ watch(() => props.currentViewId, () => {
             <p class="font-medium text-toned">
               {{ t('reviews.lifecycle.reanchorTitle') }}
             </p>
-            <p class="text-[10px] text-dimmed">
+            <p class="text-xs text-dimmed">
               {{ selectedWidgetId && currentViewId ? t('reviews.lifecycle.reanchorDescription', { widgetId: reanchorTarget }) : t('reviews.lifecycle.reanchorNeedsWidget') }}
             </p>
           </div>
@@ -892,8 +902,8 @@ watch(() => props.currentViewId, () => {
 
           <UButton
             v-if="selectedReviewData.resource.status === 'ready-for-review'"
-            color="success"
-            variant="soft"
+            color="primary"
+            variant="solid"
             size="xs"
             icon="i-lucide-check"
             :loading="resolving"
@@ -904,8 +914,8 @@ watch(() => props.currentViewId, () => {
 
           <UButton
             v-if="selectedReviewData.resource.status === 'resolved' || selectedReviewData.resource.status === 'ready-for-review'"
-            color="warning"
-            variant="soft"
+            color="neutral"
+            variant="outline"
             size="xs"
             icon="i-lucide-rotate-ccw"
             :loading="reopening"
@@ -923,7 +933,7 @@ watch(() => props.currentViewId, () => {
             <p class="font-medium text-highlighted">
               {{ t('reviews.promote.title') }}
             </p>
-            <p class="text-[10px] text-dimmed">
+            <p class="text-xs text-dimmed">
               {{ t('reviews.promote.description') }}
             </p>
           </div>

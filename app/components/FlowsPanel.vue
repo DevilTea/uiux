@@ -375,7 +375,7 @@ onMounted(() => {
         <h2 class="text-sm font-semibold text-highlighted">
           {{ t('flows.title') }}
         </h2>
-        <p class="text-[11px] text-muted">
+        <p class="text-xs text-muted">
           {{ t('flows.subtitle') }}
         </p>
       </div>
@@ -564,7 +564,7 @@ onMounted(() => {
         :ui="{ header: 'flex items-center justify-between gap-2 px-3 py-2 sm:px-3', body: 'space-y-3 p-3 sm:p-3' }"
       >
         <template #header>
-          <span class="text-[10px] font-semibold tracking-wider text-muted uppercase">{{ t('flows.detail.metadata') }}</span>
+          <span class="text-xs font-semibold text-muted">{{ t('flows.detail.metadata') }}</span>
           <UBadge
             color="neutral"
             variant="soft"
@@ -711,7 +711,7 @@ onMounted(() => {
                 </UBadge>
                 <UBadge
                   v-if="editEntryStepId === step.id"
-                  color="primary"
+                  color="neutral"
                   variant="subtle"
                   size="sm"
                   icon="i-lucide-flag"
@@ -719,7 +719,7 @@ onMounted(() => {
                   {{ t('flows.steps.entry') }}
                 </UBadge>
                 <span
-                  class="truncate font-mono text-[10px] text-dimmed"
+                  class="truncate font-mono text-xs text-dimmed"
                   :title="step.id"
                 >{{ step.id }}</span>
               </div>
@@ -756,7 +756,7 @@ onMounted(() => {
               />
               <UButton
                 v-if="step.viewId"
-                color="primary"
+                color="neutral"
                 variant="link"
                 size="xs"
                 icon="i-lucide-eye"
@@ -785,10 +785,10 @@ onMounted(() => {
             <!-- Transitions from this step -->
             <div class="space-y-2">
               <div class="flex items-center justify-between gap-2">
-                <span class="text-[10px] font-semibold text-muted uppercase">{{ t('flows.transitions.count', step.transitions.length) }}</span>
+                <span class="text-xs font-semibold text-muted">{{ t('flows.transitions.count', step.transitions.length) }}</span>
                 <UButton
                   v-if="!readOnly"
-                  color="primary"
+                  color="neutral"
                   variant="ghost"
                   size="xs"
                   icon="i-lucide-plus"
@@ -866,7 +866,7 @@ onMounted(() => {
               </div>
               <p
                 v-else
-                class="py-1 text-center text-[11px] text-dimmed"
+                class="py-1 text-center text-xs text-dimmed"
               >
                 {{ t('flows.transitions.terminal') }}
               </p>

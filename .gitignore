@@ -28,3 +28,4 @@ test-results/
 .impeccable/questions/
 .impeccable/component-reviews/
 .impeccable-live/
+.uiux-browser-test-*/

@@ -31,7 +31,7 @@ const selectedModel = computed({
       class="flex max-h-[45%] shrink-0 flex-col border-b border-default"
     >
       <div class="flex items-center justify-between px-3 pt-3 pb-2">
-        <h2 class="text-xs font-semibold tracking-wider text-muted uppercase">
+        <h2 class="text-xs font-semibold text-muted">
           {{ t('workbench.views.title') }}
         </h2>
         <UBadge

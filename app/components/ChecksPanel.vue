@@ -50,7 +50,7 @@ function handleJump(widgetId: string) {
         <h2 class="text-sm font-semibold text-highlighted">
           {{ t('checks.title') }}
         </h2>
-        <p class="text-[11px] text-muted">
+        <p class="text-xs text-muted">
           {{ t('checks.subtitle') }}
         </p>
       </div>
@@ -91,7 +91,7 @@ function handleJump(widgetId: string) {
               >
                 {{ item.source === 'View' ? t('checks.source.view') : t('checks.source.workspace') }}
               </UBadge>
-              <span class="font-mono text-[11px] font-semibold">{{ item.code }}</span>
+              <span class="font-mono text-xs font-semibold">{{ item.code }}</span>
             </template>
 
             <template #description>
@@ -100,7 +100,7 @@ function handleJump(widgetId: string) {
               </p>
               <p
                 v-if="item.path"
-                class="font-mono text-[10px] break-all text-muted"
+                class="font-mono text-xs break-all text-muted"
               >
                 {{ item.path }}
               </p>
@@ -112,7 +112,7 @@ function handleJump(widgetId: string) {
                 :text="t('checks.jump.tooltip')"
               >
                 <UButton
-                  color="primary"
+                  color="neutral"
                   variant="soft"
                   size="xs"
                   icon="i-lucide-crosshair"

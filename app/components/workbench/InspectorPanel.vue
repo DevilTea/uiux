@@ -18,7 +18,7 @@ function shortRevision(revision: string) {
     :aria-label="t('workbench.inspector.title')"
   >
     <div class="flex items-center justify-between border-b border-default pb-3">
-      <h2 class="text-xs font-semibold tracking-wider text-muted uppercase">
+      <h2 class="text-xs font-semibold text-muted">
         {{ t('workbench.inspector.title') }}
       </h2>
       <UBadge
@@ -95,7 +95,7 @@ function shortRevision(revision: string) {
             class="mt-2"
             :ui="{ body: 'p-2.5 sm:p-2.5' }"
           >
-            <dl class="font-mono text-[11px]">
+            <dl class="font-mono text-xs">
               <div
                 v-for="(value, key) in widgetStateOverrides"
                 :key="key"
@@ -166,7 +166,7 @@ function shortRevision(revision: string) {
               <dt class="text-dimmed">
                 {{ t('workbench.inspector.id') }}
               </dt>
-              <dd class="font-mono text-[10px] break-all text-toned">
+              <dd class="font-mono text-xs break-all text-toned">
                 {{ selectedView.resource.id }}
               </dd>
             </div>

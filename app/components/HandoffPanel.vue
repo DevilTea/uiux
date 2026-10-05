@@ -240,10 +240,10 @@ onMounted(async () => {
     <!-- Header -->
     <div class="flex shrink-0 flex-col gap-2 border-b border-default p-3">
       <div>
-        <h2 class="text-xs font-semibold uppercase tracking-wider text-highlighted">
+        <h2 class="text-xs font-semibold text-highlighted">
           {{ t('handoff.title') }}
         </h2>
-        <p class="text-[11px] text-muted">
+        <p class="text-xs text-muted">
           {{ t('handoff.subtitle') }}
         </p>
       </div>
@@ -440,14 +440,14 @@ onMounted(async () => {
 
             <p
               v-if="computedRoots.length === 0"
-              class="text-[11px] text-warning"
+              class="text-xs text-warning"
             >
               {{ t('handoff.roots.noneSelected') }}
             </p>
           </div>
 
           <USeparator />
-          <p class="text-[11px] text-muted">
+          <p class="text-xs text-muted">
             {{ t('handoff.closureNote') }}
           </p>
         </div>
@@ -520,13 +520,13 @@ onMounted(async () => {
                   :color="diag.blocking ? 'error' : 'warning'"
                   variant="subtle"
                   :title="diag.code"
-                  :ui="{ title: 'font-mono text-[11px]', description: 'text-[11px]' }"
+                  :ui="{ title: 'font-mono text-xs', description: 'text-xs' }"
                 >
                   <template #description>
                     <p>{{ diag.message }}</p>
                     <p
                       v-if="diag.path"
-                      class="font-mono text-[10px] text-muted"
+                      class="font-mono text-xs text-muted"
                     >
                       {{ t('handoff.blocking.path', { path: diag.path }) }}
                     </p>
@@ -555,13 +555,13 @@ onMounted(async () => {
               </div>
               <p
                 v-if="exportedResult.manifest?.exportedAt"
-                class="mt-0.5 text-[11px] text-muted"
+                class="mt-0.5 text-xs text-muted"
               >
                 {{ t('handoff.exported.at', { time: fmt.dateTime(exportedResult.manifest.exportedAt) }) }}
               </p>
             </template>
 
-            <div class="space-y-2 text-[11px]">
+            <div class="space-y-2 text-xs">
               <div>
                 <span class="text-muted">{{ t('handoff.exported.bundleIdentity') }}</span>
                 <div class="mt-0.5 flex items-center justify-between gap-1 rounded border border-default bg-default p-1.5">

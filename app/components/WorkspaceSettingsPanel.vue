@@ -199,7 +199,7 @@ async function handleSave() {
           keypath="workspaceSettings.subtitle"
           tag="p"
           scope="global"
-          class="text-[11px] text-muted"
+          class="text-xs text-muted"
         >
           <template #file>
             <code class="font-mono">.uiux/workspace.json</code>
@@ -299,7 +299,7 @@ async function handleSave() {
               {{ localAdapters.length }}
             </UBadge>
           </h3>
-          <p class="text-[11px] text-muted">
+          <p class="text-xs text-muted">
             {{ t('workspaceSettings.adapters.description') }}
           </p>
         </div>
@@ -327,7 +327,7 @@ async function handleSave() {
           :ui="{ body: 'space-y-2 p-2.5 sm:p-2.5' }"
         >
           <div class="flex items-center justify-between gap-2">
-            <span class="text-[10px] font-semibold uppercase text-muted">{{ t('workspaceSettings.adapters.item', { n: idx + 1 }) }}</span>
+            <span class="text-xs font-medium text-muted">{{ t('workspaceSettings.adapters.item', { n: idx + 1 }) }}</span>
             <UButton
               v-if="!readOnly"
               color="neutral"
@@ -396,7 +396,7 @@ async function handleSave() {
               {{ localViewports.length }}
             </UBadge>
           </h3>
-          <p class="text-[11px] text-muted">
+          <p class="text-xs text-muted">
             {{ t('workspaceSettings.viewports.description') }}
           </p>
         </div>
@@ -504,7 +504,7 @@ async function handleSave() {
               {{ localThemes.length }}
             </UBadge>
           </h3>
-          <p class="text-[11px] text-muted">
+          <p class="text-xs text-muted">
             {{ t('workspaceSettings.themes.description') }}
           </p>
         </div>
@@ -525,7 +525,7 @@ async function handleSave() {
         variant="subtle"
         icon="i-lucide-info"
         :description="t('workspaceSettings.themes.notAppearance')"
-        :ui="{ description: 'text-[11px]' }"
+        :ui="{ description: 'text-xs' }"
       />
 
       <div

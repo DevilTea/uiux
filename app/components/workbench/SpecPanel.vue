@@ -37,6 +37,10 @@ function decisionColor(status: DecisionRead['status']) {
 	return status === 'decided' ? 'success' : status === 'pending' ? 'warning' : 'neutral'
 }
 
+function decisionIcon(status: DecisionRead['status']): string {
+	return status === 'decided' ? 'i-lucide-check' : status === 'pending' ? 'i-lucide-clock' : 'i-lucide-pause'
+}
+
 function decisionStatusLabel(status: DecisionRead['status']): string {
 	switch (status) {
 		case 'decided': return t('workbench.spec.decisionStatus.decided')
@@ -86,7 +90,7 @@ function jumpTo(diagnostic: Diagnostic) {
           class="space-y-4"
         >
           <div>
-            <h3 class="font-semibold tracking-wider text-muted uppercase">
+            <h3 class="font-semibold text-muted">
               {{ t('workbench.spec.intent') }}
             </h3>
             <p class="mt-1 leading-relaxed text-default">
@@ -180,7 +184,7 @@ function jumpTo(diagnostic: Diagnostic) {
                 </UBadge>
                 <UBadge
                   v-if="item.relation"
-                  color="primary"
+                  color="neutral"
                   variant="soft"
                   size="xs"
                 >
@@ -193,7 +197,7 @@ function jumpTo(diagnostic: Diagnostic) {
               :to="item.uri"
               target="_blank"
               rel="noopener noreferrer"
-              class="mt-1 flex items-center gap-1 truncate text-[11px] text-primary hover:underline"
+              class="mt-1 flex items-center gap-1 truncate text-xs text-primary hover:underline"
             >
               <span class="truncate">{{ item.uri }}</span>
               <UIcon
@@ -204,7 +208,7 @@ function jumpTo(diagnostic: Diagnostic) {
             </ULink>
             <p
               v-else
-              class="mt-1 truncate font-mono text-[10px] text-dimmed"
+              class="mt-1 truncate font-mono text-xs text-dimmed"
             >
               {{ item.uri }}
             </p>
@@ -235,8 +239,9 @@ function jumpTo(diagnostic: Diagnostic) {
               </p>
               <UBadge
                 :color="decisionColor(decision.status)"
-                variant="soft"
-                size="xs"
+                :icon="decisionIcon(decision.status)"
+                variant="subtle"
+                size="sm"
               >
                 {{ decisionStatusLabel(decision.status) }}
               </UBadge>
@@ -253,7 +258,7 @@ function jumpTo(diagnostic: Diagnostic) {
             >
               {{ decision.outcome.rationale }}
             </p>
-            <p class="mt-2 font-mono text-[10px] text-dimmed">
+            <p class="mt-2 font-mono text-xs text-dimmed">
               {{ t('workbench.spec.historyEvents', decision.history.length) }} · {{ decision.id }}
             </p>
           </UCard>
@@ -289,7 +294,7 @@ function jumpTo(diagnostic: Diagnostic) {
             <template #actions>
               <UButton
                 v-if="workbench.resolveWidgetIdFromDiagnostic(diagnostic)"
-                color="primary"
+                color="neutral"
                 variant="soft"
                 size="xs"
                 icon="i-lucide-crosshair"

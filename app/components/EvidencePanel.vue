@@ -372,10 +372,10 @@ watch(() => props.selectedView?.key, () => {
     <!-- Header -->
     <div class="flex shrink-0 flex-col gap-2 border-b border-default p-3">
       <div>
-        <h2 class="text-xs font-semibold uppercase tracking-wider text-highlighted">
+        <h2 class="text-xs font-semibold text-highlighted">
           {{ t('evidence.title') }}
         </h2>
-        <p class="text-[11px] text-muted">
+        <p class="text-xs text-muted">
           {{ t('evidence.subtitle') }}
         </p>
       </div>
@@ -404,7 +404,7 @@ watch(() => props.selectedView?.key, () => {
       </div>
       <p
         v-if="!readOnly && !activeContext"
-        class="text-[11px] text-dimmed"
+        class="text-xs text-dimmed"
       >
         {{ t('evidence.captureUnavailable') }}
       </p>
@@ -461,7 +461,7 @@ watch(() => props.selectedView?.key, () => {
         :label="t('evidence.onlyCurrentView')"
         :disabled="!selectedView"
       />
-      <span class="text-[11px] text-muted">{{ t('evidence.recordCount', { n: fmt.number(filteredItems.length) }, filteredItems.length) }}</span>
+      <span class="text-xs text-muted">{{ t('evidence.recordCount', { n: fmt.number(filteredItems.length) }, filteredItems.length) }}</span>
     </div>
 
     <!-- Sidebar-friendly single-column list + detail flow -->
@@ -504,7 +504,7 @@ watch(() => props.selectedView?.key, () => {
           <span class="font-mono font-semibold">{{ item.label }}</span>
         </template>
         <template #item-description="{ item }">
-          <span class="flex flex-wrap gap-x-2 gap-y-0.5 whitespace-normal text-[11px]">
+          <span class="flex flex-wrap gap-x-2 gap-y-0.5 whitespace-normal text-xs">
             <span>{{ t('evidence.context.view') }} <code class="text-toned">{{ item.viewId.slice(0, 8) }}…</code></span>
             <span>{{ t('evidence.context.locale') }} <code class="text-toned">{{ item.locale }}</code></span>
             <span>{{ t('evidence.context.theme') }} <code class="text-toned">{{ item.themeId }}</code></span>
@@ -543,7 +543,7 @@ watch(() => props.selectedView?.key, () => {
               {{ t('evidence.copyDigest') }}
             </UButton>
           </div>
-          <p class="break-all rounded border border-default bg-muted p-2 font-mono text-[11px]">
+          <p class="break-all rounded border border-default bg-muted p-2 font-mono text-xs">
             {{ selectedItem.digest }}
           </p>
         </div>
@@ -565,7 +565,7 @@ watch(() => props.selectedView?.key, () => {
         >
           <div class="flex items-center justify-between gap-2">
             <span class="text-xs font-semibold text-muted">{{ t('evidence.screenshot.title') }}</span>
-            <span class="font-mono text-[10px] text-dimmed">{{ shortHash(selectedItem.record.artifactRefs[0]!) }}</span>
+            <span class="font-mono text-xs text-dimmed">{{ shortHash(selectedItem.record.artifactRefs[0]!) }}</span>
           </div>
           <UButton
             color="neutral"
@@ -588,7 +588,7 @@ watch(() => props.selectedView?.key, () => {
           <span class="font-semibold text-muted">{{ t('evidence.context.title') }}</span>
           <dl
             v-if="selectedItemContext"
-            class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 rounded border border-default bg-muted p-2 text-[11px]"
+            class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 rounded border border-default bg-muted p-2 text-xs"
           >
             <dt class="text-muted">
               {{ t('evidence.context.viewId') }}
@@ -630,7 +630,7 @@ watch(() => props.selectedView?.key, () => {
         <!-- Provenance Revisions (definition list: no Nuxt UI equivalent) -->
         <div class="space-y-1.5 text-xs">
           <span class="font-semibold text-muted">{{ t('evidence.provenance.title') }}</span>
-          <div class="space-y-1 rounded border border-default bg-muted p-2 text-[11px]">
+          <div class="space-y-1 rounded border border-default bg-muted p-2 text-xs">
             <dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1">
               <dt class="text-muted">
                 {{ t('evidence.provenance.uiuxVersion') }}
@@ -663,7 +663,7 @@ watch(() => props.selectedView?.key, () => {
         <!-- Action: Apply Context to Preview -->
         <UButton
           size="sm"
-          color="primary"
+          color="neutral"
           variant="soft"
           block
           icon="i-lucide-crosshair"

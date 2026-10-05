@@ -79,7 +79,7 @@ const hasEmptyRoot = computed(() => rootItem.value && !rootItem.value.children?.
     :aria-label="t('workbench.tree.title')"
   >
     <div class="flex items-center justify-between border-b border-default px-3 py-2">
-      <h2 class="text-xs font-semibold tracking-wider text-muted uppercase">
+      <h2 class="text-xs font-semibold text-muted">
         {{ t('workbench.tree.title') }}
       </h2>
     </div>
@@ -117,13 +117,13 @@ const hasEmptyRoot = computed(() => rootItem.value && !rootItem.value.children?.
                 {{ item.slotName }}
               </UBadge>
               <span class="shrink-0 font-medium">{{ item.type }}</span>
-              <span class="truncate font-mono text-[10px] text-muted">#{{ item.id }}</span>
+              <span class="truncate font-mono text-xs text-muted">#{{ item.id }}</span>
             </span>
           </template>
         </UTree>
         <p
           v-if="hasEmptyRoot"
-          class="ms-6 border-s border-default py-1 ps-2 text-[11px] text-dimmed italic"
+          class="ms-6 border-s border-default py-1 ps-2 text-xs text-dimmed italic"
         >
           {{ t('workbench.tree.emptyContentSlot') }}
         </p>

@@ -275,7 +275,7 @@ watch(() => props.defaultLocale, () => {
         <h2 class="text-sm font-semibold text-highlighted">
           {{ t('locales.title') }}
         </h2>
-        <p class="text-[11px] text-muted">
+        <p class="text-xs text-muted">
           {{ t('locales.subtitle') }}
         </p>
       </div>
@@ -345,7 +345,7 @@ watch(() => props.defaultLocale, () => {
           content: 'max-h-36',
           item: 'data-[state=checked]:text-selection data-[state=checked]:before:bg-selection-subtle',
           itemLabel: 'font-mono font-medium',
-          itemDescription: 'text-[10px]',
+          itemDescription: 'text-xs',
         }"
         @update:model-value="onSelectLocale"
       >
@@ -470,7 +470,7 @@ watch(() => props.defaultLocale, () => {
             :key="msg.key"
             :label="msg.key"
             size="xs"
-            :ui="{ label: 'block truncate font-mono text-[11px] text-toned', labelWrapper: 'gap-1' }"
+            :ui="{ label: 'block truncate font-mono text-xs text-toned', labelWrapper: 'gap-1' }"
           >
             <template
               v-if="!readOnly"
@@ -542,7 +542,7 @@ watch(() => props.defaultLocale, () => {
         </div>
 
         <div class="flex items-center justify-between gap-2">
-          <span class="text-[11px] text-muted">
+          <span class="text-xs text-muted">
             {{ t('locales.stringCount', localMessages.length) }}
           </span>
           <div

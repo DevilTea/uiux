@@ -305,7 +305,7 @@ onMounted(() => {
         <h2 class="text-sm font-semibold text-highlighted">
           {{ t('assets.title') }}
         </h2>
-        <p class="text-[11px] text-muted">
+        <p class="text-xs text-muted">
           {{ t('assets.subtitle') }}
         </p>
       </div>
@@ -349,7 +349,7 @@ onMounted(() => {
           content: 'max-h-44',
           item: 'data-[state=checked]:text-selection data-[state=checked]:before:bg-selection-subtle',
           itemLabel: 'font-medium',
-          itemDescription: 'font-mono text-[10px]',
+          itemDescription: 'font-mono text-xs',
         }"
         @update:model-value="onSelectAsset"
       >
@@ -425,7 +425,7 @@ onMounted(() => {
         </template>
 
         <!-- Definition list of metadata: no Nuxt UI component renders key/value pairs. -->
-        <dl class="grid grid-cols-2 gap-2 text-[11px]">
+        <dl class="grid grid-cols-2 gap-2 text-xs">
           <div class="min-w-0">
             <dt class="text-muted">
               {{ t('assets.fields.filename') }}
@@ -455,7 +455,7 @@ onMounted(() => {
               {{ t('assets.fields.digest') }}
             </dt>
             <dd
-              class="truncate font-mono text-[10px] text-muted"
+              class="truncate font-mono text-xs text-muted"
               :title="selectedAssetData.resource.content?.digest"
             >
               {{ selectedAssetData.resource.content?.digest ? selectedAssetData.resource.content.digest.slice(0, 18) + '…' : t('assets.notSet') }}
@@ -476,11 +476,11 @@ onMounted(() => {
           variant="subtle"
           icon="i-lucide-triangle-alert"
           :title="diag.code"
-          :ui="{ title: 'font-mono text-xs', description: 'text-[11px]' }"
+          :ui="{ title: 'font-mono text-xs', description: 'text-xs' }"
         >
           <template #description>
-            <span class="block font-mono text-[10px] text-muted">{{ diag.path }}</span>
-            <span class="mt-1 block text-[11px] leading-relaxed text-default">{{ diag.message }}</span>
+            <span class="block font-mono text-xs text-muted">{{ diag.path }}</span>
+            <span class="mt-1 block text-xs leading-relaxed text-default">{{ diag.message }}</span>
           </template>
         </UAlert>
       </div>

@@ -80,7 +80,7 @@ onUnmounted(() => {
           :text="selectedView ? t('workbench.canvas.commentHint') : t('workbench.canvas.commentDisabledHint')"
         >
           <UButton
-            :color="preview.isCommentMode.value ? 'warning' : 'neutral'"
+            :color="preview.isCommentMode.value ? 'annotation' : 'neutral'"
             :variant="preview.isCommentMode.value ? 'solid' : 'outline'"
             size="xs"
             :icon="preview.isCommentMode.value ? 'i-lucide-crosshair' : 'i-lucide-message-square-plus'"
@@ -129,7 +129,7 @@ onUnmounted(() => {
         }"
       >
         <div
-          class="absolute top-0 left-0 flex flex-col rounded-lg border border-accented bg-frame shadow-2xl"
+          class="absolute top-0 left-0 flex flex-col overflow-hidden rounded-xs bg-frame shadow-frame"
           :class="preview.isCommentMode.value ? 'ring-2 ring-comment' : ''"
           :style="{
             width: `${logicalFrameSize.width}px`,
@@ -138,14 +138,14 @@ onUnmounted(() => {
             transformOrigin: 'top left',
           }"
         >
-          <div class="flex h-7 shrink-0 items-center justify-between border-b border-default bg-muted px-3 text-[11px] text-muted">
+          <div class="flex h-7 shrink-0 items-center justify-between border-b border-default bg-muted px-3 text-xs text-muted">
             <div class="flex items-center gap-1.5">
               <span class="size-2 rounded-full bg-accented" />
               <span class="size-2 rounded-full bg-accented" />
               <span class="size-2 rounded-full bg-accented" />
               <span class="ms-2 font-mono text-toned">{{ selectedView.resource.name }}</span>
             </div>
-            <span class="font-mono text-[10px] text-dimmed">{{ contextOptions.locales.selected }} · {{ contextOptions.themes.selected }} · {{ contextOptions.viewports.selectedId }}</span>
+            <span class="font-mono text-xs text-dimmed">{{ contextOptions.locales.selected }} · {{ contextOptions.themes.selected }} · {{ contextOptions.viewports.selectedId }}</span>
           </div>
 
           <!-- Real Preview Iframe Boundary: logical size remains identical to RenderContext.viewport. -->

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useI18n, useRoute } from '#imports'
+import { definePageMeta, useI18n, useRoute } from '#imports'
 import { useUiuxClient } from '../composables/useUiuxClient'
 import { describeFetchError } from '../utils/fetch-error'
 import { resolveDefaultLocale, resolveDefaultThemeId } from '../../src/preview/render-context-options'
@@ -22,6 +22,10 @@ import type { PreviewRuntimeBridge } from '../../src/preview/browser-runtime'
 import type { ViewResource } from '../../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../../src/domain/render-context/schema'
 import type { I18nResource } from '../../src/domain/i18n/schema'
+
+// The Preview document never follows the Workbench color mode: pin the document to light and
+// scope the host's own status chrome to the brightness of the Workspace theme being rendered.
+definePageMeta({ colorMode: 'light' })
 
 const route = useRoute()
 const uiux = useUiuxClient()
@@ -501,7 +505,7 @@ onUnmounted(() => {
               >
                 adapter.materialization_unavailable
               </UBadge>
-              <span class="text-xs font-semibold tracking-wider uppercase">{{ t('preview.adapterUnavailable.seam') }}</span>
+              <span class="text-xs font-medium">{{ t('preview.adapterUnavailable.seam') }}</span>
             </p>
             <i18n-t
               keypath="preview.adapterUnavailable.description"

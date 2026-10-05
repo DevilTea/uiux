@@ -32,7 +32,7 @@ const modeLabel = computed(() => isReadOnly.value ? t('workbench.header.modePubl
         v-if="publicationInfo?.sourceRevision"
         :text="publicationInfo.publicationIdentity"
       >
-        <span class="font-mono text-[10px] text-dimmed">
+        <span class="font-mono text-xs text-dimmed">
           {{ publicationInfo.sourceRevision.slice(0, 12) }}
         </span>
       </UTooltip>
@@ -45,7 +45,7 @@ const modeLabel = computed(() => isReadOnly.value ? t('workbench.header.modePubl
           <span class="truncate text-xs font-medium text-toned">{{ selectedView.resource.name }}</span>
           <UBadge
             v-if="selectedView.resource.feature"
-            color="primary"
+            color="neutral"
             variant="soft"
             size="xs"
           >
