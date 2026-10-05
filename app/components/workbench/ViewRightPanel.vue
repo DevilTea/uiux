@@ -1,30 +1,25 @@
 <script setup lang="ts">
 import { computed, nextTick } from 'vue'
-import { navigateTo, useI18n } from '#imports'
+import { useI18n } from '#imports'
 import type { TabsItem } from '@nuxt/ui'
 import { useWorkbench } from '../../composables/useWorkbench'
-import type { EvidenceContextSelection, ViewPanelTab } from '../../composables/workbench-types'
-import { viewLocation } from '../../utils/workbench-routes'
+import type { ViewPanelTab } from '../../composables/workbench-types'
 import { useCanvasComments } from '../../composables/useCanvasComments'
 import CommentsTab from './comments/CommentsTab.vue'
-import ChecksPanel from '../ChecksPanel.vue'
-import EvidencePanel from '../EvidencePanel.vue'
+import ReadinessTab from '../readiness/ReadinessTab.vue'
 import WidgetInspector from './WidgetInspector.vue'
 import SpecDocument from './SpecDocument.vue'
 
 /**
  * The View page's right panel: Comments, Inspect, Spec and Readiness (brief e). Comments is the
  * list companion to the canvas pins (R7a); Inspect and Spec are the R5 property sheet and Spec
- * document; the Checks and Evidence panels stay mounted here until R9 replaces them.
+ * document; Readiness is the View's validation, Evidence, Reviews and Handoff facets (R9).
  */
 const tab = defineModel<ViewPanelTab>('tab', { required: true })
 
 const { t } = useI18n()
 const workbench = useWorkbench()
-const {
-	selectedView, selectedViewId, reviews, views, workspace,
-	discoveredLocales, localeRevisions, currentActiveContext, authorReadOnly,
-} = workbench
+const { selectedView, selectedViewId, reviews } = workbench
 const comments = useCanvasComments()!
 
 const unresolvedHere = computed(() => reviews.value.filter(review =>
@@ -53,15 +48,6 @@ async function openThread(threadId: string): Promise<void> {
 /** Inspector "Comment": the composer opens at the Widget's default pin point (brief c, section 8). */
 function commentOn(widgetId: string): void {
 	workbench.preview.commentOnWidget(widgetId)
-}
-
-function applyEvidenceContext(context: EvidenceContextSelection): void {
-	void navigateTo(viewLocation(context.viewId, {
-		variant: context.variantName,
-		locale: context.locale,
-		viewport: context.viewportId,
-		theme: context.themeId,
-	}))
 }
 
 </script>
@@ -94,29 +80,10 @@ function applyEvidenceContext(context: EvidenceContextSelection): void {
       <SpecDocument @open-thread="openThread" />
     </template>
     <template #readiness>
-      <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <div class="flex min-h-64 flex-col border-b border-default">
-          <ChecksPanel
-            :workspace-diagnostics="workspace?.diagnostics"
-            :view-diagnostics="selectedView?.diagnostics"
-            :view-ir="selectedView?.resource.ir"
-            @select-widget="workbench.selectWidget"
-          />
-        </div>
-        <div class="flex min-h-96 flex-col">
-          <EvidencePanel
-            :selected-view="selectedView"
-            :all-views="views"
-            :workspace="workspace"
-            :discovered-locales="discoveredLocales"
-            :locale-revisions="localeRevisions"
-            :active-context="currentActiveContext"
-            :read-only="authorReadOnly"
-            @apply-context="applyEvidenceContext"
-            @refresh="workbench.refreshAll()"
-          />
-        </div>
-      </div>
+      <ReadinessTab
+        @open-comments="tab = 'comments'"
+        @open-inspect="tab = 'inspect'"
+      />
     </template>
   </UTabs>
 </template>

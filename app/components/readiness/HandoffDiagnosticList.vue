@@ -1,0 +1,94 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useI18n } from '#imports'
+import type { HandoffBlockingDiagnostic } from '../../../src/domain/handoff/schema'
+import { useWorkbench } from '../../composables/useWorkbench'
+import { handoffDiagnosticSubject } from '../../utils/readiness'
+import { viewLocation } from '../../utils/workbench-routes'
+
+/**
+ * One side of a Handoff assessment: the blocking entries, or the advisory ones the server marks
+ * `blocking: false` (a declined Review). Each entry reads as a sentence naming its View, with the
+ * diagnostic code kept as a quiet mono identity.
+ */
+const props = defineProps<{
+	diagnostics: readonly HandoffBlockingDiagnostic[]
+	tone: 'blocking' | 'advisory'
+}>()
+
+const { t } = useI18n()
+const { views, reviews } = useWorkbench()
+
+const viewNames = computed(() => new Map(views.value.map(view => [view.key, view.summary.name || t('common.unnamed')])))
+const reviewAnchors = computed(() => new Map(reviews.value.map(review => [review.key, review.summary.anchor])))
+
+type Row = Readonly<{ key: string; sentence: string; code: string; to?: ReturnType<typeof viewLocation> }>
+
+function viewName(viewId: string | undefined): string {
+	return (viewId && viewNames.value.get(viewId)) || t('ready.diag.unknownView')
+}
+
+const rows = computed<Row[]>(() => props.diagnostics.map((diagnostic, index) => {
+	const subject = handoffDiagnosticSubject(diagnostic)
+	const anchor = subject.reviewId ? reviewAnchors.value.get(subject.reviewId) : undefined
+	const viewId = subject.viewId ?? anchor?.viewId
+	const view = viewName(viewId)
+	let sentence = diagnostic.message
+	switch (diagnostic.code) {
+		case 'handoff.unresolved_review_thread':
+			sentence = /ready-for-review/.test(diagnostic.message) ? t('ready.diag.reviewReady', { view }) : t('ready.diag.reviewOpen', { view })
+			break
+		case 'handoff.review_declined':
+			sentence = t('ready.diag.reviewDeclined', { view })
+			break
+		case 'handoff.stale_view_evidence':
+			sentence = t('ready.diag.evidenceStale', { view })
+			break
+		case 'handoff.missing_view_evidence':
+			sentence = t('ready.diag.evidenceMissing', { view })
+			break
+		case 'handoff.incomplete_view_evidence':
+			sentence = t('ready.diag.evidenceIncomplete', { view })
+			break
+		case 'handoff.missing_asset':
+			sentence = t('ready.diag.assetMissing')
+			break
+	}
+	const to = subject.reviewId && anchor
+		? viewLocation(anchor.viewId, { widget: anchor.widgetId, thread: subject.reviewId })
+		: viewId && viewNames.value.has(viewId) ? viewLocation(viewId, { panel: 'readiness' }) : undefined
+	return { key: `${diagnostic.code}:${diagnostic.path ?? ''}:${index}`, sentence, code: diagnostic.code, ...(to ? { to } : {}) }
+}))
+</script>
+
+<template>
+  <ul
+    class="space-y-1"
+    :data-handoff-diagnostics="tone"
+  >
+    <li
+      v-for="row in rows"
+      :key="row.key"
+      class="grid grid-cols-[16px_minmax(0,1fr)] gap-x-2 text-sm"
+      :data-diagnostic-code="row.code"
+    >
+      <UIcon
+        :name="tone === 'blocking' ? 'i-lucide-circle-x' : 'i-lucide-info'"
+        class="mt-0.5 size-4"
+        :class="tone === 'blocking' ? 'text-error' : 'text-muted'"
+      />
+      <span class="min-w-0">
+        <ULink
+          v-if="row.to"
+          :to="row.to"
+          class="text-default hover:text-highlighted hover:underline"
+        >{{ row.sentence }}</ULink>
+        <span
+          v-else
+          class="text-default"
+        >{{ row.sentence }}</span>
+        <span class="block truncate font-mono text-xs text-dimmed">{{ row.code }}</span>
+      </span>
+    </li>
+  </ul>
+</template>

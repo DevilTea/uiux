@@ -222,19 +222,24 @@ try {
 		await expectNoButton(page, 'New thread')
 		await expectNoButton(page, 'Comment')
 
+		// Overview: per-View readiness from the published Workspace assessment, no export.
 		await open(page, '/')
-		await main(page).getByRole('tab', { name: 'Evidence' }).click()
-		await expectNoButton(page, 'Capture current context')
-		const evidenceImage = main(page).locator('img[alt="Captured screenshot"]')
-		await evidenceImage.waitFor()
+		await main(page).locator('[data-readiness]').first().waitFor()
+		await expectNoButton(page, 'Export handoff…')
+
+		// A View's Readiness tab: Evidence contact sheet from static artifacts, no capture or export.
+		const viewKey = snapshot.resources.view[0].key
+		await open(page, `/views/${viewKey}?panel=readiness`)
+		const readiness = page.locator('[data-readiness-tab]')
+		await readiness.locator('[data-readiness-badge]').waitFor()
+		if (await page.locator('[data-capture-open], [data-capture-stale], [data-export-open]').count() !== 0)
+			throw new Error('Published viewer exposed Evidence capture or Handoff export.')
+		const evidenceImage = readiness.locator('[data-evidence-sheet] img').first()
+		await evidenceImage.waitFor({ state: 'attached' })
 		const evidenceSrc = await evidenceImage.getAttribute('src')
 		if (!evidenceSrc?.includes('/uiux/_uiux/artifacts/'))
 			throw new Error(`Published Evidence screenshot did not resolve to a static artifact: ${evidenceSrc}`)
-
-		await main(page).getByRole('tab', { name: 'Handoff' }).click()
-		await expectNoButton(page, 'Recheck')
-		await expectNoButton(page, 'Export snapshot')
-		await main(page).getByText('Ready to implement', { exact: true }).waitFor()
+		await readiness.locator('[data-facet="handoff"]').getByText('implementation-ready', { exact: true }).waitFor()
 
 		await page.waitForTimeout(200)
 		const runtimeApiRequests = requests.filter((requestUrl) => {

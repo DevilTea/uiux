@@ -2,7 +2,7 @@
 version: 1
 slug: "app-pages-index-vue"
 primary_target: "app/pages/index.vue"
-related_targets: ["app/components/ChecksPanel.vue","app/components/EvidencePanel.vue","app/components/HandoffPanel.vue"]
+related_targets: ["app/components/readiness/ReadinessTab.vue","app/components/readiness/OverviewChecks.vue","app/components/readiness/OverviewActivity.vue","app/components/readiness/EvidenceSheet.vue","app/components/readiness/CaptureSlideover.vue","app/components/readiness/HandoffExportModal.vue"]
 ---
 
 # Shape brief (f): Overview and readiness (absorbing Checks, Evidence and Handoff)
@@ -175,9 +175,9 @@ The Overview is a quiet dashboard: one Display-size line of what needs attention
 | Key | en-US | zh-TW |
 |---|---|---|
 | overview.title | Overview | 總覽 |
-| overview.attention | {ready} waiting for review · {open} open · {findings} Checks findings | {ready} 則待審核・{open} 則未解決・{findings} 個檢查問題 |
+| overview.attention | {ready} waiting for review · {open} open · {findings} Checks findings | {ready} 則待審核・{open} 則未解決・{findings} 個 Checks 問題 |
 | overview.allClear | Nothing waiting. {n} Views ready. | 沒有待處理項目，{n} 個 View 已就緒。 |
-| overview.tab.views / checks / activity | Views / Checks / Activity | Views／檢查／動態 |
+| overview.tab.views / checks / activity | Views / Checks / Activity | Views／Checks／動態 |
 | overview.updated | Updated since you last looked | 自你上次查看後已更新 |
 | ready.validation / evidence / reviews / handoff | Validation / Evidence / Reviews / Handoff | 驗證／Evidence／Review／Handoff |
 | ready.blockedBy | Blocked by {n} | 有 {n} 項阻擋 |
