@@ -55,8 +55,8 @@ const workbench = useWorkbench()
 const shell = useWorkbenchShell()
 const uiux = useUiuxClient()
 const { selectedView, contextOptions, loading, reviewReadOnly, preview, widgetTreeResult, selectedWidgetId, selectedVariant } = workbench
-/** The View page's comments layer; the Prototype player has none. */
-const comments = props.prototype ? undefined : useCanvasComments()
+/** The comments layer of the View page, or of the Prototype player (comment mode during playback, R17). */
+const comments = useCanvasComments()
 
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const isPhone = useMediaQuery('(max-width: 767.98px)')
@@ -262,7 +262,7 @@ const highlightGeometry = computed(() => {
  */
 const hoverCandidate = computed(() => {
 	const candidate = preview.hoverCandidate.value
-	if (props.prototype || !candidate || candidate.widgetId === 'root') return undefined
+	if ((props.prototype && !preview.isCommentMode.value) || !candidate || candidate.widgetId === 'root') return undefined
 	if (candidate.purpose === 'inspection' && candidate.widgetId === highlightGeometry.value?.widgetId) return undefined
 	return candidate
 })
@@ -472,11 +472,16 @@ defineShortcuts(computed(() => ({
 		? {
 				v: () => selectTool('select'),
 				i: () => selectTool('interact'),
-				c: () => selectTool('comment'),
-				shift_c: () => { if (comments) comments.pinsHidden.value = !comments.pinsHidden.value },
 				shift_v: () => openContextMenu('variant'),
 				shift_l: () => openContextMenu('locale'),
 				shift_t: () => openContextMenu('theme'),
+			}
+		: {}),
+	// Comment mode stays reachable in the Prototype player (R17): it disarms Widget Events.
+	...(shell.singleKeyShortcuts.value && selectedView.value
+		? {
+				c: () => selectTool('comment'),
+				shift_c: () => { if (comments) comments.pinsHidden.value = !comments.pinsHidden.value },
 			}
 		: {}),
 })))

@@ -302,7 +302,12 @@
       "stepId": "Step ID",
       "viewId": "View ID",
       "flowId": "Flow ID",
-      "scenario": "Scenario reference"
+      "scenario": "Scenario reference",
+      "eventPick": "Select an Event",
+      "eventPickHelp": "Events this Widget declares.",
+      "eventNotDeclared": "{event} (not declared by this Widget)",
+      "eventsNone": "This Widget declares no Events.",
+      "searchEvents": "Search Events"
     },
     "addStep": {
       "title": "Add step",
@@ -369,7 +374,9 @@
       "entered": "Step {n}: {step}",
       "unavailable": "This Flow isn't loaded.",
       "saveFirst": "Save your changes to play them.",
-      "checking": "Checking references…"
+      "checking": "Checking references…",
+      "eventsUnavailable": "This Preview can't report Widget Events. Use the Next controls to follow transitions.",
+      "advancedFromWorkbench": "(advanced from the Workbench)"
     }
   },
   "handoff": {
