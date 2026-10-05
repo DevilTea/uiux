@@ -48,7 +48,7 @@
 		"smoke:publication": "node ./scripts/smoke-publication.mjs",
 		"smoke:server": "node ./scripts/smoke-server.mjs",
 		"test": "pnpm run build && vitest run",
-		"typecheck": "nuxt typecheck",
+		"typecheck": "nuxt typecheck && pnpm run typecheck:adapters",
 		"typecheck:adapters": "tsc -p tsconfig.adapters.json"
 	},
 	"dependencies": {
