@@ -13,9 +13,10 @@ export default defineAppConfig({
 		},
 		dashboardSidebar: {
 			slots: {
-				root: 'min-h-0 h-full bg-default',
+				// Always visible (the Workbench is a desktop tool; no slide-over menu).
+				root: 'flex min-h-0 h-full bg-default',
 				header: 'h-auto px-0',
-				body: 'gap-0 p-0',
+				body: 'gap-0 p-0 overflow-hidden',
 			},
 		},
 		dashboardPanel: {
