@@ -13,6 +13,7 @@ type WorkspaceRead = Readonly<{
 
 const props = defineProps<{
 	workspace?: WorkspaceRead
+	readOnly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -71,32 +72,39 @@ function syncFromProps() {
 watch(() => props.workspace, syncFromProps, { immediate: true })
 
 function addAdapter() {
+	if (props.readOnly) return
 	localAdapters.value.push({ moduleSpecifier: '', config: '' })
 }
 
 function removeAdapter(index: number) {
+	if (props.readOnly) return
 	localAdapters.value.splice(index, 1)
 }
 
 function addViewport() {
+	if (props.readOnly) return
 	const nextId = `viewport-${localViewports.value.length + 1}`
 	localViewports.value.push({ id: nextId, width: 1280, height: 800 })
 }
 
 function removeViewport(index: number) {
+	if (props.readOnly) return
 	localViewports.value.splice(index, 1)
 }
 
 function addTheme() {
+	if (props.readOnly) return
 	const nextId = `theme-${localThemes.value.length + 1}`
 	localThemes.value.push({ id: nextId })
 }
 
 function removeTheme(index: number) {
+	if (props.readOnly) return
 	localThemes.value.splice(index, 1)
 }
 
 async function handleSave() {
+	if (props.readOnly) return
 	if (!props.workspace) return
 	saving.value = true
 	saveError.value = undefined
@@ -244,6 +252,7 @@ async function handleSave() {
       </p>
       <UInput
         v-model="defaultLocale"
+        :disabled="readOnly"
         size="xs"
         placeholder="en-US"
         class="w-full font-mono"
@@ -260,6 +269,7 @@ async function handleSave() {
           </p>
         </div>
         <UButton
+          v-if="!readOnly"
           color="neutral"
           variant="outline"
           size="xs"
@@ -281,6 +291,7 @@ async function handleSave() {
           <div class="flex items-center justify-between gap-2">
             <span class="text-[10px] font-semibold text-neutral-400 uppercase">Adapter {{ idx + 1 }}</span>
             <button
+              v-if="!readOnly"
               type="button"
               class="text-neutral-500 hover:text-red-400 text-xs"
               @click="removeAdapter(idx)"
@@ -292,6 +303,7 @@ async function handleSave() {
             <span class="text-[10px] text-neutral-500">Module Specifier:</span>
             <UInput
               v-model="adapter.moduleSpecifier"
+              :disabled="readOnly"
               size="xs"
               placeholder="@package/adapter or ./adapters/custom.ts"
               class="w-full font-mono mt-0.5"
@@ -301,6 +313,7 @@ async function handleSave() {
             <span class="text-[10px] text-neutral-500">Config (Optional JSON):</span>
             <UInput
               v-model="adapter.config"
+              :disabled="readOnly"
               size="xs"
               placeholder="{}"
               class="w-full font-mono mt-0.5"
@@ -326,6 +339,7 @@ async function handleSave() {
           </p>
         </div>
         <UButton
+          v-if="!readOnly"
           color="neutral"
           variant="outline"
           size="xs"
@@ -348,6 +362,7 @@ async function handleSave() {
             <span class="text-[10px] text-neutral-500">Preset ID:</span>
             <UInput
               v-model="vp.id"
+              :disabled="readOnly"
               size="xs"
               placeholder="e.g. mobile"
               class="font-mono mt-0.5"
@@ -357,6 +372,7 @@ async function handleSave() {
             <span class="text-[10px] text-neutral-500">Width:</span>
             <UInput
               v-model.number="vp.width"
+              :disabled="readOnly"
               type="number"
               size="xs"
               class="font-mono mt-0.5"
@@ -366,12 +382,14 @@ async function handleSave() {
             <span class="text-[10px] text-neutral-500">Height:</span>
             <UInput
               v-model.number="vp.height"
+              :disabled="readOnly"
               type="number"
               size="xs"
               class="font-mono mt-0.5"
             />
           </div>
           <button
+            v-if="!readOnly"
             type="button"
             class="text-neutral-500 hover:text-red-400 self-end mb-1 text-xs px-1"
             title="Remove viewport"
@@ -399,6 +417,7 @@ async function handleSave() {
           </p>
         </div>
         <UButton
+          v-if="!readOnly"
           color="neutral"
           variant="outline"
           size="xs"
@@ -420,12 +439,14 @@ async function handleSave() {
           <div class="flex-1">
             <UInput
               v-model="th.id"
+              :disabled="readOnly"
               size="xs"
               placeholder="e.g. dark, light"
               class="font-mono"
             />
           </div>
           <button
+            v-if="!readOnly"
             type="button"
             class="text-neutral-500 hover:text-red-400 text-xs px-1"
             title="Remove theme"
@@ -467,6 +488,7 @@ async function handleSave() {
     <!-- Actions -->
     <div class="pt-2 border-t border-neutral-800 flex items-center justify-between">
       <UButton
+        v-if="!readOnly"
         color="neutral"
         variant="ghost"
         size="xs"
@@ -475,6 +497,7 @@ async function handleSave() {
         Reset Changes
       </UButton>
       <UButton
+        v-if="!readOnly"
         color="primary"
         variant="solid"
         size="sm"

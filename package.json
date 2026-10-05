@@ -39,12 +39,13 @@
 	},
 	"scripts": {
 		"build": "nuxt build",
-		"check": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run smoke:package && pnpm run smoke:server",
+		"check": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run smoke:package && pnpm run smoke:publication && pnpm run smoke:server",
 		"dev": "nuxt dev --host 127.0.0.1",
 		"lint": "eslint . --max-warnings=0",
 		"prepack": "pnpm run build",
 		"preview": "node .output/server/index.mjs",
 		"smoke:package": "node ./scripts/smoke-package.mjs",
+		"smoke:publication": "node ./scripts/smoke-publication.mjs",
 		"smoke:server": "node ./scripts/smoke-server.mjs",
 		"test": "pnpm run build && vitest run",
 		"typecheck": "nuxt typecheck"
@@ -52,6 +53,7 @@
 	"dependencies": {
 		"@deviltea/widget-core": "0.0.2",
 		"@deviltea/widget-vue": "0.0.2",
+		"@iconify-json/lucide": "1.2.139",
 		"@modelcontextprotocol/server": "2.2.0",
 		"@nuxt/ui": "4.11.2",
 		"ajv": "8.20.0",

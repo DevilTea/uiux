@@ -74,6 +74,8 @@ try {
 		throw new Error(`Packed CLI version mismatch: ${versionOutput}`)
 	if (!helpOutput.includes('init --workspace <dir>'))
 		throw new Error('Packed CLI help did not expose Workspace initialization.')
+	if (!helpOutput.includes('publish --workspace <dir> --out <dir>'))
+		throw new Error('Packed CLI help did not expose static publication.')
 	const initOutput = execFileSync(cliPath, ['init', '--workspace', workspaceDirectory], { encoding: 'utf8' })
 	if (!initOutput.includes('Initialized UIUX Workspace'))
 		throw new Error(`Packed CLI init returned an unexpected response: ${initOutput}`)
@@ -364,7 +366,32 @@ try {
 		await stopServer(server)
 	}
 
-	console.log(`Package smoke passed: packed @deviltea/uiux@${installedPackage.version} serves styled Workbench assets, initializes a Workspace, authors a View and structure through MCP, captures/evaluates formal evidence and exports handoff bundles, and shares it across HTTP/MCP.`)
+	const publicationDirectory = join(temporaryDirectory, 'publication')
+	const publishOutput = execFileSync(cliPath, [
+		'publish',
+		'--workspace', workspaceDirectory,
+		'--out', publicationDirectory,
+		'--base', '/uiux/',
+		'--source-revision', 'package-smoke',
+	], {
+		encoding: 'utf8',
+		timeout: 120_000,
+	})
+	if (!publishOutput.includes('Published UIUX Workspace snapshot'))
+		throw new Error(`Packed uiux publish returned an unexpected response: ${publishOutput}`)
+	const publicationSnapshot = JSON.parse(await readFile(join(publicationDirectory, '_uiux', 'publication.json'), 'utf8'))
+	if (publicationSnapshot.schemaVersion !== 1 || publicationSnapshot.sourceRevision !== 'package-smoke')
+		throw new Error(`Packed publication snapshot has unexpected metadata: ${JSON.stringify(publicationSnapshot)}`)
+	if (!Array.isArray(publicationSnapshot.resources?.view) || publicationSnapshot.resources.view.length < 2)
+		throw new Error('Packed publication snapshot did not materialize authored Views.')
+	const publicationHtml = await readFile(join(publicationDirectory, 'index.html'), 'utf8')
+	if (!publicationHtml.includes('/uiux/_nuxt/'))
+		throw new Error('Packed publication shell did not preserve the requested /uiux/ base path.')
+	const previewHtml = await readFile(join(publicationDirectory, 'preview', 'index.html'), 'utf8')
+	if (!previewHtml.includes('/uiux/_nuxt/'))
+		throw new Error('Packed publication did not generate a base-path-safe /preview entry point.')
+
+	console.log(`Package smoke passed: packed @deviltea/uiux@${installedPackage.version} serves styled Workbench assets, initializes and authors a Workspace through MCP, captures/evaluates evidence and handoff, and publishes a portable /uiux/ static viewer.`)
 }
 finally {
 	await rm(temporaryDirectory, { recursive: true, force: true })

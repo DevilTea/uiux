@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useUiuxClient } from '../composables/useUiuxClient'
 import type { FormalEvidenceRecord } from '../../src/domain/evidence/schema'
 import { isCompleteEvidenceForViewRevision } from '../../src/domain/evidence/staleness'
 import type { ReviewAnchor, ReviewStatus, ReviewThread } from '../../src/domain/reviews/schema'
@@ -12,9 +13,6 @@ interface ReviewSummary {
 	summary: { anchor?: ReviewAnchor; status?: ReviewStatus; messageCount?: number }
 }
 
-interface ReviewDiscoveryPage {
-	items: readonly ReviewSummary[]
-}
 
 interface ReviewRead {
 	kind: 'review'
@@ -30,11 +28,14 @@ interface FormalEvidenceItem {
 }
 
 const props = defineProps<{
+	readOnly?: boolean
 	currentViewId?: string
 	selectedWidgetId?: string
 	currentViewRevision?: string
 	isCommentMode?: boolean
 }>()
+
+const uiux = useUiuxClient()
 
 const emit = defineEmits<{
 	(e: 'highlightWidget', widgetId: string): void
@@ -97,10 +98,7 @@ async function fetchReviews() {
 	loadingList.value = true
 	error.value = undefined
 	try {
-		const res = await $fetch<ReviewDiscoveryPage>('/api/resources/list', {
-			method: 'POST',
-			body: { kinds: ['review'], limit: 100 },
-		})
+		const res = await uiux.listResources<ReviewSummary>(['review'], { limit: 100 })
 		reviews.value = res.items
 		if (!selectedReviewId.value && visibleReviews.value.length > 0) {
 			await selectReview(visibleReviews.value[0]!.key)
@@ -135,7 +133,8 @@ async function loadSelectedReviewDetail() {
 
 	loadingDetail.value = true
 	try {
-		const data = await $fetch<ReviewRead>(`/api/resources/review/${encodeURIComponent(id)}`)
+		const data = await uiux.readResource<ReviewRead>('review', id)
+		if (!data) throw new Error('Review thread is unavailable.')
 		if (reviewLoadSequence.value !== currentSeq) return
 		selectedReviewData.value = data
 	}
@@ -387,6 +386,7 @@ async function handlePromoteToDecision() {
 }
 
 async function handleCreateReviewThread(targetWidgetIdOverride?: string) {
+	if (props.readOnly) return
 	if (!props.currentViewId) {
 		error.value = 'No view selected to anchor review thread.'
 		return
@@ -432,6 +432,7 @@ async function handleCreateReviewThread(targetWidgetIdOverride?: string) {
 }
 
 function openCreateModal(widgetId?: string) {
+	if (props.readOnly) return
 	newThreadWidgetId.value = widgetId || props.selectedWidgetId || 'root'
 	isCreatingThread.value = true
 }
@@ -463,7 +464,10 @@ watch(() => props.currentViewId, () => {
         </p>
       </div>
 
-      <div class="flex items-center gap-1.5">
+      <div
+        v-if="!readOnly"
+        class="flex items-center gap-1.5"
+      >
         <UButton
           :color="isCommentMode ? 'warning' : 'neutral'"
           :variant="isCommentMode ? 'solid' : 'outline'"
@@ -501,7 +505,7 @@ watch(() => props.currentViewId, () => {
 
     <!-- New Thread Inline Form -->
     <div
-      v-if="isCreatingThread"
+      v-if="isCreatingThread && !readOnly"
       class="border-b border-neutral-800 bg-neutral-900/90 p-3 space-y-2.5"
     >
       <div class="flex items-center justify-between">
@@ -710,7 +714,10 @@ watch(() => props.currentViewId, () => {
       </div>
 
       <!-- Post New Message Form -->
-      <div class="rounded border border-neutral-800 bg-neutral-900/60 p-2.5 space-y-2">
+      <div
+        v-if="!readOnly"
+        class="rounded border border-neutral-800 bg-neutral-900/60 p-2.5 space-y-2"
+      >
         <div class="flex items-center justify-between">
           <span class="text-[10px] font-semibold text-neutral-400">Post Reply</span>
           <div class="flex items-center gap-1 text-[10px]">
@@ -747,7 +754,10 @@ watch(() => props.currentViewId, () => {
       </div>
 
       <!-- Lifecycle Actions Toolbar -->
-      <div class="rounded border border-neutral-800 bg-neutral-950 p-3 space-y-3">
+      <div
+        v-if="!readOnly"
+        class="rounded border border-neutral-800 bg-neutral-950 p-3 space-y-3"
+      >
         <span class="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">Lifecycle Operations</span>
 
         <!-- Reanchor -->
@@ -882,7 +892,7 @@ watch(() => props.currentViewId, () => {
       v-else-if="!loadingList"
       class="flex flex-1 items-center justify-center p-6 text-center text-xs text-neutral-500"
     >
-      Select a review thread or click "🎯 Comment" to add feedback.
+      {{ readOnly ? 'Select a published review thread to inspect its history.' : 'Select a review thread or click "🎯 Comment" to add feedback.' }}
     </div>
   </div>
 </template>

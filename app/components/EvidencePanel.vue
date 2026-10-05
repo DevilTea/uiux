@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
+import { useUiuxClient } from '../composables/useUiuxClient'
 import type { FormalEvidenceRecord } from '../../src/domain/evidence/schema'
 import { evaluateEvidenceStaleness } from '../../src/domain/evidence/staleness'
 import type { ViewResource } from '../../src/domain/views/schema'
@@ -32,6 +33,7 @@ type FormalEvidenceItem = Readonly<{
 }>
 
 const props = defineProps<{
+	readOnly?: boolean
 	selectedView?: ViewRead
 	allViews: readonly ViewSummary[]
 	workspace?: WorkspaceRead
@@ -46,6 +48,8 @@ const props = defineProps<{
 		themeId: string
 	}
 }>()
+
+const uiux = useUiuxClient()
 
 const emit = defineEmits<{
 	(e: 'applyContext', context: {
@@ -106,11 +110,15 @@ function copyText(text: string) {
 	void navigator.clipboard?.writeText(text)
 }
 
+function artifactUrl(digest: string): string {
+	return uiux.artifactUrl(digest)
+}
+
 async function loadEvidence() {
 	loading.value = true
 	try {
-		const res = await $fetch<{ items: FormalEvidenceItem[] }>('/api/evidence/list')
-		evidenceItems.value = res.items || []
+		const items = await uiux.listEvidence<FormalEvidenceItem>()
+		evidenceItems.value = items || []
 		if (!selectedEvidenceDigest.value && evidenceItems.value.length > 0) {
 			selectedEvidenceDigest.value = evidenceItems.value[0]?.digest
 		}
@@ -124,6 +132,7 @@ async function loadEvidence() {
 }
 
 async function captureCurrentContext() {
+	if (props.readOnly) return
 	if (!props.activeContext || !props.activeContext.viewId) return
 	capturing.value = true
 	captureMessage.value = undefined
@@ -213,6 +222,7 @@ watch(() => props.selectedView?.key, () => {
           Refresh
         </UButton>
         <UButton
+          v-if="!readOnly"
           size="xs"
           color="primary"
           :loading="capturing"
@@ -255,7 +265,7 @@ watch(() => props.selectedView?.key, () => {
           v-if="filteredItems.length === 0"
           class="py-8 text-center text-xs text-neutral-500"
         >
-          No formal evidence captured yet. Click "Capture Active" to record deterministic evidence for the current render context.
+          {{ readOnly ? 'No formal evidence was included in this published snapshot.' : 'No formal evidence captured yet. Click "Capture Active" to record deterministic evidence for the current render context.' }}
         </div>
 
         <button
@@ -331,10 +341,10 @@ watch(() => props.selectedView?.key, () => {
           </div>
           <div class="rounded border border-neutral-800 bg-black/60 p-2 flex justify-center">
             <img
-              :src="'/api/artifacts/' + encodeURIComponent(selectedItem.record.artifactRefs[0]!)"
+              :src="artifactUrl(selectedItem.record.artifactRefs[0]!)"
               alt="Formal Capture Screenshot"
               class="max-h-48 rounded object-contain cursor-pointer hover:opacity-90 transition"
-              @click="modalImageUrl = '/api/artifacts/' + encodeURIComponent(selectedItem.record.artifactRefs[0]!)"
+              @click="modalImageUrl = artifactUrl(selectedItem.record.artifactRefs[0]!)"
             >
           </div>
         </div>

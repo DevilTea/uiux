@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useUiuxClient } from '../composables/useUiuxClient'
 
 interface LocaleSummary {
 	kind: 'locale'
@@ -9,9 +10,6 @@ interface LocaleSummary {
 	summary: { messageCount?: number }
 }
 
-interface LocaleDiscoveryPage {
-	items: readonly LocaleSummary[]
-}
 
 interface LocaleRead {
 	kind: 'locale'
@@ -23,7 +21,10 @@ interface LocaleRead {
 
 const props = defineProps<{
 	defaultLocale?: string
+	readOnly?: boolean
 }>()
+
+const uiux = useUiuxClient()
 
 const emit = defineEmits<{
 	(e: 'localesChanged'): void
@@ -68,10 +69,7 @@ async function fetchLocales() {
 	loadingList.value = true
 	error.value = undefined
 	try {
-		const res = await $fetch<LocaleDiscoveryPage>('/api/resources/list', {
-			method: 'POST',
-			body: { kinds: ['locale'], limit: 100 },
-		})
+		const res = await uiux.listResources<LocaleSummary>(['locale'], { limit: 100 })
 		locales.value = res.items
 		if (!selectedLocaleKey.value && res.items.length > 0) {
 			const preferred = props.defaultLocale && res.items.some(l => l.key === props.defaultLocale)
@@ -110,7 +108,8 @@ async function loadSelectedLocaleDetail() {
 
 	loadingDetail.value = true
 	try {
-		const data = await $fetch<LocaleRead>(`/api/resources/locale/${encodeURIComponent(key)}`)
+		const data = await uiux.readResource<LocaleRead>('locale', key)
+		if (!data) throw new Error('Locale is unavailable.')
 		if (localeLoadSequence.value !== currentSeq) return
 		selectedLocaleData.value = data
 		localMessages.value = Object.entries(data.resource || {}).map(([k, v]) => ({ key: k, value: String(v) }))
@@ -128,6 +127,7 @@ async function loadSelectedLocaleDetail() {
 }
 
 function addMessageRow() {
+	if (props.readOnly) return
 	const key = newKeyInput.value.trim()
 	if (!key) return
 	const existing = localMessages.value.find(m => m.key === key)
@@ -142,10 +142,12 @@ function addMessageRow() {
 }
 
 function removeMessageRow(index: number) {
+	if (props.readOnly) return
 	localMessages.value.splice(index, 1)
 }
 
 async function handleSaveLocale() {
+	if (props.readOnly) return
 	if (!selectedLocaleData.value) return
 	saving.value = true
 	error.value = undefined
@@ -186,6 +188,7 @@ async function handleSaveLocale() {
 }
 
 async function handleCreateLocale() {
+	if (props.readOnly) return
 	const tag = newLocaleTag.value.trim()
 	if (!tag) return
 	creating.value = true
@@ -232,6 +235,7 @@ watch(() => props.defaultLocale, () => {
         </p>
       </div>
       <UButton
+        v-if="!readOnly"
         color="primary"
         variant="solid"
         size="xs"
@@ -250,6 +254,7 @@ watch(() => props.defaultLocale, () => {
         ⚠ Workspace defaultLocale "<span class="font-mono font-semibold">{{ defaultLocale }}</span>" is not yet authored!
       </span>
       <UButton
+        v-if="!readOnly"
         color="warning"
         variant="soft"
         size="xs"
@@ -261,7 +266,7 @@ watch(() => props.defaultLocale, () => {
 
     <!-- Create Locale inline form -->
     <div
-      v-if="isCreatingLocale"
+      v-if="isCreatingLocale && !readOnly"
       class="border-b border-neutral-800 bg-neutral-900/80 p-3 space-y-2"
     >
       <div class="flex items-center justify-between">
@@ -280,11 +285,13 @@ watch(() => props.defaultLocale, () => {
       <div class="flex gap-2">
         <UInput
           v-model="newLocaleTag"
+          :disabled="readOnly"
           size="xs"
           placeholder="zh-TW"
           class="flex-1 font-mono"
         />
         <UButton
+          v-if="!readOnly"
           color="primary"
           variant="solid"
           size="xs"
@@ -348,6 +355,7 @@ watch(() => props.defaultLocale, () => {
         <div class="w-48">
           <UInput
             v-model="searchQuery"
+            :disabled="readOnly"
             size="xs"
             placeholder="Search keys/values…"
           />
@@ -404,12 +412,14 @@ watch(() => props.defaultLocale, () => {
             <div class="flex-1">
               <UInput
                 v-model="msg.value"
+                :disabled="readOnly"
                 size="xs"
                 placeholder="Translated text"
                 class="w-full"
               />
             </div>
             <button
+              v-if="!readOnly"
               type="button"
               class="text-neutral-500 hover:text-red-400 text-xs px-1"
               title="Delete key"
@@ -433,6 +443,7 @@ watch(() => props.defaultLocale, () => {
         <div class="flex items-center gap-2">
           <UInput
             v-model="newKeyInput"
+            :disabled="readOnly"
             size="xs"
             placeholder="new.translation.key"
             class="w-2/5 font-mono"
@@ -440,12 +451,14 @@ watch(() => props.defaultLocale, () => {
           />
           <UInput
             v-model="newValueInput"
+            :disabled="readOnly"
             size="xs"
             placeholder="Translation text"
             class="flex-1"
             @keyup.enter="addMessageRow"
           />
           <UButton
+            v-if="!readOnly"
             color="neutral"
             variant="outline"
             size="xs"
@@ -460,6 +473,7 @@ watch(() => props.defaultLocale, () => {
             Total {{ localMessages.length }} messages
           </span>
           <UButton
+            v-if="!readOnly"
             color="primary"
             variant="solid"
             size="xs"

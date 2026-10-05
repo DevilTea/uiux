@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from '#imports'
+import { useUiuxClient } from '../composables/useUiuxClient'
 import { RuntimePreviewProtocolBridge } from '../../src/preview/protocol/bridge'
 import {
 	PREVIEW_WIRE_CHANNEL,
@@ -20,6 +21,7 @@ import type { ResolvedRenderContext } from '../../src/domain/render-context/sche
 import type { I18nResource } from '../../src/domain/i18n/schema'
 
 const route = useRoute()
+const uiux = useUiuxClient()
 const localesMap = new Map<string, I18nResource>()
 
 type Diagnostic = Readonly<{ code: string; path: string; message: string }>
@@ -91,7 +93,7 @@ function handlePreviewPointerMove(event: PointerEvent) {
 				viewId: viewId.value,
 				targetingInteractionId: activeTargetingInteractionId.value,
 			},
-		}, '*')
+		}, window.location.origin)
 	}
 }
 
@@ -110,7 +112,7 @@ function handlePreviewPointerClick(event: MouseEvent) {
 				viewId: viewId.value,
 				targetingInteractionId: activeTargetingInteractionId.value,
 			},
-		}, '*')
+		}, window.location.origin)
 	}
 }
 
@@ -124,7 +126,7 @@ function handleKeydown(event: KeyboardEvent) {
 					type: 'escape',
 					targetingInteractionId: activeTargetingInteractionId.value,
 				},
-			}, '*')
+			}, window.location.origin)
 		}
 	}
 }
@@ -139,7 +141,7 @@ function initBridge() {
 			{
 				send(message) {
 					if (window.parent && window.parent !== window) {
-						window.parent.postMessage({ channel: PREVIEW_WIRE_CHANNEL, message }, '*')
+						window.parent.postMessage({ channel: PREVIEW_WIRE_CHANNEL, message }, window.location.origin)
 					}
 				},
 			},
@@ -160,7 +162,8 @@ async function loadView() {
 	loading.value = true
 	error.value = undefined
 	try {
-		const result = await $fetch<ViewRead>(`/api/resources/view/${encodeURIComponent(viewId.value)}`)
+		const result = await uiux.readResource<ViewRead>('view', viewId.value)
+		if (!result) throw new Error('Preview View is unavailable.')
 		viewData.value = result
 		await evaluateRuntime()
 	}
@@ -190,7 +193,7 @@ async function evaluateRuntime() {
 		| { state: 'invalid'; diagnostics: readonly Diagnostic[]; summaries: unknown[] }
 
 	try {
-		const adapterStatus = await $fetch<PreviewAdaptersResponse>('/api/preview/adapters')
+		const adapterStatus = await uiux.previewAdapters() as PreviewAdaptersResponse
 		if (adapterStatus.state === 'invalid') {
 			materializationResult.value = {
 				status: 'invalid',
@@ -221,7 +224,7 @@ async function evaluateRuntime() {
 		}
 
 		try {
-			const locRes = await $fetch<{ resource?: I18nResource }>(`/api/resources/locale/${encodeURIComponent(locale.value)}`)
+			const locRes = await uiux.readResource<{ resource?: I18nResource }>('locale', locale.value)
 			if (locRes?.resource) {
 				localesMap.set(locale.value, locRes.resource)
 			}
@@ -231,7 +234,7 @@ async function evaluateRuntime() {
 		}
 		if (locale.value !== 'en-US') {
 			try {
-				const defRes = await $fetch<{ resource?: I18nResource }>('/api/resources/locale/en-US')
+				const defRes = await uiux.readResource<{ resource?: I18nResource }>('locale', 'en-US')
 				if (defRes?.resource) {
 					localesMap.set('en-US', defRes.resource)
 				}
@@ -289,7 +292,7 @@ function onWindowMessage(event: MessageEvent) {
 		if (viewChanged) void loadView()
 		else if (activeBridge) {
 			if (localeChanged && payload.locale) {
-				void $fetch<{ resource?: I18nResource }>(`/api/resources/locale/${encodeURIComponent(payload.locale)}`)
+				void uiux.readResource<{ resource?: I18nResource }>('locale', payload.locale)
 					.then(res => {
 						if (res?.resource) {
 							localesMap.set(payload.locale!, res.resource)
