@@ -4,6 +4,8 @@ import { useI18n } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
 import WorkspaceSettingsPanel from '../../components/WorkspaceSettingsPanel.vue'
 import WorkbenchPage from '../../components/workbench/WorkbenchPage.vue'
+import LockBadge from '../../components/workbench/LockBadge.vue'
+import { useAccess } from '../../composables/useAccess'
 
 /**
  * Adapters. Until the Adapters and Catalog page (brief g, R10) exists, this opens Workspace
@@ -11,7 +13,8 @@ import WorkbenchPage from '../../components/workbench/WorkbenchPage.vue'
  */
 const { t } = useI18n()
 const workbench = useWorkbench()
-const { workspace, isReadOnly } = workbench
+const { workspace, authorReadOnly } = workbench
+const access = useAccess()
 
 onMounted(async () => {
 	await nextTick()
@@ -25,9 +28,14 @@ onMounted(async () => {
     :title="t('nav.adapters')"
   >
     <div class="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col overflow-y-auto border-default lg:border-x">
+      <LockBadge
+        kind="workspace"
+        resource-key="workspace"
+        class="border-b border-default px-3 py-2"
+      />
       <WorkspaceSettingsPanel
         :workspace="workspace"
-        :read-only="isReadOnly"
+        :read-only="authorReadOnly || !!access.lockFor('workspace', 'workspace')"
         @saved="workbench.refreshAll()"
         @reload="workbench.refreshAll()"
       />

@@ -8,7 +8,7 @@ import WorkbenchPage from '../../components/workbench/WorkbenchPage.vue'
 /** UX Flows. The Flows panel is mounted here until the graph editor (brief g, R11) replaces it. */
 const { t } = useI18n()
 const workbench = useWorkbench()
-const { views, isReadOnly } = workbench
+const { views, authorReadOnly } = workbench
 </script>
 
 <template>
@@ -18,7 +18,7 @@ const { views, isReadOnly } = workbench
   >
     <FlowsPanel
       :available-views="views"
-      :read-only="isReadOnly"
+      :read-only="authorReadOnly"
       @update:flow-id="(id: string) => navigateTo(flowPath(id), { replace: true })"
       @select-view="(id: string) => navigateTo(viewLocation(id))"
       @changed="workbench.refreshCounts()"

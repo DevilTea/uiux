@@ -8,6 +8,7 @@ import type { ViewPanelTab } from '../../composables/workbench-types'
 import { parseThread, parseViewPanel, parseViewRouteContext, sameQuery, viewQuery } from '../../utils/workbench-routes'
 import PreviewCanvas from '../../components/workbench/PreviewCanvas.vue'
 import ViewRightPanel from '../../components/workbench/ViewRightPanel.vue'
+import LockBadge from '../../components/workbench/LockBadge.vue'
 
 /**
  * A View: the canvas and its right panel. The render context, selected Widget, open thread
@@ -132,6 +133,11 @@ onBeforeUnmount(() => {
           class="flex min-h-0 flex-1 flex-col"
           :aria-label="selectedView ? t('workbench.canvas.iframeTitle', { name: selectedView.resource.name }) : t('workbench.canvas.label')"
         >
+          <LockBadge
+            kind="view"
+            :resource-key="viewId"
+            class="justify-center border-b border-default bg-default px-3 py-1.5"
+          />
           <PreviewCanvas @open-panel="showPanel">
             <template #actions>
               <UTooltip :text="isDesktop ? t('shell.togglePanel') : t('shell.openPanel')">

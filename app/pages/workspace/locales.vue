@@ -7,7 +7,7 @@ import WorkbenchPage from '../../components/workbench/WorkbenchPage.vue'
 /** Workspace Locales, mounted here until the Locales table (brief g, R10) replaces the panel. */
 const { t } = useI18n()
 const workbench = useWorkbench()
-const { workspace, isReadOnly } = workbench
+const { workspace, authorReadOnly } = workbench
 </script>
 
 <template>
@@ -18,7 +18,7 @@ const { workspace, isReadOnly } = workbench
     <div class="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col border-default lg:border-x">
       <LocalesPanel
         :default-locale="workspace?.resource?.i18n?.defaultLocale"
-        :read-only="isReadOnly"
+        :read-only="authorReadOnly"
         @locales-changed="workbench.refreshAll()"
       />
     </div>

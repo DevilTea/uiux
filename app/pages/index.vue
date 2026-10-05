@@ -17,7 +17,7 @@ const { t } = useI18n()
 const workbench = useWorkbench()
 const {
 	views, reviews, workspace, selectedView, discoveredLocales, localeRevisions, currentActiveContext,
-	isReadOnly, readyReviewCount, openReviewCount, workspaceFindingCount, loading,
+	isReadOnly, authorReadOnly, readyReviewCount, openReviewCount, workspaceFindingCount, loading,
 } = workbench
 
 type ViewRow = { key: string; name: string; feature: string; findings: number; unresolved: number }
@@ -172,7 +172,7 @@ function applyEvidenceContext(context: EvidenceContextSelection): void {
                 :discovered-locales="discoveredLocales"
                 :locale-revisions="localeRevisions"
                 :active-context="currentActiveContext"
-                :read-only="isReadOnly"
+                :read-only="authorReadOnly"
                 @apply-context="applyEvidenceContext"
                 @refresh="workbench.refreshAll()"
               />
