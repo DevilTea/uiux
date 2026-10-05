@@ -8,10 +8,12 @@ import { computed, ref } from 'vue'
  *
  * `variant`: `pending` is the dashed composer pin, `resolved` the small graphite check, `cluster`
  * a count. `badge`: `ready` (blue eye) or `stale` (warning: a named Variant of the scope is missing).
+ *
+ * The pin has no position of its own: it sits with its tip on the bottom-left corner of its
+ * parent, a zero-size anchor that the pin layer moves with a `transform` once per frame (decision
+ * 9: pin DOM writes are transforms only), so a moving pin never re-renders.
  */
 const props = defineProps<{
-	x: number
-	y: number
 	label: string
 	variant?: 'default' | 'pending' | 'resolved' | 'cluster'
 	badge?: 'ready' | 'stale'
@@ -27,7 +29,8 @@ const props = defineProps<{
 	draggable?: boolean
 }>()
 const emit = defineEmits<{
-	(e: 'activate'): void
+	/** `keyboard`: Enter or Space (a click with no pointer detail). */
+	(e: 'activate', keyboard: boolean): void
 	(e: 'dragMove', point: Readonly<{ clientX: number; clientY: number }>): void
 	(e: 'dragEnd', point: Readonly<{ clientX: number; clientY: number }>): void
 	(e: 'dragCancel'): void
@@ -66,8 +69,8 @@ function onPointerCancel(): void {
 	dragging.value = false
 }
 
-function onClick(): void {
-	if (!dragging.value) emit('activate')
+function onClick(event: MouseEvent): void {
+	if (!dragging.value) emit('activate', event.detail === 0)
 }
 
 const glyph = computed(() => {
@@ -86,7 +89,6 @@ const glyph = computed(() => {
       variant ? `is-${variant}` : '',
       { 'is-open': open, 'is-lift': lift, 'is-fresh': fresh, 'is-dim': dim, 'is-dragging': dragging },
     ]"
-    :style="{ left: `${x}px`, top: `${y}px` }"
     :aria-label="label"
     :aria-expanded="variant === 'pending' ? undefined : open"
     :aria-haspopup="variant === 'cluster' ? 'menu' : 'dialog'"
@@ -121,9 +123,11 @@ const glyph = computed(() => {
 </template>
 
 <style scoped>
-/* DESIGN.md "Comment pin": 28px Marker teardrop, tip bottom-left at the anchor point. */
+/* DESIGN.md "Comment pin": 28px Marker teardrop, tip bottom-left on the anchor point. */
 .comment-pin {
   position: absolute;
+  left: 0;
+  bottom: 0;
   width: 28px;
   height: 28px;
   display: grid;
@@ -137,21 +141,21 @@ const glyph = computed(() => {
   line-height: 1rem;
   font-weight: 600;
   box-shadow: var(--wb-shadow-pin);
-  transform: translateY(-100%);
+  transform-origin: 0 100%;
   pointer-events: auto;
   cursor: pointer;
   transition: transform 120ms var(--ease-out-quiet), box-shadow 120ms var(--ease-out-quiet), opacity 120ms;
-  z-index: 2;
 }
-.comment-pin:hover { transform: translateY(calc(-100% - 1px)); }
+.comment-pin:hover { transform: translateY(-1px); }
 .comment-pin:focus-visible { outline: 2px solid var(--ui-primary); outline-offset: 3px; }
-.comment-pin.is-open { box-shadow: 0 0 0 2px var(--ui-bg), 0 0 0 4px var(--ui-primary), 0 1px 3px oklch(0% 0 0 / 0.28); z-index: 3; }
-.comment-pin.is-lift { transform: translateY(calc(-100% - 2px)); box-shadow: 0 0 0 2px var(--ui-bg), 0 0 0 4px var(--wb-pin), 0 2px 6px oklch(0% 0 0 / 0.3); z-index: 3; }
+.comment-pin.is-open { box-shadow: 0 0 0 2px var(--ui-bg), 0 0 0 4px var(--ui-primary), 0 1px 3px oklch(0% 0 0 / 0.28); }
+.comment-pin.is-lift { transform: translateY(-2px); box-shadow: 0 0 0 2px var(--ui-bg), 0 0 0 4px var(--wb-pin), 0 2px 6px oklch(0% 0 0 / 0.3); }
 .comment-pin.is-resolved { width: 24px; height: 24px; background: var(--wb-pin-resolved); color: var(--wb-pin-text); }
 .comment-pin.is-pending { background: var(--ui-bg); color: var(--ui-annotation); border: 1.5px dashed var(--wb-pin); box-shadow: 0 1px 3px oklch(0% 0 0 / 0.28); cursor: default; }
+.comment-pin.is-cluster { min-width: 28px; width: auto; padding-inline: 6px; font-variant-numeric: tabular-nums; }
 .comment-pin.is-dim { opacity: 0.4; pointer-events: none; }
 .comment-pin.is-dragging { cursor: grabbing; transition: none; }
-.comment-pin.is-fresh { animation: pin-drop 180ms var(--ease-out-quiet); transform-origin: 0 100%; }
+.comment-pin.is-fresh { animation: pin-drop 180ms var(--ease-out-quiet); }
 .comment-pin-badge {
   position: absolute;
   top: -5px;
@@ -166,8 +170,8 @@ const glyph = computed(() => {
 .comment-pin-badge.is-ready { background: var(--ui-info); color: var(--ui-text-inverted); }
 .comment-pin-badge.is-stale { background: var(--ui-bg); color: var(--ui-warning); box-shadow: 0 0 0 2px var(--ui-bg), inset 0 0 0 1.5px var(--ui-warning); }
 @keyframes pin-drop {
-  from { transform: translateY(-100%) scale(0.6); opacity: 0; }
-  to { transform: translateY(-100%) scale(1); opacity: 1; }
+  from { transform: scale(0.6); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .comment-pin, .comment-pin.is-fresh { transition: none; animation: none; }

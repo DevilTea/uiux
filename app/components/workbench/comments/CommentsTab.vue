@@ -2,17 +2,18 @@
 import { computed, nextTick, ref } from 'vue'
 import { useI18n } from '#imports'
 import { useWorkbench } from '../../../composables/useWorkbench'
-import { relativeTime } from '../../../utils/widget-inspection'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
-import { threadAuthorInitials, statusKey, useCanvasComments, type CommentFilter, type CommentThread } from '../../../composables/useCanvasComments'
+import { statusKey, useCanvasComments, type CommentFilter, type CommentThread } from '../../../composables/useCanvasComments'
+import CommentRow from './CommentRow.vue'
 import { flattenWidgetTree } from '../../../../src/preview/widget-tree'
+import { MAX_TRACKED_WIDGETS } from '../../../../src/preview/protocol/schema'
 
 /**
  * The Comments tab: the list companion to the pins (brief c, section 6). Grouped Ready, Open,
  * Can't be placed, Other Variants (and Resolved when the filter shows it); filtered like the
  * pins; hovering a row lifts its pin; Enter or a click opens the bubble.
  */
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const workbench = useWorkbench()
 const comments = useCanvasComments()!
 const { preview, widgetTreeResult, selectedVariant } = workbench
@@ -33,10 +34,13 @@ function unplaceable(item: CommentThread): boolean {
 const groups = computed<readonly Group[]>(() => {
 	const all = comments.threads.value.filter(comments.inFilter)
 	const placeable = all.filter(item => !unplaceable(item))
-	const here = placeable.filter(item => item.inScope)
+	const notOnCanvas = new Set(comments.notOnCanvas.value.ids)
+	const here = placeable.filter(item => item.inScope && !notOnCanvas.has(item.id))
 	const result: Group[] = [
 		{ key: 'ready', label: t('comments.group.ready'), rows: here.filter(item => item.status === 'ready-for-review') },
 		{ key: 'open', label: t('comments.group.open'), rows: here.filter(item => item.status === 'open') },
+		// Decision 6: Widgets beyond the tracking cap get no stream and no pin; they are listed here instead.
+		{ key: 'overcap', label: t('pins.notOnCanvasGroup'), icon: 'i-lucide-eye-off', rows: placeable.filter(item => item.inScope && notOnCanvas.has(item.id)) },
 		{ key: 'unplaced', label: t('comments.group.unplaced'), icon: 'i-lucide-triangle-alert', rows: all.filter(unplaceable) },
 		{ key: 'other', label: t('pins.otherVariants', { n: placeable.filter(item => !item.inScope).length }), rows: placeable.filter(item => !item.inScope) },
 		{ key: 'resolved', label: t('comments.group.resolved'), rows: here.filter(item => item.status === 'resolved') },
@@ -57,31 +61,6 @@ const FILTERS: ReadonlyArray<{ key: keyof CommentFilter; icon: string }> = [
 	{ key: 'ready', icon: 'i-lucide-eye' },
 	{ key: 'resolved', icon: 'i-lucide-circle-check' },
 ]
-
-/** One short line under the title: why the pin is not drawn, when it is not. */
-function note(item: CommentThread): string | undefined {
-	if (!item.anchorValid) return t('comments.widgetRemoved')
-	if (item.missingVariants.length) return t('pins.variantMissing', { name: item.missingVariants.join(', ') })
-	const placement = comments.placementById.value.get(item.id)
-	if (!placement || placement.state === 'visible') return undefined
-	if (placement.state === 'offscreen') return t('comments.reason.offscreen')
-	switch (placement.reason) {
-		case 'point-not-visible': return t('comments.reason.pointNotVisible')
-		case 'not-rendered':
-		case 'no-visible-region': return t('pins.notVisible')
-		case 'over-cap':
-		case 'single-stream': return t('comments.reason.overCap')
-		case 'mapping-unavailable': return t('comments.reason.mapping')
-		default: return undefined
-	}
-}
-
-function statusIcon(item: CommentThread): { name: string; class: string } {
-	if (unplaceable(item)) return { name: 'i-lucide-triangle-alert', class: 'text-warning' }
-	if (item.status === 'ready-for-review') return { name: 'i-lucide-eye', class: 'text-info' }
-	if (item.status === 'resolved') return { name: 'i-lucide-circle-check', class: 'text-success' }
-	return { name: 'i-lucide-circle-dot', class: 'text-annotation' }
-}
 
 function openRow(item: CommentThread): void {
 	if (!comments.open(item.id)) return
@@ -167,9 +146,17 @@ function onListKeydown(event: KeyboardEvent): void {
             <UIcon
               v-if="group.icon"
               :name="group.icon"
-              class="size-3.5 text-warning"
+              class="size-3.5"
+              :class="group.key === 'overcap' ? 'text-muted' : 'text-warning'"
             />
           </h3>
+          <p
+            v-if="group.key === 'overcap'"
+            class="px-3 pb-1 text-xs text-muted"
+            data-comment-overcap-hint
+          >
+            {{ comments.notOnCanvas.value.reason === 'single-stream' ? t('pins.singleStreamHint') : t('pins.overCapHint', { cap: MAX_TRACKED_WIDGETS }) }}
+          </p>
           <div
             v-for="item in group.rows"
             :key="item.id"
@@ -178,58 +165,15 @@ function onListKeydown(event: KeyboardEvent): void {
             @mouseenter="comments.hoveredThreadId.value = item.id"
             @mouseleave="comments.hoveredThreadId.value = undefined"
           >
-            <button
-              type="button"
-              class="grid w-full grid-cols-[16px_24px_minmax(0,1fr)_auto] items-start gap-x-2 px-3 py-2 text-start hover:bg-muted focus-visible:bg-muted"
-              :class="comments.openThreadId.value === item.id ? 'bg-elevated' : ''"
-              :aria-current="comments.openThreadId.value === item.id ? 'true' : undefined"
-              :data-comment-row="item.id"
-              @focus="comments.hoveredThreadId.value = item.id"
-              @blur="comments.hoveredThreadId.value = undefined"
-              @click="openRow(item)"
-            >
-              <UIcon
-                :name="statusIcon(item).name"
-                class="mt-1 size-4"
-                :class="statusIcon(item).class"
-              />
-              <UAvatar
-                :text="item.author?.type === 'agent' ? undefined : threadAuthorInitials(item.author)"
-                :icon="item.author?.type === 'agent' ? 'i-lucide-bot' : undefined"
-                size="xs"
-                aria-hidden="true"
-              />
-              <span class="min-w-0">
-                <span class="block truncate text-sm text-highlighted">{{ item.title ?? `#${item.anchor.widgetId}` }}</span>
-                <span class="mt-0.5 block truncate text-xs text-muted">
-                  {{ item.author?.displayName ?? t('comments.unknownAuthor') }} ·
-                  <span class="font-mono">{{ item.anchorValid ? `${typeById.get(item.anchor.widgetId) ?? 'Widget'} · ` : '' }}#{{ item.anchor.widgetId }}</span>
-                  <span
-                    v-if="item.variantNames.length"
-                    class="font-mono"
-                  > · {{ item.variantNames.join(', ') }}</span>
-                </span>
-                <span
-                  v-if="note(item)"
-                  class="mt-0.5 block text-xs text-warning"
-                  :class="item.anchorValid && !item.missingVariants.length ? 'text-muted' : ''"
-                  data-comment-note
-                >{{ note(item) }}</span>
-              </span>
-              <span class="flex items-center gap-2 text-xs leading-5 whitespace-nowrap text-dimmed">
-                <time
-                  v-if="item.latestActivityAt"
-                  :datetime="item.latestActivityAt"
-                >{{ relativeTime(item.latestActivityAt, locale) }}</time>
-                <span class="inline-flex items-center gap-0.5">
-                  <UIcon
-                    name="i-lucide-message-circle"
-                    class="size-3"
-                  />{{ item.messageCount }}
-                  <span class="sr-only">{{ t('reviews.messageCount', item.messageCount) }}</span>
-                </span>
-              </span>
-            </button>
+            <CommentRow
+              :item="item"
+              :widget-type="item.anchorValid ? (typeById.get(item.anchor.widgetId) ?? 'Widget') : undefined"
+              :unplaceable="unplaceable(item)"
+              :current="comments.openThreadId.value === item.id"
+              @hover="comments.hoveredThreadId.value = item.id"
+              @leave="comments.hoveredThreadId.value = undefined"
+              @open="openRow(item)"
+            />
             <div
               v-if="group.key === 'unplaced' && comments.canComment.value && !item.anchorValid && !phone"
               class="px-3 pb-2 ps-[3.75rem]"

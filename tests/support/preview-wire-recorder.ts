@@ -21,8 +21,12 @@ export const PREVIEW_WIRE_RECORDER = `(() => {
 	window.addEventListener('message', (event) => {
 		const data = event.data
 		if (!data || typeof data !== 'object') return
-		if (data.channel !== 'uiux:preview:wire' || !data.message || typeof data.message.type !== 'string') return
-		window.__wire.messages.push(data.message)
-		if (data.message.type.startsWith('targeting.')) window.__wire.targeting.push(data.message)
+		if (data.channel !== 'uiux:preview:wire') return
+		// One envelope, or a transport batch of envelopes (runtime to Workbench).
+		for (const message of Array.isArray(data.messages) ? data.messages : [data.message]) {
+			if (!message || typeof message.type !== 'string') continue
+			window.__wire.messages.push(message)
+			if (message.type.startsWith('targeting.')) window.__wire.targeting.push(message)
+		}
 	}, true)
 })()`

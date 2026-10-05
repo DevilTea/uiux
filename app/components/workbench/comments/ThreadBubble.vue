@@ -23,7 +23,7 @@ const comments = useCanvasComments()!
 const { preview, widgetTreeResult, selectedVariant } = workbench
 
 const thread = computed(() => comments.threadById.value.get(props.threadId))
-const placement = computed(() => comments.placementById.value.get(props.threadId))
+const placement = computed(() => comments.pinStatusById.value.get(props.threadId))
 const detail = computed(() => thread.value?.detail)
 
 const widgetType = computed(() => {
@@ -219,6 +219,8 @@ function switchVariant(name: string): void {
 // Focus lands in the bubble on open; Escape returns it to the pin (the comments layer does that).
 const root = ref<HTMLElement>()
 onMounted(() => {
+	// Reached with J / K on the canvas: focus stays on the pin (Enter there moves into the bubble).
+	if (comments.browsingPins.value) return
 	void nextTick(() => {
 		const target = replyArea.value?.textareaRef ?? root.value
 		target?.focus({ preventScroll: true })
@@ -226,6 +228,7 @@ onMounted(() => {
 })
 watch(() => props.threadId, () => {
 	pendingAction.value = undefined
+	if (comments.browsingPins.value) return
 	void nextTick(() => (replyArea.value?.textareaRef ?? root.value)?.focus({ preventScroll: true }))
 })
 </script>

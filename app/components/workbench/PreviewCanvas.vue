@@ -43,7 +43,7 @@ import { mapPointAffine } from '../../../src/preview/outer-precision'
  * The iframe hit-tests every pointer event over the View: nothing transparent is ever layered over
  * it, the overlay is `pointer-events: none`, and Ctrl/⌘ + wheel or pinch zoom only over the gutter.
  */
-const emit = defineEmits<{ (e: 'openPanel', tab: 'readiness'): void }>()
+const emit = defineEmits<{ (e: 'openPanel', tab: 'readiness' | 'comments'): void }>()
 /**
  * `prototype`: the Prototype player reuses this frame (brief g). The Flow step fixes the Variant
  * and the View receives every click, so the tool pill gives way to the player's `dock` slot.
@@ -269,6 +269,28 @@ const hoverCandidate = computed(() => {
 const pinsTracked = computed(() => preview.pinPlacements.value.length > 0)
 /** Threads whose Widget is gone (never drawn, never rebound): the unplaced tray (brief c, section 6). */
 const unplacedThreads = computed(() => comments?.threads.value.filter(item => !item.anchorValid && item.status !== 'resolved' && comments.inFilter(item)) ?? [])
+/** Threads whose Widget is beyond the tracking cap (decision 6): "N more not shown on canvas". */
+const notOnCanvasCount = computed(() => comments?.pinsHidden.value ? 0 : comments?.notOnCanvas.value.ids.length ?? 0)
+/**
+ * Shows the Comments tab and moves focus to its "Not shown on canvas" group. The Prototype player
+ * has no Comments tab (R17), so there the first such thread opens in the bubble instead.
+ */
+async function showNotOnCanvas(): Promise<void> {
+	if (props.prototype) {
+		const first = comments.notOnCanvas.value.ids[0]
+		if (first) comments.open(first)
+		return
+	}
+	emit('openPanel', 'comments')
+	for (let frame = 0; frame < 30; frame++) {
+		await new Promise(resolve => requestAnimationFrame(resolve))
+		const group = document.querySelector<HTMLElement>('[data-comment-group="overcap"]')
+		if (!group) continue
+		group.scrollIntoView({ block: 'start', behavior: reducedMotion.value ? 'instant' : 'smooth' })
+		group.querySelector<HTMLElement>('[data-comment-row]')?.focus({ preventScroll: true })
+		return
+	}
+}
 const overlayActive = computed(() => !!highlightGeometry.value || !!hoverCandidate.value || pinsTracked.value)
 /** Highlight and targeting overlays keep the accepted per-frame loop; pins alone are event-driven. */
 const mappingMode = computed(() => highlightGeometry.value || hoverCandidate.value ? 'continuous' as const : 'event-driven' as const)
@@ -481,7 +503,7 @@ defineShortcuts(computed(() => ({
 	...(shell.singleKeyShortcuts.value && selectedView.value
 		? {
 				c: () => selectTool('comment'),
-				shift_c: () => { if (comments) comments.pinsHidden.value = !comments.pinsHidden.value },
+				shift_c: () => comments.togglePins(),
 			}
 		: {}),
 })))
@@ -734,17 +756,35 @@ function switchToBase(): void {
           aria-hidden="true"
           data-comment-fallback
         />
-        <UButton
-          v-if="unplacedThreads.length"
-          class="absolute bottom-4 left-3 z-20 shadow-overlay max-md:bottom-16"
-          color="warning"
-          variant="soft"
-          size="sm"
-          icon="i-lucide-triangle-alert"
-          :label="t('pins.unplaced', unplacedThreads.length)"
-          data-comment-tray
-          @click="comments.open(unplacedThreads[0]!.id)"
-        />
+        <div
+          v-if="unplacedThreads.length || notOnCanvasCount"
+          class="pointer-events-none absolute bottom-4 left-3 z-20 flex max-w-[calc(100%-1.5rem)] flex-col items-start gap-1.5 max-md:bottom-16 xl:max-w-[calc(50%-12rem)]"
+        >
+          <UButton
+            v-if="notOnCanvasCount"
+            class="pointer-events-auto bg-default shadow-overlay"
+            color="neutral"
+            variant="outline"
+            size="sm"
+            icon="i-lucide-eye-off"
+            :label="t('pins.notOnCanvas', notOnCanvasCount)"
+            :ui="{ label: 'truncate' }"
+            data-pins-overcap
+            @click="showNotOnCanvas"
+          />
+          <UButton
+            v-if="unplacedThreads.length"
+            class="pointer-events-auto shadow-overlay"
+            color="warning"
+            variant="soft"
+            size="sm"
+            icon="i-lucide-triangle-alert"
+            :label="t('pins.unplaced', unplacedThreads.length)"
+            :ui="{ label: 'truncate' }"
+            data-comment-tray
+            @click="comments.open(unplacedThreads[0]!.id)"
+          />
+        </div>
         <CommentBubbleHost />
         <p
           class="sr-only"
@@ -769,7 +809,9 @@ function switchToBase(): void {
           :active="activeTool"
           :show-comment="showComment"
           :disabled-reason="toolsDisabledReason"
+          :pins-hidden="comments ? comments.pinsHidden.value : undefined"
           @select="selectTool"
+          @toggle-pins="comments?.togglePins()"
         />
       </div>
 

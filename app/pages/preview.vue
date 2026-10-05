@@ -234,6 +234,15 @@ function reportWidgetEvent(report: WidgetEventReport) {
 	})
 }
 
+/** Envelopes waiting for the end of the current task (see `send` in `initBridge`). */
+let outbox: unknown[] = []
+function flushOutbox() {
+	const batch = outbox
+	outbox = []
+	if (!batch.length || !window.parent || window.parent === window) return
+	window.parent.postMessage(batch.length === 1 ? { channel: PREVIEW_WIRE_CHANNEL, message: batch[0] } : { channel: PREVIEW_WIRE_CHANNEL, messages: batch }, window.location.origin)
+}
+
 function initBridge() {
 	if (typeof window === 'undefined') return
 	try {
@@ -245,9 +254,11 @@ function initBridge() {
 			{ protocolVersion: 1, features: harnessMode.value ? ['geometry', MULTI_TARGET_GEOMETRY_FEATURE] : ['geometry', MULTI_TARGET_GEOMETRY_FEATURE, WIDGET_EVENTS_FEATURE] },
 			{
 				send(message) {
-					if (window.parent && window.parent !== window) {
-						window.parent.postMessage({ channel: PREVIEW_WIRE_CHANNEL, message }, window.location.origin)
-					}
+					// Transport-level batching (multi-target decision group, alternative 2): every
+					// envelope of one task (a frame's geometry reports) leaves in one postMessage, in
+					// order. Each envelope stays complete and is validated on its own by the Workbench.
+					if (!outbox.length) queueMicrotask(flushOutbox)
+					outbox.push(message)
 				},
 			},
 		)
