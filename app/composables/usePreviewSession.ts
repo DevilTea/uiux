@@ -2,14 +2,27 @@ import { computed, ref, shallowRef, watch } from 'vue'
 import { useI18n } from '#imports'
 import { WorkbenchPreviewProtocolBridge } from '../../src/preview/protocol/bridge'
 import { PreviewNavigationState, type PreviewNavigationTarget } from '../../src/preview/navigation-state'
-import type { GeometryAcquireResponse, VisibleRegion, WidgetRect } from '../../src/preview/protocol/schema'
+import { PreviewTargetingState } from '../../src/preview/targeting-state'
+import { GeometryStreamCoordinator, type GeometryDemand, type GeometryReport } from '../../src/preview/geometry-streams'
+import {
+	PinPlacementEngine,
+	pinGeometryDemand,
+	type PinPlacement,
+	type PinThreadInput,
+} from '../../src/preview/pin-visibility'
+import type { AffineOuterMapping } from '../../src/preview/outer-precision'
+import {
+	MULTI_TARGET_GEOMETRY_FEATURE,
+	type GeometryAcquireResponse,
+	type VisibleRegion,
+	type WidgetRect,
+} from '../../src/preview/protocol/schema'
 import {
 	PREVIEW_CONTEXT_CHANNEL,
-	PREVIEW_HIGHLIGHT_CHANNEL,
 	PREVIEW_TARGETING_CHANNEL,
 	PREVIEW_WIRE_CHANNEL,
-	type PreviewHighlightPayload,
 	type PreviewTargetingPayload,
+	type PreviewTargetingPurpose,
 } from '../../src/preview/protocol/transport'
 import { useUiuxClient } from './useUiuxClient'
 import type { WorkbenchState } from './useWorkbenchState'
@@ -38,6 +51,24 @@ export type SelectionGeometry = Readonly<{
  */
 export type SelectionVisibility = 'none' | 'awaiting' | 'visible' | 'hidden' | 'offscreen'
 
+/** The runtime's current hover candidate and its geometry (Part 3 targeting hover preview). */
+export type HoverCandidate = Readonly<{
+	widgetId: string
+	purpose: PreviewTargetingPurpose
+	/** The candidate Widget's latest accepted report; absent until its stream reports. */
+	geometry?: GeometryReport
+}>
+
+/** The measured canvas mapping, published by the canvas for pins and other overlay consumers. */
+export type CanvasMappingState = Readonly<{
+	mapping?: AffineOuterMapping
+	/** The visible canvas stage in overlay-layer px (pins mapped outside it become edge indicators). */
+	stage?: Readonly<{ left: number; top: number; right: number; bottom: number }>
+}>
+
+/** Options of the pins consumer: the open thread is tracked first (decision 6, tier 1). */
+export type PinTrackingOptions = Readonly<{ openThreadId?: string }>
+
 /** The render context the iframe document was created with; later changes travel over the context channel. */
 type IframeSourceContext = Readonly<{
 	viewId: string
@@ -50,9 +81,9 @@ type IframeSourceContext = Readonly<{
 }>
 
 /**
- * The Workbench side of the preview iframe: protocol bridge handshake, the
- * existing postMessage channels (context / highlight / targeting), comment
- * mode and widget selection coming back from the iframe's own hit-testing.
+ * The Workbench side of the preview iframe: protocol bridge handshake, the context and targeting
+ * channels, comment mode and widget selection coming back from the iframe's own hit-testing, and
+ * every runtime geometry stream (selection highlight, hover candidate, comment pins).
  */
 export function createPreviewSession(state: WorkbenchState) {
 	const uiux = useUiuxClient()
@@ -70,6 +101,13 @@ export function createPreviewSession(state: WorkbenchState) {
 	const runtimeFeatures = ref<readonly string[]>([])
 	const selectionGeometry = shallowRef<SelectionGeometry>()
 	const selectionVisibility = ref<SelectionVisibility>('none')
+	/** Bumps on every accepted or hidden geometry report, so computed consumers re-read the coordinator. */
+	const geometryVersion = ref(0)
+	const hoverWidgetId = ref<string>()
+	const hoverPurpose = ref<PreviewTargetingPurpose>()
+	const pinThreads = shallowRef<readonly PinThreadInput[]>([])
+	const pinOptions = shallowRef<PinTrackingOptions>({})
+	const canvasMapping = shallowRef<CanvasMappingState>({})
 
 	/** The phase shown to users. No View mounted means no session is expected, not one that is still starting. */
 	const sessionPhase = computed<SessionPhase>(() => state.selectedViewId.value ? handshakePhase.value : 'idle')
@@ -85,16 +123,22 @@ export function createPreviewSession(state: WorkbenchState) {
 	let workbenchBridge: WorkbenchPreviewProtocolBridge | undefined
 	let navigationCoordinator: PreviewNavigationState | undefined
 	let commentTargetHandler: ((widgetId: string) => void | Promise<void>) | undefined
-	/** The geometry request whose reports may update the selection overlay; one stream at a time (no `geometry.multi-target`). */
-	let activeGeometryRequest: PreviewNavigationTarget | undefined
-	let geometryRequestSequence = 0
+	/** The Checks/selection highlight request; its reports may update the selection overlay. */
+	let selectionTarget: PreviewNavigationTarget | undefined
 	let generationSequence = 0
-	/**
-	 * Whether this runtime generation has answered a geometry request. Until it has, the legacy
-	 * in-iframe highlight stays as the only visible selection cue; once a runtime reports geometry,
-	 * the Workbench overlay takes over and the in-iframe highlight is cleared.
-	 */
-	let geometryProducerSeen = false
+	let interactionSequence = 0
+	const targeting = new PreviewTargetingState<{ widgetId: string }>()
+
+	/** Every geometry stream of this session (Part 2, 2026-10-05 multi-target decision group). */
+	const geometryStreams = new GeometryStreamCoordinator({
+		send(message) {
+			workbenchBridge?.sendGeometry(message)
+		},
+		requestFrame: callback => requestAnimationFrame(callback),
+		cancelFrame: handle => cancelAnimationFrame(handle),
+	})
+	geometryStreams.subscribe(() => { geometryVersion.value++ })
+	const pinEngine = new PinPlacementEngine()
 
 	/**
 	 * The iframe document is created once per runtime generation. Locale, viewport, theme and
@@ -168,10 +212,6 @@ export function createPreviewSession(state: WorkbenchState) {
 		target.postMessage({ channel, ...body }, window.location.origin)
 	}
 
-	function postHighlight(payload: PreviewHighlightPayload): void {
-		post(PREVIEW_HIGHLIGHT_CHANNEL, { payload })
-	}
-
 	function postTargeting(payload: PreviewTargetingPayload): void {
 		post(PREVIEW_TARGETING_CHANNEL, { payload })
 	}
@@ -196,51 +236,77 @@ export function createPreviewSession(state: WorkbenchState) {
 		state.selectedWidgetId.value = id
 	}
 
+	function currentVariantId(): string | undefined {
+		return state.contextOptions.value.variants.selected || undefined
+	}
+
+	/** Keeps the coordinator's runtime context equal to the mounted View, Variant and generation. */
+	function syncGeometryContext(): void {
+		const viewId = state.selectedViewId.value
+		const variantId = currentVariantId()
+		geometryStreams.setContext(viewId
+			? {
+					previewSessionId: previewSessionId.value,
+					runtimeGenerationId: runtimeGenerationId.value,
+					viewId,
+					...(variantId ? { variantId } : {}),
+				}
+			: undefined)
+	}
+
+	/** Recomputes which Widgets need geometry: hover candidate, selection highlight, pins (decision 6). */
+	function updateGeometryDemand(): void {
+		const demand: GeometryDemand[] = []
+		const hover = hoverWidgetId.value
+		if (hover && hover !== 'root') demand.push({ consumerId: 'hover', widgetId: hover, tier: 'targeting' })
+		if (selectionTarget) {
+			demand.push({ consumerId: 'selection', widgetId: selectionTarget.widgetId, tier: 'highlight', navigationRequestId: selectionTarget.navigationRequestId })
+		}
+		const pins = pinGeometryDemand(pinThreads.value, { viewId: state.selectedViewId.value, variantId: currentVariantId() })
+		const openThreadId = pinOptions.value.openThreadId
+		for (const pin of pins) {
+			demand.push(openThreadId && pin.consumerId === `pin:${openThreadId}` ? { ...pin, tier: 'targeting' } : pin)
+		}
+		geometryStreams.setDemand(demand)
+	}
+
 	/**
-	 * Opens a geometry request for the selected Widget (the N = 1 case of the accepted per-Widget
-	 * stream model, Discussion #2). Every call mints a fresh `navigationRequestId`, so reports for an
-	 * earlier Widget, Variant or content-viewport size fail the correlation gate. Nothing is drawn
-	 * until a current report arrives; there is no last-known geometry.
+	 * Opens the selection highlight request for the selected Widget. Every call mints a fresh
+	 * `navigationRequestId`, so reports for an earlier Widget, Variant or content-viewport size fail
+	 * the correlation gate. Nothing is drawn until a current report arrives; there is no last-known
+	 * geometry. Other consumers of the same Widget share the resulting stream.
 	 */
 	function acquireSelectionGeometry(): void {
-		activeGeometryRequest = undefined
+		selectionTarget = undefined
 		selectionGeometry.value = undefined
 		const viewId = state.selectedViewId.value
 		const widgetId = state.selectedWidgetId.value
 		if (!viewId || !widgetId || !navigationCoordinator) {
 			selectionVisibility.value = 'none'
+			updateGeometryDemand()
 			return
 		}
 		selectionVisibility.value = 'awaiting'
-		const variantId = state.contextOptions.value.variants.selected || undefined
+		const variantId = currentVariantId()
 		const target: PreviewNavigationTarget = Object.freeze({
-			navigationRequestId: `geometry-${++geometryRequestSequence}-${Date.now()}`,
+			navigationRequestId: `selection-${previewSessionId.value}-${++interactionSequence}-${Date.now()}`,
 			viewId,
 			...(variantId ? { variantId } : {}),
 			widgetId,
 		})
 		const request = navigationCoordinator.requestChecksNavigation(target)
-		if (request.status !== 'execute') return // Comment mode: suspended, reacquired on exit (Part 3).
-		navigationCoordinator.applyNavigationResolution(target, 'resolved')
-		activeGeometryRequest = target
-		if (!workbenchBridge || handshakePhase.value !== 'open') return // Sent again after the capability ACK.
-		workbenchBridge.sendGeometry({
-			type: 'geometry.acquire.request',
-			context: {
-				previewSessionId: previewSessionId.value,
-				runtimeGenerationId: runtimeGenerationId.value,
-				viewId,
-				...(variantId ? { variantId } : {}),
-				navigationRequestId: target.navigationRequestId,
-				widgetId,
-			},
-			payload: {},
-		})
+		if (request.status === 'execute') {
+			// Comment mode suspends the highlight consumer instead; it is reacquired on exit (Part 3).
+			navigationCoordinator.applyNavigationResolution(target, 'resolved')
+			selectionTarget = target
+		}
+		updateGeometryDemand()
 	}
 
 	function receiveGeometryReport(message: GeometryAcquireResponse): void {
-		const target = activeGeometryRequest
-		if (!target || !navigationCoordinator) return
+		if (geometryStreams.accept(message) !== 'accepted') return
+		const target = selectionTarget
+		if (!target || !navigationCoordinator || message.context.widgetId !== target.widgetId) return
 		const { rect, regions } = message.payload
 		const viewport = state.contextOptions.value.viewports.selectedDimensions
 		const zeroArea = rect.width === 0 || rect.height === 0
@@ -256,10 +322,6 @@ export function createPreviewSession(state: WorkbenchState) {
 			visibility: visibility === 'visible' ? 'visible' : visibility === 'offscreen' ? 'offscreen' : 'hidden',
 		})
 		if (accepted.status !== 'accepted') return
-		if (!geometryProducerSeen) {
-			geometryProducerSeen = true
-			postHighlight({}) // The overlay takes over; clear the legacy in-iframe highlight.
-		}
 		selectionVisibility.value = visibility
 		selectionGeometry.value = visibility === 'visible'
 			? Object.freeze({ widgetId: target.widgetId, geometryRevision: message.context.geometryRevision, rect, regions })
@@ -267,27 +329,68 @@ export function createPreviewSession(state: WorkbenchState) {
 	}
 
 	function resetSelectionGeometry(): void {
-		activeGeometryRequest = undefined
+		selectionTarget = undefined
 		selectionGeometry.value = undefined
 		selectionVisibility.value = state.selectedWidgetId.value ? 'awaiting' : 'none'
+	}
+
+	function freshInteractionId(): string {
+		return `target-${previewSessionId.value}-${++interactionSequence}-${Date.now()}`
+	}
+
+	function clearHover(): void {
+		if (hoverWidgetId.value === undefined && hoverPurpose.value === undefined) return
+		hoverWidgetId.value = undefined
+		hoverPurpose.value = undefined
+		updateGeometryDemand()
+	}
+
+	/**
+	 * Enters the targeting interaction the current tool implies: Select is `inspection` (hover
+	 * outline and click-to-select), Interact has none. A fresh `targetingInteractionId` supersedes
+	 * the previous interaction at once (Part 3, 2026-10-02).
+	 */
+	function enterToolTargeting(): void {
+		if (isCommentMode.value) return
+		clearHover()
+		if (canvasTool.value !== 'select' || !state.selectedView.value) {
+			if (targetingInteractionId.value) {
+				targeting.explicitCancel()
+				targetingInteractionId.value = undefined
+				postTargeting({ type: 'exit' })
+			}
+			return
+		}
+		const id = freshInteractionId()
+		targeting.enterMode('inspection', id)
+		targetingInteractionId.value = id
+		postTargeting({ type: 'enter', purpose: 'inspection', targetingInteractionId: id })
 	}
 
 	function enterCommentMode(): void {
 		if (!state.selectedView.value) return
 		isCommentMode.value = true
 		navigationCoordinator?.enterCommentMode()
-		targetingInteractionId.value = `target-${Date.now()}`
-		postTargeting({ type: 'enter', purpose: 'comment-range', targetingInteractionId: targetingInteractionId.value })
-		postHighlight({ commentMode: true, targetingInteractionId: targetingInteractionId.value })
+		clearHover()
+		const id = freshInteractionId()
+		targeting.enterMode('comment-range', id)
+		targetingInteractionId.value = id
+		postTargeting({ type: 'enter', purpose: 'comment-range', targetingInteractionId: id })
+		// The Checks/selection highlight consumer is suspended and hidden (Part 3). Its stream is
+		// released unless a pin uses the same Widget; pins stay tracked (decision 8).
+		selectionTarget = undefined
+		selectionGeometry.value = undefined
+		updateGeometryDemand()
 	}
 
 	function exitCommentMode(): void {
 		if (!isCommentMode.value) return
 		isCommentMode.value = false
+		targeting.explicitCancel()
 		targetingInteractionId.value = undefined
 		postTargeting({ type: 'exit' })
-		postHighlight({ commentMode: false })
 		leaveCommentTracking()
+		enterToolTargeting()
 	}
 
 	/** Part 3: the Widget highlight was suspended for comment-range selection; reacquire it with a fresh request. */
@@ -299,6 +402,7 @@ export function createPreviewSession(state: WorkbenchState) {
 	function setCanvasTool(tool: CanvasTool): void {
 		exitCommentMode()
 		canvasTool.value = tool
+		enterToolTargeting()
 	}
 
 	function toggleCommentMode(): void {
@@ -311,14 +415,57 @@ export function createPreviewSession(state: WorkbenchState) {
 		commentTargetHandler = handler
 	}
 
+	/**
+	 * Declares the in-scope comment threads whose pins the canvas tracks. Their Widgets get
+	 * geometry streams in decision 6 order; `pinPlacements` reports each thread's placement.
+	 * Pins stay tracked during Comment mode (decision 8).
+	 */
+	function setPinThreads(threads: readonly PinThreadInput[], options: PinTrackingOptions = {}): void {
+		pinThreads.value = Object.freeze([...threads])
+		pinOptions.value = Object.freeze({ ...options })
+		updateGeometryDemand()
+	}
+
+	const pinPlacements = computed<readonly PinPlacement[]>(() => {
+		void geometryVersion.value
+		const threads = pinThreads.value
+		if (!threads.length) return []
+		const mapping = canvasMapping.value
+		return pinEngine.place(threads, {
+			viewId: state.selectedViewId.value,
+			variantId: currentVariantId(),
+			viewport: state.contextOptions.value.viewports.selectedDimensions,
+			...(mapping.mapping ? { mapping: mapping.mapping } : {}),
+			...(mapping.stage ? { stage: mapping.stage } : {}),
+			live: sessionStatus.value === 'live',
+			multiTarget: geometryStreams.isMultiTarget(),
+			report: widgetId => geometryStreams.report(widgetId),
+			isTracked: widgetId => geometryStreams.isTracked(widgetId),
+		})
+	})
+
+	const hoverCandidate = computed<HoverCandidate | undefined>(() => {
+		void geometryVersion.value
+		const widgetId = hoverWidgetId.value
+		const purpose = hoverPurpose.value
+		if (!widgetId || !purpose) return undefined
+		const geometry = geometryStreams.report(widgetId)
+		return Object.freeze({ widgetId, purpose, ...(geometry ? { geometry } : {}) })
+	})
+
 	/** Starts a fresh runtime generation, e.g. after another View is selected. */
 	function replaceGeneration(): void {
+		const previousGeneration = runtimeGenerationId.value
 		runtimeGenerationId.value = `gen-${Date.now()}-${++generationSequence}`
 		captureIframeSourceContext()
-		geometryProducerSeen = false
 		runtimeFeatures.value = []
+		targeting.onGenerationTeardown(previousGeneration)
+		hoverWidgetId.value = undefined
+		hoverPurpose.value = undefined
 		navigationCoordinator?.onRuntimeGenerationBoundary()
 		resetSelectionGeometry()
+		// Generation boundary: every stream is void until the new generation's capability ACK.
+		syncGeometryContext()
 		if (workbenchBridge) {
 			workbenchBridge.replaceGenerationForLifecycle(runtimeGenerationId.value, 'reload')
 			handshakePhase.value = 'initiating'
@@ -340,6 +487,7 @@ export function createPreviewSession(state: WorkbenchState) {
 						post(PREVIEW_WIRE_CHANNEL, { message })
 					},
 				},
+				// `geometry.multi-target` is optional: a runtime without it gets the single-stream fallback.
 				declaration => declaration.protocolVersion === 1
 					? { ok: true }
 					: { ok: false, reason: 'capability.unsupported_protocol_version' },
@@ -349,11 +497,47 @@ export function createPreviewSession(state: WorkbenchState) {
 				viewId: state.selectedViewId.value || '',
 				selectedWidgetId: state.selectedWidgetId.value,
 			})
+			syncGeometryContext()
 		}
 		catch (cause) {
 			handshakePhase.value = 'failed'
 			state.error.value = cause instanceof Error ? cause.message : t('workbench.errors.bridgeInitFailed')
 		}
+	}
+
+	function onCapabilityAcknowledged(features: readonly string[]): void {
+		handshakePhase.value = 'open'
+		hasConnected.value = true
+		runtimeFeatures.value = features
+		// The document may have missed context changes made while it loaded; re-send those, then reopen geometry.
+		if (contextDiffersFromSource()) notifyIframeContext()
+		syncGeometryContext()
+		geometryStreams.setMultiTarget(features.includes(MULTI_TARGET_GEOMETRY_FEATURE))
+		targeting.markGenerationReady(runtimeGenerationId.value)
+		// The new document knows no targeting mode yet: re-enter the active interaction.
+		if (isCommentMode.value && targetingInteractionId.value) {
+			postTargeting({ type: 'enter', purpose: 'comment-range', targetingInteractionId: targetingInteractionId.value })
+		}
+		else enterToolTargeting()
+		// Declare the selection first so its own request identity opens the Widget's stream once.
+		acquireSelectionGeometry()
+		geometryStreams.setReady(true)
+	}
+
+	function receiveHover(payload: PreviewTargetingPayload): void {
+		const generation = payload.runtimeGenerationId
+		const interaction = payload.targetingInteractionId
+		if (!generation || !interaction) return
+		const purpose = targeting.snapshot().purpose
+		const result = payload.widgetId
+			? targeting.reportHoverCandidate(generation, interaction, payload.pointerType ?? 'mouse', { widgetId: payload.widgetId })
+			: targeting.clearHoverCandidate(generation, interaction)
+		if (result.status !== 'candidate' && result.status !== 'accepted') return
+		const next = payload.widgetId
+		if (next === hoverWidgetId.value && purpose === hoverPurpose.value) return
+		hoverWidgetId.value = next
+		hoverPurpose.value = next ? purpose : undefined
+		updateGeometryDemand()
 	}
 
 	async function onWindowMessage(event: MessageEvent): Promise<void> {
@@ -364,14 +548,8 @@ export function createPreviewSession(state: WorkbenchState) {
 		if (data.channel === PREVIEW_WIRE_CHANNEL && data.message && workbenchBridge) {
 			const result = workbenchBridge.receive(data.message)
 			if (result.status === 'ack-dispatched') {
-				handshakePhase.value = 'open'
-				hasConnected.value = true
 				const features = (data.message as { payload?: { features?: unknown } }).payload?.features
-				runtimeFeatures.value = Array.isArray(features) ? features.filter((feature): feature is string => typeof feature === 'string') : []
-				// The document may have missed context changes made while it loaded; re-send those, then reopen geometry.
-				if (contextDiffersFromSource()) notifyIframeContext()
-				acquireSelectionGeometry()
-				if (state.selectedWidgetId.value) postHighlight({ widgetId: state.selectedWidgetId.value })
+				onCapabilityAcknowledged(Array.isArray(features) ? features.filter((feature): feature is string => typeof feature === 'string') : [])
 			}
 			else if (result.status === 'accepted' && result.message.type === 'geometry.acquire.response') receiveGeometryReport(result.message)
 			else if (result.status === 'capability-failure') handshakePhase.value = 'failed'
@@ -381,7 +559,9 @@ export function createPreviewSession(state: WorkbenchState) {
 
 		if (data.channel !== PREVIEW_TARGETING_CHANNEL || !data.payload) return
 		const payload = data.payload as PreviewTargetingPayload
-		if (payload.type === 'select' && payload.widgetId) {
+		if (payload.runtimeGenerationId && payload.runtimeGenerationId !== runtimeGenerationId.value) return
+		if (payload.type === 'hover') receiveHover(payload)
+		else if (payload.type === 'select' && payload.widgetId) {
 			if (payload.viewId && state.selectedViewId.value && payload.viewId !== state.selectedViewId.value) return
 			const isCommentPick = isCommentMode.value
 				&& payload.purpose !== 'inspection'
@@ -396,9 +576,8 @@ export function createPreviewSession(state: WorkbenchState) {
 		}
 		else if (payload.type === 'escape') {
 			if (!isCommentMode.value) return
-			isCommentMode.value = false
-			targetingInteractionId.value = undefined
-			leaveCommentTracking()
+			if (payload.targetingInteractionId && payload.targetingInteractionId !== targetingInteractionId.value) return
+			exitCommentMode()
 		}
 	}
 
@@ -422,6 +601,7 @@ export function createPreviewSession(state: WorkbenchState) {
 	watch(() => state.selectedView.value, (view) => {
 		if (!view && isCommentMode.value) {
 			isCommentMode.value = false
+			targeting.explicitCancel()
 			targetingInteractionId.value = undefined
 			leaveCommentTracking()
 		}
@@ -440,8 +620,10 @@ export function createPreviewSession(state: WorkbenchState) {
 	})
 
 	// A new selected Widget, a Variant change (new runtime context) or a content-viewport size change
-	// (Part 3: inner geometry is invalidated) reopens the geometry request with a fresh identity.
-	// Locale and theme changes keep the request: the runtime reports the re-laid-out geometry itself.
+	// (Part 3: inner geometry is invalidated) reopens the selection request with a fresh identity.
+	// A Variant change ends every stream and reopens it under the new context; a content-box size
+	// change hides every report and reopens every stream (decision 4). Locale and theme changes keep
+	// the streams: the runtime reports the re-laid-out geometry itself.
 	watch(
 		() => [
 			state.selectedViewId.value,
@@ -452,9 +634,15 @@ export function createPreviewSession(state: WorkbenchState) {
 		] as const,
 		(next, previous) => {
 			if (previous && next.every((value, index) => value === previous[index])) return
+			const contextChanged = !previous || next[0] !== previous[0] || next[2] !== previous[2]
+			const sizeChanged = !!previous && (next[3] !== previous[3] || next[4] !== previous[4])
+			if (contextChanged) {
+				selectionTarget = undefined
+				clearHover()
+				syncGeometryContext()
+			}
+			if (sizeChanged) geometryStreams.invalidateContentBox()
 			acquireSelectionGeometry()
-			// Until a runtime reports geometry, the legacy in-iframe highlight is the visible cue.
-			if (!geometryProducerSeen && state.selectedWidgetId.value) postHighlight({ widgetId: state.selectedWidgetId.value })
 		},
 	)
 
@@ -471,6 +659,11 @@ export function createPreviewSession(state: WorkbenchState) {
 		setCanvasTool,
 		selectionGeometry,
 		selectionVisibility,
+		hoverCandidate,
+		canvasMapping,
+		setPinThreads,
+		pinPlacements,
+		geometryStreams,
 		selectWidget,
 		retry,
 		toggleCommentMode,

@@ -113,6 +113,8 @@ function zoomAnchor(viewportPoint?: Point): { anchor: Point; viewportPoint: Poin
 
 async function renderScale(next: number, anchor: { anchor: Point; viewportPoint: Point }): Promise<void> {
 	scale.value = next
+	// The zoom tween is a Workbench-owned animation: each step remeasures the mapping once.
+	markMappingDirty()
 	await nextTick()
 	const position = anchoredScroll({ frame: dims.value, stage: stageSize.value, insets: insets.value, scale: next, ...anchor })
 	stage.value?.scrollTo({ left: position.x, top: position.y, behavior: 'instant' })
@@ -213,6 +215,7 @@ onMounted(() => {
 		resizeObserver = new ResizeObserver(measureStage)
 		resizeObserver.observe(stage.value)
 		stage.value.addEventListener('wheel', onWheel, { passive: false })
+		stage.value.addEventListener('scroll', onStageScroll, { passive: true })
 	}
 	window.addEventListener('blur', resetGestures)
 	window.addEventListener('keydown', onCanvasKeydown, { capture: true })
@@ -224,6 +227,7 @@ onBeforeUnmount(() => {
 	resizeObserver?.disconnect()
 	resizeObserver = undefined
 	stage.value?.removeEventListener('wheel', onWheel)
+	stage.value?.removeEventListener('scroll', onStageScroll)
 	window.removeEventListener('blur', resetGestures)
 	window.removeEventListener('keydown', onCanvasKeydown, { capture: true })
 	shell.onCanvasCommands(undefined)
@@ -233,17 +237,52 @@ onBeforeUnmount(() => {
 // Overlay
 // ---------------------------------------------------------------------------------------------
 
-const overlayActive = computed(() => !!preview.selectionGeometry.value && !preview.isCommentMode.value)
-const { mapping, status: mappingStatus } = useCanvasMapping({
+/** The Checks/selection highlight; Comment mode hides it (Part 3). The RootShell is the frame itself. */
+const highlightGeometry = computed(() => {
+	const geometry = preview.selectionGeometry.value
+	return preview.isCommentMode.value || geometry?.widgetId === 'root' ? undefined : geometry
+})
+/** The runtime's hover candidate, drawn by the overlay (Part 3); the selected Widget needs no hover outline. */
+const hoverCandidate = computed(() => {
+	const candidate = preview.hoverCandidate.value
+	if (!candidate || candidate.widgetId === 'root') return undefined
+	if (candidate.purpose === 'inspection' && candidate.widgetId === highlightGeometry.value?.widgetId) return undefined
+	return candidate
+})
+const pinsTracked = computed(() => preview.pinPlacements.value.length > 0)
+const overlayActive = computed(() => !!highlightGeometry.value || !!hoverCandidate.value || pinsTracked.value)
+/** Highlight and targeting overlays keep the accepted per-frame loop; pins alone are event-driven. */
+const mappingMode = computed(() => highlightGeometry.value || hoverCandidate.value ? 'continuous' as const : 'event-driven' as const)
+const { mapping, status: mappingStatus, markDirty: markMappingDirty } = useCanvasMapping({
 	iframe: preview.previewIframe,
 	overlay: overlayLayer,
 	viewport: dims,
 	active: overlayActive,
+	mode: mappingMode,
 })
 const mappingPaused = computed(() => overlayActive.value && mappingStatus.value === 'unavailable')
+watch([scale, offset, dims], () => markMappingDirty(), { flush: 'post' })
+
+// The visible stage in overlay-layer px, for pins whose mapped point leaves it (decision 7).
+const stageScroll = ref({ x: 0, y: 0 })
+function onStageScroll(): void {
+	stageScroll.value = currentScroll()
+}
+const stageBounds = computed(() => ({
+	left: stageScroll.value.x,
+	top: stageScroll.value.y,
+	right: stageScroll.value.x + stageSize.value.width,
+	bottom: stageScroll.value.y + stageSize.value.height,
+}))
+watch([mapping, stageBounds], ([nextMapping, stageArea]) => {
+	preview.canvasMapping.value = Object.freeze({ ...(nextMapping ? { mapping: nextMapping } : {}), stage: stageArea })
+}, { immediate: true })
 
 const widgetNode = computed<WidgetTreeNode | undefined>(() => widgetTreeResult.value?.status === 'valid'
 	? findWidgetInTree(widgetTreeResult.value.root, selectedWidgetId.value)
+	: undefined)
+const hoverNode = computed<WidgetTreeNode | undefined>(() => widgetTreeResult.value?.status === 'valid' && hoverCandidate.value
+	? findWidgetInTree(widgetTreeResult.value.root, hoverCandidate.value.widgetId)
 	: undefined)
 
 // ---------------------------------------------------------------------------------------------
@@ -559,8 +598,10 @@ function switchToBase(): void {
             <CanvasOverlay
               v-if="showFrame && overlayActive"
               :mapping="mapping"
-              :geometry="preview.selectionGeometry.value"
+              :geometry="highlightGeometry"
               :widget-type="widgetNode?.type"
+              :hover="hoverCandidate"
+              :hover-type="hoverNode?.type"
               :viewport="dims"
             />
           </div>

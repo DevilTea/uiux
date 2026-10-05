@@ -6,6 +6,11 @@ import {
 	type PreviewProtocolTransport,
 	type PreviewWireMessage,
 } from '../src/preview/protocol/bridge'
+import {
+	MAX_TRACKED_WIDGETS,
+	MULTI_TARGET_GEOMETRY_FEATURE,
+	validateGeometryMessage,
+} from '../src/preview/protocol/schema'
 import type {
 	CapabilityAckMessage,
 	CapabilityDeclareMessage,
@@ -67,6 +72,31 @@ describe('Preview protocol bridge', () => {
 		expect(runtime.receive(request)).toEqual({ status: 'gated' })
 		expect(runtime.receive(workbenchOutbound[0])).toMatchObject({ status: 'accepted' })
 		expect(runtime.receive(request)).toMatchObject({ status: 'accepted', message: request })
+	})
+
+	it('carries geometry.release Workbench → runtime under the acquire context, gated like every request', () => {
+		expect(MULTI_TARGET_GEOMETRY_FEATURE).toBe('geometry.multi-target')
+		expect(MAX_TRACKED_WIDGETS).toBe(64)
+		const workbenchOutbound: PreviewWireMessage[] = []
+		const runtimeOutbound: PreviewWireMessage[] = []
+		const workbench = new WorkbenchPreviewProtocolBridge('session-a', collector(workbenchOutbound), () => compatible)
+		const runtime = new RuntimePreviewProtocolBridge('session-a', 'generation-a', { protocolVersion: 1, features: ['geometry', MULTI_TARGET_GEOMETRY_FEATURE] }, collector(runtimeOutbound))
+		workbench.admitGeneration('generation-a', 'initial')
+		const release = { type: 'geometry.release', context: { ...acquireRequest().context, navigationRequestId: 'stream-1' }, payload: {} } as const
+		expect(workbench.sendGeometry(release)).toEqual({ status: 'gated' })
+		workbench.receive(runtime.declareCapabilities())
+		expect(workbench.sendGeometry(release)).toEqual({ status: 'sent' })
+		runtime.receive(workbenchOutbound[0])
+		expect(runtime.receive(release)).toMatchObject({ status: 'accepted', message: release })
+		// Release travels only Workbench → runtime.
+		expect(workbench.receive(release)).toEqual({ status: 'wrong-direction' })
+		expect(runtime.sendGeometry(release as never)).toEqual({ status: 'wrong-direction' })
+		// Unknown additive payload fields are ignored; geometryRevision and a missing stream identity are not.
+		expect(validateGeometryMessage({ ...release, payload: { reason: 'filter' } }).ok).toBe(true)
+		expect(validateGeometryMessage({ ...release, context: { ...release.context, geometryRevision: 3 } }).ok).toBe(false)
+		const withoutStream: Record<string, unknown> = { ...release.context }
+		delete withoutStream.navigationRequestId
+		expect(validateGeometryMessage({ ...release, context: withoutStream }).ok).toBe(false)
 	})
 
 	it('does not open the Workbench gate when ACK transport dispatch fails and can retry the pinned declaration', () => {

@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from '#imports'
 import { mapContourAffine, mapPointAffine, type AffineOuterMapping } from '../../../src/preview/outer-precision'
 import type { Contour } from '../../../src/preview/protocol/schema'
-import type { SelectionGeometry } from '../../composables/usePreviewSession'
+import type { HoverCandidate, SelectionGeometry } from '../../composables/usePreviewSession'
 
 /**
  * The Workbench overlay above the preview iframe (brief b, DESIGN.md "Blueprint selection label").
@@ -17,6 +17,9 @@ const props = defineProps<{
 	mapping?: AffineOuterMapping
 	geometry?: SelectionGeometry
 	widgetType?: string
+	/** The runtime's hover candidate (Part 3): a transient, non-interactive outline beneath every other mark. */
+	hover?: HoverCandidate
+	hoverType?: string
 	/** Inner content viewport (the logical View size), for clipping the label anchors. */
 	viewport: Readonly<{ width: number; height: number }>
 }>()
@@ -36,6 +39,31 @@ function pathOf(contour: Contour): string {
 		}
 	}).join('')
 }
+
+/**
+ * Select tool: a 1px Iris/60 outline and a small mono type chip. Comment mode: a dashed Marker
+ * outline and "Comment on {type}" (brief b §5, brief c §5). Nothing is drawn without a current
+ * report of the candidate's own stream, and nothing when it has no reliably visible region.
+ */
+const hoverMark = computed(() => {
+	const { mapping, hover } = props
+	const geometry = hover?.geometry
+	if (!mapping || !hover || !geometry || !geometry.regions.length) return undefined
+	const left = Math.max(0, geometry.rect.x)
+	const top = Math.max(0, geometry.rect.y)
+	const topLeft = mapPointAffine({ x: left, y: top }, mapping)
+	const comment = hover.purpose === 'comment-range'
+	const type = props.hoverType ?? ''
+	return {
+		comment,
+		paths: geometry.regions.map(region => ({ id: region.regionId, d: pathOf(mapContourAffine(region.contour, mapping)) })),
+		chip: {
+			left: topLeft.x - 1,
+			top: topLeft.y - CHIP_HEIGHT - CHIP_GAP >= 0 ? topLeft.y - CHIP_HEIGHT - CHIP_GAP : topLeft.y + CHIP_GAP,
+			text: comment ? t('comment.hoverChip', { type: type || `#${hover.widgetId}` }) : type || `#${hover.widgetId}`,
+		},
+	}
+})
 
 const selection = computed(() => {
 	const { mapping, geometry } = props
@@ -68,6 +96,31 @@ const selection = computed(() => {
     data-canvas-overlay
     aria-hidden="true"
   >
+    <template v-if="hoverMark">
+      <svg
+        class="absolute inset-0 size-full overflow-visible"
+        data-overlay-hover
+        :data-hover-purpose="hoverMark.comment ? 'comment-range' : 'inspection'"
+      >
+        <g fill="none">
+          <path
+            v-for="path in hoverMark.paths"
+            :key="path.id"
+            :d="path.d"
+            :class="hoverMark.comment ? 'stroke-comment' : 'stroke-selection/60'"
+            stroke-width="1"
+            :stroke-dasharray="hoverMark.comment ? '4 3' : undefined"
+            stroke-linejoin="round"
+          />
+        </g>
+      </svg>
+      <span
+        class="blueprint-chip"
+        :class="hoverMark.comment ? 'text-annotation' : ''"
+        data-hover-chip
+        :style="{ left: `${hoverMark.chip.left}px`, top: `${hoverMark.chip.top}px` }"
+      >{{ hoverMark.chip.text }}</span>
+    </template>
     <template v-if="selection">
       <svg
         class="absolute inset-0 size-full overflow-visible"

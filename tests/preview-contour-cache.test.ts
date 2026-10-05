@@ -58,8 +58,37 @@ describe('Preview authoritative contour cache', () => {
 		source[0] = region('evil', 99)
 		expect(controller.getSnapshot()?.regions[0]?.regionId).toBe('r1')
 		expect(controller.getSnapshot()?.rect.x).toBe(0)
+		controller.endAcquisition()
 		expect(controller.commitAcquisition({ type: 'geometry.acquire.response', context: context(8), payload: { rect, regions: [] } }).status).toBe('stale')
 		expect(versions.calls).toBe(1)
+		expect(controller.getSnapshot()).toBeUndefined()
+	})
+
+	it('accepts pushed stream reports with advancing revisions and supersedes contour work of the old revision', () => {
+		const versions = allocator()
+		const controller = new ContourCacheController(scope, () => versions.allocate())
+		expect(controller.commitAcquisition({ type: 'geometry.acquire.response', context: context(1), payload: { rect, regions: [region('r1', 0.8)] } }).status).toBe('stale')
+		controller.beginAcquisition()
+		expect(controller.isStreamOpen()).toBe(true)
+		expect(controller.commitAcquisition({ type: 'geometry.acquire.response', context: context(1), payload: { rect, regions: [region('r1', 0.8)] } }).status).toBe('committed')
+		expect(controller.startFull({ type: 'contour.full.request', context: context(1), payload: { sequence: 4, targetMaxError: 0.4 } }).status).toBe('started')
+		// The runtime pushes a new complete baseline (scroll, reflow…): it replaces the cache atomically.
+		const pushed = controller.commitAcquisition({
+			type: 'geometry.acquire.response', context: context(3), payload: { rect: { x: 0, y: -5, width: 10, height: 10 }, regions: [region('s1', 0.6)] },
+		})
+		expect(pushed).toMatchObject({ status: 'committed', supersededSequence: 4, snapshot: { geometryRevision: 3, snapshotVersion: 41 } })
+		// Work for the superseded revision is stale, and the new revision has its own sequence domain.
+		expect(controller.commitFull({ type: 'contour.full.response', context: context(1), payload: { sequence: 4, regions: [region('r1', 0.3)] } }).status).toBe('stale')
+		expect(controller.startFull({ type: 'contour.full.request', context: context(3), payload: { sequence: 1, targetMaxError: 0.4 } }).status).toBe('started')
+		// Equal or older revisions never replace the stream's current report.
+		expect(controller.commitAcquisition({ type: 'geometry.acquire.response', context: context(3), payload: { rect, regions: [] } }).status).toBe('non-advancing-geometry-revision')
+		expect(controller.commitAcquisition({ type: 'geometry.acquire.response', context: context(2), payload: { rect, regions: [] } }).status).toBe('non-advancing-geometry-revision')
+		expect(controller.getSnapshot()?.geometryRevision).toBe(3)
+		// A zero-area rect with no regions is a valid report for an unrendered Widget.
+		expect(controller.commitAcquisition({ type: 'geometry.acquire.response', context: context(4), payload: { rect: { x: 0, y: 0, width: 0, height: 0 }, regions: [] } })).toMatchObject({ status: 'committed', supersededSequence: 1 })
+		expect(controller.startFull({ type: 'contour.full.request', context: context(4), payload: { sequence: 1, targetMaxError: 0.4 } }).status).toBe('started')
+		expect(controller.endAcquisition()).toEqual({ supersededSequence: 1 })
+		expect(controller.isStreamOpen()).toBe(false)
 	})
 
 	it('rejects malformed or stale acquisition without consuming snapshot versions', () => {

@@ -201,7 +201,7 @@ export class PreviewTargetingState<Candidate extends JsonValue = JsonValue> {
 		})
 	}
 
-	private eventGate(runtimeGenerationId: string, targetingInteractionId: string): Extract<TargetingEventResult<Candidate>, { status: 'inactive' | 'suspended' | 'stale-generation' | 'stale-interaction' }> | undefined {
+	private eventGate(runtimeGenerationId: string, targetingInteractionId: string): Readonly<{ status: 'inactive' | 'suspended' | 'stale-generation' | 'stale-interaction' }> | undefined {
 		assertOpaqueId(runtimeGenerationId, 'runtimeGenerationId')
 		assertOpaqueId(targetingInteractionId, 'targetingInteractionId')
 		if (!this.purpose) return { status: 'inactive' }

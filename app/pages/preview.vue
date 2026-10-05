@@ -6,14 +6,17 @@ import { describeFetchError } from '../utils/fetch-error'
 import { resolveDefaultLocale, resolveDefaultThemeId } from '../../src/preview/render-context-options'
 import type { WorkspaceManifest } from '../../src/domain/workspace/schema'
 import { RuntimePreviewProtocolBridge } from '../../src/preview/protocol/bridge'
+import { MULTI_TARGET_GEOMETRY_FEATURE } from '../../src/preview/protocol/schema'
+import { RuntimeGeometryProducer } from '../../src/preview/geometry-producer'
+import { createDomGeometryMeasurer } from '../../src/preview/dom-geometry'
+import { attachGeometrySignals, type GeometrySignalSubscription } from '../../src/preview/geometry-signals'
 import {
 	PREVIEW_WIRE_CHANNEL,
 	PREVIEW_CONTEXT_CHANNEL,
-	PREVIEW_HIGHLIGHT_CHANNEL,
 	PREVIEW_TARGETING_CHANNEL,
 	type PreviewContextPayload,
-	type PreviewHighlightPayload,
 	type PreviewTargetingPayload,
+	type PreviewTargetingPurpose,
 } from '../../src/preview/protocol/transport'
 import type {
 	PreviewMaterializationResult,
@@ -56,9 +59,15 @@ const hostColorScope = computed(() => themeId.value === 'dark' ? 'dark' : 'light
 const variantName = ref<string | undefined>((route.query.variant as string) || undefined)
 const harnessMode = computed(() => route.query.harness === 'formal')
 
-const highlightedWidgetId = ref<string>()
-const isCommentMode = ref(false)
+/**
+ * The targeting interaction Workbench entered (Part 3): `inspection` for the Select tool,
+ * `comment-range` for Comment mode, none for Interact. The runtime hit-tests and reports the
+ * hover candidate; Workbench draws every outline. Nothing in this document is restyled for it.
+ */
+const targetingPurpose = ref<PreviewTargetingPurpose>()
+const isCommentMode = computed(() => targetingPurpose.value === 'comment-range')
 const activeTargetingInteractionId = ref<string>()
+let hoverCandidateWidgetId: string | undefined
 const viewData = ref<ViewRead>()
 const loading = ref(true)
 const error = ref<string>()
@@ -67,6 +76,8 @@ const handshakeStatus = ref<'initiating' | 'open' | 'failed'>('initiating')
 const previewHostElement = ref<HTMLElement>()
 let activeBridge: PreviewRuntimeBridge | undefined
 let runtimeBridge: RuntimePreviewProtocolBridge | undefined
+let geometryProducer: RuntimeGeometryProducer | undefined
+let geometrySignals: GeometrySignalSubscription | undefined
 const materializationResult = ref<PreviewMaterializationResult>()
 
 const activeContext = computed<ResolvedRenderContext>(() => ({
@@ -92,71 +103,92 @@ function findTargetWidgetId(target: EventTarget | null): string {
 	return widgetEl?.dataset.widgetId || 'root'
 }
 
+function postTargetingToWorkbench(payload: PreviewTargetingPayload) {
+	if (!window.parent || window.parent === window) return
+	window.parent.postMessage({ channel: PREVIEW_TARGETING_CHANNEL, payload }, window.location.origin)
+}
+
+/** Reports a changed hover candidate for the active interaction; touch has no hover (Part 3). */
+function reportHoverCandidate(widgetId: string | undefined, pointerType: string) {
+	const targetingInteractionId = activeTargetingInteractionId.value
+	if (!targetingPurpose.value || !targetingInteractionId) return
+	if (widgetId === hoverCandidateWidgetId) return
+	hoverCandidateWidgetId = widgetId
+	postTargetingToWorkbench({
+		type: 'hover',
+		...(widgetId ? { widgetId } : {}),
+		viewId: viewId.value,
+		targetingInteractionId,
+		runtimeGenerationId: runtimeGenerationId.value,
+		...(pointerType === 'mouse' || pointerType === 'pen' ? { pointerType } : {}),
+	})
+}
+
 function handlePreviewPointerMove(event: PointerEvent) {
-	if (!isCommentMode.value) return
-	const targetId = findTargetWidgetId(event.target)
-	highlightedWidgetId.value = targetId
-	if (window.parent && window.parent !== window) {
-		window.parent.postMessage({
-			channel: PREVIEW_TARGETING_CHANNEL,
-			payload: {
-				type: 'hover',
-				widgetId: targetId,
-				viewId: viewId.value,
-				targetingInteractionId: activeTargetingInteractionId.value,
-			},
-		}, window.location.origin)
-	}
+	if (!targetingPurpose.value || event.pointerType === 'touch') return
+	reportHoverCandidate(findTargetWidgetId(event.target), event.pointerType)
+}
+
+function handlePreviewPointerLeave(event: PointerEvent) {
+	if (event.pointerType === 'touch') return
+	reportHoverCandidate(undefined, event.pointerType)
 }
 
 function handlePreviewPointerClick(event: MouseEvent) {
+	const targetingInteractionId = activeTargetingInteractionId.value
 	if (!isCommentMode.value) {
 		// Outside comment mode a click selects the hit-tested widget in the Workbench tree and Inspector.
 		// The widget's own interaction still runs; nothing is prevented.
-		if (harnessMode.value || !window.parent || window.parent === window) return
-		const targetId = findTargetWidgetId(event.target)
-		highlightedWidgetId.value = targetId
-		window.parent.postMessage({
-			channel: PREVIEW_TARGETING_CHANNEL,
-			payload: {
-				type: 'select',
-				purpose: 'inspection',
-				widgetId: targetId,
-				viewId: viewId.value,
-			},
-		}, window.location.origin)
+		if (harnessMode.value) return
+		postTargetingToWorkbench({
+			type: 'select',
+			purpose: 'inspection',
+			widgetId: findTargetWidgetId(event.target),
+			viewId: viewId.value,
+			...(targetingInteractionId ? { targetingInteractionId } : {}),
+			runtimeGenerationId: runtimeGenerationId.value,
+		})
 		return
 	}
 	event.preventDefault()
 	event.stopPropagation()
-	const targetId = findTargetWidgetId(event.target)
-	highlightedWidgetId.value = targetId
-	if (window.parent && window.parent !== window) {
-		window.parent.postMessage({
-			channel: PREVIEW_TARGETING_CHANNEL,
-			payload: {
-				type: 'select',
-				widgetId: targetId,
-				viewId: viewId.value,
-				targetingInteractionId: activeTargetingInteractionId.value,
-			},
-		}, window.location.origin)
-	}
+	postTargetingToWorkbench({
+		type: 'select',
+		widgetId: findTargetWidgetId(event.target),
+		viewId: viewId.value,
+		...(targetingInteractionId ? { targetingInteractionId } : {}),
+		runtimeGenerationId: runtimeGenerationId.value,
+	})
 }
 
 function handleKeydown(event: KeyboardEvent) {
 	if (event.key === 'Escape' && isCommentMode.value) {
-		isCommentMode.value = false
-		if (window.parent && window.parent !== window) {
-			window.parent.postMessage({
-				channel: PREVIEW_TARGETING_CHANNEL,
-				payload: {
-					type: 'escape',
-					targetingInteractionId: activeTargetingInteractionId.value,
-				},
-			}, window.location.origin)
-		}
+		// Workbench owns the mode exit (Part 3); the runtime only reports the intent.
+		const targetingInteractionId = activeTargetingInteractionId.value
+		postTargetingToWorkbench({
+			type: 'escape',
+			...(targetingInteractionId ? { targetingInteractionId } : {}),
+			runtimeGenerationId: runtimeGenerationId.value,
+		})
 	}
+}
+
+/** Focus moving to the Workbench cancels the transient hover candidate (Part 3); the mode stays. */
+function handleWindowBlur() {
+	reportHoverCandidate(undefined, 'mouse')
+}
+
+function widgetElement(widgetId: string): Element | null {
+	try {
+		return document.querySelector(`[data-widget-id="${CSS.escape(widgetId)}"]`)
+	}
+	catch {
+		return null
+	}
+}
+
+function currentGeometryContext() {
+	return { viewId: viewId.value, ...(variantName.value ? { variantId: variantName.value } : {}) }
 }
 
 function initBridge() {
@@ -165,7 +197,7 @@ function initBridge() {
 		runtimeBridge = new RuntimePreviewProtocolBridge(
 			previewSessionId.value,
 			runtimeGenerationId.value,
-			{ protocolVersion: 1, features: ['geometry'] },
+			{ protocolVersion: 1, features: ['geometry', MULTI_TARGET_GEOMETRY_FEATURE] },
 			{
 				send(message) {
 					if (window.parent && window.parent !== window) {
@@ -174,6 +206,17 @@ function initBridge() {
 				},
 			},
 		)
+		const bridge = runtimeBridge
+		// The geometry producer of this runtime generation (Part 2, multi-target geometry streams).
+		geometryProducer = new RuntimeGeometryProducer({
+			send: (response) => { bridge.sendGeometry(response) },
+			measurer: createDomGeometryMeasurer({ document }),
+			requestFrame: callback => window.requestAnimationFrame(callback),
+			cancelFrame: handle => window.cancelAnimationFrame(handle),
+			now: () => performance.now(),
+		})
+		geometryProducer.setContext(currentGeometryContext())
+		geometrySignals = attachGeometrySignals(window, geometryProducer, widgetElement)
 		runtimeBridge.declareCapabilities()
 	}
 	catch (cause) {
@@ -320,8 +363,12 @@ function onWindowMessage(event: MessageEvent) {
 
 	if (data.channel === PREVIEW_WIRE_CHANNEL && data.message && runtimeBridge) {
 		const bridgeResult = runtimeBridge.receive(data.message)
-		if (bridgeResult.status === 'accepted') {
-			handshakeStatus.value = 'open'
+		if (bridgeResult.status !== 'accepted') return
+		const message = bridgeResult.message
+		if (message.type === 'capability.ack') handshakeStatus.value = 'open'
+		else if ((message.type === 'geometry.acquire.request' || message.type === 'geometry.release') && geometryProducer) {
+			geometryProducer.receive(message)
+			geometrySignals?.refreshObservedWidgets()
 		}
 	}
 	else if (data.channel === PREVIEW_CONTEXT_CHANNEL && data.payload) {
@@ -353,45 +400,24 @@ function onWindowMessage(event: MessageEvent) {
 	}
 	else if (data.channel === PREVIEW_TARGETING_CHANNEL && data.payload) {
 		const payload = data.payload as PreviewTargetingPayload
-		if (payload.type === 'enter') {
-			isCommentMode.value = true
+		if (payload.type === 'enter' && payload.targetingInteractionId) {
+			// A new interaction supersedes the previous one at once; its hover candidate starts empty.
+			targetingPurpose.value = payload.purpose ?? 'comment-range'
 			activeTargetingInteractionId.value = payload.targetingInteractionId
+			hoverCandidateWidgetId = undefined
 		}
 		else if (payload.type === 'exit') {
-			isCommentMode.value = false
+			targetingPurpose.value = undefined
 			activeTargetingInteractionId.value = undefined
-		}
-	}
-	else if (data.channel === PREVIEW_HIGHLIGHT_CHANNEL && data.payload) {
-		const payload = data.payload as PreviewHighlightPayload
-		highlightedWidgetId.value = payload.widgetId
-		if (typeof payload.commentMode === 'boolean') {
-			isCommentMode.value = payload.commentMode
-			activeTargetingInteractionId.value = payload.targetingInteractionId
+			hoverCandidateWidgetId = undefined
 		}
 	}
 }
 
-watch(highlightedWidgetId, (newId, oldId) => {
-	if (typeof document === 'undefined') return
-	if (oldId && previewHostElement.value) {
-		try {
-			const prev = previewHostElement.value.querySelector(`[data-widget-id="${CSS.escape(oldId)}"]`)
-			if (prev) prev.removeAttribute('data-preview-highlighted')
-		}
-		catch {
-			// ignore selector escape errors
-		}
-	}
-	if (newId && newId !== 'root' && previewHostElement.value && !harnessMode.value) {
-		try {
-			const next = previewHostElement.value.querySelector(`[data-widget-id="${CSS.escape(newId)}"]`)
-			if (next) next.setAttribute('data-preview-highlighted', 'true')
-		}
-		catch {
-			// ignore selector escape errors
-		}
-	}
+// The runtime context the producer reports for: streams of another View or Variant stay silent,
+// and streams of the previous context end without a release when it changes.
+watch([viewId, variantName], () => {
+	geometryProducer?.setContext(currentGeometryContext())
 })
 
 watch(() => route.query, (nextQuery) => {
@@ -415,6 +441,7 @@ function absorbCanvasZoomWheel(event: WheelEvent) {
 onMounted(() => {
 	window.addEventListener('message', onWindowMessage)
 	window.addEventListener('keydown', handleKeydown)
+	window.addEventListener('blur', handleWindowBlur)
 	if (window.parent !== window) window.addEventListener('wheel', absorbCanvasZoomWheel, { passive: false })
 	initBridge()
 	loadView()
@@ -423,10 +450,14 @@ onMounted(() => {
 onUnmounted(() => {
 	window.removeEventListener('message', onWindowMessage)
 	window.removeEventListener('keydown', handleKeydown)
+	window.removeEventListener('blur', handleWindowBlur)
 	window.removeEventListener('wheel', absorbCanvasZoomWheel)
+	geometrySignals?.dispose()
+	geometryProducer?.dispose()
 	disposeCurrentRuntime()
 })
 </script>
+
 
 <template>
   <!--
@@ -574,17 +605,20 @@ onUnmounted(() => {
     >
       <!--
         RootShell boundary container. Its content box must equal the selected viewport exactly,
-        so no padding, borders or in-flow chrome here: highlights are inset rings (box-shadow).
+        so no padding, borders or in-flow chrome here. Selection, hover and comment outlines are all
+        drawn by the Workbench overlay from runtime-reported geometry; this document is never
+        restyled to show them. Only the cursor carries Comment mode inside the View.
         The Workbench canvas owns the visual gutter and shows the View, locale and theme outside the iframe.
       -->
       <div
-        class="relative transition-shadow duration-150"
+        class="relative"
         :class="[
-          harnessMode ? '' : ['min-h-screen', highlightedWidgetId === 'root' ? 'ring-2 ring-inset ring-highlight' : ''],
-          isCommentMode ? 'cursor-crosshair ring-2 ring-inset ring-comment/60' : '',
+          harnessMode ? '' : 'min-h-screen',
+          isCommentMode ? 'cursor-crosshair' : '',
         ]"
         data-widget-id="root"
         @pointermove="handlePreviewPointerMove"
+        @pointerleave="handlePreviewPointerLeave"
         @click.capture="handlePreviewPointerClick"
       >
         <!-- Rendered component tree through standalone preview bundle -->
@@ -622,11 +656,3 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
-
-<style scoped>
-:deep([data-widget-id][data-preview-highlighted='true']) {
-  outline: 2px solid var(--wb-highlight, var(--ui-primary)) !important;
-  outline-offset: 2px !important;
-  border-radius: 4px;
-}
-</style>

@@ -2,7 +2,6 @@ import type { PreviewWireMessage, PreviewProtocolTransport } from './bridge'
 
 export const PREVIEW_WIRE_CHANNEL = 'uiux:preview:wire' as const
 export const PREVIEW_CONTEXT_CHANNEL = 'uiux:preview:context' as const
-export const PREVIEW_HIGHLIGHT_CHANNEL = 'uiux:preview:highlight' as const
 export const PREVIEW_TARGETING_CHANNEL = 'uiux:preview:targeting' as const
 
 export type PreviewContextPayload = Readonly<{
@@ -14,17 +13,22 @@ export type PreviewContextPayload = Readonly<{
 	themeId: string
 }>
 
-export type PreviewHighlightPayload = Readonly<{
-	widgetId?: string
-	navigationRequestId?: string
-	commentMode?: boolean
-	targetingInteractionId?: string
-}>
+export type PreviewTargetingPurpose = 'comment-range' | 'inspection'
 
+/**
+ * Targeting traffic on the Preview's targeting channel (Part 3). Workbench sends `enter` (with a
+ * fresh `targetingInteractionId` and its purpose) and `exit`. The runtime hit-tests and sends
+ * `hover` (the current candidate; no `widgetId` clears it), `select` and `escape`, echoing the
+ * active `targetingInteractionId` and its `runtimeGenerationId` so Workbench can reject traffic
+ * from a replaced interaction or a retired generation. Hover candidate geometry is never carried
+ * here: Workbench tracks the candidate Widget with an accepted `geometry.acquire.*` stream.
+ */
 export type PreviewTargetingPayload = Readonly<{
 	type: 'enter' | 'exit' | 'hover' | 'select' | 'escape'
-	purpose?: 'comment-range' | 'inspection'
+	purpose?: PreviewTargetingPurpose
 	targetingInteractionId?: string
+	runtimeGenerationId?: string
+	pointerType?: 'mouse' | 'pen'
 	widgetId?: string
 	viewId?: string
 }>
@@ -39,11 +43,6 @@ export type PreviewContextEnvelope = Readonly<{
 	payload: PreviewContextPayload
 }>
 
-export type PreviewHighlightEnvelope = Readonly<{
-	channel: typeof PREVIEW_HIGHLIGHT_CHANNEL
-	payload: PreviewHighlightPayload
-}>
-
 export type PreviewTargetingEnvelope = Readonly<{
 	channel: typeof PREVIEW_TARGETING_CHANNEL
 	payload: PreviewTargetingPayload
@@ -52,7 +51,6 @@ export type PreviewTargetingEnvelope = Readonly<{
 export type PreviewTransportEnvelope =
 	| PreviewWireEnvelope
 	| PreviewContextEnvelope
-	| PreviewHighlightEnvelope
 	| PreviewTargetingEnvelope
 
 export function isPreviewTransportEnvelope(value: unknown): value is PreviewTransportEnvelope {
@@ -62,8 +60,6 @@ export function isPreviewTransportEnvelope(value: unknown): value is PreviewTran
 		return isRecord(value.message) && typeof value.message.type === 'string'
 	if (channel === PREVIEW_CONTEXT_CHANNEL)
 		return isRecord(value.payload) && typeof (value.payload as Record<string, unknown>).viewId === 'string'
-	if (channel === PREVIEW_HIGHLIGHT_CHANNEL)
-		return isRecord(value.payload)
 	if (channel === PREVIEW_TARGETING_CHANNEL)
 		return isRecord(value.payload) && typeof (value.payload as Record<string, unknown>).type === 'string'
 	return false
