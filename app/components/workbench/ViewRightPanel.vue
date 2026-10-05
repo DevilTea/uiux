@@ -1,32 +1,31 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick } from 'vue'
 import { navigateTo, useI18n } from '#imports'
 import type { TabsItem } from '@nuxt/ui'
 import { useWorkbench } from '../../composables/useWorkbench'
 import type { EvidenceContextSelection, ViewPanelTab } from '../../composables/workbench-types'
 import { viewLocation } from '../../utils/workbench-routes'
-import ReviewsPanel from '../ReviewsPanel.vue'
+import { useCanvasComments } from '../../composables/useCanvasComments'
+import CommentsTab from './comments/CommentsTab.vue'
 import ChecksPanel from '../ChecksPanel.vue'
 import EvidencePanel from '../EvidencePanel.vue'
 import WidgetInspector from './WidgetInspector.vue'
 import SpecDocument from './SpecDocument.vue'
 
 /**
- * The View page's right panel: Comments, Inspect, Spec and Readiness (brief e). Inspect and Spec
- * are the R5 property sheet and Spec document; the Reviews, Checks and Evidence panels stay
- * mounted here until R7 and R9 replace them.
+ * The View page's right panel: Comments, Inspect, Spec and Readiness (brief e). Comments is the
+ * list companion to the canvas pins (R7a); Inspect and Spec are the R5 property sheet and Spec
+ * document; the Checks and Evidence panels stay mounted here until R9 replaces them.
  */
 const tab = defineModel<ViewPanelTab>('tab', { required: true })
-const emit = defineEmits<{ (e: 'threadSelected', threadId: string): void }>()
 
 const { t } = useI18n()
 const workbench = useWorkbench()
 const {
-	selectedView, selectedViewId, selectedWidgetId, reviews, views, workspace,
-	discoveredLocales, localeRevisions, currentActiveContext, authorReadOnly, reviewReadOnly, preview,
+	selectedView, selectedViewId, reviews, views, workspace,
+	discoveredLocales, localeRevisions, currentActiveContext, authorReadOnly,
 } = workbench
-
-const reviewsPanel = ref<InstanceType<typeof ReviewsPanel>>()
+const comments = useCanvasComments()!
 
 const unresolvedHere = computed(() => reviews.value.filter(review =>
 	review.summary.anchor?.viewId === selectedViewId.value && review.summary.status !== 'resolved').length)
@@ -44,22 +43,16 @@ const tabModel = computed({
 	set: (value: string | number) => { tab.value = value as ViewPanelTab },
 })
 
-/** Inspector and Spec links into the thread list: switch to Comments, then open the thread. */
+/** Inspector and Spec links into the thread list: switch to Comments, then open the thread and its pin. */
 async function openThread(threadId: string): Promise<void> {
 	tab.value = 'comments'
 	await nextTick()
-	if (threadId) await reviewsPanel.value?.selectReview(threadId)
+	if (threadId && comments.open(threadId)) comments.requestReveal(threadId)
 }
 
-async function commentOn(widgetId: string): Promise<void> {
-	tab.value = 'comments'
-	await nextTick()
-	reviewsPanel.value?.openCreateModal(widgetId)
-}
-
-async function onViewPromoted(): Promise<void> {
-	await workbench.loadSelectedView(preview.notifyIframeContext)
-	await workbench.refreshAll()
+/** Inspector "Comment": the composer opens at the Widget's default pin point (brief c, section 8). */
+function commentOn(widgetId: string): void {
+	workbench.preview.commentOnWidget(widgetId)
 }
 
 function applyEvidenceContext(context: EvidenceContextSelection): void {
@@ -71,10 +64,6 @@ function applyEvidenceContext(context: EvidenceContextSelection): void {
 	}))
 }
 
-defineExpose({
-	openCreateModal: (widgetId?: string) => reviewsPanel.value?.openCreateModal(widgetId),
-	selectThread: (threadId: string) => reviewsPanel.value?.selectReview(threadId),
-})
 </script>
 
 <template>
@@ -92,19 +81,7 @@ defineExpose({
     }"
   >
     <template #comments>
-      <ReviewsPanel
-        ref="reviewsPanel"
-        :current-view-id="selectedViewId"
-        :selected-widget-id="selectedWidgetId"
-        :current-view-revision="selectedView?.revision"
-        :is-comment-mode="preview.isCommentMode.value"
-        :read-only="reviewReadOnly"
-        @highlight-widget="workbench.selectWidget"
-        @toggle-comment-mode="preview.toggleCommentMode"
-        @view-promoted="onViewPromoted"
-        @changed="workbench.refreshCounts()"
-        @thread-selected="emit('threadSelected', $event)"
-      />
+      <CommentsTab />
     </template>
     <template #inspect>
       <WidgetInspector

@@ -12,6 +12,10 @@ import { measureRenderedContentBoxQuad, type RenderedContentBoxMeasurement, type
  * When any link of the chain is rotated, skewed, flipped, nonuniform, 3D or on a motion path,
  * the measurement fails closed as `unavailable` and the overlay stays paused, exactly as with
  * an unmeasurable quad.
+ *
+ * The chain is the flat tree: a slotted element continues at its assigned slot, and a shadow
+ * root's top-level element at the shadow host. An SVG ancestor (`foreignObject`, `viewBox`
+ * scaling) maps geometry outside CSS transforms, so it fails closed as `svg-ancestor`.
  */
 
 export type AxisAlignedProofFailure =
@@ -20,6 +24,7 @@ export type AxisAlignedProofFailure =
 	| 'nonuniform-scale'
 	| 'three-dimensional-transform'
 	| 'motion-path'
+	| 'svg-ancestor'
 	| 'empty-box'
 	| 'invalid-geometry'
 
@@ -44,6 +49,9 @@ type StyleLike = Readonly<{
 
 type ElementLike = Readonly<{
 	parentElement: ElementLike | null
+	assignedSlot?: ElementLike | null
+	parentNode?: unknown
+	namespaceURI?: string | null
 	offsetWidth?: number
 	offsetHeight?: number
 	getBoundingClientRect: () => Readonly<{ left: number; top: number; width: number; height: number }>
@@ -55,6 +63,26 @@ export type AxisAlignedDependencies = Readonly<{
 
 /** Relative roundoff allowed when comparing the two scale factors of a uniform scale. */
 const UNIFORM_SCALE_TOLERANCE = 1e-6
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
+
+type FlatTreeLink = Readonly<{ parentElement: unknown; assignedSlot?: unknown; parentNode?: unknown; namespaceURI?: string | null }>
+
+/**
+ * The next element up the flat tree: the assigned slot, else the parent element, else the host
+ * of the shadow root the element sits in. Shared with the runtime measurer's transform proof.
+ */
+export function flatTreeParent<T extends FlatTreeLink>(element: T): T | null {
+	const slot = element.assignedSlot as T | null | undefined
+	if (slot) return slot
+	const parent = element.parentElement as T | null
+	if (parent) return parent
+	const host = (element.parentNode as Readonly<{ host?: T | null }> | null | undefined)?.host
+	return host ?? null
+}
+
+export function isSvgElement(element: FlatTreeLink): boolean {
+	return element.namespaceURI === SVG_NAMESPACE
+}
 
 /**
  * Measures the iframe content-box quad: the browser quad API when it exists, otherwise the
@@ -70,7 +98,8 @@ export function measureContentBoxQuad(element: Element, deps?: AxisAlignedDepend
 export function measureAxisAlignedContentBoxQuad(element: ElementLike, deps?: AxisAlignedDependencies): AxisAlignedMeasurement {
 	const styleOf = deps?.getComputedStyle ?? ((target: ElementLike) => globalThis.getComputedStyle(target as unknown as Element) as unknown as StyleLike)
 
-	for (let link: ElementLike | null = element; link; link = link.parentElement) {
+	for (let link: ElementLike | null = element; link; link = flatTreeParent(link)) {
+		if (link !== element && isSvgElement(link)) return { status: 'unavailable', reason: 'svg-ancestor' }
 		const failure = transformFailure(styleOf(link))
 		if (failure) return { status: 'unavailable', reason: failure }
 	}

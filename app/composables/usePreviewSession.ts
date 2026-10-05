@@ -19,17 +19,26 @@ import {
 } from '../../src/preview/protocol/schema'
 import {
 	PREVIEW_CONTEXT_CHANNEL,
-	PREVIEW_TARGETING_CHANNEL,
 	PREVIEW_WIRE_CHANNEL,
-	type PreviewTargetingPayload,
 	type PreviewTargetingPurpose,
 } from '../../src/preview/protocol/transport'
+import type { TargetingContext, TargetingRuntimeMessage } from '../../src/preview/protocol/targeting'
+import type { Point } from '../../src/preview/protocol/schema'
 import { useUiuxClient } from './useUiuxClient'
 import type { WorkbenchState } from './useWorkbenchState'
 import type { SessionPhase } from './workbench-types'
 
-/** The canvas tool besides Comment, which stays the existing comment mode until R6 rewires it. */
-export type CanvasTool = 'select' | 'interact'
+/**
+ * The canvas tool. Select holds an `inspection` targeting interaction, Comment a `comment-range`
+ * one, and Interact none, so its clicks belong to the View (Part 3 item 2.1).
+ */
+export type CanvasTool = 'select' | 'comment' | 'interact'
+
+/**
+ * A committed comment-range target (Part 3): the hit-tested Widget and the transient click point
+ * in inner content-viewport CSS px. Keyboard paths (tree, Inspector) have no point.
+ */
+export type CommentTarget = Readonly<{ widgetId: string; point?: Point }>
 
 /** What the session chip shows (brief b, section 6). */
 export type SessionStatusKind = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'stopped'
@@ -66,8 +75,11 @@ export type CanvasMappingState = Readonly<{
 	stage?: Readonly<{ left: number; top: number; right: number; bottom: number }>
 }>
 
-/** Options of the pins consumer: the open thread is tracked first (decision 6, tier 1). */
-export type PinTrackingOptions = Readonly<{ openThreadId?: string }>
+/**
+ * Options of the pins consumer: the open thread and the pending composer are tracked first
+ * (decision 6, tier 1, with the hover candidate).
+ */
+export type PinTrackingOptions = Readonly<{ openThreadId?: string; pendingThreadId?: string }>
 
 /** The render context the iframe document was created with; later changes travel over the context channel. */
 type IframeSourceContext = Readonly<{
@@ -95,9 +107,13 @@ export function createPreviewSession(state: WorkbenchState) {
 	const handshakePhase = ref<Exclude<SessionPhase, 'idle'>>('initiating')
 	/** True once any generation of this session completed its handshake: a later loss reads "Reconnecting". */
 	const hasConnected = ref(false)
-	const isCommentMode = ref(false)
 	const targetingInteractionId = ref<string>()
 	const canvasTool = ref<CanvasTool>('select')
+	/** The tool Comment returns to when it is left (Select unless Interact was active). */
+	const baseTool = ref<Exclude<CanvasTool, 'comment'>>('select')
+	const isCommentMode = computed(() => canvasTool.value === 'comment')
+	/** While set, the comment-range interaction re-anchors this thread instead of creating one. */
+	const reanchorThreadId = ref<string>()
 	const runtimeFeatures = ref<readonly string[]>([])
 	const selectionGeometry = shallowRef<SelectionGeometry>()
 	const selectionVisibility = ref<SelectionVisibility>('none')
@@ -122,7 +138,9 @@ export function createPreviewSession(state: WorkbenchState) {
 
 	let workbenchBridge: WorkbenchPreviewProtocolBridge | undefined
 	let navigationCoordinator: PreviewNavigationState | undefined
-	let commentTargetHandler: ((widgetId: string) => void | Promise<void>) | undefined
+	let commentTargetHandler: ((target: CommentTarget) => void) | undefined
+	/** The comments layer's Escape: closes the composer or bubble first; false when it had nothing open. */
+	let commentEscapeHandler: (() => boolean) | undefined
 	/** The Checks/selection highlight request; its reports may update the selection overlay. */
 	let selectionTarget: PreviewNavigationTarget | undefined
 	let generationSequence = 0
@@ -212,8 +230,25 @@ export function createPreviewSession(state: WorkbenchState) {
 		target.postMessage({ channel, ...body }, window.location.origin)
 	}
 
-	function postTargeting(payload: PreviewTargetingPayload): void {
-		post(PREVIEW_TARGETING_CHANNEL, { payload })
+	function targetingContext(): TargetingContext | undefined {
+		const viewId = state.selectedViewId.value
+		if (!viewId) return undefined
+		const variantId = currentVariantId()
+		return {
+			previewSessionId: previewSessionId.value,
+			runtimeGenerationId: runtimeGenerationId.value,
+			viewId,
+			...(variantId ? { variantId } : {}),
+		}
+	}
+
+	/** Enter and exit go out in the protocol envelope; the bridge holds them until the generation's ACK. */
+	function postTargeting(message: Readonly<{ type: 'enter'; purpose: PreviewTargetingPurpose; id: string }> | Readonly<{ type: 'exit' }>): void {
+		const context = targetingContext()
+		if (!context || !workbenchBridge) return
+		if (message.type === 'enter')
+			workbenchBridge.sendTargeting({ type: 'targeting.enter', context, payload: { targetingInteractionId: message.id, purpose: message.purpose } })
+		else workbenchBridge.sendTargeting({ type: 'targeting.exit', context, payload: {} })
 	}
 
 	function notifyIframeContext(): void {
@@ -259,13 +294,13 @@ export function createPreviewSession(state: WorkbenchState) {
 		const demand: GeometryDemand[] = []
 		const hover = hoverWidgetId.value
 		if (hover && hover !== 'root') demand.push({ consumerId: 'hover', widgetId: hover, tier: 'targeting' })
-		if (selectionTarget) {
+		if (selectionTarget && !isCommentMode.value) {
 			demand.push({ consumerId: 'selection', widgetId: selectionTarget.widgetId, tier: 'highlight', navigationRequestId: selectionTarget.navigationRequestId })
 		}
 		const pins = pinGeometryDemand(pinThreads.value, { viewId: state.selectedViewId.value, variantId: currentVariantId() })
-		const openThreadId = pinOptions.value.openThreadId
+		const focused = new Set([pinOptions.value.openThreadId, pinOptions.value.pendingThreadId].filter(Boolean).map(id => `pin:${id}`))
 		for (const pin of pins) {
-			demand.push(openThreadId && pin.consumerId === `pin:${openThreadId}` ? { ...pin, tier: 'targeting' } : pin)
+			demand.push(focused.has(pin.consumerId) ? { ...pin, tier: 'targeting' } : pin)
 		}
 		geometryStreams.setDemand(demand)
 	}
@@ -345,74 +380,103 @@ export function createPreviewSession(state: WorkbenchState) {
 		updateGeometryDemand()
 	}
 
-	/**
-	 * Enters the targeting interaction the current tool implies: Select is `inspection` (hover
-	 * outline and click-to-select), Interact has none. A fresh `targetingInteractionId` supersedes
-	 * the previous interaction at once (Part 3, 2026-10-02).
-	 */
-	function enterToolTargeting(): void {
-		if (isCommentMode.value) return
-		clearHover()
-		if (canvasTool.value !== 'select' || !state.selectedView.value) {
-			if (targetingInteractionId.value) {
-				targeting.explicitCancel()
-				targetingInteractionId.value = undefined
-				postTargeting({ type: 'exit' })
-			}
-			return
-		}
-		const id = freshInteractionId()
-		targeting.enterMode('inspection', id)
-		targetingInteractionId.value = id
-		postTargeting({ type: 'enter', purpose: 'inspection', targetingInteractionId: id })
-	}
-
-	function enterCommentMode(): void {
-		if (!state.selectedView.value) return
-		isCommentMode.value = true
-		navigationCoordinator?.enterCommentMode()
-		clearHover()
-		const id = freshInteractionId()
-		targeting.enterMode('comment-range', id)
-		targetingInteractionId.value = id
-		postTargeting({ type: 'enter', purpose: 'comment-range', targetingInteractionId: id })
-		// The Checks/selection highlight consumer is suspended and hidden (Part 3). Its stream is
-		// released unless a pin uses the same Widget; pins stay tracked (decision 8).
-		selectionTarget = undefined
-		selectionGeometry.value = undefined
-		updateGeometryDemand()
-	}
-
-	function exitCommentMode(): void {
-		if (!isCommentMode.value) return
-		isCommentMode.value = false
+	/** Ends the active interaction, if any, on both sides. */
+	function exitInteraction(): void {
+		if (!targetingInteractionId.value) return
 		targeting.explicitCancel()
 		targetingInteractionId.value = undefined
 		postTargeting({ type: 'exit' })
-		leaveCommentTracking()
-		enterToolTargeting()
+	}
+
+	/** Starts a fresh interaction; the new `targetingInteractionId` supersedes the previous one at once. */
+	function enterInteraction(purpose: PreviewTargetingPurpose): void {
+		const id = freshInteractionId()
+		if (targeting.snapshot().purpose) targeting.authoritativeModeTransition(purpose, id)
+		else targeting.enterMode(purpose, id)
+		targetingInteractionId.value = id
+		postTargeting({ type: 'enter', purpose, id })
+	}
+
+	/**
+	 * Enters the targeting interaction the current tool implies: Select is `inspection` (hover
+	 * outline and click-to-select), Comment is `comment-range`, Interact has none (Part 3, 2026-10-02).
+	 */
+	function applyToolInteraction(): void {
+		clearHover()
+		const purpose: PreviewTargetingPurpose | undefined = !state.selectedView.value
+			? undefined
+			: canvasTool.value === 'comment' ? 'comment-range' : canvasTool.value === 'select' ? 'inspection' : undefined
+		if (!purpose) exitInteraction()
+		else enterInteraction(purpose)
+	}
+
+	function setCanvasTool(tool: CanvasTool): void {
+		if (tool === 'comment' && !state.selectedView.value) return
+		const previous = canvasTool.value
+		if (tool === previous) return
+		if (tool !== 'comment') {
+			baseTool.value = tool
+			reanchorThreadId.value = undefined
+		}
+		canvasTool.value = tool
+		if (tool === 'comment') {
+			// The Checks/selection highlight consumer is suspended and hidden (Part 3). Its stream is
+			// released unless a pin uses the same Widget; pins stay tracked (decision 8).
+			navigationCoordinator?.enterCommentMode()
+			selectionTarget = undefined
+			selectionGeometry.value = undefined
+		}
+		applyToolInteraction()
+		if (previous === 'comment') leaveCommentTracking()
+		else updateGeometryDemand()
+	}
+
+	/** Leaves Comment for the tool it was entered from (Esc, or C again). */
+	function exitCommentMode(): void {
+		if (isCommentMode.value) setCanvasTool(baseTool.value)
+	}
+
+	/** Comment mode whose next commit re-anchors `threadId` (the bubble's Re-anchor action). */
+	function startReanchor(threadId: string): void {
+		reanchorThreadId.value = threadId
+		if (!isCommentMode.value) setCanvasTool('comment')
 	}
 
 	/** Part 3: the Widget highlight was suspended for comment-range selection; reacquire it with a fresh request. */
 	function leaveCommentTracking(): void {
 		const exit = navigationCoordinator?.exitCommentMode()
 		if (exit) acquireSelectionGeometry()
+		else updateGeometryDemand()
 	}
 
-	function setCanvasTool(tool: CanvasTool): void {
-		exitCommentMode()
-		canvasTool.value = tool
-		enterToolTargeting()
-	}
-
-	function toggleCommentMode(): void {
-		if (isCommentMode.value) exitCommentMode()
-		else enterCommentMode()
-	}
-
-	/** Registers what happens when a widget is picked in comment mode (the shell opens the Reviews composer). */
-	function onCommentTarget(handler: (widgetId: string) => void | Promise<void>): void {
+	/** Registers what a committed comment-range target does (the canvas opens the composer at it). */
+	function onCommentTarget(handler: ((target: CommentTarget) => void) | undefined): void {
 		commentTargetHandler = handler
+	}
+
+	/**
+	 * Keyboard and menu paths (Widget tree, Inspector): comment on a Widget without a pointer. The
+	 * composer opens at the Widget's default pin point (brief c, section 8).
+	 */
+	function commentOnWidget(widgetId: string): boolean {
+		if (!commentTargetHandler || !state.selectedView.value) return false
+		commentTargetHandler({ widgetId })
+		return true
+	}
+
+	/** Registers the comments layer's Escape, which closes the composer or bubble before the mode exits. */
+	function onCommentEscape(handler: (() => boolean) | undefined): void {
+		commentEscapeHandler = handler
+	}
+
+	/** Workbench owns Escape (Part 3): close the composer or bubble first, then leave Comment mode. */
+	function handleEscape(): boolean {
+		if (commentEscapeHandler?.()) return true
+		if (isCommentMode.value) {
+			exitCommentMode()
+			return true
+		}
+		return false
 	}
 
 	/**
@@ -514,76 +578,83 @@ export function createPreviewSession(state: WorkbenchState) {
 		syncGeometryContext()
 		geometryStreams.setMultiTarget(features.includes(MULTI_TARGET_GEOMETRY_FEATURE))
 		targeting.markGenerationReady(runtimeGenerationId.value)
-		// The new document knows no targeting mode yet: re-enter the active interaction.
-		if (isCommentMode.value && targetingInteractionId.value) {
-			postTargeting({ type: 'enter', purpose: 'comment-range', targetingInteractionId: targetingInteractionId.value })
-		}
-		else enterToolTargeting()
+		// The new document knows no targeting interaction yet: enter a fresh one for the current tool.
+		applyToolInteraction()
 		// Declare the selection first so its own request identity opens the Widget's stream once.
 		acquireSelectionGeometry()
 		geometryStreams.setReady(true)
 	}
 
-	function receiveHover(payload: PreviewTargetingPayload): void {
-		const generation = payload.runtimeGenerationId
-		const interaction = payload.targetingInteractionId
-		if (!generation || !interaction) return
-		const purpose = targeting.snapshot().purpose
-		const result = payload.widgetId
-			? targeting.reportHoverCandidate(generation, interaction, payload.pointerType ?? 'mouse', { widgetId: payload.widgetId })
-			: targeting.clearHoverCandidate(generation, interaction)
-		if (result.status !== 'candidate' && result.status !== 'accepted') return
-		const next = payload.widgetId
-		if (next === hoverWidgetId.value && purpose === hoverPurpose.value) return
-		hoverWidgetId.value = next
-		hoverPurpose.value = next ? purpose : undefined
-		updateGeometryDemand()
-	}
-
-	async function onWindowMessage(event: MessageEvent): Promise<void> {
-		if (event.origin !== window.location.origin) return
-		const data = event.data
-		if (!data || typeof data !== 'object') return
-
-		if (data.channel === PREVIEW_WIRE_CHANNEL && data.message && workbenchBridge) {
-			const result = workbenchBridge.receive(data.message)
-			if (result.status === 'ack-dispatched') {
-				const features = (data.message as { payload?: { features?: unknown } }).payload?.features
-				onCapabilityAcknowledged(Array.isArray(features) ? features.filter((feature): feature is string => typeof feature === 'string') : [])
-			}
-			else if (result.status === 'accepted' && result.message.type === 'geometry.acquire.response') receiveGeometryReport(result.message)
-			else if (result.status === 'capability-failure') handshakePhase.value = 'failed'
-			else if (result.status === 'invalid' && handshakePhase.value !== 'open') handshakePhase.value = 'failed'
+	/**
+	 * Targeting traffic that passed the bridge's session, generation and ACK gates. Workbench then
+	 * gates on the mounted View and Variant, then on the exact active `targetingInteractionId`
+	 * (item 2.3); late traffic of a superseded interaction is stale and changes nothing.
+	 */
+	function receiveTargeting(message: TargetingRuntimeMessage): void {
+		if (message.context.viewId !== state.selectedViewId.value || (message.context.variantId ?? '') !== (currentVariantId() ?? '')) return
+		const generation = message.context.runtimeGenerationId
+		const interaction = message.payload.targetingInteractionId
+		if (message.type === 'targeting.hover') {
+			const next = message.context.widgetId
+			const purpose = targeting.snapshot().purpose
+			const result = next
+				? targeting.reportHoverCandidate(generation, interaction, message.payload.pointerType ?? 'mouse', { widgetId: next })
+				: targeting.clearHoverCandidate(generation, interaction)
+			if (result.status !== 'candidate' && result.status !== 'accepted') return
+			if (next === hoverWidgetId.value && purpose === hoverPurpose.value) return
+			hoverWidgetId.value = next
+			hoverPurpose.value = next ? purpose : undefined
+			updateGeometryDemand()
 			return
 		}
+		if (message.type === 'targeting.escape') {
+			const snapshot = targeting.snapshot()
+			if (snapshot.purpose !== 'comment-range' || snapshot.targetingInteractionId !== interaction || snapshot.runtimeGenerationId !== generation || snapshot.input !== 'ready') return
+			handleEscape()
+			return
+		}
+		const widgetId = message.context.widgetId
+		const committed = targeting.commitFinalTarget(generation, interaction, { widgetId })
+		if (committed.status !== 'committed') return
+		targetingInteractionId.value = undefined
+		if (committed.purpose === 'inspection') {
+			selectWidget(widgetId)
+			// The commit ended the interaction; Select keeps targeting with a fresh one.
+			applyToolInteraction()
+			return
+		}
+		const point = message.payload.point
+		// Comment stays on after a commit (brief c, section 5): a fresh interaction follows at once.
+		applyToolInteraction()
+		commentTargetHandler?.({ widgetId, ...(point ? { point } : {}) })
+	}
 
-		if (data.channel !== PREVIEW_TARGETING_CHANNEL || !data.payload) return
-		const payload = data.payload as PreviewTargetingPayload
-		if (payload.runtimeGenerationId && payload.runtimeGenerationId !== runtimeGenerationId.value) return
-		if (payload.type === 'hover') receiveHover(payload)
-		else if (payload.type === 'select' && payload.widgetId) {
-			if (payload.viewId && state.selectedViewId.value && payload.viewId !== state.selectedViewId.value) return
-			const isCommentPick = isCommentMode.value
-				&& payload.purpose !== 'inspection'
-				&& (!payload.targetingInteractionId || payload.targetingInteractionId === targetingInteractionId.value)
-			// The Interact tool hands clicks to the View; they never change the Workbench selection.
-			if (!isCommentPick && canvasTool.value === 'interact') return
-			selectWidget(payload.widgetId)
-			if (isCommentPick) {
-				exitCommentMode()
-				await commentTargetHandler?.(payload.widgetId)
-			}
+	function onWindowMessage(event: MessageEvent): void {
+		// Only this Workbench's own Preview document, of this origin, is a protocol peer (item 2.3).
+		if (event.origin !== window.location.origin) return
+		const source = previewIframe.value?.contentWindow
+		if (!source || event.source !== source) return
+		const data = event.data
+		if (!data || typeof data !== 'object' || data.channel !== PREVIEW_WIRE_CHANNEL || !data.message || !workbenchBridge) return
+		const result = workbenchBridge.receive(data.message)
+		if (result.status === 'ack-dispatched') {
+			const features = (data.message as { payload?: { features?: unknown } }).payload?.features
+			onCapabilityAcknowledged(Array.isArray(features) ? features.filter((feature): feature is string => typeof feature === 'string') : [])
 		}
-		else if (payload.type === 'escape') {
-			if (!isCommentMode.value) return
-			if (payload.targetingInteractionId && payload.targetingInteractionId !== targetingInteractionId.value) return
-			exitCommentMode()
+		else if (result.status === 'accepted') {
+			const message = result.message
+			if (message.type === 'geometry.acquire.response') receiveGeometryReport(message)
+			else if (message.type === 'targeting.hover' || message.type === 'targeting.select' || message.type === 'targeting.escape') receiveTargeting(message)
 		}
+		else if (result.status === 'capability-failure') handshakePhase.value = 'failed'
+		else if (result.status === 'invalid' && handshakePhase.value !== 'open') handshakePhase.value = 'failed'
 	}
 
 	function onWindowKeydown(event: KeyboardEvent): void {
-		// Esc leaves comment mode even when keyboard focus is in the Workbench, not the iframe.
-		if (event.key === 'Escape' && isCommentMode.value) exitCommentMode()
+		// Esc leaves the composer, the bubble, then Comment mode, even when focus is in the Workbench.
+		// The event is never prevented: menus and dialogs above the canvas close themselves on it too.
+		if (event.key !== 'Escape' || event.defaultPrevented) return
+		handleEscape()
 	}
 
 	function mount(): void {
@@ -600,9 +671,9 @@ export function createPreviewSession(state: WorkbenchState) {
 	// Comment mode is meaningless without a mounted View.
 	watch(() => state.selectedView.value, (view) => {
 		if (!view && isCommentMode.value) {
-			isCommentMode.value = false
-			targeting.explicitCancel()
-			targetingInteractionId.value = undefined
+			canvasTool.value = baseTool.value
+			reanchorThreadId.value = undefined
+			exitInteraction()
 			leaveCommentTracking()
 		}
 	})
@@ -657,6 +728,8 @@ export function createPreviewSession(state: WorkbenchState) {
 		isCommentMode,
 		canvasTool,
 		setCanvasTool,
+		reanchorThreadId,
+		startReanchor,
 		selectionGeometry,
 		selectionVisibility,
 		hoverCandidate,
@@ -666,10 +739,10 @@ export function createPreviewSession(state: WorkbenchState) {
 		geometryStreams,
 		selectWidget,
 		retry,
-		toggleCommentMode,
-		enterCommentMode,
 		exitCommentMode,
 		onCommentTarget,
+		onCommentEscape,
+		commentOnWidget,
 		notifyIframeContext,
 		replaceGeneration,
 		mount,

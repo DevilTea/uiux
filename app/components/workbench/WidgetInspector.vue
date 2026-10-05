@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n, useToast } from '#imports'
 import type { BreadcrumbItem, TableColumn } from '@nuxt/ui'
 import { useWorkbench } from '../../composables/useWorkbench'
+import { useMediaQuery } from '../../composables/useMediaQuery'
 import { useWidgetInspection, type WidgetThreadRow } from '../../composables/useWidgetInspection'
 import { actorInitials, formatStateValue, relativeTime, truncateMiddle, widgetTypeIcon } from '../../utils/widget-inspection'
 
@@ -22,6 +23,8 @@ const toast = useToast()
 const workbench = useWorkbench()
 const { selectedView, selectedWidgetId, reviewReadOnly, workspace } = workbench
 const inspection = useWidgetInspection(workbench)
+/** Phones read, reply and resolve; they never create canvas comments (decided). */
+const isPhone = useMediaQuery('(max-width: 767.98px)')
 const {
 	hasSelection, node, missing, irNode, ancestry, label, variantName, variantInvalid, variantFaults,
 	overrides, findings, geometry, visibility, threads,
@@ -192,7 +195,7 @@ function onKeydown(event: KeyboardEvent): void {
         </div>
         <div class="flex items-center gap-1">
           <UButton
-            v-if="!reviewReadOnly"
+            v-if="!reviewReadOnly && !isPhone"
             color="annotation"
             variant="soft"
             size="sm"

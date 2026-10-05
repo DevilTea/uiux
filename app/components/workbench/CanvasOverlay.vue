@@ -20,6 +20,8 @@ const props = defineProps<{
 	/** The runtime's hover candidate (Part 3): a transient, non-interactive outline beneath every other mark. */
 	hover?: HoverCandidate
 	hoverType?: string
+	/** Comment mode is re-anchoring a thread: the chip says "Re-anchor to {type}". */
+	reanchor?: boolean
 	/** Inner content viewport (the logical View size), for clipping the label anchors. */
 	viewport: Readonly<{ width: number; height: number }>
 	/** The visible stage in overlay-layer px; chips flip or clamp to stay inside it. */
@@ -120,7 +122,7 @@ const hoverMark = computed(() => {
 		chip: {
 			left: placeStartChip(topLeft.x, topRight.x, chipWidths.hover),
 			top: chipTop(topLeft.y),
-			text: comment ? t('comment.hoverChip', { type: type || `#${hover.widgetId}` }) : type || `#${hover.widgetId}`,
+			text: comment ? t(props.reanchor ? 'comments.reanchorChip' : 'comment.hoverChip', { type: type || `#${hover.widgetId}` }) : type || `#${hover.widgetId}`,
 		},
 	}
 })
