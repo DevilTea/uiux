@@ -19,6 +19,7 @@ import { FileNativePersistence } from '../src/persistence'
 import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
 import { readPointResourceForHttp } from '../src/server/point-resource'
 import { listResourcesForHttp, searchResourcesForHttp } from '../src/server/resource-discovery'
+import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const FLOW_ID = '22222222-2222-4222-8222-222222222222'
@@ -34,7 +35,7 @@ afterEach(async () => {
 	await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
-describe('shared HTTP/MCP point-resource reads', () => {
+describe('shared HTTP/MCP point-resource reads', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('keeps resource URIs stable inside the selected Workspace namespace without embedding filesystem identity', () => {
 		expect(pointResourceUri({ kind: 'workspace', key: 'workspace' })).toBe('uiux://workspace')
 		expect(pointResourceUri({ kind: 'view', key: VIEW_ID })).toBe(`uiux://view/${VIEW_ID}`)

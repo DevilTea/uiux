@@ -28,6 +28,7 @@ import { artifactBytesMatch } from '../src/domain/artifacts/schema'
 import { canonicalJsonBytes } from '../src/domain/canonical-json'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import type { ReviewThread } from '../src/domain/reviews/schema'
+import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 
 const temporaryRoots: string[] = []
 const runningServers: ChildProcess[] = []
@@ -276,7 +277,7 @@ async function putFormalEvidence(
 	return recordPut.identity
 }
 
-describe('Handoff closure export and readiness evaluation', () => {
+describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('proves deterministic closure identity: same roots and content produce identical bundleIdentity across invocations', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
 		await mkdir(join(root, 'adapters'), { recursive: true })

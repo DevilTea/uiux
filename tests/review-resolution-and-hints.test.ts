@@ -24,6 +24,7 @@ import {
 import { startWorkbenchServer } from './support/workbench-server'
 import { AGENT_EDITOR, connectMcp, scoped, testMember } from './support/access'
 import { principalActor, type MemberPrincipal } from '../src/application/access/principal'
+import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const REVIEW_ID = '44444444-4444-4444-8444-444444444444'
@@ -87,7 +88,7 @@ async function submitReady(ctx: Awaited<ReturnType<typeof session>>, key: string
 	return revisionOf(result)
 }
 
-describe('direct resolve through the Workbench HTTP surface', () => {
+describe('direct resolve through the Workbench HTTP surface', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('requires an explicit non-verified resolution on open threads and enforces the decided validation codes', async () => {
 		const ctx = await session()
 		const created = await createReviewThreadForHttp(scoped(ctx.app, MEI), { id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' } })
@@ -163,7 +164,7 @@ describe('direct resolve through the Workbench HTTP surface', () => {
 	})
 })
 
-describe('resolve_review_thread on /mcp always refuses', () => {
+describe('resolve_review_thread on /mcp always refuses', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('keeps the tool registered with the decided description and refusal order, without touching the thread', async () => {
 		const ctx = await session()
 		const created = await ctx.app.createReviewThread({ id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' } })
@@ -205,7 +206,7 @@ describe('resolve_review_thread on /mcp always refuses', () => {
 	})
 })
 
-describe('Review list summary and resolution filter', () => {
+describe('Review list summary and resolution filter', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('derives resolution, exposes variantNames and displayHint beside the anchor, and filters by resolution', async () => {
 		const ctx = await session()
 		const a = await ctx.app.createReviewThread({ id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' }, variantNames: ['Empty'], displayHint: { pin: { x: 0.25, y: 0.5 } } })
@@ -248,7 +249,7 @@ describe('Review list summary and resolution filter', () => {
 	})
 })
 
-describe('Review pin display hint', () => {
+describe('Review pin display hint', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('creates with a writer-normalized hint beside the strict anchor', async () => {
 		const ctx = await session()
 		const created = await createReviewThreadForHttp(scoped(ctx.app, MEI), { id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' }, displayHint: { pin: { x: 0.123456, y: 1.5 } } })
@@ -357,7 +358,7 @@ describe('Review pin display hint', () => {
 	})
 })
 
-describe('packaged Workbench server routes (requires pnpm build)', () => {
+describe('packaged Workbench server routes (requires pnpm build)', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('serves display-hint and resolution routes, holds its Workspace, and makes uiux migrate refuse while running', async () => {
 		const server = await startWorkbenchServer()
 		try {

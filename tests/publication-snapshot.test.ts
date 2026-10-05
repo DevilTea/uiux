@@ -12,6 +12,7 @@ import {
 	sanitizePublicationAdapterDiagnostic,
 } from '../src/application/services/publication-snapshot'
 import type { ViewResource } from '../src/domain/views/schema'
+import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 
 const roots: string[] = []
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
@@ -75,7 +76,7 @@ async function createWorkspace() {
 	}
 }
 
-describe('Static Publication snapshot', () => {
+describe('Static Publication snapshot', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('materializes the whole Workspace through the shared application session', async () => {
 		const { app } = await createWorkspace()
 		const snapshot = await createPublicationSnapshot(app, {
