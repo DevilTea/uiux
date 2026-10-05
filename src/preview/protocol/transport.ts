@@ -42,10 +42,15 @@ export function isPreviewTransportEnvelope(value: unknown): value is PreviewTran
 	return false
 }
 
+/**
+ * A `postMessage` transport. Both sides post with their own origin as `targetOrigin`, never `'*'`
+ * (Widget Event reporting decision 9, R15), so the caller names it explicitly.
+ */
 export function createPostMessageTransport(
 	getTargetWindow: () => Window | null | undefined,
-	targetOrigin = '*',
+	targetOrigin: string,
 ): PreviewProtocolTransport {
+	if (!targetOrigin || targetOrigin === '*') throw new TypeError('The protocol channel posts to an explicit same origin, never \'*\'.')
 	return {
 		send(message: PreviewWireMessage) {
 			const target = getTargetWindow()
