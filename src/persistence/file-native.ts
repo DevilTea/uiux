@@ -1472,10 +1472,11 @@ function validateCanonicalSnapshot(snapshot: WorkspaceSnapshot, expectedVersion:
 		if (directory === 'assets') {
 			if (segments.length !== 3 || !isFullUuid(segments[1]!))
 				throw new PersistenceError('workspace.migration_failed', `Migration result contains non-canonical Asset path ${relativePath}.`)
+			const assetFilename = segments[2]!
 			const files = assetFiles.get(segments[1]!) ?? []
-			files.push(filename!)
+			files.push(assetFilename)
 			assetFiles.set(segments[1]!, files)
-			if (filename === 'asset.json') {
+			if (assetFilename === 'asset.json') {
 				const metadata = parseJsonBytes(bytes, relativePath)
 				if (!isRecord(metadata) || metadata.id !== segments[1] || !isSafeAssetContentFilename(metadata.contentFilename))
 					throw new PersistenceError('workspace.migration_failed', `Migrated Asset metadata at ${relativePath} must retain its directory UUID and safe contentFilename.`)
