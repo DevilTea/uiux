@@ -25,9 +25,11 @@ import {
 	type WorkspaceSnapshot,
 } from '../src/persistence'
 import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
+import { isCaseSensitiveDirectory } from './support/filesystem'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const OTHER_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+const tmpIsCaseSensitive = await isCaseSensitiveDirectory(tmpdir())
 const FLOW_ID = '22222222-2222-4222-8222-222222222222'
 const REVIEW_ID = '33333333-3333-4333-8333-333333333333'
 const ASSET_ID = '44444444-4444-4444-8444-444444444444'
@@ -222,15 +224,38 @@ describe('file-native persistence', () => {
 	it('discovers canonical locale filenames and preserves flat message values on read/write', async () => {
 		const { root, persistence } = await newWorkspace()
 		await mkdir(join(root, 'i18n'), { recursive: true })
-		await writeFile(join(root, 'i18n', 'zh-tw.json'), '{"ignored":"noncanonical"}')
+		// A noncanonically cased tag that cannot alias `zh-TW.json` on any volume.
+		await writeFile(join(root, 'i18n', 'zh-hant-tw.json'), '{"ignored":"noncanonical"}')
 		const createdRevision = await persistence.locales.create('zh-TW', { greeting: '  ', empty: '' })
 		const discovered = await persistence.locales.discoverInspected()
 		expect(discovered.locales).toEqual(['zh-TW'])
-		expect(discovered.diagnostics.some(item => item.code === 'i18n.invalid_locale_filename')).toBe(true)
+		expect(discovered.diagnostics).toContainEqual(expect.objectContaining({ code: 'i18n.invalid_locale_filename', path: '/i18n/zh-hant-tw.json' }))
 		const read = await persistence.locales.read('zh-TW')
 		expect(read?.revision).toBe(createdRevision)
 		expect(read?.resource).toEqual({ empty: '', greeting: '  ' })
 		await expect(persistence.locales.read('zh-tw')).rejects.toMatchObject({ code: 'persistence.invalid_identity' })
+	})
+
+	// Known product gap on case-insensitive volumes (default macOS APFS/HFS+,
+	// Windows NTFS): locale read/create/compareAndSwap open `i18n/<tag>.json`
+	// by path, so a noncanonical case variant such as `zh-tw.json` is aliased to
+	// the canonical `zh-TW` identity even though discovery rejects it. `read`
+	// returns its bytes, `create` reports it as already existing, and
+	// `compareAndSwap` writes into the file discovery ignores. On case-sensitive
+	// volumes this asserts the intended behavior; elsewhere it is marked as an
+	// expected failure so a fix in persistence flips it to a visible failure.
+	const caseVariantLocaleIt = tmpIsCaseSensitive ? it : it.fails
+	caseVariantLocaleIt('does not alias a case-variant locale file to the canonical locale identity', async () => {
+		const { root, persistence } = await newWorkspace()
+		await mkdir(join(root, 'i18n'), { recursive: true })
+		await writeFile(join(root, 'i18n', 'zh-tw.json'), '{"ignored":"noncanonical"}')
+		expect((await persistence.locales.discoverInspected()).locales).toEqual([])
+		expect(await persistence.locales.read('zh-TW')).toBeUndefined()
+		const createdRevision = await persistence.locales.create('zh-TW', { greeting: 'hi' })
+		const discovered = await persistence.locales.discoverInspected()
+		expect(discovered.locales).toEqual(['zh-TW'])
+		expect(discovered.diagnostics).toContainEqual(expect.objectContaining({ code: 'i18n.invalid_locale_filename', path: '/i18n/zh-tw.json' }))
+		expect(await persistence.locales.read('zh-TW')).toMatchObject({ revision: createdRevision, resource: { greeting: 'hi' } })
 	})
 
 	it('includes Asset metadata and source bytes in its revision and rolls back a failed replacement', async () => {

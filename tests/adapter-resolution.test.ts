@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -212,7 +212,10 @@ describe('Workspace adapter resolution and validated-set installation', () => {
 async function makeRoot(): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-adapter-resolution-'))
 	temporaryRoots.push(root)
-	return root
+	// The resolver reports canonical realpaths. Some platforms reach tmpdir()
+	// through a symlink (macOS /var -> /private/var), so compare against the
+	// realpath of the fixture root rather than the raw tmpdir() spelling.
+	return realpath(root)
 }
 
 function fixtureInput(
