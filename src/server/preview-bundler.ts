@@ -57,6 +57,14 @@ export async function computeBundleContentHash(workspaceRoot: string, set: Valid
 	return hash.digest('hex').slice(0, 16)
 }
 
+/**
+ * Stable identity for the emitted browser artifact. Unlike the dev-cache hash above,
+ * this deliberately excludes host paths and mtimes so publication identity is portable.
+ */
+export function computePublishedPreviewHash(bundleJs: string): string {
+	return createHash('sha256').update(bundleJs).digest('hex').slice(0, 16)
+}
+
 export function clearPreviewBundleCache(): void {
 	bundleCache.clear()
 }
@@ -104,6 +112,8 @@ export async function buildWorkspacePreviewBundle(input: Readonly<{
 		format: 'esm',
 		platform: 'browser',
 		target: 'es2022',
+		minifyWhitespace: true,
+		legalComments: 'none',
 		write: false,
 		nodePaths: [
 			join(packageRoot, 'node_modules'),

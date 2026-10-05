@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process'
 import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
+import { parsePublishArguments, runPublish } from './publish.mjs'
 
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 const workspaceSchemaVersion = packageJson.uiuxWorkspaceSchemaVersion
@@ -20,7 +21,9 @@ Options:
 
 Commands:
   init --workspace <dir>  Initialize a Workspace
-  dev --workspace <dir>   Start the unified UIUX Workbench/Nitro server`)
+  dev --workspace <dir>   Start the unified UIUX Workbench/Nitro server
+  publish --workspace <dir> --out <dir> [--base <path>] [--source-revision <rev>]
+                           Publish a read-only static UIUX Workspace`)
 }
 
 function parseWorkspaceArgument(args) {
@@ -138,6 +141,21 @@ if (extraArgs.length === 0 && (command === undefined || command === '--help' || 
 		process.exitCode = 2
 	} else {
 		await runDev(workspace)
+	}
+} else if (command === 'publish') {
+	const options = parsePublishArguments(extraArgs)
+	if (!options) {
+		console.error('uiux: publish requires --workspace <dir> --out <dir> and accepts --base <path> and --source-revision <rev>.')
+		process.exitCode = 2
+	} else {
+		try {
+			const packageRoot = fileURLToPath(new URL('..', import.meta.url))
+			await runPublish(options, packageRoot)
+		}
+		catch (error) {
+			console.error('uiux: publish failed: ' + (error instanceof Error ? error.message : String(error)))
+			process.exitCode = 1
+		}
 	}
 } else {
 	console.error(`uiux: unknown command or option: ${[command, ...extraArgs].filter(Boolean).join(' ')}`)

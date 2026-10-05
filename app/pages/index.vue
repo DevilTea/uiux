@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { deriveWidgetTree, findWidgetInTree, flattenWidgetTree, type WidgetTreeNode } from '../../src/preview/widget-tree'
 import { deriveRenderContextOptions } from '../../src/preview/render-context-options'
 import { WorkbenchPreviewProtocolBridge } from '../../src/preview/protocol/bridge'
@@ -21,6 +21,7 @@ import ReviewsPanel from '../components/ReviewsPanel.vue'
 import ChecksPanel from '../components/ChecksPanel.vue'
 import EvidencePanel from '../components/EvidencePanel.vue'
 import HandoffPanel from '../components/HandoffPanel.vue'
+import { useUiuxClient } from '../composables/useUiuxClient'
 
 type Diagnostic = Readonly<{ code: string; path: string; message: string }>
 type WorkspaceRead = Readonly<{
@@ -37,9 +38,7 @@ type ViewSummary = Readonly<{
 	diagnosticCount: number
 	summary: { name?: string; feature?: string }
 }>
-type DiscoveryPage = Readonly<{ items: readonly ViewSummary[]; nextCursor?: string }>
 type LocaleSummary = Readonly<{ kind: 'locale'; key: string; revision: string }>
-type LocaleDiscoveryPage = Readonly<{ items: readonly LocaleSummary[] }>
 type DecisionRead = Readonly<{
 	id: string
 	question: string
@@ -70,6 +69,10 @@ type ViewRead = Readonly<{
 		}
 	}
 }>
+
+const uiux = useUiuxClient()
+const isReadOnly = uiux.isReadOnly
+const publicationInfo = shallowRef<{ publicationIdentity: string; sourceRevision?: string; generatedAt: string }>()
 
 const workspace = ref<WorkspaceRead>()
 const views = ref<readonly ViewSummary[]>([])
@@ -246,7 +249,7 @@ const previewIframeSrc = computed(() => {
 	})
 	if (contextOptions.value.variants.selected)
 		params.set('variant', contextOptions.value.variants.selected)
-	return `/preview?${params.toString()}`
+	return uiux.routeUrl(`preview?${params.toString()}`)
 })
 
 function initWorkbenchBridge() {
@@ -257,7 +260,7 @@ function initWorkbenchBridge() {
 			{
 				send(message) {
 					if (previewIframe.value?.contentWindow) {
-						previewIframe.value.contentWindow.postMessage({ channel: PREVIEW_WIRE_CHANNEL, message }, '*')
+						previewIframe.value.contentWindow.postMessage({ channel: PREVIEW_WIRE_CHANNEL, message }, window.location.origin)
 					}
 				},
 			},
@@ -300,11 +303,11 @@ async function onWindowMessage(event: MessageEvent) {
 				previewIframe.value.contentWindow.postMessage({
 					channel: PREVIEW_TARGETING_CHANNEL,
 					payload: { type: 'exit' },
-				}, '*')
+				}, window.location.origin)
 				previewIframe.value.contentWindow.postMessage({
 					channel: PREVIEW_HIGHLIGHT_CHANNEL,
 					payload: { commentMode: false },
-				}, '*')
+				}, window.location.origin)
 			}
 			await nextTick()
 			reviewsPanelRef.value?.openCreateModal(payload.widgetId)
@@ -327,14 +330,14 @@ function toggleCommentMode() {
 					purpose: 'comment-range',
 					targetingInteractionId: targetingInteractionId.value,
 				},
-			}, '*')
+			}, window.location.origin)
 			previewIframe.value.contentWindow.postMessage({
 				channel: PREVIEW_HIGHLIGHT_CHANNEL,
 				payload: {
 					commentMode: true,
 					targetingInteractionId: targetingInteractionId.value,
 				},
-			}, '*')
+			}, window.location.origin)
 		}
 	}
 	else {
@@ -344,13 +347,13 @@ function toggleCommentMode() {
 				payload: {
 					type: 'exit',
 				},
-			}, '*')
+			}, window.location.origin)
 			previewIframe.value.contentWindow.postMessage({
 				channel: PREVIEW_HIGHLIGHT_CHANNEL,
 				payload: {
 					commentMode: false,
 				},
-			}, '*')
+			}, window.location.origin)
 		}
 	}
 }
@@ -368,7 +371,7 @@ function notifyIframeContext() {
 			viewport: { width: dims.width, height: dims.height },
 			themeId: contextOptions.value.themes.selected,
 		},
-	}, '*')
+	}, window.location.origin)
 }
 
 function selectWidget(id: string) {
@@ -390,7 +393,7 @@ function selectWidget(id: string) {
 		previewIframe.value.contentWindow.postMessage({
 			channel: PREVIEW_HIGHLIGHT_CHANNEL,
 			payload: { widgetId: id },
-		}, '*')
+		}, window.location.origin)
 	}
 }
 
@@ -446,28 +449,22 @@ async function refresh() {
 	error.value = undefined
 	try {
 		const [workspaceRead, viewPage, localePage, assetPage, flowPage, reviewPage] = await Promise.all([
-			$fetch<WorkspaceRead>('/api/resources/workspace/workspace'),
-			$fetch<DiscoveryPage>('/api/resources/list', {
-				method: 'POST',
-				body: { kinds: ['view'], limit: 100 },
-			}),
-			$fetch<LocaleDiscoveryPage>('/api/resources/list', {
-				method: 'POST',
-				body: { kinds: ['locale'], limit: 100 },
-			}),
-			$fetch<{ items: unknown[] }>('/api/resources/list', {
-				method: 'POST',
-				body: { kinds: ['asset'], limit: 100 },
-			}).catch(() => ({ items: [] })),
-			$fetch<{ items: unknown[] }>('/api/resources/list', {
-				method: 'POST',
-				body: { kinds: ['flow'], limit: 100 },
-			}).catch(() => ({ items: [] })),
-			$fetch<{ items: unknown[] }>('/api/resources/list', {
-				method: 'POST',
-				body: { kinds: ['review'], limit: 100 },
-			}).catch(() => ({ items: [] })),
+			uiux.readResource<WorkspaceRead>('workspace', 'workspace'),
+			uiux.listResources<ViewSummary>(['view'], { limit: 100 }),
+			uiux.listResources<LocaleSummary>(['locale'], { limit: 100 }),
+			uiux.listResources<unknown>(['asset'], { limit: 100 }).catch(() => ({ items: [] })),
+			uiux.listResources<unknown>(['flow'], { limit: 100 }).catch(() => ({ items: [] })),
+			uiux.listResources<unknown>(['review'], { limit: 100 }).catch(() => ({ items: [] })),
 		])
+		if (!workspaceRead) throw new Error('Selected Workspace manifest is unavailable.')
+		if (isReadOnly.value) {
+			const snapshot = await uiux.publication()
+			publicationInfo.value = {
+				publicationIdentity: snapshot.publicationIdentity,
+				generatedAt: snapshot.generatedAt,
+				...(snapshot.sourceRevision ? { sourceRevision: snapshot.sourceRevision } : {}),
+			}
+		}
 		workspace.value = workspaceRead
 		views.value = viewPage.items
 		discoveredLocales.value = localePage.items.map(i => i.key)
@@ -510,7 +507,8 @@ async function loadSelectedView() {
 	}
 	detailLoading.value = true
 	try {
-		const nextView = await $fetch<ViewRead>(`/api/resources/view/${encodeURIComponent(id)}`)
+		const nextView = await uiux.readResource<ViewRead>('view', id)
+		if (!nextView) throw new Error('Selected View is unavailable.')
 		if (viewLoadSequence.value !== requestSequence || selectedViewId.value !== id) return
 		selectedView.value = nextView
 		error.value = undefined
@@ -566,8 +564,15 @@ onUnmounted(() => {
           variant="soft"
           size="sm"
         >
-          local-first
+          {{ isReadOnly ? 'published · read-only' : 'local-first' }}
         </UBadge>
+        <span
+          v-if="publicationInfo?.sourceRevision"
+          class="font-mono text-[10px] text-neutral-500"
+          :title="publicationInfo.publicationIdentity"
+        >
+          {{ publicationInfo.sourceRevision.slice(0, 12) }}
+        </span>
         <span class="text-neutral-600">|</span>
         <div
           v-if="selectedView"
@@ -949,6 +954,7 @@ onUnmounted(() => {
         <WorkspaceSettingsPanel
           v-if="activeNav === 'workspace'"
           :workspace="workspace"
+          :read-only="isReadOnly"
           @saved="onWorkspaceSaved"
           @reload="refresh"
         />
@@ -957,12 +963,14 @@ onUnmounted(() => {
         <LocalesPanel
           v-if="activeNav === 'locales'"
           :default-locale="workspace?.resource?.i18n?.defaultLocale"
+          :read-only="isReadOnly"
           @locales-changed="onLocalesChanged"
         />
 
         <!-- Panel 4: Assets Panel -->
         <AssetsPanel
           v-if="activeNav === 'assets'"
+          :read-only="isReadOnly"
         />
 
         <!-- Panel 5: UX Flows Panel -->
@@ -970,6 +978,7 @@ onUnmounted(() => {
           v-if="activeNav === 'flows'"
           :available-views="views"
           :current-view-id="selectedViewId"
+          :read-only="isReadOnly"
           @select-view="selectView"
         />
 
@@ -981,6 +990,7 @@ onUnmounted(() => {
           :selected-widget-id="selectedWidgetId"
           :current-view-revision="selectedView?.revision"
           :is-comment-mode="isCommentMode"
+          :read-only="isReadOnly"
           @highlight-widget="selectWidget"
           @toggle-comment-mode="toggleCommentMode"
           @view-promoted="onViewPromoted"
@@ -1004,6 +1014,7 @@ onUnmounted(() => {
           :discovered-locales="discoveredLocales"
           :locale-revisions="localeRevisions"
           :active-context="currentActiveContext"
+          :read-only="isReadOnly"
           @apply-context="onApplyEvidenceContext"
           @refresh="refresh"
         />
@@ -1012,6 +1023,7 @@ onUnmounted(() => {
         <HandoffPanel
           v-if="activeNav === 'handoff'"
           :views="views"
+          :read-only="isReadOnly"
         />
       </aside>
 
@@ -1027,6 +1039,7 @@ onUnmounted(() => {
 
           <div class="flex items-center gap-3">
             <UButton
+              v-if="!isReadOnly"
               :color="isCommentMode ? 'warning' : 'neutral'"
               :variant="isCommentMode ? 'solid' : 'outline'"
               size="xs"

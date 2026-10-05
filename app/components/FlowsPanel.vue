@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useUiuxClient } from '../composables/useUiuxClient'
 
 interface FlowSummary {
 	kind: 'flow'
@@ -9,9 +10,6 @@ interface FlowSummary {
 	summary: { name?: string }
 }
 
-interface FlowDiscoveryPage {
-	items: readonly FlowSummary[]
-}
 
 interface FlowTransition {
 	trigger: { widgetId: string; event: string }
@@ -40,9 +38,12 @@ interface FlowRead {
 }
 
 const props = defineProps<{
+	readOnly?: boolean
 	availableViews?: ReadonlyArray<{ key: string; name?: string; summary?: { name?: string; feature?: string } }>
 	currentViewId?: string
 }>()
+
+const uiux = useUiuxClient()
 
 const emit = defineEmits<{
 	(e: 'selectView', viewId: string): void
@@ -91,10 +92,7 @@ async function fetchFlows() {
 	loadingList.value = true
 	error.value = undefined
 	try {
-		const res = await $fetch<FlowDiscoveryPage>('/api/resources/list', {
-			method: 'POST',
-			body: { kinds: ['flow'], limit: 100 },
-		})
+		const res = await uiux.listResources<FlowSummary>(['flow'], { limit: 100 })
 		flows.value = res.items
 		if (!selectedFlowId.value && res.items.length > 0) {
 			await selectFlow(res.items[0]!.key)
@@ -130,7 +128,8 @@ async function loadSelectedFlowDetail() {
 
 	loadingDetail.value = true
 	try {
-		const data = await $fetch<FlowRead>(`/api/resources/flow/${encodeURIComponent(id)}`)
+		const data = await uiux.readResource<FlowRead>('flow', id)
+		if (!data) throw new Error('UX Flow is unavailable.')
 		if (flowLoadSequence.value !== currentSeq) return
 		selectedFlowData.value = data
 		editName.value = data.resource.name || ''
@@ -160,6 +159,7 @@ async function loadSelectedFlowDetail() {
 }
 
 function addStep() {
+	if (props.readOnly) return
 	const stepId = generateUuid()
 	const defaultViewId = props.currentViewId || props.availableViews?.[0]?.key || ''
 	localSteps.value.push({
@@ -174,6 +174,7 @@ function addStep() {
 }
 
 function removeStep(index: number) {
+	if (props.readOnly) return
 	const removed = localSteps.value[index]
 	localSteps.value.splice(index, 1)
 	if (removed && editEntryStepId.value === removed.id) {
@@ -182,6 +183,7 @@ function removeStep(index: number) {
 }
 
 function addTransition(step: LocalStep) {
+	if (props.readOnly) return
 	const availableTargets = localSteps.value.filter(s => s.id !== step.id)
 	step.transitions.push({
 		widgetId: 'root',
@@ -191,10 +193,12 @@ function addTransition(step: LocalStep) {
 }
 
 function removeTransition(step: LocalStep, trIdx: number) {
+	if (props.readOnly) return
 	step.transitions.splice(trIdx, 1)
 }
 
 async function handleSaveFlow() {
+	if (props.readOnly) return
 	if (!selectedFlowData.value) return
 	saving.value = true
 	error.value = undefined
@@ -248,6 +252,7 @@ async function handleSaveFlow() {
 }
 
 async function handleCreateFlow() {
+	if (props.readOnly) return
 	if (!newFlowName.value.trim()) {
 		createError.value = 'Flow name is required.'
 		return
@@ -308,6 +313,7 @@ onMounted(() => {
         </p>
       </div>
       <UButton
+        v-if="!readOnly"
         color="primary"
         variant="solid"
         size="xs"
@@ -319,7 +325,7 @@ onMounted(() => {
 
     <!-- Create Flow Inline Form -->
     <div
-      v-if="isCreatingFlow"
+      v-if="isCreatingFlow && !readOnly"
       class="border-b border-neutral-800 bg-neutral-900/90 p-3 space-y-2.5"
     >
       <div class="flex items-center justify-between">
@@ -336,6 +342,7 @@ onMounted(() => {
         <span class="text-[10px] text-neutral-400">Flow Name:</span>
         <UInput
           v-model="newFlowName"
+          :disabled="readOnly"
           size="xs"
           placeholder="e.g. User Signup Onboarding"
           class="mt-0.5"
@@ -345,6 +352,7 @@ onMounted(() => {
         <span class="text-[10px] text-neutral-400">Entry Step ID:</span>
         <UInput
           v-model="newEntryStepId"
+          :disabled="readOnly"
           size="xs"
           placeholder="step-1"
           class="mt-0.5 font-mono"
@@ -428,6 +436,7 @@ onMounted(() => {
           <span class="text-[10px] text-neutral-400">Flow Name:</span>
           <UInput
             v-model="editName"
+            :disabled="readOnly"
             size="xs"
             class="mt-0.5"
           />
@@ -437,6 +446,7 @@ onMounted(() => {
           <span class="text-[10px] text-neutral-400">Entry Step ID:</span>
           <select
             v-model="editEntryStepId"
+            :disabled="readOnly"
             class="mt-0.5 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 font-mono text-xs text-neutral-200 outline-none"
           >
             <option
@@ -499,6 +509,7 @@ onMounted(() => {
         <div class="flex items-center justify-between">
           <span class="font-semibold text-white">Steps & Transitions ({{ localSteps.length }})</span>
           <UButton
+            v-if="!readOnly"
             color="neutral"
             variant="outline"
             size="xs"
@@ -532,6 +543,7 @@ onMounted(() => {
                 </span>
               </div>
               <button
+                v-if="!readOnly"
                 type="button"
                 class="text-neutral-500 hover:text-red-400 text-xs"
                 @click="removeStep(sIdx)"
@@ -546,6 +558,7 @@ onMounted(() => {
                 <span class="text-[10px] text-neutral-400">Target View:</span>
                 <select
                   v-model="step.viewId"
+                  :disabled="readOnly"
                   class="mt-0.5 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none"
                 >
                   <option
@@ -570,6 +583,7 @@ onMounted(() => {
                 <span class="text-[10px] text-neutral-400">Variant (Optional):</span>
                 <UInput
                   v-model="step.variantName"
+                  :disabled="readOnly"
                   size="xs"
                   placeholder="e.g. mobile-expanded"
                   class="mt-0.5"
@@ -582,6 +596,7 @@ onMounted(() => {
               <div class="flex items-center justify-between">
                 <span class="text-[10px] font-semibold uppercase text-neutral-400">Transitions ({{ step.transitions.length }})</span>
                 <button
+                  v-if="!readOnly"
                   type="button"
                   class="text-[10px] text-primary-400 hover:underline"
                   @click="addTransition(step)"
@@ -602,6 +617,7 @@ onMounted(() => {
                   <span class="text-neutral-500 font-mono text-[10px]">on</span>
                   <UInput
                     v-model="tr.event"
+                    :disabled="readOnly"
                     size="xs"
                     placeholder="click"
                     class="w-16 font-mono"
@@ -609,6 +625,7 @@ onMounted(() => {
                   <span class="text-neutral-500 font-mono text-[10px]">#</span>
                   <UInput
                     v-model="tr.widgetId"
+                    :disabled="readOnly"
                     size="xs"
                     placeholder="widgetId"
                     class="w-24 font-mono"
@@ -616,6 +633,7 @@ onMounted(() => {
                   <span class="text-neutral-500 font-mono text-[10px]">→</span>
                   <select
                     v-model="tr.targetStepId"
+                    :disabled="readOnly"
                     class="flex-1 rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-neutral-200 outline-none"
                   >
                     <option
@@ -627,6 +645,7 @@ onMounted(() => {
                     </option>
                   </select>
                   <button
+                    v-if="!readOnly"
                     type="button"
                     class="text-neutral-500 hover:text-red-400 text-xs px-1"
                     title="Remove transition"
@@ -657,6 +676,7 @@ onMounted(() => {
       <!-- Save Actions -->
       <div class="border-t border-neutral-800 pt-3 flex justify-end">
         <UButton
+          v-if="!readOnly"
           color="primary"
           variant="solid"
           size="sm"

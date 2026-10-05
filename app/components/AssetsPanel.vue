@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useUiuxClient } from '../composables/useUiuxClient'
 
 interface AssetSummary {
 	kind: 'asset'
@@ -9,9 +10,6 @@ interface AssetSummary {
 	summary: { name?: string; mediaType?: string; contentFilename?: string }
 }
 
-interface AssetDiscoveryPage {
-	items: readonly AssetSummary[]
-}
 
 interface AssetRead {
 	kind: 'asset'
@@ -23,6 +21,9 @@ interface AssetRead {
 		content: { mediaType: string; size: number; digest: string; contentUrl: string }
 	}
 }
+
+const { readOnly = false } = defineProps<{ readOnly?: boolean }>()
+const uiux = useUiuxClient()
 
 const assets = ref<readonly AssetSummary[]>([])
 const selectedAssetId = ref<string>('')
@@ -55,6 +56,8 @@ const isRenderableMedia = computed(() => {
 	const mt = selectedAssetData.value?.resource.content.mediaType || selectedAssetData.value?.resource.metadata?.mediaType || ''
 	return mt.startsWith('image/')
 })
+
+const selectedAssetContentUrl = computed(() => selectedAssetId.value ? uiux.assetUrl(selectedAssetId.value) : '')
 
 function formatBytes(bytes: number): string {
 	if (bytes === 0) return '0 B'
@@ -99,10 +102,7 @@ async function fetchAssets() {
 	loadingList.value = true
 	error.value = undefined
 	try {
-		const res = await $fetch<AssetDiscoveryPage>('/api/resources/list', {
-			method: 'POST',
-			body: { kinds: ['asset'], limit: 100 },
-		})
+		const res = await uiux.listResources<AssetSummary>(['asset'], { limit: 100 })
 		assets.value = res.items
 		if (!selectedAssetId.value && res.items.length > 0) {
 			await selectAsset(res.items[0]!.key)
@@ -136,7 +136,8 @@ async function loadSelectedAssetDetail() {
 
 	loadingDetail.value = true
 	try {
-		const data = await $fetch<AssetRead>(`/api/resources/asset/${encodeURIComponent(id)}`)
+		const data = await uiux.readResource<AssetRead>('asset', id)
+		if (!data) throw new Error('Asset is unavailable.')
 		if (assetLoadSequence.value !== currentSeq) return
 		selectedAssetData.value = data
 		replaceName.value = data.resource.metadata?.name || ''
@@ -155,6 +156,7 @@ async function loadSelectedAssetDetail() {
 }
 
 async function handleCreateAsset() {
+	if (readOnly) return
 	if (!newName.value.trim() || !newFilename.value.trim() || !newFileBase64.value) {
 		createError.value = 'Name, filename, and file data are required.'
 		return
@@ -190,6 +192,7 @@ async function handleCreateAsset() {
 }
 
 async function handleReplaceAsset() {
+	if (readOnly) return
 	if (!selectedAssetData.value) return
 	if (!replaceFileBase64.value) {
 		replaceError.value = 'Please select a new file to replace content.'
@@ -247,6 +250,7 @@ onMounted(() => {
         </p>
       </div>
       <UButton
+        v-if="!readOnly"
         color="primary"
         variant="solid"
         size="xs"
@@ -258,7 +262,7 @@ onMounted(() => {
 
     <!-- Create Asset Form -->
     <div
-      v-if="isCreatingAsset"
+      v-if="isCreatingAsset && !readOnly"
       class="border-b border-neutral-800 bg-neutral-900/90 p-3 space-y-2.5"
     >
       <div class="flex items-center justify-between">
@@ -449,7 +453,7 @@ onMounted(() => {
         <span class="font-medium text-neutral-400">Content Preview</span>
         <div class="flex max-h-48 items-center justify-center overflow-hidden rounded bg-[radial-gradient(#333_1px,transparent_1px)] [background-size:12px_12px] p-2">
           <img
-            :src="`/api/assets/${encodeURIComponent(selectedAssetData.key)}/content`"
+            :src="selectedAssetContentUrl"
             :alt="selectedAssetData.resource.metadata?.name || 'Asset Preview'"
             class="max-h-44 max-w-full rounded object-contain shadow"
           >
@@ -468,13 +472,14 @@ onMounted(() => {
       <div class="space-y-2 border-t border-neutral-800 pt-3">
         <div class="flex items-center justify-between">
           <a
-            :href="`/api/assets/${encodeURIComponent(selectedAssetData.key)}/content`"
+            :href="selectedAssetContentUrl"
             :download="selectedAssetData.resource.metadata?.contentFilename || 'content.bin'"
             class="inline-flex items-center gap-1 rounded border border-neutral-700 bg-neutral-800 px-2.5 py-1 text-xs text-neutral-200 hover:bg-neutral-700 hover:text-white"
           >
             ↓ Download
           </a>
           <UButton
+            v-if="!readOnly"
             color="neutral"
             variant="outline"
             size="xs"
@@ -486,7 +491,7 @@ onMounted(() => {
 
         <!-- Replace Asset Form inline -->
         <div
-          v-if="isReplacing"
+          v-if="isReplacing && !readOnly"
           class="rounded border border-neutral-800 bg-neutral-900 p-3 space-y-2.5"
         >
           <span class="font-semibold text-white">Replace Content with Revision CAS</span>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useUiuxClient } from '../composables/useUiuxClient'
 import type {
 	HandoffManifest,
 	HandoffReadiness,
@@ -26,9 +27,12 @@ type AssetSummary = Readonly<{
 	summary: { name?: string; mediaType?: string }
 }>
 
-defineProps<{
+const props = defineProps<{
+	readOnly?: boolean
 	views: readonly ViewSummary[]
 }>()
+
+const uiux = useUiuxClient()
 
 const rootMode = ref<'workspace' | 'custom'>('workspace')
 const selectedViewIds = ref<string[]>([])
@@ -70,14 +74,8 @@ const computedRoots = computed<readonly HandoffRoot[]>(() => {
 async function loadFlowsAndAssets() {
 	try {
 		const [flowRes, assetRes] = await Promise.all([
-			$fetch<{ items: FlowSummary[] }>('/api/resources/list', {
-				method: 'POST',
-				body: { kinds: ['flow'], limit: 100 },
-			}).catch(() => ({ items: [] })),
-			$fetch<{ items: AssetSummary[] }>('/api/resources/list', {
-				method: 'POST',
-				body: { kinds: ['asset'], limit: 100 },
-			}).catch(() => ({ items: [] })),
+			uiux.listResources<FlowSummary>(['flow'], { limit: 100 }).catch(() => ({ items: [] })),
+			uiux.listResources<AssetSummary>(['asset'], { limit: 100 }).catch(() => ({ items: [] })),
 		])
 		availableFlows.value = flowRes.items || []
 		availableAssets.value = assetRes.items || []
@@ -96,15 +94,12 @@ async function runAssessment() {
 	assessing.value = true
 	errorMessage.value = undefined
 	try {
-		const res = await $fetch<{
+		const res = await uiux.assessHandoff<{
 			status: string
 			readiness?: HandoffReadiness
 			assessment?: HandoffReadinessAssessment
 			diagnostics?: Array<{ code: string; message: string }>
-		}>('/api/handoff/assess', {
-			method: 'POST',
-			body: { roots: computedRoots.value },
-		})
+		}>(computedRoots.value)
 		if (res.status === 'ok') {
 			readiness.value = res.readiness
 			assessment.value = res.assessment
@@ -122,7 +117,7 @@ async function runAssessment() {
 }
 
 async function runExport() {
-	if (computedRoots.value.length === 0) return
+	if (props.readOnly || computedRoots.value.length === 0) return
 	exporting.value = true
 	errorMessage.value = undefined
 	try {
@@ -195,7 +190,10 @@ onMounted(async () => {
           Deterministic dependency closure, readiness claim & immutable export
         </p>
       </div>
-      <div class="grid grid-cols-2 gap-2">
+      <div
+        v-if="!readOnly"
+        class="grid grid-cols-2 gap-2"
+      >
         <UButton
           size="xs"
           color="neutral"
@@ -228,8 +226,17 @@ onMounted(async () => {
     </div>
 
     <div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+      <div
+        v-if="readOnly"
+        class="border-b border-violet-500/20 bg-violet-500/10 p-3 text-[11px] text-violet-200"
+      >
+        Published Workspace readiness · precomputed from the canonical snapshot at publish time.
+      </div>
       <!-- Left: Root Picker -->
-      <div class="space-y-4 border-b border-neutral-800 p-3">
+      <div
+        v-if="!readOnly"
+        class="space-y-4 border-b border-neutral-800 p-3"
+      >
         <!-- Root Boundary Selection Mode -->
         <div class="space-y-2">
           <span class="text-xs font-semibold text-neutral-400">Export Scope Roots</span>

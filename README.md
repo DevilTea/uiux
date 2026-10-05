@@ -1,5 +1,7 @@
 # UIUX
 
+[Live UIUX Spec](https://deviltea.github.io/uiux/) · read-only static publication of this repository's canonical `design/` Workspace
+
 `@deviltea/uiux` is the single-package home for the UIUX local-first UI/UX specification, preview, and review workbench.
 
 The package provides a Nuxt SPA and a unified Nitro server. `uiux init --workspace <dir>` creates a minimal current-schema file-native Workspace, and `uiux dev --workspace <dir>` explicitly selects one Workspace and starts the Workbench/API/MCP process against it.
@@ -34,6 +36,19 @@ MCP exposes compact read-only discovery plus domain-specific authoring operation
 - Authored Assets: `create_asset`, `replace_asset`
 
 These are domain-specific operations rather than generic Resource writes or JSON Patch surfaces. Host/port selection remains the standard Nitro runtime concern rather than a separate UIUX Workspace contract.
+
+## Static publication
+
+`uiux publish` materializes a selected Workspace as a portable, read-only interactive site. The published viewer does not require Nitro, MCP, filesystem access, or an API server at runtime; canonical resources, Preview adapter runtime, Assets, Formal Evidence artifacts, and the Workspace Handoff readiness assessment are captured at build time.
+
+```sh
+pnpm build
+uiux publish --workspace ./design --out ./.pages --base /uiux/ --source-revision "$(git rev-parse HEAD)"
+```
+
+`--base` makes the generated shell safe for project subpaths such as GitHub Pages. Publication output carries a deterministic content identity plus optional source-revision provenance. Authoring controls are removed in published mode; View context switching, Preview, Inspector, UX Flows, review history, evidence inspection, and readiness remain interactive.
+
+This repository dogfoods that command in the `Publish UIUX Spec` GitHub Actions workflow and deploys the result to [GitHub Pages](https://deviltea.github.io/uiux/).
 
 ## Dogfood Workspace
 
