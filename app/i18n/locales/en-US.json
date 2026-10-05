@@ -657,7 +657,7 @@
     "adapters": {
       "title": "Adapters",
       "description": "Registered Widget packages or local Adapter module specifiers.",
-      "add": "Add Adapter",
+      "add": "Add adapter",
       "item": "Adapter {n}",
       "remove": "Remove Adapter {n}",
       "moduleSpecifier": "Module specifier",
@@ -668,7 +668,7 @@
     "viewports": {
       "title": "Viewports",
       "description": "Preset canvas dimensions available in the render context.",
-      "add": "Add Viewport",
+      "add": "Add viewport",
       "id": "Preset ID",
       "idPlaceholder": "e.g. mobile",
       "remove": "Remove Viewport {id}",

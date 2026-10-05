@@ -84,13 +84,17 @@ async function startStaticServer() {
 	}
 }
 
+function activePanel(page) {
+	return page.getByRole('tabpanel').first()
+}
+
 async function nav(page, name) {
-	const button = page.locator('aside').first().getByRole('button', { name: new RegExp(`^${name}`) }).first()
-	await button.click()
+	await page.getByRole('tablist').first().getByRole('tab', { name: new RegExp(`^${name}`) }).click()
+	await activePanel(page).waitFor()
 }
 
 async function expectNoButton(page, name) {
-	const count = await page.locator('aside').first().getByRole('button', { name }).count()
+	const count = await activePanel(page).getByRole('button', { name, exact: true }).count()
 	if (count !== 0)
 		throw new Error(`Published viewer exposed authoring button "${name}".`)
 }
@@ -128,64 +132,68 @@ try {
 		page.on('pageerror', error => pageErrors.push(error.message))
 		page.on('request', request => requests.push(request.url()))
 
+		await page.addInitScript(() => {
+			// Pin the Workbench chrome locale so the English labels below are stable.
+			localStorage.setItem('uiux.workbench.locale', 'en-US')
+		})
 		await page.goto(`${server.origin}/uiux/`, { waitUntil: 'networkidle' })
-		await page.getByText('published · read-only', { exact: true }).waitFor()
+		await page.getByText('Published · read-only', { exact: true }).waitFor()
 
 		const frame = page.frames().find(candidate => candidate.url().includes('/uiux/preview?'))
 		if (!frame) throw new Error('Published Workbench did not open the Preview iframe.')
-		await frame.getByText('#root', { exact: true }).waitFor()
-		await frame.getByText('en-US · dark', { exact: true }).waitFor()
+		await frame.locator('[data-preview-ready="true"]').waitFor()
+		await page.getByText('en-US · dark · desktop', { exact: true }).waitFor()
 
-		const themeSelect = page.locator('header select').last()
-		await themeSelect.selectOption('light')
-		await frame.getByText('en-US · light', { exact: true }).waitFor()
+		await page.getByRole('combobox', { name: 'Preview theme' }).click()
+		await page.getByRole('option', { name: 'Light' }).click()
+		await page.getByText('en-US · light · desktop', { exact: true }).waitFor()
+		await page.waitForFunction(() => globalThis.document.querySelector('iframe')?.getAttribute('src')?.includes('themeId=light'))
 
 		await nav(page, 'Workspace')
-		await expectNoButton(page, '+ Add Adapter')
-		await expectNoButton(page, '+ Add Viewport')
-		await expectNoButton(page, '+ Add Theme')
-		await expectNoButton(page, 'Save Settings')
-		const enabledWorkspaceFields = await page.locator('aside').first().locator('input:not([disabled]), textarea:not([disabled]), select:not([disabled])').evaluateAll(elements =>
-			elements.filter(element => element.getAttribute('placeholder') !== 'Filter views…').length,
-		)
+		await expectNoButton(page, 'Add adapter')
+		await expectNoButton(page, 'Add viewport')
+		await expectNoButton(page, 'Add theme')
+		await expectNoButton(page, 'Save settings')
+		const enabledWorkspaceFields = await activePanel(page).locator('input:not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly]), button[role="combobox"]:not([disabled])').count()
 		if (enabledWorkspaceFields !== 0)
 			throw new Error('Published Workspace settings still expose editable fields.')
 
 		await nav(page, 'Locales')
-		await expectNoButton(page, '+ New Locale')
-		await expectNoButton(page, 'Save Changes')
+		await expectNoButton(page, 'New locale')
+		await expectNoButton(page, 'Save')
 
 		await nav(page, 'Assets')
-		await expectNoButton(page, '+ New Asset')
-		await expectNoButton(page, 'Replace Asset Content')
-		const assetDownload = page.locator('aside').first().getByRole('link', { name: '↓ Download' })
+		await expectNoButton(page, 'New asset')
+		await expectNoButton(page, 'Replace content')
+		const assetDownload = activePanel(page).getByRole('link', { name: 'Download' })
 		await assetDownload.waitFor()
 		const assetHref = await assetDownload.getAttribute('href')
 		if (!assetHref?.includes('/uiux/_uiux/assets/'))
 			throw new Error(`Published Asset download did not resolve to static content: ${assetHref}`)
 
 		await nav(page, 'Flows')
-		await expectNoButton(page, '+ New Flow')
-		await expectNoButton(page, '+ Add Step')
-		await expectNoButton(page, 'Save Flow Changes')
+		await expectNoButton(page, 'New flow')
+		await expectNoButton(page, 'Add step')
+		await expectNoButton(page, 'Save flow')
 
 		await nav(page, 'Reviews')
-		await expectNoButton(page, '+ Thread')
-		await expectNoButton(page, '🎯 Comment')
+		await expectNoButton(page, 'New thread')
+		await expectNoButton(page, 'Comment')
+		if (await page.getByRole('button', { name: 'Comment', exact: true }).count() !== 0)
+			throw new Error('Published viewer exposed the canvas Comment button.')
 
 		await nav(page, 'Evidence')
-		await expectNoButton(page, 'Capture Active')
-		const evidenceImage = page.locator('aside').first().locator('img[alt="Formal Capture Screenshot"]')
+		await expectNoButton(page, 'Capture active context')
+		const evidenceImage = activePanel(page).locator('img[alt="Formal capture screenshot"]')
 		await evidenceImage.waitFor()
 		const evidenceSrc = await evidenceImage.getAttribute('src')
 		if (!evidenceSrc?.includes('/uiux/_uiux/artifacts/'))
 			throw new Error(`Published Evidence screenshot did not resolve to a static artifact: ${evidenceSrc}`)
 
 		await nav(page, 'Handoff')
-		await expectNoButton(page, 'Re-Assess')
-		await expectNoButton(page, 'Export Snapshot')
-		await page.locator('aside').first().getByText('Implementation Ready', { exact: true }).waitFor()
-		await page.locator('aside').first().getByText('Claim Verified', { exact: true }).waitFor()
+		await expectNoButton(page, 'Re-assess')
+		await expectNoButton(page, 'Export snapshot')
+		await activePanel(page).getByText('Implementation ready', { exact: true }).waitFor()
 
 		await page.waitForTimeout(200)
 		const runtimeApiRequests = requests.filter((requestUrl) => {

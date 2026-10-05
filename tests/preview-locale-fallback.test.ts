@@ -27,6 +27,11 @@ describe('preview translation fallback locale', () => {
 
 	it('falls back to the requested locale when the Workspace default locale has no resource', () => {
 		expect(resolveTranslationFallbackLocale('zh-TW', 'fr-FR', resources)).toBe('zh-TW')
-		expect(resolveTranslationFallbackLocale('zh-TW', undefined, resources)).toBe('zh-TW')
+		expect(resolveTranslationFallbackLocale('zh-TW', 'fr-FR', new Map([['zh-TW', {}]]))).toBe('zh-TW')
+	})
+
+	it('uses the manifest-less render context fallback when the Workspace default is unknown', () => {
+		expect(resolveTranslationFallbackLocale('fr-FR', undefined, resources)).toBe('en-US')
+		expect(resolveTranslationFallbackLocale('zh-TW', undefined, new Map([['zh-TW', {}]]))).toBe('zh-TW')
 	})
 })

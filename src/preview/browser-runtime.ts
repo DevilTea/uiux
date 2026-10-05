@@ -19,6 +19,7 @@ import {
 	productAdapterRuntimeMemberDecoder,
 } from '../adapters/product-integration'
 import { collectWidgetTypesFromIr } from './preview-runtime'
+import { FALLBACK_LOCALE } from './render-context-options'
 
 export type StandaloneAdapterDescriptor = Readonly<{
 	index: number
@@ -63,13 +64,16 @@ export interface PreviewRuntimeMountOptions {
 /**
  * Chooses the translation runtime's default (fallback) locale: the Workspace
  * default locale when its resource is loaded, otherwise the requested locale.
+ * Callers that do not know the Workspace default get the same fallback the
+ * render context uses when no Workspace manifest is available.
  */
 export function resolveTranslationFallbackLocale(
 	requestedLocale: string,
 	workspaceDefaultLocale: string | undefined,
 	resources: ReadonlyMap<string, unknown>,
 ): string {
-	if (workspaceDefaultLocale && resources.has(workspaceDefaultLocale)) return workspaceDefaultLocale
+	const fallback = workspaceDefaultLocale || FALLBACK_LOCALE
+	if (resources.has(fallback)) return fallback
 	return requestedLocale
 }
 
