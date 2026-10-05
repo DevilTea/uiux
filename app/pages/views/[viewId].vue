@@ -10,6 +10,7 @@ import PreviewCanvas from '../../components/workbench/PreviewCanvas.vue'
 import ViewRightPanel from '../../components/workbench/ViewRightPanel.vue'
 import LockBadge from '../../components/workbench/LockBadge.vue'
 import { provideCanvasComments } from '../../composables/useCanvasComments'
+import { useReadiness } from '../../composables/useReadiness'
 
 /**
  * A View: the canvas and its right panel. The render context, selected Widget, open thread
@@ -108,6 +109,12 @@ watch([views, loading, viewId], () => {
 	workbench.error.value = undefined
 	void navigateTo('/views', { replace: true })
 })
+
+// "Updated since you last looked" on the Overview: this browser has now seen this revision.
+const readiness = useReadiness()
+watch(() => selectedView.value && [selectedView.value.key, selectedView.value.revision] as const, (seen) => {
+	if (seen) readiness.markSeen(`view:${seen[0]}`, seen[1])
+}, { immediate: true })
 
 shell.onToggleRightPanel(togglePanel)
 // ⌥1–⌥4: Comments, Inspect, Spec, Readiness (brief e, section 8).
