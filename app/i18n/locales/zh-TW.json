@@ -302,7 +302,12 @@
       "stepId": "步驟 ID",
       "viewId": "View ID",
       "flowId": "Flow ID",
-      "scenario": "情境參照"
+      "scenario": "情境參照",
+      "eventPick": "選取事件",
+      "eventPickHelp": "此 Widget 宣告的事件。",
+      "eventNotDeclared": "{event}（此 Widget 未宣告）",
+      "eventsNone": "此 Widget 沒有宣告任何事件。",
+      "searchEvents": "搜尋事件"
     },
     "addStep": {
       "title": "新增步驟",
@@ -369,7 +374,9 @@
       "entered": "第 {n} 步：{step}",
       "unavailable": "此 Flow 尚未載入。",
       "saveFirst": "請先儲存變更再播放。",
-      "checking": "正在檢查參照…"
+      "checking": "正在檢查參照…",
+      "eventsUnavailable": "此預覽無法回報 Widget 事件。請使用「下一步」控制項跟隨轉場。",
+      "advancedFromWorkbench": "（由 Workbench 推進）"
     }
   },
   "handoff": {

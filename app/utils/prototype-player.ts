@@ -13,13 +13,23 @@ import type { FlowDraft } from './flow-graph'
 
 export type PlayerTrigger = Readonly<{ widgetId: string; event: string }>
 
+/**
+ * Where a transition came from (Widget Event reporting, decisions 7 and 8): `runtime` is a Widget
+ * Event occurrence the Preview reported; `workbench` is a dock control or digit shortcut, a player
+ * action that is not an Event and never evidence. Ephemeral: player history is never persisted.
+ */
+export type PlayerSource = 'runtime' | 'workbench'
+
 export type PlayerVisit = Readonly<{
 	/** Monotonic per player: every step entry, including a return to the same step, gets a new one. */
 	entry: number
 	stepId: string
-	/** The trigger that entered this step; absent for the entry step. */
-	via?: PlayerTrigger
+	/** The trigger that entered this step and its source; absent for the entry step. */
+	via?: PlayerTrigger & Readonly<{ source: PlayerSource }>
 }>
+
+/** Every call into the player carries the entry it was issued from (decision 7). */
+export type PlayerFollowScope = Readonly<{ entry: number; source: PlayerSource }>
 
 export type PlayerState = Readonly<{
 	flowId: string
@@ -63,13 +73,21 @@ export function resolveTransition(flow: FlowDraft, stepId: string, trigger: Play
 	return matches.length === 1 && flow.steps[matches[0]!.targetStepId] ? matches[0]!.targetStepId : undefined
 }
 
-/** Follows a Widget Event occurrence. Returns the same state when nothing matches. */
-export function followTrigger(flow: FlowDraft, state: PlayerState, trigger: PlayerTrigger): PlayerState {
-	const target = resolveTransition(flow, currentVisit(state).stepId, trigger)
+/**
+ * Follows a trigger from the entry it was issued in. Each step entry accepts at most one
+ * transition from any source: once followed, the entry is no longer current, so a later call
+ * scoped to it (a double click, an occurrence racing a dock click) is a no-op. Returns the same
+ * state when the entry is stale or nothing matches.
+ */
+export function followTrigger(flow: FlowDraft, state: PlayerState, trigger: PlayerTrigger, scope: PlayerFollowScope): PlayerState {
+	const visit = currentVisit(state)
+	if (scope.entry !== visit.entry) return state
+	const target = resolveTransition(flow, visit.stepId, trigger)
 	if (!target) return state
+	const via = Object.freeze({ widgetId: trigger.widgetId, event: trigger.event, source: scope.source })
 	return Object.freeze({
 		flowId: state.flowId,
-		history: Object.freeze([...state.history, Object.freeze({ entry: state.nextEntry, stepId: target, via: Object.freeze({ ...trigger }) })]),
+		history: Object.freeze([...state.history, Object.freeze({ entry: state.nextEntry, stepId: target, via })]),
 		nextEntry: state.nextEntry + 1,
 	})
 }

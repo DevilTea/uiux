@@ -156,7 +156,8 @@ describe('UX Flow graph editor (R11)', () => {
 			await page.locator('[data-flow-inspector]').getByRole('button', { name: /^Widget/ }).click()
 			await page.getByRole('option', { name: /#btn-export-handoff/ }).click()
 			await page.waitForTimeout(300)
-			await page.locator('[data-flow-inspector]').getByPlaceholder('e.g. click').fill('click')
+			// The Event is picked from the Widget's declared Events; a Button declares only `click`.
+			await expect.poll(() => page.locator('[data-flow-inspector] [data-flow-event-picker]').textContent()).toContain('click')
 			await page.locator('[data-flow-inspector]').getByRole('button', { name: 'Add', exact: true }).click()
 			// The new transition is selected; the graph now draws a back edge to the entry step.
 			expect(await page.locator('[data-flow-edge]', { hasText: 'btn-export-handoff.click' }).getAttribute('aria-pressed')).toBe('true')

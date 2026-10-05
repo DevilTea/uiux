@@ -174,7 +174,7 @@ describe('Prototype player (Discussion #6, items 5, 6 and 10c)', () => {
 		expect(resolveTransition(flow, CART, { widgetId: 'submit', event: 'hover' })).toBeUndefined()
 		expect(resolveTransition(flow, CART, { widgetId: 'retry', event: 'click' })).toBeUndefined()
 		const state = startPlayback(flow)
-		expect(followTrigger(flow, state, { widgetId: 'nope', event: 'click' })).toBe(state)
+		expect(followTrigger(flow, state, { widgetId: 'nope', event: 'click' }, { entry: 1, source: 'runtime' })).toBe(state)
 	})
 
 	it('never resolves an ambiguous trigger by order', () => {
@@ -186,16 +186,46 @@ describe('Prototype player (Discussion #6, items 5, 6 and 10c)', () => {
 	it('gives every step entry a new entry, including returns and restarts, so no prior state is restored', () => {
 		const flow = checkout()
 		let state = startPlayback(flow)
-		state = followTrigger(flow, state, { widgetId: 'submit', event: 'click' })
-		state = followTrigger(flow, state, { widgetId: 'retry', event: 'click' })
-		state = followTrigger(flow, state, { widgetId: 'back', event: 'click' })
+		state = followTrigger(flow, state, { widgetId: 'submit', event: 'click' }, { entry: currentVisit(state).entry, source: 'runtime' })
+		state = followTrigger(flow, state, { widgetId: 'retry', event: 'click' }, { entry: currentVisit(state).entry, source: 'workbench' })
+		state = followTrigger(flow, state, { widgetId: 'back', event: 'click' }, { entry: currentVisit(state).entry, source: 'runtime' })
 		expect(state.history.map(visit => visit.stepId)).toEqual([CART, PAY, PAY, CART])
 		const entries = state.history.map(visit => visit.entry)
 		expect(new Set(entries).size).toBe(entries.length)
-		expect(state.history[2]!.via).toEqual({ widgetId: 'retry', event: 'click' })
+		expect(state.history[2]!.via).toEqual({ widgetId: 'retry', event: 'click', source: 'workbench' })
 		const restarted = restartPlayback(flow, state)
 		expect(restarted.history).toHaveLength(1)
 		expect(currentVisit(restarted).stepId).toBe(CART)
 		expect(entries).not.toContain(currentVisit(restarted).entry)
+	})
+
+	it('accepts at most one transition per step entry, from any source (Widget Event reporting, decision 7)', () => {
+		const flow = checkout()
+		const start = startPlayback(flow)
+		const entry = currentVisit(start).entry
+		const once = followTrigger(flow, start, { widgetId: 'submit', event: 'click' }, { entry, source: 'runtime' })
+		expect(currentVisit(once).stepId).toBe(PAY)
+		// A double click, or an occurrence racing a dock click, carries the closed entry: a no-op.
+		expect(followTrigger(flow, once, { widgetId: 'retry', event: 'click' }, { entry, source: 'workbench' })).toBe(once)
+		expect(followTrigger(flow, once, { widgetId: 'submit', event: 'click' }, { entry, source: 'runtime' })).toBe(once)
+		// A self-loop is a new entry, so it can be followed once more, and only once.
+		const loopEntry = currentVisit(once).entry
+		const looped = followTrigger(flow, once, { widgetId: 'retry', event: 'click' }, { entry: loopEntry, source: 'workbench' })
+		expect(currentVisit(looped).stepId).toBe(PAY)
+		expect(currentVisit(looped).entry).not.toBe(loopEntry)
+		expect(followTrigger(flow, looped, { widgetId: 'retry', event: 'click' }, { entry: loopEntry, source: 'workbench' })).toBe(looped)
+		// Restart is a new entry too; calls for an entry before it are stale.
+		const restarted = restartPlayback(flow, looped)
+		expect(followTrigger(flow, restarted, { widgetId: 'submit', event: 'click' }, { entry, source: 'runtime' })).toBe(restarted)
+		expect(currentVisit(followTrigger(flow, restarted, { widgetId: 'submit', event: 'click' }, { entry: currentVisit(restarted).entry, source: 'runtime' })).stepId).toBe(PAY)
+	})
+
+	it('records the source in the ephemeral history only', () => {
+		const flow = checkout()
+		const start = startPlayback(flow)
+		const next = followTrigger(flow, start, { widgetId: 'submit', event: 'click' }, { entry: currentVisit(start).entry, source: 'workbench' })
+		expect(currentVisit(next).via).toEqual({ widgetId: 'submit', event: 'click', source: 'workbench' })
+		// The player state is not the Flow: following never touches the canonical Flow draft.
+		expect(JSON.stringify(flow)).not.toContain('workbench')
 	})
 })

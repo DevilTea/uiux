@@ -23,6 +23,8 @@ import {
 	type PreviewTargetingPurpose,
 } from '../../src/preview/protocol/transport'
 import type { TargetingContext, TargetingRuntimeMessage } from '../../src/preview/protocol/targeting'
+import { WIDGET_EVENTS_FEATURE } from '../../src/preview/protocol/widget-events'
+import { WidgetEventArming } from '../../src/preview/widget-event-arming'
 import type { Point } from '../../src/preview/protocol/schema'
 import { useUiuxClient } from './useUiuxClient'
 import type { WorkbenchState } from './useWorkbenchState'
@@ -146,6 +148,23 @@ export function createPreviewSession(state: WorkbenchState) {
 	let generationSequence = 0
 	let interactionSequence = 0
 	const targeting = new PreviewTargetingState<{ widgetId: string }>()
+	let armSequence = 0
+	/**
+	 * Widget Event arming for the Prototype player (Part 2 "Widget Event reporting"): armed only
+	 * while no targeting interaction is active, so it shares `targetingInteractionId` (decision 6).
+	 */
+	const widgetEvents = new WidgetEventArming({
+		generation: () => runtimeGenerationId.value,
+		open: () => handshakePhase.value === 'open',
+		features: () => runtimeFeatures.value,
+		targetingActive: () => !!targetingInteractionId.value,
+		context: () => targetingContext(),
+		send: message => workbenchBridge?.sendWidgetEventArm(message).status === 'sent',
+		mintArmId: () => `arm-${previewSessionId.value}-${++armSequence}-${Date.now()}`,
+	})
+	/** Whether the open generation declared `widget.events`; undefined until its handshake opens. */
+	const widgetEventsSupported = computed<boolean | undefined>(() =>
+		handshakePhase.value === 'open' ? runtimeFeatures.value.includes(WIDGET_EVENTS_FEATURE) : undefined)
 
 	/** Every geometry stream of this session (Part 2, 2026-10-05 multi-target decision group). */
 	const geometryStreams = new GeometryStreamCoordinator({
@@ -394,6 +413,8 @@ export function createPreviewSession(state: WorkbenchState) {
 		if (targeting.snapshot().purpose) targeting.authoritativeModeTransition(purpose, id)
 		else targeting.enterMode(purpose, id)
 		targetingInteractionId.value = id
+		// Disarm before entering: on the one ordered channel the runtime is disarmed first.
+		widgetEvents.sync()
 		postTargeting({ type: 'enter', purpose, id })
 	}
 
@@ -406,7 +427,11 @@ export function createPreviewSession(state: WorkbenchState) {
 		const purpose: PreviewTargetingPurpose | undefined = !state.selectedView.value
 			? undefined
 			: canvasTool.value === 'comment' ? 'comment-range' : canvasTool.value === 'select' ? 'inspection' : undefined
-		if (!purpose) exitInteraction()
+		if (!purpose) {
+			exitInteraction()
+			// An exit with no successor re-arms with a fresh armId.
+			widgetEvents.sync()
+		}
 		else enterInteraction(purpose)
 	}
 
@@ -523,6 +548,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		runtimeGenerationId.value = `gen-${Date.now()}-${++generationSequence}`
 		captureIframeSourceContext()
 		runtimeFeatures.value = []
+		widgetEvents.onGenerationBoundary()
 		targeting.onGenerationTeardown(previousGeneration)
 		hoverWidgetId.value = undefined
 		hoverPurpose.value = undefined
@@ -645,6 +671,7 @@ export function createPreviewSession(state: WorkbenchState) {
 			const message = result.message
 			if (message.type === 'geometry.acquire.response') receiveGeometryReport(message)
 			else if (message.type === 'targeting.hover' || message.type === 'targeting.select' || message.type === 'targeting.escape') receiveTargeting(message)
+			else if (message.type === 'widget.event.occurrence') widgetEvents.receive(message)
 		}
 		else if (result.status === 'capability-failure') handshakePhase.value = 'failed'
 		else if (result.status === 'invalid' && handshakePhase.value !== 'open') handshakePhase.value = 'failed'
@@ -745,6 +772,8 @@ export function createPreviewSession(state: WorkbenchState) {
 		commentOnWidget,
 		notifyIframeContext,
 		replaceGeneration,
+		widgetEvents,
+		widgetEventsSupported,
 		mount,
 		unmount,
 	}

@@ -17,6 +17,8 @@ import {
 	type PreviewTargetingPurpose,
 } from '../../src/preview/protocol/transport'
 import type { TargetingContext, TargetingRuntimeMessage } from '../../src/preview/protocol/targeting'
+import { WIDGET_EVENTS_FEATURE, type WidgetEventArmMessage } from '../../src/preview/protocol/widget-events'
+import type { WidgetEventReport } from '../../src/preview/widget-event-observer'
 import type {
 	PreviewMaterializationResult,
 } from '../../src/preview/preview-runtime'
@@ -67,6 +69,11 @@ const targetingPurpose = ref<PreviewTargetingPurpose>()
 const isCommentMode = computed(() => targetingPurpose.value === 'comment-range')
 const activeTargetingInteractionId = ref<string>()
 let hoverCandidateWidgetId: string | undefined
+/**
+ * The latest Widget Event arm Workbench sent for this render context (Part 2 "Widget Event
+ * reporting", decision 3), kept until the adapter bundle mounts. `spent` once it reported.
+ */
+let widgetEventArm: { armId: string; triggers: WidgetEventArmMessage['payload']['triggers']; spent: boolean } | undefined
 const viewData = ref<ViewRead>()
 const loading = ref(true)
 const error = ref<string>()
@@ -195,13 +202,47 @@ function currentGeometryContext() {
 	return { viewId: viewId.value, ...(variantName.value ? { variantId: variantName.value } : {}) }
 }
 
+/**
+ * Applies a Widget Event arm to this render context only: an arm for another View or Variant is
+ * stale and ignored. The arm replaces the previous one; no triggers disarms.
+ */
+function receiveWidgetEventArm(message: WidgetEventArmMessage) {
+	if (harnessMode.value) return
+	if (message.context.viewId !== viewId.value || (message.context.variantId ?? '') !== (variantName.value ?? '')) return
+	widgetEventArm = { armId: message.payload.armId, triggers: message.payload.triggers, spent: false }
+	activeBridge?.armWidgetEvents?.(message.payload.armId, message.payload.triggers)
+}
+
+/**
+ * One armed occurrence (decision 4): it crosses as `{ armId, event }` plus context, nothing else.
+ * While Workbench has a targeting interaction (comment or inspection), nothing is reported, even
+ * if an arm is applied: the Workbench disarm is primary, this guard is defense in depth.
+ */
+function reportWidgetEvent(report: WidgetEventReport) {
+	if (widgetEventArm?.armId === report.armId) widgetEventArm.spent = true
+	if (targetingPurpose.value || harnessMode.value) return
+	runtimeBridge?.sendWidgetEventOccurrence({
+		type: 'widget.event.occurrence',
+		context: {
+			previewSessionId: previewSessionId.value,
+			runtimeGenerationId: runtimeGenerationId.value,
+			viewId: viewId.value,
+			...(variantName.value ? { variantId: variantName.value } : {}),
+			widgetId: report.widgetId,
+		},
+		payload: { armId: report.armId, event: report.event },
+	})
+}
+
 function initBridge() {
 	if (typeof window === 'undefined') return
 	try {
 		runtimeBridge = new RuntimePreviewProtocolBridge(
 			previewSessionId.value,
 			runtimeGenerationId.value,
-			{ protocolVersion: 1, features: ['geometry', MULTI_TARGET_GEOMETRY_FEATURE] },
+			// `widget.events` ships with the mount factory (decision 10). A formal capture has no
+			// Workbench parent and is never armed, so it does not declare it.
+			{ protocolVersion: 1, features: harnessMode.value ? ['geometry', MULTI_TARGET_GEOMETRY_FEATURE] : ['geometry', MULTI_TARGET_GEOMETRY_FEATURE, WIDGET_EVENTS_FEATURE] },
 			{
 				send(message) {
 					if (window.parent && window.parent !== window) {
@@ -347,7 +388,10 @@ async function evaluateRuntime() {
 			onStatusChange(status: PreviewMaterializationResult) {
 				materializationResult.value = status
 			},
+			onWidgetEvent: reportWidgetEvent,
 		})
+		// An arm that arrived before the bundle mounted applies now, unless it already reported.
+		if (widgetEventArm && !widgetEventArm.spent) activeBridge.armWidgetEvents?.(widgetEventArm.armId, widgetEventArm.triggers)
 	}
 	catch (cause) {
 		materializationResult.value = {
@@ -387,6 +431,7 @@ function onWindowMessage(event: MessageEvent) {
 			activeTargetingInteractionId.value = undefined
 			hoverCandidateWidgetId = undefined
 		}
+		else if (message.type === 'widget.event.arm') receiveWidgetEventArm(message)
 	}
 	else if (data.channel === PREVIEW_CONTEXT_CHANNEL && data.payload) {
 		const payload = data.payload as PreviewContextPayload
@@ -421,6 +466,8 @@ function onWindowMessage(event: MessageEvent) {
 // and streams of the previous context end without a release when it changes.
 watch([viewId, variantName], () => {
 	geometryProducer?.setContext(currentGeometryContext())
+	// A View or Variant change inside the generation clears the arm (the mounted runtime clears its own).
+	widgetEventArm = undefined
 })
 
 watch(() => route.query, (nextQuery) => {
