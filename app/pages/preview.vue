@@ -406,9 +406,16 @@ watch(() => route.query, (nextQuery) => {
 	else evaluateRuntime()
 })
 
+// Canvas zoom (R4). Ctrl/⌘ + wheel and trackpad pinch over the View would zoom the whole
+// Workbench page; the canvas zooms only from its gutter (brief b), so the gesture is absorbed here.
+function absorbCanvasZoomWheel(event: WheelEvent) {
+	if (event.ctrlKey || event.metaKey) event.preventDefault()
+}
+
 onMounted(() => {
 	window.addEventListener('message', onWindowMessage)
 	window.addEventListener('keydown', handleKeydown)
+	if (window.parent !== window) window.addEventListener('wheel', absorbCanvasZoomWheel, { passive: false })
 	initBridge()
 	loadView()
 })
@@ -416,6 +423,7 @@ onMounted(() => {
 onUnmounted(() => {
 	window.removeEventListener('message', onWindowMessage)
 	window.removeEventListener('keydown', handleKeydown)
+	window.removeEventListener('wheel', absorbCanvasZoomWheel)
 	disposeCurrentRuntime()
 })
 </script>
