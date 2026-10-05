@@ -230,6 +230,7 @@ export class RuntimePreviewProtocolBridge {
 
 function isGeometryRequest(message: GeometryMessage): message is GeometryRequestMessage {
 	return message.type === 'geometry.acquire.request'
+		|| message.type === 'geometry.release'
 		|| message.type === 'contour.full.request'
 		|| message.type === 'contour.partial.request'
 		|| message.type === 'contour.cancel'
