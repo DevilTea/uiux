@@ -3,7 +3,16 @@ import { measureAxisAlignedContentBoxQuad, measureContentBoxQuad } from '../src/
 import { deriveOuterMapping } from '../src/preview/derived-outer-mapping'
 
 type Style = Record<string, string>
-type Fake = { parentElement: Fake | null; offsetWidth: number; offsetHeight: number; style: Style; getBoundingClientRect: () => { left: number; top: number; width: number; height: number } }
+type Fake = {
+	parentElement: Fake | null
+	assignedSlot?: Fake | null
+	parentNode?: { host: Fake } | null
+	namespaceURI?: string
+	offsetWidth: number
+	offsetHeight: number
+	style: Style
+	getBoundingClientRect: () => { left: number; top: number; width: number; height: number }
+}
 
 /** A fake iframe inside a chain of ancestors whose computed styles the test controls. */
 function chain(ancestorStyles: Style[], ownStyle: Style = {}, rect = { left: 100, top: 50, width: 640, height: 400 }, size = { width: 1280, height: 800 }): Fake {
@@ -14,6 +23,31 @@ function chain(ancestorStyles: Style[], ownStyle: Style = {}, rect = { left: 100
 	return { parentElement: parent, offsetWidth: size.width, offsetHeight: size.height, style: ownStyle, getBoundingClientRect: () => rect }
 }
 const deps = { getComputedStyle: (element: unknown) => (element as Fake).style }
+const SVG = 'http://www.w3.org/2000/svg'
+
+function ancestor(style: Style, links: Partial<Fake> = {}): Fake {
+	return { parentElement: null, offsetWidth: 0, offsetHeight: 0, style, getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 0 }), ...links }
+}
+
+/** A fake iframe with explicit links, so shadow roots and slots can be wired by hand. */
+function frame(links: Partial<Fake>, rect = { left: 0, top: 0, width: 640, height: 400 }): Fake {
+	return { parentElement: null, offsetWidth: 1280, offsetHeight: 800, style: {}, getBoundingClientRect: vi.fn(() => rect), ...links }
+}
+
+/** Part 4 adversarial transform families: each must be a rejection, never a quad. */
+const ADVERSARIAL: ReadonlyArray<readonly [string, Style, string]> = [
+	['a quarter rotation', { transform: 'matrix(0, 1, -1, 0, 0, 0)' }, 'non-axis-aligned-transform'],
+	['a small rotation', { transform: 'matrix(0.99998, 0.00617, -0.00617, 0.99998, 0, 0)' }, 'non-axis-aligned-transform'],
+	['a vertical reflection', { transform: 'matrix(1, 0, 0, -1, 0, 0)' }, 'non-axis-aligned-transform'],
+	['a point reflection', { transform: 'matrix(-0.5, 0, 0, -0.5, 0, 0)' }, 'non-axis-aligned-transform'],
+	['a reflecting scale property', { scale: '-1' }, 'non-axis-aligned-transform'],
+	['a nonuniform scale', { transform: 'matrix(4, 0, 0, 0.5, 0, 0)' }, 'nonuniform-scale'],
+	['a near-singular nonuniform scale', { transform: 'matrix(0.001, 0, 0, 7, 0, 0)' }, 'nonuniform-scale'],
+	['a near-singular collapse of one axis', { transform: 'matrix(1, 0, 0, 1e-9, 0, 0)' }, 'nonuniform-scale'],
+	['a near-singular scale property', { scale: '1 0.000001' }, 'nonuniform-scale'],
+	['a degenerate scale', { transform: 'matrix(0, 0, 0, 0, 0, 0)' }, 'non-axis-aligned-transform'],
+	['a near-singular skew', { transform: 'matrix(1, 1, 1, 1.000001, 0, 0)' }, 'non-axis-aligned-transform'],
+]
 
 describe('axis-aligned outer mapping proof (engines without getBoxQuads)', () => {
 	it('derives the exact quad for a uniformly scaled, translated frame', () => {
@@ -69,6 +103,70 @@ describe('axis-aligned outer mapping proof (engines without getBoxQuads)', () =>
 	it('reports an empty or detached element as unavailable', () => {
 		expect(measureAxisAlignedContentBoxQuad(chain([], {}, undefined, { width: 0, height: 0 }), deps)).toEqual({ status: 'unavailable', reason: 'empty-box' })
 		expect(measureAxisAlignedContentBoxQuad(chain([], {}, { left: 0, top: 0, width: 0, height: 0 }), deps)).toEqual({ status: 'unavailable', reason: 'detached' })
+	})
+
+	it.each(ADVERSARIAL)('rejects %s on the frame and on every ancestor', (_label, style, reason) => {
+		const own = chain([], style)
+		own.getBoundingClientRect = vi.fn(own.getBoundingClientRect)
+		expect(measureAxisAlignedContentBoxQuad(own, deps)).toEqual({ status: 'unavailable', reason })
+		expect(own.getBoundingClientRect).not.toHaveBeenCalled()
+		const inherited = chain([{ transform: 'none' }, style, { transform: 'matrix(0.5, 0, 0, 0.5, 10, 10)' }])
+		inherited.getBoundingClientRect = vi.fn(inherited.getBoundingClientRect)
+		expect(measureAxisAlignedContentBoxQuad(inherited, deps)).toEqual({ status: 'unavailable', reason })
+		expect(inherited.getBoundingClientRect).not.toHaveBeenCalled()
+	})
+
+	describe('flat-tree walk', () => {
+		it.each(ADVERSARIAL)('rejects %s on the shadow host of a frame inside a shadow root', (_label, style, reason) => {
+			const host = ancestor(style, { parentElement: ancestor({ transform: 'none' }) })
+			const element = frame({ parentNode: { host } })
+			expect(measureAxisAlignedContentBoxQuad(element, deps)).toEqual({ status: 'unavailable', reason })
+			expect(element.getBoundingClientRect).not.toHaveBeenCalled()
+		})
+
+		it.each(ADVERSARIAL)('rejects %s inside the shadow tree a slotted frame is assigned into', (_label, style, reason) => {
+			// The light-DOM parent (the host) is untransformed; only the slot's shadow ancestor is not.
+			const host = ancestor({ transform: 'none' })
+			const wrapper = ancestor(style, { parentNode: { host } })
+			const slot = ancestor({}, { parentElement: wrapper })
+			const element = frame({ parentElement: host, assignedSlot: slot })
+			expect(measureAxisAlignedContentBoxQuad(element, deps)).toEqual({ status: 'unavailable', reason })
+			expect(element.getBoundingClientRect).not.toHaveBeenCalled()
+		})
+
+		it('rejects a transform beyond the host of a nested shadow root', () => {
+			const outer = ancestor({ rotate: '30deg' })
+			const innerHost = ancestor({}, { parentNode: { host: outer } })
+			const element = frame({ parentNode: { host: innerHost } })
+			expect(measureAxisAlignedContentBoxQuad(element, deps)).toEqual({ status: 'unavailable', reason: 'non-axis-aligned-transform' })
+		})
+
+		it('still proves a uniform-scale chain through a slot and a shadow host', () => {
+			const outer = ancestor({ transform: 'matrix(0.5, 0, 0, 0.5, 30, 20)' })
+			const host = ancestor({ scale: '1' }, { parentElement: outer })
+			const wrapper = ancestor({ transform: 'none' }, { parentNode: { host } })
+			const slot = ancestor({}, { parentElement: wrapper })
+			const element = frame({ parentElement: host, assignedSlot: slot }, { left: 30, top: 20, width: 640, height: 400 })
+			expect(measureAxisAlignedContentBoxQuad(element, deps)).toEqual({
+				status: 'available',
+				source: 'axis-aligned-proof',
+				quad: { p1: { x: 30, y: 20 }, p2: { x: 670, y: 20 }, p3: { x: 670, y: 420 }, p4: { x: 30, y: 420 } },
+			})
+		})
+
+		it('fails closed on an SVG ancestor such as a foreignObject inside an <svg>', () => {
+			const svg = ancestor({ transform: 'none' }, { namespaceURI: SVG, parentElement: ancestor({}) })
+			const foreignObject = ancestor({ transform: 'none' }, { namespaceURI: SVG, parentElement: svg })
+			const element = frame({ parentElement: ancestor({}, { parentElement: foreignObject }) })
+			expect(measureAxisAlignedContentBoxQuad(element, deps)).toEqual({ status: 'unavailable', reason: 'svg-ancestor' })
+			expect(element.getBoundingClientRect).not.toHaveBeenCalled()
+		})
+
+		it('fails closed on an SVG ancestor reached across a shadow root', () => {
+			const host = ancestor({}, { parentElement: ancestor({}, { namespaceURI: SVG }) })
+			const element = frame({ parentNode: { host } })
+			expect(measureAxisAlignedContentBoxQuad(element, deps)).toEqual({ status: 'unavailable', reason: 'svg-ancestor' })
+		})
 	})
 
 	it('prefers the browser quad API when it exists', () => {

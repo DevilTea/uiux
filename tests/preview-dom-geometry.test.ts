@@ -41,6 +41,16 @@ async function measure(body: string, widgetIds: readonly string[], scroll = 0): 
 	}, widgetIds)
 }
 
+/** Part 4 adversarial transform families: each must leave the Widget with `regions: []`. */
+const ADVERSARIAL = [
+	['rotation', 'rotate(10deg)'],
+	['quarter-rotation', 'rotate(90deg)'],
+	['reflection', 'scaleX(-1)'],
+	['point-reflection', 'scale(-0.5)'],
+	['nonuniform', 'scale(1, 2)'],
+	['near-singular', 'scale(1, 0.001)'],
+] as const
+
 function bounds(geometry: WidgetGeometry) {
 	return geometry.regions.map((region) => {
 		const xs = region.contour.commands.flatMap(command => 'x' in command ? [command.x] : [])
@@ -142,5 +152,66 @@ describe('Runtime DOM measurer', () => {
 			expect(result[id]!.rect.width, id).toBeGreaterThan(0)
 			expect(result[id]!.regions, id).toEqual([])
 		}
+	})
+
+	it('rejects every adversarial transform family on the Widget and on an occluder above it', async () => {
+		const body = ADVERSARIAL.map(([id, transform], index) => `
+			<div data-widget-id="own-${id}" style="position:absolute;left:0;top:${index * 90}px;width:200px;height:60px;transform:${transform};background:#eee"></div>
+			<div data-widget-id="under-${id}" style="position:absolute;left:400px;top:${index * 90}px;width:200px;height:60px;background:#eee"></div>
+			<div style="position:absolute;left:475px;top:${index * 90 + 20}px;width:50px;height:20px;transform:${transform};background:rgb(0,0,0)"></div>`).join('')
+		const ids = ADVERSARIAL.flatMap(([id]) => [`own-${id}`, `under-${id}`])
+		const result = await measure(body, ids)
+		for (const id of ids) {
+			expect(result[id]!.rect.width, id).toBeGreaterThan(0)
+			expect(result[id]!.regions, id).toEqual([])
+		}
+	})
+
+	it('follows the flat tree into the shadow tree a Widget is slotted into', async () => {
+		const host = (top: number, transform: string, widget: string) => `
+			<div style="position:absolute;left:0;top:${top}px;width:400px">
+				<template shadowrootmode="open"><div style="transform-origin:0 0;transform:${transform}"><slot></slot></div></template>
+				<div data-widget-id="${widget}" style="width:200px;height:50px;background:#eee"></div>
+			</div>`
+		const body = ADVERSARIAL.map(([id, transform], index) => host(index * 80, transform, id)).join('') + host(500, 'translate(10px, 0) scale(0.5)', 'uniform')
+		const result = await measure(body, [...ADVERSARIAL.map(([id]) => id), 'uniform'])
+		// A parentElement-only walk sees only the untransformed host and would report the bounding box.
+		for (const [id] of ADVERSARIAL) {
+			expect(result[id]!.rect.width, id).toBeGreaterThan(0)
+			expect(result[id]!.regions, id).toEqual([])
+		}
+		// Translation plus uniform scale inside the shadow tree is still inside the exact subset.
+		expect(bounds(result.uniform!)).toEqual([{ left: 10, top: 500, right: 110, bottom: 525, maxError: 0 }])
+	})
+
+	it('treats an occluder slotted into a transformed shadow tree as unsupported', async () => {
+		const pair = (index: number, transform: string, widget: string) => {
+			const left = (index % 3) * 260
+			const top = Math.floor(index / 3) * 150
+			return `
+			<div data-widget-id="${widget}" style="position:absolute;left:${left}px;top:${top}px;width:200px;height:100px;background:#eee"></div>
+			<div style="position:absolute;left:${left + 100}px;top:${top}px;width:150px;z-index:1">
+				<template shadowrootmode="open"><div style="transform:${transform}"><slot></slot></div></template>
+				<div style="height:100px;background:rgb(0,0,0)"></div>
+			</div>`
+		}
+		const body = ADVERSARIAL.map(([id, transform], index) => pair(index, transform, id)).join('') + pair(ADVERSARIAL.length, 'none', 'control')
+		const result = await measure(body, [...ADVERSARIAL.map(([id]) => id), 'control'])
+		for (const [id] of ADVERSARIAL) {
+			expect(result[id]!.rect.width, id).toBeGreaterThan(0)
+			expect(result[id]!.regions, id).toEqual([])
+		}
+		// The same occluder without a shadow-tree transform is proven opaque and subtracted.
+		const { x, y } = result.control!.rect
+		expect(bounds(result.control!)).toEqual([{ left: x, top: y, right: x + 100, bottom: y + 100, maxError: 0 }])
+	})
+
+	it('fails closed for a Widget under an SVG ancestor', async () => {
+		const result = await measure(`
+			<svg style="position:absolute;left:0;top:0" width="400" height="200" viewBox="0 0 200 100">
+				<foreignObject x="0" y="0" width="200" height="100"><div data-widget-id="in-svg" style="width:100px;height:50px;background:#eee"></div></foreignObject>
+			</svg>`, ['in-svg'])
+		expect(result['in-svg']!.rect.width).toBeGreaterThan(0)
+		expect(result['in-svg']!.regions).toEqual([])
 	})
 })

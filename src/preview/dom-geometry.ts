@@ -1,3 +1,4 @@
+import { flatTreeParent, isSvgElement } from './axis-aligned-content-quad'
 import type { WidgetGeometry, WidgetMeasurer } from './geometry-producer'
 import { planOcclusion, type OcclusionEvidence } from './occlusion-proof'
 import type { ContourCommand, Point, VisibleRegion, WidgetRect } from './protocol/schema'
@@ -15,7 +16,8 @@ import { approximateRoundedRectContour, type RoundedRectRadii } from './rounded-
  *
  * Exact subset:
  * - Widget and occluder boxes whose transform chain is translation plus uniform positive scale.
- *   Rotation, skew, flips, nonuniform scale, 3D and motion paths fail closed.
+ *   Rotation, skew, flips, nonuniform scale, 3D and motion paths fail closed. The chain follows
+ *   the flat tree (assigned slot, parent element, shadow host), and an SVG ancestor fails closed.
  * - Rectangular clips are exact. One rounded shape may take part (the Widget's own border radius,
  *   or one rounded overflow clip whose corners reach the visible area): its contour is the
  *   `approximateRoundedRectContour` polygon clipped by the exact rectangle, with that contour's
@@ -161,17 +163,17 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 
 	type ChainFlags = Readonly<{ opacity: number; transformOk: boolean; compositing: boolean; shapeClip: boolean; hidden: boolean }>
 
-	/** Aggregated style facts of an element and all its ancestors. */
+	/** Aggregated style facts of an element and all its flat-tree ancestors. */
 	function chainOf(element: Element): ChainFlags {
 		const cached = chainFlags.get(element)
 		if (cached) return cached
 		const style = styleOf(element)
-		const parent = element.parentElement
+		const parent = flatTreeParent(element)
 		const inherited: ChainFlags = parent ? chainOf(parent) : { opacity: 1, transformOk: true, compositing: false, shapeClip: false, hidden: false }
 		const opacity = Number.parseFloat(style.opacity)
 		const flags: ChainFlags = {
 			opacity: inherited.opacity * (Number.isFinite(opacity) ? opacity : 1),
-			transformOk: inherited.transformOk && transformIsUniform(style),
+			transformOk: inherited.transformOk && !(parent && isSvgElement(parent)) && transformIsUniform(style),
 			compositing: inherited.compositing || hasCompositing(style),
 			shapeClip: inherited.shapeClip || (style.clipPath !== '' && style.clipPath !== 'none') || hasMask(style),
 			hidden: false,
