@@ -22,3 +22,10 @@ indent_size = 2
 [*.yaml]
 indent_style = space
 indent_size = 2
+
+# Vendored agent skills keep their upstream formatting.
+[.claude/**]
+indent_style = unset
+indent_size = unset
+trim_trailing_whitespace = unset
+insert_final_newline = unset

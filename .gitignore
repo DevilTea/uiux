@@ -10,3 +10,21 @@ test-results/
 .env
 .env.*
 !.env.example
+
+# Claude Code: per-machine state and agent worktrees (skills and agents stay tracked)
+.claude/worktrees/
+.claude/settings.local.json
+
+# Impeccable runtime, cache and generated review artifacts
+# (.impeccable/design.json and .impeccable/config.json stay tracked)
+.impeccable/config.local.json
+.impeccable/hook.cache.json
+.impeccable/hook.pending.json
+.impeccable/live/*
+!.impeccable/live/config.json
+.impeccable/build/
+.impeccable/review/
+.impeccable/mocks/
+.impeccable/questions/
+.impeccable/component-reviews/
+.impeccable-live/
