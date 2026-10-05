@@ -38,8 +38,10 @@ function findReference(): HTMLElement | undefined {
 		?? query('[data-comment-fallback]')
 }
 
+// The reference changes only when a thread's canvas status does (drawn, behind an edge, hidden),
+// never per scrolled frame; the floating layer itself follows the moving pin.
 watch(
-	[() => composer.value?.sequence, threadId, () => comments.placements.value, () => comments.pinsHidden.value],
+	[() => composer.value?.sequence, threadId, () => comments.pinStatusById.value, () => comments.pinsHidden.value, () => comments.hoveredThreadId.value],
 	async () => {
 		await nextTick()
 		const next = findReference()

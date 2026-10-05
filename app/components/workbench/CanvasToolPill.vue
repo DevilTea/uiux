@@ -15,8 +15,10 @@ const props = defineProps<{
 	showComment: boolean
 	/** Why the tools are unavailable (no live preview yet); undefined when they work. */
 	disabledReason?: string
+	/** Comment pins hidden (`true`) or shown; undefined where the canvas has no pins. */
+	pinsHidden?: boolean
 }>()
-const emit = defineEmits<{ (e: 'select', tool: CanvasToolId): void }>()
+const emit = defineEmits<{ (e: 'select', tool: CanvasToolId): void, (e: 'togglePins'): void }>()
 
 const { t } = useI18n()
 
@@ -52,45 +54,71 @@ function toolClass(id: CanvasToolId): string {
 </script>
 
 <template>
-  <div
-    role="toolbar"
-    :aria-label="t('tool.label')"
-    aria-orientation="horizontal"
-    class="inline-flex items-center gap-0.5 rounded-[10px] bg-default p-1 shadow-overlay"
-    @keydown.right.prevent="move(1)"
-    @keydown.left.prevent="move(-1)"
-    @keydown.home.prevent="move('first')"
-    @keydown.end.prevent="move('last')"
-  >
-    <UTooltip
-      v-for="(tool, index) in tools"
-      :key="tool.id"
-      :text="disabledReason ?? tool.label"
-      :kbds="disabledReason ? undefined : [tool.kbd]"
+  <!-- One pill: the tool toolbar (one active tool), then the pins toggle as its own control (Shift C). -->
+  <div class="inline-flex items-center gap-0.5 rounded-[10px] bg-default p-1 shadow-overlay">
+    <div
+      role="toolbar"
+      :aria-label="t('tool.label')"
+      aria-orientation="horizontal"
+      class="inline-flex items-center gap-0.5"
+      @keydown.right.prevent="move(1)"
+      @keydown.left.prevent="move(-1)"
+      @keydown.home.prevent="move('first')"
+      @keydown.end.prevent="move('last')"
     >
-      <UButton
-        ref="buttons"
-        color="neutral"
-        variant="ghost"
-        size="sm"
-        :icon="tool.icon"
-        :aria-pressed="active === tool.id"
-        :aria-keyshortcuts="tool.kbd"
-        :disabled="!!disabledReason"
-        :tabindex="tabIndexFor(index)"
-        :class="toolClass(tool.id)"
-        :ui="{ base: 'gap-1.5 px-2', label: 'max-sm:sr-only' }"
-        @focus="focusIndex = index"
-        @blur="focusIndex = -1"
-        @click="emit('select', tool.id)"
+      <UTooltip
+        v-for="(tool, index) in tools"
+        :key="tool.id"
+        :text="disabledReason ?? tool.label"
+        :kbds="disabledReason ? undefined : [tool.kbd]"
       >
-        {{ tool.label }}
-        <UKbd
-          :value="tool.kbd"
-          variant="outline"
-          class="max-sm:hidden bg-transparent text-current ring-current/35"
+        <UButton
+          ref="buttons"
+          color="neutral"
+          variant="ghost"
+          size="sm"
+          :icon="tool.icon"
+          :aria-pressed="active === tool.id"
+          :aria-keyshortcuts="tool.kbd"
+          :disabled="!!disabledReason"
+          :tabindex="tabIndexFor(index)"
+          :class="toolClass(tool.id)"
+          :ui="{ base: 'gap-1.5 px-2', label: 'max-sm:sr-only' }"
+          @focus="focusIndex = index"
+          @blur="focusIndex = -1"
+          @click="emit('select', tool.id)"
+        >
+          {{ tool.label }}
+          <UKbd
+            :value="tool.kbd"
+            variant="outline"
+            class="max-sm:hidden bg-transparent text-current ring-current/35"
+          />
+        </UButton>
+      </UTooltip>
+    </div>
+    <template v-if="pinsHidden !== undefined">
+      <USeparator
+        orientation="vertical"
+        class="mx-0.5 h-5"
+      />
+      <UTooltip
+        :text="pinsHidden ? t('pins.show') : t('pins.hide')"
+        :kbds="['shift', 'C']"
+      >
+        <UButton
+          color="neutral"
+          variant="ghost"
+          size="sm"
+          :icon="pinsHidden ? 'i-lucide-eye-off' : 'i-lucide-eye'"
+          :aria-label="t('pins.toggle')"
+          :aria-pressed="!pinsHidden"
+          aria-keyshortcuts="Shift+C"
+          class="text-muted"
+          data-pins-toggle
+          @click="emit('togglePins')"
         />
-      </UButton>
-    </UTooltip>
+      </UTooltip>
+    </template>
   </div>
 </template>

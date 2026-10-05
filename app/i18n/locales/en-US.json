@@ -1224,7 +1224,22 @@
     "unplaced": "{n} comment can't be placed | {n} comments can't be placed",
     "otherVariants": "Other Variants · {n}",
     "notVisible": "Not visible in this state",
-    "variantMissing": "Variant missing: {name}"
+    "variantMissing": "Variant missing: {name}",
+    "notOnCanvas": "{n} more not shown on canvas | {n} more not shown on canvas",
+    "notOnCanvasGroup": "Not shown on canvas",
+    "overCapHint": "The canvas tracks up to {cap} Widgets at once. Narrow the pin filter to show these.",
+    "singleStreamHint": "This preview runtime tracks one Widget at a time. Open a thread to show its pin.",
+    "toggle": "Show pins",
+    "show": "Show pins",
+    "hide": "Hide pins",
+    "shownAnnounce": "Pins shown.",
+    "hiddenAnnounce": "Pins hidden. The Comments list still shows every thread.",
+    "edge": {
+      "top": "{n} comment above, out of view | {n} comments above, out of view",
+      "right": "{n} comment to the right, out of view | {n} comments to the right, out of view",
+      "bottom": "{n} comment below, out of view | {n} comments below, out of view",
+      "left": "{n} comment to the left, out of view | {n} comments to the left, out of view"
+    }
   },
   "empty": {
     "title": "No comments yet",
@@ -1466,7 +1481,7 @@
       "pointNotVisible": "Pin point not visible",
       "otherVariant": "Scoped to another Variant.",
       "mapping": "The canvas can't be measured right now.",
-      "overCap": "Too many pins to draw. Listed here only.",
+      "overCap": "Not shown on canvas: too many Widgets to track. Narrow the pin filter.",
       "reconnecting": "Reconnecting preview…"
     },
     "resolution": {
@@ -1486,7 +1501,6 @@
     "unknownAuthor": "Unknown author",
     "pinLabel": "Comment by {name} on {type} {id}, {status}, {n} message | Comment by {name} on {type} {id}, {status}, {n} messages",
     "clusterLabel": "{n} comment here | {n} comments here",
-    "edgeLabel": "{n} comment out of view. Open it. | {n} comments out of view. Open the first.",
     "scopeLabel": "Variant scope",
     "keepEditing": "Keep editing",
     "discardAction": "Discard",

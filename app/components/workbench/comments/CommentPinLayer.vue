@@ -1,53 +1,39 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useI18n } from '#imports'
-import type { DropdownMenuItem } from '@nuxt/ui'
 import { useWorkbench } from '../../../composables/useWorkbench'
-import { threadAuthorInitials, PENDING_PIN_ID, statusKey, useCanvasComments } from '../../../composables/useCanvasComments'
-import { clusterPins, type PinPlacement } from '../../../../src/preview/pin-visibility'
+import { PENDING_PIN_ID, useCanvasComments } from '../../../composables/useCanvasComments'
+import { aggregateEdgeIndicators, type PinEdgeSide } from '../../../../src/preview/pin-visibility'
 import { mapPointAffine, type AffineOuterMapping } from '../../../../src/preview/outer-precision'
-import { flattenWidgetTree } from '../../../../src/preview/widget-tree'
+import type { Point } from '../../../../src/preview/protocol/schema'
+import { layoutPins } from '../../../utils/pin-layout'
 import CommentPin from './CommentPin.vue'
+import CommentPinMenu from './CommentPinMenu.vue'
+import CommentThreadPin from './CommentThreadPin.vue'
 
 /**
  * The pin layer inside the canvas overlay (overlay-layer CSS px). The layer itself is
  * `pointer-events: none`; only pins, clusters and edge indicators take input, so every other
  * click reaches the iframe, which hit-tests (multi-target decision 8).
+ *
+ * Rendering is split in two (decision 9, "DOM writes via `transform` only"): the template renders
+ * what is drawn (which pins, which clusters, which edge indicators, in reading order) and re-renders
+ * only when that changes; positions are written as `transform`s on zero-size anchors once per frame,
+ * after the coalesced geometry update. Children take primitive props and stable handlers, so a
+ * re-render touches only the items that changed. A scrolled frame costs one placement pass and one
+ * transform write per drawn item.
  */
 const props = defineProps<{ mapping?: AffineOuterMapping }>()
 
 const { t } = useI18n()
 const workbench = useWorkbench()
 const comments = useCanvasComments()!
-const { preview, widgetTreeResult } = workbench
+const { preview } = workbench
 
 const layer = ref<HTMLElement>()
 
-const typeById = computed(() => {
-	const tree = widgetTreeResult.value
-	return new Map(tree?.status === 'valid' ? flattenWidgetTree(tree.root).map(node => [node.id, node.type]) : [])
-})
-const widgetLabel = (widgetId: string) => `${typeById.value.get(widgetId) ?? 'Widget'} · #${widgetId}`
-
 /** Interact gives every click to the View: pins dim and stop taking input. */
 const dimmed = computed(() => preview.canvasTool.value === 'interact')
-
-function statusWord(status: string): string {
-	return t(`thread.status.${statusKey(status as 'open')}`)
-}
-
-function pinLabel(threadId: string): string {
-	const item = comments.threadById.value.get(threadId)
-	if (!item) return ''
-	const status = statusWord(item.status) + (item.missingVariants.length ? `, ${t('comments.staleWord')}` : '')
-	return t('comments.pinLabel', {
-		name: item.author?.displayName ?? t('comments.unknownAuthor'),
-		type: typeById.value.get(item.anchor.widgetId) ?? 'Widget',
-		id: item.anchor.widgetId,
-		status,
-		n: item.messageCount,
-	}, item.messageCount)
-}
 
 // ---------------------------------------------------------------------------------------------
 // Drag to move a pin within its Widget (pin-hint decision 4: one write on drop)
@@ -55,7 +41,7 @@ function pinLabel(threadId: string): string {
 
 const drag = ref<{ threadId: string; x: number; y: number; hint: { x: number; y: number } }>()
 
-function invert(point: { x: number; y: number }, mapping: AffineOuterMapping): { x: number; y: number } | undefined {
+function invert(point: Point, mapping: AffineOuterMapping): Point | undefined {
 	const det = mapping.a * mapping.d - mapping.b * mapping.c
 	if (!Number.isFinite(det) || Math.abs(det) < 1e-12) return undefined
 	const dx = point.x - mapping.e
@@ -86,87 +72,162 @@ async function dropAt(threadId: string, clientX: number, clientY: number): Promi
 	drag.value = undefined
 }
 
-// ---------------------------------------------------------------------------------------------
-// What to draw
-// ---------------------------------------------------------------------------------------------
-
-type DrawnPin = Readonly<{ placement: PinPlacement; x: number; y: number }>
-
-const visible = computed(() => comments.placements.value.filter(placement => placement.state === 'visible' && placement.point))
-const pending = computed(() => visible.value.find(placement => placement.threadId === PENDING_PIN_ID))
-
-/** The open (and dragged) thread is drawn on its own; the rest may merge into count clusters. */
-const groups = computed(() => {
-	const open = comments.openThreadId.value
-	const solo: DrawnPin[] = []
-	const rest: PinPlacement[] = []
-	for (const placement of visible.value) {
-		if (placement.threadId === PENDING_PIN_ID) continue
-		if (placement.threadId === open || placement.threadId === drag.value?.threadId || placement.threadId === comments.hoveredThreadId.value) {
-			const dragged = drag.value?.threadId === placement.threadId ? drag.value : undefined
-			solo.push({ placement, x: dragged?.x ?? placement.point!.x, y: dragged?.y ?? placement.point!.y })
-		}
-		else rest.push(placement)
-	}
-	const clusters = clusterPins(rest)
-	const byId = new Map(rest.map(placement => [placement.threadId, placement]))
-	const singles: DrawnPin[] = []
-	const merged: { x: number; y: number; threadIds: readonly string[] }[] = []
-	for (const cluster of clusters) {
-		if (cluster.threadIds.length === 1) {
-			const placement = byId.get(cluster.threadIds[0]!)!
-			singles.push({ placement, x: placement.point!.x, y: placement.point!.y })
-		}
-		else merged.push({ x: cluster.point.x, y: cluster.point.y, threadIds: cluster.threadIds })
-	}
-	return { solo, singles, merged }
-})
-
-function pinProps(drawn: DrawnPin) {
-	const item = comments.threadById.value.get(drawn.placement.threadId)
-	const resolved = item?.status === 'resolved'
-	return {
-		x: drawn.x,
-		y: drawn.y,
-		threadId: drawn.placement.threadId,
-		label: pinLabel(drawn.placement.threadId),
-		variant: resolved ? 'resolved' as const : 'default' as const,
-		badge: item?.status === 'ready-for-review' ? 'ready' as const : item?.missingVariants.length ? 'stale' as const : undefined,
-		initials: threadAuthorInitials(item?.author),
-		agent: item?.author?.type === 'agent',
-		open: comments.openThreadId.value === drawn.placement.threadId,
-		lift: comments.hoveredThreadId.value === drawn.placement.threadId,
-		fresh: comments.freshThreadIds.value.has(drawn.placement.threadId),
-		dim: dimmed.value,
-		draggable: comments.canComment.value && !resolved && !dimmed.value && !!props.mapping,
-	}
-}
-
 function toggle(threadId: string): void {
 	if (comments.openThreadId.value === threadId) comments.close()
 	else comments.open(threadId)
 }
 
-function clusterItems(threadIds: readonly string[]): DropdownMenuItem[] {
-	return threadIds.map((id) => {
-		const item = comments.threadById.value.get(id)
-		return {
-			label: item?.title ?? widgetLabel(item?.anchor.widgetId ?? ''),
-			description: `${item?.author?.displayName ?? t('comments.unknownAuthor')} · ${widgetLabel(item?.anchor.widgetId ?? '')}`,
-			icon: item?.status === 'ready-for-review' ? 'i-lucide-eye' : item?.status === 'resolved' ? 'i-lucide-circle-check' : 'i-lucide-circle-dot',
-			onSelect: () => { comments.open(id) },
+type PinPoint = Readonly<{ clientX: number; clientY: number }>
+/** One stable handler for every pin's activation and drag (see CommentThreadPin). */
+function onPin(threadId: string, action: 'activate' | 'enter' | 'move' | 'drop' | 'cancel', point?: PinPoint): void {
+	if (action === 'activate') toggle(threadId)
+	// Enter on the pin of the open bubble moves into the conversation instead of closing it.
+	else if (action === 'enter' && comments.openThreadId.value === threadId) focusBubble()
+	else if (action === 'enter') toggle(threadId)
+	else if (action === 'move' && point) dragTo(threadId, point.clientX, point.clientY)
+	else if (action === 'drop' && point) void dropAt(threadId, point.clientX, point.clientY)
+	else if (action === 'cancel') drag.value = undefined
+}
+
+// ---------------------------------------------------------------------------------------------
+// What is drawn (structure) and where (per-frame positions)
+// ---------------------------------------------------------------------------------------------
+
+/** The open, dragged and list-hovered threads are drawn on their own; the rest may merge into clusters. */
+const solo = computed(() => new Set([comments.openThreadId.value, drag.value?.threadId, comments.hoveredThreadId.value].filter((id): id is string => !!id)))
+const EXCLUDED = new Set([PENDING_PIN_ID])
+
+const layout = computed(() => comments.pinsHidden.value ? undefined : layoutPins(comments.placements.value, { solo: solo.value, excluded: EXCLUDED }))
+const edges = computed(() => comments.pinsHidden.value ? [] : aggregateEdgeIndicators(comments.placements.value))
+const pending = computed(() => comments.placements.value.find(placement => placement.threadId === PENDING_PIN_ID && placement.state === 'visible' && placement.point))
+
+type Structure = Readonly<{
+	key: string
+	items: ReadonlyArray<Readonly<{ kind: 'pin'; key: string; threadId: string; drawn: boolean } | { kind: 'cluster'; key: string; ids: string; drawn: true }>>
+	edges: ReadonlyArray<Readonly<{ key: string; side: PinEdgeSide; ids: string }>>
+	pending: boolean
+}>
+
+/** One indicator per side and scope; it keeps its element while its threads change. */
+const edgeKey = (edge: Readonly<{ scope: string; side: string }>) => `e:${edge.scope}:${edge.side}`
+
+/**
+ * What is drawn. It keeps its identity while pins only move, so the template does not re-render.
+ * Every pin that can appear on this canvas stays mounted; one that scrolls out of view, joins a
+ * cluster or loses its point is only `hidden`, so scrolling never mounts or unmounts components.
+ * Drawn items come first, in reading order, which is also their Tab order.
+ */
+const structure = computed<Structure>((previous) => {
+	const edgeItems = edges.value.map(edge => ({ key: edgeKey(edge), side: edge.side, ids: edge.threadIds.join(' ') }))
+	const drawnItems = layout.value?.items ?? []
+	const drawnPins = new Set(drawnItems.flatMap(item => item.kind === 'pin' ? [item.threadId] : []))
+	const undrawn = comments.pinsHidden.value
+		? []
+		: comments.placements.value.filter(placement => placement.threadId !== PENDING_PIN_ID && placement.state !== 'invalid'
+			&& placement.reason !== 'other-variant' && placement.reason !== 'other-view' && !drawnPins.has(placement.threadId))
+	const key = `${layout.value?.key ?? ''}~${undrawn.map(placement => placement.threadId).join(',')}#${edgeItems.map(edge => `${edge.key}=${edge.ids}`).join('|')}#${pending.value ? 'pending' : ''}`
+	if (previous && previous.key === key) return previous
+	const items: Structure['items'][number][] = drawnItems.map(item => item.kind === 'pin'
+		? { kind: 'pin' as const, key: item.key, threadId: item.threadId, drawn: true }
+		: { kind: 'cluster' as const, key: item.key, ids: item.threadIds.join(' '), drawn: true as const })
+	for (const placement of undrawn) items.push({ kind: 'pin', key: `p:${placement.threadId}`, threadId: placement.threadId, drawn: false })
+	return { key, items, edges: edgeItems, pending: !!pending.value }
+})
+
+/** Where each drawn item is, in overlay px. Recomputed per frame; written as transforms only. */
+const positions = computed(() => {
+	const result = new Map<string, Point>()
+	for (const item of layout.value?.items ?? []) {
+		const dragged = item.kind === 'pin' && drag.value?.threadId === item.threadId ? drag.value : undefined
+		result.set(item.key, dragged ? { x: dragged.x, y: dragged.y } : item.point)
+	}
+	for (const edge of edges.value) result.set(edgeKey(edge), edge.point)
+	if (pending.value?.point) result.set('pending', pending.value.point)
+	return result
+})
+
+const anchors = new Map<string, HTMLElement>()
+const anchorRefs = new Map<string, (element: Element | ComponentPublicInstance | null) => void>()
+/** Registration only: the post-flush watcher writes positions, so rendering never reads them. */
+function anchorRef(key: string) {
+	let set = anchorRefs.get(key)
+	if (!set) {
+		set = (element) => {
+			if (element instanceof HTMLElement) anchors.set(key, element)
+			else {
+				anchors.delete(key)
+				anchorRefs.delete(key)
+			}
 		}
+		anchorRefs.set(key, set)
+	}
+	return set
+}
+
+function writePositions(): void {
+	for (const [key, point] of positions.value) {
+		const element = anchors.get(key)
+		if (element) element.style.transform = `translate(${point.x}px, ${point.y}px)`
+	}
+}
+watch([positions, structure], writePositions, { flush: 'post' })
+
+// ---------------------------------------------------------------------------------------------
+// Keyboard: J / K cycle the pins (brief c §11); Tab walks them in reading order
+// ---------------------------------------------------------------------------------------------
+
+function isTyping(target: EventTarget | null): boolean {
+	const element = target as HTMLElement | null
+	return !!element && (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.tagName === 'SELECT' || element.isContentEditable)
+}
+
+function focusBubble(): void {
+	comments.browsingPins.value = false
+	const bubble = document.querySelector<HTMLElement>('[data-thread-bubble]')
+	;(bubble?.querySelector<HTMLElement>('textarea[data-thread-reply]') ?? bubble)?.focus({ preventScroll: true })
+}
+
+function focusThread(threadId: string): void {
+	void nextTick(() => {
+		const escaped = CSS.escape(threadId)
+		const target = layer.value?.querySelector<HTMLElement>(`[data-pin-thread="${escaped}"]`)
+			?? layer.value?.querySelector<HTMLElement>(`[data-edge-threads~="${escaped}"]`)
+		target?.focus({ preventScroll: true })
 	})
 }
 
-const EDGE_ICON = { top: 'i-lucide-chevron-up', right: 'i-lucide-chevron-right', bottom: 'i-lucide-chevron-down', left: 'i-lucide-chevron-left' } as const
-const EDGE_OFFSET = { top: 'translate(-50%, 0)', bottom: 'translate(-50%, -100%)', left: 'translate(0, -50%)', right: 'translate(-100%, -50%)' } as const
-
-/** Opens the first thread behind an edge indicator. It never scrolls the iframe (decision 7). */
-function openEdge(threadIds: readonly string[]): void {
-	const first = threadIds[0]
-	if (first) comments.open(first)
+function onKeydown(event: KeyboardEvent): void {
+	if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+	if (event.key !== 'j' && event.key !== 'k') return
+	const active = document.activeElement as HTMLElement | null
+	if (isTyping(active) || active?.closest('[data-comments-tab]')) return
+	if (document.querySelector('[data-reka-popper-content-wrapper] [role="menu"]')) return
+	// On the canvas: a focused pin, cluster or edge indicator, the open bubble, or nothing focused while a thread is open.
+	const inLayer = !!active && !!layer.value?.contains(active)
+	const inBubble = !!active?.closest('[data-thread-bubble]')
+	const idle = !active || active === document.body
+	if (!inLayer && !inBubble && !(idle && comments.openThreadId.value)) return
+	const from = active?.getAttribute('data-pin-thread')
+		?? (active?.getAttribute('data-edge-threads') ?? active?.getAttribute('data-pin-cluster-threads'))?.split(' ')[0]
+	const next = comments.cycle(event.key === 'j' ? 1 : -1, from && from !== PENDING_PIN_ID ? from : undefined)
+	if (!next) return
+	event.preventDefault()
+	focusThread(next)
 }
+
+/**
+ * Icons that pins, edge indicators and list rows switch to while the View scrolls. Icons inject
+ * their CSS on first use, which restyles the whole Workbench document; rendering them once up front
+ * keeps that out of the scrolled frames.
+ */
+const PRELOADED_ICONS = [
+	'i-lucide-chevron-up', 'i-lucide-chevron-right', 'i-lucide-chevron-down', 'i-lucide-chevron-left',
+	'i-lucide-arrow-up-to-line', 'i-lucide-arrow-right-to-line', 'i-lucide-arrow-down-to-line', 'i-lucide-arrow-left-to-line',
+	'i-lucide-scan', 'i-lucide-scan-line', 'i-lucide-eye-off', 'i-lucide-eye', 'i-lucide-bot', 'i-lucide-check', 'i-lucide-plus', 'i-lucide-history',
+] as const
+
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
@@ -175,85 +236,81 @@ function openEdge(threadIds: readonly string[]): void {
     class="pointer-events-none absolute inset-0"
     data-comment-pins
   >
-    <template v-if="!comments.pinsHidden.value">
-      <UDropdownMenu
-        v-for="cluster in groups.merged"
-        :key="cluster.threadIds.join(':')"
-        :items="clusterItems(cluster.threadIds)"
-        :content="{ align: 'start', side: 'right', sideOffset: 6 }"
-      >
-        <CommentPin
-          :x="cluster.x"
-          :y="cluster.y"
-          variant="cluster"
-          :count="cluster.threadIds.length"
-          :dim="dimmed"
-          :label="t('comments.clusterLabel', cluster.threadIds.length)"
-          data-pin-cluster
-        />
-      </UDropdownMenu>
-      <CommentPin
-        v-for="drawn in [...groups.singles, ...groups.solo]"
-        :key="drawn.placement.threadId"
-        v-bind="pinProps(drawn)"
-        @activate="toggle(drawn.placement.threadId)"
-        @drag-move="point => dragTo(drawn.placement.threadId, point.clientX, point.clientY)"
-        @drag-end="point => dropAt(drawn.placement.threadId, point.clientX, point.clientY)"
-        @drag-cancel="drag = undefined"
+    <span
+      v-for="item in structure.items"
+      :key="item.key"
+      :ref="anchorRef(item.key)"
+      class="pin-anchor"
+      :class="{ 'is-raised': item.kind === 'pin' && solo.has(item.threadId) }"
+      :hidden="!item.drawn"
+    >
+      <CommentPinMenu
+        v-if="item.kind === 'cluster'"
+        kind="cluster"
+        :ids="item.ids"
+        :dim="dimmed"
       />
-      <button
-        v-for="edge in comments.edgeIndicators.value"
-        :key="`${edge.scope}:${edge.side}`"
-        type="button"
-        class="comment-edge"
-        :class="{ 'is-dim': dimmed }"
-        :style="{ left: `${edge.point.x}px`, top: `${edge.point.y}px`, transform: EDGE_OFFSET[edge.side] }"
-        :aria-label="t('comments.edgeLabel', edge.threadIds.length)"
-        :data-edge-threads="edge.threadIds.join(' ')"
-        :data-edge-side="edge.side"
-        @click="openEdge(edge.threadIds)"
-      >
-        <UIcon
-          :name="EDGE_ICON[edge.side]"
-          class="size-3.5"
-        />
-        <span>{{ edge.threadIds.length }}</span>
-      </button>
-    </template>
-    <CommentPin
-      v-if="pending"
-      :x="pending.point!.x"
-      :y="pending.point!.y"
-      variant="pending"
-      :thread-id="PENDING_PIN_ID"
-      :label="t('comment.placeholder')"
-      fresh
+      <CommentThreadPin
+        v-else
+        :thread-id="item.threadId"
+        :draggable-on-canvas="!!mapping"
+        @pin="onPin"
+      />
+    </span>
+
+    <span
+      v-for="edge in structure.edges"
+      :key="edge.key"
+      :ref="anchorRef(edge.key)"
+      class="pin-anchor"
+    >
+      <CommentPinMenu
+        kind="edge"
+        :ids="edge.ids"
+        :side="edge.side"
+        :dim="dimmed"
+      />
+    </span>
+
+    <span
+      v-if="structure.pending"
+      key="pending"
+      :ref="anchorRef('pending')"
+      class="pin-anchor is-raised"
+    >
+      <CommentPin
+        variant="pending"
+        :thread-id="PENDING_PIN_ID"
+        :label="t('comment.placeholder')"
+        fresh
+        aria-hidden="true"
+        tabindex="-1"
+      />
+    </span>
+
+    <span
+      hidden
       aria-hidden="true"
-      tabindex="-1"
-    />
+    >
+      <UIcon
+        v-for="icon in PRELOADED_ICONS"
+        :key="icon"
+        :name="icon"
+      />
+    </span>
   </div>
 </template>
 
 <style scoped>
-.comment-edge {
+/* A zero-size anchor at the pin tip; the layer moves it with a transform (decision 9). */
+.pin-anchor {
   position: absolute;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  height: 24px;
-  padding: 0 6px 0 4px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--wb-pin);
-  color: var(--wb-pin-text);
-  font-size: var(--text-xs);
-  line-height: 1rem;
-  font-weight: 600;
-  box-shadow: var(--wb-shadow-pin);
-  pointer-events: auto;
-  cursor: pointer;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
   z-index: 2;
+
 }
-.comment-edge:focus-visible { outline: 2px solid var(--ui-primary); outline-offset: 3px; }
-.comment-edge.is-dim { opacity: 0.4; pointer-events: none; }
+.pin-anchor.is-raised { z-index: 3; }
 </style>

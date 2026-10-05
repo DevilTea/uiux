@@ -1,4 +1,4 @@
-import { computed, inject, nextTick, onScopeDispose, provide, ref, shallowRef, watch, type InjectionKey, type Ref } from 'vue'
+import { computed, inject, nextTick, onScopeDispose, provide, ref, shallowReactive, shallowRef, watch, type InjectionKey, type Ref } from 'vue'
 import { useI18n } from '#imports'
 import type {
 	ReviewActor,
@@ -16,6 +16,7 @@ import { useAccess } from './useAccess'
 import { useUiuxClient } from './useUiuxClient'
 import { useWorkbench } from './useWorkbench'
 import { usePinPlacements, type PinPlacement, type PinThreadInput } from './usePinPlacements'
+import { canvasOrder, cycleThread, pinStatuses, type PinStatus } from '../utils/pin-layout'
 import type { CommentTarget } from './usePreviewSession'
 import type { ReviewSummary } from './workbench-types'
 
@@ -70,6 +71,18 @@ export type ComposerState = Readonly<{
 	error?: FetchErrorDetails
 	/** The thread exists but its first message failed: Retry posts only the message. */
 	created?: Readonly<{ key: string; revision: string }>
+}>
+
+/** What a thread's pin and its cluster or edge menu row say. */
+export type PinMeta = Readonly<{
+	label: string
+	name: string
+	initials: string
+	agent: boolean
+	resolved: boolean
+	badge?: 'ready' | 'stale'
+	title: string
+	detail: string
 }>
 
 /** The pending composer's pseudo-thread in the pin inputs (its Widget is tracked in tier 1). */
@@ -505,6 +518,94 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	})
 	const placementById = computed(() => new Map<string, PinPlacement>(placements.value.map(placement => [placement.threadId, placement])))
 
+	/** Widget types by id, for pin names and menu rows. */
+	const widgetTypeById = computed(() => {
+		const tree = widgetTreeResult.value
+		return new Map(tree?.status === 'valid' ? flattenWidgetTree(tree.root).map(node => [node.id, node.type]) : [])
+	})
+	/**
+	 * What each thread's pin says (accessible name, initials, badge) and its row in cluster and edge
+	 * menus. It depends on threads and the chrome locale only, never on geometry.
+	 */
+	const pinMeta = computed(() => {
+		const meta = new Map<string, PinMeta>()
+		for (const item of threads.value) {
+			const name = item.author?.displayName ?? t('comments.unknownAuthor')
+			const status = t(`thread.status.${statusKey(item.status)}`)
+			const type = widgetTypeById.value.get(item.anchor.widgetId) ?? 'Widget'
+			meta.set(item.id, Object.freeze({
+				label: t('comments.pinLabel', {
+					name,
+					type,
+					id: item.anchor.widgetId,
+					status: status + (item.missingVariants.length ? `, ${t('comments.staleWord')}` : ''),
+					n: item.messageCount,
+				}, item.messageCount),
+				name,
+				initials: threadAuthorInitials(item.author),
+				agent: item.author?.type === 'agent',
+				resolved: item.status === 'resolved',
+				...(item.status === 'ready-for-review' ? { badge: 'ready' as const } : item.missingVariants.length ? { badge: 'stale' as const } : {}),
+				title: item.title ?? `${type} · #${item.anchor.widgetId}`,
+				detail: `${status} · ${name} · ${type} · #${item.anchor.widgetId}`,
+			}))
+		}
+		return meta
+	})
+	/**
+	 * Each thread's canvas status (`visible`, `offscreen` and its side, or `hidden` with a reason).
+	 * It keeps its identity while pins only move, so the list and the bubble do not re-render on
+	 * every scrolled frame; only the pin layer follows the per-frame placements.
+	 */
+	const pinStatusById = computed<ReadonlyMap<string, PinStatus>>(previous => pinStatuses(placements.value, previous))
+	/**
+	 * The same statuses, reactive per thread: a list row that reads `pinStatus.get(id)` re-renders
+	 * only when its own thread's status changes.
+	 */
+	const pinStatus = shallowReactive(new Map<string, PinStatus>())
+	watch(pinStatusById, (next) => {
+		for (const [id, status] of next) {
+			const before = pinStatus.get(id)
+			if (!before || before.state !== status.state || before.reason !== status.reason || before.side !== status.side) pinStatus.set(id, status)
+		}
+		for (const id of [...pinStatus.keys()]) if (!next.has(id)) pinStatus.delete(id)
+	}, { immediate: true })
+	/** Threads whose Widget got no geometry stream: the 64-Widget cap, or a single-stream runtime (decision 6). */
+	const notOnCanvas = computed<Readonly<{ ids: readonly string[]; reason?: 'over-cap' | 'single-stream' }>>((previous) => {
+		const ids: string[] = []
+		let reason: 'over-cap' | 'single-stream' | undefined
+		for (const [id, status] of pinStatusById.value) {
+			if (id === PENDING_PIN_ID || (status.reason !== 'over-cap' && status.reason !== 'single-stream')) continue
+			ids.push(id)
+			reason ??= status.reason
+		}
+		if (previous && previous.reason === reason && previous.ids.join() === ids.join()) return previous
+		return { ids, ...(reason ? { reason } : {}) }
+	})
+
+	/** Shift C (and the pins toggle): hides the pin layer only; tracking and the list keep working. */
+	function togglePins(): void {
+		pinsHidden.value = !pinsHidden.value
+		announce(t(pinsHidden.value ? 'pins.hiddenAnnounce' : 'pins.shownAnnounce'))
+	}
+
+	/**
+	 * `J` / `K` on the canvas: opens the next or previous thread in pin reading order (drawn pins,
+	 * then threads behind edge indicators), starting from the open thread or `from` (a focused
+	 * pin), and returns its id so the caller can move focus to its pin.
+	 */
+	function cycle(direction: 1 | -1, from?: string): string | undefined {
+		if (pinsHidden.value) return undefined
+		const order = canvasOrder(placements.value, new Set([PENDING_PIN_ID]))
+		const next = cycleThread(order, openThreadId.value ?? from, direction)
+		if (!next || !open(next)) return undefined
+		// Browsing keeps focus on the pins, so J / K continue; Enter on the pin moves into the bubble.
+		browsingPins.value = true
+		return next
+	}
+	/** True while the open bubble was reached with J / K: the bubble leaves focus on its pin. */
+	const browsingPins = ref(false)
+
 	// -------------------------------------------------------------------------------------------
 	// Opening threads, Escape, announcements
 	// -------------------------------------------------------------------------------------------
@@ -526,6 +627,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	function open(threadId: string): boolean {
 		const item = threadById.value.get(threadId)
 		if (!item) return false
+		browsingPins.value = false
 		if (composer.value?.text.trim()) {
 			patchComposer({ askingDiscard: true })
 			return false
@@ -639,6 +741,14 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		refreshReviews,
 		placements,
 		placementById,
+		pinStatusById,
+		pinStatus,
+		pinMeta,
+		widgetTypeById,
+		notOnCanvas,
+		togglePins,
+		cycle,
+		browsingPins,
 		clusters,
 		edgeIndicators,
 		overCapWidgetIds,

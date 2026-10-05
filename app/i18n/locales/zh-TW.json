@@ -1224,7 +1224,22 @@
     "unplaced": "{n} 則留言無法定位 | {n} 則留言無法定位",
     "otherVariants": "其他 Variant・{n}",
     "notVisible": "在此狀態下不可見",
-    "variantMissing": "找不到 Variant：{name}"
+    "variantMissing": "找不到 Variant：{name}",
+    "notOnCanvas": "另有 {n} 則未顯示在畫布上 | 另有 {n} 則未顯示在畫布上",
+    "notOnCanvasGroup": "未顯示在畫布上",
+    "overCapHint": "畫布最多同時追蹤 {cap} 個 Widget。縮小圖釘篩選範圍即可顯示這些留言。",
+    "singleStreamHint": "此預覽 Runtime 一次只能追蹤一個 Widget。開啟討論串即可顯示它的圖釘。",
+    "toggle": "顯示圖釘",
+    "show": "顯示圖釘",
+    "hide": "隱藏圖釘",
+    "shownAnnounce": "已顯示圖釘。",
+    "hiddenAnnounce": "已隱藏圖釘。留言清單仍會列出所有討論串。",
+    "edge": {
+      "top": "上方有 {n} 則留言在可視範圍外 | 上方有 {n} 則留言在可視範圍外",
+      "right": "右側有 {n} 則留言在可視範圍外 | 右側有 {n} 則留言在可視範圍外",
+      "bottom": "下方有 {n} 則留言在可視範圍外 | 下方有 {n} 則留言在可視範圍外",
+      "left": "左側有 {n} 則留言在可視範圍外 | 左側有 {n} 則留言在可視範圍外"
+    }
   },
   "empty": {
     "title": "還沒有留言",
@@ -1466,7 +1481,7 @@
       "pointNotVisible": "圖釘位置不可見",
       "otherVariant": "範圍屬於其他 Variant。",
       "mapping": "目前無法量測畫布。",
-      "overCap": "圖釘過多，只列在這裡。",
+      "overCap": "未顯示在畫布上：要追蹤的 Widget 過多，請縮小圖釘篩選範圍。",
       "reconnecting": "正在重新連線預覽…"
     },
     "resolution": {
@@ -1486,7 +1501,6 @@
     "unknownAuthor": "未知的作者",
     "pinLabel": "{name} 在 {type} {id} 的留言，{status}，{n} 則訊息 | {name} 在 {type} {id} 的留言，{status}，{n} 則訊息",
     "clusterLabel": "這裡有 {n} 則留言 | 這裡有 {n} 則留言",
-    "edgeLabel": "{n} 則留言在可視範圍外，開啟它。 | {n} 則留言在可視範圍外，開啟第一則。",
     "scopeLabel": "Variant 範圍",
     "keepEditing": "繼續編輯",
     "discardAction": "捨棄",
