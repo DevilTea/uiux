@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import { composite, contrastRatio, parseCssColor } from './support/color'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
-import { FAKE_GEOMETRY_PRODUCER } from './support/fake-geometry-producer'
+import { PREVIEW_WIRE_RECORDER, type WireRecord, type WireRecorderWindow } from './support/preview-wire-recorder'
 
 /**
  * Browser checks against the built Workbench (`pnpm build` output) serving a copy of the
@@ -40,7 +40,7 @@ afterAll(async () => {
 	await server?.close()
 })
 
-type ChromeSetup = Readonly<{ mode: 'light' | 'dark'; os?: 'light' | 'dark'; locale?: 'en-US' | 'zh-TW'; width?: number; height?: number; geometryProducer?: boolean }>
+type ChromeSetup = Readonly<{ mode: 'light' | 'dark'; os?: 'light' | 'dark'; locale?: 'en-US' | 'zh-TW'; width?: number; height?: number; recordWire?: boolean }>
 
 async function openWorkbench(path: string, setup: ChromeSetup): Promise<{ context: BrowserContext; page: Page }> {
 	const context = await browser.newContext({
@@ -51,7 +51,7 @@ async function openWorkbench(path: string, setup: ChromeSetup): Promise<{ contex
 		localStorage.setItem('nuxt-color-mode', mode)
 		localStorage.setItem('uiux.workbench.locale', locale)
 	}, [setup.mode, setup.locale ?? 'en-US'] as const)
-	if (setup.geometryProducer) await context.addInitScript(FAKE_GEOMETRY_PRODUCER)
+	if (setup.recordWire) await context.addInitScript(PREVIEW_WIRE_RECORDER)
 	const page = await context.newPage()
 	await page.goto(`${server.origin}${path}`, { waitUntil: 'networkidle' })
 	await page.waitForFunction(() => document.documentElement.classList.contains('light') || document.documentElement.classList.contains('dark'))
@@ -471,7 +471,7 @@ describe('View canvas core (R4)', () => {
 	}
 
 	it('never layers a transparent capture surface over the iframe', async () => {
-		const { context, page } = await openWorkbench(`/views/${VIEW_ID}?widget=btn-run-checks`, { mode: 'light', geometryProducer: true })
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}?widget=btn-run-checks`, { mode: 'light', recordWire: true })
 		try {
 			await waitForLivePreview(page)
 			await page.waitForSelector('[data-blueprint="type"]')
@@ -494,7 +494,7 @@ describe('View canvas core (R4)', () => {
 	}, 60_000)
 
 	it('shares the selection between the Widget tree and the canvas', async () => {
-		const { context, page } = await openWorkbench(`/views/${VIEW_ID}`, { mode: 'light', geometryProducer: true })
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}`, { mode: 'light', recordWire: true })
 		try {
 			const frame = await waitForLivePreview(page)
 			// Canvas → tree: the iframe hit-tests the click; the tree expands to and selects the Widget.
@@ -514,7 +514,7 @@ describe('View canvas core (R4)', () => {
 	}, 60_000)
 
 	it('keeps the selection across theme and locale changes and restores it after a Variant switch', async () => {
-		const { context, page } = await openWorkbench(`/views/${VIEW_ID}?widget=btn-run-checks`, { mode: 'light', geometryProducer: true })
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}?widget=btn-run-checks`, { mode: 'light', recordWire: true })
 		try {
 			const frame = await waitForLivePreview(page)
 			await page.waitForSelector('[data-blueprint="type"]')
@@ -532,12 +532,13 @@ describe('View canvas core (R4)', () => {
 			expect(await page.locator('[data-blueprint="type"]').textContent()).toContain('#btn-run-checks')
 
 			// A Variant switch reopens geometry under the new runtime context and restores the selection.
-			const requestsBefore = await frame.evaluate(() => (window as unknown as { __fakeGeometryRequests: unknown[] }).__fakeGeometryRequests.length)
+			const requests = () => frame.evaluate(() => (window as unknown as WireRecorderWindow).__wire.messages.filter(message => message.type === 'geometry.acquire.request'))
+			const requestsBefore = (await requests()).length
 			await page.locator('[data-context="variant"]').click()
 			await page.getByRole('option', { name: 'compact' }).click()
 			await page.waitForFunction(() => new URL(location.href).searchParams.get('variant') === 'compact')
-			await expect.poll(() => frame.evaluate(() => (window as unknown as { __fakeGeometryRequests: { context: { variantId?: string } }[] }).__fakeGeometryRequests.at(-1)?.context.variantId)).toBe('compact')
-			expect(await frame.evaluate(() => (window as unknown as { __fakeGeometryRequests: unknown[] }).__fakeGeometryRequests.length)).toBeGreaterThan(requestsBefore)
+			await expect.poll(async () => (await requests()).at(-1)?.context.variantId).toBe('compact')
+			expect((await requests()).length).toBeGreaterThan(requestsBefore)
 			await page.waitForSelector('[data-blueprint="type"]')
 			expect(await page.locator('[data-blueprint="type"]').textContent()).toContain('#btn-run-checks')
 			expect(new URL(page.url()).searchParams.get('widget')).toBe('btn-run-checks')
@@ -572,6 +573,167 @@ describe('View canvas core (R4)', () => {
 			await page.waitForFunction(() => new URL(location.href).searchParams.get('widget') === 'workbench-body-layout')
 			await page.keyboard.press('Alt+ArrowUp')
 			await page.waitForFunction(() => new URL(location.href).searchParams.get('widget') === 'workbench-shell')
+		}
+		finally { await context.close() }
+	}, 60_000)
+})
+
+/** The selection outline's bounds in page px, and the Widget's rendered box mapped into the page. */
+async function outlineAgainstWidget(page: Page, frame: Awaited<ReturnType<typeof previewFrame>>, widgetId: string) {
+	const widget = await frame.evaluate((id) => {
+		const r = document.querySelector(`[data-widget-id="${id}"]`)!.getBoundingClientRect()
+		return { x: r.left, y: r.top, width: r.width, height: r.height, viewport: { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight } }
+	}, widgetId)
+	return page.evaluate((inner) => {
+		const iframe = document.querySelector<HTMLIFrameElement>('[data-canvas-frame] iframe')!
+		const box = iframe.getBoundingClientRect()
+		const scale = box.width / iframe.offsetWidth
+		const left = Math.max(0, inner.x)
+		const top = Math.max(0, inner.y)
+		const right = Math.min(inner.viewport.width, inner.x + inner.width)
+		const bottom = Math.min(inner.viewport.height, inner.y + inner.height)
+		const expected = { left: box.left + left * scale, top: box.top + top * scale, right: box.left + right * scale, bottom: box.top + bottom * scale }
+		const paths = Array.from(document.querySelectorAll<SVGPathElement>('[data-overlay-selection] path.stroke-selection'))
+		const rects = paths.map(path => path.getBoundingClientRect())
+		const outline = rects.length
+			? { left: Math.min(...rects.map(r => r.left)), top: Math.min(...rects.map(r => r.top)), right: Math.max(...rects.map(r => r.right)), bottom: Math.max(...rects.map(r => r.bottom)) }
+			: undefined
+		return { expected, outline }
+	}, widget)
+}
+
+const geometryOf = (frame: Awaited<ReturnType<typeof previewFrame>>) => frame.evaluate(() => (window as unknown as WireRecorderWindow).__wire.messages.filter((message: WireRecord) => message.type.startsWith('geometry.')))
+const reportsOf = (page: Page) => page.evaluate(() => (window as unknown as WireRecorderWindow).__wire.messages.filter((message: WireRecord) => message.type === 'geometry.acquire.response'))
+
+describe('Runtime geometry producer (multi-target streams)', () => {
+	for (const mode of ['light', 'dark'] as const) {
+		for (const [windowWidth, windowHeight] of [[1920, 1080], [1024, 768], [390, 844]] as const) {
+			it(`draws the selection outline and blueprint label from the real producer at ${windowWidth}×${windowHeight} (${mode})`, async () => {
+				const { context, page } = await openWorkbench(`/views/${VIEW_ID}?widget=btn-run-checks`, { mode, width: windowWidth, height: windowHeight, recordWire: true })
+				try {
+					const frame = await waitForLivePreview(page)
+					await page.waitForFunction(() => document.querySelector('[data-blueprint="type"]')?.textContent?.includes('Button · #btn-run-checks'), undefined, { timeout: 15_000 })
+					expect(await page.locator('[data-blueprint="size"]').textContent()).toMatch(/^\d+ × \d+$/)
+					const { expected, outline } = await outlineAgainstWidget(page, frame, 'btn-run-checks')
+					expect(outline).toBeDefined()
+					for (const side of ['left', 'top', 'right', 'bottom'] as const) expect(Math.abs(outline![side] - expected[side]), side).toBeLessThan(1.5)
+					// The legacy in-iframe highlight is gone: the View document is never restyled.
+					expect(await frame.evaluate(() => ({
+						marked: document.querySelectorAll('[data-preview-highlighted]').length,
+						outline: getComputedStyle(document.querySelector('[data-widget-id="btn-run-checks"]')!).outlineStyle,
+					}))).toEqual({ marked: 0, outline: 'none' })
+					// The runtime declared the optional multi-target feature, and each report is complete and small.
+					const reports = await reportsOf(page)
+					expect(reports.length).toBeGreaterThan(0)
+					expect(reports.every(report => typeof report.context.geometryRevision === 'number' && 'rect' in report.payload && 'regions' in report.payload)).toBe(true)
+					expect(Math.max(...reports.map(report => JSON.stringify(report).length))).toBeLessThan(2048)
+				}
+				finally { await context.close() }
+			}, 60_000)
+		}
+	}
+
+	it('declares geometry.multi-target and keeps one stream per Widget, releasing the old selection', async () => {
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}?widget=btn-run-checks`, { mode: 'light', recordWire: true })
+		try {
+			const frame = await waitForLivePreview(page)
+			await page.waitForSelector('[data-blueprint="type"]')
+			const declaration = await page.evaluate(() => (window as unknown as WireRecorderWindow).__wire.messages.find((message: WireRecord) => message.type === 'capability.declare'))
+			expect(declaration?.payload).toEqual({ protocolVersion: 1, features: ['geometry', 'geometry.multi-target'] })
+			await page.locator('[data-widget-row="mock-hero-title"]').scrollIntoViewIfNeeded()
+			await page.locator('[data-widget-row="mock-hero-title"]').click()
+			await page.waitForFunction(() => document.querySelector('[data-blueprint="type"]')?.textContent?.includes('#mock-hero-title'))
+			const messages = await geometryOf(frame)
+			const firstRequest = messages.find(message => message.type === 'geometry.acquire.request' && message.context.widgetId === 'btn-run-checks')!
+			expect(firstRequest).toBeDefined()
+			expect(messages).toContainEqual(expect.objectContaining({ type: 'geometry.release', context: expect.objectContaining({ widgetId: 'btn-run-checks' }) }))
+			const ids = messages.filter(message => message.type === 'geometry.acquire.request').map(message => message.context.navigationRequestId)
+			expect(new Set(ids).size).toBe(ids.length)
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('draws the runtime hover candidate: Iris in Select, dashed Marker in Comment, none in Interact', async () => {
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}`, { mode: 'light', recordWire: true })
+		try {
+			const frame = await waitForLivePreview(page)
+			await frame.locator('[data-widget-id="mock-hero-title"]').hover()
+			await page.waitForSelector('[data-overlay-hover][data-hover-purpose="inspection"]', { timeout: 10_000 })
+			expect(await page.locator('[data-hover-chip]').textContent()).toBe('Text')
+			// The hover outline follows the candidate's own geometry stream.
+			expect(await geometryOf(frame)).toContainEqual(expect.objectContaining({ type: 'geometry.acquire.request', context: expect.objectContaining({ widgetId: 'mock-hero-title' }) }))
+			// Hover never restyles the View and never becomes the selection.
+			expect(await frame.evaluate(() => document.querySelectorAll('[data-preview-highlighted]').length)).toBe(0)
+			expect(new URL(page.url()).searchParams.get('widget')).not.toBe('mock-hero-title')
+
+			await page.keyboard.press('c')
+			await frame.locator('[data-widget-id="btn-run-checks"]').hover()
+			await page.waitForSelector('[data-overlay-hover][data-hover-purpose="comment-range"]', { timeout: 10_000 })
+			expect(await page.locator('[data-hover-chip]').textContent()).toBe('Comment on Button')
+			expect(await page.locator('[data-overlay-hover] path').first().getAttribute('stroke-dasharray')).toBe('4 3')
+			// The hover report carries the active targeting interaction and generation.
+			const hover = (await page.evaluate(() => (window as unknown as WireRecorderWindow).__wire.targeting)).filter(payload => payload.type === 'hover').at(-1)!
+			expect(hover).toMatchObject({ widgetId: 'btn-run-checks', targetingInteractionId: expect.any(String), runtimeGenerationId: expect.any(String) })
+
+			await page.keyboard.press('Escape')
+			await page.keyboard.press('i')
+			await frame.locator('[data-widget-id="mock-hero-title"]').hover()
+			await page.waitForTimeout(300)
+			expect(await page.locator('[data-overlay-hover]').count()).toBe(0)
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('re-reports on scroll inside the View, then stays silent: no frames and no messages while idle', async () => {
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}?viewport=mobile&widget=metric-card-targeting`, { mode: 'light', recordWire: true })
+		try {
+			const frame = await waitForLivePreview(page)
+			await page.waitForSelector('[data-blueprint="type"]')
+			const before = await outlineAgainstWidget(page, frame, 'metric-card-targeting')
+			const revisionsBefore = (await reportsOf(page)).length
+			await frame.evaluate(() => window.scrollBy(0, 120))
+			await expect.poll(async () => (await reportsOf(page)).length).toBeGreaterThan(revisionsBefore)
+			await page.waitForTimeout(300)
+			const after = await outlineAgainstWidget(page, frame, 'metric-card-targeting')
+			expect(after.outline).toBeDefined()
+			expect(Math.abs(after.outline!.top - after.expected.top)).toBeLessThan(1.5)
+			expect(after.outline!.top).toBeLessThan(before.outline!.top - 10)
+			const reports = await reportsOf(page)
+			const revisions = reports.filter(report => report.context.widgetId === 'metric-card-targeting').map(report => report.context.geometryRevision as number)
+			expect(revisions).toEqual([...revisions].sort((a, b) => a - b))
+
+			// Idle: the runtime requests no animation frame and sends no message while nothing changes.
+			await page.mouse.move(5, 5)
+			await page.waitForTimeout(500)
+			const snapshot = async () => ({
+				runtimeFrames: await frame.evaluate(() => (window as unknown as WireRecorderWindow).__rafCallbacks),
+				runtimeReceived: (await geometryOf(frame)).length,
+				workbenchReceived: (await reportsOf(page)).length,
+			})
+			const idleStart = await snapshot()
+			await page.waitForTimeout(1500)
+			expect(await snapshot()).toEqual(idleStart)
+
+			// A Widget without a rendered box at this viewport keeps its stream: zero-area rect, no regions.
+			await page.locator('[data-widget-row="workspace-tag"]').scrollIntoViewIfNeeded()
+			await page.locator('[data-widget-row="workspace-tag"]').click()
+			await expect.poll(async () => (await reportsOf(page)).filter(report => report.context.widgetId === 'workspace-tag').at(-1)?.payload)
+				.toMatchObject({ rect: { width: 0, height: 0 }, regions: [] })
+			expect(await page.locator('[data-overlay-selection]').count()).toBe(0)
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('shows no overlay and runs no Workbench frame loop while the RootShell is selected and idle', async () => {
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}`, { mode: 'light', recordWire: true })
+		try {
+			await waitForLivePreview(page)
+			await page.mouse.move(5, 5)
+			await page.waitForTimeout(800)
+			const start = await page.evaluate(() => (window as unknown as WireRecorderWindow).__rafCallbacks)
+			await page.waitForTimeout(1000)
+			expect(await page.evaluate(() => (window as unknown as WireRecorderWindow).__rafCallbacks)).toBe(start)
+			expect(await page.locator('[data-overlay-selection]').count()).toBe(0)
 		}
 		finally { await context.close() }
 	}, 60_000)
