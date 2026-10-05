@@ -537,109 +537,25 @@
     }
   },
   "reviews": {
-    "title": "Reviews",
-    "subtitle": "Discuss Widgets and turn outcomes into Decisions.",
-    "newThread": "New thread",
-    "scopeToCurrentView": "Current View only",
-    "threadCount": "No threads | {n} thread | {n} threads",
     "messageCount": "No messages | {n} message | {n} messages",
-    "threadListLabel": "Review threads",
-    "optional": "Optional",
-    "unknownAuthor": "Unknown author",
-    "highlight": "Highlight",
-    "highlightTooltip": "Highlight this Widget in the preview",
-    "viewLabel": "View",
-    "conversation": "Conversation",
-    "commentMode": {
-      "start": "Comment",
-      "active": "Pick a Widget…",
-      "tooltip": "Click a Widget in the preview to start a thread. Press Esc to cancel."
-    },
     "status": {
       "open": "Open",
       "readyForReview": "Ready for review",
       "resolved": "Resolved"
     },
-    "empty": {
-      "noThreadsInView": "No threads on this View.",
-      "noThreadsInWorkspace": "No threads in this Workspace.",
-      "noMessages": "No messages yet.",
-      "noSelectionTitle": "No thread selected",
-      "noSelection": "Select a thread, or use Comment to give feedback on a Widget.",
-      "noSelectionReadOnly": "Select a thread to see its history."
-    },
-    "conflict": {
-      "title": "Thread changed elsewhere",
-      "description": "Reload and try again."
-    },
-    "reply": {
-      "authorLabel": "Post as",
-      "authorPlaceholder": "Your name",
-      "messageLabel": "Reply",
-      "messagePlaceholder": "Write a reply…",
-      "shortcutHint": "to send",
-      "send": "Send"
-    },
-    "lifecycle": {
-      "title": "Status",
-      "reanchorTitle": "Move to another Widget",
-      "reanchorDescription": "Move this thread to the selected Widget (#{widgetId}).",
-      "reanchorNeedsWidget": "Select a Widget in the current View to move this thread there.",
-      "reanchorAction": "Move to #{widgetId}",
-      "markReady": "Mark ready for review",
-      "resolve": "Resolve",
-      "requestChanges": "Request changes",
-      "reopen": "Reopen"
-    },
     "promote": {
       "title": "Promote to Decision",
       "description": "Record the outcome as a Decision in the View Spec.",
-      "open": "Promote…",
       "questionLabel": "Question",
       "questionPlaceholder": "e.g. Keep the three-column layout?",
-      "questionRequired": "Enter the question this Decision answers.",
       "summaryLabel": "Outcome",
       "summaryPlaceholder": "e.g. Approved with collapsible side panels",
       "rationaleLabel": "Rationale",
       "rationalePlaceholder": "Why the discussion landed here…",
       "submit": "Promote"
     },
-    "create": {
-      "title": "New Review thread",
-      "description": "Anchor feedback to a Widget in the current View.",
-      "widgetLabel": "Widget",
-      "widgetHelp": "Enter a Widget ID, root for the whole View, or pick one in the preview.",
-      "widgetPlaceholder": "root or Widget ID",
-      "pick": "Pick",
-      "messageLabel": "First message",
-      "messagePlaceholder": "Feedback or question…",
-      "submit": "Create thread"
-    },
     "feedback": {
-      "messagePosted": "Message posted.",
-      "reanchored": "Thread moved to #{widgetId}.",
-      "markedReady": "Marked ready for review with {n} current Formal Evidence record. | Marked ready for review with {n} current Formal Evidence records.",
-      "resolved": "Thread resolved.",
-      "reopened": "Thread reopened.",
-      "promoted": "Promoted to Decision.",
-      "promotedViewRevision": "View updated to revision {revision}.",
-      "threadCreated": "Thread created on #{widgetId}."
-    },
-    "errors": {
-      "loadListFailed": "Could not load Review threads.",
-      "loadThreadFailed": "Could not load this thread.",
-      "threadUnavailable": "This thread is unavailable.",
-      "postMessageFailed": "Could not post the message.",
-      "reanchorFailed": "Could not move the thread.",
-      "readyFailed": "Could not mark the thread ready for review.",
-      "resolveFailed": "Could not resolve the thread.",
-      "reopenFailed": "Could not reopen the thread.",
-      "promoteFailed": "Could not promote to a Decision.",
-      "createFailed": "Could not create the thread.",
-      "initialMessageFailed": "Thread created, but the first message could not be posted.",
-      "targetViewUnresolved": "Could not find the current version of View {viewId}.",
-      "noCurrentEvidence": "No Formal Evidence matches the current View. Capture Evidence, then mark the thread ready for review.",
-      "noViewSelected": "Select a View to start a thread."
+      "promoted": "Promoted to Decision."
     }
   },
   "workbench": {
@@ -836,7 +752,12 @@
       "scope": "Variant scope",
       "viewWide": "View-wide",
       "domain": "Change domain",
-      "author": "Author"
+      "author": "Author",
+      "view": "View",
+      "any": "Any",
+      "find": "Find…",
+      "noOptions": "Nothing to filter by yet.",
+      "noDomains": "No changes submitted for review yet."
     },
     "openInCanvas": "Open in canvas",
     "empty": {
@@ -844,7 +765,79 @@
       "body": "Comments made on a View's canvas show up here."
     },
     "noMatch": "No threads match these filters.",
-    "caughtUp": "Nothing waiting for review"
+    "caughtUp": "Nothing waiting for review",
+    "tab": {
+      "inbox": "Inbox",
+      "ready": "Ready"
+    },
+    "waiting": "Nothing waiting | {n} waiting | {n} waiting",
+    "filtersActive": "Filters, {n} active",
+    "quickFilters": "Quick filters",
+    "mine": "Mine",
+    "mineHint": "Threads you started or took part in",
+    "updated": "Updated",
+    "updatedHint": "Updated since you last looked in this browser",
+    "removeFilter": "Remove filter {filter}",
+    "clearAll": "Clear all",
+    "clearFilters": "Clear filters",
+    "statusLabel": "Status",
+    "resolutionLabel": "Resolution",
+    "listLabel": "Review threads",
+    "groupLabel": "{group}, {n}",
+    "anchorMissing": "Widget missing",
+    "viewMissing": "View missing",
+    "resolvedCount": "No resolved threads | {n} resolved thread | {n} resolved threads",
+    "goToViews": "Go to Views",
+    "keys": {
+      "move": "Move",
+      "reply": "Reply",
+      "resolve": "Resolve",
+      "open": "Open in canvas"
+    },
+    "chip": {
+      "view": "View: {value}",
+      "scope": "Variant: {value}",
+      "author": "Author: {value}",
+      "anchor": "Anchor: {value}",
+      "domain": "Change: {value}"
+    },
+    "threadPane": "Thread",
+    "sheetDescription": "Read, reply to and resolve this thread.",
+    "selectTitle": "Select a thread",
+    "selectHint": "Press J or K to move through the queue.",
+    "selectHintNoKeys": "Pick a thread in the queue to read it here.",
+    "threadMissing": "This thread isn't in this Workspace.",
+    "threadMissingHint": "The link may come from another Workspace, or the thread ID is incomplete.",
+    "backToQueue": "Back to the queue",
+    "unreadableTitle": "Can't read this thread",
+    "viewGone": "This thread's View no longer exists.",
+    "viewGoneHint": "Resolve it as obsolete, or keep it open for the record.",
+    "resolveObsolete": "Resolve as obsolete",
+    "reanchorOnCanvas": "Re-anchor on the canvas",
+    "acceptResolve": "Accept and resolve",
+    "readOnly": "You can read this thread, but not reply to it or change its status.",
+    "copied": "Copied",
+    "errors": {
+      "loadFailed": "Couldn't load the Review threads.",
+      "threadUnreadable": "Couldn't read this thread.",
+      "viewMissing": "The View of this thread no longer exists."
+    },
+    "announce": {
+      "replied": "Reply posted.",
+      "resolved": "Thread resolved as {resolution}."
+    },
+    "timeline": {
+      "accepted": "Accepted",
+      "changes": "Changes",
+      "submission": "Submission",
+      "copySubmission": "Copy submission ID {id}",
+      "copyDigest": "Copy the evidence digest",
+      "openEvidence": "Open the View's Readiness",
+      "verifiedChip": "Verified · submission {id}",
+      "resolvedChip": "Resolved · {resolution}",
+      "by": "by {name}",
+      "scopeChanged": "Variant scope: {from} → {to}"
+    }
   },
   "timeline": {
     "submitted": "Submitted for review",
