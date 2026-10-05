@@ -383,7 +383,6 @@
       "note": "Only the UIUX-managed {rootShell} plugin and renderer are currently materialized in this browser environment."
     },
     "invalidTitle": "Runtime execution invalid",
-    "commentHint": "Click to comment (Esc cancels)",
     "emptySlotTitle": "Empty content slot",
     "emptySlotDescription": "RootShell is active and running under {core}. No child Widgets are authored in the {slot} slot yet.",
     "errors": {
@@ -514,7 +513,7 @@
       "baseVariant": "Base (no variant)",
       "defaultLocaleOption": "{locale} (default)",
       "defaultViewportName": "Default",
-      "viewportOption": "{name} ({width} × {height})",
+      "viewportOption": "{name} · {width}×{height}",
       "defaultThemeOption": "Default ({theme})",
       "noVariantsHint": "This View has no authored variants.",
       "noViewportsHint": "workspace.json defines no viewport presets, so the built-in 1280 × 800 default is used.",

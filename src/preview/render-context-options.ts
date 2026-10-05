@@ -86,7 +86,7 @@ export function resolveDefaultThemeId(workspace?: Pick<WorkspaceManifest, 'theme
 	return keys[0] ?? FALLBACK_THEME_ID
 }
 
-/** The viewport a preview renders when none is selected: the first authored preset, else the built-in default. */
+/** The viewport a preview renders when none is selected: the widest authored preset, else the built-in default. */
 export function resolveDefaultViewport(workspace?: Pick<WorkspaceManifest, 'viewports'>): ViewportOption {
 	return deriveViewportOptions(workspace)[0] ?? DEFAULT_VIEWPORT
 }
@@ -99,7 +99,10 @@ function deriveViewportOptions(workspace?: Pick<WorkspaceManifest, 'viewports'>)
 		const height = typeof preset.dimensions?.height === 'number' ? preset.dimensions.height : DEFAULT_VIEWPORT.height
 		const label = typeof preset.label === 'string' && preset.label.trim() ? preset.label : undefined
 		return Object.freeze({ id, width, height, ...(label ? { label } : {}) })
-	}))
+	})
+		// Canonical JSON stores registry keys sorted, so authored order is not available.
+		// Present presets widest first, with the stable id as tiebreak.
+		.sort((a, b) => b.width - a.width || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)))
 }
 
 export function deriveRenderContextOptions(input: Readonly<{

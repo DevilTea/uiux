@@ -142,7 +142,7 @@ const themeHint = computed(() => contextOptions.value.themes.isEmpty ? t('workbe
         :disabled="contextOptions.viewports.isEmpty"
         :color="contextOptions.viewports.isInvalid ? 'error' : contextOptions.viewports.isEmpty ? 'warning' : undefined"
         :highlight="contextOptions.viewports.isInvalid || contextOptions.viewports.isEmpty"
-        class="w-44"
+        class="w-56"
       />
       <UTooltip
         v-if="viewportHint"

@@ -427,14 +427,13 @@ onUnmounted(() => {
     :class="[
       hostColorScope,
       hostColorScope === 'dark' ? 'bg-default' : 'bg-muted',
-      harnessMode ? '' : 'p-4',
     ]"
   >
     <!-- Loading state -->
     <div
       v-if="loading"
       data-preview-status="loading"
-      class="flex h-64 items-center justify-center"
+      class="flex h-64 items-center justify-center p-4"
     >
       <div
         class="space-y-3 text-center"
@@ -454,6 +453,7 @@ onUnmounted(() => {
     <div
       v-else-if="error"
       data-preview-status="error"
+      class="p-4"
     >
       <UAlert
         color="error"
@@ -468,7 +468,7 @@ onUnmounted(() => {
     <div
       v-else-if="!viewId"
       data-preview-status="no_view"
-      class="flex h-64 items-center justify-center"
+      class="flex h-64 items-center justify-center p-4"
     >
       <UEmpty
         icon="i-lucide-monitor-dot"
@@ -482,6 +482,7 @@ onUnmounted(() => {
     <div
       v-else-if="materializationResult?.status === 'adapter_unavailable'"
       data-preview-status="adapter_unavailable"
+      class="p-4"
     >
       <UAlert
         color="warning"
@@ -531,6 +532,7 @@ onUnmounted(() => {
     <div
       v-else-if="materializationResult?.status === 'invalid'"
       data-preview-status="invalid"
+      class="p-4"
     >
       <UAlert
         color="error"
@@ -558,44 +560,23 @@ onUnmounted(() => {
       data-preview-ready="true"
       class="relative"
     >
-      <!-- RootShell boundary container -->
+      <!--
+        RootShell boundary container. Its content box must equal the selected viewport exactly,
+        so no padding, borders or in-flow chrome here: highlights are inset rings (box-shadow).
+        The Workbench canvas owns the visual gutter and shows the View, locale and theme outside the iframe.
+      -->
       <div
-        class="relative transition-all duration-150"
+        class="relative transition-shadow duration-150"
         :class="[
-          harnessMode ? '' : ['min-h-[300px] rounded-lg', highlightedWidgetId === 'root'
-            ? 'border border-highlight ring-2 ring-highlight/40'
-            : 'border border-dashed border-accented'],
-          isCommentMode ? 'cursor-crosshair ring-2 ring-comment/60' : '',
+          harnessMode ? '' : ['min-h-screen', highlightedWidgetId === 'root' ? 'ring-2 ring-inset ring-highlight' : ''],
+          isCommentMode ? 'cursor-crosshair ring-2 ring-inset ring-comment/60' : '',
         ]"
         data-widget-id="root"
         @pointermove="handlePreviewPointerMove"
         @click.capture="handlePreviewPointerClick"
       >
-        <!-- RootShell indicator tag (hidden in formal capture harness) -->
-        <div
-          v-if="!harnessMode"
-          class="flex items-center justify-between border-b border-default px-3 py-1.5 text-[11px] text-dimmed"
-        >
-          <div class="flex items-center gap-1.5">
-            <span class="font-mono font-medium text-toned">RootShell</span>
-            <span class="text-[10px]">#root</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <UBadge
-              v-if="isCommentMode"
-              color="warning"
-              variant="soft"
-              size="sm"
-              icon="i-lucide-message-square-plus"
-            >
-              {{ t('preview.commentHint') }}
-            </UBadge>
-            <span class="font-mono text-[10px]">{{ locale }} · {{ themeId }}</span>
-          </div>
-        </div>
-
         <!-- Rendered component tree through standalone preview bundle -->
-        <div :class="harnessMode ? '' : 'p-4'">
+        <div>
           <div
             ref="previewHostElement"
             class="preview-runtime-host"

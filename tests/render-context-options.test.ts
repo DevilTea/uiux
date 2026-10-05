@@ -223,6 +223,21 @@ describe('render context option derivation', () => {
 			expect(options.viewports.selectedId).toBe('desktop')
 		})
 
+		it('orders viewport presets widest first with the id as tiebreak', () => {
+			const options = deriveRenderContextOptions({
+				workspace: baseWorkspace({
+					viewports: {
+						desktop: { dimensions: { width: 1920, height: 1080 }, label: 'FHD Desktop' },
+						mobile: { dimensions: { width: 390, height: 844 } },
+						tablet: { dimensions: { width: 820, height: 1180 } },
+						alt: { dimensions: { width: 820, height: 1000 } },
+					},
+				}),
+			})
+			expect(options.viewports.available.map(item => item.id)).toEqual(['desktop', 'alt', 'tablet', 'mobile'])
+			expect(options.viewports.selectedId).toBe('desktop')
+		})
+
 		it('exposes authored theme labels alongside theme ids', () => {
 			const options = deriveRenderContextOptions({
 				workspace: baseWorkspace({ themes: { light: { label: 'Light' }, dark: { label: 'Dark' }, plain: {} } }),

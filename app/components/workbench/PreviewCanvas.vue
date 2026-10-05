@@ -146,7 +146,7 @@ onUnmounted(() => {
               <span class="size-2 rounded-full bg-accented" />
               <span class="ms-2 font-mono text-toned">{{ selectedView.resource.name }}</span>
             </div>
-            <span class="font-mono text-[10px] text-dimmed">{{ contextOptions.viewports.selectedId }}</span>
+            <span class="font-mono text-[10px] text-dimmed">{{ contextOptions.locales.selected }} · {{ contextOptions.themes.selected }} · {{ contextOptions.viewports.selectedId }}</span>
           </div>
 
           <!-- Real Preview Iframe Boundary: logical size remains identical to RenderContext.viewport. -->

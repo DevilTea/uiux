@@ -383,7 +383,6 @@
       "note": "目前在此瀏覽器環境中，只會具現化由 UIUX 管理的 {rootShell} 外掛與渲染器。"
     },
     "invalidTitle": "執行環境無效",
-    "commentHint": "點選即可留言（按 Esc 取消）",
     "emptySlotTitle": "content 插槽為空",
     "emptySlotDescription": "RootShell 已在 {core} 下啟用並執行，但 {slot} 插槽中尚未撰寫任何子 Widget。",
     "errors": {
@@ -514,7 +513,7 @@
       "baseVariant": "基本（無變體）",
       "defaultLocaleOption": "{locale}（預設）",
       "defaultViewportName": "預設",
-      "viewportOption": "{name}（{width} × {height}）",
+      "viewportOption": "{name} · {width}×{height}",
       "defaultThemeOption": "預設（{theme}）",
       "noVariantsHint": "這個 View 沒有撰寫任何變體。",
       "noViewportsHint": "workspace.json 未定義檢視區預設值，因此使用內建的 1280 × 800。",
