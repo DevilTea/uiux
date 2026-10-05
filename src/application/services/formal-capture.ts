@@ -52,7 +52,11 @@ export interface FormalCaptureService {
 
 export function createFormalCaptureService(
 	persistence: FileNativePersistence,
-	options?: { serverOrigin?: string },
+	options?: {
+		serverOrigin?: string
+		/** The in-memory `system:capture` credential, sent as a cookie scoped to the internal origin only. */
+		captureCookie?: () => Readonly<{ name: string; value: string }> | undefined
+	},
 ): FormalCaptureService {
 	async function buildRegistries(contexts: readonly ResolvedRenderContext[]): Promise<
 		| { ok: true; registries: RenderContextRegistries; workspaceInspection: unknown; workspaceRevision: string }
@@ -233,6 +237,10 @@ export function createFormalCaptureService(
 					},
 					reducedMotion: 'reduce',
 				})
+				const captureCookie = options?.captureCookie?.()
+				if (captureCookie) {
+					await browserContext.addCookies([{ name: captureCookie.name, value: captureCookie.value, url: baseUrl, httpOnly: true, sameSite: 'Strict' }])
+				}
 
 				const page = await browserContext.newPage()
 				try {

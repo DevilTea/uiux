@@ -16,7 +16,9 @@ import {
 	resolveLoopbackBindHost,
 	SECURITY_HEADERS,
 } from '../src/server/loopback-guard'
-import { closeSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
+import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
+import { createAccessGuardHandler } from '../src/server/access/http'
+import { provisionToken } from './support/access'
 
 const PORT = 4321
 const VIEW_ID = '77777777-7777-4777-8777-777777777777'
@@ -42,7 +44,7 @@ describe('loopback bind resolution', () => {
 		for (const env of [{ HOST: '0.0.0.0' }, { NITRO_HOST: '::' }, { HOST: '192.168.1.20' }, { NITRO_HOST: '10.0.0.2', HOST: '127.0.0.1' }]) {
 			const result = resolveLoopbackBindHost(env)
 			expect(result.ok).toBe(false)
-			if (!result.ok) expect(result.message).toMatch(/LAN exposure requires authentication, which is not yet available/u)
+			if (!result.ok) expect(result.message).toMatch(/the LAN listener is not yet available/u)
 		}
 	})
 
@@ -130,6 +132,7 @@ describe('loopback guard on a live h3 server with the real /mcp and /api routes'
 	let root: string
 	let server: Server
 	let port: number
+	let token: string
 	const previousRoot = process.env.UIUX_WORKSPACE_ROOT
 	const previousOrigin = process.env.UIUX_SERVER_ORIGIN
 
@@ -139,9 +142,11 @@ describe('loopback guard on a live h3 server with the real /mcp and /api routes'
 		await writeFile(join(root, '.uiux', 'workspace.json'), `${JSON.stringify({ schemaVersion: 2, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }, null, 2)}\n`)
 		process.env.UIUX_WORKSPACE_ROOT = root
 		process.env.UIUX_SERVER_ORIGIN = 'http://127.0.0.1:1'
+		token = await provisionToken(root, { nickname: 'claude', kind: 'agent', role: 'editor' })
 
 		const app = createApp()
 		app.use(createLoopbackGuardHandler())
+		app.use(createAccessGuardHandler(() => getSelectedWorkspaceServerRuntime().access()))
 		const router = createRouter()
 		router.use('/mcp', mcpRoute)
 		router.post('/api/views', createViewRoute)
@@ -202,7 +207,7 @@ describe('loopback guard on a live h3 server with the real /mcp and /api routes'
 	it('keeps Origin-less MCP clients working', async () => {
 		const client = new Client({ name: 'uiux-loopback-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto', probe: { timeoutMs: 2_000 } } })
 		try {
-			await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)))
+			await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), { requestInit: { headers: { authorization: `Bearer ${token}` } } }))
 			const tools = await client.listTools()
 			expect(tools.tools.some(tool => tool.name === 'create_view')).toBe(true)
 		}
@@ -223,9 +228,9 @@ describe('loopback guard on a live h3 server with the real /mcp and /api routes'
 	})
 
 	it('allows Origin-less and same-origin JSON /api mutations', async () => {
-		const sameOrigin = await send('POST', '/api/views', { 'content-type': 'application/json', origin: `http://127.0.0.1:${port}`, 'sec-fetch-site': 'same-origin' }, viewBody)
+		const sameOrigin = await send('POST', '/api/views', { 'content-type': 'application/json', authorization: `Bearer ${token}`, origin: `http://127.0.0.1:${port}`, 'sec-fetch-site': 'same-origin' }, viewBody)
 		expect(sameOrigin.status).toBe(201)
-		const noOrigin = await send('POST', '/api/views', { 'content-type': 'application/json' }, viewBody)
+		const noOrigin = await send('POST', '/api/views', { 'content-type': 'application/json', authorization: `Bearer ${token}` }, viewBody)
 		expect(noOrigin.status).toBe(409)
 		expect(JSON.parse(noOrigin.body)).toMatchObject({ status: 'already_exists' })
 	})

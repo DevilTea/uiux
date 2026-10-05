@@ -11,7 +11,9 @@ import type { FlowResource } from '../src/domain/flows/schema'
 import type { ReviewThread } from '../src/domain/reviews/schema'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { WorkspaceManifest } from '../src/domain/workspace/schema'
-import { createUiuxMcpHttpHandler } from '../src/mcp/server'
+import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
+import { createLeaseManager } from '../src/application/access/leases'
+import { AGENT_EDITOR } from './support/access'
 import { parsePointResourceUri, pointResourceUri } from '../src/mcp/resource-uri'
 import { FileNativePersistence } from '../src/persistence'
 import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
@@ -70,9 +72,9 @@ describe('shared HTTP/MCP point-resource reads', () => {
 		if (http.status !== 200) return
 		expect(http.body.diagnostics).toEqual(application?.diagnostics)
 
-		const handler = createUiuxMcpHttpHandler(app)
+		const handler = createUiuxMcpHttpHandler(app, { leases: createLeaseManager() })
 		const client = new Client({ name: 'uiux-inspection-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto', probe: { timeoutMs: 2_000 } } })
-		const transport = new StreamableHTTPClientTransport(new URL('http://uiux.test/mcp'), { fetch: async (input, init) => handler.fetch(new Request(input, init)) })
+		const transport = new StreamableHTTPClientTransport(new URL('http://uiux.test/mcp'), { fetch: async (input, init) => handler.fetch(new Request(input, init), { authInfo: principalAuthInfo(AGENT_EDITOR) }) })
 		try {
 			await client.connect(transport)
 			const read = await client.readResource({ uri: pointResourceUri({ kind: 'view', key: VIEW_ID }) })
@@ -97,13 +99,13 @@ describe('shared HTTP/MCP point-resource reads', () => {
 	it('serves the same point resource over real MCP HTTP and exposes no generic write/patch tools', async () => {
 		const { app } = await seededSession()
 		const expected = await app.readPointResource('view', VIEW_ID)
-		const handler = createUiuxMcpHttpHandler(app)
+		const handler = createUiuxMcpHttpHandler(app, { leases: createLeaseManager() })
 		const client = new Client(
 			{ name: 'uiux-transport-test', version: '1.0.0' },
 			{ versionNegotiation: { mode: 'auto', probe: { timeoutMs: 2_000 } } },
 		)
 		const transport = new StreamableHTTPClientTransport(new URL('http://uiux.test/mcp'), {
-			fetch: async (input, init) => handler.fetch(new Request(input, init)),
+			fetch: async (input, init) => handler.fetch(new Request(input, init), { authInfo: principalAuthInfo(AGENT_EDITOR) }),
 		})
 		try {
 			await client.connect(transport)
@@ -114,6 +116,7 @@ describe('shared HTTP/MCP point-resource reads', () => {
 			expect(content && 'text' in content ? JSON.parse(content.text) : undefined).toEqual(expected)
 			const tools = await client.listTools()
 			expect(tools.tools.map(tool => tool.name).sort()).toEqual([
+				'acquire_lock',
 				'append_review_message',
 				'assess_handoff_readiness',
 				'capture_formal_evidence',
@@ -126,6 +129,7 @@ describe('shared HTTP/MCP point-resource reads', () => {
 				'list_resources',
 				'promote_review_to_decision',
 				'reanchor_review_thread',
+				'release_lock',
 				'reopen_review_thread',
 				'replace_asset',
 				'resolve_review_thread',
@@ -219,9 +223,9 @@ describe('shared HTTP/MCP point-resource reads', () => {
 
 	it('exposes paginated read-only MCP discovery tools with Resource refs instead of large bodies', async () => {
 		const { app } = await seededSession()
-		const handler = createUiuxMcpHttpHandler(app)
+		const handler = createUiuxMcpHttpHandler(app, { leases: createLeaseManager() })
 		const client = new Client({ name: 'uiux-discovery-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto', probe: { timeoutMs: 2_000 } } })
-		const transport = new StreamableHTTPClientTransport(new URL('http://uiux.test/mcp'), { fetch: async (input, init) => handler.fetch(new Request(input, init)) })
+		const transport = new StreamableHTTPClientTransport(new URL('http://uiux.test/mcp'), { fetch: async (input, init) => handler.fetch(new Request(input, init), { authInfo: principalAuthInfo(AGENT_EDITOR) }) })
 		try {
 			await client.connect(transport)
 			const first = await client.callTool({ name: 'list_resources', arguments: { limit: 2 } })
@@ -251,9 +255,9 @@ describe('shared HTTP/MCP point-resource reads', () => {
 
 	it('returns standard MCP error codes for malformed and missing point resources', async () => {
 		const { app } = await seededSession()
-		const handler = createUiuxMcpHttpHandler(app)
+		const handler = createUiuxMcpHttpHandler(app, { leases: createLeaseManager() })
 		const client = new Client({ name: 'uiux-error-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto', probe: { timeoutMs: 2_000 } } })
-		const transport = new StreamableHTTPClientTransport(new URL('http://uiux.test/mcp'), { fetch: async (input, init) => handler.fetch(new Request(input, init)) })
+		const transport = new StreamableHTTPClientTransport(new URL('http://uiux.test/mcp'), { fetch: async (input, init) => handler.fetch(new Request(input, init), { authInfo: principalAuthInfo(AGENT_EDITOR) }) })
 		try {
 			await client.connect(transport)
 			await expect(client.readResource({ uri: 'uiux://view/not-a-uuid' })).rejects.toMatchObject({ code: -32602 })
@@ -313,9 +317,9 @@ describe('shared HTTP/MCP point-resource reads', () => {
 		expect(assetHttp.body).toEqual(assetApp)
 
 		// MCP transport reads
-		const handler = createUiuxMcpHttpHandler(app)
+		const handler = createUiuxMcpHttpHandler(app, { leases: createLeaseManager() })
 		const client = new Client({ name: 'uiux-review-asset-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto', probe: { timeoutMs: 2_000 } } })
-		const transport = new StreamableHTTPClientTransport(new URL('http://uiux.test/mcp'), { fetch: async (input, init) => handler.fetch(new Request(input, init)) })
+		const transport = new StreamableHTTPClientTransport(new URL('http://uiux.test/mcp'), { fetch: async (input, init) => handler.fetch(new Request(input, init), { authInfo: principalAuthInfo(AGENT_EDITOR) }) })
 		try {
 			await client.connect(transport)
 			const readReviewMcp = await client.readResource({ uri: pointResourceUri({ kind: 'review', key: REVIEW_ID }) })

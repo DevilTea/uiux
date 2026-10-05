@@ -1,18 +1,24 @@
 import { resolve } from 'node:path'
 
 import type { McpHttpHandler } from '@modelcontextprotocol/server'
+import { createLeaseManager, type LeaseManager } from '../application/access/leases'
 import type { WorkspaceApplicationSession } from '../application/services/workspace-session'
 import { createWorkspaceApplicationSession } from '../application/services/workspace-session'
 import { createUiuxMcpHttpHandler } from '../mcp/server'
 import { formatOriginHost } from './loopback-guard'
 import { FileNativePersistence } from '../persistence/file-native'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
+import { AccessService } from './access/service'
+import { AccessStore, resolveUiuxHome } from './access/store'
 
 export type SelectedWorkspaceServerRuntime = Readonly<{
 	root: string
 	serverOrigin: string
 	persistence: FileNativePersistence
 	app: WorkspaceApplicationSession
+	leases: LeaseManager
+	/** The Workspace's roster and authentication, opened (and created if needed) once per process. */
+	access(): Promise<AccessService>
 	mcp: McpHttpHandler
 	close(): Promise<void>
 }>
@@ -33,22 +39,53 @@ export function resolveInternalServerOrigin(): string {
 	return `http://${formatOriginHost(normalizedHost)}:${port}`
 }
 
-export function createSelectedWorkspaceServerRuntime(root: string, options?: { serverOrigin?: string }): SelectedWorkspaceServerRuntime {
+/** Internal CLI-to-server plumbing: `uiux publish` passes its per-run `system:publish` credential. */
+export const PUBLISH_CREDENTIAL_ENV = 'UIUX_INTERNAL_PUBLISH_CREDENTIAL'
+
+export function createSelectedWorkspaceServerRuntime(
+	root: string,
+	options?: { serverOrigin?: string; uiuxHome?: string; publishCredential?: string },
+): SelectedWorkspaceServerRuntime {
 	const selectedRoot = resolve(root)
 	const persistence = new FileNativePersistence({
 		root: selectedRoot,
 		schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY,
 	})
 	const serverOrigin = options?.serverOrigin ?? resolveInternalServerOrigin()
-	const app = createWorkspaceApplicationSession(persistence, { serverOrigin })
-	const mcp = createUiuxMcpHttpHandler(app)
+	const leases = createLeaseManager()
+	let accessService: AccessService | undefined
+	const app = createWorkspaceApplicationSession(persistence, {
+		serverOrigin,
+		// Formal capture loads Preview as the in-memory `system:capture` principal (cookie-scoped to the internal origin).
+		captureCookie: () => accessService ? { name: accessService.cookieName, value: accessService.captureCredential } : undefined,
+	})
+	const publishCredential = options?.publishCredential ?? process.env[PUBLISH_CREDENTIAL_ENV]
+	let pending: Promise<AccessService> | undefined
+	function access(): Promise<AccessService> {
+		pending ??= (async () => {
+			// The internal `uiux publish` server keeps an empty in-memory roster: it serves no members
+			// and must never create or touch a host roster.
+			const store = publishCredential
+				? AccessStore.memory(selectedRoot)
+				: (await AccessStore.open({ workspaceRoot: selectedRoot, home: options?.uiuxHome ?? resolveUiuxHome(), create: true }))!
+			accessService = new AccessService({ store, leases, ...(publishCredential ? { publishCredential } : {}) })
+			return accessService
+		})()
+		return pending
+	}
+	const mcp = createUiuxMcpHttpHandler(app, { leases })
 	return Object.freeze({
 		root: selectedRoot,
 		serverOrigin,
 		persistence,
 		app,
+		leases,
+		access,
 		mcp,
-		async close() { await mcp.close() },
+		async close() {
+			await accessService?.flushUsage()
+			await mcp.close()
+		},
 	})
 }
 

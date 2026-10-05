@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { lstat, mkdir, mkdtemp, readdir, readlink, realpath, rm, stat, writeFile, cp } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -6,6 +7,33 @@ import { basename, delimiter, dirname, join, relative, resolve, sep } from 'node
 import { fileURLToPath } from 'node:url'
 
 const OUTPUT_MARKER = '.uiux-publication-output'
+
+const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567'
+
+function base32(bytes) {
+	let bits = 0
+	let value = 0
+	let output = ''
+	for (const byte of bytes) {
+		value = (value << 8) | byte
+		bits += 8
+		while (bits >= 5) {
+			output += BASE32[(value >>> (bits - 5)) & 31]
+			bits -= 5
+		}
+	}
+	if (bits > 0) output += BASE32[(value << (5 - bits)) & 31]
+	return output
+}
+
+/**
+ * The per-run `system:publish` credential (accepted identity decision 1): random, in memory only,
+ * handed to the internal server child through its environment and sent as a bearer token on the
+ * internal read requests. It has the fixed credential shape so log redaction always catches it.
+ */
+function createPublishCredential() {
+	return `uiux_s_${base32(randomBytes(3)).slice(0, 4)}_${base32(randomBytes(7)).slice(0, 10)}_${base32(randomBytes(32))}`
+}
 
 export function parsePublishArguments(args) {
 	const options = {
@@ -67,17 +95,19 @@ export async function runPublish(options, packageRoot) {
 	process.once('SIGINT', onSigint)
 	process.once('SIGTERM', onSigterm)
 
+	const credential = createPublishCredential()
 	try {
 		server = await startInternalServer({
 			packageRoot,
 			workspaceRoot,
 			serverEntry,
+			credential,
 			onChild(child) { activeChild = child },
 		})
 		throwIfInterrupted(interruptedSignal)
 		const snapshotUrl = server.origin + '/api/publication/snapshot'
 			+ (options.sourceRevision ? '?sourceRevision=' + encodeURIComponent(options.sourceRevision) : '')
-		const snapshot = await fetchJson(snapshotUrl)
+		const snapshot = await fetchJson(snapshotUrl, credential)
 		throwIfInterrupted(interruptedSignal)
 
 		await generateStaticShell({
@@ -95,6 +125,7 @@ export async function runPublish(options, packageRoot) {
 			origin: server.origin,
 			outputRoot,
 			snapshot,
+			credential,
 		})
 		throwIfInterrupted(interruptedSignal)
 
@@ -224,7 +255,7 @@ async function getAvailablePort() {
 	})
 }
 
-async function startInternalServer({ packageRoot, workspaceRoot, serverEntry, onChild }) {
+async function startInternalServer({ packageRoot, workspaceRoot, serverEntry, credential, onChild }) {
 	const port = await getAvailablePort()
 	const origin = 'http://127.0.0.1:' + port
 	let stderr = ''
@@ -238,6 +269,8 @@ async function startInternalServer({ packageRoot, workspaceRoot, serverEntry, on
 			NITRO_HOST: '127.0.0.1',
 			NITRO_PORT: String(port),
 			PORT: String(port),
+			// The internal server keeps an in-memory roster and accepts only this read-only credential.
+			UIUX_INTERNAL_PUBLISH_CREDENTIAL: credential,
 		},
 	})
 	onChild?.(child)
@@ -330,29 +363,32 @@ function nuxtNodePath(nuxtPackageDir) {
 	return [...new Set(candidates)].join(delimiter)
 }
 
-async function materializePublicationFiles({ origin, outputRoot, snapshot }) {
+async function materializePublicationFiles({ origin, outputRoot, snapshot, credential }) {
 	if (snapshot?.preview?.state === 'valid') {
 		await fetchToFile(
 			origin + '/api/preview/runtime?v=' + encodeURIComponent(snapshot.preview.hash),
 			join(outputRoot, snapshot.preview.runtimeFile),
+			credential,
 		)
 	}
 	for (const [assetId, entry] of Object.entries(snapshot?.files?.assets || {})) {
 		await fetchToFile(
 			origin + '/api/assets/' + encodeURIComponent(assetId) + '/content',
 			join(outputRoot, entry.file),
+			credential,
 		)
 	}
 	for (const [digest, entry] of Object.entries(snapshot?.files?.artifacts || {})) {
 		await fetchToFile(
 			origin + '/api/artifacts/' + encodeURIComponent(digest),
 			join(outputRoot, entry.file),
+			credential,
 		)
 	}
 }
 
-async function fetchJson(url) {
-	const response = await fetch(url)
+async function fetchJson(url, credential) {
+	const response = await fetch(url, { headers: { authorization: 'Bearer ' + credential } })
 	if (!response.ok) {
 		const body = await response.text()
 		throw new Error('Publication snapshot request failed (' + response.status + '): ' + body)
@@ -360,8 +396,8 @@ async function fetchJson(url) {
 	return await response.json()
 }
 
-async function fetchToFile(url, path) {
-	const response = await fetch(url)
+async function fetchToFile(url, path, credential) {
+	const response = await fetch(url, { headers: { authorization: 'Bearer ' + credential } })
 	if (!response.ok)
 		throw new Error('Publication file request failed (' + response.status + '): ' + url)
 	const bytes = new Uint8Array(await response.arrayBuffer())

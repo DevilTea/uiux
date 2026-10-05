@@ -14,6 +14,7 @@ import {
 } from '../src/server/preview-bundler'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
+import { HUMAN_OWNER } from './support/access'
 
 const temporaryRoots: string[] = []
 
@@ -469,7 +470,8 @@ describe('preview adapter materialization transport', () => {
 			const { default: adaptersHandler } = await import('../server/api/preview/adapters.get')
 			const { default: runtimeHandler } = await import('../server/api/preview/runtime.get')
 
-			const mockEvent = { node: { res: { setHeader() {} } } } as never
+			// Routes read the principal the access guard attached (identity decision 4).
+			const mockEvent = { context: { uiuxPrincipal: HUMAN_OWNER }, node: { res: { setHeader() {} } } } as never
 			const adaptersResp = await adaptersHandler(mockEvent)
 			expect(adaptersResp).toMatchObject({
 				state: 'valid',

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 
-import type { WorkspaceApplicationSession } from '../application/services/workspace-session'
+import type { ScopedWorkspaceSession } from '../application/access/scoped-session'
 import type { FileNativePersistence } from '../persistence'
 import { isFullUuid, isSha256Digest, type JsonObject, type JsonValue } from '../domain/validation'
 import type { ViewSpecContent } from '../application/services/view-authoring'
@@ -11,13 +11,12 @@ import type { I18nResource } from '../domain/i18n/schema'
 import type { FlowStep } from '../domain/flows/schema'
 import {
 	REVIEW_RESOLUTIONS,
-	type ReviewActor,
 	type ReviewAnchor,
 	type ReviewDisplayHint,
 	type ReviewEvidenceRef,
 	type ReviewResourceRevision,
 } from '../domain/reviews/schema'
-import type { DecisionActor, DecisionOutcome } from '../domain/spec/schema'
+import type { DecisionOutcome } from '../domain/spec/schema'
 
 export type AuthoringHttpResult<T = unknown> = Readonly<{
 	status: number
@@ -25,8 +24,14 @@ export type AuthoringHttpResult<T = unknown> = Readonly<{
 	headers?: Readonly<Record<string, string>>
 }>
 
-export function mapAuthoringResultToHttpStatus(status: string): number {
+/**
+ * Maps a mutation result to HTTP. Access refusals: `auth.scope_denied` is 403 and the lease
+ * refusal `locked` (`resource.locked`) is 423 (accepted identity decisions 5 and 11).
+ */
+export function mapAuthoringResultToHttpStatus(status: string, code?: string): number {
+	if (code === 'auth.scope_denied') return 403
 	switch (status) {
+		case 'locked': return 423
 		case 'created': return 201
 		case 'updated': return 200
 		case 'not_found': return 404
@@ -37,6 +42,11 @@ export function mapAuthoringResultToHttpStatus(status: string): number {
 		case 'blocked': return 422
 		default: return 500
 	}
+}
+
+function resultCode(result: { status: string }): string | undefined {
+	const code = (result as { code?: unknown }).code
+	return typeof code === 'string' ? code : undefined
 }
 
 const viewSpecContentSchema = z.object({
@@ -152,7 +162,8 @@ const createReviewThreadHttpSchema = z.object({
 
 const appendReviewMessageHttpSchema = z.object({
 	expectedRevision: z.string(),
-	actor: reviewActorSchema,
+	/** Optional and ignored: the server stamps the actor (warning `auth.actor_ignored`). */
+	actor: reviewActorSchema.optional(),
 	body: z.string(),
 	id: z.string().min(1).optional(),
 	at: z.string().optional(),
@@ -163,7 +174,8 @@ const reanchorReviewThreadHttpSchema = z.object({
 	anchor: reviewAnchorSchema,
 	variantNames: z.array(z.string()).optional(),
 	displayHint: reviewDisplayHintSchema.nullable().optional(),
-	actor: reviewActorSchema,
+	/** Optional and ignored: the server stamps the actor (warning `auth.actor_ignored`). */
+	actor: reviewActorSchema.optional(),
 	reason: z.string().optional(),
 	id: z.string().min(1).optional(),
 	at: z.string().optional(),
@@ -176,7 +188,8 @@ const setReviewDisplayHintHttpSchema = z.object({
 
 const submitReadyForReviewHttpSchema = z.object({
 	expectedRevision: z.string(),
-	actor: reviewActorSchema,
+	/** Optional and ignored: the server stamps the actor (warning `auth.actor_ignored`). */
+	actor: reviewActorSchema.optional(),
 	changeDomains: z.array(z.string()),
 	resources: z.array(z.object({
 		identity: z.record(z.string(), z.unknown()),
@@ -195,7 +208,8 @@ const submitReadyForReviewHttpSchema = z.object({
 
 const resolveReviewThreadHttpSchema = z.object({
 	expectedRevision: z.string(),
-	actor: reviewActorSchema,
+	/** Optional and ignored: the server stamps the actor (warning `auth.actor_ignored`). */
+	actor: reviewActorSchema.optional(),
 	resolution: z.enum(REVIEW_RESOLUTIONS).optional(),
 	submissionId: z.string().min(1).optional(),
 	reason: z.string().optional(),
@@ -205,7 +219,8 @@ const resolveReviewThreadHttpSchema = z.object({
 
 const reopenReviewThreadHttpSchema = z.object({
 	expectedRevision: z.string(),
-	actor: reviewActorSchema,
+	/** Optional and ignored: the server stamps the actor (warning `auth.actor_ignored`). */
+	actor: reviewActorSchema.optional(),
 	reason: z.string().optional(),
 	id: z.string().min(1).optional(),
 	at: z.string().optional(),
@@ -290,7 +305,7 @@ export function parseHttpPayload<T>(
 	}
 }
 
-export async function createViewForHttp(app: WorkspaceApplicationSession, body: unknown): Promise<AuthoringHttpResult> {
+export async function createViewForHttp(app: ScopedWorkspaceSession, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(createViewHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
@@ -300,10 +315,10 @@ export async function createViewForHttp(app: WorkspaceApplicationSession, body: 
 		...(data.feature ? { feature: data.feature } : {}),
 		spec: data.spec as ViewSpecContent,
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function updateViewSpecForHttp(app: WorkspaceApplicationSession, viewId: string, body: unknown): Promise<AuthoringHttpResult> {
+export async function updateViewSpecForHttp(app: ScopedWorkspaceSession, viewId: string, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(updateViewSpecHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
@@ -312,10 +327,10 @@ export async function updateViewSpecForHttp(app: WorkspaceApplicationSession, vi
 		expectedRevision: data.expectedRevision,
 		spec: data.spec as ViewSpecContent,
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function updateViewStructureForHttp(app: WorkspaceApplicationSession, viewId: string, body: unknown): Promise<AuthoringHttpResult> {
+export async function updateViewStructureForHttp(app: ScopedWorkspaceSession, viewId: string, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(updateViewStructureHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
@@ -325,10 +340,10 @@ export async function updateViewStructureForHttp(app: WorkspaceApplicationSessio
 		ir: data.ir as JsonValue,
 		variants: data.variants as Record<string, VariantEntry>,
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function updateWorkspaceSettingsForHttp(app: WorkspaceApplicationSession, body: unknown): Promise<AuthoringHttpResult> {
+export async function updateWorkspaceSettingsForHttp(app: ScopedWorkspaceSession, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(updateWorkspaceSettingsHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
@@ -336,10 +351,10 @@ export async function updateWorkspaceSettingsForHttp(app: WorkspaceApplicationSe
 		expectedRevision: data.expectedRevision,
 		settings: data.settings as WorkspaceSettingsUpdate,
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function createLocaleForHttp(app: WorkspaceApplicationSession, body: unknown): Promise<AuthoringHttpResult> {
+export async function createLocaleForHttp(app: ScopedWorkspaceSession, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(createLocaleHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
@@ -347,10 +362,10 @@ export async function createLocaleForHttp(app: WorkspaceApplicationSession, body
 		locale: data.locale,
 		messages: data.messages as I18nResource,
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function updateLocaleForHttp(app: WorkspaceApplicationSession, locale: string, body: unknown): Promise<AuthoringHttpResult> {
+export async function updateLocaleForHttp(app: ScopedWorkspaceSession, locale: string, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(updateLocaleHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
@@ -359,10 +374,10 @@ export async function updateLocaleForHttp(app: WorkspaceApplicationSession, loca
 		expectedRevision: data.expectedRevision,
 		messages: data.messages as I18nResource,
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function createFlowForHttp(app: WorkspaceApplicationSession, body: unknown): Promise<AuthoringHttpResult> {
+export async function createFlowForHttp(app: ScopedWorkspaceSession, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(createFlowHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
@@ -373,10 +388,10 @@ export async function createFlowForHttp(app: WorkspaceApplicationSession, body: 
 		entryStepId: data.entryStepId,
 		steps: data.steps as Record<string, FlowStep>,
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function updateFlowForHttp(app: WorkspaceApplicationSession, flowId: string, body: unknown): Promise<AuthoringHttpResult> {
+export async function updateFlowForHttp(app: ScopedWorkspaceSession, flowId: string, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(updateFlowHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
@@ -388,10 +403,10 @@ export async function updateFlowForHttp(app: WorkspaceApplicationSession, flowId
 		entryStepId: data.entryStepId,
 		steps: data.steps as Record<string, FlowStep>,
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function createReviewThreadForHttp(app: WorkspaceApplicationSession, body: unknown): Promise<AuthoringHttpResult> {
+export async function createReviewThreadForHttp(app: ScopedWorkspaceSession, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(createReviewThreadHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
@@ -401,25 +416,25 @@ export async function createReviewThreadForHttp(app: WorkspaceApplicationSession
 		...(data.variantNames ? { variantNames: data.variantNames } : {}),
 		...(data.displayHint ? { displayHint: data.displayHint as ReviewDisplayHint } : {}),
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function appendReviewMessageForHttp(app: WorkspaceApplicationSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
+export async function appendReviewMessageForHttp(app: ScopedWorkspaceSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(appendReviewMessageHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
 	const result = await app.appendReviewMessage({
 		reviewId,
 		expectedRevision: data.expectedRevision,
-		actor: data.actor as ReviewActor,
+		...(data.actor !== undefined ? { actor: data.actor } : {}),
 		body: data.body,
 		...(data.id ? { id: data.id } : {}),
 		...(data.at ? { at: data.at } : {}),
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function reanchorReviewThreadForHttp(app: WorkspaceApplicationSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
+export async function reanchorReviewThreadForHttp(app: ScopedWorkspaceSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(reanchorReviewThreadHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
@@ -429,22 +444,22 @@ export async function reanchorReviewThreadForHttp(app: WorkspaceApplicationSessi
 		anchor: data.anchor as ReviewAnchor,
 		...(data.variantNames ? { variantNames: data.variantNames } : {}),
 		...(data.displayHint !== undefined ? { displayHint: data.displayHint as ReviewDisplayHint | null } : {}),
-		actor: data.actor as ReviewActor,
+		...(data.actor !== undefined ? { actor: data.actor } : {}),
 		...(data.reason ? { reason: data.reason } : {}),
 		...(data.id ? { id: data.id } : {}),
 		...(data.at ? { at: data.at } : {}),
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function submitReadyForReviewForHttp(app: WorkspaceApplicationSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
+export async function submitReadyForReviewForHttp(app: ScopedWorkspaceSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(submitReadyForReviewHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
 	const result = await app.submitReadyForReview({
 		reviewId,
 		expectedRevision: data.expectedRevision,
-		actor: data.actor as ReviewActor,
+		...(data.actor !== undefined ? { actor: data.actor } : {}),
 		changeDomains: data.changeDomains,
 		resources: data.resources as ReviewResourceRevision[],
 		...(data.scope ? { scope: data.scope as JsonObject } : {}),
@@ -454,27 +469,27 @@ export async function submitReadyForReviewForHttp(app: WorkspaceApplicationSessi
 		...(data.at ? { at: data.at } : {}),
 		...(data.submissionId ? { submissionId: data.submissionId } : {}),
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function resolveReviewThreadForHttp(app: WorkspaceApplicationSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
+export async function resolveReviewThreadForHttp(app: ScopedWorkspaceSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(resolveReviewThreadHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
 	const result = await app.resolveReviewThread({
 		reviewId,
 		expectedRevision: data.expectedRevision,
-		actor: data.actor as ReviewActor,
+		...(data.actor !== undefined ? { actor: data.actor } : {}),
 		...(data.resolution ? { resolution: data.resolution } : {}),
 		...(data.submissionId ? { submissionId: data.submissionId } : {}),
 		...(data.reason ? { reason: data.reason } : {}),
 		...(data.id ? { id: data.id } : {}),
 		...(data.at ? { at: data.at } : {}),
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function setReviewDisplayHintForHttp(app: WorkspaceApplicationSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
+export async function setReviewDisplayHintForHttp(app: ScopedWorkspaceSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(setReviewDisplayHintHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
@@ -483,25 +498,25 @@ export async function setReviewDisplayHintForHttp(app: WorkspaceApplicationSessi
 		expectedRevision: data.expectedRevision,
 		displayHint: data.displayHint as ReviewDisplayHint | null,
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function reopenReviewThreadForHttp(app: WorkspaceApplicationSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
+export async function reopenReviewThreadForHttp(app: ScopedWorkspaceSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(reopenReviewThreadHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
 	const result = await app.reopenReviewThread({
 		reviewId,
 		expectedRevision: data.expectedRevision,
-		actor: data.actor as ReviewActor,
+		...(data.actor !== undefined ? { actor: data.actor } : {}),
 		...(data.reason ? { reason: data.reason } : {}),
 		...(data.id ? { id: data.id } : {}),
 		...(data.at ? { at: data.at } : {}),
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function promoteReviewToDecisionForHttp(app: WorkspaceApplicationSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
+export async function promoteReviewToDecisionForHttp(app: ScopedWorkspaceSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(promoteReviewToDecisionHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
@@ -512,13 +527,13 @@ export async function promoteReviewToDecisionForHttp(app: WorkspaceApplicationSe
 		expectedViewRevision: data.expectedViewRevision,
 		question: data.question,
 		...(data.outcome ? { outcome: data.outcome as DecisionOutcome } : {}),
-		...(data.actor ? { actor: data.actor as DecisionActor } : {}),
+		...(data.actor !== undefined ? { actor: data.actor } : {}),
 		...(data.decisionId ? { decisionId: data.decisionId } : {}),
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function createAssetForHttp(app: WorkspaceApplicationSession, body: unknown): Promise<AuthoringHttpResult> {
+export async function createAssetForHttp(app: ScopedWorkspaceSession, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(createAssetHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
@@ -529,10 +544,10 @@ export async function createAssetForHttp(app: WorkspaceApplicationSession, body:
 		mediaType: data.mediaType,
 		contentBase64: data.contentBase64,
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-export async function replaceAssetForHttp(app: WorkspaceApplicationSession, assetId: string, body: unknown): Promise<AuthoringHttpResult> {
+export async function replaceAssetForHttp(app: ScopedWorkspaceSession, assetId: string, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(replaceAssetHttpSchema, body)
 	if (!parsed.ok) return parsed.result
 	const data = parsed.data
@@ -544,7 +559,7 @@ export async function replaceAssetForHttp(app: WorkspaceApplicationSession, asse
 		mediaType: data.mediaType,
 		contentBase64: data.contentBase64,
 	})
-	return { status: mapAuthoringResultToHttpStatus(result.status), body: result }
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
 export function formatContentDisposition(filename: string): string {

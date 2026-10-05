@@ -1,8 +1,11 @@
 import { defineEventHandler, setHeader, setResponseStatus } from 'h3'
 import { getSelectedWorkspaceServerRuntime } from '../../../src/server/selected-workspace'
 import { getSelectedWorkspacePreviewBundle } from '../../../src/server/workspace-adapters'
+import { denyUnlessAllowed } from '../../../src/server/access/http'
 
 export default defineEventHandler(async (event) => {
+	const denied = denyUnlessAllowed(event, 'readPreview')
+	if (denied) return denied
 	setHeader(event, 'content-type', 'text/javascript; charset=utf-8')
 	setHeader(event, 'cache-control', 'no-store')
 

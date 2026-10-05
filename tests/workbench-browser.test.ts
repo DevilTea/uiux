@@ -20,10 +20,10 @@ let browser: Browser
 
 /** Adds a Variant to the private Workspace copy through the authoring API (never by hand). */
 async function authorVariant(name: string): Promise<void> {
-	const read = await (await fetch(`${server.origin}/api/resources/view/${VIEW_ID}`)).json() as { revision: string; resource: { ir: unknown; variants: Record<string, unknown> } }
+	const read = await (await fetch(`${server.origin}/api/resources/view/${VIEW_ID}`, { headers: server.headers })).json() as { revision: string; resource: { ir: unknown; variants: Record<string, unknown> } }
 	const response = await fetch(`${server.origin}/api/views/${VIEW_ID}/structure`, {
 		method: 'PUT',
-		headers: { 'content-type': 'application/json' },
+		headers: { ...server.headers, 'content-type': 'application/json' },
 		body: JSON.stringify({ expectedRevision: read.revision, ir: read.resource.ir, variants: { ...read.resource.variants, [name]: { state: {} } } }),
 	})
 	if (!response.ok) throw new Error(`Could not author the test Variant: ${response.status} ${await response.text()}`)
@@ -52,6 +52,7 @@ async function openWorkbench(path: string, setup: ChromeSetup): Promise<{ contex
 		localStorage.setItem('uiux.workbench.locale', locale)
 	}, [setup.mode, setup.locale ?? 'en-US'] as const)
 	if (setup.geometryProducer) await context.addInitScript(FAKE_GEOMETRY_PRODUCER)
+	await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
 	const page = await context.newPage()
 	await page.goto(`${server.origin}${path}`, { waitUntil: 'networkidle' })
 	await page.waitForFunction(() => document.documentElement.classList.contains('light') || document.documentElement.classList.contains('dark'))

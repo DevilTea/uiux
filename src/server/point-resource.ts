@@ -7,7 +7,7 @@ export type PointResourceHttpResult =
 	| Readonly<{ status: 404; body: { code: 'resource_not_found'; kind: PointResourceKind; key: string } }>
 
 export async function readPointResourceForHttp(
-	app: WorkspaceApplicationSession,
+	app: Pick<WorkspaceApplicationSession, 'readPointResource'>,
 	kind: string,
 	key: string,
 ): Promise<PointResourceHttpResult> {
