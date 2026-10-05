@@ -191,92 +191,154 @@
   },
   "flows": {
     "title": "UX Flows",
-    "subtitle": "Steps and transitions across Views",
     "newFlow": "New Flow",
-    "list": {
-      "label": "UX Flows",
-      "empty": "No Flows yet",
-      "emptyHint": "Create a Flow to map a user journey across Views.",
-      "loadFailed": "Could not load Flows.",
-      "unnamed": "Unnamed Flow"
-    },
-    "detail": {
-      "metadata": "Flow details",
-      "revision": "Rev. {revision}",
-      "loadFailed": "Could not load this Flow.",
-      "unavailable": "This Flow is unavailable.",
-      "selectTitle": "No Flow selected",
-      "selectDescription": "Select a Flow to see its steps and transitions."
-    },
-    "fields": {
-      "name": "Flow name",
-      "namePlaceholder": "e.g. Signup onboarding",
-      "entryStep": "Entry step",
-      "entryStepPlaceholder": "Select entry step",
-      "entryStepId": "Entry step ID",
-      "entryStepIdHelp": "A stable ID for the first step. The generated one is fine.",
-      "initialView": "First step View",
-      "targetView": "Target View",
-      "variant": "Variant",
-      "variantPlaceholder": "e.g. mobile-expanded",
-      "optional": "Optional",
-      "event": "Event",
-      "widgetId": "Widget ID",
-      "targetStep": "Go to step",
-      "targetStepPlaceholder": "Select a step"
-    },
-    "views": {
-      "placeholder": "Select a View",
-      "search": "Search Views…",
-      "missing": "{id} (missing View)",
-      "none": "No View"
-    },
-    "steps": {
-      "title": "Steps",
-      "count": "No steps | {n} step | {n} steps",
-      "ordinal": "Step {n}",
-      "optionLabel": "Step {n}: {view}",
-      "entry": "Entry",
-      "add": "Add step",
-      "remove": "Remove step",
-      "previewView": "Preview this View",
-      "empty": "No steps yet",
-      "emptyHint": "Add a step to begin."
-    },
-    "transitions": {
-      "count": "No transitions | {n} transition | {n} transitions",
-      "add": "Add transition",
-      "remove": "Remove transition",
-      "terminal": "No transitions. This step ends the Flow."
-    },
-    "diagnostics": {
-      "count": "No diagnostics | {n} diagnostic | {n} diagnostics"
-    },
-    "conflict": {
-      "title": "Flow changed elsewhere",
-      "description": "Reload to get the latest version. Unsaved edits will be lost."
-    },
-    "save": {
-      "submit": "Save Flow",
-      "saved": "Flow saved.",
-      "failed": "Could not save the Flow."
-    },
-    "create": {
-      "title": "New Flow",
-      "description": "The first step opens a View.",
-      "submit": "Create Flow",
-      "created": "Flow created.",
-      "failed": "Could not create the Flow.",
-      "nameRequired": "Enter a Flow name.",
-      "viewRequired": "Select a View for the first step.",
-      "noViews": "Create a View first. The first step needs one."
-    },
     "play": "Play prototype",
     "restart": "Restart",
     "exit": "Exit",
     "next": "Next: {event}",
     "unreachable": "Unreachable step",
-    "cantPlay": "Fix {n} problem to play this Flow. | Fix {n} problems to play this Flow."
+    "cantPlay": "Fix {n} problem to play this Flow. | Fix {n} problems to play this Flow.",
+    "list": {
+      "label": "UX Flows",
+      "steps": "Steps in order",
+      "transitionsOf": "Transitions from {step}",
+      "goesTo": "goes to",
+      "empty": "No UX Flows yet",
+      "emptyHint": "A Flow connects Views into a playable path. Ask your agent to {tool}, or create one here.",
+      "emptyHintReadOnly": "A Flow connects Views into a playable path. Ask your agent to {tool}.",
+      "unnamed": "Unnamed Flow"
+    },
+    "detail": {
+      "loadFailed": "Couldn't load this Flow.",
+      "notFound": "Flow not found",
+      "notFoundHint": "It isn't in this Workspace. It may have been removed or renamed on disk.",
+      "allFlows": "All Flows"
+    },
+    "graph": {
+      "label": "Flow graph",
+      "layout": "Show the Flow as",
+      "graphView": "Graph",
+      "listView": "List",
+      "keyboardHint": "Arrow keys move along transitions: Right to the next step, Left to the previous one, Up and Down within a column. Enter opens the step.",
+      "entry": "Entry",
+      "end": "End",
+      "variant": "Variant {variant}",
+      "edgeLabel": "Transition {trigger} to {target}",
+      "missingStep": "Missing step",
+      "missingView": "Missing View"
+    },
+    "toolbar": {
+      "steps": "{n} step | {n} steps",
+      "problems": "{n} problem | {n} problems",
+      "unsaved": "Unsaved changes",
+      "discard": "Discard",
+      "addStep": "Add step"
+    },
+    "inspector": {
+      "label": "Flow details",
+      "flow": "Flow",
+      "name": "Name",
+      "entryStep": "Entry step",
+      "transitionCount": "{n} transition | {n} transitions",
+      "selectHint": "Select a step or transition to edit it.",
+      "view": "View",
+      "noView": "No View",
+      "viewMissing": "{id} (missing View)",
+      "variantMissing": "{name} (not in this View)",
+      "widgetMissing": "#{id} (not in this View)",
+      "searchViews": "Search Views",
+      "searchWidgets": "Search Widgets",
+      "openView": "Open View",
+      "makeEntry": "Make entry step",
+      "transitions": "Transitions",
+      "noOutgoing": "No transitions. This step ends the Flow.",
+      "incoming": "Reached by {n} transition | Reached by {n} transitions",
+      "addTransition": "Add transition",
+      "widget": "Widget",
+      "widgetPlaceholder": "Select a Widget",
+      "event": "Event",
+      "eventPlaceholder": "e.g. click",
+      "eventHelp": "The Event name the Widget declares.",
+      "target": "Goes to step",
+      "stepOption": "{n}. {step}",
+      "selectTarget": "Select target step",
+      "removeStep": "Remove step",
+      "removeStepConfirm": "Remove this step? | Remove this step and the transition into it? | Remove this step and the {n} transitions into it?",
+      "entryCantRemove": "Make another step the entry step before removing this one.",
+      "removeTransition": "Remove transition",
+      "details": "Details",
+      "stepId": "Step ID",
+      "viewId": "View ID",
+      "flowId": "Flow ID",
+      "scenario": "Scenario reference"
+    },
+    "addStep": {
+      "title": "Add step",
+      "description": "A new step is reached by a transition from an existing step.",
+      "trigger": "Transition into the new step",
+      "from": "From step",
+      "newStep": "New step",
+      "viewPlaceholder": "Select a View",
+      "widgetRequired": "Select the Widget that triggers the transition.",
+      "eventRequired": "Enter the Event name.",
+      "viewRequired": "Select a View for the new step.",
+      "submit": "Add step"
+    },
+    "problems": {
+      "unreachable": "{step} is unreachable from the entry step.",
+      "ambiguous": "Two transitions from one step use {trigger}. Each Widget Event may lead to one step only.",
+      "missingTargetStep": "Transition {trigger} goes to a step that isn't in this Flow.",
+      "missingEntry": "The entry step isn't in this Flow.",
+      "nameRequired": "The Flow needs a name.",
+      "incompleteTrigger": "Transition {trigger} needs a Widget and an Event.",
+      "incompleteStep": "{step} needs a target View.",
+      "structure": "This Flow doesn't match the canonical shape at {path}.",
+      "missingView": "The View {id} isn't in this Workspace.",
+      "missingVariant": "Variant {variant} isn't defined in {view}.",
+      "missingWidget": "Widget {widgetId} isn't in {view}.",
+      "saveBlocked": "Fix {n} problem to save. | Fix {n} problems to save.",
+      "lossy": "This Flow file has content the editor can't represent, so it is read-only here. Repair it with update_flow."
+    },
+    "conflict": {
+      "title": "This Flow changed since you opened it.",
+      "description": "Your edits are kept until you reload. Reloading shows the current Flow and discards them.",
+      "reload": "Reload theirs"
+    },
+    "save": {
+      "saved": "Flow saved",
+      "failed": "Couldn't save the Flow."
+    },
+    "leave": {
+      "title": "Leave without saving?",
+      "description": "Unsaved changes to this Flow will be discarded.",
+      "stay": "Keep editing",
+      "confirm": "Discard and leave"
+    },
+    "create": {
+      "title": "New Flow",
+      "description": "Name the Flow and choose the View its entry step opens.",
+      "namePlaceholder": "e.g. Checkout recovery",
+      "firstView": "Entry step View",
+      "noViews": "Create a View first. The entry step needs one.",
+      "submit": "Create Flow",
+      "created": "Flow created",
+      "failed": "Couldn't create the Flow.",
+      "nameRequired": "Enter a name.",
+      "viewRequired": "Select a View for the entry step."
+    },
+    "player": {
+      "label": "Prototype player",
+      "path": "Steps played",
+      "earlier": "{n} earlier step | {n} earlier steps",
+      "stepWithVariant": "{step} · {variant}",
+      "nextGroup": "Transitions from this step",
+      "goesTo": "Goes to {step}. The step starts from a fresh state.",
+      "end": "End of Flow",
+      "entered": "Step {n}: {step}",
+      "unavailable": "This Flow isn't loaded.",
+      "saveFirst": "Save your changes to play them.",
+      "checking": "Checking references…"
+    }
   },
   "handoff": {
     "title": "Handoff",

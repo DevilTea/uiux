@@ -2,7 +2,7 @@
 version: 1
 slug: "app-components-workspacesettingspanel-vue"
 primary_target: "app/components/WorkspaceSettingsPanel.vue"
-related_targets: ["app/components/LocalesPanel.vue","app/components/AssetsPanel.vue","app/components/FlowsPanel.vue"]
+related_targets: ["app/components/LocalesPanel.vue","app/components/AssetsPanel.vue","app/pages/flows/[flowId].vue"]
 ---
 
 # Shape brief (g): Secondary authoring surfaces (Workspace settings, Locales, Assets, UX Flows)
