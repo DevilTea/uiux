@@ -216,7 +216,7 @@ components:
     width: "320px"
 ---
 
-<!-- TARGET: this is the target design system for the Workbench overhaul, chosen with the user before implementation (the "Quiet canvas" direction, a violet accent from the favicon, and a distinct annotation color). The palette and contrast ratios are computed and verified. After the first implementation on feat/workbench-foundation, re-run `/impeccable document` in scan mode to record what actually shipped and regenerate `.impeccable/design.json`. -->
+<!-- SCAN: regenerated from the shipped Workbench (Roadmap R14, `/impeccable document` scan mode). Tokens are read from `app/assets/css/main.css` and `app/app.config.ts`; components and device behavior from `app/`. Where the shipped design differs from the original target, this file follows the code; the differences are listed under "Recorded drift" at the end. -->
 
 # Design System: UIUX Workbench
 
@@ -341,6 +341,8 @@ Hairlines (`--ui-border`) are decorative region separators, not control boundari
 
 **The No-Opacity-Hover Rule.** Hover and active states move one ramp step (light: darker; dark: lighter). They never lower opacity on a filled control, which would drop text contrast below AA.
 
+**The Dimmed Ground Rule.** Dimmed text (`graphite-500` / `graphite-450`) sits only on the panel or the muted fill, where it clears 4.5:1. On elevated, selected or tinted surfaces (a selected row, a soft chip) metadata uses muted text instead.
+
 ## Typography
 
 **Body Font:** Inter (variable, self-hosted at build time), falling back to the system UI stack, then to PingFang TC / Noto Sans TC / Microsoft JhengHei for Han glyphs
@@ -367,7 +369,7 @@ Hairlines (`--ui-border`) are decorative region separators, not control boundari
 
 ## Layout
 
-**Spatial model: an application shell on Nuxt UI's dashboard primitives.** `UDashboardGroup` holds a collapsible, resizable left `UDashboardSidebar`, then the canvas (`UDashboardPanel`), then a resizable right panel (`UDashboardPanel` with `resizable`). A 48px `UDashboardNavbar` holds breadcrumbs and global actions. Scrolling happens inside panels, never at page level, except on mobile.
+**Spatial model: an application shell on Nuxt UI's dashboard primitives.** `UDashboardGroup` holds a 48px navbar (Workspace mark, breadcrumbs, `⌘K` search, member chip with role, Workbench preferences, refresh), then a collapsible, resizable left `UDashboardSidebar`, the page, and on View and Flow pages a resizable right panel. The Reviews inbox is a two-pane page: a 440px thread list (resizable 360–640) and the thread detail. Page-level banners (published snapshot, migration required, server unreachable) span the full width under the navbar. Scrolling happens inside panels, never at page level, except on mobile.
 
 **Rhythm:** 4px base. Controls are 32px tall at desktop density with 8px internal gaps. Panels pad 12px horizontally (16px on the Overview and Reviews pages). Stacks use 8px within a group and 16px between groups. A section heading has 16px above it and 8px below. Tree and list rows are 28px (compact desktop) or 32px (comfortable). On coarse pointers every interactive target grows to 44px through one theme variable (`--wb-target`).
 
@@ -376,10 +378,10 @@ Hairlines (`--ui-border`) are decorative region separators, not control boundari
 | Class | Width | Shell |
 |---|---|---|
 | Desktop | ≥ 1280px (`xl`); FHD 1920 primary | Sidebar 264px (collapsible to a 56px rail, resizable 220–360), canvas flexible, right panel 340px (resizable 300–440). At 1920 with both open, the canvas is about 1300px and a 1280×800 View fits at about 95%. |
-| Tablet | 1024–1279px (`lg`) and portrait 768–1023 (`md`) | Sidebar collapses to the 56px icon rail (landscape) or a slideover (portrait). The right panel becomes a `USlideover` opened on demand. Thread bubbles stay on the canvas. Touch targets are 44px. |
-| Mobile | < 768px | Single column. A 48px top bar and a 56px bottom navigation (`UNavigationMenu` horizontal) for Overview / Views / Flows / Reviews. View pages switch between Spec, Comments and Preview with `UTabs`. Threads open in a `UDrawer` bottom sheet. No structural editing. |
+| Tablet | 1024–1279px (`lg`) and portrait 768–1023 (`md`) | The sidebar is the 56px icon rail in **both** orientations; its expand control opens the full navigation as an overlay. The right panel becomes a `USlideover` opened on demand. Comments stay on the canvas; threads open in a bottom `UDrawer` on coarse pointers. Touch targets are 44px. Review, resolve, reopen, Flows and the Prototype player work here; structural editing and authoring pages show "Edit on desktop". |
+| Mobile | < 768px | Single column. A 48px top bar (☰, the page title, search, member, preferences, refresh) and a 56px bottom navigation (plus the safe area) for Overview / Views / UX Flows / Reviews, with a Marker count on Reviews. A cold start at `/` lands on Reviews. View pages switch between Spec, Comments and View with `UTabs`. Threads open in a `UDrawer` bottom sheet with a full-width Resolve. Phones read, reply and triage: no structural editing and no new canvas comments. |
 
-**Canvas:** the frame always renders the iframe at its canonical logical viewport size and scales only the outer presentation layer. Fit-to-canvas keeps 24px of gutter on desktop and 12px on tablet and mobile. Zoom steps are 25 / 50 / 67 / 75 / 90 / 100 / 125 / 150 / 200%. The dot grid (1px dots at a 16px pitch, `--wb-canvas-dot`) shows only at ≥ 50% zoom, and is the canvas's only texture.
+**Canvas:** the frame always renders the iframe at its canonical logical viewport size and scales only the outer presentation layer. Fit-to-canvas keeps 32px of gutter on desktop and 30px on tablet and mobile, enough for a 28px pin (plus its ring) whose tip sits on the frame's top or right edge. The bottom reserves room for the floating tool pill. Zoom steps are 25 / 50 / 67 / 75 / 90 / 100 / 125 / 150 / 200%. The dot grid (1px dots at a 16px pitch, `--wb-canvas-dot`) shows only at ≥ 50% zoom, and is the canvas's only texture.
 
 ### Named Rules
 
@@ -439,9 +441,11 @@ Every component below is a Nuxt UI 4 component themed through `app.config.ts` an
 - **Primary navigation:** a vertical `UNavigationMenu` in the sidebar with four items (Overview, Views, UX Flows, Reviews), each with a Lucide icon, label and count.
   - Active: `bg-elevated` with `text-highlighted`, plus a 2px Iris inset bar on the leading edge.
   - Inactive: `text-muted`. Hover: `bg-muted`.
-- **Secondary navigation:** a "Workspace" group (Settings, Locales, Assets, Adapters & Catalog) sits below a separator at the sidebar foot.
-- **Collapsed rail:** 56px, icons only, with tooltips.
-- **Mobile:** bottom `UNavigationMenu`, 56px tall plus the safe area, with icon and label (12px).
+- **Detail routes:** a View or Flow page keeps its area's item active (Views, UX Flows). On a View page the sidebar body becomes the View navigator ("All Views" back link, View name, Widget tree); on a Flow page it lists Flows with "New Flow" (desktop).
+- **Secondary navigation:** a "Workspace" group (Settings, Locales, Assets, Adapters) sits below a separator at the sidebar foot. Members is in the member menu (Owners).
+- **Collapsed rail:** 56px, icons only, with tooltips; the active item keeps its elevated fill and Iris bar. Counts move into the item's accessible name.
+- **Mobile:** a custom bottom bar (four links, 56px plus the safe area), each a 20px icon over a 12px label. Active: highlighted text, Iris icon and a 2px Iris bar on the top edge. Reviews carries a Marker count.
+- **Breadcrumbs:** neutral; ancestor crumbs keep their width and only the current page's label truncates.
 
 ### Tree (Widget layers)
 - `UTree` with full nesting. Rows are 28px with a 16px indent per depth level, a type icon from Catalog metadata, the Widget label (13px) and a mono id (12px, muted, revealed on hover or selection).
@@ -449,7 +453,10 @@ Every component below is a Nuxt UI 4 component themed through `app.config.ts` an
 - Selected: Iris tint fill with iris-700 / iris-300 text. Keyboard: arrows, Home/End, type-ahead, Enter to select, `C` to comment on the focused Widget.
 
 ### Canvas tool palette (signature)
-A floating, centered pill at the bottom of the canvas: `UFieldGroup` of ghost `UButton`s. The tools are Inspect (`V`), Comment (`C`) and Interact (`I`), followed by a separator, the comment filter (`UDropdownMenu` with open / ready / resolved checkboxes) and the pin visibility toggle (`Shift+C`). The active tool uses an Iris fill. Comment mode instead tints the active button Marker and shows a 2px Marker inset line along the top edge of the canvas, so the mode is unmistakable without a modal.
+A floating, centered pill at the bottom of the canvas (`bg-default`, a 10px radius concentric with its 6px buttons and 4px padding, Overlay shadow): a roving-tabindex toolbar of ghost buttons. The tools are Select (`V`), Comment (`C`) and Interact (`I`), followed by a separator and the pin visibility toggle (`Shift+C`). Key hints are hidden on phones and coarse pointers. Published snapshots and phones offer Select and Interact only. The active tool uses an Iris fill. Comment mode instead tints the active button with the Marker subtle fill and ring, and shows a 2px Marker inset line along the top edge of the canvas, so the mode is unmistakable without a modal. The comment status filter (Open / Ready for review / Resolved, each a toggle chip with its status icon and count) lives at the top of the Comments tab.
+
+### Canvas toolbar
+A 40px bar above the canvas. On desktop it shows the four render-context selects (Variant, Locale, Viewport, Theme: icon, muted dimension word, highlighted value, and the viewport's mono size). The bar is a container query: as the canvas narrows it drops the dimension words, then the viewport size, then truncates the values, so it never runs under the zoom controls. Below desktop it collapses to one summary button ("Base state · en-US · desktop · dark") that opens the same controls stacked in a popover. The right side holds the session status (a neutral dot for Live; warning for Reconnecting, error for Stopped), zoom out / percentage menu / zoom in, Fit, and the right-panel toggle.
 
 ### Comment pin (signature)
 - **Default:** a 28px teardrop in pin fill (marker-600 / marker-400) with the thread starter's initials (12px, 600). An agent-started thread shows a `i-lucide-bot` glyph instead. It carries the Pin shadow and a 2px panel-colored ring.
@@ -461,14 +468,16 @@ A floating, centered pill at the bottom of the canvas: `UFieldGroup` of ghost `U
   - **pending**: a dashed outline, the unsent composer still open;
   - **edge**: the Widget is off-screen, so the pin is clamped to the frame edge with a direction chevron;
   - **unplaced**: the anchor is invalid, so the thread is listed in the canvas's bottom-left tray in caution or fault color, never drawn on a guessed spot.
-- **Clusters:** three or more pins within 20px merge into a count pin ("+4") that expands on click.
+  - **interact**: with the Interact tool (and in the Prototype player) pins dim and stop taking input, because every click belongs to the View.
+- **Clusters:** pins whose tips fall within 24px merge into a count pin ("+2") that opens a menu of its threads; off-screen threads collect in edge indicators with a direction chevron that open the same menu.
+- **Touch:** the glyph stays 28px, with an invisible 44px hit area around it.
 
 ### Composer and thread bubble (signature)
-- A `UPopover` whose `reference` is a virtual element at the pin tip. It prefers the right side of the pin and flips to stay inside the canvas.
+- A non-modal `UPopover` whose reference is the pin itself (or its edge indicator, the unplaced tray, or a fallback point at the canvas's bottom-left when the pin is not drawn). It prefers the right side of the pin and flips to stay inside the window.
 - 320px wide, 12px radius, Overlay shadow, `bg-default`. The header holds a target chip (Widget type plus mono id) and the Variant scope `USelect` ("This Variant" / "All Variants").
 - The body is a `UTextarea`, autoresizing up to 8 lines. The footer holds "Cancel" and a solid "Comment" button (`⌘↵`).
-- A thread bubble has the same frame. It shows a compact timeline (messages, re-anchors, submissions, lifecycle events), a reply field, and inline lifecycle actions: "Resolve" (only on `ready-for-review`, naming the accepted submission) and "Reopen". An overflow `UDropdownMenu` holds Copy link, Re-anchor, Promote to Decision, Open in Reviews, and Copy thread ID.
-- On touch with the virtual keyboard open, the bubble docks to a bottom `UDrawer` and keeps a target chip that links back to the pin.
+- A thread bubble has the same frame. It shows a compact timeline (messages, re-anchors, submissions, lifecycle events), a reply field, and inline lifecycle actions. "Resolve" accepts a `ready-for-review` submission (`verified`) or, on an `open` thread, resolves it as Answered; a split menu offers Won't fix, Duplicate (with a reason) and Obsolete. "Reopen" returns a resolved thread. An overflow menu holds Copy link, Re-anchor, Submit for review…, Promote to Decision, Open in Reviews, and Copy thread ID.
+- On coarse pointers and phones the composer and bubble open in a bottom `UDrawer` instead, which stays above the virtual keyboard.
 
 ### Blueprint selection label (signature)
 For the selected Widget, a mono chip sits outside the top-left corner of its outline ("Button · #checkout-submit") and a dimension chip sits below its bottom edge ("320 × 44"). Both are 12px mono on `bg-default` with a 1px hairline, and they float in the Workbench overlay, never inside the iframe. The selection outline is 1.5px solid Iris. The Inspect hover outline is 1px Iris at 60%. The Comment hover outline is 1.5px dashed Marker.
@@ -537,307 +546,24 @@ Focus is always a 2px Iris outline at 2px offset, never removed, and never cover
 - **Don't** put a transparent pointer-capture layer over the iframe for targeting. The iframe hit-tests; the Workbench only draws.
 - **Don't** add nested cards, equal-weight tab grids, or a dark-only shell.
 
-## Implementation: Nuxt UI 4 theming
+## Implementation map
 
-This appendix is outside the canonical eight sections and intended for builders. It maps every token above onto Nuxt UI 4 theming on top of `feat/workbench-foundation`, which already defines `--wb-*` tokens, `@theme inline` aliases and `@nuxtjs/i18n`.
+Outside the eight canonical sections; for builders.
 
-### `nuxt.config.ts` (register the annotation color)
+- **Tokens:** `app/assets/css/main.css`. The `@theme static` block holds the type scale, the Graphite / Iris / Marker / Leaf ramps, the two easings and the shadow aliases. `:root` / `.light` and `.dark` map them onto Nuxt UI's `--ui-*` variables and the Workbench's `--wb-*` tokens (canvas, selection, comment, pin, frame, shadows, `--wb-target`). `@theme inline` exposes those as utilities (`bg-canvas`, `bg-pin`, `text-annotation`, `bg-selection-subtle`, `shadow-overlay` …). The zh-TW line heights, the coarse-pointer target, the unlayered 2px Iris focus outline, the skeleton delay and the reduced-motion clamp also live there.
+- **Component theme:** `app/app.config.ts` maps Nuxt UI roles (`primary: iris`, `secondary`/`neutral: graphite`, `annotation: marker`, `success: leaf`, `info: blue`, `warning: yellow`, `error: red`), makes neutral outline the default button, removes opacity hovers, re-maps `xs`/`sm` badges, kbds, avatars and menu labels to the 12px floor, and grows menus, inputs, tabs and tree rows to 44px on coarse pointers.
+- **Annotation color:** registered in `nuxt.config.ts` (`ui.theme.colors` includes `annotation`). Fonts are the `@fontsource` packages bundled by Vite; nothing is fetched at runtime.
+- **Breakpoints in script:** `WORKBENCH_BREAKPOINTS` in `app/composables/useMediaQuery.ts` (desktop ≥ 1280, tablet ≥ 1024, phone < 768, handset = phone width or a short coarse screen).
 
-```ts
-export default defineNuxtConfig({
-  // ...existing config
-  ui: {
-    theme: {
-      // `annotation` becomes a first-class Nuxt UI color: <UBadge color="annotation">, <UButton color="annotation">
-      colors: ['primary', 'secondary', 'annotation', 'success', 'info', 'warning', 'error'],
-    },
-  },
-  fonts: {
-    // @nuxt/fonts ships with Nuxt UI; faces are downloaded at build time and served locally (no runtime CDN).
-    defaults: { weights: [400, 500, 600], styles: ['normal'], subsets: ['latin', 'latin-ext'] },
-    families: [
-      { name: 'Inter', provider: 'fontsource' },
-      { name: 'JetBrains Mono', provider: 'fontsource', weights: [400, 500] },
-    ],
-  },
-})
-```
+## Recorded drift
 
-### `app/app.config.ts`
+Differences between the original target of this file and what shipped (R1–R14), recorded rather than silently changed:
 
-```ts
-import { defineAppConfig } from '#imports'
-
-export default defineAppConfig({
-  ui: {
-    colors: {
-      primary: 'iris',
-      secondary: 'graphite',
-      annotation: 'marker',
-      success: 'leaf',
-      info: 'blue',
-      warning: 'yellow',
-      error: 'red',
-      neutral: 'graphite',
-    },
-    button: {
-      // Violet must be asked for: the default button is neutral outline.
-      defaultVariants: { color: 'neutral', variant: 'outline', size: 'md' },
-      slots: { base: 'min-h-(--wb-target) font-medium' },
-      compoundVariants: [
-        // The No-Opacity-Hover Rule: move one ramp step instead of /75.
-        { color: 'primary', variant: 'solid', class: 'hover:bg-primary-700 active:bg-primary-800 dark:hover:bg-primary-300 dark:active:bg-primary-200' },
-        { color: 'annotation', variant: 'solid', class: 'hover:bg-annotation-800 dark:hover:bg-annotation-300' },
-        // A visible focus ring at 3:1 or better on every variant (Nuxt UI's default primary/25 outline fails).
-        {
-          color: ['primary', 'secondary', 'annotation', 'success', 'info', 'warning', 'error', 'neutral'],
-          variant: ['solid', 'outline', 'soft', 'subtle', 'ghost', 'link'],
-          class: 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary',
-        },
-      ],
-    },
-    badge: {
-      defaultVariants: { variant: 'subtle', size: 'md' },
-      variants: {
-        size: {
-          // The 12px Floor Rule: re-map the stock 8px / 10px sizes.
-          xs: { base: 'text-xs/4 px-1 py-0 gap-1 rounded-sm' },
-          sm: { base: 'text-xs/4 px-1.5 py-0.5 gap-1 rounded-sm' },
-          md: { base: 'text-xs/4 px-1.5 py-0.5 gap-1 rounded-sm' },
-        },
-      },
-    },
-    input: { slots: { base: 'text-base sm:text-sm pointer-coarse:text-base' } },
-    textarea: { slots: { base: 'text-base sm:text-sm pointer-coarse:text-base' } },
-    tabs: { slots: { trigger: 'min-h-(--wb-target) text-sm' } },
-    tree: { slots: { link: 'min-h-7 pointer-coarse:min-h-11 text-sm', linkLabel: 'truncate' } },
-    popover: { slots: { content: 'shadow-overlay ring-0 rounded-lg' } },
-    tooltip: { slots: { content: 'text-xs/4 h-auto py-1' } },
-    kbd: { defaultVariants: { size: 'md' } },
-    navigationMenu: {
-      slots: { link: 'min-h-(--wb-target) text-sm', linkLeadingIcon: 'size-4' },
-    },
-    dashboardNavbar: { slots: { root: 'h-(--ui-header-height)' } },
-    dashboardSidebar: {
-      slots: { root: 'min-h-0 h-full bg-default', header: 'h-auto px-0', body: 'gap-0 p-0' },
-    },
-    dashboardPanel: { slots: { root: 'min-h-0 h-full', body: 'gap-0 p-0 sm:p-0' } },
-    // Keep the foundation's dashboardGroup override.
-    dashboardGroup: { base: 'relative flex min-h-0 flex-1 overflow-hidden' },
-  },
-})
-```
-
-### `app/assets/css/main.css`
-
-```css
-@import "tailwindcss";
-@import "@nuxt/ui";
-
-/* ---------- Primitives (Tailwind theme) ---------- */
-@theme static {
-  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "Noto Sans CJK TC", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, "PingFang TC", monospace;
-
-  /* Type scale (12px floor; text-sm retuned to the 13px UI size) */
-  --text-xs: 0.75rem;      --text-xs--line-height: 1rem;          /* 12/16 label, mono */
-  --text-sm: 0.8125rem;    --text-sm--line-height: 1.25rem;       /* 13/20 UI */
-  --text-body: 0.875rem;   --text-body--line-height: 1.375rem;    /* 14/22 prose */
-  --text-title: 0.9375rem; --text-title--line-height: 1.375rem;   /* 15/22 */
-  --text-headline: 1.125rem; --text-headline--line-height: 1.625rem; /* 18/26 */
-  --text-display: 1.5rem;  --text-display--line-height: 2rem;     /* 24/32 */
-
-  --color-graphite-50: oklch(98.5% 0.002 286);
-  --color-graphite-100: oklch(96.7% 0.003 286);
-  --color-graphite-150: oklch(94.6% 0.004 286);
-  --color-graphite-200: oklch(92.4% 0.005 286);
-  --color-graphite-300: oklch(86.8% 0.007 286);
-  --color-graphite-400: oklch(71% 0.01 286);
-  --color-graphite-450: oklch(65% 0.011 286);
-  --color-graphite-500: oklch(55.4% 0.012 286);
-  --color-graphite-600: oklch(45% 0.012 286);
-  --color-graphite-700: oklch(37% 0.011 286);
-  --color-graphite-750: oklch(32% 0.01 286);
-  --color-graphite-800: oklch(27.6% 0.009 286);
-  --color-graphite-850: oklch(24.4% 0.008 286);
-  --color-graphite-900: oklch(21.2% 0.007 286);
-  --color-graphite-950: oklch(16% 0.006 286);
-
-  --color-iris-50: oklch(97.2% 0.014 293.6);
-  --color-iris-100: oklch(94.4% 0.028 293.6);
-  --color-iris-200: oklch(89.6% 0.052 293.6);
-  --color-iris-300: oklch(81.6% 0.098 293.6);
-  --color-iris-400: oklch(70.9% 0.159 293.6); /* = favicon #a78bfa */
-  --color-iris-500: oklch(61.2% 0.2 293.6);
-  --color-iris-600: oklch(52.6% 0.205 293.6);
-  --color-iris-700: oklch(46.6% 0.185 293.6);
-  --color-iris-800: oklch(40.6% 0.158 293.6);
-  --color-iris-900: oklch(34.6% 0.128 293.6);
-  --color-iris-950: oklch(26.2% 0.095 293.6);
-
-  --color-marker-50: oklch(97.2% 0.014 355);
-  --color-marker-100: oklch(94.4% 0.03 355);
-  --color-marker-200: oklch(89.6% 0.058 355);
-  --color-marker-300: oklch(82.4% 0.1 355);
-  --color-marker-400: oklch(73.5% 0.15 355);
-  --color-marker-500: oklch(65.5% 0.19 355);
-  --color-marker-600: oklch(57.5% 0.2 355);
-  --color-marker-700: oklch(51% 0.18 355);
-  --color-marker-800: oklch(44.5% 0.152 355);
-  --color-marker-900: oklch(38.5% 0.122 355);
-  --color-marker-950: oklch(28% 0.088 355);
-
-  --color-leaf-50: oklch(97.6% 0.022 152);
-  --color-leaf-100: oklch(95% 0.045 152);
-  --color-leaf-200: oklch(90.5% 0.08 152);
-  --color-leaf-300: oklch(84% 0.115 152);
-  --color-leaf-400: oklch(76% 0.14 152);
-  --color-leaf-500: oklch(66% 0.145 152);
-  --color-leaf-600: oklch(56.5% 0.13 152);
-  --color-leaf-700: oklch(49.5% 0.11 152);
-  --color-leaf-800: oklch(44% 0.095 152);
-  --color-leaf-900: oklch(37.5% 0.078 152);
-  --color-leaf-950: oklch(26.5% 0.055 152);
-
-  --ease-out-quiet: cubic-bezier(0.2, 0, 0, 1);
-  --ease-in-quiet: cubic-bezier(0.4, 0, 1, 1);
-  --shadow-overlay: var(--wb-shadow-overlay);
-  --shadow-frame: var(--wb-shadow-frame);
-  --shadow-pin: var(--wb-shadow-pin);
-}
-
-/* ---------- Nuxt UI semantic variables: light ---------- */
-:root {
-  --ui-radius: 0.25rem;
-  --ui-header-height: 3rem;
-
-  --ui-primary: var(--ui-color-primary-600);
-  --ui-annotation: var(--ui-color-annotation-700);
-  --ui-success: var(--ui-color-success-700);
-  --ui-info: var(--ui-color-info-700);
-  --ui-warning: var(--ui-color-warning-800);
-  --ui-error: var(--ui-color-error-700);
-
-  --ui-text-dimmed: var(--ui-color-neutral-500);
-  --ui-text-muted: var(--ui-color-neutral-600);
-  --ui-text-toned: var(--ui-color-neutral-700);
-  --ui-text: var(--ui-color-neutral-800);
-  --ui-text-highlighted: var(--ui-color-neutral-950);
-  --ui-text-inverted: #fff;
-
-  --ui-bg: #fff;
-  --ui-bg-muted: var(--ui-color-neutral-50);
-  --ui-bg-elevated: var(--ui-color-neutral-100);
-  --ui-bg-accented: var(--ui-color-neutral-200);
-  --ui-bg-inverted: var(--ui-color-neutral-900);
-  --ui-border: var(--ui-color-neutral-200);
-  --ui-border-muted: var(--color-graphite-150);
-  --ui-border-accented: var(--color-graphite-450);
-  --ui-border-inverted: var(--ui-color-neutral-900);
-
-  /* Workbench tokens (chrome only; never the Preview render context) */
-  --wb-target: 1.5rem;                       /* 24px WCAG 2.5.8 minimum */
-  --wb-canvas: var(--ui-color-neutral-100);
-  --wb-canvas-dot: var(--ui-color-neutral-300);
-  --wb-selection: var(--ui-primary);
-  --wb-selection-subtle: color-mix(in oklab, var(--ui-primary) 10%, var(--ui-bg));
-  --wb-selection-text: var(--ui-color-primary-700);
-  --wb-hover-outline: color-mix(in oklab, var(--ui-primary) 60%, transparent);
-  --wb-comment: var(--ui-annotation);
-  --wb-comment-subtle: color-mix(in oklab, var(--ui-annotation) 10%, var(--ui-bg));
-  --wb-pin: var(--ui-color-annotation-600);
-  --wb-pin-text: #fff;
-  --wb-pin-resolved: var(--ui-color-neutral-500);
-  --wb-pin-stale: var(--ui-warning);
-  --wb-pin-invalid: var(--ui-error);
-  --wb-frame: #fff;
-  --wb-shadow-frame: 0 0 0 1px oklch(16% 0.006 286 / 0.08), 0 2px 6px oklch(16% 0.006 286 / 0.06), 0 12px 32px -8px oklch(16% 0.006 286 / 0.12);
-  --wb-shadow-pin: 0 0 0 2px var(--ui-bg), 0 1px 3px oklch(0% 0 0 / 0.28);
-  --wb-shadow-overlay: 0 1px 2px oklch(16% 0.006 286 / 0.06), 0 8px 24px -4px oklch(16% 0.006 286 / 0.14);
-}
-
-/* ---------- Nuxt UI semantic variables: dark ---------- */
-.dark {
-  --ui-primary: var(--ui-color-primary-400);
-  --ui-annotation: var(--ui-color-annotation-400);
-  --ui-success: var(--ui-color-success-400);
-  --ui-info: var(--ui-color-info-400);
-  --ui-warning: var(--ui-color-warning-400);
-  --ui-error: var(--ui-color-error-400);
-
-  --ui-text-dimmed: var(--color-graphite-450);
-  --ui-text-muted: var(--ui-color-neutral-400);
-  --ui-text-toned: var(--ui-color-neutral-300);
-  --ui-text: var(--ui-color-neutral-200);
-  --ui-text-highlighted: #fff;
-  --ui-text-inverted: var(--ui-color-neutral-900);
-
-  --ui-bg: var(--ui-color-neutral-900);
-  --ui-bg-muted: var(--color-graphite-850);
-  --ui-bg-elevated: var(--ui-color-neutral-800);
-  --ui-bg-accented: var(--color-graphite-750);
-  --ui-bg-inverted: #fff;
-  --ui-border: var(--color-graphite-750);
-  --ui-border-muted: var(--ui-color-neutral-800);
-  --ui-border-accented: var(--ui-color-neutral-500);
-  --ui-border-inverted: #fff;
-
-  --wb-canvas: var(--ui-color-neutral-950);
-  --wb-canvas-dot: var(--ui-color-neutral-800);
-  --wb-selection-subtle: color-mix(in oklab, var(--ui-primary) 14%, var(--ui-bg));
-  --wb-selection-text: var(--ui-color-primary-300);
-  --wb-comment-subtle: color-mix(in oklab, var(--ui-annotation) 14%, var(--ui-bg));
-  --wb-pin: var(--ui-color-annotation-400);
-  --wb-pin-text: var(--ui-color-neutral-950);
-  --wb-pin-resolved: var(--ui-color-neutral-500);
-  --wb-frame: var(--ui-color-neutral-900);
-  --wb-shadow-frame: 0 0 0 1px var(--color-graphite-750), 0 16px 40px -8px oklch(0% 0 0 / 0.55);
-  --wb-shadow-overlay: 0 0 0 1px var(--color-graphite-750), 0 12px 32px -4px oklch(0% 0 0 / 0.6);
-}
-
-@media (pointer: coarse) {
-  :root { --wb-target: 2.75rem; } /* 44px touch targets */
-}
-
-/* zh-TW: CJK needs more leading and no negative tracking */
-:root:lang(zh-TW) {
-  --text-xs--line-height: 1.125rem;
-  --text-sm--line-height: 1.375rem;
-  --text-body--line-height: 1.5rem;
-  --text-title--line-height: 1.5rem;
-  --text-headline--line-height: 1.75rem;
-  letter-spacing: 0;
-}
-
-/* Tailwind utilities for Workbench tokens */
-@theme inline {
-  --color-annotation: var(--ui-annotation);
-  --color-selection: var(--wb-selection);
-  --color-selection-subtle: var(--wb-selection-subtle);
-  --color-selection-text: var(--wb-selection-text);
-  --color-comment: var(--wb-comment);
-  --color-comment-subtle: var(--wb-comment-subtle);
-  --color-pin: var(--wb-pin);
-  --color-pin-text: var(--wb-pin-text);
-  --color-pin-resolved: var(--wb-pin-resolved);
-  --color-canvas: var(--wb-canvas);
-  --color-canvas-dot: var(--wb-canvas-dot);
-  --color-frame: var(--wb-frame);
-}
-
-/* Focus for focusable chrome Nuxt UI does not style (pins, overlay chips, tree rows) */
-:where(a, button, [role="tab"], [role="treeitem"], [tabindex]):focus-visible {
-  outline: 2px solid var(--ui-primary);
-  outline-offset: 2px;
-}
-
-/* Reduced motion: shorten every transition. Never reset `transform` globally, because the
-   canvas frame scale and the overlay pin positions are transforms. Components drop their own
-   translate/scale reveal keyframes under this query instead. */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { transition-duration: 80ms !important; animation-duration: 80ms !important; }
-}
-```
-
-The Nuxt UI colors plugin injects `--ui-color-<name>-<step>` from the Tailwind `--color-<name>-*` ramps registered above. Overriding `--ui-primary` and the other `--ui-<color>` variables in `:root` and `.dark` is the documented way to pick the shade per mode. The Workbench chrome color mode comes from `@nuxtjs/color-mode` (system / light / dark in the preferences menu). The Preview iframe's Workspace theme is a separate render-context key and never reads `.dark`.
+- **Tablet portrait** uses the 56px icon rail, like landscape, instead of a slideover sidebar.
+- **Comment filter** lives in the Comments tab as three toggle chips, not in the canvas tool pill.
+- **Inspect tool** is named Select (`V`) in the UI.
+- **Clusters** merge pins within 24px (not 20px) and open a menu of threads rather than expanding in place.
+- **Canvas gutter** is 32px (desktop) and 30px (tablet, phone), not 24px and 12px, so corner pins are never clipped.
+- **Phones** land on Reviews from a cold start at `/`, and the View tabs are Spec / Comments / View.
+- **Live session status** uses a neutral dot. Green stays reserved for success (The Green Means Done Rule).
+- **Resolving an `open` thread** is possible as Answered, Won't fix, Duplicate or Obsolete (the accepted direct-resolve decision); `verified` still requires a `ready-for-review` submission.

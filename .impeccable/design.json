@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-05T08:45:06.527771+00:00",
+  "generatedAt": "2026-10-06T03:27:30.189244+00:00",
   "title": "Design System: UIUX Workbench",
   "extensions": {
     "colorMeta": {
@@ -329,26 +329,22 @@
       {
         "name": "md",
         "value": "768px",
-        "purpose": "tablet portrait floor; below is mobile"
+        "purpose": "tablet portrait: 56px icon rail, right panel as slideover; below it phones get the bottom navigation"
       },
       {
         "name": "lg",
         "value": "1024px",
-        "purpose": "tablet landscape"
+        "purpose": "tablet landscape: icon rail, right panel as slideover"
       },
       {
         "name": "xl",
         "value": "1280px",
-        "purpose": "desktop: full shell"
-      },
-      {
-        "name": "2xl",
-        "value": "1536px"
+        "purpose": "desktop: full shell with resizable sidebar and right panel"
       },
       {
         "name": "pointer-coarse",
         "value": "(pointer: coarse)",
-        "purpose": "44px targets via --wb-target"
+        "purpose": "44px targets via --wb-target, 16px inputs, threads in a bottom drawer"
       }
     ]
   },
@@ -470,6 +466,11 @@
       {
         "name": "The No-Opacity-Hover Rule",
         "body": "Hover and active states move one ramp step (light: darker; dark: lighter). They never lower opacity on a filled control, which would drop text contrast below AA.",
+        "section": "colors"
+      },
+      {
+        "name": "The Dimmed Ground Rule",
+        "body": "Dimmed text (`graphite-500` / `graphite-450`) sits only on the panel or the muted fill, where it clears 4.5:1. On elevated, selected or tinted surfaces (a selected row, a soft chip) metadata uses muted text instead.",
         "section": "colors"
       },
       {
