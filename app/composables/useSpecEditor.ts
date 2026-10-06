@@ -18,6 +18,7 @@ import { useUiuxClient } from './useUiuxClient'
 import { useWorkbenchFeedback } from './useWorkbenchFeedback'
 import type { Workbench } from './useWorkbench'
 import type { ViewRead } from './workbench-types'
+import { focusFirstProblem } from '../utils/focus-problem'
 
 /** The draft of the one Spec section being edited. */
 export type SpecDraft =
@@ -114,7 +115,10 @@ export function useSpecEditor(workbench: Workbench) {
 		const from = base.value
 		if (!value || !from || saving.value || conflict.value || heldByOther.value) return
 		fieldErrors.value = validate(value)
-		if (Object.keys(fieldErrors.value).length) return
+		if (Object.keys(fieldErrors.value).length) {
+			void focusFirstProblem('[data-spec-editor]')
+			return
+		}
 		saving.value = true
 		invalid.value = undefined
 		locked.value = undefined
@@ -145,6 +149,7 @@ export function useSpecEditor(workbench: Workbench) {
 			else {
 				feedback.error(cause, t('spec.saveFailed'))
 			}
+			void focusFirstProblem('[data-spec-editor]')
 		}
 		finally {
 			saving.value = false

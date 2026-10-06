@@ -18,7 +18,8 @@ import { useWorkbench } from './useWorkbench'
 import { usePinPlacements, type PinPlacement, type PinThreadInput } from './usePinPlacements'
 import { canvasOrder, cycleThread, pinStatuses, type PinStatus } from '../utils/pin-layout'
 import type { CommentTarget } from './usePreviewSession'
-import type { ReviewSummary } from './workbench-types'
+import type { ReviewSummary, ViewRead } from './workbench-types'
+import { submissionBody, type ReviewSubmissionDraft } from '../utils/review-submission'
 
 /**
  * Canvas comments (brief c; roadmap R6 and R7a): the comment threads of the open View, their
@@ -426,6 +427,21 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		return ok
 	}
 
+	/** A human submission to `ready-for-review` (secondary, desktop-first): domains plus Evidence refs. */
+	async function submit(threadId: string, draft: ReviewSubmissionDraft): Promise<boolean> {
+		const item = threadById.value.get(threadId)
+		const viewId = item?.anchor.viewId
+		if (!item || !viewId || !canComment.value || item.status !== 'open') return false
+		lastError.value = undefined
+		const ok = await mutate(threadId, 'submit', async (revision) => {
+			const view = await uiux.readResource<ViewRead>('view', viewId)
+			if (!view) throw new Error(t('inbox.errors.viewMissing'))
+			return await post(`/api/reviews/${encodeURIComponent(threadId)}/ready`, submissionBody(draft, view, revision))
+		}, t('submit.failed'))
+		if (ok) announce(t('submit.announce'))
+		return ok
+	}
+
 	async function reopen(threadId: string, reason?: string): Promise<boolean> {
 		lastError.value = undefined
 		const ok = await mutate(threadId, 'reopen', revision => post(`/api/reviews/${encodeURIComponent(threadId)}/reopen`, { expectedRevision: revision, ...(reason?.trim() ? { reason: reason.trim() } : {}) }), t('comments.errors.reopenFailed'))
@@ -735,6 +751,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		reply,
 		resolve,
 		reopen,
+		submit,
 		reanchor,
 		moveHint,
 		promote,

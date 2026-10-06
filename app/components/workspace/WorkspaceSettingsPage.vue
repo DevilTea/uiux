@@ -26,6 +26,7 @@ import UnsavedLeaveModal from './UnsavedLeaveModal.vue'
 import SettingsGeneralSection from './SettingsGeneralSection.vue'
 import SettingsRegistrySection from './SettingsRegistrySection.vue'
 import SettingsAdaptersSection, { type AdapterResolution } from './SettingsAdaptersSection.vue'
+import { focusFirstProblem } from '../../utils/focus-problem'
 
 /**
  * Workspace settings as a full page (brief g): a section index, then one form column with
@@ -122,14 +123,15 @@ async function save(id: SettingsSectionId): Promise<void> {
 		if (details.statusCode === 409 || details.status === 'conflict') {
 			section.conflict = true
 			await workbench.refreshAll()
+			void focusFirstProblem(`#settings-${id}`)
 		}
 		else if (isLockedError(details)) {
 			lockRefusal.value = { lock: details.lock }
+			void focusFirstProblem('main')
 		}
 		else {
 			section.error = details
-			await nextTick()
-			document.querySelector<HTMLElement>(`#settings-${id} [role="alert"]`)?.focus()
+			void focusFirstProblem(`#settings-${id}`)
 		}
 	}
 	finally {

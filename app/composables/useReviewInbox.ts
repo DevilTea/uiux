@@ -17,6 +17,7 @@ import {
 	type SeenMarks,
 } from '../utils/review-inbox'
 import { parseThread, viewLocation } from '../utils/workbench-routes'
+import { submissionBody, type ReviewSubmissionDraft } from '../utils/review-submission'
 import { useAccess } from './useAccess'
 import { useUiuxClient } from './useUiuxClient'
 import { useWorkbench } from './useWorkbench'
@@ -376,6 +377,20 @@ function createReviewInbox() {
 		return ok
 	}
 
+	/** A human submission to `ready-for-review` (secondary, desktop-first): domains plus Evidence refs. */
+	async function submit(threadId: string, draft: ReviewSubmissionDraft): Promise<boolean> {
+		const item = threadById.value.get(threadId)
+		const viewId = item?.anchor?.viewId
+		if (!item || !viewId || !canReply.value || item.status !== 'open') return false
+		const ok = await mutate(threadId, 'submit', async (revision) => {
+			const view = await uiux.readResource<ViewRead>('view', viewId)
+			if (!view) throw new Error(t('inbox.errors.viewMissing'))
+			return await post(path(threadId, 'ready'), submissionBody(draft, view, revision))
+		}, t('submit.failed'))
+		if (ok) announce(t('submit.announce'))
+		return ok
+	}
+
 	async function promote(threadId: string, form: Readonly<{ question: string; summary: string; rationale: string }>): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		const viewId = item?.anchor?.viewId
@@ -475,6 +490,7 @@ function createReviewInbox() {
 		reply,
 		resolve,
 		reopen,
+		submit,
 		promote,
 		primaryResolution,
 		canvasLocation,

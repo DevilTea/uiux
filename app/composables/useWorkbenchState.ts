@@ -11,7 +11,6 @@ import type {
 	FlowSummary,
 	LocaleSummary,
 	ReviewSummary,
-	SpecTab,
 	ViewRead,
 	ViewSummary,
 	WorkspaceRead,
@@ -30,11 +29,18 @@ export function createWorkbenchState() {
 	const isReadOnly = uiux.isReadOnly
 	// Role-aware controls (accepted identity decision 12). The server remains the authority.
 	const access = useAccess()
-	const authorReadOnly = computed(() => isReadOnly.value || !access.canAuthor.value)
-	const reviewReadOnly = computed(() => isReadOnly.value || !access.canReview.value)
-
 	const publicationInfo = shallowRef<PublicationInfo>()
 	const workspace = ref<WorkspaceRead>()
+	/**
+	 * The server refuses every canonical write until an older Workspace schema is migrated
+	 * (`uiux migrate`, an explicit operator act), so authoring and review controls step back too.
+	 */
+	const writeBlocked = computed(() => {
+		const state = workspace.value?.inspection?.state
+		return state === 'migration_required' || state === 'unsupported'
+	})
+	const authorReadOnly = computed(() => isReadOnly.value || writeBlocked.value || !access.canAuthor.value)
+	const reviewReadOnly = computed(() => isReadOnly.value || writeBlocked.value || !access.canReview.value)
 	const views = ref<readonly ViewSummary[]>([])
 	const discoveredLocales = ref<readonly string[]>([])
 	const localeRevisions = ref<Readonly<Record<string, string>>>({})
@@ -52,7 +58,6 @@ export function createWorkbenchState() {
 	const selectedThemeId = ref('')
 
 	const selectedWidgetId = ref('root')
-	const activeSpecTab = ref<SpecTab>('spec')
 
 	const assetCount = ref(0)
 	const flows = ref<readonly FlowSummary[]>([])
@@ -231,6 +236,7 @@ export function createWorkbenchState() {
 		isReadOnly,
 		authorReadOnly,
 		reviewReadOnly,
+		writeBlocked,
 		publicationInfo,
 		workspace,
 		views,
@@ -246,7 +252,6 @@ export function createWorkbenchState() {
 		selectedViewportId,
 		selectedThemeId,
 		selectedWidgetId,
-		activeSpecTab,
 		assetCount,
 		flows,
 		reviews,

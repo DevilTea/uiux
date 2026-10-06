@@ -1,4 +1,5 @@
 import { computed, shallowRef, triggerRef } from 'vue'
+import { useI18n } from '#imports'
 import type { FormalEvidenceRecord } from '../../src/domain/evidence/schema'
 import type { HandoffManifest, HandoffReadiness, HandoffReadinessAssessment, HandoffRoot } from '../../src/domain/handoff/schema'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
@@ -118,7 +119,8 @@ async function limited<T>(task: () => Promise<T>): Promise<T> {
 export function useReadiness() {
 	const uiux = useUiuxClient()
 	const workbench = useWorkbench()
-	const { views, reviews, workspace, discoveredLocales, localeRevisions, flows, isReadOnly } = workbench
+	const { t } = useI18n()
+	const { views, reviews, workspace, discoveredLocales, localeRevisions, flows, isReadOnly, writeBlocked } = workbench
 
 	/** Revisions every assessment depends on; any change makes cached entries stale. */
 	const signature = computed(() => [
@@ -146,7 +148,7 @@ export function useReadiness() {
 				evidenceError.value = undefined
 			})
 			.catch((cause: unknown) => {
-				evidenceError.value = describeFetchError(cause, 'Could not load Evidence.')
+				evidenceError.value = describeFetchError(cause, t('evidence.loadFailed'))
 			})
 			.finally(() => {
 				evidenceLoaded.value = true
@@ -197,10 +199,10 @@ export function useReadiness() {
 			const response = await limited(() => uiux.assessHandoff<AssessResponse>(roots))
 			if (response.status === 'ok' && response.readiness)
 				return { status: 'ok', signature: expected, readiness: response.readiness, ...(response.assessment ? { assessment: response.assessment } : {}) }
-			return { status: 'failed', signature: expected, error: describeFetchError({ data: response }, 'Could not check readiness.') }
+			return { status: 'failed', signature: expected, error: describeFetchError({ data: response }, t('handoff.assessFailed')) }
 		}
 		catch (cause) {
-			return { status: 'failed', signature: expected, error: describeFetchError(cause, 'Could not check readiness.') }
+			return { status: 'failed', signature: expected, error: describeFetchError(cause, t('handoff.assessFailed')) }
 		}
 	}
 
@@ -211,9 +213,23 @@ export function useReadiness() {
 		const cached = assessments.value.get(key)
 		if (cached && cached.signature === expected && !options.force && cached.status !== 'failed') return cached
 		if (!roots.length) {
-			const empty: AssessmentEntry = { status: 'failed', signature: expected, error: { message: 'Select at least one root.', diagnostics: [] } }
+			const empty: AssessmentEntry = { status: 'failed', signature: expected, error: { message: t('handoff.selectRoot'), diagnostics: [] } }
 			setAssessment(key, empty)
 			return empty
+		}
+		// Until the Workspace is read, its schema state is unknown: wait (the signature changes once it
+		// loads, so callers ask again) rather than risk a request an older schema would refuse.
+		if (!workspace.value && !isReadOnly.value) {
+			const pending: AssessmentEntry = { status: 'loading', signature: expected }
+			setAssessment(key, pending)
+			return pending
+		}
+		// The server assesses under the Workspace write lock, which an older schema refuses: say why
+		// instead of sending a request that can only fail.
+		if (writeBlocked.value) {
+			const blocked: AssessmentEntry = { status: 'failed', signature: expected, error: { message: t('handoff.migrationBlocked'), diagnostics: [] } }
+			setAssessment(key, blocked)
+			return blocked
 		}
 		setAssessment(key, { ...(cached ?? {}), status: 'loading', signature: expected })
 		const entry = await fetchAssessment(roots, expected)
@@ -267,10 +283,10 @@ export function useReadiness() {
 			const result = response.results?.[0]
 			if (response.status === 'ok' && result?.status === 'captured')
 				return { status: 'captured', ...(result.evidenceDigest ? { evidenceDigest: result.evidenceDigest } : {}) }
-			return { status: 'failed', error: describeFetchError({ data: response }, 'Capture failed.') }
+			return { status: 'failed', error: describeFetchError({ data: response }, t('evidence.result.failed')) }
 		}
 		catch (cause) {
-			return { status: 'failed', error: describeFetchError(cause, 'Capture failed.') }
+			return { status: 'failed', error: describeFetchError(cause, t('evidence.result.failed')) }
 		}
 	}
 
@@ -278,10 +294,10 @@ export function useReadiness() {
 		try {
 			const response = await $fetch<ExportOutcome & { diagnostics?: unknown }>('/api/handoff/export', { method: 'POST', body: { roots } })
 			if (response.status === 'exported') return response
-			return { status: 'failed', error: describeFetchError({ data: response }, 'Could not export the Handoff.') }
+			return { status: 'failed', error: describeFetchError({ data: response }, t('handoff.exportFailed')) }
 		}
 		catch (cause) {
-			return { status: 'failed', error: describeFetchError(cause, 'Could not export the Handoff.') }
+			return { status: 'failed', error: describeFetchError(cause, t('handoff.exportFailed')) }
 		}
 	}
 

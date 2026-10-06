@@ -4,6 +4,7 @@ import { useI18n } from '#imports'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { blobToBase64, stripExtension } from '../../utils/workspace-authoring'
 import AuthoringErrorAlert from './AuthoringErrorAlert.vue'
+import { focusFirstProblem } from '../../utils/focus-problem'
 
 /** Upload an Asset (brief g): one file, a name, and the filename and media type it is stored with. */
 const open = defineModel<boolean>('open', { required: true })
@@ -45,6 +46,7 @@ const errors = computed(() => touched.value
 
 async function upload(): Promise<void> {
 	touched.value = true
+	if (!file.value || errors.value.name || errors.value.filename) void focusFirstProblem('[role="dialog"]')
 	if (!file.value || errors.value.name || errors.value.filename || uploading.value) return
 	uploading.value = true
 	error.value = undefined
@@ -64,6 +66,7 @@ async function upload(): Promise<void> {
 	}
 	catch (cause) {
 		error.value = describeFetchError(cause, t('assets.createFailed'))
+		void focusFirstProblem('[role="dialog"]')
 	}
 	finally {
 		uploading.value = false

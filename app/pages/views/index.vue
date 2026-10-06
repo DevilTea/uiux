@@ -4,6 +4,7 @@ import { navigateTo, useI18n } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { viewLocation } from '../../utils/workbench-routes'
+import { useDelayedFlag } from '../../composables/useDelayedFlag'
 
 /**
  * The View index. On tablet and desktop it opens the most recent View (the sidebar keeps the
@@ -13,6 +14,7 @@ const { t } = useI18n()
 const workbench = useWorkbench()
 const { views, loading } = workbench
 const isTablet = useMediaQuery(WORKBENCH_BREAKPOINTS.tablet)
+const showSkeleton = useDelayedFlag(() => loading.value && !views.value.length)
 
 watch([views, isTablet, loading], () => {
 	if (!isTablet.value || loading.value || !views.value.length) return
@@ -39,11 +41,38 @@ watch([views, isTablet, loading], () => {
             {{ t('nav.views') }}
           </h1>
         </div>
+        <ul
+          v-if="loading && !views.length"
+          class="divide-y divide-default border-y border-default"
+          aria-busy="true"
+          :aria-label="t('workbench.views.listLabel')"
+        >
+          <template v-if="showSkeleton">
+            <li
+              v-for="index in 8"
+              :key="index"
+              class="flex min-h-11 items-center gap-3 px-4 py-2"
+            >
+              <USkeleton class="size-4 shrink-0" />
+              <span class="flex-1 space-y-1.5">
+                <USkeleton
+                  class="h-3.5"
+                  :style="{ width: `${40 + (index * 23) % 45}%` }"
+                />
+                <USkeleton class="h-3 w-20" />
+              </span>
+            </li>
+          </template>
+        </ul>
         <UEmpty
-          v-if="!views.length && !loading"
+          v-else-if="!views.length"
           icon="i-lucide-app-window"
           :title="t('workbench.views.emptyTitle')"
           variant="naked"
+          :actions="[
+            { label: t('common.refresh'), icon: 'i-lucide-refresh-cw', onClick: () => { void workbench.refreshAll() } },
+            ...(workbench.isReadOnly.value ? [] : [{ label: t('firstRun.showSteps'), icon: 'i-lucide-list-checks', color: 'neutral' as const, variant: 'ghost' as const, to: '/' }]),
+          ]"
         >
           <template #description>
             <i18n-t

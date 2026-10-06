@@ -9,6 +9,9 @@ export default defineNuxtConfig({
 	app: {
 		baseURL: publicationBase,
 		head: {
+			// Edge-to-edge on notched phones (safe areas are padded by the shell), and the layout
+			// viewport shrinks above the virtual keyboard so sheets and composers stay visible.
+			viewport: 'width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content',
 			link: [{
 				rel: 'icon',
 				type: 'image/svg+xml',
@@ -52,7 +55,10 @@ export default defineNuxtConfig({
 					icons: ['lucide:loader-circle'],
 				},
 			}
-		: {},
+		: {
+				// Icons the server-unreachable state needs while the icon API is down with the server.
+				clientBundle: { icons: ['lucide:unplug', 'lucide:refresh-cw', 'lucide:loader-circle', 'lucide:circle-alert'] },
+			},
 	css: [
 		'@fontsource-variable/inter/wght.css',
 		'@fontsource/jetbrains-mono/latin-400.css',

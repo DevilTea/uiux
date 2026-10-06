@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n, useToast } from '#imports'
 import type { BreadcrumbItem, TableColumn } from '@nuxt/ui'
 import { useWorkbench } from '../../composables/useWorkbench'
-import { useMediaQuery } from '../../composables/useMediaQuery'
+import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { useWidgetInspection, type WidgetThreadRow } from '../../composables/useWidgetInspection'
 import { actorInitials, formatStateValue, relativeTime, truncateMiddle, widgetTypeIcon } from '../../utils/widget-inspection'
 
@@ -24,7 +24,7 @@ const workbench = useWorkbench()
 const { selectedView, selectedWidgetId, reviewReadOnly, workspace } = workbench
 const inspection = useWidgetInspection(workbench)
 /** Phones read, reply and resolve; they never create canvas comments (decided). */
-const isPhone = useMediaQuery('(max-width: 767.98px)')
+const isPhone = useMediaQuery(WORKBENCH_BREAKPOINTS.handset)
 const {
 	hasSelection, node, missing, irNode, ancestry, label, variantName, variantInvalid, variantFaults,
 	overrides, findings, geometry, visibility, threads,
@@ -110,7 +110,7 @@ async function copy(value: string, labelText: string): Promise<void> {
 		toast.add({ title: labelText, color: 'neutral', icon: 'i-lucide-copy' })
 	}
 	catch {
-		toast.add({ title: t('inspect.copyFailed'), color: 'error', icon: 'i-lucide-circle-alert' })
+		toast.add({ title: t('inspect.copyFailed'), color: 'error', icon: 'i-lucide-circle-alert', duration: 0 })
 	}
 }
 

@@ -4,6 +4,7 @@ import { useI18n } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
+import { focusFirstProblem } from '../../utils/focus-problem'
 
 /** `create_flow` from the Workbench: a name and the View of the entry step. */
 const open = defineModel<boolean>('open', { default: false })
@@ -62,6 +63,7 @@ async function submit(): Promise<void> {
 	}
 	catch (cause) {
 		failure.value = describeFetchError(cause, t('flows.create.failed'))
+		void focusFirstProblem('[role="dialog"]')
 	}
 	finally {
 		creating.value = false

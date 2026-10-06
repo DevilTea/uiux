@@ -8,6 +8,11 @@ import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { copyText } from '../../utils/copy-text'
 import type { InboxThread } from '../../utils/review-inbox'
 import ReviewTimeline from './ReviewTimeline.vue'
+import LockedSaveAlert from './LockedSaveAlert.vue'
+import SubmitForReviewModal from './SubmitForReviewModal.vue'
+import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
+import { isLockedError, type FetchErrorDetails } from '../../utils/fetch-error'
+import type { ReviewSubmissionDraft } from '../../utils/review-submission'
 
 /**
  * The selected thread (brief d): a reading column with the full timeline, then reply and the
@@ -138,6 +143,15 @@ function openPromote(): void {
 	promoteForm.rationale = ''
 	promoteOpen.value = true
 }
+/** A rejected promotion shows its error inside the dialog (not behind it) and takes focus there. */
+const promoteFailed = ref(false)
+watch(promoteOpen, (value) => { if (value) promoteFailed.value = false })
+async function focusPromoteError(): Promise<void> {
+	promoteFailed.value = true
+	await nextTick()
+	document.querySelector<HTMLElement>('[data-promote-error]')?.focus()
+}
+
 async function submitPromote(): Promise<void> {
 	const id = thread.value?.id
 	if (!id || !promoteForm.question.trim() || !promoteForm.summary.trim()) return
@@ -145,6 +159,34 @@ async function submitPromote(): Promise<void> {
 		promoteOpen.value = false
 		feedback.success(t('reviews.feedback.promoted'))
 	}
+	else await focusPromoteError()
+}
+
+// ---------------------------------------------------------------------------------------------
+// Submit for review… (human submission; secondary, desktop-first)
+// ---------------------------------------------------------------------------------------------
+
+const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
+const canSubmit = computed(() => !!thread.value && thread.value.status === 'open' && inbox.canReply.value && viewExists.value && isDesktop.value && !compact.value)
+const submitOpen = ref(false)
+const submitError = ref<FetchErrorDetails>()
+const submitConflict = ref(false)
+watch(submitOpen, (value) => {
+	if (value) {
+		submitError.value = undefined
+		submitConflict.value = false
+	}
+})
+async function submitForReview(draft: ReviewSubmissionDraft): Promise<boolean> {
+	const id = thread.value?.id
+	if (!id) return false
+	const ok = await inbox.submit(id, draft)
+	if (ok) feedback.success(t('submit.announce'))
+	else {
+		submitConflict.value = inbox.conflict.value === id
+		submitError.value = inbox.lastError.value?.threadId === id ? inbox.lastError.value.error : undefined
+	}
+	return ok
 }
 
 const overflow = computed<DropdownMenuItem[][]>(() => {
@@ -152,6 +194,7 @@ const overflow = computed<DropdownMenuItem[][]>(() => {
 	if (!current) return []
 	return [[
 		{ label: t('thread.copyLink'), icon: 'i-lucide-link', onSelect: () => { void copy(inbox.threadLink(current.id), t('comments.copiedLink')) } },
+		...(canSubmit.value ? [{ label: t('thread.submit'), icon: 'i-lucide-eye', onSelect: () => { submitOpen.value = true } }] : []),
 		...(inbox.canReply.value && viewExists.value && !compact.value ? [{ label: t('inbox.reanchorOnCanvas'), icon: 'i-lucide-crosshair', onSelect: () => inbox.reanchorOnCanvas(current) }] : []),
 		...(inbox.canPromote.value && viewExists.value && !compact.value ? [{ label: t('thread.promote'), icon: 'i-lucide-signpost', onSelect: openPromote }] : []),
 		{ label: t('comments.copyThreadId'), icon: 'i-lucide-copy', onSelect: () => { void copy(current.id, t('comments.copiedId')) } },
@@ -320,8 +363,13 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           :ui="{ title: 'text-sm', description: 'text-xs' }"
           data-review-conflict
         />
+        <LockedSaveAlert
+          v-if="error && isLockedError(error)"
+          :lock="error.lock"
+          @dismiss="inbox.lastError.value = undefined"
+        />
         <UAlert
-          v-if="error"
+          v-else-if="error"
           color="error"
           variant="subtle"
           icon="i-lucide-circle-alert"
@@ -440,13 +488,24 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           <UKbd
             value="meta"
             size="sm"
+            class="pointer-coarse:hidden"
           />
           <UKbd
             value="enter"
             size="sm"
-            class="-ms-1"
+            class="-ms-1 pointer-coarse:hidden"
           />
         </UButton>
+        <UButton
+          v-if="canSubmit"
+          color="neutral"
+          variant="ghost"
+          size="sm"
+          icon="i-lucide-eye"
+          :label="t('thread.submit')"
+          data-review-submit
+          @click="submitOpen = true"
+        />
         <UButton
           v-if="thread.status !== 'open'"
           color="neutral"
@@ -514,6 +573,16 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
       {{ t('inbox.readOnly') }}
     </p>
 
+    <SubmitForReviewModal
+      v-if="canSubmit && thread.anchor"
+      v-model:open="submitOpen"
+      :view-id="thread.anchor.viewId"
+      :submit="submitForReview"
+      :busy="inbox.busy.value === 'submit'"
+      :error="submitError"
+      :conflict="submitConflict"
+    />
+
     <UModal
       v-model:open="promoteOpen"
       :title="t('reviews.promote.title')"
@@ -524,6 +593,17 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           class="grid gap-3"
           @submit.prevent="submitPromote"
         >
+          <UAlert
+            v-if="promoteFailed && (error || conflict)"
+            :color="conflict ? 'warning' : 'error'"
+            variant="subtle"
+            :icon="conflict ? 'i-lucide-refresh-cw' : 'i-lucide-circle-alert'"
+            role="alert"
+            tabindex="-1"
+            :title="conflict ? t('comments.conflict') : error?.message"
+            :description="conflict ? t('comments.conflictHint') : undefined"
+            data-promote-error
+          />
           <UFormField
             :label="t('reviews.promote.questionLabel')"
             required

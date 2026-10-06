@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { definePageMeta, navigateTo, useI18n, useRoute } from '#imports'
-import { useAccess } from '../composables/useAccess'
+import { mayHaveSession, useAccess } from '../composables/useAccess'
 
 /**
  * Sign-in (accepted identity decision 8 and 12). An invite arrives in the URL fragment, so it
@@ -21,6 +21,8 @@ const errorMessage = ref('')
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 const plainHttpOnLan = computed(() => typeof window !== 'undefined' && window.location.protocol === 'http:' && !LOOPBACK.has(window.location.hostname))
+/** A mid-session 401 sent the member here (the access plugin); say so once. */
+const expired = computed(() => route.query.expired === '1')
 const recoverCommand = 'uiux invite create --workspace <dir> --member <nick>'
 
 function nextPath(): string {
@@ -68,6 +70,9 @@ onMounted(async () => {
 	// A link pasted into an already open sign-in tab only changes the fragment.
 	window.addEventListener('hashchange', onHashChange)
 	if (await consumeFragment()) return
+	// Already signed in (another tab, a bookmark of /login)? Only ask when this browser held a
+	// session: an anonymous probe can only answer 401, which the browser logs as a failed load.
+	if (!mayHaveSession()) return
 	const existing = await access.load(true).catch(() => undefined)
 	if (existing) await navigateTo(nextPath(), { replace: true })
 })
@@ -91,6 +96,17 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
           {{ t('access.login.description') }}
         </p>
       </div>
+
+      <UAlert
+        v-if="expired && !errorMessage"
+        color="info"
+        variant="subtle"
+        icon="i-lucide-clock"
+        role="status"
+        :title="t('access.login.expiredTitle')"
+        :description="t('access.login.expiredDescription')"
+        data-login-expired
+      />
 
       <UAlert
         v-if="plainHttpOnLan"

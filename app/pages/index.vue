@@ -12,6 +12,7 @@ import WorkbenchPage from '../components/workbench/WorkbenchPage.vue'
 import OverviewChecks from '../components/readiness/OverviewChecks.vue'
 import OverviewActivity from '../components/readiness/OverviewActivity.vue'
 import HandoffExportModal from '../components/readiness/HandoffExportModal.vue'
+import WorkspaceFirstRun from '../components/workbench/WorkspaceFirstRun.vue'
 
 /**
  * Overview (brief f): one line of what needs attention, then every View with its readiness.
@@ -25,7 +26,7 @@ const readiness = useReadiness()
 const { views, reviews, loading, isReadOnly, authorReadOnly, readyReviewCount, openReviewCount, workspaceFindingCount } = workbench
 const atLeastTablet = useMediaQuery('(min-width: 768px)')
 
-type ReadinessState = 'ready' | 'blocked' | 'checking' | 'failed'
+type ReadinessState = 'ready' | 'blocked' | 'checking' | 'failed' | 'migration'
 type ViewRow = Readonly<{
 	key: string
 	name: string
@@ -43,7 +44,10 @@ const rows = computed<ViewRow[]>(() => views.value.map((view) => {
 	const threads = reviews.value.filter(review => review.summary.anchor?.viewId === view.key)
 	const entry = readiness.viewAssessment(view.key)
 	const blocking = splitReadinessDiagnostics(entry?.readiness?.blockingDiagnostics).blocking.length
-	const state: ReadinessState = !entry || entry.status === 'loading' && !entry.readiness
+	// An older Workspace schema cannot be assessed until it is migrated: say that, not "blocked".
+	const state: ReadinessState = workbench.writeBlocked.value
+		? 'migration'
+		: !entry || entry.status === 'loading' && !entry.readiness
 		? 'checking'
 		: entry.status === 'failed' ? 'failed' : entry.readiness?.implementationReady ? 'ready' : 'blocked'
 	return {
@@ -86,7 +90,7 @@ const filtered = computed(() => rows.value.filter((row) => {
 // ----- Table ----------------------------------------------------------------------------------
 
 const sorting = ref([{ id: 'name', desc: false }])
-const READINESS_ORDER: Record<ReadinessState, number> = { failed: 0, blocked: 1, checking: 2, ready: 3 }
+const READINESS_ORDER: Record<ReadinessState, number> = { failed: 0, blocked: 1, checking: 2, migration: 2, ready: 3 }
 const columns = computed<TableColumn<ViewRow>[]>(() => [
 	{ id: 'name', accessorKey: 'name', header: t('overview.columns.view') },
 	{ id: 'feature', accessorKey: 'feature', header: t('overview.columns.feature') },
@@ -146,12 +150,14 @@ const READINESS_BADGE: Record<ReadinessState, { color: 'success' | 'error' | 'ne
 	blocked: { color: 'error', icon: 'i-lucide-circle-x' },
 	failed: { color: 'error', icon: 'i-lucide-circle-alert' },
 	checking: { color: 'neutral', icon: 'i-lucide-loader-circle' },
+	migration: { color: 'neutral', icon: 'i-lucide-database' },
 }
 
 function readinessLabel(row: ViewRow): string {
 	if (row.readiness === 'ready') return t('ready.ready')
 	if (row.readiness === 'checking') return t('ready.checking')
 	if (row.readiness === 'failed') return t('overview.readinessFailed')
+	if (row.readiness === 'migration') return t('overview.readinessMigration')
 	return row.blocking ? t('ready.blockedBy', row.blocking) : t('ready.notReadyShort')
 }
 
@@ -185,6 +191,9 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
               <template v-if="loading">
                 <USkeleton class="h-8 w-80 max-w-full" />
               </template>
+              <template v-else-if="!views.length">
+                {{ t('firstRun.headline') }}
+              </template>
               <template v-else-if="attention.length">
                 <span class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                   <template
@@ -199,12 +208,12 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                     <ULink
                       v-if="part.to"
                       :to="part.to"
-                      class="text-highlighted hover:underline"
+                      class="text-highlighted hover:underline pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
                     >{{ part.text }}</ULink>
                     <button
                       v-else
                       type="button"
-                      class="text-highlighted hover:underline"
+                      class="text-highlighted hover:underline pointer-coarse:min-h-11"
                       :data-attention-part="part.key"
                       @click="part.onClick?.()"
                     >
@@ -237,8 +246,9 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
         </div>
       </div>
 
+      <WorkspaceFirstRun v-if="!loading && !views.length && !isReadOnly" />
       <UEmpty
-        v-if="!loading && !views.length"
+        v-else-if="!loading && !views.length"
         icon="i-lucide-app-window"
         variant="naked"
         class="py-16"
@@ -329,7 +339,7 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                   ><span class="sr-only">{{ t('overview.updated') }}</span></span>
                   <ULink
                     :to="viewLocation(row.original.key, { panel: 'readiness' })"
-                    class="font-medium text-highlighted hover:underline"
+                    class="font-medium text-highlighted hover:underline pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
                     @click.stop
                   >
                     {{ row.original.name }}

@@ -27,6 +27,7 @@ import AuthoringErrorAlert from './AuthoringErrorAlert.vue'
 import AuthoringSaveBar from './AuthoringSaveBar.vue'
 import NewLocaleModal from './NewLocaleModal.vue'
 import UnsavedLeaveModal from './UnsavedLeaveModal.vue'
+import { focusFirstProblem } from '../../utils/focus-problem'
 
 /**
  * Locales as a key × Locale table (brief g). Every key of every Locale is one row; the primary
@@ -304,18 +305,21 @@ async function save(state: LocaleState): Promise<void> {
 	state.error = undefined
 	state.locked = undefined
 	try {
-		await $fetch(`/api/locales/${encodeURIComponent(state.key)}`, {
+		const written = await $fetch<{ revision?: string }>(`/api/locales/${encodeURIComponent(state.key)}`, {
 			method: 'PUT',
 			body: { expectedRevision: state.revision, messages: state.draft },
 		})
-		const read = await readLocale(state.key)
+		// The write went through: the draft is now saved even if the follow-up read fails.
+		state.saved = { ...state.draft }
+		if (written?.revision) state.revision = written.revision
+		feedback.success(t('locales.saved', { locale: state.key }))
+		const read = await readLocale(state.key).catch(() => undefined)
 		if (read) {
 			state.revision = read.revision
 			state.saved = { ...read.resource }
 			state.draft = { ...read.resource }
 			state.diagnostics = read.diagnostics ?? []
 		}
-		feedback.success(t('locales.saved', { locale: state.key }))
 		void workbench.refreshAll()
 	}
 	catch (cause) {
@@ -331,6 +335,7 @@ async function save(state: LocaleState): Promise<void> {
 		else {
 			state.error = details
 		}
+		void focusFirstProblem('main')
 	}
 	finally {
 		state.saving = false
@@ -796,7 +801,7 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
                 variant="ghost"
                 size="sm"
                 icon="i-lucide-x"
-                class="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+                class="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
                 :aria-label="t('locales.removeKeyLabel', { key: row.original.key })"
                 @click="removeKey(row.original.key)"
               />

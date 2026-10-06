@@ -61,7 +61,16 @@ async function openWorkbench(path: string, setup: ChromeSetup): Promise<{ contex
 	return { context, page }
 }
 
+/** Phones open a View on its Spec (R13); the canvas lives behind the View tab. */
+async function showCanvasOnPhone(page: Page) {
+	if ((page.viewportSize()?.width ?? 1920) >= 768) return
+	const tab = page.locator('[data-view-phone] [role="tab"]').nth(2)
+	await tab.waitFor({ timeout: 15_000 })
+	if (await tab.getAttribute('aria-selected') !== 'true') await tab.click()
+}
+
 async function previewFrame(page: Page) {
+	if (new URL(page.url()).pathname.startsWith('/views/')) await showCanvasOnPhone(page)
 	const handle = await page.waitForSelector('iframe[src*="/preview"]', { timeout: 15_000 })
 	const frame = await handle.contentFrame()
 	if (!frame) throw new Error('Preview iframe has no content frame.')
@@ -430,6 +439,24 @@ async function waitForLivePreview(page: Page) {
 	await page.waitForSelector('[data-session-status][data-status="live"]', { timeout: 15_000 })
 	return frame
 }
+
+describe('Sign-in page (R12)', () => {
+	it('treats a signed-out visitor as expected: no session probe, no console error', async () => {
+		const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+		const page = await context.newPage()
+		const errors: string[] = []
+		const probes: string[] = []
+		page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()) })
+		page.on('request', (request) => { if (new URL(request.url()).pathname === '/api/session') probes.push(request.method()) })
+		try {
+			await page.goto(`${server.origin}/login`, { waitUntil: 'networkidle' })
+			await page.locator('main form').waitFor()
+			expect(errors).toEqual([])
+			expect(probes).toEqual([])
+		}
+		finally { await context.close() }
+	}, 60_000)
+})
 
 describe('View canvas core (R4)', () => {
 	for (const [windowWidth, windowHeight] of [[1920, 1080], [1024, 768], [390, 844]] as const) {

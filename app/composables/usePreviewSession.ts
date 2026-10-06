@@ -1,5 +1,6 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { useI18n } from '#imports'
+import { describeFetchError } from '../utils/fetch-error'
 import { WorkbenchPreviewProtocolBridge } from '../../src/preview/protocol/bridge'
 import { PreviewNavigationState, type PreviewNavigationTarget } from '../../src/preview/navigation-state'
 import { PreviewTargetingState } from '../../src/preview/targeting-state'
@@ -613,7 +614,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		}
 		catch (cause) {
 			handshakePhase.value = 'failed'
-			state.error.value = cause instanceof Error ? cause.message : t('workbench.errors.bridgeInitFailed')
+			state.error.value = describeFetchError(cause, t('workbench.errors.bridgeInitFailed')).message
 		}
 	}
 
