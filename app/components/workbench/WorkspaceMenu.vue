@@ -65,9 +65,10 @@ const items = computed<DropdownMenuItem[][]>(() => {
       :aria-label="t('workspaceMenu.label')"
       class="gap-2 px-1.5"
     >
+      <!-- The favicon mark keeps its near-black square; the hairline keeps it visible on dark chrome. -->
       <svg
         viewBox="0 0 32 32"
-        class="size-5 shrink-0"
+        class="size-5 shrink-0 rounded-[0.275rem] ring-1 ring-(--ui-border-accented)"
         aria-hidden="true"
       >
         <rect

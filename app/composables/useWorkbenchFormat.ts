@@ -37,6 +37,8 @@ export function useWorkbenchFormat() {
 			amount /= 1024
 			unit += 1
 		}
+		// Intl's short "byte" reads "137 byte" in every locale; bytes use the symbol like kB and MB.
+		if (unit === 0) return `${new Intl.NumberFormat(locale.value).format(amount)} B`
 		return new Intl.NumberFormat(locale.value, {
 			style: 'unit',
 			unit: units[unit],

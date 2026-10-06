@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref } from 'vue'
 import { useI18n } from '#imports'
 import type { DropdownMenuItem, TableColumn } from '@nuxt/ui'
 import type { AccessRole, MemberKind } from '../../src/application/access/principal'
@@ -187,7 +187,7 @@ const memberColumns = computed<TableColumn<MemberRow>[]>(() => [
 	{ accessorKey: 'role', header: t('access.members.columns.role') },
 	{ accessorKey: 'activeTokens', header: t('access.members.columns.tokens') },
 	{ accessorKey: 'activeSessions', header: t('access.members.columns.sessions') },
-	{ id: 'actions', header: '' },
+	{ id: 'actions', header: () => h('span', { class: 'sr-only' }, t('access.members.actionsColumn')) },
 ])
 const tokenColumns = computed<TableColumn<TokenRow>[]>(() => [
 	{ accessorKey: 'id', header: t('access.tokens.columns.token') },
@@ -195,16 +195,16 @@ const tokenColumns = computed<TableColumn<TokenRow>[]>(() => [
 	{ accessorKey: 'label', header: t('access.tokens.columns.label') },
 	{ accessorKey: 'expiresAt', header: t('access.tokens.columns.expires') },
 	{ accessorKey: 'lastUsedAt', header: t('access.tokens.columns.lastUsed') },
-	{ id: 'actions', header: '' },
+	{ id: 'actions', header: () => h('span', { class: 'sr-only' }, t('access.members.actionsColumn')) },
 ])
 const sessionColumns = computed<TableColumn<SessionRow>[]>(() => [
 	{ accessorKey: 'member', header: t('access.sessions.columns.member') },
 	{ accessorKey: 'userAgent', header: t('access.sessions.columns.device') },
 	{ accessorKey: 'lastSeenAt', header: t('access.sessions.columns.lastSeen') },
 	{ accessorKey: 'expiresAt', header: t('access.sessions.columns.expires') },
-	{ id: 'actions', header: '' },
+	{ id: 'actions', header: () => h('span', { class: 'sr-only' }, t('access.members.actionsColumn')) },
 ])
-const tableUi = { th: 'text-xs font-medium text-muted', td: 'text-sm' }
+const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 'text-sm' }
 </script>
 
 <template>
@@ -212,10 +212,10 @@ const tableUi = { th: 'text-xs font-medium text-muted', td: 'text-sm' }
     id="members"
     :title="t('access.members.title')"
   >
-    <div class="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col overflow-y-auto border-default lg:border-x">
+    <div class="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col overflow-y-auto">
       <header class="flex flex-wrap items-start justify-between gap-3 border-b border-default px-4 py-4">
         <div class="min-w-0 space-y-1">
-          <h1 class="text-lg font-semibold text-highlighted">
+          <h1 class="text-headline font-semibold text-highlighted">
             {{ t('access.members.title') }}
           </h1>
           <p class="text-sm text-muted">
@@ -367,6 +367,7 @@ const tableUi = { th: 'text-xs font-medium text-muted', td: 'text-sm' }
                 color="neutral"
                 variant="outline"
                 size="xs"
+                :aria-label="t('access.tokens.revokeLabel', { id: row.original.id })"
                 @click="revokeToken(row.original)"
               >
                 {{ t('access.tokens.revoke') }}
@@ -414,6 +415,7 @@ const tableUi = { th: 'text-xs font-medium text-muted', td: 'text-sm' }
                 color="neutral"
                 variant="outline"
                 size="xs"
+                :aria-label="t('access.sessions.revokeLabel', { member: row.original.member, device: row.original.userAgent || '—' })"
                 @click="endSession(row.original)"
               >
                 {{ t('access.sessions.revoke') }}

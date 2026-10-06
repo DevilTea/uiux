@@ -27,7 +27,12 @@ const isOpen = computed(() => !!composer.value || !!threadId.value)
 const reference = shallowRef<HTMLElement>()
 
 function findReference(): HTMLElement | undefined {
-	const query = (selector: string) => document.querySelector<HTMLElement>(selector) ?? undefined
+	// A pin that is mounted but not drawn (its anchor is `hidden`, e.g. the pin point is not
+	// visible) has no box; anchoring to it would park the bubble in the window's top-left corner.
+	const query = (selector: string) => {
+		const element = document.querySelector<HTMLElement>(selector)
+		return element && element.getClientRects().length > 0 ? element : undefined
+	}
 	if (composer.value) return query(`[data-pin-thread="${PENDING_PIN_ID}"]`) ?? query('[data-comment-fallback]')
 	const id = threadId.value
 	if (!id) return undefined

@@ -58,7 +58,7 @@ const selectedModel = computed({
             scope="global"
           >
             <template #tool>
-              <code class="rounded bg-elevated px-1 py-0.5 font-mono text-[0.9em] text-highlighted">create_view</code>
+              <code class="rounded bg-elevated px-1 py-0.5 font-mono text-xs text-highlighted">create_view</code>
             </template>
           </i18n-t>
         </template>

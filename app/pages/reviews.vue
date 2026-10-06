@@ -131,6 +131,15 @@ defineShortcuts(computed(() => shell.singleKeyShortcuts.value
 
 <template>
   <div class="flex min-h-0 min-w-0 flex-1">
+    <!-- First, so the thread panel stays the last pane and draws no stray end border. -->
+    <div
+      class="sr-only"
+      role="status"
+      aria-live="polite"
+    >
+      {{ inbox.announcement.value }}
+    </div>
+
     <UDashboardPanel
       id="reviews-list"
       :resizable="isDesktop"
@@ -246,13 +255,5 @@ defineShortcuts(computed(() => shell.singleKeyShortcuts.value
         />
       </template>
     </USlideover>
-
-    <div
-      class="sr-only"
-      role="status"
-      aria-live="polite"
-    >
-      {{ inbox.announcement.value }}
-    </div>
   </div>
 </template>

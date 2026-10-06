@@ -104,7 +104,8 @@ export default defineAppConfig({
 		},
 		dashboardSidebar: {
 			slots: {
-				// Inline from the tablet breakpoint; a slide-over menu below it (brief a).
+				// Inline on desktop, a 56px icon rail on tablets (landscape and portrait) whose expand opens the
+				// full menu as an overlay; hidden on phones, which use the bottom navigation (R13).
 				root: 'min-h-0 h-auto bg-default',
 				header: 'h-auto px-0',
 				body: 'gap-0 p-0 overflow-hidden',

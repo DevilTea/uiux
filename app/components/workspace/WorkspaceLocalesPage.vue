@@ -615,7 +615,7 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
             color="primary"
             size="sm"
             :aria-label="t('locales.filterLabel')"
-            :ui="{ root: 'w-full sm:w-auto', list: 'overflow-x-auto' }"
+            :ui="{ root: 'w-full sm:w-auto', list: 'overflow-x-auto', trigger: 'flex-none' }"
           />
         </div>
 
@@ -696,6 +696,8 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
       <ul
         v-else-if="isMobile"
         class="flex min-h-0 flex-1 flex-col divide-y divide-default overflow-y-auto border-t border-default pb-6"
+        tabindex="0"
+        :aria-label="t('locales.title')"
         data-locale-list
       >
         <li
@@ -753,6 +755,8 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
         :empty="t('locales.noMatches')"
         class="min-h-0 flex-1 border-t border-default"
         :ui="{ base: 'table-fixed', th: 'text-xs font-medium text-muted bg-default', td: 'text-sm py-0 px-0', tr: 'group' }"
+        tabindex="0"
+        :aria-label="t('locales.title')"
         data-locale-table
       >
         <template

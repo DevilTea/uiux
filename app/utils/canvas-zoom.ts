@@ -13,9 +13,13 @@ export const ZOOM_MENU_STEPS = Object.freeze([0.5, 0.75, 1, 1.5, 2])
 /** Fit may go below the smallest step (a 1920px View on a phone), never below this. */
 export const MIN_ZOOM = 0.05
 export const MAX_ZOOM = ZOOM_STEPS[ZOOM_STEPS.length - 1]!
-/** Fit-to-canvas gutter: 24px on desktop, 12px on tablet and mobile. */
-export const CANVAS_GUTTER_DESKTOP = 24
-export const CANVAS_GUTTER_COMPACT = 12
+/**
+ * Fit-to-canvas gutter: 32px on desktop, 30px on tablet and mobile. Both clear a 28px comment pin
+ * (plus its 2px ring) whose tip sits on the frame's top or right edge, so Fit never clips a pin
+ * on a Widget at the View's corner.
+ */
+export const CANVAS_GUTTER_DESKTOP = 32
+export const CANVAS_GUTTER_COMPACT = 30
 /** Wheel and pinch zoom sensitivity: one 100px wheel notch is about 18%. */
 const WHEEL_ZOOM_RATE = 0.0018
 /** A manual step must change the zoom noticeably: Fit at 66% steps to 75%, not to 67%. */

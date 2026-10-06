@@ -29,6 +29,14 @@ const { t, locale } = useI18n()
 const fmt = useWorkbenchFormat()
 const inbox = useReviewInbox()
 
+/** The same words and counts as the Overview attention line: "1 waiting for review · 4 open". */
+const waitingSummary = computed(() => {
+	const ready = inbox.totals.value['ready-for-review']
+	const open = inbox.totals.value.open
+	const parts = [ready ? t('overview.attentionReady', ready) : '', open ? t('overview.attentionOpen', open) : ''].filter(Boolean)
+	return parts.length ? parts.join(' · ') : t('inbox.waiting', 0)
+})
+
 // ---------------------------------------------------------------------------------------------
 // Status tabs: Inbox (ready + open), Ready, Open, Resolved
 // ---------------------------------------------------------------------------------------------
@@ -228,13 +236,17 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
   >
     <div class="grid gap-3 px-4 pt-4 pb-2">
       <div class="flex min-w-0 items-center gap-2">
-        <h1 class="min-w-0 truncate text-headline font-semibold text-highlighted">
+        <!-- Phones already title the page in the top bar; the heading stays for assistive tech. -->
+        <h1
+          class="min-w-0 truncate text-headline font-semibold text-highlighted"
+          :class="props.phone ? 'sr-only' : ''"
+        >
           {{ t('inbox.title') }}
         </h1>
         <span
           v-if="inbox.loaded.value"
           class="text-xs text-dimmed tabular-nums"
-        >{{ t('inbox.waiting', inbox.totals.value['ready-for-review'] + inbox.totals.value.open) }}</span>
+        >{{ waitingSummary }}</span>
         <span class="flex-1" />
         <UButton
           color="neutral"
@@ -560,7 +572,7 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
               </span>
             </span>
             <span
-              class="flex items-center gap-2 text-xs leading-5 whitespace-nowrap text-dimmed"
+              class="flex items-center gap-2 text-xs leading-5 whitespace-nowrap text-muted"
               aria-hidden="true"
             >
               <time

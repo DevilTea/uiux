@@ -210,7 +210,7 @@ const handoffFacet = computed<Facet>(() => {
       </div>
     </header>
 
-    <dl class="divide-y divide-(--ui-border)">
+    <div class="divide-y divide-(--ui-border)">
       <!-- Validation -->
       <div
         class="grid grid-cols-[16px_minmax(0,1fr)] gap-x-2 px-3 py-2.5"
@@ -221,7 +221,7 @@ const handoffFacet = computed<Facet>(() => {
           class="mt-0.5 size-4"
           :class="validationFacet.tone"
         />
-        <div class="min-w-0 space-y-1">
+        <dl class="min-w-0 space-y-1">
           <dt class="flex items-center justify-between gap-2 text-sm font-medium text-highlighted">
             {{ t('ready.validation') }}
             <UButton
@@ -274,7 +274,7 @@ const handoffFacet = computed<Facet>(() => {
               </li>
             </ul>
           </dd>
-        </div>
+        </dl>
       </div>
 
       <!-- Evidence -->
@@ -287,7 +287,7 @@ const handoffFacet = computed<Facet>(() => {
           class="mt-0.5 size-4"
           :class="evidenceFacet.tone"
         />
-        <div class="min-w-0 space-y-1">
+        <dl class="min-w-0 space-y-1">
           <dt class="flex items-center justify-between gap-2 text-sm font-medium text-highlighted">
             {{ t('ready.evidence') }}
             <UButton
@@ -329,7 +329,7 @@ const handoffFacet = computed<Facet>(() => {
           >
             {{ t('evidence.desktopOnly') }}
           </dd>
-        </div>
+        </dl>
       </div>
 
       <!-- Reviews -->
@@ -342,7 +342,7 @@ const handoffFacet = computed<Facet>(() => {
           class="mt-0.5 size-4"
           :class="reviewsFacet.tone"
         />
-        <div class="min-w-0 space-y-1">
+        <dl class="min-w-0 space-y-1">
           <dt class="flex items-center justify-between gap-2 text-sm font-medium text-highlighted">
             {{ t('ready.reviews') }}
             <UButton
@@ -380,7 +380,7 @@ const handoffFacet = computed<Facet>(() => {
               :data-resolution="part.kind"
             >{{ index ? ' · ' : ' ' }}{{ part.count }} {{ t(`comments.resolution.${part.kind}`) }}</span>
           </dd>
-        </div>
+        </dl>
       </div>
 
       <!-- Handoff -->
@@ -393,7 +393,7 @@ const handoffFacet = computed<Facet>(() => {
           class="mt-0.5 size-4"
           :class="handoffFacet.tone"
         />
-        <div class="min-w-0 space-y-1.5">
+        <dl class="min-w-0 space-y-1.5">
           <dt class="flex items-center justify-between gap-2 text-sm font-medium text-highlighted">
             {{ t('ready.handoff') }}
             <UButton
@@ -471,9 +471,9 @@ const handoffFacet = computed<Facet>(() => {
             />
             {{ t('handoff.requiresEditor') }}
           </dd>
-        </div>
+        </dl>
       </div>
-    </dl>
+    </div>
 
     <!-- Evidence detail: what needs a fresh capture, then the contact sheet -->
     <section

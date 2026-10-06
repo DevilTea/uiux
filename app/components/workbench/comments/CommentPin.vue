@@ -148,10 +148,10 @@ const glyph = computed(() => {
 }
 .comment-pin:hover { transform: translateY(-1px); }
 .comment-pin:focus-visible { outline: 2px solid var(--ui-primary); outline-offset: 3px; }
-.comment-pin.is-open { box-shadow: 0 0 0 2px var(--ui-bg), 0 0 0 4px var(--ui-primary), 0 1px 3px oklch(0% 0 0 / 0.28); }
+.comment-pin.is-open { box-shadow: 0 0 0 2px var(--ui-bg), 0 0 0 4px var(--ui-primary), var(--wb-shadow-pin-drop); }
 .comment-pin.is-lift { transform: translateY(-2px); box-shadow: 0 0 0 2px var(--ui-bg), 0 0 0 4px var(--wb-pin), 0 2px 6px oklch(0% 0 0 / 0.3); }
 .comment-pin.is-resolved { width: 24px; height: 24px; background: var(--wb-pin-resolved); color: var(--wb-pin-text); }
-.comment-pin.is-pending { background: var(--ui-bg); color: var(--ui-annotation); border: 1.5px dashed var(--wb-pin); box-shadow: 0 1px 3px oklch(0% 0 0 / 0.28); cursor: default; }
+.comment-pin.is-pending { background: var(--ui-bg); color: var(--ui-annotation); border: 1.5px dashed var(--wb-pin); box-shadow: var(--wb-shadow-pin-drop); cursor: default; }
 .comment-pin.is-cluster { min-width: 28px; width: auto; padding-inline: 6px; font-variant-numeric: tabular-nums; }
 .comment-pin.is-dim { opacity: 0.4; pointer-events: none; }
 .comment-pin.is-dragging { cursor: grabbing; transition: none; }
@@ -179,5 +179,6 @@ const glyph = computed(() => {
 /* Touch: a 44px hit area around the 28px glyph (brief c, section 9). */
 @media (pointer: coarse) {
   .comment-pin::before { content: ""; position: absolute; inset: -8px; }
+  .comment-pin.is-resolved::before { inset: -10px; }
 }
 </style>

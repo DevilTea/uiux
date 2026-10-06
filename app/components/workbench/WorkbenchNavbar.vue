@@ -78,17 +78,16 @@ const breadcrumb = computed<BreadcrumbItem[]>(() => {
       class="hidden h-5 sm:block"
     />
 
-    <nav
+    <!-- UBreadcrumb renders the <nav> landmark itself; it gets the translated name here. Ancestors
+         keep their width; only the current page's label truncates. -->
+    <UBreadcrumb
+      :items="breadcrumb"
       :aria-label="t('shell.breadcrumb')"
       class="hidden min-w-0 flex-1 sm:block"
-    >
-      <UBreadcrumb
-        :items="breadcrumb"
-        color="neutral"
-        separator-icon="i-lucide-chevron-right"
-        :ui="{ link: 'text-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:justify-center', linkLabel: 'truncate max-w-64', separatorIcon: 'size-3.5' }"
-      />
-    </nav>
+      color="neutral"
+      separator-icon="i-lucide-chevron-right"
+      :ui="{ item: 'shrink-0 last:shrink', link: 'text-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:justify-center', linkLabel: 'truncate max-w-64', separatorIcon: 'size-3.5' }"
+    />
     <p
       class="min-w-0 flex-1 truncate text-sm font-semibold text-highlighted sm:hidden"
       data-navbar-title

@@ -194,6 +194,9 @@ const stepCount = computed(() => Object.keys(draft.value?.steps ?? {}).length)
           class="flex min-h-0 flex-1 flex-col overflow-hidden"
           :aria-label="draft?.name || t('nav.flows')"
         >
+          <h1 class="sr-only">
+            {{ draft?.name || t('nav.flows') }}
+          </h1>
           <FlowPlayer
             v-if="playing && saved"
             :key="`${saved.id}:${editor.read.value?.revision}`"

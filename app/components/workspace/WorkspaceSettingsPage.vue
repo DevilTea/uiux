@@ -257,7 +257,10 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
   >
     <div
       ref="scroller"
-      class="flex min-h-0 flex-1 overflow-y-auto"
+      class="flex min-h-0 flex-1 overflow-y-auto focus-visible:outline-offset-[-2px]"
+      tabindex="0"
+      role="region"
+      :aria-label="t('settings.title')"
     >
       <div class="mx-auto flex w-full max-w-5xl gap-10 px-4 pt-6 pb-16 sm:px-6">
         <nav
@@ -339,18 +342,21 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
               @keep-mine="keepMine('themes')"
             />
             <USeparator />
-            <SettingsAdaptersSection
-              :ref="(el) => { sectionRefs.adapters.value = el as InstanceType<typeof SettingsAdaptersSection> }"
-              :section="adapters"
-              :can-edit="canEdit"
-              :resolution="resolution"
-              :resolution-failed="resolutionFailed"
-              @save="save('adapters')"
-              @discard="discard('adapters')"
-              @reload="reloadTheirs('adapters')"
-              @keep-mine="keepMine('adapters')"
-              @retry-resolution="loadResolution"
-            />
+            <!-- The last section is at least a screen tall, so /workspace/adapters can scroll it to the top. -->
+            <div class="min-h-[calc(100dvh-var(--ui-header-height)-8rem)]">
+              <SettingsAdaptersSection
+                :ref="(el) => { sectionRefs.adapters.value = el as InstanceType<typeof SettingsAdaptersSection> }"
+                :section="adapters"
+                :can-edit="canEdit"
+                :resolution="resolution"
+                :resolution-failed="resolutionFailed"
+                @save="save('adapters')"
+                @discard="discard('adapters')"
+                @reload="reloadTheirs('adapters')"
+                @keep-mine="keepMine('adapters')"
+                @retry-resolution="loadResolution"
+              />
+            </div>
           </template>
           <div
             v-else

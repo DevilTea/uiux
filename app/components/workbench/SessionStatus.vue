@@ -14,7 +14,7 @@ const { preview } = useWorkbench()
 const status = computed(() => {
 	switch (preview.sessionStatus.value) {
 		case 'live':
-			return { color: 'neutral' as const, dot: 'bg-success', label: t('session.live'), hint: t('session.liveHint') }
+			return { color: 'neutral' as const, dot: 'bg-(--ui-text-muted)', label: t('session.live'), hint: t('session.liveHint') }
 		case 'reconnecting':
 			return { color: 'warning' as const, dot: 'bg-warning', label: t('session.reconnecting'), hint: t('session.reconnectingHint') }
 		case 'stopped':

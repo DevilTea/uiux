@@ -98,22 +98,26 @@ const messageCountLabel = computed(() => t('reviews.messageCount', props.item.me
         data-comment-note
       >{{ note }}</span>
     </span>
-    <span class="flex items-center gap-2 text-xs leading-5 whitespace-nowrap text-dimmed">
-      <span
-        class="inline-grid size-3.5 place-items-center"
-        :title="canvas?.text"
-        data-comment-canvas-glyph
+    <span class="flex items-center gap-2 text-xs leading-5 whitespace-nowrap text-muted">
+      <UTooltip
+        :text="canvas?.text"
+        :disabled="!canvas"
       >
-        <UIcon
-          :name="canvas?.icon ?? 'i-lucide-scan'"
-          class="size-3.5"
-          :class="canvas ? '' : 'invisible'"
-        />
         <span
-          v-if="canvas"
-          class="sr-only"
-        >{{ canvas.text }}</span>
-      </span>
+          class="inline-grid size-3.5 place-items-center"
+          data-comment-canvas-glyph
+        >
+          <UIcon
+            :name="canvas?.icon ?? 'i-lucide-scan'"
+            class="size-3.5"
+            :class="canvas ? '' : 'invisible'"
+          />
+          <span
+            v-if="canvas"
+            class="sr-only"
+          >{{ canvas.text }}</span>
+        </span>
+      </UTooltip>
       <time
         v-if="item.latestActivityAt"
         :datetime="item.latestActivityAt"

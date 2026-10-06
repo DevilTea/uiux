@@ -174,6 +174,9 @@ onBeforeUnmount(() => {
         :aria-label="selectedView?.resource.name || t('workbench.canvas.label')"
         data-view-phone
       >
+        <h1 class="sr-only">
+          {{ selectedView?.resource.name || t('workbench.canvas.label') }}
+        </h1>
         <UTabs
           v-model="phoneTabModel"
           :items="phoneTabs"
@@ -219,6 +222,10 @@ onBeforeUnmount(() => {
           class="flex min-h-0 flex-1 flex-col"
           :aria-label="selectedView ? t('workbench.canvas.iframeTitle', { name: selectedView.resource.name }) : t('workbench.canvas.label')"
         >
+          <!-- The page heading for assistive tech; the View name is visible in the sidebar and breadcrumb. -->
+          <h1 class="sr-only">
+            {{ selectedView?.resource.name || t('workbench.canvas.label') }}
+          </h1>
           <LockBadge
             kind="view"
             :resource-key="viewId"

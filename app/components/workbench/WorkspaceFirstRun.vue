@@ -29,7 +29,7 @@ async function copy(text: string): Promise<void> {
 
 <template>
   <section
-    class="mx-auto w-full max-w-3xl px-4 pt-4 pb-16 sm:px-6"
+    class="mx-auto w-full max-w-6xl px-4 pt-4 pb-16 sm:px-6"
     aria-labelledby="first-run-heading"
     data-first-run
   >
@@ -43,7 +43,7 @@ async function copy(text: string): Promise<void> {
       {{ t('firstRun.description') }}
     </p>
 
-    <ol class="mt-5 divide-y divide-default border-y border-default">
+    <ol class="mt-5 max-w-3xl divide-y divide-default border-y border-default">
       <li class="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-3 py-4">
         <span
           class="grid size-6 place-items-center rounded-full bg-elevated font-mono text-xs text-highlighted"

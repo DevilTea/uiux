@@ -120,8 +120,14 @@ const open = ref({ variant: false, locale: false, viewport: false, theme: false 
 defineExpose({ openMenu: (dimension: keyof typeof open.value) => { open.value[dimension] = true } })
 
 const isBar = computed(() => props.layout === 'bar')
+// Narrow canvas bars drop the dimension words first (each select keeps its icon and aria-label),
+// then the viewport size; the values themselves truncate last.
+const labelClass = computed(() => isBar.value ? '@max-[48rem]:hidden' : '')
+const dimsClass = computed(() => isBar.value ? '@max-[36rem]:hidden' : '')
 const selectUi = computed(() => ({
-	base: isBar.value ? 'h-7 hover:bg-elevated max-w-72' : 'w-full hover:bg-elevated',
+	// In the canvas bar the four selects share whatever width the canvas leaves: they shrink and
+	// truncate their values instead of running under the zoom controls (1280px with both panels).
+	base: isBar.value ? 'h-7 min-w-0 shrink hover:bg-elevated max-w-72' : 'w-full hover:bg-elevated',
 	leadingIcon: 'size-4 text-dimmed',
 	trailingIcon: 'size-3.5 text-dimmed',
 	content: 'min-w-60 w-auto max-w-[min(24rem,90vw)]',
@@ -134,7 +140,7 @@ const selectUi = computed(() => ({
   <div
     role="group"
     :aria-label="t('workbench.context.groupLabel')"
-    :class="isBar ? 'flex min-w-0 items-center gap-0.5' : 'grid gap-2'"
+    :class="isBar ? '@container flex min-w-0 flex-1 items-center gap-0.5' : 'grid gap-2'"
     data-render-context
   >
     <USelectMenu
@@ -155,7 +161,10 @@ const selectUi = computed(() => ({
       data-context="variant"
     >
       <span class="flex min-w-0 items-baseline gap-1.5">
-        <span class="shrink-0 text-muted">{{ t('ctx.variant') }}</span>
+        <span
+          class="shrink-0 text-muted"
+          :class="labelClass"
+        >{{ t('ctx.variant') }}</span>
         <span
           class="truncate font-medium"
           :class="contextOptions.variants.isInvalid ? 'text-error' : 'text-highlighted'"
@@ -184,7 +193,10 @@ const selectUi = computed(() => ({
       data-context="locale"
     >
       <span class="flex min-w-0 items-baseline gap-1.5">
-        <span class="shrink-0 text-muted">{{ t('ctx.locale') }}</span>
+        <span
+          class="shrink-0 text-muted"
+          :class="labelClass"
+        >{{ t('ctx.locale') }}</span>
         <span
           class="truncate font-medium"
           :class="contextOptions.locales.isInvalid ? 'text-error' : 'text-highlighted'"
@@ -223,12 +235,18 @@ const selectUi = computed(() => ({
       data-context="viewport"
     >
       <span class="flex min-w-0 items-baseline gap-1.5">
-        <span class="shrink-0 text-muted">{{ t('ctx.viewport') }}</span>
+        <span
+          class="shrink-0 text-muted"
+          :class="labelClass"
+        >{{ t('ctx.viewport') }}</span>
         <span
           class="truncate font-medium"
           :class="contextOptions.viewports.isInvalid ? 'text-error' : 'text-highlighted'"
         >{{ values.viewport }}</span>
-        <span class="shrink-0 font-mono text-xs text-muted">{{ values.viewportDims }}</span>
+        <span
+          class="shrink-0 font-mono text-xs text-muted"
+          :class="dimsClass"
+        >{{ values.viewportDims }}</span>
       </span>
       <template #item-trailing="{ item }">
         <span
@@ -260,7 +278,10 @@ const selectUi = computed(() => ({
       data-context="theme"
     >
       <span class="flex min-w-0 items-baseline gap-1.5">
-        <span class="shrink-0 text-muted">{{ t('ctx.theme') }}</span>
+        <span
+          class="shrink-0 text-muted"
+          :class="labelClass"
+        >{{ t('ctx.theme') }}</span>
         <span
           class="truncate font-medium"
           :class="contextOptions.themes.isInvalid ? 'text-error' : 'text-highlighted'"

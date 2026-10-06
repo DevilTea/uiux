@@ -92,7 +92,7 @@ function toolClass(id: CanvasToolId): string {
           <UKbd
             :value="tool.kbd"
             variant="outline"
-            class="max-sm:hidden bg-transparent text-current ring-current/35"
+            class="max-sm:hidden pointer-coarse:hidden bg-transparent text-current ring-current/35"
           />
         </UButton>
       </UTooltip>

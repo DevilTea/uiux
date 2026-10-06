@@ -250,18 +250,19 @@ defineExpose({ follow, restart })
           name="i-lucide-play"
           class="size-4 shrink-0 text-dimmed"
         />
-        <nav
-          :aria-label="t('flows.player.path')"
-          class="min-w-0 flex-1 overflow-x-auto"
-        >
+        <div class="min-w-0 flex-1 overflow-x-auto">
+          <!-- Neutral like the navbar breadcrumb: the current step is a location, not a selection.
+               UBreadcrumb is the <nav> landmark and gets the translated name. -->
           <UBreadcrumb
             :items="crumbs"
+            :aria-label="t('flows.player.path')"
+            color="neutral"
             separator-icon="i-lucide-chevron-right"
             :ui="{
               list: 'flex-nowrap',
               item: 'shrink-0',
               link: 'text-sm whitespace-nowrap',
-              linkLabel: 'max-w-56 truncate',
+              linkLabel: 'max-w-[min(32rem,40vw)] truncate',
             }"
             data-flow-player-path
           >
@@ -272,7 +273,7 @@ defineExpose({ follow, restart })
               >{{ t('flows.player.advancedFromWorkbench') }}</span>
             </template>
           </UBreadcrumb>
-        </nav>
+        </div>
       </template>
       <template #right>
         <UButton

@@ -257,7 +257,7 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
             color="neutral"
             variant="outline"
             size="sm"
-            trailing-icon="i-lucide-arrow-up-right"
+            icon="i-lucide-app-window"
             :label="t('inbox.openInCanvas')"
             class="shrink-0"
             data-review-open-canvas

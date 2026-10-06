@@ -222,6 +222,14 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                   </template>
                 </span>
               </template>
+              <!-- An older schema is not "all clear": Reviews and readiness cannot be read yet. -->
+              <span
+                v-else-if="workbench.writeBlocked.value"
+                class="text-title font-medium text-muted"
+                data-attention-migration
+              >
+                {{ t('overview.migrationWaiting') }}
+              </span>
               <span
                 v-else
                 class="inline-flex items-center gap-2"

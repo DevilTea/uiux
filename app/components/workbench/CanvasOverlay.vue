@@ -155,8 +155,10 @@ const selection = computed(() => {
 </script>
 
 <template>
+  <!-- Above the comment pins (z-index 2-3) so a pin never covers the selection's blueprint label;
+       the overlay takes no pointer events, so pins underneath stay clickable. -->
   <div
-    class="pointer-events-none absolute inset-0"
+    class="pointer-events-none absolute inset-0 z-[4]"
     data-canvas-overlay
     aria-hidden="true"
   >
@@ -181,7 +183,7 @@ const selection = computed(() => {
       <span
         ref="hoverChip"
         class="blueprint-chip"
-        :class="hoverMark.comment ? 'text-annotation' : ''"
+        :class="hoverMark.comment ? 'is-prose text-annotation' : ''"
         data-hover-chip
         :style="{ left: `${hoverMark.chip.left}px`, top: `${hoverMark.chip.top}px` }"
       >{{ hoverMark.chip.text }}</span>
@@ -246,5 +248,10 @@ const selection = computed(() => {
   line-height: 1rem;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "zero" 1;
+}
+
+/* "Comment on Text" is a sentence, not an identity: the Blueprint Label Rule keeps it in sans. */
+.blueprint-chip.is-prose {
+  font-family: var(--font-sans);
 }
 </style>

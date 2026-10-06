@@ -89,7 +89,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
       :aria-label="t('access.login.title')"
     >
       <div class="space-y-1">
-        <h1 class="text-lg font-semibold text-highlighted">
+        <h1 class="text-headline font-semibold text-highlighted">
           {{ t('access.login.title') }}
         </h1>
         <p class="text-sm text-muted">

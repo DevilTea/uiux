@@ -24,19 +24,22 @@ function count(value: number, color: 'neutral' | 'annotation' = 'neutral') {
 	return value > 0 ? { label: String(value), color, variant: 'soft' as const, size: 'sm' as const } : undefined
 }
 
+// A View or Flow page is a sibling route of its index, so router matching alone would leave the
+// area's item unmarked (most visibly in the tablet icon rail); mark it from the path instead.
 const primary = computed<NavigationMenuItem[]>(() => [
-	{ label: t('nav.overview'), icon: 'i-lucide-layout-dashboard', to: '/', exact: true },
-	{ label: t('nav.views'), icon: 'i-lucide-app-window', to: '/views', badge: count(views.value.length), 'aria-label': t('nav.countLabel', { label: t('nav.views'), n: views.value.length }) },
-	{ label: t('nav.flows'), icon: 'i-lucide-workflow', to: '/flows', badge: count(flows.value.length), 'aria-label': t('nav.countLabel', { label: t('nav.flows'), n: flows.value.length }) },
+	{ label: t('nav.overview'), icon: 'i-lucide-layout-dashboard', to: '/', exact: true, 'aria-label': t('nav.overview') },
+	{ label: t('nav.views'), icon: 'i-lucide-app-window', to: '/views', active: route.path.startsWith('/views'), badge: count(views.value.length), 'aria-label': t('nav.countLabel', { label: t('nav.views'), n: views.value.length }) },
+	{ label: t('nav.flows'), icon: 'i-lucide-workflow', to: '/flows', active: route.path.startsWith('/flows'), badge: count(flows.value.length), 'aria-label': t('nav.countLabel', { label: t('nav.flows'), n: flows.value.length }) },
 	{ label: t('nav.reviews'), icon: 'i-lucide-inbox', to: '/reviews', badge: count(unresolvedReviewCount.value, 'annotation'), 'aria-label': t('nav.reviewsLabel', unresolvedReviewCount.value) },
 ])
 
+// Every item carries an aria-label: the collapsed rail hides labels (icon plus hover tooltip only).
 const secondary = computed<NavigationMenuItem[]>(() => [
 	{ label: t('nav.workspace'), type: 'label' },
-	{ label: t('nav.settings'), icon: 'i-lucide-settings-2', to: '/workspace/settings' },
-	{ label: t('nav.locales'), icon: 'i-lucide-globe', to: '/workspace/locales' },
-	{ label: t('nav.assets'), icon: 'i-lucide-image', to: '/workspace/assets' },
-	{ label: t('nav.adapters'), icon: 'i-lucide-puzzle', to: '/workspace/adapters' },
+	{ label: t('nav.settings'), icon: 'i-lucide-settings-2', to: '/workspace/settings', 'aria-label': t('nav.settings') },
+	{ label: t('nav.locales'), icon: 'i-lucide-globe', to: '/workspace/locales', 'aria-label': t('nav.locales') },
+	{ label: t('nav.assets'), icon: 'i-lucide-image', to: '/workspace/assets', 'aria-label': t('nav.assets') },
+	{ label: t('nav.adapters'), icon: 'i-lucide-puzzle', to: '/workspace/adapters', 'aria-label': t('nav.adapters') },
 ])
 
 const NAV_UI = {
@@ -76,9 +79,12 @@ const createFlowOpen = ref(false)
 </script>
 
 <template>
-  <nav
+  <!-- A named region, not a <nav>: the two menus below are the navigation landmarks (a wrapping
+       <nav> made them nested, unnamed duplicates), and the View navigator / Flow list stay inside
+       a landmark. F6 still cycles to it. -->
+  <section
     data-landmark="navigation"
-    :aria-label="t('shell.primaryNav')"
+    :aria-label="t('shell.sidebar')"
     class="flex min-h-0 flex-1 flex-col"
   >
     <div
@@ -93,6 +99,7 @@ const createFlowOpen = ref(false)
     >
       <UNavigationMenu
         :items="primary"
+        :aria-label="t('shell.primaryNav')"
         orientation="vertical"
         :collapsed="props.collapsed"
         color="neutral"
@@ -241,6 +248,7 @@ const createFlowOpen = ref(false)
     >
       <UNavigationMenu
         :items="secondary"
+        :aria-label="t('nav.workspace')"
         orientation="vertical"
         :collapsed="props.collapsed"
         color="neutral"
@@ -254,5 +262,5 @@ const createFlowOpen = ref(false)
         />
       </UTooltip>
     </div>
-  </nav>
+  </section>
 </template>

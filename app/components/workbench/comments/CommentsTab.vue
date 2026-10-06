@@ -106,13 +106,13 @@ function onListKeydown(event: KeyboardEvent): void {
           size="xs"
           color="neutral"
           :variant="comments.filter.value[item.key] ? 'soft' : 'ghost'"
-          :icon="comments.filter.value[item.key] ? 'i-lucide-check' : item.icon"
+          :icon="item.icon"
           :aria-pressed="comments.filter.value[item.key]"
           :data-comment-filter="item.key"
           @click="comments.setFilter(item.key, !comments.filter.value[item.key])"
         >
           {{ t(`thread.status.${item.key}`) }}
-          <span class="text-dimmed tabular-nums">{{ counts[item.key] }}</span>
+          <span class="text-muted tabular-nums">{{ counts[item.key] }}</span>
         </UButton>
       </div>
     </div>
@@ -130,7 +130,7 @@ function onListKeydown(event: KeyboardEvent): void {
     <div
       ref="list"
       class="min-h-0 flex-1 overflow-y-auto"
-      role="list"
+      role="region"
       :aria-label="t('comments.listLabel')"
       @keydown="onListKeydown"
     >
@@ -141,7 +141,7 @@ function onListKeydown(event: KeyboardEvent): void {
           :aria-label="group.label"
           :data-comment-group="group.key"
         >
-          <h3 class="flex items-center gap-1.5 px-3 pt-3 pb-1 text-xs font-medium text-muted">
+          <h2 class="flex items-center gap-1.5 px-3 pt-3 pb-1 text-xs font-medium text-muted">
             {{ group.key === 'other' ? group.label : `${group.label} · ${group.rows.length}` }}
             <UIcon
               v-if="group.icon"
@@ -149,7 +149,7 @@ function onListKeydown(event: KeyboardEvent): void {
               class="size-3.5"
               :class="group.key === 'overcap' ? 'text-muted' : 'text-warning'"
             />
-          </h3>
+          </h2>
           <p
             v-if="group.key === 'overcap'"
             class="px-3 pb-1 text-xs text-muted"
@@ -157,48 +157,54 @@ function onListKeydown(event: KeyboardEvent): void {
           >
             {{ comments.notOnCanvas.value.reason === 'single-stream' ? t('pins.singleStreamHint') : t('pins.overCapHint', { cap: MAX_TRACKED_WIDGETS }) }}
           </p>
+          <!-- Each group is its own list, named by its heading. -->
           <div
-            v-for="item in group.rows"
-            :key="item.id"
-            role="listitem"
-            class="group/row relative"
-            @mouseenter="comments.hoveredThreadId.value = item.id"
-            @mouseleave="comments.hoveredThreadId.value = undefined"
+            role="list"
+            :aria-label="group.label"
           >
-            <CommentRow
-              :item="item"
-              :widget-type="item.anchorValid ? (typeById.get(item.anchor.widgetId) ?? 'Widget') : undefined"
-              :unplaceable="unplaceable(item)"
-              :current="comments.openThreadId.value === item.id"
-              @hover="comments.hoveredThreadId.value = item.id"
-              @leave="comments.hoveredThreadId.value = undefined"
-              @open="openRow(item)"
-            />
             <div
-              v-if="group.key === 'unplaced' && comments.canComment.value && !item.anchorValid && !phone"
-              class="px-3 pb-2 ps-[3.75rem]"
+              v-for="item in group.rows"
+              :key="item.id"
+              role="listitem"
+              class="group/row relative"
+              @mouseenter="comments.hoveredThreadId.value = item.id"
+              @mouseleave="comments.hoveredThreadId.value = undefined"
             >
-              <UButton
-                size="xs"
-                color="neutral"
-                variant="outline"
-                icon="i-lucide-crosshair"
-                :label="t('thread.reanchor')"
-                @click="reanchor(item)"
+              <CommentRow
+                :item="item"
+                :widget-type="item.anchorValid ? (typeById.get(item.anchor.widgetId) ?? 'Widget') : undefined"
+                :unplaceable="unplaceable(item)"
+                :current="comments.openThreadId.value === item.id"
+                @hover="comments.hoveredThreadId.value = item.id"
+                @leave="comments.hoveredThreadId.value = undefined"
+                @open="openRow(item)"
               />
-            </div>
-            <div
-              v-else-if="group.key === 'other' && item.variantNames[0]"
-              class="px-3 pb-2 ps-[3.75rem]"
-            >
-              <UButton
-                size="xs"
-                color="neutral"
-                variant="outline"
-                icon="i-lucide-layers"
-                :label="t('comments.switchTo', { variant: item.variantNames.find(name => !item.missingVariants.includes(name)) ?? item.variantNames[0] })"
-                @click="selectedVariant = item.variantNames.find(name => !item.missingVariants.includes(name)) ?? item.variantNames[0]!"
-              />
+              <div
+                v-if="group.key === 'unplaced' && comments.canComment.value && !item.anchorValid && !phone"
+                class="px-3 pb-2 ps-[3.75rem]"
+              >
+                <UButton
+                  size="xs"
+                  color="neutral"
+                  variant="outline"
+                  icon="i-lucide-crosshair"
+                  :label="t('thread.reanchor')"
+                  @click="reanchor(item)"
+                />
+              </div>
+              <div
+                v-else-if="group.key === 'other' && item.variantNames[0]"
+                class="px-3 pb-2 ps-[3.75rem]"
+              >
+                <UButton
+                  size="xs"
+                  color="neutral"
+                  variant="outline"
+                  icon="i-lucide-layers"
+                  :label="t('comments.switchTo', { variant: item.variantNames.find(name => !item.missingVariants.includes(name)) ?? item.variantNames[0] })"
+                  @click="selectedVariant = item.variantNames.find(name => !item.missingVariants.includes(name)) ?? item.variantNames[0]!"
+                />
+              </div>
             </div>
           </div>
         </section>

@@ -259,7 +259,7 @@ function onKeydown(event: KeyboardEvent): void {
             <UBreadcrumb
               :items="slotItems"
               :aria-label="t('inspect.slotPath')"
-              :ui="{ list: 'flex-wrap gap-x-1 gap-y-0.5', item: 'min-w-0', link: 'p-0 font-mono text-xs', separatorIcon: 'size-3 text-dimmed' }"
+              :ui="{ list: 'flex-wrap gap-x-1 gap-y-1', item: 'min-w-0', link: 'p-0 font-mono text-xs', separatorIcon: 'size-3 text-dimmed' }"
               translate="no"
             >
               <template #item="{ item, index }">
@@ -267,7 +267,7 @@ function onKeydown(event: KeyboardEvent): void {
                   v-if="index < slotItems.length - 1"
                   as="button"
                   type="button"
-                  class="rounded-sm font-mono text-xs text-muted hover:text-highlighted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  class="inline-flex min-h-6 items-center rounded-sm font-mono text-xs text-muted hover:text-highlighted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary pointer-coarse:min-h-11"
                   :aria-label="t('inspect.selectWidget', { id: item.label })"
                   @click="workbench.selectWidget(String(item.label))"
                 >

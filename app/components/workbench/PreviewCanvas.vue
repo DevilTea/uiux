@@ -63,6 +63,25 @@ const { selectedView, contextOptions, loading, reviewReadOnly, preview, widgetTr
 const comments = useCanvasComments()
 
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
+
+/**
+ * The canvas, not the window, decides how the render context fits: with both side panels open at
+ * 1280-1400px the four selects would truncate to a letter each, so below 32rem of toolbar they
+ * collapse into the same summary popover tablets use.
+ */
+const CONTEXT_BAR_MIN_PX = 512
+const contextSlot = ref<HTMLElement>()
+const contextBarCompact = ref(false)
+let contextSlotObserver: ResizeObserver | undefined
+watch(contextSlot, (element) => {
+	contextSlotObserver?.disconnect()
+	if (!element || typeof ResizeObserver === 'undefined') return
+	contextSlotObserver = new ResizeObserver(([entry]) => {
+		if (entry) contextBarCompact.value = entry.contentRect.width < CONTEXT_BAR_MIN_PX
+	})
+	contextSlotObserver.observe(element)
+})
+onBeforeUnmount(() => contextSlotObserver?.disconnect())
 const isPhone = useMediaQuery(WORKBENCH_BREAKPOINTS.handset)
 const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
 
@@ -467,7 +486,7 @@ const contextPopoverOpen = ref(false)
 
 function openContextMenu(dimension: 'variant' | 'locale' | 'theme'): void {
 	if (!selectedView.value) return
-	if (isDesktop.value) contextControls.value?.openMenu(dimension)
+	if (isDesktop.value && !contextBarCompact.value) contextControls.value?.openMenu(dimension)
 	else contextPopoverOpen.value = true
 }
 
@@ -563,14 +582,18 @@ function switchToBase(): void {
     <UDashboardToolbar
       :ui="{
         root: 'min-h-10 h-10 gap-1 bg-default px-2 sm:px-2',
-        left: 'min-w-0 gap-0.5',
+        left: 'min-w-0 flex-1 gap-0.5',
         right: 'shrink-0 gap-0.5',
       }"
     >
       <template #left>
-        <template v-if="selectedView">
+        <div
+          v-if="selectedView"
+          ref="contextSlot"
+          class="flex min-w-0 flex-1 items-center"
+        >
           <RenderContextControls
-            v-if="isDesktop"
+            v-if="isDesktop && !contextBarCompact"
             ref="contextControls"
             :lock-variant="props.prototype"
           />
@@ -599,7 +622,7 @@ function switchToBase(): void {
               </div>
             </template>
           </UPopover>
-        </template>
+        </div>
         <span
           v-else
           class="px-2 text-xs text-muted"
@@ -643,6 +666,9 @@ function switchToBase(): void {
         ref="stage"
         class="absolute inset-0 touch-pan-x touch-pan-y overflow-auto overscroll-contain"
         :class="scale >= 0.5 ? 'canvas-dots' : ''"
+        :tabindex="props.prototype ? 0 : undefined"
+        :role="props.prototype ? 'region' : undefined"
+        :aria-label="props.prototype ? t('workbench.canvas.label') : undefined"
         data-canvas-stage
         @pointerdown="onPointerDown"
         @pointermove="onPointerMove"
@@ -793,7 +819,7 @@ function switchToBase(): void {
             scope="global"
           >
             <template #tool>
-              <code class="rounded bg-elevated px-1 py-0.5 font-mono text-[0.9em] text-highlighted">create_view</code>
+              <code class="rounded bg-elevated px-1 py-0.5 font-mono text-xs text-highlighted">create_view</code>
             </template>
           </i18n-t>
         </template>

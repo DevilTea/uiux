@@ -141,7 +141,8 @@
   --wb-pin-invalid: var(--ui-error);
   --wb-frame: #fff;
   --wb-shadow-frame: 0 0 0 1px oklch(16% 0.006 286 / 0.08), 0 2px 6px oklch(16% 0.006 286 / 0.06), 0 12px 32px -8px oklch(16% 0.006 286 / 0.12);
-  --wb-shadow-pin: 0 0 0 2px var(--ui-bg), 0 1px 3px oklch(0% 0 0 / 0.28);
+  --wb-shadow-pin-drop: 0 1px 3px oklch(0% 0 0 / 0.28);
+  --wb-shadow-pin: 0 0 0 2px var(--ui-bg), var(--wb-shadow-pin-drop);
   --wb-shadow-overlay: 0 1px 2px oklch(16% 0.006 286 / 0.06), 0 8px 24px -4px oklch(16% 0.006 286 / 0.14);
   --wb-shadow-modal: 0 24px 64px -12px oklch(16% 0.006 286 / 0.25);
 }
@@ -297,5 +298,14 @@
   *::after {
     transition-duration: 80ms !important;
     animation-duration: 80ms !important;
+  }
+
+  /* Infinite animations must not speed up: spinners keep a calm turn and pulses stop. */
+  .animate-spin {
+    animation-duration: 1.5s !important;
+  }
+
+  .animate-pulse:not(.wb-skeleton) {
+    animation: none !important;
   }
 }

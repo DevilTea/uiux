@@ -5,11 +5,13 @@ import type { HandoffBlockingDiagnostic } from '../../../src/domain/handoff/sche
 import { useWorkbench } from '../../composables/useWorkbench'
 import { handoffDiagnosticSubject } from '../../utils/readiness'
 import { viewLocation } from '../../utils/workbench-routes'
+import WbErrorDetails from '../workbench/WbErrorDetails.vue'
 
 /**
  * One side of a Handoff assessment: the blocking entries, or the advisory ones the server marks
- * `blocking: false` (a declined Review). Each entry reads as a sentence naming its View, with the
- * diagnostic code kept as a quiet mono identity.
+ * `blocking: false` (a declined Review). Each entry reads as a sentence naming its View (and the
+ * Widget a Review is anchored to, so several open Reviews stay distinguishable); the diagnostic
+ * codes stay one click away in the shared Details disclosure.
  */
 const props = defineProps<{
 	diagnostics: readonly HandoffBlockingDiagnostic[]
@@ -35,9 +37,13 @@ const rows = computed<Row[]>(() => props.diagnostics.map((diagnostic, index) => 
 	const view = viewName(viewId)
 	let sentence = diagnostic.message
 	switch (diagnostic.code) {
-		case 'handoff.unresolved_review_thread':
-			sentence = /ready-for-review/.test(diagnostic.message) ? t('ready.diag.reviewReady', { view }) : t('ready.diag.reviewOpen', { view })
+		case 'handoff.unresolved_review_thread': {
+			const ready = /ready-for-review/.test(diagnostic.message)
+			sentence = anchor?.widgetId
+				? t(ready ? 'ready.diag.reviewReadyAt' : 'ready.diag.reviewOpenAt', { view, widget: anchor.widgetId })
+				: t(ready ? 'ready.diag.reviewReady' : 'ready.diag.reviewOpen', { view })
 			break
+		}
 		case 'handoff.review_declined':
 			sentence = t('ready.diag.reviewDeclined', { view })
 			break
@@ -59,36 +65,43 @@ const rows = computed<Row[]>(() => props.diagnostics.map((diagnostic, index) => 
 		: viewId && viewNames.value.has(viewId) ? viewLocation(viewId, { panel: 'readiness' }) : undefined
 	return { key: `${diagnostic.code}:${diagnostic.path ?? ''}:${index}`, sentence, code: diagnostic.code, ...(to ? { to } : {}) }
 }))
+
+const details = computed(() => props.diagnostics.map(diagnostic => ({ code: diagnostic.code, ...(diagnostic.path ? { path: diagnostic.path } : {}), message: diagnostic.message })))
 </script>
 
 <template>
-  <ul
-    class="space-y-1"
-    :data-handoff-diagnostics="tone"
-  >
-    <li
-      v-for="row in rows"
-      :key="row.key"
-      class="grid grid-cols-[16px_minmax(0,1fr)] gap-x-2 text-sm"
-      :data-diagnostic-code="row.code"
+  <div class="space-y-1">
+    <ul
+      class="space-y-1"
+      :data-handoff-diagnostics="tone"
     >
-      <UIcon
-        :name="tone === 'blocking' ? 'i-lucide-circle-x' : 'i-lucide-info'"
-        class="mt-0.5 size-4"
-        :class="tone === 'blocking' ? 'text-error' : 'text-muted'"
-      />
-      <span class="min-w-0">
-        <ULink
-          v-if="row.to"
-          :to="row.to"
-          class="text-default hover:text-highlighted hover:underline"
-        >{{ row.sentence }}</ULink>
-        <span
-          v-else
-          class="text-default"
-        >{{ row.sentence }}</span>
-        <span class="block truncate font-mono text-xs text-dimmed">{{ row.code }}</span>
-      </span>
-    </li>
-  </ul>
+      <li
+        v-for="row in rows"
+        :key="row.key"
+        class="grid grid-cols-[16px_minmax(0,1fr)] gap-x-2 text-sm"
+        :data-diagnostic-code="row.code"
+      >
+        <UIcon
+          :name="tone === 'blocking' ? 'i-lucide-circle-x' : 'i-lucide-info'"
+          class="mt-0.5 size-4"
+          :class="tone === 'blocking' ? 'text-error' : 'text-muted'"
+        />
+        <span class="min-w-0">
+          <ULink
+            v-if="row.to"
+            :to="row.to"
+            class="text-default hover:text-highlighted hover:underline"
+          >{{ row.sentence }}</ULink>
+          <span
+            v-else
+            class="text-default"
+          >{{ row.sentence }}</span>
+        </span>
+      </li>
+    </ul>
+    <WbErrorDetails
+      v-if="details.length"
+      :diagnostics="details"
+    />
+  </div>
 </template>
