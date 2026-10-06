@@ -167,17 +167,28 @@ const retract = computed(() => inbox.canReply.value ? retractEligibility(detail.
 const confirmingDelete = ref(false)
 const deleteRefused = computed(() => !!thread.value && inbox.retractRefused.value === thread.value.id)
 
-/** The menu would hand focus back to its trigger as it closes; the delete confirm keeps it on Cancel. */
+/**
+ * The menu would hand focus back to its trigger as it closes; the delete confirm keeps it on Cancel.
+ * The menu unmounts only after its close animation, which can end after the delete already went
+ * through: by then this detail shows the next thread and the page has moved focus to the queue
+ * (`inbox.deleted`), so the trigger, now another thread's, must not take it back.
+ */
 const retractConfirm = ref<InstanceType<typeof RetractConfirm>>()
+let deleteAskedFor: string | undefined
 function keepConfirmFocus(event: Event): void {
-	if (!confirmingDelete.value) return
-	event.preventDefault()
-	void nextTick(() => retractConfirm.value?.focusCancel())
+	const askedFor = deleteAskedFor
+	deleteAskedFor = undefined
+	if (confirmingDelete.value) {
+		event.preventDefault()
+		void nextTick(() => retractConfirm.value?.focusCancel())
+	}
+	else if (askedFor && askedFor !== thread.value?.id) event.preventDefault()
 }
 
 function askDelete(): void {
 	inbox.retractRefused.value = undefined
 	pendingAction.value = undefined
+	deleteAskedFor = thread.value?.id
 	confirmingDelete.value = true
 }
 
