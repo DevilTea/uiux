@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { defineShortcuts, navigateTo, useI18n } from '#imports'
 import type { HandoffRoot } from '../../../src/domain/handoff/schema'
-import { REVIEW_RESOLUTIONS } from '../../../src/domain/reviews/schema'
+import { anchorViewId, REVIEW_RESOLUTIONS } from '../../../src/domain/reviews/schema'
 import { resolveDiagnosticWidgetTarget } from '../../../src/preview/checks-navigation'
 import { flattenWidgetTree } from '../../../src/preview/widget-tree'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
@@ -108,7 +108,7 @@ function staleLabel(entry: (typeof needsCapture.value)[number]): string {
 
 // ----- Reviews ---------------------------------------------------------------------------------
 
-const threadsHere = computed(() => reviews.value.filter(review => review.summary.anchor?.viewId === selectedViewId.value))
+const threadsHere = computed(() => reviews.value.filter(review => anchorViewId(review.summary.anchor) === selectedViewId.value))
 const readyHere = computed(() => threadsHere.value.filter(review => review.summary.status === 'ready-for-review').length)
 const openHere = computed(() => threadsHere.value.filter(review => (review.summary.status ?? 'open') === 'open').length)
 

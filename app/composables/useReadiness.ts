@@ -1,3 +1,4 @@
+import { anchorViewId } from '../../src/domain/reviews/schema'
 import { computed, shallowRef, triggerRef } from 'vue'
 import { useI18n } from '#imports'
 import type { FormalEvidenceRecord } from '../../src/domain/evidence/schema'
@@ -133,8 +134,8 @@ export function useReadiness() {
 	].join(','))
 
 	const reviewAnchors = computed(() => new Map(reviews.value
-		.filter(review => review.summary.anchor?.viewId)
-		.map(review => [review.key, review.summary.anchor!.viewId])))
+		.filter(review => anchorViewId(review.summary.anchor))
+		.map(review => [review.key, anchorViewId(review.summary.anchor)!])))
 
 	// ----- Evidence --------------------------------------------------------------------------
 

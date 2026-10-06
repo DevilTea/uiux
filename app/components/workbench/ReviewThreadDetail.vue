@@ -9,7 +9,10 @@ import { copyText } from '../../utils/copy-text'
 import type { InboxThread } from '../../utils/review-inbox'
 import ReviewTimeline from './ReviewTimeline.vue'
 import LockedSaveAlert from './LockedSaveAlert.vue'
+import RetractConfirm from './RetractConfirm.vue'
 import SubmitForReviewModal from './SubmitForReviewModal.vue'
+import { resolveMenuGroups } from '../../utils/resolve-menu'
+import { latestEditableMessageId, retractEligibility } from '../../utils/review-message-actions'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { isLockedError, type FetchErrorDetails } from '../../utils/fetch-error'
 import type { ReviewSubmissionDraft } from '../../utils/review-submission'
@@ -23,7 +26,10 @@ import type { ReviewSubmissionDraft } from '../../utils/review-submission'
  * and reopen only), `slideover` the tablet panel.
  */
 const props = withDefaults(defineProps<{ layout?: 'pane' | 'sheet' | 'slideover' }>(), { layout: 'pane' })
-const emit = defineEmits<{ (e: 'close'): void; (e: 'resolved', threadId: string, next: string | undefined): void }>()
+const emit = defineEmits<{
+	(e: 'close'): void
+	(e: 'resolved', threadId: string, next: string | undefined): void
+}>()
 
 const { t } = useI18n()
 const inbox = useReviewInbox()
@@ -37,6 +43,8 @@ const STATUS = {
 	'open': { icon: 'i-lucide-circle-dot', color: 'annotation', label: 'thread.status.open' },
 	'ready-for-review': { icon: 'i-lucide-eye', color: 'info', label: 'thread.status.ready' },
 	'resolved': { icon: 'i-lucide-circle-check', color: 'success', label: 'thread.status.resolved' },
+	// A dismissal is closed without a change: neutral, never green.
+	'dismissed': { icon: 'i-lucide-circle-slash', color: 'neutral', label: 'inbox.group.dismissed' },
 } as const
 
 function shortId(id: string | undefined): string {
@@ -45,6 +53,7 @@ function shortId(id: string | undefined): string {
 
 const activeSubmission = computed(() => thread.value?.status === 'ready-for-review' ? detail.value?.submissions.at(-1) : undefined)
 const viewExists = computed(() => !!thread.value && inbox.threadViewExists(thread.value))
+const workspaceScoped = computed(() => thread.value?.scope === 'workspace')
 const scopeLabel = computed(() => thread.value?.variantNames.length ? thread.value.variantNames.join(', ') : t('inbox.filter.viewWide'))
 const unreadable = computed(() => thread.value ? inbox.detailErrors.value.get(thread.value.id) : undefined)
 
@@ -105,25 +114,80 @@ async function sendReply(): Promise<void> {
 }
 
 function onReplyKeydown(event: KeyboardEvent): void {
+	// ↑ in an empty reply box edits the viewer's latest editable message (scope/edit decision 16).
+	if (event.key === 'ArrowUp' && !reply.value && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey && detail.value) {
+		const messageId = latestEditableMessageId(detail.value, inbox.me.value)
+		if (messageId) {
+			event.preventDefault()
+			editingMessageId.value = messageId
+		}
+		return
+	}
 	if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return
 	event.preventDefault()
 	if (event.shiftKey) void resolvePrimary()
 	else void sendReply()
 }
 
-/** Non-default resolutions; on a ready thread they decline the submission. Obsolete leads (never pre-selected) for a lost anchor. */
+/** Grouped: Resolve (Answered, Verified) and Dismiss (No longer relevant, Duplicate…, Won't do). */
 const resolveMenu = computed<DropdownMenuItem[][]>(() => {
 	const current = thread.value
 	if (!current) return []
-	const items: DropdownMenuItem[] = [
-		...(current.status === 'ready-for-review' ? [{ label: t('comments.resolution.answered'), icon: 'i-lucide-message-circle-reply', onSelect: () => { void resolveAs('answered') } }] : []),
-		{ label: t('comments.resolution.wont-fix'), icon: 'i-lucide-circle-slash', onSelect: () => { void resolveAs('wont-fix') } },
-		{ label: t('comments.resolveDuplicate'), icon: 'i-lucide-copy', onSelect: () => ask('duplicate') },
-		{ label: t('comments.resolution.obsolete'), icon: 'i-lucide-archive', onSelect: () => { void resolveAs('obsolete') } },
-	]
-	if (current.anchorState === 'missing') items.unshift(items.pop()!)
-	return [items]
+	return resolveMenuGroups({
+		t,
+		status: current.status,
+		canVerify: !!activeSubmission.value,
+		resolve: (resolution) => { void resolveAs(resolution) },
+		askDuplicate: () => ask('duplicate'),
+	})
 })
+
+// ---------------------------------------------------------------------------------------------
+// Editing a message (scope/edit decisions 11–16)
+// ---------------------------------------------------------------------------------------------
+
+const editingMessageId = computed<string | undefined>({
+	get: () => inbox.editingMessage.value?.threadId === thread.value?.id ? inbox.editingMessage.value?.messageId : undefined,
+	set: (messageId) => {
+		inbox.editingMessage.value = messageId && thread.value ? { threadId: thread.value.id, messageId } : undefined
+		if (!messageId) void nextTick(() => replyArea.value?.textareaRef?.focus())
+	},
+})
+
+async function saveEdit(messageId: string, body: string): Promise<void> {
+	const id = thread.value?.id
+	if (id && await inbox.editMessage(id, messageId, body)) void nextTick(() => replyArea.value?.textareaRef?.focus())
+}
+
+// ---------------------------------------------------------------------------------------------
+// Delete comment (retract addendum decision 8): only while eligible, confirmed inline
+// ---------------------------------------------------------------------------------------------
+
+const retract = computed(() => inbox.canReply.value ? retractEligibility(detail.value, inbox.me.value) : { eligible: false as const })
+const confirmingDelete = ref(false)
+const deleteRefused = computed(() => !!thread.value && inbox.retractRefused.value === thread.value.id)
+
+/** The menu would hand focus back to its trigger as it closes; the delete confirm keeps it on Cancel. */
+const retractConfirm = ref<InstanceType<typeof RetractConfirm>>()
+function keepConfirmFocus(event: Event): void {
+	if (!confirmingDelete.value) return
+	event.preventDefault()
+	void nextTick(() => retractConfirm.value?.focusCancel())
+}
+
+function askDelete(): void {
+	inbox.retractRefused.value = undefined
+	pendingAction.value = undefined
+	confirmingDelete.value = true
+}
+
+/** On success the thread leaves the queue and this detail unmounts; the page moves focus (`inbox.deleted`). */
+async function confirmDelete(): Promise<void> {
+	const id = thread.value?.id
+	if (!id) return
+	await inbox.retract(id)
+	confirmingDelete.value = false
+}
 const resolveMenuOpen = ref(false)
 
 // ---------------------------------------------------------------------------------------------
@@ -192,13 +256,17 @@ async function submitForReview(draft: ReviewSubmissionDraft): Promise<boolean> {
 const overflow = computed<DropdownMenuItem[][]>(() => {
 	const current = thread.value
 	if (!current) return []
-	return [[
+	const groups: DropdownMenuItem[][] = [[
 		{ label: t('thread.copyLink'), icon: 'i-lucide-link', onSelect: () => { void copy(inbox.threadLink(current.id), t('comments.copiedLink')) } },
 		...(canSubmit.value ? [{ label: t('thread.submit'), icon: 'i-lucide-eye', onSelect: () => { submitOpen.value = true } }] : []),
 		...(inbox.canReply.value && viewExists.value && !compact.value ? [{ label: t('inbox.reanchorOnCanvas'), icon: 'i-lucide-crosshair', onSelect: () => inbox.reanchorOnCanvas(current) }] : []),
+		// Workspace threads have no Decision home (O3): re-anchor to a View's root first.
 		...(inbox.canPromote.value && viewExists.value && !compact.value ? [{ label: t('thread.promote'), icon: 'i-lucide-signpost', onSelect: openPromote }] : []),
 		{ label: t('comments.copyThreadId'), icon: 'i-lucide-copy', onSelect: () => { void copy(current.id, t('comments.copiedId')) } },
 	]]
+	if (retract.value.eligible)
+		groups.push([{ label: retract.value.empty ? t('comments.deleteEmpty') : t('comments.delete'), icon: 'i-lucide-trash-2', color: 'error', onSelect: askDelete }])
+	return groups
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -221,7 +289,10 @@ function openResolveMenu(): void {
 watch(() => thread.value?.id, () => {
 	pendingAction.value = undefined
 	resolveMenuOpen.value = false
+	confirmingDelete.value = false
 })
+// Someone engaged meanwhile (or the thread changed): the Delete affordance and its confirm go away.
+watch(() => retract.value.eligible, (eligible) => { if (!eligible) confirmingDelete.value = false })
 
 defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
 </script>
@@ -246,10 +317,10 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           class="line-clamp-2 min-w-0 flex-1 text-title font-semibold text-highlighted outline-none"
           :title="thread.title"
         >
-          {{ thread.title ?? (unreadable ? t('inbox.unreadableTitle') : `#${thread.anchor?.widgetId ?? ''}`) }}
+          {{ thread.title ?? (unreadable ? t('inbox.unreadableTitle') : workspaceScoped ? t('comments.workspaceComment') : `#${thread.widgetId ?? ''}`) }}
         </h2>
         <UTooltip
-          v-if="viewExists && !compact"
+          v-if="viewExists && !compact && !workspaceScoped"
           :text="t('inbox.openInCanvas')"
           :kbds="['o']"
         >
@@ -266,7 +337,7 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
         </UTooltip>
         <UDropdownMenu
           :items="overflow"
-          :content="{ align: 'end' }"
+          :content="{ align: 'end', onCloseAutoFocus: keepConfirmFocus }"
         >
           <UButton
             color="neutral"
@@ -291,11 +362,11 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
       </div>
       <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted">
         <UBadge
-          :color="STATUS[thread.status].color"
-          variant="subtle"
+          :color="STATUS[thread.inboxStatus].color"
+          :variant="thread.inboxStatus === 'dismissed' ? 'soft' : 'subtle'"
           size="sm"
-          :icon="STATUS[thread.status].icon"
-          :label="t(STATUS[thread.status].label)"
+          :icon="STATUS[thread.inboxStatus].icon"
+          :label="t(STATUS[thread.inboxStatus].label)"
           data-review-status
         />
         <UBadge
@@ -306,12 +377,25 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           :label="t(`comments.resolution.${thread.resolution}`)"
           :data-review-resolution="thread.resolution"
         />
-        <span class="min-w-0 truncate">{{ thread.viewName ?? t('inbox.viewMissing') }} › <span :class="thread.missingVariants.length ? 'text-warning' : ''">{{ scopeLabel }}</span></span>
         <span
-          v-if="thread.anchor"
-          class="min-w-0 truncate rounded-sm border border-default px-1.5 font-mono leading-5"
-          :title="thread.anchor.widgetId"
-        >{{ thread.anchorState === 'missing' ? `#${thread.anchor.widgetId}` : `${thread.widgetType ?? 'Widget'} · #${thread.anchor.widgetId}` }}</span>
+          v-if="workspaceScoped"
+          class="inline-flex min-w-0 items-center gap-1 truncate"
+          data-review-workspace
+        >
+          <UIcon
+            name="i-lucide-globe"
+            class="size-3.5 shrink-0"
+            aria-hidden="true"
+          />{{ t('comments.workspaceComment') }}
+        </span>
+        <template v-else>
+          <span class="min-w-0 truncate">{{ thread.viewName ?? t('inbox.viewMissing') }} › <span :class="thread.missingVariants.length ? 'text-warning' : ''">{{ scopeLabel }}</span></span>
+          <span
+            v-if="thread.widgetId"
+            class="min-w-0 truncate rounded-sm border border-default px-1.5 font-mono leading-5"
+            :title="thread.widgetId"
+          >{{ thread.anchorState === 'missing' ? `#${thread.widgetId}` : `${thread.widgetType ?? 'Widget'} · #${thread.widgetId}` }}</span>
+        </template>
       </div>
     </header>
 
@@ -326,7 +410,7 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           variant="subtle"
           icon="i-lucide-unlink"
           :title="viewExists ? t('comments.widgetGone') : t('inbox.viewGone')"
-          :description="viewExists ? t('comments.widgetGoneHint', { id: `#${thread.anchor?.widgetId}` }) : t('inbox.viewGoneHint')"
+          :description="viewExists ? t('comments.widgetGoneHint', { id: `#${thread.widgetId}` }) : t('inbox.viewGoneHint')"
           :actions="[
             ...(inbox.canReply.value && viewExists && !compact ? [{ label: t('thread.reanchor'), icon: 'i-lucide-crosshair', size: 'xs' as const, color: 'neutral' as const, variant: 'outline' as const, onClick: () => inbox.reanchorOnCanvas(thread!) }] : []),
             ...(inbox.canResolve.value && thread.status !== 'resolved' ? [{ label: t('inbox.resolveObsolete'), icon: 'i-lucide-archive', size: 'xs' as const, color: 'neutral' as const, variant: 'outline' as const, onClick: () => { void resolveAs('obsolete') } }] : []),
@@ -380,7 +464,12 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
 
         <ReviewTimeline
           v-if="detail"
+          v-model:editing-message-id="editingMessageId"
           :thread="detail"
+          :me="inbox.me.value"
+          :can-edit="inbox.canReply.value"
+          :saving="inbox.busy.value === 'edit'"
+          @save="saveEdit"
         />
         <div
           v-else-if="!unreadable"
@@ -402,8 +491,26 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
       :class="compact ? 'px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]' : 'px-4 py-3 sm:px-6'"
       data-review-actions
     >
+      <UAlert
+        v-if="deleteRefused"
+        color="warning"
+        variant="subtle"
+        icon="i-lucide-message-circle-warning"
+        :title="t('comments.errors.deleteEngaged')"
+        :ui="{ title: 'text-sm' }"
+        role="alert"
+        data-retract-refused
+      />
+      <RetractConfirm
+        v-if="confirmingDelete"
+        ref="retractConfirm"
+        :busy="inbox.busy.value === 'retract'"
+        :compact="compact"
+        @cancel="confirmingDelete = false"
+        @confirm="confirmDelete"
+      />
       <div
-        v-if="thread.status !== 'resolved'"
+        v-if="thread.status !== 'resolved' && !confirmingDelete"
         class="flex items-end gap-2"
       >
         <UTextarea
@@ -434,7 +541,11 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
       </div>
 
       <div
-        v-if="pendingAction"
+        v-if="confirmingDelete"
+        hidden
+      />
+      <div
+        v-else-if="pendingAction"
         class="grid gap-2 rounded-md bg-muted p-2"
         data-review-reason
       >
@@ -551,7 +662,7 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
         </UFieldGroup>
       </div>
       <p
-        v-if="thread.status !== 'resolved' && inbox.canResolve.value && !pendingAction"
+        v-if="thread.status !== 'resolved' && inbox.canResolve.value && !pendingAction && !confirmingDelete"
         :id="`review-resolve-hint-${thread.id}`"
         class="text-xs text-muted"
         :class="compact ? 'text-center' : 'text-end'"
@@ -559,7 +670,7 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
         {{ thread.status === 'ready-for-review' ? t('thread.resolveHint', { id: shortId(activeSubmission?.id) }) : t('comments.resolveAnswersHint') }}
       </p>
       <p
-        v-else-if="thread.status !== 'resolved' && !pendingAction"
+        v-else-if="thread.status !== 'resolved' && !pendingAction && !confirmingDelete"
         class="text-xs text-muted"
         :class="compact ? 'text-center' : 'text-end'"
       >
@@ -574,9 +685,9 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
     </p>
 
     <SubmitForReviewModal
-      v-if="canSubmit && thread.anchor"
+      v-if="canSubmit && thread.viewId"
       v-model:open="submitOpen"
-      :view-id="thread.anchor.viewId"
+      :view-id="thread.viewId"
       :submit="submitForReview"
       :busy="inbox.busy.value === 'submit'"
       :error="submitError"

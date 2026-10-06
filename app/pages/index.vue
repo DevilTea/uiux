@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { anchorViewId } from '../../src/domain/reviews/schema'
 import { computed, onMounted, ref, watch } from 'vue'
 import { defineShortcuts, navigateTo, useI18n } from '#imports'
 import type { TableColumn, TabsItem } from '@nuxt/ui'
@@ -41,7 +42,7 @@ type ViewRow = Readonly<{
 }>
 
 const rows = computed<ViewRow[]>(() => views.value.map((view) => {
-	const threads = reviews.value.filter(review => review.summary.anchor?.viewId === view.key)
+	const threads = reviews.value.filter(review => anchorViewId(review.summary.anchor) === view.key)
 	const entry = readiness.viewAssessment(view.key)
 	const blocking = splitReadinessDiagnostics(entry?.readiness?.blockingDiagnostics).blocking.length
 	// An older Workspace schema cannot be assessed until it is migrated: say that, not "blocked".

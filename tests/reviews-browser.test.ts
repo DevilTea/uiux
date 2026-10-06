@@ -121,11 +121,17 @@ describe('Reviews inbox (R8)', () => {
 			// The lost Widget is flagged in its row, never hidden.
 			expect(await page.locator(`[data-review-row="${seeded.missing}"] [data-review-anchor-warning]`).textContent()).toContain('Widget missing')
 
-			// Resolved threads are reachable through the explicit tab, in their own group.
+			// Resolved threads are reachable through the explicit tab, in their own group. Resolved means
+			// verified or answered; a thread closed as won't do is Dismissed (retract addendum decision 11).
 			await page.locator('[data-review-tabs] [role="tab"]', { hasText: 'Resolved' }).click()
 			await poll(() => groups(page)).toEqual(['resolved'])
 			expect(new URL(page.url()).searchParams.get('status')).toBe('resolved')
-			expect(await rowIds(page)).toEqual([seeded.answered, seeded.declined, DOGFOOD_THREAD])
+			expect(await rowIds(page)).toEqual([seeded.answered, DOGFOOD_THREAD])
+			await page.locator('[data-review-tabs] [role="tab"]', { hasText: 'Dismissed' }).click()
+			await poll(() => groups(page)).toEqual(['dismissed'])
+			await poll(() => new URL(page.url()).searchParams.get('status')).toBe('dismissed')
+			expect(await rowIds(page)).toEqual([seeded.declined])
+			expect(await page.locator(`[data-review-row="${seeded.declined}"] [data-row-resolution]`).textContent()).toContain('Dismissed · Won\'t do')
 		}
 		finally { await context.close() }
 	}, 60_000)
@@ -138,7 +144,7 @@ describe('Reviews inbox (R8)', () => {
 			await poll(() => detail.locator('[data-timeline-kind]').evaluateAll(items => items.map(item => item.getAttribute('data-timeline-kind'))))
 				.toEqual(['message', 'submission', 'resolved'])
 			expect(await detail.locator('[data-submission-not-accepted]').textContent()).toBe('Not accepted')
-			expect(await detail.locator('[data-resolution="wont-fix"]').textContent()).toContain('Won\'t fix')
+			expect(await detail.locator('[data-resolution="wont-fix"]').textContent()).toContain('Dismissed · Won\'t do')
 			expect(await detail.locator('[data-timeline-kind="resolved"]').textContent()).toContain('We keep the authoring order.')
 			// Submissions expand to their evidence references.
 			await detail.locator('[data-submission-evidence-toggle]').click()
@@ -171,16 +177,24 @@ describe('Reviews inbox (R8)', () => {
 			await poll(() => new URL(page.url()).searchParams.get('mine')).toBe('1')
 			await poll(() => page.locator('[data-review-empty="no-match"]').count()).toBe(1)
 			await page.locator('[data-review-tabs] [role="tab"]', { hasText: 'Resolved' }).click()
-			await poll(() => rowIds(page)).toEqual([seeded.answered, seeded.declined])
-
-			// Resolution narrows resolved threads.
-			await page.locator('[data-review-resolution-filter="answered"]').click()
 			await poll(() => rowIds(page)).toEqual([seeded.answered])
-			await poll(() => new URL(page.url()).searchParams.get('resolution')).toBe('answered')
+			// The Resolved tab offers its own resolutions only; Dismissed offers the three dismissals.
+			expect(await page.locator('[data-review-resolution-filter]').evaluateAll(items => items.map(item => item.getAttribute('data-review-resolution-filter')))).toEqual(['answered', 'verified'])
+			await page.locator('[data-review-tabs] [role="tab"]', { hasText: 'Dismissed' }).click()
+			await poll(() => rowIds(page)).toEqual([seeded.declined])
+			expect(await page.locator('[data-review-resolution-filter]').evaluateAll(items => items.map(item => item.getAttribute('data-review-resolution-filter')))).toEqual(['obsolete', 'duplicate', 'wont-fix'])
+
+			// Resolution narrows resolved and dismissed threads.
+			await page.locator('[data-review-resolution-filter="obsolete"]').click()
+			await poll(() => page.locator('[data-review-empty="no-match"]').count()).toBe(1)
+			await page.locator('[data-review-resolution-filter="obsolete"]').click()
+			await page.locator('[data-review-resolution-filter="wont-fix"]').click()
+			await poll(() => rowIds(page)).toEqual([seeded.declined])
+			await poll(() => new URL(page.url()).searchParams.get('resolution')).toBe('wont-fix')
 
 			// A filtered inbox is a shareable link.
 			await page.reload({ waitUntil: 'networkidle' })
-			await poll(() => rowIds(page)).toEqual([seeded.answered])
+			await poll(() => rowIds(page)).toEqual([seeded.declined])
 			await page.locator('[data-review-clear]').click()
 			await poll(() => [...new URL(page.url()).searchParams.keys()]).toEqual(['status'])
 
@@ -242,7 +256,9 @@ describe('Reviews inbox (R8)', () => {
 			await page.locator('[data-review-list]').focus()
 			await page.keyboard.press('Shift+E')
 			await poll(() => page.locator('[role="menu"]').count()).toBe(1)
-			expect(await page.locator('[role="menu"]').textContent()).toContain('Won\'t fix')
+			// Grouped: Resolve (Answered) and Dismiss (No longer relevant, Duplicate…, Won't do).
+			const menuText = await page.locator('[role="menu"]').textContent()
+			expect(menuText).toMatch(/Resolve.*Answered.*Dismiss.*No longer relevant.*Duplicate….*Won't do/u)
 			await page.keyboard.press('Escape')
 		}
 		finally { await context.close() }

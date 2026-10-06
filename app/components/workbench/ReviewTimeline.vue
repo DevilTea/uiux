@@ -1,21 +1,34 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from '#imports'
-import type { ReviewActor, ReviewResolution, ReviewThread } from '../../../src/domain/reviews/schema'
+import { anchorViewId, isWorkspaceAnchor, type ReviewActor, type ReviewAnchor, type ReviewResolution, type ReviewThread } from '../../../src/domain/reviews/schema'
 import { buildReviewTimeline } from '../../utils/review-timeline'
+import { isDismissal } from '../../utils/review-inbox'
 import { relativeTime } from '../../utils/widget-inspection'
-import { memberInitials } from '../../utils/member-initials'
 import { copyText } from '../../utils/copy-text'
 import { viewLocation } from '../../utils/workbench-routes'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
+import ReviewMessage from './ReviewMessage.vue'
 
 /**
  * One chronological timeline (Part 7 10b; brief d, section 8): messages read like a PR
  * conversation, and submissions, re-anchors and lifecycle events render as typed events with
- * their payloads. Submissions expand to their evidence references.
+ * their payloads. Submissions expand to their evidence references. Messages render through
+ * `ReviewMessage` (Edit, "· edited", Edit history); an edit keeps the message's position.
  */
-const props = defineProps<{ thread: ReviewThread }>()
+const props = withDefaults(defineProps<{
+	thread: ReviewThread
+	me?: string
+	canEdit?: boolean
+	/** The message being edited inline, if any. */
+	editingMessageId?: string
+	saving?: boolean
+}>(), { me: undefined, canEdit: false, editingMessageId: undefined, saving: false })
+const emit = defineEmits<{
+	(e: 'update:editingMessageId', value: string | undefined): void
+	(e: 'save', messageId: string, body: string): void
+}>()
 
 const { t, locale } = useI18n()
 const fmt = useWorkbenchFormat()
@@ -29,8 +42,9 @@ function actorName(actor: ReviewActor | undefined): string {
 function isAgent(actor: ReviewActor): boolean {
 	return actor.type === 'agent'
 }
-function isHuman(actor: ReviewActor): boolean {
-	return actor.type === 'human'
+/** A re-anchor end: `#widget`, or the Workspace. */
+function anchorText(anchor: ReviewAnchor): string {
+	return isWorkspaceAnchor(anchor) ? t('comments.workspaceTarget') : `#${anchor.widgetId}`
 }
 function shortId(id: string | undefined): string {
 	return id ? `${id.slice(0, 4)}…${id.slice(-4)}` : ''
@@ -50,7 +64,11 @@ async function copy(value: string): Promise<void> {
 	else feedback.error(undefined, t('comments.errors.copyFailed'))
 }
 
-const readiness = computed(() => viewLocation(props.thread.anchor.viewId, { panel: 'readiness' }))
+/** Workspace threads have no View readiness to open. */
+const readiness = computed(() => {
+	const viewId = anchorViewId(props.thread.anchor)
+	return viewId ? viewLocation(viewId, { panel: 'readiness' }) : undefined
+})
 </script>
 
 <template>
@@ -66,43 +84,26 @@ const readiness = computed(() => viewLocation(props.thread.anchor.viewId, { pane
       :data-timeline-kind="item.kind"
     >
       <template v-if="item.kind === 'message'">
-        <UAvatar
-          :text="isHuman(item.actor) ? memberInitials(actorName(item.actor)) : undefined"
-          :icon="isAgent(item.actor) ? 'i-lucide-bot' : isHuman(item.actor) ? undefined : 'i-lucide-cog'"
-          size="sm"
-          aria-hidden="true"
+        <ReviewMessage
+          :item="item"
+          :thread="thread"
+          :me="me"
+          :can-edit="canEdit"
+          :editing="editingMessageId === item.id"
+          :saving="saving && editingMessageId === item.id"
+          @update:editing="(on: boolean) => emit('update:editingMessageId', on ? item.id : undefined)"
+          @save="(body: string) => emit('save', item.id, body)"
         />
-        <div class="min-w-0">
-          <p class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
-            <b class="font-semibold text-highlighted">{{ actorName(item.actor) }}</b>
-            <UBadge
-              v-if="isAgent(item.actor)"
-              color="neutral"
-              variant="soft"
-              size="sm"
-              :label="t('comments.agent')"
-            />
-            <time
-              class="text-xs text-dimmed"
-              :datetime="item.at"
-              :title="fmt.dateTime(item.at)"
-            >{{ relativeTime(item.at, locale) }}</time>
-          </p>
-          <p
-            class="mt-1 max-w-[68ch] text-body break-words whitespace-pre-wrap text-default"
-            v-text="item.body"
-          />
-        </div>
       </template>
 
       <template v-else>
         <span
           class="mt-0.5 grid size-7 place-items-center rounded-full border border-default bg-default"
-          :class="item.kind === 'resolved' ? 'text-success' : 'text-muted'"
+          :class="item.kind === 'resolved' && !isDismissal(item.resolution) ? 'text-success' : 'text-muted'"
           aria-hidden="true"
         >
           <UIcon
-            :name="item.kind === 'submission' ? 'i-lucide-git-pull-request-arrow' : item.kind === 'resolved' ? 'i-lucide-circle-check' : item.kind === 'reopened' ? 'i-lucide-rotate-ccw' : 'i-lucide-crosshair'"
+            :name="item.kind === 'submission' ? 'i-lucide-git-pull-request-arrow' : item.kind === 'resolved' ? (isDismissal(item.resolution) ? 'i-lucide-circle-slash' : 'i-lucide-circle-check') : item.kind === 'reopened' ? 'i-lucide-rotate-ccw' : 'i-lucide-crosshair'"
             class="size-3.5"
           />
         </span>
@@ -203,7 +204,10 @@ const readiness = computed(() => viewLocation(props.thread.anchor.viewId, { pane
                       @click="copy(ref.evidence)"
                     />
                   </li>
-                  <li class="pt-1">
+                  <li
+                    v-if="readiness"
+                    class="pt-1"
+                  >
                     <ULink
                       :to="readiness"
                       class="text-xs text-muted underline-offset-2 hover:text-highlighted hover:underline"
@@ -230,12 +234,15 @@ const readiness = computed(() => viewLocation(props.thread.anchor.viewId, { pane
 
           <template v-else-if="item.kind === 'resolved'">
             <p class="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+              <!-- A dismissal is closed, not a success: neutral, never green (DESIGN.md, Green Means Done). -->
               <UBadge
-                color="success"
-                variant="subtle"
+                :color="isDismissal(item.resolution) ? 'neutral' : 'success'"
+                :variant="isDismissal(item.resolution) ? 'soft' : 'subtle'"
                 size="sm"
-                icon="i-lucide-circle-check"
-                :label="item.resolution === 'verified' ? t('inbox.timeline.verifiedChip', { id: shortId(item.submissionId) }) : t('inbox.timeline.resolvedChip', { resolution: resolutionLabel(item.resolution) })"
+                :icon="isDismissal(item.resolution) ? 'i-lucide-circle-slash' : 'i-lucide-circle-check'"
+                :label="item.resolution === 'verified'
+                  ? t('inbox.timeline.verifiedChip', { id: shortId(item.submissionId) })
+                  : t(isDismissal(item.resolution) ? 'inbox.timeline.dismissedChip' : 'inbox.timeline.resolvedChip', { resolution: resolutionLabel(item.resolution) })"
                 :data-resolution="item.resolution"
               />
               <span>{{ t('inbox.timeline.by', { name: actorName(item.actor) }) }}</span>
@@ -273,7 +280,7 @@ const readiness = computed(() => viewLocation(props.thread.anchor.viewId, { pane
 
           <template v-else>
             <p>
-              <b class="font-medium text-highlighted">{{ t('comments.reanchoredEvent', { from: `#${item.from.widgetId}`, to: `#${item.to.widgetId}` }) }}</b>
+              <b class="font-medium text-highlighted">{{ t('comments.reanchoredEvent', { from: anchorText(item.from), to: anchorText(item.to) }) }}</b>
               · {{ actorName(item.actor) }}
               · <time
                 class="text-xs text-dimmed"

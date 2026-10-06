@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { anchorViewId } from '../../../src/domain/reviews/schema'
 import { computed, nextTick } from 'vue'
 import { useI18n } from '#imports'
 import type { TabsItem } from '@nuxt/ui'
@@ -23,7 +24,7 @@ const { selectedView, selectedViewId, reviews } = workbench
 const comments = useCanvasComments()!
 
 const unresolvedHere = computed(() => reviews.value.filter(review =>
-	review.summary.anchor?.viewId === selectedViewId.value && review.summary.status !== 'resolved').length)
+	anchorViewId(review.summary.anchor) === selectedViewId.value && review.summary.status !== 'resolved').length)
 const findingsHere = computed(() => selectedView.value?.diagnostics.length ?? 0)
 
 const items = computed<TabsItem[]>(() => [

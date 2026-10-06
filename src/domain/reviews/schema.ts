@@ -104,6 +104,11 @@ export function anchorViewId(anchor: ReviewAnchor | undefined | null): string | 
 	return isWidgetAnchor(anchor) ? anchor.viewId : undefined
 }
 
+/** The anchored Widget id, or undefined for a Workspace thread. */
+export function anchorWidgetId(anchor: ReviewAnchor | undefined | null): string | undefined {
+	return isWidgetAnchor(anchor) ? anchor.widgetId : undefined
+}
+
 /** When the message was last edited, derived from `edits[]` (never stored). */
 export function messageEditedAt(message: Pick<ReviewMessage, 'edits'>): string | undefined {
 	return Array.isArray(message.edits) ? message.edits.at(-1)?.at : undefined

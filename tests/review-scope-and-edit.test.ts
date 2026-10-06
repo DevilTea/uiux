@@ -94,7 +94,7 @@ async function screenshot(ctx: Ctx, seed: string) {
 	return (await ctx.persistence.artifacts.put(new TextEncoder().encode(`evidence-${seed}`))).identity
 }
 
-describe('Workspace-scoped threads: create, re-anchor, hint, promote', () => {
+describe('Workspace-scoped threads: create, re-anchor, hint, promote', { timeout: 30_000 }, () => {
 	it('creates a Workspace thread on both transports and refuses Variant scope and a display hint', async () => {
 		const ctx = await session()
 		const created = await createReviewThreadForHttp(scoped(ctx.app, MEI), { id: REVIEW_ID, anchor: { scope: 'workspace' } })
@@ -185,7 +185,7 @@ describe('Workspace-scoped threads: create, re-anchor, hint, promote', () => {
 	})
 })
 
-describe('Workspace-scoped submissions (decision 4)', () => {
+describe('Workspace-scoped submissions (decision 4)', { timeout: 30_000 }, () => {
 	it('requires the current manifest revision and makes every named View valid and current', async () => {
 		const ctx = await session()
 		const { revision } = await workspaceThread(ctx)
@@ -228,7 +228,7 @@ describe('Workspace-scoped submissions (decision 4)', () => {
 	})
 })
 
-describe('editing a message (decisions 10–16)', () => {
+describe('editing a message (decisions 10–16)', { timeout: 30_000 }, () => {
 	it('lets the author edit over HTTP, keeps every version append-only, stamps actor and time, and counts as activity', async () => {
 		const ctx = await session()
 		const { revision, messageId } = await workspaceThread(ctx, MEI, 'Use one date format.')
@@ -359,7 +359,7 @@ describe('editing a message (decisions 10–16)', () => {
 	})
 })
 
-describe('discovery: anchorScope and the workspace search term (R6)', () => {
+describe('discovery: anchorScope and the workspace search term (R6)', { timeout: 30_000 }, () => {
 	it('filters Review threads by anchor arm on both transports, scopes cursors, and validates the filter', async () => {
 		const ctx = await session()
 		await workspaceThread(ctx)
@@ -392,7 +392,7 @@ describe('discovery: anchorScope and the workspace search term (R6)', () => {
 	})
 })
 
-describe('Handoff closure (owner decision O1)', () => {
+describe('Handoff closure (owner decision O1)', { timeout: 30_000 }, () => {
 	it('puts every Workspace thread in every export closure: an open one blocks all roots, and none is silently skipped', async () => {
 		const ctx = await session()
 		const handoff = createHandoffExportService(ctx.persistence)

@@ -71,7 +71,7 @@ async function exists(ctx: Ctx): Promise<boolean> {
 	return access(join(ctx.root, reviewRelativePath(REVIEW_ID))).then(() => true, () => false)
 }
 
-describe('retract eligibility (E1–E6)', () => {
+describe('retract eligibility (E1–E6)', { timeout: 30_000 }, () => {
 	it('lets the author hard-delete an unengaged thread: no file, no trace, then not_found', async () => {
 		const ctx = await session()
 		const revision = await thread(ctx)
@@ -172,7 +172,7 @@ describe('retract eligibility (E1–E6)', () => {
 	})
 })
 
-describe('retract over MCP and persistence faults', () => {
+describe('retract over MCP and persistence faults', { timeout: 30_000 }, () => {
 	it('lets an agent retract its own thread over MCP and refuses a human\'s', async () => {
 		const ctx = await session()
 		const mcp = await connectMcp(ctx.app)

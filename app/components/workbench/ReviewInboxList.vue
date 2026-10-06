@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { navigateTo, useI18n } from '#imports'
 import type { TabsItem } from '@nuxt/ui'
-import type { ReviewResolution, ReviewStatus } from '../../../src/domain/reviews/schema'
+import type { ReviewResolution } from '../../../src/domain/reviews/schema'
 import { useReviewInbox } from '../../composables/useReviewInbox'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import { relativeTime } from '../../utils/widget-inspection'
@@ -10,9 +10,14 @@ import { memberInitials } from '../../utils/member-initials'
 import {
 	activeFacetCount,
 	DEFAULT_INBOX_STATUS,
+	DISMISS_RESOLUTIONS,
 	INBOX_RESOLUTIONS,
+	isDismissal,
+	RESOLVE_RESOLUTIONS,
 	VIEW_WIDE_SCOPE,
+	WORKSPACE_VIEW_TOKEN,
 	type InboxFilter,
+	type InboxStatus,
 	type InboxThread,
 } from '../../utils/review-inbox'
 import ReviewInboxFilters from './ReviewInboxFilters.vue'
@@ -23,7 +28,7 @@ import ReviewInboxFilters from './ReviewInboxFilters.vue'
  * The list is a listbox: J / K or the arrow keys move, Enter opens.
  */
 const props = withDefaults(defineProps<{ phone?: boolean; keyboard?: boolean }>(), { phone: false, keyboard: true })
-const emit = defineEmits<{ (e: 'open', threadId: string): void }>()
+const emit = defineEmits<{ (e: 'open', threadId: string): void; (e: 'compose'): void }>()
 
 const { t, locale } = useI18n()
 const fmt = useWorkbenchFormat()
@@ -38,17 +43,18 @@ const waitingSummary = computed(() => {
 })
 
 // ---------------------------------------------------------------------------------------------
-// Status tabs: Inbox (ready + open), Ready, Open, Resolved
+// Status tabs: Inbox (ready + open), Ready, Open, Resolved (verified, answered), Dismissed
 // ---------------------------------------------------------------------------------------------
 
-type TabValue = 'inbox' | 'ready' | 'open' | 'resolved'
-const TAB_STATUS: Record<TabValue, readonly ReviewStatus[]> = {
+type TabValue = 'inbox' | 'ready' | 'open' | 'resolved' | 'dismissed'
+const TAB_STATUS: Record<TabValue, readonly InboxStatus[]> = {
 	inbox: DEFAULT_INBOX_STATUS,
 	ready: ['ready-for-review'],
 	open: ['open'],
 	resolved: ['resolved'],
+	dismissed: ['dismissed'],
 }
-const TABS: readonly TabValue[] = ['inbox', 'ready', 'open', 'resolved']
+const TABS: readonly TabValue[] = ['inbox', 'ready', 'open', 'resolved', 'dismissed']
 
 const tab = computed<TabValue | undefined>({
 	get: () => TABS.find((value) => {
@@ -58,7 +64,7 @@ const tab = computed<TabValue | undefined>({
 	}),
 	set: (value) => {
 		if (!value) return
-		inbox.setFilter({ status: [...TAB_STATUS[value]], ...(value === 'resolved' ? {} : { resolution: [] }) })
+		inbox.setFilter({ status: [...TAB_STATUS[value]], resolution: [] })
 	},
 })
 
@@ -67,9 +73,11 @@ const tabItems = computed<TabsItem[]>(() => {
 	const badge = (n: number, annotation = false) => n ? { label: String(n), color: annotation ? 'annotation' as const : 'neutral' as const, variant: 'soft' as const, size: 'sm' as const } : undefined
 	return [
 		{ value: 'inbox', label: t('inbox.tab.inbox'), badge: badge(counts['ready-for-review'] + counts.open) },
-		{ value: 'ready', label: props.phone ? t('inbox.tab.ready') : t('inbox.group.ready'), badge: badge(counts['ready-for-review']) },
+		// Five tabs share the 440px list: the short "Ready" keeps every label whole (the group heading says it in full).
+		{ value: 'ready', label: t('inbox.tab.ready'), badge: badge(counts['ready-for-review']) },
 		{ value: 'open', label: t('inbox.group.open'), badge: badge(counts.open, true) },
 		{ value: 'resolved', label: t('inbox.group.resolved') },
+		{ value: 'dismissed', label: t('inbox.group.dismissed') },
 	]
 })
 
@@ -78,7 +86,12 @@ function selectTab(index: number): void {
 	if (value) tab.value = value
 }
 
-const showsResolved = computed(() => !inbox.filter.value.status.length || inbox.filter.value.status.includes('resolved'))
+/** Resolution chips follow the tab: Resolved narrows Answered / Verified, Dismissed the three dismissals. */
+const resolutionChips = computed<readonly ReviewResolution[]>(() => {
+	const status = inbox.filter.value.status
+	if (!status.length) return INBOX_RESOLUTIONS
+	return [...(status.includes('resolved') ? RESOLVE_RESOLUTIONS : []), ...(status.includes('dismissed') ? DISMISS_RESOLUTIONS : [])]
+})
 
 function toggleResolution(resolution: ReviewResolution): void {
 	const current = inbox.filter.value.resolution
@@ -111,7 +124,7 @@ const chips = computed<readonly Chip[]>(() => {
 	const result: Chip[] = []
 	const drop = <K extends keyof InboxFilter>(key: K, value: string) => () => inbox.setFilter({ [key]: (filter[key] as readonly string[]).filter(item => item !== value) } as Partial<InboxFilter>)
 	for (const id of filter.views) {
-		const name = threads.find(item => item.anchor?.viewId === id)?.viewName ?? t('inbox.viewMissing')
+		const name = id === WORKSPACE_VIEW_TOKEN ? t('inbox.filter.workspace') : threads.find(item => item.viewId === id)?.viewName ?? t('inbox.viewMissing')
 		result.push({ key: `view-${id}`, label: t('inbox.chip.view', { value: name }), remove: drop('views', id) })
 	}
 	for (const scope of filter.scopes)
@@ -140,10 +153,16 @@ const STATUS_ICON = {
 	'open': { name: 'i-lucide-circle-dot', class: 'text-annotation' },
 	'ready-for-review': { name: 'i-lucide-eye', class: 'text-info' },
 	'resolved': { name: 'i-lucide-circle-check', class: 'text-success' },
+	'dismissed': { name: 'i-lucide-circle-slash', class: 'text-muted' },
 } as const
 
-function groupLabel(status: ReviewStatus): string {
-	return t(status === 'ready-for-review' ? 'inbox.group.ready' : status === 'open' ? 'inbox.group.open' : 'inbox.group.resolved')
+function groupLabel(status: InboxStatus): string {
+	return t(status === 'ready-for-review' ? 'inbox.group.ready' : status === 'open' ? 'inbox.group.open' : status === 'dismissed' ? 'inbox.group.dismissed' : 'inbox.group.resolved')
+}
+
+/** "Workspace" for a Workspace thread, else the View name (or that it is missing). */
+function placeText(item: InboxThread): string {
+	return item.scope === 'workspace' ? t('inbox.workspaceRow') : item.viewName ?? t('inbox.viewMissing')
 }
 
 function authorName(item: InboxThread): string {
@@ -157,13 +176,13 @@ function scopeText(item: InboxThread): string {
 /** The row's accessible name joins status, author, title, place and time (brief d, section 11). */
 function rowLabel(item: InboxThread): string {
 	return [
-		groupLabel(item.status),
+		groupLabel(item.inboxStatus),
 		item.status === 'resolved' && item.resolution ? t(`comments.resolution.${item.resolution}`) : '',
 		inbox.isUnread(item) ? t('inbox.updated') : '',
 		authorName(item),
 		item.title ?? '',
-		`${item.viewName ?? t('inbox.viewMissing')}, ${scopeText(item)}`,
-		item.anchor ? `#${item.anchor.widgetId}` : '',
+		item.scope === 'workspace' ? t('comments.workspaceComment') : `${placeText(item)}, ${scopeText(item)}`,
+		item.widgetId ? `#${item.widgetId}` : '',
 		item.anchorState === 'missing' ? t('inbox.anchorMissing') : item.anchorState === 'stale' ? t('comments.staleWord') : '',
 		item.latestActivityAt ? relativeTime(item.latestActivityAt, locale.value) : '',
 		t('reviews.messageCount', item.messageCount),
@@ -207,8 +226,11 @@ function onListKeydown(event: KeyboardEvent): void {
 
 const searchInput = ref<{ inputRef?: HTMLInputElement }>()
 
+const heading = ref<HTMLElement>()
+
 defineExpose({
 	focusList: () => listbox.value?.focus(),
+	focusHeading: () => heading.value?.focus(),
 	focusSearch: () => searchInput.value?.inputRef?.focus(),
 	openFilters: () => { filtersOpen.value = true },
 	selectTab,
@@ -224,7 +246,7 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
 	if (inbox.ordered.value.length) return undefined
 	if (!total.value) return 'none'
 	const defaultQueue = tab.value === 'inbox' && !hasNarrowing.value
-	if (defaultQueue && inbox.totals.value.resolved === total.value) return 'caught-up'
+	if (defaultQueue && inbox.totals.value.resolved + inbox.totals.value.dismissed === total.value) return 'caught-up'
 	return 'no-match'
 })
 </script>
@@ -238,16 +260,30 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
       <div class="flex min-w-0 items-center gap-2">
         <!-- Phones already title the page in the top bar; the heading stays for assistive tech. -->
         <h1
-          class="min-w-0 truncate text-headline font-semibold text-highlighted"
+          ref="heading"
+          tabindex="-1"
+          class="shrink-0 text-headline font-semibold text-highlighted outline-none"
           :class="props.phone ? 'sr-only' : ''"
+          data-review-heading
         >
           {{ t('inbox.title') }}
         </h1>
         <span
           v-if="inbox.loaded.value"
-          class="text-xs text-dimmed tabular-nums"
+          class="min-w-0 truncate text-xs text-dimmed tabular-nums"
+          :title="waitingSummary"
         >{{ waitingSummary }}</span>
         <span class="flex-1" />
+        <UButton
+          v-if="inbox.canReply.value"
+          color="neutral"
+          variant="outline"
+          size="sm"
+          icon="i-lucide-message-square-plus"
+          :label="t('inbox.newComment')"
+          data-review-new-comment
+          @click="emit('compose')"
+        />
         <UButton
           color="neutral"
           variant="ghost"
@@ -408,19 +444,19 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
       variant="link"
       color="primary"
       :aria-label="t('inbox.statusLabel')"
-      :ui="{ root: 'shrink-0 gap-0', list: 'border-b border-default px-2', trigger: 'px-2', trailingBadge: 'tabular-nums' }"
+      :ui="{ root: 'shrink-0 gap-0', list: 'border-b border-default px-2 overflow-x-auto', trigger: 'shrink-0 px-2', label: 'whitespace-nowrap', trailingBadge: 'tabular-nums' }"
       data-review-tabs
     />
 
     <div
-      v-if="showsResolved"
+      v-if="resolutionChips.length"
       class="flex flex-wrap items-center gap-1 border-b border-default px-4 py-2"
       role="group"
       :aria-label="t('inbox.resolutionLabel')"
       data-review-resolutions
     >
       <UButton
-        v-for="resolution in INBOX_RESOLUTIONS"
+        v-for="resolution in resolutionChips"
         :key="resolution"
         size="xs"
         color="neutral"
@@ -501,6 +537,8 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
             ]"
             :data-review-row="item.id"
             :data-review-status="item.status"
+            :data-review-inbox-status="item.inboxStatus"
+            :data-review-scope="item.scope"
             :data-unread="inbox.isUnread(item) ? '' : undefined"
             @click="activate(item.id)"
           >
@@ -510,9 +548,9 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
               aria-hidden="true"
             />
             <UIcon
-              :name="STATUS_ICON[item.status].name"
+              :name="STATUS_ICON[item.inboxStatus].name"
               class="mt-0.5 size-4"
-              :class="STATUS_ICON[item.status].class"
+              :class="STATUS_ICON[item.inboxStatus].class"
               aria-hidden="true"
             />
             <UAvatar
@@ -533,15 +571,21 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
                 <span
                   class="truncate text-sm text-highlighted"
                   :class="inbox.isUnread(item) ? 'font-semibold' : ''"
-                >{{ item.title ?? (inbox.detailErrors.value.has(item.id) ? t('inbox.unreadableTitle') : `#${item.anchor?.widgetId ?? ''}`) }}</span>
+                >{{ item.title ?? (inbox.detailErrors.value.has(item.id) ? t('inbox.unreadableTitle') : item.scope === 'workspace' ? t('comments.workspaceComment') : `#${item.widgetId ?? ''}`) }}</span>
               </span>
               <span class="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted">
-                <span class="min-w-0 truncate">{{ authorName(item) }} · {{ item.viewName ?? t('inbox.viewMissing') }}{{ item.variantNames.length ? ` › ${scopeText(item)}` : '' }}</span>
+                <span class="inline-flex min-w-0 items-center gap-1 truncate">{{ authorName(item) }} ·
+                  <UIcon
+                    v-if="item.scope === 'workspace'"
+                    name="i-lucide-globe"
+                    class="size-3.5 shrink-0"
+                    data-review-workspace-icon
+                  />{{ placeText(item) }}{{ item.variantNames.length ? ` › ${scopeText(item)}` : '' }}</span>
                 <span
-                  v-if="item.anchor"
+                  v-if="item.widgetId"
                   class="font-mono"
                   :class="item.anchorState === 'missing' ? 'text-warning' : ''"
-                >#{{ item.anchor.widgetId }}</span>
+                >#{{ item.widgetId }}</span>
                 <span
                   v-if="item.anchorState !== 'valid'"
                   class="inline-flex items-center gap-0.5 text-warning"
@@ -561,13 +605,14 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
                 </template>
                 <span
                   v-if="item.status === 'resolved' && item.resolution"
-                  class="inline-flex items-center gap-0.5 text-success"
+                  class="inline-flex items-center gap-0.5"
+                  :class="isDismissal(item.resolution) ? 'text-muted' : 'text-success'"
                   :data-row-resolution="item.resolution"
                 >
                   <UIcon
-                    name="i-lucide-circle-check"
+                    :name="isDismissal(item.resolution) ? 'i-lucide-circle-slash' : 'i-lucide-circle-check'"
                     class="size-3.5"
-                  />{{ t(`comments.resolution.${item.resolution}`) }}
+                  />{{ isDismissal(item.resolution) ? t('inbox.timeline.dismissedChip', { resolution: t(`comments.resolution.${item.resolution}`) }) : t(`comments.resolution.${item.resolution}`) }}
                 </span>
               </span>
             </span>
@@ -604,7 +649,7 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
           {{ t('inbox.caughtUp') }}
         </p>
         <p class="text-sm text-muted">
-          {{ t('inbox.resolvedCount', inbox.totals.value.resolved) }}
+          {{ [inbox.totals.value.resolved ? t('inbox.resolvedCount', inbox.totals.value.resolved) : '', inbox.totals.value.dismissed ? t('inbox.dismissedCount', { n: inbox.totals.value.dismissed }) : ''].filter(Boolean).join(' · ') }}
         </p>
         <UButton
           size="sm"

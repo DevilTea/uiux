@@ -46,7 +46,9 @@ const groups = computed<readonly Group[]>(() => {
 		{ key: 'overcap', label: t('pins.notOnCanvasGroup'), icon: 'i-lucide-eye-off', rows: placeable.filter(item => item.inScope && notOnCanvas.has(item.id)) },
 		{ key: 'unplaced', label: t('comments.group.unplaced'), icon: 'i-lucide-triangle-alert', rows: all.filter(unplaceable) },
 		{ key: 'other', label: t('pins.otherVariants', { n: placeable.filter(item => !item.inScope).length }), rows: placeable.filter(item => !item.inScope) },
-		{ key: 'resolved', label: t('comments.group.resolved'), rows: here.filter(item => item.status === 'resolved') },
+		{ key: 'resolved', label: t('comments.group.resolved'), rows: here.filter(item => item.status === 'resolved' && !item.dismissed) },
+		// Dismissed threads are listed with the resolved ones, but never drawn as pins.
+		{ key: 'dismissed', label: t('comments.group.dismissed'), icon: 'i-lucide-circle-slash', rows: placeable.filter(item => item.dismissed) },
 	]
 	return result.filter(group => group.rows.length)
 })
@@ -174,7 +176,7 @@ function onListKeydown(event: KeyboardEvent): void {
               v-if="group.icon"
               :name="group.icon"
               class="size-3.5"
-              :class="group.key === 'overcap' || group.key === 'view' ? 'text-muted' : 'text-warning'"
+              :class="group.key === 'overcap' || group.key === 'view' || group.key === 'dismissed' ? 'text-muted' : 'text-warning'"
             />
           </h2>
           <p
@@ -269,5 +271,25 @@ function onListKeydown(event: KeyboardEvent): void {
         data-comments-empty="none"
       />
     </div>
+
+    <!-- Workspace comments never sit on a View's canvas (R7); they are one click away in Reviews. -->
+    <p
+      v-if="comments.workspaceThreadCount.value"
+      class="flex items-center gap-1.5 border-t border-default px-3 py-2 text-xs text-muted"
+      data-comments-workspace-footer
+    >
+      <UIcon
+        name="i-lucide-globe"
+        class="size-3.5 shrink-0"
+        aria-hidden="true"
+      />
+      <ULink
+        :to="{ path: '/reviews', query: { view: 'workspace' } }"
+        class="underline-offset-2 hover:text-highlighted hover:underline"
+        :title="t('comments.workspaceFooterHint')"
+      >
+        {{ t('comments.workspaceFooter', comments.workspaceThreadCount.value) }}
+      </ULink>
+    </p>
   </div>
 </template>
