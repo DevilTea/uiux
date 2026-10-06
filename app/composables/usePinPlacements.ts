@@ -37,10 +37,12 @@ export function usePinPlacements(
 	options: Readonly<{ openThreadId?: Ref<string | undefined>; pendingThreadId?: Ref<string | undefined> }> = {},
 ): PinPlacementsApi {
 	const { preview } = useWorkbench()
+	const owner = {}
 	watch([threads, () => options.openThreadId?.value, () => options.pendingThreadId?.value], ([next, openThreadId, pendingThreadId]) => {
-		preview.setPinThreads(next, { ...(openThreadId ? { openThreadId } : {}), ...(pendingThreadId ? { pendingThreadId } : {}) })
+		preview.setPinThreads(next, { ...(openThreadId ? { openThreadId } : {}), ...(pendingThreadId ? { pendingThreadId } : {}) }, owner)
 	}, { immediate: true })
-	onScopeDispose(() => preview.setPinThreads([]))
+	// Releases only this consumer's threads: the next View page declares its pins before this scope ends.
+	onScopeDispose(() => preview.releasePinThreads(owner))
 
 	const placements = computed(() => preview.pinPlacements.value)
 	return Object.freeze({

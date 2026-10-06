@@ -3,7 +3,7 @@ import { computed, nextTick, ref } from 'vue'
 import { useI18n } from '#imports'
 import { useWorkbench } from '../../../composables/useWorkbench'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
-import { statusKey, useCanvasComments, type CommentFilter, type CommentThread } from '../../../composables/useCanvasComments'
+import { statusKey, useCanvasComments, VIEW_ANCHOR_WIDGET_ID, type CommentFilter, type CommentThread } from '../../../composables/useCanvasComments'
 import CommentRow from './CommentRow.vue'
 import { flattenWidgetTree } from '../../../../src/preview/widget-tree'
 import { MAX_TRACKED_WIDGETS } from '../../../../src/preview/protocol/schema'
@@ -36,9 +36,12 @@ const groups = computed<readonly Group[]>(() => {
 	const placeable = all.filter(item => !unplaceable(item))
 	const notOnCanvas = new Set(comments.notOnCanvas.value.ids)
 	const here = placeable.filter(item => item.inScope && !notOnCanvas.has(item.id))
+	// Threads on the View as a whole (the RootShell anchor) lead, apart from the Widget threads.
+	const onView = (item: CommentThread) => item.anchor.widgetId === VIEW_ANCHOR_WIDGET_ID
 	const result: Group[] = [
-		{ key: 'ready', label: t('comments.group.ready'), rows: here.filter(item => item.status === 'ready-for-review') },
-		{ key: 'open', label: t('comments.group.open'), rows: here.filter(item => item.status === 'open') },
+		{ key: 'view', label: t('comments.group.view'), icon: 'i-lucide-app-window', rows: here.filter(item => onView(item) && item.status !== 'resolved') },
+		{ key: 'ready', label: t('comments.group.ready'), rows: here.filter(item => !onView(item) && item.status === 'ready-for-review') },
+		{ key: 'open', label: t('comments.group.open'), rows: here.filter(item => !onView(item) && item.status === 'open') },
 		// Decision 6: Widgets beyond the tracking cap get no stream and no pin; they are listed here instead.
 		{ key: 'overcap', label: t('pins.notOnCanvasGroup'), icon: 'i-lucide-eye-off', rows: placeable.filter(item => item.inScope && notOnCanvas.has(item.id)) },
 		{ key: 'unplaced', label: t('comments.group.unplaced'), icon: 'i-lucide-triangle-alert', rows: all.filter(unplaceable) },
@@ -72,8 +75,11 @@ function reanchor(item: CommentThread): void {
 }
 
 function startCommenting(): void {
-	preview.setCanvasTool('comment')
+	comments.toggleCommentMode()
 }
+
+/** "Comment on this View": a blocked one says why (tooltip, then a toast when used anyway). */
+const viewCommentBlocked = computed(() => comments.createBlockedReason.value)
 
 // J / K move between rows (brief c, section 11).
 const list = ref<HTMLElement>()
@@ -115,6 +121,27 @@ function onListKeydown(event: KeyboardEvent): void {
           <span class="text-muted tabular-nums">{{ counts[item.key] }}</span>
         </UButton>
       </div>
+      <!-- Phones never start comments (DESIGN.md "Mobile"); the canvas pill says so there. -->
+      <UTooltip
+        v-if="!phone && !workbench.isReadOnly.value"
+        :text="viewCommentBlocked ?? t('comments.commentOnViewHint')"
+      >
+        <UButton
+          size="xs"
+          color="neutral"
+          variant="outline"
+          icon="i-lucide-message-square-plus"
+          class="ms-auto"
+          :class="viewCommentBlocked ? 'cursor-not-allowed text-dimmed' : ''"
+          :aria-disabled="viewCommentBlocked ? 'true' : undefined"
+          :aria-description="viewCommentBlocked"
+          data-comment-on-view="tab"
+          :data-blocked="viewCommentBlocked ? '' : undefined"
+          @click="comments.commentOnView()"
+        >
+          {{ t('comments.commentOnViewShort') }}
+        </UButton>
+      </UTooltip>
     </div>
 
     <UAlert
@@ -147,7 +174,7 @@ function onListKeydown(event: KeyboardEvent): void {
               v-if="group.icon"
               :name="group.icon"
               class="size-3.5"
-              :class="group.key === 'overcap' ? 'text-muted' : 'text-warning'"
+              :class="group.key === 'overcap' || group.key === 'view' ? 'text-muted' : 'text-warning'"
             />
           </h2>
           <p

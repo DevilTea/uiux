@@ -128,6 +128,8 @@ export function createPreviewSession(state: WorkbenchState) {
 	const pinThreads = shallowRef<readonly PinThreadInput[]>([])
 	const pinOptions = shallowRef<PinTrackingOptions>({})
 	const canvasMapping = shallowRef<CanvasMappingState>({})
+	/** The consumer whose threads `pinThreads` holds (see `releasePinThreads`). */
+	let pinOwner: object | undefined
 
 	/** The phase shown to users. No View mounted means no session is expected, not one that is still starting. */
 	const sessionPhase = computed<SessionPhase>(() => state.selectedViewId.value ? handshakePhase.value : 'idle')
@@ -495,9 +497,17 @@ export function createPreviewSession(state: WorkbenchState) {
 		else updateGeometryDemand()
 	}
 
-	/** Registers what a committed comment-range target does (the canvas opens the composer at it). */
-	function onCommentTarget(handler: ((target: CommentTarget) => void) | undefined): void {
+	/**
+	 * Registers what a committed comment-range target does (the canvas opens the composer at it)
+	 * and returns the unregister function. That function clears only its own handler: moving
+	 * between Views sets up the next page's comments layer before the previous one is disposed, and
+	 * the late disposal must not unregister the handler the new page just installed.
+	 */
+	function onCommentTarget(handler: (target: CommentTarget) => void): () => void {
 		commentTargetHandler = handler
+		return () => {
+			if (commentTargetHandler === handler) commentTargetHandler = undefined
+		}
 	}
 
 	/**
@@ -510,9 +520,15 @@ export function createPreviewSession(state: WorkbenchState) {
 		return true
 	}
 
-	/** Registers the comments layer's Escape, which closes the composer or bubble before the mode exits. */
-	function onCommentEscape(handler: (() => boolean) | undefined): void {
+	/**
+	 * Registers the comments layer's Escape, which closes the composer or bubble before the mode
+	 * exits, and returns the unregister function (which clears only its own handler).
+	 */
+	function onCommentEscape(handler: () => boolean): () => void {
 		commentEscapeHandler = handler
+		return () => {
+			if (commentEscapeHandler === handler) commentEscapeHandler = undefined
+		}
 	}
 
 	/** Workbench owns Escape (Part 3): close the composer or bubble first, then leave Comment mode. */
@@ -530,10 +546,19 @@ export function createPreviewSession(state: WorkbenchState) {
 	 * geometry streams in decision 6 order; `pinPlacements` reports each thread's placement.
 	 * Pins stay tracked during Comment mode (decision 8).
 	 */
-	function setPinThreads(threads: readonly PinThreadInput[], options: PinTrackingOptions = {}): void {
+	function setPinThreads(threads: readonly PinThreadInput[], options: PinTrackingOptions = {}, owner?: object): void {
+		pinOwner = owner
 		pinThreads.value = Object.freeze([...threads])
 		pinOptions.value = Object.freeze({ ...options })
 		updateGeometryDemand()
+	}
+
+	/**
+	 * Stops tracking `owner`'s pins, unless another consumer has declared its threads since: the
+	 * next View page declares its pins before the previous page's scope is disposed.
+	 */
+	function releasePinThreads(owner: object): void {
+		if (pinOwner === owner) setPinThreads([])
 	}
 
 	const pinPlacements = computed<readonly PinPlacement[]>(() => {
@@ -666,6 +691,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		const committed = targeting.commitFinalTarget(generation, interaction, { widgetId })
 		if (committed.status !== 'committed') return
 		targetingInteractionId.value = undefined
+		releaseIframeFocus()
 		if (committed.purpose === 'inspection') {
 			selectWidget(widgetId)
 			// The commit ended the interaction; Select keeps targeting with a fresh one.
@@ -676,6 +702,19 @@ export function createPreviewSession(state: WorkbenchState) {
 		// Comment stays on after a commit (brief c, section 5): a fresh interaction follows at once.
 		applyToolInteraction()
 		commentTargetHandler?.({ widgetId, ...(point ? { point } : {}) })
+	}
+
+	/**
+	 * A click that committed a Select or Comment target also moved keyboard focus into the iframe,
+	 * whose document would then swallow every Workbench key (`C`, `V`, `I`, `Shift C`, `J`/`K`,
+	 * `⌘K`): pressing `C` after selecting a Widget silently did nothing (review feedback 8dd59d25).
+	 * The Workbench takes focus back to the canvas region after each commit. Interact holds no
+	 * targeting interaction, so there the View keeps its keys, as it should.
+	 */
+	function releaseIframeFocus(): void {
+		const iframe = previewIframe.value
+		if (!iframe || document.activeElement !== iframe) return
+		iframe.closest<HTMLElement>('[data-canvas]')?.focus({ preventScroll: true })
 	}
 
 	function onWindowMessage(event: MessageEvent): void {
@@ -792,6 +831,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		hoverCandidate,
 		canvasMapping,
 		setPinThreads,
+		releasePinThreads,
 		pinPlacements,
 		geometryStreams,
 		selectWidget,

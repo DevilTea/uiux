@@ -10,7 +10,7 @@ import { flowPath, viewLocation } from '../../utils/workbench-routes'
 const { t } = useI18n()
 const workbench = useWorkbench()
 const shell = useWorkbenchShell()
-const { views, flows, reviews, reviewReadOnly } = workbench
+const { views, flows, reviews } = workbench
 
 function statusLabel(status: string | undefined): string {
 	if (status === 'resolved') return t('reviews.status.resolved')
@@ -60,7 +60,7 @@ const groups = computed<CommandPaletteGroup<CommandPaletteItem>[]>(() => {
 			items: reviews.value
 				.filter(review => review.summary.anchor)
 				.map(review => ({
-					label: `#${review.summary.anchor!.widgetId}`,
+					label: review.summary.anchor!.widgetId === 'root' ? t('comments.viewTarget') : `#${review.summary.anchor!.widgetId}`,
 					suffix: `${viewNames.get(review.summary.anchor!.viewId) ?? review.summary.anchor!.viewId} · ${statusLabel(review.summary.status)}`,
 					icon: review.summary.status === 'resolved' ? 'i-lucide-circle-check' : review.summary.status === 'ready-for-review' ? 'i-lucide-eye' : 'i-lucide-circle-dot',
 					to: viewLocation(review.summary.anchor!.viewId, { thread: review.key, panel: 'comments' }),
@@ -83,8 +83,16 @@ const groups = computed<CommandPaletteGroup<CommandPaletteItem>[]>(() => {
 		})
 	}
 	const actions: CommandPaletteItem[] = []
-	if (!reviewReadOnly.value && canvas?.canComment())
-		actions.push({ label: t('palette.toggleComment'), icon: 'i-lucide-message-circle-plus', kbds: ['C'], onSelect: () => canvas.selectTool('comment') })
+	// Offered with the canvas (not in a published snapshot, which has no reviewing surface); when it
+	// can't start, it is listed disabled with the reason, never just missing.
+	if (canvas && !workbench.isReadOnly.value) {
+		const toolBlocked = canvas.commentBlockedReason()
+		const viewBlocked = canvas.viewCommentBlockedReason()
+		actions.push(
+			{ label: t('palette.toggleComment'), icon: 'i-lucide-message-circle-plus', kbds: toolBlocked ? undefined : ['C'], disabled: !!toolBlocked, suffix: toolBlocked, onSelect: () => canvas.selectTool('comment') },
+			{ label: t('comments.commentOnView'), icon: 'i-lucide-message-square-plus', disabled: !!viewBlocked, suffix: viewBlocked, onSelect: () => canvas.commentOnView() },
+		)
+	}
 	actions.push(
 		{ label: t('palette.toggleTheme'), icon: 'i-lucide-sun-moon', kbds: ['meta', '.'], onSelect: () => shell.toggleWorkbenchTheme() },
 		{ label: t('palette.switchLanguage'), icon: 'i-lucide-languages', onSelect: () => shell.switchWorkbenchLanguage() },

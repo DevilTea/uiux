@@ -948,7 +948,7 @@ describe('Canvas comments (R6 targeting and composer, R7a pins and bubble)', () 
 		finally { await context.close() }
 	}, 60_000)
 
-	it('gives the Viewer role no comment tool', async () => {
+	it('gives the Viewer role a disabled comment tool that says why', async () => {
 		const token = await provisionToken(server.workspaceRoot, { nickname: 'viewer', kind: 'human', role: 'viewer' })
 		const cookie = await sessionCookieFor(server.origin, token)
 		const { context, page } = await openWorkbench(`/views/${VIEW_ID}`, { mode: 'light', cookie })
@@ -956,8 +956,13 @@ describe('Canvas comments (R6 targeting and composer, R7a pins and bubble)', () 
 			const frame = await waitForLivePreview(page)
 			const tools = await page.locator('[role="toolbar"] button').allTextContents()
 			expect(tools.some(text => text.includes('Select'))).toBe(true)
-			expect(tools.some(text => text.includes('Comment'))).toBe(false)
+			// Never silently missing (review feedback 8dd59d25): present, aria-disabled, with the reason.
+			const comment = page.locator('[role="toolbar"] [data-tool="comment"]')
+			expect(await comment.getAttribute('aria-disabled')).toBe('true')
+			expect(await comment.getAttribute('aria-description')).toContain('Reviewer role')
 			await page.keyboard.press('c')
+			// The key says why, in a toast, instead of doing nothing.
+			await expect.poll(() => page.locator('li', { hasText: 'commenting requires the Reviewer role' }).count()).toBeGreaterThan(0)
 			await frame.locator('[data-widget-id="btn-run-checks"]').hover()
 			await page.waitForTimeout(400)
 			expect(await page.locator('[data-overlay-hover][data-hover-purpose="comment-range"]').count()).toBe(0)

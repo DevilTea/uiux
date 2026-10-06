@@ -166,8 +166,9 @@ try {
 		await open(page, '/')
 		await page.getByText('Published snapshot · read-only', { exact: false }).first().waitFor()
 
-		// /views opens the most recent View; its render context rides in the query.
+		// /views lists every View (the parent crumb lands there); a View's render context rides in the query.
 		await open(page, '/views')
+		await page.locator('[data-views-index-row]').first().click()
 		await page.waitForURL(/\/uiux\/views\/[^/?]+/)
 		const frame = await previewFrame(page)
 		const iframeTitleIncludes = context => page.waitForFunction(text => globalThis.document.querySelector('iframe')?.getAttribute('title')?.includes(text), context)
@@ -210,7 +211,9 @@ try {
 		if (!assetHref?.includes('/uiux/_uiux/assets/'))
 			throw new Error(`Published Asset download did not resolve to static content: ${assetHref}`)
 
+		// /flows lists every Flow; open the first one.
 		await open(page, '/flows')
+		await main(page).locator('a[href*="/flows/"]').first().click()
 		await page.waitForURL(/\/uiux\/flows\/[^/?]+/)
 		await page.reload({ waitUntil: 'networkidle' })
 		await main(page).waitFor()

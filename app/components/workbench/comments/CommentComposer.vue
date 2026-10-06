@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import { useWorkbench } from '../../../composables/useWorkbench'
-import { threadAuthorInitials, useCanvasComments } from '../../../composables/useCanvasComments'
+import { threadAuthorInitials, useCanvasComments, VIEW_ANCHOR_WIDGET_ID } from '../../../composables/useCanvasComments'
 import { flattenWidgetTree } from '../../../../src/preview/widget-tree'
 
 /**
@@ -21,6 +21,7 @@ const widgetType = computed(() => {
 	const tree = widgetTreeResult.value
 	return tree?.status === 'valid' ? flattenWidgetTree(tree.root).find(node => node.id === composer.value.widgetId)?.type : undefined
 })
+const onView = computed(() => composer.value.widgetId === VIEW_ANCHOR_WIDGET_ID)
 const variant = computed(() => contextOptions.value.variants.selected || '')
 const scopeItems = computed(() => [
 	{ label: t('comment.scopeThis'), value: 'this' },
@@ -67,10 +68,22 @@ function onKeydown(event: KeyboardEvent): void {
     >{{ t('comment.placeholder') }}</span>
     <div class="flex min-w-0 items-center gap-2">
       <span
+        v-if="onView"
+        class="inline-flex min-w-0 items-center gap-1 truncate rounded-sm border border-default px-1.5 text-xs leading-5 text-muted"
+        data-composer-target="view"
+      >
+        <UIcon
+          name="i-lucide-app-window"
+          class="size-3.5 shrink-0"
+        />
+        <span class="truncate">{{ comments.targetLabel(composer.widgetId) }}</span>
+      </span>
+      <span
+        v-else
         class="min-w-0 truncate rounded-sm border border-default px-1.5 font-mono text-xs leading-5 text-muted"
-        :title="`${widgetType ?? 'Widget'} · #${composer.widgetId}`"
+        :title="comments.targetLabel(composer.widgetId, widgetType)"
         data-composer-target
-      >{{ widgetType ?? 'Widget' }} · #{{ composer.widgetId }}</span>
+      >{{ comments.targetLabel(composer.widgetId, widgetType) }}</span>
       <span class="flex-1" />
       <USelect
         v-if="variant"

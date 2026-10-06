@@ -156,7 +156,7 @@ watch(() => selectedView.value && [selectedView.value.key, selectedView.value.re
 	if (seen) readiness.markSeen(`view:${seen[0]}`, seen[1])
 }, { immediate: true })
 
-shell.onToggleRightPanel(togglePanel)
+const offToggleRightPanel = shell.onToggleRightPanel(togglePanel)
 // ⌥1–⌥4: Comments, Inspect, Spec, Readiness (brief e, section 8).
 defineShortcuts({
 	alt_1: () => { void showPanel('comments') },
@@ -165,7 +165,7 @@ defineShortcuts({
 	alt_4: () => { void showPanel('readiness') },
 })
 onBeforeUnmount(() => {
-	shell.onToggleRightPanel(undefined)
+	offToggleRightPanel()
 	preview.exitCommentMode()
 })
 </script>

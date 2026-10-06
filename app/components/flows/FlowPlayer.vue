@@ -45,6 +45,8 @@ const shell = useWorkbenchShell()
 const { preview } = workbench
 /** Reviewers can comment on a step's View or Variant while the player runs (R17). */
 const comments = provideCanvasComments(ref<string>())
+/** While Comment mode is on, its toggle turns it off; otherwise the reason it can't start, if any. */
+const commentBlocked = computed(() => preview.isCommentMode.value ? undefined : comments.toolBlockedReason.value)
 
 const state = shallowRef(startPlayback(props.flow))
 const visit = computed(() => currentVisit(state.value))
@@ -326,6 +328,28 @@ defineExpose({ follow, restart })
         </div>
       </template>
       <template #right>
+        <!-- The player has no tool pill and the View holds keyboard focus once clicked, so `C`
+             alone can't be relied on: Comment mode gets a visible toggle, which says why when it
+             can't start (review feedback 8dd59d25). -->
+        <UTooltip
+          :text="commentBlocked ?? t('tool.comment')"
+          :kbds="commentBlocked || !shell.singleKeyShortcuts.value ? undefined : ['C']"
+        >
+          <UButton
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            icon="i-lucide-message-circle-plus"
+            :label="t('tool.comment')"
+            :aria-pressed="preview.isCommentMode.value"
+            :aria-disabled="commentBlocked ? 'true' : undefined"
+            :aria-description="commentBlocked"
+            :class="commentBlocked ? 'cursor-not-allowed text-dimmed hover:bg-transparent' : preview.isCommentMode.value ? 'bg-comment-subtle text-annotation ring-1 ring-inset ring-annotation/35 hover:bg-comment-subtle' : 'text-muted'"
+            :ui="{ label: 'max-sm:sr-only' }"
+            data-flow-player-comment
+            @click="comments.toggleCommentMode()"
+          />
+        </UTooltip>
         <UButton
           color="neutral"
           variant="outline"

@@ -58,7 +58,7 @@ const { t } = useI18n()
 const workbench = useWorkbench()
 const shell = useWorkbenchShell()
 const uiux = useUiuxClient()
-const { selectedView, contextOptions, loading, reviewReadOnly, preview, widgetTreeResult, selectedWidgetId, selectedVariant } = workbench
+const { selectedView, contextOptions, loading, preview, widgetTreeResult, selectedWidgetId, selectedVariant } = workbench
 /** The comments layer of the View page, or of the Prototype player (comment mode during playback, R17). */
 const comments = useCanvasComments()
 
@@ -82,7 +82,6 @@ watch(contextSlot, (element) => {
 	contextSlotObserver.observe(element)
 })
 onBeforeUnmount(() => contextSlotObserver?.disconnect())
-const isPhone = useMediaQuery(WORKBENCH_BREAKPOINTS.handset)
 const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
 
 /** Room the floating tool pill needs below the frame at Fit (pill 40px, 16px offset, 8px air). */
@@ -264,7 +263,7 @@ onBeforeUnmount(() => {
 	stage.value?.removeEventListener('scroll', onStageScroll)
 	window.removeEventListener('blur', resetGestures)
 	window.removeEventListener('keydown', onCanvasKeydown, { capture: true })
-	shell.onCanvasCommands(undefined)
+	offCanvasCommands()
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -372,23 +371,33 @@ const hoverNode = computed<WidgetTreeNode | undefined>(() => widgetTreeResult.va
 // Tools
 // ---------------------------------------------------------------------------------------------
 
-/** Viewers, the publication and phones get no Comment tool (phones read, reply and resolve only). */
-const showComment = computed(() => !!comments && !reviewReadOnly.value && !isPhone.value)
+/**
+ * Viewers, the publication, a Workspace awaiting migration and phones can't start comments
+ * (phones read, reply and resolve only). The Comment tool stays in the pill anyway, disabled with
+ * the reason in its tooltip, so it never vanishes or silently does nothing (review feedback 8dd59d25).
+ */
+const commentDisabledReason = computed(() => comments?.createBlockedReason.value)
 const activeTool = computed<CanvasToolId>(() => preview.canvasTool.value)
 const toolsDisabledReason = computed(() => {
 	if (!selectedView.value) return t('tool.disabledNoView')
-	if (preview.sessionStatus.value === 'live') return undefined
-	return preview.sessionStatus.value === 'stopped' ? t('tool.disabledStopped') : t('tool.disabledConnecting')
+	switch (preview.sessionStatus.value) {
+		case 'live': return undefined
+		case 'stopped': return t('tool.disabledStopped')
+		case 'reconnecting': return t('commentBlock.reconnecting')
+		default: return t('tool.disabledConnecting')
+	}
 })
 
 function selectTool(tool: CanvasToolId): void {
-	if (tool === 'comment') {
-		// C toggles the Comment tool; leaving it returns to the tool it was entered from.
-		if (preview.isCommentMode.value) preview.exitCommentMode()
-		else if (showComment.value) preview.setCanvasTool('comment')
-		return
-	}
-	preview.setCanvasTool(tool)
+	// C toggles the Comment tool; leaving it returns to the tool it was entered from. A blocked
+	// Comment tool says why instead of doing nothing.
+	if (tool === 'comment') comments?.toggleCommentMode()
+	else preview.setCanvasTool(tool)
+}
+
+function explainBlocked(reason: string): void {
+	if (comments) comments.explainBlocked(reason)
+	else announcement.value = reason
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -559,13 +568,15 @@ defineShortcuts(computed(() => ({
 		: {}),
 })))
 
-shell.onCanvasCommands({
+const offCanvasCommands = shell.onCanvasCommands({
 	fit: zoomFit,
 	zoomIn,
 	zoomOut,
 	actualSize: zoomActual,
 	selectTool: tool => selectTool(tool),
-	canComment: () => showComment.value,
+	commentBlockedReason: () => comments ? comments.toolBlockedReason.value : t('commentBlock.no-view'),
+	viewCommentBlockedReason: () => comments ? comments.createBlockedReason.value : t('commentBlock.no-view'),
+	commentOnView: () => { comments?.commentOnView() },
 })
 
 function switchToBase(): void {
@@ -574,9 +585,11 @@ function switchToBase(): void {
 </script>
 
 <template>
+  <!-- Focusable (-1) so a Select or Comment click can take keyboard focus back from the iframe. -->
   <section
-    class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-canvas"
+    class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-canvas outline-none"
     :aria-label="t('workbench.canvas.label')"
+    tabindex="-1"
     data-canvas
   >
     <UDashboardToolbar
@@ -825,7 +838,9 @@ function switchToBase(): void {
         </template>
       </UEmpty>
 
-      <template v-if="showFrame && comments">
+      <!-- The composer and bubble stay reachable even when the frame can't render (an invalid
+           Adapter or Variant): "Comment on this View" needs no Widget and no live Preview. -->
+      <template v-if="selectedView && comments">
         <!-- The bubble's last-resort reference: the canvas corner, for threads with no pin to point at. -->
         <span
           class="pointer-events-none absolute bottom-14 left-3 size-px max-md:bottom-26"
@@ -833,7 +848,7 @@ function switchToBase(): void {
           data-comment-fallback
         />
         <div
-          v-if="unplacedThreads.length || notOnCanvasCount"
+          v-if="showFrame && (unplacedThreads.length || notOnCanvasCount)"
           class="pointer-events-none absolute bottom-4 left-3 z-20 flex max-w-[calc(100%-1.5rem)] flex-col items-start gap-1.5 max-md:bottom-16 xl:max-w-[calc(50%-12rem)]"
         >
           <UButton
@@ -883,10 +898,13 @@ function switchToBase(): void {
           v-else
           class="pointer-events-auto"
           :active="activeTool"
-          :show-comment="showComment"
           :disabled-reason="toolsDisabledReason"
+          :comment-disabled-reason="commentDisabledReason"
+          :comments="!!comments && !workbench.isReadOnly.value"
           :pins-hidden="comments ? comments.pinsHidden.value : undefined"
           @select="selectTool"
+          @blocked="explainBlocked"
+          @comment-on-view="comments?.commentOnView()"
           @toggle-pins="comments?.togglePins()"
         />
       </div>

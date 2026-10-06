@@ -536,7 +536,8 @@
       "noMatches": "No Views match “{query}”.",
       "emptyTitle": "No Views yet",
       "emptyDescription": "Create a View with the MCP {tool} tool.",
-      "diagnosticCount": "No diagnostics | {n} diagnostic | {n} diagnostics"
+      "diagnosticCount": "No diagnostics | {n} diagnostic | {n} diagnostics",
+      "lastOpened": "Last opened"
     },
     "tree": {
       "title": "Widget tree",
@@ -768,7 +769,8 @@
     "label": "Canvas tools",
     "disabledNoView": "Open a View to use the canvas tools.",
     "disabledConnecting": "Available once the preview is live.",
-    "disabledStopped": "The preview stopped. Retry from the session status."
+    "disabledStopped": "The preview stopped. Retry from the session status.",
+    "interactHint": "Interact: clicks and keys go to the View"
   },
   "zoom": {
     "fit": "Fit",
@@ -1429,7 +1431,9 @@
       "reanchored": "Thread moved to {id}.",
       "reanchorOn": "Re-anchor: click the Widget this thread belongs to. Esc cancels.",
       "modeOff": "Comment mode off.",
-      "composing": "Commenting on {id}. Type, then press Command or Control plus Enter."
+      "composing": "Commenting on {id}. Type, then press Command or Control plus Enter.",
+      "composingView": "Commenting on this View. Type, then press Command or Control plus Enter.",
+      "createdOnView": "Comment added on this View."
     },
     "reason": {
       "offscreen": "Scrolled out of view in the View.",
@@ -1450,7 +1454,8 @@
       "ready": "Ready for review",
       "open": "Open",
       "unplaced": "Can't be placed",
-      "resolved": "Resolved"
+      "resolved": "Resolved",
+      "view": "View"
     },
     "staleWord": "Variant missing",
     "unknownAuthor": "Unknown author",
@@ -1495,7 +1500,12 @@
     "noneInFilter": "No comments match the filter",
     "startCommenting": "Start commenting",
     "reanchorChip": "Re-anchor to {type}",
-    "commentOnWidget": "Comment on this Widget"
+    "commentOnWidget": "Comment on this Widget",
+    "commentOnView": "Comment on this View",
+    "commentOnViewShort": "Comment on View",
+    "commentOnViewHint": "Comment on the View as a whole, without picking a Widget",
+    "viewTarget": "Whole View",
+    "pinLabelView": "Comment by {name} on this View, {status}, {n} message | Comment by {name} on this View, {status}, {n} messages"
   },
   "firstRun": {
     "headline": "This Workspace has no Views yet",
@@ -1545,5 +1555,17 @@
   "phone": {
     "viewTab": "View",
     "viewHint": "Read-only on a phone. Tap a pin to open its thread."
+  },
+  "commentBlock": {
+    "publication": "Read-only: this is a published snapshot.",
+    "migration": "Read-only until this Workspace is migrated. Run uiux migrate.",
+    "unsupported": "Read-only: this Workspace's schema isn't supported by this version of UIUX.",
+    "signed-out": "Sign in to comment.",
+    "role": "Read-only: commenting requires the Reviewer role. You're signed in as {role}.",
+    "handset": "Not available on phones. Reply and triage here; add comments on a tablet or desktop.",
+    "no-view": "Open a View to comment.",
+    "connecting": "Connecting to the preview…",
+    "reconnecting": "Reconnecting to the preview…",
+    "stopped": "The preview stopped. Retry from the session status."
   }
 }
