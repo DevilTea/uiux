@@ -6,7 +6,7 @@ import { useWorkbench } from '../../composables/useWorkbench'
 /**
  * The phone's primary navigation (DESIGN.md "Mobile"; brief a, section 6): a 56px bar of four
  * areas, icon over a 12px label, above the home indicator. Reviews carries the waiting count
- * because triage is the phone's job; the Workspace group lives in the ☰ menu.
+ * because triage is the phone's job; the Workspace entry lives in the ☰ menu.
  */
 const { t } = useI18n()
 const route = useRoute()

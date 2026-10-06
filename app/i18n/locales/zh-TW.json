@@ -585,7 +585,8 @@
     "assets": "Asset",
     "adapters": "Adapter",
     "countLabel": "{label}，{n}",
-    "reviewsLabel": "Reviews，沒有未解決 | Reviews，{n} 則未解決 | Reviews，{n} 則未解決"
+    "reviewsLabel": "Reviews，沒有未解決 | Reviews，{n} 則未解決 | Reviews，{n} 則未解決",
+    "workspacePages": "Workspace 頁面"
   },
   "shell": {
     "search": "搜尋或前往…",
@@ -599,7 +600,8 @@
     "togglePanel": "顯示或隱藏面板",
     "openPanel": "開啟面板",
     "collapseSidebar": "收合側邊欄",
-    "expandSidebar": "展開側邊欄"
+    "expandSidebar": "展開側邊欄",
+    "secondaryNav": "次要導覽"
   },
   "prefs": {
     "theme": "Workbench 主題",

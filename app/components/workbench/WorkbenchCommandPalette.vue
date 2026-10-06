@@ -5,7 +5,7 @@ import type { CommandPaletteGroup, CommandPaletteItem } from '@nuxt/ui'
 import { isWidgetAnchor, isWorkspaceAnchor } from '../../../src/domain/reviews/schema'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
-import { flowPath, viewLocation } from '../../utils/workbench-routes'
+import { ADAPTERS_LOCATION, flowPath, viewLocation } from '../../utils/workbench-routes'
 
 /** ⌘K: go to an area, a View, a Flow or a thread, or run a Workbench action (brief a). */
 const { t } = useI18n()
@@ -34,7 +34,7 @@ const groups = computed<CommandPaletteGroup<CommandPaletteItem>[]>(() => {
 				{ label: t('nav.settings'), icon: 'i-lucide-settings-2', to: '/workspace/settings' },
 				{ label: t('nav.locales'), icon: 'i-lucide-globe', to: '/workspace/locales' },
 				{ label: t('nav.assets'), icon: 'i-lucide-image', to: '/workspace/assets' },
-				{ label: t('nav.adapters'), icon: 'i-lucide-puzzle', to: '/workspace/adapters' },
+				{ label: t('nav.adapters'), icon: 'i-lucide-puzzle', to: ADAPTERS_LOCATION },
 			],
 		},
 		{

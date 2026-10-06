@@ -33,6 +33,7 @@ import CanvasOverlay from './CanvasOverlay.vue'
 import WbErrorDetails from './WbErrorDetails.vue'
 import { adapterIndexOf, adapterRepair } from '../../utils/workspace-authoring'
 import { copyText } from '../../utils/copy-text'
+import { ADAPTERS_LOCATION } from '../../utils/workbench-routes'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import CommentPinLayer from './comments/CommentPinLayer.vue'
 import CommentBubbleHost from './comments/CommentBubbleHost.vue'
@@ -792,7 +793,7 @@ function switchToBase(): void {
           :title="t('canvas.adapterInvalid')"
           :description="t('canvas.adapterInvalidHint')"
           variant="naked"
-          :actions="[{ label: t('canvas.openAdapters'), to: '/workspace/adapters', color: 'neutral', variant: 'outline', icon: 'i-lucide-puzzle' }]"
+          :actions="[{ label: t('canvas.openAdapters'), to: ADAPTERS_LOCATION, color: 'neutral', variant: 'outline', icon: 'i-lucide-puzzle' }]"
           data-canvas-adapter-invalid
         >
           <template

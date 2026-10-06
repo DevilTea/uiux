@@ -1,12 +1,13 @@
-<script setup lang="ts">
-import WorkspaceSettingsPage from '../../components/workspace/WorkspaceSettingsPage.vue'
+<script setup lang='ts'>
+import { definePageMeta } from '#imports'
 
 /**
- * Adapters. The Adapter set is part of the Workspace settings document, so this opens the
- * settings page at its Adapters section rather than keeping a second editor for it.
+ * Adapters used to be a second route onto the settings page. The Adapter set is part of the
+ * Workspace settings document, so the old address now redirects to its section there.
  */
+definePageMeta({ redirect: { path: '/workspace/settings', query: { section: 'adapters' } } })
 </script>
 
 <template>
-  <WorkspaceSettingsPage initial-section="adapters" />
+  <div />
 </template>

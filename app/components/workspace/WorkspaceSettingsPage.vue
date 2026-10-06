@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { NavigationMenuItem } from '@nuxt/ui'
-import { useI18n } from '#imports'
+import { useI18n, useRoute } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
@@ -16,9 +16,11 @@ import {
 	cloneJson,
 	registryRecord,
 	registryRows,
+	SETTINGS_SECTIONS,
 	type SettingsSectionId,
 } from '../../utils/workspace-authoring'
 import WorkbenchPage from '../workbench/WorkbenchPage.vue'
+import WorkspaceSubnav from './WorkspaceSubnav.vue'
 import AuthoringAccessNotice from './AuthoringAccessNotice.vue'
 import LockBadge from '../workbench/LockBadge.vue'
 import LockedSaveAlert from '../workbench/LockedSaveAlert.vue'
@@ -34,10 +36,17 @@ import { focusFirstProblem } from '../../utils/focus-problem'
  * own through `update_workspace_settings` (`PUT /api/workspace/settings`, a full replace)
  * with its own `expectedRevision`, so a concurrent write surfaces as a conflict, never as
  * a silent overwrite.
+ *
+ * `?section=<id>` opens the page at that section; `/workspace/adapters` redirects here with
+ * `section=adapters`.
  */
-const props = defineProps<{ initialSection?: SettingsSectionId }>()
-
 const { t } = useI18n()
+const route = useRoute()
+/** The section named by `?section=`, if it is one. */
+const requestedSection = computed<SettingsSectionId | undefined>(() => {
+	const value = route.query.section
+	return typeof value === 'string' && (SETTINGS_SECTIONS as readonly string[]).includes(value) ? value as SettingsSectionId : undefined
+})
 const workbench = useWorkbench()
 const { workspace, discoveredLocales } = workbench
 const uiux = useUiuxClient()
@@ -153,7 +162,7 @@ function keepMine(id: SettingsSectionId): void {
 }
 
 // Section index with scroll-spy.
-const active = ref<SettingsSectionId>(props.initialSection ?? 'general')
+const active = ref<SettingsSectionId>(requestedSection.value ?? 'general')
 const scroller = ref<HTMLElement>()
 const sectionRefs = {
 	general: ref<InstanceType<typeof SettingsGeneralSection>>(),
@@ -216,8 +225,9 @@ function onScroll(): void {
 /** Once the sections exist, jump to the requested section. */
 async function onSectionsRendered(): Promise<void> {
 	await nextTick()
-	if (props.initialSection && props.initialSection !== 'general')
-		reveal(props.initialSection, false)
+	const section = requestedSection.value
+	if (section && section !== 'general')
+		reveal(section, false)
 }
 onMounted(() => {
 	void loadResolution()
@@ -229,6 +239,10 @@ onMounted(() => {
 		started = true
 		void onSectionsRendered()
 	}, { immediate: true })
+	// Asked for another section while already here (⌘K "Adapters", a canvas link).
+	watch(requestedSection, (section) => {
+		if (section && started) scrollTo(section)
+	})
 })
 onBeforeUnmount(() => {
 	if (spyFrame) cancelAnimationFrame(spyFrame)
@@ -255,6 +269,9 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
     id="workspace-settings"
     :title="t('settings.title')"
   >
+    <template #toolbar>
+      <WorkspaceSubnav />
+    </template>
     <div
       ref="scroller"
       class="flex min-h-0 flex-1 overflow-y-auto focus-visible:outline-offset-[-2px]"
@@ -342,7 +359,7 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
               @keep-mine="keepMine('themes')"
             />
             <USeparator />
-            <!-- The last section is at least a screen tall, so /workspace/adapters can scroll it to the top. -->
+            <!-- The last section is at least a screen tall, so ?section=adapters can scroll it to the top. -->
             <div class="min-h-[calc(100dvh-var(--ui-header-height)-8rem)]">
               <SettingsAdaptersSection
                 :ref="(el) => { sectionRefs.adapters.value = el as InstanceType<typeof SettingsAdaptersSection> }"

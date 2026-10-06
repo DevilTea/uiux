@@ -585,7 +585,8 @@
     "assets": "Assets",
     "adapters": "Adapters",
     "countLabel": "{label}, {n}",
-    "reviewsLabel": "Reviews, none unresolved | Reviews, {n} unresolved | Reviews, {n} unresolved"
+    "reviewsLabel": "Reviews, none unresolved | Reviews, {n} unresolved | Reviews, {n} unresolved",
+    "workspacePages": "Workspace pages"
   },
   "shell": {
     "search": "Search or jump to…",
@@ -599,7 +600,8 @@
     "togglePanel": "Show or hide the panel",
     "openPanel": "Open panel",
     "collapseSidebar": "Collapse sidebar",
-    "expandSidebar": "Expand sidebar"
+    "expandSidebar": "Expand sidebar",
+    "secondaryNav": "Secondary navigation"
   },
   "prefs": {
     "theme": "Workbench theme",

@@ -11,6 +11,7 @@ import { useAccess } from '../../composables/useAccess'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { collectAssetReferences, isImageMediaType } from '../../utils/workspace-authoring'
 import WorkbenchPage from '../workbench/WorkbenchPage.vue'
+import WorkspaceSubnav from './WorkspaceSubnav.vue'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 import AuthoringAccessNotice from './AuthoringAccessNotice.vue'
 import AssetUploadModal from './AssetUploadModal.vue'
@@ -191,6 +192,9 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
     id="workspace-assets"
     :title="t('assets.title')"
   >
+    <template #toolbar>
+      <WorkspaceSubnav />
+    </template>
     <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div class="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 pt-6 pb-16 sm:px-6">
         <header class="flex flex-wrap items-start justify-between gap-3">

@@ -20,7 +20,6 @@ const WORKSPACE_PAGES: Record<string, string> = {
 	'/workspace/settings': 'nav.settings',
 	'/workspace/locales': 'nav.locales',
 	'/workspace/assets': 'nav.assets',
-	'/workspace/adapters': 'nav.adapters',
 }
 
 const breadcrumb = computed<BreadcrumbItem[]>(() => {

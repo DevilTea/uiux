@@ -24,6 +24,12 @@ export function flowPath(flowId: string): string {
 	return `/flows/${encodeURIComponent(flowId)}`
 }
 
+/**
+ * The Adapters section of Workspace settings. The Adapter set is part of the settings document,
+ * so it has no page of its own; `/workspace/adapters` redirects here.
+ */
+export const ADAPTERS_LOCATION = { path: '/workspace/settings', query: { section: 'adapters' } } as const
+
 /** Builds the query for a View deep link; empty values mean "the effective default" and are omitted. */
 export function viewQuery(options: ViewLinkOptions): LocationQueryRaw {
 	const query: LocationQueryRaw = {}

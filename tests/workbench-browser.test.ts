@@ -281,11 +281,11 @@ async function iframeContext(page: Page): Promise<FrameContext> {
 }
 
 describe('Workbench shell (R3)', () => {
-	it('replaces the nine-tab grid with four primary areas and a Workspace group', async () => {
+	it('replaces the nine-tab grid with four primary areas and one Workspace entry', async () => {
 		const { context, page } = await openWorkbench('/', { mode: 'light' })
 		try {
 			const nav = page.locator('[data-landmark="navigation"]')
-			for (const name of ['Overview', 'Views', 'UX Flows', 'Reviews', 'Settings', 'Locales', 'Assets', 'Adapters'])
+			for (const name of ['Overview', 'Views', 'UX Flows', 'Reviews', 'Workspace'])
 				expect(await nav.getByRole('link', { name: new RegExp(`^${name}`) }).count(), name).toBe(1)
 			const largestTablist = await page.evaluate(() => Math.max(0, ...Array.from(document.querySelectorAll('[role="tablist"]')).map(list => list.querySelectorAll('[role="tab"]').length)))
 			expect(largestTablist).toBeLessThan(9)
