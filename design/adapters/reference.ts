@@ -95,6 +95,10 @@ function optionalString(value: unknown): string | null {
 	return typeof value === 'string' && value.length > 0 ? value : null
 }
 
+function stringOr(value: unknown, fallback: string): string {
+	return typeof value === 'string' ? value : fallback
+}
+
 function stringFromResult(result: DepResult): string {
 	return result.ok && typeof result.value === 'string' ? result.value : ''
 }
@@ -121,6 +125,34 @@ function translateDeps({ dep }: { dep: { root: RootOps } }) {
 	return { t: dep.root.methods.invoke('t').validate((value): value is TranslationResult => isTranslationResult(value)) }
 }
 
+/** A Catalog-mapped translatable field as resolved config: the lowered key (if any) and the literal fallback. */
+type FieldSource = Readonly<{ key: string | null; literal: string }>
+type TranslateOnlyDeps = Readonly<{ t: Translate }>
+
+/** `<field>Result` property definition for Widgets whose translated field needs no runtime parameters. */
+function translatedResult<C>(pick: (config: C) => FieldSource) {
+	return {
+		valueContract: TRANSLATION_RESULT,
+		registerDeps: translateDeps,
+		compute: ({ config, deps }: { config: C; deps: TranslateOnlyDeps }): TranslationResult => {
+			const source = pick(config)
+			return translateField(source.key, source.literal, (key, params) => deps.t(key, params))
+		},
+	}
+}
+
+/** `<field>` text property definition paired with {@link translatedResult}; it resolves the same binding. */
+function translatedText<C>(pick: (config: C) => FieldSource) {
+	return {
+		valueContract: STRING,
+		registerDeps: translateDeps,
+		compute: ({ config, deps }: { config: C; deps: TranslateOnlyDeps }): string => {
+			const source = pick(config)
+			return translateField(source.key, source.literal, (key, params) => deps.t(key, params)).text
+		},
+	}
+}
+
 const SCHEMA_DIALECT = 'https://json-schema.org/draft/2020-12/schema'
 const RESPONSIVE_SCHEMA = {
 	type: 'object',
@@ -137,280 +169,562 @@ function configSchema(properties: Record<string, WidgetConfigJsonSchema>): Widge
 }
 
 const isConfigObject = (input: unknown): boolean => typeof input === 'object' && input !== null && !Array.isArray(input)
+const isBoolean = (v: unknown): v is boolean => typeof v === 'boolean'
+
+function splitResponsive<T extends object>(raw: (T & { responsive?: Responsive<T> }) | null): { base: T; responsive?: Responsive<T> } {
+	if (!raw) return { base: {} as T }
+	const { responsive, ...base } = raw
+	return responsive && typeof responsive === 'object' ? { base: base as T, responsive } : { base: base as T }
+}
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+	return typeof value === 'string' && (allowed as readonly string[]).includes(value) ? value as T : fallback
+}
 
 // ---------------------------------------------------------------------------
-// Self-contained CSS injection for deterministic rendering
+// Icons: a curated Lucide subset (ISC licence) inlined so the adapter stays self-contained.
+// An unknown icon name renders as literal text, which keeps older authored glyphs working.
+// ---------------------------------------------------------------------------
+const ICONS: Readonly<Record<string, string>> = {
+	"layout-dashboard": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect width=\"7\" height=\"9\" x=\"3\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"5\" x=\"14\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"9\" x=\"14\" y=\"12\" rx=\"1\"/><rect width=\"7\" height=\"5\" x=\"3\" y=\"16\" rx=\"1\"/></g>",
+	"app-window": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect width=\"20\" height=\"16\" x=\"2\" y=\"4\" rx=\"2\"/><path d=\"M10 4v4M2 8h20M6 4v4\"/></g>",
+	"workflow": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect width=\"8\" height=\"8\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"M7 11v4a2 2 0 0 0 2 2h4\"/><rect width=\"8\" height=\"8\" x=\"13\" y=\"13\" rx=\"2\"/></g>",
+	"inbox": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M22 12h-6l-2 3h-4l-2-3H2\"/><path d=\"M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11\"/></g>",
+	"settings-2": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M14 17H5M19 7h-9\"/><circle cx=\"17\" cy=\"17\" r=\"3\"/><circle cx=\"7\" cy=\"7\" r=\"3\"/></g>",
+	"globe": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 2a14.5 14.5 0 0 0 0 20a14.5 14.5 0 0 0 0-20M2 12h20\"/></g>",
+	"image": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\" ry=\"2\"/><circle cx=\"9\" cy=\"9\" r=\"2\"/><path d=\"m21 15l-3.086-3.086a2 2 0 0 0-2.828 0L6 21\"/></g>",
+	"puzzle": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15.39 4.39a1 1 0 0 0 1.68-.474a2.5 2.5 0 1 1 3.014 3.015a1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474a2.5 2.5 0 1 0-3.014 3.015a1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474a2.5 2.5 0 1 1-3.014-3.015a1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474a2.5 2.5 0 1 0 3.014-3.015a1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z\"/>",
+	"mouse-pointer-2": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z\"/>",
+	"message-circle-plus": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092a10 10 0 1 0-4.777-4.719M8 12h8m-4-4v8\"/>",
+	"hand": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2m0 4V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2m0 4.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8\"/><path d=\"M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15\"/></g>",
+	"layers": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z\"/><path d=\"M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12\"/><path d=\"M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17\"/></g>",
+	"languages": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m5 8l6 6m-7 0l6-6l2-3M2 5h12M7 2h1m14 20l-5-10l-5 10m2-4h6\"/>",
+	"monitor-smartphone": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M18 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8m-2 4v-3.96v3.15M7 19h5\"/><rect width=\"6\" height=\"10\" x=\"16\" y=\"12\" rx=\"2\"/></g>",
+	"sun-moon": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 2v2m2.837 12.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715M16 12a4 4 0 0 0-4-4m7-3l-1.256 1.256M20 12h2\"/>",
+	"circle-dot": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"1\"/><circle cx=\"12\" cy=\"12\" r=\"10\"/></g>",
+	"eye": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M2.062 12.348a1 1 0 0 1 0-.696a10.75 10.75 0 0 1 19.876 0a1 1 0 0 1 0 .696a10.75 10.75 0 0 1-19.876 0\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></g>",
+	"circle-check": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m16 9l-5.5 5.5L8 12\"/></g>",
+	"rotate-ccw": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M3 12a9 9 0 1 0 9-9a9.75 9.75 0 0 0-6.74 2.74L3 8\"/><path d=\"M3 3v5h5\"/></g>",
+	"check": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M20 6L9 17l-5-5\"/>",
+	"triangle-alert": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m21.73 18l-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3M12 9v4m0 4h.01\"/>",
+	"circle-alert": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 8v4m0 4h.01\"/></g>",
+	"info": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 16v-4m0-4h.01\"/></g>",
+	"camera": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z\"/><circle cx=\"12\" cy=\"13\" r=\"3\"/></g>",
+	"package": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73zm1 .27V12\"/><path d=\"M3.29 7L12 12l8.71-5M7.5 4.27l9 5.15\"/></g>",
+	"scan": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M3 7V5a2 2 0 0 1 2-2h2m10 0h2a2 2 0 0 1 2 2v2m0 10v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2\"/>",
+	"zoom-in": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"11\" cy=\"11\" r=\"8\"/><path d=\"m21 21l-4.35-4.35M11 8v6m-3-3h6\"/></g>",
+	"zoom-out": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"11\" cy=\"11\" r=\"8\"/><path d=\"m21 21l-4.35-4.35M8 11h6\"/></g>",
+	"bot": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M12 8V4H8\"/><rect width=\"16\" height=\"12\" x=\"4\" y=\"8\" rx=\"2\"/><path d=\"M2 14h2m16 0h2m-7-1v2m-6-2v2\"/></g>",
+	"cog": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M11 10.27L7 3.34m4 10.39l-4 6.93M12 22v-2m0-18v2m2 8h8m-5 8.66l-1-1.73m1-15.59l-1 1.73M2 12h2m16.66 5l-1.73-1m1.73-9l-1.73 1M3.34 17l1.73-1M3.34 7l1.73 1\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/><circle cx=\"12\" cy=\"12\" r=\"8\"/></g>",
+	"search": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"m21 21l-4.34-4.34\"/><circle cx=\"11\" cy=\"11\" r=\"8\"/></g>",
+	"sliders-horizontal": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M10 5H3m9 14H3M14 3v4m2 10v4m5-9h-9m9 7h-5m5-14h-7m-6 5v4m0-2H3\"/>",
+	"refresh-cw": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M3 12a9 9 0 0 1 9-9a9.75 9.75 0 0 1 6.74 2.74L21 8\"/><path d=\"M21 3v5h-5m5 4a9 9 0 0 1-9 9a9.75 9.75 0 0 1-6.74-2.74L3 16\"/><path d=\"M8 16H3v5\"/></g>",
+	"chevron-down": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m6 9l6 6l6-6\"/>",
+	"chevron-right": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m9 18l6-6l-6-6\"/>",
+	"menu": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M4 5h16M4 12h16M4 19h16\"/>",
+	"x": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M18 6L6 18M6 6l12 12\"/>",
+	"ellipsis": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"1\"/><circle cx=\"19\" cy=\"12\" r=\"1\"/><circle cx=\"5\" cy=\"12\" r=\"1\"/></g>",
+	"arrow-up-right": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M7 7h10v10M7 17L17 7\"/>",
+	"send": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11zm7.318-19.539l-10.94 10.939\"/>",
+	"list-filter": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2 5h20M6 12h12m-9 7h6\"/>",
+	"user": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2\"/><circle cx=\"12\" cy=\"7\" r=\"4\"/></g>",
+	"bell-dot": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M10.268 21a2 2 0 0 0 3.464 0M11.68 2.009A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673c-.824-.85-1.678-1.731-2.21-3.348\"/><circle cx=\"18\" cy=\"5\" r=\"3\"/></g>",
+	"history": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M3 12a9 9 0 1 0 9-9a9.75 9.75 0 0 0-6.74 2.74L3 8\"/><path d=\"M3 3v5h5m4-1v5l4 2\"/></g>",
+	"unlink": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m18.84 12.25l1.72-1.71h-.02a5.004 5.004 0 0 0-.12-7.07a5.006 5.006 0 0 0-6.95 0l-1.72 1.71m-6.58 6.57l-1.71 1.71a5.004 5.004 0 0 0 .12 7.07a5.006 5.006 0 0 0 6.95 0l1.71-1.71M8 2v3M2 8h3m11 11v3m3-6h3\"/>",
+	"panel-left": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"M9 3v18\"/></g>",
+	"panel-right": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"M15 3v18\"/></g>",
+	"key-round": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z\"/><circle cx=\"16.5\" cy=\"7.5\" r=\".5\" fill=\"currentColor\"/></g>",
+	"log-in": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m10 17l5-5l-5-5m5 5H3m12-9h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4\"/>",
+	"copy": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\"/><path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"/></g>",
+	"plus": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M5 12h14m-7-7v14\"/>",
+	"arrow-left": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m12 19l-7-7l7-7m7 7H5\"/>",
+	"message-circle": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092a10 10 0 1 0-4.777-4.719\"/>",
+	"external-link": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 3h6v6m-11 5L21 3m-3 10v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6\"/>",
+	"eye-off": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575a1 1 0 0 1 0 .696a10.8 10.8 0 0 1-1.444 2.49m-6.41-.679a3 3 0 0 1-4.242-4.242\"/><path d=\"M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151a1 1 0 0 1 0-.696a10.75 10.75 0 0 1 4.446-5.143M2 2l20 20\"/></g>",
+	"filter": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M22 3H2l8 9.46V19l4 2v-8.54z\"/>",
+	"signpost": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 13v8m0-18v3m-9.646 4.354a1.207 1.207 0 0 1 0-1.708l2.06-2.06A2 2 0 0 1 5.828 6h12.344a2 2 0 0 1 1.414.586l2.06 2.06a1.207 1.207 0 0 1 0 1.708l-2.06 2.06a2 2 0 0 1-1.414.586H5.828a2 2 0 0 1-1.414-.586z\"/>",
+	"crosshair": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M22 12h-4M6 12H2m10-6V2m0 20v-4\"/></g>",
+}
+
+function iconNode(name: string | undefined | null, size = 16, extraClass = ''): VNode | null {
+	if (!name) return null
+	const body = ICONS[name]
+	if (!body) return h('span', { class: ['uiux-ref-glyph', extraClass], 'aria-hidden': 'true' }, name)
+	return h('svg', {
+		class: ['uiux-ref-icon', extraClass],
+		width: size,
+		height: size,
+		viewBox: '0 0 24 24',
+		'aria-hidden': 'true',
+		focusable: 'false',
+		innerHTML: body,
+	})
+}
+
+function kbdNode(keys: string): VNode {
+	return h('kbd', { class: 'uiux-ref-kbd' }, keys)
+}
+
+// ---------------------------------------------------------------------------
+// Self-contained CSS injection for deterministic rendering ("Quiet Canvas" tokens from DESIGN.md)
 // ---------------------------------------------------------------------------
 const STYLES_ID = 'uiux-reference-adapter-styles'
-const LIGHT_TOKENS = `
-  --ref-bg-app: #f8fafc;
-  --ref-bg-surface: #ffffff;
-  --ref-bg-surface-elevated: #f1f5f9;
-  --ref-bg-canvas: #e2e8f0;
-  --ref-border: #cbd5e1;
-  --ref-border-subtle: #e2e8f0;
-  --ref-text: #0f172a;
-  --ref-text-muted: #475569;
-  --ref-text-subtle: #64748b;
-  --ref-primary: #2563eb;
-  --ref-primary-hover: #1d4ed8;
-  --ref-primary-subtle: rgba(37, 99, 235, 0.10);
-  --ref-primary-border: rgba(37, 99, 235, 0.35);
-  --ref-on-primary: #ffffff;
-  --ref-success: #047857;
-  --ref-success-subtle: rgba(4, 120, 87, 0.10);
-  --ref-success-border: rgba(4, 120, 87, 0.35);
-  --ref-warning: #b45309;
-  --ref-warning-subtle: rgba(180, 83, 9, 0.10);
-  --ref-warning-border: rgba(180, 83, 9, 0.35);
-  --ref-danger: #b91c1c;
-  --ref-danger-subtle: rgba(185, 28, 28, 0.10);
-  --ref-danger-border: rgba(185, 28, 28, 0.35);
-  --ref-info: #0e7490;
-  --ref-info-subtle: rgba(14, 116, 144, 0.10);
-  --ref-info-border: rgba(14, 116, 144, 0.35);
-  --ref-ring: rgba(37, 99, 235, 0.4);
-  --ref-input-bg: #ffffff;
-  --ref-hover-bg: rgba(15, 23, 42, 0.05);
-  --ref-shadow: 0 1px 2px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.06);
-  color-scheme: light;
+const PRIMITIVES = `
+  --g-0: oklch(100% 0 286); --g-50: oklch(98.5% 0.002 286); --g-100: oklch(96.7% 0.003 286);
+  --g-150: oklch(94.6% 0.004 286); --g-200: oklch(92.4% 0.005 286); --g-300: oklch(86.8% 0.007 286);
+  --g-400: oklch(71% 0.01 286); --g-450: oklch(65% 0.011 286); --g-500: oklch(55.4% 0.012 286);
+  --g-600: oklch(45% 0.012 286); --g-700: oklch(37% 0.011 286); --g-750: oklch(32% 0.01 286);
+  --g-800: oklch(27.6% 0.009 286); --g-850: oklch(24.4% 0.008 286); --g-900: oklch(21.2% 0.007 286);
+  --g-950: oklch(16% 0.006 286);
+  --iris-50: oklch(97.2% 0.014 293.6); --iris-300: oklch(81.6% 0.098 293.6); --iris-400: oklch(70.9% 0.159 293.6);
+  --iris-600: oklch(52.6% 0.205 293.6); --iris-700: oklch(46.6% 0.185 293.6);
+  --marker-400: oklch(73.5% 0.15 355); --marker-600: oklch(57.5% 0.2 355); --marker-700: oklch(51% 0.18 355);
+  --leaf-400: oklch(76% 0.14 152); --leaf-700: oklch(49.5% 0.11 152);
+  --red-400: oklch(70.4% 0.191 22.216); --red-700: oklch(50.5% 0.213 27.518);
+  --yellow-400: oklch(85.2% 0.199 91.936); --yellow-800: oklch(47.6% 0.114 61.907);
+  --blue-400: oklch(70.7% 0.165 254.624); --blue-700: oklch(48.8% 0.243 264.376);
+  --brand-600: oklch(51% 0.09 182); --brand-700: oklch(45% 0.085 182);
 `
-const DARK_TOKENS = `
-  --ref-bg-app: #0b0d13;
-  --ref-bg-surface: #131722;
-  --ref-bg-surface-elevated: #1a202c;
-  --ref-bg-canvas: #080a0f;
-  --ref-border: #2a3140;
-  --ref-border-subtle: #1a202c;
-  --ref-text: #f1f5f9;
-  --ref-text-muted: #94a3b8;
-  --ref-text-subtle: #7c8aa0;
-  --ref-primary: #60a5fa;
-  --ref-primary-hover: #3b82f6;
-  --ref-primary-subtle: rgba(96, 165, 250, 0.14);
-  --ref-primary-border: rgba(96, 165, 250, 0.35);
-  --ref-on-primary: #0b1220;
-  --ref-success: #34d399;
-  --ref-success-subtle: rgba(52, 211, 153, 0.14);
-  --ref-success-border: rgba(52, 211, 153, 0.35);
-  --ref-warning: #fbbf24;
-  --ref-warning-subtle: rgba(251, 191, 36, 0.14);
-  --ref-warning-border: rgba(251, 191, 36, 0.35);
-  --ref-danger: #f87171;
-  --ref-danger-subtle: rgba(248, 113, 113, 0.14);
-  --ref-danger-border: rgba(248, 113, 113, 0.35);
-  --ref-info: #22d3ee;
-  --ref-info-subtle: rgba(34, 211, 238, 0.14);
-  --ref-info-border: rgba(34, 211, 238, 0.35);
-  --ref-ring: rgba(96, 165, 250, 0.5);
-  --ref-input-bg: #090b10;
-  --ref-hover-bg: rgba(255, 255, 255, 0.06);
-  --ref-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
-  color-scheme: dark;
+function tint(color: string, percent: number): string {
+	return `color-mix(in oklch, ${color} ${percent}%, transparent)`
+}
+function themeTokens(mode: 'light' | 'dark'): string {
+	const light = mode === 'light'
+	const t = light ? 10 : 14
+	const primary = light ? 'var(--iris-600)' : 'var(--iris-400)'
+	const annotation = light ? 'var(--marker-700)' : 'var(--marker-400)'
+	const success = light ? 'var(--leaf-700)' : 'var(--leaf-400)'
+	const warning = light ? 'var(--yellow-800)' : 'var(--yellow-400)'
+	const danger = light ? 'var(--red-700)' : 'var(--red-400)'
+	const info = light ? 'var(--blue-700)' : 'var(--blue-400)'
+	return `${PRIMITIVES}
+  --ref-bg-app: ${light ? 'var(--g-0)' : 'var(--g-900)'};
+  --ref-bg-surface: ${light ? 'var(--g-0)' : 'var(--g-900)'};
+  --ref-bg-muted: ${light ? 'var(--g-50)' : 'var(--g-850)'};
+  --ref-bg-surface-elevated: ${light ? 'var(--g-100)' : 'var(--g-800)'};
+  --ref-bg-accented: ${light ? 'var(--g-200)' : 'var(--g-750)'};
+  --ref-bg-canvas: ${light ? 'var(--g-100)' : 'var(--g-950)'};
+  --ref-canvas-dot: ${light ? 'oklch(16% 0.006 286 / 0.12)' : 'oklch(100% 0 0 / 0.08)'};
+  --ref-border: ${light ? 'var(--g-200)' : 'var(--g-750)'};
+  --ref-border-subtle: ${light ? 'var(--g-150)' : 'var(--g-800)'};
+  --ref-border-control: ${light ? 'var(--g-450)' : 'var(--g-500)'};
+  --ref-text: ${light ? 'var(--g-800)' : 'var(--g-200)'};
+  --ref-text-highlighted: ${light ? 'var(--g-950)' : 'var(--g-0)'};
+  --ref-text-muted: ${light ? 'var(--g-600)' : 'var(--g-400)'};
+  --ref-text-subtle: ${light ? 'var(--g-500)' : 'var(--g-450)'};
+  --ref-primary: ${primary};
+  --ref-primary-hover: ${light ? 'var(--iris-700)' : 'var(--iris-300)'};
+  --ref-primary-subtle: ${tint(primary, t)};
+  --ref-primary-border: ${tint(primary, 35)};
+  --ref-on-primary: ${light ? 'var(--g-0)' : 'var(--g-900)'};
+  --ref-annotation: ${annotation};
+  --ref-annotation-subtle: ${tint(annotation, t)};
+  --ref-annotation-border: ${tint(annotation, 35)};
+  --ref-pin: ${light ? 'var(--marker-600)' : 'var(--marker-400)'};
+  --ref-on-pin: ${light ? 'var(--g-0)' : 'var(--g-950)'};
+  --ref-pin-resolved: var(--g-500);
+  --ref-success: ${success}; --ref-success-subtle: ${tint(success, t)}; --ref-success-border: ${tint(success, 35)};
+  --ref-warning: ${warning}; --ref-warning-subtle: ${tint(warning, t)}; --ref-warning-border: ${tint(warning, 35)};
+  --ref-danger: ${danger}; --ref-danger-subtle: ${tint(danger, t)}; --ref-danger-border: ${tint(danger, 35)};
+  --ref-info: ${info}; --ref-info-subtle: ${tint(info, t)}; --ref-info-border: ${tint(info, 35)};
+  --ref-brand: var(--brand-600); --ref-brand-hover: var(--brand-700);
+  --ref-ring: ${primary};
+  --ref-input-bg: ${light ? 'var(--g-0)' : 'var(--g-900)'};
+  --ref-hover-bg: ${light ? 'var(--g-50)' : 'var(--g-850)'};
+  --ref-shadow: none;
+  --ref-shadow-frame: ${light
+		? '0 0 0 1px oklch(16% 0.006 286 / 0.08), 0 2px 6px oklch(16% 0.006 286 / 0.06), 0 12px 32px -8px oklch(16% 0.006 286 / 0.12)'
+		: '0 0 0 1px var(--g-750), 0 16px 40px -8px oklch(0% 0 0 / 0.55)'};
+  --ref-shadow-overlay: ${light
+		? '0 1px 2px oklch(16% 0.006 286 / 0.06), 0 8px 24px -4px oklch(16% 0.006 286 / 0.14)'
+		: '0 0 0 1px var(--g-750), 0 12px 32px -4px oklch(0% 0 0 / 0.6)'};
+  --ref-shadow-modal: ${light ? '0 24px 64px -12px oklch(16% 0.006 286 / 0.25)' : '0 0 0 1px var(--g-750), 0 24px 64px -12px oklch(0% 0 0 / 0.7)'};
+  color-scheme: ${mode};
 `
+}
+const FONT_SANS = '"Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif'
+const FONT_MONO = '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, "PingFang TC", monospace'
+
 const CSS_RULES = `
 .uiux-ref-scope {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", Helvetica, Arial, sans-serif;
+  font-family: ${FONT_SANS};
   color: var(--ref-text);
   box-sizing: border-box;
   min-width: 0;
+  font-size: 13px;
+  line-height: 20px;
 }
-.uiux-ref-scope *, .uiux-ref-scope *::before, .uiux-ref-scope *::after {
-  box-sizing: border-box;
-}
+.uiux-ref-scope *, .uiux-ref-scope *::before, .uiux-ref-scope *::after { box-sizing: border-box; }
+.uiux-ref-scope:lang(zh-TW), .uiux-ref-scope :lang(zh-TW) { letter-spacing: 0; }
 
 /* Theme tokens: explicit light/dark themes, and an OS-following fallback for other theme ids. */
-.uiux-theme-light, .uiux-theme-auto {${LIGHT_TOKENS}}
-.uiux-theme-dark {${DARK_TOKENS}}
+.uiux-theme-light, .uiux-theme-auto {${themeTokens('light')}}
+.uiux-theme-dark {${themeTokens('dark')}}
 @media (prefers-color-scheme: dark) {
-  .uiux-theme-auto {${DARK_TOKENS}}
+  .uiux-theme-auto {${themeTokens('dark')}}
 }
 
 .uiux-ref-hidden { display: none !important; }
+.uiux-ref-icon { flex-shrink: 0; display: inline-block; vertical-align: middle; }
+.uiux-ref-glyph { flex-shrink: 0; }
+.uiux-ref-kbd {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 5px;
+  font-family: ${FONT_MONO}; font-size: 12px; line-height: 16px; color: var(--ref-text-muted);
+  background: var(--ref-bg-surface); border: 1px solid var(--ref-border); border-bottom-width: 2px; border-radius: 4px; white-space: nowrap;
+}
+.uiux-ref-focusable:focus-visible { outline: 2px solid var(--ref-primary); outline-offset: 2px; }
 
 /* Stack */
 .uiux-ref-stack { display: flex; }
 .uiux-ref-stack.surface-app { background-color: var(--ref-bg-app); color: var(--ref-text); }
-.uiux-ref-stack.surface-surface { background-color: var(--ref-bg-surface); color: var(--ref-text); }
+.uiux-ref-stack.surface-surface, .uiux-ref-stack.surface-panel { background-color: var(--ref-bg-surface); color: var(--ref-text); }
+.uiux-ref-stack.surface-muted { background-color: var(--ref-bg-muted); }
+.uiux-ref-stack.surface-elevated { background-color: var(--ref-bg-surface-elevated); }
 .uiux-ref-stack.surface-canvas { background-color: var(--ref-bg-canvas); color: var(--ref-text); }
+.uiux-ref-stack.is-overlay { position: absolute; inset: 0; pointer-events: none; }
+.uiux-ref-stack.is-overlay > * { pointer-events: auto; }
+.uiux-ref-stack.is-card { border: 1px solid var(--ref-border); border-radius: 8px; background-color: var(--ref-bg-surface); }
 
 /* Panel */
 .uiux-ref-panel {
-  display: flex;
-  flex-direction: column;
-  border-radius: 6px;
-  background-color: var(--ref-bg-surface);
-  color: var(--ref-text);
-  overflow: hidden;
+  display: flex; flex-direction: column; border-radius: 8px;
+  background-color: var(--ref-bg-surface); color: var(--ref-text); overflow: hidden;
 }
 .uiux-ref-panel.is-bordered { border: 1px solid var(--ref-border); }
-.uiux-ref-panel.variant-canvas {
-  background-color: var(--ref-bg-canvas);
-  border-color: var(--ref-border-subtle);
-  border-radius: 0;
-}
+.uiux-ref-panel.variant-canvas { background-color: var(--ref-bg-canvas); border-color: var(--ref-border-subtle); border-radius: 0; }
 .uiux-ref-panel.variant-surface { border-radius: 0; }
-.uiux-ref-panel.variant-sidebar {
-  background-color: var(--ref-bg-surface);
-  border-color: var(--ref-border);
-  border-radius: 0;
-}
-.uiux-ref-panel.variant-card {
-  background-color: var(--ref-bg-surface-elevated);
-  box-shadow: var(--ref-shadow);
-}
+.uiux-ref-panel.variant-sidebar { background-color: var(--ref-bg-surface); border-color: var(--ref-border); border-radius: 0; }
+.uiux-ref-panel.variant-card { background-color: var(--ref-bg-surface); }
+.uiux-ref-panel.variant-dialog { box-shadow: var(--ref-shadow-overlay); border-radius: 8px; }
 .uiux-ref-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--ref-border);
-  min-height: 36px;
-  gap: 8px;
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  padding: 8px 12px; border-bottom: 1px solid var(--ref-border); min-height: 40px; gap: 8px;
 }
-.uiux-ref-panel-title {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--ref-text-muted);
-}
+.uiux-ref-panel-title { font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: -0.004em; color: var(--ref-text-highlighted); }
 .uiux-ref-panel-body { flex: 1 1 auto; min-width: 0; }
 
 /* Text */
-.uiux-ref-text { margin: 0; line-height: 1.45; overflow-wrap: anywhere; }
-.uiux-ref-text.variant-h1 { font-size: 22px; font-weight: 700; }
-.uiux-ref-text.variant-h2 { font-size: 17px; font-weight: 600; }
-.uiux-ref-text.variant-h3 { font-size: 14px; font-weight: 600; }
-.uiux-ref-text.variant-h4 { font-size: 12px; font-weight: 600; }
-.uiux-ref-text.variant-body { font-size: 13px; }
-.uiux-ref-text.variant-caption { font-size: 11px; }
-.uiux-ref-text.variant-code { font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.uiux-ref-text { margin: 0; overflow-wrap: anywhere; }
+.uiux-ref-text.variant-display, .uiux-ref-text.variant-h1 { font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.012em; color: var(--ref-text-highlighted); }
+.uiux-ref-text.variant-headline, .uiux-ref-text.variant-h2 { font-size: 18px; line-height: 26px; font-weight: 600; letter-spacing: -0.008em; color: var(--ref-text-highlighted); }
+.uiux-ref-text.variant-title, .uiux-ref-text.variant-h3 { font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: -0.004em; color: var(--ref-text-highlighted); }
+.uiux-ref-text.variant-h4 { font-size: 13px; line-height: 20px; font-weight: 600; }
+.uiux-ref-text.variant-body { font-size: 14px; line-height: 22px; max-width: 68ch; }
+.uiux-ref-text.variant-ui { font-size: 13px; line-height: 20px; }
+.uiux-ref-text.variant-label, .uiux-ref-text.variant-caption { font-size: 12px; line-height: 16px; }
+.uiux-ref-text.variant-label { font-weight: 500; }
+.uiux-ref-text.variant-mono, .uiux-ref-text.variant-code { font-size: 12px; line-height: 16px; font-family: ${FONT_MONO}; }
+.uiux-ref-text:lang(zh-TW).variant-ui { line-height: 22px; }
+.uiux-ref-text:lang(zh-TW).variant-body { line-height: 24px; }
 .uiux-ref-text.weight-normal { font-weight: 400; }
 .uiux-ref-text.weight-medium { font-weight: 500; }
 .uiux-ref-text.weight-semibold { font-weight: 600; }
 .uiux-ref-text.weight-bold { font-weight: 700; }
 .uiux-ref-text.tone-default { color: var(--ref-text); }
+.uiux-ref-text.tone-highlighted { color: var(--ref-text-highlighted); }
 .uiux-ref-text.tone-muted { color: var(--ref-text-muted); }
 .uiux-ref-text.tone-subtle { color: var(--ref-text-subtle); }
 .uiux-ref-text.tone-primary { color: var(--ref-primary); }
+.uiux-ref-text.tone-annotation { color: var(--ref-annotation); }
 .uiux-ref-text.tone-success { color: var(--ref-success); }
 .uiux-ref-text.tone-warning { color: var(--ref-warning); }
 .uiux-ref-text.tone-danger { color: var(--ref-danger); }
 .uiux-ref-text.tone-info { color: var(--ref-info); }
-.uiux-ref-text.is-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.uiux-ref-text.is-mono { font-family: ${FONT_MONO}; }
 .uiux-ref-text.is-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uiux-ref-text.is-clamped { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* Button */
 .uiux-ref-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  font-family: inherit;
-  font-weight: 500;
-  border-radius: 4px;
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-  white-space: nowrap;
-  user-select: none;
-  line-height: 1;
-  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  font-family: inherit; font-weight: 500; border-radius: 6px; cursor: pointer;
+  border: 1px solid transparent; white-space: nowrap; user-select: none; line-height: 20px; flex-shrink: 0;
+  transition: background-color 120ms cubic-bezier(0.2, 0, 0, 1), border-color 120ms cubic-bezier(0.2, 0, 0, 1), color 120ms cubic-bezier(0.2, 0, 0, 1);
 }
 .uiux-ref-btn:focus-visible { outline: 2px solid var(--ref-primary); outline-offset: 2px; }
-.uiux-ref-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.uiux-ref-btn.size-sm { padding: 4px 8px; font-size: 11px; height: 24px; }
-.uiux-ref-btn.size-md { padding: 6px 12px; font-size: 12px; height: 30px; }
-.uiux-ref-btn.size-lg { padding: 8px 16px; font-size: 14px; height: 36px; }
-.uiux-ref-btn.is-icon-only.size-sm { width: 24px; padding: 0; }
-.uiux-ref-btn.is-icon-only.size-md { width: 30px; padding: 0; }
-.uiux-ref-btn.is-icon-only.size-lg { width: 36px; padding: 0; }
+.uiux-ref-btn:disabled { cursor: not-allowed; color: var(--ref-text-subtle); background-color: var(--ref-bg-surface-elevated); border-color: var(--ref-border); }
+.uiux-ref-btn.size-sm { padding: 3px 8px; font-size: 13px; height: 28px; }
+.uiux-ref-btn.size-md { padding: 5px 10px; font-size: 13px; height: 32px; }
+.uiux-ref-btn.size-lg { padding: 8px 14px; font-size: 14px; height: 40px; }
+.uiux-ref-btn.is-touch { min-height: 44px; }
+.uiux-ref-btn.is-icon-only.size-sm { width: 28px; padding: 0; }
+.uiux-ref-btn.is-icon-only.size-md { width: 32px; padding: 0; }
+.uiux-ref-btn.is-icon-only.size-lg { width: 40px; padding: 0; }
+.uiux-ref-btn.is-icon-only.is-touch { width: 44px; height: 44px; }
 .uiux-ref-btn.is-full-width { width: 100%; }
-.uiux-ref-btn.variant-primary { background-color: var(--ref-primary); color: var(--ref-on-primary); border-color: var(--ref-primary); }
-.uiux-ref-btn.variant-primary:hover:not(:disabled) { background-color: var(--ref-primary-hover); }
-.uiux-ref-btn.variant-secondary { background-color: var(--ref-bg-surface-elevated); color: var(--ref-text); border-color: var(--ref-border); }
-.uiux-ref-btn.variant-secondary:hover:not(:disabled) { background-color: var(--ref-hover-bg); border-color: var(--ref-text-subtle); }
-.uiux-ref-btn.variant-ghost { background-color: transparent; color: var(--ref-text-muted); border-color: transparent; }
-.uiux-ref-btn.variant-ghost:hover:not(:disabled) { background-color: var(--ref-hover-bg); color: var(--ref-text); }
-.uiux-ref-btn.variant-outline { background-color: transparent; color: var(--ref-text); border-color: var(--ref-border); }
-.uiux-ref-btn.variant-outline:hover:not(:disabled) { background-color: var(--ref-hover-bg); }
-.uiux-ref-btn.variant-danger { background-color: var(--ref-danger); color: var(--ref-on-primary); border-color: var(--ref-danger); }
+.uiux-ref-btn.variant-primary:not(:disabled) { background-color: var(--ref-primary); color: var(--ref-on-primary); border-color: var(--ref-primary); }
+.uiux-ref-btn.variant-primary:hover:not(:disabled) { background-color: var(--ref-primary-hover); border-color: var(--ref-primary-hover); }
+.uiux-ref-btn.variant-secondary, .uiux-ref-btn.variant-outline { background-color: var(--ref-bg-surface); color: var(--ref-text); border-color: var(--ref-border-control); }
+.uiux-ref-btn.variant-secondary:hover:not(:disabled), .uiux-ref-btn.variant-outline:hover:not(:disabled) { background-color: var(--ref-bg-surface-elevated); }
+.uiux-ref-btn.variant-ghost { background-color: transparent; color: var(--ref-text-muted); }
+.uiux-ref-btn.variant-ghost:hover:not(:disabled) { background-color: var(--ref-bg-surface-elevated); color: var(--ref-text-highlighted); }
+.uiux-ref-btn.variant-annotation { background-color: var(--ref-annotation-subtle); color: var(--ref-annotation); border-color: var(--ref-annotation-border); }
+.uiux-ref-btn.variant-danger { background-color: var(--ref-danger-subtle); color: var(--ref-danger); border-color: var(--ref-danger-border); }
+.uiux-ref-btn.variant-link { background: none; border-color: transparent; color: var(--ref-primary); padding-inline: 0; text-decoration: underline; text-underline-offset: 3px; }
+.uiux-ref-btn.variant-brand:not(:disabled) { background-color: var(--ref-brand); color: #fff; border-color: var(--ref-brand); }
+.uiux-ref-btn.variant-brand:hover:not(:disabled) { background-color: var(--ref-brand-hover); }
+.uiux-ref-btn.variant-display { background: transparent; border-color: transparent; height: auto; min-height: 40px; padding: 0 4px; font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.012em; color: var(--ref-text-highlighted); white-space: normal; text-align: left; }
+.uiux-ref-btn.variant-display:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
+.uiux-ref-btn.variant-display.is-touch { min-height: 44px; font-size: 18px; line-height: 26px; }
+.uiux-ref-btn .uiux-ref-kbd { margin-left: 2px; height: 18px; min-width: 18px; }
+.uiux-ref-btn.variant-primary .uiux-ref-kbd { background: transparent; color: inherit; border-color: currentColor; opacity: 1; }
 
 /* Badge */
 .uiux-ref-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 7px;
-  font-size: 10px;
-  font-weight: 600;
-  border-radius: 9999px;
-  line-height: 1.3;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  border: 1px solid transparent;
-  flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; min-height: 20px;
+  font-size: 12px; font-weight: 500; line-height: 16px; border-radius: 4px; white-space: nowrap;
+  border: 1px solid transparent; flex-shrink: 0;
 }
-.uiux-ref-badge.tone-neutral { --ref-badge-fg: var(--ref-text-muted); --ref-badge-bg: var(--ref-hover-bg); --ref-badge-border: var(--ref-border); --ref-badge-solid: var(--ref-text-muted); }
+.uiux-ref-badge .uiux-ref-icon { width: 14px; height: 14px; }
+.uiux-ref-badge.tone-neutral { --ref-badge-fg: var(--ref-text-muted); --ref-badge-bg: var(--ref-bg-surface-elevated); --ref-badge-border: var(--ref-border); --ref-badge-solid: var(--ref-text-muted); }
 .uiux-ref-badge.tone-primary { --ref-badge-fg: var(--ref-primary); --ref-badge-bg: var(--ref-primary-subtle); --ref-badge-border: var(--ref-primary-border); --ref-badge-solid: var(--ref-primary); }
+.uiux-ref-badge.tone-annotation { --ref-badge-fg: var(--ref-annotation); --ref-badge-bg: var(--ref-annotation-subtle); --ref-badge-border: var(--ref-annotation-border); --ref-badge-solid: var(--ref-pin); }
 .uiux-ref-badge.tone-success { --ref-badge-fg: var(--ref-success); --ref-badge-bg: var(--ref-success-subtle); --ref-badge-border: var(--ref-success-border); --ref-badge-solid: var(--ref-success); }
 .uiux-ref-badge.tone-warning { --ref-badge-fg: var(--ref-warning); --ref-badge-bg: var(--ref-warning-subtle); --ref-badge-border: var(--ref-warning-border); --ref-badge-solid: var(--ref-warning); }
 .uiux-ref-badge.tone-danger { --ref-badge-fg: var(--ref-danger); --ref-badge-bg: var(--ref-danger-subtle); --ref-badge-border: var(--ref-danger-border); --ref-badge-solid: var(--ref-danger); }
 .uiux-ref-badge.tone-info { --ref-badge-fg: var(--ref-info); --ref-badge-bg: var(--ref-info-subtle); --ref-badge-border: var(--ref-info-border); --ref-badge-solid: var(--ref-info); }
 .uiux-ref-badge.variant-subtle { color: var(--ref-badge-fg); background-color: var(--ref-badge-bg); border-color: var(--ref-badge-border); }
+.uiux-ref-badge.variant-soft { color: var(--ref-badge-fg); background-color: var(--ref-badge-bg); }
 .uiux-ref-badge.variant-outline { color: var(--ref-badge-fg); background-color: transparent; border-color: var(--ref-badge-border); }
 .uiux-ref-badge.variant-solid { color: var(--ref-bg-surface); background-color: var(--ref-badge-solid); border-color: var(--ref-badge-solid); }
+.uiux-ref-badge.variant-mono { font-family: ${FONT_MONO}; font-weight: 400; color: var(--ref-text-muted); background-color: var(--ref-bg-surface-elevated); }
+.uiux-ref-badge.variant-count { min-width: 20px; justify-content: center; color: var(--ref-badge-fg); background-color: var(--ref-badge-bg); }
 
 /* TextInput */
-.uiux-ref-input-group { display: flex; flex-direction: column; gap: 4px; width: 100%; }
-.uiux-ref-input-label { font-size: 11px; font-weight: 500; color: var(--ref-text-muted); }
+.uiux-ref-input-group { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.uiux-ref-input-label { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ref-text); }
+.uiux-ref-input-shell { position: relative; display: flex; align-items: center; width: 100%; }
+.uiux-ref-input-shell > .uiux-ref-icon { position: absolute; left: 10px; color: var(--ref-text-subtle); pointer-events: none; }
+.uiux-ref-input-shell > .uiux-ref-kbd { position: absolute; right: 6px; }
 .uiux-ref-input {
-  width: 100%;
-  height: 28px;
-  padding: 4px 8px;
-  font-size: 12px;
-  background-color: var(--ref-input-bg);
-  color: var(--ref-text);
-  border: 1px solid var(--ref-border);
-  border-radius: 4px;
-  outline: none;
-  font-family: inherit;
-  transition: border-color 0.15s ease;
+  width: 100%; height: 32px; padding: 5px 10px; font-size: 13px; line-height: 20px;
+  background-color: var(--ref-input-bg); color: var(--ref-text);
+  border: 1px solid var(--ref-border-control); border-radius: 6px; outline: none; font-family: inherit;
+  transition: border-color 120ms ease;
 }
-.uiux-ref-input:focus { border-color: var(--ref-primary); box-shadow: 0 0 0 2px var(--ref-ring); }
+textarea.uiux-ref-input { height: auto; min-height: 64px; resize: none; }
+.uiux-ref-input.has-icon { padding-left: 32px; }
+.uiux-ref-input.has-kbd { padding-right: 44px; }
+.uiux-ref-input.is-mono { font-family: ${FONT_MONO}; font-size: 12px; }
+.uiux-ref-input.is-touch { height: 44px; font-size: 16px; }
+.uiux-ref-input:focus { border-color: var(--ref-primary); box-shadow: 0 0 0 1px var(--ref-primary); }
 .uiux-ref-input::placeholder { color: var(--ref-text-subtle); }
-.uiux-ref-input[readonly] { background-color: var(--ref-bg-surface-elevated); }
+.uiux-ref-input[readonly] { background-color: var(--ref-bg-muted); }
+.uiux-ref-input.is-invalid { border-color: var(--ref-danger); }
+.uiux-ref-input-help { font-size: 12px; line-height: 18px; color: var(--ref-text-muted); margin: 0; }
+.uiux-ref-input-error { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; line-height: 18px; color: var(--ref-danger); margin: 0; }
 
 /* NavItem */
 .uiux-ref-nav-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--ref-text-muted);
-  border-radius: 4px;
-  cursor: pointer;
-  user-select: none;
-  transition: background-color 0.15s ease, color 0.15s ease;
-  gap: 8px;
-  min-width: 0;
+  position: relative; display: flex; align-items: center; justify-content: space-between;
+  min-height: 32px; padding: 6px 8px; font-size: 13px; line-height: 20px; color: var(--ref-text-muted);
+  border-radius: 6px; cursor: pointer; user-select: none; gap: 8px; min-width: 0;
+  transition: background-color 120ms ease, color 120ms ease;
 }
-.uiux-ref-nav-item:hover { background-color: var(--ref-hover-bg); color: var(--ref-text); }
+.uiux-ref-nav-item:hover { background-color: var(--ref-bg-muted); color: var(--ref-text); }
 .uiux-ref-nav-item:focus-visible { outline: 2px solid var(--ref-primary); outline-offset: 1px; }
-.uiux-ref-nav-item.is-selected { background-color: var(--ref-primary-subtle); color: var(--ref-primary); font-weight: 600; }
-.uiux-ref-nav-item.is-icon-only { padding: 6px 8px; }
-.uiux-ref-nav-item-content { display: flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.uiux-ref-nav-item.is-selected { background-color: var(--ref-bg-surface-elevated); color: var(--ref-text-highlighted); font-weight: 500; }
+.uiux-ref-nav-item.is-selected::before { content: ""; position: absolute; left: -8px; top: 6px; bottom: 6px; width: 2px; border-radius: 2px; background: var(--ref-primary); }
+.uiux-ref-nav-item.is-icon-only { justify-content: center; width: 40px; height: 40px; padding: 0; }
+.uiux-ref-nav-item.is-icon-only.is-selected::before { left: -8px; }
+.uiux-ref-nav-item-content { display: flex; align-items: center; gap: 8px; overflow: hidden; white-space: nowrap; min-width: 0; }
 .uiux-ref-nav-item-label { overflow: hidden; text-overflow: ellipsis; }
-.uiux-ref-nav-item-icon { font-size: 13px; flex-shrink: 0; }
-.uiux-ref-nav-item-meta { font-size: 10px; color: var(--ref-text-subtle); margin-left: auto; white-space: nowrap; }
-.uiux-ref-nav-item.is-selected .uiux-ref-nav-item-meta { color: var(--ref-primary); opacity: 0.8; }
+.uiux-ref-nav-item-meta { font-size: 12px; color: var(--ref-text-subtle); margin-left: auto; white-space: nowrap; }
+.uiux-ref-nav-item.is-icon-only .uiux-ref-badge { position: absolute; top: 0; right: -2px; min-width: 18px; min-height: 18px; padding: 0 4px; }
 
 /* Divider */
 .uiux-ref-divider { border: 0; margin: 0; flex-shrink: 0; }
 .uiux-ref-divider.is-horizontal { width: 100%; border-top: 1px solid var(--ref-border); }
 .uiux-ref-divider.is-vertical { align-self: stretch; min-height: 16px; border-left: 1px solid var(--ref-border); }
+
+/* Avatar */
+.uiux-ref-avatar {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 9999px;
+  font-size: 12px; font-weight: 600; line-height: 1; color: var(--ref-text-muted); background: var(--ref-bg-surface-elevated);
+  border: 1px solid var(--ref-border);
+}
+.uiux-ref-avatar.tone-annotation { color: var(--ref-on-pin); background: var(--ref-pin); border-color: var(--ref-pin); }
+.uiux-ref-avatar.tone-primary { color: var(--ref-on-primary); background: var(--ref-primary); border-color: var(--ref-primary); }
+
+/* Pin (teardrop) */
+.uiux-ref-pin {
+  position: absolute; z-index: 3; width: 28px; height: 28px; transform: translate(0, -100%);
+  display: inline-flex; align-items: center; justify-content: center; padding: 0; cursor: pointer;
+  border: 0; border-radius: 999px 999px 999px 2px; font-family: inherit; font-size: 12px; font-weight: 600; line-height: 1;
+  color: var(--ref-on-pin); background: var(--ref-pin);
+  box-shadow: 0 0 0 2px var(--ref-bg-surface), 0 1px 3px oklch(0% 0 0 / 0.28);
+  transition: transform 120ms cubic-bezier(0.2, 0, 0, 1);
+}
+.uiux-ref-pin:hover { transform: translate(0, calc(-100% - 1px)); }
+.uiux-ref-pin:focus-visible { outline: 2px solid var(--ref-primary); outline-offset: 2px; }
+.uiux-ref-pin.is-selected { box-shadow: 0 0 0 2px var(--ref-bg-surface), 0 0 0 4px var(--ref-primary), 0 1px 3px oklch(0% 0 0 / 0.28); }
+.uiux-ref-pin.status-resolved { width: 24px; height: 24px; background: var(--ref-pin-resolved); color: var(--g-0); }
+.uiux-ref-pin.status-pending { background: var(--ref-bg-surface); color: var(--ref-annotation); box-shadow: none; outline: 1px dashed var(--ref-annotation); }
+.uiux-ref-pin-badge {
+  position: absolute; top: -4px; right: -4px; width: 14px; height: 14px; border-radius: 9999px;
+  display: inline-flex; align-items: center; justify-content: center; background: var(--ref-info); color: var(--ref-bg-surface);
+  box-shadow: 0 0 0 2px var(--ref-bg-surface);
+}
+.uiux-ref-pin-badge .uiux-ref-icon { width: 10px; height: 10px; }
+
+/* Bubble (thread / composer popover; docks to a bottom sheet on compact viewports) */
+.uiux-ref-bubble {
+  position: absolute; z-index: 4; width: 320px; max-width: calc(100% - 16px); display: flex; flex-direction: column;
+  background: var(--ref-bg-surface); color: var(--ref-text); border-radius: 12px; box-shadow: var(--ref-shadow-overlay);
+  border: 1px solid var(--ref-border-subtle); overflow: hidden;
+}
+.uiux-ref-bubble.is-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; top: auto !important; width: auto; max-width: none; max-height: 72%;
+  border-radius: 12px 12px 0 0; box-shadow: var(--ref-shadow-modal); z-index: 20;
+}
+.uiux-ref-bubble.is-inline { position: relative; left: auto !important; top: auto !important; width: 100%; max-width: none; box-shadow: none; border: 0; border-radius: 0; background: transparent; flex: 1 1 auto; }
+.uiux-ref-bubble-grip { align-self: center; width: 36px; height: 4px; border-radius: 4px; margin: 8px 0 0; background: var(--ref-bg-accented); }
+.uiux-ref-bubble-header { display: flex; flex-direction: column; gap: 6px; padding: 12px 12px 10px; border-bottom: 1px solid var(--ref-border); }
+.uiux-ref-bubble-head-row { display: flex; align-items: flex-start; gap: 8px; }
+.uiux-ref-bubble-title { flex: 1 1 auto; margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; color: var(--ref-text-highlighted); }
+.uiux-ref-bubble-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.uiux-ref-bubble-body { display: flex; flex-direction: column; gap: 12px; padding: 12px; overflow: auto; flex: 1 1 auto; }
+.uiux-ref-bubble:not(.is-sheet):not(.is-inline) .uiux-ref-bubble-body { max-height: 264px; }
+.uiux-ref-bubble-footer { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--ref-border); }
+.uiux-ref-bubble.is-inline .uiux-ref-bubble-header { padding: 16px 24px 12px; }
+.uiux-ref-bubble.is-inline .uiux-ref-bubble-body { padding: 16px 24px; }
+.uiux-ref-bubble.is-inline .uiux-ref-bubble-footer { padding: 12px 24px 16px; margin-top: auto; }
+.uiux-ref-bubble.is-inline .uiux-ref-bubble-title { font-size: 18px; line-height: 26px; }
+
+/* CanvasStage */
+.uiux-ref-stage { position: relative; display: flex; flex-direction: column; align-items: center; min-height: 0; overflow: hidden; background: var(--ref-bg-canvas); }
+.uiux-ref-stage.has-dots { background-image: radial-gradient(var(--ref-canvas-dot) 1px, transparent 1px); background-size: 16px 16px; }
+.uiux-ref-stage.mode-comment { box-shadow: inset 0 2px 0 var(--ref-pin); }
+.uiux-ref-stage-hint { position: relative; z-index: 5; margin: 0 0 12px; }
+.uiux-ref-stage-frame-wrap { position: relative; width: 100%; }
+.uiux-ref-stage-frame { position: relative; width: 100%; background: var(--g-0); color: var(--g-800); border-radius: 2px; box-shadow: var(--ref-shadow-frame); overflow: hidden; }
+.uiux-theme-dark .uiux-ref-stage-frame.follows-theme, .uiux-ref-stage-frame.follows-theme { background: var(--ref-bg-surface); color: var(--ref-text); }
+.uiux-ref-stage-palette { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 6; }
+.uiux-ref-stage-tray { position: absolute; left: 12px; bottom: 16px; z-index: 6; }
+.uiux-ref-stage.is-compact .uiux-ref-stage-palette { bottom: 12px; }
+.uiux-ref-stage.is-compact .uiux-ref-stage-tray { display: none; }
+
+/* SegmentedControl & Segment */
+.uiux-ref-segmented { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
+.uiux-ref-segmented.appearance-segment { padding: 2px; border-radius: 8px; background: var(--ref-bg-surface-elevated); }
+.uiux-ref-segmented.appearance-tabs { gap: 16px; border-bottom: 1px solid var(--ref-border); overflow-x: auto; }
+.uiux-ref-segmented.appearance-palette { gap: 2px; padding: 4px; border-radius: 12px; background: var(--ref-bg-surface); box-shadow: var(--ref-shadow-overlay); border: 1px solid var(--ref-border-subtle); }
+.uiux-ref-segmented.is-full-width { display: flex; width: 100%; }
+.uiux-ref-segmented.is-full-width.appearance-tabs > * { flex: 1 1 0; justify-content: center; }
+.uiux-ref-segment {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 10px;
+  font: inherit; font-size: 13px; line-height: 20px; color: var(--ref-text-muted); background: transparent; border: 0; border-radius: 6px;
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+}
+.uiux-ref-segment:hover { color: var(--ref-text-highlighted); background: var(--ref-bg-muted); }
+.uiux-ref-segment:focus-visible { outline: 2px solid var(--ref-primary); outline-offset: 2px; }
+.uiux-ref-segment.appearance-segment.is-selected { background: var(--ref-bg-surface); color: var(--ref-text-highlighted); font-weight: 500; box-shadow: 0 0 0 1px var(--ref-border); }
+.uiux-ref-segment.appearance-tabs { height: 40px; padding: 0 2px; border-radius: 0; }
+.uiux-ref-segment.appearance-tabs:hover { background: transparent; }
+.uiux-ref-segment.appearance-tabs.is-selected { color: var(--ref-text-highlighted); font-weight: 500; box-shadow: inset 0 -2px 0 var(--ref-primary); }
+.uiux-ref-segment.appearance-palette.is-selected { background: var(--ref-primary); color: var(--ref-on-primary); font-weight: 500; }
+.uiux-ref-segment.appearance-palette.is-selected.tone-annotation { background: var(--ref-annotation-subtle); color: var(--ref-annotation); box-shadow: inset 0 0 0 1px var(--ref-annotation-border); }
+.uiux-ref-segment.appearance-palette.is-selected .uiux-ref-kbd { background: transparent; color: inherit; border-color: currentColor; }
+.uiux-ref-segment.is-touch { height: 44px; }
+.uiux-ref-segment.is-icon-only { width: 32px; padding: 0; }
+.uiux-ref-segment.is-icon-only.is-touch { width: 44px; }
+.uiux-ref-segment .uiux-ref-badge.variant-count { min-height: 18px; padding: 0 5px; }
+
+/* TabBar (mobile bottom navigation) */
+.uiux-ref-tabbar {
+  position: sticky; bottom: 0; z-index: 10; display: flex; align-items: stretch; height: 56px; width: 100%;
+  background: var(--ref-bg-surface); border-top: 1px solid var(--ref-border); flex-shrink: 0;
+}
+.uiux-ref-tabbar-item {
+  position: relative; flex: 1 1 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  font: inherit; font-size: 12px; line-height: 16px; color: var(--ref-text-muted); background: transparent; border: 0; cursor: pointer; min-width: 0;
+}
+.uiux-ref-tabbar-item:focus-visible { outline: 2px solid var(--ref-primary); outline-offset: -2px; }
+.uiux-ref-tabbar-item.is-selected { color: var(--ref-text-highlighted); font-weight: 500; }
+.uiux-ref-tabbar-item.is-selected::before { content: ""; position: absolute; top: 0; left: 25%; right: 25%; height: 2px; background: var(--ref-primary); border-radius: 0 0 2px 2px; }
+.uiux-ref-tabbar-icon { position: relative; display: inline-flex; }
+.uiux-ref-tabbar-item .uiux-ref-badge { position: absolute; top: -6px; left: 12px; min-height: 18px; min-width: 18px; padding: 0 4px; justify-content: center; }
+
+/* Rail */
+.uiux-ref-rail { display: flex; flex-direction: column; flex-shrink: 0; background: var(--ref-bg-surface); border-right: 1px solid var(--ref-border); min-height: 0; }
+.uiux-ref-rail-section { display: flex; flex-direction: column; gap: 2px; padding: 8px 8px 8px 16px; }
+.uiux-ref-rail-section.is-content { flex: 1 1 auto; overflow: auto; border-top: 1px solid var(--ref-border); }
+.uiux-ref-rail-section.is-footer { border-top: 1px solid var(--ref-border); }
+.uiux-ref-rail.is-collapsed .uiux-ref-rail-section { align-items: center; padding: 8px; }
+
+/* ContextBar & ContextChip */
+.uiux-ref-contextbar {
+  display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 4px 12px; flex-shrink: 0;
+  background: var(--ref-bg-surface); border-bottom: 1px solid var(--ref-border); overflow-x: auto;
+}
+.uiux-ref-contextbar-start, .uiux-ref-contextbar-end { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.uiux-ref-contextbar-end { margin-left: auto; }
+.uiux-ref-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 4px 8px; border-radius: 6px; border: 0;
+  font: inherit; font-size: 13px; line-height: 20px; color: var(--ref-text-muted); background: transparent; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+}
+.uiux-ref-chip:hover { background: var(--ref-bg-surface-elevated); }
+.uiux-ref-chip:focus-visible { outline: 2px solid var(--ref-primary); outline-offset: 2px; }
+.uiux-ref-chip-value { color: var(--ref-text-highlighted); font-weight: 500; }
+.uiux-ref-chip-value.is-mono { font-family: ${FONT_MONO}; font-size: 12px; font-weight: 400; }
+.uiux-ref-chip.is-touch { height: 44px; }
+
+/* TimelineItem */
+.uiux-ref-timeline { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.uiux-ref-timeline-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.uiux-ref-timeline-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; line-height: 20px; }
+.uiux-ref-timeline-name { font-weight: 600; color: var(--ref-text-highlighted); }
+.uiux-ref-timeline-time { font-size: 12px; color: var(--ref-text-subtle); }
+.uiux-ref-timeline-body { margin: 0; font-size: 14px; line-height: 22px; color: var(--ref-text); }
+.uiux-ref-timeline.kind-event { align-items: center; color: var(--ref-text-muted); font-size: 12px; line-height: 16px; }
+.uiux-ref-timeline.kind-event .uiux-ref-timeline-marker { width: 24px; display: inline-flex; justify-content: center; }
+.uiux-ref-timeline.kind-event.tone-success { color: var(--ref-success); }
+.uiux-ref-timeline.kind-event.tone-info { color: var(--ref-info); }
+.uiux-ref-timeline.kind-event.tone-annotation { color: var(--ref-annotation); }
+
+/* ThreadRow */
+.uiux-ref-thread {
+  position: relative; display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; cursor: pointer; text-align: left; width: 100%;
+  font: inherit; background: transparent; border: 0; border-radius: 0; color: var(--ref-text);
+}
+.uiux-ref-thread:hover { background: var(--ref-bg-muted); }
+.uiux-ref-thread:focus-visible { outline: 2px solid var(--ref-primary); outline-offset: -2px; }
+.uiux-ref-thread.is-selected { background: var(--ref-primary-subtle); }
+.uiux-ref-thread.is-selected::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--ref-primary); }
+.uiux-ref-thread-status { display: inline-flex; padding-top: 2px; }
+.uiux-ref-thread-status.status-open { color: var(--ref-annotation); }
+.uiux-ref-thread-status.status-ready { color: var(--ref-info); }
+.uiux-ref-thread-status.status-resolved { color: var(--ref-success); }
+.uiux-ref-thread-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.uiux-ref-thread-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.uiux-ref-thread-title { flex: 1 1 auto; min-width: 0; font-size: 13px; line-height: 20px; font-weight: 500; color: var(--ref-text-highlighted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uiux-ref-thread-time { font-size: 12px; color: var(--ref-text-subtle); white-space: nowrap; }
+.uiux-ref-thread-count { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--ref-annotation); }
+.uiux-ref-thread-meta { font-size: 12px; line-height: 16px; color: var(--ref-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uiux-ref-thread-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.uiux-ref-thread.is-touch { min-height: 64px; }
+
+/* Alert */
+.uiux-ref-alert { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border-radius: 8px; border: 1px solid var(--ref-alert-border); background: var(--ref-alert-bg); color: var(--ref-text); }
+.uiux-ref-alert-icon { color: var(--ref-alert-fg); padding-top: 2px; display: inline-flex; }
+.uiux-ref-alert-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 auto; }
+.uiux-ref-alert-title { margin: 0; font-size: 14px; line-height: 22px; font-weight: 600; color: var(--ref-alert-fg); }
+.uiux-ref-alert-desc { margin: 0; font-size: 14px; line-height: 22px; color: var(--ref-text); }
+.uiux-ref-alert-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.uiux-ref-alert.tone-info { --ref-alert-fg: var(--ref-info); --ref-alert-bg: var(--ref-info-subtle); --ref-alert-border: var(--ref-info-border); }
+.uiux-ref-alert.tone-success { --ref-alert-fg: var(--ref-success); --ref-alert-bg: var(--ref-success-subtle); --ref-alert-border: var(--ref-success-border); }
+.uiux-ref-alert.tone-warning { --ref-alert-fg: var(--ref-warning); --ref-alert-bg: var(--ref-warning-subtle); --ref-alert-border: var(--ref-warning-border); }
+.uiux-ref-alert.tone-danger { --ref-alert-fg: var(--ref-danger); --ref-alert-bg: var(--ref-danger-subtle); --ref-alert-border: var(--ref-danger-border); }
+.uiux-ref-alert.tone-annotation { --ref-alert-fg: var(--ref-annotation); --ref-alert-bg: var(--ref-annotation-subtle); --ref-alert-border: var(--ref-annotation-border); }
+.uiux-ref-alert.is-toast { background: var(--ref-bg-surface); border-color: var(--ref-border-subtle); box-shadow: var(--ref-shadow-overlay); }
+
+/* EmptyState */
+.uiux-ref-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 8px; padding: 32px 24px; color: var(--ref-text-muted); }
+.uiux-ref-empty.is-dashed { border: 1px dashed var(--ref-border-control); border-radius: 8px; }
+.uiux-ref-empty-icon { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 9999px; background: var(--ref-bg-surface-elevated); color: var(--ref-text-muted); margin-bottom: 4px; }
+.uiux-ref-empty-title { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; color: var(--ref-text-highlighted); }
+.uiux-ref-empty-desc { margin: 0; font-size: 14px; line-height: 22px; max-width: 44ch; }
+.uiux-ref-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
 `
 
 function ensureReferenceStyles(): void {
@@ -424,6 +738,17 @@ function ensureReferenceStyles(): void {
 }
 
 type CssStyle = Record<string, string>
+
+/** Whether the render context implies a coarse pointer (tablet and phone tiers get 44px targets). */
+function isTouchTier(tier: ViewportTier): boolean {
+	return tier !== 'wide'
+}
+
+const visibleState = {
+	authorWritable: true,
+	validate: isBoolean,
+	default: () => true,
+}
 
 // ---------------------------------------------------------------------------
 // 1. Stack Widget Plugin & Renderer
@@ -440,15 +765,36 @@ export interface StackLayout {
 	width?: string
 	height?: string
 	minHeight?: string
+	minWidth?: string
 	maxWidth?: string
 	/** Grow to at least the render-context viewport height (replaces `100vh` arithmetic). */
 	fillViewport?: boolean
+	/** Pins the region to exactly the render-context viewport height, so inner panels scroll instead of the page. */
+	lockViewport?: boolean
 	/** Paints a themed background for top-level layout regions. */
-	surface?: 'none' | 'app' | 'surface' | 'canvas'
+	surface?: 'none' | 'app' | 'surface' | 'panel' | 'muted' | 'elevated' | 'canvas'
 	order?: number
 	hidden?: boolean
 	/** Horizontal overflow scrolls instead of wrapping (e.g. compact tab strips). */
 	scrollX?: boolean
+	/** Vertical overflow scrolls inside this region. */
+	scrollY?: boolean
+	/** Hairline separators on individual edges. */
+	borderTop?: boolean
+	borderBottom?: boolean
+	borderLeft?: boolean
+	borderRight?: boolean
+	/** Outlined 8px card for discrete objects in a collection. */
+	card?: boolean
+	/** Absolutely positioned layer covering its positioned parent (pin layers). Children stay clickable. */
+	overlay?: boolean
+	/** Center this region horizontally inside its parent. */
+	centered?: boolean
+	/** Initial value of the author-writable `visible` state (Variants flip it). */
+	visible?: boolean
+	/** Literal fill for content inside a previewed View (product swatches, brand marks); chrome uses `surface`. */
+	background?: string
+	radius?: number | string
 }
 
 export interface StackInterfaces {
@@ -457,23 +803,19 @@ export interface StackInterfaces {
 		resolved: { base: StackLayout; responsive?: Responsive<StackLayout> }
 	}
 	slots: 'content'
+	state: { visible: boolean }
 	properties: {
-		layout: { style: CssStyle; surface: string; hidden: boolean }
+		layout: { style: CssStyle; surface: string; hidden: boolean; overlay: boolean; card: boolean }
 		theme: string
 	}
 }
 
 const ALIGN: Record<string, string> = { start: 'flex-start', end: 'flex-end', center: 'center', baseline: 'baseline', stretch: 'stretch' }
 const JUSTIFY: Record<string, string> = { center: 'center', end: 'flex-end', between: 'space-between', around: 'space-around', start: 'flex-start' }
-
-function splitResponsive<T extends object>(raw: (T & { responsive?: Responsive<T> }) | null): { base: T; responsive?: Responsive<T> } {
-	if (!raw) return { base: {} as T }
-	const { responsive, ...base } = raw
-	return responsive && typeof responsive === 'object' ? { base: base as T, responsive } : { base: base as T }
-}
+const HAIRLINE = '1px solid var(--ref-border)'
 
 export const stackPlugin = createWidgetPlugin('Stack')
-	.description('Responsive layout container for horizontal and vertical stacking with gap, alignment, and viewport-tier overrides.')
+	.description('Responsive layout container for horizontal and vertical stacking with gap, alignment, hairline edges, scroll regions, viewport-tier overrides, and an author-writable `visible` state for Variants.')
 	.interfaces<StackInterfaces>()
 	.config({
 		description: 'Stack configuration. `responsive.medium` applies below 1280px viewport width, `responsive.compact` below 640px.',
@@ -489,17 +831,31 @@ export const stackPlugin = createWidgetPlugin('Stack')
 			width: { type: 'string' },
 			height: { type: 'string' },
 			minHeight: { type: 'string' },
+			minWidth: { type: 'string' },
 			maxWidth: { type: 'string' },
 			fillViewport: { type: 'boolean' },
-			surface: { enum: ['none', 'app', 'surface', 'canvas'] },
+			lockViewport: { type: 'boolean' },
+			surface: { enum: ['none', 'app', 'surface', 'panel', 'muted', 'elevated', 'canvas'] },
 			order: { type: 'number' },
 			hidden: { type: 'boolean' },
 			scrollX: { type: 'boolean' },
+			scrollY: { type: 'boolean' },
+			borderTop: { type: 'boolean' },
+			borderBottom: { type: 'boolean' },
+			borderLeft: { type: 'boolean' },
+			borderRight: { type: 'boolean' },
+			card: { type: 'boolean' },
+			overlay: { type: 'boolean' },
+			centered: { type: 'boolean' },
+			visible: { type: 'boolean' },
+			background: { type: 'string' },
+			radius: { type: ['number', 'string'] },
 		}),
 		validate: (c): c is StackInterfaces['config']['raw'] => isConfigObject(c),
 		resolve: raw => splitResponsive<StackLayout>(raw),
 	})
 	.slots({ content: { description: 'Nested child widgets' } })
+	.state(state => state.visible({ ...visibleState, default: ({ config }) => config.base.visible !== false }))
 	.properties(p => p
 		.layout({
 			registerDeps: viewportDeps,
@@ -518,12 +874,31 @@ export const stackPlugin = createWidgetPlugin('Stack')
 					...(layout.width ? { width: layout.width } : {}),
 					...(layout.height ? { height: layout.height } : {}),
 					...(layout.maxWidth ? { maxWidth: layout.maxWidth } : {}),
+					...(layout.minWidth ? { minWidth: layout.minWidth } : {}),
 					...(layout.order !== undefined ? { order: String(layout.order) } : {}),
 					...(layout.scrollX ? { overflowX: 'auto' } : {}),
+					...(layout.scrollY ? { overflowY: 'auto', minHeight: '0' } : {}),
+					...(layout.borderTop ? { borderTop: HAIRLINE } : {}),
+					...(layout.borderBottom ? { borderBottom: HAIRLINE } : {}),
+					...(layout.borderLeft ? { borderLeft: HAIRLINE } : {}),
+					...(layout.borderRight ? { borderRight: HAIRLINE } : {}),
+					...(layout.centered ? { marginLeft: 'auto', marginRight: 'auto' } : {}),
+					...(layout.background ? { background: layout.background } : {}),
+					...(layout.radius !== undefined ? { borderRadius: px(layout.radius, '0px') } : {}),
 				}
-				if (layout.fillViewport && viewport) style.minHeight = `${viewport.height}px`
+				if (layout.lockViewport && viewport) {
+					style.height = `${viewport.height}px`
+					style.overflow = 'hidden'
+				}
+				else if (layout.fillViewport && viewport) style.minHeight = `${viewport.height}px`
 				else if (layout.minHeight) style.minHeight = layout.minHeight
-				return { style, surface: layout.surface ?? 'none', hidden: Boolean(layout.hidden) }
+				return {
+					style,
+					surface: layout.surface ?? 'none',
+					hidden: Boolean(layout.hidden),
+					overlay: Boolean(layout.overlay),
+					card: Boolean(layout.card),
+				}
 			},
 		})
 		.theme(themeProperty()),
@@ -534,8 +909,9 @@ export const StackRenderer = defineComponent({
 	name: 'StackRenderer',
 	setup() {
 		ensureReferenceStyles()
-		const { widgetId, WidgetSlot, useProperties } = useWidget(stackPlugin)
+		const { widgetId, WidgetSlot, useProperties, useState } = useWidget(stackPlugin)
 		const props = useProperties()
+		const state = useState()
 
 		return (): VNode => {
 			const layout = props.layout.value
@@ -546,7 +922,9 @@ export const StackRenderer = defineComponent({
 					'uiux-ref-stack',
 					props.theme.value,
 					`surface-${layout?.surface ?? 'none'}`,
-					layout?.hidden ? 'uiux-ref-hidden' : '',
+					layout?.overlay ? 'is-overlay' : '',
+					layout?.card ? 'is-card' : '',
+					layout?.hidden || !state.visible.value ? 'uiux-ref-hidden' : '',
 				],
 				style: layout?.style,
 			}, [
@@ -570,25 +948,30 @@ export interface PanelLayout {
 	scrollable?: boolean
 	order?: number
 	hidden?: boolean
+	/** Initial value of the author-writable `visible` state (Variants flip it). */
+	visible?: boolean
 }
+
+type PanelVariant = 'default' | 'surface' | 'sidebar' | 'canvas' | 'card' | 'dialog'
 
 export interface PanelInterfaces {
 	config: {
 		raw: PanelLayout & {
 			title?: string
 			titleKey?: string
-			variant?: 'default' | 'surface' | 'sidebar' | 'canvas' | 'card'
+			variant?: PanelVariant
 			responsive?: Responsive<PanelLayout>
 		}
 		resolved: {
 			title: string
 			titleKey: string | null
-			variant: 'default' | 'surface' | 'sidebar' | 'canvas' | 'card'
+			variant: PanelVariant
 			base: PanelLayout
 			responsive?: Responsive<PanelLayout>
 		}
 	}
 	slots: 'header' | 'content' | 'footer'
+	state: { visible: boolean }
 	properties: {
 		titleResult: TranslationResult
 		title: string
@@ -599,14 +982,14 @@ export interface PanelInterfaces {
 }
 
 export const panelPlugin = createWidgetPlugin('Panel')
-	.description('Surface container with optional translatable title, header, footer, styling variants, and viewport-tier overrides.')
+	.description('Surface container with optional translatable title, header, footer, styling variants, viewport-tier overrides, and an author-writable `visible` state.')
 	.interfaces<PanelInterfaces>()
 	.config({
 		description: 'Panel configuration. `title` accepts an `$i18n` binding (lowered to `titleKey`).',
 		schema: configSchema({
 			title: { type: 'string' },
 			titleKey: { type: 'string' },
-			variant: { enum: ['default', 'surface', 'sidebar', 'canvas', 'card'] },
+			variant: { enum: ['default', 'surface', 'sidebar', 'canvas', 'card', 'dialog'] },
 			padding: { type: ['number', 'string'] },
 			border: { type: 'boolean' },
 			width: { type: 'string' },
@@ -617,6 +1000,7 @@ export const panelPlugin = createWidgetPlugin('Panel')
 			scrollable: { type: 'boolean' },
 			order: { type: 'number' },
 			hidden: { type: 'boolean' },
+			visible: { type: 'boolean' },
 		}),
 		validate: (c): c is PanelInterfaces['config']['raw'] => isConfigObject(c),
 		resolve: (raw) => {
@@ -635,17 +1019,10 @@ export const panelPlugin = createWidgetPlugin('Panel')
 		content: { description: 'Main panel body' },
 		footer: { description: 'Bottom actions or status' },
 	})
+	.state(state => state.visible({ ...visibleState, default: ({ config }) => config.base.visible !== false }))
 	.properties(p => p
-		.titleResult({
-			valueContract: TRANSLATION_RESULT,
-			registerDeps: translateDeps,
-			compute: ({ config, deps }) => translateField(config.titleKey, config.title, (key, params) => deps.t(key, params)),
-		})
-		.title({
-			valueContract: STRING,
-			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('titleResult') }),
-			compute: ({ deps }) => textOfResult(deps.result()),
-		})
+		.titleResult(translatedResult<PanelInterfaces['config']['resolved']>(c => ({ key: c.titleKey, literal: c.title })))
+		.title(translatedText<PanelInterfaces['config']['resolved']>(c => ({ key: c.titleKey, literal: c.title })))
 		.variant({ compute: ({ config }) => config.variant })
 		.frame({
 			registerDeps: viewportDeps,
@@ -674,8 +1051,9 @@ export const PanelRenderer = defineComponent({
 	name: 'PanelRenderer',
 	setup() {
 		ensureReferenceStyles()
-		const { widgetId, WidgetSlot, useProperties } = useWidget(panelPlugin)
+		const { widgetId, WidgetSlot, useProperties, useState } = useWidget(panelPlugin)
 		const props = useProperties()
+		const state = useState()
 
 		return (): VNode => {
 			const title = props.title.value ?? ''
@@ -689,13 +1067,13 @@ export const PanelRenderer = defineComponent({
 					props.theme.value,
 					`variant-${props.variant.value}`,
 					frame?.bordered ? 'is-bordered' : '',
-					frame?.hidden ? 'uiux-ref-hidden' : '',
+					frame?.hidden || !state.visible.value ? 'uiux-ref-hidden' : '',
 				],
 				style: frame?.style,
 			}, [
 				title
 					? h('div', { class: 'uiux-ref-panel-header' }, [
-							h('span', { class: 'uiux-ref-panel-title' }, title),
+							h('h2', { class: 'uiux-ref-panel-title' }, title),
 							h(WidgetSlot, { name: 'header' }),
 						])
 					: h(WidgetSlot, { name: 'header' }),
@@ -711,10 +1089,13 @@ export const PanelRenderer = defineComponent({
 // ---------------------------------------------------------------------------
 // 3. Text Widget Plugin & Renderer
 // ---------------------------------------------------------------------------
-type TextVariant = 'h1' | 'h2' | 'h3' | 'h4' | 'body' | 'caption' | 'code'
+type TextVariant = 'display' | 'headline' | 'title' | 'body' | 'ui' | 'label' | 'mono' | 'h1' | 'h2' | 'h3' | 'h4' | 'caption' | 'code'
+type TextTone = 'default' | 'highlighted' | 'muted' | 'subtle' | 'primary' | 'annotation' | 'success' | 'warning' | 'danger' | 'info'
 export interface TextPresentation {
 	variant?: TextVariant
 	truncate?: boolean
+	/** Clamp to this many lines with an ellipsis. */
+	lines?: number
 	align?: 'start' | 'center' | 'end'
 	hidden?: boolean
 }
@@ -727,8 +1108,10 @@ export interface TextInterfaces {
 			/** Interpolated into a translated template as `{value}`. */
 			value?: string | number
 			weight?: 'normal' | 'medium' | 'semibold' | 'bold'
-			tone?: 'default' | 'muted' | 'subtle' | 'primary' | 'success' | 'warning' | 'danger' | 'info'
+			tone?: TextTone
 			mono?: boolean
+			/** Semantic heading level for the rendered element, independent of the visual variant. */
+			level?: 1 | 2 | 3 | 4
 			responsive?: Responsive<TextPresentation>
 		}
 		resolved: {
@@ -738,6 +1121,7 @@ export interface TextInterfaces {
 			weight: string
 			tone: string
 			mono: boolean
+			level: number
 			base: TextPresentation
 			responsive?: Responsive<TextPresentation>
 		}
@@ -749,38 +1133,42 @@ export interface TextInterfaces {
 		weight: string
 		tone: string
 		mono: boolean
-		presentation: { variant: TextVariant; truncate: boolean; align: string; hidden: boolean }
+		level: number
+		presentation: { variant: TextVariant; truncate: boolean; lines: number; align: string; hidden: boolean }
 		theme: string
 	}
 }
 
 export const textPlugin = createWidgetPlugin('Text')
-	.description('Typography element supporting headings, body, code, tonal accents, and translatable text.')
+	.description('Typography element on the Quiet Canvas scale (display, headline, title, body, ui, label, mono) with tonal accents and translatable text.')
 	.interfaces<TextInterfaces>()
 	.config({
-		description: 'Text configuration. `text` accepts an `$i18n` binding (lowered to `textKey`); `{value}` interpolates `value`.',
+		description: 'Text configuration. `text` accepts an `$i18n` binding (lowered to `textKey`); `{value}` interpolates `value`. Legacy variants h1–h4, caption and code map onto the same scale; nothing renders below 12px.',
 		schema: configSchema({
 			text: { type: 'string' },
 			textKey: { type: 'string' },
 			value: { type: ['string', 'number'] },
-			variant: { enum: ['h1', 'h2', 'h3', 'h4', 'body', 'caption', 'code'] },
+			variant: { enum: ['display', 'headline', 'title', 'body', 'ui', 'label', 'mono', 'h1', 'h2', 'h3', 'h4', 'caption', 'code'] },
 			weight: { enum: ['normal', 'medium', 'semibold', 'bold'] },
-			tone: { enum: ['default', 'muted', 'subtle', 'primary', 'success', 'warning', 'danger', 'info'] },
+			tone: { enum: ['default', 'highlighted', 'muted', 'subtle', 'primary', 'annotation', 'success', 'warning', 'danger', 'info'] },
 			mono: { type: 'boolean' },
+			level: { enum: [1, 2, 3, 4] },
 			truncate: { type: 'boolean' },
+			lines: { type: 'number' },
 			align: { enum: ['start', 'center', 'end'] },
 			hidden: { type: 'boolean' },
 		}),
 		validate: (c): c is TextInterfaces['config']['raw'] => isConfigObject(c),
 		resolve: (raw) => {
-			const { text, textKey, value, weight, tone, mono, ...presentation } = raw ?? {}
+			const { text, textKey, value, weight, tone, mono, level, ...presentation } = raw ?? {}
 			return {
 				text: typeof text === 'string' ? text : '',
 				textKey: optionalString(textKey),
 				value: value === undefined ? '' : String(value),
-				weight: weight ?? 'normal',
+				weight: weight ?? '',
 				tone: tone ?? 'default',
 				mono: Boolean(mono),
+				level: typeof level === 'number' ? level : 0,
 				...splitResponsive<TextPresentation>(presentation),
 			}
 		},
@@ -802,6 +1190,7 @@ export const textPlugin = createWidgetPlugin('Text')
 		.weight({ compute: ({ config }) => config.weight })
 		.tone({ compute: ({ config }) => config.tone })
 		.mono({ compute: ({ config }) => config.mono })
+		.level({ compute: ({ config }) => config.level })
 		.presentation({
 			registerDeps: viewportDeps,
 			compute: ({ config, deps }) => {
@@ -809,6 +1198,7 @@ export const textPlugin = createWidgetPlugin('Text')
 				return {
 					variant: presentation.variant ?? 'body',
 					truncate: Boolean(presentation.truncate),
+					lines: typeof presentation.lines === 'number' ? presentation.lines : 0,
 					align: presentation.align ?? 'start',
 					hidden: Boolean(presentation.hidden),
 				}
@@ -818,7 +1208,10 @@ export const textPlugin = createWidgetPlugin('Text')
 	)
 	.done()
 
-const TEXT_TAGS: Record<TextVariant, string> = { h1: 'h1', h2: 'h2', h3: 'h3', h4: 'h4', code: 'code', caption: 'span', body: 'p' }
+const TEXT_TAGS: Record<TextVariant, string> = {
+	display: 'p', headline: 'p', title: 'p', body: 'p', ui: 'span', label: 'span', mono: 'code',
+	h1: 'h1', h2: 'h2', h3: 'h3', h4: 'h4', code: 'code', caption: 'span',
+}
 
 export const TextRenderer = defineComponent({
 	name: 'TextRenderer',
@@ -830,20 +1223,26 @@ export const TextRenderer = defineComponent({
 		return (): VNode => {
 			const presentation = props.presentation.value
 			const variant = presentation?.variant ?? 'body'
-			return h(TEXT_TAGS[variant], {
+			const level = props.level.value ?? 0
+			const tag = level >= 1 && level <= 4 ? `h${level}` : TEXT_TAGS[variant]
+			const style: CssStyle = {}
+			if (presentation?.align && presentation.align !== 'start') style.textAlign = presentation.align
+			if (presentation?.lines) style.webkitLineClamp = String(presentation.lines)
+			return h(tag, {
 				'data-widget-id': widgetId,
 				class: [
 					'uiux-ref-scope',
 					'uiux-ref-text',
 					props.theme.value,
 					`variant-${variant}`,
-					`weight-${props.weight.value}`,
-					`tone-${props.tone.value}`,
+					props.weight.value ? `weight-${props.weight.value}` : '',
+					props.tone.value !== 'default' ? `tone-${props.tone.value}` : '',
 					props.mono.value ? 'is-mono' : '',
 					presentation?.truncate ? 'is-truncate' : '',
+					presentation?.lines ? 'is-clamped' : '',
 					presentation?.hidden ? 'uiux-ref-hidden' : '',
 				],
-				style: presentation?.align && presentation.align !== 'start' ? { textAlign: presentation.align } : undefined,
+				style,
 			}, props.text.value ?? '')
 		}
 	},
@@ -858,16 +1257,22 @@ export interface ButtonPresentation {
 	iconOnly?: boolean
 	fullWidth?: boolean
 	hidden?: boolean
+	/** Hide the keyboard shortcut hint (touch tiers). */
+	hideKbd?: boolean
 }
+
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'outline' | 'danger' | 'annotation' | 'link' | 'brand' | 'display'
 
 export interface ButtonInterfaces {
 	config: {
 		raw: ButtonPresentation & {
 			label?: string
 			labelKey?: string
-			variant?: 'primary' | 'secondary' | 'ghost' | 'outline' | 'danger'
+			variant?: ButtonVariant
 			disabled?: boolean
 			icon?: string
+			trailingIcon?: string
+			kbd?: string
 			responsive?: Responsive<ButtonPresentation>
 		}
 		resolved: {
@@ -876,12 +1281,15 @@ export interface ButtonInterfaces {
 			variant: string
 			disabled: boolean
 			icon: string
+			trailingIcon: string
+			kbd: string
 			base: ButtonPresentation
 			responsive?: Responsive<ButtonPresentation>
 		}
 	}
 	state: {
 		disabled: boolean
+		visible: boolean
 	}
 	events: {
 		click: readonly []
@@ -891,67 +1299,70 @@ export interface ButtonInterfaces {
 		label: string
 		variant: string
 		icon: string
-		presentation: { size: string; iconOnly: boolean; fullWidth: boolean; hidden: boolean }
+		presentation: { size: string; iconOnly: boolean; fullWidth: boolean; hidden: boolean; touch: boolean; kbd: string; trailingIcon: string }
 		theme: string
 	}
 }
 
 export const buttonPlugin = createWidgetPlugin('Button')
-	.description('Interactive button with translatable label, size variants, icon-only mode, and accessible keyboard focus.')
+	.description('Button with translatable label, Lucide icon, optional trailing icon and shortcut hint, neutral-outline default, one solid primary per region, and 44px targets on touch tiers.')
 	.interfaces<ButtonInterfaces>()
 	.config({
-		description: 'Button configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`).',
+		description: 'Button configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`). `icon` and `trailingIcon` take Lucide names.',
 		schema: configSchema({
 			label: { type: 'string' },
 			labelKey: { type: 'string' },
-			variant: { enum: ['primary', 'secondary', 'ghost', 'outline', 'danger'] },
+			variant: { enum: ['primary', 'secondary', 'ghost', 'outline', 'danger', 'annotation', 'link', 'brand', 'display'] },
 			size: { enum: ['sm', 'md', 'lg'] },
 			disabled: { type: 'boolean' },
 			icon: { type: 'string' },
+			trailingIcon: { type: 'string' },
+			kbd: { type: 'string' },
 			iconOnly: { type: 'boolean' },
 			fullWidth: { type: 'boolean' },
 			hidden: { type: 'boolean' },
+			hideKbd: { type: 'boolean' },
 		}),
 		validate: (c): c is ButtonInterfaces['config']['raw'] => isConfigObject(c),
 		resolve: (raw) => {
-			const { label, labelKey, variant, disabled, icon, ...presentation } = raw ?? {}
+			const { label, labelKey, variant, disabled, icon, trailingIcon, kbd, ...presentation } = raw ?? {}
 			return {
 				label: typeof label === 'string' ? label : 'Button',
 				labelKey: optionalString(labelKey),
 				variant: variant ?? 'secondary',
 				disabled: Boolean(disabled),
 				icon: typeof icon === 'string' ? icon : '',
+				trailingIcon: typeof trailingIcon === 'string' ? trailingIcon : '',
+				kbd: typeof kbd === 'string' ? kbd : '',
 				...splitResponsive<ButtonPresentation>(presentation),
 			}
 		},
 	})
-	.state(state => state.disabled({
-		authorWritable: true,
-		validate: (v): v is boolean => typeof v === 'boolean',
-		default: ({ config }) => config.disabled,
-	}))
+	.state(state => state
+		.disabled({
+			authorWritable: true,
+			validate: isBoolean,
+			default: ({ config }) => config.disabled,
+		})
+		.visible(visibleState))
 	.properties(p => p
-		.labelResult({
-			valueContract: TRANSLATION_RESULT,
-			registerDeps: translateDeps,
-			compute: ({ config, deps }) => translateField(config.labelKey, config.label, (key, params) => deps.t(key, params)),
-		})
-		.label({
-			valueContract: STRING,
-			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('labelResult') }),
-			compute: ({ deps }) => textOfResult(deps.result()),
-		})
+		.labelResult(translatedResult<ButtonInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<ButtonInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
 		.variant({ compute: ({ config }) => config.variant })
 		.icon({ compute: ({ config }) => config.icon })
 		.presentation({
 			registerDeps: viewportDeps,
 			compute: ({ config, deps }) => {
-				const presentation = cascade(config.base, config.responsive, tierOf(readViewport(deps.viewport())))
+				const tier = tierOf(readViewport(deps.viewport()))
+				const presentation = cascade(config.base, config.responsive, tier)
 				return {
 					size: presentation.size ?? 'md',
 					iconOnly: Boolean(presentation.iconOnly && config.icon),
 					fullWidth: Boolean(presentation.fullWidth),
 					hidden: Boolean(presentation.hidden),
+					touch: isTouchTier(tier),
+					kbd: presentation.hideKbd || isTouchTier(tier) ? '' : config.kbd,
+					trailingIcon: config.trailingIcon,
 				}
 			},
 		})
@@ -971,9 +1382,11 @@ export const ButtonRenderer = defineComponent({
 		return (): VNode => {
 			const presentation = props.presentation.value
 			const label = props.label.value ?? ''
-			const children: VNode[] = []
-			if (props.icon.value) children.push(h('span', { class: 'uiux-ref-btn-icon', 'aria-hidden': 'true' }, props.icon.value))
+			const children: (VNode | null)[] = []
+			children.push(iconNode(props.icon.value, 16))
 			if (!presentation?.iconOnly) children.push(h('span', label))
+			if (presentation?.kbd && !presentation.iconOnly) children.push(kbdNode(presentation.kbd))
+			if (presentation?.trailingIcon && !presentation.iconOnly) children.push(iconNode(presentation.trailingIcon, 14))
 
 			return h('button', {
 				'data-widget-id': widgetId,
@@ -987,9 +1400,10 @@ export const ButtonRenderer = defineComponent({
 					props.theme.value,
 					`variant-${props.variant.value}`,
 					`size-${presentation?.size ?? 'md'}`,
+					presentation?.touch ? 'is-touch' : '',
 					presentation?.iconOnly ? 'is-icon-only' : '',
 					presentation?.fullWidth ? 'is-full-width' : '',
-					presentation?.hidden ? 'uiux-ref-hidden' : '',
+					presentation?.hidden || !state.visible.value ? 'uiux-ref-hidden' : '',
 				],
 				onClick: () => {
 					if (!state.disabled.value) emit.click()
@@ -1006,6 +1420,8 @@ export interface BadgePresentation {
 	hidden?: boolean
 }
 
+type BadgeTone = 'neutral' | 'primary' | 'annotation' | 'success' | 'warning' | 'danger' | 'info'
+
 export interface BadgeInterfaces {
 	config: {
 		raw: BadgePresentation & {
@@ -1013,8 +1429,9 @@ export interface BadgeInterfaces {
 			labelKey?: string
 			/** Interpolated into a translated template as `{value}`. */
 			value?: string | number
-			tone?: 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'info'
-			variant?: 'subtle' | 'solid' | 'outline'
+			tone?: BadgeTone
+			variant?: 'subtle' | 'soft' | 'solid' | 'outline' | 'mono' | 'count'
+			icon?: string
 			responsive?: Responsive<BadgePresentation>
 		}
 		resolved: {
@@ -1023,6 +1440,7 @@ export interface BadgeInterfaces {
 			value: string
 			tone: string
 			variant: string
+			icon: string
 			base: BadgePresentation
 			responsive?: Responsive<BadgePresentation>
 		}
@@ -1037,33 +1455,36 @@ export interface BadgeInterfaces {
 		label: string
 		tone: string
 		variant: string
+		icon: string
 		hidden: boolean
 		theme: string
 	}
 }
 
 export const badgePlugin = createWidgetPlugin('Badge')
-	.description('Compact status indicator and count tag; translated labels may interpolate {value} and the live render context ({viewportId}, {viewport}, {locale}, {theme}).')
+	.description('Status badge, mono identity chip, or count; carries a leading Lucide icon so color is never the only signal. Translated labels may interpolate {value} and the live render context ({viewportId}, {viewport}, {locale}, {theme}).')
 	.interfaces<BadgeInterfaces>()
 	.config({
-		description: 'Badge configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`).',
+		description: 'Badge configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`). `variant: "mono"` is the blueprint identity chip; `variant: "count"` is a count pill.',
 		schema: configSchema({
 			label: { type: 'string' },
 			labelKey: { type: 'string' },
 			value: { type: ['string', 'number'] },
-			tone: { enum: ['neutral', 'primary', 'success', 'warning', 'danger', 'info'] },
-			variant: { enum: ['subtle', 'solid', 'outline'] },
+			tone: { enum: ['neutral', 'primary', 'annotation', 'success', 'warning', 'danger', 'info'] },
+			variant: { enum: ['subtle', 'soft', 'solid', 'outline', 'mono', 'count'] },
+			icon: { type: 'string' },
 			hidden: { type: 'boolean' },
 		}),
 		validate: (c): c is BadgeInterfaces['config']['raw'] => isConfigObject(c),
 		resolve: (raw) => {
-			const { label, labelKey, value, tone, variant, ...presentation } = raw ?? {}
+			const { label, labelKey, value, tone, variant, icon, ...presentation } = raw ?? {}
 			return {
 				label: typeof label === 'string' ? label : '',
 				labelKey: optionalString(labelKey),
 				value: value === undefined ? '' : String(value),
 				tone: tone ?? 'neutral',
 				variant: variant ?? 'subtle',
+				icon: typeof icon === 'string' ? icon : '',
 				...splitResponsive<BadgePresentation>(presentation),
 			}
 		},
@@ -1118,6 +1539,7 @@ export const badgePlugin = createWidgetPlugin('Badge')
 		})
 		.tone({ compute: ({ config }) => config.tone })
 		.variant({ compute: ({ config }) => config.variant })
+		.icon({ compute: ({ config }) => config.icon })
 		.hidden({
 			registerDeps: viewportDeps,
 			compute: ({ config, deps }) => Boolean(cascade(config.base, config.responsive, tierOf(readViewport(deps.viewport()))).hidden),
@@ -1143,7 +1565,7 @@ export const BadgeRenderer = defineComponent({
 				`variant-${props.variant.value}`,
 				props.hidden.value ? 'uiux-ref-hidden' : '',
 			],
-		}, props.label.value ?? '')
+		}, [iconNode(props.icon.value, 14), props.label.value ?? ''])
 	},
 })
 
@@ -1152,6 +1574,7 @@ export const BadgeRenderer = defineComponent({
 // ---------------------------------------------------------------------------
 export interface TextInputPresentation {
 	hidden?: boolean
+	hideKbd?: boolean
 }
 
 export interface TextInputInterfaces {
@@ -1163,6 +1586,16 @@ export interface TextInputInterfaces {
 			readOnly?: boolean
 			label?: string
 			labelKey?: string
+			help?: string
+			helpKey?: string
+			error?: string
+			errorKey?: string
+			invalid?: boolean
+			icon?: string
+			kbd?: string
+			mono?: boolean
+			/** Renders a textarea with this many rows. */
+			rows?: number
 			responsive?: Responsive<TextInputPresentation>
 		}
 		resolved: {
@@ -1172,29 +1605,43 @@ export interface TextInputInterfaces {
 			readOnly: boolean
 			label: string
 			labelKey: string | null
+			help: string
+			helpKey: string | null
+			error: string
+			errorKey: string | null
+			invalid: boolean
+			icon: string
+			kbd: string
+			mono: boolean
+			rows: number
 			base: TextInputPresentation
 			responsive?: Responsive<TextInputPresentation>
 		}
 	}
 	state: {
 		value: string
+		invalid: boolean
 	}
 	properties: {
 		placeholderResult: TranslationResult
 		placeholder: string
 		labelResult: TranslationResult
 		label: string
+		helpResult: TranslationResult
+		help: string
+		errorResult: TranslationResult
+		error: string
 		readOnly: boolean
-		hidden: boolean
+		presentation: { hidden: boolean; touch: boolean; kbd: string; icon: string; mono: boolean; rows: number }
 		theme: string
 	}
 }
 
 export const textInputPlugin = createWidgetPlugin('TextInput')
-	.description('Text input field supporting authored value, translatable placeholder and label, and read-only presentation.')
+	.description('Text field or textarea with translatable label, placeholder, help and error text, leading Lucide icon, shortcut hint, and an author-writable `invalid` state.')
 	.interfaces<TextInputInterfaces>()
 	.config({
-		description: 'TextInput configuration. `placeholder` and `label` accept `$i18n` bindings (lowered to `placeholderKey` / `labelKey`).',
+		description: 'TextInput configuration. `placeholder`, `label`, `help` and `error` accept `$i18n` bindings (lowered to `placeholderKey`, `labelKey`, `helpKey`, `errorKey`). The error text shows only while `invalid` is true.',
 		schema: configSchema({
 			value: { type: 'string' },
 			placeholder: { type: 'string' },
@@ -1202,11 +1649,21 @@ export const textInputPlugin = createWidgetPlugin('TextInput')
 			readOnly: { type: 'boolean' },
 			label: { type: 'string' },
 			labelKey: { type: 'string' },
+			help: { type: 'string' },
+			helpKey: { type: 'string' },
+			error: { type: 'string' },
+			errorKey: { type: 'string' },
+			invalid: { type: 'boolean' },
+			icon: { type: 'string' },
+			kbd: { type: 'string' },
+			mono: { type: 'boolean' },
+			rows: { type: 'number' },
 			hidden: { type: 'boolean' },
+			hideKbd: { type: 'boolean' },
 		}),
 		validate: (c): c is TextInputInterfaces['config']['raw'] => isConfigObject(c),
 		resolve: (raw) => {
-			const { value, placeholder, placeholderKey, readOnly, label, labelKey, ...presentation } = raw ?? {}
+			const { value, placeholder, placeholderKey, readOnly, label, labelKey, help, helpKey, error, errorKey, invalid, icon, kbd, mono, rows, ...presentation } = raw ?? {}
 			return {
 				value: typeof value === 'string' ? value : '',
 				placeholder: typeof placeholder === 'string' ? placeholder : '',
@@ -1214,40 +1671,54 @@ export const textInputPlugin = createWidgetPlugin('TextInput')
 				readOnly: Boolean(readOnly),
 				label: typeof label === 'string' ? label : '',
 				labelKey: optionalString(labelKey),
+				help: typeof help === 'string' ? help : '',
+				helpKey: optionalString(helpKey),
+				error: typeof error === 'string' ? error : '',
+				errorKey: optionalString(errorKey),
+				invalid: Boolean(invalid),
+				icon: typeof icon === 'string' ? icon : '',
+				kbd: typeof kbd === 'string' ? kbd : '',
+				mono: Boolean(mono),
+				rows: typeof rows === 'number' ? rows : 0,
 				...splitResponsive<TextInputPresentation>(presentation),
 			}
 		},
 	})
-	.state(state => state.value({
-		authorWritable: true,
-		validate: (v): v is string => typeof v === 'string',
-		default: ({ config }) => config.value,
-	}))
+	.state(state => state
+		.value({
+			authorWritable: true,
+			validate: (v): v is string => typeof v === 'string',
+			default: ({ config }) => config.value,
+		})
+		.invalid({
+			authorWritable: true,
+			validate: isBoolean,
+			default: ({ config }) => config.invalid,
+		}))
 	.properties(p => p
-		.placeholderResult({
-			valueContract: TRANSLATION_RESULT,
-			registerDeps: translateDeps,
-			compute: ({ config, deps }) => translateField(config.placeholderKey, config.placeholder, (key, params) => deps.t(key, params)),
-		})
-		.placeholder({
-			valueContract: STRING,
-			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('placeholderResult') }),
-			compute: ({ deps }) => textOfResult(deps.result()),
-		})
-		.labelResult({
-			valueContract: TRANSLATION_RESULT,
-			registerDeps: translateDeps,
-			compute: ({ config, deps }) => translateField(config.labelKey, config.label, (key, params) => deps.t(key, params)),
-		})
-		.label({
-			valueContract: STRING,
-			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('labelResult') }),
-			compute: ({ deps }) => textOfResult(deps.result()),
-		})
+		.placeholderResult(translatedResult<TextInputInterfaces['config']['resolved']>(c => ({ key: c.placeholderKey, literal: c.placeholder })))
+		.placeholder(translatedText<TextInputInterfaces['config']['resolved']>(c => ({ key: c.placeholderKey, literal: c.placeholder })))
+		.labelResult(translatedResult<TextInputInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<TextInputInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.helpResult(translatedResult<TextInputInterfaces['config']['resolved']>(c => ({ key: c.helpKey, literal: c.help })))
+		.help(translatedText<TextInputInterfaces['config']['resolved']>(c => ({ key: c.helpKey, literal: c.help })))
+		.errorResult(translatedResult<TextInputInterfaces['config']['resolved']>(c => ({ key: c.errorKey, literal: c.error })))
+		.error(translatedText<TextInputInterfaces['config']['resolved']>(c => ({ key: c.errorKey, literal: c.error })))
 		.readOnly({ compute: ({ config }) => config.readOnly })
-		.hidden({
+		.presentation({
 			registerDeps: viewportDeps,
-			compute: ({ config, deps }) => Boolean(cascade(config.base, config.responsive, tierOf(readViewport(deps.viewport()))).hidden),
+			compute: ({ config, deps }) => {
+				const tier = tierOf(readViewport(deps.viewport()))
+				const presentation = cascade(config.base, config.responsive, tier)
+				return {
+					hidden: Boolean(presentation.hidden),
+					touch: isTouchTier(tier),
+					kbd: presentation.hideKbd || isTouchTier(tier) ? '' : config.kbd,
+					icon: config.icon,
+					mono: config.mono,
+					rows: config.rows,
+				}
+			},
 		})
 		.theme(themeProperty()),
 	)
@@ -1262,24 +1733,47 @@ export const TextInputRenderer = defineComponent({
 		const props = useProperties()
 
 		return (): VNode => {
-			const elements: VNode[] = []
+			const elements: (VNode | null)[] = []
 			const label = props.label.value ?? ''
-			if (label) elements.push(h('label', { class: 'uiux-ref-input-label' }, label))
-			elements.push(h('input', {
-				class: 'uiux-ref-input',
-				type: 'text',
+			const presentation = props.presentation.value
+			const invalid = state.invalid.value
+			const inputId = `${widgetId}-field`
+			if (label) elements.push(h('label', { class: 'uiux-ref-input-label', for: inputId }, label))
+			const fieldProps = {
+				id: inputId,
+				class: [
+					'uiux-ref-input',
+					presentation?.icon ? 'has-icon' : '',
+					presentation?.kbd ? 'has-kbd' : '',
+					presentation?.mono ? 'is-mono' : '',
+					presentation?.touch && !presentation.rows ? 'is-touch' : '',
+					invalid ? 'is-invalid' : '',
+				],
 				value: state.value.value,
 				placeholder: props.placeholder.value,
 				'aria-label': label ? undefined : (props.placeholder.value || undefined),
+				'aria-invalid': invalid ? 'true' : undefined,
 				readOnly: props.readOnly.value,
 				onInput: (event: Event) => {
 					if (!props.readOnly.value) state.value.value = (event.target as HTMLInputElement).value
 				},
-			}))
+			}
+			const field = presentation?.rows
+				? h('textarea', { ...fieldProps, rows: presentation.rows })
+				: h('input', { ...fieldProps, type: 'text' })
+			elements.push(h('div', { class: 'uiux-ref-input-shell' }, [
+				iconNode(presentation?.icon, 16),
+				field,
+				presentation?.kbd ? kbdNode(presentation.kbd) : null,
+			]))
+			if (invalid && props.error.value)
+				elements.push(h('p', { class: 'uiux-ref-input-error', role: 'alert' }, [iconNode('circle-alert', 14), h('span', props.error.value)]))
+			else if (props.help.value)
+				elements.push(h('p', { class: 'uiux-ref-input-help' }, props.help.value))
 
 			return h('div', {
 				'data-widget-id': widgetId,
-				class: ['uiux-ref-scope', 'uiux-ref-input-group', props.theme.value, props.hidden.value ? 'uiux-ref-hidden' : ''],
+				class: ['uiux-ref-scope', 'uiux-ref-input-group', props.theme.value, presentation?.hidden ? 'uiux-ref-hidden' : ''],
 			}, elements)
 		}
 	},
@@ -1305,6 +1799,7 @@ export interface NavItemInterfaces {
 			metaKey?: string
 			badge?: string
 			badgeKey?: string
+			badgeTone?: 'neutral' | 'annotation'
 			selected?: boolean
 			responsive?: Responsive<NavItemPresentation>
 		}
@@ -1316,6 +1811,7 @@ export interface NavItemInterfaces {
 			metaKey: string | null
 			badge: string
 			badgeKey: string | null
+			badgeTone: string
 			selected: boolean
 			base: NavItemPresentation
 			responsive?: Responsive<NavItemPresentation>
@@ -1335,13 +1831,14 @@ export interface NavItemInterfaces {
 		badgeResult: TranslationResult
 		badge: string
 		icon: string
+		badgeTone: string
 		presentation: { iconOnly: boolean; hideMeta: boolean; hidden: boolean }
 		theme: string
 	}
 }
 
 export const navItemPlugin = createWidgetPlugin('NavItem')
-	.description('Navigation list item with selection state, icon, translatable label, badge, and metadata tag.')
+	.description('Sidebar navigation row: Lucide icon, translatable label, count badge (annotation-colored for unresolved comments), selection with a 2px Iris inset bar, and an icon-only rail mode.')
 	.interfaces<NavItemInterfaces>()
 	.config({
 		description: 'NavItem configuration. `label`, `meta`, and `badge` accept `$i18n` bindings (lowered to `labelKey`, `metaKey`, `badgeKey`).',
@@ -1353,6 +1850,7 @@ export const navItemPlugin = createWidgetPlugin('NavItem')
 			metaKey: { type: 'string' },
 			badge: { type: 'string' },
 			badgeKey: { type: 'string' },
+			badgeTone: { enum: ['neutral', 'annotation'] },
 			selected: { type: 'boolean' },
 			iconOnly: { type: 'boolean' },
 			hideMeta: { type: 'boolean' },
@@ -1360,7 +1858,7 @@ export const navItemPlugin = createWidgetPlugin('NavItem')
 		}),
 		validate: (c): c is NavItemInterfaces['config']['raw'] => isConfigObject(c),
 		resolve: (raw) => {
-			const { label, labelKey, icon, meta, metaKey, badge, badgeKey, selected, ...presentation } = raw ?? {}
+			const { label, labelKey, icon, meta, metaKey, badge, badgeKey, badgeTone, selected, ...presentation } = raw ?? {}
 			return {
 				label: typeof label === 'string' ? label : 'Item',
 				labelKey: optionalString(labelKey),
@@ -1369,6 +1867,7 @@ export const navItemPlugin = createWidgetPlugin('NavItem')
 				metaKey: optionalString(metaKey),
 				badge: typeof badge === 'string' ? badge : '',
 				badgeKey: optionalString(badgeKey),
+				badgeTone: badgeTone ?? 'neutral',
 				selected: Boolean(selected),
 				...splitResponsive<NavItemPresentation>(presentation),
 			}
@@ -1376,41 +1875,18 @@ export const navItemPlugin = createWidgetPlugin('NavItem')
 	})
 	.state(state => state.selected({
 		authorWritable: true,
-		validate: (v): v is boolean => typeof v === 'boolean',
+		validate: isBoolean,
 		default: ({ config }) => config.selected,
 	}))
 	.properties(p => p
-		.labelResult({
-			valueContract: TRANSLATION_RESULT,
-			registerDeps: translateDeps,
-			compute: ({ config, deps }) => translateField(config.labelKey, config.label, (key, params) => deps.t(key, params)),
-		})
-		.label({
-			valueContract: STRING,
-			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('labelResult') }),
-			compute: ({ deps }) => textOfResult(deps.result()),
-		})
-		.metaResult({
-			valueContract: TRANSLATION_RESULT,
-			registerDeps: translateDeps,
-			compute: ({ config, deps }) => translateField(config.metaKey, config.meta, (key, params) => deps.t(key, params)),
-		})
-		.meta({
-			valueContract: STRING,
-			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('metaResult') }),
-			compute: ({ deps }) => textOfResult(deps.result()),
-		})
-		.badgeResult({
-			valueContract: TRANSLATION_RESULT,
-			registerDeps: translateDeps,
-			compute: ({ config, deps }) => translateField(config.badgeKey, config.badge, (key, params) => deps.t(key, params)),
-		})
-		.badge({
-			valueContract: STRING,
-			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('badgeResult') }),
-			compute: ({ deps }) => textOfResult(deps.result()),
-		})
+		.labelResult(translatedResult<NavItemInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<NavItemInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.metaResult(translatedResult<NavItemInterfaces['config']['resolved']>(c => ({ key: c.metaKey, literal: c.meta })))
+		.meta(translatedText<NavItemInterfaces['config']['resolved']>(c => ({ key: c.metaKey, literal: c.meta })))
+		.badgeResult(translatedResult<NavItemInterfaces['config']['resolved']>(c => ({ key: c.badgeKey, literal: c.badge })))
+		.badge(translatedText<NavItemInterfaces['config']['resolved']>(c => ({ key: c.badgeKey, literal: c.badge })))
 		.icon({ compute: ({ config }) => config.icon })
+		.badgeTone({ compute: ({ config }) => config.badgeTone })
 		.presentation({
 			registerDeps: viewportDeps,
 			compute: ({ config, deps }) => {
@@ -1438,15 +1914,14 @@ export const NavItemRenderer = defineComponent({
 		return (): VNode => {
 			const presentation = props.presentation.value
 			const label = props.label.value ?? ''
-			const leftChildren: VNode[] = []
-			if (props.icon.value) leftChildren.push(h('span', { class: 'uiux-ref-nav-item-icon', 'aria-hidden': 'true' }, props.icon.value))
+			const leftChildren: (VNode | null)[] = [iconNode(props.icon.value, 16)]
 			if (!presentation?.iconOnly) leftChildren.push(h('span', { class: 'uiux-ref-nav-item-label' }, label))
 
 			const rightChildren: VNode[] = []
 			if (props.meta.value && !presentation?.hideMeta && !presentation?.iconOnly)
 				rightChildren.push(h('span', { class: 'uiux-ref-nav-item-meta' }, props.meta.value))
 			if (props.badge.value)
-				rightChildren.push(h('span', { class: 'uiux-ref-badge tone-neutral variant-subtle' }, props.badge.value))
+				rightChildren.push(h('span', { class: ['uiux-ref-badge', 'variant-count', `tone-${props.badgeTone.value === 'annotation' ? 'annotation' : 'neutral'}`] }, props.badge.value))
 
 			const select = () => {
 				state.selected.value = true
@@ -1455,10 +1930,10 @@ export const NavItemRenderer = defineComponent({
 
 			return h('div', {
 				'data-widget-id': widgetId,
-				role: 'button',
+				role: 'link',
 				tabindex: 0,
 				'aria-current': state.selected.value ? 'page' : undefined,
-				'aria-label': presentation?.iconOnly ? label : undefined,
+				'aria-label': presentation?.iconOnly ? (props.badge.value ? `${label}, ${props.badge.value}` : label) : undefined,
 				title: presentation?.iconOnly ? label : undefined,
 				class: [
 					'uiux-ref-scope',
@@ -1504,7 +1979,7 @@ export interface DividerInterfaces {
 }
 
 export const dividerPlugin = createWidgetPlugin('Divider')
-	.description('Visual separator line for dividing layout sections, with viewport-tier overrides.')
+	.description('Hairline separator for dividing layout sections, with viewport-tier overrides.')
 	.interfaces<DividerInterfaces>()
 	.config({
 		description: 'Divider configuration',
@@ -1561,6 +2036,1646 @@ export const DividerRenderer = defineComponent({
 })
 
 // ---------------------------------------------------------------------------
+// 9. Avatar — initials for people, a bot glyph for agents, a cog for the system
+// ---------------------------------------------------------------------------
+type ActorKind = 'human' | 'agent' | 'system'
+const ACTOR_KINDS: readonly ActorKind[] = ['human', 'agent', 'system']
+
+function actorFace(kind: string, initials: string, size: number): VNode | string | null {
+	if (kind === 'agent') return iconNode('bot', size)
+	if (kind === 'system') return iconNode('cog', size)
+	return initials
+}
+
+export interface AvatarPresentation {
+	size?: number
+	hidden?: boolean
+}
+
+export interface AvatarInterfaces {
+	config: {
+		raw: AvatarPresentation & {
+			initials?: string
+			actor?: ActorKind
+			tone?: 'neutral' | 'annotation' | 'primary'
+			label?: string
+			labelKey?: string
+			responsive?: Responsive<AvatarPresentation>
+		}
+		resolved: { initials: string; actor: ActorKind; tone: string; label: string; labelKey: string | null; base: AvatarPresentation; responsive?: Responsive<AvatarPresentation> }
+	}
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		face: { initials: string; actor: ActorKind; tone: string; size: number; hidden: boolean }
+		theme: string
+	}
+}
+
+export const avatarPlugin = createWidgetPlugin('Avatar')
+	.description('Round author mark: initials for people, a bot glyph for agents, a cog for the system. Reviewers are never told apart by color alone.')
+	.interfaces<AvatarInterfaces>()
+	.config({
+		description: 'Avatar configuration. `label` (accessible name) accepts an `$i18n` binding (lowered to `labelKey`).',
+		schema: configSchema({
+			initials: { type: 'string' },
+			actor: { enum: ['human', 'agent', 'system'] },
+			tone: { enum: ['neutral', 'annotation', 'primary'] },
+			label: { type: 'string' },
+			labelKey: { type: 'string' },
+			size: { type: 'number' },
+			hidden: { type: 'boolean' },
+		}),
+		validate: (c): c is AvatarInterfaces['config']['raw'] => isConfigObject(c),
+		resolve: (raw) => {
+			const { initials, actor, tone, label, labelKey, ...presentation } = raw ?? {}
+			return {
+				initials: stringOr(initials, ''),
+				actor: oneOf(actor, ACTOR_KINDS, 'human'),
+				tone: tone ?? 'neutral',
+				label: stringOr(label, ''),
+				labelKey: optionalString(labelKey),
+				...splitResponsive<AvatarPresentation>(presentation),
+			}
+		},
+	})
+	.properties(p => p
+		.labelResult(translatedResult<AvatarInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<AvatarInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.face({
+			registerDeps: viewportDeps,
+			compute: ({ config, deps }) => {
+				const presentation = cascade(config.base, config.responsive, tierOf(readViewport(deps.viewport())))
+				return { initials: config.initials, actor: config.actor, tone: config.tone, size: presentation.size ?? 24, hidden: Boolean(presentation.hidden) }
+			},
+		})
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const AvatarRenderer = defineComponent({
+	name: 'AvatarRenderer',
+	setup() {
+		ensureReferenceStyles()
+		const { widgetId, useProperties } = useWidget(avatarPlugin)
+		const props = useProperties()
+		return (): VNode => {
+			const face = props.face.value
+			const size = face?.size ?? 24
+			const label = props.label.value
+			return h('span', {
+				'data-widget-id': widgetId,
+				role: label ? 'img' : undefined,
+				'aria-label': label || undefined,
+				'aria-hidden': label ? undefined : 'true',
+				class: ['uiux-ref-scope', 'uiux-ref-avatar', props.theme.value, `tone-${face?.tone ?? 'neutral'}`, face?.hidden ? 'uiux-ref-hidden' : ''],
+				style: { width: `${size}px`, height: `${size}px`, fontSize: size >= 28 ? '12px' : '12px' },
+			}, [actorFace(face?.actor ?? 'human', face?.initials ?? '', Math.round(size * 0.58))])
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 10. Kbd — a literal keyboard shortcut
+// ---------------------------------------------------------------------------
+export interface KbdInterfaces {
+	config: {
+		raw: { keys?: string; hidden?: boolean; responsive?: Responsive<{ hidden?: boolean }> }
+		resolved: { keys: string; base: { hidden?: boolean }; responsive?: Responsive<{ hidden?: boolean }> }
+	}
+	properties: { keys: string; hidden: boolean; theme: string }
+}
+
+export const kbdPlugin = createWidgetPlugin('Kbd')
+	.description('Keyboard shortcut key cap in the mono blueprint register. Keys are literal and never translated; hidden on touch tiers by default.')
+	.interfaces<KbdInterfaces>()
+	.config({
+		description: 'Kbd configuration. `keys` is a literal such as "⌘K", "C" or "Esc".',
+		schema: configSchema({ keys: { type: 'string' }, hidden: { type: 'boolean' } }),
+		validate: (c): c is KbdInterfaces['config']['raw'] => isConfigObject(c),
+		resolve: (raw) => {
+			const { keys, ...presentation } = raw ?? {}
+			return { keys: stringOr(keys, ''), ...splitResponsive<{ hidden?: boolean }>(presentation) }
+		},
+	})
+	.properties(p => p
+		.keys({ compute: ({ config }) => config.keys })
+		.hidden({
+			registerDeps: viewportDeps,
+			compute: ({ config, deps }) => {
+				const tier = tierOf(readViewport(deps.viewport()))
+				return Boolean(cascade(config.base, config.responsive, tier).hidden) || isTouchTier(tier)
+			},
+		})
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const KbdRenderer = defineComponent({
+	name: 'KbdRenderer',
+	setup() {
+		ensureReferenceStyles()
+		const { widgetId, useProperties } = useWidget(kbdPlugin)
+		const props = useProperties()
+		return (): VNode => h('kbd', {
+			'data-widget-id': widgetId,
+			class: ['uiux-ref-scope', 'uiux-ref-kbd', props.theme.value, props.hidden.value ? 'uiux-ref-hidden' : ''],
+		}, props.keys.value ?? '')
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 11. Pin — Figma-like teardrop comment marker whose bottom-left tip marks the anchor point
+// ---------------------------------------------------------------------------
+type PinStatus = 'open' | 'ready' | 'resolved' | 'pending'
+const PIN_STATUSES: readonly PinStatus[] = ['open', 'ready', 'resolved', 'pending']
+
+export interface PinPlacement {
+	/** Tip position inside the positioned parent, as a CSS length or percentage. */
+	x?: string
+	y?: string
+	hidden?: boolean
+}
+
+export interface PinInterfaces {
+	config: {
+		raw: PinPlacement & {
+			initials?: string
+			actor?: ActorKind
+			status?: PinStatus
+			selected?: boolean
+			label?: string
+			labelKey?: string
+			responsive?: Responsive<PinPlacement>
+		}
+		resolved: { initials: string; actor: ActorKind; status: PinStatus; selected: boolean; label: string; labelKey: string | null; base: PinPlacement; responsive?: Responsive<PinPlacement> }
+	}
+	state: { status: PinStatus; selected: boolean; visible: boolean }
+	events: { click: readonly [] }
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		mark: { initials: string; actor: ActorKind }
+		placement: { style: CssStyle; hidden: boolean }
+		theme: string
+	}
+}
+
+export const pinPlugin = createWidgetPlugin('Pin')
+	.description('Comment pin: a 28px Marker teardrop with the starter\'s initials (or a bot glyph for agents). States: open, ready (notice-blue eye badge), resolved (24px graphite check), pending (dashed). Selected pins get a 2px Iris ring.')
+	.interfaces<PinInterfaces>()
+	.config({
+		description: 'Pin configuration. `label` is the accessible name and accepts an `$i18n` binding (lowered to `labelKey`). `x`/`y` place the tip inside the positioned parent.',
+		schema: configSchema({
+			initials: { type: 'string' },
+			actor: { enum: ['human', 'agent', 'system'] },
+			status: { enum: ['open', 'ready', 'resolved', 'pending'] },
+			selected: { type: 'boolean' },
+			label: { type: 'string' },
+			labelKey: { type: 'string' },
+			x: { type: 'string' },
+			y: { type: 'string' },
+			hidden: { type: 'boolean' },
+		}),
+		validate: (c): c is PinInterfaces['config']['raw'] => isConfigObject(c),
+		resolve: (raw) => {
+			const { initials, actor, status, selected, label, labelKey, ...placement } = raw ?? {}
+			return {
+				initials: stringOr(initials, ''),
+				actor: oneOf(actor, ACTOR_KINDS, 'human'),
+				status: oneOf(status, PIN_STATUSES, 'open'),
+				selected: Boolean(selected),
+				label: stringOr(label, ''),
+				labelKey: optionalString(labelKey),
+				...splitResponsive<PinPlacement>(placement),
+			}
+		},
+	})
+	.state(state => state
+		.status({ authorWritable: true, validate: (v): v is PinStatus => typeof v === 'string' && (PIN_STATUSES as readonly string[]).includes(v), default: ({ config }) => config.status })
+		.selected({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.selected })
+		.visible(visibleState))
+	.properties(p => p
+		.labelResult(translatedResult<PinInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<PinInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.mark({ compute: ({ config }) => ({ initials: config.initials, actor: config.actor }) })
+		.placement({
+			registerDeps: viewportDeps,
+			compute: ({ config, deps }) => {
+				const placement = cascade(config.base, config.responsive, tierOf(readViewport(deps.viewport())))
+				return { style: { left: placement.x ?? '0', top: placement.y ?? '0' }, hidden: Boolean(placement.hidden) }
+			},
+		})
+		.theme(themeProperty()),
+	)
+	.events(events => events.click({ description: 'Fired when the pin is clicked to open its thread bubble' }))
+	.done()
+
+export const PinRenderer = defineComponent({
+	name: 'PinRenderer',
+	setup() {
+		ensureReferenceStyles()
+		const { widgetId, useState, useProperties, emit } = useWidget(pinPlugin)
+		const state = useState()
+		const props = useProperties()
+		return (): VNode => {
+			const status = state.status.value
+			const mark = props.mark.value
+			const placement = props.placement.value
+			const face = status === 'resolved' ? iconNode('check', 14) : actorFace(mark?.actor ?? 'human', mark?.initials ?? '', 14)
+			return h('button', {
+				'data-widget-id': widgetId,
+				type: 'button',
+				'aria-label': props.label.value || undefined,
+				'aria-expanded': state.selected.value ? 'true' : 'false',
+				title: props.label.value || undefined,
+				class: [
+					'uiux-ref-scope',
+					'uiux-ref-pin',
+					props.theme.value,
+					`status-${status}`,
+					state.selected.value ? 'is-selected' : '',
+					placement?.hidden || !state.visible.value ? 'uiux-ref-hidden' : '',
+				],
+				style: placement?.style,
+				onClick: () => emit.click(),
+			}, [
+				face,
+				status === 'ready' ? h('span', { class: 'uiux-ref-pin-badge', 'aria-hidden': 'true' }, [iconNode('eye', 10)]) : null,
+			])
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 12. Bubble — thread or composer popover anchored at a pin; a bottom sheet on phones
+// ---------------------------------------------------------------------------
+type BubblePlacement = 'anchored' | 'sheet' | 'inline'
+export interface BubbleLayout {
+	x?: string
+	y?: string
+	width?: string
+	placement?: BubblePlacement
+	hidden?: boolean
+}
+
+export interface BubbleInterfaces {
+	config: {
+		raw: BubbleLayout & {
+			title?: string
+			titleKey?: string
+			statusLabel?: string
+			statusLabelKey?: string
+			status?: 'open' | 'ready' | 'resolved'
+			target?: string
+			context?: string
+			contextKey?: string
+			open?: boolean
+			closeLabel?: string
+			closeLabelKey?: string
+			responsive?: Responsive<BubbleLayout>
+		}
+		resolved: {
+			title: string
+			titleKey: string | null
+			statusLabel: string
+			statusLabelKey: string | null
+			status: 'open' | 'ready' | 'resolved'
+			target: string
+			context: string
+			contextKey: string | null
+			open: boolean
+			closeLabel: string
+			closeLabelKey: string | null
+			base: BubbleLayout
+			responsive?: Responsive<BubbleLayout>
+		}
+	}
+	slots: 'content' | 'footer'
+	state: { open: boolean; status: 'open' | 'ready' | 'resolved' }
+	events: { close: readonly [] }
+	properties: {
+		titleResult: TranslationResult
+		title: string
+		statusLabelResult: TranslationResult
+		statusLabel: string
+		contextResult: TranslationResult
+		context: string
+		closeLabelResult: TranslationResult
+		closeLabel: string
+		target: string
+		layout: { style: CssStyle; placement: BubblePlacement; hidden: boolean }
+		theme: string
+	}
+}
+
+const BUBBLE_STATUS_ICON: Record<string, string> = { open: 'circle-dot', ready: 'eye', resolved: 'circle-check' }
+const BUBBLE_STATUS_TONE: Record<string, string> = { open: 'annotation', ready: 'info', resolved: 'success' }
+
+export const bubblePlugin = createWidgetPlugin('Bubble')
+	.description('Thread bubble: a 320px, 12px-radius overlay card with title, status badge, target chip, timeline body and reply footer. `placement` is anchored (absolute at x/y), sheet (bottom sheet with grip), or inline (detail pane). Author-writable `open` and `status` states drive Variants.')
+	.interfaces<BubbleInterfaces>()
+	.config({
+		description: 'Bubble configuration. `title`, `statusLabel`, `context` and `closeLabel` accept `$i18n` bindings. `target` is a literal blueprint chip such as "Button · #checkout-submit".',
+		schema: configSchema({
+			title: { type: 'string' },
+			titleKey: { type: 'string' },
+			statusLabel: { type: 'string' },
+			statusLabelKey: { type: 'string' },
+			status: { enum: ['open', 'ready', 'resolved'] },
+			target: { type: 'string' },
+			context: { type: 'string' },
+			contextKey: { type: 'string' },
+			open: { type: 'boolean' },
+			closeLabel: { type: 'string' },
+			closeLabelKey: { type: 'string' },
+			x: { type: 'string' },
+			y: { type: 'string' },
+			width: { type: 'string' },
+			placement: { enum: ['anchored', 'sheet', 'inline'] },
+			hidden: { type: 'boolean' },
+		}),
+		validate: (c): c is BubbleInterfaces['config']['raw'] => isConfigObject(c),
+		resolve: (raw) => {
+			const { title, titleKey, statusLabel, statusLabelKey, status, target, context, contextKey, open, closeLabel, closeLabelKey, ...layout } = raw ?? {}
+			return {
+				title: stringOr(title, ''),
+				titleKey: optionalString(titleKey),
+				statusLabel: stringOr(statusLabel, ''),
+				statusLabelKey: optionalString(statusLabelKey),
+				status: oneOf(status, ['open', 'ready', 'resolved'] as const, 'open'),
+				target: stringOr(target, ''),
+				context: stringOr(context, ''),
+				contextKey: optionalString(contextKey),
+				open: open === undefined ? true : Boolean(open),
+				closeLabel: stringOr(closeLabel, 'Close'),
+				closeLabelKey: optionalString(closeLabelKey),
+				...splitResponsive<BubbleLayout>(layout),
+			}
+		},
+	})
+	.slots({
+		content: { description: 'Timeline items and inline notices' },
+		footer: { description: 'Reply field and lifecycle actions' },
+	})
+	.state(state => state
+		.open({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.open })
+		.status({ authorWritable: true, validate: (v): v is 'open' | 'ready' | 'resolved' => v === 'open' || v === 'ready' || v === 'resolved', default: ({ config }) => config.status }))
+	.properties(p => p
+		.titleResult(translatedResult<BubbleInterfaces['config']['resolved']>(c => ({ key: c.titleKey, literal: c.title })))
+		.title(translatedText<BubbleInterfaces['config']['resolved']>(c => ({ key: c.titleKey, literal: c.title })))
+		.statusLabelResult(translatedResult<BubbleInterfaces['config']['resolved']>(c => ({ key: c.statusLabelKey, literal: c.statusLabel })))
+		.statusLabel(translatedText<BubbleInterfaces['config']['resolved']>(c => ({ key: c.statusLabelKey, literal: c.statusLabel })))
+		.contextResult(translatedResult<BubbleInterfaces['config']['resolved']>(c => ({ key: c.contextKey, literal: c.context })))
+		.context(translatedText<BubbleInterfaces['config']['resolved']>(c => ({ key: c.contextKey, literal: c.context })))
+		.closeLabelResult(translatedResult<BubbleInterfaces['config']['resolved']>(c => ({ key: c.closeLabelKey, literal: c.closeLabel })))
+		.closeLabel(translatedText<BubbleInterfaces['config']['resolved']>(c => ({ key: c.closeLabelKey, literal: c.closeLabel })))
+		.target({ compute: ({ config }) => config.target })
+		.layout({
+			registerDeps: viewportDeps,
+			compute: ({ config, deps }) => {
+				const layout = cascade(config.base, config.responsive, tierOf(readViewport(deps.viewport())))
+				const placement = layout.placement ?? 'anchored'
+				const style: CssStyle = placement === 'anchored'
+					? { left: layout.x ?? '0', top: layout.y ?? '0', ...(layout.width ? { width: layout.width } : {}) }
+					: {}
+				return { style, placement, hidden: Boolean(layout.hidden) }
+			},
+		})
+		.theme(themeProperty()),
+	)
+	.events(events => events.close({ description: 'Fired when the close control is pressed' }))
+	.done()
+
+export const BubbleRenderer = defineComponent({
+	name: 'BubbleRenderer',
+	setup() {
+		ensureReferenceStyles()
+		const { widgetId, WidgetSlot, useState, useProperties, emit } = useWidget(bubblePlugin)
+		const state = useState()
+		const props = useProperties()
+		return (): VNode => {
+			const layout = props.layout.value
+			const placement = layout?.placement ?? 'anchored'
+			const status = state.status.value ?? 'open'
+			const meta: (VNode | null)[] = []
+			if (props.statusLabel.value)
+				meta.push(h('span', { class: ['uiux-ref-badge', 'variant-subtle', `tone-${BUBBLE_STATUS_TONE[status] ?? 'neutral'}`] }, [iconNode(BUBBLE_STATUS_ICON[status], 14), props.statusLabel.value]))
+			if (props.context.value) meta.push(h('span', { class: 'uiux-ref-thread-meta' }, props.context.value))
+			if (props.target.value) meta.push(h('span', { class: ['uiux-ref-badge', 'variant-mono'] }, props.target.value))
+			return h('section', {
+				'data-widget-id': widgetId,
+				role: placement === 'inline' ? 'region' : 'dialog',
+				'aria-label': props.title.value || undefined,
+				class: [
+					'uiux-ref-scope',
+					'uiux-ref-bubble',
+					props.theme.value,
+					placement === 'sheet' ? 'is-sheet' : '',
+					placement === 'inline' ? 'is-inline' : '',
+					layout?.hidden || !state.open.value ? 'uiux-ref-hidden' : '',
+				],
+				style: layout?.style,
+			}, [
+				placement === 'sheet' ? h('span', { class: 'uiux-ref-bubble-grip', 'aria-hidden': 'true' }) : null,
+				h('header', { class: 'uiux-ref-bubble-header' }, [
+					h('div', { class: 'uiux-ref-bubble-head-row' }, [
+						h('h2', { class: 'uiux-ref-bubble-title' }, props.title.value ?? ''),
+						placement === 'inline'
+							? null
+							: h('button', {
+									type: 'button',
+									class: ['uiux-ref-btn', 'variant-ghost', 'size-sm', 'is-icon-only'],
+									'aria-label': props.closeLabel.value,
+									title: props.closeLabel.value,
+									onClick: () => emit.close(),
+								}, [iconNode('x', 16)]),
+					]),
+					meta.length ? h('div', { class: 'uiux-ref-bubble-meta' }, meta) : null,
+				]),
+				h('div', { class: 'uiux-ref-bubble-body' }, [h(WidgetSlot, { name: 'content' })]),
+				h('footer', { class: 'uiux-ref-bubble-footer' }, [h(WidgetSlot, { name: 'footer' })]),
+			])
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 13. CanvasStage — recessed dotted canvas, a lifted View frame, and the annotation overlay
+// ---------------------------------------------------------------------------
+type CanvasMode = 'select' | 'comment' | 'interact'
+export interface CanvasLayout {
+	frameWidth?: string
+	frameMinHeight?: string
+	padding?: number | string
+	dots?: boolean
+	flex?: string
+	hidden?: boolean
+	/** The frame paints with the render-context theme instead of the View's own white ground. */
+	frameFollowsTheme?: boolean
+}
+
+export interface CanvasStageInterfaces {
+	config: {
+		raw: CanvasLayout & { mode?: CanvasMode; label?: string; labelKey?: string; responsive?: Responsive<CanvasLayout> }
+		resolved: { mode: CanvasMode; label: string; labelKey: string | null; base: CanvasLayout; responsive?: Responsive<CanvasLayout> }
+	}
+	slots: 'frame' | 'overlay' | 'hint' | 'palette' | 'tray'
+	state: { mode: CanvasMode }
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		layout: { style: CssStyle; frameStyle: CssStyle; dots: boolean; hidden: boolean; compact: boolean; followsTheme: boolean }
+		theme: string
+	}
+}
+
+export const canvasStagePlugin = createWidgetPlugin('CanvasStage')
+	.description('The Workbench canvas: a recessed graphite ground with a 16px dot grid, the previewed View in a 2px-radius lifted frame, an overlay layer for pins and bubbles, a centered floating tool palette, and a bottom-left tray. `mode: "comment"` draws the 2px Marker inset line and shows the hint slot.')
+	.interfaces<CanvasStageInterfaces>()
+	.config({
+		description: 'CanvasStage configuration. `label` names the canvas region and accepts an `$i18n` binding (lowered to `labelKey`).',
+		schema: configSchema({
+			mode: { enum: ['select', 'comment', 'interact'] },
+			label: { type: 'string' },
+			labelKey: { type: 'string' },
+			frameWidth: { type: 'string' },
+			frameMinHeight: { type: 'string' },
+			padding: { type: ['number', 'string'] },
+			dots: { type: 'boolean' },
+			flex: { type: 'string' },
+			hidden: { type: 'boolean' },
+			frameFollowsTheme: { type: 'boolean' },
+		}),
+		validate: (c): c is CanvasStageInterfaces['config']['raw'] => isConfigObject(c),
+		resolve: (raw) => {
+			const { mode, label, labelKey, ...layout } = raw ?? {}
+			return {
+				mode: oneOf(mode, ['select', 'comment', 'interact'] as const, 'select'),
+				label: stringOr(label, ''),
+				labelKey: optionalString(labelKey),
+				...splitResponsive<CanvasLayout>(layout),
+			}
+		},
+	})
+	.slots({
+		frame: { description: 'The previewed View content inside the lifted frame' },
+		overlay: { description: 'Pins and bubbles positioned over the frame' },
+		hint: { description: 'Mode hint shown above the frame while commenting' },
+		palette: { description: 'Floating canvas tool palette' },
+		tray: { description: 'Bottom-left tray for comments that cannot be placed' },
+	})
+	.state(state => state.mode({
+		authorWritable: true,
+		validate: (v): v is CanvasMode => v === 'select' || v === 'comment' || v === 'interact',
+		default: ({ config }) => config.mode,
+	}))
+	.properties(p => p
+		.labelResult(translatedResult<CanvasStageInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<CanvasStageInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.layout({
+			registerDeps: viewportDeps,
+			compute: ({ config, deps }) => {
+				const tier = tierOf(readViewport(deps.viewport()))
+				const layout = cascade(config.base, config.responsive, tier)
+				return {
+					style: { padding: px(layout.padding, tier === 'wide' ? '24px 24px 88px' : '12px 12px 80px'), ...(layout.flex ? { flex: layout.flex } : { flex: '1 1 auto' }) },
+					frameStyle: { maxWidth: layout.frameWidth ?? '880px', ...(layout.frameMinHeight ? { minHeight: layout.frameMinHeight } : {}) },
+					dots: layout.dots ?? true,
+					hidden: Boolean(layout.hidden),
+					compact: tier === 'compact',
+					followsTheme: Boolean(layout.frameFollowsTheme),
+				}
+			},
+		})
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const CanvasStageRenderer = defineComponent({
+	name: 'CanvasStageRenderer',
+	setup() {
+		ensureReferenceStyles()
+		const { widgetId, WidgetSlot, useState, useProperties } = useWidget(canvasStagePlugin)
+		const state = useState()
+		const props = useProperties()
+		return (): VNode => {
+			const layout = props.layout.value
+			const mode = state.mode.value
+			return h('section', {
+				'data-widget-id': widgetId,
+				'aria-label': props.label.value || undefined,
+				'data-canvas-mode': mode,
+				class: [
+					'uiux-ref-scope',
+					'uiux-ref-stage',
+					props.theme.value,
+					`mode-${mode}`,
+					layout?.dots ? 'has-dots' : '',
+					layout?.compact ? 'is-compact' : '',
+					layout?.hidden ? 'uiux-ref-hidden' : '',
+				],
+				style: layout?.style,
+			}, [
+				mode === 'comment' ? h('div', { class: 'uiux-ref-stage-hint' }, [h(WidgetSlot, { name: 'hint' })]) : null,
+				h('div', { class: 'uiux-ref-stage-frame-wrap', style: layout?.frameStyle }, [
+					h('div', { class: ['uiux-ref-stage-frame', layout?.followsTheme ? 'follows-theme' : ''] }, [h(WidgetSlot, { name: 'frame' })]),
+					h(WidgetSlot, { name: 'overlay' }),
+				]),
+				h('div', { class: 'uiux-ref-stage-palette' }, [h(WidgetSlot, { name: 'palette' })]),
+				h('div', { class: 'uiux-ref-stage-tray' }, [h(WidgetSlot, { name: 'tray' })]),
+			])
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 14. SegmentedControl & Segment — segmented toggles, underline tabs, and the floating tool palette
+// ---------------------------------------------------------------------------
+type SegmentAppearance = 'segment' | 'tabs' | 'palette'
+const SEGMENT_APPEARANCES: readonly SegmentAppearance[] = ['segment', 'tabs', 'palette']
+
+export interface SegmentedLayout { fullWidth?: boolean; hidden?: boolean }
+
+export interface SegmentedControlInterfaces {
+	config: {
+		raw: SegmentedLayout & { appearance?: SegmentAppearance; label?: string; labelKey?: string; responsive?: Responsive<SegmentedLayout> }
+		resolved: { appearance: SegmentAppearance; label: string; labelKey: string | null; base: SegmentedLayout; responsive?: Responsive<SegmentedLayout> }
+	}
+	slots: 'content'
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		layout: { appearance: SegmentAppearance; fullWidth: boolean; hidden: boolean }
+		theme: string
+	}
+}
+
+export const segmentedControlPlugin = createWidgetPlugin('SegmentedControl')
+	.description('Group of Segments rendered as a segmented control, an underline tab strip, or the floating canvas tool palette (pill with overlay shadow).')
+	.interfaces<SegmentedControlInterfaces>()
+	.config({
+		description: 'SegmentedControl configuration. `label` (group accessible name) accepts an `$i18n` binding (lowered to `labelKey`).',
+		schema: configSchema({
+			appearance: { enum: ['segment', 'tabs', 'palette'] },
+			label: { type: 'string' },
+			labelKey: { type: 'string' },
+			fullWidth: { type: 'boolean' },
+			hidden: { type: 'boolean' },
+		}),
+		validate: (c): c is SegmentedControlInterfaces['config']['raw'] => isConfigObject(c),
+		resolve: (raw) => {
+			const { appearance, label, labelKey, ...layout } = raw ?? {}
+			return { appearance: oneOf(appearance, SEGMENT_APPEARANCES, 'segment'), label: stringOr(label, ''), labelKey: optionalString(labelKey), ...splitResponsive<SegmentedLayout>(layout) }
+		},
+	})
+	.slots({ content: { description: 'Segment widgets' } })
+	.properties(p => p
+		.labelResult(translatedResult<SegmentedControlInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<SegmentedControlInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.layout({
+			registerDeps: viewportDeps,
+			compute: ({ config, deps }) => {
+				const layout = cascade(config.base, config.responsive, tierOf(readViewport(deps.viewport())))
+				return { appearance: config.appearance, fullWidth: Boolean(layout.fullWidth), hidden: Boolean(layout.hidden) }
+			},
+		})
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const SegmentedControlRenderer = defineComponent({
+	name: 'SegmentedControlRenderer',
+	setup() {
+		ensureReferenceStyles()
+		const { widgetId, WidgetSlot, useProperties } = useWidget(segmentedControlPlugin)
+		const props = useProperties()
+		return (): VNode => {
+			const layout = props.layout.value
+			const appearance = layout?.appearance ?? 'segment'
+			return h('div', {
+				'data-widget-id': widgetId,
+				role: appearance === 'tabs' ? 'tablist' : appearance === 'palette' ? 'toolbar' : 'group',
+				'aria-label': props.label.value || undefined,
+				class: ['uiux-ref-scope', 'uiux-ref-segmented', props.theme.value, `appearance-${appearance}`, layout?.fullWidth ? 'is-full-width' : '', layout?.hidden ? 'uiux-ref-hidden' : ''],
+			}, [h(WidgetSlot, { name: 'content' })])
+		}
+	},
+})
+
+export interface SegmentPresentation { iconOnly?: boolean; hidden?: boolean }
+
+export interface SegmentInterfaces {
+	config: {
+		raw: SegmentPresentation & {
+			label?: string
+			labelKey?: string
+			icon?: string
+			kbd?: string
+			count?: string | number
+			countTone?: 'neutral' | 'annotation' | 'info'
+			appearance?: SegmentAppearance
+			activeTone?: 'primary' | 'annotation'
+			selected?: boolean
+			responsive?: Responsive<SegmentPresentation>
+		}
+		resolved: {
+			label: string
+			labelKey: string | null
+			icon: string
+			kbd: string
+			count: string
+			countTone: string
+			appearance: SegmentAppearance
+			activeTone: string
+			selected: boolean
+			base: SegmentPresentation
+			responsive?: Responsive<SegmentPresentation>
+		}
+	}
+	state: { selected: boolean }
+	events: { click: readonly [] }
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		look: { icon: string; kbd: string; count: string; countTone: string; appearance: SegmentAppearance; activeTone: string; iconOnly: boolean; hidden: boolean; touch: boolean }
+		theme: string
+	}
+}
+
+export const segmentPlugin = createWidgetPlugin('Segment')
+	.description('One option inside a SegmentedControl: Lucide icon, translatable label, count, and shortcut hint. The palette appearance fills Iris when selected, or tints Marker for the Comment tool (`activeTone: "annotation"`).')
+	.interfaces<SegmentInterfaces>()
+	.config({
+		description: 'Segment configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`); `appearance` must match the parent SegmentedControl.',
+		schema: configSchema({
+			label: { type: 'string' },
+			labelKey: { type: 'string' },
+			icon: { type: 'string' },
+			kbd: { type: 'string' },
+			count: { type: ['string', 'number'] },
+			countTone: { enum: ['neutral', 'annotation', 'info'] },
+			appearance: { enum: ['segment', 'tabs', 'palette'] },
+			activeTone: { enum: ['primary', 'annotation'] },
+			selected: { type: 'boolean' },
+			iconOnly: { type: 'boolean' },
+			hidden: { type: 'boolean' },
+		}),
+		validate: (c): c is SegmentInterfaces['config']['raw'] => isConfigObject(c),
+		resolve: (raw) => {
+			const { label, labelKey, icon, kbd, count, countTone, appearance, activeTone, selected, ...presentation } = raw ?? {}
+			return {
+				label: stringOr(label, ''),
+				labelKey: optionalString(labelKey),
+				icon: stringOr(icon, ''),
+				kbd: stringOr(kbd, ''),
+				count: count === undefined ? '' : String(count),
+				countTone: countTone ?? 'neutral',
+				appearance: oneOf(appearance, SEGMENT_APPEARANCES, 'segment'),
+				activeTone: activeTone ?? 'primary',
+				selected: Boolean(selected),
+				...splitResponsive<SegmentPresentation>(presentation),
+			}
+		},
+	})
+	.state(state => state.selected({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.selected }))
+	.properties(p => p
+		.labelResult(translatedResult<SegmentInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<SegmentInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.look({
+			registerDeps: viewportDeps,
+			compute: ({ config, deps }) => {
+				const tier = tierOf(readViewport(deps.viewport()))
+				const presentation = cascade(config.base, config.responsive, tier)
+				return {
+					icon: config.icon,
+					kbd: isTouchTier(tier) ? '' : config.kbd,
+					count: config.count,
+					countTone: config.countTone,
+					appearance: config.appearance,
+					activeTone: config.activeTone,
+					iconOnly: Boolean(presentation.iconOnly && config.icon),
+					hidden: Boolean(presentation.hidden),
+					touch: isTouchTier(tier) && config.appearance !== 'tabs',
+				}
+			},
+		})
+		.theme(themeProperty()),
+	)
+	.events(events => events.click({ description: 'Fired when the segment, tab or tool is chosen' }))
+	.done()
+
+export const SegmentRenderer = defineComponent({
+	name: 'SegmentRenderer',
+	setup() {
+		ensureReferenceStyles()
+		const { widgetId, useState, useProperties, emit } = useWidget(segmentPlugin)
+		const state = useState()
+		const props = useProperties()
+		return (): VNode => {
+			const look = props.look.value
+			const label = props.label.value ?? ''
+			const selected = state.selected.value
+			const appearance = look?.appearance ?? 'segment'
+			const children: (VNode | null)[] = [iconNode(look?.icon, 16)]
+			if (!look?.iconOnly) children.push(h('span', label))
+			if (look?.count) children.push(h('span', { class: ['uiux-ref-badge', 'variant-count', `tone-${look.countTone}`] }, look.count))
+			if (look?.kbd && !look.iconOnly) children.push(kbdNode(look.kbd))
+			return h('button', {
+				'data-widget-id': widgetId,
+				type: 'button',
+				role: appearance === 'tabs' ? 'tab' : undefined,
+				'aria-selected': appearance === 'tabs' ? String(selected) : undefined,
+				'aria-pressed': appearance === 'tabs' ? undefined : String(selected),
+				'aria-label': look?.iconOnly ? label : undefined,
+				title: look?.iconOnly ? label : undefined,
+				class: [
+					'uiux-ref-scope',
+					'uiux-ref-segment',
+					props.theme.value,
+					`appearance-${appearance}`,
+					`tone-${look?.activeTone ?? 'primary'}`,
+					selected ? 'is-selected' : '',
+					look?.iconOnly ? 'is-icon-only' : '',
+					look?.touch ? 'is-touch' : '',
+					look?.hidden ? 'uiux-ref-hidden' : '',
+				],
+				onClick: () => emit.click(),
+			}, children)
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 15. TabBar & TabBarItem — 56px bottom navigation for phones
+// ---------------------------------------------------------------------------
+export interface TabBarInterfaces {
+	config: {
+		raw: { label?: string; labelKey?: string; showOn?: 'compact' | 'always' }
+		resolved: { label: string; labelKey: string | null; showOn: 'compact' | 'always' }
+	}
+	slots: 'content'
+	properties: { labelResult: TranslationResult; label: string; hidden: boolean; theme: string }
+}
+
+export const tabBarPlugin = createWidgetPlugin('TabBar')
+	.description('Phone bottom navigation: a 56px sticky bar of TabBarItems (Overview, Views, UX Flows, Reviews). Shown only on the compact tier unless `showOn: "always"`.')
+	.interfaces<TabBarInterfaces>()
+	.config({
+		description: 'TabBar configuration. `label` (navigation landmark name) accepts an `$i18n` binding (lowered to `labelKey`).',
+		schema: configSchema({ label: { type: 'string' }, labelKey: { type: 'string' }, showOn: { enum: ['compact', 'always'] } }),
+		validate: (c): c is TabBarInterfaces['config']['raw'] => isConfigObject(c),
+		resolve: raw => ({ label: stringOr(raw?.label, ''), labelKey: optionalString(raw?.labelKey), showOn: raw?.showOn === 'always' ? 'always' : 'compact' }),
+	})
+	.slots({ content: { description: 'TabBarItem widgets' } })
+	.properties(p => p
+		.labelResult(translatedResult<TabBarInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<TabBarInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.hidden({
+			registerDeps: viewportDeps,
+			compute: ({ config, deps }) => config.showOn === 'compact' && tierOf(readViewport(deps.viewport())) !== 'compact',
+		})
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const TabBarRenderer = defineComponent({
+	name: 'TabBarRenderer',
+	setup() {
+		ensureReferenceStyles()
+		const { widgetId, WidgetSlot, useProperties } = useWidget(tabBarPlugin)
+		const props = useProperties()
+		return (): VNode => h('nav', {
+			'data-widget-id': widgetId,
+			'aria-label': props.label.value || undefined,
+			class: ['uiux-ref-scope', 'uiux-ref-tabbar', props.theme.value, props.hidden.value ? 'uiux-ref-hidden' : ''],
+		}, [h(WidgetSlot, { name: 'content' })])
+	},
+})
+
+export interface TabBarItemInterfaces {
+	config: {
+		raw: { label?: string; labelKey?: string; icon?: string; badge?: string | number; badgeTone?: 'neutral' | 'annotation'; selected?: boolean }
+		resolved: { label: string; labelKey: string | null; icon: string; badge: string; badgeTone: string; selected: boolean }
+	}
+	state: { selected: boolean }
+	events: { click: readonly [] }
+	properties: { labelResult: TranslationResult; label: string; look: { icon: string; badge: string; badgeTone: string }; theme: string }
+}
+
+export const tabBarItemPlugin = createWidgetPlugin('TabBarItem')
+	.description('One bottom-navigation destination: a 20px Lucide icon over a 12px label, an optional count badge, and a 2px Iris top bar when selected.')
+	.interfaces<TabBarItemInterfaces>()
+	.config({
+		description: 'TabBarItem configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`).',
+		schema: configSchema({
+			label: { type: 'string' }, labelKey: { type: 'string' }, icon: { type: 'string' },
+			badge: { type: ['string', 'number'] }, badgeTone: { enum: ['neutral', 'annotation'] }, selected: { type: 'boolean' },
+		}),
+		validate: (c): c is TabBarItemInterfaces['config']['raw'] => isConfigObject(c),
+		resolve: raw => ({
+			label: stringOr(raw?.label, ''),
+			labelKey: optionalString(raw?.labelKey),
+			icon: stringOr(raw?.icon, ''),
+			badge: raw?.badge === undefined ? '' : String(raw.badge),
+			badgeTone: raw?.badgeTone ?? 'neutral',
+			selected: Boolean(raw?.selected),
+		}),
+	})
+	.state(state => state.selected({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.selected }))
+	.properties(p => p
+		.labelResult(translatedResult<TabBarItemInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<TabBarItemInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.look({ compute: ({ config }) => ({ icon: config.icon, badge: config.badge, badgeTone: config.badgeTone }) })
+		.theme(themeProperty()),
+	)
+	.events(events => events.click({ description: 'Fired when the destination is chosen' }))
+	.done()
+
+export const TabBarItemRenderer = defineComponent({
+	name: 'TabBarItemRenderer',
+	setup() {
+		ensureReferenceStyles()
+		const { widgetId, useState, useProperties, emit } = useWidget(tabBarItemPlugin)
+		const state = useState()
+		const props = useProperties()
+		return (): VNode => {
+			const look = props.look.value
+			return h('button', {
+				'data-widget-id': widgetId,
+				type: 'button',
+				'aria-current': state.selected.value ? 'page' : undefined,
+				class: ['uiux-ref-scope', 'uiux-ref-tabbar-item', props.theme.value, state.selected.value ? 'is-selected' : ''],
+				onClick: () => {
+					state.selected.value = true
+					emit.click()
+				},
+			}, [
+				h('span', { class: 'uiux-ref-tabbar-icon' }, [
+					iconNode(look?.icon, 20),
+					look?.badge ? h('span', { class: ['uiux-ref-badge', 'variant-count', `tone-${look.badgeTone}`] }, look.badge) : null,
+				]),
+				h('span', props.label.value ?? ''),
+			])
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 16. Rail — the primary sidebar: 264px wide, a 56px icon rail on tablets, hidden on phones
+// ---------------------------------------------------------------------------
+export interface RailLayout { width?: string; collapsed?: boolean; hidden?: boolean }
+
+export interface RailInterfaces {
+	config: {
+		raw: RailLayout & { label?: string; labelKey?: string; responsive?: Responsive<RailLayout> }
+		resolved: { label: string; labelKey: string | null; base: RailLayout; responsive?: Responsive<RailLayout> }
+	}
+	slots: 'header' | 'content' | 'footer'
+	properties: { labelResult: TranslationResult; label: string; layout: { width: string; collapsed: boolean; hidden: boolean }; theme: string }
+}
+
+export const railPlugin = createWidgetPlugin('Rail')
+	.description('Primary navigation sidebar with header, scrolling content and a Workspace footer group, separated by hairlines. Defaults: 264px on desktop, a 56px icon rail on tablets, hidden on phones (the TabBar takes over).')
+	.interfaces<RailInterfaces>()
+	.config({
+		description: 'Rail configuration. `label` (navigation landmark name) accepts an `$i18n` binding (lowered to `labelKey`).',
+		schema: configSchema({ label: { type: 'string' }, labelKey: { type: 'string' }, width: { type: 'string' }, collapsed: { type: 'boolean' }, hidden: { type: 'boolean' } }),
+		validate: (c): c is RailInterfaces['config']['raw'] => isConfigObject(c),
+		resolve: (raw) => {
+			const { label, labelKey, ...layout } = raw ?? {}
+			const split = splitResponsive<RailLayout>(layout)
+			return {
+				label: stringOr(label, ''),
+				labelKey: optionalString(labelKey),
+				...split,
+				responsive: split.responsive ?? { medium: { collapsed: true }, compact: { hidden: true } },
+			}
+		},
+	})
+	.slots({
+		header: { description: 'Primary destinations' },
+		content: { description: 'Context for the current page (for example the Widget tree)' },
+		footer: { description: 'Workspace group' },
+	})
+	.properties(p => p
+		.labelResult(translatedResult<RailInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<RailInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.layout({
+			registerDeps: viewportDeps,
+			compute: ({ config, deps }) => {
+				const layout = cascade(config.base, config.responsive, tierOf(readViewport(deps.viewport())))
+				return { width: layout.collapsed ? '56px' : (layout.width ?? '264px'), collapsed: Boolean(layout.collapsed), hidden: Boolean(layout.hidden) }
+			},
+		})
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const RailRenderer = defineComponent({
+	name: 'RailRenderer',
+	setup() {
+		ensureReferenceStyles()
+		const { widgetId, WidgetSlot, useProperties } = useWidget(railPlugin)
+		const props = useProperties()
+		return (): VNode => {
+			const layout = props.layout.value
+			return h('nav', {
+				'data-widget-id': widgetId,
+				'aria-label': props.label.value || undefined,
+				class: ['uiux-ref-scope', 'uiux-ref-rail', props.theme.value, layout?.collapsed ? 'is-collapsed' : '', layout?.hidden ? 'uiux-ref-hidden' : ''],
+				style: { width: layout?.width ?? '264px' },
+			}, [
+				h('div', { class: 'uiux-ref-rail-section is-header' }, [h(WidgetSlot, { name: 'header' })]),
+				h('div', { class: 'uiux-ref-rail-section is-content' }, [h(WidgetSlot, { name: 'content' })]),
+				h('div', { class: 'uiux-ref-rail-section is-footer' }, [h(WidgetSlot, { name: 'footer' })]),
+			])
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 17. ContextBar & ContextChip — the canvas render-context toolbar (Variant, Locale, Viewport, Theme)
+// ---------------------------------------------------------------------------
+export interface ContextBarInterfaces {
+	config: {
+		raw: { label?: string; labelKey?: string; hidden?: boolean; responsive?: Responsive<{ hidden?: boolean }> }
+		resolved: { label: string; labelKey: string | null; base: { hidden?: boolean }; responsive?: Responsive<{ hidden?: boolean }> }
+	}
+	slots: 'start' | 'end'
+	properties: { labelResult: TranslationResult; label: string; hidden: boolean; theme: string }
+}
+
+export const contextBarPlugin = createWidgetPlugin('ContextBar')
+	.description('44px canvas toolbar with a start group (render-context chips) and an end group (session status, zoom, fit). Scrolls horizontally rather than wrapping on narrow tiers.')
+	.interfaces<ContextBarInterfaces>()
+	.config({
+		description: 'ContextBar configuration. `label` (toolbar accessible name) accepts an `$i18n` binding (lowered to `labelKey`).',
+		schema: configSchema({ label: { type: 'string' }, labelKey: { type: 'string' }, hidden: { type: 'boolean' } }),
+		validate: (c): c is ContextBarInterfaces['config']['raw'] => isConfigObject(c),
+		resolve: (raw) => {
+			const { label, labelKey, ...presentation } = raw ?? {}
+			return { label: stringOr(label, ''), labelKey: optionalString(labelKey), ...splitResponsive<{ hidden?: boolean }>(presentation) }
+		},
+	})
+	.slots({ start: { description: 'Render-context chips' }, end: { description: 'Status, zoom and panel controls' } })
+	.properties(p => p
+		.labelResult(translatedResult<ContextBarInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<ContextBarInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.hidden({
+			registerDeps: viewportDeps,
+			compute: ({ config, deps }) => Boolean(cascade(config.base, config.responsive, tierOf(readViewport(deps.viewport()))).hidden),
+		})
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const ContextBarRenderer = defineComponent({
+	name: 'ContextBarRenderer',
+	setup() {
+		ensureReferenceStyles()
+		const { widgetId, WidgetSlot, useProperties } = useWidget(contextBarPlugin)
+		const props = useProperties()
+		return (): VNode => h('div', {
+			'data-widget-id': widgetId,
+			role: 'toolbar',
+			'aria-label': props.label.value || undefined,
+			class: ['uiux-ref-scope', 'uiux-ref-contextbar', props.theme.value, props.hidden.value ? 'uiux-ref-hidden' : ''],
+		}, [
+			h('div', { class: 'uiux-ref-contextbar-start' }, [h(WidgetSlot, { name: 'start' })]),
+			h('div', { class: 'uiux-ref-contextbar-end' }, [h(WidgetSlot, { name: 'end' })]),
+		])
+	},
+})
+
+export interface ContextChipPresentation { hideLabel?: boolean; hidden?: boolean }
+
+export interface ContextChipInterfaces {
+	config: {
+		raw: ContextChipPresentation & {
+			icon?: string
+			label?: string
+			labelKey?: string
+			value?: string
+			valueKey?: string
+			mono?: boolean
+			chevron?: boolean
+			responsive?: Responsive<ContextChipPresentation>
+		}
+		resolved: { icon: string; label: string; labelKey: string | null; value: string; valueKey: string | null; mono: boolean; chevron: boolean; base: ContextChipPresentation; responsive?: Responsive<ContextChipPresentation> }
+	}
+	events: { click: readonly [] }
+	properties: {
+		contextViewportId: string
+		contextViewport: string
+		contextLocale: string
+		contextTheme: string
+		labelResult: TranslationResult
+		label: string
+		valueResult: TranslationResult
+		value: string
+		look: { icon: string; mono: boolean; chevron: boolean; hideLabel: boolean; hidden: boolean; touch: boolean }
+		theme: string
+	}
+}
+
+export const contextChipPlugin = createWidgetPlugin('ContextChip')
+	.description('Render-context chip: icon, muted label and a highlighted value with a select chevron. Translated values may interpolate the live render context ({viewportId}, {viewport}, {locale}, {theme}).')
+	.interfaces<ContextChipInterfaces>()
+	.config({
+		description: 'ContextChip configuration. `label` and `value` accept `$i18n` bindings (lowered to `labelKey`, `valueKey`).',
+		schema: configSchema({
+			icon: { type: 'string' }, label: { type: 'string' }, labelKey: { type: 'string' },
+			value: { type: 'string' }, valueKey: { type: 'string' }, mono: { type: 'boolean' }, chevron: { type: 'boolean' },
+			hideLabel: { type: 'boolean' }, hidden: { type: 'boolean' },
+		}),
+		validate: (c): c is ContextChipInterfaces['config']['raw'] => isConfigObject(c),
+		resolve: (raw) => {
+			const { icon, label, labelKey, value, valueKey, mono, chevron, ...presentation } = raw ?? {}
+			return {
+				icon: stringOr(icon, ''),
+				label: stringOr(label, ''),
+				labelKey: optionalString(labelKey),
+				value: stringOr(value, ''),
+				valueKey: optionalString(valueKey),
+				mono: Boolean(mono),
+				chevron: chevron === undefined ? true : Boolean(chevron),
+				...splitResponsive<ContextChipPresentation>(presentation),
+			}
+		},
+	})
+	.properties(p => p
+		.contextViewportId({ valueContract: STRING, registerDeps: viewportDeps, compute: ({ deps }) => readViewport(deps.viewport())?.id ?? '' })
+		.contextViewport({
+			valueContract: STRING,
+			registerDeps: viewportDeps,
+			compute: ({ deps }) => {
+				const viewport = readViewport(deps.viewport())
+				return viewport ? `${viewport.width} × ${viewport.height}` : ''
+			},
+		})
+		.contextLocale({ valueContract: STRING, registerDeps: ({ dep }) => ({ locale: dep.root.state.get('locale') }), compute: ({ deps }) => stringFromResult(deps.locale()) })
+		.contextTheme({ valueContract: STRING, registerDeps: ({ dep }) => ({ themeId: dep.root.state.get('themeId') }), compute: ({ deps }) => stringFromResult(deps.themeId()) })
+		.labelResult(translatedResult<ContextChipInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<ContextChipInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.valueResult({
+			valueContract: TRANSLATION_RESULT,
+			registerDeps: ({ dep }) => ({
+				...translateDeps({ dep }),
+				viewportId: dep.self.properties.get('contextViewportId'),
+				viewport: dep.self.properties.get('contextViewport'),
+				locale: dep.self.properties.get('contextLocale'),
+				theme: dep.self.properties.get('contextTheme'),
+			}),
+			compute: ({ config, deps }) => translateField(config.valueKey, config.value, (key, params) => deps.t(key, params), {
+				viewportId: stringFromResult(deps.viewportId()),
+				viewport: stringFromResult(deps.viewport()),
+				locale: stringFromResult(deps.locale()),
+				theme: stringFromResult(deps.theme()),
+			}),
+		})
+		.value({
+			valueContract: STRING,
+			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('valueResult') }),
+			compute: ({ deps }) => textOfResult(deps.result()),
+		})
+		.look({
+			registerDeps: viewportDeps,
+			compute: ({ config, deps }) => {
+				const tier = tierOf(readViewport(deps.viewport()))
+				const presentation = cascade(config.base, config.responsive, tier)
+				return { icon: config.icon, mono: config.mono, chevron: config.chevron, hideLabel: Boolean(presentation.hideLabel), hidden: Boolean(presentation.hidden), touch: isTouchTier(tier) }
+			},
+		})
+		.theme(themeProperty()),
+	)
+	.events(events => events.click({ description: 'Fired when the chip menu is opened' }))
+	.done()
+
+export const ContextChipRenderer = defineComponent({
+	name: 'ContextChipRenderer',
+	setup() {
+		ensureReferenceStyles()
+		const { widgetId, useProperties, emit } = useWidget(contextChipPlugin)
+		const props = useProperties()
+		return (): VNode => {
+			const look = props.look.value
+			const label = props.label.value ?? ''
+			return h('button', {
+				'data-widget-id': widgetId,
+				type: 'button',
+				'aria-haspopup': 'listbox',
+				'aria-label': look?.hideLabel ? `${label}: ${props.value.value ?? ''}` : undefined,
+				class: ['uiux-ref-scope', 'uiux-ref-chip', props.theme.value, look?.touch ? 'is-touch' : '', look?.hidden ? 'uiux-ref-hidden' : ''],
+				onClick: () => emit.click(),
+			}, [
+				iconNode(look?.icon, 16),
+				look?.hideLabel ? null : h('span', label),
+				h('span', { class: ['uiux-ref-chip-value', look?.mono ? 'is-mono' : ''] }, props.value.value ?? ''),
+				look?.chevron ? iconNode('chevron-down', 14) : null,
+			])
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 18. TimelineItem — one message or lifecycle event in a Review thread
+// ---------------------------------------------------------------------------
+export interface TimelineItemInterfaces {
+	config: {
+		raw: {
+			kind?: 'message' | 'event'
+			actor?: ActorKind
+			initials?: string
+			name?: string
+			role?: string
+			roleKey?: string
+			time?: string
+			timeKey?: string
+			body?: string
+			bodyKey?: string
+			icon?: string
+			tone?: 'neutral' | 'success' | 'info' | 'annotation'
+		}
+		resolved: {
+			kind: 'message' | 'event'
+			actor: ActorKind
+			initials: string
+			name: string
+			role: string
+			roleKey: string | null
+			time: string
+			timeKey: string | null
+			body: string
+			bodyKey: string | null
+			icon: string
+			tone: string
+		}
+	}
+	properties: {
+		roleResult: TranslationResult
+		role: string
+		timeResult: TranslationResult
+		time: string
+		bodyResult: TranslationResult
+		body: string
+		look: { kind: 'message' | 'event'; actor: ActorKind; initials: string; name: string; icon: string; tone: string }
+		theme: string
+	}
+}
+
+export const timelineItemPlugin = createWidgetPlugin('TimelineItem')
+	.description('Review thread timeline entry: a message (avatar, author, role badge, relative time, 14px body) or a compact lifecycle event (icon plus one muted line, toned success/info/annotation).')
+	.interfaces<TimelineItemInterfaces>()
+	.config({
+		description: 'TimelineItem configuration. `role`, `time` and `body` accept `$i18n` bindings (lowered to `roleKey`, `timeKey`, `bodyKey`). `name` and `initials` are member data and stay literal.',
+		schema: configSchema({
+			kind: { enum: ['message', 'event'] },
+			actor: { enum: ['human', 'agent', 'system'] },
+			initials: { type: 'string' }, name: { type: 'string' },
+			role: { type: 'string' }, roleKey: { type: 'string' },
+			time: { type: 'string' }, timeKey: { type: 'string' },
+			body: { type: 'string' }, bodyKey: { type: 'string' },
+			icon: { type: 'string' },
+			tone: { enum: ['neutral', 'success', 'info', 'annotation'] },
+		}),
+		validate: (c): c is TimelineItemInterfaces['config']['raw'] => isConfigObject(c),
+		resolve: raw => ({
+			kind: raw?.kind === 'event' ? 'event' : 'message',
+			actor: oneOf(raw?.actor, ACTOR_KINDS, 'human'),
+			initials: stringOr(raw?.initials, ''),
+			name: stringOr(raw?.name, ''),
+			role: stringOr(raw?.role, ''),
+			roleKey: optionalString(raw?.roleKey),
+			time: stringOr(raw?.time, ''),
+			timeKey: optionalString(raw?.timeKey),
+			body: stringOr(raw?.body, ''),
+			bodyKey: optionalString(raw?.bodyKey),
+			icon: stringOr(raw?.icon, ''),
+			tone: raw?.tone ?? 'neutral',
+		}),
+	})
+	.properties(p => p
+		.roleResult(translatedResult<TimelineItemInterfaces['config']['resolved']>(c => ({ key: c.roleKey, literal: c.role })))
+		.role(translatedText<TimelineItemInterfaces['config']['resolved']>(c => ({ key: c.roleKey, literal: c.role })))
+		.timeResult(translatedResult<TimelineItemInterfaces['config']['resolved']>(c => ({ key: c.timeKey, literal: c.time })))
+		.time(translatedText<TimelineItemInterfaces['config']['resolved']>(c => ({ key: c.timeKey, literal: c.time })))
+		.bodyResult(translatedResult<TimelineItemInterfaces['config']['resolved']>(c => ({ key: c.bodyKey, literal: c.body })))
+		.body(translatedText<TimelineItemInterfaces['config']['resolved']>(c => ({ key: c.bodyKey, literal: c.body })))
+		.look({ compute: ({ config }) => ({ kind: config.kind, actor: config.actor, initials: config.initials, name: config.name, icon: config.icon, tone: config.tone }) })
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const TimelineItemRenderer = defineComponent({
+	name: 'TimelineItemRenderer',
+	setup() {
+		ensureReferenceStyles()
+		const { widgetId, useProperties } = useWidget(timelineItemPlugin)
+		const props = useProperties()
+		return (): VNode => {
+			const look = props.look.value
+			if (look?.kind === 'event') {
+				return h('div', {
+					'data-widget-id': widgetId,
+					class: ['uiux-ref-scope', 'uiux-ref-timeline', 'kind-event', `tone-${look.tone}`, props.theme.value],
+				}, [
+					h('span', { class: 'uiux-ref-timeline-marker' }, [iconNode(look.icon || 'circle-dot', 14)]),
+					h('span', [props.body.value ?? '', props.time.value ? ` · ${props.time.value}` : '']),
+				])
+			}
+			return h('article', {
+				'data-widget-id': widgetId,
+				class: ['uiux-ref-scope', 'uiux-ref-timeline', 'kind-message', props.theme.value],
+			}, [
+				h('span', { class: ['uiux-ref-avatar'], style: { width: '24px', height: '24px' }, 'aria-hidden': 'true' }, [actorFace(look?.actor ?? 'human', look?.initials ?? '', 14)]),
+				h('div', { class: 'uiux-ref-timeline-main' }, [
+					h('div', { class: 'uiux-ref-timeline-head' }, [
+						h('span', { class: 'uiux-ref-timeline-name' }, look?.name ?? ''),
+						props.role.value ? h('span', { class: ['uiux-ref-badge', 'variant-soft', 'tone-neutral'] }, props.role.value) : null,
+						h('span', { class: 'uiux-ref-timeline-time' }, props.time.value ?? ''),
+					]),
+					h('p', { class: 'uiux-ref-timeline-body' }, props.body.value ?? ''),
+				]),
+			])
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 19. ThreadRow — one Review thread in a queue or comment list
+// ---------------------------------------------------------------------------
+type ThreadStatus = 'open' | 'ready' | 'resolved'
+const THREAD_STATUSES: readonly ThreadStatus[] = ['open', 'ready', 'resolved']
+const THREAD_STATUS_ICON: Record<ThreadStatus, string> = { open: 'circle-dot', ready: 'eye', resolved: 'circle-check' }
+
+export interface ThreadRowInterfaces {
+	config: {
+		raw: {
+			title?: string
+			titleKey?: string
+			meta?: string
+			metaKey?: string
+			time?: string
+			timeKey?: string
+			anchor?: string
+			chips?: readonly string[]
+			count?: number
+			initials?: string
+			actor?: ActorKind
+			status?: ThreadStatus
+			selected?: boolean
+			unread?: boolean
+			hidden?: boolean
+			responsive?: Responsive<{ hidden?: boolean }>
+		}
+		resolved: {
+			title: string
+			titleKey: string | null
+			meta: string
+			metaKey: string | null
+			time: string
+			timeKey: string | null
+			anchor: string
+			chips: readonly string[]
+			count: number
+			initials: string
+			actor: ActorKind
+			status: ThreadStatus
+			selected: boolean
+			unread: boolean
+			base: { hidden?: boolean }
+			responsive?: Responsive<{ hidden?: boolean }>
+		}
+	}
+	state: { selected: boolean; status: ThreadStatus }
+	events: { click: readonly [] }
+	properties: {
+		titleResult: TranslationResult
+		title: string
+		metaResult: TranslationResult
+		meta: string
+		timeResult: TranslationResult
+		time: string
+		look: { anchor: string; chips: readonly string[]; count: number; initials: string; actor: ActorKind; unread: boolean; hidden: boolean; touch: boolean }
+		theme: string
+	}
+}
+
+export const threadRowPlugin = createWidgetPlugin('ThreadRow')
+	.description('Review thread row: status icon (open/ready/resolved, never color alone), author avatar, one-line title, relative time, annotation-colored message count, meta line, mono anchor and change-domain chips. Selected rows get an Iris tint and inset bar.')
+	.interfaces<ThreadRowInterfaces>()
+	.config({
+		description: 'ThreadRow configuration. `title`, `meta` and `time` accept `$i18n` bindings (lowered to `titleKey`, `metaKey`, `timeKey`). `anchor` and `chips` are literal identities.',
+		schema: configSchema({
+			title: { type: 'string' }, titleKey: { type: 'string' },
+			meta: { type: 'string' }, metaKey: { type: 'string' },
+			time: { type: 'string' }, timeKey: { type: 'string' },
+			anchor: { type: 'string' },
+			chips: { type: 'array', items: { type: 'string' } },
+			count: { type: 'number' },
+			initials: { type: 'string' },
+			actor: { enum: ['human', 'agent', 'system'] },
+			status: { enum: ['open', 'ready', 'resolved'] },
+			selected: { type: 'boolean' },
+			unread: { type: 'boolean' },
+			hidden: { type: 'boolean' },
+		}),
+		validate: (c): c is ThreadRowInterfaces['config']['raw'] => isConfigObject(c),
+		resolve: (raw) => {
+			const { title, titleKey, meta, metaKey, time, timeKey, anchor, chips, count, initials, actor, status, selected, unread, ...presentation } = raw ?? {}
+			return {
+				title: stringOr(title, ''),
+				titleKey: optionalString(titleKey),
+				meta: stringOr(meta, ''),
+				metaKey: optionalString(metaKey),
+				time: stringOr(time, ''),
+				timeKey: optionalString(timeKey),
+				anchor: stringOr(anchor, ''),
+				chips: Array.isArray(chips) ? chips.filter((chip): chip is string => typeof chip === 'string') : [],
+				count: typeof count === 'number' ? count : 0,
+				initials: stringOr(initials, ''),
+				actor: oneOf(actor, ACTOR_KINDS, 'human'),
+				status: oneOf(status, THREAD_STATUSES, 'open'),
+				selected: Boolean(selected),
+				unread: Boolean(unread),
+				...splitResponsive<{ hidden?: boolean }>(presentation),
+			}
+		},
+	})
+	.state(state => state
+		.selected({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.selected })
+		.status({ authorWritable: true, validate: (v): v is ThreadStatus => typeof v === 'string' && (THREAD_STATUSES as readonly string[]).includes(v), default: ({ config }) => config.status }))
+	.properties(p => p
+		.titleResult(translatedResult<ThreadRowInterfaces['config']['resolved']>(c => ({ key: c.titleKey, literal: c.title })))
+		.title(translatedText<ThreadRowInterfaces['config']['resolved']>(c => ({ key: c.titleKey, literal: c.title })))
+		.metaResult(translatedResult<ThreadRowInterfaces['config']['resolved']>(c => ({ key: c.metaKey, literal: c.meta })))
+		.meta(translatedText<ThreadRowInterfaces['config']['resolved']>(c => ({ key: c.metaKey, literal: c.meta })))
+		.timeResult(translatedResult<ThreadRowInterfaces['config']['resolved']>(c => ({ key: c.timeKey, literal: c.time })))
+		.time(translatedText<ThreadRowInterfaces['config']['resolved']>(c => ({ key: c.timeKey, literal: c.time })))
+		.look({
+			registerDeps: viewportDeps,
+			compute: ({ config, deps }) => {
+				const tier = tierOf(readViewport(deps.viewport()))
+				return {
+					anchor: config.anchor,
+					chips: config.chips,
+					count: config.count,
+					initials: config.initials,
+					actor: config.actor,
+					unread: config.unread,
+					hidden: Boolean(cascade(config.base, config.responsive, tier).hidden),
+					touch: isTouchTier(tier),
+				}
+			},
+		})
+		.theme(themeProperty()),
+	)
+	.events(events => events.click({ description: 'Fired when the thread is opened' }))
+	.done()
+
+export const ThreadRowRenderer = defineComponent({
+	name: 'ThreadRowRenderer',
+	setup() {
+		ensureReferenceStyles()
+		const { widgetId, useState, useProperties, emit } = useWidget(threadRowPlugin)
+		const state = useState()
+		const props = useProperties()
+		return (): VNode => {
+			const look = props.look.value
+			const status = state.status.value ?? 'open'
+			const chips: VNode[] = []
+			if (look?.anchor) chips.push(h('span', { class: ['uiux-ref-badge', 'variant-mono'] }, look.anchor))
+			for (const chip of look?.chips ?? []) chips.push(h('span', { class: ['uiux-ref-badge', 'variant-mono'] }, chip))
+			return h('button', {
+				'data-widget-id': widgetId,
+				type: 'button',
+				'aria-current': state.selected.value ? 'true' : undefined,
+				class: ['uiux-ref-scope', 'uiux-ref-thread', props.theme.value, state.selected.value ? 'is-selected' : '', look?.touch ? 'is-touch' : '', look?.hidden ? 'uiux-ref-hidden' : ''],
+				onClick: () => {
+					state.selected.value = true
+					emit.click()
+				},
+			}, [
+				h('span', { class: ['uiux-ref-thread-status', `status-${status}`] }, [iconNode(THREAD_STATUS_ICON[status], 16)]),
+				h('span', { class: 'uiux-ref-avatar', style: { width: '24px', height: '24px' }, 'aria-hidden': 'true' }, [actorFace(look?.actor ?? 'human', look?.initials ?? '', 14)]),
+				h('span', { class: 'uiux-ref-thread-main' }, [
+					h('span', { class: 'uiux-ref-thread-top' }, [
+						h('span', { class: 'uiux-ref-thread-title', style: look?.unread ? { fontWeight: '600' } : undefined }, props.title.value ?? ''),
+						h('span', { class: 'uiux-ref-thread-time' }, props.time.value ?? ''),
+						look?.count ? h('span', { class: 'uiux-ref-thread-count' }, [iconNode('message-circle', 12), String(look.count)]) : null,
+					]),
+					h('span', { class: 'uiux-ref-thread-meta' }, props.meta.value ?? ''),
+					chips.length ? h('span', { class: 'uiux-ref-thread-chips' }, chips) : null,
+				]),
+			])
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 20. Alert — persistent inline state (adapter failure, revision conflict, invalid token, toast)
+// ---------------------------------------------------------------------------
+type AlertTone = 'info' | 'success' | 'warning' | 'danger' | 'annotation'
+const ALERT_ICON: Record<AlertTone, string> = { info: 'info', success: 'circle-check', warning: 'triangle-alert', danger: 'circle-alert', annotation: 'message-circle' }
+
+export interface AlertInterfaces {
+	config: {
+		raw: { tone?: AlertTone; icon?: string; title?: string; titleKey?: string; description?: string; descriptionKey?: string; toast?: boolean; visible?: boolean }
+		resolved: { tone: AlertTone; icon: string; title: string; titleKey: string | null; description: string; descriptionKey: string | null; toast: boolean; visible: boolean }
+	}
+	slots: 'actions'
+	state: { visible: boolean }
+	properties: {
+		titleResult: TranslationResult
+		title: string
+		descriptionResult: TranslationResult
+		description: string
+		look: { tone: AlertTone; icon: string; toast: boolean }
+		theme: string
+	}
+}
+
+export const alertPlugin = createWidgetPlugin('Alert')
+	.description('Subtle inline alert with a status icon, title, description and an actions slot; `toast: true` renders the floating toast surface. Author-writable `visible` state drives Variants.')
+	.interfaces<AlertInterfaces>()
+	.config({
+		description: 'Alert configuration. `title` and `description` accept `$i18n` bindings (lowered to `titleKey`, `descriptionKey`).',
+		schema: configSchema({
+			tone: { enum: ['info', 'success', 'warning', 'danger', 'annotation'] },
+			icon: { type: 'string' },
+			title: { type: 'string' }, titleKey: { type: 'string' },
+			description: { type: 'string' }, descriptionKey: { type: 'string' },
+			toast: { type: 'boolean' },
+			visible: { type: 'boolean' },
+		}),
+		validate: (c): c is AlertInterfaces['config']['raw'] => isConfigObject(c),
+		resolve: raw => ({
+			tone: oneOf(raw?.tone, ['info', 'success', 'warning', 'danger', 'annotation'] as const, 'info'),
+			icon: stringOr(raw?.icon, ''),
+			title: stringOr(raw?.title, ''),
+			titleKey: optionalString(raw?.titleKey),
+			description: stringOr(raw?.description, ''),
+			descriptionKey: optionalString(raw?.descriptionKey),
+			toast: Boolean(raw?.toast),
+			visible: raw?.visible === undefined ? true : Boolean(raw.visible),
+		}),
+	})
+	.slots({ actions: { description: 'Recovery actions and identity chips' } })
+	.state(state => state.visible({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.visible }))
+	.properties(p => p
+		.titleResult(translatedResult<AlertInterfaces['config']['resolved']>(c => ({ key: c.titleKey, literal: c.title })))
+		.title(translatedText<AlertInterfaces['config']['resolved']>(c => ({ key: c.titleKey, literal: c.title })))
+		.descriptionResult(translatedResult<AlertInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
+		.description(translatedText<AlertInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
+		.look({ compute: ({ config }) => ({ tone: config.tone, icon: config.icon || ALERT_ICON[config.tone], toast: config.toast }) })
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const AlertRenderer = defineComponent({
+	name: 'AlertRenderer',
+	setup() {
+		ensureReferenceStyles()
+		const { widgetId, WidgetSlot, useState, useProperties } = useWidget(alertPlugin)
+		const state = useState()
+		const props = useProperties()
+		return (): VNode => {
+			const look = props.look.value
+			return h('div', {
+				'data-widget-id': widgetId,
+				role: look?.tone === 'danger' ? 'alert' : 'status',
+				class: ['uiux-ref-scope', 'uiux-ref-alert', props.theme.value, `tone-${look?.tone ?? 'info'}`, look?.toast ? 'is-toast' : '', state.visible.value ? '' : 'uiux-ref-hidden'],
+			}, [
+				h('span', { class: 'uiux-ref-alert-icon' }, [iconNode(look?.icon, 16)]),
+				h('div', { class: 'uiux-ref-alert-main' }, [
+					props.title.value ? h('p', { class: 'uiux-ref-alert-title' }, props.title.value) : null,
+					props.description.value ? h('p', { class: 'uiux-ref-alert-desc' }, props.description.value) : null,
+					h('div', { class: 'uiux-ref-alert-actions' }, [h(WidgetSlot, { name: 'actions' })]),
+				]),
+			])
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 21. EmptyState — always one next action
+// ---------------------------------------------------------------------------
+export interface EmptyStateInterfaces {
+	config: {
+		raw: { icon?: string; title?: string; titleKey?: string; description?: string; descriptionKey?: string; dashed?: boolean; visible?: boolean }
+		resolved: { icon: string; title: string; titleKey: string | null; description: string; descriptionKey: string | null; dashed: boolean; visible: boolean }
+	}
+	slots: 'actions'
+	state: { visible: boolean }
+	properties: {
+		titleResult: TranslationResult
+		title: string
+		descriptionResult: TranslationResult
+		description: string
+		look: { icon: string; dashed: boolean }
+		theme: string
+	}
+}
+
+export const emptyStatePlugin = createWidgetPlugin('EmptyState')
+	.description('Empty state with a muted icon disc, title, description and one next action. `dashed: true` draws the 1px dashed "nothing authored yet" boundary. Author-writable `visible` state drives Variants.')
+	.interfaces<EmptyStateInterfaces>()
+	.config({
+		description: 'EmptyState configuration. `title` and `description` accept `$i18n` bindings (lowered to `titleKey`, `descriptionKey`).',
+		schema: configSchema({
+			icon: { type: 'string' },
+			title: { type: 'string' }, titleKey: { type: 'string' },
+			description: { type: 'string' }, descriptionKey: { type: 'string' },
+			dashed: { type: 'boolean' },
+			visible: { type: 'boolean' },
+		}),
+		validate: (c): c is EmptyStateInterfaces['config']['raw'] => isConfigObject(c),
+		resolve: raw => ({
+			icon: stringOr(raw?.icon, ''),
+			title: stringOr(raw?.title, ''),
+			titleKey: optionalString(raw?.titleKey),
+			description: stringOr(raw?.description, ''),
+			descriptionKey: optionalString(raw?.descriptionKey),
+			dashed: Boolean(raw?.dashed),
+			visible: raw?.visible === undefined ? true : Boolean(raw.visible),
+		}),
+	})
+	.slots({ actions: { description: 'The one next action' } })
+	.state(state => state.visible({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.visible }))
+	.properties(p => p
+		.titleResult(translatedResult<EmptyStateInterfaces['config']['resolved']>(c => ({ key: c.titleKey, literal: c.title })))
+		.title(translatedText<EmptyStateInterfaces['config']['resolved']>(c => ({ key: c.titleKey, literal: c.title })))
+		.descriptionResult(translatedResult<EmptyStateInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
+		.description(translatedText<EmptyStateInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
+		.look({ compute: ({ config }) => ({ icon: config.icon, dashed: config.dashed }) })
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const EmptyStateRenderer = defineComponent({
+	name: 'EmptyStateRenderer',
+	setup() {
+		ensureReferenceStyles()
+		const { widgetId, WidgetSlot, useState, useProperties } = useWidget(emptyStatePlugin)
+		const state = useState()
+		const props = useProperties()
+		return (): VNode => {
+			const look = props.look.value
+			return h('div', {
+				'data-widget-id': widgetId,
+				class: ['uiux-ref-scope', 'uiux-ref-empty', props.theme.value, look?.dashed ? 'is-dashed' : '', state.visible.value ? '' : 'uiux-ref-hidden'],
+			}, [
+				look?.icon ? h('span', { class: 'uiux-ref-empty-icon' }, [iconNode(look.icon, 20)]) : null,
+				h('p', { class: 'uiux-ref-empty-title' }, props.title.value ?? ''),
+				props.description.value ? h('p', { class: 'uiux-ref-empty-desc' }, props.description.value) : null,
+				h('div', { class: 'uiux-ref-empty-actions' }, [h(WidgetSlot, { name: 'actions' })]),
+			])
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
 // Canonical Adapter Manifest
 // ---------------------------------------------------------------------------
 function i18nField(field: string, params?: Readonly<Record<string, string>>) {
@@ -1572,27 +3687,42 @@ function i18nField(field: string, params?: Readonly<Record<string, string>>) {
 	}
 }
 
+function i18nFields(...fields: readonly string[]): AdapterWidgetCatalogEntry {
+	return { i18n: { fields: Object.fromEntries(fields.map(field => [field, i18nField(field)])) } }
+}
+
+const RENDER_CONTEXT_PARAMS = {
+	viewportId: 'contextViewportId',
+	viewport: 'contextViewport',
+	locale: 'contextLocale',
+	theme: 'contextTheme',
+} as const
+
 const catalogWidgets: Readonly<Record<string, AdapterWidgetCatalogEntry>> = {
 	Stack: {},
-	Panel: { i18n: { fields: { title: i18nField('title') } } },
+	Panel: i18nFields('title'),
 	Text: { i18n: { fields: { text: i18nField('text', { value: 'valueText' }) } } },
-	Button: { i18n: { fields: { label: i18nField('label') } } },
-	Badge: {
-		i18n: {
-			fields: {
-				label: i18nField('label', {
-					value: 'valueText',
-					viewportId: 'contextViewportId',
-					viewport: 'contextViewport',
-					locale: 'contextLocale',
-					theme: 'contextTheme',
-				}),
-			},
-		},
-	},
-	TextInput: { i18n: { fields: { placeholder: i18nField('placeholder'), label: i18nField('label') } } },
-	NavItem: { i18n: { fields: { label: i18nField('label'), meta: i18nField('meta'), badge: i18nField('badge') } } },
+	Button: i18nFields('label'),
+	Badge: { i18n: { fields: { label: i18nField('label', { value: 'valueText', ...RENDER_CONTEXT_PARAMS }) } } },
+	TextInput: i18nFields('placeholder', 'label', 'help', 'error'),
+	NavItem: i18nFields('label', 'meta', 'badge'),
 	Divider: {},
+	Avatar: i18nFields('label'),
+	Kbd: {},
+	Pin: i18nFields('label'),
+	Bubble: i18nFields('title', 'statusLabel', 'context', 'closeLabel'),
+	CanvasStage: i18nFields('label'),
+	SegmentedControl: i18nFields('label'),
+	Segment: i18nFields('label'),
+	TabBar: i18nFields('label'),
+	TabBarItem: i18nFields('label'),
+	Rail: i18nFields('label'),
+	ContextBar: i18nFields('label'),
+	ContextChip: { i18n: { fields: { label: i18nField('label'), value: i18nField('value', RENDER_CONTEXT_PARAMS) } } },
+	TimelineItem: i18nFields('role', 'time', 'body'),
+	ThreadRow: i18nFields('title', 'meta', 'time'),
+	Alert: i18nFields('title', 'description'),
+	EmptyState: i18nFields('title', 'description'),
 }
 
 export const manifest: AdapterManifest = {
@@ -1607,6 +3737,22 @@ export const manifest: AdapterManifest = {
 		textInputPlugin,
 		navItemPlugin,
 		dividerPlugin,
+		avatarPlugin,
+		kbdPlugin,
+		pinPlugin,
+		bubblePlugin,
+		canvasStagePlugin,
+		segmentedControlPlugin,
+		segmentPlugin,
+		tabBarPlugin,
+		tabBarItemPlugin,
+		railPlugin,
+		contextBarPlugin,
+		contextChipPlugin,
+		timelineItemPlugin,
+		threadRowPlugin,
+		alertPlugin,
+		emptyStatePlugin,
 	],
 	catalog: {
 		widgets: catalogWidgets,
@@ -1620,6 +3766,22 @@ export const manifest: AdapterManifest = {
 		{ type: 'TextInput', component: TextInputRenderer },
 		{ type: 'NavItem', component: NavItemRenderer },
 		{ type: 'Divider', component: DividerRenderer },
+		{ type: 'Avatar', component: AvatarRenderer },
+		{ type: 'Kbd', component: KbdRenderer },
+		{ type: 'Pin', component: PinRenderer },
+		{ type: 'Bubble', component: BubbleRenderer },
+		{ type: 'CanvasStage', component: CanvasStageRenderer },
+		{ type: 'SegmentedControl', component: SegmentedControlRenderer },
+		{ type: 'Segment', component: SegmentRenderer },
+		{ type: 'TabBar', component: TabBarRenderer },
+		{ type: 'TabBarItem', component: TabBarItemRenderer },
+		{ type: 'Rail', component: RailRenderer },
+		{ type: 'ContextBar', component: ContextBarRenderer },
+		{ type: 'ContextChip', component: ContextChipRenderer },
+		{ type: 'TimelineItem', component: TimelineItemRenderer },
+		{ type: 'ThreadRow', component: ThreadRowRenderer },
+		{ type: 'Alert', component: AlertRenderer },
+		{ type: 'EmptyState', component: EmptyStateRenderer },
 	],
 	providers: [],
 	styles: [],
