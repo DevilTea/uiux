@@ -14,6 +14,7 @@ import packageJson from '../../package.json' with { type: 'json' }
 export const CURRENT_WORKSPACE_SCHEMA_VERSION = packageJson.uiuxWorkspaceSchemaVersion
 
 export const WORKSPACE_V1_TO_V2_STEP_ID = 'uiux.v1-to-v2'
+export const WORKSPACE_V2_TO_V3_STEP_ID = 'uiux.v2-to-v3'
 
 /**
  * The combined `1 -> 2` step shared by the accepted "Direct resolve" and "Review pin display hint"
@@ -63,10 +64,43 @@ export const WORKSPACE_V1_TO_V2_STEP: WorkspaceMigrationStep = Object.freeze({
 	},
 })
 
+/**
+ * The `2 -> 3` step shared by the accepted "Workspace-scoped Review threads and editable Review
+ * messages" decision group and its retract addendum (Part 7). It changes only the manifest
+ * `schemaVersion`: no v2 file can contain a Workspace anchor or message `edits`, and retract
+ * changes no persisted shape. It still re-validates every Review file that was valid under v2
+ * against v3 before persistence writes anything. Deterministic and idempotent.
+ */
+export const WORKSPACE_V2_TO_V3_STEP: WorkspaceMigrationStep = Object.freeze({
+	id: WORKSPACE_V2_TO_V3_STEP_ID,
+	fromVersion: 2,
+	toVersion: 3,
+	apply(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+		const next = new Map(snapshot)
+		const manifestPath = workspaceRelativePath()
+		const manifestBytes = next.get(manifestPath)
+		if (!manifestBytes) throw new TypeError('uiux.v2-to-v3 requires .uiux/workspace.json.')
+		const manifest = parseJson(manifestBytes, manifestPath)
+		if (!isRecord(manifest) || manifest.schemaVersion !== 2)
+			throw new TypeError('uiux.v2-to-v3 applies only to a schemaVersion 2 manifest.')
+		next.set(manifestPath, canonicalJsonBytes({ ...manifest, schemaVersion: 3 }))
+
+		for (const [path, bytes] of snapshot) {
+			if (!/^reviews\/[^/]+\.review\.json$/u.test(path)) continue
+			let review: unknown
+			try { review = parseJson(bytes, path) }
+			catch { continue } // Unparseable JSON stays byte-identical and keeps its persistence diagnostic.
+			const filename = path.slice('reviews/'.length)
+			if (validateReviewThread(review, { schemaVersion: 2, filename }).ok) assertValidUnder(review, filename, 3, WORKSPACE_V2_TO_V3_STEP_ID)
+		}
+		return next
+	},
+})
+
 export const PRODUCT_WORKSPACE_SCHEMA_POLICY = defineWorkspaceSchemaPolicy({
 	currentVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
-	recognizedVersions: [1, 2],
-	steps: [WORKSPACE_V1_TO_V2_STEP],
+	recognizedVersions: [1, 2, 3],
+	steps: [WORKSPACE_V1_TO_V2_STEP, WORKSPACE_V2_TO_V3_STEP],
 })
 
 /** Returns the same object when no lifecycle resolve event lacks a resolution. */
@@ -83,9 +117,13 @@ function backfillVerifiedResolutions(review: unknown): unknown {
 }
 
 function assertValidUnderV2(review: unknown, filename: string): void {
-	const validation = validateReviewThread(review, { schemaVersion: 2, filename })
+	assertValidUnder(review, filename, 2, WORKSPACE_V1_TO_V2_STEP_ID)
+}
+
+function assertValidUnder(review: unknown, filename: string, schemaVersion: number, stepId: string): void {
+	const validation = validateReviewThread(review, { schemaVersion, filename })
 	if (!validation.ok)
-		throw new TypeError(`uiux.v1-to-v2 produced an invalid schemaVersion 2 Review ${filename}: ${validation.diagnostics.map(item => `${item.code} at ${item.path || '/'}`).join(', ')}.`)
+		throw new TypeError(`${stepId} produced an invalid schemaVersion ${schemaVersion} Review ${filename}: ${validation.diagnostics.map(item => `${item.code} at ${item.path || '/'}`).join(', ')}.`)
 }
 
 function parseJson(bytes: Uint8Array, path: string): unknown {

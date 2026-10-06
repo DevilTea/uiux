@@ -38,7 +38,7 @@ await writeFile(join(workspaceRoot, 'adapters', 'smoke.mjs'), [
 	'',
 ].join('\n'))
 await writeFile(join(workspaceRoot, '.uiux', 'workspace.json'), `${JSON.stringify({
-	schemaVersion: 2,
+	schemaVersion: 3,
 	i18n: { defaultLocale: 'en-US' },
 	adapters: [{ moduleSpecifier: './adapters/smoke.mjs' }],
 	viewports: {},

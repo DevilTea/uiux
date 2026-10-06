@@ -53,7 +53,7 @@ const previous = { root: process.env.UIUX_WORKSPACE_ROOT, origin: process.env.UI
 beforeAll(async () => {
 	root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-access-http-')))
 	await mkdir(join(root, '.uiux'), { recursive: true })
-	await writeFile(join(root, '.uiux', 'workspace.json'), `${JSON.stringify({ schemaVersion: 2, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }, null, 2)}\n`)
+	await writeFile(join(root, '.uiux', 'workspace.json'), `${JSON.stringify({ schemaVersion: 3, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }, null, 2)}\n`)
 	process.env.UIUX_WORKSPACE_ROOT = root
 
 	const app = createApp()

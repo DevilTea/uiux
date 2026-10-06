@@ -22,7 +22,7 @@ import type { WorkspaceManifest } from '../src/domain/workspace/schema'
 /** Pure rules behind the Workspace authoring pages (roadmap R10, brief g). */
 
 const MANIFEST: WorkspaceManifest = {
-	schemaVersion: 2,
+	schemaVersion: 3,
 	i18n: { defaultLocale: 'en-US' },
 	adapters: [{ moduleSpecifier: './adapters/reference.ts' }],
 	viewports: {

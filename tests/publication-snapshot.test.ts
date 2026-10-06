@@ -27,7 +27,7 @@ async function createWorkspace() {
 	roots.push(root)
 	await mkdir(join(root, '.uiux'), { recursive: true })
 	await writeFile(join(root, '.uiux', 'workspace.json'), JSON.stringify({
-		schemaVersion: 2,
+		schemaVersion: 3,
 		i18n: { defaultLocale: 'en-US' },
 		adapters: [],
 		viewports: {
@@ -90,7 +90,7 @@ describe('Static Publication snapshot', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS
 		expect(isPublicationSnapshot(snapshot)).toBe(true)
 		expect(snapshot.schemaVersion).toBe(1)
 		expect(snapshot.sourceRevision).toBe('abc123')
-		expect(snapshot.workspace.resource.schemaVersion).toBe(2)
+		expect(snapshot.workspace.resource.schemaVersion).toBe(3)
 		expect(snapshot.resources.view).toHaveLength(1)
 		expect(snapshot.resources.locale).toHaveLength(1)
 		expect(snapshot.resources.asset).toHaveLength(1)

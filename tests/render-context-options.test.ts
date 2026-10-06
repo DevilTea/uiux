@@ -24,7 +24,7 @@ function baseView(variants: ViewResource['variants'] = {}): ViewResource {
 
 function baseWorkspace(overrides: Partial<WorkspaceManifest> = {}): WorkspaceManifest {
 	return {
-		schemaVersion: 2,
+		schemaVersion: 3,
 		i18n: { defaultLocale: 'en-US' },
 		adapters: [],
 		viewports: {},

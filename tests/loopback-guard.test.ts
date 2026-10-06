@@ -139,7 +139,7 @@ describe('loopback guard on a live h3 server with the real /mcp and /api routes'
 	beforeAll(async () => {
 		root = await mkdtemp(join(tmpdir(), 'uiux-loopback-guard-'))
 		await mkdir(join(root, '.uiux'), { recursive: true })
-		await writeFile(join(root, '.uiux', 'workspace.json'), `${JSON.stringify({ schemaVersion: 2, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }, null, 2)}\n`)
+		await writeFile(join(root, '.uiux', 'workspace.json'), `${JSON.stringify({ schemaVersion: 3, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }, null, 2)}\n`)
 		process.env.UIUX_WORKSPACE_ROOT = root
 		process.env.UIUX_SERVER_ORIGIN = 'http://127.0.0.1:1'
 		token = await provisionToken(root, { nickname: 'claude', kind: 'agent', role: 'editor' })
