@@ -254,6 +254,14 @@ describe('Prototype player (R11, Discussion #6 item 6)', () => {
 				seen.push(await waitForGenerationChange(page, seen.at(-1)!))
 			}
 			expect(await page.locator('[data-flow-player-path] li').count()).toBeGreaterThanOrEqual(4)
+			// Steps that open the same View stay distinguishable: each crumb leads with its play-order
+			// number and its Variant, or "Base state" when the step has none.
+			const crumbs = await page.locator('[data-flow-player-crumb]').evaluateAll(items => items.map(item => ({
+				number: item.firstElementChild?.textContent?.trim(),
+				variant: item.querySelector('[data-flow-player-crumb-variant]')?.textContent?.trim(),
+			})))
+			expect(crumbs.map(crumb => crumb.number)).toEqual(crumbs.map((_, index) => String(index + 1)))
+			expect(crumbs.every(crumb => !!crumb.variant)).toBe(true)
 			await page.locator('[data-flow-player-restart]').click()
 			seen.push(await waitForGenerationChange(page, seen.at(-1)!))
 			expect(new Set(seen).size).toBe(seen.length)

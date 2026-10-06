@@ -66,13 +66,34 @@ function stepTitle(stepId: string): string {
 	return variant ? t('flows.player.stepWithVariant', { step: editor.stepLabel(stepId), variant }) : editor.stepLabel(stepId)
 }
 
-/** The path played so far. Earlier steps are history, not links: going back is not a Flow transition. */
+/**
+ * The path played so far. Earlier steps are history, not links: going back is not a Flow transition.
+ * Steps often open the same View in different Variants, so each crumb leads with its play-order
+ * number and its Variant ("Base state" when there is none); the View name follows, and the full
+ * "Step n: View · Variant" title is in the tooltip.
+ */
 const MAX_CRUMBS = 6
-const crumbs = computed<BreadcrumbItem[]>(() => {
+interface StepCrumb extends BreadcrumbItem {
+	slot: 'step'
+	stepNumber: number
+	variantLabel: string
+	baseState: boolean
+	viewLabel: string
+	fullTitle: string
+}
+interface EarlierCrumb extends BreadcrumbItem { slot?: undefined }
+const crumbs = computed<(StepCrumb | EarlierCrumb)[]>(() => {
 	const history = state.value.history
 	const shown = history.slice(-MAX_CRUMBS)
-	const items: BreadcrumbItem[] = shown.map((item, index) => ({
+	const offset = history.length - shown.length
+	const items: (StepCrumb | EarlierCrumb)[] = shown.map((item, index): StepCrumb => ({
 		label: stepTitle(item.stepId),
+		slot: 'step',
+		stepNumber: offset + index + 1,
+		variantLabel: props.flow.steps[item.stepId]?.target.variantName || t('ctx.base'),
+		baseState: !props.flow.steps[item.stepId]?.target.variantName,
+		viewLabel: editor.stepLabel(item.stepId),
+		fullTitle: t('flows.player.entered', { n: offset + index + 1, step: stepTitle(item.stepId) }),
 		...(index === shown.length - 1 ? { 'aria-current': 'step' } : {}),
 		// A Workbench-driven advance is marked: it is not an Event and never evidence (decision 8).
 		...(item.via?.source === 'workbench'
@@ -250,23 +271,52 @@ defineExpose({ follow, restart })
           name="i-lucide-play"
           class="size-4 shrink-0 text-dimmed"
         />
-        <div class="min-w-0 flex-1 overflow-x-auto">
+        <div class="min-w-0 flex-1">
           <!-- Neutral like the navbar breadcrumb: the current step is a location, not a selection.
-               UBreadcrumb is the <nav> landmark and gets the translated name. -->
+               UBreadcrumb is the <nav> landmark and gets the translated name. A long path scrolls
+               sideways, so the named landmark itself is the focusable scroller. -->
           <UBreadcrumb
             :items="crumbs"
             :aria-label="t('flows.player.path')"
             color="neutral"
             separator-icon="i-lucide-chevron-right"
+            tabindex="0"
+            class="rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
             :ui="{
+              root: 'overflow-x-auto',
               list: 'flex-nowrap',
               item: 'shrink-0',
               link: 'text-sm whitespace-nowrap',
-              linkLabel: 'max-w-[min(32rem,40vw)] truncate',
+              linkLabel: 'flex min-w-0 max-w-[min(32rem,40vw)]',
             }"
             data-flow-player-path
           >
+            <template #step-label="{ item }">
+              <UTooltip
+                :text="item.fullTitle"
+                :content="{ side: 'bottom', align: 'start' }"
+              >
+                <span
+                  class="inline-flex min-w-0 items-baseline gap-1.5"
+                  data-flow-player-crumb
+                >
+                  <span class="shrink-0 font-mono text-xs tabular-nums text-dimmed">{{ item.stepNumber }}</span>
+                  <span
+                    class="max-w-[14rem] truncate font-medium"
+                    :class="item.baseState ? 'text-toned' : 'text-highlighted'"
+                    data-flow-player-crumb-variant
+                  >{{ item.variantLabel }}</span>
+                  <span class="max-w-[6rem] truncate text-xs text-muted sm:max-w-[10rem]">{{ item.viewLabel }}</span>
+                </span>
+              </UTooltip>
+            </template>
             <template #item-trailing="{ item }">
+              <span
+                v-if="item.advancedFromWorkbench"
+                class="sr-only"
+              >{{ t('flows.player.advancedFromWorkbench') }}</span>
+            </template>
+            <template #step-trailing="{ item }">
               <span
                 v-if="item.advancedFromWorkbench"
                 class="sr-only"

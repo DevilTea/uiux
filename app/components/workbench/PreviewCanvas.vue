@@ -668,7 +668,7 @@ function switchToBase(): void {
         :class="scale >= 0.5 ? 'canvas-dots' : ''"
         :tabindex="props.prototype ? 0 : undefined"
         :role="props.prototype ? 'region' : undefined"
-        :aria-label="props.prototype ? t('workbench.canvas.label') : undefined"
+        :aria-label="props.prototype ? t('workbench.canvas.stageLabel') : undefined"
         data-canvas-stage
         @pointerdown="onPointerDown"
         @pointermove="onPointerMove"
