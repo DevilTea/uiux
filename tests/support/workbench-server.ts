@@ -18,6 +18,12 @@ export type WorkbenchServer = Readonly<{
 }>
 
 const REPOSITORY_ROOT = join(import.meta.dirname, '..', '..')
+/**
+ * Frozen snapshot of the dogfood Workspace the browser tests were written against (the
+ * pre-Quiet-Canvas Workbench View, its Review threads, evidence and reference adapter). The live
+ * `design/` Workspace is authored freely through MCP, so tests must not depend on its contents.
+ */
+export const WORKBENCH_FIXTURE_WORKSPACE = join(REPOSITORY_ROOT, 'tests', 'fixtures', 'workbench-workspace')
 
 async function freePort(): Promise<number> {
 	const probe = createServer()
@@ -33,12 +39,12 @@ async function freePort(): Promise<number> {
 
 /**
  * Starts the built Nitro server (`.output/server/index.mjs`, produced by `pnpm build`)
- * against a private copy of the dogfood `design/` Workspace. The copy lives under the
+ * against a private copy of the frozen fixture Workspace. The copy lives under the
  * repository so its adapter resolves the repository's `@deviltea/widget-core`.
  */
 export async function startWorkbenchServer(): Promise<WorkbenchServer> {
 	const workspaceRoot = await mkdtemp(join(REPOSITORY_ROOT, '.uiux-browser-test-'))
-	await cp(join(REPOSITORY_ROOT, 'design'), workspaceRoot, { recursive: true })
+	await cp(WORKBENCH_FIXTURE_WORKSPACE, workspaceRoot, { recursive: true })
 	const token = await provisionToken(workspaceRoot, { nickname: 'tester', kind: 'human', role: 'owner' })
 	const port = await freePort()
 	const child: ChildProcess = spawn(process.execPath, [join(REPOSITORY_ROOT, '.output', 'server', 'index.mjs')], {
