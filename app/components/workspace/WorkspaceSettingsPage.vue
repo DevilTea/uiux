@@ -279,7 +279,9 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
       role="region"
       :aria-label="t('settings.title')"
     >
-      <div class="mx-auto flex w-full max-w-5xl gap-10 px-4 pt-6 pb-16 sm:px-6">
+      <!-- self-start: as a stretched flex item this row would be only one screen tall, and the sticky
+           section index would scroll away with it. -->
+      <div class="mx-auto flex w-full max-w-5xl self-start gap-10 px-4 pt-6 pb-16 sm:px-6">
         <nav
           class="hidden w-44 shrink-0 lg:block"
           :aria-label="t('settings.sectionIndex')"
