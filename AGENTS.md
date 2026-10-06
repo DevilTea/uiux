@@ -18,6 +18,7 @@
 - Change `.spec/` semantic content only through the `spec` CLI (`pnpm exec spec ...`, JSON request on stdin) or `createSpecClient` from `@deviltea/spec-tool`, always with the current `expectedRevision`. Never hand-edit frontmatter, Rule/Clause records, Scenario tags or steps. Markdown bodies and Gherkin `#` comments are noncanonical and only carry provenance and explanatory notes; edit them only while no `spec` process is running.
 - `.spec/` is closed-world: do not add files or directories other than the ones the tool writes.
 - Commands that take no request (for example `workspace validate`, `graph export`) wait on stdin; run them with `</dev/null`. Run `pnpm spec:validate` after changes; `pnpm check` runs it too.
+- Import batches are applied with `node scripts/spec-import/apply.mjs <batch.json>`, which keeps the import ref-to-UUID map in `scripts/spec-import/refmap.json` (outside `.spec/`); that directory is temporary and is removed at the cutover.
 - Follow the shipped skills `node_modules/@deviltea/spec-tool/skills/maintain-spec-workspace/SKILL.md` for changes and `node_modules/@deviltea/spec-tool/skills/review-spec-workspace/SKILL.md` for read-only review.
 
 ## Source layout
