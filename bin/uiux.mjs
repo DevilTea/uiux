@@ -21,9 +21,37 @@ Options:
 
 Commands:
   init --workspace <dir>  Initialize a Workspace
-  dev --workspace <dir>   Start the unified UIUX Workbench/Nitro server
+  dev --workspace <dir>   Start the unified UIUX Workbench/Nitro server on loopback
+                           only (127.0.0.1; PORT selects the port, default 3000)
   publish --workspace <dir> --out <dir> [--base <path>] [--source-revision <rev>]
                            Publish a read-only static UIUX Workspace`)
+}
+
+// The first version is single-user and unauthenticated, so `uiux dev` is loopback-only and refuses
+// a non-loopback value in either HOST or NITRO_HOST. The packaged server applies the same allowlist
+// to its effective bind (src/server/loopback-guard.ts) as a backstop for direct `.output` runs.
+const LOOPBACK_BIND_HOSTS = new Map([
+	['127.0.0.1', '127.0.0.1'],
+	['localhost', 'localhost'],
+	['::1', '::1'],
+	['[::1]', '::1'],
+])
+
+function resolveLoopbackBindHost(env) {
+	let selected
+	for (const variable of ['NITRO_HOST', 'HOST']) {
+		const raw = env[variable]
+		if (raw === undefined || raw.trim() === '') continue
+		const normalized = LOOPBACK_BIND_HOSTS.get(raw.trim().toLowerCase())
+		if (!normalized) {
+			return {
+				ok: false,
+				message: `Refusing to listen on ${variable}=${raw}. UIUX serves the Workbench, /api and /mcp without authentication, so it listens on loopback only (127.0.0.1, ::1 or localhost). LAN exposure requires authentication, which is not yet available.`,
+			}
+		}
+		selected ??= normalized
+	}
+	return { ok: true, host: selected ?? '127.0.0.1' }
 }
 
 function parseWorkspaceArgument(args) {
@@ -91,12 +119,25 @@ async function runDev(workspaceArgument) {
 		return
 	}
 
+	const bind = resolveLoopbackBindHost(process.env)
+	if (!bind.ok) {
+		console.error(`uiux: ${bind.message}`)
+		process.exitCode = 2
+		return
+	}
+
 	const packageRoot = fileURLToPath(new URL('..', import.meta.url))
 	const serverEntry = resolve(packageRoot, '.output/server/index.mjs')
-	const child = spawn(process.execPath, [serverEntry], {
-		stdio: 'inherit',
-		env: { ...process.env, UIUX_WORKSPACE_ROOT: workspaceRoot, UIUX_PACKAGE_ROOT: packageRoot },
-	})
+	const env = {
+		...process.env,
+		HOST: bind.host,
+		NITRO_HOST: bind.host,
+		UIUX_WORKSPACE_ROOT: workspaceRoot,
+		UIUX_PACKAGE_ROOT: packageRoot,
+	}
+	delete env.NITRO_UNIX_SOCKET
+	console.log(`uiux: serving Workspace ${workspaceRoot} on loopback only (${bind.host}).`)
+	const child = spawn(process.execPath, [serverEntry], { stdio: 'inherit', env })
 	const forwardSignal = signal => {
 		if (child.exitCode === null && child.signalCode === null) child.kill(signal)
 	}

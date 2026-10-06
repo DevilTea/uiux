@@ -4,6 +4,7 @@ import type { McpHttpHandler } from '@modelcontextprotocol/server'
 import type { WorkspaceApplicationSession } from '../application/services/workspace-session'
 import { createWorkspaceApplicationSession } from '../application/services/workspace-session'
 import { createUiuxMcpHttpHandler } from '../mcp/server'
+import { formatOriginHost } from './loopback-guard'
 import { FileNativePersistence } from '../persistence/file-native'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 
@@ -29,7 +30,7 @@ export function resolveInternalServerOrigin(): string {
 	const port = process.env.NITRO_PORT || process.env.PORT || '3000'
 	const host = process.env.NITRO_HOST || process.env.HOST || '127.0.0.1'
 	const normalizedHost = (host === '0.0.0.0' || host === '::' || host === '') ? '127.0.0.1' : host
-	return `http://${normalizedHost}:${port}`
+	return `http://${formatOriginHost(normalizedHost)}:${port}`
 }
 
 export function createSelectedWorkspaceServerRuntime(root: string, options?: { serverOrigin?: string }): SelectedWorkspaceServerRuntime {
