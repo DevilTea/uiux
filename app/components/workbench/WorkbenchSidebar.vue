@@ -89,7 +89,7 @@ const createFlowOpen = ref(false)
     </div>
     <div
       class="shrink-0 pt-2"
-      :class="props.collapsed ? 'px-1.5' : 'px-2'"
+      :class="props.collapsed ? 'px-1' : 'px-2'"
     >
       <UNavigationMenu
         :items="primary"
@@ -237,7 +237,7 @@ const createFlowOpen = ref(false)
 
     <div
       class="shrink-0 border-t border-default pb-2"
-      :class="props.collapsed ? 'px-1.5' : 'px-2'"
+      :class="props.collapsed ? 'px-1' : 'px-2'"
     >
       <UNavigationMenu
         :items="secondary"

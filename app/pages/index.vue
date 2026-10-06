@@ -213,7 +213,7 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                     <button
                       v-else
                       type="button"
-                      class="text-highlighted hover:underline"
+                      class="text-highlighted hover:underline pointer-coarse:min-h-11"
                       :data-attention-part="part.key"
                       @click="part.onClick?.()"
                     >
