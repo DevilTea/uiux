@@ -93,7 +93,8 @@ The `feat/workbench-foundation` branch adds Workbench chrome i18n (en-US / zh-TW
 
 - Workspace files own the specification. The Workbench never holds duplicate canonical state, never silently repairs or auto-rebinds, and shows invalid, stale and missing states as repairable.
 - The Preview iframe owns rendering, hit testing and geometry. The Workbench owns all review chrome. Canonical captures exclude review UI.
-- Review anchors persist only `{ viewId, widgetId }` plus `variantNames`. A comment's click point is transient display data. A persisted, non-authoritative pin offset (Phase 2) is proposed and pending an architecture decision.
+- Review anchors persist only `{ viewId, widgetId }` plus `variantNames`, or `{ scope: "workspace" }` for feedback about the product as a whole (schemaVersion 3, no Variants, no pin). A comment's click point is transient display data; the persisted pin hint is non-authoritative.
+- A message's author may edit it until a later submission or resolution; every earlier version is kept on the message. An author may delete their own brand-new thread until someone engages; after that it can only be dismissed.
 - Only a human may resolve, and a resolution must reference the thread's current `ready-for-review` submission. An `open` thread is not resolved directly.
 - Mutations go through the shared domain services: the same semantics as MCP and HTTP, with `expectedRevision` conflicts surfaced to the user.
 - Stack: Nuxt 4 SPA, Nuxt UI 4, Tailwind CSS 4, a Nitro server, Lucide icons through Iconify, `@nuxtjs/i18n` for chrome strings, Node 24, pnpm. One public package. Nuxt UI components are used wherever one exists. No new Workspace schemas or external contracts without an accepted architecture decision.

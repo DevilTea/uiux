@@ -31,8 +31,8 @@ Sign in with the link `uiux dev` prints, then work from the sidebar (an icon rai
 
 - **Overview** answers "what needs me?": counts of threads waiting for review and open, and Views blocked from handoff. Its **Views** tab lists every View with Review, Checks, Evidence and Readiness columns; **Checks** lists findings (schema validation, translation reminders, Preview runtime warnings); **Activity** lists recent Review activity (comments, replies, submissions, resolutions). *Export handoff…* starts here.
 - **Views** opens a View on the canvas: the live Preview at its canonical viewport size, with Variant, Locale, Viewport and Theme selectors for the render context (independent of the Workbench's own language and theme). The left panel holds the Widget tree; the right panel has **Comments**, **Inspect** (the selected Widget), **Spec** (intent, rules, constraints, accessibility, references, Decisions) and **Readiness** (does it validate, is its Evidence fresh, are its Reviews closed, can it be handed off; capture Evidence and export from here).
-- **Comments** live on the canvas. Pick the Comment tool (`C`) and click a Widget to drop a pin and write; pins open their thread in place. A thread can be replied to, resolved (humans only, in the Workbench), reopened, re-anchored, promoted to a Decision, or submitted for review with change domains and fresh formal Evidence (*Submit for review…*).
-- **Reviews** is the inbox for every thread: `ready-for-review` first, then `open`, newest activity first, resolved hidden unless asked for. Filter by View, anchor state, Variant scope, change domain and author, and search. Each thread shows one timeline of messages, re-anchors, submissions and lifecycle events, and deep-links to its exact View and render context. `J`/`K` move between threads, `R` replies, `E` resolves, `O` opens the thread on the canvas.
+- **Comments** live on the canvas. Pick the Comment tool (`C`) and click a Widget to drop a pin and write; pins open their thread in place. A thread can be replied to, resolved (humans only, in the Workbench), reopened, re-anchored, promoted to a Decision, or submitted for review with change domains and fresh formal Evidence (*Submit for review…*). Feedback about the product as a whole is a **Workspace comment**: *New comment* in Reviews, or *Comment on Workspace* in `⌘K`; it never appears on a canvas. You can edit your own messages until a later submission or resolution (they show "· edited" with their Edit history), and delete your own brand-new comment until someone engages with it. The Resolve menu has two groups: **Resolve** (Answered, Verified) and **Dismiss** (No longer relevant, Duplicate, Won't do); dismissed threads leave the canvas.
+- **Reviews** is the inbox for every thread: `ready-for-review` first, then `open`, newest activity first, resolved hidden unless asked for (*Resolved* is Verified and Answered; *Dismissed* is its own tab). Filter by View (or *Workspace*), anchor state, Variant scope, change domain and author, and search. Each thread shows one timeline of messages, re-anchors, submissions and lifecycle events, and deep-links to its exact View and render context. `J`/`K` move between threads, `R` replies, `E` resolves, `O` opens the thread on the canvas.
 - **UX Flows** are graphs of steps (a View, optionally a Variant) joined by transitions (a Widget event). Edit them on desktop; *Play prototype* runs the Flow as a clickable prototype on any device.
 - **Workspace** (Settings, Locales, Assets, Adapters) holds the secondary authoring pages, and **Members** (Owners, from the member menu at the top right) manages the roster, tokens and sessions.
 
@@ -47,7 +47,7 @@ MCP exposes compact read-only discovery plus domain-specific authoring operation
 - Workspace settings: `update_workspace_settings`
 - Locales: `create_locale`, `update_locale`
 - UX Flows: `create_flow`, `update_flow`
-- Reviews: `create_review_thread`, `append_review_message`, `reanchor_review_thread`, `set_review_display_hint`, `submit_ready_for_review`, `resolve_review_thread`, `reopen_review_thread`, `promote_review_to_decision`
+- Reviews: `create_review_thread`, `append_review_message`, `edit_review_message`, `reanchor_review_thread`, `set_review_display_hint`, `submit_ready_for_review`, `resolve_review_thread`, `reopen_review_thread`, `promote_review_to_decision`, `retract_review_thread`
 - Authored Assets: `create_asset`, `replace_asset`
 - Agent edit leases: `acquire_lock`, `release_lock`
 
@@ -55,7 +55,13 @@ These are domain-specific operations rather than generic Resource writes or JSON
 
 When the Workspace is momentarily busy (another UIUX operation holds the persistence lock past its wait budget), `/api/*` answers `503` with `Retry-After` and the retryable code `persistence.busy`; on `/mcp` a tool returns the same code as an error result and a resource read as a JSON-RPC error. Nothing was read or written, so the same request can be retried. The Workbench retries reads once on its own. Handoff assessment, Handoff export and formal capture on a Workspace that still needs `uiux migrate` return `422` `blocked` with `workspace.migration_required`.
 
-Resolving a Review thread is a human act performed in the Workbench (`POST /api/reviews/:id/resolve`). `resolve_review_thread` stays registered on `/mcp` but always refuses with guidance: agents reply on the thread or submit it ready for review. A resolution is `verified` (accepts the evidence-gated ready-for-review submission) or closes the thread without a verified change: `answered`, `wont-fix`, `duplicate` (requires a reason) or `obsolete`.
+Resolving a Review thread is a human act performed in the Workbench (`POST /api/reviews/:id/resolve`). `resolve_review_thread` stays registered on `/mcp` but always refuses with guidance: agents reply on the thread or submit it ready for review. A resolution is `verified` (accepts the evidence-gated ready-for-review submission) or closes the thread without a verified change: `answered`, `wont-fix`, `duplicate` (requires a reason) or `obsolete`. The Workbench groups the last three as *Dismiss*; the resolution values are unchanged.
+
+A Review anchor is either a Widget `{ viewId, widgetId }` (`widgetId: "root"` for a whole View) or the Workspace `{ scope: "workspace" }` (schemaVersion 3), for feedback about the product as a whole. Workspace threads take `variantNames: []` and no display hint, can be re-anchored to and from a Widget, cannot be promoted to a Decision (`review.decision_target_unavailable`), and submit against the current Workspace manifest revision plus every View they name. An open Workspace thread blocks `implementation-ready` for every Handoff root; `coverage.review.workspaceThreads` counts them. `list_resources` and `search_resources` (and `POST /api/resources/list|search`) accept `anchorScope: ["workspace" | "view"]`.
+
+Authors, humans and agents alike, have two more operations on their own words, on both transports:
+- `edit_review_message` / `PUT /api/reviews/:id/messages/:messageId` `{ expectedRevision, body }` replaces the text of your own message; the previous text is kept in the message's `edits[]`. It refuses `review.message_edit_not_author` (someone else's, or a message written before authors were identified), `review.message_edit_after_formal_act` (a later ready-for-review submission or resolution exists; reopening does not lift it), `review.message_body_empty` and `review.message_edit_noop`.
+- `retract_review_thread` / `DELETE /api/reviews/:id` `{ expectedRevision }` permanently deletes your own brand-new thread: open, only your one message, no history, submissions or promoted Decision. It answers `200 { status: "deleted" }`, or refuses with `review.retract_not_author` or `review.retract_engaged` and a `reason` (`status`, `messages`, `history`, `submissions` or `promoted`); an engaged thread can only be dismissed. An empty thread with no messages can be retracted by any Reviewer.
 
 ### Members, roles and tokens
 
@@ -119,6 +125,8 @@ A Workspace records its format in `.uiux/workspace.json` `schemaVersion`. An old
 uiux migrate --workspace ./design --dry-run   # print the steps and changed files, write nothing
 uiux migrate --workspace ./design             # apply atomically and print the new manifest revision
 ```
+
+The current format is `schemaVersion` 3. Steps chain: `uiux.v1-to-v2` (resolution kinds, pin hints) then `uiux.v2-to-v3` (Workspace-scoped threads and editable messages; it changes only the manifest), so a version 1 Workspace migrates in one run. `uiux init` writes version 3.
 
 `uiux migrate` refuses while a running UIUX server holds the Workspace; stop `uiux dev` first. There is no MCP or HTTP migration entrypoint.
 
