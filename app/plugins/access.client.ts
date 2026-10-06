@@ -1,6 +1,7 @@
 import { defineNuxtPlugin, navigateTo, useRouter, useRuntimeConfig } from '#imports'
 import { useAccess } from '../composables/useAccess'
 import { useConnectivity } from '../composables/useConnectivity'
+import { isRetryableRead, shouldRetryRead, transientRetryDelay } from '../utils/fetch-retry'
 
 /**
  * Watches every Workbench API response at the native `fetch` layer that ofetch delegates to.
@@ -13,6 +14,9 @@ import { useConnectivity } from '../composables/useConnectivity'
  *   request own their 401: for them it is the expected signed-out answer, handled by their callers.
  * - A request that gets no response at all reports the server unreachable (brief h); any response
  *   reports it reachable again.
+ * - A read answered `503` (`persistence.busy`: the Workspace was momentarily busy and nothing was
+ *   read) is retried once after the server's `Retry-After`, capped and jittered. Writes are never
+ *   retried here; their callers show the transient error instead.
  *
  * The `/preview` document is left alone: it reports failures inside its own frame.
  */
@@ -46,9 +50,16 @@ export default defineNuxtPlugin({
 		window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
 			const path = requestPath(input)
 			const api = path.startsWith('/api/')
+			const retryable = api && isRetryableRead(path, input, init)
+			// A Request body can be read only once; keep a copy for the retry.
+			const retryInput = retryable && input instanceof Request ? input.clone() : input
 			let response: Response
 			try {
 				response = await nativeFetch(input, init)
+				if (retryable && shouldRetryRead(response) && !init?.signal?.aborted) {
+					await new Promise(resolve => setTimeout(resolve, transientRetryDelay(response)))
+					response = await nativeFetch(retryInput, init)
+				}
 			}
 			catch (cause) {
 				if (api && (cause as { name?: string } | undefined)?.name !== 'AbortError') connectivity.markUnreachable()

@@ -19,6 +19,7 @@ import type { WorkspaceAdapterSelection, ThemeEntry, ViewportPreset } from '../d
 import { isSha256Digest, type JsonObject } from '../domain/validation'
 import type { ResolvedRenderContext } from '../domain/render-context/schema'
 import type { HandoffRoot } from '../domain/handoff/schema'
+import { isPersistenceBusyError, persistenceBusyResult } from '../persistence/busy'
 import { parsePointResourceUri, pointResourceUri } from './resource-uri'
 
 const dynamicKinds = ['view', 'flow', 'locale', 'review', 'asset'] as const satisfies readonly PointResourceKind[]
@@ -294,7 +295,7 @@ export function uiuxMcpInstructions(principal: Principal): string {
 }
 
 export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
-	const server = new McpServer({ name: '@deviltea/uiux', version: packageJson.version }, { instructions: uiuxMcpInstructions(app.principal) })
+	const server = mapPersistenceBusy(new McpServer({ name: '@deviltea/uiux', version: packageJson.version }, { instructions: uiuxMcpInstructions(app.principal) }))
 	server.registerResource(
 		'workspace',
 		pointResourceUri({ kind: 'workspace', key: 'workspace' }),
@@ -795,6 +796,42 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		},
 	)
 
+	return server
+}
+
+/**
+ * Every tool and resource callback registered on `server` answers a persistence lock timeout with
+ * the coded, retryable `persistence.busy` instead of an opaque failure: a tool returns it as an
+ * error result (`structuredContent.code`), a resource read as a JSON-RPC internal error whose data
+ * is the same result.
+ */
+function mapPersistenceBusy(server: McpServer): McpServer {
+	type Callback = (...args: unknown[]) => unknown
+	const registerTool = server.registerTool.bind(server) as (...args: unknown[]) => unknown
+	const registerResource = server.registerResource.bind(server) as (...args: unknown[]) => unknown
+	const guard = (callback: Callback, onBusy: () => unknown): Callback => async (...args) => {
+		try {
+			return await callback(...args)
+		}
+		catch (error) {
+			if (!isPersistenceBusyError(error)) throw error
+			return onBusy()
+		}
+	}
+	server.registerTool = ((...args: unknown[]) => {
+		const callback = args.pop() as Callback
+		return registerTool(...args, guard(callback, () => {
+			const busy = persistenceBusyResult()
+			return { content: [{ type: 'text' as const, text: JSON.stringify(busy) }], structuredContent: busy, isError: true }
+		}))
+	}) as typeof server.registerTool
+	server.registerResource = ((...args: unknown[]) => {
+		const callback = args.pop() as Callback
+		return registerResource(...args, guard(callback, () => {
+			const busy = persistenceBusyResult()
+			throw new ProtocolError(ProtocolErrorCode.InternalError, `${busy.code}: ${busy.message}`, busy)
+		}))
+	}) as typeof server.registerResource
 	return server
 }
 

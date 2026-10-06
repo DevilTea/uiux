@@ -19,6 +19,11 @@ export type FetchErrorDetails = Readonly<{
 	status?: string
 	/** The edit lease that refused the write: `423 resource.locked` (accepted identity decision 11). */
 	lock?: FetchErrorLock
+	/**
+	 * The server was momentarily busy (`503 persistence.busy`): nothing was read or changed and the
+	 * same request can simply be tried again.
+	 */
+	transient?: boolean
 }>
 
 /** Who holds the edit lease on the resource, and until when. */
@@ -29,6 +34,14 @@ export function isLockedError(details: FetchErrorDetails): boolean {
 	return details.statusCode === 423 || details.status === 'locked'
 }
 
+/** True when the failure was transient (`503 persistence.busy`) and the request can be retried as is. */
+export function isTransientError(details: FetchErrorDetails): boolean {
+	return details.transient === true
+}
+
+/** HTTP statuses the Workbench retries once for reads; the server sends `Retry-After` with them. */
+export const TRANSIENT_HTTP_STATUSES: ReadonlySet<number> = new Set([503])
+
 export function describeFetchError(cause: unknown, fallback: string): FetchErrorDetails {
 	const record = isRecord(cause) ? cause : undefined
 	const statusCode = numberField(record, 'statusCode') ?? numberField(record, 'status')
@@ -38,6 +51,9 @@ export function describeFetchError(cause: unknown, fallback: string): FetchError
 	const bodyMessage = stringField(bodyRecord, 'message') ?? stringField(bodyRecord, 'statusMessage')
 	const status = stringField(bodyRecord, 'status')
 	const lock = lockField(bodyRecord)
+	const transient = (statusCode !== undefined && TRANSIENT_HTTP_STATUSES.has(statusCode))
+		|| stringField(bodyRecord, 'code') === 'persistence.busy'
+		|| bodyRecord?.retryable === true
 
 	const message = bodyMessage
 		?? diagnostics[0]?.message
@@ -50,6 +66,7 @@ export function describeFetchError(cause: unknown, fallback: string): FetchError
 		...(statusCode !== undefined ? { statusCode } : {}),
 		...(status ? { status } : {}),
 		...(lock ? { lock } : {}),
+		...(transient ? { transient: true } : {}),
 	})
 }
 

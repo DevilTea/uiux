@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { defineNuxtConfig } from 'nuxt/config'
 
 const publicationMode = process.env.UIUX_PUBLICATION_MODE === '1'
@@ -67,6 +68,14 @@ export default defineNuxtConfig({
 		'@fontsource/jetbrains-mono/latin-ext-500.css',
 		'~/assets/css/main.css',
 	],
+	hooks: {
+		// `server/error.ts` answers `persistence.busy` as a retryable 503 and otherwise falls through
+		// to Nuxt's own error handler, so it must run first in Nitro's error handler chain.
+		'nitro:config'(config) {
+			const existing = config.errorHandler ? [config.errorHandler].flat() : []
+			config.errorHandler = [fileURLToPath(new URL('./server/error.ts', import.meta.url)), ...existing]
+		},
+	},
 	nitro: {
 		preset: publicationMode ? 'static' : 'node-server',
 		...(publicationOutput ? { output: { dir: publicationOutput } } : {}),
