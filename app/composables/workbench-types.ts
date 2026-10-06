@@ -85,8 +85,6 @@ export type ViewRead = Readonly<{
 	}
 }>
 
-export type SpecTab = 'spec' | 'references' | 'decisions' | 'checks'
-
 /** Right-panel tabs of a View page (brief e). */
 export type ViewPanelTab = 'comments' | 'inspect' | 'spec' | 'readiness'
 

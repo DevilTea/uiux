@@ -2,21 +2,14 @@
   "assets": {
     "title": "Asset",
     "subtitle": "View 引用的圖片與檔案",
-    "newAsset": "新增 Asset",
-    "listLabel": "Workspace Asset",
     "unnamedAsset": "未命名 Asset",
-    "diagnosticCount": "沒有診斷 | {n} 項診斷 | {n} 項診斷",
     "emptyTitle": "尚無 Asset",
     "emptyDescription": "上傳圖片或檔案，即可在 View 中使用。",
     "emptyDescriptionReadOnly": "此快照沒有 Asset。",
-    "selectPrompt": "選取 Asset 以檢視詳細資料與預覽。",
     "loadListFailed": "無法載入 Asset。",
-    "loadDetailFailed": "無法載入此 Asset。",
-    "unavailable": "此 Asset 無法使用。",
     "notSet": "未設定",
     "fields": {
       "file": "檔案",
-      "replacementFile": "新檔案",
       "name": "名稱",
       "filename": "檔名",
       "mediaType": "媒體類型",
@@ -30,30 +23,20 @@
     "mediaTypeHelp": "依檔案自動偵測，預設為 application/octet-stream。",
     "fileUploadLabel": "拖放檔案，或按一下以瀏覽",
     "fileUploadDescription": "支援任何檔案類型，圖片可預覽。",
-    "preview": "預覽",
     "previewAlt": "{name} 的預覽",
-    "noPreviewTitle": "無法預覽",
     "noPreviewDescription": "僅支援預覽圖片，此檔案為 {mediaType}。",
     "download": "下載",
-    "replaceContent": "取代檔案",
     "createTitle": "上傳 Asset",
     "createDescription": "在此 Workspace 新增圖片或檔案。",
-    "saveAsset": "儲存 Asset",
     "created": "已建立 Asset「{name}」。",
     "createFailed": "無法建立 Asset。",
-    "replaceTitle": "取代檔案",
-    "replaceDescription": "為「{name}」上傳新檔案。若期間有其他人變更此 Asset，將無法儲存。",
     "commitReplacement": "取代內容",
     "replaced": "已取代檔案。",
-    "replaceFailed": "無法取代檔案。",
     "conflictTitle": "開啟後這個 Asset 已有變更。",
-    "conflictDescription": "你開啟後有其他人更新了此 Asset。請重新載入，再取代一次檔案。",
     "validation": {
       "fileRequired": "請選擇要上傳的檔案。",
-      "replacementFileRequired": "請選擇新檔案。",
       "nameRequired": "請輸入名稱。",
-      "filenameRequired": "請輸入檔名。",
-      "fileNotReady": "仍在讀取檔案，請稍候再試。"
+      "filenameRequired": "請輸入檔名。"
     },
     "upload": "上傳",
     "replace": "取代內容…",
@@ -92,7 +75,6 @@
     "copyValue": "複製{label}"
   },
   "checks": {
-    "title": "Checks",
     "run": "執行 Checks",
     "running": "正在執行 Checks…",
     "notRun": "尚未執行。 | 尚未執行。清單回報 {n} 個問題。 | 尚未執行。清單回報 {n} 個問題。",
@@ -118,17 +100,10 @@
   },
   "common": {
     "add": "新增",
-    "back": "返回",
     "cancel": "取消",
     "close": "關閉",
-    "create": "建立",
-    "delete": "刪除",
     "dismiss": "關閉",
-    "edit": "編輯",
-    "loading": "載入中…",
-    "none": "無",
     "refresh": "重新整理",
-    "reload": "重新載入",
     "remove": "移除",
     "retry": "重試",
     "save": "儲存",
@@ -136,8 +111,6 @@
     "unnamed": "未命名",
     "readOnly": "唯讀",
     "revision": "修訂版本",
-    "errorTitle": "發生錯誤",
-    "unexpectedError": "發生未預期的錯誤。",
     "editOnDesktop": "請在桌面版編輯"
   },
   "evidence": {
@@ -423,41 +396,23 @@
   },
   "locales": {
     "title": "Workspace Locale",
-    "subtitle": "預覽產品的翻譯，與 Workbench 介面語言分開設定。",
     "newLocale": "新增 Locale",
-    "listLabel": "Workspace Locale",
-    "stringCount": "沒有字串 | {n} 個字串 | {n} 個字串",
-    "diagnosticCount": "沒有診斷 | {n} 項診斷 | {n} 項診斷",
-    "defaultBadge": "預設",
     "emptyTitle": "尚無 Locale",
     "emptyDescription": "新增主要 Locale 以開始翻譯。",
     "emptyDescriptionReadOnly": "此快照沒有 Locale。",
-    "selectPrompt": "選取 Locale 以編輯其字串。",
     "loadListFailed": "無法載入 Locale。",
-    "loadDetailFailed": "無法載入此 Locale。",
-    "unavailable": "此 Locale 無法使用。",
     "defaultMissing": {
       "title": "主要 Locale 沒有檔案",
       "description": "{locale} 是主要 Locale，但還沒有檔案。",
       "action": "建立 Locale"
     },
-    "searchLabel": "搜尋鍵與字串",
-    "searchPlaceholder": "搜尋鍵或字串…",
-    "unsaved": "尚未儲存",
-    "valuePlaceholder": "翻譯",
     "removeKey": "移除鍵",
     "removeKeyLabel": "移除鍵 {key}",
     "noMatches": "沒有符合的鍵。",
-    "noMessages": "尚無字串。",
     "newKeyLabel": "新鍵",
-    "newValueLabel": "字串",
     "addKey": "新增鍵",
     "saved": "已儲存 Locale {locale}。",
     "saveFailed": "無法儲存 Locale。",
-    "conflict": {
-      "title": "Locale 已在其他地方變更",
-      "description": "你開啟後有其他人更新了它。請重新載入以取得最新版本，尚未儲存的編輯將會捨棄。"
-    },
     "create": {
       "title": "新增 Locale",
       "description": "為預覽產品建立 Locale 檔案。",
@@ -565,26 +520,11 @@
       "locale": "Locale",
       "viewport": "檢視區",
       "theme": "預覽主題",
-      "baseVariant": "基礎",
-      "defaultLocaleOption": "{locale}（預設）",
       "defaultViewportName": "預設",
-      "viewportOption": "{name} · {width}×{height}",
       "defaultThemeOption": "預設（{theme}）",
       "noVariantsHint": "此 View 沒有 Variant。",
       "noViewportsHint": "此 Workspace 沒有檢視區預設集，使用 1280 × 800。",
-      "noThemesHint": "此 Workspace 沒有主題。主題只影響預覽的 View，不影響 Workbench。",
-      "themeHint": "用來渲染預覽 View 的主題，與 Workbench 外觀分開設定。"
-    },
-    "session": {
-      "label": "預覽：{phase}",
-      "idle": "無 View",
-      "initiating": "連線中",
-      "open": "已連線",
-      "failed": "失敗",
-      "idleHint": "尚未開啟 View。",
-      "initiatingHint": "正在連線至預覽…",
-      "openHint": "預覽已連線。",
-      "failedHint": "預覽無法連線，請重新整理。"
+      "noThemesHint": "此 Workspace 沒有主題。主題只影響預覽的 View，不影響 Workbench。"
     },
     "views": {
       "title": "View",
@@ -607,63 +547,11 @@
     "canvas": {
       "label": "預覽畫布",
       "title": "預覽畫布",
-      "dimensions": "{width} × {height} px",
-      "comment": "留言",
-      "commentActive": "留言中",
-      "commentHint": "點選預覽中的 Widget 即可留言。",
-      "commentDisabledHint": "請先選取 View 才能留言。",
-      "scale": "{percent}%",
-      "scaleHint": "畫布縮放比例。預覽會維持精確的檢視區尺寸。",
       "iframeTitle": "{name} 的預覽",
       "noSelectionTitle": "尚未選取 View",
       "noSelectionDescription": "從清單中選取 View 以預覽。",
       "noViewsTitle": "尚無 View",
       "noViewsDescription": "請使用 MCP 的 {tool} 工具建立 View，建立後就會顯示在這裡。"
-    },
-    "spec": {
-      "label": "View Spec",
-      "tabs": {
-        "spec": "Spec",
-        "references": "參考資料",
-        "decisions": "Decision",
-        "checks": "檢查"
-      },
-      "noView": "請選取 View 以檢視其 Spec。",
-      "intent": "意圖",
-      "noIntent": "尚無意圖。",
-      "entryConditions": "進入條件 | 進入條件（{n}） | 進入條件（{n}）",
-      "interactionRules": "互動規則 | 互動規則（{n}） | 互動規則（{n}）",
-      "noReferences": "此 View 沒有參考資料。",
-      "opensInNewTab": "（在新分頁開啟）",
-      "noDecisions": "此 View 沒有 Decision。",
-      "outcome": "結果：",
-      "historyEvents": "沒有歷程事件 | {n} 筆歷程事件 | {n} 筆歷程事件",
-      "decisionStatus": {
-        "pending": "待定",
-        "deferred": "延後",
-        "decided": "已決定"
-      },
-      "jumpToWidget": "選取 #{id}",
-      "unresolvedLocation": "無位置",
-      "allChecksPassed": "所有檢查皆已通過。"
-    },
-    "inspector": {
-      "title": "屬性面板",
-      "view": "View",
-      "selectedWidget": "已選取的 Widget",
-      "identity": "識別碼",
-      "type": "類型",
-      "slot": "插槽",
-      "depth": "深度",
-      "stateOverrides": "Variant 狀態覆寫",
-      "noStateOverrides": "此 Widget 在目前 Variant 中沒有狀態覆寫。",
-      "findings": "Widget 問題",
-      "cleanWidget": "此 Widget 沒有問題",
-      "viewMetadata": "View 詳細資料",
-      "id": "ID",
-      "variants": "Variant",
-      "emptyTitle": "尚未選取任何項目",
-      "emptyDescription": "選取 View 或 Widget 以檢視。"
     },
     "errors": {
       "title": "無法載入 Workbench 資料",
@@ -720,13 +608,7 @@
   },
   "identity": {
     "commentingAs": "以 {name} 的身分留言",
-    "setName": "設定你的名稱",
-    "noName": "尚未設定名稱",
-    "change": "變更名稱",
-    "title": "你的名稱",
-    "description": "會顯示在你於此瀏覽器中的留言與 Review 操作上。",
-    "nameLabel": "顯示名稱",
-    "placeholder": "例如：林美"
+    "setName": "設定你的名稱"
   },
   "publication": {
     "banner": "已發佈的快照・唯讀",
@@ -1017,7 +899,6 @@
     "theirs": "已儲存的版本",
     "mine": "你的草稿",
     "loadingTheirs": "正在讀取已儲存的版本…",
-    "theirsMissing": "無法讀取此 View，可能已被移除。",
     "outcome": "結果：",
     "rationale": "理由：",
     "opensInNewTab": "（在新分頁開啟）",
@@ -1392,7 +1273,6 @@
       "recoverTitle": "沒有連結？",
       "recover": "在主機上執行 {command} 以取得新的單次登入連結。",
       "plainHttp": "此頁面使用未加密的 HTTP。同一網路上的任何人都能擷取並重複使用登入連結、工作階段 cookie 與 LAN token。",
-      "workspaceLabel": "Workspace 名冊 {hint}",
       "errors": {
         "invalid": "此連結或 token 對這個 Workspace 無效。登入連結只能使用一次，並於 24 小時後失效。",
         "rateLimited": "此位址的失敗嘗試過多，請稍候一分鐘再試。",
@@ -1411,7 +1291,6 @@
     },
     "chip": {
       "label": "已以 {nickname}（{role}）登入",
-      "signedInAs": "目前登入",
       "members": "成員",
       "signOut": "登出",
       "signedOut": "已登出。"
@@ -1422,7 +1301,6 @@
       "subtitle": "誰能開啟這個 Workspace，以及各自的角色。",
       "rosterLabel": "名冊 {hint}",
       "rosterHelp": "儲存在這台主機上，不會進入 Workspace 或 Git。",
-      "ownerOnly": "只有 Owner 能管理成員。",
       "add": "新增成員",
       "addTitle": "新增成員",
       "addDescription": "之後可以給人員登入連結，或給 Agent 一個 token。",
@@ -1481,8 +1359,7 @@
     },
     "invites": {
       "title": "{nickname} 的登入連結",
-      "description": "只能使用一次，於 {time} 失效。它會讓一個瀏覽器以 {nickname} 登入。",
-      "humansOnly": "Agent 以 token 登入，而非連結。"
+      "description": "只能使用一次，於 {time} 失效。它會讓一個瀏覽器以 {nickname} 登入。"
     },
     "sessions": {
       "title": "工作階段",

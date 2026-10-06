@@ -2,21 +2,14 @@
   "assets": {
     "title": "Assets",
     "subtitle": "Images and files referenced by Views",
-    "newAsset": "New Asset",
-    "listLabel": "Workspace Assets",
     "unnamedAsset": "Unnamed Asset",
-    "diagnosticCount": "No diagnostics | {n} diagnostic | {n} diagnostics",
     "emptyTitle": "No Assets yet",
     "emptyDescription": "Upload an image or file to use it in Views.",
     "emptyDescriptionReadOnly": "No Assets in this snapshot.",
-    "selectPrompt": "Select an Asset to see its details and preview.",
     "loadListFailed": "Could not load Assets.",
-    "loadDetailFailed": "Could not load this Asset.",
-    "unavailable": "This Asset is unavailable.",
     "notSet": "Not set",
     "fields": {
       "file": "File",
-      "replacementFile": "New file",
       "name": "Name",
       "filename": "Filename",
       "mediaType": "Media type",
@@ -30,30 +23,20 @@
     "mediaTypeHelp": "Detected from the file. Defaults to application/octet-stream.",
     "fileUploadLabel": "Drop a file or click to browse",
     "fileUploadDescription": "Any file type. Images show a preview.",
-    "preview": "Preview",
     "previewAlt": "Preview of {name}",
-    "noPreviewTitle": "No preview",
     "noPreviewDescription": "Only images can be previewed. This file is {mediaType}.",
     "download": "Download",
-    "replaceContent": "Replace file",
     "createTitle": "Upload Asset",
     "createDescription": "Add an image or file to this Workspace.",
-    "saveAsset": "Save Asset",
     "created": "Asset “{name}” created.",
     "createFailed": "Could not create the Asset.",
-    "replaceTitle": "Replace file",
-    "replaceDescription": "Upload a new file for “{name}”. Saving fails if someone changed the Asset in the meantime.",
     "commitReplacement": "Replace content",
     "replaced": "File replaced.",
-    "replaceFailed": "Could not replace the file.",
     "conflictTitle": "This Asset changed since you opened it.",
-    "conflictDescription": "Someone updated this Asset after you opened it. Reload, then replace the file again.",
     "validation": {
       "fileRequired": "Choose a file to upload.",
-      "replacementFileRequired": "Choose a new file.",
       "nameRequired": "Enter a name.",
-      "filenameRequired": "Enter a filename.",
-      "fileNotReady": "Still reading the file. Try again in a moment."
+      "filenameRequired": "Enter a filename."
     },
     "upload": "Upload",
     "replace": "Replace content…",
@@ -92,7 +75,6 @@
     "copyValue": "Copy {label}"
   },
   "checks": {
-    "title": "Checks",
     "run": "Run Checks",
     "running": "Running Checks…",
     "notRun": "Not run yet. | Not run yet. Listings report {n} finding. | Not run yet. Listings report {n} findings.",
@@ -118,17 +100,10 @@
   },
   "common": {
     "add": "Add",
-    "back": "Back",
     "cancel": "Cancel",
     "close": "Close",
-    "create": "Create",
-    "delete": "Delete",
     "dismiss": "Dismiss",
-    "edit": "Edit",
-    "loading": "Loading…",
-    "none": "None",
     "refresh": "Refresh",
-    "reload": "Reload",
     "remove": "Remove",
     "retry": "Retry",
     "save": "Save",
@@ -136,8 +111,6 @@
     "unnamed": "Unnamed",
     "readOnly": "Read-only",
     "revision": "Revision",
-    "errorTitle": "Something went wrong",
-    "unexpectedError": "An unexpected error occurred.",
     "editOnDesktop": "Edit on desktop"
   },
   "evidence": {
@@ -423,41 +396,23 @@
   },
   "locales": {
     "title": "Workspace Locales",
-    "subtitle": "Translations for the previewed product. The Workbench language is set separately.",
     "newLocale": "New Locale",
-    "listLabel": "Workspace Locales",
-    "stringCount": "No strings | {n} string | {n} strings",
-    "diagnosticCount": "No diagnostics | {n} diagnostic | {n} diagnostics",
-    "defaultBadge": "Default",
     "emptyTitle": "No Locales yet",
     "emptyDescription": "Add the primary Locale to start translating.",
     "emptyDescriptionReadOnly": "No Locales in this snapshot.",
-    "selectPrompt": "Select a Locale to edit its strings.",
     "loadListFailed": "Could not load Locales.",
-    "loadDetailFailed": "Could not load this Locale.",
-    "unavailable": "This Locale is unavailable.",
     "defaultMissing": {
       "title": "Primary Locale has no file",
       "description": "{locale} is the primary Locale but has no file yet.",
       "action": "Create Locale"
     },
-    "searchLabel": "Search keys and strings",
-    "searchPlaceholder": "Search keys or strings…",
-    "unsaved": "Unsaved changes",
-    "valuePlaceholder": "Translation",
     "removeKey": "Remove key",
     "removeKeyLabel": "Remove key {key}",
     "noMatches": "No matching keys.",
-    "noMessages": "No strings yet.",
     "newKeyLabel": "New key",
-    "newValueLabel": "String",
     "addKey": "Add key",
     "saved": "Locale {locale} saved.",
     "saveFailed": "Could not save the Locale.",
-    "conflict": {
-      "title": "Locale changed elsewhere",
-      "description": "Someone updated it after you opened it. Reload to get the latest version. Unsaved edits will be lost."
-    },
     "create": {
       "title": "New Locale",
       "description": "Creates a Locale file for the previewed product.",
@@ -565,26 +520,11 @@
       "locale": "Locale",
       "viewport": "Viewport",
       "theme": "Preview theme",
-      "baseVariant": "Base",
-      "defaultLocaleOption": "{locale} (default)",
       "defaultViewportName": "Default",
-      "viewportOption": "{name} · {width}×{height}",
       "defaultThemeOption": "Default ({theme})",
       "noVariantsHint": "This View has no Variants.",
       "noViewportsHint": "No viewport presets in this Workspace. Using 1280 × 800.",
-      "noThemesHint": "No themes in this Workspace. Themes change only the previewed View, not the Workbench.",
-      "themeHint": "Theme used to render the previewed View. Separate from the Workbench appearance."
-    },
-    "session": {
-      "label": "Preview: {phase}",
-      "idle": "No View",
-      "initiating": "Connecting",
-      "open": "Connected",
-      "failed": "Failed",
-      "idleHint": "No View is open.",
-      "initiatingHint": "Connecting to the preview…",
-      "openHint": "The preview is connected.",
-      "failedHint": "The preview could not connect. Try refreshing."
+      "noThemesHint": "No themes in this Workspace. Themes change only the previewed View, not the Workbench."
     },
     "views": {
       "title": "Views",
@@ -607,63 +547,11 @@
     "canvas": {
       "label": "Preview canvas",
       "title": "Preview canvas",
-      "dimensions": "{width} × {height} px",
-      "comment": "Comment",
-      "commentActive": "Commenting",
-      "commentHint": "Click a Widget in the preview to comment on it.",
-      "commentDisabledHint": "Select a View to comment.",
-      "scale": "{percent}%",
-      "scaleHint": "Canvas zoom. The preview keeps its exact viewport size.",
       "iframeTitle": "Preview of {name}",
       "noSelectionTitle": "No View selected",
       "noSelectionDescription": "Select a View from the list to preview it.",
       "noViewsTitle": "No Views yet",
       "noViewsDescription": "Create a View with the MCP {tool} tool. It appears here once created."
-    },
-    "spec": {
-      "label": "View Spec",
-      "tabs": {
-        "spec": "Spec",
-        "references": "References",
-        "decisions": "Decisions",
-        "checks": "Checks"
-      },
-      "noView": "Select a View to see its Spec.",
-      "intent": "Intent",
-      "noIntent": "No intent yet.",
-      "entryConditions": "Entry conditions | Entry condition ({n}) | Entry conditions ({n})",
-      "interactionRules": "Interaction rules | Interaction rule ({n}) | Interaction rules ({n})",
-      "noReferences": "No references for this View.",
-      "opensInNewTab": "(opens in a new tab)",
-      "noDecisions": "No Decisions for this View.",
-      "outcome": "Outcome:",
-      "historyEvents": "No history events | {n} history event | {n} history events",
-      "decisionStatus": {
-        "pending": "Pending",
-        "deferred": "Deferred",
-        "decided": "Decided"
-      },
-      "jumpToWidget": "Select #{id}",
-      "unresolvedLocation": "No location",
-      "allChecksPassed": "All checks passed."
-    },
-    "inspector": {
-      "title": "Inspector",
-      "view": "View",
-      "selectedWidget": "Selected Widget",
-      "identity": "Identity",
-      "type": "Type",
-      "slot": "Slot",
-      "depth": "Depth",
-      "stateOverrides": "Variant state overrides",
-      "noStateOverrides": "No state overrides for this Widget in this Variant.",
-      "findings": "Widget findings",
-      "cleanWidget": "No findings for this Widget",
-      "viewMetadata": "View details",
-      "id": "ID",
-      "variants": "Variants",
-      "emptyTitle": "Nothing selected",
-      "emptyDescription": "Select a View or Widget to inspect it."
     },
     "errors": {
       "title": "Could not load Workbench data",
@@ -720,13 +608,7 @@
   },
   "identity": {
     "commentingAs": "Commenting as {name}",
-    "setName": "Set your name",
-    "noName": "No name set",
-    "change": "Change name",
-    "title": "Your name",
-    "description": "Shown on comments and Review actions you make in this browser.",
-    "nameLabel": "Display name",
-    "placeholder": "e.g. Mei Lin"
+    "setName": "Set your name"
   },
   "publication": {
     "banner": "Published snapshot · read-only",
@@ -1017,7 +899,6 @@
     "theirs": "Saved version",
     "mine": "Your draft",
     "loadingTheirs": "Reading the saved version…",
-    "theirsMissing": "The View couldn't be read. It may have been removed.",
     "outcome": "Outcome:",
     "rationale": "Rationale:",
     "opensInNewTab": "(opens in a new tab)",
@@ -1392,7 +1273,6 @@
       "recoverTitle": "No link?",
       "recover": "On the host, run {command} for a fresh single-use link.",
       "plainHttp": "This page uses plain HTTP. Anyone on this network can capture sign-in links, session cookies and LAN tokens and reuse them.",
-      "workspaceLabel": "Workspace roster {hint}",
       "errors": {
         "invalid": "That link or token is not valid for this Workspace. Sign-in links work once and expire after 24 hours.",
         "rateLimited": "Too many failed attempts from this address. Wait a minute and try again.",
@@ -1411,7 +1291,6 @@
     },
     "chip": {
       "label": "Signed in as {nickname}, {role}",
-      "signedInAs": "Signed in as",
       "members": "Members",
       "signOut": "Sign out",
       "signedOut": "Signed out."
@@ -1422,7 +1301,6 @@
       "subtitle": "Who can open this Workspace, and with which role.",
       "rosterLabel": "Roster {hint}",
       "rosterHelp": "Stored on this host, never in the Workspace or Git.",
-      "ownerOnly": "Only an Owner can manage members.",
       "add": "Add member",
       "addTitle": "Add a member",
       "addDescription": "Give a person a sign-in link afterwards, or an agent a token.",
@@ -1481,8 +1359,7 @@
     },
     "invites": {
       "title": "Sign-in link for {nickname}",
-      "description": "Single use, expires {time}. It signs one browser in as {nickname}.",
-      "humansOnly": "Agents sign in with a token, not a link."
+      "description": "Single use, expires {time}. It signs one browser in as {nickname}."
     },
     "sessions": {
       "title": "Sessions",

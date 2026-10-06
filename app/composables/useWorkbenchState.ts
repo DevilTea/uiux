@@ -11,7 +11,6 @@ import type {
 	FlowSummary,
 	LocaleSummary,
 	ReviewSummary,
-	SpecTab,
 	ViewRead,
 	ViewSummary,
 	WorkspaceRead,
@@ -52,7 +51,6 @@ export function createWorkbenchState() {
 	const selectedThemeId = ref('')
 
 	const selectedWidgetId = ref('root')
-	const activeSpecTab = ref<SpecTab>('spec')
 
 	const assetCount = ref(0)
 	const flows = ref<readonly FlowSummary[]>([])
@@ -246,7 +244,6 @@ export function createWorkbenchState() {
 		selectedViewportId,
 		selectedThemeId,
 		selectedWidgetId,
-		activeSpecTab,
 		assetCount,
 		flows,
 		reviews,

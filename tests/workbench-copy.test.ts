@@ -82,9 +82,9 @@ describe('zh-TW glossary', () => {
 		expect(zh.get('reviews.status.open')).toBe('未解決')
 		expect(zh.get('reviews.status.readyForReview')).toBe('待審核')
 		expect(zh.get('reviews.status.resolved')).toBe('已解決')
-		expect(zh.get('workbench.spec.decisionStatus.pending')).toBe('待定')
-		expect(zh.get('workbench.spec.decisionStatus.decided')).toBe('已決定')
-		expect(zh.get('workbench.spec.decisionStatus.deferred')).toBe('延後')
+		expect(zh.get('decision.pending')).toBe('待定')
+		expect(zh.get('decision.decided')).toBe('已決定')
+		expect(zh.get('decision.deferred')).toBe('延後')
 	})
 })
 
