@@ -157,6 +157,14 @@ It also packs the public npm artifact from source, installs that tarball into an
 
 Vitest also drives the Workbench in Playwright Chromium for the browser suites (`tests/*-browser.test.ts`), and formal Evidence capture uses the same Playwright runtime.
 
+### Performance budgets
+
+```sh
+pnpm perf
+```
+
+The geometry and comment-pin performance suites (`tests/geometry-perf.test.ts`, and the frame-budget test in `tests/comment-pins-browser.test.ts`) always measure and print their per-frame numbers (`[geometry-perf]`, `[pins perf]`). The absolute timing budgets of the multi-target geometry decision are defined for reference devices, not shared CI runners, so `pnpm check` gates only on checks that do not depend on machine speed: no frames and no messages while idle, pins on their Widgets' current geometry, reports per frame bounded and small. `pnpm perf` builds, then runs those suites with `UIUX_PERF_BUDGETS=1`, which also enforces the timing budgets; run it on a machine that stands in for a reference device. `PIN_PERF_THROTTLE=1,2,4` adds CPU throttling to the pin run and `PIN_PERF_REPORT=<dir>` writes its numbers as JSON.
+
 ## Domain contracts
 
 Canonical Workspace resources and their validators live under `src/domain/`. The Widget executable IR remains Adapter/Widget-owned; UIUX validates only its reserved `RootShell` identity boundary. Application revision envelopes are separate from persisted resources, and Preview cross-iframe DTOs live under `src/preview/protocol/`. Workspace adapters are validated server-side by Node authority, and materialized on-demand into standalone browser bundles for the Preview iframe runtime mount without mixing Vue or widget module instances into the parent Nuxt Workbench.

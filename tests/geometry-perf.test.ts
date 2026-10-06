@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { chromium, type Browser, type Frame, type Page } from 'playwright'
 import type { GeometryPerfGlobal } from './support/geometry-perf-entry'
+import { ENFORCE_PERF_BUDGETS } from './support/perf-budgets'
 
 /**
  * Performance harness for multi-target geometry (Part 2/3, 2026-10-05 decision 9).
@@ -16,14 +17,21 @@ import type { GeometryPerfGlobal } from './support/geometry-perf-entry'
  * The View scrolls continuously for 360 frames, then rests.
  *
  * The decided budgets are for the reference devices (a mainstream Windows laptop, a mid-range
- * Android tablet, a recent iPad). This harness asserts the desktop column on the machine that
+ * Android tablet, a recent iPad). This harness measures the desktop column on the machine that
  * runs it, which is evidence, not a reference-device measurement.
  */
 
 const ROOT = join(import.meta.dirname, '..')
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const SCROLL_FRAMES = 360
-const BUDGET = { runtimeP95: 4, workbenchP95: 2, combinedP99: 8, reportBytes: 2048 } as const
+/**
+ * Decision 9, desktop column, in ms. Timing budgets hold for the reference devices, not shared CI
+ * runners: they are enforced only with `UIUX_PERF_BUDGETS=1` (`pnpm perf`); the default run prints the
+ * measurements and gates on the speed-independent checks (stream count, report size and count, idle).
+ */
+const BUDGET = { runtimeP95: 4, workbenchP95: 2, combinedP99: 8 } as const
+/** Bytes per report: a size, not a timing, so it holds on any machine. */
+const MAX_REPORT_BYTES = 2048
 
 let browser: Browser
 let bundle: string
@@ -336,17 +344,19 @@ describe('Multi-target geometry performance (decision 9, desktop column on this 
 		{ name: '64 streams, 50 threads on 42 Widgets', pinWidgets: 42, threads: 50, extraStreams: 22 },
 		{ name: '64 streams, 64 pins on 64 Widgets', pinWidgets: 63, threads: 64, extraStreams: 1 },
 	] satisfies Scenario[]) {
-		it(`meets the per-frame budgets while scrolling: ${scenario.name}`, async () => {
+		it(`scrolls with bounded reports per frame and idles at rest (budgets with UIUX_PERF_BUDGETS=1): ${scenario.name}`, async () => {
 			const measured = await runScenario(scenario)
 			const summary = summarize(scenario.name, measured)
 			expect(summary.openStreams).toBe(64)
 			expect(summary.frames).toBeGreaterThan(SCROLL_FRAMES * 0.8)
-			expect(summary.runtimeMs.p95).toBeLessThanOrEqual(BUDGET.runtimeP95)
-			expect(summary.workbenchMs.p95).toBeLessThanOrEqual(BUDGET.workbenchP95)
-			expect(summary.combinedMs.p99).toBeLessThanOrEqual(BUDGET.combinedP99)
+			if (ENFORCE_PERF_BUDGETS) {
+				expect(summary.runtimeMs.p95).toBeLessThanOrEqual(BUDGET.runtimeP95)
+				expect(summary.workbenchMs.p95).toBeLessThanOrEqual(BUDGET.workbenchP95)
+				expect(summary.combinedMs.p99).toBeLessThanOrEqual(BUDGET.combinedP99)
+			}
 			// At most one report per dirty stream per frame, each a small complete baseline.
 			expect(summary.maxReportsPerFrame).toBeLessThanOrEqual(summary.openStreams)
-			expect(summary.maxReportBytes).toBeLessThanOrEqual(BUDGET.reportBytes)
+			expect(summary.maxReportBytes).toBeLessThanOrEqual(MAX_REPORT_BYTES)
 			// Idle with pins shown and nothing changing: no frames and no messages on either side.
 			expect(summary.idle).toEqual({ runtimeFrames: 0, workbenchFrames: 0, messages: 0 })
 			expect(summary.visiblePinsAtEnd).toBeGreaterThan(0)

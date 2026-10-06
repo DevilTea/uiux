@@ -6,6 +6,7 @@ import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-
 import { provisionToken, bearer } from './support/access'
 import { PREVIEW_WIRE_RECORDER, type WireRecorderWindow } from './support/preview-wire-recorder'
 import { MAIN_THREAD_WORK, binFrames, percentile, type MainThreadWorkWindow } from './support/main-thread-work'
+import { ENFORCE_PERF_BUDGETS } from './support/perf-budgets'
 
 /**
  * R7b: every pin at once (multi-target geometry decision group, decisions 6–9; brief c §6–11).
@@ -17,15 +18,21 @@ import { MAIN_THREAD_WORK, binFrames, percentile, type MainThreadWorkWindow } fr
  * their Widgets while the View scrolls, the over-cap listing, and the frame budget.
  *
  * The budget run scrolls the View continuously and bins main-thread work per Workbench frame. It
- * asserts the desktop column on the machine that runs it; `PIN_PERF_THROTTLE=1,2,4` adds CPU
- * throttling (Chrome DevTools Protocol) to approximate the weaker reference devices, and
- * `PIN_PERF_REPORT=<dir>` writes the numbers as JSON.
+ * measures the desktop column on the machine that runs it and enforces it with
+ * `UIUX_PERF_BUDGETS=1` (`pnpm perf`); `PIN_PERF_THROTTLE=1,2,4` adds CPU throttling (Chrome
+ * DevTools Protocol) to approximate the weaker reference devices, and `PIN_PERF_REPORT=<dir>`
+ * writes the numbers as JSON.
  */
 
 const VIEW_ID = 'a7b00000-0000-4000-8000-000000000050'
 const SCROLL_FRAMES = 240
-/** Decision 9, desktop column (the mainstream Windows laptop): Workbench pin work p95 and pin tracking p99. */
-const DESKTOP_BUDGET = { pinWorkP95: 2, combinedP99: 8 } as const
+/**
+ * Decision 9, desktop column (the mainstream Windows laptop): Workbench pin work p95 and pin tracking
+ * p99, in ms, and at most 1 % dropped frames. These hold for the reference devices, not shared CI
+ * runners: they are enforced only with `UIUX_PERF_BUDGETS=1` (`pnpm perf`). The default run prints the
+ * measurements and gates on the speed-independent checks (idle, pins on their Widgets, reports per frame).
+ */
+const DESKTOP_BUDGET = { pinWorkP95: 2, combinedP99: 8, droppedFrameShare: 0.01 } as const
 
 let server: WorkbenchServer
 let browser: Browser
@@ -298,7 +305,7 @@ describe('All pins at once (R7b)', () => {
 		finally { await context.close() }
 	}, 60_000)
 
-	it('scrolls 50 pins on 42 Widgets within the frame budget: one coalesced update per frame, transforms only, idle when still', async () => {
+	it('scrolls 50 pins on 42 Widgets: one coalesced update per frame, transforms only, pins on their Widgets, idle when still (frame budget with UIUX_PERF_BUDGETS=1)', async () => {
 		const throttles = (process.env.PIN_PERF_THROTTLE ?? '1').split(',').map(Number).filter(rate => rate >= 1)
 		const results: Record<string, unknown>[] = []
 		for (const throttle of throttles) {
@@ -343,6 +350,8 @@ describe('All pins at once (R7b)', () => {
 				const frames = binFrames(marks, workbench, runtime)
 				const vsync = percentile(frames.intervals, 0.5)
 				const dropped = frames.intervals.filter(interval => interval > vsync * 1.5).length
+				// Geometry reports the Workbench received per Workbench frame (the runtime coalesces a frame's reports into one message).
+				const messagesPerFrame = marks.slice(1).map((end, index) => workbench.filter(([start, , kind]) => kind === 'message' && start >= marks[index]! && start < end).length)
 
 				// Idle: with pins shown and nothing changing, no animation frames run and no reports arrive.
 				const idleStart = { workbench: await page.evaluate(() => (window as unknown as MainThreadWorkWindow).__work.length), runtime: await frame.evaluate(() => (window as unknown as MainThreadWorkWindow).__work.length) }
@@ -362,6 +371,7 @@ describe('All pins at once (R7b)', () => {
 					droppedFrames: dropped,
 					pinWork: stats(frames.pinWork),
 					messages: stats(frames.messages),
+					messagesPerFrame: stats(messagesPerFrame),
 					runtime: stats(frames.runtime),
 					combined: stats(frames.combined),
 					idle,
@@ -371,8 +381,14 @@ describe('All pins at once (R7b)', () => {
 
 				expect(frames.intervals.length).toBeGreaterThan(SCROLL_FRAMES * 0.9)
 				expect(idle).toEqual({ workbench: 0, runtime: 0 })
-				if (throttle === 1) {
-					expect(dropped).toBeLessThanOrEqual(Math.ceil(frames.intervals.length * 0.01))
+				// Coalesced: no more report messages than frames (one per stream per frame would be dozens per frame).
+				expect(messagesPerFrame.reduce((sum, count) => sum + count, 0)).toBeLessThanOrEqual(frames.intervals.length)
+				// Back at the top after the scroll: every hinted pin sits on its Widget's current geometry.
+				const errors = await hintedPinErrors(page, frame)
+				expect(errors.length).toBeGreaterThan(0)
+				for (const error of errors) expect(error).toBeLessThan(2)
+				if (ENFORCE_PERF_BUDGETS && throttle === 1) {
+					expect(dropped).toBeLessThanOrEqual(Math.ceil(frames.intervals.length * DESKTOP_BUDGET.droppedFrameShare))
 					expect(percentile(frames.pinWork, 0.95)).toBeLessThanOrEqual(DESKTOP_BUDGET.pinWorkP95)
 					expect(percentile(frames.combined, 0.99)).toBeLessThanOrEqual(DESKTOP_BUDGET.combinedP99)
 				}
