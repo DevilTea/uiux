@@ -75,6 +75,7 @@
 	},
 	"devDependencies": {
 		"@eslint/js": "10.0.1",
+		"@intlify/eslint-plugin-vue-i18n": "4.5.1",
 		"@modelcontextprotocol/client": "2.2.0",
 		"@playwright/test": "1.63.0",
 		"@types/node": "^24.13.2",
@@ -82,9 +83,11 @@
 		"eslint-plugin-vue": "10.11.1",
 		"globals": "17.3.0",
 		"happy-dom": "^20.14.5",
+		"jsonc-eslint-parser": "3.3.0",
 		"typescript": "6.0.3",
 		"typescript-eslint": "8.71.0",
 		"vitest": "4.1.11",
-		"vue-tsc": "3.3.6"
+		"vue-tsc": "3.3.6",
+		"yaml-eslint-parser": "2.1.0"
 	}
 }
