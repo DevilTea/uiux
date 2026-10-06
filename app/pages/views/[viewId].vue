@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import type { LocationQueryRaw } from 'vue-router'
 import { defineShortcuts, navigateTo, useI18n, useRoute, useRouter, useToast } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
@@ -115,9 +116,19 @@ const stateQuery = computed(() => viewQuery({
 	thread: thread.value,
 	panel: panelTab.value === 'comments' ? undefined : panelTab.value,
 }))
+// A replace lands a few tasks later (router guards and middleware run first). While one is in
+// flight, compare against what it asked for, not the committed route: state that returns to the
+// committed query (J then K, quickly) must still supersede the pending replace, or that replace
+// lands and the route → state watch reopens the thread the user already left.
+let pendingQuery: LocationQueryRaw | undefined
 watch(stateQuery, (query) => {
 	if (route.params.viewId !== viewId.value || !route.path.startsWith('/views/')) return
-	if (!sameQuery(query, route.query)) void router.replace({ query })
+	if (sameQuery(query, pendingQuery ?? route.query)) return
+	pendingQuery = query
+	void router.replace({ query }).finally(() => {
+		// The newest request settled (committed, cancelled or a no-op).
+		if (pendingQuery === query) pendingQuery = undefined
+	})
 })
 
 // A deep-linked thread also shows the Comments tab on desktop, beside its pin and bubble.

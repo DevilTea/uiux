@@ -270,9 +270,23 @@ describe('All pins at once (R7b)', () => {
 			const next = await page.evaluate(() => document.activeElement?.getAttribute('data-pin-thread'))
 			expect(next).toBeTruthy()
 			expect(next).not.toBe(firstId)
-			expect(new URL(page.url()).searchParams.get('thread')).toBe(next)
+			// The URL follows the open thread through `router.replace`, which lands a few tasks after the bubble and the focus.
+			await expect.poll(() => new URL(page.url()).searchParams.get('thread')).toBe(next)
 			await page.keyboard.press('k')
 			await expect.poll(() => new URL(page.url()).searchParams.get('thread')).toBe(firstId)
+			await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-pin-thread'))).toBe(firstId)
+			// J then K before J's replace lands: that replace must not land late and reopen the thread just left.
+			await page.evaluate(() => {
+				const win = window as unknown as { __settledThreads: (string | null)[] }
+				win.__settledThreads = []
+				const app = (document.querySelector('[data-v-app]') as unknown as { __vue_app__: { config: { globalProperties: { $router: { afterEach: (hook: (to: { query: Record<string, unknown> }) => void) => void } } } } }).__vue_app__
+				app.config.globalProperties.$router.afterEach((to) => { win.__settledThreads.push(typeof to.query.thread === 'string' ? to.query.thread : null) })
+			})
+			await page.keyboard.press('j')
+			await page.keyboard.press('k')
+			// Every navigation reports to `afterEach` when it settles (committed, cancelled or a duplicate).
+			await expect.poll(() => page.evaluate(() => (window as unknown as { __settledThreads: (string | null)[] }).__settledThreads)).toContain(next)
+			expect(new URL(page.url()).searchParams.get('thread')).toBe(firstId)
 			await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-pin-thread'))).toBe(firstId)
 			// Enter on the open thread's pin moves into its conversation; Escape closes it and returns to the pin.
 			await page.keyboard.press('Enter')
