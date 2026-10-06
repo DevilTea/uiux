@@ -51,9 +51,15 @@ const NAV_UI = {
 	linkTrailingBadge: 'font-medium',
 }
 
+/**
+ * The area whose navigator the sidebar shows. The `/views` and `/flows` indexes are the list
+ * themselves (the parent crumb lands there), so the sidebar does not repeat it beside them.
+ */
 const area = computed(() => {
-	if (route.path.startsWith('/views')) return 'views'
-	if (route.path.startsWith('/flows')) return 'flows'
+	const path = route.path.replace(/\/+$/, '')
+	if (path === '/views' || path === '/flows') return undefined
+	if (path.startsWith('/views')) return 'views'
+	if (path.startsWith('/flows')) return 'flows'
 	return undefined
 })
 

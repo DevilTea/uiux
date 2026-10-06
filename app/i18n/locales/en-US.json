@@ -536,7 +536,8 @@
       "noMatches": "No Views match “{query}”.",
       "emptyTitle": "No Views yet",
       "emptyDescription": "Create a View with the MCP {tool} tool.",
-      "diagnosticCount": "No diagnostics | {n} diagnostic | {n} diagnostics"
+      "diagnosticCount": "No diagnostics | {n} diagnostic | {n} diagnostics",
+      "lastOpened": "Last opened"
     },
     "tree": {
       "title": "Widget tree",
