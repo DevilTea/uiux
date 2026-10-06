@@ -177,10 +177,18 @@ describe('Comments can always be started, or say why not (feedback 2)', () => {
 })
 
 describe('Comments on the View as a whole (feedback 3)', () => {
+	async function rootThreads(): Promise<{ key: string }[]> {
+		const reviews = await api<{ items: { key: string; summary: { anchor?: { viewId: string; widgetId: string } } }[] }>('/api/resources/list', { kinds: ['review'], limit: 100 })
+		return reviews.items.filter(item => item.summary.anchor?.viewId === VIEW_ID && item.summary.anchor.widgetId === 'root')
+	}
+
 	it('opens the composer without a Widget and anchors the thread to the RootShell', async () => {
 		const { context, page } = await open(`/views/${VIEW_ID}`)
 		try {
 			await livePreview(page)
+			// The fixture already holds a resolved thread on the RootShell, and the list is ordered by
+			// key, so the new thread is the one that was not there before (not the last one listed).
+			const before = new Set((await rootThreads()).map(item => item.key))
 			await page.locator('[data-comment-on-view="pill"]').click()
 			const composer = page.locator('[data-comment-composer]')
 			await composer.waitFor()
@@ -194,14 +202,13 @@ describe('Comments on the View as a whole (feedback 3)', () => {
 			await page.keyboard.press('ControlOrMeta+Enter')
 			await page.locator('[data-thread-bubble]').waitFor({ timeout: 10_000 })
 
-			const reviews = await api<{ items: { key: string; summary: { anchor?: { viewId: string; widgetId: string } } }[] }>('/api/resources/list', { kinds: ['review'], limit: 100 })
-			const onView = reviews.items.filter(item => item.summary.anchor?.viewId === VIEW_ID && item.summary.anchor.widgetId === 'root')
-			expect(onView.length).toBeGreaterThan(0)
+			const created = (await rootThreads()).filter(item => !before.has(item.key))
+			expect(created).toHaveLength(1)
 
 			const row = page.locator('[data-comment-group="view"] [data-comment-row]')
 			await row.first().waitFor()
 			expect(await row.first().textContent()).toContain('Whole View')
-			const pin = page.locator(`.pin-anchor:not([hidden]) [data-pin-thread="${onView.at(-1)!.key}"]`)
+			const pin = page.locator(`.pin-anchor:not([hidden]) [data-pin-thread="${created[0]!.key}"]`)
 			expect(await pin.getAttribute('aria-label')).toContain('on this View')
 		}
 		finally { await context.close() }
