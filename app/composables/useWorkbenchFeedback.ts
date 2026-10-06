@@ -28,7 +28,9 @@ export function useWorkbenchFeedback() {
 			...(extra.length ? { description: extra.join(' ') } : {}),
 			color: 'error',
 			icon: 'i-lucide-circle-alert',
-			duration: 8000,
+			// Error toasts persist until dismissed (brief h): a failure is never timed away.
+			duration: 0,
+			progress: false,
 		})
 		return details
 	}

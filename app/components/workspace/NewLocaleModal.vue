@@ -4,6 +4,7 @@ import { useI18n } from '#imports'
 import { isCanonicalLocaleTag } from '../../../src/domain/validation'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import AuthoringErrorAlert from './AuthoringErrorAlert.vue'
+import { focusFirstProblem } from '../../utils/focus-problem'
 
 /**
  * New Locale (brief g): a BCP 47 code and, optionally, the keys of an existing Locale to
@@ -56,6 +57,7 @@ const sourceItems = computed(() => [
 
 async function create(): Promise<void> {
 	touched.value = true
+	if (tagError.value) void focusFirstProblem('[role="dialog"]')
 	if (tagError.value || creating.value) return
 	const locale = tag.value.trim()
 	const messages: Record<string, string> = {}
@@ -69,6 +71,7 @@ async function create(): Promise<void> {
 	}
 	catch (cause) {
 		error.value = describeFetchError(cause, t('locales.create.failed'))
+		void focusFirstProblem('[role="dialog"]')
 	}
 	finally {
 		creating.value = false

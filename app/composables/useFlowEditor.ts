@@ -21,6 +21,7 @@ import { useUiuxClient } from './useUiuxClient'
 import { useWorkbench } from './useWorkbench'
 import { useWorkbenchFeedback } from './useWorkbenchFeedback'
 import type { Diagnostic, ViewRead } from './workbench-types'
+import { focusFirstProblem } from '../utils/focus-problem'
 
 export type FlowRead = Readonly<{
 	kind: 'flow'
@@ -335,6 +336,7 @@ export function useFlowEditor(flowId: Ref<string>) {
 			if (details.statusCode === 409 || details.status === 'conflict') conflict.value = true
 			else if (isLockedError(details)) locked.value = { lock: details.lock }
 			else saveError.value = details
+			void focusFirstProblem('main')
 			return false
 		}
 		finally {

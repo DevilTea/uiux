@@ -110,7 +110,7 @@ async function copy(value: string, labelText: string): Promise<void> {
 		toast.add({ title: labelText, color: 'neutral', icon: 'i-lucide-copy' })
 	}
 	catch {
-		toast.add({ title: t('inspect.copyFailed'), color: 'error', icon: 'i-lucide-circle-alert' })
+		toast.add({ title: t('inspect.copyFailed'), color: 'error', icon: 'i-lucide-circle-alert', duration: 0 })
 	}
 }
 

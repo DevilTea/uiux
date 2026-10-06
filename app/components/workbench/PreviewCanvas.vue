@@ -30,6 +30,10 @@ import SessionStatus from './SessionStatus.vue'
 import CanvasZoomControls from './CanvasZoomControls.vue'
 import CanvasToolPill, { type CanvasToolId } from './CanvasToolPill.vue'
 import CanvasOverlay from './CanvasOverlay.vue'
+import WbErrorDetails from './WbErrorDetails.vue'
+import { adapterIndexOf, adapterRepair } from '../../utils/workspace-authoring'
+import { copyText } from '../../utils/copy-text'
+import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import CommentPinLayer from './comments/CommentPinLayer.vue'
 import CommentBubbleHost from './comments/CommentBubbleHost.vue'
 import { useCanvasComments } from '../../composables/useCanvasComments'
@@ -373,18 +377,46 @@ function selectTool(tool: CanvasToolId): void {
 // ---------------------------------------------------------------------------------------------
 
 const adapterState = ref<'unknown' | 'valid' | 'invalid'>('unknown')
-const adapterDiagnostics = shallowRef<readonly { code: string; message: string }[]>([])
+const adapterDiagnostics = shallowRef<readonly { code: string; path: string; message: string }[]>([])
+const adapterSummaries = shallowRef<readonly { index?: number; moduleSpecifier?: string }[]>([])
+const adapterChecking = ref(false)
 
 async function loadAdapterState(): Promise<void> {
+	adapterChecking.value = true
 	try {
-		const result = await uiux.previewAdapters() as { state: 'valid' | 'invalid'; diagnostics?: readonly { code: string; message: string }[] }
+		const result = await uiux.previewAdapters() as { state: 'valid' | 'invalid'; diagnostics?: readonly { code: string; path: string; message: string }[]; summaries?: readonly { index?: number; moduleSpecifier?: string }[] }
 		adapterState.value = result.state
 		adapterDiagnostics.value = result.diagnostics ?? []
+		adapterSummaries.value = result.summaries ?? []
 	}
 	catch {
 		// Unknown is not invalid: the Preview itself still reports what it can.
 		adapterState.value = 'unknown'
 	}
+	finally {
+		adapterChecking.value = false
+	}
+}
+
+/**
+ * Audit E1: one Adapter module that cannot load gets its own state, naming it and offering the
+ * repair command the server diagnostics imply. The Workbench never runs it.
+ */
+const unresolvedAdapter = computed(() => {
+	for (const diagnostic of adapterDiagnostics.value) {
+		if (diagnostic.code !== 'adapter.resolution_failed' && diagnostic.code !== 'adapter.manifest_load_failed') continue
+		const index = adapterIndexOf(diagnostic.path)
+		const moduleSpecifier = adapterSummaries.value.find(item => item.index === index)?.moduleSpecifier
+		if (!moduleSpecifier) continue
+		const repair = adapterRepair(diagnostic.code, moduleSpecifier)
+		return { moduleSpecifier, command: repair?.kind === 'command' ? repair.command : undefined }
+	}
+	return undefined
+})
+const feedback = useWorkbenchFeedback()
+async function copyRepair(command: string): Promise<void> {
+	if (await copyText(command)) feedback.success(t('adapters.copied'))
+	else feedback.error(undefined, t('adapters.copyFailed'))
 }
 watch(() => selectedView.value?.revision, () => { void loadAdapterState() })
 
@@ -693,25 +725,43 @@ function switchToBase(): void {
         class="absolute inset-0 flex items-center justify-center p-6"
       >
         <UEmpty
-          v-if="adapterState === 'invalid'"
+          v-if="adapterState === 'invalid' && unresolvedAdapter"
+          icon="i-lucide-puzzle"
+          :title="t('canvas.adapterUnresolved', { id: unresolvedAdapter.moduleSpecifier })"
+          :description="t('canvas.adapterUnresolvedHint')"
+          variant="naked"
+          :actions="[
+            ...(unresolvedAdapter.command && !workbench.isReadOnly.value ? [{ label: t('canvas.copyRepair'), icon: 'i-lucide-copy', color: 'primary' as const, variant: 'solid' as const, onClick: () => { void copyRepair(unresolvedAdapter!.command!) } }] : []),
+            { label: t('common.retry'), icon: 'i-lucide-refresh-cw', color: 'neutral' as const, variant: 'outline' as const, loading: adapterChecking, onClick: () => { void loadAdapterState() } },
+          ]"
+          data-canvas-adapter-unresolved
+        >
+          <template #footer>
+            <div class="mt-1 grid max-w-md justify-items-center gap-2">
+              <code
+                v-if="unresolvedAdapter.command"
+                class="rounded-md bg-muted px-2 py-1 font-mono text-xs text-highlighted"
+              >{{ unresolvedAdapter.command }}</code>
+              <WbErrorDetails :diagnostics="adapterDiagnostics" />
+            </div>
+          </template>
+        </UEmpty>
+        <UEmpty
+          v-else-if="adapterState === 'invalid'"
           icon="i-lucide-puzzle"
           :title="t('canvas.adapterInvalid')"
           :description="t('canvas.adapterInvalidHint')"
           variant="naked"
           :actions="[{ label: t('canvas.openAdapters'), to: '/workspace/adapters', color: 'neutral', variant: 'outline', icon: 'i-lucide-puzzle' }]"
+          data-canvas-adapter-invalid
         >
           <template
             v-if="adapterDiagnostics.length"
             #footer
           >
-            <ul class="mt-2 max-w-md space-y-1 text-start text-xs text-muted">
-              <li
-                v-for="diagnostic in adapterDiagnostics"
-                :key="diagnostic.code + diagnostic.message"
-              >
-                <span class="font-mono">{{ diagnostic.code }}</span> {{ diagnostic.message }}
-              </li>
-            </ul>
+            <div class="mt-1 grid max-w-md justify-items-center">
+              <WbErrorDetails :diagnostics="adapterDiagnostics" />
+            </div>
           </template>
         </UEmpty>
         <UEmpty

@@ -111,7 +111,8 @@
     "unnamed": "Unnamed",
     "readOnly": "Read-only",
     "revision": "Revision",
-    "editOnDesktop": "Edit on desktop"
+    "editOnDesktop": "Edit on desktop",
+    "details": "Details"
   },
   "evidence": {
     "capture": "Capture…",
@@ -392,7 +393,9 @@
       "download": "Download manifest",
       "readyNote": "Every root in the closure passed the readiness gate.",
       "diagnosticNote": "Not implementation-ready. Inspect it; don't build from it."
-    }
+    },
+    "selectRoot": "Select at least one root.",
+    "migrationBlocked": "Readiness can't be checked until this Workspace is migrated."
   },
   "locales": {
     "title": "Workspace Locales",
@@ -615,7 +618,9 @@
     "bannerRevision": "Published snapshot · read-only · {revision}"
   },
   "server": {
-    "unreachable": "Can't reach the UIUX server."
+    "unreachable": "Can't reach the UIUX server.",
+    "unreachableHint": "Check that uiux dev is still running. Unsaved edits stay on this page.",
+    "reconnecting": "Reconnecting…"
   },
   "inbox": {
     "title": "Reviews",
@@ -801,7 +806,10 @@
     "adapterInvalidHint": "The Widget tree and the Spec stay available. Fix the Adapters to see the View.",
     "openAdapters": "Open Adapters",
     "variantInvalidHint": "The Variant {variant} isn't defined in this View.",
-    "openInChecks": "Open in Checks"
+    "openInChecks": "Open in Checks",
+    "adapterUnresolved": "Adapter \"{id}\" couldn't load",
+    "adapterUnresolvedHint": "Check that the package is installed in this project, then retry. The Widget tree and the Spec stay available.",
+    "copyRepair": "Copy repair command"
   },
   "panel": {
     "comments": "Comments",
@@ -1152,7 +1160,8 @@
       "title": "No Views yet",
       "description": "Ask your agent to create one with {tool}, then refresh."
     },
-    "attentionBlocked": "{n} View blocked | {n} Views blocked"
+    "attentionBlocked": "{n} View blocked | {n} Views blocked",
+    "readinessMigration": "Migrate to check"
   },
   "ready": {
     "title": "Readiness · {view}",
@@ -1277,7 +1286,9 @@
         "invalid": "That link or token is not valid for this Workspace. Sign-in links work once and expire after 24 hours.",
         "rateLimited": "Too many failed attempts from this address. Wait a minute and try again.",
         "failed": "Sign-in failed. Try again."
-      }
+      },
+      "expiredTitle": "Your session ended",
+      "expiredDescription": "Sign in again to go back to where you were."
     },
     "role": {
       "owner": "Owner",
@@ -1477,5 +1488,54 @@
     "startCommenting": "Start commenting",
     "reanchorChip": "Re-anchor to {type}",
     "commentOnWidget": "Comment on this Widget"
+  },
+  "firstRun": {
+    "headline": "This Workspace has no Views yet",
+    "title": "Get the first View in",
+    "description": "Views are written by your agent through MCP. Connect it once, ask for a View, and review it here.",
+    "connect": {
+      "title": "Connect your agent",
+      "body": "Add this MCP endpoint to your agent's MCP settings.",
+      "token": "The endpoint needs a member token. In a terminal, add the agent once and create its token:"
+    },
+    "copyEndpoint": "Copy MCP endpoint",
+    "copyCommand": "Copy command",
+    "copied": "Copied",
+    "copyFailed": "Couldn't copy. Select the text and copy it instead.",
+    "create": {
+      "title": "Ask it for a View",
+      "body": "For example: \"Create a View for the checkout payment step with {tool}.\""
+    },
+    "review": {
+      "title": "Refresh and review",
+      "body": "New Views appear here and in Views. Open one to comment on its canvas."
+    },
+    "showSteps": "Show setup steps"
+  },
+  "submit": {
+    "title": "Submit for review",
+    "description": "Mark this thread ready for review. A reviewer resolves it by accepting this submission.",
+    "domains": "Change domains",
+    "domainsHelp": "What changed: pick or type one or more.",
+    "domainsPlaceholder": "IR, Spec, i18n…",
+    "evidence": "Evidence",
+    "evidenceHelp": "Formal captures of {view} at its current revision. Stale captures can't be referenced.",
+    "evidenceCurrent": "Current",
+    "noEvidence": "This View has no Evidence yet. Capture it in the contexts you checked first.",
+    "noCurrentEvidence": "Every capture of this View is out of date. Capture it again first.",
+    "captureFirst": "Open Readiness to capture",
+    "note": "Note",
+    "notePlaceholder": "What should the reviewer check? (optional)",
+    "needs": "Needs a change domain and Evidence.",
+    "action": "Submit for review",
+    "failed": "Couldn't submit for review",
+    "conflictHint": "Your choices are kept. Submit again to use the latest thread.",
+    "announce": "Submitted for review",
+    "selectCurrent": "Select the current capture | Select all {n} current captures",
+    "clearEvidence": "Clear selection"
+  },
+  "phone": {
+    "viewTab": "View",
+    "viewHint": "Read-only on a phone. Tap a pin to open its thread."
   }
 }

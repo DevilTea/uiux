@@ -10,6 +10,7 @@ import { copyText } from '../../utils/copy-text'
 import type { FetchErrorDetails } from '../../utils/fetch-error'
 import { splitReadinessDiagnostics } from '../../utils/readiness'
 import HandoffDiagnosticList from './HandoffDiagnosticList.vue'
+import WbErrorDetails from '../workbench/WbErrorDetails.vue'
 
 /**
  * Export handoff (brief f, section 5): explicit roots (the whole Workspace, or chosen Views,
@@ -220,8 +221,19 @@ function middle(value: string | undefined): string {
           icon="i-lucide-circle-alert"
           :title="t('handoff.exportFailed')"
           :description="exportError.message"
+          role="alert"
           data-handoff-export-error
-        />
+        >
+          <template
+            v-if="exportError.diagnostics.length"
+            #footer
+          >
+            <WbErrorDetails
+              :diagnostics="exportError.diagnostics"
+              :status-code="exportError.statusCode"
+            />
+          </template>
+        </UAlert>
         <URadioGroup
           v-model="mode"
           :legend="t('handoff.roots.legend')"

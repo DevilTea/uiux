@@ -112,7 +112,7 @@ async function copy(text: string): Promise<void> {
 		toast.add({ title: t('adapters.copied'), color: 'success', icon: 'i-lucide-check' })
 	}
 	catch {
-		toast.add({ title: t('adapters.copyFailed'), color: 'error', icon: 'i-lucide-circle-alert' })
+		toast.add({ title: t('adapters.copyFailed'), color: 'error', icon: 'i-lucide-circle-alert', duration: 0 })
 	}
 }
 

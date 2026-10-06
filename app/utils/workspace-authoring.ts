@@ -339,7 +339,8 @@ export async function blobToBase64(blob: Blob): Promise<string> {
 	const dataUrl = await new Promise<string>((resolve, reject) => {
 		const reader = new FileReader()
 		reader.onload = () => resolve(String(reader.result))
-		reader.onerror = () => reject(reader.error ?? new Error('read failed'))
+		// No browser wording reaches the UI: callers show their own localized "couldn't read" message.
+		reader.onerror = () => reject(Object.assign(new Error(''), { cause: reader.error }))
 		reader.readAsDataURL(blob)
 	})
 	return dataUrl.slice(dataUrl.indexOf(',') + 1)

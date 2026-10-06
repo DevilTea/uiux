@@ -111,7 +111,8 @@
     "unnamed": "未命名",
     "readOnly": "唯讀",
     "revision": "修訂版本",
-    "editOnDesktop": "請在桌面版編輯"
+    "editOnDesktop": "請在桌面版編輯",
+    "details": "詳細資料"
   },
   "evidence": {
     "capture": "擷取…",
@@ -392,7 +393,9 @@
       "download": "下載 Manifest",
       "readyNote": "範圍內的每個根項目都通過了就緒檢查。",
       "diagnosticNote": "尚未達到 implementation-ready。可用來檢視，請勿據此實作。"
-    }
+    },
+    "selectRoot": "請至少選擇一個根項目。",
+    "migrationBlocked": "此 Workspace 完成遷移前無法檢查就緒狀態。"
   },
   "locales": {
     "title": "Workspace Locale",
@@ -615,7 +618,9 @@
     "bannerRevision": "已發佈的快照・唯讀・{revision}"
   },
   "server": {
-    "unreachable": "無法連線到 UIUX 伺服器。"
+    "unreachable": "無法連線到 UIUX 伺服器。",
+    "unreachableHint": "請確認 uiux dev 仍在執行。尚未儲存的編輯會保留在此頁。",
+    "reconnecting": "正在重新連線…"
   },
   "inbox": {
     "title": "Reviews",
@@ -801,7 +806,10 @@
     "adapterInvalidHint": "Widget 樹狀結構與 Spec 仍可使用。修正 Adapter 後即可看到 View。",
     "openAdapters": "開啟 Adapter",
     "variantInvalidHint": "這個 View 沒有定義 Variant {variant}。",
-    "openInChecks": "在檢查中開啟"
+    "openInChecks": "在檢查中開啟",
+    "adapterUnresolved": "無法載入 Adapter「{id}」",
+    "adapterUnresolvedHint": "請確認此專案已安裝該套件，再重試。Widget 樹與 Spec 仍可使用。",
+    "copyRepair": "複製修復指令"
   },
   "panel": {
     "comments": "留言",
@@ -1152,7 +1160,8 @@
       "title": "尚無 View",
       "description": "請你的 agent 用 {tool} 建立一個，然後重新整理。"
     },
-    "attentionBlocked": "{n} 個 View 受阻擋 | {n} 個 View 受阻擋"
+    "attentionBlocked": "{n} 個 View 受阻擋 | {n} 個 View 受阻擋",
+    "readinessMigration": "遷移後才能檢查"
   },
   "ready": {
     "title": "就緒狀態・{view}",
@@ -1277,7 +1286,9 @@
         "invalid": "此連結或 token 對這個 Workspace 無效。登入連結只能使用一次，並於 24 小時後失效。",
         "rateLimited": "此位址的失敗嘗試過多，請稍候一分鐘再試。",
         "failed": "登入失敗，請再試一次。"
-      }
+      },
+      "expiredTitle": "你的工作階段已結束",
+      "expiredDescription": "請重新登入，即可回到剛才的頁面。"
     },
     "role": {
       "owner": "Owner",
@@ -1477,5 +1488,54 @@
     "startCommenting": "開始留言",
     "reanchorChip": "重新錨定至 {type}",
     "commentOnWidget": "在此 Widget 上留言"
+  },
+  "firstRun": {
+    "headline": "這個 Workspace 還沒有 View",
+    "title": "放入第一個 View",
+    "description": "View 由你的 agent 透過 MCP 撰寫。連接一次後請它建立 View，再到這裡審閱。",
+    "connect": {
+      "title": "連接你的 agent",
+      "body": "把這個 MCP 端點加入 agent 的 MCP 設定。",
+      "token": "端點需要成員 token。請在終端機中加入 agent 並建立它的 token："
+    },
+    "copyEndpoint": "複製 MCP 端點",
+    "copyCommand": "複製指令",
+    "copied": "已複製",
+    "copyFailed": "無法複製，請直接選取文字複製。",
+    "create": {
+      "title": "請它建立 View",
+      "body": "例如：「用 {tool} 建立結帳付款步驟的 View。」"
+    },
+    "review": {
+      "title": "重新整理並審閱",
+      "body": "新的 View 會出現在這裡與 Views 中。開啟後即可在畫布上留言。"
+    },
+    "showSteps": "顯示設定步驟"
+  },
+  "submit": {
+    "title": "提交 Review",
+    "description": "將此討論串標為待審核。審閱者接受這份提交後即可解決。",
+    "domains": "變更範圍",
+    "domainsHelp": "說明變更了什麼：選擇或輸入一個以上。",
+    "domainsPlaceholder": "IR、Spec、i18n…",
+    "evidence": "Evidence",
+    "evidenceHelp": "{view} 目前版本的正式擷取。過期的擷取無法引用。",
+    "evidenceCurrent": "最新",
+    "noEvidence": "這個 View 還沒有 Evidence。請先擷取你檢查過的情境。",
+    "noCurrentEvidence": "這個 View 的擷取都已過期。請先重新擷取。",
+    "captureFirst": "開啟就緒狀態以擷取",
+    "note": "備註",
+    "notePlaceholder": "審閱者該檢查什麼？（選填）",
+    "needs": "需要變更範圍與 Evidence。",
+    "action": "提交 Review",
+    "failed": "無法提交 Review",
+    "conflictHint": "已保留你的選擇。再次提交即會使用最新的討論串。",
+    "announce": "已提交 Review",
+    "selectCurrent": "選擇最新的擷取 | 選擇全部 {n} 個最新擷取",
+    "clearEvidence": "清除選擇"
+  },
+  "phone": {
+    "viewTab": "View",
+    "viewHint": "手機上為唯讀。點選圖釘即可開啟討論串。"
   }
 }

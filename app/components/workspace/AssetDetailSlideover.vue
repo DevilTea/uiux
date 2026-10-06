@@ -12,6 +12,7 @@ import LockBadge from '../workbench/LockBadge.vue'
 import LockedSaveAlert from '../workbench/LockedSaveAlert.vue'
 import AuthoringErrorAlert from './AuthoringErrorAlert.vue'
 import AuthoringSaveBar from './AuthoringSaveBar.vue'
+import { focusFirstProblem } from '../../utils/focus-problem'
 
 /**
  * One Asset (brief g): preview, metadata, "Replace content…", the Views that bind it, and its
@@ -113,6 +114,7 @@ async function save(): Promise<void> {
 		else {
 			error.value = details
 		}
+		void focusFirstProblem('[role="dialog"]')
 	}
 	finally {
 		saving.value = false
@@ -143,7 +145,7 @@ async function copy(text: string): Promise<void> {
 		toast.add({ title: t('adapters.copied'), color: 'success', icon: 'i-lucide-check' })
 	}
 	catch {
-		toast.add({ title: t('adapters.copyFailed'), color: 'error', icon: 'i-lucide-circle-alert' })
+		toast.add({ title: t('adapters.copyFailed'), color: 'error', icon: 'i-lucide-circle-alert', duration: 0 })
 	}
 }
 

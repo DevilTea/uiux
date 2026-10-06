@@ -266,7 +266,7 @@ function initBridge() {
 	}
 	catch (cause) {
 		handshakeStatus.value = 'failed'
-		error.value = cause instanceof Error ? cause.message : t('preview.errors.bridgeInitFailed')
+		error.value = describeFetchError(cause, t('preview.errors.bridgeInitFailed')).message
 	}
 }
 
@@ -399,7 +399,7 @@ async function evaluateRuntime() {
 			diagnostics: [{
 				code: 'adapter.bundle_load_failed',
 				path: '/adapters',
-				message: cause instanceof Error ? cause.message : t('preview.errors.bundleLoadFailed'),
+				message: describeFetchError(cause, t('preview.errors.bundleLoadFailed')).message,
 			}],
 		}
 	}

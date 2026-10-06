@@ -9,6 +9,11 @@ import { threadAuthorInitials, statusKey, useCanvasComments } from '../../../com
 import type { ReviewActor, ReviewResolution } from '../../../../src/domain/reviews/schema'
 import { flattenWidgetTree } from '../../../../src/preview/widget-tree'
 import { buildReviewTimeline, type ReviewTimelineItem } from '../../../utils/review-timeline'
+import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../../composables/useMediaQuery'
+import { isLockedError, type FetchErrorDetails } from '../../../utils/fetch-error'
+import type { ReviewSubmissionDraft } from '../../../utils/review-submission'
+import LockedSaveAlert from '../LockedSaveAlert.vue'
+import SubmitForReviewModal from '../SubmitForReviewModal.vue'
 
 /**
  * The thread bubble (brief c, section 6; direct-resolve decision 10): status, the compact typed
@@ -149,6 +154,15 @@ function threadLink(): string {
 
 const promoteOpen = ref(false)
 const promoteForm = reactive({ question: '', summary: '', rationale: '' })
+/** A rejected promotion shows its error inside the dialog (not behind it) and takes focus there. */
+const promoteFailed = ref(false)
+watch(promoteOpen, (value) => { if (value) promoteFailed.value = false })
+async function focusPromoteError(): Promise<void> {
+	promoteFailed.value = true
+	await nextTick()
+	document.querySelector<HTMLElement>('[data-promote-error]')?.focus()
+}
+
 async function submitPromote(): Promise<void> {
 	if (!promoteForm.question.trim() || !promoteForm.summary.trim()) return
 	if (await comments.promote(props.threadId, { question: promoteForm.question, summary: promoteForm.summary, rationale: promoteForm.rationale || promoteForm.summary })) {
@@ -156,6 +170,7 @@ async function submitPromote(): Promise<void> {
 		feedback.success(t('reviews.feedback.promoted'))
 		await workbench.loadSelectedView(preview.notifyIframeContext)
 	}
+	else await focusPromoteError()
 }
 
 function startReanchor(): void {
@@ -163,8 +178,31 @@ function startReanchor(): void {
 	preview.startReanchor(props.threadId)
 }
 
+// Submit for review… (human submission; secondary, desktop-first)
+const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
+const canSubmit = computed(() => thread.value?.status === 'open' && comments.canComment.value && isDesktop.value)
+const submitOpen = ref(false)
+const submitError = ref<FetchErrorDetails>()
+const submitConflict = ref(false)
+watch(submitOpen, (value) => {
+	if (value) {
+		submitError.value = undefined
+		submitConflict.value = false
+	}
+})
+async function submitForReview(draft: ReviewSubmissionDraft): Promise<boolean> {
+	const ok = await comments.submit(props.threadId, draft)
+	if (ok) feedback.success(t('submit.announce'))
+	else {
+		submitConflict.value = comments.conflict.value === props.threadId
+		submitError.value = comments.lastError.value?.threadId === props.threadId ? comments.lastError.value.error : undefined
+	}
+	return ok
+}
+
 const overflow = computed<DropdownMenuItem[][]>(() => [[
 	{ label: t('thread.copyLink'), icon: 'i-lucide-link', onSelect: () => { void copy(threadLink(), t('comments.copiedLink')) } },
+	...(canSubmit.value ? [{ label: t('thread.submit'), icon: 'i-lucide-eye', onSelect: () => { submitOpen.value = true } }] : []),
 	...(comments.canComment.value ? [{ label: t('thread.reanchor'), icon: 'i-lucide-crosshair', onSelect: startReanchor }] : []),
 	...(workbench.authorReadOnly.value ? [] : [{ label: t('thread.promote'), icon: 'i-lucide-signpost', onSelect: () => { promoteForm.question = thread.value?.title ?? ''; promoteOpen.value = true } }]),
 	{ label: t('comments.openInReviews'), icon: 'i-lucide-inbox', onSelect: () => { void navigateTo({ path: '/reviews', query: { thread: props.threadId } }) } },
@@ -290,8 +328,13 @@ watch(() => props.threadId, () => {
       :ui="{ title: 'text-sm', description: 'text-xs' }"
       data-thread-conflict
     />
+    <LockedSaveAlert
+      v-if="error && isLockedError(error)"
+      :lock="error.lock"
+      @dismiss="comments.lastError.value = undefined"
+    />
     <UAlert
-      v-if="error"
+      v-else-if="error"
       color="error"
       variant="subtle"
       icon="i-lucide-circle-alert"
@@ -429,11 +472,12 @@ watch(() => props.threadId, () => {
           <UKbd
             value="meta"
             size="sm"
+            class="pointer-coarse:hidden"
           />
           <UKbd
             value="enter"
             size="sm"
-            class="-ms-1"
+            class="-ms-1 pointer-coarse:hidden"
           />
         </UButton>
       </div>
@@ -545,6 +589,16 @@ watch(() => props.threadId, () => {
       </div>
     </template>
 
+    <SubmitForReviewModal
+      v-if="canSubmit"
+      v-model:open="submitOpen"
+      :view-id="thread.anchor.viewId"
+      :submit="submitForReview"
+      :busy="comments.busy.value === 'submit'"
+      :error="submitError"
+      :conflict="submitConflict"
+    />
+
     <UModal
       v-model:open="promoteOpen"
       :title="t('reviews.promote.title')"
@@ -555,6 +609,17 @@ watch(() => props.threadId, () => {
           class="grid gap-3"
           @submit.prevent="submitPromote"
         >
+          <UAlert
+            v-if="promoteFailed && (error || conflict)"
+            :color="conflict ? 'warning' : 'error'"
+            variant="subtle"
+            :icon="conflict ? 'i-lucide-refresh-cw' : 'i-lucide-circle-alert'"
+            role="alert"
+            tabindex="-1"
+            :title="conflict ? t('comments.conflict') : error?.message"
+            :description="conflict ? t('comments.conflictHint') : undefined"
+            data-promote-error
+          />
           <UFormField
             :label="t('reviews.promote.questionLabel')"
             required

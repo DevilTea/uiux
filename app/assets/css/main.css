@@ -195,6 +195,23 @@
   }
 }
 
+/* Skeletons (brief h, section 7): hidden for the first 150ms so fast loads never flash, then a
+   soft pulse; with reduced motion they appear as a static fill. Space is reserved throughout. */
+@keyframes wb-skeleton-delay {
+  from { visibility: hidden; }
+  to { visibility: visible; }
+}
+
+.wb-skeleton.animate-pulse {
+  animation: wb-skeleton-delay 150ms step-end both, pulse 2s cubic-bezier(0.4, 0, 0.6, 1) 150ms infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-skeleton.animate-pulse {
+    animation: wb-skeleton-delay 150ms step-end both;
+  }
+}
+
 /* zh-TW: CJK needs more leading and no negative tracking. */
 :root:lang(zh-TW) {
   --text-xs--line-height: 1.125rem;
