@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { request as httpRequest } from 'node:http'
 import { connect, createServer } from 'node:net'
 import { networkInterfaces, tmpdir } from 'node:os'
@@ -37,8 +37,10 @@ await writeFile(join(workspaceRoot, 'adapters', 'smoke.mjs'), [
 	'export default manifest',
 	'',
 ].join('\n'))
+// The current product schema, from the package (the server opens it as `current`).
+const { uiuxWorkspaceSchemaVersion } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 await writeFile(join(workspaceRoot, '.uiux', 'workspace.json'), `${JSON.stringify({
-	schemaVersion: 3,
+	schemaVersion: uiuxWorkspaceSchemaVersion,
 	i18n: { defaultLocale: 'en-US' },
 	adapters: [{ moduleSpecifier: './adapters/smoke.mjs' }],
 	viewports: {},
@@ -117,7 +119,7 @@ try {
 	const workspace = await fetch(`http://${host}:${port}/api/resources/workspace/workspace`, { headers: auth })
 	if (workspace.status !== 200) throw new Error(`Selected Workspace route returned HTTP ${workspace.status}.`)
 	const body = await workspace.json()
-	if (body.resource?.schemaVersion !== 2 || body.inspection?.state !== 'current')
+	if (body.resource?.schemaVersion !== uiuxWorkspaceSchemaVersion || body.inspection?.state !== 'current')
 		throw new Error(`Selected Workspace route returned an unexpected body: ${JSON.stringify(body)}`)
 
 	const adapters = await fetch(`http://${host}:${port}/api/preview/adapters`, { headers: auth })
@@ -130,7 +132,7 @@ try {
 	if (!runtime.ok || !(await runtime.text()).includes('mountPreviewRuntime'))
 		throw new Error('Preview runtime bundle was not materialized for the production identity smoke Adapter.')
 
-	console.log('Nitro smoke passed: health, 401 without a token and for another Workspace\'s token, a CLI-created token on /api and /mcp, selected Workspace API, and cross-module Workspace Adapter preview resolution against schemaVersion 2.')
+	console.log(`Nitro smoke passed: health, 401 without a token and for another Workspace's token, a CLI-created token on /api and /mcp, selected Workspace API, and cross-module Workspace Adapter preview resolution against schemaVersion ${uiuxWorkspaceSchemaVersion}.`)
 }
 catch (error) {
 	server.kill('SIGTERM')
