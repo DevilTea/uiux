@@ -24,6 +24,9 @@ export function flowPath(flowId: string): string {
 	return `/flows/${encodeURIComponent(flowId)}`
 }
 
+/** The one list of every View: the Overview's Views tab (`/views` redirects here). */
+export const VIEWS_LOCATION = { path: '/', query: { tab: 'views' } } as const
+
 /**
  * The Adapters section of Workspace settings. The Adapter set is part of the settings document,
  * so it has no page of its own; `/workspace/adapters` redirects here.

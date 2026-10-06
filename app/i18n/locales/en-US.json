@@ -538,7 +538,6 @@
       "filterPlaceholder": "Filter Views…",
       "noMatches": "No Views match “{query}”.",
       "emptyTitle": "No Views yet",
-      "emptyDescription": "Create a View with the MCP {tool} tool.",
       "diagnosticCount": "No diagnostics | {n} diagnostic | {n} diagnostics",
       "lastOpened": "Last opened"
     },
@@ -1593,8 +1592,7 @@
     "review": {
       "title": "Refresh and review",
       "body": "New Views appear here and in Views. Open one to comment on its canvas."
-    },
-    "showSteps": "Show setup steps"
+    }
   },
   "submit": {
     "title": "Submit for review",

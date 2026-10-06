@@ -166,9 +166,10 @@ try {
 		await open(page, '/')
 		await page.getByText('Published snapshot · read-only', { exact: false }).first().waitFor()
 
-		// /views lists every View (the parent crumb lands there); a View's render context rides in the query.
+		// /views redirects to the Overview's Views tab, the one View list; a View's render context rides in the query.
 		await open(page, '/views')
-		await page.locator('[data-views-index-row]').first().click()
+		await page.waitForURL(/\/uiux\/\?tab=views/)
+		await page.locator('[data-view-row]').first().click()
 		await page.waitForURL(/\/uiux\/views\/[^/?]+/)
 		const frame = await previewFrame(page)
 		const iframeTitleIncludes = context => page.waitForFunction(text => globalThis.document.querySelector('iframe')?.getAttribute('title')?.includes(text), context)

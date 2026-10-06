@@ -7,6 +7,7 @@ import { useReviewInbox } from '../../composables/useReviewInbox'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import { relativeTime } from '../../utils/widget-inspection'
 import { memberInitials } from '../../utils/member-initials'
+import { VIEWS_LOCATION } from '../../utils/workbench-routes'
 import {
 	activeFacetCount,
 	DEFAULT_INBOX_STATUS,
@@ -698,7 +699,7 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
         :description="t('inbox.empty.body')"
         variant="naked"
         size="sm"
-        :actions="[{ label: t('inbox.goToViews'), icon: 'i-lucide-app-window', color: 'neutral', variant: 'outline', onClick: () => { void navigateTo('/views') } }]"
+        :actions="[{ label: t('inbox.goToViews'), icon: 'i-lucide-app-window', color: 'neutral', variant: 'outline', onClick: () => { void navigateTo(VIEWS_LOCATION) } }]"
         data-review-empty="none"
       />
     </div>

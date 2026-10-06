@@ -124,7 +124,6 @@ const STEPS: readonly Step[] = [
 	{ name: 'Overview · Views', path: '/' },
 	{ name: 'Overview · Checks', path: '/', act: async (page) => { await page.getByRole('tab').nth(1).click(); await page.locator('[data-run-checks]').click(); await page.waitForSelector('[data-run-checks]:not([disabled])', { timeout: 20_000 }) } },
 	{ name: 'Overview · Activity', path: '/', act: async (page) => { await page.getByRole('tab').nth(2).click() } },
-	{ name: 'Views', path: '/views' },
 	{ name: 'View · Comments', path: `/views/${VIEW_ID}?panel=comments` },
 	{ name: 'View · Inspect', path: `/views/${VIEW_ID}?panel=inspect&widget=root` },
 	{ name: 'View · Spec', path: `/views/${VIEW_ID}?panel=spec` },

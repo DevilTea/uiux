@@ -538,7 +538,6 @@
       "filterPlaceholder": "篩選 View…",
       "noMatches": "沒有符合「{query}」的 View。",
       "emptyTitle": "尚無 View",
-      "emptyDescription": "請使用 MCP 的 {tool} 工具建立 View。",
       "diagnosticCount": "沒有診斷 | {n} 項診斷 | {n} 項診斷",
       "lastOpened": "上次開啟"
     },
@@ -1593,8 +1592,7 @@
     "review": {
       "title": "重新整理並審閱",
       "body": "新的 View 會出現在這裡與 Views 中。開啟後即可在畫布上留言。"
-    },
-    "showSteps": "顯示設定步驟"
+    }
   },
   "submit": {
     "title": "提交 Review",

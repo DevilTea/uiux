@@ -7,7 +7,7 @@ import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import type { ViewPanelTab } from '../../composables/workbench-types'
-import { parseThread, parseViewPanel, parseViewRouteContext, sameQuery, viewQuery } from '../../utils/workbench-routes'
+import { parseThread, parseViewPanel, parseViewRouteContext, sameQuery, viewQuery, VIEWS_LOCATION } from '../../utils/workbench-routes'
 import PreviewCanvas from '../../components/workbench/PreviewCanvas.vue'
 import ViewRightPanel from '../../components/workbench/ViewRightPanel.vue'
 import LockBadge from '../../components/workbench/LockBadge.vue'
@@ -142,13 +142,13 @@ watch([thread, reviews], ([threadId]) => {
 	panelHidden.value = false
 }, { immediate: true })
 
-// A View that does not exist: say so and stay on the View index, never a blank canvas.
+// A View that does not exist: say so and land on the View list, never a blank canvas.
 watch([views, loading, viewId], () => {
 	if (loading.value || !viewId.value) return
 	if (views.value.some(view => view.key === viewId.value)) return
 	toast.add({ title: t('canvas.viewMissing'), color: 'warning', icon: 'i-lucide-triangle-alert' })
 	workbench.error.value = undefined
-	void navigateTo('/views', { replace: true })
+	void navigateTo(VIEWS_LOCATION, { replace: true })
 })
 
 // "Updated since you last looked" on the Overview: this browser has now seen this revision.

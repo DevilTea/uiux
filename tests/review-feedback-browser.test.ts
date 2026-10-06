@@ -79,14 +79,25 @@ describe('Parent crumbs land on the index (feedback 1)', () => {
 		const { context, page } = await open(`/views/${VIEW_ID}`)
 		try {
 			await livePreview(page)
-			await page.getByRole('navigation', { name: 'Location' }).getByRole('link', { name: 'Views' }).click()
-			await page.waitForURL(url => url.pathname === '/views')
-			await page.locator('[data-views-index]').waitFor()
+			// The one View list is the Overview's Views tab.
+			await page.getByRole('navigation', { name: 'Location' }).getByRole('link', { name: 'Overview' }).click()
+			await page.waitForURL(url => url.pathname === '/')
+			await page.locator('[data-views-table] [data-view-row]').first().waitFor()
 			// The index used to redirect straight back to the most recent View on tablet and desktop.
 			await page.waitForTimeout(800)
-			expect(new URL(page.url()).pathname).toBe('/views')
-			expect(await page.locator('[data-views-index-row]').count()).toBe(2)
-			expect(await page.locator(`[data-views-index-row="${VIEW_ID}"]`).textContent()).toContain('Last opened')
+			expect(new URL(page.url()).pathname).toBe('/')
+			expect(await page.locator('[data-views-table] [data-view-row]').count()).toBe(2)
+			const opened = page.locator('[data-views-table] tr').filter({ has: page.locator(`[data-view-row="${VIEW_ID}"]`) })
+			expect(await opened.textContent()).toContain('Last opened')
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('keeps the old /views address on the View list', async () => {
+		const { context, page } = await open('/views')
+		try {
+			await page.waitForURL(url => url.pathname === '/' && url.searchParams.get('tab') === 'views')
+			await page.locator('[data-views-table] [data-view-row]').first().waitFor()
 		}
 		finally { await context.close() }
 	}, 60_000)

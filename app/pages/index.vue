@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { anchorViewId } from '../../src/domain/reviews/schema'
 import { computed, onMounted, ref, watch } from 'vue'
-import { defineShortcuts, navigateTo, useI18n } from '#imports'
+import { defineShortcuts, navigateTo, useI18n, useRoute } from '#imports'
 import type { TableColumn, TabsItem } from '@nuxt/ui'
 import { useMediaQuery } from '../composables/useMediaQuery'
 import { useReadiness } from '../composables/useReadiness'
@@ -19,9 +19,14 @@ import WorkspaceFirstRun from '../components/workbench/WorkspaceFirstRun.vue'
  * Overview (brief f): one line of what needs attention, then every View with its readiness.
  * Checks and Activity are tabs here; Evidence and Handoff live in each View's Readiness tab and
  * in the Export handoff dialog. There is no top-level Checks, Evidence or Handoff destination.
+ *
+ * The Views tab is the Workbench's one list of every View: the sidebar, the phone bottom bar
+ * and a View page's parent crumb all land here. The View opened last is marked.
  */
 const { t } = useI18n()
+const route = useRoute()
 const workbench = useWorkbench()
+const lastViewId = workbench.lastViewId()
 const shell = useWorkbenchShell()
 const readiness = useReadiness()
 const { views, reviews, loading, isReadOnly, authorReadOnly, readyReviewCount, openReviewCount, workspaceFindingCount } = workbench
@@ -122,7 +127,17 @@ const attention = computed<AttentionPart[]>(() => ([
 
 // ----- Tabs, data and shortcuts ---------------------------------------------------------------
 
-const tab = ref('views')
+/** `?tab=` picks the tab: `/views` (the old View index) redirects to `?tab=views`, and `G V` uses it. */
+const TAB_VALUES = ['views', 'checks', 'activity'] as const
+function tabFromQuery(): string | undefined {
+	const value = route.query.tab
+	return typeof value === 'string' && (TAB_VALUES as readonly string[]).includes(value) ? value : undefined
+}
+const tab = ref(tabFromQuery() ?? 'views')
+watch(() => route.query.tab, () => {
+	const value = tabFromQuery()
+	if (value) tab.value = value
+})
 const tabs = computed<TabsItem[]>(() => [
 	{ value: 'views', slot: 'views' as const, label: t('overview.tab.views') },
 	{ value: 'checks', slot: 'checks' as const, label: t('overview.tab.checks'), badge: workspaceFindingCount.value ? { label: String(workspaceFindingCount.value), color: 'neutral', variant: 'soft', size: 'sm' } : undefined },
@@ -352,10 +367,16 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                   <ULink
                     :to="viewLocation(row.original.key, { panel: 'readiness' })"
                     class="font-medium text-highlighted hover:underline pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
+                    :data-view-row="row.original.key"
                     @click.stop
                   >
                     {{ row.original.name }}
                   </ULink>
+                  <span
+                    v-if="row.original.key === lastViewId"
+                    class="text-xs text-muted"
+                    data-last-opened
+                  >{{ t('workbench.views.lastOpened') }}</span>
                 </span>
               </template>
               <template #feature-cell="{ row }">
@@ -431,6 +452,7 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                 <ULink
                   :to="viewLocation(row.key, { panel: 'readiness' })"
                   class="block rounded-lg border border-default p-3 hover:bg-muted"
+                  :data-view-row="row.key"
                 >
                   <span class="flex items-center gap-2">
                     <span
@@ -438,6 +460,11 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                       class="size-2 shrink-0 rounded-full bg-primary"
                     ><span class="sr-only">{{ t('overview.updated') }}</span></span>
                     <span class="min-w-0 flex-1 truncate text-sm font-medium text-highlighted">{{ row.name }}</span>
+                    <span
+                      v-if="row.key === lastViewId"
+                      class="shrink-0 text-xs text-muted"
+                      data-last-opened
+                    >{{ t('workbench.views.lastOpened') }}</span>
                     <UBadge
                       :color="READINESS_BADGE[row.readiness].color"
                       :icon="READINESS_BADGE[row.readiness].icon"
