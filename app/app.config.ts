@@ -24,7 +24,11 @@ export default defineAppConfig({
 		button: {
 			// Violet must be asked for: the default button is neutral outline.
 			defaultVariants: { color: 'neutral', variant: 'outline', size: 'md' },
-			slots: { base: 'min-h-(--wb-target) font-medium' },
+			slots: { base: 'min-h-(--wb-target) pointer-coarse:min-w-(--wb-target) font-medium' },
+			variants: {
+				// Icon-only buttons reach the same target as their height: 24px fine, 44px on touch.
+				square: { true: 'min-w-(--wb-target) justify-center' },
+			},
 			compoundVariants: [
 				// The No-Opacity-Hover Rule: filled controls move one ramp step instead of fading.
 				{ color: 'primary', variant: 'solid', class: 'hover:bg-primary-700 active:bg-primary-800 dark:hover:bg-primary-300 dark:active:bg-primary-200' },
@@ -69,17 +73,21 @@ export default defineAppConfig({
 			},
 		},
 		// Group labels in menus and lists: 12px floor instead of the stock 10px.
-		select: { variants: { size: { xs: { label: 'text-xs/4' }, sm: { label: 'text-xs/4' } } } },
-		selectMenu: { variants: { size: { xs: { label: 'text-xs/4' }, sm: { label: 'text-xs/4' } } } },
-		inputMenu: { variants: { size: { xs: { label: 'text-xs/4', tagsItem: 'text-xs/4' }, sm: { label: 'text-xs/4', tagsItem: 'text-xs/4' } } } },
+		// Touch (brief c, section 9; DESIGN.md density): menu rows reach 44px and fields render at 16px
+		// so iOS does not zoom on focus.
+		select: { slots: { base: 'pointer-coarse:text-base pointer-coarse:min-h-11', item: 'pointer-coarse:min-h-11 pointer-coarse:items-center' }, variants: { size: { xs: { label: 'text-xs/4' }, sm: { label: 'text-xs/4' } } } },
+		selectMenu: { slots: { base: 'pointer-coarse:text-base pointer-coarse:min-h-11', item: 'pointer-coarse:min-h-11 pointer-coarse:items-center' }, variants: { size: { xs: { label: 'text-xs/4' }, sm: { label: 'text-xs/4' } } } },
+		inputMenu: { slots: { base: 'pointer-coarse:text-base pointer-coarse:min-h-11', item: 'pointer-coarse:min-h-11 pointer-coarse:items-center' }, variants: { size: { xs: { label: 'text-xs/4', tagsItem: 'text-xs/4' }, sm: { label: 'text-xs/4', tagsItem: 'text-xs/4' } } } },
 		listbox: { variants: { size: { xs: { label: 'text-xs/4' }, sm: { label: 'text-xs/4' } } } },
-		commandPalette: { variants: { size: { xs: { label: 'text-xs/4' }, sm: { label: 'text-xs/4' } } } },
-		input: { slots: { base: 'pointer-coarse:text-base' } },
-		textarea: { slots: { base: 'pointer-coarse:text-base' } },
+		commandPalette: { slots: { item: 'pointer-coarse:min-h-11 pointer-coarse:items-center' }, variants: { size: { xs: { label: 'text-xs/4' }, sm: { label: 'text-xs/4' } } } },
+		input: { slots: { base: 'pointer-coarse:text-base pointer-coarse:min-h-11' } },
+		textarea: { slots: { base: 'pointer-coarse:text-base pointer-coarse:min-h-11' } },
 		tabs: { slots: { trigger: 'min-h-(--wb-target)' } },
 		tree: { slots: { link: 'min-h-7 pointer-coarse:min-h-11', linkLabel: 'truncate' } },
+		// Skeletons wait 150ms before showing and never shimmer under reduced motion (brief h, section 7).
+		skeleton: { base: 'wb-skeleton' },
 		popover: { slots: { content: 'shadow-overlay ring-0 rounded-lg' } },
-		dropdownMenu: { slots: { content: 'shadow-overlay ring-0 rounded-lg' } },
+		dropdownMenu: { slots: { content: 'shadow-overlay ring-0 rounded-lg', item: 'pointer-coarse:min-h-11 pointer-coarse:items-center' } },
 		tooltip: { slots: { content: 'text-xs/4 h-auto py-1 shadow-overlay ring-0' } },
 		navigationMenu: {
 			slots: { link: 'min-h-(--wb-target)', linkLeadingIcon: 'size-4' },

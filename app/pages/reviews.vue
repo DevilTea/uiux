@@ -18,6 +18,8 @@ const shell = useWorkbenchShell()
 
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const isPhone = useMediaQuery('(max-width: 767.98px)')
+/** Touch: no keyboard hints (brief c, section 9); the shortcuts still work with a keyboard. */
+const coarse = useMediaQuery('(pointer: coarse)')
 
 const list = ref<InstanceType<typeof ReviewInboxList>>()
 const detail = ref<InstanceType<typeof ReviewThreadDetail>>()
@@ -27,11 +29,18 @@ onMounted(() => { void inbox.loadSummaries() })
 /** A deep link to a thread this Workspace does not have. */
 const missingThread = computed(() => inbox.loaded.value && !!inbox.selectedId.value && !inbox.selected.value)
 
-/** Below desktop the thread opens over the list; closing it clears `?thread`. */
+/**
+ * Below desktop the thread opens over the list; closing it clears `?thread`. The sheet mounts
+ * closed and opens a frame later: a drawer mounted already open (a deep link) reports itself
+ * closed at once, which would drop the thread from the URL.
+ */
+const overlayMounted = ref(false)
+onMounted(() => requestAnimationFrame(() => { overlayMounted.value = true }))
 const overlayOpen = computed({
-	get: () => !isDesktop.value && !!inbox.selected.value,
+	get: () => overlayMounted.value && !isDesktop.value && !!inbox.selected.value,
 	set: (open: boolean) => {
-		if (!open) closeDetail()
+		// The sheet also reports its initial closed state; only a real dismissal closes the thread.
+		if (!open && overlayMounted.value && !isDesktop.value && inbox.selected.value) closeDetail()
 	},
 })
 
@@ -151,7 +160,7 @@ defineShortcuts(computed(() => shell.singleKeyShortcuts.value
           <ReviewInboxList
             ref="list"
             :phone="isPhone"
-            :keyboard="!isPhone && shell.singleKeyShortcuts.value"
+            :keyboard="!isPhone && !coarse && shell.singleKeyShortcuts.value"
             @open="onOpen"
           />
         </main>

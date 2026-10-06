@@ -18,6 +18,13 @@ export function useMediaQuery(query: string): Ref<boolean> {
 export const WORKBENCH_BREAKPOINTS = {
 	/** Desktop: everything inline. */
 	desktop: '(min-width: 1280px)',
-	/** Tablet and up: the sidebar is inline (rail below desktop). */
+	/** Landscape tablet and up (1024px). */
 	tablet: '(min-width: 1024px)',
+	/** Phones (< 768px): bottom navigation, sheets, no structural editing. */
+	phone: '(max-width: 767.98px)',
+	/**
+	 * A handset in either orientation: phone width, or a touch screen too short to be a tablet
+	 * (a phone in landscape). Handsets read, reply and triage only: no comment creation.
+	 */
+	handset: '(max-width: 767.98px), (pointer: coarse) and (max-height: 500px)',
 } as const

@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useI18n, useRoute } from '#imports'
+import { navigateTo, useI18n, useRoute } from '#imports'
 import { provideWorkbench } from '../composables/useWorkbench'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../composables/useMediaQuery'
 import { provideWorkbenchShell } from '../composables/useWorkbenchShell'
+import { useConnectivity } from '../composables/useConnectivity'
 import WorkbenchNavbar from '../components/workbench/WorkbenchNavbar.vue'
 import WorkbenchSidebar from '../components/workbench/WorkbenchSidebar.vue'
 import WorkbenchCommandPalette from '../components/workbench/WorkbenchCommandPalette.vue'
 import WorkbenchShortcuts from '../components/workbench/WorkbenchShortcuts.vue'
+import WorkbenchBottomNav from '../components/workbench/WorkbenchBottomNav.vue'
 
 /**
  * The Workbench application shell (brief a): a global 48px navbar, a collapsible and
@@ -25,21 +27,34 @@ const { error, isReadOnly, publicationInfo, workspace } = workbench
 const migrationRequired = computed(() => workspace.value?.inspection?.state === 'migration_required')
 const MIGRATE_COMMAND = 'uiux migrate --workspace <dir>'
 
+// Server unreachable (brief h): one persistent alert under the navbar with Retry. It replaces the
+// generic load error, which would only repeat the same cause in transport words.
+const connectivity = useConnectivity()
+const offline = computed(() => connectivity.state.value !== 'online')
+const retrying = ref(false)
+async function retryConnection(): Promise<void> {
+	retrying.value = true
+	try { await connectivity.retry() }
+	finally { retrying.value = false }
+}
+const stopRecover = connectivity.onRecover(() => { void workbench.refreshAll() })
+
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
+const isPhone = useMediaQuery(WORKBENCH_BREAKPOINTS.phone)
 const sidebarOpen = ref(false)
 
-// Desktop keeps the user's own collapse choice (persisted). Below the desktop breakpoint the
-// sidebar falls back to the 56px rail (tablet rules) and can be expanded for this session only.
+// Desktop keeps the user's own collapse choice (persisted). Tablet (768–1279) always shows the
+// 56px icon rail; "expand" there opens the full sidebar as a slide-over above the canvas, so the
+// canvas never loses width (DESIGN.md device classes). Phones use the bottom bar and the ☰ menu.
 const COLLAPSED_STORAGE_KEY = 'uiux.workbench.sidebarCollapsed'
 const desktopCollapsed = ref(false)
 try { desktopCollapsed.value = globalThis.localStorage?.getItem(COLLAPSED_STORAGE_KEY) === '1' }
 catch { /* storage unavailable */ }
-const tabletExpanded = ref(false)
 const sidebarCollapsed = computed({
-	get: () => isDesktop.value ? desktopCollapsed.value : !tabletExpanded.value,
+	get: () => isDesktop.value ? desktopCollapsed.value : true,
 	set: (collapsed: boolean) => {
 		if (!isDesktop.value) {
-			tabletExpanded.value = !collapsed
+			if (!collapsed) sidebarOpen.value = true
 			return
 		}
 		desktopCollapsed.value = collapsed
@@ -49,7 +64,7 @@ const sidebarCollapsed = computed({
 })
 
 shell.onToggleSidebar(() => {
-	if (window.matchMedia(WORKBENCH_BREAKPOINTS.tablet).matches) sidebarCollapsed.value = !sidebarCollapsed.value
+	if (isDesktop.value) sidebarCollapsed.value = !sidebarCollapsed.value
 	else sidebarOpen.value = !sidebarOpen.value
 })
 
@@ -66,11 +81,16 @@ function dismissPublicationBanner(): void {
 }
 
 onMounted(() => {
+	// On a phone the review desk opens on its triage queue (brief a, section 6): a cold load of the
+	// Overview lands on Reviews; Overview stays one tap away in the bottom bar.
+	// The real address bar decides: during the first render the route can still read `/`.
+	if (isPhone.value && window.location.pathname === '/' && !window.location.search && !globalThis.history?.state?.back) void navigateTo('/reviews', { replace: true })
 	workbench.preview.mount()
 	void workbench.refreshAll()
 })
 
 onUnmounted(() => {
+	stopRecover()
 	workbench.preview.unmount()
 })
 </script>
@@ -115,7 +135,21 @@ onUnmounted(() => {
     />
 
     <UAlert
-      v-if="error"
+      v-if="offline"
+      id="uiux-server-unreachable"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-unplug"
+      role="alert"
+      :title="t('server.unreachable')"
+      :description="connectivity.state.value === 'reconnecting' ? t('server.reconnecting') : t('server.unreachableHint')"
+      :actions="[{ label: t('common.retry'), color: 'neutral', variant: 'outline', loading: retrying || connectivity.state.value === 'reconnecting', onClick: () => { void retryConnection() } }]"
+      :ui="{ root: 'rounded-none border-b border-default' }"
+      data-server-unreachable
+    />
+
+    <UAlert
+      v-else-if="error"
       color="error"
       variant="subtle"
       icon="i-lucide-circle-alert"
@@ -140,7 +174,7 @@ onUnmounted(() => {
         :collapsed-size="56"
         :toggle="false"
         :menu="{ title: t('shell.primaryNav') }"
-        :ui="{ root: 'min-h-0 h-auto min-w-14 bg-default', body: 'gap-0 p-0 overflow-hidden', footer: 'block p-0' }"
+        :ui="{ root: 'min-h-0 h-auto min-w-14 bg-default md:flex', body: 'gap-0 p-0 overflow-x-hidden overflow-y-auto', footer: 'block p-0', content: 'max-w-72' }"
       >
         <template #default="{ collapsed }">
           <WorkbenchSidebar :collapsed="collapsed" />
@@ -149,6 +183,8 @@ onUnmounted(() => {
 
       <slot />
     </div>
+
+    <WorkbenchBottomNav />
 
     <WorkbenchCommandPalette />
     <WorkbenchShortcuts />

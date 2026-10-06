@@ -6,6 +6,7 @@ import { useWorkbench } from '../../composables/useWorkbench'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { flowPath, viewLocation } from '../../utils/workbench-routes'
 import WidgetTree from './WidgetTree.vue'
+import WorkspaceMenu from './WorkspaceMenu.vue'
 import FlowCreateModal from '../flows/FlowCreateModal.vue'
 
 /**
@@ -80,7 +81,16 @@ const createFlowOpen = ref(false)
     :aria-label="t('shell.primaryNav')"
     class="flex min-h-0 flex-1 flex-col"
   >
-    <div class="shrink-0 px-2 pt-2">
+    <div
+      v-if="!props.collapsed"
+      class="shrink-0 border-b border-default px-2 pb-2 md:hidden"
+    >
+      <WorkspaceMenu />
+    </div>
+    <div
+      class="shrink-0 pt-2"
+      :class="props.collapsed ? 'px-1.5' : 'px-2'"
+    >
       <UNavigationMenu
         :items="primary"
         orientation="vertical"
@@ -225,7 +235,10 @@ const createFlowOpen = ref(false)
       class="flex-1"
     />
 
-    <div class="shrink-0 border-t border-default px-2 pb-2">
+    <div
+      class="shrink-0 border-t border-default pb-2"
+      :class="props.collapsed ? 'px-1.5' : 'px-2'"
+    >
       <UNavigationMenu
         :items="secondary"
         orientation="vertical"
@@ -236,7 +249,7 @@ const createFlowOpen = ref(false)
       />
       <UTooltip :text="props.collapsed ? t('shell.expandSidebar') : t('shell.collapseSidebar')">
         <UDashboardSidebarCollapse
-          class="mt-1 hidden lg:inline-flex"
+          class="mt-1 hidden md:inline-flex"
           :aria-label="props.collapsed ? t('shell.expandSidebar') : t('shell.collapseSidebar')"
         />
       </UTooltip>

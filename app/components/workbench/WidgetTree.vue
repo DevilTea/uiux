@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import type { ContextMenuItem, TreeItem } from '@nuxt/ui'
 import { useWorkbench } from '../../composables/useWorkbench'
-import { useMediaQuery } from '../../composables/useMediaQuery'
+import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import type { WidgetTreeNode } from '../../../src/preview/widget-tree'
 
 /**
@@ -17,7 +17,7 @@ import type { WidgetTreeNode } from '../../../src/preview/widget-tree'
 const { t } = useI18n()
 const workbench = useWorkbench()
 const { widgetTreeResult, selectedWidgetId, selectedView, selectedViewId, reviews, reviewReadOnly, preview } = workbench
-const isPhone = useMediaQuery('(max-width: 767.98px)')
+const isPhone = useMediaQuery(WORKBENCH_BREAKPOINTS.handset)
 
 type WidgetTreeItem = TreeItem & {
 	id: string
@@ -217,7 +217,7 @@ const missingWidgetId = computed(() => rootItem.value && selectedWidgetId.value 
               :data-widget-row="item.id"
             >
               <span class="shrink-0">{{ item.type }}</span>
-              <span class="truncate font-mono text-xs text-dimmed opacity-0 group-hover/row:opacity-100 group-focus-visible/row:opacity-100 group-data-selected/row:text-selection-text group-data-selected/row:opacity-100">#{{ item.id }}</span>
+              <span class="truncate font-mono text-xs text-dimmed opacity-0 group-hover/row:opacity-100 group-focus-visible/row:opacity-100 pointer-coarse:opacity-100 group-data-selected/row:text-selection-text group-data-selected/row:opacity-100">#{{ item.id }}</span>
             </span>
           </template>
           <template #item-trailing="{ item, ui }">

@@ -58,17 +58,20 @@ const breadcrumb = computed<BreadcrumbItem[]>(() => {
 <template>
   <header
     data-landmark="banner"
-    class="flex h-(--ui-header-height) shrink-0 items-center gap-2 border-b border-default bg-default ps-2 pe-3"
+    class="box-content flex h-(--ui-header-height) shrink-0 items-center gap-2 border-b border-default bg-default ps-[max(0.5rem,env(safe-area-inset-left))] pe-[max(0.75rem,env(safe-area-inset-right))] pt-[env(safe-area-inset-top)]"
   >
     <UButton
       color="neutral"
       variant="ghost"
-      icon="i-lucide-panel-left"
-      class="lg:hidden"
+      icon="i-lucide-menu"
+      class="md:hidden"
       :aria-label="t('shell.toggleSidebar')"
       @click="shell.toggleSidebar()"
     />
-    <WorkspaceMenu />
+    <!-- Phones keep the bar to ☰, the page title and global actions; the Workspace mark moves into the ☰ menu. -->
+    <div class="hidden md:flex">
+      <WorkspaceMenu />
+    </div>
 
     <USeparator
       orientation="vertical"
@@ -83,10 +86,15 @@ const breadcrumb = computed<BreadcrumbItem[]>(() => {
         :items="breadcrumb"
         color="neutral"
         separator-icon="i-lucide-chevron-right"
-        :ui="{ link: 'text-sm', linkLabel: 'truncate max-w-64', separatorIcon: 'size-3.5' }"
+        :ui="{ link: 'text-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:justify-center', linkLabel: 'truncate max-w-64', separatorIcon: 'size-3.5' }"
       />
     </nav>
-    <div class="min-w-0 flex-1 sm:hidden" />
+    <p
+      class="min-w-0 flex-1 truncate text-sm font-semibold text-highlighted sm:hidden"
+      data-navbar-title
+    >
+      {{ breadcrumb.at(-1)?.label }}
+    </p>
 
     <div class="flex shrink-0 items-center gap-1.5">
       <UDashboardSearchButton

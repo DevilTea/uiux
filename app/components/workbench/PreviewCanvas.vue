@@ -63,7 +63,7 @@ const { selectedView, contextOptions, loading, reviewReadOnly, preview, widgetTr
 const comments = useCanvasComments()
 
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
-const isPhone = useMediaQuery('(max-width: 767.98px)')
+const isPhone = useMediaQuery(WORKBENCH_BREAKPOINTS.handset)
 const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
 
 /** Room the floating tool pill needs below the frame at Fit (pill 40px, 16px offset, 8px air). */

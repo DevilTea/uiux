@@ -161,12 +161,12 @@ function onKeydown(event: KeyboardEvent): void {
         <UKbd
           value="meta"
           size="sm"
-          class="bg-transparent text-current ring-current/35"
+          class="bg-transparent text-current ring-current/35 pointer-coarse:hidden"
         />
         <UKbd
           value="enter"
           size="sm"
-          class="-ms-1 bg-transparent text-current ring-current/35"
+          class="-ms-1 bg-transparent text-current ring-current/35 pointer-coarse:hidden"
         />
       </UButton>
     </div>
