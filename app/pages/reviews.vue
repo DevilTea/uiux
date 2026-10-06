@@ -88,7 +88,10 @@ function onResolved(next: string | undefined): void {
 watch(() => inbox.deleted.value?.sequence, () => {
 	if (inbox.deleted.value) onDeleted(inbox.deleted.value.next)
 })
-/** Focus moves once the delete has settled (the queue reloaded, the confirm and its menu gone). */
+/**
+ * Focus moves once the delete has settled (the queue reloaded, the confirm gone). The overflow menu
+ * may still be closing; the detail keeps it from handing focus back to its trigger afterwards.
+ */
 let focusAfterDelete = false
 function onDeleted(next: string | undefined): void {
 	inbox.select(isDesktop.value ? next : undefined)

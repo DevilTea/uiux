@@ -242,6 +242,12 @@ describe('Author retract (retract addendum decision 8)', () => {
 			await poll(() => page.locator('[role="status"][aria-live="polite"]').first().textContent()).toContain('Comment deleted.')
 			await poll(() => page.locator(`[data-review-row="${id}"]`).count()).toBe(0)
 			await poll(() => activeMatches(page, '[data-review-list], [data-review-heading]')).toBe(true)
+			// It stays there once the overflow menu finished closing: the menu unmounts after its close
+			// animation (late under load) and must not hand focus back to its trigger, which by then
+			// belongs to the next thread. Its trigger refocus would run in a task after the unmount.
+			await poll(() => page.locator('[role="menu"]').count()).toBe(0)
+			await page.evaluate(() => new Promise(resolve => setTimeout(() => requestAnimationFrame(resolve), 0)))
+			expect(await activeMatches(page, '[data-review-list], [data-review-heading]')).toBe(true)
 			const next = new URL(page.url()).searchParams.get('thread')
 			if (next) expect(await page.locator('[data-review-list]').getAttribute('aria-activedescendant')).toBe(`review-row-${next}`)
 		}
