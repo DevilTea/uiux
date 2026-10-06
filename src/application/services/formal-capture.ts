@@ -129,6 +129,21 @@ export function createFormalCaptureService(
 			}
 		}
 
+		// Capture stores artifacts, so it is refused before launching a browser unless the Workspace
+		// is at the current schema (`workspace.migration_required` until `uiux migrate` runs).
+		const { inspection } = await persistence.inspectWorkspace()
+		if (inspection.state === 'migration_required' || inspection.state === 'unsupported') {
+			const diagnostics: readonly Diagnostic[] = inspection.state === 'migration_required'
+				? [{ code: 'workspace.migration_required', path: '/schemaVersion', message: `Workspace schema ${inspection.version} requires explicit migration to policy target ${inspection.targetVersion}. Run: uiux migrate --workspace <dir>` }]
+				: inspection.diagnostics
+			return {
+				status: 'failed',
+				results: contexts.map(context => ({ context, status: 'failed', diagnostics })),
+				summary: { total: contexts.length, captured: 0, failed: contexts.length },
+				executedAt: new Date().toISOString(),
+			}
+		}
+
 		const registriesResult = await buildRegistries(contexts)
 		if (!registriesResult.ok) {
 			const failedResults: FormalContextCaptureResult[] = contexts.map(context => ({

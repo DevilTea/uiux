@@ -46,7 +46,19 @@ export type ExportHandoffCommand = Readonly<{
 	roots: readonly HandoffRoot[]
 }>
 
-export type ExportHandoffResult = Readonly<{
+/**
+ * Handoff is refused while the Workspace is not at the current schema: export would write artifacts
+ * and readiness claims would be computed against files `uiux migrate` is about to rewrite.
+ */
+export type HandoffSchemaBlocked = Readonly<{
+	status: 'blocked'
+	key: 'handoff'
+	code: 'workspace.migration_required' | 'workspace.schema_unsupported'
+	message: string
+	diagnostics: readonly Diagnostic[]
+}>
+
+export type ExportHandoffResult = HandoffSchemaBlocked | Readonly<{
 	status: 'exported' | 'failed'
 	manifest?: HandoffManifest
 	manifestArtifactDigest?: string
@@ -60,7 +72,7 @@ export type AssessHandoffReadinessCommand = Readonly<{
 	roots: readonly HandoffRoot[]
 }>
 
-export type AssessHandoffReadinessResult = Readonly<{
+export type AssessHandoffReadinessResult = HandoffSchemaBlocked | Readonly<{
 	status: 'ok' | 'failed'
 	readiness?: HandoffReadiness
 	assessment?: HandoffReadinessAssessment
@@ -73,7 +85,32 @@ export interface HandoffExportService {
 }
 
 export function createHandoffExportService(persistence: FileNativePersistence): HandoffExportService {
-	async function computeClosure(roots: readonly HandoffRoot[]): Promise<
+	async function blockedForSchema(): Promise<HandoffSchemaBlocked | undefined> {
+		const { inspection } = await persistence.inspectWorkspace()
+		if (inspection.state === 'migration_required') {
+			const detail = `Workspace schema ${inspection.version} requires explicit migration to policy target ${inspection.targetVersion}.`
+			return {
+				status: 'blocked',
+				key: 'handoff',
+				code: 'workspace.migration_required',
+				message: `Workspace schemaVersion ${inspection.version} requires explicit migration to ${inspection.targetVersion}. Run: uiux migrate --workspace <dir>`,
+				diagnostics: [{ code: 'workspace.migration_required', path: '/schemaVersion', message: detail }],
+			}
+		}
+		if (inspection.state === 'unsupported')
+			return { status: 'blocked', key: 'handoff', code: 'workspace.schema_unsupported', message: 'Handoff is blocked for an unsupported Workspace schema.', diagnostics: inspection.diagnostics }
+		return undefined
+	}
+
+	/**
+	 * Content identity of closure bytes. Export stores them in the immutable artifact store; a
+	 * readiness assessment only needs the digest and must not write (it is a read-only tool).
+	 */
+	async function contentIdentity(bytes: Uint8Array, materialize: boolean): Promise<string> {
+		return materialize ? (await persistence.artifacts.put(bytes)).identity : await sha256Identity(bytes)
+	}
+
+	async function computeClosure(roots: readonly HandoffRoot[], materialize: boolean): Promise<
 		| {
 				ok: true
 				assessment: HandoffReadinessAssessment
@@ -347,10 +384,10 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 				})
 			}
 
-			const contentPut = await persistence.artifacts.put(assetRead.resource.content)
-			referencedArtifacts.set(contentPut.identity, {
+			const contentIdentityValue = await contentIdentity(assetRead.resource.content, materialize)
+			referencedArtifacts.set(contentIdentityValue, {
 				kind: 'asset-content',
-				artifact: contentPut.identity,
+				artifact: contentIdentityValue,
 				context: { assetId },
 			})
 
@@ -359,7 +396,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 				identity: { id: assetId },
 				revision: assetRead.revision,
 				snapshot: assetRead.resource.metadata as JsonObject,
-				contentDigest: contentPut.identity,
+				contentDigest: contentIdentityValue,
 			})
 		}
 
@@ -621,8 +658,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 				let contentDigest: string | undefined
 				try {
 					const modBytes = await fs.readFile(entry.resolvedModule.resolvedPath)
-					const putResult = await persistence.artifacts.put(modBytes)
-					contentDigest = putResult.identity
+					contentDigest = await contentIdentity(modBytes, materialize)
 					referencedArtifacts.set(contentDigest, {
 						kind: 'adapter-module',
 						artifact: contentDigest,
@@ -664,7 +700,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 				}
 
 				if (rsBytes && rsBytes.length > 0) {
-					const putRs = await persistence.artifacts.put(rsBytes)
+					const putRs = { identity: await contentIdentity(rsBytes, materialize) }
 					referencedArtifacts.set(putRs.identity, {
 						kind: 'widget-source',
 						artifact: putRs.identity,
@@ -726,8 +762,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 				let availability: 'materialized' | 'provenance-only' = 'provenance-only'
 				try {
 					const modBytes = await fs.readFile(matchingEntry.resolvedModule.resolvedPath)
-					const putResult = await persistence.artifacts.put(modBytes)
-					contentDigest = putResult.identity
+					contentDigest = await contentIdentity(modBytes, materialize)
 					availability = 'materialized'
 					referencedArtifacts.set(contentDigest, {
 						kind: 'widget-source',
@@ -862,7 +897,9 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 	}
 
 	async function assessReadiness(command: AssessHandoffReadinessCommand): Promise<AssessHandoffReadinessResult> {
-		const closureRes = await computeClosure(command.roots)
+		const blocked = await blockedForSchema()
+		if (blocked) return blocked
+		const closureRes = await computeClosure(command.roots, false)
 		if (!closureRes.ok) {
 			return {
 				status: 'failed',
@@ -891,7 +928,9 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 	}
 
 	async function exportHandoff(command: ExportHandoffCommand): Promise<ExportHandoffResult> {
-		const closureRes = await computeClosure(command.roots)
+		const blocked = await blockedForSchema()
+		if (blocked) return blocked
+		const closureRes = await computeClosure(command.roots, true)
 		if (!closureRes.ok) {
 			return {
 				status: 'failed',

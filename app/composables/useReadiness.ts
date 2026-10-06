@@ -224,7 +224,7 @@ export function useReadiness() {
 			setAssessment(key, pending)
 			return pending
 		}
-		// The server assesses under the Workspace write lock, which an older schema refuses: say why
+		// The server refuses Handoff for an older schema (`422 workspace.migration_required`): say why
 		// instead of sending a request that can only fail.
 		if (writeBlocked.value) {
 			const blocked: AssessmentEntry = { status: 'failed', signature: expected, error: { message: t('handoff.migrationBlocked'), diagnostics: [] } }

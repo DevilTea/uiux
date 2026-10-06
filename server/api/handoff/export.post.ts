@@ -8,6 +8,8 @@ export default defineEventHandler(async (event) => {
 		: []
 
 	const result = await requestSession(event).exportHandoff({ roots: roots as never })
-	setResponseStatus(event, result.status === 'blocked' ? 403 : result.status === 'exported' ? 200 : 422)
+	// `auth.scope_denied` is 403; a schema block (`workspace.migration_required`) and a failed closure are 422.
+	const code = 'code' in result ? result.code : undefined
+	setResponseStatus(event, code === 'auth.scope_denied' ? 403 : result.status === 'exported' ? 200 : 422)
 	return result
 })
