@@ -127,6 +127,10 @@
 		"kind": "feature",
 		"id": "01a111e4-01ee-786e-bf57-d2278afa16bc"
 	},
+	"F.review.retraction": {
+		"kind": "feature",
+		"id": "01a11203-da99-7193-8049-ae595bba2c62"
+	},
 	"F.review.threads": {
 		"kind": "feature",
 		"id": "01a111e4-01bb-783b-9792-a36016cd6c54"
@@ -242,5 +246,9 @@
 	"S.review-remote": {
 		"kind": "story",
 		"id": "01a111e4-038c-7fc1-b5ba-bf8441eacd42"
+	},
+	"S.wb-personal": {
+		"kind": "story",
+		"id": "01a11203-db9c-7a59-ae9b-c5ce96a45825"
 	}
 }
