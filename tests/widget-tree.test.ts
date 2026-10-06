@@ -145,9 +145,9 @@ describe('canonical widget tree derivation', () => {
 	})
 
 	it('rejects invalid or malformed IR inputs', () => {
-		expect(deriveWidgetTree(null)).toEqual({ status: 'invalid', reason: 'IR must be a JSON object.' })
-		expect(deriveWidgetTree('string')).toEqual({ status: 'invalid', reason: 'IR must be a JSON object.' })
-		expect(deriveWidgetTree({})).toEqual({ status: 'invalid', reason: 'Widget node must have a non-empty string id.' })
-		expect(deriveWidgetTree({ id: 'root' })).toEqual({ status: 'invalid', reason: 'Widget node must have a non-empty string type.' })
+		expect(deriveWidgetTree(null)).toEqual({ status: 'invalid', code: 'widget_tree.ir_not_object', reason: 'IR must be a JSON object.' })
+		expect(deriveWidgetTree('string')).toEqual({ status: 'invalid', code: 'widget_tree.ir_not_object', reason: 'IR must be a JSON object.' })
+		expect(deriveWidgetTree({})).toEqual({ status: 'invalid', code: 'widget_tree.missing_id', reason: 'Widget node must have a non-empty string id.' })
+		expect(deriveWidgetTree({ id: 'root' })).toEqual({ status: 'invalid', code: 'widget_tree.missing_type', reason: 'Widget node must have a non-empty string type.' })
 	})
 })

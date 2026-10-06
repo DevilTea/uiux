@@ -292,7 +292,7 @@ const readiness = computed(() => {
               v-if="item.fromScope.join(',') !== item.toScope.join(',')"
               class="mt-1 text-xs"
             >
-              {{ t('inbox.timeline.scopeChanged', { from: item.fromScope.join(', ') || t('inbox.filter.viewWide'), to: item.toScope.join(', ') || t('inbox.filter.viewWide') }) }}
+              {{ t('inbox.timeline.scopeChanged', { from: fmt.list(item.fromScope) || t('inbox.filter.viewWide'), to: fmt.list(item.toScope) || t('inbox.filter.viewWide') }) }}
             </p>
             <p
               v-if="item.reason"

@@ -26,11 +26,14 @@ function flatten(catalog: Catalog, prefix = ''): Map<string, string> {
 const en = flatten(JSON.parse(readFileSync(join(LOCALES, 'en-US.json'), 'utf8')) as Catalog)
 const zh = flatten(JSON.parse(readFileSync(join(LOCALES, 'zh-TW.json'), 'utf8')) as Catalog)
 
-/** Canonical domain nouns that zh-TW keeps in English (PRODUCT.md, user decision). */
-const DOMAIN_NOUNS = ['View', 'Variant', 'Widget', 'Review', 'Flow', 'Spec', 'Decision', 'Evidence', 'Handoff', 'Workspace', 'Locale', 'Asset', 'MCP']
+/**
+ * Canonical domain nouns that zh-TW keeps in English (PRODUCT.md, user decision). The last seven
+ * were added by the owner on 2026-10-06.
+ */
+const DOMAIN_NOUNS = ['View', 'Variant', 'Widget', 'Review', 'Flow', 'Spec', 'Decision', 'Evidence', 'Handoff', 'Workspace', 'Locale', 'Asset', 'MCP', 'Token', 'Agent', 'Slot', 'Runtime', 'Manifest', 'Bundle', 'Schema']
 
 /** Chinese renderings of those nouns that must not appear in the zh-TW catalog. */
-const FORBIDDEN_TRANSLATIONS = ['變體', '視圖', '畫面元件', '元件', '流程', '規格', '決策', '證據', '交付', '工作區', '語系', '素材', '資產', '審查']
+const FORBIDDEN_TRANSLATIONS = ['變體', '視圖', '畫面元件', '元件', '流程', '規格', '決策', '證據', '交付', '工作區', '語系', '素材', '資產', '審查', '權杖', '代理程式', '插槽', '執行環境', '資訊清單', '匯出包', '結構描述']
 
 function walk(dir: string): string[] {
 	return readdirSync(dir).flatMap((entry) => {
@@ -85,6 +88,14 @@ describe('zh-TW glossary', () => {
 		expect(zh.get('decision.pending')).toBe('待定')
 		expect(zh.get('decision.decided')).toBe('已決定')
 		expect(zh.get('decision.deferred')).toBe('延後')
+	})
+
+	it('translates Checks and Catalog (owner decision, 2026-10-06)', () => {
+		expect(zh.get('overview.tab.checks')).toBe('檢查')
+		expect(zh.get('checks.run')).toBe('執行檢查')
+		expect(zh.get('adapters.invalid')).toContain('型錄')
+		const english = [...zh].filter(([, value]) => /\bChecks?\b|\bCatalog\b/.test(value)).map(([key]) => key)
+		expect(english).toEqual([])
 	})
 })
 

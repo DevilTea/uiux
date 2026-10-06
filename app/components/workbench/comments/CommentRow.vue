@@ -26,7 +26,7 @@ const status = computed(() => comments.pinStatus.get(props.item.id))
 /** Persistent anchor problems, said in words under the title. */
 const note = computed(() => {
 	if (!props.item.anchorValid) return t('comments.widgetRemoved')
-	if (props.item.missingVariants.length) return t('pins.variantMissing', { name: props.item.missingVariants.join(', ') })
+	if (props.item.missingVariants.length) return t('pins.variantMissing', { name: props.item.missingVariants.join(t('common.listSeparator')) })
 	return undefined
 })
 
@@ -101,7 +101,7 @@ const target = computed(() => onView.value ? t('comments.viewTarget') : `#${prop
         <span
           v-if="item.variantNames.length"
           class="font-mono"
-        > · {{ item.variantNames.join(', ') }}</span>
+        > · {{ item.variantNames.join(t('common.listSeparator')) }}</span>
       </span>
       <span
         v-if="note"

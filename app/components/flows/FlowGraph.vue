@@ -125,7 +125,7 @@ function nodeLabel(node: FlowNode): string {
 	else if (node.isTerminal) parts.push(t('flows.graph.end'))
 	const count = problemsByStep.value.get(node.stepId) ?? 0
 	if (count) parts.push(t('flows.toolbar.problems', count))
-	return parts.join(', ')
+	return parts.join(t('common.clauseSeparator'))
 }
 
 function edgeAriaLabel(edge: RoutedEdge): string {

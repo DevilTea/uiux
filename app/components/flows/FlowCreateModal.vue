@@ -5,6 +5,7 @@ import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { focusFirstProblem } from '../../utils/focus-problem'
+import WbDiagnosticList from '../workbench/WbDiagnosticList.vue'
 
 /** `create_flow` from the Workbench: a name and the View of the entry step. */
 const open = defineModel<boolean>('open', { default: false })
@@ -123,18 +124,10 @@ async function submit(): Promise<void> {
             v-if="failure.diagnostics.length"
             #description
           >
-            <ul class="space-y-0.5">
-              <li
-                v-for="(diagnostic, index) in failure.diagnostics"
-                :key="index"
-              >
-                <span
-                  v-if="diagnostic.path"
-                  class="font-mono text-xs"
-                >{{ diagnostic.path }}</span>
-                {{ diagnostic.message }}
-              </li>
-            </ul>
+            <WbDiagnosticList
+              :diagnostics="failure.diagnostics"
+              :status-code="failure.statusCode"
+            />
           </template>
         </UAlert>
       </UForm>

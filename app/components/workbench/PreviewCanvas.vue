@@ -734,6 +734,7 @@ function switchToBase(): void {
               width: `${dims.width * scale}px`,
               height: `${dims.height * scale}px`,
             }"
+            :aria-label="t('common.loading')"
           />
 
           <div

@@ -13,6 +13,7 @@ import {
 	type AdapterRepair,
 	type AdapterRow,
 } from '../../utils/workspace-authoring'
+import { diagnosticText } from '../../utils/diagnostic-copy'
 import AuthoringConflictAlert from './AuthoringConflictAlert.vue'
 import AuthoringErrorAlert from './AuthoringErrorAlert.vue'
 import AuthoringSaveBar from './AuthoringSaveBar.vue'
@@ -236,7 +237,7 @@ defineExpose({ save })
             :key="diagnostic.code + diagnostic.path"
             class="break-words"
           >
-            <code class="me-1 font-mono text-xs">{{ diagnostic.path || diagnostic.code }}</code>{{ diagnostic.message }}
+            <code class="me-1 font-mono text-xs">{{ diagnostic.path || diagnostic.code }}</code>{{ diagnosticText(diagnostic) }}
           </li>
         </ul>
         <template v-if="repairs.length">
@@ -351,7 +352,10 @@ defineExpose({ save })
           >
             <div class="flex gap-1">
               <dt>{{ t('adapters.adapterId') }}</dt>
-              <dd class="font-mono text-default">
+              <dd
+                class="font-mono text-default"
+                translate="no"
+              >
                 {{ summaryOf(row)?.adapterId }}
               </dd>
             </div>
@@ -360,7 +364,10 @@ defineExpose({ save })
               class="flex gap-1"
             >
               <dt>{{ t('adapters.version') }}</dt>
-              <dd class="font-mono text-default">
+              <dd
+                class="font-mono text-default"
+                translate="no"
+              >
                 {{ summaryOf(row)?.resolvedModule?.packageVersion }}
               </dd>
             </div>
@@ -369,7 +376,10 @@ defineExpose({ save })
               class="flex gap-1"
             >
               <dt>{{ t('adapters.apiVersion') }}</dt>
-              <dd class="font-mono text-default">
+              <dd
+                class="font-mono text-default"
+                translate="no"
+              >
                 {{ summaryOf(row)?.apiVersion }}
               </dd>
             </div>
@@ -388,7 +398,7 @@ defineExpose({ save })
                 name="i-lucide-circle-alert"
                 class="mt-0.5 size-3.5 shrink-0"
               />
-              <span><code class="me-1 font-mono">{{ diagnostic.code }}</code>{{ diagnostic.message }}</span>
+              <span><code class="me-1 font-mono">{{ diagnostic.code }}</code>{{ diagnosticText(diagnostic) }}</span>
             </li>
           </ul>
 

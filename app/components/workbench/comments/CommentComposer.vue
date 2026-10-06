@@ -4,6 +4,7 @@ import { useI18n } from '#imports'
 import { useWorkbench } from '../../../composables/useWorkbench'
 import { threadAuthorInitials, useCanvasComments, VIEW_ANCHOR_WIDGET_ID } from '../../../composables/useCanvasComments'
 import { flattenWidgetTree } from '../../../../src/preview/widget-tree'
+import WbErrorDescription from '../WbErrorDescription.vue'
 
 /**
  * The inline composer at the click point (brief c, sections 5 and 6): Widget chip, Variant scope,
@@ -139,11 +140,18 @@ function onKeydown(event: KeyboardEvent): void {
       variant="subtle"
       icon="i-lucide-circle-alert"
       :title="composer.error.message"
-      :description="composer.error.diagnostics.map(item => item.message).filter(item => item !== composer.error?.message).join(' ') || undefined"
       :actions="[{ label: t('common.retry'), color: 'error', variant: 'outline', size: 'xs', icon: 'i-lucide-refresh-cw', onClick: () => { void comments.sendComposer() } }]"
       :ui="{ title: 'text-sm', description: 'text-xs' }"
       data-composer-error
-    />
+    >
+      <template #description>
+        <WbErrorDescription
+          :headline="composer.error.message"
+          :diagnostics="composer.error.diagnostics"
+          :status-code="composer.error.statusCode"
+        />
+      </template>
+    </UAlert>
     <div class="flex flex-wrap items-center gap-2">
       <span class="me-auto flex min-w-0 items-center gap-1.5 text-xs text-muted">
         <UAvatar

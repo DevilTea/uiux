@@ -144,7 +144,7 @@ export function useSpecEditor(workbench: Workbench) {
 				locked.value = { lock: details.lock }
 			}
 			else if (details.statusCode === 400 || details.status === 'invalid') {
-				invalid.value = details.diagnostics.length ? details.diagnostics : [{ message: details.message }]
+				invalid.value = details.diagnostics.length ? details.diagnostics : [{ message: details.message, localized: true }]
 			}
 			else {
 				feedback.error(cause, t('spec.saveFailed'))

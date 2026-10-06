@@ -60,13 +60,20 @@ const unresolvedByView = computed(() => {
                 :key="index"
                 class="flex min-h-11 items-center gap-3 px-4 py-2"
               >
-                <USkeleton class="size-4 shrink-0" />
+                <USkeleton
+                  class="size-4 shrink-0"
+                  :aria-label="t('common.loading')"
+                />
                 <span class="flex-1 space-y-1.5">
                   <USkeleton
                     class="h-3.5"
                     :style="{ width: `${40 + (index * 23) % 45}%` }"
+                    :aria-label="t('common.loading')"
                   />
-                  <USkeleton class="h-3 w-20" />
+                  <USkeleton
+                    class="h-3 w-20"
+                    :aria-label="t('common.loading')"
+                  />
                 </span>
               </li>
             </template>

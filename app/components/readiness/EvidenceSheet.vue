@@ -61,7 +61,7 @@ function altText(entry: EvidenceEntry): string {
 	if (!context) return t('evidence.thumbAltUnknown', { view: props.viewName })
 	return t('evidence.thumbAlt', {
 		view: props.viewName,
-		context: [context.variantName ?? t('ctx.base'), `${context.viewportId} ${context.viewport.width} × ${context.viewport.height}`, context.locale, context.themeId].join(', '),
+		context: [context.variantName ?? t('ctx.base'), `${context.viewportId} ${context.viewport.width} × ${context.viewport.height}`, context.locale, context.themeId].join(t('common.listSeparator')),
 	})
 }
 

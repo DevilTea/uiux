@@ -21,6 +21,7 @@ import {
 	type InboxThread,
 } from '../../utils/review-inbox'
 import ReviewInboxFilters from './ReviewInboxFilters.vue'
+import WbErrorDescription from './WbErrorDescription.vue'
 
 /**
  * The Reviews queue (brief d): status tabs, quick toggles, structured filters and the grouped,
@@ -170,7 +171,7 @@ function authorName(item: InboxThread): string {
 }
 
 function scopeText(item: InboxThread): string {
-	return item.variantNames.length ? item.variantNames.join(', ') : t('inbox.filter.viewWide')
+	return item.variantNames.length ? fmt.list(item.variantNames) : t('inbox.filter.viewWide')
 }
 
 /** The row's accessible name joins status, author, title, place and time (brief d, section 11). */
@@ -181,12 +182,12 @@ function rowLabel(item: InboxThread): string {
 		inbox.isUnread(item) ? t('inbox.updated') : '',
 		authorName(item),
 		item.title ?? '',
-		item.scope === 'workspace' ? t('comments.workspaceComment') : `${placeText(item)}, ${scopeText(item)}`,
+		item.scope === 'workspace' ? t('comments.workspaceComment') : `${placeText(item)}${t('common.clauseSeparator')}${scopeText(item)}`,
 		item.widgetId ? `#${item.widgetId}` : '',
 		item.anchorState === 'missing' ? t('inbox.anchorMissing') : item.anchorState === 'stale' ? t('comments.staleWord') : '',
 		item.latestActivityAt ? relativeTime(item.latestActivityAt, locale.value) : '',
 		t('reviews.messageCount', item.messageCount),
-	].filter(Boolean).join(', ')
+	].filter(Boolean).join(t('common.clauseSeparator'))
 }
 
 const listbox = ref<HTMLElement>()
@@ -477,7 +478,15 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
       :title="inbox.loadError.value.message"
       :actions="[{ label: t('common.retry'), size: 'xs', color: 'error', variant: 'outline', onClick: () => { void inbox.loadSummaries() } }]"
       class="rounded-none"
-    />
+    >
+      <template #description>
+        <WbErrorDescription
+          :headline="inbox.loadError.value.message"
+          :diagnostics="inbox.loadError.value.diagnostics"
+          :status-code="inbox.loadError.value.statusCode"
+        />
+      </template>
+    </UAlert>
 
     <div
       ref="listbox"
@@ -499,11 +508,23 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
           :key="index"
           class="grid grid-cols-[16px_24px_minmax(0,1fr)] items-start gap-x-2"
         >
-          <USkeleton class="mt-1 size-4 rounded-full" />
-          <USkeleton class="size-6 rounded-full" />
+          <USkeleton
+            class="mt-1 size-4 rounded-full"
+            :aria-label="t('common.loading')"
+          />
+          <USkeleton
+            class="size-6 rounded-full"
+            :aria-label="t('common.loading')"
+          />
           <div class="grid gap-1.5">
-            <USkeleton class="h-4 w-4/5" />
-            <USkeleton class="h-3 w-1/2" />
+            <USkeleton
+              class="h-4 w-4/5"
+              :aria-label="t('common.loading')"
+            />
+            <USkeleton
+              class="h-3 w-1/2"
+              :aria-label="t('common.loading')"
+            />
           </div>
         </div>
       </div>

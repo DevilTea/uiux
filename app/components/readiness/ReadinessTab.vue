@@ -10,6 +10,7 @@ import { useReadiness } from '../../composables/useReadiness'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { reviewCoverageSummary, splitReadinessDiagnostics, type CaptureContext } from '../../utils/readiness'
 import { viewLocation } from '../../utils/workbench-routes'
+import { diagnosticText } from '../../utils/diagnostic-copy'
 import CaptureSlideover from './CaptureSlideover.vue'
 import EvidenceSheet from './EvidenceSheet.vue'
 import HandoffDiagnosticList from './HandoffDiagnosticList.vue'
@@ -255,7 +256,7 @@ const handoffFacet = computed<Facet>(() => {
                 class="text-sm"
               >
                 <span class="block font-mono text-xs text-warning">{{ finding.code }}</span>
-                <span class="block text-default">{{ finding.message }}</span>
+                <span class="block text-default">{{ diagnosticText(finding) }}</span>
                 <UButton
                   v-if="finding.widgetId"
                   size="xs"

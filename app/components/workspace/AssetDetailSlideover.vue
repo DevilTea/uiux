@@ -13,6 +13,7 @@ import LockedSaveAlert from '../workbench/LockedSaveAlert.vue'
 import AuthoringErrorAlert from './AuthoringErrorAlert.vue'
 import AuthoringSaveBar from './AuthoringSaveBar.vue'
 import { focusFirstProblem } from '../../utils/focus-problem'
+import { diagnosticText } from '../../utils/diagnostic-copy'
 
 /**
  * One Asset (brief g): preview, metadata, "Replace content…", the Views that bind it, and its
@@ -226,7 +227,7 @@ const details = computed(() => [
           color="error"
           variant="subtle"
           icon="i-lucide-circle-alert"
-          :title="diagnostic.message"
+          :title="diagnosticText(diagnostic)"
           :description="`${diagnostic.code} · ${diagnostic.path}`"
           :ui="{ description: 'font-mono text-xs' }"
         />

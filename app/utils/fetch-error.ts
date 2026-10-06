@@ -6,11 +6,20 @@
  * the JSON body the Nitro route returned (`error.data`): a top-level `message`,
  * `diagnostics[]`, or per-context `results[].error` / `results[].diagnostics[]`.
  */
-export type FetchErrorDiagnostic = Readonly<{ code?: string; path?: string; message: string }>
+import { diagnosticText } from './diagnostic-copy'
+
+/** `localized` marks a Workbench-written entry whose message is already in the UI language. */
+export type FetchErrorDiagnostic = Readonly<{ code?: string; path?: string; message: string; localized?: boolean }>
 
 export type FetchErrorDetails = Readonly<{
-	/** Human-readable summary suitable for an error alert title or toast. */
+	/**
+	 * Human-readable summary in the Workbench UI language, suitable for an error alert title or toast:
+	 * the catalog sentence for the server's code, else the caller's fallback (`utils/diagnostic-copy.ts`).
+	 * In en-US it is the server's own message.
+	 */
 	message: string
+	/** The refusal's stable code, from the body or its first diagnostic. */
+	code?: string
 	/** Structured diagnostics reported by the server, if any. */
 	diagnostics: readonly FetchErrorDiagnostic[]
 	/** HTTP status code when the failure came from an HTTP response. */
@@ -55,13 +64,18 @@ export function describeFetchError(cause: unknown, fallback: string): FetchError
 		|| stringField(bodyRecord, 'code') === 'persistence.busy'
 		|| bodyRecord?.retryable === true
 
-	const message = bodyMessage
+	const code = stringField(bodyRecord, 'code') ?? diagnostics[0]?.code
+	const raw = bodyMessage
 		?? diagnostics[0]?.message
 		?? (cause instanceof Error && !isTransportMessage(cause.message) ? cause.message : undefined)
-		?? fallback
+	const message = diagnosticText({ code, message: raw }, fallback)
+	// The server's own words move into Details when the headline no longer shows them.
+	if (raw && message !== raw && !diagnostics.some(item => item.message === raw))
+		diagnostics.unshift({ message: raw, ...(code ? { code } : {}) })
 
 	return Object.freeze({
 		message,
+		...(code ? { code } : {}),
 		diagnostics: Object.freeze(diagnostics),
 		...(statusCode !== undefined ? { statusCode } : {}),
 		...(status ? { status } : {}),
@@ -85,12 +99,14 @@ function lockField(body: Record<string, unknown> | undefined): FetchErrorLock | 
 	})
 }
 
-/** Joins the summary and any distinct diagnostic messages into a single line. */
+/** Joins the summary and any distinct diagnostic sentences (in the UI language) into a single line. */
 export function formatFetchError(cause: unknown, fallback: string): string {
 	const details = describeFetchError(cause, fallback)
-	const extra = details.diagnostics
-		.map(item => item.message)
-		.filter(item => item && item !== details.message)
+	const extra: string[] = []
+	for (const item of details.diagnostics) {
+		const text = diagnosticText(item)
+		if (text && text !== details.message && !extra.includes(text)) extra.push(text)
+	}
 	return extra.length ? `${details.message} ${extra.join(' ')}` : details.message
 }
 

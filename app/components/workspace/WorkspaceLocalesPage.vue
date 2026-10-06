@@ -19,6 +19,7 @@ import {
 	type LocaleCellState,
 } from '../../utils/workspace-authoring'
 import WorkbenchPage from '../workbench/WorkbenchPage.vue'
+import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 import AuthoringAccessNotice from './AuthoringAccessNotice.vue'
 import LockBadge from '../workbench/LockBadge.vue'
 import LockedSaveAlert from '../workbench/LockedSaveAlert.vue'
@@ -28,6 +29,7 @@ import AuthoringSaveBar from './AuthoringSaveBar.vue'
 import NewLocaleModal from './NewLocaleModal.vue'
 import UnsavedLeaveModal from './UnsavedLeaveModal.vue'
 import { focusFirstProblem } from '../../utils/focus-problem'
+import { diagnosticText } from '../../utils/diagnostic-copy'
 
 /**
  * Locales as a key × Locale table (brief g). Every key of every Locale is one row; the primary
@@ -505,7 +507,7 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
                 v-for="diagnostic in state.diagnostics"
                 :key="diagnostic.code + diagnostic.path"
               >
-                <code class="me-1 font-mono text-xs">{{ diagnostic.path || diagnostic.code }}</code>{{ diagnostic.message }}
+                <code class="me-1 font-mono text-xs">{{ diagnostic.path || diagnostic.code }}</code>{{ diagnosticText(diagnostic) }}
               </li>
             </ul>
           </template>
@@ -667,9 +669,17 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
         role="alert"
         class="mb-4"
         :title="t('locales.loadListFailed')"
-        :description="loadError.message"
         :actions="[{ label: t('common.retry'), color: 'neutral', variant: 'outline', onClick: () => { void load() } }]"
-      />
+      >
+        <template #description>
+          <WbErrorDescription
+            :headline="t('locales.loadListFailed')"
+            :lead="loadError.message"
+            :diagnostics="loadError.diagnostics"
+            :status-code="loadError.statusCode"
+          />
+        </template>
+      </UAlert>
 
       <div
         v-if="loading && !states.length"
@@ -680,6 +690,7 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
           v-for="n in 12"
           :key="n"
           class="h-8 w-full"
+          :aria-label="t('common.loading')"
         />
       </div>
 

@@ -2,7 +2,7 @@ import { useI18n } from '#imports'
 
 /** Intl formatting bound to the active Workbench chrome locale. */
 export function useWorkbenchFormat() {
-	const { locale } = useI18n()
+	const { locale, t } = useI18n()
 
 	function toDate(value: string | number | Date | undefined | null): Date | undefined {
 		if (value === undefined || value === null || value === '') return undefined
@@ -47,5 +47,15 @@ export function useWorkbenchFormat() {
 		}).format(amount)
 	}
 
-	return { dateTime, date, time, number, bytes }
+	/** A list of names, e.g. "compact, empty" / "compact、empty". */
+	function list(items: readonly string[]): string {
+		return items.filter(Boolean).join(t('common.listSeparator'))
+	}
+
+	/** Clauses of one accessible name, e.g. "Open, mei, 2 messages" / "未解決，mei，2 則訊息". */
+	function clauses(items: readonly string[]): string {
+		return items.filter(Boolean).join(t('common.clauseSeparator'))
+	}
+
+	return { dateTime, date, time, number, bytes, list, clauses }
 }

@@ -190,7 +190,10 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
               data-attention
             >
               <template v-if="loading">
-                <USkeleton class="h-8 w-80 max-w-full" />
+                <USkeleton
+                  class="h-8 w-80 max-w-full"
+                  :aria-label="t('common.loading')"
+                />
               </template>
               <template v-else-if="!views.length">
                 {{ t('firstRun.headline') }}

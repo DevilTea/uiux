@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { definePageMeta, useI18n, useRoute } from '#imports'
 import { useUiuxClient } from '../composables/useUiuxClient'
 import { describeFetchError } from '../utils/fetch-error'
+import { diagnosticText } from '../utils/diagnostic-copy'
 import { resolveDefaultLocale, resolveDefaultThemeId } from '../../src/preview/render-context-options'
 import type { WorkspaceManifest } from '../../src/domain/workspace/schema'
 import { RuntimePreviewProtocolBridge } from '../../src/preview/protocol/bridge'
@@ -598,6 +599,7 @@ onUnmounted(() => {
                 variant="soft"
                 size="sm"
                 class="font-mono"
+                translate="no"
               >
                 adapter.materialization_unavailable
               </UBadge>
@@ -646,7 +648,7 @@ onUnmounted(() => {
               v-for="diag in materializationResult.diagnostics"
               :key="diag.code + diag.path"
             >
-              <span class="font-mono font-medium">[{{ diag.code }}]</span> {{ diag.path }}: {{ diag.message }}
+              <span class="font-mono font-medium">[{{ diag.code }}]</span> {{ diag.path }}: {{ diagnosticText(diag) }}
             </li>
           </ul>
         </template>

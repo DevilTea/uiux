@@ -6,7 +6,7 @@ import { useWorkbench } from '../../composables/useWorkbench'
 import type { FetchErrorDetails } from '../../utils/fetch-error'
 import { isSubmittable, SUGGESTED_CHANGE_DOMAINS, type ReviewSubmissionDraft } from '../../utils/review-submission'
 import { viewLocation } from '../../utils/workbench-routes'
-import WbErrorDetails from './WbErrorDetails.vue'
+import WbErrorDescription from './WbErrorDescription.vue'
 
 /**
  * "Submit for review…" (brief c, section 12; roadmap R12): a human moves an open thread to
@@ -44,6 +44,17 @@ const domainItems = computed(() => {
 	const known = new Set<string>(SUGGESTED_CHANGE_DOMAINS)
 	return [...known, ...domains.value.filter(domain => !known.has(domain))]
 })
+
+/**
+ * reka-ui names the menu's chevron trigger "Show popup" in English and Nuxt UI's InputMenu does
+ * not forward an accessible name for it, so it is named here once the field is mounted.
+ */
+watch([domainInput, () => t('submit.showDomains')], ([input, label]) => {
+	if (!input) return
+	void nextTick(() => {
+		document.querySelector('[data-submit-domains]')?.closest('[data-slot="base"]')?.querySelector('[data-slot="trailing"]')?.setAttribute('aria-label', label)
+	})
+}, { flush: 'post' })
 
 function onCreateDomain(item: string): void {
 	const value = item.trim()
@@ -127,14 +138,19 @@ async function send(): Promise<void> {
             :icon="conflict ? 'i-lucide-refresh-cw' : 'i-lucide-circle-alert'"
             role="alert"
             :title="conflict ? t('comments.conflict') : t('submit.failed')"
-            :description="conflict ? t('submit.conflictHint') : error?.message"
+            :description="conflict ? t('submit.conflictHint') : undefined"
             data-submit-error
           >
             <template
-              v-if="!conflict && error?.diagnostics.length"
-              #footer
+              v-if="!conflict && error"
+              #description
             >
-              <WbErrorDetails :diagnostics="error.diagnostics" />
+              <WbErrorDescription
+                :headline="t('submit.failed')"
+                :lead="error.message"
+                :diagnostics="error.diagnostics"
+                :status-code="error.statusCode"
+              />
             </template>
           </UAlert>
         </div>
@@ -189,6 +205,7 @@ async function send(): Promise<void> {
               v-for="index in 3"
               :key="index"
               class="h-9 w-full"
+              :aria-label="t('common.loading')"
             />
           </div>
           <div

@@ -10,7 +10,7 @@ import { copyText } from '../../utils/copy-text'
 import type { FetchErrorDetails } from '../../utils/fetch-error'
 import { splitReadinessDiagnostics } from '../../utils/readiness'
 import HandoffDiagnosticList from './HandoffDiagnosticList.vue'
-import WbErrorDetails from '../workbench/WbErrorDetails.vue'
+import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 
 /**
  * Export handoff (brief f, section 5): explicit roots (the whole Workspace, or chosen Views,
@@ -165,6 +165,7 @@ function middle(value: string | undefined): string {
             variant="subtle"
             icon="i-lucide-badge-check"
             data-handoff-claim="ready"
+            translate="no"
           >
             implementation-ready
           </UBadge>
@@ -220,15 +221,13 @@ function middle(value: string | undefined): string {
           variant="subtle"
           icon="i-lucide-circle-alert"
           :title="t('handoff.exportFailed')"
-          :description="exportError.message"
           role="alert"
           data-handoff-export-error
         >
-          <template
-            v-if="exportError.diagnostics.length"
-            #footer
-          >
-            <WbErrorDetails
+          <template #description>
+            <WbErrorDescription
+              :headline="t('handoff.exportFailed')"
+              :lead="exportError.message"
               :diagnostics="exportError.diagnostics"
               :status-code="exportError.statusCode"
             />
@@ -284,9 +283,18 @@ function middle(value: string | undefined): string {
             v-if="!entry || entry.status === 'loading' && !entry.readiness"
             class="space-y-2"
           >
-            <USkeleton class="h-5 w-48" />
-            <USkeleton class="h-4 w-full" />
-            <USkeleton class="h-4 w-2/3" />
+            <USkeleton
+              class="h-5 w-48"
+              :aria-label="t('common.loading')"
+            />
+            <USkeleton
+              class="h-4 w-full"
+              :aria-label="t('common.loading')"
+            />
+            <USkeleton
+              class="h-4 w-2/3"
+              :aria-label="t('common.loading')"
+            />
           </div>
 
           <UAlert
@@ -295,8 +303,19 @@ function middle(value: string | undefined): string {
             variant="subtle"
             icon="i-lucide-circle-alert"
             :title="t('handoff.assessFailed')"
-            :description="entry.error?.message"
-          />
+          >
+            <template
+              v-if="entry.error"
+              #description
+            >
+              <WbErrorDescription
+                :headline="t('handoff.assessFailed')"
+                :lead="entry.error.message"
+                :diagnostics="entry.error.diagnostics"
+                :status-code="entry.error.statusCode"
+              />
+            </template>
+          </UAlert>
 
           <template v-else>
             <p

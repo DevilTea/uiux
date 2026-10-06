@@ -9,7 +9,7 @@ export type WidgetTreeNode = Readonly<{
 
 export type DeriveWidgetTreeResult =
 	| Readonly<{ status: 'valid'; root: WidgetTreeNode }>
-	| Readonly<{ status: 'invalid'; reason: string }>
+	| Readonly<{ status: 'invalid'; code: string; reason: string }>
 
 /**
  * Derives a canonical hierarchical widget tree from View.ir.
@@ -17,17 +17,17 @@ export type DeriveWidgetTreeResult =
  */
 export function deriveWidgetTree(ir: unknown): DeriveWidgetTreeResult {
 	if (!isRecord(ir))
-		return { status: 'invalid', reason: 'IR must be a JSON object.' }
+		return { status: 'invalid', code: 'widget_tree.ir_not_object', reason: 'IR must be a JSON object.' }
 
 	if (typeof ir.id !== 'string' || !ir.id)
-		return { status: 'invalid', reason: 'Widget node must have a non-empty string id.' }
+		return { status: 'invalid', code: 'widget_tree.missing_id', reason: 'Widget node must have a non-empty string id.' }
 
 	if (typeof ir.type !== 'string' || !ir.type)
-		return { status: 'invalid', reason: 'Widget node must have a non-empty string type.' }
+		return { status: 'invalid', code: 'widget_tree.missing_type', reason: 'Widget node must have a non-empty string type.' }
 
 	const rootNode = parseWidgetNode(ir, 0)
 	if (!rootNode)
-		return { status: 'invalid', reason: 'Failed to parse root widget node.' }
+		return { status: 'invalid', code: 'widget_tree.unparsable_root', reason: 'Failed to parse root widget node.' }
 
 	return { status: 'valid', root: rootNode }
 }
