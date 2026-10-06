@@ -355,3 +355,64 @@ describe('Dismiss presentation (retract addendum decision 11)', () => {
 		finally { await context.close() }
 	}, 60_000)
 })
+
+describe('Shared thread actions (bubble and inbox detail)', () => {
+	/** The resolution is derived from the last lifecycle event entering `resolved`. */
+	const resolutionOf = async (id: string) => ((await read(id)).resource as { history?: { kind: string; to?: string; resolution?: string }[] }).history
+		?.filter(event => event.kind === 'lifecycle' && event.to === 'resolved').at(-1)?.resolution
+
+	it('asks for Duplicate\'s reason first, on the canvas bubble and in the inbox detail', async () => {
+		const onCanvas = await seed('mei', { viewId: VIEW_ID, widgetId: 'app-title' }, 'Same as the header thread.')
+		const inInbox = await seed('mei', { scope: 'workspace' }, 'Same as the date-format thread.')
+		const { context, page } = await open(`/views/${VIEW_ID}?thread=${onCanvas}&panel=comments`)
+		try {
+			await page.waitForSelector('[data-session-status][data-status="live"]', { timeout: 20_000 })
+			const bubble = page.locator('[data-thread-bubble]')
+			await bubble.waitFor({ timeout: 15_000 })
+			await bubble.locator('[data-thread-resolve-menu]').click()
+			await page.getByRole('menuitem', { name: 'Duplicate…' }).click()
+			await poll(() => activeMatches(page, '[data-thread-reason] input')).toBe(true)
+			expect(await bubble.locator('[data-thread-reason-confirm]').isDisabled()).toBe(true)
+			await page.keyboard.type('See the header thread.')
+			await page.keyboard.press('Enter')
+			await poll(() => resolutionOf(onCanvas)).toBe('duplicate')
+
+			await page.goto(`${server.origin}/reviews?thread=${inInbox}`, { waitUntil: 'networkidle' })
+			const thread = detail(page, inInbox)
+			await thread.locator('[data-message-id]').first().waitFor()
+			await thread.locator('[data-review-resolve-menu]').click()
+			await page.getByRole('menuitem', { name: 'Duplicate…' }).click()
+			await poll(() => activeMatches(page, '[data-thread-reason] input')).toBe(true)
+			await page.keyboard.type('See the date-format thread.')
+			await thread.locator('[data-thread-reason-confirm]').click()
+			await poll(() => resolutionOf(inInbox)).toBe('duplicate')
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('opens Promote to Decision on the thread title from both surfaces', async () => {
+		const id = await seed('mei', { viewId: VIEW_ID, widgetId: 'app-title' }, 'Should the title wrap or truncate?')
+		const { context, page } = await open(`/views/${VIEW_ID}?thread=${id}&panel=comments`)
+		try {
+			await page.waitForSelector('[data-session-status][data-status="live"]', { timeout: 20_000 })
+			const bubble = page.locator('[data-thread-bubble]')
+			await bubble.waitFor({ timeout: 15_000 })
+			for (const surface of ['bubble', 'detail'] as const) {
+				if (surface === 'detail') {
+					await page.goto(`${server.origin}/reviews?thread=${id}`, { waitUntil: 'networkidle' })
+					await detail(page, id).locator('[data-message-id]').first().waitFor()
+				}
+				const root = surface === 'bubble' ? bubble : detail(page, id)
+				await root.locator('[aria-label="More"]').first().click()
+				await page.getByRole('menuitem', { name: 'Promote to Decision' }).click()
+				const dialog = page.getByRole('dialog', { name: 'Promote to Decision' })
+				await dialog.waitFor()
+				expect(await dialog.getByRole('textbox').first().inputValue(), surface).toContain('Should the title wrap or truncate?')
+				await dialog.getByRole('button', { name: 'Cancel' }).click()
+				await poll(() => dialog.count()).toBe(0)
+			}
+			expect((await read(id)).resource.status).toBe('open')
+		}
+		finally { await context.close() }
+	}, 90_000)
+})

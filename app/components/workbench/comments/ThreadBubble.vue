@@ -1,24 +1,23 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { navigateTo, useI18n } from '#imports'
-import type { DropdownMenuItem } from '@nuxt/ui'
 import { useWorkbench } from '../../../composables/useWorkbench'
 import { relativeTime } from '../../../utils/widget-inspection'
-import { useWorkbenchFeedback } from '../../../composables/useWorkbenchFeedback'
 import { statusKey, useCanvasComments } from '../../../composables/useCanvasComments'
+import { useThreadActions } from '../../../composables/useThreadActions'
 import { isWorkspaceAnchor, type ReviewActor, type ReviewAnchor, type ReviewResolution } from '../../../../src/domain/reviews/schema'
 import { flattenWidgetTree } from '../../../../src/preview/widget-tree'
 import { buildReviewTimeline, type ReviewTimelineItem } from '../../../utils/review-timeline'
 import { isDismissal } from '../../../utils/review-inbox'
-import { resolveMenuGroups } from '../../../utils/resolve-menu'
-import { latestEditableMessageId, retractEligibility } from '../../../utils/review-message-actions'
+import { latestEditableMessageId } from '../../../utils/review-message-actions'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../../composables/useMediaQuery'
-import { isLockedError, type FetchErrorDetails } from '../../../utils/fetch-error'
-import type { ReviewSubmissionDraft } from '../../../utils/review-submission'
+import { isLockedError } from '../../../utils/fetch-error'
 import LockedSaveAlert from '../LockedSaveAlert.vue'
 import RetractConfirm from '../RetractConfirm.vue'
 import ReviewMessage from '../ReviewMessage.vue'
 import SubmitForReviewModal from '../SubmitForReviewModal.vue'
+import ThreadPromoteModal from '../ThreadPromoteModal.vue'
+import ThreadReasonPrompt from '../ThreadReasonPrompt.vue'
 import WbErrorDescription from '../WbErrorDescription.vue'
 
 /**
@@ -29,7 +28,6 @@ import WbErrorDescription from '../WbErrorDescription.vue'
 const props = defineProps<{ threadId: string }>()
 
 const { t, locale } = useI18n()
-const feedback = useWorkbenchFeedback()
 const workbench = useWorkbench()
 const comments = useCanvasComments()!
 const { preview, widgetTreeResult, selectedVariant } = workbench
@@ -87,8 +85,6 @@ const placementNote = computed(() => {
 
 const timeline = computed<readonly ReviewTimelineItem[]>(() => detail.value ? buildReviewTimeline(detail.value) : [])
 
-const activeSubmission = computed(() => thread.value?.status === 'ready-for-review' ? detail.value?.submissions.at(-1) : undefined)
-
 // ---------------------------------------------------------------------------------------------
 // Reply and lifecycle
 // ---------------------------------------------------------------------------------------------
@@ -101,25 +97,55 @@ const reply = computed({
 const conflict = computed(() => comments.conflict.value === props.threadId)
 const error = computed(() => comments.lastError.value?.threadId === props.threadId ? comments.lastError.value.error : undefined)
 
-/** A second step for kinds that ask something first: Duplicate's reason, or Reopen's optional reason. */
-const pendingAction = ref<'duplicate' | 'reopen'>()
-const reason = ref('')
-const reasonInput = ref<{ inputRef?: HTMLInputElement }>()
-
-function ask(action: 'duplicate' | 'reopen'): void {
-	pendingAction.value = action
-	reason.value = ''
-	void nextTick(() => reasonInput.value?.inputRef?.focus())
+function startReanchor(): void {
+	comments.close()
+	preview.startReanchor(props.threadId)
 }
 
-async function confirmPending(): Promise<void> {
-	const action = pendingAction.value
-	if (action === 'duplicate') {
-		if (!reason.value.trim()) return
-		if (await comments.resolve(props.threadId, 'duplicate', reason.value)) pendingAction.value = undefined
-	}
-	else if (action === 'reopen' && await comments.reopen(props.threadId, reason.value)) pendingAction.value = undefined
+function threadLink(): string {
+	const url = new URL(window.location.href)
+	url.searchParams.set('thread', props.threadId)
+	return url.toString()
 }
+
+// Phones read, reply and triage only (DESIGN.md "Mobile"): Re-anchor and Promote to Decision are
+// left out there, as in the Reviews sheet. Submit for review is desktop-first.
+const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
+const isPhone = useMediaQuery(WORKBENCH_BREAKPOINTS.phone)
+const canSubmit = computed(() => thread.value?.status === 'open' && comments.canComment.value && isDesktop.value)
+
+const actions = useThreadActions({
+	thread: () => thread.value,
+	detail: () => detail.value,
+	me: () => comments.me.value,
+	canWrite: () => comments.canComment.value,
+	canReanchor: () => comments.canComment.value && !isPhone.value,
+	canPromote: () => !workbench.authorReadOnly.value && !isPhone.value,
+	canSubmit: () => canSubmit.value,
+	conflict: () => conflict.value,
+	error: () => error.value,
+	retractRefused: () => comments.retractRefused.value === props.threadId,
+	clearRetractRefused: () => { comments.retractRefused.value = undefined },
+	resolve: (id, resolution, reason) => comments.resolve(id, resolution, reason),
+	reopen: (id, reason) => comments.reopen(id, reason),
+	// The canvas store sends the rationale as typed; an empty one repeats the summary.
+	promote: (id, form) => comments.promote(id, { ...form, rationale: form.rationale || form.summary }),
+	submit: (id, draft) => comments.submit(id, draft),
+	retract: id => comments.retract(id),
+	reanchor: startReanchor,
+	threadLink,
+	reanchorLabel: () => t('thread.reanchor'),
+	extraOverflow: () => [{ label: t('comments.openInReviews'), icon: 'i-lucide-inbox', onSelect: () => { void navigateTo({ path: '/reviews', query: { thread: props.threadId } }) } }],
+	afterPromote: () => workbench.loadSelectedView(preview.notifyIframeContext),
+})
+const {
+	activeSubmission, primaryResolution, resolveAs, resolveMenu,
+	pendingAction, reason, reasonInput, ask, confirmPending,
+	confirmingDelete, deleteRefused, retractConfirm, keepConfirmFocus, confirmDelete,
+	promoteOpen, submitPromote,
+	submitOpen, submitError, submitConflict, submitForReview,
+	overflow,
+} = actions
 
 async function sendReply(): Promise<void> {
 	await comments.reply(props.threadId)
@@ -141,15 +167,6 @@ function onReplyKeydown(event: KeyboardEvent): void {
 	}
 }
 
-/** Grouped: Resolve (Answered, Verified) and Dismiss (No longer relevant, Duplicate…, Won't do). */
-const resolveMenu = computed<DropdownMenuItem[][]>(() => resolveMenuGroups({
-	t,
-	status: thread.value?.status ?? 'open',
-	canVerify: !!activeSubmission.value,
-	resolve: (resolution) => { void comments.resolve(props.threadId, resolution) },
-	askDuplicate: () => ask('duplicate'),
-}))
-
 // Editing a message inline (scope/edit decisions 11–16)
 const editingMessageId = computed<string | undefined>({
 	get: () => comments.editingMessage.value?.threadId === props.threadId ? comments.editingMessage.value.messageId : undefined,
@@ -161,110 +178,6 @@ const editingMessageId = computed<string | undefined>({
 async function saveEdit(messageId: string, body: string): Promise<void> {
 	if (await comments.editMessage(props.threadId, messageId, body)) void nextTick(() => replyArea.value?.textareaRef?.focus({ preventScroll: true }))
 }
-
-// Delete comment (retract addendum decision 8): only while eligible, confirmed inline
-const retract = computed(() => comments.canComment.value ? retractEligibility(detail.value, comments.me.value) : { eligible: false as const })
-const confirmingDelete = ref(false)
-const deleteRefused = computed(() => comments.retractRefused.value === props.threadId)
-/** The menu would hand focus back to its trigger as it closes; the delete confirm keeps it on Cancel. */
-const retractConfirm = ref<InstanceType<typeof RetractConfirm>>()
-function keepConfirmFocus(event: Event): void {
-	if (!confirmingDelete.value) return
-	event.preventDefault()
-	void nextTick(() => retractConfirm.value?.focusCancel())
-}
-function askDelete(): void {
-	comments.retractRefused.value = undefined
-	pendingAction.value = undefined
-	confirmingDelete.value = true
-}
-async function confirmDelete(): Promise<void> {
-	await comments.retract(props.threadId)
-	confirmingDelete.value = false
-}
-watch(() => retract.value.eligible, (eligible) => { if (!eligible) confirmingDelete.value = false })
-
-// ---------------------------------------------------------------------------------------------
-// Overflow menu: Copy link, Re-anchor, Promote to Decision, Open in Reviews, Copy thread ID
-// ---------------------------------------------------------------------------------------------
-
-async function copy(text: string, title: string): Promise<void> {
-	try {
-		await navigator.clipboard.writeText(text)
-		feedback.success(title)
-	}
-	catch (cause) {
-		feedback.error(cause, t('comments.errors.copyFailed'))
-	}
-}
-
-function threadLink(): string {
-	const url = new URL(window.location.href)
-	url.searchParams.set('thread', props.threadId)
-	return url.toString()
-}
-
-const promoteOpen = ref(false)
-const promoteForm = reactive({ question: '', summary: '', rationale: '' })
-/** A rejected promotion shows its error inside the dialog (not behind it) and takes focus there. */
-const promoteFailed = ref(false)
-watch(promoteOpen, (value) => { if (value) promoteFailed.value = false })
-async function focusPromoteError(): Promise<void> {
-	promoteFailed.value = true
-	await nextTick()
-	document.querySelector<HTMLElement>('[data-promote-error]')?.focus()
-}
-
-async function submitPromote(): Promise<void> {
-	if (!promoteForm.question.trim() || !promoteForm.summary.trim()) return
-	if (await comments.promote(props.threadId, { question: promoteForm.question, summary: promoteForm.summary, rationale: promoteForm.rationale || promoteForm.summary })) {
-		promoteOpen.value = false
-		feedback.success(t('reviews.feedback.promoted'))
-		await workbench.loadSelectedView(preview.notifyIframeContext)
-	}
-	else await focusPromoteError()
-}
-
-function startReanchor(): void {
-	comments.close()
-	preview.startReanchor(props.threadId)
-}
-
-// Submit for review… (human submission; secondary, desktop-first)
-const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
-const canSubmit = computed(() => thread.value?.status === 'open' && comments.canComment.value && isDesktop.value)
-const submitOpen = ref(false)
-const submitError = ref<FetchErrorDetails>()
-const submitConflict = ref(false)
-watch(submitOpen, (value) => {
-	if (value) {
-		submitError.value = undefined
-		submitConflict.value = false
-	}
-})
-async function submitForReview(draft: ReviewSubmissionDraft): Promise<boolean> {
-	const ok = await comments.submit(props.threadId, draft)
-	if (ok) feedback.success(t('submit.announce'))
-	else {
-		submitConflict.value = comments.conflict.value === props.threadId
-		submitError.value = comments.lastError.value?.threadId === props.threadId ? comments.lastError.value.error : undefined
-	}
-	return ok
-}
-
-const overflow = computed<DropdownMenuItem[][]>(() => {
-	const groups: DropdownMenuItem[][] = [[
-		{ label: t('thread.copyLink'), icon: 'i-lucide-link', onSelect: () => { void copy(threadLink(), t('comments.copiedLink')) } },
-		...(canSubmit.value ? [{ label: t('thread.submit'), icon: 'i-lucide-eye', onSelect: () => { submitOpen.value = true } }] : []),
-		...(comments.canComment.value ? [{ label: t('thread.reanchor'), icon: 'i-lucide-crosshair', onSelect: startReanchor }] : []),
-		...(workbench.authorReadOnly.value ? [] : [{ label: t('thread.promote'), icon: 'i-lucide-signpost', onSelect: () => { promoteForm.question = thread.value?.title ?? ''; promoteOpen.value = true } }]),
-		{ label: t('comments.openInReviews'), icon: 'i-lucide-inbox', onSelect: () => { void navigateTo({ path: '/reviews', query: { thread: props.threadId } }) } },
-		{ label: t('comments.copyThreadId'), icon: 'i-lucide-copy', onSelect: () => { void copy(props.threadId, t('comments.copiedId')) } },
-	]]
-	if (retract.value.eligible)
-		groups.push([{ label: retract.value.empty ? t('comments.deleteEmpty') : t('comments.delete'), icon: 'i-lucide-trash-2', color: 'error', onSelect: askDelete }])
-	return groups
-})
 
 function switchVariant(name: string): void {
 	selectedVariant.value = name
@@ -281,8 +194,6 @@ onMounted(() => {
 	})
 })
 watch(() => props.threadId, () => {
-	pendingAction.value = undefined
-	confirmingDelete.value = false
 	if (comments.browsingPins.value) return
 	void nextTick(() => (replyArea.value?.textareaRef ?? root.value)?.focus({ preventScroll: true }))
 })
@@ -343,7 +254,7 @@ watch(() => props.threadId, () => {
       icon="i-lucide-unlink"
       :title="t('comments.widgetGone')"
       :description="t('comments.widgetGoneHint', { id: `#${thread.anchor.widgetId}` })"
-      :actions="comments.canComment.value ? [{ label: t('thread.reanchor'), icon: 'i-lucide-crosshair', size: 'xs', color: 'neutral', variant: 'outline', onClick: startReanchor }] : undefined"
+      :actions="comments.canComment.value && !isPhone ? [{ label: t('thread.reanchor'), icon: 'i-lucide-crosshair', size: 'xs', color: 'neutral', variant: 'outline', onClick: startReanchor }] : undefined"
       :ui="{ title: 'text-sm', description: 'text-xs' }"
       data-thread-missing
     />
@@ -562,38 +473,16 @@ watch(() => props.threadId, () => {
       </div>
     </template>
 
-    <div
+    <ThreadReasonPrompt
       v-if="pendingAction && !confirmingDelete"
-      class="grid gap-2 rounded-md bg-muted p-2"
-      data-thread-reason
-    >
-      <UInput
-        ref="reasonInput"
-        v-model="reason"
-        size="sm"
-        :placeholder="pendingAction === 'duplicate' ? t('comments.duplicateReason') : t('comments.reopenReason')"
-        :aria-label="pendingAction === 'duplicate' ? t('comments.duplicateReason') : t('comments.reopenReason')"
-        @keydown.enter.prevent="confirmPending"
-      />
-      <div class="flex justify-end gap-2">
-        <UButton
-          size="xs"
-          color="neutral"
-          variant="ghost"
-          :label="t('common.cancel')"
-          @click="pendingAction = undefined"
-        />
-        <UButton
-          size="xs"
-          color="primary"
-          variant="solid"
-          :disabled="pendingAction === 'duplicate' && !reason.trim()"
-          :loading="!!comments.busy.value"
-          :label="pendingAction === 'duplicate' ? t('comments.resolveAsDuplicate') : t('thread.reopen')"
-          @click="confirmPending"
-        />
-      </div>
-    </div>
+      ref="reasonInput"
+      v-model="reason"
+      :action="pendingAction"
+      :busy="!!comments.busy.value"
+      size="xs"
+      @confirm="confirmPending"
+      @cancel="pendingAction = undefined"
+    />
 
     <template v-else-if="comments.canComment.value && !confirmingDelete">
       <!-- Open: one-click Resolve answers the discussion; the menu offers the other kinds. -->
@@ -622,7 +511,7 @@ watch(() => props.threadId, () => {
             :disabled="thread.status === 'ready-for-review' && !activeSubmission"
             :aria-describedby="`resolve-hint-${thread.id}`"
             data-thread-resolve
-            @click="comments.resolve(thread.id, thread.status === 'ready-for-review' ? 'verified' : 'answered')"
+            @click="resolveAs(primaryResolution)"
           />
           <UDropdownMenu
             :items="resolveMenu"
@@ -678,73 +567,13 @@ watch(() => props.threadId, () => {
       :conflict="submitConflict"
     />
 
-    <UModal
+    <ThreadPromoteModal
       v-model:open="promoteOpen"
-      :title="t('reviews.promote.title')"
-      :description="t('reviews.promote.description')"
-    >
-      <template #body>
-        <form
-          class="grid gap-3"
-          @submit.prevent="submitPromote"
-        >
-          <UAlert
-            v-if="promoteFailed && (error || conflict)"
-            :color="conflict ? 'warning' : 'error'"
-            variant="subtle"
-            :icon="conflict ? 'i-lucide-refresh-cw' : 'i-lucide-circle-alert'"
-            role="alert"
-            tabindex="-1"
-            :title="conflict ? t('comments.conflict') : error?.message"
-            :description="conflict ? t('comments.conflictHint') : undefined"
-            data-promote-error
-          />
-          <UFormField
-            :label="t('reviews.promote.questionLabel')"
-            required
-          >
-            <UInput
-              v-model="promoteForm.question"
-              class="w-full"
-              :placeholder="t('reviews.promote.questionPlaceholder')"
-            />
-          </UFormField>
-          <UFormField
-            :label="t('reviews.promote.summaryLabel')"
-            required
-          >
-            <UInput
-              v-model="promoteForm.summary"
-              class="w-full"
-              :placeholder="t('reviews.promote.summaryPlaceholder')"
-            />
-          </UFormField>
-          <UFormField :label="t('reviews.promote.rationaleLabel')">
-            <UTextarea
-              v-model="promoteForm.rationale"
-              class="w-full"
-              :rows="2"
-              :placeholder="t('reviews.promote.rationalePlaceholder')"
-            />
-          </UFormField>
-          <div class="flex justify-end gap-2">
-            <UButton
-              color="neutral"
-              variant="ghost"
-              :label="t('common.cancel')"
-              @click="promoteOpen = false"
-            />
-            <UButton
-              type="submit"
-              color="primary"
-              variant="solid"
-              :loading="comments.busy.value === 'promote'"
-              :disabled="!promoteForm.question.trim() || !promoteForm.summary.trim()"
-              :label="t('reviews.promote.submit')"
-            />
-          </div>
-        </form>
-      </template>
-    </UModal>
+      :question="thread.title"
+      :busy="comments.busy.value === 'promote'"
+      :error="error"
+      :conflict="conflict"
+      :submit="submitPromote"
+    />
   </div>
 </template>
