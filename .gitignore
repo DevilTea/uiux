@@ -33,3 +33,7 @@ test-results/
 # UIUX live-server Workspace hold (local runtime state, never canonical)
 **/.uiux/.server-hold.json
 **/.uiux/.server-hold-*.tmp
+
+# Persistence lock temp files written while a mutation holds the Workspace lock
+**/.uiux/.persistence-lock-*
+**/.uiux/.persistence.lock
