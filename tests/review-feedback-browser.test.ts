@@ -143,7 +143,7 @@ describe('Comments can always be started, or say why not (feedback 2)', () => {
 			await page.keyboard.press('Escape')
 			await expect.poll(() => pressedTool(page)).toBe('select')
 			// The canvas still offers its commands in the palette.
-			await page.keyboard.press('Meta+k')
+			await page.keyboard.press('ControlOrMeta+k')
 			await page.getByRole('option', { name: /Comment on this View/ }).waitFor({ timeout: 10_000 })
 		}
 		finally { await context.close() }
@@ -180,7 +180,7 @@ describe('Comments on the View as a whole (feedback 3)', () => {
 			expect(Math.abs(pendingBox.x - frameBox.x)).toBeLessThan(40)
 			expect(Math.abs(pendingBox.y + pendingBox.height - frameBox.y)).toBeLessThan(40)
 			await page.keyboard.type('The rhythm between sections feels uneven overall.')
-			await page.keyboard.press('Meta+Enter')
+			await page.keyboard.press('ControlOrMeta+Enter')
 			await page.locator('[data-thread-bubble]').waitFor({ timeout: 10_000 })
 
 			const reviews = await api<{ items: { key: string; summary: { anchor?: { viewId: string; widgetId: string } } }[] }>('/api/resources/list', { kinds: ['review'], limit: 100 })
@@ -204,7 +204,7 @@ describe('Comments on the View as a whole (feedback 3)', () => {
 			await page.locator('[data-composer-target="view"]').waitFor()
 			await page.keyboard.press('Escape')
 			await expect.poll(() => page.locator('[data-comment-composer]').count()).toBe(0)
-			await page.keyboard.press('Meta+k')
+			await page.keyboard.press('ControlOrMeta+k')
 			await page.getByRole('option', { name: /Comment on this View/ }).click()
 			await page.locator('[data-composer-target="view"]').waitFor()
 			await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[data-comment-composer]'))).toBe(true)
