@@ -101,7 +101,7 @@ The `feat/workbench-foundation` branch adds Workbench chrome i18n (en-US / zh-TW
 
 **Terminology** (canonical): Workspace, View, Variant, Widget, RootShell (`root`), View IR, View Spec, Decision (`pending` / `decided` / `deferred`), Review thread (`open` / `ready-for-review` / `resolved`), anchor, re-anchor, UX Flow, step, transition, Prototype, render context (Variant × locale × viewport × theme), Checks, formal Evidence, capture, artifact, Assets, Adapter, Catalog, Handoff, `implementation-ready`.
 
-**zh-TW terminology policy:** domain nouns stay in English inside Chinese UI: View, Variant, Widget, Review, Flow (UX Flow), Spec, Decision, Evidence, Handoff, Workspace, Locale, Asset and MCP, plus RootShell, Adapter and IR. Actions and general UI are translated, for example 「新增留言」 and 「標記為已解決」. This keeps what an agent says, what MCP tools are named, and what the human sees aligned.
+**zh-TW terminology policy:** domain nouns stay in English inside Chinese UI: View, Variant, Widget, Review, Flow (UX Flow), Spec, Decision, Evidence, Handoff, Workspace, Locale, Asset and MCP, plus RootShell, Adapter and IR, and the role names Owner, Editor, Reviewer and Viewer. By the owner's decision of 2026-10-06, Token, Agent, Slot, Runtime, Manifest, Bundle (as in "Bundle ID") and Schema also stay in English, while Checks is 「檢查」 and Catalog is 「型錄」. Actions and general UI are translated, for example 「新增留言」 and 「標記為已解決」. The shared allowlist in `tests/support/i18n-allowlist.mjs` and the glossary tests enforce this. This keeps what an agent says, what MCP tools are named, and what the human sees aligned.
 
 **Undecided:**
 

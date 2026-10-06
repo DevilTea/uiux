@@ -222,8 +222,8 @@
       "transitionsOf": "{step} 的轉場",
       "goesTo": "前往",
       "empty": "尚無 UX Flow",
-      "emptyHint": "Flow 會把 View 串成可播放的路徑。請代理程式執行 {tool}，或在這裡建立。",
-      "emptyHintReadOnly": "Flow 會把 View 串成可播放的路徑。請代理程式執行 {tool}。",
+      "emptyHint": "Flow 會把 View 串成可播放的路徑。請 Agent 執行 {tool}，或在這裡建立。",
+      "emptyHintReadOnly": "Flow 會把 View 串成可播放的路徑。請 Agent 執行 {tool}。",
       "unnamed": "未命名 Flow"
     },
     "detail": {
@@ -390,11 +390,11 @@
       "none": "請至少選擇一個根項目。"
     },
     "result": {
-      "bundle": "匯出包 ID",
-      "manifest": "資訊清單",
-      "copyBundle": "複製匯出包 ID",
-      "copyManifest": "複製資訊清單摘要",
-      "download": "下載資訊清單",
+      "bundle": "Bundle ID",
+      "manifest": "Manifest",
+      "copyBundle": "複製 Bundle ID",
+      "copyManifest": "複製 Manifest 摘要",
+      "download": "下載 Manifest",
       "readyNote": "範圍內的每個根項目都通過了就緒檢查。",
       "diagnosticNote": "尚未達到 implementation-ready。可用來檢視，請勿據此實作。"
     },
@@ -489,13 +489,13 @@
     },
     "invalidTitle": "無法渲染此 View",
     "emptySlotTitle": "尚無 Widget",
-    "emptySlotDescription": "在 {slot} 插槽中加入子 Widget，即可透過 {core} 渲染。",
+    "emptySlotDescription": "在 {slot} Slot 中加入子 Widget，即可透過 {core} 渲染。",
     "errors": {
       "bridgeInitFailed": "預覽無法連線至 Workbench，請重新載入。",
       "viewUnavailable": "此 View 無法使用。",
       "viewLoadFailed": "無法載入 View。",
-      "bundleInvalid": "預覽執行環境不完整。請重新建置 UIUX 後重新載入。",
-      "bundleLoadFailed": "無法載入預覽執行環境。"
+      "bundleInvalid": "預覽 Runtime 不完整。請重新建置 UIUX 後重新載入。",
+      "bundleLoadFailed": "無法載入預覽 Runtime。"
     }
   },
   "reviews": {
@@ -546,7 +546,7 @@
     "tree": {
       "title": "Widget 樹狀結構",
       "label": "所選 View 的 Widget 樹狀結構",
-      "emptyContentSlot": "「content」插槽中尚無 Widget",
+      "emptyContentSlot": "「content」Slot 中尚無 Widget",
       "unavailable": "沒有 Widget 樹狀結構",
       "commentCount": "沒有未解決留言 | {n} 則未解決留言 | {n} 則未解決留言",
       "hasError": "有錯誤檢查結果",
@@ -757,7 +757,7 @@
     "reanchored": "已從 {from} 重新錨定至 {to}",
     "resolvedBy": "由 {name} 解決・已接受提交 {id}",
     "reopenedBy": "由 {name} 重新開啟",
-    "agent": "代理程式"
+    "agent": "Agent"
   },
   "action": {
     "resolveDisabled": "修正提交 Review 後即可標記為已解決。",
@@ -814,7 +814,7 @@
     "stoppedHint": "預覽已停止回應。重試會啟動新的預覽。",
     "chipLabel": "預覽工作階段：{status}",
     "sessionId": "工作階段",
-    "generation": "執行環境世代",
+    "generation": "Runtime 世代",
     "retry": "重試"
   },
   "canvas": {
@@ -850,7 +850,7 @@
       "body": "在 View 或圖層清單中點選 Widget。"
     },
     "identity": "識別碼",
-    "slot": "插槽",
+    "slot": "Slot",
     "size": "尺寸",
     "inVariant": "在此 Variant 中",
     "base": "基本",
@@ -876,7 +876,7 @@
     "noMessage": "尚無訊息",
     "allInComments": "在留言中查看全部",
     "selectWidget": "選取 #{id}",
-    "slotPath": "插槽路徑",
+    "slotPath": "Slot 路徑",
     "clearSelection": "清除選取",
     "copyFailed": "無法複製到剪貼簿。",
     "copiedValue": "已複製{label}",
@@ -1069,7 +1069,7 @@
     "apiVersion": "API",
     "config": "組態",
     "configLabel": "{name} 的組態",
-    "configHelp": "JSON 格式，儲存時以 Adapter 自身的結構描述驗證。留白表示不設定。",
+    "configHelp": "JSON 格式，儲存時以 Adapter 自身的 Schema 驗證。留白表示不設定。",
     "moveUp": "上移",
     "moveDown": "下移",
     "moveUpLabel": "上移 {name}",
@@ -1123,7 +1123,7 @@
     "notOnCanvas": "另有 {n} 則未顯示在畫布上 | 另有 {n} 則未顯示在畫布上",
     "notOnCanvasGroup": "未顯示在畫布上",
     "overCapHint": "畫布最多同時追蹤 {cap} 個 Widget。縮小圖釘篩選範圍即可顯示這些留言。",
-    "singleStreamHint": "此預覽執行環境一次只能追蹤一個 Widget。開啟討論串即可顯示它的圖釘。",
+    "singleStreamHint": "此預覽 Runtime 一次只能追蹤一個 Widget。開啟討論串即可顯示它的圖釘。",
     "toggle": "顯示圖釘",
     "show": "顯示圖釘",
     "hide": "隱藏圖釘",
@@ -1188,7 +1188,7 @@
     "readinessFailed": "無法檢查",
     "empty": {
       "title": "尚無 View",
-      "description": "請你的代理程式用 {tool} 建立一個，然後重新整理。"
+      "description": "請你的 Agent 用 {tool} 建立一個，然後重新整理。"
     },
     "attentionBlocked": "{n} 個 View 受阻擋 | {n} 個 View 受阻擋",
     "readinessMigration": "遷移後才能檢查"
@@ -1245,7 +1245,7 @@
     "reopened": "{name} 重新開啟了 {where}",
     "reanchored": "{name} 將討論串重新錨定到 {where}",
     "viewChanged": "已變更",
-    "anAgent": "某個代理程式",
+    "anAgent": "某個 Agent",
     "someone": "某人",
     "emptyTitle": "還沒有 Review 動態",
     "emptyDescription": "任何 View 上的留言、提交與解決都會顯示在這裡。",
@@ -1311,16 +1311,16 @@
   "access": {
     "login": {
       "title": "登入 UIUX",
-      "description": "開啟 uiux dev 或 Owner 提供的登入連結，或貼上成員權杖。",
+      "description": "開啟 uiux dev 或 Owner 提供的登入連結，或貼上成員 Token。",
       "signingIn": "正在登入…",
-      "tokenLabel": "成員權杖",
-      "tokenHelp": "登入後權杖仍然有效。請只貼到這個 Workbench。",
+      "tokenLabel": "成員 Token",
+      "tokenHelp": "登入後 Token 仍然有效。請只貼到這個 Workbench。",
       "submit": "登入",
       "recoverTitle": "沒有連結？",
       "recover": "在主機上執行 {command} 以取得新的單次登入連結。",
-      "plainHttp": "此頁面使用未加密的 HTTP。同一網路上的任何人都能擷取並重複使用登入連結、工作階段 Cookie 與 LAN 權杖。",
+      "plainHttp": "此頁面使用未加密的 HTTP。同一網路上的任何人都能擷取並重複使用登入連結、工作階段 Cookie 與 LAN Token。",
       "errors": {
-        "invalid": "此連結或權杖對這個 Workspace 無效。登入連結只能使用一次，並於 24 小時後失效。",
+        "invalid": "此連結或 Token 對這個 Workspace 無效。登入連結只能使用一次，並於 24 小時後失效。",
         "rateLimited": "此位址的失敗嘗試過多，請稍候一分鐘再試。",
         "failed": "登入失敗，請再試一次。"
       },
@@ -1335,7 +1335,7 @@
     },
     "kind": {
       "human": "人員",
-      "agent": "代理程式"
+      "agent": "Agent"
     },
     "chip": {
       "label": "已以 {nickname}（{role}）登入",
@@ -1352,55 +1352,55 @@
       "rosterHelp": "儲存在這台主機上，不會進入 Workspace 或 Git。",
       "add": "新增成員",
       "addTitle": "新增成員",
-      "addDescription": "之後可以給人員登入連結，或給代理程式一個權杖。",
+      "addDescription": "之後可以給人員登入連結，或給 Agent 一個 Token。",
       "nicknameLabel": "暱稱",
       "nicknameHelp": "小寫英文字母、數字、句點、底線與連字號，最多 32 個字元。",
       "roleLabel": "角色",
       "kindLabel": "類型",
-      "kindHelp": "建立後無法變更。代理程式最高為 Editor，且永遠不能標記為已解決。",
+      "kindHelp": "建立後無法變更。Agent 最高為 Editor，且永遠不能標記為已解決。",
       "added": "已新增 {nickname}。",
       "you": "你",
       "remove": "移除",
       "removeTitle": "要移除 {nickname} 嗎？",
-      "removeDescription": "其權杖、登入連結與工作階段會立即失效。其寫下的紀錄會保留原名稱。",
+      "removeDescription": "其 Token、登入連結與工作階段會立即失效。其寫下的紀錄會保留原名稱。",
       "removed": "已移除 {nickname}。",
       "roleChanged": "{nickname} 現在是 {role}。",
       "actionsLabel": "{nickname} 的操作",
-      "createToken": "建立權杖",
+      "createToken": "建立 Token",
       "invite": "登入連結",
       "columns": {
         "member": "成員",
         "role": "角色",
-        "tokens": "權杖",
+        "tokens": "Token",
         "sessions": "工作階段"
       },
       "errorTitle": "無法更新名冊"
     },
     "tokens": {
-      "title": "權杖",
-      "empty": "沒有有效的權杖。",
-      "createTitle": "為 {nickname} 建立權杖",
-      "createDescription": "MCP 用戶端與指令碼會以 Bearer 權杖傳送它，並依成員目前的角色運作。",
+      "title": "Token",
+      "empty": "沒有有效的 Token。",
+      "createTitle": "為 {nickname} 建立 Token",
+      "createDescription": "MCP 用戶端與指令碼會以 Bearer Token 傳送它，並依成員目前的角色運作。",
       "labelLabel": "標籤",
       "labelPlaceholder": "例如「筆電」或「CI」",
       "expiresLabel": "到期",
       "expires90": "90 天後",
       "expires30": "30 天後",
       "expiresNever": "永不",
-      "revealTitle": "請立即複製此權杖",
+      "revealTitle": "請立即複製此 Token",
       "revealDescription": "它只會顯示一次。請存放在 UIUX_MCP_TOKEN 等環境變數中，切勿提交到版本庫。",
-      "mcpHint": "在 MCP 用戶端設定中，傳送標頭 Authorization: Bearer 加上這個權杖。",
+      "mcpHint": "在 MCP 用戶端設定中，傳送標頭 Authorization: Bearer 加上這個 Token。",
       "copy": "複製",
       "copied": "已複製。",
       "copyFailed": "無法複製，請選取文字後手動複製。",
       "revoke": "撤銷",
-      "revokeLabel": "撤銷權杖 {id}",
-      "revoked": "已撤銷權杖 {id}。",
+      "revokeLabel": "撤銷 Token {id}",
+      "revoked": "已撤銷 Token {id}。",
       "never": "永不",
       "unused": "尚未使用",
       "lan": "LAN",
       "columns": {
-        "token": "權杖",
+        "token": "Token",
         "member": "成員",
         "label": "標籤",
         "expires": "到期",
@@ -1426,9 +1426,9 @@
       }
     },
     "mcpAttempts": {
-      "title": "沒有權杖的 MCP 用戶端",
-      "description": "{n} 個 /mcp 請求沒有有效的權杖。最近一次在 {time}，來自 {agent}。 | {n} 個 /mcp 請求沒有有效的權杖。最近一次在 {time}，來自 {agent}。",
-      "action": "建立代理程式權杖",
+      "title": "沒有 Token 的 MCP 用戶端",
+      "description": "{n} 個 /mcp 請求沒有有效的 Token。最近一次在 {time}，來自 {agent}。 | {n} 個 /mcp 請求沒有有效的 Token。最近一次在 {time}，來自 {agent}。",
+      "action": "建立 Agent Token",
       "unknownAgent": "未具名的用戶端"
     },
     "lock": {
@@ -1520,7 +1520,7 @@
     "conflict": "這個討論串已有變更。",
     "conflictHint": "已重新載入，內容已保留。請再試一次。",
     "timeline": "討論串紀錄",
-    "agent": "代理程式",
+    "agent": "Agent",
     "submitted": "已提交 Review",
     "current": "目前",
     "notAccepted": "未接受",
@@ -1575,11 +1575,11 @@
   "firstRun": {
     "headline": "這個 Workspace 還沒有 View",
     "title": "放入第一個 View",
-    "description": "View 由你的代理程式透過 MCP 撰寫。連接一次後請它建立 View，再到這裡審閱。",
+    "description": "View 由你的 Agent 透過 MCP 撰寫。連接一次後請它建立 View，再到這裡審閱。",
     "connect": {
-      "title": "連接你的代理程式",
-      "body": "把這個 MCP 端點加入代理程式的 MCP 設定。",
-      "token": "端點需要成員權杖。請在終端機中加入代理程式並建立它的權杖："
+      "title": "連接你的 Agent",
+      "body": "把這個 MCP 端點加入 Agent 的 MCP 設定。",
+      "token": "端點需要成員 Token。請在終端機中加入 Agent 並建立它的 Token："
     },
     "copyEndpoint": "複製 MCP 端點",
     "copyCommand": "複製指令",
@@ -1625,7 +1625,7 @@
   "commentBlock": {
     "publication": "唯讀：這是已發布的快照。",
     "migration": "此 Workspace 遷移前為唯讀。請執行 uiux migrate。",
-    "unsupported": "唯讀：此版本的 UIUX 不支援這個 Workspace 的格式。",
+    "unsupported": "唯讀：此版本的 UIUX 不支援這個 Workspace 的 Schema。",
     "signed-out": "登入後即可留言。",
     "role": "唯讀：留言需要 Reviewer 角色。你目前的角色是 {role}。",
     "handset": "手機無法新增留言。可在此回覆與分類；請在平板或桌面新增留言。",
@@ -1659,25 +1659,25 @@
     "unresolved_key": "翻譯鍵不存在。",
     "missing_parameter": "翻譯缺少必要的參數。",
     "access": {
-      "agent_role_cap": "代理程式最高只能是 Editor。",
+      "agent_role_cap": "Agent 最高只能是 Editor。",
       "invalid_expiry": "到期時間無效。",
-      "invalid_kind": "成員類型必須是人員或代理程式。",
+      "invalid_kind": "成員類型必須是人員或 Agent。",
       "invalid_label": "標籤無效。",
       "invalid_nickname": "暱稱只能使用小寫字母、數字與連字號。",
       "invalid_role": "沒有這個角色。",
-      "invite_human_only": "登入連結只能給人員使用。請改為代理程式建立權杖。",
+      "invite_human_only": "登入連結只能給人員使用。請改為 Agent 建立 Token。",
       "kind_immutable": "成員類型建立後無法變更。",
       "lock_busy": "成員名單正忙碌中，請稍後再試。",
       "member_not_found": "沒有這位成員。",
       "nickname_taken": "這個暱稱已在此 Workspace 中使用。",
       "session_not_found": "這個工作階段不存在或已結束。",
-      "token_not_found": "這個權杖不存在或已撤銷。",
+      "token_not_found": "這個 Token 不存在或已撤銷。",
       "roster_missing": "這個 Workspace 還沒有成員名單。",
       "store_invalid": "成員名單檔案已損壞。"
     },
     "auth": {
       "actor_ignored": "伺服器會依你的登入身分記錄這次變更的作者。",
-      "invalid_credential": "此連結或權杖對這個 Workspace 無效。",
+      "invalid_credential": "此連結或 Token 對這個 Workspace 無效。",
       "last_owner": "最後一位 Owner 無法移除或降級。",
       "rate_limited": "登入嘗試次數過多，請稍候一分鐘再試。",
       "required": "請登入以繼續。",
@@ -1716,7 +1716,7 @@
     },
     "runtime": {
       "root_context_write_forbidden": "RootShell 的呈現情境由預覽設定，不能由 View 撰寫。",
-      "unavailable": "預覽執行環境無法使用。"
+      "unavailable": "預覽 Runtime 無法使用。"
     },
     "preview": {
       "runtime_failed": "預覽無法呈現這個 View。"
@@ -1772,7 +1772,7 @@
       "empty_media_allowlist": "媒體允許清單至少要列出一種類型。",
       "i18n_config_capability_missing": "有 Adapter 設定欄位使用翻譯，但未宣告為可翻譯。",
       "i18n_config_field_not_proven_string": "使用翻譯的 Adapter 設定欄位必須是文字。",
-      "i18n_config_schema_unavailable": "使用翻譯的 Adapter 設定欄位沒有可供檢查的規則。",
+      "i18n_config_schema_unavailable": "使用翻譯的 Adapter 設定欄位沒有可供檢查的 Schema。",
       "i18n_mapping_collision": "有兩個翻譯對應使用同一個屬性。",
       "i18n_parameter_property_missing": "翻譯參數指向不存在的屬性。",
       "i18n_result_property_contract_mismatch": "翻譯結果屬性的類型不正確。",
@@ -1790,7 +1790,7 @@
       "reserved_root_shell_renderer": "RootShell 為保留項目，Adapter 無法取代。",
       "reserved_root_shell_type": "RootShell 為保留項目，Adapter 無法宣告。",
       "resolution_failed": "找不到 Adapter 套件，請安裝後重新載入。",
-      "runtime_api_version_mismatch": "Adapter 的執行環境 API 版本不一致。",
+      "runtime_api_version_mismatch": "Adapter 的 Runtime API 版本不一致。",
       "runtime_catalog_plugin_missing": "型錄中的 Widget 類型在 Adapter 中沒有對應的 Widget。",
       "runtime_identity_mismatch": "載入的 Adapter 與宣告的不同。",
       "runtime_manifest_extract_failed": "無法讀取 Adapter 的描述。",
@@ -2008,7 +2008,7 @@
       "invalid_widget_structure": "Widget 結構無效。",
       "json_incompatible_value": "有值無法以 JSON 儲存。",
       "reentrant_apply": "預覽在另一項變更進行中時又套用了變更。",
-      "runtime_disposed": "預覽執行環境已關閉。",
+      "runtime_disposed": "預覽 Runtime 已關閉。",
       "source_access_failed": "Widget 無法讀取其來源。",
       "unknown_state_override_member": "Variant 覆寫了 Widget 沒有的狀態。",
       "unknown_state_override_widget": "Variant 為不存在的 Widget 覆寫了狀態。",
@@ -2042,7 +2042,7 @@
     "request": "伺服器拒絕了這個請求。",
     "resource": "這項資源目前無法使用。",
     "review": "無法更新 Review。",
-    "runtime": "預覽執行環境回報了問題。",
+    "runtime": "預覽 Runtime 回報了問題。",
     "schema": "有值的格式不正確。",
     "transport": "無法傳送請求。",
     "variant": "這個 Variant 有問題。",

@@ -15,6 +15,9 @@ export const GLOSSARY_NOUNS = [
 	'RootShell', 'Adapter', 'IR',
 	// Role names.
 	'Owner', 'Editor', 'Reviewer', 'Viewer',
+	// Owner decision, 2026-10-06: these technical nouns also stay English in zh-TW.
+	// (Checks → 「檢查」 and Catalog → 「型錄」 are translated, so they are not listed.)
+	'Token', 'Agent', 'Slot', 'Runtime', 'Manifest', 'Bundle', 'Schema',
 ]
 
 /** Other English words a zh-TW string may carry, each a name or a literal rather than prose. */
