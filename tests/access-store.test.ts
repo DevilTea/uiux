@@ -206,6 +206,19 @@ describe('roster rules', () => {
 })
 
 describe('host-local access store', () => {
+	it('lets Workspaces open their rosters concurrently under a fresh UIUX_HOME', async () => {
+		const { base, home } = await workspaceAndHome()
+		const roots = await Promise.all(Array.from({ length: 6 }, async (_, index) => {
+			const root = join(base, `ws-${index}`)
+			await mkdir(join(root, '.uiux'), { recursive: true })
+			await writeFile(join(root, '.uiux', 'workspace.json'), '{}\n')
+			return root
+		}))
+		const stores = await Promise.all(roots.map(workspaceRoot => AccessStore.open({ workspaceRoot, home, create: true })))
+		expect(stores.every(store => !!store)).toBe(true)
+		for (const dir of [home, join(home, 'workspaces')]) expect((await lstat(dir)).mode & 0o777).toBe(0o700)
+	})
+
 	it('keys the roster by sha256(realpath), writes 0700 directories and a 0600 file, and records the root', async () => {
 		const { base, workspace, home } = await workspaceAndHome()
 		const link = join(base, 'link')

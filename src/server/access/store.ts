@@ -95,8 +95,15 @@ async function ensureSafeDirectory(path: string, create: boolean): Promise<boole
 	let stats = await lstatOrUndefined(path)
 	if (!stats) {
 		if (!create) return false
-		await mkdir(path, { mode: 0o700 })
-		await chmod(path, 0o700)
+		try {
+			await mkdir(path, { mode: 0o700 })
+			await chmod(path, 0o700)
+		}
+		catch (error) {
+			// Another UIUX process (or a concurrent open in this one) created it first: fall through
+			// to the same safety checks instead of failing; never chmod a directory this call did not make.
+			if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+		}
 		stats = await lstat(path)
 	}
 	if (stats.isSymbolicLink()) throw unsafe(path, 'it is a symbolic link')
