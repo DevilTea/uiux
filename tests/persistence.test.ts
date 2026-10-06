@@ -25,9 +25,11 @@ import {
 	type WorkspaceSnapshot,
 } from '../src/persistence'
 import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
+import { isCaseSensitiveDirectory } from './support/filesystem'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const OTHER_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+const tmpIsCaseSensitive = await isCaseSensitiveDirectory(tmpdir())
 const FLOW_ID = '22222222-2222-4222-8222-222222222222'
 const REVIEW_ID = '33333333-3333-4333-8333-333333333333'
 const ASSET_ID = '44444444-4444-4444-8444-444444444444'
@@ -222,15 +224,52 @@ describe('file-native persistence', () => {
 	it('discovers canonical locale filenames and preserves flat message values on read/write', async () => {
 		const { root, persistence } = await newWorkspace()
 		await mkdir(join(root, 'i18n'), { recursive: true })
-		await writeFile(join(root, 'i18n', 'zh-tw.json'), '{"ignored":"noncanonical"}')
+		// A noncanonically cased tag that cannot alias `zh-TW.json` on any volume.
+		await writeFile(join(root, 'i18n', 'zh-hant-tw.json'), '{"ignored":"noncanonical"}')
 		const createdRevision = await persistence.locales.create('zh-TW', { greeting: '  ', empty: '' })
 		const discovered = await persistence.locales.discoverInspected()
 		expect(discovered.locales).toEqual(['zh-TW'])
-		expect(discovered.diagnostics.some(item => item.code === 'i18n.invalid_locale_filename')).toBe(true)
+		expect(discovered.diagnostics).toContainEqual(expect.objectContaining({ code: 'i18n.invalid_locale_filename', path: '/i18n/zh-hant-tw.json' }))
 		const read = await persistence.locales.read('zh-TW')
 		expect(read?.revision).toBe(createdRevision)
 		expect(read?.resource).toEqual({ empty: '', greeting: '  ' })
 		await expect(persistence.locales.read('zh-tw')).rejects.toMatchObject({ code: 'persistence.invalid_identity' })
+	})
+
+	// Locale identity is the exact canonical tag. On a case-insensitive volume
+	// (default macOS APFS/HFS+, Windows NTFS) the path `i18n/zh-TW.json` resolves
+	// to a case variant such as `zh-tw.json`; read, create and compareAndSwap
+	// must not treat that file as the canonical locale or write into it.
+	it('does not alias a case-variant locale file to the canonical locale identity', async () => {
+		const { root, persistence } = await newWorkspace()
+		await mkdir(join(root, 'i18n'), { recursive: true })
+		const variantPath = join(root, 'i18n', 'zh-tw.json')
+		const variantBytes = '{"ignored":"noncanonical"}'
+		await writeFile(variantPath, variantBytes)
+		expect((await persistence.locales.discoverInspected()).locales).toEqual([])
+		expect(await persistence.locales.read('zh-TW')).toBeUndefined()
+		expect(await persistence.locales.readInspected('zh-TW')).toBeUndefined()
+		expect(await persistence.locales.readRevision('zh-TW')).toBeUndefined()
+		await expect(persistence.locales.compareAndSwap({ key: 'zh-TW', expectedRevision: 'r_any' as never, resource: { greeting: 'hi' } }))
+			.rejects.toMatchObject({ code: 'persistence.resource_not_found' })
+		expect(await readFile(variantPath, 'utf8')).toBe(variantBytes)
+
+		if (tmpIsCaseSensitive) {
+			const createdRevision = await persistence.locales.create('zh-TW', { greeting: 'hi' })
+			const discovered = await persistence.locales.discoverInspected()
+			expect(discovered.locales).toEqual(['zh-TW'])
+			expect(discovered.diagnostics).toContainEqual(expect.objectContaining({ code: 'i18n.invalid_locale_filename', path: '/i18n/zh-tw.json' }))
+			expect(await persistence.locales.read('zh-TW')).toMatchObject({ revision: createdRevision, resource: { greeting: 'hi' } })
+		}
+		else {
+			// The variant occupies the canonical path, so creation is refused with the discovery diagnostic.
+			await expect(persistence.locales.create('zh-TW', { greeting: 'hi' })).rejects.toMatchObject({
+				code: 'persistence.path_rejected',
+				diagnostics: [expect.objectContaining({ code: 'i18n.invalid_locale_filename', path: '/i18n/zh-tw.json' })],
+			})
+			expect(await readdir(join(root, 'i18n'))).toEqual(['zh-tw.json'])
+		}
+		expect(await readFile(variantPath, 'utf8')).toBe(variantBytes)
 	})
 
 	it('includes Asset metadata and source bytes in its revision and rolls back a failed replacement', async () => {
@@ -308,6 +347,21 @@ describe('file-native persistence', () => {
 		expect(resultA.view).toEqual(resultB.view)
 		expect(JSON.parse(resultA.manifest).schemaVersion).toBe(2)
 		expect(JSON.parse(resultA.view).name).toBe('Checkout migrated')
+	})
+
+	it('migrates a Workspace containing an authored Asset (result validation checks Asset filenames, not the directory UUID)', async () => {
+		const root = await makeRoot()
+		await seedOldWorkspace(root, Buffer.from(JSON.stringify(workspaceFixture(1), null, 2)), Buffer.from(JSON.stringify(viewFixture(), null, 2)))
+		await mkdir(join(root, 'assets', ASSET_ID), { recursive: true })
+		await writeFile(join(root, assetMetadataRelativePath(ASSET_ID)), JSON.stringify(assetFixture('logo.svg', 'Logo')))
+		await writeFile(join(root, 'assets', ASSET_ID, 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
+		const persistence = new FileNativePersistence({ root, schemaPolicy: policy() })
+		const plan = await persistence.planWorkspaceMigration()
+		expect(plan.changedFiles).toEqual(['.uiux/workspace.json', `views/${VIEW_ID}.view.json`])
+		expect((await persistence.inspectWorkspace()).inspection.state).toBe('migration_required')
+		const migration = await persistence.migrateWorkspace()
+		expect(migration.steps).toEqual(['synthetic-1-to-2'])
+		expect((await persistence.inspectWorkspace()).inspection.state).toBe('current')
 	})
 
 	it('aborts migration if canonical files change out of band during migration planning', async () => {

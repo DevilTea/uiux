@@ -2,6 +2,8 @@ import {
 	createLoopbackGuardHandler,
 	resolveLoopbackBindHost,
 } from '../../src/server/loopback-guard'
+import { createAccessGuardHandler } from '../../src/server/access/http'
+import { getSelectedWorkspaceServerRuntime } from '../../src/server/selected-workspace'
 
 /**
  * Keeps the live single-user server loopback-only (Part 1 item 12).
@@ -12,6 +14,8 @@ import {
  *   non-loopback host is refused.
  * - Requests: the guard is placed ahead of every h3 layer, including Nitro's static asset
  *   middleware, so `/mcp`, `/api/*` and SPA assets all pass the same Host/Origin gate.
+ * - Authentication (accepted identity decision 4) runs right after the baseline gates: every
+ *   `/api/*` and `/mcp` request resolves to one principal or gets 401; `/.well-known/*` is a JSON 404.
  *
  * Static publication (`UIUX_PUBLICATION_MODE=1`) and prerendering have no live listener and are
  * left untouched.
@@ -28,8 +32,14 @@ export default defineNitroPlugin((nitroApp) => {
 		process.env.NITRO_HOST = bind.host
 	}
 
-	nitroApp.h3App.stack.unshift({
-		route: '',
-		handler: createLoopbackGuardHandler({ anyPort: import.meta.dev }),
-	})
+	nitroApp.h3App.stack.unshift(
+		{
+			route: '',
+			handler: createLoopbackGuardHandler({ anyPort: import.meta.dev }),
+		},
+		{
+			route: '',
+			handler: createAccessGuardHandler(() => getSelectedWorkspaceServerRuntime().access()),
+		},
+	)
 })

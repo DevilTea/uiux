@@ -9,13 +9,28 @@ import {
 	type GeometryResponseMessage,
 } from './schema'
 import {
+	isTargetingMessageType,
+	isTargetingRuntimeMessage,
+	validateTargetingMessage,
+	type TargetingMessage,
+	type TargetingRuntimeMessage,
+	type TargetingWorkbenchMessage,
+} from './targeting'
+import {
+	isWidgetEventMessageType,
+	validateWidgetEventMessage,
+	type WidgetEventArmMessage,
+	type WidgetEventMessage,
+	type WidgetEventOccurrenceMessage,
+} from './widget-events'
+import {
 	PreviewProtocolSession,
 	type CapabilityCompatibility,
 	type GenerationAdmissionCause,
 	type GenerationAdmissionResult,
 } from './session'
 
-export type PreviewWireMessage = CapabilityDeclareMessage | CapabilityAckMessage | GeometryMessage
+export type PreviewWireMessage = CapabilityDeclareMessage | CapabilityAckMessage | GeometryMessage | TargetingMessage | WidgetEventMessage
 export type PreviewProtocolTransport = Readonly<{ send(message: PreviewWireMessage): void }>
 
 export type BridgeReceiveResult =
@@ -62,6 +77,23 @@ export class WorkbenchPreviewProtocolBridge {
 		const type = messageType(input)
 		if (type === 'capability.declare') return this.receiveCapabilityDeclaration(input)
 		if (type === 'capability.ack') return { status: 'wrong-direction' }
+		if (isTargetingMessageType(type)) {
+			const targeting = validateTargetingMessage(input)
+			if (!targeting.ok) return { status: 'invalid', diagnostics: targeting.diagnostics }
+			if (!isTargetingRuntimeMessage(targeting.value)) return { status: 'wrong-direction' }
+			const gate = this.classify(targeting.value.context.previewSessionId, targeting.value.context.runtimeGenerationId)
+			if (gate) return { status: gate }
+			return { status: 'accepted', message: targeting.value }
+		}
+		if (isWidgetEventMessageType(type)) {
+			// Workbench accepts only occurrences inbound; the decoded copy carries known members only.
+			const decoded = validateWidgetEventMessage(input)
+			if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
+			if (decoded.value.type !== 'widget.event.occurrence') return { status: 'wrong-direction' }
+			const gate = this.classify(decoded.value.context.previewSessionId, decoded.value.context.runtimeGenerationId)
+			if (gate) return { status: gate }
+			return { status: 'accepted', message: decoded.value }
+		}
 
 		const decoded = validateGeometryMessage(input)
 		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
@@ -69,6 +101,31 @@ export class WorkbenchPreviewProtocolBridge {
 		const gate = this.workbenchInboundGate(decoded.value)
 		if (gate) return { status: gate }
 		return { status: 'accepted', message: decoded.value }
+	}
+
+	/** Sends `targeting.enter` / `targeting.exit` once the generation's capability ACK is dispatched. */
+	sendTargeting(message: TargetingWorkbenchMessage): BridgeSendResult {
+		const decoded = validateTargetingMessage(message)
+		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
+		if (isTargetingRuntimeMessage(decoded.value)) return { status: 'wrong-direction' }
+		const gate = this.classify(decoded.value.context.previewSessionId, decoded.value.context.runtimeGenerationId)
+		if (gate) return { status: gate }
+		this.transport.send(decoded.value)
+		return { status: 'sent' }
+	}
+
+	/**
+	 * Sends `widget.event.arm` once the generation's capability ACK is dispatched. Whether the
+	 * generation declared `widget.events` is the caller's gate (decision 10).
+	 */
+	sendWidgetEventArm(message: WidgetEventArmMessage): BridgeSendResult {
+		const decoded = validateWidgetEventMessage(message, 'send')
+		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
+		if (decoded.value.type !== 'widget.event.arm') return { status: 'wrong-direction' }
+		const gate = this.classify(decoded.value.context.previewSessionId, decoded.value.context.runtimeGenerationId)
+		if (gate) return { status: gate }
+		this.transport.send(decoded.value)
+		return { status: 'sent' }
 	}
 
 	sendGeometry(message: GeometryRequestMessage): BridgeSendResult {
@@ -123,6 +180,11 @@ export class WorkbenchPreviewProtocolBridge {
 			throw new Error('Capability ACK dispatch must commit the matching Workbench handshake state.')
 		this.ackDispatchedGenerationId = decoded.value.context.runtimeGenerationId
 		return { status: 'ack-dispatched', acknowledgement }
+	}
+
+	private classify(previewSessionId: string, runtimeGenerationId: string): 'gated' | 'stale-session' | 'stale-generation' | undefined {
+		const gate = this.session.classifyGeometryTraffic(previewSessionId, runtimeGenerationId)
+		return gate === 'open' ? undefined : gate
 	}
 
 	private workbenchInboundGate(message: GeometryResponseMessage): 'gated' | 'stale-session' | 'stale-generation' | undefined {
@@ -183,6 +245,23 @@ export class RuntimePreviewProtocolBridge {
 		const type = messageType(input)
 		if (type === 'capability.declare') return { status: 'wrong-direction' }
 		if (type === 'capability.ack') return this.receiveAcknowledgement(input)
+		if (isTargetingMessageType(type)) {
+			const targeting = validateTargetingMessage(input)
+			if (!targeting.ok) return { status: 'invalid', diagnostics: targeting.diagnostics }
+			if (isTargetingRuntimeMessage(targeting.value)) return { status: 'wrong-direction' }
+			const gate = this.runtimeGate(targeting.value)
+			if (gate) return { status: gate }
+			return { status: 'accepted', message: targeting.value }
+		}
+		if (isWidgetEventMessageType(type)) {
+			// The runtime accepts only arms inbound.
+			const decoded = validateWidgetEventMessage(input)
+			if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
+			if (decoded.value.type !== 'widget.event.arm') return { status: 'wrong-direction' }
+			const gate = this.runtimeGate(decoded.value)
+			if (gate) return { status: gate }
+			return { status: 'accepted', message: decoded.value }
+		}
 
 		const decoded = validateGeometryMessage(input)
 		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
@@ -190,6 +269,31 @@ export class RuntimePreviewProtocolBridge {
 		const gate = this.runtimeGate(decoded.value)
 		if (gate) return { status: gate }
 		return { status: 'accepted', message: decoded.value }
+	}
+
+	/** Sends `targeting.hover` / `select` / `escape`; nothing crosses before the capability ACK. */
+	sendTargeting(message: TargetingRuntimeMessage): BridgeSendResult {
+		const decoded = validateTargetingMessage(message)
+		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
+		if (!isTargetingRuntimeMessage(decoded.value)) return { status: 'wrong-direction' }
+		const gate = this.runtimeGate(decoded.value)
+		if (gate) return { status: gate }
+		this.transport.send(decoded.value)
+		return { status: 'sent' }
+	}
+
+	/**
+	 * Sends one `widget.event.occurrence`; nothing crosses before the capability ACK. The payload is
+	 * closed for senders: any member beyond `{ armId, event }` makes the message invalid, unsent.
+	 */
+	sendWidgetEventOccurrence(message: WidgetEventOccurrenceMessage): BridgeSendResult {
+		const decoded = validateWidgetEventMessage(message, 'send')
+		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
+		if (decoded.value.type !== 'widget.event.occurrence') return { status: 'wrong-direction' }
+		const gate = this.runtimeGate(decoded.value)
+		if (gate) return { status: gate }
+		this.transport.send(decoded.value)
+		return { status: 'sent' }
 	}
 
 	sendGeometry(message: GeometryResponseMessage): BridgeSendResult {
@@ -220,7 +324,7 @@ export class RuntimePreviewProtocolBridge {
 		return { status: 'accepted', message: decoded.value }
 	}
 
-	private runtimeGate(message: GeometryMessage): 'gated' | 'stale-session' | 'stale-generation' | undefined {
+	private runtimeGate(message: GeometryMessage | TargetingMessage | WidgetEventMessage): 'gated' | 'stale-session' | 'stale-generation' | undefined {
 		if (message.context.previewSessionId !== this.previewSessionId) return 'stale-session'
 		if (message.context.runtimeGenerationId !== this.runtimeGenerationId) return 'stale-generation'
 		if (!this.ackObserved) return 'gated'
@@ -230,6 +334,7 @@ export class RuntimePreviewProtocolBridge {
 
 function isGeometryRequest(message: GeometryMessage): message is GeometryRequestMessage {
 	return message.type === 'geometry.acquire.request'
+		|| message.type === 'geometry.release'
 		|| message.type === 'contour.full.request'
 		|| message.type === 'contour.partial.request'
 		|| message.type === 'contour.cancel'

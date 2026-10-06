@@ -11,7 +11,9 @@ import { FileNativePersistence } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createFormalCaptureService } from '../src/application/services/formal-capture'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
-import { createUiuxMcpHttpHandler } from '../src/mcp/server'
+import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
+import { createLeaseManager } from '../src/application/access/leases'
+import { AGENT_EDITOR, provisionToken, sessionCookieFor } from './support/access'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
@@ -84,7 +86,7 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 	await symlink(vuePath, join(root, 'node_modules', 'vue')).catch(() => undefined)
 
 	await writeFile(join(root, '.uiux', 'workspace.json'), JSON.stringify({
-		schemaVersion: 1,
+		schemaVersion: 2,
 		i18n: { defaultLocale: 'en-US' },
 		adapters,
 		viewports: {
@@ -101,7 +103,8 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 	return { root, persistence }
 }
 
-async function startTestServer(workspaceRoot: string): Promise<{ url: string; close: () => void }> {
+async function startTestServer(workspaceRoot: string): Promise<{ url: string; close: () => void; token: string; cookie: { name: string; value: string }; headers: Record<string, string> }> {
+	const token = await provisionToken(workspaceRoot, { nickname: 'tester', kind: 'human', role: 'owner' })
 	const probe = createServer()
 	await new Promise<void>((res, rej) => { probe.once('error', rej); probe.listen(0, '127.0.0.1', () => res()) })
 	const address = probe.address() as AddressInfo
@@ -150,9 +153,13 @@ async function startTestServer(workspaceRoot: string): Promise<{ url: string; cl
 		throw new Error(`Test Nitro server timed out waiting for /api/health:\n${serverOutput}`)
 	}
 
+	const cookie = await sessionCookieFor(baseUrl, token)
 	return {
 		url: baseUrl,
 		close: () => server.kill('SIGTERM'),
+		token,
+		cookie,
+		headers: { cookie: `${cookie.name}=${cookie.value}` },
 	}
 }
 
@@ -204,12 +211,14 @@ describe('Formal capture service & fresh-runtime proof', () => {
 		await persistence.views.create(VIEW_COUNTER_ID, createCounterView())
 
 		// Start local server
-		const { url: serverUrl } = await startTestServer(root)
+		const server = await startTestServer(root)
+		const serverUrl = server.url
 
 		// 1. Manually launch a separate browser page and mutate the runtime state
 		const browser = await chromium.launch({ headless: true })
 		try {
 			const dirtyContext = await browser.newContext()
+			await dirtyContext.addCookies([{ ...server.cookie, url: serverUrl }])
 			const dirtyPage = await dirtyContext.newPage()
 			const previewUrl = `${serverUrl}/preview?viewId=${VIEW_COUNTER_ID}&locale=en-US&viewportId=desktop&themeId=light`
 			await dirtyPage.goto(previewUrl, { waitUntil: 'load' })
@@ -229,7 +238,7 @@ describe('Formal capture service & fresh-runtime proof', () => {
 
 			// Keep the dirty page open while formal capture executes!
 			// 2. Execute Formal Capture via FormalCaptureService
-			const formalService = createFormalCaptureService(persistence)
+			const formalService = createFormalCaptureService(persistence, { captureCookie: () => server.cookie })
 			const context: ResolvedRenderContext = {
 				viewId: VIEW_COUNTER_ID,
 				locale: 'en-US',
@@ -296,8 +305,9 @@ describe('Formal capture service & fresh-runtime proof', () => {
 		const view = createCounterView()
 		await persistence.views.create(VIEW_COUNTER_ID, view)
 
-		const { url: serverUrl } = await startTestServer(root)
-		const formalService = createFormalCaptureService(persistence)
+		const server = await startTestServer(root)
+		const serverUrl = server.url
+		const formalService = createFormalCaptureService(persistence, { captureCookie: () => server.cookie })
 
 		const context: ResolvedRenderContext = {
 			viewId: VIEW_COUNTER_ID,
@@ -408,8 +418,9 @@ describe('Formal capture service & fresh-runtime proof', () => {
 		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 		await persistence.views.create(VIEW_COUNTER_ID, createCounterView())
 
-		const { url: serverUrl } = await startTestServer(root)
-		const formalService = createFormalCaptureService(persistence)
+		const server = await startTestServer(root)
+		const serverUrl = server.url
+		const formalService = createFormalCaptureService(persistence, { captureCookie: () => server.cookie })
 
 		const validContext: ResolvedRenderContext = {
 			viewId: VIEW_COUNTER_ID,
@@ -444,10 +455,11 @@ describe('Formal capture service & fresh-runtime proof', () => {
 		const testBytes = Buffer.from('fake png image bytes for test')
 		const { identity: digest } = await persistence.artifacts.put(testBytes)
 
-		const { url: serverUrl } = await startTestServer(root)
+		const server = await startTestServer(root)
+		const serverUrl = server.url
 
 		// 1. Valid artifact download
-		const validRes = await fetch(`${serverUrl}/api/artifacts/${digest}`)
+		const validRes = await fetch(`${serverUrl}/api/artifacts/${digest}`, { headers: server.headers })
 		expect(validRes.status).toBe(200)
 		expect(validRes.headers.get('x-content-type-options')).toBe('nosniff')
 		expect(validRes.headers.get('cache-control')).toContain('immutable')
@@ -455,14 +467,14 @@ describe('Formal capture service & fresh-runtime proof', () => {
 		expect(fetchedBytes).toEqual(testBytes)
 
 		// 2. Malformed digest (path traversal attempt / invalid sha256)
-		const maliciousRes = await fetch(`${serverUrl}/api/artifacts/${encodeURIComponent('../../etc/passwd')}`)
+		const maliciousRes = await fetch(`${serverUrl}/api/artifacts/${encodeURIComponent('../../etc/passwd')}`, { headers: server.headers })
 		expect(maliciousRes.status).toBe(400)
-		const invalidFormatRes = await fetch(`${serverUrl}/api/artifacts/not-a-valid-sha256-hash`)
+		const invalidFormatRes = await fetch(`${serverUrl}/api/artifacts/not-a-valid-sha256-hash`, { headers: server.headers })
 		expect(invalidFormatRes.status).toBe(400)
 
 		// 3. Non-existent digest
 		const fakeDigest = 'sha256:' + 'a'.repeat(64)
-		const missingRes = await fetch(`${serverUrl}/api/artifacts/${fakeDigest}`)
+		const missingRes = await fetch(`${serverUrl}/api/artifacts/${fakeDigest}`, { headers: server.headers })
 		expect(missingRes.status).toBe(404)
 	})
 
@@ -472,16 +484,17 @@ describe('Formal capture service & fresh-runtime proof', () => {
 		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 		await persistence.views.create(VIEW_COUNTER_ID, createCounterView())
 
-		const { url: serverUrl } = await startTestServer(root)
+		const server = await startTestServer(root)
+		const serverUrl = server.url
 		const prevServerUrl = process.env.UIUX_SERVER_URL
 		process.env.UIUX_SERVER_URL = serverUrl
 
-		const app = createWorkspaceApplicationSession(persistence)
+		const app = createWorkspaceApplicationSession(persistence, { captureCookie: () => server.cookie })
 
-		const handler = createUiuxMcpHttpHandler(app)
+		const handler = createUiuxMcpHttpHandler(app, { leases: createLeaseManager() })
 		const client = new Client({ name: 'mcp-evidence-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto' } })
 		const transport = new StreamableHTTPClientTransport(new URL(`${serverUrl}/api/mcp`), {
-			fetch: async (input, init) => handler.fetch(new Request(input, init)),
+			fetch: async (input, init) => handler.fetch(new Request(input, init), { authInfo: principalAuthInfo(AGENT_EDITOR) }),
 		})
 		await client.connect(transport)
 
@@ -520,7 +533,8 @@ describe('Formal capture service & fresh-runtime proof', () => {
 		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 		await persistence.views.create(VIEW_COUNTER_ID, createCounterView())
 
-		const { url: serverUrl } = await startTestServer(root)
+		const server = await startTestServer(root)
+		const serverUrl = server.url
 
 		// Set up an attacker mock server to monitor if any SSRF request hits it
 		const attackerRequests: string[] = []
@@ -540,6 +554,7 @@ describe('Formal capture service & fresh-runtime proof', () => {
 			const res = await fetch(`${serverUrl}/api/evidence/capture`, {
 				method: 'POST',
 				headers: {
+					...server.headers,
 					'Content-Type': 'application/json',
 					'Host': attackerHost,
 					'X-Forwarded-Host': attackerHost,

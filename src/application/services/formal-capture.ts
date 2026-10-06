@@ -52,7 +52,11 @@ export interface FormalCaptureService {
 
 export function createFormalCaptureService(
 	persistence: FileNativePersistence,
-	options?: { serverOrigin?: string },
+	options?: {
+		serverOrigin?: string
+		/** The in-memory `system:capture` credential, sent as a cookie scoped to the internal origin only. */
+		captureCookie?: () => Readonly<{ name: string; value: string }> | undefined
+	},
 ): FormalCaptureService {
 	async function buildRegistries(contexts: readonly ResolvedRenderContext[]): Promise<
 		| { ok: true; registries: RenderContextRegistries; workspaceInspection: unknown; workspaceRevision: string }
@@ -121,6 +125,21 @@ export function createFormalCaptureService(
 				status: 'failed',
 				results: [],
 				summary: { total: 0, captured: 0, failed: 0 },
+				executedAt: new Date().toISOString(),
+			}
+		}
+
+		// Capture stores artifacts, so it is refused before launching a browser unless the Workspace
+		// is at the current schema (`workspace.migration_required` until `uiux migrate` runs).
+		const { inspection } = await persistence.inspectWorkspace()
+		if (inspection.state === 'migration_required' || inspection.state === 'unsupported') {
+			const diagnostics: readonly Diagnostic[] = inspection.state === 'migration_required'
+				? [{ code: 'workspace.migration_required', path: '/schemaVersion', message: `Workspace schema ${inspection.version} requires explicit migration to policy target ${inspection.targetVersion}. Run: uiux migrate --workspace <dir>` }]
+				: inspection.diagnostics
+			return {
+				status: 'failed',
+				results: contexts.map(context => ({ context, status: 'failed', diagnostics })),
+				summary: { total: contexts.length, captured: 0, failed: contexts.length },
 				executedAt: new Date().toISOString(),
 			}
 		}
@@ -233,6 +252,10 @@ export function createFormalCaptureService(
 					},
 					reducedMotion: 'reduce',
 				})
+				const captureCookie = options?.captureCookie?.()
+				if (captureCookie) {
+					await browserContext.addCookies([{ name: captureCookie.name, value: captureCookie.value, url: baseUrl, httpOnly: true, sameSite: 'Strict' }])
+				}
 
 				const page = await browserContext.newPage()
 				try {

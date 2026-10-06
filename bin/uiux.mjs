@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
-import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
+import { lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join, resolve } from 'node:path'
 import { parsePublishArguments, runPublish } from './publish.mjs'
 
@@ -22,13 +23,29 @@ Options:
 Commands:
   init --workspace <dir>  Initialize a Workspace
   dev --workspace <dir>   Start the unified UIUX Workbench/Nitro server on loopback
-                           only (127.0.0.1; PORT selects the port, default 3000)
+                           only (127.0.0.1; PORT selects the port, default 3000).
+                           Every /api and /mcp request needs a credential; the first
+                           start of a Workspace creates its Owner and prints a
+                           one-time sign-in link
+  migrate --workspace <dir> [--dry-run]
+                           Migrate an older Workspace schema to schemaVersion ${workspaceSchemaVersion};
+                           --dry-run prints the steps and changed files without writing
   publish --workspace <dir> --out <dir> [--base <path>] [--source-revision <rev>]
-                           Publish a read-only static UIUX Workspace`)
+                           Publish a read-only static UIUX Workspace
+
+Access (each takes --workspace <dir>; rosters live in $UIUX_HOME, default ~/.uiux):
+  member add <nick> --role <owner|editor|reviewer|viewer> [--kind human|agent]
+  member list | member set <nick> [--role <role>] [--nickname <new>] | member remove <nick>
+  token create --member <nick> [--label <text>] [--expires <days>|never] [--lan]
+  token list [--member <nick>] [--all] | token revoke <token-id>
+  invite create --member <nick> [--origin <url>] [--expires <hours>]
+  session list | session revoke <session-id> | session revoke --member <nick>
+  access copy --from <old-dir> [--replace]
+                           Copy members and tokens from another Workspace path's roster`)
 }
 
-// The first version is single-user and unauthenticated, so `uiux dev` is loopback-only and refuses
-// a non-loopback value in either HOST or NITRO_HOST. The packaged server applies the same allowlist
+// The LAN listener is not yet available, so `uiux dev` is loopback-only and refuses a non-loopback
+// value in either HOST or NITRO_HOST. The packaged server applies the same allowlist
 // to its effective bind (src/server/loopback-guard.ts) as a backstop for direct `.output` runs.
 const LOOPBACK_BIND_HOSTS = new Map([
 	['127.0.0.1', '127.0.0.1'],
@@ -46,7 +63,7 @@ function resolveLoopbackBindHost(env) {
 		if (!normalized) {
 			return {
 				ok: false,
-				message: `Refusing to listen on ${variable}=${raw}. UIUX serves the Workbench, /api and /mcp without authentication, so it listens on loopback only (127.0.0.1, ::1 or localhost). LAN exposure requires authentication, which is not yet available.`,
+				message: `Refusing to listen on ${variable}=${raw}. UIUX listens on loopback only (127.0.0.1, ::1 or localhost); the LAN listener is not yet available.`,
 			}
 		}
 		selected ??= normalized
@@ -56,6 +73,53 @@ function resolveLoopbackBindHost(env) {
 
 function parseWorkspaceArgument(args) {
 	return args.length === 2 && args[0] === '--workspace' && args[1] ? args[1] : undefined
+}
+
+function parseMigrateArguments(args) {
+	const dryRun = args.includes('--dry-run')
+	const rest = args.filter(arg => arg !== '--dry-run')
+	if (args.length - rest.length > 1) return undefined
+	const workspace = parseWorkspaceArgument(rest)
+	return workspace ? { workspace, dryRun } : undefined
+}
+
+/**
+ * Migration and access administration reuse the TypeScript modules shipped in `src/`. They are
+ * bundled on demand with the packaged esbuild dependency into a private temporary module, so the
+ * CLI applies exactly the policy the server enforces.
+ */
+async function runBundled(entry, run) {
+	const { default: esbuild } = await import('esbuild')
+	const packageRoot = fileURLToPath(new URL('..', import.meta.url))
+	const build = await esbuild.build({
+		entryPoints: [resolve(packageRoot, entry)],
+		bundle: true,
+		platform: 'node',
+		format: 'esm',
+		target: 'node24',
+		write: false,
+		logLevel: 'silent',
+	})
+	const directory = await mkdtemp(join(tmpdir(), 'uiux-cli-'))
+	try {
+		const modulePath = join(directory, 'command.mjs')
+		await writeFile(modulePath, build.outputFiles[0].contents)
+		process.exitCode = await run(await import(pathToFileURL(modulePath).href))
+	}
+	finally {
+		await rm(directory, { recursive: true, force: true })
+	}
+}
+
+async function runMigrate(options) {
+	await runBundled('src/cli/migrate.ts', ({ runMigrateCommand }) => runMigrateCommand({
+		workspaceRoot: resolve(process.cwd(), options.workspace),
+		dryRun: options.dryRun,
+	}))
+}
+
+async function runAccess(argv) {
+	await runBundled('src/cli/access.ts', ({ runAccessCommand }) => runAccessCommand({ argv }))
 }
 
 async function runInit(workspaceArgument) {
@@ -136,6 +200,8 @@ async function runDev(workspaceArgument) {
 		UIUX_PACKAGE_ROOT: packageRoot,
 	}
 	delete env.NITRO_UNIX_SOCKET
+	// Internal `uiux publish` plumbing only; a dev server always opens the Workspace's host roster.
+	delete env.UIUX_INTERNAL_PUBLISH_CREDENTIAL
 	console.log(`uiux: serving Workspace ${workspaceRoot} on loopback only (${bind.host}).`)
 	const child = spawn(process.execPath, [serverEntry], { stdio: 'inherit', env })
 	const forwardSignal = signal => {
@@ -182,6 +248,28 @@ if (extraArgs.length === 0 && (command === undefined || command === '--help' || 
 		process.exitCode = 2
 	} else {
 		await runDev(workspace)
+	}
+} else if (command === 'migrate') {
+	const options = parseMigrateArguments(extraArgs)
+	if (!options) {
+		console.error('uiux: migrate requires --workspace <dir> and accepts --dry-run.')
+		process.exitCode = 2
+	} else {
+		try {
+			await runMigrate(options)
+		}
+		catch (error) {
+			console.error('uiux: migrate failed: ' + (error instanceof Error ? error.message : String(error)))
+			process.exitCode = 1
+		}
+	}
+} else if (['member', 'token', 'invite', 'session', 'access'].includes(command)) {
+	try {
+		await runAccess([command, ...extraArgs])
+	}
+	catch (error) {
+		console.error(`uiux: ${command} failed: ` + (error instanceof Error ? error.message : String(error)))
+		process.exitCode = 1
 	}
 } else if (command === 'publish') {
 	const options = parsePublishArguments(extraArgs)

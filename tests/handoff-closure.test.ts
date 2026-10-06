@@ -12,7 +12,9 @@ import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema
 import { createHandoffExportService } from '../src/application/services/handoff-export'
 import { createFormalCaptureService } from '../src/application/services/formal-capture'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
-import { createUiuxMcpHttpHandler } from '../src/mcp/server'
+import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
+import { createLeaseManager } from '../src/application/access/leases'
+import { AGENT_EDITOR, provisionToken, sessionCookieFor } from './support/access'
 import {
 	validateHandoffManifest,
 	validateHandoffRoot,
@@ -26,6 +28,7 @@ import { artifactBytesMatch } from '../src/domain/artifacts/schema'
 import { canonicalJsonBytes } from '../src/domain/canonical-json'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import type { ReviewThread } from '../src/domain/reviews/schema'
+import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 
 const temporaryRoots: string[] = []
 const runningServers: ChildProcess[] = []
@@ -87,7 +90,7 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 	await symlink(vuePath, join(root, 'node_modules', 'vue')).catch(() => undefined)
 
 	await writeFile(join(root, '.uiux', 'workspace.json'), JSON.stringify({
-		schemaVersion: 1,
+		schemaVersion: 2,
 		i18n: { defaultLocale: 'en-US' },
 		adapters,
 		viewports: {
@@ -103,7 +106,8 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 	return { root, persistence }
 }
 
-async function startTestServer(workspaceRoot: string): Promise<{ url: string; close: () => void }> {
+async function startTestServer(workspaceRoot: string): Promise<{ url: string; close: () => void; token: string; cookie: { name: string; value: string }; headers: Record<string, string> }> {
+	const token = await provisionToken(workspaceRoot, { nickname: 'tester', kind: 'human', role: 'owner' })
 	const probe = createServer()
 	await new Promise<void>((res, rej) => { probe.once('error', rej); probe.listen(0, '127.0.0.1', () => res()) })
 	const address = probe.address() as AddressInfo
@@ -152,9 +156,13 @@ async function startTestServer(workspaceRoot: string): Promise<{ url: string; cl
 		throw new Error(`Test Nitro server timed out waiting for /api/health:\n${serverOutput}`)
 	}
 
+	const cookie = await sessionCookieFor(baseUrl, token)
 	return {
 		url: baseUrl,
 		close: () => server.kill('SIGTERM'),
+		token,
+		cookie,
+		headers: { cookie: `${cookie.name}=${cookie.value}` },
 	}
 }
 
@@ -269,7 +277,7 @@ async function putFormalEvidence(
 	return recordPut.identity
 }
 
-describe('Handoff closure export and readiness evaluation', () => {
+describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('proves deterministic closure identity: same roots and content produce identical bundleIdentity across invocations', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
 		await mkdir(join(root, 'adapters'), { recursive: true })
@@ -450,6 +458,79 @@ describe('Handoff closure export and readiness evaluation', () => {
 		const resolvedExport = await service.exportHandoff({ roots })
 		expect(resolvedExport.readiness?.implementationReady).toBe(true)
 		expect(resolvedExport.readiness?.blockingDiagnostics).toHaveLength(0)
+	})
+
+	it('reports per-resolution review counts, never blocks on closed threads, and flags wont-fix as advisory only', async () => {
+		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+		await mkdir(join(root, 'adapters'), { recursive: true })
+		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		const viewRev = await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'View With Closed Reviews'))
+		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
+
+		const human = { type: 'human', displayName: 'Mei' }
+		const submissionId = 'f0000000-0000-4000-8000-000000000001'
+		const closed = (index: number, resolution: string, reason?: string): ReviewThread => ({
+			id: `e0000000-0000-4000-8000-00000000000${index}`,
+			anchor: { viewId: VIEW_1_ID, widgetId: 'root' },
+			variantNames: [],
+			status: 'resolved',
+			messages: [],
+			submissions: [],
+			history: [{ id: `d0000000-0000-4000-8000-00000000000${index}`, kind: 'lifecycle', from: 'open', to: 'resolved', actor: human, at: '2026-10-05T09:00:00Z', resolution: resolution as never, ...(reason ? { reason } : {}) }],
+		})
+		const verified: ReviewThread = {
+			id: 'e0000000-0000-4000-8000-000000000009',
+			anchor: { viewId: VIEW_1_ID, widgetId: 'root' },
+			variantNames: [],
+			status: 'resolved',
+			messages: [],
+			submissions: [{
+				id: submissionId, actor: { type: 'agent' }, at: '2026-10-05T08:00:00Z', changeDomains: ['view-structure'],
+				resources: [{ identity: { type: 'view', id: VIEW_1_ID }, revision: viewRev }], scope: {}, evidenceRefs: [{ kind: 'screenshot', evidence: `sha256:${'d'.repeat(64)}` }],
+			}],
+			history: [
+				{ id: 'd0000000-0000-4000-8000-000000000008', kind: 'lifecycle', from: 'open', to: 'ready-for-review', actor: { type: 'agent' }, at: '2026-10-05T08:00:00Z', submissionId },
+				{ id: 'd0000000-0000-4000-8000-000000000009', kind: 'lifecycle', from: 'ready-for-review', to: 'resolved', actor: human, at: '2026-10-05T08:30:00Z', submissionId, resolution: 'verified' },
+			],
+		}
+		const threads = [closed(1, 'answered'), closed(2, 'wont-fix', 'Out of scope'), closed(3, 'duplicate', 'Same as e…9'), closed(4, 'obsolete'), closed(5, 'answered'), verified]
+		for (const thread of threads) {
+			await persistence.reviews.create(thread.id, thread)
+			expect((await persistence.reviews.readInspected(thread.id))?.diagnostics).toEqual([])
+		}
+
+		const service = createHandoffExportService(persistence)
+		const roots = [{ type: 'view' as const, viewId: VIEW_1_ID }]
+		const assessed = await service.assessReadiness({ roots })
+		expect(assessed.status).toBe('ok')
+		expect(assessed.readiness?.implementationReady).toBe(true)
+		expect(assessed.readiness?.coverage.review).toEqual({
+			complete: true,
+			threads: 6,
+			resolved: { 'verified': 1, 'answered': 2, 'wont-fix': 1, 'duplicate': 1, 'obsolete': 1 },
+		})
+		expect(assessed.readiness?.blockingDiagnostics).toEqual([{
+			code: 'handoff.review_declined',
+			message: expect.stringContaining('e0000000-0000-4000-8000-000000000002'),
+			blocking: false,
+			path: '/reviews/e0000000-0000-4000-8000-000000000002',
+		}])
+
+		const exported = await service.exportHandoff({ roots })
+		expect(exported.status).toBe('exported')
+		expect(validateHandoffManifest(exported.manifest).ok).toBe(true)
+		expect(exported.manifest?.readiness.implementationReady).toBe(true)
+		expect(exported.manifest?.readiness.coverage.review).toEqual(assessed.readiness?.coverage.review)
+		expect(exported.manifest?.provenance.workspaceSchemaVersion).toBe(2)
+		const snapshot = exported.manifest?.resources.find(resource => resource.type === 'review' && resource.identity.id === verified.id)
+		expect((snapshot?.snapshot as unknown as ReviewThread).history.at(-1)?.resolution).toBe('verified')
+
+		// An open thread still blocks; its count is not part of any resolution bucket.
+		await persistence.reviews.create('e0000000-0000-4000-8000-00000000000a', { ...closed(0, 'answered'), id: 'e0000000-0000-4000-8000-00000000000a', status: 'open', history: [] })
+		const blocked = await service.assessReadiness({ roots })
+		expect(blocked.readiness?.implementationReady).toBe(false)
+		expect(blocked.readiness?.coverage.review).toMatchObject({ complete: false, threads: 7, resolved: { answered: 2 } })
+		expect(blocked.readiness?.blockingDiagnostics.filter(d => d.blocking).map(d => d.code)).toEqual(['handoff.unresolved_review_thread'])
 	})
 
 	it('blocks implementation-ready when formal evidence is missing or incomplete', async () => {
@@ -768,14 +849,15 @@ describe('Handoff closure export and readiness evaluation', () => {
 		const viewRev = await persistence.views.create(VIEW_1_ID, view)
 		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
 
-		const { url: serverUrl } = await startTestServer(root)
-		const app = createWorkspaceApplicationSession(persistence)
+		const server = await startTestServer(root)
+		const serverUrl = server.url
+		const app = createWorkspaceApplicationSession(persistence, { captureCookie: () => server.cookie })
 
 		// 1. Test MCP client connection and tools
-		const handler = createUiuxMcpHttpHandler(app)
+		const handler = createUiuxMcpHttpHandler(app, { leases: createLeaseManager() })
 		const client = new Client({ name: 'mcp-handoff-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto' } })
 		const transport = new StreamableHTTPClientTransport(new URL(`${serverUrl}/api/mcp`), {
-			fetch: async (input, init) => handler.fetch(new Request(input, init)),
+			fetch: async (input, init) => handler.fetch(new Request(input, init), { authInfo: principalAuthInfo(AGENT_EDITOR) }),
 		})
 		await client.connect(transport)
 
@@ -809,7 +891,7 @@ describe('Handoff closure export and readiness evaluation', () => {
 			// POST /api/handoff/assess
 			const httpAssess = await fetch(`${serverUrl}/api/handoff/assess`, {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
+				headers: { ...server.headers, 'Content-Type': 'application/json' },
 				body: JSON.stringify({ roots: [{ type: 'view', viewId: VIEW_1_ID }] }),
 			})
 			expect(httpAssess.status).toBe(200)
@@ -819,7 +901,7 @@ describe('Handoff closure export and readiness evaluation', () => {
 			// POST /api/handoff/export
 			const httpExport = await fetch(`${serverUrl}/api/handoff/export`, {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
+				headers: { ...server.headers, 'Content-Type': 'application/json' },
 				body: JSON.stringify({ roots: [{ type: 'view', viewId: VIEW_1_ID }] }),
 			})
 			expect(httpExport.status).toBe(200)
@@ -832,7 +914,7 @@ describe('Handoff closure export and readiness evaluation', () => {
 			expect(httpExportJson.bundleIdentity).toBeDefined()
 
 			// GET /api/artifacts/[digest] to download exported manifest
-			const httpArtifact = await fetch(`${serverUrl}/api/artifacts/${httpExportJson.manifestArtifactDigest}`)
+			const httpArtifact = await fetch(`${serverUrl}/api/artifacts/${httpExportJson.manifestArtifactDigest}`, { headers: server.headers })
 			expect(httpArtifact.status).toBe(200)
 			expect(httpArtifact.headers.get('content-type')).toContain('application/json')
 			expect(httpArtifact.headers.get('x-content-type-options')).toBe('nosniff')
@@ -1036,8 +1118,9 @@ describe('Handoff closure export and readiness evaluation', () => {
 		const view = createSampleView(VIEW_1_ID, 'Real Capture Handoff View')
 		await persistence.views.create(VIEW_1_ID, view)
 
-		const { url: serverUrl } = await startTestServer(root)
-		const formalCapture = createFormalCaptureService(persistence)
+		const server = await startTestServer(root)
+		const serverUrl = server.url
+		const formalCapture = createFormalCaptureService(persistence, { captureCookie: () => server.cookie })
 
 		// 1. Run REAL formal capture via Playwright against running server
 		const captureBatch = await formalCapture.capture({

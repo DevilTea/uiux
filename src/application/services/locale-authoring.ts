@@ -48,6 +48,10 @@ export function createLocaleAuthoringService(persistence: FileNativePersistence)
 			return { status: 'created', key: command.locale, revision, diagnostics: inspected?.diagnostics ?? [] }
 		}
 		catch (error) {
+			// A case-variant file (for example `zh-tw.json`) holding this locale's path on a
+			// case-insensitive volume is reported as the same filename diagnostic discovery emits.
+			if (error instanceof PersistenceError && error.code === 'persistence.path_rejected' && error.diagnostics.length > 0)
+				return { status: 'invalid', key: command.locale, diagnostics: error.diagnostics }
 			if (!(error instanceof PersistenceError) || error.code !== 'persistence.resource_exists') throw error
 			const currentRevision = await persistence.locales.readRevision(command.locale)
 			return { status: 'already_exists', key: command.locale, ...(currentRevision ? { currentRevision } : {}) }

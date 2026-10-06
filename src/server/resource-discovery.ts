@@ -6,11 +6,11 @@ export type ResourceDiscoveryHttpResult =
 	| Readonly<{ status: 200; body: ResourceDiscoveryPage }>
 	| Readonly<{ status: 400; body: { code: 'invalid_discovery_request'; diagnostics: readonly Diagnostic[] } }>
 
-export async function listResourcesForHttp(app: WorkspaceApplicationSession, input: unknown): Promise<ResourceDiscoveryHttpResult> {
+export async function listResourcesForHttp(app: Pick<WorkspaceApplicationSession, 'listPointResources'>, input: unknown): Promise<ResourceDiscoveryHttpResult> {
 	return mapOutcome(await app.listPointResources(input))
 }
 
-export async function searchResourcesForHttp(app: WorkspaceApplicationSession, input: unknown): Promise<ResourceDiscoveryHttpResult> {
+export async function searchResourcesForHttp(app: Pick<WorkspaceApplicationSession, 'searchPointResources'>, input: unknown): Promise<ResourceDiscoveryHttpResult> {
 	return mapOutcome(await app.searchPointResources(input))
 }
 

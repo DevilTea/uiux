@@ -1,17 +1,18 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { decodeStrictBase64 } from '../src/domain/assets/schema'
 import type { ViewResource } from '../src/domain/views/schema'
-import { createUiuxMcpHttpHandler } from '../src/mcp/server'
 import { FileNativePersistence } from '../src/persistence'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { isCaseSensitiveDirectory } from './support/filesystem'
+import { AGENT_EDITOR, HUMAN_OWNER, connectMcp, scoped } from './support/access'
+import type { MemberPrincipal } from '../src/application/access/principal'
 import {
 	appendReviewMessageForHttp,
 	createAssetForHttp,
@@ -631,7 +632,7 @@ describe('Workspace manifest authoring', () => {
 		const initialRead = await app.readPointResource('workspace', 'workspace')
 		if (initialRead?.kind !== 'workspace') return
 
-		const http = await updateWorkspaceSettingsForHttp(app, {
+		const http = await updateWorkspaceSettingsForHttp(scoped(app), {
 			expectedRevision: initialRead.revision,
 			settings: {
 				i18n: { defaultLocale: 'de-DE' },
@@ -676,7 +677,7 @@ describe('Locale authoring', () => {
 			})
 
 			// HTTP update parity
-			const httpUpdated = await updateLocaleForHttp(app, 'zh-TW', {
+			const httpUpdated = await updateLocaleForHttp(scoped(app), 'zh-TW', {
 				expectedRevision: createResult.revision,
 				messages: { greeting: '您好', confirm: '確定' },
 			})
@@ -710,6 +711,30 @@ describe('Locale authoring', () => {
 			expect(read?.kind === 'locale' ? read.resource.title : undefined).toBe('First')
 		}
 		finally { await close() }
+	})
+
+	it('reports a case-variant locale file instead of aliasing it on create and update', async () => {
+		const { root, app } = await emptySession()
+		await mkdir(join(root, 'i18n'), { recursive: true })
+		await writeFile(join(root, 'i18n', 'ja-jp.json'), '{"title":"variant"}')
+		const caseSensitive = await isCaseSensitiveDirectory(root)
+
+		const updated = await app.updateLocale({ locale: 'ja-JP', expectedRevision: `r_${'a'.repeat(43)}`, messages: { title: 'Updated' } })
+		expect(updated.status).toBe('not_found')
+
+		const created = await app.createLocale({ locale: 'ja-JP', messages: { title: 'Canonical' } })
+		if (caseSensitive) {
+			expect(created.status).toBe('created')
+		}
+		else {
+			expect(created).toMatchObject({
+				status: 'invalid',
+				key: 'ja-JP',
+				diagnostics: [expect.objectContaining({ code: 'i18n.invalid_locale_filename', path: '/i18n/ja-jp.json' })],
+			})
+			expect(await app.readPointResource('locale', 'ja-JP')).toBeUndefined()
+		}
+		expect(await readFile(join(root, 'i18n', 'ja-jp.json'), 'utf8')).toBe('{"title":"variant"}')
 	})
 
 	it('rejects stale revision CAS conflict on update without mutating persistence', async () => {
@@ -787,7 +812,7 @@ describe('UX Flow authoring', () => {
 			expect(read.resource.name).toBe('Checkout Flow')
 
 			// Update flow with revision CAS via HTTP
-			const httpUpdated = await updateFlowForHttp(app, FLOW_ID, {
+			const httpUpdated = await updateFlowForHttp(scoped(app), FLOW_ID, {
 				expectedRevision: createResult.revision,
 				name: 'Updated Checkout Flow',
 				entryStepId: step1,
@@ -975,7 +1000,7 @@ describe('Review thread domain authoring', () => {
 			expect(read4?.kind === 'review' ? read4.resource.status : undefined).toBe('ready-for-review')
 			expect(read4?.kind === 'review' ? read4.resource.submissions : undefined).toHaveLength(1)
 
-			// 5. Negative: resolve by non-human actor must fail
+			// 5. Negative: resolve by non-human actor must fail (and /mcp never resolves)
 			const agentResolve = await client.callTool({
 				name: 'resolve_review_thread',
 				arguments: {
@@ -986,13 +1011,15 @@ describe('Review thread domain authoring', () => {
 			})
 			expect(agentResolve.isError).toBe(true)
 			expect(agentResolve.structuredContent).toMatchObject({
-				status: 'invalid',
+				status: 'blocked',
 				key: REVIEW_ID,
+				code: 'review.resolve_requires_human',
 				diagnostics: expect.arrayContaining([expect.objectContaining({ code: 'review.resolve_requires_human' })]),
 			})
 
-			// 6. Resolve with human actor
-			const resolveResult = await client.callTool({
+			// 6. A human member on /mcp is refused too: resolution is Workbench-only.
+			const human = await connectedClient(app, HUMAN_OWNER)
+			const mcpHumanResolve = await human.client.callTool({
 				name: 'resolve_review_thread',
 				arguments: {
 					reviewId: REVIEW_ID,
@@ -1001,8 +1028,19 @@ describe('Review thread domain authoring', () => {
 					reason: 'Looks great!',
 				},
 			})
-			expect(resolveResult.isError).not.toBe(true)
-			const resolveRev = (resolveResult.structuredContent as { revision: string }).revision
+			expect(mcpHumanResolve.isError).toBe(true)
+			expect(mcpHumanResolve.structuredContent).toMatchObject({ status: 'blocked', code: 'review.resolve_requires_workbench' })
+			await human.close()
+			expect((await app.readPointResource('review', REVIEW_ID))?.revision).toBe(submitRev)
+
+			// The Workbench surface (/api) resolves; an omitted resolution from ready-for-review is `verified`.
+			const resolveResult = await resolveReviewThreadForHttp(scoped(app), REVIEW_ID, {
+				expectedRevision: submitRev,
+				actor: { type: 'human', displayName: 'Lead Designer' },
+				reason: 'Looks great!',
+			})
+			expect(resolveResult.status).toBe(200)
+			const resolveRev = (resolveResult.body as { revision: string }).revision
 
 			const read5 = await app.readPointResource('review', REVIEW_ID)
 			expect(read5?.kind === 'review' ? read5.resource.status : undefined).toBe('resolved')
@@ -1264,23 +1302,23 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 	it('rejects malformed non-object bodies returning structured HTTP 400', async () => {
 		const { app } = await emptySession()
 		for (const invalidBody of [null, 'a string', 12345, true, [1, 2, 3]]) {
-			const viewRes = await createViewForHttp(app, invalidBody)
+			const viewRes = await createViewForHttp(scoped(app), invalidBody)
 			expect(viewRes.status).toBe(400)
 			expect(viewRes.body).toMatchObject({ code: 'malformed_payload' })
 
-			const localeRes = await createLocaleForHttp(app, invalidBody)
+			const localeRes = await createLocaleForHttp(scoped(app), invalidBody)
 			expect(localeRes.status).toBe(400)
 			expect(localeRes.body).toMatchObject({ code: 'malformed_payload' })
 
-			const flowRes = await createFlowForHttp(app, invalidBody)
+			const flowRes = await createFlowForHttp(scoped(app), invalidBody)
 			expect(flowRes.status).toBe(400)
 			expect(flowRes.body).toMatchObject({ code: 'malformed_payload' })
 
-			const reviewRes = await createReviewThreadForHttp(app, invalidBody)
+			const reviewRes = await createReviewThreadForHttp(scoped(app), invalidBody)
 			expect(reviewRes.status).toBe(400)
 			expect(reviewRes.body).toMatchObject({ code: 'malformed_payload' })
 
-			const assetRes = await createAssetForHttp(app, invalidBody)
+			const assetRes = await createAssetForHttp(scoped(app), invalidBody)
 			expect(assetRes.status).toBe(400)
 			expect(assetRes.body).toMatchObject({ code: 'malformed_payload' })
 		}
@@ -1289,36 +1327,36 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 	it('rejects missing required fields with structured HTTP 400 without throwing TypeError', async () => {
 		const { app } = await emptySession()
 
-		const emptyView = await createViewForHttp(app, {})
+		const emptyView = await createViewForHttp(scoped(app), {})
 		expect(emptyView.status).toBe(400)
 		expect(emptyView.body.code).toBe('malformed_payload')
 		expect(emptyView.body.diagnostics.length).toBeGreaterThan(0)
 
-		const missingSpec = await createViewForHttp(app, { name: 'Only Name' })
+		const missingSpec = await createViewForHttp(scoped(app), { name: 'Only Name' })
 		expect(missingSpec.status).toBe(400)
 		expect(missingSpec.body.code).toBe('malformed_payload')
 
-		const emptyLocale = await createLocaleForHttp(app, {})
+		const emptyLocale = await createLocaleForHttp(scoped(app), {})
 		expect(emptyLocale.status).toBe(400)
 		expect(emptyLocale.body.code).toBe('malformed_payload')
 
-		const emptyFlow = await createFlowForHttp(app, {})
+		const emptyFlow = await createFlowForHttp(scoped(app), {})
 		expect(emptyFlow.status).toBe(400)
 		expect(emptyFlow.body.code).toBe('malformed_payload')
 
-		const emptyReview = await createReviewThreadForHttp(app, {})
+		const emptyReview = await createReviewThreadForHttp(scoped(app), {})
 		expect(emptyReview.status).toBe(400)
 		expect(emptyReview.body.code).toBe('malformed_payload')
 
-		const emptyAsset = await createAssetForHttp(app, {})
+		const emptyAsset = await createAssetForHttp(scoped(app), {})
 		expect(emptyAsset.status).toBe(400)
 		expect(emptyAsset.body.code).toBe('malformed_payload')
 
-		const emptyMessage = await appendReviewMessageForHttp(app, REVIEW_ID, {})
+		const emptyMessage = await appendReviewMessageForHttp(scoped(app), REVIEW_ID, {})
 		expect(emptyMessage.status).toBe(400)
 		expect(emptyMessage.body.code).toBe('malformed_payload')
 
-		const emptyResolve = await resolveReviewThreadForHttp(app, REVIEW_ID, {})
+		const emptyResolve = await resolveReviewThreadForHttp(scoped(app), REVIEW_ID, {})
 		expect(emptyResolve.status).toBe(400)
 		expect(emptyResolve.body.code).toBe('malformed_payload')
 	})
@@ -1327,7 +1365,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 		const { app } = await emptySession()
 
 		// string instead of array on reanchor variantNames
-		const stringVariants = await reanchorReviewThreadForHttp(app, REVIEW_ID, {
+		const stringVariants = await reanchorReviewThreadForHttp(scoped(app), REVIEW_ID, {
 			expectedRevision: 'rev-1',
 			anchor: { viewId: VIEW_ID, widgetId: 'w1' },
 			actor: { type: 'human' },
@@ -1337,7 +1375,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 		expect(stringVariants.body.code).toBe('malformed_payload')
 
 		// string instead of array on submit ready changeDomains
-		const stringDomains = await submitReadyForReviewForHttp(app, REVIEW_ID, {
+		const stringDomains = await submitReadyForReviewForHttp(scoped(app), REVIEW_ID, {
 			expectedRevision: 'rev-1',
 			actor: { type: 'human' },
 			changeDomains: 'all',
@@ -1348,7 +1386,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 		expect(stringDomains.body.code).toBe('malformed_payload')
 
 		// object instead of array on submit ready changeDomains
-		const objectDomains = await submitReadyForReviewForHttp(app, REVIEW_ID, {
+		const objectDomains = await submitReadyForReviewForHttp(scoped(app), REVIEW_ID, {
 			expectedRevision: 'rev-1',
 			actor: { type: 'human' },
 			changeDomains: { domain: 'views' },
@@ -1359,7 +1397,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 		expect(objectDomains.body.code).toBe('malformed_payload')
 
 		// object instead of array on createReviewThread variantNames
-		const objectVariants = await createReviewThreadForHttp(app, {
+		const objectVariants = await createReviewThreadForHttp(scoped(app), {
 			anchor: { viewId: VIEW_ID, widgetId: 'w1' },
 			variantNames: { name: 'mobile' },
 		})
@@ -1371,14 +1409,14 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 		const { app } = await emptySession()
 
 		// anchor as string instead of object
-		const badAnchor = await createReviewThreadForHttp(app, {
+		const badAnchor = await createReviewThreadForHttp(scoped(app), {
 			anchor: 'not-an-object',
 		})
 		expect(badAnchor.status).toBe(400)
 		expect(badAnchor.body.code).toBe('malformed_payload')
 
 		// spec as string instead of object
-		const badSpec = await updateViewSpecForHttp(app, VIEW_ID, {
+		const badSpec = await updateViewSpecForHttp(scoped(app), VIEW_ID, {
 			expectedRevision: 'rev-1',
 			spec: 'intent only',
 		})
@@ -1386,7 +1424,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 		expect(badSpec.body.code).toBe('malformed_payload')
 
 		// ir as string instead of object
-		const badIr = await updateViewStructureForHttp(app, VIEW_ID, {
+		const badIr = await updateViewStructureForHttp(scoped(app), VIEW_ID, {
 			expectedRevision: 'rev-1',
 			ir: 'not-an-object',
 			variants: {},
@@ -1395,7 +1433,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 		expect(badIr.body.code).toBe('malformed_payload')
 
 		// outcome as string instead of object in promotion
-		const badOutcome = await promoteReviewToDecisionForHttp(app, REVIEW_ID, {
+		const badOutcome = await promoteReviewToDecisionForHttp(scoped(app), REVIEW_ID, {
 			expectedReviewRevision: 'rev-1',
 			viewId: VIEW_ID,
 			expectedViewRevision: 'rev-1',
@@ -1409,7 +1447,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 	it('rejects unknown extra properties on strict HTTP endpoints with HTTP 400', async () => {
 		const { app } = await emptySession()
 
-		const unknownViewProp = await createViewForHttp(app, {
+		const unknownViewProp = await createViewForHttp(scoped(app), {
 			name: 'Valid Name',
 			spec: spec('Intent'),
 			unrecognizedExtraField: 1234,
@@ -1417,7 +1455,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 		expect(unknownViewProp.status).toBe(400)
 		expect(unknownViewProp.body.code).toBe('malformed_payload')
 
-		const unknownSettingsProp = await updateWorkspaceSettingsForHttp(app, {
+		const unknownSettingsProp = await updateWorkspaceSettingsForHttp(scoped(app), {
 			expectedRevision: 'rev-1',
 			settings: { i18n: { defaultLocale: 'en-US' } },
 			unrecognizedSetting: true,
@@ -1425,7 +1463,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 		expect(unknownSettingsProp.status).toBe(400)
 		expect(unknownSettingsProp.body.code).toBe('malformed_payload')
 
-		const unknownReopenProp = await reopenReviewThreadForHttp(app, REVIEW_ID, {
+		const unknownReopenProp = await reopenReviewThreadForHttp(scoped(app), REVIEW_ID, {
 			expectedRevision: 'rev-1',
 			actor: { type: 'human' },
 			extraUnexpected: 'data',
@@ -1482,7 +1520,7 @@ describe('Strict RFC 4648 Base64 asset encoding validation', () => {
 		const { app } = await emptySession()
 
 		for (const badBase64 of ['aa=b', 'aa', 'aaa', 'aa==', 'AAAA\n', '', '?!@#']) {
-			const res = await createAssetForHttp(app, {
+			const res = await createAssetForHttp(scoped(app), {
 				name: 'Test Asset',
 				contentFilename: 'test.bin',
 				mediaType: 'application/octet-stream',
@@ -1501,7 +1539,7 @@ describe('Asset content HTTP serving and header security', () => {
 		const testBytes = new Uint8Array([1, 2, 3, 4])
 		const base64 = Buffer.from(testBytes).toString('base64')
 
-		const created = await createAssetForHttp(app, {
+		const created = await createAssetForHttp(scoped(app), {
 			id: ASSET_ID,
 			name: 'Test Icon',
 			contentFilename: 'app icon.png',
@@ -1531,7 +1569,7 @@ describe('Asset content HTTP serving and header security', () => {
 		const testBytes = new Uint8Array([1, 2, 3])
 		const base64 = Buffer.from(testBytes).toString('base64')
 
-		const created = await createAssetForHttp(app, {
+		const created = await createAssetForHttp(scoped(app), {
 			id: ASSET_ID,
 			name: 'Missing File Asset',
 			contentFilename: 'missing.bin',
@@ -1553,7 +1591,7 @@ describe('Asset content HTTP serving and header security', () => {
 		const testBytes = new Uint8Array([1, 2, 3])
 		const base64 = Buffer.from(testBytes).toString('base64')
 
-		const created = await createAssetForHttp(app, {
+		const created = await createAssetForHttp(scoped(app), {
 			id: ASSET_ID,
 			name: 'Ambiguous Asset',
 			contentFilename: 'primary.bin',
@@ -1596,18 +1634,6 @@ async function emptySession() {
 	return { root, persistence, app: createWorkspaceApplicationSession(persistence) }
 }
 
-async function connectedClient(app: ReturnType<typeof createWorkspaceApplicationSession>) {
-	const handler = createUiuxMcpHttpHandler(app)
-	const client = new Client({ name: 'uiux-authoring-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto', probe: { timeoutMs: 2_000 } } })
-	const transport = new StreamableHTTPClientTransport(new URL('http://uiux.test/mcp'), {
-		fetch: async (input, init) => handler.fetch(new Request(input, init)),
-	})
-	await client.connect(transport)
-	return {
-		client,
-		async close() {
-			await client.close()
-			await handler.close()
-		},
-	}
+async function connectedClient(app: ReturnType<typeof createWorkspaceApplicationSession>, principal: MemberPrincipal = AGENT_EDITOR) {
+	return connectMcp(app, principal)
 }

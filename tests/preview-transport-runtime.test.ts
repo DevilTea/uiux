@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
 	PREVIEW_WIRE_CHANNEL,
 	PREVIEW_CONTEXT_CHANNEL,
-	PREVIEW_HIGHLIGHT_CHANNEL,
-	PREVIEW_TARGETING_CHANNEL,
 	isPreviewTransportEnvelope,
 	createInMemoryTransportPair,
 } from '../src/preview/protocol/transport'
@@ -55,15 +53,17 @@ describe('preview protocol transport & runtime materialization', () => {
 				},
 			})).toBe(true)
 
+			// The legacy in-iframe highlight channel is retired: Workbench draws every outline.
 			expect(isPreviewTransportEnvelope({
-				channel: PREVIEW_HIGHLIGHT_CHANNEL,
+				channel: 'uiux:preview:highlight',
 				payload: { widgetId: 'root' },
-			})).toBe(true)
+			})).toBe(false)
 
+			// The ad hoc targeting channel is retired: targeting travels in the protocol envelope.
 			expect(isPreviewTransportEnvelope({
-				channel: PREVIEW_TARGETING_CHANNEL,
+				channel: 'uiux:preview:targeting',
 				payload: { type: 'select', widgetId: 'root', viewId: VIEW_ID },
-			})).toBe(true)
+			})).toBe(false)
 
 			expect(isPreviewTransportEnvelope(null)).toBe(false)
 			expect(isPreviewTransportEnvelope({})).toBe(false)

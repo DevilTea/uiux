@@ -1,0 +1,528 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-06T03:27:30.189244+00:00",
+  "title": "Design System: UIUX Workbench",
+  "extensions": {
+    "colorMeta": {
+      "iris-600": {
+        "role": "primary",
+        "displayName": "Iris (light accent)",
+        "canonical": "oklch(52.6% 0.205 293.6)",
+        "tonalRamp": [
+          "oklch(34.6% 0.128 293.6)",
+          "oklch(40.6% 0.158 293.6)",
+          "oklch(46.6% 0.185 293.6)",
+          "oklch(52.6% 0.205 293.6)",
+          "oklch(61.2% 0.2 293.6)",
+          "oklch(70.9% 0.159 293.6)",
+          "oklch(89.6% 0.052 293.6)",
+          "oklch(97.2% 0.014 293.6)"
+        ],
+        "hex": "#7545d3"
+      },
+      "iris-400": {
+        "role": "primary",
+        "displayName": "Iris (dark accent, favicon violet)",
+        "canonical": "oklch(70.9% 0.159 293.6)",
+        "tonalRamp": [
+          "oklch(34.6% 0.128 293.6)",
+          "oklch(40.6% 0.158 293.6)",
+          "oklch(46.6% 0.185 293.6)",
+          "oklch(52.6% 0.205 293.6)",
+          "oklch(61.2% 0.2 293.6)",
+          "oklch(70.9% 0.159 293.6)",
+          "oklch(89.6% 0.052 293.6)",
+          "oklch(97.2% 0.014 293.6)"
+        ],
+        "hex": "#a78bfa"
+      },
+      "marker-600": {
+        "role": "secondary",
+        "displayName": "Marker (pin fill, light)",
+        "canonical": "oklch(57.5% 0.2 355)",
+        "tonalRamp": [
+          "oklch(38.5% 0.122 355)",
+          "oklch(44.5% 0.152 355)",
+          "oklch(51% 0.18 355)",
+          "oklch(57.5% 0.2 355)",
+          "oklch(65.5% 0.19 355)",
+          "oklch(73.5% 0.15 355)",
+          "oklch(89.6% 0.058 355)",
+          "oklch(97.2% 0.014 355)"
+        ],
+        "hex": "#cb317f"
+      },
+      "marker-700": {
+        "role": "secondary",
+        "displayName": "Marker (annotation text, light)",
+        "canonical": "oklch(51% 0.18 355)",
+        "tonalRamp": [
+          "oklch(38.5% 0.122 355)",
+          "oklch(44.5% 0.152 355)",
+          "oklch(51% 0.18 355)",
+          "oklch(57.5% 0.2 355)",
+          "oklch(65.5% 0.19 355)",
+          "oklch(73.5% 0.15 355)",
+          "oklch(89.6% 0.058 355)",
+          "oklch(97.2% 0.014 355)"
+        ],
+        "hex": "#ae276b"
+      },
+      "marker-400": {
+        "role": "secondary",
+        "displayName": "Marker (annotation, dark)",
+        "canonical": "oklch(73.5% 0.15 355)",
+        "tonalRamp": [
+          "oklch(38.5% 0.122 355)",
+          "oklch(44.5% 0.152 355)",
+          "oklch(51% 0.18 355)",
+          "oklch(57.5% 0.2 355)",
+          "oklch(65.5% 0.19 355)",
+          "oklch(73.5% 0.15 355)",
+          "oklch(89.6% 0.058 355)",
+          "oklch(97.2% 0.014 355)"
+        ],
+        "hex": "#f17eae"
+      },
+      "leaf-700": {
+        "role": "tertiary",
+        "displayName": "Leaf (success, light)",
+        "canonical": "oklch(49.5% 0.11 152)",
+        "tonalRamp": [
+          "oklch(37.5% 0.078 152)",
+          "oklch(44% 0.095 152)",
+          "oklch(49.5% 0.11 152)",
+          "oklch(56.5% 0.13 152)",
+          "oklch(66% 0.145 152)",
+          "oklch(76% 0.14 152)",
+          "oklch(90.5% 0.08 152)",
+          "oklch(97.6% 0.022 152)"
+        ],
+        "hex": "#247341"
+      },
+      "leaf-400": {
+        "role": "tertiary",
+        "displayName": "Leaf (success, dark)",
+        "canonical": "oklch(76% 0.14 152)",
+        "tonalRamp": [
+          "oklch(37.5% 0.078 152)",
+          "oklch(44% 0.095 152)",
+          "oklch(49.5% 0.11 152)",
+          "oklch(56.5% 0.13 152)",
+          "oklch(66% 0.145 152)",
+          "oklch(76% 0.14 152)",
+          "oklch(90.5% 0.08 152)",
+          "oklch(97.6% 0.022 152)"
+        ],
+        "hex": "#63ca84"
+      },
+      "caution-yellow-800": {
+        "role": "tertiary",
+        "displayName": "Caution Yellow (warning, light)",
+        "canonical": "oklch(47.6% 0.114 61.907)",
+        "hex": "#894b00"
+      },
+      "caution-yellow-400": {
+        "role": "tertiary",
+        "displayName": "Caution Yellow (warning, dark)",
+        "canonical": "oklch(85.2% 0.199 91.936)",
+        "hex": "#fdc700"
+      },
+      "fault-red-700": {
+        "role": "tertiary",
+        "displayName": "Fault Red (error, light)",
+        "canonical": "oklch(50.5% 0.213 27.518)",
+        "hex": "#c10007"
+      },
+      "fault-red-400": {
+        "role": "tertiary",
+        "displayName": "Fault Red (error, dark)",
+        "canonical": "oklch(70.4% 0.191 22.216)",
+        "hex": "#ff6467"
+      },
+      "notice-blue-700": {
+        "role": "tertiary",
+        "displayName": "Notice Blue (ready-for-review / info, light)",
+        "canonical": "oklch(48.8% 0.243 264.376)",
+        "hex": "#1447e6"
+      },
+      "notice-blue-400": {
+        "role": "tertiary",
+        "displayName": "Notice Blue (ready-for-review / info, dark)",
+        "canonical": "oklch(70.7% 0.165 254.624)",
+        "hex": "#51a2ff"
+      },
+      "graphite-0": {
+        "role": "neutral",
+        "displayName": "Panel White",
+        "canonical": "oklch(100% 0 286)",
+        "tonalRamp": [
+          "oklch(16% 0.006 286)",
+          "oklch(27.6% 0.009 286)",
+          "oklch(45% 0.012 286)",
+          "oklch(55.4% 0.012 286)",
+          "oklch(71% 0.01 286)",
+          "oklch(86.8% 0.007 286)",
+          "oklch(94.6% 0.004 286)",
+          "oklch(98.5% 0.002 286)"
+        ],
+        "hex": "#ffffff"
+      },
+      "graphite-100": {
+        "role": "neutral",
+        "displayName": "Canvas Ground (light)",
+        "canonical": "oklch(96.7% 0.003 286)",
+        "tonalRamp": [
+          "oklch(16% 0.006 286)",
+          "oklch(27.6% 0.009 286)",
+          "oklch(45% 0.012 286)",
+          "oklch(55.4% 0.012 286)",
+          "oklch(71% 0.01 286)",
+          "oklch(86.8% 0.007 286)",
+          "oklch(94.6% 0.004 286)",
+          "oklch(98.5% 0.002 286)"
+        ],
+        "hex": "#f4f4f6"
+      },
+      "graphite-800": {
+        "role": "neutral",
+        "displayName": "Ink (light text)",
+        "canonical": "oklch(27.6% 0.009 286)",
+        "tonalRamp": [
+          "oklch(16% 0.006 286)",
+          "oklch(27.6% 0.009 286)",
+          "oklch(45% 0.012 286)",
+          "oklch(55.4% 0.012 286)",
+          "oklch(71% 0.01 286)",
+          "oklch(86.8% 0.007 286)",
+          "oklch(94.6% 0.004 286)",
+          "oklch(98.5% 0.002 286)"
+        ],
+        "hex": "#27272c"
+      },
+      "graphite-900": {
+        "role": "neutral",
+        "displayName": "Night Panel (dark bg)",
+        "canonical": "oklch(21.2% 0.007 286)",
+        "tonalRamp": [
+          "oklch(16% 0.006 286)",
+          "oklch(27.6% 0.009 286)",
+          "oklch(45% 0.012 286)",
+          "oklch(55.4% 0.012 286)",
+          "oklch(71% 0.01 286)",
+          "oklch(86.8% 0.007 286)",
+          "oklch(94.6% 0.004 286)",
+          "oklch(98.5% 0.002 286)"
+        ],
+        "hex": "#18181c"
+      },
+      "graphite-950": {
+        "role": "neutral",
+        "displayName": "Canvas Ground (dark)",
+        "canonical": "oklch(16% 0.006 286)",
+        "tonalRamp": [
+          "oklch(16% 0.006 286)",
+          "oklch(27.6% 0.009 286)",
+          "oklch(45% 0.012 286)",
+          "oklch(55.4% 0.012 286)",
+          "oklch(71% 0.01 286)",
+          "oklch(86.8% 0.007 286)",
+          "oklch(94.6% 0.004 286)",
+          "oklch(98.5% 0.002 286)"
+        ],
+        "hex": "#0d0d10"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Overview headline counts and empty-state titles; at most one per screen."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page titles (Overview, Reviews, View name)."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Panel, section, bubble and dialog titles."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Review messages, Spec prose, Decisions; 68ch measure."
+      },
+      "ui": {
+        "displayName": "UI",
+        "purpose": "Default control, row, tab, input and menu text (Nuxt UI text-sm retuned to 13px)."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Field labels, badges, counts, timestamps; the 12px floor."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Identities, revisions, dimensions, codes; blueprint register only."
+      }
+    },
+    "shadows": [
+      {
+        "name": "frame-lift",
+        "value": "0 0 0 1px oklch(16% 0.006 286 / 0.08), 0 2px 6px oklch(16% 0.006 286 / 0.06), 0 12px 32px -8px oklch(16% 0.006 286 / 0.12)",
+        "valueDark": "0 0 0 1px oklch(32% 0.01 286), 0 16px 40px -8px oklch(0% 0 0 / 0.55)",
+        "purpose": "Preview frame only."
+      },
+      {
+        "name": "pin",
+        "value": "0 0 0 2px var(--ui-bg), 0 1px 3px oklch(0% 0 0 / 0.28)",
+        "purpose": "Comment pins; the panel-colored ring separates the pin from View content."
+      },
+      {
+        "name": "overlay",
+        "value": "0 1px 2px oklch(16% 0.006 286 / 0.06), 0 8px 24px -4px oklch(16% 0.006 286 / 0.14)",
+        "valueDark": "0 0 0 1px oklch(32% 0.01 286), 0 12px 32px -4px oklch(0% 0 0 / 0.6)",
+        "purpose": "Bubbles, popovers, menus, tooltips, toasts."
+      },
+      {
+        "name": "modal",
+        "value": "0 24px 64px -12px oklch(16% 0.006 286 / 0.25)",
+        "valueDark": "0 0 0 1px oklch(32% 0.01 286), 0 24px 64px -12px oklch(0% 0 0 / 0.7)",
+        "purpose": "UModal, USlideover, UDrawer."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out-quiet",
+        "value": "cubic-bezier(0.2, 0, 0, 1)",
+        "purpose": "Enter / state change easing."
+      },
+      {
+        "name": "ease-in-quiet",
+        "value": "cubic-bezier(0.4, 0, 1, 1)",
+        "purpose": "Exit easing."
+      },
+      {
+        "name": "duration-micro",
+        "value": "120ms",
+        "purpose": "Hover, press, toggles."
+      },
+      {
+        "name": "duration-reveal",
+        "value": "160ms",
+        "purpose": "Popover, bubble, tooltip, menu enter (exit 100ms)."
+      },
+      {
+        "name": "duration-panel",
+        "value": "220ms",
+        "purpose": "Slideover, drawer, sidebar collapse."
+      },
+      {
+        "name": "duration-pin-drop",
+        "value": "180ms",
+        "purpose": "New pin scale-in from the tip origin, no bounce."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "opacity-only, <=80ms",
+        "purpose": "prefers-reduced-motion: no reveal translate or scale keyframes; zoom instant. Layout transforms (canvas scale, pin positions) are never reset."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "md",
+        "value": "768px",
+        "purpose": "tablet portrait: 56px icon rail, right panel as slideover; below it phones get the bottom navigation"
+      },
+      {
+        "name": "lg",
+        "value": "1024px",
+        "purpose": "tablet landscape: icon rail, right panel as slideover"
+      },
+      {
+        "name": "xl",
+        "value": "1280px",
+        "purpose": "desktop: full shell with resizable sidebar and right panel"
+      },
+      {
+        "name": "pointer-coarse",
+        "value": "(pointer: coarse)",
+        "purpose": "44px targets via --wb-target, 16px inputs, threads in a bottom drawer"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single violet action in a region (Comment, Resolve, Save).",
+      "html": "<button class=\"ds-btn-primary\">Resolve</button>",
+      "css": ".ds-btn-primary{font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);font-size:13px;line-height:20px;font-weight:500;height:32px;padding:6px 10px;border:0;border-radius:6px;background:var(--ui-primary,#7545d3);color:var(--ui-text-inverted,#fff);cursor:pointer;transition:background-color 120ms cubic-bezier(0.2,0,0,1)}.ds-btn-primary:hover{background:var(--ui-color-primary-700,#6339b5)}.ds-btn-primary:active{background:var(--ui-color-primary-800,#512e94)}.ds-btn-primary:focus-visible{outline:2px solid var(--ui-primary,#7545d3);outline-offset:2px}"
+    },
+    {
+      "name": "Neutral Outline Button",
+      "kind": "button",
+      "refersTo": "button-neutral-outline",
+      "description": "Default button; violet must be asked for.",
+      "html": "<button class=\"ds-btn-outline\">Cancel</button>",
+      "css": ".ds-btn-outline{font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);font-size:13px;line-height:20px;font-weight:500;height:32px;padding:6px 10px;border-radius:6px;background:var(--ui-bg,#fff);color:var(--ui-text,#27272c);border:0;box-shadow:inset 0 0 0 1px var(--ui-border-accented,#8e8e96);cursor:pointer;transition:background-color 120ms cubic-bezier(0.2,0,0,1)}.ds-btn-outline:hover{background:var(--ui-bg-elevated,#f4f4f6)}.ds-btn-outline:focus-visible{outline:2px solid var(--ui-primary,#7545d3);outline-offset:2px}"
+    },
+    {
+      "name": "Ghost Icon Button",
+      "kind": "button",
+      "refersTo": "button-ghost-icon",
+      "description": "Toolbar and row actions; always labelled and tooltipped.",
+      "html": "<button class=\"ds-btn-icon\" aria-label=\"Fit to canvas\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 7V5a2 2 0 0 1 2-2h2\"/><path d=\"M17 3h2a2 2 0 0 1 2 2v2\"/><path d=\"M21 17v2a2 2 0 0 1-2 2h-2\"/><path d=\"M7 21H5a2 2 0 0 1-2-2v-2\"/></svg></button>",
+      "css": ".ds-btn-icon{display:inline-grid;place-items:center;width:32px;height:32px;border:0;border-radius:6px;background:transparent;color:var(--ui-text-muted,#54545c);cursor:pointer;transition:background-color 120ms cubic-bezier(0.2,0,0,1),color 120ms}.ds-btn-icon:hover{background:var(--ui-bg-elevated,#f4f4f6);color:var(--ui-text-highlighted,#0d0d10)}.ds-btn-icon:focus-visible{outline:2px solid var(--ui-primary,#7545d3);outline-offset:2px}"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "UInput outline variant at 13px (16px on touch).",
+      "html": "<input class=\"ds-input\" placeholder=\"Filter Views\" />",
+      "css": ".ds-input{font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);font-size:13px;line-height:20px;height:32px;padding:6px 10px;border:0;border-radius:6px;background:var(--ui-bg,#fff);color:var(--ui-text,#27272c);box-shadow:inset 0 0 0 1px var(--ui-border-accented,#8e8e96);outline:none;transition:box-shadow 120ms}.ds-input::placeholder{color:var(--ui-text-dimmed,#72727a)}.ds-input:focus-visible{box-shadow:inset 0 0 0 2px var(--ui-primary,#7545d3)}"
+    },
+    {
+      "name": "Primary Nav Item",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "Sidebar UNavigationMenu item; active has a 2px violet leading bar.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-item\" href=\"#\">Overview</a><a class=\"ds-nav-item is-active\" href=\"#\" aria-current=\"page\">Views <span class=\"ds-count\">12</span></a><a class=\"ds-nav-item\" href=\"#\">UX Flows</a><a class=\"ds-nav-item\" href=\"#\">Reviews <span class=\"ds-count\">5</span></a></nav>",
+      "css": ".ds-nav{display:flex;flex-direction:column;gap:2px;width:220px}.ds-nav-item{font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);position:relative;display:flex;align-items:center;justify-content:space-between;height:32px;padding:6px 8px;border-radius:6px;font-size:13px;line-height:20px;color:var(--ui-text-muted,#54545c);text-decoration:none;transition:background-color 120ms}.ds-nav-item:hover{background:var(--ui-bg-muted,#fafafb);color:var(--ui-text,#27272c)}.ds-nav-item.is-active{background:var(--ui-bg-elevated,#f4f4f6);color:var(--ui-text-highlighted,#0d0d10);font-weight:500}.ds-nav-item.is-active::before{content:'';position:absolute;left:0;top:7px;bottom:7px;width:2px;border-radius:2px;background:var(--ui-primary,#7545d3)}.ds-nav-item:focus-visible{outline:2px solid var(--ui-primary,#7545d3);outline-offset:2px}.ds-count{font-size:12px;line-height:16px;padding:0 6px;border-radius:4px;background:var(--ui-bg-accented,#e5e5e9);color:var(--ui-text-muted,#54545c)}"
+    },
+    {
+      "name": "Review Status Badges",
+      "kind": "chip",
+      "refersTo": "badge-status",
+      "description": "Subtle UBadge at the 12px floor with icon + word; open = annotation, ready = info, resolved = success.",
+      "html": "<span class=\"ds-badge ds-open\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><circle cx=\"12\" cy=\"12\" r=\"1\"/></svg>Open</span> <span class=\"ds-badge ds-ready\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>Ready for review</span> <span class=\"ds-badge ds-resolved\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m9 12 2 2 4-4\"/></svg>Resolved</span>",
+      "css": ".ds-badge{font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);display:inline-flex;align-items:center;gap:4px;height:20px;padding:2px 6px;border-radius:4px;font-size:12px;line-height:16px;font-weight:500}.ds-open{color:var(--ui-annotation,#ae276b);background:color-mix(in oklab,var(--ui-annotation,#ae276b) 10%,var(--ui-bg,#fff));box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--ui-annotation,#ae276b) 25%,transparent)}.ds-ready{color:var(--ui-info,#1447e6);background:color-mix(in oklab,var(--ui-info,#1447e6) 10%,var(--ui-bg,#fff));box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--ui-info,#1447e6) 25%,transparent)}.ds-resolved{color:var(--ui-success,#247341);background:color-mix(in oklab,var(--ui-success,#247341) 10%,var(--ui-bg,#fff));box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--ui-success,#247341) 25%,transparent)}"
+    },
+    {
+      "name": "Mono Identity Chip",
+      "kind": "chip",
+      "refersTo": "mono-chip",
+      "description": "Blueprint register: ids, revisions, dimensions.",
+      "html": "<span class=\"ds-mono\">#checkout-submit</span> <span class=\"ds-mono\">1280 × 800</span> <span class=\"ds-mono\">rev 7f3d…a91c</span>",
+      "css": ".ds-mono{font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);font-size:12px;line-height:16px;padding:2px 6px;border-radius:4px;background:var(--ui-bg-elevated,#f4f4f6);color:var(--ui-text-muted,#54545c);font-feature-settings:'zero' 1}"
+    },
+    {
+      "name": "Comment Pin",
+      "kind": "custom",
+      "refersTo": "comment-pin",
+      "description": "Figma-like teardrop pin drawn in the Workbench overlay; tip marks the anchor point. Includes ready-for-review and resolved variants.",
+      "html": "<div class=\"ds-canvas\"><button class=\"ds-pin\" aria-label=\"Comment by Mei Lin, open\">ML</button><button class=\"ds-pin is-ready\" aria-label=\"Comment by agent, ready for review\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M12 8V4H8\"/><rect width=\"16\" height=\"12\" x=\"4\" y=\"8\" rx=\"2\"/><path d=\"M2 14h2\"/><path d=\"M20 14h2\"/><path d=\"M15 13v2\"/><path d=\"M9 13v2\"/></svg><span class=\"ds-pin-badge\"></span></button><button class=\"ds-pin is-resolved\" aria-label=\"Resolved comment\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\"><path d=\"M20 6 9 17l-5-5\"/></svg></button></div>",
+      "css": ".ds-canvas{display:flex;gap:24px;align-items:flex-end;padding:24px;background:var(--wb-canvas,#f4f4f6);border-radius:8px}.ds-pin{font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);position:relative;display:grid;place-items:center;width:28px;height:28px;border:0;border-radius:999px 999px 999px 2px;background:var(--wb-pin,#cb317f);color:var(--wb-pin-text,#fff);font-size:12px;line-height:16px;font-weight:600;box-shadow:0 0 0 2px var(--ui-bg,#fff),0 1px 3px oklch(0% 0 0 / 0.28);cursor:pointer;transition:transform 120ms cubic-bezier(0.2,0,0,1)}.ds-pin:hover{transform:translateY(-1px)}.ds-pin:focus-visible{outline:2px solid var(--ui-primary,#7545d3);outline-offset:3px}.ds-pin-badge{position:absolute;top:-4px;right:-4px;width:12px;height:12px;border-radius:999px;background:var(--ui-info,#1447e6);box-shadow:0 0 0 2px var(--ui-bg,#fff)}.ds-pin.is-resolved{width:24px;height:24px;background:var(--wb-pin-resolved,#72727a);color:#fff}"
+    },
+    {
+      "name": "Composer Bubble",
+      "kind": "card",
+      "refersTo": "composer-bubble",
+      "description": "Inline comment composer anchored at the click point (UPopover with a virtual reference).",
+      "html": "<div class=\"ds-bubble\" role=\"dialog\" aria-label=\"New comment\"><div class=\"ds-bubble-head\"><span class=\"ds-target\">Button · <code>#checkout-submit</code></span><span class=\"ds-scope\">This Variant ▾</span></div><textarea class=\"ds-bubble-input\" rows=\"3\" placeholder=\"Add a comment\"></textarea><div class=\"ds-bubble-foot\"><button class=\"ds-bubble-cancel\">Cancel</button><button class=\"ds-bubble-send\">Comment</button></div></div>",
+      "css": ".ds-bubble{font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);width:320px;padding:12px;border-radius:12px;background:var(--ui-bg,#fff);color:var(--ui-text,#27272c);box-shadow:0 1px 2px oklch(16% 0.006 286 / 0.06),0 8px 24px -4px oklch(16% 0.006 286 / 0.14);display:flex;flex-direction:column;gap:8px}.ds-bubble-head{display:flex;justify-content:space-between;align-items:center;font-size:12px;line-height:16px;color:var(--ui-text-muted,#54545c)}.ds-target code{font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);font-size:12px}.ds-scope{padding:2px 6px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--ui-border-accented,#8e8e96)}.ds-bubble-input{font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);font-size:14px;line-height:22px;padding:6px 8px;border:0;border-radius:6px;resize:none;background:var(--ui-bg,#fff);color:inherit;box-shadow:inset 0 0 0 1px var(--ui-border-accented,#8e8e96);outline:none}.ds-bubble-input:focus-visible{box-shadow:inset 0 0 0 2px var(--ui-primary,#7545d3)}.ds-bubble-foot{display:flex;justify-content:flex-end;gap:8px}.ds-bubble-cancel,.ds-bubble-send{font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);font-size:13px;line-height:20px;font-weight:500;height:32px;padding:6px 10px;border:0;border-radius:6px;cursor:pointer}.ds-bubble-cancel{background:transparent;color:var(--ui-text-muted,#54545c)}.ds-bubble-cancel:hover{background:var(--ui-bg-elevated,#f4f4f6)}.ds-bubble-send{background:var(--ui-primary,#7545d3);color:var(--ui-text-inverted,#fff)}.ds-bubble-send:hover{background:var(--ui-color-primary-700,#6339b5)}.ds-bubble-cancel:focus-visible,.ds-bubble-send:focus-visible{outline:2px solid var(--ui-primary,#7545d3);outline-offset:2px}"
+    },
+    {
+      "name": "Blueprint Selection Label",
+      "kind": "custom",
+      "refersTo": "render-context-chip",
+      "description": "Selected-Widget outline with mono type/id label and dimension chip, drawn in the overlay.",
+      "html": "<div class=\"ds-sel-wrap\"><div class=\"ds-sel\"><span class=\"ds-sel-name\">Button · #checkout-submit</span><span class=\"ds-sel-dim\">320 × 44</span></div></div>",
+      "css": ".ds-sel-wrap{padding:32px 24px;background:var(--wb-frame,#fff)}.ds-sel{position:relative;width:200px;height:44px;outline:1.5px solid var(--ui-primary,#7545d3)}.ds-sel-name,.ds-sel-dim{font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);position:absolute;font-size:12px;line-height:16px;padding:1px 4px;border-radius:2px;background:var(--ui-bg,#fff);color:var(--ui-text,#27272c);box-shadow:inset 0 0 0 1px var(--ui-border,#e5e5e9);white-space:nowrap}.ds-sel-name{left:-1.5px;bottom:calc(100% + 4px)}.ds-sel-dim{left:50%;transform:translateX(-50%);top:calc(100% + 4px)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Canvas",
+    "overview": "The Workbench is a review desk laid around a running View. Chrome is graphite in both themes and steps back: hairline-separated panels, a calm 13px UI voice, and no color anywhere unless that color is doing a job. The canvas is generous and slightly darker than the panels. The previewed View sits on it as a crisp, lightly lifted frame, and it is the only full-color object on the screen. That is the point. When a reviewer glances at the screen, the eye lands on the thing being judged, never on the tool.\n\nTwo inks are allowed to touch the canvas, and they never swap jobs. **Iris** violet, taken from the favicon's `#a78bfa`, means *you are here*: the current selection, keyboard focus, and the one primary action in a region. **Marker** magenta means *a human said something here*: comment pins, the comment tool, the composer, and comment counts. Status colors (leaf green, caution yellow, fault red, notice blue) appear only in badges, icons and alerts. Green means success and nothing else.\n\nThe signature move is **the annotation layer**. Figma-like teardrop pins float above the live View on Widgets that the iframe itself resolved. A click opens an inline bubble. Each Widget answers with a precise blueprint label: a 12px mono chip naming the Widget type and id, plus its rendered dimensions. That blueprint register (mono identities, hairline rules, measured numbers) continues into the Inspector, Spec and Evidence surfaces, where the reviewer checks facts. Everywhere else the chrome stays plain Nuxt UI, tuned rather than costumed.\n\nRejected outright: the default Nuxt UI admin-template look (green primary, card soup, 8px badges), neon-on-black \"hacker\" dev-tool styling, AI-product gloss (gradients, glassmorphism, sparkles, violet glow), and emoji used as icons.",
+    "keyCharacteristics": [
+      "Graphite chrome with a barely-there violet cast (hue 286, chroma ≤ 0.012), designed for light and dark themes as equals.",
+      "One accent (Iris) for selection, focus and primary action. One annotation ink (Marker) for human comments. Status hues for status only.",
+      "The View is the only colorful region. The canvas is a recessed neutral ground with an optional faint dot grid.",
+      "Type has a 12px floor, a 13px UI default and 14px reading text, with CJK-aware stacks and line heights for zh-TW.",
+      "Mono is reserved for identities, revisions, dimensions and codes. It is the blueprint register.",
+      "Hairlines separate regions. Shadows exist only on things that float: the View frame, pins, bubbles, popovers.",
+      "Workbench chrome theme and locale are independent of the Preview render context, always."
+    ],
+    "rules": [
+      {
+        "name": "The One Colorful Thing Rule",
+        "body": "The View inside the frame is the only full-color region on screen. If a chrome element is colored, it must be selection, focus, the one primary action, an annotation, or a status. Otherwise it is graphite.",
+        "section": "colors"
+      },
+      {
+        "name": "The Single Violet Rule",
+        "body": "Iris means \"you\": your selection, your focus, your next action. One solid Iris button per region at most. Iris is never decoration, never a status, never a gradient, and never a glow.",
+        "section": "colors"
+      },
+      {
+        "name": "The Marker Rule",
+        "body": "Magenta belongs to human annotation. Pins, the comment tool, comment counts and the `open` badge. Nothing else may borrow it, and annotation never uses violet.",
+        "section": "colors"
+      },
+      {
+        "name": "The Green Means Done Rule",
+        "body": "Leaf green appears only when something succeeded or closed: passed, captured, resolved, decided, ready. Never for navigation, selection, links or \"active\".",
+        "section": "colors"
+      },
+      {
+        "name": "The No-Opacity-Hover Rule",
+        "body": "Hover and active states move one ramp step (light: darker; dark: lighter). They never lower opacity on a filled control, which would drop text contrast below AA.",
+        "section": "colors"
+      },
+      {
+        "name": "The Dimmed Ground Rule",
+        "body": "Dimmed text (`graphite-500` / `graphite-450`) sits only on the panel or the muted fill, where it clears 4.5:1. On elevated, selected or tinted surfaces (a selected row, a soft chip) metadata uses muted text instead.",
+        "section": "colors"
+      },
+      {
+        "name": "The 12px Floor Rule",
+        "body": "No text below 12px, in any locale, at any density. This includes badges, counts, timestamps and canvas chips. Nuxt UI's `xs`/`sm` badge sizes are re-mapped in theme config so the floor cannot be bypassed.",
+        "section": "typography"
+      },
+      {
+        "name": "The Blueprint Label Rule",
+        "body": "Mono appears only where the content is an identity or a measurement: `#checkout-submit`, `rev 7f3d…a91c`, `1280 × 800`, `content[0]`. Never for headings, buttons or prose, and never as an uppercase-tracked \"eyebrow\" label.",
+        "section": "typography"
+      },
+      {
+        "name": "The Canvas First Rule",
+        "body": "At FHD the canvas must keep at least 60% of the viewport width with both side panels open. Any new panel content scrolls inside its panel rather than widening it.",
+        "section": "layout"
+      },
+      {
+        "name": "The Same Place Rule",
+        "body": "A thing lives in one place per device class. Comments are pins plus bubbles on the canvas everywhere, the thread list lives in the right panel (desktop) or a slideover or sheet (tablet and mobile), and the Reviews inbox is a page. They never appear in duplicate side-by-side panels.",
+        "section": "layout"
+      },
+      {
+        "name": "The Hairline Rule",
+        "body": "Regions separate by a single 1px `--ui-border` line or by whitespace, never by nested boxes. A card inside a panel inside a panel is a defect.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Float-Only Shadow Rule",
+        "body": "If it does not move above something else, it has no shadow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** keep the iframe at its canonical logical viewport size and scale only the outer frame. Pins and labels live in the Workbench overlay, positioned from iframe-reported geometry.",
+      "**Do** use Iris (`iris-600` / `iris-400`) only for selection, focus and the single primary action per region.",
+      "**Do** use Marker magenta only for human annotation: pins, the comment tool, comment counts, `open`.",
+      "**Do** keep every text size at 12px or above, and use 13px for controls and 14px for prose.",
+      "**Do** pair every status color with an icon and a word.",
+      "**Do** keep the chrome theme and locale independent of the Preview render context. The Theme select in the canvas toolbar changes the View; the preferences menu changes the Workbench.",
+      "**Do** keep IDs, revisions and evidence digests one click away (Inspector \"Details\" disclosure, a tooltip, a copy button), never in the default reading path.",
+      "**Do** show unresolvable anchors in the unplaced tray with their last-known hint, and offer explicit Re-anchor."
+    ],
+    "donts": [
+      "**Don't** hard-code palette classes (`neutral-*`, `slate-*`, `green-*`, `dark:` variants) in components. Use Nuxt UI semantic utilities and `--wb-*` tokens.",
+      "**Don't** use green for anything but success, or violet for anything but you-are-here.",
+      "**Don't** use emoji as icons, gradients, glassmorphism, glows or neon accents.",
+      "**Don't** use Nuxt UI `xs`/`sm` badges at their stock 8px and 10px. The theme re-map exists to prevent it.",
+      "**Don't** lower opacity for hover on filled controls (white on iris-600 at 75% drops below AA).",
+      "**Don't** draw a pin at a guessed position when the anchor is invalid or the mapping is unmeasurable. Hide it, explain it, and offer repair.",
+      "**Don't** put a transparent pointer-capture layer over the iframe for targeting. The iframe hit-tests; the Workbench only draws.",
+      "**Don't** add nested cards, equal-weight tab grids, or a dark-only shell."
+    ]
+  }
+}

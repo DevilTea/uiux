@@ -12,6 +12,7 @@ import {
 	sanitizePublicationAdapterDiagnostic,
 } from '../src/application/services/publication-snapshot'
 import type { ViewResource } from '../src/domain/views/schema'
+import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 
 const roots: string[] = []
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
@@ -26,7 +27,7 @@ async function createWorkspace() {
 	roots.push(root)
 	await mkdir(join(root, '.uiux'), { recursive: true })
 	await writeFile(join(root, '.uiux', 'workspace.json'), JSON.stringify({
-		schemaVersion: 1,
+		schemaVersion: 2,
 		i18n: { defaultLocale: 'en-US' },
 		adapters: [],
 		viewports: {
@@ -75,7 +76,7 @@ async function createWorkspace() {
 	}
 }
 
-describe('Static Publication snapshot', () => {
+describe('Static Publication snapshot', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('materializes the whole Workspace through the shared application session', async () => {
 		const { app } = await createWorkspace()
 		const snapshot = await createPublicationSnapshot(app, {
@@ -89,7 +90,7 @@ describe('Static Publication snapshot', () => {
 		expect(isPublicationSnapshot(snapshot)).toBe(true)
 		expect(snapshot.schemaVersion).toBe(1)
 		expect(snapshot.sourceRevision).toBe('abc123')
-		expect(snapshot.workspace.resource.schemaVersion).toBe(1)
+		expect(snapshot.workspace.resource.schemaVersion).toBe(2)
 		expect(snapshot.resources.view).toHaveLength(1)
 		expect(snapshot.resources.locale).toHaveLength(1)
 		expect(snapshot.resources.asset).toHaveLength(1)

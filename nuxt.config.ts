@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { defineNuxtConfig } from 'nuxt/config'
 
 const publicationMode = process.env.UIUX_PUBLICATION_MODE === '1'
@@ -9,6 +10,9 @@ export default defineNuxtConfig({
 	app: {
 		baseURL: publicationBase,
 		head: {
+			// Edge-to-edge on notched phones (safe areas are padded by the shell), and the layout
+			// viewport shrinks above the virtual keyboard so sheets and composers stay visible.
+			viewport: 'width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content',
 			link: [{
 				rel: 'icon',
 				type: 'image/svg+xml',
@@ -21,7 +25,29 @@ export default defineNuxtConfig({
 			uiuxMode: publicationMode ? 'publication' : 'live',
 		},
 	},
-	modules: ['@nuxt/ui'],
+	modules: ['@nuxt/ui', '@nuxtjs/i18n'],
+	ui: {
+		theme: {
+			// `annotation` is a first-class Nuxt UI color (Marker magenta, human comments only).
+			colors: ['primary', 'secondary', 'annotation', 'success', 'info', 'warning', 'error'],
+		},
+		// Inter and JetBrains Mono ship as npm packages bundled by Vite (see `css` below), so
+		// builds, including `uiux publish` on a user's machine, never fetch fonts from a network
+		// provider and a missing package fails the build instead of silently falling back.
+		fonts: false,
+	},
+	i18n: {
+		// Workbench chrome catalogs only. Workspace locales live in the selected Workspace's i18n/*.json.
+		restructureDir: 'app/i18n',
+		langDir: 'locales',
+		strategy: 'no_prefix',
+		defaultLocale: 'en-US',
+		detectBrowserLanguage: false,
+		locales: [
+			{ code: 'en-US', language: 'en-US', name: 'English', file: 'en-US.json' },
+			{ code: 'zh-TW', language: 'zh-TW', name: '繁體中文', file: 'zh-TW.json' },
+		],
+	},
 	icon: publicationMode
 		? {
 				provider: 'none',
@@ -30,8 +56,26 @@ export default defineNuxtConfig({
 					icons: ['lucide:loader-circle'],
 				},
 			}
-		: {},
-	css: ['~/assets/css/main.css'],
+		: {
+				// Icons the server-unreachable state needs while the icon API is down with the server.
+				clientBundle: { icons: ['lucide:unplug', 'lucide:refresh-cw', 'lucide:loader-circle', 'lucide:circle-alert'] },
+			},
+	css: [
+		'@fontsource-variable/inter/wght.css',
+		'@fontsource/jetbrains-mono/latin-400.css',
+		'@fontsource/jetbrains-mono/latin-500.css',
+		'@fontsource/jetbrains-mono/latin-ext-400.css',
+		'@fontsource/jetbrains-mono/latin-ext-500.css',
+		'~/assets/css/main.css',
+	],
+	hooks: {
+		// `server/error.ts` answers `persistence.busy` as a retryable 503 and otherwise falls through
+		// to Nuxt's own error handler, so it must run first in Nitro's error handler chain.
+		'nitro:config'(config) {
+			const existing = config.errorHandler ? [config.errorHandler].flat() : []
+			config.errorHandler = [fileURLToPath(new URL('./server/error.ts', import.meta.url)), ...existing]
+		},
+	},
 	nitro: {
 		preset: publicationMode ? 'static' : 'node-server',
 		...(publicationOutput ? { output: { dir: publicationOutput } } : {}),

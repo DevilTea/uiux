@@ -2,13 +2,13 @@ import type { IncomingHttpHeaders } from 'node:http'
 import { defineEventHandler, setResponseHeader, setResponseHeaders, setResponseStatus, type EventHandler } from 'h3'
 
 /**
- * Loopback-only request gate for the unauthenticated single-user `uiux dev` server.
+ * Loopback-only request gate (the baseline) for the `uiux dev` server.
  *
- * Accepted architecture (Part 1 item 12): the first version is single-user and loopback-only;
- * any exposure beyond loopback requires authentication, which is not available yet. Binding to
- * 127.0.0.1 keeps other machines out; this gate additionally defeats DNS rebinding (foreign
- * `Host`), cross-site request forgery (foreign `Origin` / `Sec-Fetch-Site`), simple-request form
- * posts (non-JSON bodies) and clickjacking (`frame-ancestors`). It adds no principal and no CORS.
+ * Binding to 127.0.0.1 keeps other machines out (the LAN listener is not yet available); this
+ * gate additionally defeats DNS rebinding (foreign `Host`), cross-site request forgery (foreign
+ * `Origin` / `Sec-Fetch-Site`), simple-request form posts (non-JSON bodies) and clickjacking
+ * (`frame-ancestors`). It adds no CORS. Authentication runs after it (`src/server/access/http.ts`,
+ * accepted identity decision 4) and attaches the request's principal.
  */
 
 /** Hostnames (as they appear in a `Host` header) that address this machine's loopback listener. */
@@ -25,7 +25,7 @@ const LOOPBACK_BIND_HOSTS: ReadonlyMap<string, string> = new Map([
 export const DEFAULT_LOOPBACK_BIND_HOST = '127.0.0.1'
 
 export const LAN_EXPOSURE_UNAVAILABLE_MESSAGE
-	= 'UIUX serves the Workbench, /api and /mcp without authentication, so it listens on loopback only (127.0.0.1, ::1 or localhost). LAN exposure requires authentication, which is not yet available.'
+	= 'UIUX listens on loopback only (127.0.0.1, ::1 or localhost); the LAN listener is not yet available.'
 
 export type LoopbackBindResolution
 	= | Readonly<{ ok: true; host: string }>

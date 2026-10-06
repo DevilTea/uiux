@@ -35,7 +35,15 @@ export type ProtocolContext = Readonly<{
 	[key: string]: unknown
 }>
 type GeometryRevisionContext = ProtocolContext & Readonly<{ geometryRevision: number }>
-type GeometryAcquireContext = ProtocolContext & Readonly<{ geometryRevision?: never }>
+export type GeometryAcquireContext = ProtocolContext & Readonly<{ geometryRevision?: never }>
+
+/**
+ * Capability feature for concurrent per-Widget geometry streams and `geometry.release`
+ * (Part 2, 2026-10-05 multi-target decision group, decision 5). Optional for Workbench.
+ */
+export const MULTI_TARGET_GEOMETRY_FEATURE = 'geometry.multi-target'
+/** Open geometry streams per runtime generation, counting every consumer (decision 6). */
+export const MAX_TRACKED_WIDGETS = 64
 export type ProtocolEnvelope<
 	Payload extends Readonly<Record<string, unknown>> = JsonObject,
 	Context extends ProtocolContext = ProtocolContext,
@@ -59,14 +67,16 @@ type PathSegment =
 	| Readonly<{ kind: 'cubic'; from: Point; c1: Point; c2: Point; to: Point }>
 
 export type GeometryAcquireRequest = ProtocolEnvelope<Record<string, never>, GeometryAcquireContext> & Readonly<{ type: 'geometry.acquire.request' }>
+/** Ends one geometry stream (Workbench → runtime). One-way and best-effort, like `contour.cancel`. */
+export type GeometryReleaseRequest = ProtocolEnvelope<Record<string, never>, GeometryAcquireContext> & Readonly<{ type: 'geometry.release' }>
 export type GeometryAcquireResponse = ProtocolEnvelope<{ rect: WidgetRect; regions: readonly VisibleRegion[] }, GeometryRevisionContext> & Readonly<{ type: 'geometry.acquire.response' }>
 export type FullContourRequest = ProtocolEnvelope<{ sequence: number; targetMaxError: number }, GeometryRevisionContext> & Readonly<{ type: 'contour.full.request' }>
 export type FullContourResponse = ProtocolEnvelope<{ sequence: number; regions: readonly VisibleRegion[] }, GeometryRevisionContext> & Readonly<{ type: 'contour.full.response' }>
 export type PartialContourRequest = ProtocolEnvelope<{ sequence: number; baseSnapshotVersion: number; regionIds: readonly string[]; targetMaxError: number }, GeometryRevisionContext> & Readonly<{ type: 'contour.partial.request' }>
 export type PartialContourResponse = ProtocolEnvelope<{ sequence: number; baseSnapshotVersion: number; regions: readonly VisibleRegion[] }, GeometryRevisionContext> & Readonly<{ type: 'contour.partial.response' }>
 export type ContourCancel = ProtocolEnvelope<{ sequence: number }, GeometryRevisionContext> & Readonly<{ type: 'contour.cancel' }>
-export type GeometryMessage = GeometryAcquireRequest | GeometryAcquireResponse | FullContourRequest | FullContourResponse | PartialContourRequest | PartialContourResponse | ContourCancel
-export type GeometryRequestMessage = GeometryAcquireRequest | FullContourRequest | PartialContourRequest | ContourCancel
+export type GeometryMessage = GeometryAcquireRequest | GeometryReleaseRequest | GeometryAcquireResponse | FullContourRequest | FullContourResponse | PartialContourRequest | PartialContourResponse | ContourCancel
+export type GeometryRequestMessage = GeometryAcquireRequest | GeometryReleaseRequest | FullContourRequest | PartialContourRequest | ContourCancel
 export type GeometryResponseMessage = GeometryAcquireResponse | FullContourResponse | PartialContourResponse
 
 export type FailureReasonCode = string
@@ -139,12 +149,18 @@ export function validateGeometryMessage(input: unknown): ValidationResult<Geomet
 	const envelope = v.object(input, '')
 	if (!envelope) return v.finish<GeometryMessage>(input)
 	const type = v.string(envelope.type, '/type', true)
-	validateGeometryContext(envelope.context, '/context', v, type === 'geometry.acquire.request' ? 'forbidden' : 'required')
+	validateGeometryContext(envelope.context, '/context', v, type === 'geometry.acquire.request' || type === 'geometry.release' ? 'forbidden' : 'required')
 	const payload = v.object(envelope.payload, '/payload')
 	if (!payload || !type) return v.finish<GeometryMessage>(input)
 
 	switch (type) {
 		case 'geometry.acquire.request':
+			break
+		case 'geometry.release':
+			// The released stream is named by its Workbench-minted navigationRequestId (decision 2).
+			// Payload `{}`; unknown additive fields are ignored (decision 3.4).
+			if (isRecord(envelope.context) && !Object.hasOwn(envelope.context, 'navigationRequestId'))
+				v.issue('protocol.missing_context_identity', '/context/navigationRequestId', 'geometry.release names the stream it ends by context.navigationRequestId.')
 			break
 		case 'geometry.acquire.response':
 			forbidRuntimeSnapshotVersion(payload, '/payload', v)
@@ -653,6 +669,9 @@ function midpoint(left: Point, right: Point): Point {
 }
 
 function segmentsIntersect(a: Point, b: Point, c: Point, d: Point): boolean {
+	// Exact comparisons: disjoint bounding boxes cannot intersect, even at an endpoint.
+	if (Math.max(a.x, b.x) < Math.min(c.x, d.x) || Math.max(c.x, d.x) < Math.min(a.x, b.x)
+		|| Math.max(a.y, b.y) < Math.min(c.y, d.y) || Math.max(c.y, d.y) < Math.min(a.y, b.y)) return false
 	const o1 = orientation(a, b, c)
 	const o2 = orientation(a, b, d)
 	const o3 = orientation(c, d, a)
@@ -664,7 +683,39 @@ function segmentsIntersect(a: Point, b: Point, c: Point, d: Point): boolean {
 	return o1 * o2 < 0 && o3 * o4 < 0
 }
 
+/** Shewchuk's static orient2d error bound: (3 + 16u)u with unit roundoff u = 2^-53. */
+const ORIENTATION_ERROR_BOUND = (3 + 16 * (Number.EPSILON / 2)) * (Number.EPSILON / 2)
+
+/**
+ * Exact orientation sign. A floating-point filter answers whenever its rounding error provably
+ * cannot change the sign (Shewchuk, "Adaptive Precision Floating-Point Arithmetic", 1997);
+ * otherwise the exact rational evaluation decides. Both paths return the same sign.
+ */
 function orientation(a: Point, b: Point, c: Point): number {
+	const ax = a.x - c.x
+	const by = b.y - c.y
+	const ay = a.y - c.y
+	const bx = b.x - c.x
+	// IEEE subtraction is exactly zero only for equal operands and otherwise keeps the sign, so a
+	// product with a zero factor is exactly zero and any other product has the exact sign unless it
+	// underflowed to zero, which takes the exact path.
+	const leftZero = ax === 0 || by === 0
+	const rightZero = ay === 0 || bx === 0
+	const detLeft = ax * by
+	const detRight = ay * bx
+	if (Number.isFinite(detLeft) && Number.isFinite(detRight) && (detLeft !== 0 || leftZero) && (detRight !== 0 || rightZero)) {
+		if (leftZero && rightZero) return 0
+		if (leftZero) return detRight > 0 ? -1 : 1
+		if (rightZero) return detLeft > 0 ? 1 : -1
+		const det = detLeft - detRight
+		if ((detLeft > 0 && detRight < 0) || (detLeft < 0 && detRight > 0)) return det > 0 ? 1 : -1
+		const detSum = Math.abs(detLeft) + Math.abs(detRight)
+		if (Number.isFinite(detSum) && Math.abs(det) > ORIENTATION_ERROR_BOUND * detSum) return det > 0 ? 1 : -1
+	}
+	return exactOrientation(a, b, c)
+}
+
+function exactOrientation(a: Point, b: Point, c: Point): number {
 	const determinant = subtract(
 		multiply(subtract(exactNumber(b.x), exactNumber(a.x)), subtract(exactNumber(c.y), exactNumber(a.y))),
 		multiply(subtract(exactNumber(b.y), exactNumber(a.y)), subtract(exactNumber(c.x), exactNumber(a.x))),
@@ -678,6 +729,24 @@ function onSegment(a: Point, b: Point, p: Point): boolean {
 }
 
 function signedAreaIsZero(segments: readonly PathSegment[]): boolean {
+	// Floating-point filter for line-only contours: a shoelace sum farther from zero than a
+	// conservative bound on its accumulated rounding error is certainly non-zero.
+	if (segments.every(segment => segment.kind === 'line')) {
+		let area = 0
+		let magnitude = 0
+		for (const segment of segments) {
+			const left = segment.from.x * segment.to.y
+			const right = segment.to.x * segment.from.y
+			area += left - right
+			magnitude += Math.abs(left) + Math.abs(right)
+		}
+		const bound = 4 * (segments.length + 2) * Number.EPSILON * magnitude
+		if (Number.isFinite(area) && Number.isFinite(bound) && Math.abs(area) > bound) return false
+	}
+	return exactSignedAreaIsZero(segments)
+}
+
+function exactSignedAreaIsZero(segments: readonly PathSegment[]): boolean {
 	let area = rational(0n, 1n)
 	for (const segment of segments) {
 		if (segment.kind === 'line') {

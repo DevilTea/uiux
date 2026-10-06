@@ -10,3 +10,30 @@ test-results/
 .env
 .env.*
 !.env.example
+
+# Claude Code: per-machine state and agent worktrees (skills and agents stay tracked)
+.claude/worktrees/
+.claude/settings.local.json
+
+# Impeccable runtime, cache and generated review artifacts
+# (.impeccable/design.json and .impeccable/config.json stay tracked)
+.impeccable/config.local.json
+.impeccable/hook.cache.json
+.impeccable/hook.pending.json
+.impeccable/live/*
+!.impeccable/live/config.json
+.impeccable/build/
+.impeccable/review/
+.impeccable/mocks/
+.impeccable/questions/
+.impeccable/component-reviews/
+.impeccable-live/
+.uiux-browser-test-*/
+
+# UIUX live-server Workspace hold (local runtime state, never canonical)
+**/.uiux/.server-hold.json
+**/.uiux/.server-hold-*.tmp
+
+# Persistence lock temp files written while a mutation holds the Workspace lock
+**/.uiux/.persistence-lock-*
+**/.uiux/.persistence.lock

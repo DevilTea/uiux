@@ -7,8 +7,11 @@ import {
 import { getSelectedWorkspaceServerRuntime } from '../../../src/server/selected-workspace'
 import { getSelectedWorkspacePreviewBundle } from '../../../src/server/workspace-adapters'
 import { computePublishedPreviewHash } from '../../../src/server/preview-bundler'
+import { denyUnlessAllowed } from '../../../src/server/access/http'
 
 export default defineEventHandler(async (event) => {
+	const denied = denyUnlessAllowed(event, 'readPublicationSnapshot')
+	if (denied) return denied
 	const runtime = getSelectedWorkspaceServerRuntime()
 	const bundle = await getSelectedWorkspacePreviewBundle(runtime.root)
 	const preview: PublicationPreviewInput = bundle.state === 'valid'

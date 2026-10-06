@@ -37,18 +37,25 @@ export type CommitResult =
 	| Readonly<{ status: 'stale' | 'wrong-work-kind' | 'stale-base' | 'precision-miss' | 'region-identity-changed' | 'not-better' }>
 
 export type AcquisitionCommitResult =
-	| Readonly<{ status: 'committed'; snapshot: ContourCacheSnapshot }>
+	| Readonly<{ status: 'committed'; snapshot: ContourCacheSnapshot; supersededSequence?: number }>
 	| Readonly<{ status: 'invalid'; diagnostics: readonly Diagnostic[] }>
 	| Readonly<{ status: 'stale' | 'stale-context' | 'non-advancing-geometry-revision' }>
 
 /**
- * Workbench-local authoritative contour cache and freshness controller.
+ * Workbench-local authoritative contour cache and freshness controller for one geometry stream.
  * Snapshot version allocation is injected so this layer does not define a wire-visible starting value.
+ *
+ * Acquisition is a stream (Part 2, 2026-10-05 multi-target decision 3): after `beginAcquisition()`
+ * the runtime pushes a complete `geometry.acquire.response` whenever the Widget's `rect` or
+ * `regions` really change, each with a strictly advancing `geometryRevision`. Every accepted
+ * report replaces the cache atomically and starts a fresh contour-work sequence domain; contour
+ * work still in flight for the previous revision is superseded (best-effort cancel). The stream
+ * stays open until `endAcquisition()` (release, supersession or an implicit end).
  */
 export class ContourCacheController {
 	private readonly scope: Omit<ProtocolContext, 'geometryRevision'>
 	private readonly allocateSnapshotVersion: SnapshotVersionAllocator
-	private acquisitionPending = false
+	private streamOpen = false
 	private cache?: ContourCacheSnapshot
 	private activeWork?: ActiveWork
 	private lastSequence?: number
@@ -63,7 +70,7 @@ export class ContourCacheController {
 
 	beginAcquisition(): Readonly<{ supersededSequence?: number }> {
 		const supersededSequence = this.activeWork?.request.payload.sequence
-		this.acquisitionPending = true
+		this.streamOpen = true
 		this.activeWork = undefined
 		this.lastSequence = undefined
 		this.cache = undefined
@@ -71,8 +78,23 @@ export class ContourCacheController {
 		return supersededSequence === undefined ? {} : { supersededSequence }
 	}
 
+	/** Ends the stream: later reports are stale and the cache is dropped (no last-known geometry). */
+	endAcquisition(): Readonly<{ supersededSequence?: number }> {
+		const supersededSequence = this.activeWork?.request.payload.sequence
+		this.streamOpen = false
+		this.activeWork = undefined
+		this.lastSequence = undefined
+		this.cache = undefined
+		this.currentRect = undefined
+		return supersededSequence === undefined ? {} : { supersededSequence }
+	}
+
+	isStreamOpen(): boolean {
+		return this.streamOpen
+	}
+
 	commitAcquisition(response: GeometryAcquireResponse): AcquisitionCommitResult {
-		if (!this.acquisitionPending) return { status: 'stale' }
+		if (!this.streamOpen) return { status: 'stale' }
 		const decoded = validateGeometryMessage(response)
 		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
 		if (decoded.value.type !== 'geometry.acquire.response') return { status: 'stale' }
@@ -81,16 +103,19 @@ export class ContourCacheController {
 		if (this.lastGeometryRevision !== undefined && decoded.value.context.geometryRevision <= this.lastGeometryRevision)
 			return { status: 'non-advancing-geometry-revision' }
 
+		const supersededSequence = this.activeWork?.request.payload.sequence
 		const snapshot = this.commitComplete(
 			decoded.value.context.geometryRevision,
 			decoded.value.payload.regions,
 			decoded.value.payload.rect,
 		)
 		this.lastGeometryRevision = decoded.value.context.geometryRevision
-		this.acquisitionPending = false
+		// A new geometry revision starts a new contour-work sequence domain; work for the old one is void.
 		this.lastSequence = undefined
 		this.activeWork = undefined
-		return { status: 'committed', snapshot }
+		return supersededSequence === undefined
+			? { status: 'committed', snapshot }
+			: { status: 'committed', snapshot, supersededSequence }
 	}
 
 	startFull(request: FullContourRequest): StartWorkResult {

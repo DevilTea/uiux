@@ -1,5 +1,6 @@
-import { createApp, h, shallowRef, type Component } from 'vue'
-import { createWidgetSystem, type AnyWidgetPlugin } from '@deviltea/widget-core'
+import { createApp, h, nextTick, shallowRef, type Component } from 'vue'
+import { createWidgetSystem, type AnyWidgetPlugin, type WidgetSystemRuntime } from '@deviltea/widget-core'
+import { inspectPlugin } from '@deviltea/widget-core/inspection'
 import { createWidgetVueRenderer } from '@deviltea/widget-vue'
 
 import type { Diagnostic } from '../domain/validation'
@@ -19,6 +20,9 @@ import {
 	productAdapterRuntimeMemberDecoder,
 } from '../adapters/product-integration'
 import { collectWidgetTypesFromIr } from './preview-runtime'
+import { FALLBACK_LOCALE } from './render-context-options'
+import { WidgetEventObserver, type WidgetEventReport } from './widget-event-observer'
+import type { WidgetEventTrigger } from './protocol/widget-events'
 
 export type StandaloneAdapterDescriptor = Readonly<{
 	index: number
@@ -48,6 +52,11 @@ export interface PreviewRuntimeBridge {
 	updateView(view: ViewResource): void
 	updateContext(context: ResolvedRenderContext): void
 	updateLocales?(locales: ReadonlyMap<string, I18nResource> | Record<string, I18nResource>): void
+	/**
+	 * Applies a Widget Event arm (Part 2 "Widget Event reporting", decisions 3 and 4): full
+	 * replacement, no triggers disarms. The host checks the arm's View and Variant first.
+	 */
+	armWidgetEvents?(armId: string, triggers: readonly WidgetEventTrigger[]): void
 	dispose(): void
 }
 
@@ -56,10 +65,39 @@ export interface PreviewRuntimeMountOptions {
 	context: ResolvedRenderContext
 	onStatusChange?: (status: PreviewRuntimeStatus) => void
 	locales?: ReadonlyMap<string, I18nResource> | Record<string, I18nResource>
+	/** The Workspace `i18n.defaultLocale`: the fallback for keys missing from the requested locale. */
+	defaultLocale?: string
+	/** Receives at most one report per Widget Event arm; never any Event argument. */
+	onWidgetEvent?: (report: WidgetEventReport) => void
+}
+
+/** A Widget type's declared Events, from `inspectPlugin(plugin).events` (metadata only). */
+export type DeclaredWidgetEvent = Readonly<{ name: string; description: string }>
+export type DeclaredWidgetEvents = Readonly<Record<string, readonly DeclaredWidgetEvent[]>>
+
+/**
+ * Chooses the translation runtime's default (fallback) locale: the Workspace
+ * default locale when its resource is loaded, otherwise the requested locale.
+ * Callers that do not know the Workspace default get the same fallback the
+ * render context uses when no Workspace manifest is available.
+ */
+export function resolveTranslationFallbackLocale(
+	requestedLocale: string,
+	workspaceDefaultLocale: string | undefined,
+	resources: ReadonlyMap<string, unknown>,
+): string {
+	const fallback = workspaceDefaultLocale || FALLBACK_LOCALE
+	if (resources.has(fallback)) return fallback
+	return requestedLocale
 }
 
 export type StandalonePreviewMountFactory = Readonly<{
 	mountPreviewRuntime(container: HTMLElement, options: PreviewRuntimeMountOptions): PreviewRuntimeBridge
+	/**
+	 * The declared Events of every adapter Widget type, read through `inspectPlugin` from the same
+	 * widget-core copy the bundle runs. Declaration metadata only: no Runtime is created.
+	 */
+	describeDeclaredWidgetEvents(): DeclaredWidgetEvents
 }>
 
 /**
@@ -209,9 +247,9 @@ export function createStandalonePreviewMount(input: Readonly<{
 		}
 
 		function getTranslationRuntime(currentLocale: string): TranslationRuntime {
-			const hasPrimary = resourceMap.has(currentLocale)
-			const hasFallback = resourceMap.has('en-US')
-			const primaryLocale = hasPrimary ? currentLocale : (hasFallback ? 'en-US' : currentLocale)
+			// The runtime's default locale is the fallback for keys missing from the requested locale,
+			// so it must be the Workspace default locale, not the requested one.
+			const primaryLocale = resolveTranslationFallbackLocale(currentLocale, options.defaultLocale, resourceMap)
 			const res = createTranslationRuntime(primaryLocale, resourceMap)
 			if (res.state === 'ready') {
 				return res.runtime
@@ -343,6 +381,18 @@ export function createStandalonePreviewMount(input: Readonly<{
 
 		let activeController: LiveViewRuntimeController = controllerResult
 		const activeRuntime = shallowRef(activeController.runtime)
+		let disposed = false
+		// Widget Event observation (decision 4): it starts once a Runtime has mounted, so creation and
+		// mount-time emissions never count, and it follows every Runtime instance swap.
+		const eventObserver = new WidgetEventObserver(report => options.onWidgetEvent?.(report))
+
+		/** Shows a new Runtime instance and observes it once it has mounted (after the re-render). */
+		function showRuntime(runtime: WidgetSystemRuntime): void {
+			activeRuntime.value = runtime
+			void nextTick().then(() => {
+				if (!disposed && activeRuntime.value === runtime) eventObserver.attach(runtime)
+			})
+		}
 
 		const app = createApp({
 			setup() {
@@ -359,9 +409,11 @@ export function createStandalonePreviewMount(input: Readonly<{
 			status: 'ready',
 			supportedTypes: Object.freeze([...supportedTypes]),
 		})
+		eventObserver.attach(activeRuntime.value)
 
 		return {
 			updateView(newView: ViewResource) {
+				if (newView.id !== currentView.id) eventObserver.clearArm()
 				currentView = newView
 				const nextUnsupported = checkViewSupport(currentView)
 				if (nextUnsupported.length > 0) {
@@ -379,6 +431,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 					return
 				}
 
+				eventObserver.detach()
 				activeController.dispose()
 				const nextController = LiveViewRuntimeController.create({
 					view: currentView,
@@ -395,7 +448,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 				}
 
 				activeController = nextController
-				activeRuntime.value = activeController.runtime
+				showRuntime(activeController.runtime)
 				options.onStatusChange?.({
 					status: 'ready',
 					supportedTypes: Object.freeze([...supportedTypes]),
@@ -419,11 +472,15 @@ export function createStandalonePreviewMount(input: Readonly<{
 					activeController.updateViewport(nextContext.viewportId, nextContext.viewport)
 				}
 				if (nextContext.variantName !== activeController.context.variantName) {
+					// A Variant change clears the arm; the Workbench arms the new context itself.
+					eventObserver.clearArm()
+					eventObserver.detach()
 					const switchResult = activeController.switchVariant(nextContext.variantName)
 					if (switchResult.state === 'ready') {
-						activeRuntime.value = activeController.runtime
+						showRuntime(activeController.runtime)
 					}
 					else {
+						eventObserver.attach(activeController.runtime)
 						options.onStatusChange?.({
 							status: 'invalid',
 							diagnostics: switchResult.diagnostics,
@@ -440,6 +497,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 					for (const [k, v] of Object.entries(locales)) resourceMap.set(k, v)
 				}
 				currentTranslationRuntime = getTranslationRuntime(activeController.context.locale)
+				eventObserver.detach()
 				activeController.dispose()
 				const nextController = LiveViewRuntimeController.create({
 					view: currentView,
@@ -448,11 +506,17 @@ export function createStandalonePreviewMount(input: Readonly<{
 				})
 				if (nextController instanceof LiveViewRuntimeController) {
 					activeController = nextController
-					activeRuntime.value = activeController.runtime
+					showRuntime(activeController.runtime)
 				}
 			},
 
+			armWidgetEvents(armId: string, triggers: readonly WidgetEventTrigger[]) {
+				eventObserver.setArm(armId, triggers)
+			},
+
 			dispose() {
+				disposed = true
+				eventObserver.dispose()
 				app.unmount()
 				activeController.dispose()
 				container.innerHTML = ''
@@ -460,13 +524,32 @@ export function createStandalonePreviewMount(input: Readonly<{
 		}
 	}
 
-	return { mountPreviewRuntime }
+	function describeDeclaredWidgetEvents(): DeclaredWidgetEvents {
+		const result: Record<string, readonly DeclaredWidgetEvent[]> = {}
+		for (const entry of validatedEntries) {
+			for (const plugin of entry.decodedPlugins) {
+				try {
+					const events = inspectPlugin(plugin).events
+					result[plugin.type] = Object.freeze([...(events?.values() ?? [])]
+						.filter(member => typeof member.name === 'string')
+						.map(member => Object.freeze({ name: member.name, description: member.description })))
+				}
+				catch {
+					// An uninspectable plugin has no known declared Events.
+				}
+			}
+		}
+		return Object.freeze(result)
+	}
+
+	return { mountPreviewRuntime, describeDeclaredWidgetEvents }
 }
 
 function createNoopBridge(): PreviewRuntimeBridge {
 	return {
 		updateView() {},
 		updateContext() {},
+		armWidgetEvents() {},
 		dispose() {},
 	}
 }

@@ -78,6 +78,17 @@ export type AuthoredAssetInspection = Readonly<{
 
 export type ArtifactWriteResult = Readonly<{ identity: `sha256:${string}`; created: boolean }>
 
+export type WorkspaceMigrationPlanResult = Readonly<{
+	/** The opened manifest version. */
+	fromVersion: number
+	/** The version the Workspace would have after applying the plan (the current one when no steps run). */
+	version: number
+	/** Current manifest revision; a real run reports the new manifest revision instead. */
+	revision: ResourceRevision
+	changedFiles: readonly string[]
+	steps: readonly string[]
+}>
+
 export type AtomicReviewViewPromotionCasInput = Readonly<{
 	reviewId: string
 	expectedReviewRevision: ResourceRevision
@@ -113,11 +124,18 @@ export type AtomicReviewViewPromotionResult =
 
 type FileChange = Readonly<{ path: string; bytes?: Uint8Array }>
 type TransactionJournal = Readonly<{ changes: readonly Readonly<{ path: string; existed: boolean }>[] }>
-type JsonValidator = (resource: unknown, filename: string) => readonly Diagnostic[]
+/** `schemaVersion` is the selected Workspace manifest version every canonical file is decoded under. */
+type JsonValidator = (resource: unknown, filename: string, schemaVersion: number) => readonly Diagnostic[]
 
 const TRANSACTION_ROOT = '.uiux/.transactions'
 const PERSISTENCE_LOCK = '.uiux/.persistence.lock'
 const MAX_LOCK_WAIT_MS = 15_000
+/**
+ * Upper bound on how long one shared read batch keeps admitting new readers in this process. After
+ * it, new readers queue until the batch drains, so the cross-process persistence lock is released
+ * now and then and another UIUX process waiting on it gets a turn.
+ */
+const MAX_SHARED_BATCH_MS = 1_000
 
 /** File-native persistence implementation. The schema policy is deliberately injected. */
 export class FileNativePersistence {
@@ -132,6 +150,12 @@ export class FileNativePersistence {
 	readonly artifacts: ImmutableArtifactStore
 	private readonly fault?: PersistenceFaultHook
 	private readonly lockWaitMilliseconds: number
+	/** In-process admission: readers share one hold of the cross-process lock; writers are exclusive. */
+	private readonly gate = new ProcessLockGate()
+	/** The current shared read hold of the cross-process lock, if any reader is inside it. */
+	private sharedHold?: SharedLockHold
+	/** Settles once the previous shared hold has released the cross-process lock. */
+	private sharedReleasing: Promise<void> = Promise.resolve()
 
 	constructor(options: FileNativePersistenceOptions) {
 		this.root = resolve(options.root)
@@ -141,7 +165,7 @@ export class FileNativePersistence {
 		this.workspace = new WorkspaceFileRepository(this)
 		this.views = new JsonResourceRepository(this, viewRelativePath, 'id', (resource, filename) => validateViewResource(resource, filename).diagnostics, { directory: 'views', suffix: '.view.json' })
 		this.flows = new JsonResourceRepository(this, flowRelativePath, 'id', (resource, filename) => validateFlowResource(resource, filename).diagnostics, { directory: 'flows', suffix: '.flow.json' })
-		this.reviews = new JsonResourceRepository(this, reviewRelativePath, 'id', (resource, filename) => validateReviewThread(resource, filename).diagnostics, { directory: 'reviews', suffix: '.review.json' })
+		this.reviews = new JsonResourceRepository(this, reviewRelativePath, 'id', (resource, filename, schemaVersion) => validateReviewThread(resource, { filename, schemaVersion }).diagnostics, { directory: 'reviews', suffix: '.review.json' })
 		this.locales = new LocaleFileRepository(this)
 		this.assets = new AuthoredAssetFileRepository(this)
 		this.artifacts = new ImmutableArtifactStore(this)
@@ -149,61 +173,99 @@ export class FileNativePersistence {
 
 	/** Reports policy state without changing the Workspace or its authored files. */
 	async inspectWorkspace(): Promise<WorkspaceReadInspection> {
-		return this.withLock(async () => this.inspectWorkspaceUnlocked())
+		return this.withReadLock(async () => this.inspectWorkspaceUnlocked())
+	}
+
+	/**
+	 * Plans the injected Workspace schema migration entirely in memory, without writing anything.
+	 * Returns the step ids that would run and the canonical files whose bytes would change.
+	 */
+	async planWorkspaceMigration(): Promise<WorkspaceMigrationPlanResult> {
+		return this.withLock(async () => {
+			const planned = await this.planWorkspaceMigrationUnlocked()
+			return {
+				fromVersion: planned.fromVersion,
+				version: planned.toVersion,
+				revision: planned.revision,
+				changedFiles: planned.changes.map(change => change.path),
+				steps: planned.steps,
+			}
+		})
 	}
 
 	/** The only operation that applies injected Workspace schema migrations. */
-	async migrateWorkspace(): Promise<Readonly<{ version: number; revision: ResourceRevision; changedFiles: readonly string[]; steps: readonly string[] }>> {
+	async migrateWorkspace(): Promise<Readonly<{ fromVersion: number; version: number; revision: ResourceRevision; changedFiles: readonly string[]; steps: readonly string[] }>> {
 		return this.withLock(async () => {
-			const read = await this.inspectWorkspaceUnlocked()
-			if (!read.resource || !read.revision)
-				throw new PersistenceError('workspace.manifest_missing', 'Cannot migrate a Workspace without .uiux/workspace.json.', { diagnostics: read.diagnostics })
-			if (read.inspection.state === 'unsupported')
-				throw new PersistenceError('workspace.schema_unsupported', 'Workspace schema is not supported by the injected policy.', { diagnostics: read.inspection.diagnostics })
-			if (read.inspection.state === 'missing_manifest')
-				throw new PersistenceError('workspace.manifest_missing', 'Cannot migrate a Workspace without .uiux/workspace.json.', { diagnostics: read.diagnostics })
-			if (read.inspection.state === 'current')
-				return { version: read.inspection.version, revision: read.revision, changedFiles: [], steps: [] }
-
-			const initialSnapshot = await this.scanCanonicalSnapshotUnlocked()
-			let snapshot = cloneSnapshot(initialSnapshot)
-			const stepIds: string[] = []
-			try {
-				for (const step of read.inspection.migrationPlan) {
-					const inputSnapshot = cloneSnapshot(snapshot)
-					const next = await step.apply(inputSnapshot)
-					if (!(next instanceof Map))
-						throw new TypeError(`Migration step ${step.id} did not return a WorkspaceSnapshot Map.`)
-					snapshot = cloneSnapshot(next)
-					validateCanonicalSnapshot(snapshot, step.toVersion, this.schemaPolicy)
-					stepIds.push(step.id)
-				}
-				validateCanonicalSnapshot(snapshot, this.schemaPolicy.currentVersion, this.schemaPolicy)
-			}
-			catch (cause) {
-				if (cause instanceof PersistenceError)
-					throw cause
-				throw new PersistenceError('workspace.migration_failed', 'Workspace migration planning failed before canonical files were changed.', { cause })
-			}
+			const planned = await this.planWorkspaceMigrationUnlocked()
+			if (planned.steps.length === 0)
+				return { fromVersion: planned.fromVersion, version: planned.toVersion, revision: planned.revision, changedFiles: [], steps: [] }
 
 			const beforeApplySnapshot = await this.scanCanonicalSnapshotUnlocked()
-			if (!snapshotsEqual(initialSnapshot, beforeApplySnapshot))
+			if (!snapshotsEqual(planned.initialSnapshot, beforeApplySnapshot))
 				throw new PersistenceError('workspace.migration_failed', 'Canonical Workspace files changed while migration was being planned; no migration writes were applied.')
-			const changes = diffSnapshots(initialSnapshot, snapshot)
-			const changedFiles = changes.map(change => change.path)
-			await this.applyFileTransaction(changes, 'migration')
+			const changedFiles = planned.changes.map(change => change.path)
+			await this.applyFileTransaction(planned.changes, 'migration')
 			const manifestBytes = await this.readBytesUnlocked(workspaceRelativePath())
 			const finalManifest = parseJsonBytes(manifestBytes, workspaceRelativePath())
 			const finalInspection = inspectWorkspaceManifest(finalManifest, this.schemaPolicy)
 			if (finalInspection.state !== 'current')
 				throw new PersistenceError('workspace.migration_failed', 'Workspace migration transaction completed without reaching the current policy version.', { diagnostics: finalInspection.diagnostics })
 			return {
+				fromVersion: planned.fromVersion,
 				version: finalInspection.version,
 				revision: revisionForBytes(manifestBytes),
 				changedFiles,
-				steps: stepIds,
+				steps: planned.steps,
 			}
 		})
+	}
+
+	private async planWorkspaceMigrationUnlocked(): Promise<Readonly<{
+		fromVersion: number
+		toVersion: number
+		revision: ResourceRevision
+		steps: readonly string[]
+		changes: readonly FileChange[]
+		initialSnapshot: WorkspaceSnapshot
+	}>> {
+		const read = await this.inspectWorkspaceUnlocked()
+		if (!read.resource || !read.revision)
+			throw new PersistenceError('workspace.manifest_missing', 'Cannot migrate a Workspace without .uiux/workspace.json.', { diagnostics: read.diagnostics })
+		if (read.inspection.state === 'unsupported')
+			throw new PersistenceError('workspace.schema_unsupported', 'Workspace schema is not supported by the injected policy.', { diagnostics: read.inspection.diagnostics })
+		if (read.inspection.state === 'missing_manifest')
+			throw new PersistenceError('workspace.manifest_missing', 'Cannot migrate a Workspace without .uiux/workspace.json.', { diagnostics: read.diagnostics })
+		if (read.inspection.state === 'current')
+			return { fromVersion: read.inspection.version, toVersion: read.inspection.version, revision: read.revision, steps: [], changes: [], initialSnapshot: new Map() }
+		const initialSnapshot = await this.scanCanonicalSnapshotUnlocked()
+
+		let snapshot = cloneSnapshot(initialSnapshot)
+		const stepIds: string[] = []
+		try {
+			for (const step of read.inspection.migrationPlan) {
+				const inputSnapshot = cloneSnapshot(snapshot)
+				const next = await step.apply(inputSnapshot)
+				if (!(next instanceof Map))
+					throw new TypeError(`Migration step ${step.id} did not return a WorkspaceSnapshot Map.`)
+				snapshot = cloneSnapshot(next)
+				validateCanonicalSnapshot(snapshot, step.toVersion, this.schemaPolicy)
+				stepIds.push(step.id)
+			}
+			validateCanonicalSnapshot(snapshot, this.schemaPolicy.currentVersion, this.schemaPolicy)
+		}
+		catch (cause) {
+			if (cause instanceof PersistenceError)
+				throw cause
+			throw new PersistenceError('workspace.migration_failed', 'Workspace migration planning failed before canonical files were changed.', { cause })
+		}
+		return {
+			fromVersion: read.inspection.version,
+			toVersion: this.schemaPolicy.currentVersion,
+			revision: read.revision,
+			steps: stepIds,
+			changes: diffSnapshots(initialSnapshot, snapshot),
+			initialSnapshot,
+		}
 	}
 
 	/**
@@ -255,7 +317,7 @@ export class FileNativePersistence {
 				}
 			}
 
-			const reviewValidation = validateReviewThread(input.reviewResource, `${input.reviewId}.review.json`)
+			const reviewValidation = validateReviewThread(input.reviewResource, { filename: `${input.reviewId}.review.json`, schemaVersion: this.schemaPolicy.currentVersion })
 			if (!reviewValidation.ok) {
 				throw new PersistenceError('persistence.invalid_resource', 'ReviewThread resource failed schema validation before atomic promotion write.', { diagnostics: reviewValidation.diagnostics })
 			}
@@ -284,16 +346,99 @@ export class FileNativePersistence {
 		})
 	}
 
-	/** Used by repositories; locking also serializes CAS across repository instances. */
+	/**
+	 * Exclusive access for mutations: locking serializes CAS across repository instances and
+	 * processes. Waiting longer than the lock wait budget throws `persistence.lock_busy`.
+	 */
 	async withLock<Result>(operation: () => Promise<Result>): Promise<Result> {
-		const release = await this.acquireLock()
+		const deadline = Date.now() + this.lockWaitMilliseconds
+		const leave = await this.gate.enter('exclusive', deadline)
 		try {
-			await this.recoverPendingTransactionsUnlocked()
+			const release = await this.acquireLock(deadline)
+			try {
+				await this.recoverPendingTransactionsUnlocked()
+				return await operation()
+			}
+			finally {
+				await release()
+			}
+		}
+		finally {
+			leave()
+		}
+	}
+
+	/**
+	 * Shared access for read-only operations. Reads still hold the cross-process lock, so they never
+	 * observe a multi-file transaction (Asset replace, Decision promotion, migration) half applied and
+	 * pending transactions are recovered before anything is read. Concurrent readers in this process
+	 * share one acquisition of that lock instead of queueing on it one by one; a waiting writer stops
+	 * new readers from joining, so writes are not starved. The operation must not write.
+	 */
+	async withReadLock<Result>(operation: () => Promise<Result>): Promise<Result> {
+		const deadline = Date.now() + this.lockWaitMilliseconds
+		const leave = await this.gate.enter('shared', deadline)
+		let hold: SharedLockHold | undefined
+		try {
+			hold = await this.joinSharedHold(deadline)
 			return await operation()
 		}
 		finally {
-			await release()
+			try {
+				if (hold) await this.leaveSharedHold(hold)
+			}
+			finally {
+				leave()
+			}
 		}
+	}
+
+	private async joinSharedHold(deadline: number): Promise<SharedLockHold> {
+		let hold = this.sharedHold
+		if (!hold) {
+			const previousRelease = this.sharedReleasing
+			const created: SharedLockHold = {
+				holders: 0,
+				ready: (async () => {
+					await previousRelease
+					const release = await this.acquireLock(deadline)
+					try {
+						await this.recoverPendingTransactionsUnlocked()
+					}
+					catch (error) {
+						await release()
+						throw error
+					}
+					return release
+				})(),
+			}
+			// A failed acquisition is reported to every joined reader, never left unhandled.
+			created.ready.catch(() => undefined)
+			this.sharedHold = created
+			hold = created
+		}
+		hold.holders += 1
+		try {
+			await hold.ready
+			return hold
+		}
+		catch (error) {
+			hold.holders -= 1
+			if (this.sharedHold === hold) this.sharedHold = undefined
+			throw error
+		}
+	}
+
+	private async leaveSharedHold(hold: SharedLockHold): Promise<void> {
+		hold.holders -= 1
+		if (hold.holders > 0) return
+		if (this.sharedHold === hold) this.sharedHold = undefined
+		const releasing = (async () => {
+			const release = await hold.ready
+			await release()
+		})()
+		this.sharedReleasing = releasing.catch(() => undefined)
+		await releasing
 	}
 
 	async assertWritableUnlocked(): Promise<void> {
@@ -334,6 +479,23 @@ export class FileNativePersistence {
 			: []
 		const diagnostics = [...validationDiagnostics, ...extraDiagnostics]
 		return { resource: resource as WorkspaceManifest, revision: revisionForBytes(bytes), inspection, diagnostics }
+	}
+
+	/**
+	 * The schemaVersion canonical files are decoded under: the selected manifest's integer version,
+	 * or the policy currentVersion when the manifest is missing or has no usable version.
+	 */
+	async readDecodeSchemaVersionUnlocked(): Promise<number> {
+		const bytes = await this.readOptionalBytesUnlocked(workspaceRelativePath())
+		if (!bytes) return this.schemaPolicy.currentVersion
+		try {
+			const manifest = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown
+			const version = isRecord(manifest) ? manifest.schemaVersion : undefined
+			return typeof version === 'number' && Number.isInteger(version) && version >= 1 ? version : this.schemaPolicy.currentVersion
+		}
+		catch {
+			return this.schemaPolicy.currentVersion
+		}
 	}
 
 	async readBytesUnlocked(relativePath: string): Promise<Buffer> {
@@ -697,12 +859,11 @@ export class FileNativePersistence {
 		await fs.rm(tombstoneAbsolute, { recursive: true, force: true })
 	}
 
-	private async acquireLock(): Promise<() => Promise<void>> {
+	private async acquireLock(deadline: number): Promise<() => Promise<void>> {
 		await ensureSafeDirectory(this.root, '.uiux')
 		const lockAbsolute = resolveWorkspacePath(this.root, PERSISTENCE_LOCK)
 		const lockParent = dirname(lockAbsolute)
 		const token = randomUUID()
-		const started = Date.now()
 		while (true) {
 			const candidateRelative = `.uiux/.persistence-lock-${token}-${randomUUID()}.tmp`
 			const candidateAbsolute = resolveWorkspacePath(this.root, candidateRelative)
@@ -718,8 +879,8 @@ export class FileNativePersistence {
 					await fs.rm(candidateAbsolute, { force: true }).catch(() => undefined)
 					if (await this.removeStaleLock(lockAbsolute))
 						continue
-					if (Date.now() - started >= this.lockWaitMilliseconds)
-						throw new PersistenceError('persistence.lock_busy', 'Timed out waiting for another UIUX persistence operation to finish.')
+					if (Date.now() >= deadline)
+						throw lockBusyError()
 					await delay(10)
 					continue
 				}
@@ -789,6 +950,85 @@ export class FileNativePersistence {
 
 }
 
+type SharedLockHold = {
+	holders: number
+	/** Resolves to the release of the cross-process lock once it is held and recovery has run. */
+	ready: Promise<() => Promise<void>>
+}
+
+function lockBusyError(): PersistenceError {
+	return new PersistenceError('persistence.lock_busy', 'Timed out waiting for another UIUX persistence operation to finish.')
+}
+
+type GateWaiter = { mode: 'shared' | 'exclusive'; grant: () => void }
+
+/**
+ * In-process admission to the persistence lock, first come first served: any number of shared
+ * holders at once, or one exclusive holder. A shared request queues behind a waiting exclusive one
+ * (no writer starvation) and once the running shared batch is older than MAX_SHARED_BATCH_MS.
+ */
+class ProcessLockGate {
+	private shared = 0
+	private exclusive = false
+	private batchStartedAt = 0
+	private readonly queue: GateWaiter[] = []
+
+	async enter(mode: 'shared' | 'exclusive', deadline: number): Promise<() => void> {
+		if (this.queue.length === 0 && this.admits(mode)) {
+			this.admit(mode)
+			return this.leaver(mode)
+		}
+		await new Promise<void>((resolve, reject) => {
+			const waiter: GateWaiter = { mode, grant: () => { clearTimeout(timer); resolve() } }
+			const timer = setTimeout(() => {
+				const index = this.queue.indexOf(waiter)
+				if (index < 0) return
+				this.queue.splice(index, 1)
+				reject(lockBusyError())
+				this.drain()
+			}, Math.max(0, deadline - Date.now()))
+			this.queue.push(waiter)
+		})
+		return this.leaver(mode)
+	}
+
+	private admits(mode: 'shared' | 'exclusive'): boolean {
+		if (this.exclusive) return false
+		if (mode === 'exclusive') return this.shared === 0
+		return this.shared === 0 || Date.now() - this.batchStartedAt < MAX_SHARED_BATCH_MS
+	}
+
+	private admit(mode: 'shared' | 'exclusive'): void {
+		if (mode === 'exclusive') {
+			this.exclusive = true
+			return
+		}
+		if (this.shared === 0) this.batchStartedAt = Date.now()
+		this.shared += 1
+	}
+
+	private leaver(mode: 'shared' | 'exclusive'): () => void {
+		let left = false
+		return () => {
+			if (left) return
+			left = true
+			if (mode === 'exclusive') this.exclusive = false
+			else this.shared -= 1
+			this.drain()
+		}
+	}
+
+	private drain(): void {
+		while (this.queue.length > 0) {
+			const head = this.queue[0]!
+			if (!this.admits(head.mode)) return
+			this.queue.shift()
+			this.admit(head.mode)
+			head.grant()
+		}
+	}
+}
+
 export class JsonResourceRepository<Key extends string, Resource> implements MutableResourceRepository<Key, Resource> {
 	constructor(
 		private readonly persistence: FileNativePersistence,
@@ -799,7 +1039,7 @@ export class JsonResourceRepository<Key extends string, Resource> implements Mut
 	) {}
 
 	async discoverKeys(): Promise<readonly Key[]> {
-		return this.persistence.withLock(async () => {
+		return this.persistence.withReadLock(async () => {
 			const absolute = resolveWorkspacePath(this.persistence.root, this.discovery.directory)
 			await assertSafePath(this.persistence.root, `${this.discovery.directory}/.placeholder`, true)
 			let entries: import('node:fs').Dirent[]
@@ -819,7 +1059,7 @@ export class JsonResourceRepository<Key extends string, Resource> implements Mut
 	}
 
 	async readRevision(key: Key): Promise<ResourceRevision | undefined> {
-		return this.persistence.withLock(async () => {
+		return this.persistence.withReadLock(async () => {
 			const bytes = await this.persistence.readOptionalBytesUnlocked(this.pathFor(key))
 			return bytes ? revisionForBytes(bytes) : undefined
 		})
@@ -827,12 +1067,13 @@ export class JsonResourceRepository<Key extends string, Resource> implements Mut
 
 
 	async readInspected(key: Key): Promise<InspectedResource<Resource> | undefined> {
-		return this.persistence.withLock(async () => {
+		return this.persistence.withReadLock(async () => {
 			const path = this.pathFor(key)
 			const bytes = await this.persistence.readOptionalBytesUnlocked(path)
 			if (!bytes) return undefined
 			const resource = parseJsonBytes(bytes, path)
-			return { resource: resource as Resource, revision: revisionForBytes(bytes), diagnostics: this.validate(resource, basename(path)) }
+			const schemaVersion = await this.persistence.readDecodeSchemaVersionUnlocked()
+			return { resource: resource as Resource, revision: revisionForBytes(bytes), diagnostics: this.validate(resource, basename(path), schemaVersion) }
 		})
 	}
 
@@ -917,6 +1158,18 @@ export class WorkspaceFileRepository implements MutableResourceRepository<'works
 	}
 }
 
+/**
+ * How the `i18n/` directory holds one canonical locale filename. Locale identity is the exact,
+ * case-sensitive canonical tag (discovery accepts only exactly cased canonical filenames), but a
+ * case-insensitive volume resolves `i18n/zh-TW.json` to a case variant such as `zh-tw.json`.
+ * Every locale read and write therefore checks the directory entry, not just the path.
+ */
+type LocaleEntryState =
+	| Readonly<{ kind: 'exact' }>
+	| Readonly<{ kind: 'absent' }>
+	/** Only a case variant exists and the volume aliases the canonical path to it. */
+	| Readonly<{ kind: 'aliased_variant'; entryName: string }>
+
 export class LocaleFileRepository implements MutableResourceRepository<string, I18nResource> {
 	constructor(private readonly persistence: FileNativePersistence) {}
 
@@ -926,17 +1179,17 @@ export class LocaleFileRepository implements MutableResourceRepository<string, I
 	}
 
 	async readRevision(locale: string): Promise<ResourceRevision | undefined> {
-		return this.persistence.withLock(async () => {
-			const bytes = await this.persistence.readOptionalBytesUnlocked(localeRelativePath(locale))
+		return this.persistence.withReadLock(async () => {
+			const bytes = await this.readExactBytesUnlocked(locale)
 			return bytes ? revisionForBytes(bytes) : undefined
 		})
 	}
 
 
 	async readInspected(locale: string): Promise<InspectedResource<I18nResource> | undefined> {
-		return this.persistence.withLock(async () => {
+		return this.persistence.withReadLock(async () => {
 			const path = localeRelativePath(locale)
-			const bytes = await this.persistence.readOptionalBytesUnlocked(path)
+			const bytes = await this.readExactBytesUnlocked(locale)
 			if (!bytes) return undefined
 			const resource = parseJsonBytes(bytes, path)
 			return { resource: resource as I18nResource, revision: revisionForBytes(bytes), diagnostics: validateI18nResource(resource, basename(path)).diagnostics }
@@ -948,15 +1201,8 @@ export class LocaleFileRepository implements MutableResourceRepository<string, I
 	}
 
 	async discoverInspected(): Promise<Readonly<{ locales: readonly string[]; diagnostics: readonly Diagnostic[] }>> {
-		return this.persistence.withLock(async () => {
-			const absolute = resolveWorkspacePath(this.persistence.root, 'i18n')
-			let entries: import('node:fs').Dirent[]
-			await assertSafePath(this.persistence.root, 'i18n/.placeholder', true)
-			try { entries = await fs.readdir(absolute, { withFileTypes: true }) }
-			catch (error) {
-				if (isNotFound(error)) return { locales: [], diagnostics: [] }
-				throw error
-			}
+		return this.persistence.withReadLock(async () => {
+			const entries = await this.readLocaleDirectoryUnlocked()
 			const locales: string[] = []
 			const diagnostics: Diagnostic[] = []
 			for (const entry of entries) {
@@ -978,11 +1224,18 @@ export class LocaleFileRepository implements MutableResourceRepository<string, I
 		return this.persistence.withLock(async () => {
 			await this.persistence.assertWritableUnlocked()
 			const path = localeRelativePath(locale)
-			if (await this.persistence.readOptionalBytesUnlocked(path))
+			const entry = await this.localeEntryUnlocked(locale)
+			if (entry.kind === 'exact')
 				throw new PersistenceError('persistence.resource_exists', `Locale resource ${path} already exists.`)
+			if (entry.kind === 'aliased_variant')
+				throw caseVariantCollision(locale, entry.entryName)
 			const bytes = this.persistence.serializeJson(resource, path)
-			if (!await this.persistence.atomicCreateUnlocked(path, bytes))
+			if (!await this.persistence.atomicCreateUnlocked(path, bytes)) {
+				// Lost a race to a writer outside this process; re-check which name now holds the slot.
+				const after = await this.localeEntryUnlocked(locale)
+				if (after.kind === 'aliased_variant') throw caseVariantCollision(locale, after.entryName)
 				throw new PersistenceError('persistence.resource_exists', `Locale resource ${path} already exists.`)
+			}
 			return revisionForBytes(bytes)
 		})
 	}
@@ -991,7 +1244,7 @@ export class LocaleFileRepository implements MutableResourceRepository<string, I
 		return this.persistence.withLock(async () => {
 			await this.persistence.assertWritableUnlocked()
 			const path = localeRelativePath(input.key)
-			const currentBytes = await this.persistence.readOptionalBytesUnlocked(path)
+			const currentBytes = await this.readExactBytesUnlocked(input.key)
 			if (!currentBytes)
 				throw new PersistenceError('persistence.resource_not_found', `Locale resource ${path} does not exist.`)
 			const currentRevision = revisionForBytes(currentBytes)
@@ -1002,13 +1255,56 @@ export class LocaleFileRepository implements MutableResourceRepository<string, I
 			return { ok: true, revision: revisionForBytes(bytes) }
 		})
 	}
+
+	private async readLocaleDirectoryUnlocked(): Promise<import('node:fs').Dirent[]> {
+		const absolute = resolveWorkspacePath(this.persistence.root, 'i18n')
+		await assertSafePath(this.persistence.root, 'i18n/.placeholder', true)
+		try { return await fs.readdir(absolute, { withFileTypes: true }) }
+		catch (error) {
+			if (isNotFound(error)) return []
+			throw error
+		}
+	}
+
+	private async localeEntryUnlocked(locale: string): Promise<LocaleEntryState> {
+		const expected = basename(localeRelativePath(locale))
+		const entries = await this.readLocaleDirectoryUnlocked()
+		if (entries.some(entry => entry.name === expected)) return { kind: 'exact' }
+		const folded = expected.toLowerCase()
+		const variant = entries.find(entry => entry.name.toLowerCase() === folded)
+		// On a case-sensitive volume a variant is just another (invalid) file and does not occupy the slot.
+		if (variant && await fileExists(resolveWorkspacePath(this.persistence.root, localeRelativePath(locale))))
+			return { kind: 'aliased_variant', entryName: variant.name }
+		return { kind: 'absent' }
+	}
+
+	/** Reads the canonical locale file only when the directory entry carries the exact canonical casing. */
+	private async readExactBytesUnlocked(locale: string): Promise<Buffer | undefined> {
+		const path = localeRelativePath(locale)
+		if ((await this.localeEntryUnlocked(locale)).kind !== 'exact') return undefined
+		return this.persistence.readOptionalBytesUnlocked(path)
+	}
+}
+
+function caseVariantCollision(locale: string, entryName: string): PersistenceError {
+	return new PersistenceError(
+		'persistence.path_rejected',
+		`Locale ${locale} cannot be created: this volume is case-insensitive and i18n/${entryName} already occupies i18n/${locale}.json.`,
+		{
+			diagnostics: [{
+				code: 'i18n.invalid_locale_filename',
+				path: `/i18n/${entryName}`,
+				message: `This noncanonically cased file occupies the path of locale ${locale} on a case-insensitive volume. Rename it to ${locale}.json or remove it before creating ${locale}.`,
+			}],
+		},
+	)
 }
 
 export class AuthoredAssetFileRepository implements MutableResourceRepository<string, AuthoredAssetResource> {
 	constructor(private readonly persistence: FileNativePersistence) {}
 
 	async discoverKeys(): Promise<readonly string[]> {
-		return this.persistence.withLock(async () => {
+		return this.persistence.withReadLock(async () => {
 			const absolute = resolveWorkspacePath(this.persistence.root, 'assets')
 			await assertSafePath(this.persistence.root, 'assets/.placeholder', true)
 			let entries: import('node:fs').Dirent[]
@@ -1033,7 +1329,7 @@ export class AuthoredAssetFileRepository implements MutableResourceRepository<st
 	}
 
 	async readRevision(id: string): Promise<ResourceRevision | undefined> {
-		return this.persistence.withLock(async () => {
+		return this.persistence.withReadLock(async () => {
 			const metadataPath = assetMetadataRelativePath(id)
 			const metadataBytes = await this.persistence.readOptionalBytesUnlocked(metadataPath)
 			if (!metadataBytes) return undefined
@@ -1053,7 +1349,7 @@ export class AuthoredAssetFileRepository implements MutableResourceRepository<st
 	}
 
 	async readInspected(id: string): Promise<AuthoredAssetInspection | undefined> {
-		return this.persistence.withLock(async () => this.readAssetUnlocked(id))
+		return this.persistence.withReadLock(async () => this.readAssetUnlocked(id))
 	}
 
 	async create(id: string, resource: AuthoredAssetResource): Promise<ResourceRevision> {
@@ -1210,7 +1506,7 @@ export class ImmutableArtifactStore {
 	}
 
 	async read(identity: string): Promise<Uint8Array | undefined> {
-		return this.persistence.withLock(async () => {
+		return this.persistence.withReadLock(async () => {
 			const relativePath = artifactRelativePath(identity)
 			const bytes = await this.persistence.readOptionalBytesUnlocked(relativePath)
 			if (!bytes) return undefined
@@ -1221,7 +1517,7 @@ export class ImmutableArtifactStore {
 	}
 
 	async readCandidateJson<T = unknown>(identity: string, maxBytes = 512 * 1024): Promise<T | undefined> {
-		return this.persistence.withLock(async () => {
+		return this.persistence.withReadLock(async () => {
 			const relativePath = artifactRelativePath(identity)
 			const absolutePath = resolveWorkspacePath(this.persistence.root, relativePath)
 			let stats: import('node:fs').Stats
@@ -1272,7 +1568,7 @@ export class ImmutableArtifactStore {
 	}
 
 	async listIdentities(): Promise<readonly string[]> {
-		return this.persistence.withLock(async () => {
+		return this.persistence.withReadLock(async () => {
 			const artifactsRelative = '.uiux/artifacts/sha256'
 			const artifactsAbsolute = resolveWorkspacePath(this.persistence.root, artifactsRelative)
 			let shards: import('node:fs').Dirent[]
@@ -1417,10 +1713,11 @@ function validateCanonicalSnapshot(snapshot: WorkspaceSnapshot, expectedVersion:
 		if (directory === 'assets') {
 			if (segments.length !== 3 || !isFullUuid(segments[1]!))
 				throw new PersistenceError('workspace.migration_failed', `Migration result contains non-canonical Asset path ${relativePath}.`)
+			const assetFilename = segments[2]!
 			const files = assetFiles.get(segments[1]!) ?? []
-			files.push(filename!)
+			files.push(assetFilename)
 			assetFiles.set(segments[1]!, files)
-			if (filename === 'asset.json') {
+			if (assetFilename === 'asset.json') {
 				const metadata = parseJsonBytes(bytes, relativePath)
 				if (!isRecord(metadata) || metadata.id !== segments[1] || !isSafeAssetContentFilename(metadata.contentFilename))
 					throw new PersistenceError('workspace.migration_failed', `Migrated Asset metadata at ${relativePath} must retain its directory UUID and safe contentFilename.`)

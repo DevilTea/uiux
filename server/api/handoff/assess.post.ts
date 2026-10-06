@@ -1,14 +1,15 @@
 import { defineEventHandler, readBody, setResponseStatus } from 'h3'
-import { getSelectedWorkspaceServerRuntime } from '../../../src/server/selected-workspace'
+import { requestSession } from '../../../src/server/request-session'
 
 export default defineEventHandler(async (event) => {
 	const body = await readBody(event)
-	const runtime = getSelectedWorkspaceServerRuntime()
 	const roots = (body && typeof body === 'object' && Array.isArray((body as Record<string, unknown>).roots))
 		? (body as { roots: unknown[] }).roots
 		: []
 
-	const result = await runtime.app.assessHandoffReadiness({ roots: roots as never })
-	setResponseStatus(event, result.status === 'ok' ? 200 : 422)
+	const result = await requestSession(event).assessHandoffReadiness({ roots: roots as never })
+	// `auth.scope_denied` is 403; a schema block (`workspace.migration_required`) and a failed closure are 422.
+	const code = 'code' in result ? result.code : undefined
+	setResponseStatus(event, code === 'auth.scope_denied' ? 403 : result.status === 'ok' ? 200 : 422)
 	return result
 })

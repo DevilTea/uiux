@@ -1,26 +1,32 @@
 import { randomUUID } from 'node:crypto'
 
-import { McpServer, ProtocolError, ProtocolErrorCode, ResourceNotFoundError, ResourceTemplate, createMcpHandler, type McpHttpHandler, type ReadResourceResult } from '@modelcontextprotocol/server'
+import { McpServer, ProtocolError, ProtocolErrorCode, ResourceNotFoundError, ResourceTemplate, createMcpHandler, type AuthInfo, type McpHttpHandler, type ReadResourceResult } from '@modelcontextprotocol/server'
 import packageJson from '../../package.json' with { type: 'json' }
 import { z } from 'zod'
 
 import { DISCOVERABLE_RESOURCE_KINDS, MAX_RESOURCE_DISCOVERY_LIMIT } from '../application/dto/resource-discovery'
 import type { PointResourceKind } from '../application/dto/point-resources'
 import type { WorkspaceApplicationSession } from '../application/services/workspace-session'
+import { LOCKABLE_KINDS, MAX_ACQUIRE_RESOURCES, type LeaseManager } from '../application/access/leases'
+import { principalRole, type Principal } from '../application/access/principal'
+import { roleLabel } from '../application/access/policy'
+import { createScopedWorkspaceSession, type ScopedWorkspaceSession } from '../application/access/scoped-session'
 import type { ViewSpecContent } from '../application/services/view-authoring'
 import type { ViewResource } from '../domain/views/schema'
 import type { FlowStep } from '../domain/flows/schema'
-import type { ReviewActor, ReviewAnchor, ReviewEvidenceRef, ReviewResourceRevision } from '../domain/reviews/schema'
+import { REVIEW_RESOLUTIONS, type ReviewAnchor, type ReviewDisplayHint, type ReviewEvidenceRef, type ReviewResourceRevision } from '../domain/reviews/schema'
 import type { WorkspaceAdapterSelection, ThemeEntry, ViewportPreset } from '../domain/workspace/schema'
 import { isSha256Digest, type JsonObject } from '../domain/validation'
 import type { ResolvedRenderContext } from '../domain/render-context/schema'
 import type { HandoffRoot } from '../domain/handoff/schema'
+import { isPersistenceBusyError, persistenceBusyResult } from '../persistence/busy'
 import { parsePointResourceUri, pointResourceUri } from './resource-uri'
 
 const dynamicKinds = ['view', 'flow', 'locale', 'review', 'asset'] as const satisfies readonly PointResourceKind[]
 const discoveryKindsSchema = z.array(z.enum(DISCOVERABLE_RESOURCE_KINDS)).optional()
 const discoveryBaseShape = {
 	kinds: discoveryKindsSchema,
+	resolution: z.array(z.enum(REVIEW_RESOLUTIONS)).min(1).optional(),
 	cursor: z.string().min(1).optional(),
 	limit: z.number().int().min(1).max(MAX_RESOURCE_DISCOVERY_LIMIT),
 }
@@ -123,22 +129,33 @@ const reviewAnchorSchema = z.object({
 	widgetId: z.string(),
 }).strict()
 
+const ACTOR_IGNORED_DESCRIPTION = 'Optional and ignored: the server stamps the actor from the authenticated member (a differing value yields the warning auth.actor_ignored).'
+
 const reviewActorSchema = z.object({
 	type: z.string(),
 	id: z.string().optional(),
 	displayName: z.string().optional(),
 }).strict()
 
+// Non-authoritative pin placement, beside (never inside) the strict anchor. Services clamp to 0..1
+// and quantize to 1e-4 before persisting.
+const reviewDisplayHintSchema = z.object({
+	pin: z.object({ x: z.number(), y: z.number() }).strict(),
+}).strict()
+
+const reviewResolutionSchema = z.enum(REVIEW_RESOLUTIONS)
+
 const createReviewThreadSchema = z.object({
 	id: z.string().optional(),
 	anchor: reviewAnchorSchema,
 	variantNames: z.array(z.string()).optional(),
+	displayHint: reviewDisplayHintSchema.optional(),
 }).strict()
 
 const appendReviewMessageSchema = z.object({
 	reviewId: z.string(),
 	expectedRevision: z.string(),
-	actor: reviewActorSchema,
+	actor: reviewActorSchema.optional().describe(ACTOR_IGNORED_DESCRIPTION),
 	body: z.string(),
 	id: z.string().optional(),
 	at: z.string().optional(),
@@ -149,16 +166,23 @@ const reanchorReviewThreadSchema = z.object({
 	expectedRevision: z.string(),
 	anchor: reviewAnchorSchema,
 	variantNames: z.array(z.string()).optional(),
-	actor: reviewActorSchema,
+	displayHint: reviewDisplayHintSchema.nullable().optional(),
+	actor: reviewActorSchema.optional().describe(ACTOR_IGNORED_DESCRIPTION),
 	reason: z.string().optional(),
 	id: z.string().optional(),
 	at: z.string().optional(),
 }).strict()
 
+const setReviewDisplayHintSchema = z.object({
+	reviewId: z.string(),
+	expectedRevision: z.string(),
+	displayHint: reviewDisplayHintSchema.nullable(),
+}).strict()
+
 const submitReadyForReviewSchema = z.object({
 	reviewId: z.string(),
 	expectedRevision: z.string(),
-	actor: reviewActorSchema,
+	actor: reviewActorSchema.optional().describe(ACTOR_IGNORED_DESCRIPTION),
 	changeDomains: z.array(z.string()),
 	resources: z.array(z.object({
 		identity: z.record(z.string(), z.unknown()),
@@ -178,7 +202,8 @@ const submitReadyForReviewSchema = z.object({
 const resolveReviewThreadSchema = z.object({
 	reviewId: z.string(),
 	expectedRevision: z.string(),
-	actor: reviewActorSchema,
+	actor: reviewActorSchema.optional().describe(ACTOR_IGNORED_DESCRIPTION),
+	resolution: reviewResolutionSchema.optional(),
 	submissionId: z.string().optional(),
 	reason: z.string().optional(),
 	id: z.string().optional(),
@@ -188,7 +213,7 @@ const resolveReviewThreadSchema = z.object({
 const reopenReviewThreadSchema = z.object({
 	reviewId: z.string(),
 	expectedRevision: z.string(),
-	actor: reviewActorSchema,
+	actor: reviewActorSchema.optional().describe(ACTOR_IGNORED_DESCRIPTION),
 	reason: z.string().optional(),
 	id: z.string().optional(),
 	at: z.string().optional(),
@@ -204,7 +229,7 @@ const promoteReviewToDecisionSchema = z.object({
 		summary: z.string(),
 		rationale: z.string(),
 	}).strict().optional(),
-	actor: reviewActorSchema.optional(),
+	actor: reviewActorSchema.optional().describe(ACTOR_IGNORED_DESCRIPTION),
 	decisionId: z.string().optional(),
 }).strict()
 
@@ -251,8 +276,26 @@ const exportHandoffSchema = z.object({
 	roots: z.array(handoffRootSchema).min(1),
 }).strict()
 
-export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer {
-	const server = new McpServer({ name: '@deviltea/uiux', version: packageJson.version })
+const leaseResourcesSchema = z.array(z.object({
+	kind: z.enum(LOCKABLE_KINDS),
+	key: z.string().min(1),
+}).strict()).min(1).max(MAX_ACQUIRE_RESOURCES)
+
+const acquireLockSchema = z.object({ resources: leaseResourcesSchema }).strict()
+const releaseLockSchema = z.object({ resources: leaseResourcesSchema.optional() }).strict()
+
+export const LEASE_RECIPE = 'Edit leases: your first successful write to a View, Flow, Locale, Asset or the Workspace settings takes a 5-minute lease on it, renewed by each of your writes; other writers get status "locked" (resource.locked) with your nickname and expiry. For a multi-step task, call acquire_lock up front for every resource you will write, call acquire_lock again as a heartbeat before a long pause (a build, a capture), and finish with release_lock and no arguments. Leases never replace expectedRevision: a conflict still means re-read. Review threads are never locked.'
+
+/** Per-request server instructions: the agent learns its identity and role without a new tool (decision 10). */
+export function uiuxMcpInstructions(principal: Principal): string {
+	const identity = principal.type === 'member'
+		? `Authenticated as ${principal.nickname} (${principal.kind}, ${roleLabel(principalRole(principal)).toLowerCase()}).`
+		: `Authenticated as ${principal.id}.`
+	return `${identity} Actors and times on Review records are stamped by the server from this identity; do not send actor or at. Tools your role cannot use refuse with auth.scope_denied naming the required role. Resolving Review threads is human-only, in the UIUX Workbench. ${LEASE_RECIPE}`
+}
+
+export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
+	const server = mapPersistenceBusy(new McpServer({ name: '@deviltea/uiux', version: packageJson.version }, { instructions: uiuxMcpInstructions(app.principal) }))
 	server.registerResource(
 		'workspace',
 		pointResourceUri({ kind: 'workspace', key: 'workspace' }),
@@ -458,7 +501,7 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 		'create_review_thread',
 		{
 			title: 'Create UIUX Review Thread',
-			description: 'Create an initial open Review thread anchored to a View and widget with optional variant scope.',
+			description: 'Create an initial open Review thread anchored to a View and widget with optional variant scope. The optional displayHint.pin {x, y} is a non-authoritative pin position normalized (0..1) within the anchored Widget\'s rendered rect; agents have no pointer and should normally omit it.',
 			inputSchema: createReviewThreadSchema,
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},
@@ -466,6 +509,7 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 			...(input.id ? { id: input.id } : {}),
 			anchor: input.anchor as ReviewAnchor,
 			...(input.variantNames ? { variantNames: input.variantNames } : {}),
+			...(input.displayHint ? { displayHint: input.displayHint as ReviewDisplayHint } : {}),
 		})),
 	)
 
@@ -480,7 +524,7 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 		async input => authoringToolResult('review', await app.appendReviewMessage({
 			reviewId: input.reviewId,
 			expectedRevision: input.expectedRevision,
-			actor: input.actor as ReviewActor,
+			...(input.actor !== undefined ? { actor: input.actor } : {}),
 			body: input.body,
 			...(input.id ? { id: input.id } : {}),
 			...(input.at ? { at: input.at } : {}),
@@ -491,7 +535,7 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 		'reanchor_review_thread',
 		{
 			title: 'Re-anchor UIUX Review Thread',
-			description: 'Re-anchor a Review thread to a new widget or variant scope, appending a re-anchor history event with revision CAS.',
+			description: 'Re-anchor a Review thread to a new widget or variant scope, appending a re-anchor history event with revision CAS. displayHint: an object sets the pin hint for the new anchor, null clears it, and omitting it clears the hint when the Widget changes and keeps it when only Variants change.',
 			inputSchema: reanchorReviewThreadSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
@@ -500,10 +544,26 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 			expectedRevision: input.expectedRevision,
 			anchor: input.anchor as ReviewAnchor,
 			...(input.variantNames ? { variantNames: input.variantNames } : {}),
-			actor: input.actor as ReviewActor,
+			...(input.displayHint !== undefined ? { displayHint: input.displayHint as ReviewDisplayHint | null } : {}),
+			...(input.actor !== undefined ? { actor: input.actor } : {}),
 			...(input.reason ? { reason: input.reason } : {}),
 			...(input.id ? { id: input.id } : {}),
 			...(input.at ? { at: input.at } : {}),
+		})),
+	)
+
+	server.registerTool(
+		'set_review_display_hint',
+		{
+			title: 'Set UIUX Review Display Hint',
+			description: 'Move or clear the non-authoritative pin hint of a Review thread within the same Widget (displayHint.pin {x, y} normalized 0..1 within the anchored Widget\'s rendered rect, or null to clear) with revision CAS. Appends no history event and records no actor. Moving a pin to another Widget is reanchor_review_thread.',
+			inputSchema: setReviewDisplayHintSchema,
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async input => authoringToolResult('review', await app.setReviewDisplayHint({
+			reviewId: input.reviewId,
+			expectedRevision: input.expectedRevision,
+			displayHint: input.displayHint as ReviewDisplayHint | null,
 		})),
 	)
 
@@ -518,7 +578,7 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 		async input => authoringToolResult('review', await app.submitReadyForReview({
 			reviewId: input.reviewId,
 			expectedRevision: input.expectedRevision,
-			actor: input.actor as ReviewActor,
+			...(input.actor !== undefined ? { actor: input.actor } : {}),
 			changeDomains: input.changeDomains,
 			resources: input.resources as ReviewResourceRevision[],
 			...(input.scope ? { scope: input.scope as JsonObject } : {}),
@@ -534,18 +594,14 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 		'resolve_review_thread',
 		{
 			title: 'Resolve UIUX Review Thread',
-			description: 'Resolve a Review thread by a human actor referencing the current accepted submission with revision CAS.',
+			description: RESOLVE_REVIEW_THREAD_DESCRIPTION,
 			inputSchema: resolveReviewThreadSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
 		async input => authoringToolResult('review', await app.resolveReviewThread({
 			reviewId: input.reviewId,
 			expectedRevision: input.expectedRevision,
-			actor: input.actor as ReviewActor,
-			...(input.submissionId ? { submissionId: input.submissionId } : {}),
-			...(input.reason ? { reason: input.reason } : {}),
-			...(input.id ? { id: input.id } : {}),
-			...(input.at ? { at: input.at } : {}),
+			...(input.resolution ? { resolution: input.resolution } : {}),
 		})),
 	)
 
@@ -560,7 +616,7 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 		async input => authoringToolResult('review', await app.reopenReviewThread({
 			reviewId: input.reviewId,
 			expectedRevision: input.expectedRevision,
-			actor: input.actor as ReviewActor,
+			...(input.actor !== undefined ? { actor: input.actor } : {}),
 			...(input.reason ? { reason: input.reason } : {}),
 			...(input.id ? { id: input.id } : {}),
 			...(input.at ? { at: input.at } : {}),
@@ -583,7 +639,7 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 				expectedViewRevision: input.expectedViewRevision,
 				question: input.question,
 				...(input.outcome ? { outcome: input.outcome } : {}),
-				...(input.actor ? { actor: input.actor } : {}),
+				...(input.actor !== undefined ? { actor: input.actor } : {}),
 				...(input.decisionId ? { decisionId: input.decisionId } : {}),
 			})
 			if (outcome.status === 'created' || outcome.status === 'updated') {
@@ -659,7 +715,7 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 			return {
 				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
 				structuredContent: outcome,
-				...(outcome.status === 'failed' ? { isError: true } : {}),
+				...(outcome.status === 'failed' || outcome.status === 'blocked' ? { isError: true } : {}),
 			}
 		},
 	)
@@ -679,7 +735,7 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 			return {
 				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
 				structuredContent: outcome,
-				...(outcome.status === 'failed' ? { isError: true } : {}),
+				...(outcome.status === 'failed' || outcome.status === 'blocked' ? { isError: true } : {}),
 			}
 		},
 	)
@@ -699,7 +755,43 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 			return {
 				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
 				structuredContent: outcome,
-				...(outcome.status === 'failed' ? { isError: true } : {}),
+				...(outcome.status === 'failed' || outcome.status === 'blocked' ? { isError: true } : {}),
+			}
+		},
+	)
+
+	server.registerTool(
+		'acquire_lock',
+		{
+			title: 'Acquire UIUX edit leases',
+			description: `Take (or renew) 5-minute edit leases on 1-${MAX_ACQUIRE_RESOURCES} resources, all or nothing. Lockable kinds: view, flow, locale, asset, workspace (key "workspace"); Review threads are never locked. Returns { status: "acquired", leases } or { status: "locked", locks } naming each conflicting holder and expiry. ${LEASE_RECIPE}`,
+			inputSchema: acquireLockSchema,
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (input) => {
+			const outcome = app.acquireLeases(input)
+			return {
+				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
+				structuredContent: outcome,
+				...(outcome.status === 'acquired' ? {} : { isError: true }),
+			}
+		},
+	)
+
+	server.registerTool(
+		'release_lock',
+		{
+			title: 'Release UIUX edit leases',
+			description: 'Release your edit leases on the listed resources, or all of them when resources is omitted. Idempotent: releasing what you do not hold is a no-op. Returns the released list.',
+			inputSchema: releaseLockSchema,
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (input) => {
+			const outcome = app.releaseLeases(input)
+			return {
+				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
+				structuredContent: outcome,
+				...(outcome.status === 'released' ? {} : { isError: true }),
 			}
 		},
 	)
@@ -707,11 +799,90 @@ export function createUiuxMcpServer(app: WorkspaceApplicationSession): McpServer
 	return server
 }
 
-export function createUiuxMcpHttpHandler(app: WorkspaceApplicationSession): McpHttpHandler {
-	return createMcpHandler(() => createUiuxMcpServer(app))
+/**
+ * Every tool and resource callback registered on `server` answers a persistence lock timeout with
+ * the coded, retryable `persistence.busy` instead of an opaque failure: a tool returns it as an
+ * error result (`structuredContent.code`), a resource read as a JSON-RPC internal error whose data
+ * is the same result.
+ */
+function mapPersistenceBusy(server: McpServer): McpServer {
+	type Callback = (...args: unknown[]) => unknown
+	const registerTool = server.registerTool.bind(server) as (...args: unknown[]) => unknown
+	const registerResource = server.registerResource.bind(server) as (...args: unknown[]) => unknown
+	const guard = (callback: Callback, onBusy: () => unknown): Callback => async (...args) => {
+		try {
+			return await callback(...args)
+		}
+		catch (error) {
+			if (!isPersistenceBusyError(error)) throw error
+			return onBusy()
+		}
+	}
+	server.registerTool = ((...args: unknown[]) => {
+		const callback = args.pop() as Callback
+		return registerTool(...args, guard(callback, () => {
+			const busy = persistenceBusyResult()
+			return { content: [{ type: 'text' as const, text: JSON.stringify(busy) }], structuredContent: busy, isError: true }
+		}))
+	}) as typeof server.registerTool
+	server.registerResource = ((...args: unknown[]) => {
+		const callback = args.pop() as Callback
+		return registerResource(...args, guard(callback, () => {
+			const busy = persistenceBusyResult()
+			throw new ProtocolError(ProtocolErrorCode.InternalError, `${busy.code}: ${busy.message}`, busy)
+		}))
+	}) as typeof server.registerResource
+	return server
 }
 
-async function resourceResult(app: WorkspaceApplicationSession, uri: URL): Promise<ReadResourceResult> {
+export const RESOLVE_REVIEW_THREAD_DESCRIPTION = 'Resolution is human-only and happens in the UIUX Workbench. This tool always refuses. Reply on the thread, or submit it ready for review, and a human will resolve it.'
+
+/** The `authInfo.extra` key carrying the verified principal from the route into the per-request factory. */
+export const PRINCIPAL_AUTH_INFO_KEY = 'uiuxPrincipal'
+
+export function principalFromAuthInfo(authInfo: AuthInfo | undefined): Principal | undefined {
+	const candidate = authInfo?.extra?.[PRINCIPAL_AUTH_INFO_KEY] as Principal | undefined
+	return candidate && (candidate.type === 'member' || candidate.type === 'system') ? candidate : undefined
+}
+
+/** `authInfo` for a verified principal: the plaintext token is never handed to the SDK (`token: "<redacted>"`). */
+export function principalAuthInfo(principal: Principal): AuthInfo {
+	return {
+		token: '<redacted>',
+		clientId: principal.type === 'member' ? principal.memberId : principal.id,
+		scopes: [principalRole(principal)],
+		extra: { [PRINCIPAL_AUTH_INFO_KEY]: principal },
+	}
+}
+
+/**
+ * Stateless per-request MCP handler. The caller verifies the bearer token first and passes the
+ * principal through `fetch(request, { authInfo })`; a request without one is answered 401 here
+ * too, so no code path can reach a tool unauthenticated.
+ */
+export function createUiuxMcpHttpHandler(app: WorkspaceApplicationSession, options: Readonly<{ leases: LeaseManager }>): McpHttpHandler {
+	const inner = createMcpHandler((ctx) => {
+		const principal = principalFromAuthInfo(ctx.authInfo)
+		if (!principal || principal.type !== 'member') throw new Error('MCP request reached the server factory without an authenticated member.')
+		return createUiuxMcpServer(createScopedWorkspaceSession(app, principal, { transport: 'mcp', leases: options.leases }))
+	})
+	return {
+		...inner,
+		fetch: async (request, requestOptions) => {
+			const principal = principalFromAuthInfo(requestOptions?.authInfo)
+			if (!principal || principal.type !== 'member') {
+				const message = 'MCP requires a member bearer token. Create a token with `uiux token create --workspace <dir> --member <agent>` and send it as `Authorization: Bearer <token>`.'
+				return new Response(JSON.stringify({ status: 'rejected', code: 'auth.required', message, diagnostics: [{ code: 'auth.required', path: '/headers/authorization', message }] }), {
+					status: 401,
+					headers: { 'content-type': 'application/json', 'www-authenticate': 'Bearer realm="uiux"', 'cache-control': 'no-store' },
+				})
+			}
+			return inner.fetch(request, requestOptions)
+		},
+	}
+}
+
+async function resourceResult(app: ScopedWorkspaceSession, uri: URL): Promise<ReadResourceResult> {
 	const address = parsePointResourceUri(uri)
 	if (!address) throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Unsupported UIUX resource URI: ${uri.href}`)
 	const read = await app.readPointResource(address.kind, address.key)
@@ -721,7 +892,7 @@ async function resourceResult(app: WorkspaceApplicationSession, uri: URL): Promi
 	}
 }
 
-async function discoveryToolResult(app: WorkspaceApplicationSession, mode: 'list' | 'search', input: unknown) {
+async function discoveryToolResult(app: ScopedWorkspaceSession, mode: 'list' | 'search', input: unknown) {
 	const outcome = mode === 'list' ? await app.listPointResources(input) : await app.searchPointResources(input)
 	if (outcome.status === 'invalid')
 		throw new ProtocolError(ProtocolErrorCode.InvalidParams, outcome.diagnostics.map(item => `${item.path || '/'}: ${item.message}`).join('; '))

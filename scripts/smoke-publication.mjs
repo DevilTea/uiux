@@ -45,8 +45,18 @@ async function startStaticServer() {
 				fileStat = await stat(filePath)
 			}
 			catch {
-				response.writeHead(404)
-				.end('Not found')
+				// Like GitHub Pages: a missing path under the site serves the site's 404.html
+				// (with status 404), which boots the SPA on deep links such as /uiux/views/<id>.
+				const fallback = join(publicationRoot, '404.html')
+				try {
+					const bytes = await readFile(fallback)
+					response.writeHead(404, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+					response.end(bytes)
+				}
+				catch {
+					response.writeHead(404)
+						.end('Not found')
+				}
 				return
 			}
 			if (fileStat.isDirectory()) {
@@ -84,16 +94,30 @@ async function startStaticServer() {
 	}
 }
 
-async function nav(page, name) {
-	const button = page.locator('aside').first().getByRole('button', { name: new RegExp(`^${name}`) }).first()
-	await button.click()
+function main(page) {
+	return page.locator('main').first()
+}
+
+async function open(page, path) {
+	await page.goto(`${origin}/uiux${path}`, { waitUntil: 'networkidle' })
+	await main(page).waitFor()
 }
 
 async function expectNoButton(page, name) {
-	const count = await page.locator('aside').first().getByRole('button', { name }).count()
+	const count = await main(page).getByRole('button', { name, exact: true }).count()
 	if (count !== 0)
-		throw new Error(`Published viewer exposed authoring button "${name}".`)
+		throw new Error(`Published viewer exposed authoring button "${name}" on ${page.url()}.`)
 }
+
+async function previewFrame(page) {
+	await page.waitForFunction(() => globalThis.document.querySelector('iframe')?.getAttribute('src')?.includes('/uiux/preview?'))
+	const frame = page.frames().find(candidate => candidate.url().includes('/uiux/preview?'))
+	if (!frame) throw new Error('Published Workbench did not open the Preview iframe.')
+	await frame.locator('[data-preview-ready="true"]').waitFor()
+	return frame
+}
+
+let origin = ''
 
 try {
 	execFileSync(process.execPath, [
@@ -115,6 +139,7 @@ try {
 		throw new Error('Dogfood publication did not materialize a valid Preview adapter runtime.')
 
 	const server = await startStaticServer()
+	origin = server.origin
 	const browser = await chromium.launch({ headless: true })
 	try {
 		const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
@@ -122,70 +147,99 @@ try {
 		const pageErrors = []
 		const requests = []
 		page.on('console', message => {
-			if (message.type() === 'error' || message.type() === 'warning')
-				consoleProblems.push(`${message.type()}: ${message.text()}`)
+			if (message.type() !== 'error' && message.type() !== 'warning') return
+			// A deep link is served by the static 404.html fallback, so the document itself is a 404.
+			const location = message.location()?.url ?? ''
+			const isDeepLinkDocument = message.text().includes('status of 404')
+				&& /\/uiux\/(views|flows)\/[^/]+(\?|$)/.test(location)
+			if (!isDeepLinkDocument) consoleProblems.push(`${message.type()}: ${message.text()} (${location})`)
 		})
 		page.on('pageerror', error => pageErrors.push(error.message))
 		page.on('request', request => requests.push(request.url()))
 
-		await page.goto(`${server.origin}/uiux/`, { waitUntil: 'networkidle' })
-		await page.getByText('published · read-only', { exact: true }).waitFor()
+		await page.addInitScript(() => {
+			// Pin the Workbench chrome locale so the English labels below are stable.
+			localStorage.setItem('uiux.workbench.locale', 'en-US')
+		})
 
-		const frame = page.frames().find(candidate => candidate.url().includes('/uiux/preview?'))
-		if (!frame) throw new Error('Published Workbench did not open the Preview iframe.')
-		await frame.getByText('#root', { exact: true }).waitFor()
-		await frame.getByText('en-US · dark', { exact: true }).waitFor()
+		// Overview, with the publication banner.
+		await open(page, '/')
+		await page.getByText('Published snapshot · read-only', { exact: false }).first().waitFor()
 
-		const themeSelect = page.locator('header select').last()
-		await themeSelect.selectOption('light')
-		await frame.getByText('en-US · light', { exact: true }).waitFor()
+		// /views opens the most recent View; its render context rides in the query.
+		await open(page, '/views')
+		await page.waitForURL(/\/uiux\/views\/[^/?]+/)
+		const frame = await previewFrame(page)
+		const iframeTitleIncludes = context => page.waitForFunction(text => globalThis.document.querySelector('iframe')?.getAttribute('title')?.includes(text), context)
+		await iframeTitleIncludes('en-US · desktop · dark')
+		await page.getByRole('combobox', { name: 'Preview theme' }).click()
+		await page.getByRole('option', { name: 'Light' }).click()
+		await iframeTitleIncludes('en-US · desktop · light')
+		await page.waitForURL(/[?&]theme=light/)
+		// A theme change re-renders the same Preview document; it is never reloaded.
+		await frame.waitForFunction(() => globalThis.document.querySelector('[data-preview-ready]')?.parentElement?.classList.contains('light'))
+		if (await page.getByRole('button', { name: 'Comment', exact: true }).count() !== 0)
+			throw new Error('Published viewer exposed the canvas Comment button.')
 
-		await nav(page, 'Workspace')
-		await expectNoButton(page, '+ Add Adapter')
-		await expectNoButton(page, '+ Add Viewport')
-		await expectNoButton(page, '+ Add Theme')
-		await expectNoButton(page, 'Save Settings')
-		const enabledWorkspaceFields = await page.locator('aside').first().locator('input:not([disabled]), textarea:not([disabled]), select:not([disabled])').evaluateAll(elements =>
-			elements.filter(element => element.getAttribute('placeholder') !== 'Filter views…').length,
-		)
+		// A refresh on the deep link reproduces the context (served by the static 404.html fallback).
+		const deepLink = page.url()
+		await page.goto(deepLink, { waitUntil: 'networkidle' })
+		await previewFrame(page)
+		await page.waitForFunction(() => globalThis.document.querySelector('iframe')?.getAttribute('src')?.includes('themeId=light'))
+		await iframeTitleIncludes('en-US · desktop · light')
+
+		await open(page, '/workspace/settings')
+		await expectNoButton(page, 'Add adapter')
+		await expectNoButton(page, 'Add viewport')
+		await expectNoButton(page, 'Add theme')
+		await expectNoButton(page, 'Save settings')
+		const enabledWorkspaceFields = await main(page).locator('input:not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly]), button[role="combobox"]:not([disabled])').count()
 		if (enabledWorkspaceFields !== 0)
 			throw new Error('Published Workspace settings still expose editable fields.')
 
-		await nav(page, 'Locales')
-		await expectNoButton(page, '+ New Locale')
-		await expectNoButton(page, 'Save Changes')
+		await open(page, '/workspace/locales')
+		await expectNoButton(page, 'New Locale')
+		await expectNoButton(page, 'Save')
 
-		await nav(page, 'Assets')
-		await expectNoButton(page, '+ New Asset')
-		await expectNoButton(page, 'Replace Asset Content')
-		const assetDownload = page.locator('aside').first().getByRole('link', { name: '↓ Download' })
+		await open(page, '/workspace/assets')
+		await expectNoButton(page, 'New Asset')
+		await expectNoButton(page, 'Replace file')
+		const assetDownload = main(page).getByRole('link', { name: 'Download' })
 		await assetDownload.waitFor()
 		const assetHref = await assetDownload.getAttribute('href')
 		if (!assetHref?.includes('/uiux/_uiux/assets/'))
 			throw new Error(`Published Asset download did not resolve to static content: ${assetHref}`)
 
-		await nav(page, 'Flows')
-		await expectNoButton(page, '+ New Flow')
-		await expectNoButton(page, '+ Add Step')
-		await expectNoButton(page, 'Save Flow Changes')
+		await open(page, '/flows')
+		await page.waitForURL(/\/uiux\/flows\/[^/?]+/)
+		await page.reload({ waitUntil: 'networkidle' })
+		await main(page).waitFor()
+		await expectNoButton(page, 'New Flow')
+		await expectNoButton(page, 'Add step')
+		await expectNoButton(page, 'Save Flow')
 
-		await nav(page, 'Reviews')
-		await expectNoButton(page, '+ Thread')
-		await expectNoButton(page, '🎯 Comment')
+		await open(page, '/reviews')
+		await expectNoButton(page, 'New thread')
+		await expectNoButton(page, 'Comment')
 
-		await nav(page, 'Evidence')
-		await expectNoButton(page, 'Capture Active')
-		const evidenceImage = page.locator('aside').first().locator('img[alt="Formal Capture Screenshot"]')
-		await evidenceImage.waitFor()
+		// Overview: per-View readiness from the published Workspace assessment, no export.
+		await open(page, '/')
+		await main(page).locator('[data-readiness]').first().waitFor()
+		await expectNoButton(page, 'Export handoff…')
+
+		// A View's Readiness tab: Evidence contact sheet from static artifacts, no capture or export.
+		const viewKey = snapshot.resources.view[0].key
+		await open(page, `/views/${viewKey}?panel=readiness`)
+		const readiness = page.locator('[data-readiness-tab]')
+		await readiness.locator('[data-readiness-badge]').waitFor()
+		if (await page.locator('[data-capture-open], [data-capture-stale], [data-export-open]').count() !== 0)
+			throw new Error('Published viewer exposed Evidence capture or Handoff export.')
+		const evidenceImage = readiness.locator('[data-evidence-sheet] img').first()
+		await evidenceImage.waitFor({ state: 'attached' })
 		const evidenceSrc = await evidenceImage.getAttribute('src')
 		if (!evidenceSrc?.includes('/uiux/_uiux/artifacts/'))
 			throw new Error(`Published Evidence screenshot did not resolve to a static artifact: ${evidenceSrc}`)
-
-		await nav(page, 'Handoff')
-		await expectNoButton(page, 'Re-Assess')
-		await expectNoButton(page, 'Export Snapshot')
-		await page.locator('aside').first().getByText('Implementation Ready', { exact: true }).waitFor()
-		await page.locator('aside').first().getByText('Claim Verified', { exact: true }).waitFor()
+		await readiness.locator('[data-facet="handoff"]').getByText('implementation-ready', { exact: true }).waitFor()
 
 		await page.waitForTimeout(200)
 		const runtimeApiRequests = requests.filter((requestUrl) => {

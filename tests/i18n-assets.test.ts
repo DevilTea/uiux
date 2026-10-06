@@ -12,9 +12,11 @@ import type { WorkspaceManifest } from '../src/domain/workspace/schema'
 import { lowerI18nBinding, createTranslationRuntime, inspectTranslationResources, inspectWorkspaceI18n, interpolateTemplate } from '../src/i18n'
 import { FileNativePersistence, type PersistenceFaultPoint } from '../src/persistence'
 import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
+import { isCaseSensitiveDirectory } from './support/filesystem'
 
 const ASSET_ID = '44444444-4444-4444-8444-444444444444'
 const temporaryRoots: string[] = []
+const tmpIsCaseSensitive = await isCaseSensitiveDirectory(tmpdir())
 
 afterEach(async () => {
 	await Promise.all(temporaryRoots.splice(0).map(root => rm(root, { recursive: true, force: true })))
@@ -157,12 +159,22 @@ describe('i18n runtime and Checks semantics', () => {
 		const { root, persistence } = await newWorkspace()
 		await persistence.locales.create('en-US', { title: 'Title' })
 		await persistence.locales.create('zh-TW', { title: '標題' })
-		await writeFile(join(root, 'i18n', 'EN-us.json'), JSON.stringify({ title: 'bad casing' }))
+		await writeFile(join(root, 'i18n', 'EN-gb.json'), JSON.stringify({ title: 'bad casing' }))
+		// A case variant of an existing canonical locale can only coexist with it on
+		// a case-sensitive volume; on case-insensitive volumes (default macOS and
+		// Windows) writing `EN-us.json` would overwrite `en-US.json` in place.
+		const invalidFilenames = ['/i18n/EN-gb.json']
+		if (tmpIsCaseSensitive) {
+			await writeFile(join(root, 'i18n', 'EN-us.json'), JSON.stringify({ title: 'bad casing' }))
+			invalidFilenames.push('/i18n/EN-us.json')
+		}
 
 		const inspected = await inspectWorkspaceI18n('en-US', persistence.locales)
 		expect(inspected.locales).toEqual(['en-US', 'zh-TW'])
+		expect(inspected.resources.get('en-US')).toEqual({ title: 'Title' })
 		expect(inspected.resources.get('zh-TW')).toEqual({ title: '標題' })
-		expect(inspected.resourceDiagnostics.some(item => item.code === 'i18n.invalid_locale_filename')).toBe(true)
+		for (const path of invalidFilenames)
+			expect(inspected.resourceDiagnostics).toContainEqual(expect.objectContaining({ code: 'i18n.invalid_locale_filename', path }))
 		expect(inspected.runtime.state).toBe('ready')
 	})
 })

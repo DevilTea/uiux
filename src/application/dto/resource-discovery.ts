@@ -1,4 +1,4 @@
-import type { ReviewAnchor, ReviewStatus } from '../../domain/reviews/schema'
+import { REVIEW_RESOLUTIONS, type ReviewAnchor, type ReviewDisplayHint, type ReviewResolution, type ReviewStatus } from '../../domain/reviews/schema'
 import { jsonPointer, rejectUnknownKeys, Validator, type Diagnostic } from '../../domain/validation'
 import type { ResourceRevision } from './revisions'
 
@@ -9,6 +9,8 @@ export type DiscoverableResourceKind = typeof DISCOVERABLE_RESOURCE_KINDS[number
 export type ResourceDiscoveryRequest = Readonly<{
 	kinds?: readonly DiscoverableResourceKind[]
 	query?: string
+	/** Structured Review filter: only resolved threads whose derived resolution is listed match. */
+	resolution?: readonly ReviewResolution[]
 	cursor?: string
 	limit: number
 }>
@@ -17,8 +19,22 @@ export type ResourceDiscoveryItem =
 	| Readonly<{ kind: 'view'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ name?: string; feature?: string }> }>
 	| Readonly<{ kind: 'flow'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ name?: string }> }>
 	| Readonly<{ kind: 'locale'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ messageCount?: number }> }>
-	| Readonly<{ kind: 'review'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ anchor?: ReviewAnchor; status?: ReviewStatus; messageCount?: number }> }>
+	| Readonly<{ kind: 'review'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: ReviewDiscoverySummary }>
 	| Readonly<{ kind: 'asset'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ name?: string; mediaType?: string; contentFilename?: string }> }>
+
+export type ReviewDiscoverySummary = Readonly<{
+	anchor?: ReviewAnchor
+	/** Anchor Variant scope; `[]` means View-wide. */
+	variantNames?: readonly string[]
+	/** Non-authoritative pin placement, beside (never inside) `anchor`. */
+	displayHint?: ReviewDisplayHint
+	status?: ReviewStatus
+	/** Derived from the final lifecycle event; present only while `status` is resolved. */
+	resolution?: ReviewResolution
+	messageCount?: number
+	/** Latest canonical activity (newest message, submission or history event), ISO 8601. */
+	latestActivityAt?: string
+}>
 
 export type ResourceDiscoveryPage = Readonly<{ items: readonly ResourceDiscoveryItem[]; nextCursor?: string }>
 export type ResourceDiscoveryOutcome =
@@ -33,7 +49,7 @@ export function validateResourceDiscoveryRequest(input: unknown, mode: 'list' | 
 	const v = new Validator()
 	const value = v.object(input, '')
 	if (!value) return { status: 'invalid', diagnostics: v.diagnostics }
-	rejectUnknownKeys(value, ['kinds', 'query', 'cursor', 'limit'], '', v)
+	rejectUnknownKeys(value, ['kinds', 'query', 'resolution', 'cursor', 'limit'], '', v)
 
 	if (Object.hasOwn(value, 'kinds')) {
 		const kinds = v.array(value.kinds, '/kinds')
@@ -45,6 +61,21 @@ export function validateResourceDiscoveryRequest(input: unknown, mode: 'list' | 
 			else if (seen.has(kind))
 				v.issue('discovery.duplicate_kind', path, 'Discovery kinds must not repeat.')
 			else seen.add(kind)
+		})
+	}
+
+	if (Object.hasOwn(value, 'resolution')) {
+		const resolutions = v.array(value.resolution, '/resolution')
+		if (resolutions && resolutions.length === 0)
+			v.issue('discovery.empty_resolution_filter', '/resolution', 'A resolution filter must list at least one resolution.')
+		const seen = new Set<string>()
+		resolutions?.forEach((resolution, index) => {
+			const path = jsonPointer('/resolution', index)
+			if (typeof resolution !== 'string' || !(REVIEW_RESOLUTIONS as readonly string[]).includes(resolution))
+				v.issue('discovery.invalid_resolution', path, 'Resolution filter values must be verified, answered, wont-fix, duplicate, or obsolete.')
+			else if (seen.has(resolution))
+				v.issue('discovery.duplicate_resolution', path, 'Resolution filter values must not repeat.')
+			else seen.add(resolution)
 		})
 	}
 

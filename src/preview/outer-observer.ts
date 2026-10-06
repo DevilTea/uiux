@@ -9,8 +9,19 @@ export type OuterMappingObserverDependencies<Mapping> = Readonly<{
 	onInnerGeometryInvalidated: () => void
 }>
 
+/**
+ * `continuous`: while a highlight or targeting overlay is active, one rAF callback remeasures every
+ * frame (Part 3, accepted). `event-driven`: while pins are the only overlay, remeasure once in the
+ * next frame after a dirty signal, and run the per-frame loop only while an ancestor transition or
+ * animation, or a Workbench-owned animation, is running (2026-10-05 decision 9). Either way there
+ * is at most one remeasurement per frame.
+ */
+export type OuterMappingLoopMode = 'continuous' | 'event-driven'
+
 export type OuterMappingObserverSnapshot = Readonly<{
 	overlayActive: boolean
+	mode: OuterMappingLoopMode
+	animating: boolean
 	mappingDirty: boolean
 	frameScheduled: boolean
 	measurement: 'unknown' | 'available' | 'unavailable'
@@ -28,6 +39,8 @@ export type OuterMappingObserverSnapshot = Readonly<{
 export class OuterMappingObserverController<Mapping> {
 	private readonly deps: OuterMappingObserverDependencies<Mapping>
 	private overlayActive = false
+	private mode: OuterMappingLoopMode = 'continuous'
+	private animating = false
 	private mappingDirty = true
 	private frameHandle?: FrameHandle
 	private measurement: 'unknown' | 'available' | 'unavailable' = 'unknown'
@@ -47,6 +60,21 @@ export class OuterMappingObserverController<Mapping> {
 			return
 		}
 		this.cancelScheduledFrame()
+	}
+
+	setMode(mode: OuterMappingLoopMode): void {
+		this.assertLive()
+		if (this.mode === mode) return
+		this.mode = mode
+		if (mode === 'continuous') this.ensureFrame()
+	}
+
+	/** Event-driven mode only: keep the per-frame loop while an animation may move the iframe. */
+	setAnimating(animating: boolean): void {
+		this.assertLive()
+		if (this.animating === animating) return
+		this.animating = animating
+		if (animating) this.ensureFrame()
 	}
 
 	markMappingDirty(): void {
@@ -73,6 +101,8 @@ export class OuterMappingObserverController<Mapping> {
 	snapshot(): OuterMappingObserverSnapshot {
 		return Object.freeze({
 			overlayActive: this.overlayActive,
+			mode: this.mode,
+			animating: this.animating,
 			mappingDirty: this.mappingDirty,
 			frameScheduled: this.frameHandle !== undefined,
 			measurement: this.measurement,
@@ -107,9 +137,10 @@ export class OuterMappingObserverController<Mapping> {
 			this.mappingDirty = false
 		}
 
-		// Deliberately continue only while a highlight/targeting overlay is active.
-		// This is what tracks transform transitions/animations that emit no per-frame event.
-		this.ensureFrame()
+		// Continuous mode keeps measuring while a highlight/targeting overlay is active: that is what
+		// tracks transform transitions/animations that emit no per-frame event. Event-driven mode
+		// stops here unless an animation is known to be running; the next dirty signal resumes it.
+		if (this.mode === 'continuous' || this.animating) this.ensureFrame()
 	}
 
 	private cancelScheduledFrame(): void {
