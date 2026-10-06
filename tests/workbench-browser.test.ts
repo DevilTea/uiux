@@ -495,8 +495,9 @@ describe('View canvas core (R4)', () => {
 					// Fit returns, and is remembered per View and viewport only for this session.
 					await page.locator('[data-zoom-fit]').click()
 					await page.waitForFunction(() => document.querySelector('[data-zoom-fit]')?.getAttribute('aria-pressed') === 'true')
-					await page.waitForTimeout(250)
-					expect((await canvasMetrics(page)).scale, viewportId).toBeCloseTo(fit.scale, 3)
+					// Fit is pressed at once but the scale tweens back over animation frames; a fixed delay
+					// read it mid-tween when frames were late (a loaded machine), so wait for it to land.
+					await expect.poll(async () => (await canvasMetrics(page)).scale, { message: viewportId, timeout: 5_000 }).toBeCloseTo(fit.scale, 3)
 				}
 				finally { await context.close() }
 			}
