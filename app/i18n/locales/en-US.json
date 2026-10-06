@@ -534,7 +534,6 @@
       "noThemesHint": "No themes in this Workspace. Themes change only the previewed View, not the Workbench."
     },
     "views": {
-      "title": "Views",
       "listLabel": "Views in this Workspace",
       "filterPlaceholder": "Filter Views…",
       "noMatches": "No Views match “{query}”.",

@@ -534,7 +534,6 @@
       "noThemesHint": "此 Workspace 沒有主題。主題只影響預覽的 View，不影響 Workbench。"
     },
     "views": {
-      "title": "View",
       "listLabel": "此 Workspace 中的 View",
       "filterPlaceholder": "篩選 View…",
       "noMatches": "沒有符合「{query}」的 View。",
