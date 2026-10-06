@@ -25,7 +25,7 @@ const view = {
 	spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
 }
 
-async function seedWorkspace(schemaVersion: 1 | 2): Promise<string> {
+async function seedWorkspace(schemaVersion: 1 | 2 | 3): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-handoff-block-'))
 	roots.push(root)
 	await mkdir(join(root, '.uiux'), { recursive: true })
@@ -59,7 +59,7 @@ describe('read-only Handoff assessment on a Workspace that needs migration', () 
 	})
 
 	it('assesses a current Workspace without materializing closure artifacts, which export still stores', async () => {
-		const root = await seedWorkspace(2)
+		const root = await seedWorkspace(3)
 		const app = createWorkspaceApplicationSession(open(root))
 		const assessed = await app.assessHandoffReadiness({ roots: [{ type: 'workspace' }] })
 		expect(assessed.status).toBe('ok')

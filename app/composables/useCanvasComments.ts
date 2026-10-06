@@ -1,13 +1,16 @@
 import { computed, inject, nextTick, onScopeDispose, provide, ref, shallowReactive, shallowRef, watch, type InjectionKey, type Ref } from 'vue'
 import { useI18n, useToast } from '#imports'
-import type {
-	ReviewActor,
-	ReviewAnchor,
-	ReviewDisplayHint,
-	ReviewResolution,
-	ReviewStatus,
-	ReviewThread,
+import {
+	isWidgetAnchor,
+	isWorkspaceAnchor,
+	type ReviewActor,
+	type ReviewDisplayHint,
+	type ReviewResolution,
+	type ReviewStatus,
+	type ReviewThread,
+	type ReviewWidgetAnchor,
 } from '../../src/domain/reviews/schema'
+import { isDismissal } from '../utils/review-inbox'
 import type { Point } from '../../src/preview/protocol/schema'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
 import { actorInitials } from '../utils/widget-inspection'
@@ -41,10 +44,13 @@ export type CommentFilter = Readonly<{ open: boolean; ready: boolean; resolved: 
 export type CommentThread = Readonly<{
 	id: string
 	revision: string
-	anchor: ReviewAnchor
+	/** Always a Widget anchor: Workspace threads never reach a View's canvas or Comments tab. */
+	anchor: ReviewWidgetAnchor
 	variantNames: readonly string[]
 	status: ReviewStatus
 	resolution?: ReviewResolution
+	/** Resolved as obsolete, duplicate or won't do: listed, but never drawn as a pin. */
+	dismissed: boolean
 	displayHint?: ReviewDisplayHint
 	messageCount: number
 	latestActivityAt?: string
@@ -151,7 +157,9 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	const variantNamesOfView = computed(() => new Set(Object.keys((selectedView.value?.resource as { variants?: Record<string, unknown> } | undefined)?.variants ?? {})))
 	const currentVariant = computed(() => contextOptions.value.variants.selected || '')
 
-	const viewSummaries = computed(() => reviews.value.filter(review => review.summary.anchor?.viewId === selectedViewId.value && !!review.summary.anchor))
+	const viewSummaries = computed(() => reviews.value.filter(review => isWidgetAnchor(review.summary.anchor) && review.summary.anchor.viewId === selectedViewId.value))
+	/** Workspace comments that still need an answer: the Comments tab footer links to them (R7). */
+	const workspaceThreadCount = computed(() => reviews.value.filter(review => isWorkspaceAnchor(review.summary.anchor) && review.summary.status !== 'resolved').length)
 
 	const threads = computed<readonly CommentThread[]>(() => viewSummaries.value.map((review) => {
 		const summary = review.summary
@@ -159,7 +167,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		const detail = read && read.revision === review.revision ? read.resource : read?.resource
 		const variantNames = summary.variantNames ?? detail?.variantNames ?? []
 		const ids = widgetIds.value
-		const anchor = summary.anchor!
+		const anchor = summary.anchor as ReviewWidgetAnchor
 		const first = detail?.messages[0]
 		return Object.freeze({
 			id: review.key,
@@ -168,6 +176,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 			variantNames,
 			status: summary.status ?? 'open',
 			...(summary.resolution ? { resolution: summary.resolution } : {}),
+			dismissed: summary.status === 'resolved' && isDismissal(summary.resolution),
 			...(summary.displayHint ? { displayHint: summary.displayHint } : {}),
 			messageCount: summary.messageCount ?? detail?.messages.length ?? 0,
 			...(summary.latestActivityAt ? { latestActivityAt: summary.latestActivityAt } : {}),
@@ -222,6 +231,8 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	/** Resolution is a human act on a Workbench cookie session. */
 	const canResolve = computed(() => !reviewReadOnly.value && access.member.value?.kind === 'human' && access.session.value?.credential === 'session')
 	const member = computed(() => access.member.value)
+	/** The signed-in member's stamped actor id, for "my message" and "my thread". */
+	const me = computed(() => access.member.value ? `member:${access.member.value.id}` : undefined)
 
 	/**
 	 * Why a new thread can't be started (review feedback 8dd59d25): every entry point shows this
@@ -495,10 +506,65 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 			...(reason?.trim() ? { reason: reason.trim() } : {}),
 		}), t('comments.errors.resolveFailed'))
 		if (ok) {
-			announce(t('comments.announce.resolved'))
-			if (!filter.value.resolved && openThreadId.value === threadId) openThreadId.value = undefined
+			announce(t(isDismissal(resolution) ? 'comments.announce.dismissed' : 'comments.announce.resolved'))
+			// A dismissed thread has no pin, so its bubble closes even when resolved threads are shown.
+			if ((!filter.value.resolved || isDismissal(resolution)) && openThreadId.value === threadId) openThreadId.value = undefined
 		}
 		return ok
+	}
+
+	/** The message being edited inline in the bubble; one at a time. */
+	const editingMessage = ref<Readonly<{ threadId: string; messageId: string }>>()
+
+	/** Edit the viewer's own message (scope/edit decisions 11–15); a conflict keeps the editor open. */
+	async function editMessage(threadId: string, messageId: string, body: string): Promise<boolean> {
+		if (!canComment.value || !body.trim()) return false
+		lastError.value = undefined
+		const ok = await mutate(threadId, 'edit', revision => $fetch<MutationResponse>(`/api/reviews/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}`, { method: 'PUT', body: { expectedRevision: revision, body } }), t('comments.errors.editFailed'))
+		if (ok) {
+			editingMessage.value = undefined
+			announce(t('comments.announce.edited'))
+		}
+		return ok
+	}
+
+	/** A retract refused because someone engaged meanwhile (`review.retract_engaged`). */
+	const retractRefused = ref<string>()
+
+	/**
+	 * Delete the viewer's own unengaged thread (retract addendum decision 8): the bubble closes, the
+	 * pin goes, focus returns to the canvas region and the live region says "Comment deleted."
+	 * `not_found` means it is already gone, which counts as done.
+	 */
+	async function retract(threadId: string): Promise<boolean> {
+		const item = threadById.value.get(threadId)
+		if (!item || !canComment.value || busy.value) return false
+		busy.value = 'retract'
+		conflict.value = undefined
+		lastError.value = undefined
+		retractRefused.value = undefined
+		try {
+			await $fetch(`/api/reviews/${encodeURIComponent(threadId)}`, { method: 'DELETE', body: { expectedRevision: item.revision } })
+		}
+		catch (cause) {
+			const details = describeFetchError(cause, t('comments.errors.deleteFailed'))
+			if (details.statusCode !== 404) {
+				if (details.diagnostics.some(diagnostic => diagnostic.code === 'review.retract_engaged')) retractRefused.value = threadId
+				else if (details.statusCode === 409 || details.status === 'conflict') conflict.value = threadId
+				else lastError.value = { threadId, error: details }
+				await refreshReviews()
+				busy.value = undefined
+				return false
+			}
+		}
+		if (openThreadId.value === threadId) openThreadId.value = undefined
+		sessionPoints.delete(threadId)
+		await refreshReviews()
+		busy.value = undefined
+		announce(t('comments.announce.deleted'))
+		// Not to a vanished element: back to the canvas region, once the bubble and its menu are gone.
+		requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-canvas]')?.focus({ preventScroll: true }))
+		return true
 	}
 
 	/** A human submission to `ready-for-review` (secondary, desktop-first): domains plus Evidence refs. */
@@ -577,6 +643,8 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	const pinInputs = computed<readonly PinThreadInput[]>(() => {
 		const inputs: PinThreadInput[] = []
 		for (const item of threads.value) {
+			// Dismissed threads never draw pins, even when the canvas shows resolved threads.
+			if (item.dismissed) continue
 			if (!inFilter(item) && item.id !== openThreadId.value) continue
 			const session = sessionPoints.get(item.id)
 			inputs.push({
@@ -730,6 +798,8 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		if (!filter.value[key]) setFilter(key, true)
 		conflict.value = undefined
 		lastError.value = undefined
+		retractRefused.value = undefined
+		if (editingMessage.value?.threadId !== threadId) editingMessage.value = undefined
 		openThreadId.value = threadId
 		return true
 	}
@@ -792,6 +862,22 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		announce(t('comment.hoverChip', { type: type ?? `#${widgetId}` }))
 	})
 
+	/**
+	 * A stale canvas link (`/views/:id?thread=<id>`) to a thread that no longer exists, for example
+	 * one its author deleted: the View opens with no bubble, a toast says so, and `thread` is dropped
+	 * from the URL (retract addendum decision 3). A thread of another View is not "gone".
+	 */
+	const reviewsLoaded = ref(false)
+	watch(() => workbench.loading.value, (loading) => { if (!loading) reviewsLoaded.value = true }, { immediate: true })
+	watch(() => [thread.value, reviewsLoaded.value, reviews.value.length] as const, ([id, loaded]) => {
+		if (!id || !loaded || workbench.loading.value) return
+		// A full first page may not hold every thread: only a complete listing can prove one is gone.
+		if (reviews.value.length >= 100 || reviews.value.some(review => review.key === id)) return
+		thread.value = undefined
+		toast.add({ title: t('comments.gone'), color: 'neutral', icon: 'i-lucide-message-circle-off' })
+		announce(t('comments.gone'))
+	}, { immediate: true })
+
 	// A View switch drops the composer and every transient point.
 	watch(selectedViewId, () => {
 		composer.value = undefined
@@ -808,6 +894,12 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		canComment,
 		canResolve,
 		member,
+		me,
+		workspaceThreadCount,
+		editingMessage,
+		editMessage,
+		retract,
+		retractRefused,
 		createBlockedReason,
 		toolBlockedReason,
 		explainBlocked,

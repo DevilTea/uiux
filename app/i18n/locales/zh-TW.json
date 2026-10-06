@@ -630,7 +630,8 @@
     "group": {
       "ready": "待審核",
       "open": "未解決",
-      "resolved": "已解決"
+      "resolved": "已解決",
+      "dismissed": "已捨棄"
     },
     "search": "搜尋討論串",
     "filters": "篩選",
@@ -647,7 +648,8 @@
       "any": "不限",
       "find": "尋找…",
       "noOptions": "目前沒有可篩選的項目。",
-      "noDomains": "還沒有提交 Review 的變更。"
+      "noDomains": "還沒有提交 Review 的變更。",
+      "workspace": "Workspace"
     },
     "openInCanvas": "在畫布中開啟",
     "empty": {
@@ -697,12 +699,12 @@
     "selectHint": "按 J 或 K 在佇列中移動。",
     "selectHintNoKeys": "從佇列中選擇討論串，即可在這裡閱讀。",
     "threadMissing": "這個 Workspace 中沒有這個討論串。",
-    "threadMissingHint": "連結可能來自其他 Workspace，或討論串 ID 不完整。",
+    "threadMissingHint": "留言可能已被作者刪除、連結可能來自其他 Workspace，或討論串 ID 不完整。",
     "backToQueue": "回到佇列",
     "unreadableTitle": "無法讀取這個討論串",
     "viewGone": "這個討論串的 View 已不存在。",
-    "viewGoneHint": "可以標記為已過時，或保留以供記錄。",
-    "resolveObsolete": "標記為已過時",
+    "viewGoneHint": "可以「不再適用」捨棄，或保留以供記錄。",
+    "resolveObsolete": "捨棄：不再適用",
     "reanchorOnCanvas": "在畫布上重新錨定",
     "acceptResolve": "接受並解決",
     "readOnly": "你可以閱讀這個討論串，但無法回覆或變更狀態。",
@@ -714,7 +716,9 @@
     },
     "announce": {
       "replied": "已送出回覆。",
-      "resolved": "討論串已以「{resolution}」解決。"
+      "resolved": "討論串已以「{resolution}」解決。",
+      "dismissed": "討論串已以「{resolution}」捨棄。",
+      "created": "已新增留言。"
     },
     "timeline": {
       "accepted": "已接受",
@@ -726,8 +730,22 @@
       "verifiedChip": "已驗證・提交 {id}",
       "resolvedChip": "已解決・{resolution}",
       "by": "由 {name}",
-      "scopeChanged": "Variant 範圍：{from} → {to}"
-    }
+      "scopeChanged": "Variant 範圍：{from} → {to}",
+      "dismissedChip": "已捨棄・{resolution}"
+    },
+    "dismissedCount": "{n} 則已捨棄",
+    "newComment": "新增留言",
+    "compose": {
+      "title": "新增留言",
+      "description": "針對整個產品或某個 View 留言。",
+      "where": "位置",
+      "workspace": "Workspace",
+      "workspaceHint": "關於整個產品",
+      "view": "此 View：{name}",
+      "viewHint": "關於整個 View",
+      "message": "留言內容"
+    },
+    "workspaceRow": "Workspace"
   },
   "timeline": {
     "submitted": "已提交 Review",
@@ -1201,11 +1219,14 @@
       "reviewReady": "{view} 上有一則 Review 待審核。",
       "reviewOpenAt": "{view} 的 {widget} 上有一則 Review 未解決。",
       "reviewReadyAt": "{view} 的 {widget} 上有一則 Review 待審核。",
-      "reviewDeclined": "{view} 上有一則 Review 以「不修正」解決：所要求的變更已被婉拒。",
+      "reviewDeclined": "{view} 上有一則 Review 以「不處理」解決：所要求的變更已被婉拒。",
       "evidenceStale": "{view} 只有過時的 Evidence，請重新擷取。",
       "evidenceMissing": "{view} 還沒有 Evidence。",
       "evidenceIncomplete": "{view} 的 Evidence 不完整。",
-      "assetMissing": "無法讀取範圍內的一個 Asset。"
+      "assetMissing": "無法讀取範圍內的一個 Asset。",
+      "reviewOpenWorkspace": "有一則 Workspace 留言未解決，會阻擋所有 Handoff。",
+      "reviewReadyWorkspace": "有一則 Workspace 留言待審核，會阻擋所有 Handoff。",
+      "reviewDeclinedWorkspace": "有一則 Workspace 留言以「不處理」解決：所要求的變更已被婉拒。"
     }
   },
   "activity": {
@@ -1221,7 +1242,8 @@
     "someone": "某人",
     "emptyTitle": "還沒有 Review 動態",
     "emptyDescription": "任何 View 上的留言、提交與解決都會顯示在這裡。",
-    "loadFailed": "無法載入動態。"
+    "loadFailed": "無法載入動態。",
+    "workspace": "Workspace"
   },
   "workspaceMenu": {
     "label": "Workspace",
@@ -1246,7 +1268,8 @@
     "zoomIn": "放大",
     "zoomOut": "縮小",
     "selectTool": "選取工具",
-    "interactTool": "互動工具"
+    "interactTool": "互動工具",
+    "commentOnWorkspace": "對 Workspace 留言"
   },
   "shortcuts": {
     "title": "鍵盤快捷鍵",
@@ -1422,7 +1445,10 @@
       "reanchorFailed": "無法重新錨定討論串。",
       "moveFailed": "無法移動圖釘。",
       "promoteFailed": "無法升級為 Decision。",
-      "copyFailed": "無法複製到剪貼簿。"
+      "copyFailed": "無法複製到剪貼簿。",
+      "editFailed": "無法儲存編輯。",
+      "deleteEngaged": "已有人回應，無法刪除這則留言。請改用「捨棄」。",
+      "deleteFailed": "無法刪除留言。"
     },
     "announce": {
       "created": "已在 {id} 新增留言。",
@@ -1433,7 +1459,10 @@
       "modeOff": "已離開留言模式。",
       "composing": "正在 {id} 上留言。輸入內容後按 Command 或 Control 加 Enter。",
       "composingView": "正在此 View 上留言。輸入內容後按 Command 或 Control 加 Enter。",
-      "createdOnView": "已在此 View 新增留言。"
+      "createdOnView": "已在此 View 新增留言。",
+      "dismissed": "討論串已捨棄。",
+      "edited": "已編輯留言。",
+      "deleted": "已刪除留言。"
     },
     "reason": {
       "offscreen": "已捲動到 View 的可視範圍外。",
@@ -1446,16 +1475,17 @@
     "resolution": {
       "verified": "已驗證",
       "answered": "已回答",
-      "wont-fix": "不修正",
+      "wont-fix": "不處理",
       "duplicate": "重複",
-      "obsolete": "已過時"
+      "obsolete": "不再適用"
     },
     "group": {
       "ready": "待審核",
       "open": "未解決",
       "unplaced": "無法定位",
       "resolved": "已解決",
-      "view": "View"
+      "view": "View",
+      "dismissed": "已捨棄"
     },
     "staleWord": "找不到 Variant",
     "unknownAuthor": "未知的作者",
@@ -1477,7 +1507,7 @@
     "copyThreadId": "複製討論串 ID",
     "more": "更多",
     "widgetGone": "這個 Widget 已不在 View 中。",
-    "widgetGoneHint": "原本錨定在 {id}。請重新錨定，或標記為已過時。",
+    "widgetGoneHint": "原本錨定在 {id}。請重新錨定，或以「不再適用」捨棄。",
     "widgetRemoved": "Widget 已從 View 移除",
     "switchTo": "切換到 {variant}",
     "conflict": "這個討論串已有變更。",
@@ -1505,7 +1535,35 @@
     "commentOnViewShort": "對 View 留言",
     "commentOnViewHint": "針對整個 View 留言，不需選取 Widget",
     "viewTarget": "整個 View",
-    "pinLabelView": "{name} 在此 View 上的留言，{status}，{n} 則訊息 | {name} 在此 View 上的留言，{status}，{n} 則訊息"
+    "pinLabelView": "{name} 在此 View 上的留言，{status}，{n} 則訊息 | {name} 在此 View 上的留言，{status}，{n} 則訊息",
+    "resolveGroup": "解決",
+    "dismissGroup": "捨棄",
+    "dismissedAs": "已捨棄・{resolution}・{name}",
+    "edit": "編輯",
+    "messageActions": "留言動作",
+    "edited": "已編輯",
+    "editedLabel": "於 {time} 編輯。顯示先前版本",
+    "editHistory": "編輯紀錄",
+    "editCurrent": "目前版本",
+    "editOriginal": "原始版本",
+    "editMessage": "編輯留言",
+    "editSave": "儲存",
+    "frozen": {
+      "submission": "無法編輯：這則留言之後已有提交。請改用回覆。",
+      "resolution": "無法編輯：這則留言之後已有解決紀錄。請改用回覆。"
+    },
+    "editKeys": "在空白的回覆框按上方向鍵，可編輯你的上一則留言。",
+    "delete": "刪除留言",
+    "deleteEmpty": "刪除空白討論串",
+    "deleteConfirmTitle": "要刪除這則留言嗎？",
+    "deleteConfirmBody": "留言會對所有人移除，且無法復原。",
+    "deleteConfirm": "刪除",
+    "deleteCancel": "取消",
+    "gone": "這則留言已不存在。",
+    "workspaceTarget": "Workspace",
+    "workspaceComment": "Workspace 留言",
+    "workspaceFooter": "沒有 Workspace 留言 | {n} 則 Workspace 留言 | {n} 則 Workspace 留言",
+    "workspaceFooterHint": "關於整個產品的留言位於 Reviews。"
   },
   "firstRun": {
     "headline": "這個 Workspace 還沒有 View",

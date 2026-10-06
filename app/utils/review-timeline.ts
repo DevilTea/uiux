@@ -1,9 +1,11 @@
-import type {
-	ReviewActor,
-	ReviewAnchor,
-	ReviewEvidenceRef,
-	ReviewResolution,
-	ReviewThread,
+import {
+	messageEditedAt,
+	type ReviewActor,
+	type ReviewAnchor,
+	type ReviewEvidenceRef,
+	type ReviewMessageEdit,
+	type ReviewResolution,
+	type ReviewThread,
 } from '../../src/domain/reviews/schema'
 
 /**
@@ -16,7 +18,18 @@ import type {
  * marks the pending submission "Not accepted" (direct-resolve decision 4).
  */
 export type ReviewTimelineItem =
-	| Readonly<{ kind: 'message'; id: string; at: string; actor: ReviewActor; body: string }>
+	| Readonly<{
+		kind: 'message'
+		id: string
+		at: string
+		actor: ReviewActor
+		/** The current text. */
+		body: string
+		/** Earlier versions, oldest first (append-only); empty when never edited. */
+		edits: readonly ReviewMessageEdit[]
+		/** Derived from `edits[]`: when the text last changed. An edit keeps the message's position. */
+		editedAt?: string
+	}>
 	| Readonly<{
 		kind: 'submission'
 		id: string
@@ -75,8 +88,10 @@ export function buildReviewTimeline(thread: ReviewThread): readonly ReviewTimeli
 	const lastSubmission = thread.submissions.at(-1)
 
 	const items: ReviewTimelineItem[] = []
-	for (const message of thread.messages)
-		items.push({ kind: 'message', id: message.id, at: message.at, actor: message.actor, body: message.body })
+	for (const message of thread.messages) {
+		const editedAt = messageEditedAt(message)
+		items.push({ kind: 'message', id: message.id, at: message.at, actor: message.actor, body: message.body, edits: message.edits ?? [], ...(editedAt ? { editedAt } : {}) })
+	}
 	for (const submission of thread.submissions) {
 		items.push({
 			kind: 'submission',
@@ -122,7 +137,21 @@ export function buildReviewTimeline(thread: ReviewThread): readonly ReviewTimeli
 	return items.sort((a, b) => time(a.at) - time(b.at))
 }
 
-/** The newest item's actor: who moved the thread last. */
+/** The newest item's actor: who moved the thread last. A message edit counts (it is activity). */
 export function latestTimelineActor(thread: ReviewThread): ReviewActor | undefined {
-	return buildReviewTimeline(thread).at(-1)?.actor
+	const items = buildReviewTimeline(thread)
+	let latest = items.at(-1) ? { actor: items.at(-1)!.actor, at: time(items.at(-1)!.at) } : undefined
+	for (const item of items) {
+		if (item.kind !== 'message') continue
+		for (const edit of item.edits) if (!latest || time(edit.at) >= latest.at) latest = { actor: edit.actor, at: time(edit.at) }
+	}
+	return latest?.actor
+}
+
+/** Earlier versions of a message, newest first, each with the time it was replaced (Edit history). */
+export function messageVersions(item: Readonly<{ at: string; body: string; edits: readonly ReviewMessageEdit[] }>): readonly Readonly<{ body: string; at: string; current: boolean }>[] {
+	// Version i was written at the message time (i = 0) or at the edit that produced it.
+	const versions = item.edits.map((edit, index) => ({ body: edit.previousBody, at: index === 0 ? item.at : item.edits[index - 1]!.at, current: false }))
+	versions.push({ body: item.body, at: item.edits.at(-1)?.at ?? item.at, current: true })
+	return versions.reverse()
 }

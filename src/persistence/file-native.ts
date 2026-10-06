@@ -37,6 +37,8 @@ import {
 export type PersistenceFaultPoint =
 	| 'file.before_rename'
 	| 'file.after_rename'
+	| 'file.before_remove'
+	| 'file.after_remove'
 	| 'artifact.before_publish'
 	| 'artifact.after_publish'
 	| 'transaction.before_apply'
@@ -123,6 +125,18 @@ export type AtomicReviewViewPromotionResult =
 	  }>
 
 type FileChange = Readonly<{ path: string; bytes?: Uint8Array }>
+
+/** Reads available to a delete guard while the exclusive persistence lock is held. */
+export type DeleteGuardContext = Readonly<{
+	/** Parsed JSON of another canonical file, or undefined when it does not exist. */
+	readJsonUnlocked(relativePath: string): Promise<unknown>
+}>
+
+export type DeleteIfRevisionResult<Refusal> =
+	| Readonly<{ status: 'deleted' }>
+	| Readonly<{ status: 'not_found' }>
+	| Readonly<{ status: 'conflict'; currentRevision: ResourceRevision }>
+	| Readonly<{ status: 'refused'; refusal: Refusal }>
 type TransactionJournal = Readonly<{ changes: readonly Readonly<{ path: string; existed: boolean }>[] }>
 /** `schemaVersion` is the selected Workspace manifest version every canonical file is decoded under. */
 type JsonValidator = (resource: unknown, filename: string, schemaVersion: number) => readonly Diagnostic[]
@@ -588,6 +602,21 @@ export class FileNativePersistence {
 		finally {
 			await fs.rm(temporaryPath, { force: true }).catch(() => undefined)
 		}
+	}
+
+	/** Removes one canonical file with a single atomic unlink, then fsyncs its directory. */
+	async removeUnlocked(relativePath: string): Promise<void> {
+		const absolutePath = resolveWorkspacePath(this.root, relativePath)
+		await assertSafePath(this.root, relativePath, false)
+		await this.hitFault('file.before_remove', { path: relativePath })
+		try {
+			await fs.unlink(absolutePath)
+		}
+		catch (cause) {
+			throw new PersistenceError('persistence.write_failed', `Removing ${relativePath} failed; the canonical file was left in place.`, { cause })
+		}
+		await this.hitFault('file.after_remove', { path: relativePath })
+		await syncDirectory(dirname(absolutePath))
 	}
 
 	/** Content-addressed blobs use an atomic no-replace link so identities stay immutable. */
@@ -1107,6 +1136,39 @@ export class JsonResourceRepository<Key extends string, Resource> implements Mut
 			const bytes = this.persistence.serializeJson(input.resource, path)
 			await this.persistence.atomicWriteUnlocked(path, bytes, currentBytes)
 			return { ok: true, revision: revisionForBytes(bytes) }
+		})
+	}
+
+	/**
+	 * The store's only whole-resource delete (accepted Review retract decision 7, used for Reviews).
+	 * Under the cross-process exclusive lock it checks writability, compares the content-derived
+	 * revision, checks embedded identity and runs the domain `guard` on exactly those bytes, then
+	 * unlinks the file and fsyncs its directory. One unlink is atomic: a crash leaves the old file or
+	 * no file, so there is no journal and no backup copy of the withdrawn content.
+	 */
+	async deleteIfRevision<Refusal>(input: Readonly<{
+		key: Key
+		expectedRevision: ResourceRevision
+		guard?: (resource: Resource, context: DeleteGuardContext) => Refusal | undefined | Promise<Refusal | undefined>
+	}>): Promise<DeleteIfRevisionResult<Refusal>> {
+		return this.persistence.withLock(async () => {
+			await this.persistence.assertWritableUnlocked()
+			const path = this.pathFor(input.key)
+			const currentBytes = await this.persistence.readOptionalBytesUnlocked(path)
+			if (!currentBytes) return { status: 'not_found' }
+			const currentRevision = revisionForBytes(currentBytes)
+			if (input.expectedRevision !== currentRevision) return { status: 'conflict', currentRevision }
+			const current = parseJsonBytes(currentBytes, path)
+			assertEmbeddedIdentity(input.key, current, this.identityField, basename(path))
+			const refusal = await input.guard?.(current as Resource, {
+				readJsonUnlocked: async (relativePath) => {
+					const bytes = await this.persistence.readOptionalBytesUnlocked(relativePath)
+					return bytes ? parseJsonBytes(bytes, relativePath) : undefined
+				},
+			})
+			if (refusal !== undefined) return { status: 'refused', refusal }
+			await this.persistence.removeUnlocked(path)
+			return { status: 'deleted' }
 		})
 	}
 }

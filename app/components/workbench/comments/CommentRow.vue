@@ -49,6 +49,7 @@ const canvas = computed<{ icon: string; text: string } | undefined>(() => {
 const statusIcon = computed(() => {
 	if (props.unplaceable) return { name: 'i-lucide-triangle-alert', class: 'text-warning' }
 	if (props.item.status === 'ready-for-review') return { name: 'i-lucide-eye', class: 'text-info' }
+	if (props.item.dismissed) return { name: 'i-lucide-circle-slash', class: 'text-muted' }
 	if (props.item.status === 'resolved') return { name: 'i-lucide-circle-check', class: 'text-success' }
 	return { name: 'i-lucide-circle-dot', class: 'text-annotation' }
 })

@@ -5,6 +5,7 @@ import type { HandoffBlockingDiagnostic } from '../../../src/domain/handoff/sche
 import { useWorkbench } from '../../composables/useWorkbench'
 import { handoffDiagnosticSubject } from '../../utils/readiness'
 import { viewLocation } from '../../utils/workbench-routes'
+import { isWidgetAnchor, isWorkspaceAnchor } from '../../../src/domain/reviews/schema'
 import WbErrorDetails from '../workbench/WbErrorDetails.vue'
 
 /**
@@ -32,20 +33,25 @@ function viewName(viewId: string | undefined): string {
 
 const rows = computed<Row[]>(() => props.diagnostics.map((diagnostic, index) => {
 	const subject = handoffDiagnosticSubject(diagnostic)
-	const anchor = subject.reviewId ? reviewAnchors.value.get(subject.reviewId) : undefined
+	const reviewAnchor = subject.reviewId ? reviewAnchors.value.get(subject.reviewId) : undefined
+	const anchor = isWidgetAnchor(reviewAnchor) ? reviewAnchor : undefined
+	// A Workspace thread is in every closure (O1); it says so, and links to `/reviews?thread=<id>`.
+	const workspaceThread = isWorkspaceAnchor(reviewAnchor) || /^Workspace-scoped Review thread/.test(diagnostic.message)
 	const viewId = subject.viewId ?? anchor?.viewId
 	const view = viewName(viewId)
 	let sentence = diagnostic.message
 	switch (diagnostic.code) {
 		case 'handoff.unresolved_review_thread': {
 			const ready = /ready-for-review/.test(diagnostic.message)
-			sentence = anchor?.widgetId
-				? t(ready ? 'ready.diag.reviewReadyAt' : 'ready.diag.reviewOpenAt', { view, widget: anchor.widgetId })
-				: t(ready ? 'ready.diag.reviewReady' : 'ready.diag.reviewOpen', { view })
+			sentence = workspaceThread
+				? t(ready ? 'ready.diag.reviewReadyWorkspace' : 'ready.diag.reviewOpenWorkspace')
+				: anchor?.widgetId
+					? t(ready ? 'ready.diag.reviewReadyAt' : 'ready.diag.reviewOpenAt', { view, widget: anchor.widgetId })
+					: t(ready ? 'ready.diag.reviewReady' : 'ready.diag.reviewOpen', { view })
 			break
 		}
 		case 'handoff.review_declined':
-			sentence = t('ready.diag.reviewDeclined', { view })
+			sentence = workspaceThread ? t('ready.diag.reviewDeclinedWorkspace') : t('ready.diag.reviewDeclined', { view })
 			break
 		case 'handoff.stale_view_evidence':
 			sentence = t('ready.diag.evidenceStale', { view })
@@ -60,9 +66,11 @@ const rows = computed<Row[]>(() => props.diagnostics.map((diagnostic, index) => 
 			sentence = t('ready.diag.assetMissing')
 			break
 	}
-	const to = subject.reviewId && anchor
-		? viewLocation(anchor.viewId, { widget: anchor.widgetId, thread: subject.reviewId })
-		: viewId && viewNames.value.has(viewId) ? viewLocation(viewId, { panel: 'readiness' }) : undefined
+	const to = subject.reviewId && workspaceThread
+		? { path: '/reviews', query: { thread: subject.reviewId } }
+		: subject.reviewId && anchor
+			? viewLocation(anchor.viewId, { widget: anchor.widgetId, thread: subject.reviewId })
+			: viewId && viewNames.value.has(viewId) ? viewLocation(viewId, { panel: 'readiness' }) : undefined
 	return { key: `${diagnostic.code}:${diagnostic.path ?? ''}:${index}`, sentence, code: diagnostic.code, ...(to ? { to } : {}) }
 }))
 

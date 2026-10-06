@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from '#imports'
 import { useReviewInbox } from '../../composables/useReviewInbox'
-import { actorKey, ANCHOR_STATES, VIEW_WIDE_SCOPE, type AnchorState, type InboxFilter } from '../../utils/review-inbox'
+import { actorKey, ANCHOR_STATES, VIEW_WIDE_SCOPE, WORKSPACE_VIEW_TOKEN, type AnchorState, type InboxFilter } from '../../utils/review-inbox'
 
 /**
  * The structured filters of the Reviews inbox (brief d, section 6): View, Variant scope, author,
@@ -18,10 +18,14 @@ function byLabel(a: Option, b: Option): number {
 	return a.label.localeCompare(b.label)
 }
 
+/** Views with threads, after the Workspace option (`view=workspace`) for Workspace-scoped threads. */
 const viewOptions = computed<Option[]>(() => {
 	const seen = new Map<string, string>()
-	for (const item of inbox.threads.value) if (item.anchor) seen.set(item.anchor.viewId, item.viewName ?? t('inbox.viewMissing'))
-	return [...seen].map(([value, label]) => ({ label, value })).sort(byLabel)
+	for (const item of inbox.threads.value) if (item.viewId) seen.set(item.viewId, item.viewName ?? t('inbox.viewMissing'))
+	return [
+		{ label: t('inbox.filter.workspace'), value: WORKSPACE_VIEW_TOKEN, icon: 'i-lucide-globe' },
+		...[...seen].map(([value, label]) => ({ label, value })).sort(byLabel),
+	]
 })
 
 const scopeOptions = computed<Option[]>(() => {

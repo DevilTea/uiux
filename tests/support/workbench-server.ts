@@ -3,6 +3,8 @@ import { cp, mkdtemp, rm } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 
+import { FileNativePersistence } from '../../src/persistence/file-native'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../../src/product/workspace-schema'
 import { provisionToken, sessionCookieFor } from './access'
 
 export type WorkbenchServer = Readonly<{
@@ -45,6 +47,9 @@ async function freePort(): Promise<number> {
 export async function startWorkbenchServer(): Promise<WorkbenchServer> {
 	const workspaceRoot = await mkdtemp(join(REPOSITORY_ROOT, '.uiux-browser-test-'))
 	await cp(WORKBENCH_FIXTURE_WORKSPACE, workspaceRoot, { recursive: true })
+	// The frozen fixture stays at the schemaVersion it was captured at; the private copy is migrated
+	// to the current product schema the way an operator would (`uiux migrate`), never hand-edited.
+	await new FileNativePersistence({ root: workspaceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).migrateWorkspace()
 	const token = await provisionToken(workspaceRoot, { nickname: 'tester', kind: 'human', role: 'owner' })
 	const port = await freePort()
 	const child: ChildProcess = spawn(process.execPath, [join(REPOSITORY_ROOT, '.output', 'server', 'index.mjs')], {

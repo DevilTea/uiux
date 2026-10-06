@@ -630,7 +630,8 @@
     "group": {
       "ready": "Ready for review",
       "open": "Open",
-      "resolved": "Resolved"
+      "resolved": "Resolved",
+      "dismissed": "Dismissed"
     },
     "search": "Search threads",
     "filters": "Filters",
@@ -647,7 +648,8 @@
       "any": "Any",
       "find": "Find…",
       "noOptions": "Nothing to filter by yet.",
-      "noDomains": "No changes submitted for review yet."
+      "noDomains": "No changes submitted for review yet.",
+      "workspace": "Workspace"
     },
     "openInCanvas": "Open in canvas",
     "empty": {
@@ -697,12 +699,12 @@
     "selectHint": "Press J or K to move through the queue.",
     "selectHintNoKeys": "Pick a thread in the queue to read it here.",
     "threadMissing": "This thread isn't in this Workspace.",
-    "threadMissingHint": "The link may come from another Workspace, or the thread ID is incomplete.",
+    "threadMissingHint": "It may have been deleted by its author, the link may come from another Workspace, or the thread ID is incomplete.",
     "backToQueue": "Back to the queue",
     "unreadableTitle": "Can't read this thread",
     "viewGone": "This thread's View no longer exists.",
-    "viewGoneHint": "Resolve it as obsolete, or keep it open for the record.",
-    "resolveObsolete": "Resolve as obsolete",
+    "viewGoneHint": "Dismiss it as no longer relevant, or keep it open for the record.",
+    "resolveObsolete": "Dismiss: no longer relevant",
     "reanchorOnCanvas": "Re-anchor on the canvas",
     "acceptResolve": "Accept and resolve",
     "readOnly": "You can read this thread, but not reply to it or change its status.",
@@ -714,7 +716,9 @@
     },
     "announce": {
       "replied": "Reply posted.",
-      "resolved": "Thread resolved as {resolution}."
+      "resolved": "Thread resolved as {resolution}.",
+      "dismissed": "Thread dismissed as {resolution}.",
+      "created": "Comment added."
     },
     "timeline": {
       "accepted": "Accepted",
@@ -726,8 +730,22 @@
       "verifiedChip": "Verified · submission {id}",
       "resolvedChip": "Resolved · {resolution}",
       "by": "by {name}",
-      "scopeChanged": "Variant scope: {from} → {to}"
-    }
+      "scopeChanged": "Variant scope: {from} → {to}",
+      "dismissedChip": "Dismissed · {resolution}"
+    },
+    "dismissedCount": "{n} dismissed",
+    "newComment": "New comment",
+    "compose": {
+      "title": "New comment",
+      "description": "Comment on the product as a whole, or on a View.",
+      "where": "Where",
+      "workspace": "Workspace",
+      "workspaceHint": "About the product as a whole",
+      "view": "This View: {name}",
+      "viewHint": "About the View as a whole",
+      "message": "Comment"
+    },
+    "workspaceRow": "Workspace"
   },
   "timeline": {
     "submitted": "Submitted for review",
@@ -1201,11 +1219,14 @@
       "reviewReady": "A Review on {view} is waiting for review.",
       "reviewOpenAt": "A Review on {widget} in {view} is open.",
       "reviewReadyAt": "A Review on {widget} in {view} is waiting for review.",
-      "reviewDeclined": "A Review on {view} was resolved as won't fix: the requested change was declined.",
+      "reviewDeclined": "A Review on {view} was resolved as won't do: the requested change was declined.",
       "evidenceStale": "{view} only has stale Evidence. Capture it again.",
       "evidenceMissing": "{view} has no Evidence yet.",
       "evidenceIncomplete": "{view} has incomplete Evidence.",
-      "assetMissing": "An Asset in the closure couldn't be read."
+      "assetMissing": "An Asset in the closure couldn't be read.",
+      "reviewOpenWorkspace": "A Workspace comment is open. It blocks every Handoff.",
+      "reviewReadyWorkspace": "A Workspace comment is waiting for review. It blocks every Handoff.",
+      "reviewDeclinedWorkspace": "A Workspace comment was resolved as won't do: the requested change was declined."
     }
   },
   "activity": {
@@ -1221,7 +1242,8 @@
     "someone": "Someone",
     "emptyTitle": "No Review activity yet",
     "emptyDescription": "Comments, submissions and resolutions on any View show up here.",
-    "loadFailed": "Couldn't load activity."
+    "loadFailed": "Couldn't load activity.",
+    "workspace": "the Workspace"
   },
   "workspaceMenu": {
     "label": "Workspace",
@@ -1246,7 +1268,8 @@
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",
     "selectTool": "Select tool",
-    "interactTool": "Interact tool"
+    "interactTool": "Interact tool",
+    "commentOnWorkspace": "Comment on Workspace"
   },
   "shortcuts": {
     "title": "Keyboard shortcuts",
@@ -1422,7 +1445,10 @@
       "reanchorFailed": "Couldn't re-anchor the thread.",
       "moveFailed": "Couldn't move the pin.",
       "promoteFailed": "Couldn't promote to a Decision.",
-      "copyFailed": "Couldn't copy to the clipboard."
+      "copyFailed": "Couldn't copy to the clipboard.",
+      "editFailed": "Couldn't save the edit.",
+      "deleteEngaged": "Someone has already responded, so this comment can't be deleted. Dismiss it instead.",
+      "deleteFailed": "Couldn't delete the comment."
     },
     "announce": {
       "created": "Comment added on {id}.",
@@ -1433,7 +1459,10 @@
       "modeOff": "Comment mode off.",
       "composing": "Commenting on {id}. Type, then press Command or Control plus Enter.",
       "composingView": "Commenting on this View. Type, then press Command or Control plus Enter.",
-      "createdOnView": "Comment added on this View."
+      "createdOnView": "Comment added on this View.",
+      "dismissed": "Thread dismissed.",
+      "edited": "Message edited.",
+      "deleted": "Comment deleted."
     },
     "reason": {
       "offscreen": "Scrolled out of view in the View.",
@@ -1446,16 +1475,17 @@
     "resolution": {
       "verified": "Verified",
       "answered": "Answered",
-      "wont-fix": "Won't fix",
+      "wont-fix": "Won't do",
       "duplicate": "Duplicate",
-      "obsolete": "Obsolete"
+      "obsolete": "No longer relevant"
     },
     "group": {
       "ready": "Ready for review",
       "open": "Open",
       "unplaced": "Can't be placed",
       "resolved": "Resolved",
-      "view": "View"
+      "view": "View",
+      "dismissed": "Dismissed"
     },
     "staleWord": "Variant missing",
     "unknownAuthor": "Unknown author",
@@ -1477,7 +1507,7 @@
     "copyThreadId": "Copy thread ID",
     "more": "More",
     "widgetGone": "This Widget no longer exists in the View.",
-    "widgetGoneHint": "Last anchored to {id}. Re-anchor it, or resolve it as obsolete.",
+    "widgetGoneHint": "Last anchored to {id}. Re-anchor it, or dismiss it as no longer relevant.",
     "widgetRemoved": "Widget removed from the View",
     "switchTo": "Switch to {variant}",
     "conflict": "This thread changed.",
@@ -1505,7 +1535,35 @@
     "commentOnViewShort": "Comment on View",
     "commentOnViewHint": "Comment on the View as a whole, without picking a Widget",
     "viewTarget": "Whole View",
-    "pinLabelView": "Comment by {name} on this View, {status}, {n} message | Comment by {name} on this View, {status}, {n} messages"
+    "pinLabelView": "Comment by {name} on this View, {status}, {n} message | Comment by {name} on this View, {status}, {n} messages",
+    "resolveGroup": "Resolve",
+    "dismissGroup": "Dismiss",
+    "dismissedAs": "Dismissed · {resolution} · by {name}",
+    "edit": "Edit",
+    "messageActions": "Message actions",
+    "edited": "edited",
+    "editedLabel": "Edited {time}. Show earlier versions",
+    "editHistory": "Edit history",
+    "editCurrent": "Current",
+    "editOriginal": "Original",
+    "editMessage": "Edit message",
+    "editSave": "Save",
+    "frozen": {
+      "submission": "Can't edit: a submission came after this message. Reply instead.",
+      "resolution": "Can't edit: a resolution came after this message. Reply instead."
+    },
+    "editKeys": "Up arrow in an empty reply box edits your last message.",
+    "delete": "Delete comment",
+    "deleteEmpty": "Delete empty thread",
+    "deleteConfirmTitle": "Delete this comment?",
+    "deleteConfirmBody": "It will be removed for everyone and can't be restored.",
+    "deleteConfirm": "Delete",
+    "deleteCancel": "Cancel",
+    "gone": "That comment no longer exists.",
+    "workspaceTarget": "Workspace",
+    "workspaceComment": "Workspace comment",
+    "workspaceFooter": "No Workspace comments | {n} Workspace comment | {n} Workspace comments",
+    "workspaceFooterHint": "Comments about the product as a whole live in Reviews."
   },
   "firstRun": {
     "headline": "This Workspace has no Views yet",

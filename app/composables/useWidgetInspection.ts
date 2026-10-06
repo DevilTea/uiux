@@ -1,5 +1,5 @@
 import { computed, ref, shallowRef, watch } from 'vue'
-import type { ReviewThread } from '../../src/domain/reviews/schema'
+import { anchorViewId, anchorWidgetId, type ReviewThread } from '../../src/domain/reviews/schema'
 import {
 	findIrNode,
 	variantDiagnostics,
@@ -95,7 +95,7 @@ export function useWidgetInspection(workbench: Workbench) {
 	const threadSummaries = computed(() => {
 		if (!node.value) return []
 		const id = node.value.id
-		return reviews.value.filter(review => review.summary.anchor?.viewId === selectedViewId.value && review.summary.anchor?.widgetId === id)
+		return reviews.value.filter(review => anchorViewId(review.summary.anchor) === selectedViewId.value && anchorWidgetId(review.summary.anchor) === id)
 	})
 
 	const threadDetails = shallowRef<ReadonlyMap<string, ReviewRead>>(new Map())

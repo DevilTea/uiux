@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { useI18n } from '#imports'
-import type { ReviewActor, ReviewThread } from '../../../src/domain/reviews/schema'
+import { isWidgetAnchor, type ReviewActor, type ReviewThread } from '../../../src/domain/reviews/schema'
 import { useReadiness } from '../../composables/useReadiness'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbench } from '../../composables/useWorkbench'
@@ -50,9 +50,10 @@ function excerpt(text: string): string {
 }
 
 function threadEvents(thread: ReviewThread): ActivityItem[] {
-	const view = viewNames.value.get(thread.anchor.viewId) ?? t('ready.diag.unknownView')
-	const to = viewLocation(thread.anchor.viewId, { widget: thread.anchor.widgetId, thread: thread.id })
-	const where = `${view} · #${thread.anchor.widgetId}`
+	// A Workspace thread lives only in Reviews: its link is `/reviews?thread=<id>`.
+	const anchor = thread.anchor
+	const to = isWidgetAnchor(anchor) ? viewLocation(anchor.viewId, { widget: anchor.widgetId, thread: thread.id }) : { path: '/reviews', query: { thread: thread.id } }
+	const where = isWidgetAnchor(anchor) ? `${viewNames.value.get(anchor.viewId) ?? t('ready.diag.unknownView')} · #${anchor.widgetId}` : t('activity.workspace')
 	const out: ActivityItem[] = []
 	thread.messages.forEach((message, index) => out.push({
 		value: `${thread.id}:m:${message.id}`,

@@ -1,6 +1,6 @@
 import type { ViewResource } from '../../src/domain/views/schema'
 import type { WorkspaceManifest } from '../../src/domain/workspace/schema'
-import type { ReviewDisplayHint, ReviewResolution } from '../../src/domain/reviews/schema'
+import type { ReviewAnchor, ReviewDisplayHint, ReviewResolution } from '../../src/domain/reviews/schema'
 
 export type Diagnostic = Readonly<{ code: string; path: string; message: string }>
 
@@ -38,7 +38,8 @@ export type ReviewSummary = Readonly<{
 	revision: string
 	diagnosticCount: number
 	summary: {
-		anchor?: Readonly<{ viewId: string; widgetId: string }>
+		/** The Widget arm, or the Workspace arm `{ scope: 'workspace' }` (schemaVersion >= 3). */
+		anchor?: ReviewAnchor
 		/** Anchor Variant scope; `[]` means View-wide. */
 		variantNames?: readonly string[]
 		/** Non-authoritative pin placement, normalized 0..1 within the anchored Widget's rect. */

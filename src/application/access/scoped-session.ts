@@ -12,10 +12,12 @@ import type { CreateLocaleCommand, LocaleAuthoringResult, UpdateLocaleCommand } 
 import type {
 	AppendReviewMessageCommand,
 	CreateReviewThreadCommand,
+	EditReviewMessageCommand,
 	PromoteReviewToDecisionCommand,
 	ReanchorReviewThreadCommand,
 	ReopenReviewThreadCommand,
 	ResolveReviewThreadCommand,
+	RetractReviewThreadCommand,
 	ReviewAuthoringResult,
 	SetReviewDisplayHintCommand,
 	SubmitReadyForReviewCommand,
@@ -125,6 +127,8 @@ export interface ScopedWorkspaceSession {
 	reopenReviewThread(command: Unstamped<ReopenReviewThreadCommand>): Promise<Scoped<ReviewAuthoringResult>>
 	setReviewDisplayHint(command: SetReviewDisplayHintCommand): Promise<Scoped<ReviewAuthoringResult>>
 	promoteReviewToDecision(command: Unstamped<PromoteReviewToDecisionCommand>): Promise<Scoped<ReviewAuthoringResult>>
+	editReviewMessage(command: Unstamped<EditReviewMessageCommand>): Promise<Scoped<ReviewAuthoringResult>>
+	retractReviewThread(command: Unstamped<RetractReviewThreadCommand>): Promise<Scoped<ReviewAuthoringResult>>
 	captureFormalEvidence(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult | AccessRefusal>
 	exportHandoff(command: ExportHandoffCommand): Promise<ExportHandoffResult | AccessRefusal>
 	acquireLeases(input: unknown): AcquireLeasesOutcome
@@ -367,6 +371,17 @@ export function createScopedWorkspaceSession(
 			const stamped = stamp(command, { at: false })
 			// Promotion writes the View, so it checks (and for agents takes) the View's lease.
 			return write('promoteReviewToDecision', command.reviewId, { kind: 'view', key: command.viewId }, () => app.promoteReviewToDecision(stamped.command), stamped.warnings)
+		},
+
+		// Author-only operations: the stamp is what the domain compares with the message author, so
+		// they hold on both transports (agents may edit and retract their own words over /mcp).
+		editReviewMessage: command => reviewer('editReviewMessage', command, stamped => app.editReviewMessage(stamped)),
+		async retractReviewThread(command) {
+			const denied = authorizeOperation(principal, 'retractReviewThread')
+			if (denied || principal.type !== 'member') return refusalFromScope(command.reviewId, denied ?? authorizeOperation(principal, 'retractReviewThread')!)
+			// The stamp is used only for the author check; nothing is recorded.
+			const stamped = stamp(command, { at: false })
+			return write('retractReviewThread', command.reviewId, undefined, () => app.retractReviewThread(stamped.command), stamped.warnings)
 		},
 
 		async captureFormalEvidence(command) {

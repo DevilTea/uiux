@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { anchorViewId } from '../../../src/domain/reviews/schema'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { LocationQueryRaw } from 'vue-router'
 import { defineShortcuts, navigateTo, useI18n, useRoute, useRouter, useToast } from '#imports'
@@ -53,7 +54,7 @@ watch(() => comments.openThreadId.value, (id) => {
 	else if (id && !isDesktop.value) panelOpen.value = false
 })
 const phoneTabs = computed(() => {
-	const unresolved = reviews.value.filter(review => review.summary.anchor?.viewId === viewId.value && review.summary.status !== 'resolved').length
+	const unresolved = reviews.value.filter(review => anchorViewId(review.summary.anchor) === viewId.value && review.summary.status !== 'resolved').length
 	return [
 		{ value: 'spec', slot: 'spec' as const, label: t('panel.spec') },
 		{ value: 'comments', slot: 'comments' as const, label: t('panel.comments'), badge: unresolved ? { label: String(unresolved), color: 'annotation' as const, variant: 'soft' as const, size: 'sm' as const } : undefined },

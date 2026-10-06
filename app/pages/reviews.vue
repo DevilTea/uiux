@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { defineShortcuts, useI18n } from '#imports'
+import { defineShortcuts, useI18n, useRoute, useRouter } from '#imports'
 import { provideReviewInbox } from '../composables/useReviewInbox'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../composables/useMediaQuery'
+import { useWorkbench } from '../composables/useWorkbench'
 import { useWorkbenchShell } from '../composables/useWorkbenchShell'
+import { inboxQuery } from '../utils/review-inbox'
+import NewCommentModal from '../components/workbench/NewCommentModal.vue'
 import ReviewInboxList from '../components/workbench/ReviewInboxList.vue'
 import ReviewThreadDetail from '../components/workbench/ReviewThreadDetail.vue'
 
@@ -15,6 +18,9 @@ import ReviewThreadDetail from '../components/workbench/ReviewThreadDetail.vue'
 const { t } = useI18n()
 const inbox = provideReviewInbox()
 const shell = useWorkbenchShell()
+const route = useRoute()
+const router = useRouter()
+const workbench = useWorkbench()
 
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const isPhone = useMediaQuery('(max-width: 767.98px)')
@@ -74,6 +80,49 @@ function onResolved(next: string | undefined): void {
 	else closeDetail()
 }
 
+/**
+ * After the author deleted a thread (retract addendum decision 8): the `thread` query is removed,
+ * focus moves to the next row in the queue (else the previous one), else to the list heading.
+ * The live region has already said "Comment deleted."
+ */
+watch(() => inbox.deleted.value?.sequence, () => {
+	if (inbox.deleted.value) onDeleted(inbox.deleted.value.next)
+})
+/** Focus moves once the delete has settled (the queue reloaded, the confirm and its menu gone). */
+let focusAfterDelete = false
+function onDeleted(next: string | undefined): void {
+	inbox.select(isDesktop.value ? next : undefined)
+	focusAfterDelete = true
+}
+watch(() => inbox.busy.value, (busy) => {
+	if (busy || !focusAfterDelete) return
+	focusAfterDelete = false
+	requestAnimationFrame(() => {
+		if (inbox.ordered.value.length) list.value?.focusList()
+		else list.value?.focusHeading()
+	})
+})
+
+// ---------------------------------------------------------------------------------------------
+// New comment (scope/edit decision 8): the inbox button, or `?compose=workspace[&from=<viewId>]`
+// from the command palette's "Comment on Workspace"
+// ---------------------------------------------------------------------------------------------
+
+const composeOpen = ref(false)
+const fromViewId = computed(() => typeof route.query.from === 'string' && workbench.views.value.some(view => view.key === route.query.from) ? route.query.from : undefined)
+const fromViewName = computed(() => workbench.views.value.find(view => view.key === fromViewId.value)?.summary.name)
+watch(() => route.query.compose, (value) => {
+	if (value === 'workspace' && inbox.canReply.value) composeOpen.value = true
+}, { immediate: true })
+watch(composeOpen, (open) => {
+	// Closing the composer drops the one-shot `compose` / `from` keys; the filter and thread stay.
+	if (!open && (route.query.compose || route.query.from)) void router.replace({ query: inboxQuery(inbox.filter.value, inbox.selectedId.value) })
+})
+function onCreated(threadId: string): void {
+	inbox.select(threadId)
+	onOpen()
+}
+
 // ---------------------------------------------------------------------------------------------
 // Keyboard triage (brief d, section 10): J/K, R, E, Shift+E, O, /, F, 1–4
 // ---------------------------------------------------------------------------------------------
@@ -125,6 +174,7 @@ defineShortcuts(computed(() => shell.singleKeyShortcuts.value
 			'2': guard(() => list.value?.selectTab(1)),
 			'3': guard(() => list.value?.selectTab(2)),
 			'4': guard(() => list.value?.selectTab(3)),
+			'5': guard(() => list.value?.selectTab(4)),
 		}
 	: {}))
 </script>
@@ -162,6 +212,7 @@ defineShortcuts(computed(() => shell.singleKeyShortcuts.value
             variant="subtle"
             icon="i-lucide-search-x"
             :title="t('inbox.threadMissing')"
+            :description="t('inbox.threadMissingHint')"
             :actions="[{ label: t('common.dismiss'), size: 'xs', color: 'neutral', variant: 'outline', onClick: () => inbox.select(undefined) }]"
             class="rounded-none"
             data-review-thread-missing
@@ -171,6 +222,13 @@ defineShortcuts(computed(() => shell.singleKeyShortcuts.value
             :phone="isPhone"
             :keyboard="!isPhone && !coarse && shell.singleKeyShortcuts.value"
             @open="onOpen"
+            @compose="composeOpen = true"
+          />
+          <NewCommentModal
+            v-model:open="composeOpen"
+            :from-view-id="fromViewId"
+            :from-view-name="fromViewName"
+            @created="onCreated"
           />
         </main>
       </template>

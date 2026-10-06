@@ -1,5 +1,6 @@
 import type { LocationQuery, LocationQueryRaw } from 'vue-router'
 import {
+	isWidgetAnchor,
 	REVIEW_RESOLUTIONS,
 	type ReviewActor,
 	type ReviewAnchor,
@@ -7,7 +8,7 @@ import {
 	type ReviewStatus,
 	type ReviewThread,
 } from '../../src/domain/reviews/schema'
-import { buildReviewTimeline } from './review-timeline'
+import { buildReviewTimeline, latestTimelineActor } from './review-timeline'
 
 /**
  * The Reviews inbox model (brief d; Part 7 10a). Pure functions, so the ordering, filtering and
@@ -21,18 +22,40 @@ import { buildReviewTimeline } from './review-timeline'
  */
 
 export const REVIEW_STATUSES: readonly ReviewStatus[] = ['ready-for-review', 'open', 'resolved']
-export const DEFAULT_INBOX_STATUS: readonly ReviewStatus[] = ['ready-for-review', 'open']
+/**
+ * The inbox's statuses (Dismiss presentation, retract addendum decision 11): `dismissed` is a UI
+ * pseudo-status for threads resolved as `obsolete`, `duplicate` or `wont-fix`; `resolved` then
+ * means `verified` or `answered`. The canonical lifecycle and resolution enum are unchanged.
+ */
+export type InboxStatus = ReviewStatus | 'dismissed'
+export const INBOX_STATUSES: readonly InboxStatus[] = ['ready-for-review', 'open', 'resolved', 'dismissed']
+export const DEFAULT_INBOX_STATUS: readonly InboxStatus[] = ['ready-for-review', 'open']
 export const INBOX_RESOLUTIONS: readonly ReviewResolution[] = REVIEW_RESOLUTIONS
+/** The Resolve group of the resolve menu, and what the Resolved filter covers. */
+export const RESOLVE_RESOLUTIONS: readonly ReviewResolution[] = ['answered', 'verified']
+/** The Dismiss group: No longer relevant, Duplicate, Won't do. */
+export const DISMISS_RESOLUTIONS: readonly ReviewResolution[] = ['obsolete', 'duplicate', 'wont-fix']
 /** The Variant-scope filter token for View-wide threads (`variantNames: []`). */
 export const VIEW_WIDE_SCOPE = '*'
+/** The View-facet token for Workspace-scoped threads (`view=workspace`; View ids are UUIDs, so it cannot collide). */
+export const WORKSPACE_VIEW_TOKEN = 'workspace'
+
+export function isDismissal(resolution: ReviewResolution | undefined): boolean {
+	return !!resolution && DISMISS_RESOLUTIONS.includes(resolution)
+}
+
+/** The status a thread is listed under: resolved threads closed by a dismissal are `dismissed`. */
+export function inboxStatusOf(status: ReviewStatus, resolution: ReviewResolution | undefined): InboxStatus {
+	return status === 'resolved' && isDismissal(resolution) ? 'dismissed' : status
+}
 
 export type AnchorState = 'valid' | 'stale' | 'missing'
 export const ANCHOR_STATES: readonly AnchorState[] = ['valid', 'stale', 'missing']
 
 export type InboxFilter = Readonly<{
-	/** Statuses shown; empty means every status. */
-	status: readonly ReviewStatus[]
-	/** Narrows resolved threads to these resolution kinds; empty means any. */
+	/** Statuses shown (`dismissed` is the UI pseudo-status); empty means every status. */
+	status: readonly InboxStatus[]
+	/** Narrows resolved and dismissed threads to these resolution kinds; empty means any. */
 	resolution: readonly ReviewResolution[]
 	views: readonly string[]
 	/** Variant names, or `VIEW_WIDE_SCOPE`. */
@@ -67,7 +90,14 @@ export type InboxThread = Readonly<{
 	revision: string
 	status: ReviewStatus
 	resolution?: ReviewResolution
+	/** Where the inbox lists it: the status, or `dismissed` for a dismissal. */
+	inboxStatus: InboxStatus
 	anchor?: ReviewAnchor
+	/** `workspace` for a Workspace-scoped thread, else `view` (a View root or a Widget). */
+	scope: 'workspace' | 'view'
+	/** The anchored View and Widget; undefined for a Workspace thread. */
+	viewId?: string
+	widgetId?: string
 	variantNames: readonly string[]
 	messageCount: number
 	latestActivityAt?: string
@@ -133,11 +163,15 @@ export function buildInboxThread(
 	const timeline = detail ? buildReviewTimeline(detail) : []
 	const participants = [...new Set(timeline.map(item => actorKey(item.actor)))]
 	const domains = [...new Set(detail?.submissions.flatMap(submission => submission.changeDomains) ?? [])]
-	const view = anchor && views ? views.get(anchor.viewId) : undefined
+	const widgetAnchor = isWidgetAnchor(anchor) ? anchor : undefined
+	const view = widgetAnchor && views ? views.get(widgetAnchor.viewId) : undefined
+	// A Workspace anchor always resolves: it is the server's own selected Workspace.
 	let anchorState: AnchorState = 'valid'
 	let missingVariants: readonly string[] = []
 	let widgetType: string | undefined
-	if (anchor && views) {
+	const status = summary.summary.status ?? detail?.status ?? 'open'
+	if (widgetAnchor && views) {
+		const anchor = widgetAnchor
 		if (!view) anchorState = 'missing'
 		else {
 			if (view.widgetTypes) {
@@ -153,16 +187,19 @@ export function buildInboxThread(
 	return Object.freeze({
 		id: summary.key,
 		revision: summary.revision,
-		status: summary.summary.status ?? detail?.status ?? 'open',
+		status,
 		...(summary.summary.resolution ? { resolution: summary.summary.resolution } : {}),
+		inboxStatus: inboxStatusOf(status, summary.summary.resolution),
 		...(anchor ? { anchor } : {}),
+		scope: anchor && !widgetAnchor ? 'workspace' : 'view',
+		...(widgetAnchor ? { viewId: widgetAnchor.viewId, widgetId: widgetAnchor.widgetId } : {}),
 		variantNames,
 		messageCount: summary.summary.messageCount ?? detail?.messages.length ?? 0,
 		...(summary.summary.latestActivityAt ? { latestActivityAt: summary.summary.latestActivityAt } : {}),
 		diagnosticCount: summary.diagnosticCount ?? 0,
 		...(detail ? { detail } : {}),
 		...(first ? { author: first.actor, title: first.body } : {}),
-		...(timeline.length ? { latestActor: timeline.at(-1)!.actor } : {}),
+		...(detail && timeline.length ? { latestActor: latestTimelineActor(detail)! } : {}),
 		participants,
 		domains,
 		anchorState,
@@ -176,8 +213,14 @@ export function buildInboxThread(
 // Ordering (Part 7 10a)
 // ---------------------------------------------------------------------------------------------
 
-export function statusRank(status: ReviewStatus): number {
-	return status === 'ready-for-review' ? 0 : status === 'open' ? 1 : 2
+export function statusRank(status: InboxStatus): number {
+	return status === 'ready-for-review' ? 0 : status === 'open' ? 1 : status === 'resolved' ? 2 : 3
+}
+
+type Orderable = Pick<InboxThread, 'id' | 'status' | 'latestActivityAt'> & Partial<Pick<InboxThread, 'inboxStatus'>>
+
+function listedStatus(thread: Orderable): InboxStatus {
+	return thread.inboxStatus ?? thread.status
 }
 
 function activity(thread: Pick<InboxThread, 'latestActivityAt'>): number {
@@ -185,24 +228,24 @@ function activity(thread: Pick<InboxThread, 'latestActivityAt'>): number {
 	return Number.isNaN(value) ? 0 : value
 }
 
-/** Ready before open (then resolved), then latest activity descending, then id for stability. */
-export function compareInboxThreads(a: Pick<InboxThread, 'id' | 'status' | 'latestActivityAt'>, b: Pick<InboxThread, 'id' | 'status' | 'latestActivityAt'>): number {
-	return statusRank(a.status) - statusRank(b.status)
+/** Ready before open, then resolved, then dismissed; then latest activity descending, then id for stability. */
+export function compareInboxThreads(a: Orderable, b: Orderable): number {
+	return statusRank(listedStatus(a)) - statusRank(listedStatus(b))
 		|| activity(b) - activity(a)
 		|| a.id.localeCompare(b.id)
 }
 
-export function orderInbox<T extends Pick<InboxThread, 'id' | 'status' | 'latestActivityAt'>>(threads: readonly T[]): T[] {
+export function orderInbox<T extends Orderable>(threads: readonly T[]): T[] {
 	return [...threads].sort(compareInboxThreads)
 }
 
-export type InboxGroup<T> = Readonly<{ status: ReviewStatus; threads: readonly T[] }>
+export type InboxGroup<T> = Readonly<{ status: InboxStatus; threads: readonly T[] }>
 
-/** Groups an ordered list by status, in group order, leaving out empty groups. */
-export function groupInbox<T extends Pick<InboxThread, 'id' | 'status' | 'latestActivityAt'>>(threads: readonly T[]): readonly InboxGroup<T>[] {
+/** Groups an ordered list by listed status, in group order, leaving out empty groups. */
+export function groupInbox<T extends Orderable>(threads: readonly T[]): readonly InboxGroup<T>[] {
 	const ordered = orderInbox(threads)
-	return REVIEW_STATUSES
-		.map(status => ({ status, threads: ordered.filter(thread => thread.status === status) }))
+	return INBOX_STATUSES
+		.map(status => ({ status, threads: ordered.filter(thread => listedStatus(thread) === status) }))
 		.filter(group => group.threads.length > 0)
 }
 
@@ -217,15 +260,18 @@ export type InboxFilterContext = Readonly<{
 }>
 
 function searchable(thread: InboxThread): string {
+	// Current text only: earlier versions of edited messages are not searchable (R14).
 	const messages = thread.detail?.messages.map(message => message.body).join('\n') ?? thread.title ?? ''
-	return [messages, thread.anchor?.widgetId, thread.viewName, thread.widgetType, thread.variantNames.join(' '), thread.author?.displayName]
+	return [messages, thread.scope === 'workspace' ? WORKSPACE_VIEW_TOKEN : thread.widgetId, thread.viewName, thread.widgetType, thread.variantNames.join(' '), thread.author?.displayName]
 		.filter(Boolean).join('\n').toLowerCase()
 }
 
 /** Every filter except status and resolution: the counts on the status tabs use this. */
 export function matchesInboxFacets(thread: InboxThread, filter: InboxFilter, context: InboxFilterContext = {}): boolean {
-	if (filter.views.length && !(thread.anchor && filter.views.includes(thread.anchor.viewId))) return false
+	if (filter.views.length && !filter.views.includes(thread.scope === 'workspace' ? WORKSPACE_VIEW_TOKEN : thread.viewId ?? '')) return false
 	if (filter.scopes.length) {
+		// Workspace threads have no Variant scope, so a Variant-scope facet excludes them.
+		if (thread.scope === 'workspace') return false
 		const scopes = thread.variantNames.length ? thread.variantNames : [VIEW_WIDE_SCOPE]
 		if (!scopes.some(scope => filter.scopes.includes(scope))) return false
 	}
@@ -240,7 +286,7 @@ export function matchesInboxFacets(thread: InboxThread, filter: InboxFilter, con
 }
 
 export function matchesInboxFilter(thread: InboxThread, filter: InboxFilter, context: InboxFilterContext = {}): boolean {
-	if (filter.status.length && !filter.status.includes(thread.status)) return false
+	if (filter.status.length && !filter.status.includes(thread.inboxStatus)) return false
 	if (filter.resolution.length && thread.status === 'resolved' && !(thread.resolution && filter.resolution.includes(thread.resolution))) return false
 	return matchesInboxFacets(thread, filter, context)
 }
@@ -290,10 +336,10 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
 	return a.length === b.length && a.every(item => b.includes(item))
 }
 
-/** `status=all` shows every status; an absent `status` is the default queue. */
+/** `status=all` shows every status; an absent `status` is the default queue; `status=dismissed` is the UI pseudo-status. */
 export function parseInboxQuery(query: LocationQuery): InboxFilter {
 	const statusValues = list(query.status)
-	const named = only(statusValues, REVIEW_STATUSES)
+	const named = only(statusValues, INBOX_STATUSES)
 	const status = statusValues.includes('all') ? [] : named.length ? named : [...DEFAULT_INBOX_STATUS]
 	return {
 		status,
@@ -311,7 +357,7 @@ export function parseInboxQuery(query: LocationQuery): InboxFilter {
 
 export function inboxQuery(filter: InboxFilter, thread?: string): LocationQueryRaw {
 	const query: LocationQueryRaw = {}
-	const ordered = REVIEW_STATUSES.filter(status => filter.status.includes(status))
+	const ordered = INBOX_STATUSES.filter(status => filter.status.includes(status))
 	if (!filter.status.length) query.status = 'all'
 	else if (!sameSet(ordered, DEFAULT_INBOX_STATUS)) query.status = ordered.join(',')
 	if (filter.resolution.length) query.resolution = INBOX_RESOLUTIONS.filter(item => filter.resolution.includes(item)).join(',')

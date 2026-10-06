@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { anchorViewId } from '../../../src/domain/reviews/schema'
 import { computed } from 'vue'
 import { useI18n } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
@@ -21,7 +22,7 @@ const lastViewId = workbench.lastViewId()
 const unresolvedByView = computed(() => {
 	const counts = new Map<string, number>()
 	for (const review of reviews.value) {
-		const viewId = review.summary.anchor?.viewId
+		const viewId = anchorViewId(review.summary.anchor)
 		if (viewId && review.summary.status !== 'resolved') counts.set(viewId, (counts.get(viewId) ?? 0) + 1)
 	}
 	return counts

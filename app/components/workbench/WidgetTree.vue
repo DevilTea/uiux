@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isWidgetAnchor } from '../../../src/domain/reviews/schema'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import type { ContextMenuItem, TreeItem } from '@nuxt/ui'
@@ -73,7 +74,7 @@ const commentCounts = computed(() => {
 	const counts = new Map<string, number>()
 	for (const review of reviews.value) {
 		const anchor = review.summary.anchor
-		if (!anchor || anchor.viewId !== selectedViewId.value || review.summary.status === 'resolved') continue
+		if (!isWidgetAnchor(anchor) || anchor.viewId !== selectedViewId.value || review.summary.status === 'resolved') continue
 		counts.set(anchor.widgetId, (counts.get(anchor.widgetId) ?? 0) + 1)
 	}
 	return counts

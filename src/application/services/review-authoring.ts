@@ -4,7 +4,10 @@ import { validateResourceRevision } from '../dto/revisions'
 import { isFullUuid, type Diagnostic, type JsonObject } from '../../domain/validation'
 import {
 	isAllowedReviewTransition,
+	isMessageFrozen,
 	isReviewResolution,
+	isWidgetAnchor,
+	isWorkspaceAnchor,
 	normalizeReviewPinCoordinate,
 	validateReviewEvidenceRef,
 	validateReviewThread,
@@ -14,6 +17,7 @@ import {
 	type ReviewEvidenceRef,
 	type ReviewHistoryEvent,
 	type ReviewMessage,
+	type ReviewMessageEdit,
 	type ReviewResolution,
 	type ReviewResourceRevision,
 	type ReviewSubmission,
@@ -25,6 +29,7 @@ import { validateFormalEvidenceRecord } from '../../domain/evidence/schema'
 import { isCompleteEvidenceForViewRevision } from '../../domain/evidence/staleness'
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
+import { viewRelativePath } from '../../persistence/paths'
 
 export type CreateReviewThreadCommand = Readonly<{
 	id?: string
@@ -104,6 +109,30 @@ export type SetReviewDisplayHintCommand = Readonly<{
 	displayHint: ReviewDisplayHint | null
 }>
 
+/** Replace the text of the caller's own message (author only; the stamped actor is compared). */
+export type EditReviewMessageCommand = Readonly<{
+	reviewId: string
+	expectedRevision: string
+	messageId: string
+	body: string
+	actor: ReviewActor
+	editId?: string
+	at?: string
+}>
+
+/**
+ * Author quick retract: hard-delete a brand-new thread nobody engaged with. `actor` is the stamped
+ * requester, used only for the author check (skipped for an empty thread); nothing is recorded.
+ */
+export type RetractReviewThreadCommand = Readonly<{
+	reviewId: string
+	expectedRevision: string
+	actor: ReviewActor
+}>
+
+/** Why a retract was refused as engaged (decision 2, E1–E6). */
+export type RetractEngagedReason = 'status' | 'messages' | 'history' | 'submissions' | 'promoted'
+
 export type PromoteReviewToDecisionCommand = Readonly<{
 	reviewId: string
 	expectedReviewRevision: string
@@ -126,6 +155,8 @@ export type ReviewAuthoringResult =
 			decision?: import('../../domain/spec/schema').Decision
 	  }>
 	| Readonly<{ status: 'already_exists'; key: string; currentRevision?: ResourceRevision }>
+	/** Retract only: the thread file was removed; no revision exists any more. */
+	| Readonly<{ status: 'deleted'; key: string }>
 	| Readonly<{ status: 'not_found'; key: string }>
 	| Readonly<{
 			status: 'conflict'
@@ -140,7 +171,7 @@ export type ReviewAuthoringResult =
 	  }>
 	| Readonly<{ status: 'invalid_expected_revision'; key: string; diagnostics: readonly Diagnostic[] }>
 	| Readonly<{ status: 'invalid'; key: string; diagnostics: readonly Diagnostic[] }>
-	| Readonly<{ status: 'blocked'; key: string; code?: string; message?: string; diagnostics?: readonly Diagnostic[] }>
+	| Readonly<{ status: 'blocked'; key: string; code?: string; message?: string; reason?: RetractEngagedReason; diagnostics?: readonly Diagnostic[] }>
 
 export type ReviewAuthoringService = Readonly<{
 	createReviewThread(command: CreateReviewThreadCommand): Promise<ReviewAuthoringResult>
@@ -151,7 +182,18 @@ export type ReviewAuthoringService = Readonly<{
 	reopenReviewThread(command: ReopenReviewThreadCommand): Promise<ReviewAuthoringResult>
 	setReviewDisplayHint(command: SetReviewDisplayHintCommand): Promise<ReviewAuthoringResult>
 	promoteReviewToDecision(command: PromoteReviewToDecisionCommand): Promise<ReviewAuthoringResult>
+	editReviewMessage(command: EditReviewMessageCommand): Promise<ReviewAuthoringResult>
+	retractReviewThread(command: RetractReviewThreadCommand): Promise<ReviewAuthoringResult>
 }>
+
+/** Messages written by a stamped member principal; older and self-asserted actors can never match one (R19, T15). */
+export function isMemberActorId(id: unknown): id is string {
+	return typeof id === 'string' && /^member:[0-9a-f-]{36}$/iu.test(id)
+}
+
+function sameStampedActor(left: ReviewActor | undefined, right: ReviewActor | undefined): boolean {
+	return !!left && !!right && isMemberActorId(left.id) && left.id === right.id && left.type === right.type
+}
 
 export function createReviewAuthoringService(persistence: FileNativePersistence): ReviewAuthoringService {
 	/** Writes only ever happen at the policy currentVersion, so candidates are validated under it. */
@@ -177,6 +219,20 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		}
 		const code = inspection.state === 'missing_manifest' ? 'workspace.manifest_missing' : 'workspace.schema_unsupported'
 		return { status: 'blocked', key, code, message: 'Review mutations are blocked for this Workspace schema state.', diagnostics: inspection.diagnostics }
+	}
+
+	/**
+	 * Review CAS that reports a thread deleted between the read and the write (an author retract, or
+	 * an out-of-band delete) as `not_found` instead of throwing.
+	 */
+	async function casReview(input: Parameters<typeof persistence.reviews.compareAndSwap>[0]) {
+		try {
+			return await persistence.reviews.compareAndSwap(input)
+		}
+		catch (error) {
+			if (error instanceof PersistenceError && error.code === 'persistence.resource_not_found') return { ok: false as const, gone: true as const }
+			throw error
+		}
 	}
 
 	async function createReviewThread(command: CreateReviewThreadCommand): Promise<ReviewAuthoringResult> {
@@ -245,13 +301,13 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		if (!validation.ok)
 			return { status: 'invalid', key: command.reviewId, diagnostics: validation.diagnostics }
 
-		const commit = await persistence.reviews.compareAndSwap({
+		const commit = await casReview({
 			key: command.reviewId,
 			expectedRevision: expectedRevision.value,
 			resource: next,
 		})
 		if (!commit.ok)
-			return { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
+			return 'gone' in commit ? { status: 'not_found', key: command.reviewId } : { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.reviews.readInspected(command.reviewId)
 		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
 	}
@@ -290,8 +346,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 
 		const requestedHint = command.displayHint === null ? { ok: true as const, value: undefined } : normalizeDisplayHintInput(command.displayHint, '/displayHint')
 		if (!requestedHint.ok) return { status: 'invalid', key: command.reviewId, diagnostics: requestedHint.diagnostics }
-		const widgetIdentityChanged = current.resource.anchor.viewId !== command.anchor.viewId
-			|| current.resource.anchor.widgetId !== command.anchor.widgetId
+		const widgetIdentityChanged = !sameWidgetIdentity(current.resource.anchor, command.anchor)
 		// An explicit object or null always wins; omitted clears on a Widget change and keeps on a Variant-only change.
 		const displayHint = command.displayHint !== undefined
 			? requestedHint.value
@@ -307,13 +362,13 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		if (!validation.ok)
 			return { status: 'invalid', key: command.reviewId, diagnostics: validation.diagnostics }
 
-		const commit = await persistence.reviews.compareAndSwap({
+		const commit = await casReview({
 			key: command.reviewId,
 			expectedRevision: expectedRevision.value,
 			resource: next,
 		})
 		if (!commit.ok)
-			return { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
+			return 'gone' in commit ? { status: 'not_found', key: command.reviewId } : { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.reviews.readInspected(command.reviewId)
 		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
 	}
@@ -344,43 +399,11 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 				diagnostics: [{ code: 'review.invalid_transition', path: '/status', message: `Review cannot transition from ${current.resource.status} to ready-for-review.` }],
 			}
 		}
-		const targetViewId = current.resource.anchor.viewId
-		const targetView = await persistence.views.readInspected(targetViewId)
-		if (!targetView) {
-			return {
-				status: 'invalid',
-				key: command.reviewId,
-				diagnostics: [{ code: 'review.target_view_missing', path: '/resources', message: `Review target View ${targetViewId} does not exist.` }],
-			}
-		}
-		if (targetView.diagnostics.length > 0) {
-			return {
-				status: 'invalid',
-				key: command.reviewId,
-				diagnostics: targetView.diagnostics.map(diagnostic => ({
-					...diagnostic,
-					path: `/resources${diagnostic.path || ''}`,
-				})),
-			}
-		}
-
-		const hasCurrentTargetView = command.resources.some((resource) => {
-			const identity = resource.identity as Record<string, unknown>
-			const identifiesTarget = (identity.type === 'view' && identity.id === targetViewId)
-				|| (identity.kind === 'view' && identity.key === targetViewId)
-			return identifiesTarget && resource.revision === targetView.revision
-		})
-		if (!hasCurrentTargetView) {
-			return {
-				status: 'invalid',
-				key: command.reviewId,
-				diagnostics: [{
-					code: 'review.target_view_revision_missing',
-					path: '/resources',
-					message: `Ready-for-review submission must include current target View ${targetViewId} revision ${targetView.revision}.`,
-				}],
-			}
-		}
+		// The target set (decision 4): a Widget thread's anchor View; a Workspace thread's manifest plus
+		// every View the submission names, each existing, valid and named at its current revision.
+		const targets = await submissionTargets(current.resource.anchor, command.resources)
+		if (!targets.ok) return { status: 'invalid', key: command.reviewId, diagnostics: targets.diagnostics }
+		const currentViewRevisions = targets.views
 
 		const evidenceDiagnostics: Diagnostic[] = []
 		for (const [index, ref] of command.evidenceRefs.entries()) {
@@ -403,11 +426,16 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 				if (validation.value.kind === 'formal_capture') {
 					const candidate = await persistence.artifacts.readCandidateJson(validation.value.evidence)
 					const formal = validateFormalEvidenceRecord(candidate)
-					if (!formal.ok || formal.value.kind !== 'formal_capture' || !isCompleteEvidenceForViewRevision(formal.value, targetViewId, targetView.revision)) {
+					const capturedViewId = formal.ok ? (formal.value.executionContext as Record<string, unknown>).viewId : undefined
+					const capturedRevision = typeof capturedViewId === 'string' ? currentViewRevisions.get(capturedViewId) : undefined
+					if (!formal.ok || formal.value.kind !== 'formal_capture' || typeof capturedViewId !== 'string' || capturedRevision === undefined
+						|| !isCompleteEvidenceForViewRevision(formal.value, capturedViewId, capturedRevision)) {
 						evidenceDiagnostics.push({
 							code: 'review.formal_evidence_not_current',
 							path: `${path}/evidence`,
-							message: `Formal evidence ${validation.value.evidence} must be complete and match current target View ${targetViewId} revision ${targetView.revision}.`,
+							message: targets.workspace
+								? `Formal evidence ${validation.value.evidence} must be complete for the current revision of the View it captured, and that View must be named in resources.`
+								: `Formal evidence ${validation.value.evidence} must be complete and match current target View ${[...currentViewRevisions.keys()][0]} revision ${[...currentViewRevisions.values()][0]}.`,
 						})
 					}
 				}
@@ -456,13 +484,13 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		if (!validation.ok)
 			return { status: 'invalid', key: command.reviewId, diagnostics: validation.diagnostics }
 
-		const commit = await persistence.reviews.compareAndSwap({
+		const commit = await casReview({
 			key: command.reviewId,
 			expectedRevision: expectedRevision.value,
 			resource: next,
 		})
 		if (!commit.ok)
-			return { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
+			return 'gone' in commit ? { status: 'not_found', key: command.reviewId } : { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.reviews.readInspected(command.reviewId)
 		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
 	}
@@ -566,13 +594,13 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		if (!validation.ok)
 			return { status: 'invalid', key: command.reviewId, diagnostics: validation.diagnostics }
 
-		const commit = await persistence.reviews.compareAndSwap({
+		const commit = await casReview({
 			key: command.reviewId,
 			expectedRevision: expectedRevision.value,
 			resource: next,
 		})
 		if (!commit.ok)
-			return { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
+			return 'gone' in commit ? { status: 'not_found', key: command.reviewId } : { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.reviews.readInspected(command.reviewId)
 		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
 	}
@@ -624,13 +652,13 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		if (!validation.ok)
 			return { status: 'invalid', key: command.reviewId, diagnostics: validation.diagnostics }
 
-		const commit = await persistence.reviews.compareAndSwap({
+		const commit = await casReview({
 			key: command.reviewId,
 			expectedRevision: expectedRevision.value,
 			resource: next,
 		})
 		if (!commit.ok)
-			return { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
+			return 'gone' in commit ? { status: 'not_found', key: command.reviewId } : { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.reviews.readInspected(command.reviewId)
 		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
 	}
@@ -663,19 +691,26 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		if (current.revision !== expectedRevision.value)
 			return { status: 'conflict', key: command.reviewId, currentRevision: current.revision }
 
+		if (isWorkspaceAnchor(current.resource.anchor))
+			return {
+				status: 'invalid',
+				key: command.reviewId,
+				diagnostics: [{ code: 'review.display_hint_without_widget', path: '/displayHint', message: 'A Workspace-scoped thread has no Widget, so it has no pin and no display hint.' }],
+			}
+
 		// Display data only: no history event, no actor, no timeline entry.
 		const next: ReviewThread = { ...withoutDisplayHint(current.resource), ...(hint.value ? { displayHint: hint.value } : {}) }
 		const validation = validateCandidate(next)
 		if (!validation.ok)
 			return { status: 'invalid', key: command.reviewId, diagnostics: validation.diagnostics }
 
-		const commit = await persistence.reviews.compareAndSwap({
+		const commit = await casReview({
 			key: command.reviewId,
 			expectedRevision: expectedRevision.value,
 			resource: next,
 		})
 		if (!commit.ok)
-			return { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
+			return 'gone' in commit ? { status: 'not_found', key: command.reviewId } : { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.reviews.readInspected(command.reviewId)
 		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
 	}
@@ -722,16 +757,28 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		const review = await persistence.reviews.read(command.reviewId)
 		if (!review) return { status: 'not_found', key: command.reviewId }
 
+		const reviewAnchor = review.resource.anchor
+		if (!isWidgetAnchor(reviewAnchor)) {
+			return {
+				status: 'invalid',
+				key: command.reviewId,
+				diagnostics: [{
+					code: 'review.decision_target_unavailable',
+					path: '/reviewId',
+					message: 'Workspace-scoped threads have no Decision home. Re-anchor the thread to a View\'s root to promote it there, or record the Decision with update_view_spec.',
+				}],
+			}
+		}
 		const view = await persistence.views.read(command.viewId)
 		if (!view) return { status: 'not_found', key: command.viewId }
-		if (review.resource.anchor.viewId !== command.viewId) {
+		if (reviewAnchor.viewId !== command.viewId) {
 			return {
 				status: 'invalid',
 				key: command.reviewId,
 				diagnostics: [{
 					code: 'review.decision_target_mismatch',
 					path: '/viewId',
-					message: `Review ${command.reviewId} is anchored to View ${review.resource.anchor.viewId} and cannot be promoted into View ${command.viewId}.`,
+					message: `Review ${command.reviewId} is anchored to View ${reviewAnchor.viewId} and cannot be promoted into View ${command.viewId}.`,
 				}],
 			}
 		}
@@ -850,6 +897,188 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		}
 	}
 
+	type SubmissionTargets =
+		| Readonly<{ ok: true; workspace: boolean; views: ReadonlyMap<string, ResourceRevision> }>
+		| Readonly<{ ok: false; diagnostics: readonly Diagnostic[] }>
+
+	async function submissionTargets(anchor: ReviewAnchor, resources: readonly ReviewResourceRevision[]): Promise<SubmissionTargets> {
+		const named = Array.isArray(resources) ? resources : []
+		if (isWidgetAnchor(anchor)) {
+			const targetViewId = anchor.viewId
+			const targetView = await persistence.views.readInspected(targetViewId)
+			if (!targetView)
+				return { ok: false, diagnostics: [{ code: 'review.target_view_missing', path: '/resources', message: `Review target View ${targetViewId} does not exist.` }] }
+			if (targetView.diagnostics.length > 0)
+				return { ok: false, diagnostics: targetView.diagnostics.map(diagnostic => ({ ...diagnostic, path: `/resources${diagnostic.path || ''}` })) }
+			const hasCurrentTargetView = named.some(resource => namedViewId(resource) === targetViewId && resource.revision === targetView.revision)
+			if (!hasCurrentTargetView) {
+				return {
+					ok: false,
+					diagnostics: [{
+						code: 'review.target_view_revision_missing',
+						path: '/resources',
+						message: `Ready-for-review submission must include current target View ${targetViewId} revision ${targetView.revision}.`,
+					}],
+				}
+			}
+			return { ok: true, workspace: false, views: new Map([[targetViewId, targetView.revision]]) }
+		}
+
+		const manifest = await persistence.workspace.readInspected()
+		const hasCurrentManifest = manifest.revision !== undefined && named.some((resource) => {
+			const identity = resource.identity as Record<string, unknown>
+			const identifiesWorkspace = (identity.type === 'workspace' && Object.keys(identity).length === 1)
+				|| (identity.kind === 'workspace' && identity.key === 'workspace')
+			return identifiesWorkspace && resource.revision === manifest.revision
+		})
+		if (!hasCurrentManifest) {
+			return {
+				ok: false,
+				diagnostics: [{
+					code: 'review.target_workspace_revision_missing',
+					path: '/resources',
+					message: `A Workspace-scoped submission must include the current Workspace manifest revision ${manifest.revision ?? '(missing)'} as { type: "workspace" }.`,
+				}],
+			}
+		}
+		const diagnostics: Diagnostic[] = []
+		const views = new Map<string, ResourceRevision>()
+		for (const [index, resource] of named.entries()) {
+			const viewId = namedViewId(resource)
+			if (viewId === undefined) continue
+			const path = `/resources/${index}`
+			const view = isFullUuid(viewId) ? await persistence.views.readInspected(viewId) : undefined
+			if (!view) {
+				diagnostics.push({ code: 'review.target_view_missing', path, message: `View ${viewId} named in the submission does not exist.` })
+				continue
+			}
+			if (view.diagnostics.length > 0) {
+				diagnostics.push(...view.diagnostics.map(diagnostic => ({ ...diagnostic, path: `${path}${diagnostic.path || ''}` })))
+				continue
+			}
+			if (resource.revision !== view.revision) {
+				diagnostics.push({ code: 'review.resource_revision_not_current', path: `${path}/revision`, message: `View ${viewId} is named at revision ${resource.revision}; its current revision is ${view.revision}.` })
+				continue
+			}
+			views.set(viewId, view.revision)
+		}
+		if (diagnostics.length > 0) return { ok: false, diagnostics }
+		return { ok: true, workspace: true, views }
+	}
+
+	async function editReviewMessage(command: EditReviewMessageCommand): Promise<ReviewAuthoringResult> {
+		if (!isFullUuid(command.reviewId))
+			return { status: 'invalid', key: command.reviewId, diagnostics: [{ code: 'identity.invalid_uuid', path: '/reviewId', message: 'Review id must be a full UUID.' }] }
+		if (!isFullUuid(command.messageId))
+			return { status: 'invalid', key: command.reviewId, diagnostics: [{ code: 'identity.invalid_uuid', path: '/messageId', message: 'Message id must be a full UUID.' }] }
+		if (command.editId !== undefined && !isFullUuid(command.editId))
+			return { status: 'invalid', key: command.reviewId, diagnostics: [{ code: 'identity.invalid_uuid', path: '/editId', message: 'Edit id must be a full UUID.' }] }
+		const expectedRevision = validateResourceRevision(command.expectedRevision, '/expectedRevision')
+		if (!expectedRevision.ok)
+			return { status: 'invalid_expected_revision', key: command.reviewId, diagnostics: expectedRevision.diagnostics }
+
+		const blocked = await blockedUnlessWritable(command.reviewId)
+		if (blocked) return blocked
+		const current = await persistence.reviews.read(command.reviewId)
+		if (!current) return { status: 'not_found', key: command.reviewId }
+		if (current.revision !== expectedRevision.value)
+			return { status: 'conflict', key: command.reviewId, currentRevision: current.revision }
+
+		const index = current.resource.messages.findIndex(message => message.id === command.messageId)
+		const message = current.resource.messages[index]
+		if (!message)
+			return { status: 'invalid', key: command.reviewId, diagnostics: [{ code: 'review.unknown_message', path: '/messageId', message: `Review ${command.reviewId} has no message ${command.messageId}.` }] }
+		if (!sameStampedActor(message.actor, command.actor)) {
+			const text = isMemberActorId(message.actor?.id)
+				? 'Only the author of a message may edit it. Reply instead.'
+				: 'This message was written before authors were identified, so no one can prove authorship and it cannot be edited. Reply instead.'
+			return { status: 'blocked', key: command.reviewId, code: 'review.message_edit_not_author', message: text, diagnostics: [{ code: 'review.message_edit_not_author', path: '/messageId', message: text }] }
+		}
+		const freeze = isMessageFrozen(current.resource, message.id)
+		if (freeze.frozen) {
+			const text = `This message can't be edited: a later ${freeze.by === 'submission' ? `ready-for-review submission (${freeze.id})` : `resolution (${freeze.id})`} answered the conversation as it stood. Reply instead.`
+			return { status: 'blocked', key: command.reviewId, code: 'review.message_edit_after_formal_act', message: text, diagnostics: [{ code: 'review.message_edit_after_formal_act', path: '/messageId', message: text }] }
+		}
+		if (typeof command.body !== 'string' || command.body.trim().length === 0)
+			return { status: 'invalid', key: command.reviewId, diagnostics: [{ code: 'review.message_body_empty', path: '/body', message: 'An edit must leave non-empty text; editing never deletes a message.' }] }
+		if (command.body === message.body)
+			return { status: 'invalid', key: command.reviewId, diagnostics: [{ code: 'review.message_edit_noop', path: '/body', message: 'The new text is the same as the current text.' }] }
+
+		const edit: ReviewMessageEdit = {
+			id: command.editId ?? randomUUID(),
+			actor: command.actor,
+			at: command.at ?? new Date().toISOString(),
+			previousBody: message.body,
+		}
+		const edited: ReviewMessage = { ...message, body: command.body, edits: [...(message.edits ?? []), edit] }
+		const next: ReviewThread = {
+			...current.resource,
+			messages: current.resource.messages.map((candidate, position) => position === index ? edited : candidate),
+		}
+		const validation = validateCandidate(next)
+		if (!validation.ok)
+			return { status: 'invalid', key: command.reviewId, diagnostics: validation.diagnostics }
+
+		const commit = await casReview({ key: command.reviewId, expectedRevision: expectedRevision.value, resource: next })
+		if (!commit.ok)
+			return 'gone' in commit ? { status: 'not_found', key: command.reviewId } : { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
+		const inspected = await persistence.reviews.readInspected(command.reviewId)
+		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
+	}
+
+	async function retractReviewThread(command: RetractReviewThreadCommand): Promise<ReviewAuthoringResult> {
+		if (!isFullUuid(command.reviewId))
+			return { status: 'invalid', key: command.reviewId, diagnostics: [{ code: 'identity.invalid_uuid', path: '/reviewId', message: 'Review id must be a full UUID.' }] }
+		const expectedRevision = validateResourceRevision(command.expectedRevision, '/expectedRevision')
+		if (!expectedRevision.ok)
+			return { status: 'invalid_expected_revision', key: command.reviewId, diagnostics: expectedRevision.diagnostics }
+		const blocked = await blockedUnlessWritable(command.reviewId)
+		if (blocked) return blocked
+
+		type Refusal = Readonly<{ code: 'review.retract_not_author' } | { code: 'review.retract_engaged'; reason: RetractEngagedReason }>
+		const outcome = await persistence.reviews.deleteIfRevision<Refusal>({
+			key: command.reviewId,
+			expectedRevision: expectedRevision.value,
+			// Every check runs on exactly the bytes being deleted, inside the delete's exclusive lock.
+			guard: async (thread, context) => {
+				const messages = Array.isArray(thread.messages) ? thread.messages : []
+				if (messages.length > 0 && !sameStampedActor(messages[0]!.actor, command.actor))
+					return { code: 'review.retract_not_author' }
+				if (thread.status !== 'open') return { code: 'review.retract_engaged', reason: 'status' }
+				if (messages.length > 1) return { code: 'review.retract_engaged', reason: 'messages' }
+				if (!Array.isArray(thread.history) || thread.history.length > 0) return { code: 'review.retract_engaged', reason: 'history' }
+				if (!Array.isArray(thread.submissions) || thread.submissions.length > 0) return { code: 'review.retract_engaged', reason: 'submissions' }
+				// E6: promotion leaves no trace in the Review file, so read the anchor View (E4 guarantees
+				// the anchor never changed). Workspace threads cannot be promoted.
+				if (isWidgetAnchor(thread.anchor) && isFullUuid(thread.anchor.viewId)) {
+					const view = await context.readJsonUnlocked(viewRelativePath(thread.anchor.viewId)) as ViewResource | undefined
+					if (view && decisionNamesThread(view, command.reviewId)) return { code: 'review.retract_engaged', reason: 'promoted' }
+				}
+				return undefined
+			},
+		})
+		switch (outcome.status) {
+			case 'deleted': return { status: 'deleted', key: command.reviewId }
+			case 'not_found': return { status: 'not_found', key: command.reviewId }
+			case 'conflict': return { status: 'conflict', key: command.reviewId, currentRevision: outcome.currentRevision }
+			case 'refused': {
+				if (outcome.refusal.code === 'review.retract_not_author') {
+					const text = 'Only the author of this thread can delete it. Dismiss it instead.'
+					return { status: 'blocked', key: command.reviewId, code: 'review.retract_not_author', message: text, diagnostics: [{ code: 'review.retract_not_author', path: '/reviewId', message: text }] }
+				}
+				const text = 'Someone has already engaged with this thread. Dismiss it instead.'
+				return {
+					status: 'blocked',
+					key: command.reviewId,
+					code: 'review.retract_engaged',
+					reason: outcome.refusal.reason,
+					message: text,
+					diagnostics: [{ code: 'review.retract_engaged', path: `/${outcome.refusal.reason}`, message: `${text} (${outcome.refusal.reason})` }],
+				}
+			}
+		}
+	}
+
 	return {
 		createReviewThread,
 		appendReviewMessage,
@@ -859,7 +1088,40 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		reopenReviewThread,
 		setReviewDisplayHint,
 		promoteReviewToDecision,
+		editReviewMessage,
+		retractReviewThread,
 	}
+}
+
+/** A View named by a submission resource: `{ type: "view", id }` or `{ kind: "view", key }`. */
+function namedViewId(resource: ReviewResourceRevision): string | undefined {
+	const identity = resource?.identity as Record<string, unknown> | undefined
+	if (!identity) return undefined
+	if (identity.type === 'view' && typeof identity.id === 'string') return identity.id
+	if (identity.kind === 'view' && typeof identity.key === 'string') return identity.key
+	return undefined
+}
+
+/** Same Widget identity: both Widget anchors on the same View and Widget, or both the Workspace. */
+function sameWidgetIdentity(left: ReviewAnchor, right: ReviewAnchor): boolean {
+	if (isWorkspaceAnchor(left) || isWorkspaceAnchor(right)) return isWorkspaceAnchor(left) && isWorkspaceAnchor(right)
+	return left.viewId === right.viewId && left.widgetId === right.widgetId
+}
+
+/**
+ * Whether any Decision in the View names the thread as its source, with the same matching the
+ * Workbench's "from Review" link uses: provenance ids or a history entry's `source.reviewId`.
+ */
+function decisionNamesThread(view: ViewResource, reviewId: string): boolean {
+	const decisions = (view as { spec?: { decisions?: unknown } })?.spec?.decisions
+	if (!Array.isArray(decisions)) return false
+	return decisions.some((decision) => {
+		if (typeof decision !== 'object' || decision === null) return false
+		const record = decision as { provenance?: { reviewId?: unknown; sourceReviewThreadId?: unknown }; history?: unknown }
+		if (record.provenance?.reviewId === reviewId || record.provenance?.sourceReviewThreadId === reviewId) return true
+		return Array.isArray(record.history) && record.history.some(entry =>
+			typeof entry === 'object' && entry !== null && (entry as { source?: { reviewId?: unknown } }).source?.reviewId === reviewId)
+	})
 }
 
 function withoutDisplayHint(thread: ReviewThread): ReviewThread {

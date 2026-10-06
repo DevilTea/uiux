@@ -25,10 +25,21 @@ export type ReviewDisplayHint = Readonly<{ pin: ReviewPinHint }>
 /** Decoding context: every Review file is decoded under the selected Workspace's manifest schemaVersion. */
 export type ReviewDecodeContext = Readonly<{ schemaVersion: number; filename?: string }>
 export type ReviewActor = Readonly<{ type: string; id?: string; displayName?: string }>
-export type ReviewAnchor = Readonly<{ viewId: string; widgetId: string }>
+/** The Widget arm (untagged, unchanged since v1): a thread about one Widget of one View. */
+export type ReviewWidgetAnchor = Readonly<{ viewId: string; widgetId: string }>
+/** The Workspace arm (schemaVersion >= 3): a thread about the product as a whole. */
+export type ReviewWorkspaceAnchor = Readonly<{ scope: 'workspace' }>
+/** Closed anchor union. Readers tell the arms apart by the presence of `scope`. */
+export type ReviewAnchor = ReviewWidgetAnchor | ReviewWorkspaceAnchor
 export type ReviewEvidenceRef = Readonly<{ kind: string; evidence: string }>
 export type ReviewResourceRevision = Readonly<{ identity: JsonObject; revision: string }>
-export type ReviewMessage = Readonly<{ id: string; actor: ReviewActor; at: string; body: string }>
+/** One replaced version of a message (schemaVersion >= 3): who replaced it, when, and the text it had. */
+export type ReviewMessageEdit = Readonly<{ id: string; actor: ReviewActor; at: string; previousBody: string }>
+/**
+ * `body` is always the current text. `edits[]` (schemaVersion >= 3) is append-only and omitted when
+ * the message was never edited; "edited" and "edited at" are derived from it, never stored.
+ */
+export type ReviewMessage = Readonly<{ id: string; actor: ReviewActor; at: string; body: string; edits?: readonly ReviewMessageEdit[] }>
 export type ReviewSubmission = Readonly<{
 	id: string
 	actor: ReviewActor
@@ -69,9 +80,73 @@ const REVIEW_RESOLUTION_SET = new Set<string>(REVIEW_RESOLUTIONS)
 
 /** First Workspace schemaVersion that decodes `resolution` on lifecycle events and thread `displayHint`. */
 export const REVIEW_SCHEMA_V2 = 2
+/** First Workspace schemaVersion that decodes the Workspace anchor arm and message `edits[]`. */
+export const REVIEW_SCHEMA_V3 = 3
 
 function decodesReviewV2(schemaVersion: number): boolean {
 	return schemaVersion >= REVIEW_SCHEMA_V2
+}
+
+function decodesReviewV3(schemaVersion: number): boolean {
+	return schemaVersion >= REVIEW_SCHEMA_V3
+}
+
+export function isWorkspaceAnchor(anchor: ReviewAnchor | undefined | null): anchor is ReviewWorkspaceAnchor {
+	return typeof anchor === 'object' && anchor !== null && Object.hasOwn(anchor, 'scope') && (anchor as ReviewWorkspaceAnchor).scope === 'workspace'
+}
+
+export function isWidgetAnchor(anchor: ReviewAnchor | undefined | null): anchor is ReviewWidgetAnchor {
+	return typeof anchor === 'object' && anchor !== null && !Object.hasOwn(anchor, 'scope') && typeof (anchor as ReviewWidgetAnchor).viewId === 'string'
+}
+
+/** The anchored View id, or undefined for a Workspace thread. */
+export function anchorViewId(anchor: ReviewAnchor | undefined | null): string | undefined {
+	return isWidgetAnchor(anchor) ? anchor.viewId : undefined
+}
+
+/** The anchored Widget id, or undefined for a Workspace thread. */
+export function anchorWidgetId(anchor: ReviewAnchor | undefined | null): string | undefined {
+	return isWidgetAnchor(anchor) ? anchor.widgetId : undefined
+}
+
+/** When the message was last edited, derived from `edits[]` (never stored). */
+export function messageEditedAt(message: Pick<ReviewMessage, 'edits'>): string | undefined {
+	return Array.isArray(message.edits) ? message.edits.at(-1)?.at : undefined
+}
+
+export type ReviewFormalAct = Readonly<{ by: 'submission' | 'resolution'; id: string; at: string }>
+export type ReviewMessageFreeze = Readonly<{ frozen: false } | ({ frozen: true } & ReviewFormalAct)>
+
+/**
+ * The freeze rule (owner decision O2): a message is frozen permanently once any ready-for-review
+ * submission, or any lifecycle event entering `resolved`, exists at or after the message's `at`.
+ * Reopening never unfreezes it. Reports the earliest such formal act.
+ */
+export function isMessageFrozen(thread: Pick<ReviewThread, 'messages' | 'submissions' | 'history'>, messageId: string): ReviewMessageFreeze {
+	const message = thread.messages?.find(candidate => candidate.id === messageId)
+	if (!message) return { frozen: false }
+	const act = earliestFormalActBetween(thread, Date.parse(message.at), Number.POSITIVE_INFINITY)
+	return act ? { frozen: true, ...act } : { frozen: false }
+}
+
+function earliestFormalActBetween(
+	thread: Readonly<{ submissions?: readonly unknown[]; history?: readonly unknown[] }>,
+	fromMs: number,
+	toMs: number,
+): ReviewFormalAct | undefined {
+	if (!Number.isFinite(fromMs)) return undefined
+	let found: (ReviewFormalAct & { ms: number }) | undefined
+	const consider = (by: 'submission' | 'resolution', id: unknown, at: unknown) => {
+		if (typeof id !== 'string' || typeof at !== 'string') return
+		const ms = Date.parse(at)
+		if (!Number.isFinite(ms) || ms < fromMs || ms > toMs) return
+		if (!found || ms < found.ms) found = { by, id, at, ms }
+	}
+	for (const submission of Array.isArray(thread.submissions) ? thread.submissions : [])
+		if (isObject(submission)) consider('submission', submission.id, submission.at)
+	for (const event of Array.isArray(thread.history) ? thread.history : [])
+		if (isObject(event) && event.kind === 'lifecycle' && event.to === 'resolved') consider('resolution', event.id, event.at)
+	return found && { by: found.by, id: found.id, at: found.at }
 }
 
 export function isReviewResolution(value: unknown): value is ReviewResolution {
@@ -106,6 +181,7 @@ export function validateReviewThread(input: unknown, context: ReviewDecodeContex
 		return v.finish<ReviewThread>(input)
 	const { filename } = context
 	const v2 = decodesReviewV2(context.schemaVersion)
+	const v3 = decodesReviewV3(context.schemaVersion)
 	validateJsonValue(input, '', v)
 	rejectUnknownKeys(thread, v2
 		? ['id', 'anchor', 'variantNames', 'displayHint', 'status', 'messages', 'history', 'submissions']
@@ -116,17 +192,23 @@ export function validateReviewThread(input: unknown, context: ReviewDecodeContex
 		if (!match || match[1] !== thread.id)
 			v.issue('identity.filename_id_mismatch', '/id', 'Review filename UUID must exactly match the immutable id.')
 	}
-	validateAnchor(thread.anchor, '/anchor', v)
+	const workspaceArm = validateAnchor(thread.anchor, '/anchor', v, v3) === 'workspace'
 	const variantNames = validateStringArray(thread.variantNames, '/variantNames', v)
 	if (variantNames) validateUnique(variantNames, '/variantNames', v)
-	if (v2 && Object.hasOwn(thread, 'displayHint')) validateDisplayHint(thread.displayHint, '/displayHint', v)
+	if (workspaceArm && variantNames && variantNames.length > 0)
+		v.issue('review.workspace_anchor_variants', '/variantNames', 'A Workspace-scoped thread has no Variant scope; variantNames must be [].')
+	if (v2 && Object.hasOwn(thread, 'displayHint')) {
+		if (workspaceArm)
+			v.issue('review.display_hint_without_widget', '/displayHint', 'A Workspace-scoped thread has no Widget, so it carries no display hint.')
+		else validateDisplayHint(thread.displayHint, '/displayHint', v)
+	}
 	const status = validateReviewStatus(thread.status, '/status', v)
 
 	const messages = v.array(thread.messages, '/messages')
 	const messageIds = new Set<string>()
 	messages?.forEach((message, index) => {
 		const path = jsonPointer('/messages', index)
-		const parsed = validateReviewMessage(message, path)
+		const parsed = validateReviewMessage(message, path, v3)
 		v.diagnostics.push(...parsed.diagnostics)
 		if (isObjectWithStringId(message)) {
 			if (messageIds.has(message.id)) v.issue('identity.duplicate_uuid', `${path}/id`, 'Review message UUID is duplicated.')
@@ -151,7 +233,7 @@ export function validateReviewThread(input: unknown, context: ReviewDecodeContex
 	const lifecycleEvents: { event: Record<string, unknown>; index: number }[] = []
 	history?.forEach((entry, index) => {
 		const path = jsonPointer('/history', index)
-		const parsed = validateReviewHistoryEvent(entry, path, v2)
+		const parsed = validateReviewHistoryEvent(entry, path, v2, v3)
 		v.diagnostics.push(...parsed.diagnostics)
 		if (isObjectWithStringId(entry)) {
 			if (historyIds.has(entry.id)) v.issue('identity.duplicate_uuid', `${path}/id`, 'Review history event UUID is duplicated.')
@@ -165,6 +247,12 @@ export function validateReviewThread(input: unknown, context: ReviewDecodeContex
 		if (!isObjectWithStringId(message)) continue
 		if (allIds.has(message.id)) v.issue('identity.duplicate_uuid', `/messages/${index}/id`, 'Review resource identities are globally unique within the thread.')
 		allIds.add(message.id)
+		if (!v3 || !Array.isArray(message.edits)) continue
+		for (const [editIndex, edit] of message.edits.entries()) {
+			if (!isObjectWithStringId(edit)) continue
+			if (allIds.has(edit.id)) v.issue('identity.duplicate_uuid', `/messages/${index}/edits/${editIndex}/id`, 'Review resource identities are globally unique within the thread.')
+			allIds.add(edit.id)
+		}
 	}
 	for (const [index, submission] of (submissions ?? []).entries()) {
 		if (!isObjectWithStringId(submission)) continue
@@ -177,20 +265,85 @@ export function validateReviewThread(input: unknown, context: ReviewDecodeContex
 		allIds.add(event.id)
 	}
 	validateCurrentAnchorAgainstHistory(thread.anchor, thread.variantNames, history, v)
+	if (v3) messages?.forEach((message, index) => validateMessageEditRules(message, jsonPointer('/messages', index), submissions, history, v))
 
 	return v.finish<ReviewThread>(input)
 }
 
-function validateReviewMessage(input: unknown, path: string): ValidationResult<ReviewMessage> {
+function validateReviewMessage(input: unknown, path: string, v3: boolean): ValidationResult<ReviewMessage> {
 	const v = new Validator()
 	const message = v.object(input, path)
 	if (!message) return v.finish<ReviewMessage>(input)
-	rejectUnknownKeys(message, ['id', 'actor', 'at', 'body'], path, v)
+	rejectUnknownKeys(message, v3 ? ['id', 'actor', 'at', 'body', 'edits'] : ['id', 'actor', 'at', 'body'], path, v)
 	validateUuid(message.id, `${path}/id`, v, 'Review message id')
 	validateActor(message.actor, `${path}/actor`, v)
 	validateUtcTimestamp(message.at, `${path}/at`, v)
 	v.string(message.body, `${path}/body`)
+	if (v3 && Object.hasOwn(message, 'edits')) {
+		const edits = v.array(message.edits, `${path}/edits`)
+		if (edits && edits.length === 0)
+			v.issue('review.message_edits_empty', `${path}/edits`, 'A message that was never edited omits edits instead of writing [].')
+		edits?.forEach((entry, index) => {
+			const editPath = jsonPointer(`${path}/edits`, index)
+			const edit = v.object(entry, editPath)
+			if (!edit) return
+			rejectUnknownKeys(edit, ['id', 'actor', 'at', 'previousBody'], editPath, v)
+			validateUuid(edit.id, `${editPath}/id`, v, 'Review message edit id')
+			validateActor(edit.actor, `${editPath}/actor`, v)
+			validateUtcTimestamp(edit.at, `${editPath}/at`, v)
+			v.string(edit.previousBody, `${editPath}/previousBody`)
+		})
+	}
 	return v.finish<ReviewMessage>(input)
+}
+
+/**
+ * Message edit rules 13.3–13.6 (schemaVersion >= 3): the author invariant, edit order, the freeze
+ * rule against later submissions and resolutions, and the content rules. They read only the
+ * thread's own submissions and history, so no cross-resource read is needed.
+ */
+function validateMessageEditRules(
+	input: unknown,
+	path: string,
+	submissions: readonly unknown[] | undefined,
+	history: readonly unknown[] | undefined,
+	v: Validator,
+): void {
+	if (!isObject(input) || !Array.isArray(input.edits) || input.edits.length === 0) return
+	const edits = input.edits.filter(isObject)
+	if (edits.length !== input.edits.length) return
+	const author = isObject(input.actor) ? input.actor : undefined
+	if (typeof author?.id !== 'string' || author.id.length === 0)
+		v.issue('review.message_edit_not_author', `${path}/actor/id`, 'Only a message with an identified author can be edited.')
+	else edits.forEach((edit, index) => {
+		const actor = isObject(edit.actor) ? edit.actor : undefined
+		if (actor?.id !== author.id || actor?.type !== author.type)
+			v.issue('review.message_edit_not_author', `${path}/edits/${index}/actor`, 'Only the author of a message may edit it.')
+	})
+	const messageMs = Date.parse(typeof input.at === 'string' ? input.at : '')
+	let previousMs = messageMs
+	edits.forEach((edit, index) => {
+		const ms = Date.parse(typeof edit.at === 'string' ? edit.at : '')
+		if (!Number.isFinite(ms) || !Number.isFinite(previousMs)) return
+		if (index === 0 ? ms <= previousMs : ms < previousMs)
+			v.issue('review.message_edit_out_of_order', `${path}/edits/${index}/at`, 'Edits come after the message and after each other, in order.')
+		previousMs = ms
+	})
+	edits.forEach((edit, index) => {
+		const ms = Date.parse(typeof edit.at === 'string' ? edit.at : '')
+		if (!Number.isFinite(ms)) return
+		const act = earliestFormalActBetween({ submissions, history }, messageMs, ms)
+		if (act)
+			v.issue('review.message_edit_after_formal_act', `${path}/edits/${index}`,
+				`A message cannot be edited after a later ${act.by === 'submission' ? 'ready-for-review submission' : 'resolution'} (${act.id}); reply instead.`)
+	})
+	if (typeof input.body === 'string' && input.body.trim().length === 0)
+		v.issue('review.message_body_empty', `${path}/body`, 'An edited message keeps non-empty text; editing never deletes a message.')
+	edits.forEach((edit, index) => {
+		const replacement = index + 1 < edits.length ? edits[index + 1]!.previousBody : input.body
+		if (typeof edit.previousBody === 'string' && edit.previousBody === replacement)
+			v.issue('review.message_edit_noop', `${path}/edits/${index}/previousBody`, 'An edit must change the message text.')
+	})
 }
 
 function validateReviewSubmission(input: unknown, path: string): ValidationResult<ReviewSubmission> {
@@ -228,7 +381,7 @@ function validateReviewSubmission(input: unknown, path: string): ValidationResul
 	return v.finish<ReviewSubmission>(input)
 }
 
-function validateReviewHistoryEvent(input: unknown, path: string, v2: boolean): ValidationResult<ReviewHistoryEvent> {
+function validateReviewHistoryEvent(input: unknown, path: string, v2: boolean, v3: boolean): ValidationResult<ReviewHistoryEvent> {
 	const v = new Validator()
 	const event = v.object(input, path)
 	if (!event) return v.finish<ReviewHistoryEvent>(input)
@@ -281,8 +434,8 @@ function validateReviewHistoryEvent(input: unknown, path: string, v2: boolean): 
 	}
 	else if (event.kind === 'reanchor') {
 		rejectUnknownKeys(event, ['id', 'kind', 'actor', 'at', 'before', 'after', 'reason'], path, v)
-		validateAnchorScope(event.before, `${path}/before`, v)
-		validateAnchorScope(event.after, `${path}/after`, v)
+		validateAnchorScope(event.before, `${path}/before`, v, v3)
+		validateAnchorScope(event.after, `${path}/after`, v, v3)
 	}
 	else {
 		v.issue('review.invalid_history_kind', `${path}/kind`, 'History kind must identify a lifecycle or reanchor event.')
@@ -390,21 +543,37 @@ function validateCurrentAnchorAgainstHistory(
 			'Current anchor and Variant scope must match the latest append-only re-anchor event.')
 }
 
-function validateAnchor(value: unknown, path: string, v: Validator): void {
+/**
+ * Decodes the anchor union. Under schemaVersion >= 3 an object with `scope` is the Workspace arm
+ * (closed `['scope']`, `scope === "workspace"`); anything else is the closed Widget arm. Under 1–2
+ * only the Widget arm exists, so `scope` is an unknown field there.
+ */
+function validateAnchor(value: unknown, path: string, v: Validator, v3: boolean): 'widget' | 'workspace' | undefined {
 	const anchor = v.object(value, path)
-	if (!anchor) return
+	if (!anchor) return undefined
+	if (v3 && Object.hasOwn(anchor, 'scope')) {
+		rejectUnknownKeys(anchor, ['scope'], path, v)
+		if (anchor.scope !== 'workspace') {
+			v.issue('review.invalid_anchor_scope', `${path}/scope`, 'Anchor scope must be "workspace"; a Widget anchor is { viewId, widgetId }.')
+			return undefined
+		}
+		return 'workspace'
+	}
 	rejectUnknownKeys(anchor, ['viewId', 'widgetId'], path, v)
 	validateUuid(anchor.viewId, `${path}/viewId`, v, 'anchor viewId')
 	v.string(anchor.widgetId, `${path}/widgetId`, true)
+	return 'widget'
 }
 
-function validateAnchorScope(value: unknown, path: string, v: Validator): void {
+function validateAnchorScope(value: unknown, path: string, v: Validator, v3: boolean): void {
 	const scope = v.object(value, path)
 	if (!scope) return
 	rejectUnknownKeys(scope, ['anchor', 'variantNames'], path, v)
-	validateAnchor(scope.anchor, `${path}/anchor`, v)
+	const arm = validateAnchor(scope.anchor, `${path}/anchor`, v, v3)
 	const names = validateStringArray(scope.variantNames, `${path}/variantNames`, v)
 	if (names) validateUnique(names, `${path}/variantNames`, v)
+	if (arm === 'workspace' && names && names.length > 0)
+		v.issue('review.workspace_anchor_variants', `${path}/variantNames`, 'A Workspace-scoped anchor has no Variant scope; variantNames must be [].')
 }
 
 function validateActor(value: unknown, path: string, v: Validator): void {
@@ -504,8 +673,12 @@ function isObjectWithStringId(value: unknown): value is Record<string, unknown> 
 	return isObject(value) && typeof value.id === 'string'
 }
 
+/** Arm-aware: two Workspace anchors are equal; a Workspace anchor never equals a Widget anchor. */
 function sameAnchor(left: unknown, right: unknown): boolean {
 	if (!isObject(left) || !isObject(right)) return false
+	const leftScoped = Object.hasOwn(left, 'scope')
+	const rightScoped = Object.hasOwn(right, 'scope')
+	if (leftScoped || rightScoped) return leftScoped && rightScoped && left.scope === right.scope
 	return left.viewId === right.viewId && left.widgetId === right.widgetId
 }
 

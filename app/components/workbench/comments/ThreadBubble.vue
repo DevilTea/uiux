@@ -5,14 +5,19 @@ import type { DropdownMenuItem } from '@nuxt/ui'
 import { useWorkbench } from '../../../composables/useWorkbench'
 import { relativeTime } from '../../../utils/widget-inspection'
 import { useWorkbenchFeedback } from '../../../composables/useWorkbenchFeedback'
-import { threadAuthorInitials, statusKey, useCanvasComments } from '../../../composables/useCanvasComments'
-import type { ReviewActor, ReviewResolution } from '../../../../src/domain/reviews/schema'
+import { statusKey, useCanvasComments } from '../../../composables/useCanvasComments'
+import { isWorkspaceAnchor, type ReviewActor, type ReviewAnchor, type ReviewResolution } from '../../../../src/domain/reviews/schema'
 import { flattenWidgetTree } from '../../../../src/preview/widget-tree'
 import { buildReviewTimeline, type ReviewTimelineItem } from '../../../utils/review-timeline'
+import { isDismissal } from '../../../utils/review-inbox'
+import { resolveMenuGroups } from '../../../utils/resolve-menu'
+import { latestEditableMessageId, retractEligibility } from '../../../utils/review-message-actions'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../../composables/useMediaQuery'
 import { isLockedError, type FetchErrorDetails } from '../../../utils/fetch-error'
 import type { ReviewSubmissionDraft } from '../../../utils/review-submission'
 import LockedSaveAlert from '../LockedSaveAlert.vue'
+import RetractConfirm from '../RetractConfirm.vue'
+import ReviewMessage from '../ReviewMessage.vue'
 import SubmitForReviewModal from '../SubmitForReviewModal.vue'
 
 /**
@@ -38,9 +43,10 @@ const widgetType = computed(() => {
 	return tree?.status === 'valid' && id ? flattenWidgetTree(tree.root).find(node => node.id === id)?.type : undefined
 })
 
-const status = computed(() => statusKey(thread.value?.status ?? 'open'))
-const STATUS_ICON = { open: 'i-lucide-circle-dot', ready: 'i-lucide-eye', resolved: 'i-lucide-circle-check' } as const
-const STATUS_COLOR = { open: 'annotation', ready: 'info', resolved: 'success' } as const
+const status = computed(() => thread.value?.dismissed ? 'dismissed' : statusKey(thread.value?.status ?? 'open'))
+const STATUS_ICON = { open: 'i-lucide-circle-dot', ready: 'i-lucide-eye', resolved: 'i-lucide-circle-check', dismissed: 'i-lucide-circle-slash' } as const
+const STATUS_COLOR = { open: 'annotation', ready: 'info', resolved: 'success', dismissed: 'neutral' } as const
+const STATUS_LABEL = { open: 'thread.status.open', ready: 'thread.status.ready', resolved: 'thread.status.resolved', dismissed: 'inbox.group.dismissed' } as const
 
 function actorName(actor: ReviewActor | undefined): string {
 	return actor?.displayName ?? actor?.id ?? t('comments.unknownAuthor')
@@ -50,6 +56,10 @@ function shortId(id: string | undefined): string {
 }
 function resolutionLabel(resolution: ReviewResolution | undefined): string {
 	return t(`comments.resolution.${resolution ?? 'answered'}`)
+}
+/** A re-anchor end: `#widget`, or the Workspace. */
+function anchorText(anchor: ReviewAnchor): string {
+	return isWorkspaceAnchor(anchor) ? t('comments.workspaceTarget') : `#${anchor.widgetId}`
 }
 
 /** Why the pin is not on the canvas, said once in the bubble (multi-target decision 7). */
@@ -115,22 +125,63 @@ async function sendReply(): Promise<void> {
 }
 
 function onReplyKeydown(event: KeyboardEvent): void {
+	// ↑ in an empty reply box edits the viewer's latest editable message (scope/edit decision 16).
+	if (event.key === 'ArrowUp' && !reply.value && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey && detail.value) {
+		const messageId = latestEditableMessageId(detail.value, comments.me.value)
+		if (messageId) {
+			event.preventDefault()
+			editingMessageId.value = messageId
+		}
+		return
+	}
 	if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
 		event.preventDefault()
 		void sendReply()
 	}
 }
 
-/** The menu of non-default resolutions; Obsolete leads (never pre-selected) when the anchor is gone. */
-const resolveMenu = computed<DropdownMenuItem[][]>(() => {
-	const items: DropdownMenuItem[] = [
-		{ label: t('comments.resolution.wont-fix'), icon: 'i-lucide-circle-slash', onSelect: () => { void comments.resolve(props.threadId, 'wont-fix') } },
-		{ label: t('comments.resolveDuplicate'), icon: 'i-lucide-copy', onSelect: () => ask('duplicate') },
-		{ label: t('comments.resolution.obsolete'), icon: 'i-lucide-archive', onSelect: () => { void comments.resolve(props.threadId, 'obsolete') } },
-	]
-	if (thread.value?.anchorValid === false) items.unshift(items.pop()!)
-	return [items]
+/** Grouped: Resolve (Answered, Verified) and Dismiss (No longer relevant, Duplicate…, Won't do). */
+const resolveMenu = computed<DropdownMenuItem[][]>(() => resolveMenuGroups({
+	t,
+	status: thread.value?.status ?? 'open',
+	canVerify: !!activeSubmission.value,
+	resolve: (resolution) => { void comments.resolve(props.threadId, resolution) },
+	askDuplicate: () => ask('duplicate'),
+}))
+
+// Editing a message inline (scope/edit decisions 11–16)
+const editingMessageId = computed<string | undefined>({
+	get: () => comments.editingMessage.value?.threadId === props.threadId ? comments.editingMessage.value.messageId : undefined,
+	set: (messageId) => {
+		comments.editingMessage.value = messageId ? { threadId: props.threadId, messageId } : undefined
+		if (!messageId) void nextTick(() => replyArea.value?.textareaRef?.focus({ preventScroll: true }))
+	},
 })
+async function saveEdit(messageId: string, body: string): Promise<void> {
+	if (await comments.editMessage(props.threadId, messageId, body)) void nextTick(() => replyArea.value?.textareaRef?.focus({ preventScroll: true }))
+}
+
+// Delete comment (retract addendum decision 8): only while eligible, confirmed inline
+const retract = computed(() => comments.canComment.value ? retractEligibility(detail.value, comments.me.value) : { eligible: false as const })
+const confirmingDelete = ref(false)
+const deleteRefused = computed(() => comments.retractRefused.value === props.threadId)
+/** The menu would hand focus back to its trigger as it closes; the delete confirm keeps it on Cancel. */
+const retractConfirm = ref<InstanceType<typeof RetractConfirm>>()
+function keepConfirmFocus(event: Event): void {
+	if (!confirmingDelete.value) return
+	event.preventDefault()
+	void nextTick(() => retractConfirm.value?.focusCancel())
+}
+function askDelete(): void {
+	comments.retractRefused.value = undefined
+	pendingAction.value = undefined
+	confirmingDelete.value = true
+}
+async function confirmDelete(): Promise<void> {
+	await comments.retract(props.threadId)
+	confirmingDelete.value = false
+}
+watch(() => retract.value.eligible, (eligible) => { if (!eligible) confirmingDelete.value = false })
 
 // ---------------------------------------------------------------------------------------------
 // Overflow menu: Copy link, Re-anchor, Promote to Decision, Open in Reviews, Copy thread ID
@@ -200,14 +251,19 @@ async function submitForReview(draft: ReviewSubmissionDraft): Promise<boolean> {
 	return ok
 }
 
-const overflow = computed<DropdownMenuItem[][]>(() => [[
-	{ label: t('thread.copyLink'), icon: 'i-lucide-link', onSelect: () => { void copy(threadLink(), t('comments.copiedLink')) } },
-	...(canSubmit.value ? [{ label: t('thread.submit'), icon: 'i-lucide-eye', onSelect: () => { submitOpen.value = true } }] : []),
-	...(comments.canComment.value ? [{ label: t('thread.reanchor'), icon: 'i-lucide-crosshair', onSelect: startReanchor }] : []),
-	...(workbench.authorReadOnly.value ? [] : [{ label: t('thread.promote'), icon: 'i-lucide-signpost', onSelect: () => { promoteForm.question = thread.value?.title ?? ''; promoteOpen.value = true } }]),
-	{ label: t('comments.openInReviews'), icon: 'i-lucide-inbox', onSelect: () => { void navigateTo({ path: '/reviews', query: { thread: props.threadId } }) } },
-	{ label: t('comments.copyThreadId'), icon: 'i-lucide-copy', onSelect: () => { void copy(props.threadId, t('comments.copiedId')) } },
-]])
+const overflow = computed<DropdownMenuItem[][]>(() => {
+	const groups: DropdownMenuItem[][] = [[
+		{ label: t('thread.copyLink'), icon: 'i-lucide-link', onSelect: () => { void copy(threadLink(), t('comments.copiedLink')) } },
+		...(canSubmit.value ? [{ label: t('thread.submit'), icon: 'i-lucide-eye', onSelect: () => { submitOpen.value = true } }] : []),
+		...(comments.canComment.value ? [{ label: t('thread.reanchor'), icon: 'i-lucide-crosshair', onSelect: startReanchor }] : []),
+		...(workbench.authorReadOnly.value ? [] : [{ label: t('thread.promote'), icon: 'i-lucide-signpost', onSelect: () => { promoteForm.question = thread.value?.title ?? ''; promoteOpen.value = true } }]),
+		{ label: t('comments.openInReviews'), icon: 'i-lucide-inbox', onSelect: () => { void navigateTo({ path: '/reviews', query: { thread: props.threadId } }) } },
+		{ label: t('comments.copyThreadId'), icon: 'i-lucide-copy', onSelect: () => { void copy(props.threadId, t('comments.copiedId')) } },
+	]]
+	if (retract.value.eligible)
+		groups.push([{ label: retract.value.empty ? t('comments.deleteEmpty') : t('comments.delete'), icon: 'i-lucide-trash-2', color: 'error', onSelect: askDelete }])
+	return groups
+})
 
 function switchVariant(name: string): void {
 	selectedVariant.value = name
@@ -225,6 +281,7 @@ onMounted(() => {
 })
 watch(() => props.threadId, () => {
 	pendingAction.value = undefined
+	confirmingDelete.value = false
 	if (comments.browsingPins.value) return
 	void nextTick(() => (replyArea.value?.textareaRef ?? root.value)?.focus({ preventScroll: true }))
 })
@@ -245,7 +302,7 @@ watch(() => props.threadId, () => {
         variant="soft"
         size="sm"
         :icon="STATUS_ICON[status]"
-        :label="t(`thread.status.${status}`)"
+        :label="t(STATUS_LABEL[status])"
         class="shrink-0"
       />
       <span
@@ -257,7 +314,7 @@ watch(() => props.threadId, () => {
       <span class="flex-1" />
       <UDropdownMenu
         :items="overflow"
-        :content="{ align: 'end' }"
+        :content="{ align: 'end', onCloseAutoFocus: keepConfirmFocus }"
       >
         <UButton
           color="neutral"
@@ -362,34 +419,25 @@ watch(() => props.threadId, () => {
         :data-timeline-kind="item.kind"
       >
         <template v-if="item.kind === 'message'">
-          <UAvatar
-            :text="item.actor.type === 'agent' ? undefined : threadAuthorInitials(item.actor)"
-            :icon="item.actor.type === 'agent' ? 'i-lucide-bot' : undefined"
-            size="xs"
-            aria-hidden="true"
-          />
-          <span class="flex flex-wrap items-center gap-1.5 text-xs text-muted">
-            <b class="text-sm font-semibold text-highlighted">{{ actorName(item.actor) }}</b>
-            <UBadge
-              v-if="item.actor.type === 'agent'"
-              color="neutral"
-              variant="soft"
-              size="sm"
-              :label="t('comments.agent')"
-            />
-            <time :datetime="item.at">{{ relativeTime(item.at, locale) }}</time>
-          </span>
-          <p
-            class="col-start-2 text-sm leading-normal break-words whitespace-pre-wrap text-default"
-            v-text="item.body"
+          <ReviewMessage
+            v-if="detail"
+            :item="item"
+            :thread="detail"
+            :me="comments.me.value"
+            :can-edit="comments.canComment.value"
+            compact
+            :editing="editingMessageId === item.id"
+            :saving="comments.busy.value === 'edit' && editingMessageId === item.id"
+            @update:editing="(on: boolean) => { editingMessageId = on ? item.id : undefined }"
+            @save="(body: string) => saveEdit(item.id, body)"
           />
         </template>
         <template v-else>
           <span class="grid w-6 place-items-center pt-0.5 text-dimmed">
             <UIcon
-              :name="item.kind === 'submission' ? 'i-lucide-git-pull-request-arrow' : item.kind === 'resolved' ? 'i-lucide-circle-check' : item.kind === 'reopened' ? 'i-lucide-rotate-ccw' : 'i-lucide-crosshair'"
+              :name="item.kind === 'submission' ? 'i-lucide-git-pull-request-arrow' : item.kind === 'resolved' ? (isDismissal(item.resolution) ? 'i-lucide-circle-slash' : 'i-lucide-circle-check') : item.kind === 'reopened' ? 'i-lucide-rotate-ccw' : 'i-lucide-crosshair'"
               class="size-3.5"
-              :class="item.kind === 'resolved' ? 'text-success' : ''"
+              :class="item.kind === 'resolved' && !isDismissal(item.resolution) ? 'text-success' : ''"
             />
           </span>
           <div class="text-xs text-muted">
@@ -424,7 +472,7 @@ watch(() => props.threadId, () => {
             <template v-else-if="item.kind === 'resolved'">
               {{ item.resolution === 'verified'
                 ? t('comments.resolvedVerified', { name: actorName(item.actor), id: shortId(item.submissionId) })
-                : t('comments.resolvedAs', { resolution: resolutionLabel(item.resolution), name: actorName(item.actor) }) }}
+                : t(isDismissal(item.resolution) ? 'comments.dismissedAs' : 'comments.resolvedAs', { resolution: resolutionLabel(item.resolution), name: actorName(item.actor) }) }}
               · <time :datetime="item.at">{{ relativeTime(item.at, locale) }}</time>
               <span
                 v-if="item.reason"
@@ -439,14 +487,33 @@ watch(() => props.threadId, () => {
               >{{ item.reason }}</span>
             </template>
             <template v-else>
-              {{ t('comments.reanchoredEvent', { from: `#${item.from.widgetId}`, to: `#${item.to.widgetId}` }) }} · <time :datetime="item.at">{{ relativeTime(item.at, locale) }}</time>
+              {{ t('comments.reanchoredEvent', { from: anchorText(item.from), to: anchorText(item.to) }) }} · <time :datetime="item.at">{{ relativeTime(item.at, locale) }}</time>
             </template>
           </div>
         </template>
       </li>
     </ol>
 
-    <template v-if="comments.canComment.value && thread.status !== 'resolved'">
+    <UAlert
+      v-if="deleteRefused"
+      color="warning"
+      variant="subtle"
+      icon="i-lucide-message-circle-warning"
+      :title="t('comments.errors.deleteEngaged')"
+      :ui="{ title: 'text-sm' }"
+      role="alert"
+      data-retract-refused
+    />
+    <RetractConfirm
+      v-if="confirmingDelete"
+      ref="retractConfirm"
+      compact
+      :busy="comments.busy.value === 'retract'"
+      @cancel="confirmingDelete = false"
+      @confirm="confirmDelete"
+    />
+
+    <template v-else-if="comments.canComment.value && thread.status !== 'resolved'">
       <UTextarea
         ref="replyArea"
         v-model="reply"
@@ -485,7 +552,7 @@ watch(() => props.threadId, () => {
     </template>
 
     <div
-      v-if="pendingAction"
+      v-if="pendingAction && !confirmingDelete"
       class="grid gap-2 rounded-md bg-muted p-2"
       data-thread-reason
     >
@@ -517,7 +584,7 @@ watch(() => props.threadId, () => {
       </div>
     </div>
 
-    <template v-else-if="comments.canComment.value">
+    <template v-else-if="comments.canComment.value && !confirmingDelete">
       <!-- Open: one-click Resolve answers the discussion; the menu offers the other kinds. -->
       <div
         v-if="thread.status !== 'resolved'"

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useI18n } from '#imports'
+import { navigateTo, useI18n, useRoute } from '#imports'
 import type { CommandPaletteGroup, CommandPaletteItem } from '@nuxt/ui'
+import { isWidgetAnchor, isWorkspaceAnchor } from '../../../src/domain/reviews/schema'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
 import { flowPath, viewLocation } from '../../utils/workbench-routes'
@@ -11,6 +12,7 @@ const { t } = useI18n()
 const workbench = useWorkbench()
 const shell = useWorkbenchShell()
 const { views, flows, reviews } = workbench
+const route = useRoute()
 
 function statusLabel(status: string | undefined): string {
 	if (status === 'resolved') return t('reviews.status.resolved')
@@ -57,14 +59,20 @@ const groups = computed<CommandPaletteGroup<CommandPaletteItem>[]>(() => {
 		{
 			id: 'threads',
 			label: t('palette.threads'),
-			items: reviews.value
-				.filter(review => review.summary.anchor)
-				.map(review => ({
-					label: review.summary.anchor!.widgetId === 'root' ? t('comments.viewTarget') : `#${review.summary.anchor!.widgetId}`,
-					suffix: `${viewNames.get(review.summary.anchor!.viewId) ?? review.summary.anchor!.viewId} · ${statusLabel(review.summary.status)}`,
-					icon: review.summary.status === 'resolved' ? 'i-lucide-circle-check' : review.summary.status === 'ready-for-review' ? 'i-lucide-eye' : 'i-lucide-circle-dot',
-					to: viewLocation(review.summary.anchor!.viewId, { thread: review.key, panel: 'comments' }),
-				})),
+			items: reviews.value.flatMap((review) => {
+				const anchor = review.summary.anchor
+				const icon = review.summary.status === 'resolved' ? 'i-lucide-circle-check' : review.summary.status === 'ready-for-review' ? 'i-lucide-eye' : 'i-lucide-circle-dot'
+				// A Workspace comment lives in Reviews only; its link is `/reviews?thread=<id>`.
+				if (isWorkspaceAnchor(anchor))
+					return [{ label: t('comments.workspaceComment'), suffix: statusLabel(review.summary.status), icon, to: { path: '/reviews', query: { thread: review.key } } }]
+				if (!isWidgetAnchor(anchor)) return []
+				return [{
+					label: anchor.widgetId === 'root' ? t('comments.viewTarget') : `#${anchor.widgetId}`,
+					suffix: `${viewNames.get(anchor.viewId) ?? anchor.viewId} · ${statusLabel(review.summary.status)}`,
+					icon,
+					to: viewLocation(anchor.viewId, { thread: review.key, panel: 'comments' }),
+				}]
+			}),
 		},
 	]
 	const canvas = shell.canvasCommands.value
@@ -92,6 +100,18 @@ const groups = computed<CommandPaletteGroup<CommandPaletteItem>[]>(() => {
 			{ label: t('palette.toggleComment'), icon: 'i-lucide-message-circle-plus', kbds: toolBlocked ? undefined : ['C'], disabled: !!toolBlocked, suffix: toolBlocked, onSelect: () => canvas.selectTool('comment') },
 			{ label: t('comments.commentOnView'), icon: 'i-lucide-message-square-plus', disabled: !!viewBlocked, suffix: viewBlocked, onSelect: () => canvas.commentOnView() },
 		)
+	}
+	// "Comment on Workspace" (scope/edit decision 8): opens the inbox composer, offering the View
+	// the reviewer is on as the other choice. Viewers see it disabled, with the reason.
+	if (!workbench.isReadOnly.value) {
+		const fromView = route.path.startsWith('/views/') ? workbench.selectedViewId.value : undefined
+		actions.push({
+			label: t('palette.commentOnWorkspace'),
+			icon: 'i-lucide-globe',
+			disabled: workbench.reviewReadOnly.value,
+			...(workbench.reviewReadOnly.value ? { suffix: t('inbox.readOnly') } : {}),
+			onSelect: () => { void navigateTo({ path: '/reviews', query: { compose: 'workspace', ...(fromView ? { from: fromView } : {}) } }) },
+		})
 	}
 	actions.push(
 		{ label: t('palette.toggleTheme'), icon: 'i-lucide-sun-moon', kbds: ['meta', '.'], onSelect: () => shell.toggleWorkbenchTheme() },

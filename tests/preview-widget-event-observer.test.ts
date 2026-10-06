@@ -266,7 +266,7 @@ async function tapWorkspace(): Promise<string> {
 	await mkdir(join(root, 'node_modules', '@deviltea'), { recursive: true })
 	for (const name of ['@deviltea/widget-core', '@deviltea/widget-vue', 'vue'])
 		await symlink(join(process.cwd(), 'node_modules', name), join(root, 'node_modules', name)).catch(() => undefined)
-	await writeFile(join(root, '.uiux', 'workspace.json'), JSON.stringify({ schemaVersion: 2, i18n: { defaultLocale: 'en-US' }, adapters: [{ moduleSpecifier: './adapters/tap.mjs' }], viewports: {}, themes: {} }))
+	await writeFile(join(root, '.uiux', 'workspace.json'), JSON.stringify({ schemaVersion: 3, i18n: { defaultLocale: 'en-US' }, adapters: [{ moduleSpecifier: './adapters/tap.mjs' }], viewports: {}, themes: {} }))
 	await writeFile(join(root, 'adapters', 'tap.mjs'), tapAdapterSource())
 	return root
 }

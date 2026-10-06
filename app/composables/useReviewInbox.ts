@@ -1,12 +1,13 @@
 import { computed, effectScope, inject, nextTick, provide, ref, shallowRef, watch, type InjectionKey } from 'vue'
 import { navigateTo, useI18n, useRoute, useRouter } from '#imports'
-import type { ReviewResolution, ReviewThread } from '../../src/domain/reviews/schema'
+import { anchorViewId, type ReviewResolution, type ReviewThread } from '../../src/domain/reviews/schema'
 import { deriveWidgetTree, flattenWidgetTree } from '../../src/preview/widget-tree'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
 import {
 	buildInboxThread,
 	groupInbox,
 	inboxQuery,
+	isDismissal,
 	isUnreadThread,
 	matchesInboxFacets,
 	matchesInboxFilter,
@@ -40,8 +41,20 @@ const SEEN_STORAGE_PREFIX = 'uiux.reviews.seen:'
 const MAX_PAGES = 20
 const READ_BATCH = 8
 
-async function post(url: string, body: Record<string, unknown>): Promise<unknown> {
-	return await $fetch(url, { method: 'POST', body })
+type MutationResponse = Readonly<{ status?: string; key?: string; revision?: string }>
+
+async function post(url: string, body: Record<string, unknown>): Promise<MutationResponse> {
+	return await $fetch<MutationResponse>(url, { method: 'POST', body })
+}
+
+/** PUT and DELETE (edit a message, retract a thread); the route is a plain string so typed-route inference stays shallow. */
+async function send(url: string, method: 'PUT' | 'DELETE', body: Record<string, unknown>): Promise<MutationResponse> {
+	return await $fetch<MutationResponse>(url, { method, body })
+}
+
+/** The coded refusal of a failed mutation, from its diagnostics. */
+function refusalCode(details: FetchErrorDetails): string | undefined {
+	return details.diagnostics.find(item => item.code)?.code
 }
 
 function readSeen(key: string): SeenMarks {
@@ -114,6 +127,8 @@ function createReviewInbox() {
 		if (id === selectedId.value) return
 		conflict.value = undefined
 		lastError.value = undefined
+		retractRefused.value = undefined
+		editingMessage.value = undefined
 		replaceQuery(filter.value, id)
 	}
 
@@ -142,6 +157,7 @@ function createReviewInbox() {
 					if (!cursor) break
 				}
 				reviews.value = items
+				pruneSeen(items.map(item => item.key))
 			}
 			loadError.value = undefined
 		}
@@ -190,7 +206,7 @@ function createReviewInbox() {
 
 	const viewIr = shallowRef<ReadonlyMap<string, ViewIrInfo>>(new Map())
 	async function loadViews(): Promise<void> {
-		const ids = new Set(reviews.value.map(review => review.summary.anchor?.viewId).filter((id): id is string => !!id))
+		const ids = new Set(reviews.value.map(review => anchorViewId(review.summary.anchor)).filter((id): id is string => !!id))
 		const wanted = views.value.filter(view => ids.has(view.key) && viewIr.value.get(view.key)?.revision !== view.revision)
 		if (!wanted.length) return
 		const reads = await Promise.all(wanted.map(view => uiux.readResource<ViewRead>('view', view.key).catch(() => undefined)))
@@ -206,7 +222,7 @@ function createReviewInbox() {
 		}
 		viewIr.value = next
 	}
-	watch(() => [views.value.map(view => `${view.key}@${view.revision}`).join(','), reviews.value.map(review => review.summary.anchor?.viewId).join(',')], () => { void loadViews() }, { immediate: true })
+	watch(() => [views.value.map(view => `${view.key}@${view.revision}`).join(','), reviews.value.map(review => anchorViewId(review.summary.anchor)).join(',')], () => { void loadViews() }, { immediate: true })
 
 	/** Anchored Views by id; undefined until the View list arrived, so nothing reads as missing early. */
 	const viewInfo = computed<ReadonlyMap<string, InboxViewInfo> | undefined>(() => {
@@ -243,6 +259,15 @@ function createReviewInbox() {
 	function isUnread(thread: InboxThread): boolean {
 		return isUnreadThread(thread, seen.value, me.value)
 	}
+	/** Marks of threads that no longer exist (retracted, or deleted out of band) are dropped lazily (T11). */
+	function pruneSeen(keys: readonly string[]): void {
+		const known = new Set(keys)
+		const kept = Object.fromEntries(Object.entries(seen.value).filter(([id]) => known.has(id)))
+		if (Object.keys(kept).length === Object.keys(seen.value).length) return
+		seen.value = kept
+		try { globalThis.localStorage?.setItem(seenKey.value, JSON.stringify(kept)) }
+		catch { /* storage unavailable */ }
+	}
 
 	// -------------------------------------------------------------------------------------------
 	// The queue
@@ -257,15 +282,15 @@ function createReviewInbox() {
 	const groups = computed(() => groupInbox(threads.value.filter(item => item.id === selectedId.value || matchesInboxFilter(item, filter.value, context.value))))
 	const ordered = computed(() => groups.value.flatMap(group => group.threads))
 
-	/** Per-status counts under every other filter, for the status tabs. */
+	/** Per-status counts under every other filter, for the status tabs (dismissed apart from resolved). */
 	const counts = computed(() => {
-		const result = { 'ready-for-review': 0, 'open': 0, 'resolved': 0 }
-		for (const item of threads.value) if (matchesInboxFacets(item, filter.value, context.value)) result[item.status]++
+		const result = { 'ready-for-review': 0, 'open': 0, 'resolved': 0, 'dismissed': 0 }
+		for (const item of threads.value) if (matchesInboxFacets(item, filter.value, context.value)) result[item.inboxStatus]++
 		return result
 	})
 	const totals = computed(() => {
-		const result = { 'ready-for-review': 0, 'open': 0, 'resolved': 0 }
-		for (const item of threads.value) result[item.status]++
+		const result = { 'ready-for-review': 0, 'open': 0, 'resolved': 0, 'dismissed': 0 }
+		for (const item of threads.value) result[item.inboxStatus]++
 		return result
 	})
 
@@ -322,6 +347,11 @@ function createReviewInbox() {
 				conflict.value = threadId
 				await loadSummaries()
 			}
+			else if (details.statusCode === 404) {
+				// The thread is gone (its author deleted it): say so, and drop it from the queue.
+				lastError.value = { threadId, error: { ...details, message: t('comments.gone') } }
+				await loadSummaries()
+			}
 			else lastError.value = { threadId, error: details }
 			return false
 		}
@@ -366,8 +396,103 @@ function createReviewInbox() {
 			...(resolution === 'verified' && submission ? { submissionId: submission.id } : {}),
 			...(reason?.trim() ? { reason: reason.trim() } : {}),
 		}), t('comments.errors.resolveFailed'))
-		if (ok) announce(t('inbox.announce.resolved', { resolution: t(`comments.resolution.${resolution}`) }))
+		if (ok) announce(t(isDismissal(resolution) ? 'inbox.announce.dismissed' : 'inbox.announce.resolved', { resolution: t(`comments.resolution.${resolution}`) }))
 		return ok
+	}
+
+	/** The message being edited inline, per thread view; one at a time. */
+	const editingMessage = ref<Readonly<{ threadId: string; messageId: string }>>()
+
+	/**
+	 * Edit the viewer's own message (scope/edit decisions 11–15). A `conflict` keeps the editor and
+	 * its text open: the thread is re-read and Save simply tries again on the new revision.
+	 */
+	async function editMessage(threadId: string, messageId: string, body: string): Promise<boolean> {
+		if (!canReply.value || !body.trim()) return false
+		const ok = await mutate(threadId, 'edit', revision => send(`/api/reviews/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}`, 'PUT', { expectedRevision: revision, body }), t('comments.errors.editFailed'))
+		if (ok) {
+			editingMessage.value = undefined
+			announce(t('comments.announce.edited'))
+		}
+		return ok
+	}
+
+	/** `retract_engaged` refusals, per thread: the confirm shows it and offers Dismiss instead. */
+	const retractRefused = ref<string>()
+
+	/**
+	 * Delete the viewer's own unengaged thread (retract addendum). `not_found` means it is already
+	 * gone, which counts as done; `retract_engaged` re-reads the thread and explains.
+	 */
+	/**
+	 * The last thread the viewer deleted, with the row that takes its place. The thread's detail
+	 * unmounts as soon as it leaves the queue, so the page reacts to this rather than to an event.
+	 */
+	const deleted = ref<Readonly<{ threadId: string; next: string | undefined; sequence: number }>>()
+	let deletedSequence = 0
+
+	async function retract(threadId: string): Promise<boolean> {
+		const item = threadById.value.get(threadId)
+		if (!item || !canReply.value || busy.value) return false
+		// The next row in the queue, read before the thread leaves it.
+		const next = successor(threadId)
+		busy.value = 'retract'
+		conflict.value = undefined
+		lastError.value = undefined
+		retractRefused.value = undefined
+		try {
+			await send(`/api/reviews/${encodeURIComponent(threadId)}`, 'DELETE', { expectedRevision: item.revision })
+		}
+		catch (cause) {
+			const details = describeFetchError(cause, t('comments.errors.deleteFailed'))
+			if (details.statusCode !== 404) {
+				if (refusalCode(details) === 'review.retract_engaged') retractRefused.value = threadId
+				else if (details.statusCode === 409 || details.status === 'conflict') conflict.value = threadId
+				else lastError.value = { threadId, error: details }
+				await loadSummaries()
+				busy.value = undefined
+				return false
+			}
+		}
+		deleted.value = { threadId, next, sequence: ++deletedSequence }
+		await loadSummaries()
+		busy.value = undefined
+		announce(t('comments.announce.deleted'))
+		return true
+	}
+
+	/**
+	 * A new comment from the inbox (scope/edit decision 8): the Workspace, or the root of the View
+	 * the reviewer came from. Two writes, as on the canvas; a failed first message keeps the text and
+	 * the created thread so Retry posts only the message.
+	 */
+	const composeState = ref<Readonly<{ created?: Readonly<{ key: string; revision: string }>; error?: FetchErrorDetails; posting: boolean }>>({ posting: false })
+	async function createComment(where: Readonly<{ scope: 'workspace' } | { viewId: string }>, body: string): Promise<string | undefined> {
+		const text = body.trim()
+		if (!text || !canReply.value || composeState.value.posting) return undefined
+		let created = composeState.value.created
+		composeState.value = { posting: true, ...(created ? { created } : {}) }
+		try {
+			if (!created) {
+				const anchor = 'scope' in where ? { scope: 'workspace' } : { viewId: where.viewId, widgetId: 'root' }
+				const response = await post('/api/reviews', { anchor })
+				if (!response.key || !response.revision) throw new Error(t('comments.errors.createFailed'))
+				created = { key: response.key, revision: response.revision }
+			}
+			await post(path(created.key, 'messages'), { expectedRevision: created.revision, body: text })
+			composeState.value = { posting: false }
+			await loadSummaries()
+			announce(t('inbox.announce.created'))
+			return created.key
+		}
+		catch (cause) {
+			composeState.value = { posting: false, error: describeFetchError(cause, created ? t('comments.errors.messageFailed') : t('comments.errors.createFailed')), ...(created ? { created } : {}) }
+			if (created) void loadSummaries()
+			return undefined
+		}
+	}
+	function resetCompose(): void {
+		if (!composeState.value.posting) composeState.value = { posting: false }
 	}
 
 	async function reopen(threadId: string, reason?: string): Promise<boolean> {
@@ -380,7 +505,7 @@ function createReviewInbox() {
 	/** A human submission to `ready-for-review` (secondary, desktop-first): domains plus Evidence refs. */
 	async function submit(threadId: string, draft: ReviewSubmissionDraft): Promise<boolean> {
 		const item = threadById.value.get(threadId)
-		const viewId = item?.anchor?.viewId
+		const viewId = item?.viewId
 		if (!item || !viewId || !canReply.value || item.status !== 'open') return false
 		const ok = await mutate(threadId, 'submit', async (revision) => {
 			const view = await uiux.readResource<ViewRead>('view', viewId)
@@ -393,7 +518,7 @@ function createReviewInbox() {
 
 	async function promote(threadId: string, form: Readonly<{ question: string; summary: string; rationale: string }>): Promise<boolean> {
 		const item = threadById.value.get(threadId)
-		const viewId = item?.anchor?.viewId
+		const viewId = item?.viewId
 		if (!item || !viewId || !canPromote.value) return false
 		return await mutate(threadId, 'promote', async (revision) => {
 			const view = await uiux.readResource<ViewRead>('view', viewId)
@@ -414,9 +539,10 @@ function createReviewInbox() {
 
 	/** The View deep link that reproduces a thread's context: its View, its Variant when scoped to one, the thread open. */
 	function canvasLocation(thread: InboxThread) {
-		const anchor = thread.anchor!
+		// Workspace threads are never on a canvas: their only link is `/reviews?thread=<id>`.
+		if (!thread.viewId) return { path: '/reviews', query: { thread: thread.id } }
 		const variant = thread.variantNames.length === 1 && !thread.missingVariants.length ? thread.variantNames[0] : undefined
-		return viewLocation(anchor.viewId, { thread: thread.id, ...(variant ? { variant } : {}), ...(thread.anchorState === 'valid' ? { widget: anchor.widgetId } : {}) })
+		return viewLocation(thread.viewId, { thread: thread.id, ...(variant ? { variant } : {}), ...(thread.anchorState === 'valid' && thread.widgetId ? { widget: thread.widgetId } : {}) })
 	}
 
 	function openInCanvas(thread: InboxThread): void {
@@ -424,7 +550,7 @@ function createReviewInbox() {
 	}
 
 	function threadViewExists(thread: InboxThread): boolean {
-		return !!thread.anchor && views.value.some(view => view.key === thread.anchor!.viewId)
+		return !!thread.viewId && views.value.some(view => view.key === thread.viewId)
 	}
 
 	/**
@@ -432,8 +558,8 @@ function createReviewInbox() {
 	 * re-anchor targeting once that View is loaded. The watcher outlives this page and stops itself.
 	 */
 	function reanchorOnCanvas(thread: InboxThread): void {
-		if (!thread.anchor || !canReply.value || !threadViewExists(thread)) return
-		const viewId = thread.anchor.viewId
+		if (!thread.viewId || !canReply.value || !threadViewExists(thread)) return
+		const viewId = thread.viewId
 		void router.push(viewLocation(viewId, { thread: thread.id })).then(() => {
 			const scope = effectScope(true)
 			const timer = setTimeout(() => scope.stop(), 15_000)
@@ -492,6 +618,14 @@ function createReviewInbox() {
 		reopen,
 		submit,
 		promote,
+		editingMessage,
+		editMessage,
+		retract,
+		retractRefused,
+		deleted,
+		composeState,
+		createComment,
+		resetCompose,
 		primaryResolution,
 		canvasLocation,
 		openInCanvas,
