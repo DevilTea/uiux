@@ -2,7 +2,7 @@ import { sha256Identity } from '../../domain/artifacts/schema'
 import type { AuthoredAsset } from '../../domain/assets/schema'
 import type { FlowResource } from '../../domain/flows/schema'
 import type { I18nResource } from '../../domain/i18n/schema'
-import { deriveReviewResolution, type ReviewResolution, type ReviewThread } from '../../domain/reviews/schema'
+import { deriveReviewResolution, isWorkspaceAnchor, type ReviewResolution, type ReviewThread } from '../../domain/reviews/schema'
 import type { Diagnostic } from '../../domain/validation'
 import type { ViewResource } from '../../domain/views/schema'
 import type { WorkspaceManifest } from '../../domain/workspace/schema'
@@ -13,6 +13,7 @@ import {
 	validateResourceDiscoveryRequest,
 	type DiscoverableResourceKind,
 	type ResourceDiscoveryItem,
+	type ReviewAnchorScope,
 	type ResourceDiscoveryOutcome,
 	type ResourceDiscoveryRequest,
 } from '../dto/resource-discovery'
@@ -46,10 +47,12 @@ import {
 	createReviewAuthoringService,
 	type AppendReviewMessageCommand,
 	type CreateReviewThreadCommand,
+	type EditReviewMessageCommand,
 	type PromoteReviewToDecisionCommand,
 	type ReanchorReviewThreadCommand,
 	type ReopenReviewThreadCommand,
 	type ResolveReviewThreadCommand,
+	type RetractReviewThreadCommand,
 	type ReviewAuthoringResult,
 	type SetReviewDisplayHintCommand,
 	type SubmitReadyForReviewCommand,
@@ -119,6 +122,8 @@ export interface WorkspaceApplicationSession {
 	reopenReviewThread(command: ReopenReviewThreadCommand): Promise<ReviewAuthoringResult>
 	setReviewDisplayHint(command: SetReviewDisplayHintCommand): Promise<ReviewAuthoringResult>
 	promoteReviewToDecision(command: PromoteReviewToDecisionCommand): Promise<ReviewAuthoringResult>
+	editReviewMessage(command: EditReviewMessageCommand): Promise<ReviewAuthoringResult>
+	retractReviewThread(command: RetractReviewThreadCommand): Promise<ReviewAuthoringResult>
 	createAsset(command: CreateAssetCommand): Promise<AssetAuthoringResult>
 	replaceAsset(command: ReplaceAssetCommand): Promise<AssetAuthoringResult>
 	captureFormalEvidence(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult>
@@ -220,6 +225,7 @@ export function createWorkspaceApplicationSession(
 				}
 				if (request.query !== undefined && !matchesQuery(item, request.query)) continue
 				if (request.resolution !== undefined && !matchesResolution(item, request.resolution)) continue
+				if (request.anchorScope !== undefined && !matchesAnchorScope(item, request.anchorScope)) continue
 				items.push(item)
 			}
 		}
@@ -282,6 +288,8 @@ export function createWorkspaceApplicationSession(
 		reopenReviewThread: reviewAuthoring.reopenReviewThread,
 		setReviewDisplayHint: reviewAuthoring.setReviewDisplayHint,
 		promoteReviewToDecision: reviewAuthoring.promoteReviewToDecision,
+		editReviewMessage: reviewAuthoring.editReviewMessage,
+		retractReviewThread: reviewAuthoring.retractReviewThread,
 		createAsset: assetAuthoring.createAsset,
 		replaceAsset: assetAuthoring.replaceAsset,
 		captureFormalEvidence: formalCapture.capture,
@@ -296,6 +304,7 @@ type NormalizedDiscoveryRequest = Readonly<{
 	kinds: readonly DiscoverableResourceKind[]
 	query?: string
 	resolution?: readonly ReviewResolution[]
+	anchorScope?: readonly ReviewAnchorScope[]
 	cursor?: string
 	limit: number
 }>
@@ -307,6 +316,7 @@ function normalizeDiscoveryRequest(request: ResourceDiscoveryRequest, mode: 'lis
 		kinds,
 		...(mode === 'search' ? { query: request.query!.trim().toLowerCase() } : {}),
 		...(request.resolution !== undefined ? { resolution: [...request.resolution].sort() } : {}),
+		...(request.anchorScope !== undefined ? { anchorScope: [...request.anchorScope].sort() } : {}),
 		...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
 		limit: request.limit,
 	}
@@ -360,11 +370,16 @@ function reviewSummary(thread: ReviewThread): Extract<ResourceDiscoveryItem, { k
 	}
 }
 
-/** Latest canonical activity (Part 7 9b): the newest message, submission or history timestamp. */
+/**
+ * Latest canonical activity (Part 7 9b): the newest message, message edit, submission or history
+ * timestamp. An edit is activity (R12): it can change meaning, so it moves the thread up.
+ */
 function latestActivity(thread: ReviewThread): { latestActivityAt?: string } {
 	let latest: string | undefined
 	let latestMs = Number.NEGATIVE_INFINITY
-	for (const entry of [...(thread.messages ?? []), ...(thread.submissions ?? []), ...(thread.history ?? [])]) {
+	const messages = Array.isArray(thread.messages) ? thread.messages : []
+	const edits = messages.flatMap(message => Array.isArray(message?.edits) ? message.edits : [])
+	for (const entry of [...messages, ...edits, ...(thread.submissions ?? []), ...(thread.history ?? [])]) {
 		const ms = Date.parse(entry.at)
 		if (Number.isFinite(ms) && ms > latestMs) {
 			latestMs = ms
@@ -372,6 +387,12 @@ function latestActivity(thread: ReviewThread): { latestActivityAt?: string } {
 		}
 	}
 	return latest ? { latestActivityAt: latest } : {}
+}
+
+/** An anchorScope filter selects Review threads by anchor arm: `workspace` or `view` (any Widget anchor). */
+function matchesAnchorScope(item: ResourceDiscoveryItem, scopes: readonly ReviewAnchorScope[]): boolean {
+	if (item.kind !== 'review' || !item.summary.anchor) return false
+	return scopes.includes(isWorkspaceAnchor(item.summary.anchor) ? 'workspace' : 'view')
 }
 
 /** A resolution filter selects only resolved Review threads whose derived resolution is listed. */
@@ -387,9 +408,15 @@ function matchesQuery(item: ResourceDiscoveryItem, query: string): boolean {
 			: item.kind === 'locale'
 				? [item.key]
 				: item.kind === 'review'
-					? [item.key, item.summary.anchor?.viewId, item.summary.anchor?.widgetId, item.summary.status]
+					? [item.key, ...reviewAnchorTerms(item.summary.anchor), item.summary.status]
 					: [item.key, item.summary.name, item.summary.mediaType, item.summary.contentFilename]
 	return fields.some(value => value?.toLowerCase().includes(query))
+}
+
+/** Searchable anchor terms: the View and Widget ids, or `workspace` for a Workspace thread. */
+function reviewAnchorTerms(anchor: Extract<ResourceDiscoveryItem, { kind: 'review' }>['summary']['anchor']): (string | undefined)[] {
+	if (!anchor) return []
+	return isWorkspaceAnchor(anchor) ? ['workspace'] : [anchor.viewId, anchor.widgetId]
 }
 
 function sortKey(item: ResourceDiscoveryItem): string {
@@ -397,7 +424,12 @@ function sortKey(item: ResourceDiscoveryItem): string {
 }
 
 function discoveryScope(request: NormalizedDiscoveryRequest): string {
-	return JSON.stringify({ kinds: request.kinds, query: request.query ?? null, ...(request.resolution ? { resolution: request.resolution } : {}) })
+	return JSON.stringify({
+		kinds: request.kinds,
+		query: request.query ?? null,
+		...(request.resolution ? { resolution: request.resolution } : {}),
+		...(request.anchorScope ? { anchorScope: request.anchorScope } : {}),
+	})
 }
 
 function encodeCursor(after: string, scope: string): string {

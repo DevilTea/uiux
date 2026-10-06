@@ -40,7 +40,7 @@ import {
 	productAdapterRegistryInspector,
 } from '../../adapters/product-integration'
 import { collectWidgetTypesFromIr } from '../../preview/preview-runtime'
-import { deriveReviewResolution, REVIEW_RESOLUTIONS, type ReviewResolution } from '../../domain/reviews/schema'
+import { deriveReviewResolution, isWorkspaceAnchor, REVIEW_RESOLUTIONS, type ReviewResolution } from '../../domain/reviews/schema'
 
 export type ExportHandoffCommand = Readonly<{
 	roots: readonly HandoffRoot[]
@@ -122,7 +122,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 				contextsInClosure: readonly ResolvedRenderContext[]
 				wsSchemaVersion: number
 				/** `coverage.review`: completeness plus per-resolution counts over the closure. */
-				reviewCoverage: Readonly<{ complete: boolean; threads: number; resolved: Readonly<Record<ReviewResolution, number>> }>
+				reviewCoverage: Readonly<{ complete: boolean; threads: number; workspaceThreads: number; resolved: Readonly<Record<ReviewResolution, number>> }>
 		  }
 		| {
 				ok: false
@@ -433,11 +433,14 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			snapshot: wsRead.resource as JsonObject,
 		}
 
-		// 6. Review Threads anchored to Views in closure
+		// 6. Review Threads in the closure: those anchored to a View in the closure, and every
+		// Workspace-scoped thread (owner decision O1: the Workspace manifest is in every bundle, so a
+		// thread about the Workspace is in the closure of every export and never silently skipped).
 		const reviewSnapshots = new Map<string, HandoffResourceSnapshot>()
 		const allReviewIds = await persistence.reviews.discoverKeys()
 		let reviewCoverageComplete = true
 		let reviewThreadCount = 0
+		let workspaceThreadCount = 0
 		// Machine-readable breakdown over the closure: only `verified` means a change was evidence-checked;
 		// every other kind is closed without a verified change and never counts as verified.
 		const resolvedReviewCounts = Object.fromEntries(REVIEW_RESOLUTIONS.map(kind => [kind, 0])) as Record<ReviewResolution, number>
@@ -445,8 +448,11 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 		for (const revId of allReviewIds) {
 			const revRead = await persistence.reviews.readInspected(revId)
 			if (!revRead?.resource) continue
-			const targetViewId = revRead.resource.anchor?.viewId
-			if (!targetViewId || !viewsToInclude.has(targetViewId)) continue
+			const anchor = revRead.resource.anchor
+			const workspaceScoped = isWorkspaceAnchor(anchor)
+			const targetViewId = !workspaceScoped && typeof anchor?.viewId === 'string' ? anchor.viewId : undefined
+			if (!workspaceScoped && (!targetViewId || !viewsToInclude.has(targetViewId))) continue
+			const subject = workspaceScoped ? `Workspace-scoped Review thread ${revId}` : `Review thread ${revId} anchored to View ${targetViewId}`
 
 			reviewSnapshots.set(revId, {
 				type: 'review',
@@ -456,12 +462,13 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			})
 
 			reviewThreadCount += 1
+			if (workspaceScoped) workspaceThreadCount += 1
 			// Review readiness: open threads block implementationReady; every resolution kind is closed.
 			if (revRead.resource.status === 'open' || revRead.resource.status === 'ready-for-review') {
 				reviewCoverageComplete = false
 				blockingDiagnostics.push({
 					code: 'handoff.unresolved_review_thread',
-					message: `Review thread ${revId} anchored to View ${targetViewId} is ${revRead.resource.status}.`,
+					message: `${subject} is ${revRead.resource.status}.`,
 					blocking: true,
 					path: `/reviews/${revId}`,
 				})
@@ -473,7 +480,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 					// Advisory only: a declined request is what downstream implementers most need to see.
 					blockingDiagnostics.push({
 						code: 'handoff.review_declined',
-						message: `Review thread ${revId} anchored to View ${targetViewId} was resolved as won't fix: the requested change was declined.`,
+						message: `${subject} was resolved as won't fix: the requested change was declined.`,
 						blocking: false,
 						path: `/reviews/${revId}`,
 					})
@@ -879,6 +886,8 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 		const reviewCoverage = {
 			complete: reviewCoverageComplete,
 			threads: reviewThreadCount,
+			// Handoff manifest content delta (accepted O1): how many closure threads are Workspace-scoped.
+			workspaceThreads: workspaceThreadCount,
 			resolved: resolvedReviewCounts,
 		}
 

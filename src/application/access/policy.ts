@@ -39,6 +39,9 @@ export const ACCESS_OPERATIONS = {
 	reopenReviewThread: { minRole: 'reviewer' },
 	setReviewDisplayHint: { minRole: 'reviewer' },
 	promoteReviewToDecision: { minRole: 'reviewer' },
+	// Authorship (and, for retract, engagement) is checked in the domain service, not here.
+	editReviewMessage: { minRole: 'reviewer' },
+	retractReviewThread: { minRole: 'reviewer' },
 	resolveReviewThread: { minRole: 'reviewer', humanOnly: true, sessionOnly: true },
 	// Editor: authoring, capture, Handoff export, edit leases.
 	createView: { minRole: 'editor' },

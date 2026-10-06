@@ -34,6 +34,7 @@ export function mapAuthoringResultToHttpStatus(status: string, code?: string): n
 		case 'locked': return 423
 		case 'created': return 201
 		case 'updated': return 200
+		case 'deleted': return 200
 		case 'not_found': return 404
 		case 'conflict': return 409
 		case 'already_exists': return 409
@@ -136,10 +137,11 @@ const updateFlowHttpSchema = z.object({
 	steps: z.record(z.string(), flowStepSchema),
 }).strict()
 
-const reviewAnchorSchema = z.object({
-	viewId: z.string(),
-	widgetId: z.string(),
-}).strict()
+// The closed anchor union: the Widget arm { viewId, widgetId } or the Workspace arm { scope: "workspace" }.
+const reviewAnchorSchema = z.union([
+	z.object({ viewId: z.string(), widgetId: z.string() }).strict(),
+	z.object({ scope: z.literal('workspace') }).strict(),
+])
 
 const reviewActorSchema = z.object({
 	type: z.string(),
@@ -224,6 +226,19 @@ const reopenReviewThreadHttpSchema = z.object({
 	reason: z.string().optional(),
 	id: z.string().min(1).optional(),
 	at: z.string().optional(),
+}).strict()
+
+const editReviewMessageHttpSchema = z.object({
+	expectedRevision: z.string(),
+	body: z.string(),
+	editId: z.string().min(1).optional(),
+	/** Optional and ignored: the server stamps the actor (warning `auth.actor_ignored`). */
+	actor: reviewActorSchema.optional(),
+	at: z.string().optional(),
+}).strict()
+
+const retractReviewThreadHttpSchema = z.object({
+	expectedRevision: z.string(),
 }).strict()
 
 const promoteReviewToDecisionHttpSchema = z.object({
@@ -513,6 +528,30 @@ export async function reopenReviewThreadForHttp(app: ScopedWorkspaceSession, rev
 		...(data.id ? { id: data.id } : {}),
 		...(data.at ? { at: data.at } : {}),
 	})
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
+}
+
+export async function editReviewMessageForHttp(app: ScopedWorkspaceSession, reviewId: string, messageId: string, body: unknown): Promise<AuthoringHttpResult> {
+	const parsed = parseHttpPayload(editReviewMessageHttpSchema, body)
+	if (!parsed.ok) return parsed.result
+	const data = parsed.data
+	const result = await app.editReviewMessage({
+		reviewId,
+		expectedRevision: data.expectedRevision,
+		messageId,
+		body: data.body,
+		...(data.editId ? { editId: data.editId } : {}),
+		...(data.actor !== undefined ? { actor: data.actor } : {}),
+		...(data.at ? { at: data.at } : {}),
+	})
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
+}
+
+/** `DELETE /api/reviews/:id` with a JSON body `{ expectedRevision }`; success is 200 `{ status: "deleted", key }`. */
+export async function retractReviewThreadForHttp(app: ScopedWorkspaceSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
+	const parsed = parseHttpPayload(retractReviewThreadHttpSchema, body)
+	if (!parsed.ok) return parsed.result
+	const result = await app.retractReviewThread({ reviewId, expectedRevision: parsed.data.expectedRevision })
 	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 

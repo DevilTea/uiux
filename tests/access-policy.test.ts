@@ -62,6 +62,8 @@ const MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; H?: t
 	reopenReviewThread: { min: 'reviewer' },
 	setReviewDisplayHint: { min: 'reviewer' },
 	promoteReviewToDecision: { min: 'reviewer' },
+	editReviewMessage: { min: 'reviewer' },
+	retractReviewThread: { min: 'reviewer' },
 	resolveReviewThread: { min: 'reviewer', H: true, S: true },
 	createView: { min: 'editor' },
 	updateViewSpec: { min: 'editor' },

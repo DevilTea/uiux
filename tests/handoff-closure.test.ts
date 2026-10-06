@@ -90,7 +90,7 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 	await symlink(vuePath, join(root, 'node_modules', 'vue')).catch(() => undefined)
 
 	await writeFile(join(root, '.uiux', 'workspace.json'), JSON.stringify({
-		schemaVersion: 2,
+		schemaVersion: 3,
 		i18n: { defaultLocale: 'en-US' },
 		adapters,
 		viewports: {
@@ -507,6 +507,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		expect(assessed.readiness?.coverage.review).toEqual({
 			complete: true,
 			threads: 6,
+			workspaceThreads: 0,
 			resolved: { 'verified': 1, 'answered': 2, 'wont-fix': 1, 'duplicate': 1, 'obsolete': 1 },
 		})
 		expect(assessed.readiness?.blockingDiagnostics).toEqual([{
@@ -521,7 +522,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		expect(validateHandoffManifest(exported.manifest).ok).toBe(true)
 		expect(exported.manifest?.readiness.implementationReady).toBe(true)
 		expect(exported.manifest?.readiness.coverage.review).toEqual(assessed.readiness?.coverage.review)
-		expect(exported.manifest?.provenance.workspaceSchemaVersion).toBe(2)
+		expect(exported.manifest?.provenance.workspaceSchemaVersion).toBe(3)
 		const snapshot = exported.manifest?.resources.find(resource => resource.type === 'review' && resource.identity.id === verified.id)
 		expect((snapshot?.snapshot as unknown as ReviewThread).history.at(-1)?.resolution).toBe('verified')
 

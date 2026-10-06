@@ -4,7 +4,7 @@ import { McpServer, ProtocolError, ProtocolErrorCode, ResourceNotFoundError, Res
 import packageJson from '../../package.json' with { type: 'json' }
 import { z } from 'zod'
 
-import { DISCOVERABLE_RESOURCE_KINDS, MAX_RESOURCE_DISCOVERY_LIMIT } from '../application/dto/resource-discovery'
+import { DISCOVERABLE_RESOURCE_KINDS, MAX_RESOURCE_DISCOVERY_LIMIT, REVIEW_ANCHOR_SCOPES } from '../application/dto/resource-discovery'
 import type { PointResourceKind } from '../application/dto/point-resources'
 import type { WorkspaceApplicationSession } from '../application/services/workspace-session'
 import { LOCKABLE_KINDS, MAX_ACQUIRE_RESOURCES, type LeaseManager } from '../application/access/leases'
@@ -27,6 +27,8 @@ const discoveryKindsSchema = z.array(z.enum(DISCOVERABLE_RESOURCE_KINDS)).option
 const discoveryBaseShape = {
 	kinds: discoveryKindsSchema,
 	resolution: z.array(z.enum(REVIEW_RESOLUTIONS)).min(1).optional(),
+	anchorScope: z.array(z.enum(REVIEW_ANCHOR_SCOPES)).min(1).optional()
+		.describe('Review threads only: "workspace" selects Workspace-scoped threads, "view" every thread anchored to a View or Widget.'),
 	cursor: z.string().min(1).optional(),
 	limit: z.number().int().min(1).max(MAX_RESOURCE_DISCOVERY_LIMIT),
 }
@@ -124,10 +126,14 @@ const updateFlowSchema = z.object({
 	steps: z.record(z.string(), flowStepSchema),
 }).strict()
 
-const reviewAnchorSchema = z.object({
-	viewId: z.string(),
-	widgetId: z.string(),
-}).strict()
+// The closed anchor union: the Widget arm { viewId, widgetId } or the Workspace arm { scope: "workspace" }.
+// Both arms stay strict, so a display hint inside `anchor` is still rejected.
+const reviewAnchorSchema = z.union([
+	z.object({ viewId: z.string(), widgetId: z.string() }).strict(),
+	z.object({ scope: z.literal('workspace') }).strict(),
+])
+
+const ANCHOR_DESCRIPTION = 'Use { scope: "workspace" } for feedback about the product as a whole (variantNames must be omitted or [], no displayHint); use { viewId, widgetId: "root" } for a whole View, or { viewId, widgetId } for one Widget.'
 
 const ACTOR_IGNORED_DESCRIPTION = 'Optional and ignored: the server stamps the actor from the authenticated member (a differing value yields the warning auth.actor_ignored).'
 
@@ -147,7 +153,7 @@ const reviewResolutionSchema = z.enum(REVIEW_RESOLUTIONS)
 
 const createReviewThreadSchema = z.object({
 	id: z.string().optional(),
-	anchor: reviewAnchorSchema,
+	anchor: reviewAnchorSchema.describe(ANCHOR_DESCRIPTION),
 	variantNames: z.array(z.string()).optional(),
 	displayHint: reviewDisplayHintSchema.optional(),
 }).strict()
@@ -164,7 +170,7 @@ const appendReviewMessageSchema = z.object({
 const reanchorReviewThreadSchema = z.object({
 	reviewId: z.string(),
 	expectedRevision: z.string(),
-	anchor: reviewAnchorSchema,
+	anchor: reviewAnchorSchema.describe(ANCHOR_DESCRIPTION),
 	variantNames: z.array(z.string()).optional(),
 	displayHint: reviewDisplayHintSchema.nullable().optional(),
 	actor: reviewActorSchema.optional().describe(ACTOR_IGNORED_DESCRIPTION),
@@ -217,6 +223,21 @@ const reopenReviewThreadSchema = z.object({
 	reason: z.string().optional(),
 	id: z.string().optional(),
 	at: z.string().optional(),
+}).strict()
+
+const editReviewMessageSchema = z.object({
+	reviewId: z.string(),
+	expectedRevision: z.string(),
+	messageId: z.string(),
+	body: z.string(),
+	editId: z.string().optional(),
+	actor: reviewActorSchema.optional().describe(ACTOR_IGNORED_DESCRIPTION),
+	at: z.string().optional().describe('Optional and ignored: the server stamps the time (warning auth.time_ignored).'),
+}).strict()
+
+const retractReviewThreadSchema = z.object({
+	reviewId: z.string(),
+	expectedRevision: z.string(),
 }).strict()
 
 const promoteReviewToDecisionSchema = z.object({
@@ -291,7 +312,7 @@ export function uiuxMcpInstructions(principal: Principal): string {
 	const identity = principal.type === 'member'
 		? `Authenticated as ${principal.nickname} (${principal.kind}, ${roleLabel(principalRole(principal)).toLowerCase()}).`
 		: `Authenticated as ${principal.id}.`
-	return `${identity} Actors and times on Review records are stamped by the server from this identity; do not send actor or at. Tools your role cannot use refuse with auth.scope_denied naming the required role. Resolving Review threads is human-only, in the UIUX Workbench. ${LEASE_RECIPE}`
+	return `${identity} Actors and times on Review records are stamped by the server from this identity; do not send actor or at. Tools your role cannot use refuse with auth.scope_denied naming the required role. Resolving Review threads is human-only, in the UIUX Workbench. You may edit your own Review messages (until a later submission or resolution) and retract your own brand-new threads nobody has engaged with. ${LEASE_RECIPE}`
 }
 
 export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
@@ -501,7 +522,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'create_review_thread',
 		{
 			title: 'Create UIUX Review Thread',
-			description: 'Create an initial open Review thread anchored to a View and widget with optional variant scope. The optional displayHint.pin {x, y} is a non-authoritative pin position normalized (0..1) within the anchored Widget\'s rendered rect; agents have no pointer and should normally omit it.',
+			description: 'Create an initial open Review thread. Use anchor { scope: "workspace" } for feedback about the product as a whole; use { viewId, widgetId: "root" } for a whole View, or { viewId, widgetId } for one Widget, with optional variant scope. The optional displayHint.pin {x, y} is a non-authoritative pin position normalized (0..1) within the anchored Widget\'s rendered rect (Widget anchors only); agents have no pointer and should normally omit it.',
 			inputSchema: createReviewThreadSchema,
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},
@@ -535,7 +556,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'reanchor_review_thread',
 		{
 			title: 'Re-anchor UIUX Review Thread',
-			description: 'Re-anchor a Review thread to a new widget or variant scope, appending a re-anchor history event with revision CAS. displayHint: an object sets the pin hint for the new anchor, null clears it, and omitting it clears the hint when the Widget changes and keeps it when only Variants change.',
+			description: 'Re-anchor a Review thread to a new widget or variant scope, or between a Widget and the Workspace ({ scope: "workspace" }), appending a re-anchor history event with revision CAS. displayHint: an object sets the pin hint for the new Widget anchor, null clears it, and omitting it clears the hint when the Widget changes and keeps it when only Variants change. Moving to the Workspace always clears the hint.',
 			inputSchema: reanchorReviewThreadSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
@@ -556,7 +577,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'set_review_display_hint',
 		{
 			title: 'Set UIUX Review Display Hint',
-			description: 'Move or clear the non-authoritative pin hint of a Review thread within the same Widget (displayHint.pin {x, y} normalized 0..1 within the anchored Widget\'s rendered rect, or null to clear) with revision CAS. Appends no history event and records no actor. Moving a pin to another Widget is reanchor_review_thread.',
+			description: 'Move or clear the non-authoritative pin hint of a Review thread within the same Widget (displayHint.pin {x, y} normalized 0..1 within the anchored Widget\'s rendered rect, or null to clear) with revision CAS. Appends no history event and records no actor. Moving a pin to another Widget is reanchor_review_thread. Workspace-scoped threads have no pin and refuse (review.display_hint_without_widget).',
 			inputSchema: setReviewDisplayHintSchema,
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
@@ -571,7 +592,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'submit_ready_for_review',
 		{
 			title: 'Submit UIUX Review Ready',
-			description: 'Submit an immutable ready-for-review submission and lifecycle event with revision CAS.',
+			description: 'Submit an immutable ready-for-review submission and lifecycle event with revision CAS. A Widget thread\'s resources must name its anchor View at the current revision. A Workspace thread\'s resources must name the current Workspace manifest revision ({ type: "workspace" }) and every View they name must be valid and current; formal_capture evidence must be complete for the current revision of a View named in resources.',
 			inputSchema: submitReadyForReviewSchema,
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},
@@ -627,7 +648,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'promote_review_to_decision',
 		{
 			title: 'Promote UIUX Review to Decision',
-			description: 'Promote a Review thread to a View Spec Decision with provenance keying and idempotency.',
+			description: 'Promote a Review thread to a View Spec Decision with provenance keying and idempotency. Workspace-scoped threads have no Decision home and refuse (review.decision_target_unavailable): re-anchor the thread to a View\'s root first.',
 			inputSchema: promoteReviewToDecisionSchema,
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
@@ -663,6 +684,39 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 				isError: true,
 			}
 		},
+	)
+
+	server.registerTool(
+		'edit_review_message',
+		{
+			title: 'Edit UIUX Review Message',
+			description: 'Replace the text of your own Review message. The previous text is kept in the message\'s edit history. A message cannot be edited after a later ready-for-review submission or resolution; reply instead. Refusals: review.message_edit_not_author, review.message_edit_after_formal_act, review.message_body_empty, review.message_edit_noop, review.unknown_message.',
+			inputSchema: editReviewMessageSchema,
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async input => authoringToolResult('review', await app.editReviewMessage({
+			reviewId: input.reviewId,
+			expectedRevision: input.expectedRevision,
+			messageId: input.messageId,
+			body: input.body,
+			...(input.editId ? { editId: input.editId } : {}),
+			...(input.actor !== undefined ? { actor: input.actor } : {}),
+			...(input.at ? { at: input.at } : {}),
+		})),
+	)
+
+	server.registerTool(
+		'retract_review_thread',
+		{
+			title: 'Retract UIUX Review Thread',
+			description: 'Permanently delete your own brand-new Review thread: it must be open and contain only your one message, with no replies, history, submissions or promoted Decision. An empty thread with no messages may be retracted by any Reviewer. Once anyone has engaged, this always refuses (review.retract_engaged with a reason); the thread can then only be dismissed by a human. Returns { status: "deleted" }.',
+			inputSchema: retractReviewThreadSchema,
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async input => authoringToolResult('review', await app.retractReviewThread({
+			reviewId: input.reviewId,
+			expectedRevision: input.expectedRevision,
+		})),
 	)
 
 	server.registerTool(
@@ -910,9 +964,10 @@ function authoringToolResult(kind: PointResourceKind, result: { status: string; 
 	const output = result.status === 'created' || result.status === 'updated'
 		? { ...result, resourceUri: pointResourceUri({ kind, key: result.key }) }
 		: result
+	const succeeded = result.status === 'created' || result.status === 'updated' || result.status === 'deleted'
 	return {
 		content: [{ type: 'text' as const, text: JSON.stringify(output) }],
 		structuredContent: output,
-		...(result.status === 'created' || result.status === 'updated' ? {} : { isError: true }),
+		...(succeeded ? {} : { isError: true }),
 	}
 }

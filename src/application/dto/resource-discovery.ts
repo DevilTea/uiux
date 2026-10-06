@@ -3,6 +3,9 @@ import { jsonPointer, rejectUnknownKeys, Validator, type Diagnostic } from '../.
 import type { ResourceRevision } from './revisions'
 
 export const DISCOVERABLE_RESOURCE_KINDS = ['view', 'flow', 'locale', 'review', 'asset'] as const
+/** Review anchor arms for the `anchorScope` filter: `view` is every Widget-anchored thread (including View roots). */
+export const REVIEW_ANCHOR_SCOPES = ['workspace', 'view'] as const
+export type ReviewAnchorScope = typeof REVIEW_ANCHOR_SCOPES[number]
 export const MAX_RESOURCE_DISCOVERY_LIMIT = 100
 
 export type DiscoverableResourceKind = typeof DISCOVERABLE_RESOURCE_KINDS[number]
@@ -11,6 +14,8 @@ export type ResourceDiscoveryRequest = Readonly<{
 	query?: string
 	/** Structured Review filter: only resolved threads whose derived resolution is listed match. */
 	resolution?: readonly ReviewResolution[]
+	/** Structured Review filter by anchor arm; other kinds ignore it, as with `resolution`. */
+	anchorScope?: readonly ReviewAnchorScope[]
 	cursor?: string
 	limit: number
 }>
@@ -49,7 +54,7 @@ export function validateResourceDiscoveryRequest(input: unknown, mode: 'list' | 
 	const v = new Validator()
 	const value = v.object(input, '')
 	if (!value) return { status: 'invalid', diagnostics: v.diagnostics }
-	rejectUnknownKeys(value, ['kinds', 'query', 'resolution', 'cursor', 'limit'], '', v)
+	rejectUnknownKeys(value, ['kinds', 'query', 'resolution', 'anchorScope', 'cursor', 'limit'], '', v)
 
 	if (Object.hasOwn(value, 'kinds')) {
 		const kinds = v.array(value.kinds, '/kinds')
@@ -76,6 +81,21 @@ export function validateResourceDiscoveryRequest(input: unknown, mode: 'list' | 
 			else if (seen.has(resolution))
 				v.issue('discovery.duplicate_resolution', path, 'Resolution filter values must not repeat.')
 			else seen.add(resolution)
+		})
+	}
+
+	if (Object.hasOwn(value, 'anchorScope')) {
+		const scopes = v.array(value.anchorScope, '/anchorScope')
+		if (scopes && scopes.length === 0)
+			v.issue('discovery.empty_anchor_scope_filter', '/anchorScope', 'An anchorScope filter must list at least one scope.')
+		const seen = new Set<string>()
+		scopes?.forEach((scope, index) => {
+			const path = jsonPointer('/anchorScope', index)
+			if (typeof scope !== 'string' || !(REVIEW_ANCHOR_SCOPES as readonly string[]).includes(scope))
+				v.issue('discovery.invalid_anchor_scope', path, 'anchorScope values must be workspace or view.')
+			else if (seen.has(scope))
+				v.issue('discovery.duplicate_anchor_scope', path, 'anchorScope values must not repeat.')
+			else seen.add(scope)
 		})
 	}
 
