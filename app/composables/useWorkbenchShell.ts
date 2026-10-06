@@ -15,8 +15,12 @@ export type CanvasCommands = Readonly<{
 	zoomOut: () => void
 	actualSize: () => void
 	selectTool: (tool: 'select' | 'comment' | 'interact') => void
-	/** False where the Comment tool is not offered (Viewer role, publication, phones). */
-	canComment: () => boolean
+	/** Why the Comment tool can't start (role, snapshot, phone, no live Preview…); undefined when it can. */
+	commentBlockedReason: () => string | undefined
+	/** Why "Comment on this View" can't start; undefined when it can. */
+	viewCommentBlockedReason: () => string | undefined
+	/** Opens the composer on the View as a whole (the RootShell anchor). */
+	commentOnView: () => void
 }>
 
 const SHELL_KEY: InjectionKey<WorkbenchShell> = Symbol('uiux-workbench-shell')
@@ -96,10 +100,23 @@ function createWorkbenchShell() {
 		toggleWorkbenchTheme,
 		switchWorkbenchLanguage,
 		onToggleSidebar: (handler: () => void) => { toggleSidebarHandler = handler },
-		/** Pages with a right panel register how `]` toggles it. */
-		onToggleRightPanel: (handler: (() => void) | undefined) => { toggleRightPanelHandler = handler },
-		/** The mounted canvas registers its zoom and tool commands; `undefined` on unmount. */
-		onCanvasCommands: (commands: CanvasCommands | undefined) => { canvasCommands.value = commands },
+		/**
+		 * Pages with a right panel register how `]` toggles it and get the unregister function. It
+		 * clears only its own handler: the next page registers before the previous one unmounts.
+		 */
+		onToggleRightPanel: (handler: () => void) => {
+			toggleRightPanelHandler = handler
+			return () => {
+				if (toggleRightPanelHandler === handler) toggleRightPanelHandler = undefined
+			}
+		},
+		/** The mounted canvas registers its zoom and tool commands; the returned function unregisters them (its own only). */
+		onCanvasCommands: (commands: CanvasCommands) => {
+			canvasCommands.value = commands
+			return () => {
+				if (canvasCommands.value === commands) canvasCommands.value = undefined
+			}
+		},
 		canvasCommands,
 		toggleSidebar: () => toggleSidebarHandler?.(),
 	}

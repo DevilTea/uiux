@@ -769,7 +769,8 @@
     "label": "畫布工具",
     "disabledNoView": "開啟 View 後即可使用畫布工具。",
     "disabledConnecting": "預覽連線後即可使用。",
-    "disabledStopped": "預覽已停止，請從工作階段狀態重試。"
+    "disabledStopped": "預覽已停止，請從工作階段狀態重試。",
+    "interactHint": "互動：點擊與按鍵都交給 View"
   },
   "zoom": {
     "fit": "符合畫布",
@@ -1430,7 +1431,9 @@
       "reanchored": "討論串已移到 {id}。",
       "reanchorOn": "重新錨定：點選此討論串所屬的 Widget，按 Esc 取消。",
       "modeOff": "已離開留言模式。",
-      "composing": "正在 {id} 上留言。輸入內容後按 Command 或 Control 加 Enter。"
+      "composing": "正在 {id} 上留言。輸入內容後按 Command 或 Control 加 Enter。",
+      "composingView": "正在此 View 上留言。輸入內容後按 Command 或 Control 加 Enter。",
+      "createdOnView": "已在此 View 新增留言。"
     },
     "reason": {
       "offscreen": "已捲動到 View 的可視範圍外。",
@@ -1451,7 +1454,8 @@
       "ready": "待審核",
       "open": "未解決",
       "unplaced": "無法定位",
-      "resolved": "已解決"
+      "resolved": "已解決",
+      "view": "View"
     },
     "staleWord": "找不到 Variant",
     "unknownAuthor": "未知的作者",
@@ -1496,7 +1500,12 @@
     "noneInFilter": "沒有符合篩選條件的留言",
     "startCommenting": "開始留言",
     "reanchorChip": "重新錨定至 {type}",
-    "commentOnWidget": "在此 Widget 上留言"
+    "commentOnWidget": "在此 Widget 上留言",
+    "commentOnView": "在此 View 上留言",
+    "commentOnViewShort": "對 View 留言",
+    "commentOnViewHint": "針對整個 View 留言，不需選取 Widget",
+    "viewTarget": "整個 View",
+    "pinLabelView": "{name} 在此 View 上的留言，{status}，{n} 則訊息 | {name} 在此 View 上的留言，{status}，{n} 則訊息"
   },
   "firstRun": {
     "headline": "這個 Workspace 還沒有 View",
@@ -1546,5 +1555,17 @@
   "phone": {
     "viewTab": "View",
     "viewHint": "手機上為唯讀。點選圖釘即可開啟討論串。"
+  },
+  "commentBlock": {
+    "publication": "唯讀：這是已發布的快照。",
+    "migration": "此 Workspace 遷移前為唯讀。請執行 uiux migrate。",
+    "unsupported": "唯讀：此版本的 UIUX 不支援這個 Workspace 的 schema。",
+    "signed-out": "登入後即可留言。",
+    "role": "唯讀：留言需要 Reviewer 角色。你目前的角色是 {role}。",
+    "handset": "手機無法新增留言。可在此回覆與分類；請在平板或桌面新增留言。",
+    "no-view": "開啟 View 後即可留言。",
+    "connecting": "正在連線預覽…",
+    "reconnecting": "正在重新連線預覽…",
+    "stopped": "預覽已停止，請從工作階段狀態重試。"
   }
 }

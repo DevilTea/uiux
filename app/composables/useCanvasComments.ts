@@ -1,5 +1,5 @@
 import { computed, inject, nextTick, onScopeDispose, provide, ref, shallowReactive, shallowRef, watch, type InjectionKey, type Ref } from 'vue'
-import { useI18n } from '#imports'
+import { useI18n, useToast } from '#imports'
 import type {
 	ReviewActor,
 	ReviewAnchor,
@@ -20,6 +20,11 @@ import { canvasOrder, cycleThread, pinStatuses, type PinStatus } from '../utils/
 import type { CommentTarget } from './usePreviewSession'
 import type { ReviewSummary, ViewRead } from './workbench-types'
 import { submissionBody, type ReviewSubmissionDraft } from '../utils/review-submission'
+import { commentCreateBlock, commentToolBlock, type CommentBlockCode } from '../utils/comment-availability'
+import { useMediaQuery, WORKBENCH_BREAKPOINTS } from './useMediaQuery'
+
+/** The RootShell: a thread anchored here is about the View as a whole, not one Widget. */
+export const VIEW_ANCHOR_WIDGET_ID = 'root'
 
 /**
  * Canvas comments (brief c; roadmap R6 and R7a): the comment threads of the open View, their
@@ -218,6 +223,38 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	const canResolve = computed(() => !reviewReadOnly.value && access.member.value?.kind === 'human' && access.session.value?.credential === 'session')
 	const member = computed(() => access.member.value)
 
+	/**
+	 * Why a new thread can't be started (review feedback 8dd59d25): every entry point shows this
+	 * instead of disappearing or silently doing nothing. `createBlockedReason` covers "Comment on
+	 * this View"; the canvas Comment tool also needs a live Preview (`toolBlockedReason`).
+	 */
+	const handset = useMediaQuery(WORKBENCH_BREAKPOINTS.handset)
+	const availability = computed(() => ({
+		publication: workbench.isReadOnly.value,
+		workspaceState: workbench.workspace.value?.inspection?.state,
+		signedIn: !!access.member.value,
+		canReview: access.canReview.value,
+		handset: handset.value,
+		hasView: !!selectedView.value,
+		session: preview.sessionStatus.value,
+	}))
+	function blockReason(code: CommentBlockCode | undefined): string | undefined {
+		if (!code) return undefined
+		if (code === 'role') return t('commentBlock.role', { role: t(`access.role.${access.role.value ?? 'viewer'}`) })
+		return t(`commentBlock.${code}`)
+	}
+	const createBlockedReason = computed(() => blockReason(commentCreateBlock(availability.value)))
+	const toolBlockedReason = computed(() => blockReason(commentToolBlock(availability.value)))
+
+	const toast = useToast()
+	let blockedToast: string | number | undefined
+	/** A blocked entry point was used anyway (a key, a tap, the palette): say why, replacing the last such toast. */
+	function explainBlocked(reason: string): void {
+		if (blockedToast !== undefined) toast.remove(blockedToast)
+		blockedToast = toast.add({ title: reason, color: 'neutral', icon: 'i-lucide-info' }).id
+		announce(reason)
+	}
+
 	// -------------------------------------------------------------------------------------------
 	// Filter, open thread, hover, session points
 	// -------------------------------------------------------------------------------------------
@@ -287,6 +324,43 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		return true
 	}
 
+	/** `C`, the Comment tool and the palette: toggles Comment mode, or says why it can't start. */
+	function toggleCommentMode(): boolean {
+		if (preview.isCommentMode.value) {
+			preview.exitCommentMode()
+			return true
+		}
+		const reason = toolBlockedReason.value
+		if (reason) {
+			explainBlocked(reason)
+			return false
+		}
+		preview.setCanvasTool('comment')
+		return preview.isCommentMode.value
+	}
+
+	/**
+	 * "Comment on this View": the composer on the RootShell anchor `{ viewId, widgetId: 'root' }`
+	 * (no schema change), without picking a Widget. Its pin sits at the frame's top-left.
+	 */
+	function commentOnView(): boolean {
+		const reason = createBlockedReason.value
+		if (reason) {
+			explainBlocked(reason)
+			return false
+		}
+		// A pending re-anchor would take the next commit; this is a new thread instead.
+		if (preview.reanchorThreadId.value) preview.exitCommentMode()
+		if (!openComposer({ widgetId: VIEW_ANCHOR_WIDGET_ID })) return false
+		announce(t('comments.announce.composingView'))
+		return true
+	}
+
+	/** What a thread or composer is about: "Whole View" for the RootShell, else "Type · #id". */
+	function targetLabel(widgetId: string, type?: string): string {
+		return widgetId === VIEW_ANCHOR_WIDGET_ID ? t('comments.viewTarget') : `${type ?? 'Widget'} · #${widgetId}`
+	}
+
 	function setComposerText(text: string): void {
 		patchComposer({ text, askingDiscard: false })
 	}
@@ -350,7 +424,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 			await refreshReviews()
 			markFresh(key)
 			openThreadId.value = key
-			announce(t('comments.announce.created', { id: `#${current.widgetId}` }))
+			announce(current.widgetId === VIEW_ANCHOR_WIDGET_ID ? t('comments.announce.createdOnView') : t('comments.announce.created', { id: `#${current.widgetId}` }))
 		}
 		catch (cause) {
 			const error = describeFetchError(cause, created ? t('comments.errors.messageFailed') : t('comments.errors.createFailed'))
@@ -549,21 +623,24 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 			const name = item.author?.displayName ?? t('comments.unknownAuthor')
 			const status = t(`thread.status.${statusKey(item.status)}`)
 			const type = widgetTypeById.value.get(item.anchor.widgetId) ?? 'Widget'
+			const onView = item.anchor.widgetId === VIEW_ANCHOR_WIDGET_ID
+			const labelValues = {
+				name,
+				type,
+				id: item.anchor.widgetId,
+				status: status + (item.missingVariants.length ? `, ${t('comments.staleWord')}` : ''),
+				n: item.messageCount,
+			}
+			const target = targetLabel(item.anchor.widgetId, type)
 			meta.set(item.id, Object.freeze({
-				label: t('comments.pinLabel', {
-					name,
-					type,
-					id: item.anchor.widgetId,
-					status: status + (item.missingVariants.length ? `, ${t('comments.staleWord')}` : ''),
-					n: item.messageCount,
-				}, item.messageCount),
+				label: onView ? t('comments.pinLabelView', labelValues, item.messageCount) : t('comments.pinLabel', labelValues, item.messageCount),
 				name,
 				initials: threadAuthorInitials(item.author),
 				agent: item.author?.type === 'agent',
 				resolved: item.status === 'resolved',
 				...(item.status === 'ready-for-review' ? { badge: 'ready' as const } : item.missingVariants.length ? { badge: 'stale' as const } : {}),
-				title: item.title ?? `${type} · #${item.anchor.widgetId}`,
-				detail: `${status} · ${name} · ${type} · #${item.anchor.widgetId}`,
+				title: item.title ?? target,
+				detail: `${status} · ${name} · ${target}`,
 			}))
 		}
 		return meta
@@ -685,19 +762,20 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		return false
 	}
 
-	preview.onCommentEscape(escape)
-	preview.onCommentTarget((target) => {
+	const offCommentEscape = preview.onCommentEscape(escape)
+	const offCommentTarget = preview.onCommentTarget((target) => {
 		const reanchorId = preview.reanchorThreadId.value
 		if (reanchorId) {
 			preview.exitCommentMode()
 			void reanchor(reanchorId, target).then(() => open(reanchorId))
 			return
 		}
-		if (openComposer(target) && !target.point) announce(t('comments.announce.composing', { id: `#${target.widgetId}` }))
+		if (openComposer(target) && !target.point)
+			announce(target.widgetId === VIEW_ANCHOR_WIDGET_ID ? t('comments.announce.composingView') : t('comments.announce.composing', { id: `#${target.widgetId}` }))
 	})
 	onScopeDispose(() => {
-		preview.onCommentEscape(undefined)
-		preview.onCommentTarget(undefined)
+		offCommentEscape()
+		offCommentTarget()
 	})
 
 	// The mode change and the hover chip are announced; the chip at most once per 500 ms (brief c §12).
@@ -730,6 +808,12 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		canComment,
 		canResolve,
 		member,
+		createBlockedReason,
+		toolBlockedReason,
+		explainBlocked,
+		toggleCommentMode,
+		commentOnView,
+		targetLabel,
 		filter,
 		setFilter,
 		inFilter,

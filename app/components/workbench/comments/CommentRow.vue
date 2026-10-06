@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from '#imports'
 import { relativeTime } from '../../../utils/widget-inspection'
-import { threadAuthorInitials, useCanvasComments, type CommentThread } from '../../../composables/useCanvasComments'
+import { threadAuthorInitials, useCanvasComments, VIEW_ANCHOR_WIDGET_ID, type CommentThread } from '../../../composables/useCanvasComments'
 
 /**
  * One row of the Comments tab. It is its own component so that a thread whose pin scrolls in or out
@@ -57,6 +57,9 @@ const when = computed(() => props.item.latestActivityAt ? relativeTime(props.ite
 // Cached, so a row that re-renders for its canvas glyph does no message formatting.
 const authorName = computed(() => props.item.author?.displayName ?? t('comments.unknownAuthor'))
 const messageCountLabel = computed(() => t('reviews.messageCount', props.item.messageCount))
+/** A thread on the View as a whole (RootShell) reads "Whole View", not "RootShell · #root". */
+const onView = computed(() => props.item.anchor.widgetId === VIEW_ANCHOR_WIDGET_ID)
+const target = computed(() => onView.value ? t('comments.viewTarget') : `#${props.item.anchor.widgetId}`)
 </script>
 
 <template>
@@ -83,10 +86,17 @@ const messageCountLabel = computed(() => t('reviews.messageCount', props.item.me
       aria-hidden="true"
     />
     <span class="min-w-0">
-      <span class="block truncate text-sm text-highlighted">{{ item.title ?? `#${item.anchor.widgetId}` }}</span>
+      <span class="block truncate text-sm text-highlighted">{{ item.title ?? target }}</span>
       <span class="mt-0.5 block truncate text-xs text-muted">
         {{ authorName }} ·
-        <span class="font-mono">{{ widgetType ? `${widgetType} · ` : '' }}#{{ item.anchor.widgetId }}</span>
+        <span
+          v-if="onView"
+          data-comment-target="view"
+        >{{ target }}</span>
+        <span
+          v-else
+          class="font-mono"
+        >{{ widgetType ? `${widgetType} · ` : '' }}#{{ item.anchor.widgetId }}</span>
         <span
           v-if="item.variantNames.length"
           class="font-mono"

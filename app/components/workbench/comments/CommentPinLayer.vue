@@ -171,6 +171,11 @@ function writePositions(): void {
 	}
 }
 watch([positions, structure], writePositions, { flush: 'post' })
+// The layer mounts with the overlay mapping, which can be the moment its first pin appears (a
+// composer opened from the keyboard, the tree or "Comment on this View" on a View with no pins
+// yet). Nothing changes after that first render, so the watcher alone would never place it and
+// the pin and its composer would sit at the stage's corner.
+onMounted(writePositions)
 
 // ---------------------------------------------------------------------------------------------
 // Keyboard: J / K cycle the pins (brief c §11); Tab walks them in reading order

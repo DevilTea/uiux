@@ -250,9 +250,10 @@ watch(() => props.threadId, () => {
       />
       <span
         id="thread-bubble-title"
-        class="min-w-0 truncate rounded-sm border border-default px-1.5 font-mono text-xs leading-5 text-muted"
+        class="min-w-0 truncate rounded-sm border border-default px-1.5 text-xs leading-5 text-muted"
+        :class="thread.anchor.widgetId === 'root' ? '' : 'font-mono'"
         :title="thread.title"
-      >{{ thread.anchorValid ? `${widgetType ?? 'Widget'} · #${thread.anchor.widgetId}` : `#${thread.anchor.widgetId}` }}</span>
+      >{{ thread.anchorValid ? comments.targetLabel(thread.anchor.widgetId, widgetType) : `#${thread.anchor.widgetId}` }}</span>
       <span class="flex-1" />
       <UDropdownMenu
         :items="overflow"
