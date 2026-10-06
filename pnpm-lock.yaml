@@ -66,6 +66,9 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
     devDependencies:
+      '@deviltea/spec-tool':
+        specifier: 0.1.0
+        version: 0.1.0
       '@eslint/js':
         specifier: 10.0.1
         version: 10.0.1(eslint@10.6.0(jiti@2.7.0))
@@ -275,6 +278,11 @@ packages:
 
   '@colordx/core@5.8.0':
     resolution: {integrity: sha512-cG0QJAO6VkaRUlIb0zOzX9gfJgs1pjoOL9gZ/PK1kfvBs0GCkADu5oQh6gPxXgQnZ3gV575h+lQRC0NlMDTclA==}
+
+  '@deviltea/spec-tool@0.1.0':
+    resolution: {integrity: sha512-+eaNqRiV5F20KV6wJ/2kkoanK5Ohf7wW6flCUxOpbX+0REQxI05l/PfcPaf4GOLcK26NIcWUGjBatjZcT4m3Tw==}
+    engines: {node: ^22.14.0 || ^24.0.0}
+    hasBin: true
 
   '@deviltea/widget-core@0.0.2':
     resolution: {integrity: sha512-wJMms5tNMU0q+ZU31qA79AEScVdWzm6GqWdQR1DH+h9iAHD1FA+6MoRoMLBN9AcNaul82PMTJ3o47ZbrbHPIsg==}
@@ -5653,6 +5661,10 @@ snapshots:
   '@cloudflare/kv-asset-handler@0.4.2': {}
 
   '@colordx/core@5.8.0': {}
+
+  '@deviltea/spec-tool@0.1.0':
+    dependencies:
+      yaml: 2.9.1
 
   '@deviltea/widget-core@0.0.2':
     dependencies:
