@@ -6,6 +6,7 @@ import type { ContextMenuItem, TreeItem } from '@nuxt/ui'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import type { WidgetTreeNode } from '../../../src/preview/widget-tree'
+import { diagnosticText } from '../../utils/diagnostic-copy'
 
 /**
  * The selected View's full Widget hierarchy (View.ir), at any depth (DESIGN.md "Tree").
@@ -263,7 +264,7 @@ const missingWidgetId = computed(() => rootItem.value && selectedWidgetId.value 
         size="xs"
         icon="i-lucide-network"
         :title="t('workbench.tree.unavailable')"
-        :description="widgetTreeResult?.status === 'invalid' ? widgetTreeResult.reason : undefined"
+        :description="widgetTreeResult?.status === 'invalid' ? diagnosticText({ code: widgetTreeResult.code, message: widgetTreeResult.reason }) : undefined"
       />
     </div>
   </section>

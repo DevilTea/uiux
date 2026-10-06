@@ -5,6 +5,7 @@ import { useI18n } from '#imports'
 import type { Diagnostic } from '../../composables/workbench-types'
 import type { SettingsSection } from '../../composables/useSettingsSection'
 import { nextRowUid, registryRowIssues, type RegistryKind, type RegistryRow, type RegistryRowIssue } from '../../utils/workspace-authoring'
+import { diagnosticText } from '../../utils/diagnostic-copy'
 import AuthoringConflictAlert from './AuthoringConflictAlert.vue'
 import AuthoringErrorAlert from './AuthoringErrorAlert.vue'
 import AuthoringSaveBar from './AuthoringSaveBar.vue'
@@ -170,7 +171,7 @@ defineExpose({ save })
       color="warning"
       variant="subtle"
       icon="i-lucide-triangle-alert"
-      :title="diagnostic.message"
+      :title="diagnosticText(diagnostic)"
       :description="diagnostic.path"
       :ui="{ description: 'font-mono text-xs' }"
     />
@@ -188,7 +189,7 @@ defineExpose({ save })
           <UInput
             v-if="canEdit && row.original.savedKey === undefined"
             v-model="row.original.key"
-            :placeholder="kind === 'viewports' ? 'laptop' : 'high-contrast'"
+            :placeholder="t(kind === 'viewports' ? 'settings.registry.keyPlaceholderViewport' : 'settings.registry.keyPlaceholderTheme')"
             :aria-label="t('settings.registry.key')"
             :aria-invalid="rowIssues(row.original).length > 0 || undefined"
             :data-registry-key-input="row.original.uid"
@@ -258,6 +259,7 @@ defineExpose({ save })
             :decrement="false"
             :aria-label="t('settings.registry.widthFor', { key: row.original.key || t('settings.registry.new') })"
             :aria-invalid="(!row.original.width && showIssues) || undefined"
+            :aria-roledescription="t('common.numberField')"
             class="w-24"
             :ui="{ base: 'font-mono' }"
           />
@@ -273,6 +275,7 @@ defineExpose({ save })
             :decrement="false"
             :aria-label="t('settings.registry.heightFor', { key: row.original.key || t('settings.registry.new') })"
             :aria-invalid="(!row.original.height && showIssues) || undefined"
+            :aria-roledescription="t('common.numberField')"
             class="w-24"
             :ui="{ base: 'font-mono' }"
           />

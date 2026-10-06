@@ -14,6 +14,7 @@ import FlowAddStepModal from '../../components/flows/FlowAddStepModal.vue'
 import FlowPlayer from '../../components/flows/FlowPlayer.vue'
 import LockBadge from '../../components/workbench/LockBadge.vue'
 import LockedSaveAlert from '../../components/workbench/LockedSaveAlert.vue'
+import WbDiagnosticList from '../../components/workbench/WbDiagnosticList.vue'
 import { useAccess } from '../../composables/useAccess'
 
 /**
@@ -361,18 +362,10 @@ const stepCount = computed(() => Object.keys(draft.value?.steps ?? {}).length)
                   v-if="saveError.diagnostics.length"
                   #description
                 >
-                  <ul class="space-y-0.5">
-                    <li
-                      v-for="(diagnostic, index) in saveError.diagnostics"
-                      :key="index"
-                    >
-                      <span
-                        v-if="diagnostic.path"
-                        class="font-mono text-xs"
-                      >{{ diagnostic.path }}</span>
-                      {{ diagnostic.message }}
-                    </li>
-                  </ul>
+                  <WbDiagnosticList
+                    :diagnostics="saveError.diagnostics"
+                    :status-code="saveError.statusCode"
+                  />
                 </template>
               </UAlert>
               <UAlert
@@ -463,6 +456,7 @@ const stepCount = computed(() => Object.keys(draft.value?.steps ?? {}).length)
             <USkeleton
               v-else-if="loading"
               class="h-24 w-64 rounded-lg"
+              :aria-label="t('common.loading')"
             />
           </div>
         </main>

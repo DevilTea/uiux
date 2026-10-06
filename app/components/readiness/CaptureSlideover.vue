@@ -7,6 +7,7 @@ import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import type { FetchErrorDetails } from '../../utils/fetch-error'
 import { contextKey, expandContexts, type CaptureContext, type CaptureDimension } from '../../utils/readiness'
+import { diagnosticLines } from '../../utils/diagnostic-copy'
 
 /**
  * Capture Evidence for the current View (brief f, section 5): an explicit list of resolved
@@ -308,10 +309,10 @@ const statusIcon: Record<RowStatus, string> = {
               >
                 {{ row.error?.message ?? t('evidence.result.failed') }}
                 <span
-                  v-for="diagnostic in (row.error?.diagnostics ?? []).filter(item => item.message !== row.error?.message)"
-                  :key="diagnostic.message"
+                  v-for="line in diagnosticLines(row.error?.message ?? '', row.error?.diagnostics ?? [])"
+                  :key="line"
                   class="block text-muted"
-                >{{ diagnostic.message }}</span>
+                >{{ line }}</span>
               </p>
             </div>
             <div class="flex items-center gap-1.5">

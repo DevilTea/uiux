@@ -11,6 +11,8 @@ import type { Diagnostic } from '../../composables/workbench-types'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { groupFindings, type Finding, type FindingResource } from '../../utils/readiness'
 import { flowPath, viewLocation } from '../../utils/workbench-routes'
+import WbErrorDescription from '../workbench/WbErrorDescription.vue'
+import { diagnosticText } from '../../utils/diagnostic-copy'
 
 /**
  * Overview › Checks (Part 5): one normalized findings surface for the Workspace, grouped
@@ -114,7 +116,7 @@ function open(finding: Finding): void {
 const items = computed<CheckTreeItem[]>(() => groups.value.map(group => ({
 	id: `problem:${group.code}`,
 	level: 'problem',
-	label: group.message,
+	label: diagnosticText(group),
 	code: group.code,
 	count: group.resources.length,
 	icon: 'i-lucide-triangle-alert',
@@ -128,9 +130,9 @@ const items = computed<CheckTreeItem[]>(() => groups.value.map(group => ({
 		children: list.map((finding, index) => ({
 			id: `finding:${group.code}:${resource.kind}:${resource.key}:${index}`,
 			level: 'finding',
-			label: finding.widgetId ? `${finding.widgetType ? `${finding.widgetType} · ` : ''}#${finding.widgetId}` : finding.message,
+			label: finding.widgetId ? `${finding.widgetType ? `${finding.widgetType} · ` : ''}#${finding.widgetId}` : diagnosticText(finding),
 			mono: !!finding.widgetId,
-			detail: finding.widgetId ? finding.message : finding.path,
+			detail: finding.widgetId ? diagnosticText(finding) : finding.path,
 			action: finding.widgetId ? t('checks.openWidget') : t('checks.open'),
 			icon: finding.widgetId ? 'i-lucide-crosshair' : 'i-lucide-arrow-up-right',
 			onSelect: () => open(finding),
@@ -179,8 +181,16 @@ const items = computed<CheckTreeItem[]>(() => groups.value.map(group => ({
       variant="subtle"
       icon="i-lucide-circle-alert"
       :title="t('checks.readFailedFor', { name: failure.name })"
-      :description="failure.error.message"
-    />
+    >
+      <template #description>
+        <WbErrorDescription
+          :headline="t('checks.readFailedFor', { name: failure.name })"
+          :lead="failure.error.message"
+          :diagnostics="failure.error.diagnostics"
+          :status-code="failure.error.statusCode"
+        />
+      </template>
+    </UAlert>
 
     <div
       v-if="running && !lastRun"
@@ -190,6 +200,7 @@ const items = computed<CheckTreeItem[]>(() => groups.value.map(group => ({
         v-for="index in 4"
         :key="index"
         class="h-7 w-full"
+        :aria-label="t('common.loading')"
       />
     </div>
 

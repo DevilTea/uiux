@@ -363,10 +363,22 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
             class="flex flex-col gap-3"
             aria-hidden="true"
           >
-            <USkeleton class="h-5 w-40" />
-            <USkeleton class="h-8 w-full" />
-            <USkeleton class="h-8 w-full" />
-            <USkeleton class="h-8 w-2/3" />
+            <USkeleton
+              class="h-5 w-40"
+              :aria-label="t('common.loading')"
+            />
+            <USkeleton
+              class="h-8 w-full"
+              :aria-label="t('common.loading')"
+            />
+            <USkeleton
+              class="h-8 w-full"
+              :aria-label="t('common.loading')"
+            />
+            <USkeleton
+              class="h-8 w-2/3"
+              :aria-label="t('common.loading')"
+            />
           </div>
         </div>
       </div>

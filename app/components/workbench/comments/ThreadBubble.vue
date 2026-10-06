@@ -19,6 +19,7 @@ import LockedSaveAlert from '../LockedSaveAlert.vue'
 import RetractConfirm from '../RetractConfirm.vue'
 import ReviewMessage from '../ReviewMessage.vue'
 import SubmitForReviewModal from '../SubmitForReviewModal.vue'
+import WbErrorDescription from '../WbErrorDescription.vue'
 
 /**
  * The thread bubble (brief c, section 6; direct-resolve decision 10): status, the compact typed
@@ -397,9 +398,16 @@ watch(() => props.threadId, () => {
       variant="subtle"
       icon="i-lucide-circle-alert"
       :title="error.message"
-      :description="error.diagnostics.map(item => item.message).filter(item => item !== error?.message).join(' ') || undefined"
       :ui="{ title: 'text-sm', description: 'text-xs' }"
-    />
+    >
+      <template #description>
+        <WbErrorDescription
+          :headline="error.message"
+          :diagnostics="error.diagnostics"
+          :status-code="error.statusCode"
+        />
+      </template>
+    </UAlert>
 
     <ol
       class="grid max-h-60 gap-2.5 overflow-auto border-t border-default pt-2.5"
@@ -410,7 +418,10 @@ watch(() => props.threadId, () => {
         v-if="!detail"
         class="text-xs text-muted"
       >
-        <USkeleton class="h-10 w-full" />
+        <USkeleton
+          class="h-10 w-full"
+          :aria-label="t('common.loading')"
+        />
       </li>
       <li
         v-for="item in timeline"

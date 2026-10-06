@@ -4,6 +4,7 @@ import { useI18n } from '#imports'
 import type { RadioGroupItem } from '@nuxt/ui'
 import { useReviewInbox } from '../../composables/useReviewInbox'
 import { useAccess } from '../../composables/useAccess'
+import WbErrorDescription from './WbErrorDescription.vue'
 
 /**
  * "New comment" from the Reviews inbox and "Comment on Workspace" from the command palette
@@ -112,9 +113,17 @@ function onKeydown(event: KeyboardEvent): void {
           variant="subtle"
           icon="i-lucide-circle-alert"
           :title="error.message"
-          :ui="{ title: 'text-sm' }"
+          :ui="{ title: 'text-sm', description: 'text-xs' }"
           role="alert"
-        />
+        >
+          <template #description>
+            <WbErrorDescription
+              :headline="error.message"
+              :diagnostics="error.diagnostics"
+              :status-code="error.statusCode"
+            />
+          </template>
+        </UAlert>
         <div class="flex justify-end gap-2">
           <UButton
             color="neutral"

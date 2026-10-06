@@ -9,6 +9,7 @@ import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-er
 import { updatedSince } from '../../utils/readiness'
 import { relativeTime } from '../../utils/widget-inspection'
 import { viewLocation } from '../../utils/workbench-routes'
+import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 
 /**
  * Overview › Activity: Views updated since this browser last opened them, then the latest
@@ -165,7 +166,15 @@ const timeline = computed(() => events.value.map(item => ({ ...item, date: relat
         icon="i-lucide-circle-alert"
         :title="error.message"
         :actions="[{ label: t('common.retry'), size: 'xs', color: 'error', variant: 'outline', onClick: () => { void load() } }]"
-      />
+      >
+        <template #description>
+          <WbErrorDescription
+            :headline="error.message"
+            :diagnostics="error.diagnostics"
+            :status-code="error.statusCode"
+          />
+        </template>
+      </UAlert>
       <div
         v-else-if="loading && !events.length"
         class="space-y-3"
@@ -174,6 +183,7 @@ const timeline = computed(() => events.value.map(item => ({ ...item, date: relat
           v-for="index in 4"
           :key="index"
           class="h-10 w-full"
+          :aria-label="t('common.loading')"
         />
       </div>
       <UEmpty

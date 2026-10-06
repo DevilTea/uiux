@@ -5,7 +5,9 @@ import type { FetchErrorDiagnostic } from '../../utils/fetch-error'
 
 /**
  * The "Details" disclosure of an error state (brief h, section 3): the exact diagnostic codes and
- * paths, collapsed by default so the plain-words message leads. Codes stay untranslated mono.
+ * paths, collapsed by default so the plain-words message leads. Codes stay untranslated mono, and
+ * this is the one place the server's English message appears when the Workbench speaks another
+ * language (`utils/diagnostic-copy.ts`).
  */
 defineProps<{ diagnostics: readonly FetchErrorDiagnostic[]; statusCode?: number }>()
 
@@ -48,7 +50,11 @@ const open = ref(false)
             class="ms-1 font-mono text-dimmed"
             translate="no"
           >{{ diagnostic.path }}</span>
-          <span class="block">{{ diagnostic.message }}</span>
+          <!-- The server's own words: written in English for agents and logs, so marked as such. -->
+          <span
+            class="block"
+            lang="en"
+          >{{ diagnostic.message }}</span>
         </li>
       </ul>
     </template>

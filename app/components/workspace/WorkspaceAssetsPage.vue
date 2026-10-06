@@ -11,6 +11,7 @@ import { useAccess } from '../../composables/useAccess'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { collectAssetReferences, isImageMediaType } from '../../utils/workspace-authoring'
 import WorkbenchPage from '../workbench/WorkbenchPage.vue'
+import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 import AuthoringAccessNotice from './AuthoringAccessNotice.vue'
 import AssetUploadModal from './AssetUploadModal.vue'
 import AssetDetailSlideover from './AssetDetailSlideover.vue'
@@ -270,9 +271,17 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
           icon="i-lucide-circle-alert"
           role="alert"
           :title="t('assets.loadListFailed')"
-          :description="loadError.message"
           :actions="[{ label: t('common.retry'), color: 'neutral', variant: 'outline', onClick: () => { void load() } }]"
-        />
+        >
+          <template #description>
+            <WbErrorDescription
+              :headline="t('assets.loadListFailed')"
+              :lead="loadError.message"
+              :diagnostics="loadError.diagnostics"
+              :status-code="loadError.statusCode"
+            />
+          </template>
+        </UAlert>
 
         <div
           v-if="loading && !entries.length"
@@ -283,6 +292,7 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
             v-for="n in 5"
             :key="n"
             class="aspect-4/3 w-full rounded-lg"
+            :aria-label="t('common.loading')"
           />
         </div>
 

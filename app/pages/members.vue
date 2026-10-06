@@ -233,7 +233,10 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
             >
               {{ t('access.members.rosterLabel', { hint: roster.hint }) }}
             </UBadge>
-            <span class="min-w-0 truncate font-mono">{{ roster.workspaceRoot }}</span>
+            <span
+              class="min-w-0 truncate font-mono"
+              translate="no"
+            >{{ roster.workspaceRoot }}</span>
           </p>
           <p
             v-if="roster"
@@ -341,7 +344,10 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
           :ui="tableUi"
         >
           <template #id-cell="{ row }">
-            <span class="font-mono text-xs">{{ row.original.id }}</span>
+            <span
+              class="font-mono text-xs"
+              translate="no"
+            >{{ row.original.id }}</span>
             <UBadge
               v-if="row.original.lan"
               color="neutral"
@@ -401,7 +407,10 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
             </UBadge>
           </template>
           <template #userAgent-cell="{ row }">
-            <span class="block max-w-56 truncate text-muted">{{ row.original.userAgent || '—' }}</span>
+            <span
+              class="block max-w-56 truncate text-muted"
+              translate="no"
+            >{{ row.original.userAgent || '—' }}</span>
           </template>
           <template #lastSeenAt-cell="{ row }">
             {{ fmt.dateTime(row.original.lastSeenAt) }}

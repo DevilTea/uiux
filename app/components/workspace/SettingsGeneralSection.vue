@@ -5,6 +5,7 @@ import { isCanonicalLocaleTag } from '../../../src/domain/validation'
 import type { WorkspaceManifest } from '../../../src/domain/workspace/schema'
 import type { Diagnostic } from '../../composables/workbench-types'
 import type { SettingsSection } from '../../composables/useSettingsSection'
+import { diagnosticText } from '../../utils/diagnostic-copy'
 import AuthoringConflictAlert from './AuthoringConflictAlert.vue'
 import AuthoringErrorAlert from './AuthoringErrorAlert.vue'
 import AuthoringSaveBar from './AuthoringSaveBar.vue'
@@ -87,7 +88,7 @@ defineExpose({ save })
       color="warning"
       variant="subtle"
       icon="i-lucide-triangle-alert"
-      :title="diagnostic.message"
+      :title="diagnosticText(diagnostic)"
       :description="diagnostic.path"
       :ui="{ description: 'font-mono text-xs' }"
     />

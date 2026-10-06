@@ -1,12 +1,18 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { diagnosticText } from '../../utils/diagnostic-copy'
 import type { FetchErrorDetails } from '../../utils/fetch-error'
+import WbErrorDetails from '../workbench/WbErrorDetails.vue'
 
 /**
  * Server rejection of a save (brief h, "Validation rejected"): the first message as the
- * description, then every diagnostic with its JSON Pointer path in mono.
+ * description, then every diagnostic with its JSON Pointer path in mono, each in the UI language
+ * (`utils/diagnostic-copy.ts`). The exact codes and the server's own words stay in Details.
  */
-defineProps<{ title: string; error: FetchErrorDetails }>()
+const props = defineProps<{ title: string; error: FetchErrorDetails }>()
 const emit = defineEmits<{ close: [] }>()
+
+const listed = computed(() => props.error.diagnostics.length > 1 || (props.error.diagnostics[0] && diagnosticText(props.error.diagnostics[0]) !== props.error.message))
 </script>
 
 <template>
@@ -22,7 +28,7 @@ const emit = defineEmits<{ close: [] }>()
     <template #description>
       <p>{{ error.message }}</p>
       <ul
-        v-if="error.diagnostics.length > 1 || (error.diagnostics[0] && error.diagnostics[0].message !== error.message)"
+        v-if="listed"
         class="mt-1 space-y-1"
       >
         <li
@@ -33,9 +39,13 @@ const emit = defineEmits<{ close: [] }>()
           <code
             v-if="diagnostic.path"
             class="me-1 font-mono text-xs"
-          >{{ diagnostic.path }}</code>{{ diagnostic.message }}
+          >{{ diagnostic.path }}</code>{{ diagnosticText(diagnostic) }}
         </li>
       </ul>
+      <WbErrorDetails
+        :diagnostics="error.diagnostics"
+        :status-code="error.statusCode"
+      />
     </template>
   </UAlert>
 </template>

@@ -11,6 +11,7 @@ import ReviewTimeline from './ReviewTimeline.vue'
 import LockedSaveAlert from './LockedSaveAlert.vue'
 import RetractConfirm from './RetractConfirm.vue'
 import SubmitForReviewModal from './SubmitForReviewModal.vue'
+import WbErrorDescription from './WbErrorDescription.vue'
 import { resolveMenuGroups } from '../../utils/resolve-menu'
 import { latestEditableMessageId, retractEligibility } from '../../utils/review-message-actions'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
@@ -54,7 +55,7 @@ function shortId(id: string | undefined): string {
 const activeSubmission = computed(() => thread.value?.status === 'ready-for-review' ? detail.value?.submissions.at(-1) : undefined)
 const viewExists = computed(() => !!thread.value && inbox.threadViewExists(thread.value))
 const workspaceScoped = computed(() => thread.value?.scope === 'workspace')
-const scopeLabel = computed(() => thread.value?.variantNames.length ? thread.value.variantNames.join(', ') : t('inbox.filter.viewWide'))
+const scopeLabel = computed(() => thread.value?.variantNames.length ? thread.value.variantNames.join(t('common.listSeparator')) : t('inbox.filter.viewWide'))
 const unreadable = computed(() => thread.value ? inbox.detailErrors.value.get(thread.value.id) : undefined)
 
 // ---------------------------------------------------------------------------------------------
@@ -444,10 +445,18 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           variant="subtle"
           icon="i-lucide-file-warning"
           :title="t('inbox.unreadableTitle')"
-          :description="[unreadable.message, ...unreadable.diagnostics.map(item => item.message)].filter((item, index, all) => all.indexOf(item) === index).join(' ')"
           :ui="{ title: 'text-sm', description: 'text-xs' }"
           data-review-unreadable
-        />
+        >
+          <template #description>
+            <WbErrorDescription
+              :headline="t('inbox.unreadableTitle')"
+              :lead="unreadable.message"
+              :diagnostics="unreadable.diagnostics"
+              :status-code="unreadable.statusCode"
+            />
+          </template>
+        </UAlert>
         <UAlert
           v-if="conflict"
           color="warning"
@@ -469,9 +478,16 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           variant="subtle"
           icon="i-lucide-circle-alert"
           :title="error.message"
-          :description="error.diagnostics.map(item => item.message).filter(item => item !== error?.message).join(' ') || undefined"
           :ui="{ title: 'text-sm', description: 'text-xs' }"
-        />
+        >
+          <template #description>
+            <WbErrorDescription
+              :headline="error.message"
+              :diagnostics="error.diagnostics"
+              :status-code="error.statusCode"
+            />
+          </template>
+        </UAlert>
 
         <ReviewTimeline
           v-if="detail"
@@ -491,6 +507,7 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
             v-for="index in 3"
             :key="index"
             class="h-12 w-full"
+            :aria-label="t('common.loading')"
           />
         </div>
       </div>

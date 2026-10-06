@@ -130,9 +130,23 @@ onUnmounted(() => {
       icon="i-lucide-database"
       role="status"
       :title="t('workbench.migration.title')"
-      :description="t('workbench.migration.description', { command: MIGRATE_COMMAND })"
       :ui="{ root: 'rounded-none border-b border-default' }"
-    />
+    >
+      <template #description>
+        <i18n-t
+          keypath="workbench.migration.description"
+          tag="span"
+          scope="global"
+        >
+          <template #command>
+            <code
+              class="font-mono"
+              translate="no"
+            >{{ MIGRATE_COMMAND }}</code>
+          </template>
+        </i18n-t>
+      </template>
+    </UAlert>
 
     <UAlert
       v-if="offline"

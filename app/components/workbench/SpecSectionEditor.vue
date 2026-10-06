@@ -4,6 +4,7 @@ import { useI18n } from '#imports'
 import type { SelectItem } from '@nuxt/ui'
 import type { SpecDraft, SpecEditor } from '../../composables/useSpecEditor'
 import type { ReferenceDraft } from '../../utils/widget-inspection'
+import { diagnosticText } from '../../utils/diagnostic-copy'
 import LockedSaveAlert from './LockedSaveAlert.vue'
 
 /**
@@ -196,7 +197,7 @@ const conflictActions = computed(() => [
               v-if="item.path"
               class="font-mono"
               translate="no"
-            >{{ item.path }}</span> {{ item.message }}
+            >{{ item.path }}</span> {{ diagnosticText(item) }}
           </li>
         </ul>
       </template>
@@ -317,7 +318,7 @@ const conflictActions = computed(() => [
                 <UInput
                   v-model="reference.relation"
                   class="w-full"
-                  placeholder="design"
+                  :placeholder="t('spec.ref.relationPlaceholder')"
                 />
               </UFormField>
             </div>

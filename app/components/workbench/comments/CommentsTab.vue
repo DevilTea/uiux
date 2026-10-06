@@ -5,6 +5,7 @@ import { useWorkbench } from '../../../composables/useWorkbench'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
 import { statusKey, useCanvasComments, VIEW_ANCHOR_WIDGET_ID, type CommentFilter, type CommentThread } from '../../../composables/useCanvasComments'
 import CommentRow from './CommentRow.vue'
+import WbErrorDescription from '../WbErrorDescription.vue'
 import { flattenWidgetTree } from '../../../../src/preview/widget-tree'
 import { MAX_TRACKED_WIDGETS } from '../../../../src/preview/protocol/schema'
 
@@ -154,7 +155,15 @@ function onListKeydown(event: KeyboardEvent): void {
       :title="comments.loadError.value.message"
       :actions="[{ label: t('common.retry'), size: 'xs', color: 'error', variant: 'outline', onClick: () => { void comments.refreshReviews() } }]"
       class="rounded-none"
-    />
+    >
+      <template #description>
+        <WbErrorDescription
+          :headline="comments.loadError.value.message"
+          :diagnostics="comments.loadError.value.diagnostics"
+          :status-code="comments.loadError.value.statusCode"
+        />
+      </template>
+    </UAlert>
 
     <div
       ref="list"

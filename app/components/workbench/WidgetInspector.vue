@@ -6,6 +6,7 @@ import { useWorkbench } from '../../composables/useWorkbench'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { useWidgetInspection, type WidgetThreadRow } from '../../composables/useWidgetInspection'
 import { actorInitials, formatStateValue, relativeTime, truncateMiddle, widgetTypeIcon } from '../../utils/widget-inspection'
+import { diagnosticText } from '../../utils/diagnostic-copy'
 
 /**
  * The Inspect tab (brief e): a property sheet for the selected Widget. It answers what the Widget
@@ -361,7 +362,7 @@ function onKeydown(event: KeyboardEvent): void {
                 <span
                   class="font-mono"
                   translate="no"
-                >{{ fault.code }}</span> {{ fault.message }}
+                >{{ fault.code }}</span> {{ diagnosticText(fault) }}
               </li>
             </ul>
             <span v-else>{{ t('canvas.variantInvalidHint', { variant: variantName }) }}</span>
@@ -445,7 +446,7 @@ function onKeydown(event: KeyboardEvent): void {
                   name="i-lucide-chevron-right"
                   class="mt-0.5 size-4 text-dimmed rtl:rotate-180"
                 />
-                <span class="col-start-2 text-sm text-muted">{{ finding.message }}</span>
+                <span class="col-start-2 text-sm text-muted">{{ diagnosticText(finding) }}</span>
               </span>
             </UButton>
           </li>

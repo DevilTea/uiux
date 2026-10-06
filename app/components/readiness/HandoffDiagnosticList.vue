@@ -7,6 +7,7 @@ import { handoffDiagnosticSubject } from '../../utils/readiness'
 import { viewLocation } from '../../utils/workbench-routes'
 import { isWidgetAnchor, isWorkspaceAnchor } from '../../../src/domain/reviews/schema'
 import WbErrorDetails from '../workbench/WbErrorDetails.vue'
+import { diagnosticText } from '../../utils/diagnostic-copy'
 
 /**
  * One side of a Handoff assessment: the blocking entries, or the advisory ones the server marks
@@ -39,7 +40,7 @@ const rows = computed<Row[]>(() => props.diagnostics.map((diagnostic, index) => 
 	const workspaceThread = isWorkspaceAnchor(reviewAnchor) || /^Workspace-scoped Review thread/.test(diagnostic.message)
 	const viewId = subject.viewId ?? anchor?.viewId
 	const view = viewName(viewId)
-	let sentence = diagnostic.message
+	let sentence = diagnosticText(diagnostic)
 	switch (diagnostic.code) {
 		case 'handoff.unresolved_review_thread': {
 			const ready = /ready-for-review/.test(diagnostic.message)
