@@ -4,6 +4,7 @@
 - Preserve the Nuxt SPA (`ssr: false`) and Nitro server runtime.
 - Keep the CLI help and version commands honest; `uiux init --workspace <dir>` initializes a minimal current-schema Workspace and `uiux dev --workspace <dir>` starts the unified packaged Nitro server for one selected Workspace.
 - `uiux migrate --workspace <dir> [--dry-run]` upgrades an older Workspace to the current schema (CLI-only).
+- `uiux publish --workspace <dir> --out <dir> [--base <path>] [--source-revision <rev>]` builds the read-only static publication of a Workspace (in a source checkout, run `pnpm build` first).
 - `uiux member|token|invite|session ... --workspace <dir>` and `uiux access copy --from <old-dir> --workspace <dir>` manage that Workspace's host-local roster under `$UIUX_HOME` (default `~/.uiux`). Every `/api/*` and `/mcp` request needs a credential; agents send `Authorization: Bearer <token>`. Tests and smoke runs must use a temporary `UIUX_HOME`.
 - Do not introduce Workspace schemas, domain semantics, or external protocol contracts without an accepted architecture decision and a scoped task.
 - Do not edit `design/` canonical files directly; author canonical resources (Views, Workspace settings, Locales, UX Flows, Review threads, Assets) through domain-specific authoring operations (`create_view`, `update_view_spec`, `update_view_structure`, `update_workspace_settings`, `create_locale`, `update_locale`, `create_flow`, `update_flow`, review lifecycle tools, and asset authoring).
