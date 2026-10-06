@@ -70,14 +70,6 @@ function markReachable(): void {
 	for (const run of recoveries) run()
 }
 
-/** True when a failed `$fetch` never got an HTTP response (connection refused, reset, offline). */
-export function isNetworkFailure(cause: unknown): boolean {
-	const record = cause as { status?: unknown; statusCode?: unknown; response?: unknown; name?: unknown } | undefined
-	if (!record || typeof record !== 'object') return false
-	if (record.response !== undefined || typeof record.status === 'number' || typeof record.statusCode === 'number') return false
-	return record.name === 'FetchError' || record.name === 'TypeError'
-}
-
 export function useConnectivity() {
 	return {
 		state: readonly(state),

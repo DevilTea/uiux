@@ -157,7 +157,8 @@ describe('Spec document (R5)', () => {
 	it('reads on mobile: a 68ch column, §1 open, the rest folded, and no edit affordances', async () => {
 		const { context, page } = await open(`/views/${VIEW_ID}?panel=spec`, 390, 844)
 		try {
-			await page.getByRole('button', { name: 'Open panel' }).click()
+			// Phones open a View on its Spec tab (R13): no panel to open.
+			await expect.poll(() => page.locator('[data-view-phone] [role="tab"][aria-selected="true"]').textContent()).toBe('Spec')
 			const spec = page.locator('[data-spec-document]')
 			await spec.waitFor()
 			expect(await spec.locator('[data-spec-edit], [data-spec-editor], [data-spec-edit-on-desktop]').count()).toBe(0)
