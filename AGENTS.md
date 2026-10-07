@@ -31,9 +31,9 @@
 
 Calibration pass between batch 3 and batch 4; transitional — Discussions #1–#10 remain authoritative until cutover.
 
-### Contract ownership (batch 4 finalized)
+### Contract ownership
 
-- **Batch 4 owns full contracts:** `batch-04.json` names the full C.ws-format, C.mutation-semantics and C.mcp Contracts, so batches 02 and 03 can no longer be re-run independently; change those Contracts only through batch 04 (re-rendered against the current revision) or a newer batch that names them in full.
+- **Batch 5 owns the shared Contracts:** `batch-05.json` names the full C.ws-format, C.mutation-semantics and C.mcp Contracts and the C.adapter and C.handoff-bundle Contracts it creates, so batches 02 to 04 can no longer be re-run; change those Contracts only through batch 05 (re-rendered against the current revision) or a newer batch that names them in full, and change a unit that only an older batch names through a newer batch that names it in full.
 
 ### Ownership and structure
 
@@ -47,7 +47,6 @@ Calibration pass between batch 3 and batch 4; transitional — Discussions #1–
 - **Retired list:** `retired` array deletes Rules and Clauses; applier syncs the refmap.
 - **Automatic reorder:** Applier reorders Rules and Clauses to match batch order.
 - **Dry-run behavior:** `--dry-run` reports all planned changes and refusals for stale batches (exit 1) instead of throwing.
-- **Contract ownership after batch 4:** `batch-04.json` lists the full C.ws-format, C.mutation-semantics and C.mcp Contracts, so batches 02 and 03 can no longer be re-run; change those Contracts only through batch 04 (re-rendered against the current revision) or a newer batch that lists them in full.
 
 ### Baseline and citations
 

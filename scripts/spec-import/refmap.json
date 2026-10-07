@@ -123,6 +123,110 @@
 		"kind": "clause",
 		"id": "01a11485-fa00-72da-bc46-98302a3c106e"
 	},
+	"C.adapter": {
+		"kind": "contract",
+		"id": "01a115cd-cdb2-7d01-9485-dd50fee323a3"
+	},
+	"C.adapter.api-version": {
+		"kind": "clause",
+		"id": "01a115cd-d095-790b-bc0b-95297733fed4"
+	},
+	"C.adapter.asset-fields": {
+		"kind": "clause",
+		"id": "01a115cd-d33a-73df-934f-aab7d0671649"
+	},
+	"C.adapter.brace-depth": {
+		"kind": "clause",
+		"id": "01a115cd-d4e9-7fb0-9581-f8e3be54d95f"
+	},
+	"C.adapter.catalog": {
+		"kind": "clause",
+		"id": "01a115cd-d1b4-7aa8-8095-65b3095d04b8"
+	},
+	"C.adapter.config-schema": {
+		"kind": "clause",
+		"id": "01a115cd-d0cc-79c1-84f1-70283c2cb4fc"
+	},
+	"C.adapter.i18n-fields": {
+		"kind": "clause",
+		"id": "01a115cd-d1ec-7ceb-9e0f-292719127bf4"
+	},
+	"C.adapter.i18n-members": {
+		"kind": "clause",
+		"id": "01a115cd-d223-77cf-876e-659aab26705c"
+	},
+	"C.adapter.i18n-names": {
+		"kind": "clause",
+		"id": "01a115cd-d25b-7bf4-901d-bceceddfa11d"
+	},
+	"C.adapter.id": {
+		"kind": "clause",
+		"id": "01a115cd-d05d-7e87-ae94-6e22dd646afb"
+	},
+	"C.adapter.malformed": {
+		"kind": "clause",
+		"id": "01a115cd-d524-743d-9439-a397f488e3e7"
+	},
+	"C.adapter.manifest": {
+		"kind": "clause",
+		"id": "01a115cd-d026-757d-a3ae-49d4dbf57538"
+	},
+	"C.adapter.markers": {
+		"kind": "clause",
+		"id": "01a115cd-d462-740a-b216-5f874cec41b4"
+	},
+	"C.adapter.module-resolution": {
+		"kind": "clause",
+		"id": "01a115cd-d109-76d3-9622-85d0080c60b6"
+	},
+	"C.adapter.occurrence": {
+		"kind": "clause",
+		"id": "01a115cd-d597-7c34-ab24-f088d9e29a98"
+	},
+	"C.adapter.placeholder-name": {
+		"kind": "clause",
+		"id": "01a115cd-d4ac-7c13-ac41-8af7b7712f57"
+	},
+	"C.adapter.proof-profile": {
+		"kind": "clause",
+		"id": "01a115cd-d302-70ee-ac6e-1e31f114c0fc"
+	},
+	"C.adapter.root-shell-reserved": {
+		"kind": "clause",
+		"id": "01a115cd-d17c-74b0-8eb4-2fe69194e49a"
+	},
+	"C.adapter.root-shell-state": {
+		"kind": "clause",
+		"id": "01a115cd-d372-7777-b286-8f9266a04828"
+	},
+	"C.adapter.t-result": {
+		"kind": "clause",
+		"id": "01a115cd-d3e2-7353-869d-ab3bf43c24df"
+	},
+	"C.adapter.t-signature": {
+		"kind": "clause",
+		"id": "01a115cd-d3aa-7bdb-b6f1-2029f3e9089b"
+	},
+	"C.adapter.unique-registries": {
+		"kind": "clause",
+		"id": "01a115cd-d144-79be-bf13-c2842fb39e21"
+	},
+	"C.adapter.value-contract-evolution": {
+		"kind": "clause",
+		"id": "01a115cd-d2cb-7aba-afcf-26e85e158dbb"
+	},
+	"C.adapter.value-contracts": {
+		"kind": "clause",
+		"id": "01a115cd-d293-7515-a7bd-bb82a0674e5d"
+	},
+	"C.adapter.warning-order": {
+		"kind": "clause",
+		"id": "01a115cd-d55e-73e0-bafb-c2f74d2ea95a"
+	},
+	"C.adapter.warnings": {
+		"kind": "clause",
+		"id": "01a115cd-d41a-7a30-b9f4-32d981239a29"
+	},
 	"C.cli": {
 		"kind": "contract",
 		"id": "01a1144e-52fc-74e6-a7bc-e415c8ab168d"
@@ -198,6 +302,70 @@
 	"C.cli.uiux-home": {
 		"kind": "clause",
 		"id": "01a1144e-5649-7ba2-bb90-ad49658f0400"
+	},
+	"C.handoff-bundle": {
+		"kind": "contract",
+		"id": "01a115cd-cde8-7e3f-b1ba-3d4737dde0a7"
+	},
+	"C.handoff-bundle.adapter-provenance": {
+		"kind": "clause",
+		"id": "01a115cd-d7f6-74a1-ba9f-c20a24a31ae5"
+	},
+	"C.handoff-bundle.artifact-refs": {
+		"kind": "clause",
+		"id": "01a115cd-d6b8-7f80-bd03-34b85ec0152e"
+	},
+	"C.handoff-bundle.coverage": {
+		"kind": "clause",
+		"id": "01a115cd-d8a7-7cd4-a54c-f557821dce80"
+	},
+	"C.handoff-bundle.diagnostics": {
+		"kind": "clause",
+		"id": "01a115cd-d86c-72f0-a98c-fe8eb193d1b2"
+	},
+	"C.handoff-bundle.evidence-refs": {
+		"kind": "clause",
+		"id": "01a115cd-d6f2-76a9-a339-27e18374b7db"
+	},
+	"C.handoff-bundle.identity": {
+		"kind": "clause",
+		"id": "01a115cd-d60a-794c-8230-5ef65c6fc047"
+	},
+	"C.handoff-bundle.implementation-refs": {
+		"kind": "clause",
+		"id": "01a115cd-d72b-7c10-824a-8fd5fa625f9f"
+	},
+	"C.handoff-bundle.manifest": {
+		"kind": "clause",
+		"id": "01a115cd-d5d1-78dd-8d31-2eb0beb5dff7"
+	},
+	"C.handoff-bundle.provenance": {
+		"kind": "clause",
+		"id": "01a115cd-d7ba-71b5-9cab-7c473cdcf54a"
+	},
+	"C.handoff-bundle.readiness": {
+		"kind": "clause",
+		"id": "01a115cd-d832-7bfc-800d-c6fa8dd58dd2"
+	},
+	"C.handoff-bundle.resources": {
+		"kind": "clause",
+		"id": "01a115cd-d67e-701b-af7d-c0dbbc4733cf"
+	},
+	"C.handoff-bundle.review-codes": {
+		"kind": "clause",
+		"id": "01a115cd-d922-7728-a8f5-608889f8b510"
+	},
+	"C.handoff-bundle.review-coverage": {
+		"kind": "clause",
+		"id": "01a115cd-d8e3-7976-ad6f-8f72af6a2d8a"
+	},
+	"C.handoff-bundle.roots": {
+		"kind": "clause",
+		"id": "01a115cd-d644-7e05-8f01-af40349c86c0"
+	},
+	"C.handoff-bundle.source-ref": {
+		"kind": "clause",
+		"id": "01a115cd-d776-7b2e-ab7a-4199f7e4695f"
 	},
 	"C.mcp": {
 		"kind": "contract",
@@ -343,6 +511,22 @@
 		"kind": "clause",
 		"id": "01a11544-6c56-786b-81a0-3e2a59c56a6a"
 	},
+	"C.mutation-semantics.review-submit-evidence": {
+		"kind": "clause",
+		"id": "01a115cd-3769-7376-ba43-a6b867d8cb85"
+	},
+	"C.mutation-semantics.review-submit-not-current": {
+		"kind": "clause",
+		"id": "01a115cd-373a-7507-b6dc-9c710d2366fd"
+	},
+	"C.mutation-semantics.review-submit-view-revision": {
+		"kind": "clause",
+		"id": "01a115cd-36de-73fd-a5df-0b8bfef4b559"
+	},
+	"C.mutation-semantics.review-submit-workspace-revision": {
+		"kind": "clause",
+		"id": "01a115cd-370c-74d4-b254-c175d145606a"
+	},
 	"C.mutation-semantics.review-workspace-refusals": {
 		"kind": "clause",
 		"id": "01a11544-6c84-788f-82a2-fecc7c66aeb6"
@@ -391,6 +575,10 @@
 		"kind": "clause",
 		"id": "01a11544-6826-71dd-ab2d-a61e2cea2ade"
 	},
+	"C.ws-format.decision-history-continuity": {
+		"kind": "clause",
+		"id": "01a115cd-34b8-7890-a57b-5ce7cdd21a49"
+	},
 	"C.ws-format.decision-provenance": {
 		"kind": "clause",
 		"id": "01a11544-6882-7d45-947a-eddbc7bdc120"
@@ -398,6 +586,14 @@
 	"C.ws-format.decision-transitions": {
 		"kind": "clause",
 		"id": "01a11544-6854-7c6d-b420-4747804aab8d"
+	},
+	"C.ws-format.evidence-provenance": {
+		"kind": "clause",
+		"id": "01a115cd-cecb-747b-b28d-aa083893bff2"
+	},
+	"C.ws-format.evidence-record": {
+		"kind": "clause",
+		"id": "01a115cd-ce92-7986-b9a6-0e5fa9e092f5"
 	},
 	"C.ws-format.evidence-records": {
 		"kind": "clause",
@@ -418,6 +614,14 @@
 	"C.ws-format.flow-step": {
 		"kind": "clause",
 		"id": "01a11544-68db-74aa-b589-e7bf22f813c4"
+	},
+	"C.ws-format.formal-capture": {
+		"kind": "clause",
+		"id": "01a115cd-cf06-757c-8fe8-8718bbe5ec20"
+	},
+	"C.ws-format.i18n-binding": {
+		"kind": "clause",
+		"id": "01a115cd-ce54-7b2a-8571-5c583db34e3a"
 	},
 	"C.ws-format.i18n-settings": {
 		"kind": "clause",
@@ -447,6 +651,18 @@
 		"kind": "clause",
 		"id": "01a1144e-5450-77ca-b9da-eab7e00a46e6"
 	},
+	"C.ws-format.references-external": {
+		"kind": "clause",
+		"id": "01a115cd-345e-73d1-8cb4-6d70ee56a60a"
+	},
+	"C.ws-format.references-view": {
+		"kind": "clause",
+		"id": "01a115cd-342f-7071-b8a4-4dd0f50406c1"
+	},
+	"C.ws-format.resolved-context": {
+		"kind": "clause",
+		"id": "01a115cd-cf3f-7b99-a9a1-4e9ed1011ba1"
+	},
 	"C.ws-format.review-actor": {
 		"kind": "clause",
 		"id": "01a11544-69e5-7462-84c9-b871e417743f"
@@ -455,17 +671,33 @@
 		"kind": "clause",
 		"id": "01a11544-6960-7a2c-85f3-87fac0350cfe"
 	},
+	"C.ws-format.review-direct-resolve": {
+		"kind": "clause",
+		"id": "01a115cd-35f9-7d7d-8ac8-c6b9f427446d"
+	},
 	"C.ws-format.review-display-hint": {
 		"kind": "clause",
 		"id": "01a11544-6bc3-75cd-9585-1dbcf208c502"
+	},
+	"C.ws-format.review-duplicate-reason": {
+		"kind": "clause",
+		"id": "01a115cd-3627-7dcf-9748-b01b04ada02f"
 	},
 	"C.ws-format.review-edit-author": {
 		"kind": "clause",
 		"id": "01a11544-6a3e-7c7e-b518-c0bdb68dc140"
 	},
+	"C.ws-format.review-edit-body": {
+		"kind": "clause",
+		"id": "01a115cd-3513-7004-9dd1-902426189184"
+	},
 	"C.ws-format.review-edit-content": {
 		"kind": "clause",
 		"id": "01a11544-6a6e-713b-bd35-e080842f2bf6"
+	},
+	"C.ws-format.review-edit-noop": {
+		"kind": "clause",
+		"id": "01a115cd-3540-7e17-a972-9e51a91ffb8a"
 	},
 	"C.ws-format.review-evidence-ref": {
 		"kind": "clause",
@@ -495,6 +727,10 @@
 		"kind": "clause",
 		"id": "01a11544-6b86-7529-8440-f37c43558427"
 	},
+	"C.ws-format.review-resolve-human": {
+		"kind": "clause",
+		"id": "01a115cd-3655-7b6d-912b-0535f03daa8e"
+	},
 	"C.ws-format.review-status": {
 		"kind": "clause",
 		"id": "01a11544-69b9-74c4-8f54-c383c0b83e82"
@@ -502,6 +738,10 @@
 	"C.ws-format.review-submission": {
 		"kind": "clause",
 		"id": "01a11544-6a9c-774b-b4fa-e60ef5a827b6"
+	},
+	"C.ws-format.review-submission-time": {
+		"kind": "clause",
+		"id": "01a115cd-359b-7a49-a7a5-7f5ffb12bd60"
 	},
 	"C.ws-format.review-thread": {
 		"kind": "clause",
@@ -530,6 +770,14 @@
 	"C.ws-format.themes": {
 		"kind": "clause",
 		"id": "01a1144e-53c4-752f-9c46-c4c70b384165"
+	},
+	"C.ws-format.translation-occurrence": {
+		"kind": "clause",
+		"id": "01a115cd-cf78-7bfa-b606-b196496d0389"
+	},
+	"C.ws-format.translation-order": {
+		"kind": "clause",
+		"id": "01a115cd-cfb1-7b51-8730-6418d218eb51"
 	},
 	"C.ws-format.variants": {
 		"kind": "clause",
@@ -1075,6 +1323,358 @@
 		"kind": "rule",
 		"id": "01a11485-ea39-7069-abc5-410b7576f445"
 	},
+	"R.adapter.catalog.authoring-metadata": {
+		"kind": "rule",
+		"id": "01a115cd-af87-785a-a500-19bb8e3439d5"
+	},
+	"R.adapter.catalog.core-valid": {
+		"kind": "rule",
+		"id": "01a115cd-b0d5-79c2-b533-b125964e0e7a"
+	},
+	"R.adapter.catalog.fail-closed": {
+		"kind": "rule",
+		"id": "01a115cd-b046-76b8-ad6b-323fa69ebc60"
+	},
+	"R.adapter.catalog.load-validation": {
+		"kind": "rule",
+		"id": "01a115cd-b014-75c6-9e03-6a274d498a12"
+	},
+	"R.adapter.catalog.no-evaluation": {
+		"kind": "rule",
+		"id": "01a115cd-b078-7c39-874c-bf65da4fbb4b"
+	},
+	"R.adapter.catalog.no-schema-annotation": {
+		"kind": "rule",
+		"id": "01a115cd-afe6-7e1f-9b61-805696ca3760"
+	},
+	"R.adapter.catalog.param-dependencies": {
+		"kind": "rule",
+		"id": "01a115cd-b161-7550-b6e8-a2f694f591ee"
+	},
+	"R.adapter.catalog.same-widget-params": {
+		"kind": "rule",
+		"id": "01a115cd-b132-71a6-aee2-c3406fbb5f54"
+	},
+	"R.adapter.catalog.schema-untouched": {
+		"kind": "rule",
+		"id": "01a115cd-b0a7-7aff-97d0-2757ea9f510f"
+	},
+	"R.adapter.catalog.single-mapping": {
+		"kind": "rule",
+		"id": "01a115cd-b103-7db4-9a07-65badd12c50f"
+	},
+	"R.adapter.catalog.translatable-fields": {
+		"kind": "rule",
+		"id": "01a115cd-afb7-7713-8e3b-6887683add79"
+	},
+	"R.adapter.resolution.all-or-nothing": {
+		"kind": "rule",
+		"id": "01a115cd-ae0e-7f4b-8fde-d3bd69751bce"
+	},
+	"R.adapter.resolution.api-check": {
+		"kind": "rule",
+		"id": "01a115cd-ac9a-75c2-91df-4d8a0ccffcbd"
+	},
+	"R.adapter.resolution.collision": {
+		"kind": "rule",
+		"id": "01a115cd-acf7-7b21-aff4-478e60281da9"
+	},
+	"R.adapter.resolution.config-validated": {
+		"kind": "rule",
+		"id": "01a115cd-ad53-7ab2-a241-3b3b34fa41aa"
+	},
+	"R.adapter.resolution.construction-failure": {
+		"kind": "rule",
+		"id": "01a115cd-ae3e-7ef7-8a53-5ccd86e143bf"
+	},
+	"R.adapter.resolution.extension": {
+		"kind": "rule",
+		"id": "01a115cd-ac0d-7a63-b694-791986652f65"
+	},
+	"R.adapter.resolution.identity": {
+		"kind": "rule",
+		"id": "01a115cd-acc9-7817-a65f-849e035f901d"
+	},
+	"R.adapter.resolution.install-once": {
+		"kind": "rule",
+		"id": "01a115cd-ae6b-7a85-be8e-0a42517daf17"
+	},
+	"R.adapter.resolution.invalid-blocks": {
+		"kind": "rule",
+		"id": "01a115cd-aeca-70ba-9b35-27de544863e5"
+	},
+	"R.adapter.resolution.invalid-open": {
+		"kind": "rule",
+		"id": "01a115cd-ae9a-7bf9-bd40-8da4bcd669c1"
+	},
+	"R.adapter.resolution.management": {
+		"kind": "rule",
+		"id": "01a115cd-af57-781e-9493-89d037e41b06"
+	},
+	"R.adapter.resolution.manifest-only": {
+		"kind": "rule",
+		"id": "01a115cd-abd7-7af1-8358-c37218ed14f1"
+	},
+	"R.adapter.resolution.no-core-fields": {
+		"kind": "rule",
+		"id": "01a115cd-adb0-750e-a1f9-a254eb3fb25e"
+	},
+	"R.adapter.resolution.no-install": {
+		"kind": "rule",
+		"id": "01a115cd-ac3e-7b8f-992d-323ae9eeb672"
+	},
+	"R.adapter.resolution.no-override": {
+		"kind": "rule",
+		"id": "01a115cd-ad26-7867-b3c0-de2392ac1ac7"
+	},
+	"R.adapter.resolution.no-partial-catalog": {
+		"kind": "rule",
+		"id": "01a115cd-aef9-7b93-9619-96196f63cfde"
+	},
+	"R.adapter.resolution.no-schema-no-config": {
+		"kind": "rule",
+		"id": "01a115cd-ad81-78d3-bf85-cf711f00e170"
+	},
+	"R.adapter.resolution.only-selection": {
+		"kind": "rule",
+		"id": "01a115cd-ab9b-720a-aa13-eda837160103"
+	},
+	"R.adapter.resolution.persist-invalid": {
+		"kind": "rule",
+		"id": "01a115cd-af27-798a-ab5b-3e5dfde30c93"
+	},
+	"R.adapter.resolution.repair-guidance": {
+		"kind": "rule",
+		"id": "01a115cd-ac6c-7f5b-90bb-825cd1ce2ce4"
+	},
+	"R.adapter.resolution.whole-set": {
+		"kind": "rule",
+		"id": "01a115cd-addf-7322-8ebd-f08952469905"
+	},
+	"R.artifacts.by-identity": {
+		"kind": "rule",
+		"id": "01a115cd-c1a0-72bb-a4f9-1f5063b5d33e"
+	},
+	"R.artifacts.gc": {
+		"kind": "rule",
+		"id": "01a115cd-c208-7a92-9582-69966f36e7fe"
+	},
+	"R.artifacts.gc-no-rewrite": {
+		"kind": "rule",
+		"id": "01a115cd-c23e-7143-bd1e-7ffd9fcaa6f2"
+	},
+	"R.artifacts.no-implicit-delete": {
+		"kind": "rule",
+		"id": "01a115cd-c1d4-73fe-b093-c9d1c2226916"
+	},
+	"R.artifacts.producers": {
+		"kind": "rule",
+		"id": "01a115cd-c16d-7dc8-a770-b6455ab80409"
+	},
+	"R.assets.binding-compatibility": {
+		"kind": "rule",
+		"id": "01a115cd-c06c-730f-a979-2491cadfb238"
+	},
+	"R.assets.diagnosed": {
+		"kind": "rule",
+		"id": "01a115cd-c09f-7018-9f52-48b05284f600"
+	},
+	"R.assets.invalid-blocks": {
+		"kind": "rule",
+		"id": "01a115cd-c0d2-7427-8a95-927b2b3518c9"
+	},
+	"R.assets.lowering": {
+		"kind": "rule",
+		"id": "01a115cd-bf1c-7ab1-933d-c03322035cc5"
+	},
+	"R.assets.media-check": {
+		"kind": "rule",
+		"id": "01a115cd-c036-739a-851f-50eecbd3b21b"
+	},
+	"R.assets.new-identity": {
+		"kind": "rule",
+		"id": "01a115cd-c000-722d-b18c-0ad9a7562a99"
+	},
+	"R.assets.no-inferred-binding": {
+		"kind": "rule",
+		"id": "01a115cd-beea-7d7d-bf04-edbf3990104b"
+	},
+	"R.assets.no-substitute": {
+		"kind": "rule",
+		"id": "01a115cd-c106-71d6-b1f8-4d59cab22ad2"
+	},
+	"R.assets.replace-identity": {
+		"kind": "rule",
+		"id": "01a115cd-bf91-7d0e-900c-73b4ba2e5095"
+	},
+	"R.assets.replace-together": {
+		"kind": "rule",
+		"id": "01a115cd-bfcb-7615-aa0a-4f46ae0808c6"
+	},
+	"R.assets.runtime-value": {
+		"kind": "rule",
+		"id": "01a115cd-bf4e-71ae-9fdb-74cc91862738"
+	},
+	"R.assets.unused-kept": {
+		"kind": "rule",
+		"id": "01a115cd-c13a-7769-b289-2e13417438e5"
+	},
+	"R.checks.catalog-group": {
+		"kind": "rule",
+		"id": "01a115cd-be84-755b-b9fb-62f519cf989c"
+	},
+	"R.checks.catalog-usage-live": {
+		"kind": "rule",
+		"id": "01a115cd-beb7-7024-9e44-0b5fe9ecf9af"
+	},
+	"R.checks.catalog-used": {
+		"kind": "rule",
+		"id": "01a115cd-be51-740b-8472-c08dc7138e3e"
+	},
+	"R.checks.check-states": {
+		"kind": "rule",
+		"id": "01a115cd-bb96-7131-99d9-a3882829590c"
+	},
+	"R.checks.current-only": {
+		"kind": "rule",
+		"id": "01a115cd-bc5e-710e-bbe2-a3d5f51469fb"
+	},
+	"R.checks.findings-only": {
+		"kind": "rule",
+		"id": "01a115cd-bb01-7830-abdc-43cf81dc0897"
+	},
+	"R.checks.gating-unchanged": {
+		"kind": "rule",
+		"id": "01a115cd-bca6-7c80-b393-5b9260c2ce18"
+	},
+	"R.checks.grouping": {
+		"kind": "rule",
+		"id": "01a115cd-bd13-778b-8a0a-b4d43cd98aa7"
+	},
+	"R.checks.navigation": {
+		"kind": "rule",
+		"id": "01a115cd-bd7d-705f-be59-b24cc4bd389e"
+	},
+	"R.checks.no-evidence-merge": {
+		"kind": "rule",
+		"id": "01a115cd-bcde-797b-b9f4-dc60d7d853bd"
+	},
+	"R.checks.order": {
+		"kind": "rule",
+		"id": "01a115cd-bd48-7c10-82fc-827d5e8e5ba8"
+	},
+	"R.checks.origin": {
+		"kind": "rule",
+		"id": "01a115cd-bb64-75c2-a7df-2c8dd338453d"
+	},
+	"R.checks.passive": {
+		"kind": "rule",
+		"id": "01a115cd-bbc7-7f77-bc7c-c88a97367b0e"
+	},
+	"R.checks.reminders": {
+		"kind": "rule",
+		"id": "01a115cd-bdb2-7de2-abb9-54f592539471"
+	},
+	"R.checks.run": {
+		"kind": "rule",
+		"id": "01a115cd-bbfa-7022-b8f1-ef8734cbe45e"
+	},
+	"R.checks.run-evidence": {
+		"kind": "rule",
+		"id": "01a115cd-bc2c-795f-babe-0d19eb80de96"
+	},
+	"R.checks.sources": {
+		"kind": "rule",
+		"id": "01a115cd-bb33-70a8-a09f-999e06ce38ed"
+	},
+	"R.checks.translation-groups": {
+		"kind": "rule",
+		"id": "01a115cd-bde8-736b-9153-7baaedf24f98"
+	},
+	"R.checks.translation-order": {
+		"kind": "rule",
+		"id": "01a115cd-be1d-74aa-8639-23f43671e86d"
+	},
+	"R.evidence.formal.base-fresh": {
+		"kind": "rule",
+		"id": "01a115cd-c431-7f76-bf29-a296b3e90407"
+	},
+	"R.evidence.formal.clean-host": {
+		"kind": "rule",
+		"id": "01a115cd-c467-790e-8a3a-41b4d2cf1dd7"
+	},
+	"R.evidence.formal.convenience": {
+		"kind": "rule",
+		"id": "01a115cd-c3fd-7e82-aa05-737aac6c4354"
+	},
+	"R.evidence.formal.engine": {
+		"kind": "rule",
+		"id": "01a115cd-c361-7ac6-94c0-cdfbb82f4728"
+	},
+	"R.evidence.formal.error-vs-findings": {
+		"kind": "rule",
+		"id": "01a115cd-c4d1-7c77-ab64-7b59f70ebc6c"
+	},
+	"R.evidence.formal.explicit-contexts": {
+		"kind": "rule",
+		"id": "01a115cd-c3c9-76fd-8ccd-4a8664e52e7d"
+	},
+	"R.evidence.formal.interaction-replay": {
+		"kind": "rule",
+		"id": "01a115cd-c507-738d-abd7-7a4194761319"
+	},
+	"R.evidence.formal.records-context": {
+		"kind": "rule",
+		"id": "01a115cd-c49d-7c39-87ed-7098ed135e5f"
+	},
+	"R.evidence.formal.shared-service": {
+		"kind": "rule",
+		"id": "01a115cd-c395-72b0-be67-4a77c4d2ade4"
+	},
+	"R.evidence.staleness.adapter": {
+		"kind": "rule",
+		"id": "01a115cd-c6de-7744-be27-715bec2e7fef"
+	},
+	"R.evidence.staleness.by-domain": {
+		"kind": "rule",
+		"id": "01a115cd-c715-7527-b773-cae2d87c8f33"
+	},
+	"R.evidence.staleness.locale-missing": {
+		"kind": "rule",
+		"id": "01a115cd-c5d9-7da3-88fa-db434af003e3"
+	},
+	"R.evidence.staleness.locale-revision": {
+		"kind": "rule",
+		"id": "01a115cd-c60d-7581-b3c1-576b81fd3b3e"
+	},
+	"R.evidence.staleness.no-view": {
+		"kind": "rule",
+		"id": "01a115cd-c53c-7121-ae74-8243c4890477"
+	},
+	"R.evidence.staleness.reuse": {
+		"kind": "rule",
+		"id": "01a115cd-c749-7a82-bf67-7d1634e31b35"
+	},
+	"R.evidence.staleness.theme-removed": {
+		"kind": "rule",
+		"id": "01a115cd-c6a9-7a09-af68-50b6301a9148"
+	},
+	"R.evidence.staleness.view-deleted": {
+		"kind": "rule",
+		"id": "01a115cd-c571-7baa-8f91-6309737e2b7b"
+	},
+	"R.evidence.staleness.view-revision": {
+		"kind": "rule",
+		"id": "01a115cd-c5a5-757a-b049-b5138fe75920"
+	},
+	"R.evidence.staleness.viewport-removed": {
+		"kind": "rule",
+		"id": "01a115cd-c641-7bc7-9abd-6f6072e681c8"
+	},
+	"R.evidence.staleness.viewport-resized": {
+		"kind": "rule",
+		"id": "01a115cd-c675-74cd-aaa3-c372a4250cd2"
+	},
 	"R.flow.evidence.executed": {
 		"kind": "rule",
 		"id": "01a11544-6655-7786-8185-f3e8c8d2c706"
@@ -1143,10 +1743,6 @@
 		"kind": "rule",
 		"id": "01a11544-63b1-7363-9d65-cf94d90a091f"
 	},
-	"R.flow.graph.no-payload": {
-		"kind": "rule",
-		"id": "01a11544-61c5-758e-90d6-5dc45e1cb55c"
-	},
 	"R.flow.graph.not-router": {
 		"kind": "rule",
 		"id": "01a11544-6147-70b2-969a-1d8b4997d581"
@@ -1154,6 +1750,10 @@
 	"R.flow.graph.reachable": {
 		"kind": "rule",
 		"id": "01a11544-6244-7a31-b37f-7f775a7d072a"
+	},
+	"R.flow.graph.repairable": {
+		"kind": "rule",
+		"id": "01a115cd-3223-7e9e-abc8-a80f2efec2da"
 	},
 	"R.flow.graph.scenario-ref": {
 		"kind": "rule",
@@ -1178,6 +1778,14 @@
 	"R.flow.proto.comment-mode": {
 		"kind": "rule",
 		"id": "01a11544-6585-7110-acc9-c3109c329f84"
+	},
+	"R.flow.proto.current-triggers": {
+		"kind": "rule",
+		"id": "01a115cd-335d-724b-9bd5-df614aa91b72"
+	},
+	"R.flow.proto.entry": {
+		"kind": "rule",
+		"id": "01a115cd-327f-7aa6-940d-3ef6749c4efc"
 	},
 	"R.flow.proto.ephemeral": {
 		"kind": "rule",
@@ -1215,9 +1823,321 @@
 		"kind": "rule",
 		"id": "01a11544-64b1-765f-b42b-58c94785768e"
 	},
+	"R.flow.proto.preview-flowless": {
+		"kind": "rule",
+		"id": "01a115cd-3303-7e54-adb4-1ecd039128e7"
+	},
 	"R.flow.proto.workbench-resolves": {
 		"kind": "rule",
 		"id": "01a11544-645e-7f54-8f63-cbcd63bf1e07"
+	},
+	"R.handoff.adapter-snapshot": {
+		"kind": "rule",
+		"id": "01a115cd-cca5-77d1-b2d4-f5ce09f41b2b"
+	},
+	"R.handoff.adapters": {
+		"kind": "rule",
+		"id": "01a115cd-cc36-7160-a2b6-baadcf98e40b"
+	},
+	"R.handoff.canonical-formats": {
+		"kind": "rule",
+		"id": "01a115cd-c7b1-70f2-b02a-b69e556da439"
+	},
+	"R.handoff.closure": {
+		"kind": "rule",
+		"id": "01a115cd-c82f-7ce1-acd6-480f55774999"
+	},
+	"R.handoff.export-allowed": {
+		"kind": "rule",
+		"id": "01a115cd-c945-7a9e-b108-f0391086ca42"
+	},
+	"R.handoff.fresh-evidence": {
+		"kind": "rule",
+		"id": "01a115cd-ca50-70b3-a65c-bd1c9f74aba4"
+	},
+	"R.handoff.i18n-bindings": {
+		"kind": "rule",
+		"id": "01a115cd-ccda-7175-8ab7-2820b370e2a7"
+	},
+	"R.handoff.immutable": {
+		"kind": "rule",
+		"id": "01a115cd-c8db-7df8-87e8-8550c3800a59"
+	},
+	"R.handoff.inside-blocks": {
+		"kind": "rule",
+		"id": "01a115cd-c9e5-78b1-9566-060014d24547"
+	},
+	"R.handoff.local-adapter-digest": {
+		"kind": "rule",
+		"id": "01a115cd-cc70-751d-aac2-3306e6db4c24"
+	},
+	"R.handoff.no-codegen": {
+		"kind": "rule",
+		"id": "01a115cd-c77d-7ab3-9628-96ab2d85e233"
+	},
+	"R.handoff.no-unrelated": {
+		"kind": "rule",
+		"id": "01a115cd-c8a4-71c2-b066-65cb19c8cf14"
+	},
+	"R.handoff.outside-ignored": {
+		"kind": "rule",
+		"id": "01a115cd-c9b0-7712-84fe-558740320b05"
+	},
+	"R.handoff.provenance-outside": {
+		"kind": "rule",
+		"id": "01a115cd-cd45-710c-a951-1b4fef78597d"
+	},
+	"R.handoff.read-only": {
+		"kind": "rule",
+		"id": "01a115cd-c910-7e30-9b62-f210450ed108"
+	},
+	"R.handoff.ready-claim": {
+		"kind": "rule",
+		"id": "01a115cd-c97b-7691-9d72-87d4016889d3"
+	},
+	"R.handoff.review-blocks": {
+		"kind": "rule",
+		"id": "01a115cd-caee-7be7-913e-0312303148f8"
+	},
+	"R.handoff.review-declined": {
+		"kind": "rule",
+		"id": "01a115cd-cb5e-760e-a74b-fedba2262f37"
+	},
+	"R.handoff.review-verified": {
+		"kind": "rule",
+		"id": "01a115cd-cb26-706a-916c-3df36b06c5e8"
+	},
+	"R.handoff.review-view-threads": {
+		"kind": "rule",
+		"id": "01a115cd-ca85-71aa-9861-210acf22441d"
+	},
+	"R.handoff.review-workspace-threads": {
+		"kind": "rule",
+		"id": "01a115cd-cab9-78d1-a3eb-12185f6e701e"
+	},
+	"R.handoff.runtime-internal": {
+		"kind": "rule",
+		"id": "01a115cd-cd10-7938-af6f-9d466bb0c5e1"
+	},
+	"R.handoff.source-curated": {
+		"kind": "rule",
+		"id": "01a115cd-cbcc-7ae2-856e-b0fe1248c1ac"
+	},
+	"R.handoff.source-traceable": {
+		"kind": "rule",
+		"id": "01a115cd-cb95-74ac-8f1b-ac8adf567e59"
+	},
+	"R.handoff.source-unavailable": {
+		"kind": "rule",
+		"id": "01a115cd-cc01-7365-b9ff-5535910173e9"
+	},
+	"R.handoff.typed-roots": {
+		"kind": "rule",
+		"id": "01a115cd-c7e5-7273-9618-0f9c3c4f67db"
+	},
+	"R.handoff.view-evidence": {
+		"kind": "rule",
+		"id": "01a115cd-ca1a-75ec-b635-df569c795be8"
+	},
+	"R.handoff.workspace-preset": {
+		"kind": "rule",
+		"id": "01a115cd-c86c-7a84-964f-8a2b7bcd0a18"
+	},
+	"R.i18n.resources.gaps-warning-only": {
+		"kind": "rule",
+		"id": "01a115cd-b369-72f9-8291-1b9bd5dc04c2"
+	},
+	"R.i18n.resources.global-keys": {
+		"kind": "rule",
+		"id": "01a115cd-b1f1-7c39-9e3d-a8681847d8fa"
+	},
+	"R.i18n.resources.independent": {
+		"kind": "rule",
+		"id": "01a115cd-b1c1-786a-9758-b03aced4b157"
+	},
+	"R.i18n.resources.missing-default-blocks": {
+		"kind": "rule",
+		"id": "01a115cd-b30b-706e-b8a2-46e62259156e"
+	},
+	"R.i18n.resources.missing-default-create": {
+		"kind": "rule",
+		"id": "01a115cd-b2dc-78a5-911b-a377bfcab278"
+	},
+	"R.i18n.resources.missing-default-error": {
+		"kind": "rule",
+		"id": "01a115cd-b2ad-7989-8faa-07d48bc8ee30"
+	},
+	"R.i18n.resources.missing-default-usable": {
+		"kind": "rule",
+		"id": "01a115cd-b33a-7c3e-ba1f-bed8759b67d6"
+	},
+	"R.i18n.resources.no-auto-create": {
+		"kind": "rule",
+		"id": "01a115cd-b27e-79c7-a23d-f2ae3b387f1e"
+	},
+	"R.i18n.resources.no-guessed-default": {
+		"kind": "rule",
+		"id": "01a115cd-b24f-7bcd-acd8-6b00d0aceff2"
+	},
+	"R.i18n.resources.no-naming": {
+		"kind": "rule",
+		"id": "01a115cd-b21f-7253-bc27-67628f18be27"
+	},
+	"R.i18n.resources.real-failures-block": {
+		"kind": "rule",
+		"id": "01a115cd-b398-7c3b-9d3b-66ac153bb3fc"
+	},
+	"R.i18n.resources.reminder-cell": {
+		"kind": "rule",
+		"id": "01a115cd-b428-7f64-9c13-612ad4869d8d"
+	},
+	"R.i18n.resources.reminders": {
+		"kind": "rule",
+		"id": "01a115cd-b3c8-7eb7-9e04-c152d1f800cc"
+	},
+	"R.i18n.resources.reminders-not-evidence": {
+		"kind": "rule",
+		"id": "01a115cd-b458-7def-a2eb-f1ec1395b99f"
+	},
+	"R.i18n.resources.reminders-not-handoff": {
+		"kind": "rule",
+		"id": "01a115cd-b48b-7b12-9a45-c325f84e39c6"
+	},
+	"R.i18n.resources.reminders-unused-keys": {
+		"kind": "rule",
+		"id": "01a115cd-b3f8-7892-aa90-f121287ffdc6"
+	},
+	"R.i18n.resources.workspace-owned": {
+		"kind": "rule",
+		"id": "01a115cd-b192-79fc-90f0-f2b433001425"
+	},
+	"R.i18n.runtime.argument-dependencies": {
+		"kind": "rule",
+		"id": "01a115cd-b670-7f67-86ae-541d41cc5a47"
+	},
+	"R.i18n.runtime.argument-refresh": {
+		"kind": "rule",
+		"id": "01a115cd-b6a0-7058-81d5-c2f96d304801"
+	},
+	"R.i18n.runtime.attribution": {
+		"kind": "rule",
+		"id": "01a115cd-b91d-7230-9041-b56ff70b814b"
+	},
+	"R.i18n.runtime.binding-kept": {
+		"kind": "rule",
+		"id": "01a115cd-b4f1-7348-b3d6-f0d834c73e34"
+	},
+	"R.i18n.runtime.child-property": {
+		"kind": "rule",
+		"id": "01a115cd-b581-7d3d-88eb-d1ca8fcfcdd8"
+	},
+	"R.i18n.runtime.conformance": {
+		"kind": "rule",
+		"id": "01a115cd-b6cf-7994-a12e-93eb11beac6e"
+	},
+	"R.i18n.runtime.core-agnostic": {
+		"kind": "rule",
+		"id": "01a115cd-b552-70b9-add5-ab294b9214af"
+	},
+	"R.i18n.runtime.dual-properties": {
+		"kind": "rule",
+		"id": "01a115cd-b5e0-727a-9654-02f50d9d26c9"
+	},
+	"R.i18n.runtime.empty-argument": {
+		"kind": "rule",
+		"id": "01a115cd-b7f7-752f-b3ca-4b9a1fb6277f"
+	},
+	"R.i18n.runtime.empty-available": {
+		"kind": "rule",
+		"id": "01a115cd-b794-78be-bec6-f0c9a8f9ac68"
+	},
+	"R.i18n.runtime.fallback": {
+		"kind": "rule",
+		"id": "01a115cd-b732-79db-b872-ac27713f15f8"
+	},
+	"R.i18n.runtime.formal-incomplete": {
+		"kind": "rule",
+		"id": "01a115cd-ba9b-70ba-a6ff-cf4649236a2c"
+	},
+	"R.i18n.runtime.formal-markers": {
+		"kind": "rule",
+		"id": "01a115cd-bace-7333-a98f-5a760cd57f45"
+	},
+	"R.i18n.runtime.formal-proactive": {
+		"kind": "rule",
+		"id": "01a115cd-ba68-7c73-a157-08ef34be1e54"
+	},
+	"R.i18n.runtime.intrinsic-warnings": {
+		"kind": "rule",
+		"id": "01a115cd-b8ec-7bd3-a601-8e3daee94957"
+	},
+	"R.i18n.runtime.literal-strings": {
+		"kind": "rule",
+		"id": "01a115cd-b4be-791b-916e-8c2dade9a441"
+	},
+	"R.i18n.runtime.live-context": {
+		"kind": "rule",
+		"id": "01a115cd-b9fc-71d9-8bf9-91d65acd1096"
+	},
+	"R.i18n.runtime.live-latest": {
+		"kind": "rule",
+		"id": "01a115cd-b9be-7018-9247-003f129366f9"
+	},
+	"R.i18n.runtime.lowering": {
+		"kind": "rule",
+		"id": "01a115cd-b523-7a29-81d4-5a60f9ee4176"
+	},
+	"R.i18n.runtime.malformed-literal": {
+		"kind": "rule",
+		"id": "01a115cd-b85c-7fcd-9b44-2633c0472e96"
+	},
+	"R.i18n.runtime.marker-not-copy": {
+		"kind": "rule",
+		"id": "01a115cd-b88b-7cfe-84ad-cc9d081a6c9e"
+	},
+	"R.i18n.runtime.missing-argument": {
+		"kind": "rule",
+		"id": "01a115cd-b7c5-7559-aac7-dbf746a828a0"
+	},
+	"R.i18n.runtime.passive-preview": {
+		"kind": "rule",
+		"id": "01a115cd-b94f-7a87-830c-2060f2e63a2e"
+	},
+	"R.i18n.runtime.renderer-no-t": {
+		"kind": "rule",
+		"id": "01a115cd-b5b0-75e5-9c19-0682ad1736b9"
+	},
+	"R.i18n.runtime.single-pass": {
+		"kind": "rule",
+		"id": "01a115cd-b826-71ab-afc0-4fa6a8f9e4b0"
+	},
+	"R.i18n.runtime.success-result": {
+		"kind": "rule",
+		"id": "01a115cd-b6ff-79de-8d98-dcbd0c07c504"
+	},
+	"R.i18n.runtime.t-locale-only": {
+		"kind": "rule",
+		"id": "01a115cd-b641-7cd6-a17b-9818509a1a73"
+	},
+	"R.i18n.runtime.t-read-only": {
+		"kind": "rule",
+		"id": "01a115cd-b610-78ca-8e24-8448d3a350ac"
+	},
+	"R.i18n.runtime.unresolved": {
+		"kind": "rule",
+		"id": "01a115cd-b763-7fd6-b1df-0b7b568c1879"
+	},
+	"R.i18n.runtime.unverified": {
+		"kind": "rule",
+		"id": "01a115cd-b983-7fc3-88fb-57247dd8082a"
+	},
+	"R.i18n.runtime.verbatim-projection": {
+		"kind": "rule",
+		"id": "01a115cd-b8bb-7b07-95b5-4eb10ab44857"
+	},
+	"R.i18n.runtime.warning-identity": {
+		"kind": "rule",
+		"id": "01a115cd-ba33-7f4f-afd5-a421c890bfee"
 	},
 	"R.mcp.discovery.compact-lists": {
 		"kind": "rule",
@@ -1270,6 +2190,22 @@
 	"R.publication.thread-free": {
 		"kind": "rule",
 		"id": "01a11485-f29e-7e71-a3b6-030a1dd80781"
+	},
+	"R.render-context.convenience-presets": {
+		"kind": "rule",
+		"id": "01a115cd-c2f7-7246-9446-e2325b631b5b"
+	},
+	"R.render-context.live-continuity": {
+		"kind": "rule",
+		"id": "01a115cd-c32d-7594-8277-c17646f9a500"
+	},
+	"R.render-context.no-theme-fallback": {
+		"kind": "rule",
+		"id": "01a115cd-c27d-78ba-b95d-bf1aa50adec7"
+	},
+	"R.render-context.registry-only": {
+		"kind": "rule",
+		"id": "01a115cd-c2c0-7ec4-9fc8-a491f73f798a"
 	},
 	"R.review.lifecycle.after-reopen": {
 		"kind": "rule",
@@ -1343,6 +2279,10 @@
 		"kind": "rule",
 		"id": "01a11544-5459-73a9-89d2-dd4d3ed42da3"
 	},
+	"R.review.lifecycle.textual-change": {
+		"kind": "rule",
+		"id": "01a115cd-2ddd-7c3b-bd97-03d9d154f5d7"
+	},
 	"R.review.lifecycle.timeline-marks": {
 		"kind": "rule",
 		"id": "01a11544-5772-750b-9ab3-adcc04d755a9"
@@ -1379,6 +2319,10 @@
 		"kind": "rule",
 		"id": "01a11544-57e2-701c-946f-3fe75f5294ba"
 	},
+	"R.review.messages.freeze-permanent": {
+		"kind": "rule",
+		"id": "01a115cd-2e6a-7911-9a3a-ef4a00e1339d"
+	},
 	"R.review.messages.frozen-ui": {
 		"kind": "rule",
 		"id": "01a11544-593c-787b-9d25-34f9745ee674"
@@ -1390,6 +2334,10 @@
 	"R.review.messages.no-delete": {
 		"kind": "rule",
 		"id": "01a11544-58a4-7d7e-b7c1-4491b736d146"
+	},
+	"R.review.messages.no-event": {
+		"kind": "rule",
+		"id": "01a115cd-2ec4-72ef-a94b-e5abc4a64e2a"
 	},
 	"R.review.messages.no-window": {
 		"kind": "rule",
@@ -1422,6 +2370,10 @@
 	"R.review.pins.create": {
 		"kind": "rule",
 		"id": "01a11544-5bb8-7cae-b9c1-10795b0620f7"
+	},
+	"R.review.pins.default-placement": {
+		"kind": "rule",
+		"id": "01a115cd-2fde-72d5-a7ef-78e1333caf8a"
 	},
 	"R.review.pins.dismissed": {
 		"kind": "rule",
@@ -1471,6 +2423,18 @@
 		"kind": "rule",
 		"id": "01a11544-5bde-74a8-bb73-31a20bd17284"
 	},
+	"R.review.pins.reanchor-clear": {
+		"kind": "rule",
+		"id": "01a115cd-3037-759d-a728-e50a694cb577"
+	},
+	"R.review.pins.reanchor-variant": {
+		"kind": "rule",
+		"id": "01a115cd-3094-7aa5-9929-02cd217f7446"
+	},
+	"R.review.pins.reanchor-widget": {
+		"kind": "rule",
+		"id": "01a115cd-3065-7c3c-b557-ab2597608ffa"
+	},
 	"R.review.pins.still-listed": {
 		"kind": "rule",
 		"id": "01a11544-5d39-733d-9581-eccc137f7263"
@@ -1514,6 +2478,10 @@
 	"R.review.retract.legacy": {
 		"kind": "rule",
 		"id": "01a11544-59b5-7bb1-a605-4985ac75c208"
+	},
+	"R.review.retract.no-artifact-scan": {
+		"kind": "rule",
+		"id": "01a115cd-2f4e-752e-8f85-291954cda7d1"
 	},
 	"R.review.retract.no-trace": {
 		"kind": "rule",
@@ -1670,6 +2638,10 @@
 	"R.view.decisions.conflict-ui": {
 		"kind": "rule",
 		"id": "01a11544-611c-73e0-990b-c094b48b3eb6"
+	},
+	"R.view.decisions.derived-lists": {
+		"kind": "rule",
+		"id": "01a115cd-3119-7728-ad0c-87b77b67b34f"
 	},
 	"R.view.decisions.explicit-actions": {
 		"kind": "rule",
