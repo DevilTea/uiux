@@ -431,6 +431,10 @@
 		"kind": "clause",
 		"id": "01a11544-6d38-7c63-958a-e0133b131fd3"
 	},
+	"C.mcp.review-render-context": {
+		"kind": "clause",
+		"id": "01a1170f-bba0-7982-bc92-7eef91459828"
+	},
 	"C.mcp.review-tools": {
 		"kind": "clause",
 		"id": "01a11485-f7ee-7102-a12c-694efaeb6d28"
@@ -962,6 +966,10 @@
 	"C.ws-format.review-path": {
 		"kind": "clause",
 		"id": "01a1144e-547c-7ab6-9589-e9a8b8c458c5"
+	},
+	"C.ws-format.review-render-context": {
+		"kind": "clause",
+		"id": "01a1170f-baf0-7eea-a904-7367227c10b3"
 	},
 	"C.ws-format.review-resolution": {
 		"kind": "clause",
@@ -3467,6 +3475,10 @@
 		"kind": "rule",
 		"id": "01a116f0-95b9-7625-b40c-e51136aa45c5"
 	},
+	"R.wb.a11y.muted-pin-name": {
+		"kind": "rule",
+		"id": "01a1170f-c352-7e37-98e2-51b79ebb5776"
+	},
 	"R.wb.a11y.no-hover": {
 		"kind": "rule",
 		"id": "01a116f0-952d-7aa4-9a16-2648b1852daa"
@@ -3567,6 +3579,34 @@
 		"kind": "rule",
 		"id": "01a116f0-8f90-7a3e-a71b-cd5cb22482ce"
 	},
+	"R.wb.ia.context-activate": {
+		"kind": "rule",
+		"id": "01a1170f-c1f7-7e54-8754-c1a047415d4e"
+	},
+	"R.wb.ia.context-capture": {
+		"kind": "rule",
+		"id": "01a1170f-c0ce-70ba-a94b-ff3cf24c38b0"
+	},
+	"R.wb.ia.context-header": {
+		"kind": "rule",
+		"id": "01a1170f-c11d-7d39-a5ce-cfe9ffdff6ed"
+	},
+	"R.wb.ia.context-hidden-pins": {
+		"kind": "rule",
+		"id": "01a1170f-c282-7dcc-9b16-e8dfac21a348"
+	},
+	"R.wb.ia.context-muted": {
+		"kind": "rule",
+		"id": "01a1170f-c1ae-78fc-98cb-dc8f4b97f98f"
+	},
+	"R.wb.ia.context-stale": {
+		"kind": "rule",
+		"id": "01a1170f-c165-7dd4-bc9f-a799f7884f14"
+	},
+	"R.wb.ia.context-unrecorded": {
+		"kind": "rule",
+		"id": "01a1170f-c23d-7318-b035-f84526e4b98f"
+	},
 	"R.wb.ia.inbox-address": {
 		"kind": "rule",
 		"id": "01a116f0-8e81-76ba-850c-0cbc42fbc351"
@@ -3598,10 +3638,6 @@
 	"R.wb.ia.members-entry": {
 		"kind": "rule",
 		"id": "01a116f0-8caf-7e03-ba40-ef17e116aa22"
-	},
-	"R.wb.ia.overview-default-tab": {
-		"kind": "rule",
-		"id": "01a116f0-8b96-7827-881d-117b4f906ecb"
 	},
 	"R.wb.ia.overview-tab-history": {
 		"kind": "rule",
