@@ -238,4 +238,27 @@ describe('Workspace pages navigation', () => {
 		}
 		finally { await context.close() }
 	}, 60_000)
+
+	it('scrolls to Adapters again when ⌘K asks for the section the URL already names', async () => {
+		const { context, page } = await open('/workspace/settings?section=adapters')
+		try {
+			const scrollTop = () => page.evaluate(() => document.querySelector('#settings-adapters')?.closest('[role="region"]')?.scrollTop ?? 0)
+			await page.locator('#settings-adapters').waitFor()
+			await expect.poll(scrollTop).toBeGreaterThan(0)
+			// Back to General by hand: the URL still says ?section=adapters.
+			await page.evaluate(() => document.querySelector('#settings-adapters')?.closest('[role="region"]')?.scrollTo({ top: 0 }))
+			await expect.poll(scrollTop).toBe(0)
+
+			await page.keyboard.press('ControlOrMeta+k')
+			const search = page.locator('[role="dialog"] input').first()
+			await search.waitFor()
+			await search.fill('Adapters')
+			const option = page.locator('[role="option"]').filter({ hasText: 'Adapters' }).first()
+			await option.waitFor()
+			await option.click()
+			await expect.poll(scrollTop).toBeGreaterThan(0)
+			expect(new URL(page.url()).searchParams.get('section')).toBe('adapters')
+		}
+		finally { await context.close() }
+	}, 60_000)
 })
