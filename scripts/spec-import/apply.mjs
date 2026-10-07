@@ -7,8 +7,11 @@
 // summary, Story fields, `motivates` targets, Rule and Clause statements, Contract and Clause
 // `constrains` targets and the whole Markdown body of every unit in the batch with the batch's
 // values. A Feature or Contract that lists `rules` / `clauses` must list all of them: the applier
-// refuses when the workspace holds a child the batch does not name (delete or move it explicitly).
-// So:
+// refuses when the workspace holds a child the batch does not name, unless the batch retires it.
+// A batch may retire Rules and Clauses (`retired: [{ ref, reason }]`, for example a Rule folded into
+// a neighbor): the applier deletes each retired unit that still exists and drops it from refmap.json.
+// It also puts every listed owner's Rules or Clauses in the batch's order (a presentation-only change
+// that leaves the semantic revision unchanged). So:
 //   - make every later change to an imported unit in its batch source (and re-render the batch) or
 //     in a newer batch, never by editing `.spec/` alone;
 //   - never re-run an older batch after a newer batch or edit touched the same units, or it reverts
@@ -16,23 +19,26 @@
 //
 // Guard: a batch records `baseRevision`, the `.spec/` semantic revision it was drafted against. When
 // the current revision differs and applying would change anything (a semantic field, a relation or
-// a body), the applier refuses unless `--force`. Rerunning a batch that is already applied changes
-// nothing and is always allowed. Bump `baseRevision` to the current revision when re-drafting.
+// a body, a deletion or a child order), the applier refuses unless `--force`. Rerunning a batch that
+// is already applied changes nothing and is always allowed. Bump `baseRevision` to the current
+// revision when re-drafting. A `--dry-run` of a stale batch does not stop at the first refused
+// change: it reports every change a real run would make, names the refusal, and exits 1.
 //
 // A batch draft names units by local `ref` (for example `F.review.lifecycle`). Spec Tool allocates
 // every UUID, so `refmap.json` (next to this script) keeps ref -> UUID for later batches; it never
 // goes into `.spec/`, which is closed-world. The applier:
 //   1. requires a valid workspace and checks every mapped UUID still exists with the right kind;
-//   2. creates missing Features, then their Rules (in draft order), then Stories (whose `motivates`
+//   2. deletes the retired Rules and Clauses that still exist;
+//   3. creates missing Features, then their Rules (in draft order), then Stories (whose `motivates`
 //      needs existing Features), then Contracts (whose `constrains` needs existing Features) and
 //      their Clauses (whose optional `constrains` override may name Features or Rules), or updates
 //      semantic fields and relation targets that differ from the draft, sequentially with
-//      `expectedRevision` threaded through every mutation;
-//   3. writes each Feature, Story and Contract's provenance into its noncanonical Markdown body,
+//      `expectedRevision` threaded through every mutation, and reorders children to the draft order;
+//   4. writes each Feature, Story and Contract's provenance into its noncanonical Markdown body,
 //      replacing `{{<ref>}}` placeholders with the mapped UUIDs (so Rule and Clause provenance
 //      tables can name units created in the same run), and fails unless the semantic revision is
 //      unchanged by those body writes;
-//   4. validates the workspace again.
+//   5. validates the workspace again.
 // It is idempotent: rerunning the same batch changes nothing. It stops on the first error and never
 // retries a revision conflict. Run it only while no other `spec` process is running. The repository
 // root is resolved from this script's location, not from the working directory.
@@ -80,9 +86,16 @@ if (!initial.valid)
 let revision = initial.revision
 // The batch is stale when the workspace moved on since it was drafted; then it may only be a no-op.
 const stale = batch.baseRevision !== initial.revision
+// A dry run records what a real run would refuse instead of stopping, so it can report every change.
+const refusedChanges = []
 function refuseIfStale(what) {
-	if (stale && !force)
-		fail(`Refusing to ${what}: the batch was drafted against revision ${batch.baseRevision ?? '(none recorded)'} but the workspace is at ${initial.revision}. Re-draft the batch against the current revision (set its baseRevision), or pass --force only if you mean to overwrite newer edits.`)
+	if (!stale || force)
+		return
+	if (dryRun) {
+		refusedChanges.push(what)
+		return
+	}
+	fail(`Refusing to ${what}: the batch was drafted against revision ${batch.baseRevision ?? '(none recorded)'} but the workspace is at ${initial.revision}. Re-draft the batch against the current revision (set its baseRevision), or pass --force only if you mean to overwrite newer edits.`)
 }
 
 let graph = (await client.graph.export()).data
@@ -99,7 +112,38 @@ for (const [ref, entry] of Object.entries(refmap)) {
 		fail(`refmap entry ${ref} -> ${entry.kind} ${entry.id} does not exist in the workspace`)
 }
 
-const log = { created: [], createdByKind: {}, updated: [], relinked: [], unchanged: [], bodies: [] }
+const log = { created: [], createdByKind: {}, updated: [], relinked: [], reordered: [], deleted: [], unchanged: [], bodies: [] }
+
+// Retired units: deleted when they still exist, never listed as a child, never re-created.
+const retired = (batch.retired ?? []).map(entry => entry.ref)
+const listedRefs = new Set([
+	...(batch.features ?? []).flatMap(f => [f.ref, ...(f.rules ?? []).map(r => r.ref)]),
+	...(batch.stories ?? []).map(s => s.ref),
+	...(batch.contracts ?? []).flatMap(c => [c.ref, ...(c.clauses ?? []).map(cl => cl.ref)]),
+])
+for (const ref of retired) {
+	if (listedRefs.has(ref))
+		fail(`${ref} is both retired and listed by the batch`)
+}
+const retiredIds = new Set(retired.filter(ref => refmap[ref]).map(ref => refmap[ref].id))
+
+// The persisted order of an owner's `rules:` or `clauses:` entries (presentation only).
+async function persistedChildOrder(dir, ownerId, key) {
+	const text = await readFile(join(root, '.spec', dir, `${ownerId}.md`), 'utf8')
+	const end = text.indexOf('\n---\n', 4)
+	const ids = []
+	let inList = false
+	for (const line of text.slice(0, end).split('\n')) {
+		if (/^\S/.test(line)) {
+			inList = line.startsWith(`${key}:`)
+			continue
+		}
+		const entry = inList && /^ {2}- id: (\S+)$/.exec(line)
+		if (entry)
+			ids.push(entry[1])
+	}
+	return ids
+}
 
 function resolveRef(ref, kind) {
 	const kinds = Array.isArray(kind) ? kind : [kind]
@@ -151,8 +195,8 @@ function changedFields(node, draft, fields) {
 	return changes
 }
 
-async function mutate(operation) {
-	refuseIfStale('change semantic content')
+async function mutate(operation, what = 'change semantic content') {
+	refuseIfStale(what)
 	if (dryRun)
 		return undefined
 	const response = await operation(revision)
@@ -165,7 +209,7 @@ async function upsert(kind, draft, fields, createRequest) {
 	if (!existing) {
 		log.created.push(`${kind} ${draft.ref}`)
 		log.createdByKind[kind] = (log.createdByKind[kind] ?? 0) + 1
-		const response = await mutate(expectedRevision => client[kind].create({ ...createRequest(), expectedRevision }))
+		const response = await mutate(expectedRevision => client[kind].create({ ...createRequest(), expectedRevision }), `create ${kind} ${draft.ref}`)
 		if (response) {
 			const created = response.changedNodes.filter(node => node.kind === kind)
 			if (created.length !== 1)
@@ -181,7 +225,7 @@ async function upsert(kind, draft, fields, createRequest) {
 		return
 	}
 	log.updated.push(`${kind} ${draft.ref}: ${Object.keys(changes).join(', ')}`)
-	await mutate(expectedRevision => client[kind].update({ id: existing.id, changes, expectedRevision }))
+	await mutate(expectedRevision => client[kind].update({ id: existing.id, changes, expectedRevision }), `update ${kind} ${draft.ref}`)
 }
 
 // Rules (kind 'rule', owner Feature) or Clauses (kind 'clause', owner Contract). A Clause's optional
@@ -202,7 +246,7 @@ async function upsertChildren(kind, ownerId, ownerRef, drafts) {
 				statement: child.statement,
 				...(kind === 'clause' && override ? { constrains: override } : {}),
 				expectedRevision,
-			}))
+			}), `create ${kind} ${child.ref}`)
 			if (response) {
 				const created = response.changedNodes.filter(node => node.kind === kind)
 				if (created.length !== 1)
@@ -220,7 +264,7 @@ async function upsertChildren(kind, ownerId, ownerRef, drafts) {
 			fail(`${kind} ${child.ref} belongs to ${node.ownerId}, not ${ownerRef}; move it explicitly`)
 		if (node.statement !== child.statement) {
 			log.updated.push(`${kind} ${child.ref}: statement`)
-			await mutate(expectedRevision => client[kind].update({ id: existing.id, changes: { statement: child.statement }, expectedRevision }))
+			await mutate(expectedRevision => client[kind].update({ id: existing.id, changes: { statement: child.statement }, expectedRevision }), `update ${kind} ${child.ref}`)
 		}
 		else {
 			log.unchanged.push(`${kind} ${child.ref}`)
@@ -234,19 +278,42 @@ async function upsertChildren(kind, ownerId, ownerRef, drafts) {
 			const differs = override === null ? persisted !== null : persisted === null || !sameSet(persisted, override)
 			if (differs) {
 				log.relinked.push(`clause ${child.ref}: ${override === null ? 'inherit' : 'override'}`)
-				await mutate(expectedRevision => client.graph.setRelationTargets({ sourceId: existing.id, type: 'constrains', targets: override, expectedRevision }))
+				await mutate(expectedRevision => client.graph.setRelationTargets({ sourceId: existing.id, type: 'constrains', targets: override, expectedRevision }), `relink clause ${child.ref}`)
 			}
 		}
 	}
 	if (ownerId) {
 		// `graph` predates this owner's creations, so only children that existed before the run count.
-		const extra = graph.nodes.filter(node => node.kind === kind && node.ownerId === ownerId && !draftIds.includes(node.id))
+		const extra = graph.nodes.filter(node => node.kind === kind && node.ownerId === ownerId && !draftIds.includes(node.id) && !retiredIds.has(node.id))
 		if (extra.length > 0)
 			fail(`${ownerRef} has ${kind}s the batch does not list: ${extra.map(node => node.id).join(', ')}`)
+		// Put the children in draft order. In a dry run that would create or delete children of this
+		// owner the final order is unknown, so only a run without them is compared.
+		const wanted = drafts.map(child => refmap[child.ref]?.id)
+		const ownerDir = kind === 'rule' ? 'features' : 'contracts'
+		const current = (await persistedChildOrder(ownerDir, ownerId, `${kind}s`)).filter(id => !(dryRun && retiredIds.has(id)))
+		if (wanted.every(Boolean) && wanted.length === current.length && wanted.some((id, i) => id !== current[i])) {
+			log.reordered.push(`${ownerRef} ${kind}s`)
+			await mutate(expectedRevision => client[kind].reorder({ ownerId, orderedIds: wanted, expectedRevision }), `reorder the ${kind}s of ${ownerRef}`)
+		}
 	}
 }
 
 try {
+	for (const ref of retired) {
+		const entry = refmap[ref]
+		if (!entry)
+			continue // already deleted, or never created
+		if (entry.kind !== 'rule' && entry.kind !== 'clause')
+			fail(`Only Rules and Clauses can be retired, not ${entry.kind} ${ref}`)
+		log.deleted.push(`${entry.kind} ${ref}`)
+		const response = await mutate(expectedRevision => client[entry.kind].delete({ id: entry.id, expectedRevision }), `delete ${entry.kind} ${ref}`)
+		if (response) {
+			delete refmap[ref]
+			await saveRefmap()
+		}
+	}
+
 	for (const feature of batch.features ?? []) {
 		await upsert('feature', feature, ['title', 'summary'], () => ({ title: feature.title, summary: feature.summary }))
 	}
@@ -271,12 +338,12 @@ try {
 			value: story.value,
 			motivates: targets,
 		}))
-		if (isNew || dryRun)
+		if (isNew || (dryRun && story.motivates.some(ref => !refmap[ref])))
 			continue
 		const current = graph.edges.filter(edge => edge.from === refmap[story.ref].id && edge.type === 'motivates').map(edge => edge.to).sort()
 		if (JSON.stringify(current) !== JSON.stringify(targets)) {
 			log.relinked.push(`story ${story.ref}`)
-			await mutate(expectedRevision => client.graph.setRelationTargets({ sourceId: refmap[story.ref].id, type: 'motivates', targets, expectedRevision }))
+			await mutate(expectedRevision => client.graph.setRelationTargets({ sourceId: refmap[story.ref].id, type: 'motivates', targets, expectedRevision }), `relink story ${story.ref}`)
 		}
 	}
 
@@ -286,7 +353,7 @@ try {
 		await upsert('contract', contract, ['title', 'summary'], () => ({ title: contract.title, summary: contract.summary, constrains: targets }))
 		if (!isNew && !sameSet(edgeTargets(refmap[contract.ref].id, 'constrains'), targets)) {
 			log.relinked.push(`contract ${contract.ref}`)
-			await mutate(expectedRevision => client.graph.setRelationTargets({ sourceId: refmap[contract.ref].id, type: 'constrains', targets, expectedRevision }))
+			await mutate(expectedRevision => client.graph.setRelationTargets({ sourceId: refmap[contract.ref].id, type: 'constrains', targets, expectedRevision }), `relink contract ${contract.ref}`)
 		}
 	}
 	await refreshGraph()
@@ -347,7 +414,14 @@ console.log(JSON.stringify({
 	createdByKind: log.createdByKind,
 	updated: log.updated,
 	relinked: log.relinked,
+	reordered: log.reordered,
+	deleted: log.deleted,
 	unchanged: log.unchanged.length,
 	bodies: log.bodies,
 	stale,
+	...(refusedChanges.length > 0
+		? { refused: `A real run would refuse ${refusedChanges.length} change(s), starting with: ${refusedChanges[0]}. The batch was drafted against revision ${batch.baseRevision ?? '(none recorded)'} but the workspace is at ${initial.revision}; re-draft it against the current revision, or pass --force only if you mean to overwrite newer edits.` }
+		: {}),
 }, null, 2))
+if (refusedChanges.length > 0)
+	process.exitCode = 1
