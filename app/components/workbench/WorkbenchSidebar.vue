@@ -10,8 +10,8 @@ import WorkspaceMenu from './WorkspaceMenu.vue'
 import FlowCreateModal from '../flows/FlowCreateModal.vue'
 
 /**
- * Sidebar content: the four primary areas, the current area's navigator (brief a,
- * section 3) and the secondary Workspace group at the foot.
+ * Sidebar content: the three primary areas, the current area's navigator (brief a,
+ * section 3) and the secondary Workspace entry at the foot.
  */
 const props = defineProps<{ collapsed?: boolean }>()
 
@@ -26,20 +26,18 @@ function count(value: number, color: 'neutral' | 'annotation' = 'neutral') {
 
 // A View or Flow page is a sibling route of its index, so router matching alone would leave the
 // area's item unmarked (most visibly in the tablet icon rail); mark it from the path instead.
+// The Overview's Views tab is the one list of every View, so a View page marks Overview.
 const primary = computed<NavigationMenuItem[]>(() => [
-	{ label: t('nav.overview'), icon: 'i-lucide-layout-dashboard', to: '/', exact: true, 'aria-label': t('nav.overview') },
-	{ label: t('nav.views'), icon: 'i-lucide-app-window', to: '/views', active: route.path.startsWith('/views'), badge: count(views.value.length), 'aria-label': t('nav.countLabel', { label: t('nav.views'), n: views.value.length }) },
+	{ label: t('nav.overview'), icon: 'i-lucide-layout-dashboard', to: '/', active: route.path === '/' || route.path.startsWith('/views'), 'aria-label': t('nav.overview') },
 	{ label: t('nav.flows'), icon: 'i-lucide-workflow', to: '/flows', active: route.path.startsWith('/flows'), badge: count(flows.value.length), 'aria-label': t('nav.countLabel', { label: t('nav.flows'), n: flows.value.length }) },
 	{ label: t('nav.reviews'), icon: 'i-lucide-inbox', to: '/reviews', badge: count(unresolvedReviewCount.value, 'annotation'), 'aria-label': t('nav.reviewsLabel', unresolvedReviewCount.value) },
 ])
 
-// Every item carries an aria-label: the collapsed rail hides labels (icon plus hover tooltip only).
+// The authoring side is secondary on a review desk: one quiet entry at the foot. The Workspace
+// pages carry their own sub-navigation (Settings, Locales, Assets; Adapters are a Settings
+// section). The collapsed rail hides labels, so the item carries an aria-label.
 const secondary = computed<NavigationMenuItem[]>(() => [
-	{ label: t('nav.workspace'), type: 'label' },
-	{ label: t('nav.settings'), icon: 'i-lucide-settings-2', to: '/workspace/settings', 'aria-label': t('nav.settings') },
-	{ label: t('nav.locales'), icon: 'i-lucide-globe', to: '/workspace/locales', 'aria-label': t('nav.locales') },
-	{ label: t('nav.assets'), icon: 'i-lucide-image', to: '/workspace/assets', 'aria-label': t('nav.assets') },
-	{ label: t('nav.adapters'), icon: 'i-lucide-puzzle', to: '/workspace/adapters', 'aria-label': t('nav.adapters') },
+	{ label: t('nav.workspace'), icon: 'i-lucide-settings-2', to: '/workspace/settings', active: route.path.startsWith('/workspace'), 'aria-label': t('nav.workspace') },
 ])
 
 const NAV_UI = {
@@ -50,10 +48,11 @@ const NAV_UI = {
 	linkLeadingIcon: 'size-4',
 	linkTrailingBadge: 'font-medium',
 }
+const SECONDARY_NAV_UI = { ...NAV_UI, link: 'px-2 py-1.5 text-xs before:inset-x-0', linkLeadingIcon: 'size-3.5' }
 
 /**
- * The area whose navigator the sidebar shows. The `/views` and `/flows` indexes are the list
- * themselves (the parent crumb lands there), so the sidebar does not repeat it beside them.
+ * The area whose navigator the sidebar shows. The `/flows` index is the list itself (and `/views`
+ * redirects to the Overview list), so the sidebar does not repeat it beside them.
  */
 const area = computed(() => {
 	const path = route.path.replace(/\/+$/, '')
@@ -254,12 +253,13 @@ const createFlowOpen = ref(false)
     >
       <UNavigationMenu
         :items="secondary"
-        :aria-label="t('nav.workspace')"
+        :aria-label="t('shell.secondaryNav')"
         orientation="vertical"
         :collapsed="props.collapsed"
         color="neutral"
         :tooltip="props.collapsed"
-        :ui="NAV_UI"
+        :ui="SECONDARY_NAV_UI"
+        class="pt-1"
       />
       <UTooltip :text="props.collapsed ? t('shell.expandSidebar') : t('shell.collapseSidebar')">
         <UDashboardSidebarCollapse

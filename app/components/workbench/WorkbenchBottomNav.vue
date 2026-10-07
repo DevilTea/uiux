@@ -4,17 +4,17 @@ import { useI18n, useRoute } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
 
 /**
- * The phone's primary navigation (DESIGN.md "Mobile"; brief a, section 6): a 56px bar of four
+ * The phone's primary navigation (DESIGN.md "Mobile"; brief a, section 6): a 56px bar of three
  * areas, icon over a 12px label, above the home indicator. Reviews carries the waiting count
- * because triage is the phone's job; the Workspace group lives in the ☰ menu.
+ * because triage is the phone's job; the Workspace entry lives in the ☰ menu. Overview holds the
+ * one list of every View, so a View page marks it.
  */
 const { t } = useI18n()
 const route = useRoute()
 const { unresolvedReviewCount, isReadOnly } = useWorkbench()
 
 const items = computed(() => [
-	{ to: '/', label: t('nav.overview'), icon: 'i-lucide-layout-dashboard', active: route.path === '/' },
-	{ to: '/views', label: t('nav.views'), icon: 'i-lucide-app-window', active: route.path.startsWith('/views') },
+	{ to: '/', label: t('nav.overview'), icon: 'i-lucide-layout-dashboard', active: route.path === '/' || route.path.startsWith('/views') },
 	{ to: '/flows', label: t('nav.flows'), icon: 'i-lucide-workflow', active: route.path.startsWith('/flows') },
 	{ to: '/reviews', label: t('nav.reviews'), icon: 'i-lucide-inbox', active: route.path.startsWith('/reviews'), count: isReadOnly.value ? 0 : unresolvedReviewCount.value },
 ])
@@ -26,7 +26,7 @@ const items = computed(() => [
     :aria-label="t('shell.primaryNav')"
     data-bottom-nav
   >
-    <ul class="grid h-14 grid-cols-4">
+    <ul class="grid h-14 grid-cols-3">
       <li
         v-for="item in items"
         :key="item.to"

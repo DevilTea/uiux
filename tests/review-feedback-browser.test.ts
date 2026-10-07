@@ -79,14 +79,25 @@ describe('Parent crumbs land on the index (feedback 1)', () => {
 		const { context, page } = await open(`/views/${VIEW_ID}`)
 		try {
 			await livePreview(page)
-			await page.getByRole('navigation', { name: 'Location' }).getByRole('link', { name: 'Views' }).click()
-			await page.waitForURL(url => url.pathname === '/views')
-			await page.locator('[data-views-index]').waitFor()
+			// The one View list is the Overview's Views tab.
+			await page.getByRole('navigation', { name: 'Location' }).getByRole('link', { name: 'Overview' }).click()
+			await page.waitForURL(url => url.pathname === '/')
+			await page.locator('[data-views-table] [data-view-row]').first().waitFor()
 			// The index used to redirect straight back to the most recent View on tablet and desktop.
 			await page.waitForTimeout(800)
-			expect(new URL(page.url()).pathname).toBe('/views')
-			expect(await page.locator('[data-views-index-row]').count()).toBe(2)
-			expect(await page.locator(`[data-views-index-row="${VIEW_ID}"]`).textContent()).toContain('Last opened')
+			expect(new URL(page.url()).pathname).toBe('/')
+			expect(await page.locator('[data-views-table] [data-view-row]').count()).toBe(2)
+			const opened = page.locator('[data-views-table] tr').filter({ has: page.locator(`[data-view-row="${VIEW_ID}"]`) })
+			expect(await opened.textContent()).toContain('Last opened')
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('keeps the old /views address on the View list', async () => {
+		const { context, page } = await open('/views')
+		try {
+			await page.waitForURL(url => url.pathname === '/' && url.searchParams.get('tab') === 'views')
+			await page.locator('[data-views-table] [data-view-row]').first().waitFor()
 		}
 		finally { await context.close() }
 	}, 60_000)
@@ -166,10 +177,18 @@ describe('Comments can always be started, or say why not (feedback 2)', () => {
 })
 
 describe('Comments on the View as a whole (feedback 3)', () => {
+	async function rootThreads(): Promise<{ key: string }[]> {
+		const reviews = await api<{ items: { key: string; summary: { anchor?: { viewId: string; widgetId: string } } }[] }>('/api/resources/list', { kinds: ['review'], limit: 100 })
+		return reviews.items.filter(item => item.summary.anchor?.viewId === VIEW_ID && item.summary.anchor.widgetId === 'root')
+	}
+
 	it('opens the composer without a Widget and anchors the thread to the RootShell', async () => {
 		const { context, page } = await open(`/views/${VIEW_ID}`)
 		try {
 			await livePreview(page)
+			// The fixture already holds a resolved thread on the RootShell, and the list is ordered by
+			// key, so the new thread is the one that was not there before (not the last one listed).
+			const before = new Set((await rootThreads()).map(item => item.key))
 			await page.locator('[data-comment-on-view="pill"]').click()
 			const composer = page.locator('[data-comment-composer]')
 			await composer.waitFor()
@@ -183,14 +202,13 @@ describe('Comments on the View as a whole (feedback 3)', () => {
 			await page.keyboard.press('ControlOrMeta+Enter')
 			await page.locator('[data-thread-bubble]').waitFor({ timeout: 10_000 })
 
-			const reviews = await api<{ items: { key: string; summary: { anchor?: { viewId: string; widgetId: string } } }[] }>('/api/resources/list', { kinds: ['review'], limit: 100 })
-			const onView = reviews.items.filter(item => item.summary.anchor?.viewId === VIEW_ID && item.summary.anchor.widgetId === 'root')
-			expect(onView.length).toBeGreaterThan(0)
+			const created = (await rootThreads()).filter(item => !before.has(item.key))
+			expect(created).toHaveLength(1)
 
 			const row = page.locator('[data-comment-group="view"] [data-comment-row]')
 			await row.first().waitFor()
 			expect(await row.first().textContent()).toContain('Whole View')
-			const pin = page.locator(`.pin-anchor:not([hidden]) [data-pin-thread="${onView.at(-1)!.key}"]`)
+			const pin = page.locator(`.pin-anchor:not([hidden]) [data-pin-thread="${created[0]!.key}"]`)
 			expect(await pin.getAttribute('aria-label')).toContain('on this View')
 		}
 		finally { await context.close() }

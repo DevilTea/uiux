@@ -1,6 +1,7 @@
 import { computed, inject, provide, ref, shallowRef, type InjectionKey } from 'vue'
 import { defineShortcuts, navigateTo, useColorMode, useI18n } from '#imports'
 import { isWorkbenchLocale, saveWorkbenchLocale } from '../utils/workbench-locale'
+import { VIEWS_LOCATION } from '../utils/workbench-routes'
 
 /**
  * Shell-level UI state shared by the navbar, sidebar, pages, command palette and keyboard
@@ -82,7 +83,7 @@ function createWorkbenchShell() {
 		...(singleKeyShortcuts.value
 			? {
 					'g-o': () => navigateTo('/'),
-					'g-v': () => navigateTo('/views'),
+					'g-v': () => navigateTo(VIEWS_LOCATION),
 					'g-f': () => navigateTo('/flows'),
 					'g-r': () => navigateTo('/reviews'),
 					'[': () => toggleSidebarHandler?.(),

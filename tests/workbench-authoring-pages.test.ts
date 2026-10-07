@@ -207,3 +207,35 @@ describe('Tablet is read-only (R10)', () => {
 		}, 60_000)
 	}
 })
+
+describe('Workspace pages navigation', () => {
+	it('reaches Settings, Locales and Assets from one sidebar entry and the pages\' own sub-navigation', async () => {
+		const { context, page } = await open('/')
+		try {
+			const sidebar = page.locator('[data-landmark="navigation"]')
+			for (const name of ['Settings', 'Locales', 'Assets', 'Adapters'])
+				expect(await sidebar.getByRole('link', { name, exact: true }).count(), name).toBe(0)
+			await sidebar.getByRole('link', { name: 'Workspace', exact: true }).click()
+			await page.waitForURL(url => url.pathname === '/workspace/settings')
+			const subnav = page.getByRole('navigation', { name: 'Workspace pages' })
+			for (const name of ['Settings', 'Locales', 'Assets'])
+				expect(await subnav.getByRole('link', { name }).count(), name).toBe(1)
+			await subnav.getByRole('link', { name: 'Locales' }).click()
+			await page.waitForURL(url => url.pathname === '/workspace/locales')
+			// The one sidebar entry stays marked on every Workspace page.
+			expect(await sidebar.getByRole('link', { name: 'Workspace', exact: true }).getAttribute('aria-current')).toBe('page')
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('redirects /workspace/adapters to the Adapters section of Settings', async () => {
+		const { context, page } = await open('/workspace/adapters')
+		try {
+			await page.waitForURL(url => url.pathname === '/workspace/settings' && url.searchParams.get('section') === 'adapters')
+			await page.locator('#settings-adapters').waitFor()
+			// The page opens scrolled to the section, not at General.
+			await page.waitForFunction(() => (document.querySelector('#settings-adapters')?.closest('[role="region"]')?.scrollTop ?? 0) > 0)
+		}
+		finally { await context.close() }
+	}, 60_000)
+})

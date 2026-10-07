@@ -534,12 +534,10 @@
       "noThemesHint": "No themes in this Workspace. Themes change only the previewed View, not the Workbench."
     },
     "views": {
-      "title": "Views",
       "listLabel": "Views in this Workspace",
       "filterPlaceholder": "Filter Views…",
       "noMatches": "No Views match “{query}”.",
       "emptyTitle": "No Views yet",
-      "emptyDescription": "Create a View with the MCP {tool} tool.",
       "diagnosticCount": "No diagnostics | {n} diagnostic | {n} diagnostics",
       "lastOpened": "Last opened"
     },
@@ -586,7 +584,8 @@
     "assets": "Assets",
     "adapters": "Adapters",
     "countLabel": "{label}, {n}",
-    "reviewsLabel": "Reviews, none unresolved | Reviews, {n} unresolved | Reviews, {n} unresolved"
+    "reviewsLabel": "Reviews, none unresolved | Reviews, {n} unresolved | Reviews, {n} unresolved",
+    "workspacePages": "Workspace pages"
   },
   "shell": {
     "search": "Search or jump to…",
@@ -600,7 +599,8 @@
     "togglePanel": "Show or hide the panel",
     "openPanel": "Open panel",
     "collapseSidebar": "Collapse sidebar",
-    "expandSidebar": "Expand sidebar"
+    "expandSidebar": "Expand sidebar",
+    "secondaryNav": "Secondary navigation"
   },
   "prefs": {
     "theme": "Workbench theme",
@@ -1592,8 +1592,7 @@
     "review": {
       "title": "Refresh and review",
       "body": "New Views appear here and in Views. Open one to comment on its canvas."
-    },
-    "showSteps": "Show setup steps"
+    }
   },
   "submit": {
     "title": "Submit for review",

@@ -379,7 +379,7 @@ Hairlines (`--ui-border`) are decorative region separators, not control boundari
 |---|---|---|
 | Desktop | ≥ 1280px (`xl`); FHD 1920 primary | Sidebar 264px (collapsible to a 56px rail, resizable 220–360), canvas flexible, right panel 340px (resizable 300–440). At 1920 with both open, the canvas is about 1300px and a 1280×800 View fits at about 95%. |
 | Tablet | 1024–1279px (`lg`) and portrait 768–1023 (`md`) | The sidebar is the 56px icon rail in **both** orientations; its expand control opens the full navigation as an overlay. The right panel becomes a `USlideover` opened on demand. Comments stay on the canvas; threads open in a bottom `UDrawer` on coarse pointers. Touch targets are 44px. Review, resolve, reopen, Flows and the Prototype player work here; structural editing and authoring pages show "Edit on desktop". |
-| Mobile | < 768px | Single column. A 48px top bar (☰, the page title, search, member, preferences, refresh) and a 56px bottom navigation (plus the safe area) for Overview / Views / UX Flows / Reviews, with a Marker count on Reviews. A cold start at `/` lands on Reviews. View pages switch between Spec, Comments and View with `UTabs`. Threads open in a `UDrawer` bottom sheet with a full-width Resolve. Phones read, reply and triage: no structural editing and no new canvas comments. |
+| Mobile | < 768px | Single column. A 48px top bar (☰, the page title, search, member, preferences, refresh) and a 56px bottom navigation (plus the safe area) for Overview / UX Flows / Reviews, with a Marker count on Reviews. A cold start at `/` lands on Reviews. View pages switch between Spec, Comments and View with `UTabs`. Threads open in a `UDrawer` bottom sheet with a full-width Resolve. Phones read, reply and triage: no structural editing and no new canvas comments. |
 
 **Canvas:** the frame always renders the iframe at its canonical logical viewport size and scales only the outer presentation layer. Fit-to-canvas keeps 32px of gutter on desktop and 30px on tablet and mobile, enough for a 28px pin (plus its ring) whose tip sits on the frame's top or right edge. The bottom reserves room for the floating tool pill. Zoom steps are 25 / 50 / 67 / 75 / 90 / 100 / 125 / 150 / 200%. The dot grid (1px dots at a 16px pitch, `--wb-canvas-dot`) shows only at ≥ 50% zoom, and is the canvas's only texture.
 
@@ -438,13 +438,13 @@ Every component below is a Nuxt UI 4 component themed through `app.config.ts` an
 - **Revision conflict:** a caution `UAlert` above the form: "This changed since you opened it." with "Reload" and "Review changes". Never auto-retry.
 
 ### Navigation
-- **Primary navigation:** a vertical `UNavigationMenu` in the sidebar with four items (Overview, Views, UX Flows, Reviews), each with a Lucide icon, label and count.
+- **Primary navigation:** a vertical `UNavigationMenu` in the sidebar with three items (Overview, UX Flows, Reviews), each with a Lucide icon, label and count. The Overview's Views tab is the one list of every View; `/views` redirects to it (`/?tab=views`).
   - Active: `bg-elevated` with `text-highlighted`, plus a 2px Iris inset bar on the leading edge.
   - Inactive: `text-muted`. Hover: `bg-muted`.
-- **Detail routes:** a View or Flow page keeps its area's item active (Views, UX Flows). On a View page the sidebar body becomes the View navigator ("All Views" back link, View name, Widget tree); on a Flow page it lists Flows with "New Flow" (desktop).
-- **Secondary navigation:** a "Workspace" group (Settings, Locales, Assets, Adapters) sits below a separator at the sidebar foot. Members is in the member menu (Owners).
+- **Detail routes:** a View or Flow page keeps its area's item active (Overview for a View, UX Flows for a Flow); a View page's parent crumb is Overview. On a View page the sidebar body becomes the View navigator ("All Views" back link, View name, Widget tree); on a Flow page it lists Flows with "New Flow" (desktop).
+- **Secondary navigation:** one smaller "Workspace" entry sits below a separator at the sidebar foot, active on every `/workspace` page. Those pages carry their own sub-navigation (Settings, Locales, Assets) in a `UDashboardToolbar` with a horizontal `UNavigationMenu`. Adapters are a section of Settings (`/workspace/settings?section=adapters`; `/workspace/adapters` redirects there). Members is in the member menu (Owners).
 - **Collapsed rail:** 56px, icons only, with tooltips; the active item keeps its elevated fill and Iris bar. Counts move into the item's accessible name.
-- **Mobile:** a custom bottom bar (four links, 56px plus the safe area), each a 20px icon over a 12px label. Active: highlighted text, Iris icon and a 2px Iris bar on the top edge. Reviews carries a Marker count.
+- **Mobile:** a custom bottom bar (three links: Overview, UX Flows, Reviews; 56px plus the safe area), each a 20px icon over a 12px label. Active: highlighted text, Iris icon and a 2px Iris bar on the top edge. Reviews carries a Marker count.
 - **Breadcrumbs:** neutral; ancestor crumbs keep their width and only the current page's label truncates.
 
 ### Tree (Widget layers)
@@ -476,7 +476,7 @@ A 40px bar above the canvas. On desktop it shows the four render-context selects
 - A non-modal `UPopover` whose reference is the pin itself (or its edge indicator, the unplaced tray, or a fallback point at the canvas's bottom-left when the pin is not drawn). It prefers the right side of the pin and flips to stay inside the window.
 - 320px wide, 12px radius, Overlay shadow, `bg-default`. The header holds a target chip (Widget type plus mono id) and the Variant scope `USelect` ("This Variant" / "All Variants").
 - The body is a `UTextarea`, autoresizing up to 8 lines. The footer holds "Cancel" and a solid "Comment" button (`⌘↵`).
-- A thread bubble has the same frame. It shows a compact timeline (messages, re-anchors, submissions, lifecycle events), a reply field, and inline lifecycle actions. "Resolve" accepts a `ready-for-review` submission (`verified`) or, on an `open` thread, resolves it as Answered; its split menu has two labelled groups, **Resolve** (Answered, Verified) and **Dismiss** (No longer relevant, Duplicate… with a reason, Won't do). "Reopen" returns a resolved thread. An overflow menu holds Copy link, Re-anchor, Submit for review…, Promote to Decision, Open in Reviews, and Copy thread ID, then, after a separator and only while the viewer may still withdraw their own brand-new thread, **Delete comment** in the error color. Delete confirms inline (Cancel focused, `Esc` cancels), never with a browser dialog.
+- A thread bubble has the same frame. It shows a compact timeline (messages, re-anchors, submissions, lifecycle events), a reply field, and inline lifecycle actions. "Resolve" accepts a `ready-for-review` submission (`verified`) or, on an `open` thread, resolves it as Answered; its split menu has two labelled groups, **Resolve** (Answered, Verified) and **Dismiss** (No longer relevant, Duplicate… with a reason, Won't do). "Reopen" returns a resolved thread. An overflow menu holds Copy link, Submit for review… (desktop), Re-anchor and Promote to Decision (not on phones), Open in Reviews, and Copy thread ID, then, after a separator and only while the viewer may still withdraw their own brand-new thread, **Delete comment** in the error color. Delete confirms inline (Cancel focused, `Esc` cancels), never with a browser dialog.
 - Each message has a `⋯` menu with **Edit** for the viewer's own message: the body becomes an inline editor (`⌘↵` saves, `Esc` cancels; `↑` in an empty reply box edits the latest one). After a later submission or resolution Edit stays, disabled, with the reason. An edited message shows "· edited" after its time; it opens a read-only Edit history, newest first.
 - On coarse pointers and phones the composer and bubble open in a bottom `UDrawer` instead, which stays above the virtual keyboard.
 
@@ -507,7 +507,7 @@ Lucide only, through `UIcon` with literal `i-lucide-*` names (the static-publica
 | Capture evidence / Handoff export | `i-lucide-camera` / `i-lucide-package` |
 | Fit / Zoom in / Zoom out | `i-lucide-scan` / `i-lucide-zoom-in` / `i-lucide-zoom-out` |
 | Agent / Human / System actor | `i-lucide-bot` / avatar initials / `i-lucide-cog` |
-| Workspace settings / Locales / Assets / Adapters | `i-lucide-settings-2` / `i-lucide-globe` / `i-lucide-image` / `i-lucide-puzzle` |
+| Workspace entry and settings / Locales / Assets / Adapters | `i-lucide-settings-2` / `i-lucide-globe` / `i-lucide-image` / `i-lucide-puzzle` |
 
 ### Motion
 State changes only, 120–240ms, never choreography.
@@ -555,6 +555,7 @@ Outside the eight canonical sections; for builders.
 - **Component theme:** `app/app.config.ts` maps Nuxt UI roles (`primary: iris`, `secondary`/`neutral: graphite`, `annotation: marker`, `success: leaf`, `info: blue`, `warning: yellow`, `error: red`), makes neutral outline the default button, removes opacity hovers, re-maps `xs`/`sm` badges, kbds, avatars and menu labels to the 12px floor, and grows menus, inputs, tabs and tree rows to 44px on coarse pointers.
 - **Annotation color:** registered in `nuxt.config.ts` (`ui.theme.colors` includes `annotation`). Fonts are the `@fontsource` packages bundled by Vite; nothing is fetched at runtime.
 - **Breakpoints in script:** `WORKBENCH_BREAKPOINTS` in `app/composables/useMediaQuery.ts` (desktop ≥ 1280, tablet ≥ 1024, phone < 768, handset = phone width or a short coarse screen).
+- **Thread actions:** the canvas bubble and the Reviews thread detail share their lifecycle actions through `app/composables/useThreadActions.ts`, `ThreadReasonPrompt.vue` and `ThreadPromoteModal.vue`; each keeps its own layout and device gating.
 
 ## Recorded drift
 
@@ -567,7 +568,7 @@ Differences between the original target of this file and what shipped (R1–R14)
 - **Canvas gutter** is 32px (desktop) and 30px (tablet, phone), not 24px and 12px, so corner pins are never clipped.
 - **Phones** land on Reviews from a cold start at `/`, and the View tabs are Spec / Comments / View.
 - **Live session status** uses a neutral dot. Green stays reserved for success (The Green Means Done Rule).
-- **View and Flow indexes** (`/views`, `/flows`) are lists on every device, where the parent breadcrumb lands; they no longer open the most recent View or first Flow on tablet and desktop. The sidebar does not repeat the list beside them.
+- **View and Flow indexes** are lists on every device, where the parent breadcrumb lands; they no longer open the most recent View or first Flow on tablet and desktop. The View list is the Overview's Views tab (it marks the View opened last); `/views` redirects there, so there is no separate Views area. The Flow list is `/flows`. The sidebar does not repeat the list beside them.
 - **Comments on the View as a whole** use the RootShell anchor (`widgetId: "root"`): "Comment on this View" in the canvas pill, the Comments tab header and the command palette. Their pins sit at the frame's top-left and they lead the Comments tab in a "View" group. The Prototype player has its own Comment toggle in its toolbar.
 - **Resolving an `open` thread** is possible as Answered, Won't do, Duplicate or No longer relevant (the accepted direct-resolve decision); `verified` still requires a `ready-for-review` submission. The last three are presented as **Dismiss** (zh-TW 「捨棄」): they get their own Dismissed inbox tab, a neutral (never green) chip such as "Dismissed · No longer relevant", and no pin on the canvas.
 - **Workspace comments** (`{ scope: "workspace" }`) have no canvas presence: they are created from *New comment* in Reviews or *Comment on Workspace* in `⌘K`, carry a globe glyph and "Workspace" in the inbox, and are counted in a footer link at the bottom of a View's Comments tab.

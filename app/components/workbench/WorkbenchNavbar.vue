@@ -4,7 +4,7 @@ import { useI18n, useRoute } from '#imports'
 import type { BreadcrumbItem } from '@nuxt/ui'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
-import { flowPath, viewPath } from '../../utils/workbench-routes'
+import { flowPath, viewPath, VIEWS_LOCATION } from '../../utils/workbench-routes'
 import WorkbenchPreferences from './WorkbenchPreferences.vue'
 import MemberChip from './MemberChip.vue'
 import WorkspaceMenu from './WorkspaceMenu.vue'
@@ -20,14 +20,14 @@ const WORKSPACE_PAGES: Record<string, string> = {
 	'/workspace/settings': 'nav.settings',
 	'/workspace/locales': 'nav.locales',
 	'/workspace/assets': 'nav.assets',
-	'/workspace/adapters': 'nav.adapters',
 }
 
 const breadcrumb = computed<BreadcrumbItem[]>(() => {
 	const path = route.path
 	if (path === '/') return [{ label: t('nav.overview') }]
 	if (path.startsWith('/views')) {
-		const items: BreadcrumbItem[] = [{ label: t('nav.views'), to: '/views' }]
+		// The parent of a View is the one list of every View: the Overview's Views tab.
+		const items: BreadcrumbItem[] = [{ label: t('nav.overview'), to: VIEWS_LOCATION }]
 		const id = typeof route.params.viewId === 'string' ? route.params.viewId : undefined
 		if (id) {
 			const name = selectedView.value?.key === id

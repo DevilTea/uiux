@@ -19,6 +19,7 @@ import {
 	type LocaleCellState,
 } from '../../utils/workspace-authoring'
 import WorkbenchPage from '../workbench/WorkbenchPage.vue'
+import WorkspaceSubnav from './WorkspaceSubnav.vue'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 import AuthoringAccessNotice from './AuthoringAccessNotice.vue'
 import LockBadge from '../workbench/LockBadge.vue'
@@ -411,6 +412,9 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
     id="workspace-locales"
     :title="t('locales.pageTitle')"
   >
+    <template #toolbar>
+      <WorkspaceSubnav />
+    </template>
     <div class="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col px-4 sm:px-6">
       <header class="flex shrink-0 flex-col gap-4 pt-6 pb-4">
         <div class="flex flex-wrap items-start justify-between gap-3">

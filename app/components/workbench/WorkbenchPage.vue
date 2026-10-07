@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * A full-width Workbench page (Overview aside): one dashboard panel whose `main` landmark
- * scrolls inside the panel, never the document.
+ * scrolls inside the panel, never the document. An optional `toolbar` slot sits above it, for
+ * an area's own sub-navigation (the Workspace pages).
  */
 defineProps<{ id: string; title?: string }>()
 </script>
@@ -11,6 +12,12 @@ defineProps<{ id: string; title?: string }>()
     :id="id"
     :ui="{ root: 'min-h-0 min-w-0', body: 'gap-0 p-0 sm:p-0 overflow-hidden' }"
   >
+    <template
+      v-if="$slots.toolbar"
+      #header
+    >
+      <slot name="toolbar" />
+    </template>
     <template #body>
       <main
         id="main"
