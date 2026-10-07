@@ -8,10 +8,23 @@
 // `constrains` targets and the whole Markdown body of every unit in the batch with the batch's
 // values. A Feature or Contract that lists `rules` / `clauses` must list all of them: the applier
 // refuses when the workspace holds a child the batch does not name, unless the batch retires it.
-// A batch may retire Rules and Clauses (`retired: [{ ref, reason }]`, for example a Rule folded into
+// A batch may retire Rules, Clauses and Scenarios (`retired: [{ ref, reason }]`, for example a Rule folded into
 // a neighbor): the applier deletes each retired unit that still exists and drops it from refmap.json.
 // It also puts every listed owner's Rules or Clauses in the batch's order (a presentation-only change
-// that leaves the semantic revision unchanged). So:
+// that leaves the semantic revision unchanged).
+//
+// Scenarios (`scenarios: [{ ref, title, steps: [{ type, text }], demonstrates: [ref], group?, comments }]`)
+// are created after every other unit, because `demonstrates` needs existing Rules, Clauses, Features or
+// Contracts. For each Scenario the batch names, the applier overwrites its title, its complete step list,
+// its `demonstrates` targets and its noncanonical preamble: the `Feature:` header line (the batch's
+// `group`, else the title) and the `#` comment lines before the Scenario's tags, which carry its
+// provenance (`{{<ref>}}` placeholders are replaced like in bodies). Spec Tool stores each created
+// Scenario in its own `.feature` file; the applier refuses to write the preamble of a file that holds
+// more than one Scenario. Scenario order is not persisted (each Scenario is its own file, and Spec Tool
+// has no Scenario reorder or repack operation), so there is nothing to reorder. A Rule or Clause that a
+// Scenario demonstrates cannot be deleted: retiring one is refused before any change unless every
+// Scenario demonstrating it is named by the same batch without it, in which case those Scenarios are
+// relinked first. So:
 //   - make every later change to an imported unit in its batch source (and re-render the batch) or
 //     in a newer batch, never by editing `.spec/` alone;
 //   - never re-run an older batch after a newer batch or edit touched the same units, or it reverts
@@ -27,17 +40,21 @@
 // A batch draft names units by local `ref` (for example `F.review.lifecycle`). Spec Tool allocates
 // every UUID, so `refmap.json` (next to this script) keeps ref -> UUID for later batches; it never
 // goes into `.spec/`, which is closed-world. The applier:
-//   1. requires a valid workspace and checks every mapped UUID still exists with the right kind;
-//   2. deletes the retired Rules and Clauses that still exist;
+//   1. requires a valid workspace, checks every mapped UUID still exists with the right kind, and checks
+//      every Scenario draft's shape (single-line title and steps, Given* -> When+ -> Then+, at least one
+//      `demonstrates` ref, single-line comments) before any change;
+//   2. relinks the batch's Scenarios away from retired units, then deletes the retired Rules, Clauses and
+//      Scenarios that still exist;
 //   3. creates missing Features, then their Rules (in draft order), then Stories (whose `motivates`
 //      needs existing Features), then Contracts (whose `constrains` needs existing Features) and
 //      their Clauses (whose optional `constrains` override may name Features or Rules), or updates
 //      semantic fields and relation targets that differ from the draft, sequentially with
 //      `expectedRevision` threaded through every mutation, and reorders children to the draft order;
-//   4. writes each Feature, Story and Contract's provenance into its noncanonical Markdown body,
-//      replacing `{{<ref>}}` placeholders with the mapped UUIDs (so Rule and Clause provenance
-//      tables can name units created in the same run), and fails unless the semantic revision is
-//      unchanged by those body writes;
+//      then creates or updates the Scenarios (title, steps) and their `demonstrates` targets;
+//   4. writes each Feature, Story and Contract's provenance into its noncanonical Markdown body and each
+//      Scenario's provenance into its noncanonical preamble, replacing `{{<ref>}}` placeholders with
+//      the mapped UUIDs (so provenance can name units created in the same run), and fails unless the
+//      semantic revision is unchanged by those writes;
 //   5. validates the workspace again.
 // It is idempotent: rerunning the same batch changes nothing. It stops on the first error and never
 // retries a revision conflict. Run it only while no other `spec` process is running. The repository
@@ -116,16 +133,72 @@ const log = { created: [], createdByKind: {}, updated: [], relinked: [], reorder
 
 // Retired units: deleted when they still exist, never listed as a child, never re-created.
 const retired = (batch.retired ?? []).map(entry => entry.ref)
+const scenarios = batch.scenarios ?? []
 const listedRefs = new Set([
 	...(batch.features ?? []).flatMap(f => [f.ref, ...(f.rules ?? []).map(r => r.ref)]),
 	...(batch.stories ?? []).map(s => s.ref),
 	...(batch.contracts ?? []).flatMap(c => [c.ref, ...(c.clauses ?? []).map(cl => cl.ref)]),
+	...scenarios.map(s => s.ref),
 ])
 for (const ref of retired) {
 	if (listedRefs.has(ref))
 		fail(`${ref} is both retired and listed by the batch`)
 }
 const retiredIds = new Set(retired.filter(ref => refmap[ref]).map(ref => refmap[ref].id))
+
+// Scenario drafts are checked before any change, so a malformed one never leaves a half-applied batch.
+const ONE_LINE = /^[^\r\n\u2028\u2029]*\S[^\r\n\u2028\u2029]*$/u
+function checkScenarioDraft(s) {
+	const where = `Scenario ${s.ref ?? '(no ref)'}`
+	if (typeof s.ref !== 'string' || !s.ref)
+		fail(`${where}: missing ref`)
+	if (typeof s.title !== 'string' || !ONE_LINE.test(s.title))
+		fail(`${where}: the title must be one non-empty line`)
+	if (s.group !== undefined && (typeof s.group !== 'string' || !ONE_LINE.test(s.group)))
+		fail(`${where}: the group must be one non-empty line`)
+	if (!Array.isArray(s.steps) || s.steps.length === 0)
+		fail(`${where}: steps must be a non-empty array`)
+	let phase = null
+	let whens = 0
+	let thens = 0
+	for (const [i, step] of s.steps.entries()) {
+		if (!step || !['given', 'when', 'then'].includes(step.type) || typeof step.text !== 'string' || !ONE_LINE.test(step.text) || Object.keys(step).length !== 2)
+			fail(`${where}: step ${i} must be exactly { type: given|when|then, text: one non-empty line }`)
+		if ((step.type === 'given' && phase !== null && phase !== 'given') || (step.type === 'when' && phase === 'then') || (step.type === 'then' && whens === 0))
+			fail(`${where}: steps must follow Given* -> When+ -> Then+ (step ${i})`)
+		phase = step.type
+		if (step.type === 'when')
+			whens++
+		if (step.type === 'then')
+			thens++
+	}
+	if (whens === 0 || thens === 0)
+		fail(`${where}: needs at least one When and one Then step`)
+	if (!Array.isArray(s.demonstrates) || s.demonstrates.length === 0 || new Set(s.demonstrates).size !== s.demonstrates.length)
+		fail(`${where}: demonstrates must name at least one unit, without repeats`)
+	for (const ref of s.demonstrates) {
+		if (retired.includes(ref))
+			fail(`${where} demonstrates ${ref}, which the batch retires`)
+	}
+	if (!Array.isArray(s.comments) || s.comments.some(line => typeof line !== 'string' || !ONE_LINE.test(line)))
+		fail(`${where}: comments must be an array of non-empty single lines`)
+}
+const scenarioRefs = new Set()
+for (const s of scenarios) {
+	checkScenarioDraft(s)
+	if (scenarioRefs.has(s.ref))
+		fail(`Scenario ${s.ref} is listed twice`)
+	scenarioRefs.add(s.ref)
+	if (refmap[s.ref] && refmap[s.ref].kind !== 'scenario')
+		fail(`${s.ref} is mapped to a ${refmap[s.ref].kind}, not a scenario`)
+}
+const DEMONSTRABLE = ['feature', 'rule', 'contract', 'clause']
+// The demonstrates targets of a Scenario draft, or undefined when a target would be created later in a dry run.
+function scenarioTargets(s) {
+	if (dryRun && s.demonstrates.some(ref => !refmap[ref]))
+		return undefined
+	return s.demonstrates.map(ref => resolveRef(ref, DEMONSTRABLE)).sort()
+}
 
 // The persisted order of an owner's `rules:` or `clauses:` entries (presentation only).
 async function persistedChildOrder(dir, ownerId, key) {
@@ -299,13 +372,34 @@ async function upsertChildren(kind, ownerId, ownerRef, drafts) {
 	}
 }
 
+// A retired Rule or Clause that a Scenario demonstrates cannot be deleted. When the batch names that
+// Scenario without it, the Scenario is relinked to its draft targets first (they must exist already);
+// any other demonstrating Scenario refuses the whole batch before a change.
+const preRelink = new Map()
+for (const id of retiredIds) {
+	for (const edge of graph.edges.filter(e => e.type === 'demonstrates' && e.to === id)) {
+		const ref = Object.keys(refmap).find(r => refmap[r].id === edge.from)
+		const draft = ref && scenarios.find(s => s.ref === ref)
+		const retiredRef = Object.keys(refmap).find(r => refmap[r].id === id)
+		if (!draft)
+			fail(`Cannot retire ${retiredRef}: Scenario ${ref ?? edge.from} demonstrates it and this batch does not name that Scenario; relink it in the batch that owns it first`)
+		if (draft.demonstrates.some(r => !refmap[r]))
+			fail(`Cannot retire ${retiredRef}: Scenario ${ref} demonstrates it, and its new targets do not exist yet; relink the Scenario in an earlier run`)
+		preRelink.set(ref, draft)
+	}
+}
+
 try {
+	for (const [ref, draft] of preRelink) {
+		log.relinked.push(`scenario ${ref}: demonstrates (before retiring)`)
+		await mutate(expectedRevision => client.graph.setRelationTargets({ sourceId: refmap[ref].id, type: 'demonstrates', targets: scenarioTargets(draft), expectedRevision }), `relink scenario ${ref}`)
+	}
 	for (const ref of retired) {
 		const entry = refmap[ref]
 		if (!entry)
 			continue // already deleted, or never created
-		if (entry.kind !== 'rule' && entry.kind !== 'clause')
-			fail(`Only Rules and Clauses can be retired, not ${entry.kind} ${ref}`)
+		if (entry.kind !== 'rule' && entry.kind !== 'clause' && entry.kind !== 'scenario')
+			fail(`Only Rules, Clauses and Scenarios can be retired, not ${entry.kind} ${ref}`)
 		log.deleted.push(`${entry.kind} ${ref}`)
 		const response = await mutate(expectedRevision => client[entry.kind].delete({ id: entry.id, expectedRevision }), `delete ${entry.kind} ${ref}`)
 		if (response) {
@@ -364,6 +458,45 @@ try {
 		await upsertChildren('clause', ownerId, contract.ref, contract.clauses)
 	}
 
+	// Scenarios last: their `demonstrates` targets must exist.
+	await refreshGraph()
+	for (const s of scenarios) {
+		const targets = scenarioTargets(s)
+		const existing = refmap[s.ref]
+		if (!existing) {
+			log.created.push(`scenario ${s.ref}`)
+			log.createdByKind.scenario = (log.createdByKind.scenario ?? 0) + 1
+			const response = await mutate(expectedRevision => client.scenario.create({ title: s.title, steps: s.steps, demonstrates: targets, expectedRevision }), `create scenario ${s.ref}`)
+			if (response) {
+				const created = response.changedNodes.filter(node => node.kind === 'scenario')
+				if (created.length !== 1)
+					fail(`Expected one created scenario for ${s.ref}, got ${created.length}`)
+				refmap[s.ref] = { kind: 'scenario', id: created[0].id }
+				await saveRefmap()
+			}
+			continue
+		}
+		const node = nodes.get(existing.id)
+		const changes = {}
+		if (node.title !== s.title)
+			changes.title = s.title
+		if (JSON.stringify(node.steps) !== JSON.stringify(s.steps))
+			changes.steps = s.steps
+		if (Object.keys(changes).length > 0) {
+			log.updated.push(`scenario ${s.ref}: ${Object.keys(changes).join(', ')}`)
+			await mutate(expectedRevision => client.scenario.update({ id: existing.id, changes, expectedRevision }), `update scenario ${s.ref}`)
+		}
+		// In a dry run `graph` predates the relink made before retiring, which already sets these targets.
+		if (targets && !(dryRun && preRelink.has(s.ref)) && !sameSet(edgeTargets(existing.id, 'demonstrates'), targets)) {
+			log.relinked.push(`scenario ${s.ref}: demonstrates`)
+			await mutate(expectedRevision => client.graph.setRelationTargets({ sourceId: existing.id, type: 'demonstrates', targets, expectedRevision }), `relink scenario ${s.ref}`)
+		}
+		else if (Object.keys(changes).length === 0) {
+			log.unchanged.push(`scenario ${s.ref}`)
+		}
+	}
+	await refreshGraph()
+
 	const before = dryRun ? undefined : (await client.workspace.validate()).revision
 	const writes = []
 	for (const [kind, units] of [['feature', batch.features ?? []], ['story', batch.stories ?? []], ['contract', batch.contracts ?? []]]) {
@@ -389,8 +522,35 @@ try {
 			}
 		}
 	}
+	// A Scenario's preamble is everything before its `@spec:id` tag: the storage-only `Feature:` header
+	// and the `#` comment lines that carry its provenance.
+	for (const s of scenarios) {
+		if (!refmap[s.ref])
+			continue // only in a dry run, which does not create Scenarios
+		const node = nodes.get(refmap[s.ref].id)
+		if (!node?.source?.path)
+			fail(`Cannot find the storage file of scenario ${s.ref}`)
+		const path = join(root, node.source.path)
+		const text = await readFile(path, 'utf8')
+		const tags = text.split('\n').filter(line => line.startsWith('  @spec:id:'))
+		if (tags.length !== 1 || tags[0] !== `  @spec:id:${node.id}`)
+			fail(`Scenario ${s.ref} shares ${node.source.path} with other Scenarios; its preamble is not the batch's to write`)
+		const start = text.indexOf(tags[0])
+		const comments = s.comments.map(line => `  # ${line.replace(PLACEHOLDER, (match, ref) => {
+			if (refmap[ref])
+				return refmap[ref].id
+			if (dryRun)
+				return match
+			fail(`Comments of scenario ${s.ref} name unknown ref ${ref}`)
+		})}`)
+		const next = `${[`Feature: ${s.group ?? s.title}`, ...comments].join('\n')}\n${text.slice(start)}`
+		if (next !== text) {
+			writes.push([path, next])
+			log.bodies.push(`scenario ${s.ref}`)
+		}
+	}
 	if (writes.length > 0)
-		refuseIfStale('rewrite Markdown bodies')
+		refuseIfStale('rewrite Markdown bodies or Scenario comments')
 	if (!dryRun) {
 		for (const [path, next] of writes)
 			await writeFile(path, next)
