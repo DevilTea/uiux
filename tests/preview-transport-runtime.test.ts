@@ -182,7 +182,10 @@ describe('preview protocol transport & runtime materialization', () => {
 		})
 
 		it('builds a functioning RootShell adapter bundle', () => {
-			const bundle = buildRootShellAdapterBundle('en-US')
+			const result = buildRootShellAdapterBundle('en-US')
+			expect(result.state).toBe('ready')
+			if (result.state !== 'ready') return
+			const bundle = result.bundle
 			expect(bundle.pluginsByType.has('RootShell')).toBe(true)
 			expect(bundle.renderer).toBeDefined()
 			expect(bundle.system).toBeDefined()

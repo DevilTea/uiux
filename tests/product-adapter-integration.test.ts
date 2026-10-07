@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createWidgetPlugin } from '@deviltea/widget-core'
+import { WidgetInspectionError } from '@deviltea/widget-core/inspection'
 import { defineComponent, h } from 'vue'
 
 import {
@@ -9,6 +10,7 @@ import {
 	productAdapterRuntimeMemberDecoder,
 } from '../src/adapters/product-integration'
 import type { AdapterManifest } from '../src/domain/adapters/schema'
+import { IncompatibleWidgetCoreError } from '../src/runtime/widget-core-diagnostics'
 
 const dummyPlugin = createWidgetPlugin('DummyWidget').done()
 const DummyRenderer = defineComponent({ render: () => h('div') })
@@ -65,9 +67,26 @@ describe('product adapter integration', () => {
 			expect(decoded.type).toBe('DummyWidget')
 		})
 
-		it('rejects invalid plugin member that fails inspectPlugin', () => {
-			expect(() => productAdapterRuntimeMemberDecoder.decodePlugin({ type: 'Broken' }, { entry: {} as never, index: 0 })).toThrow(
-				/failed plugin inspection/,
+		it('rejects a plugin member from another widget-core copy as an incompatible widget-core copy', () => {
+			// A structural look-alike and a Plugin from another module instance share widget-core's
+			// documented `foreign-plugin` inspection code.
+			let thrown: unknown
+			try {
+				productAdapterRuntimeMemberDecoder.decodePlugin({ type: 'Broken' }, { entry: {} as never, index: 0 })
+			}
+			catch (cause) {
+				thrown = cause
+			}
+			expect(thrown).toBeInstanceOf(IncompatibleWidgetCoreError)
+			expect((thrown as IncompatibleWidgetCoreError).pluginType).toBe('Broken')
+			expect((thrown as Error).message).toMatch(/Widget plugin 'Broken' .*incompatible widget-core copy/)
+			expect((thrown as Error).cause).toBeInstanceOf(WidgetInspectionError)
+			expect(((thrown as Error).cause as WidgetInspectionError).code).toBe('foreign-plugin')
+		})
+
+		it('rejects a member without a usable type before inspection', () => {
+			expect(() => productAdapterRuntimeMemberDecoder.decodePlugin({ type: '' }, { entry: {} as never, index: 0 })).toThrow(
+				/non-empty string type/,
 			)
 		})
 

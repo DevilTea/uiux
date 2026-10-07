@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { createWidgetPlugin, type RuntimeState, type RuntimeMethod } from '@deviltea/widget-core'
+import { createWidgetPlugin, type AnyWidgetPlugin, type RuntimeState, type RuntimeMethod } from '@deviltea/widget-core'
 import { createSSRApp, defineComponent, h } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 
 import { resolveWorkspaceAdapterSet } from '../src/adapters'
+import { productAdapterRuntimeMemberDecoder } from '../src/adapters/product-integration'
 import type { AdapterManifest, AdapterWidgetCatalogEntry } from '../src/domain/adapters/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
 import type { ViewResource } from '../src/domain/views/schema'
@@ -456,6 +457,44 @@ describe('View / RootShell / Variant runtime assembly', () => {
 		})
 		expect(result.state).toBe('invalid')
 		expect(result.state === 'invalid' && result.diagnostics.some(item => item.code === 'adapter.runtime_plugin_ownership_mismatch')).toBe(true)
+	})
+
+	// A structural look-alike stands in for a Plugin from another widget-core copy: widget-core
+	// documents both as the same `foreign-plugin` case.
+	const foreignCounter = { type: 'Counter' } as unknown as AnyWidgetPlugin
+
+	it('reports a decoded Plugin from another widget-core copy as a diagnostic, not a thrown createWidgetSystem error', async () => {
+		const translation = translationRuntime()
+		const rootShell = createRootShellPlugin(translation)
+		const set = await validatedSet('Counter')
+		const result = await materializeRuntimeAdapterBundle({
+			set, rootShellPlugin: rootShell, rootShellRenderer: createRootShellRenderer(rootShell),
+			decoder: {
+				async decodePlugin() { return foreignCounter },
+				async decodeRenderer() { return { type: 'Counter', component: FixtureRenderer } },
+			},
+		})
+		expect(result).toEqual({
+			state: 'invalid',
+			diagnostics: [expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: '/adapters/0/manifest/widgetPlugins/0', message: expect.stringContaining('incompatible widget-core copy') })],
+		})
+	})
+
+	it('maps the product decoder\'s foreign-plugin rejection to the widget-core diagnostic', async () => {
+		const translation = translationRuntime()
+		const rootShell = createRootShellPlugin(translation)
+		const set = await validatedSet('Counter')
+		const result = await materializeRuntimeAdapterBundle({
+			set, rootShellPlugin: rootShell, rootShellRenderer: createRootShellRenderer(rootShell),
+			decoder: {
+				decodePlugin() { return productAdapterRuntimeMemberDecoder.decodePlugin(foreignCounter) },
+				async decodeRenderer() { return { type: 'Counter', component: FixtureRenderer } },
+			},
+		})
+		expect(result.state).toBe('invalid')
+		if (result.state !== 'invalid') return
+		expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: '/adapters/0/manifest/widgetPlugins/0' }))
+		expect(result.diagnostics.some(item => item.code === 'adapter.runtime_plugin_decode_failed')).toBe(false)
 	})
 })
 

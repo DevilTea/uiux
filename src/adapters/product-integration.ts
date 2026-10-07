@@ -5,6 +5,7 @@ import type { Component } from 'vue'
 import { validateAdapterManifest, type AdapterManifest } from '../domain/adapters/schema'
 import type { AdapterApiCompatibilityPolicy, AdapterRegistryInspector, AdapterRegistryOwnership } from './resolution'
 import type { AdapterRuntimeMemberDecoder, DecodedRendererRegistration } from '../runtime/adapter-runtime'
+import { IncompatibleWidgetCoreError, isForeignPluginInspectionError } from '../runtime/widget-core-diagnostics'
 
 /**
  * Discovers exactly one valid AdapterManifest export from an ESM namespace.
@@ -48,6 +49,11 @@ export function extractProductAdapterManifest(namespace: Readonly<Record<string,
 /**
  * Implementation decoder for runtime members: inspects AnyWidgetPlugin via inspectPlugin
  * and validates renderer registrations { type, component }.
+ *
+ * A Plugin member that this widget-core module instance did not complete is rejected by
+ * `inspectPlugin` with `WidgetInspectionError` code `foreign-plugin` (widget-core's documented
+ * contract); the decoder rethrows it as `IncompatibleWidgetCoreError`, so the Adapter author is
+ * told the Adapter bundles an incompatible widget-core copy.
  */
 export const productAdapterRuntimeMemberDecoder = {
 	decodePlugin(member: unknown): AnyWidgetPlugin {
@@ -62,6 +68,8 @@ export const productAdapterRuntimeMemberDecoder = {
 			inspectPlugin(candidate)
 		}
 		catch (cause) {
+			if (isForeignPluginInspectionError(cause))
+				throw new IncompatibleWidgetCoreError(candidate.type, { cause })
 			throw new Error(
 				`Widget plugin member '${candidate.type}' failed plugin inspection: ${cause instanceof Error ? cause.message : String(cause)}`,
 				{ cause },

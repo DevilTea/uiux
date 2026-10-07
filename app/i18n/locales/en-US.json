@@ -1793,11 +1793,13 @@
       "runtime_catalog_plugin_missing": "A Catalog Widget type has no matching Widget in the Adapter.",
       "runtime_identity_mismatch": "The loaded Adapter is not the one that was declared.",
       "runtime_manifest_extract_failed": "The Adapter’s description could not be read.",
+      "runtime_plugin_collision": "Two Widgets share the same type.",
       "runtime_plugin_decode_failed": "A Widget in the Adapter could not be loaded.",
       "runtime_plugin_ownership_mismatch": "The Adapter’s Widgets do not match what it declared.",
       "runtime_renderer_collision": "Two renderers share the same key.",
       "runtime_renderer_decode_failed": "A renderer in the Adapter could not be loaded.",
       "runtime_renderer_ownership_mismatch": "The Adapter’s renderers do not match what it declared.",
+      "runtime_widget_core_incompatible": "A Widget in the Adapter comes from a different widget-core copy than the one UIUX runs. Do not bundle widget-core into the Adapter.",
       "unsupported_config_schema_dialect": "The Adapter’s config rules use an unsupported format.",
       "vue_renderer_registry_invalid": "The Adapter’s Vue renderers are not valid."
     },

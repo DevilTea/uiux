@@ -1793,11 +1793,13 @@
       "runtime_catalog_plugin_missing": "型錄中的 Widget 類型在 Adapter 中沒有對應的 Widget。",
       "runtime_identity_mismatch": "載入的 Adapter 與宣告的不同。",
       "runtime_manifest_extract_failed": "無法讀取 Adapter 的描述。",
+      "runtime_plugin_collision": "有兩個 Widget 使用相同的類型。",
       "runtime_plugin_decode_failed": "無法載入 Adapter 中的 Widget。",
       "runtime_plugin_ownership_mismatch": "Adapter 的 Widget 與其宣告的不一致。",
       "runtime_renderer_collision": "有兩個渲染器使用相同的鍵。",
       "runtime_renderer_decode_failed": "無法載入 Adapter 中的渲染器。",
       "runtime_renderer_ownership_mismatch": "Adapter 的渲染器與其宣告的不一致。",
+      "runtime_widget_core_incompatible": "Adapter 中的 Widget 所用的 widget-core 副本與 UIUX 執行的不同。請勿將 widget-core 打包進 Adapter。",
       "unsupported_config_schema_dialect": "Adapter 的設定規則使用了不支援的格式。",
       "vue_renderer_registry_invalid": "Adapter 的 Vue 渲染器無效。"
     },
