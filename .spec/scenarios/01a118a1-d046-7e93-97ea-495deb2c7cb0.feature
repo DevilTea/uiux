@@ -7,9 +7,9 @@ Feature: Workspace migration
   @spec:id:01a118a1-d046-7443-87a8-6f196b38fc19
   @spec:demonstrates:01a1144e-501c-746b-9f23-4cd321628f7c
   @spec:demonstrates:01a1144e-502f-7a30-bf11-69d72ea164db
-  @spec:demonstrates:01a1144e-56d6-7b81-a611-25b8ef853abb
+  @spec:demonstrates:01a1144e-5605-722c-a662-2b483ddaad73
   Scenario: A migration chains its steps once, then reports the Workspace current
     Given a Workspace at `schemaVersion` 1 with a thread resolved before resolutions existed
     When an operator runs `uiux migrate` on it twice
-    Then the first run reaches `schemaVersion` 3 and records that resolution as verified, leaving other files byte-identical
-    Then the second run reports the Workspace as already current and exits with status 0
+    Then the first run reaches `schemaVersion` 3 with that resolution recorded as verified, and prints both steps, the changed files and the new manifest revision
+    Then the second run reports the Workspace as already current

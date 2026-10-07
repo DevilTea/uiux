@@ -6,7 +6,7 @@ Feature: Review desk
   @spec:demonstrates:01a11544-5621-71c6-b5b9-ad1b1ef809ab
   @spec:demonstrates:01a11544-6b86-7529-8440-f37c43558427
   Scenario: Resolving a ready thread without a resolution verifies it
-    Given a thread ready for review with one submission
-    When a human Reviewer resolves it in the Workbench without naming a resolution
+    Given a thread ready for review
+    When a human Reviewer resolves it without naming a resolution
     Then the thread is resolved as verified
-    Then the resolution names that submission
+    Then the resolution names the thread's latest submission

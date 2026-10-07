@@ -1,0 +1,31 @@
+{
+	"batch": "09-final-fixes",
+	"baseCommit": "9a8378a73775ea55ab042971b912d1c3f970981f",
+	"baseRevision": "f43b17bcc7a1ff15281e12b5bb739f41b29bb6d26922dc30b40e40916b5dd0ba",
+	"features": [
+		{
+			"ref": "F.ws.references",
+			"title": "Reference integrity and destructive changes",
+			"summary": "How destructive or identity-changing operations treat references to their target: reporting the impact and requiring acknowledgement, staying target-local, and keeping dangling or invalid references as repairable diagnostics.",
+			"rules": [
+				{
+					"ref": "R.ws.references.impact-ack",
+					"statement": "Before deleting a View, UX Flow or authored Asset, renaming a Variant, or renaming a viewport or theme key, the normal Workbench or MCP operation reports the known affected canonical references and proceeds only after the caller explicitly acknowledges that impact."
+				},
+				{
+					"ref": "R.ws.references.target-local",
+					"statement": "Such a change stays atomic within its own resource or domain boundary: UIUX never cascades it, auto-rebinds references or silently rewrites referencing resources."
+				},
+				{
+					"ref": "R.ws.references.dangling",
+					"statement": "A reference whose target is gone keeps its original target identity and is reported as a structured invalid or dangling diagnostic until it is explicitly repaired; a Workspace with dangling references is a supported, repairable state."
+				},
+				{
+					"ref": "R.ws.references.preserve-invalid",
+					"statement": "UIUX preserves invalid authored data for repair and reports it; it never silently drops or rewrites it, and never rebinds a reference heuristically by name, type, selector, tree position, geometry or similarity."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #1 comment 171 (2026-09-30), \"Accepted convergence decision — target-local destructive change with explicit impact acknowledgement\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18676070\n- Discussion #10 comment 3 (2026-09-30), \"Accepted convergence decision — Workspace-local opaque render-dimension IDs\": render-dimension key rename is identity-changing. https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18676515\n- Discussion #1 comment 158 (2026-09-29), \"Accepted decision group — Review anchor model (A / A / A / A)\": missing anchor targets are preserved. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657409\n- Discussion #6 comment 2 (2026-09-30), \"Accepted decision group — Flow execution and graph validity (A / A / A / A)\": decision 7: invalid Flow references are preserved. https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.ws.references.impact-ack}} | [#1 c171](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18676070); [#1 body: Canonical Decision Index item 9](https://github.com/DevilTea/uiux/discussions/1); [#10 c3](https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18676515) |\n| {{R.ws.references.target-local}} | [#1 c171](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18676070) |\n| {{R.ws.references.dangling}} | [#1 c171](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18676070); [#1 c158](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657409); [#6 c2 d7](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004) |\n| {{R.ws.references.preserve-invalid}} | [#1 body: Review anchor fallback policy](https://github.com/DevilTea/uiux/discussions/1); [#1 c155 d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656662); [#1 c158](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657409); [#6 c2 d7](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004); [#9 c2 d6](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675243) |\n\n## Implementation gaps\n\n- {{R.ws.references.impact-ack}}: Partly built as of 9a8378a: the Workbench Settings page names what still refers to a viewport or theme key and requires an explicit acknowledgement before renaming or removing it (`app/components/workspace/RegistryKeyModal.vue`, since d72ec3b; `tests/workbench-authoring-pages.test.ts#L101`). Not built: `update_workspace_settings` over MCP or HTTP renames those keys without reference-impact analysis, Variant renames (`update_view_structure`) run without it, and no View, UX Flow or Asset delete operation exists. The `ReferenceImpactAnalyzer` port and the `impact_acknowledgement_required` result exist only in `src/application/services/resource-mutations.ts`, which no production service uses. Tracked in issue #75 (https://github.com/DevilTea/uiux/issues/75).\n"
+		}
+	]
+}
