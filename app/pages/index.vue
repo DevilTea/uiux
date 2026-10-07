@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { anchorViewId } from '../../src/domain/reviews/schema'
 import { computed, onMounted, ref, watch } from 'vue'
-import { defineShortcuts, navigateTo, useI18n, useRoute } from '#imports'
+import { defineShortcuts, navigateTo, useI18n, useRoute, useRouter } from '#imports'
 import type { TableColumn, TabsItem } from '@nuxt/ui'
 import { useMediaQuery } from '../composables/useMediaQuery'
 import { useReadiness } from '../composables/useReadiness'
@@ -25,6 +25,7 @@ import WorkspaceFirstRun from '../components/workbench/WorkspaceFirstRun.vue'
  */
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const workbench = useWorkbench()
 const lastViewId = workbench.lastViewId()
 const shell = useWorkbenchShell()
@@ -127,16 +128,27 @@ const attention = computed<AttentionPart[]>(() => ([
 
 // ----- Tabs, data and shortcuts ---------------------------------------------------------------
 
-/** `?tab=` picks the tab: `/views` (the old View index) redirects to `?tab=views`, and `G V` uses it. */
+/**
+ * `?tab=` is the active tab, both ways. `/views` (the old View index) redirects to `?tab=views`, and
+ * `G V`, ⌘K "Views", the View page's parent crumb and the Reviews empty state all link there.
+ * Switching tabs replaces the query (no history entry per tab), so a link to the Views tab is never
+ * a same-location no-op while another tab is showing. Views is the default: no `?tab=` means
+ * Views, and switching back to Views drops the query, so a bare `/` stays bare (a phone cold load of
+ * `/` opens Reviews, see the default layout). Nothing writes the query on load.
+ */
 const TAB_VALUES = ['views', 'checks', 'activity'] as const
-function tabFromQuery(): string | undefined {
-	const value = route.query.tab
-	return typeof value === 'string' && (TAB_VALUES as readonly string[]).includes(value) ? value : undefined
+function isTab(value: unknown): value is typeof TAB_VALUES[number] {
+	return typeof value === 'string' && (TAB_VALUES as readonly string[]).includes(value)
 }
-const tab = ref(tabFromQuery() ?? 'views')
-watch(() => route.query.tab, () => {
-	const value = tabFromQuery()
-	if (value) tab.value = value
+const tab = computed<string>({
+	get: () => isTab(route.query.tab) ? route.query.tab : 'views',
+	set: (value) => {
+		if (!isTab(value) || value === tab.value) return
+		const query = { ...route.query }
+		if (value === 'views') delete query.tab
+		else query.tab = value
+		void router.replace({ query })
+	},
 })
 const tabs = computed<TabsItem[]>(() => [
 	{ value: 'views', slot: 'views' as const, label: t('overview.tab.views') },

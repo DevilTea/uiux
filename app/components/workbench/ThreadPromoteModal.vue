@@ -31,7 +31,8 @@ watch(open, (value) => {
 })
 
 async function onSubmit(): Promise<void> {
-	if (!form.question.trim() || !form.summary.trim()) return
+	// Enter in a field submits the form too; while a promotion is in flight it must not start a second.
+	if (props.busy || !form.question.trim() || !form.summary.trim()) return
 	if (await props.submit({ ...form })) {
 		open.value = false
 		return

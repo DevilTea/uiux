@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { NavigationMenuItem } from '@nuxt/ui'
-import { useI18n, useRoute } from '#imports'
+import { useI18n, useRoute, useRouter } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
@@ -42,6 +42,7 @@ import { focusFirstProblem } from '../../utils/focus-problem'
  */
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 /** The section named by `?section=`, if it is one. */
 const requestedSection = computed<SettingsSectionId | undefined>(() => {
 	const value = route.query.section
@@ -222,6 +223,7 @@ function onScroll(): void {
 	if (!spyFrame) spyFrame = requestAnimationFrame(updateActive)
 }
 
+let stopAfterEach: (() => void) | undefined
 /** Once the sections exist, jump to the requested section. */
 async function onSectionsRendered(): Promise<void> {
 	await nextTick()
@@ -243,8 +245,17 @@ onMounted(() => {
 	watch(requestedSection, (section) => {
 		if (section && started) scrollTo(section)
 	})
+	// Asked for the section the URL already names (`?section=adapters`, then scrolled back to
+	// General, then ⌘K "Adapters"): the router refuses a duplicate navigation, so the query does
+	// not change and the watcher above never fires. Every failed navigation still reaches
+	// `afterEach`; one that stays on this page re-reveals the requested section.
+	stopAfterEach = router.afterEach((to, _from, failure) => {
+		const section = requestedSection.value
+		if (failure && started && section && to.path === route.path && to.query.section === section) scrollTo(section)
+	})
 })
 onBeforeUnmount(() => {
+	stopAfterEach?.()
 	if (spyFrame) cancelAnimationFrame(spyFrame)
 	scroller.value?.removeEventListener('scroll', onScroll)
 	window.removeEventListener('keydown', onKeydown)

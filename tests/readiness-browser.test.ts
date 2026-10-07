@@ -187,3 +187,62 @@ describe('Overview and readiness (R9)', () => {
 		finally { await context.close() }
 	}, 90_000)
 })
+
+describe('Overview tabs in the URL', () => {
+	const selectedTab = (page: Page) => page.locator('[role="tablist"] [role="tab"][aria-selected="true"]').innerText().then(text => text.trim().replace(/\s+\d+$/, ''))
+	const tabParam = (page: Page) => new URL(page.url()).searchParams.get('tab')
+
+	it('keeps ?tab= in step with the tab, so a link to the Views tab is never a no-op', async () => {
+		const { context, page } = await open('/?tab=views')
+		try {
+			await page.locator('[data-views-table]').waitFor()
+			const historyLength = await page.evaluate(() => history.length)
+			await page.keyboard.press('2')
+			await expect.poll(() => selectedTab(page)).toBe('Checks')
+			expect(tabParam(page)).toBe('checks')
+			await page.keyboard.press('3')
+			await expect.poll(() => tabParam(page)).toBe('activity')
+			// Switching tabs replaces the entry: Back leaves the Overview, not the last tab.
+			expect(await page.evaluate(() => history.length)).toBe(historyLength)
+
+			// G V from another tab (the location the View crumb, ⌘K "Views" and the Reviews empty
+			// state also use) lands on the Views tab.
+			await page.keyboard.press('g')
+			await page.keyboard.press('v')
+			await expect.poll(() => selectedTab(page)).toBe('Views')
+			expect(tabParam(page)).toBe('views')
+
+			// Views is the default: switching back to it drops the query.
+			await page.keyboard.press('2')
+			await expect.poll(() => tabParam(page)).toBe('checks')
+			await page.keyboard.press('1')
+			await expect.poll(() => new URL(page.url()).search).toBe('')
+			expect(await selectedTab(page)).toBe('Views')
+
+			// A bare `/` (G O, the sidebar's Overview) is the Views tab too.
+			await page.keyboard.press('2')
+			await expect.poll(() => tabParam(page)).toBe('checks')
+			await page.keyboard.press('g')
+			await page.keyboard.press('o')
+			await expect.poll(() => new URL(page.url()).search).toBe('')
+			await expect.poll(() => selectedTab(page)).toBe('Views')
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('still opens a phone cold load of a bare / on Reviews, and keeps an explicit tab', async () => {
+		const bare = await open('/', { width: 390, height: 844 })
+		try {
+			await expect.poll(() => new URL(bare.page.url()).pathname).toBe('/reviews')
+		}
+		finally { await bare.context.close() }
+
+		const checks = await open('/?tab=checks', { width: 390, height: 844 })
+		try {
+			await expect.poll(() => selectedTab(checks.page)).toBe('Checks')
+			expect(new URL(checks.page.url()).pathname).toBe('/')
+			expect(tabParam(checks.page)).toBe('checks')
+		}
+		finally { await checks.context.close() }
+	}, 60_000)
+})
