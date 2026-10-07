@@ -102,6 +102,14 @@ describe('WidgetEventObserver (inspection surface)', () => {
 		runtime.dispose()
 	})
 
+	it('observes nothing for a Runtime that widget-core rejects as foreign (WidgetInspectionError)', () => {
+		const observer = new WidgetEventObserver(() => {})
+		observer.attach({ isDisposed: false } as unknown as WidgetSystemRuntime)
+		expect(() => observer.setArm('arm-1', [{ widgetId: 'a', event: 'pressed' }])).not.toThrow()
+		expect(observer.snapshot()).toMatchObject({ armId: 'arm-1', spent: false, observing: 0 })
+		observer.dispose()
+	})
+
 	it('an empty arm disarms; clearArm and dispose stop reporting', async () => {
 		const { runtime, a } = probeRuntime()
 		const reports: WidgetEventReport[] = []

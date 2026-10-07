@@ -1,5 +1,5 @@
 import type { WidgetSystemRuntime } from '@deviltea/widget-core'
-import { inspectRuntime } from '@deviltea/widget-core/inspection'
+import { inspectRuntime, WidgetInspectionError } from '@deviltea/widget-core/inspection'
 
 import type { WidgetEventTrigger } from './protocol/widget-events'
 
@@ -12,8 +12,15 @@ type Arm = { readonly armId: string; readonly triggers: readonly WidgetEventTrig
  * The runtime side of Widget Event reporting (Part 2 decision group "Widget Event reporting",
  * decision 4). It observes only the armed `{ widgetId, event }` pairs, through widget-core's
  * read-only inspection surface (`inspectRuntime(runtime).getWidget(nodeId).getEvent(name)`),
- * never the public `events[name].subscribe` and never DOM events, so observing changes neither
- * emission, nor listener order, nor any exception the plugin sees.
+ * never the public `events[name].subscribe` and never DOM events.
+ *
+ * widget-core documents that surface (`@deviltea/widget-core/inspection`) as a supported
+ * read-only host surface, and documents for Event inspection that it grants no emit authority and
+ * never changes emission, public listener membership or order, or any exception the emitter
+ * sees; that a throwing inspection listener is isolated from the emitter and every other
+ * listener; that only future occurrences are delivered; and that a listener should defer work
+ * that writes State or invokes Methods, for example to a microtask. The observer relies on those
+ * guarantees rather than guarding the emitter itself.
  *
  * - The listener takes no parameters: the argument tuple is never read, copied or retained.
  * - Each arm yields at most one report (one-shot); the arm is then spent until a new one arrives.
@@ -80,7 +87,10 @@ export class WidgetEventObserver {
 		try {
 			inspection = inspectRuntime(runtime)
 		}
-		catch {
+		catch (cause) {
+			// A Runtime this widget-core module instance did not create (`foreign-runtime`) cannot be
+			// observed, so nothing reports. Any other exception is a defect and propagates.
+			if (!(cause instanceof WidgetInspectionError)) throw cause
 			return
 		}
 		for (const trigger of arm.triggers) {
@@ -96,24 +106,19 @@ export class WidgetEventObserver {
 	}
 
 	private observe(arm: Arm, widgetId: string, event: string): void {
-		try {
-			if (this.disposed || this.arm !== arm || arm.spent) return
-			arm.spent = true
-			this.schedule(() => {
-				// The arm is spent: stop observing outside the emitter, then report unless disposed.
-				if (this.arm === arm) this.unsubscribeAll()
-				if (this.disposed) return
-				try {
-					this.report(Object.freeze({ armId: arm.armId, widgetId, event }))
-				}
-				catch {
-					// A failing reporter never reaches the emitting plugin.
-				}
-			})
-		}
-		catch {
-			// Observation never throws into widget-core.
-		}
+		if (this.disposed || this.arm !== arm || arm.spent) return
+		arm.spent = true
+		this.schedule(() => {
+			// The arm is spent: stop observing outside the emitter, then report unless disposed.
+			if (this.arm === arm) this.unsubscribeAll()
+			if (this.disposed) return
+			try {
+				this.report(Object.freeze({ armId: arm.armId, widgetId, event }))
+			}
+			catch {
+				// A failing reporter never reaches the emitting plugin.
+			}
+		})
 	}
 
 	private unsubscribeAll(): void {

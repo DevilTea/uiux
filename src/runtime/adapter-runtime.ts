@@ -1,5 +1,4 @@
 import type { AnyWidgetPlugin, WidgetSystem } from '@deviltea/widget-core'
-import { createWidgetSystem } from '@deviltea/widget-core'
 import { inspectPlugin } from '@deviltea/widget-core/inspection'
 import { createWidgetVueRenderer, type WidgetVueRenderer } from '@deviltea/widget-vue'
 import type { Component } from 'vue'
@@ -12,6 +11,7 @@ import {
 	UIUX_TRANSLATION_RESULT_VALUE_CONTRACT_ID,
 } from '../i18n/widget-contracts'
 import type { RootShellPlugin } from './root-shell'
+import { createAdapterWidgetSystem, incompatibleWidgetCoreDiagnostic, IncompatibleWidgetCoreError } from './widget-core-diagnostics'
 
 export type DecodedRendererRegistration = Readonly<{ type: string; component: Component }>
 
@@ -43,18 +43,23 @@ export async function materializeRuntimeAdapterBundle(input: Readonly<{
 }>): Promise<RuntimeAdapterBundleResult> {
 	const diagnostics: Diagnostic[] = []
 	const plugins: AnyWidgetPlugin[] = [input.rootShellPlugin]
+	// The JSON Pointer reported for each entry of `plugins`; RootShell is UIUX-owned and has none.
+	const pluginPaths: string[] = ['']
 	const renderers = new Map<string, Component>([['RootShell', input.rootShellRenderer]])
 	const catalogByType = new Map<string, AdapterWidgetCatalogEntry>()
 	const pendingCatalogEntries: Array<Readonly<{ type: string; catalog: AdapterWidgetCatalogEntry; path: string }>> = []
 
 	for (const entry of input.set.entries) {
-		const decodedPlugins: AnyWidgetPlugin[] = []
+		const decodedPlugins: Array<Readonly<{ plugin: AnyWidgetPlugin; path: string }>> = []
 		const decodedRenderers = new Map<string, Component>()
 
 		for (const [index, member] of entry.manifest.widgetPlugins.entries()) {
-			try { decodedPlugins.push(await input.decoder.decodePlugin(member, { entry, index })) }
+			const path = `/adapters/${entry.index}/manifest/widgetPlugins/${index}`
+			try { decodedPlugins.push({ plugin: await input.decoder.decodePlugin(member, { entry, index }), path }) }
 			catch (cause) {
-				diagnostics.push({ code: 'adapter.runtime_plugin_decode_failed', path: `/adapters/${entry.index}/manifest/widgetPlugins/${index}`, message: messageOf('Widget plugin manifest member could not be decoded.', cause) })
+				diagnostics.push(cause instanceof IncompatibleWidgetCoreError
+					? incompatibleWidgetCoreDiagnostic(path, cause)
+					: { code: 'adapter.runtime_plugin_decode_failed', path, message: messageOf('Widget plugin manifest member could not be decoded.', cause) })
 			}
 		}
 		for (const [index, member] of entry.manifest.renderers.entries()) {
@@ -69,7 +74,7 @@ export async function materializeRuntimeAdapterBundle(input: Readonly<{
 			}
 		}
 
-		const pluginTypes = decodedPlugins.map(plugin => plugin.type)
+		const pluginTypes = decodedPlugins.map(decoded => decoded.plugin.type)
 		const rendererTypes = [...decodedRenderers.keys()]
 		if (!sameSet(pluginTypes, entry.ownership.widgetTypes))
 			diagnostics.push({ code: 'adapter.runtime_plugin_ownership_mismatch', path: `/adapters/${entry.index}/manifest/widgetPlugins`, message: 'Decoded Widget plugin types do not match the validated adapter ownership set.' })
@@ -83,9 +88,10 @@ export async function materializeRuntimeAdapterBundle(input: Readonly<{
 				path: `/adapters/${entry.index}/manifest/catalog/widgets/${escapePointer(type)}`,
 			})
 		}
-		for (const plugin of decodedPlugins) {
+		for (const { plugin, path } of decodedPlugins) {
 			if (plugin.type === 'RootShell') diagnostics.push({ code: 'adapter.reserved_root_shell_type', path: `/adapters/${entry.index}/manifest/widgetPlugins`, message: 'RootShell is owned exclusively by UIUX.' })
 			plugins.push(plugin)
+			pluginPaths.push(path)
 		}
 		for (const [type, component] of decodedRenderers) {
 			if (type === 'RootShell') diagnostics.push({ code: 'adapter.reserved_root_shell_renderer', path: `/adapters/${entry.index}/manifest/renderers`, message: 'RootShell renderer is owned exclusively by UIUX.' })
@@ -106,7 +112,9 @@ export async function materializeRuntimeAdapterBundle(input: Readonly<{
 	}
 	if (diagnostics.length > 0) return { state: 'invalid', diagnostics }
 
-	const system = createWidgetSystem({ plugins: plugins as readonly AnyWidgetPlugin[] })
+	const created = createAdapterWidgetSystem(plugins, pluginPaths)
+	if (created.state === 'invalid') return created
+	const system = created.system
 	let renderer: WidgetVueRenderer<readonly AnyWidgetPlugin[]>
 	try { renderer = createDynamicRenderer(system, renderers) }
 	catch (cause) {

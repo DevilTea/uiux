@@ -1,4 +1,4 @@
-import { createWidgetSystem, type AnyWidgetPlugin } from '@deviltea/widget-core'
+import type { AnyWidgetPlugin } from '@deviltea/widget-core'
 import { createWidgetVueRenderer } from '@deviltea/widget-vue'
 import type { Component } from 'vue'
 
@@ -7,10 +7,12 @@ import type { ResolvedRenderContext } from '../domain/render-context/schema'
 import type { ViewResource } from '../domain/views/schema'
 import { createTranslationRuntime } from '../i18n'
 import {
+	createAdapterWidgetSystem,
 	createRootShellPlugin,
 	createRootShellRenderer,
 	LiveViewRuntimeController,
 	type RuntimeAdapterBundle,
+	type RuntimeAdapterBundleResult,
 } from '../runtime'
 
 export type PreviewMaterializationResult =
@@ -31,9 +33,11 @@ export type PreviewMaterializationResult =
 	}>
 
 /**
- * Builds the canonical UIUX-owned RootShell adapter bundle for the browser preview.
+ * Builds the canonical UIUX-owned RootShell adapter bundle for the browser preview. A widget-core
+ * registration error (only possible when UIUX itself loads two widget-core copies) is returned as
+ * diagnostics instead of thrown.
  */
-export function buildRootShellAdapterBundle(locale = 'en-US'): RuntimeAdapterBundle {
+export function buildRootShellAdapterBundle(locale = 'en-US'): RuntimeAdapterBundleResult {
 	const translationResult = createTranslationRuntime(locale, new Map())
 	const defaultResult = createTranslationRuntime('en-US', new Map())
 	const translation = translationResult.state === 'ready'
@@ -46,7 +50,9 @@ export function buildRootShellAdapterBundle(locale = 'en-US'): RuntimeAdapterBun
 	const plugins: AnyWidgetPlugin[] = [rootShellPlugin]
 	const renderers = new Map<string, Component>([['RootShell', rootShellRenderer]])
 
-	const system = createWidgetSystem({ plugins })
+	const created = createAdapterWidgetSystem(plugins, [''])
+	if (created.state === 'invalid') return created
+	const system = created.system
 	const dynamicCreate = createWidgetVueRenderer as unknown as (
 		sys: typeof system,
 		build: (section: Record<string, (component: Component) => unknown>) => unknown,
@@ -60,10 +66,14 @@ export function buildRootShellAdapterBundle(locale = 'en-US'): RuntimeAdapterBun
 	})
 
 	return {
-		system,
-		renderer,
-		pluginsByType: new Map([['RootShell', rootShellPlugin]]),
-		catalogByType: new Map(),
+		state: 'ready',
+		diagnostics: [],
+		bundle: {
+			system,
+			renderer,
+			pluginsByType: new Map([['RootShell', rootShellPlugin]]),
+			catalogByType: new Map(),
+		},
 	}
 }
 
@@ -99,7 +109,12 @@ export function materializePreviewView(input: Readonly<{
 	bundle?: RuntimeAdapterBundle
 }>): PreviewMaterializationResult {
 	const allTypes = collectWidgetTypesFromIr(input.view.ir)
-	const bundle = input.bundle ?? buildRootShellAdapterBundle(input.context.locale)
+	let bundle = input.bundle
+	if (!bundle) {
+		const built = buildRootShellAdapterBundle(input.context.locale)
+		if (built.state === 'invalid') return { status: 'invalid', diagnostics: built.diagnostics }
+		bundle = built.bundle
+	}
 	const supportedTypes = new Set(bundle.pluginsByType.keys())
 
 	const unsupportedTypes = allTypes.filter(type => !supportedTypes.has(type))

@@ -1,6 +1,6 @@
 import { createApp, h, nextTick, shallowRef, type Component } from 'vue'
-import { createWidgetSystem, type AnyWidgetPlugin, type WidgetSystemRuntime } from '@deviltea/widget-core'
-import { inspectPlugin } from '@deviltea/widget-core/inspection'
+import type { AnyWidgetPlugin, WidgetSystemRuntime } from '@deviltea/widget-core'
+import { inspectPlugin, WidgetInspectionError } from '@deviltea/widget-core/inspection'
 import { createWidgetVueRenderer } from '@deviltea/widget-vue'
 
 import type { Diagnostic } from '../domain/validation'
@@ -10,8 +10,11 @@ import type { I18nResource } from '../domain/i18n/schema'
 import { validateAdapterManifest, type AdapterManifest } from '../domain/adapters/schema'
 import { createTranslationRuntime, type TranslationRuntime } from '../i18n'
 import {
+	createAdapterWidgetSystem,
 	createRootShellPlugin,
 	createRootShellRenderer,
+	incompatibleWidgetCoreDiagnostic,
+	IncompatibleWidgetCoreError,
 	LiveViewRuntimeController,
 	type RuntimeAdapterBundle,
 } from '../runtime'
@@ -115,6 +118,8 @@ export function createStandalonePreviewMount(input: Readonly<{
 		widgetTypes: readonly string[]
 		rendererKeys: readonly string[]
 		decodedPlugins: readonly AnyWidgetPlugin[]
+		/** The `widgetPlugins` member path of each entry of `decodedPlugins`. */
+		decodedPluginPaths: readonly string[]
 		decodedRenderers: ReadonlyMap<string, Component>
 	}> = []
 
@@ -161,16 +166,21 @@ export function createStandalonePreviewMount(input: Readonly<{
 		}
 
 		const decodedPlugins: AnyWidgetPlugin[] = []
+		const decodedPluginPaths: string[] = []
 		for (const [pluginIndex, member] of manifest.widgetPlugins.entries()) {
+			const pluginPath = `${basePath}/manifest/widgetPlugins/${pluginIndex}`
 			try {
 				decodedPlugins.push(productAdapterRuntimeMemberDecoder.decodePlugin(member))
+				decodedPluginPaths.push(pluginPath)
 			}
 			catch (cause) {
-				buildDiagnostics.push({
-					code: 'adapter.runtime_plugin_decode_failed',
-					path: `${basePath}/manifest/widgetPlugins/${pluginIndex}`,
-					message: cause instanceof Error ? cause.message : 'Plugin decode failed',
-				})
+				buildDiagnostics.push(cause instanceof IncompatibleWidgetCoreError
+					? incompatibleWidgetCoreDiagnostic(pluginPath, cause)
+					: {
+							code: 'adapter.runtime_plugin_decode_failed',
+							path: pluginPath,
+							message: cause instanceof Error ? cause.message : 'Plugin decode failed',
+						})
 			}
 		}
 
@@ -223,6 +233,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 			widgetTypes: desc.widgetTypes,
 			rendererKeys: desc.rendererKeys,
 			decodedPlugins,
+			decodedPluginPaths,
 			decodedRenderers,
 		})
 	}
@@ -280,11 +291,13 @@ export function createStandalonePreviewMount(input: Readonly<{
 		const rootShellRenderer = createRootShellRenderer(rootShellPlugin)
 
 		const plugins: AnyWidgetPlugin[] = [rootShellPlugin]
+		// The JSON Pointer reported for each entry of `plugins`; RootShell is UIUX-owned and has none.
+		const pluginPaths: string[] = ['']
 		const renderers = new Map<string, Component>([['RootShell', rootShellRenderer]])
 		const catalogByType = new Map()
 
 		for (const entry of validatedEntries) {
-			for (const plugin of entry.decodedPlugins) {
+			for (const [pluginIndex, plugin] of entry.decodedPlugins.entries()) {
 				if (plugin.type === 'RootShell') {
 					options.onStatusChange?.({
 						status: 'invalid',
@@ -297,6 +310,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 					return createNoopBridge()
 				}
 				plugins.push(plugin)
+				pluginPaths.push(entry.decodedPluginPaths[pluginIndex]!)
 			}
 			for (const [type, component] of entry.decodedRenderers) {
 				if (type === 'RootShell') {
@@ -318,7 +332,12 @@ export function createStandalonePreviewMount(input: Readonly<{
 		}
 
 		const pluginsByType = new Map(plugins.map(p => [p.type, p] as const))
-		const system = createWidgetSystem({ plugins })
+		const created = createAdapterWidgetSystem(plugins, pluginPaths)
+		if (created.state === 'invalid') {
+			options.onStatusChange?.({ status: 'invalid', diagnostics: created.diagnostics })
+			return createNoopBridge()
+		}
+		const system = created.system
 
 		const dynamicCreate = createWidgetVueRenderer as unknown as (
 			sys: typeof system,
@@ -534,8 +553,11 @@ export function createStandalonePreviewMount(input: Readonly<{
 						.filter(member => typeof member.name === 'string')
 						.map(member => Object.freeze({ name: member.name, description: member.description })))
 				}
-				catch {
-					// An uninspectable plugin has no known declared Events.
+				catch (cause) {
+					// widget-core documents that inspectPlugin rejects a Plugin this module instance did not
+					// complete with `WidgetInspectionError`: such a plugin has no known declared Events.
+					// Any other exception is a defect and propagates.
+					if (!(cause instanceof WidgetInspectionError)) throw cause
 				}
 			}
 		}
