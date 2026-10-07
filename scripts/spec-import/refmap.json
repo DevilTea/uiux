@@ -3671,6 +3671,10 @@
 		"kind": "rule",
 		"id": "01a116f0-8ec3-7eff-9e61-4e1b3b31dabe"
 	},
+	"R.wb.ia.thread-link-chrome": {
+		"kind": "rule",
+		"id": "01a118a1-9e11-7933-9123-4ba03f0ac223"
+	},
 	"R.wb.ia.view-link": {
 		"kind": "rule",
 		"id": "01a116f0-8f4c-7fac-a46d-53d8dba61dfa"
@@ -3942,5 +3946,273 @@
 	"S.wb-personal": {
 		"kind": "story",
 		"id": "01a11203-db9c-7a59-ae9b-c5ce96a45825"
+	},
+	"SC.access.bootstrap": {
+		"kind": "scenario",
+		"id": "01a118a1-d172-7b56-928f-865be4bd8eca"
+	},
+	"SC.access.cli-revoke": {
+		"kind": "scenario",
+		"id": "01a118a1-d0de-704c-bb3b-6351ffdeb41c"
+	},
+	"SC.access.last-owner": {
+		"kind": "scenario",
+		"id": "01a118a1-d128-7e3e-bbe9-ffb29b33b7dc"
+	},
+	"SC.access.mcp-no-token": {
+		"kind": "scenario",
+		"id": "01a118a1-d08f-7cc3-8aa4-8620b0275126"
+	},
+	"SC.canvas.edge-indicator": {
+		"kind": "scenario",
+		"id": "01a118a1-d802-7320-b00b-d6d31d07c82b"
+	},
+	"SC.canvas.escape": {
+		"kind": "scenario",
+		"id": "01a118a1-d7b4-725a-b1d9-3f51e3e7a60d"
+	},
+	"SC.canvas.interact": {
+		"kind": "scenario",
+		"id": "01a118a1-d766-701e-aa68-2bacf0e9ff23"
+	},
+	"SC.chrome.independent": {
+		"kind": "scenario",
+		"id": "01a118a1-d870-72d9-91a6-4d93e364fd53"
+	},
+	"SC.cli.init": {
+		"kind": "scenario",
+		"id": "01a118a1-dbef-7660-92f6-c0b2aaf8afa6"
+	},
+	"SC.devices.phone-comment": {
+		"kind": "scenario",
+		"id": "01a118a1-d8c8-7fbf-9a85-6808c1093211"
+	},
+	"SC.flow.invalid-blocks": {
+		"kind": "scenario",
+		"id": "01a118a1-db9f-7e6d-b7e4-cdccec714b71"
+	},
+	"SC.gates.cross-origin": {
+		"kind": "scenario",
+		"id": "01a118a1-d1c0-7a3d-a1a4-0da7053995e3"
+	},
+	"SC.gates.loopback-bind": {
+		"kind": "scenario",
+		"id": "01a118a1-d20c-7436-b43a-45ccfba1cd04"
+	},
+	"SC.handoff.declined": {
+		"kind": "scenario",
+		"id": "01a118a1-da0d-7e87-b1c8-9c0a3de39e25"
+	},
+	"SC.handoff.fresh-evidence": {
+		"kind": "scenario",
+		"id": "01a118a1-d3f5-7ea8-875c-6ddf0ec00602"
+	},
+	"SC.handoff.outside-closure": {
+		"kind": "scenario",
+		"id": "01a118a1-d39b-741a-8a39-14bae7bf0508"
+	},
+	"SC.handoff.unresolved-blocks": {
+		"kind": "scenario",
+		"id": "01a118a1-d339-7660-8349-8e03e09f2d06"
+	},
+	"SC.i18n.fallback": {
+		"kind": "scenario",
+		"id": "01a118a1-d920-7a7e-bb19-34078f1935d3"
+	},
+	"SC.i18n.missing-parameters": {
+		"kind": "scenario",
+		"id": "01a118a1-d9be-7778-b52f-2a92ec1894d7"
+	},
+	"SC.i18n.unresolved": {
+		"kind": "scenario",
+		"id": "01a118a1-d96f-782e-91eb-8c0b3dd9b25c"
+	},
+	"SC.lan.default-token": {
+		"kind": "scenario",
+		"id": "01a118a1-d256-7164-88b3-cbd3b6357f04"
+	},
+	"SC.links.view-deep-link": {
+		"kind": "scenario",
+		"id": "01a118a1-d2a1-766b-97f0-baba462acce1"
+	},
+	"SC.mcp.actor-stamp": {
+		"kind": "scenario",
+		"id": "01a118a1-ce83-793e-bac7-4dc09b26d5f7"
+	},
+	"SC.mcp.create-view": {
+		"kind": "scenario",
+		"id": "01a118a1-cda6-722d-8865-81bf804e8bcb"
+	},
+	"SC.mcp.lease": {
+		"kind": "scenario",
+		"id": "01a118a1-ce37-7ca1-9313-deb0f3573829"
+	},
+	"SC.mcp.role-refusal": {
+		"kind": "scenario",
+		"id": "01a118a1-cecf-7786-88b9-6027d92adaeb"
+	},
+	"SC.mcp.stale-revision": {
+		"kind": "scenario",
+		"id": "01a118a1-cdee-7559-a1d7-c6c187cf22d8"
+	},
+	"SC.messages.edit-before-submission": {
+		"kind": "scenario",
+		"id": "01a118a1-cc85-70e7-b0d2-f55fd4acc0fe"
+	},
+	"SC.messages.frozen": {
+		"kind": "scenario",
+		"id": "01a118a1-ccce-75dc-af5d-a76b8509fdd2"
+	},
+	"SC.messages.reopen-frozen": {
+		"kind": "scenario",
+		"id": "01a118a1-d676-7df8-90e2-f0850e499f3a"
+	},
+	"SC.migration.blocked": {
+		"kind": "scenario",
+		"id": "01a118a1-cfab-7608-977a-15bc1920bb5f"
+	},
+	"SC.migration.dry-run": {
+		"kind": "scenario",
+		"id": "01a118a1-cff9-75ac-82b2-35c863ed571a"
+	},
+	"SC.migration.run": {
+		"kind": "scenario",
+		"id": "01a118a1-d046-7443-87a8-6f196b38fc19"
+	},
+	"SC.migration.server-hold": {
+		"kind": "scenario",
+		"id": "01a118a1-d716-70a2-833a-f04aedf27405"
+	},
+	"SC.proto.comment-suppresses": {
+		"kind": "scenario",
+		"id": "01a118a1-db51-78fe-9305-76dd3fdfc923"
+	},
+	"SC.proto.fresh-runtime": {
+		"kind": "scenario",
+		"id": "01a118a1-daab-7a6b-b713-4b0b9da3c1b9"
+	},
+	"SC.proto.one-transition": {
+		"kind": "scenario",
+		"id": "01a118a1-db00-7d21-bb91-ee768e218a05"
+	},
+	"SC.publication.no-authoring": {
+		"kind": "scenario",
+		"id": "01a118a1-da5b-7878-b6f6-a9273dd043b7"
+	},
+	"SC.publication.thread-free": {
+		"kind": "scenario",
+		"id": "01a118a1-d448-7643-a55c-cdbdcdb90a8f"
+	},
+	"SC.retract.agent": {
+		"kind": "scenario",
+		"id": "01a118a1-cd16-78ac-a1d9-4ca6456d9665"
+	},
+	"SC.retract.engaged": {
+		"kind": "scenario",
+		"id": "01a118a1-cd5d-7f72-9766-9371d29a3cf7"
+	},
+	"SC.retract.workbench": {
+		"kind": "scenario",
+		"id": "01a118a1-d6c7-701d-b126-873ad4245a92"
+	},
+	"SC.review.agent-submit": {
+		"kind": "scenario",
+		"id": "01a118a1-cac7-73e4-b219-2a9175ebcafb"
+	},
+	"SC.review.canvas-comment": {
+		"kind": "scenario",
+		"id": "01a118a1-c87d-77c5-9af7-5c2c460f2321"
+	},
+	"SC.review.decline": {
+		"kind": "scenario",
+		"id": "01a118a1-cba8-7370-a649-f6a76818feea"
+	},
+	"SC.review.deleted-widget": {
+		"kind": "scenario",
+		"id": "01a118a1-c957-733d-a0eb-a51b8f0bd277"
+	},
+	"SC.review.dismissed": {
+		"kind": "scenario",
+		"id": "01a118a1-d584-7aea-8fcb-0a0016664378"
+	},
+	"SC.review.duplicate-reason": {
+		"kind": "scenario",
+		"id": "01a118a1-d5d6-7c9c-8a7f-fad68fad0e5c"
+	},
+	"SC.review.http-resolve-bearer": {
+		"kind": "scenario",
+		"id": "01a118a1-ca7d-77a4-9375-125dcfa67cd2"
+	},
+	"SC.review.inbox-changed": {
+		"kind": "scenario",
+		"id": "01a118a1-c833-7b6e-b3b5-e115152dd913"
+	},
+	"SC.review.inbox-queue": {
+		"kind": "scenario",
+		"id": "01a118a1-c7d8-7d73-9c30-f45340617bfd"
+	},
+	"SC.review.mcp-resolve-refused": {
+		"kind": "scenario",
+		"id": "01a118a1-ca34-76b7-a960-fb5a6c1bb4ec"
+	},
+	"SC.review.one-click": {
+		"kind": "scenario",
+		"id": "01a118a1-c9ec-7b31-8e21-75b3a25719c4"
+	},
+	"SC.review.promote": {
+		"kind": "scenario",
+		"id": "01a118a1-cc3e-7f91-9034-5d4857c286a5"
+	},
+	"SC.review.promote-again": {
+		"kind": "scenario",
+		"id": "01a118a1-d4e9-7a62-9729-bb5a35f86034"
+	},
+	"SC.review.promote-target": {
+		"kind": "scenario",
+		"id": "01a118a1-d49c-7736-8c85-7d56f68f96e3"
+	},
+	"SC.review.reanchor-history": {
+		"kind": "scenario",
+		"id": "01a118a1-d626-762d-b680-24eda95a62ba"
+	},
+	"SC.review.reopen": {
+		"kind": "scenario",
+		"id": "01a118a1-cbf4-733f-9be3-5a6d0b9c3f88"
+	},
+	"SC.review.resolve-open-explicit": {
+		"kind": "scenario",
+		"id": "01a118a1-c9a2-7641-863b-1ff897f0da3d"
+	},
+	"SC.review.submit-stale-evidence": {
+		"kind": "scenario",
+		"id": "01a118a1-cb0e-7652-9217-db24913f0d37"
+	},
+	"SC.review.verify-default": {
+		"kind": "scenario",
+		"id": "01a118a1-cb58-7851-ab6d-0516317ef69a"
+	},
+	"SC.review.view-comment": {
+		"kind": "scenario",
+		"id": "01a118a1-c8c4-797e-94c6-52ce0c191c5b"
+	},
+	"SC.review.workspace-comment": {
+		"kind": "scenario",
+		"id": "01a118a1-c90b-7cb1-8b9e-69f6a6140a3b"
+	},
+	"SC.review.workspace-not-promotable": {
+		"kind": "scenario",
+		"id": "01a118a1-d536-75fb-b2fc-dce649bf32fc"
+	},
+	"SC.variants.invalid": {
+		"kind": "scenario",
+		"id": "01a118a1-d2ef-7ec3-9ce8-0eebc952502a"
+	},
+	"SC.wb.conflict-draft": {
+		"kind": "scenario",
+		"id": "01a118a1-cf18-799e-9d7c-8b13c9d15086"
+	},
+	"SC.ws.impact-ack": {
+		"kind": "scenario",
+		"id": "01a118a1-cf62-7dc1-9ab5-4afd79e576f0"
 	}
 }
