@@ -49,13 +49,14 @@ Figma comments sit on pixels of a drawing. Here, a Figma-like comment sits on a 
 - **Local, single process.** `uiux init --workspace <dir>` creates a Workspace at the current schema (`schemaVersion` 3) and `uiux dev --workspace <dir>` starts one Nitro process on loopback only (`127.0.0.1`). It serves the Workbench SPA (`ssr: false`), `/api/*`, `/mcp` and the Preview host for one selected Workspace. There is no cloud and no network dependency. The Workspace may or may not be in Git.
 - **Access.** Every `/api/*` and `/mcp` request needs a credential: a Workbench session (from a one-time sign-in link) or a bearer token. Each Workspace has a host-local roster of members, tokens, invites and sessions under `$UIUX_HOME`, managed with `uiux member|token|invite|session ... --workspace <dir>` (`uiux access copy` carries a roster to a moved Workspace) or, for Owners, on the Workbench Members page. The first start of a Workspace creates its Owner and prints a sign-in link. Roles are cumulative: Viewer ⊂ Reviewer ⊂ Editor ⊂ Owner; agents are capped at Editor.
 - **Older Workspaces.** `uiux migrate --workspace <dir> [--dry-run]` upgrades an older Workspace to `schemaVersion` 3 (steps `uiux.v1-to-v2`, then `uiux.v2-to-v3`). Migration is CLI-only; until it runs, the Workbench opens the Workspace read-only and names the command.
-- **Side by side with an agent session.** A developer usually has an agent authoring through MCP in another window. Reviewers return to the Workbench to inspect the result. Refresh is manual today, and live push of agent edits is not built.
-- **Team sharing happens through one host's roster, the Workspace files** (typically Git) **and the published static site.** Several members can use the same server, each signed in with their own credential, but the server listens on loopback only, so other devices cannot reach it yet. See Undecided.
+- **Side by side with an agent session.** A developer usually has an agent authoring through MCP in another window. Reviewers return to the Workbench to inspect the result. Refresh is manual today; live push of agent edits is accepted but not built (issue #69).
+- **Team sharing happens through one host's roster, the Workspace files** (typically Git) **and the published static site.** Several members can use the same server, each signed in with their own credential, but the server listens on loopback only, so other devices cannot reach it yet; the opt-in LAN listener is accepted but not built (issue #68).
 - **Published, read-only mode.** `uiux publish --workspace <dir> --out <dir> [--base <path>] [--source-revision <rev>]` produces a static interactive site with authoring and review mutations removed. This repository dogfoods it at https://deviltea.github.io/uiux/.
 - **Devices.**
   - **Desktop** (FHD 1920×1080 is primary) gets everything: authoring, review, evidence, Handoff.
-  - **Tablet** (1024×768) gets review: canvas, comments, resolve and reopen, UX Flows and the Prototype player. Structural editing stays on desktop.
+  - **Tablet** (1024×768) gets review: canvas, comments, resolve and reopen, UX Flows and the Prototype player, plus Handoff export. Structural editing stays on desktop.
   - **Mobile** (390×844) gets reading the Spec plus triaging and replying to comments. There is no structural editing, and new canvas comments are not started on a phone.
+  - The normative device Rules are in `.spec/`; finer tier details (for example where formal capture or Handoff export is offered) and the breakpoint values follow the code and are not normative.
 - **Two independent sets of context.**
   - The Workbench chrome has its own UI language and its own light/dark theme. The UI language follows the browser and can be switched manually between en-US and zh-TW.
   - The previewed View has its own render context: Variant, plus the Workspace-defined locale, viewport and theme keys.
@@ -67,6 +68,8 @@ Figma comments sit on pixels of a drawing. Here, a Figma-like comment sits on a 
   - Checks run, formal evidence is captured, readiness is assessed, and Handoff is exported.
 
 ## Capabilities and Constraints
+
+The normative domain behavior and external contracts live in `.spec/` (Stories, Features and Rules, Contracts and Clauses, Scenarios); this section summarizes them, and `.spec/` wins where they differ.
 
 **Built today (from `app/`):**
 
@@ -82,7 +85,10 @@ Figma comments sit on pixels of a drawing. Here, a Figma-like comment sits on a 
 
 **Accepted in architecture, not yet built:**
 
-- the Component Catalog as a secondary area.
+- the Component Catalog as a secondary area;
+- the opt-in LAN listener for reviewing from other devices (issue #68);
+- live change notifications when agents write, so the Workbench refreshes on its own (issue #69);
+- Review threads that record the render context they were written in and show it in the thread header (Part 7).
 
 **Binding constraints:**
 
@@ -92,7 +98,7 @@ Figma comments sit on pixels of a drawing. Here, a Figma-like comment sits on a 
 - A message's author may edit it until a later submission or resolution; every earlier version is kept on the message. An author may delete their own brand-new thread until someone engages; after that it can only be dismissed.
 - Only a human, signed in to the Workbench, may resolve. Resolving as `verified` must reference the thread's current `ready-for-review` submission. An `open` thread can be resolved directly only without a verified change: Answered, or dismissed as Won't do, Duplicate (with a reason) or No longer relevant.
 - Mutations go through the shared domain services: the same semantics as MCP and HTTP, with `expectedRevision` conflicts surfaced to the user.
-- Stack: Nuxt 4 SPA, Nuxt UI 4, Tailwind CSS 4, a Nitro server, Lucide icons through Iconify, `@nuxtjs/i18n` for chrome strings, Node 24, pnpm. One public package. Nuxt UI components are used wherever one exists. No new Workspace schemas or external contracts without an accepted architecture decision.
+- Stack: Nuxt 4 SPA, Nuxt UI 4, Tailwind CSS 4, a Nitro server, Lucide icons through Iconify, `@nuxtjs/i18n` for chrome strings, Node 24, pnpm. One public package. Nuxt UI components are used wherever one exists. No new Workspace schemas or external contracts without an accepted architecture decision, that is, a merged `.spec/` change backed by an accepted Discussion decision.
 
 **Terminology** (canonical): Workspace, View, Variant, Widget, RootShell (`root`), View IR, View Spec, Decision (`pending` / `decided` / `deferred`), Review thread (`open` / `ready-for-review` / `resolved`), anchor, re-anchor, UX Flow, step, transition, Prototype, render context (Variant × locale × viewport × theme), Checks, formal Evidence, capture, artifact, Assets, Adapter, Catalog, Handoff, `implementation-ready`.
 
@@ -100,8 +106,6 @@ Figma comments sit on pixels of a drawing. Here, a Figma-like comment sits on a 
 
 **Undecided:**
 
-- **Reaching the server from other devices.** Several named members can already review on one host (roster, roles, sessions and tokens), but tablet or mobile review needs a device to reach the server, and `uiux dev` listens on loopback only. Until LAN or hosted exposure is decided, reviewers either run `uiux dev` locally against a shared (Git) Workspace or read the published site.
-- Live updates when agents write. Part 1 allows future ephemeral change notifications, but none is specified.
 - "What changed" beyond "updated since you last looked": showing a real diff needs revision history, which the Workspace model does not provide.
 
 ## Brand Commitments
@@ -116,7 +120,7 @@ Figma comments sit on pixels of a drawing. Here, a Figma-like comment sits on a 
 - Dogfood Workspace `design/`: 4 Views ("UIUX Workbench — Workspace browser", "Overview & readiness", "Reviews inbox", "Sign-in"), 2 UX Flows, 6 Review threads, 1 Asset, locales `en-US` and `zh-TW`, themes `dark` and `light`, viewport presets `desktop` (1920×1080), `tablet` (1024×768) and `mobile` (390×844), reference adapter `design/adapters/reference.ts`.
 - Screenshots of an earlier Workbench: `docs/pr-48/01-workbench-overview.png` to `05-handoff-export.png`.
 - Live published spec: https://deviltea.github.io/uiux/
-- Canonical architecture record: GitHub Discussions #1–#10. Implementation workstreams: Issues #11–#29.
+- Behavioral requirements and external contracts: `.spec/` in this repository, the authority (Stories, Features and Rules, Contracts and Clauses, Scenarios). Decision rationale and history: GitHub Discussions #1–#10, frozen. Implementation workstreams: Issues #11–#29.
 - **Absent, so future work must not fabricate:** users, customers, testimonials, usage metrics, pricing or licensing claims, a logo or wordmark, and revision history or diffs.
 
 ## Product Principles
