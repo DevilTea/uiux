@@ -1,4 +1,88 @@
 {
+	"C.access": {
+		"kind": "contract",
+		"id": "01a11485-f4a9-7c81-b343-45b72953a048"
+	},
+	"C.access.actor-stamp": {
+		"kind": "clause",
+		"id": "01a11485-faeb-746c-ba4f-2169765099fe"
+	},
+	"C.access.auth-failures": {
+		"kind": "clause",
+		"id": "01a11485-f999-7aea-86eb-51121a341c8b"
+	},
+	"C.access.credential-acceptance": {
+		"kind": "clause",
+		"id": "01a11485-f978-767a-b977-33028aee7ae7"
+	},
+	"C.access.credential-format": {
+		"kind": "clause",
+		"id": "01a11485-f8d7-7285-97bc-7aff3a1c26e4"
+	},
+	"C.access.credential-hash": {
+		"kind": "clause",
+		"id": "01a11485-f8f6-79b4-a8f2-650421c6cf72"
+	},
+	"C.access.editor": {
+		"kind": "clause",
+		"id": "01a11485-fa44-7b6a-99f8-de4e1e8edcfc"
+	},
+	"C.access.gate-refusals": {
+		"kind": "clause",
+		"id": "01a11485-f9df-73d4-9f47-85c9d559360c"
+	},
+	"C.access.locks-route": {
+		"kind": "clause",
+		"id": "01a11485-faca-7d6a-8d22-e7dc84140478"
+	},
+	"C.access.member-record": {
+		"kind": "clause",
+		"id": "01a11485-f8b6-7b96-aa48-e6ff70b3facd"
+	},
+	"C.access.owner": {
+		"kind": "clause",
+		"id": "01a11485-fa66-7cde-a10f-b8b796d01469"
+	},
+	"C.access.public-icons": {
+		"kind": "clause",
+		"id": "01a11485-f958-7a99-9970-07cefeb5a51b"
+	},
+	"C.access.public-routes": {
+		"kind": "clause",
+		"id": "01a11485-f936-7705-aa82-d2918fccd0ed"
+	},
+	"C.access.resolve": {
+		"kind": "clause",
+		"id": "01a11485-fa87-7cf8-8ec1-275793457228"
+	},
+	"C.access.reviewer": {
+		"kind": "clause",
+		"id": "01a11485-fa21-7b77-8ae5-1d7d0618e8a3"
+	},
+	"C.access.scope-denied": {
+		"kind": "clause",
+		"id": "01a11485-f9bd-78a3-a1d0-1b4f64e9883e"
+	},
+	"C.access.session-cookie": {
+		"kind": "clause",
+		"id": "01a11485-f916-7e0c-b6c3-19c0c0b199d2"
+	},
+	"C.access.session-routes": {
+		"kind": "clause",
+		"id": "01a11485-faa9-74fe-8e0a-068cd770ff1c"
+	},
+	"C.access.store-format": {
+		"kind": "clause",
+		"id": "01a11485-f895-7a0c-94d1-ed2b9cb092a9"
+	},
+	"C.access.store-location": {
+		"kind": "clause",
+		"id": "01a11485-f874-73b4-8b0f-2295c21e9085"
+	},
+	"C.access.viewer": {
+		"kind": "clause",
+		"id": "01a11485-fa00-72da-bc46-98302a3c106e"
+	},
 	"C.cli": {
 		"kind": "contract",
 		"id": "01a1144e-52fc-74e6-a7bc-e415c8ab168d"
@@ -14,6 +98,10 @@
 	"C.cli.dev": {
 		"kind": "clause",
 		"id": "01a1144e-55d6-75be-9a8d-f95d25cc5fbc"
+	},
+	"C.cli.dev-lan": {
+		"kind": "clause",
+		"id": "01a11485-bce9-7622-90ba-7dac5592f808"
 	},
 	"C.cli.dev-loopback": {
 		"kind": "clause",
@@ -70,6 +158,130 @@
 	"C.cli.uiux-home": {
 		"kind": "clause",
 		"id": "01a1144e-5649-7ba2-bb90-ad49658f0400"
+	},
+	"C.mcp": {
+		"kind": "contract",
+		"id": "01a11485-f48a-7500-a24f-4febb2061ab2"
+	},
+	"C.mcp.asset-tools": {
+		"kind": "clause",
+		"id": "01a11485-f7ce-7774-96d2-24d2da5356b2"
+	},
+	"C.mcp.bearer": {
+		"kind": "clause",
+		"id": "01a11485-f66d-71ab-b716-e4991817d778"
+	},
+	"C.mcp.discovery-tools": {
+		"kind": "clause",
+		"id": "01a11485-f728-768d-a972-a052c45b50f4"
+	},
+	"C.mcp.endpoint": {
+		"kind": "clause",
+		"id": "01a11485-f64f-7a62-967f-b7517052f18e"
+	},
+	"C.mcp.evidence-handoff-tools": {
+		"kind": "clause",
+		"id": "01a11485-f82f-734d-aeda-39c377b55f46"
+	},
+	"C.mcp.flow-tools": {
+		"kind": "clause",
+		"id": "01a11485-f7a8-740a-883e-e5750e845a76"
+	},
+	"C.mcp.instructions": {
+		"kind": "clause",
+		"id": "01a11485-f6ea-7918-bd58-0cdca6d0c432"
+	},
+	"C.mcp.lan": {
+		"kind": "clause",
+		"id": "01a11485-f6ca-7454-9c06-965899fca8b4"
+	},
+	"C.mcp.lease-tools": {
+		"kind": "clause",
+		"id": "01a11485-f850-7fd6-a3b9-86fa2b955dca"
+	},
+	"C.mcp.locale-tools": {
+		"kind": "clause",
+		"id": "01a11485-f788-728e-8408-65232b43fa1f"
+	},
+	"C.mcp.no-oauth": {
+		"kind": "clause",
+		"id": "01a11485-f6ac-731b-955d-6d0dae97e527"
+	},
+	"C.mcp.resolve-refused": {
+		"kind": "clause",
+		"id": "01a11485-f80f-77c2-8cb3-eaf9a09bdf57"
+	},
+	"C.mcp.resources": {
+		"kind": "clause",
+		"id": "01a11485-f70a-7d29-9b48-e7df3e634a54"
+	},
+	"C.mcp.review-tools": {
+		"kind": "clause",
+		"id": "01a11485-f7ee-7102-a12c-694efaeb6d28"
+	},
+	"C.mcp.settings-tool": {
+		"kind": "clause",
+		"id": "01a11485-f769-727c-8eda-c33cff801911"
+	},
+	"C.mcp.unauthenticated": {
+		"kind": "clause",
+		"id": "01a11485-f68c-7754-908d-9237b1259327"
+	},
+	"C.mcp.view-tools": {
+		"kind": "clause",
+		"id": "01a11485-f748-7f7d-9b31-6afecb20ba4b"
+	},
+	"C.mutation-semantics": {
+		"kind": "contract",
+		"id": "01a11485-f46d-773b-b935-2856e1ee2d54"
+	},
+	"C.mutation-semantics.change-summary": {
+		"kind": "clause",
+		"id": "01a11485-f578-79a7-9d01-4bc233f2c1cb"
+	},
+	"C.mutation-semantics.conflict": {
+		"kind": "clause",
+		"id": "01a11485-f53a-7cde-94d9-eddaf72cf88d"
+	},
+	"C.mutation-semantics.create": {
+		"kind": "clause",
+		"id": "01a11485-f51c-7287-9b04-15b9d5a77238"
+	},
+	"C.mutation-semantics.expected-revision": {
+		"kind": "clause",
+		"id": "01a11485-f4fe-7329-9ac4-3fad1651a13b"
+	},
+	"C.mutation-semantics.http": {
+		"kind": "clause",
+		"id": "01a11485-f5f2-7e77-b32e-b2214e47b8d2"
+	},
+	"C.mutation-semantics.locked-result": {
+		"kind": "clause",
+		"id": "01a11485-f5d4-7950-b476-b471d961f332"
+	},
+	"C.mutation-semantics.mcp": {
+		"kind": "clause",
+		"id": "01a11485-f610-78a7-a21a-d8c96d35e00e"
+	},
+	"C.mutation-semantics.no-merge": {
+		"kind": "clause",
+		"id": "01a11485-f597-789e-b44b-a48a5582b62d"
+	},
+	"C.mutation-semantics.parity": {
+		"kind": "clause",
+		"id": "01a11485-f630-7a2c-8406-0497fa56d31b"
+	},
+	"C.mutation-semantics.refusal-statuses": {
+		"kind": "clause",
+		"id": "01a11485-f5b6-77e1-b3bf-2a70ad33cc94"
+	},
+	"C.mutation-semantics.revision": {
+		"kind": "clause",
+		"id": "01a11485-f4de-7bde-82f7-cbd5a550a7e7"
+	},
+	"C.mutation-semantics.success": {
+		"kind": "clause",
+		"id": "01a11485-f55a-708e-baf7-9195d6514efc"
 	},
 	"C.ws-format": {
 		"kind": "contract",
@@ -359,6 +571,346 @@
 		"kind": "feature",
 		"id": "01a111e4-0135-7805-b66f-f2acc1730ed2"
 	},
+	"R.access.actor.guarantee": {
+		"kind": "rule",
+		"id": "01a11485-f1a0-7a4c-90d5-971d6d7ddfc6"
+	},
+	"R.access.actor.history": {
+		"kind": "rule",
+		"id": "01a11485-f185-7c23-8f2a-e045a279cd27"
+	},
+	"R.access.actor.ignored-input": {
+		"kind": "rule",
+		"id": "01a11485-f14e-74bd-be57-c20e26ca047b"
+	},
+	"R.access.actor.stamped": {
+		"kind": "rule",
+		"id": "01a11485-f134-71cb-ba9a-9b5709e092dc"
+	},
+	"R.access.actor.time": {
+		"kind": "rule",
+		"id": "01a11485-f16a-7ca9-be79-a573298d4d23"
+	},
+	"R.access.credentials.agent-token": {
+		"kind": "rule",
+		"id": "01a11485-ec2a-7f06-aa9d-895690f2ca5a"
+	},
+	"R.access.credentials.browser-sign-in": {
+		"kind": "rule",
+		"id": "01a11485-ebf7-78e7-9f43-706ca3c964e4"
+	},
+	"R.access.credentials.current-role": {
+		"kind": "rule",
+		"id": "01a11485-ebdd-70fc-b853-0621caf056b8"
+	},
+	"R.access.credentials.hash-only": {
+		"kind": "rule",
+		"id": "01a11485-ec61-7124-bb2b-8f0f5ebae011"
+	},
+	"R.access.credentials.invite-human": {
+		"kind": "rule",
+		"id": "01a11485-ec95-764f-b06a-044cd83a0b2b"
+	},
+	"R.access.credentials.lifetimes": {
+		"kind": "rule",
+		"id": "01a11485-ec7b-725c-bcc9-e7c6c7cefc11"
+	},
+	"R.access.credentials.loopback-browser": {
+		"kind": "rule",
+		"id": "01a11485-ec11-7d76-8099-c1327d7309ac"
+	},
+	"R.access.credentials.mcp-attempts": {
+		"kind": "rule",
+		"id": "01a11485-ed7e-7866-bec2-6deca0ec6cb1"
+	},
+	"R.access.credentials.member-chip": {
+		"kind": "rule",
+		"id": "01a11485-ed98-7754-a733-343921659920"
+	},
+	"R.access.credentials.no-secrets-in-logs": {
+		"kind": "rule",
+		"id": "01a11485-ed17-791a-a30e-1b63fa6f16ce"
+	},
+	"R.access.credentials.rate-limit": {
+		"kind": "rule",
+		"id": "01a11485-ece4-7040-b84f-89480790c649"
+	},
+	"R.access.credentials.rate-limit-distinct": {
+		"kind": "rule",
+		"id": "01a11485-ecfe-7194-9052-c86b0f55ad0d"
+	},
+	"R.access.credentials.required": {
+		"kind": "rule",
+		"id": "01a11485-ebc1-7a42-ab81-c12b6bb7903f"
+	},
+	"R.access.credentials.revocation": {
+		"kind": "rule",
+		"id": "01a11485-ecae-7f98-b096-39e37aae98df"
+	},
+	"R.access.credentials.session-origin": {
+		"kind": "rule",
+		"id": "01a11485-ed4a-766b-a51c-af2b9ffb1fcb"
+	},
+	"R.access.credentials.system-principals": {
+		"kind": "rule",
+		"id": "01a11485-ed64-76e9-8371-3ac0e120dbdf"
+	},
+	"R.access.credentials.uniform-failure": {
+		"kind": "rule",
+		"id": "01a11485-ecca-79f2-9af5-314f03912bc4"
+	},
+	"R.access.credentials.usage": {
+		"kind": "rule",
+		"id": "01a11485-ed31-7151-ba49-afe20baa376e"
+	},
+	"R.access.credentials.workspace-bound": {
+		"kind": "rule",
+		"id": "01a11485-ec45-7f54-b039-2a331c571f9e"
+	},
+	"R.access.gates.cross-origin": {
+		"kind": "rule",
+		"id": "01a11485-ee00-76be-b967-5a2f1c1661b2"
+	},
+	"R.access.gates.framing": {
+		"kind": "rule",
+		"id": "01a11485-ee6b-77ca-903d-34da460f2051"
+	},
+	"R.access.gates.host": {
+		"kind": "rule",
+		"id": "01a11485-edcc-75f5-ba60-ad152a59ab23"
+	},
+	"R.access.gates.json-body": {
+		"kind": "rule",
+		"id": "01a11485-ee35-7e27-8a06-7b4a26628010"
+	},
+	"R.access.gates.lan-host": {
+		"kind": "rule",
+		"id": "01a11485-ede6-76bd-bcde-22bf91334ee5"
+	},
+	"R.access.gates.lan-origin": {
+		"kind": "rule",
+		"id": "01a11485-ee1a-7a4e-96e9-22c8ef7b2a89"
+	},
+	"R.access.gates.no-cors": {
+		"kind": "rule",
+		"id": "01a11485-ee51-7ec6-a387-cd215d6cf161"
+	},
+	"R.access.gates.order": {
+		"kind": "rule",
+		"id": "01a11485-edb2-77bb-9dc8-730c02deefb0"
+	},
+	"R.access.gates.packaged-server": {
+		"kind": "rule",
+		"id": "01a11485-ee85-7844-b82f-fd6a7cebb763"
+	},
+	"R.access.lan.admin-loopback": {
+		"kind": "rule",
+		"id": "01a11485-eef1-76e5-aec0-775c506bf67d"
+	},
+	"R.access.lan.capture-loopback": {
+		"kind": "rule",
+		"id": "01a11485-ef7e-79ee-abc1-92bcdf6b3ce7"
+	},
+	"R.access.lan.insecure-context": {
+		"kind": "rule",
+		"id": "01a11485-ef9a-7f3f-87ee-32800ddbbb76"
+	},
+	"R.access.lan.plain-http-warning": {
+		"kind": "rule",
+		"id": "01a11485-ef46-720c-8405-46167fc7cf10"
+	},
+	"R.access.lan.role-decides": {
+		"kind": "rule",
+		"id": "01a11485-eed5-7766-8a8b-b932f96d03b0"
+	},
+	"R.access.lan.second-listener": {
+		"kind": "rule",
+		"id": "01a11485-eea0-73cc-9a95-28bde12056ae"
+	},
+	"R.access.lan.token-flag": {
+		"kind": "rule",
+		"id": "01a11485-ef0e-7dd9-990b-457db879c039"
+	},
+	"R.access.lan.transport": {
+		"kind": "rule",
+		"id": "01a11485-ef28-754a-b8bf-a2f97a6563fc"
+	},
+	"R.access.lan.trust-by-listener": {
+		"kind": "rule",
+		"id": "01a11485-eeba-7d19-a2bf-d117734bac87"
+	},
+	"R.access.lan.urls": {
+		"kind": "rule",
+		"id": "01a11485-ef62-772e-a71e-6657bf209141"
+	},
+	"R.access.leases.auto-acquire": {
+		"kind": "rule",
+		"id": "01a11485-f020-74e0-b721-b4d6a5d15195"
+	},
+	"R.access.leases.cas": {
+		"kind": "rule",
+		"id": "01a11485-f0aa-7377-9d2c-fb24b8231a1c"
+	},
+	"R.access.leases.check": {
+		"kind": "rule",
+		"id": "01a11485-f005-7f10-baf7-58cb17e5d0e1"
+	},
+	"R.access.leases.holder": {
+		"kind": "rule",
+		"id": "01a11485-efd1-7961-9940-785dfc0343d1"
+	},
+	"R.access.leases.lockable": {
+		"kind": "rule",
+		"id": "01a11485-efb6-7a68-a726-0f1875b8d015"
+	},
+	"R.access.leases.no-lease-on-failure": {
+		"kind": "rule",
+		"id": "01a11485-f058-7090-a644-51ac8d3afae3"
+	},
+	"R.access.leases.owner-not-exempt": {
+		"kind": "rule",
+		"id": "01a11485-f08f-794c-a12e-e4ef11b60240"
+	},
+	"R.access.leases.recipe": {
+		"kind": "rule",
+		"id": "01a11485-f0fc-7fd8-ab97-3b7dc3ab87d8"
+	},
+	"R.access.leases.release": {
+		"kind": "rule",
+		"id": "01a11485-f074-7d3c-80f4-f4ced35ef8f2"
+	},
+	"R.access.leases.renew": {
+		"kind": "rule",
+		"id": "01a11485-f03b-720c-8c70-adcb13c1e05e"
+	},
+	"R.access.leases.ttl": {
+		"kind": "rule",
+		"id": "01a11485-efeb-72ce-9e6e-95695ce93405"
+	},
+	"R.access.leases.workbench": {
+		"kind": "rule",
+		"id": "01a11485-f118-764c-ab2b-1b54b4270625"
+	},
+	"R.access.roster.agent-cap": {
+		"kind": "rule",
+		"id": "01a11485-eac6-730b-b66b-309cc9efb169"
+	},
+	"R.access.roster.bootstrap": {
+		"kind": "rule",
+		"id": "01a11485-eb1a-77fb-a91e-b54c505344da"
+	},
+	"R.access.roster.copy-independent": {
+		"kind": "rule",
+		"id": "01a11485-eb50-7f42-85c4-6e524cb9c4b4"
+	},
+	"R.access.roster.cumulative-roles": {
+		"kind": "rule",
+		"id": "01a11485-eaac-7523-998b-26123d7618df"
+	},
+	"R.access.roster.host-local": {
+		"kind": "rule",
+		"id": "01a11485-ea1b-7014-9111-62ca6c243342"
+	},
+	"R.access.roster.last-owner": {
+		"kind": "rule",
+		"id": "01a11485-eae3-7080-8f02-da27fc260e09"
+	},
+	"R.access.roster.live-reload": {
+		"kind": "rule",
+		"id": "01a11485-ea58-782e-9789-138833c868d9"
+	},
+	"R.access.roster.member-kind": {
+		"kind": "rule",
+		"id": "01a11485-ea75-7964-bc21-29aa78049abf"
+	},
+	"R.access.roster.member-removal": {
+		"kind": "rule",
+		"id": "01a11485-eaff-7339-91f9-10e9ea614b5b"
+	},
+	"R.access.roster.members-page": {
+		"kind": "rule",
+		"id": "01a11485-eb86-7a69-bf1b-70d492ee3be4"
+	},
+	"R.access.roster.moves": {
+		"kind": "rule",
+		"id": "01a11485-eb35-70b8-8c6b-b975f20f5b29"
+	},
+	"R.access.roster.per-workspace": {
+		"kind": "rule",
+		"id": "01a11485-e9f5-79d8-a517-9d7e01321188"
+	},
+	"R.access.roster.rename": {
+		"kind": "rule",
+		"id": "01a11485-ea91-7107-b02e-f3db764e6d86"
+	},
+	"R.access.roster.role-aware-ui": {
+		"kind": "rule",
+		"id": "01a11485-eba3-7c07-a94f-0d69e610a0b6"
+	},
+	"R.access.roster.root-visible": {
+		"kind": "rule",
+		"id": "01a11485-eb6b-724e-b1cc-3f2bc59367e4"
+	},
+	"R.access.roster.store-safety": {
+		"kind": "rule",
+		"id": "01a11485-ea39-7069-abc5-410b7576f445"
+	},
+	"R.mcp.discovery.compact-lists": {
+		"kind": "rule",
+		"id": "01a11485-f1f1-701d-abb1-272282b96438"
+	},
+	"R.mcp.discovery.detail-expansion": {
+		"kind": "rule",
+		"id": "01a11485-f20c-78cb-9984-be1d9c8b0888"
+	},
+	"R.mcp.discovery.instructions": {
+		"kind": "rule",
+		"id": "01a11485-f227-7474-9203-1caf9c38c98b"
+	},
+	"R.mcp.discovery.resources-vs-tools": {
+		"kind": "rule",
+		"id": "01a11485-f1ba-7e93-9f3e-081ca9e98495"
+	},
+	"R.mcp.discovery.stable-tools": {
+		"kind": "rule",
+		"id": "01a11485-f247-7f43-abda-bbee6e390892"
+	},
+	"R.mcp.discovery.uri-scope": {
+		"kind": "rule",
+		"id": "01a11485-f1d5-74a0-927f-dd59d83ebfee"
+	},
+	"R.publication.base-path": {
+		"kind": "rule",
+		"id": "01a11485-f2f5-7bff-830b-31298b3c35b9"
+	},
+	"R.publication.content-identity": {
+		"kind": "rule",
+		"id": "01a11485-f2d9-7683-bea5-efb830bcf52f"
+	},
+	"R.publication.no-access-data": {
+		"kind": "rule",
+		"id": "01a11485-f312-7a04-a02c-d014558bcbb0"
+	},
+	"R.publication.no-authoring": {
+		"kind": "rule",
+		"id": "01a11485-f27f-7224-a85f-989e56f91f41"
+	},
+	"R.publication.no-host-roster": {
+		"kind": "rule",
+		"id": "01a11485-f32e-7e9b-bafc-995a9f5f40bb"
+	},
+	"R.publication.portable-site": {
+		"kind": "rule",
+		"id": "01a11485-f262-7f14-a844-0899239eeeb9"
+	},
+	"R.publication.readiness-counts": {
+		"kind": "rule",
+		"id": "01a11485-f2bd-7bd9-9dee-077f88f44fe1"
+	},
+	"R.publication.thread-free": {
+		"kind": "rule",
+		"id": "01a11485-f29e-7e71-a3b6-030a1dd80781"
+	},
 	"R.view.authoring.author-writable-state": {
 		"kind": "rule",
 		"id": "01a1144e-5188-7a95-867c-d7e45487ebf8"
@@ -370,6 +922,14 @@
 	"R.view.authoring.feature-tag": {
 		"kind": "rule",
 		"id": "01a1144e-51d6-7b17-8ef7-986d00f937e2"
+	},
+	"R.view.authoring.feature-tag-no-entity": {
+		"kind": "rule",
+		"id": "01a11485-bbd5-70c1-ae04-cae536321fe7"
+	},
+	"R.view.authoring.feature-tag-regroup": {
+		"kind": "rule",
+		"id": "01a11485-bbef-7485-80ed-791fe9b3bc5e"
 	},
 	"R.view.authoring.name": {
 		"kind": "rule",
@@ -451,6 +1011,46 @@
 		"kind": "rule",
 		"id": "01a1144e-51e9-7e11-94c0-816baab9e0d6"
 	},
+	"R.wb.live.all-commits": {
+		"kind": "rule",
+		"id": "01a11485-f3bb-760b-9132-0e8c2f6bbf43"
+	},
+	"R.wb.live.conflict": {
+		"kind": "rule",
+		"id": "01a11485-f451-72eb-81ad-686aeec7b3eb"
+	},
+	"R.wb.live.content-free": {
+		"kind": "rule",
+		"id": "01a11485-f382-7307-b0c1-a1947715cf03"
+	},
+	"R.wb.live.events": {
+		"kind": "rule",
+		"id": "01a11485-f365-70ce-82d9-43ea3f5ea5bb"
+	},
+	"R.wb.live.fallback": {
+		"kind": "rule",
+		"id": "01a11485-f3d9-7663-b344-a60c2a949e5e"
+	},
+	"R.wb.live.limits": {
+		"kind": "rule",
+		"id": "01a11485-f3f6-72df-b43a-91905eb4970c"
+	},
+	"R.wb.live.no-replay": {
+		"kind": "rule",
+		"id": "01a11485-f39f-7464-9f8f-608335ed9800"
+	},
+	"R.wb.live.remote-change": {
+		"kind": "rule",
+		"id": "01a11485-f414-7882-b94f-cd4236c26d89"
+	},
+	"R.wb.live.remote-change-draft": {
+		"kind": "rule",
+		"id": "01a11485-f434-75ed-ab0a-e321468c8407"
+	},
+	"R.wb.live.stream": {
+		"kind": "rule",
+		"id": "01a11485-f34a-7c7e-a69c-fba14914d62d"
+	},
 	"R.ws.layout.flat-views": {
 		"kind": "rule",
 		"id": "01a1144e-4f63-74af-a597-6d9689631960"
@@ -462,6 +1062,10 @@
 	"R.ws.layout.labels": {
 		"kind": "rule",
 		"id": "01a1144e-4fa5-7ff4-aeb0-1278a85f188b"
+	},
+	"R.ws.layout.location": {
+		"kind": "rule",
+		"id": "01a11485-bb2c-7aba-a540-d762feff6573"
 	},
 	"R.ws.layout.no-product-install": {
 		"kind": "rule",
@@ -522,6 +1126,10 @@
 	"R.ws.migration.v1-to-v2": {
 		"kind": "rule",
 		"id": "01a1144e-502f-7a30-bf11-69d72ea164db"
+	},
+	"R.ws.migration.v1-to-v2-no-hints": {
+		"kind": "rule",
+		"id": "01a11485-bb6d-7579-a7c4-592945041d6f"
 	},
 	"R.ws.migration.v2-to-v3": {
 		"kind": "rule",
