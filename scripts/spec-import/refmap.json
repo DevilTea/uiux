@@ -199,6 +199,10 @@
 		"kind": "clause",
 		"id": "01a115cd-d372-7777-b286-8f9266a04828"
 	},
+	"C.adapter.shared-widget-core": {
+		"kind": "clause",
+		"id": "01a116f0-cae2-7c64-9c76-d472f252789a"
+	},
 	"C.adapter.t-result": {
 		"kind": "clause",
 		"id": "01a115cd-d3e2-7353-869d-ab3bf43c24df"
@@ -750,6 +754,30 @@
 	"C.preview-protocol.zero-area": {
 		"kind": "clause",
 		"id": "01a11658-2b13-76fd-a5e7-88542b59b08a"
+	},
+	"C.wb-links": {
+		"kind": "contract",
+		"id": "01a116f0-9683-76ae-b59d-c720e3064f5c"
+	},
+	"C.wb-links.inbox": {
+		"kind": "clause",
+		"id": "01a116f0-980d-7515-8038-a086bf30d7f3"
+	},
+	"C.wb-links.overview-tab": {
+		"kind": "clause",
+		"id": "01a116f0-96ef-700e-8dc6-e6ffbe41d15d"
+	},
+	"C.wb-links.retired": {
+		"kind": "clause",
+		"id": "01a116f0-9739-754b-b024-346b1c16a866"
+	},
+	"C.wb-links.settings-section": {
+		"kind": "clause",
+		"id": "01a116f0-9782-7640-865e-c340df7b06b0"
+	},
+	"C.wb-links.view": {
+		"kind": "clause",
+		"id": "01a116f0-97c8-7f7b-93d6-86568b177cae"
 	},
 	"C.ws-format": {
 		"kind": "contract",
@@ -2455,6 +2483,10 @@
 		"kind": "rule",
 		"id": "01a11687-33ee-716f-8463-5979a0af83df"
 	},
+	"R.preview.geometry.not-recoverable": {
+		"kind": "rule",
+		"id": "01a116f0-1f04-7e75-9d89-75af1641a6a8"
+	},
 	"R.preview.geometry.occluder-baseline": {
 		"kind": "rule",
 		"id": "01a11687-3297-7504-9206-92cb35788aaf"
@@ -2498,6 +2530,10 @@
 	"R.preview.geometry.pin-translucent": {
 		"kind": "rule",
 		"id": "01a11658-26e2-710b-95ff-8bd8b1ce5948"
+	},
+	"R.preview.geometry.pins-affine-only": {
+		"kind": "rule",
+		"id": "01a116f0-1dca-7e41-b6ba-dafc746f6b92"
 	},
 	"R.preview.geometry.pins-idle": {
 		"kind": "rule",
@@ -3427,6 +3463,202 @@
 		"kind": "rule",
 		"id": "01a1144e-51e9-7e11-94c0-816baab9e0d6"
 	},
+	"R.wb.a11y.commit-focus": {
+		"kind": "rule",
+		"id": "01a116f0-95b9-7625-b40c-e51136aa45c5"
+	},
+	"R.wb.a11y.no-hover": {
+		"kind": "rule",
+		"id": "01a116f0-952d-7aa4-9a16-2648b1852daa"
+	},
+	"R.wb.a11y.non-pointer": {
+		"kind": "rule",
+		"id": "01a116f0-94a5-775a-aa3d-da41c3521555"
+	},
+	"R.wb.a11y.targets": {
+		"kind": "rule",
+		"id": "01a116f0-9461-77fe-8ce2-ee89ba0d4ef0"
+	},
+	"R.wb.a11y.text-floor": {
+		"kind": "rule",
+		"id": "01a116f0-9573-7036-a9ca-76c6de6d829c"
+	},
+	"R.wb.a11y.tree-targeting": {
+		"kind": "rule",
+		"id": "01a116f0-94ea-7b74-a773-12147804a393"
+	},
+	"R.wb.a11y.wcag": {
+		"kind": "rule",
+		"id": "01a116f0-941b-7d94-8a7c-7f83186e9b06"
+	},
+	"R.wb.chrome.follows-browser": {
+		"kind": "rule",
+		"id": "01a116f0-923f-7092-b759-3c7cc584e647"
+	},
+	"R.wb.chrome.glossary": {
+		"kind": "rule",
+		"id": "01a116f0-9391-7304-b43c-0b96be55c4e4"
+	},
+	"R.wb.chrome.independent": {
+		"kind": "rule",
+		"id": "01a116f0-930a-79a1-912c-f254ff9d8bd6"
+	},
+	"R.wb.chrome.label-length": {
+		"kind": "rule",
+		"id": "01a116f0-93d4-7787-a451-9613c16592f3"
+	},
+	"R.wb.chrome.languages": {
+		"kind": "rule",
+		"id": "01a116f0-91f8-7cb9-a9d1-58b87c1c6ce0"
+	},
+	"R.wb.chrome.manual-switch": {
+		"kind": "rule",
+		"id": "01a116f0-9282-7bf0-b48f-fe5bf0fcc0ac"
+	},
+	"R.wb.chrome.not-in-links": {
+		"kind": "rule",
+		"id": "01a116f0-934e-785e-b411-f6dd58be0f93"
+	},
+	"R.wb.chrome.theme": {
+		"kind": "rule",
+		"id": "01a116f0-92c6-7bca-8abf-1b7a375716c0"
+	},
+	"R.wb.devices.desktop": {
+		"kind": "rule",
+		"id": "01a116f0-8fd3-7c11-b4d6-85c8653fc8b6"
+	},
+	"R.wb.devices.phone-cold-start": {
+		"kind": "rule",
+		"id": "01a116f0-91b4-796c-ac7a-d2da4f936935"
+	},
+	"R.wb.devices.phone-no-new-comments": {
+		"kind": "rule",
+		"id": "01a116f0-90e2-7a5a-b9d8-c80984d034ea"
+	},
+	"R.wb.devices.phone-no-reanchor-promote": {
+		"kind": "rule",
+		"id": "01a116f0-9128-77b3-8800-1a9edf67106c"
+	},
+	"R.wb.devices.phone-scope": {
+		"kind": "rule",
+		"id": "01a116f0-909c-7403-a47c-ba9bbefdf0ef"
+	},
+	"R.wb.devices.phone-sheet": {
+		"kind": "rule",
+		"id": "01a116f0-9170-72ca-872c-a9ca805fc8e1"
+	},
+	"R.wb.devices.tablet-no-structural": {
+		"kind": "rule",
+		"id": "01a116f0-9059-7ec4-a560-35159d01e56e"
+	},
+	"R.wb.devices.tablet-review": {
+		"kind": "rule",
+		"id": "01a116f0-9016-75fb-90ff-ed86412b65a4"
+	},
+	"R.wb.ia.adapters-section": {
+		"kind": "rule",
+		"id": "01a116f0-8a46-76bc-a29f-affaa302c44c"
+	},
+	"R.wb.ia.catalog": {
+		"kind": "rule",
+		"id": "01a116f0-8b11-7eba-96eb-786ba7098589"
+	},
+	"R.wb.ia.comment-stays-on": {
+		"kind": "rule",
+		"id": "01a116f0-8f90-7a3e-a71b-cd5cb22482ce"
+	},
+	"R.wb.ia.inbox-address": {
+		"kind": "rule",
+		"id": "01a116f0-8e81-76ba-850c-0cbc42fbc351"
+	},
+	"R.wb.ia.inbox-default-queue": {
+		"kind": "rule",
+		"id": "01a116f0-8d33-7c2a-ba50-fc177e9deda1"
+	},
+	"R.wb.ia.inbox-dismissed": {
+		"kind": "rule",
+		"id": "01a116f0-8dfb-7430-b056-c9cf497d022f"
+	},
+	"R.wb.ia.inbox-facets": {
+		"kind": "rule",
+		"id": "01a116f0-8e3e-7b1f-a12a-79fdcaccbf62"
+	},
+	"R.wb.ia.inbox-history": {
+		"kind": "rule",
+		"id": "01a116f0-8db9-75c3-a642-652570053138"
+	},
+	"R.wb.ia.inbox-order": {
+		"kind": "rule",
+		"id": "01a116f0-8d77-7665-8e2a-5560b6ab660f"
+	},
+	"R.wb.ia.legacy-addresses": {
+		"kind": "rule",
+		"id": "01a116f0-8a8b-787d-b5d4-34e1325bc845"
+	},
+	"R.wb.ia.members-entry": {
+		"kind": "rule",
+		"id": "01a116f0-8caf-7e03-ba40-ef17e116aa22"
+	},
+	"R.wb.ia.overview-default-tab": {
+		"kind": "rule",
+		"id": "01a116f0-8b96-7827-881d-117b4f906ecb"
+	},
+	"R.wb.ia.overview-tab-history": {
+		"kind": "rule",
+		"id": "01a116f0-8bda-7a63-99b2-fa3b98b2b336"
+	},
+	"R.wb.ia.overview-tabs": {
+		"kind": "rule",
+		"id": "01a116f0-8b54-71f1-8dd4-39699b8cc5f9"
+	},
+	"R.wb.ia.palette": {
+		"kind": "rule",
+		"id": "01a116f0-8c67-70e5-885b-d7b7f28feafb"
+	},
+	"R.wb.ia.primary": {
+		"kind": "rule",
+		"id": "01a116f0-8927-7854-b67d-e384cde6e6b1"
+	},
+	"R.wb.ia.prototype-mode": {
+		"kind": "rule",
+		"id": "01a116f0-8acf-7788-92cc-8d207694d343"
+	},
+	"R.wb.ia.reviews-global": {
+		"kind": "rule",
+		"id": "01a116f0-8cf2-7591-be25-3f6e600175fc"
+	},
+	"R.wb.ia.settings-section-link": {
+		"kind": "rule",
+		"id": "01a116f0-8c1d-7bed-803f-319d8cc5c10d"
+	},
+	"R.wb.ia.thread-canvas-link": {
+		"kind": "rule",
+		"id": "01a116f0-8ec3-7eff-9e61-4e1b3b31dabe"
+	},
+	"R.wb.ia.view-link": {
+		"kind": "rule",
+		"id": "01a116f0-8f4c-7fac-a46d-53d8dba61dfa"
+	},
+	"R.wb.ia.view-list": {
+		"kind": "rule",
+		"id": "01a116f0-8973-70c5-980e-4c851d61f42c"
+	},
+	"R.wb.ia.view-page": {
+		"kind": "rule",
+		"id": "01a116f0-89b6-7d08-a850-e1ee1aecd51f"
+	},
+	"R.wb.ia.workspace-entry": {
+		"kind": "rule",
+		"id": "01a116f0-8a01-7cd2-807d-cc26f7bf8b16"
+	},
+	"R.wb.ia.workspace-thread-link": {
+		"kind": "rule",
+		"id": "01a116f0-8f07-79c1-9e74-1ac265b5e04a"
+	},
+	"R.wb.live.access-reread": {
+		"kind": "rule",
+		"id": "01a116f0-963f-7222-95fa-ae80ce735859"
+	},
 	"R.wb.live.all-commits": {
 		"kind": "rule",
 		"id": "01a11485-f3bb-760b-9132-0e8c2f6bbf43"
@@ -3466,6 +3698,10 @@
 	"R.wb.live.remote-change-draft": {
 		"kind": "rule",
 		"id": "01a11485-f434-75ed-ab0a-e321468c8407"
+	},
+	"R.wb.live.send-again": {
+		"kind": "rule",
+		"id": "01a116f0-95fc-77c6-a7ab-1318cb6d19af"
 	},
 	"R.wb.live.stream": {
 		"kind": "rule",
