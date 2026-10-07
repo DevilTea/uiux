@@ -415,4 +415,52 @@ describe('Shared thread actions (bubble and inbox detail)', () => {
 		}
 		finally { await context.close() }
 	}, 90_000)
+
+	it('sends one write when Enter is pressed again while Reopen or Promote is still in flight', async () => {
+		const reopened = await seed('mei', { scope: 'workspace' }, 'Use sentence case in buttons.')
+		await api('tester', `/api/reviews/${reopened}/resolve`, { expectedRevision: (await read(reopened)).revision, resolution: 'answered' })
+		const promoted = await seed('mei', { viewId: VIEW_ID, widgetId: 'app-title' }, 'Wrap or truncate long titles?')
+		const { context, page } = await open(`/reviews?status=resolved&thread=${reopened}`)
+		try {
+			// Hold each write long enough for the repeated Enter to land while it is in flight.
+			const writes = { reopen: 0, promote: 0 }
+			for (const action of ['reopen', 'promote'] as const) {
+				await page.route(`**/api/reviews/*/${action}`, async (route) => {
+					writes[action] += 1
+					await pause(800)
+					await route.continue()
+				})
+			}
+
+			const thread = detail(page, reopened)
+			await thread.locator('[data-message-id]').first().waitFor()
+			await thread.locator('[data-review-reopen]').click()
+			await poll(() => activeMatches(page, '[data-thread-reason] input')).toBe(true)
+			await page.keyboard.type('Came back in QA.')
+			await page.keyboard.press('Enter')
+			await poll(() => thread.locator('[data-thread-reason-confirm]').isDisabled()).toBe(true)
+			await page.keyboard.press('Enter')
+			await page.keyboard.press('Enter')
+			await poll(() => read(reopened).then(value => value.resource.status)).toBe('open')
+			await pause(300)
+			expect(writes.reopen).toBe(1)
+
+			await page.goto(`${server.origin}/reviews?thread=${promoted}`, { waitUntil: 'networkidle' })
+			await detail(page, promoted).locator('[data-message-id]').first().waitFor()
+			await detail(page, promoted).locator('[aria-label="More"]').first().click()
+			await page.getByRole('menuitem', { name: 'Promote to Decision' }).click()
+			const dialog = page.getByRole('dialog', { name: 'Promote to Decision' })
+			await dialog.waitFor()
+			const summary = dialog.getByRole('textbox').nth(1)
+			await summary.fill('Truncate with a tooltip.')
+			await summary.press('Enter')
+			await poll(() => writes.promote).toBe(1)
+			await summary.press('Enter')
+			await summary.press('Enter')
+			await poll(() => dialog.count()).toBe(0)
+			await pause(300)
+			expect(writes.promote).toBe(1)
+		}
+		finally { await context.close() }
+	}, 90_000)
 })

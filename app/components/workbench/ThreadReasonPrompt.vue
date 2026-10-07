@@ -14,6 +14,11 @@ const reason = defineModel<string>({ required: true })
 const { t } = useI18n()
 const input = ref<{ inputRef?: HTMLInputElement }>()
 
+/** Enter confirms like the button, which is disabled while the write is in flight: no second write. */
+function confirm(): void {
+	if (!props.busy) emit('confirm')
+}
+
 defineExpose({ focus: () => input.value?.inputRef?.focus() })
 </script>
 
@@ -29,7 +34,7 @@ defineExpose({ focus: () => input.value?.inputRef?.focus() })
       :placeholder="action === 'duplicate' ? t('comments.duplicateReason') : t('comments.reopenReason')"
       :aria-label="action === 'duplicate' ? t('comments.duplicateReason') : t('comments.reopenReason')"
       :ui="{ base: 'pointer-coarse:text-base' }"
-      @keydown.enter.prevent="emit('confirm')"
+      @keydown.enter.prevent="confirm"
       @keydown.escape.stop="emit('cancel')"
     />
     <div class="flex justify-end gap-2">
