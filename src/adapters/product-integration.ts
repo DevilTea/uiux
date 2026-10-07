@@ -134,7 +134,10 @@ export const productAdapterRegistryInspector: AdapterRegistryInspector = {
 /**
  * Registry discovery runs in the Nitro process, while Workspace adapters are loaded dynamically.
  * A production Nitro bundle may resolve @deviltea/widget-core from a different physical module URL
- * than the selected Workspace. Widget's private Symbol brand intentionally cannot cross that boundary.
+ * than the selected Workspace. widget-core documents that `inspectPlugin` and `createWidgetSystem`
+ * accept only Plugins completed by the loaded module instance and reject any other with the coded
+ * `foreign-plugin` error (`WidgetInspectionError` / `WidgetSystemConfigurationError`), so inspecting
+ * here would refuse every Adapter whose widget-core copy differs from Nitro's.
  *
  * At this phase UIUX only needs the public semantic registry identity. Full plugin authenticity and
  * capability inspection stays at runtime materialization, where the preview bundler aliases Widget

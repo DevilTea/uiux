@@ -1,6 +1,6 @@
 import { createApp, h, nextTick, shallowRef, type Component } from 'vue'
 import type { AnyWidgetPlugin, WidgetSystemRuntime } from '@deviltea/widget-core'
-import { inspectPlugin } from '@deviltea/widget-core/inspection'
+import { inspectPlugin, WidgetInspectionError } from '@deviltea/widget-core/inspection'
 import { createWidgetVueRenderer } from '@deviltea/widget-vue'
 
 import type { Diagnostic } from '../domain/validation'
@@ -553,8 +553,11 @@ export function createStandalonePreviewMount(input: Readonly<{
 						.filter(member => typeof member.name === 'string')
 						.map(member => Object.freeze({ name: member.name, description: member.description })))
 				}
-				catch {
-					// An uninspectable plugin has no known declared Events.
+				catch (cause) {
+					// widget-core documents that inspectPlugin rejects a Plugin this module instance did not
+					// complete with `WidgetInspectionError`: such a plugin has no known declared Events.
+					// Any other exception is a defect and propagates.
+					if (!(cause instanceof WidgetInspectionError)) throw cause
 				}
 			}
 		}
