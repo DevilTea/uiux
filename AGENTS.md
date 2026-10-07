@@ -33,7 +33,7 @@ Calibration pass between batch 3 and batch 4; transitional — Discussions #1–
 
 ### Contract ownership
 
-- **Batch 5 owns the shared Contracts:** `batch-05.json` names the full C.ws-format, C.mutation-semantics and C.mcp Contracts and the C.adapter and C.handoff-bundle Contracts it creates, so batches 02 to 04 can no longer be re-run; change those Contracts only through batch 05 (re-rendered against the current revision) or a newer batch that names them in full, and change a unit that only an older batch names through a newer batch that names it in full. Batch 05 also names F.review.lifecycle and F.view.decisions in full (PR #100 review). Batch 06a creates and owns C.preview-protocol; batches 06b and 06c extend it by naming it in full.
+- **Batch 5 owns the shared Contracts:** `batch-05.json` names the full C.ws-format, C.mutation-semantics and C.mcp Contracts and the C.adapter and C.handoff-bundle Contracts it creates, so batches 02 to 04 can no longer be re-run; change those Contracts only through batch 05 (re-rendered against the current revision) or a newer batch that names them in full, and change a unit that only an older batch names through a newer batch that names it in full. Batch 05 also names F.review.lifecycle and F.view.decisions in full (PR #100 review). Batch 06a created C.preview-protocol; batch 06b names it in full and owns it, together with F.preview.isolation and F.preview.session, which it takes over from batch 06a for the PR #103 review carry-overs, so batch 06a can no longer be re-run; batch 06c extends C.preview-protocol by naming it in full. The PR #103 Evidence carry-overs are a re-render of batch 05 against the revision after batch 06a, applied before batch 06b.
 
 ### Ownership and structure
 
