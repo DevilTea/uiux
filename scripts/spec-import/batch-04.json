@@ -1,0 +1,1363 @@
+{
+	"batch": "04-review-decisions-flow",
+	"baseCommit": "a9225efadaed829bd10e0167ae30e2075414215d",
+	"baseRevision": "cad8fbe2996d9e97ac60a6c98483d42f996f96228567d9545cc90844f70a20c4",
+	"features": [
+		{
+			"ref": "F.review.threads",
+			"title": "Review threads and anchors",
+			"summary": "Review threads as canonical Workspace resources: what a thread is anchored to and its Variant scope, invalid anchors and explicit re-anchoring, retention, the Workbench thread timeline, and how threads are summarized, listed and filtered.",
+			"rules": [
+				{
+					"ref": "R.review.threads.identity",
+					"statement": "A Review thread's identity is independent of the View and Widget it concerns, its text and its position in any list, so re-anchoring or editing a thread never changes its identity."
+				},
+				{
+					"ref": "R.review.threads.widget-anchor",
+					"statement": "A Widget anchor names its target only by stable View and Widget identity, never by DOM selector, rendered geometry, child index or tree path, so moving the Widget within its View keeps the anchor."
+				},
+				{
+					"ref": "R.review.threads.view-comment",
+					"statement": "A comment about a whole View is anchored to that View's RootShell Widget."
+				},
+				{
+					"ref": "R.review.threads.workspace-anchor",
+					"statement": "Feedback about the product as a whole is anchored to the Workspace itself and names no View or Widget."
+				},
+				{
+					"ref": "R.review.threads.explicit-anchor",
+					"statement": "Creating a thread always states its anchor; an omitted anchor never defaults to the Workspace."
+				},
+				{
+					"ref": "R.review.threads.variant-scope",
+					"statement": "A Widget thread's Variant scope limits it to the named Variants of its View, and an empty scope means every current and future Variant."
+				},
+				{
+					"ref": "R.review.threads.missing-variant",
+					"statement": "A named Variant in a thread's scope that no longer exists makes that part of the anchor invalid, and the thread is kept."
+				},
+				{
+					"ref": "R.review.threads.invalid-anchor",
+					"statement": "When a thread's anchored View or Widget no longer exists, the thread is kept unchanged with an invalid anchor; deleting the target never resolves, moves or deletes it."
+				},
+				{
+					"ref": "R.review.threads.missing-target",
+					"statement": "The Workbench shows a thread whose anchor is invalid with a missing-target notice that offers explicit repair."
+				},
+				{
+					"ref": "R.review.threads.no-rebind",
+					"statement": "UIUX never binds a thread to another target by DOM selector, tree position, geometry or similarity, and non-authoritative display hints never decide a thread's target."
+				},
+				{
+					"ref": "R.review.threads.workspace-valid",
+					"statement": "A Workspace anchor always resolves, so a Workspace thread never has an invalid anchor."
+				},
+				{
+					"ref": "R.review.threads.explicit-reanchor",
+					"statement": "Only an explicit re-anchor changes a thread's anchor or Variant scope."
+				},
+				{
+					"ref": "R.review.threads.reanchor-arms",
+					"statement": "A re-anchor may move a thread from a Widget to the Workspace, from the Workspace to a Widget, or within either, including to the anchor it already has."
+				},
+				{
+					"ref": "R.review.threads.reanchor-history",
+					"statement": "Every re-anchor appends an immutable history event with the previous and new anchor and Variant scope, so earlier anchors stay in the thread's history."
+				},
+				{
+					"ref": "R.review.threads.retention",
+					"statement": "No Workbench or MCP action deletes a Review thread except the author's retraction of an unengaged thread, and resolved threads stay stored as design history."
+				},
+				{
+					"ref": "R.review.threads.reply",
+					"statement": "A reply appends a new message to the end of the thread's messages, on a thread of any status."
+				},
+				{
+					"ref": "R.review.threads.list-summary",
+					"statement": "A Review thread's list item summarizes its anchor, Variant scope, pin hint, status, current resolution and latest activity, and briefly its latest message and current submission."
+				},
+				{
+					"ref": "R.review.threads.latest-activity",
+					"statement": "A thread's latest activity is the newest authored time among its messages, message edits, submissions and history events."
+				},
+				{
+					"ref": "R.review.threads.filters",
+					"statement": "Listing and searching Review threads accept structured filters for status, View, anchor validity, Variant scope, change or Evidence domain, current resolution and anchor scope."
+				},
+				{
+					"ref": "R.review.threads.timeline",
+					"statement": "The Workbench shows a thread as one chronological timeline of its messages, re-anchor events, submissions and lifecycle events, each keeping its own type and content, derived from the thread rather than stored."
+				},
+				{
+					"ref": "R.review.threads.workspace-create",
+					"statement": "In the Workbench a reviewer can start a Workspace thread from the Reviews inbox and from the command palette."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #7 body (Part 7 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win). https://github.com/DevilTea/uiux/discussions/7\n- Discussion #1 comment 158 (2026-09-29), \"Accepted decision group — Review anchor model (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657409\n- Discussion #7 comment 1 (2026-09-30), \"Accepted decision group — Review persistence baseline (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686\n- Discussion #7 comment 3 (2026-09-30), \"Accepted decision group — Review MCP and Workbench projection (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18674068\n- Discussion #7 comment 9 (2026-10-06), \"Accepted decision group — Workspace-scoped Review threads and editable Review messages\": Workspace-scoped threads, schema 3. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095\n- Discussion #1 comment 178 (2026-10-06), \"Companion amendment — Workspace-scoped Review threads and editable messages (accepted on Part 7)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18772098\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.review.threads.identity}} | [#7 c1 d1](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686); [#7 body: item 1](https://github.com/DevilTea/uiux/discussions/7) |\n| {{R.review.threads.widget-anchor}} | [#1 c158 d1](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657409); [#1 body: Workflows, Reviews, & Decisions](https://github.com/DevilTea/uiux/discussions/1) |\n| {{R.review.threads.view-comment}} | [#7 c9 owner requirement: View-level comments use the existing RootShell anchor](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [#1 c178](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18772098) |\n| {{R.review.threads.workspace-anchor}} | [#7 c9 d1, R1](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [#1 c178](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18772098) |\n| {{R.review.threads.explicit-anchor}} | [#7 c9 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.threads.variant-scope}} | [#1 c158 d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657409); [#7 body: Scope and inherited decisions](https://github.com/DevilTea/uiux/discussions/7) |\n| {{R.review.threads.missing-variant}} | [#1 c158 d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657409); [code@a9225ef `app/utils/review-inbox.ts#L169-L184`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/app/utils/review-inbox.ts#L169-L184) missing Variants mark the anchor `stale` |\n| {{R.review.threads.invalid-anchor}} | [#1 c158 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657409); [#1 body: Workflows, Reviews, & Decisions](https://github.com/DevilTea/uiux/discussions/1) |\n| {{R.review.threads.missing-target}} | [#1 c158 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657409); [code@a9225ef `app/components/workbench/ReviewThreadDetail.vue#L290-L302`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/app/components/workbench/ReviewThreadDetail.vue#L290-L302) missing-target alert with Re-anchor and Dismiss actions |\n| {{R.review.threads.no-rebind}} | [#1 c158 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657409); [#7 c5 scope table](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814) |\n| {{R.review.threads.workspace-valid}} | [#7 c9 d3](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.threads.explicit-reanchor}} | [#1 c158 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657409); [#7 c1 d4](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686) |\n| {{R.review.threads.reanchor-arms}} | [#7 c9 d3, R4](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.threads.reanchor-history}} | [#7 c1 d4](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686); [#7 body: item 4](https://github.com/DevilTea/uiux/discussions/7) |\n| {{R.review.threads.retention}} | [#7 c2 d8](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673968); [#7 c10 d1: the one hard delete](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501) |\n| {{R.review.threads.reply}} | [#7 c1 d2](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686); [#7 c9 d12: replies to a resolved thread are allowed](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.threads.list-summary}} | [#7 c3 9b](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18674068); [#7 c5 d4: hint in the summary](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#7 c6 d7: derived resolution in the summary](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815) |\n| {{R.review.threads.latest-activity}} | [#7 c3 10a](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18674068); [#7 c9 d13, R12: edits are activity](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.threads.filters}} | [#7 c3 9b](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18674068); [#7 c6 d7: resolution filter](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815); [#7 c9 d7, R6: anchor-scope filter](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.threads.timeline}} | [#7 c3 10b](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18674068); [#7 body: item 10](https://github.com/DevilTea/uiux/discussions/7) |\n| {{R.review.threads.workspace-create}} | [#7 c9 d8](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [code@a9225ef `app/components/workbench/NewCommentModal.vue`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/app/components/workbench/NewCommentModal.vue); [code@a9225ef `app/components/workbench/WorkbenchCommandPalette.vue`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/app/components/workbench/WorkbenchCommandPalette.vue) |\n\n## Implementation gaps\n\n- {{R.review.threads.list-summary}}: Not built as of a9225ef: the list summary carries a message count but no summary of the latest message or the current submission (`src/application/services/workspace-session.ts` `reviewSummary`); tracked in issue #84 (https://github.com/DevilTea/uiux/issues/84).\n- {{R.review.threads.filters}}: Not built as of a9225ef: server-side discovery filters only by resolution and anchor scope; the status, View, anchor-validity, Variant-scope and domain filters exist only in the Workbench inbox (`src/application/dto/resource-discovery.ts`, `app/utils/review-inbox.ts`); tracked in issue #84 (https://github.com/DevilTea/uiux/issues/84).\n\n## Notes\n\n- The persisted thread shape, the anchor union and the Workspace arm's constraints are owned by Clauses of the Workspace persisted format Contract ({{C.ws-format.review-thread}}, {{C.ws-format.review-anchor}}, {{C.ws-format.review-workspace-arm}}, {{C.ws-format.review-history-event}}); the Review filter values by {{C.mcp.review-filters}}. Which tools perform each Review action is owned by {{C.mcp.review-tools}}, which also states that each changes one thread atomically; leases never cover threads ({{R.access.leases.lockable}}).\n- Removing a thread file outside UIUX is an external destructive change (Discussion #7 c2 d8), not a Review action; readers then report the thread as not found.\n- The Reviews inbox (default queue order, tabs including Dismissed, facets, deep links such as `/reviews?thread=<id>` and `view=workspace`) belongs to the Workbench information architecture Feature (import batch 7). Handoff treatment of Review threads (Workspace threads in every closure, per-resolution and Workspace-thread counts) belongs to the Handoff Feature (import batch 5).\n"
+		},
+		{
+			"ref": "F.review.lifecycle",
+			"title": "Review lifecycle and resolution",
+			"summary": "The lifecycle of a Review thread: ready-for-review submissions and their Evidence gate, resolution and its kinds, reopening, and how the Workbench offers resolution.",
+			"rules": [
+				{
+					"ref": "R.review.lifecycle.history",
+					"statement": "Every lifecycle transition appends an immutable event to the thread's history, and the thread's current status always matches the latest one."
+				},
+				{
+					"ref": "R.review.lifecycle.submit",
+					"statement": "Marking a thread ready for review records a new immutable submission; it means work was submitted, not that it was accepted."
+				},
+				{
+					"ref": "R.review.lifecycle.resubmit",
+					"statement": "Every entry into ready for review, including one after a reopen, appends a new submission and never replaces an earlier one."
+				},
+				{
+					"ref": "R.review.lifecycle.submission-immutable",
+					"statement": "Once a submission exists, its change domains, resources and Evidence references never change."
+				},
+				{
+					"ref": "R.review.lifecycle.whole-view",
+					"statement": "A Widget thread can enter ready for review only while its anchored View is valid as a whole and every named Variant is executable."
+				},
+				{
+					"ref": "R.review.lifecycle.widget-target",
+					"statement": "A Widget thread's submission names its anchored View at that View's current revision."
+				},
+				{
+					"ref": "R.review.lifecycle.workspace-subject",
+					"statement": "A Workspace thread's submission names the current Workspace manifest revision as its subject."
+				},
+				{
+					"ref": "R.review.lifecycle.workspace-views",
+					"statement": "Every View a Workspace thread's submission names must exist, be valid and be named at its current revision."
+				},
+				{
+					"ref": "R.review.lifecycle.evidence-exists",
+					"statement": "Every Evidence reference of a submission must name an Evidence record that exists in the Workspace."
+				},
+				{
+					"ref": "R.review.lifecycle.formal-current",
+					"statement": "Formal-capture Evidence cited by a submission must be complete for the current revision of the View it captured, and that View must belong to the submission's target set."
+				},
+				{
+					"ref": "R.review.lifecycle.evidence-kind",
+					"statement": "An Evidence reference whose declared kind differs from the referenced record's kind is invalid and diagnosed, never coerced or rewritten."
+				},
+				{
+					"ref": "R.review.lifecycle.evidence-by-change",
+					"statement": "A visual or interaction change cites Playwright captures of the clean Preview Host in the affected render and Variant contexts; a purely textual Spec change needs no capture but still needs passing validation."
+				},
+				{
+					"ref": "R.review.lifecycle.interaction-evidence",
+					"statement": "An interaction change cites replayable interaction Evidence of structured steps, targets and assertions replayed with Playwright; screenshots alone never verify interaction."
+				},
+				{
+					"ref": "R.review.lifecycle.default-verified",
+					"statement": "Resolving a ready-for-review thread without naming a resolution resolves it as verified, accepting its latest submission."
+				},
+				{
+					"ref": "R.review.lifecycle.open-explicit",
+					"statement": "Resolving an open thread requires an explicit resolution; the API never chooses one for the caller."
+				},
+				{
+					"ref": "R.review.lifecycle.decline-pending",
+					"statement": "Closing a ready-for-review thread with any resolution other than verified leaves its pending submission in the thread, not accepted."
+				},
+				{
+					"ref": "R.review.lifecycle.human-judgment",
+					"statement": "UIUX never checks a resolution against other resources: whether a thread is obsolete or a duplicate is the resolving human's judgment."
+				},
+				{
+					"ref": "R.review.lifecycle.reopen",
+					"statement": "Reopening a thread, whatever its resolution, keeps its earlier lifecycle events and submissions unchanged in its history."
+				},
+				{
+					"ref": "R.review.lifecycle.after-reopen",
+					"statement": "After a reopen, a verified resolution needs a new submission: an earlier verified resolution is never carried forward."
+				},
+				{
+					"ref": "R.review.lifecycle.one-click",
+					"statement": "In the Workbench, the one-click Resolve resolves an open thread as answered and accepts a ready-for-review thread's submission as verified, naming that submission."
+				},
+				{
+					"ref": "R.review.lifecycle.resolve-menu",
+					"statement": "The Workbench's Resolve menu groups answered and verified under Resolve, and obsolete, duplicate and won't-fix under Dismiss; the grouping is presentation only."
+				},
+				{
+					"ref": "R.review.lifecycle.obsolete-suggestion",
+					"statement": "For a thread whose anchor is invalid, the Workbench offers resolving it as obsolete but never chooses that resolution without the user."
+				},
+				{
+					"ref": "R.review.lifecycle.timeline-marks",
+					"statement": "The timeline shows each resolution with its kind, and marks a submission declined by a non-verified close as not accepted."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #7 body (Part 7 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win). https://github.com/DevilTea/uiux/discussions/7\n- Discussion #1 comment 19 (2026-09-23), \"Accepted decision — agent submits completed Review for human verification (option C)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561501\n- Discussion #1 comment 20 (2026-09-23), \"Accepted decision — mandatory validation, context-dependent screenshot evidence (option C)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561691\n- Discussion #1 comment 159 (2026-09-29), \"Accepted decision group — Review lifecycle evidence and validation (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18660618\n- Discussion #7 comment 2 (2026-09-30), \"Accepted decision group — Review submissions, evidence, lifecycle, and retention (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673968\n- Discussion #7 comment 4 (2026-09-30), \"Ratified derived consequence — minimal Review evidence reference shape\". https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18676549\n- Discussion #7 comment 6 (2026-10-05), \"Accepted decision group — Direct resolve of discussion threads\". https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815\n- Discussion #1 comment 175 (2026-10-05), \"Companion amendment — direct resolve of discussion threads (accepted on Part 7)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757819\n- Discussion #1 comment 177 (2026-10-05), \"Accepted decision group — Member identity, roles, tokens and agent edit leases\": decision 7: resolve requires a human member on a Workbench session. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344\n- Discussion #7 comment 10 (2026-10-06), \"Accepted addendum decision group — Author quick retract of a new Review thread, and the Dismiss presentation\": decision 11: Resolve / Dismiss presentation, UI-only; the resolution enum is unchanged. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501\n- Owner ruling 2026-10-07 (batch 4 confirmation): Review validation codes that no accepted decision names, and the result and HTTP status of each Review refusal, are non-normative; code is authoritative.\n- code@a9225ef `src/application/services/review-authoring.ts`. https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/application/services/review-authoring.ts\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.review.lifecycle.history}} | [#7 c2 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673968); [#7 body: item 7](https://github.com/DevilTea/uiux/discussions/7) |\n| {{R.review.lifecycle.submit}} | [#1 c19](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561501); [#7 c2 d5](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673968) |\n| {{R.review.lifecycle.resubmit}} | [#7 c2 d5](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673968) |\n| {{R.review.lifecycle.submission-immutable}} | [#7 c2 d5, d6](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673968); [#7 body: item 6](https://github.com/DevilTea/uiux/discussions/7) |\n| {{R.review.lifecycle.whole-view}} | [#1 c159 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18660618); [#1 body: Review Lifecycle & Evidence Gate](https://github.com/DevilTea/uiux/discussions/1); [#7 c9 d4](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.lifecycle.widget-target}} | [#7 c9 d4 table](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [#7 c2 d5](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673968) |\n| {{R.review.lifecycle.workspace-subject}} | [#7 c9 d4, R5](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [#1 c178](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18772098) |\n| {{R.review.lifecycle.workspace-views}} | [#7 c9 d4, R5](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.lifecycle.evidence-exists}} | [#7 c2 d6](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673968); [#7 c9 d4: non-View Evidence keeps the existence check](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.lifecycle.formal-current}} | [#1 c20](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561691); [#7 c9 d4](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.lifecycle.evidence-kind}} | [#7 c4](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18676549); [#7 body: item 6](https://github.com/DevilTea/uiux/discussions/7) |\n| {{R.review.lifecycle.evidence-by-change}} | [#1 c20](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561691); [#1 c159 d1](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18660618) |\n| {{R.review.lifecycle.interaction-evidence}} | [#1 c159 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18660618); [#1 c20](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561691) |\n| {{R.review.lifecycle.default-verified}} | [#7 c6 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815) |\n| {{R.review.lifecycle.open-explicit}} | [#7 c6 d7, d10](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815) |\n| {{R.review.lifecycle.decline-pending}} | [#7 c6 d2, R2](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815) |\n| {{R.review.lifecycle.human-judgment}} | [#7 c6 d3 rule 8](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815) |\n| {{R.review.lifecycle.reopen}} | [#7 c2 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673968); [#7 c6 d4](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815) |\n| {{R.review.lifecycle.after-reopen}} | [#7 c6 d4](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815) |\n| {{R.review.lifecycle.one-click}} | [#7 c6 d10](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815); [#1 c175](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757819) |\n| {{R.review.lifecycle.resolve-menu}} | [#7 c10 d11, T13, T14](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501) |\n| {{R.review.lifecycle.obsolete-suggestion}} | [#7 c6 d10](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815); [code@a9225ef `app/components/workbench/ReviewThreadDetail.vue#L290-L302`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/app/components/workbench/ReviewThreadDetail.vue#L290-L302) |\n| {{R.review.lifecycle.timeline-marks}} | [#7 c6 d4](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815); [code@a9225ef `app/utils/review-timeline.ts`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/app/utils/review-timeline.ts) |\n\n## Implementation gaps\n\n- {{R.review.lifecycle.evidence-kind}}: Not built as of a9225ef: a kind mismatch is diagnosed only for references declared as formal captures; a reference of any other kind is checked for existence only (`src/application/services/review-authoring.ts` `submitReadyForReview`); tracked in issue #85 (https://github.com/DevilTea/uiux/issues/85).\n- {{R.review.lifecycle.evidence-by-change}}: Not built as of a9225ef: a submission can cite only formal captures from the Workbench, so a textual change cannot cite validation Evidence instead; tracked in issue #61 (https://github.com/DevilTea/uiux/issues/61).\n- {{R.review.lifecycle.interaction-evidence}}: Not built as of a9225ef: no replayable interaction Evidence is produced (`src/domain/evidence` has no interaction-replay record), and submissions cite only formal captures; citing other Evidence is tracked in issue #61 (https://github.com/DevilTea/uiux/issues/61); producing interaction-replay Evidence is tracked in issue #89 (https://github.com/DevilTea/uiux/issues/89) (epic issue #19 (https://github.com/DevilTea/uiux/issues/19)).\n\n## Notes\n\n- The status values, transitions, resolution kinds and their persisted invariants are owned by {{C.ws-format.review-status}}, {{C.ws-format.review-transitions}}, {{C.ws-format.review-resolution}} and {{C.ws-format.review-resolution-rules}}; the refusal codes of marking ready by {{C.mutation-semantics.review-submit-codes}}. That only a human member on a Workbench session resolves is owned by {{C.access.resolve}} and {{C.mcp.resolve-refused}} (import batch 3).\n- Owner ruling 2026-10-07 (batch 4 confirmation): `review.*` validation codes that no accepted decision names (for example history-consistency codes such as `review.submission_history_mismatch`) and the result status and HTTP status of each Review refusal are non-normative; code at a9225ef is authoritative (`src/domain/reviews/schema.ts`, `src/application/services/review-authoring.ts`, `src/server/authoring-http.ts`).\n- Which Evidence must be regenerated after a change, by change domain, belongs to the Evidence freshness Feature (import batch 5).\n"
+		},
+		{
+			"ref": "F.review.messages",
+			"title": "Review message editing",
+			"summary": "Editing Review messages: who may edit and until when, how earlier versions are kept, and how edits appear in the Workbench.",
+			"rules": [
+				{
+					"ref": "R.review.messages.author-only",
+					"statement": "Only a message's author, human or Agent, may replace its text; no other member, an Owner included, may edit it."
+				},
+				{
+					"ref": "R.review.messages.stamped-author",
+					"statement": "Authorship is proven by the edit's stamped actor matching the message's actor, so a message written before stamping or by a removed member can never be edited."
+				},
+				{
+					"ref": "R.review.messages.freeze",
+					"statement": "A message is frozen permanently once a ready-for-review submission or a resolution exists at or after its authored time; reopening the thread never unfreezes it."
+				},
+				{
+					"ref": "R.review.messages.after-freeze",
+					"statement": "Messages written after the latest submission or resolution stay editable, even on a resolved thread."
+				},
+				{
+					"ref": "R.review.messages.no-window",
+					"statement": "Apart from the freeze, editing a message has no time limit."
+				},
+				{
+					"ref": "R.review.messages.versions",
+					"statement": "Each edit keeps the replaced text append-only on the message, with the edit's server-stamped actor and time."
+				},
+				{
+					"ref": "R.review.messages.position",
+					"statement": "An edited message keeps its authored time and timeline position; an edit adds no history event and no separate timeline item."
+				},
+				{
+					"ref": "R.review.messages.no-delete",
+					"statement": "No Review action deletes a single message."
+				},
+				{
+					"ref": "R.review.messages.unread",
+					"statement": "An edited thread shows as unread to members who saw it before the edit."
+				},
+				{
+					"ref": "R.review.messages.search-current",
+					"statement": "Search matches a message's current text only, never its earlier versions."
+				},
+				{
+					"ref": "R.review.messages.indicator",
+					"statement": "The Workbench marks an edited message as edited, with the edit time, and lets every reader of the thread open its earlier versions, newest first, read-only."
+				},
+				{
+					"ref": "R.review.messages.frozen-ui",
+					"statement": "On the viewer's own frozen message, the Workbench shows Edit as unavailable with the reason."
+				},
+				{
+					"ref": "R.review.messages.decisions",
+					"statement": "Editing a message never changes a Decision promoted from its thread, and promotion does not freeze messages."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #7 comment 9 (2026-10-06), \"Accepted decision group — Workspace-scoped Review threads and editable Review messages\": Group B, decisions 10-18: editable messages. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095\n- Discussion #1 comment 178 (2026-10-06), \"Companion amendment — Workspace-scoped Review threads and editable messages (accepted on Part 7)\": implementation-entry checklist item 7 amended. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18772098\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.review.messages.author-only}} | [#7 c9 d11, R9](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.messages.stamped-author}} | [#7 c9 d11, R19](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.messages.freeze}} | [#7 c9 d12, O2](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [#1 c178](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18772098) |\n| {{R.review.messages.after-freeze}} | [#7 c9 d12](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.messages.no-window}} | [#7 c9 d12, R10](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.messages.versions}} | [#7 c9 d10, d15, R11](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [#1 c178](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18772098) |\n| {{R.review.messages.position}} | [#7 c9 d14](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.messages.no-delete}} | [#7 c9 d18](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [#7 c10 d10](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501) |\n| {{R.review.messages.unread}} | [#7 c9 R12](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.messages.search-current}} | [#7 c9 R14](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.messages.indicator}} | [#7 c9 d16, R14](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [code@a9225ef `app/components/workbench/ReviewMessage.vue`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/app/components/workbench/ReviewMessage.vue) |\n| {{R.review.messages.frozen-ui}} | [#7 c9 d16](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [code@a9225ef `app/utils/review-message-actions.ts`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/app/utils/review-message-actions.ts) |\n| {{R.review.messages.decisions}} | [#7 c9 d17, R15](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n\n## Notes\n\n- The message and edit shapes and their persisted rules are owned by {{C.ws-format.review-message}}, {{C.ws-format.review-edit-author}} and {{C.ws-format.review-edit-content}}; the edit refusal codes by {{C.mutation-semantics.review-edit-codes}}. Labels and keyboard shortcuts of the editor (Discussion #7 c9 d16) are Workbench copy and presentation.\n"
+		},
+		{
+			"ref": "F.review.retraction",
+			"title": "Review thread retraction",
+			"summary": "Hard deletion of a brand-new Review thread before anyone engages with it: who may retract, when a thread is eligible, what remains afterwards, and the Workbench affordance.",
+			"rules": [
+				{
+					"ref": "R.review.retract.author",
+					"statement": "Only the author of a thread's single message may retract the thread, whether a human or an Agent."
+				},
+				{
+					"ref": "R.review.retract.legacy",
+					"statement": "A thread whose message was written before actors were stamped cannot be retracted, because no stamp can prove its authorship."
+				},
+				{
+					"ref": "R.review.retract.eligible",
+					"statement": "A thread can be retracted only while it is open, holds at most one message, has no history events or submissions, and no Decision was promoted from it."
+				},
+				{
+					"ref": "R.review.retract.empty",
+					"statement": "A thread with no messages, which has no author, may be retracted by any Reviewer under the same conditions."
+				},
+				{
+					"ref": "R.review.retract.not-engagement",
+					"statement": "The author's own edits and any move of the pin are not engagement and never block retraction."
+				},
+				{
+					"ref": "R.review.retract.no-trace",
+					"statement": "Retraction removes the thread file atomically and leaves no trace in canonical state: no tombstone, history entry or record of who retracted it."
+				},
+				{
+					"ref": "R.review.retract.under-lock",
+					"statement": "Eligibility is checked on exactly the thread revision being deleted, inside the delete's exclusive lock, so a racing reply or promotion either lands first and makes retraction refuse, or finds the thread gone."
+				},
+				{
+					"ref": "R.review.retract.gone",
+					"statement": "After retraction, reads and writes of the thread report it as not found."
+				},
+				{
+					"ref": "R.review.retract.bundles",
+					"statement": "Copies of a retracted thread inside already-exported Handoff bundles remain; retraction never scans or rewrites artifacts."
+				},
+				{
+					"ref": "R.review.retract.offer",
+					"statement": "The Workbench offers to delete a comment only to its author while the loaded thread is eligible, and offers to delete an empty thread to any Reviewer."
+				},
+				{
+					"ref": "R.review.retract.confirm",
+					"statement": "The Workbench confirms a deletion in an inline row with focus on Cancel, never in a browser dialog."
+				},
+				{
+					"ref": "R.review.retract.stale-links",
+					"statement": "A link to a retracted thread opens the inbox's missing-thread state, or on the canvas the View with a notice that the comment no longer exists."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #7 comment 10 (2026-10-06), \"Accepted addendum decision group — Author quick retract of a new Review thread, and the Dismiss presentation\": decisions 1-10; eligibility E1-E6; accepted defaults T1-T15; Q1 (empty authorless threads may be retracted by any Reviewer) and Q2 (copies in exported Handoff bundles are acceptable). https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501\n- Discussion #1 comment 179 (2026-10-06), \"Cross-reference — author quick retract of a new Review thread (accepted on Part 7)\": Part 1 cross-reference. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18772502\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.review.retract.author}} | [#7 c10 d5, T4, T5](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501); [#1 c179](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18772502) |\n| {{R.review.retract.legacy}} | [#7 c10 d2, T15](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501) |\n| {{R.review.retract.eligible}} | [#7 c10 d2: E1-E6, T3](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501); [#1 c179](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18772502) |\n| {{R.review.retract.empty}} | [#7 c10 Q1, d2, d5](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501) |\n| {{R.review.retract.not-engagement}} | [#7 c10 d2, T9](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501) |\n| {{R.review.retract.no-trace}} | [#7 c10 d1, d3, T1](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501) |\n| {{R.review.retract.under-lock}} | [#7 c10 d2, d7, T7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501) |\n| {{R.review.retract.gone}} | [#7 c10 d3](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501) |\n| {{R.review.retract.bundles}} | [#7 c10 Q2, d3](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501) |\n| {{R.review.retract.offer}} | [#7 c10 d8, T12](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501) |\n| {{R.review.retract.confirm}} | [#7 c10 d8, T12](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501); [code@a9225ef `app/components/workbench/RetractConfirm.vue`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/app/components/workbench/RetractConfirm.vue) |\n| {{R.review.retract.stale-links}} | [#7 c10 d3, T10](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501); [code@a9225ef `app/pages/reviews.vue`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/app/pages/reviews.vue) |\n\n## Notes\n\n- The retraction result and refusal codes are owned by {{C.mutation-semantics.success}} and {{C.mutation-semantics.review-retract-codes}}; the Reviewer role by {{C.access.reviewer}}. Message copy (Discussion #7 c10 d8) is Workbench presentation.\n"
+		},
+		{
+			"ref": "F.review.pins",
+			"title": "Comment pins",
+			"summary": "Comment pins on the Workbench canvas: the optional persisted pin hint and how it is set, moved, cleared and kept out of other records, where pins are drawn, and when they are hidden.",
+			"rules": [
+				{
+					"ref": "R.review.pins.non-authoritative",
+					"statement": "A thread's pin hint is display data only: anchor resolution, validity, comparison, filtering and re-anchoring never read it."
+				},
+				{
+					"ref": "R.review.pins.no-cross-check",
+					"statement": "A pin hint is never validated against the View, the Widget's existence or size, a Variant or a render context."
+				},
+				{
+					"ref": "R.review.pins.create",
+					"statement": "Creating a thread may set its pin hint; a thread without one draws its pin at the default placement."
+				},
+				{
+					"ref": "R.review.pins.reanchor",
+					"statement": "A re-anchor that supplies a hint sets it and one that clears the hint clears it; otherwise the hint is cleared when the Widget changes and kept when only the Variant scope changes."
+				},
+				{
+					"ref": "R.review.pins.to-workspace",
+					"statement": "Re-anchoring a thread to the Workspace always clears its pin hint."
+				},
+				{
+					"ref": "R.review.pins.move",
+					"statement": "Moving or clearing a thread's pin within its Widget is a separate action that never changes the anchor, records no actor and appends no history event."
+				},
+				{
+					"ref": "R.review.pins.drag",
+					"statement": "The Workbench writes a moved pin once, when the drag ends, never streaming intermediate positions."
+				},
+				{
+					"ref": "R.review.pins.not-recorded",
+					"statement": "Pin hints never enter lifecycle or re-anchor history, submissions, Evidence records, formal captures or Decision provenance."
+				},
+				{
+					"ref": "R.review.pins.no-restore",
+					"statement": "Re-anchoring back to an earlier Widget never restores the hint the thread had there."
+				},
+				{
+					"ref": "R.review.pins.placement",
+					"statement": "A hinted pin is drawn at the hint's point within the anchored Widget's current rendered rectangle, so it follows the Widget when it resizes or reflows, in every viewport."
+				},
+				{
+					"ref": "R.review.pins.physical",
+					"statement": "Pin hints are physical coordinates, so a pin keeps its side in a right-to-left Locale."
+				},
+				{
+					"ref": "R.review.pins.hidden",
+					"statement": "A pin is hidden, never clamped or moved elsewhere, when its point is clipped or occluded, its Widget is not rendered, the geometry is stale, pending or unmeasurable, or the outer mapping is not affine."
+				},
+				{
+					"ref": "R.review.pins.still-listed",
+					"statement": "A thread whose pin is hidden stays listed and navigable."
+				},
+				{
+					"ref": "R.review.pins.invalid-anchor",
+					"statement": "A thread with an invalid anchor draws no pin anywhere, and its hint stays inert until the same Widget resolves again."
+				},
+				{
+					"ref": "R.review.pins.variant",
+					"statement": "Pins are drawn only for threads whose Variant scope is empty or includes the current Variant."
+				},
+				{
+					"ref": "R.review.pins.workspace",
+					"statement": "Workspace threads have no pin and never appear on a View's canvas or in its Comments list."
+				},
+				{
+					"ref": "R.review.pins.dismissed",
+					"statement": "Dismissed threads never draw pins, even when the canvas shows resolved threads."
+				},
+				{
+					"ref": "R.review.pins.click-point",
+					"statement": "A comment's click point is transient: it only positions the composer, and the server never receives it except as a derived pin hint."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #7 comment 5 (2026-10-05), \"Accepted decision group — Review pin display hint (Figma-style comment placement, Phase 2)\". https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814\n- Discussion #1 comment 174 (2026-10-05), \"Cross-reference — accepted Review pin display hint (recorded on Part 7)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757817\n- Discussion #2 comment 36 (2026-10-05), \"Accepted implementation-recovery decision group — Multi-target geometry tracking for comment pins\". https://github.com/DevilTea/uiux/discussions/2#discussioncomment-18757811\n- Discussion #2 comment 39 (2026-10-06), \"Accepted implementation-recovery — transport-level wire batching and the tablet pin budget\": tablet pin budget. https://github.com/DevilTea/uiux/discussions/2#discussioncomment-18767954\n- Discussion #3 comment 4 (2026-10-05), \"Accepted companion — pins stay tracked during comment-range targeting (from Part 2)\". https://github.com/DevilTea/uiux/discussions/3#discussioncomment-18757813\n- Discussion #3 comment 5 (2026-10-05), \"Ratified reading — comment-range geometry (from Part 7)\". https://github.com/DevilTea/uiux/discussions/3#discussioncomment-18757818\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.review.pins.non-authoritative}} | [#7 c5 d1, d3 rule 6](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#1 c174](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757817) |\n| {{R.review.pins.no-cross-check}} | [#7 c5 d3 rule 5](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814) |\n| {{R.review.pins.create}} | [#7 c5 d4, d6](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814) |\n| {{R.review.pins.reanchor}} | [#7 c5 d5](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814) |\n| {{R.review.pins.to-workspace}} | [#7 c9 d3, R3](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.pins.move}} | [#7 c5 d4, R3](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814) |\n| {{R.review.pins.drag}} | [#7 c5 d4](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814) |\n| {{R.review.pins.not-recorded}} | [#7 c5 d3 rule 6, d5, d8](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#1 c174](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757817) |\n| {{R.review.pins.no-restore}} | [#7 c5 d5](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814) |\n| {{R.review.pins.placement}} | [#7 c5 d2, d6](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814) |\n| {{R.review.pins.physical}} | [#7 c5 d2, R4](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814) |\n| {{R.review.pins.hidden}} | [#7 c5 d6, R5](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#1 c174](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757817) |\n| {{R.review.pins.still-listed}} | [#7 c5 d6](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814) |\n| {{R.review.pins.invalid-anchor}} | [#7 c5 d6](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#1 c174](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757817) |\n| {{R.review.pins.variant}} | [#7 c5 d6](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814) |\n| {{R.review.pins.workspace}} | [#7 c9 d3, d8, R7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.review.pins.dismissed}} | [#7 c10 d11](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501) |\n| {{R.review.pins.click-point}} | [#7 c5 R1; Appendix A item 2](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#3 c5](https://github.com/DevilTea/uiux/discussions/3#discussioncomment-18757818) |\n\n## Implementation gaps\n\n- Issue #59: pins are hidden when a Widget is only partially covered by an unprovable occluder.\n- Issue #60: the tablet geometry budget (`MAX_TRACKED_WIDGETS = 64`) awaits real-device measurement.\n\n## Notes\n\n- The hint's persisted shape, range and writer quantization are owned by {{C.ws-format.review-display-hint}} and {{C.ws-format.review-hint-quantization}}; the refusal on Workspace threads by {{C.mutation-semantics.review-workspace-refusals}}. Pins being Workbench chrome outside the Preview iframe belongs to the Preview iframe boundary Feature, and tracking many pinned Widgets at once (Discussion #2 c36, c39; issues #59 and #60) to the Preview geometry Features (import batch 6).\n"
+		},
+		{
+			"ref": "F.view.decisions",
+			"title": "View Spec Decisions",
+			"summary": "Decisions recorded in a View's Spec: their identity, lifecycle and history, the derived lists of pending Decisions, and explicit promotion of a Review thread into a Decision.",
+			"rules": [
+				{
+					"ref": "R.view.decisions.view-local",
+					"statement": "A View's Decisions all live in that View's Spec, in one list whatever their status; pending, deferred and decided lists are derived views, never separate stores."
+				},
+				{
+					"ref": "R.view.decisions.stable-identity",
+					"statement": "A Decision keeps its identity through every status change; deferring, deciding or reopening never moves or re-creates it."
+				},
+				{
+					"ref": "R.view.decisions.explicit-actions",
+					"statement": "A Decision's status changes only through explicit lifecycle actions, never implicitly."
+				},
+				{
+					"ref": "R.view.decisions.reopen",
+					"statement": "Reopening a decided Decision clears its current outcome, and the earlier outcome survives only in its history."
+				},
+				{
+					"ref": "R.view.decisions.history",
+					"statement": "Every status or outcome change appends a history entry recording its time, its actor or source and the state before and after, so a Decision's lifecycle never depends on Git."
+				},
+				{
+					"ref": "R.view.decisions.pending-list",
+					"statement": "The Workbench derives a cross-View list of pending Decisions from the View files and navigates from each item to its View, and to its Variant or Widget when known."
+				},
+				{
+					"ref": "R.view.decisions.review-independent",
+					"statement": "Review and Decision lifecycles are independent: no reply, resolution or reopen creates, settles or changes a Decision, and promotion never changes the thread's status."
+				},
+				{
+					"ref": "R.view.decisions.explicit-promotion",
+					"statement": "A Review thread becomes a Decision only through an explicit promotion by a human or Agent; comments are never turned into Decisions automatically."
+				},
+				{
+					"ref": "R.view.decisions.promotion-target",
+					"statement": "A thread is promoted only into the View it is anchored to."
+				},
+				{
+					"ref": "R.view.decisions.workspace-thread",
+					"statement": "A Workspace thread cannot be promoted; it must first be re-anchored to a View's RootShell."
+				},
+				{
+					"ref": "R.view.decisions.initial-status",
+					"statement": "A promoted Decision starts pending unless the promotion records an outcome, which makes it decided."
+				},
+				{
+					"ref": "R.view.decisions.provenance",
+					"statement": "A promoted Decision records its source thread's identity, and the Workbench navigates from the Decision back to that thread."
+				},
+				{
+					"ref": "R.view.decisions.idempotent",
+					"statement": "Promoting a thread that already has a Decision in its View returns that Decision instead of creating a duplicate."
+				},
+				{
+					"ref": "R.view.decisions.idempotent-retry",
+					"statement": "That idempotent return comes before revision checks, so retrying a committed promotion with its original expected revisions succeeds."
+				},
+				{
+					"ref": "R.view.decisions.separate-decision",
+					"statement": "Creating another, independent Decision from the same thread requires a distinct explicit action."
+				},
+				{
+					"ref": "R.view.decisions.atomic",
+					"statement": "Promotion checks the thread's and the View's revisions and adds the Decision to the View in one atomic commit, leaving the thread unchanged."
+				},
+				{
+					"ref": "R.view.decisions.two-actions",
+					"statement": "Promote and resolve stay two actions with their own revision checks: there is no compound promote-and-resolve action and no promoted resolution kind."
+				},
+				{
+					"ref": "R.view.decisions.conflict-ui",
+					"statement": "When a promotion conflicts, the Workbench names which resource moved, the thread or the View, re-reads and asks the user to confirm again."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #1 comment 15 (2026-09-23), \"Accepted decision — structured View Spec with open-decision inbox (option C)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561230\n- Discussion #1 comment 16 (2026-09-23), \"Accepted decision — three-state View Spec decision lifecycle (option B)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561281\n- Discussion #1 comment 17 (2026-09-23), \"Accepted decision — one unified View-local `spec.decisions` array (option A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561343\n- Discussion #1 comment 18 (2026-09-23), \"Accepted decision — explicit Review → Decision promotion (option A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561393\n- Discussion #1 comment 157 (2026-09-29), \"Accepted decision group — View Spec decision lifecycle and references (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657198\n- Discussion #7 comment 9 (2026-10-06), \"Accepted decision group — Workspace-scoped Review threads and editable Review messages\": Workspace-scoped threads cannot be promoted. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095\n- Owner ruling 2026-10-07 (batch 4 confirmation): promotion idempotency before revision checks and both provenance keys accepted as shipped.\n- code@a9225ef `src/application/services/review-authoring.ts#L786-L847`. https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/application/services/review-authoring.ts#L786-L847\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.view.decisions.view-local}} | [#1 c17](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561343); [#1 c15](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561230) |\n| {{R.view.decisions.stable-identity}} | [#1 c16](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561281); [#1 c17](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561343); [#1 c156 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656726) |\n| {{R.view.decisions.explicit-actions}} | [#1 c157 d1](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657198); [#1 body: View IR vs View Spec](https://github.com/DevilTea/uiux/discussions/1) |\n| {{R.view.decisions.reopen}} | [#1 body: View IR vs View Spec; Canonical Decision Index item 5](https://github.com/DevilTea/uiux/discussions/1) |\n| {{R.view.decisions.history}} | [#1 c157 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657198) |\n| {{R.view.decisions.pending-list}} | [#1 c15](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561230); [#1 c16](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561281); [#1 c17](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561343) |\n| {{R.view.decisions.review-independent}} | [#1 c18](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561393); [#1 c19](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561501); [#7 c6 d6](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815); [#1 body: View IR vs View Spec](https://github.com/DevilTea/uiux/discussions/1) |\n| {{R.view.decisions.explicit-promotion}} | [#1 c18](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561393); [#1 body: Workflows, Reviews, & Decisions](https://github.com/DevilTea/uiux/discussions/1) |\n| {{R.view.decisions.promotion-target}} | [#1 c18 the corresponding item in the owning View](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561393); [#7 c9 d6: promotion into any named View (O3-B) rejected](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.view.decisions.workspace-thread}} | [#7 c9 d6, O3](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [#1 c178](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18772098) |\n| {{R.view.decisions.initial-status}} | [#1 body: Workflows, Reviews, & Decisions: promoted decisions initialize in pending unless settled](https://github.com/DevilTea/uiux/discussions/1) |\n| {{R.view.decisions.provenance}} | [#1 c18](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561393); [#1 c157 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657198); [code@a9225ef `app/components/workbench/SpecDocument.vue`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/app/components/workbench/SpecDocument.vue) \"from Review\" link |\n| {{R.view.decisions.idempotent}} | [#1 c157 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657198); [#1 c159 promotion idempotency](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18660618) |\n| {{R.view.decisions.idempotent-retry}} | [code@a9225ef `src/application/services/review-authoring.ts#L786-L804`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/application/services/review-authoring.ts#L786-L804) idempotency precedes revision conflicts; owner ruling 2026-10-07 (batch 4 confirmation): accepted as shipped |\n| {{R.view.decisions.separate-decision}} | [#1 c157 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657198) |\n| {{R.view.decisions.atomic}} | [#7 c6 d6, R8](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815); [#7 c10 G2, G3: the Review file records no promotion](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501); [#7 c9 F5](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.view.decisions.two-actions}} | [#7 c6 d6, R8](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815) |\n| {{R.view.decisions.conflict-ui}} | [#1 c176 d6 rules 4 and 5](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757820); [#1 c177 amended decisions: conflict UX kept](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n\n## Implementation gaps\n\n- {{R.view.decisions.explicit-actions}}: Not built as of a9225ef: no MCP Tool, HTTP route or Workbench action defers, decides or reopens a Decision (`update_view_spec` keeps Decisions unchanged, and `transitionDecision` in `src/domain/spec/schema.ts` has no caller); tracked in issue #86 (https://github.com/DevilTea/uiux/issues/86).\n- {{R.view.decisions.pending-list}}: Not built as of a9225ef: the Workbench shows Decisions only inside each View's Spec; there is no cross-View pending list; tracked in issue #86 (https://github.com/DevilTea/uiux/issues/86).\n- {{R.view.decisions.separate-decision}}: Not built as of a9225ef: no action creates a second Decision from a promoted thread (promotion returns the existing one, and `update_view_spec` keeps Decisions unchanged); tracked in issue #86 (https://github.com/DevilTea/uiux/issues/86).\n- {{R.view.decisions.conflict-ui}}: Not built as of a9225ef: the promotion dialog reports a failed promotion without naming the moved resource (`app/composables/useThreadActions.ts`); tracked in issue #87 (https://github.com/DevilTea/uiux/issues/87).\n\n## Notes\n\n- The Decision shape, history entries, transitions and promotion provenance are owned by {{C.ws-format.decision}}, {{C.ws-format.decision-history}}, {{C.ws-format.decision-transitions}} and {{C.ws-format.decision-provenance}}; the promotion conflict result by {{C.mutation-semantics.promotion-conflict}}. The stamped actor of promotion is owned by {{R.access.actor.promotion}} and the lease check by {{R.access.leases.check}} (import batch 3).\n"
+		},
+		{
+			"ref": "F.flow.graph",
+			"title": "UX Flow graph",
+			"summary": "The UX Flow graph: steps and their View and Variant targets, Widget-Event transitions and their identity, graph validity, invalid references, the external scenario reference, and the Workbench graph editor.",
+			"rules": [
+				{
+					"ref": "R.flow.graph.not-router",
+					"statement": "A UX Flow is a design and prototype specification, not a production router: UIUX generates no navigation code from it."
+				},
+				{
+					"ref": "R.flow.graph.base-state",
+					"statement": "A step that names no Variant targets its View's canonical base state: the View IR and plugin defaults with no Variant preset applied."
+				},
+				{
+					"ref": "R.flow.graph.trigger",
+					"statement": "A transition is triggered by a semantic Widget Event occurrence, identified by its source Widget and declared Event name; Widget Methods and DOM events are never navigation triggers."
+				},
+				{
+					"ref": "R.flow.graph.no-payload",
+					"statement": "Transitions match only a Widget Event's identity, never its arguments, so branching needs distinct semantic Events."
+				},
+				{
+					"ref": "R.flow.graph.ambiguous",
+					"statement": "Within one step a Widget Event trigger leads to at most one transition; a duplicate trigger is a validation error, never resolved by order or priority."
+				},
+				{
+					"ref": "R.flow.graph.transition-identity",
+					"statement": "A transition has no identity of its own: its source step and trigger identify it, and the editor's edge keys are temporary."
+				},
+				{
+					"ref": "R.flow.graph.reachable",
+					"statement": "Every step must be reachable from the entry step; an unreachable step is kept for repair but is a validation error that blocks complete execution and formal Evidence."
+				},
+				{
+					"ref": "R.flow.graph.cycles",
+					"statement": "Cycles and self-loops are valid, and a step without outgoing transitions is terminal without any flag."
+				},
+				{
+					"ref": "R.flow.graph.invalid-refs",
+					"statement": "Invalid View, Variant and Widget references are preserved verbatim with structured diagnostics and never rebound by name, type, selector, position or similarity."
+				},
+				{
+					"ref": "R.flow.graph.invalid-blocks",
+					"statement": "A remaining invalid step or transition reference blocks complete execution, formal Flow Evidence and executable Handoff claims, while the Flow stays editable and its valid steps previewable."
+				},
+				{
+					"ref": "R.flow.graph.event-names",
+					"statement": "Flow validation never checks a trigger's Event name against the Widget's declared Events, so an undeclared Event stays valid."
+				},
+				{
+					"ref": "R.flow.graph.scenario-ref",
+					"statement": "UIUX never imports, mirrors, authors, synchronizes or validates the scenario a Flow's scenario reference points to, and failing to resolve it never changes the Flow."
+				},
+				{
+					"ref": "R.flow.graph.editor",
+					"statement": "The Workbench edits a Flow in a node-and-edge graph editor backed directly by the one canonical Flow, with structured editing of the selected step or transition."
+				},
+				{
+					"ref": "R.flow.graph.event-picker",
+					"statement": "When a trigger Widget's declared Events are known, the Flow editor offers them in a picker, and an existing undeclared Event stays selected and labelled, never cleared or rebound."
+				},
+				{
+					"ref": "R.flow.graph.mcp",
+					"statement": "Agents can validate a Flow and play it back through MCP Tools, besides creating, reading, listing and updating it."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #6 body (Part 6 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win). https://github.com/DevilTea/uiux/discussions/6\n- Discussion #6 comment 1 (2026-09-30), \"Accepted decision group — UX Flow schema baseline (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18672784\n- Discussion #6 comment 2 (2026-09-30), \"Accepted decision group — Flow execution and graph validity (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004\n- Discussion #6 comment 6 (2026-09-30), \"Ratified derived consequence — no independent Flow transition UUID\". https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18676183\n- Discussion #6 comment 7 (2026-09-30), \"Accepted convergence decision — keyed steps with nested outgoing transitions\". https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18676343\n- Discussion #6 comment 9 (2026-10-06), \"Accepted clarification — declared-Events metadata for the Flow editor\": declared-Events metadata for the editor. https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18767955\n- Owner ruling 2026-10-07 (batch 4 confirmation): `flow.*` validation codes are non-normative; code is authoritative.\n- code@a9225ef `src/domain/flows/schema.ts`. https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/domain/flows/schema.ts\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.flow.graph.not-router}} | [#6 body: Scope and inherited decisions](https://github.com/DevilTea/uiux/discussions/6); [#6 c3 10a](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673622) |\n| {{R.flow.graph.base-state}} | [#6 c1 d2](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18672784) |\n| {{R.flow.graph.trigger}} | [#6 c1 d4](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18672784); [#6 body: item 4](https://github.com/DevilTea/uiux/discussions/6) |\n| {{R.flow.graph.no-payload}} | [#6 c2 d5](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004) |\n| {{R.flow.graph.ambiguous}} | [#6 c2 d5](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004); [#6 c7](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18676343) |\n| {{R.flow.graph.transition-identity}} | [#6 c6](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18676183); [#6 c7](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18676343) |\n| {{R.flow.graph.reachable}} | [#6 c2 d8](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004) |\n| {{R.flow.graph.cycles}} | [#6 c2 d8](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004) |\n| {{R.flow.graph.invalid-refs}} | [#6 c2 d7](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004) |\n| {{R.flow.graph.invalid-blocks}} | [#6 c2 d7](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004) |\n| {{R.flow.graph.event-names}} | [#6 c9 supersedes the Event part of d7 of comment 2 for validation](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18767955) |\n| {{R.flow.graph.scenario-ref}} | [#6 c1 d3](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18672784) |\n| {{R.flow.graph.editor}} | [#6 c3 10c](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673622); [#6 c7](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18676343) |\n| {{R.flow.graph.event-picker}} | [#6 c9](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18767955); [code@a9225ef `app/components/flows/FlowInspector.vue`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/app/components/flows/FlowInspector.vue) |\n| {{R.flow.graph.mcp}} | [#6 c3 10b](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673622); [#6 body: item 10](https://github.com/DevilTea/uiux/discussions/6) |\n\n## Implementation gaps\n\n- {{R.flow.graph.invalid-refs}}: Not built as of a9225ef: only the Workbench Flow editor checks View, Variant and Widget references (`app/utils/flow-graph.ts`); the server's Flow reads and discovery report no reference diagnostics; tracked in issue #88 (https://github.com/DevilTea/uiux/issues/88) (epic issue #21 (https://github.com/DevilTea/uiux/issues/21)).\n- {{R.flow.graph.mcp}}: Not built as of a9225ef: MCP has `create_flow` and `update_flow` and the Flow Resource, but no validate or playback Tool (`src/mcp/server.ts`); tracked in issue #88 (https://github.com/DevilTea/uiux/issues/88) (epic issue #21 (https://github.com/DevilTea/uiux/issues/21)).\n\n## Notes\n\n- The Flow shape is owned by {{C.ws-format.flow-shape}}, {{C.ws-format.flow-step}} and {{C.ws-format.flow-scenario-ref}}. Owner ruling 2026-10-07 (batch 4 confirmation): Flow validation codes (`flow.*`) are non-normative; code at a9225ef is authoritative (`src/domain/flows/schema.ts`).\n- Discussion #6 c2 d7 lists Event references among the invalid references; the later accepted clarification #6 c9 decides that Flow validation does not check Event names, which {{R.flow.graph.event-names}} records. The declared-Events metadata route `GET /api/preview/widget-events` is an HTTP route and stays in code (owner ruling Q4).\n"
+		},
+		{
+			"ref": "F.flow.prototype",
+			"title": "Prototype playback",
+			"summary": "The Workbench Prototype player: playing a UX Flow from its entry step with a fresh View Runtime per step entry, following reported Widget Events or Workbench-driven advances, and what playback never observes or keeps.",
+			"rules": [
+				{
+					"ref": "R.flow.proto.one-model",
+					"statement": "The Prototype player starts at the Flow's entry step and follows the same canonical Flow the editor edits; UIUX keeps no second prototype model."
+				},
+				{
+					"ref": "R.flow.proto.fresh-runtime",
+					"statement": "Every step entry, including a return to the same step, a self-loop or a restart, creates a fresh View Runtime from the View IR, plugin defaults and the step's Variant, and leaving the step disposes it."
+				},
+				{
+					"ref": "R.flow.proto.no-carryover",
+					"statement": "Interactive state may change within a step but never carries across a step boundary."
+				},
+				{
+					"ref": "R.flow.proto.workbench-resolves",
+					"statement": "The Workbench player resolves each reported Widget Event against the Flow; the Preview never receives the Flow and never reports a step."
+				},
+				{
+					"ref": "R.flow.proto.armed-only",
+					"statement": "Only the current step's outgoing triggers are observed, and only while a player has armed the Preview; nothing is observed on the ordinary View canvas."
+				},
+				{
+					"ref": "R.flow.proto.one-transition",
+					"statement": "Each step entry accepts at most one transition from any source; a later occurrence, double click or racing advance for that entry is discarded."
+				},
+				{
+					"ref": "R.flow.proto.no-arguments",
+					"statement": "The player learns only which armed Widget Event occurred, never its arguments or the input that caused it."
+				},
+				{
+					"ref": "R.flow.proto.ephemeral",
+					"statement": "Playback history stays in the browser: it is never written to the Workspace, sent to the server, or included in Review, Evidence or Handoff."
+				},
+				{
+					"ref": "R.flow.proto.next-controls",
+					"statement": "The player always offers a labelled, keyboard-reachable Next control for each outgoing transition, even when the Preview reports Widget Events."
+				},
+				{
+					"ref": "R.flow.proto.advance-not-event",
+					"statement": "A Workbench-driven advance is a player action, not a Widget Event: it invokes no Widget Method, synthesizes no input and is never formal Evidence."
+				},
+				{
+					"ref": "R.flow.proto.comment-mode",
+					"statement": "Commenting during playback is allowed: in comment mode Widget Events cannot advance the player, and Events from that time are never replayed afterwards."
+				},
+				{
+					"ref": "R.flow.proto.no-unreferenced",
+					"statement": "Nothing observes Widget Events that no transition references, and there is no Event log while authoring a Flow."
+				},
+				{
+					"ref": "R.flow.proto.fallback",
+					"statement": "When the Preview cannot report Widget Events, the player works through its Next controls alone and says so."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #6 body (Part 6 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win). https://github.com/DevilTea/uiux/discussions/6\n- Discussion #6 comment 2 (2026-09-30), \"Accepted decision group — Flow execution and graph validity (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004\n- Discussion #6 comment 8 (2026-10-05), \"Accepted companion — Widget Event reporting for the Prototype player (from Part 2)\". https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18760681\n- Discussion #2 comment 37 (2026-10-05), \"Accepted implementation-recovery decision group — Widget Event reporting for the Prototype player\". https://github.com/DevilTea/uiux/discussions/2#discussioncomment-18760678\n- Discussion #3 comment 7 (2026-10-05), \"Accepted companion — Widget Event suppression during comment and targeting mode (from Part 2)\". https://github.com/DevilTea/uiux/discussions/3#discussioncomment-18760683\n- Discussion #1 comment 4 (2026-09-22), \"Accepted decision — Workbench information architecture\": Prototype is a mode launched from a UX Flow. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18547636\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.flow.proto.one-model}} | [#6 c3 10c](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673622); [#6 body: item 10](https://github.com/DevilTea/uiux/discussions/6) |\n| {{R.flow.proto.fresh-runtime}} | [#6 c2 d6](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004); [#6 c8 ratified reading: one step entry is one runtime generation](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18760681) |\n| {{R.flow.proto.no-carryover}} | [#6 c2 d6](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004) |\n| {{R.flow.proto.workbench-resolves}} | [#6 c8 d1](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18760681); [#2 c37 d1](https://github.com/DevilTea/uiux/discussions/2#discussioncomment-18760678) |\n| {{R.flow.proto.armed-only}} | [#6 c8](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18760681); [#2 c37 d2, d9](https://github.com/DevilTea/uiux/discussions/2#discussioncomment-18760678) |\n| {{R.flow.proto.one-transition}} | [#6 c8 d7](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18760681); [#2 c37 d7](https://github.com/DevilTea/uiux/discussions/2#discussioncomment-18760678) |\n| {{R.flow.proto.no-arguments}} | [#2 c37 d3, d9](https://github.com/DevilTea/uiux/discussions/2#discussioncomment-18760678) |\n| {{R.flow.proto.ephemeral}} | [#2 c37 d9](https://github.com/DevilTea/uiux/discussions/2#discussioncomment-18760678) |\n| {{R.flow.proto.next-controls}} | [#6 c8 d8](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18760681); [#2 c37 d8](https://github.com/DevilTea/uiux/discussions/2#discussioncomment-18760678) |\n| {{R.flow.proto.advance-not-event}} | [#6 c8 d8](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18760681); [#2 c37 d8](https://github.com/DevilTea/uiux/discussions/2#discussioncomment-18760678) |\n| {{R.flow.proto.comment-mode}} | [#6 c8 R17](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18760681); [#2 c37 d6](https://github.com/DevilTea/uiux/discussions/2#discussioncomment-18760678) |\n| {{R.flow.proto.no-unreferenced}} | [#6 c8 R18](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18760681) |\n| {{R.flow.proto.fallback}} | [#2 c37 d10](https://github.com/DevilTea/uiux/discussions/2#discussioncomment-18760678) |\n\n## Notes\n\n- The Widget Event wire messages, arm identifiers, generation gates and the Preview runtime's passive observation rules (Discussion #2 c37 decisions 3-6) belong to the Preview protocol Contract (import batches 6a-6c, owner ruling Q1). Keyboard digits and dock labels are presentation.\n"
+		},
+		{
+			"ref": "F.flow.evidence",
+			"title": "Formal UX Flow Evidence",
+			"summary": "Formal Evidence for a UX Flow: the replayable traversal trace and its captures, the Evidence-owned replay recipe and its immutability, and how Review and Handoff use Flow Evidence.",
+			"rules": [
+				{
+					"ref": "R.flow.evidence.trace",
+					"statement": "Formal UX Flow Evidence is a deterministic, replayable trace with its required Playwright captures, recording the entry context and, per traversed step, its identity, View and Variant, triggering Widget Event, resulting step, validation result and Evidence references."
+				},
+				{
+					"ref": "R.flow.evidence.executed",
+					"statement": "UIUX executes and verifies the playback with Playwright; a manual screenshot sequence or prose walkthrough is never formal Flow Evidence."
+				},
+				{
+					"ref": "R.flow.evidence.transitions",
+					"statement": "A trace identifies each transition by its source step, trigger and resulting step, never by a transition ID."
+				},
+				{
+					"ref": "R.flow.evidence.recipe-owned",
+					"statement": "The Playwright actions and assertions that drive a replay belong to the Evidence record, never to the Flow or to Adapter Event metadata."
+				},
+				{
+					"ref": "R.flow.evidence.proves-event",
+					"statement": "A replay must show that its recorded actions produce the expected Widget Event and transition, so the Evidence proves the semantic transition rather than browser operations."
+				},
+				{
+					"ref": "R.flow.evidence.recipe-immutable",
+					"statement": "A replay recipe is immutable with its Evidence: changing it creates new Evidence, and a copied earlier recipe is only an authoring starting point."
+				},
+				{
+					"ref": "R.flow.evidence.handoff",
+					"statement": "A Handoff manifest references Flow traces and captures as derived artifacts, while the canonical Flow is an authored Handoff resource."
+				},
+				{
+					"ref": "R.flow.evidence.review",
+					"statement": "A Review submission may name UX Flow as a change domain and reference specific Flows and their traces."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #6 comment 3 (2026-09-30), \"Accepted decision group — Flow evidence, Handoff, MCP, and Workbench (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673622\n- Discussion #6 comment 4 (2026-09-30), \"Accepted convergence decision — Evidence-owned deterministic replay recipe\". https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18675481\n- Discussion #6 comment 5 (2026-09-30), \"Ratified derived consequence — Replay recipe immutability follows evidence identity\". https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18675612\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.flow.evidence.trace}} | [#6 c3 d9](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673622); [#6 body: item 9](https://github.com/DevilTea/uiux/discussions/6) |\n| {{R.flow.evidence.executed}} | [#6 c3 d9](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673622) |\n| {{R.flow.evidence.transitions}} | [#6 c6](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18676183) |\n| {{R.flow.evidence.recipe-owned}} | [#6 c4](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18675481); [#6 body: item 11](https://github.com/DevilTea/uiux/discussions/6) |\n| {{R.flow.evidence.proves-event}} | [#6 c4](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18675481); [#6 body: item 11](https://github.com/DevilTea/uiux/discussions/6) |\n| {{R.flow.evidence.recipe-immutable}} | [#6 c5](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18675612) |\n| {{R.flow.evidence.handoff}} | [#6 c3 10a](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673622) |\n| {{R.flow.evidence.review}} | [#6 c3 10a](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673622); [#7 c2 d6: Flow in the Evidence taxonomy](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673968) |\n\n## Implementation gaps\n\n- Not built as of a9225ef: no formal UX Flow Evidence is produced: formal capture covers View render contexts only, and `src/domain/evidence` defines no Flow trace record; tracked in issue #88 (https://github.com/DevilTea/uiux/issues/88) (epic issue #21 (https://github.com/DevilTea/uiux/issues/21)).\n"
+		}
+	],
+	"contracts": [
+		{
+			"ref": "C.ws-format",
+			"title": "Workspace persisted format",
+			"summary": "The persisted format of a UIUX Workspace, versioned as a whole by the manifest `schemaVersion`: the manifest, the path, file unit and identity of every canonical resource kind and of the content-addressed derived-artifact store, the canonical JSON shapes of those resources, and the diagnostics of a Workspace whose schema is older or unsupported.",
+			"constrains": [
+				"F.ws.layout",
+				"F.ws.migration",
+				"F.view.authoring",
+				"F.view.variants",
+				"F.view.spec",
+				"F.view.decisions",
+				"F.i18n.resources",
+				"F.assets",
+				"F.artifacts",
+				"F.evidence.formal",
+				"F.render-context",
+				"F.adapter.resolution",
+				"F.adapter.catalog",
+				"F.review.threads",
+				"F.flow.graph",
+				"F.review.lifecycle",
+				"F.review.messages",
+				"F.review.pins"
+			],
+			"clauses": [
+				{
+					"ref": "C.ws-format.manifest-path",
+					"statement": "The Workspace manifest is `.uiux/workspace.json` under the Workspace root. The `.uiux/` directory is reserved for UIUX system metadata, such as the manifest and the derived-artifact store.",
+					"constrains": [
+						"F.ws.layout"
+					]
+				},
+				{
+					"ref": "C.ws-format.manifest-fields",
+					"statement": "The manifest is a JSON object holding the Workspace-level settings: `schemaVersion`, `i18n`, the ordered `adapters` list and the `viewports` and `themes` registries. All five are required; an empty `adapters` list or registry is valid.",
+					"constrains": [
+						"F.ws.layout",
+						"F.i18n.resources",
+						"F.adapter.resolution",
+						"F.render-context"
+					]
+				},
+				{
+					"ref": "C.ws-format.schema-version",
+					"statement": "`schemaVersion` is a positive integer and the only schema version in a Workspace: resource files carry none and are all decoded under it. The current version is 3; versions 1 and 2 are recognized older versions.",
+					"constrains": [
+						"F.ws.migration"
+					]
+				},
+				{
+					"ref": "C.ws-format.migration-steps",
+					"statement": "The migration steps are `uiux.v1-to-v2`, from `schemaVersion` 1 to 2, and `uiux.v2-to-v3`, from 2 to 3.",
+					"constrains": [
+						"F.ws.migration"
+					]
+				},
+				{
+					"ref": "C.ws-format.version-gating",
+					"statement": "A field introduced by a later schema version is invalid (`schema.unknown_field`) in a Workspace at an earlier version; no version treats a later version's field as an optional addition.",
+					"constrains": [
+						"F.ws.migration"
+					]
+				},
+				{
+					"ref": "C.ws-format.schema-diagnostics",
+					"statement": "A Workspace whose schema is `unsupported` is reported with the diagnostic `workspace.schema_unsupported`, which is also the code of every operation refused because of it; an operation refused because the Workspace needs migration reports `workspace.migration_required`. Over HTTP, formal capture, Handoff readiness assessment and Handoff export refused with `workspace.migration_required` answer 422.",
+					"constrains": [
+						"F.ws.migration"
+					]
+				},
+				{
+					"ref": "C.ws-format.i18n-settings",
+					"statement": "`i18n` is an object whose required `defaultLocale` is a canonical BCP 47 tag. Supported Locales are discovered from Locale files and not listed in the manifest, and `i18n` gains further settings only additively, through schema evolution.",
+					"constrains": [
+						"F.i18n.resources"
+					]
+				},
+				{
+					"ref": "C.ws-format.adapters",
+					"statement": "`adapters` is an ordered array whose order is the canonical installation order. Each entry holds a portable module reference (a bare package or module specifier, or a `./` specifier relative to the Workspace root; never an absolute or resolved path) and an optional JSON-compatible Adapter `config`.",
+					"constrains": [
+						"F.adapter.resolution"
+					]
+				},
+				{
+					"ref": "C.ws-format.viewports",
+					"statement": "`viewports` maps viewport IDs to presets. A viewport ID is a non-empty, case-sensitive, opaque Workspace-local string, and each preset records the exact CSS viewport width and height; labels and other metadata are separate from identity.",
+					"constrains": [
+						"F.render-context"
+					]
+				},
+				{
+					"ref": "C.ws-format.themes",
+					"statement": "`themes` maps theme IDs, which are non-empty, case-sensitive, opaque Workspace-local strings, to theme entries; Adapters validate or map those IDs but do not own them.",
+					"constrains": [
+						"F.render-context"
+					]
+				},
+				{
+					"ref": "C.ws-format.view-path",
+					"statement": "Each View is one file `views/<uuid>.view.json`, where `<uuid>` is the View's full UUID and equals its `id`.",
+					"constrains": [
+						"F.ws.layout",
+						"F.view.authoring"
+					]
+				},
+				{
+					"ref": "C.ws-format.view-shape",
+					"statement": "A View's top level has exactly `id` (its full UUID), `name` (its required display name), an optional single-valued `feature` tag, `ir`, `variants` and `spec`; derived timestamps, file paths or filenames and a generic `metadata` object are not canonical fields.",
+					"constrains": [
+						"F.view.authoring"
+					]
+				},
+				{
+					"ref": "C.ws-format.view-ir",
+					"statement": "`ir` is the RootShell Widget, with type `RootShell`, ID `root` and one Slot, `content`: an ordered array of child Widget sources whose own shape the Adapters' Widget plugins define, and which is empty for an empty View.",
+					"constrains": [
+						"F.view.authoring"
+					]
+				},
+				{
+					"ref": "C.ws-format.variants",
+					"statement": "`variants` is an object keyed by Variant name, a non-empty string. Each entry is `{ state }`, where `state` maps Widget IDs to sparse maps of State member overrides (`variants.<name>.state.<widgetId>.<member>`); entries carry no UUID and do not repeat the name, and the entry object stays open to additive metadata.",
+					"constrains": [
+						"F.view.variants"
+					]
+				},
+				{
+					"ref": "C.ws-format.spec-fields",
+					"statement": "`spec` always contains `intent` (a string), `entryConditions`, `interactionRules`, `constraints` and `accessibility` (string lists whose items carry no IDs), `references` (typed references) and `decisions` (Decisions).",
+					"constrains": [
+						"F.view.spec",
+						"F.view.decisions"
+					]
+				},
+				{
+					"ref": "C.ws-format.references",
+					"statement": "Each `references` entry is a typed reference discriminated by `type`: `{ type: \"view\", viewId, variantName?, relation? }` with a full View UUID as `viewId`, or `{ type: \"external\", uri, label?, relation? }` with a non-empty absolute URI of any scheme as `uri`. An optional `relation` is a non-empty string, and other `type` values are invalid until a schema version adds them.",
+					"constrains": [
+						"F.view.spec"
+					]
+				},
+				{
+					"ref": "C.ws-format.decision",
+					"statement": "A Decision is `{ id, question, status, outcome?, history, provenance? }`: `id` is a full UUID, `question` a string and `status` `pending`, `deferred` or `decided`; `outcome` `{ summary, rationale }`, with a non-empty `summary` and a string `rationale`, is present exactly when `status` is `decided`.",
+					"constrains": [
+						"F.view.decisions"
+					]
+				},
+				{
+					"ref": "C.ws-format.decision-history",
+					"statement": "A Decision `history` entry is `{ at, actor?, source?, before, after }` with an `actor` or a `source`; `before` and `after` are `{ status, outcome? }` snapshots, each entry's `before` equals the previous entry's `after`, and the last `after` equals the current status and outcome.",
+					"constrains": [
+						"F.view.decisions"
+					]
+				},
+				{
+					"ref": "C.ws-format.decision-transitions",
+					"statement": "Decision transitions are `pending` ↔ `deferred`, `pending` → `decided`, `deferred` → `decided` and `decided` → `pending`; a reopen's `before` keeps the prior outcome and its `after` has none.",
+					"constrains": [
+						"F.view.decisions"
+					]
+				},
+				{
+					"ref": "C.ws-format.decision-provenance",
+					"statement": "`provenance`, when present, is a JSON object; a Decision promoted from a Review thread records that thread's ID in it as both `reviewId` and `sourceReviewThreadId`.",
+					"constrains": [
+						"F.view.decisions"
+					]
+				},
+				{
+					"ref": "C.ws-format.flow-path",
+					"statement": "Each UX Flow is one file `flows/<uuid>.flow.json`, where `<uuid>` equals the Flow's `id`.",
+					"constrains": [
+						"F.ws.layout",
+						"F.flow.graph"
+					]
+				},
+				{
+					"ref": "C.ws-format.flow-shape",
+					"statement": "A UX Flow is `{ id, name, scenarioRef?, entryStepId, steps }`: `id` is its full UUID, `name` a required non-empty display name, `entryStepId` the full UUID of one of its steps and `steps` an object keyed by full step UUIDs; there is no top-level `transitions` array.",
+					"constrains": [
+						"F.flow.graph"
+					]
+				},
+				{
+					"ref": "C.ws-format.flow-step",
+					"statement": "A step entry is `{ target: { viewId, variantName? }, transitions }` and does not repeat its key as `id`; each transition is exactly `{ trigger: { widgetId, event }, targetStepId }`, with no ID or `sourceStepId`, and transition order carries no meaning.",
+					"constrains": [
+						"F.flow.graph"
+					]
+				},
+				{
+					"ref": "C.ws-format.flow-scenario-ref",
+					"statement": "`scenarioRef`, when present, is a JSON object naming an external system or source and an opaque external ID or URI, optionally with a non-authoritative display label; UIUX does not validate its members.",
+					"constrains": [
+						"F.flow.graph"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-path",
+					"statement": "Each Review thread is one file `reviews/<uuid>.review.json`, where `<uuid>` equals the thread's `id`.",
+					"constrains": [
+						"F.ws.layout",
+						"F.review.threads"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-thread",
+					"statement": "A Review thread is a JSON object with exactly `id` (its full UUID), `anchor`, `variantNames` (an array of unique non-empty Variant names), an optional `displayHint`, `status` and the ordered arrays `messages`, `history` and `submissions`.",
+					"constrains": [
+						"F.review.threads"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-anchor",
+					"statement": "`anchor` is either the Widget anchor `{ viewId, widgetId }`, with a full View UUID and a non-empty Widget ID, or the Workspace anchor `{ scope: \"workspace\" }`. Both arms are closed; an object with `scope` is the Workspace arm, and any other `scope` value is `review.invalid_anchor_scope`.",
+					"constrains": [
+						"F.review.threads"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-workspace-arm",
+					"statement": "A Workspace-anchored thread has `variantNames: []` (`review.workspace_anchor_variants`) and no `displayHint` (`review.display_hint_without_widget`); the same holds for the Workspace arm inside re-anchor events.",
+					"constrains": [
+						"F.review.threads",
+						"F.review.pins"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-status",
+					"statement": "`status` is `open`, `ready-for-review` or `resolved`.",
+					"constrains": [
+						"F.review.lifecycle"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-actor",
+					"statement": "Every message, message edit, submission and history event records an `actor` `{ type, id?, displayName? }` and an authored time `at`, an RFC 3339 UTC timestamp.",
+					"constrains": [
+						"F.review.threads",
+						"F.review.lifecycle",
+						"F.review.messages",
+						"F.review.pins"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-message",
+					"statement": "A message is `{ id, actor, at, body, edits? }`: `id` is a full UUID and `body` the current text; `edits`, when present, is a non-empty array (`review.message_edits_empty`) of closed `{ id, actor, at, previousBody }` entries, each with a full UUID `id`.",
+					"constrains": [
+						"F.review.threads",
+						"F.review.messages"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-edit-author",
+					"statement": "An edited message has an `actor.id`, every edit's `actor` has the message's `actor.id` and `actor.type` (`review.message_edit_not_author`), and edit times strictly follow the message's `at` and never decrease (`review.message_edit_out_of_order`).",
+					"constrains": [
+						"F.review.messages"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-edit-content",
+					"statement": "No submission and no event entering `resolved` has an `at` between a message's `at` and an edit's `at`, inclusive (`review.message_edit_after_formal_act`); an edited message's `body` is non-empty after trimming (`review.message_body_empty`); and each `previousBody` differs from the text that replaced it (`review.message_edit_noop`).",
+					"constrains": [
+						"F.review.messages"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-submission",
+					"statement": "A submission is `{ id, actor, at, changeDomains, resources, scope, evidenceRefs }`: a full UUID `id`, at least one change domain, at least one resource `{ identity, revision }`, a `scope` object and at least one Evidence reference; its `at` equals the time of the lifecycle event that created it.",
+					"constrains": [
+						"F.review.lifecycle"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-evidence-ref",
+					"statement": "Each `evidenceRefs` entry is exactly `{ kind, evidence }`: `kind` is the Evidence taxonomy discriminator and `evidence` the referenced immutable Evidence record's `sha256:<hex>` identity; an entry has no ID, label or other metadata.",
+					"constrains": [
+						"F.review.lifecycle"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-history-event",
+					"statement": "A history event has a full UUID `id`, `kind` `lifecycle` or `reanchor`, `actor`, `at` and an optional `reason`. A lifecycle event adds `from`, `to`, an optional `submissionId` and an optional `resolution`; a re-anchor event adds `before` and `after`, each `{ anchor, variantNames }`.",
+					"constrains": [
+						"F.review.threads",
+						"F.review.lifecycle"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-transitions",
+					"statement": "Lifecycle transitions are `open` → `ready-for-review`, `ready-for-review` → `open`, `resolved` → `open`, `ready-for-review` → `resolved` with any resolution and `open` → `resolved` with any resolution but `verified`; any other is `review.invalid_transition`, and the first lifecycle event starts from `open` (`review.invalid_initial_status`).",
+					"constrains": [
+						"F.review.lifecycle"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-resolution",
+					"statement": "`resolution` is `verified`, `answered`, `wont-fix`, `duplicate` or `obsolete` (`review.invalid_resolution`), present exactly on lifecycle events entering `resolved` (`review.resolution_required`, `review.resolution_unexpected`); a thread's current resolution is that of its final lifecycle event while it is resolved, never stored separately.",
+					"constrains": [
+						"F.review.lifecycle"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-resolution-rules",
+					"statement": "On an event entering `resolved`: `verified` comes from `ready-for-review` and carries the active submission's `submissionId` (`review.resolve_missing_submission`, `review.resolve_stale_submission`); any other resolution has no `submissionId` (`review.direct_resolve_submission_forbidden`); `duplicate` has a non-empty `reason` (`review.resolution_reason_required`); and the actor's `type` is `human` (`review.resolve_requires_human`).",
+					"constrains": [
+						"F.review.lifecycle"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-display-hint",
+					"statement": "`displayHint` is a closed object with at least one member (`review.display_hint_empty`); its only member, `pin`, is a closed `{ x, y }` of finite numbers from 0 to 1 inclusive (`review.display_hint_out_of_range`), normalized against the anchored Widget's full rendered rectangle with the origin at its top-left, x rightward and y downward.",
+					"constrains": [
+						"F.review.pins"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-hint-quantization",
+					"statement": "Writers clamp pin coordinates to [0, 1] and quantize them to 4 fractional digits; validators check only the range and never repair a value.",
+					"constrains": [
+						"F.review.pins"
+					]
+				},
+				{
+					"ref": "C.ws-format.locale-file",
+					"statement": "Each Locale is one file `i18n/<locale>.json`, named by its canonical BCP 47 tag, holding one flat JSON object that maps literal message keys to string values: `.` in a key has no nesting or namespace meaning, and there are no per-View, split or merged Locale files.",
+					"constrains": [
+						"F.i18n.resources"
+					]
+				},
+				{
+					"ref": "C.ws-format.locale-discovery",
+					"statement": "Locale files are discovered from `i18n/*.json`; a file whose name is not a canonical BCP 47 tag is diagnosed and excluded from the discovered Locales, never aliased to or merged with another file.",
+					"constrains": [
+						"F.i18n.resources"
+					]
+				},
+				{
+					"ref": "C.ws-format.asset-directory",
+					"statement": "Each authored Asset is one directory `assets/<uuid>/` containing `asset.json` and exactly one source-content file; the directory UUID equals the `id` in `asset.json`.",
+					"constrains": [
+						"F.ws.layout",
+						"F.assets"
+					]
+				},
+				{
+					"ref": "C.ws-format.asset-metadata",
+					"statement": "`asset.json` records at least the Asset `id`, a required display `name`, the source-content filename and the declared `mediaType`; references never depend on display, original or content filenames.",
+					"constrains": [
+						"F.assets"
+					]
+				},
+				{
+					"ref": "C.ws-format.asset-binding",
+					"statement": "View data binds an Asset only as `{ \"$asset\": \"<assetId>\" }`, and only in Adapter Catalog fields declared asset-capable.",
+					"constrains": [
+						"F.assets",
+						"F.adapter.catalog"
+					]
+				},
+				{
+					"ref": "C.ws-format.authored-vs-derived",
+					"statement": "Authored Assets under `assets/` are source data; UIUX-generated derived artifacts live separately under `.uiux/artifacts/`.",
+					"constrains": [
+						"F.assets",
+						"F.artifacts"
+					]
+				},
+				{
+					"ref": "C.ws-format.artifact-store",
+					"statement": "A derived artifact is identified by `sha256:<hex>` over its bytes and stored immutably under `.uiux/artifacts/sha256/`: identical bytes deduplicate, and an existing blob is never overwritten.",
+					"constrains": [
+						"F.artifacts"
+					]
+				},
+				{
+					"ref": "C.ws-format.evidence-records",
+					"statement": "Formal Evidence records are themselves immutable artifacts in that store; there is no mutable `evidence/` resource namespace, and rerunning Evidence creates a new artifact rather than overwriting one.",
+					"constrains": [
+						"F.artifacts",
+						"F.evidence.formal"
+					]
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #1 body (Part 1 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win): Location-Independent, File-Native Workspace; Canonical Decision Index items 2, 4 and 5. https://github.com/DevilTea/uiux/discussions/1\n- Discussion #1 comment 152 (2026-09-29), \"Accepted decision group — Workspace schema and RootShell boundary (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656497\n- Discussion #1 comment 153 (2026-09-29), \"Accepted decision group — Workspace and View canonical JSON shape (C / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656572\n- Discussion #1 comment 155 (2026-09-29), \"Accepted decision group — View Variant schema and validation (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656662\n- Discussion #1 comment 156 (2026-09-29), \"Accepted decision group — View Spec core schema (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656726\n- Discussion #1 comment 157 (2026-09-29), \"Accepted decision group — View Spec decision lifecycle and references (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657198\n- Discussion #1 comment 170 (2026-09-30), \"Accepted convergence decision — URI-based external View Spec reference\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18675877\n- Discussion #7 comment 1 (2026-09-30), \"Accepted decision group — Review persistence baseline (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686\n- Discussion #7 comment 5 (2026-10-05), \"Accepted decision group — Review pin display hint (Figma-style comment placement, Phase 2)\": decision 7: schema 1 -> 2. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814\n- Discussion #7 comment 9 (2026-10-06), \"Accepted decision group — Workspace-scoped Review threads and editable Review messages\": decision 19: schema 2 -> 3. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095\n- Discussion #6 comment 1 (2026-09-30), \"Accepted decision group — UX Flow schema baseline (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18672784\n- Discussion #9 comment 1 (2026-09-30), \"Accepted decision group — Authored asset model baseline (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675131\n- Discussion #9 comment 2 (2026-09-30), \"Accepted decision group — Asset validation, artifact store, and MCP (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675243\n- Discussion #9 comment 4 (2026-09-30), \"Ratified derived consequence — formal evidence records live in the content-addressed artifact store\". https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18676181\n- Discussion #10 comment 1 (2026-09-30), \"Accepted decision group — Render-context identity and formal capture selection\". https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18675742\n- Discussion #10 comment 3 (2026-09-30), \"Accepted convergence decision — Workspace-local opaque render-dimension IDs\". https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18676515\n- Discussion #8 comment 1 (2026-09-30), \"Accepted decision group — Adapter selection and resolution baseline (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/8#discussioncomment-18674164\n- Discussion #8 comment 2 (2026-09-30), \"Accepted decision group — Adapter config, failure, install, and concurrency (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/8#discussioncomment-18674820\n- Discussion #1 comment 25 (2026-09-23), \"Accepted decision — one flat JSON file per locale (option A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18564868\n- Discussion #1 comment 28 (2026-09-23), \"Accepted decision — explicit `defaultLocale`, discover other locales from i18n files (option A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18568126\n- Discussion #5 body (Part 5 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win): Workspace i18n settings shape; locale-tag validation; locale resource layout. https://github.com/DevilTea/uiux/discussions/5\n- code@17d4165 `src/domain/workspace/schema.ts`. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/workspace/schema.ts\n- code@17d4165 `src/domain/views/schema.ts`. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/views/schema.ts\n- code@17d4165 `src/domain/spec/schema.ts`. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/spec/schema.ts\n- code@17d4165 `src/persistence/paths.ts`. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/persistence/paths.ts\n- Discussion #7 comment 2 (2026-09-30), \"Accepted decision group — Review submissions, evidence, lifecycle, and retention (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673968\n- Discussion #7 comment 4 (2026-09-30), \"Ratified derived consequence — minimal Review evidence reference shape\". https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18676549\n- Discussion #7 comment 6 (2026-10-05), \"Accepted decision group — Direct resolve of discussion threads\". https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815\n- Discussion #6 comment 2 (2026-09-30), \"Accepted decision group — Flow execution and graph validity (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004\n- Discussion #6 comment 6 (2026-09-30), \"Ratified derived consequence — no independent Flow transition UUID\". https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18676183\n- Discussion #6 comment 7 (2026-09-30), \"Accepted convergence decision — keyed steps with nested outgoing transitions\". https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18676343\n- Owner ruling 2026-10-07 (batch 4 confirmation): `decision.provenance` key names accepted as shipped; validation codes that no accepted decision names are non-normative, code authoritative.\n- code@a9225ef `src/domain/reviews/schema.ts`. https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/domain/reviews/schema.ts\n- code@a9225ef `src/domain/spec/schema.ts`. https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/domain/spec/schema.ts\n- code@a9225ef `src/domain/flows/schema.ts`. https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/domain/flows/schema.ts\n\n## Rule sources\n\n| Clause | Sources |\n| --- | --- |\n| {{C.ws-format.manifest-path}} | [#1 c153 d1](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656572); [#9 c1 d1](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675131) |\n| {{C.ws-format.manifest-fields}} | [#1 c153 d1](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656572); [#8 c1 d1](https://github.com/DevilTea/uiux/discussions/8#discussioncomment-18674164); [#10 c3](https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18676515); [#5 body: Workspace i18n settings shape](https://github.com/DevilTea/uiux/discussions/5); owner ruling 2026-10-07 (batch 2 confirmation): required `viewports` and `themes` registries, possibly empty, accepted as shipped; [code@17d4165 `src/domain/workspace/schema.ts#L13-L19`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/workspace/schema.ts#L13-L19); [code@17d4165 `src/domain/workspace/schema.ts#L46-L86`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/workspace/schema.ts#L46-L86) |\n| {{C.ws-format.schema-version}} | [#1 c152 d1](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656497); [#7 c5 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#7 c9 d19](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{C.ws-format.migration-steps}} | [#7 c5 d7: step `uiux.v1-to-v2`](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#7 c6 d8: one `1 -> 2` step `uiux.v1-to-v2`](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815); [#7 c9 d19: step `uiux.v2-to-v3`, chained after `uiux.v1-to-v2`](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [code@a4160f8 `src/product/workspace-schema.ts`](https://github.com/DevilTea/uiux/blob/a4160f8e7da49b362117c555e84560c0528fb4a3/src/product/workspace-schema.ts) |\n| {{C.ws-format.version-gating}} | [#7 c5 d3 rule 7; d7 (option B rejected)](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#7 c9 d2 rule 6; d13 rule 7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{C.ws-format.schema-diagnostics}} | [code@a9225ef `src/persistence/schema-policy.ts#L99-L106`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/persistence/schema-policy.ts#L99-L106) an unknown or newer `schemaVersion` inspects as `unsupported` with the diagnostic `workspace.schema_unsupported`; [#7 c5 d7: `migration_required` blocks mutations; one clear \"newer schema\" diagnostic](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); owner ruling B1 (checkpoint B, [PR #73](https://github.com/DevilTea/uiux/pull/73)); owner ruling 2026-10-07 (batch 2 confirmation): `workspace.schema_unsupported` refusals accepted as shipped; [code@a4160f8 `src/persistence/schema-policy.ts#L99-L106`](https://github.com/DevilTea/uiux/blob/a4160f8e7da49b362117c555e84560c0528fb4a3/src/persistence/schema-policy.ts#L99-L106); [code@a4160f8 `src/persistence/file-native.ts#L458-L469`](https://github.com/DevilTea/uiux/blob/a4160f8e7da49b362117c555e84560c0528fb4a3/src/persistence/file-native.ts#L458-L469); [code@a4160f8 `server/api/handoff/assess.post.ts`](https://github.com/DevilTea/uiux/blob/a4160f8e7da49b362117c555e84560c0528fb4a3/server/api/handoff/assess.post.ts) (422); [doc@a4160f8 `README.md#L56`](https://github.com/DevilTea/uiux/blob/a4160f8e7da49b362117c555e84560c0528fb4a3/README.md#L56) (422 `blocked` with `workspace.migration_required`) |\n| {{C.ws-format.i18n-settings}} | [#5 body: Workspace i18n settings shape](https://github.com/DevilTea/uiux/discussions/5); [#1 c28](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18568126) |\n| {{C.ws-format.adapters}} | [#8 c1 d1, d2](https://github.com/DevilTea/uiux/discussions/8#discussioncomment-18674164); [#8 c2 d5](https://github.com/DevilTea/uiux/discussions/8#discussioncomment-18674820) |\n| {{C.ws-format.viewports}} | [#10 c1](https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18675742); [#10 c3](https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18676515) |\n| {{C.ws-format.themes}} | [#10 c1](https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18675742); [#10 c3](https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18676515) |\n| {{C.ws-format.view-path}} | [#1 c13](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560794); [#1 body: Location-Independent, File-Native Workspace](https://github.com/DevilTea/uiux/discussions/1) |\n| {{C.ws-format.view-shape}} | [#1 c153 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656572); [#1 c10 a View file holds only its IR, Variants and Spec](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560280); [code@17d4165 `src/domain/views/schema.ts#L81`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/views/schema.ts#L81) |\n| {{C.ws-format.view-ir}} | [#1 c152 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656497); [#1 c153 d3, d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656572); [code@a9225ef `src/application/services/view-authoring.ts#L58`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/application/services/view-authoring.ts#L58) a new View has `content: []`; [code@a9225ef `src/domain/views/schema.ts#L46-L60`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/domain/views/schema.ts#L46-L60); [code@17d4165 `src/domain/views/schema.ts#L46-L60`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/views/schema.ts#L46-L60) |\n| {{C.ws-format.variants}} | [#1 c155 d1, d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656662); [#1 body: View Variant Realization](https://github.com/DevilTea/uiux/discussions/1) |\n| {{C.ws-format.spec-fields}} | [#1 c156 d1, d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656726) |\n| {{C.ws-format.references}} | [#1 c157 d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657198); [#1 c170](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18675877); [#1 body: Canonical Decision Index item 5](https://github.com/DevilTea/uiux/discussions/1); [code@17d4165 `src/domain/spec/schema.ts#L61-L85`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/spec/schema.ts#L61-L85) |\n| {{C.ws-format.decision}} | [#1 c16](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561281); [#1 c17](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561343); [#1 c156 d3, d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656726); [#1 body: Canonical Decision Index item 5](https://github.com/DevilTea/uiux/discussions/1); [code@a9225ef `src/domain/spec/schema.ts#L121-L167`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/domain/spec/schema.ts#L121-L167) |\n| {{C.ws-format.decision-history}} | [#1 c157 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657198); [#1 body: View IR vs View Spec](https://github.com/DevilTea/uiux/discussions/1); [code@a9225ef `src/domain/spec/schema.ts`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/domain/spec/schema.ts) |\n| {{C.ws-format.decision-transitions}} | [#1 c157 d1](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657198); [#1 body: Canonical Decision Index item 5](https://github.com/DevilTea/uiux/discussions/1) |\n| {{C.ws-format.decision-provenance}} | [#1 c157 d3: a promoted Decision records the source thread identity](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657198); [code@a9225ef `src/application/services/review-authoring.ts#L837-L847`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/application/services/review-authoring.ts#L837-L847); [code@a9225ef `app/utils/widget-inspection.ts#L136`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/app/utils/widget-inspection.ts#L136); owner ruling 2026-10-07 (batch 4 confirmation): both key names accepted as shipped |\n| {{C.ws-format.flow-path}} | [#6 c1 d1](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18672784) |\n| {{C.ws-format.flow-shape}} | [#6 c1 d1, d2](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18672784); [#6 c2 d8](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004); [#6 c7](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18676343); [code@a9225ef `src/domain/flows/schema.ts`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/domain/flows/schema.ts) |\n| {{C.ws-format.flow-step}} | [#6 c1 d2, d4](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18672784); [#6 c6](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18676183); [#6 c7](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18676343) |\n| {{C.ws-format.flow-scenario-ref}} | [#6 c1 d3](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18672784); [code@a9225ef `src/domain/flows/schema.ts`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/domain/flows/schema.ts) any JSON object is accepted |\n| {{C.ws-format.review-path}} | [#7 c1 d1](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686) |\n| {{C.ws-format.review-thread}} | [#7 c1 d1](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686); [#7 c5 schema delta](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#7 c9 schema delta](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [#7 body: items 1-7](https://github.com/DevilTea/uiux/discussions/7); [code@a9225ef `src/domain/reviews/schema.ts#L177-L205`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/domain/reviews/schema.ts#L177-L205) |\n| {{C.ws-format.review-anchor}} | [#1 c158 d1](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657409); [#7 c9 d1, d2 rule 1, R1](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [code@a9225ef `src/domain/reviews/schema.ts#L551-L566`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/domain/reviews/schema.ts#L551-L566) |\n| {{C.ws-format.review-workspace-arm}} | [#7 c9 d2 rules 2-4, R2, R3](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{C.ws-format.review-status}} | [#1 c19](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561501); [#7 c2 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673968); [#7 c6 no fourth state](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815); [#1 body: Canonical Decision Index item 7](https://github.com/DevilTea/uiux/discussions/1) |\n| {{C.ws-format.review-actor}} | [#7 c1 d3](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686); [#7 c8 item 3: the shape is unchanged by stamping](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18758345) |\n| {{C.ws-format.review-message}} | [#7 c1 d2](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686); [#7 c9 d10, d13 rules 1-2](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{C.ws-format.review-edit-author}} | [#7 c9 d13 rules 3-4](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{C.ws-format.review-edit-content}} | [#7 c9 d13 rules 5-6](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{C.ws-format.review-submission}} | [#7 c2 d5](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673968); [#1 c159 d1](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18660618); [code@a9225ef `src/domain/reviews/schema.ts#L349-L382`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/domain/reviews/schema.ts#L349-L382) |\n| {{C.ws-format.review-evidence-ref}} | [#7 c4](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18676549); [#7 body: item 6](https://github.com/DevilTea/uiux/discussions/7) |\n| {{C.ws-format.review-history-event}} | [#7 c1 d4](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686); [#7 c2 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673968); [#7 c6 d3](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815); [code@a9225ef `src/domain/reviews/schema.ts#L384-L444`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/domain/reviews/schema.ts#L384-L444) |\n| {{C.ws-format.review-transitions}} | [#1 c19](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561501); [#7 c6 d2, d3 rule 6](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815); [#1 c175](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757819) |\n| {{C.ws-format.review-resolution}} | [#7 c6 d1, d2, d3 rules 1-2, current resolution derived](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815) |\n| {{C.ws-format.review-resolution-rules}} | [#7 c2 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673968); [#7 c6 d3 rules 3-7, R4](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815) |\n| {{C.ws-format.review-display-hint}} | [#7 c5 d1, d2, d3 rules 1-3, R7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814) |\n| {{C.ws-format.review-hint-quantization}} | [#7 c5 d3 rule 4, R2](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814) |\n| {{C.ws-format.locale-file}} | [#1 c25](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18564868); [#5 body: locale resource layout](https://github.com/DevilTea/uiux/discussions/5) |\n| {{C.ws-format.locale-discovery}} | [#5 body: locale-tag validation](https://github.com/DevilTea/uiux/discussions/5); [#1 c28](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18568126) |\n| {{C.ws-format.asset-directory}} | [#9 c1 d2](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675131) |\n| {{C.ws-format.asset-metadata}} | [#9 c1 d2](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675131); [#9 c2 d5](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675243) |\n| {{C.ws-format.asset-binding}} | [#9 c1 d3](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675131); [#9 c2 d5: Catalog asset-capable fields declare the allowed media types](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675243) |\n| {{C.ws-format.authored-vs-derived}} | [#9 c1 d1](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675131) |\n| {{C.ws-format.artifact-store}} | [#9 c2 d7](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675243) |\n| {{C.ws-format.evidence-records}} | [#9 c4](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18676181) |\n\n## Notes\n\n- Why a Contract: the persisted format crosses every resource Feature and has its own lifecycle (one manifest `schemaVersion`, explicit migration), so it is governed independently of any one Feature.\n- Exact JSON property names the Discussions leave open (for example the adapter entry's module-reference key, the viewport preset's dimension keys and the RootShell Slot container) are authoritative in the code types (`src/domain/*/schema.ts`), not restated here.\n- Import batch 4 adds the Review-thread, `spec.decisions` item and UX Flow shapes. Of the `review.*`, `decision.*` and `flow.*` validation codes, only those named by accepted decisions are listed here; by owner ruling 2026-10-07 (batch 4 confirmation) the others are non-normative and code at a9225ef is authoritative (`src/domain/reviews/schema.ts`, `src/domain/spec/schema.ts`, `src/domain/flows/schema.ts`).\n- Which field is introduced by which schema version (`displayHint` and `resolution` by 2, the Workspace anchor and `edits` by 3) follows {{C.ws-format.version-gating}}; Discussion #7 c5, c6 and c9 record the steps.\n"
+		},
+		{
+			"ref": "C.mutation-semantics",
+			"title": "Mutation and revision semantics",
+			"summary": "The semantics every canonical mutation shares on every transport (`/api/*`, `/mcp` and the Workbench): opaque content-derived revisions, the required `expectedRevision`, all-or-nothing conflicts that report the current revision, compact mutation results, the meaning of refusal statuses and the refusal codes of Review actions, how the shared result surfaces over HTTP and MCP, and the change events that commits emit to Workbenches.",
+			"constrains": [
+				"F.ws.mutations",
+				"F.view.authoring",
+				"F.view.spec",
+				"F.view.variants",
+				"F.i18n.resources",
+				"F.flow.graph",
+				"F.assets",
+				"F.render-context",
+				"F.adapter.resolution",
+				"F.review.threads",
+				"F.review.lifecycle",
+				"F.review.messages",
+				"F.review.retraction",
+				"F.review.pins",
+				"F.view.decisions",
+				"F.access.leases",
+				"F.mcp.discovery",
+				"F.wb.live-refresh"
+			],
+			"clauses": [
+				{
+					"ref": "C.mutation-semantics.revision",
+					"statement": "Every mutable canonical resource has an opaque revision derived from its canonical content. Reads and queries return it; it is the same across process restarts and changes whenever that content changes, including through an edit made outside UIUX. Callers must not infer meaning from its representation."
+				},
+				{
+					"ref": "C.mutation-semantics.expected-revision",
+					"statement": "Every mutation of an existing resource carries the `expectedRevision` its caller last read for that resource; a Review action carries its thread's."
+				},
+				{
+					"ref": "C.mutation-semantics.create",
+					"statement": "A create carries no `expectedRevision`. It names or receives the identity of the new resource, and when a resource with that identity already exists it writes nothing and returns `already_exists`.",
+					"constrains": [
+						"F.ws.mutations",
+						"F.view.authoring",
+						"F.i18n.resources",
+						"F.flow.graph",
+						"F.assets",
+						"F.review.threads"
+					]
+				},
+				{
+					"ref": "C.mutation-semantics.conflict",
+					"statement": "When the resource's current revision differs from `expectedRevision`, the whole mutation writes nothing and returns a `conflict` result carrying `currentRevision`; the caller must re-read and decide again."
+				},
+				{
+					"ref": "C.mutation-semantics.success",
+					"statement": "A successful mutation returns its status, `created`, `updated` or `deleted`, and the affected identity. `created` and `updated` also return the new revision and diagnostics; `deleted`, the result of retracting a Review thread, carries no revision. A result never carries the whole Workspace."
+				},
+				{
+					"ref": "C.mutation-semantics.change-summary",
+					"statement": "A successful mutation result also carries a summary of what changed."
+				},
+				{
+					"ref": "C.mutation-semantics.no-merge",
+					"statement": "Competing writes are never merged automatically, by implicit merge, CRDT or OT: the later writer gets a conflict and must re-read, retry or rework explicitly."
+				},
+				{
+					"ref": "C.mutation-semantics.refusal-statuses",
+					"statement": "Refusals are told apart by status: `conflict` means re-read, `blocked` means a precondition refuses the operation, and `locked` means another member holds an edit lease on the resource, so retry later or ask the holder."
+				},
+				{
+					"ref": "C.mutation-semantics.locked-result",
+					"statement": "A lease refusal is `{ status: \"locked\", key, code: \"resource.locked\", message, lock: { kind, key, holder: { nickname, kind }, expiresAt } }`; it names the holder only by nickname and member kind.",
+					"constrains": [
+						"F.ws.mutations",
+						"F.access.leases"
+					]
+				},
+				{
+					"ref": "C.mutation-semantics.busy",
+					"statement": "A persistence-busy refusal has the code `persistence.busy`; over HTTP it answers 503 with a `Retry-After` header.",
+					"constrains": [
+						"F.ws.mutations"
+					]
+				},
+				{
+					"ref": "C.mutation-semantics.http",
+					"statement": "Over HTTP the structured result is the JSON response body; `conflict` and `already_exists` answer 409, and `locked` answers 423."
+				},
+				{
+					"ref": "C.mutation-semantics.mcp",
+					"statement": "Over MCP a tool returns the structured result as its structured content (and as JSON text), and any outcome other than success is an error result (`isError`).",
+					"constrains": [
+						"F.ws.mutations",
+						"F.mcp.discovery"
+					]
+				},
+				{
+					"ref": "C.mutation-semantics.parity",
+					"statement": "HTTP and MCP run an operation through the same application service and return the same result for it; only the transport envelope differs.",
+					"constrains": [
+						"F.ws.mutations",
+						"F.mcp.discovery"
+					]
+				},
+				{
+					"ref": "C.mutation-semantics.change-events",
+					"statement": "The change-event stream is the server-sent events route `GET /api/events`. On connect it sends `hello` with the server instance ID; it sends `resource.changed` (kind, key, revision) or `resource.removed` (kind, key) for a resource, `lock.changed` (kind, key) for a lease and `access.changed` for the roster or the member's role, and a heartbeat comment about every 20 seconds.",
+					"constrains": [
+						"F.wb.live-refresh"
+					]
+				},
+				{
+					"ref": "C.mutation-semantics.review-submit-codes",
+					"statement": "Marking a thread ready is refused with `review.target_view_missing` for a target View that does not exist, `review.target_view_revision_missing` when a Widget thread's resources lack its View's current revision, `review.target_workspace_revision_missing` when a Workspace thread's resources lack the current manifest revision, `review.resource_revision_not_current` for a named View not at its current revision, and `review.formal_evidence_not_current` for formal-capture Evidence not complete for its View's current revision.",
+					"constrains": [
+						"F.review.lifecycle"
+					]
+				},
+				{
+					"ref": "C.mutation-semantics.review-workspace-refusals",
+					"statement": "On a Workspace thread, setting a pin hint is refused with `review.display_hint_without_widget` and promotion with `review.decision_target_unavailable`.",
+					"constrains": [
+						"F.review.pins",
+						"F.view.decisions"
+					]
+				},
+				{
+					"ref": "C.mutation-semantics.review-edit-codes",
+					"statement": "Editing a message is refused with `review.unknown_message` for a message the thread does not have, `review.message_edit_not_author` when the requester is not its author, `review.message_frozen`, naming the submission or resolution that froze it, for a frozen message, `review.message_body_empty` for empty text and `review.message_edit_noop` for unchanged text.",
+					"constrains": [
+						"F.review.messages"
+					]
+				},
+				{
+					"ref": "C.mutation-semantics.review-retract-codes",
+					"statement": "Retraction is refused with `review.retract_not_author` when the requester is not the author of the thread's message, and with `review.retract_engaged` when the thread is engaged, carrying `reason` `status`, `messages`, `history`, `submissions` or `promoted`.",
+					"constrains": [
+						"F.review.retraction"
+					]
+				},
+				{
+					"ref": "C.mutation-semantics.promotion-conflict",
+					"statement": "A promotion conflict lists, in `conflicts`, each resource whose revision moved, `review` or `view`, with its key and its expected and current revision.",
+					"constrains": [
+						"F.view.decisions"
+					]
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #1 body (Part 1 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win): Canonical Decision Index items 9, 10 and 12. https://github.com/DevilTea/uiux/discussions/1\n- Discussion #1 comment 164 (2026-09-30), \"Accepted decision group — MCP API contract (A / A / A / A)\": decisions 2-4. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287\n- Discussion #1 comment 165 (2026-09-30), \"Accepted decision group — Preview/runtime architecture (A / A / A / A)\": decision 4. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671359\n- Discussion #1 comment 167 (2026-09-30), \"Accepted decision group — Collaboration beyond one workstation (A / A / A / A)\": decision 3. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671913\n- Discussion #7 comment 3 (2026-09-30), \"Accepted decision group — Review MCP and Workbench projection (A / A / A / A)\": 9a. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18674068\n- Discussion #1 comment 176 (2026-10-05), \"Accepted decision group — LAN/team access, authentication and reviewer identity\": decision 6. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757820\n- Discussion #1 comment 177 (2026-10-05), \"Accepted decision group — Member identity, roles, tokens and agent edit leases\": decisions 5 and 11; D16; finding C5. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344\n- code@20c427c `src/application/dto/revisions.ts`. https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/application/dto/revisions.ts\n- code@20c427c `src/server/authoring-http.ts`. https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/server/authoring-http.ts\n- code@20c427c `src/mcp/server.ts`. https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/mcp/server.ts\n- Owner ruling 2026-10-07 (checkpoint C): only HTTP 409, 423 and 403 normative; other statuses from code; code-only `create` and MCP error-result behavior accepted.\n- Owner calibration decision 2026-10-07 (spec calibration between import batches 3 and 4): that ruling covers the HTTP statuses of mutation results only; `already_exists` answers 409 normatively; `deleted` is a success status.\n- Discussion #1 comment 176 (2026-10-05), \"Accepted decision group — LAN/team access, authentication and reviewer identity\": decision 5: the change-event stream. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757820\n- Discussion #7 comment 9 (2026-10-06), \"Accepted decision group — Workspace-scoped Review threads and editable Review messages\": d4, d7, d15. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095\n- Discussion #7 comment 10 (2026-10-06), \"Accepted addendum decision group — Author quick retract of a new Review thread, and the Dismiss presentation\": d6. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501\n- Discussion #1 comment 176 (2026-10-05), \"Accepted decision group — LAN/team access, authentication and reviewer identity\": d6 rule 5. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757820\n- Owner ruling 2026-10-07 (batch 4 confirmation): `review.message_frozen` is the frozen-edit refusal code; Review refusal result and HTTP statuses are non-normative, code authoritative.\n\n## Rule sources\n\n| Clause | Sources |\n| --- | --- |\n| {{C.mutation-semantics.revision}} | [#1 c164 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287); [#1 body: Canonical Decision Index item 9](https://github.com/DevilTea/uiux/discussions/1) |\n| {{C.mutation-semantics.expected-revision}} | [#1 c164 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287); [#7 c3 9a](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18674068) |\n| {{C.mutation-semantics.create}} | owner ruling 2026-10-07 (checkpoint C): accepted as shipped; [code@20c427c `src/application/services/view-authoring.ts#L38-L44`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/application/services/view-authoring.ts#L38-L44); [code@20c427c `src/application/services/locale-authoring.ts#L57`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/application/services/locale-authoring.ts#L57); [code@20c427c `src/application/services/flow-authoring.ts#L61`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/application/services/flow-authoring.ts#L61); [code@20c427c `src/application/services/asset-authoring.ts#L90`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/application/services/asset-authoring.ts#L90); [code@20c427c `src/server/authoring-http.ts#L40`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/server/authoring-http.ts#L40) HTTP 409 |\n| {{C.mutation-semantics.conflict}} | [#1 c164 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287); [#1 c177 D16: `conflict` means re-read](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.mutation-semantics.success}} | [#1 c164 d3, d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287); owner calibration decision 2026-10-07: `deleted` is a success status (accuracy fix: it is not an MCP error result and creates no new revision); [code@a4160f8 `src/application/services/review-authoring.ts#L159`](https://github.com/DevilTea/uiux/blob/a4160f8e7da49b362117c555e84560c0528fb4a3/src/application/services/review-authoring.ts#L159) `{ status: \"deleted\", key }`; [code@a4160f8 `src/mcp/server.ts#L963-L973`](https://github.com/DevilTea/uiux/blob/a4160f8e7da49b362117c555e84560c0528fb4a3/src/mcp/server.ts#L963-L973) `deleted` counts as success; [code@a4160f8 `src/server/authoring-http.ts#L37`](https://github.com/DevilTea/uiux/blob/a4160f8e7da49b362117c555e84560c0528fb4a3/src/server/authoring-http.ts#L37) `deleted` answers 200 |\n| {{C.mutation-semantics.change-summary}} | [#1 c164 d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287) |\n| {{C.mutation-semantics.no-merge}} | [#1 c167 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671913); [#1 body: Canonical Decision Index item 12](https://github.com/DevilTea/uiux/discussions/1); [#1 c176 Scope: CAS unchanged](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757820) |\n| {{C.mutation-semantics.refusal-statuses}} | [#1 c177 D16; finding C5](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.mutation-semantics.locked-result}} | [#1 c177 d11 rule 1; D16](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344); [code@20c427c `src/application/access/scoped-session.ts`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/application/access/scoped-session.ts) `LockedRefusal` |\n| {{C.mutation-semantics.busy}} | owner ruling B2 (checkpoint B, [PR #73](https://github.com/DevilTea/uiux/pull/73)); [code@a4160f8 `src/persistence/busy.ts`](https://github.com/DevilTea/uiux/blob/a4160f8e7da49b362117c555e84560c0528fb4a3/src/persistence/busy.ts); [doc@a4160f8 `README.md#server-surfaces`](https://github.com/DevilTea/uiux/blob/a4160f8e7da49b362117c555e84560c0528fb4a3/README.md#server-surfaces) |\n| {{C.mutation-semantics.http}} | [#1 c176 d6: 409 on reply append and lifecycle actions](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757820); [#1 c177 d5 refusal shape; D16](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344); owner calibration decision 2026-10-07: `already_exists` answers HTTP 409 normatively; [code@a4160f8 `src/server/authoring-http.ts#L30-L45`](https://github.com/DevilTea/uiux/blob/a4160f8e7da49b362117c555e84560c0528fb4a3/src/server/authoring-http.ts#L30-L45) |\n| {{C.mutation-semantics.mcp}} | [#1 c177 d5: MCP refusal is a tool result with `isError`](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344); owner ruling B2 (checkpoint B, [PR #73](https://github.com/DevilTea/uiux/pull/73)); owner ruling 2026-10-07 (checkpoint C): every non-success outcome as an MCP error result accepted as shipped; [code@20c427c `src/mcp/server.ts#L963-L973`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/mcp/server.ts#L963-L973) `authoringToolResult` |\n| {{C.mutation-semantics.parity}} | [#1 c165 d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671359); [#1 body: Canonical Decision Index item 10](https://github.com/DevilTea/uiux/discussions/1); [#1 c177 d5: refusal on both transports](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.mutation-semantics.change-events}} | [#1 c176 d5](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757820); [#1 c177 d11 contract: `lock.changed`; d12: `access.changed`](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.mutation-semantics.review-submit-codes}} | [#7 c9 d4 table](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [#1 c20](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561691) |\n| {{C.mutation-semantics.review-workspace-refusals}} | [#7 c9 d3, d6, d7, O3](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{C.mutation-semantics.review-edit-codes}} | [#7 c9 d15 results](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); owner ruling 2026-10-07 (batch 4 confirmation): the Discussion's `review.message_frozen` is the refusal code; the code's `review.message_edit_after_formal_act` is a bug |\n| {{C.mutation-semantics.review-retract-codes}} | [#7 c10 d2 table, d6](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501) |\n| {{C.mutation-semantics.promotion-conflict}} | [#1 c176 d6 rule 5: name which resource moved with the existing `conflicts[]` array](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757820); [code@a9225ef `src/application/services/review-authoring.ts#L806-L820`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/application/services/review-authoring.ts#L806-L820) |\n\n## Implementation gaps\n\n- {{C.mutation-semantics.change-summary}}: Not built as of 20c427c: the authoring results return status, key, revision and diagnostics only; `changeSummary` exists only in `src/application/services/resource-mutations.ts`, which no production service uses. Tracked in issue #77 (https://github.com/DevilTea/uiux/issues/77).\n- {{C.mutation-semantics.change-events}}: Not built as of 20c427c: the stream does not exist; tracked in issue #69 (https://github.com/DevilTea/uiux/issues/69).\n- {{C.mutation-semantics.review-edit-codes}}: Bug as of a9225ef: a frozen message is refused with `review.message_edit_after_formal_act`, which is the persisted-rule code of {{C.ws-format.review-edit-content}}, instead of `review.message_frozen` (`src/application/services/review-authoring.ts` L997-L1001, also named in the `edit_review_message` tool description); tracked in issue #83 (https://github.com/DevilTea/uiux/issues/83).\n- {{C.mutation-semantics.promotion-conflict}}: Partly built as of a9225ef: `conflicts` is returned when both revisions moved or the atomic commit fails, but a conflict on only one resource returns that resource's key and current revision without `conflicts`; tracked in issue #87 (https://github.com/DevilTea/uiux/issues/87).\n\n## Notes\n\n- Why a Contract: agents and the Workbench depend on these semantics across HTTP, MCP and every authoring Feature, and they evolve independently of any one Feature.\n- Owner ruling 2026-10-07 (checkpoint C), with its scope stated by the owner's calibration decision of 2026-10-07: \"only HTTP 409, 423 and 403 are normative\" applies to the HTTP statuses of mutation results only. Of those, `conflict` and `already_exists` answer 409 and `locked` 423 ({{C.mutation-semantics.http}}), and a role refusal answers 403 ({{C.access.scope-denied}}). The ruling does not reach statuses fixed by other accepted decisions, which stay normative in the Clauses that own them: 401 and 429 (Discussion #1 c177; {{C.access.auth-failures}}), 421, 403 and 415 of the baseline gates (ruling B4; {{C.access.gate-refusals}}), 403 `auth.lan_not_allowed` (Discussion #1 c177; {{C.mcp.lan}}), 422 for capture, assessment and export on a Workspace that needs migration (ruling B1; {{C.ws-format.schema-diagnostics}}) and 503 for `persistence.busy` (ruling B2; {{C.mutation-semantics.busy}}). The full result-status vocabulary and the HTTP status of every other result status (for example `created` 201, `updated` and `deleted` 200, `not_found` 404, `invalid` 400 and other `blocked` 422) are authoritative in code at a4160f8 (`src/server/authoring-http.ts`), as are result field shapes beyond the ones named here.\n- The change-event stream is a Clause here because it carries the commits of every authoring Feature to the Workbench; there is no HTTP Contract (owner ruling Q4).\n- Reference-impact acknowledgement for destructive changes is specified by Rules of the reference-integrity Feature (issue #75), not here.\n- Import batch 4 adds the refusal codes of Review actions that accepted decisions name; the result status and HTTP status of each stay authoritative in code (see the first note).\n"
+		},
+		{
+			"ref": "C.mcp",
+			"title": "MCP interface",
+			"summary": "The Model Context Protocol surface that Agents use against one selected Workspace: the `/mcp` endpoint and its bearer authentication, the read-only Resources, the discovery, authoring, Review, Evidence, Handoff and lease Tools, and the per-request instructions.",
+			"constrains": [
+				"F.mcp.discovery",
+				"F.access.credentials",
+				"F.access.lan",
+				"F.access.leases",
+				"F.ws.mutations",
+				"F.artifacts",
+				"F.evidence.formal",
+				"F.handoff",
+				"F.view.authoring",
+				"F.view.spec",
+				"F.view.variants",
+				"F.i18n.resources",
+				"F.flow.graph",
+				"F.assets",
+				"F.render-context",
+				"F.adapter.resolution",
+				"F.review.threads",
+				"F.review.lifecycle",
+				"F.review.messages",
+				"F.review.retraction",
+				"F.review.pins",
+				"F.view.decisions"
+			],
+			"clauses": [
+				{
+					"ref": "C.mcp.endpoint",
+					"statement": "MCP is served at `/mcp` on the selected Workspace's `uiux dev` server.",
+					"constrains": [
+						"F.mcp.discovery"
+					]
+				},
+				{
+					"ref": "C.mcp.bearer",
+					"statement": "A `/mcp` request reaches a Tool or Resource only with a valid member Token.",
+					"constrains": [
+						"F.mcp.discovery",
+						"F.access.credentials"
+					]
+				},
+				{
+					"ref": "C.mcp.unauthenticated",
+					"statement": "On `/mcp`, the message of an authentication failure names the fix: create a Token with `uiux token create` and send it as a bearer Token, or, for a Token of another Workspace's roster, create one for this Workspace or run `uiux access copy`.",
+					"constrains": [
+						"F.mcp.discovery",
+						"F.access.credentials"
+					]
+				},
+				{
+					"ref": "C.mcp.no-oauth",
+					"statement": "UIUX advertises no OAuth metadata: every `/.well-known/*` path answers a JSON 404.",
+					"constrains": [
+						"F.mcp.discovery",
+						"F.access.credentials"
+					]
+				},
+				{
+					"ref": "C.mcp.lan",
+					"statement": "On the LAN listener `/mcp` refuses a Token created without the LAN flag with HTTP 403 `auth.lan_not_allowed`.",
+					"constrains": [
+						"F.mcp.discovery",
+						"F.access.lan"
+					]
+				},
+				{
+					"ref": "C.mcp.instructions",
+					"statement": "The per-request server instructions begin with \"Authenticated as <nickname> (<kind>, <role>).\" for the authenticated member.",
+					"constrains": [
+						"F.mcp.discovery"
+					]
+				},
+				{
+					"ref": "C.mcp.resources",
+					"statement": "MCP Resources are read-only, and no mutation is exposed as a Resource write: the selected Workspace, each View, UX Flow, Locale, Review thread and authored Asset by its canonical key, and each derived artifact by its `sha256:` digest. Reading one that does not exist is a not-found error.",
+					"constrains": [
+						"F.mcp.discovery",
+						"F.artifacts"
+					]
+				},
+				{
+					"ref": "C.mcp.discovery-tools",
+					"statement": "`list_resources` lists, and `search_resources` searches with a non-empty query, the Views, UX Flows, Locales, Review threads and authored Assets, optionally filtered by kind and, for Review threads, by resolution and anchor scope. Both take a required page `limit` and an opaque `cursor`, and each item carries its kind, key, revision, diagnostic count, a kind-specific summary and its Resource URI.",
+					"constrains": [
+						"F.mcp.discovery"
+					]
+				},
+				{
+					"ref": "C.mcp.review-filters",
+					"statement": "The Review filters of `list_resources` and `search_resources` are `resolution`, a non-empty list of resolution kinds matching only resolved threads whose current resolution is listed, and `anchorScope`, a non-empty list of `workspace` and `view` (any Widget anchor); either filter excludes other resource kinds, and the search term `workspace` matches Workspace threads.",
+					"constrains": [
+						"F.mcp.discovery",
+						"F.review.threads"
+					]
+				},
+				{
+					"ref": "C.mcp.view-tools",
+					"statement": "`create_view` creates a View with the canonical empty RootShell IR, no Variants and no Decisions; `update_view_spec` replaces the descriptive Spec fields, keeping Decisions and every non-Spec field; `update_view_structure` replaces the IR and Variants together, keeping the View's identity, name, `feature` tag and Spec.",
+					"constrains": [
+						"F.mcp.discovery",
+						"F.view.authoring",
+						"F.view.spec",
+						"F.view.variants"
+					]
+				},
+				{
+					"ref": "C.mcp.settings-tool",
+					"statement": "`update_workspace_settings` updates the manifest-owned Workspace settings (`i18n.defaultLocale`, `adapters`, `viewports` and `themes`) and keeps `schemaVersion`.",
+					"constrains": [
+						"F.mcp.discovery",
+						"F.i18n.resources",
+						"F.adapter.resolution",
+						"F.render-context"
+					]
+				},
+				{
+					"ref": "C.mcp.locale-tools",
+					"statement": "`create_locale` creates a Locale file named by a canonical BCP 47 tag and fails if it exists; `update_locale` updates an existing Locale's messages.",
+					"constrains": [
+						"F.mcp.discovery",
+						"F.i18n.resources"
+					]
+				},
+				{
+					"ref": "C.mcp.flow-tools",
+					"statement": "`create_flow` creates a UX Flow (identity, entry step and step transition graph) and fails if it exists; `update_flow` updates one, keeping its identity.",
+					"constrains": [
+						"F.mcp.discovery",
+						"F.flow.graph"
+					]
+				},
+				{
+					"ref": "C.mcp.asset-tools",
+					"statement": "`create_asset` creates an authored Asset from its metadata and source content; `replace_asset` replaces an authored Asset, keeping its identity.",
+					"constrains": [
+						"F.mcp.discovery",
+						"F.assets"
+					]
+				},
+				{
+					"ref": "C.mcp.review-tools",
+					"statement": "The Review tools are `create_review_thread`, `append_review_message`, `reanchor_review_thread`, `set_review_display_hint`, `submit_ready_for_review`, `reopen_review_thread`, `promote_review_to_decision`, `edit_review_message` and `retract_review_thread`; each atomically changes one Review thread (promotion also writes the target View's Decisions).",
+					"constrains": [
+						"F.mcp.discovery",
+						"F.review.threads",
+						"F.review.lifecycle",
+						"F.review.messages",
+						"F.review.retraction",
+						"F.review.pins",
+						"F.view.decisions"
+					]
+				},
+				{
+					"ref": "C.mcp.resolve-refused",
+					"statement": "`resolve_review_thread` stays registered but always refuses: a human member gets `review.resolve_requires_workbench`, an Agent asking for a resolution other than `verified` gets `review.direct_resolve_requires_workbench`, and any other Agent gets `review.resolve_requires_human`.",
+					"constrains": [
+						"F.mcp.discovery",
+						"F.review.lifecycle"
+					]
+				},
+				{
+					"ref": "C.mcp.evidence-handoff-tools",
+					"statement": "`capture_formal_evidence` captures formal Evidence for an explicit list of resolved render contexts; `assess_handoff_readiness` assesses explicit Handoff roots without exporting; `export_handoff` exports an immutable Handoff bundle from explicit roots.",
+					"constrains": [
+						"F.mcp.discovery",
+						"F.evidence.formal",
+						"F.handoff"
+					]
+				},
+				{
+					"ref": "C.mcp.lease-tools",
+					"statement": "`acquire_lock` takes `{ resources: [{ kind, key }] }` with 1 to 16 entries and is all-or-nothing: it returns `{ status: \"acquired\", leases: [{ kind, key, expiresAt }] }`, or `locked` naming every conflicting lease. `release_lock` takes optional `resources` (omitted means all of the caller's leases), is idempotent and returns the released list.",
+					"constrains": [
+						"F.mcp.discovery",
+						"F.access.leases"
+					]
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #1 body (Part 1 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win): Agent Workflow via MCP; Canonical Decision Index item 9. https://github.com/DevilTea/uiux/discussions/1\n- Discussion #1 comment 164 (2026-09-30), \"Accepted decision group — MCP API contract (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287\n- Discussion #1 comment 172 (2026-09-30), \"Ratified derived consequence — MCP Resource URI scope is the selected Workspace server namespace\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18676182\n- Discussion #7 comment 3 (2026-09-30), \"Accepted decision group — Review MCP and Workbench projection (A / A / A / A)\": 9a, 9b. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18674068\n- Discussion #6 comment 3 (2026-09-30), \"Accepted decision group — Flow evidence, Handoff, MCP, and Workbench (A / A / A / A)\": 10b. https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673622\n- Discussion #9 comment 2 (2026-09-30), \"Accepted decision group — Asset validation, artifact store, and MCP (A / A / A / A)\": decision 8. https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675243\n- Discussion #1 comment 177 (2026-10-05), \"Accepted decision group — Member identity, roles, tokens and agent edit leases\": decisions 5, 7, 10 and 11. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344\n- Discussion #7 comment 8 (2026-10-05), \"Cross-reference — member identity and actor stamping (accepted on Part 1)\". https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18758345\n- Discussion #7 comment 9 (2026-10-06), \"Accepted decision group — Workspace-scoped Review threads and editable Review messages\": edit_review_message. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095\n- Discussion #7 comment 10 (2026-10-06), \"Accepted addendum decision group — Author quick retract of a new Review thread, and the Dismiss presentation\": retract_review_thread. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501\n- code@20c427c `src/mcp/server.ts`. https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/mcp/server.ts\n- doc@20c427c `README.md#connect-an-agent`. https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/README.md#connect-an-agent\n- Owner ruling 2026-10-07 (checkpoint C): tool field shapes from code; Resource URI grammar excluded per #1 c172.\n- Discussion #7 comment 9 (2026-10-06), \"Accepted decision group — Workspace-scoped Review threads and editable Review messages\": d7. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095\n- Discussion #7 comment 6 (2026-10-05), \"Accepted decision group — Direct resolve of discussion threads\": d7. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815\n- Owner ruling 2026-10-07 (batch 4 confirmation): Review-only discovery filters return only Review threads.\n\n## Rule sources\n\n| Clause | Sources |\n| --- | --- |\n| {{C.mcp.endpoint}} | [#1 body: CLI & Server](https://github.com/DevilTea/uiux/discussions/1); [#1 c165 d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671359) |\n| {{C.mcp.bearer}} | [#1 c177 d4, d10](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.mcp.unauthenticated}} | [#1 c177 d10](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.mcp.no-oauth}} | [#1 c177 d4, d10](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.mcp.lan}} | [#1 c177 d5; new codes](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.mcp.instructions}} | [#1 c177 d10 instructions](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344); [code@20c427c `src/mcp/server.ts`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/mcp/server.ts) `uiuxMcpInstructions` |\n| {{C.mcp.resources}} | [#1 c164 d1](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287); [#1 c172](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18676182); [#9 c2 d8](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675243); [#1 body: Canonical Decision Index item 9: the same mutation is not exposed through a parallel resource-write contract](https://github.com/DevilTea/uiux/discussions/1); [code@20c427c `src/mcp/server.ts`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/mcp/server.ts) registered Resources |\n| {{C.mcp.discovery-tools}} | [#1 c164 d1, d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287); [#7 c3 9b](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18674068); [#7 c9 `anchorScope` filter](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [code@20c427c `src/application/dto/resource-discovery.ts`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/application/dto/resource-discovery.ts) |\n| {{C.mcp.review-filters}} | [#7 c6 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815); [#7 c9 d7, R6](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [code@a9225ef `src/application/dto/resource-discovery.ts`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/application/dto/resource-discovery.ts); [code@a9225ef `src/application/services/workspace-session.ts#L392-L421`](https://github.com/DevilTea/uiux/blob/a9225efadaed829bd10e0167ae30e2075414215d/src/application/services/workspace-session.ts#L392-L421); owner ruling 2026-10-07 (batch 4 confirmation): a Review-only filter returns only Review threads, superseding the literal reading of #7 c9 d7 that other kinds ignore the filter |\n| {{C.mcp.view-tools}} | [#1 body: Agent Workflow via MCP](https://github.com/DevilTea/uiux/discussions/1); [#1 c164 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287); [code@20c427c `src/mcp/server.ts`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/mcp/server.ts) tool descriptions |\n| {{C.mcp.settings-tool}} | [#1 c164 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287); [code@20c427c `src/mcp/server.ts`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/mcp/server.ts) tool descriptions |\n| {{C.mcp.locale-tools}} | [#1 c164 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287); [code@20c427c `src/mcp/server.ts`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/mcp/server.ts) tool descriptions |\n| {{C.mcp.flow-tools}} | [#6 c3 10b](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673622); [code@20c427c `src/mcp/server.ts`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/mcp/server.ts) tool descriptions |\n| {{C.mcp.asset-tools}} | [#9 c2 d8](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675243); [code@20c427c `src/mcp/server.ts`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/mcp/server.ts) tool descriptions |\n| {{C.mcp.review-tools}} | [#7 c3 9a](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18674068); [#1 c177 permission matrix](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344); [#7 c9 `edit_review_message`](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [#7 c10 `retract_review_thread`](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772501) |\n| {{C.mcp.resolve-refused}} | [#1 c177 d7](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344); [#7 c8 item 7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18758345); [#7 c6 d9](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815); [code@20c427c `src/application/access/scoped-session.ts`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/application/access/scoped-session.ts) `resolutionRefusal` |\n| {{C.mcp.evidence-handoff-tools}} | [#1 c164 d1: capture is a Tool](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287); [#1 body: Handoff](https://github.com/DevilTea/uiux/discussions/1); [code@20c427c `src/mcp/server.ts`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/mcp/server.ts) tool descriptions |\n| {{C.mcp.lease-tools}} | [#1 c177 d11 contract](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344); [code@20c427c `src/mcp/server.ts`](https://github.com/DevilTea/uiux/blob/20c427c19d5f75a0dbccebec6925107cb27fe008/src/mcp/server.ts) `acquire_lock`, `release_lock` |\n\n## Implementation gaps\n\n- {{C.mcp.lan}}: Not built as of 20c427c: `auth.lan_not_allowed` does not exist and no LAN listener ships; tracked in issue #68 (https://github.com/DevilTea/uiux/issues/68).\n\n## Notes\n\n- Why a Contract: MCP is the external agent interface; agents and their configurations depend on it independently of any one Feature.\n- Owner ruling 2026-10-07 (checkpoint C): tool input and output field shapes are authoritative in code at 20c427c (`src/mcp/server.ts` zod schemas); the Clauses fix which tools and Resources exist and what they do. The Review-specific semantics of the Review tools belong to the Review Features (import batch 4); the Review discovery filters are {{C.mcp.review-filters}}.\n- The MCP transport is the SDK's stateless per-request HTTP handler; that choice is implementation detail.\n"
+		}
+	],
+	"retired": []
+}

@@ -31,6 +31,10 @@
 
 Calibration pass between batch 3 and batch 4; transitional — Discussions #1–#10 remain authoritative until cutover.
 
+### Contract ownership (batch 4 finalized)
+
+- **Batch 4 owns full contracts:** `batch-04.json` names the full C.ws-format, C.mutation-semantics and C.mcp Contracts, so batches 02 and 03 can no longer be re-run independently; change those Contracts only through batch 04 (re-rendered against the current revision) or a newer batch that names them in full.
+
 ### Ownership and structure
 
 - **Clauses own every wire format and value set:** Events, payloads, lifetimes, file modes, limits, diagnostic codes, status codes.
@@ -40,9 +44,10 @@ Calibration pass between batch 3 and batch 4; transitional — Discussions #1–
 
 ### Import applier
 
-- **Retired list:** `retire` array deletes Rules and Clauses; applier syncs the refmap.
+- **Retired list:** `retired` array deletes Rules and Clauses; applier syncs the refmap.
 - **Automatic reorder:** Applier reorders Rules and Clauses to match batch order.
 - **Dry-run behavior:** `--dry-run` reports all planned changes and refusals for stale batches (exit 1) instead of throwing.
+- **Contract ownership after batch 4:** `batch-04.json` lists the full C.ws-format, C.mutation-semantics and C.mcp Contracts, so batches 02 and 03 can no longer be re-run; change those Contracts only through batch 04 (re-rendered against the current revision) or a newer batch that lists them in full.
 
 ### Baseline and citations
 
@@ -58,7 +63,7 @@ Calibration pass between batch 3 and batch 4; transitional — Discussions #1–
 - **Moved to shared Clauses:** Host allowlists, safe methods, Sec-Fetch-Site values → C.access.
 - **Moved to Clauses:** Migration step IDs → C.ws-format.migration-steps.
 - **Retired:** R.publication.readiness-counts (moved to thread-free), R.view.variants.orthogonal (into render-context), R.view.authoring.name (duplicate; #56 gap moved to R.ws.layout.labels).
-- **Fixes:** C.mutation-semantics.success includes `deleted` (retract_review_thread); `already_exists` → 409 stated; "409/423/403 only normative" scoped to mutation results (401/429 stay normative per Discussions #1, 421/403/415 per batch 4, 422 per batch 1, 503 per batch 2).
+- **Fixes:** C.mutation-semantics.success includes `deleted` (retract_review_thread); `already_exists` → 409 stated; "409/423/403 only normative" scoped to mutation results (401/429 stay normative per Discussions #1, 421/403/415 per ruling B4, 422 per ruling B1, 503 per ruling B2).
 - **Counts:** Rules 149→161 (+12), Clauses 91→105 (+14), nodes 308→334 (+26), edges 445→463 (+18).
 
 ## Source layout
