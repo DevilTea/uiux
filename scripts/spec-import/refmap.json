@@ -539,6 +539,82 @@
 		"kind": "clause",
 		"id": "01a11485-f55a-708e-baf7-9195d6514efc"
 	},
+	"C.preview-protocol": {
+		"kind": "contract",
+		"id": "01a1161c-3f11-7cc9-8e58-ccca1b3a422a"
+	},
+	"C.preview-protocol.batch-equivalence": {
+		"kind": "clause",
+		"id": "01a1161c-3fa7-71a1-9c20-48f96e5f7d19"
+	},
+	"C.preview-protocol.capability-messages": {
+		"kind": "clause",
+		"id": "01a1161c-420a-7b55-bccb-c64ab28e66e1"
+	},
+	"C.preview-protocol.channel": {
+		"kind": "clause",
+		"id": "01a1161c-3f6b-7a54-aed0-10f035a71799"
+	},
+	"C.preview-protocol.context-keys": {
+		"kind": "clause",
+		"id": "01a1161c-40a0-7115-960a-5244f8a4084f"
+	},
+	"C.preview-protocol.declaration-pinning": {
+		"kind": "clause",
+		"id": "01a1161c-42bf-7f97-8593-a82bd55665a8"
+	},
+	"C.preview-protocol.encoding": {
+		"kind": "clause",
+		"id": "01a1161c-4063-7e53-a529-a2d38bdf52a9"
+	},
+	"C.preview-protocol.envelope": {
+		"kind": "clause",
+		"id": "01a1161c-4028-7f0e-90f2-181b54e658ea"
+	},
+	"C.preview-protocol.features": {
+		"kind": "clause",
+		"id": "01a1161c-4246-708c-9ab9-60e079b9d475"
+	},
+	"C.preview-protocol.gates": {
+		"kind": "clause",
+		"id": "01a1161c-418f-799c-944d-23a1e17e4f19"
+	},
+	"C.preview-protocol.generation-boundaries": {
+		"kind": "clause",
+		"id": "01a1161c-4339-7614-ba65-6f21e37cd1a0"
+	},
+	"C.preview-protocol.generation-id": {
+		"kind": "clause",
+		"id": "01a1161c-4119-712d-8785-7d8155c0ceee"
+	},
+	"C.preview-protocol.generation-reuse": {
+		"kind": "clause",
+		"id": "01a1161c-4154-7de9-9dc5-622d21438a47"
+	},
+	"C.preview-protocol.generation-scope": {
+		"kind": "clause",
+		"id": "01a1161c-4379-76a7-b15e-984a9b7e3309"
+	},
+	"C.preview-protocol.handshake-gate": {
+		"kind": "clause",
+		"id": "01a1161c-4283-70b7-b487-e81bc28ce875"
+	},
+	"C.preview-protocol.origin": {
+		"kind": "clause",
+		"id": "01a1161c-3fe9-7b4b-ac66-efbfcca4eb30"
+	},
+	"C.preview-protocol.retransmission": {
+		"kind": "clause",
+		"id": "01a1161c-42fc-7e45-a3d7-e9a82a588950"
+	},
+	"C.preview-protocol.session-id": {
+		"kind": "clause",
+		"id": "01a1161c-40de-705c-8821-df94c85e20cd"
+	},
+	"C.preview-protocol.stale": {
+		"kind": "clause",
+		"id": "01a1161c-41ce-7839-8e27-c49161a42369"
+	},
 	"C.ws-format": {
 		"kind": "contract",
 		"id": "01a1144e-52e8-7a30-b49e-368e16cf8762"
@@ -586,6 +662,10 @@
 	"C.ws-format.decision-transitions": {
 		"kind": "clause",
 		"id": "01a11544-6854-7c6d-b420-4747804aab8d"
+	},
+	"C.ws-format.evidence-adapter-provenance": {
+		"kind": "clause",
+		"id": "01a1161c-008a-746d-8d53-a8301b23588f"
 	},
 	"C.ws-format.evidence-provenance": {
 		"kind": "clause",
@@ -1635,6 +1715,10 @@
 		"kind": "rule",
 		"id": "01a115cd-c6de-7744-be27-715bec2e7fef"
 	},
+	"R.evidence.staleness.adapter-unknown": {
+		"kind": "rule",
+		"id": "01a1161b-ff68-76af-8237-dbc8ef2c27d1"
+	},
 	"R.evidence.staleness.by-domain": {
 		"kind": "rule",
 		"id": "01a115cd-c715-7527-b773-cae2d87c8f33"
@@ -2162,6 +2246,94 @@
 	"R.mcp.discovery.uri-scope": {
 		"kind": "rule",
 		"id": "01a11485-f1d5-74a0-927f-dd59d83ebfee"
+	},
+	"R.preview.isolation.iframe-owns": {
+		"kind": "rule",
+		"id": "01a1161c-3a28-770f-9c62-dd7493437038"
+	},
+	"R.preview.isolation.no-direct-access": {
+		"kind": "rule",
+		"id": "01a1161c-39df-77f1-ba94-302b9da35d39"
+	},
+	"R.preview.isolation.review-chrome": {
+		"kind": "rule",
+		"id": "01a1161c-3a66-7d06-98ac-a820c6c7b548"
+	},
+	"R.preview.isolation.uiux-owned": {
+		"kind": "rule",
+		"id": "01a1161c-3aa0-7bda-8956-3debc38b7a28"
+	},
+	"R.preview.session.allowance-reset": {
+		"kind": "rule",
+		"id": "01a1161c-3c49-71e4-b9d6-bbab46e97840"
+	},
+	"R.preview.session.automatic-recovery": {
+		"kind": "rule",
+		"id": "01a1161c-3bd4-7a91-b50e-d01a857521e5"
+	},
+	"R.preview.session.exhausted": {
+		"kind": "rule",
+		"id": "01a1161c-3c0e-7274-8112-db507455e0f4"
+	},
+	"R.preview.session.exhaustion-kept": {
+		"kind": "rule",
+		"id": "01a1161c-3e63-74d6-a883-ddf6492e83e5"
+	},
+	"R.preview.session.failure-scoped": {
+		"kind": "rule",
+		"id": "01a1161c-3b93-74e5-993b-421a783a256d"
+	},
+	"R.preview.session.lineage": {
+		"kind": "rule",
+		"id": "01a1161c-3adb-7d40-a7bb-ea2765d81425"
+	},
+	"R.preview.session.new-session-clean": {
+		"kind": "rule",
+		"id": "01a1161c-3e9d-7da7-b7d7-18caf1d8cf43"
+	},
+	"R.preview.session.reacquire": {
+		"kind": "rule",
+		"id": "01a1161c-3ed7-74ba-b9ee-19b88d6160e3"
+	},
+	"R.preview.session.restart": {
+		"kind": "rule",
+		"id": "01a1161c-3b51-7ebd-bff2-987863a7c1cb"
+	},
+	"R.preview.session.retry-coalesce": {
+		"kind": "rule",
+		"id": "01a1161c-3dad-7ac1-b49b-a77fcb1e33f2"
+	},
+	"R.preview.session.retry-during-bootstrap": {
+		"kind": "rule",
+		"id": "01a1161c-3e28-7dcf-a06e-a2c12c83919c"
+	},
+	"R.preview.session.retry-one-attempt": {
+		"kind": "rule",
+		"id": "01a1161c-3cf8-7859-9de8-2b99d22ce8aa"
+	},
+	"R.preview.session.retry-pending": {
+		"kind": "rule",
+		"id": "01a1161c-3d6d-77b3-81b2-aa3b017b3771"
+	},
+	"R.preview.session.retry-revoke": {
+		"kind": "rule",
+		"id": "01a1161c-3dec-7e23-b80a-a56f2620fdb5"
+	},
+	"R.preview.session.retry-spent": {
+		"kind": "rule",
+		"id": "01a1161c-3d31-7a69-9d64-cad14a8071bb"
+	},
+	"R.preview.session.session-reuse": {
+		"kind": "rule",
+		"id": "01a1161c-3b15-7913-acfb-136f0bd365b6"
+	},
+	"R.preview.session.unauthorized": {
+		"kind": "rule",
+		"id": "01a1161c-3c83-7956-a6ad-43ecc1b21b83"
+	},
+	"R.preview.session.unavailable": {
+		"kind": "rule",
+		"id": "01a1161c-3cbe-7bdc-ba70-7d2bcc8d2591"
 	},
 	"R.publication.base-path": {
 		"kind": "rule",
