@@ -1,0 +1,618 @@
+{
+	"batch": "02-workspace-view-cli",
+	"baseCommit": "17d41659e20069b0486f974d14e5feb7075a6731",
+	"baseRevision": "9f5558b0da3f4ae5c6fcf80f8a7ae6e0767219fa22048cd6db19beab639bc2a1",
+	"features": [
+		{
+			"ref": "F.ws.layout",
+			"title": "Workspace layout and identity",
+			"summary": "A self-contained, file-native Workspace directory, selected explicitly by the CLI, holds the `.uiux/workspace.json` manifest, one canonical JSON file per View, UX Flow, Review thread and locale, and one directory per authored Asset; every resource has an immutable UUID identity that matches its file or directory name.",
+			"rules": [
+				{
+					"ref": "R.ws.layout.root",
+					"statement": "A Workspace is the directory that a CLI command selects explicitly with `--workspace <dir>`. UIUX owns a fixed internal layout beneath that root; the root may sit in a specification repository, a product repository or any ordinary directory, need not be a Git repository root, and is not coupled to a production repository."
+				},
+				{
+					"ref": "R.ws.layout.self-contained",
+					"statement": "A Workspace works without a production source tree, Git or network access. Without Git, UIUX keeps working and never invents Git revision information; with Git, Handoff may preserve its commit provenance."
+				},
+				{
+					"ref": "R.ws.layout.no-product-install",
+					"statement": "Installing `@deviltea/uiux` in the production repository is not required; the runtime is selected by the explicit Workspace path."
+				},
+				{
+					"ref": "R.ws.layout.resource-units",
+					"statement": "Each View, UX Flow, Review thread and locale is its own canonical JSON file, and each authored Asset its own directory. A View file holds only that View's IR, Variants and Spec, never Review threads, UX Flows, locale messages or Asset content."
+				},
+				{
+					"ref": "R.ws.layout.flat-views",
+					"statement": "All View files live in one flat top-level `views/` directory. Grouping never places or moves a View file, and one View can serve any number of groupings and UX Flows without being duplicated."
+				},
+				{
+					"ref": "R.ws.layout.uuid-identity",
+					"statement": "Views, UX Flows, Review threads and authored Assets each have an immutable full UUID identity stored in the resource, and every reference to them uses that full UUID, never a file path, filename, display name, slug or shortened ID. A locale is identified by its canonical BCP 47 tag."
+				},
+				{
+					"ref": "R.ws.layout.identity-mismatch",
+					"statement": "A resource whose stored identity differs from the UUID in its file or directory name, a duplicated identity, and a create that would overwrite an existing resource path all fail explicitly; copying a resource file never creates a new identity."
+				},
+				{
+					"ref": "R.ws.layout.labels",
+					"statement": "Display names and other human-readable labels can change without changing a resource's identity."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #1 body (Part 1 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win): Location-Independent, File-Native Workspace; Canonical Decision Index item 2. https://github.com/DevilTea/uiux/discussions/1\n- Discussion #1 comment 8 (2026-09-22), \"Accepted decision — location-independent UIUX Workspace root\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18553033\n- Discussion #1 comment 10 (2026-09-23), \"Accepted decision — one View = one JSON file\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560280\n- Discussion #1 comment 11 (2026-09-23), \"Accepted decision — centralized View files, Feature relationships by reference\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560462\n- Discussion #1 comment 12 (2026-09-23), \"Accepted decision — immutable full UUID for View identity (option B)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560648\n- Discussion #1 comment 13 (2026-09-23), \"Accepted decision — full UUID filenames for Views (option C)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560794\n- Discussion #1 comment 152 (2026-09-29), \"Accepted decision group — Workspace schema and RootShell boundary (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656497\n- Discussion #1 comment 153 (2026-09-29), \"Accepted decision group — Workspace and View canonical JSON shape (C / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656572\n- Discussion #7 comment 1 (2026-09-30), \"Accepted decision group — Review persistence baseline (A / A / A / A)\": Review thread file unit. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686\n- Discussion #6 comment 1 (2026-09-30), \"Accepted decision group — UX Flow schema baseline (A / A / A / A)\": Flow file unit. https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18672784\n- Discussion #9 comment 1 (2026-09-30), \"Accepted decision group — Authored asset model baseline (A / A / A / A)\": Asset unit. https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675131\n- Discussion #1 comment 25 (2026-09-23), \"Accepted decision — one flat JSON file per locale (option A)\": locale file unit. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18564868\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.ws.layout.root}} | [#1 c8](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18553033); [#1 body: Location-Independent, File-Native Workspace](https://github.com/DevilTea/uiux/discussions/1) |\n| {{R.ws.layout.self-contained}} | [#1 c8](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18553033); [#1 body: Canonical Decision Index item 11](https://github.com/DevilTea/uiux/discussions/1) |\n| {{R.ws.layout.no-product-install}} | [#1 c8](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18553033) |\n| {{R.ws.layout.resource-units}} | [#1 c10](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560280); [#7 c1 d1](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686); [#6 c1 d1](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18672784); [#9 c1 d2](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675131); [#1 c25](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18564868) |\n| {{R.ws.layout.flat-views}} | [#1 c11](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560462); [#1 c14](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560952) |\n| {{R.ws.layout.uuid-identity}} | [#1 c12](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560648); [#1 c13](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560794); [#7 c1 d1](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686); [#6 c1 d1](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18672784); [#9 c1 d2](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675131); [#5 body: locale-tag validation](https://github.com/DevilTea/uiux/discussions/5) |\n| {{R.ws.layout.identity-mismatch}} | [#1 c12](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560648); [#1 c13](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560794); [#7 c1 d1](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686); [#6 c1 d1](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18672784); [#9 c1 d2](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675131) |\n| {{R.ws.layout.labels}} | [#1 c12](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560648); [#10 c3](https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18676515) |\n"
+		},
+		{
+			"ref": "F.ws.migration",
+			"title": "Workspace schema versioning and migration",
+			"summary": "The manifest records one Workspace `schemaVersion` (current: 3). An older recognized Workspace opens read-only until it is upgraded explicitly, atomically and deterministically through the CLI-only `uiux migrate` (with a writing-nothing `--dry-run`, refused while a `uiux dev` server holds the Workspace); there is no HTTP or MCP migration entrypoint. Until then, mutations, formal capture, Handoff readiness assessment and Handoff export refuse with `workspace.migration_required` (over HTTP, capture, assessment and export answer 422); a Workspace whose `schemaVersion` is unknown or newer than this UIUX supports is `unsupported`, and the same operations refuse with `workspace.schema_unsupported`.",
+			"rules": [
+				{
+					"ref": "R.ws.migration.older-read-only",
+					"statement": "A Workspace at a recognized older `schemaVersion` can be opened, inspected and explained, but UIUX never mutates or upgrades it implicitly: until it is migrated, every mutation is refused with `workspace.migration_required`."
+				},
+				{
+					"ref": "R.ws.migration.blocked-operations",
+					"statement": "On such a Workspace, formal capture, Handoff readiness assessment and Handoff export are refused with `workspace.migration_required` too; over HTTP each answers 422."
+				},
+				{
+					"ref": "R.ws.migration.unsupported",
+					"statement": "A Workspace whose `schemaVersion` is unknown or newer than this UIUX supports is `unsupported`: it is reported with one clear schema diagnostic, `workspace.schema_unsupported`, and mutations, formal capture and Handoff assessment and export are refused."
+				},
+				{
+					"ref": "R.ws.migration.cli-only",
+					"statement": "Migration runs only when an operator invokes `uiux migrate --workspace <dir>`. There is no MCP tool and no HTTP route for it, and while migration is required the Workbench shows a read-only banner that names that command."
+				},
+				{
+					"ref": "R.ws.migration.atomic",
+					"statement": "Migration upgrades the Workspace in place, deterministically and atomically, to the current `schemaVersion`; a failure leaves the Workspace unchanged, never partially migrated."
+				},
+				{
+					"ref": "R.ws.migration.chained-steps",
+					"statement": "One run chains every step from the Workspace's version to the current one (`uiux.v1-to-v2`, then `uiux.v2-to-v3`), and before anything is written each step re-validates every Review file that was valid under its source version against its target version."
+				},
+				{
+					"ref": "R.ws.migration.v1-to-v2",
+					"statement": "Step `uiux.v1-to-v2` sets `schemaVersion` to 2 and adds `resolution: \"verified\"` to every Review lifecycle event that entered `resolved` without a resolution; it synthesizes no pin display hints."
+				},
+				{
+					"ref": "R.ws.migration.v2-to-v3",
+					"statement": "Step `uiux.v2-to-v3` changes only the manifest `schemaVersion`, from 2 to 3."
+				},
+				{
+					"ref": "R.ws.migration.dry-run",
+					"statement": "`uiux migrate --dry-run` plans the migration in memory and reports the steps and the changed files without writing anything."
+				},
+				{
+					"ref": "R.ws.migration.server-hold",
+					"statement": "A real migration refuses while a `uiux dev` server is serving the Workspace; a dry run still runs then and notes the serving server."
+				},
+				{
+					"ref": "R.ws.migration.ship-together",
+					"statement": "A release that raises the current `schemaVersion` ships the matching migration step, its validators and the `uiux migrate` entrypoint together, so no released version decodes a new schema without handling it."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #1 body (Part 1 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win): Canonical Decision Index item 2 (explicit atomic in-place migration; its \"first product version 1\" is superseded by the later schema bumps). https://github.com/DevilTea/uiux/discussions/1\n- Discussion #7 comment 5 (2026-10-05), \"Accepted decision group — Review pin display hint (Figma-style comment placement, Phase 2)\": decision 7: schema 1 -> 2 with step `uiux.v1-to-v2`; CLI-only `uiux migrate --workspace <dir> [--dry-run]` that refuses while a `uiux dev` server holds the Workspace; `migration_required` blocks mutations. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814\n- Discussion #7 comment 6 (2026-10-05), \"Accepted decision group — Direct resolve of discussion threads\": decision 8: the pin-hint and direct-resolve changes (including the `resolution: \"verified\"` backfill) folded into the one `1 -> 2` step `uiux.v1-to-v2`. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815\n- Discussion #7 comment 9 (2026-10-06), \"Accepted decision group — Workspace-scoped Review threads and editable Review messages\": decision 19: schema 2 -> 3, step `uiux.v2-to-v3`, chained after `uiux.v1-to-v2`. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095\n- code@9dba4b2 `src/cli/migrate.ts`: server-hold refusal. https://github.com/DevilTea/uiux/blob/9dba4b274ef41193379432f89695b8ad4584e25f/src/cli/migrate.ts\n- code@9dba4b2 `src/persistence/schema-policy.ts`. https://github.com/DevilTea/uiux/blob/9dba4b274ef41193379432f89695b8ad4584e25f/src/persistence/schema-policy.ts\n- doc@9dba4b2 `AGENTS.md`. https://github.com/DevilTea/uiux/blob/9dba4b274ef41193379432f89695b8ad4584e25f/AGENTS.md\n- Owner ruling 2026-10-07 (checkpoint B, item B1), recorded in PR #73 (https://github.com/DevilTea/uiux/pull/73): Handoff export and formal capture refusing with `workspace.migration_required` on an outdated schema is accepted as shipped (the Discussions decide only that `migration_required` blocks mutations).\n- code@c0a685e `src/application/services/handoff-export.ts`: `workspace.migration_required` refusal of export. https://github.com/DevilTea/uiux/blob/c0a685e72154d2fea1da811996de8484ebea25a0/src/application/services/handoff-export.ts\n- code@c0a685e `src/application/services/formal-capture.ts`: `workspace.migration_required` refusal of capture. https://github.com/DevilTea/uiux/blob/c0a685e72154d2fea1da811996de8484ebea25a0/src/application/services/formal-capture.ts\n- code@17d4165 `src/application/services/handoff-export.ts#L908-L909`: Handoff readiness assessment shares the export's `blockedForSchema` refusal (`workspace.migration_required`, or `workspace.schema_unsupported` for an unsupported schema, L88-L102); the same B1 behaviour. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/application/services/handoff-export.ts#L908-L909\n- code@17d4165 `server/api/handoff/assess.post.ts`: a schema block answers HTTP 422. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/server/api/handoff/assess.post.ts\n- doc@17d4165 `README.md#L56`: assessment, export and capture on a Workspace that still needs `uiux migrate` return 422 `blocked` with `workspace.migration_required`. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/README.md#L56\n- Discussion #7 comment 5 (2026-10-05), \"Accepted decision group — Review pin display hint (Figma-style comment placement, Phase 2)\": decision 7: a Workspace at a newer schema opened by an older UIUX is `unsupported`, with one clear \"newer schema\" diagnostic. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814\n- code@17d4165 `src/persistence/file-native.ts#L458-L469`: `assertWritableUnlocked`: mutations refuse with `workspace.schema_unsupported` for an unsupported schema. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/persistence/file-native.ts#L458-L469\n- code@17d4165 `src/persistence/schema-policy.ts#L99-L106`: an unknown or newer `schemaVersion` is `unsupported` with `workspace.schema_unsupported`. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/persistence/schema-policy.ts#L99-L106\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.ws.migration.older-read-only}} | [#1 body: Canonical Decision Index item 2](https://github.com/DevilTea/uiux/discussions/1); [#1 c152 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656497); [#7 c5 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#7 c9 d19](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [code@17d4165 `src/persistence/file-native.ts#L458-L469`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/persistence/file-native.ts#L458-L469) |\n| {{R.ws.migration.blocked-operations}} | owner ruling B1 (checkpoint B, [PR #73](https://github.com/DevilTea/uiux/pull/73)); [code@c0a685e `src/application/services/handoff-export.ts`](https://github.com/DevilTea/uiux/blob/c0a685e72154d2fea1da811996de8484ebea25a0/src/application/services/handoff-export.ts); [code@17d4165 `src/application/services/handoff-export.ts#L908-L909`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/application/services/handoff-export.ts#L908-L909) (assessment); [code@17d4165 `src/application/services/formal-capture.ts#L132-L145`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/application/services/formal-capture.ts#L132-L145); [code@17d4165 `server/api/handoff/assess.post.ts`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/server/api/handoff/assess.post.ts); [doc@17d4165 `README.md#L56`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/README.md#L56) |\n| {{R.ws.migration.unsupported}} | [#7 c5 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); owner ruling 2026-10-07 (batch 2 confirmation): refusing mutations, formal capture and Handoff assessment and export accepted as shipped; [code@17d4165 `src/persistence/schema-policy.ts#L99-L106`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/persistence/schema-policy.ts#L99-L106); [code@17d4165 `src/persistence/file-native.ts#L458-L469`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/persistence/file-native.ts#L458-L469); [code@17d4165 `src/application/services/handoff-export.ts#L100-L101`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/application/services/handoff-export.ts#L100-L101); [code@17d4165 `src/application/services/formal-capture.ts#L132-L145`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/application/services/formal-capture.ts#L132-L145) |\n| {{R.ws.migration.cli-only}} | [#7 c5 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#7 c9 d19](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [code@17d4165 `app/layouts/default.vue#L26-L28`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/app/layouts/default.vue#L26-L28) |\n| {{R.ws.migration.atomic}} | [#1 body: Canonical Decision Index item 2](https://github.com/DevilTea/uiux/discussions/1); [#1 c152 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656497) |\n| {{R.ws.migration.chained-steps}} | [#7 c5 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#7 c9 d19](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [code@17d4165 `src/product/workspace-schema.ts`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/product/workspace-schema.ts) |\n| {{R.ws.migration.v1-to-v2}} | [#7 c5 d6, d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#7 c6 d8](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757815) |\n| {{R.ws.migration.v2-to-v3}} | [#7 c9 d19](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{R.ws.migration.dry-run}} | [#7 c5 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814) |\n| {{R.ws.migration.server-hold}} | [#7 c5 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); owner ruling 2026-10-07 (batch 2 confirmation): a dry run while a server holds the Workspace accepted as shipped; [code@17d4165 `src/cli/migrate.ts#L38-L42`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/cli/migrate.ts#L38-L42); [code@17d4165 `src/cli/migrate.ts#L56-L57`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/cli/migrate.ts#L56-L57) |\n| {{R.ws.migration.ship-together}} | [#7 c5 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#7 c9 d19 coordination rule](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n\n## Notes\n\n- The step identifiers `uiux.v1-to-v2` and `uiux.v2-to-v3` are named in the Discussion decisions cited above (Part 7 comments 5, 6 and 9), not only in code.\n"
+		},
+		{
+			"ref": "F.ws.mutations",
+			"title": "Domain mutations and revision concurrency",
+			"summary": "Every canonical change goes through a domain-specific, atomic mutation that requires the resource's current opaque `expectedRevision`; a stale revision writes nothing and reports the current revision, there is no generic file write, and out-of-band edits are detected. `/api/*` and `/mcp` are separate transport adapters over one shared application layer (MCP never calls `/api/*` over loopback HTTP), so HTTP, MCP and the Workbench share the same semantics. When the persistence lock wait budget expires, an operation changes nothing and fails retryably with `persistence.busy`: HTTP answers 503 with a `Retry-After` header, MCP returns an error result.",
+			"rules": [
+				{
+					"ref": "R.ws.mutations.domain-specific",
+					"statement": "Canonical resources change only through domain-specific mutations, each atomic within one resource or domain boundary; a mutation may carry several structured operations against that boundary. There is no generic file write, arbitrary filesystem write or cross-domain Workspace-wide patch."
+				},
+				{
+					"ref": "R.ws.mutations.one-application-layer",
+					"statement": "`/api/*`, `/mcp` and `/preview/*` are separate transport adapters over one shared application and domain layer: MCP never calls `/api/*` over loopback HTTP, and transport routes never duplicate domain logic."
+				},
+				{
+					"ref": "R.ws.mutations.out-of-band",
+					"statement": "Edits made to canonical files outside UIUX are detected through content-derived revisions and validation, which survive process restarts; such edits bypass mutation-only affordances such as reference-impact acknowledgement."
+				},
+				{
+					"ref": "R.ws.mutations.busy",
+					"statement": "When the persistence lock cannot be acquired within its wait budget, the operation changes nothing and fails retryably with `persistence.busy`: HTTP answers 503 with a `Retry-After` header, and MCP returns an error result."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #1 body (Part 1 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win): Canonical Decision Index items 9 and 10; implementation-entry checklist step 2. https://github.com/DevilTea/uiux/discussions/1\n- Discussion #1 comment 164 (2026-09-30), \"Accepted decision group — MCP API contract (A / A / A / A)\": decisions 2 and 3. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287\n- Discussion #1 comment 165 (2026-09-30), \"Accepted decision group — Preview/runtime architecture (A / A / A / A)\": decision 4: `/api/*`, `/mcp` and `/preview/*` are separate transport adapters over one shared application layer; MCP never calls `/api/*` over loopback HTTP; transport routes do not duplicate domain logic. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671359\n- Owner ruling 2026-10-07 (checkpoint B, item B2), recorded in PR #73 (https://github.com/DevilTea/uiux/pull/73): the retryable `persistence.busy` refusal (HTTP 503 with `Retry-After`; MCP error result) on a persistence lock wait timeout is accepted; the `Retry-After` seconds value is not normative.\n- code@c0a685e `src/persistence/busy.ts`: retryable `persistence.busy`. https://github.com/DevilTea/uiux/blob/c0a685e72154d2fea1da811996de8484ebea25a0/src/persistence/busy.ts\n- doc@c0a685e `README.md#server-surfaces`. https://github.com/DevilTea/uiux/blob/c0a685e72154d2fea1da811996de8484ebea25a0/README.md#server-surfaces\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.ws.mutations.domain-specific}} | [#1 body: Canonical Decision Index item 9](https://github.com/DevilTea/uiux/discussions/1); [#1 c164 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287); [#9 c2 d8](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675243) |\n| {{R.ws.mutations.one-application-layer}} | [#1 c165 d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671359); [#1 body: Canonical Decision Index item 10](https://github.com/DevilTea/uiux/discussions/1) |\n| {{R.ws.mutations.out-of-band}} | [#1 c164 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287); [#1 c171](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18676070) |\n| {{R.ws.mutations.busy}} | owner ruling B2 (checkpoint B, [PR #73](https://github.com/DevilTea/uiux/pull/73)); [code@c0a685e `src/persistence/busy.ts`](https://github.com/DevilTea/uiux/blob/c0a685e72154d2fea1da811996de8484ebea25a0/src/persistence/busy.ts); [doc@c0a685e `README.md#server-surfaces`](https://github.com/DevilTea/uiux/blob/c0a685e72154d2fea1da811996de8484ebea25a0/README.md#server-surfaces) |\n\n## Notes\n\n- The `Retry-After` value (1 second, `PERSISTENCE_BUSY_RETRY_AFTER_SECONDS` at c0a685e) is an implementation choice, not part of the specification (checkpoint B, item B2).\n- Revision, `expectedRevision` and conflict semantics shared by every transport are specified as Clauses of the mutation-semantics Contract (import batch 3), not as Rules here.\n"
+		},
+		{
+			"ref": "F.ws.references",
+			"title": "Reference integrity and destructive changes",
+			"summary": "Destructive or identity-changing operations (deleting a View, UX Flow or Asset; renaming a Variant or a render-dimension key) first report their known reference impact and proceed only after explicit acknowledgement; they stay target-local, never cascade or auto-rebind, and leave dangling references as repairable diagnostics.",
+			"rules": [
+				{
+					"ref": "R.ws.references.impact-ack",
+					"statement": "Before deleting a View, UX Flow or authored Asset, renaming a Variant, or renaming a viewport or theme key, the normal Workbench or MCP operation reports the known affected canonical references and proceeds only after the caller explicitly acknowledges that impact."
+				},
+				{
+					"ref": "R.ws.references.target-local",
+					"statement": "Such a change stays atomic within its own resource or domain boundary: UIUX never cascades it, auto-rebinds references or silently rewrites referencing resources."
+				},
+				{
+					"ref": "R.ws.references.dangling",
+					"statement": "A reference whose target is gone keeps its original target identity and is reported as a structured invalid or dangling diagnostic until it is explicitly repaired; a Workspace with dangling references is a supported, repairable state."
+				},
+				{
+					"ref": "R.ws.references.preserve-invalid",
+					"statement": "UIUX preserves invalid authored data for repair and reports it; it never silently drops or rewrites it, and never rebinds a reference heuristically by name, type, selector, tree position, geometry or similarity."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #1 comment 171 (2026-09-30), \"Accepted convergence decision — target-local destructive change with explicit impact acknowledgement\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18676070\n- Discussion #10 comment 3 (2026-09-30), \"Accepted convergence decision — Workspace-local opaque render-dimension IDs\": render-dimension key rename is identity-changing. https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18676515\n- Discussion #1 comment 158 (2026-09-29), \"Accepted decision group — Review anchor model (A / A / A / A)\": missing anchor targets are preserved. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657409\n- Discussion #6 comment 2 (2026-09-30), \"Accepted decision group — Flow execution and graph validity (A / A / A / A)\": decision 7: invalid Flow references are preserved. https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.ws.references.impact-ack}} | [#1 c171](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18676070); [#1 body: Canonical Decision Index item 9](https://github.com/DevilTea/uiux/discussions/1); [#10 c3](https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18676515) |\n| {{R.ws.references.target-local}} | [#1 c171](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18676070) |\n| {{R.ws.references.dangling}} | [#1 c171](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18676070); [#1 c158](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657409); [#6 c2 d7](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004) |\n| {{R.ws.references.preserve-invalid}} | [#1 body: Review anchor fallback policy](https://github.com/DevilTea/uiux/discussions/1); [#1 c155 d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656662); [#1 c158](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657409); [#6 c2 d7](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18673004); [#9 c2 d6](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675243) |\n\n## Implementation gaps\n\n- {{R.ws.references.impact-ack}}: Not built as of 17d4165: no View, UX Flow or Asset delete operation exists on MCP or HTTP, and Variant renames (`update_view_structure`) and viewport or theme key renames (`update_workspace_settings`) run without reference-impact analysis. The `ReferenceImpactAnalyzer` port and the `impact_acknowledgement_required` result exist only in `src/application/services/resource-mutations.ts`, which no production service uses. Tracked in issue #75 (https://github.com/DevilTea/uiux/issues/75).\n"
+		},
+		{
+			"ref": "F.view.authoring",
+			"title": "View structure and RootShell",
+			"summary": "A View is one canonical JSON resource whose Widget IR is rooted at the UIUX-managed RootShell Widget (reserved ID `root`) with exactly one `content` Slot of ordered child Widgets; UIUX validates only that reserved boundary and leaves the executable Widget IR to adapters, and an optional View-local `feature` tag groups Views for display.",
+			"rules": [
+				{
+					"ref": "R.view.authoring.one-ir",
+					"statement": "A View owns exactly one canonical Widget IR. Its Variants are initial Runtime State presets over that IR, not alternate Widget trees, snapshots or source patches."
+				},
+				{
+					"ref": "R.view.authoring.rootshell-root",
+					"statement": "The IR root is the UIUX-owned RootShell Widget plugin, persisted as the real root node with type `RootShell` and the reserved ID `root`, which ordinary Widget identity allocation never uses. UIUX creates it with the View, and no other Widget in the tree may be a RootShell."
+				},
+				{
+					"ref": "R.view.authoring.content-slot",
+					"statement": "RootShell has exactly one required Slot, `content`, holding 0..N ordered authored Widgets. An empty View has an empty `content` list; authors cannot add RootShell Slots, and a new system Slot needs a Workspace schema migration."
+				},
+				{
+					"ref": "R.view.authoring.rootshell-guard",
+					"statement": "RootShell presence, type, ID and Slot structure are system-managed: authors may change only RootShell fields that the schema marks user-editable, and deleting, retyping or re-identifying the root or breaking its Slot is invalid, even through a raw file edit."
+				},
+				{
+					"ref": "R.view.authoring.render-context",
+					"statement": "The Workbench or Preview controller selects the render context (locale, theme, viewport and the selected Variant). RootShell exposes the effective values to descendant Widgets as read-only presentation context; neither descendant Widgets nor Variants can write it."
+				},
+				{
+					"ref": "R.view.authoring.author-writable-state",
+					"statement": "View IR and Variant state may set only Widget State members that the plugin schema marks author-writable; computed, read-only or internal State stays non-writable, and a write outside that boundary is a validation error."
+				},
+				{
+					"ref": "R.view.authoring.plugin-owned-ir",
+					"statement": "Beyond the reserved RootShell boundary, the adapters' Widget plugin definitions own the executable IR semantics (types, schemas, defaults, Slots and Properties); UIUX keeps no second runtime schema for them."
+				},
+				{
+					"ref": "R.view.authoring.not-an-app",
+					"statement": "View IR describes view structure, component identity, states, copy and interaction rules; it never carries arbitrary business logic, networking or routing."
+				},
+				{
+					"ref": "R.view.authoring.name",
+					"statement": "Every View has a required human-readable `name`; changing it never changes the View's identity."
+				},
+				{
+					"ref": "R.view.authoring.feature-tag",
+					"statement": "A View may carry one optional `feature` tag, used only to group Views for display: untagged Views appear ungrouped, groups are derived from the current Views, and there is no persisted Feature entity, Feature directory, Feature lifecycle or link to an external Feature or scenario system. The tag is not part of Review anchor or UX Flow identity, and regrouping means changing the matching Views' tags."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #1 body (Part 1 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win): Widget as Executable View IR Runtime; Feature Display Grouping; Canonical Decision Index items 2 and 3. https://github.com/DevilTea/uiux/discussions/1\n- Discussion #1 comment 7 (2026-09-22), \"Accepted direction — shared Design System / independent UIUX and production wrappers\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18552507\n- Discussion #1 comment 9 (2026-09-22), \"Accepted decision — View is the artifact; Variants are Widget Runtime State presets\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18554030\n- Discussion #1 comment 10 (2026-09-23), \"Accepted decision — one View = one JSON file\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560280\n- Discussion #1 comment 14 (2026-09-23), \"Accepted decision — virtual Feature directory from one optional View-local tag\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560952\n- Discussion #1 comment 32 (2026-09-24), \"Accepted direction — UIUX RootShell Widget is the root of each View (custom option, clarified)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18574794\n- Discussion #1 comment 33 (2026-09-24), \"Accepted decision — persist UIUX RootShell as the actual View Widget IR root (option A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18574868\n- Discussion #1 comment 34 (2026-09-24), \"Accepted decision — RootShell Global State has split authority (option C)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18574896\n- Discussion #1 comment 152 (2026-09-29), \"Accepted decision group — Workspace schema and RootShell boundary (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656497\n- Discussion #1 comment 154 (2026-09-29), \"Accepted decision group — Widget integration contract (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656610\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.view.authoring.one-ir}} | [#1 c9](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18554030); [#1 c10](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560280) |\n| {{R.view.authoring.rootshell-root}} | [#1 c32](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18574794); [#1 c33](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18574868); [#1 c152 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656497); [code@17d4165 `src/domain/views/schema.ts#L62-L74`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/views/schema.ts#L62-L74) (nested RootShell) |\n| {{R.view.authoring.content-slot}} | [#1 c153 d3, d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656572) |\n| {{R.view.authoring.rootshell-guard}} | [#1 c152 d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656497) |\n| {{R.view.authoring.render-context}} | [#1 c34](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18574896); [code@17d4165 `src/runtime/view-runtime.ts#L164-L167`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/runtime/view-runtime.ts#L164-L167) (Variants); [code@17d4165 `src/runtime/view-runtime.ts#L187-L202`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/runtime/view-runtime.ts#L187-L202) (descendants) |\n| {{R.view.authoring.author-writable-state}} | [#1 c161 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18669081); [#5 body: View-owned State write boundary](https://github.com/DevilTea/uiux/discussions/5) |\n| {{R.view.authoring.plugin-owned-ir}} | [#1 c154 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656610); [#1 body: Core Architecture & Foundations](https://github.com/DevilTea/uiux/discussions/1) |\n| {{R.view.authoring.not-an-app}} | [#1 body: Mockups as Executable Specifications](https://github.com/DevilTea/uiux/discussions/1) |\n| {{R.view.authoring.name}} | [#1 c153 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656572); [#1 c12](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560648) |\n| {{R.view.authoring.feature-tag}} | [#1 c14](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560952); [#1 body: Feature Display Grouping](https://github.com/DevilTea/uiux/discussions/1) |\n\n## Implementation gaps\n\n- {{R.view.authoring.name}}: A View's `name` cannot be changed after `create_view` as of 17d4165: no MCP or HTTP operation edits it; tracked in issue #56 (https://github.com/DevilTea/uiux/issues/56).\n- {{R.view.authoring.feature-tag}}: A View's `feature` tag cannot be changed after `create_view` as of 17d4165, so Views cannot be regrouped; tracked in issue #56 (https://github.com/DevilTea/uiux/issues/56).\n\n## Notes\n\n- As of 17d4165 no RootShell field is user-editable: the persisted RootShell carries only its type, ID and `content` Slot (`src/domain/views/schema.ts` L51).\n"
+		},
+		{
+			"ref": "F.view.variants",
+			"title": "View Variants",
+			"summary": "Named Variants are sparse presets of Widget Runtime State on one View, identified by name; an invalid Variant keeps its data, blocks execution and capture, and reports all of its diagnostics.",
+			"rules": [
+				{
+					"ref": "R.view.variants.sparse",
+					"statement": "A named Variant is a sparse preset of initial Widget Runtime State: it stores only the State members it overrides, and every Widget or member it omits keeps the IR and plugin defaults."
+				},
+				{
+					"ref": "R.view.variants.base-state",
+					"statement": "Rendering a View without a Variant uses its canonical base state: the IR plus plugin defaults, with no preset applied."
+				},
+				{
+					"ref": "R.view.variants.fresh-runtime",
+					"statement": "Selecting, switching or capturing a Variant builds a fresh Runtime from the View IR with that Variant's overrides; it never inherits interaction state from an earlier Runtime."
+				},
+				{
+					"ref": "R.view.variants.name-identity",
+					"statement": "A Variant's name is its stable View-local identity: names are non-empty, unique within the View and enumerated from the `variants` keys, other resources reference a Variant by its View UUID plus Variant name, and there is no secondary Variant ID or registry."
+				},
+				{
+					"ref": "R.view.variants.rename",
+					"statement": "Renaming a Variant is an explicit identity change that requires updating the references to it."
+				},
+				{
+					"ref": "R.view.variants.invalid",
+					"statement": "An invalid Variant (an unknown Widget ID, an unknown or non-author-writable State member, or an invalid value) keeps its authored data for repair but cannot be used for render, capture or formal Review evidence until it is valid; UIUX never drops its invalid overrides or applies the rest partially."
+				},
+				{
+					"ref": "R.view.variants.all-diagnostics",
+					"statement": "UIUX reports all determinable diagnostics of an invalid Variant together, inline and in Checks."
+				},
+				{
+					"ref": "R.view.variants.orthogonal",
+					"statement": "Locale, viewport and theme are render dimensions independent of Variants."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #1 body (Part 1 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win): View Variant Realization; Canonical Decision Index item 4. https://github.com/DevilTea/uiux/discussions/1\n- Discussion #1 comment 3 (2026-09-22), \"Accepted decision — View / Variant / UX Flow model\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18547402\n- Discussion #1 comment 9 (2026-09-22), \"Accepted decision — View is the artifact; Variants are Widget Runtime State presets\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18554030\n- Discussion #1 comment 155 (2026-09-29), \"Accepted decision group — View Variant schema and validation (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656662\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.view.variants.sparse}} | [#1 c9](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18554030); [#1 c155 d1, d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656662) |\n| {{R.view.variants.base-state}} | [#6 c1 d2](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18672784) |\n| {{R.view.variants.fresh-runtime}} | [#1 c9](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18554030) |\n| {{R.view.variants.name-identity}} | [#1 c155 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656662) |\n| {{R.view.variants.rename}} | [#1 c155 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656662) |\n| {{R.view.variants.invalid}} | [#1 c155 d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656662); [#1 c9](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18554030); [#1 c161 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18669081) |\n| {{R.view.variants.all-diagnostics}} | [#1 c155 d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656662) |\n| {{R.view.variants.orthogonal}} | [#1 c3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18547402); [#1 c9](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18554030); [#1 c34](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18574896) |\n"
+		},
+		{
+			"ref": "F.view.spec",
+			"title": "Structured View Spec",
+			"summary": "Each View carries a structured Spec beside its IR (intent, entry conditions, interaction rules, constraints, accessibility, references and decisions) whose fields are required and use explicit empty values; external references are URIs.",
+			"rules": [
+				{
+					"ref": "R.view.spec.beside-ir",
+					"statement": "A View's Spec is a structured specification kept in the same View file as its IR and Variants but conceptually distinct from the executable IR; it captures intent, entry conditions, interaction rules, constraints, accessibility, references and decisions."
+				},
+				{
+					"ref": "R.view.spec.explicit-empty",
+					"statement": "Every Spec field is always present, with empty content stated explicitly (`\"\"` or `[]`); completeness is judged by Checks and Review policy, never encoded by omitting a field."
+				},
+				{
+					"ref": "R.view.spec.view-reference",
+					"statement": "A View reference records a design relationship to a View, optionally to one of its Variants; it never becomes a UX Flow edge or a runtime route."
+				},
+				{
+					"ref": "R.view.spec.external-reference",
+					"statement": "An external reference identifies external material by its absolute URI alone: UIUX defines no provider-specific source or ID semantics, an optional `label` is non-authoritative display text, and neither `label` nor `relation` changes the reference's identity."
+				},
+				{
+					"ref": "R.view.spec.no-fetch",
+					"statement": "UIUX does not fetch, mirror, synchronize or domain-validate the content behind an external reference, and an unreachable URI never rewrites the Spec."
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #1 body (Part 1 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win): View IR vs View Spec; Canonical Decision Index item 5. https://github.com/DevilTea/uiux/discussions/1\n- Discussion #1 comment 15 (2026-09-23), \"Accepted decision — structured View Spec with open-decision inbox (option C)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561230\n- Discussion #1 comment 156 (2026-09-29), \"Accepted decision group — View Spec core schema (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656726\n- Discussion #1 comment 170 (2026-09-30), \"Accepted convergence decision — URI-based external View Spec reference\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18675877\n\n## Rule sources\n\n| Rule | Sources |\n| --- | --- |\n| {{R.view.spec.beside-ir}} | [#1 c15](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561230); [#1 c10](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560280); [#1 body: View IR vs View Spec](https://github.com/DevilTea/uiux/discussions/1) |\n| {{R.view.spec.explicit-empty}} | [#1 c156 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656726) |\n| {{R.view.spec.view-reference}} | [#1 c157 d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657198) |\n| {{R.view.spec.external-reference}} | [#1 c170](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18675877) |\n| {{R.view.spec.no-fetch}} | [#1 c170](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18675877) |\n"
+		}
+	],
+	"contracts": [
+		{
+			"ref": "C.ws-format",
+			"title": "Workspace persisted format",
+			"summary": "The persisted format of a UIUX Workspace, versioned as a whole by the manifest `schemaVersion` (current: 3): the `.uiux/workspace.json` manifest, the path, file unit and identity of every canonical resource kind and of the content-addressed derived-artifact store, and the canonical JSON shapes of those resources.",
+			"constrains": [
+				"F.ws.layout",
+				"F.ws.migration",
+				"F.view.authoring",
+				"F.view.variants",
+				"F.view.spec",
+				"F.view.decisions",
+				"F.i18n.resources",
+				"F.assets",
+				"F.artifacts",
+				"F.evidence.formal",
+				"F.render-context",
+				"F.adapter.resolution",
+				"F.review.threads",
+				"F.flow.graph"
+			],
+			"clauses": [
+				{
+					"ref": "C.ws-format.manifest-path",
+					"statement": "The Workspace manifest is `.uiux/workspace.json` under the Workspace root. The `.uiux/` directory is reserved for UIUX system metadata, such as the manifest and the derived-artifact store.",
+					"constrains": [
+						"F.ws.layout"
+					]
+				},
+				{
+					"ref": "C.ws-format.manifest-fields",
+					"statement": "The manifest is a JSON object holding the Workspace-level settings: `schemaVersion`, `i18n`, the ordered `adapters` list and the `viewports` and `themes` registries. All five are required; an empty `adapters` list or registry is valid.",
+					"constrains": [
+						"F.ws.layout",
+						"F.i18n.resources",
+						"F.adapter.resolution",
+						"F.render-context"
+					]
+				},
+				{
+					"ref": "C.ws-format.schema-version",
+					"statement": "`schemaVersion` is a positive integer and the only schema version in a Workspace: resource files carry none and are all decoded under it. The current version is 3; versions 1 and 2 are recognized older versions.",
+					"constrains": [
+						"F.ws.migration"
+					]
+				},
+				{
+					"ref": "C.ws-format.version-gating",
+					"statement": "A field introduced by a later schema version is invalid (`schema.unknown_field`) in a Workspace at an earlier version; no version treats a later version's field as an optional addition.",
+					"constrains": [
+						"F.ws.migration"
+					]
+				},
+				{
+					"ref": "C.ws-format.i18n-settings",
+					"statement": "`i18n` is an object whose required `defaultLocale` is a canonical BCP 47 tag. Supported locales are discovered from locale files and not listed in the manifest, and `i18n` gains further settings only additively, through schema evolution.",
+					"constrains": [
+						"F.i18n.resources"
+					]
+				},
+				{
+					"ref": "C.ws-format.adapters",
+					"statement": "`adapters` is an ordered array whose order is the canonical installation order. Each entry holds a portable module reference (a bare package or module specifier, or a `./` specifier relative to the Workspace root; never an absolute or resolved path) and an optional JSON-compatible adapter `config`.",
+					"constrains": [
+						"F.adapter.resolution"
+					]
+				},
+				{
+					"ref": "C.ws-format.viewports",
+					"statement": "`viewports` maps viewport IDs to presets. A viewport ID is a non-empty, case-sensitive, opaque Workspace-local string, and each preset records the exact CSS viewport width and height; labels and other metadata are separate from identity.",
+					"constrains": [
+						"F.render-context"
+					]
+				},
+				{
+					"ref": "C.ws-format.themes",
+					"statement": "`themes` maps theme IDs, which are non-empty, case-sensitive, opaque Workspace-local strings, to theme entries; adapters validate or map those IDs but do not own them.",
+					"constrains": [
+						"F.render-context"
+					]
+				},
+				{
+					"ref": "C.ws-format.view-path",
+					"statement": "Each View is one file `views/<uuid>.view.json`, where `<uuid>` is the View's full UUID and equals its `id`.",
+					"constrains": [
+						"F.ws.layout",
+						"F.view.authoring"
+					]
+				},
+				{
+					"ref": "C.ws-format.view-shape",
+					"statement": "A View's top level has exactly `id` (its full UUID), `name` (its required display name), an optional single-valued `feature` tag, `ir`, `variants` and `spec`; derived timestamps, file paths or filenames and a generic `metadata` object are not canonical fields.",
+					"constrains": [
+						"F.view.authoring"
+					]
+				},
+				{
+					"ref": "C.ws-format.view-ir",
+					"statement": "`ir` is the RootShell Widget, with type `RootShell`, ID `root` and one Slot, `content`: an ordered array of child Widget sources whose own shape the adapters' Widget plugins define.",
+					"constrains": [
+						"F.view.authoring"
+					]
+				},
+				{
+					"ref": "C.ws-format.variants",
+					"statement": "`variants` is an object keyed by Variant name. Each entry is `{ state }`, where `state` maps Widget IDs to sparse maps of State member overrides (`variants.<name>.state.<widgetId>.<member>`); entries carry no UUID and do not repeat the name, and the entry object stays open to additive metadata.",
+					"constrains": [
+						"F.view.variants"
+					]
+				},
+				{
+					"ref": "C.ws-format.spec-fields",
+					"statement": "`spec` always contains `intent` (a string), `entryConditions`, `interactionRules`, `constraints` and `accessibility` (string lists whose items carry no IDs), `references` (typed references) and `decisions` (Decisions).",
+					"constrains": [
+						"F.view.spec",
+						"F.view.decisions"
+					]
+				},
+				{
+					"ref": "C.ws-format.references",
+					"statement": "Each `references` entry is a typed reference discriminated by `type`: `{ type: \"view\", viewId, variantName?, relation? }` with a full View UUID as `viewId`, or `{ type: \"external\", uri, label?, relation? }` with a non-empty absolute URI of any scheme as `uri`. An optional `relation` is a non-empty string, and other `type` values are invalid until a schema version adds them.",
+					"constrains": [
+						"F.view.spec"
+					]
+				},
+				{
+					"ref": "C.ws-format.flow-path",
+					"statement": "Each UX Flow is one file `flows/<uuid>.flow.json`, where `<uuid>` equals the Flow's `id`.",
+					"constrains": [
+						"F.ws.layout",
+						"F.flow.graph"
+					]
+				},
+				{
+					"ref": "C.ws-format.review-path",
+					"statement": "Each Review thread is one file `reviews/<uuid>.review.json`, where `<uuid>` equals the thread's `id`.",
+					"constrains": [
+						"F.ws.layout",
+						"F.review.threads"
+					]
+				},
+				{
+					"ref": "C.ws-format.locale-file",
+					"statement": "Each locale is one file `i18n/<locale>.json`, named by its canonical BCP 47 tag, holding one flat JSON object that maps literal message keys to string values: `.` in a key has no nesting or namespace meaning, and there are no per-View, split or merged locale files.",
+					"constrains": [
+						"F.i18n.resources"
+					]
+				},
+				{
+					"ref": "C.ws-format.locale-discovery",
+					"statement": "Locale files are discovered from `i18n/*.json`; a file whose name is not a canonical BCP 47 tag is diagnosed and excluded from the discovered locales, never aliased to or merged with another file.",
+					"constrains": [
+						"F.i18n.resources"
+					]
+				},
+				{
+					"ref": "C.ws-format.asset-directory",
+					"statement": "Each authored Asset is one directory `assets/<uuid>/` containing `asset.json` and exactly one source-content file; the directory UUID equals the `id` in `asset.json`.",
+					"constrains": [
+						"F.ws.layout",
+						"F.assets"
+					]
+				},
+				{
+					"ref": "C.ws-format.asset-metadata",
+					"statement": "`asset.json` records at least the Asset `id`, a required display `name`, the source-content filename and the declared `mediaType`; references never depend on display, original or content filenames.",
+					"constrains": [
+						"F.assets"
+					]
+				},
+				{
+					"ref": "C.ws-format.asset-binding",
+					"statement": "View data binds an Asset only as `{ \"$asset\": \"<assetId>\" }`, and only in Adapter Catalog fields declared asset-capable.",
+					"constrains": [
+						"F.assets"
+					]
+				},
+				{
+					"ref": "C.ws-format.authored-vs-derived",
+					"statement": "Authored Assets under `assets/` are source data; UIUX-generated derived artifacts live separately under `.uiux/artifacts/`.",
+					"constrains": [
+						"F.assets",
+						"F.artifacts"
+					]
+				},
+				{
+					"ref": "C.ws-format.artifact-store",
+					"statement": "A derived artifact is identified by `sha256:<hex>` over its bytes and stored immutably under `.uiux/artifacts/sha256/`: identical bytes deduplicate, and an existing blob is never overwritten.",
+					"constrains": [
+						"F.artifacts"
+					]
+				},
+				{
+					"ref": "C.ws-format.evidence-records",
+					"statement": "Formal evidence records are themselves immutable artifacts in that store; there is no mutable `evidence/` resource namespace, and rerunning evidence creates a new artifact rather than overwriting one.",
+					"constrains": [
+						"F.artifacts",
+						"F.evidence.formal"
+					]
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #1 body (Part 1 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win): Location-Independent, File-Native Workspace; Canonical Decision Index items 2, 4 and 5. https://github.com/DevilTea/uiux/discussions/1\n- Discussion #1 comment 152 (2026-09-29), \"Accepted decision group — Workspace schema and RootShell boundary (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656497\n- Discussion #1 comment 153 (2026-09-29), \"Accepted decision group — Workspace and View canonical JSON shape (C / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656572\n- Discussion #1 comment 155 (2026-09-29), \"Accepted decision group — View Variant schema and validation (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656662\n- Discussion #1 comment 156 (2026-09-29), \"Accepted decision group — View Spec core schema (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656726\n- Discussion #1 comment 157 (2026-09-29), \"Accepted decision group — View Spec decision lifecycle and references (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657198\n- Discussion #1 comment 170 (2026-09-30), \"Accepted convergence decision — URI-based external View Spec reference\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18675877\n- Discussion #7 comment 1 (2026-09-30), \"Accepted decision group — Review persistence baseline (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686\n- Discussion #7 comment 5 (2026-10-05), \"Accepted decision group — Review pin display hint (Figma-style comment placement, Phase 2)\": decision 7: schema 1 -> 2. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814\n- Discussion #7 comment 9 (2026-10-06), \"Accepted decision group — Workspace-scoped Review threads and editable Review messages\": decision 19: schema 2 -> 3. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095\n- Discussion #6 comment 1 (2026-09-30), \"Accepted decision group — UX Flow schema baseline (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18672784\n- Discussion #9 comment 1 (2026-09-30), \"Accepted decision group — Authored asset model baseline (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675131\n- Discussion #9 comment 2 (2026-09-30), \"Accepted decision group — Asset validation, artifact store, and MCP (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675243\n- Discussion #9 comment 4 (2026-09-30), \"Ratified derived consequence — formal evidence records live in the content-addressed artifact store\". https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18676181\n- Discussion #10 comment 1 (2026-09-30), \"Accepted decision group — Render-context identity and formal capture selection\". https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18675742\n- Discussion #10 comment 3 (2026-09-30), \"Accepted convergence decision — Workspace-local opaque render-dimension IDs\". https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18676515\n- Discussion #8 comment 1 (2026-09-30), \"Accepted decision group — Adapter selection and resolution baseline (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/8#discussioncomment-18674164\n- Discussion #8 comment 2 (2026-09-30), \"Accepted decision group — Adapter config, failure, install, and concurrency (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/8#discussioncomment-18674820\n- Discussion #1 comment 25 (2026-09-23), \"Accepted decision — one flat JSON file per locale (option A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18564868\n- Discussion #1 comment 28 (2026-09-23), \"Accepted decision — explicit `defaultLocale`, discover other locales from i18n files (option A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18568126\n- Discussion #5 body (Part 5 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win): Workspace i18n settings shape; locale-tag validation; locale resource layout. https://github.com/DevilTea/uiux/discussions/5\n- code@17d4165 `src/domain/workspace/schema.ts`. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/workspace/schema.ts\n- code@17d4165 `src/domain/views/schema.ts`. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/views/schema.ts\n- code@17d4165 `src/domain/spec/schema.ts`. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/spec/schema.ts\n- code@17d4165 `src/persistence/paths.ts`. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/persistence/paths.ts\n\n## Rule sources\n\n| Clause | Sources |\n| --- | --- |\n| {{C.ws-format.manifest-path}} | [#1 c153 d1](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656572); [#9 c1 d1](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675131) |\n| {{C.ws-format.manifest-fields}} | [#1 c153 d1](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656572); [#8 c1 d1](https://github.com/DevilTea/uiux/discussions/8#discussioncomment-18674164); [#10 c3](https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18676515); [#5 body: Workspace i18n settings shape](https://github.com/DevilTea/uiux/discussions/5); owner ruling 2026-10-07 (batch 2 confirmation): required `viewports` and `themes` registries, possibly empty, accepted as shipped; [code@17d4165 `src/domain/workspace/schema.ts#L13-L19`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/workspace/schema.ts#L13-L19); [code@17d4165 `src/domain/workspace/schema.ts#L46-L86`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/workspace/schema.ts#L46-L86) |\n| {{C.ws-format.schema-version}} | [#1 c152 d1](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656497); [#7 c5 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#7 c9 d19](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{C.ws-format.version-gating}} | [#7 c5 d3 rule 7; d7 (option B rejected)](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#7 c9 d2 rule 6; d13 rule 7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{C.ws-format.i18n-settings}} | [#5 body: Workspace i18n settings shape](https://github.com/DevilTea/uiux/discussions/5); [#1 c28](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18568126) |\n| {{C.ws-format.adapters}} | [#8 c1 d1, d2](https://github.com/DevilTea/uiux/discussions/8#discussioncomment-18674164); [#8 c2 d5](https://github.com/DevilTea/uiux/discussions/8#discussioncomment-18674820) |\n| {{C.ws-format.viewports}} | [#10 c1](https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18675742); [#10 c3](https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18676515) |\n| {{C.ws-format.themes}} | [#10 c1](https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18675742); [#10 c3](https://github.com/DevilTea/uiux/discussions/10#discussioncomment-18676515) |\n| {{C.ws-format.view-path}} | [#1 c13](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18560794); [#1 body: Location-Independent, File-Native Workspace](https://github.com/DevilTea/uiux/discussions/1) |\n| {{C.ws-format.view-shape}} | [#1 c153 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656572); [code@17d4165 `src/domain/views/schema.ts#L81`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/views/schema.ts#L81) |\n| {{C.ws-format.view-ir}} | [#1 c152 d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656497); [#1 c153 d3, d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656572); [code@17d4165 `src/domain/views/schema.ts#L46-L60`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/views/schema.ts#L46-L60) |\n| {{C.ws-format.variants}} | [#1 c155 d1](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656662); [#1 body: View Variant Realization](https://github.com/DevilTea/uiux/discussions/1) |\n| {{C.ws-format.spec-fields}} | [#1 c156 d1, d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656726) |\n| {{C.ws-format.references}} | [#1 c157 d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18657198); [#1 c170](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18675877); [#1 body: Canonical Decision Index item 5](https://github.com/DevilTea/uiux/discussions/1); [code@17d4165 `src/domain/spec/schema.ts#L61-L85`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/domain/spec/schema.ts#L61-L85) |\n| {{C.ws-format.flow-path}} | [#6 c1 d1](https://github.com/DevilTea/uiux/discussions/6#discussioncomment-18672784) |\n| {{C.ws-format.review-path}} | [#7 c1 d1](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673686) |\n| {{C.ws-format.locale-file}} | [#1 c25](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18564868); [#5 body: locale resource layout](https://github.com/DevilTea/uiux/discussions/5) |\n| {{C.ws-format.locale-discovery}} | [#5 body: locale-tag validation](https://github.com/DevilTea/uiux/discussions/5); [#1 c28](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18568126) |\n| {{C.ws-format.asset-directory}} | [#9 c1 d2](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675131) |\n| {{C.ws-format.asset-metadata}} | [#9 c1 d2](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675131); [#9 c2 d5](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675243) |\n| {{C.ws-format.asset-binding}} | [#9 c1 d3](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675131) |\n| {{C.ws-format.authored-vs-derived}} | [#9 c1 d1](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675131) |\n| {{C.ws-format.artifact-store}} | [#9 c2 d7](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18675243) |\n| {{C.ws-format.evidence-records}} | [#9 c4](https://github.com/DevilTea/uiux/discussions/9#discussioncomment-18676181) |\n\n## Notes\n\n- Why a Contract: the persisted format crosses every resource Feature and has its own lifecycle (one manifest `schemaVersion`, explicit migration), so it is governed independently of any one Feature.\n- Exact JSON property names the Discussions leave open (for example the adapter entry's module-reference key, the viewport preset's dimension keys and the RootShell Slot container) are authoritative in the code types (`src/domain/*/schema.ts`), not restated here.\n- Review-thread and UX Flow internal shapes and the `spec.decisions` item shape are added as Clauses by later import batches (Review and Flow).\n"
+		},
+		{
+			"ref": "C.cli",
+			"title": "Command-line interface",
+			"summary": "The `uiux` command surface that users and CI depend on: installation as `@deviltea/uiux`, help and version output, and the `init`, `dev`, `migrate`, `publish` and access-administration (`member`, `token`, `invite`, `session`, `access copy`) commands with their arguments, effects and exit status.",
+			"constrains": [
+				"F.cli",
+				"F.ws.layout",
+				"F.ws.migration",
+				"F.publication",
+				"F.access.roster",
+				"F.access.credentials",
+				"F.access.gates",
+				"F.access.lan"
+			],
+			"clauses": [
+				{
+					"ref": "C.cli.package",
+					"statement": "UIUX is installed as the single public npm package `@deviltea/uiux` (`npm install -D @deviltea/uiux`) and invoked through its `uiux` binary, for example `npx uiux init`.",
+					"constrains": [
+						"F.cli"
+					]
+				},
+				{
+					"ref": "C.cli.help-version",
+					"statement": "`uiux --help` prints usage and `uiux --version` prints the package version. Help lists a command only once it ships and never advertises an unshipped one.",
+					"constrains": [
+						"F.cli"
+					]
+				},
+				{
+					"ref": "C.cli.explicit-workspace",
+					"statement": "Every command that acts on a Workspace takes it explicitly as `--workspace <dir>`; UIUX never infers a Workspace from the working directory.",
+					"constrains": [
+						"F.cli",
+						"F.ws.layout"
+					]
+				},
+				{
+					"ref": "C.cli.init",
+					"statement": "`uiux init --workspace <dir>` creates a minimal valid Workspace: a `.uiux/workspace.json` manifest at the current `schemaVersion` with a `defaultLocale`, no adapters and empty viewport and theme registries.",
+					"constrains": [
+						"F.cli",
+						"F.ws.layout",
+						"F.ws.migration"
+					]
+				},
+				{
+					"ref": "C.cli.init-existing",
+					"statement": "`uiux init` refuses a directory whose manifest already exists and leaves it unchanged; it creates the Workspace directory when it does not exist yet.",
+					"constrains": [
+						"F.cli"
+					]
+				},
+				{
+					"ref": "C.cli.dev",
+					"statement": "`uiux dev --workspace <dir>` starts one unified packaged Nitro server for that Workspace, hosting the Workbench SPA, `/api/*`, `/mcp` and `/preview/*`.",
+					"constrains": [
+						"F.cli"
+					]
+				},
+				{
+					"ref": "C.cli.dev-loopback",
+					"statement": "Without the opt-in LAN listener, `uiux dev` listens on loopback only and refuses a non-loopback bind host.",
+					"constrains": [
+						"F.cli",
+						"F.access.gates",
+						"F.access.lan"
+					]
+				},
+				{
+					"ref": "C.cli.migrate",
+					"statement": "`uiux migrate --workspace <dir> [--dry-run]` is the only migration entrypoint. It prints the step IDs, the `schemaVersion` change and the changed files, and a real run also prints the new manifest revision.",
+					"constrains": [
+						"F.cli",
+						"F.ws.migration"
+					]
+				},
+				{
+					"ref": "C.cli.publish",
+					"statement": "`uiux publish --workspace <dir> --out <dir> [--base <path>] [--source-revision <rev>]` builds the read-only static publication of the Workspace into the `--out` directory.",
+					"constrains": [
+						"F.cli",
+						"F.publication"
+					]
+				},
+				{
+					"ref": "C.cli.access-commands",
+					"statement": "`uiux member`, `uiux token`, `uiux invite`, `uiux session` and `uiux access copy` each take a required `--workspace <dir>` and act only on that Workspace's host-local roster. They refuse a directory that is not an initialized Workspace, so a typo never creates a stray roster, and they work while a server is running, which picks up the change on its next request.",
+					"constrains": [
+						"F.cli",
+						"F.access.roster"
+					]
+				},
+				{
+					"ref": "C.cli.uiux-home",
+					"statement": "Rosters live under `$UIUX_HOME` (default `~/.uiux`); `uiux dev` and every access command refuse when `$UIUX_HOME` resolves inside the selected Workspace.",
+					"constrains": [
+						"F.cli",
+						"F.access.roster"
+					]
+				},
+				{
+					"ref": "C.cli.member",
+					"statement": "`uiux member add <nick> --role <owner|editor|reviewer|viewer> [--kind human|agent]`, `uiux member list`, `uiux member set <nick> [--role <role>] [--nickname <new>]` and `uiux member remove <nick>` manage the roster's members.",
+					"constrains": [
+						"F.cli",
+						"F.access.roster"
+					]
+				},
+				{
+					"ref": "C.cli.token",
+					"statement": "`uiux token create --member <nick> [--label <text>] [--expires <days>|never] [--lan]` prints the new token once; `uiux token list [--member <nick>] [--all]` lists tokens, with `--all` including revoked and expired ones; `uiux token revoke <token-id>` revokes one.",
+					"constrains": [
+						"F.cli",
+						"F.access.credentials"
+					]
+				},
+				{
+					"ref": "C.cli.invite",
+					"statement": "`uiux invite create --member <nick> [--origin <url>] [--expires <hours>]` prints a single-use sign-in link for a human member.",
+					"constrains": [
+						"F.cli",
+						"F.access.credentials"
+					]
+				},
+				{
+					"ref": "C.cli.session",
+					"statement": "`uiux session list` lists browser sessions, and `uiux session revoke <session-id>` or `uiux session revoke --member <nick>` ends them.",
+					"constrains": [
+						"F.cli",
+						"F.access.credentials"
+					]
+				},
+				{
+					"ref": "C.cli.access-copy",
+					"statement": "`uiux access copy --from <old-dir> [--replace]` copies the members and token hashes of `<old-dir>`'s roster into the selected Workspace's roster once; the target must have no roster unless `--replace` is given.",
+					"constrains": [
+						"F.cli",
+						"F.access.roster"
+					]
+				},
+				{
+					"ref": "C.cli.exit-status",
+					"statement": "Exit status is 0 on success (including a migration with nothing to migrate), 1 when a command is refused or fails, and 2 for invalid usage (an unknown command or option, which also prints usage, or missing or extra arguments) or an unusable Workspace root or access home; `uiux dev` exits with its server's status, 0 after SIGINT or SIGTERM.",
+					"constrains": [
+						"F.cli"
+					]
+				}
+			],
+			"body": "\n## Sources\n\n- Discussion #1 body (Part 1 consolidation, edited before the 2026-10-02+ amendments; later accepted comments win): CLI & Server; Canonical Decision Index item 1. https://github.com/DevilTea/uiux/discussions/1\n- Discussion #1 comment 151 (2026-09-29), \"Accepted decision group — package and repository boundaries (A / A / A / A)\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656345\n- Discussion #1 comment 8 (2026-09-22), \"Accepted decision — location-independent UIUX Workspace root\". https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18553033\n- Discussion #7 comment 5 (2026-10-05), \"Accepted decision group — Review pin display hint (Figma-style comment placement, Phase 2)\": decision 7: `uiux migrate`. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814\n- Discussion #7 comment 9 (2026-10-06), \"Accepted decision group — Workspace-scoped Review threads and editable Review messages\": decision 19. https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095\n- Discussion #1 comment 177 (2026-10-05), \"Accepted decision group — Member identity, roles, tokens and agent edit leases\": decisions 2 and 9: access commands. https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344\n- Owner ruling 2026-10-07 (checkpoint B, item B5), recorded in PR #73 (https://github.com/DevilTea/uiux/pull/73): `uiux publish` and its flags accepted as-is.\n- doc@17d4165 `AGENTS.md`. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/AGENTS.md\n- code@17d4165 `bin/uiux.mjs`. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/bin/uiux.mjs\n- code@17d4165 `bin/publish.mjs`. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/bin/publish.mjs\n- code@17d4165 `src/cli/migrate.ts`. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/cli/migrate.ts\n- code@17d4165 `src/cli/access.ts`. https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/cli/access.ts\n\n## Rule sources\n\n| Clause | Sources |\n| --- | --- |\n| {{C.cli.package}} | [#1 c151 d1-d3](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18656345); [#1 body: Core Architecture & Foundations](https://github.com/DevilTea/uiux/discussions/1) |\n| {{C.cli.help-version}} | [doc@17d4165 `AGENTS.md`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/AGENTS.md); [#7 c5 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#1 c177 d9](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.cli.explicit-workspace}} | [#1 c8](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18553033); [#1 c177 d9](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.cli.init}} | [#1 body: CLI & Server](https://github.com/DevilTea/uiux/discussions/1); [#7 c5 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#7 c9 R17](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095); [doc@17d4165 `AGENTS.md`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/AGENTS.md); [code@17d4165 `bin/uiux.mjs#L151-L157`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/bin/uiux.mjs#L151-L157) |\n| {{C.cli.init-existing}} | owner ruling 2026-10-07 (batch 2 confirmation): accepted as shipped; [code@17d4165 `bin/uiux.mjs#L126-L166`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/bin/uiux.mjs#L126-L166) |\n| {{C.cli.dev}} | [#1 body: CLI & Server](https://github.com/DevilTea/uiux/discussions/1); [#1 c165 d4](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671359); [doc@17d4165 `AGENTS.md`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/AGENTS.md) |\n| {{C.cli.dev-loopback}} | owner ruling B4 (checkpoint B, [PR #73](https://github.com/DevilTea/uiux/pull/73)); [#1 c176 baseline](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18757820); [code@17d4165 `bin/uiux.mjs#L51-L73`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/bin/uiux.mjs#L51-L73) |\n| {{C.cli.migrate}} | [#7 c5 d7](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18757814); [#7 c9 d19](https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095) |\n| {{C.cli.publish}} | owner ruling B5 (checkpoint B, [PR #73](https://github.com/DevilTea/uiux/pull/73)); [code@c0a685e `bin/publish.mjs`](https://github.com/DevilTea/uiux/blob/c0a685e72154d2fea1da811996de8484ebea25a0/bin/publish.mjs); [doc@c0a685e `README.md#static-publication`](https://github.com/DevilTea/uiux/blob/c0a685e72154d2fea1da811996de8484ebea25a0/README.md#static-publication) |\n| {{C.cli.access-commands}} | [#1 c177 d2, d9](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.cli.uiux-home}} | [#1 c177 d2](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.cli.member}} | [#1 c177 d9](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.cli.token}} | [#1 c177 d9](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.cli.invite}} | [#1 c177 d3, d9](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.cli.session}} | [#1 c177 d9](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.cli.access-copy}} | [#1 c177 d2, d9](https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344) |\n| {{C.cli.exit-status}} | owner ruling 2026-10-07 (batch 2 confirmation): accepted as shipped; [code@17d4165 `bin/uiux.mjs#L215-L226`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/bin/uiux.mjs#L215-L226); [code@17d4165 `bin/uiux.mjs#L233-L294`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/bin/uiux.mjs#L233-L294); [code@17d4165 `src/cli/migrate.ts#L24-L72`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/cli/migrate.ts#L24-L72); [code@17d4165 `src/cli/access.ts#L112-L122`](https://github.com/DevilTea/uiux/blob/17d41659e20069b0486f974d14e5feb7075a6731/src/cli/access.ts#L112-L122) |\n\n## Notes\n\n- Why a Contract: the command surface spans the CLI, migration, publication and access Features, and users, scripts and CI depend on it independently of any one Feature.\n- Output wording, the default port (3000, `PORT`) and the bind-host environment variables are implementation details at code@17d4165, not part of this Contract.\n"
+		}
+	]
+}

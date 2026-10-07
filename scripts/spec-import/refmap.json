@@ -1,4 +1,176 @@
 {
+	"C.cli": {
+		"kind": "contract",
+		"id": "01a1144e-52fc-74e6-a7bc-e415c8ab168d"
+	},
+	"C.cli.access-commands": {
+		"kind": "clause",
+		"id": "01a1144e-5632-75ed-baa5-03bb2d36de47"
+	},
+	"C.cli.access-copy": {
+		"kind": "clause",
+		"id": "01a1144e-56bd-7988-8d2a-87b23954ca49"
+	},
+	"C.cli.dev": {
+		"kind": "clause",
+		"id": "01a1144e-55d6-75be-9a8d-f95d25cc5fbc"
+	},
+	"C.cli.dev-loopback": {
+		"kind": "clause",
+		"id": "01a1144e-55ed-7276-8bfe-379be9881357"
+	},
+	"C.cli.exit-status": {
+		"kind": "clause",
+		"id": "01a1144e-56d6-7b81-a611-25b8ef853abb"
+	},
+	"C.cli.explicit-workspace": {
+		"kind": "clause",
+		"id": "01a1144e-5584-7101-98c0-dc3cbadbacdf"
+	},
+	"C.cli.help-version": {
+		"kind": "clause",
+		"id": "01a1144e-5567-70cd-b2bc-19427cf21a20"
+	},
+	"C.cli.init": {
+		"kind": "clause",
+		"id": "01a1144e-55a3-74c4-8bf8-3205e968e275"
+	},
+	"C.cli.init-existing": {
+		"kind": "clause",
+		"id": "01a1144e-55be-785d-b494-7f7da834572a"
+	},
+	"C.cli.invite": {
+		"kind": "clause",
+		"id": "01a1144e-568f-7f4b-9d37-0aa746286a3f"
+	},
+	"C.cli.member": {
+		"kind": "clause",
+		"id": "01a1144e-5660-7944-8946-079fe3065a47"
+	},
+	"C.cli.migrate": {
+		"kind": "clause",
+		"id": "01a1144e-5605-722c-a662-2b483ddaad73"
+	},
+	"C.cli.package": {
+		"kind": "clause",
+		"id": "01a1144e-5550-71e0-9116-afaab4c2b20a"
+	},
+	"C.cli.publish": {
+		"kind": "clause",
+		"id": "01a1144e-561b-74b8-b625-55c58836a436"
+	},
+	"C.cli.session": {
+		"kind": "clause",
+		"id": "01a1144e-56a6-766b-bd48-d723f0dc47e6"
+	},
+	"C.cli.token": {
+		"kind": "clause",
+		"id": "01a1144e-5677-73cc-83f4-1f6fe58fdbc8"
+	},
+	"C.cli.uiux-home": {
+		"kind": "clause",
+		"id": "01a1144e-5649-7ba2-bb90-ad49658f0400"
+	},
+	"C.ws-format": {
+		"kind": "contract",
+		"id": "01a1144e-52e8-7a30-b49e-368e16cf8762"
+	},
+	"C.ws-format.adapters": {
+		"kind": "clause",
+		"id": "01a1144e-538e-705f-afdc-841028c410e4"
+	},
+	"C.ws-format.artifact-store": {
+		"kind": "clause",
+		"id": "01a1144e-551f-7352-8973-3d3debe31ee7"
+	},
+	"C.ws-format.asset-binding": {
+		"kind": "clause",
+		"id": "01a1144e-54f0-70c4-a124-e74cd774495c"
+	},
+	"C.ws-format.asset-directory": {
+		"kind": "clause",
+		"id": "01a1144e-54c0-7b12-a71e-57774b3448a3"
+	},
+	"C.ws-format.asset-metadata": {
+		"kind": "clause",
+		"id": "01a1144e-54d8-7468-b86e-0a700e118101"
+	},
+	"C.ws-format.authored-vs-derived": {
+		"kind": "clause",
+		"id": "01a1144e-5508-7eda-a9a0-23fb0d3ebabd"
+	},
+	"C.ws-format.evidence-records": {
+		"kind": "clause",
+		"id": "01a1144e-5537-7dbd-8b9e-db2e0634aace"
+	},
+	"C.ws-format.flow-path": {
+		"kind": "clause",
+		"id": "01a1144e-5466-7a92-b416-c1e7b060b6c1"
+	},
+	"C.ws-format.i18n-settings": {
+		"kind": "clause",
+		"id": "01a1144e-5378-77b5-ba82-72ff62e82e3f"
+	},
+	"C.ws-format.locale-discovery": {
+		"kind": "clause",
+		"id": "01a1144e-54a8-7a9b-9b3f-a5553c729e89"
+	},
+	"C.ws-format.locale-file": {
+		"kind": "clause",
+		"id": "01a1144e-5491-7217-900c-ded6cbeca233"
+	},
+	"C.ws-format.manifest-fields": {
+		"kind": "clause",
+		"id": "01a1144e-5336-73e7-84a0-3bcd0cb454f6"
+	},
+	"C.ws-format.manifest-path": {
+		"kind": "clause",
+		"id": "01a1144e-531c-7d71-9bc5-f62340aea55a"
+	},
+	"C.ws-format.references": {
+		"kind": "clause",
+		"id": "01a1144e-5450-77ca-b9da-eab7e00a46e6"
+	},
+	"C.ws-format.review-path": {
+		"kind": "clause",
+		"id": "01a1144e-547c-7ab6-9589-e9a8b8c458c5"
+	},
+	"C.ws-format.schema-version": {
+		"kind": "clause",
+		"id": "01a1144e-534c-7087-a504-76075f73df0d"
+	},
+	"C.ws-format.spec-fields": {
+		"kind": "clause",
+		"id": "01a1144e-543a-74ba-a4b6-a1804d1d0299"
+	},
+	"C.ws-format.themes": {
+		"kind": "clause",
+		"id": "01a1144e-53c4-752f-9c46-c4c70b384165"
+	},
+	"C.ws-format.variants": {
+		"kind": "clause",
+		"id": "01a1144e-5423-7def-a70a-7962ad2d2af7"
+	},
+	"C.ws-format.version-gating": {
+		"kind": "clause",
+		"id": "01a1144e-5360-7e16-bd46-b3d7b141cf02"
+	},
+	"C.ws-format.view-ir": {
+		"kind": "clause",
+		"id": "01a1144e-540b-7bc8-a67f-1255e0e38e70"
+	},
+	"C.ws-format.view-path": {
+		"kind": "clause",
+		"id": "01a1144e-53dc-7750-ab57-0e8d38cd9982"
+	},
+	"C.ws-format.view-shape": {
+		"kind": "clause",
+		"id": "01a1144e-53f4-7e66-b156-6ed7281f7f32"
+	},
+	"C.ws-format.viewports": {
+		"kind": "clause",
+		"id": "01a1144e-53aa-7eed-a3bb-e937ff066f7e"
+	},
 	"F.access.actor-stamping": {
 		"kind": "feature",
 		"id": "01a111e4-02d2-79a1-bc89-7439b0f69fe3"
@@ -186,6 +358,206 @@
 	"F.ws.references": {
 		"kind": "feature",
 		"id": "01a111e4-0135-7805-b66f-f2acc1730ed2"
+	},
+	"R.view.authoring.author-writable-state": {
+		"kind": "rule",
+		"id": "01a1144e-5188-7a95-867c-d7e45487ebf8"
+	},
+	"R.view.authoring.content-slot": {
+		"kind": "rule",
+		"id": "01a1144e-514f-7e38-be83-703ad352517c"
+	},
+	"R.view.authoring.feature-tag": {
+		"kind": "rule",
+		"id": "01a1144e-51d6-7b17-8ef7-986d00f937e2"
+	},
+	"R.view.authoring.name": {
+		"kind": "rule",
+		"id": "01a1144e-51c3-72d2-a4be-822e8a9b23f5"
+	},
+	"R.view.authoring.not-an-app": {
+		"kind": "rule",
+		"id": "01a1144e-51af-72c6-ab79-9803d2cfa326"
+	},
+	"R.view.authoring.one-ir": {
+		"kind": "rule",
+		"id": "01a1144e-5129-79f4-bd12-6d871491265f"
+	},
+	"R.view.authoring.plugin-owned-ir": {
+		"kind": "rule",
+		"id": "01a1144e-519d-72c3-945e-f4cc657cf41f"
+	},
+	"R.view.authoring.render-context": {
+		"kind": "rule",
+		"id": "01a1144e-5174-7ea2-ab72-b5364dd48a03"
+	},
+	"R.view.authoring.rootshell-guard": {
+		"kind": "rule",
+		"id": "01a1144e-5161-78b7-9360-710559d40c30"
+	},
+	"R.view.authoring.rootshell-root": {
+		"kind": "rule",
+		"id": "01a1144e-513d-7cf2-8e18-4a6f4494665b"
+	},
+	"R.view.spec.beside-ir": {
+		"kind": "rule",
+		"id": "01a1144e-5288-7d65-aba7-d47588111280"
+	},
+	"R.view.spec.explicit-empty": {
+		"kind": "rule",
+		"id": "01a1144e-529b-741c-baf7-023bc5ca0aa8"
+	},
+	"R.view.spec.external-reference": {
+		"kind": "rule",
+		"id": "01a1144e-52c2-7628-83c0-1b50cef6cc15"
+	},
+	"R.view.spec.no-fetch": {
+		"kind": "rule",
+		"id": "01a1144e-52d5-795b-9881-4b214f87ffeb"
+	},
+	"R.view.spec.view-reference": {
+		"kind": "rule",
+		"id": "01a1144e-52ae-71d6-abe5-3adcc46854ad"
+	},
+	"R.view.variants.all-diagnostics": {
+		"kind": "rule",
+		"id": "01a1144e-5260-7290-897e-106a9c0dd914"
+	},
+	"R.view.variants.base-state": {
+		"kind": "rule",
+		"id": "01a1144e-51fc-713c-b456-2a65d0502678"
+	},
+	"R.view.variants.fresh-runtime": {
+		"kind": "rule",
+		"id": "01a1144e-520f-7456-9b7a-eb6b97fc0f75"
+	},
+	"R.view.variants.invalid": {
+		"kind": "rule",
+		"id": "01a1144e-524c-7715-8fd8-d9ce46969cc6"
+	},
+	"R.view.variants.name-identity": {
+		"kind": "rule",
+		"id": "01a1144e-5222-78a3-853c-a6475ad0186b"
+	},
+	"R.view.variants.orthogonal": {
+		"kind": "rule",
+		"id": "01a1144e-5274-7643-9252-316f80d79c68"
+	},
+	"R.view.variants.rename": {
+		"kind": "rule",
+		"id": "01a1144e-5236-769f-b516-222c05b2f48e"
+	},
+	"R.view.variants.sparse": {
+		"kind": "rule",
+		"id": "01a1144e-51e9-7e11-94c0-816baab9e0d6"
+	},
+	"R.ws.layout.flat-views": {
+		"kind": "rule",
+		"id": "01a1144e-4f63-74af-a597-6d9689631960"
+	},
+	"R.ws.layout.identity-mismatch": {
+		"kind": "rule",
+		"id": "01a1144e-4f8f-775d-b150-6ab107bb8129"
+	},
+	"R.ws.layout.labels": {
+		"kind": "rule",
+		"id": "01a1144e-4fa5-7ff4-aeb0-1278a85f188b"
+	},
+	"R.ws.layout.no-product-install": {
+		"kind": "rule",
+		"id": "01a1144e-4f32-7d90-a59d-9f15462205d3"
+	},
+	"R.ws.layout.resource-units": {
+		"kind": "rule",
+		"id": "01a1144e-4f4b-7ef3-b52e-4dfe9187adfe"
+	},
+	"R.ws.layout.root": {
+		"kind": "rule",
+		"id": "01a1144e-4ef7-742f-9673-7ffa087f74d2"
+	},
+	"R.ws.layout.self-contained": {
+		"kind": "rule",
+		"id": "01a1144e-4f18-7346-90bc-18fad711e63c"
+	},
+	"R.ws.layout.uuid-identity": {
+		"kind": "rule",
+		"id": "01a1144e-4f78-7a90-8d52-ace5cdd54dfa"
+	},
+	"R.ws.migration.atomic": {
+		"kind": "rule",
+		"id": "01a1144e-5009-7818-abb5-1b26337671ee"
+	},
+	"R.ws.migration.blocked-operations": {
+		"kind": "rule",
+		"id": "01a1144e-4fcf-7b8a-8978-73b1a0cc31f4"
+	},
+	"R.ws.migration.chained-steps": {
+		"kind": "rule",
+		"id": "01a1144e-501c-746b-9f23-4cd321628f7c"
+	},
+	"R.ws.migration.cli-only": {
+		"kind": "rule",
+		"id": "01a1144e-4ff6-74c4-90c4-fd91439b1cb5"
+	},
+	"R.ws.migration.dry-run": {
+		"kind": "rule",
+		"id": "01a1144e-5054-7fc1-9c23-49ae8c9886c1"
+	},
+	"R.ws.migration.older-read-only": {
+		"kind": "rule",
+		"id": "01a1144e-4fba-7152-8239-5c348a832b10"
+	},
+	"R.ws.migration.server-hold": {
+		"kind": "rule",
+		"id": "01a1144e-5067-7a2e-bd8d-e33a667033c2"
+	},
+	"R.ws.migration.ship-together": {
+		"kind": "rule",
+		"id": "01a1144e-5079-7c4e-99a4-912094aba0d4"
+	},
+	"R.ws.migration.unsupported": {
+		"kind": "rule",
+		"id": "01a1144e-4fe2-7bbe-82f2-e846e43def27"
+	},
+	"R.ws.migration.v1-to-v2": {
+		"kind": "rule",
+		"id": "01a1144e-502f-7a30-bf11-69d72ea164db"
+	},
+	"R.ws.migration.v2-to-v3": {
+		"kind": "rule",
+		"id": "01a1144e-5042-77ea-9146-808f5b46b8ef"
+	},
+	"R.ws.mutations.busy": {
+		"kind": "rule",
+		"id": "01a1144e-50c9-79f7-9530-479feba082fc"
+	},
+	"R.ws.mutations.domain-specific": {
+		"kind": "rule",
+		"id": "01a1144e-508d-7f31-94f9-0c96b0ed4922"
+	},
+	"R.ws.mutations.one-application-layer": {
+		"kind": "rule",
+		"id": "01a1144e-50a1-7125-95ca-f757a8028ae7"
+	},
+	"R.ws.mutations.out-of-band": {
+		"kind": "rule",
+		"id": "01a1144e-50b5-77f4-9403-493d7914702a"
+	},
+	"R.ws.references.dangling": {
+		"kind": "rule",
+		"id": "01a1144e-5101-78bb-9748-5bdabb1c013b"
+	},
+	"R.ws.references.impact-ack": {
+		"kind": "rule",
+		"id": "01a1144e-50dd-7b92-aa5e-e175e34bf424"
+	},
+	"R.ws.references.preserve-invalid": {
+		"kind": "rule",
+		"id": "01a1144e-5114-7eb7-8cd5-aeb1d356d52f"
+	},
+	"R.ws.references.target-local": {
+		"kind": "rule",
+		"id": "01a1144e-50ef-7219-ae87-bb012dc85f12"
 	},
 	"S.agent-author": {
 		"kind": "story",

@@ -4,8 +4,11 @@
 // Usage: node scripts/spec-import/apply.mjs <batch.json> [--dry-run] [--force]
 //
 // THE BATCH FILE IS THE SOURCE OF TRUTH FOR EVERYTHING IT NAMES. The applier overwrites the title,
-// summary, Story fields, `motivates` targets and the whole Markdown body of every unit in the batch
-// with the batch's values. So:
+// summary, Story fields, `motivates` targets, Rule and Clause statements, Contract and Clause
+// `constrains` targets and the whole Markdown body of every unit in the batch with the batch's
+// values. A Feature or Contract that lists `rules` / `clauses` must list all of them: the applier
+// refuses when the workspace holds a child the batch does not name (delete or move it explicitly).
+// So:
 //   - make every later change to an imported unit in its batch source (and re-render the batch) or
 //     in a newer batch, never by editing `.spec/` alone;
 //   - never re-run an older batch after a newer batch or edit touched the same units, or it reverts
@@ -20,11 +23,15 @@
 // every UUID, so `refmap.json` (next to this script) keeps ref -> UUID for later batches; it never
 // goes into `.spec/`, which is closed-world. The applier:
 //   1. requires a valid workspace and checks every mapped UUID still exists with the right kind;
-//   2. creates missing Features, then Stories (whose `motivates` needs existing Features), or
-//      updates semantic fields and relation targets that differ from the draft, sequentially with
+//   2. creates missing Features, then their Rules (in draft order), then Stories (whose `motivates`
+//      needs existing Features), then Contracts (whose `constrains` needs existing Features) and
+//      their Clauses (whose optional `constrains` override may name Features or Rules), or updates
+//      semantic fields and relation targets that differ from the draft, sequentially with
 //      `expectedRevision` threaded through every mutation;
-//   3. writes each unit's provenance into its noncanonical Markdown body, and fails unless the
-//      semantic revision is unchanged by those body writes;
+//   3. writes each Feature, Story and Contract's provenance into its noncanonical Markdown body,
+//      replacing `{{<ref>}}` placeholders with the mapped UUIDs (so Rule and Clause provenance
+//      tables can name units created in the same run), and fails unless the semantic revision is
+//      unchanged by those body writes;
 //   4. validates the workspace again.
 // It is idempotent: rerunning the same batch changes nothing. It stops on the first error and never
 // retries a revision conflict. Run it only while no other `spec` process is running. The repository
@@ -35,7 +42,8 @@ import { join, resolve } from 'node:path'
 import process from 'node:process'
 import { createSpecClient, SpecError } from '@deviltea/spec-tool'
 
-const KIND_DIR = { feature: 'features', story: 'stories' }
+const KIND_DIR = { feature: 'features', story: 'stories', contract: 'contracts' }
+const PLACEHOLDER = /\{\{([^{}\s]+)\}\}/g
 
 const args = process.argv.slice(2)
 const dryRun = args.includes('--dry-run')
@@ -77,22 +85,35 @@ function refuseIfStale(what) {
 		fail(`Refusing to ${what}: the batch was drafted against revision ${batch.baseRevision ?? '(none recorded)'} but the workspace is at ${initial.revision}. Re-draft the batch against the current revision (set its baseRevision), or pass --force only if you mean to overwrite newer edits.`)
 }
 
-const graph = (await client.graph.export()).data
-const nodes = new Map(graph.nodes.map(node => [node.id, node]))
+let graph = (await client.graph.export()).data
+let nodes = new Map(graph.nodes.map(node => [node.id, node]))
+async function refreshGraph() {
+	if (dryRun)
+		return
+	graph = (await client.graph.export()).data
+	nodes = new Map(graph.nodes.map(node => [node.id, node]))
+}
 for (const [ref, entry] of Object.entries(refmap)) {
 	const node = nodes.get(entry.id)
 	if (!node || node.kind !== entry.kind)
 		fail(`refmap entry ${ref} -> ${entry.kind} ${entry.id} does not exist in the workspace`)
 }
 
-const log = { created: [], updated: [], relinked: [], unchanged: [], bodies: [] }
+const log = { created: [], createdByKind: {}, updated: [], relinked: [], unchanged: [], bodies: [] }
 
 function resolveRef(ref, kind) {
+	const kinds = Array.isArray(kind) ? kind : [kind]
 	const entry = refmap[ref]
-	if (!entry || entry.kind !== kind)
-		fail(`Unknown ${kind} ref ${ref}`)
+	if (!entry || !kinds.includes(entry.kind))
+		fail(`Unknown ${kinds.join(' or ')} ref ${ref}`)
 	return entry.id
 }
+
+function edgeTargets(sourceId, type) {
+	return graph.edges.filter(edge => edge.from === sourceId && edge.type === type).map(edge => edge.to).sort()
+}
+
+const sameSet = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort())
 
 function changedFields(node, draft, fields) {
 	const changes = {}
@@ -116,6 +137,7 @@ async function upsert(kind, draft, fields, createRequest) {
 	const existing = refmap[draft.ref]
 	if (!existing) {
 		log.created.push(`${kind} ${draft.ref}`)
+		log.createdByKind[kind] = (log.createdByKind[kind] ?? 0) + 1
 		const response = await mutate(expectedRevision => client[kind].create({ ...createRequest(), expectedRevision }))
 		if (response) {
 			const created = response.changedNodes.filter(node => node.kind === kind)
@@ -135,9 +157,73 @@ async function upsert(kind, draft, fields, createRequest) {
 	await mutate(expectedRevision => client[kind].update({ id: existing.id, changes, expectedRevision }))
 }
 
+// Rules (kind 'rule', owner Feature) or Clauses (kind 'clause', owner Contract). A Clause's optional
+// `constrains` lists Feature or Rule refs and overrides the Contract scope; omitted means inherit.
+async function upsertChildren(kind, ownerId, ownerRef, drafts, ownerConstrains) {
+	const draftIds = []
+	for (const child of drafts) {
+		const existing = refmap[child.ref]
+		const override = child.constrains === undefined
+			? null
+			: (dryRun && child.constrains.some(ref => !refmap[ref]) ? undefined : child.constrains.map(ref => resolveRef(ref, ['feature', 'rule'])).sort())
+		if (!existing) {
+			log.created.push(`${kind} ${child.ref}`)
+			log.createdByKind[kind] = (log.createdByKind[kind] ?? 0) + 1
+			const response = await mutate(expectedRevision => client[kind].create({
+				ownerId,
+				statement: child.statement,
+				...(kind === 'clause' && override ? { constrains: override } : {}),
+				expectedRevision,
+			}))
+			if (response) {
+				const created = response.changedNodes.filter(node => node.kind === kind)
+				if (created.length !== 1)
+					fail(`Expected one created ${kind} for ${child.ref}, got ${created.length}`)
+				refmap[child.ref] = { kind, id: created[0].id }
+				await saveRefmap()
+			}
+			continue
+		}
+		if (existing.kind !== kind)
+			fail(`${child.ref} is mapped to a ${existing.kind}, not a ${kind}`)
+		draftIds.push(existing.id)
+		const node = nodes.get(existing.id)
+		if (node.ownerId !== ownerId)
+			fail(`${kind} ${child.ref} belongs to ${node.ownerId}, not ${ownerRef}; move it explicitly`)
+		if (node.statement !== child.statement) {
+			log.updated.push(`${kind} ${child.ref}: statement`)
+			await mutate(expectedRevision => client[kind].update({ id: existing.id, changes: { statement: child.statement }, expectedRevision }))
+		}
+		else {
+			log.unchanged.push(`${kind} ${child.ref}`)
+		}
+		if (kind === 'clause' && override !== undefined && !dryRun) {
+			const effective = override ?? ownerConstrains.map(ref => resolveRef(ref, 'feature')).sort()
+			if (!sameSet(edgeTargets(existing.id, 'constrains'), effective)) {
+				log.relinked.push(`clause ${child.ref}`)
+				await mutate(expectedRevision => client.graph.setRelationTargets({ sourceId: existing.id, type: 'constrains', targets: override, expectedRevision }))
+			}
+		}
+	}
+	if (ownerId) {
+		// `graph` predates this owner's creations, so only children that existed before the run count.
+		const extra = graph.nodes.filter(node => node.kind === kind && node.ownerId === ownerId && !draftIds.includes(node.id))
+		if (extra.length > 0)
+			fail(`${ownerRef} has ${kind}s the batch does not list: ${extra.map(node => node.id).join(', ')}`)
+	}
+}
+
 try {
 	for (const feature of batch.features ?? []) {
 		await upsert('feature', feature, ['title', 'summary'], () => ({ title: feature.title, summary: feature.summary }))
+	}
+
+	// Rules: every Feature that lists `rules` owns exactly those Rules, created in draft order.
+	for (const feature of batch.features ?? []) {
+		if (!feature.rules)
+			continue
+		const ownerId = refmap[feature.ref]?.id // undefined only in a dry run that would create the Feature
+		await upsertChildren('rule', ownerId, feature.ref, feature.rules)
 	}
 
 	for (const story of batch.stories ?? []) {
@@ -161,9 +247,26 @@ try {
 		}
 	}
 
+	for (const contract of batch.contracts ?? []) {
+		const targets = contract.constrains.map(ref => resolveRef(ref, 'feature')).sort()
+		const isNew = !refmap[contract.ref]
+		await upsert('contract', contract, ['title', 'summary'], () => ({ title: contract.title, summary: contract.summary, constrains: targets }))
+		if (!isNew && !dryRun && !sameSet(edgeTargets(refmap[contract.ref].id, 'constrains'), targets)) {
+			log.relinked.push(`contract ${contract.ref}`)
+			await mutate(expectedRevision => client.graph.setRelationTargets({ sourceId: refmap[contract.ref].id, type: 'constrains', targets, expectedRevision }))
+		}
+	}
+	await refreshGraph()
+	for (const contract of batch.contracts ?? []) {
+		if (!contract.clauses)
+			continue
+		const ownerId = refmap[contract.ref]?.id
+		await upsertChildren('clause', ownerId, contract.ref, contract.clauses, contract.constrains)
+	}
+
 	const before = dryRun ? undefined : (await client.workspace.validate()).revision
 	const writes = []
-	for (const [kind, units] of [['feature', batch.features ?? []], ['story', batch.stories ?? []]]) {
+	for (const [kind, units] of [['feature', batch.features ?? []], ['story', batch.stories ?? []], ['contract', batch.contracts ?? []]]) {
 		for (const unit of units) {
 			if (!refmap[unit.ref])
 				continue // only in a dry run, which does not create units
@@ -172,7 +275,14 @@ try {
 			const end = text.indexOf('\n---\n', 4)
 			if (!text.startsWith('---\n') || end === -1)
 				fail(`Cannot find the frontmatter of ${path}`)
-			const next = `${text.slice(0, end + 5)}${unit.body}`
+			const body = unit.body.replace(PLACEHOLDER, (match, ref) => {
+				if (refmap[ref])
+					return refmap[ref].id
+				if (dryRun)
+					return match // a unit this dry run would create
+				fail(`Body of ${kind} ${unit.ref} names unknown ref ${ref}`)
+			})
+			const next = `${text.slice(0, end + 5)}${body}`
 			if (next !== text) {
 				writes.push([path, next])
 				log.bodies.push(`${kind} ${unit.ref}`)
@@ -201,6 +311,7 @@ console.log(JSON.stringify({
 	dryRun,
 	revision,
 	created: log.created.length,
+	createdByKind: log.createdByKind,
 	updated: log.updated,
 	relinked: log.relinked,
 	unchanged: log.unchanged.length,
