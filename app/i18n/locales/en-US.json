@@ -1799,7 +1799,7 @@
       "runtime_renderer_collision": "Two renderers share the same key.",
       "runtime_renderer_decode_failed": "A renderer in the Adapter could not be loaded.",
       "runtime_renderer_ownership_mismatch": "The Adapter’s renderers do not match what it declared.",
-      "runtime_widget_core_incompatible": "A Widget in the Adapter comes from a different widget-core copy than the one UIUX runs. Do not bundle widget-core into the Adapter.",
+      "runtime_widget_core_incompatible": "A Widget in the Adapter was not created by the widget-core that UIUX runs: it comes from another widget-core copy, or it is not a completed Widget. Do not bundle widget-core into the Adapter.",
       "unsupported_config_schema_dialect": "The Adapter’s config rules use an unsupported format.",
       "vue_renderer_registry_invalid": "The Adapter’s Vue renderers are not valid."
     },

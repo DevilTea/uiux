@@ -91,6 +91,14 @@ describe('standalone Preview mount and widget-core registration errors', () => {
 		expect(diagnostics.some(item => item.code === 'adapter.runtime_plugin_decode_failed')).toBe(false)
 	})
 
+	it('still reports a member that is not a Widget plugin object as a decode failure', () => {
+		const statuses = mountStatuses([descriptor(0, 'broken-adapter', 'not-a-plugin', 'Gamma')])
+		const status = statuses[0]!
+		const diagnostics = status.status === 'invalid' ? status.diagnostics : []
+		expect(diagnostics).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_plugin_decode_failed', path: '/adapters/0/manifest/widgetPlugins/0' }))
+		expect(diagnostics.some(item => item.code === 'adapter.runtime_widget_core_incompatible')).toBe(false)
+	})
+
 	it('reports two Adapters registering one Widget type instead of throwing from createWidgetSystem', () => {
 		// The server's resolved-set validation is the primary check; this is the backstop.
 		const statuses = mountStatuses([descriptor(0, 'first-adapter', alpha, 'Alpha'), descriptor(1, 'second-adapter', alphaAgain, 'Alpha')])
