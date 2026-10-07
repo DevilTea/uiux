@@ -37,3 +37,7 @@ test-results/
 # Persistence lock temp files written while a mutation holds the Workspace lock
 **/.uiux/.persistence-lock-*
 **/.uiux/.persistence.lock
+
+# Spec Tool transient reader/writer coordination files (never canonical)
+.spec-tool-v1.lock
+.spec-tool-v1.readers

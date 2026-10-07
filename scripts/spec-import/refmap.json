@@ -1,0 +1,254 @@
+{
+	"F.access.actor-stamping": {
+		"kind": "feature",
+		"id": "01a111e4-02d2-79a1-bc89-7439b0f69fe3"
+	},
+	"F.access.credentials": {
+		"kind": "feature",
+		"id": "01a111e4-0298-7e31-bfc4-f51e55aab8be"
+	},
+	"F.access.gates": {
+		"kind": "feature",
+		"id": "01a111e4-02a6-7585-9bf1-5e40eb53b4cc"
+	},
+	"F.access.lan": {
+		"kind": "feature",
+		"id": "01a111e4-02b5-7311-960e-872ca74defa8"
+	},
+	"F.access.leases": {
+		"kind": "feature",
+		"id": "01a111e4-02c1-7229-b7e9-26110ee81a23"
+	},
+	"F.access.roster": {
+		"kind": "feature",
+		"id": "01a111e4-0285-7491-bf61-f87640b8eb1e"
+	},
+	"F.adapter.catalog": {
+		"kind": "feature",
+		"id": "01a111e4-0156-7f6b-9556-c2918a92982e"
+	},
+	"F.adapter.resolution": {
+		"kind": "feature",
+		"id": "01a111e4-014f-73a1-8638-c3a58f134cf1"
+	},
+	"F.artifacts": {
+		"kind": "feature",
+		"id": "01a111e4-017b-79d9-94a2-fbccf1bd0dbf"
+	},
+	"F.assets": {
+		"kind": "feature",
+		"id": "01a111e4-0171-7cae-a37e-e67ec8deb82f"
+	},
+	"F.checks": {
+		"kind": "feature",
+		"id": "01a111e4-016a-764a-8947-93dbdd331904"
+	},
+	"F.cli": {
+		"kind": "feature",
+		"id": "01a111e4-02e0-7a9b-83ee-c37d35362761"
+	},
+	"F.evidence.formal": {
+		"kind": "feature",
+		"id": "01a111e4-0196-7010-b4ab-72313621d503"
+	},
+	"F.evidence.staleness": {
+		"kind": "feature",
+		"id": "01a111e4-01a9-728a-ad16-1fc4c431b906"
+	},
+	"F.flow.evidence": {
+		"kind": "feature",
+		"id": "01a111e4-0211-7d46-89cf-76690985beeb"
+	},
+	"F.flow.graph": {
+		"kind": "feature",
+		"id": "01a111e4-01fb-7138-9e22-08b5ff81b735"
+	},
+	"F.flow.prototype": {
+		"kind": "feature",
+		"id": "01a111e4-0207-7859-a8e0-65bc2fc82289"
+	},
+	"F.handoff": {
+		"kind": "feature",
+		"id": "01a111e4-0272-7c81-aa89-df553ee4de7c"
+	},
+	"F.i18n.resources": {
+		"kind": "feature",
+		"id": "01a111e4-015d-70aa-8098-a2bbe4690dc9"
+	},
+	"F.i18n.runtime": {
+		"kind": "feature",
+		"id": "01a111e4-0163-76c0-ac0a-935197ce2356"
+	},
+	"F.mcp.discovery": {
+		"kind": "feature",
+		"id": "01a111e4-02f2-7131-a974-233eb077d10b"
+	},
+	"F.preview.failures": {
+		"kind": "feature",
+		"id": "01a111e4-0265-770f-b7f7-4c49074711fd"
+	},
+	"F.preview.geometry": {
+		"kind": "feature",
+		"id": "01a111e4-0258-7bd1-805a-b270040f08ba"
+	},
+	"F.preview.isolation": {
+		"kind": "feature",
+		"id": "01a111e4-021e-752c-bc0b-aa292871cf10"
+	},
+	"F.preview.navigation": {
+		"kind": "feature",
+		"id": "01a111e4-023c-7cd5-8c98-3ca18eaab504"
+	},
+	"F.preview.session": {
+		"kind": "feature",
+		"id": "01a111e4-0230-7cd4-8870-cb5c4e7139e3"
+	},
+	"F.preview.targeting": {
+		"kind": "feature",
+		"id": "01a111e4-024a-724e-ad90-bb6bcfb564da"
+	},
+	"F.publication": {
+		"kind": "feature",
+		"id": "01a111e4-0303-7dff-9ff5-c18101051308"
+	},
+	"F.render-context": {
+		"kind": "feature",
+		"id": "01a111e4-0184-794a-8ede-f7f856ffbe4c"
+	},
+	"F.review.lifecycle": {
+		"kind": "feature",
+		"id": "01a111e4-01c9-793b-994d-8b8cce8950f6"
+	},
+	"F.review.messages": {
+		"kind": "feature",
+		"id": "01a111e4-01d9-7536-9ba0-3de3fe1f1856"
+	},
+	"F.review.pins": {
+		"kind": "feature",
+		"id": "01a111e4-01ee-786e-bf57-d2278afa16bc"
+	},
+	"F.review.retraction": {
+		"kind": "feature",
+		"id": "01a11203-da99-7193-8049-ae595bba2c62"
+	},
+	"F.review.threads": {
+		"kind": "feature",
+		"id": "01a111e4-01bb-783b-9792-a36016cd6c54"
+	},
+	"F.view.authoring": {
+		"kind": "feature",
+		"id": "01a111e4-013a-798d-a808-3f242a1ac414"
+	},
+	"F.view.decisions": {
+		"kind": "feature",
+		"id": "01a111e4-014a-7438-897b-ba59bc67edca"
+	},
+	"F.view.spec": {
+		"kind": "feature",
+		"id": "01a111e4-0143-7678-b969-7e1794a3c04f"
+	},
+	"F.view.variants": {
+		"kind": "feature",
+		"id": "01a111e4-013f-7b36-9e39-c57afb0bd320"
+	},
+	"F.wb.a11y": {
+		"kind": "feature",
+		"id": "01a111e4-0359-723d-9eda-d1efbee679a1"
+	},
+	"F.wb.chrome-i18n": {
+		"kind": "feature",
+		"id": "01a111e4-034a-7c44-ba0d-33d669c8b658"
+	},
+	"F.wb.devices": {
+		"kind": "feature",
+		"id": "01a111e4-033a-7b5d-87cf-0c12c4f067e2"
+	},
+	"F.wb.ia": {
+		"kind": "feature",
+		"id": "01a111e4-0328-7e20-aebf-15b78c5fa37f"
+	},
+	"F.wb.live-refresh": {
+		"kind": "feature",
+		"id": "01a111e4-0315-7755-b867-e3c7b50d22e6"
+	},
+	"F.ws.layout": {
+		"kind": "feature",
+		"id": "01a111e4-011c-7dd3-9913-afa127c17382"
+	},
+	"F.ws.migration": {
+		"kind": "feature",
+		"id": "01a111e4-0123-7ff7-a650-fd8c690e21d5"
+	},
+	"F.ws.mutations": {
+		"kind": "feature",
+		"id": "01a111e4-0131-7584-bbfd-ca1afff5c2d8"
+	},
+	"F.ws.references": {
+		"kind": "feature",
+		"id": "01a111e4-0135-7805-b66f-f2acc1730ed2"
+	},
+	"S.agent-author": {
+		"kind": "story",
+		"id": "01a111e4-0417-7837-b974-cf9799979a7e"
+	},
+	"S.agent-submit": {
+		"kind": "story",
+		"id": "01a111e4-0429-77a0-8346-29a3221684da"
+	},
+	"S.decide": {
+		"kind": "story",
+		"id": "01a111e4-03b9-7f03-a338-f414c70f41b3"
+	},
+	"S.dev-agent": {
+		"kind": "story",
+		"id": "01a111e4-0403-70ac-9266-0747790ffacd"
+	},
+	"S.dev-setup": {
+		"kind": "story",
+		"id": "01a111e4-03f0-734d-8bf4-a4a90155790f"
+	},
+	"S.ds-maintainer": {
+		"kind": "story",
+		"id": "01a111e4-0475-7be7-be27-1b58df0a7617"
+	},
+	"S.flow": {
+		"kind": "story",
+		"id": "01a111e4-03cb-75fc-be62-1ac243eeffa0"
+	},
+	"S.implementer": {
+		"kind": "story",
+		"id": "01a111e4-0450-7950-ab72-55dcb59b4ca4"
+	},
+	"S.localize": {
+		"kind": "story",
+		"id": "01a111e4-03db-7bce-bbfd-7238c853eef4"
+	},
+	"S.owner-access": {
+		"kind": "story",
+		"id": "01a111e4-043c-70a5-8a9d-a438e4d8f2f1"
+	},
+	"S.product-wide-feedback": {
+		"kind": "story",
+		"id": "01a111e4-03a0-7001-8c32-9ec5de2c0655"
+	},
+	"S.reader": {
+		"kind": "story",
+		"id": "01a111e4-0463-7f7c-aa18-77f0107da536"
+	},
+	"S.review-canvas": {
+		"kind": "story",
+		"id": "01a111e4-036a-792f-aea9-a9d028bfdb60"
+	},
+	"S.review-judge": {
+		"kind": "story",
+		"id": "01a111e4-037e-7101-8c42-279a1e0dc67b"
+	},
+	"S.review-remote": {
+		"kind": "story",
+		"id": "01a111e4-038c-7fc1-b5ba-bf8441eacd42"
+	},
+	"S.wb-personal": {
+		"kind": "story",
+		"id": "01a11203-db9c-7a59-ae9b-c5ce96a45825"
+	}
+}
