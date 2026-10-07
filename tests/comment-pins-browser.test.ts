@@ -293,7 +293,10 @@ describe('All pins at once (R7b)', () => {
 			await page.keyboard.press('k')
 			// Every navigation reports to `afterEach` when it settles (committed, cancelled or a duplicate).
 			await expect.poll(() => page.evaluate(() => (window as unknown as { __settledThreads: (string | null)[] }).__settledThreads)).toContain(next)
-			expect(new URL(page.url()).searchParams.get('thread')).toBe(firstId)
+			// On a loaded machine J's replace can commit before K is even pressed; K's replace is then
+			// still in flight here, so wait for it. A late J replace that reopened the thread would leave
+			// the URL on `next` for good, which still fails this poll.
+			await expect.poll(() => new URL(page.url()).searchParams.get('thread')).toBe(firstId)
 			await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-pin-thread'))).toBe(firstId)
 			// Enter on the open thread's pin moves into its conversation; Escape closes it and returns to the pin.
 			await page.keyboard.press('Enter')
