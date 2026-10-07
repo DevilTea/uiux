@@ -255,6 +255,10 @@
 		"kind": "clause",
 		"id": "01a11485-f70a-7d29-9b48-e7df3e634a54"
 	},
+	"C.mcp.review-filters": {
+		"kind": "clause",
+		"id": "01a11544-6d38-7c63-958a-e0133b131fd3"
+	},
 	"C.mcp.review-tools": {
 		"kind": "clause",
 		"id": "01a11485-f7ee-7102-a12c-694efaeb6d28"
@@ -319,9 +323,29 @@
 		"kind": "clause",
 		"id": "01a11485-f630-7a2c-8406-0497fa56d31b"
 	},
+	"C.mutation-semantics.promotion-conflict": {
+		"kind": "clause",
+		"id": "01a11544-6d0a-70f4-b6b7-76e42f95d42e"
+	},
 	"C.mutation-semantics.refusal-statuses": {
 		"kind": "clause",
 		"id": "01a11485-f5b6-77e1-b3bf-2a70ad33cc94"
+	},
+	"C.mutation-semantics.review-edit-codes": {
+		"kind": "clause",
+		"id": "01a11544-6cb1-7f23-ad46-b73f27eaec1f"
+	},
+	"C.mutation-semantics.review-retract-codes": {
+		"kind": "clause",
+		"id": "01a11544-6cde-7e91-8aca-f88804c7a05c"
+	},
+	"C.mutation-semantics.review-submit-codes": {
+		"kind": "clause",
+		"id": "01a11544-6c56-786b-81a0-3e2a59c56a6a"
+	},
+	"C.mutation-semantics.review-workspace-refusals": {
+		"kind": "clause",
+		"id": "01a11544-6c84-788f-82a2-fecc7c66aeb6"
 	},
 	"C.mutation-semantics.revision": {
 		"kind": "clause",
@@ -359,6 +383,22 @@
 		"kind": "clause",
 		"id": "01a1144e-5508-7eda-a9a0-23fb0d3ebabd"
 	},
+	"C.ws-format.decision": {
+		"kind": "clause",
+		"id": "01a11544-67f8-7b7e-93bf-056b89a073d6"
+	},
+	"C.ws-format.decision-history": {
+		"kind": "clause",
+		"id": "01a11544-6826-71dd-ab2d-a61e2cea2ade"
+	},
+	"C.ws-format.decision-provenance": {
+		"kind": "clause",
+		"id": "01a11544-6882-7d45-947a-eddbc7bdc120"
+	},
+	"C.ws-format.decision-transitions": {
+		"kind": "clause",
+		"id": "01a11544-6854-7c6d-b420-4747804aab8d"
+	},
 	"C.ws-format.evidence-records": {
 		"kind": "clause",
 		"id": "01a1144e-5537-7dbd-8b9e-db2e0634aace"
@@ -366,6 +406,18 @@
 	"C.ws-format.flow-path": {
 		"kind": "clause",
 		"id": "01a1144e-5466-7a92-b416-c1e7b060b6c1"
+	},
+	"C.ws-format.flow-scenario-ref": {
+		"kind": "clause",
+		"id": "01a11544-6907-74d6-a1ac-5bd1a9004343"
+	},
+	"C.ws-format.flow-shape": {
+		"kind": "clause",
+		"id": "01a11544-68af-7a67-9983-0d5045ba70cd"
+	},
+	"C.ws-format.flow-step": {
+		"kind": "clause",
+		"id": "01a11544-68db-74aa-b589-e7bf22f813c4"
 	},
 	"C.ws-format.i18n-settings": {
 		"kind": "clause",
@@ -395,9 +447,73 @@
 		"kind": "clause",
 		"id": "01a1144e-5450-77ca-b9da-eab7e00a46e6"
 	},
+	"C.ws-format.review-actor": {
+		"kind": "clause",
+		"id": "01a11544-69e5-7462-84c9-b871e417743f"
+	},
+	"C.ws-format.review-anchor": {
+		"kind": "clause",
+		"id": "01a11544-6960-7a2c-85f3-87fac0350cfe"
+	},
+	"C.ws-format.review-display-hint": {
+		"kind": "clause",
+		"id": "01a11544-6bc3-75cd-9585-1dbcf208c502"
+	},
+	"C.ws-format.review-edit-author": {
+		"kind": "clause",
+		"id": "01a11544-6a3e-7c7e-b518-c0bdb68dc140"
+	},
+	"C.ws-format.review-edit-content": {
+		"kind": "clause",
+		"id": "01a11544-6a6e-713b-bd35-e080842f2bf6"
+	},
+	"C.ws-format.review-evidence-ref": {
+		"kind": "clause",
+		"id": "01a11544-6ac9-7cb0-bc58-a898d637a4f7"
+	},
+	"C.ws-format.review-hint-quantization": {
+		"kind": "clause",
+		"id": "01a11544-6bf5-7a25-9a50-ca9417e79d80"
+	},
+	"C.ws-format.review-history-event": {
+		"kind": "clause",
+		"id": "01a11544-6af6-7584-b03e-a5d996fda94c"
+	},
+	"C.ws-format.review-message": {
+		"kind": "clause",
+		"id": "01a11544-6a12-7695-ad8e-0b14c619cd14"
+	},
 	"C.ws-format.review-path": {
 		"kind": "clause",
 		"id": "01a1144e-547c-7ab6-9589-e9a8b8c458c5"
+	},
+	"C.ws-format.review-resolution": {
+		"kind": "clause",
+		"id": "01a11544-6b50-7bf0-969b-9f94f9f39035"
+	},
+	"C.ws-format.review-resolution-rules": {
+		"kind": "clause",
+		"id": "01a11544-6b86-7529-8440-f37c43558427"
+	},
+	"C.ws-format.review-status": {
+		"kind": "clause",
+		"id": "01a11544-69b9-74c4-8f54-c383c0b83e82"
+	},
+	"C.ws-format.review-submission": {
+		"kind": "clause",
+		"id": "01a11544-6a9c-774b-b4fa-e60ef5a827b6"
+	},
+	"C.ws-format.review-thread": {
+		"kind": "clause",
+		"id": "01a11544-6933-7ac5-b287-562f94f4791d"
+	},
+	"C.ws-format.review-transitions": {
+		"kind": "clause",
+		"id": "01a11544-6b22-710e-b905-585734d42714"
+	},
+	"C.ws-format.review-workspace-arm": {
+		"kind": "clause",
+		"id": "01a11544-698c-7e01-8c12-a8d5da2b80a4"
 	},
 	"C.ws-format.schema-diagnostics": {
 		"kind": "clause",
@@ -719,6 +835,14 @@
 		"kind": "rule",
 		"id": "01a11485-ecae-7f98-b096-39e37aae98df"
 	},
+	"R.access.credentials.session-end-login": {
+		"kind": "rule",
+		"id": "01a11544-08e0-7d73-b635-77087d481db8"
+	},
+	"R.access.credentials.session-isolation": {
+		"kind": "rule",
+		"id": "01a11544-0939-7db4-ac77-9fc5e5578876"
+	},
 	"R.access.credentials.session-origin": {
 		"kind": "rule",
 		"id": "01a11485-ed4a-766b-a51c-af2b9ffb1fcb"
@@ -951,6 +1075,150 @@
 		"kind": "rule",
 		"id": "01a11485-ea39-7069-abc5-410b7576f445"
 	},
+	"R.flow.evidence.executed": {
+		"kind": "rule",
+		"id": "01a11544-6655-7786-8185-f3e8c8d2c706"
+	},
+	"R.flow.evidence.handoff": {
+		"kind": "rule",
+		"id": "01a11544-6734-7a24-a957-e23ddeb3e396"
+	},
+	"R.flow.evidence.proves-event": {
+		"kind": "rule",
+		"id": "01a11544-66d9-7fcd-8400-93516ddf2857"
+	},
+	"R.flow.evidence.recipe-immutable": {
+		"kind": "rule",
+		"id": "01a11544-6707-70a7-b544-590b4f1e8a91"
+	},
+	"R.flow.evidence.recipe-owned": {
+		"kind": "rule",
+		"id": "01a11544-66ad-73e5-8fcd-9e24bfcb3313"
+	},
+	"R.flow.evidence.review": {
+		"kind": "rule",
+		"id": "01a11544-6760-7ec2-8430-0f7cc5807259"
+	},
+	"R.flow.evidence.trace": {
+		"kind": "rule",
+		"id": "01a11544-6628-73b9-b10a-9643d264bea1"
+	},
+	"R.flow.evidence.transitions": {
+		"kind": "rule",
+		"id": "01a11544-6681-7387-bdc3-9b825261f887"
+	},
+	"R.flow.graph.ambiguous": {
+		"kind": "rule",
+		"id": "01a11544-61f0-76f1-a5a0-7bfa67408df9"
+	},
+	"R.flow.graph.base-state": {
+		"kind": "rule",
+		"id": "01a11544-6172-7b9f-a8d6-3412aa2f04e7"
+	},
+	"R.flow.graph.cycles": {
+		"kind": "rule",
+		"id": "01a11544-6270-76ac-939c-2816a124d094"
+	},
+	"R.flow.graph.editor": {
+		"kind": "rule",
+		"id": "01a11544-6358-72ae-95ed-589ac1837f39"
+	},
+	"R.flow.graph.event-names": {
+		"kind": "rule",
+		"id": "01a11544-62f1-7d7e-93a2-33691c947f24"
+	},
+	"R.flow.graph.event-picker": {
+		"kind": "rule",
+		"id": "01a11544-6386-77b6-aa9f-f767db5deb3c"
+	},
+	"R.flow.graph.invalid-blocks": {
+		"kind": "rule",
+		"id": "01a11544-62c8-7d37-933b-b991fed72e30"
+	},
+	"R.flow.graph.invalid-refs": {
+		"kind": "rule",
+		"id": "01a11544-629c-7dbf-8e41-36c8e37537b3"
+	},
+	"R.flow.graph.mcp": {
+		"kind": "rule",
+		"id": "01a11544-63b1-7363-9d65-cf94d90a091f"
+	},
+	"R.flow.graph.no-payload": {
+		"kind": "rule",
+		"id": "01a11544-61c5-758e-90d6-5dc45e1cb55c"
+	},
+	"R.flow.graph.not-router": {
+		"kind": "rule",
+		"id": "01a11544-6147-70b2-969a-1d8b4997d581"
+	},
+	"R.flow.graph.reachable": {
+		"kind": "rule",
+		"id": "01a11544-6244-7a31-b37f-7f775a7d072a"
+	},
+	"R.flow.graph.scenario-ref": {
+		"kind": "rule",
+		"id": "01a11544-6324-7a4b-96e2-8428465588bb"
+	},
+	"R.flow.graph.transition-identity": {
+		"kind": "rule",
+		"id": "01a11544-621a-79a1-b0fc-086c24c92488"
+	},
+	"R.flow.graph.trigger": {
+		"kind": "rule",
+		"id": "01a11544-619c-7fe1-a1b0-7e4695c28094"
+	},
+	"R.flow.proto.advance-not-event": {
+		"kind": "rule",
+		"id": "01a11544-6559-753f-a9f8-dc8640332cb1"
+	},
+	"R.flow.proto.armed-only": {
+		"kind": "rule",
+		"id": "01a11544-6487-7c92-8900-3487708b2def"
+	},
+	"R.flow.proto.comment-mode": {
+		"kind": "rule",
+		"id": "01a11544-6585-7110-acc9-c3109c329f84"
+	},
+	"R.flow.proto.ephemeral": {
+		"kind": "rule",
+		"id": "01a11544-6505-7956-a9db-c5960fc04027"
+	},
+	"R.flow.proto.fallback": {
+		"kind": "rule",
+		"id": "01a11544-65f1-7a41-b331-53e818c4ee7d"
+	},
+	"R.flow.proto.fresh-runtime": {
+		"kind": "rule",
+		"id": "01a11544-6409-7570-9bc7-1f74097739e8"
+	},
+	"R.flow.proto.next-controls": {
+		"kind": "rule",
+		"id": "01a11544-652f-7816-b08a-05c78c14797c"
+	},
+	"R.flow.proto.no-arguments": {
+		"kind": "rule",
+		"id": "01a11544-64db-7013-981d-a5cae3d71e5e"
+	},
+	"R.flow.proto.no-carryover": {
+		"kind": "rule",
+		"id": "01a11544-6434-779d-8de4-8130392ca913"
+	},
+	"R.flow.proto.no-unreferenced": {
+		"kind": "rule",
+		"id": "01a11544-65b9-7614-b4e7-9c18c0613315"
+	},
+	"R.flow.proto.one-model": {
+		"kind": "rule",
+		"id": "01a11544-63dd-7692-af37-66948504284d"
+	},
+	"R.flow.proto.one-transition": {
+		"kind": "rule",
+		"id": "01a11544-64b1-765f-b42b-58c94785768e"
+	},
+	"R.flow.proto.workbench-resolves": {
+		"kind": "rule",
+		"id": "01a11544-645e-7f54-8f63-cbcd63bf1e07"
+	},
 	"R.mcp.discovery.compact-lists": {
 		"kind": "rule",
 		"id": "01a11485-f1f1-701d-abb1-272282b96438"
@@ -1003,6 +1271,354 @@
 		"kind": "rule",
 		"id": "01a11485-f29e-7e71-a3b6-030a1dd80781"
 	},
+	"R.review.lifecycle.after-reopen": {
+		"kind": "rule",
+		"id": "01a11544-56db-73f1-addf-96c97320e8ee"
+	},
+	"R.review.lifecycle.decline-pending": {
+		"kind": "rule",
+		"id": "01a11544-566b-7472-8e4d-b20f5e348222"
+	},
+	"R.review.lifecycle.default-verified": {
+		"kind": "rule",
+		"id": "01a11544-5621-71c6-b5b9-ad1b1ef809ab"
+	},
+	"R.review.lifecycle.evidence-by-change": {
+		"kind": "rule",
+		"id": "01a11544-55d5-7ee4-9d63-327595144bdc"
+	},
+	"R.review.lifecycle.evidence-exists": {
+		"kind": "rule",
+		"id": "01a11544-5564-7716-8552-e57ec5795644"
+	},
+	"R.review.lifecycle.evidence-kind": {
+		"kind": "rule",
+		"id": "01a11544-55b0-7986-a32a-2a4fea7135d4"
+	},
+	"R.review.lifecycle.formal-current": {
+		"kind": "rule",
+		"id": "01a11544-558b-7b86-b4c7-76928862c948"
+	},
+	"R.review.lifecycle.history": {
+		"kind": "rule",
+		"id": "01a11544-5434-7604-b573-b3f3da49024a"
+	},
+	"R.review.lifecycle.human-judgment": {
+		"kind": "rule",
+		"id": "01a11544-5690-735b-b8f5-14aa9994a52b"
+	},
+	"R.review.lifecycle.interaction-evidence": {
+		"kind": "rule",
+		"id": "01a11544-55fa-7b7e-aec5-e71b1ba9a214"
+	},
+	"R.review.lifecycle.obsolete-suggestion": {
+		"kind": "rule",
+		"id": "01a11544-574d-7a9f-9eae-f63f96365944"
+	},
+	"R.review.lifecycle.one-click": {
+		"kind": "rule",
+		"id": "01a11544-5702-78b6-95ea-c15fe80ad4e3"
+	},
+	"R.review.lifecycle.open-explicit": {
+		"kind": "rule",
+		"id": "01a11544-5647-747f-bea3-5cd9d92241b8"
+	},
+	"R.review.lifecycle.reopen": {
+		"kind": "rule",
+		"id": "01a11544-56b5-78ff-bce6-ed5183a13ad2"
+	},
+	"R.review.lifecycle.resolve-menu": {
+		"kind": "rule",
+		"id": "01a11544-5727-7d41-b732-3108b15a8ec1"
+	},
+	"R.review.lifecycle.resubmit": {
+		"kind": "rule",
+		"id": "01a11544-547e-7dc6-93f0-abffffd8fe78"
+	},
+	"R.review.lifecycle.submission-immutable": {
+		"kind": "rule",
+		"id": "01a11544-54a8-79f0-a590-e8f8f42c1a79"
+	},
+	"R.review.lifecycle.submit": {
+		"kind": "rule",
+		"id": "01a11544-5459-73a9-89d2-dd4d3ed42da3"
+	},
+	"R.review.lifecycle.timeline-marks": {
+		"kind": "rule",
+		"id": "01a11544-5772-750b-9ab3-adcc04d755a9"
+	},
+	"R.review.lifecycle.whole-view": {
+		"kind": "rule",
+		"id": "01a11544-54ce-7a05-98ab-c9e66877b30b"
+	},
+	"R.review.lifecycle.widget-target": {
+		"kind": "rule",
+		"id": "01a11544-54f5-76e0-b5ee-b137d387f08e"
+	},
+	"R.review.lifecycle.workspace-subject": {
+		"kind": "rule",
+		"id": "01a11544-551c-7608-86bd-24eeca2fdda9"
+	},
+	"R.review.lifecycle.workspace-views": {
+		"kind": "rule",
+		"id": "01a11544-5541-77c2-9011-0c179613c3f8"
+	},
+	"R.review.messages.after-freeze": {
+		"kind": "rule",
+		"id": "01a11544-5808-772e-800c-ed37332596e1"
+	},
+	"R.review.messages.author-only": {
+		"kind": "rule",
+		"id": "01a11544-5798-7401-bdaa-4dce41a6fc86"
+	},
+	"R.review.messages.decisions": {
+		"kind": "rule",
+		"id": "01a11544-5964-7c23-92e6-0ab5e502a5af"
+	},
+	"R.review.messages.freeze": {
+		"kind": "rule",
+		"id": "01a11544-57e2-701c-946f-3fe75f5294ba"
+	},
+	"R.review.messages.frozen-ui": {
+		"kind": "rule",
+		"id": "01a11544-593c-787b-9d25-34f9745ee674"
+	},
+	"R.review.messages.indicator": {
+		"kind": "rule",
+		"id": "01a11544-5916-774b-a7e3-529bd29eb1ea"
+	},
+	"R.review.messages.no-delete": {
+		"kind": "rule",
+		"id": "01a11544-58a4-7d7e-b7c1-4491b736d146"
+	},
+	"R.review.messages.no-window": {
+		"kind": "rule",
+		"id": "01a11544-5830-7e3a-91cb-c0e24320befb"
+	},
+	"R.review.messages.position": {
+		"kind": "rule",
+		"id": "01a11544-587e-74a3-96b8-cf85473bed0f"
+	},
+	"R.review.messages.search-current": {
+		"kind": "rule",
+		"id": "01a11544-58f0-76eb-82e3-2281f399bb20"
+	},
+	"R.review.messages.stamped-author": {
+		"kind": "rule",
+		"id": "01a11544-57bd-72a8-bbdc-24819db114ba"
+	},
+	"R.review.messages.unread": {
+		"kind": "rule",
+		"id": "01a11544-58ca-7fda-9bd6-bf2e9853ef90"
+	},
+	"R.review.messages.versions": {
+		"kind": "rule",
+		"id": "01a11544-5855-75ad-ba0c-4132b19973ec"
+	},
+	"R.review.pins.click-point": {
+		"kind": "rule",
+		"id": "01a11544-5e04-79f4-bc99-5b9b504ebad6"
+	},
+	"R.review.pins.create": {
+		"kind": "rule",
+		"id": "01a11544-5bb8-7cae-b9c1-10795b0620f7"
+	},
+	"R.review.pins.dismissed": {
+		"kind": "rule",
+		"id": "01a11544-5dd6-78e1-a187-334dcd6d93f5"
+	},
+	"R.review.pins.drag": {
+		"kind": "rule",
+		"id": "01a11544-5c53-7b73-b08f-1fe6c6880df7"
+	},
+	"R.review.pins.hidden": {
+		"kind": "rule",
+		"id": "01a11544-5d12-7146-9dc0-a05068a6ee77"
+	},
+	"R.review.pins.invalid-anchor": {
+		"kind": "rule",
+		"id": "01a11544-5d60-705e-b88a-d2e8743cba14"
+	},
+	"R.review.pins.move": {
+		"kind": "rule",
+		"id": "01a11544-5c2c-7a3b-ad39-f6c0839cf07e"
+	},
+	"R.review.pins.no-cross-check": {
+		"kind": "rule",
+		"id": "01a11544-5b92-7a3f-9c75-bebbe43b76da"
+	},
+	"R.review.pins.no-restore": {
+		"kind": "rule",
+		"id": "01a11544-5ca0-7b99-9d32-43f3de4122be"
+	},
+	"R.review.pins.non-authoritative": {
+		"kind": "rule",
+		"id": "01a11544-5b6b-7f09-9b0e-dd658d4e4684"
+	},
+	"R.review.pins.not-recorded": {
+		"kind": "rule",
+		"id": "01a11544-5c79-7c07-8b56-0eef56e0cec6"
+	},
+	"R.review.pins.physical": {
+		"kind": "rule",
+		"id": "01a11544-5cec-7711-8326-5e0fa5a89922"
+	},
+	"R.review.pins.placement": {
+		"kind": "rule",
+		"id": "01a11544-5cc6-7e81-9a4d-b7a0383fa7e9"
+	},
+	"R.review.pins.reanchor": {
+		"kind": "rule",
+		"id": "01a11544-5bde-74a8-bb73-31a20bd17284"
+	},
+	"R.review.pins.still-listed": {
+		"kind": "rule",
+		"id": "01a11544-5d39-733d-9581-eccc137f7263"
+	},
+	"R.review.pins.to-workspace": {
+		"kind": "rule",
+		"id": "01a11544-5c04-7c32-8ca5-2ca0ad5fed11"
+	},
+	"R.review.pins.variant": {
+		"kind": "rule",
+		"id": "01a11544-5d87-7784-8b47-59de8187e492"
+	},
+	"R.review.pins.workspace": {
+		"kind": "rule",
+		"id": "01a11544-5dad-7d4c-b8e4-e1080c880bda"
+	},
+	"R.review.retract.author": {
+		"kind": "rule",
+		"id": "01a11544-598c-7217-8b56-7cb8ff0236da"
+	},
+	"R.review.retract.bundles": {
+		"kind": "rule",
+		"id": "01a11544-5acc-7e09-9b85-aca405d1d364"
+	},
+	"R.review.retract.confirm": {
+		"kind": "rule",
+		"id": "01a11544-5b1b-7dcb-bcea-e36f4ffa3b2a"
+	},
+	"R.review.retract.eligible": {
+		"kind": "rule",
+		"id": "01a11544-59df-7822-9aba-ff39da0d826b"
+	},
+	"R.review.retract.empty": {
+		"kind": "rule",
+		"id": "01a11544-5a05-7750-9268-fd666980dd2f"
+	},
+	"R.review.retract.gone": {
+		"kind": "rule",
+		"id": "01a11544-5aa5-76bd-99a9-b8b9b0599a03"
+	},
+	"R.review.retract.legacy": {
+		"kind": "rule",
+		"id": "01a11544-59b5-7bb1-a605-4985ac75c208"
+	},
+	"R.review.retract.no-trace": {
+		"kind": "rule",
+		"id": "01a11544-5a55-7249-948f-4e136df52a63"
+	},
+	"R.review.retract.not-engagement": {
+		"kind": "rule",
+		"id": "01a11544-5a2e-716b-9a06-c910418f24ac"
+	},
+	"R.review.retract.offer": {
+		"kind": "rule",
+		"id": "01a11544-5af4-71eb-b8e4-917743937508"
+	},
+	"R.review.retract.stale-links": {
+		"kind": "rule",
+		"id": "01a11544-5b42-7ca4-a501-a1c4977a6ccd"
+	},
+	"R.review.retract.under-lock": {
+		"kind": "rule",
+		"id": "01a11544-5a7f-7e63-9379-ddd56dc82792"
+	},
+	"R.review.threads.explicit-anchor": {
+		"kind": "rule",
+		"id": "01a11544-51b8-76a3-ab62-d87207014806"
+	},
+	"R.review.threads.explicit-reanchor": {
+		"kind": "rule",
+		"id": "01a11544-52c4-7105-895f-d94dc88ec4e9"
+	},
+	"R.review.threads.filters": {
+		"kind": "rule",
+		"id": "01a11544-53c4-7042-8e81-e381dd1d4450"
+	},
+	"R.review.threads.identity": {
+		"kind": "rule",
+		"id": "01a11544-511c-7f6e-8644-f4c86b760704"
+	},
+	"R.review.threads.invalid-anchor": {
+		"kind": "rule",
+		"id": "01a11544-5228-70b4-96be-e5e032bb3b63"
+	},
+	"R.review.threads.latest-activity": {
+		"kind": "rule",
+		"id": "01a11544-53a0-781e-bed5-4420f5fabcc1"
+	},
+	"R.review.threads.list-summary": {
+		"kind": "rule",
+		"id": "01a11544-537b-788e-8713-76f9a9ce705b"
+	},
+	"R.review.threads.missing-target": {
+		"kind": "rule",
+		"id": "01a11544-524d-7fd7-aa5e-d3f4388bdd41"
+	},
+	"R.review.threads.missing-variant": {
+		"kind": "rule",
+		"id": "01a11544-5201-70e6-9e60-a2433deb62b0"
+	},
+	"R.review.threads.no-rebind": {
+		"kind": "rule",
+		"id": "01a11544-5275-7aa3-8807-ae9cf39a4b67"
+	},
+	"R.review.threads.reanchor-arms": {
+		"kind": "rule",
+		"id": "01a11544-52e9-7559-b671-44d0bdf68879"
+	},
+	"R.review.threads.reanchor-history": {
+		"kind": "rule",
+		"id": "01a11544-530d-7048-96d6-ab6c2d0e92ab"
+	},
+	"R.review.threads.reply": {
+		"kind": "rule",
+		"id": "01a11544-5357-7b50-b864-dbba2fc0b082"
+	},
+	"R.review.threads.retention": {
+		"kind": "rule",
+		"id": "01a11544-5332-7801-9845-3306c8003cb4"
+	},
+	"R.review.threads.timeline": {
+		"kind": "rule",
+		"id": "01a11544-53e8-75b3-b819-d86993a21069"
+	},
+	"R.review.threads.variant-scope": {
+		"kind": "rule",
+		"id": "01a11544-51dd-73c6-826c-454ff3b23cef"
+	},
+	"R.review.threads.view-comment": {
+		"kind": "rule",
+		"id": "01a11544-5170-7aec-8d4b-56b8faacfca2"
+	},
+	"R.review.threads.widget-anchor": {
+		"kind": "rule",
+		"id": "01a11544-514a-733b-955a-614571facc1c"
+	},
+	"R.review.threads.workspace-anchor": {
+		"kind": "rule",
+		"id": "01a11544-5194-7c98-adf1-fc0a302a569f"
+	},
+	"R.review.threads.workspace-create": {
+		"kind": "rule",
+		"id": "01a11544-540d-765c-8552-d1f3a4d0ef10"
+	},
+	"R.review.threads.workspace-valid": {
+		"kind": "rule",
+		"id": "01a11544-529e-7ace-beeb-c5ce2b2071e8"
+	},
 	"R.view.authoring.author-writable-state": {
 		"kind": "rule",
 		"id": "01a1144e-5188-7a95-867c-d7e45487ebf8"
@@ -1046,6 +1662,78 @@
 	"R.view.authoring.rootshell-root": {
 		"kind": "rule",
 		"id": "01a1144e-513d-7cf2-8e18-4a6f4494665b"
+	},
+	"R.view.decisions.atomic": {
+		"kind": "rule",
+		"id": "01a11544-60bb-7018-8c81-82c17e5b80ed"
+	},
+	"R.view.decisions.conflict-ui": {
+		"kind": "rule",
+		"id": "01a11544-611c-73e0-990b-c094b48b3eb6"
+	},
+	"R.view.decisions.explicit-actions": {
+		"kind": "rule",
+		"id": "01a11544-5e99-789d-bfed-dda22a98776f"
+	},
+	"R.view.decisions.explicit-promotion": {
+		"kind": "rule",
+		"id": "01a11544-5f68-7e07-a7e0-fa99257570f6"
+	},
+	"R.view.decisions.history": {
+		"kind": "rule",
+		"id": "01a11544-5eee-7ebe-90f1-14e954dbd7f9"
+	},
+	"R.view.decisions.idempotent": {
+		"kind": "rule",
+		"id": "01a11544-6032-772b-b429-36a30800d70d"
+	},
+	"R.view.decisions.idempotent-retry": {
+		"kind": "rule",
+		"id": "01a11544-605b-7409-a010-fe345fb0284b"
+	},
+	"R.view.decisions.initial-status": {
+		"kind": "rule",
+		"id": "01a11544-5fe0-76ac-a2ad-ae86e40c72b5"
+	},
+	"R.view.decisions.pending-list": {
+		"kind": "rule",
+		"id": "01a11544-5f18-77ac-b89e-56ced4056f19"
+	},
+	"R.view.decisions.promotion-target": {
+		"kind": "rule",
+		"id": "01a11544-5f90-7b18-a1b6-48c2bd167100"
+	},
+	"R.view.decisions.provenance": {
+		"kind": "rule",
+		"id": "01a11544-6009-713a-8335-12c872294026"
+	},
+	"R.view.decisions.reopen": {
+		"kind": "rule",
+		"id": "01a11544-5ec3-73ae-b122-ed8387eff75b"
+	},
+	"R.view.decisions.review-independent": {
+		"kind": "rule",
+		"id": "01a11544-5f40-707b-9afc-695cd41d04bb"
+	},
+	"R.view.decisions.separate-decision": {
+		"kind": "rule",
+		"id": "01a11544-6084-7f2c-848d-cc4319e66134"
+	},
+	"R.view.decisions.stable-identity": {
+		"kind": "rule",
+		"id": "01a11544-5e6e-7af9-8557-a9702bc8ca23"
+	},
+	"R.view.decisions.two-actions": {
+		"kind": "rule",
+		"id": "01a11544-60ee-7323-bc78-c20a8c2e6a2b"
+	},
+	"R.view.decisions.view-local": {
+		"kind": "rule",
+		"id": "01a11544-5e41-79bd-8fb8-5a632bacdfaf"
+	},
+	"R.view.decisions.workspace-thread": {
+		"kind": "rule",
+		"id": "01a11544-5fb8-7547-b41a-ded1e2a23a8a"
 	},
 	"R.view.spec.beside-ir": {
 		"kind": "rule",
@@ -1138,6 +1826,10 @@
 	"R.wb.live.stream": {
 		"kind": "rule",
 		"id": "01a11485-f34a-7c7e-a69c-fba14914d62d"
+	},
+	"R.ws.layout.duplicate-identity": {
+		"kind": "rule",
+		"id": "01a11543-e3d8-72e2-b78c-dedff09e2c97"
 	},
 	"R.ws.layout.flat-views": {
 		"kind": "rule",
