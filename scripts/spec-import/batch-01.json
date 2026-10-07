@@ -1,6 +1,7 @@
 {
 	"batch": "01-skeleton",
 	"baseCommit": "9dba4b274ef41193379432f89695b8ad4584e25f",
+	"baseRevision": "46d178a083c4ac699f69204876062fb2ad2e733c580d1956644d77773589390e",
 	"features": [
 		{
 			"ref": "F.ws.layout",

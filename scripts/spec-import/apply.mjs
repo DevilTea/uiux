@@ -1,7 +1,20 @@
 #!/usr/bin/env node
 // Import applier for the `.spec/` adoption. Temporary: delete this directory at the spec cutover.
 //
-// Usage: node scripts/spec-import/apply.mjs <batch.json> [--dry-run]
+// Usage: node scripts/spec-import/apply.mjs <batch.json> [--dry-run] [--force]
+//
+// THE BATCH FILE IS THE SOURCE OF TRUTH FOR EVERYTHING IT NAMES. The applier overwrites the title,
+// summary, Story fields, `motivates` targets and the whole Markdown body of every unit in the batch
+// with the batch's values. So:
+//   - make every later change to an imported unit in its batch source (and re-render the batch) or
+//     in a newer batch, never by editing `.spec/` alone;
+//   - never re-run an older batch after a newer batch or edit touched the same units, or it reverts
+//     them. The guard below refuses that case.
+//
+// Guard: a batch records `baseRevision`, the `.spec/` semantic revision it was drafted against. When
+// the current revision differs and applying would change anything (a semantic field, a relation or
+// a body), the applier refuses unless `--force`. Rerunning a batch that is already applied changes
+// nothing and is always allowed. Bump `baseRevision` to the current revision when re-drafting.
 //
 // A batch draft names units by local `ref` (for example `F.review.lifecycle`). Spec Tool allocates
 // every UUID, so `refmap.json` (next to this script) keeps ref -> UUID for later batches; it never
@@ -14,9 +27,10 @@
 //      semantic revision is unchanged by those body writes;
 //   4. validates the workspace again.
 // It is idempotent: rerunning the same batch changes nothing. It stops on the first error and never
-// retries a revision conflict. Run it only while no other `spec` process is running.
+// retries a revision conflict. Run it only while no other `spec` process is running. The repository
+// root is resolved from this script's location, not from the working directory.
 
-import { readFile, writeFile } from 'node:fs/promises'
+import { access, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import process from 'node:process'
 import { createSpecClient, SpecError } from '@deviltea/spec-tool'
@@ -25,13 +39,19 @@ const KIND_DIR = { feature: 'features', story: 'stories' }
 
 const args = process.argv.slice(2)
 const dryRun = args.includes('--dry-run')
+const force = args.includes('--force')
 const batchPath = args.find(arg => !arg.startsWith('--'))
 if (!batchPath) {
-	console.error('Usage: node scripts/spec-import/apply.mjs <batch.json> [--dry-run]')
+	console.error('Usage: node scripts/spec-import/apply.mjs <batch.json> [--dry-run] [--force]')
 	process.exit(2)
 }
 
-const root = process.cwd()
+// This script lives in <root>/scripts/spec-import/.
+const root = resolve(import.meta.dirname, '..', '..')
+if (!await access(join(root, '.spec', 'spec.yaml')).then(() => true, () => false)) {
+	console.error(`Cannot find ${join(root, '.spec', 'spec.yaml')}; expected this script at <repository root>/scripts/spec-import/.`)
+	process.exit(2)
+}
 const refmapPath = resolve(import.meta.dirname, 'refmap.json')
 const batch = JSON.parse(await readFile(resolve(batchPath), 'utf8'))
 const refmap = JSON.parse(await readFile(refmapPath, 'utf8').catch(() => '{}'))
@@ -50,6 +70,12 @@ const initial = await client.workspace.validate()
 if (!initial.valid)
 	fail(`Workspace is invalid; repair it first: ${JSON.stringify(initial.issues)}`)
 let revision = initial.revision
+// The batch is stale when the workspace moved on since it was drafted; then it may only be a no-op.
+const stale = batch.baseRevision !== initial.revision
+function refuseIfStale(what) {
+	if (stale && !force)
+		fail(`Refusing to ${what}: the batch was drafted against revision ${batch.baseRevision ?? '(none recorded)'} but the workspace is at ${initial.revision}. Re-draft the batch against the current revision (set its baseRevision), or pass --force only if you mean to overwrite newer edits.`)
+}
 
 const graph = (await client.graph.export()).data
 const nodes = new Map(graph.nodes.map(node => [node.id, node]))
@@ -59,7 +85,7 @@ for (const [ref, entry] of Object.entries(refmap)) {
 		fail(`refmap entry ${ref} -> ${entry.kind} ${entry.id} does not exist in the workspace`)
 }
 
-const log = { created: [], updated: [], relinked: [], unchanged: [] }
+const log = { created: [], updated: [], relinked: [], unchanged: [], bodies: [] }
 
 function resolveRef(ref, kind) {
 	const entry = refmap[ref]
@@ -78,6 +104,7 @@ function changedFields(node, draft, fields) {
 }
 
 async function mutate(operation) {
+	refuseIfStale('change semantic content')
 	if (dryRun)
 		return undefined
 	const response = await operation(revision)
@@ -134,20 +161,29 @@ try {
 		}
 	}
 
-	if (!dryRun) {
-		const before = (await client.workspace.validate()).revision
-		for (const [kind, units] of [['feature', batch.features ?? []], ['story', batch.stories ?? []]]) {
-			for (const unit of units) {
-				const path = join(root, '.spec', KIND_DIR[kind], `${refmap[unit.ref].id}.md`)
-				const text = await readFile(path, 'utf8')
-				const end = text.indexOf('\n---\n', 4)
-				if (!text.startsWith('---\n') || end === -1)
-					fail(`Cannot find the frontmatter of ${path}`)
-				const next = `${text.slice(0, end + 5)}${unit.body}`
-				if (next !== text)
-					await writeFile(path, next)
+	const before = dryRun ? undefined : (await client.workspace.validate()).revision
+	const writes = []
+	for (const [kind, units] of [['feature', batch.features ?? []], ['story', batch.stories ?? []]]) {
+		for (const unit of units) {
+			if (!refmap[unit.ref])
+				continue // only in a dry run, which does not create units
+			const path = join(root, '.spec', KIND_DIR[kind], `${refmap[unit.ref].id}.md`)
+			const text = await readFile(path, 'utf8')
+			const end = text.indexOf('\n---\n', 4)
+			if (!text.startsWith('---\n') || end === -1)
+				fail(`Cannot find the frontmatter of ${path}`)
+			const next = `${text.slice(0, end + 5)}${unit.body}`
+			if (next !== text) {
+				writes.push([path, next])
+				log.bodies.push(`${kind} ${unit.ref}`)
 			}
 		}
+	}
+	if (writes.length > 0)
+		refuseIfStale('rewrite Markdown bodies')
+	if (!dryRun) {
+		for (const [path, next] of writes)
+			await writeFile(path, next)
 		const after = await client.workspace.validate()
 		if (!after.valid)
 			fail(`Workspace invalid after body writes: ${JSON.stringify(after.issues)}`)
@@ -168,4 +204,6 @@ console.log(JSON.stringify({
 	updated: log.updated,
 	relinked: log.relinked,
 	unchanged: log.unchanged.length,
+	bodies: log.bodies,
+	stale,
 }, null, 2))
