@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@deviltea/widget-core':
-        specifier: 0.0.2
-        version: 0.0.2
+        specifier: 0.0.4
+        version: 0.0.4
       '@deviltea/widget-vue':
-        specifier: 0.0.2
-        version: 0.0.2(vue@3.5.43(typescript@6.0.3))
+        specifier: 0.0.4
+        version: 0.0.4(vue@3.5.43(typescript@6.0.3))
       '@fontsource-variable/inter':
         specifier: 5.3.0
         version: 5.3.0
@@ -284,12 +284,12 @@ packages:
     engines: {node: ^22.14.0 || ^24.0.0}
     hasBin: true
 
-  '@deviltea/widget-core@0.0.2':
-    resolution: {integrity: sha512-wJMms5tNMU0q+ZU31qA79AEScVdWzm6GqWdQR1DH+h9iAHD1FA+6MoRoMLBN9AcNaul82PMTJ3o47ZbrbHPIsg==}
+  '@deviltea/widget-core@0.0.4':
+    resolution: {integrity: sha512-w+0urKigpaHRcak/wngzotJ4W0NQH6QNxdURwYErMPbQCimpMLQI1bNzmxxLlVwwNlw0MvgQJ/6l+hERjwAn4Q==}
     engines: {node: ^22.14.0 || ^24.0.0}
 
-  '@deviltea/widget-vue@0.0.2':
-    resolution: {integrity: sha512-i+QqaY42aEG4FdmYlZhteKfHAUp2XL2R0grXYdI2xIFj9Ic0DNjk79TKdiytkPreeFaZYGSORHjq6Yaj61+3Gw==}
+  '@deviltea/widget-vue@0.0.4':
+    resolution: {integrity: sha512-TRWsoAQtYfbJ57wMZZXY/OoFWiPUr0dKj1W/kSI1W0ZDjPG8gOge9tv708A2EAAf70crfUGX1DNNZ9Hyjn32Hw==}
     engines: {node: ^22.14.0 || ^24.0.0}
     peerDependencies:
       vue: ^3.5.0
@@ -5666,14 +5666,14 @@ snapshots:
     dependencies:
       yaml: 2.9.1
 
-  '@deviltea/widget-core@0.0.2':
+  '@deviltea/widget-core@0.0.4':
     dependencies:
       alien-signals: 3.2.1
       json-schema-typed: 8.0.2
 
-  '@deviltea/widget-vue@0.0.2(vue@3.5.43(typescript@6.0.3))':
+  '@deviltea/widget-vue@0.0.4(vue@3.5.43(typescript@6.0.3))':
     dependencies:
-      '@deviltea/widget-core': 0.0.2
+      '@deviltea/widget-core': 0.0.4
       vue: 3.5.43(typescript@6.0.3)
 
   '@dxup/nuxt@0.5.10(esbuild@0.28.2)(magicast@0.5.5)(oxc-parser@0.141.0)(rolldown@1.2.11)(rollup@4.63.5)(vite@8.3.1(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))':
