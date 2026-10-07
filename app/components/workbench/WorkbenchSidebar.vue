@@ -51,12 +51,12 @@ const NAV_UI = {
 const SECONDARY_NAV_UI = { ...NAV_UI, link: 'px-2 py-1.5 text-xs before:inset-x-0', linkLeadingIcon: 'size-3.5' }
 
 /**
- * The area whose navigator the sidebar shows. The `/flows` index is the list itself (and `/views`
- * redirects to the Overview list), so the sidebar does not repeat it beside them.
+ * The area whose navigator the sidebar shows. The `/flows` index is the list itself, so the sidebar
+ * does not repeat it beside it (`/views` never renders: it redirects to the Overview list).
  */
 const area = computed(() => {
 	const path = route.path.replace(/\/+$/, '')
-	if (path === '/views' || path === '/flows') return undefined
+	if (path === '/flows') return undefined
 	if (path.startsWith('/views')) return 'views'
 	if (path.startsWith('/flows')) return 'flows'
 	return undefined

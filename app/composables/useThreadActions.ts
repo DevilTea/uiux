@@ -16,9 +16,9 @@ import { useWorkbenchFeedback } from './useWorkbenchFeedback'
  * overflow menu. Each surface keeps its own layout and wires this to its own store (canvas
  * comments or the inbox).
  *
- * What a surface may offer stays its decision, passed in as `can*` getters: device and role
- * gating (Re-anchor and Promote are not offered on handsets, Submit only on desktop) are applied
- * there, never here.
+ * What a surface may offer stays its decision, passed in as `can*` getters: viewport-width and
+ * role gating (Re-anchor and Promote are not offered at phone widths,
+ * `WORKBENCH_BREAKPOINTS.phone`, or in the Reviews phone sheet; Submit only at desktop width) are applied there, never here.
  */
 export type PromoteForm = { question: string; summary: string; rationale: string }
 
