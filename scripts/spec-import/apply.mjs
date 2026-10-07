@@ -113,6 +113,33 @@ function edgeTargets(sourceId, type) {
 	return graph.edges.filter(edge => edge.from === sourceId && edge.type === type).map(edge => edge.to).sort()
 }
 
+// The graph exports only effective edges, so it cannot tell an inheriting Clause from one whose
+// explicit override happens to equal the Contract scope. The Contract file can: an entry under
+// `clauses:` carries its own `constrains:` key only when it has an override. Returns the IDs of the
+// Clauses of `contractId` that persist an override.
+async function persistedOverrides(contractId) {
+	const text = await readFile(join(root, '.spec', 'contracts', `${contractId}.md`), 'utf8')
+	const end = text.indexOf('\n---\n', 4)
+	const overrides = new Set()
+	let current
+	let inClauses = false
+	for (const line of text.slice(0, end).split('\n')) {
+		if (/^\S/.test(line)) {
+			inClauses = line.startsWith('clauses:')
+			current = undefined
+			continue
+		}
+		if (!inClauses)
+			continue
+		const entry = /^ {2}- id: (\S+)$/.exec(line)
+		if (entry)
+			current = entry[1]
+		else if (current && /^ {4}constrains:/.test(line))
+			overrides.add(current)
+	}
+	return overrides
+}
+
 const sameSet = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort())
 
 function changedFields(node, draft, fields) {
@@ -159,8 +186,9 @@ async function upsert(kind, draft, fields, createRequest) {
 
 // Rules (kind 'rule', owner Feature) or Clauses (kind 'clause', owner Contract). A Clause's optional
 // `constrains` lists Feature or Rule refs and overrides the Contract scope; omitted means inherit.
-async function upsertChildren(kind, ownerId, ownerRef, drafts, ownerConstrains) {
+async function upsertChildren(kind, ownerId, ownerRef, drafts) {
 	const draftIds = []
+	const overridden = kind === 'clause' && ownerId && refmap[ownerRef] ? await persistedOverrides(ownerId) : new Set()
 	for (const child of drafts) {
 		const existing = refmap[child.ref]
 		const override = child.constrains === undefined
@@ -197,10 +225,15 @@ async function upsertChildren(kind, ownerId, ownerRef, drafts, ownerConstrains) 
 		else {
 			log.unchanged.push(`${kind} ${child.ref}`)
 		}
-		if (kind === 'clause' && override !== undefined && !dryRun) {
-			const effective = override ?? ownerConstrains.map(ref => resolveRef(ref, 'feature')).sort()
-			if (!sameSet(edgeTargets(existing.id, 'constrains'), effective)) {
-				log.relinked.push(`clause ${child.ref}`)
+		// Compare the persisted relation state, not effective edges: `override === null` means the
+		// draft wants inheritance, which `setRelationTargets` restores with `targets: null` (the
+		// documented inherit form); an array is a complete override. In a dry run `graph` is the
+		// pre-run state, which is what the comparison needs.
+		if (kind === 'clause' && override !== undefined) {
+			const persisted = overridden.has(existing.id) ? edgeTargets(existing.id, 'constrains') : null
+			const differs = override === null ? persisted !== null : persisted === null || !sameSet(persisted, override)
+			if (differs) {
+				log.relinked.push(`clause ${child.ref}: ${override === null ? 'inherit' : 'override'}`)
 				await mutate(expectedRevision => client.graph.setRelationTargets({ sourceId: existing.id, type: 'constrains', targets: override, expectedRevision }))
 			}
 		}
@@ -251,7 +284,7 @@ try {
 		const targets = contract.constrains.map(ref => resolveRef(ref, 'feature')).sort()
 		const isNew = !refmap[contract.ref]
 		await upsert('contract', contract, ['title', 'summary'], () => ({ title: contract.title, summary: contract.summary, constrains: targets }))
-		if (!isNew && !dryRun && !sameSet(edgeTargets(refmap[contract.ref].id, 'constrains'), targets)) {
+		if (!isNew && !sameSet(edgeTargets(refmap[contract.ref].id, 'constrains'), targets)) {
 			log.relinked.push(`contract ${contract.ref}`)
 			await mutate(expectedRevision => client.graph.setRelationTargets({ sourceId: refmap[contract.ref].id, type: 'constrains', targets, expectedRevision }))
 		}
@@ -261,7 +294,7 @@ try {
 		if (!contract.clauses)
 			continue
 		const ownerId = refmap[contract.ref]?.id
-		await upsertChildren('clause', ownerId, contract.ref, contract.clauses, contract.constrains)
+		await upsertChildren('clause', ownerId, contract.ref, contract.clauses)
 	}
 
 	const before = dryRun ? undefined : (await client.workspace.validate()).revision
