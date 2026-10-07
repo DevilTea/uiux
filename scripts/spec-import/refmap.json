@@ -559,6 +559,10 @@
 		"kind": "clause",
 		"id": "01a1161c-40a0-7115-960a-5244f8a4084f"
 	},
+	"C.preview-protocol.coordinates": {
+		"kind": "clause",
+		"id": "01a11658-292d-7bfe-9f5a-6ae6c3641d40"
+	},
 	"C.preview-protocol.declaration-pinning": {
 		"kind": "clause",
 		"id": "01a1161c-42bf-7f97-8593-a82bd55665a8"
@@ -595,13 +599,29 @@
 		"kind": "clause",
 		"id": "01a1161c-4379-76a7-b15e-984a9b7e3309"
 	},
+	"C.preview-protocol.geometry-messages": {
+		"kind": "clause",
+		"id": "01a11658-28e5-7c4a-8608-64cdcbfaf33f"
+	},
+	"C.preview-protocol.geometry-revision": {
+		"kind": "clause",
+		"id": "01a11658-2a8a-71ca-97ea-4e1a5771014d"
+	},
 	"C.preview-protocol.handshake-gate": {
 		"kind": "clause",
 		"id": "01a1161c-4283-70b7-b487-e81bc28ce875"
 	},
+	"C.preview-protocol.multi-target": {
+		"kind": "clause",
+		"id": "01a11658-2b5a-7570-8e42-a3a02de5141d"
+	},
 	"C.preview-protocol.origin": {
 		"kind": "clause",
 		"id": "01a1161c-3fe9-7b4b-ac66-efbfcca4eb30"
+	},
+	"C.preview-protocol.report-atomic": {
+		"kind": "clause",
+		"id": "01a11658-2a43-7934-a36a-bcd894ea9b09"
 	},
 	"C.preview-protocol.retransmission": {
 		"kind": "clause",
@@ -614,6 +634,62 @@
 	"C.preview-protocol.stale": {
 		"kind": "clause",
 		"id": "01a1161c-41ce-7839-8e27-c49161a42369"
+	},
+	"C.preview-protocol.stream-gates": {
+		"kind": "clause",
+		"id": "01a11658-2acf-7187-9f35-aa646342788d"
+	},
+	"C.preview-protocol.stream-identity": {
+		"kind": "clause",
+		"id": "01a11658-2972-7fe3-9223-67c74e5f6816"
+	},
+	"C.preview-protocol.stream-lifecycle": {
+		"kind": "clause",
+		"id": "01a11658-29b8-74fe-8c60-e959c4020212"
+	},
+	"C.preview-protocol.stream-reports": {
+		"kind": "clause",
+		"id": "01a11658-29fd-7a44-8e90-4da7cfe3d819"
+	},
+	"C.preview-protocol.targeting-closed": {
+		"kind": "clause",
+		"id": "01a11658-2c29-78c8-88af-f08ac9b8ec98"
+	},
+	"C.preview-protocol.targeting-identity": {
+		"kind": "clause",
+		"id": "01a11658-2be5-7624-8b73-6f09d765e955"
+	},
+	"C.preview-protocol.targeting-messages": {
+		"kind": "clause",
+		"id": "01a11658-2b9f-7f1d-8ffa-12403fa7ea27"
+	},
+	"C.preview-protocol.widget-event-arm": {
+		"kind": "clause",
+		"id": "01a11658-2cb9-70ea-a850-0bf01e2a6b55"
+	},
+	"C.preview-protocol.widget-event-closed": {
+		"kind": "clause",
+		"id": "01a11658-2d47-7e88-9ed8-33be3a2117fe"
+	},
+	"C.preview-protocol.widget-event-disarm": {
+		"kind": "clause",
+		"id": "01a11658-2dd8-7a20-865f-845175476f50"
+	},
+	"C.preview-protocol.widget-event-gates": {
+		"kind": "clause",
+		"id": "01a11658-2d90-7075-8191-beb161365eae"
+	},
+	"C.preview-protocol.widget-event-messages": {
+		"kind": "clause",
+		"id": "01a11658-2c72-7b1a-8030-cd2e0ad95294"
+	},
+	"C.preview-protocol.widget-events-runtime": {
+		"kind": "clause",
+		"id": "01a11658-2cff-70bf-8b0e-0748bf7f64a4"
+	},
+	"C.preview-protocol.zero-area": {
+		"kind": "clause",
+		"id": "01a11658-2b13-76fd-a5e7-88542b59b08a"
 	},
 	"C.ws-format": {
 		"kind": "contract",
@@ -2247,6 +2323,74 @@
 		"kind": "rule",
 		"id": "01a11485-f1d5-74a0-927f-dd59d83ebfee"
 	},
+	"R.preview.geometry.clusters": {
+		"kind": "rule",
+		"id": "01a11658-27ae-7f31-ac4f-8e5c0d8d7812"
+	},
+	"R.preview.geometry.content-resize": {
+		"kind": "rule",
+		"id": "01a11658-23dd-781d-a0d3-c45cba9446b0"
+	},
+	"R.preview.geometry.edge-indicator": {
+		"kind": "rule",
+		"id": "01a11658-276a-7756-ac0e-1f1e00515e27"
+	},
+	"R.preview.geometry.one-stream": {
+		"kind": "rule",
+		"id": "01a11658-2588-7f50-b8d5-ffcd4d117e41"
+	},
+	"R.preview.geometry.outer-only": {
+		"kind": "rule",
+		"id": "01a11658-2396-777b-8cad-5c0d947171fb"
+	},
+	"R.preview.geometry.over-cap": {
+		"kind": "rule",
+		"id": "01a11658-2611-7395-92f0-372dd841ed6a"
+	},
+	"R.preview.geometry.pin-containment": {
+		"kind": "rule",
+		"id": "01a11658-269a-75e9-a036-1e44a8e605e2"
+	},
+	"R.preview.geometry.pin-no-precision": {
+		"kind": "rule",
+		"id": "01a11658-2727-76aa-aa7e-0661e92496e9"
+	},
+	"R.preview.geometry.pin-translucent": {
+		"kind": "rule",
+		"id": "01a11658-26e2-710b-95ff-8bd8b1ce5948"
+	},
+	"R.preview.geometry.pins-idle": {
+		"kind": "rule",
+		"id": "01a11658-2545-768a-8d08-2b1547fe7d24"
+	},
+	"R.preview.geometry.pins-in-comment": {
+		"kind": "rule",
+		"id": "01a11658-2655-77e5-a4ff-8bfb98dbdfef"
+	},
+	"R.preview.geometry.priority": {
+		"kind": "rule",
+		"id": "01a11658-25cb-7c05-ab57-3d57883de94d"
+	},
+	"R.preview.geometry.quad-proof": {
+		"kind": "rule",
+		"id": "01a11658-246f-778d-b267-a8efa4541d60"
+	},
+	"R.preview.geometry.remeasure": {
+		"kind": "rule",
+		"id": "01a11658-2500-71b1-94b5-88e83fbbc674"
+	},
+	"R.preview.geometry.rendered-mapping": {
+		"kind": "rule",
+		"id": "01a11658-2350-7cfb-8494-8f51efd3f991"
+	},
+	"R.preview.geometry.runtime-subset": {
+		"kind": "rule",
+		"id": "01a11658-24b8-7910-a7f7-b10b04496a23"
+	},
+	"R.preview.geometry.unmeasurable": {
+		"kind": "rule",
+		"id": "01a11658-2426-777f-8c5f-1b9185054975"
+	},
 	"R.preview.isolation.iframe-owns": {
 		"kind": "rule",
 		"id": "01a1161c-3a28-770f-9c62-dd7493437038"
@@ -2262,6 +2406,90 @@
 	"R.preview.isolation.uiux-owned": {
 		"kind": "rule",
 		"id": "01a1161c-3aa0-7bda-8956-3debc38b7a28"
+	},
+	"R.preview.navigation.comment-restore": {
+		"kind": "rule",
+		"id": "01a11658-1e85-74fd-aee2-f5048475992b"
+	},
+	"R.preview.navigation.comment-suspend": {
+		"kind": "rule",
+		"id": "01a11658-1e40-75f5-baf5-25fd22b07c88"
+	},
+	"R.preview.navigation.defer": {
+		"kind": "rule",
+		"id": "01a11658-1eca-70be-b75f-a239dd6306dc"
+	},
+	"R.preview.navigation.defer-exit": {
+		"kind": "rule",
+		"id": "01a11658-1f0f-7b80-8e05-75a64d9f6ad6"
+	},
+	"R.preview.navigation.every-region": {
+		"kind": "rule",
+		"id": "01a11658-1ca4-79a0-ac41-9280810a02eb"
+	},
+	"R.preview.navigation.hide-stale": {
+		"kind": "rule",
+		"id": "01a11658-1c1e-70c5-855c-e73889c5e008"
+	},
+	"R.preview.navigation.invalid-consumed": {
+		"kind": "rule",
+		"id": "01a11658-2022-757f-a7bc-e2b1944af01c"
+	},
+	"R.preview.navigation.missing-view": {
+		"kind": "rule",
+		"id": "01a11658-1fde-7b27-ba6d-6de27224b90c"
+	},
+	"R.preview.navigation.missing-widget": {
+		"kind": "rule",
+		"id": "01a11658-1f54-7a9f-a168-c62e37ea6101"
+	},
+	"R.preview.navigation.missing-widget-notice": {
+		"kind": "rule",
+		"id": "01a11658-1f97-7ea9-9715-e29d45ccb09d"
+	},
+	"R.preview.navigation.no-reveal": {
+		"kind": "rule",
+		"id": "01a11658-1b0a-7841-be8f-6bbea49bd343"
+	},
+	"R.preview.navigation.not-highlightable": {
+		"kind": "rule",
+		"id": "01a11658-1b97-7d59-94b2-e6f65abbbf56"
+	},
+	"R.preview.navigation.one-finding": {
+		"kind": "rule",
+		"id": "01a11658-1ce6-783a-86df-329abc0a3278"
+	},
+	"R.preview.navigation.scroll-offscreen": {
+		"kind": "rule",
+		"id": "01a11658-1b52-7f00-8f9d-eaf580c29253"
+	},
+	"R.preview.navigation.stroke": {
+		"kind": "rule",
+		"id": "01a11658-1db1-76ea-8cb5-8583b24bf6e4"
+	},
+	"R.preview.navigation.structure-first": {
+		"kind": "rule",
+		"id": "01a11658-1ac0-7478-946b-9872cc5d8f86"
+	},
+	"R.preview.navigation.style": {
+		"kind": "rule",
+		"id": "01a11658-1dfb-7723-bef9-352524844ea5"
+	},
+	"R.preview.navigation.tracks": {
+		"kind": "rule",
+		"id": "01a11658-1bda-7cf6-bf9d-a4373d40346b"
+	},
+	"R.preview.navigation.translucent-current": {
+		"kind": "rule",
+		"id": "01a11658-1d6e-75b1-b5c7-118341164ff5"
+	},
+	"R.preview.navigation.translucent-notice": {
+		"kind": "rule",
+		"id": "01a11658-1d29-793c-9641-264dc477cfd5"
+	},
+	"R.preview.navigation.visible-part": {
+		"kind": "rule",
+		"id": "01a11658-1c60-7bee-b19c-1875fc53a564"
 	},
 	"R.preview.session.allowance-reset": {
 		"kind": "rule",
@@ -2307,6 +2535,14 @@
 		"kind": "rule",
 		"id": "01a1161c-3e28-7dcf-a06e-a2c12c83919c"
 	},
+	"R.preview.session.retry-failed-allowance": {
+		"kind": "rule",
+		"id": "01a11658-196e-73c2-bf9e-078a9ea604f9"
+	},
+	"R.preview.session.retry-failed-unavailable": {
+		"kind": "rule",
+		"id": "01a11658-1929-763d-a634-7a2f6bf4711f"
+	},
 	"R.preview.session.retry-one-attempt": {
 		"kind": "rule",
 		"id": "01a1161c-3cf8-7859-9de8-2b99d22ce8aa"
@@ -2314,6 +2550,10 @@
 	"R.preview.session.retry-pending": {
 		"kind": "rule",
 		"id": "01a1161c-3d6d-77b3-81b2-aa3b017b3771"
+	},
+	"R.preview.session.retry-race": {
+		"kind": "rule",
+		"id": "01a11658-1a35-7cfe-ba73-398878c589f9"
 	},
 	"R.preview.session.retry-revoke": {
 		"kind": "rule",
@@ -2331,9 +2571,65 @@
 		"kind": "rule",
 		"id": "01a1161c-3c83-7956-a6ad-43ecc1b21b83"
 	},
+	"R.preview.session.unauthorized-retired": {
+		"kind": "rule",
+		"id": "01a11658-179e-7c94-b1cc-8e5c59ecc6ca"
+	},
 	"R.preview.session.unavailable": {
 		"kind": "rule",
 		"id": "01a1161c-3cbe-7bdc-ba70-7d2bcc8d2591"
+	},
+	"R.preview.session.unavailable-highlight": {
+		"kind": "rule",
+		"id": "01a11658-18a0-7b94-8411-17b46d344429"
+	},
+	"R.preview.session.unavailable-selection": {
+		"kind": "rule",
+		"id": "01a11658-1854-7e13-9089-a3fe4c53a33d"
+	},
+	"R.preview.targeting.escape": {
+		"kind": "rule",
+		"id": "01a11658-21c1-7f67-8158-7516905a6a98"
+	},
+	"R.preview.targeting.events-suppressed": {
+		"kind": "rule",
+		"id": "01a11658-2288-718c-a87e-20f6ded1b85c"
+	},
+	"R.preview.targeting.focus": {
+		"kind": "rule",
+		"id": "01a11658-2203-7332-a5ee-1874535ce437"
+	},
+	"R.preview.targeting.hover": {
+		"kind": "rule",
+		"id": "01a11658-2131-7302-8a66-1f550e3a5b10"
+	},
+	"R.preview.targeting.inspection-click": {
+		"kind": "rule",
+		"id": "01a11658-230d-796c-9dbe-4dec53db9f47"
+	},
+	"R.preview.targeting.modes": {
+		"kind": "rule",
+		"id": "01a11658-2066-7f38-9f08-0f5f053b9762"
+	},
+	"R.preview.targeting.no-capture-layer": {
+		"kind": "rule",
+		"id": "01a11658-20ee-7d89-a9b8-6da915e323b3"
+	},
+	"R.preview.targeting.no-traffic-outside": {
+		"kind": "rule",
+		"id": "01a11658-20a8-72f2-afa2-263d19d8aba3"
+	},
+	"R.preview.targeting.pins-clickable": {
+		"kind": "rule",
+		"id": "01a11658-22cb-7e4c-9b88-0619588734fa"
+	},
+	"R.preview.targeting.teardown": {
+		"kind": "rule",
+		"id": "01a11658-2245-7116-8f16-6c21910bae0d"
+	},
+	"R.preview.targeting.touch": {
+		"kind": "rule",
+		"id": "01a11658-217f-71e7-85ad-049ea3983cb1"
 	},
 	"R.publication.base-path": {
 		"kind": "rule",
