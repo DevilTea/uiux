@@ -543,6 +543,10 @@
 		"kind": "contract",
 		"id": "01a1161c-3f11-7cc9-8e58-ccca1b3a422a"
 	},
+	"C.preview-protocol.amplification": {
+		"kind": "clause",
+		"id": "01a11687-3fad-7d7d-b4ec-de72217ada88"
+	},
 	"C.preview-protocol.batch-equivalence": {
 		"kind": "clause",
 		"id": "01a1161c-3fa7-71a1-9c20-48f96e5f7d19"
@@ -559,6 +563,26 @@
 		"kind": "clause",
 		"id": "01a1161c-40a0-7115-960a-5244f8a4084f"
 	},
+	"C.preview-protocol.contour-cancel": {
+		"kind": "clause",
+		"id": "01a11687-403f-78cb-b625-b6e56d35ead0"
+	},
+	"C.preview-protocol.contour-commands": {
+		"kind": "clause",
+		"id": "01a11687-3e8b-7bd1-8f87-a282c785f406"
+	},
+	"C.preview-protocol.contour-messages": {
+		"kind": "clause",
+		"id": "01a11687-3d25-7a87-a3a9-bc5e0353be63"
+	},
+	"C.preview-protocol.contour-sequence": {
+		"kind": "clause",
+		"id": "01a11687-3d6e-79e8-8f1f-7934ece17ed6"
+	},
+	"C.preview-protocol.contour-topology": {
+		"kind": "clause",
+		"id": "01a11687-3ed3-7d18-9903-e3449d285ca3"
+	},
 	"C.preview-protocol.coordinates": {
 		"kind": "clause",
 		"id": "01a11658-292d-7bfe-9f5a-6ae6c3641d40"
@@ -567,6 +591,10 @@
 		"kind": "clause",
 		"id": "01a1161c-42bf-7f97-8593-a82bd55665a8"
 	},
+	"C.preview-protocol.display-tolerance": {
+		"kind": "clause",
+		"id": "01a11687-3f63-731e-be77-97992173c9a0"
+	},
 	"C.preview-protocol.encoding": {
 		"kind": "clause",
 		"id": "01a1161c-4063-7e53-a529-a2d38bdf52a9"
@@ -574,6 +602,22 @@
 	"C.preview-protocol.envelope": {
 		"kind": "clause",
 		"id": "01a1161c-4028-7f0e-90f2-181b54e658ea"
+	},
+	"C.preview-protocol.failure-categories": {
+		"kind": "clause",
+		"id": "01a11687-4088-7e56-81f9-41d1536ed88c"
+	},
+	"C.preview-protocol.failure-diagnostic": {
+		"kind": "clause",
+		"id": "01a11687-415c-79d5-9978-62683f35e9e2"
+	},
+	"C.preview-protocol.failure-reasons": {
+		"kind": "clause",
+		"id": "01a11687-40cf-7a08-a3f6-2549ebd4801a"
+	},
+	"C.preview-protocol.failure-registry": {
+		"kind": "clause",
+		"id": "01a11687-4114-728a-9d58-d69eaf786e5d"
 	},
 	"C.preview-protocol.features": {
 		"kind": "clause",
@@ -611,6 +655,10 @@
 		"kind": "clause",
 		"id": "01a1161c-4283-70b7-b487-e81bc28ce875"
 	},
+	"C.preview-protocol.max-error": {
+		"kind": "clause",
+		"id": "01a11687-3f1c-7b9c-ae2b-b3c475f31685"
+	},
 	"C.preview-protocol.multi-target": {
 		"kind": "clause",
 		"id": "01a11658-2b5a-7570-8e42-a3a02de5141d"
@@ -618,6 +666,18 @@
 	"C.preview-protocol.origin": {
 		"kind": "clause",
 		"id": "01a1161c-3fe9-7b4b-ac66-efbfcca4eb30"
+	},
+	"C.preview-protocol.partial-contour": {
+		"kind": "clause",
+		"id": "01a11687-3ff6-7fa0-b474-5aa32cafe021"
+	},
+	"C.preview-protocol.region-id": {
+		"kind": "clause",
+		"id": "01a11687-3e47-72d5-9a7b-4893f1e5d5a7"
+	},
+	"C.preview-protocol.region-member": {
+		"kind": "clause",
+		"id": "01a11687-3dfe-7b82-8f4d-f60ccdbb2f7e"
 	},
 	"C.preview-protocol.report-atomic": {
 		"kind": "clause",
@@ -631,9 +691,9 @@
 		"kind": "clause",
 		"id": "01a1161c-40de-705c-8821-df94c85e20cd"
 	},
-	"C.preview-protocol.stale": {
+	"C.preview-protocol.snapshot-version": {
 		"kind": "clause",
-		"id": "01a1161c-41ce-7839-8e27-c49161a42369"
+		"id": "01a11687-3db6-7d82-91ba-a8cc4e814799"
 	},
 	"C.preview-protocol.stream-gates": {
 		"kind": "clause",
@@ -667,10 +727,6 @@
 		"kind": "clause",
 		"id": "01a11658-2cb9-70ea-a850-0bf01e2a6b55"
 	},
-	"C.preview-protocol.widget-event-closed": {
-		"kind": "clause",
-		"id": "01a11658-2d47-7e88-9ed8-33be3a2117fe"
-	},
 	"C.preview-protocol.widget-event-disarm": {
 		"kind": "clause",
 		"id": "01a11658-2dd8-7a20-865f-845175476f50"
@@ -682,6 +738,10 @@
 	"C.preview-protocol.widget-event-messages": {
 		"kind": "clause",
 		"id": "01a11658-2c72-7b1a-8030-cd2e0ad95294"
+	},
+	"C.preview-protocol.widget-event-rearm": {
+		"kind": "clause",
+		"id": "01a11687-3cde-7032-b0a4-a478cfb76dc6"
 	},
 	"C.preview-protocol.widget-events-runtime": {
 		"kind": "clause",
@@ -2323,6 +2383,58 @@
 		"kind": "rule",
 		"id": "01a11485-f1d5-74a0-927f-dd59d83ebfee"
 	},
+	"R.preview.failures.cancel-silent": {
+		"kind": "rule",
+		"id": "01a11687-38f9-7e76-ac7a-4924dfcceea1"
+	},
+	"R.preview.failures.copy": {
+		"kind": "rule",
+		"id": "01a11687-37a0-77bb-a857-5f7804b7c306"
+	},
+	"R.preview.failures.details": {
+		"kind": "rule",
+		"id": "01a11687-3828-7160-b15b-13827988070e"
+	},
+	"R.preview.failures.inline-diagnostic": {
+		"kind": "rule",
+		"id": "01a11687-375e-7667-b8f1-59389fdd9780"
+	},
+	"R.preview.failures.latch": {
+		"kind": "rule",
+		"id": "01a11687-3650-7490-a7ec-80b2570582f6"
+	},
+	"R.preview.failures.latch-cache": {
+		"kind": "rule",
+		"id": "01a11687-36d8-771c-ab58-2d564fd20f5b"
+	},
+	"R.preview.failures.latch-recovery": {
+		"kind": "rule",
+		"id": "01a11687-371a-72fd-aac3-8e32a7ab9233"
+	},
+	"R.preview.failures.latch-scale": {
+		"kind": "rule",
+		"id": "01a11687-3693-723e-8f71-82c431d79220"
+	},
+	"R.preview.failures.refinement-stop": {
+		"kind": "rule",
+		"id": "01a11687-35cb-7bf2-85a8-1d304182cdc3"
+	},
+	"R.preview.failures.refinement-unavailable": {
+		"kind": "rule",
+		"id": "01a11687-360d-7eea-bbbe-8e6275cc73aa"
+	},
+	"R.preview.failures.retry-disabled": {
+		"kind": "rule",
+		"id": "01a11687-38b0-706c-9cf7-613152b11492"
+	},
+	"R.preview.failures.retry-preview": {
+		"kind": "rule",
+		"id": "01a11687-386c-764f-98fd-cf19dc3d0013"
+	},
+	"R.preview.failures.unknown-reason": {
+		"kind": "rule",
+		"id": "01a11687-37e4-76ef-8468-35e2e9d67a4d"
+	},
 	"R.preview.geometry.clusters": {
 		"kind": "rule",
 		"id": "01a11658-27ae-7f31-ac4f-8e5c0d8d7812"
@@ -2331,13 +2443,37 @@
 		"kind": "rule",
 		"id": "01a11658-23dd-781d-a0d3-c45cba9446b0"
 	},
+	"R.preview.geometry.cubic-normalization": {
+		"kind": "rule",
+		"id": "01a11687-30c7-7cf6-ade5-5155bded43d6"
+	},
 	"R.preview.geometry.edge-indicator": {
 		"kind": "rule",
 		"id": "01a11658-276a-7756-ac0e-1f1e00515e27"
 	},
+	"R.preview.geometry.merge-best": {
+		"kind": "rule",
+		"id": "01a11687-33ee-716f-8463-5979a0af83df"
+	},
+	"R.preview.geometry.occluder-baseline": {
+		"kind": "rule",
+		"id": "01a11687-3297-7504-9206-92cb35788aaf"
+	},
+	"R.preview.geometry.one-cache": {
+		"kind": "rule",
+		"id": "01a11687-33a8-713d-953b-6644aa828037"
+	},
 	"R.preview.geometry.one-stream": {
 		"kind": "rule",
 		"id": "01a11658-2588-7f50-b8d5-ffcd4d117e41"
+	},
+	"R.preview.geometry.opaque-proof": {
+		"kind": "rule",
+		"id": "01a11687-314d-761f-b0a2-a565f419b8ea"
+	},
+	"R.preview.geometry.outer-contour": {
+		"kind": "rule",
+		"id": "01a11687-3037-74fd-8a8a-0d365206c288"
 	},
 	"R.preview.geometry.outer-only": {
 		"kind": "rule",
@@ -2346,6 +2482,10 @@
 	"R.preview.geometry.over-cap": {
 		"kind": "rule",
 		"id": "01a11658-2611-7395-92f0-372dd841ed6a"
+	},
+	"R.preview.geometry.per-area": {
+		"kind": "rule",
+		"id": "01a11687-31d2-72e1-bb13-15fd63ad95b5"
 	},
 	"R.preview.geometry.pin-containment": {
 		"kind": "rule",
@@ -2367,6 +2507,10 @@
 		"kind": "rule",
 		"id": "01a11658-2655-77e5-a4ff-8bfb98dbdfef"
 	},
+	"R.preview.geometry.precision-gate": {
+		"kind": "rule",
+		"id": "01a11687-32da-7ea6-83aa-d7451aaf0111"
+	},
 	"R.preview.geometry.priority": {
 		"kind": "rule",
 		"id": "01a11658-25cb-7c05-ab57-3d57883de94d"
@@ -2374,6 +2518,18 @@
 	"R.preview.geometry.quad-proof": {
 		"kind": "rule",
 		"id": "01a11658-246f-778d-b267-a8efa4541d60"
+	},
+	"R.preview.geometry.recoverable": {
+		"kind": "rule",
+		"id": "01a11687-3543-7738-a0bc-690610c77148"
+	},
+	"R.preview.geometry.refine-on-scale": {
+		"kind": "rule",
+		"id": "01a11687-331e-7b04-98ad-f9f949eebd65"
+	},
+	"R.preview.geometry.refine-subset": {
+		"kind": "rule",
+		"id": "01a11687-3366-7961-bb45-c04df9b1fb40"
 	},
 	"R.preview.geometry.remeasure": {
 		"kind": "rule",
@@ -2383,13 +2539,49 @@
 		"kind": "rule",
 		"id": "01a11658-2350-7cfb-8494-8f51efd3f991"
 	},
+	"R.preview.geometry.restore-cached": {
+		"kind": "rule",
+		"id": "01a11687-3431-7067-9ede-746027543b03"
+	},
+	"R.preview.geometry.retire-unneeded": {
+		"kind": "rule",
+		"id": "01a11687-3474-7773-b690-0cc1cc06f8ea"
+	},
+	"R.preview.geometry.retry-escalate": {
+		"kind": "rule",
+		"id": "01a11687-34ff-75b5-9f7a-f7b8abf922f4"
+	},
+	"R.preview.geometry.retry-once": {
+		"kind": "rule",
+		"id": "01a11687-34ba-7318-be3c-0ba1348b3063"
+	},
 	"R.preview.geometry.runtime-subset": {
 		"kind": "rule",
 		"id": "01a11658-24b8-7910-a7f7-b10b04496a23"
 	},
+	"R.preview.geometry.single-stream": {
+		"kind": "rule",
+		"id": "01a11687-2f54-7963-a045-2d546f7dcd85"
+	},
+	"R.preview.geometry.translucent-kept": {
+		"kind": "rule",
+		"id": "01a11687-3190-7ddd-afc2-6b2fb591f53d"
+	},
+	"R.preview.geometry.true-shape": {
+		"kind": "rule",
+		"id": "01a11687-3109-7167-9c26-6e51c659d533"
+	},
+	"R.preview.geometry.unavailable-reported": {
+		"kind": "rule",
+		"id": "01a11687-3256-7814-b6a7-2ab2591d9e72"
+	},
 	"R.preview.geometry.unmeasurable": {
 		"kind": "rule",
 		"id": "01a11658-2426-777f-8c5f-1b9185054975"
+	},
+	"R.preview.geometry.unprovable": {
+		"kind": "rule",
+		"id": "01a11687-3214-75af-84e6-befd07db432d"
 	},
 	"R.preview.isolation.iframe-owns": {
 		"kind": "rule",
@@ -2459,6 +2651,10 @@
 		"kind": "rule",
 		"id": "01a11658-1ce6-783a-86df-329abc0a3278"
 	},
+	"R.preview.navigation.outline-only": {
+		"kind": "rule",
+		"id": "01a11687-2d8d-731d-864f-c7d8752e209f"
+	},
 	"R.preview.navigation.scroll-offscreen": {
 		"kind": "rule",
 		"id": "01a11658-1b52-7f00-8f9d-eaf580c29253"
@@ -2486,6 +2682,10 @@
 	"R.preview.navigation.translucent-notice": {
 		"kind": "rule",
 		"id": "01a11658-1d29-793c-9641-264dc477cfd5"
+	},
+	"R.preview.navigation.visibility-unknown": {
+		"kind": "rule",
+		"id": "01a11687-2d04-704b-887a-4b599e54e887"
 	},
 	"R.preview.navigation.visible-part": {
 		"kind": "rule",
@@ -2702,6 +2902,10 @@
 	"R.review.lifecycle.formal-current": {
 		"kind": "rule",
 		"id": "01a11544-558b-7b86-b4c7-76928862c948"
+	},
+	"R.review.lifecycle.formal-known-freshness": {
+		"kind": "rule",
+		"id": "01a11686-8d71-79f5-bb10-0c74649586ea"
 	},
 	"R.review.lifecycle.history": {
 		"kind": "rule",
