@@ -1,6 +1,8 @@
-import { readFile, realpath } from 'node:fs/promises'
+import { readFile, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+
+import { CANONICAL_WORKSPACE_DATA_DIRECTORIES, WORKSPACE_MANIFEST_PATH } from '../persistence/paths'
 
 import { resolve as resolveImport } from 'import-meta-resolve'
 import {
@@ -120,11 +122,14 @@ export class NodeWorkspaceAdapterModuleResolver implements AdapterModuleResolver
 			throw new Error('Adapter module must resolve to a file-backed module.')
 		const resolvedPath = await realpath(fileURLToPath(moduleIdentity))
 
-		if (relativeSelection) {
-			const realRoot = await realpath(root)
-			if (!isContainedPath(realRoot, resolvedPath))
-				throw new Error('Workspace-relative adapter module resolves outside the selected Workspace root.')
-		}
+		const realRoot = await realpath(root)
+		if (relativeSelection && !isContainedPath(realRoot, resolvedPath))
+			throw new Error('Workspace-relative adapter module resolves outside the selected Workspace root.')
+		// Applies to every specifier, not only `./` ones, and to every Workspace on the resolved
+		// path (the selected root, a sibling, or an enclosing one): a bare specifier can resolve via
+		// a monorepo symlink or a self-reference `exports`/`imports` into any Workspace's data.
+		if (await resolvedPathEntersWorkspaceDataDirectory(resolvedPath, realRoot))
+			throw new Error('Adapter module resolves inside a canonical Workspace data directory; Adapter code must live outside authored data directories that Editors and Agents can write.')
 
 		const packageMetadata = relativeSelection ? {} : await findNearestPackageMetadata(resolvedPath)
 		return {
@@ -312,6 +317,93 @@ function diagnosticMessage(prefix: string, cause: unknown): string {
 function isContainedPath(root: string, candidate: string): boolean {
 	const path = relative(root, candidate)
 	return path === '' || (!path.startsWith('..') && !isAbsolute(path))
+}
+
+export type FileIdentity = Readonly<{ dev: bigint; ino: bigint }>
+
+/** Reads a path's filesystem identity, or `undefined` when it is absent (never swallowing other errors). */
+export type FileIdentityReader = (path: string) => Promise<FileIdentity | undefined>
+
+/**
+ * `stat`-backed identity reader. Only a genuinely absent path (`ENOENT`/`ENOTDIR`) yields `undefined`;
+ * every other error (`EACCES`, `ELOOP`, `EIO`, …) propagates so resolution fails closed rather than
+ * silently treating an unreadable directory as "not a data directory".
+ */
+export const statFileIdentity: FileIdentityReader = async (path) => {
+	try {
+		const info = await stat(path, { bigint: true })
+		return { dev: info.dev, ino: info.ino }
+	}
+	catch (error) {
+		if (isAbsentError(error))
+			return undefined
+		throw error
+	}
+}
+
+function isAbsentError(error: unknown): boolean {
+	const code = (error as NodeJS.ErrnoException | undefined)?.code
+	return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
+/**
+ * Would importing `resolvedPath` (an already realpath-resolved module path) read authored data that an
+ * Editor or Agent can write, letting uploaded data run as host code? It would when the module sits
+ * inside the canonical data directories (see `CANONICAL_WORKSPACE_DATA_DIRECTORIES`) of ANY Workspace
+ * on its path — the selected root, a sibling sharing an enclosing package, or an enclosing Workspace —
+ * reachable through a monorepo symlink or a self-reference `exports`/`imports`.
+ *
+ * The selected Workspace root (`selectedWorkspaceRoot`, a realpath) is always a boundary. Every OTHER
+ * ancestor directory that holds a Workspace manifest is treated as a Workspace root too. Membership is
+ * decided by file identity (`dev`/`ino`), never by name: a case-insensitive file system (WSL drvfs,
+ * Docker Desktop bind mounts, exFAT/CIFS, ext4 casefold) can leave a realpath spelled `…/ASSETS/…`
+ * that a string comparison against `assets` would miss.
+ */
+export async function resolvedPathEntersWorkspaceDataDirectory(
+	resolvedPath: string,
+	selectedWorkspaceRoot?: string,
+	readIdentity: FileIdentityReader = statFileIdentity,
+): Promise<boolean> {
+	if (selectedWorkspaceRoot !== undefined
+		&& await firstSegmentIsCanonicalDataDirectory(selectedWorkspaceRoot, resolvedPath, readIdentity))
+		return true
+	// Scope: this guards data that Editors and Agents can author through the product. A data
+	// directory that the host operator has symlinked or bind-mounted outside a Workspace is out of
+	// scope — Editors and Agents cannot create such links, so only the operator can place one.
+	let directory = dirname(resolvedPath)
+	while (true) {
+		if (directory !== selectedWorkspaceRoot) {
+			const manifest = await readIdentity(join(directory, WORKSPACE_MANIFEST_PATH))
+			if (manifest !== undefined && await firstSegmentIsCanonicalDataDirectory(directory, resolvedPath, readIdentity))
+				return true
+		}
+		const parent = dirname(directory)
+		if (parent === directory)
+			return false
+		directory = parent
+	}
+}
+
+async function firstSegmentIsCanonicalDataDirectory(
+	workspaceRoot: string,
+	resolvedPath: string,
+	readIdentity: FileIdentityReader,
+): Promise<boolean> {
+	const rel = relative(workspaceRoot, resolvedPath)
+	if (rel === '' || rel.startsWith('..') || isAbsolute(rel))
+		return false
+	const firstSegment = rel.split(/[/\\]/u)[0]
+	if (firstSegment === undefined || firstSegment === '')
+		return false
+	const topIdentity = await readIdentity(join(workspaceRoot, firstSegment))
+	if (!topIdentity)
+		return false
+	for (const name of CANONICAL_WORKSPACE_DATA_DIRECTORIES) {
+		const dataIdentity = await readIdentity(join(workspaceRoot, name))
+		if (dataIdentity && dataIdentity.dev === topIdentity.dev && dataIdentity.ino === topIdentity.ino)
+			return true
+	}
+	return false
 }
 
 async function findNearestPackageMetadata(resolvedPath: string): Promise<Readonly<{ name?: string; version?: string }>> {
