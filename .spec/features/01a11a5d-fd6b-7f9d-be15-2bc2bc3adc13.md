@@ -44,7 +44,7 @@ rules:
     statement: Restoring Workspace settings also lists removed or renamed viewport
       and theme keys with the threads whose render context names them, for
       information, and the formal Evidence that would become stale, including
-      through a changed `adapters` selection or order.
+      through a changed `adapters` selection, order or configuration.
   - id: 01a11a5e-17f7-7bdf-8cec-24fea8c348b2
     statement: "A restore gives Evidence no special treatment: Evidence captured at
       the restored revision is fresh again only if every freshness Rule holds,
@@ -80,7 +80,7 @@ rules:
 | 01a11a5e-16a2-7c0b-9495-3dae49e9dda3 | [#122 body: decision 10, rule 8](https://github.com/DevilTea/uiux/discussions/122); [#122 acceptance](https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263) |
 | 01a11a5e-16f7-7229-8d17-587490168f1f | [#122 body: decision 10, rule 5](https://github.com/DevilTea/uiux/discussions/122); [#122 acceptance](https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263) |
 | 01a11a5e-174b-7e74-b232-5ec76601fbed | [#122 body: decision 10, rule 5](https://github.com/DevilTea/uiux/discussions/122); [#122 acceptance](https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263) |
-| 01a11a5e-17a0-7c21-9e23-dd56ef12c9a9 | [#122 body: decision 10, rule 5](https://github.com/DevilTea/uiux/discussions/122); [#122 body: Interactions 1](https://github.com/DevilTea/uiux/discussions/122); [#122 body: Interactions 2](https://github.com/DevilTea/uiux/discussions/122); [#122 acceptance](https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263) |
+| 01a11a5e-17a0-7c21-9e23-dd56ef12c9a9 | [#122 body: decision 10, rule 5](https://github.com/DevilTea/uiux/discussions/122); [#122 body: Interactions 1](https://github.com/DevilTea/uiux/discussions/122); [#122 body: Interactions 2](https://github.com/DevilTea/uiux/discussions/122); [#122 acceptance](https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263); "configuration" aligned with the Evidence freshness Rule 01a115cd-c6de-7744-be27-715bec2e7fef as amended by Part 12 ([#130 acceptance](https://github.com/DevilTea/uiux/discussions/130#discussioncomment-18807264)) |
 | 01a11a5e-17f7-7bdf-8cec-24fea8c348b2 | [#122 body: decision 10, rule 6](https://github.com/DevilTea/uiux/discussions/122); [#122 body: Interactions 2](https://github.com/DevilTea/uiux/discussions/122); [#122 acceptance](https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263) |
 | 01a11a5e-184c-7184-bb0b-781744e6a1ca | [#122 body: decision 10, rule 7](https://github.com/DevilTea/uiux/discussions/122); [#122 acceptance](https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263) |
 | 01a11a5e-189f-7b86-8270-e9b5d62aaa65 | [#122 body: decision 10, rule 9](https://github.com/DevilTea/uiux/discussions/122); [#122 body: decision 2](https://github.com/DevilTea/uiux/discussions/122); [#122 acceptance](https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263) |
