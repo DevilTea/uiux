@@ -1,6 +1,6 @@
 Feature: Checks
   # Source: Discussion #139 (Part 14, Product Kit), decision 7: C2; R9; owner pre-answer P13; Key Scenarios https://github.com/DevilTea/uiux/discussions/139; accepted as written 2026-10-08 https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18816364.
-  # Status: not built as of 2f7e092; see the Implementation gaps entry of 01a11bb1-a7bf-74ae-9639-b39f246fa117 in its owner.
+  # Status: not built as of 9691b8c; see the Implementation gaps entry of 01a11bb1-a7bf-74ae-9639-b39f246fa117 in its owner.
   # Note: No test exists yet; tracked in issue #141.
   @spec:id:01a11bb1-c383-779a-9ce6-2ca1bf7448ee
   @spec:demonstrates:01a11bb1-8980-7212-acad-4145928e5dc7
