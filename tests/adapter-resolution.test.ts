@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -154,6 +154,33 @@ describe('Workspace adapter resolution and validated-set installation', () => {
 		// A non-data directory of the sibling Workspace is not a data directory, so it stays resolvable.
 		const ok = await resolver.resolve(wsA, 'app/ws-b/lib/ok.mjs')
 		expect(ok.resolvedPath).toBe(join(wsB, 'lib', 'ok.mjs'))
+	})
+
+	it('refuses a specifier that resolves into an ENCLOSING Workspace data directory', async () => {
+		const resolver = new NodeWorkspaceAdapterModuleResolver()
+		// Workspace B encloses the selected Workspace A; B is itself a package reachable by name.
+		const outer = await makeRoot()
+		await mkdir(join(outer, '.uiux'), { recursive: true })
+		await writeFile(join(outer, WORKSPACE_MANIFEST_PATH), JSON.stringify({ schemaVersion: 3, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }))
+		await writeFile(join(outer, 'package.json'), JSON.stringify({ name: 'outer', type: 'module' }))
+		await mkdir(join(outer, 'assets', 'u'), { recursive: true })
+		await writeFile(join(outer, 'assets', 'u', 'x.mjs'), 'export const marker = true\n')
+		await mkdir(join(outer, '.uiux', 'nested'), { recursive: true })
+		await writeFile(join(outer, '.uiux', 'nested', 'y.mjs'), 'export const marker = true\n')
+		await mkdir(join(outer, 'lib'), { recursive: true })
+		await writeFile(join(outer, 'lib', 'ok.mjs'), 'export const marker = true\n')
+		const inner = join(outer, 'packages', 'app')
+		await mkdir(join(inner, '.uiux'), { recursive: true })
+		await writeFile(join(inner, WORKSPACE_MANIFEST_PATH), JSON.stringify({ schemaVersion: 3, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }))
+		await mkdir(join(outer, 'node_modules'), { recursive: true })
+		await symlink(outer, join(outer, 'node_modules', 'outer'))
+
+		// From the inner Workspace, reaching the enclosing Workspace's assets/ and .uiux/ is refused.
+		await expect(resolver.resolve(inner, 'outer/assets/u/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+		await expect(resolver.resolve(inner, 'outer/.uiux/nested/y.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+		// The enclosing Workspace's non-data directory still resolves.
+		const ok = await resolver.resolve(inner, 'outer/lib/ok.mjs')
+		expect(ok.resolvedPath).toBe(join(outer, 'lib', 'ok.mjs'))
 	})
 
 	it('resolves bare packages from the Workspace package environment, not the UIUX process cwd', async () => {
@@ -351,6 +378,24 @@ describe('Canonical Workspace data-directory membership is decided by file ident
 
 	it('treats a genuinely absent path as not inside a data directory via the default reader', async () => {
 		expect(await statFileIdentity(join(root, 'definitely-missing'))).toBeUndefined()
+	})
+
+	const runsAsRoot = process.getuid?.() === 0
+	const chmodUnsupported = process.platform === 'win32'
+	it.skipIf(runsAsRoot || chmodUnsupported)('default statFileIdentity rejects (does not swallow) a permission error', async () => {
+		// Guards against a regression where statFileIdentity reverts to treating every error as absence.
+		const base = await mkdtemp(join(tmpdir(), 'uiux-stat-perm-'))
+		temporaryRoots.push(base)
+		const locked = join(base, 'locked')
+		await mkdir(locked)
+		await writeFile(join(locked, 'x.mjs'), 'export const marker = true\n')
+		await chmod(locked, 0o000)
+		try {
+			await expect(statFileIdentity(join(locked, 'x.mjs'))).rejects.toMatchObject({ code: 'EACCES' })
+		}
+		finally {
+			await chmod(locked, 0o700)
+		}
 	})
 
 	it('derives both exports from the same source of truth and excludes adapters/', () => {

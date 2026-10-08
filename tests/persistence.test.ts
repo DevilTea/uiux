@@ -66,9 +66,7 @@ describe('file-native persistence', () => {
 		await persistence.assets.create(ASSET_ID, { metadata: assetFixture('file.bin', 'Real'), content: Buffer.from('data') })
 		await persistence.artifacts.put(Buffer.from('artifact-bytes'))
 
-		const topLevelEntries = (await readdir(root, { withFileTypes: true }))
-			.filter(entry => !entry.name.startsWith('.transactions') && !entry.name.endsWith('.lock'))
-			.map(entry => entry.name)
+		const topLevelEntries = (await readdir(root)).map(String)
 
 		// Authoring must never create a top-level entry outside the canonical data directories; a new
 		// one here would be a silent fail-open for the Adapter resolution boundary that trusts this set.

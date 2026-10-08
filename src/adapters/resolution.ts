@@ -367,6 +367,9 @@ export async function resolvedPathEntersWorkspaceDataDirectory(
 	if (selectedWorkspaceRoot !== undefined
 		&& await firstSegmentIsCanonicalDataDirectory(selectedWorkspaceRoot, resolvedPath, readIdentity))
 		return true
+	// Scope: this guards data that Editors and Agents can author through the product. A data
+	// directory that the host operator has symlinked or bind-mounted outside a Workspace is out of
+	// scope — Editors and Agents cannot create such links, so only the operator can place one.
 	let directory = dirname(resolvedPath)
 	while (true) {
 		if (directory !== selectedWorkspaceRoot) {
