@@ -8,23 +8,20 @@ import type { WorkspaceAdapterSelection } from '../src/domain/workspace/schema'
 import {
 	CANONICAL_WORKSPACE_DATA_DIRECTORIES,
 	WORKSPACE_DATA_DIRECTORY,
-	artifactRelativePath,
-	assetDirectoryRelativePath,
-	assetMetadataRelativePath,
-	flowRelativePath,
-	localeRelativePath,
-	reviewRelativePath,
-	viewRelativePath,
-	workspaceRelativePath,
+	WORKSPACE_MANIFEST_PATH,
 } from '../src/persistence/paths'
 import {
 	NodeAdapterManifestLoader,
 	NodeWorkspaceAdapterModuleResolver,
 	resolveAndInstallWorkspaceAdapterSet,
 	resolveWorkspaceAdapterSet,
+	resolvedPathEntersWorkspaceDataDirectory,
+	statFileIdentity,
 	type AdapterApiCompatibilityPolicy,
 	type AdapterManifestLoader,
 	type AdapterRegistryInspector,
+	type FileIdentity,
+	type FileIdentityReader,
 	type ResolvedAdapterModule,
 } from '../src/adapters'
 
@@ -131,6 +128,32 @@ describe('Workspace adapter resolution and validated-set installation', () => {
 		await writeFile(join(normalPkg, 'index.mjs'), 'export const marker = true\n')
 		const ok = await resolver.resolve(normalRoot, '@fixture/ok-adapter')
 		expect(ok.resolvedPath).toBe(join(normalPkg, 'index.mjs'))
+	})
+
+	it('refuses a bare specifier that resolves into a SIBLING Workspace data directory', async () => {
+		const resolver = new NodeWorkspaceAdapterModuleResolver()
+		// Two Workspaces share one enclosing package; node_modules/app symlinks back to that package.
+		const base = await makeRoot()
+		const pkg = join(base, 'packages', 'app')
+		const wsA = join(pkg, 'ws-a')
+		const wsB = join(pkg, 'ws-b')
+		for (const ws of [wsA, wsB]) {
+			await mkdir(join(ws, '.uiux'), { recursive: true })
+			await writeFile(join(ws, WORKSPACE_MANIFEST_PATH), JSON.stringify({ schemaVersion: 3, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }))
+		}
+		await writeFile(join(pkg, 'package.json'), JSON.stringify({ name: 'app', type: 'module' }))
+		await mkdir(join(wsB, 'assets', 'u'), { recursive: true })
+		await writeFile(join(wsB, 'assets', 'u', 'x.mjs'), 'export const marker = true\n')
+		await mkdir(join(wsB, 'lib'), { recursive: true })
+		await writeFile(join(wsB, 'lib', 'ok.mjs'), 'export const marker = true\n')
+		await mkdir(join(base, 'node_modules'), { recursive: true })
+		await symlink(pkg, join(base, 'node_modules', 'app'))
+
+		// From ws-a, reaching ws-b's assets/ through the shared package is refused.
+		await expect(resolver.resolve(wsA, 'app/ws-b/assets/u/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+		// A non-data directory of the sibling Workspace is not a data directory, so it stays resolvable.
+		const ok = await resolver.resolve(wsA, 'app/ws-b/lib/ok.mjs')
+		expect(ok.resolvedPath).toBe(join(wsB, 'lib', 'ok.mjs'))
 	})
 
 	it('resolves bare packages from the Workspace package environment, not the UIUX process cwd', async () => {
@@ -292,27 +315,45 @@ describe('Workspace adapter resolution and validated-set installation', () => {
 	})
 })
 
-describe('Canonical Workspace data-directory boundary stays in sync with path helpers', () => {
-	const SAMPLE_UUID = '00000000-0000-4000-8000-000000000000'
-	const SAMPLE_DIGEST = `sha256:${'a'.repeat(64)}`
-	const topSegment = (relativePath: string): string => relativePath.split('/')[0]!
+describe('Canonical Workspace data-directory membership is decided by file identity', () => {
+	const root = '/virtual/ws'
+	const identity = (dev: number, ino: number): FileIdentity => ({ dev: BigInt(dev), ino: BigInt(ino) })
+	const readerFor = (entries: ReadonlyMap<string, FileIdentity>): FileIdentityReader =>
+		async path => entries.get(path)
 
-	it('lists every top-level directory the persistence path helpers write to', () => {
-		const writtenPaths = [
-			workspaceRelativePath(),
-			viewRelativePath(SAMPLE_UUID),
-			flowRelativePath(SAMPLE_UUID),
-			reviewRelativePath(SAMPLE_UUID),
-			localeRelativePath('en-US'),
-			assetDirectoryRelativePath(SAMPLE_UUID),
-			assetMetadataRelativePath(SAMPLE_UUID),
-			artifactRelativePath(SAMPLE_DIGEST),
-		]
-		for (const writtenPath of writtenPaths)
-			expect(CANONICAL_WORKSPACE_DATA_DIRECTORIES).toContain(topSegment(writtenPath))
+	it('refuses a non-canonical-case segment whose inode matches a canonical data directory', async () => {
+		// `assets` and `ASSETS` share one inode (a case-insensitive volume). A name comparison would
+		// miss `ASSETS`; identity catches it. This holds on any OS because `stat` is injected.
+		const reader = readerFor(new Map([
+			[join(root, 'ASSETS'), identity(1, 42)],
+			[join(root, 'assets'), identity(1, 42)],
+		]))
+		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'ASSETS', 'u', 'x.mjs'), root, reader)).toBe(true)
 	})
 
-	it('derives both exports from the same source of truth', () => {
+	it('allows a top-level segment that is not identical to any canonical data directory', async () => {
+		const reader = readerFor(new Map([
+			[join(root, 'docs'), identity(1, 7)],
+			[join(root, 'assets'), identity(1, 42)],
+		]))
+		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'docs', 'x.mjs'), root, reader)).toBe(false)
+	})
+
+	it('fails closed when an identity read errors with anything other than absence', async () => {
+		const reader: FileIdentityReader = async () => {
+			const error = new Error('permission denied') as NodeJS.ErrnoException
+			error.code = 'EACCES'
+			throw error
+		}
+		await expect(resolvedPathEntersWorkspaceDataDirectory(join(root, 'assets', 'x.mjs'), root, reader))
+			.rejects.toThrow(/permission denied/)
+	})
+
+	it('treats a genuinely absent path as not inside a data directory via the default reader', async () => {
+		expect(await statFileIdentity(join(root, 'definitely-missing'))).toBeUndefined()
+	})
+
+	it('derives both exports from the same source of truth and excludes adapters/', () => {
 		expect(CANONICAL_WORKSPACE_DATA_DIRECTORIES).toEqual(Object.values(WORKSPACE_DATA_DIRECTORY))
 		expect(CANONICAL_WORKSPACE_DATA_DIRECTORIES).not.toContain('adapters')
 	})

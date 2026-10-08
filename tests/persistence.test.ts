@@ -10,6 +10,7 @@ import type { ReviewThread } from '../src/domain/reviews/schema'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { WorkspaceManifest } from '../src/domain/workspace/schema'
 import {
+	CANONICAL_WORKSPACE_DATA_DIRECTORIES,
 	FileNativePersistence,
 	PersistenceError,
 	artifactRelativePath,
@@ -54,6 +55,28 @@ describe('file-native persistence', () => {
 		expect(() => localeRelativePath('zh-tw')).toThrow(PersistenceError)
 		expect(() => resolveWorkspacePath('/tmp/workspace', '../outside')).toThrow(PersistenceError)
 		expect(() => resolveWorkspacePath('/tmp/workspace', '/etc/passwd')).toThrow(PersistenceError)
+	})
+
+	it('writes every authored resource kind only under canonical data directories', async () => {
+		const { root, persistence } = await newWorkspace()
+		await persistence.views.create(VIEW_ID, viewFixture())
+		await persistence.flows.create(FLOW_ID, flowFixture())
+		await persistence.reviews.create(REVIEW_ID, reviewFixture())
+		await persistence.locales.create('zh-TW', { greeting: 'hi' })
+		await persistence.assets.create(ASSET_ID, { metadata: assetFixture('file.bin', 'Real'), content: Buffer.from('data') })
+		await persistence.artifacts.put(Buffer.from('artifact-bytes'))
+
+		const topLevelEntries = (await readdir(root, { withFileTypes: true }))
+			.filter(entry => !entry.name.startsWith('.transactions') && !entry.name.endsWith('.lock'))
+			.map(entry => entry.name)
+
+		// Authoring must never create a top-level entry outside the canonical data directories; a new
+		// one here would be a silent fail-open for the Adapter resolution boundary that trusts this set.
+		for (const name of topLevelEntries)
+			expect(CANONICAL_WORKSPACE_DATA_DIRECTORIES).toContain(name)
+		// The resources above exercise each canonical directory (artifacts live under `.uiux`).
+		expect(topLevelEntries).toEqual(expect.arrayContaining(['.uiux', 'views', 'flows', 'reviews', 'i18n', 'assets']))
+		expect(topLevelEntries).not.toContain('adapters')
 	})
 
 	it('preserves filename/id mismatches for View, Flow, and Review reads and rejects authoritative writes', async () => {
