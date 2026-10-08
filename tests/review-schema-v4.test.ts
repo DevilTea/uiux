@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { validateReviewThread } from '../src/domain/reviews/schema'
 import { FileNativePersistence } from '../src/persistence/file-native'
 import { reviewRelativePath, viewRelativePath, workspaceRelativePath } from '../src/persistence/paths'
@@ -232,7 +233,7 @@ describe('uiux.v3-to-v4 (manifest-only step)', () => {
 		expect((await persistence.reviews.read(REVIEW_ID))?.resource.renderContext).toEqual(ZH_MOBILE_DARK)
 	})
 
-	it('never repairs v4-only content smuggled into a v3 file, and carries the v3 diagnostic through', async () => {
+	it('leaves v4-only content smuggled into a v3 file byte-identical: refused under v3, decoded under v4 once migrated', async () => {
 		const smuggled = thread({ id: '77777777-7777-4777-8777-777777777777', renderContext: ZH_MOBILE_DARK })
 		const root = await seedV3Workspace([thread(), smuggled])
 		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
@@ -240,6 +241,7 @@ describe('uiux.v3-to-v4 (manifest-only step)', () => {
 		const bytes = await readFile(join(root, reviewRelativePath(smuggled.id as string)), 'utf8')
 		expect((await persistence.migrateWorkspace()).changedFiles).toEqual(['.uiux/workspace.json'])
 		expect(await readFile(join(root, reviewRelativePath(smuggled.id as string)), 'utf8')).toBe(bytes)
+		expect((await persistence.reviews.readInspected(smuggled.id as string))?.diagnostics).toEqual([])
 	})
 
 	it('refuses to apply to anything but a v3 manifest and leaves unparseable Reviews to persistence', () => {
@@ -252,5 +254,57 @@ describe('uiux.v3-to-v4 (manifest-only step)', () => {
 		const next = WORKSPACE_V3_TO_V4_STEP.apply(withBroken)
 		expect(new TextDecoder().decode(next.get('reviews/x.review.json'))).toBe('{ not json')
 		expect(JSON.parse(new TextDecoder().decode(next.get(workspaceRelativePath()))).schemaVersion).toBe(4)
+	})
+})
+
+describe('re-anchor keeps or clears the recorded renderContext (owner ruling 1, omitted keeps)', () => {
+	async function seedThreadWithContext() {
+		const root = await seedV3Workspace([])
+		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		await persistence.migrateWorkspace()
+		await writeFile(join(root, reviewRelativePath(REVIEW_ID)), `${JSON.stringify(thread({ renderContext: ZH_MOBILE_DARK }))}\n`)
+		return { root, persistence, app: createWorkspaceApplicationSession(persistence) }
+	}
+
+	async function readBack(root: string, persistence: FileNativePersistence) {
+		expect((await persistence.reviews.readInspected(REVIEW_ID))?.diagnostics).toEqual([])
+		const stored = JSON.parse(await readFile(join(root, reviewRelativePath(REVIEW_ID)), 'utf8')) as Record<string, unknown> & { history: Record<string, unknown>[] }
+		expect(validateReviewThread(stored, V4).ok).toBe(true)
+		return stored
+	}
+
+	it('keeps the context on a re-anchor to another Widget and records it on both sides', async () => {
+		const { root, persistence, app } = await seedThreadWithContext()
+		const revision = (await persistence.reviews.readRevision(REVIEW_ID))!
+		expect(await app.reanchorReviewThread({ reviewId: REVIEW_ID, expectedRevision: revision, anchor: ROOT, actor: AUTHOR }))
+			.toMatchObject({ status: 'updated' })
+		const stored = await readBack(root, persistence)
+		expect(stored.anchor).toEqual(ROOT)
+		expect(stored.renderContext).toEqual(ZH_MOBILE_DARK)
+		expect(stored.history.at(-1)).toMatchObject({
+			kind: 'reanchor',
+			before: { anchor: WIDGET, renderContext: ZH_MOBILE_DARK },
+			after: { anchor: ROOT, renderContext: ZH_MOBILE_DARK },
+		})
+	})
+
+	it('clears the context on a re-anchor to the Workspace arm, and a later Widget re-anchor stays unknown', async () => {
+		const { root, persistence, app } = await seedThreadWithContext()
+		const revision = (await persistence.reviews.readRevision(REVIEW_ID))!
+		expect(await app.reanchorReviewThread({ reviewId: REVIEW_ID, expectedRevision: revision, anchor: { scope: 'workspace' }, actor: AUTHOR }))
+			.toMatchObject({ status: 'updated' })
+		const cleared = await readBack(root, persistence)
+		expect(cleared.anchor).toEqual(WORKSPACE)
+		expect(cleared).not.toHaveProperty('renderContext')
+		expect(cleared.history.at(-1)).toMatchObject({ before: { anchor: WIDGET, renderContext: ZH_MOBILE_DARK } })
+		expect(cleared.history.at(-1)!.after).toEqual({ anchor: WORKSPACE, variantNames: [] })
+
+		const next = (await persistence.reviews.readRevision(REVIEW_ID))!
+		expect(await app.reanchorReviewThread({ reviewId: REVIEW_ID, expectedRevision: next, anchor: ROOT, actor: AUTHOR }))
+			.toMatchObject({ status: 'updated' })
+		const back = await readBack(root, persistence)
+		expect(back).not.toHaveProperty('renderContext')
+		expect(back.history.at(-1)!.before).toEqual({ anchor: WORKSPACE, variantNames: [] })
+		expect(back.history.at(-1)!.after).toEqual({ anchor: ROOT, variantNames: [] })
 	})
 })
