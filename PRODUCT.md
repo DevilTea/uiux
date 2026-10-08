@@ -88,7 +88,7 @@ The normative domain behavior and external contracts live in `.spec/` (Stories, 
 - the Component Catalog as a secondary area;
 - the opt-in LAN listener for reviewing from other devices (issue #68);
 - live change notifications when agents write, so the Workbench refreshes on its own (issue #69);
-- Review threads that record the render context they were written in and show it in the thread header (Part 7).
+- Review threads that record the render context they were written in and show it in the thread header (Discussion #7, Part 7: https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18797092).
 
 **Binding constraints:**
 
