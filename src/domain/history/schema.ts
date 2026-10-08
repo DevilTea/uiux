@@ -167,7 +167,7 @@ export function validateWriteEvent(input: unknown, path = ''): ValidationResult<
 		validateResourceIdentity(resource.kind, resource.key, `${path}/resource`, v)
 	}
 	for (const field of ['beforeRevision', 'afterRevision'] as const) {
-		if (!Object.hasOwn(event, field)) v.issue('schema.missing_field', `${path}/${field}`, `${field} is required.`)
+		if (!Object.hasOwn(event, field)) v.issue('history.missing_revision', `${path}/${field}`, `${field} is required; null means the resource did not exist.`)
 		else if (event[field] !== null) v.string(event[field], `${path}/${field}`, true)
 	}
 	return v.finish<HistoryWriteEvent>(input)

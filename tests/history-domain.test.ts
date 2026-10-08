@@ -184,7 +184,7 @@ describe('version record validators', () => {
 		expect(codes(validateWriteEvent(writeEvent({ beforeRevision: null })))).toEqual([])
 		const { afterRevision: _omitted, ...missing } = writeEvent()
 		void _omitted
-		expect(codes(validateWriteEvent(missing))).toEqual(['schema.missing_field'])
+		expect(codes(validateWriteEvent(missing))).toEqual(['history.missing_revision'])
 
 		expect(codes(validateVersionRecord(checkpoint({ historySchemaVersion: 2 })))).toEqual(['history.unsupported_history_schema_version'])
 		expect(codes(validateVersionRecord(checkpoint({ id: 'v1' })))).toEqual(['identity.invalid_uuid'])
