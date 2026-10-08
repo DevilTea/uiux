@@ -159,7 +159,7 @@ This repository keeps its own UIUX specification in `design/`. Initialize a new 
 pnpm check
 ```
 
-This runs ESLint, Nuxt typechecking, Vitest, the production build, and a live Nitro health-route smoke check.
+This runs the `.spec/` validation, ESLint, Nuxt typechecking, Vitest, the production build, and a live Nitro health-route smoke check.
 
 It also packs the public npm artifact from source, installs that tarball into an isolated temporary project, initializes a Workspace through the installed `uiux init`, starts it through `uiux dev --workspace <dir>`, and exercises the live HTTP/MCP selected-Workspace path.
 
@@ -175,4 +175,6 @@ The geometry and comment-pin performance suites (`tests/geometry-perf.test.ts`, 
 
 ## Domain contracts
 
-Canonical Workspace resources and their validators live under `src/domain/`. The Widget executable IR remains Adapter/Widget-owned; UIUX validates only its reserved `RootShell` identity boundary. Application revision envelopes are separate from persisted resources, and Preview cross-iframe DTOs live under `src/preview/protocol/`. Workspace adapters are validated server-side by Node authority, and materialized on-demand into standalone browser bundles for the Preview iframe runtime mount without mixing Vue or widget module instances into the parent Nuxt Workbench.
+The authority for UIUX behavior and external contracts is the repository specification in `.spec/`, maintained with `@deviltea/spec-tool`: Stories, Features with their Rules, Contracts with their Clauses (the persisted Workspace format, mutation semantics, MCP, the CLI, access control, the Adapter interface, the Handoff bundle, Workbench links and the Preview cross-iframe protocol) and Scenarios. `pnpm spec:validate` checks it, and `pnpm check` runs that too. GitHub Discussions #1–#10 keep the rationale and history of the decisions it records; see `AGENTS.md` for how new decisions reach `.spec/`.
+
+In code, canonical Workspace resources and their validators live under `src/domain/`. The Widget executable IR remains Adapter/Widget-owned; UIUX validates only its reserved `RootShell` identity boundary. Application revision envelopes are separate from persisted resources, and Preview cross-iframe DTOs live under `src/preview/protocol/`. Workspace adapters are validated server-side by Node authority, and materialized on-demand into standalone browser bundles for the Preview iframe runtime mount without mixing Vue or widget module instances into the parent Nuxt Workbench.

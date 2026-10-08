@@ -6,65 +6,30 @@
 - `uiux migrate --workspace <dir> [--dry-run]` upgrades an older Workspace to the current schema, `schemaVersion` 3 (CLI-only; steps `uiux.v1-to-v2` then `uiux.v2-to-v3`).
 - `uiux publish --workspace <dir> --out <dir> [--base <path>] [--source-revision <rev>]` builds the read-only static publication of a Workspace (in a source checkout, run `pnpm build` first).
 - `uiux member|token|invite|session ... --workspace <dir>` and `uiux access copy --from <old-dir> --workspace <dir>` manage that Workspace's host-local roster under `$UIUX_HOME` (default `~/.uiux`). Every `/api/*` and `/mcp` request needs a credential; agents send `Authorization: Bearer <token>`. Tests and smoke runs must use a temporary `UIUX_HOME`.
-- Do not introduce Workspace schemas, domain semantics, or external protocol contracts without an accepted architecture decision and a scoped task.
-- Do not edit `design/` canonical files directly; author canonical resources (Views, Workspace settings, Locales, UX Flows, Review threads, Assets) through domain-specific authoring operations (`create_view`, `update_view_spec`, `update_view_structure`, `update_workspace_settings`, `create_locale`, `update_locale`, `create_flow`, `update_flow`, review lifecycle tools, and asset authoring).
+- Do not introduce Workspace schemas, domain semantics, or external protocol contracts without an accepted architecture decision (defined under "Repository specification" below) and a scoped task.
+- Do not edit `design/` canonical files directly; author canonical resources (Views, Workspace settings, Locales, UX Flows, Review threads, Assets) through domain-specific authoring operations (`create_view`, `update_view_spec`, `update_view_structure`, `update_workspace_settings`, `create_locale`, `update_locale`, `create_flow`, `update_flow`, review lifecycle tools, and asset authoring). The one exception (owner ruling 2026-10-05): the reference Adapter `design/adapters/reference.ts` is code and may be edited directly.
 - Review anchors are `{ viewId, widgetId }` or `{ scope: "workspace" }` (product-wide feedback). Agents may fix their own Review messages with `edit_review_message` (until a later submission or resolution) and withdraw their own unanswered threads with `retract_review_thread`; resolving stays human-only in the Workbench.
 - Use pnpm and Node 24.11 or later in the Node 24 line. Run `pnpm check` for the repository baseline.
 
-## Repository specification (`.spec/`, transitional)
+## Repository specification (`.spec/`)
 
-- TRANSITIONAL: `.spec/` (`@deviltea/spec-tool` frozen v1) is being populated from GitHub Discussions #1–#10 and the current repository. Until the cutover, the accepted decisions in those Discussions remain authoritative and `.spec/` is not; the cutover will be announced in this file.
-- `.spec/` is the repository's own specification, not UIUX product data; do not confuse it with the `design/` dogfood Workspace.
-- Change `.spec/` semantic content only through the `spec` CLI (`pnpm exec spec ...`, JSON request on stdin) or `createSpecClient` from `@deviltea/spec-tool`, always with the current `expectedRevision`. Never hand-edit frontmatter, Rule/Clause records, Scenario tags or steps. Markdown bodies and Gherkin `#` comments are noncanonical and only carry provenance and explanatory notes; edit them only while no `spec` process is running.
-- `.spec/` is closed-world: do not add files or directories other than the ones the tool writes.
+- `.spec/` (`@deviltea/spec-tool`, format v1) is the authority for UIUX behavioral requirements and external contracts: Stories, Features with their Rules, Contracts with their Clauses, and Scenarios. It is the repository's own specification, not UIUX product data; do not confuse it with the `design/` dogfood Workspace.
+- GitHub Discussions #1–#10 are frozen: they keep the rationale and history of the decisions imported into `.spec/`, and are no longer the authority. Where a Discussion and `.spec/` disagree, `.spec/` wins.
+- Decision flow: propose a change in a Discussion (a new comment or a new Discussion) → the owner (@DevilTea) explicitly accepts the proposal in that Discussion → a `.spec/` PR records it → implementation PRs cite the spec unit IDs they implement or change (UUIDs such as `01a1144e-50dd-…`; the former `R.x.y` import refs no longer resolve). An "accepted architecture decision" means exactly this: a merged `.spec/` change backed by a proposal the owner accepted in a Discussion.
+- Change `.spec/` semantic content only through the `spec` CLI (`pnpm exec spec ...`, JSON request on stdin) or `createSpecClient` from `@deviltea/spec-tool`, always with the current `expectedRevision`. Never hand-edit frontmatter, Rule or Clause records, Scenario tags or steps. Markdown bodies and Gherkin `#` comments are noncanonical and carry only provenance and notes; edit them only while no `spec` process is running.
+- `.spec/` is closed-world: add no files or directories other than the ones the tool writes. The tool's coordination files (`.spec-tool-v1.lock`, `.spec-tool-v1.readers`) are ignored in `.gitignore`.
 - Commands that take no request (for example `workspace validate`, `graph export`) wait on stdin; run them with `</dev/null`. Run `pnpm spec:validate` after changes; `pnpm check` runs it too.
-- Import batches are applied with `node scripts/spec-import/apply.mjs <batch.json>`, which keeps the import ref-to-UUID map in `scripts/spec-import/refmap.json` (outside `.spec/`); that directory is temporary and is removed at the cutover.
-- A batch overwrites the titles, summaries, Story fields, `motivates` targets, Rule and Clause statements, `constrains` targets and bodies of every unit it names, and the titles, steps, `demonstrates` targets and `#` comment preambles of the Scenarios it names; a Feature or Contract that lists Rules or Clauses must list all of them in order; a batch deletes a folded or duplicate Rule or Clause, or a Scenario, by naming it in its `retired` list. A Rule or Clause that a Scenario demonstrates cannot be retired until a batch naming that Scenario relinks it (the applier refuses before any change). Change an imported unit in its batch source (re-rendering the batch with `baseRevision` set to the current revision) or in a newer batch, never in `.spec/` alone, and never re-run an older batch after newer edits: the applier refuses a batch whose `baseRevision` is not the current revision unless the run is a no-op or `--force` is given (`--dry-run` lists every change it would refuse and exits 1).
-- Rules and Clauses do not overlap: a Clause owns an exact persisted or wire shape (paths, fields, formats) and every value set (event names and payload fields, lifetimes, file modes, limits, diagnostic codes, status codes); a Rule states behavior and names the Contract or Clause instead of restating the value. Diagnostic codes appear only in Clauses.
-- One owner per assertion: a fact appears once across Rules, Clauses and Feature summaries, and a Feature summary describes the Feature's scope only. Split a Rule longer than about 45 words or holding more than one testable assertion; fold a Rule that adds nothing testable on its own into a neighbor and retire it.
-- The `code@` and `doc@` citations a batch adds or re-pins all use one baseline commit.
-- Write the glossary's domain nouns (`GLOSSARY_NOUNS` in `tests/support/i18n-allowlist.mjs`) capitalized, such as View, Variant, Widget, Review, Flow, Spec, Decision, Evidence, Handoff, Workspace, Locale, Asset, Adapter, Agent and Token, in US spelling. A View's `feature` tag is product data that groups Views for display, unrelated to the Features of `.spec/`.
-- Owner rulings on the import plan: there is no HTTP Contract, and the RootShell `t` Method is folded into the Adapter Contract (Q4); `DESIGN.md` (visual spec) and the `design/` dogfood Workspace stay out of `.spec/` (Q7); provenance is recorded per Rule and Clause in the owner body's `## Rule sources` table (Q9); `@deviltea/spec-tool` is pinned to an exact version (Q5) and its skills are used from `node_modules` (Q10).
 - Follow the shipped skills `node_modules/@deviltea/spec-tool/skills/maintain-spec-workspace/SKILL.md` for changes and `node_modules/@deviltea/spec-tool/skills/review-spec-workspace/SKILL.md` for read-only review.
 
-## Spec calibration (batches 1–3 checkpoint)
+### Authoring policies
 
-Calibration pass between batch 3 and batch 4; transitional — Discussions #1–#10 remain authoritative until cutover.
-
-### Contract ownership
-
-- **Batch 5 owns the shared Contracts:** `batch-05.json` names the full C.ws-format, C.mutation-semantics and C.mcp Contracts and the C.adapter and C.handoff-bundle Contracts it creates, so batches 02 to 04 can no longer be re-run; change those Contracts only through batch 05 (re-rendered against the current revision) or a newer batch that names them in full, and change a unit that only an older batch names through a newer batch that names it in full. Batch 05 also names F.review.lifecycle and F.view.decisions in full (PR #100 review). Batch 06a created C.preview-protocol, and batch 06b named it in full together with F.preview.isolation and F.preview.session, so batch 06a can no longer be re-run. Batch 06c names C.preview-protocol in full and owns it, together with F.preview.geometry, F.preview.navigation, F.preview.session and F.preview.targeting, which it takes over from batch 06b, F.review.pins and F.flow.prototype, which it takes over from batch 04 for the PR #108 review carry-overs, and F.preview.failures; batch 06b keeps only F.preview.isolation and can no longer be re-run. The PR #103 Evidence carry-overs and the PR #108 F.review.lifecycle carry-over are re-renders of batch 05, applied before batch 06b and batch 06c respectively. The PR #113 review carry-overs are a re-render of batch 06c (it keeps everything it owns), applied before batch 07. Batch 07 names F.wb.ia, F.wb.devices, F.wb.chrome-i18n and F.wb.a11y in full, takes over F.wb.live-refresh from batch 03, and creates and owns C.wb-links (Workbench addresses and deep links). Batch 07 ruling 4 adds C.adapter.shared-widget-core through a re-render of batch 05 (still the owner of C.adapter), applied after batch 07. For the PR #114 review, batch 06c and then batch 05 are re-rendered again and applied before a re-rendered batch 07: 06c keeps its units and takes the review fixes, batch 05 (still the owner of C.ws-format and C.mcp) adds the accepted Part 7 render-context Clauses C.ws-format.review-render-context and C.mcp.review-render-context, and batch 07 adds the Workbench render-context Rules and retires R.wb.ia.overview-default-tab into C.wb-links.overview-tab. Batch 08 creates and owns every Scenario; for the PR #114 delta review, batch 06c, then 05, then 07 are re-rendered once more and applied before it (06c restores the decided guard of R.preview.geometry.one-cache, 05 restates R.review.lifecycle.resolve-menu, and 07 gives the render-context comparison one owner, marks R.wb.ia.thread-canvas-link partly built and adds R.wb.ia.thread-link-chrome).
-
-### Ownership and structure
-
-- **Clauses own every wire format and value set:** Events, payloads, lifetimes, file modes, limits, diagnostic codes, status codes.
-- **Rules state behavior** and reference Clauses; they do not restate value sets.
-- **One owner per assertion:** A fact appears once across Rules, Clauses and Feature summaries; Feature summaries describe scope only.
-- **Rule splitting:** Split Rules longer than approximately 45 words or holding more than one testable assertion; fold untestable Rules into neighbors and retire them.
-
-### Import applier
-
-- **Retired list:** `retired` array deletes Rules, Clauses and Scenarios; applier syncs the refmap.
-- **Scenarios:** `scenarios` entries (`ref`, `title`, `steps`, `demonstrates`, `group`, `comments`) are created after every other unit, one storage file each; the applier writes their provenance as `#` comments before the Scenario tags and never reorders Scenarios (order is not persisted).
-- **Automatic reorder:** Applier reorders Rules and Clauses to match batch order.
-- **Dry-run behavior:** `--dry-run` reports all planned changes and refusals for stale batches (exit 1) instead of throwing.
-
-### Baseline and citations
-
-- **One baseline commit per batch:** All `code@` and `doc@` citations for a batch use one commit.
-
-### Glossary and style
-
-- **Glossary nouns capitalized and US spelling:** View, Variant, Widget, Review, Flow, Spec, Decision, Evidence, Handoff, Workspace, Locale, Asset, Adapter, Agent, Token (in `GLOSSARY_NOUNS`, `tests/support/i18n-allowlist.mjs`).
-
-### Notable changes in batches 1–3
-
-- **Moved to Clauses:** SSE wire shape → C.mutation-semantics.change-events; lifetimes → C.access.lifetimes; store modes → C.access.store-modes; lease duration, roster intervals, system credentials, last-owner, stamp warnings, schema diagnostics, busy.
-- **Moved to shared Clauses:** Host allowlists, safe methods, Sec-Fetch-Site values → C.access.
-- **Moved to Clauses:** Migration step IDs → C.ws-format.migration-steps.
-- **Retired:** R.publication.readiness-counts (moved to thread-free), R.view.variants.orthogonal (into render-context), R.view.authoring.name (duplicate; #56 gap moved to R.ws.layout.labels).
-- **Fixes:** C.mutation-semantics.success includes `deleted` (retract_review_thread); `already_exists` → 409 stated; "409/423/403 only normative" scoped to mutation results (401/429 stay normative per Discussions #1, 421/403/415 per ruling B4, 422 per ruling B1, 503 per ruling B2).
-- **Counts:** Rules 149→161 (+12), Clauses 91→105 (+14), nodes 308→334 (+26), edges 445→463 (+18).
+- Clauses own every exact persisted or wire shape (paths, fields, formats) and every value set (event names and payload fields, lifetimes, file modes, limits, diagnostic codes, status codes). Diagnostic codes appear only in Clauses.
+- Rules state behavior only and name the Contract or Clause instead of restating a value. Keep a Rule to about 45 words and one testable assertion; split a longer or compound Rule, and fold a Rule that adds nothing testable on its own into a neighbor.
+- One owner per assertion: a fact appears once across Rules, Clauses and Feature summaries. A Feature summary describes the Feature's scope only.
+- Provenance is per Rule and Clause, in the owner body's `## Rule sources` table (Discussion permalinks, owner rulings, `code@`/`doc@` citations pinned to one commit per change). Record unbuilt or partly built behavior in the owner body's `## Implementation gaps` list (`Not built` or `Partly built as of <commit>`, with its tracking issue).
+- Scenarios use Spec Tool's restricted Gherkin in English (Given* → When+ → Then+, single-line steps) and show one observable behavior. They demonstrate only the Rules or Clauses whose assertion a step exercises (`demonstrates` is a specification relation, not a coverage claim). Their `#` comments record `Source:`, each `Test:` that exercises the behavior (file, line, title at a pinned commit), and `Status:`, which must agree with the Implementation gaps of the units they demonstrate.
+- Write the glossary's domain nouns (`GLOSSARY_NOUNS` in `tests/support/i18n-allowlist.mjs`) capitalized, such as View, Variant, Widget, Review, Flow, Spec, Decision, Evidence, Handoff, Workspace, Locale, Asset, Adapter, Agent and Token, in US spelling. A View's `feature` tag is product data that groups Views for display, unrelated to the Features of `.spec/`.
+- Standing owner rulings: there is no HTTP Contract, and the RootShell `t` Method belongs to the Adapter Contract; `DESIGN.md` (visual spec) and the `design/` dogfood Workspace stay out of `.spec/`; `@deviltea/spec-tool` is pinned to an exact version and its skills are used from `node_modules`.
 
 ## Source layout
 

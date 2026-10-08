@@ -9,5 +9,5 @@ Feature: Review desk
   Scenario: A thread survives the removal of its Widget
     Given an open thread is anchored to a Widget that its View no longer contains
     When a Reviewer opens the View
-    Then the thread is kept unchanged with an invalid anchor
+    Then the thread stays open and is listed among the comments that cannot be placed
     Then it draws no pin, and opening it shows a missing-target notice
