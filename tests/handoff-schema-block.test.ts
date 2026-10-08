@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { FileNativePersistence } from '../src/persistence'
 import { workspaceRelativePath } from '../src/persistence/paths'
-import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const ASSET_ID = '55555555-5555-4555-8555-555555555555'
@@ -25,7 +25,7 @@ const view = {
 	spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
 }
 
-async function seedWorkspace(schemaVersion: 1 | 2 | 3): Promise<string> {
+async function seedWorkspace(schemaVersion: number): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-handoff-block-'))
 	roots.push(root)
 	await mkdir(join(root, '.uiux'), { recursive: true })
@@ -59,7 +59,7 @@ describe('read-only Handoff assessment on a Workspace that needs migration', () 
 	})
 
 	it('assesses a current Workspace without materializing closure artifacts, which export still stores', async () => {
-		const root = await seedWorkspace(3)
+		const root = await seedWorkspace(CURRENT_WORKSPACE_SCHEMA_VERSION)
 		const app = createWorkspaceApplicationSession(open(root))
 		const assessed = await app.assessHandoffReadiness({ roots: [{ type: 'workspace' }] })
 		expect(assessed.status).toBe('ok')
