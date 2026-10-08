@@ -1,6 +1,6 @@
 Feature: Access and roster
   # Source: spec import batch 8 (Scenarios), priority P1. Decisions behind the demonstrated Rules and Clauses: #1 c177 d8 https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18758344. Restated as permission keys by Discussion #140 (Part 15), decision 7, I3; R19 https://github.com/DevilTea/uiux/discussions/140; accepted as written 2026-10-08 https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18816365.
-  # Status: not built as of 0c26ead; see the Implementation gaps entry of 01a11485-eb1a-77fb-a91e-b54c505344da in its owner.
+  # Status: partly built as of 0c26ead: bootstrap creates a human Owner and prints its link once; a member with every catalog key is not built; see the Implementation gaps entry of 01a11485-eb1a-77fb-a91e-b54c505344da in its owner.
   # Note: code@a021f9e `tests/access-http.test.ts#L114` "prints a one-time Owner sign-in link only once, and signs a browser in through the fragment invite" exercises the role-based behavior this Scenario restates (a bootstrapped Owner); no test of the restated behavior exists yet; tracked in issue #142.
   @spec:id:01a118a1-d172-7b56-928f-865be4bd8eca
   @spec:demonstrates:01a11485-eb1a-77fb-a91e-b54c505344da

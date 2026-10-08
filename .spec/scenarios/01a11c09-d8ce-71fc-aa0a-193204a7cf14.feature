@@ -3,7 +3,7 @@ Feature: Version history
   # Status: not built as of 0c26ead; see the Implementation gaps entry of 01a11c09-c648-71be-a550-2ecabf12f5d0 in its owner.
   # Note: No test exists yet; tracked in issue #142.
   @spec:id:01a11c09-d8ce-7b6a-aa80-eef991422b2f
-  @spec:demonstrates:01a11485-fa44-7b6a-99f8-de4e1e8edcfc
+  @spec:demonstrates:01a11c09-a42a-7d6b-bb5e-01d7cf1ce2de
   @spec:demonstrates:01a11c09-c648-71be-a550-2ecabf12f5d0
   Scenario: Restoring a View needs its write key
     Given a human member holding `history.restore` but not `views.write`

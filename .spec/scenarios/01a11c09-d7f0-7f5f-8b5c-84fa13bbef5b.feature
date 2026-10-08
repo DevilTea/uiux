@@ -10,6 +10,6 @@ Feature: Access and roster
   Scenario: A version 1 roster upgrades on first open and keeps a backup
     Given a version 1 roster with a human Owner and an Agent Editor
     When `uiux dev` opens it
-    Then the roster is at version 2 and the human member holds every catalog key
+    Then the roster is at version 2 and the human member holds the keys of the Owner preset
     Then the Agent holds the keys of the Editor preset except `reviews.resolve`
     Then `access.v1.json` beside the roster holds the version 1 roster
