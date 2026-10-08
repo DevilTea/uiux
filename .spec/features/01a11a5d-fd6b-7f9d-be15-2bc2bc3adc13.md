@@ -58,6 +58,10 @@ rules:
     statement: The Workbench restores from a resource's diff with "Restore this
       version", showing the impact list and asking for explicit confirmation
       before writing.
+  - id: 01a11c09-c648-71be-a550-2ecabf12f5d0
+    statement: A restore also needs the write key of the restored resource's kind as
+      the Access Contract assigns it, so `history.restore` never stands in for a
+      missing write key.
 ---
 
 ## Sources
@@ -65,6 +69,9 @@ rules:
 - Discussion #122 body (2026-10-06, accepted as written on 2026-10-08), "UIUX Architecture Decisions — Part 11: Workspace Version Timeline": decisions 1-13, Proposed defaults R1-R34, Amended decisions and "What `.spec/` records after acceptance". https://github.com/DevilTea/uiux/discussions/122
 - Discussion #122 comment (2026-10-08), "Owner acceptance — 2026-10-08": decisions 1-13 and every Proposed default R1-R34 accepted as stated; R33 (timeline in Overview › Activity, View-page `history` panel, selections in the address) and R34 (Restore on desktop only) confirmed. https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263
 - Owner pre-answers O1-O7 (2026-10-06), folded into the Discussion #122 body: O1 hybrid storage, O2 single-resource restore, O3 Reviewer+ checkpoints, O4 fixed grouping and retention, O5 no history in the publication, O6 no Git `HEAD`, O7 no automatic checkpoint at task end. https://github.com/DevilTea/uiux/discussions/122
+- Discussion #140 body (Part 15, 2026-10-08), "Proposal — Permission keys and role presets: explicit key sets per member, Workspace-defined presets and derived labels": decisions 1–13, owner answers Q1–Q12, Amended decisions, "What `.spec/` records after acceptance" and Proposed defaults R1–R30. https://github.com/DevilTea/uiux/discussions/140
+- Discussion #140 comment (2026-10-08), "Owner acceptance — 2026-10-08": accepted as written, every decision and Proposed default included. https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18816365
+- Discussion #140 comment (2026-10-08), "Owner rulings — 2026-10-08 (clarifications to the accepted proposal)": ruling 1, applying a preset to an Agent drops its `humanOnly` keys; ruling 2, Product Kit Tools that ship before permission keys authorize by the upgrade mapping's keys. https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18819026
 
 ## Rule sources
 
@@ -85,6 +92,7 @@ rules:
 | 01a11a5e-184c-7184-bb0b-781744e6a1ca | [#122 body: decision 10, rule 7](https://github.com/DevilTea/uiux/discussions/122); [#122 acceptance](https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263) |
 | 01a11a5e-189f-7b86-8270-e9b5d62aaa65 | [#122 body: decision 10, rule 9](https://github.com/DevilTea/uiux/discussions/122); [#122 body: decision 2](https://github.com/DevilTea/uiux/discussions/122); [#122 acceptance](https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263) |
 | 01a11a5e-18f2-7991-8f7d-aa4c8015d14a | [#122 body: decision 11, Workbench: Restore](https://github.com/DevilTea/uiux/discussions/122); [#122 body: Proposed defaults R34](https://github.com/DevilTea/uiux/discussions/122); [#122 acceptance](https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263) |
+| 01a11c09-c648-71be-a550-2ecabf12f5d0 | [#140 body: Interactions 2](https://github.com/DevilTea/uiux/discussions/140); [#140 body: R7](https://github.com/DevilTea/uiux/discussions/140); [#140 acceptance](https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18816365); PR #145 review (https://github.com/DevilTea/uiux/pull/145): it names the Access Contract's write key per kind (01a11c09-a42a-7d6b-bb5e-01d7cf1ce2de) and is the single owner of the restore's second key |
 
 ## Implementation gaps
 
@@ -103,6 +111,7 @@ rules:
 - 01a11a5e-184c-7184-bb0b-781744e6a1ca: Not built as of cf3b984: no version history exists; tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
 - 01a11a5e-189f-7b86-8270-e9b5d62aaa65: Not built as of cf3b984: no version history exists; tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
 - 01a11a5e-18f2-7991-8f7d-aa4c8015d14a: Not built as of cf3b984: no version history exists; tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
+- 01a11c09-c648-71be-a550-2ecabf12f5d0: Not built as of 0c26ead: restore does not exist; tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132) and issue #142 (https://github.com/DevilTea/uiux/issues/142).
 
 ## Notes
 
