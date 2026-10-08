@@ -50,6 +50,15 @@ export function isAbsoluteUri(value: unknown): value is string {
 	}
 }
 
+/** A non-empty `/`-separated relative path with no empty, `.` or `..` segment, backslash or ASCII control character. */
+export function isSafeRelativePath(path: unknown): path is string {
+	return typeof path === 'string'
+		&& path.length > 0
+		&& !path.includes('\\')
+		&& !hasAsciiControlCharacter(path)
+		&& path.split('/').every(segment => segment.length > 0 && segment !== '.' && segment !== '..')
+}
+
 export function hasAsciiControlCharacter(value: string): boolean {
 	return [...value].some(character => {
 		const code = character.charCodeAt(0)

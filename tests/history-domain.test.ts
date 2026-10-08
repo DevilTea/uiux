@@ -86,7 +86,24 @@ describe('history constants', () => {
 		expect(HISTORY_SOURCES).toEqual(['workbench', 'mcp', 'cli'])
 		expect(COMPARISON_SUMMARY_STATUSES).toEqual(['added', 'removed', 'modified', 'unchanged'])
 		expect(HISTORY_RESOURCE_KINDS).toEqual(['workspace', 'product-kit', 'access-presets', 'view', 'flow', 'locale', 'asset'])
-		expect(HISTORY_WRITE_OPERATIONS).toHaveLength(16)
+		expect(HISTORY_WRITE_OPERATIONS).toEqual([
+			'createView',
+			'updateViewSpec',
+			'updateViewStructure',
+			'updateWorkspaceSettings',
+			'composeProductKit',
+			'updateProductKit',
+			'updateComponentRegistry',
+			'updateAccessPresets',
+			'createLocale',
+			'updateLocale',
+			'createFlow',
+			'updateFlow',
+			'createAsset',
+			'replaceAsset',
+			'promoteReviewToDecision',
+			'restoreResourceVersion',
+		])
 		expect(BASELINE_CHECKPOINT_NAME).toBe('Baseline')
 		expect(migrationCheckpointName(7)).toBe('Before migration to schemaVersion 7')
 	})
@@ -146,7 +163,11 @@ describe('version record validators', () => {
 		const nameCodes = (name: string) => codes(validateCheckpointRecord(checkpoint({ name })))
 		expect(nameCodes('x')).toEqual([])
 		expect(nameCodes('x'.repeat(120))).toEqual([])
-		expect(nameCodes(`   ${'x'.repeat(120)}   `)).toEqual([])
+		// A stored name is already trimmed; normalizeCheckpointName trims a requested one.
+		expect(nameCodes(`   ${'x'.repeat(120)}   `)).toEqual(['history.invalid_checkpoint_name'])
+		expect(nameCodes('x ')).toEqual(['history.invalid_checkpoint_name'])
+		expect(normalizeCheckpointName(`   ${'x'.repeat(120)}   `)).toBe('x'.repeat(120))
+		expect(normalizeCheckpointName('x'.repeat(121))).toBeUndefined()
 		expect(nameCodes('😀'.repeat(120))).toEqual([])
 		expect(nameCodes('x'.repeat(121))).toEqual(['history.invalid_checkpoint_name'])
 		expect(nameCodes('')).toEqual(['history.invalid_checkpoint_name'])
@@ -173,7 +194,10 @@ describe('version record validators', () => {
 		expect(validateHistoryActor(AGENT).ok).toBe(true)
 		expect(validateHistoryActor({ type: 'external', displayName: 'Changes outside UIUX' }).ok).toBe(true)
 		expect(codes(validateHistoryActor({ type: 'human', id: 'member:m1' }))).toEqual(['history.unstamped_actor'])
-		expect(codes(validateHistoryActor({ type: 'agent', displayName: 'Claude' }))).toEqual(['schema.expected_string'])
+		expect(codes(validateHistoryActor({ type: 'agent', displayName: 'Claude' }))).toEqual(['history.unstamped_actor'])
+		expect(codes(validateHistoryActor({ ...HUMAN, id: 'm1' }))).toEqual(['history.unstamped_actor'])
+		expect(codes(validateHistoryActor({ ...HUMAN, id: 'member:' }))).toEqual(['history.unstamped_actor'])
+		expect(codes(validateHistoryActor({ ...AGENT, displayName: '' }))).toEqual(['history.unstamped_actor'])
 		expect(codes(validateHistoryActor({ type: 'system', id: 'system:capture' }))).toEqual(['history.invalid_system_actor'])
 		expect(codes(validateHistoryActor({ type: 'external', id: 'x' }))).toEqual(['history.external_actor_id'])
 		expect(codes(validateHistoryActor({ type: 'robot' }))).toEqual(['history.invalid_actor_type'])
@@ -254,30 +278,54 @@ describe('legacy Workspace layout', () => {
 		expect(classify(localeRelativePath('zh-TW'))).toEqual({ kind: 'locale', key: 'zh-TW' })
 		expect(classify(assetMetadataRelativePath(ASSET_ID))).toEqual({ kind: 'asset', key: ASSET_ID })
 		expect(classify(`assets/${ASSET_ID}/logo.svg`)).toEqual({ kind: 'asset', key: ASSET_ID })
-		for (const excluded of [
-			`reviews/${REVIEW_ID}.review.json`,
-			'.uiux/artifacts/sha256/aa/' + 'a'.repeat(64),
-			`.uiux/history/checkpoints/${VERSION_ID}.json`,
-			'.uiux/workspace.lock',
-			'.uiux/transactions/x/journal.json',
-			'adapters/reference.ts',
-			'kit/package.json',
-			'README.md',
-			'views/notes.txt',
-			'views/not-a-uuid.view.json',
-			`views/nested/${VIEW_ID}.view.json`,
-			`flows/${FLOW_ID}.view.json`,
-			'i18n/zh-tw.json',
-			`assets/${ASSET_ID}`,
-			`assets/${ASSET_ID}/nested/file.bin`,
-			'assets/not-a-uuid/asset.json',
-			`../views/${VIEW_ID}.view.json`,
-			`views\\${VIEW_ID}.view.json`,
-			'',
-		])
+		for (const excluded of EXCLUDED_PATHS)
 			expect(classify(excluded), excluded).toBeUndefined()
 	})
+
+	it('classifies only paths under a versioned root, and none under an excluded one except the manifest', () => {
+		const classified = [...VERSIONED_PATHS, ...EXCLUDED_PATHS].filter(path => LEGACY_LAYOUT.classifyVersionedPath(path))
+		expect(classified).toEqual(VERSIONED_PATHS)
+		const under = (path: string, root: string) => root.endsWith('/') ? path.startsWith(root) : path === root
+		for (const path of classified) {
+			expect(LEGACY_LAYOUT.versionedRoots.some(root => under(path, root)), path).toBe(true)
+			if (path !== LEGACY_LAYOUT.manifestPath)
+				expect(LEGACY_LAYOUT.excluded.some(root => under(path, root)), path).toBe(false)
+		}
+	})
 })
+
+const VERSIONED_PATHS = [
+	WORKSPACE_MANIFEST_PATH,
+	viewRelativePath(VIEW_ID),
+	flowRelativePath(FLOW_ID),
+	localeRelativePath('zh-TW'),
+	assetMetadataRelativePath(ASSET_ID),
+	`assets/${ASSET_ID}/logo.svg`,
+]
+
+const EXCLUDED_PATHS = [
+	`reviews/${REVIEW_ID}.review.json`,
+	'.uiux/artifacts/sha256/aa/' + 'a'.repeat(64),
+	`.uiux/history/checkpoints/${VERSION_ID}.json`,
+	'.uiux/workspace.lock',
+	'.uiux/transactions/x/journal.json',
+	'adapters/reference.ts',
+	'kit/package.json',
+	'README.md',
+	'views/notes.txt',
+	'views/not-a-uuid.view.json',
+	`views/nested/${VIEW_ID}.view.json`,
+	`flows/${FLOW_ID}.view.json`,
+	'i18n/zh-tw.json',
+	`assets/${ASSET_ID}`,
+	`assets/${ASSET_ID}/nested/file.bin`,
+	'assets/not-a-uuid/asset.json',
+	`../views/${VIEW_ID}.view.json`,
+	`views\\${VIEW_ID}.view.json`,
+	`views/${VIEW_ID}\u0001.view.json`,
+	'views/.DS_Store',
+	'',
+]
 
 describe('revision parity with file-native persistence', () => {
 	it('computes the same revision persistence reads for every resource kind', async () => {

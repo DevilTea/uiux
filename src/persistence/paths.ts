@@ -1,6 +1,6 @@
 import { resolve, sep } from 'node:path'
 
-import { isCanonicalLocaleFilename, isCanonicalLocaleTag, isFullUuid, isSha256Digest } from '../domain/validation'
+import { isCanonicalLocaleFilename, isCanonicalLocaleTag, isFullUuid, isSafeRelativePath, isSha256Digest } from '../domain/validation'
 import { PersistenceError } from './errors'
 
 /**
@@ -105,14 +105,6 @@ function uuidFileIdentity(kind: string, filename: string, suffix: string): Versi
 	if (!filename.endsWith(suffix)) return undefined
 	const key = filename.slice(0, -suffix.length)
 	return isFullUuid(key) ? { kind, key } : undefined
-}
-
-function isSafeRelativePath(path: unknown): path is string {
-	return typeof path === 'string'
-		&& path.length > 0
-		&& !path.includes('\\')
-		&& !path.includes('\0')
-		&& path.split('/').every(segment => segment.length > 0 && segment !== '.' && segment !== '..')
 }
 
 export function workspaceRelativePath(): typeof WORKSPACE_MANIFEST_PATH {

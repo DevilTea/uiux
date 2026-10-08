@@ -1,9 +1,9 @@
 import {
-	hasAsciiControlCharacter,
 	isCanonicalLocaleTag,
 	isFullUuid,
 	isJsonObject,
 	isRecord,
+	isSafeRelativePath,
 	jsonPointer,
 	rejectUnknownKeys,
 	validateDigest,
@@ -101,6 +101,7 @@ export type VersionRecord = CheckpointRecord | HostVersionRecord
 const BASE_KEYS = ['historySchemaVersion', 'id', 'type', 'actor', 'at', 'workspaceSchemaVersion', 'resources', 'adapters', 'productKit'] as const
 const CHECKPOINT_KEYS = [...BASE_KEYS, 'name', 'note', 'source', 'parentCheckpoint'] as const
 const HOST_VERSION_KEYS = [...BASE_KEYS, 'parent', 'startedAt', 'netChange', 'events', 'restoredFrom', 'recordingGap'] as const
+const STAMPED_ACTOR_ID = /^member:.+$/su
 const MIGRATION_CHECKPOINT_NAME = /^Before migration to schemaVersion [1-9]\d*$/u
 
 /** Dispatches on `type`: `checkpoint` records and host (`autosave`, `external`, `system`) versions. */
@@ -120,11 +121,13 @@ export function validateCheckpointRecord(input: unknown, path = ''): ValidationR
 	rejectUnknownKeys(record, CHECKPOINT_KEYS, path, v)
 	validateBase(record, path, v)
 	if (record.type !== 'checkpoint')
-		v.issue('history.invalid_version_type', `${path}/type`, 'A checkpoint record has type checkpoint.')
+		v.issue('history.invalid_version_type', `${path}/type`, 'A Checkpoint record has type checkpoint.')
 	if (typeof record.name !== 'string' || !isValidCheckpointName(record.name))
-		v.issue('history.invalid_checkpoint_name', `${path}/name`, `A checkpoint name is ${CHECKPOINT_NAME_MIN_LENGTH} to ${CHECKPOINT_NAME_MAX_LENGTH} characters after trimming.`)
+		v.issue('history.invalid_checkpoint_name', `${path}/name`, `A Checkpoint name is ${CHECKPOINT_NAME_MIN_LENGTH} to ${CHECKPOINT_NAME_MAX_LENGTH} characters after trimming.`)
+	else if (record.name !== record.name.trim())
+		v.issue('history.invalid_checkpoint_name', `${path}/name`, 'A stored Checkpoint name is already trimmed.')
 	if (Object.hasOwn(record, 'note') && (typeof record.note !== 'string' || !isValidCheckpointNote(record.note)))
-		v.issue('history.invalid_checkpoint_note', `${path}/note`, `A checkpoint note is plain text of at most ${CHECKPOINT_NOTE_MAX_LENGTH} characters.`)
+		v.issue('history.invalid_checkpoint_note', `${path}/note`, `A Checkpoint note is plain text of at most ${CHECKPOINT_NOTE_MAX_LENGTH} characters.`)
 	validateSource(record.source, `${path}/source`, v)
 	if (Object.hasOwn(record, 'parentCheckpoint')) validateUuid(record.parentCheckpoint, `${path}/parentCheckpoint`, v, 'Parent checkpoint id')
 	validateSystemCheckpointName(record, path, v)
@@ -268,18 +271,22 @@ function validateActor(input: unknown, path: string, v: Validator): void {
 	const actor = v.object(input, path)
 	if (!actor) return
 	rejectUnknownKeys(actor, ['type', 'id', 'displayName'], path, v)
-	if (Object.hasOwn(actor, 'displayName')) v.string(actor.displayName, `${path}/displayName`)
 	switch (actor.type) {
 		case 'human':
 		case 'agent':
-			v.string(actor.id, `${path}/id`, true)
-			if (!Object.hasOwn(actor, 'displayName')) v.issue('history.unstamped_actor', `${path}/displayName`, 'A human or Agent actor is a stamped actor with an id and a display name.')
+			// Clause 01a11485-faeb-746c-ba4f-2169765099fe: { type, id: "member:<member id>", displayName: <nickname> }.
+			if (typeof actor.id !== 'string' || !STAMPED_ACTOR_ID.test(actor.id))
+				v.issue('history.unstamped_actor', `${path}/id`, 'A human or Agent actor id is member:<member id>.')
+			if (typeof actor.displayName !== 'string' || actor.displayName.length === 0)
+				v.issue('history.unstamped_actor', `${path}/displayName`, 'A human or Agent actor carries the non-empty display name stamped at write time.')
 			return
 		case 'system':
+			if (Object.hasOwn(actor, 'displayName')) v.string(actor.displayName, `${path}/displayName`)
 			if (!isOneOf(HISTORY_SYSTEM_ACTOR_IDS, actor.id))
 				v.issue('history.invalid_system_actor', `${path}/id`, `A system actor id is ${HISTORY_SYSTEM_ACTOR_IDS.join(' or ')}.`)
 			return
 		case 'external':
+			if (Object.hasOwn(actor, 'displayName')) v.string(actor.displayName, `${path}/displayName`)
 			if (Object.hasOwn(actor, 'id')) v.issue('history.external_actor_id', `${path}/id`, 'An external actor has no id.')
 			return
 		default:
@@ -296,16 +303,9 @@ function validateSource(value: unknown, path: string, v: Validator): void {
 function validateSystemCheckpointName(record: Record<string, unknown>, path: string, v: Validator): void {
 	const actorId = isRecord(record.actor) && record.actor.type === 'system' ? record.actor.id : undefined
 	if (actorId === 'system:baseline' && record.name !== BASELINE_CHECKPOINT_NAME)
-		v.issue('history.invalid_system_checkpoint_name', `${path}/name`, `The first-start system checkpoint is named ${BASELINE_CHECKPOINT_NAME}.`)
+		v.issue('history.invalid_system_checkpoint_name', `${path}/name`, `The first-start system Checkpoint is named ${BASELINE_CHECKPOINT_NAME}.`)
 	if (actorId === 'system:migrate' && (typeof record.name !== 'string' || !MIGRATION_CHECKPOINT_NAME.test(record.name)))
-		v.issue('history.invalid_system_checkpoint_name', `${path}/name`, 'The migration system checkpoint is named Before migration to schemaVersion <N>.')
-}
-
-function isSafeRelativePath(path: string): boolean {
-	return path.length > 0
-		&& !path.includes('\\')
-		&& !hasAsciiControlCharacter(path)
-		&& path.split('/').every(segment => segment.length > 0 && segment !== '.' && segment !== '..')
+		v.issue('history.invalid_system_checkpoint_name', `${path}/name`, 'The migration system Checkpoint is named Before migration to schemaVersion <N>.')
 }
 
 function isOneOf<T extends string>(values: readonly T[], value: unknown): value is T {
