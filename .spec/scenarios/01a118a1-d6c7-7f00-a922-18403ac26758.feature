@@ -3,6 +3,7 @@ Feature: Review messages and retraction
   # Test: code@a021f9e `tests/review-v3-browser.test.ts#L214` "deletes an eligible thread after an inline confirm that starts on Cancel, then moves focus and announces it". https://github.com/DevilTea/uiux/blob/a021f9e1dc892ef7a5845683a228a999c3d5f827/tests/review-v3-browser.test.ts#L214
   # Test: code@a021f9e `tests/review-v3-browser.test.ts#L277` "hides Delete once anyone engaged, and on someone else\". https://github.com/DevilTea/uiux/blob/a021f9e1dc892ef7a5845683a228a999c3d5f827/tests/review-v3-browser.test.ts#L277
   # Status: built as of a021f9e.
+  # Note: Discussion #140 restates the empty-thread part of 01a11544-5af4-71eb-b8e4-917743937508 with `reviews.write`, which is not built (issue #142); this Scenario exercises the author part, which is built.
   @spec:id:01a118a1-d6c7-701d-b126-873ad4245a92
   @spec:demonstrates:01a11544-5af4-71eb-b8e4-917743937508
   @spec:demonstrates:01a11544-5b1b-7dcb-bcea-e36f4ffa3b2a
