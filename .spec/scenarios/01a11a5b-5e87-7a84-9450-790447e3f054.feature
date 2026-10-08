@@ -1,5 +1,5 @@
 Feature: Widget navigation and highlight
-  # Source: Discussion #131 (Part 13, Preview protocol additions). Decisions behind the demonstrated Rules and Clauses: #131 decision 4 https://github.com/DevilTea/uiux/discussions/131#4-when-the-workbench-sends-a-reveal-group-a; #131 owner acceptance 2026-10-08 https://github.com/DevilTea/uiux/discussions/131#discussioncomment-18807266.
+  # Source: Discussion #131 (Part 13, Preview protocol additions). Decisions behind the demonstrated Rules and Clauses: #131 body: decision 4 https://github.com/DevilTea/uiux/discussions/131; #131 owner acceptance 2026-10-08 https://github.com/DevilTea/uiux/discussions/131#discussioncomment-18807266.
   # Note: No test exists yet; tests are part of the implementation tracked in issue #105.
   # Status: not built as of cf3b984; see the Implementation gaps entry of 01a11a59-eba4-7d32-a10e-1241b5337460 in its owner.
   # Note: The Inspector already has the "outside the visible area" copy, but the Workbench reads an empty region set first and shows "not visible" (code@cf3b984 `app/composables/usePreviewSession.ts#L387-L391`); found by reading the code, not reproduced in a browser.
