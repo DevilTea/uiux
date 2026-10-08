@@ -224,8 +224,13 @@ async function auditFocus(page: Page, mode: 'light' | 'dark', route: string): Pr
 			if (!element) return undefined
 			element.focus({ focusVisible: true } as FocusOptions)
 			if (document.activeElement !== element) return undefined
-			// Let color transitions on the outline settle before reading it.
-			await new Promise(resolve => setTimeout(resolve, 200))
+			// Read the settled indicator: Nuxt UI's `transition-colors` animates `outline-color` from
+			// the unfocused 25% outline to Iris. The transition runs on the frame-driven animation
+			// timeline, so a wall-clock wait is not enough: under CPU load Chromium produces fewer
+			// frames and a timer can fire while the color is still at or near its start value.
+			await Promise.all(element.getAnimations()
+				.filter(animation => Number.isFinite(animation.effect?.getComputedTiming().endTime))
+				.map(animation => animation.finished.catch(() => undefined)))
 			const style = getComputedStyle(element)
 			let background = 'rgba(0, 0, 0, 0)'
 			for (let node: HTMLElement | null = element.parentElement; node; node = node.parentElement) {
