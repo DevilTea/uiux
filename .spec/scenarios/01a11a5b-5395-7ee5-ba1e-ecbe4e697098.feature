@@ -1,0 +1,15 @@
+Feature: Widget navigation and highlight
+  # Source: Discussion #131 (Part 13, Preview protocol additions). Decisions behind the demonstrated Rules and Clauses: #131 body: decision 2 https://github.com/DevilTea/uiux/discussions/131; #131 body: decision 3 https://github.com/DevilTea/uiux/discussions/131; #131 body: decision 4 https://github.com/DevilTea/uiux/discussions/131; #131 owner acceptance 2026-10-08 https://github.com/DevilTea/uiux/discussions/131#discussioncomment-18807266.
+  # Note: No test exists yet; tests are part of the implementation tracked in issue #105.
+  # Status: not built as of cf3b984; see the Implementation gaps entries of 01a11658-1b52-7f00-8f9d-eaf580c29253 and 01a11a59-da48-7437-bee8-67787175cbda in their owners.
+  @spec:id:01a11a5b-5395-729b-845b-d72eb5d82032
+  @spec:demonstrates:01a11658-1b52-7f00-8f9d-eaf580c29253
+  @spec:demonstrates:01a11a59-da48-7437-bee8-67787175cbda
+  @spec:demonstrates:01a11a59-e876-780b-832c-0a139baabc95
+  @spec:demonstrates:01a11a70-3d8d-7e52-9412-8a92797814e6
+  Scenario: A Checks navigation scrolls a target out of view in a nested scroll container into view
+    Given a View whose Widget is scrolled out of view inside a nested scroll container of the Preview
+    Given the Preview runtime declares reveal support
+    When a Reviewer opens that Widget from Checks
+    Then the Preview scrolls only its own scroll containers until the Widget is in view
+    Then the Workbench highlights the Widget from the geometry report that follows the scroll
