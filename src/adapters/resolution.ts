@@ -1,6 +1,8 @@
-import { readFile, realpath } from 'node:fs/promises'
+import { readFile, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+
+import { CANONICAL_WORKSPACE_DATA_DIRECTORIES } from '../persistence/paths'
 
 import { resolve as resolveImport } from 'import-meta-resolve'
 import {
@@ -120,13 +122,13 @@ export class NodeWorkspaceAdapterModuleResolver implements AdapterModuleResolver
 			throw new Error('Adapter module must resolve to a file-backed module.')
 		const resolvedPath = await realpath(fileURLToPath(moduleIdentity))
 
-		if (relativeSelection) {
-			const realRoot = await realpath(root)
-			if (!isContainedPath(realRoot, resolvedPath))
-				throw new Error('Workspace-relative adapter module resolves outside the selected Workspace root.')
-			if (isInsideCanonicalDataDirectory(realRoot, resolvedPath))
-				throw new Error('Workspace-relative adapter module resolves inside a canonical Workspace data directory; Adapter code must live outside authored data directories that Editors and Agents can write.')
-		}
+		const realRoot = await realpath(root)
+		if (relativeSelection && !isContainedPath(realRoot, resolvedPath))
+			throw new Error('Workspace-relative adapter module resolves outside the selected Workspace root.')
+		// Applies to every specifier, not only `./` ones: a bare specifier (monorepo symlink,
+		// self-reference `exports`/`imports`) can also resolve back inside the Workspace root.
+		if (await isInsideCanonicalDataDirectory(realRoot, resolvedPath))
+			throw new Error('Adapter module resolves inside a canonical Workspace data directory; Adapter code must live outside authored data directories that Editors and Agents can write.')
 
 		const packageMetadata = relativeSelection ? {} : await findNearestPackageMetadata(resolvedPath)
 		return {
@@ -317,20 +319,30 @@ function isContainedPath(root: string, candidate: string): boolean {
 }
 
 /**
- * Canonical top-level Workspace directories that hold authored data an Editor or Agent can write
- * (through asset/View/Flow/Locale/Review authoring and workspace artifacts). A `./` Adapter must
- * not resolve into any of these: otherwise a principal capped at Editor could upload an executable
- * module as data and select it, escalating to host code execution on the next adapter resolution.
- * `adapters/` is deliberately absent — it is code, edited on disk, and holds legitimate `./` Adapters.
+ * Does `candidate` (an already realpath-resolved path) live under one of the Workspace's canonical
+ * authored-data directories (see `CANONICAL_WORKSPACE_DATA_DIRECTORIES`)? Those hold data an Editor
+ * or Agent can write; an Adapter must not resolve into them, or uploaded data could run as host code.
+ *
+ * The comparison is by file identity (`dev`/`ino`), never by name: a case-insensitive file system
+ * (WSL drvfs, Docker Desktop bind mounts, exFAT/CIFS, ext4 casefold) can leave a `realpath` result
+ * spelled `./ASSETS/…`, which a string match on `assets` would miss. Missing directories are skipped.
  */
-const CANONICAL_WORKSPACE_DATA_DIRECTORIES: readonly string[] = ['.uiux', 'assets', 'views', 'flows', 'reviews', 'i18n']
-
-function isInsideCanonicalDataDirectory(realRoot: string, candidate: string): boolean {
+async function isInsideCanonicalDataDirectory(realRoot: string, candidate: string): Promise<boolean> {
 	const rel = relative(realRoot, candidate)
 	if (rel === '' || rel.startsWith('..') || isAbsolute(rel))
 		return false
 	const firstSegment = rel.split(/[/\\]/u)[0]
-	return firstSegment !== undefined && CANONICAL_WORKSPACE_DATA_DIRECTORIES.includes(firstSegment)
+	if (firstSegment === undefined || firstSegment === '')
+		return false
+	const topIdentity = await stat(join(realRoot, firstSegment), { bigint: true }).catch(() => undefined)
+	if (!topIdentity)
+		return false
+	for (const name of CANONICAL_WORKSPACE_DATA_DIRECTORIES) {
+		const dataIdentity = await stat(join(realRoot, name), { bigint: true }).catch(() => undefined)
+		if (dataIdentity && dataIdentity.dev === topIdentity.dev && dataIdentity.ino === topIdentity.ino)
+			return true
+	}
+	return false
 }
 
 async function findNearestPackageMetadata(resolvedPath: string): Promise<Readonly<{ name?: string; version?: string }>> {
