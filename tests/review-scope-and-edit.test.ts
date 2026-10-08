@@ -415,7 +415,7 @@ describe('Handoff closure (owner decision O1)', { timeout: 30_000 }, () => {
 		if (exported.status === 'exported') {
 			const snapshot = exported.manifest!.resources.find(resource => resource.type === 'review')
 			expect(snapshot?.snapshot).toMatchObject({ anchor: { scope: 'workspace' } })
-			expect(exported.manifest!.provenance.workspaceSchemaVersion).toBe(3)
+			expect(exported.manifest!.provenance.workspaceSchemaVersion).toBe(CURRENT_WORKSPACE_SCHEMA_VERSION)
 			expect(exported.manifest!.readiness.coverage.review).toMatchObject({ workspaceThreads: 1 })
 		}
 

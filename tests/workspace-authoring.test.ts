@@ -18,11 +18,12 @@ import {
 	sameJson,
 } from '../app/utils/workspace-authoring'
 import type { WorkspaceManifest } from '../src/domain/workspace/schema'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 
 /** Pure rules behind the Workspace authoring pages (roadmap R10, brief g). */
 
 const MANIFEST: WorkspaceManifest = {
-	schemaVersion: 3,
+	schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 	i18n: { defaultLocale: 'en-US' },
 	adapters: [{ moduleSpecifier: './adapters/reference.ts' }],
 	viewports: {

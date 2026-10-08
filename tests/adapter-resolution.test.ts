@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 
 import type { AdapterManifest } from '../src/domain/adapters/schema'
 import type { WorkspaceAdapterSelection } from '../src/domain/workspace/schema'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import {
 	CANONICAL_WORKSPACE_DATA_DIRECTORIES,
 	WORKSPACE_DATA_DIRECTORY,
@@ -139,7 +140,7 @@ describe('Workspace adapter resolution and validated-set installation', () => {
 		const wsB = join(pkg, 'ws-b')
 		for (const ws of [wsA, wsB]) {
 			await mkdir(join(ws, '.uiux'), { recursive: true })
-			await writeFile(join(ws, WORKSPACE_MANIFEST_PATH), JSON.stringify({ schemaVersion: 3, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }))
+			await writeFile(join(ws, WORKSPACE_MANIFEST_PATH), JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }))
 		}
 		await writeFile(join(pkg, 'package.json'), JSON.stringify({ name: 'app', type: 'module' }))
 		await mkdir(join(wsB, 'assets', 'u'), { recursive: true })
@@ -161,7 +162,7 @@ describe('Workspace adapter resolution and validated-set installation', () => {
 		// Workspace B encloses the selected Workspace A; B is itself a package reachable by name.
 		const outer = await makeRoot()
 		await mkdir(join(outer, '.uiux'), { recursive: true })
-		await writeFile(join(outer, WORKSPACE_MANIFEST_PATH), JSON.stringify({ schemaVersion: 3, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }))
+		await writeFile(join(outer, WORKSPACE_MANIFEST_PATH), JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }))
 		await writeFile(join(outer, 'package.json'), JSON.stringify({ name: 'outer', type: 'module' }))
 		await mkdir(join(outer, 'assets', 'u'), { recursive: true })
 		await writeFile(join(outer, 'assets', 'u', 'x.mjs'), 'export const marker = true\n')
@@ -171,7 +172,7 @@ describe('Workspace adapter resolution and validated-set installation', () => {
 		await writeFile(join(outer, 'lib', 'ok.mjs'), 'export const marker = true\n')
 		const inner = join(outer, 'packages', 'app')
 		await mkdir(join(inner, '.uiux'), { recursive: true })
-		await writeFile(join(inner, WORKSPACE_MANIFEST_PATH), JSON.stringify({ schemaVersion: 3, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }))
+		await writeFile(join(inner, WORKSPACE_MANIFEST_PATH), JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }))
 		await mkdir(join(outer, 'node_modules'), { recursive: true })
 		await symlink(outer, join(outer, 'node_modules', 'outer'))
 
