@@ -1932,10 +1932,10 @@
     "history": {
       "unsupported_history_schema_version": "This version history record uses a format this UIUX build does not support.",
       "invalid_version_type": "The version type is not valid.",
-      "invalid_checkpoint_name": "A checkpoint name must be 1 to 120 characters.",
-      "invalid_checkpoint_note": "A checkpoint note can be at most 2,000 characters.",
-      "invalid_system_checkpoint_name": "A system checkpoint does not have its fixed name.",
-      "invalid_net_change": "The version does not say whether it changed anything.",
+      "invalid_checkpoint_name": "A Checkpoint name must be 1 to 120 characters, with no leading or trailing spaces.",
+      "invalid_checkpoint_note": "A Checkpoint note can be at most 2,000 characters.",
+      "invalid_system_checkpoint_name": "A system Checkpoint does not have its fixed name.",
+      "invalid_net_change": "The version's net-change flag is not valid.",
       "invalid_recording_gap": "The recording gap flag is not valid.",
       "invalid_operation": "The recorded change names an operation that history does not record.",
       "missing_revision": "A recorded change does not state the resource revision before or after it.",
@@ -1948,8 +1948,8 @@
       "invalid_actor_type": "The author type of the version is not valid.",
       "unstamped_actor": "The version does not record who made the change.",
       "invalid_system_actor": "The system author of the version is not valid.",
-      "external_actor_id": "A change made outside UIUX cannot name a member.",
-      "invalid_source": "The version does not record where the change came from."
+      "external_actor_id": "The author of a change made outside UIUX cannot carry a member ID.",
+      "invalid_source": "The change's source is not valid."
     },
     "review": {
       "anchor_history_mismatch": "The Review’s place does not match its history.",

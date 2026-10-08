@@ -18,6 +18,8 @@ export const GLOSSARY_NOUNS = [
 	// Owner decision, 2026-10-06: these technical nouns also stay English in zh-TW.
 	// (Checks → 「檢查」 and Catalog → 「型錄」 are translated, so they are not listed.)
 	'Token', 'Agent', 'Slot', 'Runtime', 'Manifest', 'Bundle', 'Schema',
+	// Owner decision, 2026-10-09: the version timeline's Checkpoint stays English in zh-TW.
+	'Checkpoint',
 ]
 
 /** Other English words a zh-TW string may carry, each a name or a literal rather than prose. */

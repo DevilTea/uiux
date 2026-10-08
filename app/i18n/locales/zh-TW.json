@@ -1930,12 +1930,12 @@
       "unsubstantiated_readiness_claim": "就緒宣告沒有 Evidence 佐證。"
     },
     "history": {
-      "unsupported_history_schema_version": "這筆版本歷程紀錄的格式不受此 UIUX 版本支援。",
+      "unsupported_history_schema_version": "此版本的 UIUX 不支援這筆版本歷程紀錄的格式。",
       "invalid_version_type": "版本類型無效。",
-      "invalid_checkpoint_name": "檢查點名稱必須為 1 到 120 個字元。",
-      "invalid_checkpoint_note": "檢查點備註最多 2,000 個字元。",
-      "invalid_system_checkpoint_name": "系統檢查點沒有使用固定名稱。",
-      "invalid_net_change": "版本沒有標示是否有實際變更。",
+      "invalid_checkpoint_name": "Checkpoint 名稱必須為 1 到 120 個字元，且前後不能有空白。",
+      "invalid_checkpoint_note": "Checkpoint 備註最多 2,000 個字元。",
+      "invalid_system_checkpoint_name": "系統 Checkpoint 沒有使用固定名稱。",
+      "invalid_net_change": "版本的淨變更標記無效。",
       "invalid_recording_gap": "記錄缺漏標記無效。",
       "invalid_operation": "記錄的變更使用了歷程不記錄的操作。",
       "missing_revision": "記錄的變更沒有標示變更前後的資源修訂版本。",
@@ -1948,8 +1948,8 @@
       "invalid_actor_type": "版本的作者類型無效。",
       "unstamped_actor": "版本沒有記錄是誰做的變更。",
       "invalid_system_actor": "版本的系統作者無效。",
-      "external_actor_id": "在 UIUX 之外做的變更不能指名成員。",
-      "invalid_source": "版本沒有記錄變更的來源。"
+      "external_actor_id": "外部變更的作者不能帶有成員 ID。",
+      "invalid_source": "變更來源無效。"
     },
     "review": {
       "anchor_history_mismatch": "Review 的位置與其歷程不一致。",
