@@ -10,6 +10,7 @@ Feature: Render context
     Given a Workspace with the themes `light` and `contrast` whose active Adapter supports only `light`
     When an author previews a View with the theme `contrast`
     When formal capture is requested for that View with the theme `contrast`
-    Then the Preview shows a render-context diagnostic instead of rendering the View in any theme
-    Then formal capture refuses that context
-    Then the View still renders and captures with the theme `light`
+    When the author previews and formally captures the same View with the theme `light`
+    Then the `contrast` Preview shows a render-context diagnostic in place of the View and never renders it with the `light` theme
+    Then formal capture refuses the `contrast` context
+    Then the View renders and is captured with the theme `light`

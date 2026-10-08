@@ -4,7 +4,6 @@ Feature: Evidence freshness
   # Note: No test exists yet.
   @spec:id:01a11a5b-1b82-75ab-b08d-a630609e3b80
   @spec:demonstrates:01a115cd-c6de-7744-be27-715bec2e7fef
-  @spec:demonstrates:01a1161c-008a-746d-8d53-a8301b23588f
   Scenario: Editing an Adapter configuration makes a capture stale
     Given a fresh formal capture of a View made under its Adapter entry's current configuration
     When an author changes that Adapter entry's configuration in Settings
