@@ -1,5 +1,5 @@
 Feature: Version history
-  # Source: Discussion #122 (Part 11) d10 rule 5 https://github.com/DevilTea/uiux/discussions/122; "What `.spec/` records after acceptance" key Scenarios https://github.com/DevilTea/uiux/discussions/122#what-spec-records-after-acceptance; owner acceptance https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263.
+  # Source: Discussion #122 (Part 11) d10 rule 5 https://github.com/DevilTea/uiux/discussions/122; "What `.spec/` records after acceptance" key Scenarios https://github.com/DevilTea/uiux/discussions/122; owner acceptance https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263.
   # Status: not built as of cf3b984; see the Implementation gaps entry of 01a11a5e-16f7-7229-8d17-587490168f1f in its owner.
   # Note: No test exists yet; tracked in issue #132.
   @spec:id:01a11a5e-9174-7006-b506-038e979982b8
