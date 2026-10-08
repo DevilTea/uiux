@@ -1,18 +1,27 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 import type { AdapterManifest } from '../src/domain/adapters/schema'
 import type { WorkspaceAdapterSelection } from '../src/domain/workspace/schema'
 import {
+	CANONICAL_WORKSPACE_DATA_DIRECTORIES,
+	WORKSPACE_DATA_DIRECTORY,
+	WORKSPACE_MANIFEST_PATH,
+} from '../src/persistence/paths'
+import {
 	NodeAdapterManifestLoader,
 	NodeWorkspaceAdapterModuleResolver,
 	resolveAndInstallWorkspaceAdapterSet,
 	resolveWorkspaceAdapterSet,
+	resolvedPathEntersWorkspaceDataDirectory,
+	statFileIdentity,
 	type AdapterApiCompatibilityPolicy,
 	type AdapterManifestLoader,
 	type AdapterRegistryInspector,
+	type FileIdentity,
+	type FileIdentityReader,
 	type ResolvedAdapterModule,
 } from '../src/adapters'
 
@@ -48,6 +57,130 @@ describe('Workspace adapter resolution and validated-set installation', () => {
 		await writeFile(symlinkTarget, 'export const marker = true\n')
 		await symlink(symlinkTarget, join(root, 'linked-adapter.mjs'))
 		await expect(resolver.resolve(root, './linked-adapter.mjs')).rejects.toThrow(/outside/i)
+	})
+
+	it('refuses relative adapters that resolve inside canonical Workspace data directories while allowing adapters/', async () => {
+		const root = await makeRoot()
+		const resolver = new NodeWorkspaceAdapterModuleResolver()
+
+		// A legitimate `./adapters/*` local Adapter (e.g. the reference Adapter) stays resolvable.
+		await mkdir(join(root, 'adapters'), { recursive: true })
+		await writeFile(join(root, 'adapters', 'reference.mjs'), 'export const marker = true\n')
+		const ok = await resolver.resolve(root, './adapters/reference.mjs')
+		expect(ok.resolvedPath).toBe(join(root, 'adapters', 'reference.mjs'))
+
+		// Each authoring-writable data directory is refused: an Editor/Agent could upload an
+		// executable module there and select it, escalating to host code execution on resolution.
+		for (const relative of ['./assets/abc/x.mjs', './views/x.mjs', './flows/x.mjs', './reviews/x.mjs', './i18n/en-US.mjs', './.uiux/x.mjs']) {
+			const absolute = join(root, relative.slice(2))
+			await mkdir(dirname(absolute), { recursive: true })
+			await writeFile(absolute, 'import { writeFileSync } from "node:fs"\nwriteFileSync(process.env.UIUX_TEST_MARKER, "pwned")\n')
+			await expect(resolver.resolve(root, relative)).rejects.toThrow(/canonical Workspace data directory/i)
+		}
+
+		// A symlink from adapters/ into assets/ is caught via realpath, not just the literal path.
+		await writeFile(join(root, 'assets', 'payload.mjs'), 'export const marker = true\n')
+		await symlink(join(root, 'assets', 'payload.mjs'), join(root, 'adapters', 'linked.mjs'))
+		await expect(resolver.resolve(root, './adapters/linked.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+
+		// Root-level `./adapter.mjs` stays a legitimate accepted local Adapter.
+		await writeFile(join(root, 'adapter.mjs'), 'export const marker = true\n')
+		const rootLevel = await resolver.resolve(root, './adapter.mjs')
+		expect(rootLevel.resolvedPath).toBe(join(root, 'adapter.mjs'))
+
+		// A case-variant specifier is refused on a case-insensitive file system (identity, not name).
+		if (await filesystemIsCaseInsensitive(root)) {
+			await mkdir(join(root, 'assets', 'cv'), { recursive: true })
+			await writeFile(join(root, 'assets', 'cv', 'x.mjs'), 'export const marker = true\n')
+			await expect(resolver.resolve(root, './ASSETS/cv/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+		}
+	})
+
+	it('refuses bare specifiers that resolve back inside a canonical Workspace data directory', async () => {
+		const resolver = new NodeWorkspaceAdapterModuleResolver()
+
+		// (a) Monorepo: node_modules/<pkg> is a symlink back to the package that contains the Workspace.
+		const base = await makeRoot()
+		const pkg = join(base, 'packages', 'app')
+		const wsRoot = join(pkg, 'design')
+		await mkdir(join(wsRoot, 'assets', 'u1'), { recursive: true })
+		await writeFile(join(pkg, 'package.json'), JSON.stringify({ name: 'app', type: 'module' }))
+		await writeFile(join(wsRoot, 'assets', 'u1', 'x.mjs'), 'export const marker = true\n')
+		await mkdir(join(base, 'node_modules'), { recursive: true })
+		await symlink(pkg, join(base, 'node_modules', 'app'))
+		await expect(resolver.resolve(wsRoot, 'app/design/assets/u1/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+
+		// (b) Self-reference: the Workspace root is itself a package whose exports/imports map `./*`.
+		const selfRoot = await makeRoot()
+		await mkdir(join(selfRoot, 'assets', 'u1'), { recursive: true })
+		await writeFile(join(selfRoot, 'package.json'), JSON.stringify({
+			name: 'selfref', type: 'module', exports: { './*': './*' }, imports: { '#*': './*' },
+		}))
+		await writeFile(join(selfRoot, 'assets', 'u1', 'x.mjs'), 'export const marker = true\n')
+		await expect(resolver.resolve(selfRoot, 'selfref/assets/u1/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+		await expect(resolver.resolve(selfRoot, '#assets/u1/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+
+		// A bare package resolving to a genuine node_modules location outside the root stays allowed.
+		const normalRoot = await makeRoot()
+		const normalPkg = join(normalRoot, 'node_modules', '@fixture', 'ok-adapter')
+		await mkdir(normalPkg, { recursive: true })
+		await writeFile(join(normalPkg, 'package.json'), JSON.stringify({ name: '@fixture/ok-adapter', version: '1.0.0', type: 'module', exports: { import: './index.mjs' } }))
+		await writeFile(join(normalPkg, 'index.mjs'), 'export const marker = true\n')
+		const ok = await resolver.resolve(normalRoot, '@fixture/ok-adapter')
+		expect(ok.resolvedPath).toBe(join(normalPkg, 'index.mjs'))
+	})
+
+	it('refuses a bare specifier that resolves into a SIBLING Workspace data directory', async () => {
+		const resolver = new NodeWorkspaceAdapterModuleResolver()
+		// Two Workspaces share one enclosing package; node_modules/app symlinks back to that package.
+		const base = await makeRoot()
+		const pkg = join(base, 'packages', 'app')
+		const wsA = join(pkg, 'ws-a')
+		const wsB = join(pkg, 'ws-b')
+		for (const ws of [wsA, wsB]) {
+			await mkdir(join(ws, '.uiux'), { recursive: true })
+			await writeFile(join(ws, WORKSPACE_MANIFEST_PATH), JSON.stringify({ schemaVersion: 3, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }))
+		}
+		await writeFile(join(pkg, 'package.json'), JSON.stringify({ name: 'app', type: 'module' }))
+		await mkdir(join(wsB, 'assets', 'u'), { recursive: true })
+		await writeFile(join(wsB, 'assets', 'u', 'x.mjs'), 'export const marker = true\n')
+		await mkdir(join(wsB, 'lib'), { recursive: true })
+		await writeFile(join(wsB, 'lib', 'ok.mjs'), 'export const marker = true\n')
+		await mkdir(join(base, 'node_modules'), { recursive: true })
+		await symlink(pkg, join(base, 'node_modules', 'app'))
+
+		// From ws-a, reaching ws-b's assets/ through the shared package is refused.
+		await expect(resolver.resolve(wsA, 'app/ws-b/assets/u/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+		// A non-data directory of the sibling Workspace is not a data directory, so it stays resolvable.
+		const ok = await resolver.resolve(wsA, 'app/ws-b/lib/ok.mjs')
+		expect(ok.resolvedPath).toBe(join(wsB, 'lib', 'ok.mjs'))
+	})
+
+	it('refuses a specifier that resolves into an ENCLOSING Workspace data directory', async () => {
+		const resolver = new NodeWorkspaceAdapterModuleResolver()
+		// Workspace B encloses the selected Workspace A; B is itself a package reachable by name.
+		const outer = await makeRoot()
+		await mkdir(join(outer, '.uiux'), { recursive: true })
+		await writeFile(join(outer, WORKSPACE_MANIFEST_PATH), JSON.stringify({ schemaVersion: 3, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }))
+		await writeFile(join(outer, 'package.json'), JSON.stringify({ name: 'outer', type: 'module' }))
+		await mkdir(join(outer, 'assets', 'u'), { recursive: true })
+		await writeFile(join(outer, 'assets', 'u', 'x.mjs'), 'export const marker = true\n')
+		await mkdir(join(outer, '.uiux', 'nested'), { recursive: true })
+		await writeFile(join(outer, '.uiux', 'nested', 'y.mjs'), 'export const marker = true\n')
+		await mkdir(join(outer, 'lib'), { recursive: true })
+		await writeFile(join(outer, 'lib', 'ok.mjs'), 'export const marker = true\n')
+		const inner = join(outer, 'packages', 'app')
+		await mkdir(join(inner, '.uiux'), { recursive: true })
+		await writeFile(join(inner, WORKSPACE_MANIFEST_PATH), JSON.stringify({ schemaVersion: 3, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }))
+		await mkdir(join(outer, 'node_modules'), { recursive: true })
+		await symlink(outer, join(outer, 'node_modules', 'outer'))
+
+		// From the inner Workspace, reaching the enclosing Workspace's assets/ and .uiux/ is refused.
+		await expect(resolver.resolve(inner, 'outer/assets/u/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+		await expect(resolver.resolve(inner, 'outer/.uiux/nested/y.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+		// The enclosing Workspace's non-data directory still resolves.
+		const ok = await resolver.resolve(inner, 'outer/lib/ok.mjs')
+		expect(ok.resolvedPath).toBe(join(outer, 'lib', 'ok.mjs'))
 	})
 
 	it('resolves bare packages from the Workspace package environment, not the UIUX process cwd', async () => {
@@ -209,6 +342,68 @@ describe('Workspace adapter resolution and validated-set installation', () => {
 	})
 })
 
+describe('Canonical Workspace data-directory membership is decided by file identity', () => {
+	const root = '/virtual/ws'
+	const identity = (dev: number, ino: number): FileIdentity => ({ dev: BigInt(dev), ino: BigInt(ino) })
+	const readerFor = (entries: ReadonlyMap<string, FileIdentity>): FileIdentityReader =>
+		async path => entries.get(path)
+
+	it('refuses a non-canonical-case segment whose inode matches a canonical data directory', async () => {
+		// `assets` and `ASSETS` share one inode (a case-insensitive volume). A name comparison would
+		// miss `ASSETS`; identity catches it. This holds on any OS because `stat` is injected.
+		const reader = readerFor(new Map([
+			[join(root, 'ASSETS'), identity(1, 42)],
+			[join(root, 'assets'), identity(1, 42)],
+		]))
+		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'ASSETS', 'u', 'x.mjs'), root, reader)).toBe(true)
+	})
+
+	it('allows a top-level segment that is not identical to any canonical data directory', async () => {
+		const reader = readerFor(new Map([
+			[join(root, 'docs'), identity(1, 7)],
+			[join(root, 'assets'), identity(1, 42)],
+		]))
+		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'docs', 'x.mjs'), root, reader)).toBe(false)
+	})
+
+	it('fails closed when an identity read errors with anything other than absence', async () => {
+		const reader: FileIdentityReader = async () => {
+			const error = new Error('permission denied') as NodeJS.ErrnoException
+			error.code = 'EACCES'
+			throw error
+		}
+		await expect(resolvedPathEntersWorkspaceDataDirectory(join(root, 'assets', 'x.mjs'), root, reader))
+			.rejects.toThrow(/permission denied/)
+	})
+
+	it('treats a genuinely absent path as not inside a data directory via the default reader', async () => {
+		expect(await statFileIdentity(join(root, 'definitely-missing'))).toBeUndefined()
+	})
+
+	const runsAsRoot = process.getuid?.() === 0
+	const chmodUnsupported = process.platform === 'win32'
+	it.skipIf(runsAsRoot || chmodUnsupported)('default statFileIdentity rejects (does not swallow) a permission error', async () => {
+		// Guards against a regression where statFileIdentity reverts to treating every error as absence.
+		const base = await mkdtemp(join(tmpdir(), 'uiux-stat-perm-'))
+		temporaryRoots.push(base)
+		const locked = join(base, 'locked')
+		await mkdir(locked)
+		await writeFile(join(locked, 'x.mjs'), 'export const marker = true\n')
+		await chmod(locked, 0o000)
+		try {
+			await expect(statFileIdentity(join(locked, 'x.mjs'))).rejects.toMatchObject({ code: 'EACCES' })
+		}
+		finally {
+			await chmod(locked, 0o700)
+		}
+	})
+
+	it('derives both exports from the same source of truth and excludes adapters/', () => {
+		expect(CANONICAL_WORKSPACE_DATA_DIRECTORIES).toEqual(Object.values(WORKSPACE_DATA_DIRECTORY))
+		expect(CANONICAL_WORKSPACE_DATA_DIRECTORIES).not.toContain('adapters')
+	})
+})
+
 async function makeRoot(): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-adapter-resolution-'))
 	temporaryRoots.push(root)
@@ -216,6 +411,19 @@ async function makeRoot(): Promise<string> {
 	// through a symlink (macOS /var -> /private/var), so compare against the
 	// realpath of the fixture root rather than the raw tmpdir() spelling.
 	return realpath(root)
+}
+
+async function filesystemIsCaseInsensitive(root: string): Promise<boolean> {
+	const probe = join(root, '.case-probe')
+	await mkdir(probe, { recursive: true })
+	try {
+		const lower = await stat(probe, { bigint: true })
+		const upper = await stat(join(root, '.CASE-PROBE'), { bigint: true }).catch(() => undefined)
+		return upper !== undefined && upper.dev === lower.dev && upper.ino === lower.ino
+	}
+	finally {
+		await rm(probe, { recursive: true, force: true })
+	}
 }
 
 function fixtureInput(
