@@ -124,6 +124,8 @@ export class NodeWorkspaceAdapterModuleResolver implements AdapterModuleResolver
 			const realRoot = await realpath(root)
 			if (!isContainedPath(realRoot, resolvedPath))
 				throw new Error('Workspace-relative adapter module resolves outside the selected Workspace root.')
+			if (isInsideCanonicalDataDirectory(realRoot, resolvedPath))
+				throw new Error('Workspace-relative adapter module resolves inside a canonical Workspace data directory; Adapter code must live outside authored data directories that Editors and Agents can write.')
 		}
 
 		const packageMetadata = relativeSelection ? {} : await findNearestPackageMetadata(resolvedPath)
@@ -312,6 +314,23 @@ function diagnosticMessage(prefix: string, cause: unknown): string {
 function isContainedPath(root: string, candidate: string): boolean {
 	const path = relative(root, candidate)
 	return path === '' || (!path.startsWith('..') && !isAbsolute(path))
+}
+
+/**
+ * Canonical top-level Workspace directories that hold authored data an Editor or Agent can write
+ * (through asset/View/Flow/Locale/Review authoring and workspace artifacts). A `./` Adapter must
+ * not resolve into any of these: otherwise a principal capped at Editor could upload an executable
+ * module as data and select it, escalating to host code execution on the next adapter resolution.
+ * `adapters/` is deliberately absent — it is code, edited on disk, and holds legitimate `./` Adapters.
+ */
+const CANONICAL_WORKSPACE_DATA_DIRECTORIES: readonly string[] = ['.uiux', 'assets', 'views', 'flows', 'reviews', 'i18n']
+
+function isInsideCanonicalDataDirectory(realRoot: string, candidate: string): boolean {
+	const rel = relative(realRoot, candidate)
+	if (rel === '' || rel.startsWith('..') || isAbsolute(rel))
+		return false
+	const firstSegment = rel.split(/[/\\]/u)[0]
+	return firstSegment !== undefined && CANONICAL_WORKSPACE_DATA_DIRECTORIES.includes(firstSegment)
 }
 
 async function findNearestPackageMetadata(resolvedPath: string): Promise<Readonly<{ name?: string; version?: string }>> {

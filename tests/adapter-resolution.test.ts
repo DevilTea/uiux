@@ -50,6 +50,31 @@ describe('Workspace adapter resolution and validated-set installation', () => {
 		await expect(resolver.resolve(root, './linked-adapter.mjs')).rejects.toThrow(/outside/i)
 	})
 
+	it('refuses relative adapters that resolve inside canonical Workspace data directories while allowing adapters/', async () => {
+		const root = await makeRoot()
+		const resolver = new NodeWorkspaceAdapterModuleResolver()
+
+		// A legitimate `./adapters/*` local Adapter (e.g. the reference Adapter) stays resolvable.
+		await mkdir(join(root, 'adapters'), { recursive: true })
+		await writeFile(join(root, 'adapters', 'reference.mjs'), 'export const marker = true\n')
+		const ok = await resolver.resolve(root, './adapters/reference.mjs')
+		expect(ok.resolvedPath).toBe(join(root, 'adapters', 'reference.mjs'))
+
+		// Each authoring-writable data directory is refused: an Editor/Agent could upload an
+		// executable module there and select it, escalating to host code execution on resolution.
+		for (const relative of ['./assets/abc/x.mjs', './views/x.mjs', './flows/x.mjs', './reviews/x.mjs', './i18n/en-US.mjs', './.uiux/x.mjs']) {
+			const absolute = join(root, relative.slice(2))
+			await mkdir(dirname(absolute), { recursive: true })
+			await writeFile(absolute, 'import { writeFileSync } from "node:fs"\nwriteFileSync(process.env.UIUX_TEST_MARKER, "pwned")\n')
+			await expect(resolver.resolve(root, relative)).rejects.toThrow(/canonical Workspace data directory/i)
+		}
+
+		// A symlink from adapters/ into assets/ is caught via realpath, not just the literal path.
+		await writeFile(join(root, 'assets', 'payload.mjs'), 'export const marker = true\n')
+		await symlink(join(root, 'assets', 'payload.mjs'), join(root, 'adapters', 'linked.mjs'))
+		await expect(resolver.resolve(root, './adapters/linked.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+	})
+
 	it('resolves bare packages from the Workspace package environment, not the UIUX process cwd', async () => {
 		const root = await makeRoot()
 		const packageRoot = join(root, 'node_modules', '@fixture', 'uiux-adapter')
