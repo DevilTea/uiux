@@ -1960,7 +1960,9 @@
       "store_unsafe": "The history store on this computer is not safe to use. Check its folder permissions and links.",
       "write_failed": "History could not be saved. Nothing was changed.",
       "rollback_failed": "History could not be saved, and the interrupted write could not be fully undone. Check the history store.",
-      "invalid_cursor": "This place in the timeline is invalid. Reload the timeline."
+      "invalid_cursor": "This place in the timeline is invalid. Reload the timeline.",
+      "invalid_comparison": "These versions cannot be compared. Choose a version and what to compare it with.",
+      "blob_missing": "A file of this version is no longer stored, so it cannot be compared."
     },
     "review": {
       "anchor_history_mismatch": "The Review’s place does not match its history.",
