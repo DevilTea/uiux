@@ -8,6 +8,6 @@ Feature: Version history
   Scenario: An edit made outside UIUX shows as an external version
     Given a running `uiux dev` server for a Workspace
     When a text editor changes a View file outside UIUX
-    When a member then creates a checkpoint
-    Then the timeline shows an external version with that change before the checkpoint
+    When a member then creates a Checkpoint
+    Then the timeline shows an external version with that change before the Checkpoint
     Then the external version names no member as its actor

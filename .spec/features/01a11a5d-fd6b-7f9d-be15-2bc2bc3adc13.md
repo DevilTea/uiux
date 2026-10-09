@@ -62,6 +62,9 @@ rules:
     statement: A restore also needs the write key of the restored resource's kind as
       the Access Contract assigns it, so `history.restore` never stands in for a
       missing write key.
+  - id: 01a11e0d-d911-7030-9565-7473aa0995e1
+    statement: The autosave holding a restore's write event closes right after it,
+      so every restore forms a version of its own.
 ---
 
 ## Sources
@@ -72,6 +75,7 @@ rules:
 - Discussion #140 body (Part 15, 2026-10-08), "Proposal — Permission keys and role presets: explicit key sets per member, Workspace-defined presets and derived labels": decisions 1–13, owner answers Q1–Q12, Amended decisions, "What `.spec/` records after acceptance" and Proposed defaults R1–R30. https://github.com/DevilTea/uiux/discussions/140
 - Discussion #140 comment (2026-10-08), "Owner acceptance — 2026-10-08": accepted as written, every decision and Proposed default included. https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18816365
 - Discussion #140 comment (2026-10-08), "Owner rulings — 2026-10-08 (clarifications to the accepted proposal)": ruling 1, applying a preset to an Agent drops its `humanOnly` keys; ruling 2, Product Kit Tools that ship before permission keys authorize by the upgrade mapping's keys. https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18819026
+- Discussion #122 comment (2026-10-09), "Owner rulings — 2026-10-09 (implementation clarifications, #132, continued)": rulings 1-8 on the address keys, a restore as its own version, `expectedRevision: null` for a missing resource, the standalone impact analyzer, Adapter-based Evidence staleness, stage-only synchronized scrolling, Checkpoint deletion in the Workbench and the separate Review event list. https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18825439
 
 ## Rule sources
 
@@ -93,6 +97,7 @@ rules:
 | 01a11a5e-189f-7b86-8270-e9b5d62aaa65 | [#122 body: decision 10, rule 9](https://github.com/DevilTea/uiux/discussions/122); [#122 body: decision 2](https://github.com/DevilTea/uiux/discussions/122); [#122 acceptance](https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263) |
 | 01a11a5e-18f2-7991-8f7d-aa4c8015d14a | [#122 body: decision 11, Workbench: Restore](https://github.com/DevilTea/uiux/discussions/122); [#122 body: Proposed defaults R34](https://github.com/DevilTea/uiux/discussions/122); [#122 acceptance](https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263) |
 | 01a11c09-c648-71be-a550-2ecabf12f5d0 | [#140 body: Interactions 2](https://github.com/DevilTea/uiux/discussions/140); [#140 body: R7](https://github.com/DevilTea/uiux/discussions/140); [#140 acceptance](https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18816365); PR #145 review (https://github.com/DevilTea/uiux/pull/145): it names the Access Contract's write key per kind (01a11c09-a42a-7d6b-bb5e-01d7cf1ce2de) and is the single owner of the restore's second key |
+| 01a11e0d-d911-7030-9565-7473aa0995e1 | [#122 owner rulings 2026-10-09 (continued): ruling 2, the open autosave is closed before the restore event and again after it, so the restore stands alone with `restoredFrom`](https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18825439) |
 
 ## Implementation gaps
 
@@ -104,14 +109,15 @@ rules:
 - 01a11a5e-15e9-797f-9a1c-1e6ea5b7c431: Not built as of cf3b984: no version history exists; tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
 - 01a11a5e-1645-7f02-ae9e-05dd242e4a82: Not built as of cf3b984: no version history exists; tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
 - 01a11a5e-16a2-7c0b-9495-3dae49e9dda3: Not built as of cf3b984: no version history exists; tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
-- 01a11a5e-16f7-7229-8d17-587490168f1f: Not built as of cf3b984: no version history exists; it also needs the reference-impact analysis tracked in issue #75 (https://github.com/DevilTea/uiux/issues/75); tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
-- 01a11a5e-174b-7e74-b232-5ec76601fbed: Not built as of cf3b984: no version history exists; it also needs the reference-impact analysis tracked in issue #75 (https://github.com/DevilTea/uiux/issues/75); tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
-- 01a11a5e-17a0-7c21-9e23-dd56ef12c9a9: Not built as of cf3b984: no version history exists; it also needs the reference-impact analysis tracked in issue #75 (https://github.com/DevilTea/uiux/issues/75); tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
+- 01a11a5e-16f7-7229-8d17-587490168f1f: Not built as of cf3b984: no version history exists; its impact analysis is to be built with history as a standalone analyzer designed for reuse by issue #75 (https://github.com/DevilTea/uiux/issues/75), without waiting for it (owner ruling 4 of 2026-10-09, https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18825439); tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
+- 01a11a5e-174b-7e74-b232-5ec76601fbed: Not built as of cf3b984: no version history exists; its impact analysis is to be built with history as a standalone analyzer designed for reuse by issue #75 (https://github.com/DevilTea/uiux/issues/75), without waiting for it (owner ruling 4 of 2026-10-09, https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18825439); tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
+- 01a11a5e-17a0-7c21-9e23-dd56ef12c9a9: Not built as of cf3b984: no version history exists; its impact analysis is to be built with history as a standalone analyzer designed for reuse by issue #75 (https://github.com/DevilTea/uiux/issues/75), without waiting for it (owner ruling 4 of 2026-10-09, https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18825439); the formal Evidence made stale through a changed `adapters` selection, order or configuration is not listed until Adapter provenance lands (issues #57 and #92), so that part stays open (owner ruling 5); tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
 - 01a11a5e-17f7-7bdf-8cec-24fea8c348b2: Not built as of cf3b984: no version history exists; tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
 - 01a11a5e-184c-7184-bb0b-781744e6a1ca: Not built as of cf3b984: no version history exists; tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
 - 01a11a5e-189f-7b86-8270-e9b5d62aaa65: Not built as of cf3b984: no version history exists; tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
 - 01a11a5e-18f2-7991-8f7d-aa4c8015d14a: Not built as of cf3b984: no version history exists; tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
 - 01a11c09-c648-71be-a550-2ecabf12f5d0: Not built as of 0c26ead: restore does not exist; tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132) and issue #142 (https://github.com/DevilTea/uiux/issues/142).
+- 01a11e0d-d911-7030-9565-7473aa0995e1: Not built as of 11f8b7b: no version history exists; tracked in issue #132 (https://github.com/DevilTea/uiux/issues/132).
 
 ## Notes
 
