@@ -126,13 +126,18 @@ export type HistoryService = Readonly<{
 export const DEFAULT_VERSION_LIST_LIMIT = 50
 export const MAX_VERSION_LIST_LIMIT = 200
 const BOUNDARY_RETRY_AFTER_SECONDS = 1
+/** Cross-schema pairs are one per migration, so a few hundred cover any realistic timeline. */
+const CROSS_SCHEMA_CACHE_LIMIT = 256
 
 export function createHistoryService(
 	persistence: FileNativePersistence,
 	history: HistoryStoreSource | undefined,
-	options: Readonly<{ boundary?: () => CheckpointBoundary | undefined; comparison?: HistoryDiffService }> = {},
+	options: Readonly<{ boundary?: () => CheckpointBoundary | undefined; comparison?: HistoryDiffService; log?: (message: string) => void }> = {},
 ): HistoryService {
 	const comparison = options.comparison ?? createHistoryDiffService(persistence, history)
+	const log = options.log ?? ((message: string) => console.warn(message))
+	/** Cross-schema pair summaries by `(fromId, toId)`, least recently used first. */
+	const crossSchemaCache = new Map<string, readonly ChangedResource[]>()
 
 	async function openStores(): Promise<Awaited<ReturnType<HistoryStoreSource['open']>> | HistoryRefusal> {
 		try {
@@ -291,22 +296,44 @@ export function createHistoryService(
 	 * version the recorded revisions decide. Across a migration the pair goes through the comparison
 	 * service itself, so the listing says what `get_version_diff` says (a change the migration alone
 	 * made, such as the manifest `schemaVersion`, is not one: Rule 01a11a5e-1085-71ec-ac82-d60263ae8173).
-	 * A pair the comparison refuses (an unrecognized schema, Rule 01a11a5e-081c-…, or a lost blob)
-	 * keeps its revision summary.
+	 * A pair the comparison refuses (an unrecognized schema, Rule 01a11a5e-081c-…, or a lost or
+	 * corrupt blob) keeps its revision summary, with a logged warning. Versions are immutable, so a
+	 * pair's result is kept in a bounded in-process cache.
 	 */
 	async function changeSummaries(timeline: MergedTimeline): Promise<ReadonlyMap<string, readonly ChangedResource[]>> {
 		const byId = new Map(timeline.versions.map(entry => [entry.version.id, entry.version]))
 		const summaries = new Map<string, readonly ChangedResource[]>()
 		for (const entry of timeline.versions) {
 			const parent = entry.predecessor === undefined ? undefined : byId.get(entry.predecessor)
-			let rows: readonly ResourceChangeSummary[] = summarizeResourceChanges(parent?.resources, entry.version.resources)
-			if (parent && parent.workspaceSchemaVersion !== entry.version.workspaceSchemaVersion) {
-				const compared = await comparison.diffVersions({ from: parent.id, to: entry.version.id })
-				if (compared.status === 'compared') rows = compared.summary
-			}
-			summaries.set(entry.version.id, rows.flatMap(row => row.status === 'unchanged' ? [] : [{ kind: row.kind, key: row.key, status: row.status }]))
+			const rows = parent && parent.workspaceSchemaVersion !== entry.version.workspaceSchemaVersion
+				? await crossSchemaSummary(parent, entry.version)
+				: changedOnly(summarizeResourceChanges(parent?.resources, entry.version.resources))
+			summaries.set(entry.version.id, rows)
 		}
 		return summaries
+	}
+
+	async function crossSchemaSummary(parent: VersionRecord, version: VersionRecord): Promise<readonly ChangedResource[]> {
+		const key = `${parent.id}\0${version.id}`
+		const cached = crossSchemaCache.get(key)
+		if (cached) {
+			// Least recently used first: a hit moves the pair to the end.
+			crossSchemaCache.delete(key)
+			crossSchemaCache.set(key, cached)
+			return cached
+		}
+		const compared = await comparison.diffVersions({ from: parent.id, to: version.id })
+		let rows: readonly ChangedResource[]
+		if (compared.status === 'compared') {
+			rows = changedOnly(compared.summary)
+		}
+		else {
+			log(`uiux: the version listing could not compare ${parent.id} with ${version.id} across schema versions ${parent.workspaceSchemaVersion} and ${version.workspaceSchemaVersion} (${compared.code}: ${compared.message}); its summary falls back to the recorded revisions.`)
+			rows = changedOnly(summarizeResourceChanges(parent.resources, version.resources))
+		}
+		crossSchemaCache.set(key, rows)
+		while (crossSchemaCache.size > CROSS_SCHEMA_CACHE_LIMIT) crossSchemaCache.delete(crossSchemaCache.keys().next().value!)
+		return rows
 	}
 
 	async function readTimeline(): Promise<MergedTimeline | HistoryRefusal> {
@@ -393,6 +420,10 @@ function listItem(entry: TimelineVersion, summary: readonly ChangedResource[]): 
 				}),
 		summary,
 	}
+}
+
+function changedOnly(rows: readonly ResourceChangeSummary[]): readonly ChangedResource[] {
+	return rows.flatMap(row => row.status === 'unchanged' ? [] : [{ kind: row.kind, key: row.key, status: row.status }])
 }
 
 function actorMatches(actor: HistoryActor, wanted: string): boolean {

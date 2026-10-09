@@ -17,11 +17,12 @@ import loginRoute from '../server/api/session/login.post'
 import { createLeaseManager } from '../src/application/access/leases'
 import type { MemberPrincipal } from '../src/application/access/principal'
 import { createHistoryRecorder, type HistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
-import type { CheckpointBoundary, VersionListing, VersionListItem } from '../src/application/services/history-service'
+import { createHistoryDiffService } from '../src/application/services/history-diff'
+import { createHistoryService, type CheckpointBoundary, type VersionListing, type VersionListItem } from '../src/application/services/history-service'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { CheckpointRecord, HostVersionRecord } from '../src/domain/history/schema'
-import { FileNativePersistence, localeRelativePath, WORKSPACE_CHECKPOINTS_DIRECTORY, workspaceRelativePath } from '../src/persistence'
+import { artifactRelativePath, FileNativePersistence, localeRelativePath, WORKSPACE_CHECKPOINTS_DIRECTORY, workspaceRelativePath } from '../src/persistence'
 import { readMergedTimeline, versionResourcesFromSnapshot } from '../src/persistence/history'
 import { CHECKPOINT_RECOMMENDATION, versionResourceUri } from '../src/mcp/server'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
@@ -473,9 +474,8 @@ describe('the version listing', () => {
 		expect(listed(await ctx.app.listVersions({ resource: { kind: 'flow', key: randomUUID() } })).versions).toEqual([])
 	})
 
-	it('summarizes a pair across a migration as get_version_diff does (Rule 01a11a5e-1085-71ec-ac82-d60263ae8173)', async () => {
-		const ctx = await fixture()
-		// A pre-migration Checkpoint recorded under the previous schema version, before the Baseline.
+	/** A pre-migration Checkpoint recorded under the previous schema version, before the Baseline. */
+	async function previousSchemaCheckpoint(ctx: Fixture) {
 		const previousSchema = CURRENT_WORKSPACE_SCHEMA_VERSION - 1
 		const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
 		const manifestPath = workspaceRelativePath()
@@ -494,6 +494,12 @@ describe('the version listing', () => {
 			name: `Before migration to schemaVersion ${CURRENT_WORKSPACE_SCHEMA_VERSION}`,
 			source: 'cli',
 		}, built.blobs)
+		return { before, built, manifestDigest: built.resources.find(resource => resource.kind === 'workspace')!.files[manifestPath]! }
+	}
+
+	it('summarizes a pair across a migration as get_version_diff does (Rule 01a11a5e-1085-71ec-ac82-d60263ae8173)', async () => {
+		const ctx = await fixture()
+		const { before, built } = await previousSchemaCheckpoint(ctx)
 
 		const rows = listed(await ctx.app.listVersions({})).versions
 		expect(rows.map(row => [row.id, row.parent])).toEqual([[ctx.baseline, before], [before, null]])
@@ -508,6 +514,28 @@ describe('the version listing', () => {
 		expect(rows[0]!.summary).toEqual([])
 		// The projection judges the pair the same way.
 		expect(listed(await ctx.app.listVersions({ resource: { kind: 'workspace', key: 'workspace' } })).versions.map(row => row.id)).toEqual([before])
+	})
+
+	it('compares a cross-schema pair once, and warns when it falls back to the recorded revisions', async () => {
+		const ctx = await fixture()
+		const { before, manifestDigest } = await previousSchemaCheckpoint(ctx)
+		// The pre-migration manifest blob is lost, so the comparison is refused (history.blob_missing).
+		await rm(join(ctx.root, artifactRelativePath(manifestDigest)))
+		const inner = createHistoryDiffService(ctx.persistence, ctx.history)
+		const compare = vi.fn(inner.diffVersions)
+		const warnings: string[] = []
+		const service = createHistoryService(ctx.persistence, ctx.history, { comparison: { diffVersions: compare }, log: message => warnings.push(message) })
+		const first = listed(await service.listVersions({})).versions
+		expect(compare).toHaveBeenCalledTimes(1)
+		expect(compare).toHaveBeenCalledWith({ from: before, to: ctx.baseline })
+		expect(await compare.mock.results[0]!.value).toMatchObject({ status: 'failed', code: 'history.blob_missing' })
+		expect(warnings).toEqual([expect.stringContaining('history.blob_missing')])
+		// The fallback is the revision comparison: the manifest's schemaVersion change shows.
+		expect(first[0]).toMatchObject({ id: ctx.baseline, summary: [{ kind: 'workspace', key: 'workspace', status: 'modified' }] })
+		// Versions are immutable: a second listing reuses the pair's result.
+		expect(listed(await service.listVersions({ resource: { kind: 'workspace', key: 'workspace' } })).versions.map(row => row.id)).toEqual([ctx.baseline, before])
+		expect(compare).toHaveBeenCalledTimes(1)
+		expect(warnings).toHaveLength(1)
 	})
 
 	it('pages with a stable cursor and validates the request', async () => {
