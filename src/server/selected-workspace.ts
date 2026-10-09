@@ -10,6 +10,7 @@ import { FileNativePersistence } from '../persistence/file-native'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 import { AccessService } from './access/service'
 import { AccessStore, resolveUiuxHome } from './access/store'
+import { createHistoryStoreFactory, type HistoryStoreFactory } from './history-stores'
 
 export type SelectedWorkspaceServerRuntime = Readonly<{
 	root: string
@@ -19,6 +20,8 @@ export type SelectedWorkspaceServerRuntime = Readonly<{
 	leases: LeaseManager
 	/** The Workspace's roster and authentication, opened (and created if needed) once per process. */
 	access(): Promise<AccessService>
+	/** The Workspace's history stores; disabled (never opened) for the internal `uiux publish` server. */
+	history: HistoryStoreFactory
 	mcp: McpHttpHandler
 	close(): Promise<void>
 }>
@@ -74,6 +77,13 @@ export function createSelectedWorkspaceServerRuntime(
 		return pending
 	}
 	const mcp = createUiuxMcpHttpHandler(app, { leases })
+	// Nothing records history yet: the recorder that opens these stores arrives with the autosave work (B3).
+	const history = createHistoryStoreFactory({
+		workspaceRoot: selectedRoot,
+		persistence,
+		home: () => options?.uiuxHome ?? resolveUiuxHome(),
+		...(publishCredential ? { publishCredential } : {}),
+	})
 	return Object.freeze({
 		root: selectedRoot,
 		serverOrigin,
@@ -81,6 +91,7 @@ export function createSelectedWorkspaceServerRuntime(
 		app,
 		leases,
 		access,
+		history,
 		mcp,
 		async close() {
 			await accessService?.flushUsage()
