@@ -1967,7 +1967,11 @@
       "rollback_failed": "History could not be saved, and the interrupted write could not be fully undone. Check the history store.",
       "invalid_cursor": "This place in the timeline is invalid. Reload the timeline.",
       "invalid_comparison": "These versions cannot be compared. Choose a version and what to compare it with.",
-      "blob_missing": "A file of this version is no longer stored, so it cannot be compared."
+      "blob_missing": "A file of this version is no longer stored, so it cannot be compared.",
+      "invalid_listing": "This version list request is not valid. Check the filters and the page size.",
+      "unavailable": "Version history isn't available on this server, so no Checkpoint can be created.",
+      "boundary_failed": "The open autosave couldn't be closed, so no Checkpoint was created. Nothing was changed. Try again.",
+      "not_checkpoint": "Only a Checkpoint can be deleted. This version was saved automatically."
     },
     "review": {
       "anchor_history_mismatch": "The Review’s place does not match its history.",

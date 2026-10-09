@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createLeaseManager } from '../src/application/access/leases'
-import { ACCESS_OPERATIONS, authorizeOperation, type AccessOperation } from '../src/application/access/policy'
+import { ACCESS_OPERATIONS, authorizeOperation, HUMAN_ONLY_PERMISSION_KEYS, PERMISSION_KEYS, type AccessOperation } from '../src/application/access/policy'
 import { ACCESS_ROLES, MEMBER_KINDS, principalActor, type AccessRole, type MemberPrincipal, type SystemPrincipal } from '../src/application/access/principal'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
@@ -54,6 +54,8 @@ const MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; H?: t
 	assessHandoffReadiness: { min: 'viewer' },
 	listLeases: { min: 'viewer' },
 	diffVersions: { min: 'viewer' },
+	listVersions: { min: 'viewer' },
+	readVersion: { min: 'viewer' },
 	readSession: { min: 'viewer', S: true },
 	endSession: { min: 'viewer', S: true },
 	createReviewThread: { min: 'reviewer' },
@@ -66,6 +68,7 @@ const MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; H?: t
 	editReviewMessage: { min: 'reviewer' },
 	retractReviewThread: { min: 'reviewer' },
 	resolveReviewThread: { min: 'reviewer', H: true, S: true },
+	createCheckpoint: { min: 'reviewer' },
 	createView: { min: 'editor' },
 	updateViewSpec: { min: 'editor' },
 	updateViewStructure: { min: 'editor' },
@@ -81,6 +84,7 @@ const MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; H?: t
 	acquireLeases: { min: 'editor' },
 	releaseLeases: { min: 'editor' },
 	forceReleaseLease: { min: 'owner', H: true, S: true },
+	deleteCheckpoint: { min: 'owner', H: true, S: true },
 	administerAccess: { min: 'owner', H: true, S: true, L: true },
 }
 
@@ -113,6 +117,77 @@ describe('permission matrix (role × operation)', () => {
 			}
 		})
 	}
+})
+
+/**
+ * Clause 01a11c09-a930-7e31-bb0a-9e2bee79490c, transcribed independently of the policy data: the
+ * built-in Access presets in order, each with the keys it adds to the one before it.
+ */
+const BUILT_IN_PRESETS: readonly Readonly<{ role: AccessRole; adds: readonly string[] }>[] = [
+	{ role: 'viewer', adds: ['workspace.read', 'history.read', 'product-kit.source.read'] },
+	{ role: 'reviewer', adds: ['reviews.write', 'reviews.submit', 'reviews.promote', 'reviews.resolve', 'checkpoints.create'] },
+	{ role: 'editor', adds: ['views.write', 'flows.write', 'locales.write', 'assets.write', 'settings.write', 'product-kit.write', 'product-kit.compose', 'evidence.capture', 'handoff.export', 'history.restore'] },
+	{ role: 'owner', adds: ['checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'] },
+]
+
+describe('permission-key annotations (seam 5; Clauses 01a11c09-a26e-73bb-9a29-eed40aae37bd and 01a11c09-a930-7e31-bb0a-9e2bee79490c)', () => {
+	it('gives every annotated operation the lowest built-in preset that holds its key as its minimum role', () => {
+		const annotated = Object.entries(ACCESS_OPERATIONS).flatMap(([operation, rule]) => 'permissionKey' in rule ? [[operation, rule] as const] : [])
+		expect(annotated.map(([operation, rule]) => [operation, rule.permissionKey]).sort()).toEqual([
+			['createCheckpoint', 'checkpoints.create'],
+			['deleteCheckpoint', 'checkpoints.delete'],
+			['diffVersions', 'history.read'],
+			['listVersions', 'history.read'],
+			['readVersion', 'history.read'],
+		])
+		for (const [operation, rule] of annotated) {
+			const lowest = BUILT_IN_PRESETS.find(preset => preset.adds.includes(rule.permissionKey))
+			expect(lowest, `${rule.permissionKey} is in a built-in preset`).toBeDefined()
+			expect(rule.minRole, operation).toBe(lowest!.role)
+			expect(PERMISSION_KEYS).toContain(rule.permissionKey)
+			// A humanOnly key is human-only on the operation too.
+			expect('humanOnly' in rule && rule.humanOnly === true, operation).toBe(HUMAN_ONLY_PERMISSION_KEYS.includes(rule.permissionKey))
+		}
+	})
+
+	it('keeps the catalog and the presets consistent: every key is in exactly one preset step', () => {
+		expect(BUILT_IN_PRESETS.flatMap(preset => preset.adds).sort()).toEqual([...PERMISSION_KEYS].sort())
+	})
+
+	it('records the catalog in Clause 01a11c09-a26e-73bb-9a29-eed40aae37bd order, with its humanOnly keys', () => {
+		expect(PERMISSION_KEYS).toEqual([
+			'workspace.read',
+			'history.read',
+			'product-kit.source.read',
+			'reviews.write',
+			'reviews.submit',
+			'reviews.promote',
+			'reviews.resolve',
+			'views.write',
+			'flows.write',
+			'locales.write',
+			'assets.write',
+			'settings.write',
+			'product-kit.write',
+			'product-kit.compose',
+			'evidence.capture',
+			'handoff.export',
+			'checkpoints.create',
+			'history.restore',
+			'checkpoints.delete',
+			'locks.force-release',
+			'presets.manage',
+			'members.manage',
+		])
+		expect(HUMAN_ONLY_PERMISSION_KEYS).toEqual(['reviews.resolve', 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'])
+	})
+
+	it('refuses every history operation to the system credentials (Clause 01a11485-f978-767a-b977-33028aee7ae7)', () => {
+		for (const operation of ['diffVersions', 'listVersions', 'readVersion', 'createCheckpoint', 'deleteCheckpoint'] as const) {
+			for (const id of ['system:capture', 'system:publish'] as const)
+				expect(authorizeOperation({ type: 'system', id, role: 'viewer', credential: 'system' }, operation), `${operation} as ${id}`).toMatchObject({ code: 'auth.scope_denied' })
+		}
+	})
 })
 
 describe('authorization in the shared application layer', () => {

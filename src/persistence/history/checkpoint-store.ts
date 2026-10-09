@@ -66,6 +66,18 @@ export class CheckpointStore {
 			throw new PersistenceError('persistence.resource_exists', `Checkpoint ${record.id} already exists.`)
 	}
 
+	/**
+	 * Removes one checkpoint record (Rule 01a11a5e-0c1f-7b18-83a2-d9cd62b78ae9): only the record file
+	 * goes; the blobs it names stay in the derived-artifact store for artifact cleanup. Resolves
+	 * false when no record file exists. The caller holds the exclusive persistence lock.
+	 */
+	async deleteUnlocked(id: string): Promise<boolean> {
+		const relativePath = this.layout.checkpointRelativePath(id)
+		if (!await this.persistence.readOptionalBytesUnlocked(relativePath)) return false
+		await this.persistence.removeUnlocked(relativePath)
+		return true
+	}
+
 	async read(id: string): Promise<CheckpointRecord | undefined> {
 		return this.persistence.withReadLock(async () => this.readUnlocked(id))
 	}

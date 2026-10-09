@@ -1967,7 +1967,11 @@
       "rollback_failed": "無法儲存版本歷程，且中斷的寫入未能完全復原。請檢查版本歷程存放區。",
       "invalid_cursor": "時間軸中的這個位置無效，請重新載入時間軸。",
       "invalid_comparison": "無法比較這些版本。請選擇一個版本以及要與它比較的對象。",
-      "blob_missing": "這個版本的某個檔案已不再保存，因此無法比較。"
+      "blob_missing": "這個版本的某個檔案已不再保存，因此無法比較。",
+      "invalid_listing": "這個版本清單的請求無效。請檢查篩選條件與每頁筆數。",
+      "unavailable": "這台伺服器無法使用版本歷程，因此無法建立 Checkpoint。",
+      "boundary_failed": "無法結束進行中的自動儲存，因此沒有建立 Checkpoint，也未變更任何內容。請再試一次。",
+      "not_checkpoint": "只能刪除 Checkpoint。這個版本是自動儲存的。"
     },
     "review": {
       "anchor_history_mismatch": "Review 的位置與其歷程不一致。",
