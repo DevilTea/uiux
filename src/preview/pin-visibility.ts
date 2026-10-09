@@ -369,3 +369,27 @@ function mid(a: Point, b: Point): Point {
 function samePoint(a: Point, b: Point): boolean {
 	return a.x === b.x && a.y === b.y
 }
+
+// ---------------------------------------------------------------------------------------------
+// Muted pins (Workbench IA Rules 01a1170f-c1ae, 01a1170f-c23d, 01a1170f-c282)
+// ---------------------------------------------------------------------------------------------
+
+/** A thread's recorded render context, or the Preview's current one: Locale, viewport ID and theme ID. */
+export type PinRenderContext = Readonly<{ locale?: string; viewportId?: string; themeId?: string }>
+
+/**
+ * Whether a thread's pin and bubble are muted: its recorded render context differs from the
+ * Preview's current one (Rule 01a1170f-c1ae). Only the members the thread records are compared,
+ * so a member it does not record never makes it differ, and a thread without a recorded context
+ * is never muted (Rule 01a1170f-c23d). `current` holds the keys the Preview actually shows, with
+ * empty selections already resolved to their defaults.
+ *
+ * Muting is presentation only: it is not an input to placement, so it never shows a pin that
+ * another rule hides and never moves one (Rule 01a1170f-c282).
+ */
+export function renderContextDiffers(recorded: PinRenderContext | undefined, current: PinRenderContext): boolean {
+	if (!recorded) return false
+	return (recorded.locale !== undefined && recorded.locale !== current.locale)
+		|| (recorded.viewportId !== undefined && recorded.viewportId !== current.viewportId)
+		|| (recorded.themeId !== undefined && recorded.themeId !== current.themeId)
+}

@@ -469,6 +469,7 @@ A 40px bar above the canvas. On desktop it shows the four render-context selects
   - **edge**: the Widget is off-screen, so the pin is clamped to the frame edge with a direction chevron;
   - **unplaced**: the anchor is invalid, so the thread is listed in the canvas's bottom-left tray in caution or fault color, never drawn on a guessed spot.
   - **interact**: with the Interact tool (and in the Prototype player) pins dim and stop taking input, because every click belongs to the View.
+  - **muted**: the thread records another Preview render context (Locale, viewport or theme) than the canvas shows. The teardrop turns hollow (`bg-default` fill, a 1.5px pin-fill border, Marker initials) and a 12px mono chip beside it names that context ("zh-TW · dark"); the accessible name says it too. It keeps its position and never appears where a pin would be hidden. Activating it switches the Preview, never the chrome, to that context and opens the thread. A cluster is muted only when all its pins are. The open bubble of a muted thread says so beside its context and offers "Show in recorded context".
 - **Clusters:** pins whose tips fall within 24px merge into a count pin ("+2") that opens a menu of its threads; off-screen threads collect in edge indicators with a direction chevron that open the same menu.
 - **Touch:** the glyph stays 28px, with an invisible 44px hit area around it.
 

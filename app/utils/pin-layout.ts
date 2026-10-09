@@ -103,3 +103,23 @@ export function cycleThread(order: readonly string[], current: string | undefine
 	if (index < 0) return direction === 1 ? order[0] : order[order.length - 1]
 	return order[(index + direction + order.length) % order.length]
 }
+
+/**
+ * The drawn items shown muted (Rules 01a1170f-c1ae, 01a11e0d-d4a0): a pin whose thread is in
+ * `muted`, and a cluster only when every thread in it is; one unmuted member keeps the cluster
+ * unmuted. It reads the layout and never changes it, so muting never draws a pin that placement
+ * hides and never moves one (Rule 01a1170f-c282). Returns item keys.
+ */
+export function mutedItemKeys(layout: PinLayout | undefined, muted: ReadonlySet<string>): ReadonlySet<string> {
+	const keys = new Set<string>()
+	if (!layout || !muted.size) return keys
+	for (const item of layout.items) {
+		if (item.kind === 'pin' ? muted.has(item.threadId) : isClusterMuted(item.threadIds, muted)) keys.add(item.key)
+	}
+	return keys
+}
+
+/** A pin cluster is muted only when every pin in it is (Rule 01a11e0d-d4a0). */
+export function isClusterMuted(threadIds: readonly string[], muted: ReadonlySet<string>): boolean {
+	return threadIds.length > 0 && threadIds.every(id => muted.has(id))
+}

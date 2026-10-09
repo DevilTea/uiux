@@ -20,6 +20,8 @@ const props = defineProps<{
 	ids: string
 	side?: PinEdgeSide
 	dim?: boolean
+	/** A cluster whose every thread is muted (Rule 01a11e0d-d4a0). */
+	muted?: boolean
 }>()
 
 const { t } = useI18n()
@@ -30,19 +32,33 @@ const count = computed(() => threadIds.value.length)
 const label = computed(() => props.kind === 'cluster'
 	? t('comments.clusterLabel', count.value)
 	: t(`pins.edge.${props.side ?? 'bottom'}`, count.value))
+const triggerLabel = computed(() => props.muted ? t('pins.muted.clusterLabel', { label: label.value }) : label.value)
 
-/** A pick moves focus to the picked thread's pin; only a dismissal returns it to the trigger. */
+function focusPin(threadId: string): void {
+	const escaped = CSS.escape(threadId)
+	const target = document.querySelector<HTMLElement>(`[data-comment-pins] [data-pin-thread="${escaped}"]`)
+		?? document.querySelector<HTMLElement>(`[data-comment-pins] [data-edge-threads~="${escaped}"]`)
+	target?.focus({ preventScroll: true })
+}
+
+/**
+ * A pick moves focus to the picked thread's pin; only a dismissal returns it to the trigger. Picking
+ * a muted thread activates its pin: the Preview switches to its recorded context first (Rule
+ * 01a1170f-c1f7).
+ */
 let picked = false
 function openAndFocus(threadId: string): void {
+	if (comments.mutedThreadIds.value.has(threadId)) {
+		picked = true
+		void comments.openInRecordedContext(threadId).then((opened) => {
+			if (opened) void nextTick(() => setTimeout(() => focusPin(threadId)))
+		})
+		return
+	}
 	if (!comments.open(threadId)) return
 	picked = true
 	// After the menu's own focus restoration (it runs in a timeout when the menu unmounts).
-	void nextTick(() => setTimeout(() => {
-		const escaped = CSS.escape(threadId)
-		const target = document.querySelector<HTMLElement>(`[data-comment-pins] [data-pin-thread="${escaped}"]`)
-			?? document.querySelector<HTMLElement>(`[data-comment-pins] [data-edge-threads~="${escaped}"]`)
-		target?.focus({ preventScroll: true })
-	}))
+	void nextTick(() => setTimeout(() => focusPin(threadId)))
 }
 
 /** Items are built only while the menu is open, so a closed menu ignores membership changes. */
@@ -52,9 +68,10 @@ const items = computed<DropdownMenuItem[][]>(() => !open.value ? NO_ITEMS : [
 	[{ type: 'label', label: label.value }],
 	threadIds.value.map((id) => {
 		const meta = comments.pinMeta.value.get(id)
+		const context = comments.mutedContexts.value.get(id)
 		return {
 			label: meta?.title ?? id,
-			description: meta?.detail,
+			description: [meta?.detail, context].filter(Boolean).join(' · ') || undefined,
 			...(meta?.agent ? { icon: 'i-lucide-bot' } : { avatar: { text: meta?.initials ?? '', alt: meta?.name } }),
 			onSelect: () => openAndFocus(id),
 		}
@@ -76,7 +93,13 @@ const content = computed(() => props.kind === 'cluster'
 const MENU_UI = { content: 'w-72 max-h-[min(24rem,var(--reka-dropdown-menu-content-available-height))]', itemLabel: 'truncate', itemDescription: 'truncate' }
 
 const single = computed(() => props.kind === 'edge' && count.value === 1)
-const singleLabel = computed(() => single.value ? `${label.value}. ${comments.pinMeta.value.get(threadIds.value[0]!)?.label ?? ''}` : label.value)
+const singleLabel = computed(() => {
+	if (!single.value) return label.value
+	const id = threadIds.value[0]!
+	const pin = comments.pinMeta.value.get(id)?.label ?? ''
+	const context = comments.mutedContexts.value.get(id)
+	return `${label.value}. ${context === undefined ? pin : t('pins.muted.label', { label: pin, context })}`
+})
 </script>
 
 <template>
@@ -110,7 +133,8 @@ const singleLabel = computed(() => single.value ? `${label.value}. ${comments.pi
       variant="cluster"
       :count="count"
       :dim="dim"
-      :label="label"
+      :muted="muted"
+      :label="triggerLabel"
       :data-pin-cluster-threads="ids"
       data-pin-cluster
     />
