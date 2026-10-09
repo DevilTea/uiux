@@ -12,6 +12,7 @@ import { principalRole, type Principal } from '../application/access/principal'
 import { roleLabel } from '../application/access/policy'
 import { createScopedWorkspaceSession, type ScopedSessionOptions, type ScopedWorkspaceSession } from '../application/access/scoped-session'
 import type { ViewSpecContent } from '../application/services/view-authoring'
+import { VERSION_DIFF_DETAILS } from '../application/services/history-diff'
 import type { ViewResource } from '../domain/views/schema'
 import type { FlowStep } from '../domain/flows/schema'
 import { REVIEW_RESOLUTIONS, type ReviewAnchor, type ReviewDisplayHint, type ReviewEvidenceRef, type ReviewRenderContext, type ReviewResourceRevision } from '../domain/reviews/schema'
@@ -307,6 +308,17 @@ const assessHandoffReadinessSchema = z.object({
 
 const exportHandoffSchema = z.object({
 	roots: z.array(handoffRootSchema).min(1),
+}).strict()
+
+// Clause 01a11a5e-2710-70b7-b63b-82f27236b1cd.
+const getVersionDiffSchema = z.object({
+	from: z.string().describe('The ID of the version to compare from.'),
+	to: z.string().optional().describe('A version ID, or "current" for the Workspace\'s current files (the default).'),
+	resources: z.array(z.object({
+		kind: z.string().min(1),
+		key: z.string().min(1),
+	}).strict()).optional().describe('Compare only these resources, each { kind, key } such as { kind: "view", key: <View ID> } or { kind: "workspace", key: "workspace" }; omit to compare every resource.'),
+	detail: z.enum(VERSION_DIFF_DETAILS).optional().describe('"summary" (the default) for per-resource statuses only, or "semantic" to add the semantic changes.'),
 }).strict()
 
 const leaseResourcesSchema = z.array(z.object({
@@ -804,6 +816,29 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
 				structuredContent: outcome,
 				...(outcome.status === 'failed' || outcome.status === 'blocked' ? { isError: true } : {}),
+			}
+		},
+	)
+
+	server.registerTool(
+		'get_version_diff',
+		{
+			title: 'Compare UIUX versions',
+			description: 'Compare a version of the Workspace timeline with another version or with the current files. Returns { status: "compared", from, to, summary }, where summary lists each resource as added, removed, modified or unchanged; with detail "semantic" it adds changes, one semantic diff per resource that is not unchanged (Widgets by id, Variants, Spec items and Decisions for a View; steps for a Flow; message keys for a Locale; settings members for the Workspace, never schemaVersion; metadata and content digest for an Asset; JSON pointers otherwise). A side recorded under an older schema is upgraded in memory first, so a migration adds no changes. Refusals: history.invalid_comparison, history.record_missing (unknown version), workspace.schema_unsupported (a version recorded under a schema this build does not recognize).',
+			inputSchema: getVersionDiffSchema,
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (input) => {
+			const outcome = await app.diffVersions({
+				from: input.from,
+				...(input.to === undefined ? {} : { to: input.to }),
+				...(input.resources === undefined ? {} : { resources: input.resources }),
+				...(input.detail === undefined ? {} : { detail: input.detail }),
+			})
+			return {
+				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
+				structuredContent: outcome,
+				...(outcome.status === 'compared' ? {} : { isError: true }),
 			}
 		},
 	)

@@ -170,7 +170,7 @@ defineShortcuts(computed(() => shell.singleKeyShortcuts.value
 			'r': guard(() => withThread(view => view.focusReply())),
 			'e': guard(() => withThread(view => void view.resolvePrimary())),
 			'shift_e': guard(() => withThread(view => view.openResolveMenu())),
-			'o': guard(() => { if (inbox.selected.value) inbox.openInCanvas(inbox.selected.value) }),
+			'o': guard(() => { if (inbox.selected.value) void inbox.openInCanvas(inbox.selected.value) }),
 			'/': guard(() => list.value?.focusSearch()),
 			'f': guard(() => list.value?.openFilters()),
 			'1': guard(() => list.value?.selectTab(0)),

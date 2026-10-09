@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import type { ReviewActor, ReviewThread } from '../src/domain/reviews/schema'
 import {
 	buildInboxThread,
+	canvasLinkOptions,
 	DEFAULT_INBOX_FILTER,
 	groupInbox,
+	inboxCanvasLink,
 	inboxQuery,
 	isUnreadThread,
 	matchesInboxFilter,
@@ -15,6 +17,9 @@ import {
 	type ReviewSummaryInput,
 } from '../app/utils/review-inbox'
 import { buildReviewTimeline } from '../app/utils/review-timeline'
+import { recordedContextParts, recordedContextText } from '../app/utils/thread-render-context'
+import { viewQuery } from '../app/utils/workbench-routes'
+import { workspaceRenderContextKeys } from '../src/preview/render-context-options'
 
 const VIEW = 'view-1'
 const mei: ReviewActor = { type: 'human', id: 'member:mei', displayName: 'mei' }
@@ -153,6 +158,67 @@ describe('Reviews inbox threads and filters', () => {
 		expect(parseInboxQuery({ status: 'all' }).status).toEqual([])
 		expect(inboxQuery({ ...DEFAULT_INBOX_FILTER, status: [] })).toEqual({ status: 'all' })
 		expect(parseInboxQuery({ status: 'nonsense', resolution: 'bogus' })).toMatchObject({ status: ['ready-for-review', 'open'], resolution: [] })
+	})
+})
+
+describe('Reviews inbox canvas links and the recorded render context (Part 7)', () => {
+	const ZH_MOBILE_DARK = { locale: 'zh-TW', viewportId: 'mobile', themeId: 'dark' } as const
+	const keys = workspaceRenderContextKeys({
+		i18n: { defaultLocale: 'en-US' },
+		viewports: { desktop: { dimensions: { width: 1920, height: 1080 } }, mobile: { dimensions: { width: 390, height: 844 } } },
+		themes: { dark: {}, light: {} },
+	}, ['en-US', 'zh-TW'])
+
+	it('carries the recorded render context from the summary, or the point read, on Widget threads only', () => {
+		expect(buildInboxThread(summary('a', 'open', 1, { renderContext: ZH_MOBILE_DARK }), undefined, views).renderContext).toEqual(ZH_MOBILE_DARK)
+		expect(buildInboxThread(summary('b', 'open', 1), thread('b', { renderContext: { locale: 'zh-TW' } }), views).renderContext).toEqual({ locale: 'zh-TW' })
+		expect(buildInboxThread(summary('c', 'open', 1), undefined, views).renderContext).toBeUndefined()
+		expect('renderContext' in buildInboxThread(summary('w', 'open', 1, { anchor: { scope: 'workspace' }, renderContext: ZH_MOBILE_DARK }), undefined, views)).toBe(false)
+	})
+
+	it('opens a Widget thread on its View in the recorded Locale, viewport and theme, with the thread open and its Widget selected (Rule 01a116f0-8ec3, Scenario 01a11e0e-435a)', () => {
+		const item = buildInboxThread(summary('a', 'open', 1, { renderContext: ZH_MOBILE_DARK }), undefined, views)
+		const link = inboxCanvasLink(item, keys)
+		expect(link.options).toEqual({ thread: 'a', locale: 'zh-TW', viewport: 'mobile', theme: 'dark', widget: 'cta' })
+		expect(link.missing).toEqual([])
+		// The View link query carries only render-context members, never the chrome language or theme (Rule 01a118a1-9e11).
+		expect(Object.keys(viewQuery(link.options)).sort()).toEqual(['locale', 'theme', 'thread', 'viewport', 'widget'])
+	})
+
+	it('leaves unrecorded members to the defaults and keeps the single-Variant rule', () => {
+		const scoped = buildInboxThread(summary('s', 'open', 1, { variantNames: ['compact'], renderContext: { locale: 'zh-TW' } }), undefined, views)
+		expect(inboxCanvasLink(scoped, keys).options).toEqual({ thread: 's', variant: 'compact', locale: 'zh-TW', widget: 'cta' })
+		const unknown = buildInboxThread(summary('u', 'open', 1), undefined, views)
+		expect(inboxCanvasLink(unknown, keys).options).toEqual({ thread: 'u', widget: 'cta' })
+	})
+
+	it('drops a stale key so it opens with its default, keeps the other members, and reports it for the notice (Rule 01a1170f-c165, Scenario 01a11e0e-4409)', () => {
+		const withoutMobile = workspaceRenderContextKeys({ i18n: { defaultLocale: 'en-US' }, viewports: { desktop: { dimensions: { width: 1920, height: 1080 } } }, themes: { dark: {} } }, ['en-US', 'zh-TW'])
+		const item = buildInboxThread(summary('a', 'open', 1, { renderContext: { locale: 'zh-TW', viewportId: 'mobile' } }), undefined, views)
+		const link = inboxCanvasLink(item, withoutMobile)
+		expect(link.options).toEqual({ thread: 'a', locale: 'zh-TW', widget: 'cta' })
+		expect(link.missing).toEqual([{ member: 'viewportId', key: 'mobile' }])
+		// The thread itself still records the stale key: nothing is rebound.
+		expect(item.renderContext).toEqual({ locale: 'zh-TW', viewportId: 'mobile' })
+	})
+
+	it('carries every recorded member while the Workspace keys are not read yet', () => {
+		const item = buildInboxThread(summary('a', 'open', 1, { renderContext: ZH_MOBILE_DARK }), undefined, views)
+		expect(inboxCanvasLink(item, undefined)).toEqual({ options: { thread: 'a', locale: 'zh-TW', viewport: 'mobile', theme: 'dark', widget: 'cta' }, missing: [] })
+	})
+
+	it('builds "Open in current context" from the reader\'s own selections instead (Rule 01a1170f-c11d)', () => {
+		const item = buildInboxThread(summary('a', 'open', 1, { renderContext: ZH_MOBILE_DARK }), undefined, views)
+		expect(canvasLinkOptions(item, { locale: 'en-US', viewport: 'desktop', theme: '' })).toEqual({ thread: 'a', locale: 'en-US', viewport: 'desktop', widget: 'cta' })
+		expect(canvasLinkOptions(item)).toEqual({ thread: 'a', widget: 'cta' })
+	})
+
+	it('labels the recorded members in header order and flags a stale one', () => {
+		const parts = recordedContextParts({ themeId: 'dark', locale: 'zh-TW', viewportId: 'mobile' }, [{ member: 'viewportId', key: 'mobile' }])
+		expect(recordedContextText(parts)).toBe('zh-TW · mobile · dark')
+		expect(parts.map(part => part.missing)).toEqual([false, true, false])
+		expect(recordedContextText(recordedContextParts({ themeId: 'dark' }))).toBe('dark')
+		expect(recordedContextParts(undefined)).toEqual([])
 	})
 })
 

@@ -1960,7 +1960,9 @@
       "store_unsafe": "The history store on this computer is not safe to use. Check its folder permissions and links.",
       "write_failed": "History could not be saved. Nothing was changed.",
       "rollback_failed": "History could not be saved, and the interrupted write could not be fully undone. Check the history store.",
-      "invalid_cursor": "This place in the timeline is invalid. Reload the timeline."
+      "invalid_cursor": "This place in the timeline is invalid. Reload the timeline.",
+      "invalid_comparison": "These versions cannot be compared. Choose a version and what to compare it with.",
+      "blob_missing": "A file of this version is no longer stored, so it cannot be compared."
     },
     "review": {
       "anchor_history_mismatch": "The Review’s place does not match its history.",
@@ -2095,5 +2097,19 @@
     "reference": "A Spec reference is not valid.",
     "time": "A time is not in the expected format.",
     "revision": "The revision record is not valid."
+  },
+  "threadContext": {
+    "srPrefix": "Recorded Preview context:",
+    "label": "Recorded Preview context: {context}",
+    "missingSr": "(no longer in this Workspace)",
+    "openInCurrent": "Open in current context",
+    "openInCurrentHint": "Show this thread in your own Preview context instead of the one it records",
+    "announceCurrent": "Showing the thread in your current Preview context.",
+    "noticeTitle": "Part of this thread’s context no longer exists",
+    "missing": {
+      "locale": "Locale {key} no longer exists, so the default Locale is shown.",
+      "viewportId": "Viewport {key} no longer exists, so the default viewport is shown.",
+      "themeId": "Theme {key} no longer exists, so the default theme is shown."
+    }
   }
 }

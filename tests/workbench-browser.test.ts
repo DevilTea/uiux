@@ -860,9 +860,11 @@ describe('Canvas comments (R6 targeting and composer, R7a pins and bubble)', () 
 			await page.keyboard.press('Control+Enter')
 			await page.waitForSelector('[data-thread-bubble]', { timeout: 10_000 })
 
-			// The persisted thread is the accepted model only: anchor, scope and the normalized hint; never an actor or raw px.
+			// The persisted thread is the accepted model only: anchor, scope, the normalized hint and the
+			// Preview's authored render context (here the defaults: en-US, desktop, dark); never an actor or raw px.
 			const create = posts.find(post => post.url === '/api/reviews')!
-			expect(Object.keys(create.body).sort()).toEqual(['anchor', 'displayHint', 'variantNames'])
+			expect(Object.keys(create.body).sort()).toEqual(['anchor', 'displayHint', 'renderContext', 'variantNames'])
+			expect(create.body.renderContext).toEqual({ locale: 'en-US', viewportId: 'desktop', themeId: 'dark' })
 			expect(create.body.anchor).toEqual({ viewId: VIEW_ID, widgetId: 'btn-run-checks' })
 			expect(create.body.variantNames).toEqual([])
 			const hint = (create.body.displayHint as { pin: { x: number; y: number } }).pin

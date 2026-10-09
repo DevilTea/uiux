@@ -1,4 +1,5 @@
 import type { ViewResource } from '../domain/views/schema'
+import type { ReviewRenderContext } from '../domain/reviews/schema'
 import type { ViewportPreset, WorkspaceManifest } from '../domain/workspace/schema'
 
 export type ViewportOption = Readonly<{
@@ -207,4 +208,98 @@ export function deriveRenderContextOptions(input: Readonly<{
 			status: Object.freeze(themeStatus),
 		}),
 	})
+}
+
+// ---------------------------------------------------------------------------------------------
+// A Review thread's recorded render context (Workbench IA Rules 01a1170f-c0ce, 01a1170f-c165)
+// ---------------------------------------------------------------------------------------------
+
+/** One member of a thread's recorded `renderContext`. */
+export type RenderContextMember = 'locale' | 'viewportId' | 'themeId'
+export const RENDER_CONTEXT_MEMBERS: readonly RenderContextMember[] = Object.freeze(['locale', 'viewportId', 'themeId'])
+
+/**
+ * The Workspace-local keys of each member (Clause 01a11e0d-d2d0): the Locales with an i18n file
+ * plus `i18n.defaultLocale`, and the IDs in the manifest's `viewports` and `themes`. Built-in
+ * fallbacks (the `default` viewport, the `light` theme, `en-US` without a manifest) are not keys.
+ */
+export type RenderContextKeys = Readonly<{
+	locales: ReadonlySet<string>
+	viewportIds: ReadonlySet<string>
+	themeIds: ReadonlySet<string>
+}>
+
+export function workspaceRenderContextKeys(
+	workspace: Pick<WorkspaceManifest, 'i18n' | 'viewports' | 'themes'> | undefined,
+	localeFiles: readonly string[],
+): RenderContextKeys {
+	const locales = new Set(localeFiles.filter(Boolean))
+	const defaultLocale = workspace?.i18n?.defaultLocale
+	if (typeof defaultLocale === 'string' && defaultLocale) locales.add(defaultLocale)
+	return Object.freeze({
+		locales,
+		viewportIds: new Set(Object.keys(workspace?.viewports ?? {})),
+		themeIds: new Set(Object.keys(workspace?.themes ?? {})),
+	})
+}
+
+function isKey(keys: RenderContextKeys, member: RenderContextMember, value: string): boolean {
+	return member === 'locale' ? keys.locales.has(value) : member === 'viewportId' ? keys.viewportIds.has(value) : keys.themeIds.has(value)
+}
+
+/**
+ * What a new canvas thread records (Rule 01a1170f-c0ce): each current member that is a
+ * Workspace-local key, and nothing (`undefined`) when none is.
+ */
+export function captureRenderContext(
+	keys: RenderContextKeys,
+	current: Readonly<{ locale?: string; viewportId?: string; themeId?: string }>,
+): ReviewRenderContext | undefined {
+	const recorded: { locale?: string; viewportId?: string; themeId?: string } = {}
+	for (const member of RENDER_CONTEXT_MEMBERS) {
+		const value = current[member]
+		if (value && isKey(keys, member, value)) recorded[member] = value
+	}
+	return Object.keys(recorded).length ? Object.freeze(recorded) : undefined
+}
+
+export type MissingRenderContextKey = Readonly<{ member: RenderContextMember; key: string }>
+
+/**
+ * Splits a recorded render context into the members that still exist (`applied`) and the stale
+ * ones (`missing`), which open with their default and a notice (Rule 01a1170f-c165). A stale key
+ * is never rebound; members the thread does not record appear in neither list.
+ */
+export function resolveRecordedContext(
+	recorded: ReviewRenderContext | undefined,
+	keys: RenderContextKeys,
+): Readonly<{ applied: ReviewRenderContext; missing: readonly MissingRenderContextKey[] }> {
+	const applied: { locale?: string; viewportId?: string; themeId?: string } = {}
+	const missing: MissingRenderContextKey[] = []
+	for (const member of RENDER_CONTEXT_MEMBERS) {
+		const value = recorded?.[member]
+		if (value === undefined) continue
+		if (isKey(keys, member, value)) applied[member] = value
+		else missing.push(Object.freeze({ member, key: value }))
+	}
+	return Object.freeze({ applied: Object.freeze(applied), missing: Object.freeze(missing) })
+}
+
+/**
+ * The Locale, viewport and theme a selection actually shows, with its empty members resolved to
+ * their defaults, so two selections can be compared by what the Preview renders.
+ */
+export function effectiveRenderContext(
+	workspace: WorkspaceManifest | undefined,
+	discoveredLocales: readonly string[],
+	selection: Readonly<{ locale?: string; viewport?: string; theme?: string }>,
+): Readonly<{ locale: string; viewportId: string; themeId: string }> {
+	const options = deriveRenderContextOptions({
+		workspace,
+		discoveredLocales,
+		selectedLocale: selection.locale,
+		selectedViewportId: selection.viewport,
+		selectedThemeId: selection.theme,
+	})
+	return Object.freeze({ locale: options.locales.selected, viewportId: options.viewports.selectedId, themeId: options.themes.selected })
 }

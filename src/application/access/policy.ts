@@ -29,6 +29,9 @@ export const ACCESS_OPERATIONS = {
 	readPublicationSnapshot: { minRole: 'viewer', system: true },
 	assessHandoffReadiness: { minRole: 'viewer' },
 	listLeases: { minRole: 'viewer' },
+	// Version history reads (`history.read`, Clause 01a11485-fa00-72da-bc46-98302a3c106e) are Viewer
+	// reads that a system credential never gets (Clause 01a11485-f978-767a-b977-33028aee7ae7).
+	diffVersions: { minRole: 'viewer' },
 	readSession: { minRole: 'viewer', sessionOnly: true },
 	endSession: { minRole: 'viewer', sessionOnly: true },
 	// Reviewer: every Review action (actor stamped).
