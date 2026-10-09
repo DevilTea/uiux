@@ -50,8 +50,9 @@
 		"smoke:server": "node ./scripts/smoke-server.mjs",
 		"spec:validate": "spec workspace validate --root . </dev/null",
 		"test": "pnpm run build && vitest run",
-		"typecheck": "nuxt typecheck && pnpm run typecheck:adapters",
-		"typecheck:adapters": "tsc -p tsconfig.adapters.json"
+		"typecheck": "nuxt typecheck && pnpm run typecheck:adapters && pnpm run typecheck:tests",
+		"typecheck:adapters": "tsc -p tsconfig.adapters.json",
+		"typecheck:tests": "tsc -p tsconfig.tests.json"
 	},
 	"dependencies": {
 		"@deviltea/widget-core": "0.0.4",
