@@ -99,6 +99,29 @@ async function snapshotTree(root: string): Promise<Record<string, string>> {
 	return files
 }
 
+const DOGFOOD_ROOT = join(REPOSITORY_ROOT, 'design')
+const DOGFOOD_ARTIFACT_SHARDS = join(DOGFOOD_ROOT, '.uiux', 'artifacts', 'sha256')
+
+/**
+ * A private copy of the dogfood Workspace for migration replays. Migration reads and writes only
+ * the canonical files (manifest, Views, Flows, Reviews, Locales, Assets), never the
+ * content-addressed artifact store under `.uiux/artifacts`, yet that store is 142 of the tree's
+ * 160 files, each in its own shard directory. Copying all of it cost about 4 s under I/O load and
+ * pushed these tests past Vitest's 5 s default, so the copy keeps every canonical file and one
+ * artifact shard: enough to still prove that migration leaves the store byte-identical.
+ */
+async function copyDogfoodWorkspace(prefix: string): Promise<string> {
+	const root = await mkdtemp(join(tmpdir(), prefix))
+	roots.push(root)
+	const [witnessShard] = (await readdir(DOGFOOD_ARTIFACT_SHARDS)).sort()
+	const witness = join(DOGFOOD_ARTIFACT_SHARDS, witnessShard!)
+	await cp(DOGFOOD_ROOT, root, {
+		recursive: true,
+		filter: source => !source.startsWith(`${DOGFOOD_ARTIFACT_SHARDS}${sep}`) || source === witness || source.startsWith(`${witness}${sep}`),
+	})
+	return root
+}
+
 async function snapshotFiles(root: string): Promise<Record<string, string>> {
 	const files: Record<string, string> = {}
 	for (const path of [workspaceRelativePath(), viewRelativePath(VIEW_ID), reviewRelativePath(RESOLVED_REVIEW_ID), reviewRelativePath(OPEN_REVIEW_ID), `assets/${ASSET_ID}/asset.json`, `assets/${ASSET_ID}/icon.svg`])
@@ -295,9 +318,7 @@ describe('uiux migrate CLI', () => {
 	})
 
 	it('migrates a copy of the dogfood Workspace with the expected plan', async () => {
-		const root = await mkdtemp(join(tmpdir(), 'uiux-dogfood-migration-'))
-		roots.push(root)
-		await cp(join(REPOSITORY_ROOT, 'design'), root, { recursive: true })
+		const root = await copyDogfoodWorkspace('uiux-dogfood-migration-')
 		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		const result = await persistence.migrateWorkspace()
 		expect(result.version).toBe(4)
@@ -306,15 +327,16 @@ describe('uiux migrate CLI', () => {
 			expect((await persistence.reviews.readInspected(key))?.diagnostics).toEqual([])
 	})
 
-	it('replays the dogfood uiux.v3-to-v4 migration through the CLI: one step, only the manifest changes, re-runs are no-ops', async () => {
-		const root = await mkdtemp(join(tmpdir(), 'uiux-dogfood-v3-to-v4-'))
-		roots.push(root)
-		await cp(join(REPOSITORY_ROOT, 'design'), root, { recursive: true })
+	// Three real CLI runs (each bundles the command with esbuild in a fresh Node process) plus an
+	// fsynced migration transaction: about 0.6 s alone, close to 4 s under CPU and I/O load.
+	it('replays the dogfood uiux.v3-to-v4 migration through the CLI: one step, only the manifest changes, re-runs are no-ops', { timeout: 20_000 }, async () => {
+		const root = await copyDogfoodWorkspace('uiux-dogfood-v3-to-v4-')
 		// The committed dogfood Workspace was migrated by this step; restore its v3 manifest in the copy.
 		const manifestPath = join(root, workspaceRelativePath())
 		const current = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>
 		await writeFile(manifestPath, `${JSON.stringify({ ...current, schemaVersion: 3 })}\n`)
 		const before = await snapshotTree(root)
+		expect(Object.keys(before).filter(path => path.startsWith('.uiux/artifacts/'))).toHaveLength(1)
 
 		const dryRun = spawnSync(process.execPath, [CLI, 'migrate', '--workspace', root, '--dry-run'], { encoding: 'utf8' })
 		expect(dryRun.status).toBe(0)
