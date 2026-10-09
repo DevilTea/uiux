@@ -1949,7 +1949,18 @@
       "unstamped_actor": "The version does not record who made the change.",
       "invalid_system_actor": "The system author of the version is not valid.",
       "external_actor_id": "The author of a change made outside UIUX cannot carry a member ID.",
-      "invalid_source": "The change's source is not valid."
+      "invalid_source": "The change's source is not valid.",
+      "invalid_open_entry": "An entry of the open autosave is not valid.",
+      "unexpected_file": "A file in the history store is not a history record.",
+      "record_invalid": "A version history record is not valid.",
+      "record_exists": "A version with this ID already exists.",
+      "record_missing": "The version does not exist.",
+      "journal_invalid": "The open autosave could not be read.",
+      "blob_corrupt": "A stored history file does not match its content.",
+      "store_unsafe": "The history store on this computer is not safe to use. Check its folder permissions and links.",
+      "write_failed": "History could not be saved. Nothing was changed.",
+      "rollback_failed": "History could not be saved, and the interrupted write could not be fully undone. Check the history store.",
+      "invalid_cursor": "This place in the timeline is invalid. Reload the timeline."
     },
     "review": {
       "anchor_history_mismatch": "The Review’s place does not match its history.",
