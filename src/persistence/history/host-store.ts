@@ -224,6 +224,21 @@ export class HostHistoryStore {
 		return parseOpenJournal(bytes)
 	}
 
+	/**
+	 * Moves an unreadable `open.json` aside as `open.json.corrupt-<timestamp>` (kept for inspection,
+	 * never read again) so recording and garbage collection can start clean. Returns the new file
+	 * name, or `undefined` when there is no journal.
+	 */
+	async quarantineOpenJournal(at: Date): Promise<string | undefined> {
+		if (!await checkPrivateFile(this.paths.open)) return undefined
+		const stamp = at.toISOString().replace(/[:.]/gu, '-')
+		let name = `open.json.corrupt-${stamp}`
+		for (let attempt = 1; await lstatOrUndefined(join(this.paths.dir, name)); attempt++) name = `open.json.corrupt-${stamp}-${attempt}`
+		await fs.rename(this.paths.open, join(this.paths.dir, name))
+		await syncDirectory(this.paths.dir)
+		return name
+	}
+
 	/** Removes `open.json` once its autosave has been written as a version. */
 	async clearOpenJournal(): Promise<void> {
 		if (!await checkPrivateFile(this.paths.open)) return

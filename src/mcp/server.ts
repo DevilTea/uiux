@@ -10,7 +10,7 @@ import type { WorkspaceApplicationSession } from '../application/services/worksp
 import { LOCKABLE_KINDS, MAX_ACQUIRE_RESOURCES, type LeaseManager } from '../application/access/leases'
 import { principalRole, type Principal } from '../application/access/principal'
 import { roleLabel } from '../application/access/policy'
-import { createScopedWorkspaceSession, type ScopedWorkspaceSession } from '../application/access/scoped-session'
+import { createScopedWorkspaceSession, type ScopedSessionOptions, type ScopedWorkspaceSession } from '../application/access/scoped-session'
 import type { ViewSpecContent } from '../application/services/view-authoring'
 import type { ViewResource } from '../domain/views/schema'
 import type { FlowStep } from '../domain/flows/schema'
@@ -855,7 +855,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
 		async (input) => {
-			const outcome = app.releaseLeases(input)
+			const outcome = await app.releaseLeases(input)
 			return {
 				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
 				structuredContent: outcome,
@@ -928,11 +928,11 @@ export function principalAuthInfo(principal: Principal): AuthInfo {
  * principal through `fetch(request, { authInfo })`; a request without one is answered 401 here
  * too, so no code path can reach a tool unauthenticated.
  */
-export function createUiuxMcpHttpHandler(app: WorkspaceApplicationSession, options: Readonly<{ leases: LeaseManager }>): McpHttpHandler {
+export function createUiuxMcpHttpHandler(app: WorkspaceApplicationSession, options: Readonly<{ leases: LeaseManager; history?: ScopedSessionOptions['history'] }>): McpHttpHandler {
 	const inner = createMcpHandler((ctx) => {
 		const principal = principalFromAuthInfo(ctx.authInfo)
 		if (!principal || principal.type !== 'member') throw new Error('MCP request reached the server factory without an authenticated member.')
-		return createUiuxMcpServer(createScopedWorkspaceSession(app, principal, { transport: 'mcp', leases: options.leases }))
+		return createUiuxMcpServer(createScopedWorkspaceSession(app, principal, { transport: 'mcp', leases: options.leases, ...(options.history ? { history: options.history } : {}) }))
 	})
 	return {
 		...inner,

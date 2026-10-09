@@ -31,6 +31,12 @@ export default defineNitroPlugin((nitroApp) => {
 					console.error(`uiux: ${error instanceof AccessError ? error.message : `could not open the access store: ${error instanceof Error ? error.message : String(error)}`}`)
 					process.exit(2)
 				})
+			// Version history: close a leftover autosave, record changes made while no server ran,
+			// write the Baseline on a host without history, prune, then record design writes. A
+			// failure here is logged and never stops the server; the internal publish server never records.
+			void runtime.historyRecorder.start().then((report) => {
+				if (report.baseline) console.log(`uiux: history recorded the Baseline Checkpoint ${report.baseline} for ${runtime.root}.`)
+			})
 			pendingHold = acquireServerHold(resolve(process.env.UIUX_WORKSPACE_ROOT))
 				.then((hold) => {
 					acquiredHold = hold

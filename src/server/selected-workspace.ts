@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 
 import type { McpHttpHandler } from '@modelcontextprotocol/server'
 import { createLeaseManager, type LeaseManager } from '../application/access/leases'
+import { createHistoryRecorder, type HistoryRecorder } from '../application/services/history-recorder'
 import type { WorkspaceApplicationSession } from '../application/services/workspace-session'
 import { createWorkspaceApplicationSession } from '../application/services/workspace-session'
 import { createUiuxMcpHttpHandler } from '../mcp/server'
@@ -22,6 +23,11 @@ export type SelectedWorkspaceServerRuntime = Readonly<{
 	access(): Promise<AccessService>
 	/** The Workspace's history stores; disabled (never opened) for the internal `uiux publish` server. */
 	history: HistoryStoreFactory
+	/**
+	 * The autosave recorder over those stores. The Nitro plugin starts it (start boundary, Baseline,
+	 * pruning) and `close()` stops it; for the internal `uiux publish` server it never records.
+	 */
+	historyRecorder: HistoryRecorder
 	mcp: McpHttpHandler
 	close(): Promise<void>
 }>
@@ -76,14 +82,15 @@ export function createSelectedWorkspaceServerRuntime(
 		})()
 		return pending
 	}
-	const mcp = createUiuxMcpHttpHandler(app, { leases })
-	// Nothing records history yet: the recorder that opens these stores arrives with the autosave work (B3).
 	const history = createHistoryStoreFactory({
 		workspaceRoot: selectedRoot,
 		persistence,
 		home: () => options?.uiuxHome ?? resolveUiuxHome(),
 		...(publishCredential ? { publishCredential } : {}),
 	})
+	// Disabled with the factory: for the publish server `open()` resolves nothing, so it never records.
+	const historyRecorder = createHistoryRecorder({ persistence, stores: () => history.open() })
+	const mcp = createUiuxMcpHttpHandler(app, { leases, history: historyRecorder })
 	return Object.freeze({
 		root: selectedRoot,
 		serverOrigin,
@@ -92,8 +99,10 @@ export function createSelectedWorkspaceServerRuntime(
 		leases,
 		access,
 		history,
+		historyRecorder,
 		mcp,
 		async close() {
+			await historyRecorder.stop()
 			await accessService?.flushUsage()
 			await mcp.close()
 		},

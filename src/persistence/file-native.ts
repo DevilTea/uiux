@@ -63,7 +63,12 @@ export type FileNativePersistenceOptions = Readonly<{
 	lockWaitMilliseconds?: number
 	/** The history observer (recorder seam 6); it can also be attached later with `setWriteObserver`. */
 	writeObserver?: CanonicalWriteObserver
+	/** How long one observer hook may hold the lock before it is abandoned; defaults to {@link OBSERVER_HOOK_TIMEOUT_MS}. */
+	observerTimeoutMilliseconds?: number
 }>
+
+/** The revision of one versioned resource a design write is about to change (`null` when it does not exist yet). */
+export type CanonicalResourceBefore = Readonly<{ resource: VersionedResourceIdentity; revision: ResourceRevision | null }>
 
 /** One committed versioned file: `bytes` are exactly the bytes written, or `null` when the file was removed. */
 export type CanonicalFileChange = Readonly<{ path: string; bytes: Uint8Array | null }>
@@ -85,9 +90,12 @@ export type CanonicalResourceChange = Readonly<{
  * design-write context is set and only for writes that change versioned files (Review files are
  * not versioned, so Review writes never call them), always under the exclusive persistence lock:
  *
- * - `beforeCanonicalWrite` runs after every check of the write passed, before any byte changes.
+ * - `beforeCanonicalWrite` runs after every check of the write passed, before any byte changes,
+ *   with the current revision of each versioned resource the write changes.
  * - `afterCanonicalCommit` runs once the write has committed (for multi-file writes, once the
- *   transaction journal is committed), with exactly the committed bytes.
+ *   transaction journal is committed), with exactly the committed bytes. It runs only when
+ *   `beforeCanonicalWrite` succeeded for the same write: a boundary the `before` hook failed to
+ *   close must not receive the write's event, so the write stays unrecorded and flagged instead.
  *
  * A hook must not call this instance's `withLock` or `withReadLock` (that is refused); use the
  * `*Unlocked` helpers instead. Do not start a lock acquisition fire-and-forget inside a hook
@@ -96,13 +104,25 @@ export type CanonicalResourceChange = Readonly<{
  * it is logged and sets `recordingGap`.
  *
  * `beforeCanonicalWrite` can run without a following `afterCanonicalCommit` when the write itself
- * then fails; a hook has no time limit and holds the lock while it runs (both are the recorder's
- * concern, issue #132 B3).
+ * then fails or decides not to write. Each hook may hold the lock for at most the observer timeout
+ * ({@link OBSERVER_HOOK_TIMEOUT_MS} unless configured): a hook still running then is abandoned
+ * (the write goes on and `recordingGap` is set) and keeps running without the lock, so an observer
+ * must refuse to start new work until its abandoned work settles.
  */
 export type CanonicalWriteObserver = Readonly<{
-	beforeCanonicalWrite?(context: DesignWriteContext): void | Promise<void>
+	beforeCanonicalWrite?(context: DesignWriteContext, resources: readonly CanonicalResourceBefore[]): void | Promise<void>
 	afterCanonicalCommit?(context: DesignWriteContext, changes: readonly CanonicalResourceChange[]): void | Promise<void>
 }>
+
+/**
+ * The longest one observer hook may hold the exclusive lock (issue #132 B3, review finding L4).
+ * A write runs at most two hooks, so a stalled history store adds at most 10 s to a write: two
+ * thirds of the 15 s lock wait budget (`MAX_LOCK_WAIT_MS`), which leaves a writer queued behind it
+ * time to get the lock instead of failing with `persistence.lock_busy`. A healthy hook (a journal
+ * append, or a version write plus a rescan of the versioned files) takes milliseconds to a few
+ * hundred milliseconds, far below the bound.
+ */
+export const OBSERVER_HOOK_TIMEOUT_MS = 5_000
 
 export type InspectedResource<Resource> = Readonly<{
 	resource: Resource
@@ -231,7 +251,7 @@ export class FileNativePersistence {
 		this.locales = new LocaleFileRepository(this)
 		this.assets = new AuthoredAssetFileRepository(this)
 		this.artifacts = new ImmutableArtifactStore(this)
-		observerStates.set(this, { observer: options.writeObserver, recordingGap: false })
+		observerStates.set(this, { observer: options.writeObserver, recordingGap: false, timeoutMilliseconds: options.observerTimeoutMilliseconds ?? OBSERVER_HOOK_TIMEOUT_MS })
 	}
 
 	/** Attaches (or with `undefined`, detaches) the history observer. */
@@ -1790,7 +1810,7 @@ export class ImmutableArtifactStore {
 	}
 }
 
-type ObserverState = { observer?: CanonicalWriteObserver; recordingGap: boolean }
+type ObserverState = { observer?: CanonicalWriteObserver; recordingGap: boolean; readonly timeoutMilliseconds: number }
 
 /** Per-instance observer state, private to this module so only `commitCanonicalWrite` calls the hooks. */
 const observerStates = new WeakMap<FileNativePersistence, ObserverState>()
@@ -1822,8 +1842,14 @@ type ResourceFilesBefore = Readonly<{ resource: VersionedResourceIdentity; files
  * when it decided not to write after all (a lost create race). Only versioned files count: with
  * no design-write context, no observer, or no versioned file among `changes`, this is exactly
  * `write()`. Otherwise the resources' files are read first, `beforeCanonicalWrite` runs, then the
- * write, then `afterCanonicalCommit` with the committed bytes. Observer failures never fail the
- * write; they set `recordingGap`. Called with the exclusive persistence lock held.
+ * write, then (when the `before` hook succeeded) `afterCanonicalCommit` with the committed bytes.
+ * Observer failures never fail the write; they set `recordingGap`. Called with the exclusive
+ * persistence lock held.
+ *
+ * When the resources cannot be read first, neither hook runs and the gap is flagged only once the
+ * write is done: a `before` hook that closed an autosave at that point would consume the flag
+ * before the change it stands for exists, attributing the missed write to the previous boundary
+ * instead of the next one (Rule 01a11a5e-03c9-745e-b23a-bb06b600377d).
  */
 async function commitCanonicalWrite<Written extends boolean | void>(
 	persistence: FileNativePersistence,
@@ -1835,19 +1861,27 @@ async function commitCanonicalWrite<Written extends boolean | void>(
 	const context = observer ? currentDesignWriteContext() : undefined
 	const versioned = observer && context ? changes.filter(change => LEGACY_LAYOUT.classifyVersionedPath(change.path)) : []
 	if (!observer || !context || versioned.length === 0) return write()
-	let before: readonly ResourceFilesBefore[] | undefined
+	let before: readonly ResourceFilesBefore[]
 	try {
 		before = await readResourceFilesBeforeWrite(persistence, versioned)
 	}
 	catch (error) {
-		reportObserverFailure(state, 'could not read the resources before a design write', error)
+		try {
+			return await write()
+		}
+		finally {
+			reportObserverFailure(state, 'could not read the resources before a design write', error)
+		}
 	}
-	await invokeObserver(persistence, state, 'beforeCanonicalWrite', async () => observer.beforeCanonicalWrite?.(context))
+	const ready = await invokeObserver(persistence, state, 'beforeCanonicalWrite', async () => observer.beforeCanonicalWrite?.(context, before.map(resourceBeforeWrite)))
 	const written = await write()
-	if (written === false || !before) return written
-	const committedBefore = before
-	await invokeObserver(persistence, state, 'afterCanonicalCommit', async () => observer.afterCanonicalCommit?.(context, committedBefore.map(resourceChangeAfterCommit)))
+	if (written === false || !ready) return written
+	await invokeObserver(persistence, state, 'afterCanonicalCommit', async () => observer.afterCanonicalCommit?.(context, before.map(resourceChangeAfterCommit)))
 	return written
+}
+
+function resourceBeforeWrite(entry: ResourceFilesBefore): CanonicalResourceBefore {
+	return { resource: entry.resource, revision: revisionForResourceFiles(entry.resource.kind, entry.files) ?? null }
 }
 
 async function readResourceFilesBeforeWrite(persistence: FileNativePersistence, changes: readonly FileChange[]): Promise<readonly ResourceFilesBefore[]> {
@@ -1905,15 +1939,33 @@ function resourceChangeAfterCommit(entry: ResourceFilesBefore): CanonicalResourc
 	}
 }
 
-async function invokeObserver(persistence: FileNativePersistence, state: ObserverState, hook: keyof CanonicalWriteObserver, call: () => Promise<unknown>): Promise<void> {
+/**
+ * Runs one hook under the observer mark and the observer timeout; true when it settled in time
+ * without throwing. A hook still running at the timeout is abandoned: the write goes on, the gap is
+ * flagged, and a later rejection of the abandoned hook is only logged.
+ */
+async function invokeObserver(persistence: FileNativePersistence, state: ObserverState, hook: keyof CanonicalWriteObserver, call: () => Promise<unknown>): Promise<boolean> {
 	const mark = { running: true, persistence }
+	let timer: ReturnType<typeof setTimeout> | undefined
 	try {
-		await observerScope.run(mark, call)
+		const pending = observerScope.run(mark, call)
+		const timedOut = new Promise<'timeout'>((resolve) => {
+			timer = setTimeout(resolve, state.timeoutMilliseconds, 'timeout')
+			timer.unref?.()
+		})
+		if (await Promise.race([pending.then(() => 'settled' as const), timedOut]) === 'timeout') {
+			pending.catch((error: unknown) => console.error(`uiux: abandoned history ${hook} failed later: ${error instanceof Error ? error.message : String(error)}`))
+			reportObserverFailure(state, `${hook} did not finish within ${state.timeoutMilliseconds} ms and was abandoned`, undefined)
+			return false
+		}
+		return true
 	}
 	catch (error) {
 		reportObserverFailure(state, `${hook} failed`, error)
+		return false
 	}
 	finally {
+		clearTimeout(timer)
 		mark.running = false
 	}
 }
@@ -1921,7 +1973,8 @@ async function invokeObserver(persistence: FileNativePersistence, state: Observe
 /** Rule 01a11a5e-036d-7955-aa27-4ec036b55938: the write stands, the failure is logged and flagged. */
 function reportObserverFailure(state: ObserverState, what: string, error: unknown): void {
 	state.recordingGap = true
-	console.error(`uiux: history ${what}; the write was kept and the gap is recorded at the next history boundary: ${error instanceof Error ? error.message : String(error)}`)
+	const detail = error === undefined ? '' : `: ${error instanceof Error ? error.message : String(error)}`
+	console.error(`uiux: history ${what}; the write was kept and the gap is recorded at the next history boundary${detail}`)
 }
 
 function compareCodeUnits(left: string, right: string): number {
