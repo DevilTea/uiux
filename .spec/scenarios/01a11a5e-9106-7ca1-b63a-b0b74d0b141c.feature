@@ -1,7 +1,7 @@
 Feature: Version history
   # Source: Discussion #122 (Part 11) d10 rule 4, R16 https://github.com/DevilTea/uiux/discussions/122; "What `.spec/` records after acceptance" key Scenarios https://github.com/DevilTea/uiux/discussions/122; owner acceptance https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263.
-  # Status: not built as of cf3b984; see the Implementation gaps entry of 01a11a5e-1645-7f02-ae9e-05dd242e4a82 in its owner.
-  # Note: No test exists yet; tracked in issue #132.
+  # Status: built as of 6ee4a5c.
+  # Test: code@6ee4a5c `tests/history-restore.test.ts#L186` "replaces its IR, Variants, name and non-Decision Spec, keeps its current Decisions, and records a version of its own naming the source". https://github.com/DevilTea/uiux/blob/6ee4a5cd0c7dcaaad91db13589e03ecd0691de36/tests/history-restore.test.ts#L186
   @spec:id:01a11a5e-9106-73c2-b51b-107557aa88e8
   @spec:demonstrates:01a11a5e-1428-70eb-9d75-b54ba25015cb
   @spec:demonstrates:01a11a5e-14ce-7894-9c46-a8ad4b45e6d6
