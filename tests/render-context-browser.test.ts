@@ -131,7 +131,7 @@ describe('Review render context in the Workbench (Part 7)', () => {
 			// The Locale list closes with an exit animation, and when it unmounts it returns focus to its
 			// trigger. Focusing the composer before then loses focus to the trigger, and ⌘↵ reopens the list
 			// instead of sending. Wait for the list to go, then confirm focus is in the composer text.
-			await page.getByRole('listbox').waitFor({ state: 'detached' })
+			await page.locator('[data-slot="content"][role="listbox"]').waitFor({ state: 'detached' })
 			const composerText = page.locator('[data-comment-composer] [data-composer-text]')
 			await composerText.focus()
 			await expect.poll(() => composerText.evaluate(element => element === document.activeElement)).toBe(true)
