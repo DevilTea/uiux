@@ -247,6 +247,11 @@ class AutosaveRecorder implements HistoryRecorder {
 			this.persistence.setWriteObserver(undefined)
 			this.phase = 'stopped'
 		}
+		// Nothing to close: stop without taking the lock, so shutdown touches the Workspace only when it records.
+		if (!this.open && !this.inFlight) {
+			detach()
+			return
+		}
 		try {
 			// Rule 01a11a5e-010b-75ae-bfd7-7e80d48e8eca: best effort; a failure leaves open.json for the next start.
 			await this.persistence.withLock(async () => {

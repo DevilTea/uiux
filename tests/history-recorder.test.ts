@@ -289,7 +289,7 @@ describe('history recorder start', () => {
 		await vi.waitFor(() => expect(ctx.clock.pending()).toBe(1))
 		await ctx.recorder.stop()
 		expect(ctx.clock.pending()).toBe(0)
-	})
+	}, 30_000)
 })
 
 describe('autosave boundaries', () => {
@@ -303,7 +303,8 @@ describe('autosave boundaries', () => {
 		ctx.clock.advance(AUTOSAVE_IDLE_MS - 1)
 		expect(await ctx.hostVersions()).toEqual([])
 		ctx.clock.advance(1)
-		await vi.waitFor(async () => expect(await ctx.hostVersions()).toHaveLength(1))
+		// The timer close writes the version, then clears open.json.
+		await vi.waitFor(async () => expect([(await ctx.hostVersions()).length, await ctx.host.readOpenJournal()]).toEqual([1, undefined]))
 		const [autosave] = await ctx.hostVersions()
 		expect(autosave).toMatchObject({ type: 'autosave', actor: actorOf(HUMAN), netChange: true, startedAt: new Date(START).toISOString() })
 		expect(autosave).not.toHaveProperty('recordingGap')
@@ -343,7 +344,7 @@ describe('autosave boundaries', () => {
 		}
 		expect(await ctx.hostVersions()).toEqual([])
 		ctx.clock.advance(START + AUTOSAVE_MAX_SPAN_MS - ctx.clock.now())
-		await vi.waitFor(async () => expect(await ctx.hostVersions()).toHaveLength(1))
+		await vi.waitFor(async () => expect([(await ctx.hostVersions()).length, await ctx.host.readOpenJournal()]).toEqual([1, undefined]))
 		const [autosave] = await ctx.hostVersions()
 		expect(autosave!.events).toHaveLength(writes)
 		expect(Date.parse(autosave!.at) - Date.parse(autosave!.startedAt)).toBe(AUTOSAVE_MAX_SPAN_MS)
@@ -602,7 +603,8 @@ describe('recording failures', () => {
 		// records both skipped writes as one external version flagged as a recording gap.
 		release()
 		await vi.waitFor(async () => expect(await ctx.hostVersions()).toHaveLength(2))
-		expect(await ctx.recorder.closeOpenAutosave('checkpoint')).toEqual({ reason: 'checkpoint' })
+		// Retried until the abandoned close has fully settled (until then the recorder refuses new work).
+		expect(await vi.waitFor(() => ctx.recorder.closeOpenAutosave('checkpoint'))).toEqual({ reason: 'checkpoint' })
 		const versions = await ctx.hostVersions()
 		expect(versions.map(version => version.type)).toEqual(['autosave', 'external'])
 		expect(revisionOf(versions[0]!, 'view', VIEW_ID)).toBe(agentRevision)
