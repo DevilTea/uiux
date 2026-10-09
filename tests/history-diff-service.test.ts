@@ -201,6 +201,23 @@ describe('diffVersions', () => {
 		expect(JSON.stringify(changed)).not.toContain('schemaVersion')
 	})
 
+	it('gives the same summary at every detail for two versions recorded under the same older schema', async () => {
+		const ctx = await workspace()
+		const recordV3 = (at: string, manifestBytes: Uint8Array) => record(ctx, 'autosave', {
+			at,
+			workspaceSchemaVersion: 3,
+			edit: snapshot => snapshot.set(workspaceRelativePath(), manifestBytes),
+		})
+		// The manifests differ in whitespace only; upgrading both would canonicalize them alike.
+		const pretty = await recordV3('2026-10-01T00:00:00.000Z', json({ ...MANIFEST, schemaVersion: 3 }))
+		const compact = await recordV3('2026-10-02T00:00:00.000Z', new TextEncoder().encode(`${JSON.stringify({ ...MANIFEST, schemaVersion: 3 })}\n`))
+		const summary = compared(await ctx.app.diffVersions({ from: pretty, to: compact }))
+		const semantic = compared(await ctx.app.diffVersions({ from: pretty, to: compact, detail: 'semantic' }))
+		expect(semantic.summary).toEqual(summary.summary)
+		expect(statuses(summary)['workspace:workspace']).toBe('modified')
+		expect(semantic.changes).toEqual([{ kind: 'workspace', key: 'workspace', status: 'modified', diff: { type: 'workspace' } }])
+	})
+
 	it('upgrades an older side in memory with the policy steps before comparing, so a migration adds no change', async () => {
 		const root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-upgrade-')))
 		const home = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-home-')))
@@ -322,6 +339,8 @@ describe('diffVersions', () => {
 
 		expect((await diffVersionsForHttp(scoped(ctx.app, VIEWER), { from: first, extra: '1' })).status).toBe(400)
 		expect((await diffVersionsForHttp(scoped(ctx.app, VIEWER), { from: 'parent' })).status).toBe(400)
+		const parentOfCurrent = await diffVersionsForHttp(scoped(ctx.app, VIEWER), { from: 'parent', to: 'current' })
+		expect(parentOfCurrent).toMatchObject({ status: 400, body: { diagnostics: [{ path: '/to', message: expect.stringContaining('needs a version ID in to') }] } })
 		expect((await diffVersionsForHttp(scoped(ctx.app, VIEWER), { from: first, resource: 'view' })).status).toBe(400)
 		expect((await diffVersionsForHttp(scoped(ctx.app, VIEWER), { from: randomUUID() })).status).toBe(404)
 	})

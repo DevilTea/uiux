@@ -245,11 +245,13 @@ export function createHistoryDiffService(persistence: FileNativePersistence, his
 		const summary = summarizeResourceChanges(from?.resources, to.resources)
 			.filter(row => !request.resources || request.resources.has(resourceIdentityKey(row)))
 			.map((row): ResourceChangeSummary => {
-				if (row.status !== 'modified' || !before) return row
+				// Within one schema version the recorded revisions decide, whatever the detail: only a
+				// comparison across a migration can show differences the migration alone made.
+				if (row.status !== 'modified' || !before || !crossSchema) return row
 				const identity = resourceIdentityKey(row)
 				const upgradedBefore = before.revisions.get(identity)
 				if (upgradedBefore !== undefined && upgradedBefore === after.revisions.get(identity)) return { ...row, status: 'unchanged' }
-				if (crossSchema && row.kind === 'workspace' && sameSettings(before.files.get(identity), after.files.get(identity))) return { ...row, status: 'unchanged' }
+				if (row.kind === 'workspace' && sameSettings(before.files.get(identity), after.files.get(identity))) return { ...row, status: 'unchanged' }
 				return row
 			})
 		if (request.detail !== 'semantic') return { status: 'compared', from: from ? from.ref as ComparedVersion : null, to: to.ref, summary }

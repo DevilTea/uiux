@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import type { AccessRefusal, ScopedWorkspaceSession } from '../application/access/scoped-session'
+import { isFullUuid } from '../domain/validation'
 import { VERSION_DIFF_DETAILS, type DiffVersionsCommand, type VersionDiffOutcome } from '../application/services/history-diff'
 import type { AuthoringHttpResult } from './authoring-http'
 
@@ -41,8 +42,8 @@ export async function diffVersionsForHttp(session: ScopedWorkspaceSession, query
 			return invalid([{ code: 'transport.malformed_payload', path: `/resource/${index}`, message: 'Each resource is <kind>:<key>.' }])
 		resources.push({ kind: value.slice(0, separator), key: value.slice(separator + 1) })
 	}
-	if (from === PARENT_VERSION_SELECTOR && to === undefined)
-		return invalid([{ code: 'transport.malformed_payload', path: '/to', message: 'from=parent compares the to version with its parent; name that version in to.' }])
+	if (from === PARENT_VERSION_SELECTOR && (to === undefined || !isFullUuid(to)))
+		return invalid([{ code: 'transport.malformed_payload', path: '/to', message: 'A comparison with the parent (from=parent) needs a version ID in to.' }])
 	const command: DiffVersionsCommand = {
 		from: from === PARENT_VERSION_SELECTOR ? { parentOf: to! } : from,
 		...(to === undefined ? {} : { to }),
