@@ -138,7 +138,7 @@ function defaultContext(viewId = VIEW_ID_1): ResolvedRenderContext {
 
 function setupDom(): { window: Window; document: Document } {
 	const win = new Window()
-	globalThis.window = win as unknown as Window & typeof globalThis
+	globalThis.window = win as unknown as typeof globalThis.window
 	globalThis.document = win.document as unknown as Document
 	globalThis.HTMLElement = win.HTMLElement as unknown as typeof HTMLElement
 	globalThis.Element = win.Element as unknown as typeof Element
@@ -478,7 +478,7 @@ describe('preview adapter materialization transport', () => {
 				state: 'valid',
 				diagnostics: [],
 			})
-			expect(adaptersResp.bundleUrl).toContain('/api/preview/runtime?v=')
+			expect(adaptersResp).toMatchObject({ bundleUrl: expect.stringContaining('/api/preview/runtime?v=') })
 
 			const runtimeJs = await runtimeHandler(mockEvent)
 			expect(typeof runtimeJs).toBe('string')

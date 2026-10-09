@@ -290,7 +290,7 @@ async function loadBundle(root: string): Promise<BundleModule> {
 	if (resolution.state !== 'valid') throw new Error(JSON.stringify(resolution.diagnostics))
 	const bundle = await buildWorkspacePreviewBundle({ workspaceRoot: root, set: resolution.set })
 	const win = new Window()
-	globalThis.window = win as unknown as Window & typeof globalThis
+	globalThis.window = win as unknown as typeof globalThis.window
 	globalThis.document = win.document as unknown as Document
 	globalThis.HTMLElement = win.HTMLElement as unknown as typeof HTMLElement
 	globalThis.Element = win.Element as unknown as typeof Element

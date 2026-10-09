@@ -330,11 +330,13 @@ describe('shared HTTP/MCP point-resource reads', { timeout: HEAVY_SERVER_SUITE_T
 		try {
 			await client.connect(transport)
 			const readReviewMcp = await client.readResource({ uri: pointResourceUri({ kind: 'review', key: REVIEW_ID }) })
-			const mcpReview = JSON.parse(readReviewMcp.contents[0]?.text ?? '{}')
+			const reviewContent = readReviewMcp.contents[0]
+			const mcpReview = JSON.parse(reviewContent && 'text' in reviewContent ? reviewContent.text : '{}')
 			expect(mcpReview).toEqual(reviewApp)
 
 			const readAssetMcp = await client.readResource({ uri: pointResourceUri({ kind: 'asset', key: ASSET_ID }) })
-			const mcpAsset = JSON.parse(readAssetMcp.contents[0]?.text ?? '{}')
+			const assetContent = readAssetMcp.contents[0]
+			const mcpAsset = JSON.parse(assetContent && 'text' in assetContent ? assetContent.text : '{}')
 			expect(mcpAsset).toEqual(assetApp)
 		}
 		finally {

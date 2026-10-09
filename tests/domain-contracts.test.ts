@@ -166,8 +166,10 @@ describe('canonical resource primitives', () => {
 		expect(validateDecision(reopened.value).ok).toBe(true)
 		expect(validateDecision({ ...pending, outcome: { summary: 'stale', rationale: '' } }).ok).toBe(false)
 		expect(validateDecision({ ...pending, history: [{ at: TIME, actor: { type: 'human' }, before: { status: 'decided', outcome: { summary: 'old', rationale: '' } }, after: { status: 'deferred' } }] }).ok).toBe(false)
-		const brokenChain = structuredClone(reopened.value)
-		brokenChain.history[1]!.before = { status: 'pending' }
+		const brokenChain = {
+			...reopened.value,
+			history: reopened.value.history.map((entry, index) => index === 1 ? { ...entry, before: { status: 'pending' as const } } : entry),
+		}
 		expect(validateDecision(brokenChain).diagnostics.some(item => item.code === 'decision.discontinuous_history')).toBe(true)
 		expect(validateDecision({ ...reopened.value, status: 'deferred' }).diagnostics.some(item => item.code === 'decision.history_state_mismatch')).toBe(true)
 	})

@@ -3,6 +3,7 @@ import { lstat, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
+import type { ResourceRevision } from '../src/application/dto/revisions'
 import { artifactStoreRelativePath } from '../src/domain/artifacts/schema'
 import type { AuthoredAsset } from '../src/domain/assets/schema'
 import type { FlowResource } from '../src/domain/flows/schema'
@@ -521,6 +522,9 @@ describe('file-native persistence', () => {
 		const initialReview = await persistence.reviews.read(REVIEW_ID)
 		expect(initialView).toBeDefined()
 		expect(initialReview).toBeDefined()
+		// Revisions are opaque branded strings with no public constructor; these stale tokens are built by hand on purpose.
+		const staleReviewRevision = 'rev-stale-review' as ResourceRevision
+		const staleViewRevision = 'rev-stale-view' as ResourceRevision
 
 		const nextView: ViewResource = {
 			...viewFixture(),
@@ -548,10 +552,10 @@ describe('file-native persistence', () => {
 		// 1. Simultaneous stale revisions: both mismatch
 		const bothStale = await persistence.atomicReviewViewPromotionCas({
 			reviewId: REVIEW_ID,
-			expectedReviewRevision: 'rev-stale-review',
+			expectedReviewRevision: staleReviewRevision,
 			reviewResource: nextReview,
 			viewId: VIEW_ID,
-			expectedViewRevision: 'rev-stale-view',
+			expectedViewRevision: staleViewRevision,
 			viewResource: nextView,
 		})
 		expect(bothStale.ok).toBe(false)
@@ -568,7 +572,7 @@ describe('file-native persistence', () => {
 		// 2. Stale Review revision alone
 		const staleReview = await persistence.atomicReviewViewPromotionCas({
 			reviewId: REVIEW_ID,
-			expectedReviewRevision: 'rev-stale-review',
+			expectedReviewRevision: staleReviewRevision,
 			reviewResource: nextReview,
 			viewId: VIEW_ID,
 			expectedViewRevision: initialView!.revision,
@@ -589,7 +593,7 @@ describe('file-native persistence', () => {
 			expectedReviewRevision: initialReview!.revision,
 			reviewResource: nextReview,
 			viewId: VIEW_ID,
-			expectedViewRevision: 'rev-stale-view',
+			expectedViewRevision: staleViewRevision,
 			viewResource: nextView,
 		})
 		expect(staleView.ok).toBe(false)

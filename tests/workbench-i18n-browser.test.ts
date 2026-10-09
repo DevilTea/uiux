@@ -115,7 +115,9 @@ type Step = Readonly<{ name: string; path: string; signedOut?: boolean; before?:
 
 /** Answers matching requests the way the server refuses them: an English message and coded diagnostics. */
 function refuse(pattern: string, status: number, body: Record<string, unknown>) {
-	return (page: Page) => page.route(pattern, route => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) }))
+	return async (page: Page) => {
+		await page.route(pattern, route => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) }))
+	}
 }
 
 const pause = (page: Page, ms = 600) => page.waitForTimeout(ms)

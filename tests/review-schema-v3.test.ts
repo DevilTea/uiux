@@ -347,14 +347,14 @@ describe('uiux.v2-to-v3 (manifest-only step)', () => {
 		expect(await readFile(join(root, reviewRelativePath(smuggled.id)), 'utf8')).toBe(bytes)
 	})
 
-	it('refuses to apply to anything but a v2 manifest and leaves unparseable Reviews to persistence', () => {
-		const manifest = (version: number) => new Map([[workspaceRelativePath(), new TextEncoder().encode(JSON.stringify({ ...v2Manifest, schemaVersion: version }))]])
+	it('refuses to apply to anything but a v2 manifest and leaves unparseable Reviews to persistence', async () => {
+		const manifest = (version: number) => new Map<string, Uint8Array>([[workspaceRelativePath(), new TextEncoder().encode(JSON.stringify({ ...v2Manifest, schemaVersion: version }))]])
 		expect(() => WORKSPACE_V2_TO_V3_STEP.apply(manifest(1))).toThrow(/schemaVersion 2/)
 		expect(() => WORKSPACE_V2_TO_V3_STEP.apply(manifest(3))).toThrow(/schemaVersion 2/)
 		expect(() => WORKSPACE_V2_TO_V3_STEP.apply(new Map())).toThrow(/workspace\.json/)
 		const withBroken = manifest(2)
 		withBroken.set('reviews/x.review.json', new TextEncoder().encode('{ not json'))
-		const next = WORKSPACE_V2_TO_V3_STEP.apply(withBroken)
+		const next = await WORKSPACE_V2_TO_V3_STEP.apply(withBroken)
 		expect(new TextDecoder().decode(next.get('reviews/x.review.json'))).toBe('{ not json')
 	})
 

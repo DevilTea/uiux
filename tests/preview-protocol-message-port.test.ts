@@ -1,5 +1,3 @@
-import { MessageChannel } from 'node:worker_threads'
-
 import { describe, expect, it, vi } from 'vitest'
 
 import {

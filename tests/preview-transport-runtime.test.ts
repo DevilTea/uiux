@@ -147,9 +147,11 @@ describe('preview protocol transport & runtime materialization', () => {
 			expect(result.status).toBe('ready')
 			if (result.status !== 'ready') return
 
-			expect(result.controller.runtime.blueprint.root.type).toBe('RootShell')
-			expect(result.controller.context.locale).toBe('en-US')
-			result.controller.dispose()
+			const controller = result.controller
+			if (!controller) throw new Error('Expected a live View runtime controller.')
+			expect(controller.runtime.blueprint.root.type).toBe('RootShell')
+			expect(controller.context.locale).toBe('en-US')
+			controller.dispose()
 		})
 
 		it('reports adapter.materialization_unavailable when IR contains unmaterialized adapter widget types', () => {

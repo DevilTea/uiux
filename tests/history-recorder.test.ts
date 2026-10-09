@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { MemberPrincipal } from '../src/application/access/principal'
+import type { ResourceRevision } from '../src/application/dto/revisions'
 import { createHistoryRecorder, type HistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
@@ -103,7 +104,7 @@ type Fixture = Readonly<{
 	clock: ManualClock
 	recorder: HistoryRecorder
 	logs: string[]
-	viewRevision: () => Promise<string>
+	viewRevision: () => Promise<ResourceRevision>
 	versions: () => Promise<readonly VersionRecord[]>
 	hostVersions: () => Promise<readonly HostVersionRecord[]>
 }>
@@ -151,7 +152,7 @@ async function editView(ctx: Fixture, principal: MemberPrincipal, intent: string
 }
 
 /** A change made outside UIUX: a text editor rewrites the View file. */
-async function externalViewEdit(ctx: Fixture, name: string): Promise<string> {
+async function externalViewEdit(ctx: Fixture, name: string): Promise<ResourceRevision> {
 	const path = join(ctx.root, viewRelativePath(VIEW_ID))
 	const view = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>
 	await writeFile(path, `${JSON.stringify({ ...view, name }, null, '\t')}\n`)

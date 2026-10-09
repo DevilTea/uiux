@@ -286,7 +286,7 @@ describe('View / RootShell / Variant runtime assembly', () => {
 			id: 'label', type: 'LocalizedLabel', config: { title: { $i18n: 42 } },
 		}), context())
 		expect(result).not.toBeInstanceOf(LiveViewRuntimeController)
-		if (result instanceof LiveViewRuntimeController) return
+		if (result instanceof LiveViewRuntimeController || result.state !== 'invalid') throw new Error('Expected an invalid View runtime build.')
 		expect(result.diagnostics.some(item => item.path.endsWith('/config/title/$i18n'))).toBe(true)
 		expect(result.diagnostics.every(item => !item.code.startsWith('widget.'))).toBe(true)
 	})
@@ -297,7 +297,7 @@ describe('View / RootShell / Variant runtime assembly', () => {
 			id: 'counter', type: 'Counter', config: { title: { $i18n: 'title' } },
 		}), context())
 		expect(result).not.toBeInstanceOf(LiveViewRuntimeController)
-		if (result instanceof LiveViewRuntimeController) return
+		if (result instanceof LiveViewRuntimeController || result.state !== 'invalid') throw new Error('Expected an invalid View runtime build.')
 		expect(result.diagnostics.some(item => item.code === 'i18n.field_not_eligible')).toBe(true)
 	})
 
@@ -345,7 +345,7 @@ describe('View / RootShell / Variant runtime assembly', () => {
 		const bundle = await runtimeBundle(counterPlugin, FixtureRenderer)
 		const result = createController(bundle, viewFixture({ Broken: { state: { root: { locale: 'zh-TW' } } } }), context({ variantName: 'Broken' }))
 		expect(result).not.toBeInstanceOf(LiveViewRuntimeController)
-		if (result instanceof LiveViewRuntimeController) return
+		if (result instanceof LiveViewRuntimeController || result.state !== 'invalid') throw new Error('Expected an invalid View runtime build.')
 		expect(result.diagnostics.some(item => item.code === 'variant.root_shell_state_managed')).toBe(true)
 	})
 
@@ -353,7 +353,7 @@ describe('View / RootShell / Variant runtime assembly', () => {
 		const bundle = await runtimeBundle(rootWriterPlugin, FixtureRenderer)
 		const result = createController(bundle, viewFixture({}, { id: 'writer', type: 'RootWriter' }), context())
 		expect(result).not.toBeInstanceOf(LiveViewRuntimeController)
-		if (result instanceof LiveViewRuntimeController) return
+		if (result instanceof LiveViewRuntimeController || result.state !== 'invalid') throw new Error('Expected an invalid View runtime build.')
 		expect(result.diagnostics.some(item => item.code === 'runtime.root_context_write_forbidden')).toBe(true)
 	})
 
@@ -440,7 +440,7 @@ describe('View / RootShell / Variant runtime assembly', () => {
 			id: 'label', type: 'LocalizedLabel', config: { title: { $i18n: 'title' }, titleKey: 'other' },
 		}), context())
 		expect(result).not.toBeInstanceOf(LiveViewRuntimeController)
-		if (result instanceof LiveViewRuntimeController) return
+		if (result instanceof LiveViewRuntimeController || result.state !== 'invalid') throw new Error('Expected an invalid View runtime build.')
 		expect(result.diagnostics.some(item => item.code === 'i18n.config_field_conflict')).toBe(true)
 	})
 

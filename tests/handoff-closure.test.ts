@@ -9,7 +9,11 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 
 import { FileNativePersistence } from '../src/persistence'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
-import { createHandoffExportService } from '../src/application/services/handoff-export'
+import {
+	createHandoffExportService,
+	type AssessHandoffReadinessCommand,
+	type ExportHandoffCommand,
+} from '../src/application/services/handoff-export'
 import { createFormalCaptureService } from '../src/application/services/formal-capture'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
@@ -39,6 +43,23 @@ afterEach(async () => {
 	}
 	await Promise.all(temporaryRoots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
+
+/** These Workspaces are on the current schema, so the schema gate never blocks; a blocked result fails the test. */
+function currentSchemaHandoff(persistence: FileNativePersistence) {
+	const service = createHandoffExportService(persistence)
+	return {
+		async exportHandoff(command: ExportHandoffCommand) {
+			const result = await service.exportHandoff(command)
+			if (result.status === 'blocked') throw new Error(`Unexpected Handoff schema gate: ${result.code}`)
+			return result
+		},
+		async assessReadiness(command: AssessHandoffReadinessCommand) {
+			const result = await service.assessReadiness(command)
+			if (result.status === 'blocked') throw new Error(`Unexpected Handoff schema gate: ${result.code}`)
+			return result
+		},
+	}
+}
 
 function makeCounterAdapterSource(): string {
 	return `
@@ -287,7 +308,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		const viewRev = await persistence.views.create(VIEW_1_ID, view)
 		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
 
-		const service = createHandoffExportService(persistence)
+		const service = currentSchemaHandoff(persistence)
 		const roots = [{ type: 'view' as const, viewId: VIEW_1_ID }]
 
 		// First export
@@ -319,7 +340,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		const { persistence } = await createTestWorkspace()
 		await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'One'))
 		await persistence.views.create(VIEW_2_ID, createSampleView(VIEW_2_ID, 'Two'))
-		const service = createHandoffExportService(persistence)
+		const service = currentSchemaHandoff(persistence)
 
 		const first = await service.exportHandoff({ roots: [
 			{ type: 'view', viewId: VIEW_1_ID },
@@ -345,7 +366,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		const viewRev = await persistence.views.create(VIEW_1_ID, view)
 		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
 
-		const service = createHandoffExportService(persistence)
+		const service = currentSchemaHandoff(persistence)
 		const roots = [{ type: 'view' as const, viewId: VIEW_1_ID }]
 
 		const result1 = await service.exportHandoff({ roots })
@@ -389,7 +410,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 			// Missing required ir, variants, spec
 		}))
 
-		const service = createHandoffExportService(persistence)
+		const service = currentSchemaHandoff(persistence)
 
 		// Target only VIEW_1
 		const result = await service.exportHandoff({
@@ -423,14 +444,16 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 			status: 'open',
 			messages: [{
 				id: 'msg-1',
-				author: 'reviewer',
+				actor: { type: 'human', id: 'reviewer' },
+				at: '2026-10-04T00:00:00Z',
 				body: 'Need visual check on button padding',
-				createdAt: '2026-10-04T00:00:00Z',
 			}],
+			history: [],
+			submissions: [],
 		}
 		const reviewRev = await persistence.reviews.create(REVIEW_1_ID, reviewThread)
 
-		const service = createHandoffExportService(persistence)
+		const service = currentSchemaHandoff(persistence)
 		const roots = [{ type: 'view' as const, viewId: VIEW_1_ID }]
 
 		// Assessment blocks readiness
@@ -499,7 +522,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 			expect((await persistence.reviews.readInspected(thread.id))?.diagnostics).toEqual([])
 		}
 
-		const service = createHandoffExportService(persistence)
+		const service = currentSchemaHandoff(persistence)
 		const roots = [{ type: 'view' as const, viewId: VIEW_1_ID }]
 		const assessed = await service.assessReadiness({ roots })
 		expect(assessed.status).toBe('ok')
@@ -542,7 +565,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		const view1 = createSampleView(VIEW_1_ID, 'View Without Evidence')
 		const viewRev = await persistence.views.create(VIEW_1_ID, view1)
 
-		const service = createHandoffExportService(persistence)
+		const service = currentSchemaHandoff(persistence)
 		const roots = [{ type: 'view' as const, viewId: VIEW_1_ID }]
 
 		// Missing evidence
@@ -578,7 +601,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		const flow = createSampleFlow(FLOW_1_ID, VIEW_1_ID)
 		await persistence.flows.create(FLOW_1_ID, flow)
 
-		const service = createHandoffExportService(persistence)
+		const service = currentSchemaHandoff(persistence)
 
 		// Export with Flow as root
 		const result = await service.exportHandoff({
@@ -640,7 +663,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		const viewRev = await persistence.views.create(VIEW_1_ID, view)
 		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
 
-		const result = await createHandoffExportService(persistence).exportHandoff({
+		const result = await currentSchemaHandoff(persistence).exportHandoff({
 			roots: [{ type: 'view', viewId: VIEW_1_ID }],
 		})
 		expect(result.status).toBe('exported')
@@ -687,7 +710,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		const viewRev = await persistence.views.create(VIEW_1_ID, view)
 		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
 
-		const service = createHandoffExportService(persistence)
+		const service = currentSchemaHandoff(persistence)
 		const result = await service.exportHandoff({
 			roots: [{ type: 'view', viewId: VIEW_1_ID }],
 		})
@@ -736,7 +759,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		await putFormalEvidence(persistence, VIEW_1_ID, viewRev1, true)
 		await putFormalEvidence(persistence, VIEW_2_ID, viewRev2, true)
 
-		const service = createHandoffExportService(persistence)
+		const service = currentSchemaHandoff(persistence)
 		const result = await service.exportHandoff({
 			roots: [
 				{ type: 'view', viewId: VIEW_1_ID },
@@ -772,7 +795,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		const viewRev = await persistence.views.create(VIEW_1_ID, view)
 		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
 
-		const service = createHandoffExportService(persistence)
+		const service = currentSchemaHandoff(persistence)
 		const result = await service.exportHandoff({
 			roots: [{ type: 'view', viewId: VIEW_1_ID }],
 		})
@@ -938,7 +961,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		const viewRev = await persistence.views.create(VIEW_1_ID, view)
 		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
 
-		const handoff = createHandoffExportService(persistence)
+		const handoff = currentSchemaHandoff(persistence)
 		const exportRes = await handoff.exportHandoff({
 			roots: [{ type: 'view', viewId: VIEW_1_ID }],
 		})
@@ -973,7 +996,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		// Capture evidence at r1
 		const r1EvidenceDigest = await putFormalEvidence(persistence, VIEW_1_ID, r1, true)
 
-		const handoff = createHandoffExportService(persistence)
+		const handoff = currentSchemaHandoff(persistence)
 		const formalCapture = createFormalCaptureService(persistence)
 
 		// Assessment at r1: must be ready
@@ -989,6 +1012,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 			expectedRevision: r1,
 			resource: updatedView,
 		})
+		expect(casRes.ok).toBe(true)
+		if (!casRes.ok) throw new Error('CAS failed')
 		const r2 = casRes.revision
 		expect(r2).not.toBe(r1)
 
@@ -1038,7 +1063,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		})
 		expect(localeUpdate.ok).toBe(true)
 
-		const service = createHandoffExportService(persistence)
+		const service = currentSchemaHandoff(persistence)
 		const assessed = await service.assessReadiness({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
 		expect(assessed.status).toBe('ok')
 		expect(assessed.readiness?.implementationReady).toBe(false)
@@ -1092,7 +1117,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		const viewRev = await persistence.views.create(VIEW_1_ID, view)
 		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
 
-		const handoff = createHandoffExportService(persistence)
+		const handoff = currentSchemaHandoff(persistence)
 
 		// Assessment must succeed because View only uses Counter, not the broken adapter
 		const assess = await handoff.assessReadiness({
@@ -1140,7 +1165,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		expect(realEvidenceDigest).toBeDefined()
 
 		// 2. Assess readiness using the real formal capture
-		const handoff = createHandoffExportService(persistence)
+		const handoff = currentSchemaHandoff(persistence)
 		const assess = await handoff.assessReadiness({
 			roots: [{ type: 'view', viewId: VIEW_1_ID }],
 		})
