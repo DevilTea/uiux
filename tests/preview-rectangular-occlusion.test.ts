@@ -230,5 +230,5 @@ function expectProtocolValid(rectangle: WidgetRect, contours: readonly Contour[]
 			})),
 		},
 	})
-	expect(result.ok, result.ok ? undefined : JSON.stringify(result.issues)).toBe(true)
+	expect(result.ok, result.ok ? undefined : JSON.stringify(result.diagnostics)).toBe(true)
 }

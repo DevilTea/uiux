@@ -1281,7 +1281,8 @@ describe('Review renderContext over MCP and HTTP', () => {
 		expect(created.status).toBe(201)
 		expect((await stored(app)).resource.renderContext).toEqual({ viewportId: 'mobile' })
 		const listed = await listResourcesForHttp(app, { kinds: ['review'], limit: 10 })
-		expect((listed.body as { items: { summary: Record<string, unknown> }[] }).items[0]!.summary.renderContext).toEqual({ viewportId: 'mobile' })
+		const listedItem = listed.status === 200 ? listed.body.items[0] : undefined
+		expect(listedItem?.kind === 'review' && listedItem.summary.renderContext).toEqual({ viewportId: 'mobile' })
 
 		const reanchor = async (body: Record<string, unknown>) => {
 			const result = await reanchorReviewThreadForHttp(scoped(app), REVIEW_ID, { expectedRevision: (await stored(app)).revision, ...body })
@@ -1514,36 +1515,36 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 
 		const emptyView = await createViewForHttp(scoped(app), {})
 		expect(emptyView.status).toBe(400)
-		expect(emptyView.body.code).toBe('malformed_payload')
-		expect(emptyView.body.diagnostics.length).toBeGreaterThan(0)
+		expect(emptyView.body).toMatchObject({ code: 'malformed_payload' })
+		expect(emptyView.body).toMatchObject({ diagnostics: expect.arrayContaining([expect.anything()]) })
 
 		const missingSpec = await createViewForHttp(scoped(app), { name: 'Only Name' })
 		expect(missingSpec.status).toBe(400)
-		expect(missingSpec.body.code).toBe('malformed_payload')
+		expect(missingSpec.body).toMatchObject({ code: 'malformed_payload' })
 
 		const emptyLocale = await createLocaleForHttp(scoped(app), {})
 		expect(emptyLocale.status).toBe(400)
-		expect(emptyLocale.body.code).toBe('malformed_payload')
+		expect(emptyLocale.body).toMatchObject({ code: 'malformed_payload' })
 
 		const emptyFlow = await createFlowForHttp(scoped(app), {})
 		expect(emptyFlow.status).toBe(400)
-		expect(emptyFlow.body.code).toBe('malformed_payload')
+		expect(emptyFlow.body).toMatchObject({ code: 'malformed_payload' })
 
 		const emptyReview = await createReviewThreadForHttp(scoped(app), {})
 		expect(emptyReview.status).toBe(400)
-		expect(emptyReview.body.code).toBe('malformed_payload')
+		expect(emptyReview.body).toMatchObject({ code: 'malformed_payload' })
 
 		const emptyAsset = await createAssetForHttp(scoped(app), {})
 		expect(emptyAsset.status).toBe(400)
-		expect(emptyAsset.body.code).toBe('malformed_payload')
+		expect(emptyAsset.body).toMatchObject({ code: 'malformed_payload' })
 
 		const emptyMessage = await appendReviewMessageForHttp(scoped(app), REVIEW_ID, {})
 		expect(emptyMessage.status).toBe(400)
-		expect(emptyMessage.body.code).toBe('malformed_payload')
+		expect(emptyMessage.body).toMatchObject({ code: 'malformed_payload' })
 
 		const emptyResolve = await resolveReviewThreadForHttp(scoped(app), REVIEW_ID, {})
 		expect(emptyResolve.status).toBe(400)
-		expect(emptyResolve.body.code).toBe('malformed_payload')
+		expect(emptyResolve.body).toMatchObject({ code: 'malformed_payload' })
 	})
 
 	it('rejects string or object passed instead of array without type coercion or TypeError', async () => {
@@ -1557,7 +1558,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 			variantNames: 'not-an-array',
 		})
 		expect(stringVariants.status).toBe(400)
-		expect(stringVariants.body.code).toBe('malformed_payload')
+		expect(stringVariants.body).toMatchObject({ code: 'malformed_payload' })
 
 		// string instead of array on submit ready changeDomains
 		const stringDomains = await submitReadyForReviewForHttp(scoped(app), REVIEW_ID, {
@@ -1568,7 +1569,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 			evidenceRefs: [],
 		})
 		expect(stringDomains.status).toBe(400)
-		expect(stringDomains.body.code).toBe('malformed_payload')
+		expect(stringDomains.body).toMatchObject({ code: 'malformed_payload' })
 
 		// object instead of array on submit ready changeDomains
 		const objectDomains = await submitReadyForReviewForHttp(scoped(app), REVIEW_ID, {
@@ -1579,7 +1580,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 			evidenceRefs: [],
 		})
 		expect(objectDomains.status).toBe(400)
-		expect(objectDomains.body.code).toBe('malformed_payload')
+		expect(objectDomains.body).toMatchObject({ code: 'malformed_payload' })
 
 		// object instead of array on createReviewThread variantNames
 		const objectVariants = await createReviewThreadForHttp(scoped(app), {
@@ -1587,7 +1588,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 			variantNames: { name: 'mobile' },
 		})
 		expect(objectVariants.status).toBe(400)
-		expect(objectVariants.body.code).toBe('malformed_payload')
+		expect(objectVariants.body).toMatchObject({ code: 'malformed_payload' })
 	})
 
 	it('rejects malformed nested objects with structured HTTP 400', async () => {
@@ -1598,7 +1599,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 			anchor: 'not-an-object',
 		})
 		expect(badAnchor.status).toBe(400)
-		expect(badAnchor.body.code).toBe('malformed_payload')
+		expect(badAnchor.body).toMatchObject({ code: 'malformed_payload' })
 
 		// spec as string instead of object
 		const badSpec = await updateViewSpecForHttp(scoped(app), VIEW_ID, {
@@ -1606,7 +1607,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 			spec: 'intent only',
 		})
 		expect(badSpec.status).toBe(400)
-		expect(badSpec.body.code).toBe('malformed_payload')
+		expect(badSpec.body).toMatchObject({ code: 'malformed_payload' })
 
 		// ir as string instead of object
 		const badIr = await updateViewStructureForHttp(scoped(app), VIEW_ID, {
@@ -1615,7 +1616,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 			variants: {},
 		})
 		expect(badIr.status).toBe(400)
-		expect(badIr.body.code).toBe('malformed_payload')
+		expect(badIr.body).toMatchObject({ code: 'malformed_payload' })
 
 		// outcome as string instead of object in promotion
 		const badOutcome = await promoteReviewToDecisionForHttp(scoped(app), REVIEW_ID, {
@@ -1626,7 +1627,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 			outcome: 'approved',
 		})
 		expect(badOutcome.status).toBe(400)
-		expect(badOutcome.body.code).toBe('malformed_payload')
+		expect(badOutcome.body).toMatchObject({ code: 'malformed_payload' })
 	})
 
 	it('rejects unknown extra properties on strict HTTP endpoints with HTTP 400', async () => {
@@ -1638,7 +1639,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 			unrecognizedExtraField: 1234,
 		})
 		expect(unknownViewProp.status).toBe(400)
-		expect(unknownViewProp.body.code).toBe('malformed_payload')
+		expect(unknownViewProp.body).toMatchObject({ code: 'malformed_payload' })
 
 		const unknownSettingsProp = await updateWorkspaceSettingsForHttp(scoped(app), {
 			expectedRevision: 'rev-1',
@@ -1646,7 +1647,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 			unrecognizedSetting: true,
 		})
 		expect(unknownSettingsProp.status).toBe(400)
-		expect(unknownSettingsProp.body.code).toBe('malformed_payload')
+		expect(unknownSettingsProp.body).toMatchObject({ code: 'malformed_payload' })
 
 		const unknownReopenProp = await reopenReviewThreadForHttp(scoped(app), REVIEW_ID, {
 			expectedRevision: 'rev-1',
@@ -1654,7 +1655,7 @@ describe('HTTP authoring strict transport boundary and malformed payload rejecti
 			extraUnexpected: 'data',
 		})
 		expect(unknownReopenProp.status).toBe(400)
-		expect(unknownReopenProp.body.code).toBe('malformed_payload')
+		expect(unknownReopenProp.body).toMatchObject({ code: 'malformed_payload' })
 	})
 })
 
@@ -1712,8 +1713,8 @@ describe('Strict RFC 4648 Base64 asset encoding validation', () => {
 				contentBase64: badBase64,
 			})
 			expect(res.status).toBe(400)
-			expect(res.body.status).toBe('invalid')
-			expect(res.body.diagnostics.length).toBeGreaterThan(0)
+			expect(res.body).toMatchObject({ status: 'invalid' })
+			expect(res.body).toMatchObject({ diagnostics: expect.arrayContaining([expect.anything()]) })
 		}
 	})
 })
@@ -1743,7 +1744,7 @@ describe('Asset content HTTP serving and header security', () => {
 			'X-Content-Type-Options': 'nosniff',
 		})
 		// Verify no CRLF injection in headers
-		for (const [key, value] of Object.entries(contentRes.headers)) {
+		for (const [key, value] of Object.entries(contentRes.headers ?? {})) {
 			expect(key).not.toMatch(/[\r\n]/)
 			expect(value).not.toMatch(/[\r\n]/)
 		}

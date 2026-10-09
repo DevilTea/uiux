@@ -257,7 +257,7 @@ describe('Review timeline (Part 7 10b)', () => {
 		const declined = items[8]!
 		expect(declined.kind === 'resolved' && declined.resolution === 'wont-fix' && declined.reason === 'Out of scope' && !declined.submissionId).toBe(true)
 		const moved = items[1]!
-		expect(moved.kind === 'reanchored' && moved.from.widgetId === 'old' && moved.toScope.join() === 'compact').toBe(true)
+		expect(moved.kind === 'reanchored' && 'widgetId' in moved.from && moved.from.widgetId === 'old' && moved.toScope.join() === 'compact').toBe(true)
 	})
 
 	it('marks only the active ready submission as current, and reads a v1 resolve as verified', () => {

@@ -193,8 +193,8 @@ describe('product Workspace schema policy v4', () => {
 		expect(result.revision).toBe((await persistence.workspace.read('workspace'))?.revision)
 
 		const migrated = JSON.parse(after[reviewRelativePath(RESOLVED_REVIEW_ID)]!) as ReturnType<typeof v1ResolvedReview>
-		const expected = v1ResolvedReview()
-		expected.history[1] = { ...expected.history[1]!, resolution: 'verified' } as typeof expected.history[number]
+		const original = v1ResolvedReview()
+		const expected = { ...original, history: original.history.map((entry, index) => index === 1 ? { ...entry, resolution: 'verified' } : entry) }
 		expect(migrated).toEqual(expected)
 		expect(migrated.history[0]).not.toHaveProperty('resolution')
 		expect(validateReviewThread(migrated, { schemaVersion: 2 }).ok).toBe(true)

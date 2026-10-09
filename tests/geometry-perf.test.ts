@@ -111,7 +111,7 @@ async function runScenario(scenario: Scenario): Promise<Measured> {
 		}, () => ({ ok: true }))
 		bridge.admitGeneration('perf-gen', 'initial')
 		const streams = new P.GeometryStreamCoordinator({
-			send: (message: unknown) => bridge.sendGeometry(message),
+			send: message => bridge.sendGeometry(message),
 			requestFrame: (callback: () => void) => requestAnimationFrame(callback),
 			cancelFrame: (handle: number) => cancelAnimationFrame(handle),
 		})
@@ -120,11 +120,11 @@ async function runScenario(scenario: Scenario): Promise<Measured> {
 		const threads = Array.from({ length: scenario.threads }, (_, index) => ({
 			threadId: `t${index}`,
 			anchor: { viewId, widgetId: `w${index % scenario.pinWidgets}` },
-			status: statuses[index % 3],
+			status: statuses[index % 3]!,
 			latestActivity: 1_700_000_000_000 + index,
 			...(index % 4 === 0 ? { displayHint: { pin: { x: 0.2, y: 0.5 } } } : {}),
 		}))
-		const extra = Array.from({ length: scenario.extraStreams }, (_, index) => ({ consumerId: `x${index}`, widgetId: `label-${index}`, tier: 'targeting' }))
+		const extra = Array.from({ length: scenario.extraStreams }, (_, index) => ({ consumerId: `x${index}`, widgetId: `label-${index}`, tier: 'targeting' as const }))
 		streams.setDemand([...extra, ...P.pinGeometryDemand(threads, { viewId })])
 		const engine = new P.PinPlacementEngine()
 		const pins = threads.map(() => {
@@ -210,7 +210,7 @@ async function runScenario(scenario: Scenario): Promise<Measured> {
 		let passStart = 0
 		let passReports = 0
 		const producer = new P.RuntimeGeometryProducer({
-			send: (response: unknown) => {
+			send: (response) => {
 				passReports++
 				state.sent++
 				bridge.sendGeometry(response)
@@ -228,7 +228,9 @@ async function runScenario(scenario: Scenario): Promise<Measured> {
 		window.addEventListener('message', (event) => {
 			if (!event.data || event.data.channel !== 'wire') return
 			const result = bridge.receive(event.data.message)
-			if (result.status === 'accepted' && result.message.type.startsWith('geometry.')) producer.receive(result.message)
+			if (result.status !== 'accepted') return
+			const message = result.message
+			if (message.type === 'geometry.acquire.request' || message.type === 'geometry.release') producer.receive(message)
 		})
 		;(window as never as { __rt: unknown }).__rt = { state, producer }
 		bridge.declareCapabilities()

@@ -103,8 +103,7 @@ describe('Review resolution kinds (schemaVersion 2)', () => {
 			],
 		}
 		expect(validateReviewThread(cycled, V2).ok).toBe(true)
-		const staleVerified = structuredClone(cycled)
-		staleVerified.history[4]!.submissionId = SUBMISSION_ID
+		const staleVerified = { ...cycled, history: cycled.history.map((entry, index) => index === 4 ? { ...entry, submissionId: SUBMISSION_ID } : entry) }
 		expect(codes(staleVerified, V2)).toContain('review.resolve_stale_submission')
 	})
 

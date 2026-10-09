@@ -28,8 +28,8 @@ function region(regionId: string, maxError: number): VisibleRegion {
 	return { regionId, contour: square, maxError }
 }
 
-function context(geometryRevision: number, overrides: Partial<ProtocolContext> = {}): ProtocolContext {
-	return { ...scope, geometryRevision, ...overrides }
+function context(geometryRevision: number, overrides: Partial<ProtocolContext> = {}): ProtocolContext & Readonly<{ geometryRevision: number }> {
+	return { ...scope, ...overrides, geometryRevision }
 }
 
 function allocator(start = 40) {

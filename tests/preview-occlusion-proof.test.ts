@@ -4,7 +4,7 @@ import { planOcclusion, type OcclusionEvidence } from '../src/preview/occlusion-
 
 type Shape = { id: string; points?: Array<[number, number]> }
 
-function opaque(kind: 'rectangle' | 'rounded-box' | 'clip-inset' | 'clip-circle' | 'clip-ellipse' | 'clip-polygon' | 'svg-clip-path', id = kind): OcclusionEvidence<Shape> {
+function opaque(kind: 'rectangle' | 'rounded-box' | 'clip-inset' | 'clip-circle' | 'clip-ellipse' | 'clip-polygon' | 'svg-clip-path', id: string = kind): OcclusionEvidence<Shape> {
 	return { classification: 'opaque', targetContribution: 'proven-zero', shape: { kind, shape: { id } } }
 }
 

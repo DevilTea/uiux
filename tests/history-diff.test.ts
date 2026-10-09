@@ -8,6 +8,7 @@ import {
 	diffResource,
 	diffView,
 	diffWorkspaceSettings,
+	type AssetFile,
 	type AssetFiles,
 	type ResourceFiles,
 } from '../src/domain/history/diff'
@@ -258,7 +259,7 @@ describe('Workspace settings diff (Rules 01a11a5e-102f-7caa-b63f-d7c6fb5189c0 an
 })
 
 describe('Asset semantic diff (Rule 01a11a5e-10df-795e-8fbc-a99de09694a5)', () => {
-	const files = (metadata: Json, content: Record<string, string>): AssetFiles => new Map([
+	const files = (metadata: Json, content: Record<string, string>): AssetFiles => new Map<string, AssetFile>([
 		['asset.json', { digest: `sha256:${'0'.repeat(64)}`, bytes: new TextEncoder().encode(JSON.stringify(metadata)) }],
 		...Object.entries(content).map(([name, digest]) => [name, { digest }] as const),
 	])

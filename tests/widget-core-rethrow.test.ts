@@ -47,7 +47,7 @@ afterEach(() => {
 	overrides.inspectRuntime = undefined
 })
 
-const alpha = createWidgetPlugin('Alpha').done()
+const alpha = createWidgetPlugin('Alpha').description('Test Alpha Widget.').interfaces<Record<never, never>>().done()
 
 describe('createAdapterWidgetSystem rethrows what it does not map', () => {
 	it('propagates an exception that is not a WidgetSystemConfigurationError', () => {

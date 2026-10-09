@@ -12,7 +12,7 @@ import {
 import type { AdapterManifest } from '../src/domain/adapters/schema'
 import { IncompatibleWidgetCoreError } from '../src/runtime/widget-core-diagnostics'
 
-const dummyPlugin = createWidgetPlugin('DummyWidget').done()
+const dummyPlugin = createWidgetPlugin('DummyWidget').description('Test DummyWidget Widget.').interfaces<Record<never, never>>().done()
 const DummyRenderer = defineComponent({ render: () => h('div') })
 
 function makeManifest(id: string, overrides: Partial<AdapterManifest> = {}): AdapterManifest {
@@ -63,7 +63,7 @@ describe('product adapter integration', () => {
 
 	describe('productAdapterRuntimeMemberDecoder', () => {
 		it('decodes valid AnyWidgetPlugin', () => {
-			const decoded = productAdapterRuntimeMemberDecoder.decodePlugin(dummyPlugin, { entry: {} as never, index: 0 })
+			const decoded = productAdapterRuntimeMemberDecoder.decodePlugin(dummyPlugin)
 			expect(decoded.type).toBe('DummyWidget')
 		})
 
@@ -72,7 +72,7 @@ describe('product adapter integration', () => {
 			// documented `foreign-plugin` inspection code.
 			let thrown: unknown
 			try {
-				productAdapterRuntimeMemberDecoder.decodePlugin({ type: 'Broken' }, { entry: {} as never, index: 0 })
+				productAdapterRuntimeMemberDecoder.decodePlugin({ type: 'Broken' })
 			}
 			catch (cause) {
 				thrown = cause
@@ -85,7 +85,7 @@ describe('product adapter integration', () => {
 		})
 
 		it('rejects a member without a usable type before inspection', () => {
-			expect(() => productAdapterRuntimeMemberDecoder.decodePlugin({ type: '' }, { entry: {} as never, index: 0 })).toThrow(
+			expect(() => productAdapterRuntimeMemberDecoder.decodePlugin({ type: '' })).toThrow(
 				/non-empty string type/,
 			)
 		})
@@ -93,24 +93,23 @@ describe('product adapter integration', () => {
 		it('decodes valid renderer registration', () => {
 			const decoded = productAdapterRuntimeMemberDecoder.decodeRenderer(
 				{ type: 'DummyWidget', component: DummyRenderer },
-				{ entry: {} as never, index: 0 },
 			)
 			expect(decoded.type).toBe('DummyWidget')
 			expect(decoded.component).toBe(DummyRenderer)
 		})
 
 		it('rejects malformed renderer registration', () => {
-			expect(() => productAdapterRuntimeMemberDecoder.decodeRenderer({ type: '' }, { entry: {} as never, index: 0 })).toThrow()
-			expect(() => productAdapterRuntimeMemberDecoder.decodeRenderer({ type: 'Foo', component: 123 }, { entry: {} as never, index: 0 })).toThrow(
+			expect(() => productAdapterRuntimeMemberDecoder.decodeRenderer({ type: '' })).toThrow()
+			expect(() => productAdapterRuntimeMemberDecoder.decodeRenderer({ type: 'Foo', component: 123 })).toThrow(
 				/component must be a Vue component/,
 			)
 		})
 	})
 
 	describe('productAdapterRegistryInspector', () => {
-		it('inspects manifest ownership of plugins and renderers', () => {
+		it('inspects manifest ownership of plugins and renderers', async () => {
 			const manifest = makeManifest('inspect-test')
-			const ownership = productAdapterRegistryInspector.inspect(manifest)
+			const ownership = await productAdapterRegistryInspector.inspect(manifest)
 			expect(ownership.widgetTypes).toEqual(['DummyWidget'])
 			expect(ownership.rendererKeys).toEqual(['DummyWidget'])
 		})
