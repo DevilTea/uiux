@@ -241,6 +241,10 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 	 * viewport and theme ids authored in the manifest (a built-in fallback such as `default` or
 	 * `light` is not a key unless authored) and a Locale that has an i18n file or is the default
 	 * Locale. Every unknown key is reported, and nothing is written.
+	 *
+	 * The check reads the manifest and the i18n directory outside the Review write lock. If a key is
+	 * removed between this check and the write, the thread records a stale key, which the spec allows
+	 * (a key that stops existing never invalidates the thread).
 	 */
 	async function checkRenderContextInput(input: unknown, anchor: ReviewAnchor): Promise<
 		| Readonly<{ ok: true; value: ReviewRenderContext | undefined }>

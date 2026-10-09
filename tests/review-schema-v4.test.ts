@@ -370,6 +370,23 @@ describe('Review authoring records only Workspace keys in renderContext', () => 
 		expect(await readdir(join(root, 'reviews'))).toEqual([])
 	})
 
+	it('accepts `default` and `light` when the Workspace authored them, since only unauthored fallbacks are refused', async () => {
+		const { root, persistence, app } = await seedV4Workspace()
+		const manifest = { ...v3Manifest, schemaVersion: 4, viewports: { default: { dimensions: { width: 1280, height: 800 } } }, themes: { light: {} } }
+		await writeFile(join(root, workspaceRelativePath()), `${JSON.stringify(manifest, null, 2)}\n`)
+		expect(await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET, renderContext: { viewportId: 'default', themeId: 'light' } }))
+			.toMatchObject({ status: 'created', diagnostics: [] })
+		expect((await persistence.reviews.read(REVIEW_ID))?.resource.renderContext).toEqual({ viewportId: 'default', themeId: 'light' })
+	})
+
+	it('refuses a non-canonical Locale tag at the service layer and writes nothing', async () => {
+		const { root, app } = await seedV4Workspace()
+		const refused = await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET, renderContext: { locale: 'zh-tw' } })
+		expect(refused).toMatchObject({ status: 'invalid' })
+		expect(refusals(refused)).toEqual([['review.render_context_invalid_locale', '/renderContext/locale']])
+		expect(await readdir(join(root, 'reviews'))).toEqual([])
+	})
+
 	it('refuses a renderContext on a Workspace anchor and writes nothing', async () => {
 		const { root, app } = await seedV4Workspace()
 		const refused = await app.createReviewThread({ id: REVIEW_ID, anchor: { scope: 'workspace' }, renderContext: { locale: 'en-US' } })
@@ -404,6 +421,20 @@ describe('Review authoring records only Workspace keys in renderContext', () => 
 		expect(stored).not.toHaveProperty('renderContext')
 		expect(stored.history.at(-1)!.before).toEqual({ anchor: ROOT, variantNames: [], renderContext: ZH_MOBILE })
 		expect(stored.history.at(-1)!.after).toEqual({ anchor: ROOT, variantNames: [] })
+		expect((await persistence.reviews.readInspected(REVIEW_ID))?.diagnostics).toEqual([])
+	})
+
+	it('clears the context on a re-anchor to the Workspace arm with null and keeps it in before', async () => {
+		const { root, persistence, app } = await seedV4Workspace()
+		const created = await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET, renderContext: ZH_MOBILE_DARK })
+		if (created.status !== 'created') throw new Error('Thread fixture failed.')
+		expect(await app.reanchorReviewThread({ reviewId: REVIEW_ID, expectedRevision: created.revision, anchor: WORKSPACE as { scope: 'workspace' }, renderContext: null, actor: AUTHOR }))
+			.toMatchObject({ status: 'updated' })
+		const stored = await storedThread(root)
+		expect(stored.anchor).toEqual(WORKSPACE)
+		expect(stored).not.toHaveProperty('renderContext')
+		expect(stored.history.at(-1)!.before).toEqual({ anchor: WIDGET, variantNames: [], renderContext: ZH_MOBILE_DARK })
+		expect(stored.history.at(-1)!.after).toEqual({ anchor: WORKSPACE, variantNames: [] })
 		expect((await persistence.reviews.readInspected(REVIEW_ID))?.diagnostics).toEqual([])
 	})
 

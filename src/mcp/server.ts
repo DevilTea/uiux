@@ -569,7 +569,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'reanchor_review_thread',
 		{
 			title: 'Re-anchor UIUX Review Thread',
-			description: 'Re-anchor a Review thread to a new widget or variant scope, or between a Widget and the Workspace ({ scope: "workspace" }), appending a re-anchor history event with revision CAS. displayHint: an object sets the pin hint for the new Widget anchor, null clears it, and omitting it clears the hint when the Widget changes and keeps it when only Variants change. Moving to the Workspace always clears the hint. renderContext: an object sets the recorded Locale, viewport and theme (each key must exist in the Workspace), null clears it, and omitting it keeps the recorded one; moving to the Workspace always clears it. The event records the context on both sides.',
+			description: 'Re-anchor a Review thread to a new widget or variant scope, or between a Widget and the Workspace ({ scope: "workspace" }), appending a re-anchor history event with revision CAS. displayHint: an object sets the pin hint for the new Widget anchor, null clears it, and omitting it clears the hint when the Widget changes and keeps it when only Variants change. Moving to the Workspace always clears the hint. renderContext: an object sets the recorded Locale, viewport and theme (each key must exist in the Workspace), null clears it, and omitting it keeps the recorded one; moving to the Workspace clears it, and an object there is refused (review.render_context_without_widget). The event records the context on both sides.',
 			inputSchema: reanchorReviewThreadSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
