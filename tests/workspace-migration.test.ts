@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { hostname, tmpdir } from 'node:os'
-import { join, relative, sep } from 'node:path'
+import { dirname, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -10,6 +10,7 @@ import { createWorkspaceApplicationSession } from '../src/application/services/w
 import { runMigrateCommand } from '../src/cli/migrate'
 import { validateReviewThread } from '../src/domain/reviews/schema'
 import { FileNativePersistence } from '../src/persistence/file-native'
+import { HostHistoryStore } from '../src/persistence/history/host-store'
 import { reviewRelativePath, viewRelativePath, WORKSPACE_ARTIFACTS_DIRECTORY, workspaceRelativePath } from '../src/persistence/paths'
 import { acquireServerHold, readActiveServerHold, SERVER_HOLD_RELATIVE_PATH } from '../src/persistence/server-hold'
 import {
@@ -22,6 +23,7 @@ import {
 	WORKSPACE_V3_TO_V4_STEP,
 	WORKSPACE_V3_TO_V4_STEP_ID,
 } from '../src/product/workspace-schema'
+import { hostHistoryPaths } from '../src/server/access/store'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -104,12 +106,13 @@ const DOGFOOD_ROOT = join(REPOSITORY_ROOT, 'design')
 const DOGFOOD_ARTIFACT_SHARDS = join(DOGFOOD_ROOT, WORKSPACE_ARTIFACTS_DIRECTORY, 'sha256')
 
 /**
- * A private copy of the dogfood Workspace for migration replays. Migration reads and writes only
- * the canonical files (manifest, Views, Flows, Reviews, Locales, Assets), never the
- * content-addressed artifact store, yet that store holds 142 of the tree's 160 files, spread over
- * 110 shard directories. Copying all of it cost about 4 s under I/O load and pushed these tests
- * past Vitest's 5 s default, so the copy keeps every canonical file and exactly one artifact file
- * (the first by name): enough to still prove that migration leaves the store byte-identical.
+ * A private copy of the dogfood Workspace for migration replays. Migration changes only the
+ * canonical files (manifest, Views, Flows, Reviews, Locales, Assets); the CLI's pre-migration
+ * Checkpoint only adds a record and new blobs to the content-addressed artifact store, yet that
+ * store holds 142 of the tree's 160 files, spread over 110 shard directories. Copying all of it
+ * cost about 4 s under I/O load and pushed these tests past Vitest's 5 s default, so the copy keeps
+ * every canonical file and exactly one artifact file (the first by name): enough to still prove
+ * that migration leaves the existing store files byte-identical.
  */
 async function copyDogfoodWorkspace(prefix: string): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), prefix))
@@ -250,6 +253,8 @@ describe('uiux migrate CLI', () => {
 	it('lists migrate in honest help text and validates its arguments', () => {
 		const help = execFileSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' })
 		expect(help).toContain('migrate --workspace <dir> [--dry-run]')
+		expect(help).toMatch(/a real run first writes the Checkpoint "Before migration to\s+schemaVersion 4"/u)
+		expect(help).toMatch(/--dry-run prints the steps and changed\s+files without writing anything/u)
 		for (const args of [['migrate'], ['migrate', '--workspace'], ['migrate', '--dry-run'], ['migrate', '--workspace', '.', 'extra'], ['migrate', '--workspace', '.', '--dry-run', '--dry-run']]) {
 			const result = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8' })
 			expect(result.status).toBe(2)
@@ -332,7 +337,7 @@ describe('uiux migrate CLI', () => {
 
 	// Three real CLI runs (each bundles the command with esbuild in a fresh Node process) plus an
 	// fsynced migration transaction: about 0.6 s alone, close to 4 s under CPU and I/O load.
-	it('replays the dogfood uiux.v3-to-v4 migration through the CLI: one step, only the manifest changes, re-runs are no-ops', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, async () => {
+	it('replays the dogfood uiux.v3-to-v4 migration through the CLI: one step, only the manifest changes, a pre-migration Checkpoint and a system version are recorded, re-runs are no-ops', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, async () => {
 		const root = await copyDogfoodWorkspace('uiux-dogfood-v3-to-v4-')
 		// The committed dogfood Workspace was migrated by this step; restore its v3 manifest in the copy.
 		const manifestPath = join(root, workspaceRelativePath())
@@ -348,11 +353,29 @@ describe('uiux migrate CLI', () => {
 		expect(dryRun.stdout).toContain(`changedFiles (1):\n    ${workspaceRelativePath()}`)
 		expect(await snapshotTree(root)).toEqual(before)
 
-		const real = spawnSync(process.execPath, [CLI, 'migrate', '--workspace', root], { encoding: 'utf8' })
+		// Its own UIUX_HOME, so the host history the real run records can be inspected (and nothing else shares it).
+		const home = join(await mkdtemp(join(tmpdir(), 'uiux-dogfood-v3-to-v4-home-')), 'home')
+		roots.push(dirname(home))
+		expect(spawnSync(process.execPath, [CLI, 'migrate', '--workspace', root, '--dry-run'], { encoding: 'utf8', env: { ...process.env, UIUX_HOME: home } }).status).toBe(0)
+		expect(await snapshotTree(root)).toEqual(before)
+		expect(await readdir(home).catch(() => undefined)).toBeUndefined()
+
+		const real = spawnSync(process.execPath, [CLI, 'migrate', '--workspace', root], { encoding: 'utf8', env: { ...process.env, UIUX_HOME: home } })
 		expect(real.status).toBe(0)
 		const after = await snapshotTree(root)
-		expect(Object.keys(after).sort()).toEqual(Object.keys(before).sort())
-		expect(Object.keys(after).filter(path => after[path] !== before[path])).toEqual([workspaceRelativePath()])
+		// Besides the manifest, the run adds only the pre-migration Checkpoint and the blobs it names.
+		const added = Object.keys(after).filter(path => !(path in before))
+		const [checkpointFile, ...otherCheckpoints] = added.filter(path => path.startsWith('.uiux/history/checkpoints/'))
+		expect(otherCheckpoints).toEqual([])
+		expect(added.filter(path => path !== checkpointFile).every(path => path.startsWith(`${WORKSPACE_ARTIFACTS_DIRECTORY}/sha256/`))).toBe(true)
+		expect(Object.keys(before).filter(path => after[path] !== before[path])).toEqual([workspaceRelativePath()])
+		const checkpoint = JSON.parse(Buffer.from(after[checkpointFile!]!, 'base64').toString('utf8')) as Record<string, unknown>
+		expect(checkpoint).toMatchObject({ type: 'checkpoint', name: 'Before migration to schemaVersion 4', actor: { type: 'system', id: 'system:migrate' }, source: 'cli', workspaceSchemaVersion: 3 })
+		expect(real.stdout).toContain(`pre-migration Checkpoint: ${String(checkpoint.id)} (Before migration to schemaVersion 4)`)
+		const systemVersion = /system version: (?<id>\S+)/u.exec(real.stdout)?.groups?.id
+		const host = await HostHistoryStore.open({ paths: hostHistoryPaths(home, await realpath(root)) })
+		expect((await host!.listVersions()).records.map(version => [version.id, version.type, version.actor, version.workspaceSchemaVersion]))
+			.toEqual([[systemVersion, 'system', { type: 'system', id: 'system:migrate' }, 4]])
 		expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toEqual({ ...current, schemaVersion: 4 })
 		expect(await readFile(manifestPath, 'utf8')).toBe(await readFile(join(REPOSITORY_ROOT, 'design', workspaceRelativePath()), 'utf8'))
 
@@ -361,9 +384,10 @@ describe('uiux migrate CLI', () => {
 		for (const key of await persistence.reviews.discoverKeys())
 			expect((await persistence.reviews.readInspected(key))?.diagnostics).toEqual([])
 
-		const again = spawnSync(process.execPath, [CLI, 'migrate', '--workspace', root], { encoding: 'utf8' })
+		const again = spawnSync(process.execPath, [CLI, 'migrate', '--workspace', root], { encoding: 'utf8', env: { ...process.env, UIUX_HOME: home } })
 		expect(again.status).toBe(0)
 		expect(again.stdout).toContain('is already at schemaVersion 4; nothing to migrate.')
 		expect(await snapshotTree(root)).toEqual(after)
+		expect((await host!.listVersions()).records).toHaveLength(1)
 	})
 })
