@@ -53,6 +53,7 @@ const MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; H?: t
 	readPublicationSnapshot: { min: 'viewer', system: true },
 	assessHandoffReadiness: { min: 'viewer' },
 	listLeases: { min: 'viewer' },
+	diffVersions: { min: 'viewer' },
 	readSession: { min: 'viewer', S: true },
 	endSession: { min: 'viewer', S: true },
 	createReviewThread: { min: 'reviewer' },

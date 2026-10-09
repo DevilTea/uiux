@@ -76,6 +76,12 @@ import {
 	type ExportHandoffCommand,
 	type ExportHandoffResult,
 } from './handoff-export'
+import {
+	createHistoryDiffService,
+	type DiffVersionsCommand,
+	type HistoryStoreSource,
+	type VersionDiffOutcome,
+} from './history-diff'
 
 export type AssetContentDescriptor = Readonly<{
 	mediaType: string
@@ -131,6 +137,7 @@ export interface WorkspaceApplicationSession {
 	assessHandoffReadiness(command: AssessHandoffReadinessCommand): Promise<AssessHandoffReadinessResult>
 	exportHandoff(command: ExportHandoffCommand): Promise<ExportHandoffResult>
 	readArtifact(identity: string): Promise<Uint8Array | undefined>
+	diffVersions(command: DiffVersionsCommand): Promise<VersionDiffOutcome>
 }
 
 /**
@@ -139,7 +146,12 @@ export interface WorkspaceApplicationSession {
  */
 export function createWorkspaceApplicationSession(
 	persistence: FileNativePersistence,
-	options?: { serverOrigin?: string; captureCookie?: () => Readonly<{ name: string; value: string }> | undefined },
+	options?: {
+		serverOrigin?: string
+		captureCookie?: () => Readonly<{ name: string; value: string }> | undefined
+		/** The Workspace's history stores; without them no version exists to compare. */
+		history?: HistoryStoreSource
+	},
 ): WorkspaceApplicationSession {
 	const viewAuthoring = createViewAuthoringService(persistence)
 	const workspaceAuthoring = createWorkspaceAuthoringService(persistence)
@@ -149,6 +161,7 @@ export function createWorkspaceApplicationSession(
 	const assetAuthoring = createAssetAuthoringService(persistence)
 	const formalCapture = createFormalCaptureService(persistence, { serverOrigin: options?.serverOrigin, captureCookie: options?.captureCookie })
 	const handoffExport = createHandoffExportService(persistence)
+	const historyDiff = createHistoryDiffService(persistence, options?.history)
 
 	async function readPointResource(kind: PointResourceKind, key: string): Promise<PointResourceRead | undefined> {
 		if (!isValidPointResourceAddress({ kind, key })) return undefined
@@ -297,6 +310,7 @@ export function createWorkspaceApplicationSession(
 		assessHandoffReadiness: handoffExport.assessReadiness,
 		exportHandoff: handoffExport.exportHandoff,
 		readArtifact: identity => persistence.artifacts.read(identity),
+		diffVersions: historyDiff.diffVersions,
 	}
 }
 
