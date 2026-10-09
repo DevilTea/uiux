@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
+import type { ResourceDiscoveryItem } from '../src/application/dto/resource-discovery'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { decodeStrictBase64 } from '../src/domain/assets/schema'
@@ -33,7 +34,7 @@ import {
 	updateViewStructureForHttp,
 	updateWorkspaceSettingsForHttp,
 } from '../src/server/authoring-http'
-import { listResourcesForHttp } from '../src/server/resource-discovery'
+import { listResourcesForHttp, type ResourceDiscoveryHttpResult } from '../src/server/resource-discovery'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const DECISION_ID = '22222222-2222-4222-8222-222222222222'
@@ -1281,8 +1282,7 @@ describe('Review renderContext over MCP and HTTP', () => {
 		expect(created.status).toBe(201)
 		expect((await stored(app)).resource.renderContext).toEqual({ viewportId: 'mobile' })
 		const listed = await listResourcesForHttp(app, { kinds: ['review'], limit: 10 })
-		const listedItem = listed.status === 200 ? listed.body.items[0] : undefined
-		expect(listedItem?.kind === 'review' && listedItem.summary.renderContext).toEqual({ viewportId: 'mobile' })
+		expect(reviewSummary(discoveryPage(listed).items[0]).renderContext).toEqual({ viewportId: 'mobile' })
 
 		const reanchor = async (body: Record<string, unknown>) => {
 			const result = await reanchorReviewThreadForHttp(scoped(app), REVIEW_ID, { expectedRevision: (await stored(app)).revision, ...body })
@@ -1794,6 +1794,17 @@ describe('Asset content HTTP serving and header security', () => {
 		expect(contentRes.body).toMatchObject({ code: 'asset_content_ambiguous' })
 	})
 })
+
+/** The page of a successful discovery call; a 400 fails the test. */
+function discoveryPage(result: ResourceDiscoveryHttpResult) {
+	if (result.status !== 200) throw new Error(`Expected a discovery page, got ${JSON.stringify(result.body)}`)
+	return result.body
+}
+
+function reviewSummary(item: ResourceDiscoveryItem | undefined) {
+	if (item?.kind !== 'review') throw new Error(`Expected a Review item, got ${JSON.stringify(item)}`)
+	return item.summary
+}
 
 function spec(intent: string, entryConditions: readonly string[] = []): ViewSpecContent {
 	return {
