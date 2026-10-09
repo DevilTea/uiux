@@ -13,5 +13,9 @@
  * That test runs the CLI three times as real child processes (each bundles its command with esbuild)
  * plus an fsynced migration transaction. It takes about 0.6 s alone and close to 4 s under CPU and
  * I/O load.
+ *
+ * `history-restore.test.ts` uses it too: each test starts a history recorder, writes Checkpoints and
+ * fsynced host versions and restores through the full write path (one also assesses Handoff
+ * readiness), taking 0.7 to 2.5 s alone and about 5.5 s for the readiness test.
  */
 export const HEAVY_SERVER_SUITE_TIMEOUT_MS = 20_000

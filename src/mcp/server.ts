@@ -340,6 +340,17 @@ const listVersionsSchema = z.object({
 	cursor: z.string().min(1).optional().describe('The nextCursor of the previous page.'),
 }).strict()
 
+// Clause 01a11a5e-2768-76ad-b02a-e15f50f91268.
+const restoreResourceVersionSchema = z.object({
+	versionId: z.string().describe('The ID of the version to restore the resource from.'),
+	resource: z.object({
+		kind: z.string().min(1),
+		key: z.string().min(1),
+	}).strict().describe('The one resource to restore: { kind: "view" | "flow" | "locale" | "asset", key } or { kind: "workspace", key: "workspace" } for the Workspace settings.'),
+	expectedRevision: z.string().min(1).nullable().describe('The resource\'s current revision, as read now (not the version\'s). Use null to re-create a resource that no longer exists; null requires that it not exist.'),
+	acknowledgeImpact: z.boolean().optional().describe('Set true to write after reviewing the impacts an earlier call returned with impact_acknowledgement_required.'),
+}).strict()
+
 /** The URI of the read-only version Resource (Clause 01a11a5e-27c1-77d1-b60d-45a5ccfc1ee7 leaves its grammar to the implementation). */
 export function versionResourceUri(id: string): string {
 	return `uiux://version/${encodeURIComponent(id)}`
@@ -931,6 +942,34 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 				content: [{ type: 'text' as const, text: JSON.stringify(output) }],
 				structuredContent: output,
 				...(outcome.status === 'created' ? {} : { isError: true }),
+			}
+		},
+	)
+
+	server.registerTool(
+		'restore_resource_version',
+		{
+			title: 'Restore a UIUX resource from a version',
+			description: 'Write one design resource (a View, Flow, Locale, Asset or the Workspace settings) back to its content in an earlier version, as a new current revision; history is never rewritten and there is no whole-version revert. It is a write of that resource: your edit lease is checked or taken, and expectedRevision is the resource\'s current revision (null to re-create a removed one). A View keeps its current Decisions; the settings keep the current schemaVersion. The content is validated like an authoring write. Before writing, the impact is analyzed (Review threads whose Widget anchor would become invalid or valid again, dangling $i18n and $asset references, UX Flow steps whose Widgets would disappear, ready-for-review submissions whose revision would stop or start being current, and for the settings removed viewport and theme keys and formal Evidence that would become stale); when it is not empty nothing is written and the result is impact_acknowledgement_required with impacts: call again with acknowledgeImpact true to write. The restore is recorded as its own version naming restoredFrom. Returns { status: "updated" | "created", kind, key, revision, restoredFrom, impacts, diagnostics }. Refusals: conflict (with currentRevision, null when the resource does not exist), locked, invalid (history.invalid_restore, history.restore_unsupported_kind, history.restore_invalid_content), impact_acknowledgement_required, not_found (history.record_missing, history.resource_not_in_version), blocked (workspace.migration_required, workspace.schema_unsupported).',
+			inputSchema: restoreResourceVersionSchema,
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async (input) => {
+			const outcome = await app.restoreResourceVersion({
+				versionId: input.versionId,
+				resource: input.resource,
+				expectedRevision: input.expectedRevision,
+				...(input.acknowledgeImpact === undefined ? {} : { acknowledgeImpact: input.acknowledgeImpact }),
+			})
+			const written = outcome.status === 'created' || outcome.status === 'updated'
+			// As for every authoring tool, a written result adds the restored resource's URI.
+			const output = outcome.status === 'created' || outcome.status === 'updated'
+				? { ...outcome, resourceUri: pointResourceUri({ kind: outcome.kind, key: outcome.key }) }
+				: outcome
+			return {
+				content: [{ type: 'text' as const, text: JSON.stringify(output) }],
+				structuredContent: output,
+				...(written ? {} : { isError: true }),
 			}
 		},
 	)

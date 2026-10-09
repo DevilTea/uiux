@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { HISTORY_WRITE_OPERATIONS, type HistoryWriteOperation } from '../../domain/history/constants'
-import type { Diagnostic } from '../../domain/validation'
+import { isFullUuid, type Diagnostic } from '../../domain/validation'
 import { runWithDesignWriteContext, type DesignWriteContext } from '../../persistence/history/write-context'
 import type { ReviewResolution } from '../../domain/reviews/schema'
 import type { PointResourceKind } from '../dto/point-resources'
@@ -11,6 +11,7 @@ import type { CreateFlowCommand, FlowAuthoringResult, UpdateFlowCommand } from '
 import type { CaptureFormalEvidenceCommand, CaptureFormalEvidenceResult, FormalEvidenceItem } from '../services/formal-capture'
 import type { AssessHandoffReadinessCommand, AssessHandoffReadinessResult, ExportHandoffCommand, ExportHandoffResult } from '../services/handoff-export'
 import type { DiffVersionsCommand, VersionDiffOutcome } from '../services/history-diff'
+import type { RestoreResourceVersionCommand, RestoreResourceVersionOutcome } from '../services/history-restore'
 import type { CreateCheckpointOutcome, DeleteCheckpointOutcome, ListVersionsOutcome, ListVersionsQuery, ReadVersionOutcome } from '../services/history-service'
 import type { CreateLocaleCommand, LocaleAuthoringResult, UpdateLocaleCommand } from '../services/locale-authoring'
 import type {
@@ -39,7 +40,7 @@ import {
 	type LockableKind,
 	type PublicLease,
 } from './leases'
-import { authorizeOperation, type AccessOperation, type ScopeDenied } from './policy'
+import { authorizeOperation, writeOperationForKind, type AccessOperation, type ScopeDenied } from './policy'
 import { principalActor, type AccessRole, type MemberPrincipal, type Principal, type StampedActor } from './principal'
 
 /**
@@ -119,6 +120,12 @@ export interface ScopedWorkspaceSession {
 	/** Stamps the member actor and the transport's source; needs no edit lease (Rule 01a11a5e-0a0c-7d65-8d09-9a71a730ec61). */
 	createCheckpoint(command: Readonly<{ name: string; note?: string }>): Promise<CreateCheckpointOutcome | AccessRefusal>
 	deleteCheckpoint(id: string): Promise<DeleteCheckpointOutcome | AccessRefusal>
+	/**
+	 * Needs `history.restore` and the restored kind's write key (Rule 01a11c09-c648-71be-a550-2ecabf12f5d0);
+	 * checks (and for an Agent takes) the target's edit lease like any write of it (Rule
+	 * 01a11a5e-1520-78ac-a711-6e51c54c2079), and records the write with `restoredFrom`.
+	 */
+	restoreResourceVersion(command: RestoreResourceVersionCommand): Promise<Scoped<RestoreResourceVersionOutcome>>
 	createView(command: CreateViewCommand): Promise<Scoped<ViewAuthoringResult>>
 	updateViewSpec(command: UpdateViewSpecCommand): Promise<Scoped<ViewAuthoringResult>>
 	updateViewStructure(command: UpdateViewStructureCommand): Promise<Scoped<ViewAuthoringResult>>
@@ -270,9 +277,16 @@ export function createScopedWorkspaceSession(
 	 * operations of Clause 01a11a5e-216d-7587-8022-66a66f264eee get one, so Review activity is never
 	 * recorded (Rule 01a11a5e-0873-7976-8a48-a9a1a00e4b6d), and system principals never create events.
 	 */
-	function designWriteContext(operation: AccessOperation): DesignWriteContext | undefined {
+	function designWriteContext(operation: AccessOperation, restoredFrom?: string): DesignWriteContext | undefined {
 		if (principal.type !== 'member' || !(HISTORY_WRITE_OPERATIONS as readonly string[]).includes(operation)) return undefined
-		return { actor: principalActor(principal), source: transport === 'mcp' ? 'mcp' : 'workbench', operation: operation as HistoryWriteOperation }
+		return {
+			actor: principalActor(principal),
+			source: transport === 'mcp' ? 'mcp' : 'workbench',
+			operation: operation as HistoryWriteOperation,
+			// Clause 01a11a5e-20c6-7573-8530-e6fed6d8d4af: the version a restore copied. The recorder
+			// closes the open autosave before and after such a write (Rule 01a11e0d-d911-7030-9565-7473aa0995e1).
+			...(restoredFrom === undefined ? {} : { restoredFrom }),
+		}
 	}
 
 	function withWarnings<R extends object>(result: R, warnings: readonly Diagnostic[]): R & AccessWarnings {
@@ -286,6 +300,7 @@ export function createScopedWorkspaceSession(
 		target: LeaseAddress | undefined,
 		run: () => Promise<R>,
 		warnings: readonly Diagnostic[] = [],
+		options: Readonly<{ restoredFrom?: string }> = {},
 	): Promise<Scoped<R>> {
 		const denied = authorizeOperation(principal, operation)
 		if (denied) return refusalFromScope(key, denied)
@@ -299,7 +314,7 @@ export function createScopedWorkspaceSession(
 			ticket = begun.ticket
 		}
 		let result: R
-		const context = designWriteContext(operation)
+		const context = designWriteContext(operation, options.restoredFrom)
 		try {
 			result = context ? await runWithDesignWriteContext(context, run) : await run()
 		}
@@ -389,6 +404,20 @@ export function createScopedWorkspaceSession(
 		async deleteCheckpoint(id) {
 			const denied = authorizeOperation(principal, 'deleteCheckpoint')
 			return denied ? refusalFromScope(id, denied) : app.deleteCheckpoint(id)
+		},
+
+		async restoreResourceVersion(command) {
+			const resource = (command as Readonly<{ resource?: unknown }>).resource
+			const kind = typeof resource === 'object' && resource !== null && typeof (resource as { kind?: unknown }).kind === 'string' ? (resource as { kind: string }).kind : ''
+			const key = typeof resource === 'object' && resource !== null && typeof (resource as { key?: unknown }).key === 'string' ? (resource as { key: string }).key : ''
+			// `history.restore` first, then the kind's write key. A kind no operation writes has no key
+			// to check here; the service refuses it as not restorable.
+			const kindOperation = writeOperationForKind(kind)
+			const denied = authorizeOperation(principal, 'restoreResourceVersion') ?? (kindOperation ? authorizeOperation(principal, kindOperation) : undefined)
+			if (denied) return refusalFromScope(key || 'history', denied)
+			const target = isValidLeaseAddress({ kind, key }) ? { kind: kind as LockableKind, key } : undefined
+			const versionId: unknown = command.versionId
+			return write('restoreResourceVersion', key || 'history', target, () => app.restoreResourceVersion(command), [], isFullUuid(versionId) ? { restoredFrom: versionId } : {})
 		},
 
 		createView: command => write('createView', command.id, { kind: 'view', key: command.id }, () => app.createView(command)),

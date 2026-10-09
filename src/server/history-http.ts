@@ -1,8 +1,9 @@
 import { z } from 'zod'
 
-import type { AccessRefusal, ScopedWorkspaceSession } from '../application/access/scoped-session'
+import type { AccessRefusal, LockedRefusal, ScopedWorkspaceSession } from '../application/access/scoped-session'
 import { isFullUuid } from '../domain/validation'
 import { VERSION_DIFF_DETAILS, type DiffVersionsCommand, type VersionDiffOutcome } from '../application/services/history-diff'
+import type { RestoreResourceVersionOutcome } from '../application/services/history-restore'
 import type { CreateCheckpointOutcome, DeleteCheckpointOutcome, ListVersionsOutcome, ReadVersionOutcome } from '../application/services/history-service'
 import type { HistoryVersionType } from '../domain/history/constants'
 import type { AuthoringHttpResult } from './authoring-http'
@@ -124,6 +125,51 @@ export async function createCheckpointForHttp(session: ScopedWorkspaceSession, b
 /** `DELETE /api/history/checkpoints/:id`: removes the record only. There is no route that changes a Checkpoint (Rule 01a11a5e-09bb-755c-9253-3cbff9f65da9). */
 export async function deleteCheckpointForHttp(session: ScopedWorkspaceSession, id: string): Promise<AuthoringHttpResult<DeleteCheckpointOutcome | AccessRefusal>> {
 	return historyHttpResult(await session.deleteCheckpoint(id))
+}
+
+const restoreBodySchema = z.object({
+	resource: z.object({
+		kind: z.string().min(1),
+		key: z.string().min(1),
+	}).strict(),
+	expectedRevision: z.string().min(1).nullable(),
+	acknowledgeImpact: z.boolean().optional(),
+}).strict()
+
+/**
+ * `POST /api/history/versions/:id/restore` `{ resource: { kind, key }, expectedRevision,
+ * acknowledgeImpact? }` (named by Clause 01a11485-fa44-7b6a-99f8-de4e1e8edcfc; there is no HTTP
+ * Contract, so the body is that of `restore_resource_version`, Clause
+ * 01a11a5e-2768-76ad-b02a-e15f50f91268, with the version in the path). It answers the object the
+ * tool returns: `updated` 200, `created` 201, `invalid` 400, `auth.scope_denied` 403, `not_found`
+ * 404, `conflict` and `impact_acknowledgement_required` 409 (the latter carries `impacts`; resend
+ * with `acknowledgeImpact: true`), `blocked` 422 and `locked` 423.
+ */
+export async function restoreResourceVersionForHttp(session: ScopedWorkspaceSession, id: string, body: unknown): Promise<AuthoringHttpResult<RestoreResourceVersionOutcome | AccessRefusal | LockedRefusal | Readonly<Record<string, unknown>>>> {
+	const parsed = restoreBodySchema.safeParse(body)
+	if (!parsed.success) return invalid(zodDiagnostics(parsed.error.issues), 'Request body failed structural validation.')
+	const outcome = await session.restoreResourceVersion({
+		versionId: id,
+		resource: parsed.data.resource,
+		expectedRevision: parsed.data.expectedRevision,
+		...(parsed.data.acknowledgeImpact === undefined ? {} : { acknowledgeImpact: parsed.data.acknowledgeImpact }),
+	})
+	return { status: restoreHttpStatus(outcome), body: outcome }
+}
+
+export function restoreHttpStatus(outcome: Readonly<{ status: string; code?: string }>): number {
+	if (outcome.code === 'auth.scope_denied') return 403
+	switch (outcome.status) {
+		case 'updated': return 200
+		case 'created': return 201
+		case 'invalid': return 400
+		case 'not_found': return 404
+		case 'conflict':
+		case 'impact_acknowledgement_required': return 409
+		case 'blocked': return 422
+		case 'locked': return 423
+		default: return 500
+	}
 }
 
 function historyHttpResult<T extends Readonly<{ status: string; code?: string; retryAfterSeconds?: number }>>(outcome: T): AuthoringHttpResult<T> {

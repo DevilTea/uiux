@@ -98,6 +98,9 @@ export const ACCESS_OPERATIONS = {
 	replaceAsset: { minRole: 'editor' },
 	captureFormalEvidence: { minRole: 'editor' },
 	exportHandoff: { minRole: 'editor' },
+	// `history.restore` (Clause 01a11485-fa44-7b6a-99f8-de4e1e8edcfc). A restore also needs the restored
+	// kind's write key (Rule 01a11c09-c648-71be-a550-2ecabf12f5d0): see `writeOperationForKind`.
+	restoreResourceVersion: { minRole: 'editor', permissionKey: 'history.restore' },
 	acquireLeases: { minRole: 'editor' },
 	releaseLeases: { minRole: 'editor' },
 	// Owner.
@@ -108,6 +111,25 @@ export const ACCESS_OPERATIONS = {
 } as const satisfies Record<string, OperationRule>
 
 export type AccessOperation = keyof typeof ACCESS_OPERATIONS
+
+/**
+ * Clause 01a11c09-a42a-7d6b-bb5e-01d7cf1ce2de: the write key of each restorable resource kind
+ * (`views.write`, `flows.write`, `locales.write`, `assets.write`, `settings.write`), stood for
+ * by an authoring operation that needs exactly that key, so a restore is authorized for the key
+ * the Access Contract assigns the kind (Rule 01a11c09-c648-71be-a550-2ecabf12f5d0): `history.restore`
+ * never stands in for a missing write key. `undefined` for a kind no operation writes yet.
+ */
+const WRITE_OPERATION_BY_KIND: Readonly<Record<string, AccessOperation>> = Object.freeze({
+	view: 'updateViewStructure',
+	flow: 'updateFlow',
+	locale: 'updateLocale',
+	asset: 'replaceAsset',
+	workspace: 'updateWorkspaceSettings',
+})
+
+export function writeOperationForKind(kind: string): AccessOperation | undefined {
+	return Object.hasOwn(WRITE_OPERATION_BY_KIND, kind) ? WRITE_OPERATION_BY_KIND[kind] : undefined
+}
 
 export type ScopeDenied = Readonly<{
 	code: 'auth.scope_denied'

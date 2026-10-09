@@ -1971,7 +1971,11 @@
       "invalid_listing": "這個版本清單的請求無效。請檢查篩選條件與每頁筆數。",
       "unavailable": "這台伺服器無法使用版本歷程，因此無法建立 Checkpoint。",
       "boundary_failed": "無法結束進行中的自動儲存，因此沒有建立 Checkpoint，也未變更任何內容。請再試一次。",
-      "not_checkpoint": "只能刪除 Checkpoint。這個版本是自動儲存的。"
+      "not_checkpoint": "只能刪除 Checkpoint。這個版本是自動儲存的。",
+      "invalid_restore": "這個還原請求無效。請選擇一項資源，並提供它目前的修訂版本。",
+      "restore_unsupported_kind": "無法還原這類資源。Review 討論串一律不會還原。",
+      "resource_not_in_version": "這個版本不包含該資源，因此沒有可還原的內容。",
+      "restore_invalid_content": "這個版本中的內容目前無效，因此沒有還原，也未變更任何內容。"
     },
     "review": {
       "anchor_history_mismatch": "Review 的位置與其歷程不一致。",

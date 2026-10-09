@@ -81,6 +81,7 @@ const MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; H?: t
 	replaceAsset: { min: 'editor' },
 	captureFormalEvidence: { min: 'editor' },
 	exportHandoff: { min: 'editor' },
+	restoreResourceVersion: { min: 'editor' },
 	acquireLeases: { min: 'editor' },
 	releaseLeases: { min: 'editor' },
 	forceReleaseLease: { min: 'owner', H: true, S: true },
@@ -139,6 +140,7 @@ describe('permission-key annotations (seam 5; Clauses 01a11c09-a26e-73bb-9a29-ee
 			['diffVersions', 'history.read'],
 			['listVersions', 'history.read'],
 			['readVersion', 'history.read'],
+			['restoreResourceVersion', 'history.restore'],
 		])
 		for (const [operation, rule] of annotated) {
 			const lowest = BUILT_IN_PRESETS.find(preset => preset.adds.includes(rule.permissionKey))
