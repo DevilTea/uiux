@@ -368,7 +368,7 @@ describe('packaged Workbench server routes (requires pnpm build)', { timeout: HE
 				return { status: response.status, body: await response.json() as Record<string, unknown> }
 			}
 			const workspace = await (await fetch(`${server.origin}/api/resources/workspace/workspace`, { headers: server.headers })).json() as { resource: { schemaVersion: number }; inspection: { state: string } }
-			expect(workspace.resource.schemaVersion).toBe(3)
+			expect(workspace.resource.schemaVersion).toBe(CURRENT_WORKSPACE_SCHEMA_VERSION)
 			expect(workspace.inspection.state).toBe('current')
 			const views = await (await fetch(`${server.origin}/api/resources/list`, { method: 'POST', headers: { ...server.headers, 'content-type': 'application/json' }, body: JSON.stringify({ kinds: ['view'], limit: 1 }) })).json() as { items: { key: string }[] }
 			const viewId = views.items[0]!.key

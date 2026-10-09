@@ -126,7 +126,7 @@ uiux migrate --workspace ./design --dry-run   # print the steps and changed file
 uiux migrate --workspace ./design             # apply atomically and print the new manifest revision
 ```
 
-The current format is `schemaVersion` 3. Steps chain: `uiux.v1-to-v2` (resolution kinds, pin hints) then `uiux.v2-to-v3` (Workspace-scoped threads and editable messages; it changes only the manifest), so a version 1 Workspace migrates in one run. `uiux init` writes version 3.
+The current format is `schemaVersion` 4. Steps chain: `uiux.v1-to-v2` (resolution kinds, pin hints), `uiux.v2-to-v3` (Workspace-scoped threads and editable messages; it changes only the manifest), then `uiux.v3-to-v4` (the optional Review thread `renderContext`; it changes only the manifest), so a version 1 Workspace migrates in one run. `uiux init` writes version 4.
 
 `uiux migrate` refuses while a running UIUX server holds the Workspace; stop `uiux dev` first. There is no MCP or HTTP migration entrypoint.
 

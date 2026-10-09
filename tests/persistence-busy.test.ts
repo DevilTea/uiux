@@ -11,7 +11,7 @@ import { createWorkspaceApplicationSession } from '../src/application/services/w
 import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
 import { FileNativePersistence, PersistenceError, isPersistenceBusyError, persistenceBusyResult } from '../src/persistence'
 import { workspaceRelativePath } from '../src/persistence/paths'
-import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { sendPersistenceBusyError } from '../src/server/persistence-busy'
 import { describeFetchError, isTransientError } from '../app/utils/fetch-error'
 import { isRetryableRead, shouldRetryRead, transientRetryDelay } from '../app/utils/fetch-retry'
@@ -33,7 +33,7 @@ const view = {
 	spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
 }
 
-async function seedWorkspace(schemaVersion: 1 | 2 | 3): Promise<string> {
+async function seedWorkspace(schemaVersion: number): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-busy-'))
 	roots.push(root)
 	await mkdir(join(root, '.uiux'), { recursive: true })
@@ -71,7 +71,7 @@ async function holdLockElsewhere(root: string): Promise<{ release: () => Promise
 
 describe('persistence lock sharing', () => {
 	it('lets concurrent reads in one process share the lock instead of queueing on it', async () => {
-		const persistence = open(await seedWorkspace(3))
+		const persistence = open(await seedWorkspace(CURRENT_WORKSPACE_SCHEMA_VERSION))
 		const inside = deferred()
 		const gate = deferred()
 		const firstRead = persistence.withReadLock(async () => {
@@ -88,7 +88,7 @@ describe('persistence lock sharing', () => {
 	})
 
 	it('admits a waiting writer before readers that arrive after it, so writes are not starved', async () => {
-		const persistence = open(await seedWorkspace(3))
+		const persistence = open(await seedWorkspace(CURRENT_WORKSPACE_SCHEMA_VERSION))
 		const events: string[] = []
 		const inside = deferred()
 		const gate = deferred()
@@ -108,7 +108,7 @@ describe('persistence lock sharing', () => {
 	})
 
 	it('still excludes another process: reads wait for its lock and time out as persistence.lock_busy', async () => {
-		const root = await seedWorkspace(3)
+		const root = await seedWorkspace(CURRENT_WORKSPACE_SCHEMA_VERSION)
 		const elsewhere = await holdLockElsewhere(root)
 		try {
 			const reader = open(root, 150)
@@ -123,7 +123,7 @@ describe('persistence lock sharing', () => {
 	})
 
 	it('times out an in-process waiter queued behind a long exclusive operation', async () => {
-		const persistence = open(await seedWorkspace(3), 120)
+		const persistence = open(await seedWorkspace(CURRENT_WORKSPACE_SCHEMA_VERSION), 120)
 		const inside = deferred()
 		const gate = deferred()
 		const write = persistence.withLock(async () => {
@@ -171,7 +171,7 @@ describe('persistence.busy transport mapping', () => {
 	})
 
 	it('answers MCP tools with a persistence.busy error result and resource reads with a coded JSON-RPC error', async () => {
-		const root = await seedWorkspace(3)
+		const root = await seedWorkspace(CURRENT_WORKSPACE_SCHEMA_VERSION)
 		const app = createWorkspaceApplicationSession(open(root, 150))
 		const handler = createUiuxMcpHttpHandler(app, { leases: createLeaseManager() })
 		const client = new Client({ name: 'uiux-busy-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto', probe: { timeoutMs: 2_000 } } })

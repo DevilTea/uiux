@@ -8,7 +8,7 @@ import { createServer, type AddressInfo } from 'node:net'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 
 import { FileNativePersistence } from '../src/persistence'
-import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createHandoffExportService } from '../src/application/services/handoff-export'
 import { createFormalCaptureService } from '../src/application/services/formal-capture'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
@@ -90,7 +90,7 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 	await symlink(vuePath, join(root, 'node_modules', 'vue')).catch(() => undefined)
 
 	await writeFile(join(root, '.uiux', 'workspace.json'), JSON.stringify({
-		schemaVersion: 3,
+		schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 		i18n: { defaultLocale: 'en-US' },
 		adapters,
 		viewports: {
@@ -522,7 +522,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		expect(validateHandoffManifest(exported.manifest).ok).toBe(true)
 		expect(exported.manifest?.readiness.implementationReady).toBe(true)
 		expect(exported.manifest?.readiness.coverage.review).toEqual(assessed.readiness?.coverage.review)
-		expect(exported.manifest?.provenance.workspaceSchemaVersion).toBe(3)
+		expect(exported.manifest?.provenance.workspaceSchemaVersion).toBe(CURRENT_WORKSPACE_SCHEMA_VERSION)
 		const snapshot = exported.manifest?.resources.find(resource => resource.type === 'review' && resource.identity.id === verified.id)
 		expect((snapshot?.snapshot as unknown as ReviewThread).history.at(-1)?.resolution).toBe('verified')
 

@@ -15,6 +15,7 @@ export const CURRENT_WORKSPACE_SCHEMA_VERSION = packageJson.uiuxWorkspaceSchemaV
 
 export const WORKSPACE_V1_TO_V2_STEP_ID = 'uiux.v1-to-v2'
 export const WORKSPACE_V2_TO_V3_STEP_ID = 'uiux.v2-to-v3'
+export const WORKSPACE_V3_TO_V4_STEP_ID = 'uiux.v3-to-v4'
 
 /**
  * The combined `1 -> 2` step shared by the accepted "Direct resolve" and "Review pin display hint"
@@ -97,10 +98,42 @@ export const WORKSPACE_V2_TO_V3_STEP: WorkspaceMigrationStep = Object.freeze({
 	},
 })
 
+/**
+ * The manifest-only `3 -> 4` step of the accepted "Review render context" decision group (Part 7).
+ * It changes only the manifest `schemaVersion`: no v3 file can contain `renderContext`, and none is
+ * backfilled, since an absent context means unknown. It still re-validates every Review file that
+ * was valid under v3 against v4 before persistence writes anything. Deterministic and idempotent.
+ */
+export const WORKSPACE_V3_TO_V4_STEP: WorkspaceMigrationStep = Object.freeze({
+	id: WORKSPACE_V3_TO_V4_STEP_ID,
+	fromVersion: 3,
+	toVersion: 4,
+	apply(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+		const next = new Map(snapshot)
+		const manifestPath = workspaceRelativePath()
+		const manifestBytes = next.get(manifestPath)
+		if (!manifestBytes) throw new TypeError('uiux.v3-to-v4 requires .uiux/workspace.json.')
+		const manifest = parseJson(manifestBytes, manifestPath)
+		if (!isRecord(manifest) || manifest.schemaVersion !== 3)
+			throw new TypeError('uiux.v3-to-v4 applies only to a schemaVersion 3 manifest.')
+		next.set(manifestPath, canonicalJsonBytes({ ...manifest, schemaVersion: 4 }))
+
+		for (const [path, bytes] of snapshot) {
+			if (!/^reviews\/[^/]+\.review\.json$/u.test(path)) continue
+			let review: unknown
+			try { review = parseJson(bytes, path) }
+			catch { continue } // Unparseable JSON stays byte-identical and keeps its persistence diagnostic.
+			const filename = path.slice('reviews/'.length)
+			if (validateReviewThread(review, { schemaVersion: 3, filename }).ok) assertValidUnder(review, filename, 4, WORKSPACE_V3_TO_V4_STEP_ID)
+		}
+		return next
+	},
+})
+
 export const PRODUCT_WORKSPACE_SCHEMA_POLICY = defineWorkspaceSchemaPolicy({
 	currentVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
-	recognizedVersions: [1, 2, 3],
-	steps: [WORKSPACE_V1_TO_V2_STEP, WORKSPACE_V2_TO_V3_STEP],
+	recognizedVersions: [1, 2, 3, 4],
+	steps: [WORKSPACE_V1_TO_V2_STEP, WORKSPACE_V2_TO_V3_STEP, WORKSPACE_V3_TO_V4_STEP],
 })
 
 /** Returns the same object when no lifecycle resolve event lacks a resolution. */

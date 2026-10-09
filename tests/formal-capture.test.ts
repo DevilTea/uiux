@@ -8,7 +8,7 @@ import { createServer as createHttpServer } from 'node:http'
 import { chromium } from 'playwright'
 
 import { FileNativePersistence } from '../src/persistence'
-import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createFormalCaptureService } from '../src/application/services/formal-capture'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
@@ -86,7 +86,7 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 	await symlink(vuePath, join(root, 'node_modules', 'vue')).catch(() => undefined)
 
 	await writeFile(join(root, '.uiux', 'workspace.json'), JSON.stringify({
-		schemaVersion: 3,
+		schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 		i18n: { defaultLocale: 'en-US' },
 		adapters,
 		viewports: {

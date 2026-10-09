@@ -9,6 +9,7 @@ import {
 } from '../src/preview/render-context-options'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { WorkspaceManifest } from '../src/domain/workspace/schema'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 
 const VIEW_ID = '00000000-0000-4000-8000-000000000001'
 
@@ -24,7 +25,7 @@ function baseView(variants: ViewResource['variants'] = {}): ViewResource {
 
 function baseWorkspace(overrides: Partial<WorkspaceManifest> = {}): WorkspaceManifest {
 	return {
-		schemaVersion: 3,
+		schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 		i18n: { defaultLocale: 'en-US' },
 		adapters: [],
 		viewports: {},

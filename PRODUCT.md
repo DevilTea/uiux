@@ -46,9 +46,9 @@ Figma comments sit on pixels of a drawing. Here, a Figma-like comment sits on a 
 
 ## Operating Context
 
-- **Local, single process.** `uiux init --workspace <dir>` creates a Workspace at the current schema (`schemaVersion` 3) and `uiux dev --workspace <dir>` starts one Nitro process on loopback only (`127.0.0.1`). It serves the Workbench SPA (`ssr: false`), `/api/*`, `/mcp` and the Preview host for one selected Workspace. There is no cloud and no network dependency. The Workspace may or may not be in Git.
+- **Local, single process.** `uiux init --workspace <dir>` creates a Workspace at the current schema (`schemaVersion` 4) and `uiux dev --workspace <dir>` starts one Nitro process on loopback only (`127.0.0.1`). It serves the Workbench SPA (`ssr: false`), `/api/*`, `/mcp` and the Preview host for one selected Workspace. There is no cloud and no network dependency. The Workspace may or may not be in Git.
 - **Access.** Every `/api/*` and `/mcp` request needs a credential: a Workbench session (from a one-time sign-in link) or a bearer token. Each Workspace has a host-local roster of members, tokens, invites and sessions under `$UIUX_HOME`, managed with `uiux member|token|invite|session ... --workspace <dir>` (`uiux access copy` carries a roster to a moved Workspace) or, for Owners, on the Workbench Members page. The first start of a Workspace creates its Owner and prints a sign-in link. Roles are cumulative: Viewer ⊂ Reviewer ⊂ Editor ⊂ Owner; agents are capped at Editor.
-- **Older Workspaces.** `uiux migrate --workspace <dir> [--dry-run]` upgrades an older Workspace to `schemaVersion` 3 (steps `uiux.v1-to-v2`, then `uiux.v2-to-v3`). Migration is CLI-only; until it runs, the Workbench opens the Workspace read-only and names the command.
+- **Older Workspaces.** `uiux migrate --workspace <dir> [--dry-run]` upgrades an older Workspace to `schemaVersion` 4 (steps `uiux.v1-to-v2`, `uiux.v2-to-v3`, then `uiux.v3-to-v4`). Migration is CLI-only; until it runs, the Workbench opens the Workspace read-only and names the command.
 - **Side by side with an agent session.** A developer usually has an agent authoring through MCP in another window. Reviewers return to the Workbench to inspect the result. Refresh is manual today; live push of agent edits is accepted but not built (issue #69).
 - **Team sharing happens through one host's roster, the Workspace files** (typically Git) **and the published static site.** Several members can use the same server, each signed in with their own credential, but the server listens on loopback only, so other devices cannot reach it yet; the opt-in LAN listener is accepted but not built (issue #68).
 - **Published, read-only mode.** `uiux publish --workspace <dir> --out <dir> [--base <path>] [--source-revision <rev>]` produces a static interactive site with authoring and review mutations removed. This repository dogfoods it at https://deviltea.github.io/uiux/.
@@ -88,7 +88,7 @@ The normative domain behavior and external contracts live in `.spec/` (Stories, 
 - the Component Catalog as a secondary area;
 - the opt-in LAN listener for reviewing from other devices (issue #68);
 - live change notifications when agents write, so the Workbench refreshes on its own (issue #69);
-- Review threads that record the render context they were written in and show it in the thread header (Discussion #7, Part 7: https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18797092).
+- Review threads that record the render context they were written in and show it in the thread header (Discussion #7, Part 7: https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18797092). `schemaVersion` 4 already defines the thread's optional `renderContext`, but nothing writes or shows it yet (issue #144).
 
 **Binding constraints:**
 
