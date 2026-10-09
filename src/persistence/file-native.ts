@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import * as fs from 'node:fs/promises'
@@ -5,7 +6,6 @@ import { basename, dirname, resolve } from 'node:path'
 
 import type { ResourceRevision, RevisionedResourceRead, RevisionConflict } from '../application/dto/revisions'
 import type { MutableResourceRepository } from '../application/ports/resources'
-import { sha256Identity } from '../domain/artifacts/schema'
 import { validateAssetContentFiles, validateAssetContentMetadata, validateAssetMetadata, type AuthoredAsset, type AuthoredAssetResource } from '../domain/assets/schema'
 import { validateFlowResource, type FlowResource } from '../domain/flows/schema'
 import { validateI18nResource, type I18nResource } from '../domain/i18n/schema'
@@ -14,6 +14,7 @@ import { validateReviewThread, type ReviewThread } from '../domain/reviews/schem
 import { validateViewResource, type ViewResource } from '../domain/views/schema'
 import { validateWorkspaceManifest, type WorkspaceManifest } from '../domain/workspace/schema'
 import { PersistenceError } from './errors'
+import { currentDesignWriteContext, type DesignWriteContext } from './history/write-context'
 import {
 	artifactRelativePath,
 	assetMetadataRelativePath,
@@ -25,6 +26,8 @@ import {
 	viewRelativePath,
 	workspaceRelativePath,
 	isSafeAssetContentFilename,
+	LEGACY_LAYOUT,
+	type VersionedResourceIdentity,
 } from './paths'
 import {
 	defineWorkspaceSchemaPolicy,
@@ -58,6 +61,40 @@ export type FileNativePersistenceOptions = Readonly<{
 	schemaPolicy: WorkspaceSchemaPolicy
 	fault?: PersistenceFaultHook
 	lockWaitMilliseconds?: number
+	/** The history observer (recorder seam 6); it can also be attached later with `setWriteObserver`. */
+	writeObserver?: CanonicalWriteObserver
+}>
+
+/** One committed versioned file: `bytes` are exactly the bytes written, or `null` when the file was removed. */
+export type CanonicalFileChange = Readonly<{ path: string; bytes: Uint8Array | null }>
+
+/**
+ * One versioned resource a committed design write changed. The revisions are the ones persistence
+ * reports for the resource's files before and after the write (`null` when the resource did not
+ * exist on that side); `files` lists only the files the write changed.
+ */
+export type CanonicalResourceChange = Readonly<{
+	resource: VersionedResourceIdentity
+	beforeRevision: ResourceRevision | null
+	afterRevision: ResourceRevision | null
+	files: readonly CanonicalFileChange[]
+}>
+
+/**
+ * Observer hooks the history recorder attaches to persistence. Both are called only while a
+ * design-write context is set and only for writes that change versioned files (Review files are
+ * not versioned, so Review writes never call them), always under the exclusive persistence lock:
+ *
+ * - `beforeCanonicalWrite` runs after every check of the write passed, before any byte changes.
+ * - `afterCanonicalCommit` runs once the write has committed (for multi-file writes, once the
+ *   transaction journal is committed), with exactly the committed bytes.
+ *
+ * A hook must not call `withLock` or `withReadLock` (that is refused); use the `*Unlocked`
+ * helpers instead. A hook failure never fails the write: it is logged and sets `recordingGap`.
+ */
+export type CanonicalWriteObserver = Readonly<{
+	beforeCanonicalWrite?(context: DesignWriteContext): void | Promise<void>
+	afterCanonicalCommit?(context: DesignWriteContext, changes: readonly CanonicalResourceChange[]): void | Promise<void>
 }>
 
 export type InspectedResource<Resource> = Readonly<{
@@ -152,6 +189,8 @@ const MAX_LOCK_WAIT_MS = 15_000
  * now and then and another UIUX process waiting on it gets a turn.
  */
 const MAX_SHARED_BATCH_MS = 1_000
+/** The deepest versioned file of the legacy layout is `assets/<uuid>/<file>`: three path segments. */
+const VERSIONED_SCAN_MAX_SEGMENTS = 3
 
 /** File-native persistence implementation. The schema policy is deliberately injected. */
 export class FileNativePersistence {
@@ -185,6 +224,25 @@ export class FileNativePersistence {
 		this.locales = new LocaleFileRepository(this)
 		this.assets = new AuthoredAssetFileRepository(this)
 		this.artifacts = new ImmutableArtifactStore(this)
+		observerStates.set(this, { observer: options.writeObserver, recordingGap: false })
+	}
+
+	/** Attaches (or with `undefined`, detaches) the history observer. */
+	setWriteObserver(observer: CanonicalWriteObserver | undefined): void {
+		observerState(this).observer = observer
+	}
+
+	/** True once an observer hook failed (or could not be prepared) since the flag was last consumed. */
+	get recordingGap(): boolean {
+		return observerState(this).recordingGap
+	}
+
+	/** Returns the recording-gap flag and clears it, so the next history boundary can record the gap once. */
+	consumeRecordingGap(): boolean {
+		const state = observerState(this)
+		const gap = state.recordingGap
+		state.recordingGap = false
+		return gap
 	}
 
 	/** Reports policy state without changing the Workspace or its authored files. */
@@ -330,10 +388,12 @@ export class FileNativePersistence {
 			const serializedReview = this.serializeJson(input.reviewResource, reviewPath)
 			const serializedView = this.serializeJson(input.viewResource, viewPath)
 
-			await this.applyFileTransaction([
+			const changes: FileChange[] = [
 				{ path: reviewPath, bytes: serializedReview },
 				{ path: viewPath, bytes: serializedView },
-			], 'decision-promotion')
+			]
+			// Only the View part is versioned; the observer never sees the Review file.
+			await commitCanonicalWrite(this, changes, () => this.applyFileTransaction(changes, 'decision-promotion'))
 
 			return {
 				ok: true,
@@ -348,6 +408,7 @@ export class FileNativePersistence {
 	 * processes. Waiting longer than the lock wait budget throws `persistence.lock_busy`.
 	 */
 	async withLock<Result>(operation: () => Promise<Result>): Promise<Result> {
+		assertOutsideObserver()
 		const deadline = Date.now() + this.lockWaitMilliseconds
 		const leave = await this.gate.enter('exclusive', deadline)
 		try {
@@ -373,6 +434,7 @@ export class FileNativePersistence {
 	 * new readers from joining, so writes are not starved. The operation must not write.
 	 */
 	async withReadLock<Result>(operation: () => Promise<Result>): Promise<Result> {
+		assertOutsideObserver()
 		const deadline = Date.now() + this.lockWaitMilliseconds
 		const leave = await this.gate.enter('shared', deadline)
 		let hold: SharedLockHold | undefined
@@ -508,6 +570,22 @@ export class FileNativePersistence {
 		catch (error) {
 			if (isNotFound(error))
 				return undefined
+			throw error
+		}
+	}
+
+	/**
+	 * The entries of a Workspace directory, or `undefined` when it does not exist. The directory
+	 * and every ancestor must be real directories, never symbolic links.
+	 */
+	async listDirectoryUnlocked(relativeDirectory: string): Promise<import('node:fs').Dirent[] | undefined> {
+		const absolute = resolveWorkspacePath(this.root, relativeDirectory)
+		await assertSafePath(this.root, `${relativeDirectory}/.placeholder`, true)
+		try {
+			return await fs.readdir(absolute, { withFileTypes: true })
+		}
+		catch (error) {
+			if (isNotFound(error)) return undefined
 			throw error
 		}
 	}
@@ -730,6 +808,51 @@ export class FileNativePersistence {
 			await this.scanFlatDirectoryUnlocked(directory, snapshot)
 		await this.scanAssetsUnlocked(snapshot)
 		return snapshot
+	}
+
+	/**
+	 * The versioned files (Clause 01a11a5e-1eba-78ae-a204-52e286a95ddb) and their current bytes, keyed
+	 * by Workspace-relative path in code unit order. Unlike the canonical scan it tolerates files the
+	 * layout does not classify (such as `views/notes.txt`): they are not versioned, so they are left
+	 * out instead of refused. Symbolic links are never followed: a linked versioned directory is
+	 * refused, and a linked entry inside one is skipped. The caller holds the persistence lock.
+	 */
+	async scanVersionedSnapshotUnlocked(): Promise<Map<string, Uint8Array>> {
+		const snapshot = new Map<string, Uint8Array>()
+		for (const root of LEGACY_LAYOUT.versionedRoots) {
+			if (root.endsWith('/')) {
+				await this.scanVersionedDirectoryUnlocked(root.slice(0, -1), snapshot)
+				continue
+			}
+			const bytes = await this.readOptionalBytesUnlocked(root)
+			if (bytes && LEGACY_LAYOUT.classifyVersionedPath(root)) snapshot.set(root, Uint8Array.from(bytes))
+		}
+		return new Map([...snapshot].sort(([left], [right]) => compareCodeUnits(left, right)))
+	}
+
+	private async scanVersionedDirectoryUnlocked(directory: string, snapshot: Map<string, Uint8Array>): Promise<void> {
+		const absoluteDirectory = resolveWorkspacePath(this.root, directory)
+		await assertSafePath(this.root, `${directory}/.placeholder`, true)
+		let entries: import('node:fs').Dirent[]
+		try {
+			entries = await fs.readdir(absoluteDirectory, { withFileTypes: true })
+		}
+		catch (error) {
+			if (isNotFound(error)) return
+			throw error
+		}
+		if (await isSymlink(absoluteDirectory))
+			throw pathRejected(`Versioned directory ${directory} is a symbolic link.`)
+		for (const entry of entries) {
+			const relativePath = `${directory}/${entry.name}`
+			if (entry.isDirectory()) {
+				if (relativePath.split('/').length < VERSIONED_SCAN_MAX_SEGMENTS)
+					await this.scanVersionedDirectoryUnlocked(relativePath, snapshot)
+				continue
+			}
+			if (!entry.isFile() || !LEGACY_LAYOUT.classifyVersionedPath(relativePath)) continue
+			snapshot.set(relativePath, Uint8Array.from(await this.readBytesUnlocked(relativePath)))
+		}
 	}
 
 	private async scanFlatDirectoryUnlocked(directory: string, snapshot: Map<string, Uint8Array>): Promise<void> {
@@ -1097,7 +1220,7 @@ export class JsonResourceRepository<Key extends string, Resource> implements Mut
 			if (await this.persistence.readOptionalBytesUnlocked(path))
 				throw new PersistenceError('persistence.resource_exists', `Canonical resource ${path} already exists.`)
 			const bytes = this.persistence.serializeJson(resource, path)
-			if (!await this.persistence.atomicCreateUnlocked(path, bytes))
+			if (!await commitCanonicalWrite(this.persistence, [{ path, bytes }], () => this.persistence.atomicCreateUnlocked(path, bytes)))
 				throw new PersistenceError('persistence.resource_exists', `Canonical resource ${path} already exists.`)
 			return revisionForBytes(bytes)
 		})
@@ -1117,7 +1240,7 @@ export class JsonResourceRepository<Key extends string, Resource> implements Mut
 			assertEmbeddedIdentity(input.key, current, this.identityField, basename(path))
 			assertEmbeddedIdentity(input.key, input.resource, this.identityField, basename(path))
 			const bytes = this.persistence.serializeJson(input.resource, path)
-			await this.persistence.atomicWriteUnlocked(path, bytes, currentBytes)
+			await commitCanonicalWrite(this.persistence, [{ path, bytes }], () => this.persistence.atomicWriteUnlocked(path, bytes, currentBytes))
 			return { ok: true, revision: revisionForBytes(bytes) }
 		})
 	}
@@ -1150,7 +1273,7 @@ export class JsonResourceRepository<Key extends string, Resource> implements Mut
 				},
 			})
 			if (refusal !== undefined) return { status: 'refused', refusal }
-			await this.persistence.removeUnlocked(path)
+			await commitCanonicalWrite(this.persistence, [{ path }], () => this.persistence.removeUnlocked(path))
 			return { status: 'deleted' }
 		})
 	}
@@ -1178,7 +1301,7 @@ export class WorkspaceFileRepository implements MutableResourceRepository<'works
 			if (await this.persistence.readOptionalBytesUnlocked(path))
 				throw new PersistenceError('persistence.resource_exists', 'Workspace manifest already exists.')
 			const bytes = this.persistence.serializeJson(resource, path)
-			if (!await this.persistence.atomicCreateUnlocked(path, bytes))
+			if (!await commitCanonicalWrite(this.persistence, [{ path, bytes }], () => this.persistence.atomicCreateUnlocked(path, bytes)))
 				throw new PersistenceError('persistence.resource_exists', 'Workspace manifest already exists.')
 			return revisionForBytes(bytes)
 		})
@@ -1197,7 +1320,7 @@ export class WorkspaceFileRepository implements MutableResourceRepository<'works
 			if (input.expectedRevision !== currentRevision)
 				return { ok: false, conflict: { code: 'revision_conflict', currentRevision } }
 			const bytes = this.persistence.serializeJson(input.resource, path)
-			await this.persistence.atomicWriteUnlocked(path, bytes, currentBytes)
+			await commitCanonicalWrite(this.persistence, [{ path, bytes }], () => this.persistence.atomicWriteUnlocked(path, bytes, currentBytes))
 			return { ok: true, revision: revisionForBytes(bytes) }
 		})
 	}
@@ -1275,7 +1398,7 @@ export class LocaleFileRepository implements MutableResourceRepository<string, I
 			if (entry.kind === 'aliased_variant')
 				throw caseVariantCollision(locale, entry.entryName)
 			const bytes = this.persistence.serializeJson(resource, path)
-			if (!await this.persistence.atomicCreateUnlocked(path, bytes)) {
+			if (!await commitCanonicalWrite(this.persistence, [{ path, bytes }], () => this.persistence.atomicCreateUnlocked(path, bytes))) {
 				// Lost a race to a writer outside this process; re-check which name now holds the slot.
 				const after = await this.localeEntryUnlocked(locale)
 				if (after.kind === 'aliased_variant') throw caseVariantCollision(locale, after.entryName)
@@ -1296,7 +1419,7 @@ export class LocaleFileRepository implements MutableResourceRepository<string, I
 			if (input.expectedRevision !== currentRevision)
 				return { ok: false, conflict: { code: 'revision_conflict', currentRevision } }
 			const bytes = this.persistence.serializeJson(input.resource, path)
-			await this.persistence.atomicWriteUnlocked(path, bytes, currentBytes)
+			await commitCanonicalWrite(this.persistence, [{ path, bytes }], () => this.persistence.atomicWriteUnlocked(path, bytes, currentBytes))
 			return { ok: true, revision: revisionForBytes(bytes) }
 		})
 	}
@@ -1417,10 +1540,12 @@ export class AuthoredAssetFileRepository implements MutableResourceRepository<st
 			if (existingEntries.length > 0)
 				throw new PersistenceError('persistence.asset_shape_invalid', `Cannot create Authored Asset ${id} over existing unowned files.`)
 			const candidate = this.prepareCandidate(id, resource)
-			await this.persistence.applyFileTransaction([
+			const changes: FileChange[] = [
 				{ path: metadataPath, bytes: candidate.metadataBytes },
 				{ path: `${directory}/${resource.metadata.contentFilename}`, bytes: resource.content },
-			], 'asset')
+			]
+			// applyFileTransaction returns only once its journal is committed, so the observer sees a committed Asset.
+			await commitCanonicalWrite(this.persistence, changes, () => this.persistence.applyFileTransaction(changes, 'asset'))
 			return assetRevision(candidate.metadataBytes, [{ filename: resource.metadata.contentFilename, bytes: resource.content }])
 		})
 	}
@@ -1452,7 +1577,7 @@ export class AuthoredAssetFileRepository implements MutableResourceRepository<st
 					changes.push({ path: `${directory}/${filename}` })
 			}
 			changes.push({ path: `${directory}/${input.resource.metadata.contentFilename}`, bytes: input.resource.content })
-			await this.persistence.applyFileTransaction(changes, 'asset')
+			await commitCanonicalWrite(this.persistence, changes, () => this.persistence.applyFileTransaction(changes, 'asset'))
 			return {
 				ok: true,
 				revision: assetRevision(candidate.metadataBytes, [{ filename: input.resource.metadata.contentFilename, bytes: input.resource.content }]),
@@ -1529,25 +1654,35 @@ export class ImmutableArtifactStore {
 	async put(bytes: Uint8Array): Promise<ArtifactWriteResult> {
 		if (!(bytes instanceof Uint8Array))
 			throw new PersistenceError('persistence.invalid_resource', 'Artifact content must be supplied as bytes.')
-		const identity = await sha256Identity(bytes) as `sha256:${string}`
 		return this.persistence.withLock(async () => {
 			await this.persistence.assertWritableUnlocked()
-			const relativePath = artifactRelativePath(identity)
-			const existing = await this.persistence.readOptionalBytesUnlocked(relativePath)
-			if (existing) {
-				if (digestBytes(existing) !== identity)
-					throw new PersistenceError('persistence.artifact_corrupt', `Existing immutable artifact ${identity} does not match its content identity.`)
-				return { identity, created: false }
-			}
-			const created = await this.persistence.atomicCreateImmutableUnlocked(relativePath, bytes)
-			if (!created) {
-				const racedExisting = await this.persistence.readBytesUnlocked(relativePath)
-				if (digestBytes(racedExisting) !== identity)
-					throw new PersistenceError('persistence.artifact_corrupt', `Existing immutable artifact ${identity} does not match its content identity.`)
-				return { identity, created: false }
-			}
-			return { identity, created }
+			return this.putUnlocked(bytes)
 		})
+	}
+
+	/**
+	 * `put` for a producer that already holds the exclusive persistence lock and has decided whether
+	 * the Workspace state allows it (a checkpoint writer, which may also run before a migration).
+	 */
+	async putUnlocked(bytes: Uint8Array): Promise<ArtifactWriteResult> {
+		if (!(bytes instanceof Uint8Array))
+			throw new PersistenceError('persistence.invalid_resource', 'Artifact content must be supplied as bytes.')
+		const identity = digestBytes(bytes)
+		const relativePath = artifactRelativePath(identity)
+		const existing = await this.persistence.readOptionalBytesUnlocked(relativePath)
+		if (existing) {
+			if (digestBytes(existing) !== identity)
+				throw new PersistenceError('persistence.artifact_corrupt', `Existing immutable artifact ${identity} does not match its content identity.`)
+			return { identity, created: false }
+		}
+		const created = await this.persistence.atomicCreateImmutableUnlocked(relativePath, bytes)
+		if (!created) {
+			const racedExisting = await this.persistence.readBytesUnlocked(relativePath)
+			if (digestBytes(racedExisting) !== identity)
+				throw new PersistenceError('persistence.artifact_corrupt', `Existing immutable artifact ${identity} does not match its content identity.`)
+			return { identity, created: false }
+		}
+		return { identity, created }
 	}
 
 	async read(identity: string): Promise<Uint8Array | undefined> {
@@ -1646,6 +1781,134 @@ export class ImmutableArtifactStore {
 			return identities.sort()
 		})
 	}
+}
+
+type ObserverState = { observer?: CanonicalWriteObserver; recordingGap: boolean }
+
+/** Per-instance observer state, private to this module so only `commitCanonicalWrite` calls the hooks. */
+const observerStates = new WeakMap<FileNativePersistence, ObserverState>()
+/** Marks the asynchronous call chain of a running observer hook, which must not re-enter the lock. */
+const observerScope = new AsyncLocalStorage<true>()
+
+function observerState(persistence: FileNativePersistence): ObserverState {
+	const state = observerStates.get(persistence)
+	if (!state) throw new TypeError('FileNativePersistence observer state is missing.')
+	return state
+}
+
+function assertOutsideObserver(): void {
+	if (observerScope.getStore())
+		throw new PersistenceError('persistence.lock_busy', 'A history observer hook runs under the exclusive persistence lock and cannot take it again; use the *Unlocked helpers.')
+}
+
+type ResourceFilesBefore = Readonly<{ resource: VersionedResourceIdentity; files: Map<string, Uint8Array>; changes: FileChange[] }>
+
+/**
+ * The one funnel every canonical design write commits through (Clause and Rule references in
+ * `CanonicalWriteObserver`). `changes` are the files `write` changes; `write` resolves `false`
+ * when it decided not to write after all (a lost create race). Only versioned files count: with
+ * no design-write context, no observer, or no versioned file among `changes`, this is exactly
+ * `write()`. Otherwise the resources' files are read first, `beforeCanonicalWrite` runs, then the
+ * write, then `afterCanonicalCommit` with the committed bytes. Observer failures never fail the
+ * write; they set `recordingGap`. Called with the exclusive persistence lock held.
+ */
+async function commitCanonicalWrite<Written extends boolean | void>(
+	persistence: FileNativePersistence,
+	changes: readonly FileChange[],
+	write: () => Promise<Written>,
+): Promise<Written> {
+	const state = observerState(persistence)
+	const observer = state.observer
+	const context = observer ? currentDesignWriteContext() : undefined
+	const versioned = observer && context ? changes.filter(change => LEGACY_LAYOUT.classifyVersionedPath(change.path)) : []
+	if (!observer || !context || versioned.length === 0) return write()
+	let before: readonly ResourceFilesBefore[] | undefined
+	try {
+		before = await readResourceFilesBeforeWrite(persistence, versioned)
+	}
+	catch (error) {
+		reportObserverFailure(state, 'could not read the resources before a design write', error)
+	}
+	await invokeObserver(state, 'beforeCanonicalWrite', async () => observer.beforeCanonicalWrite?.(context))
+	const written = await write()
+	if (written === false || !before) return written
+	const committedBefore = before
+	await invokeObserver(state, 'afterCanonicalCommit', async () => observer.afterCanonicalCommit?.(context, committedBefore.map(resourceChangeAfterCommit)))
+	return written
+}
+
+async function readResourceFilesBeforeWrite(persistence: FileNativePersistence, changes: readonly FileChange[]): Promise<readonly ResourceFilesBefore[]> {
+	const byResource = new Map<string, ResourceFilesBefore>()
+	for (const change of changes) {
+		const resource = LEGACY_LAYOUT.classifyVersionedPath(change.path)!
+		const identity = `${resource.kind}\0${resource.key}`
+		let entry = byResource.get(identity)
+		if (!entry) {
+			entry = { resource, files: await readVersionedResourceFilesUnlocked(persistence, resource, change.path), changes: [] }
+			byResource.set(identity, entry)
+		}
+		entry.changes.push(change)
+	}
+	return [...byResource.values()].sort((left, right) => compareCodeUnits(left.resource.kind, right.resource.kind) || compareCodeUnits(left.resource.key, right.resource.key))
+}
+
+/** Every current file of one versioned resource: an Asset's whole directory, otherwise its one file. */
+async function readVersionedResourceFilesUnlocked(persistence: FileNativePersistence, resource: VersionedResourceIdentity, path: string): Promise<Map<string, Uint8Array>> {
+	const files = new Map<string, Uint8Array>()
+	if (resource.kind !== 'asset') {
+		const bytes = await persistence.readOptionalBytesUnlocked(path)
+		if (bytes) files.set(path, Uint8Array.from(bytes))
+		return files
+	}
+	const directory = assetDirectoryRelativePath(resource.key)
+	await assertSafePath(persistence.root, `${directory}/.placeholder`, true)
+	let entries: import('node:fs').Dirent[]
+	try { entries = await fs.readdir(resolveWorkspacePath(persistence.root, directory), { withFileTypes: true }) }
+	catch (error) {
+		if (isNotFound(error)) return files
+		throw error
+	}
+	for (const entry of entries) {
+		const relativePath = `${directory}/${entry.name}`
+		if (entry.isFile() && LEGACY_LAYOUT.classifyVersionedPath(relativePath))
+			files.set(relativePath, Uint8Array.from(await persistence.readBytesUnlocked(relativePath)))
+	}
+	return files
+}
+
+function resourceChangeAfterCommit(entry: ResourceFilesBefore): CanonicalResourceChange {
+	const after = new Map(entry.files)
+	const files: CanonicalFileChange[] = []
+	for (const change of [...entry.changes].sort((left, right) => compareCodeUnits(left.path, right.path))) {
+		if (change.bytes === undefined) after.delete(change.path)
+		else after.set(change.path, change.bytes)
+		files.push({ path: change.path, bytes: change.bytes === undefined ? null : Uint8Array.from(change.bytes) })
+	}
+	return {
+		resource: entry.resource,
+		beforeRevision: revisionForResourceFiles(entry.resource.kind, entry.files) ?? null,
+		afterRevision: revisionForResourceFiles(entry.resource.kind, after) ?? null,
+		files,
+	}
+}
+
+async function invokeObserver(state: ObserverState, hook: keyof CanonicalWriteObserver, call: () => Promise<unknown>): Promise<void> {
+	try {
+		await observerScope.run(true, call)
+	}
+	catch (error) {
+		reportObserverFailure(state, `${hook} failed`, error)
+	}
+}
+
+/** Rule 01a11a5e-036d-7955-aa27-4ec036b55938: the write stands, the failure is logged and flagged. */
+function reportObserverFailure(state: ObserverState, what: string, error: unknown): void {
+	state.recordingGap = true
+	console.error(`uiux: history ${what}; the write was kept and the gap is recorded at the next history boundary: ${error instanceof Error ? error.message : String(error)}`)
+}
+
+function compareCodeUnits(left: string, right: string): number {
+	return left < right ? -1 : left > right ? 1 : 0
 }
 
 function assertEmbeddedIdentity(key: string, resource: unknown, identityField: string, filename: string): void {
@@ -1747,6 +2010,13 @@ function updateLengthFramed(hash: ReturnType<typeof createHash>, bytes: Uint8Arr
 
 function digestBytes(bytes: Uint8Array): `sha256:${string}` {
 	return `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+}
+
+/** The canonical JSON bytes persistence writes: object members sorted by key, no whitespace, one trailing newline. */
+export function canonicalJsonBytes(value: unknown, label = 'value'): Buffer {
+	if (!isJsonValue(value))
+		throw new PersistenceError('persistence.invalid_resource', `The ${label} is not a JSON-compatible value.`)
+	return Buffer.from(`${stableStringify(value)}\n`, 'utf8')
 }
 
 function stableStringify(value: unknown): string {

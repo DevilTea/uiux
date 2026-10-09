@@ -4,6 +4,7 @@ import { lstat, mkdir, open, readFile, rename, rm, chmod } from 'node:fs/promise
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
+import type { HostHistoryPaths } from '../../persistence/history/host-store'
 import { generateHint } from './credentials'
 import {
 	AccessError,
@@ -50,6 +51,24 @@ export function accessStorePaths(home: string, realRoot: string): AccessStorePat
 	const workspaces = join(home, 'workspaces')
 	const dir = join(workspaces, workspaceStoreId(realRoot))
 	return { home, workspaces, dir, file: join(dir, ACCESS_FILE_NAME), lock: join(dir, ACCESS_LOCK_NAME) }
+}
+
+/**
+ * Host history of one Workspace (Clause 01a11a5e-1e65-7deb-a89e-6ad021248fe0):
+ * `$UIUX_HOME/workspaces/<wsid>/history/`, beside the roster and under the same `<wsid>`.
+ */
+export function hostHistoryPaths(home: string, realRoot: string): HostHistoryPaths {
+	const { workspaces, dir: workspaceDir } = accessStorePaths(home, realRoot)
+	const dir = join(workspaceDir, 'history')
+	return Object.freeze({
+		home,
+		workspaces,
+		workspaceDir,
+		dir,
+		versions: join(dir, 'versions'),
+		open: join(dir, 'open.json'),
+		objects: join(dir, 'objects', 'sha256'),
+	})
 }
 
 /** Real path of `path`, or of its nearest existing ancestor joined with the missing remainder. */
