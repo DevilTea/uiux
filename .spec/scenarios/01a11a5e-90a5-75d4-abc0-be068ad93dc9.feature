@@ -7,8 +7,8 @@ Feature: Version history
   @spec:demonstrates:01a11a5e-096a-761e-a65a-6fd66e7e0b12
   @spec:demonstrates:01a11a5e-0a0c-7d65-8d09-9a71a730ec61
   @spec:demonstrates:01a11a5e-1e0e-7539-b925-c54dcb1afb55
-  Scenario: A member holding `checkpoints.create` creates a checkpoint without a lease
+  Scenario: A member holding `checkpoints.create` creates a Checkpoint without a lease
     Given a human member holding `checkpoints.create` and no edit lease
-    When the member creates a checkpoint named "v1 layout approved" with a note
-    Then a checkpoint record with that name, the note and the member as its actor is written to the Workspace's checkpoint directory
+    When the member creates a Checkpoint named "v1 layout approved" with a note
+    Then a Checkpoint record with that name, the note and the member as its actor is written to the Workspace's Checkpoint directory
     Then no canonical file changes
