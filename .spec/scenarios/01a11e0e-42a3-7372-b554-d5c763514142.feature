@@ -1,7 +1,9 @@
 Feature: Review desk
   # Source: Discussion #7 owner rulings 2026-10-09, ruling 3: Part 7 Scenarios for capture, the inbox link, the stale-key fallback, muted-pin activation and migration https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18820343; #7 c11 decision 2 https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18797092; ruling 2: only Workspace-authored keys are recorded https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18820343.
-  # Status: not built as of 54fe345: the Workbench records no render context; see the Implementation gaps entry of 01a1170f-c0ce-70ba-a94b-ff3cf24c38b0 in its owner. The write-time key check of 01a11e0d-d2d0-7b31-9534-fd0fd6b8ca7c is built (PR #151).
-  # Note: No test exists yet; tracked in issue #144.
+  # Test: code@0edbee8 `tests/render-context-options.test.ts#L300` "records only the authored members: a built-in fallback or an unknown value is left out (Scenario 01a11e0e-42a3)". https://github.com/DevilTea/uiux/blob/0edbee80010fb87d3bd052e109605606a3e40cbe/tests/render-context-options.test.ts#L300
+  # Test: code@7e7dfca `tests/render-context-browser.test.ts#L119` "records the context a comment on the whole View is sent from, and a Workbench re-anchor keeps it". https://github.com/DevilTea/uiux/blob/7e7dfca3c224e0d3e56177b3735f4ff7209d5f98/tests/render-context-browser.test.ts#L119
+  # Test: code@0edbee8 `tests/canvas-comment-requests.test.ts#L13` "sends the captured render context with a new thread, Root ("Comment on this View") included". https://github.com/DevilTea/uiux/blob/0edbee80010fb87d3bd052e109605606a3e40cbe/tests/canvas-comment-requests.test.ts#L13
+  # Status: built as of 7e7dfca: the canvas records, when the thread is sent, the Preview's Workspace-local Locale, viewport and theme, a comment on the whole View included, and no render context when none qualifies; the write-time key check of 01a11e0d-d2d0-7b31-9534-fd0fd6b8ca7c is built (PR #151).
   @spec:id:01a11e0e-42a3-7fc3-8205-f3d1452b2b8c
   @spec:demonstrates:01a1170f-c0ce-70ba-a94b-ff3cf24c38b0
   @spec:demonstrates:01a11e0d-d2d0-7b31-9534-fd0fd6b8ca7c
