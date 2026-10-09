@@ -11,6 +11,7 @@ import SubmitForReviewModal from './SubmitForReviewModal.vue'
 import ThreadPromoteModal from './ThreadPromoteModal.vue'
 import ThreadReasonPrompt from './ThreadReasonPrompt.vue'
 import WbErrorDescription from './WbErrorDescription.vue'
+import RecordedContextLabel from './RecordedContextLabel.vue'
 import { latestEditableMessageId } from '../../utils/review-message-actions'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { isLockedError } from '../../utils/fetch-error'
@@ -278,6 +279,19 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
             class="min-w-0 truncate rounded-sm border border-default px-1.5 font-mono leading-5"
             :title="thread.widgetId"
           >{{ thread.anchorState === 'missing' ? `#${thread.widgetId}` : `${thread.widgetType ?? 'Widget'} · #${thread.widgetId}` }}</span>
+          <RecordedContextLabel :context="thread.renderContext" />
+          <UButton
+            v-if="thread.renderContext && viewExists && !compact"
+            color="neutral"
+            variant="link"
+            size="xs"
+            class="p-0"
+            icon="i-lucide-app-window"
+            :label="t('threadContext.openInCurrent')"
+            :title="t('threadContext.openInCurrentHint')"
+            data-thread-open-current
+            @click="inbox.openInCurrentContext(thread)"
+          />
         </template>
       </div>
     </header>

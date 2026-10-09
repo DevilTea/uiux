@@ -2084,5 +2084,19 @@
     "reference": "A Spec reference is not valid.",
     "time": "A time is not in the expected format.",
     "revision": "The revision record is not valid."
+  },
+  "threadContext": {
+    "srPrefix": "Recorded Preview context:",
+    "label": "Recorded Preview context: {context}",
+    "missingSr": "(no longer in this Workspace)",
+    "openInCurrent": "Open in current context",
+    "openInCurrentHint": "Show this thread in your own Preview context instead of the one it records",
+    "announceCurrent": "Showing the thread in your current Preview context.",
+    "noticeTitle": "Part of this thread’s context no longer exists",
+    "missing": {
+      "locale": "Locale {key} no longer exists, so the default Locale is shown.",
+      "viewportId": "Viewport {key} no longer exists, so the default viewport is shown.",
+      "themeId": "Theme {key} no longer exists, so the default theme is shown."
+    }
   }
 }

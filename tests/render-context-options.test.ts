@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
 	DEFAULT_VIEWPORT,
+	FALLBACK_LOCALE,
 	FALLBACK_THEME_ID,
+	captureRenderContext,
 	deriveRenderContextOptions,
+	effectiveRenderContext,
+	resolveRecordedContext,
+	workspaceRenderContextKeys,
 	resolveDefaultLocale,
 	resolveDefaultThemeId,
 	resolveDefaultViewport,
@@ -266,5 +271,72 @@ describe('render context option derivation', () => {
 			expect(resolveDefaultThemeId(baseWorkspace())).toBe(FALLBACK_THEME_ID)
 			expect(resolveDefaultViewport(baseWorkspace())).toBe(DEFAULT_VIEWPORT)
 		})
+	})
+})
+
+describe('recorded render context (Part 7, schemaVersion 4)', () => {
+	// The browser fixture's shape: Locale files en-US and zh-TW, authored viewports and themes.
+	const authored = baseWorkspace({
+		viewports: { desktop: { dimensions: { width: 1920, height: 1080 } }, mobile: { dimensions: { width: 390, height: 844 } } },
+		themes: { dark: {}, light: {} },
+	})
+	const keys = workspaceRenderContextKeys(authored, ['en-US', 'zh-TW'])
+
+	it('takes the Locale set from the i18n files plus defaultLocale, and the viewport and theme IDs from the manifest (Clause 01a11e0d-d2d0)', () => {
+		expect([...workspaceRenderContextKeys(baseWorkspace({ i18n: { defaultLocale: 'ja-JP' } }), ['en-US']).locales].sort()).toEqual(['en-US', 'ja-JP'])
+		expect([...keys.viewportIds].sort()).toEqual(['desktop', 'mobile'])
+		expect([...keys.themeIds].sort()).toEqual(['dark', 'light'])
+		// Built-in fallbacks are never keys: no `default` viewport, no `light` theme when not authored.
+		const bare = workspaceRenderContextKeys(baseWorkspace(), [])
+		expect([...bare.viewportIds]).toEqual([])
+		expect([...bare.themeIds]).toEqual([])
+		expect([...workspaceRenderContextKeys(undefined, []).locales]).toEqual([])
+	})
+
+	it('captures every current member that is a Workspace-local key (Rule 01a1170f-c0ce)', () => {
+		expect(captureRenderContext(keys, { locale: 'zh-TW', viewportId: 'mobile', themeId: 'dark' })).toEqual({ locale: 'zh-TW', viewportId: 'mobile', themeId: 'dark' })
+	})
+
+	it('records only the authored members: a built-in fallback or an unknown value is left out (Scenario 01a11e0e-42a3)', () => {
+		const workspace = baseWorkspace({ viewports: { mobile: { dimensions: { width: 390, height: 844 } } } })
+		const options = deriveRenderContextOptions({ workspace, discoveredLocales: ['en-US', 'zh-TW'], selectedLocale: 'zh-TW', selectedViewportId: 'mobile' })
+		// The Preview shows the built-in `light` theme, which this Workspace does not author.
+		expect(options.themes.selected).toBe(FALLBACK_THEME_ID)
+		const current = { locale: options.locales.selected, viewportId: options.viewports.selectedId, themeId: options.themes.selected }
+		expect(captureRenderContext(workspaceRenderContextKeys(workspace, ['en-US', 'zh-TW']), current)).toEqual({ locale: 'zh-TW', viewportId: 'mobile' })
+		expect(captureRenderContext(keys, { locale: 'fr-FR', viewportId: 'watch', themeId: 'dark' })).toEqual({ themeId: 'dark' })
+	})
+
+	it('records no render context when no member qualifies', () => {
+		const workspace = baseWorkspace()
+		const options = deriveRenderContextOptions({ workspace })
+		expect(options.viewports.selectedId).toBe(DEFAULT_VIEWPORT.id)
+		// Only the default Locale qualifies on a bare Workspace, so a non-default Locale without a file records nothing.
+		expect(captureRenderContext(workspaceRenderContextKeys(workspace, []), { locale: 'zh-TW', viewportId: options.viewports.selectedId, themeId: options.themes.selected })).toBeUndefined()
+		expect(captureRenderContext(workspaceRenderContextKeys(undefined, []), { locale: FALLBACK_LOCALE, viewportId: DEFAULT_VIEWPORT.id, themeId: FALLBACK_THEME_ID })).toBeUndefined()
+		expect(captureRenderContext(keys, {})).toBeUndefined()
+	})
+
+	it('splits a recorded context into the members that exist and the stale ones, never rebinding (Rule 01a1170f-c165)', () => {
+		expect(resolveRecordedContext({ locale: 'zh-TW', viewportId: 'mobile', themeId: 'dark' }, keys)).toEqual({ applied: { locale: 'zh-TW', viewportId: 'mobile', themeId: 'dark' }, missing: [] })
+		const withoutMobile = workspaceRenderContextKeys(baseWorkspace({ viewports: { desktop: { dimensions: { width: 1920, height: 1080 } } }, themes: { dark: {} } }), ['en-US', 'zh-TW'])
+		expect(resolveRecordedContext({ locale: 'zh-TW', viewportId: 'mobile', themeId: 'dark' }, withoutMobile)).toEqual({
+			applied: { locale: 'zh-TW', themeId: 'dark' },
+			missing: [{ member: 'viewportId', key: 'mobile' }],
+		})
+		expect(resolveRecordedContext({ locale: 'fr-FR', themeId: 'sepia' }, keys)).toEqual({
+			applied: {},
+			missing: [{ member: 'locale', key: 'fr-FR' }, { member: 'themeId', key: 'sepia' }],
+		})
+		// No recorded context, or an unrecorded member, is neither applied nor missing.
+		expect(resolveRecordedContext(undefined, keys)).toEqual({ applied: {}, missing: [] })
+		expect(resolveRecordedContext({ viewportId: 'mobile' }, keys)).toEqual({ applied: { viewportId: 'mobile' }, missing: [] })
+	})
+
+	it('compares selections by what the Preview shows, with empty members as their defaults', () => {
+		const locales = ['en-US', 'zh-TW']
+		expect(effectiveRenderContext(authored, locales, {})).toEqual({ locale: 'en-US', viewportId: 'desktop', themeId: 'dark' })
+		expect(effectiveRenderContext(authored, locales, { locale: 'en-US', viewport: 'desktop', theme: 'dark' })).toEqual(effectiveRenderContext(authored, locales, {}))
+		expect(effectiveRenderContext(authored, locales, { viewport: 'mobile' }).viewportId).toBe('mobile')
 	})
 })

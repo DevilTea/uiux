@@ -19,6 +19,8 @@ import SubmitForReviewModal from '../SubmitForReviewModal.vue'
 import ThreadPromoteModal from '../ThreadPromoteModal.vue'
 import ThreadReasonPrompt from '../ThreadReasonPrompt.vue'
 import WbErrorDescription from '../WbErrorDescription.vue'
+import RecordedContextLabel from '../RecordedContextLabel.vue'
+import { effectiveRenderContext } from '../../../../src/preview/render-context-options'
 
 /**
  * The thread bubble (brief c, section 6; direct-resolve decision 10): status, the compact typed
@@ -30,7 +32,7 @@ const props = defineProps<{ threadId: string }>()
 const { t, locale } = useI18n()
 const workbench = useWorkbench()
 const comments = useCanvasComments()!
-const { preview, widgetTreeResult, selectedVariant } = workbench
+const { preview, widgetTreeResult, selectedVariant, selectedLocale, selectedViewportId, selectedThemeId } = workbench
 
 const thread = computed(() => comments.threadById.value.get(props.threadId))
 const placement = computed(() => comments.pinStatusById.value.get(props.threadId))
@@ -183,6 +185,30 @@ function switchVariant(name: string): void {
 	selectedVariant.value = name
 }
 
+/**
+ * "Open in current context" (Rule 01a1170f-c11d): when an inbox link switched the Preview to this
+ * thread's recorded context, the reader's own context comes back with the thread still open. It
+ * changes the Preview render context only, never the chrome (Rule 01a118a1-9e11).
+ */
+const contextBefore = computed(() => {
+	const saved = workbench.contextBeforeThread.value
+	if (saved?.threadId !== props.threadId) return undefined
+	const shows = (selection: Readonly<{ locale: string; viewport: string; theme: string }>) =>
+		effectiveRenderContext(workbench.workspace.value?.resource, workbench.discoveredLocales.value, selection)
+	const was = shows(saved)
+	const now = shows({ locale: selectedLocale.value, viewport: selectedViewportId.value, theme: selectedThemeId.value })
+	return was.locale !== now.locale || was.viewportId !== now.viewportId || was.themeId !== now.themeId ? saved : undefined
+})
+function openInCurrentContext(): void {
+	const saved = contextBefore.value
+	if (!saved) return
+	selectedLocale.value = saved.locale
+	selectedViewportId.value = saved.viewport
+	selectedThemeId.value = saved.theme
+	workbench.contextBeforeThread.value = undefined
+	comments.announce(t('threadContext.announceCurrent'))
+}
+
 // Focus lands in the bubble on open; Escape returns it to the pin (the comments layer does that).
 const root = ref<HTMLElement>()
 onMounted(() => {
@@ -244,6 +270,25 @@ watch(() => props.threadId, () => {
         :aria-label="t('common.close')"
         data-thread-close
         @click="comments.close()"
+      />
+    </div>
+
+    <div
+      v-if="thread.renderContext"
+      class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted"
+    >
+      <RecordedContextLabel :context="thread.renderContext" />
+      <UButton
+        v-if="contextBefore"
+        color="neutral"
+        variant="link"
+        size="xs"
+        class="p-0"
+        icon="i-lucide-undo-2"
+        :label="t('threadContext.openInCurrent')"
+        :title="t('threadContext.openInCurrentHint')"
+        data-thread-open-current
+        @click="openInCurrentContext"
       />
     </div>
 

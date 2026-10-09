@@ -132,6 +132,11 @@ watch(stateQuery, (query) => {
 	})
 })
 
+// The reader's context from before an inbox link is offered back only while that thread stays open.
+watch(thread, (id) => {
+	if (workbench.contextBeforeThread.value && workbench.contextBeforeThread.value.threadId !== id) workbench.contextBeforeThread.value = undefined
+})
+
 // A deep-linked thread also shows the Comments tab on desktop, beside its pin and bubble.
 let openedThread: string | undefined
 watch([thread, reviews], ([threadId]) => {

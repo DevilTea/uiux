@@ -1,6 +1,6 @@
 import type { ViewResource } from '../../src/domain/views/schema'
 import type { WorkspaceManifest } from '../../src/domain/workspace/schema'
-import type { ReviewAnchor, ReviewDisplayHint, ReviewResolution } from '../../src/domain/reviews/schema'
+import type { ReviewAnchor, ReviewDisplayHint, ReviewRenderContext, ReviewResolution } from '../../src/domain/reviews/schema'
 
 export type Diagnostic = Readonly<{ code: string; path: string; message: string }>
 
@@ -44,6 +44,8 @@ export type ReviewSummary = Readonly<{
 		variantNames?: readonly string[]
 		/** Non-authoritative pin placement, normalized 0..1 within the anchored Widget's rect. */
 		displayHint?: ReviewDisplayHint
+		/** The Locale, viewport and theme the thread records (schemaVersion >= 4, Widget arm only); absent means unknown. */
+		renderContext?: ReviewRenderContext
 		status?: 'open' | 'ready-for-review' | 'resolved'
 		/** Derived from the final lifecycle event while resolved. */
 		resolution?: ReviewResolution

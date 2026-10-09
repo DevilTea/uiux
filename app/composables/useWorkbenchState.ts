@@ -1,6 +1,6 @@
 import { computed, ref, shallowRef } from 'vue'
 import { useI18n } from '#imports'
-import { deriveRenderContextOptions } from '../../src/preview/render-context-options'
+import { deriveRenderContextOptions, workspaceRenderContextKeys, type RenderContextKeys } from '../../src/preview/render-context-options'
 import { deriveWidgetTree, findWidgetInTree, flattenWidgetTree, type WidgetTreeNode } from '../../src/preview/widget-tree'
 import { describeFetchError } from '../utils/fetch-error'
 import { useUiuxClient } from './useUiuxClient'
@@ -82,6 +82,21 @@ export function createWorkbenchState() {
 		selectedViewportId: selectedViewportId.value,
 		selectedThemeId: selectedThemeId.value,
 	}))
+
+	/**
+	 * The Workspace-local render-context keys (Clause 01a11e0d-d2d0) that thread capture, inbox
+	 * links and the stale-key notice check against; `undefined` until the manifest is read.
+	 */
+	const renderContextKeys = computed<RenderContextKeys | undefined>(() => workspace.value
+		? workspaceRenderContextKeys(workspace.value.resource, discoveredLocales.value)
+		: undefined)
+
+	/**
+	 * The reader's own Preview context from before an inbox link applied a thread's recorded one,
+	 * so the thread header can offer to open the thread in that context instead (Rule 01a1170f-c11d).
+	 * Never the chrome language or theme (Rule 01a118a1-9e11).
+	 */
+	const contextBeforeThread = ref<Readonly<{ threadId: string; locale: string; viewport: string; theme: string }>>()
 
 	const currentActiveContext = computed(() => {
 		if (!selectedView.value) return undefined
@@ -264,6 +279,8 @@ export function createWorkbenchState() {
 		localeCount,
 		checkCount,
 		contextOptions,
+		renderContextKeys,
+		contextBeforeThread,
 		currentActiveContext,
 		widgetTreeResult,
 		selectedWidgetNode,

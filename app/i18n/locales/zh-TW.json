@@ -2084,5 +2084,19 @@
     "reference": "Spec 參照無效。",
     "time": "時間格式不正確。",
     "revision": "修訂紀錄無效。"
+  },
+  "threadContext": {
+    "srPrefix": "記錄的預覽情境：",
+    "label": "記錄的預覽情境：{context}",
+    "missingSr": "（此 Workspace 已沒有）",
+    "openInCurrent": "以目前情境開啟",
+    "openInCurrentHint": "改用你自己的預覽情境顯示此討論串，而非它記錄的情境",
+    "announceCurrent": "已改用你目前的預覽情境顯示此討論串。",
+    "noticeTitle": "此討論串記錄的情境有部分已不存在",
+    "missing": {
+      "locale": "Locale {key} 已不存在，改為顯示預設 Locale。",
+      "viewportId": "檢視區 {key} 已不存在，改為顯示預設檢視區。",
+      "themeId": "主題 {key} 已不存在，改為顯示預設主題。"
+    }
   }
 }
