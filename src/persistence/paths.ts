@@ -32,7 +32,8 @@ export const WORKSPACE_CHECKPOINTS_DIRECTORY = `${WORKSPACE_DATA_DIRECTORY.works
 
 const VIEW_FILE_SUFFIX = '.view.json'
 const FLOW_FILE_SUFFIX = '.flow.json'
-const REVIEW_FILE_SUFFIX = '.review.json'
+/** The suffix of a Review thread file in `reviews/`. */
+export const REVIEW_FILE_SUFFIX = '.review.json'
 const ASSET_METADATA_FILENAME = 'asset.json'
 
 /** The identity of one versioned resource: Version history records Contract 01a11a5e-1fc4-7bf0-a402-61c345f454c2. */

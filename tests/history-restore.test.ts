@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -246,6 +246,40 @@ describe('restoring a View (Scenario 01a11a5e-9106-73c2-b51b-107557aa88e8)', { t
 		const again = await restore(ctx, EDITOR, { versionId: earlier, resource: { kind: 'view', key: VIEW_ID }, expectedRevision: null })
 		expect(again).toEqual({ status: 'conflict', kind: 'view', key: VIEW_ID, currentRevision: await viewRevision(ctx) })
 	})
+
+	it('takes the version\'s Decisions only when it re-creates the View; an existing View without Decisions keeps none (owner ruling 1 of discussioncomment-18837266)', async () => {
+		const ctx = await fixture()
+		await addDecidedDecision(ctx)
+		const withDecision = await checkpoint(ctx, 'With a Decision')
+		const path = join(ctx.root, viewRelativePath(VIEW_ID))
+		const file = JSON.parse(await readFile(path, 'utf8')) as { spec: Record<string, unknown> }
+		const { decisions: _decisions, ...specWithout } = file.spec
+		void _decisions
+		// A hand edit dropped the Decisions member: the View exists, so it keeps none.
+		await writeFile(path, `${JSON.stringify({ ...file, spec: specWithout })}\n`)
+		const kept = await restore(ctx, EDITOR, { versionId: withDecision, resource: { kind: 'view', key: VIEW_ID }, expectedRevision: await viewRevision(ctx) })
+		expect(kept, JSON.stringify(kept)).toMatchObject({ status: 'updated' })
+		expect((await ctx.persistence.views.read(VIEW_ID))!.resource.spec.decisions).toEqual([])
+
+		await rm(path)
+		const recreated = await restore(ctx, EDITOR, { versionId: withDecision, resource: { kind: 'view', key: VIEW_ID }, expectedRevision: null })
+		expect(recreated).toMatchObject({ status: 'created' })
+		expect((await ctx.persistence.views.read(VIEW_ID))!.resource.spec.decisions.map(decision => decision.id)).toEqual([DECISION_ID])
+	})
+
+	it('refuses, as blocked with diagnostics, to replace a current file that is not readable JSON', async () => {
+		const ctx = await fixture()
+		const earlier = await checkpoint(ctx, 'Readable')
+		const path = join(ctx.root, viewRelativePath(VIEW_ID))
+		await writeFile(path, '{ "id": "not closed"\n')
+		const current = await viewRevision(ctx)
+
+		const outcome = await restore(ctx, EDITOR, { versionId: earlier, resource: { kind: 'view', key: VIEW_ID }, expectedRevision: current })
+		expect(outcome).toMatchObject({ status: 'blocked', kind: 'view', key: VIEW_ID, code: 'persistence.invalid_json', diagnostics: [expect.objectContaining({ code: 'persistence.invalid_json' })] })
+		const http = await restoreResourceVersionForHttp(scoped(ctx.app, EDITOR), earlier, { resource: { kind: 'view', key: VIEW_ID }, expectedRevision: current })
+		expect(http.status).toBe(422)
+		expect(await readFile(path, 'utf8')).toBe('{ "id": "not closed"\n')
+	})
 })
 
 describe('restoring every other kind', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
@@ -284,7 +318,9 @@ describe('restoring every other kind', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS 
 		expect(replaced.status).toBe('updated')
 
 		const outcome = await restore(ctx, EDITOR, { versionId: earlier, resource: { kind: 'asset', key: ASSET_ID }, expectedRevision: (replaced as { revision: string }).revision })
-		expect(outcome).toMatchObject({ status: 'updated', kind: 'asset', key: ASSET_ID, revision: (first as { revision: string }).revision })
+		expect(outcome).toMatchObject({ status: 'updated', kind: 'asset', key: ASSET_ID, revision: (first as { revision: string }).revision, diagnostics: [] })
+		// The replaced content file is gone: the directory holds exactly the restored pair.
+		expect((await readdir(join(ctx.root, 'assets', ASSET_ID))).sort()).toEqual(['asset.json', 'logo.png'])
 		const asset = (await ctx.persistence.assets.read(ASSET_ID))!
 		expect(asset.resource.metadata).toEqual({ id: ASSET_ID, name: 'Logo', contentFilename: 'logo.png', mediaType: 'image/png' })
 		expect([...asset.resource.content]).toEqual([...PNG, 1])

@@ -56,6 +56,9 @@ export const IMPACT_CATEGORIES: readonly ImpactCategory[] = Object.freeze([
 	'evidence_stale',
 ])
 
+/** How deep the analysis follows nested JSON, so malformed input never exhausts the stack. */
+const MAX_DEPTH = 256
+
 /** The fallback Locale when the manifest names none, as the Preview and Evidence freshness assume. */
 const DEFAULT_LOCALE_FALLBACK = 'en-US'
 
@@ -144,9 +147,10 @@ export function bindingReferences(view: unknown): readonly BindingReference[] {
 	const references: BindingReference[] = []
 	const record = asRecord(view)
 	if (!record) return references
-	const visit = (value: unknown, pointer: string): void => {
+	const visit = (value: unknown, pointer: string, depth: number): void => {
+		if (depth > MAX_DEPTH) return
 		if (Array.isArray(value)) {
-			value.forEach((item, index) => visit(item, `${pointer}/${index}`))
+			value.forEach((item, index) => visit(item, `${pointer}/${index}`, depth + 1))
 			return
 		}
 		const object = asRecord(value)
@@ -155,10 +159,10 @@ export function bindingReferences(view: unknown): readonly BindingReference[] {
 			const target = object[binding]
 			if (typeof target === 'string' && target.length > 0) references.push({ binding, target, pointer })
 		}
-		for (const key of Object.keys(object)) visit(object[key], `${pointer}/${escapePointer(key)}`)
+		for (const key of Object.keys(object)) visit(object[key], `${pointer}/${escapePointer(key)}`, depth + 1)
 	}
-	visit(record.ir, '/ir')
-	visit(record.variants, '/variants')
+	visit(record.ir, '/ir', 0)
+	visit(record.variants, '/variants', 0)
 	return references
 }
 
@@ -317,13 +321,20 @@ function stalenessContext(workspace: ImpactWorkspace): EvidenceStalenessContext 
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
-/** Every Widget id in a View's IR (the RootShell `root` included), following each node's `slots`. */
+/**
+ * Every Widget id in a View's IR (the RootShell `root` included), following each node's `slots`.
+ * A node counts as the Preview's widget tree counts it (`deriveWidgetTree` in
+ * `src/preview/widget-tree.ts`): it needs a non-empty string `id` and `type`, and a node without
+ * them is dropped with its whole subtree. Unlike the Preview, nodes deeper than the depth bound are
+ * not followed, so malformed input never exhausts the stack.
+ */
 export function widgetIds(view: unknown): ReadonlySet<string> {
 	const ids = new Set<string>()
 	const visit = (value: unknown, depth: number): void => {
 		const node = asRecord(value)
-		if (!node || depth > 256) return
-		if (typeof node.id === 'string') ids.add(node.id)
+		if (!node || depth > MAX_DEPTH) return
+		if (typeof node.id !== 'string' || node.id.length === 0 || typeof node.type !== 'string' || node.type.length === 0) return
+		ids.add(node.id)
 		const slots = asRecord(node.slots)
 		if (!slots) return
 		for (const children of Object.values(slots)) {

@@ -15,7 +15,7 @@ import { HostHistoryError } from '../../persistence/history/host-store'
 import { versionResourcesFromSnapshot } from '../../persistence/history/snapshot'
 import { mergeTimeline } from '../../persistence/history/timeline'
 import { readVersionBlobUnlocked } from '../../persistence/history/version-blobs'
-import { assetMetadataRelativePath, LEGACY_LAYOUT } from '../../persistence/paths'
+import { assetMetadataRelativePath, LEGACY_LAYOUT, REVIEW_FILE_SUFFIX, WORKSPACE_DATA_DIRECTORY } from '../../persistence/paths'
 import type { ResourceRevision } from '../dto/revisions'
 import type { HistoryStoreSource } from './history-diff'
 
@@ -218,11 +218,11 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 
 	/** Every Review thread file, decoded leniently: the analysis only follows what it can read. */
 	async function readReviewsUnlocked(): Promise<readonly unknown[]> {
-		const entries = await persistence.listDirectoryUnlocked('reviews')
+		const entries = await persistence.listDirectoryUnlocked(WORKSPACE_DATA_DIRECTORY.reviews)
 		const reviews: unknown[] = []
 		for (const entry of entries ?? []) {
-			if (!entry.isFile() || !entry.name.endsWith('.review.json')) continue
-			const bytes = await persistence.readOptionalBytesUnlocked(`reviews/${entry.name}`)
+			if (!entry.isFile() || !entry.name.endsWith(REVIEW_FILE_SUFFIX)) continue
+			const bytes = await persistence.readOptionalBytesUnlocked(`${WORKSPACE_DATA_DIRECTORY.reviews}/${entry.name}`)
 			const value = bytes ? parseJson(bytes) : undefined
 			if (value !== undefined) reviews.push(value)
 		}
@@ -288,6 +288,10 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 				case 'workspace.migration_required':
 				case 'workspace.schema_unsupported':
 					return { status: 'blocked', kind: target.kind, key: target.key, code: error.code, message: error.message, diagnostics: error.diagnostics.length > 0 ? error.diagnostics : [{ code: error.code, path: '/schemaVersion', message: error.message }] }
+				// The target's current file is not readable JSON, so its identity cannot be checked before
+				// it is replaced, as for an authoring write; nothing was written.
+				case 'persistence.invalid_json':
+					return { status: 'blocked', kind: target.kind, key: target.key, code: error.code, message: `The current ${target.kind} ${target.key} is not readable JSON, so it cannot be replaced by a restore. ${error.message}`, diagnostics: error.diagnostics.length > 0 ? error.diagnostics : [{ code: error.code, path: '/resource', message: error.message }] }
 				case 'persistence.path_rejected':
 				case 'persistence.identity_mismatch':
 					if (error.diagnostics.length > 0 || error.code === 'persistence.identity_mismatch')
@@ -390,12 +394,15 @@ function decodeRestored(target: Target, files: ReadonlyMap<string, Uint8Array>):
 
 /** Rules 01a11a5e-1645-… and 01a11a5e-15e9-…: what a View and a settings restore keep from the current resource. */
 function compose(target: Target, restored: unknown, currentFiles: ReadonlyMap<string, Uint8Array>): RestoredResource {
+	const exists = currentFiles.size > 0
 	const current = target.kind === 'asset' || currentFiles.size !== 1 ? undefined : parseJson([...currentFiles.values()][0]!)
-	if (target.kind === 'view' && isRecord(restored)) {
+	if (target.kind === 'view' && isRecord(restored) && isRecord(restored.spec) && exists) {
+		// An existing View keeps its current Decisions, none when its file has none or cannot be
+		// read. Only a re-created View (owner ruling 1 of
+		// https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18837266) keeps the version's.
 		const currentSpec = isRecord(current) && isRecord(current.spec) ? current.spec : undefined
-		// A re-created View has no current Decisions, so it keeps the version's.
-		if (isRecord(restored.spec) && currentSpec && Object.hasOwn(currentSpec, 'decisions'))
-			return { ...restored, spec: { ...restored.spec, decisions: currentSpec.decisions } } as unknown as ViewResource
+		const decisions = currentSpec && Array.isArray(currentSpec.decisions) ? currentSpec.decisions : []
+		return { ...restored, spec: { ...restored.spec, decisions } } as unknown as ViewResource
 	}
 	if (target.kind === 'workspace' && isRecord(restored) && isRecord(current) && Object.hasOwn(current, 'schemaVersion'))
 		return { ...restored, schemaVersion: current.schemaVersion } as unknown as WorkspaceManifest

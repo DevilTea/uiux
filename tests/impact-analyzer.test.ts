@@ -49,8 +49,29 @@ function thread(id: string, anchor: unknown, extra: Readonly<Record<string, unkn
 
 describe('helpers', () => {
 	it('collects Widget ids through slots, the RootShell included', () => {
-		expect([...widgetIds(view([{ id: 'a', slots: { body: [{ id: 'b' }, { id: 'c', slots: { x: [{ id: 'd' }] } }] } }]))].sort()).toEqual(['a', 'b', 'c', 'd', 'root'])
+		expect([...widgetIds(view([{ type: 'Panel', id: 'a', slots: { body: [{ type: 'Text', id: 'b' }, { type: 'Panel', id: 'c', slots: { x: [{ type: 'Text', id: 'd' }] } }] } }]))].sort()).toEqual(['a', 'b', 'c', 'd', 'root'])
 		expect([...widgetIds(undefined)]).toEqual([])
+	})
+
+	it('counts Widgets as the Preview widget tree does: a node without a string id and type is dropped with its subtree', () => {
+		const ids = widgetIds(view([
+			{ id: 'untyped', slots: { body: [{ type: 'Text', id: 'under-untyped' }] } },
+			{ type: 'Text', id: '' },
+			{ type: 'Panel', id: 'kept', slots: { body: [{ type: 'Text', id: 'child' }, 'not a node'] } },
+		]))
+		expect([...ids].sort()).toEqual(['child', 'kept', 'root'])
+		expect([...widgetIds({ ir: { id: 'root', slots: { content: [{ type: 'Text', id: 'orphan' }] } } })]).toEqual([])
+	})
+
+	it('stops following nested JSON at the depth bound instead of exhausting the stack', () => {
+		let deep: Record<string, unknown> = { $i18n: 'deep' }
+		for (let index = 0; index < 100_000; index += 1) deep = { nested: deep }
+		const value = view([{ type: 'Text', id: 'shallow', config: { label: { $i18n: 'shallow' }, deep } }])
+		expect(() => bindingReferences(value)).not.toThrow()
+		expect(bindingReferences(value).map(reference => reference.target)).toEqual(['shallow'])
+		let tree: Record<string, unknown> = { type: 'Text', id: 'leaf' }
+		for (let index = 0; index < 100_000; index += 1) tree = { type: 'Panel', id: `n${index}`, slots: { body: [tree] } }
+		expect(() => widgetIds({ ir: tree })).not.toThrow()
 	})
 
 	it('finds $i18n and $asset bindings in the IR and Variants with their pointers', () => {
@@ -120,7 +141,7 @@ describe('analyzeImpact', () => {
 			steps: { [STEP]: { target: { viewId }, transitions: widgets.map(widgetId => ({ trigger: { widgetId, event: 'click' }, targetStepId: STEP })) } },
 		})
 		const before = workspace({ flows: new Map([[FLOW, flow(['pay'])]]) })
-		const viewChanged = withResource(before, { kind: 'view', key: VIEW }, view([{ id: 'cancel' }]), 'r_view_2')
+		const viewChanged = withResource(before, { kind: 'view', key: VIEW }, view([{ type: 'Button', id: 'cancel' }]), 'r_view_2')
 		expect(analyzeImpact(before, viewChanged)).toEqual([{ category: 'flow_step_widget_missing', flowId: FLOW, stepId: STEP, viewId: VIEW, widgetIds: ['pay'] }])
 		const flowChanged = withResource(before, { kind: 'flow', key: FLOW }, flow(['pay', 'gone', 'also-gone']), 'r_flow_2')
 		expect(analyzeImpact(before, flowChanged)).toEqual([{ category: 'flow_step_widget_missing', flowId: FLOW, stepId: STEP, viewId: VIEW, widgetIds: ['also-gone', 'gone'] }])
@@ -135,14 +156,14 @@ describe('analyzeImpact', () => {
 			history: [{ id: '88888888-8888-4888-8888-888888888888', kind: 'lifecycle', from: 'open', to: 'ready-for-review', submissionId: SUBMISSION }],
 		})
 		const current = workspace({ reviews: [submitted('r_view_1')] })
-		const changed = withResource(current, { kind: 'view', key: VIEW }, view([{ id: 'pay' }]), 'r_view_2')
+		const changed = withResource(current, { kind: 'view', key: VIEW }, view([{ type: 'Button', id: 'pay' }]), 'r_view_2')
 		expect(analyzeImpact(current, changed)).toEqual([{ category: 'submission_revision_not_current', reviewId: THREAD, submissionId: SUBMISSION, resource: { kind: 'view', key: VIEW }, revision: 'r_view_1' }])
 		const old = workspace({ reviews: [submitted('r_view_0')] })
-		const back = withResource(old, { kind: 'view', key: VIEW }, view([{ id: 'pay' }]), 'r_view_0')
+		const back = withResource(old, { kind: 'view', key: VIEW }, view([{ type: 'Button', id: 'pay' }]), 'r_view_0')
 		expect(analyzeImpact(old, back)).toEqual([{ category: 'submission_revision_current', reviewId: THREAD, submissionId: SUBMISSION, resource: { kind: 'view', key: VIEW }, revision: 'r_view_0' }])
 		// Open and resolved threads are not ready for review: their submissions are history.
 		const open = workspace({ reviews: [{ ...submitted('r_view_1'), status: 'open' }] })
-		expect(analyzeImpact(open, withResource(open, { kind: 'view', key: VIEW }, view([{ id: 'pay' }]), 'r_view_2'))).toEqual([])
+		expect(analyzeImpact(open, withResource(open, { kind: 'view', key: VIEW }, view([{ type: 'Button', id: 'pay' }]), 'r_view_2'))).toEqual([])
 	})
 
 	it('lists removed viewport and theme keys with the threads whose render context names them', () => {
