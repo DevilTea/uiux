@@ -158,6 +158,25 @@ export type WorkspaceMigrationPlanResult = Readonly<{
 	steps: readonly string[]
 }>
 
+export type WorkspaceMigrationResult = Readonly<{ fromVersion: number; version: number; revision: ResourceRevision; changedFiles: readonly string[]; steps: readonly string[] }>
+
+/**
+ * Work a caller (`uiux migrate`) runs under the migration's exclusive lock, outside every step:
+ *
+ * - `beforeSteps` runs once the Workspace is known to need migration, before any step runs (in
+ *   memory or on disk). Whatever it writes is not part of the migration, so a migration that fails
+ *   later leaves it in place; when it throws, no step runs and the migration is refused.
+ * - `afterCommit` runs once the migration committed and the manifest reached the current version.
+ *   The migration is committed by then, so it must not throw: an error it lets escape is reported
+ *   as the migration's own failure.
+ *
+ * Neither runs when there is nothing to migrate.
+ */
+export type WorkspaceMigrationHooks = Readonly<{
+	beforeSteps?(plan: Readonly<{ fromVersion: number; toVersion: number }>): Promise<void>
+	afterCommit?(result: WorkspaceMigrationResult): Promise<void>
+}>
+
 export type AtomicReviewViewPromotionCasInput = Readonly<{
 	reviewId: string
 	expectedReviewRevision: ResourceRevision
@@ -296,9 +315,9 @@ export class FileNativePersistence {
 	}
 
 	/** The only operation that applies injected Workspace schema migrations. */
-	async migrateWorkspace(): Promise<Readonly<{ fromVersion: number; version: number; revision: ResourceRevision; changedFiles: readonly string[]; steps: readonly string[] }>> {
+	async migrateWorkspace(hooks: WorkspaceMigrationHooks = {}): Promise<WorkspaceMigrationResult> {
 		return this.withLock(async () => {
-			const planned = await this.planWorkspaceMigrationUnlocked()
+			const planned = await this.planWorkspaceMigrationUnlocked(hooks.beforeSteps)
 			if (planned.steps.length === 0)
 				return { fromVersion: planned.fromVersion, version: planned.toVersion, revision: planned.revision, changedFiles: [], steps: [] }
 
@@ -312,17 +331,19 @@ export class FileNativePersistence {
 			const finalInspection = inspectWorkspaceManifest(finalManifest, this.schemaPolicy)
 			if (finalInspection.state !== 'current')
 				throw new PersistenceError('workspace.migration_failed', 'Workspace migration transaction completed without reaching the current policy version.', { diagnostics: finalInspection.diagnostics })
-			return {
+			const result: WorkspaceMigrationResult = {
 				fromVersion: planned.fromVersion,
 				version: finalInspection.version,
 				revision: revisionForBytes(manifestBytes),
 				changedFiles,
 				steps: planned.steps,
 			}
+			await hooks.afterCommit?.(result)
+			return result
 		})
 	}
 
-	private async planWorkspaceMigrationUnlocked(): Promise<Readonly<{
+	private async planWorkspaceMigrationUnlocked(beforeSteps?: WorkspaceMigrationHooks['beforeSteps']): Promise<Readonly<{
 		fromVersion: number
 		toVersion: number
 		revision: ResourceRevision
@@ -339,6 +360,7 @@ export class FileNativePersistence {
 			throw new PersistenceError('workspace.manifest_missing', 'Cannot migrate a Workspace without .uiux/workspace.json.', { diagnostics: read.diagnostics })
 		if (read.inspection.state === 'current')
 			return { fromVersion: read.inspection.version, toVersion: read.inspection.version, revision: read.revision, steps: [], changes: [], initialSnapshot: new Map() }
+		await beforeSteps?.({ fromVersion: read.inspection.version, toVersion: this.schemaPolicy.currentVersion })
 		const initialSnapshot = await this.scanCanonicalSnapshotUnlocked()
 		const { snapshot, steps: stepIds } = await applyMigrationPlan(initialSnapshot, read.inspection.migrationPlan, this.schemaPolicy)
 		return {

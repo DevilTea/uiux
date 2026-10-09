@@ -7,15 +7,17 @@ import {
 	BASELINE_CHECKPOINT_NAME,
 	HISTORY_SCHEMA_VERSION,
 	HOST_PRUNE_INTERVAL_MS,
+	migrationCheckpointName,
 } from '../../domain/history/constants'
-import type { CheckpointRecord, HistoryActor, HistoryResourceEntry, HistoryWriteEvent, HostVersionRecord } from '../../domain/history/schema'
+import type { HistoryActor, HistoryResourceEntry, HistoryWriteEvent, HostVersionRecord } from '../../domain/history/schema'
 import { resourceIdentityKey } from '../../domain/history/summary'
 import type { CanonicalResourceBefore, CanonicalResourceChange, CanonicalWriteObserver, FileNativePersistence } from '../../persistence/file-native'
 import type { CheckpointStore } from '../../persistence/history/checkpoint-store'
-import { HostHistoryError, type HostHistoryStore, type OpenAutosaveJournal } from '../../persistence/history/host-store'
+import { HostHistoryError, type HostHistoryStore, type HostVersionListing, type OpenAutosaveJournal } from '../../persistence/history/host-store'
 import { compareCodeUnits } from '../../persistence/history/order'
 import { pruneHostHistory, type HostPruneResult } from '../../persistence/history/retention'
 import { versionResourcesFromSnapshot } from '../../persistence/history/snapshot'
+import { writeSnapshotCheckpointUnlocked } from '../../persistence/history/snapshot-checkpoint'
 import { mergeTimeline } from '../../persistence/history/timeline'
 import { outsideDesignWriteContext, type DesignWriteContext } from '../../persistence/history/write-context'
 
@@ -69,6 +71,7 @@ export type AutosaveCloseReason =
 	| 'start'
 	| 'drift'
 	| 'recording_gap'
+	| 'migration'
 
 /** What one boundary recorded: the closed autosave and the external version, when either was written. */
 export type HistoryBoundaryReport = Readonly<{ reason: AutosaveCloseReason; autosave?: string; external?: string }>
@@ -118,6 +121,49 @@ export type HistoryRecorderOptions = Readonly<{
 	operationTimeoutMilliseconds?: number
 	log?: (message: string) => void
 }>
+
+/** What `uiux migrate` recorded before its first step. */
+export type MigrationCheckpointReport = Readonly<{
+	/** The id of the pre-migration system Checkpoint. */
+	checkpoint: string
+	/** The boundary taken first: the leftover autosave it closed and the external version it recorded. */
+	boundary: HistoryBoundaryReport
+	/** The file name a corrupt `open.json` was moved to. */
+	quarantined?: string
+}>
+
+/**
+ * History for `uiux migrate` (Rules 01a11a5e-0b23-7d4f-954a-26fcde4a8014 and
+ * 01a11a5e-0422-78fe-b28b-d877417932e9, Clauses 01a1144e-5605-722c-a662-2b483ddaad73 and
+ * 01a11a5e-22ca-756e-8128-8f730ca887c9). Both methods run under the migration's exclusive
+ * persistence lock and outside every step; no server is involved and no observer is attached.
+ */
+export interface MigrationHistoryRecorder {
+	/**
+	 * Before any step: closes a leftover autosave the host journal holds (a server that crashed or
+	 * lost its shutdown), records changes made outside UIUX as an external version, then writes the
+	 * Checkpoint `Before migration to schemaVersion <targetSchemaVersion>` with the actor
+	 * `system:migrate` and the source `cli`. It works while the Workspace needs migration.
+	 */
+	beforeMigrationUnlocked(targetSchemaVersion: number): Promise<MigrationCheckpointReport>
+	/** After the migration committed: records its changes as one `system:migrate` system version and returns its id. */
+	afterMigrationUnlocked(): Promise<string>
+}
+
+export type MigrationHistoryRecorderOptions = Readonly<{
+	persistence: FileNativePersistence
+	/** Opens the history stores; resolves `undefined` when history is disabled, which refuses the migration's history. */
+	stores: () => Promise<HistoryRecorderStores | undefined>
+	clock?: HistoryRecorderClock
+	log?: (message: string) => void
+}>
+
+export function createMigrationHistoryRecorder(options: MigrationHistoryRecorderOptions): MigrationHistoryRecorder {
+	return new AutosaveRecorder(options)
+}
+
+/** Clause 01a11a5e-21c4-79f7-b6f9-4128d842c278: the actor of everything `uiux migrate` records. */
+const MIGRATE_ACTOR: HistoryActor = Object.freeze({ type: 'system', id: 'system:migrate' })
 
 /** How long a timer close that could not take the lock waits before it tries again. */
 const CLOSE_RETRY_MS = 15_000
@@ -174,7 +220,7 @@ class RecorderBusyError extends Error {
 	}
 }
 
-class AutosaveRecorder implements HistoryRecorder {
+class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 	readonly observer: CanonicalWriteObserver
 	private readonly persistence: FileNativePersistence
 	private readonly openStores: HistoryRecorderOptions['stores']
@@ -182,7 +228,7 @@ class AutosaveRecorder implements HistoryRecorder {
 	private readonly operationTimeout: number
 	private readonly log: (message: string) => void
 
-	private phase: 'idle' | 'starting' | 'recording' | 'disabled' | 'stopped' = 'idle'
+	private phase: 'idle' | 'starting' | 'recording' | 'disabled' | 'stopped' | 'migrating' = 'idle'
 	private stopping = false
 	private stores?: HistoryRecorderStores
 	/** The state the timeline explains: the latest version plus the open autosave's events. */
@@ -196,6 +242,8 @@ class AutosaveRecorder implements HistoryRecorder {
 	/** Recorder work in progress, possibly abandoned by a timeout and still running without the lock. */
 	private inFlight?: symbol
 	private journalQueue: Promise<void> = Promise.resolve()
+	/** The pre-migration Checkpoint's time, the earliest a migration's changes can have happened. */
+	private migrationStartedAt?: string
 	private autosaveTimer?: unknown
 	private pruneTimer?: unknown
 
@@ -339,11 +387,14 @@ class AutosaveRecorder implements HistoryRecorder {
 	 * writes that arrive meanwhile wait, up to `persistence.lock_busy`.
 	 */
 	private async startUnlocked(stores: HistoryRecorderStores): Promise<HistoryStartReport> {
-		const { host, checkpoints } = stores
+		const { host } = stores
 		// Owner ruling (https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18832873,
 		// item 2): while the Workspace is not writable (migration required, unsupported schema), skip
-		// the Baseline and write nothing to the host store, so the first start after migration still
-		// finds no host history and creates the Baseline. No design write can happen meanwhile.
+		// the Baseline and write nothing to the host store. No design write can happen meanwhile. The
+		// Baseline then follows on a later start only when the host still has no history at all, which
+		// owner ruling https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18834723
+		// item 2 limits to exactly that case: a real `uiux migrate` records its pre-migration Checkpoint
+		// and a host system version, so after it no Baseline is written.
 		try {
 			await this.persistence.assertWritableUnlocked()
 		}
@@ -351,43 +402,16 @@ class AutosaveRecorder implements HistoryRecorder {
 			this.log(`uiux: history is not recorded while the Workspace is not writable: ${message(error)}`)
 			return { enabled: false }
 		}
-		let journal: OpenAutosaveJournal | undefined
-		let quarantined: string | undefined
-		try {
-			journal = await host.readOpenJournal()
-			// The append that a crash cut short may have been a gap entry (review finding L1).
-			if (journal?.droppedPartialLine) this.gap = true
-		}
-		catch (error) {
-			if (!(error instanceof HostHistoryError) || error.code !== 'history.journal_invalid') throw error
-			quarantined = await host.quarantineOpenJournal(new Date(this.clock.now()))
-			// The quarantined events were never closed into a version: their changes surface as an
-			// external version at the start boundary below, flagged as a recording gap.
-			this.gap = true
-			this.log(`uiux: history moved a corrupt open autosave journal aside as ${quarantined}; its changes are recorded as an external version: ${error.message}`)
-		}
-		const hostListing = await host.listVersions()
-		const timeline = mergeTimeline(hostListing, await checkpoints.listUnlocked())
-		const latest = timeline.versions.at(-1)?.version
-		this.lastAtMs = latest ? Date.parse(latest.at) : 0
-		this.lastHostVersionId = hostListing.records.at(-1)?.id
-		this.expected = latest ? resourceMap(latest.resources) : undefined
+		const { journal, quarantined, hostListing } = await this.loadUnlocked(stores)
 
 		const noHostHistory = hostListing.records.length === 0 && hostListing.invalid.length === 0 && !journal && !quarantined
 			&& (await host.listBlobDigests()).length === 0
 		let baseline: string | undefined
-		if (noHostHistory) baseline = await this.writeBaselineUnlocked(stores, timeline.versions.filter(entry => entry.version.type === 'checkpoint').at(-1)?.version.id)
+		if (noHostHistory) baseline = await this.writeBaselineUnlocked(stores)
 
-		let boundary: HistoryBoundaryReport | undefined
-		if (journal) {
-			const leftover = this.reopenLeftover(journal, hostListing.records.map(record => record.id))
-			// Without a leftover autosave the journal (gap entries, a lone begin, a cut line) is kept
-			// until the start boundary below has recorded its gap; that boundary then clears it.
-			if (leftover) {
-				this.open = leftover
-				boundary = await this.boundaryUnlocked('leftover', LOCK_HELD)
-			}
-		}
+		// Without a leftover autosave the journal (gap entries, a lone begin, a cut line) is kept
+		// until the start boundary below has recorded its gap; that boundary then clears it.
+		let boundary = journal ? await this.closeLeftoverUnlocked(journal, hostListing) : undefined
 		// Rule 01a11a5e-0313-7d86-af79-8eafa1753853: drift detection at server start.
 		if (!boundary && !baseline) boundary = await this.boundaryUnlocked('start', LOCK_HELD)
 
@@ -408,28 +432,119 @@ class AutosaveRecorder implements HistoryRecorder {
 	}
 
 	/**
+	 * Reads the host journal (moving a corrupt one aside) and both stores, and sets the recorded state
+	 * the next boundary compares with: the latest version on the merged timeline.
+	 */
+	private async loadUnlocked(stores: HistoryRecorderStores): Promise<Readonly<{ journal?: OpenAutosaveJournal; quarantined?: string; hostListing: HostVersionListing }>> {
+		const { host, checkpoints } = stores
+		let journal: OpenAutosaveJournal | undefined
+		let quarantined: string | undefined
+		try {
+			journal = await host.readOpenJournal()
+			// The append that a crash cut short may have been a gap entry (review finding L1).
+			if (journal?.droppedPartialLine) this.gap = true
+		}
+		catch (error) {
+			if (!(error instanceof HostHistoryError) || error.code !== 'history.journal_invalid') throw error
+			quarantined = await host.quarantineOpenJournal(new Date(this.clock.now()))
+			// The quarantined events were never closed into a version: their changes surface as an
+			// external version at the next boundary, flagged as a recording gap.
+			this.gap = true
+			this.log(`uiux: history moved a corrupt open autosave journal aside as ${quarantined}; its changes are recorded as an external version: ${error.message}`)
+		}
+		const hostListing = await host.listVersions()
+		const timeline = mergeTimeline(hostListing, await checkpoints.listUnlocked())
+		const latest = timeline.versions.at(-1)?.version
+		this.lastAtMs = latest ? Date.parse(latest.at) : 0
+		this.lastHostVersionId = hostListing.records.at(-1)?.id
+		this.expected = latest ? resourceMap(latest.resources) : undefined
+		return { ...(journal ? { journal } : {}), ...(quarantined ? { quarantined } : {}), hostListing }
+	}
+
+	/** Closes the autosave a leftover journal holds; `undefined` when it holds none (the journal is then kept for the next boundary). */
+	private async closeLeftoverUnlocked(journal: OpenAutosaveJournal, hostListing: HostVersionListing): Promise<HistoryBoundaryReport | undefined> {
+		const leftover = this.reopenLeftover(journal, hostListing.records.map(record => record.id))
+		if (!leftover) return undefined
+		this.open = leftover
+		return this.boundaryUnlocked('leftover', LOCK_HELD)
+	}
+
+	/**
 	 * Rule 01a11a5e-0b79-7920-953b-288cede75df8 and Clause 01a11a5e-22ca-756e-8128-8f730ca887c9: the
 	 * first start on a host with no history for this Workspace records the Baseline Checkpoint. Its
 	 * blobs also go to the host store, which is what marks the host as having history from then on.
 	 * The caller has checked that the Workspace is writable.
 	 */
-	private async writeBaselineUnlocked(stores: HistoryRecorderStores, parentCheckpoint: string | undefined): Promise<string> {
-		const snapshot = versionResourcesFromSnapshot(await this.persistence.scanVersionedSnapshotUnlocked())
-		const record: CheckpointRecord = {
-			historySchemaVersion: HISTORY_SCHEMA_VERSION,
-			id: randomUUID(),
-			type: 'checkpoint',
-			actor: { type: 'system', id: 'system:baseline' },
+	private async writeBaselineUnlocked(stores: HistoryRecorderStores): Promise<string> {
+		const record = await writeSnapshotCheckpointUnlocked({
+			persistence: this.persistence,
+			checkpoints: stores.checkpoints,
+			host: stores.host,
 			at: this.stamp(),
-			workspaceSchemaVersion: await this.persistence.readDecodeSchemaVersionUnlocked(),
-			resources: snapshot.resources,
+			actor: { type: 'system', id: 'system:baseline' },
 			name: BASELINE_CHECKPOINT_NAME,
 			source: 'cli',
-			...(parentCheckpoint ? { parentCheckpoint } : {}),
+		})
+		this.expected = resourceMap(record.resources)
+		return record.id
+	}
+
+	// ── Migration (`uiux migrate`, under the migration's lock) ─────────────────
+
+	async beforeMigrationUnlocked(targetSchemaVersion: number): Promise<MigrationCheckpointReport> {
+		if (this.phase !== 'idle') throw new Error('The migration history recorder runs once, on a recorder that was never started.')
+		this.phase = 'migrating'
+		const stores = await this.openStores()
+		if (!stores) throw new Error('History is disabled, so the pre-migration Checkpoint cannot be written.')
+		this.stores = stores
+		const { journal, quarantined, hostListing } = await this.loadUnlocked(stores)
+		// The journal's leftover autosave first, then changes made outside UIUX, so the Checkpoint
+		// below follows a timeline that explains the state it records.
+		const boundary = (journal ? await this.closeLeftoverUnlocked(journal, hostListing) : undefined)
+			?? await this.boundaryUnlocked('migration', LOCK_HELD)
+		// Clause 01a11a5e-22ca-756e-8128-8f730ca887c9; Clause 01a11a5e-221b-7a04-a6cb-66bc9608c11f: a CLI command records `cli`.
+		const checkpoint = await writeSnapshotCheckpointUnlocked({
+			persistence: this.persistence,
+			checkpoints: stores.checkpoints,
+			host: stores.host,
+			at: this.stamp(),
+			actor: MIGRATE_ACTOR,
+			name: migrationCheckpointName(targetSchemaVersion),
+			source: 'cli',
+		})
+		this.expected = resourceMap(checkpoint.resources)
+		this.migrationStartedAt = checkpoint.at
+		return { checkpoint: checkpoint.id, boundary, ...(quarantined ? { quarantined } : {}) }
+	}
+
+	async afterMigrationUnlocked(): Promise<string> {
+		const stores = this.stores
+		const startedAt = this.migrationStartedAt
+		if (this.phase !== 'migrating' || !stores || !startedAt) throw new Error('The migration system version follows the pre-migration Checkpoint.')
+		const actual = versionResourcesFromSnapshot(await this.persistence.scanVersionedSnapshotUnlocked())
+		for (const [digest, bytes] of actual.blobs) {
+			if (!await stores.host.hasBlob(digest)) await stores.host.putBlob(bytes)
 		}
-		await stores.checkpoints.createUnlocked(record, snapshot.blobs)
-		for (const bytes of snapshot.blobs.values()) await stores.host.putBlob(bytes)
-		this.expected = resourceMap(snapshot.resources)
+		const actualMap = resourceMap(actual.resources)
+		// Rule 01a11a5e-0422-78fe-b28b-d877417932e9: the migration's changes are their own system
+		// version. Migration is not a design operation, so the version carries no write event.
+		const record: HostVersionRecord = {
+			historySchemaVersion: HISTORY_SCHEMA_VERSION,
+			id: randomUUID(),
+			type: 'system',
+			actor: MIGRATE_ACTOR,
+			at: this.stamp(),
+			workspaceSchemaVersion: await this.persistence.readDecodeSchemaVersionUnlocked(),
+			resources: actual.resources,
+			startedAt,
+			netChange: !sameResources(this.expected ?? new Map(), actualMap),
+			events: [],
+			...(this.lastHostVersionId ? { parent: this.lastHostVersionId } : {}),
+		}
+		await stores.host.writeVersion(record)
+		this.lastHostVersionId = record.id
+		this.expected = actualMap
+		this.phase = 'stopped'
 		return record.id
 	}
 
