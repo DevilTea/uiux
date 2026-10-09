@@ -398,7 +398,7 @@ function validateOpenEntry(input: unknown, path: string): readonly Diagnostic[] 
 	if (!entry) return v.diagnostics
 	const allowed = (keys: readonly string[]) => {
 		for (const key of Object.keys(entry))
-			if (!keys.includes(key)) v.issue('schema.unknown_property', `${path}/${key}`, 'Unknown open-autosave entry member.')
+			if (!keys.includes(key)) v.issue('schema.unknown_field', `${path}/${key}`, 'Unknown open-autosave entry member.')
 	}
 	switch (entry.type) {
 		case 'begin':

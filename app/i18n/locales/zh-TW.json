@@ -1949,7 +1949,16 @@
       "unstamped_actor": "版本沒有記錄是誰做的變更。",
       "invalid_system_actor": "版本的系統作者無效。",
       "external_actor_id": "外部變更的作者不能帶有成員 ID。",
-      "invalid_source": "變更來源無效。"
+      "invalid_source": "變更來源無效。",
+      "invalid_open_entry": "進行中自動儲存的一筆項目無效。",
+      "unexpected_file": "版本歷程存放區中有一個檔案不是歷程紀錄。",
+      "record_invalid": "一筆版本歷程紀錄無效。",
+      "record_exists": "已有相同 ID 的版本。",
+      "record_missing": "這個版本不存在。",
+      "journal_invalid": "無法讀取進行中的自動儲存。",
+      "blob_corrupt": "一個已存放的歷程檔案與其內容不符。",
+      "store_unsafe": "這台電腦上的版本歷程存放區無法安全使用。請檢查資料夾權限與連結。",
+      "write_failed": "無法儲存版本歷程，沒有任何內容被變更。"
     },
     "review": {
       "anchor_history_mismatch": "Review 的位置與其歷程不一致。",
