@@ -390,9 +390,11 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 					})
 				}
 				catch (error) {
-					if (copied && error instanceof AccessError)
-						throw new AccessError(error.code, `${error.message} The host history was copied, but the roster was not; run uiux access copy again with --replace.`)
-					throw error
+					if (!copied) throw error
+					// Whatever failed, the host history is already in place: only a rerun with --replace finishes the copy.
+					const hint = 'The host history was copied, but the roster was not; run uiux access copy again with --replace.'
+					if (error instanceof AccessError) throw new AccessError(error.code, `${error.message} ${hint}`)
+					throw new AccessError('access.store_invalid', `Could not write the roster: ${error instanceof Error ? error.message : String(error)}. ${hint}`)
 				}
 				context.out(`Copied ${source.members.length} member(s) and ${source.tokens.length} token(s) from roster ${source.hint} (${sourceRoot}) to roster ${written.file.hint} (${written.file.workspaceRoot}).`)
 				if (copied) {
@@ -433,6 +435,9 @@ async function isRegularFile(path: string): Promise<boolean> {
  */
 async function withSourceLock<Result>(sourceRoot: string, warn: (line: string) => void, operation: () => Promise<Result>): Promise<Result> {
 	if (!(await lstat(join(sourceRoot, '.uiux')).then(stats => stats.isDirectory(), () => false))) return operation()
+	// Not read-only for the source: taking its persistence lock writes the lock file under the source's
+	// `.uiux/` (removed on release), and acquiring the lock runs the source's pending-transaction
+	// recovery, which can change its files to settle a multi-file write it left interrupted.
 	let entered = false
 	try {
 		return await new FileNativePersistence({ root: sourceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).withLock(async () => {

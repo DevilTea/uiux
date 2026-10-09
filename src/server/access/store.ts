@@ -440,7 +440,7 @@ export type HostHistoryCopyResult = Readonly<{
 	files: number
 	/** Versions of the target's own history that `replace` discarded. */
 	discardedVersions: number
-	/** Blobs the copied versions name that the source did not have either. */
+	/** Blobs the copied versions or open-autosave events name that the source did not have either. */
 	missingBlobs: readonly string[]
 }>
 
@@ -452,7 +452,8 @@ export type HostHistoryCopyResult = Readonly<{
  * not copied, and a file removed between listing and reading (pruned) is skipped.
  *
  * The copy is assembled beside the target and checked before it replaces anything: every blob a
- * copied version names must be in the copy (or available elsewhere for the target). A blob the
+ * copied version or open-autosave event names must be in the copy (or available elsewhere for the
+ * target). A blob the
  * copy lacks while the source has it means the copy raced a writer of the source: the copy is
  * refused and removed, so the target is unchanged and a rerun copies a consistent state. A blob the
  * source lacks too is reported in `missingBlobs` and does not refuse the copy: the source history
@@ -509,7 +510,7 @@ export async function copyHostHistory(plan: HostHistoryCopyPlan, options: HostHi
 			else missingBlobs.push(digest)
 		}
 		if (raced.length > 0)
-			throw new AccessError('access.store_invalid', `The host history of ${plan.source.workspaceDir} changed while it was copied (${raced.length} blob(s) its versions name were not copied); nothing was changed. Run uiux access copy again.`)
+			throw new AccessError('access.store_invalid', `The host history of ${plan.source.workspaceDir} changed while it was copied (${raced.length} blob(s) its versions or open autosave name were not copied); nothing was changed. Run uiux access copy again.`)
 		missingBlobs = missingBlobs.sort()
 
 		await options.beforeSwap?.()
@@ -549,9 +550,28 @@ function blobRelativePath(digest: string): string {
 
 const DIGEST = /^sha256:[0-9a-f]{64}$/u
 
-/** Every blob digest the version files under `historyDir/versions` name; unreadable records are left to the store's own checks. */
+/**
+ * Every blob digest named by the version files under `historyDir/versions` and by the open
+ * autosave's events in `historyDir/open.json`; unreadable records and journal lines are left to the
+ * store's own checks.
+ */
 async function referencedBlobDigests(historyDir: string): Promise<Set<string>> {
 	const digests = new Set<string>()
+	const addDigests = (files: unknown) => {
+		if (!files || typeof files !== 'object') return
+		for (const digest of Object.values(files)) if (typeof digest === 'string' && DIGEST.test(digest)) digests.add(digest)
+	}
+	let journal: string | undefined
+	try { journal = await readFile(join(historyDir, 'open.json'), 'utf8') }
+	catch (error) {
+		if (!isNotFound(error)) throw error
+	}
+	for (const line of journal?.split('\n') ?? []) {
+		let entry: unknown
+		try { entry = JSON.parse(line) }
+		catch { continue }
+		if ((entry as { type?: unknown } | null)?.type === 'event') addDigests((entry as { files?: unknown }).files)
+	}
 	const versions = join(historyDir, 'versions')
 	let names: string[]
 	try { names = await readdir(versions) }
@@ -566,11 +586,7 @@ async function referencedBlobDigests(historyDir: string): Promise<Set<string>> {
 		catch { continue }
 		const resources = (record as { resources?: unknown })?.resources
 		if (!Array.isArray(resources)) continue
-		for (const resource of resources) {
-			const files = (resource as { files?: unknown })?.files
-			if (!files || typeof files !== 'object') continue
-			for (const digest of Object.values(files)) if (typeof digest === 'string' && DIGEST.test(digest)) digests.add(digest)
-		}
+		for (const resource of resources) addDigests((resource as { files?: unknown })?.files)
 	}
 	return digests
 }
