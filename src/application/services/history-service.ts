@@ -1,6 +1,4 @@
-import { randomUUID } from 'node:crypto'
-
-import { HISTORY_SCHEMA_VERSION, HISTORY_VERSION_TYPES, type HistorySource, type HistoryVersionType } from '../../domain/history/constants'
+import { HISTORY_VERSION_TYPES, type HistorySource, type HistoryVersionType } from '../../domain/history/constants'
 import { isValidCheckpointNote, normalizeCheckpointName, type CheckpointRecord, type HistoryActor, type HistoryResourceIdentity, type VersionRecord } from '../../domain/history/schema'
 import { resourceIdentityKey, summarizeResourceChanges, type ResourceChangeSummary } from '../../domain/history/summary'
 import { isFullUuid, type Diagnostic } from '../../domain/validation'
@@ -8,7 +6,7 @@ import { PersistenceError } from '../../persistence/errors'
 import type { FileNativePersistence } from '../../persistence/file-native'
 import { HostHistoryError } from '../../persistence/history/host-store'
 import { compareVersionOrder } from '../../persistence/history/order'
-import { versionResourcesFromSnapshot } from '../../persistence/history/snapshot'
+import { writeSnapshotCheckpointUnlocked } from '../../persistence/history/snapshot-checkpoint'
 import { mergeTimeline, pageTimeline, readMergedTimeline, TimelineCursorError, type MergedTimeline, type TimelineVersion } from '../../persistence/history/timeline'
 import { createHistoryDiffService, type HistoryDiffService, type HistoryStoreSource } from './history-diff'
 import type { HistoryRecorder } from './history-recorder'
@@ -193,30 +191,23 @@ export function createHistoryService(
 					return boundaryUnavailable(error)
 				}
 			}
-			const host = await stores.host?.listVersions()
-			const existing = await checkpoints.listUnlocked()
-			const timeline = mergeTimeline(host, existing)
-			const snapshot = versionResourcesFromSnapshot(await persistence.scanVersionedSnapshotUnlocked())
+			const timeline = mergeTimeline(await stores.host?.listVersions(), await checkpoints.listUnlocked())
 			const latest = timeline.versions.at(-1)?.version.at
 			// The recorder takes the later of the newest stored version and every version it knows, so
 			// its own next stamp also follows this Checkpoint.
 			const at = boundary ? boundary.nextVersionAt(latest) : laterThan(new Date().toISOString(), latest)
-			const parentCheckpoint = existing.records.at(-1)?.id
-			const note = command.note === undefined || command.note === '' ? undefined : command.note
-			const record: CheckpointRecord = {
-				historySchemaVersion: HISTORY_SCHEMA_VERSION,
-				id: randomUUID(),
-				type: 'checkpoint',
-				actor: command.actor,
+			// The snapshot, the schema version and `parentCheckpoint` are the shared Checkpoint writer's
+			// (the Baseline and `uiux migrate` use it too); the blobs stay in the artifact store only,
+			// since the boundary above already left the recorder's state equal to these files.
+			const record = await writeSnapshotCheckpointUnlocked({
+				persistence,
+				checkpoints,
 				at,
-				workspaceSchemaVersion: await persistence.readDecodeSchemaVersionUnlocked(),
-				resources: snapshot.resources,
+				actor: command.actor,
 				name: name!,
-				...(note === undefined ? {} : { note }),
+				...(command.note === undefined || command.note === '' ? {} : { note: command.note }),
 				source: command.source,
-				...(parentCheckpoint ? { parentCheckpoint } : {}),
-			}
-			await checkpoints.createUnlocked(record, snapshot.blobs)
+			})
 			return { status: 'created', versionId: record.id, at: record.at, resources: record.resources.length }
 		})
 	}
