@@ -14,6 +14,7 @@ import {
 	type ReviewAnchor,
 	type ReviewDisplayHint,
 	type ReviewEvidenceRef,
+	type ReviewRenderContext,
 	type ReviewResourceRevision,
 } from '../domain/reviews/schema'
 import type { DecisionOutcome } from '../domain/spec/schema'
@@ -155,11 +156,20 @@ const reviewDisplayHintSchema = z.object({
 	pin: z.object({ x: z.number(), y: z.number() }).strict(),
 }).strict()
 
+// The render context a Widget thread was raised in. Shape details and key existence in the
+// Workspace are the service's diagnostics.
+const reviewRenderContextSchema = z.object({
+	locale: z.string().optional(),
+	viewportId: z.string().optional(),
+	themeId: z.string().optional(),
+}).strict()
+
 const createReviewThreadHttpSchema = z.object({
 	id: z.string().min(1).optional(),
 	anchor: reviewAnchorSchema,
 	variantNames: z.array(z.string()).optional(),
 	displayHint: reviewDisplayHintSchema.optional(),
+	renderContext: reviewRenderContextSchema.optional(),
 }).strict()
 
 const appendReviewMessageHttpSchema = z.object({
@@ -176,6 +186,8 @@ const reanchorReviewThreadHttpSchema = z.object({
 	anchor: reviewAnchorSchema,
 	variantNames: z.array(z.string()).optional(),
 	displayHint: reviewDisplayHintSchema.nullable().optional(),
+	/** An object sets the render context, null clears it, omitted keeps it. */
+	renderContext: reviewRenderContextSchema.nullable().optional(),
 	/** Optional and ignored: the server stamps the actor (warning `auth.actor_ignored`). */
 	actor: reviewActorSchema.optional(),
 	reason: z.string().optional(),
@@ -430,6 +442,7 @@ export async function createReviewThreadForHttp(app: ScopedWorkspaceSession, bod
 		anchor: data.anchor as ReviewAnchor,
 		...(data.variantNames ? { variantNames: data.variantNames } : {}),
 		...(data.displayHint ? { displayHint: data.displayHint as ReviewDisplayHint } : {}),
+		...(data.renderContext ? { renderContext: data.renderContext as ReviewRenderContext } : {}),
 	})
 	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
@@ -459,6 +472,7 @@ export async function reanchorReviewThreadForHttp(app: ScopedWorkspaceSession, r
 		anchor: data.anchor as ReviewAnchor,
 		...(data.variantNames ? { variantNames: data.variantNames } : {}),
 		...(data.displayHint !== undefined ? { displayHint: data.displayHint as ReviewDisplayHint | null } : {}),
+		...(data.renderContext !== undefined ? { renderContext: data.renderContext as ReviewRenderContext | null } : {}),
 		...(data.actor !== undefined ? { actor: data.actor } : {}),
 		...(data.reason ? { reason: data.reason } : {}),
 		...(data.id ? { id: data.id } : {}),

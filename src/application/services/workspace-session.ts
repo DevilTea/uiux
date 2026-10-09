@@ -354,8 +354,9 @@ function summarize(read: Exclude<PointResourceRead, { kind: 'workspace' }>): Res
 }
 
 /**
- * Compact Review summary. `displayHint` sits beside `anchor`, never inside it; `variantNames` is the
- * accepted anchor/Variant scope; `resolution` is derived from the final lifecycle event while resolved.
+ * Compact Review summary. `displayHint` and `renderContext` sit beside `anchor`, never inside it;
+ * `variantNames` is the accepted anchor/Variant scope; `resolution` is derived from the final
+ * lifecycle event while resolved.
  */
 function reviewSummary(thread: ReviewThread): Extract<ResourceDiscoveryItem, { kind: 'review' }>['summary'] {
 	const resolution = deriveReviewResolution(thread)
@@ -363,6 +364,7 @@ function reviewSummary(thread: ReviewThread): Extract<ResourceDiscoveryItem, { k
 		anchor: thread.anchor,
 		...(Array.isArray(thread.variantNames) ? { variantNames: thread.variantNames } : {}),
 		...(thread.displayHint ? { displayHint: thread.displayHint } : {}),
+		...(thread.renderContext ? { renderContext: thread.renderContext } : {}),
 		status: thread.status,
 		...(resolution ? { resolution } : {}),
 		messageCount: thread.messages?.length ?? 0,

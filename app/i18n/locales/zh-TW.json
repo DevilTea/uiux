@@ -1999,6 +1999,7 @@
       "render_context_empty": "呈現情境是空的。",
       "render_context_history_mismatch": "Review 的呈現情境與其歷程不一致。",
       "render_context_invalid_locale": "呈現情境的 Locale 不是有效的語言標籤。",
+      "render_context_unknown_key": "呈現情境指定的 Locale、檢視區或主題不存在於這個 Workspace。",
       "render_context_without_widget": "只有 Widget 上的留言才有呈現情境。",
       "resolution_reason_required": "請說明與哪則留言重複。",
       "resolution_required": "請選擇這個 Review 的解決方式。",
