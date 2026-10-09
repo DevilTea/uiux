@@ -8,5 +8,10 @@
  *
  * The global default stays 5 s so every other suite still fails fast; only these suites opt in, and
  * 20 s is several times the observed worst case, so a real hang still fails.
+ *
+ * The dogfood uiux.v3-to-v4 CLI replay test in `workspace-migration.test.ts` also uses it, per test.
+ * That test runs the CLI three times as real child processes (each bundles its command with esbuild)
+ * plus an fsynced migration transaction. It takes about 0.6 s alone and close to 4 s under CPU and
+ * I/O load.
  */
 export const HEAVY_SERVER_SUITE_TIMEOUT_MS = 20_000
