@@ -3,7 +3,7 @@ Feature: Review desk
   # Test: code@0edbee8 `tests/review-inbox.test.ts#L195` "drops a stale key so it opens with its default, keeps the other members, and reports it for the notice (Rule 01a1170f-c165, Scenario 01a11e0e-4409)". https://github.com/DevilTea/uiux/blob/0edbee80010fb87d3bd052e109605606a3e40cbe/tests/review-inbox.test.ts#L195
   # Test: code@0edbee8 `tests/render-context-options.test.ts#L320` "splits a recorded context into the members that exist and the stale ones, never rebinding (Rule 01a1170f-c165)". https://github.com/DevilTea/uiux/blob/0edbee80010fb87d3bd052e109605606a3e40cbe/tests/render-context-options.test.ts#L320
   # Test: code@7e7dfca `tests/render-context-browser.test.ts#L204` "checks the recorded viewport when the thread is opened: one removed after the inbox loaded opens with the default and a notice". https://github.com/DevilTea/uiux/blob/7e7dfca3c224e0d3e56177b3735f4ff7209d5f98/tests/render-context-browser.test.ts#L204
-  # Status: built as of 7e7dfca for this path, opening from the Reviews inbox, with the recorded keys checked at open time; 01a1170f-c165-7dd4-bc9f-a799f7884f14 stays partly built until activating a muted pin falls back the same way (see its Implementation gaps entry, issue #144).
+  # Status: built as of 7e7dfca for this path, opening from the Reviews inbox, with the recorded keys checked at open time; activating a muted pin falls back the same way as of 9c8a643, so 01a1170f-c165-7dd4-bc9f-a799f7884f14 has no open gap.
   # Note: The decoder keeps a stale key unchanged (01a1170f-baf0-7eea-a904-7367227c10b3 has no open gap since PR #151).
   @spec:id:01a11e0e-4409-7ae2-b94f-22454cd0dca1
   @spec:demonstrates:01a1170f-baf0-7eea-a904-7367227c10b3
