@@ -128,7 +128,13 @@ describe('Review render context in the Workbench (Part 7)', () => {
 			await page.locator('[data-context="locale"]').click()
 			await page.getByRole('option', { name: 'zh-TW' }).click()
 			await expect.poll(() => query(page).locale).toBe('zh-TW')
-			await page.locator('[data-comment-composer] [data-composer-text]').focus()
+			// The Locale list closes with an exit animation, and when it unmounts it returns focus to its
+			// trigger. Focusing the composer before then loses focus to the trigger, and ⌘↵ reopens the list
+			// instead of sending. Wait for the list to go, then confirm focus is in the composer text.
+			await page.getByRole('listbox').waitFor({ state: 'detached' })
+			const composerText = page.locator('[data-comment-composer] [data-composer-text]')
+			await composerText.focus()
+			await expect.poll(() => composerText.evaluate(element => element === document.activeElement)).toBe(true)
 			await page.keyboard.press('ControlOrMeta+Enter')
 			await page.locator('[data-thread-bubble]').waitFor({ timeout: 10_000 })
 
