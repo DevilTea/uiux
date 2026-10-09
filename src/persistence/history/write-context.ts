@@ -25,12 +25,22 @@ const storage = new AsyncLocalStorage<DesignWriteContext>()
 
 /**
  * Runs `operation` with `context` as the current design-write context; nesting replaces it.
- * Asynchronous work scheduled inside (timers included) inherits the context; a recorder that arms
- * timers from a write must not treat their later writes as the same design operation (B3).
+ * Asynchronous work scheduled inside (timers included) inherits the context, so work that must
+ * outlive the design operation, such as the recorder's autosave timers, is scheduled through
+ * {@link outsideDesignWriteContext}.
  */
 export function runWithDesignWriteContext<Result>(context: DesignWriteContext, operation: () => Result): Result {
 	assertDesignWriteContext(context)
 	return storage.run(Object.freeze({ ...context }), operation)
+}
+
+/**
+ * Runs `operation` with no design-write context. Timers and promises created inside do not
+ * inherit the caller's context, so a canonical write they make later is never attributed to the
+ * design operation that happened to schedule them.
+ */
+export function outsideDesignWriteContext<Result>(operation: () => Result): Result {
+	return storage.exit(operation)
 }
 
 /** The design-write context of the running asynchronous call chain, if any. */

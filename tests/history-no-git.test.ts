@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest'
 
 const repositoryRoot = join(import.meta.dirname, '..')
 
-/** Every source file that implements version history (domain, stores, hooks and their server factory). */
-const HISTORY_SOURCES = ['src/domain/history', 'src/persistence/history', 'src/server/history-stores.ts']
+/** Every source file that implements version history (domain, stores, hooks, their server factory and the recorder). */
+const HISTORY_SOURCES = ['src/domain/history', 'src/persistence/history', 'src/server/history-stores.ts', 'src/application/services/history-recorder.ts']
 
 /**
  * Rule 01a11a5e-0539-7a33-a000-55adde1f72b8: history never runs Git, reads `.git`, writes the
@@ -39,6 +39,7 @@ describe('history uses no Git', () => {
 			'src/persistence/history/timeline.ts',
 			'src/persistence/history/retention.ts',
 			'src/server/history-stores.ts',
+			'src/application/services/history-recorder.ts',
 		]))
 		const violations: string[] = []
 		for (const file of files) {

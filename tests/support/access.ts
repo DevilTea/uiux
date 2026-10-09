@@ -4,7 +4,7 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 
 import { createLeaseManager, type LeaseManager } from '../../src/application/access/leases'
 import type { AccessRole, MemberKind, MemberPrincipal } from '../../src/application/access/principal'
-import { createScopedWorkspaceSession, type AccessTransport, type ScopedWorkspaceSession } from '../../src/application/access/scoped-session'
+import { createScopedWorkspaceSession, type AccessTransport, type ScopedSessionOptions, type ScopedWorkspaceSession } from '../../src/application/access/scoped-session'
 import type { WorkspaceApplicationSession } from '../../src/application/services/workspace-session'
 import { createUiuxMcpHttpHandler, principalAuthInfo } from '../../src/mcp/server'
 import { addMember, createToken, findMemberByNickname } from '../../src/server/access/roster'
@@ -36,18 +36,18 @@ export const AGENT_EDITOR = testMember({ nickname: 'claude', kind: 'agent', role
 export function scoped(
 	app: WorkspaceApplicationSession,
 	principal: MemberPrincipal = HUMAN_OWNER,
-	options: Readonly<{ leases?: LeaseManager; transport?: AccessTransport }> = {},
+	options: Readonly<{ leases?: LeaseManager; transport?: AccessTransport; history?: ScopedSessionOptions['history'] }> = {},
 ): ScopedWorkspaceSession {
-	return createScopedWorkspaceSession(app, principal, { transport: options.transport ?? 'http', leases: options.leases ?? createLeaseManager() })
+	return createScopedWorkspaceSession(app, principal, { transport: options.transport ?? 'http', leases: options.leases ?? createLeaseManager(), ...(options.history ? { history: options.history } : {}) })
 }
 
 /** An MCP client connected in-process to the stateless handler as `principal`. */
 export async function connectMcp(
 	app: WorkspaceApplicationSession,
 	principal: MemberPrincipal = AGENT_EDITOR,
-	options: Readonly<{ leases?: LeaseManager }> = {},
+	options: Readonly<{ leases?: LeaseManager; history?: ScopedSessionOptions['history'] }> = {},
 ) {
-	const handler = createUiuxMcpHttpHandler(app, { leases: options.leases ?? createLeaseManager() })
+	const handler = createUiuxMcpHttpHandler(app, { leases: options.leases ?? createLeaseManager(), ...(options.history ? { history: options.history } : {}) })
 	const client = new Client({ name: 'uiux-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto', probe: { timeoutMs: 2_000 } } })
 	const transport = new StreamableHTTPClientTransport(new URL('http://uiux.test/mcp'), {
 		fetch: async (input, init) => handler.fetch(new Request(input, init), { authInfo: principalAuthInfo(principal) }),

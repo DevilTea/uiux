@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 
+import { HISTORY_WRITE_OPERATIONS, type HistoryWriteOperation } from '../../domain/history/constants'
 import type { Diagnostic } from '../../domain/validation'
+import { runWithDesignWriteContext, type DesignWriteContext } from '../../persistence/history/write-context'
 import type { ReviewResolution } from '../../domain/reviews/schema'
 import type { PointResourceKind } from '../dto/point-resources'
 import type { ResourceDiscoveryOutcome } from '../dto/resource-discovery'
@@ -134,7 +136,8 @@ export interface ScopedWorkspaceSession {
 	captureFormalEvidence(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult | AccessRefusal>
 	exportHandoff(command: ExportHandoffCommand): Promise<ExportHandoffResult | AccessRefusal>
 	acquireLeases(input: unknown): AcquireLeasesOutcome
-	releaseLeases(input: unknown): ReleaseLeasesOutcome
+	/** With no `resources`, an Agent's release also closes the autosave it wrote (Rule 01a11a5e-0068-7a4b-b4bc-3cb282b4ae5a). */
+	releaseLeases(input: unknown): Promise<ReleaseLeasesOutcome>
 	listLeases(): readonly PublicLease[]
 	forceReleaseLease(address: unknown): ForceReleaseOutcome
 }
@@ -152,6 +155,8 @@ export type ScopedSessionOptions = Readonly<{
 	transport: AccessTransport
 	leases: LeaseManager
 	now?: () => Date
+	/** The history recorder's `release_lock` boundary; absent where history is not recorded. */
+	history?: Readonly<{ agentReleased(actor: StampedActor): Promise<void> }>
 }>
 
 const SUCCESS = new Set(['created', 'updated'])
@@ -252,6 +257,18 @@ export function createScopedWorkspaceSession(
 		}
 	}
 
+	/**
+	 * The design-write context of one write (recorder seam 6): the server-stamped member actor, the
+	 * transport's source (Clause 01a11a5e-221b-7a04-a6cb-66bc9608c11f: `/api/*` records `workbench`,
+	 * bearer Tokens included, and `/mcp` records `mcp`) and the operation. Only the design
+	 * operations of Clause 01a11a5e-216d-7587-8022-66a66f264eee get one, so Review activity is never
+	 * recorded (Rule 01a11a5e-0873-7976-8a48-a9a1a00e4b6d), and system principals never create events.
+	 */
+	function designWriteContext(operation: AccessOperation): DesignWriteContext | undefined {
+		if (principal.type !== 'member' || !(HISTORY_WRITE_OPERATIONS as readonly string[]).includes(operation)) return undefined
+		return { actor: principalActor(principal), source: transport === 'mcp' ? 'mcp' : 'workbench', operation: operation as HistoryWriteOperation }
+	}
+
 	function withWarnings<R extends object>(result: R, warnings: readonly Diagnostic[]): R & AccessWarnings {
 		return warnings.length > 0 ? { ...result, warnings } : result
 	}
@@ -276,8 +293,9 @@ export function createScopedWorkspaceSession(
 			ticket = begun.ticket
 		}
 		let result: R
+		const context = designWriteContext(operation)
 		try {
-			result = await run()
+			result = context ? await runWithDesignWriteContext(context, run) : await run()
 		}
 		catch (error) {
 			ticket?.abort()
@@ -411,12 +429,15 @@ export function createScopedWorkspaceSession(
 			}
 			return { status: 'acquired', leases: outcome.leases.map(lease => ({ kind: lease.kind, key: lease.key, expiresAt: lease.expiresAt })) }
 		},
-		releaseLeases(input) {
+		async releaseLeases(input) {
 			const denied = authorizeOperation(principal, 'releaseLeases')
 			if (denied || !holder) return refusalFromScope('locks', denied ?? authorizeOperation(principal, 'releaseLeases')!)
 			const parsed = parseAddresses(input, false)
 			if (!parsed.ok) return invalidLeases(parsed.diagnostics)
 			const released = leases.release(holder, parsed.addresses)
+			// The end of an Agent's task closes only its open autosave; no Checkpoint is created (Rule 01a11a5e-0ac6-79b2-b542-1e527e8b4fdf).
+			if (parsed.addresses === undefined && principal.type === 'member' && principal.kind === 'agent')
+				await options.history?.agentReleased(principalActor(principal)).catch(() => undefined)
 			return { status: 'released', released: released.map(lease => ({ kind: lease.kind, key: lease.key })) }
 		},
 		listLeases() {

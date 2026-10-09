@@ -1,7 +1,8 @@
 Feature: Version history
   # Source: Discussion #122 (Part 11) d5 Changes outside UIUX https://github.com/DevilTea/uiux/discussions/122; "What `.spec/` records after acceptance" key Scenarios https://github.com/DevilTea/uiux/discussions/122; owner acceptance https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263.
-  # Status: not built as of cf3b984; see the Implementation gaps entry of 01a11a5e-0313-7d86-af79-8eafa1753853 in its owner.
-  # Note: No test exists yet; tracked in issue #132.
+  # Status: partly built as of 673b166: the external version is recorded at every boundary, which a Checkpoint will start, but members cannot create a Checkpoint yet; see the Implementation gaps entries of 01a11a5e-0313-7d86-af79-8eafa1753853 and 01a11a5e-21c4-79f7-b6f9-4128d842c278 in their owners.
+  # Test: code@673b166 `tests/history-recorder.test.ts#L693` "records an edit made outside UIUX as an external version before a Checkpoint boundary (Scenario 01a11a5e-91d5)". https://github.com/DevilTea/uiux/blob/673b166561530c1dc5855148404fd7bbdf0edc39/tests/history-recorder.test.ts#L693
+  # Test: code@673b166 `tests/history-recorder.test.ts#L201` "records a change made while no server ran as an external version at start (Scenario 01a11a5e-91d5)". https://github.com/DevilTea/uiux/blob/673b166561530c1dc5855148404fd7bbdf0edc39/tests/history-recorder.test.ts#L201
   @spec:id:01a11a5e-91d5-7576-9bc3-d0da98e93169
   @spec:demonstrates:01a11a5e-0313-7d86-af79-8eafa1753853
   @spec:demonstrates:01a11a5e-21c4-79f7-b6f9-4128d842c278
