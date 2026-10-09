@@ -622,6 +622,35 @@ describe('recording failures', () => {
 		await ctx.recorder.stop()
 	})
 
+	it('discards a rescan that outlives the observer timeout and leaves the gap to the next locked boundary (owner ruling 3, verification of 67b5f11)', async () => {
+		const ctx = await fixture({ observerTimeoutMilliseconds: 100 })
+		await ctx.recorder.start()
+		vi.spyOn(console, 'error').mockImplementation(() => undefined)
+		await editView(ctx, AGENT, 'agent')
+		let release!: () => void
+		const stalled = new Promise<void>(resolve => { release = resolve })
+		const scan = ctx.persistence.scanVersionedSnapshotUnlocked.bind(ctx.persistence)
+		vi.spyOn(ctx.persistence, 'scanVersionedSnapshotUnlocked').mockImplementationOnce(async () => {
+			await stalled
+			// By now W1 has committed and the lock is free: this read is not under the lock.
+			return scan()
+		})
+		// W1: the actor change closes the agent's autosave, then the rescan stalls and is abandoned.
+		const w1 = await editView(ctx, HUMAN, 'W1')
+		expect(ctx.persistence.recordingGap).toBe(true)
+		release()
+		await vi.waitFor(async () => expect((await ctx.host.readOpenJournal())?.entries.map(entry => entry.type)).toContain('gap'))
+		// The abandoned work wrote nothing from its unlocked scan.
+		expect((await ctx.hostVersions()).map(version => version.type)).toEqual(['autosave'])
+
+		expect(await vi.waitFor(() => ctx.recorder.closeOpenAutosave('checkpoint'))).toMatchObject({ external: expect.any(String) })
+		const versions = await ctx.hostVersions()
+		expect(versions.map(version => [version.type, version.recordingGap])).toEqual([['autosave', undefined], ['external', true]])
+		expect(revisionOf(versions[1]!, 'view', VIEW_ID)).toBe(w1)
+		expect(ctx.persistence.recordingGap).toBe(false)
+		await ctx.recorder.stop()
+	})
+
 	it('never rescans outside the lock when an abandoned boundary finishes during a slow write (owner ruling 3, review M1)', async () => {
 		let slowWrite: (() => Promise<void>) | undefined
 		const ctx = await fixture({

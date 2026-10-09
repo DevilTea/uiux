@@ -155,6 +155,18 @@ export function createHistoryRecorder(options: HistoryRecorderOptions): HistoryR
 	return new AutosaveRecorder(options)
 }
 
+/** Thrown where abandoned work notices it no longer holds the lock; everything it read is discarded. */
+class RecorderAbandonedError extends Error {
+	constructor() {
+		super('the history recorder operation was abandoned and no longer holds the persistence lock')
+		this.name = 'RecorderAbandonedError'
+	}
+}
+
+function assertHeld(signal: AbortSignal): void {
+	if (signal.aborted) throw new RecorderAbandonedError()
+}
+
 class RecorderBusyError extends Error {
 	constructor() {
 		super('the history recorder is still finishing an abandoned operation')
@@ -183,6 +195,7 @@ class AutosaveRecorder implements HistoryRecorder {
 	private gap = false
 	/** Recorder work in progress, possibly abandoned by a timeout and still running without the lock. */
 	private inFlight?: symbol
+	private journalQueue: Promise<void> = Promise.resolve()
 	private autosaveTimer?: unknown
 	private pruneTimer?: unknown
 
@@ -295,10 +308,12 @@ class AutosaveRecorder implements HistoryRecorder {
 
 	/**
 	 * For B4 and B6: this boundary is bounded by the operation timeout. When it times out it is
-	 * abandoned and rejects, but its host write can still complete later, after the caller has gone
-	 * on (for example after the caller's Checkpoint write). The abandoned part never rescans or
-	 * consumes the gap; the next boundary under the lock records what it left as an external version
-	 * with `recordingGap`. Callers must tolerate that ordering, or refuse their own write on rejection.
+	 * abandoned and rejects, but a host version write already in flight (the autosave, or an external
+	 * version from a rescan finished under the lock) can still land later, after the caller has gone
+	 * on (for example after the caller's Checkpoint write). Nothing it reads after the abandonment is
+	 * used and it never consumes the gap; the next boundary under the lock records what it left as an
+	 * external version with `recordingGap`. Callers must tolerate that ordering, or refuse their own
+	 * write on rejection.
 	 */
 	async closeOpenAutosaveUnlocked(reason: AutosaveCloseReason): Promise<HistoryBoundaryReport | undefined> {
 		if (this.phase !== 'recording') return undefined
@@ -366,12 +381,11 @@ class AutosaveRecorder implements HistoryRecorder {
 		let boundary: HistoryBoundaryReport | undefined
 		if (journal) {
 			const leftover = this.reopenLeftover(journal, hostListing.records.map(record => record.id))
+			// Without a leftover autosave the journal (gap entries, a lone begin, a cut line) is kept
+			// until the start boundary below has recorded its gap; that boundary then clears it.
 			if (leftover) {
 				this.open = leftover
 				boundary = await this.boundaryUnlocked('leftover', LOCK_HELD)
-			}
-			else {
-				await host.clearOpenJournal()
 			}
 		}
 		// Rule 01a11a5e-0313-7d86-af79-8eafa1753853: drift detection at server start.
@@ -498,17 +512,22 @@ class AutosaveRecorder implements HistoryRecorder {
 		}
 		let open = this.open
 		if (!open) {
-			// A journal without an open autosave in memory is the remnant of a failed earlier attempt.
-			await host.clearOpenJournal()
+			// A journal without an open autosave in memory is the remnant of a failed earlier attempt; a
+			// gap not yet recorded is carried into the new journal.
 			const startedAt = new Date(now).toISOString()
 			const begin = { type: 'begin' as const, id: randomUUID(), startedAt }
-			await host.appendOpenEntry(begin)
+			const carryGap = this.gap || this.persistence.recordingGap
+			await this.journal(async () => {
+				await host.clearOpenJournal()
+				await host.appendOpenEntry(begin)
+				if (carryGap) await host.appendOpenEntry({ type: 'gap', at: startedAt })
+			})
 			open = { id: begin.id, actor: context.actor, startedAt, startedAtMs: now, lastEventAtMs: now, events: [], base: new Map(this.expected ?? []) }
 			this.open = open
 		}
 		this.expected ??= new Map()
 		for (const entry of entries) {
-			await host.appendOpenEntry({ type: 'event', event: entry.event, files: entry.files })
+			await this.journal(() => host.appendOpenEntry({ type: 'event', event: entry.event, files: entry.files }))
 			applyEvent(this.expected, entry.event, entry.files)
 			open.events.push(entry.event)
 		}
@@ -534,16 +553,19 @@ class AutosaveRecorder implements HistoryRecorder {
 	 * The caller holds the exclusive persistence lock while `signal` is not aborted.
 	 *
 	 * Owner ruling (https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18832873, item
-	 * 3): once `signal` is aborted the work was abandoned and no longer holds the lock, so it never
-	 * reads the Workspace, rescans or consumes the gap; `exclusive` then marks the gap, and the next
-	 * boundary under the lock records the unexplained changes as an external version (Rules
-	 * 01a11a5e-01b5-7c2d-8114-15b500d543f5 and 01a11a5e-03c9-745e-b23a-bb06b600377d).
+	 * 3): once `signal` is aborted the work was abandoned and no longer holds the lock. The signal is
+	 * checked after every step that waits; an abandoned boundary stops there (throwing), so it never
+	 * uses a Workspace read made without the lock, never writes the external version from it and
+	 * never consumes the gap. Only a host write already in flight may still land. `exclusive` then
+	 * marks and journals the gap, and the next boundary under the lock records the unexplained
+	 * changes as an external version (Rules 01a11a5e-01b5-7c2d-8114-15b500d543f5 and
+	 * 01a11a5e-03c9-745e-b23a-bb06b600377d).
 	 */
 	private async boundaryUnlocked(reason: AutosaveCloseReason, signal: AbortSignal): Promise<HistoryBoundaryReport> {
 		const { host } = this.stores!
 		let autosave: string | undefined
 		const open = this.open
-		if (signal.aborted) return { reason }
+		assertHeld(signal)
 		if (open && open.events.length === 0) {
 			// No event was ever journaled (the first append failed): there is nothing to record (review finding L3).
 			this.open = undefined
@@ -551,13 +573,15 @@ class AutosaveRecorder implements HistoryRecorder {
 		}
 		else if (open) {
 			const resources = sortedResources(this.expected ?? new Map())
+			const workspaceSchemaVersion = await this.persistence.readDecodeSchemaVersionUnlocked()
+			assertHeld(signal)
 			const record: HostVersionRecord = {
 				historySchemaVersion: HISTORY_SCHEMA_VERSION,
 				id: open.id,
 				type: 'autosave',
 				actor: open.actor,
 				at: this.stamp(),
-				workspaceSchemaVersion: await this.persistence.readDecodeSchemaVersionUnlocked(),
+				workspaceSchemaVersion,
 				resources,
 				startedAt: open.startedAt,
 				// Rule 01a11a5e-020b-7716-aa2b-a6e403c59c85: recorded even when nothing changed on net.
@@ -566,33 +590,36 @@ class AutosaveRecorder implements HistoryRecorder {
 				...(this.lastHostVersionId ? { parent: this.lastHostVersionId } : {}),
 				...(open.restoredFrom ? { restoredFrom: open.restoredFrom } : {}),
 			}
+			// A host write that outlives an abandonment still lands, so the state follows it either way.
 			await host.writeVersion(record)
 			this.open = undefined
 			this.clearAutosaveTimer()
 			this.lastHostVersionId = record.id
 			autosave = record.id
-			try {
-				await host.clearOpenJournal()
-			}
-			catch (error) {
-				// The next start finds the journal's id already written and only clears it.
-				this.log(`uiux: history could not clear the closed autosave's journal: ${message(error)}`)
-			}
 		}
-		if (signal.aborted) return { reason, ...(autosave ? { autosave } : {}) }
-		// The flag is moved into the recorder first, so a failure below keeps it for the next boundary.
-		if (this.persistence.consumeRecordingGap()) this.gap = true
-		const external = await this.recordExternalUnlocked()
+		assertHeld(signal)
+		// The gap is read here and consumed only once the external version (if any) is recorded, so
+		// a failure or an abandonment below leaves it for the next boundary.
+		const external = await this.recordExternalUnlocked(signal, this.gap || this.persistence.recordingGap)
+		if (signal.aborted) return { reason, ...(autosave ? { autosave } : {}), ...(external ? { external } : {}) }
+		this.persistence.consumeRecordingGap()
 		this.gap = false
-		// No autosave is open after a boundary: drop a journal left holding only gap entries.
-		await host.clearOpenJournal()
+		// No autosave is open after a boundary: drop the closed autosave's journal, or one holding only
+		// gap entries. A failure is harmless: the next start finds the closed id already written.
+		await this.journal(() => host.clearOpenJournal()).catch((error: unknown) => this.log(`uiux: history could not clear open.json after a boundary: ${message(error)}`))
 		return { reason, ...(autosave ? { autosave } : {}), ...(external ? { external } : {}) }
 	}
 
-	/** Rules 01a11a5e-01b5-…, 01a11a5e-0313-… and 01a11a5e-03c9-…: the rescan after a boundary. */
-	private async recordExternalUnlocked(): Promise<string | undefined> {
+	/**
+	 * Rules 01a11a5e-01b5-…, 01a11a5e-0313-… and 01a11a5e-03c9-…: the rescan after a boundary. The
+	 * signal is checked after every step that waits: once it is aborted the work no longer holds the
+	 * lock, so whatever it read is discarded and no state changes (owner ruling 3).
+	 */
+	private async recordExternalUnlocked(signal: AbortSignal, gap: boolean): Promise<string | undefined> {
 		const { host } = this.stores!
-		const actual = versionResourcesFromSnapshot(await this.persistence.scanVersionedSnapshotUnlocked())
+		const snapshot = await this.persistence.scanVersionedSnapshotUnlocked()
+		assertHeld(signal)
+		const actual = versionResourcesFromSnapshot(snapshot)
 		const actualMap = resourceMap(actual.resources)
 		const expected = this.expected
 		if (!expected) {
@@ -608,7 +635,10 @@ class AutosaveRecorder implements HistoryRecorder {
 				const bytes = actual.blobs.get(digest)
 				if (bytes && !await host.hasBlob(digest)) await host.putBlob(bytes)
 			}
+			assertHeld(signal)
 		}
+		const workspaceSchemaVersion = await this.persistence.readDecodeSchemaVersionUnlocked()
+		assertHeld(signal)
 		const windowStart = this.lastAtMs > 0 ? new Date(this.lastAtMs).toISOString() : undefined
 		const at = this.stamp()
 		const record: HostVersionRecord = {
@@ -617,15 +647,17 @@ class AutosaveRecorder implements HistoryRecorder {
 			type: 'external',
 			actor: { type: 'external' },
 			at,
-			workspaceSchemaVersion: await this.persistence.readDecodeSchemaVersionUnlocked(),
+			workspaceSchemaVersion,
 			resources: actual.resources,
 			// The earliest the change can have happened: the previous version.
 			startedAt: windowStart ?? at,
 			netChange: true,
 			events: [],
 			...(this.lastHostVersionId ? { parent: this.lastHostVersionId } : {}),
-			...(this.gap ? { recordingGap: true as const } : {}),
+			...(gap ? { recordingGap: true as const } : {}),
 		}
+		assertHeld(signal)
+		// The snapshot was taken under the lock; a write that outlives an abandonment still lands.
 		await host.writeVersion(record)
 		this.lastHostVersionId = record.id
 		this.expected = actualMap
@@ -695,8 +727,10 @@ class AutosaveRecorder implements HistoryRecorder {
 			await this.exclusive(operation, signal ?? new AbortController().signal)
 		}
 		catch (error) {
-			// Busy: the abandoned work still runs and marks the gap itself when it settles.
-			if (!(error instanceof RecorderBusyError) && !signal?.aborted) {
+			// Abandoned work journals its own gap when it settles. A hook refused as busy journals one
+			// now, so the gap survives a crash before the abandoned work settles (journal writes are
+			// serialized, so this cannot interleave with the abandoned work's own).
+			if (!signal?.aborted) {
 				this.gap = true
 				await this.persistGap()
 			}
@@ -734,12 +768,25 @@ class AutosaveRecorder implements HistoryRecorder {
 
 	/** Appends a gap entry to `open.json`; best effort, a failure is only logged. */
 	private async persistGap(): Promise<void> {
+		const host = this.stores?.host
+		if (!host) return
 		try {
-			await this.stores?.host.appendOpenEntry({ type: 'gap', at: new Date(this.clock.now()).toISOString() })
+			await this.journal(() => host.appendOpenEntry({ type: 'gap', at: new Date(this.clock.now()).toISOString() }))
 		}
 		catch (error) {
 			this.log(`uiux: history could not journal a recording gap: ${message(error)}`)
 		}
+	}
+
+	/**
+	 * Serializes every change to `open.json`. Appends position themselves at the file's current end,
+	 * so two concurrent appends (a hook refused as busy and the abandoned work it waits on) could
+	 * otherwise overwrite each other.
+	 */
+	private journal<Result>(operation: () => Promise<Result>): Promise<Result> {
+		const run = this.journalQueue.then(operation, operation)
+		this.journalQueue = run.then(() => undefined, () => undefined)
+		return run
 	}
 
 	/** A version time strictly after every version the recorder knows, so the timeline order follows recording order. */
