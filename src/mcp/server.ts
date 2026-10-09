@@ -14,7 +14,7 @@ import { createScopedWorkspaceSession, type ScopedWorkspaceSession } from '../ap
 import type { ViewSpecContent } from '../application/services/view-authoring'
 import type { ViewResource } from '../domain/views/schema'
 import type { FlowStep } from '../domain/flows/schema'
-import { REVIEW_RESOLUTIONS, type ReviewAnchor, type ReviewDisplayHint, type ReviewEvidenceRef, type ReviewResourceRevision } from '../domain/reviews/schema'
+import { REVIEW_RESOLUTIONS, type ReviewAnchor, type ReviewDisplayHint, type ReviewEvidenceRef, type ReviewRenderContext, type ReviewResourceRevision } from '../domain/reviews/schema'
 import type { WorkspaceAdapterSelection, ThemeEntry, ViewportPreset } from '../domain/workspace/schema'
 import { isSha256Digest, type JsonObject } from '../domain/validation'
 import type { ResolvedRenderContext } from '../domain/render-context/schema'
@@ -149,6 +149,16 @@ const reviewDisplayHintSchema = z.object({
 	pin: z.object({ x: z.number(), y: z.number() }).strict(),
 }).strict()
 
+// The render context a Widget thread was raised in: Workspace-local keys, checked against the
+// Workspace at write time. Shape and key existence are the service's diagnostics, not the transport's.
+const reviewRenderContextSchema = z.object({
+	locale: z.string().optional(),
+	viewportId: z.string().optional(),
+	themeId: z.string().optional(),
+}).strict()
+
+const RENDER_CONTEXT_DESCRIPTION = 'Optional render context the feedback was raised in, Widget anchors only: at least one of locale, viewportId, themeId. Each must exist in the Workspace now: a viewport or theme id authored in the Workspace settings (built-in fallbacks such as "default" or "light" are not keys unless authored) and a Locale with an i18n file or the default Locale. An unknown key is refused (review.render_context_unknown_key); a Workspace anchor refuses any renderContext (review.render_context_without_widget).'
+
 const reviewResolutionSchema = z.enum(REVIEW_RESOLUTIONS)
 
 const createReviewThreadSchema = z.object({
@@ -156,6 +166,7 @@ const createReviewThreadSchema = z.object({
 	anchor: reviewAnchorSchema.describe(ANCHOR_DESCRIPTION),
 	variantNames: z.array(z.string()).optional(),
 	displayHint: reviewDisplayHintSchema.optional(),
+	renderContext: reviewRenderContextSchema.optional().describe(RENDER_CONTEXT_DESCRIPTION),
 }).strict()
 
 const appendReviewMessageSchema = z.object({
@@ -173,6 +184,7 @@ const reanchorReviewThreadSchema = z.object({
 	anchor: reviewAnchorSchema.describe(ANCHOR_DESCRIPTION),
 	variantNames: z.array(z.string()).optional(),
 	displayHint: reviewDisplayHintSchema.nullable().optional(),
+	renderContext: reviewRenderContextSchema.nullable().optional().describe(`${RENDER_CONTEXT_DESCRIPTION} An object sets it, null clears it, and omitting it keeps the recorded one.`),
 	actor: reviewActorSchema.optional().describe(ACTOR_IGNORED_DESCRIPTION),
 	reason: z.string().optional(),
 	id: z.string().optional(),
@@ -522,7 +534,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'create_review_thread',
 		{
 			title: 'Create UIUX Review Thread',
-			description: 'Create an initial open Review thread. Use anchor { scope: "workspace" } for feedback about the product as a whole; use { viewId, widgetId: "root" } for a whole View, or { viewId, widgetId } for one Widget, with optional variant scope. The optional displayHint.pin {x, y} is a non-authoritative pin position normalized (0..1) within the anchored Widget\'s rendered rect (Widget anchors only); agents have no pointer and should normally omit it.',
+			description: 'Create an initial open Review thread. Use anchor { scope: "workspace" } for feedback about the product as a whole; use { viewId, widgetId: "root" } for a whole View, or { viewId, widgetId } for one Widget, with optional variant scope. The optional displayHint.pin {x, y} is a non-authoritative pin position normalized (0..1) within the anchored Widget\'s rendered rect (Widget anchors only); agents have no pointer and should normally omit it. The optional renderContext { locale?, viewportId?, themeId? } records the Locale, viewport and theme the feedback was raised in (Widget anchors only); every key must exist in the Workspace (review.render_context_unknown_key otherwise).',
 			inputSchema: createReviewThreadSchema,
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},
@@ -531,6 +543,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			anchor: input.anchor as ReviewAnchor,
 			...(input.variantNames ? { variantNames: input.variantNames } : {}),
 			...(input.displayHint ? { displayHint: input.displayHint as ReviewDisplayHint } : {}),
+			...(input.renderContext ? { renderContext: input.renderContext as ReviewRenderContext } : {}),
 		})),
 	)
 
@@ -556,7 +569,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'reanchor_review_thread',
 		{
 			title: 'Re-anchor UIUX Review Thread',
-			description: 'Re-anchor a Review thread to a new widget or variant scope, or between a Widget and the Workspace ({ scope: "workspace" }), appending a re-anchor history event with revision CAS. displayHint: an object sets the pin hint for the new Widget anchor, null clears it, and omitting it clears the hint when the Widget changes and keeps it when only Variants change. Moving to the Workspace always clears the hint.',
+			description: 'Re-anchor a Review thread to a new widget or variant scope, or between a Widget and the Workspace ({ scope: "workspace" }), appending a re-anchor history event with revision CAS. displayHint: an object sets the pin hint for the new Widget anchor, null clears it, and omitting it clears the hint when the Widget changes and keeps it when only Variants change. Moving to the Workspace always clears the hint. renderContext: an object sets the recorded Locale, viewport and theme (each key must exist in the Workspace), null clears it, and omitting it keeps the recorded one; moving to the Workspace always clears it. The event records the context on both sides.',
 			inputSchema: reanchorReviewThreadSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
@@ -566,6 +579,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			anchor: input.anchor as ReviewAnchor,
 			...(input.variantNames ? { variantNames: input.variantNames } : {}),
 			...(input.displayHint !== undefined ? { displayHint: input.displayHint as ReviewDisplayHint | null } : {}),
+			...(input.renderContext !== undefined ? { renderContext: input.renderContext as ReviewRenderContext | null } : {}),
 			...(input.actor !== undefined ? { actor: input.actor } : {}),
 			...(input.reason ? { reason: input.reason } : {}),
 			...(input.id ? { id: input.id } : {}),

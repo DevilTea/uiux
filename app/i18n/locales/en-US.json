@@ -1968,6 +1968,7 @@
       "render_context_empty": "The render context is empty.",
       "render_context_history_mismatch": "The Review’s render context does not match its history.",
       "render_context_invalid_locale": "The render context Locale is not a valid language tag.",
+      "render_context_unknown_key": "The render context names a Locale, viewport or theme this Workspace does not have.",
       "render_context_without_widget": "Only a comment on a Widget has a render context.",
       "resolution_reason_required": "Say which comment this duplicates.",
       "resolution_required": "Choose how this Review was resolved.",

@@ -10,6 +10,7 @@ import {
 	isWorkspaceAnchor,
 	normalizeReviewPinCoordinate,
 	validateReviewEvidenceRef,
+	validateReviewRenderContextInput,
 	validateReviewThread,
 	type ReviewActor,
 	type ReviewAnchor,
@@ -18,6 +19,7 @@ import {
 	type ReviewHistoryEvent,
 	type ReviewMessage,
 	type ReviewMessageEdit,
+	type ReviewRenderContext,
 	type ReviewResolution,
 	type ReviewResourceRevision,
 	type ReviewSubmission,
@@ -37,6 +39,11 @@ export type CreateReviewThreadCommand = Readonly<{
 	variantNames?: readonly string[]
 	/** Optional non-authoritative pin placement; omitted means no hint (default placement). */
 	displayHint?: ReviewDisplayHint
+	/**
+	 * Optional render context the feedback was raised in (Widget anchors only). Each member must name
+	 * a key that exists in the Workspace at write time; omitted means unknown.
+	 */
+	renderContext?: ReviewRenderContext
 }>
 
 export type AppendReviewMessageCommand = Readonly<{
@@ -58,6 +65,13 @@ export type ReanchorReviewThreadCommand = Readonly<{
 	 * when Widget identity (viewId or widgetId) changes and keeps it when only Variants change.
 	 */
 	displayHint?: ReviewDisplayHint | null
+	/**
+	 * Tri-state (owner ruling, Discussion #7, 2026-10-09): an object sets the render context, `null`
+	 * clears it, and omitted keeps the recorded one. A re-anchor to the Workspace arm always clears an
+	 * omitted one and refuses an object. A new object is checked against the Workspace keys at write
+	 * time; a kept one is never re-checked, since a stale key never invalidates the thread.
+	 */
+	renderContext?: ReviewRenderContext | null
 	actor: ReviewActor
 	reason?: string
 	id?: string
@@ -222,6 +236,38 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 	}
 
 	/**
+	 * An incoming render context. Omitted stays unknown; anything else must have the decoder's shape
+	 * and name only keys the Workspace has at write time (owner ruling, Discussion #7, 2026-10-09):
+	 * viewport and theme ids authored in the manifest (a built-in fallback such as `default` or
+	 * `light` is not a key unless authored) and a Locale that has an i18n file or is the default
+	 * Locale. Every unknown key is reported, and nothing is written.
+	 */
+	async function checkRenderContextInput(input: unknown, anchor: ReviewAnchor): Promise<
+		| Readonly<{ ok: true; value: ReviewRenderContext | undefined }>
+		| Readonly<{ ok: false; diagnostics: readonly Diagnostic[] }>
+	> {
+		if (input === undefined) return { ok: true, value: undefined }
+		const shape = validateReviewRenderContextInput(input, '/renderContext', anchor)
+		if (!shape.ok) return shape
+		const { locale, viewportId, themeId } = shape.value
+		const manifest = (await persistence.workspace.readInspected()).resource
+		const locales = new Set(await persistence.locales.discover())
+		if (typeof manifest?.i18n?.defaultLocale === 'string') locales.add(manifest.i18n.defaultLocale)
+		const diagnostics: Diagnostic[] = []
+		if (locale !== undefined && !locales.has(locale))
+			diagnostics.push({ code: 'review.render_context_unknown_key', path: '/renderContext/locale', message: `Locale ${locale} is not in this Workspace: it has no i18n file and is not the default Locale.` })
+		if (viewportId !== undefined && !Object.hasOwn(manifest?.viewports ?? {}, viewportId))
+			diagnostics.push({ code: 'review.render_context_unknown_key', path: '/renderContext/viewportId', message: `Viewport ${viewportId} is not authored in this Workspace's viewports.` })
+		if (themeId !== undefined && !Object.hasOwn(manifest?.themes ?? {}, themeId))
+			diagnostics.push({ code: 'review.render_context_unknown_key', path: '/renderContext/themeId', message: `Theme ${themeId} is not authored in this Workspace's themes.` })
+		if (diagnostics.length > 0) return { ok: false, diagnostics }
+		return {
+			ok: true,
+			value: { ...(locale !== undefined ? { locale } : {}), ...(viewportId !== undefined ? { viewportId } : {}), ...(themeId !== undefined ? { themeId } : {}) },
+		}
+	}
+
+	/**
 	 * Review CAS that reports a thread deleted between the read and the write (an author retract, or
 	 * an out-of-band delete) as `not_found` instead of throwing.
 	 */
@@ -241,11 +287,14 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		if (blocked) return blocked
 		const hint = normalizeDisplayHintInput(command.displayHint, '/displayHint')
 		if (!hint.ok) return { status: 'invalid', key: id, diagnostics: hint.diagnostics }
+		const context = await checkRenderContextInput(command.renderContext, command.anchor)
+		if (!context.ok) return { status: 'invalid', key: id, diagnostics: context.diagnostics }
 		const resource: ReviewThread = {
 			id,
 			anchor: command.anchor,
 			variantNames: Array.isArray(command.variantNames) ? [...command.variantNames] : [],
 			...(hint.value ? { displayHint: hint.value } : {}),
+			...(context.value ? { renderContext: context.value } : {}),
 			status: 'open',
 			messages: [],
 			history: [],
@@ -334,10 +383,16 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		const id = command.id ?? randomUUID()
 		const at = command.at ?? new Date().toISOString()
 		const variantNames = Array.isArray(command.variantNames) ? [...command.variantNames] : []
-		// Owner ruling (Discussion #7, 2026-10-09): an omitted render context keeps the recorded one;
-		// a re-anchor to the Workspace arm clears it. Both sides of the event record it.
+		// Owner ruling (Discussion #7, 2026-10-09): an object sets the render context, null clears it,
+		// and omitted keeps the recorded one; a re-anchor to the Workspace arm clears an omitted one and
+		// refuses an object. A kept context is never re-checked: a stale key never invalidates the thread.
+		// Both sides of the event record it.
 		const currentRenderContext = current.resource.renderContext
-		const renderContext = isWorkspaceAnchor(command.anchor) ? undefined : currentRenderContext
+		const requestedContext = await checkRenderContextInput(command.renderContext ?? undefined, command.anchor)
+		if (!requestedContext.ok) return { status: 'invalid', key: command.reviewId, diagnostics: requestedContext.diagnostics }
+		const renderContext = command.renderContext !== undefined
+			? requestedContext.value
+			: isWorkspaceAnchor(command.anchor) ? undefined : currentRenderContext
 		const event: ReviewHistoryEvent = {
 			id,
 			kind: 'reanchor',
