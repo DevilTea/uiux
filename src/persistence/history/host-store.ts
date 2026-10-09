@@ -203,11 +203,7 @@ export class HostHistoryStore {
 		try {
 			if (existed) await trimPartialLastLine(handle)
 			const { size } = await handle.stat()
-			// A short write is not success: keep writing until the whole line is in the file.
-			for (let offset = 0; offset < line.length;) {
-				const { bytesWritten } = await handle.write(line, offset, line.length - offset, size + offset)
-				offset += bytesWritten
-			}
+			await writeFullyAt(handle, line, size)
 			await handle.sync()
 		}
 		finally {
@@ -454,6 +450,19 @@ function versionBytes(record: HostVersionRecord): Buffer {
 
 export function blobDigest(bytes: Uint8Array): string {
 	return `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+}
+
+/**
+ * Writes all of `bytes` at `position`. A short write is not success, so it keeps writing the rest;
+ * a write that makes no progress fails with `history.write_failed` instead of retrying forever.
+ */
+export async function writeFullyAt(handle: Pick<fs.FileHandle, 'write'>, bytes: Uint8Array, position: number): Promise<void> {
+	for (let offset = 0; offset < bytes.length;) {
+		const { bytesWritten } = await handle.write(bytes, offset, bytes.length - offset, position + offset)
+		if (bytesWritten <= 0)
+			throw new HostHistoryError('history.write_failed', `A write made no progress after ${offset} of ${bytes.length} bytes.`)
+		offset += bytesWritten
+	}
 }
 
 async function trimPartialLastLine(handle: fs.FileHandle): Promise<void> {

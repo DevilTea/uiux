@@ -37,6 +37,7 @@ import {
 	runWithDesignWriteContext,
 	selectPrunableHostVersions,
 	versionResourcesFromSnapshot,
+	writeFullyAt,
 	TimelineCursorError,
 	type DesignWriteContext,
 	type HostHistoryPaths,
@@ -264,6 +265,30 @@ describe('open autosave journal', () => {
 		expect(await store.readOpenJournal()).toBeUndefined()
 	})
 
+	it('finishes short writes and fails, rather than spins, on a write that makes no progress', async () => {
+		const bytes = Buffer.from('{"type":"gap"}\n')
+		const written: number[] = []
+		const short = {
+			async write(buffer: Uint8Array, offset: number, length: number, position: number) {
+				const count = Math.min(3, length)
+				for (let index = 0; index < count; index++) written[position + index] = buffer[offset + index]!
+				return { bytesWritten: count, buffer }
+			},
+		}
+		await writeFullyAt(short as never, bytes, 0)
+		expect(Buffer.from(written)).toEqual(bytes)
+
+		let calls = 0
+		const stuck = {
+			async write(buffer: Uint8Array) {
+				calls += 1
+				return { bytesWritten: 0, buffer }
+			},
+		}
+		await expect(writeFullyAt(stuck as never, bytes, 0)).rejects.toMatchObject({ code: 'history.write_failed' })
+		expect(calls).toBe(1)
+	})
+
 	it('refuses a corrupt complete line and an invalid entry', async () => {
 		const { store, paths } = await hostStore()
 		await writeFile(paths.open, `{"type":"gap","at":"${NOW.toISOString()}"}\nnot json\n{"type":"gap","at":"${NOW.toISOString()}"}\n`, { mode: 0o600 })
@@ -317,14 +342,35 @@ describe('host retention', () => {
 		const checkpointBytes = await readFile(join(root, LEGACY_LAYOUT.checkpointRelativePath(kept.id)))
 		await store.appendOpenEntry({ type: 'event', event: { at: NOW.toISOString(), actor: AGENT, source: 'mcp', operation: 'updateViewSpec', resource: { kind: 'view', key: VIEW_ID }, beforeRevision: null, afterRevision: 'r_x' }, files: { [viewRelativePath(VIEW_ID)]: blobDigest(journalOnly) } })
 
-		// Timeline reads racing the prune see one consistent snapshot: all of it before, or all after.
-		const pruning = persistence.withLock(async () => pruneHostHistory({ host: store, checkpoints: await checkpoints.listUnlocked(), now: NOW }))
-		const reads = Array.from({ length: 3 }, () => readMergedTimeline(persistence, { host: store, checkpoints }))
-		const [result, ...timelines] = await Promise.all([pruning, ...reads])
-		for (const timeline of timelines) {
-			expect(timeline.invalid).toEqual([])
-			expect([HOST_RETENTION_MIN_KEPT + 5, HOST_RETENTION_MIN_KEPT + 3]).toContain(timeline.versions.length)
-		}
+		// A timeline read holds the persistence read lock across both stores: a prune started while
+		// the read is paused between them waits, and the read sees the whole timeline before the prune.
+		let entered!: () => void
+		let release!: () => void
+		const readEntered = new Promise<void>(resolve => entered = resolve)
+		const gate = new Promise<void>(resolve => release = resolve)
+		const pausedHost = {
+			async listVersions() {
+				const listing = await store.listVersions()
+				entered()
+				await gate
+				return listing
+			},
+		} as unknown as HostHistoryStore
+		const reading = readMergedTimeline(persistence, { host: pausedHost, checkpoints })
+		await readEntered
+		let pruneStarted = false
+		const pruning = persistence.withLock(async () => {
+			pruneStarted = true
+			return pruneHostHistory({ host: store, checkpoints: await checkpoints.listUnlocked(), now: NOW })
+		})
+		await new Promise(resolve => setTimeout(resolve, 200))
+		expect(pruneStarted).toBe(false)
+		release()
+		const snapshot = await reading
+		expect(snapshot.invalid).toEqual([])
+		expect(snapshot.versions).toHaveLength(HOST_RETENTION_MIN_KEPT + 5)
+		const result = await pruning
+		expect(pruneStarted).toBe(true)
 		expect((await readMergedTimeline(persistence, { host: store, checkpoints })).versions).toHaveLength(HOST_RETENTION_MIN_KEPT + 3)
 
 		expect(result.pruned).toEqual([external.id, aged.id].sort())

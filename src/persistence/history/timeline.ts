@@ -62,7 +62,8 @@ export function mergeTimeline(host: HostVersionListing | undefined, checkpoints:
 /**
  * Reads both stores inside one persistence read lock and merges them. Every history mutation
  * (recording, pruning, garbage collection, checkpoints) runs under the exclusive lock, so the two
- * listings are one consistent snapshot.
+ * listings are one consistent snapshot. Callers must not hold the persistence lock (nor run inside a
+ * write observer hook): the read lock is taken here.
  */
 export async function readMergedTimeline(persistence: FileNativePersistence, stores: Readonly<{ host?: HostHistoryStore; checkpoints?: CheckpointStore }>): Promise<MergedTimeline> {
 	return persistence.withReadLock(async () => {
