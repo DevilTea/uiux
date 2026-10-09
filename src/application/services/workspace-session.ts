@@ -82,6 +82,16 @@ import {
 	type HistoryStoreSource,
 	type VersionDiffOutcome,
 } from './history-diff'
+import {
+	createHistoryService,
+	type CheckpointBoundary,
+	type CreateCheckpointCommand,
+	type CreateCheckpointOutcome,
+	type DeleteCheckpointOutcome,
+	type ListVersionsOutcome,
+	type ListVersionsQuery,
+	type ReadVersionOutcome,
+} from './history-service'
 
 export type AssetContentDescriptor = Readonly<{
 	mediaType: string
@@ -138,6 +148,10 @@ export interface WorkspaceApplicationSession {
 	exportHandoff(command: ExportHandoffCommand): Promise<ExportHandoffResult>
 	readArtifact(identity: string): Promise<Uint8Array | undefined>
 	diffVersions(command: DiffVersionsCommand): Promise<VersionDiffOutcome>
+	createCheckpoint(command: CreateCheckpointCommand): Promise<CreateCheckpointOutcome>
+	deleteCheckpoint(id: string): Promise<DeleteCheckpointOutcome>
+	listVersions(query: ListVersionsQuery): Promise<ListVersionsOutcome>
+	readVersion(id: string): Promise<ReadVersionOutcome>
 }
 
 /**
@@ -151,6 +165,11 @@ export function createWorkspaceApplicationSession(
 		captureCookie?: () => Readonly<{ name: string; value: string }> | undefined
 		/** The Workspace's history stores; without them no version exists to compare. */
 		history?: HistoryStoreSource
+		/**
+		 * The history recorder's boundary, taken before every Checkpoint (Rule
+		 * 01a11a5e-00b9-7bf5-8005-9380a388afb8); absent where no recorder runs.
+		 */
+		historyBoundary?: () => CheckpointBoundary | undefined
 	},
 ): WorkspaceApplicationSession {
 	const viewAuthoring = createViewAuthoringService(persistence)
@@ -162,6 +181,7 @@ export function createWorkspaceApplicationSession(
 	const formalCapture = createFormalCaptureService(persistence, { serverOrigin: options?.serverOrigin, captureCookie: options?.captureCookie })
 	const handoffExport = createHandoffExportService(persistence)
 	const historyDiff = createHistoryDiffService(persistence, options?.history)
+	const historyService = createHistoryService(persistence, options?.history, options?.historyBoundary ? { boundary: options.historyBoundary } : {})
 
 	async function readPointResource(kind: PointResourceKind, key: string): Promise<PointResourceRead | undefined> {
 		if (!isValidPointResourceAddress({ kind, key })) return undefined
@@ -311,6 +331,10 @@ export function createWorkspaceApplicationSession(
 		exportHandoff: handoffExport.exportHandoff,
 		readArtifact: identity => persistence.artifacts.read(identity),
 		diffVersions: historyDiff.diffVersions,
+		createCheckpoint: historyService.createCheckpoint,
+		deleteCheckpoint: historyService.deleteCheckpoint,
+		listVersions: historyService.listVersions,
+		readVersion: historyService.readVersion,
 	}
 }
 

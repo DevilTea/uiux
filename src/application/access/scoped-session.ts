@@ -11,6 +11,7 @@ import type { CreateFlowCommand, FlowAuthoringResult, UpdateFlowCommand } from '
 import type { CaptureFormalEvidenceCommand, CaptureFormalEvidenceResult, FormalEvidenceItem } from '../services/formal-capture'
 import type { AssessHandoffReadinessCommand, AssessHandoffReadinessResult, ExportHandoffCommand, ExportHandoffResult } from '../services/handoff-export'
 import type { DiffVersionsCommand, VersionDiffOutcome } from '../services/history-diff'
+import type { CreateCheckpointOutcome, DeleteCheckpointOutcome, ListVersionsOutcome, ListVersionsQuery, ReadVersionOutcome } from '../services/history-service'
 import type { CreateLocaleCommand, LocaleAuthoringResult, UpdateLocaleCommand } from '../services/locale-authoring'
 import type {
 	AppendReviewMessageCommand,
@@ -113,6 +114,11 @@ export interface ScopedWorkspaceSession {
 	readArtifact(identity: string): Promise<Uint8Array | undefined>
 	assessHandoffReadiness(command: AssessHandoffReadinessCommand): Promise<AssessHandoffReadinessResult | AccessRefusal>
 	diffVersions(command: DiffVersionsCommand): Promise<VersionDiffOutcome | AccessRefusal>
+	listVersions(query: ListVersionsQuery): Promise<ListVersionsOutcome | AccessRefusal>
+	readVersion(id: string): Promise<ReadVersionOutcome | AccessRefusal>
+	/** Stamps the member actor and the transport's source; needs no edit lease (Rule 01a11a5e-0a0c-7d65-8d09-9a71a730ec61). */
+	createCheckpoint(command: Readonly<{ name: string; note?: string }>): Promise<CreateCheckpointOutcome | AccessRefusal>
+	deleteCheckpoint(id: string): Promise<DeleteCheckpointOutcome | AccessRefusal>
 	createView(command: CreateViewCommand): Promise<Scoped<ViewAuthoringResult>>
 	updateViewSpec(command: UpdateViewSpecCommand): Promise<Scoped<ViewAuthoringResult>>
 	updateViewStructure(command: UpdateViewStructureCommand): Promise<Scoped<ViewAuthoringResult>>
@@ -358,6 +364,30 @@ export function createScopedWorkspaceSession(
 		async diffVersions(command) {
 			const denied = authorizeOperation(principal, 'diffVersions')
 			return denied ? refusalFromScope('history', denied) : app.diffVersions(command)
+		},
+		async listVersions(query) {
+			const denied = authorizeOperation(principal, 'listVersions')
+			return denied ? refusalFromScope('history', denied) : app.listVersions(query)
+		},
+		async readVersion(id) {
+			const denied = authorizeOperation(principal, 'readVersion')
+			return denied ? refusalFromScope(id, denied) : app.readVersion(id)
+		},
+		async createCheckpoint(command) {
+			const denied = authorizeOperation(principal, 'createCheckpoint')
+			if (denied || principal.type !== 'member') return refusalFromScope('checkpoint', denied ?? authorizeOperation(principal, 'createCheckpoint')!)
+			// Rule 01a11a5e-025f-71d7-8d08-63948220de57 and Clause 01a11a5e-221b-7a04-a6cb-66bc9608c11f:
+			// the server-stamped actor and the transport's source; the caller supplies neither.
+			return app.createCheckpoint({
+				name: command.name,
+				...(command.note === undefined ? {} : { note: command.note }),
+				actor: principalActor(principal),
+				source: transport === 'mcp' ? 'mcp' : 'workbench',
+			})
+		},
+		async deleteCheckpoint(id) {
+			const denied = authorizeOperation(principal, 'deleteCheckpoint')
+			return denied ? refusalFromScope(id, denied) : app.deleteCheckpoint(id)
 		},
 
 		createView: command => write('createView', command.id, { kind: 'view', key: command.id }, () => app.createView(command)),
