@@ -6,10 +6,11 @@ import { isFullUuid, type Diagnostic, type JsonValue } from '../../domain/valida
 import { PersistenceError } from '../../persistence/errors'
 import { upgradeSnapshotInMemory, type FileNativePersistence } from '../../persistence/file-native'
 import type { CheckpointStore } from '../../persistence/history/checkpoint-store'
-import { blobDigest, HostHistoryError, type HostHistoryStore } from '../../persistence/history/host-store'
+import { HostHistoryError, type HostHistoryStore } from '../../persistence/history/host-store'
 import { versionResourcesFromSnapshot } from '../../persistence/history/snapshot'
 import { mergeTimeline, type TimelineVersion } from '../../persistence/history/timeline'
-import { artifactRelativePath, LEGACY_LAYOUT } from '../../persistence/paths'
+import { readVersionBlobUnlocked } from '../../persistence/history/version-blobs'
+import { LEGACY_LAYOUT } from '../../persistence/paths'
 
 /** The selected Workspace's history stores, or `undefined` where history is off (`uiux publish`). */
 export type HistoryStoreSource = Readonly<{
@@ -215,18 +216,9 @@ export function createHistoryDiffService(persistence: FileNativePersistence, his
 		}
 	}
 
-	/** Reads a version blob from the host store or the artifact store, checking its digest. */
-	async function readBlobUnlocked(stores: Awaited<ReturnType<HistoryStoreSource['open']>>, digest: string): Promise<Uint8Array | undefined> {
-		const hosted = await stores?.host?.readBlob(digest)
-		if (hosted) return hosted
-		let path: string
-		try { path = artifactRelativePath(digest) }
-		catch { return undefined }
-		const bytes = await persistence.readOptionalBytesUnlocked(path)
-		if (!bytes) return undefined
-		if (blobDigest(bytes) !== digest)
-			throw new HostHistoryError('history.blob_corrupt', `Stored blob ${digest} does not match its content digest.`)
-		return Uint8Array.from(bytes)
+	/** Reads a version blob: the host store first, then the artifact store (shared with restore). */
+	function readBlobUnlocked(stores: Awaited<ReturnType<HistoryStoreSource['open']>>, digest: string): Promise<Uint8Array | undefined> {
+		return readVersionBlobUnlocked(persistence, stores?.host, digest)
 	}
 
 	async function compare(request: Request, from: LoadedSide | undefined, to: LoadedSide): Promise<VersionDiffOutcome> {
