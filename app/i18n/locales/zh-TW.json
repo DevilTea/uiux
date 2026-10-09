@@ -1960,7 +1960,9 @@
       "store_unsafe": "這台電腦上的版本歷程存放區無法安全使用。請檢查資料夾權限與連結。",
       "write_failed": "無法儲存版本歷程，未變更任何內容。",
       "rollback_failed": "無法儲存版本歷程，且中斷的寫入未能完全復原。請檢查版本歷程存放區。",
-      "invalid_cursor": "時間軸中的這個位置無效，請重新載入時間軸。"
+      "invalid_cursor": "時間軸中的這個位置無效，請重新載入時間軸。",
+      "invalid_comparison": "無法比較這些版本。請選擇一個版本以及要與它比較的對象。",
+      "blob_missing": "這個版本的某個檔案已不再保存，因此無法比較。"
     },
     "review": {
       "anchor_history_mismatch": "Review 的位置與其歷程不一致。",

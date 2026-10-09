@@ -8,6 +8,7 @@ import type { AssetAuthoringResult, CreateAssetCommand, ReplaceAssetCommand } fr
 import type { CreateFlowCommand, FlowAuthoringResult, UpdateFlowCommand } from '../services/flow-authoring'
 import type { CaptureFormalEvidenceCommand, CaptureFormalEvidenceResult, FormalEvidenceItem } from '../services/formal-capture'
 import type { AssessHandoffReadinessCommand, AssessHandoffReadinessResult, ExportHandoffCommand, ExportHandoffResult } from '../services/handoff-export'
+import type { DiffVersionsCommand, VersionDiffOutcome } from '../services/history-diff'
 import type { CreateLocaleCommand, LocaleAuthoringResult, UpdateLocaleCommand } from '../services/locale-authoring'
 import type {
 	AppendReviewMessageCommand,
@@ -109,6 +110,7 @@ export interface ScopedWorkspaceSession {
 	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
 	readArtifact(identity: string): Promise<Uint8Array | undefined>
 	assessHandoffReadiness(command: AssessHandoffReadinessCommand): Promise<AssessHandoffReadinessResult | AccessRefusal>
+	diffVersions(command: DiffVersionsCommand): Promise<VersionDiffOutcome | AccessRefusal>
 	createView(command: CreateViewCommand): Promise<Scoped<ViewAuthoringResult>>
 	updateViewSpec(command: UpdateViewSpecCommand): Promise<Scoped<ViewAuthoringResult>>
 	updateViewStructure(command: UpdateViewStructureCommand): Promise<Scoped<ViewAuthoringResult>>
@@ -334,6 +336,10 @@ export function createScopedWorkspaceSession(
 		async assessHandoffReadiness(command) {
 			const denied = authorizeOperation(principal, 'assessHandoffReadiness')
 			return denied ? refusalFromScope('handoff', denied) : app.assessHandoffReadiness(command)
+		},
+		async diffVersions(command) {
+			const denied = authorizeOperation(principal, 'diffVersions')
+			return denied ? refusalFromScope('history', denied) : app.diffVersions(command)
 		},
 
 		createView: command => write('createView', command.id, { kind: 'view', key: command.id }, () => app.createView(command)),

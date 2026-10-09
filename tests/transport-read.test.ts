@@ -128,6 +128,7 @@ describe('shared HTTP/MCP point-resource reads', { timeout: HEAVY_SERVER_SUITE_T
 				'create_view',
 				'edit_review_message',
 				'export_handoff',
+				'get_version_diff',
 				'list_resources',
 				'promote_review_to_decision',
 				'reanchor_review_thread',

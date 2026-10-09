@@ -57,12 +57,21 @@ export function createSelectedWorkspaceServerRuntime(
 	const serverOrigin = options?.serverOrigin ?? resolveInternalServerOrigin()
 	const leases = createLeaseManager()
 	let accessService: AccessService | undefined
+	const publishCredential = options?.publishCredential ?? process.env[PUBLISH_CREDENTIAL_ENV]
+	// Nothing records history yet: the recorder that opens these stores arrives with the autosave work (B3).
+	// Version comparison reads them; the internal `uiux publish` server gets a disabled factory.
+	const history = createHistoryStoreFactory({
+		workspaceRoot: selectedRoot,
+		persistence,
+		home: () => options?.uiuxHome ?? resolveUiuxHome(),
+		...(publishCredential ? { publishCredential } : {}),
+	})
 	const app = createWorkspaceApplicationSession(persistence, {
 		serverOrigin,
 		// Formal capture loads Preview as the in-memory `system:capture` principal (cookie-scoped to the internal origin).
 		captureCookie: () => accessService ? { name: accessService.cookieName, value: accessService.captureCredential } : undefined,
+		history,
 	})
-	const publishCredential = options?.publishCredential ?? process.env[PUBLISH_CREDENTIAL_ENV]
 	let pending: Promise<AccessService> | undefined
 	function access(): Promise<AccessService> {
 		pending ??= (async () => {
@@ -77,13 +86,6 @@ export function createSelectedWorkspaceServerRuntime(
 		return pending
 	}
 	const mcp = createUiuxMcpHttpHandler(app, { leases })
-	// Nothing records history yet: the recorder that opens these stores arrives with the autosave work (B3).
-	const history = createHistoryStoreFactory({
-		workspaceRoot: selectedRoot,
-		persistence,
-		home: () => options?.uiuxHome ?? resolveUiuxHome(),
-		...(publishCredential ? { publishCredential } : {}),
-	})
 	return Object.freeze({
 		root: selectedRoot,
 		serverOrigin,
