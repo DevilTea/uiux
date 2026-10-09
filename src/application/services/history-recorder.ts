@@ -727,10 +727,15 @@ class AutosaveRecorder implements HistoryRecorder {
 			await this.exclusive(operation, signal ?? new AbortController().signal)
 		}
 		catch (error) {
-			// Abandoned work journals its own gap when it settles. A hook refused as busy journals one
-			// now, so the gap survives a crash before the abandoned work settles (journal writes are
-			// serialized, so this cannot interleave with the abandoned work's own).
-			if (!signal?.aborted) {
+			// Abandoned work journals its own gap when it settles. A hook refused as busy queues one now,
+			// so the gap survives a crash before the abandoned work settles (journal writes are
+			// serialized, so this cannot interleave with the abandoned work's own). It is not awaited:
+			// the abandoned work may be stuck in the journal itself, and this hook holds the lock.
+			if (error instanceof RecorderBusyError) {
+				this.gap = true
+				void this.persistGap()
+			}
+			else if (!signal?.aborted) {
 				this.gap = true
 				await this.persistGap()
 			}

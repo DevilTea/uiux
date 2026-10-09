@@ -622,6 +622,35 @@ describe('recording failures', () => {
 		await ctx.recorder.stop()
 	})
 
+	it('refuses a hook as busy without waiting for an abandoned boundary stuck in open.json (re-verification of 6c2c313)', async () => {
+		const ctx = await fixture({ observerTimeoutMilliseconds: 1_000 })
+		await ctx.recorder.start()
+		vi.spyOn(console, 'error').mockImplementation(() => undefined)
+		await editView(ctx, AGENT, 'agent')
+		let release!: () => void
+		const stalled = new Promise<void>(resolve => { release = resolve })
+		const clear = ctx.host.clearOpenJournal.bind(ctx.host)
+		vi.spyOn(ctx.host, 'clearOpenJournal').mockImplementationOnce(async () => {
+			await stalled
+			return clear()
+		})
+		// The actor change closes the agent's autosave; the boundary's journal clear stalls past the timeout.
+		await editView(ctx, HUMAN, 'abandoned boundary')
+		// The recorder is busy with the abandoned work, which holds the journal queue.
+		const durations: number[] = []
+		for (const intent of ['busy 1', 'busy 2']) {
+			const began = Date.now()
+			await editView(ctx, HUMAN, intent)
+			durations.push(Date.now() - began)
+		}
+		expect(Math.max(...durations)).toBeLessThan(500)
+		release()
+		await vi.waitFor(async () => expect((await ctx.host.readOpenJournal())?.entries.filter(entry => entry.type === 'gap').length).toBeGreaterThanOrEqual(3))
+		expect(await vi.waitFor(() => ctx.recorder.closeOpenAutosave('checkpoint'))).toMatchObject({ external: expect.any(String) })
+		expect((await ctx.hostVersions()).map(version => [version.type, version.recordingGap])).toEqual([['autosave', undefined], ['external', true]])
+		await ctx.recorder.stop()
+	})
+
 	it('discards a rescan that outlives the observer timeout and leaves the gap to the next locked boundary (owner ruling 3, verification of 67b5f11)', async () => {
 		const ctx = await fixture({ observerTimeoutMilliseconds: 100 })
 		await ctx.recorder.start()
