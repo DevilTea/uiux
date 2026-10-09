@@ -1,3 +1,4 @@
+// Scheduled for deletion together with resource-mutations.ts when issue #75 lands.
 import type { AuthoredAssetResource } from '../../domain/assets/schema'
 import { validateAuthoredAssetResource } from '../../domain/assets/schema'
 import type { FlowResource } from '../../domain/flows/schema'
@@ -55,7 +56,7 @@ export function createViewService<Impact>(input: Readonly<{
 	diagnostics?: ResourceDiagnosticPort<ViewKey, ViewResource>
 	impact: ReferenceImpactAnalyzer<ViewKey, ViewResource, Impact>
 }>): ViewApplicationService<Impact> {
-	const service = createResourceService({
+	const service = createResourceService<ViewKey, ViewResource, Impact>({
 		...input,
 		validation: validationPort(resource => validateViewResource(resource)),
 		transitionValidation: immutableIdTransition('view.immutable_id_changed', 'View'),
@@ -68,7 +69,7 @@ export function createFlowService<Impact>(input: Readonly<{
 	diagnostics?: ResourceDiagnosticPort<FlowKey, FlowResource>
 	impact: ReferenceImpactAnalyzer<FlowKey, FlowResource, Impact>
 }>): FlowApplicationService<Impact> {
-	const service = createResourceService({
+	const service = createResourceService<FlowKey, FlowResource, Impact>({
 		...input,
 		validation: validationPort(resource => validateFlowResource(resource)),
 		transitionValidation: immutableIdTransition('flow.immutable_id_changed', 'Flow'),
@@ -81,7 +82,7 @@ export function createAssetService<Impact>(input: Readonly<{
 	diagnostics?: ResourceDiagnosticPort<AssetKey, AuthoredAssetResource>
 	impact: ReferenceImpactAnalyzer<AssetKey, AuthoredAssetResource, Impact>
 }>): AssetApplicationService<Impact> {
-	const service = createResourceService({
+	const service = createResourceService<AssetKey, AuthoredAssetResource, Impact>({
 		...input,
 		validation: validationPort(resource => validateAuthoredAssetResource(resource)),
 		transitionValidation: {
