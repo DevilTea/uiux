@@ -46,7 +46,9 @@ Access (each takes --workspace <dir>; rosters live in $UIUX_HOME, default ~/.uiu
   session list | session revoke <session-id> | session revoke --member <nick>
   access copy --from <old-dir> [--replace]
                            Copy members, tokens and host history from another
-                           Workspace path, once`)
+                           Workspace path, once. Copy before running uiux migrate on
+                           the new path: --replace discards the target's roster and
+                           its own host history, migration system versions included`)
 }
 
 // The LAN listener is not yet available, so `uiux dev` is loopback-only and refuses a non-loopback

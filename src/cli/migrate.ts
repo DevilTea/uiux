@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { createMigrationHistoryRecorder, type MigrationCheckpointReport } from '../application/services/history-recorder'
 import { migrationCheckpointName } from '../domain/history/constants'
 import { FileNativePersistence, type PersistenceFaultHook } from '../persistence/file-native'
+import { CheckpointHostBlobsError } from '../persistence/history/snapshot-checkpoint'
 import { PersistenceError } from '../persistence/errors'
 import type { WorkspaceSchemaPolicy } from '../persistence/schema-policy'
 import { readActiveServerHold } from '../persistence/server-hold'
@@ -23,11 +24,15 @@ export type MigrateCommandOptions = Readonly<{
 	fault?: PersistenceFaultHook
 }>
 
-/** The pre-migration Checkpoint could not be written; no step ran. */
+/** The pre-migration history could not be recorded; no step ran. */
 class PreMigrationHistoryError extends Error {
+	/** The pre-migration Checkpoint, when its record was written before the failure. */
+	readonly checkpointId: string | undefined
+
 	constructor(override readonly cause: unknown) {
 		super(cause instanceof Error ? cause.message : String(cause))
 		this.name = 'PreMigrationHistoryError'
+		this.checkpointId = cause instanceof CheckpointHostBlobsError ? cause.checkpointId : undefined
 	}
 }
 
@@ -125,7 +130,8 @@ export async function runMigrateCommand(options: MigrateCommandOptions): Promise
 	}
 	catch (error) {
 		if (error instanceof PreMigrationHistoryError) {
-			err(`uiux: refusing to migrate ${root}: the pre-migration Checkpoint could not be written, so no step ran: ${error.message}`)
+			err(`uiux: refusing to migrate ${root}: the pre-migration history could not be recorded, so no step ran: ${error.message}`)
+			if (error.checkpointId) err(`  The pre-migration Checkpoint ${error.checkpointId} was written and stays in the Workspace.`)
 			return 1
 		}
 		if (error instanceof PersistenceError) {

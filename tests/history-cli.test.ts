@@ -3,7 +3,7 @@ import { lstat, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createHistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
@@ -287,8 +287,28 @@ describe('uiux migrate records history', () => {
 		// UIUX_HOME inside the Workspace: host history would travel with it, so no step runs.
 		const inside = await migrate({ root, home: join(root, 'home') })
 		expect(inside.code).toBe(1)
-		expect(inside.err).toContain('the pre-migration Checkpoint could not be written, so no step ran')
+		expect(inside.err).toContain('the pre-migration history could not be recorded, so no step ran')
 		expect(await canonicalFiles(root)).toEqual(Object.fromEntries(Object.entries(before).filter(([path]) => path === workspaceRelativePath() || path === viewRelativePath(VIEW_ID))))
 		expect(await exists(join(root, CHECKPOINTS_DIR))).toBe(false)
+		expect(inside.err).not.toContain('was written')
+	})
+
+	it('names the written Checkpoint when only storing its blobs on the host fails, and runs no step', async () => {
+		const { root, home } = await seed(3)
+		const before = await canonicalFiles(root)
+		vi.spyOn(HostHistoryStore.prototype, 'putBlob').mockRejectedValueOnce(new Error('disk full'))
+		try {
+			const result = await migrate({ root, home })
+			expect(result.code).toBe(1)
+			expect(result.err).toContain('the pre-migration history could not be recorded, so no step ran')
+			expect(result.err).not.toContain('Checkpoint could not be written')
+			const [checkpoint, ...others] = (await new CheckpointStore(new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })).list()).records
+			expect(others).toEqual([])
+			expect(result.err).toContain(`The pre-migration Checkpoint ${checkpoint!.id} was written and stays in the Workspace.`)
+			expect(await canonicalFiles(root)).toEqual(before)
+		}
+		finally {
+			vi.restoreAllMocks()
+		}
 	})
 })

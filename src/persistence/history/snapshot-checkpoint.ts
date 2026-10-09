@@ -48,7 +48,20 @@ export async function writeSnapshotCheckpointUnlocked(input: SnapshotCheckpointI
 	}
 	await input.checkpoints.createUnlocked(record, snapshot.blobs)
 	if (input.host) {
-		for (const bytes of snapshot.blobs.values()) await input.host.putBlob(bytes)
+		try {
+			for (const bytes of snapshot.blobs.values()) await input.host.putBlob(bytes)
+		}
+		catch (cause) {
+			throw new CheckpointHostBlobsError(record.id, cause)
+		}
 	}
 	return record
+}
+
+/** The Checkpoint record was written, but copying its blobs to the host store failed. */
+export class CheckpointHostBlobsError extends Error {
+	constructor(readonly checkpointId: string, override readonly cause: unknown) {
+		super(`Checkpoint ${checkpointId} was written, but its blobs could not be stored in host history: ${cause instanceof Error ? cause.message : String(cause)}`)
+		this.name = 'CheckpointHostBlobsError'
+	}
 }

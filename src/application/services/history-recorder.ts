@@ -390,8 +390,11 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 		const { host } = stores
 		// Owner ruling (https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18832873,
 		// item 2): while the Workspace is not writable (migration required, unsupported schema), skip
-		// the Baseline and write nothing to the host store, so the first start after migration still
-		// finds no host history and creates the Baseline. No design write can happen meanwhile.
+		// the Baseline and write nothing to the host store. No design write can happen meanwhile. The
+		// Baseline then follows on a later start only when the host still has no history at all, which
+		// owner ruling https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18834723
+		// item 2 limits to exactly that case: a real `uiux migrate` records its pre-migration Checkpoint
+		// and a host system version, so after it no Baseline is written.
 		try {
 			await this.persistence.assertWritableUnlocked()
 		}
@@ -401,8 +404,6 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 		}
 		const { journal, quarantined, hostListing } = await this.loadUnlocked(stores)
 
-		// `uiux migrate` records its pre-migration Checkpoint and a system version on this host
-		// (issue #132 B7), so after it the host has history and no Baseline follows (Rule 01a11a5e-0b79).
 		const noHostHistory = hostListing.records.length === 0 && hostListing.invalid.length === 0 && !journal && !quarantined
 			&& (await host.listBlobDigests()).length === 0
 		let baseline: string | undefined
