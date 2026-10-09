@@ -72,11 +72,15 @@ export function createSelectedWorkspaceServerRuntime(
 		home: () => options?.uiuxHome ?? resolveUiuxHome(),
 		...(publishCredential ? { publishCredential } : {}),
 	})
+	// Disabled with the factory: for the publish server `open()` resolves nothing, so it never records.
+	const historyRecorder = createHistoryRecorder({ persistence, stores: () => history.open() })
 	const app = createWorkspaceApplicationSession(persistence, {
 		serverOrigin,
 		// Formal capture loads Preview as the in-memory `system:capture` principal (cookie-scoped to the internal origin).
 		captureCookie: () => accessService ? { name: accessService.cookieName, value: accessService.captureCredential } : undefined,
 		history,
+		// A Checkpoint first closes the open autosave and records outside changes (Rule 01a11a5e-00b9-7bf5-8005-9380a388afb8).
+		historyBoundary: () => historyRecorder,
 	})
 	let pending: Promise<AccessService> | undefined
 	function access(): Promise<AccessService> {
@@ -91,8 +95,6 @@ export function createSelectedWorkspaceServerRuntime(
 		})()
 		return pending
 	}
-	// Disabled with the factory: for the publish server `open()` resolves nothing, so it never records.
-	const historyRecorder = createHistoryRecorder({ persistence, stores: () => history.open() })
 	const mcp = createUiuxMcpHttpHandler(app, { leases, history: historyRecorder })
 	return Object.freeze({
 		root: selectedRoot,

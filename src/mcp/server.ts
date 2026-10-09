@@ -13,11 +13,13 @@ import { roleLabel } from '../application/access/policy'
 import { createScopedWorkspaceSession, type ScopedSessionOptions, type ScopedWorkspaceSession } from '../application/access/scoped-session'
 import type { ViewSpecContent } from '../application/services/view-authoring'
 import { VERSION_DIFF_DETAILS } from '../application/services/history-diff'
+import { DEFAULT_VERSION_LIST_LIMIT, MAX_VERSION_LIST_LIMIT } from '../application/services/history-service'
+import { HISTORY_VERSION_TYPES } from '../domain/history/constants'
 import type { ViewResource } from '../domain/views/schema'
 import type { FlowStep } from '../domain/flows/schema'
 import { REVIEW_RESOLUTIONS, type ReviewAnchor, type ReviewDisplayHint, type ReviewEvidenceRef, type ReviewRenderContext, type ReviewResourceRevision } from '../domain/reviews/schema'
 import type { WorkspaceAdapterSelection, ThemeEntry, ViewportPreset } from '../domain/workspace/schema'
-import { isSha256Digest, type JsonObject } from '../domain/validation'
+import { isFullUuid, isSha256Digest, type JsonObject } from '../domain/validation'
 import type { ResolvedRenderContext } from '../domain/render-context/schema'
 import type { HandoffRoot } from '../domain/handoff/schema'
 import { isPersistenceBusyError, persistenceBusyResult } from '../persistence/busy'
@@ -321,6 +323,28 @@ const getVersionDiffSchema = z.object({
 	detail: z.enum(VERSION_DIFF_DETAILS).optional().describe('"summary" (the default) for per-resource statuses only, or "semantic" to add the semantic changes.'),
 }).strict()
 
+// Clause 01a11a5e-265d-7f71-80a3-5dae7f788ae1.
+const createCheckpointSchema = z.object({
+	name: z.string().describe('A descriptive name, 1 to 120 characters after trimming (stored trimmed). Names need not be unique.'),
+	note: z.string().optional().describe('Optional plain-text note of at most 2,000 characters.'),
+}).strict()
+
+// Clause 01a11a5e-26b9-7dfd-b619-a7e4113809f5.
+const listVersionsSchema = z.object({
+	resource: z.object({
+		kind: z.string().min(1),
+		key: z.string().min(1),
+	}).strict().optional().describe('List only the versions in which this resource changed, such as { kind: "view", key: <View ID> } or { kind: "workspace", key: "workspace" }.'),
+	types: z.array(z.enum(HISTORY_VERSION_TYPES)).min(1).optional().describe('List only these version types.'),
+	limit: z.number().int().min(1).max(MAX_VERSION_LIST_LIMIT).optional().describe(`Page size, 1 to ${MAX_VERSION_LIST_LIMIT} (default ${DEFAULT_VERSION_LIST_LIMIT}).`),
+	cursor: z.string().min(1).optional().describe('The nextCursor of the previous page.'),
+}).strict()
+
+/** The URI of the read-only version Resource (Clause 01a11a5e-27c1-77d1-b60d-45a5ccfc1ee7 leaves its grammar to the implementation). */
+export function versionResourceUri(id: string): string {
+	return `uiux://version/${encodeURIComponent(id)}`
+}
+
 const leaseResourcesSchema = z.array(z.object({
 	kind: z.enum(LOCKABLE_KINDS),
 	key: z.string().min(1),
@@ -336,8 +360,14 @@ export function uiuxMcpInstructions(principal: Principal): string {
 	const identity = principal.type === 'member'
 		? `Authenticated as ${principal.nickname} (${principal.kind}, ${roleLabel(principalRole(principal)).toLowerCase()}).`
 		: `Authenticated as ${principal.id}.`
-	return `${identity} Actors and times on Review records are stamped by the server from this identity; do not send actor or at. Tools your role cannot use refuse with auth.scope_denied naming the required role. Resolving Review threads is human-only, in the UIUX Workbench. You may edit your own Review messages (until a later submission or resolution) and retract your own brand-new threads nobody has engaged with. ${LEASE_RECIPE}`
+	return `${identity} Actors and times on Review records are stamped by the server from this identity; do not send actor or at. Tools your role cannot use refuse with auth.scope_denied naming the required role. Resolving Review threads is human-only, in the UIUX Workbench. You may edit your own Review messages (until a later submission or resolution) and retract your own brand-new threads nobody has engaged with. ${LEASE_RECIPE} ${CHECKPOINT_RECOMMENDATION}`
 }
+
+/**
+ * Clause 01a11a5e-2821-7d36-baea-66507ff1f399, verbatim. Advice only (Rule
+ * 01a11a5e-1ca3-740d-8235-01106d8ffc25): no Tool requires a Checkpoint before `release_lock`.
+ */
+export const CHECKPOINT_RECOMMENDATION = 'When you finish a meaningful task that changed design resources, call `create_checkpoint` with a descriptive name, then `release_lock`.'
 
 export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 	const server = mapPersistenceBusy(new McpServer({ name: '@deviltea/uiux', version: packageJson.version }, { instructions: uiuxMcpInstructions(app.principal) }))
@@ -387,6 +417,23 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 					contents: [{ uri: uri.href, mimeType: 'application/octet-stream', blob: Buffer.from(bytes).toString('base64') }],
 				}
 			}
+		},
+	)
+
+	// Clause 01a11a5e-27c1-77d1-b60d-45a5ccfc1ee7: each version is a read-only Resource holding its
+	// record (its file map and, for an autosave, external or system version, its events). `parent` is
+	// its predecessor on the merged timeline, as in list_versions.
+	server.registerResource(
+		'version',
+		new ResourceTemplate('uiux://version/{id}', { list: undefined }),
+		{ title: 'UIUX Workspace version (read-only)', mimeType: 'application/json' },
+		async (uri, { id }) => {
+			const idStr = typeof id === 'string' ? decodeURIComponent(id) : String(id)
+			if (!isFullUuid(idStr)) throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Invalid version ID: ${idStr}`)
+			const outcome = await app.readVersion(idStr)
+			if (outcome.status === 'not_found') throw new ResourceNotFoundError(uri.href, `UIUX version not found: ${idStr}`)
+			if (outcome.status !== 'found') throw new ProtocolError(ProtocolErrorCode.InternalError, `${outcome.code}: ${outcome.message}`, outcome)
+			return { contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(outcome) }] }
 		},
 	)
 
@@ -839,6 +886,51 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
 				structuredContent: outcome,
 				...(outcome.status === 'compared' ? {} : { isError: true }),
+			}
+		},
+	)
+
+	server.registerTool(
+		'list_versions',
+		{
+			title: 'List UIUX versions',
+			description: 'List the Workspace version timeline (autosaves, Checkpoints, changes made outside UIUX as external versions, and system versions), newest first. Each version has id, type, name (Checkpoints), actor, at, parent (the ID of the version just before it on the full timeline, null for the first; it does not change with the filters) and summary, the resources whose revision differs from parent ({ kind, key, status }). Call get_version_diff with from set to a row\'s parent and to set to its id to see what that version changed, the same comparison the Workbench shows. Each version is also the read-only Resource uiux://version/{id}. Page with nextCursor. Refusals: history.invalid_listing, history.invalid_cursor.',
+			inputSchema: listVersionsSchema,
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (input) => {
+			const outcome = await app.listVersions({
+				...(input.resource === undefined ? {} : { resource: input.resource }),
+				...(input.types === undefined ? {} : { types: input.types }),
+				...(input.limit === undefined ? {} : { limit: input.limit }),
+				...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+			})
+			const output = outcome.status === 'listed'
+				? { ...outcome, versions: outcome.versions.map(version => ({ ...version, resourceUri: versionResourceUri(version.id) })) }
+				: outcome
+			return {
+				content: [{ type: 'text' as const, text: JSON.stringify(output) }],
+				structuredContent: output,
+				...(outcome.status === 'listed' ? {} : { isError: true }),
+			}
+		},
+	)
+
+	server.registerTool(
+		'create_checkpoint',
+		{
+			title: 'Create UIUX Checkpoint',
+			description: `Name the current state of the Workspace as a Checkpoint, a version kept until a human deletes it. Needs no edit lease and changes no design file; the open autosave closes first, and changes made outside UIUX are recorded before it. A Checkpoint is immutable: to correct one, create another. Returns { status: "created", versionId, at, resources }, resources being the number of resources it records. Refusals: history.invalid_checkpoint_name, history.invalid_checkpoint_note, workspace.migration_required, workspace.schema_unsupported, history.boundary_failed (retryable). ${CHECKPOINT_RECOMMENDATION}`,
+			inputSchema: createCheckpointSchema,
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async (input) => {
+			const outcome = await app.createCheckpoint({ name: input.name, ...(input.note === undefined ? {} : { note: input.note }) })
+			const output = outcome.status === 'created' ? { ...outcome, resourceUri: versionResourceUri(outcome.versionId) } : outcome
+			return {
+				content: [{ type: 'text' as const, text: JSON.stringify(output) }],
+				structuredContent: output,
+				...(outcome.status === 'created' ? {} : { isError: true }),
 			}
 		},
 	)
