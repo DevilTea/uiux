@@ -207,6 +207,8 @@ function openInCurrentContext(): void {
 	selectedThemeId.value = saved.theme
 	workbench.contextBeforeThread.value = undefined
 	comments.announce(t('threadContext.announceCurrent'))
+	// The button unmounts with the offer: keep focus in the bubble instead of dropping it to the body.
+	void nextTick(() => root.value?.focus({ preventScroll: true }))
 }
 
 // Focus lands in the bubble on open; Escape returns it to the pin (the comments layer does that).

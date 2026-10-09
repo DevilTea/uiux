@@ -84,8 +84,6 @@ export type ComposerState = Readonly<{
 	hint?: Readonly<{ x: number; y: number }>
 	text: string
 	scope: 'this' | 'all'
-	/** The Preview render context the composer was opened in, Workspace-local keys only (Rule 01a1170f-c0ce). */
-	renderContext?: ReviewRenderContext
 	askingDiscard: boolean
 	posting: boolean
 	error?: FetchErrorDetails
@@ -325,7 +323,8 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	/**
 	 * What a thread started now records (Rule 01a1170f-c0ce): the Preview's current Locale,
 	 * viewport and theme that are Workspace-local keys, never a built-in fallback, and nothing when
-	 * none is. Captured when the composer opens, beside the click point it comments on.
+	 * none is. Captured when the thread is sent, so a context changed while composing is the one
+	 * recorded (owner ruling 2026-10-09, Discussion #7).
 	 */
 	function currentRenderContext(): ReviewRenderContext | undefined {
 		const keys = workbench.renderContextKeys.value
@@ -343,7 +342,6 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		}
 		openThreadId.value = undefined
 		const hint = hintFromReport(target.widgetId, target.point)
-		const renderContext = currentRenderContext()
 		composer.value = Object.freeze({
 			sequence: ++composerSequence,
 			widgetId: target.widgetId,
@@ -351,7 +349,6 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 			...(hint ? { hint } : {}),
 			text: '',
 			scope: currentVariant.value ? 'this' : 'all',
-			...(renderContext ? { renderContext } : {}),
 			askingDiscard: false,
 			posting: false,
 		})
@@ -443,12 +440,13 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		let created = current.created
 		try {
 			if (!created) {
+				const renderContext = currentRenderContext()
 				const response = await post('/api/reviews', createThreadBody({
 					viewId,
 					widgetId: current.widgetId,
 					variantNames: current.scope === 'this' && currentVariant.value ? [currentVariant.value] : [],
 					...(hint ? { hint } : {}),
-					...(current.renderContext ? { renderContext: current.renderContext } : {}),
+					...(renderContext ? { renderContext } : {}),
 				}))
 				if (!response.key || !response.revision) throw new Error(t('comments.errors.createFailed'))
 				created = { key: response.key, revision: response.revision }

@@ -1,8 +1,8 @@
 import { computed, effectScope, inject, nextTick, provide, ref, shallowRef, watch, type InjectionKey } from 'vue'
-import { navigateTo, useI18n, useRoute, useRouter, useToast } from '#imports'
+import { navigateTo, useI18n, useRoute, useRouter } from '#imports'
 import { anchorViewId, type ReviewResolution, type ReviewThread } from '../../src/domain/reviews/schema'
 import { deriveWidgetTree, flattenWidgetTree } from '../../src/preview/widget-tree'
-import { effectiveRenderContext, type MissingRenderContextKey } from '../../src/preview/render-context-options'
+import { effectiveRenderContext } from '../../src/preview/render-context-options'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
 import {
 	buildInboxThread,
@@ -26,6 +26,7 @@ import { submissionBody, type ReviewSubmissionDraft } from '../utils/review-subm
 import { useAccess } from './useAccess'
 import { useUiuxClient } from './useUiuxClient'
 import { useWorkbench } from './useWorkbench'
+import { useRecordedRenderContext } from './useRecordedRenderContext'
 import type { ReviewSummary, ViewRead } from './workbench-types'
 
 /**
@@ -77,6 +78,7 @@ function createReviewInbox() {
 	const uiux = useUiuxClient()
 	const access = useAccess()
 	const workbench = useWorkbench()
+	const recordedContext = useRecordedRenderContext()
 	const { reviews, views, reviewReadOnly, authorReadOnly, preview } = workbench
 
 	// -------------------------------------------------------------------------------------------
@@ -541,17 +543,6 @@ function createReviewInbox() {
 	// Canvas hand-offs
 	// -------------------------------------------------------------------------------------------
 
-	/**
-	 * The View deep link that reproduces a thread's context (Rule 01a116f0-8ec3): its View, its
-	 * Variant when scoped to one, the recorded Locale, viewport and theme that still exist, the
-	 * thread open. The chrome language and theme never ride in it (Rule 01a118a1-9e11).
-	 */
-	function canvasLocation(thread: InboxThread) {
-		// Workspace threads are never on a canvas: their only link is `/reviews?thread=<id>`.
-		if (!thread.viewId) return { path: '/reviews', query: { thread: thread.id } }
-		return viewLocation(thread.viewId, inboxCanvasLink(thread, workbench.renderContextKeys.value).options)
-	}
-
 	/** The reader's current Preview context selections (empty members are the defaults). */
 	function readerContext(): CanvasLinkContext {
 		return { locale: workbench.selectedLocale.value, viewport: workbench.selectedViewportId.value, theme: workbench.selectedThemeId.value }
@@ -562,14 +553,17 @@ function createReviewInbox() {
 	}
 
 	/**
-	 * Opens the thread on its canvas in its recorded context. A recorded key that no longer exists
-	 * opens with its default and a non-blocking notice naming it (Rule 01a1170f-c165). When this
-	 * changes what the Preview shows, the reader's own context is kept so the thread header can
-	 * offer it instead (Rule 01a1170f-c11d).
+	 * Opens the thread on its canvas in its recorded context (Rule 01a116f0-8ec3): its View, its
+	 * Variant when scoped to one, the recorded Locale, viewport and theme, the thread open; never the
+	 * chrome language or theme (Rule 01a118a1-9e11). The recorded keys are checked against the
+	 * Workspace's settings now, and one that no longer exists opens with its default and a notice
+	 * naming it (Rule 01a1170f-c165). When this changes what the Preview shows, the reader's own
+	 * context is kept so the thread header can offer it instead (Rule 01a1170f-c11d).
 	 */
-	function openInCanvas(thread: InboxThread): void {
+	async function openInCanvas(thread: InboxThread): Promise<void> {
 		if (!thread.viewId || !threadViewExists(thread)) return
-		const link = inboxCanvasLink(thread, workbench.renderContextKeys.value)
+		const viewId = thread.viewId
+		const link = inboxCanvasLink(thread, thread.renderContext ? await recordedContext.keysAtOpen() : workbench.renderContextKeys.value)
 		const before = readerContext()
 		const after = shows({ locale: link.options.locale, viewport: link.options.viewport, theme: link.options.theme })
 		const current = shows(before)
@@ -577,9 +571,8 @@ function createReviewInbox() {
 		workbench.contextBeforeThread.value = changes
 			? { threadId: thread.id, locale: before.locale ?? '', viewport: before.viewport ?? '', theme: before.theme ?? '' }
 			: undefined
-		void router.push(viewLocation(thread.viewId, link.options)).then((failure) => {
-			if (!failure && link.missing.length) noticeMissingContext(link.missing)
-		})
+		const failure = await router.push(viewLocation(viewId, link.options))
+		if (!failure) recordedContext.noticeMissingContext(link.missing)
 	}
 
 	/** "Open in current context" (Rule 01a1170f-c11d): the same canvas link in the reader's own Preview context. */
@@ -587,13 +580,6 @@ function createReviewInbox() {
 		if (!thread.viewId || !threadViewExists(thread)) return
 		workbench.contextBeforeThread.value = undefined
 		void navigateTo(viewLocation(thread.viewId, canvasLinkOptions(thread, readerContext())))
-	}
-
-	const toast = useToast()
-	/** The stale-key notice (Rule 01a1170f-c165): a non-blocking toast, one sentence per missing member. */
-	function noticeMissingContext(missing: readonly MissingRenderContextKey[]): void {
-		const description = missing.map(item => t(`threadContext.missing.${item.member}`, { key: item.key })).join(' ')
-		toast.add({ title: t('threadContext.noticeTitle'), description, color: 'warning', icon: 'i-lucide-triangle-alert', duration: 10_000 })
 	}
 
 	function threadViewExists(thread: InboxThread): boolean {
@@ -674,7 +660,6 @@ function createReviewInbox() {
 		createComment,
 		resetCompose,
 		primaryResolution,
-		canvasLocation,
 		openInCanvas,
 		openInCurrentContext,
 		threadViewExists,

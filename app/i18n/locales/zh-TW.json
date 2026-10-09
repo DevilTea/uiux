@@ -2099,7 +2099,7 @@
   "threadContext": {
     "srPrefix": "記錄的預覽情境：",
     "label": "記錄的預覽情境：{context}",
-    "missingSr": "（此 Workspace 已沒有）",
+    "missingSr": "（已不在此 Workspace 中）",
     "openInCurrent": "以目前情境開啟",
     "openInCurrentHint": "改用你自己的預覽情境顯示此討論串，而非它記錄的情境",
     "announceCurrent": "已改用你目前的預覽情境顯示此討論串。",

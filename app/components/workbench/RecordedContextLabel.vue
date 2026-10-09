@@ -31,7 +31,7 @@ const title = computed(() => t('threadContext.label', { context: text.value }))
     class="inline-flex min-w-0 items-center gap-1 rounded-sm border border-default px-1.5 font-mono leading-5"
     :title="title"
     data-thread-context
-    :data-context="text"
+    :data-context-label="text"
   >
     <UIcon
       name="i-lucide-scan-eye"

@@ -207,6 +207,23 @@ export function createWorkbenchState() {
 		if (reviewPage) reviews.value = reviewPage.items
 	}
 
+	/**
+	 * Re-reads the manifest and the Locale list, so recorded render-context keys are checked against
+	 * the Workspace's settings at open time, not a snapshot from page load (owner ruling 2026-10-09,
+	 * Discussion #7). A failed read keeps the last known state.
+	 */
+	async function refreshRenderContextKeys(): Promise<void> {
+		const [workspaceRead, localePage] = await Promise.all([
+			uiux.readResource<WorkspaceRead>('workspace', 'workspace').catch(() => undefined),
+			uiux.listResources<LocaleSummary>(['locale'], { limit: 100 }).catch(() => undefined),
+		])
+		if (workspaceRead) workspace.value = workspaceRead
+		if (localePage) {
+			discoveredLocales.value = localePage.items.map(item => item.key)
+			localeRevisions.value = Object.fromEntries(localePage.items.map(item => [item.key, item.revision]))
+		}
+	}
+
 	async function refresh(onViewLoaded?: () => void): Promise<void> {
 		loading.value = true
 		error.value = undefined
@@ -290,6 +307,7 @@ export function createWorkbenchState() {
 		loadSelectedView,
 		refresh,
 		refreshCounts,
+		refreshRenderContextKeys,
 	}
 }
 
