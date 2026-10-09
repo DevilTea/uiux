@@ -106,12 +106,13 @@ export type CanonicalResourceChange = Readonly<{
  * `beforeCanonicalWrite` can run without a following `afterCanonicalCommit` when the write itself
  * then fails or decides not to write. Each hook may hold the lock for at most the observer timeout
  * ({@link OBSERVER_HOOK_TIMEOUT_MS} unless configured): a hook still running then is abandoned
- * (the write goes on and `recordingGap` is set) and keeps running without the lock, so an observer
- * must refuse to start new work until its abandoned work settles.
+ * (the write goes on and `recordingGap` is set) and keeps running without the lock: its `signal` is
+ * aborted then, after which it must not read the Workspace or consume the gap, and an observer must
+ * refuse to start new work until its abandoned work settles.
  */
 export type CanonicalWriteObserver = Readonly<{
-	beforeCanonicalWrite?(context: DesignWriteContext, resources: readonly CanonicalResourceBefore[]): void | Promise<void>
-	afterCanonicalCommit?(context: DesignWriteContext, changes: readonly CanonicalResourceChange[]): void | Promise<void>
+	beforeCanonicalWrite?(context: DesignWriteContext, resources: readonly CanonicalResourceBefore[], signal: AbortSignal): void | Promise<void>
+	afterCanonicalCommit?(context: DesignWriteContext, changes: readonly CanonicalResourceChange[], signal: AbortSignal): void | Promise<void>
 }>
 
 /**
@@ -1873,10 +1874,10 @@ async function commitCanonicalWrite<Written extends boolean | void>(
 			reportObserverFailure(state, 'could not read the resources before a design write', error)
 		}
 	}
-	const ready = await invokeObserver(persistence, state, 'beforeCanonicalWrite', async () => observer.beforeCanonicalWrite?.(context, before.map(resourceBeforeWrite)))
+	const ready = await invokeObserver(persistence, state, 'beforeCanonicalWrite', async signal => observer.beforeCanonicalWrite?.(context, before.map(resourceBeforeWrite), signal))
 	const written = await write()
 	if (written === false || !ready) return written
-	await invokeObserver(persistence, state, 'afterCanonicalCommit', async () => observer.afterCanonicalCommit?.(context, before.map(resourceChangeAfterCommit)))
+	await invokeObserver(persistence, state, 'afterCanonicalCommit', async signal => observer.afterCanonicalCommit?.(context, before.map(resourceChangeAfterCommit), signal))
 	return written
 }
 
@@ -1941,19 +1942,22 @@ function resourceChangeAfterCommit(entry: ResourceFilesBefore): CanonicalResourc
 
 /**
  * Runs one hook under the observer mark and the observer timeout; true when it settled in time
- * without throwing. A hook still running at the timeout is abandoned: the write goes on, the gap is
- * flagged, and a later rejection of the abandoned hook is only logged.
+ * without throwing. A hook still running at the timeout is abandoned: its signal is aborted (it no
+ * longer holds the lock, so it must not read the Workspace or consume the gap), the write goes on,
+ * the gap is flagged, and a later rejection of the abandoned hook is only logged.
  */
-async function invokeObserver(persistence: FileNativePersistence, state: ObserverState, hook: keyof CanonicalWriteObserver, call: () => Promise<unknown>): Promise<boolean> {
+async function invokeObserver(persistence: FileNativePersistence, state: ObserverState, hook: keyof CanonicalWriteObserver, call: (signal: AbortSignal) => Promise<unknown>): Promise<boolean> {
 	const mark = { running: true, persistence }
+	const abandon = new AbortController()
 	let timer: ReturnType<typeof setTimeout> | undefined
 	try {
-		const pending = observerScope.run(mark, call)
+		const pending = observerScope.run(mark, () => call(abandon.signal))
 		const timedOut = new Promise<'timeout'>((resolve) => {
 			timer = setTimeout(resolve, state.timeoutMilliseconds, 'timeout')
 			timer.unref?.()
 		})
 		if (await Promise.race([pending.then(() => 'settled' as const), timedOut]) === 'timeout') {
+			abandon.abort()
 			pending.catch((error: unknown) => console.error(`uiux: abandoned history ${hook} failed later: ${error instanceof Error ? error.message : String(error)}`))
 			reportObserverFailure(state, `${hook} did not finish within ${state.timeoutMilliseconds} ms and was abandoned`, undefined)
 			return false

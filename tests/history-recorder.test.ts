@@ -18,6 +18,7 @@ import {
 	currentDesignWriteContext,
 	readMergedTimeline,
 	runWithDesignWriteContext,
+	versionResourcesFromSnapshot,
 	type DesignWriteContext,
 } from '../src/persistence/history'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
@@ -361,7 +362,7 @@ describe('autosave boundaries', () => {
 		const revision = await ctx.viewRevision()
 		const context: DesignWriteContext = { actor: actorOf(HUMAN), source: 'workbench', operation: 'updateViewSpec' }
 		const change = { resource: { kind: 'view', key: VIEW_ID }, beforeRevision: revision, afterRevision: revision, files: [{ path, bytes }] }
-		for (let index = 0; index < AUTOSAVE_MAX_EVENTS - 1; index++) await ctx.recorder.observer.afterCanonicalCommit!(context, [change])
+		for (let index = 0; index < AUTOSAVE_MAX_EVENTS - 1; index++) await ctx.recorder.observer.afterCanonicalCommit!(context, [change], new AbortController().signal)
 		expect(ctx.recorder.openAutosaveId).toBeDefined()
 		await editView(ctx, HUMAN, 'the 200th event')
 		expect(ctx.recorder.openAutosaveId).toBeUndefined()
@@ -599,18 +600,67 @@ describe('recording failures', () => {
 		const busyRevision = await editView(ctx, HUMAN, 'human again')
 		expect(Date.now() - began).toBeLessThan(3_000)
 
-		// Once the store recovers, the abandoned close finishes: the agent's autosave, then its rescan
-		// records both skipped writes as one external version flagged as a recording gap.
+		// Once the store recovers, the abandoned close writes the agent's autosave but, no longer
+		// holding the lock, neither rescans nor consumes the gap: it journals the gap instead.
+		const scan = vi.spyOn(ctx.persistence, 'scanVersionedSnapshotUnlocked')
 		release()
-		await vi.waitFor(async () => expect(await ctx.hostVersions()).toHaveLength(2))
-		// Retried until the abandoned close has fully settled (until then the recorder refuses new work).
-		expect(await vi.waitFor(() => ctx.recorder.closeOpenAutosave('checkpoint'))).toEqual({ reason: 'checkpoint' })
+		await vi.waitFor(async () => {
+			expect(await ctx.hostVersions()).toHaveLength(1)
+			expect((await ctx.host.readOpenJournal())?.entries.map(entry => entry.type)).toContain('gap')
+		})
+		expect(scan).not.toHaveBeenCalled()
+		// The next boundary under the lock records both skipped writes as one external version.
+		expect(await vi.waitFor(() => ctx.recorder.closeOpenAutosave('checkpoint'))).toMatchObject({ reason: 'checkpoint', external: expect.any(String) })
+		expect(scan).toHaveBeenCalledTimes(1)
+		expect(await ctx.host.readOpenJournal()).toBeUndefined()
 		const versions = await ctx.hostVersions()
 		expect(versions.map(version => version.type)).toEqual(['autosave', 'external'])
 		expect(revisionOf(versions[0]!, 'view', VIEW_ID)).toBe(agentRevision)
 		expect(versions[1]).toMatchObject({ recordingGap: true })
 		expect(revisionOf(versions[1]!, 'view', VIEW_ID)).toBe(busyRevision)
 		expect(humanRevision).not.toBe(busyRevision)
+		await ctx.recorder.stop()
+	})
+
+	it('never rescans outside the lock when an abandoned boundary finishes during a slow write (owner ruling 3, review M1)', async () => {
+		let slowWrite: (() => Promise<void>) | undefined
+		const ctx = await fixture({
+			observerTimeoutMilliseconds: 100,
+			fault: async (point, details) => {
+				if (point === 'file.before_rename' && details.path === viewRelativePath(VIEW_ID) && slowWrite) await slowWrite()
+			},
+		})
+		await ctx.recorder.start()
+		vi.spyOn(console, 'error').mockImplementation(() => undefined)
+		await editView(ctx, AGENT, 'agent')
+		let release!: () => void
+		const stalled = new Promise<void>(resolve => { release = resolve })
+		const writeVersion = ctx.host.writeVersion.bind(ctx.host)
+		vi.spyOn(ctx.host, 'writeVersion').mockImplementationOnce(async (record) => {
+			await stalled
+			return writeVersion(record)
+		})
+		const scan = vi.spyOn(ctx.persistence, 'scanVersionedSnapshotUnlocked')
+		let scansDuringW1 = -1
+		// W1, the human's write, is slow: the store recovers while W1's bytes are not on disk yet, so
+		// a rescan by the abandoned close would see the Workspace mid-write without the lock.
+		slowWrite = async () => {
+			slowWrite = undefined
+			const before = scan.mock.calls.length
+			release()
+			await new Promise(resolve => setTimeout(resolve, 300))
+			scansDuringW1 = scan.mock.calls.length - before
+		}
+		const w1 = await editView(ctx, HUMAN, 'W1')
+		expect(scansDuringW1).toBe(0)
+		expect(ctx.persistence.recordingGap).toBe(true)
+		await vi.waitFor(async () => expect((await ctx.host.readOpenJournal())?.entries.map(entry => entry.type)).toContain('gap'))
+		expect(scan).not.toHaveBeenCalled()
+
+		expect(await vi.waitFor(() => ctx.recorder.closeOpenAutosave('checkpoint'))).toMatchObject({ external: expect.any(String) })
+		const versions = await ctx.hostVersions()
+		expect(versions.map(version => [version.type, version.actor.type, version.recordingGap])).toEqual([['autosave', 'agent', undefined], ['external', 'external', true]])
+		expect(revisionOf(versions[1]!, 'view', VIEW_ID)).toBe(w1)
 		await ctx.recorder.stop()
 	})
 
@@ -625,6 +675,115 @@ describe('recording failures', () => {
 		expect(Date.now() - began).toBeLessThan(2_000)
 		expect(after).not.toHaveBeenCalled()
 		expect(ctx.persistence.consumeRecordingGap()).toBe(true)
+	})
+})
+
+describe('review follow-ups on PR #156', () => {
+	const restart = (ctx: Fixture) => createHistoryRecorder({ persistence: ctx.persistence, stores: async () => ({ host: ctx.host, checkpoints: ctx.checkpoints }), clock: ctx.clock, log: () => undefined })
+
+	it('writes nothing to the host while migration is required, then creates the Baseline on the first start after migration (owner ruling 2, review M2)', async () => {
+		const ctx = await fixture({ seed: false })
+		await mkdir(join(ctx.root, '.uiux'), { recursive: true })
+		await writeFile(join(ctx.root, '.uiux/workspace.json'), `${JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })}\n`)
+		// A Checkpoint committed by another worktree is already in the Workspace.
+		const other = randomUUID()
+		await ctx.persistence.withLock(async () => {
+			const snapshot = versionResourcesFromSnapshot(await ctx.persistence.scanVersionedSnapshotUnlocked())
+			await ctx.checkpoints.createUnlocked({ historySchemaVersion: 1, id: other, type: 'checkpoint', actor: actorOf(HUMAN), at: new Date(START - 60_000).toISOString(), workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1, resources: snapshot.resources, name: 'From another worktree', source: 'workbench' }, snapshot.blobs)
+		})
+
+		expect(await ctx.recorder.start()).toEqual({ enabled: false })
+		expect(await ctx.hostVersions()).toEqual([])
+		expect(await ctx.host.listBlobDigests()).toEqual([])
+		expect(await ctx.host.readOpenJournal()).toBeUndefined()
+		expect((await ctx.checkpoints.list()).records.map(checkpoint => checkpoint.id)).toEqual([other])
+		await ctx.recorder.stop()
+
+		await ctx.persistence.migrateWorkspace()
+		const after = restart(ctx)
+		const report = await after.start()
+		expect(report).toMatchObject({ enabled: true, baseline: expect.any(String) })
+		const checkpoints = (await ctx.checkpoints.list()).records
+		expect(checkpoints.map(checkpoint => checkpoint.id)).toEqual([other, report.baseline])
+		expect(checkpoints[1]).toMatchObject({ name: 'Baseline', parentCheckpoint: other, workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION })
+		await after.stop()
+	})
+
+	it('journals a recording gap, so a kill before the next boundary still flags the next start\'s external version (review L1)', async () => {
+		const ctx = await fixture()
+		await ctx.recorder.start()
+		vi.spyOn(console, 'error').mockImplementation(() => undefined)
+		const first = await editView(ctx, HUMAN, 'recorded')
+		vi.spyOn(ctx.host, 'putBlob').mockRejectedValueOnce(new Error('disk full'))
+		const missed = await editView(ctx, HUMAN, 'missed')
+		expect((await ctx.host.readOpenJournal())!.entries.map(entry => entry.type)).toEqual(['begin', 'event', 'gap'])
+		// SIGKILL: no shutdown boundary, and the in-memory gap flag is gone with the process.
+		ctx.persistence.setWriteObserver(undefined)
+
+		const report = await restart(ctx).start()
+		expect(report.boundary).toMatchObject({ reason: 'leftover', autosave: expect.any(String), external: expect.any(String) })
+		const versions = await ctx.hostVersions()
+		expect(versions.map(version => [version.type, version.recordingGap])).toEqual([['autosave', undefined], ['external', true]])
+		expect(revisionOf(versions[0]!, 'view', VIEW_ID)).toBe(first)
+		expect(revisionOf(versions[1]!, 'view', VIEW_ID)).toBe(missed)
+	})
+
+	it('treats a journal line cut short by a crash as a recording gap (review L1)', async () => {
+		const ctx = await fixture()
+		await ctx.recorder.start()
+		await editView(ctx, HUMAN, 'recorded')
+		ctx.persistence.setWriteObserver(undefined)
+		await editView(ctx, HUMAN, 'never journaled')
+		await writeFile(ctx.host.paths.open, `${await readFile(ctx.host.paths.open, 'utf8')}{"type":"ga`, { mode: 0o600 })
+		await restart(ctx).start()
+		expect((await ctx.hostVersions()).map(version => [version.type, version.recordingGap])).toEqual([['autosave', undefined], ['external', true]])
+	})
+
+	it('still journals a write already past its before hook when shutdown takes the no-lock path (review L2)', async () => {
+		let duringWrite: (() => Promise<void>) | undefined
+		const ctx = await fixture({
+			fault: async (point, details) => {
+				if (point === 'file.before_rename' && details.path === viewRelativePath(VIEW_ID) && duringWrite) await duringWrite()
+			},
+		})
+		await ctx.recorder.start()
+		duringWrite = async () => {
+			duringWrite = undefined
+			await ctx.recorder.stop()
+		}
+		const revision = await editView(ctx, HUMAN, 'written while stopping')
+		expect((await ctx.host.readOpenJournal())!.entries.map(entry => entry.type)).toEqual(['begin', 'event'])
+
+		const report = await restart(ctx).start()
+		expect(report.boundary).toMatchObject({ reason: 'leftover', autosave: expect.any(String) })
+		expect(report.boundary).not.toHaveProperty('external')
+		const versions = await ctx.hostVersions()
+		expect(versions.map(version => [version.type, version.actor.type])).toEqual([['autosave', 'human']])
+		expect(versions[0]!.events.map(event => event.afterRevision)).toEqual([revision])
+	})
+
+	it('discards an open autosave that never journaled an event and writes no version for it (review L3)', async () => {
+		const ctx = await fixture()
+		await ctx.recorder.start()
+		vi.spyOn(console, 'error').mockImplementation(() => undefined)
+		const append = ctx.host.appendOpenEntry.bind(ctx.host)
+		let failed = false
+		vi.spyOn(ctx.host, 'appendOpenEntry').mockImplementation(async (entry) => {
+			if (entry.type === 'event' && !failed) {
+				failed = true
+				throw new Error('journal append failed')
+			}
+			return append(entry)
+		})
+		const revision = await editView(ctx, HUMAN, 'event not journaled')
+		expect(ctx.recorder.openAutosaveId).toBeDefined()
+		expect(await ctx.recorder.closeOpenAutosave('checkpoint')).toMatchObject({ external: expect.any(String) })
+		expect(await ctx.recorder.closeOpenAutosave('checkpoint')).toEqual({ reason: 'checkpoint' })
+		const versions = await ctx.hostVersions()
+		expect(versions.map(version => [version.type, version.recordingGap])).toEqual([['external', true]])
+		expect(revisionOf(versions[0]!, 'view', VIEW_ID)).toBe(revision)
+		expect(await ctx.host.readOpenJournal()).toBeUndefined()
+		await ctx.recorder.stop()
 	})
 })
 
