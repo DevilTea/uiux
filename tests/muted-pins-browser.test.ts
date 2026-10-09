@@ -286,8 +286,53 @@ describe('Muted pins and bubbles (Part 7)', () => {
 			// The stale key is never rebound: the thread records it, and the header marks it as gone.
 			await expect.poll(() => bubble.locator('[data-context-member="viewportId"]').getAttribute('data-context-missing')).toBe('')
 			expect((await api<ReviewRead>(`/api/resources/review/${threadId}`)).resource.renderContext).toEqual({ locale: 'zh-TW', viewportId: 'watch' })
-			// The reader's context stays on offer.
+			// The stale key keeps it muted, but nothing left could be applied, so no switch is offered
+			// (owner ruling 2026-10-09, muted pins, ruling 1); the reader's context stays on offer.
+			await expect.poll(() => muted(page, threadId)).toBe(true)
+			expect(await bubble.getAttribute('data-thread-muted')).toBe('')
+			expect(await bubble.locator('[data-thread-open-recorded]').count()).toBe(0)
 			expect(await bubble.locator('[data-thread-open-current]').count()).toBe(1)
+			// The announcement names only the member applied; the notice names the missing one.
+			await expect.poll(() => page.locator('[role="status"][aria-live="polite"]').allTextContents().then(texts => texts.map(text => text.trim()))).toContain('Showing the thread in its recorded Preview context: zh-TW.')
+			expect(await chrome(page)).toEqual(LIGHT_EN_US)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('drops an activation that is still reading the settings once the user presses Escape or picks another pin', async () => {
+		const viewId = await seedView('Muted race')
+		const mutedId = await seedThread(viewId, { widgetId: 'first', body: 'Slow switch.', renderContext: { locale: 'zh-TW' } })
+		const plainId = await seedThread(viewId, { widgetId: 'third', body: 'A plain thread.' })
+		const { context, page } = await open(`/views/${viewId}?locale=en-US&viewport=mobile&theme=dark`)
+		try {
+			await livePreview(page, viewId)
+			await expect.poll(() => drawn(page, mutedId), { timeout: 15_000 }).toBe(true)
+			await expect.poll(() => drawn(page, plainId), { timeout: 15_000 }).toBe(true)
+			// Activation re-reads the settings first; hold that read so the user can act meanwhile.
+			let held = 0
+			await page.route('**/api/resources/workspace/workspace', async (route) => {
+				held++
+				await new Promise(resolve => setTimeout(resolve, 1_500))
+				await route.continue()
+			})
+
+			// Escape while nothing is open yet: the activation is cancelled.
+			await pin(page, mutedId).click()
+			await expect.poll(() => held).toBe(1)
+			await page.keyboard.press('Escape')
+			await page.waitForTimeout(2_500)
+			expect(query(page)).toMatchObject({ locale: 'en-US', viewport: 'mobile', theme: 'dark' })
+			expect(query(page)).not.toHaveProperty('thread')
+			expect(await page.locator('[data-thread-bubble]').count()).toBe(0)
+			expect(await muted(page, mutedId)).toBe(true)
+
+			// Another pin picked meanwhile: that thread opens, and the late activation switches nothing.
+			await pin(page, mutedId).click()
+			await expect.poll(() => held).toBe(2)
+			await pin(page, plainId).click()
+			await page.waitForTimeout(2_500)
+			expect(query(page)).toMatchObject({ locale: 'en-US', viewport: 'mobile', theme: 'dark', thread: plainId })
+			expect(await muted(page, mutedId)).toBe(true)
 			expect(await chrome(page)).toEqual(LIGHT_EN_US)
 		}
 		finally { await context.close() }

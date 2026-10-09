@@ -71,7 +71,7 @@ const items = computed<DropdownMenuItem[][]>(() => !open.value ? NO_ITEMS : [
 		const context = comments.mutedContexts.value.get(id)
 		return {
 			label: meta?.title ?? id,
-			description: context === undefined ? meta?.detail : `${meta?.detail ?? ''} · ${context}`,
+			description: [meta?.detail, context].filter(Boolean).join(' · ') || undefined,
 			...(meta?.agent ? { icon: 'i-lucide-bot' } : { avatar: { text: meta?.initials ?? '', alt: meta?.name } }),
 			onSelect: () => openAndFocus(id),
 		}

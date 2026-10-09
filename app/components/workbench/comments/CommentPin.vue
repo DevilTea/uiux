@@ -176,6 +176,7 @@ const isMuted = computed(() => props.muted || props.context !== undefined)
  */
 .comment-pin.is-muted { background: var(--ui-bg); color: var(--ui-annotation); border: 1.5px solid var(--wb-pin); box-shadow: var(--wb-shadow-pin-drop); }
 .comment-pin.is-muted.is-resolved { color: var(--ui-text-muted); border-color: var(--wb-pin-resolved); }
+.comment-pin.is-muted.is-lift { box-shadow: 0 0 0 2px var(--ui-bg), 0 0 0 4px var(--wb-pin), 0 2px 6px oklch(0% 0 0 / 0.3); }
 .comment-pin.is-muted.is-open { box-shadow: 0 0 0 2px var(--ui-bg), 0 0 0 4px var(--ui-primary), var(--wb-shadow-pin-drop); }
 .comment-pin-context {
   position: absolute;
@@ -191,6 +192,10 @@ const isMuted = computed(() => props.muted || props.context !== undefined)
   line-height: 1rem;
   font-weight: 400;
   white-space: nowrap;
+  /* Long keys truncate; the full context stays in the pin's accessible name. */
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
   pointer-events: none;
 }
 .comment-pin.is-dim { opacity: 0.4; pointer-events: none; }

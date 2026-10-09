@@ -217,6 +217,8 @@ function openInCurrentContext(): void {
  * the recorded context; activating that switches the Preview like the muted pin (Rule 01a1170f-c1f7).
  */
 const muted = computed(() => comments.mutedThreadIds.value.has(props.threadId))
+/** The offer is hidden when no differing recorded member still exists (owner ruling 2026-10-09, muted pins, ruling 1). */
+const switchable = computed(() => comments.switchableThreadIds.value.has(props.threadId))
 async function openInRecordedContext(): Promise<void> {
 	if (!await comments.openInRecordedContext(props.threadId)) return
 	// The offer unmounts once the context matches: keep focus in the bubble.
@@ -299,7 +301,7 @@ watch(() => props.threadId, () => {
         data-thread-muted-note
       >{{ t('threadContext.mutedNote') }}</span>
       <UButton
-        v-if="muted"
+        v-if="switchable"
         color="neutral"
         variant="link"
         size="xs"

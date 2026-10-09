@@ -1137,7 +1137,7 @@
     },
     "muted": {
       "label": "{label}, recorded in another Preview context: {context}",
-      "clusterLabel": "{label}, all recorded in another Preview context",
+      "clusterLabel": "{label}, all recorded in other Preview contexts",
       "announce": "Showing the thread in its recorded Preview context: {context}."
     }
   },

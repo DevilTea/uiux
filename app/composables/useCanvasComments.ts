@@ -26,7 +26,7 @@ import type { ReviewSummary, ViewRead } from './workbench-types'
 import { submissionBody, type ReviewSubmissionDraft } from '../utils/review-submission'
 import { commentCreateBlock, commentToolBlock, type CommentBlockCode } from '../utils/comment-availability'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from './useMediaQuery'
-import { captureRenderContext, effectiveRenderContext } from '../../src/preview/render-context-options'
+import { captureRenderContext, effectiveRenderContext, resolveRecordedContext } from '../../src/preview/render-context-options'
 import { renderContextDiffers, type PinRenderContext } from '../../src/preview/pin-visibility'
 import { createThreadBody, reanchorThreadBody } from '../utils/canvas-comment-requests'
 import { recordedContextParts, recordedContextText } from '../utils/thread-render-context'
@@ -768,6 +768,22 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	})
 	const mutedThreadIds = computed<ReadonlySet<string>>(() => new Set(mutedContexts.value.keys()))
 	/**
+	 * Muted threads with a differing recorded member that still exists, so switching to the recorded
+	 * context would change what the Preview shows. A thread muted only by stale keys stays muted, but
+	 * its bubble offers no switch (owner ruling 2026-10-09, Discussion #7, muted pins, ruling 1).
+	 */
+	const switchableThreadIds = computed<ReadonlySet<string>>(() => {
+		const keys = workbench.renderContextKeys.value
+		const current = shownContext.value
+		const ids = new Set<string>()
+		for (const item of threads.value) {
+			if (!item.renderContext || !mutedContexts.value.has(item.id)) continue
+			const applicable = keys ? resolveRecordedContext(item.renderContext, keys).applied : item.renderContext
+			if (renderContextDiffers(applicable, current)) ids.add(item.id)
+		}
+		return ids
+	})
+	/**
 	 * Each thread's canvas status (`visible`, `offscreen` and its side, or `hidden` with a reason).
 	 * It keeps its identity while pins only move, so the list and the bubble do not re-render on
 	 * every scrolled frame; only the pin layer follows the per-frame placements.
@@ -838,10 +854,23 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		void nextTick(() => { announcement.value = text })
 	}
 
+	/**
+	 * Bumped by every open, close and muted-pin activation, so an activation still reading the
+	 * settings never switches the Preview or opens its thread after the user moved on.
+	 */
+	let activation = 0
+	/** An activation is reading the settings: Escape cancels it. */
+	let activationPending = false
+	function supersedeActivation(): void {
+		activation++
+		activationPending = false
+	}
+
 	/** Opens a thread's bubble; its status joins the filter so the pin can show (brief c §6). */
 	function open(threadId: string): boolean {
 		const item = threadById.value.get(threadId)
 		if (!item) return false
+		supersedeActivation()
 		browsingPins.value = false
 		if (composer.value?.text.trim()) {
 			patchComposer({ askingDiscard: true })
@@ -858,7 +887,6 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		return true
 	}
 
-	let activation = 0
 	/**
 	 * Activating a muted pin or bubble (Rule 01a1170f-c1f7): the Preview switches to the Locale,
 	 * viewport and theme the thread records, keeping the Variant, the chrome (Rule 01a118a1-9e11)
@@ -873,8 +901,11 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		// An unsent comment asks first (open() raises the prompt); nothing switches until it is settled.
 		if (!item || !recorded || !mutedContexts.value.has(threadId) || composer.value?.text.trim()) return open(threadId)
 		const sequence = ++activation
-		const { applied, missing } = await recordedContext.resolveAtOpen(recorded)
-		// A later activation, a View switch or a deleted thread supersedes this one.
+		activationPending = true
+		const { applied, missing } = await recordedContext.resolveAtOpen(recorded).finally(() => {
+			if (sequence === activation) activationPending = false
+		})
+		// A later open, close or activation, a View switch or a deleted thread supersedes this one.
 		if (sequence !== activation || !threadById.value.has(threadId)) return false
 		if (composer.value?.text.trim()) return open(threadId)
 		const before = { locale: workbench.selectedLocale.value, viewport: workbench.selectedViewportId.value, theme: workbench.selectedThemeId.value }
@@ -896,11 +927,14 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		workbench.selectedThemeId.value = after.theme
 		if (!open(threadId)) return false
 		recordedContext.noticeMissingContext(missing)
-		announce(t('pins.muted.announce', { context: recordedContextText(recordedContextParts(recorded)) }))
+		// Only the members actually applied; a missing one is named by the notice instead.
+		const appliedText = recordedContextText(recordedContextParts(applied))
+		if (appliedText) announce(t('pins.muted.announce', { context: appliedText }))
 		return true
 	}
 
 	function close(): void {
+		supersedeActivation()
 		const id = openThreadId.value
 		if (!id) return
 		openThreadId.value = undefined
@@ -917,6 +951,11 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		}
 		if (openThreadId.value) {
 			close()
+			return true
+		}
+		// A muted-pin activation still reading the settings: cancel it before it switches anything.
+		if (activationPending) {
+			supersedeActivation()
 			return true
 		}
 		if (preview.reanchorThreadId.value) {
@@ -1035,6 +1074,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		pinMeta,
 		mutedContexts,
 		mutedThreadIds,
+		switchableThreadIds,
 		widgetTypeById,
 		notOnCanvas,
 		togglePins,
