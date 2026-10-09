@@ -26,8 +26,11 @@ import type { ReviewSummary, ViewRead } from './workbench-types'
 import { submissionBody, type ReviewSubmissionDraft } from '../utils/review-submission'
 import { commentCreateBlock, commentToolBlock, type CommentBlockCode } from '../utils/comment-availability'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from './useMediaQuery'
-import { captureRenderContext } from '../../src/preview/render-context-options'
+import { captureRenderContext, effectiveRenderContext } from '../../src/preview/render-context-options'
+import { renderContextDiffers, type PinRenderContext } from '../../src/preview/pin-visibility'
 import { createThreadBody, reanchorThreadBody } from '../utils/canvas-comment-requests'
+import { recordedContextParts, recordedContextText } from '../utils/thread-render-context'
+import { useRecordedRenderContext } from './useRecordedRenderContext'
 
 /** The RootShell: a thread anchored here is about the View as a whole, not one Widget. */
 export const VIEW_ANCHOR_WIDGET_ID = 'root'
@@ -146,6 +149,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	const workbench = useWorkbench()
 	const access = useAccess()
 	const uiux = useUiuxClient()
+	const recordedContext = useRecordedRenderContext()
 	const { preview, reviews, selectedViewId, selectedView, widgetTreeResult, contextOptions, reviewReadOnly } = workbench
 
 	// -------------------------------------------------------------------------------------------
@@ -738,6 +742,31 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		}
 		return meta
 	})
+
+	/**
+	 * The Locale, viewport and theme the Preview shows now, with empty selections resolved to their
+	 * defaults. It keeps its identity while they stay the same (a Variant switch, a View reload).
+	 */
+	const shownContext = computed<PinRenderContext>((previous) => {
+		const options = contextOptions.value
+		const next = { locale: options.locales.selected, viewportId: options.viewports.selectedId, themeId: options.themes.selected }
+		return previous && previous.locale === next.locale && previous.viewportId === next.viewportId && previous.themeId === next.themeId ? previous : next
+	})
+	/**
+	 * The muted threads (Rules 01a1170f-c1ae, 01a1170f-c23d), each with its recorded context as the
+	 * pin's visible label, such as "zh-TW · mobile". Presentation only: placement never reads it, so
+	 * muting never shows a hidden pin or moves one (Rule 01a1170f-c282).
+	 */
+	const mutedContexts = computed<ReadonlyMap<string, string>>((previous) => {
+		const current = shownContext.value
+		const next = new Map<string, string>()
+		for (const item of threads.value) {
+			if (renderContextDiffers(item.renderContext, current)) next.set(item.id, recordedContextText(recordedContextParts(item.renderContext)))
+		}
+		if (previous && previous.size === next.size && [...next].every(([id, text]) => previous.get(id) === text)) return previous
+		return next
+	})
+	const mutedThreadIds = computed<ReadonlySet<string>>(() => new Set(mutedContexts.value.keys()))
 	/**
 	 * Each thread's canvas status (`visible`, `offscreen` and its side, or `hidden` with a reason).
 	 * It keeps its identity while pins only move, so the list and the bubble do not re-render on
@@ -826,6 +855,48 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		retractRefused.value = undefined
 		if (editingMessage.value?.threadId !== threadId) editingMessage.value = undefined
 		openThreadId.value = threadId
+		return true
+	}
+
+	let activation = 0
+	/**
+	 * Activating a muted pin or bubble (Rule 01a1170f-c1f7): the Preview switches to the Locale,
+	 * viewport and theme the thread records, keeping the Variant, the chrome (Rule 01a118a1-9e11)
+	 * and every member it does not record, then the thread opens. The recorded keys are checked
+	 * against the Workspace's settings now; one that no longer exists gets its default and a notice
+	 * (Rule 01a1170f-c165). The reader's own context is kept so the bubble can offer it back (Rule
+	 * 01a1170f-c11d). A thread that is not muted just opens.
+	 */
+	async function openInRecordedContext(threadId: string): Promise<boolean> {
+		const item = threadById.value.get(threadId)
+		const recorded = item?.renderContext
+		// An unsent comment asks first (open() raises the prompt); nothing switches until it is settled.
+		if (!item || !recorded || !mutedContexts.value.has(threadId) || composer.value?.text.trim()) return open(threadId)
+		const sequence = ++activation
+		const { applied, missing } = await recordedContext.resolveAtOpen(recorded)
+		// A later activation, a View switch or a deleted thread supersedes this one.
+		if (sequence !== activation || !threadById.value.has(threadId)) return false
+		if (composer.value?.text.trim()) return open(threadId)
+		const before = { locale: workbench.selectedLocale.value, viewport: workbench.selectedViewportId.value, theme: workbench.selectedThemeId.value }
+		const after = {
+			locale: recorded.locale === undefined ? before.locale : applied.locale ?? '',
+			viewport: recorded.viewportId === undefined ? before.viewport : applied.viewportId ?? '',
+			theme: recorded.themeId === undefined ? before.theme : applied.themeId ?? '',
+		}
+		const shows = (selection: Readonly<{ locale: string; viewport: string; theme: string }>) =>
+			effectiveRenderContext(workbench.workspace.value?.resource, workbench.discoveredLocales.value, selection)
+		const was = shows(before)
+		const will = shows(after)
+		const changes = was.locale !== will.locale || was.viewportId !== will.viewportId || was.themeId !== will.themeId
+		// Activated again (a stale key keeps it muted): the reader's context from the first time stays on offer.
+		const saved = workbench.contextBeforeThread.value?.threadId === threadId ? workbench.contextBeforeThread.value : undefined
+		workbench.contextBeforeThread.value = saved ?? (changes ? { threadId, ...before } : undefined)
+		workbench.selectedLocale.value = after.locale
+		workbench.selectedViewportId.value = after.viewport
+		workbench.selectedThemeId.value = after.theme
+		if (!open(threadId)) return false
+		recordedContext.noticeMissingContext(missing)
+		announce(t('pins.muted.announce', { context: recordedContextText(recordedContextParts(recorded)) }))
 		return true
 	}
 
@@ -962,6 +1033,8 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		pinStatusById,
 		pinStatus,
 		pinMeta,
+		mutedContexts,
+		mutedThreadIds,
 		widgetTypeById,
 		notOnCanvas,
 		togglePins,
@@ -971,6 +1044,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		edgeIndicators,
 		overCapWidgetIds,
 		open,
+		openInRecordedContext,
 		close,
 		escape,
 		announcement,

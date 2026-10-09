@@ -211,6 +211,18 @@ function openInCurrentContext(): void {
 	void nextTick(() => root.value?.focus({ preventScroll: true }))
 }
 
+/**
+ * A muted bubble (Rule 01a1170f-c1ae): the thread records another render context than the Preview
+ * shows, for example after a list pick or a context change while it is open. It says so and offers
+ * the recorded context; activating that switches the Preview like the muted pin (Rule 01a1170f-c1f7).
+ */
+const muted = computed(() => comments.mutedThreadIds.value.has(props.threadId))
+async function openInRecordedContext(): Promise<void> {
+	if (!await comments.openInRecordedContext(props.threadId)) return
+	// The offer unmounts once the context matches: keep focus in the bubble.
+	void nextTick(() => root.value?.focus({ preventScroll: true }))
+}
+
 // Focus lands in the bubble on open; Escape returns it to the pin (the comments layer does that).
 const root = ref<HTMLElement>()
 onMounted(() => {
@@ -235,6 +247,7 @@ watch(() => props.threadId, () => {
     tabindex="-1"
     data-thread-bubble
     :data-thread-status="thread.status"
+    :data-thread-muted="muted ? '' : undefined"
   >
     <div class="flex min-w-0 items-center gap-2">
       <UBadge
@@ -280,6 +293,23 @@ watch(() => props.threadId, () => {
       class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted"
     >
       <RecordedContextLabel :context="thread.renderContext" />
+      <span
+        v-if="muted"
+        class="text-muted"
+        data-thread-muted-note
+      >{{ t('threadContext.mutedNote') }}</span>
+      <UButton
+        v-if="muted"
+        color="neutral"
+        variant="link"
+        size="xs"
+        class="p-0"
+        icon="i-lucide-scan-eye"
+        :label="t('threadContext.openInRecorded')"
+        :title="t('threadContext.openInRecordedHint')"
+        data-thread-open-recorded
+        @click="openInRecordedContext"
+      />
       <UButton
         v-if="contextBefore"
         color="neutral"

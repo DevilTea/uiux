@@ -1134,6 +1134,11 @@
       "right": "{n} comment to the right, out of view | {n} comments to the right, out of view",
       "bottom": "{n} comment below, out of view | {n} comments below, out of view",
       "left": "{n} comment to the left, out of view | {n} comments to the left, out of view"
+    },
+    "muted": {
+      "label": "{label}, recorded in another Preview context: {context}",
+      "clusterLabel": "{label}, all recorded in another Preview context",
+      "announce": "Showing the thread in its recorded Preview context: {context}."
     }
   },
   "empty": {
@@ -2108,6 +2113,9 @@
       "locale": "Locale {key} no longer exists, so the default Locale is shown.",
       "viewportId": "Viewport {key} no longer exists, so the default viewport is shown.",
       "themeId": "Theme {key} no longer exists, so the default theme is shown."
-    }
+    },
+    "mutedNote": "Recorded in another Preview context",
+    "openInRecorded": "Show in recorded context",
+    "openInRecordedHint": "Switch the Preview to the Locale, viewport and theme this thread records"
   }
 }

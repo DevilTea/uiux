@@ -6,7 +6,7 @@ import { PENDING_PIN_ID, useCanvasComments } from '../../../composables/useCanva
 import { aggregateEdgeIndicators, type PinEdgeSide } from '../../../../src/preview/pin-visibility'
 import { mapPointAffine, type AffineOuterMapping } from '../../../../src/preview/outer-precision'
 import type { Point } from '../../../../src/preview/protocol/schema'
-import { layoutPins } from '../../../utils/pin-layout'
+import { layoutPins, mutedItemKeys } from '../../../utils/pin-layout'
 import CommentPin from './CommentPin.vue'
 import CommentPinMenu from './CommentPinMenu.vue'
 import CommentThreadPin from './CommentThreadPin.vue'
@@ -72,8 +72,10 @@ async function dropAt(threadId: string, clientX: number, clientY: number): Promi
 	drag.value = undefined
 }
 
+/** A muted pin switches the Preview to its thread's recorded context first (Rule 01a1170f-c1f7). */
 function toggle(threadId: string): void {
 	if (comments.openThreadId.value === threadId) comments.close()
+	else if (comments.mutedThreadIds.value.has(threadId)) void comments.openInRecordedContext(threadId)
 	else comments.open(threadId)
 }
 
@@ -99,6 +101,8 @@ const EXCLUDED = new Set([PENDING_PIN_ID])
 
 const layout = computed(() => comments.pinsHidden.value ? undefined : layoutPins(comments.placements.value, { solo: solo.value, excluded: EXCLUDED }))
 const edges = computed(() => comments.pinsHidden.value ? [] : aggregateEdgeIndicators(comments.placements.value))
+/** Muted clusters: only those whose every thread is muted (Rule 01a11e0d-d4a0). Never changes `layout`. */
+const mutedKeys = computed(() => mutedItemKeys(layout.value, comments.mutedThreadIds.value))
 const pending = computed(() => comments.placements.value.find(placement => placement.threadId === PENDING_PIN_ID && placement.state === 'visible' && placement.point))
 
 type Structure = Readonly<{
@@ -254,6 +258,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         kind="cluster"
         :ids="item.ids"
         :dim="dimmed"
+        :muted="mutedKeys.has(item.key)"
       />
       <CommentThreadPin
         v-else

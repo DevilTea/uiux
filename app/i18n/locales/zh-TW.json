@@ -1134,6 +1134,11 @@
       "right": "右側有 {n} 則留言在可視範圍外 | 右側有 {n} 則留言在可視範圍外",
       "bottom": "下方有 {n} 則留言在可視範圍外 | 下方有 {n} 則留言在可視範圍外",
       "left": "左側有 {n} 則留言在可視範圍外 | 左側有 {n} 則留言在可視範圍外"
+    },
+    "muted": {
+      "label": "{label}，記錄於另一個預覽情境：{context}",
+      "clusterLabel": "{label}，皆記錄於其他預覽情境",
+      "announce": "已改用此討論串記錄的預覽情境：{context}。"
     }
   },
   "empty": {
@@ -2108,6 +2113,9 @@
       "locale": "Locale {key} 已不存在，改為顯示預設 Locale。",
       "viewportId": "檢視區 {key} 已不存在，改為顯示預設檢視區。",
       "themeId": "主題 {key} 已不存在，改為顯示預設主題。"
-    }
+    },
+    "mutedNote": "記錄於另一個預覽情境",
+    "openInRecorded": "以記錄的情境顯示",
+    "openInRecordedHint": "將預覽切換為此討論串記錄的 Locale、檢視區與主題"
   }
 }

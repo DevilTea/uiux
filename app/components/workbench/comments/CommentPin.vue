@@ -9,6 +9,11 @@ import { computed, ref } from 'vue'
  * `variant`: `pending` is the dashed composer pin, `resolved` the small graphite check, `cluster`
  * a count. `badge`: `ready` (blue eye) or `stale` (warning: a named Variant of the scope is missing).
  *
+ * `muted` (or a `context`): the thread is recorded in another render context (Rule 01a1170f-c1ae).
+ * The pin turns hollow and `context`, such as "zh-TW · mobile", shows as a mono chip beside it;
+ * the accessible name (`label`) carries the same context (Rule 01a1170f-c352). Muting changes the
+ * look only, never the position (Rule 01a1170f-c282).
+ *
  * The pin has no position of its own: it sits with its tip on the bottom-left corner of its
  * parent, a zero-size anchor that the pin layer moves with a `transform` once per frame (decision
  * 9: pin DOM writes are transforms only), so a moving pin never re-renders.
@@ -24,6 +29,9 @@ const props = defineProps<{
 	lift?: boolean
 	fresh?: boolean
 	dim?: boolean
+	muted?: boolean
+	/** A muted pin's recorded render context, shown beside it. */
+	context?: string
 	threadId?: string
 	/** Mouse drag moves the pin within its Widget (the hint mutation is the caller's). */
 	draggable?: boolean
@@ -79,6 +87,7 @@ const glyph = computed(() => {
 	if (props.variant !== 'cluster' && props.agent) return 'i-lucide-bot'
 	return undefined
 })
+const isMuted = computed(() => props.muted || props.context !== undefined)
 </script>
 
 <template>
@@ -87,7 +96,7 @@ const glyph = computed(() => {
     class="comment-pin"
     :class="[
       variant ? `is-${variant}` : '',
-      { 'is-open': open, 'is-lift': lift, 'is-fresh': fresh, 'is-dim': dim, 'is-dragging': dragging },
+      { 'is-open': open, 'is-lift': lift, 'is-fresh': fresh, 'is-dim': dim, 'is-muted': isMuted, 'is-dragging': dragging },
     ]"
     :aria-label="label"
     :aria-expanded="variant === 'pending' ? undefined : open"
@@ -95,6 +104,7 @@ const glyph = computed(() => {
     :tabindex="dim ? -1 : 0"
     :data-pin-thread="threadId"
     :data-pin-variant="variant ?? 'default'"
+    :data-pin-muted="isMuted ? '' : undefined"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"
@@ -119,6 +129,12 @@ const glyph = computed(() => {
         class="size-2.5"
       />
     </span>
+    <span
+      v-if="context"
+      class="comment-pin-context"
+      aria-hidden="true"
+      data-pin-context
+    >{{ context }}</span>
   </button>
 </template>
 
@@ -153,6 +169,30 @@ const glyph = computed(() => {
 .comment-pin.is-resolved { width: 24px; height: 24px; background: var(--wb-pin-resolved); color: var(--wb-pin-text); }
 .comment-pin.is-pending { background: var(--ui-bg); color: var(--ui-annotation); border: 1.5px dashed var(--wb-pin); box-shadow: var(--wb-shadow-pin-drop); cursor: default; }
 .comment-pin.is-cluster { min-width: 28px; width: auto; padding-inline: 6px; font-variant-numeric: tabular-nums; }
+/*
+ * Muted (recorded in another render context): hollow, in the same Marker ink, so it still reads as
+ * a comment but steps back from the pins of this context. The border sits inside the same box, so
+ * the tip never moves.
+ */
+.comment-pin.is-muted { background: var(--ui-bg); color: var(--ui-annotation); border: 1.5px solid var(--wb-pin); box-shadow: var(--wb-shadow-pin-drop); }
+.comment-pin.is-muted.is-resolved { color: var(--ui-text-muted); border-color: var(--wb-pin-resolved); }
+.comment-pin.is-muted.is-open { box-shadow: 0 0 0 2px var(--ui-bg), 0 0 0 4px var(--ui-primary), var(--wb-shadow-pin-drop); }
+.comment-pin-context {
+  position: absolute;
+  left: calc(100% + 4px);
+  bottom: 0;
+  padding: 0 4px;
+  border: 1px solid var(--ui-border);
+  border-radius: 4px;
+  background: var(--ui-bg);
+  color: var(--ui-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1rem;
+  font-weight: 400;
+  white-space: nowrap;
+  pointer-events: none;
+}
 .comment-pin.is-dim { opacity: 0.4; pointer-events: none; }
 .comment-pin.is-dragging { cursor: grabbing; transition: none; }
 .comment-pin.is-fresh { animation: pin-drop 180ms var(--ease-out-quiet); }

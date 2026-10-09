@@ -4,7 +4,7 @@ import { resolveRecordedContext, type MissingRenderContextKey, type RenderContex
 import { useWorkbench } from './useWorkbench'
 
 /**
- * Opening a thread by its recorded render context (the inbox link now, muted-pin activation in A4):
+ * Opening a thread by its recorded render context (the inbox link and muted-pin activation):
  * the recorded keys are checked against the Workspace's settings at open time (owner ruling
  * 2026-10-09, Discussion #7), and a key that no longer exists opens with its default and a
  * non-blocking notice naming it (Rule 01a1170f-c165). Must be used below `provideWorkbench()`.

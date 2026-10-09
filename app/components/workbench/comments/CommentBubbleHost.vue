@@ -23,6 +23,16 @@ const sheet = computed(() => coarse.value || phone.value)
 const composer = computed(() => comments.composer.value)
 const threadId = computed(() => composer.value ? undefined : comments.openThreadId.value)
 const isOpen = computed(() => !!composer.value || !!threadId.value)
+/**
+ * The open thread's recorded context when it is muted (Rule 01a1170f-c1ae): the sheet's title says
+ * so, like the muted pin's accessible name (Rule 01a1170f-c352); the bubble itself shows the label
+ * and offers the recorded context.
+ */
+const mutedContext = computed(() => threadId.value ? comments.mutedContexts.value.get(threadId.value) : undefined)
+const sheetTitle = computed(() => {
+	if (composer.value) return t('comment.placeholder')
+	return mutedContext.value === undefined ? t('comments.threadTitle') : t('pins.muted.label', { label: t('comments.threadTitle'), context: mutedContext.value })
+})
 
 const reference = shallowRef<HTMLElement>()
 
@@ -77,7 +87,7 @@ const contentProps = {
   <UDrawer
     v-if="sheet"
     :open="isOpen"
-    :title="composer ? t('comment.placeholder') : t('comments.threadTitle')"
+    :title="sheetTitle"
     :ui="{ header: 'sr-only', body: 'p-0', content: 'max-h-[90dvh]' }"
     @update:open="onSheetOpen"
   >
