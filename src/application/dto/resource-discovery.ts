@@ -1,4 +1,4 @@
-import { REVIEW_RESOLUTIONS, type ReviewAnchor, type ReviewDisplayHint, type ReviewResolution, type ReviewStatus } from '../../domain/reviews/schema'
+import { REVIEW_RESOLUTIONS, type ReviewAnchor, type ReviewDisplayHint, type ReviewRenderContext, type ReviewResolution, type ReviewStatus } from '../../domain/reviews/schema'
 import { jsonPointer, rejectUnknownKeys, Validator, type Diagnostic } from '../../domain/validation'
 import type { ResourceRevision } from './revisions'
 
@@ -33,6 +33,8 @@ export type ReviewDiscoverySummary = Readonly<{
 	variantNames?: readonly string[]
 	/** Non-authoritative pin placement, beside (never inside) `anchor`. */
 	displayHint?: ReviewDisplayHint
+	/** Recorded render context (Workspace-local Locale, viewport and theme keys); absent means unknown. */
+	renderContext?: ReviewRenderContext
 	status?: ReviewStatus
 	/** Derived from the final lifecycle event; present only while `status` is resolved. */
 	resolution?: ReviewResolution

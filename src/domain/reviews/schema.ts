@@ -711,6 +711,17 @@ function validateRenderContextMember(value: unknown, path: string, workspaceArm:
 	if (Object.hasOwn(context, 'themeId')) v.string(context.themeId, `${path}/themeId`, true)
 }
 
+/**
+ * Writer-side check of one incoming `renderContext` value with the decoder's shape rules, reported
+ * once at `path` instead of at every place the candidate thread repeats it. Key existence in the
+ * Workspace is the writer's separate check.
+ */
+export function validateReviewRenderContextInput(value: unknown, path: string, anchor: ReviewAnchor): ValidationResult<ReviewRenderContext> {
+	const v = new Validator()
+	validateRenderContextMember(value, path, isWorkspaceAnchor(anchor), v)
+	return v.finish<ReviewRenderContext>(value)
+}
+
 /** Writer normalization for pin hints: clamp to [0, 1] and quantize to 4 fractional digits. */
 export function normalizeReviewPinCoordinate(value: number): number {
 	const clamped = Math.min(1, Math.max(0, value))
