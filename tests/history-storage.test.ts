@@ -609,6 +609,18 @@ describe('persistence write observer', () => {
 		expect(reentry).toMatchObject({ code: 'persistence.lock_busy' })
 		expect(persistence.consumeRecordingGap()).toBe(true)
 		expect((await persistence.views.read(VIEW_ID))?.resource.name).toBe('Still written')
+
+		// Work a hook schedules for later (an idle-close timer) may take the lock once the hook settled.
+		let later: Promise<unknown> | undefined
+		persistence.setWriteObserver({
+			afterCanonicalCommit() {
+				later = new Promise(resolve => setTimeout(resolve, 0)).then(() => persistence.views.read(VIEW_ID))
+			},
+		})
+		const latest = (await persistence.views.readRevision(VIEW_ID))!
+		await runWithDesignWriteContext(CONTEXT, () => persistence.views.compareAndSwap({ key: VIEW_ID, expectedRevision: latest, resource: { ...viewFixture(), name: 'Later' } }))
+		await expect(later).resolves.toMatchObject({ resource: { name: 'Later' } })
+		expect(persistence.recordingGap).toBe(false)
 	})
 
 	it('refuses a design-write context that is not stamped', () => {

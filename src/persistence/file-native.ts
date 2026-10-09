@@ -1787,8 +1787,12 @@ type ObserverState = { observer?: CanonicalWriteObserver; recordingGap: boolean 
 
 /** Per-instance observer state, private to this module so only `commitCanonicalWrite` calls the hooks. */
 const observerStates = new WeakMap<FileNativePersistence, ObserverState>()
-/** Marks the asynchronous call chain of a running observer hook, which must not re-enter the lock. */
-const observerScope = new AsyncLocalStorage<true>()
+/**
+ * Marks the asynchronous call chain of a running observer hook, which must not re-enter the lock.
+ * The mark is cleared when the hook settles, so work the hook schedules for later (a timer that
+ * closes an idle autosave) inherits a cleared mark and may take the lock then.
+ */
+const observerScope = new AsyncLocalStorage<{ running: boolean }>()
 
 function observerState(persistence: FileNativePersistence): ObserverState {
 	const state = observerStates.get(persistence)
@@ -1797,7 +1801,7 @@ function observerState(persistence: FileNativePersistence): ObserverState {
 }
 
 function assertOutsideObserver(): void {
-	if (observerScope.getStore())
+	if (observerScope.getStore()?.running)
 		throw new PersistenceError('persistence.lock_busy', 'A history observer hook runs under the exclusive persistence lock and cannot take it again; use the *Unlocked helpers.')
 }
 
@@ -1893,11 +1897,15 @@ function resourceChangeAfterCommit(entry: ResourceFilesBefore): CanonicalResourc
 }
 
 async function invokeObserver(state: ObserverState, hook: keyof CanonicalWriteObserver, call: () => Promise<unknown>): Promise<void> {
+	const mark = { running: true }
 	try {
-		await observerScope.run(true, call)
+		await observerScope.run(mark, call)
 	}
 	catch (error) {
 		reportObserverFailure(state, `${hook} failed`, error)
+	}
+	finally {
+		mark.running = false
 	}
 }
 
