@@ -1,8 +1,8 @@
 Feature: Version history
   # Source: Discussion #122 (Part 11) d4, R26 (owner pre-answer O3) https://github.com/DevilTea/uiux/discussions/122; "What `.spec/` records after acceptance" key Scenarios https://github.com/DevilTea/uiux/discussions/122; owner acceptance https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263. Restated as permission keys by Discussion #140 (Part 15), decision 1, A: `checkpoints.create`; Interactions 2 https://github.com/DevilTea/uiux/discussions/140; accepted as written 2026-10-08 https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18816365.
-  # Status: built as of 3ae264d.
-  # Test: code@3ae264d `tests/history-checkpoints.test.ts#L152` "writes a named record with the member as actor, holding no lease and changing no canonical file (Scenario 01a11a5e-90a5)". https://github.com/DevilTea/uiux/blob/3ae264dd229937e412f5041396711eb44a2c9dbe/tests/history-checkpoints.test.ts#L152
-  # Note: The test grants `checkpoints.create` through the Reviewer role (issue #142). Discussion #139 (Part 14) moved the checkpoint directory, so the step names no path. Discussion #140 restates the precondition as `checkpoints.create` (issue #142).
+  # Status: partly built as of 41330c7: the Checkpoint is created without a lease, but `checkpoints.create` is granted by the Reviewer role, not a key; see the Implementation gaps entry of 01a11485-fa21-7b77-8ae5-1d7d0618e8a3 in its owner.
+  # Test: code@41330c7 `tests/history-checkpoints.test.ts#L167` "writes a named record with the member as actor, holding no lease and changing no canonical file (Scenario 01a11a5e-90a5)". https://github.com/DevilTea/uiux/blob/41330c7736ba6a62859ee612ca7fbde133f00d89/tests/history-checkpoints.test.ts#L167
+  # Note: Discussion #139 (Part 14) moved the checkpoint directory, so the step names no path. Discussion #140 restates the precondition as `checkpoints.create` (issue #142).
   @spec:id:01a11a5e-90a5-70f3-912e-e9e6e9b0eee9
   @spec:demonstrates:01a11485-fa21-7b77-8ae5-1d7d0618e8a3
   @spec:demonstrates:01a11a5e-096a-761e-a65a-6fd66e7e0b12
