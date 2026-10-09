@@ -1,6 +1,9 @@
 import { stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
+import { FileNativePersistence } from '../persistence/file-native'
+import { readActiveServerHold } from '../persistence/server-hold'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 import { generateHint } from '../server/access/credentials'
 import {
 	AccessError,
@@ -18,7 +21,7 @@ import {
 	summarizeMembers,
 	type AccessFile,
 } from '../server/access/roster'
-import { AccessStore, realFuturePath, resolveUiuxHome, workspaceRealRoot, writeNewRoster } from '../server/access/store'
+import { AccessStore, assertHomeOutsideWorkspace, copyHostHistory, planHostHistoryCopy, realFuturePath, resolveUiuxHome, workspaceRealRoot, writeNewRoster } from '../server/access/store'
 
 /**
  * `uiux member | token | invite | session | access copy` (accepted identity decision 9). Every
@@ -345,15 +348,37 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				if (sourceRoot === context.workspaceRoot) throw new AccessError('access.roster_exists', 'The source and target are the same Workspace.')
 				const source = await AccessStore.readRoster(context.home, sourceRoot)
 				if (!source) throw new AccessError('access.roster_missing', `No roster recorded for ${sourceRoot} under ${context.home}.`)
+				const replace = context.parsed.flags.has('replace')
+				// Clause 01a1144e-56bd-7988-8d2a-87b23954ca49: the host history comes along, once. Checked
+				// before the roster is written, so a refusal changes nothing.
+				assertHomeOutsideWorkspace(context.home, context.workspaceRoot)
+				const history = await planHostHistoryCopy(context.home, sourceRoot, context.workspaceRoot)
+				if (history.sourceExists) {
+					if (history.targetExists && !replace)
+						throw new AccessError('access.roster_exists', `Workspace ${context.workspaceRoot} already has host history (${history.target.dir}). Pass --replace to discard it.`)
+					// A running server keeps the target's history state in memory; replacing it underneath would corrupt it.
+					const hold = await readActiveServerHold(context.workspaceRoot)
+					if (hold)
+						throw new AccessError('access.lock_busy', `A UIUX server (pid ${hold.pid} on ${hold.hostname}) is serving ${context.workspaceRoot}. Stop that server, then run uiux access copy again to copy the host history.`)
+				}
 				const written = await writeNewRoster({
 					workspaceRoot: context.workspaceRoot,
 					home: context.home,
-					replace: context.parsed.flags.has('replace'),
+					replace,
 					file: realRoot => copyRoster(source, { workspaceRoot: realRoot, hint: generateHint() }),
 				})
 				context.out(`Copied ${source.members.length} member(s) and ${source.tokens.length} token(s) from roster ${source.hint} (${sourceRoot}) to roster ${written.file.hint} (${written.file.workspaceRoot}).`)
+				if (history.sourceExists) {
+					// Under the target Workspace's persistence lock, which every writer of its history holds.
+					const persistence = new FileNativePersistence({ root: context.workspaceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+					const copied = await persistence.withLock(() => copyHostHistory(history, { replace }))
+					context.out(`Copied the host history (${copied.files} file(s)) from ${history.source.dir} to ${history.target.dir}.`)
+				}
+				else {
+					context.out(`No host history recorded for ${sourceRoot}; none copied.`)
+				}
 				context.out('Existing tokens keep working here; browsers sign in again (invites and sessions are not copied).')
-				context.out('This is a one-time copy: revoking a token in one roster does not revoke it in the other.')
+				context.out('This is a one-time copy: revoking a token in one roster does not revoke it in the other, and later history is recorded separately.')
 				context.out(`Source roster: ${source.workspaceRoot} — delete it by hand when it is stale.`)
 				return 0
 			},

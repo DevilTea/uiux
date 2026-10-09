@@ -81,7 +81,7 @@ uiux session list|revoke ...
 uiux access copy --from <old-dir> --workspace <new-dir> [--replace]
 ```
 
-A moved or renamed Workspace, and every git worktree, starts with an empty roster. `uiux access copy` carries members and tokens over once, so existing agent tokens keep working.
+A moved or renamed Workspace, and every git worktree, starts with an empty roster. `uiux access copy` carries members, tokens and the host version history over once, so existing agent tokens keep working and the timeline continues; it refuses to copy history into a Workspace that a running server holds.
 
 Review actors and times on `/api/*` and `/mcp` are stamped by the server from the signed-in member (`member:<uuid>`). A supplied `actor` or `at` is ignored with the warnings `auth.actor_ignored` and `auth.time_ignored`. Resolving needs a human member on a Workbench session; bearer tokens get `review.resolve_requires_workbench`. Role refusals are `403 auth.scope_denied`, naming the required role.
 
@@ -130,7 +130,7 @@ uiux migrate --workspace ./design             # apply atomically and print the n
 
 The current format is `schemaVersion` 4. Steps chain: `uiux.v1-to-v2` (resolution kinds, pin hints), `uiux.v2-to-v3` (Workspace-scoped threads and editable messages; it changes only the manifest), then `uiux.v3-to-v4` (the optional Review thread `renderContext`; it changes only the manifest), so a version 1 Workspace migrates in one run. `uiux init` writes version 4.
 
-`uiux migrate` refuses while a running UIUX server holds the Workspace; stop `uiux dev` first. There is no MCP or HTTP migration entrypoint.
+`uiux migrate` refuses while a running UIUX server holds the Workspace; stop `uiux dev` first. There is no MCP or HTTP migration entrypoint. Before its first step a real run writes the Checkpoint `Before migration to schemaVersion <N>` (`<N>` the target version) into the Workspace (a failed migration leaves it in place), and after it succeeds it records the migration as a system version in the host history under `$UIUX_HOME`. A dry run, and a Workspace that is already current, write nothing.
 
 ### Loopback-only access
 

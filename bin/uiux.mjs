@@ -30,7 +30,10 @@ Commands:
   migrate --workspace <dir> [--dry-run]
                            Migrate an older Workspace schema to schemaVersion ${workspaceSchemaVersion}
                            (steps chain: uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4);
-                           --dry-run prints the steps and changed files without writing
+                           a real run first writes the Checkpoint "Before migration to
+                           schemaVersion ${workspaceSchemaVersion}" and then records the migration in the host
+                           history ($UIUX_HOME); --dry-run prints the steps and changed
+                           files without writing anything
   publish --workspace <dir> --out <dir> [--base <path>] [--source-revision <rev>]
                            Publish a read-only static UIUX Workspace
 
@@ -42,7 +45,8 @@ Access (each takes --workspace <dir>; rosters live in $UIUX_HOME, default ~/.uiu
   invite create --member <nick> [--origin <url>] [--expires <hours>]
   session list | session revoke <session-id> | session revoke --member <nick>
   access copy --from <old-dir> [--replace]
-                           Copy members and tokens from another Workspace path's roster`)
+                           Copy members, tokens and host history from another
+                           Workspace path, once`)
 }
 
 // The LAN listener is not yet available, so `uiux dev` is loopback-only and refuses a non-loopback
