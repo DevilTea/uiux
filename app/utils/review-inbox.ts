@@ -4,11 +4,14 @@ import {
 	REVIEW_RESOLUTIONS,
 	type ReviewActor,
 	type ReviewAnchor,
+	type ReviewRenderContext,
 	type ReviewResolution,
 	type ReviewStatus,
 	type ReviewThread,
 } from '../../src/domain/reviews/schema'
 import { buildReviewTimeline, latestTimelineActor } from './review-timeline'
+import type { ViewLinkOptions } from './workbench-routes'
+import { resolveRecordedContext, type MissingRenderContextKey, type RenderContextKeys } from '../../src/preview/render-context-options'
 
 /**
  * The Reviews inbox model (brief d; Part 7 10a). Pure functions, so the ordering, filtering and
@@ -99,6 +102,8 @@ export type InboxThread = Readonly<{
 	viewId?: string
 	widgetId?: string
 	variantNames: readonly string[]
+	/** The Locale, viewport and theme a Widget thread records; absent means unknown (never on a Workspace thread). */
+	renderContext?: ReviewRenderContext
 	messageCount: number
 	latestActivityAt?: string
 	/** Validation findings in the thread file. */
@@ -130,6 +135,7 @@ export type ReviewSummaryInput = Readonly<{
 	summary: Readonly<{
 		anchor?: ReviewAnchor
 		variantNames?: readonly string[]
+		renderContext?: ReviewRenderContext
 		status?: ReviewStatus
 		resolution?: ReviewResolution
 		messageCount?: number
@@ -170,6 +176,7 @@ export function buildInboxThread(
 	let missingVariants: readonly string[] = []
 	let widgetType: string | undefined
 	const status = summary.summary.status ?? detail?.status ?? 'open'
+	const renderContext = widgetAnchor ? summary.summary.renderContext ?? detail?.renderContext : undefined
 	if (widgetAnchor && views) {
 		const anchor = widgetAnchor
 		if (!view) anchorState = 'missing'
@@ -194,6 +201,7 @@ export function buildInboxThread(
 		scope: anchor && !widgetAnchor ? 'workspace' : 'view',
 		...(widgetAnchor ? { viewId: widgetAnchor.viewId, widgetId: widgetAnchor.widgetId } : {}),
 		variantNames,
+		...(renderContext ? { renderContext } : {}),
 		messageCount: summary.summary.messageCount ?? detail?.messages.length ?? 0,
 		...(summary.summary.latestActivityAt ? { latestActivityAt: summary.summary.latestActivityAt } : {}),
 		diagnosticCount: summary.diagnosticCount ?? 0,
@@ -372,3 +380,40 @@ export function inboxQuery(filter: InboxFilter, thread?: string): LocationQueryR
 	if (thread) query.thread = thread
 	return query
 }
+
+// ---------------------------------------------------------------------------------------------
+// Canvas links (Rules 01a116f0-8ec3, 01a1170f-c11d, 01a1170f-c165)
+// ---------------------------------------------------------------------------------------------
+
+/** A Preview render context as View link query values; empty means the effective default. */
+export type CanvasLinkContext = Readonly<{ locale?: string; viewport?: string; theme?: string }>
+
+/**
+ * A Widget thread's View link options: the thread open, its Widget while the anchor is valid, the
+ * Variant only when the thread is scoped to exactly one existing Variant, and `context`. Never the
+ * chrome language or theme (Rule 01a118a1-9e11).
+ */
+export function canvasLinkOptions(thread: InboxThread, context: CanvasLinkContext = {}): ViewLinkOptions {
+	const variant = thread.variantNames.length === 1 && !thread.missingVariants.length ? thread.variantNames[0] : undefined
+	return {
+		thread: thread.id,
+		...(variant ? { variant } : {}),
+		...(context.locale ? { locale: context.locale } : {}),
+		...(context.viewport ? { viewport: context.viewport } : {}),
+		...(context.theme ? { theme: context.theme } : {}),
+		...(thread.anchorState === 'valid' && thread.widgetId ? { widget: thread.widgetId } : {}),
+	}
+}
+
+/**
+ * The inbox's canvas link (Rule 01a116f0-8ec3): it carries every recorded member that still
+ * exists; a stale one is left out, so it opens with its default, and is returned in `missing`
+ * for the notice (Rule 01a1170f-c165). Without `keys` (the manifest is not read yet) every
+ * recorded member is carried. Members the thread does not record open with their default.
+ */
+export function inboxCanvasLink(thread: InboxThread, keys: RenderContextKeys | undefined): Readonly<{ options: ViewLinkOptions; missing: readonly MissingRenderContextKey[] }> {
+	const resolved = keys ? resolveRecordedContext(thread.renderContext, keys) : { applied: thread.renderContext ?? {}, missing: [] }
+	const { locale, viewportId, themeId } = resolved.applied
+	return { options: canvasLinkOptions(thread, { locale, viewport: viewportId, theme: themeId }), missing: resolved.missing }
+}
+

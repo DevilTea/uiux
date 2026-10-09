@@ -5,6 +5,7 @@ import {
 	isWorkspaceAnchor,
 	type ReviewActor,
 	type ReviewDisplayHint,
+	type ReviewRenderContext,
 	type ReviewResolution,
 	type ReviewStatus,
 	type ReviewThread,
@@ -25,6 +26,8 @@ import type { ReviewSummary, ViewRead } from './workbench-types'
 import { submissionBody, type ReviewSubmissionDraft } from '../utils/review-submission'
 import { commentCreateBlock, commentToolBlock, type CommentBlockCode } from '../utils/comment-availability'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from './useMediaQuery'
+import { captureRenderContext } from '../../src/preview/render-context-options'
+import { createThreadBody, reanchorThreadBody } from '../utils/canvas-comment-requests'
 
 /** The RootShell: a thread anchored here is about the View as a whole, not one Widget. */
 export const VIEW_ANCHOR_WIDGET_ID = 'root'
@@ -34,7 +37,8 @@ export const VIEW_ANCHOR_WIDGET_ID = 'root'
  * pins, the inline composer and the thread bubble, shared by the canvas and the Comments tab.
  *
  * Persistence is the accepted Review model only: `{ anchor, variantNames }` plus the
- * non-authoritative `displayHint.pin` (pin-hint decision group), messages and lifecycle events.
+ * non-authoritative `displayHint.pin` (pin-hint decision group), the recorded `renderContext`
+ * (Rule 01a1170f-c0ce), messages and lifecycle events.
  * The actor is never sent: the server stamps it from the signed-in member. The raw click point
  * stays transient; only its quantized, Widget-relative hint is written.
  */
@@ -52,6 +56,8 @@ export type CommentThread = Readonly<{
 	/** Resolved as obsolete, duplicate or won't do: listed, but never drawn as a pin. */
 	dismissed: boolean
 	displayHint?: ReviewDisplayHint
+	/** The Locale, viewport and theme the thread records; absent means unknown. */
+	renderContext?: ReviewRenderContext
 	messageCount: number
 	latestActivityAt?: string
 	/** The canonical thread, once its point read arrived. */
@@ -178,6 +184,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 			...(summary.resolution ? { resolution: summary.resolution } : {}),
 			dismissed: summary.status === 'resolved' && isDismissal(summary.resolution),
 			...(summary.displayHint ? { displayHint: summary.displayHint } : {}),
+			...((summary.renderContext ?? detail?.renderContext) ? { renderContext: summary.renderContext ?? detail?.renderContext } : {}),
 			messageCount: summary.messageCount ?? detail?.messages.length ?? 0,
 			...(summary.latestActivityAt ? { latestActivityAt: summary.latestActivityAt } : {}),
 			...(detail ? { detail } : {}),
@@ -313,6 +320,19 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		if (composer.value) composer.value = Object.freeze({ ...composer.value, ...patch })
 	}
 
+	/**
+	 * What a thread started now records (Rule 01a1170f-c0ce): the Preview's current Locale,
+	 * viewport and theme that are Workspace-local keys, never a built-in fallback, and nothing when
+	 * none is. Captured when the thread is sent, so a context changed while composing is the one
+	 * recorded (owner ruling 2026-10-09, Discussion #7).
+	 */
+	function currentRenderContext(): ReviewRenderContext | undefined {
+		const keys = workbench.renderContextKeys.value
+		if (!keys) return undefined
+		const options = contextOptions.value
+		return captureRenderContext(keys, { locale: options.locales.selected, viewportId: options.viewports.selectedId, themeId: options.themes.selected })
+	}
+
 	/** Opens the composer on a Widget, at the click point when there is one (pointer), else the default point. */
 	function openComposer(target: CommentTarget): boolean {
 		if (!canComment.value) return false
@@ -407,7 +427,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	}
 
 	/**
-	 * ⌘↵ in the composer: create the thread (`anchor`, `variantNames`, `displayHint`), then post its
+	 * ⌘↵ in the composer: create the thread (`anchor`, `variantNames`, `displayHint`, `renderContext`), then post its
 	 * first message. A failed first message keeps the text and retries only the message.
 	 */
 	async function sendComposer(): Promise<void> {
@@ -420,11 +440,14 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		let created = current.created
 		try {
 			if (!created) {
-				const response = await post('/api/reviews', {
-					anchor: { viewId, widgetId: current.widgetId },
+				const renderContext = currentRenderContext()
+				const response = await post('/api/reviews', createThreadBody({
+					viewId,
+					widgetId: current.widgetId,
 					variantNames: current.scope === 'this' && currentVariant.value ? [currentVariant.value] : [],
-					...(hint ? { displayHint: { pin: hint } } : {}),
-				})
+					...(hint ? { hint } : {}),
+					...(renderContext ? { renderContext } : {}),
+				}))
 				if (!response.key || !response.revision) throw new Error(t('comments.errors.createFailed'))
 				created = { key: response.key, revision: response.revision }
 				if (hint) sessionPoints.set(created.key, hint)
@@ -599,12 +622,14 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		if (!item || !viewId) return false
 		const hint = hintFromReport(target.widgetId, target.point)
 		lastError.value = undefined
-		const ok = await mutate(threadId, 'reanchor', revision => post(`/api/reviews/${encodeURIComponent(threadId)}/reanchor`, {
+		// No `renderContext`: the Workbench re-anchor keeps the recorded one (Rule 01a11e0d-d3f8).
+		const ok = await mutate(threadId, 'reanchor', revision => post(`/api/reviews/${encodeURIComponent(threadId)}/reanchor`, reanchorThreadBody({
 			expectedRevision: revision,
-			anchor: { viewId, widgetId: target.widgetId },
-			variantNames: [...item.variantNames],
-			...(hint ? { displayHint: { pin: hint } } : {}),
-		}), t('comments.errors.reanchorFailed'))
+			viewId,
+			widgetId: target.widgetId,
+			variantNames: item.variantNames,
+			...(hint ? { hint } : {}),
+		})), t('comments.errors.reanchorFailed'))
 		if (ok) {
 			sessionPoints.delete(threadId)
 			if (hint) sessionPoints.set(threadId, hint)
