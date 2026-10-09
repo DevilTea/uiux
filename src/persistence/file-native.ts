@@ -28,8 +28,10 @@ import {
 } from './paths'
 import {
 	defineWorkspaceSchemaPolicy,
+	findMigrationPlan,
 	inspectWorkspaceManifest,
 	type WorkspaceInspection,
+	type WorkspaceMigrationStep,
 	type WorkspaceSchemaPolicy,
 	type WorkspaceSnapshot,
 } from './schema-policy'
@@ -252,26 +254,7 @@ export class FileNativePersistence {
 		if (read.inspection.state === 'current')
 			return { fromVersion: read.inspection.version, toVersion: read.inspection.version, revision: read.revision, steps: [], changes: [], initialSnapshot: new Map() }
 		const initialSnapshot = await this.scanCanonicalSnapshotUnlocked()
-
-		let snapshot = cloneSnapshot(initialSnapshot)
-		const stepIds: string[] = []
-		try {
-			for (const step of read.inspection.migrationPlan) {
-				const inputSnapshot = cloneSnapshot(snapshot)
-				const next = await step.apply(inputSnapshot)
-				if (!(next instanceof Map))
-					throw new TypeError(`Migration step ${step.id} did not return a WorkspaceSnapshot Map.`)
-				snapshot = cloneSnapshot(next)
-				validateCanonicalSnapshot(snapshot, step.toVersion, this.schemaPolicy)
-				stepIds.push(step.id)
-			}
-			validateCanonicalSnapshot(snapshot, this.schemaPolicy.currentVersion, this.schemaPolicy)
-		}
-		catch (cause) {
-			if (cause instanceof PersistenceError)
-				throw cause
-			throw new PersistenceError('workspace.migration_failed', 'Workspace migration planning failed before canonical files were changed.', { cause })
-		}
+		const { snapshot, steps: stepIds } = await applyMigrationPlan(initialSnapshot, read.inspection.migrationPlan, this.schemaPolicy)
 		return {
 			fromVersion: read.inspection.version,
 			toVersion: this.schemaPolicy.currentVersion,
@@ -1671,6 +1654,75 @@ function assertEmbeddedIdentity(key: string, resource: unknown, identityField: s
 			diagnostics: [{ code: 'identity.filename_id_mismatch', path: `/${identityField}`, message: `Resource identity must exactly match canonical filename ${filename}.` }],
 		})
 	}
+}
+
+/**
+ * The revision persistence reports for one versioned resource, computed from that resource's files
+ * alone (`files` maps each Workspace-relative path of the resource to its bytes). It is the value
+ * `readRevision` returns for the same bytes: the manifest, a View, a Flow and a Locale hash their
+ * single file; an Asset hashes its metadata and every content file, and falls back to the metadata
+ * bytes alone when `asset.json` is not UTF-8 JSON. Returns `undefined` when the files hold no
+ * resource (no file, or an Asset without `asset.json`) or when this build has no revision rule for
+ * `kind` (seam 3: the resource-kind set is open).
+ */
+export function revisionForResourceFiles(kind: string, files: ReadonlyMap<string, Uint8Array>): ResourceRevision | undefined {
+	if (kind === 'asset') {
+		let metadataBytes: Uint8Array | undefined
+		const contentFiles: { filename: string; bytes: Uint8Array }[] = []
+		for (const [path, bytes] of files) {
+			const filename = path.slice(path.lastIndexOf('/') + 1)
+			if (filename === 'asset.json') metadataBytes = bytes
+			else if (isSafeAssetContentFilename(filename)) contentFiles.push({ filename, bytes })
+		}
+		if (!metadataBytes) return undefined
+		try { parseJsonBytes(metadataBytes, 'asset.json') }
+		catch { return revisionForBytes(metadataBytes) }
+		return assetRevision(metadataBytes, contentFiles)
+	}
+	if (kind !== 'workspace' && kind !== 'view' && kind !== 'flow' && kind !== 'locale') return undefined
+	if (files.size === 0) return undefined
+	if (files.size > 1)
+		throw new TypeError(`A ${kind} resource is exactly one file; received ${files.size}.`)
+	return revisionForBytes([...files.values()][0]!)
+}
+
+/**
+ * Upgrades a recorded snapshot of the versioned files from `fromVersion` to the policy's current
+ * schema entirely in memory, with the same policy steps and checks `uiux migrate` uses; nothing is
+ * read or written. A version not recognized by the policy, or without a migration plan, is refused
+ * with `workspace.schema_unsupported` (Clause 01a11a5e-2434-7342-a3c1-6d63aa74334c).
+ */
+export async function upgradeSnapshotInMemory(snapshot: WorkspaceSnapshot, fromVersion: number, policy: WorkspaceSchemaPolicy): Promise<Readonly<{ snapshot: WorkspaceSnapshot; steps: readonly string[] }>> {
+	if (!policy.recognizedVersions.includes(fromVersion))
+		throw new PersistenceError('workspace.schema_unsupported', `Workspace schemaVersion ${fromVersion} is not recognized by the injected policy.`)
+	const plan = findMigrationPlan(policy, fromVersion)
+	if (!plan)
+		throw new PersistenceError('workspace.schema_unsupported', `Workspace schemaVersion ${fromVersion} has no migration plan to the current version.`)
+	if (plan.length === 0) return { snapshot: cloneSnapshot(snapshot), steps: [] }
+	return applyMigrationPlan(snapshot, plan, policy)
+}
+
+async function applyMigrationPlan(initialSnapshot: WorkspaceSnapshot, plan: readonly WorkspaceMigrationStep[], policy: WorkspaceSchemaPolicy): Promise<Readonly<{ snapshot: Map<string, Uint8Array>; steps: readonly string[] }>> {
+	let snapshot = cloneSnapshot(initialSnapshot)
+	const steps: string[] = []
+	try {
+		for (const step of plan) {
+			const inputSnapshot = cloneSnapshot(snapshot)
+			const next = await step.apply(inputSnapshot)
+			if (!(next instanceof Map))
+				throw new TypeError(`Migration step ${step.id} did not return a WorkspaceSnapshot Map.`)
+			snapshot = cloneSnapshot(next)
+			validateCanonicalSnapshot(snapshot, step.toVersion, policy)
+			steps.push(step.id)
+		}
+		validateCanonicalSnapshot(snapshot, policy.currentVersion, policy)
+	}
+	catch (cause) {
+		if (cause instanceof PersistenceError)
+			throw cause
+		throw new PersistenceError('workspace.migration_failed', 'Workspace migration planning failed before canonical files were changed.', { cause })
+	}
+	return { snapshot, steps }
 }
 
 function revisionForBytes(bytes: Uint8Array): ResourceRevision {
