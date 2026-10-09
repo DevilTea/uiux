@@ -334,13 +334,17 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		const id = command.id ?? randomUUID()
 		const at = command.at ?? new Date().toISOString()
 		const variantNames = Array.isArray(command.variantNames) ? [...command.variantNames] : []
+		// Owner ruling (Discussion #7, 2026-10-09): an omitted render context keeps the recorded one;
+		// a re-anchor to the Workspace arm clears it. Both sides of the event record it.
+		const currentRenderContext = current.resource.renderContext
+		const renderContext = isWorkspaceAnchor(command.anchor) ? undefined : currentRenderContext
 		const event: ReviewHistoryEvent = {
 			id,
 			kind: 'reanchor',
 			actor: command.actor,
 			at,
-			before: { anchor: current.resource.anchor, variantNames: current.resource.variantNames },
-			after: { anchor: command.anchor, variantNames },
+			before: { anchor: current.resource.anchor, variantNames: current.resource.variantNames, ...(currentRenderContext ? { renderContext: currentRenderContext } : {}) },
+			after: { anchor: command.anchor, variantNames, ...(renderContext ? { renderContext } : {}) },
 			...(command.reason ? { reason: command.reason } : {}),
 		}
 
@@ -352,10 +356,11 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 			? requestedHint.value
 			: widgetIdentityChanged ? undefined : current.resource.displayHint
 		const next: ReviewThread = {
-			...withoutDisplayHint(current.resource),
+			...withoutRenderContext(withoutDisplayHint(current.resource)),
 			anchor: command.anchor,
 			variantNames,
 			...(displayHint ? { displayHint } : {}),
+			...(renderContext ? { renderContext } : {}),
 			history: [...current.resource.history, event],
 		}
 		const validation = validateCandidate(next)
@@ -1127,6 +1132,12 @@ function decisionNamesThread(view: ViewResource, reviewId: string): boolean {
 function withoutDisplayHint(thread: ReviewThread): ReviewThread {
 	const copy: { -readonly [Key in keyof ReviewThread]?: ReviewThread[Key] } = { ...thread }
 	delete copy.displayHint
+	return copy as ReviewThread
+}
+
+function withoutRenderContext(thread: ReviewThread): ReviewThread {
+	const copy: { -readonly [Key in keyof ReviewThread]?: ReviewThread[Key] } = { ...thread }
+	delete copy.renderContext
 	return copy as ReviewThread
 }
 

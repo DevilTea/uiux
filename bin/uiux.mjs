@@ -29,7 +29,7 @@ Commands:
                            one-time sign-in link
   migrate --workspace <dir> [--dry-run]
                            Migrate an older Workspace schema to schemaVersion ${workspaceSchemaVersion}
-                           (steps chain, e.g. uiux.v1-to-v2 then uiux.v2-to-v3);
+                           (steps chain: uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4);
                            --dry-run prints the steps and changed files without writing
   publish --workspace <dir> --out <dir> [--base <path>] [--source-revision <rev>]
                            Publish a read-only static UIUX Workspace

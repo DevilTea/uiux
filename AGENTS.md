@@ -3,7 +3,7 @@
 - Keep this repository as the single public package `@deviltea/uiux`.
 - Preserve the Nuxt SPA (`ssr: false`) and Nitro server runtime.
 - Keep the CLI help and version commands honest; `uiux init --workspace <dir>` initializes a minimal current-schema Workspace and `uiux dev --workspace <dir>` starts the unified packaged Nitro server for one selected Workspace.
-- `uiux migrate --workspace <dir> [--dry-run]` upgrades an older Workspace to the current schema, `schemaVersion` 3 (CLI-only; steps `uiux.v1-to-v2` then `uiux.v2-to-v3`).
+- `uiux migrate --workspace <dir> [--dry-run]` upgrades an older Workspace to the current schema, `schemaVersion` 4 (CLI-only; steps `uiux.v1-to-v2`, `uiux.v2-to-v3`, then `uiux.v3-to-v4`).
 - `uiux publish --workspace <dir> --out <dir> [--base <path>] [--source-revision <rev>]` builds the read-only static publication of a Workspace (in a source checkout, run `pnpm build` first).
 - `uiux member|token|invite|session ... --workspace <dir>` and `uiux access copy --from <old-dir> --workspace <dir>` manage that Workspace's host-local roster under `$UIUX_HOME` (default `~/.uiux`). Every `/api/*` and `/mcp` request needs a credential; agents send `Authorization: Bearer <token>`. Tests and smoke runs must use a temporary `UIUX_HOME`.
 - Do not introduce Workspace schemas, domain semantics, or external protocol contracts without an accepted architecture decision (defined under "Repository specification" below) and a scoped task.

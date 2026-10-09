@@ -1,4 +1,5 @@
 import {
+	isCanonicalLocaleTag,
 	jsonPointer,
 	rejectUnknownKeys,
 	validateDigest,
@@ -22,6 +23,12 @@ export const REVIEW_RESOLUTIONS = ['verified', 'answered', 'wont-fix', 'duplicat
 export type ReviewPinHint = Readonly<{ x: number; y: number }>
 /** Non-authoritative, closed display-hint container (schemaVersion >= 2). Never part of anchor identity. */
 export type ReviewDisplayHint = Readonly<{ pin: ReviewPinHint }>
+/**
+ * The render context a Widget-arm thread was raised in (schemaVersion >= 4): Workspace-local keys of
+ * a Locale, a viewport and a theme. At least one member; an absent member, or an absent
+ * `renderContext`, means unknown. A key that later stops existing never invalidates the thread.
+ */
+export type ReviewRenderContext = Readonly<{ locale?: string; viewportId?: string; themeId?: string }>
 /** Decoding context: every Review file is decoded under the selected Workspace's manifest schemaVersion. */
 export type ReviewDecodeContext = Readonly<{ schemaVersion: number; filename?: string }>
 export type ReviewActor = Readonly<{ type: string; id?: string; displayName?: string }>
@@ -49,6 +56,8 @@ export type ReviewSubmission = Readonly<{
 	scope: JsonObject
 	evidenceRefs: readonly ReviewEvidenceRef[]
 }>
+/** What a re-anchor event records on each side; `renderContext` only under schemaVersion >= 4. */
+export type ReviewAnchorScope = Readonly<{ anchor: ReviewAnchor; variantNames: readonly string[]; renderContext?: ReviewRenderContext }>
 export type ReviewHistoryEvent = Readonly<{
 	id: string
 	kind: 'lifecycle' | 'reanchor'
@@ -57,8 +66,8 @@ export type ReviewHistoryEvent = Readonly<{
 	from?: ReviewStatus
 	to?: ReviewStatus
 	submissionId?: string
-	before?: Readonly<{ anchor: ReviewAnchor; variantNames: readonly string[] }>
-	after?: Readonly<{ anchor: ReviewAnchor; variantNames: readonly string[] }>
+	before?: ReviewAnchorScope
+	after?: ReviewAnchorScope
 	reason?: string
 	/** Lifecycle events only; required exactly when `to === 'resolved'` (schemaVersion >= 2). */
 	resolution?: ReviewResolution
@@ -69,6 +78,8 @@ export type ReviewThread = Readonly<{
 	variantNames: readonly string[]
 	/** Optional non-authoritative pin placement (schemaVersion >= 2); never anchor identity. */
 	displayHint?: ReviewDisplayHint
+	/** Optional render context (schemaVersion >= 4, Widget arm only); changed only by a re-anchor. */
+	renderContext?: ReviewRenderContext
 	status: ReviewStatus
 	messages: readonly ReviewMessage[]
 	history: readonly ReviewHistoryEvent[]
@@ -82,6 +93,8 @@ const REVIEW_RESOLUTION_SET = new Set<string>(REVIEW_RESOLUTIONS)
 export const REVIEW_SCHEMA_V2 = 2
 /** First Workspace schemaVersion that decodes the Workspace anchor arm and message `edits[]`. */
 export const REVIEW_SCHEMA_V3 = 3
+/** First Workspace schemaVersion that decodes thread `renderContext` and re-anchor `before`/`after` `renderContext`. */
+export const REVIEW_SCHEMA_V4 = 4
 
 function decodesReviewV2(schemaVersion: number): boolean {
 	return schemaVersion >= REVIEW_SCHEMA_V2
@@ -89,6 +102,10 @@ function decodesReviewV2(schemaVersion: number): boolean {
 
 function decodesReviewV3(schemaVersion: number): boolean {
 	return schemaVersion >= REVIEW_SCHEMA_V3
+}
+
+function decodesReviewV4(schemaVersion: number): boolean {
+	return schemaVersion >= REVIEW_SCHEMA_V4
 }
 
 export function isWorkspaceAnchor(anchor: ReviewAnchor | undefined | null): anchor is ReviewWorkspaceAnchor {
@@ -182,10 +199,13 @@ export function validateReviewThread(input: unknown, context: ReviewDecodeContex
 	const { filename } = context
 	const v2 = decodesReviewV2(context.schemaVersion)
 	const v3 = decodesReviewV3(context.schemaVersion)
+	const v4 = decodesReviewV4(context.schemaVersion)
 	validateJsonValue(input, '', v)
-	rejectUnknownKeys(thread, v2
-		? ['id', 'anchor', 'variantNames', 'displayHint', 'status', 'messages', 'history', 'submissions']
-		: ['id', 'anchor', 'variantNames', 'status', 'messages', 'history', 'submissions'], '', v)
+	rejectUnknownKeys(thread, v4
+		? ['id', 'anchor', 'variantNames', 'displayHint', 'renderContext', 'status', 'messages', 'history', 'submissions']
+		: v2
+			? ['id', 'anchor', 'variantNames', 'displayHint', 'status', 'messages', 'history', 'submissions']
+			: ['id', 'anchor', 'variantNames', 'status', 'messages', 'history', 'submissions'], '', v)
 	const idIsUuid = validateUuid(thread.id, '/id', v, 'Review thread id')
 	if (filename !== undefined && idIsUuid) {
 		const match = /^([0-9a-f-]+)\.review\.json$/iu.exec(filename)
@@ -202,6 +222,8 @@ export function validateReviewThread(input: unknown, context: ReviewDecodeContex
 			v.issue('review.display_hint_without_widget', '/displayHint', 'A Workspace-scoped thread has no Widget, so it carries no display hint.')
 		else validateDisplayHint(thread.displayHint, '/displayHint', v)
 	}
+	if (v4 && Object.hasOwn(thread, 'renderContext'))
+		validateRenderContextMember(thread.renderContext, '/renderContext', workspaceArm, v)
 	const status = validateReviewStatus(thread.status, '/status', v)
 
 	const messages = v.array(thread.messages, '/messages')
@@ -233,7 +255,7 @@ export function validateReviewThread(input: unknown, context: ReviewDecodeContex
 	const lifecycleEvents: { event: Record<string, unknown>; index: number }[] = []
 	history?.forEach((entry, index) => {
 		const path = jsonPointer('/history', index)
-		const parsed = validateReviewHistoryEvent(entry, path, v2, v3)
+		const parsed = validateReviewHistoryEvent(entry, path, v2, v3, v4)
 		v.diagnostics.push(...parsed.diagnostics)
 		if (isObjectWithStringId(entry)) {
 			if (historyIds.has(entry.id)) v.issue('identity.duplicate_uuid', `${path}/id`, 'Review history event UUID is duplicated.')
@@ -265,6 +287,7 @@ export function validateReviewThread(input: unknown, context: ReviewDecodeContex
 		allIds.add(event.id)
 	}
 	validateCurrentAnchorAgainstHistory(thread.anchor, thread.variantNames, history, v)
+	if (v4) validateCurrentRenderContextAgainstHistory(thread.renderContext, history, v)
 	if (v3) messages?.forEach((message, index) => validateMessageEditRules(message, jsonPointer('/messages', index), submissions, history, v))
 
 	return v.finish<ReviewThread>(input)
@@ -381,7 +404,7 @@ function validateReviewSubmission(input: unknown, path: string): ValidationResul
 	return v.finish<ReviewSubmission>(input)
 }
 
-function validateReviewHistoryEvent(input: unknown, path: string, v2: boolean, v3: boolean): ValidationResult<ReviewHistoryEvent> {
+function validateReviewHistoryEvent(input: unknown, path: string, v2: boolean, v3: boolean, v4: boolean): ValidationResult<ReviewHistoryEvent> {
 	const v = new Validator()
 	const event = v.object(input, path)
 	if (!event) return v.finish<ReviewHistoryEvent>(input)
@@ -434,8 +457,8 @@ function validateReviewHistoryEvent(input: unknown, path: string, v2: boolean, v
 	}
 	else if (event.kind === 'reanchor') {
 		rejectUnknownKeys(event, ['id', 'kind', 'actor', 'at', 'before', 'after', 'reason'], path, v)
-		validateAnchorScope(event.before, `${path}/before`, v, v3)
-		validateAnchorScope(event.after, `${path}/after`, v, v3)
+		validateAnchorScope(event.before, `${path}/before`, v, v3, v4)
+		validateAnchorScope(event.after, `${path}/after`, v, v3, v4)
 	}
 	else {
 		v.issue('review.invalid_history_kind', `${path}/kind`, 'History kind must identify a lifecycle or reanchor event.')
@@ -544,6 +567,30 @@ function validateCurrentAnchorAgainstHistory(
 }
 
 /**
+ * Render context continuity (schemaVersion >= 4): only a re-anchor changes `renderContext`, so each
+ * re-anchor's `before` repeats the preceding `after`, and the thread's current value equals the
+ * latest `after`. Absent is a value here: it means unknown on both sides. Without any re-anchor
+ * the thread keeps whatever it was created with.
+ */
+function validateCurrentRenderContextAgainstHistory(
+	currentValue: unknown,
+	history: readonly unknown[] | undefined,
+	v: Validator,
+): void {
+	let previousAfter: Record<string, unknown> | undefined
+	for (const [index, event] of (history ?? []).entries()) {
+		if (!isObject(event) || event.kind !== 'reanchor' || !isObject(event.before) || !isObject(event.after)) continue
+		if (previousAfter && !sameRenderContext(previousAfter.renderContext, event.before.renderContext))
+			v.issue('review.render_context_discontinuous_history', `/history/${index}/before/renderContext`,
+				'A re-anchor must record the render context the preceding re-anchor left as its before value.')
+		previousAfter = event.after
+	}
+	if (previousAfter && !sameRenderContext(previousAfter.renderContext, currentValue))
+		v.issue('review.render_context_history_mismatch', '/renderContext',
+			'The current render context must match the latest re-anchor event\'s after value.')
+}
+
+/**
  * Decodes the anchor union. Under schemaVersion >= 3 an object with `scope` is the Workspace arm
  * (closed `['scope']`, `scope === "workspace"`); anything else is the closed Widget arm. Under 1–2
  * only the Widget arm exists, so `scope` is an unknown field there.
@@ -565,11 +612,13 @@ function validateAnchor(value: unknown, path: string, v: Validator, v3: boolean)
 	return 'widget'
 }
 
-function validateAnchorScope(value: unknown, path: string, v: Validator, v3: boolean): void {
+function validateAnchorScope(value: unknown, path: string, v: Validator, v3: boolean, v4: boolean): void {
 	const scope = v.object(value, path)
 	if (!scope) return
-	rejectUnknownKeys(scope, ['anchor', 'variantNames'], path, v)
+	rejectUnknownKeys(scope, v4 ? ['anchor', 'variantNames', 'renderContext'] : ['anchor', 'variantNames'], path, v)
 	const arm = validateAnchor(scope.anchor, `${path}/anchor`, v, v3)
+	if (v4 && Object.hasOwn(scope, 'renderContext'))
+		validateRenderContextMember(scope.renderContext, `${path}/renderContext`, arm === 'workspace', v)
 	const names = validateStringArray(scope.variantNames, `${path}/variantNames`, v)
 	if (names) validateUnique(names, `${path}/variantNames`, v)
 	if (arm === 'workspace' && names && names.length > 0)
@@ -639,6 +688,29 @@ function validateDisplayHint(value: unknown, path: string, v: Validator): void {
 	}
 }
 
+/**
+ * Closed `renderContext` container (schemaVersion >= 4). Shape only: `locale` is a canonical BCP 47
+ * tag and the ids are non-empty Workspace-local keys. Whether a key still exists in the Workspace
+ * is never checked here, since a stale key never invalidates the thread.
+ */
+function validateRenderContextMember(value: unknown, path: string, workspaceArm: boolean, v: Validator): void {
+	if (workspaceArm) {
+		v.issue('review.render_context_without_widget', path, 'A Workspace-scoped thread has no Widget, so it carries no render context.')
+		return
+	}
+	const context = v.object(value, path)
+	if (!context) return
+	rejectUnknownKeys(context, ['locale', 'viewportId', 'themeId'], path, v)
+	if (Object.keys(context).length === 0) {
+		v.issue('review.render_context_empty', path, 'A renderContext must contain at least one member; omit the field instead of writing {}.')
+		return
+	}
+	if (Object.hasOwn(context, 'locale') && !isCanonicalLocaleTag(context.locale))
+		v.issue('review.render_context_invalid_locale', `${path}/locale`, 'Render context locale must be a canonical BCP 47 tag.')
+	if (Object.hasOwn(context, 'viewportId')) v.string(context.viewportId, `${path}/viewportId`, true)
+	if (Object.hasOwn(context, 'themeId')) v.string(context.themeId, `${path}/themeId`, true)
+}
+
 /** Writer normalization for pin hints: clamp to [0, 1] and quantize to 4 fractional digits. */
 export function normalizeReviewPinCoordinate(value: number): number {
 	const clamped = Math.min(1, Math.max(0, value))
@@ -680,6 +752,14 @@ function sameAnchor(left: unknown, right: unknown): boolean {
 	const rightScoped = Object.hasOwn(right, 'scope')
 	if (leftScoped || rightScoped) return leftScoped && rightScoped && left.scope === right.scope
 	return left.viewId === right.viewId && left.widgetId === right.widgetId
+}
+
+/** Absent equals absent; otherwise the same members with the same values. */
+function sameRenderContext(left: unknown, right: unknown): boolean {
+	if (left === undefined || right === undefined) return left === right
+	if (!isObject(left) || !isObject(right)) return false
+	const keys = Object.keys(left)
+	return keys.length === Object.keys(right).length && keys.every(key => Object.hasOwn(right, key) && left[key] === right[key])
 }
 
 function sameStringSet(left: unknown, right: unknown): boolean {

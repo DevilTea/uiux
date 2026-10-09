@@ -97,7 +97,7 @@ try {
 	await mkdir(join(legacyWorkspace, '.uiux'), { recursive: true })
 	await writeFile(join(legacyWorkspace, '.uiux', 'workspace.json'), `${JSON.stringify({ ...initializedManifest, schemaVersion: 1 }, null, 2)}\n`)
 	const migrateDryRun = execFileSync(cliPath, ['migrate', '--workspace', legacyWorkspace, '--dry-run'], { encoding: 'utf8' })
-	if (!migrateDryRun.includes('dry run, nothing written') || !migrateDryRun.includes('uiux.v1-to-v2, uiux.v2-to-v3')
+	if (!migrateDryRun.includes('dry run, nothing written') || !migrateDryRun.includes('uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4')
 		|| JSON.parse(await readFile(join(legacyWorkspace, '.uiux', 'workspace.json'), 'utf8')).schemaVersion !== 1)
 		throw new Error(`Packed CLI migrate --dry-run returned an unexpected response or wrote files: ${migrateDryRun}`)
 	const migrateOutput = execFileSync(cliPath, ['migrate', '--workspace', legacyWorkspace], { encoding: 'utf8' })

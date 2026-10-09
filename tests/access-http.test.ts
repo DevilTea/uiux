@@ -37,6 +37,7 @@ import { removeMember, revokeToken } from '../src/server/access/roster'
 import { AccessStore } from '../src/server/access/store'
 import { createLoopbackGuardHandler } from '../src/server/loopback-guard'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import { provisionToken } from './support/access'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
@@ -53,7 +54,7 @@ const previous = { root: process.env.UIUX_WORKSPACE_ROOT, origin: process.env.UI
 beforeAll(async () => {
 	root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-access-http-')))
 	await mkdir(join(root, '.uiux'), { recursive: true })
-	await writeFile(join(root, '.uiux', 'workspace.json'), `${JSON.stringify({ schemaVersion: 3, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }, null, 2)}\n`)
+	await writeFile(join(root, '.uiux', 'workspace.json'), `${JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }, null, 2)}\n`)
 	process.env.UIUX_WORKSPACE_ROOT = root
 
 	const app = createApp()
