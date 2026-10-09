@@ -31,6 +31,8 @@ import {
 	validateVersionRecord,
 	validateWriteEvent,
 	type CheckpointRecord,
+	type HistoryResourceEntry,
+	type HistoryWriteEvent,
 	type HostVersionRecord,
 } from '../src/domain/history/schema'
 import { summarizeResourceChanges } from '../src/domain/history/summary'
@@ -424,6 +426,8 @@ describe('in-memory snapshot upgrade', () => {
 	})
 })
 
+// These builders take arbitrary overrides so tests can make a record invalid on purpose; the casts type
+// the valid defaults, and the validators under test receive the result as `unknown` input anyway.
 function checkpoint(overrides: Record<string, unknown> = {}): CheckpointRecord {
 	return {
 		historySchemaVersion: 1,
@@ -455,7 +459,7 @@ function hostVersion(overrides: Record<string, unknown> = {}): HostVersionRecord
 	} as HostVersionRecord
 }
 
-function writeEvent(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function writeEvent(overrides: Record<string, unknown> = {}): HistoryWriteEvent {
 	return {
 		at: '2026-10-09T10:01:00.000Z',
 		actor: AGENT,
@@ -465,10 +469,10 @@ function writeEvent(overrides: Record<string, unknown> = {}): Record<string, unk
 		beforeRevision: 'r_before',
 		afterRevision: 'r_after',
 		...overrides,
-	}
+	} as HistoryWriteEvent
 }
 
-function baseResources(): Record<string, unknown>[] {
+function baseResources(): HistoryResourceEntry[] {
 	return [
 		{ kind: 'workspace', key: 'workspace', revision: 'r_ws', files: { [WORKSPACE_MANIFEST_PATH]: DIGEST } },
 		{ kind: 'view', key: VIEW_ID, revision: 'r_view', files: { [viewRelativePath(VIEW_ID)]: OTHER_DIGEST } },

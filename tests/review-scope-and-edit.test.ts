@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { principalActor } from '../src/application/access/principal'
+import type { ResourceDiscoveryItem } from '../src/application/dto/resource-discovery'
 import { createHandoffExportService } from '../src/application/services/handoff-export'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
@@ -21,7 +22,7 @@ import {
 	setReviewDisplayHintForHttp,
 	submitReadyForReviewForHttp,
 } from '../src/server/authoring-http'
-import { listResourcesForHttp, searchResourcesForHttp } from '../src/server/resource-discovery'
+import { listResourcesForHttp, searchResourcesForHttp, type ResourceDiscoveryHttpResult } from '../src/server/resource-discovery'
 import { AGENT_EDITOR, connectMcp, scoped, testMember } from './support/access'
 
 /**
@@ -69,6 +70,17 @@ async function read(ctx: Ctx, key = REVIEW_ID) {
 
 function body(result: { body: unknown }) {
 	return result.body as { status: string; code?: string; revision?: string; diagnostics?: { code: string; path?: string }[]; warnings?: { code: string }[] }
+}
+
+/** The page of a successful discovery call; a 400 fails the test. */
+function discoveryPage(result: ResourceDiscoveryHttpResult) {
+	if (result.status !== 200) throw new Error(`Expected a discovery page, got ${JSON.stringify(result.body)}`)
+	return result.body
+}
+
+function reviewSummary(item: ResourceDiscoveryItem | undefined) {
+	if (item?.kind !== 'review') throw new Error(`Expected a Review item, got ${JSON.stringify(item)}`)
+	return item.summary
 }
 
 function codes(result: { body: unknown } | { diagnostics?: readonly { code: string }[] }): string[] {
@@ -232,7 +244,7 @@ describe('editing a message (decisions 10–16)', { timeout: 30_000 }, () => {
 	it('lets the author edit over HTTP, keeps every version append-only, stamps actor and time, and counts as activity', async () => {
 		const ctx = await session()
 		const { revision, messageId } = await workspaceThread(ctx, MEI, 'Use one date format.')
-		const before = (await listResourcesForHttp(ctx.app, { kinds: ['review'], limit: 10 })).body as { items: { summary: { latestActivityAt?: string } }[] }
+		const before = discoveryPage(await listResourcesForHttp(ctx.app, { kinds: ['review'], limit: 10 }))
 		const edited = await editReviewMessageForHttp(scoped(ctx.app, MEI), REVIEW_ID, messageId, {
 			expectedRevision: revision,
 			body: 'Use one date format everywhere.',
@@ -255,9 +267,9 @@ describe('editing a message (decisions 10–16)', { timeout: 30_000 }, () => {
 		expect(message.edits![0]!.at).not.toBe('2000-01-01T00:00:00.000Z')
 		expect(thread.resource.history).toEqual([])
 
-		const after = (await listResourcesForHttp(ctx.app, { kinds: ['review'], limit: 10 })).body as { items: { summary: { latestActivityAt?: string } }[] }
-		expect(after.items[0]!.summary.latestActivityAt).toBe(message.edits![1]!.at)
-		expect(Date.parse(after.items[0]!.summary.latestActivityAt!)).toBeGreaterThanOrEqual(Date.parse(before.items[0]!.summary.latestActivityAt!))
+		const after = discoveryPage(await listResourcesForHttp(ctx.app, { kinds: ['review'], limit: 10 }))
+		expect(reviewSummary(after.items[0]).latestActivityAt).toBe(message.edits![1]!.at)
+		expect(Date.parse(reviewSummary(after.items[0]).latestActivityAt!)).toBeGreaterThanOrEqual(Date.parse(reviewSummary(before.items[0]).latestActivityAt!))
 		// Search covers the current text only (R14); the title is the first message's current body.
 		expect(((await searchResourcesForHttp(ctx.app, { kinds: ['review'], query: 'workspace', limit: 10 })).body as { items: unknown[] }).items).toHaveLength(1)
 	})
@@ -364,7 +376,7 @@ describe('discovery: anchorScope and the workspace search term (R6)', { timeout:
 		const ctx = await session()
 		await workspaceThread(ctx)
 		await ctx.app.createReviewThread({ id: WIDGET_REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' } })
-		const keys = async (input: Record<string, unknown>) => ((await listResourcesForHttp(ctx.app, { limit: 10, ...input })).body as { items: { key: string }[] }).items.map(item => item.key)
+		const keys = async (input: Record<string, unknown>) => discoveryPage(await listResourcesForHttp(ctx.app, { limit: 10, ...input })).items.map(item => item.key)
 		expect(await keys({ kinds: ['review'], anchorScope: ['workspace'] })).toEqual([REVIEW_ID])
 		expect(await keys({ kinds: ['review'], anchorScope: ['view'] })).toEqual([WIDGET_REVIEW_ID])
 		expect(await keys({ kinds: ['review'], anchorScope: ['view', 'workspace'] })).toEqual([REVIEW_ID, WIDGET_REVIEW_ID])
@@ -374,12 +386,12 @@ describe('discovery: anchorScope and the workspace search term (R6)', { timeout:
 			const result = await listResourcesForHttp(ctx.app, { kinds: ['review'], limit: 10, anchorScope: invalid })
 			expect(result.status).toBe(400)
 		}
-		const page = (await listResourcesForHttp(ctx.app, { kinds: ['review'], limit: 1, anchorScope: ['view', 'workspace'] })).body as { nextCursor?: string }
+		const page = discoveryPage(await listResourcesForHttp(ctx.app, { kinds: ['review'], limit: 1, anchorScope: ['view', 'workspace'] }))
 		expect(page.nextCursor).toBeDefined()
 		expect((await listResourcesForHttp(ctx.app, { kinds: ['review'], limit: 1, anchorScope: ['workspace'], cursor: page.nextCursor })).status).toBe(400)
-		const found = (await searchResourcesForHttp(ctx.app, { kinds: ['review'], query: 'WORKSPACE', limit: 10 })).body as { items: { key: string; summary: { anchor: unknown } }[] }
+		const found = discoveryPage(await searchResourcesForHttp(ctx.app, { kinds: ['review'], query: 'WORKSPACE', limit: 10 }))
 		expect(found.items.map(item => item.key)).toEqual([REVIEW_ID])
-		expect(found.items[0]!.summary.anchor).toEqual({ scope: 'workspace' })
+		expect(reviewSummary(found.items[0]).anchor).toEqual({ scope: 'workspace' })
 
 		const mcp = await connectMcp(ctx.app)
 		try {
@@ -405,9 +417,9 @@ describe('Handoff closure (owner decision O1)', { timeout: 30_000 }, () => {
 			const assessed = await handoff.assessReadiness({ roots })
 			expect(assessed.status).toBe('ok')
 			if (assessed.status !== 'ok') continue
-			expect(assessed.readiness.implementationReady).toBe(false)
-			expect(assessed.readiness.coverage.review).toMatchObject({ complete: false, threads: 1, workspaceThreads: 1 })
-			expect(assessed.readiness.blockingDiagnostics).toContainEqual({ code: 'handoff.unresolved_review_thread', message: workspaceBlocked('open'), blocking: true, path: `/reviews/${REVIEW_ID}` })
+			expect(assessed.readiness!.implementationReady).toBe(false)
+			expect(assessed.readiness!.coverage.review).toMatchObject({ complete: false, threads: 1, workspaceThreads: 1 })
+			expect(assessed.readiness!.blockingDiagnostics).toContainEqual({ code: 'handoff.unresolved_review_thread', message: workspaceBlocked('open'), blocking: true, path: `/reviews/${REVIEW_ID}` })
 		}
 
 		const exported = await handoff.exportHandoff({ roots: [{ type: 'view', viewId: OTHER_VIEW_ID }] })
@@ -424,10 +436,10 @@ describe('Handoff closure (owner decision O1)', { timeout: 30_000 }, () => {
 		const after = await handoff.assessReadiness({ roots: [{ type: 'view', viewId: VIEW_ID }] })
 		expect(after.status).toBe('ok')
 		if (after.status === 'ok') {
-			expect(after.assessment.reviewCoverageComplete).toBe(true)
-			expect(after.readiness.blockingDiagnostics.some(item => item.code === 'handoff.unresolved_review_thread')).toBe(false)
-			expect(after.readiness.coverage.review).toMatchObject({ complete: true, threads: 1, workspaceThreads: 1, resolved: { 'wont-fix': 1 } })
-			expect(after.readiness.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'handoff.review_declined', blocking: false, message: expect.stringContaining('Workspace-scoped Review thread') }))
+			expect(after.assessment!.reviewCoverageComplete).toBe(true)
+			expect(after.readiness!.blockingDiagnostics.some(item => item.code === 'handoff.unresolved_review_thread')).toBe(false)
+			expect(after.readiness!.coverage.review).toMatchObject({ complete: true, threads: 1, workspaceThreads: 1, resolved: { 'wont-fix': 1 } })
+			expect(after.readiness!.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'handoff.review_declined', blocking: false, message: expect.stringContaining('Workspace-scoped Review thread') }))
 		}
 	})
 })

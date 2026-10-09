@@ -135,7 +135,7 @@ describe('Preview outer mapping observer lifecycle', () => {
 
 	it('rejects non-finite or negative content viewport dimensions', () => {
 		const h = harness()
-		for (const [width, height] of [[-1, 1], [1, -1], [Number.NaN, 1], [1, Number.POSITIVE_INFINITY]]) {
+		for (const [width, height] of [[-1, 1], [1, -1], [Number.NaN, 1], [1, Number.POSITIVE_INFINITY]] as const) {
 			expect(() => h.controller.observeContentViewport(width, height)).toThrow(/finite non-negative/)
 		}
 	})

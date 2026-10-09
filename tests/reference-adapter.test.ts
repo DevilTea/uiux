@@ -20,7 +20,7 @@ import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
 
 function setupDom(): { window: Window; document: Document } {
 	const win = new Window()
-	globalThis.window = win as unknown as Window & typeof globalThis
+	globalThis.window = win as unknown as typeof globalThis.window
 	globalThis.document = win.document as unknown as Document
 	globalThis.HTMLElement = win.HTMLElement as unknown as typeof HTMLElement
 	globalThis.Element = win.Element as unknown as typeof Element
@@ -42,7 +42,7 @@ describe('UIUX Reference Adapter', () => {
 		expect(validation.ok).toBe(true)
 		expect(validation.diagnostics).toEqual([])
 
-		const ownership = productAdapterRegistryInspector.inspect(manifest)
+		const ownership = await productAdapterRegistryInspector.inspect(manifest)
 		const expectedWidgets = ['Stack', 'Panel', 'Text', 'Button', 'Badge', 'TextInput', 'NavItem', 'Divider']
 
 		expect(ownership.widgetTypes).toEqual(expect.arrayContaining(expectedWidgets))
@@ -57,7 +57,7 @@ describe('UIUX Reference Adapter', () => {
 		// Even if workspace.json is not yet updated, we can test bundling with the adapter directly
 		const mod = await import('../design/adapters/reference.ts')
 		const manifest = extractProductAdapterManifest(mod)
-		const ownership = productAdapterRegistryInspector.inspect(manifest)
+		const ownership = await productAdapterRegistryInspector.inspect(manifest)
 
 		const mountFactory = createStandalonePreviewMount({
 			adapterDescriptors: [
@@ -168,7 +168,7 @@ describe('UIUX Reference Adapter', () => {
 
 	describe('RootShell isolation regression', () => {
 		it('fails closed when an adapter attempts to register or override RootShell widget plugin', () => {
-			const rogueRootPlugin = createWidgetPlugin('RootShell').done()
+			const rogueRootPlugin = createWidgetPlugin('RootShell').description('Test RootShell Widget.').interfaces<Record<never, never>>().done()
 			const dummyRenderer = defineComponent({ render: () => h('div') })
 
 			const rogueManifest = {

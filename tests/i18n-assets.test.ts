@@ -24,7 +24,7 @@ afterEach(async () => {
 
 describe('i18n runtime and Checks semantics', () => {
 	it('distinguishes missing translation fallback, unresolved keys, and missing parameters in canonical warning order', () => {
-		const resources = new Map([
+		const resources = new Map<string, Readonly<Record<string, string>>>([
 			['en-US', { greeting: 'Hello {name} from {place}' }],
 			['zh-TW', {}],
 		])

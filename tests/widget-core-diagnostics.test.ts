@@ -14,9 +14,9 @@ import { createAdapterWidgetSystem } from '../src/runtime/widget-core-diagnostic
  * from another widget-core copy: widget-core documents both as the same `foreign-plugin` case.
  */
 
-const alpha = createWidgetPlugin('Alpha').done()
-const alphaAgain = createWidgetPlugin('Alpha').done()
-const beta = createWidgetPlugin('Beta').done()
+const alpha = createWidgetPlugin('Alpha').description('Test Alpha Widget.').interfaces<Record<never, never>>().done()
+const alphaAgain = createWidgetPlugin('Alpha').description('Test Alpha Widget.').interfaces<Record<never, never>>().done()
+const beta = createWidgetPlugin('Beta').description('Test Beta Widget.').interfaces<Record<never, never>>().done()
 const foreignGamma = { type: 'Gamma' } as unknown as AnyWidgetPlugin
 const Renderer = defineComponent({ render: () => h('div') })
 

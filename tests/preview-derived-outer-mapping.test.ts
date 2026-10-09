@@ -91,7 +91,9 @@ describe('rendered content quad -> outer mapping', () => {
 		const source = quad([[0, 0], [100, 5], [90, 90], [5, 100]])
 		const result = deriveOuterMapping({ width: 100, height: 100 }, source)
 		expect(result.status).toBe('non-affine')
-		source.p1.x = 999
+		// The quad type is readonly; the test mutates the caller's evidence on purpose to prove the result owns a copy.
+		const callerPoint = source.p1 as { x: number }
+		callerPoint.x = 999
 		if (result.status === 'non-affine') expect(result.quad.p1.x).toBe(0)
 	})
 })

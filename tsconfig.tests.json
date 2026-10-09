@@ -1,0 +1,22 @@
+{
+	"$schema": "https://json.schemastore.org/tsconfig",
+	// Type-checks the Vitest suites and their support files with the app's compiler options. Tests
+	// import `vitest` explicitly (no globals); browser suites reach the DOM through the shared DOM lib.
+	// The `typecheck:tests` script runs `nuxt prepare` first to generate `.nuxt/`. `noEmit` is set
+	// here too, so a run without `.nuxt/` fails without writing `.js` files next to the sources.
+	"extends": "./.nuxt/tsconfig.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"types": ["node"]
+	},
+	"include": ["tests/**/*.ts", ".nuxt/nuxt.node.d.ts"],
+	// These suites are the only importers of two source modules with their own type errors
+	// (src/application/services/canonical-resources.ts, src/preview/protocol/contour-cache.ts),
+	// which `nuxt typecheck` never reaches. A follow-up PR fixes those two modules and then removes
+	// these exclusions.
+	"exclude": [
+		"tests/application-foundation.test.ts",
+		"tests/i18n-assets.test.ts",
+		"tests/preview-contour-cache.test.ts"
+	]
+}
