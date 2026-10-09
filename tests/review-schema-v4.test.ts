@@ -5,9 +5,9 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
-import { validateReviewThread } from '../src/domain/reviews/schema'
+import { validateReviewRenderContextInput, validateReviewThread } from '../src/domain/reviews/schema'
 import { FileNativePersistence } from '../src/persistence/file-native'
-import { reviewRelativePath, viewRelativePath, workspaceRelativePath } from '../src/persistence/paths'
+import { localeRelativePath, reviewRelativePath, viewRelativePath, workspaceRelativePath } from '../src/persistence/paths'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY, WORKSPACE_V3_TO_V4_STEP } from '../src/product/workspace-schema'
 
 /**
@@ -306,5 +306,153 @@ describe('re-anchor keeps or clears the recorded renderContext (owner ruling 1, 
 		expect(back).not.toHaveProperty('renderContext')
 		expect(back.history.at(-1)!.before).toEqual({ anchor: WORKSPACE, variantNames: [] })
 		expect(back.history.at(-1)!.after).toEqual({ anchor: ROOT, variantNames: [] })
+	})
+})
+
+describe('validateReviewRenderContextInput (writer-side shape check)', () => {
+	it('accepts a non-empty context on a Widget anchor and reports each shape error once at the given path', () => {
+		expect(validateReviewRenderContextInput(ZH_MOBILE_DARK, '/renderContext', WIDGET)).toMatchObject({ ok: true, value: ZH_MOBILE_DARK })
+		const refuse = (value: unknown, anchor: typeof WIDGET | { scope: 'workspace' } = WIDGET) =>
+			validateReviewRenderContextInput(value, '/renderContext', anchor).diagnostics.map(item => [item.code, item.path])
+		expect(refuse({ locale: 'en-US' }, { scope: 'workspace' })).toEqual([['review.render_context_without_widget', '/renderContext']])
+		expect(refuse({})).toEqual([['review.render_context_empty', '/renderContext']])
+		expect(refuse({ locale: 'zh_TW' })).toEqual([['review.render_context_invalid_locale', '/renderContext/locale']])
+		expect(refuse({ density: 'compact', themeId: 'dark' })).toEqual([['schema.unknown_field', '/renderContext/density']])
+	})
+})
+
+/**
+ * Write path (Clause 01a1170f-bba0-7982-bc92-7eef91459828; owner rulings, Discussion #7,
+ * 2026-10-09): only Workspace-authored keys are recorded; on re-anchor an object sets, null clears
+ * and omitted keeps.
+ */
+describe('Review authoring records only Workspace keys in renderContext', () => {
+	async function seedV4Workspace() {
+		const root = await seedV3Workspace([])
+		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		await persistence.migrateWorkspace()
+		await mkdir(join(root, 'i18n'), { recursive: true })
+		await writeFile(join(root, localeRelativePath('zh-TW')), '{}\n')
+		return { root, persistence, app: createWorkspaceApplicationSession(persistence) }
+	}
+
+	async function storedThread(root: string) {
+		return JSON.parse(await readFile(join(root, reviewRelativePath(REVIEW_ID)), 'utf8')) as Record<string, unknown> & { history: Record<string, unknown>[] }
+	}
+
+	function refusals(result: unknown): Array<[string, string]> {
+		const diagnostics = (result as { diagnostics?: { code: string; path: string }[] }).diagnostics ?? []
+		return diagnostics.map(item => [item.code, item.path])
+	}
+
+	it('creates a thread with keys from the authored viewports and themes, an i18n file and the default Locale', async () => {
+		const { root, persistence, app } = await seedV4Workspace()
+		expect(await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET, renderContext: ZH_MOBILE_DARK })).toMatchObject({ status: 'created', diagnostics: [] })
+		expect((await storedThread(root)).renderContext).toEqual(ZH_MOBILE_DARK)
+		expect((await persistence.reviews.readInspected(REVIEW_ID))?.diagnostics).toEqual([])
+		const second = '88888888-8888-4888-8888-888888888888'
+		expect(await app.createReviewThread({ id: second, anchor: ROOT, renderContext: { locale: 'en-US' } })).toMatchObject({ status: 'created' })
+		expect((await persistence.reviews.read(second))?.resource.renderContext).toEqual({ locale: 'en-US' })
+	})
+
+	it('refuses unknown keys, unauthored built-in fallbacks included, reports every one, and writes nothing', async () => {
+		const { root, app } = await seedV4Workspace()
+		const refused = await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET, renderContext: { locale: 'fr-FR', viewportId: 'default', themeId: 'light' } })
+		expect(refused).toMatchObject({ status: 'invalid', key: REVIEW_ID })
+		expect(refusals(refused)).toEqual([
+			['review.render_context_unknown_key', '/renderContext/locale'],
+			['review.render_context_unknown_key', '/renderContext/viewportId'],
+			['review.render_context_unknown_key', '/renderContext/themeId'],
+		])
+		expect(await readdir(join(root, 'reviews'))).toEqual([])
+		expect(refusals(await app.createReviewThread({ anchor: WIDGET, renderContext: { viewportId: 'mobile', themeId: 'retired' } })))
+			.toEqual([['review.render_context_unknown_key', '/renderContext/themeId']])
+		expect(await readdir(join(root, 'reviews'))).toEqual([])
+	})
+
+	it('accepts `default` and `light` when the Workspace authored them, since only unauthored fallbacks are refused', async () => {
+		const { root, persistence, app } = await seedV4Workspace()
+		const manifest = { ...v3Manifest, schemaVersion: 4, viewports: { default: { dimensions: { width: 1280, height: 800 } } }, themes: { light: {} } }
+		await writeFile(join(root, workspaceRelativePath()), `${JSON.stringify(manifest, null, 2)}\n`)
+		expect(await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET, renderContext: { viewportId: 'default', themeId: 'light' } }))
+			.toMatchObject({ status: 'created', diagnostics: [] })
+		expect((await persistence.reviews.read(REVIEW_ID))?.resource.renderContext).toEqual({ viewportId: 'default', themeId: 'light' })
+	})
+
+	it('refuses a non-canonical Locale tag at the service layer and writes nothing', async () => {
+		const { root, app } = await seedV4Workspace()
+		const refused = await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET, renderContext: { locale: 'zh-tw' } })
+		expect(refused).toMatchObject({ status: 'invalid' })
+		expect(refusals(refused)).toEqual([['review.render_context_invalid_locale', '/renderContext/locale']])
+		expect(await readdir(join(root, 'reviews'))).toEqual([])
+	})
+
+	it('refuses a renderContext on a Workspace anchor and writes nothing', async () => {
+		const { root, app } = await seedV4Workspace()
+		const refused = await app.createReviewThread({ id: REVIEW_ID, anchor: { scope: 'workspace' }, renderContext: { locale: 'en-US' } })
+		expect(refused).toMatchObject({ status: 'invalid' })
+		expect(refusals(refused)).toEqual([['review.render_context_without_widget', '/renderContext']])
+		expect(await readdir(join(root, 'reviews'))).toEqual([])
+	})
+
+	it('re-anchors: an object sets, omitted keeps, null clears, each recorded on both sides of the event', async () => {
+		const { root, persistence, app } = await seedV4Workspace()
+		const created = await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET })
+		if (created.status !== 'created') throw new Error('Thread fixture failed.')
+		const revision = async () => (await persistence.reviews.readRevision(REVIEW_ID))!
+		const ZH_MOBILE = { locale: 'zh-TW', viewportId: 'mobile' }
+
+		expect(await app.reanchorReviewThread({ reviewId: REVIEW_ID, expectedRevision: created.revision, anchor: WIDGET, renderContext: ZH_MOBILE, actor: AUTHOR }))
+			.toMatchObject({ status: 'updated' })
+		let stored = await storedThread(root)
+		expect(stored.renderContext).toEqual(ZH_MOBILE)
+		expect(stored.history.at(-1)!.before).toEqual({ anchor: WIDGET, variantNames: [] })
+		expect(stored.history.at(-1)!.after).toEqual({ anchor: WIDGET, variantNames: [], renderContext: ZH_MOBILE })
+
+		expect(await app.reanchorReviewThread({ reviewId: REVIEW_ID, expectedRevision: await revision(), anchor: ROOT, actor: AUTHOR }))
+			.toMatchObject({ status: 'updated' })
+		stored = await storedThread(root)
+		expect(stored.renderContext).toEqual(ZH_MOBILE)
+		expect(stored.history.at(-1)!.after).toEqual({ anchor: ROOT, variantNames: [], renderContext: ZH_MOBILE })
+
+		expect(await app.reanchorReviewThread({ reviewId: REVIEW_ID, expectedRevision: await revision(), anchor: ROOT, renderContext: null, actor: AUTHOR }))
+			.toMatchObject({ status: 'updated' })
+		stored = await storedThread(root)
+		expect(stored).not.toHaveProperty('renderContext')
+		expect(stored.history.at(-1)!.before).toEqual({ anchor: ROOT, variantNames: [], renderContext: ZH_MOBILE })
+		expect(stored.history.at(-1)!.after).toEqual({ anchor: ROOT, variantNames: [] })
+		expect((await persistence.reviews.readInspected(REVIEW_ID))?.diagnostics).toEqual([])
+	})
+
+	it('clears the context on a re-anchor to the Workspace arm with null and keeps it in before', async () => {
+		const { root, persistence, app } = await seedV4Workspace()
+		const created = await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET, renderContext: ZH_MOBILE_DARK })
+		if (created.status !== 'created') throw new Error('Thread fixture failed.')
+		expect(await app.reanchorReviewThread({ reviewId: REVIEW_ID, expectedRevision: created.revision, anchor: WORKSPACE as { scope: 'workspace' }, renderContext: null, actor: AUTHOR }))
+			.toMatchObject({ status: 'updated' })
+		const stored = await storedThread(root)
+		expect(stored.anchor).toEqual(WORKSPACE)
+		expect(stored).not.toHaveProperty('renderContext')
+		expect(stored.history.at(-1)!.before).toEqual({ anchor: WIDGET, variantNames: [], renderContext: ZH_MOBILE_DARK })
+		expect(stored.history.at(-1)!.after).toEqual({ anchor: WORKSPACE, variantNames: [] })
+		expect((await persistence.reviews.readInspected(REVIEW_ID))?.diagnostics).toEqual([])
+	})
+
+	it('refuses an unknown key, or an object with a Workspace target, on re-anchor without writing, and never re-checks a kept stale key', async () => {
+		const { root, persistence, app } = await seedV4Workspace()
+		// The Workspace has no `tablet` viewport (any more): the recorded key is stale but valid.
+		await writeFile(join(root, reviewRelativePath(REVIEW_ID)), `${JSON.stringify(thread({ renderContext: { viewportId: 'tablet' } }))}\n`)
+		const revision = (await persistence.reviews.readRevision(REVIEW_ID))!
+		const bytes = await readFile(join(root, reviewRelativePath(REVIEW_ID)), 'utf8')
+
+		const unknown = await app.reanchorReviewThread({ reviewId: REVIEW_ID, expectedRevision: revision, anchor: ROOT, renderContext: { viewportId: 'tablet' }, actor: AUTHOR })
+		expect(refusals(unknown)).toEqual([['review.render_context_unknown_key', '/renderContext/viewportId']])
+		const toWorkspace = await app.reanchorReviewThread({ reviewId: REVIEW_ID, expectedRevision: revision, anchor: { scope: 'workspace' }, renderContext: { locale: 'en-US' }, actor: AUTHOR })
+		expect(refusals(toWorkspace)).toEqual([['review.render_context_without_widget', '/renderContext']])
+		expect(await readFile(join(root, reviewRelativePath(REVIEW_ID)), 'utf8')).toBe(bytes)
+
+		expect(await app.reanchorReviewThread({ reviewId: REVIEW_ID, expectedRevision: revision, anchor: ROOT, actor: AUTHOR }))
+			.toMatchObject({ status: 'updated' })
+		expect((await storedThread(root)).renderContext).toEqual({ viewportId: 'tablet' })
 	})
 })

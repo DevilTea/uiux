@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -9,6 +9,7 @@ import type { ViewSpecContent } from '../src/application/services/view-authoring
 import { decodeStrictBase64 } from '../src/domain/assets/schema'
 import type { ViewResource } from '../src/domain/views/schema'
 import { FileNativePersistence } from '../src/persistence'
+import { reviewRelativePath } from '../src/persistence/paths'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { isCaseSensitiveDirectory } from './support/filesystem'
 import { AGENT_EDITOR, HUMAN_OWNER, connectMcp, scoped } from './support/access'
@@ -32,6 +33,7 @@ import {
 	updateViewStructureForHttp,
 	updateWorkspaceSettingsForHttp,
 } from '../src/server/authoring-http'
+import { listResourcesForHttp } from '../src/server/resource-discovery'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const DECISION_ID = '22222222-2222-4222-8222-222222222222'
@@ -1186,6 +1188,189 @@ describe('Review thread domain authoring', () => {
 		})
 		const unchanged = await app.readPointResource('view', OTHER_VIEW_ID)
 		expect(unchanged?.kind === 'view' ? unchanged.resource.spec.decisions : undefined).toEqual([])
+	})
+})
+
+/**
+ * Review render context write path over both transports (Clause 01a1170f-bba0-7982-bc92-7eef91459828,
+ * persisted shape 01a1170f-baf0-7eea-a904-7367227c10b3; owner rulings, Discussion #7, 2026-10-09):
+ * only Workspace-authored keys, an object sets, null clears, omitted keeps, the Workspace arm clears.
+ */
+describe('Review renderContext over MCP and HTTP', () => {
+	const WIDGET = { viewId: VIEW_ID, widgetId: 'submit' }
+	const ROOT = { viewId: VIEW_ID, widgetId: 'root' }
+	const ZH_MOBILE_DARK = { locale: 'zh-TW', viewportId: 'mobile', themeId: 'dark' }
+
+	/** A Workspace with one authored viewport and theme, a default Locale and one i18n file. */
+	async function renderContextSession() {
+		const root = await mkdtemp(join(tmpdir(), 'uiux-render-context-'))
+		roots.push(root)
+		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		await persistence.workspace.create({
+			schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
+			i18n: { defaultLocale: 'en-US' },
+			adapters: [],
+			viewports: { mobile: { label: 'Mobile', dimensions: { width: 390, height: 844 } } },
+			themes: { dark: { label: 'Dark' } },
+		})
+		const app = createWorkspaceApplicationSession(persistence)
+		expect((await app.createLocale({ locale: 'zh-TW', messages: { title: '結帳' } })).status).toBe('created')
+		expect((await app.createView({ id: VIEW_ID, name: 'Checkout', spec: spec('Pay') })).status).toBe('created')
+		return { root, persistence, app }
+	}
+
+	async function stored(app: ReturnType<typeof createWorkspaceApplicationSession>, key = REVIEW_ID) {
+		const read = await app.readPointResource('review', key)
+		if (read?.kind !== 'review') throw new Error(`Review ${key} is missing.`)
+		expect(read.diagnostics).toEqual([])
+		return read
+	}
+
+	function diagnosticsOf(value: unknown): Array<[string, string]> {
+		return ((value as { diagnostics?: { code: string; path: string }[] }).diagnostics ?? []).map(item => [item.code, item.path])
+	}
+
+	async function reviewFiles(root: string): Promise<string[]> {
+		return (await readdir(join(root, 'reviews')).catch(() => [])).sort()
+	}
+
+	it('creates with renderContext, then sets, keeps and clears it on re-anchor over MCP, and list and search summaries carry it', async () => {
+		const { app } = await renderContextSession()
+		const { client, close } = await connectedClient(app)
+		try {
+			const tools = await client.listTools()
+			expect(tools.tools.find(tool => tool.name === 'create_review_thread')!.description).toContain('renderContext')
+			expect(tools.tools.find(tool => tool.name === 'reanchor_review_thread')!.description).toContain('null clears it')
+
+			const created = await client.callTool({ name: 'create_review_thread', arguments: { id: REVIEW_ID, anchor: WIDGET, renderContext: ZH_MOBILE_DARK } })
+			expect(created.isError).not.toBe(true)
+			expect((await stored(app)).resource.renderContext).toEqual(ZH_MOBILE_DARK)
+
+			const listed = await client.callTool({ name: 'list_resources', arguments: { kinds: ['review'], limit: 10 } })
+			expect((listed.structuredContent as { items: { key: string; summary: Record<string, unknown> }[] }).items[0]!.summary)
+				.toMatchObject({ anchor: WIDGET, renderContext: ZH_MOBILE_DARK })
+			const searched = await client.callTool({ name: 'search_resources', arguments: { kinds: ['review'], query: 'submit', limit: 10 } })
+			expect((searched.structuredContent as { items: { summary: Record<string, unknown> }[] }).items[0]!.summary.renderContext).toEqual(ZH_MOBILE_DARK)
+
+			const reanchor = async (args: Record<string, unknown>) => {
+				const result = await client.callTool({ name: 'reanchor_review_thread', arguments: { reviewId: REVIEW_ID, expectedRevision: (await stored(app)).revision, ...args } })
+				expect(result.isError, JSON.stringify(result.structuredContent)).not.toBe(true)
+				return (await stored(app)).resource
+			}
+			let thread = await reanchor({ anchor: WIDGET, renderContext: { locale: 'en-US', themeId: 'dark' } })
+			expect(thread.renderContext).toEqual({ locale: 'en-US', themeId: 'dark' })
+			expect(thread.history.at(-1)).toMatchObject({ kind: 'reanchor', before: { renderContext: ZH_MOBILE_DARK }, after: { renderContext: { locale: 'en-US', themeId: 'dark' } } })
+
+			thread = await reanchor({ anchor: ROOT })
+			expect(thread.renderContext).toEqual({ locale: 'en-US', themeId: 'dark' })
+			expect(thread.history.at(-1)).toMatchObject({ before: { anchor: WIDGET, renderContext: { locale: 'en-US', themeId: 'dark' } }, after: { anchor: ROOT, renderContext: { locale: 'en-US', themeId: 'dark' } } })
+
+			thread = await reanchor({ anchor: ROOT, renderContext: null })
+			expect(thread).not.toHaveProperty('renderContext')
+			expect(thread.history.at(-1)!.before).toMatchObject({ renderContext: { locale: 'en-US', themeId: 'dark' } })
+			expect(thread.history.at(-1)!.after).toEqual({ anchor: ROOT, variantNames: [] })
+			const relisted = await client.callTool({ name: 'list_resources', arguments: { kinds: ['review'], limit: 10 } })
+			expect((relisted.structuredContent as { items: { summary: Record<string, unknown> }[] }).items[0]!.summary).not.toHaveProperty('renderContext')
+		}
+		finally { await close() }
+	})
+
+	it('creates with renderContext, then sets, keeps and clears it on re-anchor over HTTP, and the list summary carries it', async () => {
+		const { app } = await renderContextSession()
+		const created = await createReviewThreadForHttp(scoped(app), { id: REVIEW_ID, anchor: ROOT, renderContext: { viewportId: 'mobile' } })
+		expect(created.status).toBe(201)
+		expect((await stored(app)).resource.renderContext).toEqual({ viewportId: 'mobile' })
+		const listed = await listResourcesForHttp(app, { kinds: ['review'], limit: 10 })
+		expect((listed.body as { items: { summary: Record<string, unknown> }[] }).items[0]!.summary.renderContext).toEqual({ viewportId: 'mobile' })
+
+		const reanchor = async (body: Record<string, unknown>) => {
+			const result = await reanchorReviewThreadForHttp(scoped(app), REVIEW_ID, { expectedRevision: (await stored(app)).revision, ...body })
+			expect(result.status, JSON.stringify(result.body)).toBe(200)
+			return (await stored(app)).resource
+		}
+		let thread = await reanchor({ anchor: WIDGET, renderContext: ZH_MOBILE_DARK })
+		expect(thread.renderContext).toEqual(ZH_MOBILE_DARK)
+		expect(thread.history.at(-1)).toMatchObject({ before: { anchor: ROOT, renderContext: { viewportId: 'mobile' } }, after: { anchor: WIDGET, renderContext: ZH_MOBILE_DARK } })
+		thread = await reanchor({ anchor: WIDGET, variantNames: ['compact'] })
+		expect(thread.renderContext).toEqual(ZH_MOBILE_DARK)
+		thread = await reanchor({ anchor: WIDGET, renderContext: null })
+		expect(thread).not.toHaveProperty('renderContext')
+		expect(thread.history.at(-1)!.after).toEqual({ anchor: WIDGET, variantNames: [] })
+	})
+
+	it('refuses unknown keys, unauthored built-in fallbacks included, on both transports and writes nothing', async () => {
+		const { root, app } = await renderContextSession()
+		const unknown = { locale: 'fr-FR', viewportId: 'tablet', themeId: 'sepia' }
+		const fallbacks = { viewportId: 'default', themeId: 'light' }
+		const everyKey = [
+			['review.render_context_unknown_key', '/renderContext/locale'],
+			['review.render_context_unknown_key', '/renderContext/viewportId'],
+			['review.render_context_unknown_key', '/renderContext/themeId'],
+		]
+		const fallbackKeys = everyKey.slice(1)
+
+		for (const [renderContext, expected] of [[unknown, everyKey], [fallbacks, fallbackKeys]] as const) {
+			const http = await createReviewThreadForHttp(scoped(app), { id: REVIEW_ID, anchor: WIDGET, renderContext })
+			expect(http.status).toBe(400)
+			expect(http.body).toMatchObject({ status: 'invalid' })
+			expect(diagnosticsOf(http.body)).toEqual(expected)
+		}
+		const { client, close } = await connectedClient(app)
+		try {
+			for (const [renderContext, expected] of [[unknown, everyKey], [fallbacks, fallbackKeys]] as const) {
+				const mcp = await client.callTool({ name: 'create_review_thread', arguments: { id: REVIEW_ID, anchor: WIDGET, renderContext } })
+				expect(mcp.isError).toBe(true)
+				expect(diagnosticsOf(mcp.structuredContent)).toEqual(expected)
+			}
+			expect(await reviewFiles(root)).toEqual([])
+
+			// Re-anchor with an unknown key leaves the thread byte-identical on both transports.
+			const created = await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET, renderContext: ZH_MOBILE_DARK })
+			if (created.status !== 'created') throw new Error('Thread fixture failed.')
+			const bytes = await readFile(join(root, reviewRelativePath(REVIEW_ID)), 'utf8')
+			const viaHttp = await reanchorReviewThreadForHttp(scoped(app), REVIEW_ID, { expectedRevision: created.revision, anchor: ROOT, renderContext: { locale: 'ja-JP' } })
+			expect(viaHttp.status).toBe(400)
+			expect(diagnosticsOf(viaHttp.body)).toEqual([['review.render_context_unknown_key', '/renderContext/locale']])
+			const viaMcp = await client.callTool({ name: 'reanchor_review_thread', arguments: { reviewId: REVIEW_ID, expectedRevision: created.revision, anchor: ROOT, renderContext: { themeId: 'light' } } })
+			expect(viaMcp.isError).toBe(true)
+			expect(diagnosticsOf(viaMcp.structuredContent)).toEqual([['review.render_context_unknown_key', '/renderContext/themeId']])
+			expect(await readFile(join(root, reviewRelativePath(REVIEW_ID)), 'utf8')).toBe(bytes)
+		}
+		finally { await close() }
+		// The transport stays strict about members; key existence is the service's diagnostic.
+		expect((await createReviewThreadForHttp(scoped(app), { anchor: WIDGET, renderContext: { variant: 'empty' } })).body).toMatchObject({ code: 'malformed_payload' })
+	})
+
+	it('refuses renderContext on a Workspace anchor and clears it on a re-anchor to the Workspace, on both transports', async () => {
+		const { root, app } = await renderContextSession()
+		const http = await createReviewThreadForHttp(scoped(app), { anchor: { scope: 'workspace' }, renderContext: { locale: 'en-US' } })
+		expect(http.status).toBe(400)
+		expect(diagnosticsOf(http.body)).toEqual([['review.render_context_without_widget', '/renderContext']])
+		const { client, close } = await connectedClient(app)
+		try {
+			const mcp = await client.callTool({ name: 'create_review_thread', arguments: { anchor: { scope: 'workspace' }, renderContext: { themeId: 'dark' } } })
+			expect(mcp.isError).toBe(true)
+			expect(diagnosticsOf(mcp.structuredContent)).toEqual([['review.render_context_without_widget', '/renderContext']])
+			expect(await reviewFiles(root)).toEqual([])
+
+			const created = await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET, renderContext: ZH_MOBILE_DARK })
+			const second = await app.createReviewThread({ id: SECOND_REVIEW_ID, anchor: WIDGET, renderContext: ZH_MOBILE_DARK })
+			if (created.status !== 'created' || second.status !== 'created') throw new Error('Thread fixtures failed.')
+			const refused = await reanchorReviewThreadForHttp(scoped(app), REVIEW_ID, { expectedRevision: created.revision, anchor: { scope: 'workspace' }, renderContext: ZH_MOBILE_DARK })
+			expect(diagnosticsOf(refused.body)).toEqual([['review.render_context_without_widget', '/renderContext']])
+
+			const viaHttp = await reanchorReviewThreadForHttp(scoped(app), REVIEW_ID, { expectedRevision: created.revision, anchor: { scope: 'workspace' } })
+			expect(viaHttp.status).toBe(200)
+			const viaMcp = await client.callTool({ name: 'reanchor_review_thread', arguments: { reviewId: SECOND_REVIEW_ID, expectedRevision: second.revision, anchor: { scope: 'workspace' } } })
+			expect(viaMcp.isError).not.toBe(true)
+			for (const key of [REVIEW_ID, SECOND_REVIEW_ID]) {
+				const thread = (await stored(app, key)).resource
+				expect(thread).not.toHaveProperty('renderContext')
+				expect(thread.history.at(-1)!.before).toMatchObject({ anchor: WIDGET, renderContext: ZH_MOBILE_DARK })
+				expect(thread.history.at(-1)!.after).toEqual({ anchor: { scope: 'workspace' }, variantNames: [] })
+			}
+		}
+		finally { await close() }
 	})
 })
 
