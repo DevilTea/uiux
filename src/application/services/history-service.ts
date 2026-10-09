@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto'
 
 import { HISTORY_SCHEMA_VERSION, HISTORY_VERSION_TYPES, type HistorySource, type HistoryVersionType } from '../../domain/history/constants'
-import { projectResourceHistory } from '../../domain/history/projection'
 import { isValidCheckpointNote, normalizeCheckpointName, type CheckpointRecord, type HistoryActor, type HistoryResourceIdentity, type VersionRecord } from '../../domain/history/schema'
-import { summarizeResourceChanges, type ResourceChangeSummary } from '../../domain/history/summary'
+import { resourceIdentityKey, summarizeResourceChanges, type ResourceChangeSummary } from '../../domain/history/summary'
 import { isFullUuid, type Diagnostic } from '../../domain/validation'
 import { PersistenceError } from '../../persistence/errors'
 import type { FileNativePersistence } from '../../persistence/file-native'
@@ -11,7 +10,7 @@ import { HostHistoryError } from '../../persistence/history/host-store'
 import { compareVersionOrder } from '../../persistence/history/order'
 import { versionResourcesFromSnapshot } from '../../persistence/history/snapshot'
 import { mergeTimeline, pageTimeline, readMergedTimeline, TimelineCursorError, type MergedTimeline, type TimelineVersion } from '../../persistence/history/timeline'
-import type { HistoryStoreSource } from './history-diff'
+import { createHistoryDiffService, type HistoryDiffService, type HistoryStoreSource } from './history-diff'
 import type { HistoryRecorder } from './history-recorder'
 
 /**
@@ -24,7 +23,7 @@ import type { HistoryRecorder } from './history-recorder'
  */
 
 /** The recorder boundary a Checkpoint takes first (Rule 01a11a5e-00b9-7bf5-8005-9380a388afb8). */
-export type CheckpointBoundary = Pick<HistoryRecorder, 'closeOpenAutosaveUnlocked' | 'nextVersionAt'>
+export type CheckpointBoundary = Pick<HistoryRecorder, 'closeOpenAutosaveUnlocked' | 'nextVersionAt' | 'starting'>
 
 export type CreateCheckpointCommand = Readonly<{
 	name: string
@@ -45,12 +44,15 @@ export type CheckpointDeleted = Readonly<{ status: 'deleted'; versionId: string 
  * owner ruling https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18828964 item 1):
  * `parent` is the version's predecessor on the merged timeline (Rule
  * 01a11e0d-d550-78e4-9787-f0023bbc1b93), `null` for the first version, whatever filter the listing
- * applies; `summary` lists the resources whose revision differs from that predecessor.
+ * applies; `summary` lists the resources that differ from that predecessor, judged as
+ * `get_version_diff` judges them (across a migration, a change the migration alone made is not one,
+ * Rule 01a11a5e-1085-71ec-ac82-d60263ae8173). `name` is `null` on every version that is not a
+ * Checkpoint (owner ruling https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18835031 item 1).
  */
 export type VersionListItem = Readonly<{
 	id: string
 	type: HistoryVersionType
-	name?: string
+	name: string | null
 	note?: string
 	actor: HistoryActor
 	at: string
@@ -59,8 +61,10 @@ export type VersionListItem = Readonly<{
 	netChange?: boolean
 	restoredFrom?: string
 	recordingGap?: true
-	summary: readonly Pick<ResourceChangeSummary, 'kind' | 'key' | 'status'>[]
+	summary: readonly ChangedResource[]
 }>
+
+export type ChangedResource = Readonly<{ kind: string; key: string; status: Exclude<ResourceChangeSummary['status'], 'unchanged'> }>
 
 export type ListVersionsQuery = Readonly<{
 	/** The per-resource projection (Rule 01a11a5d-fe15-7ed2-ab74-4616dcc47a28). */
@@ -96,12 +100,15 @@ export type HistoryRefusal = Readonly<{
 	diagnostics: readonly Diagnostic[]
 }>
 
-/** A transient refusal (HTTP 503 with `Retry-After`): nothing was written; the same request may be retried. */
+/**
+ * HTTP 503: nothing was written. A `retryable` refusal (with `Retry-After`) may simply be retried;
+ * `history.unavailable` is not: history is off on this server.
+ */
 export type HistoryUnavailable = Readonly<{
 	status: 'unavailable'
 	code: string
-	retryable: true
-	retryAfterSeconds: number
+	retryable: boolean
+	retryAfterSeconds?: number
 	message: string
 	diagnostics: readonly Diagnostic[]
 }>
@@ -125,8 +132,10 @@ const BOUNDARY_RETRY_AFTER_SECONDS = 1
 export function createHistoryService(
 	persistence: FileNativePersistence,
 	history: HistoryStoreSource | undefined,
-	options: Readonly<{ boundary?: () => CheckpointBoundary | undefined }> = {},
+	options: Readonly<{ boundary?: () => CheckpointBoundary | undefined; comparison?: HistoryDiffService }> = {},
 ): HistoryService {
+	const comparison = options.comparison ?? createHistoryDiffService(persistence, history)
+
 	async function openStores(): Promise<Awaited<ReturnType<HistoryStoreSource['open']>> | HistoryRefusal> {
 		try {
 			return await history?.open()
@@ -168,6 +177,11 @@ export function createHistoryService(
 				throw error
 			}
 			if (boundary) {
+				// While the recorder is still starting, its boundary would be skipped and drift found by the
+				// start boundary would be recorded after this Checkpoint (Rule 01a11a5e-0313-…). Start
+				// needs this lock, so it is refused rather than awaited.
+				if (boundary.starting)
+					return boundaryUnavailable(new Error('version history is still starting'))
 				// The recorder bounds this boundary in time. When it fails or is abandoned, a host version
 				// it already started writing can still land after this point, so the Checkpoint is refused
 				// rather than written before (or interleaved with) it; the next boundary records what the
@@ -183,7 +197,10 @@ export function createHistoryService(
 			const existing = await checkpoints.listUnlocked()
 			const timeline = mergeTimeline(host, existing)
 			const snapshot = versionResourcesFromSnapshot(await persistence.scanVersionedSnapshotUnlocked())
-			const at = laterThan(boundary?.nextVersionAt(), timeline.versions.at(-1)?.version.at)
+			const latest = timeline.versions.at(-1)?.version.at
+			// The recorder takes the later of the newest stored version and every version it knows, so
+			// its own next stamp also follows this Checkpoint.
+			const at = boundary ? boundary.nextVersionAt(latest) : laterThan(new Date().toISOString(), latest)
 			const parentCheckpoint = existing.records.at(-1)?.id
 			const note = command.note === undefined || command.note === '' ? undefined : command.note
 			const record: CheckpointRecord = {
@@ -218,7 +235,9 @@ export function createHistoryService(
 			}
 			catch (error) {
 				if (error instanceof PersistenceError && error.code === 'persistence.invalid_resource')
-					return { status: 'invalid', code: 'history.record_invalid', message: `Checkpoint file ${id} is not a valid Checkpoint record, so UIUX does not delete it.`, diagnostics: error.diagnostics.length > 0 ? error.diagnostics : [{ code: 'history.record_invalid', path: '/id', message: error.message }] }
+					// Owner ruling https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18835031 item 2:
+					// a corrupt record, or one in a format this build does not know, is never deleted.
+					return { status: 'blocked', code: 'history.record_invalid', message: `Checkpoint file ${id} is not a valid Checkpoint record for this UIUX build, so it is not deleted.`, diagnostics: error.diagnostics.length > 0 ? error.diagnostics : [{ code: 'history.record_invalid', path: '/id', message: error.message }] }
 				throw error
 			}
 			if (!record) {
@@ -243,13 +262,14 @@ export function createHistoryService(
 		if ('status' in parsed) return parsed
 		const timeline = await readTimeline()
 		if (isRefusal(timeline)) return timeline
-		const projected = parsed.resource
-			? new Set(projectResourceHistory(timeline.versions.map(entry => ({ ...entry, resources: entry.version.resources })), parsed.resource).map(entry => entry.version.version.id))
-			: undefined
+		const summaries = await changeSummaries(timeline)
+		// Rule 01a11a5d-fe15-7ed2-ab74-4616dcc47a28: the versions in which the resource changed against
+		// their merged-timeline parent, judged like every row's summary.
+		const resourceKey = parsed.resource ? resourceIdentityKey(parsed.resource) : undefined
 		const selected = timeline.versions.filter(entry =>
 			(!parsed.types || parsed.types.has(entry.version.type))
 			&& (parsed.actor === undefined || actorMatches(entry.version.actor, parsed.actor))
-			&& (!projected || projected.has(entry.version.id)))
+			&& (resourceKey === undefined || summaries.get(entry.version.id)!.some(row => resourceIdentityKey(row) === resourceKey)))
 		let page: ReturnType<typeof pageTimeline>
 		try {
 			page = pageTimeline({ versions: selected, invalid: [] }, { limit: parsed.limit, ...(parsed.cursor === undefined ? {} : { cursor: parsed.cursor }) })
@@ -258,10 +278,9 @@ export function createHistoryService(
 			if (error instanceof TimelineCursorError) return refusal('invalid', error.code, '/cursor', error.message)
 			throw error
 		}
-		const byId = new Map(timeline.versions.map(entry => [entry.version.id, entry.version]))
 		return {
 			status: 'listed',
-			versions: page.items.map(entry => listItem(entry, entry.predecessor === undefined ? undefined : byId.get(entry.predecessor))),
+			versions: page.items.map(entry => listItem(entry, summaries.get(entry.version.id)!)),
 			...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
 			...(timeline.invalid.length > 0 ? { invalid: timeline.invalid } : {}),
 		}
@@ -274,6 +293,29 @@ export function createHistoryService(
 		const entry = timeline.versions.find(item => item.version.id === id)
 		if (!entry) return refusal('not_found', 'history.record_missing', '/id', `Version ${id} does not exist.`)
 		return { status: 'found', version: entry.version, parent: entry.predecessor ?? null }
+	}
+
+	/**
+	 * Every version's changed resources against its merged-timeline parent. Within one schema
+	 * version the recorded revisions decide. Across a migration the pair goes through the comparison
+	 * service itself, so the listing says what `get_version_diff` says (a change the migration alone
+	 * made, such as the manifest `schemaVersion`, is not one: Rule 01a11a5e-1085-71ec-ac82-d60263ae8173).
+	 * A pair the comparison refuses (an unrecognized schema, Rule 01a11a5e-081c-…, or a lost blob)
+	 * keeps its revision summary.
+	 */
+	async function changeSummaries(timeline: MergedTimeline): Promise<ReadonlyMap<string, readonly ChangedResource[]>> {
+		const byId = new Map(timeline.versions.map(entry => [entry.version.id, entry.version]))
+		const summaries = new Map<string, readonly ChangedResource[]>()
+		for (const entry of timeline.versions) {
+			const parent = entry.predecessor === undefined ? undefined : byId.get(entry.predecessor)
+			let rows: readonly ResourceChangeSummary[] = summarizeResourceChanges(parent?.resources, entry.version.resources)
+			if (parent && parent.workspaceSchemaVersion !== entry.version.workspaceSchemaVersion) {
+				const compared = await comparison.diffVersions({ from: parent.id, to: entry.version.id })
+				if (compared.status === 'compared') rows = compared.summary
+			}
+			summaries.set(entry.version.id, rows.flatMap(row => row.status === 'unchanged' ? [] : [{ kind: row.kind, key: row.key, status: row.status }]))
+		}
+		return summaries
 	}
 
 	async function readTimeline(): Promise<MergedTimeline | HistoryRefusal> {
@@ -340,15 +382,13 @@ function parseListQuery(query: ListVersionsQuery): ParsedListQuery | HistoryRefu
 	}
 }
 
-function listItem(entry: TimelineVersion, predecessor: VersionRecord | undefined): VersionListItem {
+function listItem(entry: TimelineVersion, summary: readonly ChangedResource[]): VersionListItem {
 	const { version } = entry
-	const summary = summarizeResourceChanges(predecessor?.resources, version.resources)
-		.filter(row => row.status !== 'unchanged')
-		.map(row => ({ kind: row.kind, key: row.key, status: row.status }))
 	return {
 		id: version.id,
 		type: version.type,
-		...(version.type === 'checkpoint' ? { name: version.name, ...(version.note === undefined ? {} : { note: version.note }) } : {}),
+		name: version.type === 'checkpoint' ? version.name : null,
+		...(version.type === 'checkpoint' && version.note !== undefined ? { note: version.note } : {}),
 		actor: version.actor,
 		at: version.at,
 		parent: entry.predecessor ?? null,
@@ -368,9 +408,8 @@ function actorMatches(actor: HistoryActor, wanted: string): boolean {
 	return actor.type === 'external' ? wanted === 'external' : actor.id === wanted
 }
 
-/** A version time after both the recorder's stamp and the newest recorded version, so the Checkpoint sorts last. */
-function laterThan(stamp: string | undefined, latest: string | undefined): string {
-	const candidate = stamp ?? new Date().toISOString()
+/** Without a recorder: the clock, or just after the newest recorded version, so the Checkpoint sorts last. */
+function laterThan(candidate: string, latest: string | undefined): string {
 	if (latest === undefined || compareVersionOrder({ at: candidate, id: '' }, { at: latest, id: '' }) > 0) return candidate
 	return new Date(Date.parse(latest) + 1).toISOString()
 }
@@ -399,8 +438,9 @@ function storeFailure(error: HostHistoryError): HistoryRefusal {
 	return { status: 'failed', code: error.code, message: error.message, diagnostics: error.diagnostics.length > 0 ? error.diagnostics : [{ code: error.code, path: '/', message: error.message }] }
 }
 
-function unavailableHistory(): HistoryRefusal {
-	return refusal('failed', 'history.unavailable', '/', 'Version history is not available on this server, so no Checkpoint can be created.')
+function unavailableHistory(): HistoryUnavailable {
+	const message = 'Version history is not available on this server, so no Checkpoint can be created.'
+	return { status: 'unavailable', code: 'history.unavailable', retryable: false, message, diagnostics: [{ code: 'history.unavailable', path: '/', message }] }
 }
 
 function boundaryUnavailable(error: unknown): HistoryUnavailable {

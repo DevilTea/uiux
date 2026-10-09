@@ -95,7 +95,7 @@ export function createSelectedWorkspaceServerRuntime(
 		})()
 		return pending
 	}
-	const mcp =createUiuxMcpHttpHandler(app, { leases, history: historyRecorder })
+	const mcp = createUiuxMcpHttpHandler(app, { leases, history: historyRecorder })
 	return Object.freeze({
 		root: selectedRoot,
 		serverOrigin,

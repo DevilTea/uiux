@@ -102,7 +102,13 @@ export interface HistoryRecorder {
 	 * A version timestamp strictly after every version the recorder knows, for a caller (Checkpoint
 	 * creation) that records a version right after a boundary, under the same lock.
 	 */
-	nextVersionAt(): string
+	nextVersionAt(after?: string): string
+	/**
+	 * True while {@link start} has not finished its start boundary. A Checkpoint taken then would
+	 * skip drift detection (Rule 01a11a5e-0313-7d86-af79-8eafa1753853), so the caller refuses it
+	 * instead of waiting for start while it holds the lock.
+	 */
+	readonly starting: boolean
 	/** Prunes host history now (also run at start and once a day). */
 	prune(): Promise<HostPruneResult | undefined>
 	/** The id of the open autosave, if any. */
@@ -320,8 +326,15 @@ class AutosaveRecorder implements HistoryRecorder {
 		return this.exclusive(signal => this.boundaryUnlocked(reason, signal))
 	}
 
-	nextVersionAt(): string {
+	/** `after` is the newest version time the caller knows of; the stamp is later than it and than every version the recorder knows. */
+	nextVersionAt(after?: string): string {
+		const afterMs = after === undefined ? Number.NaN : Date.parse(after)
+		if (Number.isFinite(afterMs)) this.lastAtMs = Math.max(this.lastAtMs, afterMs)
 		return this.stamp()
+	}
+
+	get starting(): boolean {
+		return this.phase === 'starting'
 	}
 
 	async prune(): Promise<HostPruneResult | undefined> {

@@ -375,13 +375,14 @@ export function createScopedWorkspaceSession(
 		},
 		async createCheckpoint(command) {
 			const denied = authorizeOperation(principal, 'createCheckpoint')
-			if (denied || principal.type !== 'member') return refusalFromScope('checkpoint', denied ?? authorizeOperation(principal, 'createCheckpoint')!)
-			// Rule 01a11a5e-025f-71d7-8d08-63948220de57 and Clause 01a11a5e-221b-7a04-a6cb-66bc9608c11f:
-			// the server-stamped actor and the transport's source; the caller supplies neither.
+			if (denied) return refusalFromScope('checkpoint', denied)
+			// The policy refuses every system principal, so only a member gets here. Rule
+			// 01a11a5e-025f-71d7-8d08-63948220de57 and Clause 01a11a5e-221b-7a04-a6cb-66bc9608c11f: the
+			// server-stamped actor and the transport's source; the caller supplies neither.
 			return app.createCheckpoint({
 				name: command.name,
 				...(command.note === undefined ? {} : { note: command.note }),
-				actor: principalActor(principal),
+				actor: principalActor(principal as MemberPrincipal),
 				source: transport === 'mcp' ? 'mcp' : 'workbench',
 			})
 		},

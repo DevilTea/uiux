@@ -3,10 +3,10 @@ import { mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/pro
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 
 import { createApp, createRouter, toNodeListener } from 'h3'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import diffRoute from '../server/api/history/diff.get'
 import createCheckpointRoute from '../server/api/history/checkpoints.post'
@@ -22,7 +22,7 @@ import type { ViewSpecContent } from '../src/application/services/view-authoring
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { CheckpointRecord, HostVersionRecord } from '../src/domain/history/schema'
 import { FileNativePersistence, localeRelativePath, WORKSPACE_CHECKPOINTS_DIRECTORY, workspaceRelativePath } from '../src/persistence'
-import { readMergedTimeline } from '../src/persistence/history'
+import { readMergedTimeline, versionResourcesFromSnapshot } from '../src/persistence/history'
 import { CHECKPOINT_RECOMMENDATION, versionResourceUri } from '../src/mcp/server'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createAccessGuardHandler } from '../src/server/access/http'
@@ -90,7 +90,15 @@ type Fixture = Readonly<{
 	baseline: string
 }>
 
-async function fixture(options: Readonly<{ boundary?: CheckpointBoundary }> = {}): Promise<Fixture> {
+type FixtureOptions = Readonly<{
+	boundary?: CheckpointBoundary
+	/** Opens the stores for the recorder only (the service opens its own), e.g. to hold start in its starting phase. */
+	recorderStores?: (open: () => ReturnType<HistoryStoreFactory['open']>) => ReturnType<HistoryStoreFactory['open']>
+	operationTimeoutMilliseconds?: number
+	start?: boolean
+}>
+
+async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
 	const root = await tempDir('uiux-checkpoints-ws-')
 	const home = join(await tempDir('uiux-checkpoints-home-'), 'home')
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
@@ -98,11 +106,18 @@ async function fixture(options: Readonly<{ boundary?: CheckpointBoundary }> = {}
 	await persistence.locales.create('en-US', { greeting: 'Hello' })
 	const history = createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home })
 	const clock = manualClock()
-	const recorder = createHistoryRecorder({ persistence, stores: () => history.open(), clock, log: () => undefined })
+	const recorder = createHistoryRecorder({
+		persistence,
+		stores: () => options.recorderStores ? options.recorderStores(() => history.open()) : history.open(),
+		clock,
+		log: () => undefined,
+		...(options.operationTimeoutMilliseconds ? { operationTimeoutMilliseconds: options.operationTimeoutMilliseconds } : {}),
+	})
 	const app = createWorkspaceApplicationSession(persistence, { history, historyBoundary: () => options.boundary ?? recorder })
 	expect((await app.createView({ id: VIEW_ID, name: 'Checkout', spec: spec('Pay') })).status).toBe('created')
-	const started = await recorder.start()
 	running.push(recorder)
+	if (options.start === false) return { root, persistence, history, recorder, clock, app, baseline: '' }
+	const started = await recorder.start()
 	expect(started).toMatchObject({ enabled: true, baseline: expect.any(String) })
 	return { root, persistence, history, recorder, clock, app, baseline: started.baseline! }
 }
@@ -283,6 +298,7 @@ describe('creating a Checkpoint', () => {
 		const failing: CheckpointBoundary = {
 			closeOpenAutosaveUnlocked: async () => { throw new Error('a history recorder operation did not finish within 5000 ms and was abandoned') },
 			nextVersionAt: () => new Date().toISOString(),
+			starting: false,
 		}
 		const ctx = await fixture({ boundary: failing })
 		const files = await checkpointFiles(ctx)
@@ -291,11 +307,72 @@ describe('creating a Checkpoint', () => {
 		expect(await checkpointFiles(ctx)).toEqual(files)
 	})
 
+	it('is refused, without waiting under the lock, while the recorder is still starting (Rule 01a11a5e-0313-7d86-af79-8eafa1753853)', async () => {
+		let release!: () => void
+		const gate = new Promise<void>((resolve) => { release = resolve })
+		const ctx = await fixture({ start: false, recorderStores: async open => gate.then(open) })
+		const edited = await externalLocaleEdit(ctx, 'Edited before the server started')
+		const starting = ctx.recorder.start()
+		expect(ctx.recorder.starting).toBe(true)
+		const refused = await createCheckpointForHttp(scoped(ctx.app, REVIEWER), { name: 'Too early' })
+		expect(refused).toMatchObject({ status: 503, body: { code: 'history.boundary_failed', retryable: true } })
+		expect(await readdir(join(ctx.root, '.uiux')).then(entries => entries.includes('history'))).toBe(false)
+		release()
+		const report = await starting
+		expect(ctx.recorder.starting).toBe(false)
+		expect(report).toMatchObject({ enabled: true, baseline: expect.any(String) })
+		const checkpoint = await createCheckpoint(ctx, REVIEWER, 'After start')
+		const versions = listed(await ctx.app.listVersions({})).versions
+		expect(versions.map(version => [version.type, version.name])).toEqual([['checkpoint', 'After start'], ['checkpoint', 'Baseline']])
+		expect(versions[0]!.id).toBe(checkpoint)
+		expect((await readCheckpointFile(ctx, checkpoint)).resources.find(resource => resource.kind === 'locale')!.revision).toBe(edited)
+	})
+
+	it('refuses while an abandoned recorder boundary still runs, and orders the next Checkpoint after its late host write', async () => {
+		const ctx = await fixture({ operationTimeoutMilliseconds: 50 })
+		const host = (await ctx.history.open())!.host
+		await editView(ctx, OWNER, 'open autosave')
+		const autosave = ctx.recorder.openAutosaveId!
+		let release!: () => void
+		const gate = new Promise<void>((resolve) => { release = resolve })
+		let landed!: () => void
+		const late = new Promise<void>((resolve) => { landed = resolve })
+		const writeVersion = host.writeVersion.bind(host)
+		const stuck = vi.spyOn(host, 'writeVersion').mockImplementationOnce(async (record) => {
+			await gate
+			await writeVersion(record)
+			landed()
+		})
+		const files = await checkpointFiles(ctx)
+		// The boundary times out and is abandoned while its host write is stuck.
+		expect(await scoped(ctx.app, REVIEWER).createCheckpoint({ name: 'Abandoned' })).toMatchObject({ status: 'unavailable', code: 'history.boundary_failed' })
+		expect(stuck).toHaveBeenCalledTimes(1)
+		// Still running without the lock: the recorder refuses as busy, and nothing is written.
+		expect(await scoped(ctx.app, REVIEWER).createCheckpoint({ name: 'Busy' })).toMatchObject({ status: 'unavailable', code: 'history.boundary_failed' })
+		expect(await checkpointFiles(ctx)).toEqual(files)
+
+		release()
+		await late
+		let created: Awaited<ReturnType<WorkspaceApplicationSession['createCheckpoint']>> | undefined
+		for (let attempt = 0; attempt < 50; attempt++) {
+			created = await scoped(ctx.app, REVIEWER).createCheckpoint({ name: 'After the late write' })
+			if (created.status === 'created') break
+			await new Promise(resolve => setTimeout(resolve, 20))
+		}
+		expect(created).toMatchObject({ status: 'created' })
+		const versions = listed(await ctx.app.listVersions({})).versions
+		expect(versions.map(version => version.type)).toEqual(['checkpoint', 'autosave', 'checkpoint'])
+		expect(versions[1]!.id).toBe(autosave)
+		expect(versions[0]).toMatchObject({ name: 'After the late write', parent: autosave })
+		expect(Date.parse(versions[0]!.at)).toBeGreaterThan(Date.parse(versions[1]!.at))
+	})
+
 	it('cannot be created where history is off (the internal uiux publish server)', async () => {
 		const ctx = await fixture()
 		const publishing = createHistoryStoreFactory({ workspaceRoot: ctx.root, persistence: ctx.persistence, home: () => '/nonexistent', publishCredential: 'x' })
 		const app = createWorkspaceApplicationSession(ctx.persistence, { history: publishing })
-		expect(await app.createCheckpoint({ name: 'x', actor: actorOf(OWNER), source: 'workbench' })).toMatchObject({ status: 'failed', code: 'history.unavailable' })
+		expect(await createCheckpointForHttp(scoped(app, REVIEWER), { name: 'x' })).toMatchObject({ status: 503, body: { status: 'unavailable', code: 'history.unavailable', retryable: false } })
+		expect((await createCheckpointForHttp(scoped(app, REVIEWER), { name: 'x' })).headers).toBeUndefined()
 		expect(await app.listVersions({})).toEqual({ status: 'listed', versions: [] })
 	})
 })
@@ -330,6 +407,15 @@ describe('Checkpoints are immutable and deleted record-only', () => {
 		expect(await deleteCheckpointForHttp(scoped(ctx.app, OWNER), id)).toMatchObject({ status: 404, body: { code: 'history.record_missing' } })
 		expect(await readVersionForHttp(scoped(ctx.app, VIEWER), id)).toMatchObject({ status: 404, body: { code: 'history.record_missing' } })
 		expect(await deleteCheckpointForHttp(scoped(ctx.app, OWNER), 'not-a-uuid')).toMatchObject({ status: 404 })
+
+		// A record this build cannot read is never deleted (owner ruling
+		// https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18835031 item 2).
+		const corrupt = randomUUID()
+		const corruptPath = join(ctx.root, WORKSPACE_CHECKPOINTS_DIRECTORY, `${corrupt}.json`)
+		await writeFile(corruptPath, '{"historySchemaVersion":2}\n')
+		expect(await deleteCheckpointForHttp(scoped(ctx.app, OWNER), corrupt)).toMatchObject({ status: 422, body: { status: 'blocked', code: 'history.record_invalid' } })
+		expect(await readFile(corruptPath, 'utf8')).toBe('{"historySchemaVersion":2}\n')
+		expect(listed(await ctx.app.listVersions({})).invalid).toEqual([expect.objectContaining({ file: `${WORKSPACE_CHECKPOINTS_DIRECTORY}/${corrupt}.json` })])
 	})
 })
 
@@ -356,8 +442,10 @@ describe('the version listing', () => {
 		expect(all.map(version => version.parent)).toEqual([c2.id, e1.id, a1.id, b.id, null])
 		expect(b).toMatchObject({ type: 'checkpoint', name: 'Baseline', actor: { type: 'system', id: 'system:baseline' } })
 		expect(b.summary.map(row => `${row.kind}:${row.status}`)).toEqual(['locale:added', 'view:added', 'workspace:added'])
-		expect(a1).toMatchObject({ actor: actorOf(OWNER), netChange: true, summary: [{ kind: 'view', key: VIEW_ID, status: 'modified' }] })
-		expect(e1).toMatchObject({ actor: { type: 'external' }, summary: [{ kind: 'locale', key: 'en-US', status: 'modified' }] })
+		// Owner ruling https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18835031 item 1: name is null off Checkpoints.
+		expect(a1).toMatchObject({ name: null, actor: actorOf(OWNER), netChange: true, summary: [{ kind: 'view', key: VIEW_ID, status: 'modified' }] })
+		expect(e1).toMatchObject({ name: null, actor: { type: 'external' }, summary: [{ kind: 'locale', key: 'en-US', status: 'modified' }] })
+		expect(a2.name).toBeNull()
 		expect(c2).toMatchObject({ name: 'Reviewed', summary: [] })
 		expect(c2).not.toHaveProperty('netChange')
 
@@ -383,6 +471,43 @@ describe('the version listing', () => {
 		expect(ids(locale)).toEqual([e1.id, b.id])
 		expect(ids(listed(await ctx.app.listVersions({ resource: { kind: 'view', key: VIEW_ID }, types: ['checkpoint'] })).versions)).toEqual([b.id])
 		expect(listed(await ctx.app.listVersions({ resource: { kind: 'flow', key: randomUUID() } })).versions).toEqual([])
+	})
+
+	it('summarizes a pair across a migration as get_version_diff does (Rule 01a11a5e-1085-71ec-ac82-d60263ae8173)', async () => {
+		const ctx = await fixture()
+		// A pre-migration Checkpoint recorded under the previous schema version, before the Baseline.
+		const previousSchema = CURRENT_WORKSPACE_SCHEMA_VERSION - 1
+		const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
+		const manifestPath = workspaceRelativePath()
+		const manifest = JSON.parse(Buffer.from(snapshot.get(manifestPath)!).toString('utf8')) as Record<string, unknown>
+		snapshot.set(manifestPath, new TextEncoder().encode(`${JSON.stringify({ ...manifest, schemaVersion: previousSchema })}\n`))
+		const built = versionResourcesFromSnapshot(snapshot)
+		const before = randomUUID()
+		await (await ctx.history.open())!.checkpoints.create({
+			historySchemaVersion: 1,
+			id: before,
+			type: 'checkpoint',
+			actor: { type: 'system', id: 'system:migrate' },
+			at: '2026-10-01T00:00:00.000Z',
+			workspaceSchemaVersion: previousSchema,
+			resources: built.resources,
+			name: `Before migration to schemaVersion ${CURRENT_WORKSPACE_SCHEMA_VERSION}`,
+			source: 'cli',
+		}, built.blobs)
+
+		const rows = listed(await ctx.app.listVersions({})).versions
+		expect(rows.map(row => [row.id, row.parent])).toEqual([[ctx.baseline, before], [before, null]])
+		// The recorded manifest revisions differ only by schemaVersion, which comparison ignores.
+		const baseline = await ctx.app.readVersion(ctx.baseline)
+		if (baseline.status !== 'found') throw new Error('Baseline missing')
+		expect(built.resources.find(resource => resource.kind === 'workspace')!.revision).not.toBe(baseline.version.resources.find(resource => resource.kind === 'workspace')!.revision)
+		const diff = await ctx.app.diffVersions({ from: rows[0]!.parent!, to: rows[0]!.id })
+		if (diff.status !== 'compared') throw new Error(JSON.stringify(diff))
+		const expected = diff.summary.filter(row => row.status !== 'unchanged').map(row => ({ kind: row.kind, key: row.key, status: row.status }))
+		expect(rows[0]!.summary).toEqual(expected)
+		expect(rows[0]!.summary).toEqual([])
+		// The projection judges the pair the same way.
+		expect(listed(await ctx.app.listVersions({ resource: { kind: 'workspace', key: 'workspace' } })).versions.map(row => row.id)).toEqual([before])
 	})
 
 	it('pages with a stable cursor and validates the request', async () => {
@@ -558,17 +683,19 @@ describe('/api/history/* over HTTP', () => {
 		expect((await fetch(`${origin}/api/history/versions/${versionId}`, { headers: bearer(viewer) })).status).toBe(404)
 	})
 
-	it('has no route that changes a Checkpoint (Rule 01a11a5e-09bb-755c-9253-3cbff9f65da9)', async () => {
-		const reviewer = await provisionToken(root, { nickname: 'rui', kind: 'human', role: 'reviewer' })
-		const owner = await provisionToken(root, { nickname: 'mei', kind: 'human', role: 'owner' })
-		const created = await fetch(`${origin}/api/history/checkpoints`, { method: 'POST', headers: { ...bearer(reviewer), ...json }, body: JSON.stringify({ name: 'Final' }) })
-		const { versionId } = await created.json() as { versionId: string }
-		const path = join(root, WORKSPACE_CHECKPOINTS_DIRECTORY, `${versionId}.json`)
-		const bytes = await readFile(path)
-		for (const method of ['PUT', 'PATCH', 'POST'] as const) {
-			const response = await fetch(`${origin}/api/history/checkpoints/${versionId}`, { method, headers: { ...bearer(owner), ...json }, body: JSON.stringify({ name: 'Renamed' }) })
-			expect(response.status, method).toBeGreaterThanOrEqual(400)
-		}
-		expect(await readFile(path)).toEqual(bytes)
+})
+
+describe('the /api/history route tree', () => {
+	it('holds exactly the five history routes, none of which changes a Checkpoint (Rule 01a11a5e-09bb-755c-9253-3cbff9f65da9)', async () => {
+		const directory = join(import.meta.dirname, '..', 'server', 'api', 'history')
+		const entries = await readdir(directory, { recursive: true, withFileTypes: true })
+		const files = entries.filter(entry => entry.isFile()).map(entry => relative(directory, join(entry.parentPath, entry.name)).split('\\').join('/')).sort()
+		expect(files).toEqual([
+			'checkpoints.post.ts',
+			'checkpoints/[id].delete.ts',
+			'diff.get.ts',
+			'versions.get.ts',
+			'versions/[id].get.ts',
+		])
 	})
 })

@@ -154,6 +154,34 @@ describe('permission-key annotations (seam 5; Clauses 01a11c09-a26e-73bb-9a29-ee
 		expect(BUILT_IN_PRESETS.flatMap(preset => preset.adds).sort()).toEqual([...PERMISSION_KEYS].sort())
 	})
 
+	it('records the catalog in Clause 01a11c09-a26e-73bb-9a29-eed40aae37bd order, with its humanOnly keys', () => {
+		expect(PERMISSION_KEYS).toEqual([
+			'workspace.read',
+			'history.read',
+			'product-kit.source.read',
+			'reviews.write',
+			'reviews.submit',
+			'reviews.promote',
+			'reviews.resolve',
+			'views.write',
+			'flows.write',
+			'locales.write',
+			'assets.write',
+			'settings.write',
+			'product-kit.write',
+			'product-kit.compose',
+			'evidence.capture',
+			'handoff.export',
+			'checkpoints.create',
+			'history.restore',
+			'checkpoints.delete',
+			'locks.force-release',
+			'presets.manage',
+			'members.manage',
+		])
+		expect(HUMAN_ONLY_PERMISSION_KEYS).toEqual(['reviews.resolve', 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'])
+	})
+
 	it('refuses every history operation to the system credentials (Clause 01a11485-f978-767a-b977-33028aee7ae7)', () => {
 		for (const operation of ['diffVersions', 'listVersions', 'readVersion', 'createCheckpoint', 'deleteCheckpoint'] as const) {
 			for (const id of ['system:capture', 'system:publish'] as const)
