@@ -374,12 +374,13 @@ describe('in-memory snapshot upgrade', () => {
 	it('upgrades every older recognized version with the product policy and leaves design files identical', async () => {
 		const policy = PRODUCT_WORKSPACE_SCHEMA_POLICY
 		const older = policy.recognizedVersions.filter(version => version < policy.currentVersion)
-		expect(older.length).toBeGreaterThan(0)
+		// Every version from 1 up to the one before current, each through the full step chain.
+		expect(older).toEqual(Array.from({ length: policy.currentVersion - 1 }, (_, index) => index + 1))
 		for (const fromVersion of older) {
 			const snapshot = designSnapshot(fromVersion)
 			const frozen = cloneSnapshot(snapshot)
 			const upgraded = await upgradeSnapshotInMemory(snapshot, fromVersion, policy)
-			expect(upgraded.steps.length).toBeGreaterThan(0)
+			expect(upgraded.steps).toHaveLength(policy.currentVersion - fromVersion)
 			expect(JSON.parse(new TextDecoder().decode(upgraded.snapshot.get(WORKSPACE_MANIFEST_PATH)))).toMatchObject({ schemaVersion: policy.currentVersion })
 			expect([...upgraded.snapshot.keys()].sort()).toEqual([...snapshot.keys()].sort())
 			for (const [path, bytes] of snapshot) {
