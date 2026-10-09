@@ -89,7 +89,7 @@ export type ViewRead = Readonly<{
 }>
 
 /** Right-panel tabs of a View page (brief e). */
-export type ViewPanelTab = 'comments' | 'inspect' | 'spec' | 'readiness'
+export type ViewPanelTab = 'comments' | 'inspect' | 'spec' | 'readiness' | 'history'
 
 /** Render context carried in a View deep link (`/views/:id?variant=&locale=&viewport=&theme=&widget=`). */
 export type ViewRouteContext = Readonly<{

@@ -10,11 +10,13 @@ import CommentsTab from './comments/CommentsTab.vue'
 import ReadinessTab from '../readiness/ReadinessTab.vue'
 import WidgetInspector from './WidgetInspector.vue'
 import SpecDocument from './SpecDocument.vue'
+import ViewHistoryPanel from '../history/ViewHistoryPanel.vue'
 
 /**
- * The View page's right panel: Comments, Inspect, Spec and Readiness (brief e). Comments is the
- * list companion to the canvas pins (R7a); Inspect and Spec are the R5 property sheet and Spec
- * document; Readiness is the View's validation, Evidence, Reviews and Handoff facets (R9).
+ * The View page's right panel: Comments, Inspect, Spec, Readiness and History (brief e). Comments
+ * is the list companion to the canvas pins (R7a); Inspect and Spec are the R5 property sheet and
+ * Spec document; Readiness is the View's validation, Evidence, Reviews and Handoff facets (R9);
+ * History is the versions that changed the View (Rule 01a11a5e-1aa5-7d13-939a-8d99245f7906).
  */
 const tab = defineModel<ViewPanelTab>('tab', { required: true })
 
@@ -32,6 +34,7 @@ const items = computed<TabsItem[]>(() => [
 	{ value: 'inspect', slot: 'inspect' as const, label: t('panel.inspect') },
 	{ value: 'spec', slot: 'spec' as const, label: t('panel.spec') },
 	{ value: 'readiness', slot: 'readiness' as const, label: t('panel.readiness'), badge: findingsHere.value ? { label: String(findingsHere.value), color: 'warning', variant: 'soft', size: 'sm' } : undefined },
+	{ value: 'history', slot: 'history' as const, label: t('panel.history') },
 ])
 
 const tabModel = computed({
@@ -62,8 +65,8 @@ function commentOn(widgetId: string): void {
     :unmount-on-hide="false"
     :ui="{
       root: 'flex min-h-0 flex-1 flex-col gap-0',
-      list: 'shrink-0 border-b border-default px-2',
-      trigger: 'px-2',
+      list: 'shrink-0 overflow-x-auto border-b border-default px-1.5',
+      trigger: 'shrink-0 px-1.5',
       content: 'flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden',
     }"
   >
@@ -85,6 +88,9 @@ function commentOn(widgetId: string): void {
         @open-comments="tab = 'comments'"
         @open-inspect="tab = 'inspect'"
       />
+    </template>
+    <template #history>
+      <ViewHistoryPanel :active="tab === 'history'" />
     </template>
   </UTabs>
 </template>

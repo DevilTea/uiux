@@ -20,7 +20,7 @@ const rows = computed(() => [
 	{ keys: [['meta', '='], ['meta', '-']], label: t('shortcuts.zoom') },
 	{ keys: [['alt', '↑'], ['alt', '↓'], ['alt', '←'], ['alt', '→']], label: t('shortcuts.walkTree') },
 	{ keys: [['shift', 'V'], ['shift', 'L'], ['shift', 'T']], label: t('shortcuts.contextMenus') },
-	{ keys: [['alt', '1'], ['alt', '2'], ['alt', '3'], ['alt', '4']], label: t('shortcuts.panelTabs') },
+	{ keys: [['alt', '1'], ['alt', '2'], ['alt', '3'], ['alt', '4'], ['alt', '5']], label: t('shortcuts.panelTabs') },
 	{ keys: [['meta', 'C']], label: t('shortcuts.copyId') },
 	{ keys: [['E']], label: t('shortcuts.editSection') },
 	{ keys: [['meta', '↵'], ['Esc']], label: t('shortcuts.saveSection') },

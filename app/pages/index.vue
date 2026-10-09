@@ -147,6 +147,12 @@ const tab = computed<string>({
 		const query = { ...route.query }
 		if (value === 'views') delete query.tab
 		else query.tab = value
+		// The version selection belongs to Activity (Clause 01a11e0d-d74b-701a-9a25-a149e400b7ec).
+		if (value !== 'activity') {
+			delete query.version
+			delete query.compare
+			delete query.resource
+		}
 		void router.replace({ query })
 	},
 })

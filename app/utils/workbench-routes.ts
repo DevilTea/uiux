@@ -1,5 +1,6 @@
 import type { LocationQuery, LocationQueryRaw } from 'vue-router'
 import type { ViewPanelTab, ViewRouteContext } from '../composables/workbench-types'
+import { historyQuery, type HistoryAddress } from './version-history'
 
 /**
  * The Workbench route and deep-link contract (brief a, section 5).
@@ -7,9 +8,13 @@ import type { ViewPanelTab, ViewRouteContext } from '../composables/workbench-ty
  * Render context rides in the query so a link reproduces exactly what its author saw.
  * Workbench chrome language and theme never ride in the URL.
  */
-export const VIEW_PANEL_TABS: readonly ViewPanelTab[] = ['comments', 'inspect', 'spec', 'readiness']
+export const VIEW_PANEL_TABS: readonly ViewPanelTab[] = ['comments', 'inspect', 'spec', 'readiness', 'history']
 
-export type ViewLinkOptions = Partial<ViewRouteContext> & Readonly<{ thread?: string; panel?: ViewPanelTab }>
+/**
+ * `history` is the history panel's selection (Clause 01a11e0d-d7f5-7ef8-ac22-e235d4a00a41):
+ * `version`, `compare` and `canvas`, carried only with `panel=history`.
+ */
+export type ViewLinkOptions = Partial<ViewRouteContext> & Readonly<{ thread?: string; panel?: ViewPanelTab; history?: HistoryAddress }>
 
 function single(value: LocationQuery[string] | undefined): string {
 	const first = Array.isArray(value) ? value[0] : value
@@ -43,6 +48,7 @@ export function viewQuery(options: ViewLinkOptions): LocationQueryRaw {
 	if (options.widget && options.widget !== 'root') query.widget = options.widget
 	if (options.thread) query.thread = options.thread
 	if (options.panel) query.panel = options.panel
+	if (options.panel === 'history' && options.history) Object.assign(query, historyQuery(options.history, ['version', 'compare', 'canvas']))
 	return query
 }
 

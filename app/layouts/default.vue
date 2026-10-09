@@ -10,6 +10,7 @@ import WorkbenchSidebar from '../components/workbench/WorkbenchSidebar.vue'
 import WorkbenchCommandPalette from '../components/workbench/WorkbenchCommandPalette.vue'
 import WorkbenchShortcuts from '../components/workbench/WorkbenchShortcuts.vue'
 import WorkbenchBottomNav from '../components/workbench/WorkbenchBottomNav.vue'
+import CreateCheckpointModal from '../components/history/CreateCheckpointModal.vue'
 
 /**
  * The Workbench application shell (brief a): a global 48px navbar, a collapsible and
@@ -202,5 +203,6 @@ onUnmounted(() => {
 
     <WorkbenchCommandPalette />
     <WorkbenchShortcuts />
+    <CreateCheckpointModal v-if="!isReadOnly" />
   </UDashboardGroup>
 </template>

@@ -8,12 +8,14 @@ import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import type { ViewPanelTab } from '../../composables/workbench-types'
 import { parseThread, parseViewPanel, parseViewRouteContext, sameQuery, viewQuery, VIEWS_LOCATION } from '../../utils/workbench-routes'
+import { parseHistoryAddress, type HistoryAddress } from '../../utils/version-history'
 import PreviewCanvas from '../../components/workbench/PreviewCanvas.vue'
 import ViewRightPanel from '../../components/workbench/ViewRightPanel.vue'
 import LockBadge from '../../components/workbench/LockBadge.vue'
 import { provideCanvasComments } from '../../composables/useCanvasComments'
 import CommentsTab from '../../components/workbench/comments/CommentsTab.vue'
 import SpecDocument from '../../components/workbench/SpecDocument.vue'
+import ViewHistoryPanel from '../../components/history/ViewHistoryPanel.vue'
 import { useReadiness } from '../../composables/useReadiness'
 
 /**
@@ -38,16 +40,28 @@ const viewId = computed(() => String(route.params.viewId ?? ''))
 
 const panelTab = ref<ViewPanelTab>(parseViewPanel(route.query) ?? 'comments')
 const thread = ref<string | undefined>(parseThread(route.query))
+/** The history panel's selection (`version`, `compare`, `canvas`), kept while the panel shows. */
+const historyAddress = ref<HistoryAddress>(parseHistoryAddress(route.query))
 const rightPanel = ref<InstanceType<typeof ViewRightPanel>>()
 // The canvas pins, composer and bubble, and the Comments tab, share one comments layer; the open
 // thread is the route's `thread`, so a deep link opens its pin and bubble.
 const comments = provideCanvasComments(thread)
 
 // Phones (brief a, section 6; DESIGN.md "Mobile"): one column switching between the Spec (the
-// default reading surface), the comment list and the read-only View. A thread opens in a bottom
-// sheet over the View, so opening one from the list or the Spec shows the View tab.
-type PhoneTab = 'spec' | 'comments' | 'view'
-const phoneTab = ref<PhoneTab>(thread.value ? 'view' : parseViewPanel(route.query) === 'comments' ? 'comments' : 'spec')
+// default reading surface), the comment list, the read-only View and the View's history (the
+// timeline and diffs are offered on every layout, Rule 01a11a5e-1b52-7f6f-8244-65bb038ef6f8). A
+// thread opens in a bottom sheet over the View, so opening one from the list or the Spec shows the
+// View tab.
+type PhoneTab = 'spec' | 'comments' | 'view' | 'history'
+function phoneTabFor(panel: ViewPanelTab | undefined): PhoneTab {
+	return panel === 'comments' ? 'comments' : panel === 'history' ? 'history' : 'spec'
+}
+const phoneTab = ref<PhoneTab>(thread.value ? 'view' : phoneTabFor(parseViewPanel(route.query)))
+// The history tab's selection rides in the address with `panel=history` on phones too.
+watch(phoneTab, (value) => {
+	if (value === 'history') panelTab.value = 'history'
+	else if (panelTab.value === 'history') panelTab.value = 'comments'
+})
 watch(() => comments.openThreadId.value, (id) => {
 	if (id && isPhone.value) phoneTab.value = 'view'
 	// Tablet: the thread sheet opens over the canvas, so the slide-over list steps aside.
@@ -59,6 +73,7 @@ const phoneTabs = computed(() => {
 		{ value: 'spec', slot: 'spec' as const, label: t('panel.spec') },
 		{ value: 'comments', slot: 'comments' as const, label: t('panel.comments'), badge: unresolved ? { label: String(unresolved), color: 'annotation' as const, variant: 'soft' as const, size: 'sm' as const } : undefined },
 		{ value: 'view', slot: 'view' as const, label: t('phone.viewTab') },
+		{ value: 'history', slot: 'history' as const, label: t('panel.history') },
 	]
 })
 const phoneTabModel = computed({
@@ -103,6 +118,9 @@ watch(() => [viewId.value, route.query] as const, ([id, query]) => {
 	void workbench.openView(id, parseViewRouteContext(query))
 	const nextTab = parseViewPanel(query)
 	if (nextTab) panelTab.value = nextTab
+	if (nextTab === 'history' && isPhone.value) phoneTab.value = 'history'
+	const nextHistory = parseHistoryAddress(query)
+	if (JSON.stringify(nextHistory) !== JSON.stringify(historyAddress.value)) historyAddress.value = nextHistory
 	const nextThread = parseThread(query)
 	if (nextThread !== thread.value) thread.value = nextThread
 }, { immediate: true, deep: true })
@@ -116,6 +134,7 @@ const stateQuery = computed(() => viewQuery({
 	widget: selectedWidgetId.value,
 	thread: thread.value,
 	panel: panelTab.value === 'comments' ? undefined : panelTab.value,
+	history: historyAddress.value,
 }))
 // A replace lands a few tasks later (router guards and middleware run first). While one is in
 // flight, compare against what it asked for, not the committed route: state that returns to the
@@ -163,12 +182,16 @@ watch(() => selectedView.value && [selectedView.value.key, selectedView.value.re
 }, { immediate: true })
 
 const offToggleRightPanel = shell.onToggleRightPanel(togglePanel)
-// ⌥1–⌥4: Comments, Inspect, Spec, Readiness (brief e, section 8).
+// ⌥1–⌥5: Comments, Inspect, Spec, Readiness, History (brief e, section 8).
 defineShortcuts({
 	alt_1: () => { void showPanel('comments') },
 	alt_2: () => { void showPanel('inspect') },
 	alt_3: () => { void showPanel('spec') },
 	alt_4: () => { void showPanel('readiness') },
+	alt_5: () => {
+		if (isPhone.value) phoneTab.value = 'history'
+		else void showPanel('history')
+	},
 })
 onBeforeUnmount(() => {
 	offToggleRightPanel()
@@ -218,6 +241,9 @@ onBeforeUnmount(() => {
             <p class="shrink-0 border-t border-default px-4 pt-2 pb-3 text-xs text-muted">
               {{ t('phone.viewHint') }}
             </p>
+          </template>
+          <template #history>
+            <ViewHistoryPanel :active="phoneTab === 'history'" />
           </template>
         </UTabs>
       </main>

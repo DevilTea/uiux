@@ -842,7 +842,8 @@
     "inspect": "屬性",
     "spec": "Spec",
     "readiness": "就緒狀態",
-    "label": "View 詳細資料"
+    "label": "View 詳細資料",
+    "history": "歷程"
   },
   "inspect": {
     "empty": {
@@ -1308,7 +1309,7 @@
     "zoom": "放大或縮小",
     "walkTree": "選取上層、第一個子層或相鄰的 Widget",
     "contextMenus": "開啟 Variant、Locale 或主題選單",
-    "panelTabs": "留言、屬性、Spec 或就緒狀態分頁",
+    "panelTabs": "留言、屬性、Spec、就緒狀態或歷程分頁",
     "editSection": "編輯目前聚焦的 Spec 段落",
     "saveSection": "儲存或取消 Spec 段落",
     "copyId": "複製所選 Widget 的 ID"
@@ -2127,5 +2128,200 @@
     "mutedNote": "記錄於另一個預覽情境",
     "openInRecorded": "以記錄的情境顯示",
     "openInRecordedHint": "將預覽切換為此討論串記錄的 Locale、檢視區與主題"
+  },
+  "history": {
+    "title": "版本歷程",
+    "timelineLabel": "版本時間軸",
+    "loadFailed": "無法載入版本歷程。",
+    "emptyTitle": "還沒有任何版本",
+    "emptyDescription": "View、Flow、Locale、Asset 與 Workspace 設定的變更都會自動儲存在這裡。",
+    "emptyFiltered": "沒有符合篩選條件的版本",
+    "emptyFilteredDescription": "請調整或清除篩選條件以查看更多版本。",
+    "loadMore": "載入較早的版本",
+    "publication": "發布的快照不含版本歷程。",
+    "today": "今天",
+    "yesterday": "昨天",
+    "quiet": "{n} 次沒有淨變更的自動儲存 | {n} 次沒有淨變更的自動儲存",
+    "quietHint": "這些變更彼此抵銷，Workspace 最後回到原本的狀態。",
+    "type": {
+      "autosave": "自動儲存",
+      "checkpoint": "Checkpoint",
+      "external": "在 UIUX 之外變更",
+      "system": "系統變更"
+    },
+    "actor": {
+      "external": "UIUX 之外",
+      "system": "系統",
+      "migrate": "遷移",
+      "baseline": "歷程起點",
+      "unknown": "某人"
+    },
+    "kind": {
+      "workspace": "Workspace 設定",
+      "view": "View",
+      "flow": "Flow",
+      "locale": "Locale",
+      "asset": "Asset"
+    },
+    "operation": {
+      "createView": "建立了 View",
+      "updateViewSpec": "編輯了 Spec",
+      "updateViewStructure": "編輯了結構",
+      "updateWorkspaceSettings": "編輯了 Workspace 設定",
+      "createLocale": "建立了 Locale",
+      "updateLocale": "編輯了 Locale",
+      "createFlow": "建立了 Flow",
+      "updateFlow": "編輯了 Flow",
+      "createAsset": "新增了 Asset",
+      "replaceAsset": "取代了 Asset",
+      "promoteReviewToDecision": "將 Review 升級為 Decision",
+      "restoreResourceVersion": "還原了較早的版本"
+    },
+    "row": {
+      "compare": "比較",
+      "compareNamed": "比較 {name} 與前一個版本",
+      "compareWithSelected": "比較所選版本與 {name}",
+      "expand": "顯示 {name} 的變更",
+      "collapse": "隱藏 {name} 的變更",
+      "selected": "已選取",
+      "changed": "{n} 項資源有變更 | {n} 項資源有變更",
+      "noChanges": "沒有資源變更",
+      "changedResources": "變更的資源",
+      "events": "依序列出的變更",
+      "eventsLoadFailed": "無法載入這個版本的變更。",
+      "noEvents": "沒有記錄到任何變更。",
+      "restored": "還原了較早的版本。",
+      "recordingGap": "這個版本可能缺少部分變更。"
+    },
+    "filter": {
+      "actor": "變更者",
+      "allActors": "所有人",
+      "kind": "資源類型",
+      "allKinds": "所有類型",
+      "checkpointsOnly": "只顯示 Checkpoint"
+    },
+    "since": {
+      "compare": "與目前比較",
+      "unavailable": "沒有已儲存的版本含有你上次看到的內容",
+      "openView": "開啟 View"
+    },
+    "invalid": {
+      "title": "有些歷程紀錄無法讀取",
+      "explanation": "這些檔案對此版本的 UIUX 而言不是有效的歷程紀錄，因此不會列在時間軸上，也無法在這裡刪除。請更新 UIUX，或檢查歷程檔案。",
+      "notDeletable": "無法讀取這筆紀錄，因此不會刪除。"
+    },
+    "compare": {
+      "title": "比較",
+      "failed": "無法比較這些版本。",
+      "against": "比較對象",
+      "parent": "前一個版本",
+      "current": "目前狀態",
+      "other": "另一個版本",
+      "otherNamed": "另一個版本：{name}",
+      "to": "到",
+      "nothing": "尚無內容",
+      "close": "關閉比較",
+      "summary": "摘要",
+      "changedCount": "{n} 項資源有變更 | {n} 項資源有變更",
+      "unchangedCount": "{n} 項未變更 | {n} 項未變更",
+      "noParent": "這是第一個版本，因此其中的內容都算是新增。",
+      "noDifferences": "這兩個版本之間沒有差異。",
+      "allResources": "顯示所有變更的資源",
+      "openInActivity": "在動態中開啟完整比較",
+      "status": {
+        "added": "新增",
+        "removed": "移除",
+        "modified": "修改",
+        "unchanged": "未變更"
+      }
+    },
+    "diff": {
+      "op": {
+        "added": "新增",
+        "removed": "移除",
+        "changed": "變更",
+        "moved": "移動",
+        "reordered": "重新排序"
+      },
+      "section": {
+        "properties": "屬性",
+        "widgets": "Widget",
+        "variants": "Variant",
+        "spec": "Spec",
+        "decisions": "Decision",
+        "other": "其他變更",
+        "steps": "步驟",
+        "messages": "訊息",
+        "i18n": "語言",
+        "viewports": "檢視區",
+        "themes": "主題",
+        "adapters": "Adapter",
+        "metadata": "詳細資料",
+        "content": "內容",
+        "files": "檔案",
+        "structure": "變更"
+      },
+      "field": {
+        "name": "名稱",
+        "feature": "功能",
+        "type": "類型",
+        "state": "狀態",
+        "intent": "目的",
+        "entryConditions": "進入條件",
+        "interactionRules": "互動規則",
+        "constraints": "限制",
+        "accessibility": "無障礙",
+        "references": "參考資料",
+        "question": "問題",
+        "status": "狀態",
+        "outcome": "結果",
+        "entryStepId": "第一個步驟",
+        "target": "目標",
+        "transition": "轉換",
+        "defaultLocale": "預設 Locale",
+        "content": "內容"
+      },
+      "unsupported": "此版本的 UIUX 無法顯示這類資源內部的變更，只能顯示它有變更。",
+      "empty": "內容沒有變更。",
+      "before": "變更前",
+      "after": "變更後",
+      "noImage": "沒有圖片",
+      "imageAlt": "{name}，{side}",
+      "imageUnavailable": "這張圖片已不再保存。"
+    },
+    "checkpoint": {
+      "create": "建立 Checkpoint",
+      "title": "建立 Checkpoint",
+      "description": "將整個 Workspace 目前的狀態儲存為具名版本。Workspace 中的內容不會有任何變更。",
+      "name": "名稱",
+      "nameHelp": "最多 {max} 個字元。",
+      "nameRequired": "請輸入名稱。",
+      "nameTooLong": "最多只能使用 {max} 個字元。",
+      "note": "備註",
+      "noteHelp": "選填，最多 {max} 個字元。",
+      "noteTooLong": "最多只能使用 {max} 個字元。",
+      "leaseTitle": "仍有人正在編輯",
+      "leaseBody": "Checkpoint 會儲存這些檔案目前的狀態，包括尚未完成的編輯。",
+      "submit": "建立 Checkpoint",
+      "created": "已建立 Checkpoint「{name}」",
+      "failed": "無法建立 Checkpoint。",
+      "retryable": "沒有儲存任何內容，請稍後再試一次。",
+      "blockedRole": "建立 Checkpoint 需要 Reviewer 角色",
+      "blockedMigration": "Workspace 遷移完成前無法使用"
+    },
+    "delete": {
+      "action": "刪除 Checkpoint",
+      "actionNamed": "刪除 Checkpoint {name}",
+      "title": "要刪除這個 Checkpoint 嗎？",
+      "body": "「{name}」會從所有人的時間軸上移除。Workspace 的檔案不會變更，而且此動作無法復原。",
+      "confirm": "刪除 Checkpoint",
+      "deleted": "已刪除 Checkpoint「{name}」",
+      "failed": "無法刪除 Checkpoint。"
+    },
+    "view": {
+      "title": "這個 View 的版本",
+      "emptyTitle": "這個 View 還沒有任何變更",
+      "emptyDescription": "這個 View 每一次儲存的變更都會列在這裡。"
+    }
   }
 }
