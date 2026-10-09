@@ -1958,7 +1958,9 @@
       "journal_invalid": "The open autosave could not be read.",
       "blob_corrupt": "A stored history file does not match its content.",
       "store_unsafe": "The history store on this computer is not safe to use. Check its folder permissions and links.",
-      "write_failed": "History could not be saved. Nothing was changed."
+      "write_failed": "History could not be saved. Nothing was changed.",
+      "rollback_failed": "History could not be saved, and the interrupted write could not be fully undone. Check the history store.",
+      "invalid_cursor": "This place in the timeline is no longer valid. Reload the timeline."
     },
     "review": {
       "anchor_history_mismatch": "The Review’s place does not match its history.",

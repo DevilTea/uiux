@@ -1,5 +1,6 @@
 import type { VersionRecord } from '../../domain/history/schema'
 import { isFullUuid } from '../../domain/validation'
+import type { FileNativePersistence } from '../file-native'
 import type { CheckpointListing, CheckpointStore } from './checkpoint-store'
 import type { HostHistoryStore, HostVersionListing, InvalidHistoryFile } from './host-store'
 import { compareVersionOrder } from './order'
@@ -58,10 +59,17 @@ export function mergeTimeline(host: HostVersionListing | undefined, checkpoints:
 	return { versions, invalid: [...(host?.invalid ?? []), ...(checkpoints?.invalid ?? [])] }
 }
 
-/** Reads both stores and merges them. Takes the persistence read lock for the checkpoints only. */
-export async function readMergedTimeline(stores: Readonly<{ host?: HostHistoryStore; checkpoints?: CheckpointStore }>): Promise<MergedTimeline> {
-	const [host, checkpoints] = await Promise.all([stores.host?.listVersions(), stores.checkpoints?.list()])
-	return mergeTimeline(host, checkpoints)
+/**
+ * Reads both stores inside one persistence read lock and merges them. Every history mutation
+ * (recording, pruning, garbage collection, checkpoints) runs under the exclusive lock, so the two
+ * listings are one consistent snapshot.
+ */
+export async function readMergedTimeline(persistence: FileNativePersistence, stores: Readonly<{ host?: HostHistoryStore; checkpoints?: CheckpointStore }>): Promise<MergedTimeline> {
+	return persistence.withReadLock(async () => {
+		const host = await stores.host?.listVersions()
+		const checkpoints = await stores.checkpoints?.listUnlocked()
+		return mergeTimeline(host, checkpoints)
+	})
 }
 
 /**

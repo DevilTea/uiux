@@ -53,6 +53,7 @@ export type HostHistoryErrorCode =
 	| 'history.journal_invalid'
 	| 'history.blob_corrupt'
 	| 'history.write_failed'
+	| 'history.rollback_failed'
 
 /** Implementation-defined store errors (not diagnostics of any Contract). */
 export class HostHistoryError extends Error {
@@ -145,14 +146,8 @@ export class HostHistoryStore {
 	}
 
 	async readVersion(id: string): Promise<HostVersionRecord | undefined> {
-		const path = this.versionPath(id)
-		if (!await checkPrivateFile(path)) return undefined
-		let bytes: Buffer
-		try { bytes = await fs.readFile(path) }
-		catch (error) {
-			if (isNotFound(error)) return undefined
-			throw error
-		}
+		const bytes = await readPrivateFileIfPresent(this.versionPath(id))
+		if (!bytes) return undefined
 		const result = decodeVersion(bytes, id)
 		if (!result.ok)
 			throw new HostHistoryError('history.record_invalid', `Host version ${id} is not a valid version record.`, { diagnostics: result.diagnostics })
@@ -178,9 +173,10 @@ export class HostHistoryStore {
 				invalid.push({ file, diagnostics: [{ code: 'history.unexpected_file', path: `/${file}`, message: 'Only regular <uuid>.json version files belong in versions/.' }] })
 				continue
 			}
-			const path = this.versionPath(id)
-			await checkPrivateFile(path)
-			const result = decodeVersion(await fs.readFile(path), id)
+			// A version removed between the directory read and this read (pruning) is simply gone.
+			const bytes = await readPrivateFileIfPresent(this.versionPath(id))
+			if (!bytes) continue
+			const result = decodeVersion(bytes, id)
 			if (result.ok) records.push(result.value)
 			else invalid.push({ file, diagnostics: result.diagnostics })
 		}
@@ -207,7 +203,11 @@ export class HostHistoryStore {
 		try {
 			if (existed) await trimPartialLastLine(handle)
 			const { size } = await handle.stat()
-			await handle.write(line, 0, line.length, size)
+			// A short write is not success: keep writing until the whole line is in the file.
+			for (let offset = 0; offset < line.length;) {
+				const { bytesWritten } = await handle.write(line, offset, line.length - offset, size + offset)
+				offset += bytesWritten
+			}
 			await handle.sync()
 		}
 		finally {
@@ -252,9 +252,8 @@ export class HostHistoryStore {
 	}
 
 	async readBlob(digest: string): Promise<Uint8Array | undefined> {
-		const path = this.blobPath(digest)
-		if (!await checkPrivateFile(path)) return undefined
-		const bytes = await fs.readFile(path)
+		const bytes = await readPrivateFileIfPresent(this.blobPath(digest))
+		if (!bytes) return undefined
 		if (blobDigest(bytes) !== digest)
 			throw new HostHistoryError('history.blob_corrupt', `Host blob ${digest} does not match its content digest.`)
 		return Uint8Array.from(bytes)
@@ -276,8 +275,14 @@ export class HostHistoryStore {
 		for (const shard of shards) {
 			if (!shard.isDirectory() || !/^[0-9a-f]{2}$/u.test(shard.name)) continue
 			const shardPath = join(this.paths.objects, shard.name)
-			await ensurePrivateDirectory(shardPath, false)
-			for (const entry of await fs.readdir(shardPath, { withFileTypes: true })) {
+			if (!await ensurePrivateDirectory(shardPath, false)) continue
+			let entries: import('node:fs').Dirent[]
+			try { entries = await fs.readdir(shardPath, { withFileTypes: true }) }
+			catch (error) {
+				if (isNotFound(error)) continue
+				throw error
+			}
+			for (const entry of entries) {
 				if (entry.isFile() && /^[0-9a-f]{64}$/u.test(entry.name) && entry.name.startsWith(shard.name))
 					digests.push(`sha256:${entry.name}`)
 			}
@@ -356,7 +361,7 @@ export class HostHistoryStore {
 					await syncDirectory(directory)
 				}
 				catch (rollbackCause) {
-					throw new HostHistoryError('history.write_failed', `Could not roll back ${relative} after an interrupted write.`, { cause: new AggregateError([cause, rollbackCause]) })
+					throw new HostHistoryError('history.rollback_failed', `Could not roll back ${relative} after an interrupted write.`, { cause: new AggregateError([cause, rollbackCause]) })
 				}
 			}
 			if (cause instanceof HostHistoryError) throw cause
@@ -515,6 +520,18 @@ async function ensurePrivateDirectory(path: string, create: boolean): Promise<bo
 	if (!stats.isDirectory()) throw unsafe(path, 'it is not a directory')
 	if (process.platform !== 'win32' && (stats.mode & 0o022) !== 0) throw unsafe(path, 'it is writable by group or others (expected 0700)')
 	return true
+}
+
+/** The bytes of a private file, or `undefined` when it is absent or disappears before it is read. */
+async function readPrivateFileIfPresent(path: string): Promise<Buffer | undefined> {
+	if (!await checkPrivateFile(path)) return undefined
+	try {
+		return await fs.readFile(path)
+	}
+	catch (error) {
+		if (isNotFound(error)) return undefined
+		throw error
+	}
 }
 
 /** The roster's file rule: a regular 0600 file, never a symbolic link. Returns `undefined` when absent. */

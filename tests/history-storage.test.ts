@@ -33,6 +33,7 @@ import {
 	mergeTimeline,
 	pageTimeline,
 	pruneHostHistory,
+	readMergedTimeline,
 	runWithDesignWriteContext,
 	selectPrunableHostVersions,
 	versionResourcesFromSnapshot,
@@ -316,10 +317,19 @@ describe('host retention', () => {
 		const checkpointBytes = await readFile(join(root, LEGACY_LAYOUT.checkpointRelativePath(kept.id)))
 		await store.appendOpenEntry({ type: 'event', event: { at: NOW.toISOString(), actor: AGENT, source: 'mcp', operation: 'updateViewSpec', resource: { kind: 'view', key: VIEW_ID }, beforeRevision: null, afterRevision: 'r_x' }, files: { [viewRelativePath(VIEW_ID)]: blobDigest(journalOnly) } })
 
-		const result = await pruneHostHistory({ host: store, checkpoints: await checkpoints.list(), now: NOW })
+		// Timeline reads racing the prune see one consistent snapshot: all of it before, or all after.
+		const pruning = persistence.withLock(async () => pruneHostHistory({ host: store, checkpoints: await checkpoints.listUnlocked(), now: NOW }))
+		const reads = Array.from({ length: 3 }, () => readMergedTimeline(persistence, { host: store, checkpoints }))
+		const [result, ...timelines] = await Promise.all([pruning, ...reads])
+		for (const timeline of timelines) {
+			expect(timeline.invalid).toEqual([])
+			expect([HOST_RETENTION_MIN_KEPT + 5, HOST_RETENTION_MIN_KEPT + 3]).toContain(timeline.versions.length)
+		}
+		expect((await readMergedTimeline(persistence, { host: store, checkpoints })).versions).toHaveLength(HOST_RETENTION_MIN_KEPT + 3)
 
 		expect(result.pruned).toEqual([external.id, aged.id].sort())
 		expect(result.repointed).toEqual([{ id: young.id, parent: system.id }])
+		expect(result.cycles).toEqual([])
 		expect((await store.readVersion(young.id))?.parent).toBe(system.id)
 		expect(await store.readVersion(external.id)).toBeUndefined()
 		expect(await store.readVersion(system.id)).toEqual(system)
@@ -328,7 +338,7 @@ describe('host retention', () => {
 		expect([...result.gc.removed].sort()).toEqual([blobDigest(prunedOnly), blobDigest(unnamed)].sort())
 		expect(await store.hasBlob(blobDigest(checkpointOnly))).toBe(true)
 		expect(await store.hasBlob(blobDigest(journalOnly))).toBe(true)
-	}, 30_000)
+	}, 60_000)
 
 	it('drops a pruned first parent and skips the sweep while any record is unreadable', async () => {
 		const { store, paths } = await hostStore()
@@ -350,7 +360,48 @@ describe('host retention', () => {
 
 		const skippedForCheckpoints = await collectHostGarbage({ host: store, checkpoints: { records: [], invalid: [{ file: 'x', diagnostics: [] }] } })
 		expect(skippedForCheckpoints.removed).toEqual([])
-	}, 30_000)
+	}, 60_000)
+
+	it('terminates on a parent cycle or a self-parent among pruned versions and reports the dropped parents', async () => {
+		const { store } = await hostStore()
+		const old = (ageDays: number) => iso(NOW.getTime() - HOST_RETENTION_MAX_AGE_MS - ageDays * 86_400_000)
+		const [loopA, loopB, self] = [randomUUID(), randomUUID(), randomUUID()]
+		const versions = [
+			hostVersion({ type: 'autosave', id: loopA, at: old(3), parent: loopB }),
+			hostVersion({ type: 'autosave', id: loopB, at: old(2), parent: loopA }),
+			hostVersion({ type: 'autosave', id: self, at: old(1), parent: self }),
+		]
+		const intoLoop = hostVersion({ type: 'system', at: old(0), parent: loopA })
+		const intoSelf = hostVersion({ type: 'system', at: old(0), parent: self })
+		const selfSurvivor = hostVersion({ type: 'system', at: old(0) })
+		versions.push(intoLoop, intoSelf, { ...selfSurvivor, parent: selfSurvivor.id })
+		for (let index = HOST_RETENTION_MIN_KEPT; index >= 1; index--)
+			versions.push(hostVersion({ type: 'autosave', at: iso(NOW.getTime() - index * 1000) }))
+		for (const version of versions) await store.writeVersion(version)
+
+		const result = await pruneHostHistory({ host: store, checkpoints: { records: [], invalid: [] }, now: NOW })
+		expect(result.pruned).toEqual([loopA, loopB, self].sort())
+		expect([...result.cycles].sort()).toEqual([intoLoop.id, intoSelf.id].sort())
+		expect(await store.readVersion(intoLoop.id)).not.toHaveProperty('parent')
+		expect(await store.readVersion(intoSelf.id)).not.toHaveProperty('parent')
+		// A surviving self-parent is never walked, so it is left as it is.
+		expect((await store.readVersion(selfSurvivor.id))?.parent).toBe(selfSurvivor.id)
+	}, 60_000)
+
+	it('lists versions without failing while versions are removed underneath', async () => {
+		const { store } = await hostStore()
+		const versions = Array.from({ length: 80 }, (_, index) => hostVersion({ type: 'autosave', at: iso(NOW.getTime() - index * 1000) }))
+		for (const version of versions) await store.writeVersion(version)
+		const listings = Array.from({ length: 5 }, () => store.listVersions())
+		const removals = versions.map(version => store.removeVersion(version.id))
+		const results = await Promise.all([...listings, ...removals])
+		for (const listing of results.slice(0, 5) as Awaited<ReturnType<HostHistoryStore['listVersions']>>[]) {
+			expect(listing.invalid).toEqual([])
+			expect(listing.records.length).toBeLessThanOrEqual(versions.length)
+		}
+		expect((await store.listVersions()).records).toEqual([])
+		expect(await store.readVersion(versions[0]!.id)).toBeUndefined()
+	}, 60_000)
 })
 
 describe('checkpoint store and versioned snapshot', () => {
@@ -482,6 +533,7 @@ describe('persistence write observer', () => {
 			{ label: 'view create', kind: 'view', key: VIEW_ID, run: () => persistence.views.create(VIEW_ID, viewFixture()), revision: () => persistence.views.readRevision(VIEW_ID) },
 			{ label: 'view CAS', kind: 'view', key: VIEW_ID, run: async () => persistence.views.compareAndSwap({ key: VIEW_ID, expectedRevision: (await persistence.views.readRevision(VIEW_ID))!, resource: { ...viewFixture(), name: 'Renamed' } }), revision: () => persistence.views.readRevision(VIEW_ID) },
 			{ label: 'flow create', kind: 'flow', key: FLOW_ID, run: () => persistence.flows.create(FLOW_ID, flowFixture()), revision: () => persistence.flows.readRevision(FLOW_ID) },
+			{ label: 'flow CAS', kind: 'flow', key: FLOW_ID, run: async () => persistence.flows.compareAndSwap({ key: FLOW_ID, expectedRevision: (await persistence.flows.readRevision(FLOW_ID))!, resource: { ...flowFixture(), name: 'Renamed Flow' } }), revision: () => persistence.flows.readRevision(FLOW_ID) },
 			{ label: 'workspace CAS', kind: 'workspace', key: 'workspace', run: async () => persistence.workspace.compareAndSwap({ key: 'workspace', expectedRevision: (await persistence.workspace.read('workspace'))!.revision, resource: { ...workspaceFixture(), themes: { dark: {} } } as WorkspaceManifest }), revision: async () => (await persistence.workspace.read('workspace'))?.revision },
 			{ label: 'locale create', kind: 'locale', key: 'zh-TW', run: () => persistence.locales.create('zh-TW', { greeting: '嗨' }), revision: () => persistence.locales.readRevision('zh-TW') },
 			{ label: 'locale CAS', kind: 'locale', key: 'zh-TW', run: async () => persistence.locales.compareAndSwap({ key: 'zh-TW', expectedRevision: (await persistence.locales.readRevision('zh-TW'))!, resource: { greeting: '你好' } }), revision: () => persistence.locales.readRevision('zh-TW') },
@@ -498,7 +550,7 @@ describe('persistence write observer', () => {
 			expect(changes, testCase.label).toHaveLength(1)
 			expect(changes[0]!.resource).toEqual({ kind: testCase.kind, key: testCase.key })
 			expect(changes[0]!.beforeRevision, testCase.label).toBe(before ?? null)
-			expect(changes[0]!.afterRevision, testCase.label).toBe(await testCase.revision())
+			expect(changes[0]!.afterRevision, testCase.label).toBe((await testCase.revision()) ?? null)
 			await expectCommitted(root, changes)
 		}
 		// The Asset replacement also removed the previous content file, and says so.
@@ -508,6 +560,39 @@ describe('persistence write observer', () => {
 			[`assets/${ASSET_ID}/logo-2.bin`, false],
 			[`assets/${ASSET_ID}/logo.bin`, true],
 		])
+
+		// Deleting a View or a Flow reports the removed file and no revision after it.
+		for (const [kind, key, repository] of [['view', VIEW_ID, persistence.views], ['flow', FLOW_ID, persistence.flows]] as const) {
+			const before = (await repository.readRevision(key))!
+			calls.length = 0
+			const deleted = await inContext(() => repository.deleteIfRevision({ key, expectedRevision: before }))
+			expect(deleted).toEqual({ status: 'deleted' })
+			expect(calls.map(call => call.hook)).toEqual(['before', 'after'])
+			const path = kind === 'view' ? viewRelativePath(key) : flowRelativePath(key)
+			expect(calls[1]!.changes).toEqual([{ resource: { kind, key }, beforeRevision: before, afterRevision: null, files: [{ path, bytes: null }] }])
+			await expectCommitted(root, calls[1]!.changes!)
+		}
+	})
+
+	it('reports a Workspace create, and runs the before hook while the old bytes are still on disk', async () => {
+		const root = await tempDir('uiux-history-create-')
+		const persistence = new FileNativePersistence({ root, schemaPolicy: policy() })
+		const { observer, calls } = recorder()
+		persistence.setWriteObserver(observer)
+		await runWithDesignWriteContext({ ...CONTEXT, operation: 'updateWorkspaceSettings' }, () => persistence.workspace.create(workspaceFixture()))
+		expect(calls.map(call => call.hook)).toEqual(['before', 'after'])
+		expect(calls[1]!.changes).toMatchObject([{ resource: { kind: 'workspace', key: 'workspace' }, beforeRevision: null, afterRevision: (await persistence.workspace.read('workspace'))!.revision }])
+		await expectCommitted(root, calls[1]!.changes!)
+
+		await persistence.views.create(VIEW_ID, viewFixture())
+		const oldBytes = await readFile(join(root, viewRelativePath(VIEW_ID)))
+		let seenBefore: Buffer | undefined
+		persistence.setWriteObserver({
+			async beforeCanonicalWrite() { seenBefore = await readFile(join(root, viewRelativePath(VIEW_ID))) },
+		})
+		await runWithDesignWriteContext(CONTEXT, async () => persistence.views.compareAndSwap({ key: VIEW_ID, expectedRevision: (await persistence.views.readRevision(VIEW_ID))!, resource: { ...viewFixture(), name: 'New' } }))
+		expect(seenBefore).toEqual(oldBytes)
+		expect(await readFile(join(root, viewRelativePath(VIEW_ID)))).not.toEqual(oldBytes)
 	})
 
 	it('reports only the View part of a Decision promotion and nothing for Review writes', async () => {
@@ -620,6 +705,18 @@ describe('persistence write observer', () => {
 		const latest = (await persistence.views.readRevision(VIEW_ID))!
 		await runWithDesignWriteContext(CONTEXT, () => persistence.views.compareAndSwap({ key: VIEW_ID, expectedRevision: latest, resource: { ...viewFixture(), name: 'Later' } }))
 		await expect(later).resolves.toMatchObject({ resource: { name: 'Later' } })
+		expect(persistence.recordingGap).toBe(false)
+
+		// The guard is per instance: a hook may still use another Workspace's persistence.
+		const other = await newWorkspace(await tempDir('uiux-history-other-'))
+		await other.views.create(VIEW_ID, { ...viewFixture(), name: 'Other' })
+		let otherRead: unknown
+		persistence.setWriteObserver({
+			async afterCanonicalCommit() { otherRead = await other.views.read(VIEW_ID) },
+		})
+		const current = (await persistence.views.readRevision(VIEW_ID))!
+		await runWithDesignWriteContext(CONTEXT, () => persistence.views.compareAndSwap({ key: VIEW_ID, expectedRevision: current, resource: { ...viewFixture(), name: 'Again' } }))
+		expect(otherRead).toMatchObject({ resource: { name: 'Other' } })
 		expect(persistence.recordingGap).toBe(false)
 	})
 

@@ -89,8 +89,15 @@ export type CanonicalResourceChange = Readonly<{
  * - `afterCanonicalCommit` runs once the write has committed (for multi-file writes, once the
  *   transaction journal is committed), with exactly the committed bytes.
  *
- * A hook must not call `withLock` or `withReadLock` (that is refused); use the `*Unlocked`
- * helpers instead. A hook failure never fails the write: it is logged and sets `recordingGap`.
+ * A hook must not call this instance's `withLock` or `withReadLock` (that is refused); use the
+ * `*Unlocked` helpers instead. Do not start a lock acquisition fire-and-forget inside a hook
+ * either: it is refused too, and nothing observes the rejection. Defer such work until the hook
+ * has returned (a timer), when the lock can be taken again. A hook failure never fails the write:
+ * it is logged and sets `recordingGap`.
+ *
+ * `beforeCanonicalWrite` can run without a following `afterCanonicalCommit` when the write itself
+ * then fails; a hook has no time limit and holds the lock while it runs (both are the recorder's
+ * concern, issue #132 B3).
  */
 export type CanonicalWriteObserver = Readonly<{
 	beforeCanonicalWrite?(context: DesignWriteContext): void | Promise<void>
@@ -408,7 +415,7 @@ export class FileNativePersistence {
 	 * processes. Waiting longer than the lock wait budget throws `persistence.lock_busy`.
 	 */
 	async withLock<Result>(operation: () => Promise<Result>): Promise<Result> {
-		assertOutsideObserver()
+		assertOutsideObserver(this)
 		const deadline = Date.now() + this.lockWaitMilliseconds
 		const leave = await this.gate.enter('exclusive', deadline)
 		try {
@@ -434,7 +441,7 @@ export class FileNativePersistence {
 	 * new readers from joining, so writes are not starved. The operation must not write.
 	 */
 	async withReadLock<Result>(operation: () => Promise<Result>): Promise<Result> {
-		assertOutsideObserver()
+		assertOutsideObserver(this)
 		const deadline = Date.now() + this.lockWaitMilliseconds
 		const leave = await this.gate.enter('shared', deadline)
 		let hold: SharedLockHold | undefined
@@ -1792,7 +1799,7 @@ const observerStates = new WeakMap<FileNativePersistence, ObserverState>()
  * The mark is cleared when the hook settles, so work the hook schedules for later (a timer that
  * closes an idle autosave) inherits a cleared mark and may take the lock then.
  */
-const observerScope = new AsyncLocalStorage<{ running: boolean }>()
+const observerScope = new AsyncLocalStorage<{ running: boolean; persistence: FileNativePersistence }>()
 
 function observerState(persistence: FileNativePersistence): ObserverState {
 	const state = observerStates.get(persistence)
@@ -1800,8 +1807,10 @@ function observerState(persistence: FileNativePersistence): ObserverState {
 	return state
 }
 
-function assertOutsideObserver(): void {
-	if (observerScope.getStore()?.running)
+/** Refuses only re-entry into the instance whose hook is running; other instances lock as usual. */
+function assertOutsideObserver(persistence: FileNativePersistence): void {
+	const mark = observerScope.getStore()
+	if (mark?.running && mark.persistence === persistence)
 		throw new PersistenceError('persistence.lock_busy', 'A history observer hook runs under the exclusive persistence lock and cannot take it again; use the *Unlocked helpers.')
 }
 
@@ -1833,11 +1842,11 @@ async function commitCanonicalWrite<Written extends boolean | void>(
 	catch (error) {
 		reportObserverFailure(state, 'could not read the resources before a design write', error)
 	}
-	await invokeObserver(state, 'beforeCanonicalWrite', async () => observer.beforeCanonicalWrite?.(context))
+	await invokeObserver(persistence, state, 'beforeCanonicalWrite', async () => observer.beforeCanonicalWrite?.(context))
 	const written = await write()
 	if (written === false || !before) return written
 	const committedBefore = before
-	await invokeObserver(state, 'afterCanonicalCommit', async () => observer.afterCanonicalCommit?.(context, committedBefore.map(resourceChangeAfterCommit)))
+	await invokeObserver(persistence, state, 'afterCanonicalCommit', async () => observer.afterCanonicalCommit?.(context, committedBefore.map(resourceChangeAfterCommit)))
 	return written
 }
 
@@ -1896,8 +1905,8 @@ function resourceChangeAfterCommit(entry: ResourceFilesBefore): CanonicalResourc
 	}
 }
 
-async function invokeObserver(state: ObserverState, hook: keyof CanonicalWriteObserver, call: () => Promise<unknown>): Promise<void> {
-	const mark = { running: true }
+async function invokeObserver(persistence: FileNativePersistence, state: ObserverState, hook: keyof CanonicalWriteObserver, call: () => Promise<unknown>): Promise<void> {
+	const mark = { running: true, persistence }
 	try {
 		await observerScope.run(mark, call)
 	}

@@ -10,6 +10,11 @@ export type HostPruneResult = Readonly<{
 	pruned: readonly string[]
 	/** Surviving versions whose pruned parent was replaced by their nearest surviving ancestor. */
 	repointed: readonly Readonly<{ id: string; parent?: string }>[]
+	/**
+	 * Surviving versions whose parent chain through pruned versions loops (a corrupt store): the
+	 * walk stops at the first repeat and the version is re-pointed with no parent.
+	 */
+	cycles: readonly string[]
 	gc: HostGarbageCollection
 }>
 
@@ -50,10 +55,26 @@ export async function pruneHostHistory(input: Readonly<{ host: HostHistoryStore;
 	const prunable = selectPrunableHostVersions(listing.records, input.now)
 	const byId = new Map(listing.records.map(version => [version.id, version]))
 	const repointed: { id: string; parent?: string }[] = []
+	const cycles: string[] = []
 	for (const version of listing.records) {
 		if (prunable.has(version.id) || version.parent === undefined || !prunable.has(version.parent)) continue
+		// Bounded walk: every step visits a new pruned version, so a parent cycle cannot loop forever.
+		const visited = new Set<string>()
 		let parent: string | undefined = version.parent
-		while (parent !== undefined && prunable.has(parent)) parent = byId.get(parent)?.parent
+		let cyclic = false
+		while (parent !== undefined && prunable.has(parent)) {
+			if (visited.has(parent)) {
+				cyclic = true
+				break
+			}
+			visited.add(parent)
+			parent = byId.get(parent)?.parent
+		}
+		// A chain that loops, or leads back to the version itself, leaves it without a parent.
+		if (cyclic || parent === version.id) {
+			parent = undefined
+			cycles.push(version.id)
+		}
 		const { parent: _previous, ...rest } = version
 		void _previous
 		await input.host.replaceVersion(parent === undefined ? rest : { ...rest, parent })
@@ -61,7 +82,7 @@ export async function pruneHostHistory(input: Readonly<{ host: HostHistoryStore;
 	}
 	for (const id of prunable) await input.host.removeVersion(id)
 	const gc = await collectHostGarbage({ host: input.host, checkpoints: input.checkpoints })
-	return { pruned: [...prunable].sort(), repointed, gc }
+	return { pruned: [...prunable].sort(), repointed, cycles, gc }
 }
 
 /**

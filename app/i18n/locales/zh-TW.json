@@ -1958,7 +1958,9 @@
       "journal_invalid": "無法讀取進行中的自動儲存。",
       "blob_corrupt": "一個已存放的歷程檔案與其內容不符。",
       "store_unsafe": "這台電腦上的版本歷程存放區無法安全使用。請檢查資料夾權限與連結。",
-      "write_failed": "無法儲存版本歷程，沒有任何內容被變更。"
+      "write_failed": "無法儲存版本歷程，未變更任何內容。",
+      "rollback_failed": "無法儲存版本歷程，且中斷的寫入未能完全復原。請檢查版本歷程存放區。",
+      "invalid_cursor": "時間軸中的這個位置已失效，請重新載入時間軸。"
     },
     "review": {
       "anchor_history_mismatch": "Review 的位置與其歷程不一致。",

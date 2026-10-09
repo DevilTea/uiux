@@ -23,7 +23,11 @@ export type DesignWriteContext = Readonly<{
 
 const storage = new AsyncLocalStorage<DesignWriteContext>()
 
-/** Runs `operation` with `context` as the current design-write context; nesting replaces it. */
+/**
+ * Runs `operation` with `context` as the current design-write context; nesting replaces it.
+ * Asynchronous work scheduled inside (timers included) inherits the context; a recorder that arms
+ * timers from a write must not treat their later writes as the same design operation (B3).
+ */
 export function runWithDesignWriteContext<Result>(context: DesignWriteContext, operation: () => Result): Result {
 	assertDesignWriteContext(context)
 	return storage.run(Object.freeze({ ...context }), operation)
