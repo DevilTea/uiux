@@ -69,6 +69,8 @@ export const ACCESS_OPERATIONS = {
 	diffVersions: { minRole: 'viewer', permissionKey: 'history.read' },
 	listVersions: { minRole: 'viewer', permissionKey: 'history.read' },
 	readVersion: { minRole: 'viewer', permissionKey: 'history.read' },
+	// The version reads for Preview: a version's manifest, View and Locales, and its blobs by digest.
+	readVersionForPreview: { minRole: 'viewer', permissionKey: 'history.read' },
 	readSession: { minRole: 'viewer', sessionOnly: true },
 	endSession: { minRole: 'viewer', sessionOnly: true },
 	// Reviewer: every Review action (actor stamped).

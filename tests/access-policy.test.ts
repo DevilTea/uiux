@@ -56,6 +56,7 @@ const MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; H?: t
 	diffVersions: { min: 'viewer' },
 	listVersions: { min: 'viewer' },
 	readVersion: { min: 'viewer' },
+	readVersionForPreview: { min: 'viewer' },
 	readSession: { min: 'viewer', S: true },
 	endSession: { min: 'viewer', S: true },
 	createReviewThread: { min: 'reviewer' },
@@ -140,6 +141,7 @@ describe('permission-key annotations (seam 5; Clauses 01a11c09-a26e-73bb-9a29-ee
 			['diffVersions', 'history.read'],
 			['listVersions', 'history.read'],
 			['readVersion', 'history.read'],
+			['readVersionForPreview', 'history.read'],
 			['restoreResourceVersion', 'history.restore'],
 		])
 		for (const [operation, rule] of annotated) {
@@ -185,7 +187,7 @@ describe('permission-key annotations (seam 5; Clauses 01a11c09-a26e-73bb-9a29-ee
 	})
 
 	it('refuses every history operation to the system credentials (Clause 01a11485-f978-767a-b977-33028aee7ae7)', () => {
-		for (const operation of ['diffVersions', 'listVersions', 'readVersion', 'createCheckpoint', 'deleteCheckpoint'] as const) {
+		for (const operation of ['diffVersions', 'listVersions', 'readVersion', 'readVersionForPreview', 'createCheckpoint', 'deleteCheckpoint'] as const) {
 			for (const id of ['system:capture', 'system:publish'] as const)
 				expect(authorizeOperation({ type: 'system', id, role: 'viewer', credential: 'system' }, operation), `${operation} as ${id}`).toMatchObject({ code: 'auth.scope_denied' })
 		}
