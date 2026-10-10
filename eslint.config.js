@@ -7,7 +7,7 @@ import { RAW_TEXT_IGNORE_PATTERN } from './tests/support/i18n-allowlist.mjs'
 
 export default tseslint.config(
 	{
-		ignores: ['.claude/**', '.impeccable/**', '.nuxt/**', '.output/**', 'coverage/**', 'node_modules/**', 'playwright-report/**', 'test-results/**'],
+		ignores: ['.claude/**', '.impeccable/**', '.uiux-server-smoke-*/**', '.nuxt/**', '.output/**', 'coverage/**', 'node_modules/**', 'playwright-report/**', 'test-results/**'],
 	},
 	js.configs.recommended,
 	...tseslint.configs.recommended,

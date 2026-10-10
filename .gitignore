@@ -29,6 +29,7 @@ test-results/
 .impeccable/component-reviews/
 .impeccable-live/
 .uiux-browser-test-*/
+.uiux-server-smoke-*/
 
 # UIUX live-server Workspace hold (local runtime state, never canonical)
 **/.uiux/.server-hold.json
