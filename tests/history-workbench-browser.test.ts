@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import { bearer, provisionToken, sessionCookieFor } from './support/access'
@@ -80,16 +82,17 @@ async function seedLocaleVersion(key: string, name: string): Promise<{ autosave:
 	return { autosave: autosave.id, checkpoint: id }
 }
 
-type Device = 'desktop' | 'tablet' | 'phone'
+type Device = 'desktop' | 'tablet' | 'phone' | 'landscape'
 const VIEWPORTS: Record<Device, { width: number; height: number }> = {
 	desktop: { width: 1440, height: 900 },
 	tablet: { width: 1024, height: 768 },
 	phone: { width: 390, height: 844 },
+	landscape: { width: 844, height: 390 },
 }
 
 async function open(path: string, options: Readonly<{ device?: Device; locale?: string; cookie?: { name: string; value: string } }> = {}): Promise<{ context: BrowserContext; page: Page }> {
 	const device = options.device ?? 'desktop'
-	const context = await browser.newContext({ viewport: VIEWPORTS[device], colorScheme: 'light', ...(device === 'phone' ? { hasTouch: true, isMobile: true } : {}) })
+	const context = await browser.newContext({ viewport: VIEWPORTS[device], colorScheme: 'light', ...(device === 'phone' || device === 'landscape' ? { hasTouch: true, isMobile: true } : {}) })
 	const workbenchLocale = options.locale ?? 'en-US'
 	await context.addInitScript((value) => {
 		localStorage.setItem('nuxt-color-mode', 'light')
@@ -104,12 +107,24 @@ async function open(path: string, options: Readonly<{ device?: Device; locale?: 
 const row = (page: Page, id: string) => page.locator(`[data-version-timeline] [data-version-row="${id}"]`).first()
 const query = (page: Page) => Object.fromEntries(new URL(page.url()).searchParams)
 
-/** Picks an option of a Nuxt UI select, then waits for its list to go so focus is back (PR #162). */
+/** Picks an option of a Nuxt UI select, then waits for its own list to go so focus is back (PR #162, #163). */
 async function choose(page: Page, trigger: string, option: string): Promise<void> {
 	await page.locator(trigger).click()
-	await page.getByRole('option', { name: option, exact: true }).click()
-	await page.getByRole('listbox').waitFor({ state: 'detached' })
+	const listbox = page.locator('[data-slot="content"][role="listbox"]')
+	await listbox.getByRole('option', { name: option, exact: true }).click()
+	await listbox.waitFor({ state: 'detached' })
 }
+
+/** A changed resource's diff in a comparison, opened if it is still collapsed. */
+async function openDiff(page: Page, resource: string) {
+	const block = page.locator(`[data-version-comparison] [data-resource-diff="${resource}"]`)
+	await block.waitFor({ timeout: 15_000 })
+	if (await block.getAttribute('data-open') === null) await block.locator('[data-resource-diff-toggle]').click()
+	await block.locator('[data-diff-section]').first().waitFor({ timeout: 15_000 })
+	return block
+}
+
+const focused = (page: Page, selector: string) => page.evaluate(target => !!document.activeElement?.matches(target), selector)
 
 beforeAll(async () => {
 	server = await startWorkbenchServer()
@@ -197,6 +212,55 @@ describe('version timeline in Activity', () => {
 	}, 90_000)
 })
 
+describe('timeline rows', () => {
+	it('folds an autosave whose changes cancelled out into one quiet row', async () => {
+		const key = `b8.quiet.${unique()}`
+		await checkpoint(`b8-before-${unique()}`)
+		await editLocale(key, 'Added, then removed')
+		const read = await api<Read<Record<string, string>>>('/api/resources/locale/en-US')
+		const messages = { ...read.resource }
+		delete messages[key]
+		await api('/api/locales/en-US', { expectedRevision: read.revision, messages }, 'PUT')
+		const id = await checkpoint(`b8 quiet ${unique()}`)
+		const quiet = (await versions()).find(version => version.type === 'autosave' && version.summary.length === 0)!
+		const { context, page } = await open('/?tab=activity')
+		try {
+			await row(page, id).waitFor({ timeout: 15_000 })
+			const run = page.locator('[data-version-timeline] [data-quiet-run]').filter({ has: page.locator(`[data-version-row="${quiet.id}"]`) })
+			await page.locator('[data-quiet-run] [data-quiet-toggle]').first().waitFor()
+			// The run is collapsed: its version is not shown as a row of its own.
+			expect(await page.locator(`[data-version-timeline] > section [data-version-row="${quiet.id}"]:visible`).count()).toBe(0)
+			const toggle = page.locator('[data-quiet-run]').locator('[data-quiet-toggle]')
+			for (let index = 0; index < await toggle.count(); index++) {
+				if (await run.count()) break
+				await toggle.nth(index).click()
+			}
+			await expect.poll(() => run.count()).toBe(1)
+			expect(await run.locator('[data-quiet-toggle]').getAttribute('aria-expanded')).toBe('true')
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('lists a history file it cannot read with an explanation and no Delete', async () => {
+		const directory = join(server.workspaceRoot, '.uiux', 'history', 'checkpoints')
+		const file = join(directory, `${randomUUID()}.json`)
+		await mkdir(directory, { recursive: true })
+		await writeFile(file, '{"historySchemaVersion": 99}\n')
+		const { context, page } = await open('/?tab=activity')
+		try {
+			const section = page.locator('[data-invalid-records]')
+			await section.waitFor({ timeout: 15_000 })
+			await section.getByText('so they are left out of the timeline and can\'t be deleted here').waitFor()
+			expect(await section.locator('[data-invalid-record]').filter({ hasText: file.slice(server.workspaceRoot.length + 1) }).count()).toBe(1)
+			expect(await section.locator('[data-version-delete]').count()).toBe(0)
+		}
+		finally {
+			await context.close()
+			await rm(file, { force: true })
+		}
+	}, 90_000)
+})
+
 describe('comparison', () => {
 	it('compares with the parent and with the current state, and a copied address reopens the same comparison', async () => {
 		const key = `b8.compare.${unique()}`
@@ -214,8 +278,10 @@ describe('comparison', () => {
 			const summary = comparison.locator('[data-summary-row="locale:en-US"]')
 			await summary.waitFor({ timeout: 15_000 })
 			expect(await summary.getAttribute('data-status')).toBe('modified')
-			const diff = comparison.locator('[data-resource-diff="locale:en-US"]')
+			const diff = await openDiff(page, 'locale:en-US')
 			await diff.locator('[data-diff-item][data-op="added"]').filter({ hasText: key }).waitFor()
+			// Choosing a version moves focus to the comparison's heading.
+			await expect.poll(() => focused(page, '[data-comparison-heading]')).toBe(true)
 			expect(await comparison.evaluate((element) => {
 				const first = element.querySelector('[data-comparison-summary]')!
 				const second = element.querySelector('[data-resource-diff]')!
@@ -229,7 +295,7 @@ describe('comparison', () => {
 			await page.waitForURL(url => new URL(url).searchParams.get('compare') === 'current')
 			await expect.poll(() => comparison.getAttribute('data-from')).toBe(seeded.autosave)
 			expect(await comparison.getAttribute('data-to')).toBe('current')
-			await comparison.locator('[data-resource-diff="locale:en-US"] [data-diff-item]').filter({ hasText: `${key}.later` }).waitFor({ timeout: 15_000 })
+			await (await openDiff(page, 'locale:en-US')).locator('[data-diff-item]').filter({ hasText: `${key}.later` }).waitFor({ timeout: 15_000 })
 
 			// Narrow to one resource, then reopen the copied address in a fresh page.
 			await comparison.locator('[data-summary-row="locale:en-US"] a').click()
@@ -239,7 +305,7 @@ describe('comparison', () => {
 			const reopened = await context.newPage()
 			await reopened.goto(copied, { waitUntil: 'networkidle' })
 			const again = reopened.locator('[data-version-comparison]')
-			await again.locator('[data-resource-diff="locale:en-US"]').waitFor({ timeout: 15_000 })
+			await again.locator('[data-resource-diff="locale:en-US"][data-open] [data-diff-section]').waitFor({ timeout: 15_000 })
 			expect(await again.getAttribute('data-from')).toBe(seeded.autosave)
 			expect(await again.getAttribute('data-to')).toBe('current')
 			expect(await again.locator('[data-compare-target="current"]').getAttribute('aria-current')).toBe('true')
@@ -272,7 +338,26 @@ describe('comparison', () => {
 			expect({ compare, resource }).toEqual({ compare: 'current', resource: `view:${VIEW_ID}` })
 			const holding = await api<{ version: { resources: { kind: string; key: string; revision: string }[] } }>(`/api/history/versions/${version}`)
 			expect(holding.version.resources.find(item => item.kind === 'view' && item.key === VIEW_ID)?.revision).toBe(seen)
-			await page.locator(`[data-version-comparison] [data-resource-diff="view:${VIEW_ID}"] [data-diff-section="spec"]`).waitFor({ timeout: 15_000 })
+			await page.locator(`[data-version-comparison] [data-resource-diff="view:${VIEW_ID}"][data-open] [data-diff-section="spec"]`).waitFor({ timeout: 15_000 })
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('orders a comparison with another version by time, even before either is listed', async () => {
+		const older = await seedLocaleVersion(`b8.order.a.${unique()}`, `b8 order a ${unique()}`)
+		const newer = await seedLocaleVersion(`b8.order.b.${unique()}`, `b8 order b ${unique()}`)
+		const requests: string[] = []
+		const { context, page } = await open('/', {})
+		try {
+			page.on('request', (request) => { if (request.url().includes('/api/history/diff')) requests.push(request.url()) })
+			// Cold start on the address with the newer version selected and the older one to compare.
+			await page.goto(`${server.origin}/?tab=activity&version=${newer.autosave}&compare=${older.autosave}`, { waitUntil: 'networkidle' })
+			const comparison = page.locator('[data-version-comparison]')
+			await expect.poll(() => comparison.getAttribute('data-from'), { timeout: 15_000 }).toBe(older.autosave)
+			expect(await comparison.getAttribute('data-to')).toBe(newer.autosave)
+			// No diff was ever asked for the wrong way round.
+			expect(requests.length).toBeGreaterThan(0)
+			expect(requests.every(url => new URL(url).searchParams.get('from') === older.autosave)).toBe(true)
 		}
 		finally { await context.close() }
 	}, 90_000)
@@ -299,12 +384,12 @@ describe('View history panel', () => {
 			await page.waitForURL(url => new URL(url).searchParams.get('version') === changed.id)
 			expect(query(page)).toMatchObject({ panel: 'history', version: changed.id })
 			expect(query(page)).not.toHaveProperty('compare')
-			const diff = panel.locator(`[data-version-comparison] [data-resource-diff="view:${VIEW_ID}"]`)
+			const diff = panel.locator(`[data-version-comparison] [data-resource-diff="view:${VIEW_ID}"][data-open]`)
 			await diff.locator('[data-diff-section="spec"] [data-diff-item]').filter({ hasText: intent }).waitFor({ timeout: 15_000 })
 
 			// The render context written by the page keeps the history keys; a reload shows the same.
 			await page.reload({ waitUntil: 'networkidle' })
-			await panel.locator(`[data-version-comparison] [data-resource-diff="view:${VIEW_ID}"] [data-diff-section="spec"]`).waitFor({ timeout: 15_000 })
+			await panel.locator(`[data-version-comparison] [data-resource-diff="view:${VIEW_ID}"][data-open] [data-diff-section="spec"]`).waitFor({ timeout: 15_000 })
 			expect(query(page)).toMatchObject({ panel: 'history', version: changed.id })
 			expect(await panel.locator('[data-comparison-full]').getAttribute('href')).toContain(`version=${changed.id}`)
 		}
@@ -387,6 +472,8 @@ describe('Checkpoints', () => {
 			const dialog = page.locator('[data-delete-checkpoint-dialog]')
 			await dialog.waitFor()
 			expect(await dialog.textContent()).toContain(name)
+			// Focus starts on Cancel, never on Delete or the close button.
+			await expect.poll(() => focused(page, '[data-delete-cancel]')).toBe(true)
 			// Cancel keeps it.
 			await page.locator('[data-delete-cancel]').click()
 			await dialog.waitFor({ state: 'detached' })
@@ -411,6 +498,16 @@ describe('Checkpoints', () => {
 			expect(await editor.page.locator('[data-create-checkpoint]').count()).toBe(1)
 		}
 		finally { await editor.context.close() }
+
+		// A Viewer reads the timeline but is offered neither Create nor Delete.
+		const viewerToken = await provisionToken(server.workspaceRoot, { nickname: `b8-viewer-${unique()}`, kind: 'human', role: 'viewer' })
+		const viewer = await open('/?tab=activity', { cookie: await sessionCookieFor(server.origin, viewerToken) })
+		try {
+			await row(viewer.page, other).waitFor({ timeout: 15_000 })
+			expect(await viewer.page.locator('[data-create-checkpoint]').count()).toBe(0)
+			expect(await viewer.page.locator('[data-version-delete]').count()).toBe(0)
+		}
+		finally { await viewer.context.close() }
 	}, 90_000)
 })
 
@@ -420,7 +517,7 @@ describe('device tiers and zh-TW', () => {
 		const phone = await open(`/?tab=activity&version=${seeded.autosave}`, { device: 'phone' })
 		try {
 			await row(phone.page, seeded.checkpoint).waitFor({ timeout: 15_000 })
-			await phone.page.locator('[data-version-comparison] [data-resource-diff="locale:en-US"]').waitFor({ timeout: 15_000 })
+			await phone.page.locator('[data-version-comparison] [data-resource-diff="locale:en-US"][data-open] [data-diff-section]').waitFor({ timeout: 15_000 })
 			expect(await phone.page.locator('[data-create-checkpoint]').count()).toBe(0)
 			expect(await phone.page.locator('[data-version-delete]').count()).toBe(0)
 		}
@@ -432,6 +529,15 @@ describe('device tiers and zh-TW', () => {
 			expect(await phoneView.page.locator('[data-create-checkpoint]').count()).toBe(0)
 		}
 		finally { await phoneView.context.close() }
+
+		// A phone in landscape is still a handset: no Create (Rule 01a11a5e-1ba5).
+		const landscape = await open('/?tab=activity', { device: 'landscape' })
+		try {
+			await row(landscape.page, seeded.checkpoint).waitFor({ timeout: 15_000 })
+			expect(await landscape.page.locator('[data-create-checkpoint]').count()).toBe(0)
+			expect(await landscape.page.locator('[data-version-delete]').count()).toBe(0)
+		}
+		finally { await landscape.context.close() }
 
 		const tablet = await open('/?tab=activity', { device: 'tablet' })
 		try {
