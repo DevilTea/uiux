@@ -1668,7 +1668,7 @@
       "token_not_found": "這個 Token 不存在或已撤銷。",
       "roster_missing": "這個 Workspace 還沒有成員名單。",
       "store_invalid": "成員名單檔案已損壞。",
-      "admin_origin_rejected": "成員、Token、登入連結與工作階段只能在伺服器主機的 loopback 網址或 https 網址上管理，不會透過網路上未加密的 HTTP 進行。請改用上述網址，或在主機上執行 uiux member、token、invite 與 session 指令。"
+      "admin_origin_rejected": "成員、Token、登入連結與工作階段只能在伺服器主機的本機迴路網址或 HTTPS 網址上管理，不會透過網路上未加密的 HTTP 進行。請改用上述網址，或在主機上使用 uiux member、uiux token、uiux invite 與 uiux session 指令。"
     },
     "auth": {
       "actor_ignored": "伺服器會依你的登入身分記錄這次變更的作者。",
