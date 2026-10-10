@@ -1,7 +1,7 @@
 import { canonicalJsonBytes } from '../domain/canonical-json'
 import { validateReviewThread } from '../domain/reviews/schema'
 import { isRecord } from '../domain/validation'
-import { workspaceRelativePath } from '../persistence/paths'
+import { layoutForSchemaVersion } from '../persistence/paths'
 import { defineWorkspaceSchemaPolicy, type WorkspaceMigrationStep, type WorkspaceSnapshot } from '../persistence/schema-policy'
 import packageJson from '../../package.json' with { type: 'json' }
 
@@ -38,9 +38,9 @@ export const WORKSPACE_V1_TO_V2_STEP: WorkspaceMigrationStep = Object.freeze({
 	toVersion: 2,
 	apply(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
 		const next = new Map(snapshot)
-		const manifestPath = workspaceRelativePath()
+		const manifestPath = layoutForSchemaVersion(1).manifestPath
 		const manifestBytes = next.get(manifestPath)
-		if (!manifestBytes) throw new TypeError('uiux.v1-to-v2 requires .uiux/workspace.json.')
+		if (!manifestBytes) throw new TypeError(`uiux.v1-to-v2 requires ${manifestPath}.`)
 		const manifest = parseJson(manifestBytes, manifestPath)
 		if (!isRecord(manifest) || manifest.schemaVersion !== 1)
 			throw new TypeError('uiux.v1-to-v2 applies only to a schemaVersion 1 manifest.')
@@ -78,9 +78,9 @@ export const WORKSPACE_V2_TO_V3_STEP: WorkspaceMigrationStep = Object.freeze({
 	toVersion: 3,
 	apply(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
 		const next = new Map(snapshot)
-		const manifestPath = workspaceRelativePath()
+		const manifestPath = layoutForSchemaVersion(2).manifestPath
 		const manifestBytes = next.get(manifestPath)
-		if (!manifestBytes) throw new TypeError('uiux.v2-to-v3 requires .uiux/workspace.json.')
+		if (!manifestBytes) throw new TypeError(`uiux.v2-to-v3 requires ${manifestPath}.`)
 		const manifest = parseJson(manifestBytes, manifestPath)
 		if (!isRecord(manifest) || manifest.schemaVersion !== 2)
 			throw new TypeError('uiux.v2-to-v3 applies only to a schemaVersion 2 manifest.')
@@ -110,9 +110,9 @@ export const WORKSPACE_V3_TO_V4_STEP: WorkspaceMigrationStep = Object.freeze({
 	toVersion: 4,
 	apply(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
 		const next = new Map(snapshot)
-		const manifestPath = workspaceRelativePath()
+		const manifestPath = layoutForSchemaVersion(3).manifestPath
 		const manifestBytes = next.get(manifestPath)
-		if (!manifestBytes) throw new TypeError('uiux.v3-to-v4 requires .uiux/workspace.json.')
+		if (!manifestBytes) throw new TypeError(`uiux.v3-to-v4 requires ${manifestPath}.`)
 		const manifest = parseJson(manifestBytes, manifestPath)
 		if (!isRecord(manifest) || manifest.schemaVersion !== 3)
 			throw new TypeError('uiux.v3-to-v4 applies only to a schemaVersion 3 manifest.')

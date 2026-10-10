@@ -10,7 +10,7 @@ import { HostHistoryError, type HostHistoryStore } from '../../persistence/histo
 import { versionResourcesFromSnapshot } from '../../persistence/history/snapshot'
 import { mergeTimeline, type TimelineVersion } from '../../persistence/history/timeline'
 import { readVersionBlobUnlocked } from '../../persistence/history/version-blobs'
-import { LEGACY_LAYOUT } from '../../persistence/paths'
+import { layoutForSchemaVersion } from '../../persistence/paths'
 
 /** The selected Workspace's history stores, or `undefined` where history is off. */
 export type HistoryStoreSource = Readonly<{
@@ -181,7 +181,7 @@ export function createHistoryDiffService(persistence: FileNativePersistence, his
 			current = { schemaVersion, snapshot: await persistence.scanVersionedSnapshotUnlocked() }
 		}
 
-		const toResources = toVersion ? toVersion.resources : versionResourcesFromSnapshot(current!.snapshot, LEGACY_LAYOUT).resources
+		const toResources = toVersion ? toVersion.resources : versionResourcesFromSnapshot(current!.snapshot, persistence.layout).resources
 		const toSchemaVersion = toVersion ? toVersion.workspaceSchemaVersion : current!.schemaVersion
 		const crossSchema = fromVersion !== undefined && fromVersion.workspaceSchemaVersion !== toSchemaVersion
 		const candidates = changedCandidates(fromVersion?.resources ?? [], toResources, request.resources)
@@ -282,18 +282,19 @@ export function createHistoryDiffService(persistence: FileNativePersistence, his
 			for (const resource of side.resources) fromRecord(resource, side.bytes)
 			return { revisions, files }
 		}
+		const sideLayout = layoutForSchemaVersion(side.schemaVersion)
 		const snapshot = new Map<string, Uint8Array>()
 		const placed = new Set<string>()
 		for (const resource of side.resources) {
 			for (const path of Object.keys(resource.files)) {
 				const bytes = side.bytes.get(path)
-				if (!bytes || !LEGACY_LAYOUT.classifyVersionedPath(path)) continue
+				if (!bytes || !sideLayout.classifyVersionedPath(path)) continue
 				snapshot.set(path, bytes)
 				placed.add(resourceIdentityKey(resource))
 			}
 		}
 		const upgraded = await upgradeSnapshotInMemory(snapshot, side.schemaVersion, policy)
-		const regrouped = versionResourcesFromSnapshot(upgraded.snapshot, LEGACY_LAYOUT)
+		const regrouped = versionResourcesFromSnapshot(upgraded.snapshot, layoutForSchemaVersion(policy.currentVersion))
 		for (const resource of regrouped.resources) fromRecord(resource, upgraded.snapshot)
 		for (const resource of side.resources) if (!placed.has(resourceIdentityKey(resource))) fromRecord(resource, side.bytes)
 		return { revisions, files }

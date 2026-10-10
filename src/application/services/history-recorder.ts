@@ -534,7 +534,7 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 		const stores = this.stores
 		const startedAt = this.migrationStartedAt
 		if (this.phase !== 'migrating' || !stores || !startedAt) throw new Error('The migration system version follows the pre-migration Checkpoint.')
-		const actual = versionResourcesFromSnapshot(await this.persistence.scanVersionedSnapshotUnlocked())
+		const actual = versionResourcesFromSnapshot(await this.persistence.scanVersionedSnapshotUnlocked(), this.persistence.layout)
 		for (const [digest, bytes] of actual.blobs) {
 			if (!await stores.host.hasBlob(digest)) await stores.host.putBlob(bytes)
 		}
@@ -747,7 +747,7 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 		const { host } = this.stores!
 		const snapshot = await this.persistence.scanVersionedSnapshotUnlocked()
 		assertHeld(signal)
-		const actual = versionResourcesFromSnapshot(snapshot)
+		const actual = versionResourcesFromSnapshot(snapshot, this.persistence.layout)
 		const actualMap = resourceMap(actual.resources)
 		const expected = this.expected
 		if (!expected) {

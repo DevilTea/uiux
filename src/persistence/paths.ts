@@ -1,5 +1,6 @@
 import { resolve, sep } from 'node:path'
 
+import { artifactStoreShardPath } from '../domain/artifacts/schema'
 import { isCanonicalLocaleFilename, isCanonicalLocaleTag, isFullUuid, isSafeRelativePath, isSha256Digest } from '../domain/validation'
 import { PersistenceError } from './errors'
 
@@ -40,10 +41,18 @@ const ASSET_METADATA_FILENAME = 'asset.json'
 export type VersionedResourceIdentity = Readonly<{ kind: string; key: string }>
 
 /**
- * Where a Workspace keeps the files history reads and writes (seam 1 of the version timeline).
- * History code asks the layout instead of building path literals, so a later layout (Part 14,
- * `schemaVersion` 5) can be added beside this one and chosen by where the manifest lives.
+ * Where a Workspace keeps its files: the one seam every path that depends on the Workspace layout
+ * goes through (the manifest, the derived-artifact store, Checkpoints, the transaction journal,
+ * the persistence lock, the server hold, and the versioned files history reads and writes).
+ * Callers ask the layout instead of building path literals, so a later layout (Part 14,
+ * `schemaVersion` 5) can be added beside this one: persistence picks the current Workspace's
+ * layout, and history reads each record with `layoutForSchemaVersion` of the schema it was
+ * recorded under.
  *
+ * Every path is Workspace-relative and `/`-separated.
+ *
+ * - `metadataDir` is the directory that holds the manifest and the runtime files; a writer makes
+ *   sure it exists before taking the lock.
  * - `versionedRoots` lists the versioned manifest file and the versioned directories (with a
  *   trailing `/`), per Clause 01a11a5e-1eba-78ae-a204-52e286a95ddb.
  * - `excluded` lists the directories next to them that are never versioned (`reviews/` and the
@@ -53,20 +62,33 @@ export type VersionedResourceIdentity = Readonly<{ kind: string; key: string }>
  *   `undefined` for every other path, including excluded and non-canonical ones.
  */
 export type WorkspaceLayout = Readonly<{
+	metadataDir: string
 	manifestPath: string
 	artifactsDir: string
 	checkpointsDir: string
+	transactionsDir: string
+	lockPath: string
+	serverHoldPath: string
 	versionedRoots: readonly string[]
 	excluded: readonly string[]
+	/** A runtime file directly inside `metadataDir` (lock candidates, the server hold's temporary file). */
+	metadataFilePath(filename: string): string
 	checkpointRelativePath(id: string): string
+	artifactRelativePath(identity: string): string
 	classifyVersionedPath(path: string): VersionedResourceIdentity | undefined
 }>
 
-/** The `schemaVersion` 1–4 layout: authored directories at the Workspace root, the manifest under `.uiux/`. */
+const LEGACY_METADATA_DIRECTORY = WORKSPACE_DATA_DIRECTORY.workspaceMeta
+
+/** The `schemaVersion` 1–4 layout: authored directories at the Workspace root, the manifest and runtime files under `.uiux/`. */
 export const LEGACY_LAYOUT: WorkspaceLayout = Object.freeze({
+	metadataDir: LEGACY_METADATA_DIRECTORY,
 	manifestPath: WORKSPACE_MANIFEST_PATH,
 	artifactsDir: WORKSPACE_ARTIFACTS_DIRECTORY,
 	checkpointsDir: WORKSPACE_CHECKPOINTS_DIRECTORY,
+	transactionsDir: `${LEGACY_METADATA_DIRECTORY}/.transactions`,
+	lockPath: `${LEGACY_METADATA_DIRECTORY}/.persistence.lock`,
+	serverHoldPath: `${LEGACY_METADATA_DIRECTORY}/.server-hold.json`,
 	versionedRoots: Object.freeze([
 		WORKSPACE_MANIFEST_PATH,
 		`${WORKSPACE_DATA_DIRECTORY.views}/`,
@@ -76,14 +98,41 @@ export const LEGACY_LAYOUT: WorkspaceLayout = Object.freeze({
 	]),
 	excluded: Object.freeze([
 		`${WORKSPACE_DATA_DIRECTORY.reviews}/`,
-		`${WORKSPACE_DATA_DIRECTORY.workspaceMeta}/`,
+		`${LEGACY_METADATA_DIRECTORY}/`,
 	]),
+	metadataFilePath(filename: string): string {
+		return `${LEGACY_METADATA_DIRECTORY}/${filename}`
+	},
 	checkpointRelativePath(id: string): string {
 		assertUuidIdentity(id, 'Checkpoint')
 		return `${WORKSPACE_CHECKPOINTS_DIRECTORY}/${id}.json`
 	},
+	artifactRelativePath(identity: string): string {
+		return `${WORKSPACE_ARTIFACTS_DIRECTORY}/${artifactShardRelativePath(identity)}`
+	},
 	classifyVersionedPath: classifyLegacyVersionedPath,
 })
+
+/**
+ * Each layout with the first Workspace `schemaVersion` that uses it, oldest first. A layout holds
+ * until the next entry's version; the `schemaVersion` 5 layout (Part 14) is appended here.
+ */
+const LAYOUTS_BY_SCHEMA_VERSION: readonly Readonly<{ fromVersion: number; layout: WorkspaceLayout }>[] = Object.freeze([
+	Object.freeze({ fromVersion: 1, layout: LEGACY_LAYOUT }),
+])
+
+/**
+ * The layout of files recorded under Workspace `schemaVersion` `version` (a history record's
+ * `workspaceSchemaVersion`, or a migration step's version). A version below the first entry, or
+ * one that is not a number, falls back to the legacy layout; whether such a version is usable at
+ * all is the schema policy's decision, not the layout's.
+ */
+export function layoutForSchemaVersion(version: number): WorkspaceLayout {
+	let selected = LEGACY_LAYOUT
+	for (const entry of LAYOUTS_BY_SCHEMA_VERSION)
+		if (version >= entry.fromVersion) selected = entry.layout
+	return selected
+}
 
 function classifyLegacyVersionedPath(path: string): VersionedResourceIdentity | undefined {
 	if (!isSafeRelativePath(path)) return undefined
@@ -108,6 +157,7 @@ function uuidFileIdentity(kind: string, filename: string, suffix: string): Versi
 	return isFullUuid(key) ? { kind, key } : undefined
 }
 
+/** The legacy layout's manifest path; code that holds a layout reads `layout.manifestPath` instead. */
 export function workspaceRelativePath(): typeof WORKSPACE_MANIFEST_PATH {
 	return WORKSPACE_MANIFEST_PATH
 }
@@ -142,11 +192,16 @@ export function assetMetadataRelativePath(id: string): string {
 	return `${assetDirectoryRelativePath(id)}/${ASSET_METADATA_FILENAME}`
 }
 
+/** The legacy layout's artifact path; code that holds a layout calls `layout.artifactRelativePath` instead. */
 export function artifactRelativePath(identity: string): string {
+	return LEGACY_LAYOUT.artifactRelativePath(identity)
+}
+
+/** An artifact's place inside the artifact directory: `sha256/<first two hex>/<hex>`, the same in every layout. */
+function artifactShardRelativePath(identity: string): string {
 	if (!isSha256Digest(identity))
 		throw invalidIdentity('Artifact identity must be sha256:<64 lowercase hexadecimal characters>.')
-	const hex = identity.slice('sha256:'.length)
-	return `${WORKSPACE_ARTIFACTS_DIRECTORY}/sha256/${hex.slice(0, 2)}/${hex}`
+	return artifactStoreShardPath(identity)
 }
 
 /** Resolve only already-derived relative paths, rejecting traversal before touching the filesystem. */

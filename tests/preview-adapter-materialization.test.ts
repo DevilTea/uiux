@@ -15,6 +15,7 @@ import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import { HUMAN_OWNER } from './support/access'
+import { writeManifest } from './support/workspace-layout'
 
 const temporaryRoots: string[] = []
 
@@ -26,12 +27,11 @@ afterEach(async () => {
 async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; config?: unknown }> = []): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-preview-test-'))
 	temporaryRoots.push(root)
-	await mkdir(join(root, '.uiux'), { recursive: true })
 	await mkdir(join(root, 'node_modules', '@deviltea'), { recursive: true })
 	await symlink(join(process.cwd(), 'node_modules', '@deviltea', 'widget-core'), join(root, 'node_modules', '@deviltea', 'widget-core')).catch(() => undefined)
 	await symlink(join(process.cwd(), 'node_modules', '@deviltea', 'widget-vue'), join(root, 'node_modules', '@deviltea', 'widget-vue')).catch(() => undefined)
 	await symlink(join(process.cwd(), 'node_modules', 'vue'), join(root, 'node_modules', 'vue')).catch(() => undefined)
-	await writeFile(join(root, '.uiux', 'workspace.json'), JSON.stringify({
+	await writeManifest(root, JSON.stringify({
 		schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 		i18n: { defaultLocale: 'en-US' },
 		adapters,

@@ -26,6 +26,8 @@ import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } fro
 import { hostHistoryPaths } from '../src/server/access/store'
 import { createSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { connectMcp, scoped, testMember } from './support/access'
+import { layoutForSchemaVersion } from '../src/persistence/paths'
+import { checkpointsPath, writeManifest } from './support/workspace-layout'
 
 /**
  * The autosave recorder (issue #132 B3): Rules 01a11a5d-fec6, ff1c, ff72, ffc6 and 01a11a5e-0018,
@@ -177,7 +179,7 @@ describe('history recorder start', () => {
 		expect(baseline).not.toHaveProperty('parentCheckpoint')
 		expect(revisionOf(baseline!, 'view', VIEW_ID)).toBe(await ctx.viewRevision())
 		// The checkpoint is inside the Workspace and its blobs are in the artifact store.
-		expect((await readdir(join(ctx.root, '.uiux/history/checkpoints')))).toEqual([`${started.baseline}.json`])
+		expect((await readdir(checkpointsPath(ctx.root)))).toEqual([`${started.baseline}.json`])
 		await ctx.recorder.stop()
 
 		// Same host, next start: no second Baseline, no external version.
@@ -742,8 +744,7 @@ describe('review follow-ups on PR #156', () => {
 
 	it('writes nothing to the host while migration is required, then creates the Baseline on the first start after migration (owner ruling 2, review M2)', async () => {
 		const ctx = await fixture({ seed: false })
-		await mkdir(join(ctx.root, '.uiux'), { recursive: true })
-		await writeFile(join(ctx.root, '.uiux/workspace.json'), `${JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })}\n`)
+		await writeManifest(ctx.root, `${JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })}\n`, layoutForSchemaVersion(CURRENT_WORKSPACE_SCHEMA_VERSION - 1))
 		// A Checkpoint committed by another worktree is already in the Workspace.
 		const other = randomUUID()
 		await ctx.persistence.withLock(async () => {

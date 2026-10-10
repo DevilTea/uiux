@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 import type { ResourceRevision } from '../src/application/dto/revisions'
-import { artifactStoreRelativePath } from '../src/domain/artifacts/schema'
 import type { AuthoredAsset } from '../src/domain/assets/schema'
 import type { FlowResource } from '../src/domain/flows/schema'
 import type { ReviewThread } from '../src/domain/reviews/schema'
@@ -51,7 +50,7 @@ describe('file-native persistence', () => {
 		expect(localeRelativePath('zh-TW')).toBe('i18n/zh-TW.json')
 		expect(assetDirectoryRelativePath(ASSET_ID)).toBe(`assets/${ASSET_ID}`)
 		expect(assetMetadataRelativePath(ASSET_ID)).toBe(`assets/${ASSET_ID}/asset.json`)
-		expect(artifactRelativePath(`sha256:${'a'.repeat(64)}`)).toBe(artifactStoreRelativePath(`sha256:${'a'.repeat(64)}`))
+		expect(artifactRelativePath(`sha256:${'a'.repeat(64)}`)).toBe(`.uiux/artifacts/sha256/aa/${'a'.repeat(64)}`)
 		expect(() => viewRelativePath('../outside')).toThrow(PersistenceError)
 		expect(() => localeRelativePath('zh-tw')).toThrow(PersistenceError)
 		expect(() => resolveWorkspacePath('/tmp/workspace', '../outside')).toThrow(PersistenceError)
@@ -353,7 +352,7 @@ describe('file-native persistence', () => {
 		const storedSecond = await persistence.artifacts.put(second)
 		expect(storedSecond.identity).not.toBe(storedFirst.identity)
 		expect(Buffer.from((await persistence.artifacts.read(storedFirst.identity))!)).toEqual(first)
-		const artifactPath = join(root, artifactStoreRelativePath(storedFirst.identity))
+		const artifactPath = join(root, artifactRelativePath(storedFirst.identity))
 		const corrupted = Buffer.from('external replacement')
 		await writeFile(artifactPath, corrupted)
 		await expect(persistence.artifacts.put(first)).rejects.toMatchObject({ code: 'persistence.artifact_corrupt' })

@@ -31,7 +31,7 @@ export type SnapshotCheckpointInput = Readonly<{
  * state allows the write (`uiux migrate` writes its Checkpoint while migration is required).
  */
 export async function writeSnapshotCheckpointUnlocked(input: SnapshotCheckpointInput): Promise<CheckpointRecord> {
-	const snapshot = versionResourcesFromSnapshot(await input.persistence.scanVersionedSnapshotUnlocked())
+	const snapshot = versionResourcesFromSnapshot(await input.persistence.scanVersionedSnapshotUnlocked(), input.persistence.layout)
 	const parentCheckpoint = (await input.checkpoints.listUnlocked()).records.at(-1)?.id
 	const record: CheckpointRecord = {
 		historySchemaVersion: HISTORY_SCHEMA_VERSION,
