@@ -495,7 +495,8 @@
       "viewUnavailable": "This View is unavailable.",
       "viewLoadFailed": "Could not load the View.",
       "bundleInvalid": "The preview runtime is incomplete. Rebuild UIUX, then reload.",
-      "bundleLoadFailed": "Could not load the preview runtime."
+      "bundleLoadFailed": "Could not load the preview runtime.",
+      "viewNotInVersion": "This View doesn't exist in this version."
     }
   },
   "reviews": {
@@ -2399,6 +2400,40 @@
         "denied": "Your role can't restore this resource",
         "failed": "Couldn't restore this version"
       }
+    },
+    "canvas": {
+      "label": "Canvas",
+      "title": "Canvas comparison",
+      "stageLabel": "Before and after frames",
+      "mode": {
+        "list": "Change list",
+        "side": "Side by side",
+        "highlight": "Highlight changes"
+      },
+      "close": "Back to the live canvas",
+      "before": "Before",
+      "after": "After",
+      "version": "Version",
+      "frameTitle": "{side}: {name}, {version}",
+      "nothingBefore": "Nothing before this version: it is the first one.",
+      "viewMissing": "This View doesn't exist in this version.",
+      "loadFailed": "Couldn't load this version of the View.",
+      "caveatTitle": "Shown with today's Widget Runtime and Adapters",
+      "caveat": "Versions don't record which Adapters they were made with, so an earlier version may look different here from how it looked when it was saved.",
+      "notice": {
+        "variant": "{side}: Variant {requested} doesn't exist here, so the base state is shown.",
+        "locale": "{side}: Locale {requested} isn't in this version, so {used} is shown.",
+        "viewport": "{side}: viewport {requested} isn't in this version, so {used} is shown.",
+        "theme": "{side}: theme {requested} isn't in this version, so {used} is shown."
+      },
+      "legend": {
+        "added": "Added",
+        "modified": "Changed",
+        "moved": "Moved",
+        "removed": "Removed"
+      },
+      "unmatched": "Widgets can't be matched by ID in this comparison, so no change is outlined.",
+      "overCap": "{n} more change isn't outlined | {n} more changes aren't outlined"
     }
   }
 }

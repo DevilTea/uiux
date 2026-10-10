@@ -4,6 +4,7 @@ import type { AccessRefusal, LockedRefusal, ScopedWorkspaceSession } from '../ap
 import { isFullUuid } from '../domain/validation'
 import { VERSION_DIFF_DETAILS, type DiffVersionsCommand, type VersionDiffOutcome } from '../application/services/history-diff'
 import type { RestoreResourceVersionOutcome } from '../application/services/history-restore'
+import type { ReadVersionBlobOutcome, ReadVersionResourceOutcome } from '../application/services/history-preview'
 import type { CreateCheckpointOutcome, DeleteCheckpointOutcome, ListVersionsOutcome, ReadVersionOutcome } from '../application/services/history-service'
 import type { HistoryVersionType } from '../domain/history/constants'
 import type { AuthoringHttpResult } from './authoring-http'
@@ -108,6 +109,41 @@ export async function listVersionsForHttp(session: ScopedWorkspaceSession, query
 /** `GET /api/history/versions/:id`: the record the version Resource holds, plus its merged-timeline parent. */
 export async function readVersionForHttp(session: ScopedWorkspaceSession, id: string): Promise<AuthoringHttpResult<ReadVersionOutcome | AccessRefusal>> {
 	return historyHttpResult(await session.readVersion(id))
+}
+
+/**
+ * `GET /api/history/versions/:id/resources/:kind/:key`: one of the version reads for Preview (Clause
+ * 01a11485-fa00-72da-bc46-98302a3c106e; Rule 01a11a5e-1232-777c-a76d-26a6d5cbcfc0). `kind` is
+ * `workspace` (key `workspace`), `view` or `locale`; the body is the resource as that version
+ * records it, upgraded in memory to the current schema, beside the recorded `revision` and
+ * `workspaceSchemaVersion`. The shape is implementation-defined (there is no HTTP Contract).
+ */
+export async function readVersionResourceForHttp(session: ScopedWorkspaceSession, id: string, kind: string, key: string): Promise<AuthoringHttpResult<ReadVersionResourceOutcome | AccessRefusal>> {
+	return historyHttpResult(await session.readVersionResource(id, kind, key))
+}
+
+/**
+ * `GET /api/history/blobs/:digest`: the bytes a version names, by content digest, from the host
+ * history store first, then the artifact store (Rule 01a11a5e-10df-795e-8fbc-a99de09694a5). The body
+ * is `application/octet-stream`: the reader knows the recorded media type. Content never changes
+ * for a digest, but access does, so the answer is cached privately only.
+ */
+export async function readVersionBlobForHttp(session: ScopedWorkspaceSession, digest: string): Promise<AuthoringHttpResult<Uint8Array | Exclude<ReadVersionBlobOutcome, { status: 'found' }> | AccessRefusal>> {
+	const outcome = await session.readVersionBlob(digest)
+	if (outcome.status !== 'found') return historyHttpResult(outcome)
+	return {
+		status: 200,
+		body: outcome.bytes,
+		headers: {
+			'Content-Type': 'application/octet-stream',
+			'Content-Length': String(outcome.bytes.byteLength),
+			'ETag': `"${outcome.digest}"`,
+			'X-Content-Type-Options': 'nosniff',
+			// Never rendered as a document, even when opened directly.
+			'Content-Disposition': 'attachment',
+			'Cache-Control': 'private, max-age=31536000, immutable',
+		},
+	}
 }
 
 const createCheckpointBodySchema = z.object({

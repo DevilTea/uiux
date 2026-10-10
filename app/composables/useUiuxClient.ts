@@ -6,6 +6,8 @@ import {
 } from '../../src/application/services/publication-snapshot'
 import type { HandoffRoot } from '../../src/domain/handoff/schema'
 
+export type VersionResourceRead<T> = Readonly<{ versionId: string; kind: string; key: string; revision: string; workspaceSchemaVersion: number; resource: T }>
+
 type ResourceListPage<T> = Readonly<{ items: readonly T[]; nextCursor?: string }>
 
 type PreviewAdaptersResponse =
@@ -56,6 +58,24 @@ export function useUiuxClient() {
 		if (kind === 'workspace' && key === 'workspace') return snapshot.workspace as T
 		const list = snapshot.resources[kind as keyof typeof snapshot.resources] ?? []
 		return list.find(item => item.key === key) as T | undefined
+	}
+
+	/**
+	 * One resource as a version records it, for Preview's read-only version mode (Rule
+	 * 01a11a5e-1232-777c-a76d-26a6d5cbcfc0): `workspace`, `view` or `locale`, already upgraded to the
+	 * current schema by the server. `undefined` when the version does not hold it. A published
+	 * snapshot has no history, so there it is always `undefined`.
+	 */
+	async function readVersionResource<T>(versionId: string, kind: string, key: string): Promise<VersionResourceRead<T> | undefined> {
+		if (isReadOnly.value) return undefined
+		try {
+			return await $fetch<VersionResourceRead<T>>(`/api/history/versions/${encodeURIComponent(versionId)}/resources/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`, { cache: 'no-store' }) as VersionResourceRead<T>
+		}
+		catch (cause) {
+			const error = cause as { status?: number; statusCode?: number; data?: { code?: string } }
+			if ((error?.status === 404 || error?.statusCode === 404) && error.data?.code === 'history.resource_missing') return undefined
+			throw cause
+		}
 	}
 
 	async function listResources<T>(
@@ -163,6 +183,7 @@ export function useUiuxClient() {
 		baseURL,
 		publication,
 		readResource,
+		readVersionResource,
 		listResources,
 		listEvidence,
 		assessHandoff,
@@ -173,6 +194,11 @@ export function useUiuxClient() {
 		resolveArtifactUrl,
 		routeUrl,
 	}
+}
+
+/** A version blob by content digest (host history store, then artifact store; `history.read`). */
+export function versionBlobUrl(digest: string): string {
+	return `/api/history/blobs/${encodeURIComponent(digest)}`
 }
 
 function normalizeBase(value: string): string {

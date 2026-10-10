@@ -9,13 +9,15 @@ import { useVersionTimeline } from '../../composables/useVersionHistory'
 import { activityLocation, historyQuery, parseHistoryAddress, resolveHistorySelection, type HistoryAddress } from '../../utils/version-history'
 import VersionTimeline from './VersionTimeline.vue'
 import VersionComparison from './VersionComparison.vue'
+import VersionCanvasSwitch from './VersionCanvasSwitch.vue'
 
 /**
  * The View page's history panel (Rule 01a11a5e-1aa5-7d13-939a-8d99245f7906): the projection of the
  * versions in which this View changed (Rule 01a11a5d-fe15-7ed2-ab74-4616dcc47a28) and the selected
  * comparison of this View. The selection is the address (Clause 01a11e0d-d7f5-7ef8-ac22-e235d4a00a41:
  * `version`, `compare` and `canvas` with `panel=history`); the page keeps those keys when it writes
- * the render context. `canvas` is kept for B9's canvas comparison and shows nothing yet.
+ * the render context. The View diff's `canvas` choice opens the canvas before/after comparison in
+ * place of the live canvas (`VersionCanvas`, on desktop and tablet).
  */
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
 const { t } = useI18n()
@@ -83,7 +85,14 @@ const fullComparison = computed(() => selection.value && view.value
           :close-to="panelTo({})"
           :full-comparison-to="fullComparison"
           class="border-b border-default pb-4"
-        />
+        >
+          <template #canvas>
+            <VersionCanvasSwitch
+              :address="address"
+              :link-for="panelTo"
+            />
+          </template>
+        </VersionComparison>
         <VersionTimeline
           :versions="timeline.rows.value"
           :loading="timeline.loading.value"

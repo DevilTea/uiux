@@ -5,6 +5,7 @@ import { useUiuxClient } from '../composables/useUiuxClient'
 import { describeFetchError } from '../utils/fetch-error'
 import { diagnosticText } from '../utils/diagnostic-copy'
 import { resolveDefaultLocale, resolveDefaultThemeId } from '../../src/preview/render-context-options'
+import { resolveFrameContext } from '../../src/preview/version-frame-context'
 import type { WorkspaceManifest } from '../../src/domain/workspace/schema'
 import { RuntimePreviewProtocolBridge } from '../../src/preview/protocol/bridge'
 import { MULTI_TARGET_GEOMETRY_FEATURE } from '../../src/preview/protocol/schema'
@@ -62,6 +63,19 @@ const workspaceDefaultLocale = ref<string>()
 const hostColorScope = computed(() => themeId.value === 'dark' ? 'dark' : 'light')
 const variantName = ref<string | undefined>((route.query.variant as string) || undefined)
 const harnessMode = computed(() => route.query.harness === 'formal')
+/**
+ * Read-only version mode (Rule 01a11a5e-1232-777c-a76d-26a6d5cbcfc0): `?version=<id>` renders that
+ * version's View with that version's manifest and Locales, through the version reads for Preview,
+ * while the Widget runtime and Adapters are the current ones. The document then enters no targeting
+ * interaction and takes no Widget Event arm: it is a canvas comparison frame, never authored or
+ * commented on (the Workbench draws no pins over it, Rule 01a11a5e-13d6-7a24-92e9-9a5de720ca27). A
+ * selected Variant or key the version lacks renders its base state or default (Rule
+ * 01a11a5e-1331-7e9e-a98d-5ff9b265b0e8); the Workbench shows the notice outside the frame.
+ */
+const versionId = (route.query.version as string) || undefined
+/** Version mode: the version's manifest, and the Locales it holds files for (from its record). */
+let versionManifest: WorkspaceManifest | undefined
+let versionLocales: readonly string[] | undefined
 
 /**
  * The targeting interaction Workbench entered (Part 3): `inspection` for the Select tool,
@@ -244,8 +258,8 @@ function initBridge() {
 			previewSessionId.value,
 			runtimeGenerationId.value,
 			// `widget.events` ships with the mount factory (decision 10). A formal capture has no
-			// Workbench parent and is never armed, so it does not declare it.
-			{ protocolVersion: 1, features: harnessMode.value ? ['geometry', MULTI_TARGET_GEOMETRY_FEATURE] : ['geometry', MULTI_TARGET_GEOMETRY_FEATURE, WIDGET_EVENTS_FEATURE] },
+			// Workbench parent and is never armed, and a version frame is read-only: neither declares it.
+			{ protocolVersion: 1, features: harnessMode.value || versionId ? ['geometry', MULTI_TARGET_GEOMETRY_FEATURE] : ['geometry', MULTI_TARGET_GEOMETRY_FEATURE, WIDGET_EVENTS_FEATURE] },
 			// Transport-level batching (see `PreviewWireBatchEnvelope`): every envelope of one task (a
 			// frame's geometry reports, a Widget Event occurrence) leaves in one post, in order.
 			createBatchingWireSender((post) => {
@@ -271,8 +285,52 @@ function initBridge() {
 	}
 }
 
+/** A Locale's messages: the version's in version mode, else the current ones. */
+async function readLocale(code: string): Promise<I18nResource | undefined> {
+	if (versionId) return (await uiux.readVersionResource<I18nResource>(versionId, 'locale', code))?.resource
+	return (await uiux.readResource<{ resource?: I18nResource }>('locale', code))?.resource
+}
+
+/** Version mode: the version's manifest and Locale list decide the defaults and the fallbacks. */
+async function resolveVersionDefaults() {
+	// A publication holds no versions: say so, as for any View the version does not hold.
+	if (uiux.isReadOnly.value) throw new Error(t('preview.errors.viewNotInVersion'))
+	versionManifest = (await uiux.readVersionResource<WorkspaceManifest>(versionId!, 'workspace', 'workspace'))?.resource
+	versionLocales ??= (await $fetch<{ version: { resources: readonly { kind: string; key: string }[] } }>(`/api/history/versions/${encodeURIComponent(versionId!)}`, { cache: 'no-store' }))
+		.version.resources.filter(resource => resource.kind === 'locale').map(resource => resource.key)
+	workspaceDefaultLocale.value = resolveDefaultLocale(versionManifest)
+	if (!locale.value) locale.value = workspaceDefaultLocale.value
+	if (!themeId.value) themeId.value = resolveDefaultThemeId(versionManifest)
+}
+
+/** The View to render: the version's, with the selection resolved against that version, or the current one. */
+async function readViewForPreview(): Promise<ViewRead | undefined> {
+	if (!versionId) return await uiux.readResource<ViewRead>('view', viewId.value)
+	const read = await uiux.readVersionResource<ViewResource>(versionId, 'view', viewId.value)
+	if (!read) throw new Error(t('preview.errors.viewNotInVersion'))
+	const resolved = resolveFrameContext({
+		...(variantName.value ? { variant: variantName.value } : {}),
+		locale: locale.value,
+		viewportId: viewportId.value,
+		width: viewportWidth.value,
+		height: viewportHeight.value,
+		themeId: themeId.value,
+	}, { manifest: versionManifest, view: read.resource, locales: versionLocales ?? [] }).context
+	variantName.value = resolved.variant
+	locale.value = resolved.locale
+	viewportId.value = resolved.viewportId
+	viewportWidth.value = resolved.width
+	viewportHeight.value = resolved.height
+	themeId.value = resolved.themeId
+	return { kind: 'view', key: read.key, revision: read.revision, diagnostics: [], resource: read.resource }
+}
+
 /** Resolves the Workspace default locale and, when not supplied, the effective locale and theme. */
 async function resolveWorkspaceDefaults() {
+	if (versionId) {
+		await resolveVersionDefaults()
+		return
+	}
 	if (workspaceDefaultLocale.value && locale.value && themeId.value) return
 	let manifest: WorkspaceManifest | undefined
 	try {
@@ -295,7 +353,7 @@ async function loadView() {
 	error.value = undefined
 	try {
 		await resolveWorkspaceDefaults()
-		const result = await uiux.readResource<ViewRead>('view', viewId.value)
+		const result = await readViewForPreview()
 		if (!result) throw new Error(t('preview.errors.viewUnavailable'))
 		viewData.value = result
 		await evaluateRuntime()
@@ -357,9 +415,9 @@ async function evaluateRuntime() {
 		}
 
 		try {
-			const locRes = await uiux.readResource<{ resource?: I18nResource }>('locale', locale.value)
-			if (locRes?.resource) {
-				localesMap.set(locale.value, locRes.resource)
+			const messages = await readLocale(locale.value)
+			if (messages) {
+				localesMap.set(locale.value, messages)
 			}
 		}
 		catch {
@@ -368,9 +426,9 @@ async function evaluateRuntime() {
 		const fallbackLocale = workspaceDefaultLocale.value
 		if (fallbackLocale && locale.value !== fallbackLocale) {
 			try {
-				const defRes = await uiux.readResource<{ resource?: I18nResource }>('locale', fallbackLocale)
-				if (defRes?.resource) {
-					localesMap.set(fallbackLocale, defRes.resource)
+				const messages = await readLocale(fallbackLocale)
+				if (messages) {
+					localesMap.set(fallbackLocale, messages)
 				}
 			}
 			catch {
@@ -417,6 +475,8 @@ function receiveWire(input: unknown) {
 		geometryProducer.receive(message)
 		geometrySignals?.refreshObservedWidgets()
 	}
+	// A version frame is read-only: it enters no targeting interaction and takes no Widget Event arm.
+	else if (versionId && (message.type === 'targeting.enter' || message.type === 'widget.event.arm')) return
 	else if (message.type === 'targeting.enter') {
 		// A new interaction supersedes the previous one at once; its hover candidate starts empty.
 		targetingPurpose.value = message.payload.purpose
@@ -452,7 +512,11 @@ function onWindowMessage(event: MessageEvent) {
 		if (payload.viewport?.height) viewportHeight.value = payload.viewport.height
 		if (payload.themeId) themeId.value = payload.themeId
 		variantName.value = payload.variantName
-		if (viewChanged) void loadView()
+		// A version frame resolves every new selection against the version again (its fallbacks).
+		if (viewChanged || versionId) {
+			localesMap.clear()
+			void loadView()
+		}
 		else if (activeBridge) {
 			if (localeChanged && payload.locale) {
 				void uiux.readResource<{ resource?: I18nResource }>('locale', payload.locale)
@@ -525,6 +589,7 @@ onUnmounted(() => {
   -->
   <div
     class="min-h-screen text-default transition-colors"
+    :data-preview-version="versionId"
     :class="[
       hostColorScope,
       hostColorScope === 'dark' ? 'bg-default' : 'bg-muted',
