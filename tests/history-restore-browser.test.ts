@@ -212,7 +212,7 @@ describe('restoring from a resource\'s diff', () => {
 			expect(await item.textContent()).toContain('note')
 			expect(await item.getAttribute('title')).toContain(thread.key)
 			// The impact list moved focus to itself, and nothing was written.
-			expect(await page.evaluate(() => !!document.activeElement?.closest('[data-restore-dialog]'))).toBe(true)
+			await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[data-restore-dialog]'))).toBe(true)
 			expect((await readView(key)).revision).toBe(before.revision)
 
 			await page.locator('[data-restore-acknowledge]').click()
@@ -309,7 +309,7 @@ describe('a refused restore', () => {
 			await locked.waitFor({ timeout: 15_000 })
 			expect(await dialog(page).getAttribute('data-stage')).toBe('locked')
 			expect(await locked.textContent()).toContain('b10-holder')
-			expect(await page.evaluate(() => !!document.activeElement?.closest('[data-restore-dialog]'))).toBe(true)
+			await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[data-restore-dialog]'))).toBe(true)
 			expect((await readView(key)).revision).toBe(before.revision)
 
 			await page.unroute('**/api/history/versions/*/restore')
@@ -345,7 +345,7 @@ describe('where Restore is offered', () => {
 			const { context, page } = await open(comparisonPath(earlier, key), { cookie: await sessionCookieFor(server.origin, token) })
 			try {
 				await viewDiff(page, key)
-				expect(await page.locator('[data-restore-version]').count(), role).toBe(role === 'editor' ? 1 : 0)
+				await expect.poll(() => page.locator('[data-restore-version]').count(), { message: role }).toBe(role === 'editor' ? 1 : 0)
 			}
 			finally { await context.close() }
 		}
