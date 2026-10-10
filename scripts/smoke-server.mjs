@@ -8,24 +8,24 @@ import { networkInterfaces, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const host = '127.0.0.1'
-// Keep the temporary Workspace under the repository so its Adapter resolves the
-// repository's widget-core copy, while Nitro resolves its external from
-// .output/server/node_modules. This deliberately exercises the production-only
-// duplicate-module boundary that unit tests cannot reproduce.
-const workspaceRoot = await mkdtemp(join(process.cwd(), '.uiux-server-smoke-'))
-// Access rosters live in a private UIUX_HOME, never the developer's ~/.uiux.
-const uiuxHome = await mkdtemp(join(tmpdir(), 'uiux-smoke-home-'))
-const otherWorkspace = await mkdtemp(join(tmpdir(), 'uiux-smoke-other-'))
+let workspaceRoot
+let uiuxHome
+let otherWorkspace
 
 // Every child server is stopped, and has exited, before the temporary directories are removed: a
 // server still shutting down (the history recorder's shutdown boundary) writes into the Workspace,
 // and removing it under that writer fails with ENOTEMPTY and masks the error that stopped the run.
-const children = new Set()
+// Each tracked child maps to whether it leads its own process group (see stopChild).
+const children = new Map()
+let stopping = false
 let cleanupPromise
 function cleanup() {
+	// Set synchronously with the snapshot below, so no spawn can slip in after it (spawnTracked).
+	stopping = true
 	cleanupPromise ??= (async () => {
-		await Promise.all([...children].map(stopChild))
-		const removed = await Promise.allSettled([workspaceRoot, otherWorkspace, uiuxHome].map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 })))
+		await Promise.all([...children.keys()].map(stopChild))
+		const dirs = [workspaceRoot, otherWorkspace, uiuxHome].filter(dir => dir !== undefined)
+		const removed = await Promise.allSettled(dirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 })))
 		const failures = removed.filter(result => result.status === 'rejected').map(result => result.reason)
 		if (failures.length > 0) throw new AggregateError(failures, 'Server smoke cleanup could not remove its temporary directories.')
 	})()
@@ -38,10 +38,27 @@ for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
 	})
 }
 
+/** spawn() that registers the child for cleanup, and refuses to start one once cleanup has begun. */
+function spawnTracked(command, args, options) {
+	if (stopping) throw new Error('Server smoke is cleaning up; not starting another process.')
+	const child = spawn(command, args, options)
+	children.set(child, options.detached === true)
+	return child
+}
+
 let port
 let auth
 let failed = false
 try {
+	// Keep the temporary Workspace under the repository so its Adapter resolves the
+	// repository's widget-core copy, while Nitro resolves its external from
+	// .output/server/node_modules. This deliberately exercises the production-only
+	// duplicate-module boundary that unit tests cannot reproduce.
+	workspaceRoot = await mkdtemp(join(process.cwd(), '.uiux-server-smoke-'))
+	// Access rosters live in a private UIUX_HOME, never the developer's ~/.uiux.
+	uiuxHome = await mkdtemp(join(tmpdir(), 'uiux-smoke-home-'))
+	otherWorkspace = await mkdtemp(join(tmpdir(), 'uiux-smoke-other-'))
+
 	await mkdir(join(workspaceRoot, '.uiux'), { recursive: true })
 	await mkdir(join(workspaceRoot, 'adapters'), { recursive: true })
 	await writeFile(join(workspaceRoot, 'adapters', 'smoke.mjs'), [
@@ -95,7 +112,7 @@ try {
 	port = address.port
 	await new Promise((resolve, reject) => probe.close(error => error ? reject(error) : resolve()))
 
-	const server = spawn(process.execPath, ['.output/server/index.mjs'], {
+	const server = spawnTracked(process.execPath, ['.output/server/index.mjs'], {
 		stdio: ['ignore', 'pipe', 'pipe'],
 		env: {
 			...process.env,
@@ -107,7 +124,6 @@ try {
 			UIUX_WORKSPACE_ROOT: workspaceRoot,
 		},
 	})
-	children.add(server)
 	let serverOutput = ''
 	server.stdout.setEncoding('utf8').on('data', chunk => serverOutput += chunk)
 	server.stderr.setEncoding('utf8').on('data', chunk => serverOutput += chunk)
@@ -178,14 +194,32 @@ finally {
 	})
 }
 
-/** Sends SIGTERM and resolves once the child has exited (SIGKILL after a 10 s grace period). */
+/**
+ * Sends SIGTERM and resolves once the child has exited, with SIGKILL after a 10 s grace period.
+ * A detached child leads its own process group: `uiux dev` forwards SIGTERM to the Nitro server it
+ * spawns and exits after it, but SIGKILL cannot be forwarded, so the fallback kills the whole group,
+ * and once the leader has exited the group is swept for a server it may have left behind.
+ */
 async function stopChild(child) {
-	if (child.exitCode !== null || child.signalCode !== null) return
-	const exited = new Promise(resolve => child.once('exit', resolve))
-	child.kill('SIGTERM')
-	const forceKill = setTimeout(() => child.kill('SIGKILL'), 10_000)
-	await exited
-	clearTimeout(forceKill)
+	if (child.pid === undefined) return // never started
+	const group = children.get(child) === true
+	const kill = (signal) => {
+		try {
+			if (group) process.kill(-child.pid, signal)
+			else child.kill(signal)
+		}
+		catch (error) {
+			if (error.code !== 'ESRCH') throw error
+		}
+	}
+	if (child.exitCode === null && child.signalCode === null) {
+		const exited = new Promise(resolve => child.once('exit', resolve))
+		child.kill('SIGTERM')
+		const forceKill = setTimeout(() => kill('SIGKILL'), 10_000)
+		await exited
+		clearTimeout(forceKill)
+	}
+	if (group) kill('SIGKILL')
 }
 
 // `uiux dev` must bind loopback only, even when no HOST/NITRO_HOST is set (the LAN listener is not
@@ -202,11 +236,13 @@ async function smokeLoopbackOnlyCli() {
 	if (refused.status !== 2 || !refused.stderr.includes('the LAN listener is not yet available'))
 		throw new Error(`uiux dev did not refuse HOST=0.0.0.0 (exit ${refused.status}).\n${refused.stdout}${refused.stderr}`)
 
-	const cli = spawn(process.execPath, ['bin/uiux.mjs', 'dev', '--workspace', workspaceRoot], {
+	// Detached, so stopChild can kill the CLI and its Nitro server together as one process group.
+	// It then no longer receives a terminal's SIGINT; the signal handlers above stop it instead.
+	const cli = spawnTracked(process.execPath, ['bin/uiux.mjs', 'dev', '--workspace', workspaceRoot], {
 		stdio: ['ignore', 'pipe', 'pipe'],
 		env: { ...cliEnv, PORT: String(port) },
+		detached: true,
 	})
-	children.add(cli)
 	let cliOutput = ''
 	cli.stdout.setEncoding('utf8').on('data', chunk => cliOutput += chunk)
 	cli.stderr.setEncoding('utf8').on('data', chunk => cliOutput += chunk)
