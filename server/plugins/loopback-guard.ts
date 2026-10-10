@@ -19,15 +19,19 @@ import { getSelectedWorkspaceServerRuntime, resolveInternalServerOrigin } from '
  *   resolves to one principal or gets 401; `/.well-known/*` is a JSON 404.
  */
 export default defineNitroPlugin((nitroApp) => {
-	const localSocket = Boolean(process.env.NITRO_UNIX_SOCKET)
+	const unixSocket = Boolean(process.env.NITRO_UNIX_SOCKET)
+	// The Nuxt development server proxies to a Nitro worker that listens on a Unix domain socket
+	// without setting NITRO_UNIX_SOCKET, so its connections have no peer address either. Dev mode
+	// already accepts any loopback port (anyPort); it treats such connections as local too.
+	const localSocket = unixSocket || import.meta.dev
 	if (!import.meta.dev) {
-		const network = configureServerNetwork(process.env, { localSocket })
+		const network = configureServerNetwork(process.env, { localSocket: unixSocket })
 		if (!network.ok) {
 			console.error(`uiux: ${network.message}`)
 			process.exit(2)
 		}
 		setServerNetwork(network.value)
-		if (!localSocket) console.log(startupLines(resolveInternalServerOrigin(), network.value).join('\n'))
+		if (!unixSocket) console.log(startupLines(resolveInternalServerOrigin(), network.value).join('\n'))
 	}
 
 	nitroApp.h3App.stack.unshift(

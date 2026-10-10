@@ -213,6 +213,48 @@ describe('request gate with configured origins', () => {
 	})
 })
 
+describe('guard handler on a Unix domain socket (the Nuxt development worker)', () => {
+	let directory: string
+	const servers: Server[] = []
+
+	beforeAll(async () => {
+		directory = await mkdtemp(join(tmpdir(), 'uiux-guard-socket-'))
+	})
+
+	afterAll(async () => {
+		await Promise.all(servers.map(server => new Promise<void>(resolve => server.close(() => resolve()))))
+		await rm(directory, { recursive: true, force: true })
+	})
+
+	/** Serves `/` behind the guard on a Unix socket, whose connections have no peer address. */
+	async function socketServer(name: string, options: Parameters<typeof createLoopbackGuardHandler>[0]) {
+		const app = createApp()
+		app.use(createLoopbackGuardHandler(options))
+		app.use(defineEventHandler(() => 'ok'))
+		const server = createServer(toNodeListener(app))
+		servers.push(server)
+		const socketPath = join(directory, `${name}.sock`)
+		await new Promise<void>(resolve => server.listen(socketPath, resolve))
+		return (host: string) => new Promise<number>((resolve, reject) => {
+			const req = httpRequest({ socketPath, path: '/', headers: { host } }, (res) => { res.resume(); res.once('end', () => resolve(res.statusCode ?? 0)) })
+			req.once('error', reject)
+			req.end()
+		})
+	}
+
+	it('accepts an address-less loopback peer when localSocket is set, as in dev mode', async () => {
+		const dev = await socketServer('dev', { anyPort: true, localSocket: true })
+		expect(await dev('localhost:3000')).toBe(200)
+		expect(await dev('127.0.0.1:4000')).toBe(200)
+		expect(await dev('rebind.attacker.test:3000')).toBe(421)
+	})
+
+	it('refuses an address-less peer without localSocket', async () => {
+		const strict = await socketServer('strict', { anyPort: true })
+		expect(await strict('localhost:3000')).toBe(421)
+	})
+})
+
 describe('loopback guard on a live h3 server with the real /mcp and /api routes', () => {
 	let root: string
 	let server: Server

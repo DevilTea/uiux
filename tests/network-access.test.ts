@@ -120,8 +120,9 @@ describe('server startup configuration (Rule 01a11485-ee85-7844-b82f-fd6a7cebb76
 
 	it('refuses NITRO_SSL_CERT/NITRO_SSL_KEY and drops the handoff on a Unix socket too', () => {
 		for (const localSocket of [false, true]) {
-			const env: Record<string, string | undefined> = { NITRO_SSL_CERT: 'cert', NITRO_SSL_KEY: 'key' }
+			const env: Record<string, string | undefined> = { NITRO_SSL_CERT: 'cert', NITRO_SSL_KEY: 'key', [DEV_HANDOFF_VARIABLE]: handoff }
 			expect(configureServerNetwork(env, { localSocket })).toMatchObject({ ok: false, message: expect.stringContaining('UIUX serves plain HTTP only') })
+			expect(env).not.toHaveProperty(DEV_HANDOFF_VARIABLE)
 		}
 		const socketEnv: Record<string, string | undefined> = { [DEV_HANDOFF_VARIABLE]: handoff, NITRO_UNIX_SOCKET: '/tmp/uiux.sock' }
 		expect(configureServerNetwork(socketEnv, { localSocket: true })).toEqual({ ok: true, value: { bindHost: '127.0.0.1', wildcard: false, origins: [] } })

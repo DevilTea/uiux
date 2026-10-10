@@ -83,9 +83,9 @@ export const PLAIN_HTTP_ONLY_MESSAGE
  * Sets `NITRO_HOST` to the resolved bind address unless the server listens on a Unix socket.
  */
 export function configureServerNetwork(env: Record<string, string | undefined>, options: Readonly<{ localSocket: boolean }>): Resolution<NetworkConfig> {
-	if (env.NITRO_SSL_CERT || env.NITRO_SSL_KEY) return { ok: false, message: PLAIN_HTTP_ONLY_MESSAGE }
 	const handoff = env[DEV_HANDOFF_VARIABLE]
 	delete env[DEV_HANDOFF_VARIABLE]
+	if (env.NITRO_SSL_CERT || env.NITRO_SSL_KEY) return { ok: false, message: PLAIN_HTTP_ONLY_MESSAGE }
 	if (options.localSocket) return { ok: true, value: LOOPBACK_ONLY_NETWORK }
 	let network: NetworkConfig
 	if (handoff !== undefined) {
