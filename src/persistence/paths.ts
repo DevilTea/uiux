@@ -75,6 +75,8 @@ export type VersionedResourceIdentity = Readonly<{ kind: string; key: string }>
  *   `undefined` for every other path, including excluded and non-canonical ones.
  */
 export type WorkspaceLayout = Readonly<{
+	/** A stable name of the layout, recorded in pending transaction journals (`legacy` is never written). */
+	id: 'legacy' | 'v5'
 	metadataDir: string
 	manifestPath: string
 	productKitPath?: string
@@ -99,6 +101,7 @@ const LEGACY_METADATA_DIRECTORY = WORKSPACE_DATA_DIRECTORY.workspaceMeta
 
 /** The `schemaVersion` 1–4 layout: authored directories at the Workspace root, the manifest and runtime files under `.uiux/`. */
 export const LEGACY_LAYOUT: WorkspaceLayout = Object.freeze({
+	id: 'legacy',
 	metadataDir: LEGACY_METADATA_DIRECTORY,
 	manifestPath: WORKSPACE_MANIFEST_PATH,
 	artifactsDir: WORKSPACE_ARTIFACTS_DIRECTORY,
@@ -148,6 +151,7 @@ const PRODUCT_KIT_RESOURCE: VersionedResourceIdentity = Object.freeze({ kind: PR
  * directly under the root. The data directories keep their names and inner layout.
  */
 export const V5_LAYOUT: WorkspaceLayout = Object.freeze({
+	id: 'v5',
 	metadataDir: '',
 	manifestPath: V5_MANIFEST_PATH,
 	productKitPath: PRODUCT_KIT_FILENAME,

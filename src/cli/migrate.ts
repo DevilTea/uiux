@@ -8,6 +8,7 @@ import { CheckpointHostBlobsError } from '../persistence/history/snapshot-checkp
 import { PersistenceError } from '../persistence/errors'
 import type { WorkspaceSchemaPolicy } from '../persistence/schema-policy'
 import { readActiveServerHold } from '../persistence/server-hold'
+import { checkWorkspaceSelection } from '../persistence/workspace-selection'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 import { resolveUiuxHome } from '../server/access/store'
 import { createHistoryStoreFactory } from '../server/history-stores'
@@ -66,8 +67,15 @@ export async function runMigrateCommand(options: MigrateCommandOptions): Promise
 		return 2
 	}
 
-	// The layout is detected here, so the server hold is looked for where this Workspace keeps it.
-	const persistence = new FileNativePersistence({ root, schemaPolicy: options.schemaPolicy ?? PRODUCT_WORKSPACE_SCHEMA_POLICY, ...(options.fault ? { fault: options.fault } : {}) })
+	// The entry check runs before any lock, server hold, recovery, read or write; its layout is where
+	// the server hold and every Workspace file are looked for.
+	const schemaPolicy = options.schemaPolicy ?? PRODUCT_WORKSPACE_SCHEMA_POLICY
+	const selection = checkWorkspaceSelection(root, schemaPolicy.currentVersion)
+	if (!selection.ok) {
+		err(`uiux: ${selection.message}`)
+		return 2
+	}
+	const persistence = new FileNativePersistence({ root, schemaPolicy, layout: selection.layout, ...(options.fault ? { fault: options.fault } : {}) })
 	const hold = await readActiveServerHold(root, persistence.layout)
 	if (hold && !options.dryRun) {
 		err(`uiux: refusing to migrate ${root}: a UIUX server (pid ${hold.pid} on ${hold.hostname}, started ${hold.startedAt}) is serving this Workspace. Stop that server, then run uiux migrate again.`)

@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 
 import { FileNativePersistence } from '../persistence/file-native'
 import { detectWorkspaceLayout, layoutForSchemaVersion, resolveLayoutDirectory, resolveWorkspacePath, type WorkspaceLayout } from '../persistence/paths'
+import { checkWorkspaceSelection, type WorkspaceSelection } from '../persistence/workspace-selection'
 import { readActiveServerHold } from '../persistence/server-hold'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 import { generateHint } from '../server/access/credentials'
@@ -146,14 +147,20 @@ type CommandSpec = Readonly<{ positionals: number; values: readonly string[]; fl
 
 async function requireWorkspace(root: string): Promise<string> {
 	let manifestPath = layoutForSchemaVersion(CURRENT_WORKSPACE_SCHEMA_VERSION).manifestPath
+	let selection: WorkspaceSelection | undefined
 	try {
 		if (!(await stat(root)).isDirectory()) throw new Error('not a directory')
-		manifestPath = (await workspaceLayout(root)).manifestPath
-		await stat(resolveWorkspacePath(root, manifestPath))
+		// The shared entry check, before any lock, store or Workspace file is touched.
+		selection = checkWorkspaceSelection(root, CURRENT_WORKSPACE_SCHEMA_VERSION)
+		if (selection.ok) {
+			manifestPath = selection.layout.manifestPath
+			await stat(resolveWorkspacePath(root, manifestPath))
+		}
 	}
 	catch {
 		throw new AccessError('access.workspace_invalid', `${root} is not an initialized UIUX Workspace (no ${manifestPath}). Run uiux init --workspace <dir> first.`)
 	}
+	if (!selection.ok) throw new AccessError('access.workspace_invalid', selection.message)
 	return workspaceRealRoot(root)
 }
 
@@ -357,6 +364,9 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				const fromPath = resolve(context.cwd, from)
 				// The old directory may already be gone; fall back to its nearest existing ancestor's real path.
 				const sourceRoot = realFuturePath(fromPath)
+				// The source gets the same entry check as the target before its lock is ever taken.
+				const sourceSelection = checkWorkspaceSelection(sourceRoot, CURRENT_WORKSPACE_SCHEMA_VERSION)
+				if (!sourceSelection.ok) throw new AccessError('access.workspace_invalid', `The source ${sourceSelection.message}`)
 				if (sourceRoot === context.workspaceRoot) throw new AccessError('access.roster_exists', 'The source and target are the same Workspace.')
 				const source = await AccessStore.readRoster(context.home, sourceRoot)
 				if (!source) throw new AccessError('access.roster_missing', `No roster recorded for ${sourceRoot} under ${context.home}.`)

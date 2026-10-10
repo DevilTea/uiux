@@ -175,7 +175,8 @@ describe('the Product Kit file and the versioned manifest shape', () => {
 		const codes = (value: unknown) => validateProductKit(value).diagnostics.map(item => `${item.code} ${item.path}`)
 		expect(codes({ ...KIT, designSystems: ['Not A Package', '@acme/design-system', '@acme/design-system'] })).toEqual(['product_kit.invalid_package_name /designSystems/0', 'identity.duplicate /designSystems/2'])
 		expect(codes({ ...KIT, adapters: [{ moduleSpecifier: '/abs/adapter.js' }] })).toEqual(['workspace.invalid_adapter_specifier /adapters/0/moduleSpecifier'])
-		expect(codes({ ...KIT, styles: ['../outside.css'] })).toEqual(['product_kit.invalid_style_specifier /styles/0'])
+		expect(codes({ ...KIT, styles: ['../outside.css', './../outside.css', './dist/../../x.css', './dist//x.css', '@acme/ds/../../x.css', './dist/./x.css'] })).toEqual([0, 1, 2, 3, 4, 5].map(index => `product_kit.invalid_style_specifier /styles/${index}`))
+		expect(codes({ ...KIT, styles: ['./dist/kit.css', '@acme/design-system/styles.css', 'normalize.css'] })).toEqual([])
 		expect(codes({ ...KIT, themes: { dark: { 'data theme': 'dark', 'data-mode': 1 } } })).toEqual(['product_kit.invalid_theme_attribute /themes/dark/data theme', 'schema.expected_string /themes/dark/data-mode'])
 		expect(codes({ ...KIT, widgets: {}, components: { Button: { files: ['components/button.vue', 'src/../x.ts'], requires: ['ghost', 'Button'], layer: 'ui', extra: true } } })).toEqual([
 			'product_kit.invalid_component_name /components/Button',
@@ -219,9 +220,14 @@ describe('persistence on a schemaVersion 5 root', () => {
 		await persistence.workspace.create(v5Manifest())
 		expect(JSON.parse(await readFile(join(root, 'workspace.json'), 'utf8'))).toEqual(v5Manifest())
 		expect(await exists(join(root, '.uiux'))).toBe(false)
-		expect((await persistence.workspace.readInspected()).inspection).toMatchObject({ state: 'current', version: 5 })
+		// Until product-kit.json exists the root cannot be written (Clause 01a11bb1-8d67); creating that file is the one exception.
+		const withoutKit = (await persistence.workspace.readInspected()).inspection
+		expect(withoutKit).toMatchObject({ state: 'unsupported', version: 5 })
+		expect(withoutKit.diagnostics).toContainEqual(expect.objectContaining({ code: 'workspace.schema_unsupported', path: '/product-kit.json' }))
+		await expect(persistence.views.create(VIEW_ID, view() as never)).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
 
 		const created = await persistence.productKit.create(KIT)
+		expect((await persistence.workspace.readInspected()).inspection).toMatchObject({ state: 'current', version: 5 })
 		expect(await readFile(join(root, 'product-kit.json'))).toEqual(canonicalJsonBytes(KIT))
 		expect(await persistence.productKit.read()).toEqual({ resource: KIT, revision: created })
 		expect(await persistence.productKit.readRevision()).toBe(created)
@@ -462,6 +468,8 @@ describe('history on a schemaVersion 5 Workspace', () => {
 		await ctx.persistence.productKit.compareAndSwap({ key: 'product-kit', expectedRevision: kit.revision, resource: { ...kit.resource, styles: ['./dist/kit.css'] } })
 		const changed = await ctx.app.diffVersions({ from: version.id, to: 'current', detail: 'semantic', resources: [{ kind: 'product-kit', key: 'product-kit' }] })
 		expect(changed).toMatchObject({ status: 'compared', summary: [{ kind: 'product-kit', status: 'modified' }], changes: [{ kind: 'product-kit', diff: { type: 'structural', changes: [expect.objectContaining({ path: '/styles/0', after: './dist/kit.css' })] } }] })
+		// No record holds the upgraded side's revision, so the row names none.
+		expect(changed.status === 'compared' && changed.summary[0]).not.toHaveProperty('fromRevision')
 
 		const current = await ctx.persistence.views.readRevision(VIEW_ID)
 		const restored = await ctx.app.restoreResourceVersion({ versionId: version.id, resource: { kind: 'view', key: VIEW_ID }, expectedRevision: current! })

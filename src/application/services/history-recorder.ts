@@ -760,6 +760,9 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 			return undefined
 		}
 		if (sameResources(expected, actualMap)) return undefined
+		// The record's schema version is read (and its layout checked) before any blob is stored.
+		const workspaceSchemaVersion = await this.persistence.readRecordSchemaVersionUnlocked()
+		assertHeld(signal)
 		for (const resource of actual.resources) {
 			const known = expected.get(resourceIdentityKey(resource))
 			if (known && sameResource(known, resource)) continue
@@ -769,8 +772,6 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 			}
 			assertHeld(signal)
 		}
-		const workspaceSchemaVersion = await this.persistence.readRecordSchemaVersionUnlocked()
-		assertHeld(signal)
 		const windowStart = this.lastAtMs > 0 ? new Date(this.lastAtMs).toISOString() : undefined
 		const at = this.stamp()
 		const record: HostVersionRecord = {

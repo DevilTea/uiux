@@ -231,7 +231,8 @@ export type DeleteIfRevisionResult<Refusal> =
 	| Readonly<{ status: 'not_found' }>
 	| Readonly<{ status: 'conflict'; currentRevision: ResourceRevision }>
 	| Readonly<{ status: 'refused'; refusal: Refusal }>
-type TransactionJournal = Readonly<{ changes: readonly Readonly<{ path: string; existed: boolean }>[] }>
+/** A pending multi-file write: its changes and, outside the legacy layout, the layout it was written for (`layout` absent means legacy). */
+type TransactionJournal = Readonly<{ layout?: WorkspaceLayout['id']; changes: readonly Readonly<{ path: string; existed: boolean }>[] }>
 /** `schemaVersion` is the selected Workspace manifest version every canonical file is decoded under. */
 type JsonValidator = (resource: unknown, filename: string, schemaVersion: number) => readonly Diagnostic[]
 
@@ -567,8 +568,13 @@ export class FileNativePersistence {
 		await releasing
 	}
 
-	async assertWritableUnlocked(): Promise<void> {
-		const inspection = (await this.inspectWorkspaceUnlocked()).inspection
+	/**
+	 * Refuses a mutation unless the Workspace is at the current schema. `productKitMayBeMissing` is
+	 * for creating the Product Kit file itself, the one write a `schemaVersion` 5 root may make
+	 * before that file exists.
+	 */
+	async assertWritableUnlocked(options: Readonly<{ productKitMayBeMissing?: boolean }> = {}): Promise<void> {
+		const inspection = (await this.inspectWorkspaceUnlocked(options)).inspection
 		if (inspection.state === 'current')
 			return
 		if (inspection.state === 'migration_required')
@@ -580,7 +586,7 @@ export class FileNativePersistence {
 		throw new PersistenceError('workspace.schema_unsupported', 'Normal canonical mutations are blocked for an unsupported Workspace schema.', { diagnostics: inspection.diagnostics })
 	}
 
-	async inspectWorkspaceUnlocked(): Promise<WorkspaceReadInspection> {
+	async inspectWorkspaceUnlocked(options: Readonly<{ productKitMayBeMissing?: boolean }> = {}): Promise<WorkspaceReadInspection> {
 		const relativePath = this.layout.manifestPath
 		let bytes: Buffer
 		try {
@@ -598,7 +604,17 @@ export class FileNativePersistence {
 			throw error
 		}
 		const resource = parseJsonBytes(bytes, relativePath)
-		const inspection = this.inspectLayout(inspectWorkspaceManifest(resource, this.schemaPolicy))
+		let inspection = this.inspectLayout(inspectWorkspaceManifest(resource, this.schemaPolicy))
+		// Clause 01a11bb1-8d67-71c5-929f-138afd0c66ec: a schemaVersion 5 root holds product-kit.json.
+		if (this.layout.productKitPath && !options.productKitMayBeMissing && (inspection.state === 'current' || inspection.state === 'migration_required')
+			&& !await this.readOptionalBytesUnlocked(this.layout.productKitPath)) {
+			inspection = {
+				state: 'unsupported',
+				version: inspection.version,
+				targetVersion: inspection.targetVersion,
+				diagnostics: [...inspection.diagnostics, { code: 'workspace.schema_unsupported', path: `/${this.layout.productKitPath}`, message: `A schemaVersion ${inspection.version} Workspace requires ${this.layout.productKitPath}, which does not exist.` }],
+			}
+		}
 		const validationDiagnostics = validateWorkspaceManifest(resource).diagnostics
 		const extraDiagnostics = inspection.state === 'unsupported'
 			? inspection.diagnostics.filter(item => !validationDiagnostics.some(existing => existing.code === item.code && existing.path === item.path))
@@ -856,7 +872,7 @@ export class FileNativePersistence {
 					await writeSyncedFile(backup, prior, true)
 				}
 			}
-			const journal: TransactionJournal = { changes: records }
+			const journal: TransactionJournal = { ...(this.layout.id === 'legacy' ? {} : { layout: this.layout.id }), changes: records }
 			await writeSyncedFile(resolveWorkspacePath(this.root, `${transactionRelative}/journal.json`), Buffer.from(JSON.stringify(journal), 'utf8'), true)
 			journalWritten = true
 			await syncDirectory(transactionAbsolute)
@@ -1055,6 +1071,10 @@ export class FileNativePersistence {
 				await fs.rm(transactionAbsolute, { recursive: true, force: true })
 				continue
 			}
+			// A journal written for another layout belongs to another root's files: keep it and stop.
+			const recordedLayout = await readJournalLayout(journalPath)
+			if (recordedLayout !== undefined && recordedLayout !== this.layout.id)
+				throw new PersistenceError('persistence.recovery_failed', `Pending transaction ${entry.name} was written for the ${recordedLayout} Workspace layout, not the ${this.layout.id} layout this root was opened with; it was kept, and canonical reads and writes are blocked.`)
 			const committedPath = resolveWorkspacePath(this.root, `${transactionRelative}/COMMITTED`)
 			await assertSafePath(this.root, `${transactionRelative}/COMMITTED`, false).catch(error => {
 				if (!isNotFound(error)) throw error
@@ -1480,7 +1500,7 @@ export class ProductKitFileRepository implements MutableResourceRepository<'prod
 
 	async create(resource: ProductKit): Promise<ResourceRevision> {
 		return this.persistence.withLock(async () => {
-			await this.persistence.assertWritableUnlocked()
+			await this.persistence.assertWritableUnlocked({ productKitMayBeMissing: true })
 			const path = this.pathUnlocked()
 			if (await this.persistence.readOptionalBytesUnlocked(path))
 				throw new PersistenceError('persistence.resource_exists', 'The Product Kit file already exists.')
@@ -2380,9 +2400,23 @@ function validateCanonicalSnapshot(snapshot: WorkspaceSnapshot, expectedVersion:
 	}
 }
 
+/**
+ * The layout a journal was written for: `legacy` when it names none, `undefined` when the journal
+ * cannot be read as a JSON object (recovery then handles it as before).
+ */
+async function readJournalLayout(journalPath: string): Promise<string | undefined> {
+	let value: unknown
+	try { value = JSON.parse(await fs.readFile(journalPath, 'utf8')) as unknown }
+	catch { return undefined }
+	if (!isRecord(value)) return undefined
+	return value.layout === undefined ? 'legacy' : String(value.layout)
+}
+
 function validateTransactionJournal(value: unknown, layout: WorkspaceLayout): TransactionJournal {
 	if (!isRecord(value) || !Array.isArray(value.changes))
 		throw new TypeError('Persistence transaction journal has an invalid shape.')
+	if ((value.layout ?? 'legacy') !== layout.id)
+		throw new TypeError(`Persistence transaction journal was written for the ${String(value.layout ?? 'legacy')} layout, not ${layout.id}.`)
 	const changes: { path: string; existed: boolean }[] = []
 	for (const change of value.changes) {
 		if (!isRecord(change) || typeof change.path !== 'string' || typeof change.existed !== 'boolean')
