@@ -13,6 +13,8 @@ let assetNamesRead: Promise<void> | undefined
 let assetNamesAt = 0
 /** An Asset added since the last read is looked up again, at most this often. */
 const ASSET_NAMES_TTL_MS = 30_000
+/** The discovery list's largest page (`MAX_RESOURCE_DISCOVERY_LIMIT`). */
+const ASSET_PAGE_SIZE = 100
 
 /** Literal icon names (the static publication's icon scanner reads literals only). */
 export const VERSION_TYPE_ICONS: Readonly<Record<HistoryVersionType, string>> = {
@@ -43,11 +45,21 @@ export function useHistoryLabels() {
 		if (missing && assetNamesRead && Date.now() - assetNamesAt > ASSET_NAMES_TTL_MS) assetNamesRead = undefined
 		if (assetNamesRead || isReadOnly.value) return
 		assetNamesAt = Date.now()
-		assetNamesRead = uiux.listResources<{ key: string; summary?: { name?: string } }>(['asset'], { limit: 100 })
-			.then((page) => {
-				assetNames.value = new Map(page.items.flatMap(item => item.summary?.name ? [[item.key, item.summary.name] as const] : []))
-			})
+		assetNamesRead = readAllAssetNames()
+			.then((names) => { assetNames.value = names })
 			.catch(() => { assetNamesRead = undefined })
+	}
+
+	/** Every Asset's name, page by page (a page holds at most 100), so no Asset past the first page is named by its key. */
+	async function readAllAssetNames(): Promise<Map<string, string>> {
+		const names = new Map<string, string>()
+		let cursor: string | undefined
+		do {
+			const page = await uiux.listResources<{ key: string; summary?: { name?: string } }>(['asset'], { limit: ASSET_PAGE_SIZE, ...(cursor ? { cursor } : {}) })
+			for (const item of page.items) if (item.summary?.name) names.set(item.key, item.summary.name)
+			cursor = page.nextCursor
+		} while (cursor)
+		return names
 	}
 
 	function actorName(actor: HistoryActor): string {
