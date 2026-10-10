@@ -155,7 +155,8 @@ describe('UX Flow graph editor (R11)', () => {
 			await page.locator('[data-flow-inspector]').getByRole('button', { name: 'Add transition' }).click()
 			await page.locator('[data-flow-inspector]').getByRole('button', { name: /^Widget/ }).click()
 			await page.getByRole('option', { name: /#btn-export-handoff/ }).click()
-			await page.waitForTimeout(300)
+			// Wait for the Widget list to close (it has an exit animation) instead of sleeping.
+			await page.locator('[data-slot="content"][role="listbox"]').waitFor({ state: 'detached' })
 			// The Event is picked from the Widget's declared Events; a Button declares only `click`.
 			await expect.poll(() => page.locator('[data-flow-inspector] [data-flow-event-picker]').textContent()).toContain('click')
 			await page.locator('[data-flow-inspector]').getByRole('button', { name: 'Add', exact: true }).click()

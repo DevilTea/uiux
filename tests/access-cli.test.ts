@@ -318,6 +318,34 @@ describe('uiux access commands', () => {
 		expect(copied.err).toContain('1 blob(s) that copied versions name are missing from the source host history too')
 	})
 
+	it('checks the blobs the open autosave\'s events name too, not only the versions\'', async () => {
+		const { base, workspace, home } = await setup()
+		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
+		const bytes = new TextEncoder().encode('{"view":"open"}\n')
+		const digest = blobDigest(bytes)
+		const missing = `sha256:${'e'.repeat(64)}`
+		const event = (afterRevision: string) => ({ at: new Date().toISOString(), actor: { type: 'agent' as const, id: 'member:m-agent', displayName: 'claude' }, source: 'mcp' as const, operation: 'updateViewSpec' as const, resource: { kind: 'view' as const, key: '11111111-1111-4111-8111-111111111111' }, beforeRevision: null, afterRevision })
+		await sourceHost.appendOpenEntry({ type: 'begin', id: randomUUID(), startedAt: new Date().toISOString() })
+		await sourceHost.appendOpenEntry({ type: 'event', event: event('r_a'), files: { 'views/11111111-1111-4111-8111-111111111111.view.json': digest } })
+		const worktree = await initWorkspace(base, 'worktree')
+		const plan = await planHostHistoryCopy(home, workspace, worktree)
+
+		// No version names the blob; only the open autosave's event does. A source writer stores it after it was listed.
+		await expect(copyHostHistory(plan, {
+			replace: false,
+			async blobAvailableElsewhere() {
+				await sourceHost.putBlob(bytes)
+				return false
+			},
+		})).rejects.toThrow('changed while it was copied')
+		expect(await lstat(plan.target.dir).catch(() => undefined)).toBeUndefined()
+
+		// An event's blob the source lacks too is reported, like a version's.
+		await sourceHost.appendOpenEntry({ type: 'event', event: event('r_b'), files: { 'views/11111111-1111-4111-8111-111111111111.view.json': missing } })
+		expect(await copyHostHistory(plan, { replace: false })).toMatchObject({ missingBlobs: [missing] })
+		expect(await lstat(join(plan.target.dir, 'objects', 'sha256', digest.slice(7, 9), digest.slice(7)))).toBeDefined()
+	})
+
 	it('dispatches the access commands from the installed CLI and lists them in --help', async () => {
 		const { home, workspace } = await setup()
 		const result = spawnSync(process.execPath, [CLI, 'member', 'add', 'mei', '--role', 'viewer', '--workspace', workspace], { encoding: 'utf8', env: { ...process.env, UIUX_HOME: home } })
