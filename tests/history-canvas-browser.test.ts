@@ -200,7 +200,7 @@ describe('canvas comparison', () => {
 			const canvas = page.locator('[data-version-canvas]')
 			await canvas.waitFor()
 			await expect.poll(() => canvas.getAttribute('data-from')).toBe(seeded.before)
-			expect(await canvas.getAttribute('data-to')).toBe(seeded.after)
+			await expect.poll(() => canvas.getAttribute('data-to')).toBe(seeded.after)
 
 			const before = await frameDocument(page, 'before')
 			const after = await frameDocument(page, 'after')
@@ -220,7 +220,7 @@ describe('canvas comparison', () => {
 			if (await summary.count()) await summary.click()
 			await choose(page, '[data-context="locale"]', 'zh-TW')
 			await expect.poll(async () => (await contexts()).every(value => value?.includes('|zh-TW|'))).toBe(true)
-			expect(query(page)).toMatchObject({ locale: 'zh-TW', canvas: 'side' })
+			await expect.poll(() => query(page)).toMatchObject({ locale: 'zh-TW', canvas: 'side' })
 
 			// The Adapters-changed caveat always shows; there are no pins and no canvas tools.
 			await canvas.locator('[data-adapters-caveat]').getByText('Shown with today\'s Widget Runtime and Adapters').waitFor()
@@ -244,7 +244,7 @@ describe('canvas comparison', () => {
 			await reopened.locator('[data-canvas-close]').click()
 			await reopened.waitForURL(url => !new URL(url).searchParams.has('canvas'))
 			await reopened.locator('[data-canvas]').waitFor()
-			expect(await reopened.locator('[data-version-canvas]').count()).toBe(0)
+			await expect.poll(() => reopened.locator('[data-version-canvas]').count()).toBe(0)
 			expect(query(reopened)).toMatchObject({ panel: 'history', version: seeded.after })
 		}
 		finally { await context.close() }
@@ -353,7 +353,7 @@ describe('canvas comparison', () => {
 			await placeholder.locator('[data-frame-retry]').click()
 			const before = await frameDocument(page, 'before')
 			await before.locator(`[data-widget-id="${seeded.ids.removed}"]`).waitFor({ state: 'attached' })
-			expect(await page.locator('[data-frame-placeholder="error"]').count()).toBe(0)
+			await expect.poll(() => page.locator('[data-frame-placeholder="error"]').count()).toBe(0)
 		}
 		finally { await context.close() }
 	}, 120_000)

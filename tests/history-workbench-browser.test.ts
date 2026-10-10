@@ -154,7 +154,7 @@ describe('version timeline in Activity', () => {
 			const autosave = row(page, seeded.autosave)
 			expect(await autosave.getAttribute('data-version-type')).toBe('autosave')
 			await autosave.locator('[data-version-expand]').click()
-			expect(await autosave.locator('[data-version-expand]').getAttribute('aria-expanded')).toBe('true')
+			await expect.poll(() => autosave.locator('[data-version-expand]').getAttribute('aria-expanded')).toBe('true')
 			await autosave.locator('[data-changed-resource="locale:en-US"][data-status="modified"]').waitFor()
 			await autosave.locator('[data-version-event]').filter({ hasText: 'Edited the Locale' }).first().waitFor()
 
@@ -188,22 +188,23 @@ describe('version timeline in Activity', () => {
 			await row(page, ownerVersion.id).waitFor()
 
 			await page.getByRole('switch', { name: 'Checkpoints only' }).click()
-			// The listing is read again with the server's type filter.
+			// A filter change empties the list and reads it again (the server applies the type and actor
+			// filters). A row count of 0 also holds while the list is empty, so each step polls for a state
+			// that neither the old list nor the empty one shows: only Checkpoint rows, or [excluded, kept] = [0, 1].
 			await expect.poll(() => row(page, checkpointId).count()).toBe(1)
-			expect(await row(page, agentVersion.id).count()).toBe(0)
-			const types = await page.locator('[data-version-timeline] [data-version-row]').evaluateAll(rows => rows.map(item => item.getAttribute('data-version-type')))
-			expect(new Set(types)).toEqual(new Set(['checkpoint']))
+			const types = () => page.locator('[data-version-timeline] [data-version-row]').evaluateAll(rows => rows.map(item => item.getAttribute('data-version-type')))
+			await expect.poll(async () => [...new Set(await types())]).toEqual(['checkpoint'])
 			await page.getByRole('switch', { name: 'Checkpoints only' }).click()
+			await row(page, agentVersion.id).waitFor()
 
+			const ownerAndAgent = () => Promise.all([row(page, ownerVersion.id).count(), row(page, agentVersion.id).count()])
 			await choose(page, '[data-history-filter="actor"]', agentNickname)
-			await expect.poll(() => row(page, agentVersion.id).count()).toBe(1)
-			expect(await row(page, ownerVersion.id).count()).toBe(0)
+			await expect.poll(ownerAndAgent).toEqual([0, 1])
 			await choose(page, '[data-history-filter="actor"]', 'Anyone')
 			await row(page, ownerVersion.id).waitFor()
 
 			await choose(page, '[data-history-filter="kind"]', 'Locale')
-			await expect.poll(() => row(page, ownerVersion.id).count()).toBe(0)
-			expect(await row(page, agentVersion.id).count()).toBe(1)
+			await expect.poll(ownerAndAgent).toEqual([0, 1])
 		}
 		finally {
 			await context.close()
@@ -236,7 +237,7 @@ describe('timeline rows', () => {
 				await toggle.nth(index).click()
 			}
 			await expect.poll(() => run.count()).toBe(1)
-			expect(await run.locator('[data-quiet-toggle]').getAttribute('aria-expanded')).toBe('true')
+			await expect.poll(() => run.locator('[data-quiet-toggle]').getAttribute('aria-expanded')).toBe('true')
 		}
 		finally { await context.close() }
 	}, 90_000)
@@ -273,7 +274,7 @@ describe('comparison', () => {
 			expect(query(page)).toEqual({ tab: 'activity', version: seeded.autosave })
 			const comparison = page.locator('[data-version-comparison]')
 			await expect.poll(() => comparison.getAttribute('data-from')).toBe('parent')
-			expect(await comparison.getAttribute('data-to')).toBe(seeded.autosave)
+			await expect.poll(() => comparison.getAttribute('data-to')).toBe(seeded.autosave)
 			// Summary first, then the diff per resource.
 			const summary = comparison.locator('[data-summary-row="locale:en-US"]')
 			await summary.waitFor({ timeout: 15_000 })
@@ -294,7 +295,7 @@ describe('comparison', () => {
 			await comparison.locator('[data-compare-target="current"]').click()
 			await page.waitForURL(url => new URL(url).searchParams.get('compare') === 'current')
 			await expect.poll(() => comparison.getAttribute('data-from')).toBe(seeded.autosave)
-			expect(await comparison.getAttribute('data-to')).toBe('current')
+			await expect.poll(() => comparison.getAttribute('data-to')).toBe('current')
 			await (await openDiff(page, 'locale:en-US')).locator('[data-diff-item]').filter({ hasText: `${key}.later` }).waitFor({ timeout: 15_000 })
 
 			// Narrow to one resource, then reopen the copied address in a fresh page.
@@ -354,7 +355,7 @@ describe('comparison', () => {
 			await page.goto(`${server.origin}/?tab=activity&version=${newer.autosave}&compare=${older.autosave}`, { waitUntil: 'networkidle' })
 			const comparison = page.locator('[data-version-comparison]')
 			await expect.poll(() => comparison.getAttribute('data-from'), { timeout: 15_000 }).toBe(older.autosave)
-			expect(await comparison.getAttribute('data-to')).toBe(newer.autosave)
+			await expect.poll(() => comparison.getAttribute('data-to')).toBe(newer.autosave)
 			// No diff was ever asked for the wrong way round.
 			expect(requests.length).toBeGreaterThan(0)
 			expect(requests.every(url => new URL(url).searchParams.get('from') === older.autosave)).toBe(true)
@@ -495,7 +496,7 @@ describe('Checkpoints', () => {
 			await row(editor.page, other).waitFor({ timeout: 15_000 })
 			expect(await editor.page.locator('[data-version-delete]').count()).toBe(0)
 			// An Editor may still create one.
-			expect(await editor.page.locator('[data-create-checkpoint]').count()).toBe(1)
+			await expect.poll(() => editor.page.locator('[data-create-checkpoint]').count()).toBe(1)
 		}
 		finally { await editor.context.close() }
 
@@ -542,7 +543,7 @@ describe('device tiers and zh-TW', () => {
 		const tablet = await open('/?tab=activity', { device: 'tablet' })
 		try {
 			await row(tablet.page, seeded.checkpoint).waitFor({ timeout: 15_000 })
-			expect(await tablet.page.locator('[data-create-checkpoint]').count()).toBe(1)
+			await expect.poll(() => tablet.page.locator('[data-create-checkpoint]').count()).toBe(1)
 			expect(await tablet.page.locator('[data-version-delete]').count()).toBe(0)
 		}
 		finally { await tablet.context.close() }
