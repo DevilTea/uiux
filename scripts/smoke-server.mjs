@@ -498,10 +498,10 @@ async function smokeConfiguredOrigins() {
 	}
 }
 
-/** The first-run Owner's nickname, from `Created Owner "<nick>"` in the startup banner. */
+/** The first-run manager's nickname, from `created member "<nick>" with every permission key` in the startup banner. */
 function ownerNickname(output) {
-	const nickname = output.match(/created Owner "([^"]+)"/u)?.[1]
-	if (!nickname) throw new Error(`The startup output names no first-run Owner.\n${output}`)
+	const nickname = output.match(/created member "([^"]+)" with every permission key/u)?.[1]
+	if (!nickname) throw new Error(`The startup output names no first-run manager.\n${output}`)
 	return nickname
 }
 
