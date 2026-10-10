@@ -2,7 +2,8 @@
 
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { request as httpRequest } from 'node:http'
+import { createServer as createHttpServer, request as httpRequest } from 'node:http'
+import { createServer as createHttpsServer, request as httpsRequest } from 'node:https'
 import { connect, createServer } from 'node:net'
 import { networkInterfaces, tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,6 +12,10 @@ const host = '127.0.0.1'
 let workspaceRoot
 let uiuxHome
 let otherWorkspace
+// The configured-origin run: a fresh roster home (first run), and the self-signed TLS material of its proxy.
+let originsHome
+let tlsDir
+const proxies = new Set()
 
 // Every child server is stopped, and has exited, before the temporary directories are removed: a
 // server still shutting down (the history recorder's shutdown boundary) writes into the Workspace,
@@ -24,7 +29,8 @@ function cleanup() {
 	stopping = true
 	cleanupPromise ??= (async () => {
 		await Promise.all([...children.keys()].map(stopChild))
-		const dirs = [workspaceRoot, otherWorkspace, uiuxHome].filter(dir => dir !== undefined)
+		await Promise.all([...proxies].map(proxy => new Promise((resolve) => { proxy.closeAllConnections(); proxy.close(() => resolve()) })))
+		const dirs = [workspaceRoot, otherWorkspace, uiuxHome, originsHome, tlsDir].filter(dir => dir !== undefined)
 		const removed = await Promise.allSettled(dirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 })))
 		const failures = removed.filter(result => result.status === 'rejected').map(result => result.reason)
 		if (failures.length > 0) throw new AggregateError(failures, 'Server smoke cleanup could not remove its temporary directories.')
@@ -181,6 +187,9 @@ try {
 	// `uiux dev` below reuses the port, so this server must have exited first.
 	await stopChild(server)
 	await smokeLoopbackOnlyCli()
+	const originsStarted = Date.now()
+	await smokeConfiguredOrigins()
+	console.log(`Configured-origin smoke passed in ${Date.now() - originsStarted} ms.`)
 }
 catch (error) {
 	failed = true
@@ -222,8 +231,9 @@ async function stopChild(child) {
 	if (group) kill('SIGKILL')
 }
 
-// `uiux dev` must bind loopback only, even when no HOST/NITRO_HOST is set (the LAN listener is not
-// yet available), and must refuse an explicit non-loopback bind.
+// Without --host and --origin, `uiux dev` must bind and accept loopback only (Rule
+// 01a12500-a7f3-7da3-b330-f5451f74a2f8), and must refuse a non-loopback HOST and a wildcard bind
+// without an origin.
 async function smokeLoopbackOnlyCli() {
 	const cliEnv = { ...process.env, UIUX_HOME: uiuxHome }
 	for (const name of ['HOST', 'NITRO_HOST', 'NITRO_PORT', 'NITRO_UNIX_SOCKET']) delete cliEnv[name]
@@ -233,8 +243,26 @@ async function smokeLoopbackOnlyCli() {
 		env: { ...cliEnv, HOST: '0.0.0.0', PORT: String(port) },
 		timeout: 15_000,
 	})
-	if (refused.status !== 2 || !refused.stderr.includes('the LAN listener is not yet available'))
+	if (refused.status !== 2 || !refused.stderr.includes('takes its bind address from --host only'))
 		throw new Error(`uiux dev did not refuse HOST=0.0.0.0 (exit ${refused.status}).\n${refused.stdout}${refused.stderr}`)
+	// A wildcard bind needs at least one configured origin (Rule 01a12500-a9c5-74e6-868a-2a6f4a5f3315).
+	const wildcard = spawnSync(process.execPath, ['bin/uiux.mjs', 'dev', '--workspace', workspaceRoot, '--host', '0.0.0.0'], {
+		encoding: 'utf8',
+		env: { ...cliEnv, PORT: String(port) },
+		timeout: 15_000,
+	})
+	if (wildcard.status !== 2 || !wildcard.stderr.includes('needs at least one --origin'))
+		throw new Error(`uiux dev did not refuse --host 0.0.0.0 without an origin (exit ${wildcard.status}).\n${wildcard.stdout}${wildcard.stderr}`)
+	// The packaged server run directly stays loopback-only (Rule 01a11485-ee85-7844-b82f-fd6a7cebb763),
+	// and UIUX serves plain HTTP only (Rule 01a12500-bbed-7aaa-a9bf-869e5e09bd45).
+	for (const [label, env, expected] of [
+		['HOST=0.0.0.0', { HOST: '0.0.0.0' }, 'listens on loopback only'],
+		['NITRO_SSL_CERT/NITRO_SSL_KEY', { NITRO_SSL_CERT: 'cert', NITRO_SSL_KEY: 'key' }, 'UIUX serves plain HTTP only'],
+	]) {
+		const direct = spawnSync(process.execPath, ['.output/server/index.mjs'], { encoding: 'utf8', env: { ...cliEnv, PORT: String(port), ...env }, timeout: 15_000 })
+		if (direct.status !== 2 || !direct.stderr.includes(expected))
+			throw new Error(`The packaged server run directly did not refuse ${label} (exit ${direct.status}).\n${direct.stdout}${direct.stderr}`)
+	}
 
 	// Detached, so stopChild can kill the CLI and its Nitro server together as one process group.
 	// It then no longer receives a terminal's SIGINT; the signal handlers above stop it instead.
@@ -293,6 +321,186 @@ async function smokeLoopbackOnlyCli() {
 	finally {
 		await stopChild(cli)
 	}
+}
+
+// Network access (Feature 01a12500-a0a0-74c0-b83b-3dbb628689e4): `uiux dev --host 0.0.0.0` with two
+// configured origins, each reached through a minimal local reverse proxy that forwards the client's
+// `Host` and streams responses unbuffered, as the README asks of nginx. One proxy is plain HTTP (a
+// LAN origin); the other terminates TLS with a self-signed certificate (an https origin), which
+// needs openssl. Every wait polls with a deadline; nothing sleeps for a fixed time.
+async function smokeConfiguredOrigins() {
+	originsHome = await mkdtemp(join(tmpdir(), 'uiux-smoke-origins-home-'))
+	const cliEnv = { ...process.env, UIUX_HOME: originsHome, PORT: String(port) }
+	for (const name of ['HOST', 'NITRO_HOST', 'NITRO_PORT', 'NITRO_UNIX_SOCKET', 'NITRO_SSL_CERT', 'NITRO_SSL_KEY']) delete cliEnv[name]
+	const uiuxCli = (...args) => execFileSync(process.execPath, ['bin/uiux.mjs', ...args], { encoding: 'utf8', env: cliEnv })
+
+	// The TLS proxy's certificate; without openssl the https origin is reached over plain HTTP,
+	// which the server cannot tell apart: it never looks at the transport or forwarding headers.
+	let tls
+	try {
+		tlsDir = await mkdtemp(join(tmpdir(), 'uiux-smoke-tls-'))
+		execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=uiux-secure.test', '-keyout', join(tlsDir, 'key.pem'), '-out', join(tlsDir, 'cert.pem')], { stdio: 'ignore' })
+		tls = { key: await readFile(join(tlsDir, 'key.pem')), cert: await readFile(join(tlsDir, 'cert.pem')) }
+	}
+	catch {
+		console.log('Configured-origin smoke: openssl is unavailable, so the https origin\'s proxy forwards plain HTTP.')
+	}
+
+	const forward = scheme => (req, res) => {
+		// Like nginx's `proxy_set_header Host $http_host`: the client's Host goes through unchanged.
+		// The X-Forwarded-* headers a proxy usually adds must not change anything (Rule 01a12500-ba1c-7a07-8341-2a8b0691e8c5).
+		const upstream = httpRequest({ host, port, method: req.method, path: req.url, headers: { ...req.headers, 'x-forwarded-proto': scheme, 'x-forwarded-for': req.socket.remoteAddress } }, (upstreamResponse) => {
+			res.writeHead(upstreamResponse.statusCode, upstreamResponse.headers)
+			upstreamResponse.pipe(res)
+		})
+		upstream.once('error', () => { res.destroy() })
+		req.pipe(upstream)
+	}
+	const listen = async (server) => {
+		proxies.add(server)
+		await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, host, resolve) })
+		return server.address().port
+	}
+	const lanPort = await listen(createHttpServer(forward('http')))
+	const securePort = await listen(tls ? createHttpsServer(tls, forward('https')) : createHttpServer(forward('https')))
+	const lanOrigin = `http://uiux-lan.test:${lanPort}`
+	const secureOrigin = `https://uiux-secure.test:${securePort}`
+
+	// Through a proxy: connect to it on 127.0.0.1 and name the configured origin in `Host`.
+	const viaProxy = (target, method, path, headers = {}, body) => new Promise((resolve, reject) => {
+		const secure = target === secureOrigin && tls
+		const options = { host, port: target === lanOrigin ? lanPort : securePort, method, path, headers: { host: new URL(target).host, ...headers }, ...(secure ? { rejectUnauthorized: false, servername: 'uiux-secure.test' } : {}) }
+		const req = (secure ? httpsRequest : httpRequest)(options, (res) => {
+			let text = ''
+			res.setEncoding('utf8').on('data', chunk => text += chunk).on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: text }))
+		})
+		req.once('error', reject)
+		req.end(body)
+	})
+
+	const cli = spawnTracked(process.execPath, ['bin/uiux.mjs', 'dev', '--workspace', workspaceRoot, '--host', '0.0.0.0', '--origin', lanOrigin, '--origin', secureOrigin], {
+		stdio: ['ignore', 'pipe', 'pipe'],
+		env: cliEnv,
+		detached: true,
+	})
+	let output = ''
+	cli.stdout.setEncoding('utf8').on('data', chunk => output += chunk)
+	cli.stderr.setEncoding('utf8').on('data', chunk => output += chunk)
+	try {
+		const deadline = Date.now() + 15_000
+		// The first-run banner is printed once the roster is open, which may follow "Listening on".
+		while (!output.includes('Listening on ') || !output.includes('uiux access copy')) {
+			if (cli.exitCode !== null) throw new Error(`uiux dev with configured origins exited before listening.\n${output}`)
+			if (Date.now() > deadline) throw new Error(`uiux dev with configured origins did not start within 15 seconds.\n${output}`)
+			await new Promise(resolve => setTimeout(resolve, 100))
+		}
+
+		// Startup output (Rules 01a12500-b4af-7446-a66e-40de3db3dac2, 01a12500-b2db-7083-973d-1bf90a859a5b, 01a12515-9c61-7916-a0d0-4bcf2537dfc9).
+		for (const line of [`uiux: loopback URL http://127.0.0.1:${port}`, `uiux: configured origin ${lanOrigin}`, `uiux: configured origin ${secureOrigin}`, `uiux: warning: ${lanOrigin} is plain HTTP.`]) {
+			if (!output.includes(line)) throw new Error(`uiux dev did not print ${JSON.stringify(line)}.\n${output}`)
+		}
+		if (output.includes(`warning: ${secureOrigin}`)) throw new Error(`uiux dev warned about the https origin.\n${output}`)
+		const links = [...output.matchAll(/(\S+)\/login#(uiux_i_\S+)/gu)].map(match => ({ origin: match[1], invite: match[2] }))
+		if (JSON.stringify(links.map(link => link.origin)) !== JSON.stringify([`http://127.0.0.1:${port}`, lanOrigin, secureOrigin]) || new Set(links.map(link => link.invite)).size !== 1)
+			throw new Error(`The first-run sign-in links are not one invite on the loopback URL and each origin: ${JSON.stringify(links)}\n${output}`)
+		const invite = links[0].invite
+
+		// The loopback default still holds.
+		if ((await request('GET', '/api/health', {})).status !== 200) throw new Error('The loopback URL stopped answering with configured origins.')
+
+		// Host and Origin acceptance through the LAN proxy.
+		uiuxCli('member', 'add', 'origin-agent', '--kind', 'agent', '--role', 'editor', '--workspace', workspaceRoot)
+		const token = uiuxCli('token', 'create', '--member', 'origin-agent', '--workspace', workspaceRoot).match(/uiux_t_\S+/u)?.[0]
+		if (!token) throw new Error('uiux token create printed no token.')
+		const bearer = { authorization: `Bearer ${token}` }
+		const list = JSON.stringify({ kinds: ['view'], limit: 1 })
+		const checks = [
+			[lanOrigin, 'GET', '/api/health', {}, 200],
+			[lanOrigin, 'GET', '/', { host: `rebind.attacker.test:${lanPort}` }, 421],
+			[lanOrigin, 'POST', '/api/resources/list', { 'content-type': 'application/json', ...bearer }, 200],
+			[lanOrigin, 'POST', '/api/resources/list', { 'content-type': 'application/json', ...bearer, origin: lanOrigin, 'sec-fetch-site': 'same-origin' }, 200],
+			[lanOrigin, 'POST', '/api/resources/list', { 'content-type': 'application/json', ...bearer, origin: secureOrigin }, 403],
+			[lanOrigin, 'POST', '/api/resources/list', { 'content-type': 'application/json', ...bearer, origin: 'https://attacker.test' }, 403],
+			[secureOrigin, 'POST', '/api/resources/list', { 'content-type': 'application/json', ...bearer, origin: secureOrigin }, 200],
+			[secureOrigin, 'POST', '/api/resources/list', { 'content-type': 'application/json', ...bearer, origin: `http://uiux-secure.test:${securePort}` }, 403],
+		]
+		for (const [target, method, path, headers, expected] of checks) {
+			const response = await viaProxy(target, method, path, headers, method === 'POST' ? list : undefined)
+			if (response.status !== expected)
+				throw new Error(`${method} ${path} through ${target} ${JSON.stringify(headers)} returned HTTP ${response.status}, expected ${expected}: ${response.body}`)
+		}
+
+		// /mcp streams its event-stream answer through the proxy. (`GET /api/events` is not built
+		// yet, issue #69; the MCP stream is the server-sent event stream that exists today.)
+		const mcpInit = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke-origins', version: '1' } } })
+		const mcpHeaders = { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...bearer }
+		for (const target of [lanOrigin, secureOrigin]) {
+			const mcp = await viaProxy(target, 'POST', '/mcp', { ...mcpHeaders, origin: target }, mcpInit)
+			const payload = mcp.headers['content-type']?.includes('text/event-stream')
+				? mcp.body.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).at(-1)
+				: undefined
+			if (mcp.status !== 200 || !payload || !JSON.parse(payload).result?.serverInfo)
+				throw new Error(`/mcp through ${target} did not stream an initialize answer (HTTP ${mcp.status}, ${mcp.headers['content-type']}): ${mcp.body}`)
+		}
+
+		// The LAN origin: the first-run invite signs in without Secure, and roster administration is refused.
+		const lanLogin = await viaProxy(lanOrigin, 'POST', '/api/session/login', { 'content-type': 'application/json', origin: lanOrigin }, JSON.stringify({ credential: invite }))
+		const lanCookie = String(lanLogin.headers['set-cookie'] ?? '')
+		if (lanLogin.status !== 200 || lanCookie.includes('Secure')) throw new Error(`Sign-in on ${lanOrigin} returned HTTP ${lanLogin.status} with ${lanCookie}.`)
+		const lanSession = { cookie: lanCookie.split(';', 1)[0] }
+		const refused = await viaProxy(lanOrigin, 'GET', '/api/access/members', lanSession)
+		if (refused.status !== 403 || JSON.parse(refused.body).code !== 'access.admin_origin_rejected')
+			throw new Error(`Roster administration on ${lanOrigin} returned HTTP ${refused.status}: ${refused.body}`)
+		if ((await viaProxy(lanOrigin, 'GET', '/api/session', lanSession)).status !== 200) throw new Error(`The session on ${lanOrigin} does not work there.`)
+
+		// The https origin: a CLI invite for it signs in with Secure, and administration works there.
+		const secureLink = uiuxCli('invite', 'create', '--member', ownerNickname(output), '--origin', secureOrigin, '--workspace', workspaceRoot).match(/(\S+)\/login#(uiux_i_\S+)/u)
+		if (secureLink?.[1] !== secureOrigin) throw new Error(`uiux invite create --origin did not name ${secureOrigin}.`)
+		const secureLogin = await viaProxy(secureOrigin, 'POST', '/api/session/login', { 'content-type': 'application/json', origin: secureOrigin }, JSON.stringify({ credential: secureLink[2] }))
+		const secureCookie = String(secureLogin.headers['set-cookie'] ?? '')
+		if (secureLogin.status !== 200 || !/; Secure$/u.test(secureCookie)) throw new Error(`Sign-in on ${secureOrigin} returned HTTP ${secureLogin.status} with ${secureCookie}.`)
+		const secureSession = { cookie: secureCookie.split(';', 1)[0] }
+		const members = await viaProxy(secureOrigin, 'GET', '/api/access/members', secureSession)
+		if (members.status !== 200) throw new Error(`Roster administration on ${secureOrigin} returned HTTP ${members.status}: ${members.body}`)
+		const owner = JSON.parse(members.body).members.find(member => member.kind === 'human')
+		const created = await viaProxy(secureOrigin, 'POST', '/api/access/invites', { 'content-type': 'application/json', origin: secureOrigin, ...secureSession }, JSON.stringify({ memberId: owner.id }))
+		if (created.status !== 201 || !JSON.parse(created.body).url.startsWith(`${secureOrigin}/login#`))
+			throw new Error(`An invite created on ${secureOrigin} does not name it: ${created.body}`)
+		// A session belongs to its origin: the LAN cookie authenticates nothing on the https origin.
+		if ((await viaProxy(secureOrigin, 'GET', '/api/access/members', lanSession)).status !== 401) throw new Error('A LAN session cookie was accepted on the https origin.')
+
+		// `uiux invite create` without --origin names the loopback origin on the running server's port.
+		const defaultLink = uiuxCli('invite', 'create', '--member', owner.nickname, '--workspace', workspaceRoot).match(/(\S+)\/login#/u)?.[1]
+		if (defaultLink !== `http://127.0.0.1:${port}`) throw new Error(`uiux invite create named ${defaultLink}, expected the server's loopback origin http://127.0.0.1:${port}.`)
+
+		// Bound to a wildcard address, the server is reachable from other machines, but a loopback
+		// Host from a non-loopback peer is refused (Rule 01a12500-ad67-7e14-b375-78a59f822687).
+		const lanAddress = Object.values(networkInterfaces()).flat().find(item => item && !item.internal && item.family === 'IPv4')?.address
+		if (lanAddress) {
+			const direct = (headers) => new Promise((resolve, reject) => {
+				const req = httpRequest({ host: lanAddress, port, method: 'GET', path: '/api/health', headers }, res => { res.resume(); res.once('end', () => resolve(res.statusCode)) })
+				req.once('error', reject)
+				req.end()
+			})
+			if (await direct({ host: `127.0.0.1:${port}` }) !== 421) throw new Error(`A loopback Host from ${lanAddress} was accepted.`)
+			if (await direct({ host: `localhost:${port}` }) !== 421) throw new Error(`A loopback Host from ${lanAddress} was accepted.`)
+			if (await direct({ host: new URL(lanOrigin).host }) !== 200) throw new Error(`The configured Host was refused from ${lanAddress}.`)
+		}
+		else {
+			console.log('Configured-origin smoke: no non-loopback IPv4 interface, so the loopback-Host-from-a-network-peer check was skipped.')
+		}
+		console.log(`Configured-origin smoke: uiux dev --host 0.0.0.0 printed the loopback URL, both origins, the plaintext warning and one invite on each; Host and Origin gating, /mcp event streams and sign-in work through a Host-forwarding proxy${tls ? ' (TLS-terminating for the https origin)' : ''}; the http origin refuses roster administration, the https origin sets Secure and serves it; sessions stay on their origin.`)
+	}
+	finally {
+		await stopChild(cli)
+	}
+}
+
+/** The first-run Owner's nickname, from `Created Owner "<nick>"` in the startup banner. */
+function ownerNickname(output) {
+	const nickname = output.match(/created Owner "([^"]+)"/u)?.[1]
+	if (!nickname) throw new Error(`The startup output names no first-run Owner.\n${output}`)
+	return nickname
 }
 
 // Version history end to end, through the public HTTP and MCP surfaces only (issue #132). Every
