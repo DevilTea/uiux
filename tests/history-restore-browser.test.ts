@@ -14,7 +14,11 @@ import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-
  *   (Rules 01a11a5e-14ce-… and 01a11e0d-d911-…);
  * - with impact, the dialog lists it and writes only after "Restore anyway" (Rules 01a11a5e-16f7-…
  *   and 174b-…);
- * - a change made after the dialog opened conflicts and can be reloaded (Rule 01a11a5e-1520-…);
+ * - a change made after the dialog opened conflicts and can be reloaded (Rule 01a11a5e-1520-…), and
+ *   an edit lease held by someone else is named;
+ * - compared with its parent, Restore still restores the selected version, its content right after
+ *   that change; a View that already matches it is not restored again, since that would only
+ *   write an empty version;
  * - Restore is offered only on a desktop layout (Rule 01a11a5e-1bfa-…), only to an Editor or above
  *   (Clause 01a11485-fa44-…), and only for the kinds this build restores.
  *
@@ -100,8 +104,15 @@ async function open(path: string, options: Readonly<{ device?: Device; cookie?: 
 	return { context, page }
 }
 
-/** Overview › Activity comparing a version with the current state, narrowed to one View. */
-const comparisonPath = (version: string, viewKey: string) => `/?tab=activity&version=${version}&compare=current&resource=view:${viewKey}`
+/** Overview › Activity comparing a version with the current state (or its parent), narrowed to one View. */
+const comparisonPath = (version: string, viewKey: string, compare: 'current' | 'parent' = 'current') => `/?tab=activity&version=${version}&compare=${compare}&resource=view:${viewKey}`
+
+/** The closed autosave that last changed the View. */
+async function lastAutosave(key: string): Promise<string> {
+	const found = (await versions()).find(version => version.type === 'autosave' && version.summary.some(row => row.kind === 'view' && row.key === key))
+	if (!found) throw new Error(`no autosave changed view:${key}`)
+	return found.id
+}
 
 /** The View's open diff in the comparison, once its semantic diff has loaded. */
 async function viewDiff(page: Page, viewKey: string) {
@@ -233,6 +244,78 @@ describe('restoring from a resource\'s diff', () => {
 			await page.locator('[data-restore-confirm]').click()
 			await dialog(page).waitFor({ state: 'detached', timeout: 15_000 })
 			expect((await readView(key)).resource.spec.intent).toBe(earlierIntent)
+		}
+		finally { await context.close() }
+	}, 90_000)
+})
+
+describe('restoring from a comparison with the parent', () => {
+	it('offers no Restore while the View already matches the version, and otherwise restores the content right after that change', async () => {
+		const key = await seedView(`b10 parent ${unique()}`)
+		await checkpoint(`b10 seeded ${unique()}`)
+		const seededIntent = (await readView(key)).resource.spec.intent
+		const changedIntent = `After the change ${unique()}`
+		await setIntent(key, changedIntent)
+		await checkpoint(`b10 changed ${unique()}`)
+		const change = await lastAutosave(key)
+
+		const { context, page } = await open(comparisonPath(change, key, 'parent'))
+		try {
+			// The View is still as this change left it: restoring would change nothing.
+			const block = await viewDiff(page, key)
+			await block.locator('[data-restore-version]').click()
+			await dialog(page).locator('[data-restore-unchanged]').waitFor({ timeout: 15_000 })
+			expect(await dialog(page).locator('[data-restore-unchanged]').textContent()).toContain('already matches this version')
+			expect(await page.locator('[data-restore-confirm]').isDisabled()).toBe(true)
+			await page.locator('[data-restore-cancel]').click()
+			await dialog(page).waitFor({ state: 'detached' })
+			expect((await versions()).some(version => version.restoredFrom === change)).toBe(false)
+
+			// After a later edit, Restore brings back the content right after the change, not before it.
+			await setIntent(key, `Later ${unique()}`)
+			await page.reload({ waitUntil: 'networkidle' })
+			await openRestore(page, key)
+			expect(await dialog(page).locator('[data-restore-unchanged]').count()).toBe(0)
+			const summary = dialog(page).locator('[data-restore-summary][data-after-change]')
+			expect(await summary.textContent()).toContain('right after this change')
+			await page.locator('[data-restore-confirm]').click()
+			await dialog(page).waitFor({ state: 'detached', timeout: 15_000 })
+			const intent = (await readView(key)).resource.spec.intent
+			expect(intent).toBe(changedIntent)
+			expect(intent).not.toBe(seededIntent)
+			expect((await versions()).some(version => version.restoredFrom === change)).toBe(true)
+		}
+		finally { await context.close() }
+	}, 90_000)
+})
+
+describe('a refused restore', () => {
+	it('names the holder of an edit lease, writes nothing, and goes back to the confirmation on Retry', async () => {
+		const key = await seedView(`b10 locked ${unique()}`)
+		const earlier = await checkpoint(`b10 before ${unique()}`)
+		await setIntent(key, `Locked ${unique()}`)
+		const before = await readView(key)
+		const { context, page } = await open(comparisonPath(earlier, key))
+		try {
+			// The lease is answered by the route as the server answers it (`423 resource.locked`).
+			const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString()
+			await page.route('**/api/history/versions/*/restore', route => route.fulfill({
+				status: 423,
+				json: { status: 'locked', key, code: 'resource.locked', message: 'View is locked.', lock: { kind: 'view', key, holder: { nickname: 'b10-holder', kind: 'agent' }, expiresAt } },
+			}))
+			await openRestore(page, key)
+			await page.locator('[data-restore-confirm]').click()
+			const locked = dialog(page).locator('[data-restore-locked]')
+			await locked.waitFor({ timeout: 15_000 })
+			expect(await dialog(page).getAttribute('data-stage')).toBe('locked')
+			expect(await locked.textContent()).toContain('b10-holder')
+			expect(await page.evaluate(() => !!document.activeElement?.closest('[data-restore-dialog]'))).toBe(true)
+			expect((await readView(key)).revision).toBe(before.revision)
+
+			await page.unroute('**/api/history/versions/*/restore')
+			await page.locator('[data-restore-reload]').click()
+			await expect.poll(() => dialog(page).getAttribute('data-stage')).toBe('confirm')
+			await expect.poll(() => page.locator('[data-restore-confirm]').isEnabled(), { timeout: 10_000 }).toBe(true)
 		}
 		finally { await context.close() }
 	}, 90_000)

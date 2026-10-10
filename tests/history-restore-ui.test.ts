@@ -4,7 +4,7 @@ import { RESTORABLE_RESOURCE_KINDS as SERVICE_KINDS } from '../src/application/s
 import type { ImpactItem } from '../src/domain/impact/analyzer'
 import { comparisonRefreshKey, forgetComparisonsAfterDeletion, refreshKeyChanged } from '../app/utils/comparison-refresh'
 import { diffRequestQuery } from '../app/utils/version-history'
-import { classifyRestoreAnswer, groupImpacts, restoreSourceVersion, shortId, type RestoreGateInput } from '../app/utils/version-restore'
+import { classifyRestoreAnswer, groupImpacts, matchesCurrent, restoreSourceVersion, shortId, type RestoreGateInput } from '../app/utils/version-restore'
 
 /**
  * The Workbench restore's pure parts (issue #132, B10): when a resource's diff offers "Restore this
@@ -70,6 +70,18 @@ describe('the restore gate', () => {
 	})
 })
 
+describe('a restore that would change nothing', () => {
+	it('is recognized from the comparison of the selected version with the current state', () => {
+		const resource = { kind: 'view', key: SELECTED }
+		expect(matchesCurrent([{ kind: 'view', key: SELECTED, status: 'unchanged' }], resource)).toBe(true)
+		for (const status of ['modified', 'removed', 'added'] as const)
+			expect(matchesCurrent([{ kind: 'view', key: SELECTED, status }], resource), status).toBe(false)
+		// Another resource unchanged, or the resource not compared at all, says nothing about this one.
+		expect(matchesCurrent([{ kind: 'view', key: OTHER, status: 'unchanged' }, { kind: 'flow', key: SELECTED, status: 'unchanged' }], resource)).toBe(false)
+		expect(matchesCurrent([], resource)).toBe(false)
+	})
+})
+
 describe('the restore answer', () => {
 	it('classifies what the restore route answers', () => {
 		expect(classifyRestoreAnswer(200, { status: 'updated', restoredFrom: SELECTED })).toEqual({ state: 'restored', created: false, restoredFrom: SELECTED })
@@ -121,23 +133,43 @@ describe('a comparison with the current state on a cold start (B8 follow-up a)',
 		for (let index = 1; index < keys.length; index++) if (refreshKeyChanged(keys[index], keys[index - 1])) reloads += 1
 		return reloads
 	}
+	const before = { loaded: false, latestVersionId: undefined }
+	const listed = (latestVersionId?: string) => ({ loaded: true, latestVersionId })
 
 	it('is not read again when the timeline and the Workbench first arrive, in either order', () => {
 		const signature = 'sha256:ws,sha256:view'
 		// Timeline first, then the Workbench; then the Workbench first, then the timeline.
-		expect(reloadsFor([comparisonRefreshKey(undefined, ''), comparisonRefreshKey(SELECTED, ''), comparisonRefreshKey(SELECTED, signature)])).toBe(0)
-		expect(reloadsFor([comparisonRefreshKey(undefined, ''), comparisonRefreshKey(undefined, signature), comparisonRefreshKey(SELECTED, signature)])).toBe(0)
+		expect(reloadsFor([comparisonRefreshKey(before, ''), comparisonRefreshKey(listed(SELECTED), ''), comparisonRefreshKey(listed(SELECTED), signature)])).toBe(0)
+		expect(reloadsFor([comparisonRefreshKey(before, ''), comparisonRefreshKey(before, signature), comparisonRefreshKey(listed(SELECTED), signature)])).toBe(0)
+		// A timeline that loads empty (a filter that matches nothing) is an arrival too.
+		expect(reloadsFor([comparisonRefreshKey(before, signature), comparisonRefreshKey(listed(), signature)])).toBe(0)
 	})
 
 	it('is read again once for each later change of the newest version or the Workbench revisions', () => {
 		const keys = [
-			comparisonRefreshKey(undefined, ''),
-			comparisonRefreshKey(SELECTED, 'a'),
-			comparisonRefreshKey(OTHER, 'a'),
-			comparisonRefreshKey(OTHER, 'b'),
-			comparisonRefreshKey(OTHER, 'b'),
+			comparisonRefreshKey(before, ''),
+			comparisonRefreshKey(listed(SELECTED), 'a'),
+			comparisonRefreshKey(listed(OTHER), 'a'),
+			comparisonRefreshKey(listed(OTHER), 'b'),
+			comparisonRefreshKey(listed(OTHER), 'b'),
 		]
 		expect(reloadsFor(keys)).toBe(2)
+	})
+
+	it('is read again on a Workbench change while the loaded timeline lists nothing', () => {
+		// The address still selects a version, but the filtered timeline is empty.
+		const keys = [
+			comparisonRefreshKey(before, ''),
+			comparisonRefreshKey(listed(), 'a'),
+			comparisonRefreshKey(listed(), 'b'),
+			comparisonRefreshKey(listed(SELECTED), 'b'),
+		]
+		expect(keys.slice(1).every(key => key !== undefined)).toBe(true)
+		expect(reloadsFor(keys)).toBe(2)
+	})
+
+	it('waits for the timeline after a filter change resets it', () => {
+		expect(reloadsFor([comparisonRefreshKey(listed(SELECTED), 'a'), comparisonRefreshKey(before, 'a'), comparisonRefreshKey(listed(OTHER), 'a')])).toBe(0)
 	})
 })
 
