@@ -21,11 +21,20 @@ Options:
 
 Commands:
   init --workspace <dir>  Initialize a Workspace
-  dev --workspace <dir>   Start the unified UIUX Workbench/Nitro server on loopback
-                           only (127.0.0.1; PORT selects the port, default 3000).
+  dev --workspace <dir> [--host <address>] [--origin <url>]...
+                           Start the unified UIUX Workbench/Nitro server. By default
+                           it listens on loopback only (127.0.0.1; PORT selects the
+                           port, default 3000) and accepts only loopback host names.
+                           --host takes a loopback address (127.0.0.1, ::1, localhost)
+                           or a wildcard address (0.0.0.0, ::), which needs an origin.
+                           Each --origin (repeatable) is an http:// or https:// origin
+                           people use to reach the server, such as a reverse proxy's
+                           https://uiux.corp.example or http://10.0.0.5:3000 on a LAN;
+                           an http origin sends credentials in clear text. UIUX serves
+                           plain HTTP; a TLS-terminating proxy serves https origins.
                            Every /api and /mcp request needs a credential; the first
                            start of a Workspace creates its Owner and prints a
-                           one-time sign-in link
+                           one-time sign-in link on each URL
   migrate --workspace <dir> [--dry-run]
                            Migrate an older Workspace schema to schemaVersion ${workspaceSchemaVersion}
                            (steps chain: uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4);
@@ -37,7 +46,7 @@ Commands:
 Access (each takes --workspace <dir>; rosters live in $UIUX_HOME, default ~/.uiux):
   member add <nick> --role <owner|editor|reviewer|viewer> [--kind human|agent]
   member list | member set <nick> [--role <role>] [--nickname <new>] | member remove <nick>
-  token create --member <nick> [--label <text>] [--expires <days>|never] [--lan]
+  token create --member <nick> [--label <text>] [--expires <days>|never]
   token list [--member <nick>] [--all] | token revoke <token-id>
   invite create --member <nick> [--origin <url>] [--expires <hours>]
   session list | session revoke <session-id> | session revoke --member <nick>
@@ -48,35 +57,48 @@ Access (each takes --workspace <dir>; rosters live in $UIUX_HOME, default ~/.uiu
                            its own host history, migration system versions included`)
 }
 
-// The LAN listener is not yet available, so `uiux dev` is loopback-only and refuses a non-loopback
-// value in either HOST or NITRO_HOST. The packaged server applies the same allowlist
-// to its effective bind (src/server/loopback-guard.ts) as a backstop for direct `.output` runs.
-const LOOPBACK_BIND_HOSTS = new Map([
-	['127.0.0.1', '127.0.0.1'],
-	['localhost', 'localhost'],
-	['::1', '::1'],
-	['[::1]', '::1'],
-])
+// `uiux dev` takes its bind address only from --host. For compatibility, a loopback HOST or
+// NITRO_HOST still selects the loopback address when --host is absent; any other value is refused.
+// The server it spawns gets the bind address and the origins through an internal handoff, never
+// through HOST/NITRO_HOST, so a packaged server run directly stays loopback-only
+// (server/plugins/loopback-guard.ts).
+const LOOPBACK_ENV_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
 
-function resolveLoopbackBindHost(env) {
+function loopbackHostFromEnv(env) {
 	let selected
 	for (const variable of ['NITRO_HOST', 'HOST']) {
 		const raw = env[variable]
 		if (raw === undefined || raw.trim() === '') continue
-		const normalized = LOOPBACK_BIND_HOSTS.get(raw.trim().toLowerCase())
-		if (!normalized) {
+		if (!LOOPBACK_ENV_HOSTS.has(raw.trim().toLowerCase())) {
 			return {
 				ok: false,
-				message: `Refusing to listen on ${variable}=${raw}. UIUX listens on loopback only (127.0.0.1, ::1 or localhost); the LAN listener is not yet available.`,
+				message: `Refusing to listen on ${variable}=${raw}. uiux dev takes its bind address from --host only: a loopback address, or a wildcard address (0.0.0.0, ::) together with --origin <url>.`,
 			}
 		}
-		selected ??= normalized
+		selected ??= raw.trim()
 	}
-	return { ok: true, host: selected ?? '127.0.0.1' }
+	return { ok: true, host: selected }
 }
 
 function parseWorkspaceArgument(args) {
 	return args.length === 2 && args[0] === '--workspace' && args[1] ? args[1] : undefined
+}
+
+/** `dev --workspace <dir> [--host <address>] [--origin <url>]...`; undefined for invalid usage. */
+function parseDevArguments(args) {
+	let workspace
+	let host
+	const origins = []
+	for (let index = 0; index < args.length; index += 2) {
+		const name = args[index]
+		const value = args[index + 1]
+		if (value === undefined || value === '' || value.startsWith('--')) return undefined
+		if (name === '--workspace' && workspace === undefined) workspace = value
+		else if (name === '--host' && host === undefined) host = value
+		else if (name === '--origin') origins.push(value)
+		else return undefined
+	}
+	return workspace === undefined ? undefined : { workspace, host, origins }
 }
 
 function parseMigrateArguments(args) {
@@ -93,6 +115,10 @@ function parseMigrateArguments(args) {
  * CLI applies exactly the policy the server enforces.
  */
 async function runBundled(entry, run) {
+	process.exitCode = await withBundled(entry, run)
+}
+
+async function withBundled(entry, use) {
 	const { default: esbuild } = await import('esbuild')
 	const packageRoot = fileURLToPath(new URL('..', import.meta.url))
 	const build = await esbuild.build({
@@ -108,7 +134,7 @@ async function runBundled(entry, run) {
 	try {
 		const modulePath = join(directory, 'command.mjs')
 		await writeFile(modulePath, build.outputFiles[0].contents)
-		process.exitCode = await run(await import(pathToFileURL(modulePath).href))
+		return await use(await import(pathToFileURL(modulePath).href))
 	}
 	finally {
 		await rm(directory, { recursive: true, force: true })
@@ -170,8 +196,8 @@ async function runInit(workspaceArgument) {
 	console.log(`Initialized UIUX Workspace at ${workspaceRoot}`)
 }
 
-async function runDev(workspaceArgument) {
-	const workspaceRoot = resolve(process.cwd(), workspaceArgument)
+async function runDev(options) {
+	const workspaceRoot = resolve(process.cwd(), options.workspace)
 	let workspaceStat
 	try {
 		workspaceStat = await stat(workspaceRoot)
@@ -187,9 +213,29 @@ async function runDev(workspaceArgument) {
 		return
 	}
 
-	const bind = resolveLoopbackBindHost(process.env)
-	if (!bind.ok) {
-		console.error(`uiux: ${bind.message}`)
+	// UIUX serves plain HTTP only; an https origin is served by a TLS-terminating front end.
+	if (process.env.NITRO_SSL_CERT || process.env.NITRO_SSL_KEY) {
+		console.error('uiux: NITRO_SSL_CERT and NITRO_SSL_KEY are not supported: UIUX serves plain HTTP only. Serve an https origin through a TLS-terminating front end and list it with --origin https://<host>.')
+		process.exitCode = 2
+		return
+	}
+	let host = options.host
+	if (host === undefined) {
+		const fromEnv = loopbackHostFromEnv(process.env)
+		if (!fromEnv.ok) {
+			console.error(`uiux: ${fromEnv.message}`)
+			process.exitCode = 2
+			return
+		}
+		host = fromEnv.host
+	}
+	const network = await withBundled('src/server/network-access.ts', (module) => {
+		const port = module.resolveListenPort(process.env)
+		const resolved = module.resolveNetworkConfig({ ...(host === undefined ? {} : { host }), origins: options.origins, port })
+		return { resolved, handoff: module.encodeDevHandoff({ host, origins: options.origins }), variable: module.DEV_HANDOFF_VARIABLE }
+	})
+	if (!network.resolved.ok) {
+		console.error(`uiux: ${network.resolved.message}`)
 		process.exitCode = 2
 		return
 	}
@@ -198,13 +244,17 @@ async function runDev(workspaceArgument) {
 	const serverEntry = resolve(packageRoot, '.output/server/index.mjs')
 	const env = {
 		...process.env,
-		HOST: bind.host,
-		NITRO_HOST: bind.host,
 		UIUX_WORKSPACE_ROOT: workspaceRoot,
 		UIUX_PACKAGE_ROOT: packageRoot,
+		[network.variable]: network.handoff,
 	}
+	// The server takes its bind address from the handoff only.
+	delete env.HOST
+	delete env.NITRO_HOST
 	delete env.NITRO_UNIX_SOCKET
-	console.log(`uiux: serving Workspace ${workspaceRoot} on loopback only (${bind.host}).`)
+	const { bindHost, origins } = network.resolved.value
+	const reach = origins.length === 0 ? 'loopback only' : `loopback and ${origins.length} configured origin${origins.length === 1 ? '' : 's'}`
+	console.log(`uiux: serving Workspace ${workspaceRoot} on ${bindHost} (${reach}).`)
 	const child = spawn(process.execPath, [serverEntry], { stdio: 'inherit', env })
 	const forwardSignal = signal => {
 		if (child.exitCode === null && child.signalCode === null) child.kill(signal)
@@ -244,12 +294,12 @@ if (extraArgs.length === 0 && (command === undefined || command === '--help' || 
 		await runInit(workspace)
 	}
 } else if (command === 'dev') {
-	const workspace = parseWorkspaceArgument(extraArgs)
-	if (!workspace) {
-		console.error('uiux: dev requires exactly --workspace <dir>.')
+	const options = parseDevArguments(extraArgs)
+	if (!options) {
+		console.error('uiux: dev requires --workspace <dir> and accepts --host <address> and repeated --origin <url>.')
 		process.exitCode = 2
 	} else {
-		await runDev(workspace)
+		await runDev(options)
 	}
 } else if (command === 'migrate') {
 	const options = parseMigrateArguments(extraArgs)

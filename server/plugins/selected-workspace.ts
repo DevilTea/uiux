@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { acquireServerHold, type AcquiredServerHold } from '../../src/persistence/server-hold'
 import { AccessError } from '../../src/server/access/roster'
 import { installLogRedaction, writeUnredacted } from '../../src/server/access/redaction'
+import { getServerNetwork } from '../../src/server/network-access'
 import {
 	closeSelectedWorkspaceServerRuntime,
 	getSelectedWorkspaceServerRuntime,
@@ -23,7 +24,7 @@ export default defineNitroPlugin((nitroApp) => {
 			// bootstraps one and prints its one-time sign-in link (decision 8).
 			void runtime.access()
 				.then(async (access) => {
-					const banner = await access.bootstrap(resolveInternalServerOrigin())
+					const banner = await access.bootstrap([resolveInternalServerOrigin(), ...getServerNetwork().origins.map(origin => origin.origin)])
 					if (banner) writeUnredacted(banner)
 					if (access.store.paths) console.log(`uiux: access roster ${access.hint} for ${access.workspaceRoot} (${access.store.paths.file}).`)
 				})
@@ -37,7 +38,7 @@ export default defineNitroPlugin((nitroApp) => {
 			void runtime.historyRecorder.start().then((report) => {
 				if (report.baseline) console.log(`uiux: history recorded the Baseline Checkpoint ${report.baseline} for ${runtime.root}.`)
 			})
-			pendingHold = acquireServerHold(resolve(process.env.UIUX_WORKSPACE_ROOT))
+			pendingHold = acquireServerHold(resolve(process.env.UIUX_WORKSPACE_ROOT), { origin: resolveInternalServerOrigin() })
 				.then((hold) => {
 					acquiredHold = hold
 					return hold

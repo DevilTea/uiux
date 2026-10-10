@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
-import { createServer, type Server } from 'node:http'
+import { createServer, request as httpRequest, type IncomingHttpHeaders, type OutgoingHttpHeaders, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -33,9 +33,10 @@ import sessionDeleteByIdRoute from '../server/api/access/sessions/[id].delete'
 import mcpAttemptsRoute from '../server/api/access/mcp-attempts.get'
 import { createAccessGuardHandler } from '../src/server/access/http'
 import { generateCredential } from '../src/server/access/credentials'
-import { removeMember, revokeToken } from '../src/server/access/roster'
+import { createInvite, removeMember, revokeToken } from '../src/server/access/roster'
 import { AccessStore } from '../src/server/access/store'
 import { createLoopbackGuardHandler } from '../src/server/loopback-guard'
+import { LOOPBACK_ONLY_NETWORK, resolveNetworkConfig, setServerNetwork, type NetworkConfig } from '../src/server/network-access'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import { provisionToken } from './support/access'
@@ -57,8 +58,21 @@ beforeAll(async () => {
 	await writeFile(join(root, '.uiux', 'workspace.json'), `${JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }, null, 2)}\n`)
 	process.env.UIUX_WORKSPACE_ROOT = root
 
+	server = createServer(toNodeListener(buildApp()))
+	await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+	origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+	process.env.UIUX_SERVER_ORIGIN = origin
+
+	// First run: no human Owner yet, so the server creates one and mints a single-use invite.
+	const banner = await (await getSelectedWorkspaceServerRuntime().access()).bootstrap([origin])
+	inviteLink = banner?.find(line => line.includes('/login#'))?.trim().split(' ').at(-1)
+	agentToken = await provisionToken(root, { nickname: 'claude', kind: 'agent', role: 'editor' })
+})
+
+/** The real routes behind the request gate and the access guard, with the given bind and origin configuration. */
+function buildApp(network?: () => NetworkConfig) {
 	const app = createApp()
-	app.use(createLoopbackGuardHandler())
+	app.use(createLoopbackGuardHandler(network ? { network } : {}))
 	app.use(createAccessGuardHandler(() => getSelectedWorkspaceServerRuntime().access()))
 	const router = createRouter()
 	router.use('/mcp', mcpRoute)
@@ -86,16 +100,8 @@ beforeAll(async () => {
 	router.get('/api/access/mcp-attempts', mcpAttemptsRoute)
 	router.get('/login', () => '<!doctype html><title>Sign in</title>')
 	app.use(router)
-	server = createServer(toNodeListener(app))
-	await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-	origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-	process.env.UIUX_SERVER_ORIGIN = origin
-
-	// First run: no human Owner yet, so the server creates one and mints a single-use invite.
-	const banner = await (await getSelectedWorkspaceServerRuntime().access()).bootstrap(origin)
-	inviteLink = banner?.find(line => line.includes('/login#'))?.trim().split(' ').at(-1)
-	agentToken = await provisionToken(root, { nickname: 'claude', kind: 'agent', role: 'editor' })
-})
+	return app
+}
 
 afterAll(async () => {
 	await new Promise<void>(resolve => server.close(() => resolve()))
@@ -114,7 +120,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 describe('first-run bootstrap and sign-in', () => {
 	it('prints a one-time Owner sign-in link only once, and signs a browser in through the fragment invite', async () => {
 		expect(inviteLink).toMatch(new RegExp(`^${origin}/login#uiux_i_[a-z2-7]{4}_`, 'u'))
-		expect(await (await getSelectedWorkspaceServerRuntime().access()).bootstrap(origin)).toBeUndefined()
+		expect(await (await getSelectedWorkspaceServerRuntime().access()).bootstrap([origin])).toBeUndefined()
 		const invite = inviteLink!.split('#')[1]!
 		const login = await fetch(`${origin}/api/session/login`, json({ credential: invite }))
 		expect(login.status).toBe(200)
@@ -134,6 +140,139 @@ describe('first-run bootstrap and sign-in', () => {
 
 		const me = await fetch(`${origin}/api/session`, { headers: { cookie: ownerCookie } })
 		expect(await me.json()).toMatchObject({ member: { role: 'owner', kind: 'human' }, credential: 'session', workspaceRoot: root })
+	})
+})
+
+describe('configured origins (Feature 01a12500-a0a0-74c0-b83b-3dbb628689e4)', () => {
+	const LAN = 'http://uiux-lan.test:8080'
+	const PROXIED = 'https://uiux.corp.example'
+	let proxyServer: Server
+	let proxyPort: number
+
+	beforeAll(async () => {
+		const resolved = resolveNetworkConfig({ host: '0.0.0.0', origins: [LAN, PROXIED], port: 3000 })
+		if (!resolved.ok) throw new Error(resolved.message)
+		// The /mcp route reads the server-wide configuration for the SDK's own host check.
+		setServerNetwork(resolved.value)
+		proxyServer = createServer(toNodeListener(buildApp(() => resolved.value)))
+		await new Promise<void>(resolve => proxyServer.listen(0, '127.0.0.1', resolve))
+		proxyPort = (proxyServer.address() as AddressInfo).port
+	})
+
+	afterAll(async () => {
+		await new Promise<void>(resolve => proxyServer.close(() => resolve()))
+		setServerNetwork(LOOPBACK_ONLY_NETWORK)
+	})
+
+	/** A request as a same-host reverse proxy forwards it: the client's `Host`, from a loopback peer. */
+	function send(host: string, method: string, path: string, headers: OutgoingHttpHeaders = {}, body?: unknown) {
+		const payload = body === undefined ? undefined : JSON.stringify(body)
+		return new Promise<{ status: number; headers: IncomingHttpHeaders; json: () => Record<string, unknown> }>((resolve, reject) => {
+			const req = httpRequest({ host: '127.0.0.1', port: proxyPort, method, path, headers: { host, ...(payload === undefined ? {} : { 'content-type': 'application/json' }), ...headers } }, (res) => {
+				let text = ''
+				res.setEncoding('utf8').on('data', chunk => text += chunk).on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, json: () => JSON.parse(text) as Record<string, unknown> }))
+			})
+			req.once('error', reject)
+			req.end(payload)
+		})
+	}
+
+	async function ownerInvite(): Promise<string> {
+		const store = (await AccessStore.open({ workspaceRoot: root }))!
+		const owner = store.data.members.find(member => member.kind === 'human' && member.role === 'owner')!
+		return (await store.update(file => createInvite(file, { nickname: owner.nickname }))).credential
+	}
+
+	async function signIn(host: string, headers: OutgoingHttpHeaders = {}) {
+		const response = await send(host, 'POST', '/api/session/login', headers, { credential: await ownerInvite() })
+		expect(response.status).toBe(200)
+		const setCookie = String(response.headers['set-cookie'])
+		return { setCookie, cookie: setCookie.split(';', 1)[0]! }
+	}
+
+	it('sets Secure on the session cookie only for an https origin, whatever X-Forwarded-Proto says', async () => {
+		const secure = await signIn('uiux.corp.example', { 'x-forwarded-proto': 'http' })
+		expect(secure.setCookie).toMatch(/; Secure$/u)
+		expect(secure.setCookie).toContain('SameSite=Strict')
+		const plain = await signIn('uiux-lan.test:8080', { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'uiux.corp.example' })
+		expect(plain.setCookie).not.toContain('Secure')
+		// Sign-out clears the cookie with the same attribute.
+		const out = await send('uiux.corp.example', 'DELETE', '/api/session', { cookie: secure.cookie })
+		expect(out.status).toBe(200)
+		expect(String(out.headers['set-cookie'])).toMatch(/Max-Age=0; Secure$/u)
+	})
+
+	it('refuses roster administration on an http origin with access.admin_origin_rejected, before the permission check', async () => {
+		const { cookie } = await signIn('uiux-lan.test:8080')
+		// The member holds members.manage and is signed in on that origin, yet no Token is created.
+		const store = (await AccessStore.open({ workspaceRoot: root }))!
+		const before = store.data.tokens.length
+		const claude = store.data.members.find(member => member.nickname === 'claude')!
+		const created = await send('uiux-lan.test:8080', 'POST', '/api/access/tokens', { cookie, origin: LAN }, { memberId: claude.id })
+		expect(created.status).toBe(403)
+		expect(created.json()).toMatchObject({ code: 'access.admin_origin_rejected' })
+		await store.refresh({ force: true })
+		expect(store.data.tokens.length).toBe(before)
+		for (const [method, path, body] of [['GET', '/api/access/members'], ['GET', '/api/access/tokens'], ['GET', '/api/access/sessions'], ['GET', '/api/access/mcp-attempts'], ['POST', '/api/access/invites', { memberId: claude.id }], ['POST', '/api/access/members', { nickname: 'x' }]] as const) {
+			const refused = await send('uiux-lan.test:8080', method, path, { cookie, ...(method === 'POST' ? { origin: LAN } : {}) }, body)
+			expect(refused.status, `${method} ${path}`).toBe(403)
+			expect(refused.json()).toMatchObject({ code: 'access.admin_origin_rejected' })
+		}
+		// Precedence (Clause 01a12500-a619-7fa5-b7f6-797adaf52f34): an Agent's Token lacks members.manage
+		// and would get auth.scope_denied anywhere else.
+		const agent = await send('uiux-lan.test:8080', 'GET', '/api/access/members', bearer(agentToken))
+		expect(agent.status).toBe(403)
+		expect(agent.json()).toMatchObject({ code: 'access.admin_origin_rejected' })
+		expect((await send('uiux.corp.example', 'GET', '/api/access/members', bearer(agentToken))).json()).toMatchObject({ code: 'auth.scope_denied' })
+		// Everything else works there like on loopback (Rule 01a12500-af31-7c3e-b619-78c128f18a1d).
+		expect((await send('uiux-lan.test:8080', 'GET', '/api/session', { cookie })).status).toBe(200)
+		expect((await send('uiux-lan.test:8080', 'GET', '/api/resources/workspace/workspace', bearer(agentToken))).status).toBe(200)
+	})
+
+	it('serves roster administration on an https origin and names the matched origin in sign-in links', async () => {
+		const { cookie } = await signIn('uiux.corp.example')
+		expect((await send('uiux.corp.example', 'GET', '/api/access/members', { cookie })).status).toBe(200)
+		const store = (await AccessStore.open({ workspaceRoot: root }))!
+		const owner = store.data.members.find(member => member.kind === 'human' && member.role === 'owner')!
+		const invite = await send('uiux.corp.example', 'POST', '/api/access/invites', { cookie, origin: PROXIED, 'x-forwarded-host': 'evil.test', 'x-forwarded-proto': 'http' }, { memberId: owner.id })
+		expect(invite.status).toBe(201)
+		expect(invite.json().url).toMatch(/^https:\/\/uiux\.corp\.example\/login#uiux_i_/u)
+		// The link's origin is the server's choice, never the client's.
+		const chosen = await send('uiux.corp.example', 'POST', '/api/access/invites', { cookie, origin: PROXIED }, { memberId: owner.id, origin: 'https://attacker.test' })
+		expect(chosen.status).toBe(400)
+	})
+
+	it('binds a session to its origin: a cookie replayed on another origin authenticates nothing', async () => {
+		const lan = await signIn('uiux-lan.test:8080')
+		const replayed = await send('uiux.corp.example', 'GET', '/api/access/members', { cookie: lan.cookie })
+		expect(replayed.status).toBe(401)
+		expect(replayed.json()).toMatchObject({ code: 'auth.invalid_credential' })
+		// The cookie stays valid on its own origin.
+		expect((await send('uiux-lan.test:8080', 'GET', '/api/session', { cookie: lan.cookie })).status).toBe(200)
+		// A loopback session does not reach a configured origin either.
+		expect((await send('uiux.corp.example', 'GET', '/api/session', { cookie: ownerCookie })).status).toBe(401)
+	})
+
+	it('checks Origin against the matched origin, scheme included, and records the origin of rejected /mcp attempts', async () => {
+		const mismatched = await send('uiux.corp.example', 'POST', '/api/views', { ...bearer(agentToken), origin: 'http://uiux.corp.example' }, { name: 'x', spec })
+		expect(mismatched.status).toBe(403)
+		expect(mismatched.json()).toMatchObject({ code: 'request.origin_rejected' })
+		expect((await send('uiux-lan.test:8080', 'POST', '/api/views', { ...bearer(agentToken), origin: PROXIED }, { name: 'x', spec })).status).toBe(403)
+		const mcpHeaders = { accept: 'application/json, text/event-stream', 'user-agent': 'lan-agent/1.0' }
+		const initialize = { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } } }
+		expect((await send('uiux-lan.test:8080', 'POST', '/mcp', mcpHeaders, initialize)).status).toBe(401)
+		expect((await send('uiux-lan.test:8080', 'POST', '/mcp', { ...mcpHeaders, origin: PROXIED }, initialize)).status).toBe(403)
+		expect((await send('uiux-lan.test:8080', 'POST', '/mcp', { ...mcpHeaders, ...bearer(agentToken), origin: LAN }, initialize)).status).toBe(200)
+		const { cookie } = await signIn('uiux.corp.example')
+		const attempts = (await send('uiux.corp.example', 'GET', '/api/access/mcp-attempts', { cookie })).json() as { recent: { userAgent: string; origin: string }[] }
+		expect(attempts.recent.find(item => item.userAgent === 'lan-agent/1.0')).toMatchObject({ origin: LAN })
+	})
+
+	it('refuses a foreign Host and a configured host name on another port', async () => {
+		expect((await send('rebind.attacker.test', 'GET', '/api/health')).status).toBe(421)
+		expect((await send('uiux-lan.test', 'GET', '/api/health')).status).toBe(421)
+		expect((await send('uiux.corp.example:8443', 'GET', '/api/health')).status).toBe(421)
+		expect((await send('uiux.corp.example:443', 'GET', '/api/health')).status).toBe(200)
 	})
 })
 

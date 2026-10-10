@@ -10,6 +10,7 @@ import {
 	type SystemPrincipal,
 	type SystemPrincipalId,
 } from '../../application/access/principal'
+import { isLoopbackHostname } from '../network-access'
 import { generateCredential, parseCredential, sessionCookieName } from './credentials'
 import {
 	AccessError,
@@ -33,6 +34,7 @@ import {
 	type MemberSummary,
 	type Mutation,
 	type StoredMember,
+	type StoredSession,
 	type StoredToken,
 } from './roster'
 import type { AccessStore } from './store'
@@ -44,12 +46,17 @@ import type { AccessStore } from './store'
  */
 export type AuthSurface = 'api' | 'mcp'
 
+/** The origin a request's `Host` matched (see `MatchedOrigin` in `src/server/loopback-guard.ts`). */
+export type RequestOrigin = Readonly<{ origin: string; loopbackHost: boolean }>
+
 export type AuthenticateInput = Readonly<{
 	surface: AuthSurface
 	authorization?: string
 	cookieHeader?: string
 	remoteAddress?: string
 	userAgent?: string
+	/** The matched origin; a session cookie is accepted only on the origin it was created on. */
+	origin?: RequestOrigin
 }>
 
 export type AuthFailureCode = 'auth.required' | 'auth.invalid_credential' | 'auth.rate_limited'
@@ -66,7 +73,8 @@ export type AuthFailure = Readonly<{
 
 export type AuthResult = Readonly<{ ok: true; principal: Principal }> | AuthFailure
 
-export type McpAttempt = Readonly<{ at: string; userAgent: string; listener: 'loopback'; code: AuthFailureCode }>
+/** A rejected `/mcp` attempt, with the origin its `Host` matched (Rule 01a11485-ed7e-7866-bec2-6deca0ec6cb1). */
+export type McpAttempt = Readonly<{ at: string; userAgent: string; origin: string; code: AuthFailureCode }>
 
 export type AccessServiceOptions = Readonly<{
 	store: AccessStore
@@ -185,9 +193,9 @@ export class AccessService {
 		}
 	}
 
-	private recordMcpAttempt(code: AuthFailureCode, userAgent: string | undefined): void {
+	private recordMcpAttempt(code: AuthFailureCode, userAgent: string | undefined, origin: RequestOrigin | undefined): void {
 		this.attemptCount += 1
-		this.attempts.push({ at: new Date(this.now()).toISOString(), userAgent: (userAgent ?? '').slice(0, 200), listener: 'loopback', code })
+		this.attempts.push({ at: new Date(this.now()).toISOString(), userAgent: (userAgent ?? '').slice(0, 200), origin: origin?.origin ?? '', code })
 		if (this.attempts.length > MAX_MCP_ATTEMPTS) this.attempts.splice(0, this.attempts.length - MAX_MCP_ATTEMPTS)
 	}
 
@@ -197,7 +205,7 @@ export class AccessService {
 
 	async authenticate(input: AuthenticateInput): Promise<AuthResult> {
 		const result = await this.authenticateInner(input)
-		if (!result.ok && input.surface === 'mcp') this.recordMcpAttempt(result.code, input.userAgent)
+		if (!result.ok && input.surface === 'mcp') this.recordMcpAttempt(result.code, input.userAgent, input.origin)
 		return result
 	}
 
@@ -240,6 +248,11 @@ export class AccessService {
 			this.recordUsage(this.tokenUsage, verification.token!.id, now)
 			return { ok: true, principal: memberPrincipal(verification.member, 'token', verification.token!.id) }
 		}
+		// A session belongs to the origin where it was created (Rule 01a11485-ed4a-766b-a51c-af2b9ffb1fcb):
+		// a cookie replayed on another origin authenticates nothing there. It is not a guess, so it
+		// does not count toward the rate limit, and the cookie is kept for its own origin.
+		if (input.origin && !sessionServesOrigin(verification.session!, input.origin))
+			return { ok: false, status: 401, code: 'auth.invalid_credential', message: 'This session was created on another origin of this server. Sign in again here.' }
 		this.recordUsage(this.sessionUsage, verification.session!.id, now)
 		return { ok: true, principal: memberPrincipal(verification.member, 'session', verification.session!.id) }
 	}
@@ -264,7 +277,7 @@ export class AccessService {
 	}
 
 	/** `POST /api/session/login`: an invite (single use) or a member token becomes a fresh session. */
-	async login(credential: unknown, meta: Readonly<{ remoteAddress?: string; userAgent?: string }>): Promise<
+	async login(credential: unknown, meta: Readonly<{ remoteAddress?: string; userAgent?: string; origin: string }>): Promise<
 		| Readonly<{ ok: true; member: StoredMember; cookieValue: string; cookieName: string; maxAgeSeconds: number }>
 		| AuthFailure
 	> {
@@ -286,7 +299,7 @@ export class AccessService {
 			const outcome = await this.mutate<Readonly<{ member: StoredMember; cookieValue: string }>>((file) => {
 				const fresh = verifyCredential(file, presented, this.now())
 				if (!fresh.ok || fresh.kind === 'session') throw new AccessError('access.store_invalid', 'credential no longer valid')
-				return loginWithCredential(file, fresh, { listener: 'loopback', userAgent: meta.userAgent ?? '' }, new Date(this.now()))
+				return loginWithCredential(file, fresh, { origin: meta.origin, userAgent: meta.userAgent ?? '' }, new Date(this.now()))
 			})
 			return { ok: true, member: outcome.member, cookieValue: outcome.cookieValue, cookieName: this.cookieName, maxAgeSeconds: SESSION_COOKIE_MAX_AGE_SECONDS }
 		}
@@ -312,7 +325,7 @@ export class AccessService {
 	 * First-run bootstrap (decision 8): when the roster has no human Owner, create one named after
 	 * the OS user and mint a 24-hour single-use invite. Returns the banner lines, or undefined.
 	 */
-	async bootstrap(origin: string): Promise<readonly string[] | undefined> {
+	async bootstrap(origins: readonly string[]): Promise<readonly string[] | undefined> {
 		await this.refresh(true)
 		if (hasHumanOwner(this.store.data)) return undefined
 		let username: string | undefined
@@ -330,7 +343,11 @@ export class AccessService {
 		const root = this.workspaceRoot
 		return [
 			`UIUX access: created Owner "${outcome.nickname}" for ${root} (roster ${this.hint}, first run).`,
-			`  Sign in (single use, expires in 24 h): ${origin}/login#${outcome.invite}`,
+			// One single-use invite, offered on the loopback URL and on each configured origin (Rule 01a12515-9c61-7916-a0d0-4bcf2537dfc9).
+			origins.length > 1
+				? '  Sign in on any one of these (one single-use invite, expires in 24 h):'
+				: '  Sign in (single use, expires in 24 h):',
+			...origins.map(origin => `    ${origin}/login#${outcome.invite}`),
 			'/mcp requires a token. For an agent:',
 			`  uiux member add claude --workspace ${root} --kind agent --role editor`,
 			`  uiux token create --workspace ${root} --member claude`,
@@ -389,7 +406,7 @@ export class AccessService {
 		return this.mutate<StoredMember>(file => removeMember(file, nicknameOf(file, memberId)))
 	}
 
-	createToken(input: Readonly<{ memberId: string; label?: string; expiresInDays?: number | null; lan?: boolean }>) {
+	createToken(input: Readonly<{ memberId: string; label?: string; expiresInDays?: number | null }>) {
 		return this.mutate<Readonly<{ entry: StoredToken; credential: string }>>(file => createToken(file, { ...input, nickname: nicknameOf(file, input.memberId) }, new Date(this.now())))
 	}
 
@@ -436,8 +453,24 @@ export function memberPrincipal(member: StoredMember, credential: 'session' | 't
 		role: effectiveRole(member.kind, member.role),
 		credential,
 		credentialId,
-		listener: 'loopback',
 	}
+}
+
+function isLoopbackOrigin(origin: string): boolean {
+	try { return isLoopbackHostname(new URL(origin).hostname) }
+	catch { return false }
+}
+
+/**
+ * Whether a session serves a request on `origin`. Loopback sessions (a loopback host name, or a
+ * session written before configured origins existed) serve every loopback origin, where the
+ * browser already keeps one cookie per host name; a session created on any other origin serves
+ * only that origin.
+ */
+export function sessionServesOrigin(session: StoredSession, origin: RequestOrigin): boolean {
+	if (session.origin === undefined) return session.listener === 'loopback' && origin.loopbackHost
+	if (origin.loopbackHost && isLoopbackOrigin(session.origin)) return true
+	return session.origin === origin.origin
 }
 
 function parseBearer(header: string | undefined): { value?: string; malformed: boolean } {

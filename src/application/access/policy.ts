@@ -6,7 +6,6 @@ import { principalRole, roleAtLeast, type AccessRole, type Principal } from './p
  *
  * - `humanOnly` (H): members of kind `human` only.
  * - `sessionOnly` (S): a Workbench cookie session only; bearer tokens are refused.
- * - `loopbackOnly` (L): the loopback listener only (the only listener that ships).
  * - `system`: the in-memory system principal (`system:capture`) may call it.
  * - `permissionKey`: the permission key the operation needs (Clause 01a11c09-a26e-73bb-9a29-eed40aae37bd),
  *   recorded ahead of permission keys (seam 5 of the version timeline). Until keys are built, a
@@ -17,7 +16,6 @@ export type OperationRule = Readonly<{
 	minRole: AccessRole
 	humanOnly?: boolean
 	sessionOnly?: boolean
-	loopbackOnly?: boolean
 	system?: boolean
 	permissionKey?: PermissionKey
 }>
@@ -108,7 +106,9 @@ export const ACCESS_OPERATIONS = {
 	forceReleaseLease: { minRole: 'owner', humanOnly: true, sessionOnly: true },
 	// `checkpoints.delete` (Clause 01a11485-fa66-7cde-a10f-b8b796d01469), a humanOnly key, offered in the Workbench only.
 	deleteCheckpoint: { minRole: 'owner', humanOnly: true, sessionOnly: true, permissionKey: 'checkpoints.delete' },
-	administerAccess: { minRole: 'owner', humanOnly: true, sessionOnly: true, loopbackOnly: true },
+	// Served only on a loopback origin or an `https` configured origin (Rule 01a12500-b105-7773-822f-359d4dcbd1da);
+	// the HTTP layer refuses every other origin before this rule runs (Clause 01a12500-a619-7fa5-b7f6-797adaf52f34).
+	administerAccess: { minRole: 'owner', humanOnly: true, sessionOnly: true },
 } as const satisfies Record<string, OperationRule>
 
 export type AccessOperation = keyof typeof ACCESS_OPERATIONS
@@ -159,7 +159,5 @@ export function authorizeOperation(principal: Principal, operation: AccessOperat
 		return deny(`${operation} requires a human member; ${principal.nickname} is an agent.`)
 	if (rule.sessionOnly && principal.credential !== 'session')
 		return deny(`${operation} requires a signed-in Workbench session; bearer tokens cannot perform it.`)
-	if (rule.loopbackOnly && principal.listener !== 'loopback')
-		return deny(`${operation} is available on the loopback listener only.`)
 	return undefined
 }

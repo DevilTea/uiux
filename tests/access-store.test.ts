@@ -27,11 +27,13 @@ import {
 	revokeToken,
 	sanitizeNickname,
 	setMember,
+	validateAccessFile,
 	verifyCredential,
 	DAY_MS,
 	SESSION_IDLE_MS,
 	type AccessFile,
 } from '../src/server/access/roster'
+import { sessionServesOrigin } from '../src/server/access/service'
 import { AccessStore, accessStorePaths, workspaceStoreId } from '../src/server/access/store'
 
 const cleanup: string[] = []
@@ -133,12 +135,14 @@ describe('roster rules', () => {
 		expectAccessError(() => setMember(file, 'ghost', { role: 'viewer' }), 'access.member_not_found')
 	})
 
-	it('issues 90-day loopback tokens by default, honours --expires never and --lan, and verifies by id + hash', () => {
+	it('issues 90-day tokens by default, honours --expires never, and verifies by id + hash', () => {
 		const file = rosterWithOwner()
 		const issued = createToken(file, { nickname: 'claude', label: 'laptop' }, NOW)
-		expect(issued.result.entry).toMatchObject({ label: 'laptop', lan: false, lastUsedAt: null, revokedAt: null, expiresAt: new Date(NOW.getTime() + 90 * DAY_MS).toISOString() })
+		expect(issued.result.entry).toMatchObject({ label: 'laptop', lastUsedAt: null, revokedAt: null, expiresAt: new Date(NOW.getTime() + 90 * DAY_MS).toISOString() })
+		// The LAN flag is gone (Discussion #174): a Token works on every accepted origin.
+		expect(issued.result.entry).not.toHaveProperty('lan')
 		expect(JSON.stringify(issued.file)).not.toContain(issued.result.credential)
-		expect(createToken(file, { nickname: 'claude', expiresInDays: null, lan: true }, NOW).result.entry).toMatchObject({ expiresAt: null, lan: true })
+		expect(createToken(file, { nickname: 'claude', expiresInDays: null }, NOW).result.entry).toMatchObject({ expiresAt: null })
 		expectAccessError(() => createToken(file, { nickname: 'claude', expiresInDays: 0 }, NOW), 'access.invalid_expiry')
 
 		const now = NOW.getTime()
@@ -166,14 +170,14 @@ describe('roster rules', () => {
 		const now = NOW.getTime()
 		const verified = verifyCredential(invite.file, invite.result.credential, now)
 		if (!verified.ok) throw new Error('invite should verify')
-		const login = loginWithCredential(invite.file, verified, { listener: 'loopback', userAgent: 'test' }, NOW)
+		const login = loginWithCredential(invite.file, verified, { origin: 'http://127.0.0.1:3000', userAgent: 'test' }, NOW)
 		expect(login.result.cookieValue).toMatch(/^uiux_s_k3x7_/u)
 		expect(verifyCredential(login.file, invite.result.credential, now)).toMatchObject({ ok: false, reason: 'expired' })
 		// A token sign-in mints another fresh session and the token stays valid.
 		const ownerToken = createToken(login.file, { nickname: 'deviltea' }, NOW)
 		const byToken = verifyCredential(ownerToken.file, ownerToken.result.credential, now)
 		if (!byToken.ok) throw new Error('token should verify')
-		const second = loginWithCredential(ownerToken.file, byToken, { listener: 'loopback', userAgent: 'x' }, NOW)
+		const second = loginWithCredential(ownerToken.file, byToken, { origin: 'https://uiux.corp.example', userAgent: 'x' }, NOW)
 		expect(second.result.session.id).not.toBe(login.result.session.id)
 		expect(verifyCredential(second.file, ownerToken.result.credential, now)).toMatchObject({ ok: true, kind: 'token' })
 		expect(verifyCredential(invite.file, invite.result.credential, now + DAY_MS + 1)).toMatchObject({ ok: false, reason: 'expired' })
@@ -235,6 +239,60 @@ describe('host-local access store', () => {
 		// Opening through the target shares the roster.
 		expect((await AccessStore.open({ workspaceRoot: workspace, home }))!.data.hint).toBe(file.hint)
 		expect(await AccessStore.open({ workspaceRoot: join(base, 'other'), home }).catch((error: AccessError) => error.code)).toBe('access.workspace_invalid')
+	})
+
+	it('keeps loading rosters written before configured origins: Token LAN flags and session listeners', async () => {
+		const { workspace, home } = await workspaceAndHome()
+		await AccessStore.open({ workspaceRoot: workspace, home, create: true })
+		const paths = accessStorePaths(home, workspace)
+		let file = JSON.parse(await readFile(paths.file, 'utf8')) as AccessFile
+		file = addMember(file, { nickname: 'deviltea', role: 'owner' }, NOW).file
+		file = addMember(file, { nickname: 'claude', role: 'editor', kind: 'agent' }, NOW).file
+		const token = createToken(file, { nickname: 'claude' }, NOW)
+		const invite = createInvite(token.file, { nickname: 'deviltea' }, NOW)
+		const verified = verifyCredential(invite.file, invite.result.credential, NOW.getTime())
+		if (!verified.ok) throw new Error('invite should verify')
+		const login = loginWithCredential(invite.file, verified, { origin: 'http://127.0.0.1:3000', userAgent: 'old' }, NOW)
+		// The shape an earlier UIUX wrote: `lan` on every Token, `listener` instead of `origin` on sessions.
+		const legacy = {
+			...login.file,
+			tokens: login.file.tokens.map(item => ({ ...item, lan: true })),
+			sessions: login.file.sessions.map(item => ({ ...item, origin: undefined, listener: 'loopback' as const })),
+		}
+		await writeFile(paths.file, `${JSON.stringify(legacy, null, 2)}\n`)
+		const reopened = (await AccessStore.open({ workspaceRoot: workspace, home }))!
+		const now = NOW.getTime()
+		expect(verifyCredential(reopened.data, token.result.credential, now)).toMatchObject({ ok: true, kind: 'token' })
+		const session = verifyCredential(reopened.data, login.result.cookieValue, now)
+		expect(session).toMatchObject({ ok: true, kind: 'session' })
+		// A Token created with --lan behaves like any other; a legacy session is a loopback session.
+		if (!session.ok) throw new Error('session should verify')
+		expect(sessionServesOrigin(session.session!, { origin: 'http://localhost:3000', loopbackHost: true })).toBe(true)
+		expect(sessionServesOrigin(session.session!, { origin: 'https://uiux.corp.example', loopbackHost: false })).toBe(false)
+		expect(sessionServesOrigin({ ...session.session!, listener: 'lan' }, { origin: 'http://localhost:3000', loopbackHost: true })).toBe(false)
+		// Writing keeps the legacy fields it does not understand, and new sessions carry their origin.
+		await reopened.update(current => ({ file: current, result: undefined }))
+		expect(JSON.parse(await readFile(paths.file, 'utf8')).tokens[0]).toMatchObject({ lan: true })
+
+		const invalid = { ...legacy, sessions: legacy.sessions.map(item => ({ ...item, listener: undefined })) }
+		expectAccessError(() => validateAccessFile(invalid), 'access.store_invalid')
+		expectAccessError(() => validateAccessFile({ ...legacy, tokens: legacy.tokens.map(item => ({ ...item, lan: 'yes' })) }), 'access.store_invalid')
+	})
+
+	it('binds a session to the origin it was created on, with loopback origins sharing one scope', () => {
+		const at = (origin: string) => ({ id: 'aaaaaaaaaa', memberId: '11111111-1111-4111-8111-111111111111', hash: '', origin, userAgent: '', createdAt: '', lastSeenAt: '', expiresAt: '' })
+		const loopback = { origin: 'http://127.0.0.1:3000', loopbackHost: true }
+		const proxied = { origin: 'https://uiux.corp.example', loopbackHost: false }
+		const lan = { origin: 'http://10.0.0.5:3000', loopbackHost: false }
+		expect(sessionServesOrigin(at('http://127.0.0.1:3000'), loopback)).toBe(true)
+		// The browser keeps one cookie per host name, so a loopback session serves every loopback origin.
+		expect(sessionServesOrigin(at('http://localhost:4000'), loopback)).toBe(true)
+		expect(sessionServesOrigin(at('http://127.0.0.1:3000'), proxied)).toBe(false)
+		expect(sessionServesOrigin(at('https://uiux.corp.example'), proxied)).toBe(true)
+		expect(sessionServesOrigin(at('https://uiux.corp.example'), loopback)).toBe(false)
+		// A cookie captured on a plain-HTTP origin authenticates nothing on the https origin.
+		expect(sessionServesOrigin(at('http://10.0.0.5:3000'), proxied)).toBe(false)
+		expect(sessionServesOrigin(at('http://10.0.0.5:3000'), lan)).toBe(true)
 	})
 
 	it('refuses symlinked or group/other-writable stores, a mismatched root and a UIUX_HOME inside the Workspace', async () => {
