@@ -259,7 +259,7 @@ function initBridge() {
 			runtimeGenerationId.value,
 			// `widget.events` ships with the mount factory (decision 10). A formal capture has no
 			// Workbench parent and is never armed, and a version frame is read-only: neither declares it.
-			{ protocolVersion: 1, features: harnessMode.value || versionId ?['geometry', MULTI_TARGET_GEOMETRY_FEATURE] : ['geometry', MULTI_TARGET_GEOMETRY_FEATURE, WIDGET_EVENTS_FEATURE] },
+			{ protocolVersion: 1, features: harnessMode.value || versionId ? ['geometry', MULTI_TARGET_GEOMETRY_FEATURE] : ['geometry', MULTI_TARGET_GEOMETRY_FEATURE, WIDGET_EVENTS_FEATURE] },
 			// Transport-level batching (see `PreviewWireBatchEnvelope`): every envelope of one task (a
 			// frame's geometry reports, a Widget Event occurrence) leaves in one post, in order.
 			createBatchingWireSender((post) => {
@@ -293,6 +293,8 @@ async function readLocale(code: string): Promise<I18nResource | undefined> {
 
 /** Version mode: the version's manifest and Locale list decide the defaults and the fallbacks. */
 async function resolveVersionDefaults() {
+	// A publication holds no versions: say so, as for any View the version does not hold.
+	if (uiux.isReadOnly.value) throw new Error(t('preview.errors.viewNotInVersion'))
 	versionManifest = (await uiux.readVersionResource<WorkspaceManifest>(versionId!, 'workspace', 'workspace'))?.resource
 	versionLocales ??= (await $fetch<{ version: { resources: readonly { kind: string; key: string }[] } }>(`/api/history/versions/${encodeURIComponent(versionId!)}`, { cache: 'no-store' }))
 		.version.resources.filter(resource => resource.kind === 'locale').map(resource => resource.key)

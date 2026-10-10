@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import { useI18n } from '#imports'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useVersionFrame } from '../../composables/useVersionFrame'
 import type { FrameContextSelection } from '../../../src/preview/version-frame-context'
@@ -29,7 +28,6 @@ const props = defineProps<{
 /** How many outlined Widgets get no geometry stream because of the tracking cap. */
 const emit = defineEmits<{ (e: 'overCap', count: number): void }>()
 
-const { t } = useI18n()
 const uiux = useUiuxClient()
 const session = useVersionFrame({
 	viewId: props.viewId,
@@ -72,7 +70,6 @@ const outlines = computed(() => {
 		return [{
 			widgetId: highlight.widgetId,
 			kinds: highlight.kinds.join(' '),
-			label: highlight.kinds.map(kind => t(`history.canvas.legend.${kind}`)).join(' · '),
 			style: {
 				left: `${report.rect.x - width}px`,
 				top: `${report.rect.y - width}px`,
@@ -117,7 +114,6 @@ const outlines = computed(() => {
         :key="outline.widgetId"
         class="absolute rounded-xs"
         :style="outline.style"
-        :title="outline.label"
         :data-highlight-widget="outline.widgetId"
         :data-highlight="outline.kinds"
       />

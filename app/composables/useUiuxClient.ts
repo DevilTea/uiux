@@ -8,7 +8,7 @@ import type { HandoffRoot } from '../../src/domain/handoff/schema'
 
 export type VersionResourceRead<T> = Readonly<{ versionId: string; kind: string; key: string; revision: string; workspaceSchemaVersion: number; resource: T }>
 
-type ResourceListPage<T> =Readonly<{ items: readonly T[]; nextCursor?: string }>
+type ResourceListPage<T> = Readonly<{ items: readonly T[]; nextCursor?: string }>
 
 type PreviewAdaptersResponse =
 	| { state: 'valid'; diagnostics: readonly []; summaries: readonly unknown[]; bundleUrl: string }

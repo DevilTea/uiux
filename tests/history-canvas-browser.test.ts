@@ -115,13 +115,14 @@ const VIEWPORTS: Record<Device, { width: number; height: number }> = {
 	landscape: { width: 844, height: 390 },
 }
 
-async function open(path: string, device: Device = 'desktop'): Promise<{ context: BrowserContext; page: Page }> {
+async function open(path: string, device: Device = 'desktop', prepare?: (context: BrowserContext) => Promise<void>): Promise<{ context: BrowserContext; page: Page }> {
 	const context = await browser.newContext({ viewport: VIEWPORTS[device], colorScheme: 'light', ...(device === 'phone' || device === 'landscape' ? { hasTouch: true, isMobile: true } : {}) })
 	await context.addInitScript(() => {
 		localStorage.setItem('nuxt-color-mode', 'light')
 		localStorage.setItem('uiux.workbench.locale', 'en-US')
 	})
 	await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
+	await prepare?.(context)
 	const page = await context.newPage()
 	await page.goto(`${server.origin}${path}`, { waitUntil: 'networkidle' })
 	return { context, page }
@@ -332,6 +333,29 @@ describe('canvas comparison', () => {
 			await context.close()
 			await editStructure((_ir, variants) => { delete variants[variant] })
 		}
+	}, 120_000)
+
+	it('offers Retry on a frame whose version could not be read, and renders it once the read succeeds', async () => {
+		const seeded = await seedStructureChange()
+		let failing = true
+		const { context, page } = await open(`/views/${VIEW_ID}?panel=history&version=${seeded.after}&canvas=side`, 'desktop', async (context) => {
+			await context.route(`**/api/history/versions/${seeded.before}/resources/view/**`, async (route) => {
+				if (failing) await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ status: 'failed', code: 'history.blob_missing', message: 'Injected failure.', diagnostics: [] }) })
+				else await route.continue()
+			})
+		})
+		try {
+			const placeholder = page.locator('[data-version-canvas] [data-frame-slot="before"] [data-frame-placeholder="error"]')
+			await placeholder.waitFor({ timeout: 20_000 })
+			await frameDocument(page, 'after')
+			// A transient failure is not kept: Retry reads the side again.
+			failing = false
+			await placeholder.locator('[data-frame-retry]').click()
+			const before = await frameDocument(page, 'before')
+			await before.locator(`[data-widget-id="${seeded.ids.removed}"]`).waitFor({ state: 'attached' })
+			expect(await page.locator('[data-frame-placeholder="error"]').count()).toBe(0)
+		}
+		finally { await context.close() }
 	}, 120_000)
 })
 
