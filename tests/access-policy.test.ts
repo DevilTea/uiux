@@ -50,7 +50,6 @@ const MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; H?: t
 	readArtifact: { min: 'viewer', system: true },
 	readAssetContent: { min: 'viewer', system: true },
 	readPreview: { min: 'viewer', system: true },
-	readPublicationSnapshot: { min: 'viewer', system: true },
 	assessHandoffReadiness: { min: 'viewer' },
 	listLeases: { min: 'viewer' },
 	diffVersions: { min: 'viewer' },
@@ -113,7 +112,7 @@ describe('permission matrix (role × operation)', () => {
 				expect(denied === undefined, `${operation} as ${principal.nickname}`).toBe(allowed)
 				if (denied) expect(denied).toMatchObject({ code: 'auth.scope_denied', requiredRole: rule.min })
 			}
-			for (const id of ['system:capture', 'system:publish'] as const) {
+			for (const id of ['system:capture'] as const) {
 				const system: SystemPrincipal = { type: 'system', id, role: 'viewer', credential: 'system' }
 				expect(authorizeOperation(system, operation) === undefined, `${operation} as ${id}`).toBe(rule.system === true)
 			}
@@ -188,7 +187,7 @@ describe('permission-key annotations (seam 5; Clauses 01a11c09-a26e-73bb-9a29-ee
 
 	it('refuses every history operation to the system credentials (Clause 01a11485-f978-767a-b977-33028aee7ae7)', () => {
 		for (const operation of ['diffVersions', 'listVersions', 'readVersion', 'readVersionForPreview', 'createCheckpoint', 'deleteCheckpoint'] as const) {
-			for (const id of ['system:capture', 'system:publish'] as const)
+			for (const id of ['system:capture'] as const)
 				expect(authorizeOperation({ type: 'system', id, role: 'viewer', credential: 'system' }, operation), `${operation} as ${id}`).toMatchObject({ code: 'auth.scope_denied' })
 		}
 	})

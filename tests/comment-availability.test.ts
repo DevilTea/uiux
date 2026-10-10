@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { commentCreateBlock, commentToolBlock, type CommentAvailabilityInput } from '../app/utils/comment-availability'
 
 const READY: CommentAvailabilityInput = {
-	publication: false,
 	signedIn: true,
 	canReview: true,
 	handset: false,
@@ -17,7 +16,6 @@ describe('comment availability (review feedback 8dd59d25)', () => {
 	})
 
 	it('names each blocking state, in the order a person can fix it', () => {
-		expect(commentCreateBlock({ ...READY, publication: true, canReview: false, handset: true })).toBe('publication')
 		expect(commentCreateBlock({ ...READY, workspaceState: 'migration_required', canReview: false })).toBe('migration')
 		expect(commentCreateBlock({ ...READY, workspaceState: 'unsupported' })).toBe('unsupported')
 		expect(commentCreateBlock({ ...READY, signedIn: false, canReview: false })).toBe('signed-out')

@@ -350,8 +350,6 @@ describe('diffVersions', () => {
 		const known = await record(ctx, 'checkpoint', { at: '2026-10-01T00:00:00.000Z' })
 		const app = createWorkspaceApplicationSession(ctx.persistence)
 		expect(await app.diffVersions({ from: known })).toMatchObject({ status: 'not_found', code: 'history.record_missing' })
-		const publishing = createHistoryStoreFactory({ workspaceRoot: ctx.root, persistence: ctx.persistence, home: () => '/nonexistent', publishCredential: 'x' })
-		expect(await createWorkspaceApplicationSession(ctx.persistence, { history: publishing }).diffVersions({ from: known })).toMatchObject({ status: 'not_found' })
 	})
 })
 
@@ -407,7 +405,7 @@ describe('GET /api/history/diff access (Clause 01a11485-f978-767a-b977-33028aee7
 		const refused = await fetch(`${origin}/api/history/diff?from=${checkpointId}`, { headers: { cookie: `${access.cookieName}=${access.captureCredential}` } })
 		expect(refused.status).toBe(403)
 		expect(await refused.json()).toMatchObject({ status: 'blocked', code: 'auth.scope_denied' })
-		for (const id of ['system:capture', 'system:publish'] as const)
+		for (const id of ['system:capture'] as const)
 			expect(authorizeOperation({ type: 'system', id, role: 'viewer', credential: 'system' }, 'diffVersions')).toMatchObject({ code: 'auth.scope_denied' })
 
 		expect((await fetch(`${origin}/api/history/diff?from=${checkpointId}`)).status).toBe(401)

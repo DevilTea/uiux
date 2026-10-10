@@ -3,7 +3,6 @@ import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import type { HandoffBlockingDiagnostic, HandoffReadiness } from '../src/domain/handoff/schema'
 import {
 	contextKey,
-	diagnosticsForView,
 	evidenceFreshness,
 	expandContexts,
 	groupFindings,
@@ -53,17 +52,10 @@ describe('Handoff assessment: blocking versus advisory (R9)', () => {
 		expect(reviewCoverageSummary(undefined).resolvedTotal).toBe(0)
 	})
 
-	it('names the resource a diagnostic is about and narrows a Workspace assessment to one View', () => {
+	it('names the resource a diagnostic is about', () => {
 		expect(handoffDiagnosticSubject({ path: `/views/${VIEW}` })).toEqual({ viewId: VIEW })
 		expect(handoffDiagnosticSubject({ path: `/reviews/${REVIEW}` })).toEqual({ reviewId: REVIEW })
 		expect(handoffDiagnosticSubject({ path: '/i18n/zh-TW.json/messages' })).toEqual({ locale: 'zh-TW' })
-		const narrowed = diagnosticsForView([
-			diagnostic('a', true, `/views/${VIEW}`),
-			diagnostic('b', true, '/views/other'),
-			diagnostic('c', false, `/reviews/${REVIEW}`),
-			diagnostic('d', true, '/workspace'),
-		], VIEW, new Map([[REVIEW, VIEW]]))
-		expect(narrowed.map(item => item.code)).toEqual(['a', 'c'])
 	})
 })
 

@@ -74,7 +74,7 @@ describe('loopback request policy', () => {
 	})
 
 	it('blocks DNS-rebinding Host values on /mcp, /api and SPA assets alike', () => {
-		for (const path of ['/mcp', '/api/views', '/api/publication/snapshot', '/_nuxt/entry.js', '/preview'])
+		for (const path of ['/mcp', '/api/views', '/api/history/versions', '/_nuxt/entry.js', '/preview'])
 			expect(evaluate('GET', path, { host: `rebind.attacker.test:${PORT}` })?.status).toBe(421)
 		expect(evaluate('POST', '/mcp', { host: `rebind.attacker.test:${PORT}`, ...json })?.status).toBe(421)
 	})

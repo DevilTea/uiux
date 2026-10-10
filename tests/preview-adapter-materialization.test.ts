@@ -10,7 +10,6 @@ import {
 import {
 	buildWorkspacePreviewBundle,
 	clearPreviewBundleCache,
-	computePublishedPreviewHash,
 } from '../src/server/preview-bundler'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
@@ -406,33 +405,6 @@ describe('preview adapter materialization transport', () => {
 		expect(unavailableStatus?.unsupportedTypes).toEqual(['Counter'])
 		expect(unavailableStatus?.diagnostics?.some(d => d.code === 'adapter.materialization_unavailable')).toBe(true)
 		unavailableBridge.dispose()
-	})
-
-	it('uses emitted Preview bytes rather than host paths for publication identity', async () => {
-		const roots = await Promise.all([
-			createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }]),
-			createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }]),
-		])
-		for (const root of roots) {
-			await mkdir(join(root, 'adapters'), { recursive: true })
-			await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
-		}
-
-		const resolutions = await Promise.all(roots.map(root => resolveSelectedWorkspaceAdapters(root)))
-		if (resolutions.some(result => result.state !== 'valid')) throw new Error('Expected valid adapter resolutions')
-		const validResolutions = resolutions as Array<Extract<typeof resolutions[number], { state: 'valid' }>>
-		const bundles = await Promise.all(roots.map((root, index) =>
-			buildWorkspacePreviewBundle({
-				workspaceRoot: root,
-				set: validResolutions[index]!.set,
-			}),
-		))
-
-		// The dev cache key intentionally includes physical path information.
-		expect(bundles[0]?.hash).not.toBe(bundles[1]?.hash)
-		// Publication identity is based on the emitted browser artifact only.
-		expect(bundles[0]?.bundleJs).toBe(bundles[1]?.bundleJs)
-		expect(computePublishedPreviewHash(bundles[0]!.bundleJs)).toBe(computePublishedPreviewHash(bundles[1]!.bundleJs))
 	})
 
 	it('ensures adapter module changes on disk are not incorrectly masked by cache', async () => {

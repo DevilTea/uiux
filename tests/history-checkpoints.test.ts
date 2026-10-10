@@ -368,10 +368,9 @@ describe('creating a Checkpoint', () => {
 		expect(Date.parse(versions[0]!.at)).toBeGreaterThan(Date.parse(versions[1]!.at))
 	})
 
-	it('cannot be created where history is off (the internal uiux publish server)', async () => {
+	it('cannot be created where history is off', async () => {
 		const ctx = await fixture()
-		const publishing = createHistoryStoreFactory({ workspaceRoot: ctx.root, persistence: ctx.persistence, home: () => '/nonexistent', publishCredential: 'x' })
-		const app = createWorkspaceApplicationSession(ctx.persistence, { history: publishing })
+		const app = createWorkspaceApplicationSession(ctx.persistence)
 		expect(await createCheckpointForHttp(scoped(app, REVIEWER), { name: 'x' })).toMatchObject({ status: 503, body: { status: 'unavailable', code: 'history.unavailable', retryable: false } })
 		expect((await createCheckpointForHttp(scoped(app, REVIEWER), { name: 'x' })).headers).toBeUndefined()
 		expect(await app.listVersions({})).toEqual({ status: 'listed', versions: [] })
