@@ -191,6 +191,8 @@ describe('startup output (Rules 01a12500-b4af-7446-a66e-40de3db3dac2, 01a12500-b
 			expect(await service.authenticate({ surface: 'api', cookieHeader, origin: { origin: 'https://uiux.corp.example', loopbackHost: false } })).toMatchObject({ ok: true })
 			expect(await service.authenticate({ surface: 'api', cookieHeader })).toMatchObject({ ok: false, status: 401, code: 'auth.invalid_credential' })
 			expect(await service.authenticate({ surface: 'api', cookieHeader, origin: { origin: 'http://10.0.0.5:3000', loopbackHost: false } })).toMatchObject({ ok: false, status: 401 })
+			// The accepted request recorded its usage; let that write finish before the directory goes.
+			await service.flushUsage()
 		})
 	})
 })
