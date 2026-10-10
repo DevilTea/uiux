@@ -17,11 +17,10 @@ import { getSelectedWorkspaceServerRuntime } from '../../src/server/selected-wor
  * - Authentication (accepted identity decision 4) runs right after the baseline gates: every
  *   `/api/*` and `/mcp` request resolves to one principal or gets 401; `/.well-known/*` is a JSON 404.
  *
- * Static publication (`UIUX_PUBLICATION_MODE=1`) and prerendering have no live listener and are
- * left untouched.
+ * Prerendering has no live listener and is left untouched.
  */
 export default defineNitroPlugin((nitroApp) => {
-	if (import.meta.prerender || useRuntimeConfig().public.uiuxMode === 'publication') return
+	if (import.meta.prerender) return
 
 	if (!import.meta.dev && !process.env.NITRO_UNIX_SOCKET) {
 		const bind = resolveLoopbackBindHost(process.env)

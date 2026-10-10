@@ -12,7 +12,7 @@ import { mergeTimeline, type TimelineVersion } from '../../persistence/history/t
 import { readVersionBlobUnlocked } from '../../persistence/history/version-blobs'
 import { LEGACY_LAYOUT } from '../../persistence/paths'
 
-/** The selected Workspace's history stores, or `undefined` where history is off (`uiux publish`). */
+/** The selected Workspace's history stores, or `undefined` where history is off. */
 export type HistoryStoreSource = Readonly<{
 	open(): Promise<Readonly<{ host?: HostHistoryStore; checkpoints?: CheckpointStore }> | undefined>
 }>

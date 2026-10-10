@@ -246,12 +246,6 @@ export class AccessStore {
 		this.lastCheck = Date.now()
 	}
 
-	/** An in-memory roster that is never written (the internal `uiux publish` server). */
-	static memory(workspaceRoot: string): AccessStore {
-		const realRoot = workspaceRealRoot(workspaceRoot)
-		return new AccessStore(realRoot, undefined, createEmptyAccessFile(realRoot, generateHint()), undefined)
-	}
-
 	/** Opens the Workspace's roster. Returns `undefined` when none exists and `create` is false. */
 	static async open(options: OpenAccessStoreOptions): Promise<AccessStore | undefined> {
 		const realRoot = workspaceRealRoot(options.workspaceRoot)

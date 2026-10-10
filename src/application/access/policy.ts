@@ -7,7 +7,7 @@ import { principalRole, roleAtLeast, type AccessRole, type Principal } from './p
  * - `humanOnly` (H): members of kind `human` only.
  * - `sessionOnly` (S): a Workbench cookie session only; bearer tokens are refused.
  * - `loopbackOnly` (L): the loopback listener only (the only listener that ships).
- * - `system`: the in-memory system principals (`system:capture`, `system:publish`) may call it.
+ * - `system`: the in-memory system principal (`system:capture`) may call it.
  * - `permissionKey`: the permission key the operation needs (Clause 01a11c09-a26e-73bb-9a29-eed40aae37bd),
  *   recorded ahead of permission keys (seam 5 of the version timeline). Until keys are built, a
  *   member is authorized by role (Clause 01a11c74-9c83-7d4e-83e4-840d420837a9), so `minRole` is the
@@ -61,7 +61,6 @@ export const ACCESS_OPERATIONS = {
 	readArtifact: { minRole: 'viewer', system: true },
 	readAssetContent: { minRole: 'viewer', system: true },
 	readPreview: { minRole: 'viewer', system: true },
-	readPublicationSnapshot: { minRole: 'viewer', system: true },
 	assessHandoffReadiness: { minRole: 'viewer' },
 	listLeases: { minRole: 'viewer' },
 	// Version history reads (`history.read`, Clause 01a11485-fa00-72da-bc46-98302a3c106e) are Viewer

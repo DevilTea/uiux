@@ -25,10 +25,10 @@ export type MemberPrincipal = Readonly<{
 	listener: 'loopback'
 }>
 
-export const SYSTEM_PRINCIPAL_IDS = ['system:capture', 'system:publish'] as const
+export const SYSTEM_PRINCIPAL_IDS = ['system:capture'] as const
 export type SystemPrincipalId = typeof SYSTEM_PRINCIPAL_IDS[number]
 
-/** Server-internal clients (formal capture, `uiux publish`): Viewer scope, never members, never actors. */
+/** Server-internal clients (formal capture): Viewer scope, never members, never actors. */
 export type SystemPrincipal = Readonly<{
 	type: 'system'
 	id: SystemPrincipalId

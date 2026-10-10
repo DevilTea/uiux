@@ -33,7 +33,7 @@ export default defineNitroPlugin((nitroApp) => {
 				})
 			// Version history: close a leftover autosave, record changes made while no server ran,
 			// write the Baseline on a host without history, prune, then record design writes. A
-			// failure here is logged and never stops the server; the internal publish server never records.
+			// failure here is logged and never stops the server.
 			void runtime.historyRecorder.start().then((report) => {
 				if (report.baseline) console.log(`uiux: history recorded the Baseline Checkpoint ${report.baseline} for ${runtime.root}.`)
 			})

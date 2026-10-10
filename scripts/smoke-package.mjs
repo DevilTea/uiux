@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -76,8 +76,12 @@ try {
 		throw new Error(`Packed CLI version mismatch: ${versionOutput}`)
 	if (!helpOutput.includes('init --workspace <dir>'))
 		throw new Error('Packed CLI help did not expose Workspace initialization.')
-	if (!helpOutput.includes('publish --workspace <dir> --out <dir>'))
-		throw new Error('Packed CLI help did not expose static publication.')
+	// Static publication was removed (issue #175): `uiux publish` is an unknown command.
+	if (/\bpublish\b/u.test(helpOutput))
+		throw new Error('Packed CLI help still lists the removed publish command.')
+	const publish = spawnSync(cliPath, ['publish', '--workspace', workspaceDirectory, '--out', join(temporaryDirectory, 'publication')], { encoding: 'utf8' })
+	if (publish.status !== 2 || !publish.stderr.includes('uiux: unknown command or option: publish') || !publish.stdout.includes('Usage: uiux <command>'))
+		throw new Error(`Packed CLI did not refuse the removed publish command as unknown: status ${publish.status}, stderr ${publish.stderr}`)
 	const initOutput = execFileSync(cliPath, ['init', '--workspace', workspaceDirectory], { encoding: 'utf8' })
 	if (!initOutput.includes('Initialized UIUX Workspace'))
 		throw new Error(`Packed CLI init returned an unexpected response: ${initOutput}`)
@@ -393,32 +397,7 @@ try {
 		await stopServer(server)
 	}
 
-	const publicationDirectory = join(temporaryDirectory, 'publication')
-	const publishOutput = execFileSync(cliPath, [
-		'publish',
-		'--workspace', workspaceDirectory,
-		'--out', publicationDirectory,
-		'--base', '/uiux/',
-		'--source-revision', 'package-smoke',
-	], {
-		encoding: 'utf8',
-		timeout: 120_000,
-	})
-	if (!publishOutput.includes('Published UIUX Workspace snapshot'))
-		throw new Error(`Packed uiux publish returned an unexpected response: ${publishOutput}`)
-	const publicationSnapshot = JSON.parse(await readFile(join(publicationDirectory, '_uiux', 'publication.json'), 'utf8'))
-	if (publicationSnapshot.schemaVersion !== 1 || publicationSnapshot.sourceRevision !== 'package-smoke')
-		throw new Error(`Packed publication snapshot has unexpected metadata: ${JSON.stringify(publicationSnapshot)}`)
-	if (!Array.isArray(publicationSnapshot.resources?.view) || publicationSnapshot.resources.view.length < 2)
-		throw new Error('Packed publication snapshot did not materialize authored Views.')
-	const publicationHtml = await readFile(join(publicationDirectory, 'index.html'), 'utf8')
-	if (!publicationHtml.includes('/uiux/_nuxt/'))
-		throw new Error('Packed publication shell did not preserve the requested /uiux/ base path.')
-	const previewHtml = await readFile(join(publicationDirectory, 'preview', 'index.html'), 'utf8')
-	if (!previewHtml.includes('/uiux/_nuxt/'))
-		throw new Error('Packed publication did not generate a base-path-safe /preview entry point.')
-
-	console.log(`Package smoke passed: packed @deviltea/uiux@${installedPackage.version} serves styled Workbench assets, initializes a Workspace, authenticates /api and /mcp with a CLI-created token, authors through MCP, captures/evaluates evidence and handoff, and publishes a portable /uiux/ static viewer.`)
+	console.log(`Package smoke passed: packed @deviltea/uiux@${installedPackage.version} serves styled Workbench assets, initializes a Workspace, authenticates /api and /mcp with a CLI-created token, authors through MCP, and captures/evaluates evidence and handoff.`)
 }
 finally {
 	await rm(temporaryDirectory, { recursive: true, force: true })
