@@ -1,140 +1,101 @@
-import { principalRole, roleAtLeast, type AccessRole, type Principal } from './principal'
+import { inCatalogOrder, isHumanOnlyKey, writeKeyForKind, type PermissionKey } from './keys'
+import type { AccessRole, MemberPrincipal, Principal } from './principal'
 
 /**
- * The permission matrix (accepted identity decision group, *Permission matrix*) as data, shared
- * by `/api/*` and `/mcp`. Roles are cumulative: Viewer ⊂ Reviewer ⊂ Editor ⊂ Owner.
+ * The permission policy as data, shared by `/api/*` and `/mcp`: each operation declares the
+ * permission keys it needs (Clauses 01a11485-fa00-72da-bc46-98302a3c106e,
+ * 01a11485-fa21-7b77-8ae5-1d7d0618e8a3, 01a11485-fa44-7b6a-99f8-de4e1e8edcfc,
+ * 01a11bb1-b35a-7e69-bba5-978e3f47c4fa and 01a11485-fa66-7cde-a10f-b8b796d01469). A member may do
+ * exactly what its keys allow: no key implies another, and an operation checks only its own keys
+ * (Rule 01a11485-eaac-7523-998b-26123d7618df).
  *
- * - `humanOnly` (H): members of kind `human` only.
- * - `sessionOnly` (S): a Workbench cookie session only; bearer tokens are refused.
- * - `system`: the in-memory system principal (`system:capture`) may call it.
- * - `permissionKey`: the permission key the operation needs (Clause 01a11c09-a26e-73bb-9a29-eed40aae37bd),
- *   recorded ahead of permission keys (seam 5 of the version timeline). Until keys are built, a
- *   member is authorized by role (Clause 01a11c74-9c83-7d4e-83e4-840d420837a9), so `minRole` is the
- *   lowest built-in preset that holds the key (Clause 01a11c09-a930-7e31-bb0a-9e2bee79490c).
+ * - `requiredKeys`: the keys the operation needs; an operation that needs none is open to every member.
+ * - `sessionOnly`: a Workbench cookie session only; bearer Tokens are refused.
+ * - `system`: on the system credential allowlist (Clause 01a11c09-a3bb-7ad4-a889-d50b124d3679).
+ *
+ * A `humanOnly` key (Clause 01a11c09-a26e-73bb-9a29-eed40aae37bd) takes effect only on its human
+ * holder's cookie session (Rule 01a11c09-bec8-7dee-971a-4c10eaf83eef), so an operation needing one
+ * is human-only and session-only without a flag of its own.
  */
 export type OperationRule = Readonly<{
-	minRole: AccessRole
-	humanOnly?: boolean
+	requiredKeys: readonly PermissionKey[]
 	sessionOnly?: boolean
 	system?: boolean
-	permissionKey?: PermissionKey
 }>
 
-/** Clause 01a11c09-a26e-73bb-9a29-eed40aae37bd: the permission key catalog, in catalog order. */
-export const PERMISSION_KEYS = Object.freeze([
-	'workspace.read',
-	'history.read',
-	'product-kit.source.read',
-	'reviews.write',
-	'reviews.submit',
-	'reviews.promote',
-	'reviews.resolve',
-	'views.write',
-	'flows.write',
-	'locales.write',
-	'assets.write',
-	'settings.write',
-	'product-kit.write',
-	'product-kit.compose',
-	'evidence.capture',
-	'handoff.export',
-	'checkpoints.create',
-	'history.restore',
-	'checkpoints.delete',
-	'locks.force-release',
-	'presets.manage',
-	'members.manage',
-] as const)
-export type PermissionKey = typeof PERMISSION_KEYS[number]
-
-/** The catalog's `humanOnly` keys (same Clause). */
-export const HUMAN_ONLY_PERMISSION_KEYS: readonly PermissionKey[] = Object.freeze(['reviews.resolve', 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'])
-
 export const ACCESS_OPERATIONS = {
-	// Viewer: reads, Preview, evidence, artifacts, Handoff readiness.
-	readPointResource: { minRole: 'viewer', system: true },
-	listPointResources: { minRole: 'viewer', system: true },
-	searchPointResources: { minRole: 'viewer', system: true },
-	listEvidence: { minRole: 'viewer', system: true },
-	readArtifact: { minRole: 'viewer', system: true },
-	readAssetContent: { minRole: 'viewer', system: true },
-	readPreview: { minRole: 'viewer', system: true },
-	assessHandoffReadiness: { minRole: 'viewer' },
-	listLeases: { minRole: 'viewer' },
-	// Version history reads (`history.read`, Clause 01a11485-fa00-72da-bc46-98302a3c106e) are Viewer
-	// reads that a system credential never gets (Clause 01a11485-f978-767a-b977-33028aee7ae7).
-	diffVersions: { minRole: 'viewer', permissionKey: 'history.read' },
-	listVersions: { minRole: 'viewer', permissionKey: 'history.read' },
-	readVersion: { minRole: 'viewer', permissionKey: 'history.read' },
+	// `workspace.read`: reads, Preview, Evidence, artifacts, Handoff readiness, the lease list.
+	readPointResource: { requiredKeys: ['workspace.read'], system: true },
+	listPointResources: { requiredKeys: ['workspace.read'], system: true },
+	searchPointResources: { requiredKeys: ['workspace.read'], system: true },
+	listEvidence: { requiredKeys: ['workspace.read'], system: true },
+	readArtifact: { requiredKeys: ['workspace.read'], system: true },
+	readAssetContent: { requiredKeys: ['workspace.read'], system: true },
+	readPreview: { requiredKeys: ['workspace.read'], system: true },
+	assessHandoffReadiness: { requiredKeys: ['workspace.read'] },
+	listLeases: { requiredKeys: ['workspace.read'] },
+	// `history.read`: version history reads, which a system credential never gets (Clause 01a11485-f978-767a-b977-33028aee7ae7).
+	diffVersions: { requiredKeys: ['history.read'] },
+	listVersions: { requiredKeys: ['history.read'] },
+	readVersion: { requiredKeys: ['history.read'] },
 	// The version reads for Preview: a version's manifest, View and Locales, and its blobs by digest.
-	readVersionForPreview: { minRole: 'viewer', permissionKey: 'history.read' },
-	readSession: { minRole: 'viewer', sessionOnly: true },
-	endSession: { minRole: 'viewer', sessionOnly: true },
-	// Reviewer: every Review action (actor stamped).
-	createReviewThread: { minRole: 'reviewer' },
-	appendReviewMessage: { minRole: 'reviewer' },
-	reanchorReviewThread: { minRole: 'reviewer' },
-	submitReadyForReview: { minRole: 'reviewer' },
-	reopenReviewThread: { minRole: 'reviewer' },
-	setReviewDisplayHint: { minRole: 'reviewer' },
-	promoteReviewToDecision: { minRole: 'reviewer' },
-	// Authorship (and, for retract, engagement) is checked in the domain service, not here.
-	editReviewMessage: { minRole: 'reviewer' },
-	retractReviewThread: { minRole: 'reviewer' },
-	resolveReviewThread: { minRole: 'reviewer', humanOnly: true, sessionOnly: true },
-	// `checkpoints.create` (Clause 01a11485-fa21-7b77-8ae5-1d7d0618e8a3): humans and Agents, no lease.
-	createCheckpoint: { minRole: 'reviewer', permissionKey: 'checkpoints.create' },
-	// Editor: authoring, capture, Handoff export, edit leases.
-	createView: { minRole: 'editor' },
-	updateViewSpec: { minRole: 'editor' },
-	updateViewStructure: { minRole: 'editor' },
-	updateWorkspaceSettings: { minRole: 'editor' },
-	createLocale: { minRole: 'editor' },
-	updateLocale: { minRole: 'editor' },
-	createFlow: { minRole: 'editor' },
-	updateFlow: { minRole: 'editor' },
-	createAsset: { minRole: 'editor' },
-	replaceAsset: { minRole: 'editor' },
-	captureFormalEvidence: { minRole: 'editor' },
-	exportHandoff: { minRole: 'editor' },
-	// `history.restore` (Clause 01a11485-fa44-7b6a-99f8-de4e1e8edcfc). A restore also needs the restored
-	// kind's write key (Rule 01a11c09-c648-71be-a550-2ecabf12f5d0): see `writeOperationForKind`.
-	restoreResourceVersion: { minRole: 'editor', permissionKey: 'history.restore' },
-	acquireLeases: { minRole: 'editor' },
-	releaseLeases: { minRole: 'editor' },
-	// Owner.
-	forceReleaseLease: { minRole: 'owner', humanOnly: true, sessionOnly: true },
-	// `checkpoints.delete` (Clause 01a11485-fa66-7cde-a10f-b8b796d01469), a humanOnly key, offered in the Workbench only.
-	deleteCheckpoint: { minRole: 'owner', humanOnly: true, sessionOnly: true, permissionKey: 'checkpoints.delete' },
+	readVersionForPreview: { requiredKeys: ['history.read'] },
+	// The session routes need no key, for cookie sessions only (Clause 01a11485-faa9-74fe-8e0a-068cd770ff1c).
+	readSession: { requiredKeys: [], sessionOnly: true },
+	endSession: { requiredKeys: [], sessionOnly: true },
+	// Review actions (actor stamped). Authorship (and, for retract, engagement) is checked in the
+	// domain service, not here (Rule 01a11544-5a05-7750-9268-fd666980dd2f).
+	createReviewThread: { requiredKeys: ['reviews.write'] },
+	appendReviewMessage: { requiredKeys: ['reviews.write'] },
+	reanchorReviewThread: { requiredKeys: ['reviews.write'] },
+	setReviewDisplayHint: { requiredKeys: ['reviews.write'] },
+	editReviewMessage: { requiredKeys: ['reviews.write'] },
+	retractReviewThread: { requiredKeys: ['reviews.write'] },
+	submitReadyForReview: { requiredKeys: ['reviews.submit'] },
+	reopenReviewThread: { requiredKeys: ['reviews.submit'] },
+	promoteReviewToDecision: { requiredKeys: ['reviews.promote'] },
+	// Clause 01a11485-fa87-7cf8-8ec1-275793457228; the HTTP refusal order is `resolutionRefusal`.
+	resolveReviewThread: { requiredKeys: ['reviews.resolve'] },
+	// `checkpoints.create`: humans and Agents, no lease.
+	createCheckpoint: { requiredKeys: ['checkpoints.create'] },
+	// Authoring, capture and Handoff export.
+	createView: { requiredKeys: ['views.write'] },
+	updateViewSpec: { requiredKeys: ['views.write'] },
+	updateViewStructure: { requiredKeys: ['views.write'] },
+	// Below `schemaVersion` 5 a change to the `adapters` list also needs `product-kit.compose`: see `adapterChangeKeys`.
+	updateWorkspaceSettings: { requiredKeys: ['settings.write'] },
+	createLocale: { requiredKeys: ['locales.write'] },
+	updateLocale: { requiredKeys: ['locales.write'] },
+	createFlow: { requiredKeys: ['flows.write'] },
+	updateFlow: { requiredKeys: ['flows.write'] },
+	createAsset: { requiredKeys: ['assets.write'] },
+	replaceAsset: { requiredKeys: ['assets.write'] },
+	captureFormalEvidence: { requiredKeys: ['evidence.capture'] },
+	exportHandoff: { requiredKeys: ['handoff.export'] },
+	// A restore also needs the restored kind's write key (Rule 01a11c09-c648-71be-a550-2ecabf12f5d0): see `authorizeRestore`.
+	restoreResourceVersion: { requiredKeys: ['history.restore'] },
+	// Acquiring needs each requested kind's write key (Rule 01a11c09-c125-752e-aa98-b4c063b2b7fb): see
+	// `authorizeLeaseAcquire`. Releasing one's own leases needs no key.
+	acquireLeases: { requiredKeys: [] },
+	releaseLeases: { requiredKeys: [] },
+	forceReleaseLease: { requiredKeys: ['locks.force-release'] },
+	// Offered in the Workbench only.
+	deleteCheckpoint: { requiredKeys: ['checkpoints.delete'] },
 	// Served only on a loopback origin or an `https` configured origin (Rule 01a12500-b105-7773-822f-359d4dcbd1da);
 	// the HTTP layer refuses every other origin before this rule runs (Clause 01a12500-a619-7fa5-b7f6-797adaf52f34).
-	administerAccess: { minRole: 'owner', humanOnly: true, sessionOnly: true },
+	administerAccess: { requiredKeys: ['members.manage'] },
 } as const satisfies Record<string, OperationRule>
 
 export type AccessOperation = keyof typeof ACCESS_OPERATIONS
 
 /**
- * Clause 01a11c09-a42a-7d6b-bb5e-01d7cf1ce2de: the write key of each restorable resource kind
- * (`views.write`, `flows.write`, `locales.write`, `assets.write`, `settings.write`), stood for
- * by an authoring operation that needs exactly that key, so a restore is authorized for the key
- * the Access Contract assigns the kind (Rule 01a11c09-c648-71be-a550-2ecabf12f5d0): `history.restore`
- * never stands in for a missing write key. `undefined` for a kind no operation writes yet.
+ * Clause 01a11485-f9bd-78a3-a1d0-1b4f64e9883e: a permission refusal names the keys the request
+ * lacks. A system credential lacks every key the operation needs; a refusal for the credential
+ * type alone (a session-only operation over a bearer Token) lacks none.
  */
-const WRITE_OPERATION_BY_KIND: Readonly<Record<string, AccessOperation>> = Object.freeze({
-	view: 'updateViewStructure',
-	flow: 'updateFlow',
-	locale: 'updateLocale',
-	asset: 'replaceAsset',
-	workspace: 'updateWorkspaceSettings',
-})
-
-export function writeOperationForKind(kind: string): AccessOperation | undefined {
-	return Object.hasOwn(WRITE_OPERATION_BY_KIND, kind) ? WRITE_OPERATION_BY_KIND[kind] : undefined
-}
-
 export type ScopeDenied = Readonly<{
 	code: 'auth.scope_denied'
-	requiredRole: AccessRole
+	requiredKeys: readonly PermissionKey[]
 	message: string
 }>
 
@@ -144,20 +105,85 @@ export function roleLabel(role: AccessRole): string {
 	return ROLE_LABEL[role]
 }
 
-/** Returns `undefined` when the principal may perform the operation, otherwise the `auth.scope_denied` refusal. */
-export function authorizeOperation(principal: Principal, operation: AccessOperation): ScopeDenied | undefined {
-	const rule: OperationRule = ACCESS_OPERATIONS[operation]
-	const required = rule.minRole
-	const deny = (message: string): ScopeDenied => ({ code: 'auth.scope_denied', requiredRole: required, message })
-	if (principal.type === 'system') {
-		return rule.system ? undefined : deny(`${operation} is not available to the internal ${principal.id} credential.`)
+/**
+ * The keys that take effect for this request: a system credential holds none (Clause
+ * 01a114ec-ea96-764e-876b-464e3319b3db), and a `humanOnly` key counts only on a human member's
+ * cookie session (Rule 01a11c09-bec8-7dee-971a-4c10eaf83eef).
+ */
+export function effectiveKeys(principal: Principal): readonly PermissionKey[] {
+	if (principal.type === 'system') return []
+	if (principal.kind === 'human' && principal.credential === 'session') return principal.keys
+	return principal.keys.filter(key => !isHumanOnlyKey(key))
+}
+
+function list(keys: readonly string[]): string {
+	return keys.map(key => `\`${key}\``).join(', ')
+}
+
+function missingKeysMessage(principal: MemberPrincipal, operation: string, missing: readonly PermissionKey[]): string {
+	const plural = missing.length > 1
+	const parts = [`${operation} requires the permission key${plural ? 's' : ''} ${list(missing)}; ${principal.nickname} lacks ${plural ? 'them' : 'it'}.`]
+	const humanOnly = missing.filter(isHumanOnlyKey)
+	if (humanOnly.length > 0) {
+		if (principal.kind === 'agent')
+			parts.push(`${list(humanOnly)} ${humanOnly.length > 1 ? 'are' : 'is'} humanOnly: an Agent never holds ${humanOnly.length > 1 ? 'them' : 'it'}.`)
+		else if (principal.credential !== 'session' && humanOnly.some(key => principal.keys.includes(key)))
+			parts.push(`${list(humanOnly)} ${humanOnly.length > 1 ? 'are' : 'is'} humanOnly and takes effect only on a signed-in Workbench session; a bearer Token acts without ${humanOnly.length > 1 ? 'them' : 'it'}.`)
 	}
-	const role = principalRole(principal)
-	if (!roleAtLeast(role, required))
-		return deny(`${operation} requires the ${roleLabel(required)} role or above; ${principal.nickname} is ${roleLabel(role)}.`)
-	if (rule.humanOnly && principal.kind !== 'human')
-		return deny(`${operation} requires a human member; ${principal.nickname} is an agent.`)
+	return parts.join(' ')
+}
+
+/**
+ * Returns `undefined` when the principal may perform the operation, otherwise the
+ * `auth.scope_denied` refusal. `additionalKeys` are keys this request needs beyond the
+ * operation's own, such as a restored kind's write key.
+ */
+export function authorizeOperation(principal: Principal, operation: AccessOperation, additionalKeys: readonly PermissionKey[] = []): ScopeDenied | undefined {
+	const rule: OperationRule = ACCESS_OPERATIONS[operation]
+	const needed = inCatalogOrder([...rule.requiredKeys, ...additionalKeys])
+	if (principal.type === 'system') {
+		return rule.system && additionalKeys.length === 0
+			? undefined
+			: { code: 'auth.scope_denied', requiredKeys: needed, message: `${operation} is not available to the internal ${principal.id} credential.` }
+	}
+	const held = new Set(effectiveKeys(principal))
+	const missing = needed.filter(key => !held.has(key))
+	if (missing.length > 0)
+		return { code: 'auth.scope_denied', requiredKeys: missing, message: missingKeysMessage(principal, operation, missing) }
 	if (rule.sessionOnly && principal.credential !== 'session')
-		return deny(`${operation} requires a signed-in Workbench session; bearer tokens cannot perform it.`)
+		return { code: 'auth.scope_denied', requiredKeys: [], message: `${operation} requires a signed-in Workbench session; bearer tokens cannot perform it.` }
 	return undefined
+}
+
+/**
+ * Rule 01a11c09-c648-71be-a550-2ecabf12f5d0: a restore needs `history.restore` and the restored
+ * kind's write key, so `history.restore` never stands in for a missing write key. A kind with no
+ * write key adds none here; the service refuses it as not restorable.
+ */
+export function authorizeRestore(principal: Principal, kind: string): ScopeDenied | undefined {
+	const writeKey = writeKeyForKind(kind)
+	return authorizeOperation(principal, 'restoreResourceVersion', writeKey ? [writeKey] : [])
+}
+
+/** Rule 01a11c09-c125-752e-aa98-b4c063b2b7fb: acquiring needs the write key of each requested resource's kind. */
+export function authorizeLeaseAcquire(principal: Principal, kinds: readonly string[]): ScopeDenied | undefined {
+	return authorizeOperation(principal, 'acquireLeases', kinds.flatMap(kind => writeKeyForKind(kind) ?? []))
+}
+
+/** The `schemaVersion` from which the `adapters` list leaves the manifest for the Product Kit file. */
+const PRODUCT_KIT_SCHEMA_VERSION = 5
+
+/**
+ * Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa, below `schemaVersion` 5: an
+ * `update_workspace_settings` that adds, removes, reorders or re-points an `adapters` entry also
+ * needs `product-kit.compose`. A change to an entry's `config` alone is not one.
+ */
+export function adapterChangeKeys(
+	schemaVersion: number,
+	current: readonly Readonly<{ moduleSpecifier: string }>[],
+	next: readonly Readonly<{ moduleSpecifier: string }>[],
+): readonly PermissionKey[] {
+	if (schemaVersion >= PRODUCT_KIT_SCHEMA_VERSION) return []
+	const same = current.length === next.length && current.every((entry, index) => entry.moduleSpecifier === next[index]!.moduleSpecifier)
+	return same ? [] : ['product-kit.compose']
 }

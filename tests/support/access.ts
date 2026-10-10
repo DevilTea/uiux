@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 
+import { keysForRole } from '../../src/application/access/keys'
 import { createLeaseManager, type LeaseManager } from '../../src/application/access/leases'
 import type { AccessRole, MemberKind, MemberPrincipal } from '../../src/application/access/principal'
 import { createScopedWorkspaceSession, type AccessTransport, type ScopedSessionOptions, type ScopedWorkspaceSession } from '../../src/application/access/scoped-session'
@@ -13,15 +14,19 @@ import { AccessStore } from '../../src/server/access/store'
 /**
  * Tests inject a principal (accepted identity migration plan): in-process HTTP helpers get a
  * scoped session and the MCP handler gets `authInfo`, exactly as the live routes pass them.
+ * `role` is sugar: unless `keys` is given, the member holds the keys the live server derives from
+ * that role (the built-in preset of that `id`, with no `humanOnly` key for an Agent).
  */
 export function testMember(overrides: Partial<Omit<MemberPrincipal, 'type'>> = {}): MemberPrincipal {
 	const kind: MemberKind = overrides.kind ?? 'human'
+	const role = overrides.role ?? (kind === 'agent' ? 'editor' : 'owner')
 	return {
 		type: 'member',
 		memberId: overrides.memberId ?? randomUUID(),
 		nickname: overrides.nickname ?? (kind === 'agent' ? 'claude' : 'owner'),
 		kind,
-		role: overrides.role ?? (kind === 'agent' ? 'editor' : 'owner'),
+		role,
+		keys: overrides.keys ?? keysForRole(kind, role),
 		credential: overrides.credential ?? (kind === 'agent' ? 'token' : 'session'),
 		credentialId: overrides.credentialId ?? 'aaaaaaaaaa',
 	}

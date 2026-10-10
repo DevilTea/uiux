@@ -31,7 +31,9 @@ import type {
 import type { CreateViewCommand, UpdateViewSpecCommand, UpdateViewStructureCommand, ViewAuthoringResult } from '../services/view-authoring'
 import type { PointResourceRead, WorkspaceApplicationSession } from '../services/workspace-session'
 import type { UpdateWorkspaceSettingsCommand, WorkspaceAuthoringResult } from '../services/workspace-authoring'
+import { keyRequirements, type PermissionKey } from './keys'
 import {
+	LOCKABLE_KINDS,
 	MAX_ACQUIRE_RESOURCES,
 	isValidLeaseAddress,
 	publicLease,
@@ -41,13 +43,21 @@ import {
 	type LockableKind,
 	type PublicLease,
 } from './leases'
-import { authorizeOperation, writeOperationForKind, type AccessOperation, type ScopeDenied } from './policy'
-import { principalActor, type AccessRole, type MemberPrincipal, type Principal, type StampedActor } from './principal'
+import {
+	adapterChangeKeys,
+	authorizeLeaseAcquire,
+	authorizeOperation,
+	authorizeRestore,
+	effectiveKeys,
+	type AccessOperation,
+	type ScopeDenied,
+} from './policy'
+import { principalActor, type MemberPrincipal, type Principal, type StampedActor } from './principal'
 
 /**
  * The principal-scoped facade over the selected-Workspace application session. Both transports
  * (`/api/*` and `/mcp`) build one per request from the authenticated principal; it authorizes
- * against the role matrix, stamps `actor` and `at` server-side, and checks or takes agent edit
+ * against the permission keys, stamps `actor` and `at` server-side, and checks or takes agent edit
  * leases before every domain write (accepted identity decisions 5, 6, 7 and 11). The domain
  * services underneath are unchanged and keep accepting in-process callers' own `actor` / `at`.
  */
@@ -57,7 +67,8 @@ export type AccessRefusal = Readonly<{
 	status: 'blocked'
 	key: string
 	code: 'auth.scope_denied'
-	requiredRole: AccessRole
+	/** The permission keys the request lacks (Clause 01a11485-f9bd-78a3-a1d0-1b4f64e9883e). */
+	requiredKeys: readonly PermissionKey[]
 	message: string
 	diagnostics: readonly Diagnostic[]
 }>
@@ -187,7 +198,7 @@ export function refusalFromScope(key: string, denied: ScopeDenied): AccessRefusa
 		status: 'blocked',
 		key,
 		code: 'auth.scope_denied',
-		requiredRole: denied.requiredRole,
+		requiredKeys: denied.requiredKeys,
 		message: denied.message,
 		diagnostics: [{ code: 'auth.scope_denied', path: '/', message: denied.message }],
 	}
@@ -201,7 +212,11 @@ function resolveRefusal(key: string, code: ResolveRefusal['code'], message: stri
  * Resolution is human-only and Workbench-only. The refusal order is keyed on the principal
  * (decision 7): on `/mcp` a human gets `review.resolve_requires_workbench`, an agent asking for a
  * non-verified resolution `review.direct_resolve_requires_workbench`, any other agent
- * `review.resolve_requires_human`. On `/api/*` a bearer token is refused with
+ * `review.resolve_requires_human`. On `/api/*` resolving needs `reviews.resolve` on a human
+ * member's cookie session (Clause 01a11485-fa87-7cf8-8ec1-275793457228): a member that could not
+ * resolve on any credential gets the permission refusal naming `reviews.resolve`, that is a human
+ * without the key, or an Agent without `reviews.write`, the key `reviews.resolve` requires (an
+ * Agent never holds the `humanOnly` key itself); otherwise a bearer token is refused with
  * `review.resolve_requires_workbench` and an agent's session with `review.resolve_requires_human`.
  */
 export function resolutionRefusal(
@@ -218,8 +233,10 @@ export function resolutionRefusal(
 		return resolveRefusal(reviewId, 'review.resolve_requires_human', 'Only a human member may resolve a Review thread, in the UIUX Workbench. Submit the thread ready for review and a human will resolve it.', '/')
 	}
 	if (principal.type === 'system') return refusalFromScope(reviewId, authorizeOperation(principal, 'resolveReviewThread')!)
-	const denied = authorizeOperation(principal, 'appendReviewMessage')
-	if (denied) return refusalFromScope(reviewId, { ...denied, message: `resolveReviewThread requires the Reviewer role or above; ${principal.nickname} is ${principal.role}.` })
+	const eligible = principal.kind === 'human'
+		? principal.keys.includes('reviews.resolve')
+		: keyRequirements('reviews.resolve').every(key => principal.keys.includes(key))
+	if (!eligible) return refusalFromScope(reviewId, authorizeOperation(principal, 'resolveReviewThread')!)
 	if (principal.credential !== 'session')
 		return resolveRefusal(reviewId, 'review.resolve_requires_workbench', 'Resolution is performed by a signed-in human in the UIUX Workbench; bearer tokens cannot resolve.', '/')
 	if (principal.kind !== 'human')
@@ -297,6 +314,26 @@ export function createScopedWorkspaceSession(
 		return warnings.length > 0 ? { ...result, warnings } : result
 	}
 
+	/**
+	 * The keys a settings update needs beyond `settings.write`: `product-kit.compose` when, below
+	 * `schemaVersion` 5, it changes the `adapters` list (Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa).
+	 * The comparison is against the manifest at `expectedRevision`; when that is not the current
+	 * revision the service answers a conflict and writes nothing, so no key is added.
+	 */
+	async function settingsChangeKeys(command: UpdateWorkspaceSettingsCommand): Promise<readonly PermissionKey[]> {
+		if (effectiveKeys(principal).includes('product-kit.compose') || authorizeOperation(principal, 'updateWorkspaceSettings')) return []
+		const current = await app.readPointResource('workspace', 'workspace')
+		if (current?.kind !== 'workspace' || current.revision !== command.expectedRevision) return []
+		// A malformed `adapters` value is the service's to refuse as invalid.
+		const next: unknown = (command.settings as { adapters?: unknown } | undefined)?.adapters
+		if (!Array.isArray(next)) return []
+		const specifiers = (entries: readonly unknown[]) => entries.map(entry => ({
+			moduleSpecifier: typeof entry === 'object' && entry !== null ? String((entry as { moduleSpecifier?: unknown }).moduleSpecifier) : '',
+		}))
+		const currentAdapters: unknown = current.resource.adapters
+		return adapterChangeKeys(current.resource.schemaVersion, specifiers(Array.isArray(currentAdapters) ? currentAdapters : []), specifiers(next))
+	}
+
 	/** Authorize, check or reserve the lease, run the domain write, then keep or drop the reservation. */
 	async function write<R extends { status: string; key: string }>(
 		operation: AccessOperation,
@@ -304,9 +341,9 @@ export function createScopedWorkspaceSession(
 		target: LeaseAddress | undefined,
 		run: () => Promise<R>,
 		warnings: readonly Diagnostic[] = [],
-		options: Readonly<{ restoredFrom?: string }> = {},
+		options: Readonly<{ restoredFrom?: string; additionalKeys?: readonly PermissionKey[] }> = {},
 	): Promise<Scoped<R>> {
-		const denied = authorizeOperation(principal, operation)
+		const denied = authorizeOperation(principal, operation, options.additionalKeys)
 		if (denied) return refusalFromScope(key, denied)
 		let ticket: { commit(): void; abort(): void; rekey(key: string): void } | undefined
 		if (target && holder) {
@@ -422,10 +459,9 @@ export function createScopedWorkspaceSession(
 			const resource = (command as Readonly<{ resource?: unknown }>).resource
 			const kind = typeof resource === 'object' && resource !== null && typeof (resource as { kind?: unknown }).kind === 'string' ? (resource as { kind: string }).kind : ''
 			const key = typeof resource === 'object' && resource !== null && typeof (resource as { key?: unknown }).key === 'string' ? (resource as { key: string }).key : ''
-			// `history.restore` first, then the kind's write key. A kind no operation writes has no key
-			// to check here; the service refuses it as not restorable.
-			const kindOperation = writeOperationForKind(kind)
-			const denied = authorizeOperation(principal, 'restoreResourceVersion') ?? (kindOperation ? authorizeOperation(principal, kindOperation) : undefined)
+			// `history.restore` and the kind's write key. A kind with no write key adds none here; the
+			// service refuses it as not restorable.
+			const denied = authorizeRestore(principal, kind)
 			if (denied) return refusalFromScope(key || 'history', denied)
 			const target = isValidLeaseAddress({ kind, key }) ? { kind: kind as LockableKind, key } : undefined
 			const versionId: unknown = command.versionId
@@ -435,7 +471,7 @@ export function createScopedWorkspaceSession(
 		createView: command => write('createView', command.id, { kind: 'view', key: command.id }, () => app.createView(command)),
 		updateViewSpec: command => write('updateViewSpec', command.key, { kind: 'view', key: command.key }, () => app.updateViewSpec(command)),
 		updateViewStructure: command => write('updateViewStructure', command.key, { kind: 'view', key: command.key }, () => app.updateViewStructure(command)),
-		updateWorkspaceSettings: command => write('updateWorkspaceSettings', 'workspace', { kind: 'workspace', key: 'workspace' }, () => app.updateWorkspaceSettings(command)),
+		updateWorkspaceSettings: async command => write('updateWorkspaceSettings', 'workspace', { kind: 'workspace', key: 'workspace' }, () => app.updateWorkspaceSettings(command), [], { additionalKeys: await settingsChangeKeys(command) }),
 		createLocale: command => write('createLocale', command.locale, { kind: 'locale', key: command.locale }, () => app.createLocale(command)),
 		updateLocale: command => write('updateLocale', command.locale, { kind: 'locale', key: command.locale }, () => app.updateLocale(command)),
 		createFlow: (command) => {
@@ -490,10 +526,16 @@ export function createScopedWorkspaceSession(
 		},
 
 		acquireLeases(input) {
-			const denied = authorizeOperation(principal, 'acquireLeases')
-			if (denied || !holder) return refusalFromScope('locks', denied ?? authorizeOperation(principal, 'acquireLeases')!)
+			if (!holder) return refusalFromScope('locks', authorizeLeaseAcquire(principal, LOCKABLE_KINDS)!)
 			const parsed = parseAddresses(input, true)
-			if (!parsed.ok) return invalidLeases(parsed.diagnostics)
+			if (!parsed.ok) {
+				// A member that may lease no kind at all is refused before its input is examined.
+				if (LOCKABLE_KINDS.every(kind => authorizeLeaseAcquire(principal, [kind]) !== undefined))
+					return refusalFromScope('locks', authorizeLeaseAcquire(principal, LOCKABLE_KINDS)!)
+				return invalidLeases(parsed.diagnostics)
+			}
+			const denied = authorizeLeaseAcquire(principal, parsed.addresses!.map(address => address.kind))
+			if (denied) return refusalFromScope('locks', denied)
 			const outcome = leases.acquire(parsed.addresses!, holder)
 			if (outcome.status === 'locked') {
 				const locks = outcome.conflicts.map(publicLease)
