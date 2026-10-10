@@ -7,7 +7,7 @@ import type { AccessService, AuthFailure } from './service'
 import { AccessError, ACCESS_ERROR_HTTP_STATUS } from './roster'
 
 /**
- * Authentication on every surface (accepted identity decision 4). It runs after the loopback
+ * Authentication on every surface (accepted identity decision 4). It runs after the
  * baseline gates (Host, Origin, Sec-Fetch-Site, Content-Type, framing) and attaches the request's
  * principal to `event.context`; authorization happens in the shared application layer.
  */
@@ -56,7 +56,7 @@ export function authFailureBody(failure: AuthFailure) {
 export function sendAuthFailure(event: H3Event, failure: AuthFailure, options: Readonly<{ mcp: boolean; cookieName?: string }>) {
 	if (options.mcp || failure.status === 401) setResponseHeader(event, 'WWW-Authenticate', WWW_AUTHENTICATE)
 	if (failure.retryAfterSeconds) setResponseHeader(event, 'Retry-After', failure.retryAfterSeconds)
-	if (failure.clearCookie && options.cookieName) setResponseHeader(event, 'Set-Cookie', clearedCookie(options.cookieName))
+	if (failure.clearCookie && options.cookieName) setResponseHeader(event, 'Set-Cookie', clearedCookie(options.cookieName, secureCookieFor(event)))
 	return json(event, failure.status, authFailureBody(failure))
 }
 
@@ -64,8 +64,17 @@ export function sessionCookie(name: string, value: string, maxAgeSeconds: number
 	return `${name}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSeconds}${secure ? '; Secure' : ''}`
 }
 
-export function clearedCookie(name: string): string {
-	return `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`
+export function clearedCookie(name: string, secure = false): string {
+	return `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? '; Secure' : ''}`
+}
+
+/**
+ * `Secure` follows the configured scheme of the origin the request's `Host` matched (Clause
+ * 01a11485-f916-7e0c-b6c3-19c0c0b199d2), never the socket or a forwarding header: UIUX serves
+ * plain HTTP, and an `https` origin is served by a TLS-terminating front end.
+ */
+export function secureCookieFor(event: H3Event): boolean {
+	return event.context.uiuxOrigin?.scheme === 'https'
 }
 
 function headerValue(event: H3Event, name: string): string | undefined {
@@ -92,6 +101,7 @@ export function createAccessGuardHandler(resolveAccess: () => Promise<AccessServ
 			cookieHeader: kind === 'mcp' ? undefined : headerValue(event, 'cookie'),
 			remoteAddress: event.node.req.socket?.remoteAddress,
 			userAgent: headerValue(event, 'user-agent'),
+			...(event.context.uiuxOrigin ? { origin: event.context.uiuxOrigin } : {}),
 		})
 		if (!result.ok) return sendAuthFailure(event, result, { mcp: kind === 'mcp', cookieName: access.cookieName })
 		event.context.uiuxPrincipal = result.principal

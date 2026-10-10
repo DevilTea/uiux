@@ -1,40 +1,43 @@
-import {
-	createLoopbackGuardHandler,
-	resolveLoopbackBindHost,
-} from '../../src/server/loopback-guard'
+import { configureServerNetwork, createLoopbackGuardHandler } from '../../src/server/loopback-guard'
 import { createAccessGuardHandler } from '../../src/server/access/http'
-import { getSelectedWorkspaceServerRuntime } from '../../src/server/selected-workspace'
+import { setServerNetwork, startupLines } from '../../src/server/network-access'
+import { getSelectedWorkspaceServerRuntime, resolveInternalServerOrigin } from '../../src/server/selected-workspace'
 
 /**
- * Keeps the live single-user server loopback-only (Part 1 item 12).
+ * The bind and origin policy of the live server (Feature 01a12500-a0a0-74c0-b83b-3dbb628689e4).
  *
- * - Bind: `uiux dev` already selects a loopback address; this is the backstop for running
- *   `.output/server/index.mjs` directly. Nitro plugins run before the node-server entry reads
- *   `NITRO_HOST`, so an unset host defaults to 127.0.0.1, a loopback host is normalized and a
- *   non-loopback host is refused.
- * - Requests: the guard is placed ahead of every h3 layer, including Nitro's static asset
+ * - Startup: Nitro plugins run before the node-server entry reads `NITRO_HOST`, so
+ *   `configureServerNetwork` settles the bind address and the configured origins here: from the
+ *   internal `uiux dev` handoff only (then removed from the environment), never from
+ *   `HOST`/`NITRO_HOST`. Without the handoff the server binds and accepts loopback only (Rule
+ *   01a11485-ee85-7844-b82f-fd6a7cebb763). The node-server entry reads `NITRO_SSL_CERT`/
+ *   `NITRO_SSL_KEY` before plugins run, so they are refused rather than dropped (Rule
+ *   01a12500-bbed-7aaa-a9bf-869e5e09bd45), on a Unix domain socket too.
+ * - Requests: the gate is placed ahead of every h3 layer, including Nitro's static asset
  *   middleware, so `/mcp`, `/api/*` and SPA assets all pass the same Host/Origin gate.
- * - Authentication (accepted identity decision 4) runs right after the baseline gates: every
- *   `/api/*` and `/mcp` request resolves to one principal or gets 401; `/.well-known/*` is a JSON 404.
- *
- * Prerendering has no live listener and is left untouched.
+ * - Authentication runs right after the baseline gates: every `/api/*` and `/mcp` request
+ *   resolves to one principal or gets 401; `/.well-known/*` is a JSON 404.
  */
 export default defineNitroPlugin((nitroApp) => {
-	if (import.meta.prerender) return
-
-	if (!import.meta.dev && !process.env.NITRO_UNIX_SOCKET) {
-		const bind = resolveLoopbackBindHost(process.env)
-		if (!bind.ok) {
-			console.error(`uiux: ${bind.message}`)
+	const unixSocket = Boolean(process.env.NITRO_UNIX_SOCKET)
+	// The Nuxt development server proxies to a Nitro worker that listens on a Unix domain socket
+	// without setting NITRO_UNIX_SOCKET, so its connections have no peer address either. Dev mode
+	// already accepts any loopback port (anyPort); it treats such connections as local too.
+	const localSocket = unixSocket || import.meta.dev
+	if (!import.meta.dev) {
+		const network = configureServerNetwork(process.env, { localSocket: unixSocket })
+		if (!network.ok) {
+			console.error(`uiux: ${network.message}`)
 			process.exit(2)
 		}
-		process.env.NITRO_HOST = bind.host
+		setServerNetwork(network.value)
+		if (!unixSocket) console.log(startupLines(resolveInternalServerOrigin(), network.value).join('\n'))
 	}
 
 	nitroApp.h3App.stack.unshift(
 		{
 			route: '',
-			handler: createLoopbackGuardHandler({ anyPort: import.meta.dev }),
+			handler: createLoopbackGuardHandler({ anyPort: import.meta.dev, localSocket }),
 		},
 		{
 			route: '',

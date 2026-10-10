@@ -13,7 +13,14 @@ import { resolveWorkspacePath } from './paths'
  */
 export const SERVER_HOLD_RELATIVE_PATH = '.uiux/.server-hold.json'
 
-export type ServerHold = Readonly<{ pid: number; hostname: string; startedAt: string; token: string }>
+export type ServerHold = Readonly<{
+	pid: number
+	hostname: string
+	startedAt: string
+	token: string
+	/** The server's internal loopback origin, so host commands can name the server's port (`uiux invite create`). */
+	origin?: string
+}>
 
 export type AcquiredServerHold = Readonly<{
 	hold: ServerHold
@@ -26,7 +33,7 @@ export type AcquiredServerHold = Readonly<{
  * Records the current process as the server holding `root`. Returns undefined when the Workspace
  * has no real `.uiux` metadata directory (an uninitialized root is not held).
  */
-export async function acquireServerHold(root: string): Promise<AcquiredServerHold | undefined> {
+export async function acquireServerHold(root: string, options: Readonly<{ origin?: string }> = {}): Promise<AcquiredServerHold | undefined> {
 	const metadata = resolveWorkspacePath(root, '.uiux')
 	try {
 		const stat = await fs.lstat(metadata)
@@ -36,7 +43,7 @@ export async function acquireServerHold(root: string): Promise<AcquiredServerHol
 		if (isNotFound(error)) return undefined
 		throw error
 	}
-	const hold: ServerHold = { pid: process.pid, hostname: hostname(), startedAt: new Date().toISOString(), token: randomUUID() }
+	const hold: ServerHold = { pid: process.pid, hostname: hostname(), startedAt: new Date().toISOString(), token: randomUUID(), ...(options.origin ? { origin: options.origin } : {}) }
 	const target = resolveWorkspacePath(root, SERVER_HOLD_RELATIVE_PATH)
 	const temporary = resolveWorkspacePath(root, `.uiux/.server-hold-${hold.token}.tmp`)
 	await fs.writeFile(temporary, `${JSON.stringify(hold)}\n`, { encoding: 'utf8', flag: 'wx' })
@@ -83,7 +90,13 @@ export async function readActiveServerHold(root: string): Promise<ServerHold | u
 	if (!isRecord(parsed) || typeof parsed.pid !== 'number' || !Number.isInteger(parsed.pid) || parsed.pid < 1
 		|| typeof parsed.hostname !== 'string' || typeof parsed.startedAt !== 'string' || typeof parsed.token !== 'string')
 		return undefined
-	const hold: ServerHold = { pid: parsed.pid, hostname: parsed.hostname, startedAt: parsed.startedAt, token: parsed.token }
+	const hold: ServerHold = {
+		pid: parsed.pid,
+		hostname: parsed.hostname,
+		startedAt: parsed.startedAt,
+		token: parsed.token,
+		...(typeof parsed.origin === 'string' ? { origin: parsed.origin } : {}),
+	}
 	if (hold.hostname !== hostname()) return hold
 	return isProcessAlive(hold.pid) ? hold : undefined
 }

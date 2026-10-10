@@ -70,7 +70,7 @@ Every `/api/*` and `/mcp` request needs a credential. Each Workspace has its own
 
 The first `uiux dev` of a Workspace creates its Owner, named after your OS user, and prints a single-use sign-in link (valid for 24 hours). Open it in the browser to sign in. The session lasts 14 days idle and 30 days at most, and it survives restarts. Lost the link? Run `uiux invite create --workspace <dir> --member <nick>` for a new one.
 
-Manage the roster with the CLI (each command needs `--workspace <dir>` and works while the server runs), or as the Owner on the Workbench **Members** page:
+Manage the roster with the CLI (each command needs `--workspace <dir>` and works while the server runs), or as the Owner on the Workbench **Members** page (on a loopback URL or an `https` origin, see Network access):
 
 ```sh
 uiux member add|list|set|remove ...
@@ -79,6 +79,8 @@ uiux invite create --member <nick>     # a single-use browser sign-in link
 uiux session list|revoke ...
 uiux access copy --from <old-dir> --workspace <new-dir> [--replace]
 ```
+
+Rosters are not downgrade-compatible: a roster that this version has written, for example with a session that records its origin, may not load in an older UIUX ([owner ruling 3, Discussion #174](https://github.com/DevilTea/uiux/discussions/174#discussioncomment-18849995)). Rosters written by older versions keep loading.
 
 A moved or renamed Workspace, and every git worktree, starts with an empty roster. `uiux access copy` carries members, tokens and the host version history over once, so existing agent tokens keep working and the timeline continues; it refuses to copy history into a Workspace that a running server holds. Copy before you run `uiux migrate` on the new path: the target's own history (such as the migration's Checkpoint boundary versions and its system version) is not merged, and `--replace` discards the target's roster and that history, printing how many versions it discarded.
 
@@ -131,11 +133,65 @@ The current format is `schemaVersion` 4. Steps chain: `uiux.v1-to-v2` (resolutio
 
 `uiux migrate` refuses while a running UIUX server holds the Workspace; stop `uiux dev` first. There is no MCP or HTTP migration entrypoint. Before its first step a real run writes the Checkpoint `Before migration to schemaVersion <N>` (`<N>` the target version) into the Workspace (a failed migration leaves it in place), and after it succeeds it records the migration as a system version in the host history under `$UIUX_HOME`. A dry run, and a Workspace that is already current, write nothing.
 
-### Loopback-only access
+### Network access
 
-The LAN listener is not yet available, so `uiux dev` listens on loopback only: `127.0.0.1` by default, with the port taken from the standard Nitro `PORT` / `NITRO_PORT` variables (default `3000`). It prints the address it actually listens on. Setting `HOST` or `NITRO_HOST` to a loopback address (`127.0.0.1`, `::1` or `localhost`) is allowed; any other value makes `uiux dev` refuse to start.
+By default `uiux dev` listens on loopback only: `127.0.0.1`, with the port taken from the standard Nitro `PORT` / `NITRO_PORT` variables (default `3000`). It accepts only the loopback host names, and it prints its loopback URL at startup. `--host` picks the bind address. It takes a loopback address (`127.0.0.1`, `::1` or `localhost`), or a wildcard address (`0.0.0.0` or `::`) that listens on every interface. A loopback `HOST` or `NITRO_HOST` still works when `--host` is absent; any other value makes `uiux dev` refuse to start.
 
-Every request, including `/mcp`, `/api/*` and Workbench assets, must address the server as `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`; any other `Host` gets `421` (DNS-rebinding protection). State-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`), and every `/mcp` request, are refused with `403` when a browser marks them as cross-origin (`Origin` not equal to the server's own origin, or `Sec-Fetch-Site` other than `same-origin` / `none`). State-changing requests that carry a body must send `Content-Type: application/json` (otherwise `415`). Non-browser clients such as curl, scripts and MCP CLIs that send no `Origin` keep working; they authenticate with `Authorization: Bearer <token>`. The server sends no CORS headers, and pages are served with `Content-Security-Policy: frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`, so only the Workbench itself can frame them (as it does for `/preview`).
+Other machines reach the server only through origins you configure with `--origin`, which may repeat:
+
+```sh
+# Behind a reverse proxy on the same host: keep the loopback bind and list the public origin.
+uiux dev --workspace ./design --origin https://uiux.corp.example
+
+# Directly on a LAN: listen on every interface and list the origin people type.
+uiux dev --workspace ./design --host 0.0.0.0 --origin http://10.0.0.5:3000
+```
+
+An origin is `http://` or `https://`, a host and an optional `:<port>`, with no path: UIUX is served on a dedicated hostname, never under a path prefix. `uiux dev` refuses to start in these cases:
+- a wildcard bind without any `--origin`;
+- an invalid origin;
+- two origins that share a host and port;
+- two origins on one host that both use their scheme's default port, such as `http://uiux.corp` and `https://uiux.corp`;
+- an origin that is one of the loopback addresses it already serves.
+
+At startup the server prints its loopback URL and each configured origin. On the first run it also prints the Owner's sign-in link on each of them. The links share one single-use invite, so use only one.
+
+Every request, including `/mcp`, `/api/*` and Workbench assets, must name the server in its `Host` header. It can name a loopback host on the bound port (`127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`), or the host and port of a configured origin. A `Host` without a port matches the configured origin on that host that uses its scheme's default port. Any other `Host` gets `421`, which protects against DNS rebinding. A loopback `Host` is accepted only from a connection that comes from this machine. Two more checks protect against cross-site requests. State-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`) and every `/mcp` request are refused with `403` when they carry an `Origin` other than the origin their `Host` matched, or a `Sec-Fetch-Site` other than `same-origin` / `none`. State-changing requests that carry a body must send `Content-Type: application/json` (otherwise `415`). Non-browser clients such as curl, scripts and MCP CLIs send no `Origin` and keep working on every accepted origin; they authenticate with `Authorization: Bearer <token>`. The server sends no CORS headers, and it serves pages with `Content-Security-Policy: frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`, so only the Workbench itself can frame them (as it does for `/preview`).
+
+On a configured origin, members sign in and work as they do on loopback, with the same credentials and roles, with these differences:
+- **Sessions.** A browser session belongs to the origin it signed in on, so each origin needs its own sign-in.
+- **Cookies and links.** The session cookie carries `Secure` on an `https` origin. Sign-in links the Workbench creates name the origin it is open on.
+- **One host, two schemes.** The cookie name is the same on every origin (`uiux_session_<hint>`), and a browser keeps one cookie per name and host whatever the scheme or port. After someone signs in on `https://uiux.corp.example`, the browser holds a `Secure` cookie for that host and ignores the cookie that a sign-in on `http://uiux.corp.example:8080` sets, so that origin keeps returning to the sign-in page. Give an `http` origin its own host name, or use only the `https` origin for people who use both.
+- **Roster administration.** Managing members, Tokens, invites and sessions works only on a loopback URL or an `https` origin. Elsewhere it is refused with `403 access.admin_origin_rejected`. The `uiux member|token|invite|session` commands on the host always work.
+- **Formal capture.** It still loads Preview from the internal loopback origin.
+
+`uiux invite create` without `--origin` names the loopback origin on the running server's port. Pass `--origin https://uiux.corp.example` for a link that people on the network can open.
+
+**Plain HTTP on a network.** UIUX itself serves plain HTTP only. It refuses `NITRO_SSL_CERT` / `NITRO_SSL_KEY`, and it never reads `X-Forwarded-Proto` or other forwarding headers. An `https` origin is served by a front end that terminates TLS. On an `http` origin other than loopback, sign-in links, session cookies and Tokens cross the network in clear text, and anyone on that network can capture and reuse them. UIUX warns about each such origin at startup and on its sign-in page. Prefer an `https` origin behind a TLS-terminating reverse proxy; use a plain `http` LAN origin only on a network you trust.
+
+**Reverse proxy.** The proxy must forward the client's `Host` unchanged, with its port, and must not buffer the response streams (`/mcp` answers are server-sent events). For nginx:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name uiux.corp.example;
+    # ssl_certificate / ssl_certificate_key ...
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;   # the client's Host, port included
+        proxy_set_header Connection "";
+        proxy_buffering off;                 # stream server-sent events as they are written
+        proxy_cache off;
+        proxy_read_timeout 1h;
+    }
+}
+```
+
+With a proxy on the same host, keep the default loopback bind: the proxy is then the only way in. A wildcard bind (`--host 0.0.0.0` or `::`) also serves the plain port to the network, so with only `https` origins `uiux dev` prints a warning at startup; keep the loopback bind, or block the raw port with a firewall.
+
+A proxy that rewrites `Host` to the loopback address makes its requests look local. State-changing requests then fail the `Origin` check, but reads and roster administration would be treated as local, so always forward `Host`. Failed sign-in attempts are rate-limited per connecting address. Every client behind one proxy therefore shares a single limit of 10 failures a minute.
 
 ## Dogfood Workspace
 

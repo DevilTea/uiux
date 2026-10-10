@@ -21,8 +21,6 @@ export type MemberPrincipal = Readonly<{
 	credential: 'session' | 'token'
 	/** Public id of the token or session that authenticated the request. */
 	credentialId: string
-	/** The accepting listener. Only the loopback listener ships. */
-	listener: 'loopback'
 }>
 
 export const SYSTEM_PRINCIPAL_IDS = ['system:capture'] as const

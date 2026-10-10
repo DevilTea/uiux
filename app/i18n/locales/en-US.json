@@ -1314,7 +1314,7 @@
       "submit": "Sign in",
       "recoverTitle": "No link?",
       "recover": "On the host, run {command} for a fresh single-use link.",
-      "plainHttp": "This page uses plain HTTP. Anyone on this network can capture sign-in links, session cookies and LAN tokens and reuse them.",
+      "plainHttp": "This page uses plain HTTP. Anyone on this network can capture sign-in links, session cookies and Tokens and reuse them.",
       "errors": {
         "invalid": "That link or token is not valid for this Workspace. Sign-in links work once and expire after 24 hours.",
         "rateLimited": "Too many failed attempts from this address. Wait a minute and try again.",
@@ -1370,7 +1370,8 @@
         "tokens": "Tokens",
         "sessions": "Sessions"
       },
-      "errorTitle": "Couldn't update the roster"
+      "errorTitle": "Couldn't update the roster",
+      "adminOriginTitle": "Roster administration isn’t available on this address"
     },
     "tokens": {
       "title": "Tokens",
@@ -1394,7 +1395,6 @@
       "revoked": "Token {id} revoked.",
       "never": "Never",
       "unused": "Not used yet",
-      "lan": "LAN",
       "columns": {
         "token": "Token",
         "member": "Member",
@@ -1667,7 +1667,8 @@
       "session_not_found": "That session does not exist or has already ended.",
       "token_not_found": "That token does not exist or was already revoked.",
       "roster_missing": "This Workspace has no member list yet.",
-      "store_invalid": "The member list file is damaged."
+      "store_invalid": "The member list file is damaged.",
+      "admin_origin_rejected": "Members, Tokens, sign-in links and sessions are managed only on the server host’s loopback URL or on an https address, never over plain HTTP on the network. Use one of those, or the uiux member, token, invite and session commands on the host."
     },
     "auth": {
       "actor_ignored": "The server records who made this change from your sign-in.",

@@ -23,7 +23,8 @@ export type StoredToken = Readonly<{
 	memberId: string
 	label: string
 	hash: string
-	lan: boolean
+	/** Written before the LAN listener design was retired (Discussion #174): kept when read, never written, without effect. */
+	lan?: boolean
 	createdAt: string
 	expiresAt: string | null
 	lastUsedAt: string | null
@@ -34,7 +35,13 @@ export type StoredSession = Readonly<{
 	id: string
 	memberId: string
 	hash: string
-	listener: 'loopback' | 'lan'
+	/**
+	 * The origin the session was created on (Rule 01a11485-ed4a-766b-a51c-af2b9ffb1fcb). A session
+	 * written before configured origins existed has `listener` instead and is a loopback session.
+	 */
+	origin?: string
+	/** Legacy (before Discussion #174): `'loopback'`, or `'lan'` for the never-shipped LAN listener. */
+	listener?: 'loopback' | 'lan'
 	userAgent: string
 	createdAt: string
 	lastSeenAt: string
@@ -107,6 +114,12 @@ const isoOrNull = (value: unknown) => value === null || (typeof value === 'strin
 const iso = (value: unknown) => typeof value === 'string' && !Number.isNaN(Date.parse(value))
 const hash = (value: unknown) => typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value)
 
+/** A session names its origin, or (written before configured origins existed) its listener. */
+function sessionOriginValid(session: Record<string, unknown>): boolean {
+	if (session.origin !== undefined) return typeof session.origin === 'string' && session.origin.length > 0 && session.origin.length <= 300
+	return session.listener === 'loopback' || session.listener === 'lan'
+}
+
 /** Strict structural validation of a parsed `access.json`. */
 export function validateAccessFile(value: unknown): AccessFile {
 	const fail = (detail: string): never => { throw new AccessError('access.store_invalid', `The access store is invalid: ${detail}.`) }
@@ -128,7 +141,7 @@ export function validateAccessFile(value: unknown): AccessFile {
 	}
 	for (const token of file.tokens as Record<string, unknown>[]) {
 		if (typeof token !== 'object' || token === null) fail('token entry is not an object')
-		if (typeof token.id !== 'string' || !CREDENTIAL_ID_PATTERN.test(token.id) || !isFullUuid(token.memberId) || typeof token.label !== 'string' || !hash(token.hash) || typeof token.lan !== 'boolean' || !iso(token.createdAt) || !isoOrNull(token.expiresAt) || !isoOrNull(token.lastUsedAt) || !isoOrNull(token.revokedAt))
+		if (typeof token.id !== 'string' || !CREDENTIAL_ID_PATTERN.test(token.id) || !isFullUuid(token.memberId) || typeof token.label !== 'string' || !hash(token.hash) || (token.lan !== undefined && typeof token.lan !== 'boolean') || !iso(token.createdAt) || !isoOrNull(token.expiresAt) || !isoOrNull(token.lastUsedAt) || !isoOrNull(token.revokedAt))
 			fail('token entry is invalid')
 	}
 	for (const invite of file.invites as Record<string, unknown>[]) {
@@ -138,7 +151,7 @@ export function validateAccessFile(value: unknown): AccessFile {
 	}
 	for (const session of file.sessions as Record<string, unknown>[]) {
 		if (typeof session !== 'object' || session === null) fail('session entry is not an object')
-		if (typeof session.id !== 'string' || !CREDENTIAL_ID_PATTERN.test(session.id) || !isFullUuid(session.memberId) || !hash(session.hash) || (session.listener !== 'loopback' && session.listener !== 'lan') || typeof session.userAgent !== 'string' || !iso(session.createdAt) || !iso(session.lastSeenAt) || !iso(session.expiresAt))
+		if (typeof session.id !== 'string' || !CREDENTIAL_ID_PATTERN.test(session.id) || !isFullUuid(session.memberId) || !hash(session.hash) || !sessionOriginValid(session) || typeof session.userAgent !== 'string' || !iso(session.createdAt) || !iso(session.lastSeenAt) || !iso(session.expiresAt))
 			fail('session entry is invalid')
 	}
 	const nicknames = new Set<string>()
@@ -248,7 +261,7 @@ export type IssuedCredential<T> = Readonly<{ entry: T; credential: string }>
 
 export function createToken(
 	file: AccessFile,
-	input: Readonly<{ nickname: string; label?: string; expiresInDays?: number | null; lan?: boolean }>,
+	input: Readonly<{ nickname: string; label?: string; expiresInDays?: number | null }>,
 	now: Date = new Date(),
 ): Mutation<IssuedCredential<StoredToken>> {
 	const member = requireMember(file, input.nickname)
@@ -263,7 +276,6 @@ export function createToken(
 		memberId: member.id,
 		label,
 		hash: issued.hash,
-		lan: input.lan === true,
 		createdAt: now.toISOString(),
 		expiresAt: days === null ? null : new Date(now.getTime() + days * DAY_MS).toISOString(),
 		lastUsedAt: null,
@@ -397,7 +409,7 @@ export type LoginOutcome = Readonly<{ member: StoredMember; session: StoredSessi
 export function loginWithCredential(
 	file: AccessFile,
 	verification: Extract<CredentialVerification, { ok: true }>,
-	meta: Readonly<{ listener: 'loopback' | 'lan'; userAgent: string }>,
+	meta: Readonly<{ origin: string; userAgent: string }>,
 	now: Date = new Date(),
 ): Mutation<LoginOutcome> {
 	if (verification.kind === 'session') throw new Error('A session cannot be exchanged for another session.')
@@ -406,7 +418,7 @@ export function loginWithCredential(
 		id: issued.id,
 		memberId: verification.member.id,
 		hash: issued.hash,
-		listener: meta.listener,
+		origin: meta.origin,
 		userAgent: meta.userAgent.slice(0, 200),
 		createdAt: now.toISOString(),
 		lastSeenAt: now.toISOString(),

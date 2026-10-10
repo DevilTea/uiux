@@ -4,6 +4,7 @@ import { useI18n } from '#imports'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
+import { copyText } from '../../utils/copy-text'
 
 /**
  * The Workspace mark at the start of the navbar. One server serves one Workspace, so this
@@ -15,13 +16,8 @@ const feedback = useWorkbenchFeedback()
 const { workspace } = workbench
 
 async function copy(value: string): Promise<void> {
-	try {
-		await navigator.clipboard.writeText(value)
-		feedback.success(t('workspaceMenu.copied'))
-	}
-	catch {
-		feedback.error(undefined, t('workspaceMenu.copyFailed'))
-	}
+	if (await copyText(value)) feedback.success(t('workspaceMenu.copied'))
+	else feedback.error(undefined, t('workspaceMenu.copyFailed'))
 }
 
 const items = computed<DropdownMenuItem[][]>(() => {

@@ -2,7 +2,7 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { createApp, createRouter, defineEventHandler, toNodeListener } from 'h3'
 import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type OutgoingHttpHeaders, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { connect, type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -12,10 +12,12 @@ import createViewRoute from '../server/api/views.post'
 import {
 	createLoopbackGuardHandler,
 	evaluateLoopbackRequest,
+	evaluateRequestGate,
 	formatOriginHost,
 	resolveLoopbackBindHost,
 	SECURITY_HEADERS,
 } from '../src/server/loopback-guard'
+import { resolveNetworkConfig } from '../src/server/network-access'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { createAccessGuardHandler } from '../src/server/access/http'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
@@ -25,7 +27,7 @@ const PORT = 4321
 const VIEW_ID = '77777777-7777-4777-8777-777777777777'
 
 function evaluate(method: string, path: string, headers: IncomingHttpHeaders, localPort: number | null = PORT) {
-	return evaluateLoopbackRequest({ method, path, headers, localPort: localPort ?? undefined })
+	return evaluateLoopbackRequest({ method, path, headers, localPort: localPort ?? undefined, remoteAddress: '127.0.0.1' })
 }
 
 const json = { 'content-type': 'application/json', 'content-length': '2' }
@@ -41,11 +43,11 @@ describe('loopback bind resolution', () => {
 		expect(resolveLoopbackBindHost({ NITRO_HOST: '127.0.0.1', HOST: 'my-mac.local' })).toEqual({ ok: true, host: '127.0.0.1' })
 	})
 
-	it('refuses an explicit non-loopback bind and explains that LAN exposure needs authentication', () => {
+	it('keeps a packaged server run directly loopback-only, a wildcard HOST included, and points to uiux dev', () => {
 		for (const env of [{ HOST: '0.0.0.0' }, { NITRO_HOST: '::' }, { HOST: '192.168.1.20' }, { NITRO_HOST: '10.0.0.2', HOST: '127.0.0.1' }]) {
 			const result = resolveLoopbackBindHost(env)
 			expect(result.ok).toBe(false)
-			if (!result.ok) expect(result.message).toMatch(/the LAN listener is not yet available/u)
+			if (!result.ok) expect(result.message).toMatch(/listens on loopback only .* uiux dev --host <address> --origin <url>/u)
 		}
 	})
 
@@ -126,6 +128,130 @@ describe('loopback request policy', () => {
 		}
 		expect(evaluate('POST', '/api/views', { host, 'content-length': '10' })?.status).toBe(415)
 		expect(evaluate('POST', '/api/reviews/x/ready', { host, 'content-length': '0' })).toBeUndefined()
+	})
+})
+
+describe('request gate with configured origins', () => {
+	const network = resolveNetworkConfig({ host: '0.0.0.0', origins: ['https://uiux.corp.example', 'http://10.0.0.5:3000', 'http://uiux-lan.test:8080', 'http://localhost:8443'], port: PORT })
+	if (!network.ok) throw new Error(network.message)
+	const origins = network.value.origins
+	const gate = (method: string, path: string, headers: IncomingHttpHeaders, remoteAddress = '192.168.1.20') =>
+		evaluateRequestGate({ method, path, headers, localPort: PORT, remoteAddress, origins })
+
+	it('keeps the loopback default when no origin is configured', () => {
+		expect(evaluateRequestGate({ method: 'GET', path: '/', headers: { host: `127.0.0.1:${PORT}` }, localPort: PORT, remoteAddress: '127.0.0.1' })).toMatchObject({ ok: true, origin: { origin: `http://127.0.0.1:${PORT}`, kind: 'loopback' } })
+		expect(evaluateRequestGate({ method: 'GET', path: '/', headers: { host: `uiux.corp.example` }, localPort: PORT, remoteAddress: '127.0.0.1' })).toMatchObject({ ok: false, rejection: { status: 421 } })
+	})
+
+	it('matches a configured host and port, and a port-less Host to the one default-port origin', () => {
+		expect(gate('GET', '/', { host: 'uiux.corp.example' })).toMatchObject({ ok: true, origin: { origin: 'https://uiux.corp.example', kind: 'configured', scheme: 'https', loopbackHost: false } })
+		expect(gate('GET', '/', { host: 'UIUX.corp.example:443' })).toMatchObject({ ok: true, origin: { origin: 'https://uiux.corp.example' } })
+		expect(gate('GET', '/', { host: '10.0.0.5:3000' })).toMatchObject({ ok: true, origin: { origin: 'http://10.0.0.5:3000', scheme: 'http' } })
+		expect(gate('GET', '/', { host: 'uiux-lan.test:8080' })).toMatchObject({ ok: true, origin: { origin: 'http://uiux-lan.test:8080' } })
+		// A port-less Host means the scheme's default port; these origins use other ports.
+		for (const host of ['10.0.0.5', 'uiux-lan.test', 'uiux.corp.example:80', 'uiux.corp.example:3000', '10.0.0.5:8080'])
+			expect(gate('GET', '/', { host }), host).toMatchObject({ ok: false, rejection: { status: 421, body: { code: 'request.host_rejected' } } })
+	})
+
+	it('still refuses a foreign Host on every path', () => {
+		for (const path of ['/', '/mcp', '/api/views', '/_nuxt/entry.js'])
+			for (const host of ['rebind.attacker.test', `attacker.test:${PORT}`, 'uiux.corp.example.attacker.test', `0.0.0.0:${PORT}`, `192.168.1.20:${PORT}`, 'user@uiux.corp.example'])
+				expect(gate('GET', path, { host }), `${host} ${path}`).toMatchObject({ ok: false, rejection: { status: 421 } })
+	})
+
+	it('accepts a loopback Host only from a loopback peer', () => {
+		for (const peer of ['127.0.0.1', '::1', '::ffff:127.0.0.1', '127.8.9.10'])
+			expect(gate('GET', '/', { host: `localhost:${PORT}` }, peer), String(peer)).toMatchObject({ ok: true, origin: { kind: 'loopback' } })
+		for (const peer of ['192.168.1.20', '10.0.0.7', '::ffff:10.0.0.7', 'fe80::1']) {
+			for (const host of [`127.0.0.1:${PORT}`, `localhost:${PORT}`, `[::1]:${PORT}`, 'localhost:8443'])
+				expect(gate('GET', '/', { host }, peer), `${host} from ${peer}`).toMatchObject({ ok: false, rejection: { status: 421, body: { code: 'request.host_rejected' } } })
+		}
+		// A configured origin on a loopback host name is a loopback origin, also for the peer check.
+		expect(gate('GET', '/', { host: 'localhost:8443' }, '127.0.0.1')).toMatchObject({ ok: true, origin: { kind: 'configured', loopbackHost: true } })
+	})
+
+	it('fails closed for a connection without a peer address unless the server listens on a Unix socket', () => {
+		const loopbackHost = { method: 'GET', path: '/', headers: { host: `127.0.0.1:${PORT}` }, localPort: PORT, origins }
+		expect(evaluateRequestGate(loopbackHost)).toMatchObject({ ok: false, rejection: { status: 421 } })
+		expect(evaluateRequestGate({ ...loopbackHost, remoteAddress: '' })).toMatchObject({ ok: false, rejection: { status: 421 } })
+		expect(evaluateRequestGate({ ...loopbackHost, localSocket: true })).toMatchObject({ ok: true, origin: { kind: 'loopback' } })
+		// A configured origin does not depend on the peer.
+		expect(evaluateRequestGate({ ...loopbackHost, headers: { host: 'uiux.corp.example' } })).toMatchObject({ ok: true })
+	})
+
+	it('refuses a request with more than one Host header', () => {
+		for (const rawHeaders of [['Host', 'uiux.corp.example', 'Host', 'rebind.attacker.test'], ['host', `127.0.0.1:${PORT}`, 'HOST', `127.0.0.1:${PORT}`]]) {
+			expect(evaluateRequestGate({ method: 'GET', path: '/', headers: { host: rawHeaders[1] }, rawHeaders, localPort: PORT, remoteAddress: '127.0.0.1', origins }))
+				.toMatchObject({ ok: false, rejection: { status: 400, body: { code: 'request.host_rejected' } } })
+		}
+		expect(evaluateRequestGate({ method: 'GET', path: '/', headers: { host: 'uiux.corp.example' }, rawHeaders: ['Host', 'uiux.corp.example', 'Accept', '*/*'], localPort: PORT, remoteAddress: '192.168.1.20', origins })).toMatchObject({ ok: true })
+	})
+
+	it('requires a present Origin to equal the matched origin, scheme and port included, and allows a missing one', () => {
+		expect(gate('POST', '/api/views', { host: 'uiux.corp.example', origin: 'https://uiux.corp.example', ...json })).toMatchObject({ ok: true })
+		expect(gate('POST', '/api/views', { host: 'uiux.corp.example', ...json })).toMatchObject({ ok: true })
+		expect(gate('POST', '/mcp', { host: '10.0.0.5:3000', ...json })).toMatchObject({ ok: true })
+		expect(gate('GET', '/mcp', { host: '10.0.0.5:3000', origin: 'http://10.0.0.5:3000' })).toMatchObject({ ok: true })
+		for (const [host, origin] of [
+			['uiux.corp.example', 'http://uiux.corp.example'],
+			['uiux.corp.example', 'https://uiux.corp.example:8443'],
+			['10.0.0.5:3000', 'https://10.0.0.5:3000'],
+			['10.0.0.5:3000', 'http://uiux-lan.test:8080'],
+			['uiux-lan.test:8080', 'https://uiux.corp.example'],
+			['uiux.corp.example', `http://127.0.0.1:${PORT}`],
+		]) {
+			for (const path of ['/api/views', '/mcp'])
+				expect(gate('POST', path, { host, origin, ...json }), `${host} ${origin} ${path}`).toMatchObject({ ok: false, rejection: { status: 403, body: { code: 'request.origin_rejected' } } })
+		}
+	})
+
+	it('never takes the origin or the scheme from forwarding headers', () => {
+		const forwarded = { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'uiux.corp.example', 'x-forwarded-port': '443', forwarded: 'proto=https;host=uiux.corp.example' }
+		expect(gate('GET', '/', { host: 'rebind.attacker.test', ...forwarded })).toMatchObject({ ok: false, rejection: { status: 421 } })
+		expect(gate('GET', '/', { host: '10.0.0.5:3000', ...forwarded })).toMatchObject({ ok: true, origin: { origin: 'http://10.0.0.5:3000', scheme: 'http' } })
+		expect(gate('POST', '/api/views', { host: '10.0.0.5:3000', origin: 'https://uiux.corp.example', ...forwarded, ...json })).toMatchObject({ ok: false, rejection: { status: 403 } })
+	})
+})
+
+describe('guard handler on a Unix domain socket (the Nuxt development worker)', () => {
+	let directory: string
+	const servers: Server[] = []
+
+	beforeAll(async () => {
+		directory = await mkdtemp(join(tmpdir(), 'uiux-guard-socket-'))
+	})
+
+	afterAll(async () => {
+		await Promise.all(servers.map(server => new Promise<void>(resolve => server.close(() => resolve()))))
+		await rm(directory, { recursive: true, force: true })
+	})
+
+	/** Serves `/` behind the guard on a Unix socket, whose connections have no peer address. */
+	async function socketServer(name: string, options: Parameters<typeof createLoopbackGuardHandler>[0]) {
+		const app = createApp()
+		app.use(createLoopbackGuardHandler(options))
+		app.use(defineEventHandler(() => 'ok'))
+		const server = createServer(toNodeListener(app))
+		servers.push(server)
+		const socketPath = join(directory, `${name}.sock`)
+		await new Promise<void>(resolve => server.listen(socketPath, resolve))
+		return (host: string) => new Promise<number>((resolve, reject) => {
+			const req = httpRequest({ socketPath, path: '/', headers: { host } }, (res) => { res.resume(); res.once('end', () => resolve(res.statusCode ?? 0)) })
+			req.once('error', reject)
+			req.end()
+		})
+	}
+
+	it('accepts an address-less loopback peer when localSocket is set, as in dev mode', async () => {
+		const dev = await socketServer('dev', { anyPort: true, localSocket: true })
+		expect(await dev('localhost:3000')).toBe(200)
+		expect(await dev('127.0.0.1:4000')).toBe(200)
+		expect(await dev('rebind.attacker.test:3000')).toBe(421)
+	})
+
+	it('refuses an address-less peer without localSocket', async () => {
+		const strict = await socketServer('strict', { anyPort: true })
+		expect(await strict('localhost:3000')).toBe(421)
 	})
 })
 
@@ -234,6 +360,17 @@ describe('loopback guard on a live h3 server with the real /mcp and /api routes'
 		const noOrigin = await send('POST', '/api/views', { 'content-type': 'application/json', authorization: `Bearer ${token}` }, viewBody)
 		expect(noOrigin.status).toBe(409)
 		expect(JSON.parse(noOrigin.body)).toMatchObject({ status: 'already_exists' })
+	})
+
+	it('answers 400 to a request with two Host headers, which Node would otherwise reduce to the first', async () => {
+		const response = await new Promise<string>((resolve, reject) => {
+			const socket = connect(port, '127.0.0.1')
+			let text = ''
+			socket.setEncoding('utf8').on('data', chunk => text += chunk).once('end', () => resolve(text)).once('error', reject)
+			socket.write(`GET / HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nHost: rebind.attacker.test\r\nConnection: close\r\n\r\n`)
+		})
+		expect(response).toMatch(/^HTTP\/1\.1 400 /u)
+		expect(response).toContain('"code":"request.host_rejected"')
 	})
 
 	it('sends framing protection and no CORS headers on HTML responses', async () => {

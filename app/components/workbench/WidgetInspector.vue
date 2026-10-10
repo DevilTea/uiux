@@ -7,6 +7,7 @@ import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMedia
 import { useWidgetInspection, type WidgetThreadRow } from '../../composables/useWidgetInspection'
 import { actorInitials, formatStateValue, relativeTime, truncateMiddle, widgetTypeIcon } from '../../utils/widget-inspection'
 import { diagnosticText } from '../../utils/diagnostic-copy'
+import { copyText } from '../../utils/copy-text'
 
 /**
  * The Inspect tab (brief e): a property sheet for the selected Widget. It answers what the Widget
@@ -106,13 +107,8 @@ function statusLabel(status: WidgetThreadRow['status']): string {
 }
 
 async function copy(value: string, labelText: string): Promise<void> {
-	try {
-		await navigator.clipboard.writeText(value)
-		toast.add({ title: labelText, color: 'neutral', icon: 'i-lucide-copy' })
-	}
-	catch {
-		toast.add({ title: t('inspect.copyFailed'), color: 'error', icon: 'i-lucide-circle-alert', duration: 0 })
-	}
+	if (await copyText(value)) toast.add({ title: labelText, color: 'neutral', icon: 'i-lucide-copy' })
+	else toast.add({ title: t('inspect.copyFailed'), color: 'error', icon: 'i-lucide-circle-alert', duration: 0 })
 }
 
 function copyWidgetId(): void {

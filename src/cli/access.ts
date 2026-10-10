@@ -1,4 +1,5 @@
 import { lstat, stat } from 'node:fs/promises'
+import { hostname } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import { FileNativePersistence } from '../persistence/file-native'
@@ -6,6 +7,7 @@ import { artifactRelativePath } from '../persistence/paths'
 import { readActiveServerHold } from '../persistence/server-hold'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 import { generateHint } from '../server/access/credentials'
+import { DEFAULT_LOOPBACK_BIND_HOST, isLoopbackHostname, resolveListenPort } from '../server/network-access'
 import {
 	AccessError,
 	addMember,
@@ -46,10 +48,11 @@ export const ACCESS_HELP = `Access commands (each takes --workspace <dir>; the r
   member list
   member set <nick> [--role <role>] [--nickname <new>]
   member remove <nick>
-  token create --member <nick> [--label <text>] [--expires <days>|never] [--lan]
+  token create --member <nick> [--label <text>] [--expires <days>|never]
   token list [--member <nick>] [--all]
   token revoke <token-id>
   invite create --member <nick> [--origin <url>] [--expires <hours>]
+                                             (--origin defaults to the loopback origin on the server's port)
   session list
   session revoke <session-id> | --member <nick>
   access copy --from <old-dir> [--replace]   (roster and host history, once; copy before uiux migrate:
@@ -111,7 +114,7 @@ export async function runAccessCommand(options: AccessCommandOptions): Promise<n
 		if (spec.positionals >= 0 && parsed.positionals.length !== spec.positionals)
 			throw new UsageError(`uiux ${command} ${sub} takes ${spec.positionals === 0 ? 'no positional arguments' : `exactly ${spec.positionals} positional argument${spec.positionals > 1 ? 's' : ''}`}.`)
 		const workspaceRoot = await requireWorkspace(resolve(cwd, workspaceArg))
-		const context: Context = { home, workspaceRoot, parsed, out, err, now, cwd }
+		const context: Context = { home, workspaceRoot, parsed, out, err, now, cwd, env }
 		return await spec.run(context)
 	}
 	catch (error) {
@@ -136,6 +139,7 @@ type Context = Readonly<{
 	err: (line: string) => void
 	now: () => Date
 	cwd: string
+	env: Readonly<Record<string, string | undefined>>
 }>
 
 type CommandSpec = Readonly<{ positionals: number; values: readonly string[]; flags: readonly string[]; run: (context: Context) => Promise<number> }>
@@ -232,26 +236,21 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 			},
 		}
 		case 'token create': return {
-			positionals: 0, values: ['member', 'label', 'expires'], flags: ['lan'],
+			positionals: 0, values: ['member', 'label', 'expires'], flags: [],
 			async run(context) {
 				const nickname = context.parsed.values.get('member')
 				if (!nickname) throw new UsageError('uiux token create requires --member <nick>.')
 				const expiresInDays = parseExpiryDays(context.parsed.values.get('expires'))
-				const lan = context.parsed.flags.has('lan')
 				const store = await requireStore(context)
 				const issued = await store.update(file => createToken(file, {
 					nickname,
 					...(context.parsed.values.has('label') ? { label: context.parsed.values.get('label') } : {}),
 					...(expiresInDays !== undefined ? { expiresInDays } : {}),
-					lan,
 				}, context.now()))
 				const member = store.data.members.find(item => item.id === issued.entry.memberId)!
-				context.out(`Created token ${issued.entry.id} for ${member.nickname} (${member.kind}, ${member.role}; expires ${day(issued.entry.expiresAt)}; ${lan ? 'LAN-enabled' : 'loopback only'}).`)
+				context.out(`Created token ${issued.entry.id} for ${member.nickname} (${member.kind}, ${member.role}; expires ${day(issued.entry.expiresAt)}).`)
 				context.out(issued.credential)
 				context.out('Store it in an environment variable such as UIUX_MCP_TOKEN, never commit it. It is shown only once.')
-				if (lan) {
-					context.err('Warning: LAN tokens cross the network in clear text on a plain-HTTP LAN listener; anyone on the network can capture and reuse them. This version of UIUX ships no LAN listener, so the token works on loopback like any other.')
-				}
 				return 0
 			},
 		}
@@ -277,8 +276,8 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				const nick = (id: string) => file.members.find(item => item.id === id)?.nickname ?? '(removed)'
 				const state = (token: typeof tokens[number]) => token.revokedAt ? 'revoked' : isTokenActive(token, nowMs) ? 'active' : 'expired'
 				context.out(table([
-					['ID', 'MEMBER', 'LABEL', 'LAN', 'CREATED', 'EXPIRES', 'LAST USED', 'STATE'],
-					...tokens.map(token => [token.id, nick(token.memberId), token.label || '-', token.lan ? 'yes' : 'no', day(token.createdAt), day(token.expiresAt), when(token.lastUsedAt), state(token)]),
+					['ID', 'MEMBER', 'LABEL', 'CREATED', 'EXPIRES', 'LAST USED', 'STATE'],
+					...tokens.map(token => [token.id, nick(token.memberId), token.label || '-', day(token.createdAt), day(token.expiresAt), when(token.lastUsedAt), state(token)]),
 				]).join('\n'))
 				return 0
 			},
@@ -297,11 +296,14 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 			async run(context) {
 				const nickname = context.parsed.values.get('member')
 				if (!nickname) throw new UsageError('uiux invite create requires --member <nick>.')
-				let origin = 'http://127.0.0.1:3000'
+				let origin: string
 				const rawOrigin = context.parsed.values.get('origin')
 				if (rawOrigin !== undefined) {
 					try { origin = new URL(rawOrigin).origin }
 					catch { throw new UsageError('--origin must be a URL such as http://127.0.0.1:3000.') }
+				}
+				else {
+					origin = await defaultInviteOrigin(context)
 				}
 				const hours = parseHours(context.parsed.values.get('expires'))
 				const store = await requireStore(context)
@@ -329,8 +331,9 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				}
 				const nick = (id: string) => file.members.find(item => item.id === id)?.nickname ?? '(removed)'
 				context.out(table([
-					['ID', 'MEMBER', 'LISTENER', 'CREATED', 'LAST SEEN', 'EXPIRES', 'USER AGENT'],
-					...sessions.map(session => [session.id, nick(session.memberId), session.listener, when(session.createdAt), when(session.lastSeenAt), day(session.expiresAt), session.userAgent.slice(0, 60) || '-']),
+					['ID', 'MEMBER', 'ORIGIN', 'CREATED', 'LAST SEEN', 'EXPIRES', 'USER AGENT'],
+					// A session written before configured origins existed names its listener instead.
+					...sessions.map(session => [session.id, nick(session.memberId), session.origin ?? session.listener ?? '-', when(session.createdAt), when(session.lastSeenAt), day(session.expiresAt), session.userAgent.slice(0, 60) || '-']),
 				]).join('\n'))
 				return 0
 			},
@@ -415,6 +418,23 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 		}
 		default: return undefined
 	}
+}
+
+/**
+ * The default `invite create` origin (Clause 01a1144e-568f-7f4b-9d37-0aa746286a3f): the loopback
+ * origin on the server's port. A server running on this host for the Workspace records its loopback
+ * origin in its hold; otherwise the port is the one `uiux dev` would use (`NITRO_PORT`, `PORT`, 3000).
+ */
+async function defaultInviteOrigin(context: Context): Promise<string> {
+	const hold = await readActiveServerHold(context.workspaceRoot).catch(() => undefined)
+	if (hold?.origin && hold.hostname === hostname()) {
+		try {
+			const recorded = new URL(hold.origin)
+			if (recorded.protocol === 'http:' && isLoopbackHostname(recorded.hostname)) return recorded.origin
+		}
+		catch { /* fall back to the configured port */ }
+	}
+	return `http://${DEFAULT_LOOPBACK_BIND_HOST}:${resolveListenPort(context.env)}`
 }
 
 async function refuseWhileServed(workspaceRoot: string): Promise<void> {

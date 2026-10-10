@@ -12,11 +12,12 @@ import { memberInitials } from '../utils/member-initials'
 import WorkbenchPage from '../components/workbench/WorkbenchPage.vue'
 
 /**
- * Members (accepted identity decision 12): the served Workspace's roster, for a human Owner on
- * the loopback listener. Tokens are revealed once at creation; invites are single-use links.
+ * Members (accepted identity decision 12): the served Workspace's roster, for a human Owner on a
+ * loopback origin or an `https` configured origin (Rule 01a11485-eb86-7a69-bf1b-70d492ee3be4).
+ * Tokens are revealed once at creation; invites are single-use links.
  */
 type MemberRow = Readonly<{ id: string; nickname: string; kind: MemberKind; role: AccessRole; createdAt: string; activeTokens: number; activeSessions: number }>
-type TokenRow = Readonly<{ id: string; member: string; memberId: string; label: string; lan: boolean; createdAt: string; expiresAt: string | null; lastUsedAt: string | null; active: boolean }>
+type TokenRow = Readonly<{ id: string; member: string; memberId: string; label: string; createdAt: string; expiresAt: string | null; lastUsedAt: string | null; active: boolean }>
 type SessionRow = Readonly<{ id: string; member: string; userAgent: string; lastSeenAt: string; expiresAt: string; current: boolean }>
 type Attempts = Readonly<{ total: number; recent: readonly Readonly<{ at: string; userAgent: string }>[] }>
 
@@ -34,6 +35,8 @@ const sessions = ref<SessionRow[]>([])
 const attempts = ref<Attempts>({ total: 0, recent: [] })
 const loading = ref(true)
 const loadError = ref('')
+/** This origin does not serve roster administration (an `http` network origin, Rule 01a12500-b105-7773-822f-359d4dcbd1da). */
+const adminOriginRefused = ref(false)
 
 const ROLES: readonly AccessRole[] = ['owner', 'editor', 'reviewer', 'viewer']
 const roleItems = (kind: MemberKind) => ROLES.filter(role => kind === 'human' || role !== 'owner').map(role => ({ label: t(`access.role.${role}`), value: role }))
@@ -41,6 +44,7 @@ const kindItems = computed(() => (['human', 'agent'] as const).map(kind => ({ la
 
 async function load(): Promise<void> {
 	loadError.value = ''
+	adminOriginRefused.value = false
 	try {
 		const [members, tokenList, sessionList, attemptList] = await Promise.all([
 			api<{ workspaceRoot: string; hint: string; members: MemberRow[] }>('/api/access/members'),
@@ -54,7 +58,9 @@ async function load(): Promise<void> {
 		attempts.value = attemptList
 	}
 	catch (cause) {
-		loadError.value = describeFetchError(cause, t('access.members.errorTitle')).message
+		const details = describeFetchError(cause, t('access.members.errorTitle'))
+		loadError.value = details.message
+		adminOriginRefused.value = details.code === 'access.admin_origin_rejected'
 	}
 	finally {
 		loading.value = false
@@ -145,7 +151,8 @@ async function revokeToken(row: TokenRow): Promise<void> {
 const invite = ref<Readonly<{ nickname: string; url: string; expiresAt: string }>>()
 async function createInvite(row: MemberRow): Promise<void> {
 	try {
-		const result = await api<{ url: string; expiresAt: string }>('/api/access/invites', { method: 'POST', body: { memberId: row.id, origin: window.location.origin } })
+		// The link names the origin this page was loaded from: the one the request's Host matched.
+		const result = await api<{ url: string; expiresAt: string }>('/api/access/invites', { method: 'POST', body: { memberId: row.id } })
 		invite.value = { nickname: row.nickname, ...result }
 	}
 	catch (cause) {
@@ -246,6 +253,7 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
           </p>
         </div>
         <UButton
+          v-if="!adminOriginRefused"
           color="primary"
           variant="solid"
           icon="i-lucide-user-plus"
@@ -256,7 +264,18 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
       </header>
 
       <UAlert
-        v-if="loadError"
+        v-if="adminOriginRefused"
+        data-testid="admin-origin-refused"
+        color="warning"
+        variant="subtle"
+        icon="i-lucide-shield-alert"
+        :title="t('access.members.adminOriginTitle')"
+        :description="loadError"
+        :ui="{ root: 'rounded-none border-b border-default' }"
+      />
+
+      <UAlert
+        v-else-if="loadError"
         color="error"
         variant="subtle"
         icon="i-lucide-circle-alert"
@@ -348,15 +367,6 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
               class="font-mono text-xs"
               translate="no"
             >{{ row.original.id }}</span>
-            <UBadge
-              v-if="row.original.lan"
-              color="neutral"
-              variant="soft"
-              size="sm"
-              class="ms-1.5"
-            >
-              {{ t('access.tokens.lan') }}
-            </UBadge>
           </template>
           <template #label-cell="{ row }">
             <span class="text-muted">{{ row.original.label || '—' }}</span>

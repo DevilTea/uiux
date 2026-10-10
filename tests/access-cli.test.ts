@@ -27,13 +27,14 @@ async function setup() {
 	const workspace = join(base, 'design')
 	await mkdir(join(workspace, '.uiux'), { recursive: true })
 	await writeFile(join(workspace, '.uiux', 'workspace.json'), '{}\n')
-	async function run(...argv: string[]) {
+	async function runWithEnv(env: Readonly<Record<string, string>>, ...argv: string[]) {
 		const out: string[] = []
 		const err: string[] = []
-		const code = await runAccessCommand({ argv, env: { UIUX_HOME: home }, cwd: base, stdout: line => out.push(line), stderr: line => err.push(line) })
+		const code = await runAccessCommand({ argv, env: { UIUX_HOME: home, ...env }, cwd: base, stdout: line => out.push(line), stderr: line => err.push(line) })
 		return { code, out: out.join('\n'), err: err.join('\n') }
 	}
-	return { base, home, workspace, run }
+	const run = (...argv: string[]) => runWithEnv({}, ...argv)
+	return { base, home, workspace, run, runWithEnv }
 }
 
 async function initWorkspace(base: string, name: string): Promise<string> {
@@ -93,7 +94,10 @@ describe('uiux access commands', () => {
 		expect(listed.out).not.toContain(token!)
 		const store = (await AccessStore.open({ workspaceRoot: workspace, home }))!
 		expect(verifyCredential(store.data, token!, Date.now()).ok).toBe(true)
-		expect(await run('token', 'create', '--member', 'claude', '--expires', 'never', '--lan', '--workspace', workspace)).toMatchObject({ code: 0, err: expect.stringContaining('ships no LAN listener') })
+		// The LAN flag is gone (Discussion #174): every Token works on every accepted origin.
+		expect(await run('token', 'create', '--member', 'claude', '--expires', 'never', '--lan', '--workspace', workspace)).toMatchObject({ code: 2, err: expect.stringContaining('Unknown option --lan.') })
+		expect((await run('token', 'create', '--member', 'claude', '--expires', 'never', '--workspace', workspace)).out).not.toMatch(/LAN|loopback only/u)
+		expect((await run('token', 'list', '--workspace', workspace)).out).not.toContain('LAN')
 		expect(await run('token', 'create', '--member', 'claude', '--expires', 'soon', '--workspace', workspace)).toMatchObject({ code: 2 })
 		expect(await run('token', 'revoke', id, '--workspace', workspace)).toMatchObject({ code: 0 })
 		await store.refresh({ force: true })
@@ -117,11 +121,29 @@ describe('uiux access commands', () => {
 		await store.update((file) => {
 			const verified = verifyCredential(file, credential, Date.now())
 			if (!verified.ok) throw new Error('invite')
-			return loginWithCredential(file, verified, { listener: 'loopback', userAgent: 'Playwright' })
+			return loginWithCredential(file, verified, { origin: 'http://127.0.0.1:3700', userAgent: 'Playwright' })
 		})
-		expect((await run('session', 'list', '--workspace', workspace)).out).toMatch(/mei\s+loopback/u)
+		expect((await run('session', 'list', '--workspace', workspace)).out).toMatch(/ORIGIN[\s\S]*mei\s+http:\/\/127\.0\.0\.1:3700/u)
 		expect(await run('session', 'revoke', '--workspace', workspace)).toMatchObject({ code: 2 })
 		expect(await run('session', 'revoke', '--member', 'mei', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('Revoked 1 session') })
+	})
+
+	it('names the loopback origin on the server\'s port when invite create has no --origin', async () => {
+		const { workspace, run, runWithEnv } = await setup()
+		await run('member', 'add', 'mei', '--role', 'reviewer', '--workspace', workspace)
+		const link = (output: string) => output.match(/(\S+)\/login#uiux_i_/u)?.[1]
+		expect(link((await run('invite', 'create', '--member', 'mei', '--workspace', workspace)).out)).toBe('http://127.0.0.1:3000')
+		// The port uiux dev would use, as Nitro reads it.
+		expect(link((await runWithEnv({ PORT: '4555' }, 'invite', 'create', '--member', 'mei', '--workspace', workspace)).out)).toBe('http://127.0.0.1:4555')
+		expect(link((await runWithEnv({ PORT: '4555', NITRO_PORT: '4666' }, 'invite', 'create', '--member', 'mei', '--workspace', workspace)).out)).toBe('http://127.0.0.1:4666')
+		// A server running for this Workspace records its loopback origin; that port wins.
+		const hold = (await acquireServerHold(workspace, { origin: 'http://[::1]:4777' }))!
+		try {
+			expect(link((await runWithEnv({ PORT: '4555' }, 'invite', 'create', '--member', 'mei', '--workspace', workspace)).out)).toBe('http://[::1]:4777')
+		}
+		finally { await hold.release() }
+		// An explicit --origin still wins.
+		expect(link((await run('invite', 'create', '--member', 'mei', '--origin', 'https://uiux.corp.example', '--workspace', workspace)).out)).toBe('https://uiux.corp.example')
 	})
 
 	it('copies a roster to a new Workspace path once, keeping tokens and dropping sessions', async () => {
@@ -355,5 +377,6 @@ describe('uiux access commands', () => {
 		for (const command of ['member add', 'token create', 'invite create', 'session list', 'access copy'])
 			expect(help).toContain(command)
 		expect(help).toMatch(/Copy members, tokens and host history from another\s+Workspace path, once/u)
+		expect(help).not.toContain('--lan')
 	}, 30_000)
 })

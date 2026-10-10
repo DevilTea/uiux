@@ -24,7 +24,6 @@ export function testMember(overrides: Partial<Omit<MemberPrincipal, 'type'>> = {
 		role: overrides.role ?? (kind === 'agent' ? 'editor' : 'owner'),
 		credential: overrides.credential ?? (kind === 'agent' ? 'token' : 'session'),
 		credentialId: overrides.credentialId ?? 'aaaaaaaaaa',
-		listener: 'loopback',
 	}
 }
 

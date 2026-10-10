@@ -25,7 +25,20 @@ describe('bootstrap', () => {
 
 		expect(output).toContain('Usage: uiux <command>')
 		expect(output).toContain('init --workspace <dir>  Initialize a Workspace')
-		expect(output).toContain('dev --workspace <dir>   Start the unified UIUX Workbench/Nitro server')
+		expect(output).toContain('dev --workspace <dir> [--host <address>] [--origin <url>]...')
+		expect(output).toContain('Start the unified UIUX Workbench/Nitro server')
+		expect(output).not.toContain('publish')
+	})
+
+	it('treats publish as an unknown command now that static publication is removed', () => {
+		for (const args of [['publish'], ['publish', '--workspace', '.', '--out', 'site']]) {
+			const result = spawnSync(process.execPath, [cliPath, ...args], { encoding: 'utf8' })
+			expect(result.status).toBe(2)
+			expect(result.stderr).toContain(`uiux: unknown command or option: ${args.join(' ')}`)
+			// Usage follows, with no removal notice.
+			expect(result.stdout).toContain('Usage: uiux <command>')
+			expect(`${result.stdout}${result.stderr}`).not.toMatch(/removed|no longer/iu)
+		}
 	})
 
 	it('initializes a minimal current-schema Workspace without overwriting an existing manifest', () => {
@@ -57,10 +70,10 @@ describe('bootstrap', () => {
 			expect(result.status).toBe(2)
 			expect(result.stderr).toContain('uiux: init requires exactly --workspace <dir>.')
 		}
-		for (const args of [['dev'], ['dev', '--workspace'], ['dev', '--workspace', '.', 'extra'], ['dev', '--other', '.']]) {
+		for (const args of [['dev'], ['dev', '--workspace'], ['dev', '--workspace', '.', 'extra'], ['dev', '--other', '.'], ['dev', '--host', '0.0.0.0'], ['dev', '--workspace', '.', '--host', '::1', '--host', '127.0.0.1'], ['dev', '--workspace', '.', '--origin']]) {
 			const result = spawnSync(process.execPath, [cliPath, ...args], { encoding: 'utf8' })
 			expect(result.status).toBe(2)
-			expect(result.stderr).toContain('uiux: dev requires exactly --workspace <dir>.')
+			expect(result.stderr).toContain('uiux: dev requires --workspace <dir> and accepts --host <address> and repeated --origin <url>.')
 		}
 	})
 

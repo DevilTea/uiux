@@ -1314,7 +1314,7 @@
       "submit": "登入",
       "recoverTitle": "沒有連結？",
       "recover": "在主機上執行 {command} 以取得新的單次登入連結。",
-      "plainHttp": "此頁面使用未加密的 HTTP。同一網路上的任何人都能擷取並重複使用登入連結、工作階段 Cookie 與 LAN Token。",
+      "plainHttp": "此頁面使用未加密的 HTTP。同一網路上的任何人都能擷取並重複使用登入連結、工作階段 Cookie 與 Token。",
       "errors": {
         "invalid": "此連結或 Token 對這個 Workspace 無效。登入連結只能使用一次，並於 24 小時後失效。",
         "rateLimited": "此位址的失敗嘗試過多，請稍候一分鐘再試。",
@@ -1370,7 +1370,8 @@
         "tokens": "Token",
         "sessions": "工作階段"
       },
-      "errorTitle": "無法更新名冊"
+      "errorTitle": "無法更新名冊",
+      "adminOriginTitle": "這個網址無法管理名冊"
     },
     "tokens": {
       "title": "Token",
@@ -1394,7 +1395,6 @@
       "revoked": "已撤銷 Token {id}。",
       "never": "永不",
       "unused": "尚未使用",
-      "lan": "LAN",
       "columns": {
         "token": "Token",
         "member": "成員",
@@ -1667,7 +1667,8 @@
       "session_not_found": "這個工作階段不存在或已結束。",
       "token_not_found": "這個 Token 不存在或已撤銷。",
       "roster_missing": "這個 Workspace 還沒有成員名單。",
-      "store_invalid": "成員名單檔案已損壞。"
+      "store_invalid": "成員名單檔案已損壞。",
+      "admin_origin_rejected": "成員、Token、登入連結與工作階段只能在伺服器主機的本機迴路網址或 HTTPS 網址上管理，不會透過網路上未加密的 HTTP 進行。請改用上述網址，或在主機上使用 uiux member、uiux token、uiux invite 與 uiux session 指令。"
     },
     "auth": {
       "actor_ignored": "伺服器會依你的登入身分記錄這次變更的作者。",
