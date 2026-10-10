@@ -10,7 +10,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import restoreRoute from '../server/api/history/versions/[id]/restore.post'
 import { createLeaseManager, type LeaseManager } from '../src/application/access/leases'
-import { ACCESS_OPERATIONS, writeOperationForKind } from '../src/application/access/policy'
+import { writeKeyForKind } from '../src/application/access/keys'
+import { ACCESS_OPERATIONS } from '../src/application/access/policy'
 import type { MemberPrincipal, SystemPrincipal } from '../src/application/access/principal'
 import { createScopedWorkspaceSession } from '../src/application/access/scoped-session'
 import { createHistoryRecorder, type HistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
@@ -580,9 +581,9 @@ describe('effects on Evidence, Handoff readiness and Reviews (Rules 01a11a5e-17f
 
 describe('access (Clause 01a11485-fa44, Rule 01a11c09-c648)', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('needs history.restore and the kind\'s write key: a Reviewer and a system credential are refused, an Editor Agent may restore', async () => {
-		expect(ACCESS_OPERATIONS.restoreResourceVersion).toEqual({ minRole: 'editor', permissionKey: 'history.restore' })
-		expect(['view', 'flow', 'locale', 'asset', 'workspace'].map(writeOperationForKind)).toEqual(['updateViewStructure', 'updateFlow', 'updateLocale', 'replaceAsset', 'updateWorkspaceSettings'])
-		expect(writeOperationForKind('product-kit')).toBeUndefined()
+		expect(ACCESS_OPERATIONS.restoreResourceVersion).toEqual({ requiredKeys: ['history.restore'] })
+		expect(['view', 'flow', 'locale', 'asset', 'workspace'].map(writeKeyForKind)).toEqual(['views.write', 'flows.write', 'locales.write', 'assets.write', 'settings.write'])
+		expect(writeKeyForKind('review')).toBeUndefined()
 
 		const ctx = await fixture()
 		const earlier = await checkpoint(ctx, 'Start')
@@ -590,9 +591,9 @@ describe('access (Clause 01a11485-fa44, Rule 01a11c09-c648)', { timeout: HEAVY_S
 		const command = async () => ({ versionId: earlier, resource: { kind: 'view', key: VIEW_ID }, expectedRevision: await viewRevision(ctx) })
 		for (const principal of [REVIEWER, AGENT_REVIEWER]) {
 			const refused = await restore(ctx, principal, await command())
-			expect(refused, principal.nickname).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredRole: 'editor' })
+			expect(refused, principal.nickname).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['views.write', 'history.restore'] })
 		}
-		const system: SystemPrincipal = { type: 'system', id: 'system:capture', role: 'viewer', credential: 'system' }
+		const system: SystemPrincipal = { type: 'system', id: 'system:capture', credential: 'system' }
 		const systemSession = createScopedWorkspaceSession(ctx.app, system, { transport: 'http', leases: ctx.leases })
 		const unchanged = await viewRevision(ctx)
 		expect(await systemSession.restoreResourceVersion(await command())).toMatchObject({ status: 'blocked', code: 'auth.scope_denied' })
@@ -601,6 +602,54 @@ describe('access (Clause 01a11485-fa44, Rule 01a11c09-c648)', { timeout: HEAVY_S
 		const restored = await restore(ctx, AGENT, await command())
 		expect(restored.status).toBe('updated')
 		expect(ctx.leases.list().map(lease => [lease.holder.nickname, lease.kind, lease.key])).toEqual([['claude', 'view', VIEW_ID]])
+	})
+
+	it('refuses a member holding history.restore but not views.write, naming views.write, and leaves the View unchanged (Scenario 01a11c09-d8ce)', async () => {
+		const ctx = await fixture()
+		const earlier = await checkpoint(ctx, 'Start')
+		await setIntent(ctx, EDITOR, 'Moved on')
+		const restorer = testMember({ nickname: 'rhea', kind: 'human', credential: 'session', keys: ['workspace.read', 'history.read', 'history.restore', 'flows.write'] })
+		const before = await viewRevision(ctx)
+		const refused = await restore(ctx, restorer, { versionId: earlier, resource: { kind: 'view', key: VIEW_ID }, expectedRevision: before })
+		expect(refused).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['views.write'] })
+		expect(await viewRevision(ctx)).toBe(before)
+		expect(ctx.leases.list()).toEqual([])
+	})
+
+	it('needs product-kit.compose for a workspace restore that changes the adapters, judged on the restore\'s result (#140 owner ruling 2026-10-10, 1)', async () => {
+		const ctx = await fixture()
+		const settings = async () => {
+			const read = await ctx.app.readPointResource('workspace', 'workspace')
+			if (read?.kind !== 'workspace') throw new Error('workspace')
+			return read
+		}
+		const update = async (changes: Partial<WorkspaceManifest>) => {
+			const current = await settings()
+			const outcome = await session(ctx, EDITOR).updateWorkspaceSettings({ expectedRevision: current.revision, settings: { ...current.resource, ...changes, adapters: changes.adapters ?? current.resource.adapters ?? [] } })
+			expect(outcome).toMatchObject({ status: 'updated' })
+		}
+		await update({ adapters: [{ moduleSpecifier: '@acme/adapter' }] })
+		const withAdapter = await checkpoint(ctx, 'With the Adapter')
+		await update({ viewports: { desktop: { dimensions: { width: 1440, height: 900 } } } })
+		const widened = await checkpoint(ctx, 'Wider desktop')
+		await update({ adapters: [] })
+
+		const restorer = testMember({ nickname: 'rhea', kind: 'human', credential: 'session', keys: ['workspace.read', 'history.read', 'history.restore', 'settings.write'] })
+		const before = await settings()
+		const refused = await restore(ctx, restorer, { versionId: withAdapter, resource: { kind: 'workspace', key: 'workspace' }, expectedRevision: before.revision, acknowledgeImpact: true })
+		expect(refused).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['product-kit.compose'] })
+		expect((await settings()).revision).toBe(before.revision)
+
+		// Restoring the same adapters with other settings changed needs no compose key.
+		await update({ adapters: [{ moduleSpecifier: '@acme/adapter' }], viewports: MANIFEST.viewports })
+		const sameAdapters = await settings()
+		expect(await restore(ctx, restorer, { versionId: widened, resource: { kind: 'workspace', key: 'workspace' }, expectedRevision: sameAdapters.revision, acknowledgeImpact: true })).toMatchObject({ status: 'updated' })
+
+		// With product-kit.compose the adapters restore goes through.
+		await update({ adapters: [] })
+		const composer = testMember({ nickname: 'cara', kind: 'human', credential: 'session', keys: ['workspace.read', 'history.read', 'history.restore', 'settings.write', 'product-kit.source.read', 'product-kit.write', 'product-kit.compose'] })
+		expect(await restore(ctx, composer, { versionId: withAdapter, resource: { kind: 'workspace', key: 'workspace' }, expectedRevision: (await settings()).revision, acknowledgeImpact: true })).toMatchObject({ status: 'updated' })
+		expect((await settings()).resource.adapters).toEqual([{ moduleSpecifier: '@acme/adapter' }])
 	})
 })
 

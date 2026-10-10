@@ -31,12 +31,20 @@ export type WorkspaceAuthoringResult =
 	| Readonly<{ status: 'invalid'; key: 'workspace'; diagnostics: readonly Diagnostic[] }>
 	| Readonly<{ status: 'blocked'; key: 'workspace'; diagnostics: readonly Diagnostic[] }>
 
+/**
+ * A caller's check of a settings change against the manifest it replaces, such as an
+ * authorization that depends on what changes. It runs after the revision check, on the manifest at
+ * `expectedRevision`, which the compare-and-swap then requires, so the change it allows is exactly
+ * the change written. A returned refusal is answered as is and nothing is written.
+ */
+export type WorkspaceSettingsGuard<R> = (change: Readonly<{ current: WorkspaceManifest; next: WorkspaceManifest }>) => R | undefined
+
 export type WorkspaceAuthoringService = Readonly<{
-	updateWorkspaceSettings(command: UpdateWorkspaceSettingsCommand): Promise<WorkspaceAuthoringResult>
+	updateWorkspaceSettings<R = never>(command: UpdateWorkspaceSettingsCommand, guard?: WorkspaceSettingsGuard<R>): Promise<WorkspaceAuthoringResult | R>
 }>
 
 export function createWorkspaceAuthoringService(persistence: FileNativePersistence): WorkspaceAuthoringService {
-	async function updateWorkspaceSettings(command: UpdateWorkspaceSettingsCommand): Promise<WorkspaceAuthoringResult> {
+	async function updateWorkspaceSettings<R = never>(command: UpdateWorkspaceSettingsCommand, guard?: WorkspaceSettingsGuard<R>): Promise<WorkspaceAuthoringResult | R> {
 		const expectedRevision = validateResourceRevision(command.expectedRevision, '/expectedRevision')
 		if (!expectedRevision.ok)
 			return { status: 'invalid_expected_revision', key: 'workspace', diagnostics: expectedRevision.diagnostics }
@@ -68,6 +76,9 @@ export function createWorkspaceAuthoringService(persistence: FileNativePersisten
 		const validation = validateWorkspaceManifest(next)
 		if (!validation.ok)
 			return { status: 'invalid', key: 'workspace', diagnostics: validation.diagnostics }
+
+		const refused = guard?.({ current: current.resource, next })
+		if (refused !== undefined) return refused
 
 		try {
 			const commit = await persistence.workspace.compareAndSwap({

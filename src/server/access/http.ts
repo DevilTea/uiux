@@ -122,11 +122,11 @@ export function requestPrincipal(event: H3Event): Principal {
 	return principal
 }
 
-/** Returns a JSON `403 auth.scope_denied` body when the principal may not perform the operation. */
+/** Returns a JSON `403 auth.scope_denied` body naming the missing keys when the principal may not perform the operation. */
 export function denyUnlessAllowed(event: H3Event, operation: AccessOperation): unknown | undefined {
 	const denied = authorizeOperation(requestPrincipal(event), operation)
 	if (!denied) return undefined
-	return json(event, 403, { status: 'blocked', code: denied.code, requiredRole: denied.requiredRole, message: denied.message, diagnostics: [{ code: denied.code, path: '/', message: denied.message }] })
+	return json(event, 403, { status: 'blocked', code: denied.code, requiredKeys: denied.requiredKeys, message: denied.message, diagnostics: [{ code: denied.code, path: '/', message: denied.message }] })
 }
 
 export function accessErrorResponse(event: H3Event, error: unknown) {

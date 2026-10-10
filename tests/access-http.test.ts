@@ -348,8 +348,27 @@ describe('authentication on every surface', () => {
 		expect(viaCookie.status).toBe(200)
 		const admin = await fetch(`${origin}/api/access/members`, { headers: bearer(agentToken) })
 		expect(admin.status).toBe(403)
-		expect(await admin.json()).toMatchObject({ code: 'auth.scope_denied', requiredRole: 'owner' })
+		expect(await admin.json()).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['members.manage'] })
 		expect((await fetch(`${origin}/api/session`, { headers: bearer(agentToken) })).status).toBe(403)
+	})
+
+	it('refuses a human Owner\'s bearer Token a force-release, naming locks.force-release, and keeps the lease (Scenario 01a11c09-d861)', async () => {
+		const members = (await AccessStore.open({ workspaceRoot: root }))!.data.members
+		const owner = members.find(member => member.kind === 'human' && member.role === 'owner')!
+		const claude = members.find(member => member.nickname === 'claude')!
+		// The signed-in Owner's own bearer Token.
+		const leadToken = await provisionToken(root, { nickname: owner.nickname })
+		const runtime = getSelectedWorkspaceServerRuntime()
+		runtime.leases.acquire([{ kind: 'view', key: VIEW_ID }], { memberId: claude.id, nickname: 'claude', kind: 'agent' })
+		const refused = await fetch(`${origin}/api/locks/view/${VIEW_ID}`, { method: 'DELETE', headers: bearer(leadToken) })
+		expect(refused.status).toBe(403)
+		const body = await refused.json() as { code: string; requiredKeys: string[]; message: string }
+		expect(body).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['locks.force-release'] })
+		expect(body.message).toContain('signed-in Workbench session')
+		expect(runtime.leases.list()).toMatchObject([{ kind: 'view', key: VIEW_ID, holder: { nickname: 'claude' } }])
+		// The same Owner on a cookie session releases it.
+		expect((await fetch(`${origin}/api/locks/view/${VIEW_ID}`, { method: 'DELETE', headers: { cookie: ownerCookie } })).status).toBe(200)
+		expect(runtime.leases.list()).toEqual([])
 	})
 })
 

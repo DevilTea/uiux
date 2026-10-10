@@ -1,14 +1,18 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { PERMISSION_KEYS } from '../src/application/access/keys'
 import { createLeaseManager, LEASE_TTL_MS, type LeaseHolder } from '../src/application/access/leases'
+import type { MemberPrincipal } from '../src/application/access/principal'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { FileNativePersistence } from '../src/persistence'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { AccessService } from '../src/server/access/service'
+import { AccessStore } from '../src/server/access/store'
 import { appendReviewMessageForHttp, mapAuthoringResultToHttpStatus, updateViewSpecForHttp } from '../src/server/authoring-http'
 import { connectMcp, scoped, testMember } from './support/access'
 
@@ -211,5 +215,85 @@ describe('leases through MCP and HTTP', () => {
 			await agent.close()
 			await other.close()
 		}
+	})
+})
+
+describe('leases by write key (Rules 01a11c09-c125, 01a11485-f074, 01a11485-f08f)', () => {
+	it('needs each requested kind\'s write key to acquire, refusing the whole request, and no key to release one\'s own leases', async () => {
+		const ctx = await fixture()
+		const leases = createLeaseManager()
+		const translator = scoped(ctx.app, testMember({ nickname: 'tran', kind: 'agent', credential: 'token', keys: ['workspace.read', 'reviews.write', 'locales.write'] }), { leases })
+		expect(translator.acquireLeases({ resources: [{ kind: 'locale', key: 'en-US' }, { kind: 'view', key: VIEW_ID }, { kind: 'flow', key: FLOW_KEY }] }))
+			.toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['views.write', 'flows.write'] })
+		expect(leases.list()).toEqual([])
+		expect(translator.acquireLeases({ resources: [{ kind: 'locale', key: 'en-US' }] })).toMatchObject({ status: 'acquired', leases: [{ kind: 'locale', key: 'en-US' }] })
+		// Malformed input is the request's fault once the member may lease some kind; a member that may lease none is refused first.
+		expect(translator.acquireLeases({ resources: [] })).toMatchObject({ status: 'invalid', code: 'lease.invalid_resources' })
+		const reader = scoped(ctx.app, testMember({ nickname: 'vera', kind: 'agent', role: 'viewer', credential: 'token' }), { leases })
+		expect(reader.acquireLeases({ resources: [] })).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['views.write', 'flows.write', 'locales.write', 'assets.write', 'settings.write'] })
+		// Releasing needs no key, and releases only one's own leases.
+		expect(await reader.releaseLeases({})).toMatchObject({ status: 'released', released: [] })
+		expect(leases.list()).toHaveLength(1)
+		expect(await translator.releaseLeases({})).toMatchObject({ status: 'released', released: [{ kind: 'locale', key: 'en-US' }] })
+		expect(leases.list()).toEqual([])
+	})
+
+	it('exempts no key holder from another member\'s lease: even every catalog key needs a force-release first', async () => {
+		const ctx = await fixture()
+		const leases = createLeaseManager()
+		const claude = testMember({ nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' })
+		expect(scoped(ctx.app, claude, { leases }).acquireLeases({ resources: [{ kind: 'view', key: VIEW_ID }] })).toMatchObject({ status: 'acquired' })
+		const everyKey = scoped(ctx.app, testMember({ nickname: 'root', kind: 'human', credential: 'session', keys: PERMISSION_KEYS }), { leases })
+		expect(await everyKey.updateViewSpec({ key: VIEW_ID, expectedRevision: ctx.viewRevision, spec: spec('mine') })).toMatchObject({ status: 'locked', code: 'resource.locked' })
+		expect(everyKey.forceReleaseLease({ kind: 'view', key: VIEW_ID })).toMatchObject({ status: 'released' })
+		expect(await everyKey.updateViewSpec({ key: VIEW_ID, expectedRevision: ctx.viewRevision, spec: spec('mine') })).toMatchObject({ status: 'updated' })
+	})
+
+	it('takes no View lease when an Agent without views.write promotes a Review, but still honors another holder\'s lease (#140 owner ruling 2026-10-10, 2)', async () => {
+		const ctx = await fixture()
+		const leases = createLeaseManager()
+		const promote = (principal: MemberPrincipal, viewRevision: string, reviewRevision: string) => scoped(ctx.app, principal, { leases })
+			.promoteReviewToDecision({ reviewId: REVIEW_ID, expectedReviewRevision: reviewRevision, viewId: VIEW_ID, expectedViewRevision: viewRevision, question: 'Keep it?' })
+		const critic = testMember({ nickname: 'critic', kind: 'agent', role: 'reviewer', credential: 'token' })
+		const holder = testMember({ nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' })
+
+		// Another member's lease blocks the promotion, which writes the View.
+		expect(scoped(ctx.app, holder, { leases }).acquireLeases({ resources: [{ kind: 'view', key: VIEW_ID }] })).toMatchObject({ status: 'acquired' })
+		expect(await promote(critic, ctx.viewRevision, ctx.reviewRevision)).toMatchObject({ status: 'locked', code: 'resource.locked', lock: { holder: { nickname: 'claude' } } })
+		await scoped(ctx.app, holder, { leases }).releaseLeases({})
+
+		// Without the lease the promotion succeeds and leaves no lease behind.
+		const promoted = await promote(critic, ctx.viewRevision, ctx.reviewRevision)
+		expect(promoted, JSON.stringify(promoted)).toMatchObject({ status: 'updated' })
+		expect(leases.list()).toEqual([])
+
+		// An Agent holding views.write still takes the View lease when it promotes.
+		const view = await ctx.app.readPointResource('view', VIEW_ID)
+		const review = await ctx.app.createReviewThread({ anchor: { viewId: VIEW_ID, widgetId: 'root' } })
+		if (review.status !== 'created' || !view) throw new Error('fixture')
+		const second = await scoped(ctx.app, holder, { leases }).promoteReviewToDecision({ reviewId: review.key, expectedReviewRevision: review.revision, viewId: VIEW_ID, expectedViewRevision: view.revision, question: 'And this?' })
+		expect(second, JSON.stringify(second)).toMatchObject({ status: 'updated' })
+		expect(leases.list()).toMatchObject([{ kind: 'view', key: VIEW_ID, holder: { nickname: 'claude' } }])
+	})
+
+	it('ends a lease when its holder loses the write key of the leased kind or is removed, and keeps it otherwise', async () => {
+		const base = await mkdtemp(join(tmpdir(), 'uiux-leases-roster-'))
+		roots.push(base)
+		const workspaceRoot = join(base, 'design')
+		await mkdir(workspaceRoot, { recursive: true })
+		const store = (await AccessStore.open({ workspaceRoot, home: join(base, 'home'), create: true }))!
+		const leases = createLeaseManager()
+		const service = new AccessService({ store, leases })
+		const bot = await service.addMember({ nickname: 'bot', role: 'editor', kind: 'agent' })
+		const pal = await service.addMember({ nickname: 'pal', role: 'editor', kind: 'agent' })
+		leases.acquire([{ kind: 'view', key: VIEW_ID }, { kind: 'flow', key: FLOW_KEY }], { memberId: bot.id, nickname: 'bot', kind: 'agent' })
+		leases.acquire([{ kind: 'workspace', key: 'workspace' }], { memberId: pal.id, nickname: 'pal', kind: 'agent' })
+
+		await service.setMember(bot.id, { nickname: 'bot-renamed' })
+		expect(leases.list().map(lease => lease.kind)).toEqual(['flow', 'view', 'workspace'])
+		await service.setMember(bot.id, { role: 'reviewer' })
+		expect(leases.list().map(lease => [lease.holder.nickname, lease.kind])).toEqual([['pal', 'workspace']])
+		await service.removeMember(pal.id)
+		expect(leases.list()).toEqual([])
 	})
 })
