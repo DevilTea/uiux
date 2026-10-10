@@ -83,6 +83,7 @@ import {
 	type VersionDiffOutcome,
 } from './history-diff'
 import { createHistoryRestoreService, type RestoreResourceVersionCommand, type RestoreResourceVersionOutcome } from './history-restore'
+import { createHistoryPreviewService, type ReadVersionBlobOutcome, type ReadVersionResourceOutcome } from './history-preview'
 import {
 	createHistoryService,
 	type CheckpointBoundary,
@@ -153,6 +154,8 @@ export interface WorkspaceApplicationSession {
 	deleteCheckpoint(id: string): Promise<DeleteCheckpointOutcome>
 	listVersions(query: ListVersionsQuery): Promise<ListVersionsOutcome>
 	readVersion(id: string): Promise<ReadVersionOutcome>
+	readVersionResource(id: string, kind: string, key: string): Promise<ReadVersionResourceOutcome>
+	readVersionBlob(digest: string): Promise<ReadVersionBlobOutcome>
 	restoreResourceVersion(command: RestoreResourceVersionCommand): Promise<RestoreResourceVersionOutcome>
 }
 
@@ -185,6 +188,7 @@ export function createWorkspaceApplicationSession(
 	const historyDiff = createHistoryDiffService(persistence, options?.history)
 	const historyService = createHistoryService(persistence, options?.history, options?.historyBoundary ? { boundary: options.historyBoundary } : {})
 	const historyRestore = createHistoryRestoreService(persistence, options?.history)
+	const historyPreview = createHistoryPreviewService(persistence, options?.history)
 
 	async function readPointResource(kind: PointResourceKind, key: string): Promise<PointResourceRead | undefined> {
 		if (!isValidPointResourceAddress({ kind, key })) return undefined
@@ -338,6 +342,8 @@ export function createWorkspaceApplicationSession(
 		deleteCheckpoint: historyService.deleteCheckpoint,
 		listVersions: historyService.listVersions,
 		readVersion: historyService.readVersion,
+		readVersionResource: historyPreview.readVersionResource,
+		readVersionBlob: historyPreview.readVersionBlob,
 		restoreResourceVersion: historyRestore.restoreResourceVersion,
 	}
 }

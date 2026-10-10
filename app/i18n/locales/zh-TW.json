@@ -495,7 +495,8 @@
       "viewUnavailable": "此 View 無法使用。",
       "viewLoadFailed": "無法載入 View。",
       "bundleInvalid": "預覽 Runtime 不完整。請重新建置 UIUX 後重新載入。",
-      "bundleLoadFailed": "無法載入預覽 Runtime。"
+      "bundleLoadFailed": "無法載入預覽 Runtime。",
+      "viewNotInVersion": "這個版本中沒有這個 View。"
     }
   },
   "reviews": {
@@ -2328,6 +2329,40 @@
     "systemName": {
       "baseline": "歷程起點",
       "migrate": "遷移到 schemaVersion {version} 之前"
+    },
+    "canvas": {
+      "label": "畫布",
+      "title": "畫布比較",
+      "stageLabel": "變更前後的畫面",
+      "mode": {
+        "list": "變更清單",
+        "side": "並排比較",
+        "highlight": "標示變更"
+      },
+      "close": "回到即時畫布",
+      "before": "變更前",
+      "after": "變更後",
+      "version": "版本",
+      "frameTitle": "{side}：{name}，{version}",
+      "nothingBefore": "這是第一個版本，之前沒有任何內容。",
+      "viewMissing": "這個版本中沒有這個 View。",
+      "loadFailed": "無法載入這個版本的 View。",
+      "caveatTitle": "以目前的 Widget Runtime 與 Adapter 呈現",
+      "caveat": "版本不會記錄當時使用的 Adapter，因此較早的版本在這裡看起來可能與儲存當時不同。",
+      "notice": {
+        "variant": "{side}：這裡沒有 Variant {requested}，因此顯示基本狀態。",
+        "locale": "{side}：這個版本沒有 Locale {requested}，因此顯示 {used}。",
+        "viewport": "{side}：這個版本沒有檢視區 {requested}，因此顯示 {used}。",
+        "theme": "{side}：這個版本沒有主題 {requested}，因此顯示 {used}。"
+      },
+      "legend": {
+        "added": "新增",
+        "modified": "修改",
+        "moved": "移動",
+        "removed": "移除"
+      },
+      "unmatched": "這次比較無法依 ID 對應 Widget，因此沒有標示任何變更。",
+      "overCap": "還有 {n} 項變更未標示 | 還有 {n} 項變更未標示"
     }
   }
 }

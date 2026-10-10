@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from '#imports'
+import { versionBlobUrl } from '../../composables/useUiuxClient'
 
 /**
  * One side of an Asset image change, fetched by its content digest (Rule
  * 01a11a5e-10df-795e-8fbc-a99de09694a5: fetching by digest is the reader's concern). When the digest
- * is the Asset's current content, the Asset's content address serves it; otherwise the artifact
- * store, which holds the blobs of member Checkpoints, is tried. A blob kept only in the host history
- * store (an autosave's) has no route yet (issue #132, B9), so its digest is shown with a note
- * instead of a broken image. The bytes are shown with the recorded media type, since the artifact
- * route labels only PNG and JSON.
+ * is the Asset's current content, the Asset's content address serves it; otherwise the version blob
+ * route does, which reads the host history store (an autosave's blobs) and then the artifact store
+ * (member Checkpoints' blobs). A blob neither store keeps any more is shown as its digest with a note
+ * instead of a broken image. The bytes are shown with the recorded media type, since the blob route
+ * answers them untyped.
  */
 const props = defineProps<{ digest: string; mediaType: string; alt: string; current?: Readonly<{ digest?: string; url: string }> }>()
 const { t } = useI18n()
@@ -35,7 +36,7 @@ async function load(): Promise<void> {
 	try {
 		const blob = props.current?.digest === props.digest
 			? await fetchBlob(props.current.url)
-			: await fetchBlob(`/api/artifacts/${encodeURIComponent(props.digest)}`)
+			: await fetchBlob(versionBlobUrl(props.digest))
 		if (!blob) {
 			missing.value = true
 			return
