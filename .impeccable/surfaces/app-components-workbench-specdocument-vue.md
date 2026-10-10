@@ -129,7 +129,6 @@ Inline references to Widgets, such as `#checkout-submit`, are mono links that se
 | Empty Spec section | n/a | Dashed placeholder row: "No interaction rules yet." On desktop, "Add" (opens edit) |
 | Saving | n/a | Save button loading. Fields read-only |
 | Revision conflict | n/a | Caution `UAlert`: "The Spec changed since you started editing." with "Review their version" (side-by-side text) and "Discard mine". Never auto-merge |
-| Publication mode | Read-only. Comment hidden | Edit hidden |
 
 ## 8. Keyboard
 

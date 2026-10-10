@@ -150,21 +150,16 @@ function createReviewInbox() {
 	async function loadSummaries(): Promise<void> {
 		loading.value = true
 		try {
-			if (uiux.isReadOnly.value) {
-				reviews.value = (await uiux.listResources<ReviewSummary>(['review'], { limit: 100 })).items
+			const items: ReviewSummary[] = []
+			let cursor: string | undefined
+			for (let page = 0; page < MAX_PAGES; page++) {
+				const result: ListPage = await $fetch<ListPage>('/api/resources/list', { method: 'POST', body: { kinds: ['review'], limit: 100, ...(cursor ? { cursor } : {}) } })
+				items.push(...result.items)
+				cursor = result.nextCursor
+				if (!cursor) break
 			}
-			else {
-				const items: ReviewSummary[] = []
-				let cursor: string | undefined
-				for (let page = 0; page < MAX_PAGES; page++) {
-					const result: ListPage = await $fetch<ListPage>('/api/resources/list', { method: 'POST', body: { kinds: ['review'], limit: 100, ...(cursor ? { cursor } : {}) } })
-					items.push(...result.items)
-					cursor = result.nextCursor
-					if (!cursor) break
-				}
-				reviews.value = items
-				pruneSeen(items.map(item => item.key))
-			}
+			reviews.value = items
+			pruneSeen(items.map(item => item.key))
 			loadError.value = undefined
 		}
 		catch (cause) {
@@ -320,7 +315,7 @@ function createReviewInbox() {
 	// Permissions (accepted identity decisions; direct-resolve decision 9)
 	// -------------------------------------------------------------------------------------------
 
-	/** Reviewers and above reply, reopen and re-anchor; Viewers and the publication read only. */
+	/** Reviewers and above reply, reopen and re-anchor; Viewers read only. */
 	const canReply = computed(() => !reviewReadOnly.value)
 	/** Resolution is a human act on a Workbench cookie session. */
 	const canResolve = computed(() => !reviewReadOnly.value && member.value?.kind === 'human' && access.session.value?.credential === 'session')

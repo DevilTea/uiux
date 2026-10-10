@@ -1,4 +1,3 @@
-import { anchorViewId } from '../../src/domain/reviews/schema'
 import { computed, shallowRef, triggerRef } from 'vue'
 import { useI18n } from '#imports'
 import type { FormalEvidenceRecord } from '../../src/domain/evidence/schema'
@@ -6,7 +5,6 @@ import type { HandoffManifest, HandoffReadiness, HandoffReadinessAssessment, Han
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
 import {
 	contextFromRecord,
-	diagnosticsForView,
 	evidenceFreshness,
 	type CaptureContext,
 	type EvidenceFreshness,
@@ -37,8 +35,6 @@ export type AssessmentEntry = Readonly<{
 	readiness?: HandoffReadiness
 	assessment?: HandoffReadinessAssessment
 	error?: FetchErrorDetails
-	/** Narrowed from the Workspace assessment because a View-root assessment cannot run here. */
-	derived?: boolean
 }>
 
 export type CaptureOutcome = Readonly<{
@@ -121,7 +117,7 @@ export function useReadiness() {
 	const uiux = useUiuxClient()
 	const workbench = useWorkbench()
 	const { t } = useI18n()
-	const { views, reviews, workspace, discoveredLocales, localeRevisions, flows, isReadOnly, writeBlocked } = workbench
+	const { views, reviews, workspace, discoveredLocales, localeRevisions, flows, writeBlocked } = workbench
 
 	/** Revisions every assessment depends on; any change makes cached entries stale. */
 	const signature = computed(() => [
@@ -132,10 +128,6 @@ export function useReadiness() {
 		...Object.entries(localeRevisions.value).map(([key, revision]) => `${key}@${revision}`),
 		`evidence:${evidenceItems.value.length}`,
 	].join(','))
-
-	const reviewAnchors = computed(() => new Map(reviews.value
-		.filter(review => anchorViewId(review.summary.anchor))
-		.map(review => [review.key, anchorViewId(review.summary.anchor)!])))
 
 	// ----- Evidence --------------------------------------------------------------------------
 
@@ -220,7 +212,7 @@ export function useReadiness() {
 		}
 		// Until the Workspace is read, its schema state is unknown: wait (the signature changes once it
 		// loads, so callers ask again) rather than risk a request an older schema would refuse.
-		if (!workspace.value && !isReadOnly.value) {
+		if (!workspace.value) {
 			const pending: AssessmentEntry = { status: 'loading', signature: expected }
 			setAssessment(key, pending)
 			return pending
@@ -238,31 +230,14 @@ export function useReadiness() {
 		return entry
 	}
 
-	/**
-	 * Per-View readiness: the readiness check run with that View as the only root (Part 1). A
-	 * published snapshot ships only the Workspace assessment, so there it is narrowed to the View.
-	 */
+	/** Per-View readiness: the readiness check run with that View as the only root (Part 1). */
 	async function assessView(viewId: string, options: Readonly<{ force?: boolean }> = {}): Promise<AssessmentEntry> {
-		if (!isReadOnly.value) return assess([{ type: 'view', viewId }], options)
-		const key = `published-view:${viewId}`
-		const workspaceEntry = await assess([{ type: 'workspace' }], options)
-		const readiness = workspaceEntry.readiness
-		const entry: AssessmentEntry = readiness
-			? {
-					status: 'ok',
-					signature: workspaceEntry.signature,
-					derived: true,
-					// The claim stays the Workspace's: a narrowed slice never upgrades it.
-					readiness: { ...readiness, blockingDiagnostics: diagnosticsForView(readiness.blockingDiagnostics, viewId, reviewAnchors.value) },
-				}
-			: { ...workspaceEntry, derived: true }
-		setAssessment(key, entry)
-		return entry
+		return assess([{ type: 'view', viewId }], options)
 	}
 
 	/** The cached View assessment, without triggering a request. */
 	function viewAssessment(viewId: string): AssessmentEntry | undefined {
-		return assessments.value.get(isReadOnly.value ? `published-view:${viewId}` : rootKey([{ type: 'view', viewId }]))
+		return assessments.value.get(rootKey([{ type: 'view', viewId }]))
 	}
 
 	function assessmentFor(roots: readonly HandoffRoot[]): AssessmentEntry | undefined {

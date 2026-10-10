@@ -76,24 +76,6 @@ export function handoffDiagnosticSubject(diagnostic: Pick<HandoffBlockingDiagnos
 	return { locale: id!.replace(/\.json$/, '') }
 }
 
-/**
- * Narrows a Workspace-root assessment to one View: its own entries and those of Review threads
- * anchored to it. Only used where a View-root assessment cannot run (a published snapshot ships
- * the Workspace assessment alone), and labelled as such in the UI.
- */
-export function diagnosticsForView(
-	diagnostics: readonly HandoffBlockingDiagnostic[],
-	viewId: string,
-	reviewAnchors: ReadonlyMap<string, string>,
-): HandoffBlockingDiagnostic[] {
-	return diagnostics.filter((diagnostic) => {
-		const subject = handoffDiagnosticSubject(diagnostic)
-		if (subject.viewId) return subject.viewId === viewId
-		if (subject.reviewId) return reviewAnchors.get(subject.reviewId) === viewId
-		return false
-	})
-}
-
 // ---------------------------------------------------------------------------------------------
 // Evidence freshness
 // ---------------------------------------------------------------------------------------------

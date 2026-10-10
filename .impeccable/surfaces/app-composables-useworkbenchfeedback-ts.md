@@ -88,7 +88,6 @@ Quiet, specific and repairable. Empty states use a 20px Lucide icon in `text-dim
 | Deep link | View gone | (toast) **View not found. Stayed on the current page.** | none |
 | Deep link | Widget gone | (alert) **Widget {id} isn't in this View anymore.** | Select parent (when hinted) |
 | Deep link | Thread gone | (toast) **Thread not found.** | Open Reviews |
-| Publication | Read-only | (banner) **Published snapshot · read-only** | Dismiss |
 
 ## 7. Loading skeletons
 

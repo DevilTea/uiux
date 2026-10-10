@@ -10,7 +10,7 @@ import { edgeKey, orderSteps, parseEdgeKey, triggerLabel, type FlowSelection } f
 /**
  * Structured editing for the selected step or transition (brief g, section 6), or the Flow itself
  * when nothing is selected. Every control edits the shared draft; Save sends the whole Flow in one
- * `update_flow`. Read-only mode (tablet, phone, publication) shows the same facts as text.
+ * `update_flow`. Read-only mode (tablet, phone) shows the same facts as text.
  */
 const props = defineProps<{ selection?: FlowSelection; readOnly?: boolean }>()
 const emit = defineEmits<{ (e: 'select', selection: FlowSelection | undefined): void }>()

@@ -10,7 +10,6 @@ web
 
 - **A small product team reviewing what AI agents author.** Designers and PMs read Views, comment on the canvas, and judge readiness. Developers author the Workspace with AI agents (for example Claude Code) through MCP, then implement production code from Handoff. Several named humans review in parallel. Each person is a member of the Workspace's host-local roster (under `$UIUX_HOME`, default `~/.uiux`) with one role, Owner, Editor, Reviewer or Viewer, and signs in to the Workbench with a one-time link; Review actions record the member (`member:<id>`) as actor provenance.
 - **AI agents (non-human authors).** They are agent members of the roster and authenticate with a bearer token (`Authorization: Bearer <token>`). They write the canonical `design/` Workspace only through domain-specific MCP operations (`create_view`, `update_view_spec`, `update_view_structure`, `update_workspace_settings`, `create_locale`, `update_locale`, `create_flow`, `update_flow`, review lifecycle tools, asset authoring, and so on) under per-resource `expectedRevision` concurrency. They never use the Workbench UI, but every change they make must become legible there. Agents can create threads (on a Widget or on the Workspace as a whole), reply, edit their own messages (`edit_review_message`, until a later submission or resolution), withdraw their own unanswered threads (`retract_review_thread`), and submit threads to `ready-for-review` with an evidence bundle. They cannot resolve.
-- **Readers of the published spec.** Anyone given the static `uiux publish` site (for example GitHub Pages) can browse Views, Preview, Inspector, Spec, UX Flows, review history, evidence and readiness. Authoring and review controls are removed there.
 - **Downstream implementers (developers on the team or their agents).** They consume the Handoff export, which is a manifest-first, read-only reference contract.
 
 ## Product Purpose
@@ -50,8 +49,7 @@ Figma comments sit on pixels of a drawing. Here, a Figma-like comment sits on a 
 - **Access.** Every `/api/*` and `/mcp` request needs a credential: a Workbench session (from a one-time sign-in link) or a bearer token. Each Workspace has a host-local roster of members, tokens, invites and sessions under `$UIUX_HOME`, managed with `uiux member|token|invite|session ... --workspace <dir>` (`uiux access copy` carries a roster to a moved Workspace) or, for Owners, on the Workbench Members page. The first start of a Workspace creates its Owner and prints a sign-in link. Roles are cumulative: Viewer ⊂ Reviewer ⊂ Editor ⊂ Owner; agents are capped at Editor.
 - **Older Workspaces.** `uiux migrate --workspace <dir> [--dry-run]` upgrades an older Workspace to `schemaVersion` 4 (steps `uiux.v1-to-v2`, `uiux.v2-to-v3`, then `uiux.v3-to-v4`). Migration is CLI-only; until it runs, the Workbench opens the Workspace read-only and names the command.
 - **Side by side with an agent session.** A developer usually has an agent authoring through MCP in another window. Reviewers return to the Workbench to inspect the result. Refresh is manual today; live push of agent edits is accepted but not built (issue #69).
-- **Team sharing happens through one host's roster, the Workspace files** (typically Git) **and the published static site.** Several members can use the same server, each signed in with their own credential, but the server listens on loopback only, so other devices cannot reach it yet; the opt-in LAN listener is accepted but not built (issue #68).
-- **Published, read-only mode.** `uiux publish --workspace <dir> --out <dir> [--base <path>] [--source-revision <rev>]` produces a static interactive site with authoring and review mutations removed. This repository dogfoods it at https://deviltea.github.io/uiux/.
+- **Team sharing happens through one host's roster and the Workspace files** (typically Git). Several members can use the same server, each signed in with their own credential, but the server listens on loopback only, so other devices cannot reach it yet; the opt-in LAN listener is accepted but not built (issue #68).
 - **Devices.**
   - **Desktop** (FHD 1920×1080 is primary) gets everything: authoring, review, evidence, Handoff.
   - **Tablet** (1024×768) gets review: canvas, comments, resolve and reopen, UX Flows and the Prototype player, plus Handoff export. Structural editing stays on desktop.
@@ -80,8 +78,7 @@ The normative domain behavior and external contracts live in `.spec/` (Stories, 
 - a Reviews inbox: `ready-for-review` before `open`, resolved and dismissed threads in their own tabs, filters by View (or Workspace), anchor state, Variant scope, change domain and author, one chronological timeline per thread, and reply, resolve or dismiss, reopen, re-anchor, promote to Decision, submit for review, edit own message and delete own new thread;
 - a node/edge UX Flow graph editor and a Prototype player;
 - Workspace pages for Settings (including Adapters), Locales and Assets, and a Members page for Owners;
-- a Preview session indicator, Workbench chrome i18n (en-US / zh-TW) and light/dark themes on Nuxt UI semantic color tokens;
-- read-only publication mode.
+- a Preview session indicator, Workbench chrome i18n (en-US / zh-TW) and light/dark themes on Nuxt UI semantic color tokens.
 
 **Accepted in architecture, not yet built:**
 
@@ -115,7 +112,6 @@ The normative domain behavior and external contracts live in `.spec/` (Stories, 
 
 - Dogfood Workspace `design/`: 4 Views ("UIUX Workbench — Workspace browser", "Overview & readiness", "Reviews inbox", "Sign-in"), 2 UX Flows, 6 Review threads, 1 Asset, locales `en-US` and `zh-TW`, themes `dark` and `light`, viewport presets `desktop` (1920×1080), `tablet` (1024×768) and `mobile` (390×844), reference adapter `design/adapters/reference.ts`.
 - Screenshots of an earlier Workbench: `docs/pr-48/01-workbench-overview.png` to `05-handoff-export.png`.
-- Live published spec: https://deviltea.github.io/uiux/
 - Behavioral requirements and external contracts: `.spec/` in this repository, the authority (Stories, Features and Rules, Contracts and Clauses, Scenarios). Decision rationale and history: GitHub Discussions #1–#10, frozen. Implementation workstreams: Issues #11–#29.
 - **Absent, so future work must not fabricate:** users, customers, testimonials, usage metrics, pricing or licensing claims, and a logo or wordmark.
 

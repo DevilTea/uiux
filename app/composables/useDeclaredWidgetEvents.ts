@@ -1,6 +1,5 @@
 import { shallowRef } from 'vue'
 import type { DeclaredWidgetEvent, DeclaredWidgetEvents } from '../../src/preview/browser-runtime'
-import { useUiuxClient } from './useUiuxClient'
 
 type DeclaredWidgetEventsResponse =
 	| Readonly<{ state: 'valid'; widgets: DeclaredWidgetEvents }>
@@ -16,14 +15,8 @@ let pending: Promise<void> | undefined
  * Event and records nothing. Each use refreshes it in the background, so adapter edits show up.
  */
 export function useDeclaredWidgetEvents() {
-	const uiux = useUiuxClient()
-
 	function refresh(): void {
 		if (pending) return
-		if (uiux.isReadOnly.value) {
-			catalog.value = 'unavailable'
-			return
-		}
 		pending = $fetch<DeclaredWidgetEventsResponse>('/api/preview/widget-events')
 			.then((response) => { catalog.value = response.state === 'valid' ? response.widgets : 'unavailable' })
 			.catch(() => { catalog.value ??= 'unavailable' })

@@ -5,7 +5,6 @@ import { lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join, resolve } from 'node:path'
-import { parsePublishArguments, runPublish } from './publish.mjs'
 
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 const workspaceSchemaVersion = packageJson.uiuxWorkspaceSchemaVersion
@@ -34,8 +33,6 @@ Commands:
                            schemaVersion ${workspaceSchemaVersion}" and then records the migration in the host
                            history ($UIUX_HOME); --dry-run prints the steps and changed
                            files without writing anything
-  publish --workspace <dir> --out <dir> [--base <path>] [--source-revision <rev>]
-                           Publish a read-only static UIUX Workspace
 
 Access (each takes --workspace <dir>; rosters live in $UIUX_HOME, default ~/.uiux):
   member add <nick> --role <owner|editor|reviewer|viewer> [--kind human|agent]
@@ -207,8 +204,6 @@ async function runDev(workspaceArgument) {
 		UIUX_PACKAGE_ROOT: packageRoot,
 	}
 	delete env.NITRO_UNIX_SOCKET
-	// Internal `uiux publish` plumbing only; a dev server always opens the Workspace's host roster.
-	delete env.UIUX_INTERNAL_PUBLISH_CREDENTIAL
 	console.log(`uiux: serving Workspace ${workspaceRoot} on loopback only (${bind.host}).`)
 	const child = spawn(process.execPath, [serverEntry], { stdio: 'inherit', env })
 	const forwardSignal = signal => {
@@ -277,21 +272,6 @@ if (extraArgs.length === 0 && (command === undefined || command === '--help' || 
 	catch (error) {
 		console.error(`uiux: ${command} failed: ` + (error instanceof Error ? error.message : String(error)))
 		process.exitCode = 1
-	}
-} else if (command === 'publish') {
-	const options = parsePublishArguments(extraArgs)
-	if (!options) {
-		console.error('uiux: publish requires --workspace <dir> --out <dir> and accepts --base <path> and --source-revision <rev>.')
-		process.exitCode = 2
-	} else {
-		try {
-			const packageRoot = fileURLToPath(new URL('..', import.meta.url))
-			await runPublish(options, packageRoot)
-		}
-		catch (error) {
-			console.error('uiux: publish failed: ' + (error instanceof Error ? error.message : String(error)))
-			process.exitCode = 1
-		}
 	}
 } else {
 	console.error(`uiux: unknown command or option: ${[command, ...extraArgs].filter(Boolean).join(' ')}`)

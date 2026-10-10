@@ -1,14 +1,9 @@
 import { fileURLToPath } from 'node:url'
 import { defineNuxtConfig } from 'nuxt/config'
 
-const publicationMode = process.env.UIUX_PUBLICATION_MODE === '1'
-const publicationBase = process.env.UIUX_APP_BASE_URL || '/'
-const publicationOutput = process.env.UIUX_NITRO_OUTPUT_DIR
-
 export default defineNuxtConfig({
 	ssr: false,
 	app: {
-		baseURL: publicationBase,
 		head: {
 			// Edge-to-edge on notched phones (safe areas are padded by the shell), and the layout
 			// viewport shrinks above the virtual keyboard so sheets and composers stay visible.
@@ -20,11 +15,6 @@ export default defineNuxtConfig({
 			}],
 		},
 	},
-	runtimeConfig: {
-		public: {
-			uiuxMode: publicationMode ? 'publication' : 'live',
-		},
-	},
 	modules: ['@nuxt/ui', '@nuxtjs/i18n'],
 	ui: {
 		theme: {
@@ -32,8 +22,8 @@ export default defineNuxtConfig({
 			colors: ['primary', 'secondary', 'annotation', 'success', 'info', 'warning', 'error'],
 		},
 		// Inter and JetBrains Mono ship as npm packages bundled by Vite (see `css` below), so
-		// builds, including `uiux publish` on a user's machine, never fetch fonts from a network
-		// provider and a missing package fails the build instead of silently falling back.
+		// builds never fetch fonts from a network provider and a missing package fails the build
+		// instead of silently falling back.
 		fonts: false,
 	},
 	i18n: {
@@ -48,18 +38,10 @@ export default defineNuxtConfig({
 			{ code: 'zh-TW', language: 'zh-TW', name: '繁體中文', file: 'zh-TW.json' },
 		],
 	},
-	icon: publicationMode
-		? {
-				provider: 'none',
-				clientBundle: {
-					scan: true,
-					icons: ['lucide:loader-circle'],
-				},
-			}
-		: {
-				// Icons the server-unreachable state needs while the icon API is down with the server.
-				clientBundle: { icons: ['lucide:unplug', 'lucide:refresh-cw', 'lucide:loader-circle', 'lucide:circle-alert'] },
-			},
+	icon: {
+		// Icons the server-unreachable state needs while the icon API is down with the server.
+		clientBundle: { icons: ['lucide:unplug', 'lucide:refresh-cw', 'lucide:loader-circle', 'lucide:circle-alert'] },
+	},
 	css: [
 		'@fontsource-variable/inter/wght.css',
 		'@fontsource/jetbrains-mono/latin-400.css',
@@ -77,11 +59,7 @@ export default defineNuxtConfig({
 		},
 	},
 	nitro: {
-		preset: publicationMode ? 'static' : 'node-server',
-		...(publicationOutput ? { output: { dir: publicationOutput } } : {}),
-		prerender: {
-			routes: publicationMode ? ['/', '/preview'] : [],
-		},
+		preset: 'node-server',
 		externals: {
 			external: [
 				'@deviltea/widget-core',

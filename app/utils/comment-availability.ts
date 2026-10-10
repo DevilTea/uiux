@@ -7,7 +7,6 @@
  * Replies, resolve and reopen have their own rules; this is only about creating a thread.
  */
 export type CommentBlockCode =
-	| 'publication'
 	| 'migration'
 	| 'unsupported'
 	| 'signed-out'
@@ -19,8 +18,6 @@ export type CommentBlockCode =
 	| 'stopped'
 
 export type CommentAvailabilityInput = Readonly<{
-	/** A read-only `uiux publish` snapshot. */
-	publication: boolean
 	/** `workspace.inspection.state`: the server refuses every write until `uiux migrate`. */
 	workspaceState?: string
 	/** A member is signed in to this Workbench. */
@@ -36,12 +33,11 @@ export type CommentAvailabilityInput = Readonly<{
 }>
 
 /**
- * Whether a thread can be created at all, in the order a person can fix it: the snapshot, the
- * Workspace, the sign-in, the role, then the device. "Comment on this View" needs nothing more:
+ * Whether a thread can be created at all, in the order a person can fix it: the Workspace, the
+ * sign-in, the role, then the device. "Comment on this View" needs nothing more:
  * it targets the RootShell and never waits for the Preview to hit-test a Widget.
  */
 export function commentCreateBlock(input: CommentAvailabilityInput): CommentBlockCode | undefined {
-	if (input.publication) return 'publication'
 	if (input.workspaceState === 'migration_required') return 'migration'
 	if (input.workspaceState === 'unsupported') return 'unsupported'
 	if (!input.signedIn) return 'signed-out'

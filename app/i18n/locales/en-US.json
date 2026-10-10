@@ -5,7 +5,7 @@
     "unnamedAsset": "Unnamed Asset",
     "emptyTitle": "No Assets yet",
     "emptyDescription": "Upload an image or file to use it in Views.",
-    "emptyDescriptionReadOnly": "No Assets in this snapshot.",
+    "emptyDescriptionReadOnly": "This Workspace has no Assets.",
     "loadListFailed": "Could not load Assets.",
     "notSet": "Not set",
     "fields": {
@@ -406,7 +406,7 @@
     "newLocale": "New Locale",
     "emptyTitle": "No Locales yet",
     "emptyDescription": "Add the primary Locale to start translating.",
-    "emptyDescriptionReadOnly": "No Locales in this snapshot.",
+    "emptyDescriptionReadOnly": "This Workspace has no Locales.",
     "loadListFailed": "Could not load Locales.",
     "defaultMissing": {
       "title": "Primary Locale has no file",
@@ -496,8 +496,7 @@
       "viewLoadFailed": "Could not load the View.",
       "bundleInvalid": "The preview runtime is incomplete. Rebuild UIUX, then reload.",
       "bundleLoadFailed": "Could not load the preview runtime.",
-      "viewNotInVersion": "This View doesn't exist in this version.",
-      "versionUnavailable": "A published snapshot has no version history, so this version can't be shown."
+      "viewNotInVersion": "This View doesn't exist in this version."
     }
   },
   "reviews": {
@@ -621,10 +620,6 @@
   "identity": {
     "commentingAs": "Commenting as {name}",
     "setName": "Set your name"
-  },
-  "publication": {
-    "banner": "Published snapshot · read-only",
-    "bannerRevision": "Published snapshot · read-only · {revision}"
   },
   "server": {
     "unreachable": "Can't reach the UIUX server.",
@@ -1194,10 +1189,6 @@
       "mixed": "{fresh} fresh · {stale} stale"
     },
     "readinessFailed": "Couldn't check",
-    "empty": {
-      "title": "No Views yet",
-      "description": "Ask your agent to create one with {tool}, then refresh."
-    },
     "attentionBlocked": "{n} View blocked | {n} Views blocked",
     "readinessMigration": "Migrate to check"
   },
@@ -1227,7 +1218,6 @@
     "openComments": "Open",
     "blockingTitle": "{n} blocking issue | {n} blocking issues",
     "advisoryTitle": "{n} advisory note, doesn't block | {n} advisory notes, don't block",
-    "derived": "Narrowed from the Workspace assessment published with this snapshot.",
     "diag": {
       "unknownView": "an unknown View",
       "reviewOpen": "A Review on {view} is open.",
@@ -1263,9 +1253,7 @@
   "workspaceMenu": {
     "label": "Workspace",
     "local": "Local Workspace",
-    "published": "Published snapshot · read-only",
     "copyRevision": "Copy Workspace revision",
-    "copyPublication": "Copy publication ID",
     "copied": "Copied",
     "copyFailed": "Could not copy to the clipboard."
   },
@@ -1630,7 +1618,6 @@
     "viewHint": "Read-only on a phone. Tap a pin to open its thread."
   },
   "commentBlock": {
-    "publication": "Read-only: this is a published snapshot.",
     "migration": "Read-only until this Workspace is migrated. Run uiux migrate.",
     "unsupported": "Read-only: this Workspace's schema isn't supported by this version of UIUX.",
     "signed-out": "Sign in to comment.",
@@ -1727,9 +1714,6 @@
     },
     "preview": {
       "runtime_failed": "The preview could not render this View."
-    },
-    "publication": {
-      "snapshot_failed": "The published snapshot could not be created."
     },
     "schema": {
       "empty_string": "This value must not be empty.",
@@ -2096,7 +2080,6 @@
     "lease": "The edit lock could not be taken.",
     "persistence": "The Workspace files could not be read or written.",
     "preview": "The preview could not render this View.",
-    "publication": "The publication could not be created.",
     "render_context": "That render context is not valid.",
     "request": "The server refused this request.",
     "resource": "This resource is not available right now.",
@@ -2140,7 +2123,6 @@
     "emptyFiltered": "No versions match these filters",
     "emptyFilteredDescription": "Change or clear the filters to see more versions.",
     "loadMore": "Load older versions",
-    "publication": "A published snapshot has no version history.",
     "today": "Today",
     "yesterday": "Yesterday",
     "quiet": "{n} autosave with no net change | {n} autosaves with no net change",

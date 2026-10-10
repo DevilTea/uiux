@@ -373,7 +373,7 @@ const hoverNode = computed<WidgetTreeNode | undefined>(() => widgetTreeResult.va
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Viewers, the publication, a Workspace awaiting migration and phones can't start comments
+ * Viewers, a Workspace awaiting migration and phones can't start comments
  * (phones read, reply and resolve only). The Comment tool stays in the pill anyway, disabled with
  * the reason in its tooltip, so it never vanishes or silently does nothing (review feedback 8dd59d25).
  */
@@ -772,7 +772,7 @@ function switchToBase(): void {
           :description="t('canvas.adapterUnresolvedHint')"
           variant="naked"
           :actions="[
-            ...(unresolvedAdapter.command && !workbench.isReadOnly.value ? [{ label: t('canvas.copyRepair'), icon: 'i-lucide-copy', color: 'primary' as const, variant: 'solid' as const, onClick: () => { void copyRepair(unresolvedAdapter!.command!) } }] : []),
+            ...(unresolvedAdapter.command ? [{ label: t('canvas.copyRepair'), icon: 'i-lucide-copy', color: 'primary' as const, variant: 'solid' as const, onClick: () => { void copyRepair(unresolvedAdapter!.command!) } }] : []),
             { label: t('common.retry'), icon: 'i-lucide-refresh-cw', color: 'neutral' as const, variant: 'outline' as const, loading: adapterChecking, onClick: () => { void loadAdapterState() } },
           ]"
           data-canvas-adapter-unresolved
@@ -902,7 +902,7 @@ function switchToBase(): void {
           :active="activeTool"
           :disabled-reason="toolsDisabledReason"
           :comment-disabled-reason="commentDisabledReason"
-          :comments="!!comments && !workbench.isReadOnly.value"
+          :comments="!!comments"
           :pins-hidden="comments ? comments.pinsHidden.value : undefined"
           @select="selectTool"
           @blocked="explainBlocked"

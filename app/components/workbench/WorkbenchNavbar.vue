@@ -14,7 +14,7 @@ const { t } = useI18n()
 const route = useRoute()
 const workbench = useWorkbench()
 const shell = useWorkbenchShell()
-const { isReadOnly, selectedView, views, flows, loading } = workbench
+const { selectedView, views, flows, loading } = workbench
 
 const WORKSPACE_PAGES: Record<string, string> = {
 	'/workspace/settings': 'nav.settings',
@@ -108,7 +108,7 @@ const breadcrumb = computed<BreadcrumbItem[]>(() => {
         class="md:hidden"
         :aria-label="t('shell.search')"
       />
-      <MemberChip v-if="!isReadOnly" />
+      <MemberChip />
       <WorkbenchPreferences />
       <UTooltip :text="t('common.refresh')">
         <UButton

@@ -7,12 +7,12 @@ import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 
 /**
  * The Workspace mark at the start of the navbar. One server serves one Workspace, so this
- * only identifies it (mode and revision, one click away) and never switches Workspaces.
+ * only identifies it (its revision, one click away) and never switches Workspaces.
  */
 const { t } = useI18n()
 const workbench = useWorkbench()
 const feedback = useWorkbenchFeedback()
-const { isReadOnly, workspace, publicationInfo } = workbench
+const { workspace } = workbench
 
 async function copy(value: string): Promise<void> {
 	try {
@@ -27,8 +27,8 @@ async function copy(value: string): Promise<void> {
 const items = computed<DropdownMenuItem[][]>(() => {
 	const details: DropdownMenuItem[] = [{
 		type: 'label',
-		label: isReadOnly.value ? t('workspaceMenu.published') : t('workspaceMenu.local'),
-		icon: isReadOnly.value ? 'i-lucide-lock' : 'i-lucide-hard-drive',
+		label: t('workspaceMenu.local'),
+		icon: 'i-lucide-hard-drive',
 	}]
 	const revision = workspace.value?.revision
 	if (revision) {
@@ -37,15 +37,6 @@ const items = computed<DropdownMenuItem[][]>(() => {
 			description: `${revision.slice(0, 14)}…`,
 			icon: 'i-lucide-copy',
 			onSelect: () => { void copy(revision) },
-		})
-	}
-	const identity = publicationInfo.value?.publicationIdentity
-	if (identity) {
-		details.push({
-			label: t('workspaceMenu.copyPublication'),
-			description: `${identity.slice(0, 18)}…`,
-			icon: 'i-lucide-copy',
-			onSelect: () => { void copy(identity) },
 		})
 	}
 	return [details]

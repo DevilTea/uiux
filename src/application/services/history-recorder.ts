@@ -77,7 +77,7 @@ export type AutosaveCloseReason =
 export type HistoryBoundaryReport = Readonly<{ reason: AutosaveCloseReason; autosave?: string; external?: string }>
 
 export type HistoryStartReport = Readonly<{
-	/** False when history is disabled (the internal `uiux publish` server) or could not start. */
+	/** False when no history stores are available or recording could not start. */
 	enabled: boolean
 	/** The Baseline Checkpoint written because this host had no history for the Workspace. */
 	baseline?: string

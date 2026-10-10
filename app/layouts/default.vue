@@ -21,7 +21,7 @@ const { t } = useI18n()
 const route = useRoute()
 const workbench = provideWorkbench()
 const shell = provideWorkbenchShell()
-const { error, isReadOnly, publicationInfo, workspace } = workbench
+const { error, workspace } = workbench
 
 // Read-only banner for an older Workspace schema. Migration is a CLI-only operator act
 // (`uiux migrate`), so the banner names the command and offers no in-app action.
@@ -71,16 +71,6 @@ shell.onToggleSidebar(() => {
 
 const isViewPage = computed(() => route.path.startsWith('/views/'))
 
-const PUBLICATION_BANNER_KEY = 'uiux.workbench.publicationBannerDismissed'
-const publicationBannerDismissed = ref(false)
-try { publicationBannerDismissed.value = globalThis.sessionStorage?.getItem(PUBLICATION_BANNER_KEY) === '1' }
-catch { /* session storage unavailable */ }
-function dismissPublicationBanner(): void {
-	publicationBannerDismissed.value = true
-	try { globalThis.sessionStorage?.setItem(PUBLICATION_BANNER_KEY, '1') }
-	catch { /* session storage unavailable */ }
-}
-
 onMounted(() => {
 	// On a phone the review desk opens on its triage queue (brief a, section 6): a cold load of the
 	// Overview lands on Reviews; Overview stays one tap away in the bottom bar.
@@ -111,17 +101,6 @@ onUnmounted(() => {
     </a>
 
     <WorkbenchNavbar />
-
-    <UBanner
-      v-if="isReadOnly && !publicationBannerDismissed"
-      id="uiux-publication"
-      icon="i-lucide-lock"
-      color="neutral"
-      :title="publicationInfo?.sourceRevision ? t('publication.bannerRevision', { revision: publicationInfo.sourceRevision.slice(0, 12) }) : t('publication.banner')"
-      close
-      :ui="{ root: 'border-b border-default bg-muted', title: 'text-xs text-muted font-medium' }"
-      @close="dismissPublicationBanner"
-    />
 
     <UAlert
       v-if="migrationRequired"
@@ -203,6 +182,6 @@ onUnmounted(() => {
 
     <WorkbenchCommandPalette />
     <WorkbenchShortcuts />
-    <CreateCheckpointModal v-if="!isReadOnly" />
+    <CreateCheckpointModal />
   </UDashboardGroup>
 </template>

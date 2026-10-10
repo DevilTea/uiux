@@ -21,11 +21,11 @@ export type SelectedWorkspaceServerRuntime = Readonly<{
 	leases: LeaseManager
 	/** The Workspace's roster and authentication, opened (and created if needed) once per process. */
 	access(): Promise<AccessService>
-	/** The Workspace's history stores; disabled (never opened) for the internal `uiux publish` server. */
+	/** The Workspace's history stores, opened lazily. */
 	history: HistoryStoreFactory
 	/**
 	 * The autosave recorder over those stores. The Nitro plugin starts it (start boundary, Baseline,
-	 * pruning) and `close()` stops it; for the internal `uiux publish` server it never records.
+	 * pruning) and `close()` stops it.
 	 */
 	historyRecorder: HistoryRecorder
 	mcp: McpHttpHandler
@@ -48,12 +48,9 @@ export function resolveInternalServerOrigin(): string {
 	return `http://${formatOriginHost(normalizedHost)}:${port}`
 }
 
-/** Internal CLI-to-server plumbing: `uiux publish` passes its per-run `system:publish` credential. */
-export const PUBLISH_CREDENTIAL_ENV = 'UIUX_INTERNAL_PUBLISH_CREDENTIAL'
-
 export function createSelectedWorkspaceServerRuntime(
 	root: string,
-	options?: { serverOrigin?: string; uiuxHome?: string; publishCredential?: string },
+	options?: { serverOrigin?: string; uiuxHome?: string },
 ): SelectedWorkspaceServerRuntime {
 	const selectedRoot = resolve(root)
 	const persistence = new FileNativePersistence({
@@ -63,16 +60,12 @@ export function createSelectedWorkspaceServerRuntime(
 	const serverOrigin = options?.serverOrigin ?? resolveInternalServerOrigin()
 	const leases = createLeaseManager()
 	let accessService: AccessService | undefined
-	const publishCredential = options?.publishCredential ?? process.env[PUBLISH_CREDENTIAL_ENV]
-	// The recorder writes these stores and version comparison reads them; the internal `uiux publish`
-	// server gets a disabled factory.
+	// The recorder writes these stores and version comparison reads them.
 	const history = createHistoryStoreFactory({
 		workspaceRoot: selectedRoot,
 		persistence,
 		home: () => options?.uiuxHome ?? resolveUiuxHome(),
-		...(publishCredential ? { publishCredential } : {}),
 	})
-	// Disabled with the factory: for the publish server `open()` resolves nothing, so it never records.
 	const historyRecorder = createHistoryRecorder({ persistence, stores: () => history.open() })
 	const app = createWorkspaceApplicationSession(persistence, {
 		serverOrigin,
@@ -85,12 +78,8 @@ export function createSelectedWorkspaceServerRuntime(
 	let pending: Promise<AccessService> | undefined
 	function access(): Promise<AccessService> {
 		pending ??= (async () => {
-			// The internal `uiux publish` server keeps an empty in-memory roster: it serves no members
-			// and must never create or touch a host roster.
-			const store = publishCredential
-				? AccessStore.memory(selectedRoot)
-				: (await AccessStore.open({ workspaceRoot: selectedRoot, home: options?.uiuxHome ?? resolveUiuxHome(), create: true }))!
-			accessService = new AccessService({ store, leases, ...(publishCredential ? { publishCredential } : {}) })
+			const store = (await AccessStore.open({ workspaceRoot: selectedRoot, home: options?.uiuxHome ?? resolveUiuxHome(), create: true }))!
+			accessService = new AccessService({ store, leases })
 			return accessService
 		})()
 		return pending

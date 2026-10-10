@@ -924,21 +924,6 @@ describe('transports', () => {
 		await ctx.recorder.stop()
 	})
 
-	it('never records for the internal uiux publish server', async () => {
-		const base = await tempDir('uiux-recorder-publish-')
-		const workspace = join(base, 'ws')
-		await mkdir(workspace)
-		const home = join(base, 'home')
-		const runtime = createSelectedWorkspaceServerRuntime(workspace, { uiuxHome: home, publishCredential: 'internal-publish-credential', serverOrigin: 'http://127.0.0.1:1' })
-		await runtime.persistence.workspace.create({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
-		expect(await runtime.historyRecorder.start()).toEqual({ enabled: false })
-		const created = await scoped(runtime.app, HUMAN, { history: runtime.historyRecorder }).createView({ id: VIEW_ID, name: 'Published', spec: spec('p') })
-		expect(created.status).toBe('created')
-		await runtime.close()
-		await expect(lstat(home)).rejects.toMatchObject({ code: 'ENOENT' })
-		await expect(lstat(join(workspace, '.uiux/history'))).rejects.toMatchObject({ code: 'ENOENT' })
-	})
-
 	it('starts and stops with the selected-Workspace runtime', async () => {
 		const base = await tempDir('uiux-recorder-runtime-')
 		const workspace = join(base, 'ws')

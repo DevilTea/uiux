@@ -1,4 +1,4 @@
-import { computed, ref, shallowRef } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from '#imports'
 import { deriveRenderContextOptions, workspaceRenderContextKeys, type RenderContextKeys } from '../../src/preview/render-context-options'
 import { deriveWidgetTree, findWidgetInTree, flattenWidgetTree, type WidgetTreeNode } from '../../src/preview/widget-tree'
@@ -16,8 +16,6 @@ import type {
 	WorkspaceRead,
 } from './workbench-types'
 
-export type PublicationInfo = Readonly<{ publicationIdentity: string; sourceRevision?: string; generatedAt: string }>
-
 /**
  * Workbench data and selection state: the selected Workspace, its Views, the
  * selected View / Widget, render-context selections and section counts.
@@ -26,10 +24,8 @@ export type PublicationInfo = Readonly<{ publicationIdentity: string; sourceRevi
 export function createWorkbenchState() {
 	const uiux = useUiuxClient()
 	const { t } = useI18n()
-	const isReadOnly = uiux.isReadOnly
 	// Role-aware controls (accepted identity decision 12). The server remains the authority.
 	const access = useAccess()
-	const publicationInfo = shallowRef<PublicationInfo>()
 	const workspace = ref<WorkspaceRead>()
 	/**
 	 * The server refuses every canonical write until an older Workspace schema is migrated
@@ -39,8 +35,8 @@ export function createWorkbenchState() {
 		const state = workspace.value?.inspection?.state
 		return state === 'migration_required' || state === 'unsupported'
 	})
-	const authorReadOnly = computed(() => isReadOnly.value || writeBlocked.value || !access.canAuthor.value)
-	const reviewReadOnly = computed(() => isReadOnly.value || writeBlocked.value || !access.canReview.value)
+	const authorReadOnly = computed(() => writeBlocked.value || !access.canAuthor.value)
+	const reviewReadOnly = computed(() => writeBlocked.value || !access.canReview.value)
 	const views = ref<readonly ViewSummary[]>([])
 	const discoveredLocales = ref<readonly string[]>([])
 	const localeRevisions = ref<Readonly<Record<string, string>>>({})
@@ -237,14 +233,6 @@ export function createWorkbenchState() {
 				uiux.listResources<ReviewSummary>(['review'], { limit: 100 }).catch(() => ({ items: [] as ReviewSummary[] })),
 			])
 			if (!workspaceRead) throw new Error(t('workbench.errors.workspaceUnavailable'))
-			if (isReadOnly.value) {
-				const snapshot = await uiux.publication()
-				publicationInfo.value = {
-					publicationIdentity: snapshot.publicationIdentity,
-					generatedAt: snapshot.generatedAt,
-					...(snapshot.sourceRevision ? { sourceRevision: snapshot.sourceRevision } : {}),
-				}
-			}
 			workspace.value = workspaceRead
 			views.value = viewPage.items
 			discoveredLocales.value = localePage.items.map(item => item.key)
@@ -265,11 +253,9 @@ export function createWorkbenchState() {
 	}
 
 	return {
-		isReadOnly,
 		authorReadOnly,
 		reviewReadOnly,
 		writeBlocked,
-		publicationInfo,
 		workspace,
 		views,
 		discoveredLocales,

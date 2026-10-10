@@ -10,7 +10,7 @@ import {
 	type SystemPrincipal,
 	type SystemPrincipalId,
 } from '../../application/access/principal'
-import { generateCredential, parseCredential, sessionCookieName, CREDENTIAL_PATTERN } from './credentials'
+import { generateCredential, parseCredential, sessionCookieName } from './credentials'
 import {
 	AccessError,
 	addMember,
@@ -71,8 +71,6 @@ export type McpAttempt = Readonly<{ at: string; userAgent: string; listener: 'lo
 export type AccessServiceOptions = Readonly<{
 	store: AccessStore
 	leases: LeaseManager
-	/** Accepted in addition to the per-process `system:capture` credential (the internal `uiux publish` server). */
-	publishCredential?: string
 	now?: () => number
 	/** Shown in 401 messages; defaults to the Workspace root. */
 	workspaceLabel?: string
@@ -105,8 +103,6 @@ export class AccessService {
 		this.now = options.now ?? (() => Date.now())
 		this.captureCredential = generateCredential('session', this.store.data.hint).value
 		this.system.set(this.captureCredential, systemPrincipal('system:capture'))
-		if (options.publishCredential && CREDENTIAL_PATTERN.test(options.publishCredential))
-			this.system.set(options.publishCredential, systemPrincipal('system:publish'))
 	}
 
 	get hint(): string {

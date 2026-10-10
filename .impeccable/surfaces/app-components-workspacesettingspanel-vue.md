@@ -150,7 +150,6 @@ The player opens full-canvas, reusing the frame. A step strip runs across the to
 | Asset invalid (type or digest mismatch) | Tile fault badge. Detail shows diagnostics. Referencing Views are listed |
 | Tablet | Settings, Locales and Assets are read-only, with an edit hint "Edit on desktop". Flows support play plus read-only graph |
 | Mobile | Read-only lists |
-| Publication mode | All read-only. Upload, Save and Edit are hidden |
 
 ## 8. Keyboard
 

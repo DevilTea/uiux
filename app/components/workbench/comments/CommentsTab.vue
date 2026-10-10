@@ -126,7 +126,7 @@ function onListKeydown(event: KeyboardEvent): void {
       </div>
       <!-- Phones never start comments (DESIGN.md "Mobile"); the canvas pill says so there. -->
       <UTooltip
-        v-if="!phone && !workbench.isReadOnly.value"
+        v-if="!phone"
         :text="viewCommentBlocked ?? t('comments.commentOnViewHint')"
       >
         <UButton

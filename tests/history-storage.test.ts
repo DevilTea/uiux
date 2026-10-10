@@ -772,22 +772,15 @@ describe('persistence write observer', () => {
 	})
 })
 
-describe('publish isolation', () => {
-	it('never opens host history for the internal uiux publish server', async () => {
-		const base = await tempDir('uiux-history-publish-')
+describe('selected-Workspace history stores', () => {
+	it('opens host history under UIUX_HOME for the served Workspace', async () => {
+		const base = await tempDir('uiux-history-serve-')
 		const workspace = join(base, 'ws')
 		await mkdir(join(workspace, '.uiux'), { recursive: true })
 		const home = join(base, 'home')
 
-		const publishing = createSelectedWorkspaceServerRuntime(workspace, { uiuxHome: home, publishCredential: 'internal-publish-credential', serverOrigin: 'http://127.0.0.1:1' })
-		expect(publishing.history.enabled).toBe(false)
-		expect(await publishing.history.open()).toBeUndefined()
-		await publishing.close()
-		await expect(lstat(home)).rejects.toMatchObject({ code: 'ENOENT' })
-
 		const serving = createSelectedWorkspaceServerRuntime(workspace, { uiuxHome: home, serverOrigin: 'http://127.0.0.1:1' })
-		expect(serving.history.enabled).toBe(true)
-		const stores = (await serving.history.open())!
+		const stores = await serving.history.open()
 		expect(stores.host.paths.dir).toBe(hostHistoryPaths(home, await realpath(workspace)).dir)
 		expect((await stat(stores.host.paths.dir)).isDirectory()).toBe(true)
 		await serving.close()

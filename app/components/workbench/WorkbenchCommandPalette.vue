@@ -93,9 +93,8 @@ const groups = computed<CommandPaletteGroup<CommandPaletteItem>[]>(() => {
 		})
 	}
 	const actions: CommandPaletteItem[] = []
-	// Offered with the canvas (not in a published snapshot, which has no reviewing surface); when it
-	// can't start, it is listed disabled with the reason, never just missing.
-	if (canvas && !workbench.isReadOnly.value) {
+	// Offered with the canvas; when it can't start, it is listed disabled with the reason, never just missing.
+	if (canvas) {
 		const toolBlocked = canvas.commentBlockedReason()
 		const viewBlocked = canvas.viewCommentBlockedReason()
 		actions.push(
@@ -105,16 +104,14 @@ const groups = computed<CommandPaletteGroup<CommandPaletteItem>[]>(() => {
 	}
 	// "Comment on Workspace" (scope/edit decision 8): opens the inbox composer, offering the View
 	// the reviewer is on as the other choice. Viewers see it disabled, with the reason.
-	if (!workbench.isReadOnly.value) {
-		const fromView = route.path.startsWith('/views/') ? workbench.selectedViewId.value : undefined
-		actions.push({
-			label: t('palette.commentOnWorkspace'),
-			icon: 'i-lucide-globe',
-			disabled: workbench.reviewReadOnly.value,
-			...(workbench.reviewReadOnly.value ? { suffix: t('inbox.readOnly') } : {}),
-			onSelect: () => { void navigateTo({ path: '/reviews', query: { compose: 'workspace', ...(fromView ? { from: fromView } : {}) } }) },
-		})
-	}
+	const fromView = route.path.startsWith('/views/') ? workbench.selectedViewId.value : undefined
+	actions.push({
+		label: t('palette.commentOnWorkspace'),
+		icon: 'i-lucide-globe',
+		disabled: workbench.reviewReadOnly.value,
+		...(workbench.reviewReadOnly.value ? { suffix: t('inbox.readOnly') } : {}),
+		onSelect: () => { void navigateTo({ path: '/reviews', query: { compose: 'workspace', ...(fromView ? { from: fromView } : {}) } }) },
+	})
 	// Create Checkpoint (Rule 01a11a5e-0c71-78d1-9adb-14db6c67ab9c): desktop and tablet only, never on a
 	// phone (Rule 01a11a5e-1ba5-765e-966f-a681def5f472); below Reviewer it is listed disabled with the reason.
 	if (checkpoints.createOffered.value) {
