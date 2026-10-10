@@ -80,6 +80,8 @@ uiux session list|revoke ...
 uiux access copy --from <old-dir> --workspace <new-dir> [--replace]
 ```
 
+Rosters are not downgrade-compatible: a roster that this version has written, for example with a session that records its origin, may not load in an older UIUX ([owner ruling 3, Discussion #174](https://github.com/DevilTea/uiux/discussions/174#discussioncomment-18849995)). Rosters written by older versions keep loading.
+
 A moved or renamed Workspace, and every git worktree, starts with an empty roster. `uiux access copy` carries members, tokens and the host version history over once, so existing agent tokens keep working and the timeline continues; it refuses to copy history into a Workspace that a running server holds. Copy before you run `uiux migrate` on the new path: the target's own history (such as the migration's Checkpoint boundary versions and its system version) is not merged, and `--replace` discards the target's roster and that history, printing how many versions it discarded.
 
 Review actors and times on `/api/*` and `/mcp` are stamped by the server from the signed-in member (`member:<uuid>`). A supplied `actor` or `at` is ignored with the warnings `auth.actor_ignored` and `auth.time_ignored`. Resolving needs a human member on a Workbench session; bearer tokens get `review.resolve_requires_workbench`. Role refusals are `403 auth.scope_denied`, naming the required role.
@@ -159,6 +161,7 @@ Every request, including `/mcp`, `/api/*` and Workbench assets, must name the se
 On a configured origin, members sign in and work as they do on loopback, with the same credentials and roles, with these differences:
 - **Sessions.** A browser session belongs to the origin it signed in on, so each origin needs its own sign-in.
 - **Cookies and links.** The session cookie carries `Secure` on an `https` origin. Sign-in links the Workbench creates name the origin it is open on.
+- **One host, two schemes.** The cookie name is the same on every origin (`uiux_session_<hint>`), and a browser keeps one cookie per name and host whatever the scheme or port. After someone signs in on `https://uiux.corp.example`, the browser holds a `Secure` cookie for that host and ignores the cookie that a sign-in on `http://uiux.corp.example:8080` sets, so that origin keeps returning to the sign-in page. Give an `http` origin its own host name, or use only the `https` origin for people who use both.
 - **Roster administration.** Managing members, Tokens, invites and sessions works only on a loopback URL or an `https` origin. Elsewhere it is refused with `403 access.admin_origin_rejected`. The `uiux member|token|invite|session` commands on the host always work.
 - **Formal capture.** It still loads Preview from the internal loopback origin.
 
@@ -185,6 +188,8 @@ server {
     }
 }
 ```
+
+With a proxy on the same host, keep the default loopback bind: the proxy is then the only way in. A wildcard bind (`--host 0.0.0.0` or `::`) also serves the plain port to the network, so with only `https` origins `uiux dev` prints a warning at startup; keep the loopback bind, or block the raw port with a firewall.
 
 A proxy that rewrites `Host` to the loopback address makes its requests look local. State-changing requests then fail the `Origin` check, but reads and roster administration would be treated as local, so always forward `Host`. Failed sign-in attempts are rate-limited per connecting address. Every client behind one proxy therefore shares a single limit of 10 failures a minute.
 
