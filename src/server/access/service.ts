@@ -55,7 +55,7 @@ export type AuthenticateInput = Readonly<{
 	cookieHeader?: string
 	remoteAddress?: string
 	userAgent?: string
-	/** The matched origin; a session cookie is accepted only on the origin it was created on. */
+	/** The matched origin; a session cookie is accepted only on the origin it was created on, and never without one. */
 	origin?: RequestOrigin
 }>
 
@@ -249,9 +249,9 @@ export class AccessService {
 			return { ok: true, principal: memberPrincipal(verification.member, 'token', verification.token!.id) }
 		}
 		// A session belongs to the origin where it was created (Rule 01a11485-ed4a-766b-a51c-af2b9ffb1fcb):
-		// a cookie replayed on another origin authenticates nothing there. It is not a guess, so it
-		// does not count toward the rate limit, and the cookie is kept for its own origin.
-		if (input.origin && !sessionServesOrigin(verification.session!, input.origin))
+		// a cookie presented on another origin, or with no matched origin, authenticates nothing. It is
+		// not a guess, so it does not count toward the rate limit, and the cookie is kept for its own origin.
+		if (!input.origin || !sessionServesOrigin(verification.session!, input.origin))
 			return { ok: false, status: 401, code: 'auth.invalid_credential', message: 'This session was created on another origin of this server. Sign in again here.' }
 		this.recordUsage(this.sessionUsage, verification.session!.id, now)
 		return { ok: true, principal: memberPrincipal(verification.member, 'session', verification.session!.id) }

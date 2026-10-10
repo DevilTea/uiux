@@ -9,8 +9,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createLeaseManager } from '../src/application/access/leases'
 import { AccessService } from '../src/server/access/service'
 import { AccessStore } from '../src/server/access/store'
+import { configureServerNetwork } from '../src/server/loopback-guard'
 import {
 	decodeDevHandoff,
+	DEV_HANDOFF_VARIABLE,
 	encodeDevHandoff,
 	isLoopbackPeer,
 	parseBindHost,
@@ -87,9 +89,44 @@ describe('origin format (Clause 01a12500-a436-7368-8347-809e0176cfcc)', () => {
 		expect(resolveListenPort({ PORT: '4000', NITRO_PORT: '5000' })).toBe(5000)
 	})
 
-	it('recognizes loopback peers', () => {
-		for (const peer of ['127.0.0.1', '127.1.2.3', '::1', '::ffff:127.0.0.1', undefined]) expect(isLoopbackPeer(peer), String(peer)).toBe(true)
-		for (const peer of ['10.0.0.5', '::ffff:10.0.0.5', 'fe80::1', '128.0.0.1', '::']) expect(isLoopbackPeer(peer), peer).toBe(false)
+	it('recognizes loopback peers, and a missing peer address only on a Unix socket', () => {
+		for (const peer of ['127.0.0.1', '127.1.2.3', '::1', '::ffff:127.0.0.1']) expect(isLoopbackPeer(peer), peer).toBe(true)
+		for (const peer of ['10.0.0.5', '::ffff:10.0.0.5', 'fe80::1', '128.0.0.1', '::', '', undefined]) expect(isLoopbackPeer(peer), String(peer)).toBe(false)
+		expect(isLoopbackPeer(undefined, { localSocket: true })).toBe(true)
+		expect(isLoopbackPeer('10.0.0.5', { localSocket: true })).toBe(false)
+	})
+})
+
+describe('server startup configuration (Rule 01a11485-ee85-7844-b82f-fd6a7cebb763)', () => {
+	const handoff = encodeDevHandoff({ host: '0.0.0.0', origins: ['http://10.0.0.5:3000'] })
+
+	it('reads the uiux dev handoff, then removes it so child processes do not inherit it', () => {
+		const env: Record<string, string | undefined> = { [DEV_HANDOFF_VARIABLE]: handoff, PORT: '3000', HOST: '127.0.0.1' }
+		expect(configureServerNetwork(env, { localSocket: false })).toMatchObject({ ok: true, value: { bindHost: '0.0.0.0', origins: [{ origin: 'http://10.0.0.5:3000' }] } })
+		expect(env).not.toHaveProperty(DEV_HANDOFF_VARIABLE)
+		expect(env.NITRO_HOST).toBe('0.0.0.0')
+		// An invalid handoff is refused, and still removed.
+		const invalid: Record<string, string | undefined> = { [DEV_HANDOFF_VARIABLE]: encodeDevHandoff({ host: '0.0.0.0', origins: [] }) }
+		expect(configureServerNetwork(invalid, { localSocket: false })).toMatchObject({ ok: false })
+		expect(invalid).not.toHaveProperty(DEV_HANDOFF_VARIABLE)
+	})
+
+	it('binds and accepts loopback only without the handoff, whatever HOST says', () => {
+		const env: Record<string, string | undefined> = { HOST: '::1' }
+		expect(configureServerNetwork(env, { localSocket: false })).toEqual({ ok: true, value: { bindHost: '::1', wildcard: false, origins: [] } })
+		expect(env.NITRO_HOST).toBe('::1')
+		expect(configureServerNetwork({ HOST: '0.0.0.0' }, { localSocket: false })).toMatchObject({ ok: false, message: expect.stringContaining('listens on loopback only') })
+	})
+
+	it('refuses NITRO_SSL_CERT/NITRO_SSL_KEY and drops the handoff on a Unix socket too', () => {
+		for (const localSocket of [false, true]) {
+			const env: Record<string, string | undefined> = { NITRO_SSL_CERT: 'cert', NITRO_SSL_KEY: 'key' }
+			expect(configureServerNetwork(env, { localSocket })).toMatchObject({ ok: false, message: expect.stringContaining('UIUX serves plain HTTP only') })
+		}
+		const socketEnv: Record<string, string | undefined> = { [DEV_HANDOFF_VARIABLE]: handoff, NITRO_UNIX_SOCKET: '/tmp/uiux.sock' }
+		expect(configureServerNetwork(socketEnv, { localSocket: true })).toEqual({ ok: true, value: { bindHost: '127.0.0.1', wildcard: false, origins: [] } })
+		expect(socketEnv).not.toHaveProperty(DEV_HANDOFF_VARIABLE)
+		expect(socketEnv).not.toHaveProperty('NITRO_HOST')
 	})
 })
 
@@ -112,6 +149,21 @@ describe('startup output (Rules 01a12500-b4af-7446-a66e-40de3db3dac2, 01a12500-b
 		expect(startupLines('http://127.0.0.1:3000', loopbackOnly.value)).toEqual(['uiux: loopback URL http://127.0.0.1:3000'])
 	})
 
+	it('warns once when a wildcard bind serves only https origins (Rule 01a1259f-747f-7986-bef8-ece6a3b0f078)', () => {
+		const lines = (host: string | undefined, origins: string[]) => {
+			const network = resolveNetworkConfig({ ...(host ? { host } : {}), origins, port: 3000 })
+			if (!network.ok) throw new Error(network.message)
+			return startupLines('http://127.0.0.1:3000', network.value).filter(line => line.includes('only https origins'))
+		}
+		for (const host of ['0.0.0.0', '::']) {
+			const warning = lines(host, ['https://uiux.corp.example', 'https://uiux-2.corp.example'])
+			expect(warning).toEqual([`uiux: warning: listening on ${host} with only https origins, so the plain HTTP port 3000 is also reachable from the network. Keep the loopback bind behind the TLS-terminating proxy, or block port 3000 with a firewall.`])
+		}
+		// A loopback bind, or an http origin (which has its own warning), gets none.
+		expect(lines(undefined, ['https://uiux.corp.example'])).toEqual([])
+		expect(lines('0.0.0.0', ['https://uiux.corp.example', 'http://10.0.0.5:3000'])).toEqual([])
+	})
+
 	describe('first-run sign-in links', () => {
 		let base: string
 		beforeAll(async () => {
@@ -119,7 +171,7 @@ describe('startup output (Rules 01a12500-b4af-7446-a66e-40de3db3dac2, 01a12500-b
 		})
 		afterAll(async () => { await rm(base, { recursive: true, force: true }) })
 
-		it('prints one link per origin, all carrying the same single-use invite', async () => {
+		it('prints one link per origin, all carrying the same single-use invite, and binds the session to its origin', async () => {
 			const workspace = join(base, 'design')
 			await mkdir(join(workspace, '.uiux'), { recursive: true })
 			await writeFile(join(workspace, '.uiux', 'workspace.json'), '{}\n')
@@ -131,6 +183,14 @@ describe('startup output (Rules 01a12500-b4af-7446-a66e-40de3db3dac2, 01a12500-b
 			expect(links.map(link => link.split('/login#')[0])).toEqual(origins)
 			expect(new Set(links.map(link => link.split('#')[1])).size).toBe(1)
 			expect(banner?.join('\n')).toContain('one single-use invite')
+
+			// A session cookie authenticates only with a matched origin it serves, never without one.
+			const login = await service.login(links[1]!.split('#')[1], { origin: 'https://uiux.corp.example' })
+			if (!login.ok) throw new Error(login.message)
+			const cookieHeader = `${login.cookieName}=${login.cookieValue}`
+			expect(await service.authenticate({ surface: 'api', cookieHeader, origin: { origin: 'https://uiux.corp.example', loopbackHost: false } })).toMatchObject({ ok: true })
+			expect(await service.authenticate({ surface: 'api', cookieHeader })).toMatchObject({ ok: false, status: 401, code: 'auth.invalid_credential' })
+			expect(await service.authenticate({ surface: 'api', cookieHeader, origin: { origin: 'http://10.0.0.5:3000', loopbackHost: false } })).toMatchObject({ ok: false, status: 401 })
 		})
 	})
 })

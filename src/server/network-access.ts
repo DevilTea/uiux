@@ -182,13 +182,28 @@ export function startupLines(loopbackUrl: string, network: NetworkConfig): reado
 	for (const origin of network.origins) lines.push(`uiux: configured origin ${origin.origin}`)
 	for (const origin of network.origins.filter(isPlaintextNetworkOrigin))
 		lines.push(`uiux: warning: ${origin.origin} is plain HTTP. Sign-in links, session cookies and Tokens cross the network in clear text there, and roster administration is refused on it. Prefer an https origin served by a TLS-terminating proxy.`)
+	if (exposesPlainPortBehindHttpsOnly(network)) {
+		const port = new URL(loopbackUrl).port || '80'
+		lines.push(`uiux: warning: listening on ${network.bindHost} with only https origins, so the plain HTTP port ${port} is also reachable from the network. Keep the loopback bind behind the TLS-terminating proxy, or block port ${port} with a firewall.`)
+	}
 	return lines
 }
 
-/** Whether `address` (a socket's `remoteAddress`) is a loopback peer. */
-export function isLoopbackPeer(address: string | undefined): boolean {
-	// A socket without an IP peer is a local (Unix domain) socket.
-	if (address === undefined || address === '') return true
+/**
+ * A wildcard bind whose configured origins are all `https`: the TLS front end is meant to be the
+ * only way in, yet the plain port listens on every interface (Rule 01a1259f-747f-7986-bef8-ece6a3b0f078).
+ */
+export function exposesPlainPortBehindHttpsOnly(network: NetworkConfig): boolean {
+	return network.wildcard && network.origins.length > 0 && network.origins.every(origin => origin.scheme === 'https')
+}
+
+/**
+ * Whether `address` (a socket's `remoteAddress`) is a loopback peer. A connection without an IP
+ * peer counts as local only when the server listens on a Unix domain socket (`localSocket`);
+ * otherwise it fails closed.
+ */
+export function isLoopbackPeer(address: string | undefined, options: Readonly<{ localSocket?: boolean }> = {}): boolean {
+	if (address === undefined || address === '') return options.localSocket === true
 	const normalized = address.toLowerCase()
 	if (normalized === '::1') return true
 	const v4 = normalized.startsWith('::ffff:') ? normalized.slice(7) : normalized

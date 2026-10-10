@@ -400,6 +400,8 @@ async function smokeConfiguredOrigins() {
 			if (!output.includes(line)) throw new Error(`uiux dev did not print ${JSON.stringify(line)}.\n${output}`)
 		}
 		if (output.includes(`warning: ${secureOrigin}`)) throw new Error(`uiux dev warned about the https origin.\n${output}`)
+		// An http origin is listed, so the wildcard bind does not get the https-only warning.
+		if (output.includes('only https origins')) throw new Error(`uiux dev printed the https-only warning with an http origin listed.\n${output}`)
 		const links = [...output.matchAll(/(\S+)\/login#(uiux_i_\S+)/gu)].map(match => ({ origin: match[1], invite: match[2] }))
 		if (JSON.stringify(links.map(link => link.origin)) !== JSON.stringify([`http://127.0.0.1:${port}`, lanOrigin, secureOrigin]) || new Set(links.map(link => link.invite)).size !== 1)
 			throw new Error(`The first-run sign-in links are not one invite on the loopback URL and each origin: ${JSON.stringify(links)}\n${output}`)

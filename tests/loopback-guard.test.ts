@@ -2,7 +2,7 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { createApp, createRouter, defineEventHandler, toNodeListener } from 'h3'
 import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type OutgoingHttpHeaders, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { connect, type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -27,7 +27,7 @@ const PORT = 4321
 const VIEW_ID = '77777777-7777-4777-8777-777777777777'
 
 function evaluate(method: string, path: string, headers: IncomingHttpHeaders, localPort: number | null = PORT) {
-	return evaluateLoopbackRequest({ method, path, headers, localPort: localPort ?? undefined })
+	return evaluateLoopbackRequest({ method, path, headers, localPort: localPort ?? undefined, remoteAddress: '127.0.0.1' })
 }
 
 const json = { 'content-type': 'application/json', 'content-length': '2' }
@@ -170,6 +170,23 @@ describe('request gate with configured origins', () => {
 		expect(gate('GET', '/', { host: 'localhost:8443' }, '127.0.0.1')).toMatchObject({ ok: true, origin: { kind: 'configured', loopbackHost: true } })
 	})
 
+	it('fails closed for a connection without a peer address unless the server listens on a Unix socket', () => {
+		const loopbackHost = { method: 'GET', path: '/', headers: { host: `127.0.0.1:${PORT}` }, localPort: PORT, origins }
+		expect(evaluateRequestGate(loopbackHost)).toMatchObject({ ok: false, rejection: { status: 421 } })
+		expect(evaluateRequestGate({ ...loopbackHost, remoteAddress: '' })).toMatchObject({ ok: false, rejection: { status: 421 } })
+		expect(evaluateRequestGate({ ...loopbackHost, localSocket: true })).toMatchObject({ ok: true, origin: { kind: 'loopback' } })
+		// A configured origin does not depend on the peer.
+		expect(evaluateRequestGate({ ...loopbackHost, headers: { host: 'uiux.corp.example' } })).toMatchObject({ ok: true })
+	})
+
+	it('refuses a request with more than one Host header', () => {
+		for (const rawHeaders of [['Host', 'uiux.corp.example', 'Host', 'rebind.attacker.test'], ['host', `127.0.0.1:${PORT}`, 'HOST', `127.0.0.1:${PORT}`]]) {
+			expect(evaluateRequestGate({ method: 'GET', path: '/', headers: { host: rawHeaders[1] }, rawHeaders, localPort: PORT, remoteAddress: '127.0.0.1', origins }))
+				.toMatchObject({ ok: false, rejection: { status: 400, body: { code: 'request.host_rejected' } } })
+		}
+		expect(evaluateRequestGate({ method: 'GET', path: '/', headers: { host: 'uiux.corp.example' }, rawHeaders: ['Host', 'uiux.corp.example', 'Accept', '*/*'], localPort: PORT, remoteAddress: '192.168.1.20', origins })).toMatchObject({ ok: true })
+	})
+
 	it('requires a present Origin to equal the matched origin, scheme and port included, and allows a missing one', () => {
 		expect(gate('POST', '/api/views', { host: 'uiux.corp.example', origin: 'https://uiux.corp.example', ...json })).toMatchObject({ ok: true })
 		expect(gate('POST', '/api/views', { host: 'uiux.corp.example', ...json })).toMatchObject({ ok: true })
@@ -301,6 +318,17 @@ describe('loopback guard on a live h3 server with the real /mcp and /api routes'
 		const noOrigin = await send('POST', '/api/views', { 'content-type': 'application/json', authorization: `Bearer ${token}` }, viewBody)
 		expect(noOrigin.status).toBe(409)
 		expect(JSON.parse(noOrigin.body)).toMatchObject({ status: 'already_exists' })
+	})
+
+	it('answers 400 to a request with two Host headers, which Node would otherwise reduce to the first', async () => {
+		const response = await new Promise<string>((resolve, reject) => {
+			const socket = connect(port, '127.0.0.1')
+			let text = ''
+			socket.setEncoding('utf8').on('data', chunk => text += chunk).once('end', () => resolve(text)).once('error', reject)
+			socket.write(`GET / HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nHost: rebind.attacker.test\r\nConnection: close\r\n\r\n`)
+		})
+		expect(response).toMatch(/^HTTP\/1\.1 400 /u)
+		expect(response).toContain('"code":"request.host_rejected"')
 	})
 
 	it('sends framing protection and no CORS headers on HTML responses', async () => {

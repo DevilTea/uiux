@@ -2,13 +2,18 @@ import type { IncomingHttpHeaders } from 'node:http'
 import { defineEventHandler, setResponseHeader, setResponseHeaders, setResponseStatus, type EventHandler, type H3Event } from 'h3'
 
 import {
+	decodeDevHandoff,
 	DEFAULT_LOOPBACK_BIND_HOST,
+	DEV_HANDOFF_VARIABLE,
 	getServerNetwork,
 	isLoopbackHostname,
 	isLoopbackPeer,
 	LOOPBACK_HOSTNAMES,
+	LOOPBACK_ONLY_NETWORK,
+	resolveListenPort,
 	type ConfiguredOrigin,
 	type NetworkConfig,
+	type Resolution,
 } from './network-access'
 
 /**
@@ -61,6 +66,42 @@ export function resolveLoopbackBindHost(env: Readonly<Record<string, string | un
 	}
 }
 
+export const PLAIN_HTTP_ONLY_MESSAGE
+	= 'NITRO_SSL_CERT and NITRO_SSL_KEY are not supported: UIUX serves plain HTTP only. Serve an https origin through a TLS-terminating front end and configure it with uiux dev --origin https://<host>.'
+
+/**
+ * The live server's bind and origin configuration, read once at startup from `env` (the Nitro
+ * plugin passes `process.env`, before the node-server entry reads `NITRO_HOST`):
+ *
+ * - `NITRO_SSL_CERT`/`NITRO_SSL_KEY` are refused in every mode (Rule 01a12500-bbed-7aaa-a9bf-869e5e09bd45).
+ * - The internal `uiux dev` handoff is read and then removed from `env`, so processes the server
+ *   starts (formal capture's browser, Kit builds) do not inherit it.
+ * - With the handoff, its bind address and origins apply; without it (run directly, Rule
+ *   01a11485-ee85-7844-b82f-fd6a7cebb763) the server binds and accepts loopback only, whatever
+ *   `HOST`/`NITRO_HOST` say. On a Unix domain socket no address is bound and no origin is served.
+ *
+ * Sets `NITRO_HOST` to the resolved bind address unless the server listens on a Unix socket.
+ */
+export function configureServerNetwork(env: Record<string, string | undefined>, options: Readonly<{ localSocket: boolean }>): Resolution<NetworkConfig> {
+	if (env.NITRO_SSL_CERT || env.NITRO_SSL_KEY) return { ok: false, message: PLAIN_HTTP_ONLY_MESSAGE }
+	const handoff = env[DEV_HANDOFF_VARIABLE]
+	delete env[DEV_HANDOFF_VARIABLE]
+	if (options.localSocket) return { ok: true, value: LOOPBACK_ONLY_NETWORK }
+	let network: NetworkConfig
+	if (handoff !== undefined) {
+		const resolved = decodeDevHandoff(handoff, resolveListenPort(env))
+		if (!resolved.ok) return resolved
+		network = resolved.value
+	}
+	else {
+		const bind = resolveLoopbackBindHost(env)
+		if (!bind.ok) return { ok: false, message: bind.message }
+		network = { ...LOOPBACK_ONLY_NETWORK, bindHost: bind.host }
+	}
+	env.NITRO_HOST = network.bindHost
+	return { ok: true, value: network }
+}
+
 /** Formats a bind host as an origin host component (IPv6 literals are bracketed). */
 export function formatOriginHost(host: string): string {
 	return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
@@ -103,10 +144,14 @@ export type LoopbackRequestInput = Readonly<{
 	 * arrive through an internal proxy.
 	 */
 	localPort?: number
-	/** The connection's peer address; `undefined` for a local (Unix domain) socket. */
+	/** The connection's peer address; `undefined` when the connection has no IP peer. */
 	remoteAddress?: string
+	/** The server listens on a Unix domain socket, whose peers have no address and are local. */
+	localSocket?: boolean
 	/** Configured origins; none by default (loopback only). */
 	origins?: readonly ConfiguredOrigin[]
+	/** The raw header list (`IncomingMessage.rawHeaders`), where repeated `Host` headers stay visible. */
+	rawHeaders?: readonly string[]
 }>
 
 export type LoopbackRequestRejection = Readonly<{
@@ -138,6 +183,14 @@ function headerValue(headers: Readonly<IncomingHttpHeaders>, name: string): stri
 	const value = headers[name]
 	if (Array.isArray(value)) return value.join(', ')
 	return value
+}
+
+function countHeader(rawHeaders: readonly string[], name: string): number {
+	let count = 0
+	for (let index = 0; index < rawHeaders.length; index += 2) {
+		if (rawHeaders[index]!.toLowerCase() === name) count += 1
+	}
+	return count
 }
 
 function reject(status: number, statusText: string, code: string, path: string, message: string): LoopbackRequestRejection {
@@ -194,10 +247,17 @@ function describeAllowlist(input: LoopbackRequestInput): string {
  */
 export function evaluateRequestGate(input: LoopbackRequestInput): RequestGateOutcome {
 	const method = input.method.toUpperCase()
+	// Node keeps only the first of repeated `Host` headers; a request with several is malformed (RFC 9112 section 3.2).
+	if (input.rawHeaders && countHeader(input.rawHeaders, 'host') > 1) {
+		return {
+			ok: false,
+			rejection: reject(400, 'Bad Request', 'request.host_rejected', '/headers/host', 'A request must carry exactly one Host header.'),
+		}
+	}
 	const host = headerValue(input.headers, 'host')?.trim().toLowerCase() ?? ''
 	const matched = matchHost(host, input)
 	// A loopback host name claims a local client; only a loopback peer may make that claim.
-	if (!matched || (matched.loopbackHost && !isLoopbackPeer(input.remoteAddress))) {
+	if (!matched || (matched.loopbackHost && !isLoopbackPeer(input.remoteAddress, { localSocket: input.localSocket }))) {
 		return {
 			ok: false,
 			rejection: reject(
@@ -283,6 +343,8 @@ export type LoopbackGuardOptions = Readonly<{
 	anyPort?: boolean
 	/** The bind and origin configuration; defaults to the server's ({@link getServerNetwork}). */
 	network?: () => NetworkConfig
+	/** The server listens on a Unix domain socket (`NITRO_UNIX_SOCKET`). */
+	localSocket?: boolean
 }>
 
 /** The origin the request's `Host` matched; the gate attaches it before any handler runs. */
@@ -305,7 +367,9 @@ export function createLoopbackGuardHandler(options: LoopbackGuardOptions = {}): 
 			headers: event.node.req.headers,
 			localPort: options.anyPort ? undefined : socket?.localPort,
 			remoteAddress: socket?.remoteAddress,
+			localSocket: options.localSocket === true,
 			origins: network().origins,
+			rawHeaders: event.node.req.rawHeaders,
 		})
 		if (outcome.ok) {
 			event.context.uiuxOrigin = outcome.origin
