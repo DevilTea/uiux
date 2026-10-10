@@ -1,7 +1,9 @@
+import type { PermissionKey } from './keys'
+
 /**
  * Authenticated principals (accepted identity decision 1). Every request on `/api/*` and `/mcp`
  * resolves to exactly one principal or to none; the shared application layer authorizes and
- * stamps from it, so transports never decide roles themselves.
+ * stamps from it, so transports never decide permissions themselves.
  */
 export const ACCESS_ROLES = ['viewer', 'reviewer', 'editor', 'owner'] as const
 export type AccessRole = typeof ACCESS_ROLES[number]
@@ -17,7 +19,14 @@ export type MemberPrincipal = Readonly<{
 	memberId: string
 	nickname: string
 	kind: MemberKind
+	/** The roster role, still shown on the session wire and in the MCP instructions (issue #142). */
 	role: AccessRole
+	/**
+	 * The member's permission keys, resolved on every request (Rule 01a11485-ebdd-70fc-b853-0621caf056b8).
+	 * Until the roster stores keys they are derived from `role` by `keysForRole`. Which of them take
+	 * effect depends on the credential: see `effectiveKeys` in `policy.ts`.
+	 */
+	keys: readonly PermissionKey[]
 	credential: 'session' | 'token'
 	/** Public id of the token or session that authenticated the request. */
 	credentialId: string
@@ -26,11 +35,14 @@ export type MemberPrincipal = Readonly<{
 export const SYSTEM_PRINCIPAL_IDS = ['system:capture'] as const
 export type SystemPrincipalId = typeof SYSTEM_PRINCIPAL_IDS[number]
 
-/** Server-internal clients (formal capture): Viewer scope, never members, never actors. */
+/**
+ * Server-internal clients (formal capture): never members, never actors, holding no permission key
+ * and no label (Clause 01a114ec-ea96-764e-876b-464e3319b3db); they may perform only a fixed
+ * operation allowlist (Clause 01a11c09-a3bb-7ad4-a889-d50b124d3679).
+ */
 export type SystemPrincipal = Readonly<{
 	type: 'system'
 	id: SystemPrincipalId
-	role: 'viewer'
 	credential: 'system'
 }>
 
@@ -49,12 +61,8 @@ export function effectiveRole(kind: MemberKind, role: AccessRole): AccessRole {
 	return kind === 'agent' && role === 'owner' ? 'editor' : role
 }
 
-export function roleAtLeast(role: AccessRole, minimum: AccessRole): boolean {
-	return ACCESS_ROLES.indexOf(role) >= ACCESS_ROLES.indexOf(minimum)
-}
-
-export function principalRole(principal: Principal): AccessRole {
-	return principal.type === 'system' ? 'viewer' : effectiveRole(principal.kind, principal.role)
+export function principalRole(principal: MemberPrincipal): AccessRole {
+	return effectiveRole(principal.kind, principal.role)
 }
 
 /** The server-stamped Review/Decision actor (decision 6). */

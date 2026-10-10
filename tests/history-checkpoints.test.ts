@@ -598,13 +598,13 @@ describe('access to history (Clauses 01a11485-fa00, fa21, fa66 and f978)', () =>
 		const viewer = scoped(ctx.app, VIEWER)
 		expect(listed(await viewer.listVersions({})).versions).toHaveLength(1)
 		expect(await viewer.readVersion(ctx.baseline)).toMatchObject({ status: 'found', parent: null })
-		expect(await viewer.createCheckpoint({ name: 'Nope' })).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredRole: 'reviewer' })
+		expect(await viewer.createCheckpoint({ name: 'Nope' })).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['checkpoints.create'] })
 		const created = await createCheckpoint(ctx, REVIEWER, 'By a Reviewer')
 		await createCheckpoint(ctx, AGENT_REVIEWER, 'By an Agent')
 
 		for (const principal of [VIEWER, REVIEWER, EDITOR, OWNER_TOKEN, AGENT, AGENT_OWNER]) {
 			const refused = await deleteCheckpointForHttp(scoped(ctx.app, principal), created)
-			expect(refused, principal.nickname).toMatchObject({ status: 403, body: { code: 'auth.scope_denied', requiredRole: 'owner' } })
+			expect(refused, principal.nickname).toMatchObject({ status: 403, body: { code: 'auth.scope_denied', requiredKeys: ['checkpoints.delete'] } })
 		}
 		expect(await checkpointFiles(ctx)).toContain(`${created}.json`)
 		expect(await deleteCheckpointForHttp(scoped(ctx.app, OWNER), created)).toMatchObject({ status: 200, body: { status: 'deleted' } })

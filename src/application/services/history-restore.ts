@@ -87,8 +87,17 @@ export type RestoreRefusal = Readonly<{
 
 export type RestoreResourceVersionOutcome = RestoreWritten | RestoreConflict | RestoreImpactRefusal | RestoreRefusal
 
+/**
+ * A caller's check of a restore against the resource it replaces, such as an authorization that
+ * depends on what the restore changes. It runs after the revision check, on the current content at
+ * `expectedRevision` (`undefined` when the resource does not exist), which the compare-and-swap
+ * then requires, so the change it allows is exactly the change written. A returned refusal is
+ * answered as is and nothing is written.
+ */
+export type RestoreGuard<R> = (change: Readonly<{ kind: RestorableResourceKind; key: string; current: unknown; next: unknown }>) => R | undefined
+
 export type HistoryRestoreService = Readonly<{
-	restoreResourceVersion(command: RestoreResourceVersionCommand): Promise<RestoreResourceVersionOutcome>
+	restoreResourceVersion<R = never>(command: RestoreResourceVersionCommand, guard?: RestoreGuard<R>): Promise<RestoreResourceVersionOutcome | R>
 }>
 
 type Target = Readonly<{ kind: RestorableResourceKind; key: string }>
@@ -108,7 +117,7 @@ type Loaded = Readonly<{
 export function createHistoryRestoreService(persistence: FileNativePersistence, history: HistoryStoreSource | undefined): HistoryRestoreService {
 	const policy = persistence.schemaPolicy
 
-	async function restoreResourceVersion(command: RestoreResourceVersionCommand): Promise<RestoreResourceVersionOutcome> {
+	async function restoreResourceVersion<R = never>(command: RestoreResourceVersionCommand, guard?: RestoreGuard<R>): Promise<RestoreResourceVersionOutcome | R> {
 		const parsed = parseCommand(command)
 		if ('status' in parsed) return parsed
 		const { target } = parsed
@@ -150,6 +159,10 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 		const diagnostics = validateNext(target, next)
 		if (diagnostics.length > 0)
 			return { status: 'invalid', kind: target.kind, key: target.key, code: 'history.restore_invalid_content', message: `The ${target.kind} content of version ${parsed.versionId} is not valid for this UIUX build, so it cannot be restored.`, diagnostics }
+
+		const current = target.kind === 'asset' || currentFiles.size !== 1 ? undefined : parseJson([...currentFiles.values()][0]!)
+		const refused = guard?.({ kind: target.kind, key: target.key, current, next })
+		if (refused !== undefined) return refused
 
 		const before = impactWorkspace(loaded.current, persistence.layout, loaded.reviews, target.kind === 'workspace' ? await readEvidence() : undefined)
 		const after = withResource(before, target, target.kind === 'asset' ? (next as AuthoredAssetResource).metadata : next, nextRevision(target, next))

@@ -9,7 +9,7 @@ import type { PointResourceKind } from '../application/dto/point-resources'
 import type { WorkspaceApplicationSession } from '../application/services/workspace-session'
 import { LOCKABLE_KINDS, MAX_ACQUIRE_RESOURCES, type LeaseManager } from '../application/access/leases'
 import { principalRole, type Principal } from '../application/access/principal'
-import { roleLabel } from '../application/access/policy'
+import { effectiveKeys, roleLabel } from '../application/access/policy'
 import { createScopedWorkspaceSession, type ScopedSessionOptions, type ScopedWorkspaceSession } from '../application/access/scoped-session'
 import type { ViewSpecContent } from '../application/services/view-authoring'
 import { VERSION_DIFF_DETAILS } from '../application/services/history-diff'
@@ -371,7 +371,7 @@ export function uiuxMcpInstructions(principal: Principal): string {
 	const identity = principal.type === 'member'
 		? `Authenticated as ${principal.nickname} (${principal.kind}, ${roleLabel(principalRole(principal)).toLowerCase()}).`
 		: `Authenticated as ${principal.id}.`
-	return `${identity} Actors and times on Review records are stamped by the server from this identity; do not send actor or at. Tools your role cannot use refuse with auth.scope_denied naming the required role. Resolving Review threads is human-only, in the UIUX Workbench. You may edit your own Review messages (until a later submission or resolution) and retract your own brand-new threads nobody has engaged with. ${LEASE_RECIPE} ${CHECKPOINT_RECOMMENDATION}`
+	return `${identity} Actors and times on Review records are stamped by the server from this identity; do not send actor or at. Tools your permission keys do not allow refuse with auth.scope_denied naming the missing keys (requiredKeys). Resolving Review threads is human-only, in the UIUX Workbench. You may edit your own Review messages (until a later submission or resolution) and retract your own brand-new threads nobody has engaged with. ${LEASE_RECIPE} ${CHECKPOINT_RECOMMENDATION}`
 }
 
 /**
@@ -1084,7 +1084,7 @@ export function principalAuthInfo(principal: Principal): AuthInfo {
 	return {
 		token: '<redacted>',
 		clientId: principal.type === 'member' ? principal.memberId : principal.id,
-		scopes: [principalRole(principal)],
+		scopes: [...effectiveKeys(principal)],
 		extra: { [PRINCIPAL_AUTH_INFO_KEY]: principal },
 	}
 }

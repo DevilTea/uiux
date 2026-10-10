@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto'
 import { userInfo } from 'node:os'
 
+import { keysForRole, writeKeyForKind } from '../../application/access/keys'
 import type { LeaseManager } from '../../application/access/leases'
 import {
 	effectiveRole,
-	roleAtLeast,
 	type MemberPrincipal,
 	type Principal,
 	type SystemPrincipal,
@@ -125,18 +125,22 @@ export class AccessService {
 		return this.store.data.workspaceRoot
 	}
 
-	/** Re-reads the roster when it changed on disk, then drops leases of removed or demoted members. */
+	/** Re-reads the roster when it changed on disk, then drops leases of removed members and lost write keys. */
 	async refresh(force = false): Promise<void> {
 		const changed = await this.store.refresh({ force })
 		if (changed) this.reconcileLeases()
 	}
 
+	/**
+	 * Rule 01a11485-f074-7d3c-80f4-f4ced35ef8f2: a lease ends when its holder is removed or loses the
+	 * write key of the leased resource's kind (Clause 01a11c09-a42a-7d6b-bb5e-01d7cf1ce2de).
+	 */
 	private reconcileLeases(): void {
 		const members = new Map(this.store.data.members.map(member => [member.id, member]))
-		const holders = new Set(this.leases.list().map(lease => lease.holder.memberId))
-		for (const memberId of holders) {
-			const member = members.get(memberId)
-			if (!member || !roleAtLeast(effectiveRole(member.kind, member.role), 'editor')) this.leases.dropHolder(memberId)
+		for (const lease of this.leases.list()) {
+			const member = members.get(lease.holder.memberId)
+			const writeKey = writeKeyForKind(lease.kind)
+			if (!member || !writeKey || !memberKeys(member).includes(writeKey)) this.leases.forceRelease(lease)
 		}
 	}
 
@@ -441,7 +445,16 @@ function uniqueNickname(file: AccessFile, base: string): string {
 }
 
 export function systemPrincipal(id: SystemPrincipalId): SystemPrincipal {
-	return { type: 'system', id, role: 'viewer', credential: 'system' }
+	return { type: 'system', id, credential: 'system' }
+}
+
+/**
+ * A member's permission keys, derived from its roster `role` through the built-in Access preset
+ * of that `id` (Clause 01a11bb1-b427-777e-8175-fa24d61d434b), with no `humanOnly` key for an
+ * Agent, until the roster stores keys (issue #142).
+ */
+export function memberKeys(member: Pick<StoredMember, 'kind' | 'role'>) {
+	return keysForRole(member.kind, member.role)
 }
 
 export function memberPrincipal(member: StoredMember, credential: 'session' | 'token', credentialId: string): MemberPrincipal {
@@ -451,6 +464,7 @@ export function memberPrincipal(member: StoredMember, credential: 'session' | 't
 		nickname: member.nickname,
 		kind: member.kind,
 		role: effectiveRole(member.kind, member.role),
+		keys: memberKeys(member),
 		credential,
 		credentialId,
 	}
