@@ -16,6 +16,8 @@ import { provideCanvasComments } from '../../composables/useCanvasComments'
 import CommentsTab from '../../components/workbench/comments/CommentsTab.vue'
 import SpecDocument from '../../components/workbench/SpecDocument.vue'
 import ViewHistoryPanel from '../../components/history/ViewHistoryPanel.vue'
+import VersionCanvas from '../../components/history/VersionCanvas.vue'
+import { useVersionCanvasAccess } from '../../composables/useVersionCanvasAccess'
 import { useReadiness } from '../../composables/useReadiness'
 
 /**
@@ -42,6 +44,13 @@ const panelTab = ref<ViewPanelTab>(parseViewPanel(route.query) ?? 'comments')
 const thread = ref<string | undefined>(parseThread(route.query))
 /** The history panel's selection (`version`, `compare`, `canvas`), kept while the panel shows. */
 const historyAddress = ref<HistoryAddress>(parseHistoryAddress(route.query))
+/**
+ * The canvas before/after comparison (issue #132, B9) replaces the live canvas while the history
+ * panel's address selects a version and a `canvas` mode, on desktop and tablet only (Rule
+ * 01a11a5e-1ba5-765e-966f-a681def5f472). Elsewhere the key stays in the address and shows nothing.
+ */
+const canvasAccess = useVersionCanvasAccess()
+const canvasComparison = computed(() => canvasAccess.offered.value && panelTab.value === 'history' && !!historyAddress.value.version && !!historyAddress.value.canvas)
 const rightPanel = ref<InstanceType<typeof ViewRightPanel>>()
 // The canvas pins, composer and bubble, and the Comments tab, share one comments layer; the open
 // thread is the route's `thread`, so a deep link opens its pin and bubble.
@@ -274,7 +283,29 @@ onBeforeUnmount(() => {
             :resource-key="viewId"
             class="justify-center border-b border-default bg-default px-3 py-1.5"
           />
-          <PreviewCanvas @open-panel="showPanel">
+          <VersionCanvas
+            v-if="canvasComparison"
+            :view-id="viewId"
+            :address="historyAddress"
+          >
+            <template #actions>
+              <UTooltip :text="isDesktop ? t('shell.togglePanel') : t('shell.openPanel')">
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  :icon="isDesktop ? 'i-lucide-panel-right' : 'i-lucide-panel-right-open'"
+                  :aria-label="isDesktop ? t('shell.togglePanel') : t('shell.openPanel')"
+                  :aria-expanded="isDesktop ? !panelHidden : panelOpen"
+                  @click="togglePanel"
+                />
+              </UTooltip>
+            </template>
+          </VersionCanvas>
+          <PreviewCanvas
+            v-else
+            @open-panel="showPanel"
+          >
             <template #actions>
               <UTooltip :text="isDesktop ? t('shell.togglePanel') : t('shell.openPanel')">
                 <UButton
