@@ -1,7 +1,7 @@
 Feature: Workspace migration
   # Source: Discussion #139 (Part 14, Product Kit), decision 15, A: step (2); R18; owner pre-answer P16; Key Scenarios https://github.com/DevilTea/uiux/discussions/139; accepted as written 2026-10-08 https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18816364.
   # Status: not built as of 9691b8c; see the Implementation gaps entry of 01a11bb1-9658-7f9e-972e-bd09136a5735 in its owner.
-  # Note: No test exists yet; tracked in issue #141, after `uiux.v3-to-v4` (issue #144).
+  # Note: No test exists yet; tracked in issue #141.
   @spec:id:01a11bb1-bfe7-7a7e-b595-d80654a146be
   @spec:demonstrates:01a11bb1-9658-7f9e-972e-bd09136a5735
   Scenario: An Adapter outside the kit project makes the migration refuse
