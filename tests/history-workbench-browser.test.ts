@@ -189,23 +189,22 @@ describe('version timeline in Activity', () => {
 
 			await page.getByRole('switch', { name: 'Checkpoints only' }).click()
 			// A filter change empties the list and reads it again (the server applies the type and actor
-			// filters), so every row assertion below waits for the new listing instead of reading it once.
-			await expect.poll(() => row(page, agentVersion.id).count()).toBe(0)
+			// filters). A row count of 0 also holds while the list is empty, so each step polls for a state
+			// that neither the old list nor the empty one shows: only Checkpoint rows, or [excluded, kept] = [0, 1].
 			await expect.poll(() => row(page, checkpointId).count()).toBe(1)
 			const types = () => page.locator('[data-version-timeline] [data-version-row]').evaluateAll(rows => rows.map(item => item.getAttribute('data-version-type')))
 			await expect.poll(async () => [...new Set(await types())]).toEqual(['checkpoint'])
 			await page.getByRole('switch', { name: 'Checkpoints only' }).click()
 			await row(page, agentVersion.id).waitFor()
 
+			const ownerAndAgent = () => Promise.all([row(page, ownerVersion.id).count(), row(page, agentVersion.id).count()])
 			await choose(page, '[data-history-filter="actor"]', agentNickname)
-			await expect.poll(() => row(page, ownerVersion.id).count()).toBe(0)
-			await expect.poll(() => row(page, agentVersion.id).count()).toBe(1)
+			await expect.poll(ownerAndAgent).toEqual([0, 1])
 			await choose(page, '[data-history-filter="actor"]', 'Anyone')
 			await row(page, ownerVersion.id).waitFor()
 
 			await choose(page, '[data-history-filter="kind"]', 'Locale')
-			await expect.poll(() => row(page, ownerVersion.id).count()).toBe(0)
-			await expect.poll(() => row(page, agentVersion.id).count()).toBe(1)
+			await expect.poll(ownerAndAgent).toEqual([0, 1])
 		}
 		finally {
 			await context.close()
