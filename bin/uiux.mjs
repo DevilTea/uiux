@@ -212,6 +212,13 @@ async function runDev(options) {
 		process.exitCode = 2
 		return
 	}
+	// The layout entry check, before the server starts (and so before any lock or server hold).
+	const selection = await withBundled('src/persistence/workspace-selection.ts', module => module.checkWorkspaceSelection(workspaceRoot, workspaceSchemaVersion))
+	if (!selection.ok) {
+		console.error(`uiux: ${selection.message}`)
+		process.exitCode = 2
+		return
+	}
 
 	// UIUX serves plain HTTP only; an https origin is served by a TLS-terminating front end.
 	if (process.env.NITRO_SSL_CERT || process.env.NITRO_SSL_KEY) {

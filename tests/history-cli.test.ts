@@ -278,7 +278,7 @@ describe('uiux migrate records history', () => {
 
 	it('writes nothing when a server holds the Workspace or the Checkpoint cannot be written', async () => {
 		const { root, home } = await seed(3)
-		const hold = (await acquireServerHold(root))!
+		const hold = (await acquireServerHold(root, { layout: CURRENT_TEST_LAYOUT }))!
 		const before = await snapshotTree(root)
 		expect((await migrate({ root, home })).code).toBe(1)
 		await hold.release()

@@ -3,9 +3,10 @@ import { hostname } from 'node:os'
 import { resolve } from 'node:path'
 
 import { FileNativePersistence } from '../persistence/file-native'
-import { LEGACY_LAYOUT, resolveWorkspacePath } from '../persistence/paths'
+import { detectWorkspaceLayout, layoutForSchemaVersion, resolveLayoutDirectory, resolveWorkspacePath, type WorkspaceLayout } from '../persistence/paths'
+import { checkWorkspaceSelection, type WorkspaceSelection } from '../persistence/workspace-selection'
 import { readActiveServerHold } from '../persistence/server-hold'
-import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 import { generateHint } from '../server/access/credentials'
 import { DEFAULT_LOOPBACK_BIND_HOST, isLoopbackHostname, resolveListenPort } from '../server/network-access'
 import {
@@ -145,14 +146,27 @@ type Context = Readonly<{
 type CommandSpec = Readonly<{ positionals: number; values: readonly string[]; flags: readonly string[]; run: (context: Context) => Promise<number> }>
 
 async function requireWorkspace(root: string): Promise<string> {
+	let manifestPath = layoutForSchemaVersion(CURRENT_WORKSPACE_SCHEMA_VERSION).manifestPath
+	let selection: WorkspaceSelection | undefined
 	try {
 		if (!(await stat(root)).isDirectory()) throw new Error('not a directory')
-		await stat(resolveWorkspacePath(root, LEGACY_LAYOUT.manifestPath))
+		// The shared entry check, before any lock, store or Workspace file is touched.
+		selection = checkWorkspaceSelection(root, CURRENT_WORKSPACE_SCHEMA_VERSION)
+		if (selection.ok) {
+			manifestPath = selection.layout.manifestPath
+			await stat(resolveWorkspacePath(root, manifestPath))
+		}
 	}
 	catch {
-		throw new AccessError('access.workspace_invalid', `${root} is not an initialized UIUX Workspace (no ${LEGACY_LAYOUT.manifestPath}). Run uiux init --workspace <dir> first.`)
+		throw new AccessError('access.workspace_invalid', `${root} is not an initialized UIUX Workspace (no ${manifestPath}). Run uiux init --workspace <dir> first.`)
 	}
+	if (!selection.ok) throw new AccessError('access.workspace_invalid', selection.message)
 	return workspaceRealRoot(root)
+}
+
+/** The layout of the Workspace at `root`, detected from where its manifest is. */
+function workspaceLayout(root: string): Promise<WorkspaceLayout> {
+	return detectWorkspaceLayout(root, CURRENT_WORKSPACE_SCHEMA_VERSION)
 }
 
 async function openStore(context: Context, create: boolean): Promise<AccessStore | undefined> {
@@ -350,6 +364,9 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				const fromPath = resolve(context.cwd, from)
 				// The old directory may already be gone; fall back to its nearest existing ancestor's real path.
 				const sourceRoot = realFuturePath(fromPath)
+				// The source gets the same entry check as the target before its lock is ever taken.
+				const sourceSelection = checkWorkspaceSelection(sourceRoot, CURRENT_WORKSPACE_SCHEMA_VERSION)
+				if (!sourceSelection.ok) throw new AccessError('access.workspace_invalid', `The source ${sourceSelection.message}`)
 				if (sourceRoot === context.workspaceRoot) throw new AccessError('access.roster_exists', 'The source and target are the same Workspace.')
 				const source = await AccessStore.readRoster(context.home, sourceRoot)
 				if (!source) throw new AccessError('access.roster_missing', `No roster recorded for ${sourceRoot} under ${context.home}.`)
@@ -426,7 +443,7 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
  * origin in its hold; otherwise the port is the one `uiux dev` would use (`NITRO_PORT`, `PORT`, 3000).
  */
 async function defaultInviteOrigin(context: Context): Promise<string> {
-	const hold = await readActiveServerHold(context.workspaceRoot).catch(() => undefined)
+	const hold = await workspaceLayout(context.workspaceRoot).then(layout => readActiveServerHold(context.workspaceRoot, layout)).catch(() => undefined)
 	if (hold?.origin && hold.hostname === hostname()) {
 		try {
 			const recorded = new URL(hold.origin)
@@ -438,7 +455,7 @@ async function defaultInviteOrigin(context: Context): Promise<string> {
 }
 
 async function refuseWhileServed(workspaceRoot: string): Promise<void> {
-	const hold = await readActiveServerHold(workspaceRoot)
+	const hold = await readActiveServerHold(workspaceRoot, await workspaceLayout(workspaceRoot))
 	if (hold)
 		throw new AccessError('access.lock_busy', `A UIUX server (pid ${hold.pid} on ${hold.hostname}) is serving ${workspaceRoot}. Stop that server, then run uiux access copy again to copy the host history.`)
 }
@@ -454,13 +471,14 @@ async function isRegularFile(path: string): Promise<boolean> {
  * since the copy checks its own consistency before it replaces anything.
  */
 async function withSourceLock<Result>(sourceRoot: string, warn: (line: string) => void, operation: () => Promise<Result>): Promise<Result> {
-	if (!(await lstat(resolveWorkspacePath(sourceRoot, LEGACY_LAYOUT.metadataDir)).then(stats => stats.isDirectory(), () => false))) return operation()
+	const layout = await workspaceLayout(sourceRoot).catch(() => undefined)
+	if (!layout || !(await lstat(resolveLayoutDirectory(sourceRoot, layout.metadataDir)).then(stats => stats.isDirectory(), () => false))) return operation()
 	// Not read-only for the source: taking its persistence lock writes the lock file under the source's
 	// metadata directory (removed on release), and acquiring the lock runs the source's pending-transaction
 	// recovery, which can change its files to settle a multi-file write it left interrupted.
 	let entered = false
 	try {
-		return await new FileNativePersistence({ root: sourceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).withLock(async () => {
+		return await new FileNativePersistence({ root: sourceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY, layout }).withLock(async () => {
 			entered = true
 			return operation()
 		})
