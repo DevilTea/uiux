@@ -25,7 +25,10 @@ const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{
 	entry: AssetEntry
 	canEdit: boolean
+	/** Where the Asset's bytes are read and its image is shown from. */
 	contentUrl: string
+	/** Where the Asset downloads from; a publication may offer a different address than `contentUrl`. */
+	downloadUrl: string
 	/** Re-reads this Asset from the server: the newer version after a conflict. */
 	reread: (key: string) => Promise<AssetEntry | undefined>
 }>()
@@ -404,8 +407,8 @@ const details = computed(() => [
           class="flex justify-end"
         >
           <UButton
-            v-if="contentUrl"
-            :to="contentUrl"
+            v-if="downloadUrl"
+            :to="downloadUrl"
             external
             :download="entry.contentFilename || 'content.bin'"
             icon="i-lucide-download"

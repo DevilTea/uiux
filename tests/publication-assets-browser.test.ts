@@ -16,14 +16,21 @@ import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } fro
  * - an SVG Asset is shown and downloaded without any `<img>` or link pointing at its raw `.svg`
  *   file on the published site's origin, so opening the image or the link on its own never runs
  *   a script inside the SVG there;
+ * - an HTML or XHTML Asset downloads the same way and is never linked by its raw file;
  * - a PNG Asset keeps its static file for display and download.
  */
 
 const REPOSITORY_ROOT = join(import.meta.dirname, '..')
 const SVG_ID = '33333333-3333-4333-8333-333333333333'
 const PNG_ID = '44444444-4444-4444-8444-444444444444'
-const SENTINEL = 'uiux.test.svg-script-ran'
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30"><rect width="40" height="30" fill="teal"/><script>localStorage.setItem('${SENTINEL}', location.origin)</script></svg>`
+const HTML_ID = '55555555-5555-4555-8555-555555555555'
+const XHTML_ID = '66666666-6666-4666-8666-666666666666'
+const SENTINEL = 'uiux.test.asset-script-ran'
+/** A script that appends which Asset ran it, and on which origin. */
+const mark = (source: string) => `localStorage.setItem('${SENTINEL}', (localStorage.getItem('${SENTINEL}') || '') + '${source} ' + location.origin + ';')`
+const SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30"><rect width="40" height="30" fill="teal"/><script>${mark('svg')}</script></svg>`
+const HTML = `<!doctype html><title>Page</title><script>${mark('html')}</script>`
+const XHTML = `<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Page</title><script>${mark('xhtml')}</script></head><body/></html>`
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64')
 const RAW_SVG_PATH = `/uiux/_uiux/assets/${SVG_ID}/scripted.svg`
 const RAW_PNG_PATH = `/uiux/_uiux/assets/${PNG_ID}/pixel.png`
@@ -42,6 +49,7 @@ function contentType(path: string): string {
 		'.mjs': 'text/javascript; charset=utf-8',
 		'.png': 'image/png',
 		'.svg': 'image/svg+xml',
+		'.xhtml': 'application/xhtml+xml',
 	}
 	return types[extname(path)] ?? 'application/octet-stream'
 }
@@ -97,6 +105,14 @@ beforeAll(async () => {
 		metadata: { id: PNG_ID, name: 'Pixel', contentFilename: 'pixel.png', mediaType: 'image/png' },
 		content: PNG,
 	})
+	await persistence.assets.create(HTML_ID, {
+		metadata: { id: HTML_ID, name: 'Page', contentFilename: 'page.html', mediaType: 'text/html' },
+		content: new TextEncoder().encode(HTML),
+	})
+	await persistence.assets.create(XHTML_ID, {
+		metadata: { id: XHTML_ID, name: 'Strict page', contentFilename: 'page.xhtml', mediaType: 'application/xhtml+xml' },
+		content: new TextEncoder().encode(XHTML),
+	})
 	// The CLI reads the built Workbench (`pnpm build`, which `pnpm test` runs first).
 	execFileSync(process.execPath, [join(REPOSITORY_ROOT, 'bin', 'uiux.mjs'), 'publish', '--workspace', workspace, '--out', out, '--base', '/uiux/'], { stdio: 'pipe', timeout: 120_000 })
 	expect(await readFile(join(siteRoot, RAW_SVG_PATH), 'utf8')).toBe(SVG)
@@ -129,7 +145,7 @@ async function openAssets(layout: 'grid' | 'list'): Promise<{ context: BrowserCo
 	return { context, page }
 }
 
-/** Whether a script ran with the publication's origin: the SVG's script writes this storage key. */
+/** Whether a script ran with the publication's origin: each Asset's script writes this storage key. */
 async function sentinel(page: Page): Promise<string | null> {
 	return await page.evaluate(key => localStorage.getItem(key), SENTINEL)
 }
@@ -175,7 +191,7 @@ async function openEveryAssetAddress(context: BrowserContext, page: Page): Promi
 	return await sentinel(page)
 }
 
-describe('Published SVG Assets open without the raw file on the publication origin', () => {
+describe('Published document-capable Assets open without the raw file on the publication origin', () => {
 	it('shows and downloads the SVG from the grid and the detail, and no address on the page runs its script', async () => {
 		const { context, page } = await openAssets('grid')
 		try {
@@ -186,7 +202,8 @@ describe('Published SVG Assets open without the raw file on the publication orig
 
 			// Opening any link or image on its own, as a new tab would, never runs the SVG's script here.
 			expect(await openEveryAssetAddress(context, page)).toBeNull()
-			expect(await svgDownload.getAttribute('href')).not.toContain(RAW_SVG_PATH)
+			expect(await svgDownload.getAttribute('href')).toMatch(/^data:application\/octet-stream;base64,/u)
+			expect(await page.getByRole('button', { name: 'Open Scripted' }).locator('img').getAttribute('src')).toMatch(/^data:image\/svg\+xml;base64,/u)
 
 			// Download saves the authored bytes under the authored filename and leaves the page in place.
 			const saved = await downloadFrom(page, svgDownload)
@@ -215,6 +232,37 @@ describe('Published SVG Assets open without the raw file on the publication orig
 			expect(await openEveryAssetAddress(context, page)).toBeNull()
 			expect(await svgDownload.getAttribute('href')).not.toContain(RAW_SVG_PATH)
 			expect((await downloadFrom(page, svgDownload)).bytes.toString('utf8')).toBe(SVG)
+		}
+		finally {
+			await context.close()
+		}
+	}, 60_000)
+
+	it('downloads HTML and XHTML Assets without their raw files, and no address on the page runs their scripts', async () => {
+		const { context, page } = await openAssets('grid')
+		try {
+			const htmlDownload = page.locator('main').getByRole('link', { name: 'Download Page' })
+			const xhtmlDownload = page.locator('main').getByRole('link', { name: 'Download Strict page' })
+			await htmlDownload.waitFor()
+			await xhtmlDownload.waitFor()
+			expect(await openEveryAssetAddress(context, page)).toBeNull()
+			for (const link of [htmlDownload, xhtmlDownload])
+				expect(await link.getAttribute('href')).toMatch(/^data:application\/octet-stream;base64,/u)
+			// Neither is shown as an image.
+			expect(await page.getByRole('button', { name: 'Open Page' }).locator('img').count()).toBe(0)
+
+			const html = await downloadFrom(page, htmlDownload)
+			expect(html.filename).toBe('page.html')
+			expect(html.bytes.toString('utf8')).toBe(HTML)
+			const xhtml = await downloadFrom(page, xhtmlDownload)
+			expect(xhtml.filename).toBe('page.xhtml')
+			expect(xhtml.bytes.toString('utf8')).toBe(XHTML)
+			expect(new URL(page.url()).pathname).toBe('/uiux/workspace/assets')
+
+			await page.getByRole('button', { name: 'Open Page' }).click()
+			const detailDownload = page.getByRole('dialog').getByRole('link', { name: 'Download' })
+			expect(await detailDownload.getAttribute('href')).toMatch(/^data:application\/octet-stream;base64,/u)
+			expect(await openEveryAssetAddress(context, page)).toBeNull()
 		}
 		finally {
 			await context.close()

@@ -3,7 +3,7 @@ import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
 import { useI18n } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
-import { useUiuxClient } from '../../composables/useUiuxClient'
+import { useUiuxClient, type AssetAddresses } from '../../composables/useUiuxClient'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import { useAuthoringAccess } from '../../composables/useAuthoringAccess'
@@ -146,19 +146,23 @@ function clearFilters(): void {
 }
 
 /**
- * A published site resolves each Asset's address once (an SVG file becomes a `data:` URL; see
- * `resolveAssetContentUrl`). Until it arrives the Asset shows no image and no Download link.
+ * A published site resolves each Asset's addresses once (a file a host would serve as a document
+ * gets `data:` URLs; see `resolveAssetAddresses`). Until they arrive the Asset shows no image and
+ * no Download link.
  */
-const publishedUrls = ref<Readonly<Record<string, string>>>({})
+const publishedAddresses = ref<Readonly<Record<string, AssetAddresses>>>({})
 watch(entries, async (list) => {
 	if (!uiux.isReadOnly.value) return
-	const missing = list.filter(entry => !(entry.key in publishedUrls.value))
+	const missing = list.filter(entry => !(entry.key in publishedAddresses.value))
 	if (!missing.length) return
-	const urls = await Promise.all(missing.map(entry => uiux.resolveAssetContentUrl(entry.key).catch(() => '')))
-	publishedUrls.value = { ...publishedUrls.value, ...Object.fromEntries(missing.map((entry, index) => [entry.key, urls[index]!])) }
+	const resolved = await Promise.all(missing.map(entry => uiux.resolveAssetAddresses(entry.key).catch(() => ({ image: '', download: '' }))))
+	publishedAddresses.value = { ...publishedAddresses.value, ...Object.fromEntries(missing.map((entry, index) => [entry.key, resolved[index]!])) }
 })
-function contentUrl(entry: AssetEntry): string {
-	return uiux.isReadOnly.value ? publishedUrls.value[entry.key] ?? '' : uiux.assetUrl(entry.key)
+function imageUrl(entry: AssetEntry): string {
+	return uiux.isReadOnly.value ? publishedAddresses.value[entry.key]?.image ?? '' : uiux.assetUrl(entry.key)
+}
+function downloadUrl(entry: AssetEntry): string {
+	return uiux.isReadOnly.value ? publishedAddresses.value[entry.key]?.download ?? '' : uiux.assetUrl(entry.key)
 }
 
 function describe(entry: AssetEntry): string {
@@ -352,8 +356,8 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
               >
                 <span class="flex aspect-4/3 items-center justify-center border-b border-default bg-elevated p-4">
                   <img
-                    v-if="isImageMediaType(entry.mediaType) && !entry.diagnostics.length && contentUrl(entry)"
-                    :src="contentUrl(entry)"
+                    v-if="isImageMediaType(entry.mediaType) && !entry.diagnostics.length && imageUrl(entry)"
+                    :src="imageUrl(entry)"
                     alt=""
                     loading="lazy"
                     class="max-h-full max-w-full object-contain"
@@ -397,8 +401,8 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
                 </UBadge>
                 <UTooltip :text="t('assets.download')">
                   <UButton
-                    v-if="contentUrl(entry)"
-                    :to="contentUrl(entry)"
+                    v-if="downloadUrl(entry)"
+                    :to="downloadUrl(entry)"
                     external
                     :download="entry.contentFilename || 'content.bin'"
                     color="neutral"
@@ -475,8 +479,8 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
           </template>
           <template #download-cell="{ row }">
             <UButton
-              v-if="contentUrl(row.original)"
-              :to="contentUrl(row.original)"
+              v-if="downloadUrl(row.original)"
+              :to="downloadUrl(row.original)"
               external
               :download="row.original.contentFilename || 'content.bin'"
               color="neutral"
@@ -495,7 +499,8 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
       v-model:open="detailOpen"
       :entry="selected"
       :can-edit="canEdit && !member.lockFor('asset', selected.key)"
-      :content-url="contentUrl(selected)"
+      :content-url="imageUrl(selected)"
+      :download-url="downloadUrl(selected)"
       :reread="reread"
       @changed="onChanged"
     />

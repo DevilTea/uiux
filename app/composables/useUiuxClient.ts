@@ -5,6 +5,7 @@ import {
 	type PublicationSnapshot,
 } from '../../src/application/services/publication-snapshot'
 import type { HandoffRoot } from '../../src/domain/handoff/schema'
+import { publishedAssetKind } from '../utils/published-asset-files'
 
 export type VersionResourceRead<T> = Readonly<{ versionId: string; kind: string; key: string; revision: string; workspaceSchemaVersion: number; resource: T }>
 
@@ -16,18 +17,14 @@ type PreviewAdaptersResponse =
 
 let publicationPromise: Promise<PublicationSnapshot> | undefined
 const publicationState = shallowRef<PublicationSnapshot>()
-/** Published SVG files as `data:` URLs, by file and digest; see `resolveAssetContentUrl`. */
-const svgDataUrls = new Map<string, Promise<string>>()
+/** Published document-capable files as base64 `data:application/octet-stream` URLs, by file and digest. */
+const inertDataUrls = new Map<string, Promise<string>>()
+const OCTET_STREAM_DATA = 'data:application/octet-stream;base64,'
 
-/** A published file a static host serves as `image/svg+xml`, by media type or file extension. */
-function isSvgFile(entry: Readonly<{ filename: string; mediaType: string }>): boolean {
-	return entry.mediaType.split(';')[0]!.trim().toLowerCase() === 'image/svg+xml' || /\.svgz?$/iu.test(entry.filename)
-}
-
-async function svgDataUrl(url: string): Promise<string> {
+async function octetStreamDataUrl(url: string): Promise<string> {
 	const response = await fetch(url, { credentials: 'same-origin' })
 	if (!response.ok) throw new Error(`${url}: ${response.status}`)
-	const blob = new Blob([await response.arrayBuffer()], { type: 'image/svg+xml' })
+	const blob = new Blob([await response.arrayBuffer()], { type: 'application/octet-stream' })
 	return await new Promise<string>((resolve, reject) => {
 		const reader = new FileReader()
 		reader.onload = () => resolve(String(reader.result))
@@ -35,6 +32,9 @@ async function svgDataUrl(url: string): Promise<string> {
 		reader.readAsDataURL(blob)
 	})
 }
+
+/** Where the Assets page shows an Asset from (`''` when it shows no image) and downloads it from. */
+export type AssetAddresses = Readonly<{ image: string; download: string }>
 
 export function useUiuxClient() {
 	const runtimeConfig = useRuntimeConfig()
@@ -182,24 +182,31 @@ export function useUiuxClient() {
 	}
 
 	/**
-	 * The address the Assets page shows an Asset from and offers it for download at. In the live
-	 * Workbench and for most published files it is `assetUrl`. A published SVG file resolves to a
-	 * `data:` URL of its bytes instead, so neither its `<img>` nor its Download link points at the
-	 * raw `.svg` file on the published site's own origin. `''` when the file cannot be read.
+	 * The addresses the Assets page shows and downloads an Asset from. In the live Workbench both
+	 * are `assetUrl`, as they are for a published raster image or other file. A published file that
+	 * a static host would serve as an HTML, XHTML, SVG or XML document (`publishedAssetKind`) is
+	 * never linked by its raw file on the published site's own origin: its download is a
+	 * `data:application/octet-stream` URL of its bytes, and an SVG is shown from a
+	 * `data:image/svg+xml` URL. Both are `''` when the file cannot be read.
 	 */
-	async function resolveAssetContentUrl(assetId: string): Promise<string> {
-		if (!isReadOnly.value) return assetUrl(assetId)
+	async function resolveAssetAddresses(assetId: string): Promise<AssetAddresses> {
+		if (!isReadOnly.value) return { image: assetUrl(assetId), download: assetUrl(assetId) }
 		const entry = (await publication()).files.assets[assetId]
-		if (!entry) return ''
-		if (!isSvgFile(entry)) return staticUrl(entry.file)
+		if (!entry) return { image: '', download: '' }
+		const kind = publishedAssetKind(entry)
+		if (kind === 'file') return { image: staticUrl(entry.file), download: staticUrl(entry.file) }
 		const cacheKey = `${entry.file}#${entry.digest}`
-		let pending = svgDataUrls.get(cacheKey)
+		let pending = inertDataUrls.get(cacheKey)
 		if (!pending) {
-			pending = svgDataUrl(staticUrl(entry.file))
-			svgDataUrls.set(cacheKey, pending)
-			pending.catch(() => svgDataUrls.delete(cacheKey))
+			pending = octetStreamDataUrl(staticUrl(entry.file))
+			inertDataUrls.set(cacheKey, pending)
+			pending.catch(() => inertDataUrls.delete(cacheKey))
 		}
-		return await pending.catch(() => '')
+		const download = await pending.catch(() => '')
+		const image = kind === 'svg' && download.startsWith(OCTET_STREAM_DATA)
+			? `data:image/svg+xml;base64,${download.slice(OCTET_STREAM_DATA.length)}`
+			: ''
+		return { image, download }
 	}
 
 	function artifactUrl(digest: string): string {
@@ -230,7 +237,7 @@ export function useUiuxClient() {
 		previewAdapters,
 		assetUrl,
 		resolveAssetUrl,
-		resolveAssetContentUrl,
+		resolveAssetAddresses,
 		artifactUrl,
 		resolveArtifactUrl,
 		routeUrl,

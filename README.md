@@ -149,7 +149,7 @@ uiux publish --workspace ./design --out ./.pages --base /uiux/ --source-revision
 
 `--base` makes the generated shell safe for project subpaths such as GitHub Pages. Publication output carries a deterministic content identity plus optional source-revision provenance. Authoring controls are removed in published mode; View context switching, Preview, Inspector, UX Flows, review history, evidence inspection, and readiness remain interactive.
 
-Published Asset files are written as-is under `<base>_uiux/assets/<asset-id>/<filename>`, on the same origin as the viewer. The viewer shows and downloads SVG Assets from a `data:` URL of their bytes rather than linking to those files. When the host lets you set response headers per path, these are the recommended response headers for published Asset files (`<base>_uiux/assets/*`):
+Published Asset files are written as-is under `<base>_uiux/assets/<asset-id>/<filename>`, on the same origin as the viewer. For a file a static host would serve as an HTML, XHTML, SVG or XML document (by its media type or extension), the viewer offers the download from a `data:application/octet-stream` URL of its bytes, and shows an SVG image from a `data:image/svg+xml` URL, rather than linking to the file. Raster images and other files link to their published file. When the host lets you set response headers per path, these are the recommended response headers for published Asset files (`<base>_uiux/assets/*`):
 
 ```text
 Content-Security-Policy: sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'
