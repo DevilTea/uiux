@@ -27,12 +27,14 @@ import {
 } from '../src/application/access/policy'
 import { ACCESS_ROLES, MEMBER_KINDS, principalActor, type AccessRole, type MemberPrincipal, type Principal, type SystemPrincipal } from '../src/application/access/principal'
 import { resolutionRefusal } from '../src/application/access/scoped-session'
+import { RESTORABLE_RESOURCE_KINDS } from '../src/domain/history/constants'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
-import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
+import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { FileNativePersistence } from '../src/persistence'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { appendReviewMessageForHttp, createViewForHttp, resolveReviewThreadForHttp, submitReadyForReviewForHttp, updateViewSpecForHttp } from '../src/server/authoring-http'
 import { connectMcp, scoped, testMember } from './support/access'
+import { manifestPath as workspaceManifestPath } from './support/workspace-layout'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const NEW_VIEW_ID = '22222222-2222-4222-8222-222222222222'
@@ -145,6 +147,7 @@ const PARITY_CASES: readonly ParityCase[] = [
 	...LOCKABLE_KINDS.map(kind => ({ label: `acquireLeases(${kind})`, operation: 'acquireLeases' as const, decide: (principal: Principal) => authorizeLeaseAcquire(principal, [kind]) })),
 	{ label: 'acquireLeases(every kind)', operation: 'acquireLeases', decide: principal => authorizeLeaseAcquire(principal, LOCKABLE_KINDS) },
 	...RESTORABLE_KINDS.map(kind => ({ label: `restoreResourceVersion(${kind})`, operation: 'restoreResourceVersion' as const, decide: (principal: Principal) => authorizeRestore(principal, kind) })),
+	{ label: 'restoreResourceVersion(workspace, adapters changed)', operation: 'restoreResourceVersion', decide: principal => authorizeRestore(principal, 'workspace', adapterChangeKeys(4, [], [{ moduleSpecifier: '@acme/adapter' }])) },
 	{ label: 'updateWorkspaceSettings(adapters changed)', operation: 'updateWorkspaceSettings', decide: principal => authorizeOperation(principal, 'updateWorkspaceSettings', adapterChangeKeys(4, [], [{ moduleSpecifier: '@acme/adapter' }])) },
 ]
 
@@ -173,8 +176,8 @@ describe('parity: role-derived keys decide as the role matrix did', () => {
 				if ((denied === undefined) !== before) changed.push(`${id}: ${before ? 'allowed' : 'refused'} → ${denied ? 'refused' : 'allowed'}`)
 			}
 		}
-		// 43 operations, 6 lease acquires, 5 restores and 1 adapters change, for 16 members and the system credential.
-		expect(compared).toBe(55 * 17)
+		// 43 operations, 6 lease acquires, 6 restores and 1 settings adapters change, for 16 members and the system credential.
+		expect(compared).toBe(56 * 17)
 		expect(changed.sort()).toEqual([...INTENDED_CHANGES].sort())
 	})
 
@@ -302,6 +305,8 @@ describe('authorization by permission keys', () => {
 
 	it('allows each operation with exactly its keys and refuses it without any one of them, naming that key (Rule 01a11485-eaac)', () => {
 		for (const [operation, rule] of Object.entries(ACCESS_OPERATIONS) as [AccessOperation, typeof ACCESS_OPERATIONS[AccessOperation]][]) {
+			// A per-resource operation is authorized with the keys of its resources (see the fail-closed test).
+			if ('perResourceKeys' in rule) continue
 			expect(authorizeOperation(member(rule.requiredKeys), operation), operation).toBeUndefined()
 			for (const key of rule.requiredKeys) {
 				const denied = authorizeOperation(member(ALL.filter(held => held !== key)), operation)
@@ -309,6 +314,19 @@ describe('authorization by permission keys', () => {
 				expect(denied!.message).toContain(`\`${key}\``)
 			}
 		}
+	})
+
+	it('fails closed on an unknown operation, a per-resource operation named alone, and a kind with no write key', () => {
+		const owner = member(ALL)
+		expect(authorizeOperation(owner, 'dropDatabase' as AccessOperation)).toMatchObject({ code: 'auth.scope_denied', requiredKeys: [] })
+		expect(authorizeOperation(owner, 'toString' as AccessOperation)).toMatchObject({ code: 'auth.scope_denied', requiredKeys: [] })
+		expect(authorizeOperation(owner, 'acquireLeases')).toMatchObject({ code: 'auth.scope_denied', requiredKeys: [] })
+		expect(authorizeLeaseAcquire(owner, [])).toMatchObject({ code: 'auth.scope_denied', requiredKeys: [] })
+		expect(authorizeLeaseAcquire(owner, ['view', 'review'])).toMatchObject({ code: 'auth.scope_denied', requiredKeys: [] })
+		expect(authorizeLeaseAcquire(owner, ['view'])).toBeUndefined()
+		for (const kind of ['review', '', '__proto__']) expect(authorizeRestore(owner, kind), kind).toMatchObject({ code: 'auth.scope_denied', requiredKeys: [] })
+		// Every kind a restore can write has a write key.
+		for (const kind of RESTORABLE_RESOURCE_KINDS) expect(writeKeyForKind(kind), kind).toBeDefined()
 	})
 
 	it('checks only the operation\'s own keys: no key implies another', () => {
@@ -435,7 +453,7 @@ describe('authorization in the shared application layer', () => {
 
 	it('needs product-kit.compose besides settings.write to change the adapters list, but not for other settings (Clause 01a11bb1-b35a)', async () => {
 		const ctx = await fixture()
-		const manifestPath = join(ctx.root, '.uiux', 'workspace.json')
+		const manifestPath = workspaceManifestPath(ctx.root)
 		const settingsOnly = scoped(ctx.app, testMember({ nickname: 'sam', kind: 'human', credential: 'session', keys: ['workspace.read', 'settings.write'] }))
 		const read = async () => {
 			const current = await ctx.app.readPointResource('workspace', 'workspace')
@@ -459,6 +477,36 @@ describe('authorization in the shared application layer', () => {
 		// A config change of the same entries is a settings change only.
 		const third = await read()
 		expect(await settingsOnly.updateWorkspaceSettings({ expectedRevision: third.revision, settings: { ...third.resource, adapters: [{ moduleSpecifier: '@acme/adapter', config: { dense: true } }] } })).toMatchObject({ status: 'updated' })
+	})
+
+	it('decides the compose check on the manifest the write replaces, even when another write lands between authorization and the write', async () => {
+		const ctx = await fixture()
+		const read = async () => {
+			const current = await ctx.app.readPointResource('workspace', 'workspace')
+			if (current?.kind !== 'workspace') throw new Error('workspace')
+			return current
+		}
+		const original = await read()
+		const resized = { ...original.resource, viewports: { desktop: { dimensions: { width: 1280, height: 800 } } } }
+		// The revision a concurrent viewport edit produces, found by making that edit and undoing it.
+		const edited = await ctx.app.updateWorkspaceSettings({ expectedRevision: original.revision, settings: resized })
+		if (edited.status !== 'updated') throw new Error('edit')
+		expect(await ctx.app.updateWorkspaceSettings({ expectedRevision: edited.revision, settings: original.resource })).toMatchObject({ status: 'updated', revision: original.revision })
+
+		// The concurrent edit lands after the scoped session authorized the request and before the service reads the manifest.
+		const racing: WorkspaceApplicationSession = {
+			...ctx.app,
+			updateWorkspaceSettings: (async (command, guard) => {
+				expect(await ctx.app.updateWorkspaceSettings({ expectedRevision: original.revision, settings: resized })).toMatchObject({ status: 'updated', revision: edited.revision })
+				return ctx.app.updateWorkspaceSettings(command, guard)
+			}) as WorkspaceApplicationSession['updateWorkspaceSettings'],
+		}
+		const settingsOnly = scoped(racing, testMember({ nickname: 'sam', kind: 'human', credential: 'session', keys: ['workspace.read', 'settings.write'] }))
+		const outcome = await settingsOnly.updateWorkspaceSettings({ expectedRevision: edited.revision, settings: { ...resized, adapters: [{ moduleSpecifier: '@acme/adapter' }] } })
+		expect(outcome).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['product-kit.compose'] })
+		const after = await read()
+		expect(after.revision).toBe(edited.revision)
+		expect(after.resource.adapters).toEqual([])
 	})
 
 	it('tells the agent its identity and role in the per-request instructions', async () => {

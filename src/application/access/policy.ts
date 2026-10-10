@@ -12,6 +12,8 @@ import type { AccessRole, MemberPrincipal, Principal } from './principal'
  * - `requiredKeys`: the keys the operation needs; an operation that needs none is open to every member.
  * - `sessionOnly`: a Workbench cookie session only; bearer Tokens are refused.
  * - `system`: on the system credential allowlist (Clause 01a11c09-a3bb-7ad4-a889-d50b124d3679).
+ * - `perResourceKeys`: the keys depend on the resources the request names, so the operation is
+ *   authorized only with them (`authorizeLeaseAcquire`); authorized alone, it is refused.
  *
  * A `humanOnly` key (Clause 01a11c09-a26e-73bb-9a29-eed40aae37bd) takes effect only on its human
  * holder's cookie session (Rule 01a11c09-bec8-7dee-971a-4c10eaf83eef), so an operation needing one
@@ -21,6 +23,7 @@ export type OperationRule = Readonly<{
 	requiredKeys: readonly PermissionKey[]
 	sessionOnly?: boolean
 	system?: boolean
+	perResourceKeys?: boolean
 }>
 
 export const ACCESS_OPERATIONS = {
@@ -76,7 +79,7 @@ export const ACCESS_OPERATIONS = {
 	restoreResourceVersion: { requiredKeys: ['history.restore'] },
 	// Acquiring needs each requested kind's write key (Rule 01a11c09-c125-752e-aa98-b4c063b2b7fb): see
 	// `authorizeLeaseAcquire`. Releasing one's own leases needs no key.
-	acquireLeases: { requiredKeys: [] },
+	acquireLeases: { requiredKeys: [], perResourceKeys: true },
 	releaseLeases: { requiredKeys: [] },
 	forceReleaseLease: { requiredKeys: ['locks.force-release'] },
 	// Offered in the Workbench only.
@@ -139,7 +142,11 @@ function missingKeysMessage(principal: MemberPrincipal, operation: string, missi
  * operation's own, such as a restored kind's write key.
  */
 export function authorizeOperation(principal: Principal, operation: AccessOperation, additionalKeys: readonly PermissionKey[] = []): ScopeDenied | undefined {
-	const rule: OperationRule = ACCESS_OPERATIONS[operation]
+	// Fail closed: an operation outside the policy data, or a per-resource operation named without
+	// the keys of its resources, is refused rather than allowed by an empty key list.
+	const rule: OperationRule | undefined = Object.hasOwn(ACCESS_OPERATIONS, operation) ? ACCESS_OPERATIONS[operation] : undefined
+	if (!rule) return refuse(`${String(operation)} is not a known operation, so it is refused.`)
+	if (rule.perResourceKeys && additionalKeys.length === 0) return refuse(`${operation} is authorized for the resources it names; a request naming none is refused.`)
 	const needed = inCatalogOrder([...rule.requiredKeys, ...additionalKeys])
 	if (principal.type === 'system') {
 		return rule.system && additionalKeys.length === 0
@@ -155,19 +162,34 @@ export function authorizeOperation(principal: Principal, operation: AccessOperat
 	return undefined
 }
 
+function refuse(message: string): ScopeDenied {
+	return { code: 'auth.scope_denied', requiredKeys: [], message }
+}
+
 /**
  * Rule 01a11c09-c648-71be-a550-2ecabf12f5d0: a restore needs `history.restore` and the restored
  * kind's write key, so `history.restore` never stands in for a missing write key. A kind with no
- * write key adds none here; the service refuses it as not restorable.
+ * write key is refused. `additionalKeys` are keys the restore's result needs, such as
+ * `product-kit.compose` for an `adapters` change (`adapterChangeKeys`).
  */
-export function authorizeRestore(principal: Principal, kind: string): ScopeDenied | undefined {
+export function authorizeRestore(principal: Principal, kind: string, additionalKeys: readonly PermissionKey[] = []): ScopeDenied | undefined {
 	const writeKey = writeKeyForKind(kind)
-	return authorizeOperation(principal, 'restoreResourceVersion', writeKey ? [writeKey] : [])
+	if (!writeKey) return refuse(`restoreResourceVersion needs the write key of the restored kind, and ${kind} has none.`)
+	return authorizeOperation(principal, 'restoreResourceVersion', [writeKey, ...additionalKeys])
 }
 
-/** Rule 01a11c09-c125-752e-aa98-b4c063b2b7fb: acquiring needs the write key of each requested resource's kind. */
+/**
+ * Rule 01a11c09-c125-752e-aa98-b4c063b2b7fb: acquiring needs the write key of each requested
+ * resource's kind. No kind, or a kind with no write key, is refused.
+ */
 export function authorizeLeaseAcquire(principal: Principal, kinds: readonly string[]): ScopeDenied | undefined {
-	return authorizeOperation(principal, 'acquireLeases', kinds.flatMap(kind => writeKeyForKind(kind) ?? []))
+	const keys: PermissionKey[] = []
+	for (const kind of kinds) {
+		const writeKey = writeKeyForKind(kind)
+		if (!writeKey) return refuse(`acquireLeases needs the write key of each requested kind, and ${kind} has none.`)
+		keys.push(writeKey)
+	}
+	return authorizeOperation(principal, 'acquireLeases', keys)
 }
 
 /** The `schemaVersion` from which the `adapters` list leaves the manifest for the Product Kit file. */

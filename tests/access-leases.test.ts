@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { PERMISSION_KEYS } from '../src/application/access/keys'
 import { createLeaseManager, LEASE_TTL_MS, type LeaseHolder } from '../src/application/access/leases'
+import type { MemberPrincipal } from '../src/application/access/principal'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { FileNativePersistence } from '../src/persistence'
@@ -246,6 +247,33 @@ describe('leases by write key (Rules 01a11c09-c125, 01a11485-f074, 01a11485-f08f
 		expect(await everyKey.updateViewSpec({ key: VIEW_ID, expectedRevision: ctx.viewRevision, spec: spec('mine') })).toMatchObject({ status: 'locked', code: 'resource.locked' })
 		expect(everyKey.forceReleaseLease({ kind: 'view', key: VIEW_ID })).toMatchObject({ status: 'released' })
 		expect(await everyKey.updateViewSpec({ key: VIEW_ID, expectedRevision: ctx.viewRevision, spec: spec('mine') })).toMatchObject({ status: 'updated' })
+	})
+
+	it('takes no View lease when an Agent without views.write promotes a Review, but still honors another holder\'s lease (#140 owner ruling 2026-10-10, 2)', async () => {
+		const ctx = await fixture()
+		const leases = createLeaseManager()
+		const promote = (principal: MemberPrincipal, viewRevision: string, reviewRevision: string) => scoped(ctx.app, principal, { leases })
+			.promoteReviewToDecision({ reviewId: REVIEW_ID, expectedReviewRevision: reviewRevision, viewId: VIEW_ID, expectedViewRevision: viewRevision, question: 'Keep it?' })
+		const critic = testMember({ nickname: 'critic', kind: 'agent', role: 'reviewer', credential: 'token' })
+		const holder = testMember({ nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' })
+
+		// Another member's lease blocks the promotion, which writes the View.
+		expect(scoped(ctx.app, holder, { leases }).acquireLeases({ resources: [{ kind: 'view', key: VIEW_ID }] })).toMatchObject({ status: 'acquired' })
+		expect(await promote(critic, ctx.viewRevision, ctx.reviewRevision)).toMatchObject({ status: 'locked', code: 'resource.locked', lock: { holder: { nickname: 'claude' } } })
+		await scoped(ctx.app, holder, { leases }).releaseLeases({})
+
+		// Without the lease the promotion succeeds and leaves no lease behind.
+		const promoted = await promote(critic, ctx.viewRevision, ctx.reviewRevision)
+		expect(promoted, JSON.stringify(promoted)).toMatchObject({ status: 'updated' })
+		expect(leases.list()).toEqual([])
+
+		// An Agent holding views.write still takes the View lease when it promotes.
+		const view = await ctx.app.readPointResource('view', VIEW_ID)
+		const review = await ctx.app.createReviewThread({ anchor: { viewId: VIEW_ID, widgetId: 'root' } })
+		if (review.status !== 'created' || !view) throw new Error('fixture')
+		const second = await scoped(ctx.app, holder, { leases }).promoteReviewToDecision({ reviewId: review.key, expectedReviewRevision: review.revision, viewId: VIEW_ID, expectedViewRevision: view.revision, question: 'And this?' })
+		expect(second, JSON.stringify(second)).toMatchObject({ status: 'updated' })
+		expect(leases.list()).toMatchObject([{ kind: 'view', key: VIEW_ID, holder: { nickname: 'claude' } }])
 	})
 
 	it('ends a lease when its holder loses the write key of the leased kind or is removed, and keeps it otherwise', async () => {

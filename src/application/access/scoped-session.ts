@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import { HISTORY_WRITE_OPERATIONS, type HistoryWriteOperation } from '../../domain/history/constants'
+import { HISTORY_WRITE_OPERATIONS, isRestorableResourceKind, type HistoryWriteOperation } from '../../domain/history/constants'
 import { isFullUuid, type Diagnostic } from '../../domain/validation'
 import { runWithDesignWriteContext, type DesignWriteContext } from '../../persistence/history/write-context'
 import type { ReviewResolution } from '../../domain/reviews/schema'
@@ -12,7 +12,7 @@ import type { CaptureFormalEvidenceCommand, CaptureFormalEvidenceResult, FormalE
 import type { AssessHandoffReadinessCommand, AssessHandoffReadinessResult, ExportHandoffCommand, ExportHandoffResult } from '../services/handoff-export'
 import type { DiffVersionsCommand, VersionDiffOutcome } from '../services/history-diff'
 import type { ReadVersionBlobOutcome, ReadVersionResourceOutcome } from '../services/history-preview'
-import type { RestoreResourceVersionCommand, RestoreResourceVersionOutcome } from '../services/history-restore'
+import type { RestoreGuard, RestoreResourceVersionCommand, RestoreResourceVersionOutcome } from '../services/history-restore'
 import type { CreateCheckpointOutcome, DeleteCheckpointOutcome, ListVersionsOutcome, ListVersionsQuery, ReadVersionOutcome } from '../services/history-service'
 import type { CreateLocaleCommand, LocaleAuthoringResult, UpdateLocaleCommand } from '../services/locale-authoring'
 import type {
@@ -31,7 +31,7 @@ import type {
 import type { CreateViewCommand, UpdateViewSpecCommand, UpdateViewStructureCommand, ViewAuthoringResult } from '../services/view-authoring'
 import type { PointResourceRead, WorkspaceApplicationSession } from '../services/workspace-session'
 import type { UpdateWorkspaceSettingsCommand, WorkspaceAuthoringResult } from '../services/workspace-authoring'
-import { keyRequirements, type PermissionKey } from './keys'
+import { keyRequirements, writeKeyForKind, type PermissionKey } from './keys'
 import {
 	LOCKABLE_KINDS,
 	MAX_ACQUIRE_RESOURCES,
@@ -315,23 +315,20 @@ export function createScopedWorkspaceSession(
 	}
 
 	/**
-	 * The keys a settings update needs beyond `settings.write`: `product-kit.compose` when, below
-	 * `schemaVersion` 5, it changes the `adapters` list (Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa).
-	 * The comparison is against the manifest at `expectedRevision`; when that is not the current
-	 * revision the service answers a conflict and writes nothing, so no key is added.
+	 * Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa: below `schemaVersion` 5 a settings change or a
+	 * `workspace` restore that adds, removes, reorders or re-points an `adapters` entry also needs
+	 * `product-kit.compose`. The services call this guard after their revision check, on the
+	 * manifest the compare-and-swap replaces, so the keys are those of the change actually written.
 	 */
-	async function settingsChangeKeys(command: UpdateWorkspaceSettingsCommand): Promise<readonly PermissionKey[]> {
-		if (effectiveKeys(principal).includes('product-kit.compose') || authorizeOperation(principal, 'updateWorkspaceSettings')) return []
-		const current = await app.readPointResource('workspace', 'workspace')
-		if (current?.kind !== 'workspace' || current.revision !== command.expectedRevision) return []
-		// A malformed `adapters` value is the service's to refuse as invalid.
-		const next: unknown = (command.settings as { adapters?: unknown } | undefined)?.adapters
-		if (!Array.isArray(next)) return []
-		const specifiers = (entries: readonly unknown[]) => entries.map(entry => ({
-			moduleSpecifier: typeof entry === 'object' && entry !== null ? String((entry as { moduleSpecifier?: unknown }).moduleSpecifier) : '',
-		}))
-		const currentAdapters: unknown = current.resource.adapters
-		return adapterChangeKeys(current.resource.schemaVersion, specifiers(Array.isArray(currentAdapters) ? currentAdapters : []), specifiers(next))
+	function adapterChangeRefusal(current: unknown, next: unknown, authorize: (keys: readonly PermissionKey[]) => ScopeDenied | undefined, key: string): AccessRefusal | undefined {
+		const record = (value: unknown): Readonly<Record<string, unknown>> => typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
+		const specifiers = (value: unknown) => Array.isArray(value)
+			? value.map(entry => ({ moduleSpecifier: String(record(entry).moduleSpecifier) }))
+			: []
+		// An unknown schema version counts as below 5, so the check fails closed.
+		const schemaVersion = record(next).schemaVersion ?? record(current).schemaVersion
+		const denied = authorize(adapterChangeKeys(typeof schemaVersion === 'number' ? schemaVersion : 0, specifiers(record(current).adapters), specifiers(record(next).adapters)))
+		return denied ? refusalFromScope(key, denied) : undefined
 	}
 
 	/** Authorize, check or reserve the lease, run the domain write, then keep or drop the reservation. */
@@ -341,13 +338,17 @@ export function createScopedWorkspaceSession(
 		target: LeaseAddress | undefined,
 		run: () => Promise<R>,
 		warnings: readonly Diagnostic[] = [],
-		options: Readonly<{ restoredFrom?: string; additionalKeys?: readonly PermissionKey[] }> = {},
+		options: Readonly<{ restoredFrom?: string }> = {},
 	): Promise<Scoped<R>> {
-		const denied = authorizeOperation(principal, operation, options.additionalKeys)
+		const denied = authorizeOperation(principal, operation)
 		if (denied) return refusalFromScope(key, denied)
 		let ticket: { commit(): void; abort(): void; rekey(key: string): void } | undefined
 		if (target && holder) {
-			const begun = leases.beginWrite(target, holder, { autoAcquire: holder.kind === 'agent' })
+			// An Agent's write takes the lease only when the Agent holds the kind's write key: promoting a
+			// Review without `views.write` only checks the View's lease (#140 owner ruling 2026-10-10, 2).
+			const writeKey = writeKeyForKind(target.kind)
+			const autoAcquire = holder.kind === 'agent' && writeKey !== undefined && effectiveKeys(principal).includes(writeKey)
+			const begun = leases.beginWrite(target, holder, { autoAcquire })
 			if (begun.status === 'locked') {
 				const lock = publicLease(begun.lease)
 				return { status: 'locked', key: target.key, code: 'resource.locked', message: lockedMessage(lock), lock }
@@ -459,19 +460,25 @@ export function createScopedWorkspaceSession(
 			const resource = (command as Readonly<{ resource?: unknown }>).resource
 			const kind = typeof resource === 'object' && resource !== null && typeof (resource as { kind?: unknown }).kind === 'string' ? (resource as { kind: string }).kind : ''
 			const key = typeof resource === 'object' && resource !== null && typeof (resource as { key?: unknown }).key === 'string' ? (resource as { key: string }).key : ''
-			// `history.restore` and the kind's write key. A kind with no write key adds none here; the
-			// service refuses it as not restorable.
-			const denied = authorizeRestore(principal, kind)
+			// `history.restore` and the kind's write key. A kind this build cannot restore has no write
+			// key; the service refuses it while parsing the command, before it reads or writes anything,
+			// so only `history.restore` is checked for it here.
+			const denied = isRestorableResourceKind(kind) ? authorizeRestore(principal, kind) : authorizeOperation(principal, 'restoreResourceVersion')
 			if (denied) return refusalFromScope(key || 'history', denied)
 			const target = isValidLeaseAddress({ kind, key }) ? { kind: kind as LockableKind, key } : undefined
 			const versionId: unknown = command.versionId
-			return write('restoreResourceVersion', key || 'history', target, () => app.restoreResourceVersion(command), [], isFullUuid(versionId) ? { restoredFrom: versionId } : {})
+			// #140 owner ruling 2026-10-10, 1: a `workspace` restore that changes `adapters` needs `product-kit.compose` too.
+			const guard: RestoreGuard<AccessRefusal> = change => change.kind === 'workspace'
+				? adapterChangeRefusal(change.current, change.next, keys => authorizeRestore(principal, change.kind, keys), key || 'history')
+				: undefined
+			return write('restoreResourceVersion', key || 'history', target, () => app.restoreResourceVersion(command, guard), [], isFullUuid(versionId) ? { restoredFrom: versionId } : {})
 		},
 
 		createView: command => write('createView', command.id, { kind: 'view', key: command.id }, () => app.createView(command)),
 		updateViewSpec: command => write('updateViewSpec', command.key, { kind: 'view', key: command.key }, () => app.updateViewSpec(command)),
 		updateViewStructure: command => write('updateViewStructure', command.key, { kind: 'view', key: command.key }, () => app.updateViewStructure(command)),
-		updateWorkspaceSettings: async command => write('updateWorkspaceSettings', 'workspace', { kind: 'workspace', key: 'workspace' }, () => app.updateWorkspaceSettings(command), [], { additionalKeys: await settingsChangeKeys(command) }),
+		updateWorkspaceSettings: command => write('updateWorkspaceSettings', 'workspace', { kind: 'workspace', key: 'workspace' }, () => app.updateWorkspaceSettings(command, change =>
+			adapterChangeRefusal(change.current, change.next, keys => authorizeOperation(principal, 'updateWorkspaceSettings', keys), 'workspace'))),
 		createLocale: command => write('createLocale', command.locale, { kind: 'locale', key: command.locale }, () => app.createLocale(command)),
 		updateLocale: command => write('updateLocale', command.locale, { kind: 'locale', key: command.locale }, () => app.updateLocale(command)),
 		createFlow: (command) => {

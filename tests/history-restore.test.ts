@@ -614,6 +614,42 @@ describe('access (Clause 01a11485-fa44, Rule 01a11c09-c648)', { timeout: HEAVY_S
 		expect(await viewRevision(ctx)).toBe(before)
 		expect(ctx.leases.list()).toEqual([])
 	})
+
+	it('needs product-kit.compose for a workspace restore that changes the adapters, judged on the restore\'s result (#140 owner ruling 2026-10-10, 1)', async () => {
+		const ctx = await fixture()
+		const settings = async () => {
+			const read = await ctx.app.readPointResource('workspace', 'workspace')
+			if (read?.kind !== 'workspace') throw new Error('workspace')
+			return read
+		}
+		const update = async (changes: Partial<WorkspaceManifest>) => {
+			const current = await settings()
+			const outcome = await session(ctx, EDITOR).updateWorkspaceSettings({ expectedRevision: current.revision, settings: { ...current.resource, ...changes } })
+			expect(outcome).toMatchObject({ status: 'updated' })
+		}
+		await update({ adapters: [{ moduleSpecifier: '@acme/adapter' }] })
+		const withAdapter = await checkpoint(ctx, 'With the Adapter')
+		await update({ viewports: { desktop: { dimensions: { width: 1440, height: 900 } } } })
+		const widened = await checkpoint(ctx, 'Wider desktop')
+		await update({ adapters: [] })
+
+		const restorer = testMember({ nickname: 'rhea', kind: 'human', credential: 'session', keys: ['workspace.read', 'history.read', 'history.restore', 'settings.write'] })
+		const before = await settings()
+		const refused = await restore(ctx, restorer, { versionId: withAdapter, resource: { kind: 'workspace', key: 'workspace' }, expectedRevision: before.revision, acknowledgeImpact: true })
+		expect(refused).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['product-kit.compose'] })
+		expect((await settings()).revision).toBe(before.revision)
+
+		// Restoring the same adapters with other settings changed needs no compose key.
+		await update({ adapters: [{ moduleSpecifier: '@acme/adapter' }], viewports: MANIFEST.viewports })
+		const sameAdapters = await settings()
+		expect(await restore(ctx, restorer, { versionId: widened, resource: { kind: 'workspace', key: 'workspace' }, expectedRevision: sameAdapters.revision, acknowledgeImpact: true })).toMatchObject({ status: 'updated' })
+
+		// With product-kit.compose the adapters restore goes through.
+		await update({ adapters: [] })
+		const composer = testMember({ nickname: 'cara', kind: 'human', credential: 'session', keys: ['workspace.read', 'history.read', 'history.restore', 'settings.write', 'product-kit.source.read', 'product-kit.write', 'product-kit.compose'] })
+		expect(await restore(ctx, composer, { versionId: withAdapter, resource: { kind: 'workspace', key: 'workspace' }, expectedRevision: (await settings()).revision, acknowledgeImpact: true })).toMatchObject({ status: 'updated' })
+		expect((await settings()).resource.adapters).toEqual([{ moduleSpecifier: '@acme/adapter' }])
+	})
 })
 
 describe('MCP restore_resource_version (Clause 01a11a5e-2768-76ad-b02a-e15f50f91268)', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {

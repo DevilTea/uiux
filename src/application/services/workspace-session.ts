@@ -30,6 +30,7 @@ import {
 	createWorkspaceAuthoringService,
 	type UpdateWorkspaceSettingsCommand,
 	type WorkspaceAuthoringResult,
+	type WorkspaceSettingsGuard,
 } from './workspace-authoring'
 import {
 	createLocaleAuthoringService,
@@ -82,7 +83,7 @@ import {
 	type HistoryStoreSource,
 	type VersionDiffOutcome,
 } from './history-diff'
-import { createHistoryRestoreService, type RestoreResourceVersionCommand, type RestoreResourceVersionOutcome } from './history-restore'
+import { createHistoryRestoreService, type RestoreGuard, type RestoreResourceVersionCommand, type RestoreResourceVersionOutcome } from './history-restore'
 import { createHistoryPreviewService, type ReadVersionBlobOutcome, type ReadVersionResourceOutcome } from './history-preview'
 import {
 	createHistoryService,
@@ -127,7 +128,7 @@ export interface WorkspaceApplicationSession {
 	createView(command: CreateViewCommand): Promise<ViewAuthoringResult>
 	updateViewSpec(command: UpdateViewSpecCommand): Promise<ViewAuthoringResult>
 	updateViewStructure(command: UpdateViewStructureCommand): Promise<ViewAuthoringResult>
-	updateWorkspaceSettings(command: UpdateWorkspaceSettingsCommand): Promise<WorkspaceAuthoringResult>
+	updateWorkspaceSettings<R = never>(command: UpdateWorkspaceSettingsCommand, guard?: WorkspaceSettingsGuard<R>): Promise<WorkspaceAuthoringResult | R>
 	createLocale(command: CreateLocaleCommand): Promise<LocaleAuthoringResult>
 	updateLocale(command: UpdateLocaleCommand): Promise<LocaleAuthoringResult>
 	createFlow(command: CreateFlowCommand): Promise<FlowAuthoringResult>
@@ -156,7 +157,7 @@ export interface WorkspaceApplicationSession {
 	readVersion(id: string): Promise<ReadVersionOutcome>
 	readVersionResource(id: string, kind: string, key: string): Promise<ReadVersionResourceOutcome>
 	readVersionBlob(digest: string): Promise<ReadVersionBlobOutcome>
-	restoreResourceVersion(command: RestoreResourceVersionCommand): Promise<RestoreResourceVersionOutcome>
+	restoreResourceVersion<R = never>(command: RestoreResourceVersionCommand, guard?: RestoreGuard<R>): Promise<RestoreResourceVersionOutcome | R>
 }
 
 /**
