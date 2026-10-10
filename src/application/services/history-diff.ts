@@ -195,6 +195,10 @@ export function createHistoryDiffService(persistence: FileNativePersistence, his
 			const bytes = new Map<string, Uint8Array>()
 			for (const resource of version.resources) {
 				if (!isDiffableResourceKind(resource.kind) || !(all || some.has(resourceIdentityKey(resource)))) continue
+				// Strict on purpose (owner ruling 2026-10-10): any blob this side reads that is no longer
+				// stored refuses the comparison with history.blob_missing. Unlike the version reads for
+				// Preview (`history-preview.ts`), a diff does not leave unrelated resources out of a
+				// cross-schema upgrade.
 				for (const [path, digest] of Object.entries(resource.files)) {
 					const blob = await readBlobUnlocked(stores, digest)
 					if (!blob) return refusal('failed', 'history.blob_missing', '/', `Version ${version.id} names file ${path} (${digest}), whose content is no longer stored.`)
