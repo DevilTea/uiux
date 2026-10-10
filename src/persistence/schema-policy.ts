@@ -3,6 +3,16 @@ import { isRecord } from '../domain/validation'
 
 export type WorkspaceSnapshot = ReadonlyMap<string, Uint8Array>
 
+/**
+ * One step of the Workspace schema migration chain.
+ *
+ * Invariant: a step never reads across resources. It rewrites each resource from that resource's
+ * own files plus the manifest (`.uiux/workspace.json`), never from another resource's files.
+ * The version reads for Preview depend on it: when they upgrade an older version in memory they
+ * leave out, whole, every unrelated resource whose content is no longer stored
+ * (`src/application/services/history-preview.ts`). A future step that does read other resources
+ * must make those resources required there too, or that upgrade silently changes its output.
+ */
 export type WorkspaceMigrationStep = Readonly<{
 	fromVersion: number
 	toVersion: number

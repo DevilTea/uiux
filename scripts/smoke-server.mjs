@@ -133,6 +133,10 @@ try {
 		throw new Error('Preview runtime bundle was not materialized for the production identity smoke Adapter.')
 
 	console.log(`Nitro smoke passed: health, 401 without a token and for another Workspace's token, a CLI-created token on /api and /mcp, selected Workspace API, and cross-module Workspace Adapter preview resolution against schemaVersion ${uiuxWorkspaceSchemaVersion}.`)
+
+	const historyStarted = Date.now()
+	await smokeHistory({ origin: `http://${host}:${port}`, auth, mcpHeaders })
+	console.log(`History smoke passed in ${Date.now() - historyStarted} ms: an Agent's MCP task ended by release_lock is one autosave, a Checkpoint, its diff against current, a restore naming restoredFrom, and an on-disk edit recorded as an external version.`)
 }
 catch (error) {
 	server.kill('SIGTERM')
@@ -222,6 +226,112 @@ async function smokeLoopbackOnlyCli() {
 		cli.kill('SIGTERM')
 		await new Promise(resolve => cli.exitCode !== null || cli.signalCode !== null ? resolve() : cli.once('exit', resolve))
 	}
+}
+
+// Version history end to end, through the public HTTP and MCP surfaces only (issue #132). Every
+// wait polls a public read with a bounded deadline; nothing sleeps for a fixed time.
+async function smokeHistory({ origin, auth, mcpHeaders }) {
+	const VIEW_ID = '0b11e2e0-0000-4000-8000-00000000b011'
+	const viewSpec = intent => ({ intent, entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [] })
+	let rpcId = 100
+	async function callTool(name, args) {
+		const response = await fetch(`${origin}/mcp`, {
+			method: 'POST',
+			headers: { ...mcpHeaders, ...auth, 'mcp-protocol-version': '2025-06-18' },
+			body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/call', params: { name, arguments: args } }),
+		})
+		const text = await response.text()
+		if (response.status !== 200) throw new Error(`MCP ${name} returned HTTP ${response.status}: ${text}`)
+		// A stateless Streamable HTTP response is either JSON or one SSE event carrying the JSON-RPC answer.
+		const payload = response.headers.get('content-type')?.includes('text/event-stream')
+			? text.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).at(-1)
+			: text
+		const message = JSON.parse(payload ?? 'null')
+		if (!message?.result || message.result.isError) throw new Error(`MCP ${name} failed: ${payload}`)
+		return message.result.structuredContent
+	}
+	async function api(method, path, body) {
+		const response = await fetch(`${origin}${path}`, {
+			method,
+			headers: { ...auth, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+			...(body === undefined ? {} : { body: JSON.stringify(body) }),
+		})
+		return { status: response.status, body: await response.json() }
+	}
+	async function versions() {
+		const listed = await api('GET', '/api/history/versions?limit=200')
+		if (listed.status !== 200) throw new Error(`GET /api/history/versions returned HTTP ${listed.status}: ${JSON.stringify(listed.body)}`)
+		return listed.body.versions
+	}
+	async function waitFor(label, probe, timeoutMs = 10_000) {
+		const deadline = Date.now() + timeoutMs
+		for (;;) {
+			const value = await probe()
+			if (value) return value
+			if (Date.now() > deadline) throw new Error(`History smoke timed out after ${timeoutMs} ms waiting for ${label}.\n${JSON.stringify(await versions(), null, 2)}`)
+			await new Promise(resolve => setTimeout(resolve, 50))
+		}
+	}
+	async function viewRevision() {
+		const read = await api('GET', `/api/resources/view/${VIEW_ID}`)
+		if (read.status !== 200 || !read.body.revision) throw new Error(`Reading the smoke View returned HTTP ${read.status}: ${JSON.stringify(read.body)}`)
+		return read.body.revision
+	}
+	const isSmokeAgent = actor => actor?.type === 'agent' && actor.displayName === 'smoke-agent'
+
+	// The recorder starts in the background: its Baseline Checkpoint marks it ready.
+	await waitFor('the Baseline Checkpoint', async () => (await versions()).some(version => version.type === 'checkpoint' && version.actor?.id === 'system:baseline'))
+
+	// 1. An Agent's task over /mcp (Bearer token), ended by release_lock, is one autosave.
+	await callTool('create_view', { id: VIEW_ID, name: 'History smoke', spec: viewSpec('first') })
+	await callTool('update_view_spec', { viewId: VIEW_ID, expectedRevision: await viewRevision(), spec: viewSpec('second') })
+	const released = await callTool('release_lock', {})
+	if (released?.status !== 'released') throw new Error(`release_lock answered ${JSON.stringify(released)}.`)
+	const autosave = await waitFor('the Agent autosave', async () => (await versions()).find(version => version.type === 'autosave' && isSmokeAgent(version.actor)))
+	if (!autosave.summary.some(change => change.kind === 'view' && change.key === VIEW_ID && change.status === 'added'))
+		throw new Error(`The Agent autosave does not record the new View: ${JSON.stringify(autosave)}`)
+	const agentAutosaves = (await versions()).filter(version => version.type === 'autosave' && isSmokeAgent(version.actor))
+	if (agentAutosaves.length !== 1) throw new Error(`One Agent task produced ${agentAutosaves.length} autosaves, expected 1.`)
+
+	// 2. A Checkpoint names the current state.
+	const checkpoint = await callTool('create_checkpoint', { name: 'Smoke checkpoint' })
+	if (checkpoint?.status !== 'created' || !checkpoint.versionId) throw new Error(`create_checkpoint answered ${JSON.stringify(checkpoint)}.`)
+
+	// 3. After one more write, the Checkpoint differs from current in that View only.
+	await callTool('update_view_spec', { viewId: VIEW_ID, expectedRevision: await viewRevision(), spec: viewSpec('after the checkpoint') })
+	const diff = await api('GET', `/api/history/diff?from=${checkpoint.versionId}&to=current&detail=semantic&resource=view:${VIEW_ID}`)
+	if (diff.status !== 200 || diff.body.status !== 'compared')
+		throw new Error(`GET /api/history/diff returned HTTP ${diff.status}: ${JSON.stringify(diff.body)}`)
+	const changed = diff.body.summary.filter(item => item.status !== 'unchanged')
+	if (changed.length !== 1 || changed[0].kind !== 'view' || changed[0].key !== VIEW_ID || changed[0].status !== 'modified' || !diff.body.changes?.length)
+		throw new Error(`The Checkpoint-to-current diff is not the one modified View: ${JSON.stringify(diff.body)}`)
+
+	// 4. Restoring the View from the Checkpoint (expectedRevision CAS) is its own version naming restoredFrom.
+	const stale = await api('POST', `/api/history/versions/${checkpoint.versionId}/restore`, { resource: { kind: 'view', key: VIEW_ID }, expectedRevision: 'r_stale' })
+	if (stale.status !== 409 || stale.body.status !== 'conflict') throw new Error(`A restore with a stale expectedRevision returned HTTP ${stale.status}: ${JSON.stringify(stale.body)}`)
+	const restored = await api('POST', `/api/history/versions/${checkpoint.versionId}/restore`, { resource: { kind: 'view', key: VIEW_ID }, expectedRevision: await viewRevision() })
+	if (restored.status !== 200 || restored.body.status !== 'updated' || restored.body.restoredFrom !== checkpoint.versionId)
+		throw new Error(`The restore returned HTTP ${restored.status}: ${JSON.stringify(restored.body)}`)
+	if ((await api('GET', `/api/resources/view/${VIEW_ID}`)).body.resource?.spec?.intent !== 'second')
+		throw new Error('The restored View does not hold the Checkpoint content.')
+	await waitFor('the restore version', async () => (await versions()).some(version => version.restoredFrom === checkpoint.versionId && version.summary.some(change => change.key === VIEW_ID)))
+	await callTool('release_lock', {})
+
+	// 5. An edit made on disk while the server runs is recorded as an external version at the next boundary.
+	const viewPath = join(workspaceRoot, 'views', `${VIEW_ID}.view.json`)
+	const onDisk = JSON.parse(await readFile(viewPath, 'utf8'))
+	await writeFile(viewPath, `${JSON.stringify({ ...onDisk, name: 'Edited outside UIUX' }, null, 2)}\n`)
+	const boundary = await callTool('create_checkpoint', { name: 'After an outside edit' })
+	const timeline = await waitFor('the external version', async () => {
+		const listed = await versions()
+		return listed.some(version => version.type === 'external') ? listed : undefined
+	})
+	const external = timeline.find(version => version.type === 'external')
+	if (external.actor?.type !== 'external' || !external.summary.some(change => change.kind === 'view' && change.key === VIEW_ID))
+		throw new Error(`The external version does not record the outside View edit: ${JSON.stringify(external)}`)
+	const order = timeline.map(version => version.id)
+	if (order.indexOf(boundary.versionId) > order.indexOf(external.id))
+		throw new Error('The external version is not recorded before the Checkpoint that detected it.')
 }
 
 function canConnect(address, targetPort) {

@@ -18,7 +18,7 @@ import loginRoute from '../server/api/session/login.post'
 import type { VersionListing } from '../src/application/services/history-service'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { HistoryResourceEntry, HostVersionRecord, VersionRecord } from '../src/domain/history/schema'
-import { FileNativePersistence, canonicalJsonBytes, localeRelativePath, viewRelativePath, workspaceRelativePath } from '../src/persistence'
+import { FileNativePersistence, assetDirectoryRelativePath, assetMetadataRelativePath, canonicalJsonBytes, localeRelativePath, viewRelativePath, workspaceRelativePath } from '../src/persistence'
 import { versionResourcesFromSnapshot } from '../src/persistence/history'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createAccessGuardHandler } from '../src/server/access/http'
@@ -313,5 +313,20 @@ describe('version reads for Preview across schema versions', () => {
 			snapshot.set(workspaceRelativePath(), canonicalJsonBytes({ ...MANIFEST, schemaVersion: 2, i18n: { defaultLocale: 'zh-TW' } }))
 		}, [workspaceRelativePath()])
 		expect(await readVersionResourceForHttp(scoped(ctx.app, VIEWER), noManifest.id, 'view', VIEW_ID)).toMatchObject({ status: 500, body: { status: 'failed', code: 'history.blob_missing' } })
+	})
+
+	it('reads an older version\'s View when an Asset\'s content file is no longer stored, leaving that Asset out whole', async () => {
+		const ctx = await workspace()
+		const ASSET_ID = '66666666-6666-4666-8666-666666666666'
+		await ctx.persistence.assets.create(ASSET_ID, { metadata: { id: ASSET_ID, name: 'Logo', contentFilename: 'logo.bin', mediaType: 'application/octet-stream' }, content: Buffer.from('logo') })
+		const contentPath = `${assetDirectoryRelativePath(ASSET_ID)}/logo.bin`
+		const old = await record(ctx, 2, v2, [contentPath])
+		// The Asset is recorded with both files, but only its metadata blob is stored: a partial Asset.
+		expect(Object.keys(old.resources.find(resource => resource.kind === 'asset')!.files).sort()).toEqual([assetMetadataRelativePath(ASSET_ID), contentPath].sort())
+		const assetFiles = old.resources.find(resource => resource.kind === 'asset')!.files
+		expect(await ctx.stores.host.hasBlob(assetFiles[assetMetadataRelativePath(ASSET_ID)]!)).toBe(true)
+		expect(await ctx.stores.host.hasBlob(assetFiles[contentPath]!)).toBe(false)
+
+		expect(await readVersionResourceForHttp(scoped(ctx.app, VIEWER), old.id, 'view', VIEW_ID)).toMatchObject({ status: 200, body: { status: 'found', workspaceSchemaVersion: 2, resource: { name: 'Checkout before migration' } } })
 	})
 })

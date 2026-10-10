@@ -1,15 +1,22 @@
 #!/usr/bin/env node
 
-import { execFileSync } from 'node:child_process'
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { execFileSync, spawn } from 'node:child_process'
+import { cp, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
+import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
-import { extname, join, normalize } from 'node:path'
+import { extname, join, normalize, relative, sep } from 'node:path'
 import { chromium } from 'playwright'
 
 const tempRoot = await mkdtemp(join(tmpdir(), 'uiux-publication-browser-'))
 const publicationRoot = join(tempRoot, 'uiux')
 const cli = join(process.cwd(), 'bin', 'uiux.mjs')
+// The dogfood Workspace is published from a copy that has version history: Checkpoints in the
+// Workspace and host versions under a private UIUX_HOME, never ~/.uiux, and never by running a
+// server against design/ itself. The copy sits beside design/ so its Adapter resolves the
+// repository's packages exactly as design/ does.
+const workspaceCopy = await mkdtemp(join(process.cwd(), '.uiux-publication-smoke-'))
+const uiuxHome = await mkdtemp(join(tmpdir(), 'uiux-publication-home-'))
 
 function contentType(path) {
 	return ({
@@ -117,22 +124,143 @@ async function previewFrame(page) {
 	return frame
 }
 
+async function waitFor(label, probe, timeoutMs) {
+	const deadline = Date.now() + timeoutMs
+	for (;;) {
+		const value = await probe()
+		if (value) return value
+		if (Date.now() > deadline) throw new Error(`Publication smoke timed out after ${timeoutMs} ms waiting for ${label}.`)
+		await new Promise(resolve => setTimeout(resolve, 100))
+	}
+}
+
+async function freePort() {
+	const probe = createNetServer()
+	await new Promise((resolve, reject) => { probe.once('error', reject); probe.listen(0, '127.0.0.1', resolve) })
+	const { port } = probe.address()
+	await new Promise((resolve, reject) => probe.close(error => error ? reject(error) : resolve()))
+	return port
+}
+
+async function filesUnder(dir) {
+	const entries = await readdir(dir, { recursive: true, withFileTypes: true })
+	return entries.filter(entry => entry.isFile()).map(entry => join(entry.parentPath, entry.name))
+}
+
+/** Every file under `dir` with its size and mtime, to show that a run left the directory untouched. */
+async function fingerprint(dir) {
+	const files = await filesUnder(dir)
+	const rows = await Promise.all(files.map(async (file) => {
+		const info = await stat(file)
+		return `${relative(dir, file)} ${info.size} ${info.mtimeMs}`
+	}))
+	return rows.sort().join('\n')
+}
+
+/**
+ * Gives the Workspace copy version history through the packaged server: the Baseline Checkpoint
+ * of the first start, an Agent's autosave in the host store (a Locale edited and edited back, so
+ * the published content is unchanged), and a named Checkpoint. Answers every version ID.
+ */
+async function recordHistory() {
+	// Host-local runtime state (a live server's hold, persistence lock files) stays behind.
+	const runtimeState = /^\.(?:server-hold|persistence[.-]lock)/u
+	await cp(join(process.cwd(), 'design'), workspaceCopy, { recursive: true, filter: source => !runtimeState.test(source.split(sep).at(-1)) })
+	const env = { ...process.env, UIUX_HOME: uiuxHome }
+	const uiuxCli = (...args) => execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8', env })
+	uiuxCli('member', 'add', 'publication-smoke', '--kind', 'agent', '--role', 'editor', '--workspace', workspaceCopy)
+	const token = uiuxCli('token', 'create', '--member', 'publication-smoke', '--workspace', workspaceCopy).match(/uiux_t_\S+/u)?.[0]
+	if (!token) throw new Error('uiux token create printed no token.')
+	const port = await freePort()
+	const server = spawn(process.execPath, ['.output/server/index.mjs'], {
+		stdio: ['ignore', 'pipe', 'pipe'],
+		env: { ...env, HOST: '127.0.0.1', PORT: String(port), NITRO_HOST: '127.0.0.1', NITRO_PORT: String(port), UIUX_WORKSPACE_ROOT: workspaceCopy },
+	})
+	let serverOutput = ''
+	server.stdout.setEncoding('utf8').on('data', chunk => serverOutput += chunk)
+	server.stderr.setEncoding('utf8').on('data', chunk => serverOutput += chunk)
+	try {
+		const api = async (method, path, body) => {
+			const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+				method,
+				headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+				...(body === undefined ? {} : { body: JSON.stringify(body) }),
+			})
+			const result = { status: response.status, body: await response.json() }
+			if (result.status >= 300) throw new Error(`${method} ${path} returned HTTP ${result.status}: ${JSON.stringify(result.body)}`)
+			return result.body
+		}
+		const versions = async () => (await api('GET', '/api/history/versions?limit=200')).versions
+		await waitFor('the Baseline Checkpoint', async () => {
+			if (server.exitCode !== null) throw new Error(`The history server exited early.\n${serverOutput}`)
+			try { return (await versions()).some(version => version.actor?.id === 'system:baseline') }
+			catch { return false }
+		}, 20_000)
+		const locale = await api('GET', '/api/resources/locale/en-US')
+		const edited = await api('PUT', '/api/locales/en-US', { expectedRevision: locale.revision, messages: { ...locale.resource, 'publication.smoke': 'History only' } })
+		await api('PUT', '/api/locales/en-US', { expectedRevision: edited.revision, messages: locale.resource })
+		await api('POST', '/api/history/checkpoints', { name: 'Publication smoke' })
+		const recorded = await waitFor('the host autosave', async () => {
+			const listed = await versions()
+			return listed.some(version => version.type === 'autosave') && listed.filter(version => version.type === 'checkpoint').length >= 2 ? listed : undefined
+		}, 10_000)
+		return recorded.map(version => version.id)
+	}
+	finally {
+		server.kill('SIGTERM')
+		await new Promise(resolve => server.exitCode !== null || server.signalCode !== null ? resolve() : server.once('exit', resolve))
+	}
+}
+
+/** Rule 01a11a5e-1c4e-72d9-ad72-364a6549d779: publication output carries no Checkpoints, versions or diffs. */
+async function assertNoHistory(snapshot, versionIds) {
+	const files = await filesUnder(publicationRoot)
+	const paths = files.map(file => relative(publicationRoot, file).split(sep).join('/'))
+	const historyPaths = paths.filter(path => path.split('/').some(segment => ['.uiux', 'history', 'checkpoints'].includes(segment)))
+	if (historyPaths.length) throw new Error(`Publication output contains history paths:\n${historyPaths.join('\n')}`)
+	// The only artifacts are the ones the snapshot references (formal Evidence), never Checkpoint blobs.
+	const artifacts = paths.filter(path => path.startsWith('_uiux/artifacts/')).sort()
+	const referenced = Object.values(snapshot.files?.artifacts ?? {}).map(entry => entry.file).sort()
+	if (JSON.stringify(artifacts) !== JSON.stringify(referenced))
+		throw new Error(`Publication artifacts differ from the snapshot's references:\n${JSON.stringify({ artifacts, referenced }, null, 2)}`)
+	// The snapshot has no section for history (a Decision's or Review's own `history` is design data),
+	// and no history resource kind.
+	const sections = ['schemaVersion', 'publicationIdentity', 'generatedAt', 'sourceRevision', 'workspace', 'discovery', 'resources', 'evidence', 'handoff', 'preview', 'files']
+	const unexpected = Object.keys(snapshot).filter(key => !sections.includes(key))
+	if (unexpected.length) throw new Error(`publication.json has unexpected sections: ${unexpected.join(', ')}`)
+	const kinds = [...Object.keys(snapshot.resources ?? {}), ...Object.keys(snapshot.discovery ?? {}), ...Object.keys(snapshot.files ?? {})]
+	if (kinds.some(kind => /version|checkpoint|history/iu.test(kind)))
+		throw new Error(`publication.json publishes a history kind: ${kinds.join(', ')}`)
+	for (const file of files) {
+		const text = (await readFile(file)).toString('latin1')
+		const leaked = versionIds.find(id => text.includes(id))
+		if (leaked) throw new Error(`Publication file ${relative(publicationRoot, file)} names version ${leaked}.`)
+	}
+	return { files: files.length, versions: versionIds.length }
+}
+
 let origin = ''
 
 try {
+	const versionIds = await recordHistory()
+	const homeBefore = await fingerprint(uiuxHome)
 	execFileSync(process.execPath, [
 		cli,
 		'publish',
-		'--workspace', join(process.cwd(), 'design'),
+		'--workspace', workspaceCopy,
 		'--out', publicationRoot,
 		'--base', '/uiux/',
 		'--source-revision', 'publication-browser-smoke',
 	], {
 		stdio: 'pipe',
 		timeout: 120_000,
+		env: { ...process.env, UIUX_HOME: uiuxHome },
 	})
+	// Building a publication neither reads nor records host history.
+	if (await fingerprint(uiuxHome) !== homeBefore) throw new Error('uiux publish changed the host UIUX_HOME.')
 
 	const snapshot = JSON.parse(await readFile(join(publicationRoot, '_uiux', 'publication.json'), 'utf8'))
+	const historyCheck = await assertNoHistory(snapshot, versionIds)
 	if (snapshot.handoff?.readiness?.implementationReady !== true)
 		throw new Error('Dogfood publication lost its Implementation Ready Handoff claim.')
 	if (snapshot.preview?.state !== 'valid')
@@ -245,6 +373,15 @@ try {
 			throw new Error(`Published Evidence screenshot did not resolve to a static artifact: ${evidenceSrc}`)
 		await readiness.locator('[data-facet="handoff"]').getByText('implementation-ready', { exact: true }).waitFor()
 
+		// No version history is published: the Activity tab says so and offers no timeline, and a
+		// Preview frame addressed to a version says the snapshot has none instead of fetching it.
+		await open(page, '/?tab=activity')
+		await main(page).getByText('A published snapshot has no version history.', { exact: true }).first().waitFor()
+		if (await page.locator('[data-history-filters], [data-create-checkpoint]').count() !== 0)
+			throw new Error('Published viewer exposed the version timeline.')
+		await page.goto(`${origin}/uiux/preview?viewId=${encodeURIComponent(viewKey)}&version=${encodeURIComponent(versionIds[0])}`, { waitUntil: 'networkidle' })
+		await page.locator('[data-preview-status="error"]').getByText('A published snapshot has no version history, so this version can\'t be shown.', { exact: true }).waitFor()
+
 		await page.waitForTimeout(200)
 		const runtimeApiRequests = requests.filter((requestUrl) => {
 			const url = new URL(requestUrl)
@@ -263,8 +400,10 @@ try {
 		await server.close()
 	}
 
-	console.log(`Publication browser smoke passed: ${snapshot.publicationIdentity}`)
+	console.log(`Publication browser smoke passed: ${snapshot.publicationIdentity}; none of ${historyCheck.versions} recorded versions reached its ${historyCheck.files} files.`)
 }
 finally {
 	await rm(tempRoot, { recursive: true, force: true })
+	await rm(workspaceCopy, { recursive: true, force: true })
+	await rm(uiuxHome, { recursive: true, force: true })
 }

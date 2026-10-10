@@ -87,7 +87,10 @@ export function createHistoryPreviewService(persistence: FileNativePersistence, 
 				// An older version is upgraded as a whole Workspace snapshot, so every placed file is read.
 				// Only the resource's own files, and the manifest every migration step reads, are required:
 				// another resource whose content is no longer stored is left out of the snapshot whole (a
-				// partial Asset would fail the upgrade), so it cannot block reading this one.
+				// partial Asset would fail the upgrade), so it cannot block reading this one. Leaving it out
+				// is safe only because no migration step reads across resources (the invariant documented
+				// on `WorkspaceMigrationStep`); a future step that reads other resources must make them
+				// required here as well.
 				const wanted = version.workspaceSchemaVersion === policy.currentVersion
 					? [entry]
 					: version.resources.filter(resource => Object.keys(resource.files).some(path => LEGACY_LAYOUT.classifyVersionedPath(path)))
