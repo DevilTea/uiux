@@ -1,11 +1,12 @@
 import { validateAssetContentFiles, validateAssetContentMetadata, validateAssetMetadata, type AuthoredAsset, type AuthoredAssetResource } from '../../domain/assets/schema'
 import { validateFormalEvidenceRecord } from '../../domain/evidence/schema'
 import { validateFlowResource, type FlowResource } from '../../domain/flows/schema'
+import { isRestorableResourceKind, RESTORABLE_RESOURCE_KINDS, type RestorableResourceKind } from '../../domain/history/constants'
 import { isDiffableResourceKind } from '../../domain/history/diff'
 import type { HistoryResourceIdentity, VersionRecord } from '../../domain/history/schema'
 import { resourceIdentityKey } from '../../domain/history/summary'
 import { validateI18nResource, type I18nResource } from '../../domain/i18n/schema'
-import { analyzeImpact, withResource, type ImpactEvidence, type ImpactItem, type ImpactResourceKind, type ImpactWorkspace } from '../../domain/impact'
+import { analyzeImpact, withResource, type ImpactEvidence, type ImpactItem, type ImpactWorkspace } from '../../domain/impact'
 import { isCanonicalLocaleTag, isFullUuid, isRecord, type Diagnostic, type ValidationResult } from '../../domain/validation'
 import { validateViewResource, type ViewResource } from '../../domain/views/schema'
 import { validateWorkspaceManifest, type WorkspaceManifest } from '../../domain/workspace/schema'
@@ -48,12 +49,9 @@ import type { HistoryStoreSource } from './history-diff'
  * Kinds this build cannot restore (the kind set is open, seam 3) are refused. Refusal codes other
  * than the schema diagnostics are implementation-defined.
  */
-export const RESTORABLE_RESOURCE_KINDS = Object.freeze(['workspace', 'view', 'flow', 'locale', 'asset'] as const satisfies readonly ImpactResourceKind[])
-export type RestorableResourceKind = typeof RESTORABLE_RESOURCE_KINDS[number]
-
-export function isRestorableResourceKind(kind: unknown): kind is RestorableResourceKind {
-	return typeof kind === 'string' && (RESTORABLE_RESOURCE_KINDS as readonly string[]).includes(kind)
-}
+// The kind set lives in the domain constants so the Workbench offers Restore for the same kinds;
+// every one is a kind the impact analysis follows (`withResource` takes the target's kind).
+export { isRestorableResourceKind, RESTORABLE_RESOURCE_KINDS, type RestorableResourceKind }
 
 export type RestoreResourceVersionCommand = Readonly<{
 	versionId: string

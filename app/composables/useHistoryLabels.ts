@@ -3,6 +3,7 @@ import { useI18n } from '#imports'
 import type { HistoryVersionType } from '../../src/domain/history/constants'
 import type { HistoryActor } from '../../src/domain/history/schema'
 import type { VersionListItem } from '../../src/application/services/history-service'
+import { MAX_RESOURCE_DISCOVERY_LIMIT } from '../../src/application/dto/resource-discovery'
 import { systemCheckpointTitle, type HistoryResourceRef } from '../utils/version-history'
 import { useUiuxClient } from './useUiuxClient'
 import { useWorkbench } from './useWorkbench'
@@ -43,11 +44,21 @@ export function useHistoryLabels() {
 		if (missing && assetNamesRead && Date.now() - assetNamesAt > ASSET_NAMES_TTL_MS) assetNamesRead = undefined
 		if (assetNamesRead || isReadOnly.value) return
 		assetNamesAt = Date.now()
-		assetNamesRead = uiux.listResources<{ key: string; summary?: { name?: string } }>(['asset'], { limit: 100 })
-			.then((page) => {
-				assetNames.value = new Map(page.items.flatMap(item => item.summary?.name ? [[item.key, item.summary.name] as const] : []))
-			})
+		assetNamesRead = readAllAssetNames()
+			.then((names) => { assetNames.value = names })
 			.catch(() => { assetNamesRead = undefined })
+	}
+
+	/** Every Asset's name, page by page (a page holds at most `MAX_RESOURCE_DISCOVERY_LIMIT`), so no Asset past the first page is named by its key. */
+	async function readAllAssetNames(): Promise<Map<string, string>> {
+		const names = new Map<string, string>()
+		let cursor: string | undefined
+		do {
+			const page = await uiux.listResources<{ key: string; summary?: { name?: string } }>(['asset'], { limit: MAX_RESOURCE_DISCOVERY_LIMIT, ...(cursor ? { cursor } : {}) })
+			for (const item of page.items) if (item.summary?.name) names.set(item.key, item.summary.name)
+			cursor = page.nextCursor
+		} while (cursor)
+		return names
 	}
 
 	function actorName(actor: HistoryActor): string {

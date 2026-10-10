@@ -80,6 +80,7 @@ const fullComparison = computed(() => selection.value && view.value
           :address="address"
           :request-resources="[view]"
           :latest-version-id="timeline.versions.value[0]?.id"
+          :timeline-loaded="timeline.loaded.value"
           :link-for="panelTo"
           :close-to="panelTo({})"
           :full-comparison-to="fullComparison"

@@ -276,6 +276,7 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
           <VersionComparison
             :address="address"
             :latest-version-id="timeline.versions.value[0]?.id"
+            :timeline-loaded="timeline.loaded.value"
             :link-for="activityTo"
             :close-to="activityTo({})"
           />

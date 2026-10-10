@@ -4,6 +4,7 @@ import type { VersionListItem } from '../../src/application/services/history-ser
 import type { VersionDiffResult } from '../../src/application/services/history-diff'
 import type { Diagnostic } from '../../src/domain/validation'
 import type { VersionRecord } from '../../src/domain/history/schema'
+import { forgetComparisonsAfterDeletion, refreshKeyChanged } from '../utils/comparison-refresh'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
 import { comparisonEndpoints, CURRENT_COMPARE, diffRequestQuery, filterVersions, PARENT_COMPARE, versionListQuery, type ComparisonEndpoints, type HistoryResourceRef, type HistorySelection, type TimelineFilters } from '../utils/version-history'
 import { useWorkbench } from './useWorkbench'
@@ -204,9 +205,24 @@ export function useOrderedEndpoints(selection: MaybeRefOrGetter<Pick<HistorySele
 	return { endpoints, compared }
 }
 
-/** Compared results whose sides never change (no `current`), least recently used first. */
+/**
+ * Compared results whose sides do not change (no `current`), least recently used first. A
+ * `from=parent` side changes only when a Checkpoint is deleted (`forgetVersionDiffs`).
+ */
 const DIFF_CACHE_LIMIT = 50
 const diffs = new Map<string, VersionDiffResult>()
+/** Bumped when a deletion drops cached comparisons, so a shown comparison with the parent reads again. */
+const diffEpoch = ref(0)
+
+/**
+ * After a Checkpoint is deleted: the version after it has another parent now, so the cached
+ * comparisons with a parent, and those naming the deleted version, are dropped, and every shown
+ * comparison with a parent is read again.
+ */
+export function forgetVersionDiffs(deletedId: string): void {
+	forgetComparisonsAfterDeletion(diffs, deletedId)
+	diffEpoch.value += 1
+}
 
 /**
  * `GET /api/history/diff` for two sides: the `summary`, or the `semantic` diff of the given
@@ -267,8 +283,9 @@ export function useVersionDiff(
 
 	watch(() => JSON.stringify([toValue(endpoints) ?? null, toValue(options.resources) ?? [], toValue(options.enabled) ?? true]), () => { void load() }, { immediate: true })
 	watch(() => toValue(endpoints)?.to === CURRENT_COMPARE ? toValue(options.refreshKey) : undefined, (key, previous) => {
-		if (key !== undefined && previous !== undefined && key !== previous) void load()
+		if (refreshKeyChanged(key, previous)) void load()
 	})
+	watch(diffEpoch, () => { if (toValue(endpoints)?.from === PARENT_COMPARE) void load() })
 
 	return { result, loading, error, load }
 }
