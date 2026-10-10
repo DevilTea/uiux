@@ -41,6 +41,8 @@ function createWorkbenchShell() {
 
 	const searchOpen = ref(false)
 	const shortcutsOpen = ref(false)
+	/** The Create Checkpoint dialog (Rule 01a11a5e-0c71-78d1-9adb-14db6c67ab9c), opened from a toolbar or ⌘K. */
+	const checkpointOpen = ref(false)
 	const singleKeyShortcuts = ref(readSingleKeyPreference())
 	let toggleSidebarHandler: (() => void) | undefined
 	let toggleRightPanelHandler: (() => void) | undefined
@@ -96,6 +98,7 @@ function createWorkbenchShell() {
 	return {
 		searchOpen,
 		shortcutsOpen,
+		checkpointOpen,
 		singleKeyShortcuts,
 		setSingleKeyShortcuts,
 		toggleWorkbenchTheme,

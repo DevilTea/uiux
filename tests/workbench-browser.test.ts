@@ -14,7 +14,7 @@ import { provisionToken, sessionCookieFor } from './support/access'
 const VIEW_ID = '7f3d7780-3cb9-4e57-8f0b-2e8d569905c1'
 const THREAD_ID = '140f4e87-cc50-4768-a82b-56b663609321'
 /** The main screens of the shell (brief a, section 5). */
-const MAIN_ROUTES = ['/', `/views/${VIEW_ID}`, '/flows', '/reviews', '/workspace/settings', '/workspace/locales', '/workspace/assets']
+const MAIN_ROUTES = ['/', '/?tab=activity', `/views/${VIEW_ID}`, `/views/${VIEW_ID}?panel=history`, '/flows', '/reviews', '/workspace/settings', '/workspace/locales', '/workspace/assets']
 
 let server: WorkbenchServer
 let browser: Browser

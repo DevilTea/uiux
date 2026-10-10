@@ -842,7 +842,8 @@
     "inspect": "Inspect",
     "spec": "Spec",
     "readiness": "Readiness",
-    "label": "View details"
+    "label": "View details",
+    "history": "History"
   },
   "inspect": {
     "empty": {
@@ -1308,7 +1309,7 @@
     "zoom": "Zoom in or out",
     "walkTree": "Select the parent, first child or a sibling Widget",
     "contextMenus": "Open the Variant, Locale or theme menu",
-    "panelTabs": "Comments, Inspect, Spec or Readiness tab",
+    "panelTabs": "Comments, Inspect, Spec, Readiness or History tab",
     "editSection": "Edit the focused Spec section",
     "saveSection": "Save or cancel the Spec section",
     "copyId": "Copy the selected Widget id"
@@ -2127,5 +2128,206 @@
     "mutedNote": "Recorded in another Preview context",
     "openInRecorded": "Show in recorded context",
     "openInRecordedHint": "Switch the Preview to the Locale, viewport and theme this thread records"
+  },
+  "history": {
+    "title": "Version history",
+    "timelineLabel": "Version timeline",
+    "loadFailed": "Couldn't load the version history.",
+    "emptyTitle": "No versions yet",
+    "emptyDescription": "Changes to Views, Flows, Locales, Assets and Workspace settings are saved here automatically.",
+    "emptyFiltered": "No versions match these filters",
+    "emptyFilteredDescription": "Change or clear the filters to see more versions.",
+    "loadMore": "Load older versions",
+    "publication": "A published snapshot has no version history.",
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "quiet": "{n} autosave with no net change | {n} autosaves with no net change",
+    "quietHint": "Their changes cancelled each other out, so the Workspace ended where it started.",
+    "type": {
+      "autosave": "Autosave",
+      "checkpoint": "Checkpoint",
+      "external": "Changed outside UIUX",
+      "system": "System change"
+    },
+    "actor": {
+      "external": "Outside UIUX",
+      "system": "System",
+      "migrate": "Migration",
+      "baseline": "History start",
+      "unknown": "Someone"
+    },
+    "kind": {
+      "workspace": "Workspace settings",
+      "view": "View",
+      "flow": "Flow",
+      "locale": "Locale",
+      "asset": "Asset"
+    },
+    "operation": {
+      "createView": "Created the View",
+      "updateViewSpec": "Edited the Spec",
+      "updateViewStructure": "Edited the structure",
+      "updateWorkspaceSettings": "Edited the Workspace settings",
+      "createLocale": "Created the Locale",
+      "updateLocale": "Edited the Locale",
+      "createFlow": "Created the Flow",
+      "updateFlow": "Edited the Flow",
+      "createAsset": "Added the Asset",
+      "replaceAsset": "Replaced the Asset",
+      "promoteReviewToDecision": "Promoted a Review to a Decision",
+      "restoreResourceVersion": "Restored an earlier version"
+    },
+    "row": {
+      "compare": "Compare",
+      "compareNamed": "Compare {name} with the version before it",
+      "compareWithSelected": "Compare the selected version with {name}",
+      "expand": "Show what {name} changed",
+      "collapse": "Hide what {name} changed",
+      "selected": "Selected",
+      "changed": "{n} resource changed | {n} resources changed",
+      "noChanges": "No resource changed",
+      "changedResources": "Changed resources",
+      "events": "Changes in order",
+      "eventsLoadFailed": "Couldn't load the changes of this version.",
+      "noEvents": "No changes were recorded.",
+      "restored": "Restores an earlier version.",
+      "recordingGap": "Some changes may be missing from this version."
+    },
+    "filter": {
+      "actor": "Changed by",
+      "allActors": "Anyone",
+      "kind": "Resource kind",
+      "allKinds": "All kinds",
+      "checkpointsOnly": "Checkpoints only"
+    },
+    "since": {
+      "compare": "Compare with now",
+      "unavailable": "No saved version has what you last saw",
+      "openView": "Open View",
+      "failed": "Couldn't find the version you last saw."
+    },
+    "invalid": {
+      "title": "Some history records can't be read",
+      "explanation": "These files aren't valid history records for this UIUX build, so they are left out of the timeline and can't be deleted here. Update UIUX, or check the history files.",
+      "notDeletable": "This record can't be read, so it isn't deleted."
+    },
+    "compare": {
+      "title": "Comparison",
+      "failed": "Couldn't compare these versions.",
+      "against": "Compare with",
+      "parent": "Previous version",
+      "current": "Current state",
+      "other": "Another version",
+      "otherNamed": "Another version: {name}",
+      "to": "to",
+      "nothing": "Nothing yet",
+      "close": "Close the comparison",
+      "summary": "Summary",
+      "changedCount": "{n} resource changed | {n} resources changed",
+      "unchangedCount": "{n} unchanged | {n} unchanged",
+      "noParent": "This is the first version, so everything in it counts as added.",
+      "noDifferences": "Nothing differs between these two versions.",
+      "allResources": "Show every changed resource",
+      "openInActivity": "Open the whole comparison in Activity",
+      "status": {
+        "added": "Added",
+        "removed": "Removed",
+        "modified": "Modified",
+        "unchanged": "Unchanged"
+      }
+    },
+    "diff": {
+      "op": {
+        "added": "Added",
+        "removed": "Removed",
+        "changed": "Changed",
+        "moved": "Moved",
+        "reordered": "Reordered"
+      },
+      "section": {
+        "properties": "Properties",
+        "widgets": "Widgets",
+        "variants": "Variants",
+        "spec": "Spec",
+        "decisions": "Decisions",
+        "other": "Other changes",
+        "steps": "Steps",
+        "messages": "Messages",
+        "i18n": "Languages",
+        "viewports": "Viewports",
+        "themes": "Themes",
+        "adapters": "Adapters",
+        "metadata": "Details",
+        "content": "Content",
+        "files": "Files",
+        "structure": "Changes"
+      },
+      "field": {
+        "name": "Name",
+        "feature": "Feature",
+        "type": "Type",
+        "state": "State",
+        "intent": "Intent",
+        "entryConditions": "Entry conditions",
+        "interactionRules": "Interaction rules",
+        "constraints": "Constraints",
+        "accessibility": "Accessibility",
+        "references": "References",
+        "question": "Question",
+        "status": "Status",
+        "outcome": "Outcome",
+        "entryStepId": "First step",
+        "target": "Target",
+        "transition": "Transition",
+        "defaultLocale": "Default Locale",
+        "content": "Content"
+      },
+      "unsupported": "This UIUX build can't show what changed inside this kind of resource, only that it changed.",
+      "empty": "No change in the content.",
+      "before": "Before",
+      "after": "After",
+      "noImage": "No image",
+      "imageAlt": "{name}, {side}",
+      "imageUnavailable": "This image can't be previewed here yet."
+    },
+    "checkpoint": {
+      "create": "Create Checkpoint",
+      "title": "Create Checkpoint",
+      "description": "Saves a named version of the whole Workspace as it is now. Nothing in the Workspace changes.",
+      "name": "Name",
+      "nameHelp": "Up to {max} characters.",
+      "nameRequired": "Enter a name.",
+      "nameTooLong": "Use at most {max} characters.",
+      "note": "Note",
+      "noteHelp": "Optional, up to {max} characters.",
+      "noteTooLong": "Use at most {max} characters.",
+      "leaseTitle": "Someone is still editing",
+      "leaseBody": "The Checkpoint saves these files as they are now, including edits that aren't finished yet.",
+      "submit": "Create Checkpoint",
+      "created": "Checkpoint “{name}” created",
+      "failed": "Couldn't create the Checkpoint.",
+      "retryable": "Nothing was saved. Try again in a moment.",
+      "blockedRole": "Creating a Checkpoint requires the Reviewer role",
+      "blockedMigration": "Not available until the Workspace is migrated"
+    },
+    "delete": {
+      "action": "Delete Checkpoint",
+      "actionNamed": "Delete Checkpoint {name}",
+      "title": "Delete this Checkpoint?",
+      "body": "“{name}” is removed from the timeline for everyone. The Workspace files don't change, and this can't be undone.",
+      "confirm": "Delete Checkpoint",
+      "deleted": "Checkpoint “{name}” deleted",
+      "failed": "Couldn't delete the Checkpoint."
+    },
+    "view": {
+      "title": "Versions of this View",
+      "emptyTitle": "No changes to this View yet",
+      "emptyDescription": "Each saved change to this View is listed here."
+    },
+    "emptyFilteredMore": "None of the loaded versions match. Load older versions to look further back.",
+    "systemName": {
+      "baseline": "History start",
+      "migrate": "Before migrating to schemaVersion {version}"
+    }
   }
 }
