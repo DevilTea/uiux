@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto'
-import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -16,11 +16,16 @@ import updateLocaleRoute from '../server/api/locales/[locale].put'
 import createViewRoute from '../server/api/views.post'
 import loginRoute from '../server/api/session/login.post'
 import type { VersionListing } from '../src/application/services/history-service'
-import type { VersionRecord } from '../src/domain/history/schema'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
+import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
+import type { HistoryResourceEntry, HostVersionRecord, VersionRecord } from '../src/domain/history/schema'
+import { FileNativePersistence, canonicalJsonBytes, localeRelativePath, viewRelativePath, workspaceRelativePath } from '../src/persistence'
+import { versionResourcesFromSnapshot } from '../src/persistence/history'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createAccessGuardHandler } from '../src/server/access/http'
+import { readVersionResourceForHttp } from '../src/server/history-http'
+import { createHistoryStoreFactory, type HistoryStores } from '../src/server/history-stores'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
-import { bearer, provisionToken, sessionCookieFor } from './support/access'
+import { bearer, provisionToken, scoped, sessionCookieFor, testMember } from './support/access'
 
 /**
  * The version reads for Preview and the version blob route (issue #132, B9): Rule
@@ -150,6 +155,9 @@ describe('GET /api/history/blobs/:digest', () => {
 		expect(response.status).toBe(200)
 		expect(response.headers.get('content-type')).toBe('application/octet-stream')
 		expect(response.headers.get('etag')).toBe(`"${digest}"`)
+		expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+		// Never rendered as a document, even when the address is opened directly.
+		expect(response.headers.get('content-disposition')).toBe('attachment')
 		const bytes = new Uint8Array(await response.arrayBuffer())
 		expect(`sha256:${createHash('sha256').update(bytes).digest('hex')}`).toBe(digest)
 		expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual({ greeting: 'Hello from the first edit' })
@@ -188,5 +196,119 @@ describe('access to the version reads for Preview (Clauses 01a11485-fa00 and f97
 			expect(system.status, path).toBe(403)
 			expect(await system.json()).toMatchObject({ status: 'blocked', code: 'auth.scope_denied' })
 		}
+	})
+})
+
+/**
+ * Versions recorded under an older schema (Rule 01a11a5e-118c-733d-92d7-27262bfbcd33): every
+ * migrated Workspace holds a pre-migration Checkpoint, which Preview reads upgraded in memory to the
+ * current schema, and a version under a schema this build does not recognize is refused (Clause
+ * 01a11a5e-2434-7342-a3c1-6d63aa74334c).
+ */
+describe('version reads for Preview across schema versions', () => {
+	const PEER_VIEW_ID = '55555555-5555-4555-8555-555555555555'
+	const AGENT = { type: 'agent', id: 'member:m-agent', displayName: 'claude' } as const
+	const VIEWER = testMember({ nickname: 'vera', kind: 'human', role: 'viewer', credential: 'session' })
+	const MANIFEST = { schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: { desktop: { label: 'Desktop', dimensions: { width: 1280, height: 800 } } }, themes: {} }
+	const view = (id: string, name: string) => ({
+		id,
+		name,
+		ir: { type: 'RootShell', id: 'root', slots: { content: [{ id: 'title', type: 'Text', config: { text: { $i18n: 'greeting' } } }] } },
+		variants: {},
+		spec: { intent: 'Pay', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+	})
+	type Context = Readonly<{ persistence: FileNativePersistence; stores: HistoryStores; app: WorkspaceApplicationSession }>
+	const cleanup: string[] = []
+
+	afterAll(async () => {
+		await Promise.all(cleanup.splice(0).map(path => rm(path, { recursive: true, force: true })))
+	})
+
+	async function workspace(): Promise<Context> {
+		const dir = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-preview-schema-')))
+		const home = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-preview-home-')))
+		cleanup.push(dir, home)
+		await mkdir(join(dir, '.uiux'), { recursive: true })
+		await writeFile(join(dir, workspaceRelativePath()), canonicalJsonBytes(MANIFEST))
+		await mkdir(join(dir, 'views'), { recursive: true })
+		await writeFile(join(dir, viewRelativePath(VIEW_ID)), canonicalJsonBytes(view(VIEW_ID, 'Checkout')))
+		const persistence = new FileNativePersistence({ root: dir, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		await persistence.locales.create('en-US', { greeting: 'Hello' })
+		const history = createHistoryStoreFactory({ workspaceRoot: dir, persistence, home: () => home })
+		return { persistence, stores: (await history.open())!, app: createWorkspaceApplicationSession(persistence, { history }) }
+	}
+
+	/** Records the Workspace's files, as `edit` changes them, as an autosave under `workspaceSchemaVersion`; the files in `drop` have no stored blob. */
+	async function record(ctx: Context, workspaceSchemaVersion: number, edit: (snapshot: Map<string, Uint8Array>) => void, drop: readonly string[] = []): Promise<HostVersionRecord> {
+		const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
+		edit(snapshot)
+		const built = versionResourcesFromSnapshot(snapshot)
+		const files = new Map(built.resources.flatMap(resource => Object.entries(resource.files)))
+		const dropped = new Set(drop.map(path => files.get(path)!))
+		for (const [digest, bytes] of built.blobs) if (!dropped.has(digest)) await ctx.stores.host.putBlob(bytes)
+		const at = new Date().toISOString()
+		const version: HostVersionRecord = { historySchemaVersion: 1, id: randomUUID(), at, workspaceSchemaVersion, resources: [...built.resources] as HistoryResourceEntry[], type: 'autosave', actor: AGENT, startedAt: at, netChange: true, events: [] }
+		await ctx.stores.host.writeVersion(version)
+		return version
+	}
+
+	const v2 = (snapshot: Map<string, Uint8Array>) => {
+		snapshot.set(workspaceRelativePath(), canonicalJsonBytes({ ...MANIFEST, schemaVersion: 2 }))
+		snapshot.set(viewRelativePath(VIEW_ID), canonicalJsonBytes(view(VIEW_ID, 'Checkout before migration')))
+	}
+
+	it('reads a View and the manifest recorded under schemaVersion 2 in the current schema, beside the recorded revision', async () => {
+		const ctx = await workspace()
+		const old = await record(ctx, 2, v2)
+		const read = (kind: string, key: string) => readVersionResourceForHttp(scoped(ctx.app, VIEWER), old.id, kind, key)
+
+		const manifest = await read('workspace', 'workspace')
+		expect(manifest.status).toBe(200)
+		// The uiux.v2-to-v3 and uiux.v3-to-v4 steps ran: the manifest is in the current schema.
+		expect(manifest.body).toEqual({
+			status: 'found',
+			versionId: old.id,
+			kind: 'workspace',
+			key: 'workspace',
+			revision: old.resources.find(item => item.kind === 'workspace')!.revision,
+			workspaceSchemaVersion: 2,
+			resource: MANIFEST,
+		})
+		const viewRead = await read('view', VIEW_ID)
+		expect(viewRead.status).toBe(200)
+		expect(viewRead.body).toMatchObject({ status: 'found', workspaceSchemaVersion: 2, revision: old.resources.find(item => item.kind === 'view')!.revision, resource: view(VIEW_ID, 'Checkout before migration') })
+		expect(await read('locale', 'en-US')).toMatchObject({ status: 200, body: { status: 'found', resource: { greeting: 'Hello' } } })
+	})
+
+	it('refuses a version recorded under an unrecognized schemaVersion with workspace.schema_unsupported (422)', async () => {
+		const ctx = await workspace()
+		const future = await record(ctx, 99, snapshot => snapshot.set(workspaceRelativePath(), canonicalJsonBytes({ ...MANIFEST, schemaVersion: 99 })))
+		for (const [kind, key] of [['view', VIEW_ID], ['workspace', 'workspace']] as const) {
+			const result = await readVersionResourceForHttp(scoped(ctx.app, VIEWER), future.id, kind, key)
+			expect(result.status).toBe(422)
+			expect(result.body).toMatchObject({ status: 'blocked', code: 'workspace.schema_unsupported', diagnostics: [{ path: '/id' }] })
+		}
+	})
+
+	it('reads an older version\'s View when another resource\'s content is no longer stored, and refuses only a resource without its own', async () => {
+		const ctx = await workspace()
+		const old = await record(ctx, 2, (snapshot) => {
+			v2(snapshot)
+			snapshot.set(viewRelativePath(PEER_VIEW_ID), canonicalJsonBytes(view(PEER_VIEW_ID, 'Peer')))
+		}, [localeRelativePath('en-US'), viewRelativePath(PEER_VIEW_ID)])
+		const read = (kind: string, key: string) => readVersionResourceForHttp(scoped(ctx.app, VIEWER), old.id, kind, key)
+
+		expect(await read('view', VIEW_ID)).toMatchObject({ status: 200, body: { status: 'found', resource: { name: 'Checkout before migration' } } })
+		expect(await read('workspace', 'workspace')).toMatchObject({ status: 200, body: { status: 'found', resource: MANIFEST } })
+		for (const [kind, key] of [['locale', 'en-US'], ['view', PEER_VIEW_ID]] as const)
+			expect(await read(kind, key)).toMatchObject({ status: 500, body: { status: 'failed', code: 'history.blob_missing' } })
+
+		// The manifest is the input of every migration step, so an older version without it is refused.
+		const noManifest = await record(ctx, 2, (snapshot) => {
+			v2(snapshot)
+			// Other manifest bytes than the version above, whose blob is stored.
+			snapshot.set(workspaceRelativePath(), canonicalJsonBytes({ ...MANIFEST, schemaVersion: 2, i18n: { defaultLocale: 'zh-TW' } }))
+		}, [workspaceRelativePath()])
+		expect(await readVersionResourceForHttp(scoped(ctx.app, VIEWER), noManifest.id, 'view', VIEW_ID)).toMatchObject({ status: 500, body: { status: 'failed', code: 'history.blob_missing' } })
 	})
 })
