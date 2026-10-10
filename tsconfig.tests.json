@@ -9,14 +9,5 @@
 		"noEmit": true,
 		"types": ["node"]
 	},
-	"include": ["tests/**/*.ts", ".nuxt/nuxt.node.d.ts"],
-	// These suites are the only importers of two source modules with their own type errors
-	// (src/application/services/canonical-resources.ts, src/preview/protocol/contour-cache.ts),
-	// which `nuxt typecheck` never reaches. A follow-up PR fixes those two modules and then removes
-	// these exclusions.
-	"exclude": [
-		"tests/application-foundation.test.ts",
-		"tests/i18n-assets.test.ts",
-		"tests/preview-contour-cache.test.ts"
-	]
+	"include": ["tests/**/*.ts", ".nuxt/nuxt.node.d.ts"]
 }

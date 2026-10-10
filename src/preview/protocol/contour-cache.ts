@@ -132,10 +132,12 @@ export class ContourCacheController {
 		if (!this.cache) return { status: 'no-cache' }
 		if (!sameScope(this.scope, decoded.value.context)) return { status: 'stale-context' }
 		if (decoded.value.context.geometryRevision !== this.cache.geometryRevision) return { status: 'stale-geometry' }
-		if (decoded.value.payload.baseSnapshotVersion !== this.cache.snapshotVersion) return { status: 'stale-base' }
+		// Bound once so the narrowing on `decoded.value.type` survives into the callbacks below.
+		const payload = decoded.value.payload
+		if (payload.baseSnapshotVersion !== this.cache.snapshotVersion) return { status: 'stale-base' }
 		const known = new Map(this.cache.regions.map(region => [region.regionId, region] as const))
-		if (decoded.value.payload.regionIds.some(regionId => !known.has(regionId))) return { status: 'unknown-region' }
-		if (decoded.value.payload.regionIds.some(regionId => known.get(regionId)!.maxError <= decoded.value.payload.targetMaxError))
+		if (payload.regionIds.some(regionId => !known.has(regionId))) return { status: 'unknown-region' }
+		if (payload.regionIds.some(regionId => known.get(regionId)!.maxError <= payload.targetMaxError))
 			return { status: 'region-already-in-tolerance' }
 		return this.startWork({ kind: 'partial', request: decoded.value })
 	}
