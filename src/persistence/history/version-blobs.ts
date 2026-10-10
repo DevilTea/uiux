@@ -1,5 +1,4 @@
 import type { FileNativePersistence } from '../file-native'
-import { artifactRelativePath } from '../paths'
 import { blobDigest, HostHistoryError, type HostHistoryStore } from './host-store'
 
 /**
@@ -11,7 +10,7 @@ export async function readVersionBlobUnlocked(persistence: FileNativePersistence
 	const hosted = await host?.readBlob(digest)
 	if (hosted) return hosted
 	let path: string
-	try { path = artifactRelativePath(digest) }
+	try { path = persistence.layout.artifactRelativePath(digest) }
 	catch { return undefined }
 	const bytes = await persistence.readOptionalBytesUnlocked(path)
 	if (!bytes) return undefined

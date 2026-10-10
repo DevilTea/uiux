@@ -1,7 +1,7 @@
 Feature: Workspace migration
   # Source: Discussion #139 (Part 14, Product Kit), decision 15, A; R18; owner pre-answer P24; Key Scenarios https://github.com/DevilTea/uiux/discussions/139; accepted as written 2026-10-08 https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18816364.
   # Status: not built as of 9691b8c; see the Implementation gaps entry of 01a11bb1-8f5f-77ea-817b-46679c5a6475 in its owner.
-  # Note: No test exists yet; tracked in issue #141, after `uiux.v3-to-v4` (issue #144). Discussion #140 (Part 15) adds `uiux.v5-to-v6`, so the converted Workspace ends at the current `schemaVersion` (issue #142).
+  # Note: No test exists yet; tracked in issue #141. Discussion #140 (Part 15) adds `uiux.v5-to-v6`, so the converted Workspace ends at the current `schemaVersion` (issue #142).
   @spec:id:01a11bb1-bf7f-7c8e-bec7-1511c5f7d36f
   @spec:demonstrates:01a1144e-56bd-7988-8d2a-87b23954ca49
   @spec:demonstrates:01a11bb1-8f5f-77ea-817b-46679c5a6475

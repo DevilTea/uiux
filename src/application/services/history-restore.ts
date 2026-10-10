@@ -16,7 +16,7 @@ import { HostHistoryError } from '../../persistence/history/host-store'
 import { versionResourcesFromSnapshot } from '../../persistence/history/snapshot'
 import { mergeTimeline } from '../../persistence/history/timeline'
 import { readVersionBlobUnlocked } from '../../persistence/history/version-blobs'
-import { assetMetadataRelativePath, LEGACY_LAYOUT, REVIEW_FILE_SUFFIX, WORKSPACE_DATA_DIRECTORY } from '../../persistence/paths'
+import { assetMetadataRelativePath, layoutForSchemaVersion, REVIEW_FILE_SUFFIX, WORKSPACE_DATA_DIRECTORY, type WorkspaceLayout } from '../../persistence/paths'
 import type { ResourceRevision } from '../dto/revisions'
 import type { HistoryStoreSource } from './history-diff'
 
@@ -135,7 +135,7 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 
 		const restored = decodeRestored(target, loaded.restoredFiles)
 		if ('status' in restored) return restored
-		const currentFiles = filesOf(loaded.current, target)
+		const currentFiles = filesOf(loaded.current, persistence.layout, target)
 		const currentRevision = currentFiles.size > 0 ? (revisionForResourceFiles(target.kind, currentFiles) as ResourceRevision | undefined) : undefined
 
 		// Rule 01a11a5e-1520-…: the revision check is against the target's current revision.
@@ -151,7 +151,7 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 		if (diagnostics.length > 0)
 			return { status: 'invalid', kind: target.kind, key: target.key, code: 'history.restore_invalid_content', message: `The ${target.kind} content of version ${parsed.versionId} is not valid for this UIUX build, so it cannot be restored.`, diagnostics }
 
-		const before = impactWorkspace(loaded.current, loaded.reviews, target.kind === 'workspace' ? await readEvidence() : undefined)
+		const before = impactWorkspace(loaded.current, persistence.layout, loaded.reviews, target.kind === 'workspace' ? await readEvidence() : undefined)
 		const after = withResource(before, target, target.kind === 'asset' ? (next as AuthoredAssetResource).metadata : next, nextRevision(target, next))
 		const impacts = analyzeImpact(before, after)
 		if (impacts.length > 0 && !parsed.acknowledgeImpact)
@@ -188,11 +188,12 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 		// An older version is upgraded as a whole, with the same steps `uiux migrate` runs, so a step
 		// that reads more than the target (the manifest, other resources) sees what it expects.
 		const upgrade = version.workspaceSchemaVersion !== policy.currentVersion
+		const recordedLayout = layoutForSchemaVersion(version.workspaceSchemaVersion)
 		const snapshot = new Map<string, Uint8Array>()
 		for (const resource of upgrade ? version.resources : [entry]) {
 			if (!isDiffableResourceKind(resource.kind)) continue
 			for (const [path, digest] of Object.entries(resource.files)) {
-				if (!LEGACY_LAYOUT.classifyVersionedPath(path)) continue
+				if (!recordedLayout.classifyVersionedPath(path)) continue
 				const bytes = await readVersionBlobUnlocked(persistence, stores.host, digest)
 				if (!bytes) return refusal('failed', target, 'history.blob_missing', '/versionId', `Version ${version.id} names file ${path} (${digest}), whose content is no longer stored.`)
 				snapshot.set(path, bytes)
@@ -201,7 +202,7 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 		let restoredFiles: ReadonlyMap<string, Uint8Array>
 		if (upgrade) {
 			try {
-				restoredFiles = filesOf((await upgradeSnapshotInMemory(snapshot, version.workspaceSchemaVersion, policy)).snapshot, target)
+				restoredFiles = filesOf((await upgradeSnapshotInMemory(snapshot, version.workspaceSchemaVersion, policy)).snapshot, layoutForSchemaVersion(policy.currentVersion), target)
 			}
 			catch (error) {
 				if (!(error instanceof PersistenceError)) throw error
@@ -209,7 +210,7 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 			}
 		}
 		else {
-			restoredFiles = filesOf(snapshot, target)
+			restoredFiles = filesOf(snapshot, recordedLayout, target)
 		}
 		return { version, restoredFiles, current: await persistence.scanVersionedSnapshotUnlocked(), reviews: await readReviewsUnlocked() }
 	}
@@ -358,10 +359,10 @@ function validKey(kind: RestorableResourceKind, key: string): boolean {
 }
 
 /** The files of one resource in a snapshot, by the layout's classification (seam 2: identity, not paths). */
-function filesOf(snapshot: ReadonlyMap<string, Uint8Array>, target: Target): Map<string, Uint8Array> {
+function filesOf(snapshot: ReadonlyMap<string, Uint8Array>, layout: WorkspaceLayout, target: Target): Map<string, Uint8Array> {
 	const files = new Map<string, Uint8Array>()
 	for (const [path, bytes] of snapshot) {
-		const identity = LEGACY_LAYOUT.classifyVersionedPath(path)
+		const identity = layout.classifyVersionedPath(path)
 		if (identity && identity.kind === target.kind && identity.key === target.key) files.set(path, bytes)
 	}
 	return files
@@ -435,16 +436,16 @@ function nextRevision(target: Target, next: RestoredResource): string | undefine
 }
 
 /** The analysis picture of the current Workspace: the versioned files, the Reviews and, when asked, the formal Evidence. */
-function impactWorkspace(snapshot: ReadonlyMap<string, Uint8Array>, reviews: readonly unknown[], evidence: readonly ImpactEvidence[] | undefined): ImpactWorkspace {
+function impactWorkspace(snapshot: ReadonlyMap<string, Uint8Array>, layout: WorkspaceLayout, reviews: readonly unknown[], evidence: readonly ImpactEvidence[] | undefined): ImpactWorkspace {
 	const revisions = new Map<string, string>()
-	for (const resource of versionResourcesFromSnapshot(snapshot, LEGACY_LAYOUT).resources) revisions.set(resourceIdentityKey(resource), resource.revision)
+	for (const resource of versionResourcesFromSnapshot(snapshot, layout).resources) revisions.set(resourceIdentityKey(resource), resource.revision)
 	const views = new Map<string, unknown>()
 	const flows = new Map<string, unknown>()
 	const locales = new Map<string, unknown>()
 	const assets = new Set<string>()
 	let manifest: unknown
 	for (const [path, bytes] of snapshot) {
-		const identity = LEGACY_LAYOUT.classifyVersionedPath(path)
+		const identity = layout.classifyVersionedPath(path)
 		if (!identity) continue
 		if (identity.kind === 'asset') {
 			if (revisions.has(resourceIdentityKey(identity))) assets.add(identity.key)

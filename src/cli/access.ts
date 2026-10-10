@@ -1,9 +1,9 @@
 import { lstat, stat } from 'node:fs/promises'
 import { hostname } from 'node:os'
-import { join, resolve } from 'node:path'
+import { resolve } from 'node:path'
 
 import { FileNativePersistence } from '../persistence/file-native'
-import { artifactRelativePath } from '../persistence/paths'
+import { LEGACY_LAYOUT, resolveWorkspacePath } from '../persistence/paths'
 import { readActiveServerHold } from '../persistence/server-hold'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 import { generateHint } from '../server/access/credentials'
@@ -147,10 +147,10 @@ type CommandSpec = Readonly<{ positionals: number; values: readonly string[]; fl
 async function requireWorkspace(root: string): Promise<string> {
 	try {
 		if (!(await stat(root)).isDirectory()) throw new Error('not a directory')
-		await stat(join(root, '.uiux', 'workspace.json'))
+		await stat(resolveWorkspacePath(root, LEGACY_LAYOUT.manifestPath))
 	}
 	catch {
-		throw new AccessError('access.workspace_invalid', `${root} is not an initialized UIUX Workspace (no .uiux/workspace.json). Run uiux init --workspace <dir> first.`)
+		throw new AccessError('access.workspace_invalid', `${root} is not an initialized UIUX Workspace (no ${LEGACY_LAYOUT.manifestPath}). Run uiux init --workspace <dir> first.`)
 	}
 	return workspaceRealRoot(root)
 }
@@ -375,7 +375,7 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 							replace,
 							// A server may have started since the check above.
 							beforeSwap: () => refuseWhileServed(context.workspaceRoot),
-							blobAvailableElsewhere: digest => isRegularFile(join(context.workspaceRoot, artifactRelativePath(digest))),
+							blobAvailableElsewhere: digest => isRegularFile(resolveWorkspacePath(context.workspaceRoot, persistence.layout.artifactRelativePath(digest))),
 						})))
 					}
 					catch (error) {
@@ -454,9 +454,9 @@ async function isRegularFile(path: string): Promise<boolean> {
  * since the copy checks its own consistency before it replaces anything.
  */
 async function withSourceLock<Result>(sourceRoot: string, warn: (line: string) => void, operation: () => Promise<Result>): Promise<Result> {
-	if (!(await lstat(join(sourceRoot, '.uiux')).then(stats => stats.isDirectory(), () => false))) return operation()
+	if (!(await lstat(resolveWorkspacePath(sourceRoot, LEGACY_LAYOUT.metadataDir)).then(stats => stats.isDirectory(), () => false))) return operation()
 	// Not read-only for the source: taking its persistence lock writes the lock file under the source's
-	// `.uiux/` (removed on release), and acquiring the lock runs the source's pending-transaction
+	// metadata directory (removed on release), and acquiring the lock runs the source's pending-transaction
 	// recovery, which can change its files to settle a multi-file write it left interrupted.
 	let entered = false
 	try {

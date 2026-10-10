@@ -46,6 +46,7 @@ import {
 import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
 import { accessStorePaths, hostHistoryPaths, workspaceStoreId } from '../src/server/access/store'
 import { createSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
+import { metadataPath } from './support/workspace-layout'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const FLOW_ID = '22222222-2222-4222-8222-222222222222'
@@ -776,7 +777,7 @@ describe('selected-Workspace history stores', () => {
 	it('opens host history under UIUX_HOME for the served Workspace', async () => {
 		const base = await tempDir('uiux-history-serve-')
 		const workspace = join(base, 'ws')
-		await mkdir(join(workspace, '.uiux'), { recursive: true })
+		await mkdir(metadataPath(workspace), { recursive: true })
 		const home = join(base, 'home')
 
 		const serving = createSelectedWorkspaceServerRuntime(workspace, { uiuxHome: home, serverOrigin: 'http://127.0.0.1:1' })

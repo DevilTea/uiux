@@ -17,10 +17,13 @@ export function validateArtifactReference(input: unknown, path = ''): Validation
 	return v.finish<ArtifactReference>(input)
 }
 
-/** Logical identity stays sha256:<hex>; physical sharding is a storage detail. */
-export function artifactStoreRelativePath(identity: ArtifactIdentity): string {
+/**
+ * Logical identity stays sha256:<hex>; physical sharding is a storage detail. This is the path inside
+ * the artifact directory; where that directory lives is the Workspace layout's (`src/persistence/paths.ts`).
+ */
+export function artifactStoreShardPath(identity: ArtifactIdentity): string {
 	const hex = identity.slice('sha256:'.length)
-	return `.uiux/artifacts/sha256/${hex.slice(0, 2)}/${hex}`
+	return `sha256/${hex.slice(0, 2)}/${hex}`
 }
 
 export type ArtifactByteSource = BufferSource | Uint8Array<ArrayBufferLike>

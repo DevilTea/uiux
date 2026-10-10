@@ -22,6 +22,7 @@ import {
 } from '../src/product/workspace-schema'
 import { hostHistoryPaths } from '../src/server/access/store'
 import { scoped, testMember } from './support/access'
+import { CURRENT_TEST_LAYOUT } from './support/workspace-layout'
 
 /**
  * `uiux migrate` and version history (issue #132 B7): Rules 01a11a5e-0b23-7d4f-954a-26fcde4a8014
@@ -31,7 +32,7 @@ import { scoped, testMember } from './support/access'
  */
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
-const CHECKPOINTS_DIR = '.uiux/history/checkpoints'
+const CHECKPOINTS_DIR = CURRENT_TEST_LAYOUT.checkpointsDir
 const AGENT = testMember({ memberId: 'agent-1', nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' })
 
 /** The policy under which schemaVersion 3 was current, so a v3 server can run and record history. */

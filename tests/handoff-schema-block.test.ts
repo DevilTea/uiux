@@ -6,8 +6,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { FileNativePersistence } from '../src/persistence'
-import { workspaceRelativePath } from '../src/persistence/paths'
+import { layoutForSchemaVersion } from '../src/persistence/paths'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { artifactShardsPath, writeManifest } from './support/workspace-layout'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const ASSET_ID = '55555555-5555-4555-8555-555555555555'
@@ -28,10 +29,9 @@ const view = {
 async function seedWorkspace(schemaVersion: number): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-handoff-block-'))
 	roots.push(root)
-	await mkdir(join(root, '.uiux'), { recursive: true })
 	await mkdir(join(root, 'views'), { recursive: true })
 	await mkdir(join(root, 'assets', ASSET_ID), { recursive: true })
-	await writeFile(join(root, workspaceRelativePath()), `${JSON.stringify({ schemaVersion, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })}\n`)
+	await writeManifest(root, `${JSON.stringify({ schemaVersion, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })}\n`, layoutForSchemaVersion(schemaVersion))
 	await writeFile(join(root, 'views', `${VIEW_ID}.view.json`), `${JSON.stringify(view)}\n`)
 	await writeFile(join(root, 'assets', ASSET_ID, 'asset.json'), `${JSON.stringify({ id: ASSET_ID, name: 'icon', contentFilename: 'icon.svg', mediaType: 'image/svg+xml' })}\n`)
 	await writeFile(join(root, 'assets', ASSET_ID, 'icon.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
@@ -43,7 +43,7 @@ function open(root: string): FileNativePersistence {
 }
 
 async function artifactFiles(root: string): Promise<string[]> {
-	return readdir(join(root, '.uiux', 'artifacts', 'sha256')).catch(() => [])
+	return readdir(artifactShardsPath(root)).catch(() => [])
 }
 
 describe('read-only Handoff assessment on a Workspace that needs migration', () => {

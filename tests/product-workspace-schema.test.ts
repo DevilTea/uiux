@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -6,11 +6,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import type { WorkspaceManifest } from '../src/domain/workspace/schema'
 import { FileNativePersistence } from '../src/persistence/file-native'
-import { workspaceRelativePath } from '../src/persistence/paths'
 import {
 	CURRENT_WORKSPACE_SCHEMA_VERSION,
 	PRODUCT_WORKSPACE_SCHEMA_POLICY,
 } from '../src/product/workspace-schema'
+import { manifestPath, writeManifest } from './support/workspace-layout'
 
 const temporaryRoots: string[] = []
 
@@ -41,15 +41,14 @@ describe('product Workspace schema authority', () => {
 			version: CURRENT_WORKSPACE_SCHEMA_VERSION,
 			targetVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 		})
-		expect(JSON.parse(await readFile(join(root, workspaceRelativePath()), 'utf8')).schemaVersion).toBe(CURRENT_WORKSPACE_SCHEMA_VERSION)
+		expect(JSON.parse(await readFile(manifestPath(root), 'utf8')).schemaVersion).toBe(CURRENT_WORKSPACE_SCHEMA_VERSION)
 	})
 
 	it('does not infer a newer opened Workspace version as the product current version', async () => {
 		const root = await makeRoot()
-		await mkdir(join(root, '.uiux'), { recursive: true })
 		const future = workspaceFixture(CURRENT_WORKSPACE_SCHEMA_VERSION + 1)
 		const originalBytes = JSON.stringify(future, null, 2) + '\n'
-		await writeFile(join(root, workspaceRelativePath()), originalBytes)
+		await writeManifest(root, originalBytes)
 
 		const persistence = new FileNativePersistence({
 			root,
@@ -63,7 +62,7 @@ describe('product Workspace schema authority', () => {
 			targetVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 		})
 		expect(inspected.inspection.diagnostics.some(item => item.code === 'workspace.schema_unsupported')).toBe(true)
-		expect(await readFile(join(root, workspaceRelativePath()), 'utf8')).toBe(originalBytes)
+		expect(await readFile(manifestPath(root), 'utf8')).toBe(originalBytes)
 	})
 })
 
