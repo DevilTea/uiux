@@ -13,81 +13,105 @@ const host = '127.0.0.1'
 // .output/server/node_modules. This deliberately exercises the production-only
 // duplicate-module boundary that unit tests cannot reproduce.
 const workspaceRoot = await mkdtemp(join(process.cwd(), '.uiux-server-smoke-'))
-await mkdir(join(workspaceRoot, '.uiux'), { recursive: true })
-await mkdir(join(workspaceRoot, 'adapters'), { recursive: true })
-await writeFile(join(workspaceRoot, 'adapters', 'smoke.mjs'), [
-	"import { createWidgetPlugin } from '@deviltea/widget-core'",
-	'',
-	"export const smokePlugin = createWidgetPlugin('SmokeWidget')",
-	"  .description('Production Nitro adapter identity smoke plugin.')",
-	'  .interfaces()',
-	'  .done()',
-	'',
-	'export const manifest = {',
-	"  id: 'production-identity-smoke',",
-	"  apiVersion: '1',",
-	'  widgetPlugins: [smokePlugin],',
-	'  catalog: { widgets: { SmokeWidget: {} } },',
-	'  renderers: [],',
-	'  providers: [],',
-	'  styles: [],',
-	'  tokens: [],',
-	'}',
-	'',
-	'export default manifest',
-	'',
-].join('\n'))
-// The current product schema, from the package (the server opens it as `current`).
-const { uiuxWorkspaceSchemaVersion } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
-await writeFile(join(workspaceRoot, '.uiux', 'workspace.json'), `${JSON.stringify({
-	schemaVersion: uiuxWorkspaceSchemaVersion,
-	i18n: { defaultLocale: 'en-US' },
-	adapters: [{ moduleSpecifier: './adapters/smoke.mjs' }],
-	viewports: {},
-	themes: {},
-}, null, 2)}\n`)
-
-// Access rosters live in a private UIUX_HOME, never the developer's ~/.uiux. Tokens are created
-// through the CLI exactly as a user would (accepted identity decision D17).
+// Access rosters live in a private UIUX_HOME, never the developer's ~/.uiux.
 const uiuxHome = await mkdtemp(join(tmpdir(), 'uiux-smoke-home-'))
-const cliBaseEnv = { ...process.env, UIUX_HOME: uiuxHome }
-function uiuxCli(...args) {
-	return execFileSync(process.execPath, ['bin/uiux.mjs', ...args], { encoding: 'utf8', env: cliBaseEnv })
-}
-uiuxCli('member', 'add', 'smoke-agent', '--kind', 'agent', '--role', 'editor', '--workspace', workspaceRoot)
-const token = uiuxCli('token', 'create', '--member', 'smoke-agent', '--workspace', workspaceRoot).match(/uiux_t_\S+/u)?.[0]
-if (!token) throw new Error('uiux token create printed no token.')
-const auth = { authorization: `Bearer ${token}` }
-// A token from another Workspace's roster must be refused.
 const otherWorkspace = await mkdtemp(join(tmpdir(), 'uiux-smoke-other-'))
-uiuxCli('init', '--workspace', otherWorkspace)
-uiuxCli('member', 'add', 'other-agent', '--kind', 'agent', '--role', 'editor', '--workspace', otherWorkspace)
-const foreignToken = uiuxCli('token', 'create', '--member', 'other-agent', '--workspace', otherWorkspace).match(/uiux_t_\S+/u)?.[0]
 
-const probe = createServer()
-await new Promise((resolve, reject) => { probe.once('error', reject); probe.listen(0, host, resolve) })
-const address = probe.address()
-if (!address || typeof address === 'string') throw new Error('Could not select a local port for the Nitro smoke check.')
-const port = address.port
-await new Promise((resolve, reject) => probe.close(error => error ? reject(error) : resolve()))
+// Every child server is stopped, and has exited, before the temporary directories are removed: a
+// server still shutting down (the history recorder's shutdown boundary) writes into the Workspace,
+// and removing it under that writer fails with ENOTEMPTY and masks the error that stopped the run.
+const children = new Set()
+let cleanupPromise
+function cleanup() {
+	cleanupPromise ??= (async () => {
+		await Promise.all([...children].map(stopChild))
+		const removed = await Promise.allSettled([workspaceRoot, otherWorkspace, uiuxHome].map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 })))
+		const failures = removed.filter(result => result.status === 'rejected').map(result => result.reason)
+		if (failures.length > 0) throw new AggregateError(failures, 'Server smoke cleanup could not remove its temporary directories.')
+	})()
+	return cleanupPromise
+}
+for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+	process.once(signal, () => {
+		console.error(`Server smoke interrupted by ${signal}; cleaning up.`)
+		cleanup().catch(error => console.error(error)).finally(() => process.exit(code))
+	})
+}
 
-const server = spawn(process.execPath, ['.output/server/index.mjs'], {
-	stdio: ['ignore', 'pipe', 'pipe'],
-	env: {
-		...process.env,
-		UIUX_HOME: uiuxHome,
-		HOST: host,
-		PORT: String(port),
-		NITRO_HOST: host,
-		NITRO_PORT: String(port),
-		UIUX_WORKSPACE_ROOT: workspaceRoot,
-	},
-})
-let serverOutput = ''
-server.stdout.setEncoding('utf8').on('data', chunk => serverOutput += chunk)
-server.stderr.setEncoding('utf8').on('data', chunk => serverOutput += chunk)
-
+let port
+let auth
+let failed = false
 try {
+	await mkdir(join(workspaceRoot, '.uiux'), { recursive: true })
+	await mkdir(join(workspaceRoot, 'adapters'), { recursive: true })
+	await writeFile(join(workspaceRoot, 'adapters', 'smoke.mjs'), [
+		"import { createWidgetPlugin } from '@deviltea/widget-core'",
+		'',
+		"export const smokePlugin = createWidgetPlugin('SmokeWidget')",
+		"  .description('Production Nitro adapter identity smoke plugin.')",
+		'  .interfaces()',
+		'  .done()',
+		'',
+		'export const manifest = {',
+		"  id: 'production-identity-smoke',",
+		"  apiVersion: '1',",
+		'  widgetPlugins: [smokePlugin],',
+		'  catalog: { widgets: { SmokeWidget: {} } },',
+		'  renderers: [],',
+		'  providers: [],',
+		'  styles: [],',
+		'  tokens: [],',
+		'}',
+		'',
+		'export default manifest',
+		'',
+	].join('\n'))
+	// The current product schema, from the package (the server opens it as `current`).
+	const { uiuxWorkspaceSchemaVersion } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+	await writeFile(join(workspaceRoot, '.uiux', 'workspace.json'), `${JSON.stringify({
+		schemaVersion: uiuxWorkspaceSchemaVersion,
+		i18n: { defaultLocale: 'en-US' },
+		adapters: [{ moduleSpecifier: './adapters/smoke.mjs' }],
+		viewports: {},
+		themes: {},
+	}, null, 2)}\n`)
+
+	// Tokens are created through the CLI exactly as a user would (accepted identity decision D17).
+	const cliBaseEnv = { ...process.env, UIUX_HOME: uiuxHome }
+	const uiuxCli = (...args) => execFileSync(process.execPath, ['bin/uiux.mjs', ...args], { encoding: 'utf8', env: cliBaseEnv })
+	uiuxCli('member', 'add', 'smoke-agent', '--kind', 'agent', '--role', 'editor', '--workspace', workspaceRoot)
+	const token = uiuxCli('token', 'create', '--member', 'smoke-agent', '--workspace', workspaceRoot).match(/uiux_t_\S+/u)?.[0]
+	if (!token) throw new Error('uiux token create printed no token.')
+	auth = { authorization: `Bearer ${token}` }
+	// A token from another Workspace's roster must be refused.
+	uiuxCli('init', '--workspace', otherWorkspace)
+	uiuxCli('member', 'add', 'other-agent', '--kind', 'agent', '--role', 'editor', '--workspace', otherWorkspace)
+	const foreignToken = uiuxCli('token', 'create', '--member', 'other-agent', '--workspace', otherWorkspace).match(/uiux_t_\S+/u)?.[0]
+
+	const probe = createServer()
+	await new Promise((resolve, reject) => { probe.once('error', reject); probe.listen(0, host, resolve) })
+	const address = probe.address()
+	if (!address || typeof address === 'string') throw new Error('Could not select a local port for the Nitro smoke check.')
+	port = address.port
+	await new Promise((resolve, reject) => probe.close(error => error ? reject(error) : resolve()))
+
+	const server = spawn(process.execPath, ['.output/server/index.mjs'], {
+		stdio: ['ignore', 'pipe', 'pipe'],
+		env: {
+			...process.env,
+			UIUX_HOME: uiuxHome,
+			HOST: host,
+			PORT: String(port),
+			NITRO_HOST: host,
+			NITRO_PORT: String(port),
+			UIUX_WORKSPACE_ROOT: workspaceRoot,
+		},
+	})
+	children.add(server)
+	let serverOutput = ''
+	server.stdout.setEncoding('utf8').on('data', chunk => serverOutput += chunk)
+	server.stderr.setEncoding('utf8').on('data', chunk => serverOutput += chunk)
+
 	const deadline = Date.now() + 15_000
 	let health
 	while (Date.now() < deadline) {
@@ -136,25 +160,32 @@ try {
 
 	const historyStarted = Date.now()
 	await smokeHistory({ origin: `http://${host}:${port}`, auth, mcpHeaders })
-	console.log(`History smoke passed in ${Date.now() - historyStarted} ms: an Agent's MCP task ended by release_lock is one autosave, a Checkpoint, its diff against current, a restore naming restoredFrom, and an on-disk edit recorded as an external version.`)
-}
-catch (error) {
-	server.kill('SIGTERM')
-	await rm(workspaceRoot, { recursive: true, force: true })
-	await rm(otherWorkspace, { recursive: true, force: true })
-	await rm(uiuxHome, { recursive: true, force: true })
-	throw error
-}
-server.kill('SIGTERM')
-await new Promise(resolve => server.exitCode !== null || server.signalCode !== null ? resolve() : server.once('exit', resolve))
+	console.log(`History smoke passed in ${Date.now() - historyStarted} ms: an Agent's MCP task ended by release_lock is one autosave, a Checkpoint, its diff against current naming only the changed View, a restore naming restoredFrom, release_lock recording nothing more, and an on-disk edit recorded as an external version.`)
 
-try {
+	// `uiux dev` below reuses the port, so this server must have exited first.
+	await stopChild(server)
 	await smokeLoopbackOnlyCli()
 }
+catch (error) {
+	failed = true
+	throw error
+}
 finally {
-	await rm(workspaceRoot, { recursive: true, force: true })
-	await rm(otherWorkspace, { recursive: true, force: true })
-	await rm(uiuxHome, { recursive: true, force: true })
+	// A cleanup failure must not replace the error that stopped the run.
+	await cleanup().catch((error) => {
+		if (!failed) throw error
+		console.error('Server smoke cleanup also failed:', error)
+	})
+}
+
+/** Sends SIGTERM and resolves once the child has exited (SIGKILL after a 10 s grace period). */
+async function stopChild(child) {
+	if (child.exitCode !== null || child.signalCode !== null) return
+	const exited = new Promise(resolve => child.once('exit', resolve))
+	child.kill('SIGTERM')
+	const forceKill = setTimeout(() => child.kill('SIGKILL'), 10_000)
+	await exited
+	clearTimeout(forceKill)
 }
 
 // `uiux dev` must bind loopback only, even when no HOST/NITRO_HOST is set (the LAN listener is not
@@ -175,6 +206,7 @@ async function smokeLoopbackOnlyCli() {
 		stdio: ['ignore', 'pipe', 'pipe'],
 		env: { ...cliEnv, PORT: String(port) },
 	})
+	children.add(cli)
 	let cliOutput = ''
 	cli.stdout.setEncoding('utf8').on('data', chunk => cliOutput += chunk)
 	cli.stderr.setEncoding('utf8').on('data', chunk => cliOutput += chunk)
@@ -223,8 +255,7 @@ async function smokeLoopbackOnlyCli() {
 		console.log(`Loopback smoke passed: uiux dev listens on 127.0.0.1 only (${addresses.length} non-loopback address(es) refused), refuses HOST=0.0.0.0, gates Host, Origin, Sec-Fetch-Site and Content-Type, and requires a credential.`)
 	}
 	finally {
-		cli.kill('SIGTERM')
-		await new Promise(resolve => cli.exitCode !== null || cli.signalCode !== null ? resolve() : cli.once('exit', resolve))
+		await stopChild(cli)
 	}
 }
 
@@ -305,6 +336,16 @@ async function smokeHistory({ origin, auth, mcpHeaders }) {
 	const changed = diff.body.summary.filter(item => item.status !== 'unchanged')
 	if (changed.length !== 1 || changed[0].kind !== 'view' || changed[0].key !== VIEW_ID || changed[0].status !== 'modified' || !diff.body.changes?.length)
 		throw new Error(`The Checkpoint-to-current diff is not the one modified View: ${JSON.stringify(diff.body)}`)
+	// The filter above restricts the summary to that View, so it cannot show that nothing else
+	// changed; the unfiltered summary over every versioned resource must name that View alone.
+	const whole = await api('GET', `/api/history/diff?from=${checkpoint.versionId}&to=current&detail=summary`)
+	if (whole.status !== 200 || whole.body.status !== 'compared')
+		throw new Error(`GET /api/history/diff (unfiltered) returned HTTP ${whole.status}: ${JSON.stringify(whole.body)}`)
+	if (!whole.body.summary.some(item => item.kind === 'workspace' && item.status === 'unchanged'))
+		throw new Error(`The unfiltered diff does not list the unchanged Workspace settings: ${JSON.stringify(whole.body.summary)}`)
+	const wholeChanged = whole.body.summary.filter(item => item.status !== 'unchanged')
+	if (wholeChanged.length !== 1 || wholeChanged[0].kind !== 'view' || wholeChanged[0].key !== VIEW_ID || wholeChanged[0].status !== 'modified')
+		throw new Error(`The unfiltered Checkpoint-to-current diff changes more than the one View: ${JSON.stringify(whole.body.summary)}`)
 
 	// 4. Restoring the View from the Checkpoint (expectedRevision CAS) is its own version naming restoredFrom.
 	const stale = await api('POST', `/api/history/versions/${checkpoint.versionId}/restore`, { resource: { kind: 'view', key: VIEW_ID }, expectedRevision: 'r_stale' })
@@ -315,7 +356,14 @@ async function smokeHistory({ origin, auth, mcpHeaders }) {
 	if ((await api('GET', `/api/resources/view/${VIEW_ID}`)).body.resource?.spec?.intent !== 'second')
 		throw new Error('The restored View does not hold the Checkpoint content.')
 	await waitFor('the restore version', async () => (await versions()).some(version => version.restoredFrom === checkpoint.versionId && version.summary.some(change => change.key === VIEW_ID)))
-	await callTool('release_lock', {})
+	// The restore closed its own autosave, so ending the task now releases the View lease the Agent's
+	// update_view_spec took and records nothing (release_lock answers only after its history boundary).
+	const versionsBeforeRelease = (await versions()).length
+	const releasedAfterRestore = await callTool('release_lock', {})
+	if (releasedAfterRestore?.status !== 'released' || JSON.stringify(releasedAfterRestore.released) !== JSON.stringify([{ kind: 'view', key: VIEW_ID }]))
+		throw new Error(`release_lock after the restore answered ${JSON.stringify(releasedAfterRestore)}, expected the View lease.`)
+	if ((await versions()).length !== versionsBeforeRelease)
+		throw new Error('release_lock with no open autosave recorded a version.')
 
 	// 5. An edit made on disk while the server runs is recorded as an external version at the next boundary.
 	const viewPath = join(workspaceRoot, 'views', `${VIEW_ID}.view.json`)
@@ -330,7 +378,12 @@ async function smokeHistory({ origin, auth, mcpHeaders }) {
 	if (external.actor?.type !== 'external' || !external.summary.some(change => change.kind === 'view' && change.key === VIEW_ID))
 		throw new Error(`The external version does not record the outside View edit: ${JSON.stringify(external)}`)
 	const order = timeline.map(version => version.id)
-	if (order.indexOf(boundary.versionId) > order.indexOf(external.id))
+	const boundaryAt = order.indexOf(boundary?.versionId)
+	const externalAt = order.indexOf(external.id)
+	if (boundaryAt < 0 || externalAt < 0)
+		throw new Error(`The timeline does not list both the Checkpoint ${boundary?.versionId} and the external version ${external.id}: ${JSON.stringify(order)}`)
+	// The list is newest first: the Checkpoint that detected the edit comes before the external version.
+	if (boundaryAt > externalAt)
 		throw new Error('The external version is not recorded before the Checkpoint that detected it.')
 }
 
