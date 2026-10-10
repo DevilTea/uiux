@@ -20,6 +20,7 @@ const fromLink = ref(false)
 const errorMessage = ref('')
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
+/** An `http` origin that is not a loopback origin: credentials cross the network in clear text (Rule 01a12500-b2db-7083-973d-1bf90a859a5b). */
 const plainHttpOnLan = computed(() => typeof window !== 'undefined' && window.location.protocol === 'http:' && !LOOPBACK.has(window.location.hostname))
 /** A mid-session 401 sent the member here (the access plugin); say so once. */
 const expired = computed(() => route.query.expired === '1')
@@ -110,6 +111,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
 
       <UAlert
         v-if="plainHttpOnLan"
+        data-login-plain-http
         color="warning"
         variant="subtle"
         icon="i-lucide-triangle-alert"

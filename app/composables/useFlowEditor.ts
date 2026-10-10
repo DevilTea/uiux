@@ -22,6 +22,7 @@ import { useWorkbench } from './useWorkbench'
 import { useWorkbenchFeedback } from './useWorkbenchFeedback'
 import type { Diagnostic, ViewRead } from './workbench-types'
 import { focusFirstProblem } from '../utils/focus-problem'
+import { randomUuid } from '../utils/random-uuid'
 
 export type FlowRead = Readonly<{
 	kind: 'flow'
@@ -30,14 +31,6 @@ export type FlowRead = Readonly<{
 	diagnostics: readonly Diagnostic[]
 	resource: unknown
 }>
-
-function newUuid(): string {
-	if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
-	return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-		const r = (Math.random() * 16) | 0
-		return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
-	})
-}
 
 /**
  * One UX Flow open in the graph editor: the canonical read, a Workbench edit draft, reference facts
@@ -267,7 +260,7 @@ export function useFlowEditor(flowId: Ref<string>) {
 	function addStep(input: { fromStepId: string; trigger: { widgetId: string; event: string }; viewId: string; variantName?: string }): string | undefined {
 		const current = draft.value
 		if (!current?.steps[input.fromStepId]) return undefined
-		const stepId = newUuid()
+		const stepId = randomUuid()
 		current.steps[stepId] = {
 			target: { viewId: input.viewId, ...(input.variantName ? { variantName: input.variantName } : {}) },
 			transitions: [],

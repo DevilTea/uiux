@@ -17,6 +17,7 @@ import { diagnosticText } from '../../utils/diagnostic-copy'
 import AuthoringConflictAlert from './AuthoringConflictAlert.vue'
 import AuthoringErrorAlert from './AuthoringErrorAlert.vue'
 import AuthoringSaveBar from './AuthoringSaveBar.vue'
+import { copyText } from '../../utils/copy-text'
 
 /** What `/api/preview/adapters` reports about the saved Adapter set. */
 export type AdapterResolution = Readonly<{
@@ -108,13 +109,8 @@ const repairs = computed(() => {
 })
 
 async function copy(text: string): Promise<void> {
-	try {
-		await navigator.clipboard.writeText(text)
-		toast.add({ title: t('adapters.copied'), color: 'success', icon: 'i-lucide-check' })
-	}
-	catch {
-		toast.add({ title: t('adapters.copyFailed'), color: 'error', icon: 'i-lucide-circle-alert', duration: 0 })
-	}
+	if (await copyText(text)) toast.add({ title: t('adapters.copied'), color: 'success', icon: 'i-lucide-check' })
+	else toast.add({ title: t('adapters.copyFailed'), color: 'error', icon: 'i-lucide-circle-alert', duration: 0 })
 }
 
 function add(): void {

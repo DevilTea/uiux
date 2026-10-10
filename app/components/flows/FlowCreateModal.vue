@@ -5,6 +5,7 @@ import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { focusFirstProblem } from '../../utils/focus-problem'
+import { randomUuid } from '../../utils/random-uuid'
 import WbDiagnosticList from '../workbench/WbDiagnosticList.vue'
 
 /** `create_flow` from the Workbench: a name and the View of the entry step. */
@@ -39,15 +40,11 @@ function validate(values: Partial<typeof state>) {
 	return errors
 }
 
-function newUuid(): string {
-	return crypto.randomUUID()
-}
-
 async function submit(): Promise<void> {
 	if (creating.value) return
 	creating.value = true
 	failure.value = undefined
-	const entryStepId = newUuid()
+	const entryStepId = randomUuid()
 	try {
 		const result = await $fetch<{ key: string }>('/api/flows', {
 			method: 'POST',

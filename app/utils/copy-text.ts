@@ -1,5 +1,5 @@
 /**
- * Copies text, also without a secure context (team-access F6): plain-HTTP LAN origins have no
+ * Copies text, also without a secure context (Rule 01a12500-b84a-7d4e-a52d-5c7e13d78fd0): plain-HTTP network origins have no
  * `navigator.clipboard`, so it falls back to a selected off-screen textarea and `execCommand`.
  */
 export async function copyText(text: string): Promise<boolean> {
