@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto'
 import { userInfo } from 'node:os'
 
-import { keysForRole, writeKeyForKind } from '../../application/access/keys'
-import type { LeaseManager } from '../../application/access/leases'
+import { grantedKeys, PERMISSION_KEYS, writeKeyForKind } from '../../application/access/keys'
+import { compatibilityRole } from '../../application/access/labels'
+import type { Lease, LeaseManager } from '../../application/access/leases'
 import {
-	effectiveRole,
 	type MemberPrincipal,
 	type Principal,
 	type SystemPrincipal,
@@ -18,7 +18,7 @@ import {
 	applyUsage,
 	createInvite,
 	createToken,
-	hasHumanOwner,
+	hasHumanManager,
 	isSessionActive,
 	isTokenActive,
 	loginWithCredential,
@@ -111,6 +111,8 @@ export class AccessService {
 		this.now = options.now ?? (() => Date.now())
 		this.captureCredential = generateCredential('session', this.store.data.hint).value
 		this.system.set(this.captureCredential, systemPrincipal('system:capture'))
+		// A lease whose holder lost the kind's write key ends when next looked at, even before a reconcile.
+		this.leases.setHolderCheck(lease => this.holderMayKeep(lease))
 	}
 
 	get hint(): string {
@@ -136,12 +138,17 @@ export class AccessService {
 	 * write key of the leased resource's kind (Clause 01a11c09-a42a-7d6b-bb5e-01d7cf1ce2de).
 	 */
 	private reconcileLeases(): void {
-		const members = new Map(this.store.data.members.map(member => [member.id, member]))
-		for (const lease of this.leases.list()) {
-			const member = members.get(lease.holder.memberId)
-			const writeKey = writeKeyForKind(lease.kind)
-			if (!member || !writeKey || !memberKeys(member).includes(writeKey)) this.leases.forceRelease(lease)
-		}
+		for (const lease of this.leases.list()) if (!this.holderMayKeep(lease)) this.leases.forceRelease(lease)
+	}
+
+	/**
+	 * Whether a lease's holder is still a member holding the write key of the leased kind
+	 * (Clause 01a11c09-a42a-7d6b-bb5e-01d7cf1ce2de), by the roster this server last read.
+	 */
+	private holderMayKeep(lease: Lease): boolean {
+		const member = this.store.data.members.find(item => item.id === lease.holder.memberId)
+		const writeKey = writeKeyForKind(lease.kind)
+		return member !== undefined && writeKey !== undefined && memberKeys(member).includes(writeKey)
 	}
 
 	private async mutate<T>(mutation: (file: AccessFile) => Mutation<T>): Promise<T> {
@@ -326,27 +333,28 @@ export class AccessService {
 	}
 
 	/**
-	 * First-run bootstrap (decision 8): when the roster has no human Owner, create one named after
-	 * the OS user and mint a 24-hour single-use invite. Returns the banner lines, or undefined.
+	 * First-run bootstrap (Rule 01a11485-eb1a-77fb-a91e-b54c505344da): when no human member holds
+	 * `members.manage`, create a human member with every catalog key, named after the OS user, and
+	 * mint a 24-hour single-use invite. Returns the banner lines, or undefined.
 	 */
 	async bootstrap(origins: readonly string[]): Promise<readonly string[] | undefined> {
 		await this.refresh(true)
-		if (hasHumanOwner(this.store.data)) return undefined
+		if (hasHumanManager(this.store.data)) return undefined
 		let username: string | undefined
 		try { username = userInfo().username }
 		catch { username = undefined }
 		const outcome = await this.mutate<Readonly<{ nickname: string; invite: string; created: boolean }>>((file) => {
-			if (hasHumanOwner(file)) return { file, result: { nickname: '', invite: '', created: false } }
+			if (hasHumanManager(file)) return { file, result: { nickname: '', invite: '', created: false } }
 			let nickname = sanitizeNickname(username)
 			if (file.members.some(member => member.nickname === nickname)) nickname = uniqueNickname(file, nickname)
-			const added = addMember(file, { nickname, role: 'owner', kind: 'human' }, new Date(this.now()))
+			const added = addMember(file, { nickname, keys: [...PERMISSION_KEYS], kind: 'human' }, new Date(this.now()))
 			const invite = createInvite(added.file, { nickname }, new Date(this.now()))
 			return { file: invite.file, result: { nickname, invite: invite.result.credential, created: true } }
 		})
 		if (!outcome.created) return undefined
 		const root = this.workspaceRoot
 		return [
-			`UIUX access: created Owner "${outcome.nickname}" for ${root} (roster ${this.hint}, first run).`,
+			`UIUX access: created member "${outcome.nickname}" with every permission key for ${root} (roster ${this.hint}, first run).`,
 			// One single-use invite, offered on the loopback URL and on each configured origin (Rule 01a12515-9c61-7916-a0d0-4bcf2537dfc9).
 			origins.length > 1
 				? '  Sign in on any one of these (one single-use invite, expires in 24 h):'
@@ -398,11 +406,11 @@ export class AccessService {
 			})
 	}
 
-	addMember(input: Readonly<{ nickname: string; role: unknown; kind?: unknown }>) {
+	addMember(input: Readonly<{ nickname: string; role?: unknown; keys?: unknown; kind?: unknown }>) {
 		return this.mutate<StoredMember>(file => addMember(file, input, new Date(this.now())))
 	}
 
-	setMember(memberId: string, changes: Readonly<{ role?: unknown; nickname?: string; kind?: unknown }>) {
+	setMember(memberId: string, changes: Readonly<{ role?: unknown; keys?: unknown; nickname?: string; kind?: unknown }>) {
 		return this.mutate<StoredMember>(file => setMember(file, nicknameOf(file, memberId), changes))
 	}
 
@@ -449,22 +457,24 @@ export function systemPrincipal(id: SystemPrincipalId): SystemPrincipal {
 }
 
 /**
- * A member's permission keys, derived from its roster `role` through the built-in Access preset
- * of that `id` (Clause 01a11bb1-b427-777e-8175-fa24d61d434b), with no `humanOnly` key for an
- * Agent, until the roster stores keys (issue #142).
+ * The permission keys a member's stored keys grant (`grantedKeys`): a key unknown to this
+ * version grants nothing (Rule 01a11c09-b7ec-786f-9723-eda32404d421), and an Agent never gets a
+ * `humanOnly` key, even from a roster that lists one (Rule 01a11485-eac6-730b-b66b-309cc9efb169).
  */
-export function memberKeys(member: Pick<StoredMember, 'kind' | 'role'>) {
-	return keysForRole(member.kind, member.role)
+export function memberKeys(member: Pick<StoredMember, 'kind' | 'keys'>) {
+	return grantedKeys(member.kind, member.keys)
 }
 
+/** The principal of a request authenticated as `member`, its keys resolved now (Rule 01a11485-ebdd-70fc-b853-0621caf056b8). */
 export function memberPrincipal(member: StoredMember, credential: 'session' | 'token', credentialId: string): MemberPrincipal {
+	const keys = memberKeys(member)
 	return {
 		type: 'member',
 		memberId: member.id,
 		nickname: member.nickname,
 		kind: member.kind,
-		role: effectiveRole(member.kind, member.role),
-		keys: memberKeys(member),
+		role: compatibilityRole({ kind: member.kind, keys }),
+		keys,
 		credential,
 		credentialId,
 	}

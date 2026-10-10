@@ -8,7 +8,9 @@ import type { HostHistoryPaths } from '../../persistence/history/host-store'
 import { generateHint } from './credentials'
 import {
 	AccessError,
+	assertRosterWrite,
 	createEmptyAccessFile,
+	readAccessFile,
 	validateAccessFile,
 	type AccessFile,
 	type Mutation,
@@ -20,9 +22,16 @@ import {
  * Directories are 0700 and the file 0600; symlinked or group/other-writable paths are refused.
  * Writes are atomic (temporary file, fsync, rename) under `<wsid>/.access.lock`, and readers
  * re-read the file when its size, mtime or inode changes.
+ *
+ * The first process that opens a `version: 1` roster upgrades it to `version: 2` under the lock
+ * (Rule 01a11c09-b623-7824-8745-9c10510d0d53), after keeping the version 1 file beside it as
+ * `access.v1.json` (Clause 01a11c09-a195-768b-ba6e-a64eb7f05eca). Both writes are atomic and the
+ * backup comes first, so a crash between them leaves the version 1 roster in place and the next
+ * opener upgrades it again; no reader ever sees a half-written roster or loses the version 1 file.
  */
 export const ACCESS_FILE_NAME = 'access.json'
 export const ACCESS_LOCK_NAME = '.access.lock'
+export const ACCESS_V1_BACKUP_NAME = 'access.v1.json'
 const RELOAD_INTERVAL_MS = 1000
 const LOCK_WAIT_MS = 5000
 
@@ -45,12 +54,12 @@ export function workspaceStoreId(realRoot: string): string {
 	return createHash('sha256').update(realRoot, 'utf8').digest('hex')
 }
 
-export type AccessStorePaths = Readonly<{ home: string; workspaces: string; dir: string; file: string; lock: string }>
+export type AccessStorePaths = Readonly<{ home: string; workspaces: string; dir: string; file: string; lock: string; v1Backup: string }>
 
 export function accessStorePaths(home: string, realRoot: string): AccessStorePaths {
 	const workspaces = join(home, 'workspaces')
 	const dir = join(workspaces, workspaceStoreId(realRoot))
-	return { home, workspaces, dir, file: join(dir, ACCESS_FILE_NAME), lock: join(dir, ACCESS_LOCK_NAME) }
+	return { home, workspaces, dir, file: join(dir, ACCESS_FILE_NAME), lock: join(dir, ACCESS_LOCK_NAME), v1Backup: join(dir, ACCESS_V1_BACKUP_NAME) }
 }
 
 /**
@@ -223,6 +232,9 @@ async function removeStaleLock(lockPath: string): Promise<boolean> {
 
 type Fingerprint = Readonly<{ size: number; mtimeMs: number; ino: number }>
 
+/** A validated roster as read: `legacy` when the file is `version: 1` (`file` is then its upgrade) and `text` as read. */
+type StoreRead = Readonly<{ file: AccessFile; fingerprint: Fingerprint; legacy: boolean; text: string }>
+
 export type OpenAccessStoreOptions = Readonly<{
 	/** The Workspace root; it is resolved to its real path. */
 	workspaceRoot: string
@@ -257,12 +269,20 @@ export class AccessStore {
 		if (!await ensureSafeDirectory(paths.workspaces, create)) return undefined
 		if (!await ensureSafeDirectory(paths.dir, create)) return undefined
 		const existing = await AccessStore.readAt(paths, realRoot)
-		if (existing) return new AccessStore(realRoot, paths, existing.file, existing.fingerprint)
+		if (existing && !existing.legacy) return new AccessStore(realRoot, paths, existing.file, existing.fingerprint)
+		if (existing) {
+			const upgraded = await AccessStore.upgradeAt(paths, realRoot)
+			return new AccessStore(realRoot, paths, upgraded.file, upgraded.fingerprint)
+		}
 		if (!create) return undefined
 		const release = await acquireLock(paths.lock)
 		try {
 			const raced = await AccessStore.readAt(paths, realRoot)
-			if (raced) return new AccessStore(realRoot, paths, raced.file, raced.fingerprint)
+			if (raced && !raced.legacy) return new AccessStore(realRoot, paths, raced.file, raced.fingerprint)
+			if (raced) {
+				await AccessStore.writeUpgradeUnlocked(paths, raced)
+				return new AccessStore(realRoot, paths, raced.file, fingerprintOf(await lstat(paths.file)))
+			}
 			const file = createEmptyAccessFile(realRoot, generateHint())
 			await writeAtomically(paths.file, serialize(file))
 			const stats = await lstat(paths.file)
@@ -273,7 +293,11 @@ export class AccessStore {
 		}
 	}
 
-	/** Reads the roster recorded for `realRoot` under `home` without creating anything (`access copy --from`). */
+	/**
+	 * Reads the roster recorded for `realRoot` under `home` without creating or writing anything
+	 * (`access copy --from`). A `version: 1` roster is returned as its upgrade, without upgrading
+	 * the file itself.
+	 */
 	static async readRoster(home: string, realRoot: string): Promise<AccessFile | undefined> {
 		const paths = accessStorePaths(home, realRoot)
 		for (const path of [paths.home, paths.workspaces, paths.dir])
@@ -282,21 +306,52 @@ export class AccessStore {
 		return read?.file
 	}
 
-	private static async readAt(paths: AccessStorePaths, realRoot: string): Promise<{ file: AccessFile; fingerprint: Fingerprint } | undefined> {
+	/**
+	 * Reads and validates the roster. A `version: 1` roster comes back upgraded in memory with
+	 * `legacy` set and its text, which `writeUpgradeUnlocked` keeps as the backup.
+	 */
+	private static async readAt(paths: AccessStorePaths, realRoot: string): Promise<StoreRead | undefined> {
 		const stats = await checkSafeFile(paths.file)
 		if (!stats) return undefined
+		let text: string
 		let parsed: unknown
 		try {
-			parsed = JSON.parse(await readFile(paths.file, 'utf8'))
+			text = await readFile(paths.file, 'utf8')
+			parsed = JSON.parse(text)
 		}
 		catch (error) {
 			if (isNotFound(error)) return undefined
 			throw new AccessError('access.store_invalid', `The access store ${paths.file} is not valid JSON.`)
 		}
-		const file = validateAccessFile(parsed)
+		const { file, legacy } = readAccessFile(parsed)
 		if (file.workspaceRoot !== realRoot)
 			throw new AccessError('access.store_root_mismatch', `The access store ${paths.file} records Workspace ${file.workspaceRoot}, not ${realRoot}; refusing to reuse it.`)
-		return { file, fingerprint: fingerprintOf(stats) }
+		return { file, fingerprint: fingerprintOf(stats), legacy, text }
+	}
+
+	/** Upgrades a `version: 1` roster on disk under the store lock, unless another process already has. */
+	private static async upgradeAt(paths: AccessStorePaths, realRoot: string): Promise<{ file: AccessFile; fingerprint: Fingerprint }> {
+		const release = await acquireLock(paths.lock)
+		try {
+			const current = await AccessStore.readAt(paths, realRoot)
+			if (!current) throw new AccessError('access.store_invalid', `The access store ${paths.file} disappeared.`)
+			if (!current.legacy) return current
+			await AccessStore.writeUpgradeUnlocked(paths, current)
+			return { file: current.file, fingerprint: fingerprintOf(await lstat(paths.file)) }
+		}
+		finally {
+			await release()
+		}
+	}
+
+	/**
+	 * Clause 01a11c09-a195-768b-ba6e-a64eb7f05eca, with the lock held: first keeps the `version: 1`
+	 * text as `access.v1.json` (mode 0600), then replaces the roster with its upgrade. Each write is
+	 * atomic, and the backup is complete before the roster changes.
+	 */
+	private static async writeUpgradeUnlocked(paths: AccessStorePaths, read: StoreRead): Promise<void> {
+		await writeAtomically(paths.v1Backup, read.text)
+		await writeAtomically(paths.file, serialize(read.file))
 	}
 
 	get data(): AccessFile {
@@ -323,16 +378,24 @@ export class AccessStore {
 		if (this.fingerprint && sameFingerprint(this.fingerprint, next)) return false
 		const read = await AccessStore.readAt(this.paths, this.realRoot)
 		if (!read) throw new AccessError('access.store_invalid', `The access store ${this.paths.file} disappeared.`)
-		this.file = read.file
-		this.fingerprint = read.fingerprint
+		// A `version: 1` roster written while this process runs (a backup put back by hand, say) is
+		// upgraded like on first open.
+		const current = read.legacy ? await AccessStore.upgradeAt(this.paths, this.realRoot) : read
+		this.file = current.file
+		this.fingerprint = current.fingerprint
 		return true
 	}
 
-	/** Applies a mutation to the latest on-disk roster under the store lock and writes it atomically. */
+	/**
+	 * Applies a mutation to the latest on-disk roster under the store lock and writes it
+	 * atomically, after checking the write's invariants against that roster (`assertRosterWrite`).
+	 */
 	async update<T>(mutate: (file: AccessFile) => Mutation<T>): Promise<T> {
 		if (!this.paths) {
 			const { file, result } = mutate(this.file)
-			this.file = validateAccessFile(file)
+			const validated = validateAccessFile(file)
+			assertRosterWrite(this.file, validated)
+			this.file = validated
 			return result
 		}
 		const release = await acquireLock(this.paths.lock)
@@ -341,7 +404,10 @@ export class AccessStore {
 			if (!current) throw new AccessError('access.store_invalid', `The access store ${this.paths.file} disappeared.`)
 			const { file, result } = mutate(current.file)
 			const validated = validateAccessFile(file)
-			if (validated !== current.file) await writeAtomically(this.paths.file, serialize(validated))
+			assertRosterWrite(current.file, validated)
+			// A `version: 1` roster on disk is upgraded by this write: its backup comes first.
+			if (current.legacy) await writeAtomically(this.paths.v1Backup, current.text)
+			if (validated !== current.file || current.legacy) await writeAtomically(this.paths.file, serialize(validated))
 			const stats = await lstat(this.paths.file)
 			this.file = validated
 			this.fingerprint = fingerprintOf(stats)

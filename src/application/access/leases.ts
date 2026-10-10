@@ -66,6 +66,13 @@ export interface LeaseManager {
 	dropHolder(memberId: string): readonly Lease[]
 	list(): readonly Lease[]
 	onChange(listener: (change: LeaseChange) => void): () => void
+	/**
+	 * Installs the check that a lease's holder may still hold it (the live server: still a member
+	 * holding the kind's write key). A lease failing it has ended (Rule
+	 * 01a11485-f074-7d3c-80f4-f4ced35ef8f2): every lookup drops it like an expired one, so it never
+	 * blocks another member's write or acquire.
+	 */
+	setHolderCheck(check: ((lease: Lease) => boolean) | undefined): void
 }
 
 const addressKey = (address: LeaseAddress) => `${address.kind}\u0000${address.key}`
@@ -75,6 +82,7 @@ export function createLeaseManager(options: Readonly<{ now?: () => number; ttlMs
 	const ttl = options.ttlMs ?? LEASE_TTL_MS
 	const leases = new Map<string, Lease>()
 	const listeners = new Set<(change: LeaseChange) => void>()
+	let holderCheck: ((lease: Lease) => boolean) | undefined
 
 	const emit = (lease: Pick<Lease, 'kind' | 'key'>) => {
 		for (const listener of listeners) {
@@ -87,7 +95,8 @@ export function createLeaseManager(options: Readonly<{ now?: () => number; ttlMs
 		const id = addressKey(address)
 		const lease = leases.get(id)
 		if (!lease) return undefined
-		if (Date.parse(lease.expiresAt) <= now()) {
+		// An expired lease, or one whose holder may no longer hold it, has ended: treat it as released.
+		if (Date.parse(lease.expiresAt) <= now() || (holderCheck !== undefined && !holderCheck(lease))) {
 			leases.delete(id)
 			emit(lease)
 			return undefined
@@ -207,6 +216,10 @@ export function createLeaseManager(options: Readonly<{ now?: () => number; ttlMs
 		onChange(listener) {
 			listeners.add(listener)
 			return () => listeners.delete(listener)
+		},
+
+		setHolderCheck(check) {
+			holderCheck = check
 		},
 	}
 }

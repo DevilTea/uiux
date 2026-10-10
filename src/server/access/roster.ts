@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
+import { inCatalogOrder, isCatalogKey, isHumanOnlyKey, isPermissionKeyName, keysForRole, missingRequirements, type PermissionKey } from '../../application/access/keys'
+import { compatibilityRole } from '../../application/access/labels'
 import { isAccessRole, isMemberKind, type AccessRole, type MemberKind } from '../../application/access/principal'
 import { isFullUuid } from '../../domain/validation'
 import {
@@ -12,12 +14,21 @@ import {
 } from './credentials'
 
 /**
- * Host-local roster format (`$UIUX_HOME/workspaces/<wsid>/access.json`, `version: 1`). It is not a
- * Workspace schema: it never lives in the Workspace and holds only hashes of secrets.
+ * Host-local roster format (`$UIUX_HOME/workspaces/<wsid>/access.json`, `version: 2`, Clause
+ * 01a11485-f895-7a0c-94d1-ed2b9cb092a9). It is not a Workspace schema: it never lives in the
+ * Workspace and holds only hashes of secrets. A `version: 1` roster, whose members carry `role`,
+ * is upgraded to `version: 2` when opened (Clause 01a11c09-a195-768b-ba6e-a64eb7f05eca; see
+ * `upgradeAccessFile` and the store).
  */
-export const ACCESS_FILE_VERSION = 1
+export const ACCESS_FILE_VERSION = 2
+export const LEGACY_ACCESS_FILE_VERSION = 1
 
-export type StoredMember = Readonly<{ id: string; nickname: string; kind: MemberKind; role: AccessRole; createdAt: string }>
+/**
+ * Clause 01a11485-f8b6-7b96-aa48-e6ff70b3facd: `{ id, nickname, kind, keys, createdAt }`. `keys`
+ * are unique permission key names; a key unknown to this UIUX version is kept and grants nothing
+ * (Rule 01a11c09-b7ec-786f-9723-eda32404d421).
+ */
+export type StoredMember = Readonly<{ id: string; nickname: string; kind: MemberKind; keys: readonly string[]; createdAt: string }>
 export type StoredToken = Readonly<{
 	id: string
 	memberId: string
@@ -69,8 +80,10 @@ export type AccessErrorCode =
 	| 'access.invalid_nickname'
 	| 'access.nickname_taken'
 	| 'access.invalid_role'
+	| 'access.invalid_keys'
 	| 'access.invalid_kind'
-	| 'access.agent_role_cap'
+	| 'access.key_requires'
+	| 'access.key_human_only'
 	| 'access.kind_immutable'
 	| 'access.member_not_found'
 	| 'access.token_not_found'
@@ -86,15 +99,15 @@ export type AccessErrorCode =
 	| 'access.roster_missing'
 	| 'access.lock_busy'
 	| 'access.workspace_invalid'
-	| 'auth.last_owner'
+	| 'access.last_manager'
 
-/** Status codes used when an AccessError reaches HTTP. */
+/** Status codes used when an AccessError reaches HTTP (Clause 01a114ec-ea2d-7f54-97d1-f981d48795fb: `access.last_manager` is 409). */
 export const ACCESS_ERROR_HTTP_STATUS: Readonly<Partial<Record<AccessErrorCode, number>>> = {
 	'access.member_not_found': 404,
 	'access.token_not_found': 404,
 	'access.session_not_found': 404,
 	'access.nickname_taken': 409,
-	'auth.last_owner': 409,
+	'access.last_manager': 409,
 }
 
 export class AccessError extends Error {
@@ -120,12 +133,33 @@ function sessionOriginValid(session: Record<string, unknown>): boolean {
 	return session.listener === 'loopback' || session.listener === 'lan'
 }
 
-/** Strict structural validation of a parsed `access.json`. */
-export function validateAccessFile(value: unknown): AccessFile {
-	const fail = (detail: string): never => { throw new AccessError('access.store_invalid', `The access store is invalid: ${detail}.`) }
-	if (typeof value !== 'object' || value === null || Array.isArray(value)) fail('expected a JSON object')
+const storeInvalid = (detail: string): never => { throw new AccessError('access.store_invalid', `The access store is invalid: ${detail}.`) }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** A `version: 2` member's `keys`: unique key names, and no `humanOnly` key on an Agent. */
+function validateStoredKeys(member: Record<string, unknown>): void {
+	const nickname = JSON.stringify(member.nickname)
+	if (!Array.isArray(member.keys)) storeInvalid(`member ${nickname} has no keys array`)
+	const keys = member.keys as unknown[]
+	const invalid = keys.filter(key => !isPermissionKeyName(key))
+	if (invalid.length > 0) storeInvalid(`member ${nickname} holds ${invalid.map(key => JSON.stringify(key)).join(', ')}, which ${invalid.length > 1 ? 'are not permission key names' : 'is not a permission key name'}`)
+	if (new Set(keys).size !== keys.length) storeInvalid(`member ${nickname} lists a key more than once`)
+	// Rule 01a11485-eac6-730b-b66b-309cc9efb169: a `humanOnly` key is never stored on an Agent. A
+	// roster that says otherwise was not written by UIUX, so it is refused rather than trusted.
+	const humanOnly = (keys as string[]).filter(isHumanOnlyKey)
+	if (member.kind === 'agent' && humanOnly.length > 0)
+		storeInvalid(`Agent member ${nickname} holds the humanOnly key${humanOnly.length > 1 ? 's' : ''} ${humanOnly.join(', ')}, which an Agent never holds; remove ${humanOnly.length > 1 ? 'them' : 'it'} from the roster file`)
+}
+
+/** Strict structural validation of a parsed roster of `version` (members carry `role` in version 1 and `keys` in version 2). */
+function validateRoster(value: unknown, version: typeof ACCESS_FILE_VERSION | typeof LEGACY_ACCESS_FILE_VERSION): void {
+	const fail = storeInvalid
+	if (!isRecord(value)) fail('expected a JSON object')
 	const file = value as Record<string, unknown>
-	if (file.version !== ACCESS_FILE_VERSION) fail(`unsupported version ${JSON.stringify(file.version)}`)
+	if (file.version !== version) fail(`unsupported version ${JSON.stringify(file.version)}`)
 	if (typeof file.workspaceRoot !== 'string' || !file.workspaceRoot) fail('workspaceRoot is missing')
 	if (typeof file.hint !== 'string' || !HINT_PATTERN.test(file.hint)) fail('hint must be 4 base32 characters')
 	for (const name of ['members', 'tokens', 'invites', 'sessions'] as const)
@@ -136,9 +170,15 @@ export function validateAccessFile(value: unknown): AccessFile {
 		if (!isFullUuid(member.id)) fail('member id must be a full UUID')
 		if (typeof member.nickname !== 'string' || !NICKNAME_PATTERN.test(member.nickname)) fail(`member nickname ${JSON.stringify(member.nickname)} is invalid`)
 		if (!isMemberKind(member.kind)) fail('member kind is invalid')
-		if (!isAccessRole(member.role)) fail('member role is invalid')
+		if (version === LEGACY_ACCESS_FILE_VERSION) {
+			if (!isAccessRole(member.role)) fail('member role is invalid')
+		}
+		else {
+			validateStoredKeys(member)
+		}
 		if (!iso(member.createdAt)) fail('member createdAt is invalid')
 	}
+	if (new Set(members.map(member => member.id)).size !== members.length) fail('a member id is duplicated')
 	for (const token of file.tokens as Record<string, unknown>[]) {
 		if (typeof token !== 'object' || token === null) fail('token entry is not an object')
 		if (typeof token.id !== 'string' || !CREDENTIAL_ID_PATTERN.test(token.id) || !isFullUuid(token.memberId) || typeof token.label !== 'string' || !hash(token.hash) || (token.lan !== undefined && typeof token.lan !== 'boolean') || !iso(token.createdAt) || !isoOrNull(token.expiresAt) || !isoOrNull(token.lastUsedAt) || !isoOrNull(token.revokedAt))
@@ -160,7 +200,41 @@ export function validateAccessFile(value: unknown): AccessFile {
 		if (nicknames.has(key)) fail(`nickname ${JSON.stringify(member.nickname)} is duplicated`)
 		nicknames.add(key)
 	}
+}
+
+/** Strict structural validation of a parsed `version: 2` `access.json`. */
+export function validateAccessFile(value: unknown): AccessFile {
+	validateRoster(value, ACCESS_FILE_VERSION)
 	return value as AccessFile
+}
+
+/**
+ * Clause 01a11c09-a195-768b-ba6e-a64eb7f05eca: a validated `version: 1` roster as `version: 2`.
+ * Each member gets the keys its `role` maps to (Clause 01a11bb1-b427-777e-8175-fa24d61d434b),
+ * without `humanOnly` keys for an Agent (Rule 01a11c09-b698-7ee3-861b-f02eaba61269), so an Agent
+ * written as Owner by hand gets the Editor keys it could hold. Any `keys` a version 1 member
+ * carries are not trusted and are replaced. Fields this version does not know are kept.
+ */
+export function upgradeAccessFile(legacy: Readonly<Record<string, unknown>>): Record<string, unknown> {
+	const members = (legacy.members as Record<string, unknown>[]).map(({ role, keys: _untrusted, ...member }) => {
+		void _untrusted
+		return { ...member, keys: [...keysForRole(member.kind as MemberKind, role as AccessRole)] }
+	})
+	return { ...legacy, version: ACCESS_FILE_VERSION, members }
+}
+
+/**
+ * Parses a roster of either version: a `version: 2` roster is validated, and a `version: 1`
+ * roster is validated as written, then upgraded in memory (`legacy` says so; the store writes the
+ * upgrade and its backup). Any other version is refused, so an older roster format is never
+ * misread and a newer one is never silently rewritten.
+ */
+export function readAccessFile(value: unknown): Readonly<{ file: AccessFile; legacy: boolean }> {
+	if (isRecord(value) && value.version === LEGACY_ACCESS_FILE_VERSION) {
+		validateRoster(value, LEGACY_ACCESS_FILE_VERSION)
+		return { file: validateAccessFile(upgradeAccessFile(value)), legacy: true }
+	}
+	return { file: validateAccessFile(value), legacy: false }
 }
 
 export function assertNickname(nickname: string): string {
@@ -186,12 +260,15 @@ export function requireMember(file: AccessFile, nickname: string): StoredMember 
 	return member
 }
 
-function humanOwners(file: AccessFile): readonly StoredMember[] {
-	return file.members.filter(member => member.kind === 'human' && member.role === 'owner')
+const MANAGE_KEY: PermissionKey = 'members.manage'
+
+function isHumanManager(member: StoredMember): boolean {
+	return member.kind === 'human' && member.keys.includes(MANAGE_KEY)
 }
 
-export function hasHumanOwner(file: AccessFile): boolean {
-	return humanOwners(file).length > 0
+/** Whether a human member holds `members.manage` (Rule 01a11485-eae3-7080-8f02-da27fc260e09). */
+export function hasHumanManager(file: AccessFile): boolean {
+	return file.members.some(isHumanManager)
 }
 
 function assertRole(role: unknown): AccessRole {
@@ -199,38 +276,120 @@ function assertRole(role: unknown): AccessRole {
 	return role
 }
 
+const keyList = (keys: readonly string[]) => keys.map(key => `\`${key}\``).join(', ')
+
+/**
+ * An explicit key set: an array of permission key names (Clause
+ * 01a11c09-a200-754a-ac85-48b52dfe7bdc), stored once each, catalog keys in catalog order and then
+ * any key unknown to this version, which is kept (Rule 01a11c09-b7ec-786f-9723-eda32404d421).
+ */
+export function normalizeKeys(value: unknown): string[] {
+	if (!Array.isArray(value)) throw new AccessError('access.invalid_keys', 'Keys must be an array of permission key names.')
+	const invalid = value.filter(key => !isPermissionKeyName(key))
+	if (invalid.length > 0)
+		throw new AccessError('access.invalid_keys', `${invalid.map(key => JSON.stringify(key)).join(', ')} ${invalid.length > 1 ? 'are not permission key names' : 'is not a permission key name'}: a key is <domain>.<capability>, such as views.write.`)
+	const unique = [...new Set(value as string[])]
+	return [...inCatalogOrder(unique.filter(isCatalogKey)), ...unique.filter(key => !isCatalogKey(key))]
+}
+
+/**
+ * Clause 01a11c09-a349-721b-bef5-ef7e63954bb6: a key set is stored only when it gives an Agent no
+ * `humanOnly` key (`access.key_human_only`, Rule 01a11485-eac6-730b-b66b-309cc9efb169) and holds
+ * every requirement of each key in it (`access.key_requires`, Rule
+ * 01a11c09-b707-7138-91af-0542ea1b8b89); each refusal names the offending keys.
+ */
+export function assertStorableKeys(member: Readonly<{ nickname: string; kind: MemberKind; keys: readonly string[] }>): void {
+	const humanOnly = member.kind === 'agent' ? member.keys.filter(isHumanOnlyKey) : []
+	if (humanOnly.length > 0)
+		throw new AccessError('access.key_human_only', `${member.nickname} is an Agent and cannot hold ${keyList(humanOnly)}: ${humanOnly.length > 1 ? 'these keys are' : 'this key is'} humanOnly, for human members on a Workbench session.`)
+	const gaps = missingRequirements(member.keys)
+	if (gaps.length > 0)
+		throw new AccessError('access.key_requires', `The keys of ${member.nickname} lack requirements: ${gaps.map(gap => `\`${gap.key}\` requires ${keyList(gap.missing)}`).join('; ')}.`)
+}
+
+function sameKeys(left: readonly string[], right: readonly string[]): boolean {
+	const set = new Set(left)
+	return set.size === new Set(right).size && right.every(key => set.has(key))
+}
+
+/**
+ * The invariants of a roster write, checked against the roster it replaces (`before`):
+ * - each new member, and each member whose kind or keys change, has a storable key set
+ *   (`assertStorableKeys`); an unchanged member keeps its keys, so a set written by hand that
+ *   lacks a requirement stays as it is and grants only the keys it lists (Rule
+ *   01a11c09-b779-7f5f-ba47-170a584a09ce);
+ * - a write that would leave no human member holding `members.manage` where one held it is
+ *   refused with `access.last_manager` (Rule 01a11485-eae3-7080-8f02-da27fc260e09, Clause
+ *   01a114ec-ea2d-7f54-97d1-f981d48795fb), whether it removes a member or changes keys. A roster
+ *   that has no such member yet (a new roster, or one with Agents only) is not refused for it:
+ *   `uiux dev` bootstraps its manager (Rule 01a11485-eb1a-77fb-a91e-b54c505344da).
+ */
+export function assertRosterWrite(before: AccessFile | undefined, after: AccessFile): void {
+	const previous = new Map((before?.members ?? []).map(member => [member.id, member]))
+	for (const member of after.members) {
+		const prior = previous.get(member.id)
+		if (prior && prior.kind === member.kind && sameKeys(prior.keys, member.keys)) continue
+		assertStorableKeys(member)
+	}
+	if (!before || hasHumanManager(after)) return
+	const lost = before.members.filter(isHumanManager)
+	if (lost.length === 0) return
+	const names = lost.map(member => member.nickname).join(', ')
+	throw new AccessError('access.last_manager', `${names} ${lost.length > 1 ? 'are the last human holders' : 'is the last human holder'} of \`members.manage\` in this roster; this change would leave none. Give another human member \`members.manage\` first.`)
+}
+
+/**
+ * The key set a member write asks for: explicit `keys`, or a `role`, which the CLI's `--role` and
+ * the Members page still send and which stands for the keys of the built-in preset with that
+ * `id` (Clause 01a11bb1-b427-777e-8175-fa24d61d434b), without `humanOnly` keys for an Agent. An
+ * Agent asking for the Owner role is refused: its keys are the human-only administration keys.
+ */
+function requestedKeys(kind: MemberKind, nickname: string, input: Readonly<{ keys?: unknown; role?: unknown }>): string[] | undefined {
+	if (input.keys !== undefined && input.role !== undefined) throw new AccessError('access.invalid_keys', 'Give either keys or a role, not both.')
+	if (input.keys !== undefined) return normalizeKeys(input.keys)
+	if (input.role === undefined) return undefined
+	const role = assertRole(input.role)
+	if (kind === 'agent' && role === 'owner')
+		assertStorableKeys({ nickname, kind, keys: keysForRole('human', 'owner') })
+	return [...keysForRole(kind, role)]
+}
+
 export type Mutation<T> = Readonly<{ file: AccessFile; result: T }>
+
+export type MemberAccessInput = Readonly<{ keys?: unknown; role?: unknown }>
 
 export function addMember(
 	file: AccessFile,
-	input: Readonly<{ nickname: string; role: unknown; kind?: unknown }>,
+	input: Readonly<{ nickname: string; kind?: unknown } & MemberAccessInput>,
 	now: Date = new Date(),
 ): Mutation<StoredMember> {
 	const nickname = assertNickname(input.nickname)
-	const role = assertRole(input.role)
 	const kind = input.kind ?? 'human'
 	if (!isMemberKind(kind)) throw new AccessError('access.invalid_kind', `Kind must be human or agent (received ${JSON.stringify(kind)}).`)
-	if (kind === 'agent' && role === 'owner') throw new AccessError('access.agent_role_cap', 'An agent cannot be Owner; agents are capped at Editor.')
+	const keys = requestedKeys(kind, nickname, input)
+	if (keys === undefined) throw new AccessError('access.invalid_keys', `A new member needs its keys (or a role) (received none for ${nickname}).`)
 	if (findMemberByNickname(file, nickname)) throw new AccessError('access.nickname_taken', `Nickname ${JSON.stringify(nickname)} is already used in this roster.`)
-	const member: StoredMember = { id: randomUUID(), nickname, kind, role, createdAt: now.toISOString() }
-	return { file: { ...file, members: [...file.members, member] }, result: member }
+	const member: StoredMember = { id: randomUUID(), nickname, kind, keys, createdAt: now.toISOString() }
+	const next: AccessFile = { ...file, members: [...file.members, member] }
+	assertRosterWrite(file, next)
+	return { file: next, result: member }
 }
 
 export function setMember(
 	file: AccessFile,
 	nickname: string,
-	changes: Readonly<{ role?: unknown; nickname?: string; kind?: unknown }>,
+	changes: Readonly<{ nickname?: string; kind?: unknown } & MemberAccessInput>,
 ): Mutation<StoredMember> {
 	const member = requireMember(file, nickname)
+	// Rule 01a11485-ea75-7964-bc21-29aa78049abf: the kind is fixed at creation.
 	if (changes.kind !== undefined && changes.kind !== member.kind)
 		throw new AccessError('access.kind_immutable', 'A member\'s kind is fixed at creation and cannot be changed.')
 	let next: StoredMember = member
-	if (changes.role !== undefined) {
-		const role = assertRole(changes.role)
-		if (member.kind === 'agent' && role === 'owner') throw new AccessError('access.agent_role_cap', 'An agent cannot be Owner; agents are capped at Editor.')
-		if (member.kind === 'human' && member.role === 'owner' && role !== 'owner' && humanOwners(file).length <= 1)
-			throw new AccessError('auth.last_owner', `${member.nickname} is the last human Owner of this roster and cannot be demoted.`)
-		next = { ...next, role }
+	const keys = requestedKeys(member.kind, member.nickname, changes)
+	if (keys !== undefined) {
+		// Writing a member's keys stores them anew, so they must be storable even when unchanged.
+		assertStorableKeys({ nickname: member.nickname, kind: member.kind, keys })
+		next = { ...next, keys }
 	}
 	if (changes.nickname !== undefined && changes.nickname !== member.nickname) {
 		const renamed = assertNickname(changes.nickname)
@@ -238,23 +397,22 @@ export function setMember(
 		if (clash && clash.id !== member.id) throw new AccessError('access.nickname_taken', `Nickname ${JSON.stringify(renamed)} is already used in this roster.`)
 		next = { ...next, nickname: renamed }
 	}
-	return { file: { ...file, members: file.members.map(item => item.id === member.id ? next : item) }, result: next }
+	const written: AccessFile = { ...file, members: file.members.map(item => item.id === member.id ? next : item) }
+	assertRosterWrite(file, written)
+	return { file: written, result: next }
 }
 
 export function removeMember(file: AccessFile, nickname: string): Mutation<StoredMember> {
 	const member = requireMember(file, nickname)
-	if (member.kind === 'human' && member.role === 'owner' && humanOwners(file).length <= 1)
-		throw new AccessError('auth.last_owner', `${member.nickname} is the last human Owner of this roster and cannot be removed.`)
-	return {
-		file: {
-			...file,
-			members: file.members.filter(item => item.id !== member.id),
-			tokens: file.tokens.filter(item => item.memberId !== member.id),
-			invites: file.invites.filter(item => item.memberId !== member.id),
-			sessions: file.sessions.filter(item => item.memberId !== member.id),
-		},
-		result: member,
+	const next: AccessFile = {
+		...file,
+		members: file.members.filter(item => item.id !== member.id),
+		tokens: file.tokens.filter(item => item.memberId !== member.id),
+		invites: file.invites.filter(item => item.memberId !== member.id),
+		sessions: file.sessions.filter(item => item.memberId !== member.id),
 	}
+	assertRosterWrite(file, next)
+	return { file: next, result: member }
 }
 
 export type IssuedCredential<T> = Readonly<{ entry: T; credential: string }>
@@ -455,7 +613,11 @@ export function applyUsage(
 	}
 }
 
-/** `uiux access copy`: members and tokens (hashes included), a new hint and root, no invites or sessions. */
+/**
+ * `uiux access copy`: members and tokens (hashes included), a new hint and root, no invites or
+ * sessions. The copy is always `version: 2`: a `version: 1` source is read through its upgrade
+ * (Clause 01a1144e-56bd-7988-8d2a-87b23954ca49).
+ */
 export function copyRoster(source: AccessFile, target: Readonly<{ workspaceRoot: string; hint: string }>): AccessFile {
 	return {
 		version: ACCESS_FILE_VERSION,
@@ -468,11 +630,28 @@ export function copyRoster(source: AccessFile, target: Readonly<{ workspaceRoot:
 	}
 }
 
-export type MemberSummary = Readonly<StoredMember & { activeTokens: number; activeSessions: number }>
+/**
+ * A member as roster administration lists it. `role` is derived from the stored keys
+ * (`compatibilityRole`) for the Members page and `uiux member list`, which still show roles until
+ * they show keys and labels (issue #142).
+ */
+export type MemberSummary = Readonly<{
+	id: string
+	nickname: string
+	kind: MemberKind
+	role: AccessRole
+	createdAt: string
+	activeTokens: number
+	activeSessions: number
+}>
 
 export function summarizeMembers(file: AccessFile, now: number): readonly MemberSummary[] {
 	return file.members.map(member => ({
-		...member,
+		id: member.id,
+		nickname: member.nickname,
+		kind: member.kind,
+		role: compatibilityRole(member),
+		createdAt: member.createdAt,
 		activeTokens: file.tokens.filter(token => token.memberId === member.id && isTokenActive(token, now)).length,
 		activeSessions: file.sessions.filter(session => session.memberId === member.id && isSessionActive(session, now)).length,
 	}))

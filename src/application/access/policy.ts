@@ -209,3 +209,18 @@ export function adapterChangeKeys(
 	const same = current.length === next.length && current.every((entry, index) => entry.moduleSpecifier === next[index]!.moduleSpecifier)
 	return same ? [] : ['product-kit.compose']
 }
+
+/**
+ * `adapterChangeKeys` for two raw manifests: the one a write replaces and the one it writes. The
+ * schema version is the written manifest's, else the replaced one's; a missing or non-integer
+ * version counts as below 5, so the check fails closed. A missing or non-array `adapters` is an
+ * empty list.
+ */
+export function manifestAdapterChangeKeys(current: unknown, next: unknown): readonly PermissionKey[] {
+	const record = (value: unknown): Readonly<Record<string, unknown>> => typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
+	const specifiers = (value: unknown) => Array.isArray(value)
+		? value.map(entry => ({ moduleSpecifier: String(record(entry).moduleSpecifier) }))
+		: []
+	const schemaVersion = record(next).schemaVersion ?? record(current).schemaVersion
+	return adapterChangeKeys(Number.isInteger(schemaVersion) ? schemaVersion as number : 0, specifiers(record(current).adapters), specifiers(record(next).adapters))
+}

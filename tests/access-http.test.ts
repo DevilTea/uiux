@@ -179,7 +179,7 @@ describe('configured origins (Feature 01a12500-a0a0-74c0-b83b-3dbb628689e4)', ()
 
 	async function ownerInvite(): Promise<string> {
 		const store = (await AccessStore.open({ workspaceRoot: root }))!
-		const owner = store.data.members.find(member => member.kind === 'human' && member.role === 'owner')!
+		const owner = store.data.members.find(member => member.kind === 'human' && member.keys.includes('members.manage'))!
 		return (await store.update(file => createInvite(file, { nickname: owner.nickname }))).credential
 	}
 
@@ -233,7 +233,7 @@ describe('configured origins (Feature 01a12500-a0a0-74c0-b83b-3dbb628689e4)', ()
 		const { cookie } = await signIn('uiux.corp.example')
 		expect((await send('uiux.corp.example', 'GET', '/api/access/members', { cookie })).status).toBe(200)
 		const store = (await AccessStore.open({ workspaceRoot: root }))!
-		const owner = store.data.members.find(member => member.kind === 'human' && member.role === 'owner')!
+		const owner = store.data.members.find(member => member.kind === 'human' && member.keys.includes('members.manage'))!
 		const invite = await send('uiux.corp.example', 'POST', '/api/access/invites', { cookie, origin: PROXIED, 'x-forwarded-host': 'evil.test', 'x-forwarded-proto': 'http' }, { memberId: owner.id })
 		expect(invite.status).toBe(201)
 		expect(invite.json().url).toMatch(/^https:\/\/uiux\.corp\.example\/login#uiux_i_/u)
@@ -354,7 +354,7 @@ describe('authentication on every surface', () => {
 
 	it('refuses a human Owner\'s bearer Token a force-release, naming locks.force-release, and keeps the lease (Scenario 01a11c09-d861)', async () => {
 		const members = (await AccessStore.open({ workspaceRoot: root }))!.data.members
-		const owner = members.find(member => member.kind === 'human' && member.role === 'owner')!
+		const owner = members.find(member => member.kind === 'human' && member.keys.includes('members.manage'))!
 		const claude = members.find(member => member.nickname === 'claude')!
 		// The signed-in Owner's own bearer Token.
 		const leadToken = await provisionToken(root, { nickname: owner.nickname })
@@ -384,7 +384,7 @@ describe('Owner administration over the loopback cookie session', () => {
 		const owner = roster.members.find(member => member.nickname !== 'claude')!
 		const demote = await fetch(`${origin}/api/access/members/${owner.id}`, { method: 'PATCH', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ role: 'viewer' }) })
 		expect(demote.status).toBe(409)
-		expect(await demote.json()).toMatchObject({ code: 'auth.last_owner' })
+		expect(await demote.json()).toMatchObject({ code: 'access.last_manager' })
 
 		const token = await (await fetch(`${origin}/api/access/tokens`, json({ memberId: mei.id, label: 'browser' }, headers))).json() as { credential: string; token: { id: string; hash?: string } }
 		expect(token.credential).toMatch(/^uiux_t_/u)
@@ -455,6 +455,8 @@ describe('roster changes reach live leases', () => {
 		const store = (await AccessStore.open({ workspaceRoot: root }))!
 		const bot = store.data.members.find(member => member.nickname === 'bot')!
 		const runtime = getSelectedWorkspaceServerRuntime()
+		// The server knows bot (as after the request that would take this lease), so the lease stands.
+		await (await runtime.access()).refresh(true)
 		runtime.leases.acquire([{ kind: 'flow', key: 'f' }], { memberId: bot.id, nickname: 'bot', kind: 'agent' })
 		expect(runtime.leases.list().some(lease => lease.holder.nickname === 'bot')).toBe(true)
 		await store.update(file => removeMember(file, 'bot'))
