@@ -6,7 +6,7 @@ import { HostHistoryError } from '../../persistence/history/host-store'
 import { versionResourcesFromSnapshot } from '../../persistence/history/snapshot'
 import { mergeTimeline } from '../../persistence/history/timeline'
 import { readVersionBlobUnlocked } from '../../persistence/history/version-blobs'
-import { LEGACY_LAYOUT } from '../../persistence/paths'
+import { layoutForSchemaVersion } from '../../persistence/paths'
 import type { HistoryStoreSource } from './history-diff'
 
 /**
@@ -93,7 +93,7 @@ export function createHistoryPreviewService(persistence: FileNativePersistence, 
 				// required here as well.
 				const wanted = version.workspaceSchemaVersion === policy.currentVersion
 					? [entry]
-					: version.resources.filter(resource => Object.keys(resource.files).some(path => LEGACY_LAYOUT.classifyVersionedPath(path)))
+					: version.resources.filter(resource => Object.keys(resource.files).some(path => layoutForSchemaVersion(version.workspaceSchemaVersion).classifyVersionedPath(path)))
 				const bytes = new Map<string, Uint8Array>()
 				for (const resource of wanted) {
 					const required = resource === entry || resource.kind === 'workspace'
@@ -152,9 +152,10 @@ export function createHistoryPreviewService(persistence: FileNativePersistence, 
 			return files
 		}
 		const snapshot = new Map<string, Uint8Array>()
-		for (const [path, content] of bytes) if (LEGACY_LAYOUT.classifyVersionedPath(path)) snapshot.set(path, content)
+		const recordedLayout = layoutForSchemaVersion(version.workspaceSchemaVersion)
+		for (const [path, content] of bytes) if (recordedLayout.classifyVersionedPath(path)) snapshot.set(path, content)
 		const upgraded = await upgradeSnapshotInMemory(snapshot, version.workspaceSchemaVersion, policy)
-		const resource = versionResourcesFromSnapshot(upgraded.snapshot, LEGACY_LAYOUT).resources.find(item => item.kind === entry.kind && item.key === entry.key)
+		const resource = versionResourcesFromSnapshot(upgraded.snapshot, layoutForSchemaVersion(policy.currentVersion)).resources.find(item => item.kind === entry.kind && item.key === entry.key)
 		const files = new Map<string, Uint8Array>()
 		for (const path of Object.keys(resource?.files ?? {})) files.set(path, upgraded.snapshot.get(path)!)
 		return files

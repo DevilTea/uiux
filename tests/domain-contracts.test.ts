@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { validateAdapterConfig, validateAdapterManifest, validateResolvedAdapterSet } from '../src/domain/adapters/schema'
 import { validateAssetBinding, validateAssetBindingCompatibility, validateAssetContentFiles, validateAssetContentMetadata, validateAssetMetadata } from '../src/domain/assets/schema'
-import { artifactBytesMatch, artifactStoreRelativePath, sha256Identity, validateArtifactIdentity } from '../src/domain/artifacts/schema'
+import { artifactBytesMatch, artifactStoreShardPath, sha256Identity, validateArtifactIdentity } from '../src/domain/artifacts/schema'
 import { validateFormalEvidenceRecord, validateTranslationEvidenceOccurrence } from '../src/domain/evidence/schema'
 import { validateFlowResource } from '../src/domain/flows/schema'
 import { mayClaimImplementationReady, validateHandoffManifest, validateHandoffRoot, validateImplementationReadyClaim } from '../src/domain/handoff/schema'
@@ -332,7 +332,8 @@ describe('derived evidence, render context, and handoff', () => {
 		const padded = Uint8Array.from([0, ...bytes, 0])
 		expect(await sha256Identity(padded.subarray(1, -1))).toBe(identity)
 		expect(await sha256Identity(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength))).toBe(identity)
-		expect(artifactStoreRelativePath(identity)).toContain('/sha256/')
+		const hex = identity.slice('sha256:'.length)
+		expect(artifactStoreShardPath(identity)).toBe(`sha256/${hex.slice(0, 2)}/${hex}`)
 	})
 
 	it('validates formal evidence responsibilities without turning warnings into corruption', () => {

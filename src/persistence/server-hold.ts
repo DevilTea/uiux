@@ -4,14 +4,15 @@ import * as fs from 'node:fs/promises'
 import { hostname } from 'node:os'
 
 import { isRecord } from '../domain/validation'
-import { resolveWorkspacePath } from './paths'
+import { LEGACY_LAYOUT, resolveWorkspacePath, type WorkspaceLayout } from './paths'
 
 /**
  * A live UIUX server's claim on its selected Workspace. It is local runtime state (never a
  * canonical file, never migrated or exported) that lets operator commands such as
- * `uiux migrate` refuse to rewrite a Workspace that a running server is serving.
+ * `uiux migrate` refuse to rewrite a Workspace that a running server is serving. This is its path in
+ * the legacy layout; a caller that holds a layout reads `layout.serverHoldPath`.
  */
-export const SERVER_HOLD_RELATIVE_PATH = '.uiux/.server-hold.json'
+export const SERVER_HOLD_RELATIVE_PATH = LEGACY_LAYOUT.serverHoldPath
 
 export type ServerHold = Readonly<{
 	pid: number
@@ -31,10 +32,11 @@ export type AcquiredServerHold = Readonly<{
 
 /**
  * Records the current process as the server holding `root`. Returns undefined when the Workspace
- * has no real `.uiux` metadata directory (an uninitialized root is not held).
+ * has no real metadata directory (the layout's `metadataDir`; an uninitialized root is not held).
  */
-export async function acquireServerHold(root: string, options: Readonly<{ origin?: string }> = {}): Promise<AcquiredServerHold | undefined> {
-	const metadata = resolveWorkspacePath(root, '.uiux')
+export async function acquireServerHold(root: string, options: Readonly<{ origin?: string; layout?: WorkspaceLayout }> = {}): Promise<AcquiredServerHold | undefined> {
+	const layout = options.layout ?? LEGACY_LAYOUT
+	const metadata = resolveWorkspacePath(root, layout.metadataDir)
 	try {
 		const stat = await fs.lstat(metadata)
 		if (!stat.isDirectory() || stat.isSymbolicLink()) return undefined
@@ -44,8 +46,8 @@ export async function acquireServerHold(root: string, options: Readonly<{ origin
 		throw error
 	}
 	const hold: ServerHold = { pid: process.pid, hostname: hostname(), startedAt: new Date().toISOString(), token: randomUUID(), ...(options.origin ? { origin: options.origin } : {}) }
-	const target = resolveWorkspacePath(root, SERVER_HOLD_RELATIVE_PATH)
-	const temporary = resolveWorkspacePath(root, `.uiux/.server-hold-${hold.token}.tmp`)
+	const target = resolveWorkspacePath(root, layout.serverHoldPath)
+	const temporary = resolveWorkspacePath(root, layout.metadataFilePath(`.server-hold-${hold.token}.tmp`))
 	await fs.writeFile(temporary, `${JSON.stringify(hold)}\n`, { encoding: 'utf8', flag: 'wx' })
 	await fs.rename(temporary, target)
 	const ownsHold = (bytes: string): boolean => {
@@ -77,9 +79,9 @@ export async function acquireServerHold(root: string, options: Readonly<{ origin
  * A hold whose process no longer exists on this host is stale and ignored. A hold recorded by
  * another host cannot be checked and is treated as active.
  */
-export async function readActiveServerHold(root: string): Promise<ServerHold | undefined> {
+export async function readActiveServerHold(root: string, layout: WorkspaceLayout = LEGACY_LAYOUT): Promise<ServerHold | undefined> {
 	let text: string
-	try { text = await fs.readFile(resolveWorkspacePath(root, SERVER_HOLD_RELATIVE_PATH), 'utf8') }
+	try { text = await fs.readFile(resolveWorkspacePath(root, layout.serverHoldPath), 'utf8') }
 	catch (error) {
 		if (isNotFound(error)) return undefined
 		throw error

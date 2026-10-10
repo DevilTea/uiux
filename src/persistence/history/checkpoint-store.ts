@@ -2,7 +2,7 @@ import { validateCheckpointRecord, type CheckpointRecord } from '../../domain/hi
 import { isFullUuid, isRecord, type Diagnostic } from '../../domain/validation'
 import { PersistenceError } from '../errors'
 import { canonicalJsonBytes, type FileNativePersistence } from '../file-native'
-import { artifactRelativePath, LEGACY_LAYOUT, type WorkspaceLayout } from '../paths'
+import type { WorkspaceLayout } from '../paths'
 import { blobDigest, type InvalidHistoryFile } from './host-store'
 import { compareVersionOrder } from './order'
 import { referencedDigests } from './snapshot'
@@ -30,7 +30,7 @@ const CHECKPOINT_FILE = /^(?<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
 export class CheckpointStore {
 	constructor(
 		private readonly persistence: FileNativePersistence,
-		private readonly layout: WorkspaceLayout = LEGACY_LAYOUT,
+		private readonly layout: WorkspaceLayout = persistence.layout,
 	) {}
 
 	async create(record: CheckpointRecord, blobs: ReadonlyMap<string, Uint8Array>): Promise<void> {
@@ -58,7 +58,7 @@ export class CheckpointStore {
 					throw new PersistenceError('persistence.artifact_corrupt', `Checkpoint blob bytes do not match ${digest}.`)
 				await this.persistence.artifacts.putUnlocked(bytes)
 			}
-			else if (!await this.persistence.readOptionalBytesUnlocked(artifactRelativePath(digest))) {
+			else if (!await this.persistence.readOptionalBytesUnlocked(this.layout.artifactRelativePath(digest))) {
 				throw new PersistenceError('persistence.resource_not_found', `Checkpoint ${record.id} names blob ${digest}, which is neither supplied nor stored.`)
 			}
 		}

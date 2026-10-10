@@ -16,7 +16,6 @@ import { validateWorkspaceManifest, type WorkspaceManifest } from '../domain/wor
 import { PersistenceError } from './errors'
 import { currentDesignWriteContext, type DesignWriteContext } from './history/write-context'
 import {
-	artifactRelativePath,
 	assetMetadataRelativePath,
 	assetDirectoryRelativePath,
 	flowRelativePath,
@@ -24,10 +23,11 @@ import {
 	reviewRelativePath,
 	resolveWorkspacePath,
 	viewRelativePath,
-	workspaceRelativePath,
 	isSafeAssetContentFilename,
+	layoutForSchemaVersion,
 	LEGACY_LAYOUT,
 	type VersionedResourceIdentity,
+	type WorkspaceLayout,
 } from './paths'
 import {
 	defineWorkspaceSchemaPolicy,
@@ -227,8 +227,6 @@ type TransactionJournal = Readonly<{ changes: readonly Readonly<{ path: string; 
 /** `schemaVersion` is the selected Workspace manifest version every canonical file is decoded under. */
 type JsonValidator = (resource: unknown, filename: string, schemaVersion: number) => readonly Diagnostic[]
 
-const TRANSACTION_ROOT = '.uiux/.transactions'
-const PERSISTENCE_LOCK = '.uiux/.persistence.lock'
 const MAX_LOCK_WAIT_MS = 15_000
 /**
  * Upper bound on how long one shared read batch keeps admitting new readers in this process. After
@@ -242,6 +240,8 @@ const VERSIONED_SCAN_MAX_SEGMENTS = 3
 /** File-native persistence implementation. The schema policy is deliberately injected. */
 export class FileNativePersistence {
 	readonly root: string
+	/** Where this Workspace keeps its manifest, runtime files and versioned files. */
+	readonly layout: WorkspaceLayout
 	readonly schemaPolicy: WorkspaceSchemaPolicy
 	readonly workspace: WorkspaceFileRepository
 	readonly views: JsonResourceRepository<string, ViewResource>
@@ -261,6 +261,7 @@ export class FileNativePersistence {
 
 	constructor(options: FileNativePersistenceOptions) {
 		this.root = resolve(options.root)
+		this.layout = LEGACY_LAYOUT
 		this.schemaPolicy = defineWorkspaceSchemaPolicy(options.schemaPolicy)
 		this.fault = options.fault
 		this.lockWaitMilliseconds = options.lockWaitMilliseconds ?? MAX_LOCK_WAIT_MS
@@ -326,8 +327,8 @@ export class FileNativePersistence {
 				throw new PersistenceError('workspace.migration_failed', 'Canonical Workspace files changed while migration was being planned; no migration writes were applied.')
 			const changedFiles = planned.changes.map(change => change.path)
 			await this.applyFileTransaction(planned.changes, 'migration')
-			const manifestBytes = await this.readBytesUnlocked(workspaceRelativePath())
-			const finalManifest = parseJsonBytes(manifestBytes, workspaceRelativePath())
+			const manifestBytes = await this.readBytesUnlocked(this.layout.manifestPath)
+			const finalManifest = parseJsonBytes(manifestBytes, this.layout.manifestPath)
 			const finalInspection = inspectWorkspaceManifest(finalManifest, this.schemaPolicy)
 			if (finalInspection.state !== 'current')
 				throw new PersistenceError('workspace.migration_failed', 'Workspace migration transaction completed without reaching the current policy version.', { diagnostics: finalInspection.diagnostics })
@@ -353,11 +354,11 @@ export class FileNativePersistence {
 	}>> {
 		const read = await this.inspectWorkspaceUnlocked()
 		if (!read.resource || !read.revision)
-			throw new PersistenceError('workspace.manifest_missing', 'Cannot migrate a Workspace without .uiux/workspace.json.', { diagnostics: read.diagnostics })
+			throw new PersistenceError('workspace.manifest_missing', `Cannot migrate a Workspace without ${this.layout.manifestPath}.`, { diagnostics: read.diagnostics })
 		if (read.inspection.state === 'unsupported')
 			throw new PersistenceError('workspace.schema_unsupported', 'Workspace schema is not supported by the injected policy.', { diagnostics: read.inspection.diagnostics })
 		if (read.inspection.state === 'missing_manifest')
-			throw new PersistenceError('workspace.manifest_missing', 'Cannot migrate a Workspace without .uiux/workspace.json.', { diagnostics: read.diagnostics })
+			throw new PersistenceError('workspace.manifest_missing', `Cannot migrate a Workspace without ${this.layout.manifestPath}.`, { diagnostics: read.diagnostics })
 		if (read.inspection.state === 'current')
 			return { fromVersion: read.inspection.version, toVersion: read.inspection.version, revision: read.revision, steps: [], changes: [], initialSnapshot: new Map() }
 		await beforeSteps?.({ fromVersion: read.inspection.version, toVersion: this.schemaPolicy.currentVersion })
@@ -564,7 +565,7 @@ export class FileNativePersistence {
 	}
 
 	async inspectWorkspaceUnlocked(): Promise<WorkspaceReadInspection> {
-		const relativePath = workspaceRelativePath()
+		const relativePath = this.layout.manifestPath
 		let bytes: Buffer
 		try {
 			bytes = await this.readBytesUnlocked(relativePath)
@@ -574,7 +575,7 @@ export class FileNativePersistence {
 				const inspection: WorkspaceInspection = {
 					state: 'missing_manifest',
 					targetVersion: this.schemaPolicy.currentVersion,
-					diagnostics: [{ code: 'workspace.manifest_missing', path: `/${relativePath}`, message: 'Workspace manifest .uiux/workspace.json does not exist.' }],
+					diagnostics: [{ code: 'workspace.manifest_missing', path: `/${relativePath}`, message: `Workspace manifest ${relativePath} does not exist.` }],
 				}
 				return { inspection, diagnostics: inspection.diagnostics }
 			}
@@ -595,7 +596,7 @@ export class FileNativePersistence {
 	 * or the policy currentVersion when the manifest is missing or has no usable version.
 	 */
 	async readDecodeSchemaVersionUnlocked(): Promise<number> {
-		const bytes = await this.readOptionalBytesUnlocked(workspaceRelativePath())
+		const bytes = await this.readOptionalBytesUnlocked(this.layout.manifestPath)
 		if (!bytes) return this.schemaPolicy.currentVersion
 		try {
 			const manifest = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown
@@ -769,11 +770,11 @@ export class FileNativePersistence {
 		if (new Set(ordered.map(change => change.path)).size !== ordered.length)
 			throw new PersistenceError('persistence.path_rejected', 'A file transaction contains duplicate paths.')
 		for (const change of ordered)
-			assertTransactionalPath(change.path)
+			assertTransactionalPath(this.layout, change.path)
 		const transactionId = randomUUID()
-		const transactionRelative = `${TRANSACTION_ROOT}/${transactionId}`
+		const transactionRelative = `${this.layout.transactionsDir}/${transactionId}`
 		const transactionAbsolute = resolveWorkspacePath(this.root, transactionRelative)
-		await ensureSafeDirectory(this.root, TRANSACTION_ROOT)
+		await ensureSafeDirectory(this.root, this.layout.transactionsDir)
 		await fs.mkdir(transactionAbsolute)
 		const records: { path: string; existed: boolean }[] = []
 		let journalWritten = false
@@ -850,7 +851,7 @@ export class FileNativePersistence {
 
 	async scanCanonicalSnapshotUnlocked(): Promise<Map<string, Uint8Array>> {
 		const snapshot = new Map<string, Uint8Array>()
-		const manifestPath = workspaceRelativePath()
+		const manifestPath = this.layout.manifestPath
 		const manifest = await this.readOptionalBytesUnlocked(manifestPath)
 		if (manifest)
 			snapshot.set(manifestPath, Uint8Array.from(manifest))
@@ -869,13 +870,13 @@ export class FileNativePersistence {
 	 */
 	async scanVersionedSnapshotUnlocked(): Promise<Map<string, Uint8Array>> {
 		const snapshot = new Map<string, Uint8Array>()
-		for (const root of LEGACY_LAYOUT.versionedRoots) {
+		for (const root of this.layout.versionedRoots) {
 			if (root.endsWith('/')) {
 				await this.scanVersionedDirectoryUnlocked(root.slice(0, -1), snapshot)
 				continue
 			}
 			const bytes = await this.readOptionalBytesUnlocked(root)
-			if (bytes && LEGACY_LAYOUT.classifyVersionedPath(root)) snapshot.set(root, Uint8Array.from(bytes))
+			if (bytes && this.layout.classifyVersionedPath(root)) snapshot.set(root, Uint8Array.from(bytes))
 		}
 		return new Map([...snapshot].sort(([left], [right]) => compareCodeUnits(left, right)))
 	}
@@ -900,7 +901,7 @@ export class FileNativePersistence {
 					await this.scanVersionedDirectoryUnlocked(relativePath, snapshot)
 				continue
 			}
-			if (!entry.isFile() || !LEGACY_LAYOUT.classifyVersionedPath(relativePath)) continue
+			if (!entry.isFile() || !this.layout.classifyVersionedPath(relativePath)) continue
 			snapshot.set(relativePath, Uint8Array.from(await this.readBytesUnlocked(relativePath)))
 		}
 	}
@@ -922,7 +923,7 @@ export class FileNativePersistence {
 			if (!entry.isFile())
 				throw pathRejected(`Canonical directory ${directory} contains a non-file entry ${entry.name}.`)
 			const relativePath = `${directory}/${entry.name}`
-			assertTransactionalPath(relativePath)
+			assertTransactionalPath(this.layout, relativePath)
 			snapshot.set(relativePath, Uint8Array.from(await this.readBytesUnlocked(relativePath)))
 		}
 	}
@@ -952,16 +953,16 @@ export class FileNativePersistence {
 				if (!file.isFile())
 					throw pathRejected(`Authored Asset ${directory.name} contains a non-file entry ${file.name}.`)
 				const relativePath = `${relativeDirectory}/${file.name}`
-				assertTransactionalPath(relativePath)
+				assertTransactionalPath(this.layout, relativePath)
 				snapshot.set(relativePath, Uint8Array.from(await this.readBytesUnlocked(relativePath)))
 			}
 		}
 	}
 
 	private async recoverPendingTransactionsUnlocked(): Promise<void> {
-		const transactionsPath = resolveWorkspacePath(this.root, TRANSACTION_ROOT)
+		const transactionsPath = resolveWorkspacePath(this.root, this.layout.transactionsDir)
 		let entries: import('node:fs').Dirent[]
-		await assertSafePath(this.root, `${TRANSACTION_ROOT}/.placeholder`, true)
+		await assertSafePath(this.root, `${this.layout.transactionsDir}/.placeholder`, true)
 		try {
 			entries = await fs.readdir(transactionsPath, { withFileTypes: true })
 		}
@@ -973,12 +974,12 @@ export class FileNativePersistence {
 			throw new PersistenceError('persistence.recovery_failed', 'Persistence transaction directory is a symbolic link.')
 		for (const entry of entries) {
 			if (entry.isDirectory() && entry.name.startsWith('.cleanup-') && isFullUuid(entry.name.slice('.cleanup-'.length))) {
-				await fs.rm(resolveWorkspacePath(this.root, `${TRANSACTION_ROOT}/${entry.name}`), { recursive: true, force: true })
+				await fs.rm(resolveWorkspacePath(this.root, `${this.layout.transactionsDir}/${entry.name}`), { recursive: true, force: true })
 				continue
 			}
 			if (!entry.isDirectory() || !isFullUuid(entry.name))
 				throw new PersistenceError('persistence.recovery_failed', `Unrecognized persistence transaction entry ${entry.name}.`)
-			const transactionRelative = `${TRANSACTION_ROOT}/${entry.name}`
+			const transactionRelative = `${this.layout.transactionsDir}/${entry.name}`
 			const transactionAbsolute = resolveWorkspacePath(this.root, transactionRelative)
 			const journalPath = resolveWorkspacePath(this.root, `${transactionRelative}/journal.json`)
 			await assertSafePath(this.root, `${transactionRelative}/journal.json`, false).catch(error => {
@@ -998,7 +999,7 @@ export class FileNativePersistence {
 			}
 			try {
 				const journalValue = JSON.parse(await fs.readFile(journalPath, 'utf8')) as unknown
-				const journal = validateTransactionJournal(journalValue)
+				const journal = validateTransactionJournal(journalValue, this.layout)
 				await this.rollbackTransaction(transactionRelative, journal)
 				await fs.rm(transactionAbsolute, { recursive: true, force: true })
 			}
@@ -1032,7 +1033,7 @@ export class FileNativePersistence {
 		const transactionId = transactionRelative.split('/').at(-1)
 		if (!transactionId || !isFullUuid(transactionId))
 			throw new PersistenceError('persistence.path_rejected', 'Cannot clean a transaction without its internal UUID identity.')
-		const tombstoneRelative = `${TRANSACTION_ROOT}/.cleanup-${transactionId}`
+		const tombstoneRelative = `${this.layout.transactionsDir}/.cleanup-${transactionId}`
 		const transactionAbsolute = resolveWorkspacePath(this.root, transactionRelative)
 		const tombstoneAbsolute = resolveWorkspacePath(this.root, tombstoneRelative)
 		try { await fs.rename(transactionAbsolute, tombstoneAbsolute) }
@@ -1040,17 +1041,17 @@ export class FileNativePersistence {
 			if (!isNotFound(error)) throw error
 			return
 		}
-		await syncDirectory(resolveWorkspacePath(this.root, TRANSACTION_ROOT))
+		await syncDirectory(resolveWorkspacePath(this.root, this.layout.transactionsDir))
 		await fs.rm(tombstoneAbsolute, { recursive: true, force: true })
 	}
 
 	private async acquireLock(deadline: number): Promise<() => Promise<void>> {
-		await ensureSafeDirectory(this.root, '.uiux')
-		const lockAbsolute = resolveWorkspacePath(this.root, PERSISTENCE_LOCK)
+		await ensureSafeDirectory(this.root, this.layout.metadataDir)
+		const lockAbsolute = resolveWorkspacePath(this.root, this.layout.lockPath)
 		const lockParent = dirname(lockAbsolute)
 		const token = randomUUID()
 		while (true) {
-			const candidateRelative = `.uiux/.persistence-lock-${token}-${randomUUID()}.tmp`
+			const candidateRelative = this.layout.metadataFilePath(`.persistence-lock-${token}-${randomUUID()}.tmp`)
 			const candidateAbsolute = resolveWorkspacePath(this.root, candidateRelative)
 			let published = false
 			try {
@@ -1347,7 +1348,7 @@ export class WorkspaceFileRepository implements MutableResourceRepository<'works
 		return this.persistence.withLock(async () => {
 			if (resource.schemaVersion !== this.persistence.schemaPolicy.currentVersion)
 				throw new PersistenceError('workspace.schema_unsupported', 'A new Workspace must use the injected policy currentVersion.')
-			const path = workspaceRelativePath()
+			const path = this.persistence.layout.manifestPath
 			if (await this.persistence.readOptionalBytesUnlocked(path))
 				throw new PersistenceError('persistence.resource_exists', 'Workspace manifest already exists.')
 			const bytes = this.persistence.serializeJson(resource, path)
@@ -1362,7 +1363,7 @@ export class WorkspaceFileRepository implements MutableResourceRepository<'works
 			await this.persistence.assertWritableUnlocked()
 			if (input.resource.schemaVersion !== this.persistence.schemaPolicy.currentVersion)
 				throw new PersistenceError('workspace.schema_unsupported', 'Normal Workspace writes must keep the schemaVersion at the injected policy currentVersion.')
-			const path = workspaceRelativePath()
+			const path = this.persistence.layout.manifestPath
 			const currentBytes = await this.persistence.readOptionalBytesUnlocked(path)
 			if (!currentBytes)
 				throw new PersistenceError('workspace.manifest_missing', 'Workspace manifest does not exist.')
@@ -1718,7 +1719,7 @@ export class ImmutableArtifactStore {
 		if (!(bytes instanceof Uint8Array))
 			throw new PersistenceError('persistence.invalid_resource', 'Artifact content must be supplied as bytes.')
 		const identity = digestBytes(bytes)
-		const relativePath = artifactRelativePath(identity)
+		const relativePath = this.persistence.layout.artifactRelativePath(identity)
 		const existing = await this.persistence.readOptionalBytesUnlocked(relativePath)
 		if (existing) {
 			if (digestBytes(existing) !== identity)
@@ -1737,7 +1738,7 @@ export class ImmutableArtifactStore {
 
 	async read(identity: string): Promise<Uint8Array | undefined> {
 		return this.persistence.withReadLock(async () => {
-			const relativePath = artifactRelativePath(identity)
+			const relativePath = this.persistence.layout.artifactRelativePath(identity)
 			const bytes = await this.persistence.readOptionalBytesUnlocked(relativePath)
 			if (!bytes) return undefined
 			if (digestBytes(bytes) !== identity)
@@ -1748,7 +1749,7 @@ export class ImmutableArtifactStore {
 
 	async readCandidateJson<T = unknown>(identity: string, maxBytes = 512 * 1024): Promise<T | undefined> {
 		return this.persistence.withReadLock(async () => {
-			const relativePath = artifactRelativePath(identity)
+			const relativePath = this.persistence.layout.artifactRelativePath(identity)
 			const absolutePath = resolveWorkspacePath(this.persistence.root, relativePath)
 			let stats: import('node:fs').Stats
 			try {
@@ -1799,7 +1800,7 @@ export class ImmutableArtifactStore {
 
 	async listIdentities(): Promise<readonly string[]> {
 		return this.persistence.withReadLock(async () => {
-			const artifactsRelative = '.uiux/artifacts/sha256'
+			const artifactsRelative = `${this.persistence.layout.artifactsDir}/sha256`
 			const artifactsAbsolute = resolveWorkspacePath(this.persistence.root, artifactsRelative)
 			let shards: import('node:fs').Dirent[]
 			try {
@@ -1882,7 +1883,7 @@ async function commitCanonicalWrite<Written extends boolean | void>(
 	const state = observerState(persistence)
 	const observer = state.observer
 	const context = observer ? currentDesignWriteContext() : undefined
-	const versioned = observer && context ? changes.filter(change => LEGACY_LAYOUT.classifyVersionedPath(change.path)) : []
+	const versioned = observer && context ? changes.filter(change => persistence.layout.classifyVersionedPath(change.path)) : []
 	if (!observer || !context || versioned.length === 0) return write()
 	let before: readonly ResourceFilesBefore[]
 	try {
@@ -1910,7 +1911,7 @@ function resourceBeforeWrite(entry: ResourceFilesBefore): CanonicalResourceBefor
 async function readResourceFilesBeforeWrite(persistence: FileNativePersistence, changes: readonly FileChange[]): Promise<readonly ResourceFilesBefore[]> {
 	const byResource = new Map<string, ResourceFilesBefore>()
 	for (const change of changes) {
-		const resource = LEGACY_LAYOUT.classifyVersionedPath(change.path)!
+		const resource = persistence.layout.classifyVersionedPath(change.path)!
 		const identity = `${resource.kind}\0${resource.key}`
 		let entry = byResource.get(identity)
 		if (!entry) {
@@ -1940,7 +1941,7 @@ async function readVersionedResourceFilesUnlocked(persistence: FileNativePersist
 	}
 	for (const entry of entries) {
 		const relativePath = `${directory}/${entry.name}`
-		if (entry.isFile() && LEGACY_LAYOUT.classifyVersionedPath(relativePath))
+		if (entry.isFile() && persistence.layout.classifyVersionedPath(relativePath))
 			files.set(relativePath, Uint8Array.from(await persistence.readBytesUnlocked(relativePath)))
 	}
 	return files
@@ -2173,10 +2174,11 @@ function diffSnapshots(previous: WorkspaceSnapshot, next: WorkspaceSnapshot): Fi
 }
 
 function validateCanonicalSnapshot(snapshot: WorkspaceSnapshot, expectedVersion: number, policy: WorkspaceSchemaPolicy): void {
-	const manifestPath = workspaceRelativePath()
+	const layout = layoutForSchemaVersion(expectedVersion)
+	const manifestPath = layout.manifestPath
 	const manifestBytes = snapshot.get(manifestPath)
 	if (!manifestBytes)
-		throw new PersistenceError('workspace.migration_failed', 'Migration result must contain .uiux/workspace.json.')
+		throw new PersistenceError('workspace.migration_failed', `Migration result must contain ${manifestPath}.`)
 	const manifest = parseJsonBytes(manifestBytes, manifestPath)
 	if (!isRecord(manifest) || manifest.schemaVersion !== expectedVersion)
 		throw new PersistenceError('workspace.migration_failed', `Migration result manifest schemaVersion must equal its policy step target ${expectedVersion}.`)
@@ -2184,7 +2186,7 @@ function validateCanonicalSnapshot(snapshot: WorkspaceSnapshot, expectedVersion:
 		throw new PersistenceError('workspace.migration_failed', `Migration step target ${expectedVersion} is not recognized by the injected policy.`)
 	const assetFiles = new Map<string, string[]>()
 	for (const [relativePath, bytes] of snapshot) {
-		assertTransactionalPath(relativePath)
+		assertTransactionalPath(layout, relativePath)
 		if (!(bytes instanceof Uint8Array))
 			throw new PersistenceError('workspace.migration_failed', `Migration result ${relativePath} must contain bytes.`)
 		if (relativePath === manifestPath) continue
@@ -2233,14 +2235,14 @@ function validateCanonicalSnapshot(snapshot: WorkspaceSnapshot, expectedVersion:
 	}
 }
 
-function validateTransactionJournal(value: unknown): TransactionJournal {
+function validateTransactionJournal(value: unknown, layout: WorkspaceLayout): TransactionJournal {
 	if (!isRecord(value) || !Array.isArray(value.changes))
 		throw new TypeError('Persistence transaction journal has an invalid shape.')
 	const changes: { path: string; existed: boolean }[] = []
 	for (const change of value.changes) {
 		if (!isRecord(change) || typeof change.path !== 'string' || typeof change.existed !== 'boolean')
 			throw new TypeError('Persistence transaction journal contains an invalid entry.')
-		assertTransactionalPath(change.path)
+		assertTransactionalPath(layout, change.path)
 		changes.push({ path: change.path, existed: change.existed })
 	}
 	if (new Set(changes.map(change => change.path)).size !== changes.length)
@@ -2248,9 +2250,9 @@ function validateTransactionJournal(value: unknown): TransactionJournal {
 	return { changes }
 }
 
-function assertTransactionalPath(relativePath: string): void {
+function assertTransactionalPath(layout: WorkspaceLayout, relativePath: string): void {
 	resolveWorkspacePath('/', relativePath)
-	if (relativePath === workspaceRelativePath()) return
+	if (relativePath === layout.manifestPath) return
 	const segments = relativePath.split('/')
 	if (segments.length === 2 && segments[0] === 'views' && /^[0-9a-f-]+\.view\.json$/iu.test(segments[1]!) && isFullUuid(segments[1]!.slice(0, -'.view.json'.length))) return
 	if (segments.length === 2 && segments[0] === 'flows' && /^[0-9a-f-]+\.flow\.json$/iu.test(segments[1]!) && isFullUuid(segments[1]!.slice(0, -'.flow.json'.length))) return

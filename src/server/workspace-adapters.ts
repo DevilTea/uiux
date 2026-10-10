@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 
 import {
 	NodeAdapterManifestLoader,
@@ -18,10 +17,11 @@ import {
 	type PreviewBundleResult,
 } from './preview-bundler'
 import { validateWorkspaceManifest, type WorkspaceManifest } from '../domain/workspace/schema'
+import { LEGACY_LAYOUT, resolveWorkspacePath, type WorkspaceLayout } from '../persistence/paths'
 
-export async function readRawWorkspaceManifest(workspaceRoot: string): Promise<WorkspaceManifest | undefined> {
+export async function readRawWorkspaceManifest(workspaceRoot: string, layout: WorkspaceLayout = LEGACY_LAYOUT): Promise<WorkspaceManifest | undefined> {
 	try {
-		const content = await readFile(join(workspaceRoot, '.uiux', 'workspace.json'), 'utf8')
+		const content = await readFile(resolveWorkspacePath(workspaceRoot, layout.manifestPath), 'utf8')
 		const parsed = JSON.parse(content)
 		const validation = validateWorkspaceManifest(parsed)
 		return validation.ok ? validation.value : undefined
@@ -31,15 +31,15 @@ export async function readRawWorkspaceManifest(workspaceRoot: string): Promise<W
 	}
 }
 
-export async function resolveSelectedWorkspaceAdapters(workspaceRoot: string): Promise<AdapterSetResolutionResult> {
-	const manifest = await readRawWorkspaceManifest(workspaceRoot)
+export async function resolveSelectedWorkspaceAdapters(workspaceRoot: string, layout: WorkspaceLayout = LEGACY_LAYOUT): Promise<AdapterSetResolutionResult> {
+	const manifest = await readRawWorkspaceManifest(workspaceRoot, layout)
 	if (!manifest) {
 		return {
 			state: 'invalid',
 			diagnostics: [{
 				code: 'workspace.manifest_missing',
 				path: '/workspace',
-				message: 'Could not read valid workspace manifest from .uiux/workspace.json.',
+				message: `Could not read valid workspace manifest from ${layout.manifestPath}.`,
 			}],
 			summaries: [],
 		}
