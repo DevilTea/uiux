@@ -66,9 +66,9 @@ Authors, humans and agents alike, have two more operations on their own words, o
 
 ### Members, roles and tokens
 
-Every `/api/*` and `/mcp` request needs a credential. Each Workspace has its own roster of members on this host, at `$UIUX_HOME/workspaces/<sha256(realpath)>/access.json` (`UIUX_HOME` defaults to `~/.uiux`). The roster never lives in the Workspace or in Git, and it stores only hashes of secrets. A member has a nickname, a kind (`human` or `agent`, fixed at creation) and one cumulative role: Viewer ⊂ Reviewer ⊂ Editor ⊂ Owner. Agents are capped at Editor and can never resolve Review threads.
+Every `/api/*` and `/mcp` request needs a credential. Each Workspace has its own roster of members on this host, at `$UIUX_HOME/workspaces/<sha256(realpath)>/access.json` (`UIUX_HOME` defaults to `~/.uiux`). The roster never lives in the Workspace or in Git, and it stores only hashes of secrets. A member has a nickname, a kind (`human` or `agent`, fixed at creation) and a set of permission keys, such as `views.write` or `members.manage`. The roster stores each member's keys, and a member's label names the built-in preset (Viewer, Reviewer, Editor or Owner) whose keys match, or Custom. Keys for people only, such as `reviews.resolve` and `members.manage`, are never stored on an Agent, and at least one human member always keeps `members.manage`. `--role` on `uiux member add|set` still gives a member the keys of the preset of that name; an Agent gets them without the keys for people only, and `--role owner` is refused for it.
 
-The first `uiux dev` of a Workspace creates its Owner, named after your OS user, and prints a single-use sign-in link (valid for 24 hours). Open it in the browser to sign in. The session lasts 14 days idle and 30 days at most, and it survives restarts. Lost the link? Run `uiux invite create --workspace <dir> --member <nick>` for a new one.
+The first `uiux dev` of a Workspace with no human holder of `members.manage` creates one with every key, named after your OS user, and prints a single-use sign-in link (valid for 24 hours). Open it in the browser to sign in. The session lasts 14 days idle and 30 days at most, and it survives restarts. Lost the link? Run `uiux invite create --workspace <dir> --member <nick>` for a new one.
 
 Manage the roster with the CLI (each command needs `--workspace <dir>` and works while the server runs), or as the Owner on the Workbench **Members** page (on a loopback URL or an `https` origin, see Network access):
 
@@ -80,11 +80,11 @@ uiux session list|revoke ...
 uiux access copy --from <old-dir> --workspace <new-dir> [--replace]
 ```
 
-Rosters are not downgrade-compatible: a roster that this version has written, for example with a session that records its origin, may not load in an older UIUX ([owner ruling 3, Discussion #174](https://github.com/DevilTea/uiux/discussions/174#discussioncomment-18849995)). Rosters written by older versions keep loading.
+Rosters are not downgrade-compatible: a roster that this version has written, for example with a session that records its origin, may not load in an older UIUX ([owner ruling 3, Discussion #174](https://github.com/DevilTea/uiux/discussions/174#discussioncomment-18849995)). Rosters written by older versions keep loading. The first command or server that opens a roster written with roles (`version: 1`) upgrades it to keys (`version: 2`) and keeps the old file beside it as `access.v1.json`; an older UIUX then refuses the upgraded roster.
 
 A moved or renamed Workspace, and every git worktree, starts with an empty roster. `uiux access copy` carries members, tokens and the host version history over once, so existing agent tokens keep working and the timeline continues; it refuses to copy history into a Workspace that a running server holds. Copy before you run `uiux migrate` on the new path: the target's own history (such as the migration's Checkpoint boundary versions and its system version) is not merged, and `--replace` discards the target's roster and that history, printing how many versions it discarded.
 
-Review actors and times on `/api/*` and `/mcp` are stamped by the server from the signed-in member (`member:<uuid>`). A supplied `actor` or `at` is ignored with the warnings `auth.actor_ignored` and `auth.time_ignored`. Resolving needs a human member on a Workbench session; bearer tokens get `review.resolve_requires_workbench`. Each operation needs permission keys, which a member holds through its role until the roster stores keys; a refusal is `403 auth.scope_denied` whose `requiredKeys` names the keys the request lacks.
+Review actors and times on `/api/*` and `/mcp` are stamped by the server from the signed-in member (`member:<uuid>`). A supplied `actor` or `at` is ignored with the warnings `auth.actor_ignored` and `auth.time_ignored`. Resolving needs a human member on a Workbench session; bearer tokens get `review.resolve_requires_workbench`. Each operation needs permission keys; a refusal is `403 auth.scope_denied` whose `requiredKeys` names the keys the request lacks.
 
 ### Connect an agent
 

@@ -7,12 +7,13 @@ import { fileURLToPath } from 'node:url'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { keysForRole } from '../src/application/access/keys'
 import { runAccessCommand } from '../src/cli/access'
 import type { HostVersionRecord } from '../src/domain/history/schema'
 import { blobDigest, HostHistoryStore } from '../src/persistence/history/host-store'
 import { acquireServerHold } from '../src/persistence/server-hold'
 import { verifyCredential } from '../src/server/access/roster'
-import { AccessStore, copyHostHistory, hostHistoryPaths, planHostHistoryCopy } from '../src/server/access/store'
+import { AccessStore, accessStorePaths, copyHostHistory, hostHistoryPaths, planHostHistoryCopy } from '../src/server/access/store'
 
 const CLI = join(fileURLToPath(new URL('..', import.meta.url)), 'bin', 'uiux.mjs')
 const cleanup: string[] = []
@@ -67,12 +68,12 @@ describe('uiux access commands', () => {
 		expect((await run('member', 'list', '--workspace', workspace)).out).toContain('No roster yet')
 		expect(await run('member', 'add', 'deviltea', '--role', 'owner', '--workspace', workspace)).toMatchObject({ code: 0 })
 		expect(await run('member', 'add', 'claude', '--kind', 'agent', '--role', 'editor', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('uiux token create') })
-		expect(await run('member', 'add', 'bot', '--kind', 'agent', '--role', 'owner', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('capped at Editor') })
+		expect(await run('member', 'add', 'bot', '--kind', 'agent', '--role', 'owner', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('humanOnly') })
 		const list = await run('member', 'list', '--workspace', workspace)
 		expect(list.out).toMatch(/Roster [a-z2-7]{4} for /u)
 		expect(list.out).toContain(workspace)
 		expect(list.out).toMatch(/claude\s+agent\s+editor\s+0\s+0/u)
-		expect(await run('member', 'set', 'deviltea', '--role', 'editor', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('last human Owner') })
+		expect(await run('member', 'set', 'deviltea', '--role', 'editor', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('last human holder of `members.manage`') })
 		expect(await run('member', 'set', 'claude', '--nickname', 'claude-main', '--workspace', workspace)).toMatchObject({ code: 0 })
 		expect(await run('member', 'set', 'claude-main', '--workspace', workspace)).toMatchObject({ code: 2 })
 		expect(await run('member', 'remove', 'claude-main', '--workspace', workspace)).toMatchObject({ code: 0 })
@@ -180,6 +181,35 @@ describe('uiux access commands', () => {
 		await writeFile(join(third, '.uiux', 'workspace.json'), '{}\n')
 		expect(await run('access', 'copy', '--from', workspace, '--workspace', third)).toMatchObject({ code: 0 })
 		expect(await run('access', 'copy', '--from', join(base, 'never-existed'), '--workspace', join(base, 'third'), '--replace')).toMatchObject({ code: 1, err: expect.stringContaining('No roster recorded') })
+	})
+
+	it('copies a version 1 roster as version 2 with the keys the upgrade maps, leaving the source as it was (Clause 01a1144e-56bd)', async () => {
+		const { base, workspace, home, run } = await setup()
+		await run('member', 'add', 'deviltea', '--role', 'owner', '--workspace', workspace)
+		const paths = accessStorePaths(home, workspace)
+		const current = JSON.parse(await readFile(paths.file, 'utf8')) as { members: { id: string; nickname: string; createdAt: string }[] }
+		const owner = current.members[0]!
+		const legacy = {
+			...current,
+			version: 1,
+			members: [
+				{ id: owner.id, nickname: 'deviltea', kind: 'human', role: 'owner', createdAt: owner.createdAt },
+				{ id: randomUUID(), nickname: 'claude', kind: 'agent', role: 'editor', createdAt: owner.createdAt },
+			],
+		}
+		const legacyText = `${JSON.stringify(legacy, null, 2)}\n`
+		await writeFile(paths.file, legacyText)
+		const target = await initWorkspace(base, 'moved')
+		expect(await run('access', 'copy', '--from', workspace, '--workspace', target)).toMatchObject({ code: 0 })
+		const copied = JSON.parse(await readFile(accessStorePaths(home, target).file, 'utf8')) as { version: number; members: { nickname: string; keys: string[] }[] }
+		expect(copied.version).toBe(2)
+		expect(copied.members).toMatchObject([{ nickname: 'deviltea', keys: [...keysForRole('human', 'owner')] }, { nickname: 'claude', keys: [...keysForRole('agent', 'editor')] }])
+		expect(copied.members.every(member => !('role' in member))).toBe(true)
+		// Reading a copy source writes nothing to it; the source upgrades when it is next opened.
+		expect(await readFile(paths.file, 'utf8')).toBe(legacyText)
+		expect(await run('member', 'list', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringMatching(/claude\s+agent\s+editor/u) })
+		expect(JSON.parse(await readFile(paths.file, 'utf8')).version).toBe(2)
+		expect(await readFile(paths.v1Backup, 'utf8')).toBe(legacyText)
 	})
 
 	it('refuses an uninitialized Workspace, a missing --workspace and a UIUX_HOME inside the Workspace', async () => {

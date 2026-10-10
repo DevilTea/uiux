@@ -2,6 +2,7 @@ import { lstat, stat } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { resolve } from 'node:path'
 
+import { memberLabel } from '../application/access/labels'
 import { FileNativePersistence } from '../persistence/file-native'
 import { LEGACY_LAYOUT, resolveWorkspacePath } from '../persistence/paths'
 import { readActiveServerHold } from '../persistence/server-hold'
@@ -23,6 +24,7 @@ import {
 	setMember,
 	summarizeMembers,
 	type AccessFile,
+	type StoredMember,
 } from '../server/access/roster'
 import { AccessStore, assertHomeOutsideWorkspace, copyHostHistory, planHostHistoryCopy, realFuturePath, resolveUiuxHome, rosterExists, workspaceRealRoot, writeNewRoster, type HostHistoryCopyResult } from '../server/access/store'
 
@@ -94,6 +96,11 @@ function table(rows: readonly (readonly string[])[]): string[] {
 }
 
 const day = (value: string | null) => value ? value.slice(0, 10) : 'never'
+/** The built-in preset that labels a member, by `id` (the role names `--role` takes), or `custom`. */
+const access = (member: StoredMember) => {
+	const label = memberLabel(member)
+	return 'preset' in label ? label.preset.id : 'custom'
+}
 const when = (value: string | null) => value ? value.replace('T', ' ').slice(0, 16) : '-'
 
 export async function runAccessCommand(options: AccessCommandOptions): Promise<number> {
@@ -189,7 +196,7 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				if (!role) throw new UsageError('uiux member add requires --role <owner|editor|reviewer|viewer>.')
 				const store = await requireStore(context)
 				const member = await store.update(file => addMember(file, { nickname: context.parsed.positionals[0]!, role, kind: context.parsed.values.get('kind') ?? 'human' }, context.now()))
-				context.out(`Added ${member.kind} member ${member.nickname} (${member.role}) to roster ${store.data.hint} for ${store.data.workspaceRoot}.`)
+				context.out(`Added ${member.kind} member ${member.nickname} (${access(member)}) to roster ${store.data.hint} for ${store.data.workspaceRoot}.`)
 				if (member.kind === 'agent') context.out(`  Next: uiux token create --workspace ${store.data.workspaceRoot} --member ${member.nickname}`)
 				else context.out(`  Next: uiux invite create --workspace ${store.data.workspaceRoot} --member ${member.nickname}`)
 				return 0
@@ -210,7 +217,7 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 					return 0
 				}
 				const members = summarizeMembers(file, context.now().getTime())
-				context.out(table([['NICKNAME', 'KIND', 'ROLE', 'TOKENS', 'SESSIONS'], ...members.map(member => [member.nickname, member.kind, member.role, String(member.activeTokens), String(member.activeSessions)])]).join('\n'))
+				context.out(table([['NICKNAME', 'KIND', 'ROLE', 'TOKENS', 'SESSIONS'], ...members.map((member, index) => [member.nickname, member.kind, access(file.members[index]!), String(member.activeTokens), String(member.activeSessions)])]).join('\n'))
 				return 0
 			},
 		}
@@ -222,7 +229,7 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				if (role === undefined && nickname === undefined) throw new UsageError('uiux member set needs --role <role> and/or --nickname <new>. The kind is immutable.')
 				const store = await requireStore(context)
 				const member = await store.update(file => setMember(file, context.parsed.positionals[0]!, { ...(role !== undefined ? { role } : {}), ...(nickname !== undefined ? { nickname } : {}) }))
-				context.out(`Updated ${member.nickname}: ${member.kind}, ${member.role}.`)
+				context.out(`Updated ${member.nickname}: ${member.kind}, ${access(member)}.`)
 				return 0
 			},
 		}
@@ -248,7 +255,7 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 					...(expiresInDays !== undefined ? { expiresInDays } : {}),
 				}, context.now()))
 				const member = store.data.members.find(item => item.id === issued.entry.memberId)!
-				context.out(`Created token ${issued.entry.id} for ${member.nickname} (${member.kind}, ${member.role}; expires ${day(issued.entry.expiresAt)}).`)
+				context.out(`Created token ${issued.entry.id} for ${member.nickname} (${member.kind}, ${access(member)}; expires ${day(issued.entry.expiresAt)}).`)
 				context.out(issued.credential)
 				context.out('Store it in an environment variable such as UIUX_MCP_TOKEN, never commit it. It is shown only once.')
 				return 0
