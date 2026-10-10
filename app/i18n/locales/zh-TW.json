@@ -496,7 +496,8 @@
       "viewLoadFailed": "無法載入 View。",
       "bundleInvalid": "預覽 Runtime 不完整。請重新建置 UIUX 後重新載入。",
       "bundleLoadFailed": "無法載入預覽 Runtime。",
-      "viewNotInVersion": "這個版本中沒有這個 View。"
+      "viewNotInVersion": "這個版本中沒有這個 View。",
+      "versionUnavailable": "發布的快照不含版本歷程，因此無法顯示這個版本。"
     }
   },
   "reviews": {

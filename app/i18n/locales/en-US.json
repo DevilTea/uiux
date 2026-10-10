@@ -496,7 +496,8 @@
       "viewLoadFailed": "Could not load the View.",
       "bundleInvalid": "The preview runtime is incomplete. Rebuild UIUX, then reload.",
       "bundleLoadFailed": "Could not load the preview runtime.",
-      "viewNotInVersion": "This View doesn't exist in this version."
+      "viewNotInVersion": "This View doesn't exist in this version.",
+      "versionUnavailable": "A published snapshot has no version history, so this version can't be shown."
     }
   },
   "reviews": {
