@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { createApp, createRouter, toNodeListener } from 'h3'
+import { createApp, createRouter, defineEventHandler, toNodeListener } from 'h3'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import blobRoute from '../server/api/history/blobs/[digest].get'
@@ -66,6 +66,9 @@ beforeAll(async () => {
 	root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-preview-')))
 	process.env.UIUX_WORKSPACE_ROOT = root
 	const app = createApp()
+	// The matched origin the request gate attaches on the live server; sign-in records it. (The
+	// gate itself is left out so the stored-content headers below are the route's own.)
+	app.use(defineEventHandler((event) => { event.context.uiuxOrigin = { origin, kind: 'loopback', scheme: 'http', loopbackHost: true } }))
 	app.use(createAccessGuardHandler(() => getSelectedWorkspaceServerRuntime().access()))
 	const router = createRouter()
 	router.post('/api/session/login', loginRoute)

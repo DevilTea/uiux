@@ -27,6 +27,7 @@ import { readMergedTimeline, versionResourcesFromSnapshot } from '../src/persist
 import { CHECKPOINT_RECOMMENDATION, versionResourceUri } from '../src/mcp/server'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createAccessGuardHandler } from '../src/server/access/http'
+import { createLoopbackGuardHandler } from '../src/server/loopback-guard'
 import { createHistoryStoreFactory, type HistoryStoreFactory } from '../src/server/history-stores'
 import { createCheckpointForHttp, deleteCheckpointForHttp, diffVersionsForHttp, listVersionsForHttp, readVersionForHttp } from '../src/server/history-http'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
@@ -638,6 +639,8 @@ describe('/api/history/* over HTTP', () => {
 		root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-api-')))
 		process.env.UIUX_WORKSPACE_ROOT = root
 		const app = createApp()
+		// The request gate attaches the matched origin that sign-in records, as on the live server.
+		app.use(createLoopbackGuardHandler())
 		app.use(createAccessGuardHandler(() => getSelectedWorkspaceServerRuntime().access()))
 		const router = createRouter()
 		router.post('/api/session/login', loginRoute)
