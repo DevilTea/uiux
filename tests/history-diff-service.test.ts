@@ -30,7 +30,7 @@ import { createHistoryStoreFactory, type HistoryStores } from '../src/server/his
 import { diffVersionsForHttp } from '../src/server/history-http'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { bearer, connectMcp, provisionToken, scoped, testMember } from './support/access'
-import { writeManifest } from './support/workspace-layout'
+import { CURRENT_TEST_LAYOUT, writeManifest } from './support/workspace-layout'
 
 /**
  * Version comparison through the service, `GET /api/history/diff` and MCP `get_version_diff`
@@ -97,7 +97,7 @@ type RecordOptions = Readonly<{
 async function record(ctx: Context, type: 'checkpoint' | 'autosave', options: RecordOptions): Promise<string> {
 	const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
 	options.edit?.(snapshot)
-	const built = versionResourcesFromSnapshot(snapshot)
+	const built = versionResourcesFromSnapshot(snapshot, CURRENT_TEST_LAYOUT)
 	const resources = options.resources ? options.resources([...built.resources]) : [...built.resources]
 	const base = { historySchemaVersion: 1 as const, id: randomUUID(), at: options.at, workspaceSchemaVersion: options.workspaceSchemaVersion ?? 4, resources }
 	if (type === 'checkpoint') {
@@ -378,7 +378,7 @@ describe('GET /api/history/diff access (Clause 01a11485-f978-767a-b977-33028aee7
 
 		const runtime = getSelectedWorkspaceServerRuntime()
 		const snapshot = await runtime.persistence.withReadLock(() => runtime.persistence.scanVersionedSnapshotUnlocked())
-		const built = versionResourcesFromSnapshot(snapshot)
+		const built = versionResourcesFromSnapshot(snapshot, CURRENT_TEST_LAYOUT)
 		checkpointId = randomUUID()
 		await new CheckpointStore(runtime.persistence).create({ historySchemaVersion: 1, id: checkpointId, type: 'checkpoint', actor: HUMAN, at: '2026-10-01T00:00:00.000Z', workspaceSchemaVersion: 4, resources: built.resources, name: 'Before', source: 'workbench' }, built.blobs)
 	})

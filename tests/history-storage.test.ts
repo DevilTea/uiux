@@ -46,7 +46,7 @@ import {
 import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
 import { accessStorePaths, hostHistoryPaths, workspaceStoreId } from '../src/server/access/store'
 import { createSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
-import { metadataPath } from './support/workspace-layout'
+import { CURRENT_TEST_LAYOUT, metadataPath } from './support/workspace-layout'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const FLOW_ID = '22222222-2222-4222-8222-222222222222'
@@ -472,7 +472,7 @@ describe('checkpoint store and versioned snapshot', () => {
 			viewRelativePath(VIEW_ID),
 		].sort())
 
-		const { resources, blobs } = versionResourcesFromSnapshot(snapshot)
+		const { resources, blobs } = versionResourcesFromSnapshot(snapshot, CURRENT_TEST_LAYOUT)
 		expect(resources.map(resource => `${resource.kind}:${resource.key}`)).toEqual(['asset:' + ASSET_ID, 'flow:' + FLOW_ID, 'locale:zh-TW', 'view:' + VIEW_ID, 'workspace:workspace'])
 		const revisionOf = (kind: string) => resources.find(resource => resource.kind === kind)!.revision
 		expect(revisionOf('view')).toBe(await persistence.views.readRevision(VIEW_ID))
@@ -491,7 +491,7 @@ describe('checkpoint store and versioned snapshot', () => {
 		const persistence = await newWorkspace(root)
 		await seedAllKinds(persistence)
 		const store = new CheckpointStore(persistence)
-		const { resources, blobs } = versionResourcesFromSnapshot(await persistence.withLock(() => persistence.scanVersionedSnapshotUnlocked()))
+		const { resources, blobs } = versionResourcesFromSnapshot(await persistence.withLock(() => persistence.scanVersionedSnapshotUnlocked()), persistence.layout)
 		const first = checkpoint({ resources, at: iso(NOW.getTime() - 1000) })
 		await store.create(first, blobs)
 

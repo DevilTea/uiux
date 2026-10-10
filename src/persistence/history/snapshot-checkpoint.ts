@@ -39,7 +39,7 @@ export async function writeSnapshotCheckpointUnlocked(input: SnapshotCheckpointI
 		type: 'checkpoint',
 		actor: input.actor,
 		at: input.at,
-		workspaceSchemaVersion: await input.persistence.readDecodeSchemaVersionUnlocked(),
+		workspaceSchemaVersion: await input.persistence.readRecordSchemaVersionUnlocked(),
 		resources: snapshot.resources,
 		name: input.name,
 		...(input.note !== undefined ? { note: input.note } : {}),

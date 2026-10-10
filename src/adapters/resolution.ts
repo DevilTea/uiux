@@ -2,7 +2,14 @@ import { readFile, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { CANONICAL_WORKSPACE_DATA_DIRECTORIES, WORKSPACE_MANIFEST_PATH } from '../persistence/paths'
+import { PRODUCT_KIT_FILENAME } from '../domain/product-kit/schema'
+import {
+	CANONICAL_WORKSPACE_DATA_DIRECTORIES,
+	V5_CODE_DIRECTORY,
+	V5_MANIFEST_PATH,
+	WORKSPACE_DATA_DIRECTORY,
+	WORKSPACE_MANIFEST_PATH,
+} from '../persistence/paths'
 
 import { resolve as resolveImport } from 'import-meta-resolve'
 import {
@@ -129,7 +136,7 @@ export class NodeWorkspaceAdapterModuleResolver implements AdapterModuleResolver
 		// path (the selected root, a sibling, or an enclosing one): a bare specifier can resolve via
 		// a monorepo symlink or a self-reference `exports`/`imports` into any Workspace's data.
 		if (await resolvedPathEntersWorkspaceDataDirectory(resolvedPath, realRoot))
-			throw new Error('Adapter module resolves inside a canonical Workspace data directory; Adapter code must live outside authored data directories that Editors and Agents can write.')
+			throw new Error('Adapter module resolves inside a canonical Workspace data directory (in a schemaVersion 5 Workspace root, anywhere outside kit/); Adapter code must live outside authored data that Editors and Agents can write.')
 
 		const packageMetadata = relativeSelection ? {} : await findNearestPackageMetadata(resolvedPath)
 		return {
@@ -354,7 +361,11 @@ function isAbsentError(error: unknown): boolean {
  * reachable through a monorepo symlink or a self-reference `exports`/`imports`.
  *
  * The selected Workspace root (`selectedWorkspaceRoot`, a realpath) is always a boundary. Every OTHER
- * ancestor directory that holds a Workspace manifest is treated as a Workspace root too. Membership is
+ * ancestor directory that holds a Workspace manifest is treated as a Workspace root too. In the
+ * schemaVersion 5 layout, where the former `.uiux/` directory is the root, the whole root but its
+ * `kit/` code directory counts as data: the data directories, `artifacts/`, `history/` and the files
+ * beside them. (Resolving `./` specifiers from `kit/` and the `kit/package.json` dependency guard are
+ * separate, not built here.) Membership is
  * decided by file identity (`dev`/`ino`), never by name: a case-insensitive file system (WSL drvfs,
  * Docker Desktop bind mounts, exFAT/CIFS, ext4 casefold) can leave a realpath spelled `…/ASSETS/…`
  * that a string comparison against `assets` would miss.
@@ -364,17 +375,30 @@ export async function resolvedPathEntersWorkspaceDataDirectory(
 	selectedWorkspaceRoot?: string,
 	readIdentity: FileIdentityReader = statFileIdentity,
 ): Promise<boolean> {
-	if (selectedWorkspaceRoot !== undefined
-		&& await firstSegmentIsCanonicalDataDirectory(selectedWorkspaceRoot, resolvedPath, readIdentity))
-		return true
+	if (selectedWorkspaceRoot !== undefined) {
+		if (await firstSegmentIsCanonicalDataDirectory(selectedWorkspaceRoot, resolvedPath, readIdentity))
+			return true
+		// A selected root in the schemaVersion 5 layout (its manifest directly under it, as persistence
+		// detects it) keeps everything but `kit/` as Workspace data.
+		if (await readIdentity(join(selectedWorkspaceRoot, V5_MANIFEST_PATH)) !== undefined
+			&& await readIdentity(join(selectedWorkspaceRoot, WORKSPACE_MANIFEST_PATH)) === undefined
+			&& await liesOutsideCodeDirectory(selectedWorkspaceRoot, resolvedPath, readIdentity))
+			return true
+	}
 	// Scope: this guards data that Editors and Agents can author through the product. A data
 	// directory that the host operator has symlinked or bind-mounted outside a Workspace is out of
 	// scope — Editors and Agents cannot create such links, so only the operator can place one.
 	let directory = dirname(resolvedPath)
 	while (true) {
 		if (directory !== selectedWorkspaceRoot) {
-			const manifest = await readIdentity(join(directory, WORKSPACE_MANIFEST_PATH))
-			if (manifest !== undefined && await firstSegmentIsCanonicalDataDirectory(directory, resolvedPath, readIdentity))
+			const relocated = await isRelocatedWorkspaceRoot(directory, readIdentity)
+			if (relocated && await liesOutsideCodeDirectory(directory, resolvedPath, readIdentity))
+				return true
+			// An old-layout Workspace keeps its manifest in `.uiux/`; a `.uiux/` that is itself a
+			// relocated root is checked as one when the walk reaches it.
+			if (!relocated && await readIdentity(join(directory, WORKSPACE_MANIFEST_PATH)) !== undefined
+				&& !await isRelocatedWorkspaceRoot(join(directory, WORKSPACE_DATA_DIRECTORY.workspaceMeta), readIdentity)
+				&& await firstSegmentIsCanonicalDataDirectory(directory, resolvedPath, readIdentity))
 				return true
 		}
 		const parent = dirname(directory)
@@ -382,6 +406,39 @@ export async function resolvedPathEntersWorkspaceDataDirectory(
 			return false
 		directory = parent
 	}
+}
+
+/**
+ * A Workspace root in the schemaVersion 5 layout, recognized by the two files only such a root has
+ * directly under it: the manifest `workspace.json` and the Product Kit file. Requiring both keeps an
+ * unrelated `workspace.json` (other tools use the name) from turning a directory into a root.
+ */
+async function isRelocatedWorkspaceRoot(directory: string, readIdentity: FileIdentityReader): Promise<boolean> {
+	return await readIdentity(join(directory, V5_MANIFEST_PATH)) !== undefined
+		&& await readIdentity(join(directory, PRODUCT_KIT_FILENAME)) !== undefined
+}
+
+/**
+ * Discussion #139 owner ruling 3 (2026-10-08), Clause 01a115cd-d109-76d3-9622-85d0080c60b6: from
+ * schemaVersion 5, inside a Workspace root a module may lie only in that Workspace's `kit/`. Every
+ * other path in the root (the data directories, `artifacts/`, `history/`, the runtime files, the
+ * root files) is Workspace data. Membership in `kit/` is decided by file identity, like the
+ * data-directory check.
+ */
+async function liesOutsideCodeDirectory(
+	workspaceRoot: string,
+	resolvedPath: string,
+	readIdentity: FileIdentityReader,
+): Promise<boolean> {
+	const rel = relative(workspaceRoot, resolvedPath)
+	if (rel === '' || rel.startsWith('..') || isAbsolute(rel))
+		return false
+	const firstSegment = rel.split(/[/\\]/u)[0]
+	if (firstSegment === undefined || firstSegment === '' || rel === firstSegment)
+		return true
+	const topIdentity = await readIdentity(join(workspaceRoot, firstSegment))
+	const codeIdentity = await readIdentity(join(workspaceRoot, V5_CODE_DIRECTORY))
+	return !topIdentity || !codeIdentity || topIdentity.dev !== codeIdentity.dev || topIdentity.ino !== codeIdentity.ino
 }
 
 async function firstSegmentIsCanonicalDataDirectory(

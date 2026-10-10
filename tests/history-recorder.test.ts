@@ -748,7 +748,7 @@ describe('review follow-ups on PR #156', () => {
 		// A Checkpoint committed by another worktree is already in the Workspace.
 		const other = randomUUID()
 		await ctx.persistence.withLock(async () => {
-			const snapshot = versionResourcesFromSnapshot(await ctx.persistence.scanVersionedSnapshotUnlocked())
+			const snapshot = versionResourcesFromSnapshot(await ctx.persistence.scanVersionedSnapshotUnlocked(), ctx.persistence.layout)
 			await ctx.checkpoints.createUnlocked({ historySchemaVersion: 1, id: other, type: 'checkpoint', actor: actorOf(HUMAN), at: new Date(START - 60_000).toISOString(), workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1, resources: snapshot.resources, name: 'From another worktree', source: 'workbench' }, snapshot.blobs)
 		})
 

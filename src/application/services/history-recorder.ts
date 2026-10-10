@@ -534,6 +534,10 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 		const stores = this.stores
 		const startedAt = this.migrationStartedAt
 		if (this.phase !== 'migrating' || !stores || !startedAt) throw new Error('The migration system version follows the pre-migration Checkpoint.')
+		// Read before anything is stored: a migration that moved the Workspace to another layout leaves
+		// this persistence's layout stale, and the record must then fail loudly, not pair the old
+		// layout's scan with the new version.
+		const workspaceSchemaVersion = await this.persistence.readRecordSchemaVersionUnlocked()
 		const actual = versionResourcesFromSnapshot(await this.persistence.scanVersionedSnapshotUnlocked(), this.persistence.layout)
 		for (const [digest, bytes] of actual.blobs) {
 			if (!await stores.host.hasBlob(digest)) await stores.host.putBlob(bytes)
@@ -547,7 +551,7 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 			type: 'system',
 			actor: MIGRATE_ACTOR,
 			at: this.stamp(),
-			workspaceSchemaVersion: await this.persistence.readDecodeSchemaVersionUnlocked(),
+			workspaceSchemaVersion,
 			resources: actual.resources,
 			startedAt,
 			netChange: !sameResources(this.expected ?? new Map(), actualMap),
@@ -701,7 +705,7 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 		}
 		else if (open) {
 			const resources = sortedResources(this.expected ?? new Map())
-			const workspaceSchemaVersion = await this.persistence.readDecodeSchemaVersionUnlocked()
+			const workspaceSchemaVersion = await this.persistence.readRecordSchemaVersionUnlocked()
 			assertHeld(signal)
 			const record: HostVersionRecord = {
 				historySchemaVersion: HISTORY_SCHEMA_VERSION,
@@ -765,7 +769,7 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 			}
 			assertHeld(signal)
 		}
-		const workspaceSchemaVersion = await this.persistence.readDecodeSchemaVersionUnlocked()
+		const workspaceSchemaVersion = await this.persistence.readRecordSchemaVersionUnlocked()
 		assertHeld(signal)
 		const windowStart = this.lastAtMs > 0 ? new Date(this.lastAtMs).toISOString() : undefined
 		const at = this.stamp()

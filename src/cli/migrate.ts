@@ -66,13 +66,14 @@ export async function runMigrateCommand(options: MigrateCommandOptions): Promise
 		return 2
 	}
 
-	const hold = await readActiveServerHold(root)
+	// The layout is detected here, so the server hold is looked for where this Workspace keeps it.
+	const persistence = new FileNativePersistence({ root, schemaPolicy: options.schemaPolicy ?? PRODUCT_WORKSPACE_SCHEMA_POLICY, ...(options.fault ? { fault: options.fault } : {}) })
+	const hold = await readActiveServerHold(root, persistence.layout)
 	if (hold && !options.dryRun) {
 		err(`uiux: refusing to migrate ${root}: a UIUX server (pid ${hold.pid} on ${hold.hostname}, started ${hold.startedAt}) is serving this Workspace. Stop that server, then run uiux migrate again.`)
 		return 1
 	}
 
-	const persistence = new FileNativePersistence({ root, schemaPolicy: options.schemaPolicy ?? PRODUCT_WORKSPACE_SCHEMA_POLICY, ...(options.fault ? { fault: options.fault } : {}) })
 	let checkpoint: MigrationCheckpointReport | undefined
 	let systemVersion: string | undefined
 	let systemVersionError: unknown

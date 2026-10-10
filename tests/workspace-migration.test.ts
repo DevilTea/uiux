@@ -25,6 +25,7 @@ import {
 } from '../src/product/workspace-schema'
 import { hostHistoryPaths } from '../src/server/access/store'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
+import { CURRENT_TEST_LAYOUT } from './support/workspace-layout'
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('..', import.meta.url))
 const CLI = join(REPOSITORY_ROOT, 'bin', 'uiux.mjs')
@@ -304,9 +305,9 @@ describe('uiux migrate CLI', () => {
 	it('refuses the real run while a live UIUX server holds the Workspace, and ignores a stale hold', async () => {
 		const root = await seedV1Workspace()
 		const before = await snapshotFiles(root)
-		const hold = await acquireServerHold(root)
+		const hold = await acquireServerHold(root, { layout: CURRENT_TEST_LAYOUT })
 		expect(hold).toBeDefined()
-		expect(await readActiveServerHold(root)).toMatchObject({ pid: process.pid })
+		expect(await readActiveServerHold(root, CURRENT_TEST_LAYOUT)).toMatchObject({ pid: process.pid })
 		const lines: string[] = []
 		const refused = await runMigrateCommand({ workspaceRoot: root, dryRun: false, stdout: line => lines.push(line), stderr: line => lines.push(line) })
 		expect(refused).toBe(1)
@@ -317,10 +318,10 @@ describe('uiux migrate CLI', () => {
 		expect(await runMigrateCommand({ workspaceRoot: root, dryRun: true, stdout: line => lines.push(line), stderr: line => lines.push(line) })).toBe(0)
 		expect(lines.join('\n')).toContain('stop it before the real run')
 		await hold!.release()
-		expect(await readActiveServerHold(root)).toBeUndefined()
+		expect(await readActiveServerHold(root, CURRENT_TEST_LAYOUT)).toBeUndefined()
 
 		await writeFile(join(root, SERVER_HOLD_RELATIVE_PATH), JSON.stringify({ pid: 2_000_000_000, hostname: hostname(), startedAt: TIME, token: 'stale' }))
-		expect(await readActiveServerHold(root)).toBeUndefined()
+		expect(await readActiveServerHold(root, CURRENT_TEST_LAYOUT)).toBeUndefined()
 		expect(await runMigrateCommand({ workspaceRoot: root, dryRun: false, stdout: () => undefined, stderr: () => undefined })).toBe(0)
 		expect((await new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).inspectWorkspace()).inspection.state).toBe('current')
 	})

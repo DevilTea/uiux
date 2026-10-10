@@ -243,9 +243,14 @@ export function createHistoryDiffService(persistence: FileNativePersistence, his
 			.map((row): ResourceChangeSummary => {
 				// Within one schema version the recorded revisions decide, whatever the detail: only a
 				// comparison across a migration can show differences the migration alone made.
-				if (row.status !== 'modified' || !before || !crossSchema) return row
+				if (!before || !crossSchema) return row
 				const identity = resourceIdentityKey(row)
 				const upgradedBefore = before.revisions.get(identity)
+				// A resource the migration itself creates (the Product Kit file of `uiux.v4-to-v5`) is no
+				// design change: it is compared with what the upgrade made of the older side.
+				if (row.status === 'added' && upgradedBefore !== undefined)
+					return upgradedBefore === row.toRevision ? { ...row, status: 'unchanged' } : { ...row, status: 'modified', fromRevision: upgradedBefore }
+				if (row.status !== 'modified') return row
 				if (upgradedBefore !== undefined && upgradedBefore === after.revisions.get(identity)) return { ...row, status: 'unchanged' }
 				if (row.kind === 'workspace' && sameSettings(before.files.get(identity), after.files.get(identity))) return { ...row, status: 'unchanged' }
 				return row

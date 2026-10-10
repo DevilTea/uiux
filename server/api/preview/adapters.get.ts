@@ -7,7 +7,7 @@ export default defineEventHandler(async (event) => {
 	const denied = denyUnlessAllowed(event, 'readPreview')
 	if (denied) return denied
 	const workspaceRuntime = getSelectedWorkspaceServerRuntime()
-	const resolution = await resolveSelectedWorkspaceAdapters(workspaceRuntime.root)
+	const resolution = await resolveSelectedWorkspaceAdapters(workspaceRuntime.root, workspaceRuntime.persistence.layout)
 
 	if (resolution.state === 'invalid') {
 		return {
@@ -17,7 +17,7 @@ export default defineEventHandler(async (event) => {
 		}
 	}
 
-	const bundle = await getSelectedWorkspacePreviewBundle(workspaceRuntime.root)
+	const bundle = await getSelectedWorkspacePreviewBundle(workspaceRuntime.root, workspaceRuntime.persistence.layout)
 	if (bundle.state === 'invalid') {
 		return {
 			state: 'invalid',

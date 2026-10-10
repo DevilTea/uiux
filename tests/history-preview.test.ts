@@ -27,7 +27,7 @@ import { createHistoryStoreFactory, type HistoryStores } from '../src/server/his
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { STORED_CONTENT_SECURITY_POLICY } from '../src/server/stored-content-headers'
 import { bearer, provisionToken, scoped, sessionCookieFor, testMember } from './support/access'
-import { writeManifest } from './support/workspace-layout'
+import { CURRENT_TEST_LAYOUT, writeManifest } from './support/workspace-layout'
 
 /**
  * The version reads for Preview and the version blob route (issue #132, B9): Rule
@@ -248,7 +248,7 @@ describe('version reads for Preview across schema versions', () => {
 	async function record(ctx: Context, workspaceSchemaVersion: number, edit: (snapshot: Map<string, Uint8Array>) => void, drop: readonly string[] = []): Promise<HostVersionRecord> {
 		const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
 		edit(snapshot)
-		const built = versionResourcesFromSnapshot(snapshot)
+		const built = versionResourcesFromSnapshot(snapshot, CURRENT_TEST_LAYOUT)
 		const files = new Map(built.resources.flatMap(resource => Object.entries(resource.files)))
 		const dropped = new Set(drop.map(path => files.get(path)!))
 		for (const [digest, bytes] of built.blobs) if (!dropped.has(digest)) await ctx.stores.host.putBlob(bytes)

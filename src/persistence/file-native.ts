@@ -9,6 +9,7 @@ import type { MutableResourceRepository } from '../application/ports/resources'
 import { validateAssetContentFiles, validateAssetContentMetadata, validateAssetMetadata, type AuthoredAsset, type AuthoredAssetResource } from '../domain/assets/schema'
 import { validateFlowResource, type FlowResource } from '../domain/flows/schema'
 import { validateI18nResource, type I18nResource } from '../domain/i18n/schema'
+import { PRODUCT_KIT_RESOURCE_KEY, PRODUCT_KIT_RESOURCE_KIND, PRODUCT_KIT_SCHEMA_VERSION, validateProductKit, type ProductKit } from '../domain/product-kit/schema'
 import { isCanonicalLocaleFilename, isFullUuid, isJsonValue, isRecord, type Diagnostic } from '../domain/validation'
 import { validateReviewThread, type ReviewThread } from '../domain/reviews/schema'
 import { validateViewResource, type ViewResource } from '../domain/views/schema'
@@ -24,8 +25,9 @@ import {
 	resolveWorkspacePath,
 	viewRelativePath,
 	isSafeAssetContentFilename,
+	detectWorkspaceLayoutSync,
+	isInCodeDirectory,
 	layoutForSchemaVersion,
-	LEGACY_LAYOUT,
 	type VersionedResourceIdentity,
 	type WorkspaceLayout,
 } from './paths'
@@ -65,6 +67,12 @@ export type FileNativePersistenceOptions = Readonly<{
 	writeObserver?: CanonicalWriteObserver
 	/** How long one observer hook may hold the lock before it is abandoned; defaults to {@link OBSERVER_HOOK_TIMEOUT_MS}. */
 	observerTimeoutMilliseconds?: number
+	/**
+	 * The Workspace layout. Omitted, it is detected from where the manifest is
+	 * (`detectWorkspaceLayoutSync`); a directory without a manifest gets the layout of the policy's
+	 * current version.
+	 */
+	layout?: WorkspaceLayout
 }>
 
 /** The revision of one versioned resource a design write is about to change (`null` when it does not exist yet). */
@@ -244,6 +252,8 @@ export class FileNativePersistence {
 	readonly layout: WorkspaceLayout
 	readonly schemaPolicy: WorkspaceSchemaPolicy
 	readonly workspace: WorkspaceFileRepository
+	/** The Product Kit file (from `schemaVersion` 5; the old layout has none). */
+	readonly productKit: ProductKitFileRepository
 	readonly views: JsonResourceRepository<string, ViewResource>
 	readonly flows: JsonResourceRepository<string, FlowResource>
 	readonly reviews: JsonResourceRepository<string, ReviewThread>
@@ -261,11 +271,12 @@ export class FileNativePersistence {
 
 	constructor(options: FileNativePersistenceOptions) {
 		this.root = resolve(options.root)
-		this.layout = LEGACY_LAYOUT
 		this.schemaPolicy = defineWorkspaceSchemaPolicy(options.schemaPolicy)
+		this.layout = options.layout ?? detectWorkspaceLayoutSync(this.root, this.schemaPolicy.currentVersion)
 		this.fault = options.fault
 		this.lockWaitMilliseconds = options.lockWaitMilliseconds ?? MAX_LOCK_WAIT_MS
 		this.workspace = new WorkspaceFileRepository(this)
+		this.productKit = new ProductKitFileRepository(this)
 		this.views = new JsonResourceRepository(this, viewRelativePath, 'id', (resource, filename) => validateViewResource(resource, filename).diagnostics, { directory: 'views', suffix: '.view.json' })
 		this.flows = new JsonResourceRepository(this, flowRelativePath, 'id', (resource, filename) => validateFlowResource(resource, filename).diagnostics, { directory: 'flows', suffix: '.flow.json' })
 		this.reviews = new JsonResourceRepository(this, reviewRelativePath, 'id', (resource, filename, schemaVersion) => validateReviewThread(resource, { filename, schemaVersion }).diagnostics, { directory: 'reviews', suffix: '.review.json' })
@@ -361,6 +372,11 @@ export class FileNativePersistence {
 			throw new PersistenceError('workspace.manifest_missing', `Cannot migrate a Workspace without ${this.layout.manifestPath}.`, { diagnostics: read.diagnostics })
 		if (read.inspection.state === 'current')
 			return { fromVersion: read.inspection.version, toVersion: read.inspection.version, revision: read.revision, steps: [], changes: [], initialSnapshot: new Map() }
+		// A plan that ends in another layout relocates the Workspace (`uiux.v4-to-v5`), which a file
+		// transaction under this root cannot apply; refuse before anything, the pre-migration
+		// Checkpoint included, is written.
+		if (layoutForSchemaVersion(this.schemaPolicy.currentVersion) !== this.layout)
+			throw new PersistenceError('workspace.migration_failed', `Migrating schemaVersion ${read.inspection.version} to ${this.schemaPolicy.currentVersion} moves the Workspace to another layout, which this build cannot apply; nothing was changed.`)
 		await beforeSteps?.({ fromVersion: read.inspection.version, toVersion: this.schemaPolicy.currentVersion })
 		const initialSnapshot = await this.scanCanonicalSnapshotUnlocked()
 		const { snapshot, steps: stepIds } = await applyMigrationPlan(initialSnapshot, read.inspection.migrationPlan, this.schemaPolicy)
@@ -582,13 +598,46 @@ export class FileNativePersistence {
 			throw error
 		}
 		const resource = parseJsonBytes(bytes, relativePath)
-		const inspection = inspectWorkspaceManifest(resource, this.schemaPolicy)
+		const inspection = this.inspectLayout(inspectWorkspaceManifest(resource, this.schemaPolicy))
 		const validationDiagnostics = validateWorkspaceManifest(resource).diagnostics
 		const extraDiagnostics = inspection.state === 'unsupported'
 			? inspection.diagnostics.filter(item => !validationDiagnostics.some(existing => existing.code === item.code && existing.path === item.path))
 			: []
 		const diagnostics = [...validationDiagnostics, ...extraDiagnostics]
 		return { resource: resource as WorkspaceManifest, revision: revisionForBytes(bytes), inspection, diagnostics }
+	}
+
+	/**
+	 * A manifest whose `schemaVersion` belongs to another layout than the one this root was opened
+	 * with is `unsupported`: an old-layout `.uiux/` directory selected as a root (its `workspace.json`
+	 * is below version 5), or an old-layout parent of a relocated Workspace (its `.uiux/workspace.json`
+	 * is version 5 or later). Reads and writes would otherwise look for files in the wrong places.
+	 */
+	private inspectLayout(inspection: WorkspaceInspection): WorkspaceInspection {
+		if (inspection.state !== 'current' && inspection.state !== 'migration_required') return inspection
+		if (layoutForSchemaVersion(inspection.version) === this.layout) return inspection
+		const message = this.layout.codeDir
+			? `${this.layout.manifestPath} holds a schemaVersion ${inspection.version} manifest, but only a schemaVersion ${PRODUCT_KIT_SCHEMA_VERSION} or later Workspace keeps it there; this directory is the metadata directory of an old-layout Workspace, so select its parent.`
+			: `${this.layout.manifestPath} holds a schemaVersion ${inspection.version} manifest, whose Workspace root is that .uiux/ directory itself; select it.`
+		return {
+			state: 'unsupported',
+			version: inspection.version,
+			targetVersion: inspection.targetVersion,
+			diagnostics: [...inspection.diagnostics, { code: 'workspace.schema_unsupported', path: '/schemaVersion', message }],
+		}
+	}
+
+	/**
+	 * The `workspaceSchemaVersion` of a history record taken from this Workspace now. History reads
+	 * each record by the layout of that version, so a record must never pair one layout's paths with
+	 * another layout's version: when the manifest's version belongs to another layout than this
+	 * persistence's (a stale persistence after a relocation), this throws instead of recording.
+	 */
+	async readRecordSchemaVersionUnlocked(): Promise<number> {
+		const version = await this.readDecodeSchemaVersionUnlocked()
+		if (layoutForSchemaVersion(version) !== this.layout)
+			throw new PersistenceError('workspace.schema_unsupported', `A history record cannot be taken: the manifest is schemaVersion ${version}, whose layout differs from the layout this Workspace was opened with (manifest ${this.layout.manifestPath}).`)
+		return version
 	}
 
 	/**
@@ -647,7 +696,17 @@ export class FileNativePersistence {
 		return Buffer.from(`${stableStringify(resource)}\n`, 'utf8')
 	}
 
+	/**
+	 * Rule 01a11bb1-9585-7239-b371-0ac4032f2d5d: no persistence write creates, changes or deletes
+	 * anything in the Workspace's code directory (`kit/`), whatever path a caller derives.
+	 */
+	assertOutsideCodeDirectory(relativePath: string): void {
+		if (isInCodeDirectory(this.layout, relativePath))
+			throw new PersistenceError('persistence.path_rejected', `Path ${relativePath} lies in the Workspace code directory ${this.layout.codeDir}/, which authoring never writes.`)
+	}
+
 	async atomicWriteUnlocked(relativePath: string, bytes: Uint8Array, oldBytes?: Uint8Array): Promise<void> {
+		this.assertOutsideCodeDirectory(relativePath)
 		const absolutePath = resolveWorkspacePath(this.root, relativePath)
 		const parentRelative = dirname(relativePath).split('\\').join('/')
 		await ensureSafeDirectory(this.root, parentRelative)
@@ -680,6 +739,7 @@ export class FileNativePersistence {
 
 	/** Stages, flushes, and renames a new canonical single-file resource into place. */
 	async atomicCreateUnlocked(relativePath: string, bytes: Uint8Array): Promise<boolean> {
+		this.assertOutsideCodeDirectory(relativePath)
 		const absolutePath = resolveWorkspacePath(this.root, relativePath)
 		const parentRelative = dirname(relativePath).split('\\').join('/')
 		await ensureSafeDirectory(this.root, parentRelative)
@@ -718,6 +778,7 @@ export class FileNativePersistence {
 
 	/** Removes one canonical file with a single atomic unlink, then fsyncs its directory. */
 	async removeUnlocked(relativePath: string): Promise<void> {
+		this.assertOutsideCodeDirectory(relativePath)
 		const absolutePath = resolveWorkspacePath(this.root, relativePath)
 		await assertSafePath(this.root, relativePath, false)
 		await this.hitFault('file.before_remove', { path: relativePath })
@@ -733,6 +794,7 @@ export class FileNativePersistence {
 
 	/** Content-addressed blobs use an atomic no-replace link so identities stay immutable. */
 	async atomicCreateImmutableUnlocked(relativePath: string, bytes: Uint8Array): Promise<boolean> {
+		this.assertOutsideCodeDirectory(relativePath)
 		const absolutePath = resolveWorkspacePath(this.root, relativePath)
 		const parentRelative = dirname(relativePath).split('\\').join('/')
 		await ensureSafeDirectory(this.root, parentRelative)
@@ -769,8 +831,10 @@ export class FileNativePersistence {
 		const ordered = [...changes].sort((left, right) => left.path.localeCompare(right.path))
 		if (new Set(ordered.map(change => change.path)).size !== ordered.length)
 			throw new PersistenceError('persistence.path_rejected', 'A file transaction contains duplicate paths.')
-		for (const change of ordered)
+		for (const change of ordered) {
+			this.assertOutsideCodeDirectory(change.path)
 			assertTransactionalPath(this.layout, change.path)
+		}
 		const transactionId = randomUUID()
 		const transactionRelative = `${this.layout.transactionsDir}/${transactionId}`
 		const transactionAbsolute = resolveWorkspacePath(this.root, transactionRelative)
@@ -851,10 +915,12 @@ export class FileNativePersistence {
 
 	async scanCanonicalSnapshotUnlocked(): Promise<Map<string, Uint8Array>> {
 		const snapshot = new Map<string, Uint8Array>()
-		const manifestPath = this.layout.manifestPath
-		const manifest = await this.readOptionalBytesUnlocked(manifestPath)
-		if (manifest)
-			snapshot.set(manifestPath, Uint8Array.from(manifest))
+		// The manifest and, from schemaVersion 5, the Product Kit file; `kit/` is never part of it.
+		for (const path of this.layout.canonicalFiles) {
+			const bytes = await this.readOptionalBytesUnlocked(path)
+			if (bytes)
+				snapshot.set(path, Uint8Array.from(bytes))
+		}
 		for (const directory of ['views', 'flows', 'reviews', 'i18n'] as const)
 			await this.scanFlatDirectoryUnlocked(directory, snapshot)
 		await this.scanAssetsUnlocked(snapshot)
@@ -1374,6 +1440,78 @@ export class WorkspaceFileRepository implements MutableResourceRepository<'works
 			await commitCanonicalWrite(this.persistence, [{ path, bytes }], () => this.persistence.atomicWriteUnlocked(path, bytes, currentBytes))
 			return { ok: true, revision: revisionForBytes(bytes) }
 		})
+	}
+}
+
+/**
+ * The Product Kit file `product-kit.json` (Clause 01a11bb1-8e31-7b25-b6b8-da667b201670), one
+ * single-file resource of kind and key `product-kit`, from `schemaVersion` 5. In the old layout
+ * the Workspace has none: reads find nothing and writes are refused. Writes are canonical design
+ * writes like the manifest's (versioned, observed by history); validating the content is the
+ * authoring operation's job, as for the other repositories.
+ */
+export class ProductKitFileRepository implements MutableResourceRepository<'product-kit', ProductKit> {
+	constructor(private readonly persistence: FileNativePersistence) {}
+
+	async read(_key: 'product-kit' = PRODUCT_KIT_RESOURCE_KEY): Promise<RevisionedResourceRead<ProductKit> | undefined> {
+		void _key
+		const inspected = await this.readInspected()
+		return inspected && { resource: inspected.resource, revision: inspected.revision }
+	}
+
+	async readRevision(): Promise<ResourceRevision | undefined> {
+		return this.persistence.withReadLock(async () => {
+			const path = this.persistence.layout.productKitPath
+			const bytes = path ? await this.persistence.readOptionalBytesUnlocked(path) : undefined
+			return bytes ? revisionForBytes(bytes) : undefined
+		})
+	}
+
+	async readInspected(): Promise<InspectedResource<ProductKit> | undefined> {
+		return this.persistence.withReadLock(async () => {
+			const path = this.persistence.layout.productKitPath
+			if (!path) return undefined
+			const bytes = await this.persistence.readOptionalBytesUnlocked(path)
+			if (!bytes) return undefined
+			const resource = parseJsonBytes(bytes, path)
+			return { resource: resource as ProductKit, revision: revisionForBytes(bytes), diagnostics: validateProductKit(resource).diagnostics }
+		})
+	}
+
+	async create(resource: ProductKit): Promise<ResourceRevision> {
+		return this.persistence.withLock(async () => {
+			await this.persistence.assertWritableUnlocked()
+			const path = this.pathUnlocked()
+			if (await this.persistence.readOptionalBytesUnlocked(path))
+				throw new PersistenceError('persistence.resource_exists', 'The Product Kit file already exists.')
+			const bytes = this.persistence.serializeJson(resource, path)
+			if (!await commitCanonicalWrite(this.persistence, [{ path, bytes }], () => this.persistence.atomicCreateUnlocked(path, bytes)))
+				throw new PersistenceError('persistence.resource_exists', 'The Product Kit file already exists.')
+			return revisionForBytes(bytes)
+		})
+	}
+
+	async compareAndSwap(input: Readonly<{ key: 'product-kit'; expectedRevision: ResourceRevision; resource: ProductKit }>): Promise<Readonly<{ ok: true; revision: ResourceRevision } | { ok: false; conflict: RevisionConflict }>> {
+		return this.persistence.withLock(async () => {
+			await this.persistence.assertWritableUnlocked()
+			const path = this.pathUnlocked()
+			const currentBytes = await this.persistence.readOptionalBytesUnlocked(path)
+			if (!currentBytes)
+				throw new PersistenceError('persistence.resource_not_found', 'The Product Kit file does not exist.')
+			const currentRevision = revisionForBytes(currentBytes)
+			if (input.expectedRevision !== currentRevision)
+				return { ok: false, conflict: { code: 'revision_conflict', currentRevision } }
+			const bytes = this.persistence.serializeJson(input.resource, path)
+			await commitCanonicalWrite(this.persistence, [{ path, bytes }], () => this.persistence.atomicWriteUnlocked(path, bytes, currentBytes))
+			return { ok: true, revision: revisionForBytes(bytes) }
+		})
+	}
+
+	private pathUnlocked(): string {
+		const path = this.persistence.layout.productKitPath
+		if (!path)
+			throw new PersistenceError('persistence.path_rejected', `A Workspace below schemaVersion ${PRODUCT_KIT_SCHEMA_VERSION} has no Product Kit file; its Adapter list is in the manifest.`)
+		return path
 	}
 }
 
@@ -2039,7 +2177,7 @@ export function revisionForResourceFiles(kind: string, files: ReadonlyMap<string
 		catch { return revisionForBytes(metadataBytes) }
 		return assetRevision(metadataBytes, contentFiles)
 	}
-	if (kind !== 'workspace' && kind !== 'view' && kind !== 'flow' && kind !== 'locale') return undefined
+	if (kind !== 'workspace' && kind !== PRODUCT_KIT_RESOURCE_KIND && kind !== 'view' && kind !== 'flow' && kind !== 'locale') return undefined
 	if (files.size === 0) return undefined
 	if (files.size > 1)
 		throw new TypeError(`A ${kind} resource is exactly one file; received ${files.size}.`)
@@ -2184,12 +2322,19 @@ function validateCanonicalSnapshot(snapshot: WorkspaceSnapshot, expectedVersion:
 		throw new PersistenceError('workspace.migration_failed', `Migration result manifest schemaVersion must equal its policy step target ${expectedVersion}.`)
 	if (!policy.recognizedVersions.includes(expectedVersion) && expectedVersion !== policy.currentVersion)
 		throw new PersistenceError('workspace.migration_failed', `Migration step target ${expectedVersion} is not recognized by the injected policy.`)
+	// Clause 01a11bb1-8e31-7b25-b6b8-da667b201670: from schemaVersion 5 the Product Kit file is required.
+	if (layout.productKitPath && !snapshot.has(layout.productKitPath))
+		throw new PersistenceError('workspace.migration_failed', `Migration result must contain ${layout.productKitPath}.`)
 	const assetFiles = new Map<string, string[]>()
 	for (const [relativePath, bytes] of snapshot) {
 		assertTransactionalPath(layout, relativePath)
 		if (!(bytes instanceof Uint8Array))
 			throw new PersistenceError('workspace.migration_failed', `Migration result ${relativePath} must contain bytes.`)
 		if (relativePath === manifestPath) continue
+		if (relativePath === layout.productKitPath) {
+			parseJsonBytes(bytes, relativePath)
+			continue
+		}
 		const segments = relativePath.split('/')
 		const [directory, filename] = segments
 		if (directory === 'assets') {
@@ -2252,13 +2397,7 @@ function validateTransactionJournal(value: unknown, layout: WorkspaceLayout): Tr
 
 function assertTransactionalPath(layout: WorkspaceLayout, relativePath: string): void {
 	resolveWorkspacePath('/', relativePath)
-	if (relativePath === layout.manifestPath) return
-	const segments = relativePath.split('/')
-	if (segments.length === 2 && segments[0] === 'views' && /^[0-9a-f-]+\.view\.json$/iu.test(segments[1]!) && isFullUuid(segments[1]!.slice(0, -'.view.json'.length))) return
-	if (segments.length === 2 && segments[0] === 'flows' && /^[0-9a-f-]+\.flow\.json$/iu.test(segments[1]!) && isFullUuid(segments[1]!.slice(0, -'.flow.json'.length))) return
-	if (segments.length === 2 && segments[0] === 'reviews' && /^[0-9a-f-]+\.review\.json$/iu.test(segments[1]!) && isFullUuid(segments[1]!.slice(0, -'.review.json'.length))) return
-	if (segments.length === 2 && segments[0] === 'i18n' && isCanonicalLocaleFilename(segments[1])) return
-	if (segments.length === 3 && segments[0] === 'assets' && isFullUuid(segments[1]!) && (segments[2] === 'asset.json' || isSafeAssetContentFilename(segments[2]))) return
+	if (!isInCodeDirectory(layout, relativePath) && layout.isCanonicalPath(relativePath)) return
 	throw new PersistenceError('persistence.path_rejected', `Path ${relativePath} is outside the allowed canonical Workspace layout.`)
 }
 

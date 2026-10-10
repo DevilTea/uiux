@@ -38,7 +38,7 @@ export default defineNitroPlugin((nitroApp) => {
 			void runtime.historyRecorder.start().then((report) => {
 				if (report.baseline) console.log(`uiux: history recorded the Baseline Checkpoint ${report.baseline} for ${runtime.root}.`)
 			})
-			pendingHold = acquireServerHold(resolve(process.env.UIUX_WORKSPACE_ROOT), { origin: resolveInternalServerOrigin() })
+			pendingHold = acquireServerHold(resolve(process.env.UIUX_WORKSPACE_ROOT), { origin: resolveInternalServerOrigin(), layout: runtime.persistence.layout })
 				.then((hold) => {
 					acquiredHold = hold
 					return hold
