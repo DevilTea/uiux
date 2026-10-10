@@ -485,6 +485,26 @@ describe('the data boundary of a schemaVersion 5 Workspace root (only kit/ may h
 		expect(await resolvedPathEntersWorkspaceDataDirectory(join(tool, 'views', 'x.mjs'), selected)).toBe(false)
 	})
 
+	it('treats a directory whose name begins with two dots as inside the root', async () => {
+		const resolver = new NodeWorkspaceAdapterModuleResolver()
+		const root = await v5Root(await makeRoot())
+		await put(join(root, '..dotted', 'x.mjs'))
+		await expect(resolver.resolve(root, './..dotted/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, '..dotted', 'x.mjs'), root)).toBe(true)
+		// In the old layout such a directory is an ordinary local directory, not an escape.
+		const legacy = await makeRoot()
+		const local = await put(join(legacy, '..dotted', 'adapter.mjs'))
+		expect((await resolver.resolve(legacy, './..dotted/adapter.mjs')).resolvedPath).toBe(local)
+	})
+
+	it('does not accept a symbolic link named kit as the code directory', async () => {
+		const root = await v5Root(await makeRoot())
+		await put(join(root, 'views', 'x.mjs'))
+		await symlink(join(root, 'views'), join(root, 'kit'))
+		await expect(new NodeWorkspaceAdapterModuleResolver().resolve(root, './kit/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'views', 'x.mjs'), root)).toBe(true)
+	})
+
 	it('decides kit/ membership by file identity', async () => {
 		const root = '/virtual/v5'
 		const identity = (dev: number, ino: number): FileIdentity => ({ dev: BigInt(dev), ino: BigInt(ino) })
@@ -496,12 +516,12 @@ describe('the data boundary of a schemaVersion 5 Workspace root (only kit/ may h
 			[join(root, 'views'), identity(1, 4)],
 			[join(root, 'Kit2'), identity(1, 5)],
 		]).get(path)
-		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'KIT', 'x.mjs'), root, reader)).toBe(false)
-		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'Kit2', 'x.mjs'), root, reader)).toBe(true)
-		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'views', 'x.mjs'), root, reader)).toBe(true)
+		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'KIT', 'x.mjs'), root, reader, reader)).toBe(false)
+		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'Kit2', 'x.mjs'), root, reader, reader)).toBe(true)
+		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'views', 'x.mjs'), root, reader, reader)).toBe(true)
 		// An unselected v5 root met on the way up is a boundary too.
-		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'Kit2', 'x.mjs'), '/elsewhere', reader)).toBe(true)
-		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'kit', 'x.mjs'), '/elsewhere', reader)).toBe(false)
+		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'Kit2', 'x.mjs'), '/elsewhere', reader, reader)).toBe(true)
+		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'kit', 'x.mjs'), '/elsewhere', reader, reader)).toBe(false)
 	})
 })
 

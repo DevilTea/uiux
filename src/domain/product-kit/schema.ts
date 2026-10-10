@@ -87,7 +87,7 @@ export function validateProductKit(input: unknown): ValidationResult<ProductKit>
 		validateAdapterSelections(root.adapters, '/adapters', v)
 	if (Object.hasOwn(root, 'styles')) {
 		v.array(root.styles, '/styles')?.forEach((style, index) => {
-			if (!isPortableAdapterModuleSpecifier(style))
+			if (!isStyleSpecifier(style))
 				v.issue('product_kit.invalid_style_specifier', jsonPointer('/styles', index), 'A styles entry is a bare package specifier or a ./ specifier relative to kit/.')
 		})
 	}
@@ -198,6 +198,16 @@ function validateWidgets(input: unknown, componentNames: ReadonlySet<string>, v:
 		if (typeof entry.export !== 'string' || entry.export.length === 0)
 			v.issue('product_kit.invalid_widget_import', `${path}/export`, 'export names one export of that package.')
 	}
+}
+
+/**
+ * A `styles` entry (Clause 01a11bb1-8e98-7270-9662-682c048f9929): a portable specifier whose path
+ * part has no empty, `.` or `..` segment, so a `./` entry stays inside `kit/` and a bare entry names
+ * a path inside its package.
+ */
+function isStyleSpecifier(value: unknown): value is string {
+	if (!isPortableAdapterModuleSpecifier(value)) return false
+	return isSafeRelativePath(value.startsWith('./') ? value.slice(2) : value)
 }
 
 function isBareSpecifier(value: unknown): value is string {

@@ -1,5 +1,5 @@
-import { readFile, realpath, stat } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { lstat, readFile, realpath, stat } from 'node:fs/promises'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { PRODUCT_KIT_FILENAME } from '../domain/product-kit/schema'
@@ -323,7 +323,7 @@ function diagnosticMessage(prefix: string, cause: unknown): string {
 
 function isContainedPath(root: string, candidate: string): boolean {
 	const path = relative(root, candidate)
-	return path === '' || (!path.startsWith('..') && !isAbsolute(path))
+	return path === '' || !escapesBase(path)
 }
 
 export type FileIdentity = Readonly<{ dev: bigint; ino: bigint }>
@@ -346,6 +346,28 @@ export const statFileIdentity: FileIdentityReader = async (path) => {
 			return undefined
 		throw error
 	}
+}
+
+/**
+ * The identity of a code directory (`kit/`) only when it is a real directory: `lstat`, so a symbolic
+ * link named `kit` never stands in for the directory it points to. Absence and any other entry type
+ * yield `undefined` (nothing counts as inside `kit/`); other errors propagate, failing closed.
+ */
+export const realDirectoryIdentity: FileIdentityReader = async (path) => {
+	try {
+		const info = await lstat(path, { bigint: true })
+		return info.isDirectory() && !info.isSymbolicLink() ? { dev: info.dev, ino: info.ino } : undefined
+	}
+	catch (error) {
+		if (isAbsentError(error))
+			return undefined
+		throw error
+	}
+}
+
+/** True when a `relative()` result leaves its base: `..` itself, a `../` prefix, or an absolute path (another drive). */
+function escapesBase(rel: string): boolean {
+	return rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith('../') || isAbsolute(rel)
 }
 
 function isAbsentError(error: unknown): boolean {
@@ -374,6 +396,7 @@ export async function resolvedPathEntersWorkspaceDataDirectory(
 	resolvedPath: string,
 	selectedWorkspaceRoot?: string,
 	readIdentity: FileIdentityReader = statFileIdentity,
+	readCodeDirectoryIdentity: FileIdentityReader = realDirectoryIdentity,
 ): Promise<boolean> {
 	if (selectedWorkspaceRoot !== undefined) {
 		if (await firstSegmentIsCanonicalDataDirectory(selectedWorkspaceRoot, resolvedPath, readIdentity))
@@ -382,7 +405,7 @@ export async function resolvedPathEntersWorkspaceDataDirectory(
 		// detects it) keeps everything but `kit/` as Workspace data.
 		if (await readIdentity(join(selectedWorkspaceRoot, V5_MANIFEST_PATH)) !== undefined
 			&& await readIdentity(join(selectedWorkspaceRoot, WORKSPACE_MANIFEST_PATH)) === undefined
-			&& await liesOutsideCodeDirectory(selectedWorkspaceRoot, resolvedPath, readIdentity))
+			&& await liesOutsideCodeDirectory(selectedWorkspaceRoot, resolvedPath, readIdentity, readCodeDirectoryIdentity))
 			return true
 	}
 	// Scope: this guards data that Editors and Agents can author through the product. A data
@@ -392,7 +415,7 @@ export async function resolvedPathEntersWorkspaceDataDirectory(
 	while (true) {
 		if (directory !== selectedWorkspaceRoot) {
 			const relocated = await isRelocatedWorkspaceRoot(directory, readIdentity)
-			if (relocated && await liesOutsideCodeDirectory(directory, resolvedPath, readIdentity))
+			if (relocated && await liesOutsideCodeDirectory(directory, resolvedPath, readIdentity, readCodeDirectoryIdentity))
 				return true
 			// An old-layout Workspace keeps its manifest in `.uiux/`; a `.uiux/` that is itself a
 			// relocated root is checked as one when the walk reaches it.
@@ -429,15 +452,16 @@ async function liesOutsideCodeDirectory(
 	workspaceRoot: string,
 	resolvedPath: string,
 	readIdentity: FileIdentityReader,
+	readCodeDirectoryIdentity: FileIdentityReader,
 ): Promise<boolean> {
 	const rel = relative(workspaceRoot, resolvedPath)
-	if (rel === '' || rel.startsWith('..') || isAbsolute(rel))
+	if (rel === '' || escapesBase(rel))
 		return false
 	const firstSegment = rel.split(/[/\\]/u)[0]
 	if (firstSegment === undefined || firstSegment === '' || rel === firstSegment)
 		return true
 	const topIdentity = await readIdentity(join(workspaceRoot, firstSegment))
-	const codeIdentity = await readIdentity(join(workspaceRoot, V5_CODE_DIRECTORY))
+	const codeIdentity = await readCodeDirectoryIdentity(join(workspaceRoot, V5_CODE_DIRECTORY))
 	return !topIdentity || !codeIdentity || topIdentity.dev !== codeIdentity.dev || topIdentity.ino !== codeIdentity.ino
 }
 
@@ -447,7 +471,7 @@ async function firstSegmentIsCanonicalDataDirectory(
 	readIdentity: FileIdentityReader,
 ): Promise<boolean> {
 	const rel = relative(workspaceRoot, resolvedPath)
-	if (rel === '' || rel.startsWith('..') || isAbsolute(rel))
+	if (rel === '' || escapesBase(rel))
 		return false
 	const firstSegment = rel.split(/[/\\]/u)[0]
 	if (firstSegment === undefined || firstSegment === '')

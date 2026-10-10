@@ -249,7 +249,8 @@ export function createHistoryDiffService(persistence: FileNativePersistence, his
 				// A resource the migration itself creates (the Product Kit file of `uiux.v4-to-v5`) is no
 				// design change: it is compared with what the upgrade made of the older side.
 				if (row.status === 'added' && upgradedBefore !== undefined)
-					return upgradedBefore === row.toRevision ? { ...row, status: 'unchanged' } : { ...row, status: 'modified', fromRevision: upgradedBefore }
+					// No record holds the upgraded revision, so the row names no `fromRevision`.
+					return upgradedBefore === row.toRevision ? { ...row, status: 'unchanged' } : { ...row, status: 'modified' }
 				if (row.status !== 'modified') return row
 				if (upgradedBefore !== undefined && upgradedBefore === after.revisions.get(identity)) return { ...row, status: 'unchanged' }
 				if (row.kind === 'workspace' && sameSettings(before.files.get(identity), after.files.get(identity))) return { ...row, status: 'unchanged' }
