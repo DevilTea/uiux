@@ -244,3 +244,20 @@ export function revisionIn(record: Pick<VersionRecord, 'resources'>, resource: H
 export function activityLocation(address: HistoryAddress) {
 	return { path: '/', query: { tab: 'activity', ...historyQuery(address, ['version', 'compare', 'resource']) } }
 }
+
+// ----- System Checkpoint names -----------------------------------------------------------------
+
+const MIGRATION_TARGET = /schemaVersion (\d+)$/u
+
+/**
+ * Which localized title a system Checkpoint gets, keyed by the system actor that created it (owner
+ * ruling https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18844687); `undefined`
+ * for a member's Checkpoint, whose name is shown as written, and for any other version.
+ */
+export function systemCheckpointTitle(version: Readonly<{ type: string; name?: string | null; actor: HistoryActor }>): Readonly<{ key: 'baseline' } | { key: 'migrate'; target: string }> | undefined {
+	if (version.type !== 'checkpoint' || !version.name || version.actor.type !== 'system') return undefined
+	if (version.actor.id === 'system:baseline') return { key: 'baseline' }
+	const target = MIGRATION_TARGET.exec(version.name)?.[1]
+	if (version.actor.id === 'system:migrate' && target) return { key: 'migrate', target }
+	return undefined
+}

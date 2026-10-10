@@ -132,6 +132,7 @@ function toggle(id: string): void {
                   <span
                     class="min-w-0 truncate text-sm text-highlighted"
                     :class="entry.version.type === 'checkpoint' ? 'font-semibold' : 'font-medium'"
+                    :title="labels.storedName(entry.version)"
                     data-version-title
                   >{{ labels.versionTitle(entry.version) }}</span>
                   <UBadge
@@ -235,7 +236,7 @@ function toggle(id: string): void {
                   variant="ghost"
                   :icon="expanded.has(entry.version.id) ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
                   :aria-expanded="expanded.has(entry.version.id)"
-                  :aria-controls="`${baseId}-details-${entry.version.id}`"
+                  :aria-controls="expanded.has(entry.version.id) ? `${baseId}-details-${entry.version.id}` : undefined"
                   :aria-label="t(expanded.has(entry.version.id) ? 'history.row.collapse' : 'history.row.expand', { name: labels.versionTitle(entry.version) })"
                   data-version-expand
                   @click="toggle(entry.version.id)"
@@ -257,7 +258,7 @@ function toggle(id: string): void {
               class="flex w-full items-center gap-2.5 text-start text-xs text-muted hover:bg-muted pointer-coarse:min-h-11"
               :class="compact ? 'px-2.5 py-1.5' : 'px-3 py-2'"
               :aria-expanded="expanded.has(`quiet-${entry.id}`)"
-              :aria-controls="`${baseId}-quiet-${entry.id}`"
+              :aria-controls="expanded.has(`quiet-${entry.id}`) ? `${baseId}-quiet-${entry.id}` : undefined"
               data-quiet-toggle
               @click="toggle(`quiet-${entry.id}`)"
             >

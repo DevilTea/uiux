@@ -5,7 +5,7 @@ import type { VersionDiffResult } from '../../src/application/services/history-d
 import type { Diagnostic } from '../../src/domain/validation'
 import type { VersionRecord } from '../../src/domain/history/schema'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
-import { diffRequestQuery, filterVersions, versionListQuery, type ComparisonEndpoints, type HistoryResourceRef, type TimelineFilters } from '../utils/version-history'
+import { comparisonEndpoints, CURRENT_COMPARE, diffRequestQuery, filterVersions, PARENT_COMPARE, versionListQuery, type ComparisonEndpoints, type HistoryResourceRef, type HistorySelection, type TimelineFilters } from '../utils/version-history'
 import { useWorkbench } from './useWorkbench'
 
 /**
@@ -13,7 +13,7 @@ import { useWorkbench } from './useWorkbench'
  * (`/api/events`, #69) and history adds no change-event kind (Rule
  * 01a11a5e-08c7-73c1-bc66-3af814a454d6), so a timeline re-reads itself when the Workbench re-reads
  * its resources, when the window regains focus, every `TIMELINE_POLL_MS` while it is visible, and
- * after this browser creates or deletes a Checkpoint.
+ * after this browser creates or deletes a Checkpoint. Comparisons are not polled.
  */
 
 export const TIMELINE_POLL_MS = 30_000
@@ -30,16 +30,24 @@ export function notifyHistoryChanged(): void {
 	historyEpoch.value += 1
 }
 
-/** Version records never change once written, so one read serves the session (a deleted one is dropped). */
+/**
+ * Version records never change once written, so a read is kept for the session (a deleted one is
+ * dropped). The cache is bounded, least recently used first.
+ */
+const RECORD_CACHE_LIMIT = 200
 const records = new Map<string, Promise<VersionRead>>()
 
 export function readVersionRecord(id: string): Promise<VersionRead> {
 	let read = records.get(id)
-	if (!read) {
-		read = $fetch<VersionRead>(`/api/history/versions/${encodeURIComponent(id)}`, { cache: 'no-store' })
-		read.catch(() => { records.delete(id) })
+	if (read) {
+		records.delete(id)
 		records.set(id, read)
+		return read
 	}
+	read = $fetch<VersionRead>(`/api/history/versions/${encodeURIComponent(id)}`, { cache: 'no-store' })
+	read.catch(() => { if (records.get(id) === read) records.delete(id) })
+	records.set(id, read)
+	while (records.size > RECORD_CACHE_LIMIT) records.delete(records.keys().next().value!)
 	return read
 }
 
@@ -47,17 +55,30 @@ export function forgetVersionRecord(id: string): void {
 	records.delete(id)
 }
 
-/** Re-reads `load` on focus, while visible every `TIMELINE_POLL_MS`, on Workbench refreshes and Checkpoint changes. */
-function useTimelineRefresh(load: () => Promise<void>, enabled: () => boolean): void {
+/** Every revision the Workbench has read; it changes when the Workbench re-reads changed resources. */
+export function useWorkbenchSignature() {
 	const { views, flows, workspace, localeRevisions } = useWorkbench()
-	const signature = computed(() => [
+	return computed(() => [
 		workspace.value?.revision ?? '',
 		...views.value.map(view => view.revision),
 		...flows.value.map(flow => flow.revision),
 		...Object.values(localeRevisions.value),
 	].join(','))
+}
+
+/** A focus and a visibility change arrive together; one read serves both. */
+const MIN_REFRESH_GAP_MS = 2000
+
+/** Re-reads `load` on focus, while visible every `TIMELINE_POLL_MS`, on Workbench refreshes and Checkpoint changes. */
+function useTimelineRefresh(load: () => Promise<void>, enabled: () => boolean): void {
+	const signature = useWorkbenchSignature()
 	let timer: ReturnType<typeof setInterval> | undefined
-	const refresh = () => { if (enabled() && document.visibilityState === 'visible') void load() }
+	let last = 0
+	const refresh = () => {
+		if (!enabled() || document.visibilityState !== 'visible' || Date.now() - last < MIN_REFRESH_GAP_MS) return
+		last = Date.now()
+		void load()
+	}
 	onMounted(() => {
 		window.addEventListener('focus', refresh)
 		document.addEventListener('visibilitychange', refresh)
@@ -150,8 +171,57 @@ export function useVersionTimeline(options: Readonly<{
 	return { versions, rows, invalid, nextCursor, loading, loadingMore, loaded, error, load, loadMore }
 }
 
-/** `GET /api/history/diff` with `detail=semantic` for a selection's two sides. */
-export function useVersionComparison(endpoints: MaybeRefOrGetter<ComparisonEndpoints | undefined>, resources: MaybeRefOrGetter<readonly HistoryResourceRef[]> = []) {
+/**
+ * The two sides of a selection, oldest first. With another version, both records are read first
+ * (their times decide the order), so no comparison is requested the wrong way round; until both are
+ * known the endpoints are `undefined`.
+ */
+export function useOrderedEndpoints(selection: MaybeRefOrGetter<Pick<HistorySelection, 'version' | 'compare'> | undefined>) {
+	const endpoints = shallowRef<ComparisonEndpoints>()
+	/** The other version's record, when `compare` names one. */
+	const compared = shallowRef<VersionRecord>()
+	let generation = 0
+	watch(() => JSON.stringify(toValue(selection) ?? null), async () => {
+		const current = ++generation
+		const value = toValue(selection)
+		compared.value = undefined
+		if (!value) {
+			endpoints.value = undefined
+			return
+		}
+		if (value.compare === PARENT_COMPARE || value.compare === CURRENT_COMPARE) {
+			endpoints.value = comparisonEndpoints(value)
+			return
+		}
+		endpoints.value = undefined
+		const [selected, other] = await Promise.all([readVersionRecord(value.version).catch(() => undefined), readVersionRecord(value.compare).catch(() => undefined)])
+		if (current !== generation) return
+		compared.value = other?.version
+		const times = new Map([[value.version, selected?.version.at], [value.compare, other?.version.at]])
+		// A side that cannot be read is compared as asked; the server answers why it cannot.
+		endpoints.value = comparisonEndpoints(value, id => times.get(id))
+	}, { immediate: true })
+	return { endpoints, compared }
+}
+
+/** Compared results whose sides never change (no `current`), least recently used first. */
+const DIFF_CACHE_LIMIT = 50
+const diffs = new Map<string, VersionDiffResult>()
+
+/**
+ * `GET /api/history/diff` for two sides: the `summary`, or the `semantic` diff of the given
+ * resources. A comparison with `current` is read again only when `refreshKey` changes (the newest
+ * version or the Workbench's revisions), never on a poll.
+ */
+export function useVersionDiff(
+	endpoints: MaybeRefOrGetter<ComparisonEndpoints | undefined>,
+	options: Readonly<{
+		resources?: MaybeRefOrGetter<readonly HistoryResourceRef[]>
+		detail: 'summary' | 'semantic'
+		enabled?: MaybeRefOrGetter<boolean>
+		refreshKey?: MaybeRefOrGetter<string | undefined>
+	}>,
+) {
 	const { t } = useI18n()
 	const result = shallowRef<VersionDiffResult>()
 	const loading = ref(false)
@@ -161,15 +231,27 @@ export function useVersionComparison(endpoints: MaybeRefOrGetter<ComparisonEndpo
 	async function load(): Promise<void> {
 		const sides = toValue(endpoints)
 		const current = ++generation
-		if (!sides) {
-			result.value = undefined
+		if (!sides || toValue(options.enabled) === false) {
+			if (!sides) result.value = undefined
+			error.value = undefined
+			return
+		}
+		const query = diffRequestQuery(sides, toValue(options.resources) ?? [], options.detail)
+		const key = JSON.stringify(query)
+		const cached = sides.to === CURRENT_COMPARE ? undefined : diffs.get(key)
+		if (cached) {
+			result.value = cached
 			error.value = undefined
 			return
 		}
 		loading.value = true
 		try {
-			const compared = await $fetch<VersionDiffResult>('/api/history/diff', { query: diffRequestQuery(sides, toValue(resources)), cache: 'no-store' })
+			const compared = await $fetch<VersionDiffResult>('/api/history/diff', { query, cache: 'no-store' })
 			if (current !== generation) return
+			if (sides.to !== CURRENT_COMPARE) {
+				diffs.set(key, compared)
+				while (diffs.size > DIFF_CACHE_LIMIT) diffs.delete(diffs.keys().next().value!)
+			}
 			result.value = compared
 			error.value = undefined
 		}
@@ -183,9 +265,10 @@ export function useVersionComparison(endpoints: MaybeRefOrGetter<ComparisonEndpo
 		}
 	}
 
-	watch(() => JSON.stringify([toValue(endpoints) ?? null, toValue(resources)]), () => { void load() }, { immediate: true })
-	// A comparison with `current` changes whenever the Workspace does.
-	useTimelineRefresh(load, () => toValue(endpoints)?.to === 'current')
+	watch(() => JSON.stringify([toValue(endpoints) ?? null, toValue(options.resources) ?? [], toValue(options.enabled) ?? true]), () => { void load() }, { immediate: true })
+	watch(() => toValue(endpoints)?.to === CURRENT_COMPARE ? toValue(options.refreshKey) : undefined, (key, previous) => {
+		if (key !== undefined && previous !== undefined && key !== previous) void load()
+	})
 
 	return { result, loading, error, load }
 }

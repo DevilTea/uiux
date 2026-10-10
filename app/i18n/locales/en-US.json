@@ -2203,7 +2203,8 @@
     "since": {
       "compare": "Compare with now",
       "unavailable": "No saved version has what you last saw",
-      "openView": "Open View"
+      "openView": "Open View",
+      "failed": "Couldn't find the version you last saw."
     },
     "invalid": {
       "title": "Some history records can't be read",
@@ -2287,7 +2288,7 @@
       "after": "After",
       "noImage": "No image",
       "imageAlt": "{name}, {side}",
-      "imageUnavailable": "This image is no longer stored."
+      "imageUnavailable": "This image can't be previewed here yet."
     },
     "checkpoint": {
       "create": "Create Checkpoint",
@@ -2322,6 +2323,11 @@
       "title": "Versions of this View",
       "emptyTitle": "No changes to this View yet",
       "emptyDescription": "Each saved change to this View is listed here."
+    },
+    "emptyFilteredMore": "None of the loaded versions match. Load older versions to look further back.",
+    "systemName": {
+      "baseline": "History start",
+      "migrate": "Before migrating to schemaVersion {version}"
     }
   }
 }

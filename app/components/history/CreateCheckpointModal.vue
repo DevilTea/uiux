@@ -40,8 +40,8 @@ watch(open, (value) => {
 		note.value = ''
 		touched.value = false
 		error.value = undefined
+		// Starting the watch reads the leases at once; a running watch read them at most 5 s ago.
 		stopLocks ??= access.watchLocks()
-		void access.refreshLocks()
 	}
 	else {
 		stopLocks?.()
@@ -138,7 +138,6 @@ async function create(): Promise<void> {
             class="w-full"
             data-checkpoint-name
             @blur="touched = true"
-            @keydown.enter.prevent="create"
           />
         </UFormField>
         <UFormField

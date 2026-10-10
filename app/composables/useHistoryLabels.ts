@@ -1,9 +1,18 @@
+import { shallowRef } from 'vue'
 import { useI18n } from '#imports'
 import type { HistoryVersionType } from '../../src/domain/history/constants'
 import type { HistoryActor } from '../../src/domain/history/schema'
 import type { VersionListItem } from '../../src/application/services/history-service'
-import type { HistoryResourceRef } from '../utils/version-history'
+import { systemCheckpointTitle, type HistoryResourceRef } from '../utils/version-history'
+import { useUiuxClient } from './useUiuxClient'
 import { useWorkbench } from './useWorkbench'
+
+/** Asset names by key, read once on demand (the Workbench state keeps only the Asset count). */
+const assetNames = shallowRef(new Map<string, string>())
+let assetNamesRead: Promise<void> | undefined
+let assetNamesAt = 0
+/** An Asset added since the last read is looked up again, at most this often. */
+const ASSET_NAMES_TTL_MS = 30_000
 
 /** Literal icon names (the static publication's icon scanner reads literals only). */
 export const VERSION_TYPE_ICONS: Readonly<Record<HistoryVersionType, string>> = {
@@ -27,7 +36,19 @@ export const CHANGE_ICONS: Readonly<Record<string, string>> = {
 /** Chrome words for history records: actors, version types, resource kinds and write operations. */
 export function useHistoryLabels() {
 	const { t, te, locale } = useI18n()
-	const { views, flows } = useWorkbench()
+	const { views, flows, isReadOnly } = useWorkbench()
+	const uiux = useUiuxClient()
+
+	function readAssetNames(missing: boolean): void {
+		if (missing && assetNamesRead && Date.now() - assetNamesAt > ASSET_NAMES_TTL_MS) assetNamesRead = undefined
+		if (assetNamesRead || isReadOnly.value) return
+		assetNamesAt = Date.now()
+		assetNamesRead = uiux.listResources<{ key: string; summary?: { name?: string } }>(['asset'], { limit: 100 })
+			.then((page) => {
+				assetNames.value = new Map(page.items.flatMap(item => item.summary?.name ? [[item.key, item.summary.name] as const] : []))
+			})
+			.catch(() => { assetNamesRead = undefined })
+	}
 
 	function actorName(actor: HistoryActor): string {
 		if (actor.type === 'external') return t('history.actor.external')
@@ -46,9 +67,24 @@ export function useHistoryLabels() {
 		return 'i-lucide-user'
 	}
 
-	/** A Checkpoint's own name; every other version is named by its type. */
-	function versionTitle(version: Pick<VersionListItem, 'type' | 'name'>): string {
-		return version.type === 'checkpoint' && version.name ? version.name : t(`history.type.${version.type}`)
+	/**
+	 * A Checkpoint's own name; every other version is named by its type. A system Checkpoint's fixed
+	 * name is localized by the actor that created it (owner ruling
+	 * https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18844687); `storedName` gives
+	 * the persisted name for a tooltip. A member's name is shown as written.
+	 */
+	function versionTitle(version: Readonly<{ type: VersionListItem['type']; name?: string | null; actor: HistoryActor }>): string {
+		if (version.type !== 'checkpoint' || !version.name) return t(`history.type.${version.type}`)
+		const system = systemCheckpointTitle(version)
+		if (system?.key === 'baseline') return t('history.systemName.baseline')
+		if (system?.key === 'migrate') return t('history.systemName.migrate', { version: system.target })
+		return version.name
+	}
+
+	/** The persisted name of a Checkpoint whose title is localized; `undefined` when the title is the name. */
+	function storedName(version: Readonly<{ type: VersionListItem['type']; name?: string | null; actor: HistoryActor }>): string | undefined {
+		if (version.type !== 'checkpoint' || !version.name) return undefined
+		return versionTitle(version) === version.name ? undefined : version.name
 	}
 
 	function kindLabel(kind: string): string {
@@ -60,6 +96,11 @@ export function useHistoryLabels() {
 		if (resource.kind === 'workspace') return t('history.kind.workspace')
 		if (resource.kind === 'view') return views.value.find(view => view.key === resource.key)?.summary.name || resource.key
 		if (resource.kind === 'flow') return flows.value.find(flow => flow.key === resource.key)?.summary.name || resource.key
+		if (resource.kind === 'asset') {
+			const name = assetNames.value.get(resource.key)
+			readAssetNames(!name)
+			return name || resource.key
+		}
 		return resource.key
 	}
 
@@ -89,5 +130,5 @@ export function useHistoryLabels() {
 		return new Intl.DateTimeFormat(locale.value, { dateStyle: 'full' }).format(value)
 	}
 
-	return { actorName, actorIcon, versionTitle, kindLabel, resourceName, operationLabel, time, dateTime, dayLabel }
+	return { actorName, actorIcon, versionTitle, storedName, kindLabel, resourceName, operationLabel, time, dateTime, dayLabel }
 }

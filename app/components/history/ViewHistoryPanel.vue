@@ -5,9 +5,8 @@ import { useI18n, useRoute } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
 import { useCheckpointAccess } from '../../composables/useCheckpointAccess'
-import { useHistoryLabels } from '../../composables/useHistoryLabels'
 import { useVersionTimeline } from '../../composables/useVersionHistory'
-import { activityLocation, comparisonEndpoints, historyQuery, parseHistoryAddress, resolveHistorySelection, type HistoryAddress } from '../../utils/version-history'
+import { activityLocation, historyQuery, parseHistoryAddress, resolveHistorySelection, type HistoryAddress } from '../../utils/version-history'
 import VersionTimeline from './VersionTimeline.vue'
 import VersionComparison from './VersionComparison.vue'
 
@@ -23,7 +22,6 @@ const { t } = useI18n()
 const route = useRoute()
 const shell = useWorkbenchShell()
 const { selectedViewId, isReadOnly } = useWorkbench()
-const labels = useHistoryLabels()
 const checkpoints = useCheckpointAccess()
 
 const view = computed(() => selectedViewId.value ? { kind: 'view', key: selectedViewId.value } : undefined)
@@ -43,12 +41,6 @@ function panelTo(next: HistoryAddress) {
 }
 
 const timeline = useVersionTimeline({ resource: view, enabled: () => props.active && !!view.value && !isReadOnly.value })
-const versionAt = computed(() => new Map(timeline.versions.value.map(version => [version.id, version.at])))
-const endpoints = computed(() => selection.value && comparisonEndpoints(selection.value, id => versionAt.value.get(id)))
-const compareTitle = computed(() => {
-	const compared = selection.value && timeline.versions.value.find(version => version.id === selection.value!.compare)
-	return compared ? labels.versionTitle(compared) : undefined
-})
 const fullComparison = computed(() => selection.value && view.value
 	? activityLocation({ version: selection.value.version, ...(address.value.compare ? { compare: address.value.compare } : {}), resource: view.value })
 	: undefined)
@@ -82,11 +74,10 @@ const fullComparison = computed(() => selection.value && view.value
       </p>
       <template v-else>
         <VersionComparison
-          v-if="selection && endpoints && view"
+          v-if="selection && view"
           :address="address"
-          :endpoints="endpoints"
           :request-resources="[view]"
-          :compare-title="compareTitle"
+          :latest-version-id="timeline.versions.value[0]?.id"
           :link-for="panelTo"
           :close-to="panelTo({})"
           :full-comparison-to="fullComparison"

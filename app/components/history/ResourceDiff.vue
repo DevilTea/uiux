@@ -14,8 +14,8 @@ import HistoryImage from './HistoryImage.vue'
  */
 const props = defineProps<{
 	diff: ResourceDiff
-	/** For an Asset image on the `current` side: the Asset's current content address. */
-	currentImageUrl?: string
+	/** The Asset's current content: an image with this digest is read from its content address. */
+	currentImage?: Readonly<{ digest?: string; url: string }>
 	/** The resource's display name, for image alternative text. */
 	name: string
 }>()
@@ -64,6 +64,7 @@ const hasContent = computed(() => described.value.sections.length > 0 || !!descr
           v-if="described.image.before"
           :digest="described.image.before.digest"
           :media-type="described.image.before.mediaType"
+          :current="currentImage"
           :alt="t('history.diff.imageAlt', { name, side: t('history.diff.before') })"
         />
         <p
@@ -81,7 +82,7 @@ const hasContent = computed(() => described.value.sections.length > 0 || !!descr
           v-if="described.image.after"
           :digest="described.image.after.digest"
           :media-type="described.image.after.mediaType"
-          :fallback-url="currentImageUrl"
+          :current="currentImage"
           :alt="t('history.diff.imageAlt', { name, side: t('history.diff.after') })"
         />
         <p

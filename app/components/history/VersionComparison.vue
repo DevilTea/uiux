@@ -1,25 +1,26 @@
 <script setup lang="ts">
-import { computed, useId } from 'vue'
+import { computed, nextTick, onMounted, shallowRef, useId, useTemplateRef, watch } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 import { useI18n } from '#imports'
 import type { ComparedCurrent, ComparedVersion, ResourceSemanticChange } from '../../../src/application/services/history-diff'
+import type { VersionRecord } from '../../../src/domain/history/schema'
 import { CHANGE_ICONS, useHistoryLabels } from '../../composables/useHistoryLabels'
-import { useVersionComparison } from '../../composables/useVersionHistory'
-import { CURRENT_COMPARE, PARENT_COMPARE, resolveHistorySelection, sameResource, type ComparisonEndpoints, type HistoryAddress, type HistoryResourceRef, type HistorySelection } from '../../utils/version-history'
-import ResourceDiff from './ResourceDiff.vue'
+import { readVersionRecord, useOrderedEndpoints, useVersionDiff, useWorkbenchSignature } from '../../composables/useVersionHistory'
+import { CURRENT_COMPARE, PARENT_COMPARE, resolveHistorySelection, sameResource, type HistoryAddress, type HistoryResourceRef, type HistorySelection } from '../../utils/version-history'
+import ResourceChange from './ResourceChange.vue'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 
 /**
  * A comparison (Rule 01a11a5e-11e0-7f39-84a7-fde3faa43340): the summary of every compared resource
- * first, then the semantic diff of each changed one. The selection lives in the address
- * (Rule 01a11a5e-1afd-79e8-bfe8-8c0eccfaa396), so the compare-with choices and the resource
- * choices are links built by the caller (`linkFor`). A View's canvas before and after is B9: the
- * `canvas` slot is where it goes, below that View's change list.
+ * first, then the semantic diff of each changed one, read per resource when it is opened (the
+ * selected resource, or the only changed one, opens at once). The selection lives in the address
+ * (Rule 01a11a5e-1afd-79e8-bfe8-8c0eccfaa396), so the compare-with choices and the resource choices
+ * are links built by the caller (`linkFor`). A View's canvas before and after is B9: the `canvas`
+ * slot is where it goes, below that View's change list.
  */
 const props = withDefaults(defineProps<{
 	/** The address as written; it holds a `version` (`resolveHistorySelection` applies the defaults). */
 	address: HistoryAddress
-	endpoints: ComparisonEndpoints
 	/** Only these resources are compared (the View page's panel compares its View). */
 	requestResources?: readonly HistoryResourceRef[]
 	/** The address of another selection: a different `compare` or `resource`. */
@@ -28,28 +29,45 @@ const props = withDefaults(defineProps<{
 	closeTo: RouteLocationRaw
 	/** From the View page: the same comparison in Overview's Activity, with every resource. */
 	fullComparisonTo?: RouteLocationRaw
-	/** The compared version's display title, when the caller knows it, for the other-version choice. */
-	compareTitle?: string
-}>(), { requestResources: () => [], fullComparisonTo: undefined, compareTitle: undefined })
+	/** The newest listed version: a comparison with `current` is read again when it or the Workspace changes. */
+	latestVersionId?: string
+}>(), { requestResources: () => [], fullComparisonTo: undefined, latestVersionId: undefined })
 
 defineSlots<{ canvas?: (props: { change: ResourceSemanticChange }) => unknown }>()
 
 const { t } = useI18n()
 const labels = useHistoryLabels()
 const headingId = useId()
+const heading = useTemplateRef<HTMLElement>('heading')
 
 const selection = computed<HistorySelection>(() => resolveHistorySelection(props.address) ?? { version: '', compare: PARENT_COMPARE })
-const comparison = useVersionComparison(() => props.endpoints, () => props.requestResources)
-const result = computed(() => comparison.result.value)
+const ordered = useOrderedEndpoints(selection)
+const endpoints = ordered.endpoints
+const signature = useWorkbenchSignature()
+const refreshKey = computed(() => `${props.latestVersionId ?? ''}|${signature.value}`)
+const summary = useVersionDiff(endpoints, { resources: () => props.requestResources, detail: 'summary', refreshKey })
+const result = computed(() => summary.result.value)
 const changed = computed(() => result.value?.summary.filter(row => row.status !== 'unchanged') ?? [])
 const unchangedCount = computed(() => (result.value?.summary.length ?? 0) - changed.value.length)
-const shownChanges = computed(() => (result.value?.changes ?? []).filter(change => !selection.value.resource || sameResource(change, selection.value.resource)))
+const shownRows = computed(() => changed.value.filter(row => !selection.value.resource || sameResource(row, selection.value.resource)))
 
-function sideTitle(side: ComparedVersion | ComparedCurrent | null | undefined): string {
-	if (!side) return t('history.compare.nothing')
-	if (side.id === CURRENT_COMPARE) return t('history.compare.current')
+/** The records of the two sides, for their titles (system Checkpoint names are localized by actor). */
+const sideRecords = shallowRef(new Map<string, VersionRecord>())
+watch(() => [result.value?.from?.id, result.value?.to.id].filter((id): id is string => !!id && id !== CURRENT_COMPARE).join(','), async (ids) => {
+	for (const id of ids ? ids.split(',') : []) {
+		if (sideRecords.value.has(id)) continue
+		const read = await readVersionRecord(id).catch(() => undefined)
+		if (read) sideRecords.value = new Map(sideRecords.value).set(id, read.version)
+	}
+}, { immediate: true })
+
+function side(side: ComparedVersion | ComparedCurrent | null | undefined): { title: string; stored?: string } {
+	if (!side) return { title: t('history.compare.nothing') }
+	if (side.id === CURRENT_COMPARE) return { title: t('history.compare.current') }
 	const version = side as ComparedVersion
-	return version.type === 'checkpoint' && version.name ? version.name : t(`history.type.${version.type}`)
+	const record = sideRecords.value.get(version.id)
+	if (record) return { title: labels.versionTitle(record), ...(labels.storedName(record) ? { stored: labels.storedName(record) } : {}) }
+	return { title: version.type === 'checkpoint' && version.name ? version.name : t(`history.type.${version.type}`) }
 }
 
 const targets = computed(() => {
@@ -57,8 +75,10 @@ const targets = computed(() => {
 		{ value: PARENT_COMPARE, label: t('history.compare.parent') },
 		{ value: CURRENT_COMPARE, label: t('history.compare.current') },
 	]
-	if (selection.value.compare !== PARENT_COMPARE && selection.value.compare !== CURRENT_COMPARE)
-		list.push({ value: selection.value.compare, label: props.compareTitle ? t('history.compare.otherNamed', { name: props.compareTitle }) : t('history.compare.other') })
+	if (selection.value.compare !== PARENT_COMPARE && selection.value.compare !== CURRENT_COMPARE) {
+		const other = ordered.compared.value
+		list.push({ value: selection.value.compare, label: other ? t('history.compare.otherNamed', { name: labels.versionTitle(other) }) : t('history.compare.other') })
+	}
 	return list
 })
 
@@ -74,6 +94,16 @@ function resourceLink(resource: HistoryResourceRef): RouteLocationRaw {
 	delete rest.resource
 	return props.linkFor(rest as HistoryAddress)
 }
+
+/**
+ * After the reader picks a version in the timeline, focus moves to the comparison heading so a
+ * screen reader hears where the result is; a comparison opened from the address keeps the page's focus.
+ */
+function focusHeading(): void {
+	void nextTick(() => heading.value?.focus())
+}
+onMounted(() => { if (document.activeElement?.closest('[data-version-timeline]')) focusHeading() })
+watch(() => props.address.version, focusHeading)
 </script>
 
 <template>
@@ -81,15 +111,18 @@ function resourceLink(resource: HistoryResourceRef): RouteLocationRaw {
     class="space-y-4"
     :aria-labelledby="headingId"
     data-version-comparison
-    :data-from="endpoints.from"
-    :data-to="endpoints.to"
-    :aria-busy="comparison.loading.value || undefined"
+    :data-from="endpoints?.from"
+    :data-to="endpoints?.to"
+    :aria-busy="summary.loading.value || !endpoints || undefined"
   >
     <div class="flex items-start justify-between gap-2">
       <div class="min-w-0 space-y-1">
         <h3
           :id="headingId"
+          ref="heading"
+          tabindex="-1"
           class="text-sm font-semibold text-highlighted"
+          data-comparison-heading
         >
           {{ t('history.compare.title') }}
         </h3>
@@ -98,7 +131,10 @@ function resourceLink(resource: HistoryResourceRef): RouteLocationRaw {
           class="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-muted"
           data-comparison-sides
         >
-          <span class="truncate font-medium text-default">{{ sideTitle(result.from) }}</span>
+          <span
+            class="truncate font-medium text-default"
+            :title="side(result.from).stored"
+          >{{ side(result.from).title }}</span>
           <time
             v-if="result.from && 'at' in result.from"
             :datetime="result.from.at"
@@ -108,7 +144,10 @@ function resourceLink(resource: HistoryResourceRef): RouteLocationRaw {
             class="size-3.5 shrink-0"
           />
           <span class="sr-only">{{ t('history.compare.to') }}</span>
-          <span class="truncate font-medium text-default">{{ sideTitle(result.to) }}</span>
+          <span
+            class="truncate font-medium text-default"
+            :title="side(result.to).stored"
+          >{{ side(result.to).title }}</span>
           <time
             v-if="'at' in result.to"
             :datetime="result.to.at"
@@ -148,18 +187,18 @@ function resourceLink(resource: HistoryResourceRef): RouteLocationRaw {
     </nav>
 
     <UAlert
-      v-if="comparison.error.value"
+      v-if="summary.error.value"
       color="error"
       variant="subtle"
       icon="i-lucide-circle-alert"
-      :title="comparison.error.value.message"
-      :actions="[{ label: t('common.retry'), size: 'xs', color: 'error', variant: 'outline', onClick: () => { void comparison.load() } }]"
+      :title="summary.error.value.message"
+      :actions="[{ label: t('common.retry'), size: 'xs', color: 'error', variant: 'outline', onClick: () => { void summary.load() } }]"
     >
       <template #description>
         <WbErrorDescription
-          :headline="comparison.error.value.message"
-          :diagnostics="comparison.error.value.diagnostics"
-          :status-code="comparison.error.value.statusCode"
+          :headline="summary.error.value.message"
+          :diagnostics="summary.error.value.diagnostics"
+          :status-code="summary.error.value.statusCode"
         />
       </template>
     </UAlert>
@@ -244,33 +283,21 @@ function resourceLink(resource: HistoryResourceRef): RouteLocationRaw {
         </div>
       </section>
 
-      <article
-        v-for="change in shownChanges"
-        :key="`${change.kind}:${change.key}`"
-        class="space-y-2 border-t border-default pt-3"
-        :data-resource-diff="`${change.kind}:${change.key}`"
+      <ResourceChange
+        v-for="row in shownRows"
+        :key="`${endpoints?.from}:${endpoints?.to}:${row.kind}:${row.key}`"
+        :row="row"
+        :endpoints="endpoints!"
+        :refresh-key="refreshKey"
+        :initially-open="!!selection.resource || changed.length === 1"
       >
-        <h4 class="flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm">
-          <UIcon
-            :name="CHANGE_ICONS[change.status]!"
-            class="size-4 shrink-0 text-muted"
+        <template #canvas="{ change }">
+          <slot
+            name="canvas"
+            :change="change"
           />
-          <span class="text-xs text-muted">{{ t(`history.compare.status.${change.status}`) }}</span>
-          <span class="text-xs text-muted">{{ labels.kindLabel(change.kind) }}</span>
-          <span class="min-w-0 truncate font-medium text-highlighted">{{ labels.resourceName(change) }}</span>
-        </h4>
-        <ResourceDiff
-          :diff="change.diff"
-          :name="labels.resourceName(change)"
-          :current-image-url="change.kind === 'asset' && endpoints.to === CURRENT_COMPARE ? `/api/assets/${encodeURIComponent(change.key)}/content` : undefined"
-        />
-        <!-- B9 seam: a View's canvas before and after (Rules 01a11a5e-1232…, 1288…, 12dc…) renders here. -->
-        <slot
-          v-if="change.kind === 'view'"
-          name="canvas"
-          :change="change"
-        />
-      </article>
+        </template>
+      </ResourceChange>
     </template>
   </section>
 </template>

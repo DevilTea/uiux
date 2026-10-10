@@ -4,13 +4,14 @@ import { useI18n } from '#imports'
 
 /**
  * One side of an Asset image change, fetched by its content digest (Rule
- * 01a11a5e-10df-795e-8fbc-a99de09694a5: fetching by digest is the reader's concern). The bytes come
- * from the artifact store, which holds the blobs of member Checkpoints; `fallbackUrl` (the Asset's
- * current content, for the `current` side) is tried next. The bytes are shown with the recorded
- * media type, since the artifact route labels only PNG and JSON. When neither has the bytes, the
- * digest is shown instead of a broken image.
+ * 01a11a5e-10df-795e-8fbc-a99de09694a5: fetching by digest is the reader's concern). When the digest
+ * is the Asset's current content, the Asset's content address serves it; otherwise the artifact
+ * store, which holds the blobs of member Checkpoints, is tried. A blob kept only in the host history
+ * store (an autosave's) has no route yet (issue #132, B9), so its digest is shown with a note
+ * instead of a broken image. The bytes are shown with the recorded media type, since the artifact
+ * route labels only PNG and JSON.
  */
-const props = defineProps<{ digest: string; mediaType: string; alt: string; fallbackUrl?: string }>()
+const props = defineProps<{ digest: string; mediaType: string; alt: string; current?: Readonly<{ digest?: string; url: string }> }>()
 const { t } = useI18n()
 
 const url = ref<string>()
@@ -32,8 +33,9 @@ async function load(): Promise<void> {
 	url.value = undefined
 	missing.value = false
 	try {
-		const blob = await fetchBlob(`/api/artifacts/${encodeURIComponent(props.digest)}`)
-			?? (props.fallbackUrl ? await fetchBlob(props.fallbackUrl) : undefined)
+		const blob = props.current?.digest === props.digest
+			? await fetchBlob(props.current.url)
+			: await fetchBlob(`/api/artifacts/${encodeURIComponent(props.digest)}`)
 		if (!blob) {
 			missing.value = true
 			return
@@ -46,7 +48,7 @@ async function load(): Promise<void> {
 	}
 }
 
-watch(() => [props.digest, props.fallbackUrl], () => { void load() }, { immediate: true })
+watch(() => [props.digest, props.current?.digest, props.current?.url], () => { void load() }, { immediate: true })
 onBeforeUnmount(release)
 </script>
 

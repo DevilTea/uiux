@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, watch } from 'vue'
+import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { useI18n, useToast } from '#imports'
 import type { VersionListItem } from '../../../src/application/services/history-service'
 import { forgetVersionRecord, notifyHistoryChanged } from '../../composables/useVersionHistory'
@@ -18,6 +18,13 @@ const props = defineProps<{ version?: VersionListItem }>()
 const emit = defineEmits<{ deleted: [id: string] }>()
 const { t } = useI18n()
 const toast = useToast()
+
+const cancelButton = useTemplateRef<{ $el?: HTMLElement }>('cancelButton')
+/** Focus starts on Cancel, the safe choice; the dialog's own autofocus would land on its close button. */
+function focusCancel(event: Event): void {
+	event.preventDefault()
+	cancelButton.value?.$el?.focus()
+}
 
 const deleting = ref(false)
 const error = shallowRef<FetchErrorDetails>()
@@ -53,6 +60,7 @@ async function confirm(): Promise<void> {
     v-model:open="open"
     :title="t('history.delete.title')"
     :dismissible="!deleting"
+    :content="{ onOpenAutoFocus: focusCancel }"
   >
     <template #body>
       <div
@@ -92,9 +100,9 @@ async function confirm(): Promise<void> {
     <template #footer>
       <div class="flex w-full justify-end gap-2">
         <UButton
+          ref="cancelButton"
           color="neutral"
           variant="outline"
-          autofocus
           :disabled="deleting"
           :label="t('common.cancel')"
           data-delete-cancel

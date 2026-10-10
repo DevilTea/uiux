@@ -18,7 +18,6 @@ import { relativeTime } from '../../utils/widget-inspection'
 import { viewLocation } from '../../utils/workbench-routes'
 import {
 	actorFilterValue,
-	comparisonEndpoints,
 	CURRENT_COMPARE,
 	distinctActors,
 	historyQuery,
@@ -97,10 +96,6 @@ const kindItems = computed(() => [
 	...KINDS.map(kind => ({ label: labels.kindLabel(kind), value: kind })),
 ])
 
-const versionAt = computed(() => new Map(timeline.versions.value.map(version => [version.id, version.at])))
-const versionTitles = computed(() => new Map(timeline.versions.value.map(version => [version.id, labels.versionTitle(version)])))
-const endpoints = computed(() => selection.value && comparisonEndpoints(selection.value, id => versionAt.value.get(id)))
-const compareTitle = computed(() => selection.value ? versionTitles.value.get(selection.value.compare) : undefined)
 
 // ----- Delete (an Owner on desktop) -----------------------------------------------------------
 
@@ -117,31 +112,52 @@ function onDeleted(id: string): void {
 // ----- Changes since you last looked ----------------------------------------------------------
 
 const updatedViews = computed(() => views.value.filter(view => updatedSince(readiness.lastSeen.value, `view:${view.key}`, view.revision)))
-/** View key and last-seen revision → the version holding it (`null`: no listed version does). */
-const sinceVersions = shallowRef(new Map<string, string | null>())
-const SINCE_SEARCH_LIMIT = 20
+/**
+ * The version holding a View's last-seen revision is looked up when the reader asks for the
+ * comparison: the View's projection is paged until a version records that revision. A lookup that
+ * finds none, or fails, is reported beside the View and can be tried again.
+ */
+type SinceState = Readonly<{ state: 'resolving' } | { state: 'missing' } | { state: 'failed'; message: string }>
+const sinceStates = shallowRef(new Map<string, SinceState>())
+const SINCE_PAGE_SIZE = 50
 
-async function versionHolding(viewKey: string, revision: string): Promise<string | null> {
+async function versionHolding(viewKey: string, revision: string): Promise<string | undefined> {
 	const resource = { kind: 'view', key: viewKey }
-	const page = await $fetch<{ versions: VersionListItem[] }>('/api/history/versions', { query: { resource: `view:${viewKey}`, limit: String(SINCE_SEARCH_LIMIT) }, cache: 'no-store' })
-	for (const row of page.versions) {
-		const read = await readVersionRecord(row.id)
-		if (revisionIn(read.version, resource) === revision) return row.id
-	}
-	return null
+	let cursor: string | undefined
+	do {
+		const page = await $fetch<{ versions: VersionListItem[]; nextCursor?: string }>('/api/history/versions', {
+			query: { resource: `view:${viewKey}`, limit: String(SINCE_PAGE_SIZE), ...(cursor ? { cursor } : {}) },
+			cache: 'no-store',
+		})
+		for (const row of page.versions) {
+			const read = await readVersionRecord(row.id)
+			if (revisionIn(read.version, resource) === revision) return row.id
+		}
+		cursor = page.nextCursor
+	} while (cursor)
+	return undefined
 }
 
-watch(() => isReadOnly.value ? [] : updatedViews.value.map(view => `${view.key}@${readiness.lastSeen.value[`view:${view.key}`]}`), async (keys) => {
-	for (const key of keys) {
-		if (sinceVersions.value.has(key)) continue
-		const [viewKey, revision] = key.split('@') as [string, string]
-		const found = await versionHolding(viewKey, revision).catch(() => null)
-		sinceVersions.value = new Map(sinceVersions.value).set(key, found)
-	}
-}, { immediate: true })
+function setSince(viewKey: string, state: SinceState | undefined): void {
+	const next = new Map(sinceStates.value)
+	if (state) next.set(viewKey, state)
+	else next.delete(viewKey)
+	sinceStates.value = next
+}
 
-function sinceVersion(viewKey: string): string | null | undefined {
-	return sinceVersions.value.get(`${viewKey}@${readiness.lastSeen.value[`view:${viewKey}`]}`)
+async function compareSince(viewKey: string): Promise<void> {
+	const revision = readiness.lastSeen.value[`view:${viewKey}`]
+	if (!revision || sinceStates.value.get(viewKey)?.state === 'resolving') return
+	setSince(viewKey, { state: 'resolving' })
+	try {
+		const version = await versionHolding(viewKey, revision)
+		if (!version) return setSince(viewKey, { state: 'missing' })
+		setSince(viewKey, undefined)
+		await router.push(activityTo({ version, compare: CURRENT_COMPARE, resource: { kind: 'view', key: viewKey } }))
+	}
+	catch (cause) {
+		setSince(viewKey, { state: 'failed', message: describeFetchError(cause, t('history.since.failed')).message })
+	}
 }
 
 // ----- Review events (a separate, secondary list) ---------------------------------------------
@@ -253,14 +269,13 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
     >
       <!-- The comparison comes first on narrow layouts and sits beside the timeline from 1024px. -->
       <div
-        v-if="selection && endpoints && !isReadOnly"
+        v-if="selection && !isReadOnly"
         class="min-w-0 lg:order-2"
       >
         <div class="lg:sticky lg:top-4">
           <VersionComparison
             :address="address"
-            :endpoints="endpoints"
-            :compare-title="compareTitle"
+            :latest-version-id="timeline.versions.value[0]?.id"
             :link-for="activityTo"
             :close-to="activityTo({})"
           />
@@ -289,19 +304,28 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
                 aria-hidden="true"
               />
               <span class="min-w-0 flex-1 truncate text-default">{{ view.summary.name || t('common.unnamed') }}</span>
-              <ULink
-                v-if="!isReadOnly && sinceVersion(view.key)"
-                :to="activityTo({ version: sinceVersion(view.key)!, compare: CURRENT_COMPARE, resource: { kind: 'view', key: view.key } })"
-                class="shrink-0 text-xs text-default underline underline-offset-2 pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
-                data-since-compare
-              >
-                {{ t('history.since.compare') }}
-              </ULink>
               <span
-                v-else-if="!isReadOnly && sinceVersion(view.key) === null"
+                v-if="sinceStates.get(view.key)?.state === 'missing'"
                 class="shrink-0 text-xs text-muted"
                 data-since-unavailable
               >{{ t('history.since.unavailable') }}</span>
+              <span
+                v-else-if="sinceStates.get(view.key)?.state === 'failed'"
+                class="shrink-0 text-xs text-error"
+                role="alert"
+                data-since-failed
+              >{{ (sinceStates.get(view.key) as { message: string }).message }}</span>
+              <UButton
+                v-if="!isReadOnly"
+                size="xs"
+                color="neutral"
+                variant="link"
+                class="shrink-0 underline underline-offset-2"
+                :loading="sinceStates.get(view.key)?.state === 'resolving'"
+                :label="t('history.since.compare')"
+                data-since-compare
+                @click="compareSince(view.key)"
+              />
               <ULink
                 :to="viewLocation(view.key)"
                 class="shrink-0 text-xs text-muted hover:text-default pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
@@ -371,7 +395,7 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
             :compare-link-for="selection ? (id) => activityTo({ version: selection!.version, compare: id }) : undefined"
             :can-delete="checkpoints.canDelete.value"
             :empty-title="filters.actor || filters.kind || filters.checkpointsOnly ? t('history.emptyFiltered') : undefined"
-            :empty-description="filters.actor || filters.kind || filters.checkpointsOnly ? t('history.emptyFilteredDescription') : undefined"
+            :empty-description="filters.actor || filters.kind || filters.checkpointsOnly ? t(timeline.nextCursor.value ? 'history.emptyFilteredMore' : 'history.emptyFilteredDescription') : undefined"
             @delete="askDelete"
             @load-more="timeline.loadMore()"
             @retry="timeline.load()"

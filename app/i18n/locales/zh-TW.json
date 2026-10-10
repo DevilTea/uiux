@@ -2203,7 +2203,8 @@
     "since": {
       "compare": "與目前比較",
       "unavailable": "沒有已儲存的版本含有你上次看到的內容",
-      "openView": "開啟 View"
+      "openView": "開啟 View",
+      "failed": "找不到你上次看到的版本。"
     },
     "invalid": {
       "title": "有些歷程紀錄無法讀取",
@@ -2287,7 +2288,7 @@
       "after": "變更後",
       "noImage": "沒有圖片",
       "imageAlt": "{name}，{side}",
-      "imageUnavailable": "這張圖片已不再保存。"
+      "imageUnavailable": "這張圖片目前還無法在這裡預覽。"
     },
     "checkpoint": {
       "create": "建立 Checkpoint",
@@ -2322,6 +2323,11 @@
       "title": "這個 View 的版本",
       "emptyTitle": "這個 View 還沒有任何變更",
       "emptyDescription": "這個 View 每一次儲存的變更都會列在這裡。"
+    },
+    "emptyFilteredMore": "已載入的版本中沒有符合的項目。請載入較早的版本以繼續查看。",
+    "systemName": {
+      "baseline": "歷程起點",
+      "migrate": "遷移到 schemaVersion {version} 之前"
     }
   }
 }
