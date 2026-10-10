@@ -16,7 +16,7 @@ export type CanvasCommands = Readonly<{
 	zoomOut: () => void
 	actualSize: () => void
 	selectTool: (tool: 'select' | 'comment' | 'interact') => void
-	/** Why the Comment tool can't start (role, snapshot, phone, no live Preview…); undefined when it can. */
+	/** Why the Comment tool can't start (role, migration, phone, no live Preview…); undefined when it can. */
 	commentBlockedReason: () => string | undefined
 	/** Why "Comment on this View" can't start; undefined when it can. */
 	viewCommentBlockedReason: () => string | undefined

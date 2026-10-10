@@ -124,7 +124,7 @@ function commentOnView(): void {
           @click="choose(tool.id, tool.blocked)"
         >
           {{ tool.label }}
-          <!-- A tool that can't be used here at all (role, snapshot, phone) shows no key to press. -->
+          <!-- A tool that can't be used here at all (role, migration, phone) shows no key to press. -->
           <UKbd
             v-if="keys && !(tool.blocked && !disabledReason)"
             :value="tool.kbd"
