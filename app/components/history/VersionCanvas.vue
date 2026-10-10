@@ -92,8 +92,10 @@ type SideData =
 
 const versionData = shallowRef(new Map<string, SideData>())
 
-async function loadVersion(id: string): Promise<void> {
-	if (versionData.value.has(id)) return
+/** Loads a side once; an `error` is kept only for its placeholder, whose Retry loads it again. */
+async function loadVersion(id: string, retry = false): Promise<void> {
+	const known = versionData.value.get(id)
+	if (known && !(retry && known.status === 'error')) return
 	versionData.value = new Map(versionData.value).set(id, { status: 'loading' })
 	let data: SideData
 	try {
@@ -492,12 +494,24 @@ function canvasTo(next: HistoryCanvasMode | undefined) {
                     class="absolute inset-0"
                     :aria-label="t('common.loading')"
                   />
-                  <p
+                  <div
                     v-else
-                    class="max-w-xs text-sm text-muted"
+                    class="flex max-w-xs flex-col items-center gap-2"
                   >
-                    {{ frame.data.status === 'none' ? t('history.canvas.nothingBefore') : frame.data.status === 'missing' ? t('history.canvas.viewMissing') : frame.data.status === 'error' ? frame.data.message : '' }}
-                  </p>
+                    <p class="text-sm text-muted">
+                      {{ frame.data.status === 'none' ? t('history.canvas.nothingBefore') : frame.data.status === 'missing' ? t('history.canvas.viewMissing') : frame.data.status === 'error' ? frame.data.message : '' }}
+                    </p>
+                    <UButton
+                      v-if="frame.data.status === 'error' && frame.id"
+                      size="xs"
+                      color="neutral"
+                      variant="outline"
+                      icon="i-lucide-rotate-cw"
+                      :label="t('common.retry')"
+                      data-frame-retry
+                      @click="loadVersion(frame.id, true)"
+                    />
+                  </div>
                 </div>
               </div>
             </div>

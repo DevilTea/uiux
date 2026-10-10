@@ -85,16 +85,24 @@ export function createHistoryPreviewService(persistence: FileNativePersistence, 
 				const entry = version.resources.find(resource => resource.kind === kind && resource.key === key)
 				if (!entry) return refusal('not_found', 'history.resource_missing', '/key', `Version ${id} holds no ${kind} ${key}.`)
 				// An older version is upgraded as a whole Workspace snapshot, so every placed file is read.
+				// Only the resource's own files, and the manifest every migration step reads, are required:
+				// another resource whose content is no longer stored is left out of the snapshot whole (a
+				// partial Asset would fail the upgrade), so it cannot block reading this one.
 				const wanted = version.workspaceSchemaVersion === policy.currentVersion
 					? [entry]
 					: version.resources.filter(resource => Object.keys(resource.files).some(path => LEGACY_LAYOUT.classifyVersionedPath(path)))
 				const bytes = new Map<string, Uint8Array>()
 				for (const resource of wanted) {
+					const required = resource === entry || resource.kind === 'workspace'
+					const files = new Map<string, Uint8Array>()
+					let complete = true
 					for (const [path, digest] of Object.entries(resource.files)) {
 						const blob = await readVersionBlobUnlocked(persistence, stores?.host, digest)
-						if (!blob) return refusal('failed', 'history.blob_missing', '/', `Version ${id} names file ${path} (${digest}), whose content is no longer stored.`)
-						bytes.set(path, blob)
+						if (blob) files.set(path, blob)
+						else if (required) return refusal('failed', 'history.blob_missing', '/', `Version ${id} names file ${path} (${digest}), whose content is no longer stored.`)
+						else complete = false
 					}
+					if (complete) for (const [path, blob] of files) bytes.set(path, blob)
 				}
 				return { version, entry, bytes }
 			}

@@ -8,7 +8,7 @@ import type { HandoffRoot } from '../../src/domain/handoff/schema'
 
 export type VersionResourceRead<T> = Readonly<{ versionId: string; kind: string; key: string; revision: string; workspaceSchemaVersion: number; resource: T }>
 
-type ResourceListPage<T> =Readonly<{ items: readonly T[]; nextCursor?: string }>
+type ResourceListPage<T> = Readonly<{ items: readonly T[]; nextCursor?: string }>
 
 type PreviewAdaptersResponse =
 	| { state: 'valid'; diagnostics: readonly []; summaries: readonly unknown[]; bundleUrl: string }
@@ -80,7 +80,7 @@ export function useUiuxClient() {
 
 	async function listResources<T>(
 		kinds: readonly string[],
-		options: Readonly<{ query?: string; limit?: number }> = {},
+		options: Readonly<{ query?: string; limit?: number; cursor?: string }> = {},
 	): Promise<ResourceListPage<T>> {
 		if (!isReadOnly.value) {
 			return await $fetch<ResourceListPage<T>>(options.query ? '/api/resources/search' : '/api/resources/list', {
@@ -88,6 +88,7 @@ export function useUiuxClient() {
 				body: {
 					kinds,
 					...(options.query ? { query: options.query } : {}),
+					...(options.cursor ? { cursor: options.cursor } : {}),
 					limit: options.limit ?? 100,
 				},
 			})

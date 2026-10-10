@@ -140,6 +140,8 @@ export async function readVersionBlobForHttp(session: ScopedWorkspaceSession, di
 			'Content-Length': String(outcome.bytes.byteLength),
 			'ETag': `"${outcome.digest}"`,
 			'X-Content-Type-Options': 'nosniff',
+			// Never rendered as a document, even when opened directly.
+			'Content-Disposition': 'attachment',
 			'Cache-Control': 'private, max-age=31536000, immutable',
 			...storedContentSecurityHeaders('application/octet-stream', outcome.bytes),
 		},

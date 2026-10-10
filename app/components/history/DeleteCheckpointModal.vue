@@ -2,7 +2,7 @@
 import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { useI18n, useToast } from '#imports'
 import type { VersionListItem } from '../../../src/application/services/history-service'
-import { forgetVersionRecord, notifyHistoryChanged } from '../../composables/useVersionHistory'
+import { forgetVersionDiffs, forgetVersionRecord, notifyHistoryChanged } from '../../composables/useVersionHistory'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 
@@ -41,6 +41,7 @@ async function confirm(): Promise<void> {
 	try {
 		await $fetch(`/api/history/checkpoints/${encodeURIComponent(version.id)}`, { method: 'DELETE' })
 		forgetVersionRecord(version.id)
+		forgetVersionDiffs(version.id)
 		open.value = false
 		notifyHistoryChanged()
 		emit('deleted', version.id)

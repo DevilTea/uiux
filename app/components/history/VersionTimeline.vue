@@ -7,6 +7,7 @@ import { useHistoryLabels, VERSION_TYPE_ICONS } from '../../composables/useHisto
 import type { FetchErrorDetails } from '../../utils/fetch-error'
 import { groupVersionsByDay } from '../../utils/version-history'
 import VersionDetails from './VersionDetails.vue'
+import RestoredFrom from './RestoredFrom.vue'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 
 /**
@@ -170,12 +171,11 @@ function toggle(id: string): void {
                 >
                   {{ entry.version.note }}
                 </p>
-                <p
+                <RestoredFrom
                   v-if="entry.version.restoredFrom"
-                  class="text-xs text-muted"
-                >
-                  {{ t('history.row.restored') }}
-                </p>
+                  :version-id="entry.version.restoredFrom"
+                  :to="linkFor(entry.version.restoredFrom)"
+                />
                 <p
                   v-if="entry.version.recordingGap"
                   class="flex items-center gap-1 text-xs text-warning"
