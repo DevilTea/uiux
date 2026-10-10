@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import { versionBlobUrl } from '../../composables/useUiuxClient'
+import { blobToDataUrl } from '../../utils/workspace-authoring'
 
 /**
  * One side of an Asset image change, fetched by its content digest (Rule
@@ -11,18 +12,19 @@ import { versionBlobUrl } from '../../composables/useUiuxClient'
  * (member Checkpoints' blobs). A blob neither store keeps any more is shown as its digest with a note
  * instead of a broken image. The bytes are shown with the recorded media type, since the blob route
  * answers them untyped.
+ *
+ * The image is a `data:` URL, not an object URL: an object URL shares the Workbench origin, so
+ * opening it on its own would show the stored markup (an SVG, say) as a Workbench document, while a
+ * `data:` document has an opaque origin (and Chromium and Firefox refuse a page's own top-level
+ * navigation to one).
  */
 const props = defineProps<{ digest: string; mediaType: string; alt: string; current?: Readonly<{ digest?: string; url: string }> }>()
 const { t } = useI18n()
 
 const url = ref<string>()
 const missing = ref(false)
-let objectUrl: string | undefined
-
-function release(): void {
-	if (objectUrl) URL.revokeObjectURL(objectUrl)
-	objectUrl = undefined
-}
+/** Only the latest load may show its result; an earlier one still in flight is dropped. */
+let generation = 0
 
 async function fetchBlob(path: string): Promise<Blob | undefined> {
 	const response = await fetch(path, { credentials: 'same-origin' })
@@ -30,27 +32,24 @@ async function fetchBlob(path: string): Promise<Blob | undefined> {
 }
 
 async function load(): Promise<void> {
-	release()
+	const current = ++generation
 	url.value = undefined
 	missing.value = false
 	try {
 		const blob = props.current?.digest === props.digest
 			? await fetchBlob(props.current.url)
 			: await fetchBlob(versionBlobUrl(props.digest))
-		if (!blob) {
-			missing.value = true
-			return
-		}
-		objectUrl = URL.createObjectURL(new Blob([blob], { type: props.mediaType }))
-		url.value = objectUrl
+		const dataUrl = blob ? await blobToDataUrl(new Blob([blob], { type: props.mediaType })) : undefined
+		if (current !== generation) return
+		if (dataUrl) url.value = dataUrl
+		else missing.value = true
 	}
 	catch {
-		missing.value = true
+		if (current === generation) missing.value = true
 	}
 }
 
 watch(() => [props.digest, props.current?.digest, props.current?.url], () => { void load() }, { immediate: true })
-onBeforeUnmount(release)
 </script>
 
 <template>

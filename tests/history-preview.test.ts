@@ -20,6 +20,7 @@ import type { VersionRecord } from '../src/domain/history/schema'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import { createAccessGuardHandler } from '../src/server/access/http'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
+import { STORED_CONTENT_SECURITY_POLICY } from '../src/server/stored-content-headers'
 import { bearer, provisionToken, sessionCookieFor } from './support/access'
 
 /**
@@ -150,6 +151,9 @@ describe('GET /api/history/blobs/:digest', () => {
 		expect(response.status).toBe(200)
 		expect(response.headers.get('content-type')).toBe('application/octet-stream')
 		expect(response.headers.get('etag')).toBe(`"${digest}"`)
+		expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+		// Opened on its own, a blob is an opaque-origin document that runs no script.
+		expect(response.headers.get('content-security-policy')).toBe(STORED_CONTENT_SECURITY_POLICY)
 		const bytes = new Uint8Array(await response.arrayBuffer())
 		expect(`sha256:${createHash('sha256').update(bytes).digest('hex')}`).toBe(digest)
 		expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual({ greeting: 'Hello from the first edit' })

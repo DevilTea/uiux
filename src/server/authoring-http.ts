@@ -18,6 +18,7 @@ import {
 	type ReviewResourceRevision,
 } from '../domain/reviews/schema'
 import type { DecisionOutcome } from '../domain/spec/schema'
+import { storedContentSecurityHeaders } from './stored-content-headers'
 
 export type AuthoringHttpResult<T = unknown> = Readonly<{
 	status: number
@@ -665,6 +666,7 @@ export async function readAssetContentForHttp(persistence: FileNativePersistence
 			'ETag': `"${read.revision}"`,
 			'X-Content-Type-Options': 'nosniff',
 			'Content-Disposition': formatContentDisposition(declaredFilename),
+			...storedContentSecurityHeaders(mediaType),
 		},
 	}
 }
@@ -728,6 +730,7 @@ export async function readArtifactForHttp(persistence: FileNativePersistence, di
 			'X-Content-Type-Options': 'nosniff',
 			'Cache-Control': 'public, max-age=31536000, immutable',
 			'Content-Disposition': `inline; filename="${filename}"`,
+			...storedContentSecurityHeaders(contentType),
 		},
 	}
 }

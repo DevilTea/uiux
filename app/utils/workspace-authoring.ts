@@ -334,14 +334,19 @@ export function isImageMediaType(mediaType: string | undefined): boolean {
 	return !!mediaType && mediaType.startsWith('image/')
 }
 
-/** Reads a Blob as canonical base64 (no data-URL prefix), the shape the Asset routes accept. */
-export async function blobToBase64(blob: Blob): Promise<string> {
-	const dataUrl = await new Promise<string>((resolve, reject) => {
+/** Reads a Blob as a base64 `data:` URL typed with the Blob's own type. */
+export async function blobToDataUrl(blob: Blob): Promise<string> {
+	return await new Promise<string>((resolve, reject) => {
 		const reader = new FileReader()
 		reader.onload = () => resolve(String(reader.result))
 		// No browser wording reaches the UI: callers show their own localized "couldn't read" message.
 		reader.onerror = () => reject(Object.assign(new Error(''), { cause: reader.error }))
 		reader.readAsDataURL(blob)
 	})
+}
+
+/** Reads a Blob as canonical base64 (no data-URL prefix), the shape the Asset routes accept. */
+export async function blobToBase64(blob: Blob): Promise<string> {
+	const dataUrl = await blobToDataUrl(blob)
 	return dataUrl.slice(dataUrl.indexOf(',') + 1)
 }
