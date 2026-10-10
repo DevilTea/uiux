@@ -148,7 +148,6 @@ The timeline is a projection only; nothing is written back as message text.
 | Anchor invalid | Row ⚠ plus "(missing)". Detail header `UAlert` (caution): "This Widget no longer exists in the View." with Re-anchor, and the last-known hint |
 | Thread file invalid | Row in fault style: "Can't read this thread", with the diagnostics in the detail. Never hidden silently |
 | Revision conflict on action | Inline caution above the reply: "This thread changed since you opened it." Timeline refreshed, draft kept |
-| Publication mode | Read-only. No reply or actions. Filters work |
 
 ## 10. Keyboard
 

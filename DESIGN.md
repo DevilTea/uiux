@@ -369,7 +369,7 @@ Hairlines (`--ui-border`) are decorative region separators, not control boundari
 
 ## Layout
 
-**Spatial model: an application shell on Nuxt UI's dashboard primitives.** `UDashboardGroup` holds a 48px navbar (Workspace mark, breadcrumbs, `⌘K` search, member chip with role, Workbench preferences, refresh), then a collapsible, resizable left `UDashboardSidebar`, the page, and on View and Flow pages a resizable right panel. The Reviews inbox is a two-pane page: a 440px thread list (resizable 360–640) and the thread detail. Page-level banners (published snapshot, migration required, server unreachable) span the full width under the navbar. Scrolling happens inside panels, never at page level, except on mobile.
+**Spatial model: an application shell on Nuxt UI's dashboard primitives.** `UDashboardGroup` holds a 48px navbar (Workspace mark, breadcrumbs, `⌘K` search, member chip with role, Workbench preferences, refresh), then a collapsible, resizable left `UDashboardSidebar`, the page, and on View and Flow pages a resizable right panel. The Reviews inbox is a two-pane page: a 440px thread list (resizable 360–640) and the thread detail. Page-level banners (migration required, server unreachable) span the full width under the navbar. Scrolling happens inside panels, never at page level, except on mobile.
 
 **Rhythm:** 4px base. Controls are 32px tall at desktop density with 8px internal gaps. Panels pad 12px horizontally (16px on the Overview and Reviews pages). Stacks use 8px within a group and 16px between groups. A section heading has 16px above it and 8px below. Tree and list rows are 28px (compact desktop) or 32px (comfortable). On coarse pointers every interactive target grows to 44px through one theme variable (`--wb-target`).
 
@@ -498,7 +498,7 @@ For the selected Widget, a mono chip sits outside the top-left corner of its out
 - `UEmpty` for empty states, always with one next action.
 
 ### Iconography
-Lucide only, through `UIcon` with literal `i-lucide-*` names (the static-publication scanner needs literals). 16px in 13px UI, 14px inline with 12px labels, 20px in the mobile bottom nav and touch toolbars. Icons inherit `currentColor`, and they never stand alone: icon-only buttons get an `aria-label` and a tooltip.
+Lucide only, through `UIcon` with `i-lucide-*` names. 16px in 13px UI, 14px inline with 12px labels, 20px in the mobile bottom nav and touch toolbars. Icons inherit `currentColor`, and they never stand alone: icon-only buttons get an `aria-label` and a tooltip.
 
 | Concept | Icon |
 |---|---|

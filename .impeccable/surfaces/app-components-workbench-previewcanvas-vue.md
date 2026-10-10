@@ -125,7 +125,6 @@ On tablet the canvas bar collapses into the navbar row as a compact context summ
 | Adapter set invalid | Frame replaced by `UEmpty` (error): "Preview unavailable. The Adapter set is invalid." with "Open Adapters". Tree and Spec stay usable (Part 8, 10b) |
 | Missing Widget from a deep link | Persistent inline `UAlert` above the tree: "Widget #x isn't in this View anymore." (Part 3). The View opens normally |
 | Missing View from a deep link | Toast "View not found. Stayed on the current page." No navigation |
-| Publication mode | Same canvas. Tools: Select and Interact only. Pins are visible read-only |
 
 ## 9. Keyboard
 

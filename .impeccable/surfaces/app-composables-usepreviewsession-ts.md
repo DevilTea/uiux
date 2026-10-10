@@ -194,7 +194,6 @@ Thread bubbles behave the same way. Pins are 32px with a 44px hit area.
 | Post failed | Inline `UAlert` (error) inside the bubble with the diagnostic. Text is kept, with Retry. Never lost |
 | Revision conflict (thread changed) | Inline caution in the bubble: "This thread changed." The timeline is refreshed and the reply text is kept. Retry is explicit |
 | No reviewer name | The first send turns the footer into "Your name" `UInput` plus "Comment". It is saved locally |
-| Publication mode | Pins and bubbles are read-only. Composer and actions are hidden |
 | Session reconnecting | Pins hidden. A "Reconnecting preview…" chip. The composer keeps its text (targeting interaction cancelled per Part 3) |
 
 ## 11. Keyboard summary

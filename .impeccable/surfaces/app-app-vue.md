@@ -46,7 +46,7 @@ The sidebar's contextual section changes per area:
 ## 4. Scope and boundaries
 
 - **In scope:** routes, the sidebar, the top bar, the preferences menu, the reviewer identity menu, the command palette, the responsive collapse rules, and the deep-link query contract.
-- **Untouched:** the Preview host route (`/preview`), the publication mode build, and all server routes.
+- **Untouched:** the Preview host route (`/preview`) and all server routes.
 - **Anti-goals:**
   - equal-weight tab grids;
   - a second nav column;
@@ -55,7 +55,7 @@ The sidebar's contextual section changes per area:
 
 ## 5. Routes and deep links
 
-Use a path-based SPA router with query-carried render context. The published static site serves its `404.html` fallback with the SPA. Confirm this in the routing task; hash routing is the fallback.
+Use a path-based SPA router with query-carried render context.
 
 | Route | Purpose |
 |---|---|
@@ -144,7 +144,6 @@ On mobile the default landing is **Reviews**: the triage job. Overview is one ta
 | Command palette | `UDashboardSearch` (`UCommandPalette`) with groups: Go to (areas), Views, Flows, Threads, Actions (Toggle comment mode, Fit, Switch theme, Switch language) |
 | Preferences | `UDropdownMenu` with a radio group for Theme (System / Light / Dark through `useColorMode`) and Language (System / English / 繁體中文), plus Keyboard shortcuts (`UModal` listing `UKbd`) |
 | Mobile bottom nav | `UNavigationMenu orientation="horizontal"` in a fixed footer, 4 items, icon over label |
-| Publication banner | `UBanner` (neutral, dismissible per session): "Published snapshot · read-only" |
 
 ## 8. States
 
@@ -153,7 +152,6 @@ On mobile the default landing is **Reviews**: the triage job. Overview is one ta
 | Loading Workspace | Sidebar and canvas skeletons (`USkeleton`). The navbar renders immediately |
 | Workspace invalid / unreadable | Full-panel `UEmpty` with an error icon, the diagnostics list, and "Reload". The IA stays visible (brief h) |
 | Server unreachable | Persistent `UAlert` (error, subtle) under the navbar: "Can't reach the UIUX server." with Retry. Mutations are disabled |
-| Publication mode | Banner. All mutation controls are hidden, not disabled. Reviewer identity is hidden |
 | No reviewer identity yet | The identity menu shows "Set your name". The first comment attempt prompts inline (brief c) |
 | Sidebar collapsed | Icon rail with tooltips. Counts become 8px dots with an `aria-label` carrying the count |
 | Very narrow desktop window (< 1280) | Falls back to the tablet rules regardless of pointer type |
@@ -198,12 +196,10 @@ Shortcuts are ignored while focus is in a text field, and single-key shortcuts c
 | prefs.system | Match system | 跟隨系統 |
 | identity.commentingAs | Commenting as {name} | 以 {name} 的身分留言 |
 | identity.setName | Set your name | 設定你的名稱 |
-| publication.banner | Published snapshot · read-only | 已發佈的快照・唯讀 |
 | server.unreachable | Can't reach the UIUX server. | 無法連線到 UIUX 伺服器。 |
 
 ## 12. Constraints and open decisions
 
 - **Glossary correction needed.** The foundation branch's glossary translates Variant (變體), Review (審查), Flow (流程), Locale (語系) and Asset (素材). Per the user, View, Variant, Widget, Review, Flow, Spec, Decision, Evidence, Handoff, Workspace, Locale, Asset and MCP stay in English (applied on `feat/workbench-foundation`).
 - The reviewer identity is stored per browser (`localStorage`) and written as actor `{ type: "human", displayName }`. There is no roster and no auth (see PRODUCT.md Undecided).
-- Routing for the static publication (`404.html` fallback versus hash routing) must be verified on GitHub Pages before committing to path routes.
-- Tablet and mobile access to a *live* server conflicts with Part 1 item 12 (loopback-only, single user). Until it is resolved, the responsive layouts serve narrow desktop windows and the published site; mutation controls on touch layouts must not assume a reachable live server.
+- Tablet and mobile access to a *live* server conflicts with Part 1 item 12 (loopback-only, single user). Until it is resolved, the responsive layouts serve narrow desktop windows; mutation controls on touch layouts must not assume a reachable live server.

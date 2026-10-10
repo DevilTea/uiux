@@ -152,7 +152,6 @@ The Overview is a quiet dashboard: one Display-size line of what needs attention
 | Capture failed (per context) | Fault rows with the diagnostic, while the other contexts complete. Never all-or-nothing in the UI |
 | Assessment unavailable (invalid closure) | Fault `UAlert` with diagnostics. Export is still allowed when a coherent snapshot is possible (Part 1), otherwise disabled with the reason |
 | Export done | Success panel: "Snapshot exported" plus a mono bundle id. If ready: "implementation-ready" success badge. If not: a neutral "Diagnostic snapshot" badge. Never green |
-| Publication mode | Readiness and evidence are read-only. Capture and Export are hidden |
 
 ## 8. Keyboard
 

@@ -1,7 +1,5 @@
 # UIUX
 
-[Live UIUX Spec](https://deviltea.github.io/uiux/) · read-only static publication of this repository's canonical `design/` Workspace
-
 `@deviltea/uiux` is the single-package home for the UIUX local-first UI/UX specification, preview, and review workbench.
 
 The package provides a Nuxt SPA and a unified Nitro server. `uiux init --workspace <dir>` creates a minimal current-schema file-native Workspace, and `uiux dev --workspace <dir>` explicitly selects one Workspace and starts the Workbench/API/MCP process against it.
@@ -138,19 +136,6 @@ The current format is `schemaVersion` 4. Steps chain: `uiux.v1-to-v2` (resolutio
 The LAN listener is not yet available, so `uiux dev` listens on loopback only: `127.0.0.1` by default, with the port taken from the standard Nitro `PORT` / `NITRO_PORT` variables (default `3000`). It prints the address it actually listens on. Setting `HOST` or `NITRO_HOST` to a loopback address (`127.0.0.1`, `::1` or `localhost`) is allowed; any other value makes `uiux dev` refuse to start.
 
 Every request, including `/mcp`, `/api/*` and Workbench assets, must address the server as `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`; any other `Host` gets `421` (DNS-rebinding protection). State-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`), and every `/mcp` request, are refused with `403` when a browser marks them as cross-origin (`Origin` not equal to the server's own origin, or `Sec-Fetch-Site` other than `same-origin` / `none`). State-changing requests that carry a body must send `Content-Type: application/json` (otherwise `415`). Non-browser clients such as curl, scripts and MCP CLIs that send no `Origin` keep working; they authenticate with `Authorization: Bearer <token>`. The server sends no CORS headers, and pages are served with `Content-Security-Policy: frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`, so only the Workbench itself can frame them (as it does for `/preview`).
-
-## Static publication
-
-`uiux publish` materializes a selected Workspace as a portable, read-only interactive site. The published viewer does not require Nitro, MCP, filesystem access, or an API server at runtime; canonical resources, Preview adapter runtime, Assets, Formal Evidence artifacts, and the Workspace Handoff readiness assessment are captured at build time.
-
-```sh
-pnpm build
-uiux publish --workspace ./design --out ./.pages --base /uiux/ --source-revision "$(git rev-parse HEAD)"
-```
-
-`--base` makes the generated shell safe for project subpaths such as GitHub Pages. Publication output carries a deterministic content identity plus optional source-revision provenance. Authoring controls are removed in published mode; View context switching, Preview, Inspector, UX Flows, review history, evidence inspection, and readiness remain interactive.
-
-This repository dogfoods that command in the `Publish UIUX Spec` GitHub Actions workflow and deploys the result to [GitHub Pages](https://deviltea.github.io/uiux/).
 
 ## Dogfood Workspace
 
