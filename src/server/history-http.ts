@@ -8,6 +8,7 @@ import type { ReadVersionBlobOutcome, ReadVersionResourceOutcome } from '../appl
 import type { CreateCheckpointOutcome, DeleteCheckpointOutcome, ListVersionsOutcome, ReadVersionOutcome } from '../application/services/history-service'
 import type { HistoryVersionType } from '../domain/history/constants'
 import type { AuthoringHttpResult } from './authoring-http'
+import { storedContentSecurityHeaders } from './stored-content-headers'
 
 /**
  * `GET /api/history/diff` (named by Clause 01a11485-fa00-72da-bc46-98302a3c106e; there is no HTTP
@@ -142,6 +143,7 @@ export async function readVersionBlobForHttp(session: ScopedWorkspaceSession, di
 			// Never rendered as a document, even when opened directly.
 			'Content-Disposition': 'attachment',
 			'Cache-Control': 'private, max-age=31536000, immutable',
+			...storedContentSecurityHeaders('application/octet-stream', outcome.bytes),
 		},
 	}
 }

@@ -25,6 +25,7 @@ import { createAccessGuardHandler } from '../src/server/access/http'
 import { readVersionResourceForHttp } from '../src/server/history-http'
 import { createHistoryStoreFactory, type HistoryStores } from '../src/server/history-stores'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
+import { STORED_CONTENT_SECURITY_POLICY } from '../src/server/stored-content-headers'
 import { bearer, provisionToken, scoped, sessionCookieFor, testMember } from './support/access'
 
 /**
@@ -158,6 +159,8 @@ describe('GET /api/history/blobs/:digest', () => {
 		expect(response.headers.get('x-content-type-options')).toBe('nosniff')
 		// Never rendered as a document, even when the address is opened directly.
 		expect(response.headers.get('content-disposition')).toBe('attachment')
+		// Should it ever render as a document, it is an opaque-origin one that runs no script.
+		expect(response.headers.get('content-security-policy')).toBe(STORED_CONTENT_SECURITY_POLICY)
 		const bytes = new Uint8Array(await response.arrayBuffer())
 		expect(`sha256:${createHash('sha256').update(bytes).digest('hex')}`).toBe(digest)
 		expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual({ greeting: 'Hello from the first edit' })
