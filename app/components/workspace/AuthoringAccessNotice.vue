@@ -6,8 +6,7 @@ import type { AuthoringAccess } from '../../composables/useAuthoringAccess'
 /**
  * Why a Workspace authoring page is read-only. Tablet and mobile get "Edit on desktop";
  * a migration-required Workspace names the reason, and a member below Editor names the role
- * required. Publication already has its banner and a held edit lock its Lock badge, so they
- * show nothing here.
+ * required. A held edit lock already has its Lock badge, so it shows nothing here.
  */
 const props = defineProps<{ access: AuthoringAccess }>()
 const { t } = useI18n()

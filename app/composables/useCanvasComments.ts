@@ -237,7 +237,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	// Permissions (accepted identity decisions; direct-resolve decision 9)
 	// -------------------------------------------------------------------------------------------
 
-	/** Reviewers and above comment and reply; Viewers and the publication read only. */
+	/** Reviewers and above comment and reply; Viewers read only. */
 	const canComment = computed(() => !reviewReadOnly.value)
 	/** Resolution is a human act on a Workbench cookie session. */
 	const canResolve = computed(() => !reviewReadOnly.value && access.member.value?.kind === 'human' && access.session.value?.credential === 'session')
@@ -252,7 +252,6 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	 */
 	const handset = useMediaQuery(WORKBENCH_BREAKPOINTS.handset)
 	const availability = computed(() => ({
-		publication: workbench.isReadOnly.value,
 		workspaceState: workbench.workspace.value?.inspection?.state,
 		signedIn: !!access.member.value,
 		canReview: access.canReview.value,

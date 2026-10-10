@@ -293,8 +293,6 @@ async function readLocale(code: string): Promise<I18nResource | undefined> {
 
 /** Version mode: the version's manifest and Locale list decide the defaults and the fallbacks. */
 async function resolveVersionDefaults() {
-	// A publication holds no versions at all: say that, rather than that the View is missing from this one.
-	if (uiux.isReadOnly.value) throw new Error(t('preview.errors.versionUnavailable'))
 	versionManifest = (await uiux.readVersionResource<WorkspaceManifest>(versionId!, 'workspace', 'workspace'))?.resource
 	versionLocales ??= (await $fetch<{ version: { resources: readonly { kind: string; key: string }[] } }>(`/api/history/versions/${encodeURIComponent(versionId!)}`, { cache: 'no-store' }))
 		.version.resources.filter(resource => resource.kind === 'locale').map(resource => resource.key)

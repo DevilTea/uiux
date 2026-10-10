@@ -23,7 +23,7 @@ const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true }
 const { t } = useI18n()
 const route = useRoute()
 const shell = useWorkbenchShell()
-const { selectedViewId, isReadOnly } = useWorkbench()
+const { selectedViewId } = useWorkbench()
 const checkpoints = useCheckpointAccess()
 
 const view = computed(() => selectedViewId.value ? { kind: 'view', key: selectedViewId.value } : undefined)
@@ -42,7 +42,7 @@ function panelTo(next: HistoryAddress) {
 	return { path: route.path, query: { ...query, ...historyQuery(next, ['version', 'compare', 'canvas']) } }
 }
 
-const timeline = useVersionTimeline({ resource: view, enabled: () => props.active && !!view.value && !isReadOnly.value })
+const timeline = useVersionTimeline({ resource: view, enabled: () => props.active && !!view.value })
 const fullComparison = computed(() => selection.value && view.value
 	? activityLocation({ version: selection.value.version, ...(address.value.compare ? { compare: address.value.compare } : {}), resource: view.value })
 	: undefined)
@@ -68,48 +68,40 @@ const fullComparison = computed(() => selection.value && view.value
         />
       </div>
 
-      <p
-        v-if="isReadOnly"
-        class="text-sm text-muted"
+      <VersionComparison
+        v-if="selection && view"
+        :address="address"
+        :request-resources="[view]"
+        :latest-version-id="timeline.versions.value[0]?.id"
+        :timeline-loaded="timeline.loaded.value"
+        :link-for="panelTo"
+        :close-to="panelTo({})"
+        :full-comparison-to="fullComparison"
+        class="border-b border-default pb-4"
       >
-        {{ t('history.publication') }}
-      </p>
-      <template v-else>
-        <VersionComparison
-          v-if="selection && view"
-          :address="address"
-          :request-resources="[view]"
-          :latest-version-id="timeline.versions.value[0]?.id"
-          :timeline-loaded="timeline.loaded.value"
-          :link-for="panelTo"
-          :close-to="panelTo({})"
-          :full-comparison-to="fullComparison"
-          class="border-b border-default pb-4"
-        >
-          <template #canvas>
-            <VersionCanvasSwitch
-              :address="address"
-              :link-for="panelTo"
-            />
-          </template>
-        </VersionComparison>
-        <VersionTimeline
-          :versions="timeline.rows.value"
-          :loading="timeline.loading.value"
-          :loaded="timeline.loaded.value"
-          :error="timeline.error.value"
-          :has-more="!!timeline.nextCursor.value"
-          :loading-more="timeline.loadingMore.value"
-          :selected="selection?.version"
-          :link-for="(id) => panelTo({ version: id })"
-          :compare-link-for="selection ? (id) => panelTo({ version: selection!.version, compare: id }) : undefined"
-          :empty-title="t('history.view.emptyTitle')"
-          :empty-description="t('history.view.emptyDescription')"
-          compact
-          @load-more="timeline.loadMore()"
-          @retry="timeline.load()"
-        />
-      </template>
+        <template #canvas>
+          <VersionCanvasSwitch
+            :address="address"
+            :link-for="panelTo"
+          />
+        </template>
+      </VersionComparison>
+      <VersionTimeline
+        :versions="timeline.rows.value"
+        :loading="timeline.loading.value"
+        :loaded="timeline.loaded.value"
+        :error="timeline.error.value"
+        :has-more="!!timeline.nextCursor.value"
+        :loading-more="timeline.loadingMore.value"
+        :selected="selection?.version"
+        :link-for="(id) => panelTo({ version: id })"
+        :compare-link-for="selection ? (id) => panelTo({ version: selection!.version, compare: id }) : undefined"
+        :empty-title="t('history.view.emptyTitle')"
+        :empty-description="t('history.view.emptyDescription')"
+        compact
+        @load-more="timeline.loadMore()"
+        @retry="timeline.load()"
+      />
     </div>
   </div>
 </template>

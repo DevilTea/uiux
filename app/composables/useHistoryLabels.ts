@@ -15,7 +15,7 @@ let assetNamesAt = 0
 /** An Asset added since the last read is looked up again, at most this often. */
 const ASSET_NAMES_TTL_MS = 30_000
 
-/** Literal icon names (the static publication's icon scanner reads literals only). */
+/** Icon names per version type. */
 export const VERSION_TYPE_ICONS: Readonly<Record<HistoryVersionType, string>> = {
 	autosave: 'i-lucide-save',
 	checkpoint: 'i-lucide-flag',
@@ -37,12 +37,12 @@ export const CHANGE_ICONS: Readonly<Record<string, string>> = {
 /** Chrome words for history records: actors, version types, resource kinds and write operations. */
 export function useHistoryLabels() {
 	const { t, te, locale } = useI18n()
-	const { views, flows, isReadOnly } = useWorkbench()
+	const { views, flows } = useWorkbench()
 	const uiux = useUiuxClient()
 
 	function readAssetNames(missing: boolean): void {
 		if (missing && assetNamesRead && Date.now() - assetNamesAt > ASSET_NAMES_TTL_MS) assetNamesRead = undefined
-		if (assetNamesRead || isReadOnly.value) return
+		if (assetNamesRead) return
 		assetNamesAt = Date.now()
 		assetNamesRead = readAllAssetNames()
 			.then((names) => { assetNames.value = names })

@@ -30,7 +30,7 @@ const workbench = useWorkbench()
 const lastViewId = workbench.lastViewId()
 const shell = useWorkbenchShell()
 const readiness = useReadiness()
-const { views, reviews, loading, isReadOnly, authorReadOnly, readyReviewCount, openReviewCount, workspaceFindingCount } = workbench
+const { views, reviews, loading, authorReadOnly, readyReviewCount, openReviewCount, workspaceFindingCount } = workbench
 const atLeastTablet = useMediaQuery('(min-width: 768px)')
 
 type ReadinessState = 'ready' | 'blocked' | 'checking' | 'failed' | 'migration'
@@ -163,7 +163,7 @@ const tabs = computed<TabsItem[]>(() => [
 ])
 
 const exportOpen = ref(false)
-const canExport = computed(() => !isReadOnly.value && !authorReadOnly.value && atLeastTablet.value)
+const canExport = computed(() => !authorReadOnly.value && atLeastTablet.value)
 
 onMounted(() => { void readiness.loadEvidence() })
 watch([views, readiness.signature], () => {
@@ -291,28 +291,7 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
         </div>
       </div>
 
-      <WorkspaceFirstRun v-if="!loading && !views.length && !isReadOnly" />
-      <UEmpty
-        v-else-if="!loading && !views.length"
-        icon="i-lucide-app-window"
-        variant="naked"
-        class="py-16"
-        :title="t('overview.empty.title')"
-        :actions="[{ label: t('common.refresh'), icon: 'i-lucide-refresh-cw', onClick: () => { void workbench.refreshAll() } }]"
-      >
-        <template #description>
-          <i18n-t
-            keypath="overview.empty.description"
-            tag="span"
-            scope="global"
-          >
-            <template #tool>
-              <code class="rounded-sm bg-elevated px-1 py-0.5 font-mono text-xs text-highlighted">create_view</code>
-            </template>
-          </i18n-t>
-        </template>
-      </UEmpty>
-
+      <WorkspaceFirstRun v-if="!loading && !views.length" />
       <UTabs
         v-else
         v-model="tab"

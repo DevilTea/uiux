@@ -29,7 +29,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const workbench = useWorkbench()
-const { selectedView, selectedViewId, reviews, widgetTreeResult, currentActiveContext, authorReadOnly, isReadOnly, preview } = workbench
+const { selectedView, selectedViewId, reviews, widgetTreeResult, currentActiveContext, authorReadOnly, preview } = workbench
 const readiness = useReadiness()
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const atLeastTablet = useMediaQuery('(min-width: 768px)')
@@ -138,7 +138,7 @@ watch([selectedViewId, readiness.signature], () => refresh(), { immediate: true 
 // ⇧⌘P captures Evidence for this View (desktop); ⇧⌘E exports a handoff rooted at it (brief f, section 8).
 defineShortcuts({
 	meta_shift_p: () => openCapture(),
-	meta_shift_e: () => { if (canExport.value && !isReadOnly.value) exportOpen.value = true },
+	meta_shift_e: () => { if (canExport.value) exportOpen.value = true },
 })
 
 async function recheck(): Promise<void> {
@@ -314,7 +314,7 @@ const handoffFacet = computed<Facet>(() => {
             </template>
           </dd>
           <dd
-            v-if="!isReadOnly && authorReadOnly"
+            v-if="authorReadOnly"
             class="flex items-center gap-1.5 text-xs text-muted"
             data-access-notice="capture"
           >
@@ -325,7 +325,7 @@ const handoffFacet = computed<Facet>(() => {
             {{ t('evidence.requiresEditor') }}
           </dd>
           <dd
-            v-else-if="!isReadOnly && !isDesktop"
+            v-else-if="!isDesktop"
             class="text-xs text-muted"
           >
             {{ t('evidence.desktopOnly') }}
@@ -398,7 +398,7 @@ const handoffFacet = computed<Facet>(() => {
           <dt class="flex items-center justify-between gap-2 text-sm font-medium text-highlighted">
             {{ t('ready.handoff') }}
             <UButton
-              v-if="canExport && !isReadOnly"
+              v-if="canExport"
               size="xs"
               icon="i-lucide-package"
               class="-my-1.5 pointer-coarse:-my-3"
@@ -431,12 +431,6 @@ const handoffFacet = computed<Facet>(() => {
               {{ ready ? 'implementation-ready' : t('ready.notReady') }}
             </dd>
             <dd
-              v-if="entry.derived"
-              class="text-xs text-muted"
-            >
-              {{ t('ready.derived') }}
-            </dd>
-            <dd
               v-if="split.blocking.length"
               class="space-y-1"
             >
@@ -462,7 +456,7 @@ const handoffFacet = computed<Facet>(() => {
             </dd>
           </template>
           <dd
-            v-if="!isReadOnly && authorReadOnly"
+            v-if="authorReadOnly"
             class="flex items-center gap-1.5 text-xs text-muted"
             data-access-notice="export"
           >
@@ -551,7 +545,6 @@ const handoffFacet = computed<Facet>(() => {
       @captured="refresh(true)"
     />
     <HandoffExportModal
-      v-if="!isReadOnly"
       v-model:open="exportOpen"
       :initial-roots="exportRoots"
     />

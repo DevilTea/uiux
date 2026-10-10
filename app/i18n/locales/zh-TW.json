@@ -5,7 +5,7 @@
     "unnamedAsset": "未命名 Asset",
     "emptyTitle": "尚無 Asset",
     "emptyDescription": "上傳圖片或檔案，即可在 View 中使用。",
-    "emptyDescriptionReadOnly": "此快照沒有 Asset。",
+    "emptyDescriptionReadOnly": "此 Workspace 沒有 Asset。",
     "loadListFailed": "無法載入 Asset。",
     "notSet": "未設定",
     "fields": {
@@ -406,7 +406,7 @@
     "newLocale": "新增 Locale",
     "emptyTitle": "尚無 Locale",
     "emptyDescription": "新增主要 Locale 以開始翻譯。",
-    "emptyDescriptionReadOnly": "此快照沒有 Locale。",
+    "emptyDescriptionReadOnly": "此 Workspace 沒有 Locale。",
     "loadListFailed": "無法載入 Locale。",
     "defaultMissing": {
       "title": "主要 Locale 沒有檔案",
@@ -496,8 +496,7 @@
       "viewLoadFailed": "無法載入 View。",
       "bundleInvalid": "預覽 Runtime 不完整。請重新建置 UIUX 後重新載入。",
       "bundleLoadFailed": "無法載入預覽 Runtime。",
-      "viewNotInVersion": "這個版本中沒有這個 View。",
-      "versionUnavailable": "發布的快照不含版本歷程，因此無法顯示這個版本。"
+      "viewNotInVersion": "這個版本中沒有這個 View。"
     }
   },
   "reviews": {
@@ -621,10 +620,6 @@
   "identity": {
     "commentingAs": "以 {name} 的身分留言",
     "setName": "設定你的名稱"
-  },
-  "publication": {
-    "banner": "已發佈的快照・唯讀",
-    "bannerRevision": "已發佈的快照・唯讀・{revision}"
   },
   "server": {
     "unreachable": "無法連線到 UIUX 伺服器。",
@@ -1194,10 +1189,6 @@
       "mixed": "{fresh} 項最新・{stale} 項過時"
     },
     "readinessFailed": "無法檢查",
-    "empty": {
-      "title": "尚無 View",
-      "description": "請你的 Agent 用 {tool} 建立一個，然後重新整理。"
-    },
     "attentionBlocked": "{n} 個 View 受阻擋 | {n} 個 View 受阻擋",
     "readinessMigration": "遷移後才能檢查"
   },
@@ -1227,7 +1218,6 @@
     "openComments": "開啟",
     "blockingTitle": "{n} 項阻擋問題 | {n} 項阻擋問題",
     "advisoryTitle": "{n} 項提醒，不會阻擋 | {n} 項提醒，不會阻擋",
-    "derived": "由此快照發布的 Workspace 評估縮小範圍而來。",
     "diag": {
       "unknownView": "未知的 View",
       "reviewOpen": "{view} 上有一則 Review 未解決。",
@@ -1263,9 +1253,7 @@
   "workspaceMenu": {
     "label": "Workspace",
     "local": "本機 Workspace",
-    "published": "已發佈的快照・唯讀",
     "copyRevision": "複製 Workspace 修訂版本",
-    "copyPublication": "複製發佈 ID",
     "copied": "已複製",
     "copyFailed": "無法複製到剪貼簿。"
   },
@@ -1630,7 +1618,6 @@
     "viewHint": "手機上為唯讀。點選圖釘即可開啟討論串。"
   },
   "commentBlock": {
-    "publication": "唯讀：這是已發布的快照。",
     "migration": "此 Workspace 遷移前為唯讀。請執行 uiux migrate。",
     "unsupported": "唯讀：此版本的 UIUX 不支援這個 Workspace 的 Schema。",
     "signed-out": "登入後即可留言。",
@@ -1727,9 +1714,6 @@
     },
     "preview": {
       "runtime_failed": "預覽無法呈現這個 View。"
-    },
-    "publication": {
-      "snapshot_failed": "無法建立發佈快照。"
     },
     "schema": {
       "empty_string": "此值不可為空白。",
@@ -2096,7 +2080,6 @@
     "lease": "無法取得編輯鎖定。",
     "persistence": "無法讀取或寫入 Workspace 檔案。",
     "preview": "預覽無法呈現這個 View。",
-    "publication": "無法建立發佈內容。",
     "render_context": "這個呈現情境無效。",
     "request": "伺服器拒絕了這個請求。",
     "resource": "這項資源目前無法使用。",
@@ -2140,7 +2123,6 @@
     "emptyFiltered": "沒有符合篩選條件的版本",
     "emptyFilteredDescription": "請調整或清除篩選條件以查看更多版本。",
     "loadMore": "載入較早的版本",
-    "publication": "發布的快照不含版本歷程。",
     "today": "今天",
     "yesterday": "昨天",
     "quiet": "{n} 次沒有淨變更的自動儲存 | {n} 次沒有淨變更的自動儲存",

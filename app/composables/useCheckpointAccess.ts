@@ -18,14 +18,14 @@ const AT_LEAST_TABLET = '(min-width: 768px)'
  */
 export function useCheckpointAccess() {
 	const { t } = useI18n()
-	const { isReadOnly, reviewReadOnly, writeBlocked } = useWorkbench()
+	const { reviewReadOnly, writeBlocked } = useWorkbench()
 	const access = useAccess()
 	const desktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 	const atLeastTablet = useMediaQuery(AT_LEAST_TABLET)
 	const handset = useMediaQuery(WORKBENCH_BREAKPOINTS.handset)
 
-	/** Offered at all on this layout and in this Workbench (a published snapshot has no history). */
-	const createOffered = computed(() => atLeastTablet.value && !handset.value && !isReadOnly.value)
+	/** Offered at all on this layout. */
+	const createOffered = computed(() => atLeastTablet.value && !handset.value)
 	/** Why the signed-in member cannot create one here; undefined when they can. */
 	const createBlockedReason = computed(() => {
 		if (writeBlocked.value) return t('history.checkpoint.blockedMigration')
@@ -33,7 +33,7 @@ export function useCheckpointAccess() {
 		return undefined
 	})
 	const canCreate = computed(() => createOffered.value && !createBlockedReason.value)
-	const canDelete = computed(() => desktop.value && !isReadOnly.value && access.isOwner.value && access.session.value?.credential === 'session')
+	const canDelete = computed(() => desktop.value && access.isOwner.value && access.session.value?.credential === 'session')
 
 	return { createOffered, createBlockedReason, canCreate, canDelete }
 }

@@ -41,7 +41,7 @@ const access = useAccess()
 const migrationRequired = computed(() => workbench.workspace.value?.inspection?.state === 'migration_required')
 /** Someone else (an agent) holds this Flow's edit lease: read-only beside the Lock badge (identity decision 11). */
 const lockedByOther = computed(() => !!access.lockFor('flow', flowId.value))
-// Editing needs Editor or above (authorReadOnly also covers a publication), a desktop window and no foreign lease.
+// Editing needs Editor or above (authorReadOnly), a desktop window and no foreign lease.
 const canEdit = computed(() => !workbench.authorReadOnly.value && !lockedByOther.value && isDesktop.value && lossless.value && !migrationRequired.value)
 const showEditOnDesktop = computed(() => !workbench.authorReadOnly.value && !isDesktop.value)
 

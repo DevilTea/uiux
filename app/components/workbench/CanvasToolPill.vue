@@ -19,13 +19,9 @@ const props = defineProps<{
 	active: CanvasToolId
 	/** Why every tool is unavailable (no live preview yet); undefined when they work. */
 	disabledReason?: string
-	/** Why new comments can't be started here (role, snapshot, phone…); undefined when they can. */
+	/** Why new comments can't be started here (role, migration, phone…); undefined when they can. */
 	commentDisabledReason?: string
-	/**
-	 * Offers the Comment tool and "Comment on this View" (the canvas has a comments layer and is
-	 * not a published snapshot: a snapshot has no reviewing surface at all, so it offers Select and
-	 * Interact only, and its banner already says it is read-only).
-	 */
+	/** Offers the Comment tool and "Comment on this View" (the canvas has a comments layer). */
 	comments?: boolean
 	/** Comment pins hidden (`true`) or shown; undefined where the canvas has no pins. */
 	pinsHidden?: boolean

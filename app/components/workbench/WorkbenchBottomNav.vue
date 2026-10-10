@@ -11,12 +11,12 @@ import { useWorkbench } from '../../composables/useWorkbench'
  */
 const { t } = useI18n()
 const route = useRoute()
-const { unresolvedReviewCount, isReadOnly } = useWorkbench()
+const { unresolvedReviewCount } = useWorkbench()
 
 const items = computed(() => [
 	{ to: '/', label: t('nav.overview'), icon: 'i-lucide-layout-dashboard', active: route.path === '/' || route.path.startsWith('/views') },
 	{ to: '/flows', label: t('nav.flows'), icon: 'i-lucide-workflow', active: route.path.startsWith('/flows') },
-	{ to: '/reviews', label: t('nav.reviews'), icon: 'i-lucide-inbox', active: route.path.startsWith('/reviews'), count: isReadOnly.value ? 0 : unresolvedReviewCount.value },
+	{ to: '/reviews', label: t('nav.reviews'), icon: 'i-lucide-inbox', active: route.path.startsWith('/reviews'), count: unresolvedReviewCount.value },
 ])
 </script>
 

@@ -1,4 +1,4 @@
-import { defineNuxtPlugin, navigateTo, useRouter, useRuntimeConfig } from '#imports'
+import { defineNuxtPlugin, navigateTo, useRouter } from '#imports'
 import { useAccess } from '../composables/useAccess'
 import { useConnectivity } from '../composables/useConnectivity'
 import { isRetryableRead, shouldRetryRead, transientRetryDelay } from '../utils/fetch-retry'
@@ -29,7 +29,6 @@ function requestPath(input: RequestInfo | URL): string {
 export default defineNuxtPlugin({
 	name: 'uiux:access',
 	setup() {
-		if (useRuntimeConfig().public.uiuxMode === 'publication') return
 		const router = useRouter()
 		const connectivity = useConnectivity()
 		const nativeFetch = window.fetch.bind(window)

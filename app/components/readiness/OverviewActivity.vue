@@ -49,7 +49,7 @@ const route = useRoute()
 const router = useRouter()
 const uiux = useUiuxClient()
 const shell = useWorkbenchShell()
-const { views, reviews, isReadOnly } = useWorkbench()
+const { views, reviews } = useWorkbench()
 const readiness = useReadiness()
 const labels = useHistoryLabels()
 const checkpoints = useCheckpointAccess()
@@ -79,7 +79,7 @@ const filters = computed<TimelineFilters>(() => ({
 	...(kindFilter.value !== ALL ? { kind: kindFilter.value } : {}),
 	...(checkpointsOnly.value ? { checkpointsOnly: true } : {}),
 }))
-const timeline = useVersionTimeline({ filters, enabled: () => !isReadOnly.value })
+const timeline = useVersionTimeline({ filters })
 
 /** Every actor seen so far, so filtering by one keeps the others choosable. */
 const knownActors = shallowRef<readonly HistoryActor[]>([])
@@ -265,11 +265,11 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
   >
     <div
       class="grid gap-6"
-      :class="selection && !isReadOnly ? 'lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]' : ''"
+      :class="selection ? 'lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]' : ''"
     >
       <!-- The comparison comes first on narrow layouts and sits beside the timeline from 1024px. -->
       <div
-        v-if="selection && !isReadOnly"
+        v-if="selection"
         class="min-w-0 lg:order-2"
       >
         <div class="lg:sticky lg:top-4">
@@ -317,7 +317,6 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
                 data-since-failed
               >{{ (sinceStates.get(view.key) as { message: string }).message }}</span>
               <UButton
-                v-if="!isReadOnly"
                 size="xs"
                 color="neutral"
                 variant="link"
@@ -337,15 +336,7 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
           </ul>
         </section>
 
-        <UAlert
-          v-if="isReadOnly"
-          color="neutral"
-          variant="subtle"
-          icon="i-lucide-info"
-          :title="t('history.publication')"
-        />
         <section
-          v-else
           class="space-y-3"
           :aria-label="t('history.timelineLabel')"
         >

@@ -66,7 +66,7 @@ const roots = computed<HandoffRoot[]>(() => {
 const entry = computed(() => roots.value.length ? readiness.assessmentFor(roots.value) : undefined)
 const split = computed(() => splitReadinessDiagnostics(entry.value?.readiness?.blockingDiagnostics))
 const ready = computed(() => entry.value?.status === 'ok' && entry.value.readiness?.implementationReady === true)
-const canExport = computed(() => !authorReadOnly.value && !uiux.isReadOnly.value)
+const canExport = computed(() => !authorReadOnly.value)
 const exportedReady = computed(() => result.value?.readiness?.implementationReady === true && (result.value.manifest?.resources.length ?? 0) > 0)
 
 function seed(): void {

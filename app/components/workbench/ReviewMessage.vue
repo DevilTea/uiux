@@ -27,7 +27,7 @@ const props = withDefaults(defineProps<{
 	thread: ReviewThread
 	/** The signed-in member's stamped actor id (`member:<uuid>`). */
 	me?: string
-	/** Reviewer role and a live Workbench (not the publication, not a Viewer). */
+	/** Reviewer role or above (not a Viewer). */
 	canEdit?: boolean
 	compact?: boolean
 	editing?: boolean
