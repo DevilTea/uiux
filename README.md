@@ -149,6 +149,15 @@ uiux publish --workspace ./design --out ./.pages --base /uiux/ --source-revision
 
 `--base` makes the generated shell safe for project subpaths such as GitHub Pages. Publication output carries a deterministic content identity plus optional source-revision provenance. Authoring controls are removed in published mode; View context switching, Preview, Inspector, UX Flows, review history, evidence inspection, and readiness remain interactive.
 
+Published Asset files are written as-is under `<base>_uiux/assets/<asset-id>/<filename>`, on the same origin as the viewer. The viewer shows and downloads SVG Assets from a `data:` URL of their bytes rather than linking to those files. When the host lets you set response headers per path, these are the recommended response headers for published Asset files (`<base>_uiux/assets/*`):
+
+```text
+Content-Security-Policy: sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'
+X-Content-Type-Options: nosniff
+```
+
+`uiux publish` does not write host-specific header files; add them in your host's own configuration.
+
 This repository dogfoods that command in the `Publish UIUX Spec` GitHub Actions workflow and deploys the result to [GitHub Pages](https://deviltea.github.io/uiux/).
 
 ## Dogfood Workspace

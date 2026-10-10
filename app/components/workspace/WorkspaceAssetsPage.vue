@@ -145,8 +145,20 @@ function clearFilters(): void {
 	usageFilter.value = 'all'
 }
 
+/**
+ * A published site resolves each Asset's address once (an SVG file becomes a `data:` URL; see
+ * `resolveAssetContentUrl`). Until it arrives the Asset shows no image and no Download link.
+ */
+const publishedUrls = ref<Readonly<Record<string, string>>>({})
+watch(entries, async (list) => {
+	if (!uiux.isReadOnly.value) return
+	const missing = list.filter(entry => !(entry.key in publishedUrls.value))
+	if (!missing.length) return
+	const urls = await Promise.all(missing.map(entry => uiux.resolveAssetContentUrl(entry.key).catch(() => '')))
+	publishedUrls.value = { ...publishedUrls.value, ...Object.fromEntries(missing.map((entry, index) => [entry.key, urls[index]!])) }
+})
 function contentUrl(entry: AssetEntry): string {
-	return uiux.assetUrl(entry.key)
+	return uiux.isReadOnly.value ? publishedUrls.value[entry.key] ?? '' : uiux.assetUrl(entry.key)
 }
 
 function describe(entry: AssetEntry): string {

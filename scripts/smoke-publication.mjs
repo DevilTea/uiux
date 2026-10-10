@@ -209,8 +209,10 @@ try {
 		const assetDownload = main(page).getByRole('link', { name: 'Download' })
 		await assetDownload.waitFor()
 		const assetHref = await assetDownload.getAttribute('href')
-		if (!assetHref?.includes('/uiux/_uiux/assets/'))
-			throw new Error(`Published Asset download did not resolve to static content: ${assetHref}`)
+		// An SVG file is offered as a `data:` URL of its bytes, never as its raw file on this origin.
+		const isStaticFile = assetHref?.startsWith('/uiux/_uiux/assets/') && !/\.svgz?$/iu.test(assetHref)
+		if (!isStaticFile && !assetHref?.startsWith('data:image/svg+xml;base64,'))
+			throw new Error(`Published Asset download did not resolve to its published content: ${assetHref?.slice(0, 80)}`)
 
 		// /flows lists every Flow; open the first one.
 		await open(page, '/flows')

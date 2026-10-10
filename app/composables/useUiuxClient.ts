@@ -16,6 +16,25 @@ type PreviewAdaptersResponse =
 
 let publicationPromise: Promise<PublicationSnapshot> | undefined
 const publicationState = shallowRef<PublicationSnapshot>()
+/** Published SVG files as `data:` URLs, by file and digest; see `resolveAssetContentUrl`. */
+const svgDataUrls = new Map<string, Promise<string>>()
+
+/** A published file a static host serves as `image/svg+xml`, by media type or file extension. */
+function isSvgFile(entry: Readonly<{ filename: string; mediaType: string }>): boolean {
+	return entry.mediaType.split(';')[0]!.trim().toLowerCase() === 'image/svg+xml' || /\.svgz?$/iu.test(entry.filename)
+}
+
+async function svgDataUrl(url: string): Promise<string> {
+	const response = await fetch(url, { credentials: 'same-origin' })
+	if (!response.ok) throw new Error(`${url}: ${response.status}`)
+	const blob = new Blob([await response.arrayBuffer()], { type: 'image/svg+xml' })
+	return await new Promise<string>((resolve, reject) => {
+		const reader = new FileReader()
+		reader.onload = () => resolve(String(reader.result))
+		reader.onerror = () => reject(reader.error ?? new Error(`${url}: unreadable`))
+		reader.readAsDataURL(blob)
+	})
+}
 
 export function useUiuxClient() {
 	const runtimeConfig = useRuntimeConfig()
@@ -162,6 +181,27 @@ export function useUiuxClient() {
 		return entry ? staticUrl(entry.file) : ''
 	}
 
+	/**
+	 * The address the Assets page shows an Asset from and offers it for download at. In the live
+	 * Workbench and for most published files it is `assetUrl`. A published SVG file resolves to a
+	 * `data:` URL of its bytes instead, so neither its `<img>` nor its Download link points at the
+	 * raw `.svg` file on the published site's own origin. `''` when the file cannot be read.
+	 */
+	async function resolveAssetContentUrl(assetId: string): Promise<string> {
+		if (!isReadOnly.value) return assetUrl(assetId)
+		const entry = (await publication()).files.assets[assetId]
+		if (!entry) return ''
+		if (!isSvgFile(entry)) return staticUrl(entry.file)
+		const cacheKey = `${entry.file}#${entry.digest}`
+		let pending = svgDataUrls.get(cacheKey)
+		if (!pending) {
+			pending = svgDataUrl(staticUrl(entry.file))
+			svgDataUrls.set(cacheKey, pending)
+			pending.catch(() => svgDataUrls.delete(cacheKey))
+		}
+		return await pending.catch(() => '')
+	}
+
 	function artifactUrl(digest: string): string {
 		if (!isReadOnly.value) return `/api/artifacts/${encodeURIComponent(digest)}`
 		const entry = publicationState.value?.files.artifacts[digest]
@@ -190,6 +230,7 @@ export function useUiuxClient() {
 		previewAdapters,
 		assetUrl,
 		resolveAssetUrl,
+		resolveAssetContentUrl,
 		artifactUrl,
 		resolveArtifactUrl,
 		routeUrl,
