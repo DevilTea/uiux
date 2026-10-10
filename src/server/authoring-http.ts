@@ -666,7 +666,7 @@ export async function readAssetContentForHttp(persistence: FileNativePersistence
 			'ETag': `"${read.revision}"`,
 			'X-Content-Type-Options': 'nosniff',
 			'Content-Disposition': formatContentDisposition(declaredFilename),
-			...storedContentSecurityHeaders(mediaType),
+			...storedContentSecurityHeaders(mediaType, contentBytes),
 		},
 	}
 }
@@ -730,7 +730,7 @@ export async function readArtifactForHttp(persistence: FileNativePersistence, di
 			'X-Content-Type-Options': 'nosniff',
 			'Cache-Control': 'public, max-age=31536000, immutable',
 			'Content-Disposition': `inline; filename="${filename}"`,
-			...storedContentSecurityHeaders(contentType),
+			...storedContentSecurityHeaders(contentType, bytes),
 		},
 	}
 }

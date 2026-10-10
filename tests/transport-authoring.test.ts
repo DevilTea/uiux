@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -1753,7 +1754,7 @@ describe('Asset content HTTP serving and header security', () => {
 		}
 	})
 
-	it('sandboxes stored SVG content and artifacts, and leaves PDF content to the browser viewer', async () => {
+	it('sandboxes stored SVG content and artifacts', async () => {
 		const { app, persistence } = await emptySession()
 		const svg = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
 		const created = await createAssetForHttp(scoped(app), {
@@ -1772,9 +1773,40 @@ describe('Asset content HTTP serving and header security', () => {
 		const artifactRes = await readArtifactForHttp(persistence, identity)
 		expect(artifactRes.headers).toMatchObject({ 'Content-Type': 'application/octet-stream', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': STORED_CONTENT_SECURITY_POLICY })
 
-		expect(storedContentSecurityHeaders('image/svg+xml; charset=utf-8')).toEqual({ 'Content-Security-Policy': STORED_CONTENT_SECURITY_POLICY })
-		expect(storedContentSecurityHeaders('text/html')).toEqual({ 'Content-Security-Policy': STORED_CONTENT_SECURITY_POLICY })
-		expect(storedContentSecurityHeaders('Application/PDF')).toEqual({})
+		const svgBytes = new TextEncoder().encode(svg)
+		expect(storedContentSecurityHeaders('image/svg+xml; charset=utf-8', svgBytes)).toEqual({ 'Content-Security-Policy': STORED_CONTENT_SECURITY_POLICY })
+		expect(storedContentSecurityHeaders('text/html', svgBytes)).toEqual({ 'Content-Security-Policy': STORED_CONTENT_SECURITY_POLICY })
+	})
+
+	it('leaves only content declared PDF that carries the PDF signature unsandboxed', async () => {
+		const { app, persistence } = await emptySession()
+		const pdf = '%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n'
+		const cases = [
+			{ label: 'HTML declared PDF', bytes: '<!doctype html><script>alert(1)</script>', mediaType: 'application/pdf', sandboxed: true },
+			{ label: 'SVG with a doctype declared PDF', bytes: '<!DOCTYPE svg><svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', mediaType: 'application/pdf', sandboxed: true },
+			{ label: 'PDF signature after a prefix', bytes: `<html>${pdf}`, mediaType: 'application/pdf', sandboxed: true },
+			{ label: 'a real PDF', bytes: pdf, mediaType: 'application/pdf', sandboxed: false },
+			{ label: 'a real PDF declared with other casing', bytes: pdf, mediaType: 'Application/PDF', sandboxed: false },
+		]
+		for (const item of cases) {
+			const id = randomUUID()
+			// Upload validation is unchanged: bytes whose type is not determinable are accepted as declared.
+			const created = await createAssetForHttp(scoped(app), {
+				id,
+				name: item.label,
+				contentFilename: 'document.pdf',
+				mediaType: item.mediaType,
+				contentBase64: Buffer.from(item.bytes).toString('base64'),
+			})
+			expect(created.status, item.label).toBe(201)
+			const served = await readAssetContentForHttp(persistence, id)
+			expect(served.status, item.label).toBe(200)
+			expect(served.headers?.['Content-Type'], item.label).toBe(item.mediaType)
+			expect(served.headers?.['Content-Security-Policy'], item.label).toBe(item.sandboxed ? STORED_CONTENT_SECURITY_POLICY : undefined)
+		}
+		const pdfBytes = new TextEncoder().encode(pdf)
+		expect(storedContentSecurityHeaders('APPLICATION/PDF; charset=binary', pdfBytes)).toEqual({})
+		expect(storedContentSecurityHeaders('application/octet-stream', pdfBytes)).toEqual({ 'Content-Security-Policy': STORED_CONTENT_SECURITY_POLICY })
 	})
 
 	it('returns HTTP 404 when declared content file is missing on disk', async () => {

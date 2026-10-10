@@ -141,7 +141,7 @@ export async function readVersionBlobForHttp(session: ScopedWorkspaceSession, di
 			'ETag': `"${outcome.digest}"`,
 			'X-Content-Type-Options': 'nosniff',
 			'Cache-Control': 'private, max-age=31536000, immutable',
-			...storedContentSecurityHeaders('application/octet-stream'),
+			...storedContentSecurityHeaders('application/octet-stream', outcome.bytes),
 		},
 	}
 }
