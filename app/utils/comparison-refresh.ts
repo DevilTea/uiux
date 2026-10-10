@@ -7,12 +7,13 @@ import { PARENT_COMPARE } from './version-history'
 
 /**
  * The key that re-reads a comparison with `current`: the newest listed version and the revisions
- * the Workbench has read. It is `undefined` until both are known, so their first arrival on a cold
- * start (the timeline's first page, the Workbench's first read) is not taken for a change and the
- * comparison is read once, not three times.
+ * the Workbench has read. It is `undefined` until the timeline's first page and the Workbench's
+ * first read have both arrived, so their arrival on a cold start is not taken for a change and the
+ * comparison is read once, not three times. Once the timeline is loaded an empty one (a filter that
+ * matches nothing) keys as `-`, so a later Workbench change still re-reads the comparison.
  */
-export function comparisonRefreshKey(latestVersionId: string | undefined, workbenchSignature: string): string | undefined {
-	return latestVersionId && workbenchSignature ? `${latestVersionId}|${workbenchSignature}` : undefined
+export function comparisonRefreshKey(timeline: Readonly<{ loaded: boolean; latestVersionId: string | undefined }>, workbenchSignature: string): string | undefined {
+	return timeline.loaded && workbenchSignature ? `${timeline.latestVersionId ?? '-'}|${workbenchSignature}` : undefined
 }
 
 /** A refresh key change re-reads the comparison only between two known keys. */

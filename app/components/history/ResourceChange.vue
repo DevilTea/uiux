@@ -8,7 +8,7 @@ import { useVersionDiff } from '../../composables/useVersionHistory'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { useWorkbench } from '../../composables/useWorkbench'
-import type { ComparisonEndpoints } from '../../utils/version-history'
+import { PARENT_COMPARE, type ComparisonEndpoints } from '../../utils/version-history'
 import { restoreSourceVersion } from '../../utils/version-restore'
 import ResourceDiff from './ResourceDiff.vue'
 import RestoreVersionAction from './RestoreVersionAction.vue'
@@ -54,6 +54,8 @@ const restoreFrom = computed(() => restoreSourceVersion({
 	selectedVersion: props.selectedVersion,
 	endpoints: props.endpoints,
 }))
+/** Compared with its parent, the selected version is this change: Restore brings back its after side. */
+const restoresAfterChange = computed(() => props.endpoints.from === PARENT_COMPARE && props.endpoints.to === restoreFrom.value)
 
 /** An Asset's current content digest: an image of either side with this digest is its current content. */
 const currentAsset = shallowRef<{ digest?: string; url: string }>()
@@ -105,6 +107,7 @@ watch(() => open.value && props.row.kind === 'asset' ? props.row.key : undefined
           :resource="{ kind: row.kind, key: row.key }"
           :version-id="restoreFrom"
           :resource-name="name"
+          :after-change="restoresAfterChange"
         />
       </div>
       <UAlert

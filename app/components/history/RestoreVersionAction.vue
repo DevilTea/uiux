@@ -3,12 +3,12 @@ import { computed, nextTick, ref, shallowRef, useTemplateRef } from 'vue'
 import { useI18n, useToast } from '#imports'
 import type { VersionRecord } from '../../../src/domain/history/schema'
 import { useHistoryLabels } from '../../composables/useHistoryLabels'
-import { notifyHistoryChanged, readVersionRecord } from '../../composables/useVersionHistory'
+import { notifyHistoryChanged, readVersionRecord, useVersionDiff } from '../../composables/useVersionHistory'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
-import type { HistoryResourceRef } from '../../utils/version-history'
-import { classifyRestoreAnswer, groupImpacts, shortId, type ImpactGroup, type ReceivedImpact } from '../../utils/version-restore'
+import { CURRENT_COMPARE, type HistoryResourceRef } from '../../utils/version-history'
+import { classifyRestoreAnswer, groupImpacts, matchesCurrent, shortId, type ImpactGroup, type ReceivedImpact } from '../../utils/version-restore'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 
 /**
@@ -26,6 +26,13 @@ import WbErrorDescription from '../workbench/WbErrorDescription.vue'
  * other refusals are explained with their diagnostics. Focus starts on Cancel; each later state
  * moves focus to its own text so it is read out.
  *
+ * Opening the dialog also compares the version with the current state for this resource. When the
+ * resource already matches the version, a restore would change nothing yet still form a version of
+ * its own, so the dialog says so and offers no Restore; the server has no refusal for this case
+ * (Clause 01a11a5e-2768-76ad-b02a-e15f50f91268), so the guard is the Workbench's alone. Compared
+ * with its parent (`afterChange`), the version restored is still the selected one: its content right
+ * after that change, never the content before it (Rule 01a11a5e-18f2-…, owner decision on PR #166).
+ *
  * A restore forms a version of its own naming its source (Rules 01a11a5e-14ce-… and
  * 01a11e0d-d911-…), so on success every timeline and the Workbench's resources are read again.
  */
@@ -35,6 +42,8 @@ const props = defineProps<{
 	versionId: string
 	/** The resource's display name. */
 	resourceName: string
+	/** The comparison is with the version's parent: the dialog says the content restored is the one after that change. */
+	afterChange?: boolean
 }>()
 
 const { t, locale } = useI18n()
@@ -60,9 +69,28 @@ const readFailed = ref(false)
 const cancelButton = useTemplateRef<{ $el?: HTMLElement }>('cancelButton')
 const stageRegion = useTemplateRef<HTMLElement>('stageRegion')
 
+/** The version compared with the current state, for this resource alone, while the dialog is open. */
+const match = useVersionDiff(() => ({ from: props.versionId, to: CURRENT_COMPARE }), {
+	resources: () => [props.resource],
+	detail: 'summary',
+	enabled: open,
+})
+/** `true` when the resource already matches the version; `undefined` while unknown. A failed comparison blocks nothing: the server decides. */
+const unchanged = computed(() => {
+	if (match.loading.value) return undefined
+	if (match.error.value || !match.result.value) return match.error.value ? false : undefined
+	return matchesCurrent(match.result.value.summary, props.resource)
+})
+
 const versionName = computed(() => record.value ? labels.versionTitle(record.value) : t('history.restore.thisVersion'))
 const versionTime = computed(() => record.value ? labels.dateTime(record.value.at) : '')
 const missing = computed(() => expectedRevision.value === null)
+/** What the restore writes: the version's content, said as "right after this change" when compared with its parent. */
+const summaryText = computed(() => {
+	const params = { resource: props.resourceName, version: versionName.value, time: versionTime.value }
+	if (props.afterChange) return versionTime.value ? t('history.restore.bodyAfterChange', params) : t('history.restore.bodyAfterChangeNoTime', params)
+	return versionTime.value ? t('history.restore.body', params) : t('history.restore.bodyNoTime', params)
+})
 const groups = computed(() => groupImpacts(impacts.value))
 const dialogTitle = computed(() => stage.value === 'impact' ? t('history.restore.impact.title') : t('history.restore.title'))
 
@@ -113,12 +141,13 @@ async function reload(): Promise<void> {
 	impacts.value = []
 	stage.value = 'confirm'
 	void workbench.refreshAll()
+	void match.load()
 	await readCurrent()
 	if (stage.value === 'confirm') void nextTick(() => cancelButton.value?.$el?.focus())
 }
 
 async function restore(acknowledgeImpact: boolean): Promise<void> {
-	if (submitting.value || reading.value || expectedRevision.value === undefined) return
+	if (submitting.value || reading.value || expectedRevision.value === undefined || unchanged.value !== false) return
 	submitting.value = true
 	error.value = undefined
 	let status: number | undefined
@@ -275,31 +304,43 @@ function groupLabel(group: ImpactGroup): string {
             v-if="stage === 'confirm'"
             class="space-y-2 text-sm text-default"
           >
-            <p data-restore-summary>
-              {{ versionTime ? t('history.restore.body', { resource: resourceName, version: versionName, time: versionTime }) : t('history.restore.bodyNoTime', { resource: resourceName, version: versionName }) }}
-            </p>
             <p
-              v-if="missing"
-              data-restore-recreates
+              v-if="unchanged"
+              role="status"
+              data-restore-unchanged
             >
-              {{ resource.kind === 'view' ? t('history.restore.recreatesView') : t('history.restore.recreates') }}
+              {{ t('history.restore.unchanged', { resource: resourceName }) }}
             </p>
-            <p
-              v-else-if="resource.kind === 'view'"
-              data-restore-decisions
-            >
-              {{ t('history.restore.keepsDecisions') }}
-            </p>
-            <p
-              v-else-if="resource.kind === 'workspace'"
-            >
-              {{ t('history.restore.keepsSchema') }}
-            </p>
-            <p class="text-muted">
-              {{ t('history.restore.impactNote') }}
-            </p>
+            <template v-else>
+              <p
+                data-restore-summary
+                :data-after-change="afterChange || undefined"
+              >
+                {{ summaryText }}
+              </p>
+              <p
+                v-if="missing"
+                data-restore-recreates
+              >
+                {{ resource.kind === 'view' ? t('history.restore.recreatesView') : t('history.restore.recreates') }}
+              </p>
+              <p
+                v-else-if="resource.kind === 'view'"
+                data-restore-decisions
+              >
+                {{ t('history.restore.keepsDecisions') }}
+              </p>
+              <p
+                v-else-if="resource.kind === 'workspace'"
+              >
+                {{ t('history.restore.keepsSchema') }}
+              </p>
+              <p class="text-muted">
+                {{ t('history.restore.impactNote') }}
+              </p>
+            </template>
             <USkeleton
-              v-if="reading"
+              v-if="reading || unchanged === undefined"
               class="h-4 w-48"
               :aria-label="t('history.restore.reading')"
             />
@@ -400,16 +441,18 @@ function groupLabel(group: ImpactGroup): string {
           <UButton
             v-if="stage === 'confirm'"
             color="primary"
+            variant="solid"
             icon="i-lucide-history"
             :loading="submitting"
-            :disabled="reading || expectedRevision === undefined"
+            :disabled="reading || expectedRevision === undefined || unchanged !== false"
             :label="t('history.restore.confirm')"
             data-restore-confirm
             @click="restore(false)"
           />
           <UButton
             v-else-if="stage === 'impact'"
-            color="warning"
+            color="primary"
+            variant="solid"
             icon="i-lucide-history"
             :loading="submitting"
             :label="t('history.restore.impact.confirm')"
@@ -419,6 +462,7 @@ function groupLabel(group: ImpactGroup): string {
           <UButton
             v-else-if="stage === 'conflict' || stage === 'locked' || (stage === 'refused' && readFailed)"
             color="primary"
+            variant="solid"
             icon="i-lucide-refresh-cw"
             :loading="reading"
             :label="stage === 'conflict' ? t('history.restore.conflict.reload') : t('common.retry')"

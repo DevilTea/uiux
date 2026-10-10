@@ -32,7 +32,9 @@ const props = withDefaults(defineProps<{
 	fullComparisonTo?: RouteLocationRaw
 	/** The newest listed version: a comparison with `current` is read again when it or the Workspace changes. */
 	latestVersionId?: string
-}>(), { requestResources: () => [], fullComparisonTo: undefined, latestVersionId: undefined })
+	/** The timeline's first page has arrived, so `latestVersionId` is known, if only to be absent. */
+	timelineLoaded?: boolean
+}>(), { requestResources: () => [], fullComparisonTo: undefined, latestVersionId: undefined, timelineLoaded: false })
 
 defineSlots<{ canvas?: (props: { change: ResourceSemanticChange }) => unknown }>()
 
@@ -45,7 +47,7 @@ const selection = computed<HistorySelection>(() => resolveHistorySelection(props
 const ordered = useOrderedEndpoints(selection)
 const endpoints = ordered.endpoints
 const signature = useWorkbenchSignature()
-const refreshKey = computed(() => comparisonRefreshKey(props.latestVersionId, signature.value))
+const refreshKey = computed(() => comparisonRefreshKey({ loaded: props.timelineLoaded, latestVersionId: props.latestVersionId }, signature.value))
 const summary = useVersionDiff(endpoints, { resources: () => props.requestResources, detail: 'summary', refreshKey })
 const result = computed(() => summary.result.value)
 const changed = computed(() => result.value?.summary.filter(row => row.status !== 'unchanged') ?? [])

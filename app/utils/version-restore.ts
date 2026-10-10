@@ -50,6 +50,18 @@ export function restoreSourceVersion(input: RestoreGateInput): string | undefine
 	return undefined
 }
 
+/**
+ * Whether the resource's current content already equals the selected version's: the summary of
+ * `GET /api/history/diff?from=<version>&to=current&resource=<kind:key>` lists it as `unchanged`.
+ * Restoring it would change nothing yet still form a version of its own (Rule
+ * 01a11e0d-d911-7030-9565-7473aa0995e1), so the dialog offers no Restore. The restore Clause
+ * (01a11a5e-2768-76ad-b02a-e15f50f91268) has no result for this case, so this guard is the
+ * Workbench's own.
+ */
+export function matchesCurrent(summary: readonly Pick<ResourceChangeSummary, 'kind' | 'key' | 'status'>[], resource: Readonly<{ kind: string; key: string }>): boolean {
+	return summary.find(row => row.kind === resource.kind && row.key === resource.key)?.status === 'unchanged'
+}
+
 /** The impact list's groups, in the order the confirmation shows them (Rules 01a11a5e-174b-… and 17a0-…). */
 export const IMPACT_GROUPS = ['anchors', 'references', 'flowSteps', 'submissions', 'renderKeys', 'evidence', 'other'] as const
 export type ImpactGroup = typeof IMPACT_GROUPS[number]
