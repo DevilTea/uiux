@@ -104,10 +104,6 @@ The normative domain behavior and external contracts live in `.spec/` (Stories, 
 
 **zh-TW terminology policy:** domain nouns stay in English inside Chinese UI: View, Variant, Widget, Review, Flow (UX Flow), Spec, Decision, Evidence, Handoff, Workspace, Locale, Asset and MCP, plus RootShell, Adapter and IR, and the role names Owner, Editor, Reviewer and Viewer. By the owner's decision of 2026-10-06, Token, Agent, Slot, Runtime, Manifest, Bundle (as in "Bundle ID") and Schema also stay in English, while Checks is 「檢查」 and Catalog is 「型錄」. Actions and general UI are translated, for example 「新增留言」 and 「標記為已解決」. The shared allowlist in `tests/support/i18n-allowlist.mjs` and the glossary tests enforce this. This keeps what an agent says, what MCP tools are named, and what the human sees aligned.
 
-**Undecided:**
-
-- "What changed" beyond "updated since you last looked": showing a real diff needs revision history, which the Workspace model does not provide.
-
 ## Brand Commitments
 
 - Product name **UIUX**, package `@deviltea/uiux`, CLI `uiux`. The Workbench is titled "UIUX Workbench".
@@ -121,7 +117,7 @@ The normative domain behavior and external contracts live in `.spec/` (Stories, 
 - Screenshots of an earlier Workbench: `docs/pr-48/01-workbench-overview.png` to `05-handoff-export.png`.
 - Live published spec: https://deviltea.github.io/uiux/
 - Behavioral requirements and external contracts: `.spec/` in this repository, the authority (Stories, Features and Rules, Contracts and Clauses, Scenarios). Decision rationale and history: GitHub Discussions #1–#10, frozen. Implementation workstreams: Issues #11–#29.
-- **Absent, so future work must not fabricate:** users, customers, testimonials, usage metrics, pricing or licensing claims, a logo or wordmark, and revision history or diffs.
+- **Absent, so future work must not fabricate:** users, customers, testimonials, usage metrics, pricing or licensing claims, and a logo or wordmark.
 
 ## Product Principles
 
