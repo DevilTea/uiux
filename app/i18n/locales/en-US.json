@@ -2190,8 +2190,9 @@
       "events": "Changes in order",
       "eventsLoadFailed": "Couldn't load the changes of this version.",
       "noEvents": "No changes were recorded.",
-      "restored": "Restores an earlier version.",
-      "recordingGap": "Some changes may be missing from this version."
+      "restored": "Restored from an earlier version that is no longer in history.",
+      "recordingGap": "Some changes may be missing from this version.",
+      "restoredFrom": "Restored from {version}"
     },
     "filter": {
       "actor": "Changed by",
@@ -2328,6 +2329,71 @@
     "systemName": {
       "baseline": "History start",
       "migrate": "Before migrating to schemaVersion {version}"
+    },
+    "restore": {
+      "action": "Restore this version",
+      "actionNamed": "Restore {resource} to this version",
+      "title": "Restore this version?",
+      "thisVersion": "this version",
+      "body": "{resource} gets its content from {version} ({time}) as a new revision. Every version stays in history, and no other resource changes.",
+      "bodyNoTime": "{resource} gets its content from {version} as a new revision. Every version stays in history, and no other resource changes.",
+      "keepsDecisions": "The View keeps its current Decisions.",
+      "keepsSchema": "The Workspace keeps its current schema version.",
+      "recreates": "It no longer exists, so the restore re-creates it with its original identity.",
+      "recreatesView": "It no longer exists, so the restore re-creates it with its original identity and the Decisions recorded in that version.",
+      "impactNote": "If the restore changes what other resources refer to, you'll see the effects before anything is written.",
+      "reading": "Checking the current revision",
+      "readFailed": "Couldn't read the current {resource}.",
+      "confirm": "Restore",
+      "restored": "{resource} restored from {version}",
+      "recreated": "{resource} re-created from {version}",
+      "impact": {
+        "title": "Restore anyway?",
+        "body": "Restoring {resource} from {version} affects what other resources refer to. Nothing has been written yet.",
+        "count": "{n} effect | {n} effects",
+        "confirm": "Restore anyway",
+        "group": {
+          "anchors": "Review threads whose Widget anchor changes",
+          "references": "References that would have nothing to point to",
+          "flowSteps": "Flow steps that would lose Widgets",
+          "submissions": "Ready-for-review submissions",
+          "renderKeys": "Removed viewport and theme keys",
+          "evidence": "Evidence that would become stale",
+          "other": "Other effects"
+        },
+        "item": {
+          "anchorInvalidated": "Thread {thread} would no longer find Widget {widget} in View {view}.",
+          "anchorRevalidated": "Thread {thread} would find Widget {widget} in View {view} again.",
+          "textKey": "View {view} uses text key {key}, which the default Locale would no longer define.",
+          "asset": "View {view} uses Asset {asset}, which would no longer exist.",
+          "flowStep": "Flow {flow}, step {step}: Widgets {widgets} would no longer be in View {view}.",
+          "submissionNotCurrent": "Thread {thread} was submitted for review at a {kind} {resource} revision that would no longer be current.",
+          "submissionCurrent": "Thread {thread} was submitted for review at a {kind} {resource} revision that would be current again.",
+          "viewportRemoved": "Viewport key {key} would be removed.",
+          "themeRemoved": "Theme key {key} would be removed.",
+          "namedBy": "Thread {threads} records it in its render context. | Threads {threads} record it in their render context.",
+          "namedByNone": "No thread records it.",
+          "evidence": "Evidence {evidence} would become stale.",
+          "evidenceForView": "Evidence {evidence} of View {view} would become stale.",
+          "other": "Another effect: {category}"
+        }
+      },
+      "conflict": {
+        "title": "{resource} changed after this dialog opened",
+        "body": "Nothing was restored. Reload to restore over its newest revision.",
+        "reload": "Reload"
+      },
+      "locked": {
+        "title": "{nickname} is editing {resource} until {time}",
+        "body": "Nothing was restored. Try again once the edit lock is released."
+      },
+      "refused": {
+        "invalid": "This version can't be restored",
+        "not_found": "There is nothing to restore",
+        "blocked": "The restore is blocked",
+        "denied": "Your role can't restore this resource",
+        "failed": "Couldn't restore this version"
+      }
     }
   }
 }

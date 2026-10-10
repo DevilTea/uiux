@@ -7,6 +7,7 @@ import type { VersionRecord } from '../../../src/domain/history/schema'
 import { CHANGE_ICONS, useHistoryLabels } from '../../composables/useHistoryLabels'
 import { readVersionRecord, useOrderedEndpoints, useVersionDiff, useWorkbenchSignature } from '../../composables/useVersionHistory'
 import { CURRENT_COMPARE, PARENT_COMPARE, resolveHistorySelection, sameResource, type HistoryAddress, type HistoryResourceRef, type HistorySelection } from '../../utils/version-history'
+import { comparisonRefreshKey } from '../../utils/comparison-refresh'
 import ResourceChange from './ResourceChange.vue'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 
@@ -44,7 +45,7 @@ const selection = computed<HistorySelection>(() => resolveHistorySelection(props
 const ordered = useOrderedEndpoints(selection)
 const endpoints = ordered.endpoints
 const signature = useWorkbenchSignature()
-const refreshKey = computed(() => `${props.latestVersionId ?? ''}|${signature.value}`)
+const refreshKey = computed(() => comparisonRefreshKey(props.latestVersionId, signature.value))
 const summary = useVersionDiff(endpoints, { resources: () => props.requestResources, detail: 'summary', refreshKey })
 const result = computed(() => summary.result.value)
 const changed = computed(() => result.value?.summary.filter(row => row.status !== 'unchanged') ?? [])
@@ -289,6 +290,7 @@ watch(() => props.address.version, focusHeading)
         :row="row"
         :endpoints="endpoints!"
         :refresh-key="refreshKey"
+        :selected-version="selection.version"
         :initially-open="!!selection.resource || changed.length === 1"
       >
         <template #canvas="{ change }">

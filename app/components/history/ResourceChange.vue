@@ -6,19 +6,28 @@ import type { ResourceChangeSummary } from '../../../src/domain/history/summary'
 import { CHANGE_ICONS, useHistoryLabels } from '../../composables/useHistoryLabels'
 import { useVersionDiff } from '../../composables/useVersionHistory'
 import { useUiuxClient } from '../../composables/useUiuxClient'
+import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
+import { useWorkbench } from '../../composables/useWorkbench'
 import type { ComparisonEndpoints } from '../../utils/version-history'
+import { restoreSourceVersion } from '../../utils/version-restore'
 import ResourceDiff from './ResourceDiff.vue'
+import RestoreVersionAction from './RestoreVersionAction.vue'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 
 /**
  * One changed resource of a comparison: its heading and, once opened, its semantic diff, read for
  * this resource alone (`detail=semantic&resource=…`), so a comparison of many resources reads only
  * the ones the reader looks at. A View's canvas before and after (B9) goes in the `canvas` slot.
+ * The open diff offers "Restore this version" for the selected version (Rule
+ * 01a11a5e-18f2-7991-8f7d-aa4c8015d14a) when `restoreSourceVersion` allows it: desktop only (Rule
+ * 01a11a5e-1bfa-71e9-9611-152b5b665379), Editor or above, a restorable kind held by that version.
  */
 const props = defineProps<{
 	row: Readonly<Pick<ResourceChangeSummary, 'kind' | 'key' | 'status'>>
 	endpoints: ComparisonEndpoints
 	refreshKey?: string
+	/** The comparison's selected version: the one "Restore this version" restores. */
+	selectedVersion?: string
 	/** Open from the start: the selected resource, or the only one compared. */
 	initiallyOpen: boolean
 }>()
@@ -35,6 +44,16 @@ const resources = computed(() => [{ kind: props.row.kind, key: props.row.key }])
 const semantic = useVersionDiff(() => props.endpoints, { resources, detail: 'semantic', enabled: open, refreshKey: () => props.refreshKey })
 const change = computed(() => semantic.result.value?.changes?.find(item => item.kind === props.row.kind && item.key === props.row.key))
 const name = computed(() => labels.resourceName(props.row))
+
+const { authorReadOnly } = useWorkbench()
+const desktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
+const restoreFrom = computed(() => restoreSourceVersion({
+	desktop: desktop.value,
+	canAuthor: !authorReadOnly.value,
+	resource: props.row,
+	selectedVersion: props.selectedVersion,
+	endpoints: props.endpoints,
+}))
 
 /** An Asset's current content digest: an image of either side with this digest is its current content. */
 const currentAsset = shallowRef<{ digest?: string; url: string }>()
@@ -78,6 +97,16 @@ watch(() => open.value && props.row.kind === 'asset' ? props.row.key : undefined
       :id="panelId"
       class="space-y-2"
     >
+      <div
+        v-if="restoreFrom"
+        class="flex justify-end"
+      >
+        <RestoreVersionAction
+          :resource="{ kind: row.kind, key: row.key }"
+          :version-id="restoreFrom"
+          :resource-name="name"
+        />
+      </div>
       <UAlert
         v-if="semantic.error.value"
         color="error"

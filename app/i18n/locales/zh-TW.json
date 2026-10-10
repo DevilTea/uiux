@@ -2190,8 +2190,9 @@
       "events": "依序列出的變更",
       "eventsLoadFailed": "無法載入這個版本的變更。",
       "noEvents": "沒有記錄到任何變更。",
-      "restored": "還原了較早的版本。",
-      "recordingGap": "這個版本可能缺少部分變更。"
+      "restored": "還原自一個已不在歷程中的較早版本。",
+      "recordingGap": "這個版本可能缺少部分變更。",
+      "restoredFrom": "還原自 {version}"
     },
     "filter": {
       "actor": "變更者",
@@ -2328,6 +2329,71 @@
     "systemName": {
       "baseline": "歷程起點",
       "migrate": "遷移到 schemaVersion {version} 之前"
+    },
+    "restore": {
+      "action": "還原這個版本",
+      "actionNamed": "將 {resource} 還原為這個版本",
+      "title": "要還原這個版本嗎？",
+      "thisVersion": "這個版本",
+      "body": "{resource} 會以 {version}（{time}）的內容寫入新的修訂版本。歷程中的每個版本都會保留，其他資源不會變更。",
+      "bodyNoTime": "{resource} 會以 {version} 的內容寫入新的修訂版本。歷程中的每個版本都會保留，其他資源不會變更。",
+      "keepsDecisions": "這個 View 會保留目前的 Decision。",
+      "keepsSchema": "Workspace 會保留目前的 Schema 版本。",
+      "recreates": "這項資源已不存在，還原後會以原本的識別碼重新建立。",
+      "recreatesView": "這個 View 已不存在，還原後會以原本的識別碼重新建立，並帶回該版本記錄的 Decision。",
+      "impactNote": "如果還原會影響其他資源的參照，寫入前會先列出影響。",
+      "reading": "正在確認目前的修訂版本",
+      "readFailed": "無法讀取目前的 {resource}。",
+      "confirm": "還原",
+      "restored": "已將 {resource} 還原為 {version}",
+      "recreated": "已從 {version} 重新建立 {resource}",
+      "impact": {
+        "title": "仍要還原嗎？",
+        "body": "從 {version} 還原 {resource} 會影響其他資源的參照。目前尚未寫入任何內容。",
+        "count": "{n} 項影響 | {n} 項影響",
+        "confirm": "仍要還原",
+        "group": {
+          "anchors": "Widget 錨點會改變的 Review 討論串",
+          "references": "會找不到目標的參照",
+          "flowSteps": "會失去 Widget 的 Flow 步驟",
+          "submissions": "待審核的 Review 提交",
+          "renderKeys": "會移除的檢視區與主題鍵值",
+          "evidence": "會變成過時的 Evidence",
+          "other": "其他影響"
+        },
+        "item": {
+          "anchorInvalidated": "討論串 {thread} 將找不到 View {view} 中的 Widget {widget}。",
+          "anchorRevalidated": "討論串 {thread} 將重新找到 View {view} 中的 Widget {widget}。",
+          "textKey": "View {view} 使用的文字鍵值 {key} 將不再由預設 Locale 定義。",
+          "asset": "View {view} 使用的 Asset {asset} 將不再存在。",
+          "flowStep": "Flow {flow} 的步驟 {step}：Widget {widgets} 將不再位於 View {view} 中。",
+          "submissionNotCurrent": "討論串 {thread} 提交 Review 時的 {kind} {resource} 修訂版本將不再是目前版本。",
+          "submissionCurrent": "討論串 {thread} 提交 Review 時的 {kind} {resource} 修訂版本將再次成為目前版本。",
+          "viewportRemoved": "檢視區鍵值 {key} 將被移除。",
+          "themeRemoved": "主題鍵值 {key} 將被移除。",
+          "namedBy": "討論串 {threads} 的呈現情境記錄了它。 | 討論串 {threads} 的呈現情境記錄了它。",
+          "namedByNone": "沒有討論串記錄它。",
+          "evidence": "Evidence {evidence} 將變成過時。",
+          "evidenceForView": "View {view} 的 Evidence {evidence} 將變成過時。",
+          "other": "其他影響：{category}"
+        }
+      },
+      "conflict": {
+        "title": "這個對話框開啟後，{resource} 已有變更",
+        "body": "尚未還原任何內容。請重新載入，以最新的修訂版本為基礎再還原。",
+        "reload": "重新載入"
+      },
+      "locked": {
+        "title": "{nickname} 正在編輯 {resource}，持有編輯鎖至 {time}",
+        "body": "尚未還原任何內容。請在編輯鎖解除後再試一次。"
+      },
+      "refused": {
+        "invalid": "無法還原這個版本",
+        "not_found": "沒有可還原的內容",
+        "blocked": "還原已被阻擋",
+        "denied": "你的角色無法還原這項資源",
+        "failed": "無法還原這個版本"
+      }
     }
   }
 }
