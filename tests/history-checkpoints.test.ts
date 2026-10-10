@@ -32,6 +32,7 @@ import { createHistoryStoreFactory, type HistoryStoreFactory } from '../src/serv
 import { createCheckpointForHttp, deleteCheckpointForHttp, diffVersionsForHttp, listVersionsForHttp, readVersionForHttp } from '../src/server/history-http'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { bearer, connectMcp, provisionToken, scoped, sessionCookieFor, testMember } from './support/access'
+import { metadataPath } from './support/workspace-layout'
 
 /**
  * Named Checkpoints, the version listing and their access (issue #132 B4): Feature
@@ -318,7 +319,7 @@ describe('creating a Checkpoint', () => {
 		expect(ctx.recorder.starting).toBe(true)
 		const refused = await createCheckpointForHttp(scoped(ctx.app, REVIEWER), { name: 'Too early' })
 		expect(refused).toMatchObject({ status: 503, body: { code: 'history.boundary_failed', retryable: true } })
-		expect(await readdir(join(ctx.root, '.uiux')).then(entries => entries.includes('history'))).toBe(false)
+		expect(await readdir(metadataPath(ctx.root)).then(entries => entries.includes('history'))).toBe(false)
 		release()
 		const report = await starting
 		expect(ctx.recorder.starting).toBe(false)

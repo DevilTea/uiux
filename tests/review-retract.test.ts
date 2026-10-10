@@ -22,6 +22,7 @@ import {
 	submitReadyForReviewForHttp,
 } from '../src/server/authoring-http'
 import { AGENT_EDITOR, connectMcp, scoped, testMember } from './support/access'
+import { metadataPath } from './support/workspace-layout'
 
 /**
  * Accepted addendum "Author quick retract of a new Review thread" (Part 7,
@@ -84,7 +85,7 @@ describe('retract eligibility (E1–E6)', { timeout: 30_000 }, () => {
 		expect(retracted.body).toEqual({ status: 'deleted', key: REVIEW_ID })
 		expect(await exists(ctx)).toBe(false)
 		expect(await readdir(join(ctx.root, 'reviews'))).toEqual([])
-		expect(await readdir(join(ctx.root, '.uiux')).then(entries => entries.filter(name => name.startsWith('.transactions')))).toEqual([])
+		expect(await readdir(metadataPath(ctx.root)).then(entries => entries.filter(name => name.startsWith('.transactions')))).toEqual([])
 		expect(await ctx.app.readPointResource('review', REVIEW_ID)).toBeUndefined()
 		const again = await retractReviewThreadForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: body(moved).revision! })
 		expect(again.status).toBe(404)

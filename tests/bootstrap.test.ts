@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import nuxtConfig from '../nuxt.config'
 import { healthResponse } from '../src/server/health'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
+import { manifestPath } from './support/workspace-layout'
 
 const rootDirectory = fileURLToPath(new URL('..', import.meta.url))
 const cliPath = `${rootDirectory}/bin/uiux.mjs`
@@ -47,7 +48,7 @@ describe('bootstrap', () => {
 		try {
 			const output = execFileSync(process.execPath, [cliPath, 'init', '--workspace', workspace], { encoding: 'utf8' })
 			expect(output).toContain('Initialized UIUX Workspace')
-			const manifest = JSON.parse(readFileSync(join(workspace, '.uiux', 'workspace.json'), 'utf8'))
+			const manifest = JSON.parse(readFileSync(manifestPath(workspace), 'utf8'))
 			expect(manifest).toEqual({
 				schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 				i18n: { defaultLocale: 'en-US' },
@@ -59,7 +60,7 @@ describe('bootstrap', () => {
 			const repeated = spawnSync(process.execPath, [cliPath, 'init', '--workspace', workspace], { encoding: 'utf8' })
 			expect(repeated.status).toBe(2)
 			expect(repeated.stderr).toContain('Workspace is already initialized')
-			expect(JSON.parse(readFileSync(join(workspace, '.uiux', 'workspace.json'), 'utf8'))).toEqual(manifest)
+			expect(JSON.parse(readFileSync(manifestPath(workspace), 'utf8'))).toEqual(manifest)
 		}
 		finally { rmSync(parent, { recursive: true, force: true }) }
 	})

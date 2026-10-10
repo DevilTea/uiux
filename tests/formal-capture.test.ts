@@ -17,6 +17,7 @@ import { AGENT_EDITOR, provisionToken, sessionCookieFor } from './support/access
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
+import { writeManifest } from './support/workspace-layout'
 
 const temporaryRoots: string[] = []
 const runningServers: ChildProcess[] = []
@@ -70,7 +71,6 @@ export const manifest = {
 async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; config?: unknown }> = []): Promise<{ root: string; persistence: FileNativePersistence }> {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-capture-test-'))
 	temporaryRoots.push(root)
-	await mkdir(join(root, '.uiux'), { recursive: true })
 	await mkdir(join(root, 'node_modules', '@deviltea'), { recursive: true })
 
 	const serverModules = join(process.cwd(), '.output/server/node_modules')
@@ -85,7 +85,7 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 	await symlink(widgetVuePath, join(root, 'node_modules', '@deviltea', 'widget-vue')).catch(() => undefined)
 	await symlink(vuePath, join(root, 'node_modules', 'vue')).catch(() => undefined)
 
-	await writeFile(join(root, '.uiux', 'workspace.json'), JSON.stringify({
+	await writeManifest(root, JSON.stringify({
 		schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 		i18n: { defaultLocale: 'en-US' },
 		adapters,

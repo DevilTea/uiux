@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import { bearer, provisionToken, sessionCookieFor } from './support/access'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
+import { checkpointsPath } from './support/workspace-layout'
 
 /**
  * The Workbench version timeline, history panel, comparison and Checkpoints (Part 11, issue #132,
@@ -243,7 +244,7 @@ describe('timeline rows', () => {
 	}, 90_000)
 
 	it('lists a history file it cannot read with an explanation and no Delete', async () => {
-		const directory = join(server.workspaceRoot, '.uiux', 'history', 'checkpoints')
+		const directory = checkpointsPath(server.workspaceRoot)
 		const file = join(directory, `${randomUUID()}.json`)
 		await mkdir(directory, { recursive: true })
 		await writeFile(file, '{"historySchemaVersion": 99}\n')

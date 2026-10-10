@@ -17,6 +17,7 @@ import {
 	FileNativePersistence,
 	canonicalJsonBytes,
 	defineWorkspaceSchemaPolicy,
+	layoutForSchemaVersion,
 	localeRelativePath,
 	viewRelativePath,
 	workspaceRelativePath,
@@ -29,6 +30,7 @@ import { createHistoryStoreFactory, type HistoryStores } from '../src/server/his
 import { diffVersionsForHttp } from '../src/server/history-http'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { bearer, connectMcp, provisionToken, scoped, testMember } from './support/access'
+import { writeManifest } from './support/workspace-layout'
 
 /**
  * Version comparison through the service, `GET /api/history/diff` and MCP `get_version_diff`
@@ -56,9 +58,8 @@ async function workspace(): Promise<Context> {
 	const root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-')))
 	const home = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-home-')))
 	cleanup.push(root, home)
-	await mkdir(join(root, '.uiux'), { recursive: true })
 	// Hand-written (not canonical) JSON, as a Workspace edited outside UIUX has.
-	await writeFile(join(root, workspaceRelativePath()), `${JSON.stringify(MANIFEST, null, 2)}\n`)
+	await writeManifest(root, `${JSON.stringify(MANIFEST, null, 2)}\n`)
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 	await writeView(root, view())
 	await persistence.locales.create('en-US', { greeting: 'Hello' })
@@ -244,8 +245,7 @@ describe('diffVersions', () => {
 				},
 			}],
 		})
-		await mkdir(join(root, '.uiux'), { recursive: true })
-		await writeFile(join(root, workspaceRelativePath()), canonicalJsonBytes({ ...MANIFEST, schemaVersion: 2 }))
+		await writeManifest(root, canonicalJsonBytes({ ...MANIFEST, schemaVersion: 2 }), layoutForSchemaVersion(2))
 		await mkdir(join(root, 'views'), { recursive: true })
 		await writeFile(join(root, viewRelativePath(VIEW_ID)), canonicalJsonBytes(view()))
 		const persistence = new FileNativePersistence({ root, schemaPolicy: policy })
@@ -362,8 +362,7 @@ describe('GET /api/history/diff access (Clause 01a11485-f978-767a-b977-33028aee7
 
 	beforeAll(async () => {
 		root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-http-')))
-		await mkdir(join(root, '.uiux'), { recursive: true })
-		await writeFile(join(root, workspaceRelativePath()), `${JSON.stringify(MANIFEST)}\n`)
+		await writeManifest(root, `${JSON.stringify(MANIFEST)}\n`)
 		await mkdir(join(root, 'i18n'), { recursive: true })
 		await writeFile(join(root, localeRelativePath('en-US')), '{"greeting":"Hello"}\n')
 		process.env.UIUX_WORKSPACE_ROOT = root

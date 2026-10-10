@@ -33,6 +33,7 @@ import { canonicalJsonBytes } from '../src/domain/canonical-json'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import type { ReviewThread } from '../src/domain/reviews/schema'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
+import { writeManifest } from './support/workspace-layout'
 
 const temporaryRoots: string[] = []
 const runningServers: ChildProcess[] = []
@@ -97,7 +98,6 @@ export const manifest = {
 async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; config?: unknown }> = []): Promise<{ root: string; persistence: FileNativePersistence }> {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-handoff-test-'))
 	temporaryRoots.push(root)
-	await mkdir(join(root, '.uiux'), { recursive: true })
 	await mkdir(join(root, 'node_modules', '@deviltea'), { recursive: true })
 
 	const rootModules = join(process.cwd(), 'node_modules')
@@ -110,7 +110,7 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 	await symlink(widgetVuePath, join(root, 'node_modules', '@deviltea', 'widget-vue')).catch(() => undefined)
 	await symlink(vuePath, join(root, 'node_modules', 'vue')).catch(() => undefined)
 
-	await writeFile(join(root, '.uiux', 'workspace.json'), JSON.stringify({
+	await writeManifest(root, JSON.stringify({
 		schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 		i18n: { defaultLocale: 'en-US' },
 		adapters,

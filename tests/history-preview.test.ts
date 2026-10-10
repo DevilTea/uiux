@@ -27,6 +27,7 @@ import { createHistoryStoreFactory, type HistoryStores } from '../src/server/his
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { STORED_CONTENT_SECURITY_POLICY } from '../src/server/stored-content-headers'
 import { bearer, provisionToken, scoped, sessionCookieFor, testMember } from './support/access'
+import { writeManifest } from './support/workspace-layout'
 
 /**
  * The version reads for Preview and the version blob route (issue #132, B9): Rule
@@ -234,8 +235,7 @@ describe('version reads for Preview across schema versions', () => {
 		const dir = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-preview-schema-')))
 		const home = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-preview-home-')))
 		cleanup.push(dir, home)
-		await mkdir(join(dir, '.uiux'), { recursive: true })
-		await writeFile(join(dir, workspaceRelativePath()), canonicalJsonBytes(MANIFEST))
+		await writeManifest(dir, canonicalJsonBytes(MANIFEST))
 		await mkdir(join(dir, 'views'), { recursive: true })
 		await writeFile(join(dir, viewRelativePath(VIEW_ID)), canonicalJsonBytes(view(VIEW_ID, 'Checkout')))
 		const persistence = new FileNativePersistence({ root: dir, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
