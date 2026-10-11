@@ -409,17 +409,40 @@ export function addMember(
 	return { file: next, result: member }
 }
 
+/** Keys to grant and keys to revoke, the administration wire's key change. */
+export type KeyChanges = Readonly<{ grant?: unknown; revoke?: unknown }>
+
+/**
+ * Keys to grant and to revoke, applied to the member's keys as the roster holds them now:
+ * `(current ∪ grant) − revoke`, as `uiux member set --grant/--revoke` does. The Members page sends
+ * these instead of a whole key set, so a change made meanwhile through the CLI or by another manager
+ * is not reverted (owner ruling 1 of 2026-10-11 on PR #191,
+ * https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18864075). Revoking a key the
+ * member does not hold changes nothing. Returns undefined when the keys stay as they are.
+ */
+function adjustedKeys(member: StoredMember, changes: KeyChanges & MemberAccessInput): string[] | undefined {
+	if (changes.grant === undefined && changes.revoke === undefined) return undefined
+	if (changes.keys !== undefined || changes.role !== undefined)
+		throw new AccessError('access.invalid_keys', 'Give either a key set or keys to grant and revoke, not both.')
+	const grant = changes.grant === undefined ? [] : normalizeKeys(changes.grant)
+	const revoke = changes.revoke === undefined ? [] : normalizeKeys(changes.revoke)
+	const both = grant.filter(key => revoke.includes(key))
+	if (both.length > 0) throw new AccessError('access.invalid_keys', `${keyList(both)} ${both.length > 1 ? 'are' : 'is'} both granted and revoked.`)
+	const keys = normalizeKeys([...member.keys, ...grant].filter(key => !revoke.includes(key)))
+	return sameKeys(keys, member.keys) ? undefined : keys
+}
+
 export function setMember(
 	file: AccessFile,
 	nickname: string,
-	changes: Readonly<{ nickname?: string; kind?: unknown } & MemberAccessInput>,
+	changes: Readonly<{ nickname?: string; kind?: unknown } & MemberAccessInput & KeyChanges>,
 ): Mutation<StoredMember> {
 	const member = requireMember(file, nickname)
 	// Rule 01a11485-ea75-7964-bc21-29aa78049abf: the kind is fixed at creation.
 	if (changes.kind !== undefined && changes.kind !== member.kind)
 		throw new AccessError('access.kind_immutable', 'A member\'s kind is fixed at creation and cannot be changed.')
 	let next: StoredMember = member
-	const keys = requestedKeys(member.kind, member.nickname, changes, member.keys)
+	const keys = adjustedKeys(member, changes) ?? requestedKeys(member.kind, member.nickname, changes, member.keys)
 	if (keys !== undefined) {
 		// Writing a member's keys stores them anew, so they must be storable even when unchanged.
 		assertStorableKeys({ nickname: member.nickname, kind: member.kind, keys })

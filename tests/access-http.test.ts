@@ -33,6 +33,7 @@ import sessionDeleteByIdRoute from '../server/api/access/sessions/[id].delete'
 import mcpAttemptsRoute from '../server/api/access/mcp-attempts.get'
 import { createAccessGuardHandler } from '../src/server/access/http'
 import { generateCredential } from '../src/server/access/credentials'
+import { runAccessCommand } from '../src/cli/access'
 import { createInvite, removeMember, revokeToken } from '../src/server/access/roster'
 import { AccessStore, accessStorePaths, resolveUiuxHome } from '../src/server/access/store'
 import { createLoopbackGuardHandler } from '../src/server/loopback-guard'
@@ -404,15 +405,20 @@ describe('member keys over the administration wire (issue #142, P5)', () => {
 		expect(roster.presets.map(preset => [preset.id, preset.name, preset.keys])).toEqual(BUILT_IN_ACCESS_PRESETS.map(preset => [preset.id, preset.name, preset.keys]))
 		for (const item of roster.members) expect(item).not.toHaveProperty('role')
 		expect(roster.members.find(item => item.nickname === 'kai')).toMatchObject({ keys: ['workspace.read', 'views.write'], label: { custom: true } })
-		// A preset's keys, sent as the page sends them, label the member with that preset.
-		expect(await (await patch(member.id, { keys: keysForRole('human', 'editor') })).json()).toMatchObject({ member: { label: { preset: { id: 'editor', name: 'Editor' } } } })
+		// The Editor preset applied on the page: the keys it lacks are granted, and the preset labels the member.
+		const grant = keysForRole('human', 'editor').filter(key => !member.keys.includes(key))
+		expect(await (await patch(member.id, { grant })).json()).toMatchObject({ member: { keys: keysForRole('human', 'editor'), label: { preset: { id: 'editor', name: 'Editor' } } } })
 		expect((await fetch(`${origin}/api/access/members/${member.id}`, { method: 'DELETE', headers: headers() })).status).toBe(200)
 	})
 
-	it('takes keys, not a role', async () => {
+	it('takes keys, not a role, and an edit takes keys to grant and revoke, not a whole key set', async () => {
 		expect(await (await add({ nickname: 'old', role: 'viewer' })).json()).toMatchObject({ code: 'malformed_payload' })
 		const owner = (await listed()).members.find(item => item.kind === 'human')!
 		expect((await patch(owner.id, { role: 'viewer' })).status).toBe(400)
+		expect(await (await patch(owner.id, { keys: [...PERMISSION_KEYS] })).json()).toMatchObject({ code: 'malformed_payload' })
+		const both = await patch(owner.id, { grant: ['views.write'], revoke: ['views.write'] })
+		expect(both.status).toBe(400)
+		expect(await both.json()).toMatchObject({ code: 'access.invalid_keys', message: expect.stringContaining('`views.write`') })
 	})
 
 	it('refuses a key outside the catalog, a humanOnly key for an Agent and a set lacking a requirement, naming the keys', async () => {
@@ -432,42 +438,92 @@ describe('member keys over the administration wire (issue #142, P5)', () => {
 		expect(incomplete.status).toBe(400)
 		expect(await incomplete.json()).toMatchObject({ code: 'access.key_requires', message: expect.stringContaining('`views.write` requires `workspace.read`') })
 		expect((await listed()).members.map(item => item.nickname)).not.toContain('nova')
+
+		// The same checks hold for the keys an edit grants and revokes.
+		const { member: lena } = await (await add({ nickname: 'lena', keys: keysForRole('human', 'viewer') })).json() as { member: WireMember }
+		expect(await (await patch(lena.id, { grant: ['future.capability'] })).json()).toMatchObject({ code: 'access.unknown_key', message: expect.stringContaining('`future.capability`') })
+		expect(await (await patch(lena.id, { grant: ['reviews.submit'] })).json()).toMatchObject({ code: 'access.key_requires', message: expect.stringContaining('`reviews.submit` requires `reviews.write`') })
+		const claude = (await listed()).members.find(item => item.nickname === 'claude')!
+		expect(await (await patch(claude.id, { grant: ['members.manage'] })).json()).toMatchObject({ code: 'access.key_human_only', message: expect.stringContaining('`members.manage`') })
+		expect((await listed()).members.find(item => item.id === lena.id)!.keys).toEqual(keysForRole('human', 'viewer'))
+		expect((await fetch(`${origin}/api/access/members/${lena.id}`, { method: 'DELETE', headers: headers() })).status).toBe(200)
 	})
 
 	it('refuses a change of kind with access.kind_immutable', async () => {
 		const claude = (await listed()).members.find(item => item.nickname === 'claude')!
-		const refused = await patch(claude.id, { kind: 'human', keys: keysForRole('human', 'owner') })
+		const refused = await patch(claude.id, { kind: 'human', grant: ['members.manage'] })
 		expect(refused.status).toBe(400)
 		expect(await refused.json()).toMatchObject({ code: 'access.kind_immutable' })
 		expect((await listed()).members.find(item => item.nickname === 'claude')).toMatchObject({ kind: 'agent', keys: keysForRole('agent', 'editor') })
 	})
 
-	it('keeps an unknown key the member holds when its keys are rewritten, and refuses a new one (Rules 01a11c09-b7ec and 01a128be-99df)', async () => {
+	it('keeps an unknown key the member holds when keys are granted, and refuses a new one (Rules 01a11c09-b7ec and 01a128be-99df)', async () => {
 		const { member } = await (await add({ nickname: 'ivy', keys: keysForRole('human', 'viewer') })).json() as { member: WireMember }
 		await writeStoredKeys('ivy', [...keysForRole('human', 'viewer'), 'future.capability'])
 		expect((await listed()).members.find(item => item.nickname === 'ivy')).toMatchObject({ keys: [...keysForRole('human', 'viewer'), 'future.capability'], label: { custom: true } })
-		// The Reviewer preset applied on the page: its keys plus the unknown key the member holds.
-		const applied = await patch(member.id, { keys: [...keysForRole('human', 'reviewer'), 'future.capability'] })
+		// The Reviewer preset applied on the page grants the keys it adds; the unknown key the member holds stays.
+		const grant = keysForRole('human', 'reviewer').filter(key => !keysForRole('human', 'viewer').includes(key))
+		const applied = await patch(member.id, { grant })
 		expect(applied.status).toBe(200)
 		expect((await applied.json() as { member: WireMember }).member.keys).toEqual([...keysForRole('human', 'reviewer'), 'future.capability'])
-		const added = await patch(member.id, { keys: [...keysForRole('human', 'reviewer'), 'future.capability', 'future.other'] })
+		const added = await patch(member.id, { grant: ['future.other'] })
 		expect(added.status).toBe(400)
 		expect(await added.json()).toMatchObject({ code: 'access.unknown_key', message: expect.stringContaining('`future.other`') })
-		// Unchecking a held unknown key removes it.
-		expect((await (await patch(member.id, { keys: keysForRole('human', 'reviewer') })).json() as { member: WireMember }).member.keys).toEqual(keysForRole('human', 'reviewer'))
+		// Unchecking a held unknown key revokes it.
+		expect((await (await patch(member.id, { revoke: ['future.capability'] })).json() as { member: WireMember }).member.keys).toEqual(keysForRole('human', 'reviewer'))
 		expect((await fetch(`${origin}/api/access/members/${member.id}`, { method: 'DELETE', headers: headers() })).status).toBe(200)
 	})
 
 	it('lets a manager drop members.manage while another person holds it, and refuses the last one (Rule 01a11485-eae3)', async () => {
 		const owner = (await listed()).members.find(item => item.kind === 'human' && item.keys.includes('members.manage'))!
 		const { member: lead } = await (await add({ nickname: 'lead', keys: [...PERMISSION_KEYS] })).json() as { member: WireMember }
-		const dropped = await patch(lead.id, { keys: keysForRole('human', 'editor') })
+		const dropped = await patch(lead.id, { revoke: ['members.manage'] })
 		expect(dropped.status).toBe(200)
-		const last = await patch(owner.id, { keys: keysForRole('human', 'editor') })
+		const last = await patch(owner.id, { revoke: ['members.manage'] })
 		expect(last.status).toBe(409)
 		expect(await last.json()).toMatchObject({ code: 'access.last_manager' })
 		expect((await listed()).members.find(item => item.id === owner.id)!.keys).toContain('members.manage')
 		expect((await fetch(`${origin}/api/access/members/${lead.id}`, { method: 'DELETE', headers: headers() })).status).toBe(200)
+	})
+
+	/** `uiux member set` run in-process against the same Workspace and `UIUX_HOME` as the server. */
+	async function cliMemberSet(...args: string[]): Promise<void> {
+		const err: string[] = []
+		const code = await runAccessCommand({ argv: ['member', 'set', ...args, '--workspace', root], env: { UIUX_HOME: resolveUiuxHome() }, stdout: () => {}, stderr: line => err.push(line) })
+		expect(code, err.join('\n')).toBe(0)
+	}
+
+	it('does not revert a CLI revoke when a page loaded before it saves an unrelated change (owner ruling 1 of 2026-10-11 on PR #191)', async () => {
+		const { member: lead } = await (await add({ nickname: 'lead2', keys: [...PERMISSION_KEYS] })).json() as { member: WireMember }
+		// The page shows lead2 with every key; meanwhile the CLI takes members.manage away.
+		const snapshot = (await listed()).members.find(item => item.id === lead.id)!
+		expect(snapshot.keys).toContain('members.manage')
+		await cliMemberSet('lead2', '--revoke', 'members.manage')
+		// The stale page then unchecks an unrelated key and renames lead2: it sends only that change.
+		const saved = await patch(lead.id, { revoke: ['locks.force-release'], nickname: 'lead-two' })
+		expect(saved.status).toBe(200)
+		const { member } = await saved.json() as { member: WireMember }
+		expect(member.nickname).toBe('lead-two')
+		expect(member.keys).not.toContain('members.manage')
+		expect(member.keys).not.toContain('locks.force-release')
+		expect(member.keys).toEqual(PERMISSION_KEYS.filter(key => key !== 'members.manage' && key !== 'locks.force-release'))
+		expect((await listed()).members.find(item => item.id === lead.id)!.keys).not.toContain('members.manage')
+		expect((await fetch(`${origin}/api/access/members/${lead.id}`, { method: 'DELETE', headers: headers() })).status).toBe(200)
+	})
+
+	it('does not remove a CLI grant when a page loaded before it saves an unrelated change', async () => {
+		const { member: rae } = await (await add({ nickname: 'rae', keys: keysForRole('human', 'viewer') })).json() as { member: WireMember }
+		const snapshot = (await listed()).members.find(item => item.id === rae.id)!
+		expect(snapshot.keys).not.toContain('views.write')
+		await cliMemberSet('rae', '--grant', 'views.write')
+		// The stale page grants reviews.write, or only renames rae: views.write stays either way.
+		const granted = await patch(rae.id, { grant: ['reviews.write'] })
+		expect(granted.status).toBe(200)
+		expect((await granted.json() as { member: WireMember }).member.keys).toEqual(expect.arrayContaining(['views.write', 'reviews.write']))
+		const renamed = await patch(rae.id, { nickname: 'rae-2' })
+		expect(renamed.status).toBe(200)
+		expect((await renamed.json() as { member: WireMember }).member).toMatchObject({ nickname: 'rae-2', keys: expect.arrayContaining(['views.write', 'reviews.write']) })
+		expect((await fetch(`${origin}/api/access/members/${rae.id}`, { method: 'DELETE', headers: headers() })).status).toBe(200)
 	})
 })
 
@@ -487,7 +543,7 @@ describe('Owner administration over the loopback cookie session', () => {
 		const mei = (await added.json() as { member: { id: string } }).member
 		expect((await fetch(`${origin}/api/access/members`, json({ nickname: 'bot', keys: keysForRole('human', 'owner'), kind: 'agent' }, headers))).status).toBe(400)
 		const owner = roster.members.find(member => member.nickname !== 'claude')!
-		const demote = await fetch(`${origin}/api/access/members/${owner.id}`, { method: 'PATCH', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ keys: keysForRole('human', 'viewer') }) })
+		const demote = await fetch(`${origin}/api/access/members/${owner.id}`, { method: 'PATCH', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ revoke: ['members.manage'] }) })
 		expect(demote.status).toBe(409)
 		expect(await demote.json()).toMatchObject({ code: 'access.last_manager' })
 

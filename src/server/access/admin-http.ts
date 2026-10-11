@@ -19,10 +19,8 @@ import { memberKeys } from './service'
  * origin or an `https` configured origin (Rule 01a12500-b105-7773-822f-359d4dcbd1da).
  */
 /**
- * A member's explicit key set (Rule 01a11c09-b85c-7d0b-a390-ca3dcd2e4a10). The Members page sends
- * the whole set it shows, so applying a preset there keeps the unknown keys the member holds (owner
- * ruling of 2026-10-11 on PR #189). The roster checks each name and refuses a new key outside the
- * catalog (Clause 01a128be-9a51-726b-b5d9-f73bace107c5).
+ * Permission key names (Rule 01a11c09-b85c-7d0b-a390-ca3dcd2e4a10). The roster checks each name and
+ * refuses a new key outside the catalog (Clause 01a128be-9a51-726b-b5d9-f73bace107c5).
  */
 const keysSchema = z.array(z.string())
 
@@ -32,9 +30,17 @@ const addMemberSchema = z.object({
 	kind: z.enum(MEMBER_KINDS).optional(),
 }).strict()
 
-/** `kind` is accepted so that a change of it is refused with `access.kind_immutable` (Clause 01a12928-6237-7c28-8652-0b129079329b). */
+/**
+ * An edit sends the keys to grant and the keys to revoke, never the whole set: the server applies
+ * them to the member's keys under the store lock, as `uiux member set` does, so a change made
+ * meanwhile through the CLI or by another manager is not reverted (owner ruling 1 of 2026-10-11 on
+ * PR #191, https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18864075). `kind` is
+ * accepted so that a change of it is refused with `access.kind_immutable` (Clause
+ * 01a12928-6237-7c28-8652-0b129079329b).
+ */
 const setMemberSchema = z.object({
-	keys: keysSchema.optional(),
+	grant: keysSchema.optional(),
+	revoke: keysSchema.optional(),
 	nickname: z.string().optional(),
 	kind: z.enum(MEMBER_KINDS).optional(),
 }).strict()

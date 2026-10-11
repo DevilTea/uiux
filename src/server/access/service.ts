@@ -410,7 +410,11 @@ export class AccessService {
 		return this.mutate<StoredMember>(file => addMember(file, input, new Date(this.now())))
 	}
 
-	setMember(memberId: string, changes: Readonly<{ role?: unknown; keys?: unknown; nickname?: string; kind?: unknown }>) {
+	/**
+	 * `grant` and `revoke` apply to the member's keys as read under the store's lock, so a concurrent
+	 * writer's change is kept. `keys` and `role` replace them; no surface sends those (in-process only).
+	 */
+	setMember(memberId: string, changes: Readonly<{ role?: unknown; keys?: unknown; grant?: unknown; revoke?: unknown; nickname?: string; kind?: unknown }>) {
 		return this.mutate<StoredMember>(file => setMember(file, nicknameOf(file, memberId), changes))
 	}
 
