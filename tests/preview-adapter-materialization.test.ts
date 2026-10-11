@@ -19,9 +19,8 @@ import {
 } from '../src/server/preview-bundler'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import { HUMAN_OWNER } from './support/access'
-import { v5Manifest, writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
+import { v5Manifest, writeCurrentWorkspace } from './support/workspace-layout'
 
 const temporaryRoots: string[] = []
 
@@ -614,7 +613,7 @@ export const manifest = {
 	})
 })
 
-describe('a schemaVersion 5 Workspace resolves its Adapters from the Product Kit (dormant)', () => {
+describe('a schemaVersion 5 Workspace resolves its Adapters from the Product Kit', () => {
 	const HOST_PACKAGES = [['@deviltea', 'widget-core'], ['@deviltea', 'widget-vue'], ['vue']] as const
 
 	/** Links the host's widget-core, widget-vue and vue into `<directory>/node_modules`, as a kit install would provide them. */

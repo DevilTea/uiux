@@ -80,7 +80,7 @@ export const V4_TEST_SCHEMA_POLICY: WorkspaceSchemaPolicy = defineWorkspaceSchem
 })
 
 /** A manifest as tests wrote it below `schemaVersion` 5: settings plus an optional `adapters` list. */
-export type TestWorkspaceSettings = Readonly<Record<string, unknown> & { adapters?: readonly WorkspaceAdapterSelection[] }>
+export type TestWorkspaceSettings = Readonly<Record<string, unknown> & { adapters?: readonly Readonly<{ moduleSpecifier: string; config?: unknown }>[] }>
 
 /**
  * Splits a test's Workspace settings into the current-schema manifest and the Product Kit file: from
@@ -90,7 +90,7 @@ export function currentWorkspaceFiles(settings: TestWorkspaceSettings = {}): Rea
 	const { adapters, ...rest } = settings
 	return {
 		manifest: currentManifest({ ...rest, schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION }) as WorkspaceManifest,
-		productKit: { ...emptyProductKit(), adapters: [...(adapters ?? [])] },
+		productKit: { ...emptyProductKit(), adapters: [...(adapters ?? [])] as WorkspaceAdapterSelection[] },
 	}
 }
 

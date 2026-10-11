@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type OutgoingHttpHeaders, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -39,7 +39,6 @@ import { AccessStore, accessStorePaths, resolveUiuxHome } from '../src/server/ac
 import { createLoopbackGuardHandler } from '../src/server/loopback-guard'
 import { LOOPBACK_ONLY_NETWORK, resolveNetworkConfig, setServerNetwork, type NetworkConfig } from '../src/server/network-access'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import { provisionToken } from './support/access'
 import { BUILT_IN_ACCESS_PRESETS, keysForRole, PERMISSION_KEYS } from '../src/application/access/keys'
 import { writeCurrentWorkspace } from './support/workspace-layout'

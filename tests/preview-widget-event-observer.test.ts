@@ -12,8 +12,7 @@ import { WidgetEventObserver, type WidgetEventReport } from '../src/preview/widg
 import { RuntimePreviewProtocolBridge, type PreviewWireMessage } from '../src/preview/protocol/bridge'
 import type { PreviewRuntimeBridge, PreviewRuntimeMountOptions } from '../src/preview/browser-runtime'
 import type { ViewResource } from '../src/domain/views/schema'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
-import { writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
+import { writeCurrentWorkspace } from './support/workspace-layout'
 
 /**
  * The runtime observer of Widget Event reporting (Part 2 decision group, decision 4): the

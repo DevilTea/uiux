@@ -27,8 +27,8 @@ import { connectMcp, scoped, testMember } from './support/access'
 import { currentManifest, V5_TEST_SCHEMA_POLICY, v5Manifest, writeManifest } from './support/workspace-layout'
 
 /**
- * The Product Kit authoring operations (issue #141, unit K5), dormant at `schemaVersion` 5 under the
- * injected `V5_TEST_SCHEMA_POLICY`: Clauses 01a11bb1-b15c-…, 01a11bb1-b35a-…, 01a11bb1-b3c2-…,
+ * The Product Kit authoring operations (issue #141, units K5 and K6) on a `schemaVersion` 5 Workspace,
+ * under `V5_TEST_SCHEMA_POLICY`, UIUX's own policy: Clauses 01a11bb1-b15c-…, 01a11bb1-b35a-…, 01a11bb1-b3c2-…,
  * 01a11bb1-b0f1-…, 01a11bb1-8d03-…, 01a11485-f769-… and 01a11485-f70a-…, Rules 01a11485-efb6-…,
  * 01a11bb1-a120-…, 01a11bb1-a2ac-… and 01a11bb1-a310-….
  */

@@ -8,7 +8,7 @@ import { createServer as createHttpServer } from 'node:http'
 import { chromium } from 'playwright'
 
 import { FileNativePersistence } from '../src/persistence'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createFormalCaptureService } from '../src/application/services/formal-capture'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
@@ -17,7 +17,7 @@ import { AGENT_EDITOR, provisionToken, sessionCookieFor } from './support/access
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
-import { writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
+import { writeCurrentWorkspace } from './support/workspace-layout'
 
 const temporaryRoots: string[] = []
 const runningServers: ChildProcess[] = []

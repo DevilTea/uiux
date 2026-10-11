@@ -1,6 +1,6 @@
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { createApp, createRouter, defineEventHandler, toNodeListener } from 'h3'
-import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type OutgoingHttpHeaders, type Server } from 'node:http'
 import { connect, type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -20,7 +20,6 @@ import {
 import { resolveNetworkConfig } from '../src/server/network-access'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { createAccessGuardHandler } from '../src/server/access/http'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import { provisionToken } from './support/access'
 import { writeCurrentWorkspace } from './support/workspace-layout'
 

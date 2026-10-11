@@ -33,7 +33,7 @@ import { canonicalJsonBytes } from '../src/domain/canonical-json'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import type { ReviewThread } from '../src/domain/reviews/schema'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
-import { writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
+import { writeCurrentWorkspace } from './support/workspace-layout'
 
 const temporaryRoots: string[] = []
 const runningServers: ChildProcess[] = []

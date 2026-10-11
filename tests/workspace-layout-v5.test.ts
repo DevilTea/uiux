@@ -36,11 +36,11 @@ function v4Manifest(overrides: Readonly<Record<string, unknown>> = {}): Record<s
 }
 
 /**
- * The dormant `schemaVersion` 5 layout (issue #141, unit K2): Clauses 01a1144e-531c-…, 01a11bb1-8d67-…,
+ * The `schemaVersion` 5 layout (issue #141, units K2 and K6): Clauses 01a1144e-531c-…, 01a11bb1-8d67-…,
  * 01a11bb1-8dcc-…, 01a11bb1-8e31-…, 01a11bb1-8e98-…, 01a11bb1-8efc-…, 01a1144e-5336-…, 01a1144e-538e-…,
  * 01a1144e-5508-…, 01a1144e-551f-…, 01a11a5e-1e0e-…, 01a11a5e-1eba-… and 01a11a5e-1fc4-…, Rule
- * 01a11bb1-9585-…. UIUX's current schema stays 4, so a v5 Workspace is exercised under an injected
- * policy (`V5_TEST_SCHEMA_POLICY`).
+ * 01a11bb1-9585-…. A v5 Workspace is exercised under `V5_TEST_SCHEMA_POLICY`, UIUX's own policy now
+ * that schemaVersion 5 is current.
  */
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'

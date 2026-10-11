@@ -238,8 +238,8 @@ describe('the keys a Workspace settings restore needs beyond its write key (#140
 describe('the keys a Product Kit restore needs beyond its write key (#139 owner ruling 2026-10-11, 1)', () => {
 	const KIT = { designSystems: ['@acme/ds'], adapters: [{ moduleSpecifier: './a.ts', config: { tone: 'warm' } }, { moduleSpecifier: 'b' }], styles: [], themes: {}, components: {}, widgets: {} }
 	/** The structural comparison of a version's Product Kit file (`from`) with the current one, as the dialog reads it. */
-	function compared(version: JsonValue | undefined, current: JsonValue | undefined) {
-		const diff = { type: 'structural' as const, changes: diffJson(version, current) }
+	function compared(version: unknown, current: unknown) {
+		const diff = { type: 'structural' as const, changes: diffJson(version as JsonValue | undefined, current as JsonValue | undefined) }
 		return { to: { id: 'current' as const, workspaceSchemaVersion: 5 }, changes: [{ kind: 'product-kit', key: 'product-kit', status: 'modified' as const, diff }] }
 	}
 
