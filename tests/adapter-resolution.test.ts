@@ -505,6 +505,16 @@ describe('the data boundary of a schemaVersion 5 Workspace root (only kit/ may h
 		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'views', 'x.mjs'), root)).toBe(true)
 	})
 
+	it('refuses ./kit/ when kit is a symbolic link to artifacts/, a directory outside the old-layout data directories', async () => {
+		const root = await v5Root(await makeRoot())
+		await put(join(root, 'artifacts', 'x.mjs'))
+		await symlink(join(root, 'artifacts'), join(root, 'kit'))
+		await expect(new NodeWorkspaceAdapterModuleResolver().resolve(root, './kit/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'artifacts', 'x.mjs'), root)).toBe(true)
+		// Followed through the link, kit/ would look like artifacts/ itself: only the lstat reader keeps it out.
+		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'artifacts', 'x.mjs'), root, statFileIdentity, statFileIdentity)).toBe(false)
+	})
+
 	it('decides kit/ membership by file identity', async () => {
 		const root = '/virtual/v5'
 		const identity = (dev: number, ino: number): FileIdentity => ({ dev: BigInt(dev), ino: BigInt(ino) })

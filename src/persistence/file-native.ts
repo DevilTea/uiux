@@ -231,8 +231,21 @@ export type DeleteIfRevisionResult<Refusal> =
 	| Readonly<{ status: 'not_found' }>
 	| Readonly<{ status: 'conflict'; currentRevision: ResourceRevision }>
 	| Readonly<{ status: 'refused'; refusal: Refusal }>
-/** A pending multi-file write: its changes and, outside the legacy layout, the layout it was written for (`layout` absent means legacy). */
-type TransactionJournal = Readonly<{ layout?: WorkspaceLayout['id']; changes: readonly Readonly<{ path: string; existed: boolean }>[] }>
+type JournalEntry = Readonly<{ path: string; existed: boolean }>
+/** A pending multi-file write, as recovery reads it back. */
+type TransactionJournal = Readonly<{ changes: readonly JournalEntry[] }>
+
+/**
+ * The bytes of `journal.json`. The legacy layout writes `{ changes }`, the format every UIUX build
+ * reads. Other layouts write `{ layout, entries }` and no `changes` array, so a build that predates
+ * layouts, which requires `changes`, fails its recovery and keeps the journal instead of applying it.
+ * The file keeps its name: a transaction directory without `journal.json` is discarded as never
+ * started.
+ */
+function encodeTransactionJournal(layout: WorkspaceLayout, entries: readonly JournalEntry[]): Buffer {
+	const journal = layout.id === 'legacy' ? { changes: entries } : { layout: layout.id, entries }
+	return Buffer.from(JSON.stringify(journal), 'utf8')
+}
 /** `schemaVersion` is the selected Workspace manifest version every canonical file is decoded under. */
 type JsonValidator = (resource: unknown, filename: string, schemaVersion: number) => readonly Diagnostic[]
 
@@ -872,8 +885,7 @@ export class FileNativePersistence {
 					await writeSyncedFile(backup, prior, true)
 				}
 			}
-			const journal: TransactionJournal = { ...(this.layout.id === 'legacy' ? {} : { layout: this.layout.id }), changes: records }
-			await writeSyncedFile(resolveWorkspacePath(this.root, `${transactionRelative}/journal.json`), Buffer.from(JSON.stringify(journal), 'utf8'), true)
+			await writeSyncedFile(resolveWorkspacePath(this.root, `${transactionRelative}/journal.json`), encodeTransactionJournal(this.layout, records), true)
 			journalWritten = true
 			await syncDirectory(transactionAbsolute)
 			for (let index = 0; index < ordered.length; index++) {
@@ -2413,12 +2425,16 @@ async function readJournalLayout(journalPath: string): Promise<string | undefine
 }
 
 function validateTransactionJournal(value: unknown, layout: WorkspaceLayout): TransactionJournal {
-	if (!isRecord(value) || !Array.isArray(value.changes))
+	if (!isRecord(value))
 		throw new TypeError('Persistence transaction journal has an invalid shape.')
 	if ((value.layout ?? 'legacy') !== layout.id)
 		throw new TypeError(`Persistence transaction journal was written for the ${String(value.layout ?? 'legacy')} layout, not ${layout.id}.`)
-	const changes: { path: string; existed: boolean }[] = []
-	for (const change of value.changes) {
+	// The legacy format is `{ changes }`; every other layout's is `{ layout, entries }` (`encodeTransactionJournal`).
+	const recorded = layout.id === 'legacy' ? value.changes : value.entries
+	if (!Array.isArray(recorded) || (layout.id === 'legacy' ? Object.hasOwn(value, 'entries') : Object.hasOwn(value, 'changes')))
+		throw new TypeError('Persistence transaction journal has an invalid shape.')
+	const changes: JournalEntry[] = []
+	for (const change of recorded) {
 		if (!isRecord(change) || typeof change.path !== 'string' || typeof change.existed !== 'boolean')
 			throw new TypeError('Persistence transaction journal contains an invalid entry.')
 		assertTransactionalPath(layout, change.path)

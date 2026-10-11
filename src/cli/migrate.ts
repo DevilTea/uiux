@@ -70,7 +70,7 @@ export async function runMigrateCommand(options: MigrateCommandOptions): Promise
 	// The entry check runs before any lock, server hold, recovery, read or write; its layout is where
 	// the server hold and every Workspace file are looked for.
 	const schemaPolicy = options.schemaPolicy ?? PRODUCT_WORKSPACE_SCHEMA_POLICY
-	const selection = checkWorkspaceSelection(root, schemaPolicy.currentVersion)
+	const selection = checkWorkspaceSelection(root, schemaPolicy)
 	if (!selection.ok) {
 		err(`uiux: ${selection.message}`)
 		return 2

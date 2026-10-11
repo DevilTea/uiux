@@ -151,7 +151,7 @@ async function requireWorkspace(root: string): Promise<string> {
 	try {
 		if (!(await stat(root)).isDirectory()) throw new Error('not a directory')
 		// The shared entry check, before any lock, store or Workspace file is touched.
-		selection = checkWorkspaceSelection(root, CURRENT_WORKSPACE_SCHEMA_VERSION)
+		selection = checkWorkspaceSelection(root, PRODUCT_WORKSPACE_SCHEMA_POLICY)
 		if (selection.ok) {
 			manifestPath = selection.layout.manifestPath
 			await stat(resolveWorkspacePath(root, manifestPath))
@@ -365,7 +365,7 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				// The old directory may already be gone; fall back to its nearest existing ancestor's real path.
 				const sourceRoot = realFuturePath(fromPath)
 				// The source gets the same entry check as the target before its lock is ever taken.
-				const sourceSelection = checkWorkspaceSelection(sourceRoot, CURRENT_WORKSPACE_SCHEMA_VERSION)
+				const sourceSelection = checkWorkspaceSelection(sourceRoot, PRODUCT_WORKSPACE_SCHEMA_POLICY)
 				if (!sourceSelection.ok) throw new AccessError('access.workspace_invalid', `The source ${sourceSelection.message}`)
 				if (sourceRoot === context.workspaceRoot) throw new AccessError('access.roster_exists', 'The source and target are the same Workspace.')
 				const source = await AccessStore.readRoster(context.home, sourceRoot)

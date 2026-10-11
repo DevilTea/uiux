@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 
 import { acquireServerHold, type AcquiredServerHold } from '../../src/persistence/server-hold'
 import { checkWorkspaceSelection } from '../../src/persistence/workspace-selection'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../../src/product/workspace-schema'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../../src/product/workspace-schema'
 import { AccessError } from '../../src/server/access/roster'
 import { installLogRedaction, writeUnredacted } from '../../src/server/access/redaction'
 import { getServerNetwork } from '../../src/server/network-access'
@@ -17,7 +17,7 @@ export default defineNitroPlugin((nitroApp) => {
 	let acquiredHold: AcquiredServerHold | undefined
 	if (process.env.UIUX_WORKSPACE_ROOT) {
 		// The layout entry check runs before the runtime opens anything: no lock, hold or recovery yet.
-		const selection = checkWorkspaceSelection(resolve(process.env.UIUX_WORKSPACE_ROOT), CURRENT_WORKSPACE_SCHEMA_VERSION)
+		const selection = checkWorkspaceSelection(resolve(process.env.UIUX_WORKSPACE_ROOT), PRODUCT_WORKSPACE_SCHEMA_POLICY)
 		if (!selection.ok) {
 			console.error(`uiux: ${selection.message}`)
 			process.exit(2)

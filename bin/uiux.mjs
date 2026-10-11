@@ -213,7 +213,7 @@ async function runDev(options) {
 		return
 	}
 	// The layout entry check, before the server starts (and so before any lock or server hold).
-	const selection = await withBundled('src/persistence/workspace-selection.ts', module => module.checkWorkspaceSelection(workspaceRoot, workspaceSchemaVersion))
+	const selection = await withBundled('src/cli/workspace-selection.ts', module => module.checkSelectedWorkspace(workspaceRoot))
 	if (!selection.ok) {
 		console.error(`uiux: ${selection.message}`)
 		process.exitCode = 2

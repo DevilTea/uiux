@@ -92,39 +92,66 @@ async function pendingJournal(transactionsDir: string, layout?: string): Promise
 	const directory = join(transactionsDir, id)
 	await mkdir(join(directory, 'backup', 'views'), { recursive: true })
 	await writeFile(join(directory, 'backup', viewRelativePath(VIEW_ID)), canonicalJsonBytes(view('Before')))
-	await writeFile(join(directory, 'journal.json'), JSON.stringify({ ...(layout ? { layout } : {}), changes: [{ path: viewRelativePath(VIEW_ID), existed: true }] }))
+	const entries = [{ path: viewRelativePath(VIEW_ID), existed: true }]
+	await writeFile(join(directory, 'journal.json'), JSON.stringify(layout ? { layout, entries } : { changes: entries }))
 	return join(directory, 'journal.json')
+}
+
+/**
+ * The shape check of `validateTransactionJournal` in builds that predate layouts (base 71c629f,
+ * `src/persistence/file-native.ts#L2238-L2251`); a throw there makes recovery fail and keep the journal.
+ */
+function preLayoutValidateJournal(value: unknown): void {
+	if (typeof value !== 'object' || value === null || Array.isArray(value) || !Array.isArray((value as { changes?: unknown }).changes))
+		throw new TypeError('Persistence transaction journal has an invalid shape.')
+	for (const change of (value as { changes: unknown[] }).changes) {
+		if (typeof change !== 'object' || change === null || typeof (change as { path?: unknown }).path !== 'string' || typeof (change as { existed?: unknown }).existed !== 'boolean')
+			throw new TypeError('Persistence transaction journal contains an invalid entry.')
+	}
 }
 
 describe('checkWorkspaceSelection', () => {
 	it('accepts each layout with its own manifest, and an uninitialized directory', async () => {
-		expect(checkWorkspaceSelection(await legacyWorkspace(), 4)).toEqual({ ok: true, layout: LEGACY_LAYOUT })
-		expect(checkWorkspaceSelection((await relocatedWorkspace()).root, 4)).toEqual({ ok: true, layout: V5_LAYOUT })
-		expect(checkWorkspaceSelection(await makeRoot(), 4)).toEqual({ ok: true, layout: LEGACY_LAYOUT })
+		expect(checkWorkspaceSelection(await legacyWorkspace(), PRODUCT_WORKSPACE_SCHEMA_POLICY)).toEqual({ ok: true, layout: LEGACY_LAYOUT })
+		expect(checkWorkspaceSelection((await relocatedWorkspace()).root, V5_TEST_SCHEMA_POLICY)).toEqual({ ok: true, layout: V5_LAYOUT })
+		expect(checkWorkspaceSelection(await makeRoot(), PRODUCT_WORKSPACE_SCHEMA_POLICY)).toEqual({ ok: true, layout: LEGACY_LAYOUT })
+		expect(checkWorkspaceSelection(await makeRoot(), V5_TEST_SCHEMA_POLICY)).toEqual({ ok: true, layout: V5_LAYOUT })
 		// The old-layout manifest decides when another tool's workspace.json sits beside it.
 		const both = await legacyWorkspace()
 		await writeFile(join(both, 'workspace.json'), '{"version":2,"projects":{}}\n')
-		expect(checkWorkspaceSelection(both, 4)).toEqual({ ok: true, layout: LEGACY_LAYOUT })
+		expect(checkWorkspaceSelection(both, PRODUCT_WORKSPACE_SCHEMA_POLICY)).toEqual({ ok: true, layout: LEGACY_LAYOUT })
 	})
 
-	it('refuses an old-layout .uiux/ directory, a foreign workspace.json, a mismatched schemaVersion and a v5 root without product-kit.json', async () => {
+	it('refuses each mismatched selection with a reason a caller can act on', async () => {
 		const legacy = await legacyWorkspace()
-		expect(checkWorkspaceSelection(join(legacy, '.uiux'), 4)).toEqual({ ok: false, message: expect.stringContaining(`select its parent ${legacy}`) })
+		expect(checkWorkspaceSelection(join(legacy, '.uiux'), PRODUCT_WORKSPACE_SCHEMA_POLICY)).toEqual({ ok: false, reason: 'legacy_metadata_dir', message: expect.stringContaining(`select its parent ${legacy}`) })
 
 		const foreign = await makeRoot()
 		await writeFile(join(foreign, 'workspace.json'), '{"version":2,"projects":{}}\n')
-		expect(checkWorkspaceSelection(foreign, 4)).toEqual({ ok: false, message: expect.stringContaining('is not a UIUX Workspace manifest') })
+		expect(checkWorkspaceSelection(foreign, PRODUCT_WORKSPACE_SCHEMA_POLICY)).toEqual({ ok: false, reason: 'foreign_manifest', message: expect.stringContaining('is not a UIUX Workspace manifest') })
 
 		const misplaced = await makeRoot()
 		await writeManifest(misplaced, currentManifest(), V5_LAYOUT)
-		expect(checkWorkspaceSelection(misplaced, 4)).toEqual({ ok: false, message: expect.stringContaining('is a schemaVersion 4 manifest') })
+		expect(checkWorkspaceSelection(misplaced, PRODUCT_WORKSPACE_SCHEMA_POLICY)).toEqual({ ok: false, reason: 'version_layout_mismatch', message: expect.stringContaining('is a schemaVersion 4 manifest') })
 
 		const { parent } = await relocatedWorkspace()
-		expect(checkWorkspaceSelection(parent, 4)).toEqual({ ok: false, message: expect.stringContaining(`whose Workspace root is ${join(parent, '.uiux')}`) })
+		expect(checkWorkspaceSelection(parent, V5_TEST_SCHEMA_POLICY)).toEqual({ ok: false, reason: 'relocated_parent', message: expect.stringContaining(`whose Workspace root is ${join(parent, '.uiux')}`) })
 
 		const { root: withoutKit } = await relocatedWorkspace()
 		await rm(join(withoutKit, 'product-kit.json'))
-		expect(checkWorkspaceSelection(withoutKit, 5)).toEqual({ ok: false, message: expect.stringContaining('no product-kit.json') })
+		expect(checkWorkspaceSelection(withoutKit, V5_TEST_SCHEMA_POLICY)).toEqual({ ok: false, reason: 'missing_product_kit', message: expect.stringContaining('no product-kit.json') })
+	})
+
+	it('names an unrecognized schemaVersion as unsupported instead of suggesting another directory', async () => {
+		// UIUX's own policy does not recognize 5, so the parent of a relocated root is not pointed at its child.
+		const { parent } = await relocatedWorkspace()
+		const refused = checkWorkspaceSelection(parent, PRODUCT_WORKSPACE_SCHEMA_POLICY)
+		expect(refused).toEqual({ ok: false, reason: 'unknown_schema', message: expect.stringContaining('schemaVersion 5, which this UIUX build does not support') })
+		expect(refused.ok === false && refused.message).not.toMatch(/; select /)
+
+		const future = await makeRoot()
+		await writeManifest(future, { ...currentManifest(), schemaVersion: 99 }, LEGACY_LAYOUT)
+		expect(checkWorkspaceSelection(future, V5_TEST_SCHEMA_POLICY)).toEqual({ ok: false, reason: 'unknown_schema', message: expect.stringContaining('schemaVersion 99, which this UIUX build does not support') })
 	})
 })
 
@@ -178,7 +205,11 @@ describe('recovery refuses a journal written for another layout', () => {
 				},
 			})
 			await persistence.withLock(() => persistence.applyFileTransaction([{ path: viewRelativePath(VIEW_ID), bytes: canonicalJsonBytes(view('A')) }], 'asset'))
-			expect(seen).toEqual([{ ...(expected ? { layout: expected } : {}), changes: [{ path: viewRelativePath(VIEW_ID), existed: false }] }])
+			const entries = [{ path: viewRelativePath(VIEW_ID), existed: false }]
+			expect(seen).toEqual([expected ? { layout: expected, entries } : { changes: entries }])
+			// The journal check of a build that predates layouts (base 71c629f) refuses the v5 format, so its recovery keeps the journal.
+			if (expected) expect(() => preLayoutValidateJournal(seen[0])).toThrow()
+			else expect(() => preLayoutValidateJournal(seen[0])).not.toThrow()
 		}
 	})
 })
