@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { checkProductKitAgainstKit, maskHostPaths, scanImportSpecifiers } from '../src/adapters/kit-registry'
 import { createLeaseManager, type LeaseManager } from '../src/application/access/leases'
 import { productKitChangeKeys } from '../src/application/access/policy'
 import type { MemberPrincipal } from '../src/application/access/principal'
@@ -48,9 +49,10 @@ async function write(path: string, content: string): Promise<void> {
 }
 
 /** A v5 Workspace whose kit project declares two packages and holds a plain-module Adapter and three component files. */
-async function v5Fixture(kit: ProductKit = KIT) {
-	const root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-product-kit-')))
-	roots.push(root)
+async function v5Fixture(kit: ProductKit = KIT, parent?: string) {
+	const root = parent ? join(parent, 'workspace') : await realpath(await mkdtemp(join(tmpdir(), 'uiux-product-kit-')))
+	if (parent) await mkdir(root)
+	else roots.push(root)
 	await writeManifest(root, canonicalJsonBytes(v5Manifest()), V5_LAYOUT)
 	await writeFile(join(root, 'product-kit.json'), canonicalJsonBytes(kit))
 	await write(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', private: true, dependencies: { '@acme/design-system': '^1.0.0', '@acme/uiux-adapter': '^2.0.0' } }))
@@ -490,5 +492,156 @@ describe('the service guard of the Product Kit operations', () => {
 		const command = { expectedRevision: await revision(ctx.app), designSystems: ['@evil/design-system'], adapters: ['./uiux.js'] }
 		expect(await ctx.app.composeProductKit(command, () => refusal)).toBe(refusal)
 		expect(await ctx.app.composeProductKit(command, () => undefined)).toMatchObject({ status: 'invalid', diagnostics: [expect.objectContaining({ code: 'product_kit.package_undeclared' })] })
+	})
+})
+
+describe('the import scan (Rule 01a11bb1-a310)', () => {
+	it('reads static, side-effect and dynamic imports, re-exports and require calls', () => {
+		const text = [
+			'import a from \'./a\'',
+			'import {',
+			'  b,',
+			'  c as d,',
+			'} from "./b.js"',
+			'import \'./side.css\'',
+			'export * from \'./c\'',
+			'export { e } from \'./e\'',
+			'const f = await import( \'./f\' )',
+			'const g = require(\'./g\')',
+			'const from = \'./not-an-import\'',
+		].join('\n')
+		expect(scanImportSpecifiers(text)).toEqual(['./a', './b.js', './side.css', './c', './e', './f', './g'])
+	})
+
+	it('scans a pathological 1 MB file well under a second', async () => {
+		const size = 1024 * 1024
+		const fill = (unit: string, tail = '') => unit.repeat(Math.floor((size - tail.length) / unit.length)) + tail
+		for (const text of [fill('import '), fill('export '), fill('export { a, ', 'from \'./x\''), fill('import(\'', ''), fill('from '), fill('import \'a', '\'')]) {
+			const started = performance.now()
+			scanImportSpecifiers(text)
+			expect(performance.now() - started, text.slice(0, 20)).toBeLessThan(500)
+		}
+
+		// Through the registry check, with the 1 MB file as a component's entry.
+		const ctx = await v5Fixture()
+		await write(join(ctx.root, 'kit', 'src', 'huge.ts'), fill('import '))
+		const next: ProductKit = { ...KIT, components: { huge: { files: ['src/huge.ts'], layer: 'product' } } }
+		const started = performance.now()
+		const checked = await checkProductKitAgainstKit({ root: ctx.root, codeDirectoryName: 'kit', next })
+		expect(performance.now() - started).toBeLessThan(1000)
+		expect(checked).toEqual({ refusals: [], findings: [] })
+	})
+})
+
+describe('kit project containment', () => {
+	/** A directory outside the Workspace holding a whole kit project, with a package version to look for. */
+	async function outsideKit(): Promise<string> {
+		const outside = await realpath(await mkdtemp(join(tmpdir(), 'uiux-product-kit-outside-')))
+		roots.push(outside)
+		await write(join(outside, 'package.json'), JSON.stringify({ name: 'outside', dependencies: { '@acme/design-system': '^9.0.0', '@outside/secret': '^1.0.0' } }))
+		await write(join(outside, 'node_modules', '@acme', 'design-system', 'package.json'), JSON.stringify({ name: '@acme/design-system', version: '9.9.9' }))
+		await write(join(outside, 'src', 'button.ts'), 'export const button = 1\n')
+		await write(join(outside, 'src', 'secret.ts'), 'export const secret = 1\n')
+		await write(join(outside, 'secret.ts'), 'export const secret = 1\n')
+		return outside
+	}
+
+	const registry = { button: { files: ['src/button.ts'], layer: 'product' as const } }
+	const present = { probe: { files: ['src/button.ts'], layer: 'product' as const } }
+	const missing = { probe: { files: ['src/absent.ts'], layer: 'product' as const } }
+	const shape = (outcome: { body: unknown }) => JSON.stringify(outcome.body).replaceAll('absent.ts', 'button.ts')
+
+	for (const [label, link] of [
+		['kit/ is a symbolic link out of the Workspace', async (root: string, outside: string) => {
+			await rm(join(root, 'kit'), { recursive: true })
+			await symlink(outside, join(root, 'kit'))
+		}],
+		['kit/src/ is a symbolic link out of the Workspace', async (root: string, outside: string) => {
+			await rm(join(root, 'kit', 'src'), { recursive: true })
+			await symlink(join(outside, 'src'), join(root, 'kit', 'src'))
+		}],
+	] as const) {
+		it(`answers as for a missing file when ${label}, and reads nothing there`, async () => {
+			const outside = await outsideKit()
+			const ctx = await v5Fixture({ ...KIT, components: registry })
+			await link(ctx.root, outside)
+			const read = await ctx.app.readProductKit()
+			const text = JSON.stringify(read)
+			expect(read?.findings).toContainEqual(expect.objectContaining({ code: 'kit.component_invalid', path: '/components/button/files/0' }))
+			expect(text).not.toContain('9.9.9')
+			expect(text).not.toContain(outside)
+
+			const session = http(ctx.app, HUMAN_EDITOR)
+			const outsideFile = await updateComponentRegistryForHttp(session, { expectedRevision: await revision(ctx.app), components: present, widgets: {} })
+			const absent = await updateComponentRegistryForHttp(session, { expectedRevision: await revision(ctx.app), components: missing, widgets: {} })
+			expect(outsideFile).toMatchObject({ status: 400, body: { code: 'kit.component_invalid' } })
+			expect(shape(outsideFile)).toBe(shape(absent))
+			// A package only the outside kit/package.json declares is not declared.
+			const secret = await composeProductKitForHttp(session, { expectedRevision: await revision(ctx.app), designSystems: ['@outside/secret'], adapters: ['./uiux.js'] })
+			expect(secret).toMatchObject({ status: 400, body: { diagnostics: [expect.objectContaining({ code: 'product_kit.package_undeclared' })] } })
+		})
+	}
+
+	it('answers as for a missing file for a link inside kit/src/ out of the Workspace, and the import scan does not follow it', async () => {
+		const outside = await outsideKit()
+		const ctx = await v5Fixture()
+		await symlink(join(outside, 'secret.ts'), join(ctx.root, 'kit', 'src', 'leak.ts'))
+		await symlink(join(outside, 'nothing.ts'), join(ctx.root, 'kit', 'src', 'dangling.ts'))
+		await symlink(join(outside, 'src'), join(ctx.root, 'kit', 'src', 'out'))
+		const session = http(ctx.app, HUMAN_EDITOR)
+		const answers: string[] = []
+		for (const file of ['src/leak.ts', 'src/dangling.ts', 'src/out/secret.ts', 'src/out/nothing.ts', 'src/absent.ts']) {
+			const outcome = await updateComponentRegistryForHttp(session, { expectedRevision: await revision(ctx.app), components: { a: { files: [file], layer: 'product' } }, widgets: {} })
+			expect(outcome, file).toMatchObject({ status: 400, body: { code: 'kit.component_invalid' } })
+			answers.push(JSON.stringify(outcome.body).replaceAll(file, '<file>'))
+		}
+		expect(new Set(answers).size).toBe(1)
+
+		// An import through the link names nothing, as an import of a missing file.
+		await write(join(ctx.root, 'kit', 'src', 'probe.ts'), 'import { secret } from \'./out/secret\'\nimport { nothing } from \'./out/nothing\'\nexport const probe = secret + nothing\n')
+		const registered = await updateComponentRegistryForHttp(session, { expectedRevision: await revision(ctx.app), components: { probe: { files: ['src/probe.ts'], layer: 'product' } }, widgets: {} })
+		expect(registered, JSON.stringify(registered.body)).toMatchObject({ status: 200, body: { findings: [] } })
+	})
+
+	it('reports a Design System package linked out of the Workspace without its version, and never looks above the Workspace', async () => {
+		const outside = await outsideKit()
+		const ctx = await v5Fixture()
+		await rm(join(ctx.root, 'kit', 'node_modules', '@acme', 'design-system'), { recursive: true })
+		await symlink(join(outside, 'node_modules', '@acme', 'design-system'), join(ctx.root, 'kit', 'node_modules', '@acme', 'design-system'))
+		const read = await ctx.app.readProductKit()
+		expect(read?.packages).toEqual([{ package: '@acme/design-system', status: 'resolved', linked: true }])
+		expect(JSON.stringify(read)).not.toContain('9.9.9')
+
+		// A package installed only in a directory enclosing the Workspace is missing.
+		const parent = await realpath(await mkdtemp(join(tmpdir(), 'uiux-product-kit-parent-')))
+		roots.push(parent)
+		await write(join(parent, 'node_modules', '@acme', 'design-system', 'package.json'), JSON.stringify({ name: '@acme/design-system', version: '7.7.7' }))
+		const nested = await v5Fixture(KIT, parent)
+		await rm(join(nested.root, 'kit', 'node_modules'), { recursive: true })
+		const nestedRead = await nested.app.readProductKit()
+		expect(nestedRead?.packages).toEqual([{ package: '@acme/design-system', status: 'missing' }])
+	})
+})
+
+describe('host paths in the Product Kit Resource', () => {
+	it('masks absolute paths and file URLs, keeping the Workspace root as <workspace>', () => {
+		const root = '/srv/acme/workspace'
+		expect(maskHostPaths(`Cannot find package 'x' imported from ${root}/kit/.uiux-adapter-resolution.mjs`, [root])).toBe('Cannot find package \'x\' imported from <workspace>/kit/.uiux-adapter-resolution.mjs')
+		expect(maskHostPaths('Package subpath \'.\' is not defined by "exports" in /home/someone/node_modules/x/package.json imported from file:///home/someone/a.mjs', [root])).toBe('Package subpath \'.\' is not defined by "exports" in <path> imported from <path>')
+		expect(maskHostPaths('at (C:\\Users\\someone\\x.js) and \\\\server\\share\\y.js', [root])).toBe('at (<path>) and <path>')
+		expect(maskHostPaths('kit/package.json is not a regular file.', [root])).toBe('kit/package.json is not a regular file.')
+	})
+
+	it('names no host path outside the Workspace in an Adapter\'s resolution failure', async () => {
+		const parent = await realpath(await mkdtemp(join(tmpdir(), 'uiux-product-kit-parent-')))
+		roots.push(parent)
+		// The declared Adapter package is not installed in kit/, so Node resolution finds the one above the Workspace, whose exports refuse it.
+		await write(join(parent, 'node_modules', '@acme', 'uiux-adapter', 'package.json'), JSON.stringify({ name: '@acme/uiux-adapter', version: '2.0.0', exports: { './other': './other.js' } }))
+		const ctx = await v5Fixture({ ...KIT, adapters: [{ moduleSpecifier: '@acme/uiux-adapter' }] }, parent)
+		const read = await ctx.app.readProductKit()
+		expect(read?.adapters).toEqual([expect.objectContaining({ moduleSpecifier: '@acme/uiux-adapter', status: 'failed', message: expect.stringContaining('<path>') })])
+		const text = JSON.stringify(read)
+		expect(text).not.toContain(parent)
+		expect(text).not.toContain(tmpdir())
 	})
 })

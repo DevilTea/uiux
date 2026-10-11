@@ -1,9 +1,8 @@
-import { lstat, readFile, realpath } from 'node:fs/promises'
-import { dirname, join, relative, sep } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { lstat, readFile } from 'node:fs/promises'
+import { join, relative, sep } from 'node:path'
 
 import { NodeWorkspaceAdapterModuleResolver } from '../../adapters/resolution'
-import { checkProductKitAgainstKit } from '../../adapters/kit-registry'
+import { checkProductKitAgainstKit, containedRealPath, locateKitProject, maskHostPaths, type KitProject } from '../../adapters/kit-registry'
 import {
 	PRODUCT_KIT_RESOURCE_KEY,
 	PRODUCT_KIT_SCHEMA_VERSION,
@@ -156,7 +155,7 @@ export function createProductKitAuthoringService(persistence: FileNativePersiste
 			const refused = guard?.({ current: currentKit.value, next })
 			if (refused !== undefined) return refused
 
-			const checked = await checkProductKitAgainstKit({ kitDirectory: kit.directory, codeDirectoryName: kit.name, current: currentKit.value, next })
+			const checked = await checkProductKitAgainstKit({ root: persistence.root, codeDirectoryName: kit.name, current: currentKit.value, next })
 			if (checked.refusals.length > 0) {
 				const registry = checked.refusals.some(item => item.code === 'kit.component_invalid')
 				return { status: 'invalid', key: KEY, ...(registry ? { code: 'kit.component_invalid' } : {}), diagnostics: checked.refusals }
@@ -228,49 +227,41 @@ export function createProductKitAuthoringService(persistence: FileNativePersiste
 		let adapters: ProductKitAdapterResolution[] = []
 		let packages: ProductKitPackage[] = []
 		if (validation.ok) {
-			const checked = await checkProductKitAgainstKit({ kitDirectory: kit.directory, codeDirectoryName: kit.name, next: validation.value })
+			const checked = await checkProductKitAgainstKit({ root: persistence.root, codeDirectoryName: kit.name, next: validation.value })
 			findings.push(...checked.refusals, ...checked.findings)
-			adapters = await resolveAdapters(validation.value.adapters)
-			packages = await Promise.all(validation.value.designSystems.map(name => resolvePackage(kit.directory, name)))
+			const project = await locateKitProject(persistence.root, kit.name)
+			adapters = await resolveAdapters(project, validation.value.adapters)
+			packages = await Promise.all(validation.value.designSystems.map(name => resolvePackage(project, name)))
 		}
 		return { kind: 'product-kit', key: KEY, resource, revision: read.revision, diagnostics: read.diagnostics, build: { state: 'none' }, adapters, packages, findings }
 	}
 
-	async function resolveAdapters(entries: readonly WorkspaceAdapterSelection[]): Promise<ProductKitAdapterResolution[]> {
+	async function resolveAdapters(project: KitProject, entries: readonly WorkspaceAdapterSelection[]): Promise<ProductKitAdapterResolution[]> {
 		const resolver = new NodeWorkspaceAdapterModuleResolver({ layout: persistence.layout })
-		const kit = kitLocation()!
-		const realKit = await realpath(kit.directory).catch(() => kit.directory)
+		const roots = [...new Set([project.realRoot, persistence.root])]
 		const results: ProductKitAdapterResolution[] = []
 		for (const entry of entries) {
 			try {
 				const resolved = await resolver.resolve(persistence.root, entry.moduleSpecifier)
-				const inKit = relative(realKit, resolved.resolvedPath)
+				const inKit = project.directory ? relative(project.directory, resolved.resolvedPath) : '..'
 				const path = inKit !== '' && !inKit.startsWith('..') && !inKit.startsWith(sep) ? inKit.split(sep).join('/') : undefined
+				// A module that resolves outside the Workspace (a linked or an ancestor's package) is
+				// reported without the package name and version found there.
+				const inWorkspace = await containedRealPath(project.realRoot, resolved.resolvedPath) !== undefined
 				results.push({
 					moduleSpecifier: entry.moduleSpecifier,
 					status: 'resolved',
 					// A host path is never reported: only a path inside the kit project.
 					...(entry.moduleSpecifier.startsWith('./') && path ? { path } : {}),
-					...(resolved.packageName ? { packageName: resolved.packageName } : {}),
-					...(resolved.packageVersion ? { packageVersion: resolved.packageVersion } : {}),
+					...(inWorkspace && resolved.packageName ? { packageName: resolved.packageName } : {}),
+					...(inWorkspace && resolved.packageVersion ? { packageVersion: resolved.packageVersion } : {}),
 				})
 			}
 			catch (error) {
-				results.push({ moduleSpecifier: entry.moduleSpecifier, status: 'failed', message: await withoutHostPaths(error instanceof Error ? error.message : String(error)) })
+				results.push({ moduleSpecifier: entry.moduleSpecifier, status: 'failed', message: maskHostPaths(error instanceof Error ? error.message : String(error), roots) })
 			}
 		}
 		return results
-	}
-
-	/** A message with the Workspace root's host path replaced, since the Resource never names one. */
-	async function withoutHostPaths(message: string): Promise<string> {
-		const roots = new Set([persistence.root, await realpath(persistence.root).catch(() => persistence.root)])
-		let result = message
-		for (const root of roots) {
-			result = result.split(pathToFileURL(root).href).join('<workspace>')
-			result = result.split(root).join('<workspace>')
-		}
-		return result
 	}
 
 	return Object.freeze({ composeProductKit, updateProductKit, updateComponentRegistry, readProductKit })
@@ -293,32 +284,42 @@ export function composeAdapters(current: readonly WorkspaceAdapterSelection[], s
 }
 
 /**
- * An external package as Node module resolution finds it from the kit project: the first
- * `node_modules/<name>/package.json` in `kit/` or one of its ancestors. `linked` marks a package
- * directory reached through a symbolic link (Clause 01a11bb1-8b6e-7185-b0ac-cb84c3fcc24a).
+ * An external package as Node module resolution finds it inside the Workspace: the first
+ * `node_modules/<name>/package.json` in `kit/` or the Workspace root. `linked` marks a package
+ * directory reached through a symbolic link (Clause 01a11bb1-8b6e-7185-b0ac-cb84c3fcc24a). A link
+ * whose target lies outside the Workspace, or does not resolve, is reported as `linked` with no
+ * version: nothing outside the Workspace is read or told apart.
  */
-async function resolvePackage(kitDirectory: string, name: string): Promise<ProductKitPackage> {
-	let directory = kitDirectory
-	for (;;) {
-		const packageDirectory = join(directory, 'node_modules', ...name.split('/'))
-		const manifest = await readFile(join(packageDirectory, 'package.json'), 'utf8').catch(() => undefined)
-		if (manifest !== undefined) {
-			let version: string | undefined
-			try {
-				const parsed: unknown = JSON.parse(manifest)
-				if (isRecord(parsed) && typeof parsed.version === 'string') version = parsed.version
+async function resolvePackage(project: KitProject, name: string): Promise<ProductKitPackage> {
+	if (!project.directory) return { package: name, status: 'missing' }
+	const segments = name.split('/')
+	for (const directory of [project.directory, project.realRoot]) {
+		let linked = false
+		let present = true
+		for (let index = 0; index <= segments.length; index++) {
+			const info = await lstat(join(directory, 'node_modules', ...segments.slice(0, index))).catch(() => undefined)
+			if (!info) {
+				present = false
+				break
 			}
-			catch { /* an unreadable package.json names no version */ }
-			const segments = name.split('/')
-			let linked = false
-			for (let index = 1; index <= segments.length; index++) {
-				const info = await lstat(join(directory, 'node_modules', ...segments.slice(0, index))).catch(() => undefined)
-				if (info?.isSymbolicLink()) linked = true
-			}
-			return { package: name, status: 'resolved', ...(version ? { version } : {}), linked }
+			if (info.isSymbolicLink()) linked = true
 		}
-		const parent = dirname(directory)
-		if (parent === directory) return { package: name, status: 'missing' }
-		directory = parent
+		if (!present) continue
+		const real = await containedRealPath(project.realRoot, join(directory, 'node_modules', ...segments))
+		if (real === undefined) {
+			if (linked) return { package: name, status: 'resolved', linked: true }
+			continue
+		}
+		const manifestPath = await containedRealPath(project.realRoot, join(real, 'package.json'))
+		const manifest = manifestPath === undefined ? undefined : await readFile(manifestPath, 'utf8').catch(() => undefined)
+		if (manifest === undefined) continue
+		let version: string | undefined
+		try {
+			const parsed: unknown = JSON.parse(manifest)
+			if (isRecord(parsed) && typeof parsed.version === 'string') version = parsed.version
+		}
+		catch { /* an unreadable package.json names no version */ }
+		return { package: name, status: 'resolved', ...(version ? { version } : {}), linked }
 	}
+	return { package: name, status: 'missing' }
 }

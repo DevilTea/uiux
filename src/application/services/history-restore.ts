@@ -12,7 +12,6 @@ import { validateViewResource, type ViewResource } from '../../domain/views/sche
 import { validateWorkspaceManifest, type WorkspaceManifest } from '../../domain/workspace/schema'
 import { validateProductKit, type ProductKit } from '../../domain/product-kit/schema'
 import { checkProductKitAgainstKit } from '../../adapters/kit-registry'
-import { join } from 'node:path'
 import { PersistenceError } from '../../persistence/errors'
 import { canonicalJsonBytes, revisionForResourceFiles, upgradeSnapshotInMemory, type FileNativePersistence } from '../../persistence/file-native'
 import { HostHistoryError } from '../../persistence/history/host-store'
@@ -194,7 +193,7 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 		if (!codeDirectoryName) return undefined
 		const currentKit = validateProductKit(current)
 		const checked = await checkProductKitAgainstKit({
-			kitDirectory: join(persistence.root, codeDirectoryName),
+			root: persistence.root,
 			codeDirectoryName,
 			next,
 			...(currentKit.ok ? { current: currentKit.value } : {}),
