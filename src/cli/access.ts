@@ -8,7 +8,7 @@ import { isMemberKind, type MemberKind } from '../application/access/principal'
 import { FileNativePersistence } from '../persistence/file-native'
 import { detectWorkspaceLayout, layoutForSchemaVersion, resolveLayoutDirectory, resolveWorkspacePath, type WorkspaceLayout } from '../persistence/paths'
 import type { WorkspaceSchemaPolicy } from '../persistence/schema-policy'
-import { checkWorkspaceSelection, isRelocatedSourceOf, type WorkspaceSelection } from '../persistence/workspace-selection'
+import { checkWorkspaceSelection, isRelocatedSourceOf, selectWorkspace } from '../persistence/workspace-selection'
 import { readActiveServerHold } from '../persistence/server-hold'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 import { generateHint } from '../server/access/credentials'
@@ -36,7 +36,8 @@ import { AccessStore, assertHomeOutsideWorkspace, assertReplacementKeepsManager,
 
 /**
  * `uiux member | token | invite | session | access copy` (accepted identity decision 9). Every
- * command takes a required `--workspace <dir>` and acts only on that Workspace's host-local roster
+ * command takes an optional `--workspace <dir>` (otherwise the Workspace is discovered from the
+ * current directory) and acts only on the selected Workspace's host-local roster
  * under `$UIUX_HOME/workspaces/<sha256(realpath)>/access.json`. They work while a server runs: the
  * server re-reads the store on its next request.
  */
@@ -177,10 +178,9 @@ export async function runAccessCommand(options: AccessCommandOptions): Promise<n
 		if (!spec) throw new UsageError(`Unknown command: uiux ${[command, sub].filter(Boolean).join(' ')}.`)
 		const parsed = parse(rest, ['workspace', ...spec.values], spec.flags, spec.removed)
 		const workspaceArg = parsed.values.get('workspace')
-		if (!workspaceArg) throw new UsageError(`uiux ${command} ${sub} requires --workspace <dir>.`)
 		if (spec.positionals >= 0 && parsed.positionals.length !== spec.positionals)
 			throw new UsageError(`uiux ${command} ${sub} takes ${spec.positionals === 0 ? 'no positional arguments' : `exactly ${spec.positionals} positional argument${spec.positionals > 1 ? 's' : ''}`}.`)
-		const workspaceRoot = await requireWorkspace(resolve(cwd, workspaceArg), schemaPolicy)
+		const workspaceRoot = await requireWorkspace(workspaceArg, cwd, schemaPolicy)
 		const context: Context = { home, workspaceRoot, parsed, out, err, now, cwd, env, schemaPolicy }
 		return await spec.run(context)
 	}
@@ -219,23 +219,27 @@ type CommandSpec = Readonly<{
 	run: (context: Context) => Promise<number>
 }>
 
-async function requireWorkspace(root: string, schemaPolicy: WorkspaceSchemaPolicy): Promise<string> {
-	let manifestPath = layoutForSchemaVersion(CURRENT_WORKSPACE_SCHEMA_VERSION).manifestPath
-	let selection: WorkspaceSelection | undefined
+/**
+ * The selected Workspace's real root: `--workspace <dir>` or the discovered Workspace
+ * (`selectWorkspace`), after the shared entry check, before any lock, store or Workspace file is
+ * touched. A directory without a manifest is refused, so a typo never creates a stray roster
+ * (Clause 01a1144e-5632-75ed-baa5-03bb2d36de47).
+ */
+async function requireWorkspace(workspace: string | undefined, cwd: string, schemaPolicy: WorkspaceSchemaPolicy): Promise<string> {
+	const selection = selectWorkspace({ ...(workspace === undefined ? {} : { workspace }), cwd }, schemaPolicy)
+	if (!selection.ok) {
+		if (selection.reason === 'not_found' || selection.reason === 'not_a_directory')
+			throw new AccessError('access.workspace_invalid', `${resolve(cwd, workspace ?? '.')} is not an initialized UIUX Workspace (no ${layoutForSchemaVersion(CURRENT_WORKSPACE_SCHEMA_VERSION).manifestPath}). Run uiux init first.`)
+		throw new AccessError('access.workspace_invalid', selection.message)
+	}
+	const manifestPath = selection.layout.manifestPath
 	try {
-		if (!(await stat(root)).isDirectory()) throw new Error('not a directory')
-		// The shared entry check, before any lock, store or Workspace file is touched.
-		selection = checkWorkspaceSelection(root, schemaPolicy)
-		if (selection.ok) {
-			manifestPath = selection.layout.manifestPath
-			await stat(resolveWorkspacePath(root, manifestPath))
-		}
+		await stat(resolveWorkspacePath(selection.root, manifestPath))
 	}
 	catch {
-		throw new AccessError('access.workspace_invalid', `${root} is not an initialized UIUX Workspace (no ${manifestPath}). Run uiux init --workspace <dir> first.`)
+		throw new AccessError('access.workspace_invalid', `${selection.root} is not an initialized UIUX Workspace (no ${manifestPath}). Run uiux init first.`)
 	}
-	if (!selection.ok) throw new AccessError('access.workspace_invalid', selection.message)
-	return workspaceRealRoot(root)
+	return workspaceRealRoot(selection.root)
 }
 
 /** The layout of the Workspace at `root`, detected from where its manifest is. */

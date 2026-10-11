@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join, resolve } from 'node:path'
@@ -91,11 +91,7 @@ function parseOptionalWorkspaceArgument(args) {
 	return args.length === 2 && args[0] === '--workspace' && args[1] && !args[1].startsWith('--') ? { workspace: args[1] } : undefined
 }
 
-function parseWorkspaceArgument(args) {
-	return args.length === 2 && args[0] === '--workspace' && args[1] ? args[1] : undefined
-}
-
-/** `dev --workspace <dir> [--host <address>] [--origin <url>]...`; undefined for invalid usage. */
+/** `dev [--workspace <dir>] [--host <address>] [--origin <url>]...`; undefined for invalid usage. */
 function parseDevArguments(args) {
 	let workspace
 	let host
@@ -109,15 +105,15 @@ function parseDevArguments(args) {
 		else if (name === '--origin') origins.push(value)
 		else return undefined
 	}
-	return workspace === undefined ? undefined : { workspace, host, origins }
+	return { workspace, host, origins }
 }
 
 function parseMigrateArguments(args) {
 	const dryRun = args.includes('--dry-run')
 	const rest = args.filter(arg => arg !== '--dry-run')
 	if (args.length - rest.length > 1) return undefined
-	const workspace = parseWorkspaceArgument(rest)
-	return workspace ? { workspace, dryRun } : undefined
+	const options = parseOptionalWorkspaceArgument(rest)
+	return options ? { workspace: options.workspace, dryRun } : undefined
 }
 
 /**
@@ -153,8 +149,9 @@ async function withBundled(entry, use) {
 }
 
 async function runMigrate(options) {
-	await runBundled('src/cli/migrate.ts', ({ runMigrateCommand }) => runMigrateCommand({
-		workspaceRoot: resolve(process.cwd(), options.workspace),
+	await runBundled('src/cli/migrate.ts', ({ runSelectedMigrateCommand }) => runSelectedMigrateCommand({
+		...(options.workspace === undefined ? {} : { workspace: options.workspace }),
+		cwd: process.cwd(),
 		dryRun: options.dryRun,
 	}))
 }
@@ -168,28 +165,15 @@ async function runInit(workspace) {
 }
 
 async function runDev(options) {
-	const workspaceRoot = resolve(process.cwd(), options.workspace)
-	let workspaceStat
-	try {
-		workspaceStat = await stat(workspaceRoot)
-	}
-	catch {
-		console.error(`uiux: Workspace root does not exist: ${workspaceRoot}`)
-		process.exitCode = 2
-		return
-	}
-	if (!workspaceStat.isDirectory()) {
-		console.error(`uiux: Workspace root is not a directory: ${workspaceRoot}`)
-		process.exitCode = 2
-		return
-	}
-	// The layout entry check, before the server starts (and so before any lock or server hold).
-	const selection = await withBundled('src/cli/workspace-selection.ts', module => module.checkSelectedWorkspace(workspaceRoot))
+	// `--workspace <dir>` or discovery, then the layout entry check, before the server starts (and so
+	// before any lock or server hold).
+	const selection = await withBundled('src/cli/workspace-selection.ts', module => module.selectCliWorkspace(options.workspace, process.cwd()))
 	if (!selection.ok) {
 		console.error(`uiux: ${selection.message}`)
 		process.exitCode = 2
 		return
 	}
+	const workspaceRoot = selection.root
 
 	// UIUX serves plain HTTP only; an https origin is served by a TLS-terminating front end.
 	if (process.env.NITRO_SSL_CERT || process.env.NITRO_SSL_KEY) {
@@ -274,7 +258,7 @@ if (extraArgs.length === 0 && (command === undefined || command === '--help' || 
 } else if (command === 'dev') {
 	const options = parseDevArguments(extraArgs)
 	if (!options) {
-		console.error('uiux: dev requires --workspace <dir> and accepts --host <address> and repeated --origin <url>.')
+		console.error('uiux: dev accepts --workspace <dir>, --host <address> and repeated --origin <url>.')
 		process.exitCode = 2
 	} else {
 		await runDev(options)
@@ -282,7 +266,7 @@ if (extraArgs.length === 0 && (command === undefined || command === '--help' || 
 } else if (command === 'migrate') {
 	const options = parseMigrateArguments(extraArgs)
 	if (!options) {
-		console.error('uiux: migrate requires --workspace <dir> and accepts --dry-run.')
+		console.error('uiux: migrate accepts --workspace <dir> and --dry-run.')
 		process.exitCode = 2
 	} else {
 		try {

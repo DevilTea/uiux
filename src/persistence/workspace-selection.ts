@@ -1,4 +1,4 @@
-import { lstatSync, readFileSync, realpathSync } from 'node:fs'
+import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 
 import { isRecord } from '../domain/validation'
@@ -72,6 +72,66 @@ export function checkWorkspaceSelection(root: string, policy: Pick<WorkspaceSche
 		return { ok: true, layout: V5_LAYOUT }
 	}
 	return { ok: true, layout: layoutForSchemaVersion(policy.currentVersion) }
+}
+
+/** Why no Workspace directory could be selected at all, before the entry check. */
+export type WorkspaceLocationRefusalReason = 'not_found' | 'not_a_directory' | 'not_discovered'
+
+export type SelectedWorkspace =
+	| Readonly<{ ok: true; root: string; layout: WorkspaceLayout; discovered: boolean }>
+	| Readonly<{ ok: false; reason: WorkspaceSelectionRefusalReason | WorkspaceLocationRefusalReason; message: string }>
+
+/**
+ * Selects the Workspace a command acts on, then runs the entry check on it.
+ *
+ * - With `--workspace <dir>` (Clause 01a1144e-5584-7101-98c0-dc3cbadbacdf), `<dir>` is the root, or
+ *   the parent of a `schemaVersion` 5 root in its `.uiux/` child, which is then selected. An
+ *   explicitly selected old-layout `.uiux/` directory is refused, naming its parent (Clause
+ *   01a126c7-7c2a-7bb7-b4db-c86fa04ac9e9).
+ * - Without it, discovery (Clause 01a11bb1-9847-751f-a1ba-943ad111a02a) selects the `.uiux/` child of
+ *   the nearest directory, from `cwd` upward, that has a `.uiux/workspace.json`; when that manifest's
+ *   `schemaVersion` is below 5, the `.uiux/` directory is an old-layout metadata directory and its
+ *   parent is selected (Clause 01a11bb1-98a9-7881-8fa0-ee1e355a3a9a). The mapping comes before the
+ *   entry check (owner ruling
+ *   https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18857361).
+ *
+ * Like the entry check, it reads only directory entries and manifests.
+ */
+export function selectWorkspace(input: Readonly<{ workspace?: string; cwd: string }>, policy: Pick<WorkspaceSchemaPolicy, 'currentVersion' | 'recognizedVersions'>): SelectedWorkspace {
+	if (input.workspace === undefined) return discoverWorkspace(resolve(input.cwd), policy)
+	const directory = resolve(input.cwd, input.workspace)
+	let isDirectory: boolean
+	try { isDirectory = statSync(directory).isDirectory() }
+	catch { return refuseLocation('not_found', `Workspace root does not exist: ${directory}`) }
+	if (!isDirectory) return refuseLocation('not_a_directory', `Workspace root is not a directory: ${directory}`)
+	const selection = checkWorkspaceSelection(directory, policy)
+	if (!selection.ok && selection.reason === 'relocated_parent') {
+		const child = join(directory, LEGACY_LAYOUT.metadataDir)
+		return withSelection(child, checkWorkspaceSelection(child, policy), false)
+	}
+	return withSelection(directory, selection, false)
+}
+
+function discoverWorkspace(cwd: string, policy: Pick<WorkspaceSchemaPolicy, 'currentVersion' | 'recognizedVersions'>): SelectedWorkspace {
+	for (let directory = cwd; ; directory = dirname(directory)) {
+		const metadata = join(directory, LEGACY_LAYOUT.metadataDir)
+		const manifest = join(metadata, V5_LAYOUT.manifestPath)
+		if (exists(manifest)) {
+			const version = manifestVersion(manifest)
+			const root = version !== undefined && layoutForSchemaVersion(version) === LEGACY_LAYOUT ? directory : metadata
+			return withSelection(root, checkWorkspaceSelection(root, policy), true)
+		}
+		if (dirname(directory) === directory) break
+	}
+	return refuseLocation('not_discovered', `No UIUX Workspace found: no directory from ${cwd} upward has a ${LEGACY_LAYOUT.manifestPath}. Pass --workspace <dir>, or create one with uiux init.`)
+}
+
+function withSelection(root: string, selection: WorkspaceSelection, discovered: boolean): SelectedWorkspace {
+	return selection.ok ? { ok: true, root, layout: selection.layout, discovered } : selection
+}
+
+function refuseLocation(reason: WorkspaceLocationRefusalReason, message: string): SelectedWorkspace {
+	return { ok: false, reason, message }
 }
 
 /** The old layout's data directories, which `uiux.v4-to-v5` moves into `.uiux/`. */
