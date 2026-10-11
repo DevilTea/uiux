@@ -144,7 +144,7 @@ function roleMatrixAllows(principal: Principal, operation: AccessOperation): boo
  */
 type ParityCase = Readonly<{ label: string; operation: AccessOperation; decide: (principal: Principal) => ScopeDenied | undefined }>
 
-const RESTORABLE_KINDS = ['view', 'flow', 'locale', 'asset', 'workspace'] as const
+const RESTORABLE_KINDS = ['view', 'flow', 'locale', 'asset', 'workspace', 'product-kit'] as const
 
 const PARITY_CASES: readonly ParityCase[] = [
 	// An acquire always names at least one resource, so it is decided per requested kind below.
@@ -181,8 +181,8 @@ describe('parity: role-derived keys decide as the role matrix did', () => {
 				if ((denied === undefined) !== before) changed.push(`${id}: ${before ? 'allowed' : 'refused'} → ${denied ? 'refused' : 'allowed'}`)
 			}
 		}
-		// 47 operations, 7 lease acquires, 6 restores and 1 settings adapters change, for 16 members and the system credential.
-		expect(compared).toBe(61 * 17)
+		// 47 operations, 7 lease acquires, 7 restores and 1 settings adapters change, for 16 members and the system credential.
+		expect(compared).toBe(62 * 17)
 		expect(changed.sort()).toEqual([...INTENDED_CHANGES].sort())
 	})
 

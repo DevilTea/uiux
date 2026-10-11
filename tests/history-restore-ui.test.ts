@@ -41,10 +41,10 @@ describe('the restore gate', () => {
 		expect(restoreSourceVersion(gate({ canAuthor: false }))).toBeUndefined()
 	})
 
-	it('is offered for the restorable kinds only: never a Review thread, a Product Kit, access presets or an unknown kind', () => {
-		for (const kind of ['view', 'flow', 'locale', 'asset', 'workspace'])
+	it('is offered for the restorable kinds only: never a Review thread, access presets or an unknown kind', () => {
+		for (const kind of ['view', 'flow', 'locale', 'asset', 'workspace', 'product-kit'])
 			expect(restoreSourceVersion(gate({ resource: { kind, status: 'modified' } })), kind).toBe(SELECTED)
-		for (const kind of ['review', 'product-kit', 'access-presets', 'widget', ''])
+		for (const kind of ['review', 'access-presets', 'widget', ''])
 			expect(restoreSourceVersion(gate({ resource: { kind, status: 'modified' } })), kind).toBeUndefined()
 		// The Workbench and the restore service share one kind list.
 		expect(SERVICE_KINDS).toBe(RESTORABLE_RESOURCE_KINDS)

@@ -498,9 +498,17 @@ export function createScopedWorkspaceSession(
 			const target = isValidLeaseAddress({ kind, key }) ? { kind: kind as LockableKind, key } : undefined
 			const versionId: unknown = command.versionId
 			// #140 owner ruling 2026-10-10, 1: a `workspace` restore that changes `adapters` needs `product-kit.compose` too.
-			const guard: RestoreGuard<AccessRefusal> = change => change.kind === 'workspace'
-				? adapterChangeRefusal(change.current, change.next, keys => authorizeRestore(principal, change.kind, keys), key || 'history')
-				: undefined
+			// Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa: a `product-kit` restore needs the keys of what it
+			// changes, so one that changes `designSystems` or the Adapter specifiers needs `product-kit.compose`.
+			const guard: RestoreGuard<AccessRefusal> = (change) => {
+				if (change.kind === 'workspace')
+					return adapterChangeRefusal(change.current, change.next, keys => authorizeRestore(principal, change.kind, keys), key || 'history')
+				if (change.kind === 'product-kit') {
+					const denied = authorizeRestore(principal, change.kind, productKitChangeKeys(change.current, change.next))
+					return denied ? refusalFromScope(key || 'history', denied) : undefined
+				}
+				return undefined
+			}
 			return write('restoreResourceVersion', key || 'history', target, () => app.restoreResourceVersion(command, guard), [], isFullUuid(versionId) ? { restoredFrom: versionId } : {})
 		},
 

@@ -7,8 +7,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createLeaseManager, type LeaseManager } from '../src/application/access/leases'
 import { productKitChangeKeys } from '../src/application/access/policy'
 import type { MemberPrincipal } from '../src/application/access/principal'
+import { createHistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
+import type { HostVersionRecord } from '../src/domain/history/schema'
 import { emptyProductKit, type ProductKit } from '../src/domain/product-kit/schema'
+import { createHistoryStoreFactory } from '../src/server/history-stores'
 import { canonicalJsonBytes, FileNativePersistence, V5_LAYOUT } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import {
@@ -342,6 +345,83 @@ describe('the product-kit edit lease (Rule 01a11485-efb6)', () => {
 		expect(leases.list()).toEqual([])
 		// Acquiring the lease needs product-kit.write (Rule 01a11c09-c125).
 		expect(http(ctx.app, COMPOSER_ONLY, leases).acquireLeases({ resources: [{ kind: 'product-kit', key: 'product-kit' }] })).toMatchObject({ status: 'blocked', requiredKeys: ['product-kit.write'] })
+	})
+})
+
+describe('Product Kit history and restore (Clauses 01a11a5e-216d and 01a11bb1-b35a, Rule 01a11c09-c648)', () => {
+	const clock = (): HistoryRecorderClock => ({ now: () => Date.parse('2026-10-11T00:00:00.000Z'), setTimeout: () => Symbol('timer'), clearTimeout: () => undefined })
+	const RESTORER = testMember({ nickname: 'rhea', kind: 'human', credential: 'session', keys: ['workspace.read', 'history.read', 'product-kit.source.read', 'product-kit.write', 'history.restore'] })
+
+	async function historyFixture() {
+		const base = await v5Fixture()
+		const home = join(await realpath(await mkdtemp(join(tmpdir(), 'uiux-product-kit-home-'))), 'home')
+		roots.push(dirname(home))
+		const history = createHistoryStoreFactory({ workspaceRoot: base.root, persistence: base.persistence, home: () => home })
+		const recorder = createHistoryRecorder({ persistence: base.persistence, stores: () => history.open(), clock: clock(), log: () => undefined })
+		const app = createWorkspaceApplicationSession(base.persistence, { history, historyBoundary: () => recorder })
+		const started = await recorder.start()
+		return { ...base, app, history, recorder, baseline: started.baseline! }
+	}
+
+	it('records each operation as a write event, and restores the Product Kit only with the keys of what the restore changes', async () => {
+		const ctx = await historyFixture()
+		const mcp = await connectMcp(ctx.app, AGENT)
+		try {
+			const composed = await mcp.client.callTool({ name: 'compose_product_kit', arguments: { expectedRevision: await revision(ctx.app), designSystems: [], adapters: ['./uiux.js', '@acme/uiux-adapter'] } })
+			expect(composed.isError, JSON.stringify(composed.structuredContent)).not.toBe(true)
+		}
+		finally { await mcp.close() }
+		expect(await updateComponentRegistryForHttp(http(ctx.app, HUMAN_EDITOR), { expectedRevision: await revision(ctx.app), components: { button: { files: ['src/button.ts'], layer: 'product' } }, widgets: {} })).toMatchObject({ status: 200 })
+		await ctx.recorder.stop()
+		const versions = (await (await ctx.history.open())!.host.listVersions()).records as HostVersionRecord[]
+		expect(versions.flatMap(version => version.events.map(event => `${event.operation}:${event.source}`))).toEqual(['composeProductKit:mcp', 'updateComponentRegistry:workbench'])
+
+		const current = await revision(ctx.app)
+		const restore = { versionId: ctx.baseline, resource: { kind: 'product-kit', key: 'product-kit' }, expectedRevision: current }
+		// The baseline holds the other Adapter list and designSystems, so the restore composes.
+		expect(await http(ctx.app, RESTORER).restoreResourceVersion(restore)).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['product-kit.compose'] })
+		// history.restore never stands in for the kind's write key.
+		const noWrite = testMember({ nickname: 'hal', kind: 'human', credential: 'session', keys: ['workspace.read', 'history.read', 'history.restore', 'product-kit.compose'] })
+		expect(await http(ctx.app, noWrite).restoreResourceVersion(restore)).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['product-kit.write'] })
+		expect(await revision(ctx.app)).toBe(current)
+
+		const restored = await http(ctx.app, HUMAN_EDITOR).restoreResourceVersion(restore)
+		expect(restored).toMatchObject({ status: 'updated', kind: 'product-kit', key: 'product-kit', restoredFrom: ctx.baseline })
+		expect(JSON.parse(await readFile(ctx.kitPath, 'utf8'))).toEqual(KIT)
+	})
+
+	it('decides a restore\'s compose check on the file it replaces, even when a composition lands between authorization and the write', async () => {
+		const ctx = await historyFixture()
+		const styled = await ctx.app.updateProductKit({ expectedRevision: await revision(ctx.app), adapters: KIT.adapters as never, styles: ['./dist/kit.css'], themes: {} })
+		if (styled.status !== 'updated') throw new Error(JSON.stringify(styled))
+		const restore = { versionId: ctx.baseline, resource: { kind: 'product-kit', key: 'product-kit' }, expectedRevision: styled.revision as string }
+
+		// The concurrent composition lands after the scoped session authorized the restore and before the service reads the file.
+		const racing: WorkspaceApplicationSession = {
+			...ctx.app,
+			restoreResourceVersion: (async (command, guard) => {
+				const composed = await ctx.app.composeProductKit({ expectedRevision: styled.revision, designSystems: ['@acme/design-system'], adapters: ['@acme/uiux-adapter'] })
+				if (composed.status !== 'updated') throw new Error(JSON.stringify(composed))
+				return ctx.app.restoreResourceVersion({ ...command, expectedRevision: composed.revision }, guard)
+			}) as WorkspaceApplicationSession['restoreResourceVersion'],
+		}
+		expect(await http(racing, RESTORER).restoreResourceVersion(restore)).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['product-kit.compose'] })
+		expect(JSON.parse(await readFile(ctx.kitPath, 'utf8')).adapters).toEqual([{ moduleSpecifier: '@acme/uiux-adapter' }])
+
+		// Without the race, the same restore changes only styles, which product-kit.write allows.
+		const control = await historyFixture()
+		const controlStyled = await control.app.updateProductKit({ expectedRevision: await revision(control.app), adapters: KIT.adapters as never, styles: ['./dist/kit.css'], themes: {} })
+		if (controlStyled.status !== 'updated') throw new Error('control')
+		expect(await http(control.app, RESTORER).restoreResourceVersion({ ...restore, versionId: control.baseline, expectedRevision: controlStyled.revision })).toMatchObject({ status: 'updated' })
+	})
+
+	it('refuses to restore a Product Kit that no longer matches the kit project', async () => {
+		const ctx = await historyFixture()
+		await rm(join(ctx.root, 'kit', 'package.json'))
+		const composed = await ctx.app.composeProductKit({ expectedRevision: await revision(ctx.app), designSystems: [], adapters: ['./uiux.js'] })
+		if (composed.status !== 'updated') throw new Error(JSON.stringify(composed))
+		const outcome = await http(ctx.app, HUMAN_EDITOR).restoreResourceVersion({ versionId: ctx.baseline, resource: { kind: 'product-kit', key: 'product-kit' }, expectedRevision: composed.revision })
+		expect(outcome).toMatchObject({ status: 'invalid', code: 'history.restore_invalid_content', diagnostics: [expect.objectContaining({ code: 'product_kit.package_undeclared', path: '/designSystems/0' })] })
 	})
 })
 
