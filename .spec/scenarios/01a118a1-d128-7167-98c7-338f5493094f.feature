@@ -6,6 +6,7 @@ Feature: Access and roster
   # Test: code@47a571a `tests/access-cli.test.ts#L66` "adds, lists, changes and removes members of one Workspace roster". https://github.com/DevilTea/uiux/blob/47a571afb0c5e4bdd2a708b4170d4cecbab032f7/tests/access-cli.test.ts#L66
   # Test: code@0e85300 `tests/access-roster-v2.test.ts#L253` "keeps the last human manager through a roster replacement, and lets a roster without one be replaced". https://github.com/DevilTea/uiux/blob/0e853000c38bcaa0d77c949a8d8aea50555985dd/tests/access-roster-v2.test.ts#L253
   # Test: code@0e85300 `tests/access-cli.test.ts#L216` "refuses an access copy --replace that would drop the target's last human manager, before copying anything". https://github.com/DevilTea/uiux/blob/0e853000c38bcaa0d77c949a8d8aea50555985dd/tests/access-cli.test.ts#L216
+  # Test: code@becc67d `tests/access-cli.test.ts#L515` "grants and revokes keys with member set, keeping the invariants (Rules 01a11c09-b932, 01a11485-ea91)". https://github.com/DevilTea/uiux/blob/becc67dff71c9fb6f31c48729e4a2c030e73ac6c/tests/access-cli.test.ts#L515
   @spec:id:01a118a1-d128-7e3e-bbe9-ffb29b33b7dc
   @spec:demonstrates:01a11485-eae3-7080-8f02-da27fc260e09
   @spec:demonstrates:01a114ec-ea2d-7f54-97d1-f981d48795fb
