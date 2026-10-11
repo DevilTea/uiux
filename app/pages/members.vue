@@ -1,22 +1,31 @@
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref } from 'vue'
-import { useI18n } from '#imports'
+import { computed, h, onMounted, reactive, ref, shallowRef } from 'vue'
+import { navigateTo, useI18n } from '#imports'
 import type { DropdownMenuItem, TableColumn } from '@nuxt/ui'
-import type { AccessRole, MemberKind } from '../../src/application/access/principal'
+import { keysOfPreset, missingRequirements } from '../../src/application/access/keys'
+import type { LabelPreset, MemberLabel } from '../../src/application/access/labels'
+import type { MemberKind } from '../../src/application/access/principal'
 import { useAccess } from '../composables/useAccess'
 import { useWorkbenchFeedback } from '../composables/useWorkbenchFeedback'
 import { useWorkbenchFormat } from '../composables/useWorkbenchFormat'
 import { copyText } from '../utils/copy-text'
-import { describeFetchError } from '../utils/fetch-error'
+import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
 import { memberInitials } from '../utils/member-initials'
+import { keysNoHumanHolds, orderedKeys } from '../utils/member-keys'
+import { memberLabelText } from '../utils/member-label'
+import MemberKeyEditor from '../components/access/MemberKeyEditor.vue'
+import WbErrorDescription from '../components/workbench/WbErrorDescription.vue'
 import WorkbenchPage from '../components/workbench/WorkbenchPage.vue'
 
 /**
  * Members (accepted identity decision 12): the served Workspace's roster, for a holder of `members.manage` on a
  * loopback origin or an `https` configured origin (Rule 01a11485-eb86-7a69-bf1b-70d492ee3be4).
- * Tokens are revealed once at creation; invites are single-use links.
+ * Each member is listed with its kind, label, key count, Tokens and sessions (Rule
+ * 01a11c09-ba13-71f1-8194-898b221f6c8a), and its keys are edited in the key checklist (Rule
+ * 01a11c09-ba80-7bef-96fe-4a4bae3ab528). Tokens are revealed once at creation; invites are single-use links.
  */
-type MemberRow = Readonly<{ id: string; nickname: string; kind: MemberKind; role: AccessRole; createdAt: string; activeTokens: number; activeSessions: number }>
+type MemberRow = Readonly<{ id: string; nickname: string; kind: MemberKind; createdAt: string; activeTokens: number; activeSessions: number; keys: readonly string[]; label: MemberLabel }>
+type Roster = Readonly<{ workspaceRoot: string; hint: string; members: MemberRow[]; presets: LabelPreset[] }>
 type TokenRow = Readonly<{ id: string; member: string; memberId: string; label: string; createdAt: string; expiresAt: string | null; lastUsedAt: string | null; active: boolean }>
 type SessionRow = Readonly<{ id: string; member: string; userAgent: string; lastSeenAt: string; expiresAt: string; current: boolean }>
 type Attempts = Readonly<{ total: number; recent: readonly Readonly<{ at: string; userAgent: string }>[] }>
@@ -29,7 +38,7 @@ const access = useAccess()
 const feedback = useWorkbenchFeedback()
 const fmt = useWorkbenchFormat()
 
-const roster = ref<{ workspaceRoot: string; hint: string; members: MemberRow[] }>()
+const roster = ref<Roster>()
 const tokens = ref<TokenRow[]>([])
 const sessions = ref<SessionRow[]>([])
 const attempts = ref<Attempts>({ total: 0, recent: [] })
@@ -38,16 +47,15 @@ const loadError = ref('')
 /** This origin does not serve roster administration (an `http` network origin, Rule 01a12500-b105-7773-822f-359d4dcbd1da). */
 const adminOriginRefused = ref(false)
 
-const ROLES: readonly AccessRole[] = ['owner', 'editor', 'reviewer', 'viewer']
-const roleItems = (kind: MemberKind) => ROLES.filter(role => kind === 'human' || role !== 'owner').map(role => ({ label: t(`access.role.${role}`), value: role }))
 const kindItems = computed(() => (['human', 'agent'] as const).map(kind => ({ label: t(`access.kind.${kind}`), value: kind })))
+const labelText = (label: MemberLabel) => memberLabelText(label, t('access.label.custom'))
 
 async function load(): Promise<void> {
 	loadError.value = ''
 	adminOriginRefused.value = false
 	try {
 		const [members, tokenList, sessionList, attemptList] = await Promise.all([
-			api<{ workspaceRoot: string; hint: string; members: MemberRow[] }>('/api/access/members'),
+			api<Roster>('/api/access/members'),
 			api<{ tokens: TokenRow[] }>('/api/access/tokens'),
 			api<{ sessions: SessionRow[] }>('/api/access/sessions'),
 			api<Attempts>('/api/access/mcp-attempts'),
@@ -84,21 +92,91 @@ async function mutate(run: () => Promise<unknown>, success?: string): Promise<bo
 
 const isSelf = (row: MemberRow) => row.id === access.member.value?.id
 
-// ---- Add member ----
-const adding = ref(false)
-const addForm = reactive<{ nickname: string; role: AccessRole; kind: MemberKind }>({ nickname: '', role: 'reviewer', kind: 'human' })
-async function addMember(): Promise<void> {
-	const nickname = addForm.nickname.trim()
-	const ok = await mutate(() => api('/api/access/members', { method: 'POST', body: { nickname, role: addForm.kind === 'agent' && addForm.role === 'owner' ? 'editor' : addForm.role, kind: addForm.kind } }), t('access.members.added', { nickname }))
-	if (ok) {
-		adding.value = false
-		addForm.nickname = ''
+// ---- Add a member, or edit one's nickname and keys ("Edit access") ----
+type Editor = { member?: MemberRow; nickname: string; kind: MemberKind; keys: string[] }
+const editorOpen = ref(false)
+const editor = reactive<Editor>({ nickname: '', kind: 'human', keys: [] })
+const saving = ref(false)
+const editorError = shallowRef<FetchErrorDetails>()
+const presets = computed(() => roster.value?.presets ?? [])
+
+/** The keys of the preset with this `id` for a member of this kind, when the Workspace has it. */
+function presetKeys(id: string, kind: MemberKind): string[] {
+	const preset = presets.value.find(item => item.id === id)
+	return preset ? keysOfPreset(kind, preset.keys) : []
+}
+
+function openAdd(kind: MemberKind = 'human'): void {
+	Object.assign(editor, { member: undefined, nickname: '', kind, keys: presetKeys(kind === 'agent' ? 'editor' : 'reviewer', kind) })
+	editorError.value = undefined
+	editorOpen.value = true
+}
+
+function openEdit(row: MemberRow): void {
+	Object.assign(editor, { member: row, nickname: row.nickname, kind: row.kind, keys: [...row.keys] })
+	editorError.value = undefined
+	editorOpen.value = true
+}
+
+/** A new member's kind decides its keys: an Agent never gets a `humanOnly` key (Rule 01a11485-eac6-730b-b66b-309cc9efb169). */
+function setNewKind(kind: MemberKind): void {
+	editor.kind = kind
+	editor.keys = keysOfPreset(kind, editor.keys)
+}
+
+const sameKeys = (left: readonly string[], right: readonly string[]) => orderedKeys(left).join() === orderedKeys(right).join()
+
+async function saveEditor(): Promise<void> {
+	if (saving.value) return
+	const nickname = editor.nickname.trim()
+	const member = editor.member
+	saving.value = true
+	editorError.value = undefined
+	try {
+		if (!member) {
+			await api('/api/access/members', { method: 'POST', body: { nickname, kind: editor.kind, keys: editor.keys } })
+			feedback.success(t('access.members.added', { nickname }))
+		}
+		else {
+			// Unchanged keys are not sent, so a rename alone leaves a key set written by hand as it is
+			// (Rules 01a11c09-b779-7f5f-ba47-170a584a09ce and 01a11c33-24ab-76c8-8811-13d938153cad).
+			const body = {
+				...(sameKeys(editor.keys, member.keys) ? {} : { keys: editor.keys }),
+				...(nickname !== member.nickname ? { nickname } : {}),
+			}
+			if (Object.keys(body).length > 0) {
+				await api(`/api/access/members/${member.id}`, { method: 'PATCH', body })
+				feedback.success(t('access.members.updated', { nickname }))
+			}
+		}
+		editorOpen.value = false
+		if (member && isSelf(member)) {
+			// The signed-in member's own keys changed: what the Workbench offers follows them.
+			await access.reload()
+			if (!access.can('members.manage')) {
+				await navigateTo('/')
+				return
+			}
+		}
+		await load()
+	}
+	catch (cause) {
+		editorError.value = describeFetchError(cause, t('access.members.errorTitle'))
+	}
+	finally {
+		saving.value = false
 	}
 }
 
-async function setRole(row: MemberRow, role: AccessRole): Promise<void> {
-	if (role === row.role) return
-	await mutate(() => api(`/api/access/members/${row.id}`, { method: 'PATCH', body: { role } }), t('access.members.roleChanged', { nickname: row.nickname, role: t(`access.role.${role}`) }))
+/** Rule 01a11c33-24ab-76c8-8811-13d938153cad: a stored key set that lacks a requirement, flagged until it is next written. */
+const gapsOf = (row: MemberRow) => missingRequirements(row.keys)
+const gapText = (row: MemberRow) => gapsOf(row).map(gap => t('access.keys.gap', { key: gap.key, keys: gap.missing.join(', ') })).join(' ')
+
+/** Rule 01a11c09-bbc9-721f-903c-27c615692624: the catalog keys no human member holds. */
+const unheldKeys = computed(() => roster.value ? keysNoHumanHolds(roster.value.members) : [])
+function openOwnChecklist(): void {
+	const self = roster.value?.members.find(isSelf)
+	if (self) openEdit(self)
 }
 
 const removing = ref<MemberRow>()
@@ -175,23 +253,23 @@ const latestAttempt = computed(() => attempts.value.recent[0])
 function createAgentToken(): void {
 	const agent = roster.value?.members.find(member => member.kind === 'agent')
 	if (agent) openToken(agent)
-	else {
-		addForm.kind = 'agent'
-		addForm.role = 'editor'
-		addForm.nickname = ''
-		adding.value = true
-	}
+	else openAdd('agent')
 }
 
 function memberActions(row: MemberRow): DropdownMenuItem[][] {
-	const first: DropdownMenuItem[] = [{ label: t('access.members.createToken'), icon: 'i-lucide-key-round', onSelect: () => openToken(row) }]
+	const first: DropdownMenuItem[] = [
+		{ label: t('access.members.editAccess'), icon: 'i-lucide-shield-check', onSelect: () => openEdit(row) },
+		{ label: t('access.members.createToken'), icon: 'i-lucide-key-round', onSelect: () => openToken(row) },
+	]
 	if (row.kind === 'human') first.push({ label: t('access.members.invite'), icon: 'i-lucide-link', onSelect: () => { void createInvite(row) } })
 	return [first, [{ label: t('access.members.remove'), icon: 'i-lucide-user-minus', color: 'error', disabled: isSelf(row), onSelect: () => { removing.value = row } }]]
 }
 
 const memberColumns = computed<TableColumn<MemberRow>[]>(() => [
 	{ accessorKey: 'nickname', header: t('access.members.columns.member') },
-	{ accessorKey: 'role', header: t('access.members.columns.role') },
+	{ accessorKey: 'kind', header: t('access.members.columns.kind') },
+	{ id: 'label', header: t('access.members.columns.label') },
+	{ id: 'keys', header: t('access.members.columns.keys') },
 	{ accessorKey: 'activeTokens', header: t('access.members.columns.tokens') },
 	{ accessorKey: 'activeSessions', header: t('access.members.columns.sessions') },
 	{ id: 'actions', header: () => h('span', { class: 'sr-only' }, t('access.members.actionsColumn')) },
@@ -257,7 +335,7 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
           color="primary"
           variant="solid"
           icon="i-lucide-user-plus"
-          @click="adding = true"
+          @click="openAdd()"
         >
           {{ t('access.members.add') }}
         </UButton>
@@ -296,7 +374,44 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
         :ui="{ root: 'rounded-none border-b border-default' }"
       />
 
-      <section class="border-b border-default px-4 py-3">
+      <UAlert
+        v-if="unheldKeys.length > 0 && access.can('members.manage')"
+        data-testid="unheld-keys"
+        color="info"
+        variant="subtle"
+        icon="i-lucide-key-square"
+        :title="t('access.members.unheldTitle', { n: unheldKeys.length }, unheldKeys.length)"
+        :ui="{ root: 'rounded-none border-b border-default' }"
+      >
+        <template #description>
+          <p class="space-y-1">
+            <span class="block">{{ t('access.members.unheldDescription') }}</span>
+            <code
+              class="block font-mono text-xs"
+              translate="no"
+              data-unheld-keys
+            >{{ unheldKeys.join(', ') }}</code>
+          </p>
+        </template>
+        <template #actions>
+          <UButton
+            v-if="roster?.members.some(isSelf)"
+            color="neutral"
+            variant="outline"
+            size="sm"
+            icon="i-lucide-list-checks"
+            data-unheld-open-checklist
+            @click="openOwnChecklist"
+          >
+            {{ t('access.members.unheldAction') }}
+          </UButton>
+        </template>
+      </UAlert>
+
+      <section
+        class="border-b border-default px-4 py-3"
+        data-members-table
+      >
         <UTable
           :data="roster?.members ?? []"
           :columns="memberColumns"
@@ -311,7 +426,6 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
                 size="2xs"
               />
               <span class="font-medium text-highlighted">{{ row.original.nickname }}</span>
-              <span class="text-xs text-muted">{{ t(`access.kind.${row.original.kind}`) }}</span>
               <UBadge
                 v-if="isSelf(row.original)"
                 color="neutral"
@@ -322,15 +436,46 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
               </UBadge>
             </div>
           </template>
-          <template #role-cell="{ row }">
-            <USelect
-              :model-value="row.original.role"
-              :items="roleItems(row.original.kind)"
+          <template #kind-cell="{ row }">
+            <span class="text-muted">{{ t(`access.kind.${row.original.kind}`) }}</span>
+          </template>
+          <template #label-cell="{ row }">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <UBadge
+                color="neutral"
+                variant="soft"
+                data-member-label
+              >
+                {{ labelText(row.original.label) }}
+              </UBadge>
+              <UTooltip
+                v-if="gapsOf(row.original).length > 0"
+                :text="gapText(row.original)"
+              >
+                <UBadge
+                  color="warning"
+                  variant="subtle"
+                  icon="i-lucide-triangle-alert"
+                  data-member-key-gap
+                  :aria-description="gapText(row.original)"
+                >
+                  {{ t('access.keys.gapBadge') }}
+                </UBadge>
+              </UTooltip>
+            </div>
+          </template>
+          <template #keys-cell="{ row }">
+            <UButton
+              color="neutral"
+              variant="link"
               size="sm"
-              class="w-32"
-              :aria-label="t('access.members.roleLabel')"
-              @update:model-value="(value: AccessRole) => setRole(row.original, value)"
-            />
+              class="px-0"
+              data-member-key-count
+              :aria-label="t('access.members.editAccessFor', { nickname: row.original.nickname })"
+              @click="openEdit(row.original)"
+            >
+              {{ t('access.keys.count', { n: row.original.keys.length }, row.original.keys.length) }}
+            </UButton>
           </template>
           <template #actions-cell="{ row }">
             <div class="flex justify-end">
@@ -445,16 +590,20 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
       </section>
     </div>
 
-    <UModal
-      v-model:open="adding"
-      :title="t('access.members.addTitle')"
-      :description="t('access.members.addDescription')"
+    <USlideover
+      v-model:open="editorOpen"
+      side="right"
+      :title="editor.member ? t('access.members.editTitle', { nickname: editor.member.nickname }) : t('access.members.addTitle')"
+      :description="editor.member ? t('access.members.editDescription') : t('access.members.addDescription')"
+      :dismissible="!saving"
+      :ui="{ content: 'max-w-xl', body: 'flex min-h-0 flex-col gap-4 p-4 sm:p-4' }"
     >
       <template #body>
         <UForm
-          :state="addForm"
+          :state="editor"
           class="space-y-4"
-          @submit="addMember"
+          data-member-editor
+          @submit="saveEditor"
         >
           <UFormField
             :label="t('access.members.nicknameLabel')"
@@ -463,11 +612,11 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
             required
           >
             <UInput
-              v-model="addForm.nickname"
-              autofocus
+              v-model="editor.nickname"
               autocomplete="off"
               spellcheck="false"
               class="w-full font-mono"
+              data-member-editor-nickname
             />
           </UFormField>
           <UFormField
@@ -476,26 +625,50 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
             name="kind"
           >
             <USelect
-              v-model="addForm.kind"
+              v-if="!editor.member"
+              :model-value="editor.kind"
               :items="kindItems"
               class="w-full"
+              data-member-editor-kind
+              @update:model-value="(value: MemberKind) => setNewKind(value)"
             />
+            <p
+              v-else
+              class="text-sm text-default"
+              data-member-editor-kind
+            >
+              {{ t(`access.kind.${editor.kind}`) }}
+            </p>
           </UFormField>
-          <UFormField
-            :label="t('access.members.roleLabel')"
-            name="role"
+          <MemberKeyEditor
+            v-model:keys="editor.keys"
+            :kind="editor.kind"
+            :presets="presets"
+          />
+          <UAlert
+            v-if="editorError"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-circle-alert"
+            :title="editorError.message"
+            role="alert"
+            data-member-editor-error
+            :data-code="editorError.code"
           >
-            <USelect
-              v-model="addForm.role"
-              :items="roleItems(addForm.kind)"
-              class="w-full"
-            />
-          </UFormField>
+            <template #description>
+              <WbErrorDescription
+                :headline="editorError.message"
+                :diagnostics="editorError.diagnostics"
+                :status-code="editorError.statusCode"
+              />
+            </template>
+          </UAlert>
           <div class="flex justify-end gap-2">
             <UButton
               color="neutral"
               variant="outline"
-              @click="adding = false"
+              :disabled="saving"
+              @click="editorOpen = false"
             >
               {{ t('common.cancel') }}
             </UButton>
@@ -503,14 +676,16 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
               type="submit"
               color="primary"
               variant="solid"
-              :disabled="!addForm.nickname.trim()"
+              :loading="saving"
+              :disabled="!editor.nickname.trim()"
+              data-member-editor-save
             >
-              {{ t('access.members.add') }}
+              {{ editor.member ? t('access.members.save') : t('access.members.add') }}
             </UButton>
           </div>
         </UForm>
       </template>
-    </UModal>
+    </USlideover>
 
     <UModal
       :open="Boolean(tokenFor)"
