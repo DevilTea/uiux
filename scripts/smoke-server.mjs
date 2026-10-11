@@ -65,9 +65,10 @@ try {
 	uiuxHome = await mkdtemp(join(tmpdir(), 'uiux-smoke-home-'))
 	otherWorkspace = await mkdtemp(join(tmpdir(), 'uiux-smoke-other-'))
 
-	await mkdir(join(workspaceRoot, '.uiux'), { recursive: true })
-	await mkdir(join(workspaceRoot, 'adapters'), { recursive: true })
-	await writeFile(join(workspaceRoot, 'adapters', 'smoke.mjs'), [
+	// A schemaVersion 5 Workspace: the manifest at the root, the Adapter list in product-kit.json, and
+	// a ./ Adapter resolved from kit/.
+	await mkdir(join(workspaceRoot, 'kit', 'adapters'), { recursive: true })
+	await writeFile(join(workspaceRoot, 'kit', 'adapters', 'smoke.mjs'), [
 		"import { createWidgetPlugin } from '@deviltea/widget-core'",
 		'',
 		"export const smokePlugin = createWidgetPlugin('SmokeWidget')",
@@ -91,12 +92,19 @@ try {
 	].join('\n'))
 	// The current product schema, from the package (the server opens it as `current`).
 	const { uiuxWorkspaceSchemaVersion } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
-	await writeFile(join(workspaceRoot, '.uiux', 'workspace.json'), `${JSON.stringify({
+	await writeFile(join(workspaceRoot, 'workspace.json'), `${JSON.stringify({
 		schemaVersion: uiuxWorkspaceSchemaVersion,
 		i18n: { defaultLocale: 'en-US' },
-		adapters: [{ moduleSpecifier: './adapters/smoke.mjs' }],
 		viewports: {},
 		themes: {},
+	}, null, 2)}\n`)
+	await writeFile(join(workspaceRoot, 'product-kit.json'), `${JSON.stringify({
+		designSystems: [],
+		adapters: [{ moduleSpecifier: './adapters/smoke.mjs' }],
+		styles: [],
+		themes: {},
+		components: {},
+		widgets: {},
 	}, null, 2)}\n`)
 
 	// Tokens are created through the CLI exactly as a user would (accepted identity decision D17).
