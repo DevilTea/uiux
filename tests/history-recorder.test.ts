@@ -628,7 +628,7 @@ describe('recording failures', () => {
 	it('refuses a hook as busy without waiting for an abandoned boundary stuck in open.json (re-verification of 6c2c313)', async () => {
 		const ctx = await fixture({ observerTimeoutMilliseconds: 1_000 })
 		await ctx.recorder.start()
-		vi.spyOn(console, 'error').mockImplementation(() => undefined)
+		const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 		await editView(ctx, AGENT, 'agent')
 		let release!: () => void
 		const stalled = new Promise<void>(resolve => { release = resolve })
@@ -637,16 +637,23 @@ describe('recording failures', () => {
 			await stalled
 			return clear()
 		})
-		// The actor change closes the agent's autosave; the boundary's journal clear stalls past the timeout.
+		// The actor change closes the agent's autosave; the boundary's journal clear stalls on `stalled`,
+		// which only this test releases, so persistence abandons the boundary at the observer timeout.
 		await editView(ctx, HUMAN, 'abandoned boundary')
-		// The recorder is busy with the abandoned work, which holds the journal queue.
-		const durations: number[] = []
+		expect(errors.mock.calls.map(call => String(call[0]))).toContainEqual(expect.stringContaining('beforeCanonicalWrite did not finish within 1000 ms and was abandoned'))
+		// The recorder is busy with the abandoned work, which holds the journal queue until `stalled`
+		// settles. Each hook must be refused as busy, not left to wait on that queue: a hook that waits
+		// can only end by being abandoned at the observer timeout, because nothing releases the
+		// boundary before this loop ends. So the assertion is on how each hook ended, not on how long it took.
 		for (const intent of ['busy 1', 'busy 2']) {
-			const began = Date.now()
+			errors.mockClear()
 			await editView(ctx, HUMAN, intent)
-			durations.push(Date.now() - began)
+			const logged = errors.mock.calls.map(call => String(call[0]))
+			expect(logged.filter(line => line.includes('did not finish within'))).toEqual([])
+			expect(logged).toEqual([
+				expect.stringContaining('beforeCanonicalWrite failed; the write was kept and the gap is recorded at the next history boundary: the history recorder is still finishing an abandoned operation'),
+			])
 		}
-		expect(Math.max(...durations)).toBeLessThan(500)
 		release()
 		await vi.waitFor(async () => expect((await ctx.host.readOpenJournal())?.entries.filter(entry => entry.type === 'gap').length).toBeGreaterThanOrEqual(3))
 		expect(await vi.waitFor(() => ctx.recorder.closeOpenAutosave('checkpoint'))).toMatchObject({ external: expect.any(String) })
