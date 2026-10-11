@@ -1,10 +1,11 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { checkProductKitAgainstKit, maskHostPaths, scanImportSpecifiers } from '../src/adapters/kit-registry'
+import { NodeWorkspaceAdapterModuleResolver } from '../src/adapters/resolution'
 import { createLeaseManager, type LeaseManager } from '../src/application/access/leases'
 import { productKitChangeKeys } from '../src/application/access/policy'
 import type { MemberPrincipal } from '../src/application/access/principal'
@@ -720,13 +721,90 @@ describe('kit project containment', () => {
 			expect(JSON.stringify(read)).not.toContain('9.9.9')
 		})
 	}
+
+	for (const [label, link] of [
+		['the package directory', async (root: string, outside: string, target: string) => {
+			await symlink(join(outside, 'node_modules', '@acme', target), join(root, 'kit', 'node_modules', '@acme', 'uiux-adapter'))
+		}],
+		['kit/node_modules/', async (root: string, outside: string, target: string) => {
+			if (target === 'adapter') await rename(join(outside, 'node_modules', '@acme', target), join(outside, 'node_modules', '@acme', 'uiux-adapter'))
+			await rm(join(root, 'kit', 'node_modules'), { recursive: true })
+			await symlink(join(outside, 'node_modules'), join(root, 'kit', 'node_modules'))
+		}],
+	] as const) {
+		it(`reports a bare Adapter one way through a link out of the Workspace at ${label}, whether or not its target exists`, async () => {
+			const answers: unknown[] = []
+			for (const target of ['adapter', 'absent']) {
+				const outside = await outsideKit()
+				await write(join(outside, 'node_modules', '@acme', 'adapter', 'package.json'), JSON.stringify({ name: '@acme/uiux-adapter', version: '9.9.9', type: 'module', exports: { './uiux': './uiux.js' } }))
+				await write(join(outside, 'node_modules', '@acme', 'adapter', 'uiux.js'), 'export const adapter = {}\n')
+				const ctx = await v5Fixture({ ...KIT, adapters: [{ moduleSpecifier: '@acme/uiux-adapter/uiux' }] })
+				await link(ctx.root, outside, target)
+				const read = await ctx.app.readProductKit()
+				answers.push(read?.adapters)
+				const text = JSON.stringify(read)
+				expect(text).not.toContain(outside)
+				expect(text).not.toContain('9.9.9')
+				// Loading is unchanged: the linked package that exists still resolves.
+				const resolving = new NodeWorkspaceAdapterModuleResolver({ layout: ctx.persistence.layout }).resolve(ctx.root, '@acme/uiux-adapter/uiux')
+				if (target === 'adapter') await expect(resolving).resolves.toMatchObject({ resolvedPath: await realpath(join(ctx.root, 'kit', 'node_modules', '@acme', 'uiux-adapter', 'uiux.js')) })
+				else await expect(resolving).rejects.toThrow()
+			}
+			expect(answers).toEqual([
+				[{ moduleSpecifier: '@acme/uiux-adapter/uiux', status: 'resolved' }],
+				[{ moduleSpecifier: '@acme/uiux-adapter/uiux', status: 'resolved' }],
+			])
+		})
+	}
+
+	for (const [label, link] of [
+		['the module file', async (pkg: string, outside: string, target: string) => {
+			await symlink(join(outside, 'lib', target), join(pkg, 'dist', 'uiux.js'))
+		}],
+		['a directory above the module file', async (pkg: string, outside: string, target: string) => {
+			await rm(join(pkg, 'dist'), { recursive: true })
+			await symlink(join(outside, target === 'uiux.js' ? 'lib' : 'gone'), join(pkg, 'dist'))
+		}],
+	] as const) {
+		it(`reports a bare Adapter one way when ${label} of a package in the Workspace links out of it, whether or not its target exists`, async () => {
+			const answers: unknown[] = []
+			for (const target of ['uiux.js', 'nothing.js']) {
+				const outside = await outsideKit()
+				await write(join(outside, 'lib', 'uiux.js'), 'export const adapter = {}\n')
+				const ctx = await v5Fixture({ ...KIT, adapters: [{ moduleSpecifier: '@acme/uiux-adapter/uiux' }] })
+				const pkg = join(ctx.root, 'kit', 'node_modules', '@acme', 'uiux-adapter')
+				await write(join(pkg, 'package.json'), JSON.stringify({ name: '@acme/uiux-adapter', version: '2.0.0', type: 'module', exports: { './uiux': './dist/uiux.js' } }))
+				await mkdir(join(pkg, 'dist'))
+				await link(pkg, outside, target)
+				const read = await ctx.app.readProductKit()
+				answers.push(read?.adapters)
+				expect(JSON.stringify(read)).not.toContain(outside)
+				// Loading is unchanged: the linked module that exists still resolves.
+				const resolving = new NodeWorkspaceAdapterModuleResolver({ layout: ctx.persistence.layout }).resolve(ctx.root, '@acme/uiux-adapter/uiux')
+				if (target === 'uiux.js') await expect(resolving).resolves.toMatchObject({ resolvedPath: join(outside, 'lib', 'uiux.js') })
+				else await expect(resolving).rejects.toThrow('Adapter module specifier @acme/uiux-adapter/uiux does not resolve to a readable module file.')
+			}
+			expect(answers).toEqual([
+				[{ moduleSpecifier: '@acme/uiux-adapter/uiux', status: 'resolved' }],
+				[{ moduleSpecifier: '@acme/uiux-adapter/uiux', status: 'resolved' }],
+			])
+		})
+	}
+
+	it('still reports a missing module file of a package in the Workspace, with no link on its way, as failed', async () => {
+		const ctx = await v5Fixture({ ...KIT, adapters: [{ moduleSpecifier: '@acme/uiux-adapter/uiux' }] })
+		await write(join(ctx.root, 'kit', 'node_modules', '@acme', 'uiux-adapter', 'package.json'), JSON.stringify({ name: '@acme/uiux-adapter', exports: { './uiux': './dist/uiux.js' } }))
+		const read = await ctx.app.readProductKit()
+		expect(read?.adapters).toEqual([expect.objectContaining({ moduleSpecifier: '@acme/uiux-adapter/uiux', status: 'failed', message: expect.stringContaining('<workspace>/kit/node_modules/@acme/uiux-adapter/dist/uiux.js') })])
+		expect(JSON.stringify(read)).not.toContain(ctx.root)
+	})
 })
 
 describe('host paths in the Product Kit Resource', () => {
 	it('masks absolute paths and file URLs, keeping the Workspace root as <workspace>', () => {
 		const root = '/srv/acme/workspace'
 		expect(maskHostPaths(`Cannot find package 'x' imported from ${root}/kit/.uiux-adapter-resolution.mjs`, [root])).toBe('Cannot find package \'x\' imported from <workspace>/kit/.uiux-adapter-resolution.mjs')
-		expect(maskHostPaths('Package subpath \'.\' is not defined by "exports" in /home/someone/node_modules/x/package.json imported from file:///home/someone/a.mjs', [root])).toBe('Package subpath \'.\' is not defined by "exports" in <path> imported from <path>')
+		expect(maskHostPaths('Package subpath \'.\' is not defined by "exports" in /home/someone/node_modules/x/package.json imported from file:///home/someone/a.mjs', [root])).toBe('Package subpath \'.\' is not defined by "exports" in <path> <path>')
 		expect(maskHostPaths('at (C:\\Users\\someone\\x.js) and \\\\server\\share\\y.js', [root])).toBe('at (<path>) and <path>')
 		expect(maskHostPaths('kit/package.json is not a regular file.', [root])).toBe('kit/package.json is not a regular file.')
 	})
@@ -735,7 +813,7 @@ describe('host paths in the Product Kit Resource', () => {
 		const root = '/srv/acme/ws'
 		expect(maskHostPaths(`in ${root}`, [root])).toBe('in <workspace>')
 		expect(maskHostPaths(`in ${root}/kit/a.mjs.`, [root])).toBe('in <workspace>/kit/a.mjs.')
-		expect(maskHostPaths(`in ${root}-other/kit/a.mjs and ${root}other`, [root])).toBe('in <path> and <path>')
+		expect(maskHostPaths(`in ${root}-other/kit/a.mjs and ${root}other`, [root])).toBe('in <path> <path>')
 		expect(maskHostPaths(`in /mnt${root}/kit/a.mjs`, [root])).toBe('in <path>')
 		expect(maskHostPaths(`in file://${root}-other/a.mjs`, [root])).toBe('in <path>')
 		expect(maskHostPaths(`in "${root}-other/a.mjs"`, [root])).toBe('in "<path>"')
@@ -755,10 +833,62 @@ describe('host paths in the Product Kit Resource', () => {
 	it('masks a path with spaces whole', () => {
 		const root = '/srv/my acme/ws'
 		expect(maskHostPaths('Cannot find module \'/Users/John Smith/My File.js\' imported from "/Users/John Smith/a b.mjs"', [root])).toBe('Cannot find module \'<path>\' imported from "<path>"')
-		expect(maskHostPaths('in /Users/John Smith/node_modules/x/package.json imported from /home/a b/c d.mjs', [root])).toBe('in <path> imported from <path>')
+		expect(maskHostPaths('in /Users/John Smith/node_modules/x/package.json imported from /home/a b/c d.mjs', [root])).toBe('in <path> <path>')
 		expect(maskHostPaths('at file:///Users/John%20Smith/x.js', [root])).toBe('at <path>')
 		expect(maskHostPaths(`in ${root}/kit/a b.mjs imported from file:///srv/my%20acme/ws/kit/x.mjs`, [root])).toBe('in <workspace>/kit/a b.mjs imported from <workspace>/kit/x.mjs')
 		expect(maskHostPaths(`in '${root}/kit/a.mjs'`, [root])).toBe('in \'<workspace>/kit/a.mjs\'')
+	})
+
+	// Once an absolute path starts, it is masked to the line end, a quote, the next path or
+	// path-terminating punctuation, so the words after a path may be masked with it.
+	const root = '/srv/acme/ws'
+	it.each([
+		['the root after a non-path character', `;${root}/kit/a.js`, ';<workspace>/kit/a.js'],
+		['the root after a word', `x${root}/kit/a.js`, 'x<workspace>/kit/a.js'],
+		['the root inside another path', `in /mnt${root}/kit/a.js`, 'in <path>'],
+		['the root inside a path below the root', `in ${root}/kit${root}/a.js`, 'in <workspace>/kit/srv/acme/ws/a.js'],
+		['a path after ;', 'x;/home/someone/a.js', 'x;<path>'],
+		['a path after |', 'a|/home/someone/a.js', 'a|<path>'],
+		['a path after >', '>/home/someone/a.js', '><path>'],
+		['a path in braces', '{/home/someone/a.js}', '{<path>}'],
+		['a path after <', '</home/someone/a.js', '<<path>'],
+		['a path after !', '!/home/someone/a.js', '!<path>'],
+		['a path after @', 'x@/home/someone/a.js', 'x@<path>'],
+		['a path after -', '-/home/someone/a.js', '-<path>'],
+		['an apostrophe in a bare path', 'in /home/o\'brien/x.js', 'in <path>'],
+		['an apostrophe in a quoted path', 'in \'/home/o\'brien/x.js\' from /home/o\'brien/a.mjs', 'in \'<path>\' from <path>'],
+		['an apostrophe in a file URL', 'at file:///home/o\'brien/x.js', 'at <path>'],
+		['tabs', 'in\t/home/a\tb/x.js\tz', 'in\t<path>'],
+		['a next word with no separator or extension', 'in /Users/John Smith', 'in <path>'],
+		['an outside path after a Workspace path', `in ${root}/kit/a.mjs imported from /home/x/y.mjs`, 'in <workspace>/kit/a.mjs imported from <path>'],
+		['a path ended by punctuation', 'in /home/x/a.js, then (/home/y/b.js).', 'in <path>, then (<path>).'],
+		['a path on its own line', 'in /home/x/a.js\nnext line', 'in <path>\nnext line'],
+		['a relative path', 'kit/src/a.js and ./b.js', 'kit/src/a.js and ./b.js'],
+		['a lone slash', 'a / b', 'a / b'],
+		['a directory name ending in .', 'in /Users/J. Smith/other/x', 'in <path>'],
+		['a directory name ending in ;', 'in /Users/J; Smith/other/x', 'in <path>'],
+		['a directory name ending in :', 'in /Users/J: Smith/other/x', 'in <path>'],
+		['a directory name ending in !', 'in /Users/J! Smith/other/x', 'in <path>'],
+		['a directory name ending in ?', 'in /Users/J? Smith/other/x', 'in <path>'],
+		['a directory name ending in }', 'in /Users/J} Smith/other/x', 'in <path>'],
+		['a directory name ending in |', 'in /Users/J| Smith/other/x', 'in <path>'],
+		['a directory name ending in . before a Windows separator', 'in C:\\Users\\J. Smith\\x', 'in <path>'],
+		['the root alone before prose', `Workspace ${root} is not writable`, 'Workspace <workspace> is not writable'],
+		['the root alone before punctuation', `Workspace ${root}. Next`, 'Workspace <workspace>. Next'],
+		['a sibling of the root sharing its name', `in ${root}.bak/x`, 'in <path>'],
+		['a sibling of the root with a space', `in ${root} other/x`, 'in <path>'],
+	])('masks %s', (_case, message, masked) => {
+		expect(maskHostPaths(message, [root])).toBe(masked)
+	})
+
+	it('masks in linear time across long runs of whitespace and punctuation', () => {
+		const whitespace = ' \t\u00A0\u2003'.repeat(10_000)
+		const started = performance.now()
+		expect(maskHostPaths(`in /home/x${whitespace}`, [root])).toBe(`in <path>${whitespace}`)
+		maskHostPaths(`in /home/x.${whitespace}y`, [root])
+		maskHostPaths(`in ${root}${whitespace}y`, [root])
+		maskHostPaths(`in /home/x${'.;'.repeat(20_000)} y`, [root])
+		expect(performance.now() - started).toBeLessThan(50)
 	})
 
 	it('names no host path outside the Workspace in an Adapter\'s resolution failure', async () => {

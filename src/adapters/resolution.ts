@@ -12,6 +12,7 @@ import {
 	WORKSPACE_MANIFEST_PATH,
 	type WorkspaceLayout,
 } from '../persistence/paths'
+import { maskHostPaths } from './host-paths'
 import { bareKitSpecifierProblem, bareSpecifierPackageName, readDeclaredKitDependencies, relativeKitSpecifierProblem } from './kit-dependencies'
 
 import { resolve as resolveImport } from 'import-meta-resolve'
@@ -159,14 +160,24 @@ async function resolveFromWorkspaceRoot(root: string, moduleSpecifier: string): 
 	}
 
 	const parentUrl = pathToFileURL(join(root, '.uiux-adapter-resolution.mjs')).href
-	const moduleIdentity = resolveImport(moduleSpecifier, parentUrl)
-	if (!moduleIdentity.startsWith('file:'))
-		throw new Error('Adapter module must resolve to a file-backed module.')
-	const resolvedPath = await realpath(fileURLToPath(moduleIdentity))
+	// A `./` specifier that does not resolve and one that resolves outside the root get one answer,
+	// naming no path: a link inside the root may point anywhere, and its target is not described.
+	const unresolvedInRoot = () => new Error(`Workspace-relative adapter module specifier ${moduleSpecifier} does not resolve to a file inside the selected Workspace root.`)
+	let resolvedPath: string
+	try {
+		const moduleIdentity = resolveImport(moduleSpecifier, parentUrl)
+		if (!moduleIdentity.startsWith('file:'))
+			throw new Error('Adapter module must resolve to a file-backed module.')
+		resolvedPath = await realpath(fileURLToPath(moduleIdentity))
+	}
+	catch (error) {
+		if (relativeSelection) throw unresolvedInRoot()
+		throw error
+	}
 
 	const realRoot = await realpath(root)
 	if (relativeSelection && !isContainedPath(realRoot, resolvedPath))
-		throw new Error('Workspace-relative adapter module resolves outside the selected Workspace root.')
+		throw unresolvedInRoot()
 	await assertOutsideWorkspaceData(resolvedPath, realRoot)
 	return resolvedAdapterModule(moduleSpecifier, resolvedPath, relativeSelection)
 }
@@ -205,14 +216,19 @@ async function resolveFromCodeDirectory(root: string, codeDirectoryName: string,
 	// naming no path: a link inside `kit/` may point anywhere, and its target is not described.
 	const unresolvedInKit = () => new Error(`Adapter module specifier ${moduleSpecifier} does not resolve to a file inside ${codeDirectoryName}/.`)
 	let resolvedPath: string
+	let modulePath: string | undefined
 	try {
 		const moduleIdentity = resolveImport(moduleSpecifier, parentUrl)
 		if (!moduleIdentity.startsWith('file:'))
 			throw new Error('Adapter module must resolve to a file-backed module.')
-		resolvedPath = await realpath(fileURLToPath(moduleIdentity))
+		modulePath = fileURLToPath(moduleIdentity)
+		resolvedPath = await realpath(modulePath)
 	}
 	catch (error) {
 		if (relativeSelection) throw unresolvedInKit()
+		// A bare specifier's module behind a link out of the root, or a dangling one, names no path.
+		if (modulePath !== undefined && await passesUnresolvedLink(realRoot, modulePath))
+			throw new AdapterModuleBehindLinkError(moduleSpecifier)
 		throw error
 	}
 
@@ -228,6 +244,34 @@ async function resolveFromCodeDirectory(root: string, codeDirectoryName: string,
 		throw new Error(`Adapter module resolves inside the selected Workspace root but outside ${codeDirectoryName}/, which is Workspace data like a canonical Workspace data directory; Adapter code must live outside authored data that Editors and Agents can write.`)
 	await assertOutsideWorkspaceData(resolvedPath, realRoot)
 	return resolvedAdapterModule(moduleSpecifier, resolvedPath, relativeSelection)
+}
+
+/**
+ * A bare Adapter specifier whose module file, inside the selected root as Node module resolution
+ * names it, cannot be read and lies behind a link whose target is outside the root or does not
+ * resolve. Its message names no path, so what lies behind the link is not described.
+ */
+export class AdapterModuleBehindLinkError extends Error {
+	constructor(moduleSpecifier: string) {
+		super(`Adapter module specifier ${moduleSpecifier} does not resolve to a readable module file.`)
+		this.name = 'AdapterModuleBehindLinkError'
+	}
+}
+
+/**
+ * Whether `path`, inside `realRoot` as written, passes a link (itself or a directory above it, below
+ * the root) whose target lies outside `realRoot` or does not resolve.
+ */
+async function passesUnresolvedLink(realRoot: string, path: string): Promise<boolean> {
+	const rel = relative(realRoot, path)
+	if (rel === '' || escapesBase(rel)) return false
+	for (let current = path; current !== realRoot && current !== dirname(current); current = dirname(current)) {
+		const info = await lstat(current).catch(() => undefined)
+		if (!info?.isSymbolicLink()) continue
+		const target = await realpath(current).catch(() => undefined)
+		if (target === undefined || !isContainedPath(realRoot, target)) return true
+	}
+	return false
 }
 
 async function assertOutsideWorkspaceData(resolvedPath: string, realRoot: string): Promise<void> {
@@ -276,6 +320,10 @@ export async function resolveWorkspaceAdapterSet(input: ResolveWorkspaceAdapterS
 	const summaries: AdapterResolutionSummary[] = []
 	const entries: ValidatedAdapterEntry[] = []
 	const ownership: ResolvedAdapterRegistries[] = []
+	// A cause's message names host paths: the Workspace root, as given and by its real path, reads `<workspace>`.
+	const givenRoot = resolve(input.workspaceRoot)
+	const realRoot = await realpath(givenRoot).catch(() => undefined)
+	const roots = realRoot === undefined ? [givenRoot] : [givenRoot, realRoot]
 
 	for (const [index, selection] of input.adapters.entries()) {
 		const basePath = `/adapters/${index}`
@@ -296,7 +344,7 @@ export async function resolveWorkspaceAdapterSet(input: ResolveWorkspaceAdapterS
 			diagnostics.push({
 				code: 'adapter.resolution_failed',
 				path: `${basePath}/moduleSpecifier`,
-				message: diagnosticMessage('Adapter module could not be resolved from the selected Workspace root.', cause),
+				message: diagnosticMessage('Adapter module could not be resolved from the selected Workspace root.', cause, roots),
 			})
 			summaries.push({ index, moduleSpecifier: selection.moduleSpecifier })
 			continue
@@ -310,7 +358,7 @@ export async function resolveWorkspaceAdapterSet(input: ResolveWorkspaceAdapterS
 			diagnostics.push({
 				code: 'adapter.manifest_load_failed',
 				path: `${basePath}/moduleSpecifier`,
-				message: diagnosticMessage('Resolved adapter module did not provide a readable canonical manifest.', cause),
+				message: diagnosticMessage('Resolved adapter module did not provide a readable canonical manifest.', cause, roots),
 			})
 			summaries.push({ index, moduleSpecifier: selection.moduleSpecifier, resolvedModule })
 			continue
@@ -361,7 +409,7 @@ export async function resolveWorkspaceAdapterSet(input: ResolveWorkspaceAdapterS
 			diagnostics.push({
 				code: 'adapter.registry_inspection_failed',
 				path: `${basePath}/manifest`,
-				message: diagnosticMessage('Adapter registry ownership could not be inspected.', cause),
+				message: diagnosticMessage('Adapter registry ownership could not be inspected.', cause, roots),
 			})
 			continue
 		}
@@ -439,8 +487,9 @@ function mapSetDiagnosticsToWorkspaceAdapters(
 	})
 }
 
-function diagnosticMessage(prefix: string, cause: unknown): string {
-	return cause instanceof Error && cause.message ? `${prefix} ${cause.message}` : prefix
+/** `prefix`, then the cause's message with its host paths masked (`maskHostPaths`) against the Workspace roots. */
+function diagnosticMessage(prefix: string, cause: unknown, roots: readonly string[]): string {
+	return cause instanceof Error && cause.message ? `${prefix} ${maskHostPaths(cause.message, roots)}` : prefix
 }
 
 function isContainedPath(root: string, candidate: string): boolean {
