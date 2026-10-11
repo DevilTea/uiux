@@ -427,9 +427,10 @@ function adjustedKeys(member: StoredMember, changes: KeyChanges & MemberAccessIn
 		throw new AccessError('access.invalid_keys', 'Give either a key set or keys to grant and revoke, not both.')
 	const grant = changes.grant === undefined ? [] : normalizeKeys(changes.grant)
 	const revoke = changes.revoke === undefined ? [] : normalizeKeys(changes.revoke)
-	const both = grant.filter(key => revoke.includes(key))
+	const revoked = new Set(revoke)
+	const both = grant.filter(key => revoked.has(key))
 	if (both.length > 0) throw new AccessError('access.invalid_keys', `${keyList(both)} ${both.length > 1 ? 'are' : 'is'} both granted and revoked.`)
-	return normalizeKeys([...member.keys, ...grant].filter(key => !revoke.includes(key)))
+	return normalizeKeys([...member.keys, ...grant].filter(key => !revoked.has(key)))
 }
 
 export function setMember(

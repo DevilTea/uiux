@@ -38,9 +38,11 @@ const addMemberSchema = z.object({
  * accepted so that a change of it is refused with `access.kind_immutable` (Clause
  * 01a12928-6237-7c28-8652-0b129079329b).
  */
+const MAX_KEY_CHANGES = 256
+
 const setMemberSchema = z.object({
-	grant: keysSchema.optional(),
-	revoke: keysSchema.optional(),
+	grant: keysSchema.max(MAX_KEY_CHANGES).optional(),
+	revoke: keysSchema.max(MAX_KEY_CHANGES).optional(),
 	nickname: z.string().optional(),
 	kind: z.enum(MEMBER_KINDS).optional(),
 }).strict()

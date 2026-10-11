@@ -419,6 +419,14 @@ describe('member keys over the administration wire (issue #142, P5)', () => {
 		const both = await patch(owner.id, { grant: ['views.write'], revoke: ['views.write'] })
 		expect(both.status).toBe(400)
 		expect(await both.json()).toMatchObject({ code: 'access.invalid_keys', message: expect.stringContaining('`views.write`') })
+		// At most 256 keys to grant or to revoke in one edit.
+		const many = Array.from({ length: 257 }, (_, index) => `future.key${index}`)
+		for (const change of [{ grant: many }, { revoke: many }]) {
+			const refused = await patch(owner.id, change)
+			expect(refused.status).toBe(400)
+			expect(await refused.json()).toMatchObject({ code: 'malformed_payload' })
+		}
+		expect((await patch(owner.id, { revoke: many.slice(0, 256) })).status).toBe(200)
 	})
 
 	it('refuses a key outside the catalog, a humanOnly key for an Agent and a set lacking a requirement, naming the keys', async () => {
