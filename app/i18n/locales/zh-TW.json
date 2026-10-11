@@ -1484,7 +1484,7 @@
         "locales_write": "建立與編輯 Locale。",
         "assets_write": "新增與取代 Asset。",
         "settings_write": "變更 Workspace 設定。",
-        "product_kit_write": "變更 Adapter 設定、樣式、主題、元件登錄表與 Product Kit 建置。",
+        "product_kit_write": "變更 Adapter 設定、樣式、主題、登錄表與 Product Kit 建置。",
         "product_kit_compose": "變更設計系統，以及 Workspace 使用哪些 Adapter 與其順序。",
         "evidence_capture": "擷取正式 Evidence。",
         "handoff_export": "匯出 Handoff。",
