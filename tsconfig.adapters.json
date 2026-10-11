@@ -14,5 +14,5 @@
 		"resolveJsonModule": true,
 		"types": []
 	},
-	"include": ["design/adapters/**/*.ts"]
+	"include": ["design/adapters/**/*.ts", ".uiux/kit/**/*.ts"]
 }
