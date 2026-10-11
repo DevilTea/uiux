@@ -2,7 +2,7 @@ import { lstat, stat } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { resolve } from 'node:path'
 
-import { BUILT_IN_ACCESS_PRESETS, isCatalogKey, keysOfPreset, PERMISSION_KEYS } from '../application/access/keys'
+import { BUILT_IN_ACCESS_PRESETS, isCatalogKey, isHumanOnlyKey, keysOfPreset, PERMISSION_KEYS } from '../application/access/keys'
 import { memberLabel, memberLabelName, type LabelPreset } from '../application/access/labels'
 import { isMemberKind, type MemberKind } from '../application/access/principal'
 import { FileNativePersistence } from '../persistence/file-native'
@@ -82,7 +82,9 @@ function parse(args: readonly string[], valueOptions: readonly string[], flagOpt
 		const arg = args[index]!
 		if (arg.startsWith('--')) {
 			const name = arg.slice(2)
-			if (Object.hasOwn(removedOptions, name)) throw new UsageError(removedOptions[name]!)
+			// A removed option is named however it is given, `--role editor` or `--role=editor`.
+			const bare = name.split('=', 1)[0]!
+			if (Object.hasOwn(removedOptions, bare)) throw new UsageError(removedOptions[bare]!)
 			if (flagOptions.includes(name)) {
 				if (flags.has(name)) throw new UsageError(`--${name} was given twice.`)
 				flags.add(name)
@@ -139,13 +141,19 @@ function keyListOption(raw: string): string[] {
 	return normalizeKeys(raw.split(',').map(key => key.trim()).filter(key => key.length > 0))
 }
 
-/** The note printed when a preset applied to an Agent leaves out its `humanOnly` keys (Rule 01a11c74-26ef-7894-9b2c-2714f487aeb8). */
-function droppedKeysNote(preset: LabelPreset, kind: MemberKind): string | undefined {
-	const applied = keysOfPreset(kind, preset.keys)
-	const dropped = preset.keys.filter(key => !applied.includes(key))
+/**
+ * The note printed when a preset (Rule 01a11c74-26ef-7894-9b2c-2714f487aeb8) or `--all-keys`
+ * (Clause 01a1144e-5660-7944-8946-079fe3065a47) gives an Agent its keys without the `humanOnly`
+ * ones, naming the keys left out.
+ */
+function droppedKeysNote(source: string, keys: readonly string[], kind: MemberKind): string | undefined {
+	const applied = keysOfPreset(kind, keys)
+	const dropped = keys.filter(key => !applied.includes(key))
 	if (dropped.length === 0) return undefined
-	return `  Applied the ${preset.name} preset without ${dropped.join(', ')}: an Agent cannot hold humanOnly keys.`
+	return `  ${source} without ${dropped.join(', ')}: an Agent cannot hold humanOnly keys.`
 }
+
+const presetNote = (preset: LabelPreset, kind: MemberKind) => droppedKeysNote(`Applied the ${preset.name} preset`, preset.keys, kind)
 
 const ROLE_REMOVED = '--role was removed; give an Access preset with --preset <name>, such as --preset Editor.'
 
@@ -279,7 +287,9 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				const store = await requireStore(context)
 				const member = await store.update(file => addMember(file, { nickname: context.parsed.positionals[0]!, keys, kind }, context.now()))
 				context.out(`Added ${member.kind} member ${member.nickname} (${accessSummary(member)}) to roster ${store.data.hint} for ${store.data.workspaceRoot}.`)
-				const note = preset && droppedKeysNote(preset, member.kind)
+				const note = preset
+					? presetNote(preset, member.kind)
+					: flags.has('all-keys') ? droppedKeysNote('Gave every catalog key', PERMISSION_KEYS, member.kind) : undefined
 				if (note) context.out(note)
 				if (member.kind === 'agent') context.out(`  Next: uiux token create --workspace ${store.data.workspaceRoot} --member ${member.nickname}`)
 				else context.out(`  Next: uiux invite create --workspace ${store.data.workspaceRoot} --member ${member.nickname}`)
@@ -331,20 +341,30 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				const preset = presetName !== undefined ? resolvePreset(presetName) : undefined
 				const changesKeys = preset !== undefined || grantList !== undefined || revokeList !== undefined
 				let notHeld: string[] = []
+				let notGranted: string[] = []
 				const store = await requireStore(context)
 				// The keys are computed from the roster read under the store's lock, so a concurrent writer's change is not lost.
 				const member = await store.update((file) => {
 					const current = requireMember(file, context.parsed.positionals[0]!)
 					if (!changesKeys) return setMember(file, current.nickname, { ...(nickname !== undefined ? { nickname } : {}) })
-					// A preset replaces the key set (Rule 01a11c09-b8c6-741e-b3b7-97f4840985c5); --grant and --revoke then adjust it.
-					const base = preset ? keysOfPreset(current.kind, preset.keys) : current.keys
-					notHeld = revoke.filter(key => !base.includes(key))
+					// A preset replaces the member's known keys with its own (Rule 01a11c09-b8c6-741e-b3b7-97f4840985c5)
+					// and keeps the keys this version does not know (Rule 01a11c09-b7ec-786f-9723-eda32404d421; owner
+					// ruling of 2026-10-11 on PR #189); --grant and --revoke then adjust it.
+					const base = preset
+						? [...keysOfPreset(current.kind, preset.keys), ...current.keys.filter(key => !isCatalogKey(key))]
+						: current.keys
+					const absent = revoke.filter(key => !base.includes(key))
+					// A humanOnly key is never granted to an Agent, so revoking one changes nothing.
+					notGranted = current.kind === 'agent' ? absent.filter(isHumanOnlyKey) : []
+					notHeld = absent.filter(key => !notGranted.includes(key))
 					const keys = [...base.filter(key => !revoke.includes(key)), ...grant]
 					return setMember(file, current.nickname, { keys, ...(nickname !== undefined ? { nickname } : {}) })
 				})
 				if (notHeld.length > 0) context.err(`uiux: warning: ${member.nickname} did not hold ${notHeld.join(', ')}; nothing to revoke there.`)
+				if (notGranted.length > 0)
+					context.err(`uiux: warning: ${notGranted.join(', ')} ${notGranted.length > 1 ? 'are humanOnly keys' : 'is a humanOnly key'}, not granted to an Agent such as ${member.nickname}; nothing to revoke there.`)
 				context.out(`Updated ${member.nickname}: ${member.kind}, ${accessSummary(member)}.`)
-				const note = preset && droppedKeysNote(preset, member.kind)
+				const note = preset && presetNote(preset, member.kind)
 				if (note) context.out(note)
 				return 0
 			},
