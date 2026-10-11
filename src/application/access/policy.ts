@@ -1,5 +1,5 @@
 import { inCatalogOrder, isHumanOnlyKey, writeKeyForKind, type PermissionKey } from './keys'
-import type { AccessRole, MemberPrincipal, Principal } from './principal'
+import type { MemberPrincipal, Principal } from './principal'
 
 /**
  * The permission policy as data, shared by `/api/*` and `/mcp`: each operation declares the
@@ -101,12 +101,6 @@ export type ScopeDenied = Readonly<{
 	requiredKeys: readonly PermissionKey[]
 	message: string
 }>
-
-const ROLE_LABEL: Readonly<Record<AccessRole, string>> = { viewer: 'Viewer', reviewer: 'Reviewer', editor: 'Editor', owner: 'Owner' }
-
-export function roleLabel(role: AccessRole): string {
-	return ROLE_LABEL[role]
-}
 
 /**
  * The keys that take effect for this request: a system credential holds none (Clause

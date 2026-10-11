@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { userInfo } from 'node:os'
 
 import { grantedKeys, PERMISSION_KEYS, writeKeyForKind } from '../../application/access/keys'
-import { compatibilityRole } from '../../application/access/labels'
+import { memberLabel } from '../../application/access/labels'
 import type { Lease, LeaseManager } from '../../application/access/leases'
 import {
 	type MemberPrincipal,
@@ -465,16 +465,19 @@ export function memberKeys(member: Pick<StoredMember, 'kind' | 'keys'>) {
 	return grantedKeys(member.kind, member.keys)
 }
 
-/** The principal of a request authenticated as `member`, its keys resolved now (Rule 01a11485-ebdd-70fc-b853-0621caf056b8). */
+/**
+ * The principal of a request authenticated as `member`, its keys resolved now (Rule
+ * 01a11485-ebdd-70fc-b853-0621caf056b8) and its label computed from its stored keys (Rule
+ * 01a11c09-c9be-736b-95a4-0b39d6f64cf0), so a stored key unknown to this version makes it Custom.
+ */
 export function memberPrincipal(member: StoredMember, credential: 'session' | 'token', credentialId: string): MemberPrincipal {
-	const keys = memberKeys(member)
 	return {
 		type: 'member',
 		memberId: member.id,
 		nickname: member.nickname,
 		kind: member.kind,
-		role: compatibilityRole({ kind: member.kind, keys }),
-		keys,
+		keys: memberKeys(member),
+		label: memberLabel(member),
 		credential,
 		credentialId,
 	}

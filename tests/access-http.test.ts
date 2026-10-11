@@ -40,6 +40,7 @@ import { LOOPBACK_ONLY_NETWORK, resolveNetworkConfig, setServerNetwork, type Net
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import { provisionToken } from './support/access'
+import { keysForRole, PERMISSION_KEYS } from '../src/application/access/keys'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const spec = { intent: 'x', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [] }
@@ -124,7 +125,9 @@ describe('first-run bootstrap and sign-in', () => {
 		const invite = inviteLink!.split('#')[1]!
 		const login = await fetch(`${origin}/api/session/login`, json({ credential: invite }))
 		expect(login.status).toBe(200)
-		expect(await login.json()).toMatchObject({ member: { kind: 'human', role: 'owner' } })
+		// Clause 01a11485-faa9: the session wire carries the keys and the label, not a role.
+		const signedIn = await login.json() as { member: Record<string, unknown> }
+		expect(signedIn).toEqual({ member: { id: expect.any(String), nickname: expect.any(String), kind: 'human', keys: [...PERMISSION_KEYS], label: { preset: { id: 'owner', name: 'Owner' } } } })
 		const cookie = login.headers.get('set-cookie')!
 		expect(cookie).toMatch(/^uiux_session_[a-z2-7]{4}=uiux_s_[a-z2-7]{4}_/u)
 		expect(cookie).toContain('HttpOnly')
@@ -139,7 +142,10 @@ describe('first-run bootstrap and sign-in', () => {
 		expect(await reused.json()).toMatchObject({ code: 'auth.invalid_credential' })
 
 		const me = await fetch(`${origin}/api/session`, { headers: { cookie: ownerCookie } })
-		expect(await me.json()).toMatchObject({ member: { role: 'owner', kind: 'human' }, credential: 'session', workspaceRoot: root })
+		const current = await me.json() as { member: Record<string, unknown> }
+		expect(current).toMatchObject({ member: { kind: 'human', keys: [...PERMISSION_KEYS], label: { preset: { id: 'owner', name: 'Owner' } } }, credential: 'session', workspaceRoot: root })
+		expect(current.member).not.toHaveProperty('role')
+		expect(current.member).toEqual(signedIn.member)
 	})
 })
 
@@ -313,7 +319,7 @@ describe('authentication on every surface', () => {
 		const client = new Client({ name: 'uiux-access-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto', probe: { timeoutMs: 2_000 } } })
 		try {
 			await client.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp`), { requestInit: { headers: bearer(agentToken) } }))
-			expect(client.getInstructions()).toMatch(/^Authenticated as claude \(agent, editor\)\./u)
+			expect(client.getInstructions()).toMatch(/^Authenticated as claude \(agent, Editor\)\. Your effective permission keys: workspace\.read, history\.read, /u)
 			const created = await client.callTool({ name: 'create_view', arguments: { id: VIEW_ID, name: 'Leased', spec } })
 			expect(created.isError).not.toBe(true)
 		}
@@ -375,8 +381,14 @@ describe('authentication on every surface', () => {
 describe('Owner administration over the loopback cookie session', () => {
 	it('adds members, reveals a token once, creates invites, lists and revokes sessions', async () => {
 		const headers = { cookie: ownerCookie }
-		const roster = await (await fetch(`${origin}/api/access/members`, { headers })).json() as { workspaceRoot: string; hint: string; members: { nickname: string; id: string }[] }
+		const roster = await (await fetch(`${origin}/api/access/members`, { headers })).json() as { workspaceRoot: string; hint: string; members: { nickname: string; id: string; kind: string; keys: string[]; label: unknown }[] }
 		expect(roster.workspaceRoot).toBe(root)
+		// Each listed member carries its stored keys and a label computed now (Clause 01a11c09-a49b). An Agent
+		// holding the Editor keys it can hold is labeled Editor (Scenario 01a11c09-d61f).
+		const claude = roster.members.find(member => member.nickname === 'claude')!
+		expect(claude.keys).toEqual(keysForRole('agent', 'editor'))
+		expect(claude.label).toEqual({ preset: { id: 'editor', name: 'Editor' } })
+		expect(roster.members.find(member => member.kind === 'human')!.label).toEqual({ preset: { id: 'owner', name: 'Owner' } })
 		const added = await fetch(`${origin}/api/access/members`, json({ nickname: 'mei', role: 'reviewer' }, headers))
 		expect(added.status).toBe(201)
 		const mei = (await added.json() as { member: { id: string } }).member
@@ -396,6 +408,7 @@ describe('Owner administration over the loopback cookie session', () => {
 		const invite = await (await fetch(`${origin}/api/access/invites`, json({ memberId: mei.id }, headers))).json() as { url: string }
 		expect(invite.url).toMatch(new RegExp(`^${origin}/login#uiux_i_`, 'u'))
 		const meiLogin = await fetch(`${origin}/api/session/login`, json({ credential: invite.url.split('#')[1] }))
+		expect(await meiLogin.json()).toMatchObject({ member: { nickname: 'mei', kind: 'human', keys: keysForRole('human', 'reviewer'), label: { preset: { id: 'reviewer', name: 'Reviewer' } } } })
 		const meiCookie = meiLogin.headers.get('set-cookie')!.split(';', 1)[0]!
 		expect((await fetch(`${origin}/api/access/members`, { headers: { cookie: meiCookie } })).status).toBe(403)
 		const sessions = await (await fetch(`${origin}/api/access/sessions`, { headers })).json() as { sessions: { id: string; member: string; current: boolean }[] }

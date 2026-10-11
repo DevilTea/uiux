@@ -58,7 +58,7 @@ export function memberLabelName(label: MemberLabel): string {
 
 /**
  * A role for the surfaces that still speak roles until they move to keys and labels (issue #142:
- * the session wire, the Members page and the MCP instructions): the highest built-in preset whose
+ * the Members page's role select and `uiux member list`): the highest built-in preset whose
  * keys, without `humanOnly` keys for an Agent, the member's granted keys all include, and
  * `viewer` when none does. The built-in presets are nested, so a member labeled with a built-in
  * preset gets that preset's `id`. It authorizes nothing: the server checks keys.
