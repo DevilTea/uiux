@@ -10,7 +10,7 @@ import { validateAssetContentFiles, validateAssetContentMetadata, validateAssetM
 import { validateFlowResource, type FlowResource } from '../domain/flows/schema'
 import { validateI18nResource, type I18nResource } from '../domain/i18n/schema'
 import { PRODUCT_KIT_RESOURCE_KEY, PRODUCT_KIT_RESOURCE_KIND, PRODUCT_KIT_SCHEMA_VERSION, validateProductKit, type ProductKit } from '../domain/product-kit/schema'
-import { isCanonicalLocaleFilename, isFullUuid, isJsonValue, isRecord, type Diagnostic } from '../domain/validation'
+import { isCanonicalLocaleFilename, isFullUuid, isJsonValue, isRecord, isSafeRelativePath, type Diagnostic } from '../domain/validation'
 import { validateReviewThread, type ReviewThread } from '../domain/reviews/schema'
 import { validateViewResource, type ViewResource } from '../domain/views/schema'
 import { validateWorkspaceManifest, type WorkspaceManifest } from '../domain/workspace/schema'
@@ -303,8 +303,9 @@ type PlannedMigration = Readonly<{
  * The pending journal of a relocation, `{ layout, relocationEntries, relocation }`: `layout` names the
  * target layout as the `schemaVersion` 5 journal format does, `relocationEntries` are the files to
  * write, relative to the new root, and `relocation` records the old layout, its metadata directory
- * (which becomes the new root), the data directories moved into it, and the digest of the new
- * manifest, whose presence marks the commit point. The journal has neither `changes` (the old
+ * (which becomes the new root), the data directories moved into it, the directories the files need
+ * that do not exist yet (`createdDirectories`, relative to the new root, parents first), which a
+ * rollback removes again, and the digest of the new manifest, whose presence marks the commit point. The journal has neither `changes` (the old
  * layout's format) nor `entries` (the plain `schemaVersion` 5 format), so every build that predates
  * relocations, an old-layout one or a dormant `schemaVersion` 5 one, fails its recovery and keeps
  * the journal instead of applying it as a plain transaction.
@@ -312,7 +313,7 @@ type PlannedMigration = Readonly<{
 type RelocationJournal = Readonly<{
 	layout: string
 	relocationEntries: readonly JournalEntry[]
-	relocation: Readonly<{ from: string; metadataDir: string; moves: readonly string[]; manifest: string }>
+	relocation: Readonly<{ from: string; metadataDir: string; moves: readonly string[]; createdDirectories: readonly string[]; manifest: string }>
 }>
 
 /** Data files first, then the other root files, then the manifest: replacing the manifest commits a relocation. */
@@ -342,7 +343,9 @@ async function readRelocationJournal(journalPath: string): Promise<RelocationJou
 		throw new TypeError('Relocation journal has an invalid shape.')
 	if (relocation.from !== LEGACY_LAYOUT.id || relocation.metadataDir !== LEGACY_LAYOUT.metadataDir || typeof relocation.manifest !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(relocation.manifest)
 		|| !Array.isArray(relocation.moves) || relocation.moves.some(move => typeof move !== 'string' || !RELOCATED_DATA_DIRECTORIES.includes(move))
-		|| new Set(relocation.moves).size !== relocation.moves.length)
+		|| new Set(relocation.moves).size !== relocation.moves.length
+		|| !Array.isArray(relocation.createdDirectories) || new Set(relocation.createdDirectories).size !== relocation.createdDirectories.length
+		|| relocation.createdDirectories.some(directory => typeof directory !== 'string' || !isSafeRelativePath(directory) || !RELOCATED_DATA_DIRECTORIES.includes(directory.split('/')[0]!)))
 		throw new TypeError('Relocation journal has an invalid relocation record.')
 	const entries: JournalEntry[] = []
 	for (const entry of value.relocationEntries) {
@@ -355,7 +358,7 @@ async function readRelocationJournal(journalPath: string): Promise<RelocationJou
 	}
 	if (new Set(entries.map(entry => entry.path)).size !== entries.length)
 		throw new TypeError('Relocation journal repeats a path.')
-	return { layout: V5_LAYOUT.id, relocationEntries: entries, relocation: { from: LEGACY_LAYOUT.id, metadataDir: LEGACY_LAYOUT.metadataDir, moves: relocation.moves as string[], manifest: relocation.manifest } }
+	return { layout: V5_LAYOUT.id, relocationEntries: entries, relocation: { from: LEGACY_LAYOUT.id, metadataDir: LEGACY_LAYOUT.metadataDir, moves: relocation.moves as string[], createdDirectories: relocation.createdDirectories as string[], manifest: relocation.manifest } }
 }
 
 /** Removes a directory only when it exists and is empty; anything else stays. */
@@ -619,10 +622,11 @@ export class FileNativePersistence {
 		await ensureSafeDirectory(this.root, this.layout.transactionsDir)
 		await fs.mkdir(transactionAbsolute)
 		await syncDirectory(dirname(transactionAbsolute))
+		const createdDirectories = await this.relocationCreatedDirectoriesUnlocked(ordered, relocation.moves)
 		const journal: RelocationJournal = {
 			layout: target.id,
 			relocationEntries: ordered.map(change => ({ path: change.path, existed: relocation.relocatedInitial.has(change.path) })),
-			relocation: { from: this.layout.id, metadataDir, moves: [...relocation.moves], manifest: digestBytes(manifest.bytes) },
+			relocation: { from: this.layout.id, metadataDir, moves: [...relocation.moves], createdDirectories, manifest: digestBytes(manifest.bytes) },
 		}
 		let journalWritten = false
 		try {
@@ -694,6 +698,26 @@ export class FileNativePersistence {
 	}
 
 	/**
+	 * The directories, relative to the new root and parents first, that writing `changes` after the
+	 * moves would create: every ancestor of a written file that does not exist then. A directory of a
+	 * moved data directory exists then exactly when it exists now at the old root.
+	 */
+	private async relocationCreatedDirectoriesUnlocked(changes: readonly FileChange[], moves: readonly string[]): Promise<string[]> {
+		const created = new Set<string>()
+		for (const change of changes) {
+			if (change.bytes === undefined) continue
+			const segments = change.path.split('/')
+			for (let depth = 1; depth < segments.length; depth++) {
+				const directory = segments.slice(0, depth).join('/')
+				if (created.has(directory)) continue
+				const now = moves.includes(segments[0]!) ? directory : `${this.layout.metadataDir}/${directory}`
+				if (!await lstatOrUndefined(resolveWorkspacePath(this.root, now))) created.add(directory)
+			}
+		}
+		return [...created].sort((left, right) => left.split('/').length - right.split('/').length || compareCodeUnits(left, right))
+	}
+
+	/**
 	 * True once a relocation reached its commit point: the transaction is marked committed, or the
 	 * manifest (at `manifestPrefix` plus the new layout's manifest path) already holds the new bytes.
 	 */
@@ -726,10 +750,6 @@ export class FileNativePersistence {
 			if (!entry.existed) {
 				await assertSafePath(this.root, physical, true)
 				await fs.rm(resolveWorkspacePath(this.root, physical), { force: true })
-				// A directory below a data directory that held only this file (a new Asset's) goes too.
-				const segments = entry.path.split('/')
-				for (let depth = segments.length - 1; depth > 1; depth--)
-					await removeEmptyDirectory(resolveWorkspacePath(this.root, `${metadataDir}/${segments.slice(0, depth).join('/')}`))
 				continue
 			}
 			let backup: Buffer
@@ -737,6 +757,10 @@ export class FileNativePersistence {
 			catch (cause) { throw new Error(`Relocation backup for ${entry.path} is missing or unreadable.`, { cause }) }
 			await atomicWriteWithoutFault(this.root, physical, backup)
 		}
+		// The directories the relocation created go again, children first, once they are empty; a directory
+		// that existed before is never removed.
+		for (const directory of [...journal.relocation.createdDirectories].reverse())
+			await removeEmptyDirectory(resolveWorkspacePath(this.root, `${metadataDir}/${directory}`))
 		for (const [index, directory] of [...moves].reverse().entries()) {
 			if (!moved.has(directory)) continue
 			await this.hitFault('relocation.before_rollback_move', { path: directory, index, operation: 'migration' })
@@ -745,11 +769,6 @@ export class FileNativePersistence {
 			await fs.rename(destination, resolveWorkspacePath(this.root, directory))
 			await syncDirectory(dirname(destination))
 			await syncDirectory(this.root)
-		}
-		// A data directory the relocation created in the new root goes again once it is empty.
-		for (const directory of RELOCATED_DATA_DIRECTORIES) {
-			if (moves.includes(directory)) continue
-			await removeEmptyDirectory(resolveWorkspacePath(this.root, `${metadataDir}/${directory}`))
 		}
 	}
 

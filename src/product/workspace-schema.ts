@@ -202,10 +202,11 @@ export const WORKSPACE_V4_TO_V5_STEP_ID = 'uiux.v4-to-v5'
  * `refuse`, which `uiux migrate` runs before anything is written, lists every Adapter the
  * relocated Workspace could not resolve: a `./` Adapter outside `.uiux/kit/` with its replacement
  * (Rule 01a11bb1-9658-7f9e-972e-bd09136a5735, Clause 01a12626-e5c9-7753-8019-cdf82a5410ce), and,
- * per owner ruling 2 of https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18858856,
- * a bare Adapter whose package `.uiux/kit/package.json` does not declare, or a `./` Adapter in
- * `.uiux/kit/node_modules/`, with its bare replacement. It names the packages to declare and writes
- * no `package.json`. `apply` alone never refuses, so an in-memory upgrade of a version recorded
+ * per owner ruling 2 of https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18858856
+ * (Rule 01a12997-75d3-7852-93ec-46f5aa3cf98d), a bare Adapter whose package `.uiux/kit/package.json`
+ * does not declare, or a `./` Adapter in `.uiux/kit/node_modules/`. It names the packages to declare,
+ * gives a `./` specifier with a `node_modules` segment its bare replacement and writes no
+ * `package.json` (Clause 01a1294a-1f53-7abe-8ac3-4fe4542c4618). `apply` alone never refuses, so an in-memory upgrade of a version recorded
  * before the hand edit (Rule 01a12626-6a4f-72dc-af92-67b3b6355d66) still reads: it keeps such a
  * specifier unchanged.
  */

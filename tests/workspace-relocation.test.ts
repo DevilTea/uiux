@@ -583,6 +583,7 @@ describe('relocation crash safety', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, 
 		expect(journal).not.toHaveProperty('entries')
 		expect(journal).not.toHaveProperty('changes')
 		expect(journal.relocationEntries).toEqual([{ path: 'product-kit.json', existed: false }, { path: 'workspace.json', existed: true }])
+		expect(journal.relocation).toMatchObject({ createdDirectories: [] })
 		// A relocation journal that also carries a plain `entries` list is not guessed at either.
 		await writeFile(join(killed, '.uiux', '.transactions', transaction!, 'journal.json'), JSON.stringify({ ...journal, entries: [] }))
 		await expect(new FileNativePersistence({ root: killed, schemaPolicy: V5_TEST_SCHEMA_POLICY }).inspectWorkspace()).rejects.toMatchObject({ code: 'persistence.recovery_failed' })
@@ -617,30 +618,47 @@ describe('relocation crash safety', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, 
 		}
 	})
 
-	it('removes the directories a rolled-back relocation created below a data directory', async () => {
+	it('removes only the directories a rolled-back relocation created, keeping an empty one that existed before', async () => {
 		const NEW_ASSET = '66666666-6666-4666-8666-666666666666'
-		// A step that, like a future one might, adds an Asset in a new directory while relocating.
+		const EMPTY_ASSET = '77777777-7777-4777-8777-777777777777'
+		// A step that, like a future one might, adds Assets while relocating: one in a new directory,
+		// one in a directory that already exists and is empty.
+		const asset = (id: string) => [
+			[`assets/${id}/asset.json`, canonicalJsonBytes({ id, name: 'new', contentFilename: 'new.svg', mediaType: 'image/svg+xml' })],
+			[`assets/${id}/new.svg`, new TextEncoder().encode('<svg/>')],
+		] as const
 		const policy = defineWorkspaceSchemaPolicy({
 			currentVersion: 5,
 			recognizedVersions: [4, 5],
 			steps: [{
 				...WORKSPACE_V4_TO_V5_STEP,
 				async apply(snapshot) {
-					const next = new Map(await WORKSPACE_V4_TO_V5_STEP.apply(snapshot))
-					next.set(`assets/${NEW_ASSET}/asset.json`, canonicalJsonBytes({ id: NEW_ASSET, name: 'new', contentFilename: 'new.svg', mediaType: 'image/svg+xml' }))
-					next.set(`assets/${NEW_ASSET}/new.svg`, new TextEncoder().encode('<svg/>'))
-					return next
+					return new Map([...await WORKSPACE_V4_TO_V5_STEP.apply(snapshot), ...asset(NEW_ASSET), ...asset(EMPTY_ASSET)])
 				},
 			}],
 		})
 		const root = await seedOldLayout()
+		await mkdir(join(root, 'assets', EMPTY_ASSET))
 		const before = await canonicalTree(root)
-		const persistence = new FileNativePersistence({ root, schemaPolicy: policy, fault(hit, details) {
-			if (hit === 'migration.before_apply' && details.path === 'workspace.json') throw new Error('injected fault before the commit point')
+		const killed = join(await makeDirectory('uiux-relocation-killed-'), 'design')
+		const persistence = new FileNativePersistence({ root, schemaPolicy: policy, async fault(hit, details) {
+			if (hit === 'migration.before_apply' && details.path === 'workspace.json') {
+				await cp(root, killed, { recursive: true, verbatimSymlinks: true })
+				throw new Error('injected fault before the commit point')
+			}
 		} })
 		await expect(persistence.migrateWorkspace()).rejects.toMatchObject({ code: 'workspace.migration_failed' })
 		expect(await canonicalTree(root)).toEqual(before)
 		expect(await exists(join(root, 'assets', NEW_ASSET))).toBe(false)
+		expect((await readdir(join(root, 'assets', EMPTY_ASSET)))).toEqual([])
+
+		// The journal names only the new directory, and a recovery after a kill there keeps the empty one too.
+		const [transaction] = await readdir(join(killed, '.uiux', '.transactions'))
+		const journal = JSON.parse(await readFile(join(killed, '.uiux', '.transactions', transaction!, 'journal.json'), 'utf8')) as { relocation: { createdDirectories: string[] } }
+		expect(journal.relocation.createdDirectories).toEqual([`assets/${NEW_ASSET}`])
+		await rm(join(killed, '.uiux', '.persistence.lock'), { force: true })
+		await new FileNativePersistence({ root: killed, schemaPolicy: policy }).inspectWorkspace()
+		expect(await canonicalTree(killed)).toEqual(before)
 	})
 
 })
@@ -680,7 +698,7 @@ describe('history across the relocation', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_
 			const code = await runAccessCommand({ argv, env: { UIUX_HOME: home }, cwd: root, schemaPolicy: V5_TEST_SCHEMA_POLICY, stdout: run.stdout, stderr: run.stderr })
 			return { code, out: run.out.join('\n'), err: run.err.join('\n') }
 		}
-		expect((await access('member', 'add', 'claude', '--kind', 'agent', '--role', 'editor', '--workspace', root)).code).toBe(0)
+		expect((await access('member', 'add', 'claude', '--kind', 'agent', '--preset', 'Editor', '--workspace', root)).code).toBe(0)
 		const token = (await access('token', 'create', '--member', 'claude', '--workspace', root)).out.match(/uiux_t_\S+/u)![0]
 
 		const migrate = capture()
