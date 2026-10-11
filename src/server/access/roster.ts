@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
 import { inCatalogOrder, isCatalogKey, isHumanOnlyKey, isPermissionKeyName, keysForRole, missingRequirements, type PermissionKey } from '../../application/access/keys'
-import { compatibilityRole } from '../../application/access/labels'
 import { isAccessRole, isMemberKind, type AccessRole, type MemberKind } from '../../application/access/principal'
 import { isFullUuid } from '../../domain/validation'
 import {
@@ -369,8 +368,9 @@ export function assertManagerKept(before: AccessFile | undefined, after: AccessF
 }
 
 /**
- * The key set a member write asks for: explicit `keys`, or a `role`, which the Members page still
- * sends and which stands for the keys of the built-in preset with that
+ * The key set a member write asks for: explicit `keys`, or a `role`, an in-process shorthand that
+ * no surface sends (the CLI refuses `--role` and the administration wire takes keys) and that
+ * stands for the keys of the built-in preset with that
  * `id` (Clause 01a11bb1-b427-777e-8175-fa24d61d434b), without `humanOnly` keys for an Agent. An
  * Agent asking for the Owner role is refused: its keys are the human-only administration keys.
  */
@@ -664,16 +664,11 @@ export function copyRoster(source: AccessFile, target: Readonly<{ workspaceRoot:
 	}
 }
 
-/**
- * A member as roster administration lists it. `role` is derived from the stored keys
- * (`compatibilityRole`) for the Members page, which still shows roles until it shows keys and
- * labels (issue #142).
- */
+/** A member as roster administration lists it; the administration wire adds its keys and label. */
 export type MemberSummary = Readonly<{
 	id: string
 	nickname: string
 	kind: MemberKind
-	role: AccessRole
 	createdAt: string
 	activeTokens: number
 	activeSessions: number
@@ -684,7 +679,6 @@ export function summarizeMembers(file: AccessFile, now: number): readonly Member
 		id: member.id,
 		nickname: member.nickname,
 		kind: member.kind,
-		role: compatibilityRole(member),
 		createdAt: member.createdAt,
 		activeTokens: file.tokens.filter(token => token.memberId === member.id && isTokenActive(token, now)).length,
 		activeSessions: file.sessions.filter(session => session.memberId === member.id && isSessionActive(session, now)).length,

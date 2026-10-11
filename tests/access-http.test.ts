@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type OutgoingHttpHeaders, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -34,13 +34,13 @@ import mcpAttemptsRoute from '../server/api/access/mcp-attempts.get'
 import { createAccessGuardHandler } from '../src/server/access/http'
 import { generateCredential } from '../src/server/access/credentials'
 import { createInvite, removeMember, revokeToken } from '../src/server/access/roster'
-import { AccessStore } from '../src/server/access/store'
+import { AccessStore, accessStorePaths, resolveUiuxHome } from '../src/server/access/store'
 import { createLoopbackGuardHandler } from '../src/server/loopback-guard'
 import { LOOPBACK_ONLY_NETWORK, resolveNetworkConfig, setServerNetwork, type NetworkConfig } from '../src/server/network-access'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import { provisionToken } from './support/access'
-import { keysForRole, PERMISSION_KEYS } from '../src/application/access/keys'
+import { BUILT_IN_ACCESS_PRESETS, keysForRole, PERMISSION_KEYS } from '../src/application/access/keys'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const spec = { intent: 'x', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [] }
@@ -378,6 +378,99 @@ describe('authentication on every surface', () => {
 	})
 })
 
+describe('member keys over the administration wire (issue #142, P5)', () => {
+	type WireMember = { id: string; nickname: string; kind: string; keys: string[]; label: unknown; role?: unknown }
+	const headers = () => ({ cookie: ownerCookie })
+	const patch = (id: string, body: unknown) => fetch(`${origin}/api/access/members/${id}`, { method: 'PATCH', headers: { ...headers(), 'content-type': 'application/json' }, body: JSON.stringify(body) })
+	const listed = async () => await (await fetch(`${origin}/api/access/members`, { headers: headers() })).json() as { members: WireMember[]; presets: { id: string; name: string; keys: string[] }[] }
+	async function add(body: unknown): Promise<Response> {
+		return await fetch(`${origin}/api/access/members`, json(body, headers()))
+	}
+	/** Hand-edits a member's stored keys in the roster file, as a newer UIUX or a person might. */
+	async function writeStoredKeys(nickname: string, keys: readonly string[]): Promise<void> {
+		const { file } = accessStorePaths(resolveUiuxHome(), root)
+		const roster = JSON.parse(await readFile(file, 'utf8')) as { members: { nickname: string; keys: string[] }[] }
+		for (const member of roster.members) if (member.nickname === nickname) member.keys = [...keys]
+		await writeFile(file, `${JSON.stringify(roster, null, 2)}\n`)
+	}
+
+	it('adds a member with an explicit key set and lists keys, labels and the presets, with no role (Rules 01a11c09-b85c and 01a11c09-ba13)', async () => {
+		const response = await add({ nickname: 'kai', keys: ['views.write', 'workspace.read'] })
+		expect(response.status).toBe(201)
+		const { member } = await response.json() as { member: WireMember }
+		expect(member).toMatchObject({ nickname: 'kai', kind: 'human', keys: ['workspace.read', 'views.write'], label: { custom: true } })
+		expect(member).not.toHaveProperty('role')
+		const roster = await listed()
+		expect(roster.presets.map(preset => [preset.id, preset.name, preset.keys])).toEqual(BUILT_IN_ACCESS_PRESETS.map(preset => [preset.id, preset.name, preset.keys]))
+		for (const item of roster.members) expect(item).not.toHaveProperty('role')
+		expect(roster.members.find(item => item.nickname === 'kai')).toMatchObject({ keys: ['workspace.read', 'views.write'], label: { custom: true } })
+		// A preset's keys, sent as the page sends them, label the member with that preset.
+		expect(await (await patch(member.id, { keys: keysForRole('human', 'editor') })).json()).toMatchObject({ member: { label: { preset: { id: 'editor', name: 'Editor' } } } })
+		expect((await fetch(`${origin}/api/access/members/${member.id}`, { method: 'DELETE', headers: headers() })).status).toBe(200)
+	})
+
+	it('takes keys, not a role', async () => {
+		expect(await (await add({ nickname: 'old', role: 'viewer' })).json()).toMatchObject({ code: 'malformed_payload' })
+		const owner = (await listed()).members.find(item => item.kind === 'human')!
+		expect((await patch(owner.id, { role: 'viewer' })).status).toBe(400)
+	})
+
+	it('refuses a key outside the catalog, a humanOnly key for an Agent and a set lacking a requirement, naming the keys', async () => {
+		const unknown = await add({ nickname: 'nova', keys: ['workspace.read', 'future.capability'] })
+		expect(unknown.status).toBe(400)
+		const unknownBody = await unknown.json() as { code: string; message: string }
+		expect(unknownBody.code).toBe('access.unknown_key')
+		expect(unknownBody.message).toContain('`future.capability`')
+
+		const humanOnly = await add({ nickname: 'bot-admin', kind: 'agent', keys: ['workspace.read', 'members.manage'] })
+		expect(humanOnly.status).toBe(400)
+		const humanOnlyBody = await humanOnly.json() as { code: string; message: string }
+		expect(humanOnlyBody.code).toBe('access.key_human_only')
+		expect(humanOnlyBody.message).toContain('`members.manage`')
+
+		const incomplete = await add({ nickname: 'nova', keys: ['views.write'] })
+		expect(incomplete.status).toBe(400)
+		expect(await incomplete.json()).toMatchObject({ code: 'access.key_requires', message: expect.stringContaining('`views.write` requires `workspace.read`') })
+		expect((await listed()).members.map(item => item.nickname)).not.toContain('nova')
+	})
+
+	it('refuses a change of kind with access.kind_immutable', async () => {
+		const claude = (await listed()).members.find(item => item.nickname === 'claude')!
+		const refused = await patch(claude.id, { kind: 'human', keys: keysForRole('human', 'owner') })
+		expect(refused.status).toBe(400)
+		expect(await refused.json()).toMatchObject({ code: 'access.kind_immutable' })
+		expect((await listed()).members.find(item => item.nickname === 'claude')).toMatchObject({ kind: 'agent', keys: keysForRole('agent', 'editor') })
+	})
+
+	it('keeps an unknown key the member holds when its keys are rewritten, and refuses a new one (Rules 01a11c09-b7ec and 01a128be-99df)', async () => {
+		const { member } = await (await add({ nickname: 'ivy', keys: keysForRole('human', 'viewer') })).json() as { member: WireMember }
+		await writeStoredKeys('ivy', [...keysForRole('human', 'viewer'), 'future.capability'])
+		expect((await listed()).members.find(item => item.nickname === 'ivy')).toMatchObject({ keys: [...keysForRole('human', 'viewer'), 'future.capability'], label: { custom: true } })
+		// The Reviewer preset applied on the page: its keys plus the unknown key the member holds.
+		const applied = await patch(member.id, { keys: [...keysForRole('human', 'reviewer'), 'future.capability'] })
+		expect(applied.status).toBe(200)
+		expect((await applied.json() as { member: WireMember }).member.keys).toEqual([...keysForRole('human', 'reviewer'), 'future.capability'])
+		const added = await patch(member.id, { keys: [...keysForRole('human', 'reviewer'), 'future.capability', 'future.other'] })
+		expect(added.status).toBe(400)
+		expect(await added.json()).toMatchObject({ code: 'access.unknown_key', message: expect.stringContaining('`future.other`') })
+		// Unchecking a held unknown key removes it.
+		expect((await (await patch(member.id, { keys: keysForRole('human', 'reviewer') })).json() as { member: WireMember }).member.keys).toEqual(keysForRole('human', 'reviewer'))
+		expect((await fetch(`${origin}/api/access/members/${member.id}`, { method: 'DELETE', headers: headers() })).status).toBe(200)
+	})
+
+	it('lets a manager drop members.manage while another person holds it, and refuses the last one (Rule 01a11485-eae3)', async () => {
+		const owner = (await listed()).members.find(item => item.kind === 'human' && item.keys.includes('members.manage'))!
+		const { member: lead } = await (await add({ nickname: 'lead', keys: [...PERMISSION_KEYS] })).json() as { member: WireMember }
+		const dropped = await patch(lead.id, { keys: keysForRole('human', 'editor') })
+		expect(dropped.status).toBe(200)
+		const last = await patch(owner.id, { keys: keysForRole('human', 'editor') })
+		expect(last.status).toBe(409)
+		expect(await last.json()).toMatchObject({ code: 'access.last_manager' })
+		expect((await listed()).members.find(item => item.id === owner.id)!.keys).toContain('members.manage')
+		expect((await fetch(`${origin}/api/access/members/${lead.id}`, { method: 'DELETE', headers: headers() })).status).toBe(200)
+	})
+})
+
 describe('Owner administration over the loopback cookie session', () => {
 	it('adds members, reveals a token once, creates invites, lists and revokes sessions', async () => {
 		const headers = { cookie: ownerCookie }
@@ -389,12 +482,12 @@ describe('Owner administration over the loopback cookie session', () => {
 		expect(claude.keys).toEqual(keysForRole('agent', 'editor'))
 		expect(claude.label).toEqual({ preset: { id: 'editor', name: 'Editor' } })
 		expect(roster.members.find(member => member.kind === 'human')!.label).toEqual({ preset: { id: 'owner', name: 'Owner' } })
-		const added = await fetch(`${origin}/api/access/members`, json({ nickname: 'mei', role: 'reviewer' }, headers))
+		const added = await fetch(`${origin}/api/access/members`, json({ nickname: 'mei', keys: keysForRole('human', 'reviewer') }, headers))
 		expect(added.status).toBe(201)
 		const mei = (await added.json() as { member: { id: string } }).member
-		expect((await fetch(`${origin}/api/access/members`, json({ nickname: 'bot', role: 'owner', kind: 'agent' }, headers))).status).toBe(400)
+		expect((await fetch(`${origin}/api/access/members`, json({ nickname: 'bot', keys: keysForRole('human', 'owner'), kind: 'agent' }, headers))).status).toBe(400)
 		const owner = roster.members.find(member => member.nickname !== 'claude')!
-		const demote = await fetch(`${origin}/api/access/members/${owner.id}`, { method: 'PATCH', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ role: 'viewer' }) })
+		const demote = await fetch(`${origin}/api/access/members/${owner.id}`, { method: 'PATCH', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ keys: keysForRole('human', 'viewer') }) })
 		expect(demote.status).toBe(409)
 		expect(await demote.json()).toMatchObject({ code: 'access.last_manager' })
 

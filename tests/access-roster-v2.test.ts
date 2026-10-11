@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { BUILT_IN_ACCESS_PRESETS, HUMAN_ONLY_PERMISSION_KEYS, keysForRole, PERMISSION_KEYS } from '../src/application/access/keys'
-import { compatibilityRole, memberLabel } from '../src/application/access/labels'
+import { memberLabel } from '../src/application/access/labels'
 import { createLeaseManager } from '../src/application/access/leases'
 import { authorizeOperation, effectiveKeys } from '../src/application/access/policy'
 import { generateCredential, generateHint } from '../src/server/access/credentials'
@@ -489,8 +489,6 @@ describe('principals from stored keys', () => {
 		expect(principal.keys).toEqual(['workspace.read', 'reviews.write', 'checkpoints.delete'])
 		expect(principal.label).toEqual({ custom: true })
 		expect(memberPrincipal(v2Member('lead', 'human', presetKeys('owner')), 'session', 'aaaaaaaaaa').label).toEqual({ preset: { id: 'owner', name: 'Owner' } })
-		expect(compatibilityRole(v2Member('lead', 'human', presetKeys('owner')))).toBe('owner')
-		expect(compatibilityRole(v2Member('ed', 'human', [...presetKeys('editor'), 'members.manage']))).toBe('editor')
 	})
 })
 

@@ -1,9 +1,10 @@
 import { getRouterParam, readBody, setResponseHeader, setResponseStatus, type H3Event } from 'h3'
 import { z } from 'zod'
 
-import { compatibilityRole, memberLabel } from '../../application/access/labels'
+import { BUILT_IN_ACCESS_PRESETS } from '../../application/access/keys'
+import { memberLabel, type LabelPreset } from '../../application/access/labels'
 import { effectiveKeys } from '../../application/access/policy'
-import { ACCESS_ROLES, MEMBER_KINDS } from '../../application/access/principal'
+import { MEMBER_KINDS } from '../../application/access/principal'
 import { getSelectedWorkspaceServerRuntime } from '../selected-workspace'
 import { requestOrigin, servesRosterAdministration } from '../loopback-guard'
 import { requestSession } from '../request-session'
@@ -17,15 +18,25 @@ import { memberKeys } from './service'
  * 5, 11 and 12, *Session model*). Administration is a human Owner's cookie session on a loopback
  * origin or an `https` configured origin (Rule 01a12500-b105-7773-822f-359d4dcbd1da).
  */
+/**
+ * A member's explicit key set (Rule 01a11c09-b85c-7d0b-a390-ca3dcd2e4a10). The Members page sends
+ * the whole set it shows, so applying a preset there keeps the unknown keys the member holds (owner
+ * ruling of 2026-10-11 on PR #189). The roster checks each name and refuses a new key outside the
+ * catalog (Clause 01a128be-9a51-726b-b5d9-f73bace107c5).
+ */
+const keysSchema = z.array(z.string())
+
 const addMemberSchema = z.object({
 	nickname: z.string(),
-	role: z.enum(ACCESS_ROLES),
+	keys: keysSchema,
 	kind: z.enum(MEMBER_KINDS).optional(),
 }).strict()
 
+/** `kind` is accepted so that a change of it is refused with `access.kind_immutable` (Clause 01a12928-6237-7c28-8652-0b129079329b). */
 const setMemberSchema = z.object({
-	role: z.enum(ACCESS_ROLES).optional(),
+	keys: keysSchema.optional(),
 	nickname: z.string().optional(),
+	kind: z.enum(MEMBER_KINDS).optional(),
 }).strict()
 
 const createTokenSchema = z.object({
@@ -61,13 +72,20 @@ function respond(event: H3Event, status: number, body: unknown) {
 const access = () => getSelectedWorkspaceServerRuntime().access()
 
 /**
- * A stored member on the administration wire, with its label (Clause
- * 01a11c09-a49b-78c7-9304-7b8239f8a8cf, computed now and never stored) and the role the Members
- * page's role select still shows, derived from its keys (`compatibilityRole`) until the page edits
- * keys (issue #142). The role authorizes nothing.
+ * The Workspace's Access presets, which label members and which the Members page offers to start
+ * from. Below `schemaVersion` 6 a Workspace has no presets file, so they are the built-in presets
+ * (Rule 01a11c09-cb79-744e-bbf6-ec38d6f159ba).
+ */
+function workspacePresets(): readonly LabelPreset[] {
+	return BUILT_IN_ACCESS_PRESETS
+}
+
+/**
+ * A stored member on the administration wire: its stored keys, unknown ones included, and its
+ * label (Clause 01a11c09-a49b-78c7-9304-7b8239f8a8cf, computed now and never stored).
  */
 function memberBody(member: StoredMember) {
-	return { ...member, label: memberLabel(member), role: compatibilityRole(member) }
+	return { ...member, label: memberLabel(member, workspacePresets()) }
 }
 
 /**
@@ -165,15 +183,21 @@ async function admin<T>(event: H3Event, run: (service: Awaited<ReturnType<typeof
 	}
 }
 
-/** The roster's members, each with its stored keys and its label (Scenario 01a11c09-d61f). */
+/**
+ * The roster's members, each with its stored keys and its label (Scenario 01a11c09-d61f), and the
+ * presets the Members page starts a key set from (Rule 01a11c09-ba80-7bef-96fe-4a4bae3ab528), each
+ * with its keys as they are now.
+ */
 export const listMembersForHttp = (event: H3Event) => admin(event, (service) => {
 	const roster = service.roster()
+	const presets = workspacePresets()
 	return {
 		...roster,
 		members: roster.members.map((summary) => {
 			const stored = service.member(summary.id)
-			return stored ? { ...summary, keys: stored.keys, label: memberLabel(stored) } : summary
+			return stored ? { ...summary, keys: stored.keys, label: memberLabel(stored, presets) } : summary
 		}),
+		presets: presets.map(preset => ({ id: preset.id, name: preset.name, keys: preset.keys })),
 	}
 })
 
