@@ -688,6 +688,36 @@ describe('host paths in the Product Kit Resource', () => {
 		expect(maskHostPaths('kit/package.json is not a regular file.', [root])).toBe('kit/package.json is not a regular file.')
 	})
 
+	it('keeps <workspace> to paths inside the root, by path segment', () => {
+		const root = '/srv/acme/ws'
+		expect(maskHostPaths(`in ${root}`, [root])).toBe('in <workspace>')
+		expect(maskHostPaths(`in ${root}/kit/a.mjs.`, [root])).toBe('in <workspace>/kit/a.mjs.')
+		expect(maskHostPaths(`in ${root}-other/kit/a.mjs and ${root}other`, [root])).toBe('in <path> and <path>')
+		expect(maskHostPaths(`in /mnt${root}/kit/a.mjs`, [root])).toBe('in <path>')
+		expect(maskHostPaths(`in file://${root}-other/a.mjs`, [root])).toBe('in <path>')
+		expect(maskHostPaths(`in "${root}-other/a.mjs"`, [root])).toBe('in "<path>"')
+		// The longer of two roots wins.
+		expect(maskHostPaths(`in ${root}/kit/a.mjs`, ['/srv', root])).toBe('in <workspace>/kit/a.mjs')
+	})
+
+	it('masks a path that leaves the root through ..', () => {
+		const root = '/srv/acme/ws'
+		expect(maskHostPaths(`in ${root}/../x.mjs`, [root])).toBe('in <path>')
+		expect(maskHostPaths(`in ${root}/kit/../../other/x.mjs`, [root])).toBe('in <path>')
+		expect(maskHostPaths(`in '${root}/..'`, [root])).toBe('in \'<path>\'')
+		expect(maskHostPaths(`in file://${root}/../x.mjs`, [root])).toBe('in <path>')
+		expect(maskHostPaths(`in ${root}/kit/../src/a.ts`, [root])).toBe('in <workspace>/src/a.ts')
+	})
+
+	it('masks a path with spaces whole', () => {
+		const root = '/srv/my acme/ws'
+		expect(maskHostPaths('Cannot find module \'/Users/John Smith/My File.js\' imported from "/Users/John Smith/a b.mjs"', [root])).toBe('Cannot find module \'<path>\' imported from "<path>"')
+		expect(maskHostPaths('in /Users/John Smith/node_modules/x/package.json imported from /home/a b/c d.mjs', [root])).toBe('in <path> imported from <path>')
+		expect(maskHostPaths('at file:///Users/John%20Smith/x.js', [root])).toBe('at <path>')
+		expect(maskHostPaths(`in ${root}/kit/a b.mjs imported from file:///srv/my%20acme/ws/kit/x.mjs`, [root])).toBe('in <workspace>/kit/a b.mjs imported from <workspace>/kit/x.mjs')
+		expect(maskHostPaths(`in '${root}/kit/a.mjs'`, [root])).toBe('in \'<workspace>/kit/a.mjs\'')
+	})
+
 	it('names no host path outside the Workspace in an Adapter\'s resolution failure', async () => {
 		const parent = await realpath(await mkdtemp(join(tmpdir(), 'uiux-product-kit-parent-')))
 		roots.push(parent)

@@ -1,6 +1,6 @@
 import { lstat, readFile, realpath } from 'node:fs/promises'
 import { isAbsolute, join, posix, relative, sep } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 import { canonicalJsonStringify } from '../domain/canonical-json'
 import type { ProductKit } from '../domain/product-kit/schema'
@@ -80,20 +80,55 @@ function escapesBase(rel: string): boolean {
 	return rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith('../') || isAbsolute(rel)
 }
 
+/** Characters that end a path in a message, and the ones that may precede one. */
+const PATH_END = String.raw`\s'"\x60<>()\],`
+const PATH_LEAD = String.raw`^|[\s'"\x60(=:,[]`
+/** A marker standing for the `index`-th Workspace root, written where the root starts a path. */
+const ROOT_MARK = '\u0001'
+const PATH_START = String.raw`(?:${ROOT_MARK}\d+${ROOT_MARK}|\/|[A-Za-z]:\\|\\\\)`
+/** A file URL. */
+const FILE_URL = new RegExp(String.raw`file:[^${PATH_END}]*`, 'gu')
+/** A path in quotes: everything up to the same closing quote on the line, spaces included. */
+const QUOTED_PATH = new RegExp(String.raw`(['"\x60])(${PATH_START}[^'"\x60\n]*)(?=\1)`, 'gu')
 /**
- * `message` without host paths: the Workspace root's paths and file URLs become `<workspace>`, and
- * any other absolute path or file URL becomes `<path>`, so a Resource or a refusal never names a
- * host path outside the Workspace.
+ * A path outside quotes. It continues past a space when the next word holds a path separator or
+ * ends in a file extension, so a path with spaces is masked whole; masking too much is harmless.
+ */
+const BARE_PATH = new RegExp(String.raw`(${PATH_LEAD})(${PATH_START}[^${PATH_END}]*(?: +(?:[^${PATH_END}]*[\/\\][^${PATH_END}]*|[^${PATH_END}\/\\]*\.[A-Za-z0-9]+(?=$|[${PATH_END}.;:])))*)`, 'gu')
+
+/**
+ * `message` without host paths: a path inside a Workspace root becomes `<workspace>` and its path
+ * below the root, and any other absolute path or file URL, including one that leaves a root
+ * through `..` or only shares a root's name as a prefix (`<root>-other`), becomes `<path>`, so a
+ * Resource or a refusal never names a host path outside the Workspace.
  */
 export function maskHostPaths(message: string, roots: readonly string[]): string {
-	let result = message
-	for (const root of roots) {
-		result = result.split(pathToFileURL(root).href).join('<workspace>')
-		result = result.split(root).join('<workspace>')
+	const ordered = [...new Set(roots)].filter(root => root !== '').sort((a, b) => b.length - a.length)
+	const describe = (path: string): string => {
+		const marked = new RegExp(String.raw`^${ROOT_MARK}(\d+)${ROOT_MARK}`, 'u').exec(path)
+		const candidates = marked ? [[ordered[Number(marked[1])]!, path.slice(marked[0].length)] as const] : ordered.flatMap(root => path === root || path.startsWith(`${root}/`) || path.startsWith(`${root}\\`) ? [[root, path.slice(root.length)] as const] : [])
+		for (const [root, rest] of candidates) {
+			const inside = relative(root, `${root}${rest}`)
+			if (inside === '') return '<workspace>'
+			if (!escapesBase(inside)) return `<workspace>/${inside.split(sep).join('/')}`
+		}
+		return '<path>'
 	}
+	let result = message.replaceAll(ROOT_MARK, '').replace(FILE_URL, (url) => {
+		try {
+			return describe(fileURLToPath(url))
+		}
+		catch {
+			return '<path>'
+		}
+	})
+	ordered.forEach((root, index) => {
+		const escaped = root.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+		result = result.replace(new RegExp(String.raw`(${PATH_LEAD})${escaped}(?=$|[\/\\${PATH_END}.;:!?])`, 'gu'), `$1${ROOT_MARK}${index}${ROOT_MARK}`)
+	})
 	return result
-		.replace(/file:[^\s'"`<>()]*/gu, '<path>')
-		.replace(/(^|[\s'"`(=:,[])(?:\/|[A-Za-z]:\\|\\\\)[^\s'"`<>()\],]*/gu, '$1<path>')
+		.replace(QUOTED_PATH, (_match, quote: string, path: string) => `${quote}${describe(path)}`)
+		.replace(BARE_PATH, (_match, lead: string, path: string) => `${lead}${describe(path)}`)
 }
 
 export type KitCheckInput = Readonly<{
