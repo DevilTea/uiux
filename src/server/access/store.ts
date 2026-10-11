@@ -8,6 +8,7 @@ import type { HostHistoryPaths } from '../../persistence/history/host-store'
 import { generateHint } from './credentials'
 import {
 	AccessError,
+	assertManagerKept,
 	assertRosterWrite,
 	createEmptyAccessFile,
 	readAccessFile,
@@ -32,6 +33,10 @@ import {
 export const ACCESS_FILE_NAME = 'access.json'
 export const ACCESS_LOCK_NAME = '.access.lock'
 export const ACCESS_V1_BACKUP_NAME = 'access.v1.json'
+/** Where a refused roster's message points for recovery (README, "Recovering a roster"). */
+const RECOVERY_HINT = 'See "Recovering a roster" in the UIUX README.'
+/** A temporary file of `writeAtomically` for the roster or its backup. */
+const ROSTER_TEMPORARY = /^access(?:\.v1)?\.json\.[0-9a-f]{12}\.tmp$/u
 const RELOAD_INTERVAL_MS = 1000
 const LOCK_WAIT_MS = 5000
 
@@ -268,6 +273,7 @@ export class AccessStore {
 		if (!await ensureSafeDirectory(paths.home, create)) return undefined
 		if (!await ensureSafeDirectory(paths.workspaces, create)) return undefined
 		if (!await ensureSafeDirectory(paths.dir, create)) return undefined
+		await removeStaleTemporaries(paths)
 		const existing = await AccessStore.readAt(paths, realRoot)
 		if (existing && !existing.legacy) return new AccessStore(realRoot, paths, existing.file, existing.fingerprint)
 		if (existing) {
@@ -321,11 +327,18 @@ export class AccessStore {
 		}
 		catch (error) {
 			if (isNotFound(error)) return undefined
-			throw new AccessError('access.store_invalid', `The access store ${paths.file} is not valid JSON.`)
+			throw new AccessError('access.store_invalid', `The access store ${paths.file} is not valid JSON. ${RECOVERY_HINT}`)
 		}
-		const { file, legacy } = readAccessFile(parsed)
+		let read: ReturnType<typeof readAccessFile>
+		try {
+			read = readAccessFile(parsed)
+		}
+		catch (error) {
+			throw withStorePath(paths, error)
+		}
+		const { file, legacy } = read
 		if (file.workspaceRoot !== realRoot)
-			throw new AccessError('access.store_root_mismatch', `The access store ${paths.file} records Workspace ${file.workspaceRoot}, not ${realRoot}; refusing to reuse it.`)
+			throw new AccessError('access.store_root_mismatch', `The access store ${paths.file} records Workspace ${file.workspaceRoot}, not ${realRoot}; refusing to reuse it. ${RECOVERY_HINT}`)
 		return { file, fingerprint: fingerprintOf(stats), legacy, text }
 	}
 
@@ -439,6 +452,8 @@ export async function writeNewRoster(
 		if (existing && !options.replace)
 			throw new AccessError('access.roster_exists', `Workspace ${realRoot} already has a roster (${paths.file}). Pass --replace to discard it.`)
 		const file = validateAccessFile(options.file(realRoot))
+		// A replacement keeps the last human manager like any other write (owner ruling 2 of 2026-10-11).
+		if (existing) assertManagerKept(await readReplacedRoster(paths, realRoot), file)
 		await writeAtomically(paths.file, serialize(file))
 		return { paths, file }
 	}
@@ -711,6 +726,58 @@ async function listHistoryTree(root: string): Promise<HistoryTreeEntry[]> {
 	}
 	await visit('')
 	return entries
+}
+
+/**
+ * A refused roster's message, naming the file: `$UIUX_HOME/workspaces/<sha256>/access.json`.
+ * Errors other than an invalid store pass through unchanged.
+ */
+function withStorePath(paths: AccessStorePaths, error: unknown): unknown {
+	if (!(error instanceof AccessError) || error.code !== 'access.store_invalid') return error
+	return new AccessError(error.code, `${error.message.replace(/^The access store /u, `The access store ${paths.file} `)} ${RECOVERY_HINT}`)
+}
+
+/**
+ * The roster `access copy --replace` is about to replace, for the last-manager check, or
+ * `undefined` when the store refuses it: replacing a roster that cannot be read is how it is
+ * recovered, and such a roster grants nothing to keep.
+ */
+async function readReplacedRoster(paths: AccessStorePaths, realRoot: string): Promise<AccessFile | undefined> {
+	try {
+		const { file } = readAccessFile(JSON.parse(await readFile(paths.file, 'utf8')))
+		return file.workspaceRoot === realRoot ? file : undefined
+	}
+	catch (error) {
+		if (error instanceof AccessError || error instanceof SyntaxError || isNotFound(error)) return undefined
+		throw error
+	}
+}
+
+/**
+ * Refuses, before `access copy --replace` changes anything, a replacement of the target's roster
+ * that would drop its last human manager (`assertManagerKept`); `writeNewRoster` checks again
+ * under the lock.
+ */
+export async function assertReplacementKeepsManager(home: string, workspaceRoot: string, replacement: AccessFile): Promise<void> {
+	const realRoot = workspaceRealRoot(workspaceRoot)
+	if (!await rosterExists(home, realRoot)) return
+	assertManagerKept(await readReplacedRoster(accessStorePaths(home, realRoot), realRoot), replacement)
+}
+
+/**
+ * Removes temporary files that a killed writer left beside the roster. Every roster write holds
+ * the store lock while its temporary file exists, so under the lock any such file is stale.
+ */
+async function removeStaleTemporaries(paths: AccessStorePaths): Promise<void> {
+	const stale = async () => (await readdir(paths.dir)).filter(name => ROSTER_TEMPORARY.test(name))
+	if ((await stale()).length === 0) return
+	const release = await acquireLock(paths.lock)
+	try {
+		for (const name of await stale()) await rm(join(paths.dir, name), { force: true })
+	}
+	finally {
+		await release()
+	}
 }
 
 function serialize(file: AccessFile): string {

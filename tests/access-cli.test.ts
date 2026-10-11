@@ -213,6 +213,19 @@ describe('uiux access commands', () => {
 		expect(await readFile(paths.v1Backup, 'utf8')).toBe(legacyText)
 	})
 
+	it('refuses an access copy --replace that would drop the target\'s last human manager, before copying anything', async () => {
+		const { base, workspace, home, run } = await setup()
+		await run('member', 'add', 'claude', '--kind', 'agent', '--role', 'editor', '--workspace', workspace)
+		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
+		await sourceHost.writeVersion(hostVersion())
+		const target = await initWorkspace(base, 'moved')
+		await run('member', 'add', 'deviltea', '--role', 'owner', '--workspace', target)
+		const rosterBefore = await readFile(accessStorePaths(home, target).file, 'utf8')
+		expect(await run('access', 'copy', '--from', workspace, '--workspace', target, '--replace')).toMatchObject({ code: 1, err: expect.stringContaining('deviltea is the last human holder of `members.manage`') })
+		expect(await readFile(accessStorePaths(home, target).file, 'utf8')).toBe(rosterBefore)
+		await expect(lstat(hostHistoryPaths(home, target).dir)).rejects.toMatchObject({ code: 'ENOENT' })
+	})
+
 	it('refuses an uninitialized Workspace, a missing --workspace and a UIUX_HOME inside the Workspace', async () => {
 		const { base, workspace, run } = await setup()
 		expect(await run('member', 'list', '--workspace', join(base, 'typo'))).toMatchObject({ code: 2, err: expect.stringContaining('not an initialized UIUX Workspace') })

@@ -27,7 +27,7 @@ import {
 	type AccessFile,
 	type StoredMember,
 } from '../server/access/roster'
-import { AccessStore, assertHomeOutsideWorkspace, copyHostHistory, planHostHistoryCopy, realFuturePath, resolveUiuxHome, rosterExists, workspaceRealRoot, writeNewRoster, type HostHistoryCopyResult } from '../server/access/store'
+import { AccessStore, assertHomeOutsideWorkspace, assertReplacementKeepsManager, copyHostHistory, planHostHistoryCopy, realFuturePath, resolveUiuxHome, rosterExists, workspaceRealRoot, writeNewRoster, type HostHistoryCopyResult } from '../server/access/store'
 
 /**
  * `uiux member | token | invite | session | access copy` (accepted identity decision 9). Every
@@ -384,6 +384,8 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				assertHomeOutsideWorkspace(context.home, context.workspaceRoot)
 				if (!replace && await rosterExists(context.home, context.workspaceRoot))
 					throw new AccessError('access.roster_exists', `Workspace ${context.workspaceRoot} already has a roster. Pass --replace to discard it (and its host history).`)
+				// A replacement keeps the target's last human manager (owner ruling 2 of 2026-10-11).
+				if (replace) await assertReplacementKeepsManager(context.home, context.workspaceRoot, source)
 				const history = await planHostHistoryCopy(context.home, sourceRoot, context.workspaceRoot)
 				let copied: HostHistoryCopyResult | undefined
 				if (history.sourceExists) {

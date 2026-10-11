@@ -1669,6 +1669,7 @@
       "nickname_taken": "這個暱稱已在此 Workspace 中使用。",
       "session_not_found": "這個工作階段不存在或已結束。",
       "token_not_found": "這個 Token 不存在或已撤銷。",
+      "unknown_key": "這個版本的 UIUX 沒有這個權限鍵。",
       "roster_missing": "這個 Workspace 還沒有成員名單。",
       "store_invalid": "成員名單檔案已損壞。",
       "admin_origin_rejected": "成員、Token、登入連結與工作階段只能在伺服器主機的本機迴路網址或 HTTPS 網址上管理，不會透過網路上未加密的 HTTP 進行。請改用上述網址，或在主機上使用 uiux member、uiux token、uiux invite 與 uiux session 指令。"

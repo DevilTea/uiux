@@ -84,6 +84,7 @@ export type AccessErrorCode =
 	| 'access.invalid_kind'
 	| 'access.key_requires'
 	| 'access.key_human_only'
+	| 'access.unknown_key'
 	| 'access.kind_immutable'
 	| 'access.member_not_found'
 	| 'access.token_not_found'
@@ -230,6 +231,8 @@ export function upgradeAccessFile(legacy: Readonly<Record<string, unknown>>): Re
  * misread and a newer one is never silently rewritten.
  */
 export function readAccessFile(value: unknown): Readonly<{ file: AccessFile; legacy: boolean }> {
+	if (isRecord(value) && Number.isInteger(value.version) && (value.version as number) > ACCESS_FILE_VERSION)
+		storeInvalid(`it is roster version ${String(value.version)}, written by a newer UIUX; this UIUX reads versions ${LEGACY_ACCESS_FILE_VERSION} and ${ACCESS_FILE_VERSION}. Use that newer UIUX`)
 	if (isRecord(value) && value.version === LEGACY_ACCESS_FILE_VERSION) {
 		validateRoster(value, LEGACY_ACCESS_FILE_VERSION)
 		return { file: validateAccessFile(upgradeAccessFile(value)), legacy: true }
@@ -307,6 +310,18 @@ export function assertStorableKeys(member: Readonly<{ nickname: string; kind: Me
 		throw new AccessError('access.key_requires', `The keys of ${member.nickname} lack requirements: ${gaps.map(gap => `\`${gap.key}\` requires ${keyList(gap.missing)}`).join('; ')}.`)
 }
 
+/**
+ * Clause 01a128be-9a51-726b-b5d9-f73bace107c5: a key given to a member must be in the catalog
+ * unless the member already holds it, so a key a newer UIUX stored is kept (Rule
+ * 01a11c09-b7ec-786f-9723-eda32404d421) but never newly granted (Rule
+ * 01a128be-99df-75ad-a1a1-6306d7c4cbc6; owner ruling 1 of 2026-10-11).
+ */
+export function assertKnownKeys(nickname: string, keys: readonly string[], held: readonly string[] = []): void {
+	const unknown = keys.filter(key => !isCatalogKey(key) && !held.includes(key))
+	if (unknown.length > 0)
+		throw new AccessError('access.unknown_key', `${keyList(unknown)} ${unknown.length > 1 ? 'are not permission keys' : 'is not a permission key'} of this UIUX version, so ${nickname} cannot be given ${unknown.length > 1 ? 'them' : 'it'}.`)
+}
+
 function sameKeys(left: readonly string[], right: readonly string[]): boolean {
 	const set = new Set(left)
 	return set.size === new Set(right).size && right.every(key => set.has(key))
@@ -314,23 +329,32 @@ function sameKeys(left: readonly string[], right: readonly string[]): boolean {
 
 /**
  * The invariants of a roster write, checked against the roster it replaces (`before`):
- * - each new member, and each member whose kind or keys change, has a storable key set
- *   (`assertStorableKeys`); an unchanged member keeps its keys, so a set written by hand that
- *   lacks a requirement stays as it is and grants only the keys it lists (Rule
- *   01a11c09-b779-7f5f-ba47-170a584a09ce);
- * - a write that would leave no human member holding `members.manage` where one held it is
- *   refused with `access.last_manager` (Rule 01a11485-eae3-7080-8f02-da27fc260e09, Clause
- *   01a114ec-ea2d-7f54-97d1-f981d48795fb), whether it removes a member or changes keys. A roster
- *   that has no such member yet (a new roster, or one with Agents only) is not refused for it:
- *   `uiux dev` bootstraps its manager (Rule 01a11485-eb1a-77fb-a91e-b54c505344da).
+ * - each new member, and each member whose kind or keys change, gets no key outside the catalog
+ *   that it did not hold (`assertKnownKeys`) and has a storable key set (`assertStorableKeys`);
+ *   an unchanged member keeps its keys, so a set written by hand that lacks a requirement stays
+ *   as it is and grants only the keys it lists (Rule 01a11c09-b779-7f5f-ba47-170a584a09ce);
+ * - the last human holder of `members.manage` is kept (`assertManagerKept`).
  */
 export function assertRosterWrite(before: AccessFile | undefined, after: AccessFile): void {
 	const previous = new Map((before?.members ?? []).map(member => [member.id, member]))
 	for (const member of after.members) {
 		const prior = previous.get(member.id)
 		if (prior && prior.kind === member.kind && sameKeys(prior.keys, member.keys)) continue
+		assertKnownKeys(member.nickname, member.keys, prior?.keys)
 		assertStorableKeys(member)
 	}
+	assertManagerKept(before, after)
+}
+
+/**
+ * Rule 01a11485-eae3-7080-8f02-da27fc260e09 (owner ruling 2 of 2026-10-11): a write, including a
+ * replacement by `uiux access copy --replace`, that would leave no human member holding
+ * `members.manage` where one held it before is refused with `access.last_manager` (Clause
+ * 01a114ec-ea2d-7f54-97d1-f981d48795fb). A roster that has no such member yet (a new roster, or
+ * one with Agents only) may still be written: `uiux dev` bootstraps its manager (Rule
+ * 01a11485-eb1a-77fb-a91e-b54c505344da).
+ */
+export function assertManagerKept(before: AccessFile | undefined, after: AccessFile): void {
 	if (!before || hasHumanManager(after)) return
 	const lost = before.members.filter(isHumanManager)
 	if (lost.length === 0) return
@@ -344,9 +368,13 @@ export function assertRosterWrite(before: AccessFile | undefined, after: AccessF
  * `id` (Clause 01a11bb1-b427-777e-8175-fa24d61d434b), without `humanOnly` keys for an Agent. An
  * Agent asking for the Owner role is refused: its keys are the human-only administration keys.
  */
-function requestedKeys(kind: MemberKind, nickname: string, input: Readonly<{ keys?: unknown; role?: unknown }>): string[] | undefined {
+function requestedKeys(kind: MemberKind, nickname: string, input: Readonly<{ keys?: unknown; role?: unknown }>, held: readonly string[] = []): string[] | undefined {
 	if (input.keys !== undefined && input.role !== undefined) throw new AccessError('access.invalid_keys', 'Give either keys or a role, not both.')
-	if (input.keys !== undefined) return normalizeKeys(input.keys)
+	if (input.keys !== undefined) {
+		const keys = normalizeKeys(input.keys)
+		assertKnownKeys(nickname, keys, held)
+		return keys
+	}
 	if (input.role === undefined) return undefined
 	const role = assertRole(input.role)
 	if (kind === 'agent' && role === 'owner')
@@ -385,7 +413,7 @@ export function setMember(
 	if (changes.kind !== undefined && changes.kind !== member.kind)
 		throw new AccessError('access.kind_immutable', 'A member\'s kind is fixed at creation and cannot be changed.')
 	let next: StoredMember = member
-	const keys = requestedKeys(member.kind, member.nickname, changes)
+	const keys = requestedKeys(member.kind, member.nickname, changes, member.keys)
 	if (keys !== undefined) {
 		// Writing a member's keys stores them anew, so they must be storable even when unchanged.
 		assertStorableKeys({ nickname: member.nickname, kind: member.kind, keys })

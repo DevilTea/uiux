@@ -1669,6 +1669,7 @@
       "nickname_taken": "That nickname is already used in this Workspace.",
       "session_not_found": "That session does not exist or has already ended.",
       "token_not_found": "That token does not exist or was already revoked.",
+      "unknown_key": "That permission key does not exist in this version of UIUX.",
       "roster_missing": "This Workspace has no member list yet.",
       "store_invalid": "The member list file is damaged.",
       "admin_origin_rejected": "Members, Tokens, sign-in links and sessions are managed only on the server host’s loopback URL or on an https address, never over plain HTTP on the network. Use one of those, or the uiux member, token, invite and session commands on the host."

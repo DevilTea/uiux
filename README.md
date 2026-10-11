@@ -86,6 +86,14 @@ A moved or renamed Workspace, and every git worktree, starts with an empty roste
 
 Review actors and times on `/api/*` and `/mcp` are stamped by the server from the signed-in member (`member:<uuid>`). A supplied `actor` or `at` is ignored with the warnings `auth.actor_ignored` and `auth.time_ignored`. Resolving needs a human member on a Workbench session; bearer tokens get `review.resolve_requires_workbench`. Each operation needs permission keys; a refusal is `403 auth.scope_denied` whose `requiredKeys` names the keys the request lacks.
 
+#### Recovering a roster
+
+When UIUX refuses a roster (`access.store_invalid`), the message names the file, `$UIUX_HOME/workspaces/<sha256 of the Workspace root's real path>/access.json`, and what is wrong with it. Stop every `uiux dev` for that Workspace before you touch the file, and keep it mode 0600.
+
+- **A hand-edited roster.** Fix what the message names. Each member's `keys` must be an array of distinct permission key names. An Agent must not hold `reviews.resolve`, `checkpoints.delete`, `locks.force-release`, `presets.manage` or `members.manage`, so remove them or the member. When no human member holds `members.manage` after your fix, the next `uiux dev` creates one and prints its sign-in link.
+- **A roster written by a newer UIUX** (a `version` above 2): use that newer UIUX.
+- **Going back to a UIUX that reads only roster version 1.** Move `access.json` aside and copy `access.v1.json` from the same directory to `access.json`. **Restoring the version 1 file revives the roster as it was before the upgrade.** Tokens and sessions revoked since then work again, and removed members return. Members, Tokens and key changes made since then are lost. Revoke and remove them again right after restoring. A later upgrade by a newer UIUX overwrites `access.v1.json`.
+
 ### Connect an agent
 
 `/mcp` always requires `Authorization: Bearer <token>`, loopback included. Give every concurrently running agent its own member:
