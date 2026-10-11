@@ -5,11 +5,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { PRODUCT_KIT_FILENAME } from '../domain/product-kit/schema'
 import {
 	CANONICAL_WORKSPACE_DATA_DIRECTORIES,
+	detectWorkspaceLayout,
 	V5_CODE_DIRECTORY,
 	V5_MANIFEST_PATH,
 	WORKSPACE_DATA_DIRECTORY,
 	WORKSPACE_MANIFEST_PATH,
+	type WorkspaceLayout,
 } from '../persistence/paths'
+import { bareSpecifierPackageName, readDeclaredKitDependencies } from './kit-dependencies'
 
 import { resolve as resolveImport } from 'import-meta-resolve'
 import {
@@ -110,43 +113,159 @@ export interface AdapterSetInstaller<Result> {
 	install(set: ValidatedAdapterSet): Promise<Result>
 }
 
+export type NodeWorkspaceAdapterModuleResolverOptions = Readonly<{
+	/**
+	 * The selected Workspace's layout (a caller holding a persistence passes `persistence.layout`).
+	 * When omitted it is detected from where the Workspace's manifest is; a directory with no
+	 * manifest resolves as below `schemaVersion` 5, from its root.
+	 */
+	layout?: WorkspaceLayout
+}>
+
+/** The schema version whose layout detection falls back to when a directory has no manifest. */
+const MANIFESTLESS_FALLBACK_SCHEMA_VERSION = 1
+
+/**
+ * The base a `./` Adapter specifier resolves from, which is also the root of a `./` Adapter's file
+ * references (Clauses 01a115cd-d109-76d3-9622-85d0080c60b6 and 01a11a5a-45a7-7139-ac1c-d3881976eb71):
+ * `kit/` from `schemaVersion` 5, the Workspace root below it.
+ */
+export function adapterResolutionBase(workspaceRoot: string, layout: WorkspaceLayout): string {
+	return layout.codeDir ? join(resolve(workspaceRoot), layout.codeDir) : resolve(workspaceRoot)
+}
+
 export class NodeWorkspaceAdapterModuleResolver implements AdapterModuleResolver {
+	constructor(private readonly options: NodeWorkspaceAdapterModuleResolverOptions = {}) {}
+
 	async resolve(workspaceRoot: string, moduleSpecifier: string): Promise<ResolvedAdapterModule> {
 		if (!isPortableAdapterModuleSpecifier(moduleSpecifier))
 			throw new Error('Adapter module specifier is not a canonical portable module reference.')
 
 		const root = resolve(workspaceRoot)
-		const relativeSelection = moduleSpecifier.startsWith('./')
-		if (relativeSelection) {
-			const authoredTarget = resolve(root, moduleSpecifier)
-			if (!isContainedPath(root, authoredTarget))
-				throw new Error('Workspace-relative adapter module specifier escapes the selected Workspace root.')
-		}
-
-		const parentUrl = pathToFileURL(join(root, '.uiux-adapter-resolution.mjs')).href
-		const moduleIdentity = resolveImport(moduleSpecifier, parentUrl)
-		if (!moduleIdentity.startsWith('file:'))
-			throw new Error('Adapter module must resolve to a file-backed module.')
-		const resolvedPath = await realpath(fileURLToPath(moduleIdentity))
-
-		const realRoot = await realpath(root)
-		if (relativeSelection && !isContainedPath(realRoot, resolvedPath))
-			throw new Error('Workspace-relative adapter module resolves outside the selected Workspace root.')
-		// Applies to every specifier, not only `./` ones, and to every Workspace on the resolved
-		// path (the selected root, a sibling, or an enclosing one): a bare specifier can resolve via
-		// a monorepo symlink or a self-reference `exports`/`imports` into any Workspace's data.
-		if (await resolvedPathEntersWorkspaceDataDirectory(resolvedPath, realRoot))
-			throw new Error('Adapter module resolves inside a canonical Workspace data directory (in a schemaVersion 5 Workspace root, anywhere outside kit/); Adapter code must live outside authored data that Editors and Agents can write.')
-
-		const packageMetadata = relativeSelection ? {} : await findNearestPackageMetadata(resolvedPath)
-		return {
-			moduleSpecifier,
-			resolvedPath,
-			moduleIdentity: pathToFileURL(resolvedPath).href,
-			...(packageMetadata.name ? { packageName: packageMetadata.name } : {}),
-			...(packageMetadata.version ? { packageVersion: packageMetadata.version } : {}),
-		}
+		const layout = this.options.layout ?? await detectWorkspaceLayout(root, MANIFESTLESS_FALLBACK_SCHEMA_VERSION)
+		return layout.codeDir
+			? resolveFromCodeDirectory(root, layout.codeDir, moduleSpecifier)
+			: resolveFromWorkspaceRoot(root, moduleSpecifier)
 	}
+}
+
+/** Below `schemaVersion` 5: both specifier kinds resolve from the Workspace root (Clause 01a115cd-d109, below-5 half). */
+async function resolveFromWorkspaceRoot(root: string, moduleSpecifier: string): Promise<ResolvedAdapterModule> {
+	const relativeSelection = moduleSpecifier.startsWith('./')
+	if (relativeSelection) {
+		const authoredTarget = resolve(root, moduleSpecifier)
+		if (!isContainedPath(root, authoredTarget))
+			throw new Error('Workspace-relative adapter module specifier escapes the selected Workspace root.')
+	}
+
+	const parentUrl = pathToFileURL(join(root, '.uiux-adapter-resolution.mjs')).href
+	const moduleIdentity = resolveImport(moduleSpecifier, parentUrl)
+	if (!moduleIdentity.startsWith('file:'))
+		throw new Error('Adapter module must resolve to a file-backed module.')
+	const resolvedPath = await realpath(fileURLToPath(moduleIdentity))
+
+	const realRoot = await realpath(root)
+	if (relativeSelection && !isContainedPath(realRoot, resolvedPath))
+		throw new Error('Workspace-relative adapter module resolves outside the selected Workspace root.')
+	await assertOutsideWorkspaceData(resolvedPath, realRoot)
+	return resolvedAdapterModule(moduleSpecifier, resolvedPath, relativeSelection)
+}
+
+/** `kit/node_modules/`, which a `./` specifier never names or resolves into. */
+const KIT_DEPENDENCY_DIRECTORY = 'node_modules'
+
+/**
+ * From `schemaVersion` 5 (Clause 01a115cd-d109-76d3-9622-85d0080c60b6; Discussion #139 decision 3
+ * and owner ruling 3 of 2026-10-08): the base is `kit/`, which must be a real directory, never a
+ * symbolic link standing in for one. A `./` specifier stays inside `kit/` and outside
+ * `kit/node_modules/`, both as written and by its real path. A bare specifier names a dependency
+ * that `kit/package.json` declares (the dependency guard) and resolves through Node module
+ * resolution and package `exports` from `kit/`. Whatever the kind, a module whose real path lies
+ * inside the selected root lies inside its `kit/`, and the same holds for every other Workspace
+ * root on the module's path.
+ */
+async function resolveFromCodeDirectory(root: string, codeDirectoryName: string, moduleSpecifier: string): Promise<ResolvedAdapterModule> {
+	const realRoot = await realpath(root)
+	const codeDirectory = join(realRoot, codeDirectoryName)
+	if (!await realDirectoryIdentity(codeDirectory))
+		throw new Error(`The selected Workspace has no ${codeDirectoryName}/ directory (a real directory, not a symbolic link) to resolve Adapter modules from.`)
+
+	const relativeSelection = moduleSpecifier.startsWith('./')
+	if (relativeSelection) {
+		const authored = relative(codeDirectory, resolve(codeDirectory, moduleSpecifier))
+		if (authored === '' || escapesBase(authored))
+			throw new Error(`Adapter module specifier ${moduleSpecifier} escapes ${codeDirectoryName}/.`)
+		if (firstSegmentOf(authored).toLowerCase() === KIT_DEPENDENCY_DIRECTORY)
+			throw new Error(`Adapter module specifier ${moduleSpecifier} names a file in ${codeDirectoryName}/${KIT_DEPENDENCY_DIRECTORY}/; select a dependency by its bare package name.`)
+	}
+	else {
+		const packageName = bareSpecifierPackageName(moduleSpecifier)
+		if (packageName === undefined)
+			throw new Error(`Adapter module specifier ${moduleSpecifier} does not name an npm package followed by a plain subpath.`)
+		const declared = await readDeclaredKitDependencies(codeDirectory)
+		if (!declared.has(packageName))
+			throw new Error(`Adapter module specifier ${moduleSpecifier} names ${packageName}, which ${codeDirectoryName}/package.json does not declare as a dependency.`)
+	}
+
+	const parentUrl = pathToFileURL(join(codeDirectory, '.uiux-adapter-resolution.mjs')).href
+	const moduleIdentity = resolveImport(moduleSpecifier, parentUrl)
+	if (!moduleIdentity.startsWith('file:'))
+		throw new Error('Adapter module must resolve to a file-backed module.')
+	const resolvedPath = await realpath(fileURLToPath(moduleIdentity))
+
+	if (relativeSelection) {
+		const resolved = relative(codeDirectory, resolvedPath)
+		if (resolved === '' || escapesBase(resolved))
+			throw new Error(`Adapter module specifier ${moduleSpecifier} resolves outside ${codeDirectoryName}/.`)
+		if (await liesInKitDependencies(codeDirectory, resolvedPath))
+			throw new Error(`Adapter module specifier ${moduleSpecifier} resolves inside ${codeDirectoryName}/${KIT_DEPENDENCY_DIRECTORY}/.`)
+	}
+	// The selected root is a boundary whatever files it holds: inside it, only kit/ is code.
+	if (await liesOutsideCodeDirectory(realRoot, resolvedPath, statFileIdentity, realDirectoryIdentity))
+		throw new Error(`Adapter module resolves inside the selected Workspace root but outside ${codeDirectoryName}/, which is Workspace data like a canonical Workspace data directory; Adapter code must live outside authored data that Editors and Agents can write.`)
+	await assertOutsideWorkspaceData(resolvedPath, realRoot)
+	return resolvedAdapterModule(moduleSpecifier, resolvedPath, relativeSelection)
+}
+
+async function assertOutsideWorkspaceData(resolvedPath: string, realRoot: string): Promise<void> {
+	// Applies to every specifier, not only `./` ones, and to every Workspace on the resolved
+	// path (the selected root, a sibling, or an enclosing one): a bare specifier can resolve via
+	// a monorepo symlink or a self-reference `exports`/`imports` into any Workspace's data.
+	if (await resolvedPathEntersWorkspaceDataDirectory(resolvedPath, realRoot))
+		throw new Error('Adapter module resolves inside a canonical Workspace data directory (in a schemaVersion 5 Workspace root, anywhere outside kit/); Adapter code must live outside authored data that Editors and Agents can write.')
+}
+
+async function resolvedAdapterModule(moduleSpecifier: string, resolvedPath: string, relativeSelection: boolean): Promise<ResolvedAdapterModule> {
+	const packageMetadata = relativeSelection ? {} : await findNearestPackageMetadata(resolvedPath)
+	return {
+		moduleSpecifier,
+		resolvedPath,
+		moduleIdentity: pathToFileURL(resolvedPath).href,
+		...(packageMetadata.name ? { packageName: packageMetadata.name } : {}),
+		...(packageMetadata.version ? { packageVersion: packageMetadata.version } : {}),
+	}
+}
+
+/**
+ * True when `resolvedPath` (a real path) lies in `<codeDirectory>/node_modules/`. Membership is
+ * decided by file identity, so a differently cased spelling on a case-insensitive volume, or a
+ * directory inside `kit/` that `node_modules` links to, still counts.
+ */
+async function liesInKitDependencies(codeDirectory: string, resolvedPath: string): Promise<boolean> {
+	const rel = relative(codeDirectory, resolvedPath)
+	if (rel === '' || escapesBase(rel))
+		return false
+	const firstSegment = firstSegmentOf(rel)
+	if (firstSegment === '' || rel === firstSegment)
+		return false
+	const topIdentity = await statFileIdentity(join(codeDirectory, firstSegment))
+	const dependencyIdentity = await statFileIdentity(join(codeDirectory, KIT_DEPENDENCY_DIRECTORY))
+	return topIdentity !== undefined && dependencyIdentity !== undefined
+		&& topIdentity.dev === dependencyIdentity.dev && topIdentity.ino === dependencyIdentity.ino
+}
+
+function firstSegmentOf(rel: string): string {
+	return rel.split(/[/\\]/u)[0] ?? ''
 }
 
 export async function resolveWorkspaceAdapterSet(input: ResolveWorkspaceAdapterSetInput): Promise<AdapterSetResolutionResult> {
@@ -386,8 +505,8 @@ function isAbsentError(error: unknown): boolean {
  * ancestor directory that holds a Workspace manifest is treated as a Workspace root too. In the
  * schemaVersion 5 layout, where the former `.uiux/` directory is the root, the whole root but its
  * `kit/` code directory counts as data: the data directories, `artifacts/`, `history/` and the files
- * beside them. (Resolving `./` specifiers from `kit/` and the `kit/package.json` dependency guard are
- * separate, not built here.) Membership is
+ * beside them. (Resolving from `kit/`, the `kit/node_modules/` exclusion and the `kit/package.json`
+ * dependency guard belong to the resolver, `resolveFromCodeDirectory`.) Membership is
  * decided by file identity (`dev`/`ino`), never by name: a case-insensitive file system (WSL drvfs,
  * Docker Desktop bind mounts, exFAT/CIFS, ext4 casefold) can leave a realpath spelled `…/ASSETS/…`
  * that a string comparison against `assets` would miss.

@@ -66,14 +66,17 @@ Authors, humans and agents alike, have two more operations on their own words, o
 
 ### Members, roles and tokens
 
-Every `/api/*` and `/mcp` request needs a credential. Each Workspace has its own roster of members on this host, at `$UIUX_HOME/workspaces/<sha256(realpath)>/access.json` (`UIUX_HOME` defaults to `~/.uiux`). The roster never lives in the Workspace or in Git, and it stores only hashes of secrets. A member has a nickname, a kind (`human` or `agent`, fixed at creation) and a set of permission keys, such as `views.write` or `members.manage`. The roster stores each member's keys, and a member's label names the built-in preset (Viewer, Reviewer, Editor or Owner) whose keys match, or Custom. Keys for people only, such as `reviews.resolve` and `members.manage`, are never stored on an Agent, and at least one human member always keeps `members.manage`. `--role` on `uiux member add|set` still gives a member the keys of the preset of that name; an Agent gets them without the keys for people only, and `--role owner` is refused for it.
+Every `/api/*` and `/mcp` request needs a credential. Each Workspace has its own roster of members on this host, at `$UIUX_HOME/workspaces/<sha256(realpath)>/access.json` (`UIUX_HOME` defaults to `~/.uiux`). The roster never lives in the Workspace or in Git, and it stores only hashes of secrets. A member has a nickname, a kind (`human` or `agent`, fixed at creation) and a set of permission keys, such as `views.write` or `members.manage`. The roster stores each member's keys, and a member's label names the built-in preset (Viewer, Reviewer, Editor or Owner) whose keys match, or Custom. Keys for people only, such as `reviews.resolve` and `members.manage`, are never stored on an Agent, and at least one human member always keeps `members.manage`. `uiux member add` takes `--preset <name>` (Viewer, Reviewer, Editor or Owner), which copies that preset's keys, `--keys <k,…>` or `--all-keys`; `uiux member set` takes `--preset`, `--grant <k,…>` and `--revoke <k,…>`. An Agent given a preset or `--all-keys` gets the keys without the ones for people only. A key this version does not know is refused. `--role` is gone: use `--preset`.
 
 The first `uiux dev` of a Workspace with no human holder of `members.manage` creates one with every key, named after your OS user, and prints a single-use sign-in link (valid for 24 hours). Open it in the browser to sign in. The session lasts 14 days idle and 30 days at most, and it survives restarts. Lost the link? Run `uiux invite create --workspace <dir> --member <nick>` for a new one.
 
 Manage the roster with the CLI (each command needs `--workspace <dir>` and works while the server runs), or as the Owner on the Workbench **Members** page (on a loopback URL or an `https` origin, see Network access):
 
 ```sh
-uiux member add|list|set|remove ...
+uiux member add <nick> --preset Editor  # or --keys workspace.read,reviews.write, or --all-keys
+uiux member set <nick> --grant members.manage   # --preset, --grant, --revoke, --nickname
+uiux member list [--keys]              # ACCESS: the preset label or Custom; KEYS: the key count
+uiux member remove <nick>
 uiux token create|list|revoke ...      # tokens print once; 90 days by default, --expires never to opt out
 uiux invite create --member <nick>     # a single-use browser sign-in link
 uiux session list|revoke ...
@@ -99,7 +102,7 @@ When UIUX refuses a roster (`access.store_invalid`), the message names the file,
 `/mcp` always requires `Authorization: Bearer <token>`, loopback included. Give every concurrently running agent its own member:
 
 ```sh
-uiux member add claude --workspace ./design --kind agent --role editor
+uiux member add claude --workspace ./design --kind agent --preset Editor
 uiux token create --workspace ./design --member claude
 export UIUX_MCP_TOKEN=uiux_t_...   # in your shell profile or a gitignored .envrc, never in Git
 ```

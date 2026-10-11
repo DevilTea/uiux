@@ -2,7 +2,9 @@ import { lstat, stat } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { resolve } from 'node:path'
 
-import { memberLabel } from '../application/access/labels'
+import { BUILT_IN_ACCESS_PRESETS, isCatalogKey, isHumanOnlyKey, keysOfPreset, PERMISSION_KEYS } from '../application/access/keys'
+import { memberLabel, memberLabelName, type LabelPreset } from '../application/access/labels'
+import { isMemberKind, type MemberKind } from '../application/access/principal'
 import { FileNativePersistence } from '../persistence/file-native'
 import { detectWorkspaceLayout, layoutForSchemaVersion, resolveLayoutDirectory, resolveWorkspacePath, type WorkspaceLayout } from '../persistence/paths'
 import { checkWorkspaceSelection, type WorkspaceSelection } from '../persistence/workspace-selection'
@@ -19,7 +21,9 @@ import {
 	findMemberByNickname,
 	isSessionActive,
 	isTokenActive,
+	normalizeKeys,
 	removeMember,
+	requireMember,
 	revokeSessions,
 	revokeToken,
 	setMember,
@@ -47,9 +51,14 @@ export type AccessCommandOptions = Readonly<{
 }>
 
 export const ACCESS_HELP = `Access commands (each takes --workspace <dir>; the roster lives in $UIUX_HOME, default ~/.uiux):
-  member add <nick> --role <owner|editor|reviewer|viewer> [--kind human|agent]
-  member list
-  member set <nick> [--role <role>] [--nickname <new>]
+  member add <nick> (--preset <name> | --keys <k,...> | --all-keys) [--kind human|agent]
+  member set <nick> [--preset <name>] [--grant <k,...>] [--revoke <k,...>] [--nickname <new>]
+                                             (--preset copies an Access preset's keys: Viewer, Reviewer,
+                                             Editor or Owner; --all-keys gives every key. An Agent never
+                                             gets humanOnly keys such as members.manage. Keys are
+                                             comma-separated, such as views.write,flows.write)
+  member list [--keys]                       (ACCESS: the preset label or Custom; KEYS: the key count,
+                                             or with --keys the keys)
   member remove <nick>
   token create --member <nick> [--label <text>] [--expires <days>|never]
   token list [--member <nick>] [--all]
@@ -65,7 +74,7 @@ class UsageError extends Error {}
 
 type Parsed = Readonly<{ positionals: string[]; values: Map<string, string>; flags: Set<string> }>
 
-function parse(args: readonly string[], valueOptions: readonly string[], flagOptions: readonly string[]): Parsed {
+function parse(args: readonly string[], valueOptions: readonly string[], flagOptions: readonly string[], removedOptions: Readonly<Record<string, string>> = {}): Parsed {
 	const positionals: string[] = []
 	const values = new Map<string, string>()
 	const flags = new Set<string>()
@@ -73,6 +82,9 @@ function parse(args: readonly string[], valueOptions: readonly string[], flagOpt
 		const arg = args[index]!
 		if (arg.startsWith('--')) {
 			const name = arg.slice(2)
+			// A removed option is named however it is given, `--role editor` or `--role=editor`.
+			const bare = name.split('=', 1)[0]!
+			if (Object.hasOwn(removedOptions, bare)) throw new UsageError(removedOptions[bare]!)
 			if (flagOptions.includes(name)) {
 				if (flags.has(name)) throw new UsageError(`--${name} was given twice.`)
 				flags.add(name)
@@ -97,11 +109,54 @@ function table(rows: readonly (readonly string[])[]): string[] {
 }
 
 const day = (value: string | null) => value ? value.slice(0, 10) : 'never'
-/** The built-in preset that labels a member, by `id` (the role names `--role` takes), or `custom`. */
-const access = (member: StoredMember) => {
-	const label = memberLabel(member)
-	return 'preset' in label ? label.preset.id : 'custom'
+/**
+ * The Workspace's Access presets. Below `schemaVersion` 6 a Workspace has no presets file, so
+ * labels and `--preset` use the built-in presets (Rule 01a11c09-cb79-744e-bbf6-ec38d6f159ba).
+ */
+function workspacePresets(): readonly LabelPreset[] {
+	return BUILT_IN_ACCESS_PRESETS
 }
+
+/** A member's label among the Workspace's presets: the preset's name, or `Custom`. */
+const access = (member: StoredMember) => memberLabelName(memberLabel(member, workspacePresets()))
+const keyCount = (keys: readonly string[]) => `${keys.length} key${keys.length === 1 ? '' : 's'}`
+const accessSummary = (member: StoredMember) => `${access(member)}, ${keyCount(member.keys)}`
+
+/**
+ * `--preset <name>` (Rule 01a11c09-ccc6-705c-96c6-9f4ba7a2ad58): the Workspace's preset of that
+ * name at this moment, ignoring case as preset names are unique ignoring case; otherwise the
+ * command fails naming the available presets.
+ */
+function resolvePreset(name: string): LabelPreset {
+	const presets = workspacePresets()
+	const preset = presets.find(item => item.name.toLowerCase() === name.toLowerCase())
+	if (preset) return preset
+	throw new AccessError('access.preset_not_found', presets.length > 0
+		? `No Access preset named ${JSON.stringify(name)}. The presets are ${presets.map(item => item.name).join(', ')}.`
+		: `No Access preset named ${JSON.stringify(name)}: this Workspace has no presets. Give keys with --keys <k,...> or --all-keys.`)
+}
+
+/** A comma-separated key list (`--keys`, `--grant`, `--revoke`), each a permission key name. */
+function keyListOption(raw: string): string[] {
+	return normalizeKeys(raw.split(',').map(key => key.trim()).filter(key => key.length > 0))
+}
+
+/**
+ * The note printed when a preset (Rule 01a11c74-26ef-7894-9b2c-2714f487aeb8) or `--all-keys`
+ * (Clause 01a1144e-5660-7944-8946-079fe3065a47) gives an Agent its keys without the `humanOnly`
+ * ones, naming the keys left out.
+ */
+function droppedKeysNote(source: string, keys: readonly string[], kind: MemberKind): string | undefined {
+	const applied = keysOfPreset(kind, keys)
+	const dropped = keys.filter(key => !applied.includes(key))
+	if (dropped.length === 0) return undefined
+	return `  ${source} without ${dropped.join(', ')}: an Agent cannot hold humanOnly keys.`
+}
+
+const presetNote = (preset: LabelPreset, kind: MemberKind) => droppedKeysNote(`Applied the ${preset.name} preset`, preset.keys, kind)
+
+const ROLE_REMOVED = '--role was removed; give an Access preset with --preset <name>, such as --preset Editor.'
+
 const when = (value: string | null) => value ? value.replace('T', ' ').slice(0, 16) : '-'
 
 export async function runAccessCommand(options: AccessCommandOptions): Promise<number> {
@@ -116,7 +171,7 @@ export async function runAccessCommand(options: AccessCommandOptions): Promise<n
 		const home = resolveUiuxHome(env)
 		const spec = commandSpec(command, sub)
 		if (!spec) throw new UsageError(`Unknown command: uiux ${[command, sub].filter(Boolean).join(' ')}.`)
-		const parsed = parse(rest, ['workspace', ...spec.values], spec.flags)
+		const parsed = parse(rest, ['workspace', ...spec.values], spec.flags, spec.removed)
 		const workspaceArg = parsed.values.get('workspace')
 		if (!workspaceArg) throw new UsageError(`uiux ${command} ${sub} requires --workspace <dir>.`)
 		if (spec.positionals >= 0 && parsed.positionals.length !== spec.positionals)
@@ -150,7 +205,14 @@ type Context = Readonly<{
 	env: Readonly<Record<string, string | undefined>>
 }>
 
-type CommandSpec = Readonly<{ positionals: number; values: readonly string[]; flags: readonly string[]; run: (context: Context) => Promise<number> }>
+type CommandSpec = Readonly<{
+	positionals: number
+	values: readonly string[]
+	flags: readonly string[]
+	/** Options a command no longer takes, each with the usage error that names its replacement. */
+	removed?: Readonly<Record<string, string>>
+	run: (context: Context) => Promise<number>
+}>
 
 async function requireWorkspace(root: string): Promise<string> {
 	let manifestPath = layoutForSchemaVersion(CURRENT_WORKSPACE_SCHEMA_VERSION).manifestPath
@@ -204,20 +266,38 @@ function parseHours(raw: string | undefined): number | undefined {
 function commandSpec(command: string, sub: string | undefined): CommandSpec | undefined {
 	switch (`${command} ${sub ?? ''}`) {
 		case 'member add': return {
-			positionals: 1, values: ['role', 'kind'], flags: [],
+			positionals: 1, values: ['preset', 'keys', 'kind'], flags: ['all-keys'], removed: { role: ROLE_REMOVED },
 			async run(context) {
-				const role = context.parsed.values.get('role')
-				if (!role) throw new UsageError('uiux member add requires --role <owner|editor|reviewer|viewer>.')
+				const { values, flags } = context.parsed
+				const presetName = values.get('preset')
+				const keyList = values.get('keys')
+				if ([presetName !== undefined, keyList !== undefined, flags.has('all-keys')].filter(Boolean).length !== 1)
+					throw new UsageError('uiux member add needs exactly one of --preset <name>, --keys <k,...> or --all-keys.')
+				const kind = values.get('kind') ?? 'human'
+				// An invalid kind is refused by addMember; meanwhile it is treated as human, which drops no key.
+				const memberKind = isMemberKind(kind) ? kind : 'human'
+				// Resolved before the store is opened, so a refused preset or key list writes nothing.
+				const preset = presetName !== undefined ? resolvePreset(presetName) : undefined
+				const keys = preset
+					? keysOfPreset(memberKind, preset.keys)
+					: flags.has('all-keys')
+						// Clause 01a1144e-5660-7944-8946-079fe3065a47: every catalog key, without the humanOnly keys for an Agent.
+						? keysOfPreset(memberKind, PERMISSION_KEYS)
+						: keyListOption(keyList!)
 				const store = await requireStore(context)
-				const member = await store.update(file => addMember(file, { nickname: context.parsed.positionals[0]!, role, kind: context.parsed.values.get('kind') ?? 'human' }, context.now()))
-				context.out(`Added ${member.kind} member ${member.nickname} (${access(member)}) to roster ${store.data.hint} for ${store.data.workspaceRoot}.`)
+				const member = await store.update(file => addMember(file, { nickname: context.parsed.positionals[0]!, keys, kind }, context.now()))
+				context.out(`Added ${member.kind} member ${member.nickname} (${accessSummary(member)}) to roster ${store.data.hint} for ${store.data.workspaceRoot}.`)
+				const note = preset
+					? presetNote(preset, member.kind)
+					: flags.has('all-keys') ? droppedKeysNote('Gave every catalog key', PERMISSION_KEYS, member.kind) : undefined
+				if (note) context.out(note)
 				if (member.kind === 'agent') context.out(`  Next: uiux token create --workspace ${store.data.workspaceRoot} --member ${member.nickname}`)
 				else context.out(`  Next: uiux invite create --workspace ${store.data.workspaceRoot} --member ${member.nickname}`)
 				return 0
 			},
 		}
 		case 'member list': return {
-			positionals: 0, values: [], flags: [],
+			positionals: 0, values: [], flags: ['keys'],
 			async run(context) {
 				const store = await openStore(context, false)
 				if (!store) {
@@ -230,20 +310,62 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 					context.out('  (no members)')
 					return 0
 				}
+				// Clause 01a11c09-acaf-7fd0-a180-116c667961b4: the label in ACCESS, the key count in KEYS, or
+				// with --keys the key set, last so a long set does not widen the other columns. A key unknown
+				// to this UIUX version is kept but grants nothing (Rule 01a11c09-b7ec-786f-9723-eda32404d421).
+				const keysCell = (keys: readonly string[]) => context.parsed.flags.has('keys')
+					? keys.map(key => isCatalogKey(key) ? key : `${key} (unknown)`).join(', ') || '(none)'
+					: String(keys.length)
 				const members = summarizeMembers(file, context.now().getTime())
-				context.out(table([['NICKNAME', 'KIND', 'ROLE', 'TOKENS', 'SESSIONS'], ...members.map((member, index) => [member.nickname, member.kind, access(file.members[index]!), String(member.activeTokens), String(member.activeSessions)])]).join('\n'))
+				context.out(table([
+					['NICKNAME', 'KIND', 'ACCESS', 'TOKENS', 'SESSIONS', 'KEYS'],
+					...members.map((member, index) => [member.nickname, member.kind, access(file.members[index]!), String(member.activeTokens), String(member.activeSessions), keysCell(file.members[index]!.keys)]),
+				]).join('\n'))
 				return 0
 			},
 		}
 		case 'member set': return {
-			positionals: 1, values: ['role', 'nickname'], flags: [],
+			positionals: 1, values: ['preset', 'grant', 'revoke', 'nickname'], flags: [], removed: { role: ROLE_REMOVED },
 			async run(context) {
-				const role = context.parsed.values.get('role')
-				const nickname = context.parsed.values.get('nickname')
-				if (role === undefined && nickname === undefined) throw new UsageError('uiux member set needs --role <role> and/or --nickname <new>. The kind is immutable.')
+				const { values } = context.parsed
+				const presetName = values.get('preset')
+				const grantList = values.get('grant')
+				const revokeList = values.get('revoke')
+				const nickname = values.get('nickname')
+				if (presetName === undefined && grantList === undefined && revokeList === undefined && nickname === undefined)
+					throw new UsageError('uiux member set needs --preset <name>, --grant <k,...>, --revoke <k,...> and/or --nickname <new>. The kind is immutable.')
+				const grant = grantList !== undefined ? keyListOption(grantList) : []
+				const revoke = revokeList !== undefined ? keyListOption(revokeList) : []
+				const both = grant.filter(key => revoke.includes(key))
+				if (both.length > 0) throw new UsageError(`--grant and --revoke both name ${both.join(', ')}.`)
+				const preset = presetName !== undefined ? resolvePreset(presetName) : undefined
+				const changesKeys = preset !== undefined || grantList !== undefined || revokeList !== undefined
+				let notHeld: string[] = []
+				let notGranted: string[] = []
 				const store = await requireStore(context)
-				const member = await store.update(file => setMember(file, context.parsed.positionals[0]!, { ...(role !== undefined ? { role } : {}), ...(nickname !== undefined ? { nickname } : {}) }))
-				context.out(`Updated ${member.nickname}: ${member.kind}, ${access(member)}.`)
+				// The keys are computed from the roster read under the store's lock, so a concurrent writer's change is not lost.
+				const member = await store.update((file) => {
+					const current = requireMember(file, context.parsed.positionals[0]!)
+					if (!changesKeys) return setMember(file, current.nickname, { ...(nickname !== undefined ? { nickname } : {}) })
+					// A preset replaces the member's known keys with its own (Rule 01a11c09-b8c6-741e-b3b7-97f4840985c5)
+					// and keeps the keys this version does not know (Rule 01a11c09-b7ec-786f-9723-eda32404d421; owner
+					// ruling of 2026-10-11 on PR #189); --grant and --revoke then adjust it.
+					const base = preset
+						? [...keysOfPreset(current.kind, preset.keys), ...current.keys.filter(key => !isCatalogKey(key))]
+						: current.keys
+					const absent = revoke.filter(key => !base.includes(key))
+					// A humanOnly key is never granted to an Agent, so revoking one changes nothing.
+					notGranted = current.kind === 'agent' ? absent.filter(isHumanOnlyKey) : []
+					notHeld = absent.filter(key => !notGranted.includes(key))
+					const keys = [...base.filter(key => !revoke.includes(key)), ...grant]
+					return setMember(file, current.nickname, { keys, ...(nickname !== undefined ? { nickname } : {}) })
+				})
+				if (notHeld.length > 0) context.err(`uiux: warning: ${member.nickname} did not hold ${notHeld.join(', ')}; nothing to revoke there.`)
+				if (notGranted.length > 0)
+					context.err(`uiux: warning: ${notGranted.join(', ')} ${notGranted.length > 1 ? 'are humanOnly keys' : 'is a humanOnly key'}, not granted to an Agent such as ${member.nickname}; nothing to revoke there.`)
+				context.out(`Updated ${member.nickname}: ${member.kind}, ${accessSummary(member)}.`)
+				const note = preset && presetNote(preset, member.kind)
+				if (note) context.out(note)
 				return 0
 			},
 		}

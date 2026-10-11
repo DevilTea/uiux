@@ -102,13 +102,13 @@ try {
 	// Tokens are created through the CLI exactly as a user would (accepted identity decision D17).
 	const cliBaseEnv = { ...process.env, UIUX_HOME: uiuxHome }
 	const uiuxCli = (...args) => execFileSync(process.execPath, ['bin/uiux.mjs', ...args], { encoding: 'utf8', env: cliBaseEnv })
-	uiuxCli('member', 'add', 'smoke-agent', '--kind', 'agent', '--role', 'editor', '--workspace', workspaceRoot)
+	uiuxCli('member', 'add', 'smoke-agent', '--kind', 'agent', '--preset', 'Editor', '--workspace', workspaceRoot)
 	const token = uiuxCli('token', 'create', '--member', 'smoke-agent', '--workspace', workspaceRoot).match(/uiux_t_\S+/u)?.[0]
 	if (!token) throw new Error('uiux token create printed no token.')
 	auth = { authorization: `Bearer ${token}` }
 	// A token from another Workspace's roster must be refused.
 	uiuxCli('init', '--workspace', otherWorkspace)
-	uiuxCli('member', 'add', 'other-agent', '--kind', 'agent', '--role', 'editor', '--workspace', otherWorkspace)
+	uiuxCli('member', 'add', 'other-agent', '--kind', 'agent', '--preset', 'Editor', '--workspace', otherWorkspace)
 	const foreignToken = uiuxCli('token', 'create', '--member', 'other-agent', '--workspace', otherWorkspace).match(/uiux_t_\S+/u)?.[0]
 
 	const probe = createServer()
@@ -411,7 +411,7 @@ async function smokeConfiguredOrigins() {
 		if ((await request('GET', '/api/health', {})).status !== 200) throw new Error('The loopback URL stopped answering with configured origins.')
 
 		// Host and Origin acceptance through the LAN proxy.
-		uiuxCli('member', 'add', 'origin-agent', '--kind', 'agent', '--role', 'editor', '--workspace', workspaceRoot)
+		uiuxCli('member', 'add', 'origin-agent', '--kind', 'agent', '--preset', 'Editor', '--workspace', workspaceRoot)
 		const token = uiuxCli('token', 'create', '--member', 'origin-agent', '--workspace', workspaceRoot).match(/uiux_t_\S+/u)?.[0]
 		if (!token) throw new Error('uiux token create printed no token.')
 		const bearer = { authorization: `Bearer ${token}` }
