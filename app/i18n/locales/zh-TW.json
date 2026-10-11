@@ -2066,7 +2066,7 @@
       "invalid_absolute_uri": "請使用完整網址，例如 https://example.com/spec。"
     },
     "kit": {
-      "component_invalid": "登錄中的元件與 kit/ 專案不符。"
+      "component_invalid": "登錄中的項目與 kit/ 專案不符。"
     },
     "product_kit": {
       "adapters_not_current": "若要變更 Adapter 的指定方式或順序，請改用組合操作。",

@@ -357,26 +357,26 @@ describe('where Restore is offered', () => {
 		await setIntent(key, `Kinds ${unique()}`)
 		const { context, page } = await open('/?tab=activity')
 		try {
-			// A comparison that also names a Product Kit, as a later schema records one: it is diffed
-			// as a kind this build cannot read, and offers no Restore.
+			// A comparison that also names the Access presets, as a later schema records them: they are
+			// diffed as a kind this build cannot read, and offer no Restore.
 			await page.route('**/api/history/diff?*', async (route) => {
 				const response = await route.fetch()
 				const body = await response.json() as { summary: unknown[]; changes?: unknown[] }
-				const unknown = { kind: 'product-kit', key: 'product-kit', status: 'modified' }
+				const unknown = { kind: 'access-presets', key: 'access-presets', status: 'modified' }
 				body.summary = [...body.summary, unknown]
 				if (body.changes) body.changes = [...body.changes, { ...unknown, diff: { type: 'unsupported_kind' } }]
 				await route.fulfill({ response, json: body })
 			})
 			await page.goto(`${server.origin}/?tab=activity&version=${earlier}&compare=current`, { waitUntil: 'networkidle' })
 			const comparison = page.locator('[data-version-comparison]')
-			for (const resource of [`view:${key}`, 'product-kit:product-kit']) {
+			for (const resource of [`view:${key}`, 'access-presets:access-presets']) {
 				const block = comparison.locator(`[data-resource-diff="${resource}"]`)
 				await block.waitFor({ timeout: 15_000 })
 				if (await block.getAttribute('data-open') === null) await block.locator('[data-resource-diff-toggle]').click()
 			}
-			await comparison.locator('[data-resource-diff="product-kit:product-kit"] [data-diff-unsupported]').waitFor({ timeout: 15_000 })
+			await comparison.locator('[data-resource-diff="access-presets:access-presets"] [data-diff-unsupported]').waitFor({ timeout: 15_000 })
 			await comparison.locator(`[data-resource-diff="view:${key}"] [data-restore-version]`).waitFor({ timeout: 15_000 })
-			expect(await comparison.locator('[data-resource-diff="product-kit:product-kit"] [data-restore-version]').count()).toBe(0)
+			expect(await comparison.locator('[data-resource-diff="access-presets:access-presets"] [data-restore-version]').count()).toBe(0)
 		}
 		finally { await context.close() }
 	}, 90_000)

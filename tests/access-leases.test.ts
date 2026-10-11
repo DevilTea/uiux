@@ -231,7 +231,7 @@ describe('leases by write key (Rules 01a11c09-c125, 01a11485-f074, 01a11485-f08f
 		// Malformed input is the request's fault once the member may lease some kind; a member that may lease none is refused first.
 		expect(translator.acquireLeases({ resources: [] })).toMatchObject({ status: 'invalid', code: 'lease.invalid_resources' })
 		const reader = scoped(ctx.app, testMember({ nickname: 'vera', kind: 'agent', role: 'viewer', credential: 'token' }), { leases })
-		expect(reader.acquireLeases({ resources: [] })).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['views.write', 'flows.write', 'locales.write', 'assets.write', 'settings.write'] })
+		expect(reader.acquireLeases({ resources: [] })).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['views.write', 'flows.write', 'locales.write', 'assets.write', 'settings.write', 'product-kit.write'] })
 		// Releasing needs no key, and releases only one's own leases.
 		expect(await reader.releaseLeases({})).toMatchObject({ status: 'released', released: [] })
 		expect(leases.list()).toHaveLength(1)
