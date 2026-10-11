@@ -2,7 +2,9 @@ Feature: Workspace migration
   # Source: Discussion #139 (Part 14, Product Kit), decision 15, A; R18; owner pre-answer P24; Key Scenarios https://github.com/DevilTea/uiux/discussions/139; accepted as written 2026-10-08 https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18816364.
   # Test: code@77d9d59 `tests/workspace-relocation.test.ts#L191` "moves the data directories into .uiux/, keeps the manifest, artifact and kit paths, and leaves everything else alone". https://github.com/DevilTea/uiux/blob/77d9d592cef041c7587b2586df2872532bf074a7/tests/workspace-relocation.test.ts#L191
   # Test: code@77d9d59 `tests/workspace-relocation.test.ts#L515` "migrate, then access copy --from the old root, carries the roster and the history without --replace, and the Token works". https://github.com/DevilTea/uiux/blob/77d9d592cef041c7587b2586df2872532bf074a7/tests/workspace-relocation.test.ts#L515
-  # Status: partly built as of 77d9d59: the conversion and the copy are built but dormant until UIUX switches to `schemaVersion` 5; see the Implementation gaps entry of 01a11bb1-8f5f-77ea-817b-46679c5a6475 in its owner.
+  # Test: code@3b20412 `tests/workspace-relocation.test.ts#L206` "moves the data directories into .uiux/, keeps the manifest, artifact and kit paths, and leaves everything else alone". https://github.com/DevilTea/uiux/blob/3b20412aff65b677618b90a4a841ad8dfccf4218/tests/workspace-relocation.test.ts#L206
+  # Test: code@3b20412 `tests/workspace-relocation.test.ts#L693` "migrate, then access copy --from the old root, carries the roster and the history without --replace, and the Token works". https://github.com/DevilTea/uiux/blob/3b20412aff65b677618b90a4a841ad8dfccf4218/tests/workspace-relocation.test.ts#L693
+  # Status: built as of 3b20412.
   # Note: Discussion #140 (Part 15) adds `uiux.v5-to-v6`, so the converted Workspace ends at the current `schemaVersion` (issue #142).
   @spec:id:01a11bb1-bf7f-7c8e-bec7-1511c5f7d36f
   @spec:demonstrates:01a1144e-56bd-7988-8d2a-87b23954ca49

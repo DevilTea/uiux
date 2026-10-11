@@ -1,7 +1,8 @@
 Feature: Version history
   # Source: Discussion #122 (Part 11) d4, R26 (owner pre-answer O3) https://github.com/DevilTea/uiux/discussions/122; "What `.spec/` records after acceptance" key Scenarios https://github.com/DevilTea/uiux/discussions/122; owner acceptance https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18807263. Restated as permission keys by Discussion #140 (Part 15), decision 1, A: `checkpoints.create`; Interactions 2 https://github.com/DevilTea/uiux/discussions/140; accepted as written 2026-10-08 https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18816365.
-  # Status: partly built as of 98672a4: the Checkpoint is created without a lease by a member holding `checkpoints.create`; the schema-5 Checkpoint directory is built as of 82e151f but dormant, since UIUX's current `schemaVersion` is 4; see the Implementation gaps entry of 01a11a5e-1e0e-7539-b925-c54dcb1afb55 (issue #141) in its owner.
+  # Status: built as of 3b20412.
   # Test: code@98672a4 `tests/history-checkpoints.test.ts#L169` "writes a named record with the member as actor, holding no lease and changing no canonical file (Scenario 01a11a5e-90a5)". https://github.com/DevilTea/uiux/blob/98672a48d3d0babd56b8d471322cb3eea13f0d7f/tests/history-checkpoints.test.ts#L169
+  # Test: code@3b20412 `tests/history-checkpoints.test.ts#L171` "writes a named record with the member as actor, holding no lease and changing no canonical file (Scenario 01a11a5e-90a5)". https://github.com/DevilTea/uiux/blob/3b20412aff65b677618b90a4a841ad8dfccf4218/tests/history-checkpoints.test.ts#L171
   # Note: Discussion #139 (Part 14) moved the checkpoint directory, so the step names no path. Discussion #140 restates the precondition as `checkpoints.create` (issue #142).
   @spec:id:01a11a5e-90a5-70f3-912e-e9e6e9b0eee9
   @spec:demonstrates:01a11485-fa21-7b77-8ae5-1d7d0618e8a3
