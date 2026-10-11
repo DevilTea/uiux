@@ -58,9 +58,20 @@ export async function readDeclaredKitDependencies(codeDirectory: string): Promis
 		if (code === 'ENOENT' || code === 'ENOTDIR') return new Set()
 		throw error
 	}
+	return declaredKitDependencies(await readFile(path, 'utf8'))
+}
+
+/**
+ * The dependency names a kit `package.json` with the text `text` declares in any of
+ * {@link KIT_DEPENDENCY_MEMBERS}; `undefined` (no file) declares none. Text that is not a JSON
+ * object, or a member that is not an object, throws, so a caller fails closed. Reading the file is
+ * the caller's: it must refuse a symbolic link, as {@link readDeclaredKitDependencies} does.
+ */
+export function declaredKitDependencies(text: string | undefined): ReadonlySet<string> {
+	if (text === undefined) return new Set()
 	let parsed: unknown
 	try {
-		parsed = JSON.parse(await readFile(path, 'utf8'))
+		parsed = JSON.parse(text)
 	}
 	catch (error) {
 		throw new Error(`kit/${KIT_PACKAGE_FILENAME} could not be read as JSON.`, { cause: error })

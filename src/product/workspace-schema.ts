@@ -1,9 +1,10 @@
 import { posix } from 'node:path'
 
 import { canonicalJsonBytes } from '../domain/canonical-json'
-import { emptyProductKit, isProductKitPackageName } from '../domain/product-kit/schema'
+import { bareSpecifierPackageName, declaredKitDependencies, KIT_PACKAGE_FILENAME } from '../adapters/kit-dependencies'
+import { emptyProductKit } from '../domain/product-kit/schema'
 import { validateReviewThread } from '../domain/reviews/schema'
-import { isRecord, isSafeRelativePath } from '../domain/validation'
+import { isRecord } from '../domain/validation'
 import { LEGACY_LAYOUT, layoutForSchemaVersion, V5_LAYOUT } from '../persistence/paths'
 import { defineWorkspaceSchemaPolicy, type WorkspaceMigrationContext, type WorkspaceMigrationRefusal, type WorkspaceMigrationStep, type WorkspaceSnapshot } from '../persistence/schema-policy'
 import packageJson from '../../package.json' with { type: 'json' }
@@ -138,53 +139,7 @@ const OLD_METADATA_DIRECTORY = LEGACY_LAYOUT.metadataDir
 /** The kit project inside the old metadata directory, as a path relative to the old Workspace root. */
 const OLD_KIT_DIRECTORY = `${OLD_METADATA_DIRECTORY}/${V5_LAYOUT.codeDir!}`
 /** The kit project's package file, relative to the old Workspace root; `uiux migrate` only reads it. */
-const OLD_KIT_PACKAGE_FILE = `${OLD_KIT_DIRECTORY}/package.json`
-
-/**
- * The `package.json` members whose keys are the kit project's declared dependencies (owner ruling
- * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18858542).
- *
- * TODO(#141): unify with `KIT_DEPENDENCY_MEMBERS`, `bareSpecifierPackageName` and
- * `readDeclaredKitDependencies` of `src/adapters/kit-dependencies.ts` (PR #186) once both have landed.
- */
-const KIT_DEPENDENCY_MEMBERS = Object.freeze(['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'] as const)
-
-/**
- * The npm package a bare specifier names (`name` or `@scope/name`, then an optional plain subpath),
- * or `undefined` when it names none (a `#` import, a malformed name, or a subpath with an empty,
- * `.` or `..` segment or a percent escape), the same reading as the v5 dependency guard.
- */
-export function bareSpecifierPackageName(specifier: string): string | undefined {
-	const segments = specifier.split('/')
-	const nameSegments = specifier.startsWith('@') ? 2 : 1
-	if (segments.length < nameSegments) return undefined
-	const name = segments.slice(0, nameSegments).join('/')
-	if (!isProductKitPackageName(name)) return undefined
-	if (segments.length > nameSegments) {
-		const subpath = segments.slice(nameSegments).join('/')
-		if (!isSafeRelativePath(subpath) || subpath.includes('%')) return undefined
-	}
-	return name
-}
-
-/**
- * The dependency names a kit `package.json` declares in any of the four dependency members; a kit
- * without the file declares none. A file that is not a JSON object, or whose member is not an
- * object, throws: the check fails closed rather than guess.
- */
-export function declaredKitDependencies(bytes: Uint8Array | undefined): ReadonlySet<string> {
-	if (!bytes) return new Set()
-	const parsed = parseJson(bytes, OLD_KIT_PACKAGE_FILE)
-	if (!isRecord(parsed)) throw new TypeError(`${OLD_KIT_PACKAGE_FILE} is not a JSON object.`)
-	const declared = new Set<string>()
-	for (const member of KIT_DEPENDENCY_MEMBERS) {
-		const value = parsed[member]
-		if (value === undefined) continue
-		if (!isRecord(value)) throw new TypeError(`${OLD_KIT_PACKAGE_FILE} member ${member} is not an object.`)
-		for (const name of Object.keys(value)) declared.add(name)
-	}
-	return declared
-}
+const OLD_KIT_PACKAGE_FILE = `${OLD_KIT_DIRECTORY}/${KIT_PACKAGE_FILENAME}`
 
 /**
  * Where a v4 Adapter specifier goes in `schemaVersion` 5. A `./` specifier is placed by its module
@@ -215,8 +170,11 @@ export function placeV4AdapterSpecifier(specifier: string): V4AdapterSpecifierPl
 	const path = posix.normalize(specifier.slice(2))
 	if (path === '..' || path.startsWith('../'))
 		return { kind: 'outside', replacement: `./${OLD_KIT_DIRECTORY}/${posix.basename(path)}`, exact: false }
-	const packagePath = /(?:^|\/)node_modules\/(?<rest>.+)$/u.exec(path)?.groups?.rest
-	if (packagePath !== undefined) {
+	// The innermost `node_modules/` (in any case, as the dependency guard reads it) names the package.
+	const segments = path.split('/')
+	const dependencyDirectory = segments.findLastIndex(segment => segment.toLowerCase() === 'node_modules')
+	if (dependencyDirectory >= 0) {
+		const packagePath = segments.slice(dependencyDirectory + 1).join('/')
 		const packageName = bareSpecifierPackageName(packagePath)
 		return packageName
 			? { kind: 'outside', replacement: packagePath, exact: true, packageName }
@@ -258,7 +216,7 @@ export const WORKSPACE_V4_TO_V5_STEP: WorkspaceMigrationStep = Object.freeze({
 	async refuse(snapshot: WorkspaceSnapshot, context: WorkspaceMigrationContext): Promise<WorkspaceMigrationRefusal | undefined> {
 		let declared: ReadonlySet<string> | undefined
 		const isDeclared = async (packageName: string) => {
-			declared ??= declaredKitDependencies(await context.readWorkspaceFile(OLD_KIT_PACKAGE_FILE))
+			declared ??= await readOldKitDependencies(context)
 			return declared.has(packageName)
 		}
 		const items: { path: string; message: string }[] = []
@@ -341,6 +299,16 @@ export const WORKSPACE_V4_TO_V5_STEP: WorkspaceMigrationStep = Object.freeze({
 		return next
 	},
 })
+
+/**
+ * The dependencies `.uiux/kit/package.json` declares, by the reading of the v5 dependency guard
+ * (`declaredKitDependencies`). The context refuses a symbolic link or a non-regular file, and an
+ * unreadable or malformed file throws, so the refusal check fails closed.
+ */
+async function readOldKitDependencies(context: WorkspaceMigrationContext): Promise<ReadonlySet<string>> {
+	const bytes = await context.readWorkspaceFile(OLD_KIT_PACKAGE_FILE)
+	return declaredKitDependencies(bytes === undefined ? undefined : new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+}
 
 /** The `adapters` of a v4 snapshot's manifest, or none when the manifest is missing or unreadable. */
 function v4Adapters(snapshot: WorkspaceSnapshot): readonly unknown[] {

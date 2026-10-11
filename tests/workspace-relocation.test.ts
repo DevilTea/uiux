@@ -184,6 +184,11 @@ describe('uiux.v4-to-v5 on the logical snapshot', () => {
 		// Owner ruling 2 of #139 c18858856: a ./ specifier in kit/node_modules/ gets its bare replacement.
 		expect(placeV4AdapterSpecifier('./.uiux/kit/node_modules/@acme/adapter/index.js')).toEqual({ kind: 'outside', replacement: '@acme/adapter/index.js', exact: true, packageName: '@acme/adapter' })
 		expect(placeV4AdapterSpecifier('./.uiux/kit/node_modules/.bin/adapter')).toEqual({ kind: 'outside', replacement: '<package>/<subpath>', exact: false })
+		// The innermost node_modules/ names the package, in any case, as the v5 dependency guard reads it.
+		expect(placeV4AdapterSpecifier('./node_modules/a/node_modules/@b/c/x.js')).toEqual({ kind: 'outside', replacement: '@b/c/x.js', exact: true, packageName: '@b/c' })
+		expect(placeV4AdapterSpecifier('./.uiux/kit/Node_Modules/@acme/adapter/index.js')).toEqual({ kind: 'outside', replacement: '@acme/adapter/index.js', exact: true, packageName: '@acme/adapter' })
+		// A bare subpath through node_modules/ names no package (src/adapters/kit-dependencies.ts).
+		expect(placeV4AdapterSpecifier('lodash/node_modules/other/index.js')).toEqual({ kind: 'bare' })
 		expect(placeV4AdapterSpecifier('./../shared/adapter.ts')).toEqual({ kind: 'outside', replacement: './.uiux/kit/adapter.ts', exact: false })
 		expect(placeV4AdapterSpecifier('./.uiux/kit')).toMatchObject({ kind: 'outside', exact: false })
 	})
@@ -430,14 +435,15 @@ describe('uiux.v4-to-v5 refuses Adapters the kit project does not declare (owner
 		expect(declared.errors).not.toContain('Declare ')
 	})
 
-	it('refuses a bare specifier that names no npm package', async () => {
-		const { errors } = await refusal({ adapters: [{ moduleSpecifier: '#internal/adapter' }] })
+	it('refuses a bare specifier that names no npm package, a node_modules/ subpath of a declared one included', async () => {
+		const { errors } = await refusal({ adapters: [{ moduleSpecifier: '#internal/adapter' }, { moduleSpecifier: '@acme/uiux-adapter/node_modules/other/index.js' }] })
 		expect(errors).toContain('/adapters/0/moduleSpecifier: #internal/adapter names no npm package')
+		expect(errors).toContain('/adapters/1/moduleSpecifier: @acme/uiux-adapter/node_modules/other/index.js names no npm package')
 	})
 
 	it('fails closed on a kit package.json that is not a well-formed package file or is a symbolic link, writing nothing', async () => {
 		const malformed = await refusal({ kitPackage: '{ not json' })
-		expect(malformed.errors).toContain('.uiux/kit/package.json')
+		expect(malformed.errors).toContain('kit/package.json could not be read as JSON')
 		const wrongMember = await refusal({ kitPackage: { dependencies: ['@acme/uiux-adapter'] } })
 		expect(wrongMember.errors).toContain('member dependencies is not an object')
 
