@@ -1725,6 +1725,7 @@
       "expected_string": "This value must be text.",
       "invalid_json_object": "This value must be a JSON object.",
       "invalid_json_value": "This value must be valid JSON.",
+      "required_field": "This field is required.",
       "unknown_field": "This field is not recognized."
     },
     "identity": {
@@ -2060,6 +2061,16 @@
     "reference": {
       "unknown_type": "This reference type is not supported.",
       "invalid_absolute_uri": "Use a full address, such as https://example.com/spec."
+    },
+    "product_kit": {
+      "invalid_component_file": "A component file must be a path under kit/src/.",
+      "invalid_component_layer": "A component layer must be design-system or product.",
+      "invalid_component_name": "Component names use lowercase words joined by hyphens.",
+      "invalid_package_name": "Use a package name.",
+      "invalid_style_specifier": "Use a package export or a ./ path inside kit/ for the stylesheet.",
+      "invalid_theme_attribute": "Theme attribute names cannot contain spaces, quotes, >, / or =.",
+      "invalid_widget_import": "Name a package and one of its exports.",
+      "unknown_component": "This must name another component of the registry."
     }
   },
   "diagnosticFallback": {
@@ -2080,6 +2091,7 @@
     "identity": "An identity is not valid.",
     "lease": "The edit lock could not be taken.",
     "persistence": "The Workspace files could not be read or written.",
+    "product_kit": "There is a problem with the Product Kit file.",
     "preview": "The preview could not render this View.",
     "render_context": "That render context is not valid.",
     "request": "The server refused this request.",

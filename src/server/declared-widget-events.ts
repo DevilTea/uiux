@@ -1,3 +1,4 @@
+import type { WorkspaceLayout } from '../persistence/paths'
 import type { DeclaredWidgetEvent, DeclaredWidgetEvents } from '../preview/browser-runtime'
 import { getSelectedWorkspacePreviewBundle } from './workspace-adapters'
 
@@ -13,8 +14,8 @@ let cached: { hash: string; result: Promise<DeclaredWidgetEventsResult> } | unde
  * the bundle aliases widget-core to one authoritative copy, so the plugin brand check holds even
  * when the Workspace resolves its own widget-core. No Runtime is created and nothing is persisted.
  */
-export async function readSelectedWorkspaceDeclaredWidgetEvents(workspaceRoot: string): Promise<DeclaredWidgetEventsResult> {
-	const bundle = await getSelectedWorkspacePreviewBundle(workspaceRoot)
+export async function readSelectedWorkspaceDeclaredWidgetEvents(workspaceRoot: string, layout?: WorkspaceLayout): Promise<DeclaredWidgetEventsResult> {
+	const bundle = await getSelectedWorkspacePreviewBundle(workspaceRoot, layout)
 	if (bundle.state !== 'valid') return { state: 'unavailable' }
 	if (cached?.hash === bundle.hash) return await cached.result
 	const result = describe(bundle.bundleJs)

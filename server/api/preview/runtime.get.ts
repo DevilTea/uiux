@@ -10,7 +10,7 @@ export default defineEventHandler(async (event) => {
 	setHeader(event, 'cache-control', 'no-store')
 
 	const workspaceRuntime = getSelectedWorkspaceServerRuntime()
-	const bundle = await getSelectedWorkspacePreviewBundle(workspaceRuntime.root)
+	const bundle = await getSelectedWorkspacePreviewBundle(workspaceRuntime.root, workspaceRuntime.persistence.layout)
 
 	if (bundle.state === 'invalid') {
 		setResponseStatus(event, 409)

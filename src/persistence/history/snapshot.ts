@@ -1,7 +1,7 @@
 import type { HistoryResourceEntry } from '../../domain/history/schema'
 import { resourceIdentityKey } from '../../domain/history/summary'
 import { revisionForResourceFiles } from '../file-native'
-import { LEGACY_LAYOUT, type VersionedResourceIdentity, type WorkspaceLayout } from '../paths'
+import type { VersionedResourceIdentity, WorkspaceLayout } from '../paths'
 import { blobDigest } from './host-store'
 import { compareCodeUnits } from './order'
 
@@ -18,7 +18,7 @@ export type VersionResources = Readonly<{
  * layout classifies them into, and each resource carries the revision persistence reports for the
  * same bytes; a group without a resource (an Asset directory without `asset.json`) is left out.
  */
-export function versionResourcesFromSnapshot(snapshot: ReadonlyMap<string, Uint8Array>, layout: WorkspaceLayout = LEGACY_LAYOUT): VersionResources {
+export function versionResourcesFromSnapshot(snapshot: ReadonlyMap<string, Uint8Array>, layout: WorkspaceLayout): VersionResources {
 	const groups = new Map<string, { resource: VersionedResourceIdentity; files: Map<string, Uint8Array> }>()
 	for (const [path, bytes] of snapshot) {
 		const resource = layout.classifyVersionedPath(path)

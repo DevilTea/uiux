@@ -8,5 +8,5 @@ export default defineEventHandler(async (event) => {
 	const denied = denyUnlessAllowed(event, 'readPreview')
 	if (denied) return denied
 	const workspaceRuntime = getSelectedWorkspaceServerRuntime()
-	return await readSelectedWorkspaceDeclaredWidgetEvents(workspaceRuntime.root)
+	return await readSelectedWorkspaceDeclaredWidgetEvents(workspaceRuntime.root, workspaceRuntime.persistence.layout)
 })

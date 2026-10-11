@@ -32,7 +32,7 @@ import { createHistoryStoreFactory, type HistoryStoreFactory } from '../src/serv
 import { createCheckpointForHttp, deleteCheckpointForHttp, diffVersionsForHttp, listVersionsForHttp, readVersionForHttp } from '../src/server/history-http'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { bearer, connectMcp, provisionToken, scoped, sessionCookieFor, testMember } from './support/access'
-import { metadataPath } from './support/workspace-layout'
+import { CURRENT_TEST_LAYOUT, metadataPath } from './support/workspace-layout'
 
 /**
  * Named Checkpoints, the version listing and their access (issue #132 B4): Feature
@@ -483,7 +483,7 @@ describe('the version listing', () => {
 		const manifestPath = workspaceRelativePath()
 		const manifest = JSON.parse(Buffer.from(snapshot.get(manifestPath)!).toString('utf8')) as Record<string, unknown>
 		snapshot.set(manifestPath, new TextEncoder().encode(`${JSON.stringify({ ...manifest, schemaVersion: previousSchema })}\n`))
-		const built = versionResourcesFromSnapshot(snapshot)
+		const built = versionResourcesFromSnapshot(snapshot, CURRENT_TEST_LAYOUT)
 		const before = randomUUID()
 		await (await ctx.history.open())!.checkpoints.create({
 			historySchemaVersion: 1,

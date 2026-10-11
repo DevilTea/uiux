@@ -13,6 +13,7 @@ import { blobDigest, HostHistoryStore } from '../src/persistence/history/host-st
 import { acquireServerHold } from '../src/persistence/server-hold'
 import { verifyCredential } from '../src/server/access/roster'
 import { AccessStore, copyHostHistory, hostHistoryPaths, planHostHistoryCopy } from '../src/server/access/store'
+import { CURRENT_TEST_LAYOUT } from './support/workspace-layout'
 
 const CLI = join(fileURLToPath(new URL('..', import.meta.url)), 'bin', 'uiux.mjs')
 const cleanup: string[] = []
@@ -137,7 +138,7 @@ describe('uiux access commands', () => {
 		expect(link((await runWithEnv({ PORT: '4555' }, 'invite', 'create', '--member', 'mei', '--workspace', workspace)).out)).toBe('http://127.0.0.1:4555')
 		expect(link((await runWithEnv({ PORT: '4555', NITRO_PORT: '4666' }, 'invite', 'create', '--member', 'mei', '--workspace', workspace)).out)).toBe('http://127.0.0.1:4666')
 		// A server running for this Workspace records its loopback origin; that port wins.
-		const hold = (await acquireServerHold(workspace, { origin: 'http://[::1]:4777' }))!
+		const hold = (await acquireServerHold(workspace, { origin: 'http://[::1]:4777', layout: CURRENT_TEST_LAYOUT }))!
 		try {
 			expect(link((await runWithEnv({ PORT: '4555' }, 'invite', 'create', '--member', 'mei', '--workspace', workspace)).out)).toBe('http://[::1]:4777')
 		}
@@ -264,7 +265,7 @@ describe('uiux access commands', () => {
 		await rename(moved, sourceHost.paths.dir)
 
 		// A running server keeps the target's history in memory.
-		const hold = (await acquireServerHold(worktree))!
+		const hold = (await acquireServerHold(worktree, { layout: CURRENT_TEST_LAYOUT }))!
 		expect(await run('access', 'copy', '--from', workspace, '--workspace', worktree)).toMatchObject({ code: 1, err: expect.stringContaining('Stop that server') })
 		expect(await AccessStore.open({ workspaceRoot: worktree, home })).toBeUndefined()
 		await hold.release()

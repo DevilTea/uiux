@@ -461,7 +461,7 @@ describe('authorization in the shared application layer', () => {
 			return current
 		}
 		const first = await read()
-		const resized = await settingsOnly.updateWorkspaceSettings({ expectedRevision: first.revision, settings: { ...first.resource, viewports: { desktop: { dimensions: { width: 1280, height: 800 } } } } })
+		const resized = await settingsOnly.updateWorkspaceSettings({ expectedRevision: first.revision, settings: { ...first.resource, adapters: first.resource.adapters ?? [], viewports: { desktop: { dimensions: { width: 1280, height: 800 } } } } })
 		expect(resized).toMatchObject({ status: 'updated' })
 
 		const second = await read()
@@ -487,11 +487,11 @@ describe('authorization in the shared application layer', () => {
 			return current
 		}
 		const original = await read()
-		const resized = { ...original.resource, viewports: { desktop: { dimensions: { width: 1280, height: 800 } } } }
+		const resized = { ...original.resource, adapters: original.resource.adapters ?? [], viewports: { desktop: { dimensions: { width: 1280, height: 800 } } } }
 		// The revision a concurrent viewport edit produces, found by making that edit and undoing it.
 		const edited = await ctx.app.updateWorkspaceSettings({ expectedRevision: original.revision, settings: resized })
 		if (edited.status !== 'updated') throw new Error('edit')
-		expect(await ctx.app.updateWorkspaceSettings({ expectedRevision: edited.revision, settings: original.resource })).toMatchObject({ status: 'updated', revision: original.revision })
+		expect(await ctx.app.updateWorkspaceSettings({ expectedRevision: edited.revision, settings: { ...original.resource, adapters: original.resource.adapters ?? [] } })).toMatchObject({ status: 'updated', revision: original.revision })
 
 		// The concurrent edit lands after the scoped session authorized the request and before the service reads the manifest.
 		const racing: WorkspaceApplicationSession = {

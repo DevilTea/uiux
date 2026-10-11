@@ -1725,6 +1725,7 @@
       "expected_string": "此值必須是文字。",
       "invalid_json_object": "此值必須是 JSON 物件。",
       "invalid_json_value": "此值必須是有效的 JSON。",
+      "required_field": "此欄位為必填。",
       "unknown_field": "無法辨識這個欄位。"
     },
     "identity": {
@@ -2060,6 +2061,16 @@
     "reference": {
       "unknown_type": "不支援這種參照類型。",
       "invalid_absolute_uri": "請使用完整網址，例如 https://example.com/spec。"
+    },
+    "product_kit": {
+      "invalid_component_file": "登錄中的檔案路徑必須位於 kit/src/ 之下。",
+      "invalid_component_layer": "層級必須是設計系統層（design-system）或產品層。",
+      "invalid_component_name": "登錄中的名稱須為以連字號連接的小寫單字。",
+      "invalid_package_name": "請使用套件名稱。",
+      "invalid_style_specifier": "樣式表請使用套件匯出，或 kit/ 內的 ./ 路徑。",
+      "invalid_theme_attribute": "主題屬性名稱不可包含空白、引號、>、/ 或 =。",
+      "invalid_widget_import": "請指定套件及其中一個匯出。",
+      "unknown_component": "必須指向登錄中的另一個項目。"
     }
   },
   "diagnosticFallback": {
@@ -2080,6 +2091,7 @@
     "identity": "識別碼無效。",
     "lease": "無法取得編輯鎖定。",
     "persistence": "無法讀取或寫入 Workspace 檔案。",
+    "product_kit": "product-kit.json 有問題。",
     "preview": "預覽無法呈現這個 View。",
     "render_context": "這個呈現情境無效。",
     "request": "伺服器拒絕了這個請求。",

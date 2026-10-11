@@ -33,6 +33,7 @@ import { restoreResourceVersionForHttp } from '../src/server/history-http'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { bearer, connectMcp, provisionToken, scoped, testMember } from './support/access'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
+import { CURRENT_TEST_LAYOUT } from './support/workspace-layout'
 
 /**
  * Single-resource restore (issue #132 B6): Feature 01a11a5d-fd6b-7f9d-be15-2bc2bc3adc13 Rules 1428,
@@ -58,13 +59,13 @@ const AGENT = testMember({ memberId: 'agent-1', nickname: 'claude', kind: 'agent
 const OTHER_AGENT = testMember({ memberId: 'agent-2', nickname: 'codex', kind: 'agent', role: 'editor', credential: 'token' })
 const AGENT_REVIEWER = testMember({ memberId: 'agent-3', nickname: 'critic', kind: 'agent', role: 'reviewer', credential: 'token' })
 
-const MANIFEST: WorkspaceManifest = {
+const MANIFEST = {
 	schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 	i18n: { defaultLocale: 'en-US' },
 	adapters: [],
 	viewports: { desktop: { dimensions: { width: 1280, height: 800 } } },
 	themes: { light: { label: 'Light' } },
-}
+} satisfies WorkspaceManifest
 
 const cleanup: string[] = []
 const running: HistoryRecorder[] = []
@@ -332,7 +333,7 @@ describe('restoring every other kind', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS 
 		// A Checkpoint recorded under the previous schema version, holding settings without the mobile viewport.
 		const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
 		snapshot.set(workspaceRelativePath(), canonicalJsonBytes({ ...MANIFEST, schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1, themes: { light: { label: 'Light' }, dark: { label: 'Dark' } } }))
-		const built = versionResourcesFromSnapshot(snapshot)
+		const built = versionResourcesFromSnapshot(snapshot, CURRENT_TEST_LAYOUT)
 		const earlier = randomUUID()
 		await (await ctx.history.open())!.checkpoints.create({
 			historySchemaVersion: 1,
@@ -463,7 +464,7 @@ describe('refusals', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('refuses a version recorded under an unrecognized schema version (Rule 01a11a5e-081c)', async () => {
 		const ctx = await fixture()
 		const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
-		const built = versionResourcesFromSnapshot(snapshot)
+		const built = versionResourcesFromSnapshot(snapshot, CURRENT_TEST_LAYOUT)
 		const future = randomUUID()
 		await (await ctx.history.open())!.checkpoints.create({
 			historySchemaVersion: 1,
@@ -624,7 +625,7 @@ describe('access (Clause 01a11485-fa44, Rule 01a11c09-c648)', { timeout: HEAVY_S
 		}
 		const update = async (changes: Partial<WorkspaceManifest>) => {
 			const current = await settings()
-			const outcome = await session(ctx, EDITOR).updateWorkspaceSettings({ expectedRevision: current.revision, settings: { ...current.resource, ...changes } })
+			const outcome = await session(ctx, EDITOR).updateWorkspaceSettings({ expectedRevision: current.revision, settings: { ...current.resource, ...changes, adapters: changes.adapters ?? current.resource.adapters ?? [] } })
 			expect(outcome).toMatchObject({ status: 'updated' })
 		}
 		await update({ adapters: [{ moduleSpecifier: '@acme/adapter' }] })

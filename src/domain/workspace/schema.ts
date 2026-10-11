@@ -9,11 +9,20 @@ import {
 	type ValidationResult,
 } from '../validation'
 
+/**
+ * The first Workspace `schemaVersion` with the Product Kit file and the relocated layout (Part 14,
+ * Discussion #139): from it the manifest sits at the Workspace root and holds no `adapters`, which
+ * live in the Product Kit file (Clauses 01a1144e-531c-7d71-9bc5-f62340aea55a,
+ * 01a1144e-5336-73e7-84a0-3bcd0cb454f6 and 01a1144e-538e-705f-afdc-841028c410e4).
+ */
+export const PRODUCT_KIT_SCHEMA_VERSION = 5
+
 /** Property names in this DTO realize the accepted Workspace concepts. */
 export type WorkspaceManifest = {
 	schemaVersion: number
 	i18n: { defaultLocale: string; [key: string]: JsonValue }
-	adapters: WorkspaceAdapterSelection[]
+	/** Required below {@link PRODUCT_KIT_SCHEMA_VERSION}, absent from it (the Product Kit file holds the list). */
+	adapters?: WorkspaceAdapterSelection[]
 	viewports: Record<string, ViewportPreset>
 	themes: Record<string, ThemeEntry>
 }
@@ -57,17 +66,13 @@ export function validateWorkspaceManifest(input: unknown): ValidationResult<Work
 	if (i18n && !isCanonicalLocaleTag(i18n.defaultLocale))
 		v.issue('workspace.invalid_default_locale', '/i18n/defaultLocale', 'Workspace defaultLocale must be a canonical BCP 47 tag.')
 
-	const adapters = v.array(root.adapters, '/adapters')
-	adapters?.forEach((entry, index) => {
-		const path = jsonPointer('/adapters', index)
-		const adapter = v.object(entry, path)
-		if (!adapter)
-			return
-		if (!isPortableAdapterModuleSpecifier(adapter.moduleSpecifier))
-			v.issue('workspace.invalid_adapter_specifier', `${path}/moduleSpecifier`, 'Adapter moduleSpecifier must be a bare package specifier or a ./ Workspace-relative specifier.')
-		if (Object.hasOwn(adapter, 'config'))
-			validateJsonValue(adapter.config, `${path}/config`, v)
-	})
+	// Clause 01a1144e-5336-73e7-84a0-3bcd0cb454f6: `adapters` is required below schemaVersion 5 and,
+	// from 5, a member the manifest no longer has (it moved to the Product Kit file).
+	const productKitSchema = typeof root.schemaVersion === 'number' && root.schemaVersion >= PRODUCT_KIT_SCHEMA_VERSION
+	if (!productKitSchema)
+		validateAdapterSelections(root.adapters, '/adapters', v)
+	else if (Object.hasOwn(root, 'adapters'))
+		v.issue('schema.unknown_field', '/adapters', `From schemaVersion ${PRODUCT_KIT_SCHEMA_VERSION} the Adapter list lives in the Product Kit file, not in the manifest.`)
 
 	validateRegistry(root.viewports, '/viewports', v, (entry, path) => {
 		const viewport = v.object(entry, path)
@@ -86,6 +91,23 @@ export function validateWorkspaceManifest(input: unknown): ValidationResult<Work
 	})
 
 	return v.finish<WorkspaceManifest>(input)
+}
+
+/**
+ * An ordered Adapter list (Clause 01a1144e-538e-705f-afdc-841028c410e4): in the manifest below
+ * schemaVersion 5 and in the Product Kit file from 5.
+ */
+export function validateAdapterSelections(input: unknown, path: string, v: Validator): void {
+	v.array(input, path)?.forEach((entry, index) => {
+		const entryPath = jsonPointer(path, index)
+		const adapter = v.object(entry, entryPath)
+		if (!adapter)
+			return
+		if (!isPortableAdapterModuleSpecifier(adapter.moduleSpecifier))
+			v.issue('workspace.invalid_adapter_specifier', `${entryPath}/moduleSpecifier`, 'Adapter moduleSpecifier must be a bare package specifier or a ./ Workspace-relative specifier.')
+		if (Object.hasOwn(adapter, 'config'))
+			validateJsonValue(adapter.config, `${entryPath}/config`, v)
+	})
 }
 
 function validateRegistry(
