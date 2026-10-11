@@ -22,6 +22,7 @@ import {
 	authorizeOperation,
 	authorizeRestore,
 	effectiveKeys,
+	manifestAdapterChangeKeys,
 	type AccessOperation,
 	type ScopeDenied,
 } from '../src/application/access/policy'
@@ -389,6 +390,24 @@ describe('authorization by permission keys', () => {
 		expect(adapterChangeKeys(4, [a, b], [b, a])).toEqual(['product-kit.compose'])
 		expect(adapterChangeKeys(4, [a], [{ moduleSpecifier: '@acme/c' }])).toEqual(['product-kit.compose'])
 		expect(adapterChangeKeys(5, [a], [b])).toEqual([])
+	})
+
+	it('treats a missing or non-numeric manifest schemaVersion as below 5, so an adapters change needs product-kit.compose', () => {
+		const before = { adapters: [{ moduleSpecifier: '@acme/a' }] }
+		const after = { adapters: [{ moduleSpecifier: '@acme/b' }] }
+		for (const schemaVersion of [undefined, null, '5', '6', 5.5, Number.NaN, true, {}, [5]]) {
+			const label = String(JSON.stringify(schemaVersion))
+			expect(manifestAdapterChangeKeys({ ...before, schemaVersion }, { ...after, schemaVersion }), label).toEqual(['product-kit.compose'])
+		}
+		expect(manifestAdapterChangeKeys(before, after)).toEqual(['product-kit.compose'])
+		expect(manifestAdapterChangeKeys(undefined, after)).toEqual(['product-kit.compose'])
+		// The written manifest's version decides; the replaced one's stands in only when it has none.
+		expect(manifestAdapterChangeKeys({ ...before, schemaVersion: 5 }, { ...after, schemaVersion: '5' })).toEqual(['product-kit.compose'])
+		expect(manifestAdapterChangeKeys({ ...before, schemaVersion: 4 }, { ...after, schemaVersion: 5 })).toEqual([])
+		expect(manifestAdapterChangeKeys({ ...before, schemaVersion: 5 }, after)).toEqual([])
+		// A non-array adapters list is empty, so adding a first entry is a change.
+		expect(manifestAdapterChangeKeys({ adapters: 'none' }, after)).toEqual(['product-kit.compose'])
+		expect(manifestAdapterChangeKeys({ ...before, schemaVersion: 4 }, { ...before, schemaVersion: 4 })).toEqual([])
 	})
 })
 

@@ -33,6 +33,7 @@ import {
 	SESSION_IDLE_MS,
 	type AccessFile,
 } from '../src/server/access/roster'
+import { keysForRole } from '../src/application/access/keys'
 import { sessionServesOrigin } from '../src/server/access/service'
 import { AccessStore, accessStorePaths, workspaceStoreId } from '../src/server/access/store'
 
@@ -115,21 +116,21 @@ describe('roster rules', () => {
 		expectAccessError(() => addMember(file, { nickname: 'claude', role: 'viewer' }), 'access.nickname_taken')
 		expectAccessError(() => addMember(file, { nickname: 'x', role: 'admin' }), 'access.invalid_role')
 		expectAccessError(() => addMember(file, { nickname: 'x', role: 'viewer', kind: 'robot' }), 'access.invalid_kind')
-		expect(addMember(file, { nickname: 'mei.l_2-x', role: 'reviewer' }).result).toMatchObject({ kind: 'human', role: 'reviewer' })
+		expect(addMember(file, { nickname: 'mei.l_2-x', role: 'reviewer' }).result).toMatchObject({ kind: 'human', keys: keysForRole('human', 'reviewer') })
 		expect(sanitizeNickname('William Chen')).toBe('william-chen')
 		expect(sanitizeNickname('___')).toBe('owner')
 		expect(sanitizeNickname(undefined)).toBe('owner')
 	})
 
-	it('caps agents at Editor, keeps kind immutable and protects the last human Owner', () => {
+	it('refuses the Owner role\'s humanOnly keys for an Agent, keeps kind immutable and protects the last human manager', () => {
 		const file = rosterWithOwner()
-		expectAccessError(() => addMember(file, { nickname: 'bot', role: 'owner', kind: 'agent' }), 'access.agent_role_cap')
-		expectAccessError(() => setMember(file, 'claude', { role: 'owner' }), 'access.agent_role_cap')
+		expectAccessError(() => addMember(file, { nickname: 'bot', role: 'owner', kind: 'agent' }), 'access.key_human_only')
+		expectAccessError(() => setMember(file, 'claude', { role: 'owner' }), 'access.key_human_only')
 		expectAccessError(() => setMember(file, 'claude', { kind: 'human' }), 'access.kind_immutable')
-		expectAccessError(() => setMember(file, 'deviltea', { role: 'editor' }), 'auth.last_owner')
-		expectAccessError(() => removeMember(file, 'deviltea'), 'auth.last_owner')
+		expectAccessError(() => setMember(file, 'deviltea', { role: 'editor' }), 'access.last_manager')
+		expectAccessError(() => removeMember(file, 'deviltea'), 'access.last_manager')
 		const withSecond = addMember(file, { nickname: 'mei', role: 'owner' }).file
-		expect(setMember(withSecond, 'deviltea', { role: 'editor' }).result.role).toBe('editor')
+		expect(setMember(withSecond, 'deviltea', { role: 'editor' }).result.keys).toEqual(keysForRole('human', 'editor'))
 		expect(setMember(file, 'claude', { nickname: 'claude-main' }).result.nickname).toBe('claude-main')
 		expectAccessError(() => setMember(file, 'claude', { nickname: 'deviltea' }), 'access.nickname_taken')
 		expectAccessError(() => setMember(file, 'ghost', { role: 'viewer' }), 'access.member_not_found')
@@ -234,7 +235,7 @@ describe('host-local access store', () => {
 		for (const dir of [home, join(home, 'workspaces'), paths.dir]) expect((await lstat(dir)).mode & 0o777).toBe(0o700)
 		expect((await lstat(paths.file)).mode & 0o777).toBe(0o600)
 		const file = JSON.parse(await readFile(paths.file, 'utf8')) as AccessFile
-		expect(file).toMatchObject({ version: 1, workspaceRoot: workspace, members: [], tokens: [], invites: [], sessions: [] })
+		expect(file).toMatchObject({ version: 2, workspaceRoot: workspace, members: [], tokens: [], invites: [], sessions: [] })
 		expect(file.hint).toMatch(/^[a-z2-7]{4}$/u)
 		// Opening through the target shares the roster.
 		expect((await AccessStore.open({ workspaceRoot: workspace, home }))!.data.hint).toBe(file.hint)
