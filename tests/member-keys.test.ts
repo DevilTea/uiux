@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { HUMAN_ONLY_PERMISSION_KEYS, keysForRole, PERMISSION_KEYS } from '../src/application/access/keys'
-import { applyPreset, catalogByDomain, keyDomain, keysNoHumanHolds, orderedKeys, toggleKey } from '../app/utils/member-keys'
+import { applyPreset, catalogByDomain, keyChanges, keyDomain, keysNoHumanHolds, orderedKeys, toggleKey } from '../app/utils/member-keys'
 
 /** The Members page key checklist's rules (issue #142, P5), without the page. */
 
@@ -44,6 +44,17 @@ describe('the key checklist', () => {
 	it('keeps the unknown keys the member holds when a preset is applied (owner ruling of 2026-10-11 on PR #189)', () => {
 		expect(applyPreset(VIEWER, ['future.capability', ...OWNER, 'other.thing'], 'human').keys).toEqual([...VIEWER, 'future.capability', 'other.thing'])
 		expect(applyPreset(OWNER, ['future.capability'], 'agent').keys).toEqual([...keysForRole('agent', 'owner'), 'future.capability'])
+	})
+
+	it('sends a preset or an edit as the keys to grant and revoke against the member as loaded (owner ruling 1 of 2026-10-11 on PR #191)', () => {
+		const loaded = [...VIEWER, 'future.capability']
+		const applied = applyPreset(keysForRole('human', 'editor'), loaded, 'human').keys
+		expect(keyChanges(loaded, applied)).toEqual({ grant: keysForRole('human', 'editor').filter(key => !VIEWER.includes(key)), revoke: VIEWER.filter(key => !keysForRole('human', 'editor').includes(key)) })
+		// The unknown key the member holds is neither granted nor revoked.
+		expect(keyChanges(loaded, applied).revoke).not.toContain('future.capability')
+		expect(keyChanges(OWNER, applyPreset(VIEWER, OWNER, 'human').keys)).toEqual({ grant: [], revoke: OWNER.filter(key => !VIEWER.includes(key)) })
+		expect(keyChanges(loaded, loaded)).toEqual({ grant: [], revoke: [] })
+		expect(keyChanges(['workspace.read', 'views.write'], ['views.write', 'workspace.read'])).toEqual({ grant: [], revoke: [] })
 	})
 
 	it('orders a key set as the roster stores it', () => {

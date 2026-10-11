@@ -78,6 +78,21 @@ export function applyPreset(presetKeys: readonly string[], current: readonly str
 }
 
 /**
+ * What an edit sends: the keys checked now that the member did not hold when the page loaded it
+ * (`grant`), and the keys it held then that are unchecked now (`revoke`). The server applies them
+ * to the member's current keys, so a change made meanwhile through the CLI or by another manager
+ * is kept (owner ruling 1 of 2026-10-11 on PR #191,
+ * https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18864075). Applying a preset is
+ * such a diff too, and an unknown key the member holds stays out of it.
+ */
+export function keyChanges(loaded: readonly string[], edited: readonly string[]): Readonly<{ grant: string[]; revoke: string[] }> {
+	return {
+		grant: orderedKeys(edited.filter(key => !loaded.includes(key))),
+		revoke: orderedKeys(loaded.filter(key => !edited.includes(key))),
+	}
+}
+
+/**
  * The catalog keys that no human member holds (Rule 01a11c09-bbc9-721f-903c-27c615692624), in
  * catalog order. An Agent's keys do not count.
  */

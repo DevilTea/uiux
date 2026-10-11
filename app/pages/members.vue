@@ -11,7 +11,7 @@ import { useWorkbenchFormat } from '../composables/useWorkbenchFormat'
 import { copyText } from '../utils/copy-text'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
 import { memberInitials } from '../utils/member-initials'
-import { keysNoHumanHolds, orderedKeys } from '../utils/member-keys'
+import { keyChanges, keysNoHumanHolds } from '../utils/member-keys'
 import { memberLabelText } from '../utils/member-label'
 import MemberKeyEditor from '../components/access/MemberKeyEditor.vue'
 import WbErrorDescription from '../components/workbench/WbErrorDescription.vue'
@@ -124,8 +124,6 @@ function setNewKind(kind: MemberKind): void {
 	editor.keys = keysOfPreset(kind, editor.keys)
 }
 
-const sameKeys = (left: readonly string[], right: readonly string[]) => orderedKeys(left).join() === orderedKeys(right).join()
-
 async function saveEditor(): Promise<void> {
 	if (saving.value) return
 	const nickname = editor.nickname.trim()
@@ -138,10 +136,14 @@ async function saveEditor(): Promise<void> {
 			feedback.success(t('access.members.added', { nickname }))
 		}
 		else {
-			// Unchanged keys are not sent, so a rename alone leaves a key set written by hand as it is
-			// (Rules 01a11c09-b779-7f5f-ba47-170a584a09ce and 01a11c33-24ab-76c8-8811-13d938153cad).
+			// Only the keys granted and revoked against the member as loaded are sent: the server applies
+			// them to its current keys, so a concurrent change is kept (owner ruling 1 of 2026-10-11 on
+			// PR #191), and a rename alone leaves a key set written by hand as it is (Rules
+			// 01a11c09-b779-7f5f-ba47-170a584a09ce and 01a11c33-24ab-76c8-8811-13d938153cad).
+			const { grant, revoke } = keyChanges(member.keys, editor.keys)
 			const body = {
-				...(sameKeys(editor.keys, member.keys) ? {} : { keys: editor.keys }),
+				...(grant.length > 0 ? { grant } : {}),
+				...(revoke.length > 0 ? { revoke } : {}),
 				...(nickname !== member.nickname ? { nickname } : {}),
 			}
 			if (Object.keys(body).length > 0) {

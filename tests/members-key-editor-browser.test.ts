@@ -6,6 +6,7 @@ import { keysForRole, PERMISSION_KEYS } from '../src/application/access/keys'
 import type { MemberKind } from '../src/application/access/principal'
 import { accessStorePaths, resolveUiuxHome, workspaceRealRoot } from '../src/server/access/store'
 import { orderedKeys } from '../app/utils/member-keys'
+import { runAccessCommand } from '../src/cli/access'
 import { provisionToken } from './support/access'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
@@ -21,7 +22,9 @@ import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-
  * - an Agent's `humanOnly` keys are disabled, and a preset applied to it drops them (Rules
  *   01a11485-eac6 and 01a11c74-26ef);
  * - a preset keeps the unknown keys the member holds (owner ruling of 2026-10-11 on PR #189);
- * - the server's refusals (`access.last_manager`, `access.key_requires`, `access.unknown_key`,
+ * - an edit sends only the keys it grants and revokes, so a rename alone keeps a hand-written key set
+ *   and a change made meanwhile through the CLI is kept (owner ruling 1 of 2026-10-11 on PR #191);
+ * - the server's refusals (`access.last_manager`, `access.key_requires`,
  *   `access.admin_origin_rejected`) show in place, in the UI language;
  * - the notice lists the catalog keys no person holds (Rule 01a11c09-bbc9).
  */
@@ -216,6 +219,48 @@ describe('Edit access', () => {
 		finally { await context.close() }
 	}, 60_000)
 
+	it('renames a member alone without rewriting a hand-written key set that lacks a requirement', async () => {
+		const nickname = await member('human', VIEWER)
+		await writeStoredKeys(nickname, ['views.write'])
+		const renamed = `${nickname}-renamed`
+		const { context, page } = await openMembers()
+		try {
+			const editor = await editAccess(page, nickname)
+			const patches: unknown[] = []
+			page.on('request', (request) => {
+				if (request.method() === 'PATCH') patches.push(request.postDataJSON())
+			})
+			const saved = page.waitForResponse(response => response.request().method() === 'PATCH' && response.url().includes('/api/access/members/'))
+			await editor.locator('input[data-member-editor-nickname], [data-member-editor-nickname] input').fill(renamed)
+			await save(editor)
+			expect((await saved).status()).toBe(200)
+			await editor.waitFor({ state: 'detached' })
+			expect(patches).toEqual([{ nickname: renamed }])
+			expect(await storedKeys(renamed)).toEqual(['views.write'])
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('keeps a change made through the CLI while the page was open (owner ruling 1 of 2026-10-11 on PR #191)', async () => {
+		const EDITOR = keysForRole('human', 'editor')
+		const nickname = await member('human', [...EDITOR, 'members.manage'])
+		const { context, page } = await openMembers()
+		try {
+			const editor = await editAccess(page, nickname)
+			expect(await checkedKeys(editor)).toEqual([...EDITOR, 'members.manage'])
+			// Meanwhile `uiux member set` takes members.manage away.
+			const err: string[] = []
+			const code = await runAccessCommand({ argv: ['member', 'set', nickname, '--revoke', 'members.manage', '--workspace', server.workspaceRoot], env: { UIUX_HOME: resolveUiuxHome() }, stdout: () => {}, stderr: line => err.push(line) })
+			expect(code, err.join('\n')).toBe(0)
+			// The page, still showing members.manage checked, unchecks an unrelated key and saves.
+			await checkbox(editor, 'handoff.export').click()
+			await save(editor)
+			await editor.waitFor({ state: 'detached' })
+			expect(await storedKeys(nickname)).toEqual(EDITOR.filter(key => key !== 'handoff.export'))
+		}
+		finally { await context.close() }
+	}, 60_000)
+
 	it('adds a member with the keys chosen in the checklist', async () => {
 		const nickname = `p5-new-${unique()}`
 		const { context, page } = await openMembers()
@@ -268,22 +313,6 @@ describe('refusals shown in place', () => {
 		finally { await context.close() }
 	}, 60_000)
 
-	it('shows access.unknown_key when an unknown key was dropped from the roster meanwhile', async () => {
-		const nickname = await member('human', VIEWER)
-		await writeStoredKeys(nickname, [...VIEWER, 'future.capability'])
-		const { context, page } = await openMembers()
-		try {
-			const editor = await editAccess(page, nickname)
-			await writeStoredKeys(nickname, VIEWER)
-			await checkbox(editor, 'reviews.write').click()
-			await save(editor)
-			const error = editor.locator('[data-member-editor-error]')
-			await error.waitFor()
-			expect(await error.getAttribute('data-code')).toBe('access.unknown_key')
-			expect(await error.innerText()).toContain('`future.capability` is not a permission key of this UIUX version')
-		}
-		finally { await context.close() }
-	}, 60_000)
 
 	it('explains access.admin_origin_rejected in zh-TW', async () => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' })
