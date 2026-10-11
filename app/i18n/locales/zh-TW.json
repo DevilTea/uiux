@@ -1370,7 +1370,7 @@
       "updated": "已更新 {nickname}。",
       "save": "儲存",
       "unheldTitle": "有 {n} 個權限鍵沒有任何人員持有 | 有 {n} 個權限鍵沒有任何人員持有",
-      "unheldDescription": "目前沒有任何人員成員持有這些權限鍵，在有人獲得之前，沒有人能在 Workbench 中使用它們。",
+      "unheldDescription": "目前沒有任何人員持有這些權限鍵，在有人獲得之前，沒有人能在 Workbench 中使用它們。",
       "unheldAction": "開啟你的權限鍵清單"
     },
     "tokens": {
@@ -1442,7 +1442,7 @@
     "keys": {
       "resultingLabel": "權限",
       "count": "沒有權限鍵 | {n} 個權限鍵 | {n} 個權限鍵",
-      "startFromPreset": "從預設開始",
+      "startFromPreset": "從預設集開始",
       "applied": "已從 {preset} 開始。",
       "appliedAgent": "已從 {preset} 開始，但不含 {keys}：Agent 不能持有僅限人員的權限鍵。",
       "manageWarningTitle": "這位成員可以授予所有權限鍵",
@@ -1451,13 +1451,13 @@
       "humanOnlyAgent": "Agent 不能持有這個權限鍵。",
       "missing": "還需要 {keys}",
       "unknownTitle": "這個版本的 UIUX 不認得的權限鍵",
-      "unknownHelp": "它們會原樣保留，但不授予任何權限。從預設開始時也會保留。",
+      "unknownHelp": "它們會原樣保留，但不授予任何權限。從預設集開始時也會保留。",
       "gap": "{key} 需要 {keys}。",
       "gapBadge": "缺少必要權限鍵",
       "domain": {
         "workspace": "Workspace",
         "history": "歷程",
-        "product_kit": "產品套件",
+        "product_kit": "Product Kit",
         "reviews": "Review",
         "views": "View",
         "flows": "UX Flow",
@@ -1468,13 +1468,13 @@
         "handoff": "Handoff",
         "checkpoints": "Checkpoint",
         "locks": "編輯鎖定",
-        "presets": "存取預設",
+        "presets": "存取預設集",
         "members": "成員"
       },
       "description": {
         "workspace_read": "開啟 Workspace：View、UX Flow、Locale、Asset、Evidence 與預覽。",
         "history_read": "瀏覽版本歷程並比較版本。",
-        "product_kit_source_read": "瀏覽套件原始碼、建置輸出與建置記錄。",
+        "product_kit_source_read": "瀏覽 Product Kit 原始碼、建置輸出與建置記錄。",
         "reviews_write": "建立 Review 討論串、回覆、重新錨定與釘選，並編輯或撤回自己的討論串。",
         "reviews_submit": "將 Review 討論串送出為待審核，並重新開啟討論串。",
         "reviews_promote": "將 Review 提升為 Decision。",
@@ -1484,7 +1484,7 @@
         "locales_write": "建立與編輯 Locale。",
         "assets_write": "新增與取代 Asset。",
         "settings_write": "變更 Workspace 設定。",
-        "product_kit_write": "變更 Adapter 設定、樣式、主題、登錄表與套件建置。",
+        "product_kit_write": "變更 Adapter 設定、樣式、主題、元件登錄表與 Product Kit 建置。",
         "product_kit_compose": "變更設計系統，以及 Workspace 使用哪些 Adapter 與其順序。",
         "evidence_capture": "擷取正式 Evidence。",
         "handoff_export": "匯出 Handoff。",
@@ -1492,7 +1492,7 @@
         "history_restore": "從較早的版本還原資源。",
         "checkpoints_delete": "刪除 Checkpoint。",
         "locks_force_release": "解除其他成員的編輯鎖定。",
-        "presets_manage": "編輯存取預設。",
+        "presets_manage": "編輯存取預設集。",
         "members_manage": "管理成員、Token、登入連結與工作階段。"
       }
     },
