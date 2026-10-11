@@ -32,6 +32,12 @@ function fingerprint(path: string): string {
  * `process.env`) can ever read or write the developer's real `~/.uiux` access rosters. The run also
  * fails when any test changed the repository's own Workspaces (AGENTS.md: tests use temporary
  * Workspaces and never write the dogfood).
+ *
+ * Vitest reports an error thrown from a global teardown but still exits 0, so the guard sets
+ * `process.exitCode = 1` before throwing. Its limits: it compares one fingerprint before the run
+ * with one after it, so a test that creates and then deletes a file (or restores the same size
+ * and modification time) goes unnoticed; and it covers only `vitest` runs, not the smoke scripts
+ * (`scripts/smoke-*.mjs`), which run outside it.
  */
 export default function setup(): () => void {
 	const home = mkdtempSync(join(tmpdir(), 'uiux-test-home-'))
@@ -40,7 +46,9 @@ export default function setup(): () => void {
 	return () => {
 		rmSync(home, { recursive: true, force: true })
 		const changed = GUARDED.filter((path, index) => fingerprint(path) !== before[index])
-		if (changed.length > 0)
+		if (changed.length > 0) {
+			process.exitCode = 1
 			throw new Error(`A test changed the repository's own Workspace in ${changed.map(path => relative(REPOSITORY_ROOT, path)).join(' and ')}; tests must use a temporary --workspace.`)
+		}
 	}
 }
