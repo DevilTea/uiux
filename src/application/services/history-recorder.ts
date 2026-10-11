@@ -152,8 +152,14 @@ export interface MigrationHistoryRecorder {
 	 * `system:migrate` and the source `cli`. It works while the Workspace needs migration.
 	 */
 	beforeMigrationUnlocked(targetSchemaVersion: number): Promise<MigrationCheckpointReport>
-	/** After the migration committed: records its changes as one `system:migrate` system version and returns its id. */
-	afterMigrationUnlocked(): Promise<string>
+	/**
+	 * After the migration committed: records its changes as one `system:migrate` system version and
+	 * returns its id. A migration that moved the Workspace to a new root (`uiux.v4-to-v5`) passes
+	 * that root's persistence as `migrated`, so the version is taken there, with its layout, while it
+	 * is still recorded in the host history this recorder opened, the old root's (Rule
+	 * 01a12626-5a0c-7c1a-942f-666101981e29). The migration's lock must cover both roots.
+	 */
+	afterMigrationUnlocked(migrated?: FileNativePersistence): Promise<string>
 }
 
 export type MigrationHistoryRecorderOptions = Readonly<{
@@ -530,15 +536,16 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 		return { checkpoint: checkpoint.id, boundary, ...(quarantined ? { quarantined } : {}) }
 	}
 
-	async afterMigrationUnlocked(): Promise<string> {
+	async afterMigrationUnlocked(migrated?: FileNativePersistence): Promise<string> {
 		const stores = this.stores
 		const startedAt = this.migrationStartedAt
 		if (this.phase !== 'migrating' || !stores || !startedAt) throw new Error('The migration system version follows the pre-migration Checkpoint.')
+		const persistence = migrated ?? this.persistence
 		// Read before anything is stored: a migration that moved the Workspace to another layout leaves
-		// this persistence's layout stale, and the record must then fail loudly, not pair the old
+		// the old root's persistence layout stale, and the record must then fail loudly, not pair the old
 		// layout's scan with the new version.
-		const workspaceSchemaVersion = await this.persistence.readRecordSchemaVersionUnlocked()
-		const actual = versionResourcesFromSnapshot(await this.persistence.scanVersionedSnapshotUnlocked(), this.persistence.layout)
+		const workspaceSchemaVersion = await persistence.readRecordSchemaVersionUnlocked()
+		const actual = versionResourcesFromSnapshot(await persistence.scanVersionedSnapshotUnlocked(), persistence.layout)
 		for (const [digest, bytes] of actual.blobs) {
 			if (!await stores.host.hasBlob(digest)) await stores.host.putBlob(bytes)
 		}

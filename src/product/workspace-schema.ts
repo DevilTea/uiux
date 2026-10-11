@@ -1,8 +1,11 @@
+import { posix } from 'node:path'
+
 import { canonicalJsonBytes } from '../domain/canonical-json'
+import { emptyProductKit } from '../domain/product-kit/schema'
 import { validateReviewThread } from '../domain/reviews/schema'
 import { isRecord } from '../domain/validation'
-import { layoutForSchemaVersion } from '../persistence/paths'
-import { defineWorkspaceSchemaPolicy, type WorkspaceMigrationStep, type WorkspaceSnapshot } from '../persistence/schema-policy'
+import { LEGACY_LAYOUT, layoutForSchemaVersion, V5_LAYOUT } from '../persistence/paths'
+import { defineWorkspaceSchemaPolicy, type WorkspaceMigrationRefusal, type WorkspaceMigrationStep, type WorkspaceSnapshot } from '../persistence/schema-policy'
 import packageJson from '../../package.json' with { type: 'json' }
 
 /**
@@ -129,6 +132,147 @@ export const WORKSPACE_V3_TO_V4_STEP: WorkspaceMigrationStep = Object.freeze({
 		return next
 	},
 })
+
+/** The old layout's metadata directory, which `uiux.v4-to-v5` makes the Workspace root. */
+const OLD_METADATA_DIRECTORY = LEGACY_LAYOUT.metadataDir
+/** The kit project inside the old metadata directory, as a path relative to the old Workspace root. */
+const OLD_KIT_DIRECTORY = `${OLD_METADATA_DIRECTORY}/${V5_LAYOUT.codeDir!}`
+
+/**
+ * Where a v4 `./` Adapter specifier goes in `schemaVersion` 5, by the module path `<p>` normalized
+ * relative to the old Workspace root:
+ *
+ * - `kit`: `<p>` lies in `.uiux/kit/`, and `rebased` is the specifier relative to `kit/`
+ *   (Clause 01a11bb1-8f5f-77ea-817b-46679c5a6475);
+ * - `outside`: `<p>` lies outside `.uiux/kit/`, which `uiux.v4-to-v5` refuses
+ *   (Rule 01a11bb1-9658-7f9e-972e-bd09136a5735), and `replacement` is the specifier to write by hand
+ *   once the module was moved (Clause 01a12626-e5c9-7753-8019-cdf82a5410ce: `./.uiux/kit/<p>`).
+ *   The edge forms the Contract leaves to this step get the closest useful replacement: a path
+ *   already under `.uiux/` keeps its place below `.uiux/kit/`; a path in a `node_modules/` directory
+ *   names that package with a bare specifier, which the kit project declares instead; and a path that
+ *   leaves the old root keeps only its file name, with `exact: false` since the module's place in the
+ *   kit project is the operator's choice.
+ */
+export type V4AdapterSpecifierPlacement =
+	| Readonly<{ kind: 'bare' }>
+	| Readonly<{ kind: 'kit'; rebased: string }>
+	| Readonly<{ kind: 'outside'; replacement: string; exact: boolean }>
+
+export function placeV4AdapterSpecifier(specifier: string): V4AdapterSpecifierPlacement {
+	if (!specifier.startsWith('./')) return { kind: 'bare' }
+	const path = posix.normalize(specifier.slice(2))
+	if (path === '..' || path.startsWith('../'))
+		return { kind: 'outside', replacement: `./${OLD_KIT_DIRECTORY}/${posix.basename(path)}`, exact: false }
+	if (path.startsWith(`${OLD_KIT_DIRECTORY}/`))
+		return { kind: 'kit', rebased: `./${path.slice(OLD_KIT_DIRECTORY.length + 1)}` }
+	const packagePath = /(?:^|\/)node_modules\/(?<rest>.+)$/u.exec(path)?.groups?.rest
+	if (packagePath && !packagePath.startsWith('.'))
+		return { kind: 'outside', replacement: packagePath, exact: true }
+	if (path === '.' || path === OLD_METADATA_DIRECTORY || path === OLD_KIT_DIRECTORY)
+		return { kind: 'outside', replacement: `./${OLD_KIT_DIRECTORY}/<module>`, exact: false }
+	const inKit = path.startsWith(`${OLD_METADATA_DIRECTORY}/`) ? path.slice(OLD_METADATA_DIRECTORY.length + 1) : path
+	return { kind: 'outside', replacement: `./${OLD_KIT_DIRECTORY}/${inKit}`, exact: true }
+}
+
+export const WORKSPACE_V4_TO_V5_STEP_ID = 'uiux.v4-to-v5'
+
+/**
+ * The `4 -> 5` step of Part 14 (Clause 01a11bb1-8f5f-77ea-817b-46679c5a6475), on the logical
+ * snapshot: the manifest moves from `.uiux/workspace.json` to `workspace.json` without `adapters`,
+ * at `schemaVersion` 5; `product-kit.json` holds those Adapters, each `./.uiux/kit/<p>` rebased to
+ * `./<p>` and each bare specifier unchanged, with every other member empty; the data files keep
+ * their paths, which from 5 are relative to the former `.uiux/` directory. Persistence applies the
+ * move of the data directories (`FileNativePersistence.migrateWorkspace`). Deterministic and
+ * idempotent; it re-validates every Review file that was valid under 4 against 5.
+ *
+ * `refuse` lists every `./` Adapter outside `.uiux/kit/` with its replacement (Rule
+ * 01a11bb1-9658-7f9e-972e-bd09136a5735, Clause 01a12626-e5c9-7753-8019-cdf82a5410ce); `uiux
+ * migrate` runs it before anything is written. `apply` alone never refuses, so an in-memory upgrade
+ * of a version recorded before the hand edit (Rule 01a12626-6a4f-72dc-af92-67b3b6355d66) still
+ * reads: it keeps such a specifier unchanged.
+ */
+export const WORKSPACE_V4_TO_V5_STEP: WorkspaceMigrationStep = Object.freeze({
+	id: WORKSPACE_V4_TO_V5_STEP_ID,
+	fromVersion: 4,
+	toVersion: 5,
+	refuse(snapshot: WorkspaceSnapshot): WorkspaceMigrationRefusal | undefined {
+		const adapters = v4Adapters(snapshot)
+		const items = adapters.flatMap((adapter, index) => {
+			const specifier = isRecord(adapter) ? adapter.moduleSpecifier : undefined
+			if (typeof specifier !== 'string') return []
+			const placement = placeV4AdapterSpecifier(specifier)
+			if (placement.kind !== 'outside') return []
+			const replacement = placement.exact
+				? `replace it with ${placement.replacement}`
+				: `move the module into ${OLD_KIT_DIRECTORY}/ and replace it with its path there, such as ${placement.replacement}`
+			return [{ path: `/adapters/${index}/moduleSpecifier`, message: `${specifier} lies outside ${OLD_KIT_DIRECTORY}/: ${replacement}` }]
+		})
+		if (items.length === 0) return undefined
+		const manifestPath = LEGACY_LAYOUT.manifestPath
+		return {
+			message: `${WORKSPACE_V4_TO_V5_STEP_ID} refuses ${items.length} ./ Adapter${items.length === 1 ? '' : 's'} outside ${OLD_KIT_DIRECTORY}/, and nothing was written. Move each module into ${OLD_KIT_DIRECTORY}/, edit its specifier in ${manifestPath} by hand as listed, then run uiux migrate again.`,
+			items,
+		}
+	},
+	apply(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+		const from = layoutForSchemaVersion(4)
+		const to = layoutForSchemaVersion(5)
+		const next = new Map(snapshot)
+		const manifestBytes = next.get(from.manifestPath)
+		if (!manifestBytes) throw new TypeError(`${WORKSPACE_V4_TO_V5_STEP_ID} requires ${from.manifestPath}.`)
+		const manifest = parseJson(manifestBytes, from.manifestPath)
+		if (!isRecord(manifest) || manifest.schemaVersion !== 4)
+			throw new TypeError(`${WORKSPACE_V4_TO_V5_STEP_ID} applies only to a schemaVersion 4 manifest.`)
+		if (next.has(to.manifestPath) || next.has(to.productKitPath!))
+			throw new TypeError(`${WORKSPACE_V4_TO_V5_STEP_ID} found ${to.manifestPath} or ${to.productKitPath} in a schemaVersion 4 snapshot.`)
+		const { adapters, ...settings } = manifest
+		next.delete(from.manifestPath)
+		next.set(to.manifestPath, canonicalJsonBytes({ ...settings, schemaVersion: 5 }))
+		const rebased = (Array.isArray(adapters) ? adapters : []).map((adapter: unknown) => {
+			if (!isRecord(adapter) || typeof adapter.moduleSpecifier !== 'string') return adapter
+			const placement = placeV4AdapterSpecifier(adapter.moduleSpecifier)
+			return placement.kind === 'kit' ? { ...adapter, moduleSpecifier: placement.rebased } : adapter
+		})
+		next.set(to.productKitPath!, canonicalJsonBytes({ ...emptyProductKit(), adapters: rebased }))
+
+		for (const [path, bytes] of snapshot) {
+			if (!/^reviews\/[^/]+\.review\.json$/u.test(path)) continue
+			let review: unknown
+			try { review = parseJson(bytes, path) }
+			catch { continue } // Unparseable JSON stays byte-identical and keeps its persistence diagnostic.
+			const filename = path.slice('reviews/'.length)
+			if (validateReviewThread(review, { schemaVersion: 4, filename }).ok) assertValidUnder(review, filename, 5, WORKSPACE_V4_TO_V5_STEP_ID)
+		}
+		return next
+	},
+})
+
+/** The `adapters` of a v4 snapshot's manifest, or none when the manifest is missing or unreadable. */
+function v4Adapters(snapshot: WorkspaceSnapshot): readonly unknown[] {
+	const bytes = snapshot.get(LEGACY_LAYOUT.manifestPath)
+	if (!bytes) return []
+	let manifest: unknown
+	try { manifest = parseJson(bytes, LEGACY_LAYOUT.manifestPath) }
+	catch { return [] }
+	return isRecord(manifest) && Array.isArray(manifest.adapters) ? manifest.adapters : []
+}
+
+/**
+ * The `.gitignore` rules for a `schemaVersion` 5 Workspace root (Clause
+ * 01a1144e-55a3-74c4-8bf8-3205e968e275): the runtime files (with the temporary files written next
+ * to the server hold and the persistence lock), `kit/node_modules/` and `kit/dist/`. `uiux migrate`
+ * prints them after `uiux.v4-to-v5` and writes no `.gitignore` (Clause
+ * 01a12626-e8fe-7354-aa20-31dd8491f841).
+ */
+export const WORKSPACE_GITIGNORE_RULES: readonly string[] = Object.freeze([
+	V5_LAYOUT.serverHoldPath,
+	V5_LAYOUT.metadataFilePath('.server-hold-*.tmp'),
+	V5_LAYOUT.lockPath,
+	V5_LAYOUT.metadataFilePath('.persistence-lock-*'),
+	`${V5_LAYOUT.transactionsDir}/`,
+	`${V5_LAYOUT.codeDir!}/node_modules/`,
+	`${V5_LAYOUT.codeDir!}/dist/`,
+])
 
 export const PRODUCT_WORKSPACE_SCHEMA_POLICY = defineWorkspaceSchemaPolicy({
 	currentVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,

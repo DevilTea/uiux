@@ -4,7 +4,8 @@ import { resolve } from 'node:path'
 
 import { FileNativePersistence } from '../persistence/file-native'
 import { detectWorkspaceLayout, layoutForSchemaVersion, resolveLayoutDirectory, resolveWorkspacePath, type WorkspaceLayout } from '../persistence/paths'
-import { checkWorkspaceSelection, type WorkspaceSelection } from '../persistence/workspace-selection'
+import type { WorkspaceSchemaPolicy } from '../persistence/schema-policy'
+import { checkWorkspaceSelection, isRelocatedSourceOf, type WorkspaceSelection } from '../persistence/workspace-selection'
 import { readActiveServerHold } from '../persistence/server-hold'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 import { generateHint } from '../server/access/credentials'
@@ -42,6 +43,8 @@ export type AccessCommandOptions = Readonly<{
 	stdout?: (line: string) => void
 	stderr?: (line: string) => void
 	now?: () => Date
+	/** Test seam: the Workspace schema policy of the entry checks (UIUX's own by default). */
+	schemaPolicy?: WorkspaceSchemaPolicy
 }>
 
 export const ACCESS_HELP = `Access commands (each takes --workspace <dir>; the roster lives in $UIUX_HOME, default ~/.uiux):
@@ -103,6 +106,7 @@ export async function runAccessCommand(options: AccessCommandOptions): Promise<n
 	const cwd = options.cwd ?? process.cwd()
 	const env = options.env ?? process.env
 	const now = options.now ?? (() => new Date())
+	const schemaPolicy = options.schemaPolicy ?? PRODUCT_WORKSPACE_SCHEMA_POLICY
 	const [command, sub, ...rest] = options.argv
 	try {
 		if (!command || !(ACCESS_COMMANDS as readonly string[]).includes(command)) throw new UsageError(`Unknown access command ${JSON.stringify(command ?? '')}.`)
@@ -114,8 +118,8 @@ export async function runAccessCommand(options: AccessCommandOptions): Promise<n
 		if (!workspaceArg) throw new UsageError(`uiux ${command} ${sub} requires --workspace <dir>.`)
 		if (spec.positionals >= 0 && parsed.positionals.length !== spec.positionals)
 			throw new UsageError(`uiux ${command} ${sub} takes ${spec.positionals === 0 ? 'no positional arguments' : `exactly ${spec.positionals} positional argument${spec.positionals > 1 ? 's' : ''}`}.`)
-		const workspaceRoot = await requireWorkspace(resolve(cwd, workspaceArg))
-		const context: Context = { home, workspaceRoot, parsed, out, err, now, cwd, env }
+		const workspaceRoot = await requireWorkspace(resolve(cwd, workspaceArg), schemaPolicy)
+		const context: Context = { home, workspaceRoot, parsed, out, err, now, cwd, env, schemaPolicy }
 		return await spec.run(context)
 	}
 	catch (error) {
@@ -141,17 +145,18 @@ type Context = Readonly<{
 	now: () => Date
 	cwd: string
 	env: Readonly<Record<string, string | undefined>>
+	schemaPolicy: WorkspaceSchemaPolicy
 }>
 
 type CommandSpec = Readonly<{ positionals: number; values: readonly string[]; flags: readonly string[]; run: (context: Context) => Promise<number> }>
 
-async function requireWorkspace(root: string): Promise<string> {
+async function requireWorkspace(root: string, schemaPolicy: WorkspaceSchemaPolicy): Promise<string> {
 	let manifestPath = layoutForSchemaVersion(CURRENT_WORKSPACE_SCHEMA_VERSION).manifestPath
 	let selection: WorkspaceSelection | undefined
 	try {
 		if (!(await stat(root)).isDirectory()) throw new Error('not a directory')
 		// The shared entry check, before any lock, store or Workspace file is touched.
-		selection = checkWorkspaceSelection(root, PRODUCT_WORKSPACE_SCHEMA_POLICY)
+		selection = checkWorkspaceSelection(root, schemaPolicy)
 		if (selection.ok) {
 			manifestPath = selection.layout.manifestPath
 			await stat(resolveWorkspacePath(root, manifestPath))
@@ -364,9 +369,11 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				const fromPath = resolve(context.cwd, from)
 				// The old directory may already be gone; fall back to its nearest existing ancestor's real path.
 				const sourceRoot = realFuturePath(fromPath)
-				// The source gets the same entry check as the target before its lock is ever taken.
-				const sourceSelection = checkWorkspaceSelection(sourceRoot, PRODUCT_WORKSPACE_SCHEMA_POLICY)
-				if (!sourceSelection.ok) throw new AccessError('access.workspace_invalid', `The source ${sourceSelection.message}`)
+				// The source gets the same entry check as the target before its lock is ever taken. Its one
+				// exception is the old root of a Workspace uiux migrate relocated into the target.
+				const sourceSelection = checkWorkspaceSelection(sourceRoot, context.schemaPolicy)
+				const relocatedSource = !sourceSelection.ok && isRelocatedSourceOf(sourceRoot, context.workspaceRoot, context.schemaPolicy)
+				if (!sourceSelection.ok && !relocatedSource) throw new AccessError('access.workspace_invalid', `The source ${sourceSelection.message}`)
 				if (sourceRoot === context.workspaceRoot) throw new AccessError('access.roster_exists', 'The source and target are the same Workspace.')
 				const source = await AccessStore.readRoster(context.home, sourceRoot)
 				if (!source) throw new AccessError('access.roster_missing', `No roster recorded for ${sourceRoot} under ${context.home}.`)
@@ -386,9 +393,11 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 					await refuseWhileServed(context.workspaceRoot)
 					// Under the target Workspace's persistence lock, which every writer of its history holds,
 					// and where possible the source's, so no source writer or prune runs mid-copy.
-					const persistence = new FileNativePersistence({ root: context.workspaceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+					const persistence = new FileNativePersistence({ root: context.workspaceRoot, schemaPolicy: context.schemaPolicy })
+					// A relocated source's lock file is the target's own, which this command already holds.
+					const underSourceLock = <Result>(operation: () => Promise<Result>) => relocatedSource ? operation() : withSourceLock(sourceRoot, context.err, operation)
 					try {
-						copied = await persistence.withLock(() => withSourceLock(sourceRoot, context.err, () => copyHostHistory(history, {
+						copied = await persistence.withLock(() => underSourceLock(() => copyHostHistory(history, {
 							replace,
 							// A server may have started since the check above.
 							beforeSwap: () => refuseWhileServed(context.workspaceRoot),
