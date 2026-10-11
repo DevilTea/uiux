@@ -212,7 +212,7 @@ A proxy that rewrites `Host` to the loopback address makes its requests look loc
 
 ## Dogfood Workspace
 
-This repository keeps its own UIUX specification in `design/`, still a `schemaVersion` 4 Workspace until its owner relocates it with `scripts/dogfood-relocate.sh` (to `<repo>/.uiux/`); until then the current UIUX opens it read-only. Initialize a new Workspace with `uiux init`; once a UIUX server is running against it, agents should author canonical resources through domain-specific MCP tools rather than editing files in `design/` directly. The Workbench is the human inspection surface for the same canonical state.
+This repository keeps its own UIUX specification in `design/`, still a `schemaVersion` 4 Workspace until its owner relocates it with `scripts/dogfood-relocate.mjs` (to `<repo>/.uiux/`); until then the current UIUX opens it read-only. Initialize a new Workspace with `uiux init`; once a UIUX server is running against it, agents should author canonical resources through domain-specific MCP tools rather than editing files in `design/` directly. The Workbench is the human inspection surface for the same canonical state.
 
 ## Checks
 
