@@ -1,12 +1,18 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { Window } from 'happy-dom'
+import { resolve as resolveImport } from 'import-meta-resolve'
 
 import {
+	getSelectedWorkspacePreviewBundle,
 	resolveSelectedWorkspaceAdapters,
 } from '../src/server/workspace-adapters'
+import { emptyProductKit } from '../src/domain/product-kit/schema'
+import { V5_LAYOUT } from '../src/persistence/paths'
 import {
 	buildWorkspacePreviewBundle,
 	clearPreviewBundleCache,
@@ -15,7 +21,7 @@ import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import { HUMAN_OWNER } from './support/access'
-import { writeManifest } from './support/workspace-layout'
+import { v5Manifest, writeManifest } from './support/workspace-layout'
 
 const temporaryRoots: string[] = []
 
@@ -602,5 +608,137 @@ export const manifest = {
 		expect(container.querySelector('#greeting-text')?.textContent).toBe('Bonjour le monde|⟦missing:untranslated_key⟧')
 
 		bridge.dispose()
+	})
+})
+
+describe('a schemaVersion 5 Workspace resolves its Adapters from the Product Kit (dormant)', () => {
+	const HOST_PACKAGES = [['@deviltea', 'widget-core'], ['@deviltea', 'widget-vue'], ['vue']] as const
+
+	/** Links the host's widget-core, widget-vue and vue into `<directory>/node_modules`, as a kit install would provide them. */
+	async function linkHostPackages(directory: string): Promise<void> {
+		for (const segments of HOST_PACKAGES) {
+			const target = join(directory, 'node_modules', ...segments)
+			await mkdir(dirname(target), { recursive: true })
+			await symlink(join(process.cwd(), 'node_modules', ...segments), target)
+		}
+	}
+
+	/** A v5 Workspace at `<root>`: `workspace.json`, `product-kit.json` with `adapters`, and `kit/` (Clause 01a1144e-538e). */
+	async function createV5Workspace(root: string, adapters: Array<{ moduleSpecifier: string }>, kitPackage?: unknown): Promise<string> {
+		await mkdir(join(root, 'kit'), { recursive: true })
+		await writeFile(join(root, 'workspace.json'), JSON.stringify(v5Manifest()))
+		await writeFile(join(root, 'product-kit.json'), JSON.stringify({ ...emptyProductKit(), adapters }))
+		if (kitPackage !== undefined) await writeFile(join(root, 'kit', 'package.json'), JSON.stringify(kitPackage))
+		return root
+	}
+
+	async function temporaryRoot(): Promise<string> {
+		const root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-preview-v5-')))
+		temporaryRoots.push(root)
+		return root
+	}
+
+	async function mountCounter(root: string, bundleJs: string): Promise<string> {
+		setupDom()
+		const bundleFile = join(root, `bundle-${randomUUID()}.mjs`)
+		await writeFile(bundleFile, bundleJs)
+		const bundleMod = await import(bundleFile)
+		const container = document.createElement('div')
+		document.body.appendChild(container)
+		const bridge = bundleMod.mountPreviewRuntime(container, { view: viewWithCounter(), context: defaultContext() })
+		const html = container.innerHTML
+		bridge.dispose()
+		return html
+	}
+
+	it('renders a plain-module Adapter in kit/ with no build, no registry and no kit package file (the minimal form)', async () => {
+		const root = await createV5Workspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
+		await linkHostPackages(join(root, 'kit'))
+		await writeFile(join(root, 'kit', 'adapter.mjs'), makeCounterAdapterSource())
+
+		const resolution = await resolveSelectedWorkspaceAdapters(root)
+		expect(resolution).toMatchObject({ state: 'valid', summaries: [{ index: 0, moduleSpecifier: './adapter.mjs', adapterId: 'my-counter' }] })
+		const bundle = await getSelectedWorkspacePreviewBundle(root, V5_LAYOUT)
+		expect(bundle.state).toBe('valid')
+		if (bundle.state !== 'valid') return
+		expect(await mountCounter(root, bundle.bundleJs)).toContain('Value: 42')
+	})
+
+	it('reports an Adapter outside kit/ or an undeclared package as a resolution diagnostic of the Product Kit list', async () => {
+		const root = await createV5Workspace(await temporaryRoot(), [
+			{ moduleSpecifier: './../views/counter.mjs' },
+			{ moduleSpecifier: 'undeclared-counter' },
+		], { private: true, dependencies: {} })
+		await mkdir(join(root, 'views'), { recursive: true })
+		await writeFile(join(root, 'views', 'counter.mjs'), makeCounterAdapterSource())
+		const undeclared = join(root, 'kit', 'node_modules', 'undeclared-counter')
+		await mkdir(undeclared, { recursive: true })
+		await writeFile(join(undeclared, 'package.json'), JSON.stringify({ name: 'undeclared-counter', type: 'module', main: './index.mjs' }))
+		await writeFile(join(undeclared, 'index.mjs'), makeCounterAdapterSource())
+
+		const resolution = await resolveSelectedWorkspaceAdapters(root)
+		expect(resolution.state).toBe('invalid')
+		expect(resolution.diagnostics).toEqual([
+			expect.objectContaining({ code: 'adapter.resolution_failed', path: '/adapters/0/moduleSpecifier', message: expect.stringMatching(/escapes kit\//) }),
+			expect.objectContaining({ code: 'adapter.resolution_failed', path: '/adapters/1/moduleSpecifier', message: expect.stringMatching(/does not declare/) }),
+		])
+	})
+
+	it('fails closed when the Product Kit file or the manifest is missing or invalid', async () => {
+		const root = await createV5Workspace(await temporaryRoot(), [])
+		expect(await resolveSelectedWorkspaceAdapters(root)).toMatchObject({ state: 'valid', summaries: [] })
+		for (const content of [undefined, '{', JSON.stringify({ adapters: [] })]) {
+			if (content === undefined) await rm(join(root, 'product-kit.json'))
+			else await writeFile(join(root, 'product-kit.json'), content)
+			const resolution = await resolveSelectedWorkspaceAdapters(root)
+			expect(resolution, String(content)).toMatchObject({ state: 'invalid', diagnostics: [{ code: 'product_kit.missing', path: '/product-kit' }] })
+		}
+		// A v5 manifest that still lists adapters is invalid (Clause 01a115cd-adb0): its Adapters are not read from it.
+		await writeFile(join(root, 'product-kit.json'), JSON.stringify(emptyProductKit()))
+		await writeFile(join(root, 'workspace.json'), JSON.stringify({ ...v5Manifest(), adapters: [] }))
+		expect(await resolveSelectedWorkspaceAdapters(root)).toMatchObject({ state: 'invalid', diagnostics: [{ code: 'workspace.manifest_missing' }] })
+	})
+
+	it('bundles the host widget-core even when kit/node_modules holds a second copy (#123)', async () => {
+		const root = await createV5Workspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
+		await linkHostPackages(join(root, 'kit'))
+		// Replace the linked widget-core with a second copy: it re-exports the host copy (so the
+		// server-side manifest load still works) and carries a marker that a bundled copy would include.
+		const secondCopy = join(root, 'kit', 'node_modules', '@deviltea', 'widget-core')
+		await rm(secondCopy)
+		await mkdir(secondCopy, { recursive: true })
+		const hostCore = resolveImport('@deviltea/widget-core', pathToFileURL(join(process.cwd(), 'package.json')).href)
+		await writeFile(join(secondCopy, 'package.json'), JSON.stringify({ name: '@deviltea/widget-core', version: '0.0.0-kit', type: 'module', exports: { '.': './index.mjs' } }))
+		await writeFile(join(secondCopy, 'index.mjs'), `export * from ${JSON.stringify(hostCore)};\nglobalThis.__kitSecondCopy = 'kit-second-widget-core-copy';\n`)
+		await writeFile(join(root, 'kit', 'adapter.mjs'), makeCounterAdapterSource())
+
+		const bundle = await getSelectedWorkspacePreviewBundle(root)
+		expect(bundle.state).toBe('valid')
+		if (bundle.state !== 'valid') return
+		expect(bundle.bundleJs).not.toContain('kit-second-widget-core-copy')
+		expect(await mountCounter(root, bundle.bundleJs)).toContain('Value: 42')
+	})
+
+	it('falls back to kit/node_modules, never the root node_modules, for a bare import of an Adapter outside kit/', async () => {
+		const outer = await temporaryRoot()
+		await linkHostPackages(outer)
+		const root = await createV5Workspace(join(outer, 'ws'), [{ moduleSpecifier: 'hoisted-counter' }], { dependencies: { 'hoisted-counter': '*' } })
+		const hoisted = join(outer, 'node_modules', 'hoisted-counter')
+		await mkdir(hoisted, { recursive: true })
+		await writeFile(join(hoisted, 'package.json'), JSON.stringify({ name: 'hoisted-counter', type: 'module', main: './index.mjs' }))
+		// The probe import is dynamic and never runs on the server; only the bundler resolves it.
+		await writeFile(join(hoisted, 'index.mjs'), `${makeCounterAdapterSource()}\nif (globalThis.__neverSet) import('fallback-probe');\n`)
+		for (const [directory, marker] of [[join(root, 'kit'), 'probe-from-kit'], [root, 'probe-from-root']] as const) {
+			const probe = join(directory, 'node_modules', 'fallback-probe')
+			await mkdir(probe, { recursive: true })
+			await writeFile(join(probe, 'package.json'), JSON.stringify({ name: 'fallback-probe', type: 'module', main: './index.mjs' }))
+			await writeFile(join(probe, 'index.mjs'), `export const probe = ${JSON.stringify(marker)};\n`)
+		}
+
+		const bundle = await getSelectedWorkspacePreviewBundle(root)
+		expect(bundle.state).toBe('valid')
+		if (bundle.state !== 'valid') return
+		expect(bundle.bundleJs).toContain('probe-from-kit')
+		expect(bundle.bundleJs).not.toContain('probe-from-root')
 	})
 })
