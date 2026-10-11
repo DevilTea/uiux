@@ -636,6 +636,47 @@ describe('kit project containment', () => {
 		const nestedRead = await nested.app.readProductKit()
 		expect(nestedRead?.packages).toEqual([{ package: '@acme/design-system', status: 'missing' }])
 	})
+
+	it('answers one way for a ./ Adapter through a link out of the Workspace, whether or not its target exists', async () => {
+		const outside = await outsideKit()
+		const ctx = await v5Fixture()
+		await symlink(join(outside, 'src'), join(ctx.root, 'kit', 'link'))
+		await symlink(join(outside, 'gone'), join(ctx.root, 'kit', 'gone'))
+		await symlink(join(outside, 'secret.ts'), join(ctx.root, 'kit', 'leak.ts'))
+		await symlink(join(outside, 'nothing.ts'), join(ctx.root, 'kit', 'dangling.ts'))
+		const specifiers = ['./link/secret.ts', './link/nothing.ts', './link/deeper/nothing.ts', './gone/x.ts', './leak.ts', './dangling.ts', './absent.ts']
+		await writeFile(ctx.kitPath, canonicalJsonBytes({ ...KIT, adapters: specifiers.map(moduleSpecifier => ({ moduleSpecifier })) }))
+		const read = await ctx.app.readProductKit()
+		const answers = new Set(read?.adapters.map(entry => JSON.stringify({ ...entry, moduleSpecifier: '<specifier>', ...('message' in entry ? { message: entry.message.replace(entry.moduleSpecifier, '<specifier>') } : {}) })))
+		expect(read?.adapters.map(entry => entry.status)).toEqual(specifiers.map(() => 'failed'))
+		expect([...answers]).toEqual([JSON.stringify({ moduleSpecifier: '<specifier>', status: 'failed', message: 'Adapter module specifier <specifier> does not resolve to a file inside kit/.' })])
+		const text = JSON.stringify(read)
+		expect(text).not.toContain(outside)
+		expect(text).not.toContain('<path>')
+	})
+
+	for (const [label, link] of [
+		['kit/node_modules/ is a link out of the Workspace', async (root: string, outside: string) => {
+			await rm(join(root, 'kit', 'node_modules'), { recursive: true })
+			await symlink(join(outside, 'node_modules'), join(root, 'kit', 'node_modules'))
+		}],
+		['a scope directory in kit/node_modules/ is a link out of the Workspace', async (root: string, outside: string) => {
+			await rm(join(root, 'kit', 'node_modules', '@acme'), { recursive: true })
+			await symlink(join(outside, 'node_modules', '@acme'), join(root, 'kit', 'node_modules', '@acme'))
+		}],
+	] as const) {
+		it(`reports a package as linked, whether or not it exists there, when ${label}`, async () => {
+			const outside = await outsideKit()
+			const ctx = await v5Fixture({ ...KIT, designSystems: ['@acme/design-system', '@acme/absent'] })
+			await link(ctx.root, outside)
+			const read = await ctx.app.readProductKit()
+			expect(read?.packages).toEqual([
+				{ package: '@acme/design-system', status: 'resolved', linked: true },
+				{ package: '@acme/absent', status: 'resolved', linked: true },
+			])
+			expect(JSON.stringify(read)).not.toContain('9.9.9')
+		})
+	}
 })
 
 describe('host paths in the Product Kit Resource', () => {

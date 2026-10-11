@@ -612,12 +612,12 @@ describe('Adapter resolution from kit/ in a schemaVersion 5 Workspace (Clause 01
 			await expect(resolver().resolve(root, specifier), specifier).rejects.toThrow(/escapes kit\//i)
 		// Percent-encoded dot segments pass the lexical check but resolve, as URLs, out of kit/.
 		await mkdir(join(root, 'kit', 'src'), { recursive: true })
-		await expect(resolver().resolve(root, './src/%2e%2e/%2e%2e/views/x.mjs')).rejects.toThrow(/resolves outside kit\//i)
+		await expect(resolver().resolve(root, './src/%2e%2e/%2e%2e/views/x.mjs')).rejects.toThrow(/does not resolve to a file inside kit\//i)
 		// A file link and a directory link out of kit/.
 		await symlink(join(root, 'views', 'x.mjs'), join(root, 'kit', 'linked.mjs'))
-		await expect(resolver().resolve(root, './linked.mjs')).rejects.toThrow(/resolves outside kit\//i)
+		await expect(resolver().resolve(root, './linked.mjs')).rejects.toThrow(/does not resolve to a file inside kit\//i)
 		await symlink(join(root, 'lib'), join(root, 'kit', 'lib'))
-		await expect(resolver().resolve(root, './lib/x.mjs')).rejects.toThrow(/resolves outside kit\//i)
+		await expect(resolver().resolve(root, './lib/x.mjs')).rejects.toThrow(/does not resolve to a file inside kit\//i)
 	})
 
 	it('keeps a ./ specifier outside kit/node_modules/, as written, by its real path and by identity', async () => {

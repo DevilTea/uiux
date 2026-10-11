@@ -201,15 +201,25 @@ async function resolveFromCodeDirectory(root: string, codeDirectoryName: string,
 		throw new Error(problem)
 
 	const parentUrl = pathToFileURL(join(codeDirectory, '.uiux-adapter-resolution.mjs')).href
-	const moduleIdentity = resolveImport(moduleSpecifier, parentUrl)
-	if (!moduleIdentity.startsWith('file:'))
-		throw new Error('Adapter module must resolve to a file-backed module.')
-	const resolvedPath = await realpath(fileURLToPath(moduleIdentity))
+	// A `./` specifier that does not resolve and one that resolves outside `kit/` get one answer,
+	// naming no path: a link inside `kit/` may point anywhere, and its target is not described.
+	const unresolvedInKit = () => new Error(`Adapter module specifier ${moduleSpecifier} does not resolve to a file inside ${codeDirectoryName}/.`)
+	let resolvedPath: string
+	try {
+		const moduleIdentity = resolveImport(moduleSpecifier, parentUrl)
+		if (!moduleIdentity.startsWith('file:'))
+			throw new Error('Adapter module must resolve to a file-backed module.')
+		resolvedPath = await realpath(fileURLToPath(moduleIdentity))
+	}
+	catch (error) {
+		if (relativeSelection) throw unresolvedInKit()
+		throw error
+	}
 
 	if (relativeSelection) {
 		const resolved = relative(codeDirectory, resolvedPath)
 		if (resolved === '' || escapesBase(resolved))
-			throw new Error(`Adapter module specifier ${moduleSpecifier} resolves outside ${codeDirectoryName}/.`)
+			throw unresolvedInKit()
 		if (await liesInKitDependencies(codeDirectory, resolvedPath))
 			throw new Error(`Adapter module specifier ${moduleSpecifier} resolves inside ${codeDirectoryName}/${KIT_DEPENDENCY_DIRECTORY}/.`)
 	}
