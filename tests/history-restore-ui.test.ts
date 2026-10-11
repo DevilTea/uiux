@@ -233,3 +233,10 @@ describe('the keys a Workspace settings restore needs beyond its write key (#140
 		expect(restoreExtraKeys('workspace', undefined)).toEqual([])
 	})
 })
+
+describe('the keys a Product Kit restore needs beyond its write key (#139 owner ruling 2026-10-11, 1)', () => {
+	it('always needs `product-kit.compose` until the Workbench compares the Product Kit precisely (K6)', () => {
+		expect(restoreExtraKeys('product-kit', undefined)).toEqual(['product-kit.compose'])
+		expect(restoreExtraKeys('product-kit', { to: { id: 'current', workspaceSchemaVersion: 5 }, changes: [] })).toEqual(['product-kit.compose'])
+	})
+})

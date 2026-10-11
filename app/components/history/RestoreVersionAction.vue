@@ -36,6 +36,8 @@ import WbErrorDescription from '../workbench/WbErrorDescription.vue'
  * For the Workspace settings that comparison is semantic: a restore that would change the
  * `adapters` entries also needs `product-kit.compose` (#140 owner ruling 2026-10-10, 1), so
  * without it the dialog names the key and offers no Restore (`restoreExtraKeys`).
+ * A Product Kit restore asks for `product-kit.compose` too, for now whatever it changes (#139
+ * owner ruling 2026-10-11, 1), until the Workbench compares the Product Kit precisely (K6).
  *
  * A restore forms a version of its own naming its source (Rules 01a11a5e-14ce-… and
  * 01a11e0d-d911-…), so on success every timeline and the Workbench's resources are read again.
