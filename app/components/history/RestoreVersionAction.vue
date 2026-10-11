@@ -13,7 +13,7 @@ import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 
 /**
  * "Restore this version" on a resource's diff (Rule 01a11a5e-18f2-7991-8f7d-aa4c8015d14a; offered
- * by the caller only on a desktop layout to an Editor or above, Rule 01a11a5e-1bfa-71e9-9611-152b5b665379).
+ * by the caller only on a desktop layout to a holder of `history.restore` and the kind's write key, Rule 01a11a5e-1bfa-71e9-9611-152b5b665379).
  *
  * Opening the dialog reads the resource's current revision, the `expectedRevision` of the write
  * (`null` when the resource no longer exists, owner ruling 3 of

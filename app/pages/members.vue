@@ -12,7 +12,7 @@ import { memberInitials } from '../utils/member-initials'
 import WorkbenchPage from '../components/workbench/WorkbenchPage.vue'
 
 /**
- * Members (accepted identity decision 12): the served Workspace's roster, for a human Owner on a
+ * Members (accepted identity decision 12): the served Workspace's roster, for a holder of `members.manage` on a
  * loopback origin or an `https` configured origin (Rule 01a11485-eb86-7a69-bf1b-70d492ee3be4).
  * Tokens are revealed once at creation; invites are single-use links.
  */

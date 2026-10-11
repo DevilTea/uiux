@@ -2,6 +2,7 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { useI18n } from '#imports'
 import type { HandoffRoot } from '../../../src/domain/handoff/schema'
+import { useAccess } from '../../composables/useAccess'
 import { useReadiness, type ExportOutcome } from '../../composables/useReadiness'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
@@ -26,7 +27,8 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const workbench = useWorkbench()
-const { views, flows, authorReadOnly } = workbench
+const { views, flows } = workbench
+const access = useAccess()
 const readiness = useReadiness()
 const uiux = useUiuxClient()
 const feedback = useWorkbenchFeedback()
@@ -66,7 +68,7 @@ const roots = computed<HandoffRoot[]>(() => {
 const entry = computed(() => roots.value.length ? readiness.assessmentFor(roots.value) : undefined)
 const split = computed(() => splitReadinessDiagnostics(entry.value?.readiness?.blockingDiagnostics))
 const ready = computed(() => entry.value?.status === 'ok' && entry.value.readiness?.implementationReady === true)
-const canExport = computed(() => !authorReadOnly.value)
+const canExport = computed(() => workbench.canWrite('handoff.export'))
 const exportedReady = computed(() => result.value?.readiness?.implementationReady === true && (result.value.manifest?.resources.length ?? 0) > 0)
 
 function seed(): void {
@@ -376,7 +378,7 @@ function middle(value: string | undefined): string {
             name="i-lucide-user-lock"
             class="size-4"
           />
-          {{ t('access.requiresRole', { role: t('access.role.editor') }) }}
+          {{ access.can('handoff.export') ? t('authoring.access.migration') : t('access.requiresKey', { key: 'handoff.export' }) }}
         </p>
         <template v-if="result">
           <UButton

@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { useI18n, useRoute, useRouter } from '#imports'
+import { useAccess } from '../../composables/useAccess'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
@@ -53,7 +54,8 @@ const { workspace, discoveredLocales } = workbench
 const uiux = useUiuxClient()
 const feedback = useWorkbenchFeedback()
 // The Workspace settings document is one lockable resource (accepted identity decision 11).
-const { access, canEdit } = useAuthoringAccess({ kind: 'workspace', key: 'workspace' })
+const member = useAccess()
+const { access, writeKey, canEdit } = useAuthoringAccess('settings.write', { kind: 'workspace', key: 'workspace' })
 /** A save refused by someone else's edit lease; every section's draft is kept. */
 const lockRefusal = shallowRef<Readonly<{ lock?: FetchErrorLock }>>()
 
@@ -321,7 +323,10 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
                 <code class="font-mono text-xs">.uiux/workspace.json</code>
               </template>
             </i18n-t>
-            <AuthoringAccessNotice :access="access" />
+            <AuthoringAccessNotice
+              :access="access"
+              :write-key="writeKey"
+            />
             <LockBadge
               kind="workspace"
               resource-key="workspace"
@@ -378,6 +383,7 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
                 :ref="(el) => { sectionRefs.adapters.value = el as InstanceType<typeof SettingsAdaptersSection> }"
                 :section="adapters"
                 :can-edit="canEdit"
+                :can-compose="member.can('product-kit.compose')"
                 :resolution="resolution"
                 :resolution-failed="resolutionFailed"
                 @save="save('adapters')"

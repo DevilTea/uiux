@@ -237,10 +237,19 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	// Permissions (accepted identity decisions; direct-resolve decision 9)
 	// -------------------------------------------------------------------------------------------
 
-	/** Reviewers and above comment and reply; Viewers read only. */
+	/** Commenting, replying, editing and deleting one's own messages, and re-anchoring need `reviews.write`. */
 	const canComment = computed(() => !reviewReadOnly.value)
-	/** Resolution is a human act on a Workbench cookie session. */
-	const canResolve = computed(() => !reviewReadOnly.value && access.member.value?.kind === 'human' && access.session.value?.credential === 'session')
+	/** Submitting for review and reopening need `reviews.submit`. */
+	const canSubmit = computed(() => workbench.canWrite('reviews.submit'))
+	/** Promoting to a Decision needs `reviews.promote`. */
+	const canPromote = computed(() => workbench.canWrite('reviews.promote'))
+	/**
+	 * Resolving needs `reviews.resolve`, a `humanOnly` key: the session's keys hold it only for a
+	 * human member on this Workbench cookie session (Rule 01a11c09-bec8-7dee-971a-4c10eaf83eef).
+	 */
+	const canResolve = computed(() => workbench.canWrite('reviews.resolve'))
+	/** Why the member cannot resolve: an Agent never can; a person without the key is told which one. */
+	const resolveBlockedReason = computed(() => access.member.value?.kind === 'agent' ? t('comments.resolveNeedsPerson') : t('access.requiresKey', { key: 'reviews.resolve' }))
 	const member = computed(() => access.member.value)
 	/** The signed-in member's stamped actor id, for "my message" and "my thread". */
 	const me = computed(() => access.member.value ? `member:${access.member.value.id}` : undefined)
@@ -254,14 +263,14 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	const availability = computed(() => ({
 		workspaceState: workbench.workspace.value?.inspection?.state,
 		signedIn: !!access.member.value,
-		canReview: access.canReview.value,
+		canWriteReviews: access.can('reviews.write'),
 		handset: handset.value,
 		hasView: !!selectedView.value,
 		session: preview.sessionStatus.value,
 	}))
 	function blockReason(code: CommentBlockCode | undefined): string | undefined {
 		if (!code) return undefined
-		if (code === 'role') return t('commentBlock.role', { role: t(`access.role.${access.role.value ?? 'viewer'}`) })
+		if (code === 'key') return t('commentBlock.key', { key: 'reviews.write' })
 		return t(`commentBlock.${code}`)
 	}
 	const createBlockedReason = computed(() => blockReason(commentCreateBlock(availability.value)))
@@ -597,7 +606,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	async function submit(threadId: string, draft: ReviewSubmissionDraft): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		const viewId = item?.anchor.viewId
-		if (!item || !viewId || !canComment.value || item.status !== 'open') return false
+		if (!item || !viewId || !canSubmit.value || item.status !== 'open') return false
 		lastError.value = undefined
 		const ok = await mutate(threadId, 'submit', async (revision) => {
 			const view = await uiux.readResource<ViewRead>('view', viewId)
@@ -1026,7 +1035,10 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		loadingDetails,
 		loadError,
 		canComment,
+		canSubmit,
+		canPromote,
 		canResolve,
+		resolveBlockedReason,
 		member,
 		me,
 		workspaceThreadCount,

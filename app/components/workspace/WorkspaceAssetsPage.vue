@@ -29,7 +29,7 @@ const { views } = workbench
 const uiux = useUiuxClient()
 const feedback = useWorkbenchFeedback()
 const fmt = useWorkbenchFormat()
-const { access, canEdit, isMobile } = useAuthoringAccess()
+const { access, writeKey, canEdit, isMobile } = useAuthoringAccess('assets.write')
 /** Each Asset is its own lockable resource; someone else's edit lease makes its detail read-only. */
 const member = useAccess()
 
@@ -216,7 +216,10 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
             {{ t('assets.upload') }}
           </UButton>
         </header>
-        <AuthoringAccessNotice :access="access" />
+        <AuthoringAccessNotice
+          :access="access"
+          :write-key="writeKey"
+        />
 
         <div
           v-if="entries.length"

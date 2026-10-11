@@ -30,7 +30,7 @@ const workbench = useWorkbench()
 const lastViewId = workbench.lastViewId()
 const shell = useWorkbenchShell()
 const readiness = useReadiness()
-const { views, reviews, loading, authorReadOnly, readyReviewCount, openReviewCount, workspaceFindingCount } = workbench
+const { views, reviews, loading, readyReviewCount, openReviewCount, workspaceFindingCount } = workbench
 const atLeastTablet = useMediaQuery('(min-width: 768px)')
 
 type ReadinessState = 'ready' | 'blocked' | 'checking' | 'failed' | 'migration'
@@ -163,7 +163,7 @@ const tabs = computed<TabsItem[]>(() => [
 ])
 
 const exportOpen = ref(false)
-const canExport = computed(() => !authorReadOnly.value && atLeastTablet.value)
+const canExport = computed(() => workbench.canWrite('handoff.export') && atLeastTablet.value)
 
 onMounted(() => { void readiness.loadEvidence() })
 watch([views, readiness.signature], () => {

@@ -4,6 +4,7 @@ import { deriveRenderContextOptions, workspaceRenderContextKeys, type RenderCont
 import { deriveWidgetTree, findWidgetInTree, flattenWidgetTree, type WidgetTreeNode } from '../../src/preview/widget-tree'
 import { describeFetchError } from '../utils/fetch-error'
 import { useUiuxClient } from './useUiuxClient'
+import type { PermissionKey } from '../../src/application/access/keys'
 import { useAccess } from './useAccess'
 import type {
 	Diagnostic,
@@ -24,7 +25,7 @@ import type {
 export function createWorkbenchState() {
 	const uiux = useUiuxClient()
 	const { t } = useI18n()
-	// Role-aware controls (accepted identity decision 12). The server remains the authority.
+	// Per-key controls (Rule 01a11485-eba3-7c07-a94f-0d69e610a0b6). The server remains the authority.
 	const access = useAccess()
 	const workspace = ref<WorkspaceRead>()
 	/**
@@ -35,8 +36,16 @@ export function createWorkbenchState() {
 		const state = workspace.value?.inspection?.state
 		return state === 'migration_required' || state === 'unsupported'
 	})
-	const authorReadOnly = computed(() => writeBlocked.value || !access.canAuthor.value)
-	const reviewReadOnly = computed(() => writeBlocked.value || !access.canReview.value)
+	/**
+	 * Whether the Workbench offers a write that needs `key`: the Workspace is live and migrated, and
+	 * the signed-in member holds the key (Discussion #140, decision 12: each page and action checks
+	 * its own key). Device tiers narrow this further where each surface decides.
+	 */
+	function canWrite(key: PermissionKey): boolean {
+		return !writeBlocked.value && access.can(key)
+	}
+	/** Commenting and replying need `reviews.write`; without it the Review surfaces are read-only. */
+	const reviewReadOnly = computed(() => !canWrite('reviews.write'))
 	const views = ref<readonly ViewSummary[]>([])
 	const discoveredLocales = ref<readonly string[]>([])
 	const localeRevisions = ref<Readonly<Record<string, string>>>({})
@@ -253,7 +262,7 @@ export function createWorkbenchState() {
 	}
 
 	return {
-		authorReadOnly,
+		canWrite,
 		reviewReadOnly,
 		writeBlocked,
 		workspace,

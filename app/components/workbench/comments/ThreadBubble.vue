@@ -114,7 +114,7 @@ function threadLink(): string {
 // left out there, as in the Reviews sheet. Submit for review is desktop-first.
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const isPhone = useMediaQuery(WORKBENCH_BREAKPOINTS.phone)
-const canSubmit = computed(() => thread.value?.status === 'open' && comments.canComment.value && isDesktop.value)
+const canSubmit = computed(() => thread.value?.status === 'open' && comments.canSubmit.value && isDesktop.value)
 
 const actions = useThreadActions({
 	thread: () => thread.value,
@@ -122,7 +122,7 @@ const actions = useThreadActions({
 	me: () => comments.me.value,
 	canWrite: () => comments.canComment.value,
 	canReanchor: () => comments.canComment.value && !isPhone.value,
-	canPromote: () => !workbench.authorReadOnly.value && !isPhone.value,
+	canPromote: () => comments.canPromote.value && !isPhone.value,
 	canSubmit: () => canSubmit.value,
 	conflict: () => conflict.value,
 	error: () => error.value,
@@ -571,7 +571,7 @@ watch(() => props.threadId, () => {
         data-thread-lifecycle
       >
         <UButton
-          v-if="thread.status === 'ready-for-review'"
+          v-if="thread.status === 'ready-for-review' && comments.canSubmit.value"
           size="sm"
           color="neutral"
           variant="outline"
@@ -618,10 +618,10 @@ watch(() => props.threadId, () => {
         v-else-if="thread.status !== 'resolved'"
         class="text-end text-xs text-muted"
       >
-        {{ t('comments.resolveNeedsPerson') }}
+        {{ comments.resolveBlockedReason.value }}
       </p>
       <div
-        v-if="thread.status === 'resolved'"
+        v-if="thread.status === 'resolved' && comments.canSubmit.value"
         class="flex justify-end"
       >
         <UButton

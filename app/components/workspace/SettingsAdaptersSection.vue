@@ -36,10 +36,15 @@ export type AdapterResolution = Readonly<{
  * Adapters (brief g): the ordered selection, read-only package state per Adapter, and repair
  * guidance for an invalid set. The Workbench never runs a package manager (Part 8 10a); it
  * prints the command to run. Order is changed by dragging or with the Move up / Move down buttons.
+ *
+ * Below `schemaVersion` 5, adding, removing, reordering or re-pointing an Adapter also needs
+ * `product-kit.compose` (Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa): without it (`canCompose`)
+ * only an Adapter's config stays editable, and the section names the missing key.
  */
 const props = defineProps<{
 	section: SettingsSection<AdapterRow[]>
 	canEdit: boolean
+	canCompose: boolean
 	resolution?: AdapterResolution
 	resolutionFailed?: boolean
 }>()
@@ -48,6 +53,8 @@ const { t } = useI18n()
 const toast = useToast()
 
 const rows = computed<AdapterRow[]>(() => props.section.draft ?? [])
+/** The selection itself (which Adapters, in which order) is editable here. */
+const canComposeHere = computed(() => props.canEdit && props.canCompose)
 const showIssues = ref(false)
 
 function specifierError(row: AdapterRow): string | undefined {
@@ -144,7 +151,7 @@ function onDragStart(index: number, event: DragEvent): void {
 	if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
 }
 function onDrop(index: number): void {
-	if (dragFrom.value !== undefined) move(dragFrom.value, index)
+	if (dragFrom.value !== undefined && canComposeHere.value) move(dragFrom.value, index)
 	dragFrom.value = undefined
 	dragOver.value = undefined
 }
@@ -188,9 +195,21 @@ defineExpose({ save })
         <p class="text-sm text-muted">
           {{ t('adapters.description') }}
         </p>
+        <p
+          v-if="canEdit && !canCompose"
+          class="flex items-center gap-1.5 text-xs text-muted"
+          data-access-notice="compose"
+          data-missing-key="product-kit.compose"
+        >
+          <UIcon
+            name="i-lucide-user-lock"
+            class="size-3.5 shrink-0"
+          />
+          {{ t('access.requiresKey', { key: 'product-kit.compose' }) }}
+        </p>
       </div>
       <UButton
-        v-if="canEdit"
+        v-if="canComposeHere"
         icon="i-lucide-plus"
         class="shrink-0"
         @click="add"
@@ -291,7 +310,7 @@ defineExpose({ save })
         :key="row.uid"
         class="flex gap-3 py-3"
         :class="dragOver === index && dragFrom !== index ? 'bg-muted' : ''"
-        :draggable="canEdit"
+        :draggable="canComposeHere"
         data-adapter-row
         @dragstart="onDragStart(index, $event)"
         @dragover.prevent="dragOver = index"
@@ -301,7 +320,7 @@ defineExpose({ save })
       >
         <div class="flex shrink-0 flex-col items-center gap-1 pt-1.5">
           <UIcon
-            v-if="canEdit"
+            v-if="canComposeHere"
             name="i-lucide-grip-vertical"
             class="size-4 cursor-grab text-dimmed"
             aria-hidden="true"
@@ -312,7 +331,7 @@ defineExpose({ save })
         <div class="flex min-w-0 flex-1 flex-col gap-2">
           <div class="flex flex-wrap items-start gap-2">
             <UFormField
-              v-if="canEdit"
+              v-if="canComposeHere"
               :label="t('adapters.moduleSpecifier')"
               :error="specifierError(row)"
               :ui="{ label: 'sr-only' }"
@@ -440,7 +459,7 @@ defineExpose({ save })
         </div>
 
         <div
-          v-if="canEdit"
+          v-if="canComposeHere"
           class="flex shrink-0 items-start gap-0.5"
         >
           <UTooltip :text="t('adapters.moveUp')">

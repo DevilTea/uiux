@@ -103,7 +103,7 @@ const groups = computed<CommandPaletteGroup<CommandPaletteItem>[]>(() => {
 		)
 	}
 	// "Comment on Workspace" (scope/edit decision 8): opens the inbox composer, offering the View
-	// the reviewer is on as the other choice. Viewers see it disabled, with the reason.
+	// the reviewer is on as the other choice. Without `reviews.write` it is disabled, with the reason.
 	const fromView = route.path.startsWith('/views/') ? workbench.selectedViewId.value : undefined
 	actions.push({
 		label: t('palette.commentOnWorkspace'),
@@ -113,7 +113,7 @@ const groups = computed<CommandPaletteGroup<CommandPaletteItem>[]>(() => {
 		onSelect: () => { void navigateTo({ path: '/reviews', query: { compose: 'workspace', ...(fromView ? { from: fromView } : {}) } }) },
 	})
 	// Create Checkpoint (Rule 01a11a5e-0c71-78d1-9adb-14db6c67ab9c): desktop and tablet only, never on a
-	// phone (Rule 01a11a5e-1ba5-765e-966f-a681def5f472); below Reviewer it is listed disabled with the reason.
+	// phone (Rule 01a11a5e-1ba5-765e-966f-a681def5f472); without `checkpoints.create` it is listed disabled with the reason.
 	if (checkpoints.createOffered.value) {
 		const blocked = checkpoints.createBlockedReason.value
 		actions.push({

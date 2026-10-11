@@ -11,5 +11,6 @@ export default defineNuxtRouteMiddleware(async (to) => {
 	const access = useAccess()
 	const session = await access.load().catch(() => undefined)
 	if (!session) return navigateTo({ path: '/login', query: to.fullPath && to.fullPath !== '/' ? { next: to.fullPath } : {} })
-	if (to.path === '/members' && !access.isOwner.value) return navigateTo('/')
+	// The Members page needs `members.manage` (Rule 01a116f0-8caf-7e03-ba40-ef17e116aa22), whatever else the member holds.
+	if (to.path === '/members' && !access.can('members.manage')) return navigateTo('/')
 })

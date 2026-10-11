@@ -3,7 +3,7 @@ import { commentCreateBlock, commentToolBlock, type CommentAvailabilityInput } f
 
 const READY: CommentAvailabilityInput = {
 	signedIn: true,
-	canReview: true,
+	canWriteReviews: true,
 	handset: false,
 	hasView: true,
 	session: 'live',
@@ -16,10 +16,10 @@ describe('comment availability (review feedback 8dd59d25)', () => {
 	})
 
 	it('names each blocking state, in the order a person can fix it', () => {
-		expect(commentCreateBlock({ ...READY, workspaceState: 'migration_required', canReview: false })).toBe('migration')
+		expect(commentCreateBlock({ ...READY, workspaceState: 'migration_required', canWriteReviews: false })).toBe('migration')
 		expect(commentCreateBlock({ ...READY, workspaceState: 'unsupported' })).toBe('unsupported')
-		expect(commentCreateBlock({ ...READY, signedIn: false, canReview: false })).toBe('signed-out')
-		expect(commentCreateBlock({ ...READY, canReview: false, handset: true })).toBe('role')
+		expect(commentCreateBlock({ ...READY, signedIn: false, canWriteReviews: false })).toBe('signed-out')
+		expect(commentCreateBlock({ ...READY, canWriteReviews: false, handset: true })).toBe('key')
 		expect(commentCreateBlock({ ...READY, handset: true })).toBe('handset')
 		expect(commentCreateBlock({ ...READY, hasView: false })).toBe('no-view')
 		expect(commentCreateBlock({ ...READY, workspaceState: 'valid' })).toBeUndefined()
@@ -31,6 +31,6 @@ describe('comment availability (review feedback 8dd59d25)', () => {
 			expect(commentCreateBlock({ ...READY, session })).toBeUndefined()
 		}
 		// A reason the person must fix first wins over the session.
-		expect(commentToolBlock({ ...READY, canReview: false, session: 'reconnecting' })).toBe('role')
+		expect(commentToolBlock({ ...READY, canWriteReviews: false, session: 'reconnecting' })).toBe('key')
 	})
 })

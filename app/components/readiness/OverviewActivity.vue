@@ -5,6 +5,7 @@ import { useI18n, useRoute, useRouter } from '#imports'
 import { isWidgetAnchor, type ReviewActor, type ReviewThread } from '../../../src/domain/reviews/schema'
 import type { VersionListItem } from '../../../src/application/services/history-service'
 import type { HistoryActor } from '../../../src/domain/history/schema'
+import { useAccess } from '../../composables/useAccess'
 import { useReadiness } from '../../composables/useReadiness'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbench } from '../../composables/useWorkbench'
@@ -42,7 +43,9 @@ import WbErrorDescription from '../workbench/WbErrorDescription.vue'
  *
  * The selection is the address (Clause 01a11e0d-d74b-701a-9a25-a149e400b7ec): `version`, `compare`
  * and `resource` on `/?tab=activity`, read with the defaults of the owner ruling and never written
- * on the reader's behalf. The filters are view state, not part of the address.
+ * on the reader's behalf. The filters are view state, not part of the address. The version reads
+ * need `history.read`; without it the timeline names the key instead (Rule
+ * 01a11485-eba3-7c07-a94f-0d69e610a0b6), and the Review events stay.
  */
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -53,6 +56,8 @@ const { views, reviews } = useWorkbench()
 const readiness = useReadiness()
 const labels = useHistoryLabels()
 const checkpoints = useCheckpointAccess()
+const access = useAccess()
+const canReadHistory = computed(() => access.can('history.read'))
 
 // ----- Address --------------------------------------------------------------------------------
 
@@ -79,7 +84,7 @@ const filters = computed<TimelineFilters>(() => ({
 	...(kindFilter.value !== ALL ? { kind: kindFilter.value } : {}),
 	...(checkpointsOnly.value ? { checkpointsOnly: true } : {}),
 }))
-const timeline = useVersionTimeline({ filters })
+const timeline = useVersionTimeline({ filters, enabled: canReadHistory })
 
 /** Every actor seen so far, so filtering by one keeps the others choosable. */
 const knownActors = shallowRef<readonly HistoryActor[]>([])
@@ -97,7 +102,7 @@ const kindItems = computed(() => [
 ])
 
 
-// ----- Delete (an Owner on desktop) -----------------------------------------------------------
+// ----- Delete (`checkpoints.delete` on desktop) ----------------------------------------------------
 
 const deleteOpen = ref(false)
 const deleteTarget = shallowRef<VersionListItem>()
@@ -269,7 +274,7 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
     >
       <!-- The comparison comes first on narrow layouts and sits beside the timeline from 1024px. -->
       <div
-        v-if="selection"
+        v-if="selection && canReadHistory"
         class="min-w-0 lg:order-2"
       >
         <div class="lg:sticky lg:top-4">
@@ -285,7 +290,7 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
 
       <div class="min-w-0 space-y-6 lg:order-1">
         <section
-          v-if="updatedViews.length"
+          v-if="updatedViews.length && canReadHistory"
           class="space-y-2"
           :aria-label="t('overview.updated')"
           data-since-last-looked
@@ -347,25 +352,27 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
             <h3 class="me-auto text-sm font-semibold text-highlighted">
               {{ t('history.title') }}
             </h3>
-            <USelect
-              v-model="actorFilter"
-              :items="actorItems"
-              :aria-label="t('history.filter.actor')"
-              class="w-40"
-              data-history-filter="actor"
-            />
-            <USelect
-              v-model="kindFilter"
-              :items="kindItems"
-              :aria-label="t('history.filter.kind')"
-              class="w-40"
-              data-history-filter="kind"
-            />
-            <USwitch
-              v-model="checkpointsOnly"
-              :label="t('history.filter.checkpointsOnly')"
-              data-history-filter="checkpoints"
-            />
+            <template v-if="canReadHistory">
+              <USelect
+                v-model="actorFilter"
+                :items="actorItems"
+                :aria-label="t('history.filter.actor')"
+                class="w-40"
+                data-history-filter="actor"
+              />
+              <USelect
+                v-model="kindFilter"
+                :items="kindItems"
+                :aria-label="t('history.filter.kind')"
+                class="w-40"
+                data-history-filter="kind"
+              />
+              <USwitch
+                v-model="checkpointsOnly"
+                :label="t('history.filter.checkpointsOnly')"
+                data-history-filter="checkpoints"
+              />
+            </template>
             <UButton
               v-if="checkpoints.canCreate.value"
               icon="i-lucide-flag"
@@ -375,56 +382,70 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
             />
           </div>
 
-          <VersionTimeline
-            :versions="timeline.rows.value"
-            :loading="timeline.loading.value"
-            :loaded="timeline.loaded.value"
-            :error="timeline.error.value"
-            :has-more="!!timeline.nextCursor.value"
-            :loading-more="timeline.loadingMore.value"
-            :selected="selection?.version"
-            :link-for="(id) => activityTo({ version: id })"
-            :compare-link-for="selection ? (id) => activityTo({ version: selection!.version, compare: id }) : undefined"
-            :can-delete="checkpoints.canDelete.value"
-            :empty-title="filters.actor || filters.kind || filters.checkpointsOnly ? t('history.emptyFiltered') : undefined"
-            :empty-description="filters.actor || filters.kind || filters.checkpointsOnly ? t(timeline.nextCursor.value ? 'history.emptyFilteredMore' : 'history.emptyFilteredDescription') : undefined"
-            @delete="askDelete"
-            @load-more="timeline.loadMore()"
-            @retry="timeline.load()"
-          />
-
-          <section
-            v-if="timeline.invalid.value.length"
-            class="space-y-2"
-            :aria-label="t('history.invalid.title')"
-            data-invalid-records
-          >
-            <UAlert
-              color="warning"
-              variant="subtle"
-              icon="i-lucide-file-warning"
-              :title="t('history.invalid.title')"
-              :description="t('history.invalid.explanation')"
+          <template v-if="canReadHistory">
+            <VersionTimeline
+              :versions="timeline.rows.value"
+              :loading="timeline.loading.value"
+              :loaded="timeline.loaded.value"
+              :error="timeline.error.value"
+              :has-more="!!timeline.nextCursor.value"
+              :loading-more="timeline.loadingMore.value"
+              :selected="selection?.version"
+              :link-for="(id) => activityTo({ version: id })"
+              :compare-link-for="selection ? (id) => activityTo({ version: selection!.version, compare: id }) : undefined"
+              :can-delete="checkpoints.canDelete.value"
+              :empty-title="filters.actor || filters.kind || filters.checkpointsOnly ? t('history.emptyFiltered') : undefined"
+              :empty-description="filters.actor || filters.kind || filters.checkpointsOnly ? t(timeline.nextCursor.value ? 'history.emptyFilteredMore' : 'history.emptyFilteredDescription') : undefined"
+              @delete="askDelete"
+              @load-more="timeline.loadMore()"
+              @retry="timeline.load()"
             />
-            <ul class="space-y-1">
-              <li
-                v-for="record in timeline.invalid.value"
-                :key="record.file"
-                class="rounded-md border border-default px-3 py-2 text-xs"
-                data-invalid-record
-              >
-                <code
-                  class="font-mono break-all text-default"
-                  translate="no"
-                >{{ record.file }}</code>
-                <WbErrorDescription
-                  class="mt-1"
-                  :headline="t('history.invalid.notDeletable')"
-                  :diagnostics="record.diagnostics"
-                />
-              </li>
-            </ul>
-          </section>
+
+            <section
+              v-if="timeline.invalid.value.length"
+              class="space-y-2"
+              :aria-label="t('history.invalid.title')"
+              data-invalid-records
+            >
+              <UAlert
+                color="warning"
+                variant="subtle"
+                icon="i-lucide-file-warning"
+                :title="t('history.invalid.title')"
+                :description="t('history.invalid.explanation')"
+              />
+              <ul class="space-y-1">
+                <li
+                  v-for="record in timeline.invalid.value"
+                  :key="record.file"
+                  class="rounded-md border border-default px-3 py-2 text-xs"
+                  data-invalid-record
+                >
+                  <code
+                    class="font-mono break-all text-default"
+                    translate="no"
+                  >{{ record.file }}</code>
+                  <WbErrorDescription
+                    class="mt-1"
+                    :headline="t('history.invalid.notDeletable')"
+                    :diagnostics="record.diagnostics"
+                  />
+                </li>
+              </ul>
+            </section>
+          </template>
+          <p
+            v-else
+            class="flex items-center gap-1.5 text-sm text-muted"
+            data-access-notice="history"
+            data-missing-key="history.read"
+          >
+            <UIcon
+              name="i-lucide-user-lock"
+              class="size-4 shrink-0"
+            />
+            {{ t('access.requiresKey', { key: 'history.read' }) }}
+          </p>
         </section>
       </div>
     </div>

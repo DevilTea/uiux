@@ -20,7 +20,7 @@ const OTHER = '00000000-0000-4000-8000-00000000000b'
 function gate(overrides: Partial<RestoreGateInput> = {}): RestoreGateInput {
 	return {
 		desktop: true,
-		canAuthor: true,
+		canWrite: () => true,
 		resource: { kind: 'view', status: 'modified' },
 		selectedVersion: SELECTED,
 		endpoints: { from: 'parent', to: SELECTED },
@@ -36,9 +36,23 @@ describe('the restore gate', () => {
 		expect(restoreSourceVersion(gate({ endpoints: { from: SELECTED, to: OTHER } }))).toBe(SELECTED)
 	})
 
-	it('is offered only on a desktop layout to a member who may author', () => {
+	it('is offered only on a desktop layout to a member who may write', () => {
 		expect(restoreSourceVersion(gate({ desktop: false }))).toBeUndefined()
-		expect(restoreSourceVersion(gate({ canAuthor: false }))).toBeUndefined()
+		expect(restoreSourceVersion(gate({ canWrite: () => false }))).toBeUndefined()
+	})
+
+	it('needs `history.restore` and the write key of the restored kind, each on its own (Rule 01a11c09-c648)', () => {
+		const holding = (...keys: string[]) => (key: string) => keys.includes(key)
+		for (const [kind, writeKey] of [['view', 'views.write'], ['flow', 'flows.write'], ['locale', 'locales.write'], ['asset', 'assets.write'], ['workspace', 'settings.write']] as const) {
+			const resource = { kind, status: 'modified' as const }
+			expect(restoreSourceVersion(gate({ resource, canWrite: holding('history.restore', writeKey) })), kind).toBe(SELECTED)
+			expect(restoreSourceVersion(gate({ resource, canWrite: holding(writeKey) })), `${kind} without history.restore`).toBeUndefined()
+			expect(restoreSourceVersion(gate({ resource, canWrite: holding('history.restore') })), `${kind} without ${writeKey}`).toBeUndefined()
+		}
+		// A translator-like member restores a Locale but not a View.
+		const translator = holding('history.restore', 'locales.write')
+		expect(restoreSourceVersion(gate({ resource: { kind: 'locale', status: 'modified' }, canWrite: translator }))).toBe(SELECTED)
+		expect(restoreSourceVersion(gate({ resource: { kind: 'view', status: 'modified' }, canWrite: translator }))).toBeUndefined()
 	})
 
 	it('is offered for the restorable kinds only: never a Review thread, a Product Kit, access presets or an unknown kind', () => {

@@ -10,7 +10,7 @@ export type CommentBlockCode =
 	| 'migration'
 	| 'unsupported'
 	| 'signed-out'
-	| 'role'
+	| 'key'
 	| 'handset'
 	| 'no-view'
 	| 'connecting'
@@ -22,8 +22,8 @@ export type CommentAvailabilityInput = Readonly<{
 	workspaceState?: string
 	/** A member is signed in to this Workbench. */
 	signedIn: boolean
-	/** The member's role is Reviewer or above. */
-	canReview: boolean
+	/** The member holds `reviews.write`, which creating a thread needs. */
+	canWriteReviews: boolean
 	/** Phone width, or a short touch screen: handsets read, reply and triage only. */
 	handset: boolean
 	/** A View is open. */
@@ -34,14 +34,14 @@ export type CommentAvailabilityInput = Readonly<{
 
 /**
  * Whether a thread can be created at all, in the order a person can fix it: the Workspace, the
- * sign-in, the role, then the device. "Comment on this View" needs nothing more:
+ * sign-in, the `reviews.write` key, then the device. "Comment on this View" needs nothing more:
  * it targets the RootShell and never waits for the Preview to hit-test a Widget.
  */
 export function commentCreateBlock(input: CommentAvailabilityInput): CommentBlockCode | undefined {
 	if (input.workspaceState === 'migration_required') return 'migration'
 	if (input.workspaceState === 'unsupported') return 'unsupported'
 	if (!input.signedIn) return 'signed-out'
-	if (!input.canReview) return 'role'
+	if (!input.canWriteReviews) return 'key'
 	if (input.handset) return 'handset'
 	if (!input.hasView) return 'no-view'
 	return undefined

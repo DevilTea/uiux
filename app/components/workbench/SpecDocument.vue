@@ -26,7 +26,7 @@ const { t } = useI18n()
 const fmt = useWorkbenchFormat()
 const workbench = useWorkbench()
 const shell = useWorkbenchShell()
-const { selectedView, selectedViewId, views, authorReadOnly, workspace, widgetTreeResult } = workbench
+const { selectedView, selectedViewId, views, workspace, widgetTreeResult } = workbench
 const access = useAccess()
 const editor = useSpecEditor(workbench)
 
@@ -34,11 +34,13 @@ const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const notMobile = useMediaQuery('(min-width: 768px)')
 const isMobile = computed(() => !notMobile.value)
 /**
- * Editing is a desktop task for Editors and above; tablet is review-focused and mobile reads. An
+ * Editing is a desktop task for holders of `views.write`; tablet is review-focused and mobile reads. An
  * open section stays open while someone else's edit lease arrives (its Save waits, the draft is
  * kept); only starting a new edit needs the View to be free.
  */
-const canAuthor = computed(() => isDesktop.value && !authorReadOnly.value)
+/** The member may write Views on this live, migrated Workspace, whatever the layout. */
+const mayWriteViews = computed(() => workbench.canWrite('views.write'))
+const canAuthor = computed(() => isDesktop.value && mayWriteViews.value)
 const canEdit = computed(() => canAuthor.value && !access.lockFor('view', selectedViewId.value))
 
 const spec = computed(() => selectedView.value?.resource.spec)
@@ -170,7 +172,7 @@ function isHttp(uri: string): boolean {
           {{ t('spec.title', { name: selectedView.resource.name || t('common.unnamed') }) }}
         </h2>
         <span
-          v-if="!isDesktop && !isMobile && !authorReadOnly"
+          v-if="!isDesktop && !isMobile && mayWriteViews"
           class="shrink-0 text-xs text-dimmed"
           data-spec-edit-on-desktop
         >{{ t('common.editOnDesktop') }}</span>
