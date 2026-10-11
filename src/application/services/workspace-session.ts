@@ -95,6 +95,15 @@ import {
 	type ListVersionsQuery,
 	type ReadVersionOutcome,
 } from './history-service'
+import {
+	createProductKitAuthoringService,
+	type ComposeProductKitCommand,
+	type ProductKitAuthoringResult,
+	type ProductKitGuard,
+	type ProductKitRead,
+	type UpdateComponentRegistryCommand,
+	type UpdateProductKitCommand,
+} from './product-kit-authoring'
 
 export type AssetContentDescriptor = Readonly<{
 	mediaType: string
@@ -129,6 +138,10 @@ export interface WorkspaceApplicationSession {
 	updateViewSpec(command: UpdateViewSpecCommand): Promise<ViewAuthoringResult>
 	updateViewStructure(command: UpdateViewStructureCommand): Promise<ViewAuthoringResult>
 	updateWorkspaceSettings<R = never>(command: UpdateWorkspaceSettingsCommand, guard?: WorkspaceSettingsGuard<R>): Promise<WorkspaceAuthoringResult | R>
+	readProductKit(): Promise<ProductKitRead | undefined>
+	composeProductKit<R = never>(command: ComposeProductKitCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
+	updateProductKit<R = never>(command: UpdateProductKitCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
+	updateComponentRegistry<R = never>(command: UpdateComponentRegistryCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
 	createLocale(command: CreateLocaleCommand): Promise<LocaleAuthoringResult>
 	updateLocale(command: UpdateLocaleCommand): Promise<LocaleAuthoringResult>
 	createFlow(command: CreateFlowCommand): Promise<FlowAuthoringResult>
@@ -190,6 +203,7 @@ export function createWorkspaceApplicationSession(
 	const historyService = createHistoryService(persistence, options?.history, options?.historyBoundary ? { boundary: options.historyBoundary } : {})
 	const historyRestore = createHistoryRestoreService(persistence, options?.history)
 	const historyPreview = createHistoryPreviewService(persistence, options?.history)
+	const productKitAuthoring = createProductKitAuthoringService(persistence)
 
 	async function readPointResource(kind: PointResourceKind, key: string): Promise<PointResourceRead | undefined> {
 		if (!isValidPointResourceAddress({ kind, key })) return undefined
@@ -317,6 +331,10 @@ export function createWorkspaceApplicationSession(
 		updateViewSpec: viewAuthoring.updateViewSpec,
 		updateViewStructure: viewAuthoring.updateViewStructure,
 		updateWorkspaceSettings: workspaceAuthoring.updateWorkspaceSettings,
+		readProductKit: productKitAuthoring.readProductKit,
+		composeProductKit: productKitAuthoring.composeProductKit,
+		updateProductKit: productKitAuthoring.updateProductKit,
+		updateComponentRegistry: productKitAuthoring.updateComponentRegistry,
 		createLocale: localeAuthoring.createLocale,
 		updateLocale: localeAuthoring.updateLocale,
 		createFlow: flowAuthoring.createFlow,

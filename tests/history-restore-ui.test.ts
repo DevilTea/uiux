@@ -57,10 +57,10 @@ describe('the restore gate', () => {
 		expect(restoreSourceVersion(gate({ resource: { kind: 'view', status: 'modified' }, canWrite: translator }))).toBeUndefined()
 	})
 
-	it('is offered for the restorable kinds only: never a Review thread, a Product Kit, access presets or an unknown kind', () => {
-		for (const kind of ['view', 'flow', 'locale', 'asset', 'workspace'])
+	it('is offered for the restorable kinds only: never a Review thread, access presets or an unknown kind', () => {
+		for (const kind of ['view', 'flow', 'locale', 'asset', 'workspace', 'product-kit'])
 			expect(restoreSourceVersion(gate({ resource: { kind, status: 'modified' } })), kind).toBe(SELECTED)
-		for (const kind of ['review', 'product-kit', 'access-presets', 'widget', ''])
+		for (const kind of ['review', 'access-presets', 'widget', ''])
 			expect(restoreSourceVersion(gate({ resource: { kind, status: 'modified' } })), kind).toBeUndefined()
 		// The Workbench and the restore service share one kind list.
 		expect(SERVICE_KINDS).toBe(RESTORABLE_RESOURCE_KINDS)
@@ -231,5 +231,12 @@ describe('the keys a Workspace settings restore needs beyond its write key (#140
 		expect(restoreExtraKeys('view', compared([ref('./a.ts')], [ref('./b.ts')]))).toEqual([])
 		expect(restoreExtraKeys('workspace', compared([ref('./a.ts')], [ref('./b.ts')], 5))).toEqual([])
 		expect(restoreExtraKeys('workspace', undefined)).toEqual([])
+	})
+})
+
+describe('the keys a Product Kit restore needs beyond its write key (#139 owner ruling 2026-10-11, 1)', () => {
+	it('always needs `product-kit.compose` until the Workbench compares the Product Kit precisely (K6)', () => {
+		expect(restoreExtraKeys('product-kit', undefined)).toEqual(['product-kit.compose'])
+		expect(restoreExtraKeys('product-kit', { to: { id: 'current', workspaceSchemaVersion: 5 }, changes: [] })).toEqual(['product-kit.compose'])
 	})
 })

@@ -479,9 +479,9 @@ describe('history on a schemaVersion 5 Workspace', () => {
 		expect((await ctx.persistence.views.read(VIEW_ID))?.resource).toMatchObject({ name: 'Checkout' })
 		expect(await exists(join(ctx.root, '.uiux'))).toBe(false)
 
-		// Restoring the Product Kit file waits for its write key (Rule 01a11c09-c648); this build refuses the kind.
+		// The Product Kit file is restorable (Rule 01a11c09-c648), but a version recorded at 4 holds none.
 		const kitRevision = await ctx.persistence.productKit.readRevision()
-		expect(await ctx.app.restoreResourceVersion({ versionId: version.id, resource: { kind: 'product-kit', key: 'product-kit' }, expectedRevision: kitRevision! })).toMatchObject({ status: 'invalid', code: 'history.restore_unsupported_kind' })
+		expect(await ctx.app.restoreResourceVersion({ versionId: version.id, resource: { kind: 'product-kit', key: 'product-kit' }, expectedRevision: kitRevision! })).toMatchObject({ status: 'not_found', code: 'history.resource_not_in_version' })
 	})
 
 	it('fails loudly instead of recording a version whose layout differs from the persistence layout', async () => {

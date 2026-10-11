@@ -1,3 +1,4 @@
+import { canonicalJsonStringify } from '../../domain/canonical-json'
 import { inCatalogOrder, isHumanOnlyKey, writeKeyForKind, type PermissionKey } from './keys'
 import type { MemberPrincipal, Principal } from './principal'
 
@@ -37,6 +38,8 @@ export const ACCESS_OPERATIONS = {
 	readPreview: { requiredKeys: ['workspace.read'], system: true },
 	assessHandoffReadiness: { requiredKeys: ['workspace.read'] },
 	listLeases: { requiredKeys: ['workspace.read'] },
+	// Clause 01a11bb1-b3c2-7937-96fb-e139c5e566f5: the Product Kit file, its build state and findings need no Product Kit key.
+	readProductKit: { requiredKeys: ['workspace.read'] },
 	// `history.read`: version history reads, which a system credential never gets (Clause 01a11485-f978-767a-b977-33028aee7ae7).
 	diffVersions: { requiredKeys: ['history.read'] },
 	listVersions: { requiredKeys: ['history.read'] },
@@ -73,6 +76,11 @@ export const ACCESS_OPERATIONS = {
 	updateFlow: { requiredKeys: ['flows.write'] },
 	createAsset: { requiredKeys: ['assets.write'] },
 	replaceAsset: { requiredKeys: ['assets.write'] },
+	// Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa. Each also needs the keys of what its change touches,
+	// decided on the Product Kit file it replaces: see `productKitChangeKeys`.
+	composeProductKit: { requiredKeys: ['product-kit.compose'] },
+	updateProductKit: { requiredKeys: ['product-kit.write'] },
+	updateComponentRegistry: { requiredKeys: ['product-kit.write'] },
 	captureFormalEvidence: { requiredKeys: ['evidence.capture'] },
 	exportHandoff: { requiredKeys: ['handoff.export'] },
 	// A restore also needs the restored kind's write key (Rule 01a11c09-c648-71be-a550-2ecabf12f5d0): see `authorizeRestore`.
@@ -217,4 +225,55 @@ export function manifestAdapterChangeKeys(current: unknown, next: unknown): read
 		: []
 	const schemaVersion = record(next).schemaVersion ?? record(current).schemaVersion
 	return adapterChangeKeys(Number.isInteger(schemaVersion) ? schemaVersion as number : 0, specifiers(record(current).adapters), specifiers(record(next).adapters))
+}
+
+/** The Product Kit members whose change needs `product-kit.write` besides Adapter configuration. */
+const PRODUCT_KIT_WRITE_MEMBERS = ['styles', 'themes', 'components', 'widgets'] as const
+
+/**
+ * Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa, from `schemaVersion` 5: the keys a change of the
+ * Product Kit file needs, by what it changes between the file a write replaces (`current`) and the
+ * file it writes (`next`). Changing `designSystems` or the Adapter specifiers or their order needs
+ * `product-kit.compose`; changing an Adapter's `config`, `styles`, `themes`, `components` or
+ * `widgets` needs `product-kit.write`. An Adapter's `config` is compared with that of the entry
+ * holding the same specifier at the same occurrence in `current`, so a composition that keeps an
+ * entry's configuration changes none; an added entry with a `config` changes one. Members are
+ * compared as canonical JSON, and a missing or malformed member is compared as it is, so any
+ * difference counts as a change and the check fails closed.
+ */
+export function productKitChangeKeys(current: unknown, next: unknown): readonly PermissionKey[] {
+	const record = (value: unknown): Readonly<Record<string, unknown>> => typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {}
+	const same = (left: unknown, right: unknown) => canonicalJsonStringify(left) === canonicalJsonStringify(right)
+	const before = record(current)
+	const after = record(next)
+	const entries = (value: unknown) => Array.isArray(value) ? value.map(entry => record(entry)) : undefined
+	const beforeAdapters = entries(before.adapters)
+	const afterAdapters = entries(after.adapters)
+	const keys: PermissionKey[] = []
+
+	const specifiers = (list: readonly Readonly<Record<string, unknown>>[] | undefined) => list?.map(entry => entry.moduleSpecifier)
+	if (!same(before.designSystems, after.designSystems) || !Array.isArray(before.adapters) || !Array.isArray(after.adapters)
+		|| !same(specifiers(beforeAdapters), specifiers(afterAdapters)))
+		keys.push('product-kit.compose')
+
+	let configChanged = !beforeAdapters || !afterAdapters
+	if (beforeAdapters && afterAdapters) {
+		const configs = new Map<string, unknown[]>()
+		for (const entry of beforeAdapters) {
+			const specifier = canonicalJsonStringify(entry.moduleSpecifier)
+			configs.set(specifier, [...(configs.get(specifier) ?? []), entry.config])
+		}
+		const seen = new Map<string, number>()
+		for (const entry of afterAdapters) {
+			const specifier = canonicalJsonStringify(entry.moduleSpecifier)
+			const occurrence = seen.get(specifier) ?? 0
+			seen.set(specifier, occurrence + 1)
+			const previous = configs.get(specifier)
+			if (previous !== undefined && occurrence < previous.length ? !same(previous[occurrence], entry.config) : entry.config !== undefined)
+				configChanged = true
+		}
+	}
+	if (configChanged || PRODUCT_KIT_WRITE_MEMBERS.some(member => !same(before[member], after[member])))
+		keys.push('product-kit.write')
+	return inCatalogOrder(keys)
 }

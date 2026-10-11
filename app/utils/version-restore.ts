@@ -37,8 +37,8 @@ export type RestoreGateInput = Readonly<{
  * brings the resource back to what that version made it), with the current state or another
  * version it is the side the reader chose. It is offered only when:
  * - the layout is desktop and the member holds `history.restore` and the kind's write key (see `RestoreGateInput`);
- * - the kind is one this build restores (`RESTORABLE_RESOURCE_KINDS`: never a Review thread, a
- *   Product Kit, access presets or a kind this build does not know);
+ * - the kind is one this build restores (`RESTORABLE_RESOURCE_KINDS`: never a Review thread,
+ *   access presets or a kind this build does not know);
  * - the selected version is a real version, not `current` or `parent`;
  * - the resource exists in the selected version: not `removed` when the selected version is the
  *   newer side, not `added` when it is the older side.
@@ -78,8 +78,15 @@ export function matchesCurrent(summary: readonly Pick<ResourceChangeSummary, 'ki
  * 01a11485-eba3-7c07-a94f-0d69e610a0b6). A change to an entry's `config` alone is not one; from
  * `schemaVersion` 5 the manifest holds no `adapters`. Without a comparison nothing is required:
  * the server decides.
+ *
+ * #139 owner ruling 2026-10-11, 1 (https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18864076):
+ * a `product-kit` restore that changes `designSystems` or the Adapter specifiers or their order
+ * also needs `product-kit.compose`. Until the Workbench reads that from a precise comparison (K6),
+ * it asks for `product-kit.compose` for every `product-kit` restore, which never offers a
+ * restore the server refuses.
  */
 export function restoreExtraKeys(kind: string, comparison: Pick<VersionDiffResult, 'to' | 'changes'> | undefined): readonly PermissionKey[] {
+	if (kind === 'product-kit') return ['product-kit.compose']
 	if (kind !== 'workspace' || !comparison || comparison.to.workspaceSchemaVersion >= PRODUCT_KIT_SCHEMA_VERSION) return []
 	const diff = comparison.changes?.find(change => change.kind === 'workspace')?.diff
 	if (diff?.type !== 'workspace') return []

@@ -12,7 +12,7 @@ import {
 	WORKSPACE_MANIFEST_PATH,
 	type WorkspaceLayout,
 } from '../persistence/paths'
-import { bareSpecifierPackageName, readDeclaredKitDependencies } from './kit-dependencies'
+import { bareKitSpecifierProblem, bareSpecifierPackageName, readDeclaredKitDependencies, relativeKitSpecifierProblem } from './kit-dependencies'
 
 import { resolve as resolveImport } from 'import-meta-resolve'
 import {
@@ -191,21 +191,14 @@ async function resolveFromCodeDirectory(root: string, codeDirectoryName: string,
 		throw new Error(`The selected Workspace has no ${codeDirectoryName}/ directory (a real directory, not a symbolic link) to resolve Adapter modules from.`)
 
 	const relativeSelection = moduleSpecifier.startsWith('./')
-	if (relativeSelection) {
-		const authored = relative(codeDirectory, resolve(codeDirectory, moduleSpecifier))
-		if (authored === '' || escapesBase(authored))
-			throw new Error(`Adapter module specifier ${moduleSpecifier} escapes ${codeDirectoryName}/.`)
-		if (firstSegmentOf(authored).toLowerCase() === KIT_DEPENDENCY_DIRECTORY)
-			throw new Error(`Adapter module specifier ${moduleSpecifier} names a file in ${codeDirectoryName}/${KIT_DEPENDENCY_DIRECTORY}/; select a dependency by its bare package name.`)
-	}
-	else {
-		const packageName = bareSpecifierPackageName(moduleSpecifier)
-		if (packageName === undefined)
-			throw new Error(`Adapter module specifier ${moduleSpecifier} does not name an npm package followed by a plain subpath.`)
-		const declared = await readDeclaredKitDependencies(codeDirectory)
-		if (!declared.has(packageName))
-			throw new Error(`Adapter module specifier ${moduleSpecifier} names ${packageName}, which ${codeDirectoryName}/package.json does not declare as a dependency.`)
-	}
+	// The as-written rules, which the Product Kit authoring operations also apply before storing a specifier.
+	const problem = relativeSelection
+		? relativeKitSpecifierProblem(codeDirectoryName, moduleSpecifier)
+		: bareSpecifierPackageName(moduleSpecifier) === undefined
+			? bareKitSpecifierProblem(codeDirectoryName, moduleSpecifier, new Set())
+			: bareKitSpecifierProblem(codeDirectoryName, moduleSpecifier, await readDeclaredKitDependencies(codeDirectory))
+	if (problem !== undefined)
+		throw new Error(problem)
 
 	const parentUrl = pathToFileURL(join(codeDirectory, '.uiux-adapter-resolution.mjs')).href
 	const moduleIdentity = resolveImport(moduleSpecifier, parentUrl)

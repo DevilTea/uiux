@@ -10,6 +10,8 @@ import { analyzeImpact, withResource, type ImpactEvidence, type ImpactItem, type
 import { isCanonicalLocaleTag, isFullUuid, isRecord, type Diagnostic, type ValidationResult } from '../../domain/validation'
 import { validateViewResource, type ViewResource } from '../../domain/views/schema'
 import { validateWorkspaceManifest, type WorkspaceManifest } from '../../domain/workspace/schema'
+import { validateProductKit, type ProductKit } from '../../domain/product-kit/schema'
+import { checkProductKitAgainstKit } from '../../adapters/kit-registry'
 import { PersistenceError } from '../../persistence/errors'
 import { canonicalJsonBytes, revisionForResourceFiles, upgradeSnapshotInMemory, type FileNativePersistence } from '../../persistence/file-native'
 import { HostHistoryError } from '../../persistence/history/host-store'
@@ -121,6 +123,11 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 		const parsed = parseCommand(command)
 		if ('status' in parsed) return parsed
 		const { target } = parsed
+		// Below `schemaVersion` 5 a Workspace has no Product Kit file to restore.
+		if (target.kind === 'product-kit' && !persistence.layout.productKitPath) {
+			const message = 'Restoring the Product Kit needs a Workspace at schemaVersion 5 or later; this Workspace keeps its Adapters in the manifest.'
+			return { status: 'invalid', kind: target.kind, key: target.key, code: 'history.restore_unsupported_kind', message, diagnostics: [{ code: 'history.restore_unsupported_kind', path: '/resource/kind', message }] }
+		}
 
 		let stores: Awaited<ReturnType<HistoryStoreSource['open']>>
 		try {
@@ -161,8 +168,16 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 			return { status: 'invalid', kind: target.kind, key: target.key, code: 'history.restore_invalid_content', message: `The ${target.kind} content of version ${parsed.versionId} is not valid for this UIUX build, so it cannot be restored.`, diagnostics }
 
 		const current = target.kind === 'asset' || currentFiles.size !== 1 ? undefined : parseJson([...currentFiles.values()][0]!)
+		// The key check runs before the checks against the kit project, so a caller without the keys
+		// causes no kit project I/O.
 		const refused = guard?.({ kind: target.kind, key: target.key, current, next })
 		if (refused !== undefined) return refused
+		if (target.kind === 'product-kit') {
+			// The checks against the kit project the Product Kit operations make (Rule 01a11a5e-1580-…),
+			// for the members the restore changes.
+			const kitRefusal = await checkRestoredProductKit(target, next as ProductKit, current)
+			if (kitRefusal) return kitRefusal
+		}
 
 		const before = impactWorkspace(loaded.current, persistence.layout, loaded.reviews, target.kind === 'workspace' ? await readEvidence() : undefined)
 		const after = withResource(before, target, target.kind === 'asset' ? (next as AuthoredAssetResource).metadata : next, nextRevision(target, next))
@@ -171,6 +186,20 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 			return { status: 'impact_acknowledgement_required', kind: target.kind, key: target.key, impacts }
 
 		return write(parsed, next, impacts)
+	}
+
+	async function checkRestoredProductKit(target: Target, next: ProductKit, current: unknown): Promise<RestoreRefusal | undefined> {
+		const codeDirectoryName = persistence.layout.codeDir
+		if (!codeDirectoryName) return undefined
+		const currentKit = validateProductKit(current)
+		const checked = await checkProductKitAgainstKit({
+			root: persistence.root,
+			codeDirectoryName,
+			next,
+			...(currentKit.ok ? { current: currentKit.value } : {}),
+		})
+		if (checked.refusals.length === 0) return undefined
+		return { status: 'invalid', kind: target.kind, key: target.key, code: 'history.restore_invalid_content', message: `The Product Kit of this version does not match the kit project, so it cannot be restored.`, diagnostics: checked.refusals }
 	}
 
 	/** Under the shared lock: the schema state, the version, its blobs, the current files and the Reviews. */
@@ -265,8 +294,9 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 					case 'flow': revision = await persistence.flows.create(target.key, next as FlowResource); break
 					case 'locale': revision = await persistence.locales.create(target.key, next as I18nResource); break
 					case 'asset': revision = await persistence.assets.create(target.key, next as AuthoredAssetResource); break
-					// The manifest always exists while the Workspace is writable; `null` already conflicted.
-					case 'workspace': return await conflict()
+					// The manifest and the Product Kit file always exist while the Workspace is writable; `null` already conflicted.
+					case 'workspace':
+					case 'product-kit': return await conflict()
 				}
 			}
 			else {
@@ -275,7 +305,8 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 					: target.kind === 'flow' ? await persistence.flows.compareAndSwap({ ...swap, resource: next as FlowResource })
 						: target.kind === 'locale' ? await persistence.locales.compareAndSwap({ ...swap, resource: next as I18nResource })
 							: target.kind === 'asset' ? await persistence.assets.compareAndSwap({ ...swap, resource: next as AuthoredAssetResource })
-								: await persistence.workspace.compareAndSwap({ ...swap, key: 'workspace', resource: next as WorkspaceManifest })
+								: target.kind === 'product-kit' ? await persistence.productKit.compareAndSwap({ ...swap, key: 'product-kit', resource: next as ProductKit })
+									: await persistence.workspace.compareAndSwap({ ...swap, key: 'workspace', resource: next as WorkspaceManifest })
 				if (!commit.ok) return { status: 'conflict', kind: target.kind, key: target.key, currentRevision: commit.conflict.currentRevision }
 				revision = commit.revision
 			}
@@ -322,6 +353,7 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 			case 'locale': return persistence.locales.readRevision(target.key)
 			case 'asset': return persistence.assets.readRevision(target.key)
 			case 'workspace': return (await persistence.workspace.readInspected()).revision
+			case 'product-kit': return persistence.productKit.readRevision()
 		}
 	}
 
@@ -333,13 +365,14 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 			case 'locale': return (await persistence.locales.readInspected(target.key))?.diagnostics ?? []
 			case 'asset': return (await persistence.assets.readInspected(target.key))?.diagnostics ?? []
 			case 'workspace': return (await persistence.workspace.readInspected()).diagnostics
+			case 'product-kit': return (await persistence.productKit.readInspected())?.diagnostics ?? []
 		}
 	}
 
 	return Object.freeze({ restoreResourceVersion })
 }
 
-type RestoredResource = ViewResource | FlowResource | I18nResource | WorkspaceManifest | AuthoredAssetResource
+type RestoredResource = ViewResource | FlowResource | I18nResource | WorkspaceManifest | ProductKit | AuthoredAssetResource
 
 function parseCommand(command: RestoreResourceVersionCommand): ParsedCommand | RestoreRefusal {
 	const raw = (command ?? {}) as Readonly<Record<string, unknown>>
@@ -366,6 +399,7 @@ function parseCommand(command: RestoreResourceVersionCommand): ParsedCommand | R
 function validKey(kind: RestorableResourceKind, key: string): boolean {
 	switch (kind) {
 		case 'workspace': return key === 'workspace'
+		case 'product-kit': return key === 'product-kit'
 		case 'locale': return isCanonicalLocaleTag(key)
 		default: return isFullUuid(key)
 	}
@@ -429,6 +463,7 @@ function validateNext(target: Target, next: RestoredResource): readonly Diagnost
 		case 'flow': return failed(validateFlowResource(next, `${target.key}.flow.json`))
 		case 'locale': return failed(validateI18nResource(next, `${target.key}.json`))
 		case 'workspace': return failed(validateWorkspaceManifest(next))
+		case 'product-kit': return failed(validateProductKit(next))
 		case 'asset': {
 			const { metadata, content } = next as AuthoredAssetResource
 			const metadataValidation = validateAssetMetadata(metadata, target.key)

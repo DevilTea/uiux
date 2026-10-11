@@ -31,6 +31,14 @@ import type {
 import type { CreateViewCommand, UpdateViewSpecCommand, UpdateViewStructureCommand, ViewAuthoringResult } from '../services/view-authoring'
 import type { PointResourceRead, WorkspaceApplicationSession } from '../services/workspace-session'
 import type { UpdateWorkspaceSettingsCommand, WorkspaceAuthoringResult } from '../services/workspace-authoring'
+import type {
+	ComposeProductKitCommand,
+	ProductKitAuthoringResult,
+	ProductKitGuard,
+	ProductKitRead,
+	UpdateComponentRegistryCommand,
+	UpdateProductKitCommand,
+} from '../services/product-kit-authoring'
 import { keyRequirements, writeKeyForKind, type PermissionKey } from './keys'
 import {
 	LOCKABLE_KINDS,
@@ -49,6 +57,7 @@ import {
 	authorizeRestore,
 	effectiveKeys,
 	manifestAdapterChangeKeys,
+	productKitChangeKeys,
 	type AccessOperation,
 	type ScopeDenied,
 } from './policy'
@@ -145,6 +154,15 @@ export interface ScopedWorkspaceSession {
 	updateViewSpec(command: UpdateViewSpecCommand): Promise<Scoped<ViewAuthoringResult>>
 	updateViewStructure(command: UpdateViewStructureCommand): Promise<Scoped<ViewAuthoringResult>>
 	updateWorkspaceSettings(command: UpdateWorkspaceSettingsCommand): Promise<Scoped<WorkspaceAuthoringResult>>
+	/** The Product Kit Resource; `workspace.read` only (Clause 01a11bb1-b3c2-7937-96fb-e139c5e566f5). */
+	readProductKit(): Promise<ProductKitRead | undefined>
+	/**
+	 * The Product Kit operations (Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa): each needs its own key
+	 * and, checked in the service on the file the write replaces, the keys of what its change touches.
+	 */
+	composeProductKit(command: ComposeProductKitCommand): Promise<Scoped<ProductKitAuthoringResult>>
+	updateProductKit(command: UpdateProductKitCommand): Promise<Scoped<ProductKitAuthoringResult>>
+	updateComponentRegistry(command: UpdateComponentRegistryCommand): Promise<Scoped<ProductKitAuthoringResult>>
 	createLocale(command: CreateLocaleCommand): Promise<Scoped<LocaleAuthoringResult>>
 	updateLocale(command: UpdateLocaleCommand): Promise<Scoped<LocaleAuthoringResult>>
 	createFlow(command: CreateFlowCommand): Promise<Scoped<FlowAuthoringResult>>
@@ -188,6 +206,10 @@ export type ScopedSessionOptions = Readonly<{
 }>
 
 const SUCCESS = new Set(['created', 'updated'])
+
+/** The Product Kit file's key, and its one edit lease (Rule 01a11485-efb6-7a68-a726-0f1875b8d015). */
+const PRODUCT_KIT_KEY = 'product-kit'
+const PRODUCT_KIT_LEASE: LeaseAddress = { kind: 'product-kit', key: PRODUCT_KIT_KEY }
 
 export function lockedMessage(lease: PublicLease): string {
 	return `${lease.kind} ${lease.key} is locked by ${lease.holder.nickname} until ${lease.expiresAt}.`
@@ -326,6 +348,19 @@ export function createScopedWorkspaceSession(
 		return denied ? refusalFromScope(key, denied) : undefined
 	}
 
+	/**
+	 * Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa, from `schemaVersion` 5: a Product Kit operation
+	 * needs its own key and the keys of what its change touches (`productKitChangeKeys`). The service
+	 * calls this guard after its revision check, on the file the compare-and-swap replaces, so the
+	 * keys are those of the change actually written.
+	 */
+	function productKitGuard(operation: 'composeProductKit' | 'updateProductKit' | 'updateComponentRegistry'): ProductKitGuard<AccessRefusal> {
+		return (change) => {
+			const denied = authorizeOperation(principal, operation, productKitChangeKeys(change.current, change.next))
+			return denied ? refusalFromScope(PRODUCT_KIT_KEY, denied) : undefined
+		}
+	}
+
 	/** Authorize, check or reserve the lease, run the domain write, then keep or drop the reservation. */
 	async function write<R extends { status: string; key: string }>(
 		operation: AccessOperation,
@@ -388,7 +423,7 @@ export function createScopedWorkspaceSession(
 		const diagnostics: Diagnostic[] = []
 		resources.forEach((entry, index) => {
 			if (!isValidLeaseAddress(entry))
-				diagnostics.push({ code: 'lease.invalid_resources', path: `/resources/${index}`, message: 'Each resource must be { kind: view | flow | locale | asset | workspace, key }; the workspace key is "workspace". Review threads are never locked.' })
+				diagnostics.push({ code: 'lease.invalid_resources', path: `/resources/${index}`, message: 'Each resource must be { kind: view | flow | locale | asset | workspace | product-kit, key }; the workspace key is "workspace" and the product-kit key "product-kit". Review threads are never locked.' })
 		})
 		if (diagnostics.length > 0) return { ok: false, diagnostics }
 		const seen = new Map<string, LeaseAddress>()
@@ -463,9 +498,17 @@ export function createScopedWorkspaceSession(
 			const target = isValidLeaseAddress({ kind, key }) ? { kind: kind as LockableKind, key } : undefined
 			const versionId: unknown = command.versionId
 			// #140 owner ruling 2026-10-10, 1: a `workspace` restore that changes `adapters` needs `product-kit.compose` too.
-			const guard: RestoreGuard<AccessRefusal> = change => change.kind === 'workspace'
-				? adapterChangeRefusal(change.current, change.next, keys => authorizeRestore(principal, change.kind, keys), key || 'history')
-				: undefined
+			// Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa: a `product-kit` restore needs the keys of what it
+			// changes, so one that changes `designSystems` or the Adapter specifiers needs `product-kit.compose`.
+			const guard: RestoreGuard<AccessRefusal> = (change) => {
+				if (change.kind === 'workspace')
+					return adapterChangeRefusal(change.current, change.next, keys => authorizeRestore(principal, change.kind, keys), key || 'history')
+				if (change.kind === 'product-kit') {
+					const denied = authorizeRestore(principal, change.kind, productKitChangeKeys(change.current, change.next))
+					return denied ? refusalFromScope(key || 'history', denied) : undefined
+				}
+				return undefined
+			}
 			return write('restoreResourceVersion', key || 'history', target, () => app.restoreResourceVersion(command, guard), [], isFullUuid(versionId) ? { restoredFrom: versionId } : {})
 		},
 
@@ -474,6 +517,10 @@ export function createScopedWorkspaceSession(
 		updateViewStructure: command => write('updateViewStructure', command.key, { kind: 'view', key: command.key }, () => app.updateViewStructure(command)),
 		updateWorkspaceSettings: command => write('updateWorkspaceSettings', 'workspace', { kind: 'workspace', key: 'workspace' }, () => app.updateWorkspaceSettings(command, change =>
 			adapterChangeRefusal(change.current, change.next, keys => authorizeOperation(principal, 'updateWorkspaceSettings', keys), 'workspace'))),
+		async readProductKit() { assert('readProductKit'); return app.readProductKit() },
+		composeProductKit: command => write('composeProductKit', PRODUCT_KIT_KEY, PRODUCT_KIT_LEASE, () => app.composeProductKit(command, productKitGuard('composeProductKit'))),
+		updateProductKit: command => write('updateProductKit', PRODUCT_KIT_KEY, PRODUCT_KIT_LEASE, () => app.updateProductKit(command, productKitGuard('updateProductKit'))),
+		updateComponentRegistry: command => write('updateComponentRegistry', PRODUCT_KIT_KEY, PRODUCT_KIT_LEASE, () => app.updateComponentRegistry(command, productKitGuard('updateComponentRegistry'))),
 		createLocale: command => write('createLocale', command.locale, { kind: 'locale', key: command.locale }, () => app.createLocale(command)),
 		updateLocale: command => write('updateLocale', command.locale, { kind: 'locale', key: command.locale }, () => app.updateLocale(command)),
 		createFlow: (command) => {
@@ -564,7 +611,7 @@ export function createScopedWorkspaceSession(
 			const denied = authorizeOperation(principal, 'forceReleaseLease')
 			if (denied) return refusalFromScope('locks', denied)
 			if (!isValidLeaseAddress(address))
-				return invalidLeases([{ code: 'lease.invalid_resources', path: '/', message: 'Lease address must be { kind: view | flow | locale | asset | workspace, key }.' }])
+				return invalidLeases([{ code: 'lease.invalid_resources', path: '/', message: 'Lease address must be { kind: view | flow | locale | asset | workspace | product-kit, key }.' }])
 			const released = leases.forceRelease(address)
 			return released ? { status: 'released', lease: publicLease(released) } : { status: 'not_found', kind: address.kind, key: address.key }
 		},

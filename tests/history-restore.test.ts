@@ -452,10 +452,12 @@ describe('refusals', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('refuses kinds it cannot restore, Reviews included, and resources or versions that do not exist (Rule 01a11a5e-189f; seam 3)', async () => {
 		const ctx = await fixture()
 		const earlier = await checkpoint(ctx, 'Start')
-		for (const kind of ['review', 'product-kit', 'access-presets', 'something-new']) {
+		for (const kind of ['review', 'access-presets', 'something-new']) {
 			const outcome = await restore(ctx, OWNER, { versionId: earlier, resource: { kind, key: REVIEW_ID }, expectedRevision: 'r_x' })
 			expect(outcome, kind).toMatchObject({ status: 'invalid', code: 'history.restore_unsupported_kind' })
 		}
+		// A Workspace below schemaVersion 5 has no Product Kit file to restore.
+		expect(await restore(ctx, OWNER, { versionId: earlier, resource: { kind: 'product-kit', key: 'product-kit' }, expectedRevision: 'r_x' })).toMatchObject({ status: 'invalid', code: 'history.restore_unsupported_kind' })
 		expect(await restore(ctx, OWNER, { versionId: earlier, resource: { kind: 'flow', key: FLOW_ID }, expectedRevision: null })).toMatchObject({ status: 'not_found', code: 'history.resource_not_in_version' })
 		expect(await restore(ctx, OWNER, { versionId: randomUUID(), resource: { kind: 'view', key: VIEW_ID }, expectedRevision: null })).toMatchObject({ status: 'not_found', code: 'history.record_missing' })
 		expect(await restore(ctx, OWNER, { versionId: earlier, resource: { kind: 'view', key: 'not-a-uuid' }, expectedRevision: null })).toMatchObject({ status: 'invalid', code: 'history.invalid_restore' })
