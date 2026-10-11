@@ -24,7 +24,7 @@ import { canvasOrder, cycleThread, pinStatuses, type PinStatus } from '../utils/
 import type { CommentTarget } from './usePreviewSession'
 import type { ReviewSummary, ViewRead } from './workbench-types'
 import { submissionBody, type ReviewSubmissionDraft } from '../utils/review-submission'
-import { commentCreateBlock, commentToolBlock, type CommentBlockCode } from '../utils/comment-availability'
+import { commentCreateBlock, commentToolBlock, resolveBlock, resolveBlockMessage, type CommentBlockCode } from '../utils/comment-availability'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from './useMediaQuery'
 import { captureRenderContext, effectiveRenderContext, resolveRecordedContext } from '../../src/preview/render-context-options'
 import { renderContextDiffers, type PinRenderContext } from '../../src/preview/pin-visibility'
@@ -248,8 +248,14 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	 * human member on this Workbench cookie session (Rule 01a11c09-bec8-7dee-971a-4c10eaf83eef).
 	 */
 	const canResolve = computed(() => workbench.canWrite('reviews.resolve'))
-	/** Why the member cannot resolve: an Agent never can; a person without the key is told which one. */
-	const resolveBlockedReason = computed(() => access.member.value?.kind === 'agent' ? t('comments.resolveNeedsPerson') : t('access.requiresKey', { key: 'reviews.resolve' }))
+	/**
+	 * Why the member cannot resolve (`resolveBlock`): a write-blocked Workspace, then an Agent, which
+	 * never can, then the missing key; a holder of the key on a write-blocked Workspace is told why.
+	 */
+	const resolveBlockedReason = computed(() => {
+		const code = resolveBlock({ workspaceState: workbench.workspace.value?.inspection?.state, agent: access.member.value?.kind === 'agent', holdsResolve: access.can('reviews.resolve') })
+		return code ? resolveBlockMessage(code, t) : undefined
+	})
 	const member = computed(() => access.member.value)
 	/** The signed-in member's stamped actor id, for "my message" and "my thread". */
 	const me = computed(() => access.member.value ? `member:${access.member.value.id}` : undefined)

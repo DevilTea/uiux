@@ -4,6 +4,7 @@ import { anchorViewId, type ReviewResolution, type ReviewThread } from '../../sr
 import { deriveWidgetTree, flattenWidgetTree } from '../../src/preview/widget-tree'
 import { effectiveRenderContext } from '../../src/preview/render-context-options'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
+import { resolveBlock, resolveBlockMessage } from '../utils/comment-availability'
 import {
 	buildInboxThread,
 	canvasLinkOptions,
@@ -324,8 +325,14 @@ function createReviewInbox() {
 	 * human member on this Workbench cookie session (Rule 01a11c09-bec8-7dee-971a-4c10eaf83eef).
 	 */
 	const canResolve = computed(() => workbench.canWrite('reviews.resolve'))
-	/** Why the member cannot resolve: an Agent never can; a person without the key is told which one. */
-	const resolveBlockedReason = computed(() => member.value?.kind === 'agent' ? t('comments.resolveNeedsPerson') : t('access.requiresKey', { key: 'reviews.resolve' }))
+	/**
+	 * Why the member cannot resolve (`resolveBlock`): a write-blocked Workspace, then an Agent, which
+	 * never can, then the missing key; a holder of the key on a write-blocked Workspace is told why.
+	 */
+	const resolveBlockedReason = computed(() => {
+		const code = resolveBlock({ workspaceState: workbench.workspace.value?.inspection?.state, agent: member.value?.kind === 'agent', holdsResolve: access.can('reviews.resolve') })
+		return code ? resolveBlockMessage(code, t) : undefined
+	})
 	/** Promoting to a Decision needs `reviews.promote`. */
 	const canPromote = computed(() => workbench.canWrite('reviews.promote'))
 

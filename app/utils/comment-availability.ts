@@ -58,3 +58,27 @@ export function commentToolBlock(input: CommentAvailabilityInput): CommentBlockC
 		default: return 'connecting'
 	}
 }
+
+/** Why a thread cannot be resolved: the Workspace, an Agent, or the missing `reviews.resolve`. */
+export type ResolveBlockCode = 'migration' | 'unsupported' | 'agent' | 'key'
+
+/**
+ * Why the member cannot resolve, in the same order as `commentCreateBlock`: a write-blocked
+ * Workspace first, so a holder of `reviews.resolve` is told about the Workspace rather than a key
+ * it holds; then an Agent, which never can (Rule 01a11c09-bec8-7dee-971a-4c10eaf83eef); then the
+ * missing key. `undefined` when nothing blocks it.
+ */
+export function resolveBlock(input: Readonly<{ workspaceState?: string; agent: boolean; holdsResolve: boolean }>): ResolveBlockCode | undefined {
+	if (input.workspaceState === 'migration_required') return 'migration'
+	if (input.workspaceState === 'unsupported') return 'unsupported'
+	if (input.agent) return 'agent'
+	if (!input.holdsResolve) return 'key'
+	return undefined
+}
+
+/** The message for a `ResolveBlockCode`, in the Workbench's words. */
+export function resolveBlockMessage(code: ResolveBlockCode, t: (key: string, params?: Record<string, unknown>) => string): string {
+	if (code === 'agent') return t('comments.resolveNeedsPerson')
+	if (code === 'key') return t('access.requiresKey', { key: 'reviews.resolve' })
+	return t(`commentBlock.${code}`)
+}
