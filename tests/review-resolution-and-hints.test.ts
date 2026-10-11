@@ -11,7 +11,6 @@ import type { ViewSpecContent } from '../src/application/services/view-authoring
 import type { ReviewThread } from '../src/domain/reviews/schema'
 import { RESOLVE_REVIEW_THREAD_DESCRIPTION } from '../src/mcp/server'
 import { FileNativePersistence } from '../src/persistence'
-import { SERVER_HOLD_RELATIVE_PATH } from '../src/persistence/server-hold'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import {
 	createReviewThreadForHttp,
@@ -25,6 +24,7 @@ import { startWorkbenchServer } from './support/workbench-server'
 import { AGENT_EDITOR, connectMcp, scoped, testMember } from './support/access'
 import { principalActor, type MemberPrincipal } from '../src/application/access/principal'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
+import { createCurrentWorkspace, CURRENT_TEST_LAYOUT } from './support/workspace-layout'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const REVIEW_ID = '44444444-4444-4444-8444-444444444444'
@@ -50,7 +50,7 @@ async function session() {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-review-v2-'))
 	roots.push(root)
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
-	await persistence.workspace.create({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
+	await createCurrentWorkspace(persistence, { i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
 	const app = createWorkspaceApplicationSession(persistence)
 	const view = await app.createView({ id: VIEW_ID, name: 'Checkout', spec: spec('Pay') })
 	if (view.status !== 'created') throw new Error('View fixture failed.')
@@ -362,7 +362,7 @@ describe('packaged Workbench server routes (requires pnpm build)', { timeout: HE
 	it('serves display-hint and resolution routes, holds its Workspace, and makes uiux migrate refuse while running', async () => {
 		const server = await startWorkbenchServer()
 		try {
-			await access(join(server.workspaceRoot, SERVER_HOLD_RELATIVE_PATH))
+			await access(join(server.workspaceRoot, CURRENT_TEST_LAYOUT.serverHoldPath))
 			const post = async (path: string, body: unknown) => {
 				const response = await fetch(`${server.origin}${path}`, { method: 'POST', headers: { ...server.headers, 'content-type': 'application/json' }, body: JSON.stringify(body) })
 				return { status: response.status, body: await response.json() as Record<string, unknown> }

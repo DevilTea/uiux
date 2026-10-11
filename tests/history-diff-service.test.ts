@@ -17,6 +17,7 @@ import {
 	FileNativePersistence,
 	canonicalJsonBytes,
 	defineWorkspaceSchemaPolicy,
+	LEGACY_LAYOUT,
 	layoutForSchemaVersion,
 	localeRelativePath,
 	viewRelativePath,
@@ -24,13 +25,12 @@ import {
 	type WorkspaceSnapshot,
 } from '../src/persistence'
 import { CheckpointStore, versionResourcesFromSnapshot } from '../src/persistence/history'
-import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createAccessGuardHandler } from '../src/server/access/http'
 import { createHistoryStoreFactory, type HistoryStores } from '../src/server/history-stores'
 import { diffVersionsForHttp } from '../src/server/history-http'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { bearer, connectMcp, provisionToken, scoped, testMember } from './support/access'
-import { CURRENT_TEST_LAYOUT, writeManifest } from './support/workspace-layout'
+import { V4_TEST_SCHEMA_POLICY, writeManifest } from './support/workspace-layout'
 
 /**
  * Version comparison through the service, `GET /api/history/diff` and MCP `get_version_diff`
@@ -52,6 +52,7 @@ afterEach(async () => {
 
 type Context = Readonly<{ root: string; persistence: FileNativePersistence; stores: HistoryStores; app: WorkspaceApplicationSession }>
 
+/** The comparisons here are about history across schema versions 1 to 4, so the Workspace stays in the old layout under a build where 4 is current. */
 const MANIFEST = { schemaVersion: 4, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: { desktop: { label: 'Desktop', dimensions: { width: 1280, height: 800 } } }, themes: {} }
 
 async function workspace(): Promise<Context> {
@@ -59,8 +60,8 @@ async function workspace(): Promise<Context> {
 	const home = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-home-')))
 	cleanup.push(root, home)
 	// Hand-written (not canonical) JSON, as a Workspace edited outside UIUX has.
-	await writeManifest(root, `${JSON.stringify(MANIFEST, null, 2)}\n`)
-	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+	await writeManifest(root, `${JSON.stringify(MANIFEST, null, 2)}\n`, LEGACY_LAYOUT)
+	const persistence = new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })
 	await writeView(root, view())
 	await persistence.locales.create('en-US', { greeting: 'Hello' })
 	await persistence.assets.create(ASSET_ID, { metadata: { id: ASSET_ID, name: 'Logo', contentFilename: 'logo.png', mediaType: 'image/png' }, content: Buffer.from('png-1') })
@@ -97,7 +98,7 @@ type RecordOptions = Readonly<{
 async function record(ctx: Context, type: 'checkpoint' | 'autosave', options: RecordOptions): Promise<string> {
 	const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
 	options.edit?.(snapshot)
-	const built = versionResourcesFromSnapshot(snapshot, CURRENT_TEST_LAYOUT)
+	const built = versionResourcesFromSnapshot(snapshot, LEGACY_LAYOUT)
 	const resources = options.resources ? options.resources([...built.resources]) : [...built.resources]
 	const base = { historySchemaVersion: 1 as const, id: randomUUID(), at: options.at, workspaceSchemaVersion: options.workspaceSchemaVersion ?? 4, resources }
 	if (type === 'checkpoint') {
@@ -362,7 +363,7 @@ describe('GET /api/history/diff access (Clause 01a11485-f978-767a-b977-33028aee7
 
 	beforeAll(async () => {
 		root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-http-')))
-		await writeManifest(root, `${JSON.stringify(MANIFEST)}\n`)
+		await writeManifest(root, `${JSON.stringify(MANIFEST)}\n`, LEGACY_LAYOUT)
 		await mkdir(join(root, 'i18n'), { recursive: true })
 		await writeFile(join(root, localeRelativePath('en-US')), '{"greeting":"Hello"}\n')
 		process.env.UIUX_WORKSPACE_ROOT = root
@@ -378,7 +379,7 @@ describe('GET /api/history/diff access (Clause 01a11485-f978-767a-b977-33028aee7
 
 		const runtime = getSelectedWorkspaceServerRuntime()
 		const snapshot = await runtime.persistence.withReadLock(() => runtime.persistence.scanVersionedSnapshotUnlocked())
-		const built = versionResourcesFromSnapshot(snapshot, CURRENT_TEST_LAYOUT)
+		const built = versionResourcesFromSnapshot(snapshot, LEGACY_LAYOUT)
 		checkpointId = randomUUID()
 		await new CheckpointStore(runtime.persistence).create({ historySchemaVersion: 1, id: checkpointId, type: 'checkpoint', actor: HUMAN, at: '2026-10-01T00:00:00.000Z', workspaceSchemaVersion: 4, resources: built.resources, name: 'Before', source: 'workbench' }, built.blobs)
 	})

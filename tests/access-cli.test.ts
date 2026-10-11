@@ -16,7 +16,7 @@ import { acquireServerHold } from '../src/persistence/server-hold'
 import { verifyCredential } from '../src/server/access/roster'
 import { AccessService, agentAccessOption } from '../src/server/access/service'
 import { AccessStore, accessStorePaths, copyHostHistory, hostHistoryPaths, planHostHistoryCopy } from '../src/server/access/store'
-import { CURRENT_TEST_LAYOUT } from './support/workspace-layout'
+import { CURRENT_TEST_LAYOUT, writeCurrentWorkspace } from './support/workspace-layout'
 
 const CLI = join(fileURLToPath(new URL('..', import.meta.url)), 'bin', 'uiux.mjs')
 const cleanup: string[] = []
@@ -29,8 +29,7 @@ async function setup() {
 	cleanup.push(base)
 	const home = join(base, 'home')
 	const workspace = join(base, 'design')
-	await mkdir(join(workspace, '.uiux'), { recursive: true })
-	await writeFile(join(workspace, '.uiux', 'workspace.json'), '{}\n')
+	await writeCurrentWorkspace(workspace)
 	async function runWithEnv(env: Readonly<Record<string, string>>, ...argv: string[]) {
 		const out: string[] = []
 		const err: string[] = []
@@ -43,8 +42,7 @@ async function setup() {
 
 async function initWorkspace(base: string, name: string): Promise<string> {
 	const root = join(base, name, 'design')
-	await mkdir(join(root, '.uiux'), { recursive: true })
-	await writeFile(join(root, '.uiux', 'workspace.json'), '{}\n')
+	await writeCurrentWorkspace(root)
 	return root
 }
 
@@ -157,8 +155,7 @@ describe('uiux access commands', () => {
 		const token = (await run('token', 'create', '--member', 'claude', '--workspace', workspace)).out.match(/uiux_t_\S+/u)![0]
 		await run('invite', 'create', '--member', 'deviltea', '--workspace', workspace)
 		const worktree = join(base, 'worktree', 'design')
-		await mkdir(join(worktree, '.uiux'), { recursive: true })
-		await writeFile(join(worktree, '.uiux', 'workspace.json'), '{}\n')
+		await writeCurrentWorkspace(worktree)
 		// The target already has a roster (for example one uiux dev bootstrapped): --replace is required.
 		await run('member', 'add', 'someone', '--preset', 'Owner', '--workspace', worktree)
 		expect(await run('access', 'copy', '--from', workspace, '--workspace', worktree)).toMatchObject({ code: 1, err: expect.stringContaining('--replace') })
@@ -180,8 +177,7 @@ describe('uiux access commands', () => {
 		// The old directory may already be gone.
 		await rm(workspace, { recursive: true, force: true })
 		const third = join(base, 'third')
-		await mkdir(join(third, '.uiux'), { recursive: true })
-		await writeFile(join(third, '.uiux', 'workspace.json'), '{}\n')
+		await writeCurrentWorkspace(third)
 		expect(await run('access', 'copy', '--from', workspace, '--workspace', third)).toMatchObject({ code: 0 })
 		expect(await run('access', 'copy', '--from', join(base, 'never-existed'), '--workspace', join(base, 'third'), '--replace')).toMatchObject({ code: 1, err: expect.stringContaining('No roster recorded') })
 	})
@@ -251,7 +247,8 @@ describe('uiux access commands', () => {
 	it('refuses an uninitialized Workspace, a missing --workspace and a UIUX_HOME inside the Workspace', async () => {
 		const { base, workspace, run } = await setup()
 		expect(await run('member', 'list', '--workspace', join(base, 'typo'))).toMatchObject({ code: 2, err: expect.stringContaining('not an initialized UIUX Workspace') })
-		expect(await run('member', 'list')).toMatchObject({ code: 2, err: expect.stringContaining('requires --workspace') })
+		// Without --workspace nothing is discovered from a directory outside every Workspace.
+		expect(await run('member', 'list')).toMatchObject({ code: 2, err: expect.stringContaining('No UIUX Workspace found') })
 		expect(await run('member', 'frobnicate', '--workspace', workspace)).toMatchObject({ code: 2 })
 		const out: string[] = []
 		const inside = await runAccessCommand({ argv: ['member', 'add', 'x', '--preset', 'Owner', '--workspace', workspace], env: { UIUX_HOME: join(workspace, 'home') }, stdout: () => {}, stderr: line => out.push(line) })

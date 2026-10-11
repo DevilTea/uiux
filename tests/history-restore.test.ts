@@ -24,7 +24,7 @@ import { evaluateEvidenceStaleness } from '../src/domain/evidence/staleness'
 import type { HostVersionRecord } from '../src/domain/history/schema'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { WorkspaceManifest } from '../src/domain/workspace/schema'
-import { canonicalJsonBytes, FileNativePersistence, reviewRelativePath, viewRelativePath, workspaceRelativePath } from '../src/persistence'
+import { canonicalJsonBytes, FileNativePersistence, reviewRelativePath, viewRelativePath } from '../src/persistence'
 import { versionResourcesFromSnapshot } from '../src/persistence/history'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createAccessGuardHandler } from '../src/server/access/http'
@@ -33,7 +33,8 @@ import { restoreResourceVersionForHttp } from '../src/server/history-http'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { bearer, connectMcp, provisionToken, scoped, testMember } from './support/access'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
-import { CURRENT_TEST_LAYOUT } from './support/workspace-layout'
+import { createCurrentWorkspace, CURRENT_TEST_LAYOUT, V4_TEST_SCHEMA_POLICY, writeManifest } from './support/workspace-layout'
+import { LEGACY_LAYOUT } from '../src/persistence/paths'
 
 /**
  * Single-resource restore (issue #132 B6): Feature 01a11a5d-fd6b-7f9d-be15-2bc2bc3adc13 Rules 1428,
@@ -62,7 +63,6 @@ const AGENT_REVIEWER = testMember({ memberId: 'agent-3', nickname: 'critic', kin
 const MANIFEST = {
 	schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 	i18n: { defaultLocale: 'en-US' },
-	adapters: [],
 	viewports: { desktop: { dimensions: { width: 1280, height: 800 } } },
 	themes: { light: { label: 'Light' } },
 } satisfies WorkspaceManifest
@@ -109,11 +109,16 @@ type Fixture = Readonly<{
 	baseline: string
 }>
 
-async function fixture(): Promise<Fixture> {
+/**
+ * A started Workspace with one View and a Locale. `legacy` makes it a `schemaVersion` 4 Workspace, in the
+ * old layout, under the policy of a build where 4 is current, for the rules about the manifest's `adapters`.
+ */
+async function fixture(options: Readonly<{ legacy?: boolean }> = {}): Promise<Fixture> {
 	const root = await tempDir('uiux-restore-ws-')
 	const home = join(await tempDir('uiux-restore-home-'), 'home')
-	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
-	await persistence.workspace.create(MANIFEST)
+	const persistence = new FileNativePersistence({ root, schemaPolicy: options.legacy ? V4_TEST_SCHEMA_POLICY : PRODUCT_WORKSPACE_SCHEMA_POLICY })
+	if (options.legacy) await persistence.workspace.create({ ...MANIFEST, schemaVersion: 4, adapters: [] })
+	else await createCurrentWorkspace(persistence, MANIFEST)
 	await persistence.locales.create('en-US', { greeting: 'Hello' })
 	const history = createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home })
 	const clock = manualClock()
@@ -330,10 +335,13 @@ describe('restoring every other kind', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS 
 
 	it('restores the Workspace settings, keeping the current schemaVersion, after acknowledging a removed viewport key (Rules 01a11a5e-15e9 and 17a0)', async () => {
 		const ctx = await fixture()
-		// A Checkpoint recorded under the previous schema version, holding settings without the mobile viewport.
+		// A Checkpoint recorded under the previous schema version, in its old layout (the manifest in .uiux/,
+		// holding the Adapters, and no Product Kit file), holding settings without the mobile viewport.
 		const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
-		snapshot.set(workspaceRelativePath(), canonicalJsonBytes({ ...MANIFEST, schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1, themes: { light: { label: 'Light' }, dark: { label: 'Dark' } } }))
-		const built = versionResourcesFromSnapshot(snapshot, CURRENT_TEST_LAYOUT)
+		snapshot.delete(CURRENT_TEST_LAYOUT.manifestPath)
+		snapshot.delete(CURRENT_TEST_LAYOUT.productKitPath!)
+		snapshot.set(LEGACY_LAYOUT.manifestPath, canonicalJsonBytes({ ...MANIFEST, schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1, adapters: [], themes: { light: { label: 'Light' }, dark: { label: 'Dark' } } }))
+		const built = versionResourcesFromSnapshot(snapshot, LEGACY_LAYOUT)
 		const earlier = randomUUID()
 		await (await ctx.history.open())!.checkpoints.create({
 			historySchemaVersion: 1,
@@ -456,8 +464,8 @@ describe('refusals', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 			const outcome = await restore(ctx, OWNER, { versionId: earlier, resource: { kind, key: REVIEW_ID }, expectedRevision: 'r_x' })
 			expect(outcome, kind).toMatchObject({ status: 'invalid', code: 'history.restore_unsupported_kind' })
 		}
-		// A Workspace below schemaVersion 5 has no Product Kit file to restore.
-		expect(await restore(ctx, OWNER, { versionId: earlier, resource: { kind: 'product-kit', key: 'product-kit' }, expectedRevision: 'r_x' })).toMatchObject({ status: 'invalid', code: 'history.restore_unsupported_kind' })
+		// From schemaVersion 5 the Product Kit file is a restorable kind: a stale revision is a conflict.
+		expect(await restore(ctx, OWNER, { versionId: earlier, resource: { kind: 'product-kit', key: 'product-kit' }, expectedRevision: 'r_x' })).toMatchObject({ status: 'conflict' })
 		expect(await restore(ctx, OWNER, { versionId: earlier, resource: { kind: 'flow', key: FLOW_ID }, expectedRevision: null })).toMatchObject({ status: 'not_found', code: 'history.resource_not_in_version' })
 		expect(await restore(ctx, OWNER, { versionId: randomUUID(), resource: { kind: 'view', key: VIEW_ID }, expectedRevision: null })).toMatchObject({ status: 'not_found', code: 'history.record_missing' })
 		expect(await restore(ctx, OWNER, { versionId: earlier, resource: { kind: 'view', key: 'not-a-uuid' }, expectedRevision: null })).toMatchObject({ status: 'invalid', code: 'history.invalid_restore' })
@@ -483,11 +491,13 @@ describe('refusals', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	})
 
 	it('is refused while the Workspace needs migration (Rule 01a1144e-4fcf)', async () => {
-		const ctx = await fixture()
-		const earlier = await checkpoint(ctx, 'Start')
-		const manifest = JSON.parse(await readFile(join(ctx.root, workspaceRelativePath()), 'utf8')) as Record<string, unknown>
-		await writeFile(join(ctx.root, workspaceRelativePath()), `${JSON.stringify({ ...manifest, schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1 })}\n`)
-		expect(await restore(ctx, OWNER, { versionId: earlier, resource: { kind: 'view', key: VIEW_ID }, expectedRevision: await viewRevision(ctx) })).toMatchObject({ status: 'blocked', code: 'workspace.migration_required' })
+		// An old-layout Workspace (schemaVersion 4, the manifest in .uiux/) opened by this build.
+		const root = await tempDir('uiux-restore-old-ws-')
+		const home = join(await tempDir('uiux-restore-old-home-'), 'home')
+		await writeManifest(root, { ...MANIFEST, schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1, adapters: [] }, LEGACY_LAYOUT)
+		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const app = createWorkspaceApplicationSession(persistence, { history: createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home }) })
+		expect(await scoped(app, OWNER).restoreResourceVersion({ versionId: randomUUID(), resource: { kind: 'view', key: VIEW_ID }, expectedRevision: null })).toMatchObject({ status: 'blocked', code: 'workspace.migration_required' })
 	})
 })
 
@@ -618,8 +628,8 @@ describe('access (Clause 01a11485-fa44, Rule 01a11c09-c648)', { timeout: HEAVY_S
 		expect(ctx.leases.list()).toEqual([])
 	})
 
-	it('needs product-kit.compose for a workspace restore that changes the adapters, judged on the restore\'s result (#140 owner ruling 2026-10-10, 1)', async () => {
-		const ctx = await fixture()
+	it('needs product-kit.compose for a workspace restore that changes the adapters below schemaVersion 5, judged on the restore\'s result (#140 owner ruling 2026-10-10, 1)', async () => {
+		const ctx = await fixture({ legacy: true })
 		const settings = async () => {
 			const read = await ctx.app.readPointResource('workspace', 'workspace')
 			if (read?.kind !== 'workspace') throw new Error('workspace')
@@ -728,7 +738,7 @@ describe('POST /api/history/versions/:id/restore', { timeout: HEAVY_SERVER_SUITE
 		origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 		process.env.UIUX_SERVER_ORIGIN = origin
 		const runtime = getSelectedWorkspaceServerRuntime()
-		await runtime.persistence.workspace.create(MANIFEST)
+		await createCurrentWorkspace(runtime.persistence, MANIFEST)
 		await runtime.persistence.locales.create('en-US', { greeting: 'Hello' })
 		expect(await runtime.historyRecorder.start()).toMatchObject({ enabled: true, baseline: expect.any(String) })
 	})

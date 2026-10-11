@@ -17,8 +17,11 @@ import {
 	workspaceRelativePath,
 } from '../src/persistence'
 import { CheckpointStore } from '../src/persistence/history'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
-import { CURRENT_TEST_LAYOUT } from './support/workspace-layout'
+import { V4_TEST_SCHEMA_POLICY } from './support/workspace-layout'
+
+/** The old layout is exercised under a build where schemaVersion 4, its last version, is current. */
+const OLD_LAYOUT_POLICY = V4_TEST_SCHEMA_POLICY
+const OLD_LAYOUT_VERSION = V4_TEST_SCHEMA_POLICY.currentVersion
 
 const HEX = 'ab'.repeat(32)
 const CHECKPOINT_ID = '11111111-1111-4111-8111-111111111111'
@@ -64,7 +67,7 @@ describe('Workspace layout seam', () => {
 	})
 
 	it('selects the legacy layout for every schemaVersion this build knows and for unusable versions, and the schemaVersion 5 layout from 5', () => {
-		for (const version of [...PRODUCT_WORKSPACE_SCHEMA_POLICY.recognizedVersions, CURRENT_WORKSPACE_SCHEMA_VERSION, 0, -1, Number.NaN])
+		for (const version of [...OLD_LAYOUT_POLICY.recognizedVersions, OLD_LAYOUT_VERSION, 0, -1, Number.NaN])
 			expect(layoutForSchemaVersion(version), String(version)).toBe(LEGACY_LAYOUT)
 		for (const version of [5, 6, 99])
 			expect(layoutForSchemaVersion(version), String(version)).toBe(V5_LAYOUT)
@@ -75,14 +78,14 @@ describe('Workspace layout seam', () => {
 		const seen: string[] = []
 		const persistence = new FileNativePersistence({
 			root,
-			schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY,
+			schemaPolicy: OLD_LAYOUT_POLICY,
 			async fault(point) {
 				if (point === 'transaction.before_apply')
 					seen.push(...(await readdir(join(root, '.uiux', '.transactions'))))
 			},
 		})
 		expect(persistence.layout).toBe(LEGACY_LAYOUT)
-		await persistence.workspace.create({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
+		await persistence.workspace.create({ schemaVersion: OLD_LAYOUT_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
 		expect(await exists(join(root, '.uiux', 'workspace.json'))).toBe(true)
 
 		await persistence.withLock(async () => {
@@ -105,17 +108,17 @@ describe('Workspace layout seam', () => {
 			type: 'checkpoint',
 			actor: { type: 'human', id: 'member:m-owner', displayName: 'deviltea' },
 			at: '2026-10-01T00:00:00.000Z',
-			workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
+			workspaceSchemaVersion: OLD_LAYOUT_VERSION,
 			resources: [],
 			name: 'Layout seam',
 			source: 'workbench',
 		}, new Map())
 		expect(await readdir(join(root, '.uiux', 'history', 'checkpoints'))).toEqual([`${CHECKPOINT_ID}.json`])
 
-		const hold = await acquireServerHold(root, { layout: CURRENT_TEST_LAYOUT })
+		const hold = await acquireServerHold(root, { layout: LEGACY_LAYOUT })
 		expect(hold).toBeDefined()
 		expect((await lstat(join(root, '.uiux', '.server-hold.json'))).isFile()).toBe(true)
-		expect((await readActiveServerHold(root, CURRENT_TEST_LAYOUT))?.token).toBe(hold!.hold.token)
+		expect((await readActiveServerHold(root, LEGACY_LAYOUT))?.token).toBe(hold!.hold.token)
 		await hold!.release()
 		expect(await exists(join(root, '.uiux', '.server-hold.json'))).toBe(false)
 		expect((await readdir(join(root, '.uiux'))).filter(name => name.endsWith('.tmp'))).toEqual([])

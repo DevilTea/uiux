@@ -9,7 +9,7 @@ import type { ViewSpecContent } from '../src/application/services/view-authoring
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { FileNativePersistence, type PersistenceFaultPoint } from '../src/persistence'
 import { reviewRelativePath } from '../src/persistence/paths'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import {
 	appendReviewMessageForHttp,
 	createReviewThreadForHttp,
@@ -22,7 +22,7 @@ import {
 	submitReadyForReviewForHttp,
 } from '../src/server/authoring-http'
 import { AGENT_EDITOR, connectMcp, scoped, testMember } from './support/access'
-import { metadataPath } from './support/workspace-layout'
+import { createCurrentWorkspace, metadataPath } from './support/workspace-layout'
 
 /**
  * Accepted addendum "Author quick retract of a new Review thread" (Part 7,
@@ -49,7 +49,7 @@ async function session(fault?: (point: PersistenceFaultPoint) => void) {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-retract-'))
 	roots.push(root)
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY, ...(fault ? { fault } : {}) })
-	await persistence.workspace.create({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
+	await createCurrentWorkspace(persistence, { i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
 	const app = createWorkspaceApplicationSession(persistence)
 	const view = await app.createView({ id: VIEW_ID, name: 'Checkout', spec: spec() })
 	if (view.status !== 'created') throw new Error('View fixture failed.')

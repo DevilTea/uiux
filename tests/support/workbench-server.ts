@@ -46,12 +46,20 @@ async function freePort(): Promise<number> {
  */
 export async function startWorkbenchServer(): Promise<WorkbenchServer> {
 	const workspaceRoot = await mkdtemp(join(REPOSITORY_ROOT, '.uiux-browser-test-'))
-	await cp(WORKBENCH_FIXTURE_WORKSPACE, workspaceRoot, { recursive: true })
-	// The frozen fixture is a schemaVersion 5 Workspace (its root holds workspace.json and its
-	// Adapter is in kit/). A later product schema migrates the private copy the way an operator would
-	// (`uiux migrate`), never hand-edited; at the current schema this is a no-op.
-	await new FileNativePersistence({ root: workspaceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).migrateWorkspace()
-	const token = await provisionToken(workspaceRoot, { nickname: 'tester', kind: 'human', role: 'owner' })
+	let token: string
+	try {
+		await cp(WORKBENCH_FIXTURE_WORKSPACE, workspaceRoot, { recursive: true })
+		// The frozen fixture is a schemaVersion 5 Workspace (its root holds workspace.json and its
+		// Adapter is in kit/). A later product schema migrates the private copy the way an operator would
+		// (`uiux migrate`), never hand-edited; at the current schema this is a no-op.
+		await new FileNativePersistence({ root: workspaceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).migrateWorkspace()
+		token = await provisionToken(workspaceRoot, { nickname: 'tester', kind: 'human', role: 'owner' })
+	}
+	catch (error) {
+		// A copy that never served leaves nothing behind in the repository.
+		await rm(workspaceRoot, { recursive: true, force: true })
+		throw error
+	}
 	const port = await freePort()
 	const child: ChildProcess = spawn(process.execPath, [join(REPOSITORY_ROOT, '.output', 'server', 'index.mjs')], {
 		stdio: ['ignore', 'pipe', 'pipe'],

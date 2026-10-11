@@ -11,7 +11,7 @@ import { FileNativePersistence } from '../src/persistence/file-native'
 import { checkWorkspaceSelection } from '../src/persistence/workspace-selection'
 import { V5_LAYOUT } from '../src/persistence/paths'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY, WORKSPACE_GITIGNORE_RULES } from '../src/product/workspace-schema'
-import { TEST_TIMEOUT } from './support/timeouts'
+import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 
 /**
  * `uiux init` (Clauses 01a1144e-55a3-74c4-8bf8-3205e968e275 and 01a1144e-55be-785d-b494-7f7da834572a):
@@ -61,7 +61,7 @@ describe('uiux init', () => {
 		expect(result.stdout).toContain(`Initialized UIUX Workspace at ${join(repository, '.uiux')}`)
 		await expectInitialized(join(repository, '.uiux'))
 		expect(await readdir(nested)).toEqual([])
-	}, TEST_TIMEOUT)
+	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
 
 	it('creates the Workspace in <cwd>/.uiux/ outside a Git repository', async () => {
 		const cwd = await makeDirectory()
