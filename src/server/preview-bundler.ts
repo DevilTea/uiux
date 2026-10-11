@@ -65,8 +65,10 @@ export async function buildWorkspacePreviewBundle(input: Readonly<{
 	workspaceRoot: string
 	/**
 	 * The Adapter resolution base (`adapterResolutionBase`): `kit/` from `schemaVersion` 5, the
-	 * Workspace root (the default) below it. Its `node_modules/` is the Workspace's fallback module
-	 * directory, so a `schemaVersion` 5 bundle never falls back to the root's own `node_modules/`.
+	 * Workspace root (the default) below it. Its `node_modules/` is the Workspace entry of esbuild's
+	 * `nodePaths`, the fallback consulted only after the `node_modules/` directories above each
+	 * importing file; so from `schemaVersion` 5 only that fallback is `kit/node_modules/` instead of
+	 * the root's `node_modules/`.
 	 */
 	moduleBase?: string
 	packageRoot?: string
