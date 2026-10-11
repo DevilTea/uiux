@@ -1,7 +1,9 @@
 import { writeKeyForKind, type PermissionKey } from '../../src/application/access/keys'
+import type { VersionDiffResult } from '../../src/application/services/history-diff'
 import { isRestorableResourceKind } from '../../src/domain/history/constants'
 import type { ImpactCategory, ImpactItem } from '../../src/domain/impact/analyzer'
 import type { ResourceChangeSummary } from '../../src/domain/history/summary'
+import { PRODUCT_KIT_SCHEMA_VERSION } from '../../src/domain/workspace/schema'
 import { CURRENT_COMPARE, PARENT_COMPARE, type ComparisonEndpoints } from './version-history'
 
 /**
@@ -63,6 +65,30 @@ export function restoreSourceVersion(input: RestoreGateInput): string | undefine
  */
 export function matchesCurrent(summary: readonly Pick<ResourceChangeSummary, 'kind' | 'key' | 'status'>[], resource: Readonly<{ kind: string; key: string }>): boolean {
 	return summary.find(row => row.kind === resource.kind && row.key === resource.key)?.status === 'unchanged'
+}
+
+/**
+ * The keys a restore needs beyond `history.restore` and the kind's write key, read from the
+ * semantic comparison of the selected version with the current state (`from=<version>&to=current`).
+ *
+ * #140 owner ruling 2026-10-10, 1 (https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18852724):
+ * a `workspace` restore that adds, removes, reorders or re-points an `adapters` entry also needs
+ * `product-kit.compose`, as the server checks (`adapterChangeKeys`, Clause
+ * 01a11bb1-b35a-7e69-bba5-978e3f47c4fa), so the Workbench offers only what the server allows (Rule
+ * 01a11485-eba3-7c07-a94f-0d69e610a0b6). A change to an entry's `config` alone is not one; from
+ * `schemaVersion` 5 the manifest holds no `adapters`. Without a comparison nothing is required:
+ * the server decides.
+ */
+export function restoreExtraKeys(kind: string, comparison: Pick<VersionDiffResult, 'to' | 'changes'> | undefined): readonly PermissionKey[] {
+	if (kind !== 'workspace' || !comparison || comparison.to.workspaceSchemaVersion >= PRODUCT_KIT_SCHEMA_VERSION) return []
+	const diff = comparison.changes?.find(change => change.kind === 'workspace')?.diff
+	if (diff?.type !== 'workspace') return []
+	const { adapters, adaptersChanges } = diff
+	const matched = adapters !== undefined && (adapters.added.length > 0 || adapters.removed.length > 0 || adapters.reordered === true)
+	// Unmatched by `moduleSpecifier`, the list is compared by position: an entry added, removed or
+	// replaced whole, or a changed `moduleSpecifier`, changes the list; a deeper change does not.
+	const structural = adaptersChanges?.some(change => /^(?:\/[^/]+(?:\/moduleSpecifier)?)?$/u.test(change.path)) === true
+	return matched || structural ? ['product-kit.compose'] : []
 }
 
 /** The impact list's groups, in the order the confirmation shows them (Rules 01a11a5e-174b-… and 17a0-…). */

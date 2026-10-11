@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
+import { keysForRole } from '../src/application/access/keys'
 import { provisionToken, sessionCookieFor } from './support/access'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
@@ -405,5 +406,45 @@ describe('comparison reads (B8 follow-up)', () => {
 			expect(summaries).toHaveLength(1)
 		}
 		finally { await context.close() }
+	}, 90_000)
+})
+
+describe('restoring the Workspace settings (#140 owner ruling 2026-10-10, 1)', () => {
+	type WorkspaceRead = Read<{ adapters: unknown[] } & Record<string, unknown>>
+	async function setAdapters(adapters: unknown[]): Promise<void> {
+		const workspace = await api<WorkspaceRead>('/api/resources/workspace/workspace')
+		const { i18n, viewports, themes } = workspace.resource
+		await api('/api/workspace/settings', { expectedRevision: workspace.revision, settings: { i18n, adapters, viewports, themes } }, 'PUT')
+	}
+
+	it('names `product-kit.compose` and offers no Restore when the restore would change the `adapters` entries', async () => {
+		const original = (await api<WorkspaceRead>('/api/resources/workspace/workspace')).resource.adapters
+		const earlier = await checkpoint(`b10 adapters ${unique()}`)
+		await setAdapters([])
+		try {
+			const editor = keysForRole('human', 'editor')
+			for (const keys of [editor.filter(key => key !== 'product-kit.compose'), editor]) {
+				const composes = keys.includes('product-kit.compose')
+				const token = await provisionToken(server.workspaceRoot, { nickname: `b10-adapters-${unique()}`, kind: 'human', keys })
+				const { context, page } = await open(`/?tab=activity&version=${earlier}&compare=current&resource=workspace:workspace`, { cookie: await sessionCookieFor(server.origin, token) })
+				try {
+					const block = page.locator('[data-version-comparison] [data-resource-diff="workspace:workspace"][data-open]')
+					await block.locator('[data-restore-version]').click({ timeout: 15_000 })
+					await dialog(page).waitFor()
+					const notice = page.locator('[data-access-notice="restore"][data-missing-key="product-kit.compose"]')
+					if (composes) {
+						await expect.poll(() => page.locator('[data-restore-confirm]').isEnabled(), { timeout: 10_000 }).toBe(true)
+						expect(await notice.count()).toBe(0)
+					}
+					else {
+						await notice.waitFor({ timeout: 10_000 })
+						expect(await notice.innerText()).toContain('Requires the permission key product-kit.compose.')
+						expect(await page.locator('[data-restore-confirm]').isDisabled()).toBe(true)
+					}
+				}
+				finally { await context.close() }
+			}
+		}
+		finally { await setAdapters(original) }
 	}, 90_000)
 })
