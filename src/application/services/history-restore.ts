@@ -169,14 +169,16 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 			return { status: 'invalid', kind: target.kind, key: target.key, code: 'history.restore_invalid_content', message: `The ${target.kind} content of version ${parsed.versionId} is not valid for this UIUX build, so it cannot be restored.`, diagnostics }
 
 		const current = target.kind === 'asset' || currentFiles.size !== 1 ? undefined : parseJson([...currentFiles.values()][0]!)
+		// The key check runs before the checks against the kit project, so a caller without the keys
+		// causes no kit project I/O.
+		const refused = guard?.({ kind: target.kind, key: target.key, current, next })
+		if (refused !== undefined) return refused
 		if (target.kind === 'product-kit') {
 			// The checks against the kit project the Product Kit operations make (Rule 01a11a5e-1580-…),
 			// for the members the restore changes.
 			const kitRefusal = await checkRestoredProductKit(target, next as ProductKit, current)
 			if (kitRefusal) return kitRefusal
 		}
-		const refused = guard?.({ kind: target.kind, key: target.key, current, next })
-		if (refused !== undefined) return refused
 
 		const before = impactWorkspace(loaded.current, persistence.layout, loaded.reviews, target.kind === 'workspace' ? await readEvidence() : undefined)
 		const after = withResource(before, target, target.kind === 'asset' ? (next as AuthoredAssetResource).metadata : next, nextRevision(target, next))

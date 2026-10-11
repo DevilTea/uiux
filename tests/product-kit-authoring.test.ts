@@ -423,6 +423,16 @@ describe('Product Kit history and restore (Clauses 01a11a5e-216d and 01a11bb1-b3
 		const outcome = await http(ctx.app, HUMAN_EDITOR).restoreResourceVersion({ versionId: ctx.baseline, resource: { kind: 'product-kit', key: 'product-kit' }, expectedRevision: composed.revision })
 		expect(outcome).toMatchObject({ status: 'invalid', code: 'history.restore_invalid_content', diagnostics: [expect.objectContaining({ code: 'product_kit.package_undeclared', path: '/designSystems/0' })] })
 	})
+
+	it('checks a restore\'s keys before the kit project, so a caller without them learns nothing of it', async () => {
+		const ctx = await historyFixture()
+		await rm(join(ctx.root, 'kit', 'package.json'))
+		const composed = await ctx.app.composeProductKit({ expectedRevision: await revision(ctx.app), designSystems: [], adapters: ['./uiux.js'] })
+		if (composed.status !== 'updated') throw new Error(JSON.stringify(composed))
+		const restore = { versionId: ctx.baseline, resource: { kind: 'product-kit', key: 'product-kit' }, expectedRevision: composed.revision }
+		// The restore would also fail the kit project check; the missing key answers first.
+		expect(await http(ctx.app, RESTORER).restoreResourceVersion(restore)).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['product-kit.compose'] })
+	})
 })
 
 describe('the uiux://product-kit Resource (Clause 01a11bb1-b0f1)', () => {
@@ -454,5 +464,31 @@ describe('the uiux://product-kit Resource (Clause 01a11bb1-b0f1)', () => {
 		}
 		finally { await mcp.close() }
 		expect(await readProductKitForHttp(http(ctx.app, VIEWER))).toMatchObject({ status: 200, body: { kind: 'product-kit' } })
+	})
+})
+
+describe('the service guard of the Product Kit operations', () => {
+	it('returns the guard\'s refusal on the file the write replaces, storing nothing, and stores when the guard passes', async () => {
+		const ctx = await v5Fixture()
+		const bytes = await readFile(ctx.kitPath, 'utf8')
+		const seen: unknown[] = []
+		const refusal = { status: 'refused-by-guard' } as const
+		const refused = await ctx.app.composeProductKit({ expectedRevision: await revision(ctx.app), designSystems: [], adapters: ['./uiux.js'] }, (change) => {
+			seen.push(change)
+			return refusal
+		})
+		expect(refused).toBe(refusal)
+		expect(seen).toEqual([{ current: KIT, next: { ...KIT, designSystems: [] } }])
+		expect(await readFile(ctx.kitPath, 'utf8')).toBe(bytes)
+		expect(await ctx.app.composeProductKit({ expectedRevision: await revision(ctx.app), designSystems: [], adapters: ['./uiux.js'] }, () => undefined)).toMatchObject({ status: 'updated' })
+	})
+
+	it('runs the guard before the checks against the kit project', async () => {
+		const ctx = await v5Fixture()
+		const refusal = { status: 'refused-by-guard' } as const
+		// The change would fail the kit project check (an undeclared package); the guard answers first.
+		const command = { expectedRevision: await revision(ctx.app), designSystems: ['@evil/design-system'], adapters: ['./uiux.js'] }
+		expect(await ctx.app.composeProductKit(command, () => refusal)).toBe(refusal)
+		expect(await ctx.app.composeProductKit(command, () => undefined)).toMatchObject({ status: 'invalid', diagnostics: [expect.objectContaining({ code: 'product_kit.package_undeclared' })] })
 	})
 })

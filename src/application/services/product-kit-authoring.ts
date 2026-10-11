@@ -36,7 +36,8 @@ import { validateResourceRevision } from '../dto/revisions'
  * (`checkProductKitAgainstKit`) before anything is stored. Access, the edit lease and the
  * design-write context belong to the scoped session; its key check runs here as the `guard`,
  * after the revision check and on the file the compare-and-swap replaces, so the keys checked are
- * those of the change written. A Workspace below `schemaVersion` 5 has no Product Kit file: the
+ * those of the change written, and before the checks against the kit project, so a caller
+ * without the keys causes no kit project I/O. A Workspace below `schemaVersion` 5 has no Product Kit file: the
  * operations refuse with `workspace.migration_required`.
  */
 export type ProductKitAdapterSettings = Readonly<{ moduleSpecifier: string; config?: JsonValue }>
@@ -152,14 +153,14 @@ export function createProductKitAuthoringService(persistence: FileNativePersiste
 			if (!validation.ok) return { status: 'invalid', key: KEY, diagnostics: validation.diagnostics }
 			const next = validation.value
 
+			const refused = guard?.({ current: currentKit.value, next })
+			if (refused !== undefined) return refused
+
 			const checked = await checkProductKitAgainstKit({ kitDirectory: kit.directory, codeDirectoryName: kit.name, current: currentKit.value, next })
 			if (checked.refusals.length > 0) {
 				const registry = checked.refusals.some(item => item.code === 'kit.component_invalid')
 				return { status: 'invalid', key: KEY, ...(registry ? { code: 'kit.component_invalid' } : {}), diagnostics: checked.refusals }
 			}
-
-			const refused = guard?.({ current: currentKit.value, next })
-			if (refused !== undefined) return refused
 
 			const commit = await persistence.productKit.compareAndSwap({ key: KEY, expectedRevision: expectedRevision.value, resource: next })
 			if (!commit.ok) return { status: 'conflict', key: KEY, currentRevision: commit.conflict.currentRevision }
