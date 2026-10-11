@@ -726,7 +726,7 @@ describe('host paths in the Product Kit Resource', () => {
 	it('masks absolute paths and file URLs, keeping the Workspace root as <workspace>', () => {
 		const root = '/srv/acme/workspace'
 		expect(maskHostPaths(`Cannot find package 'x' imported from ${root}/kit/.uiux-adapter-resolution.mjs`, [root])).toBe('Cannot find package \'x\' imported from <workspace>/kit/.uiux-adapter-resolution.mjs')
-		expect(maskHostPaths('Package subpath \'.\' is not defined by "exports" in /home/someone/node_modules/x/package.json imported from file:///home/someone/a.mjs', [root])).toBe('Package subpath \'.\' is not defined by "exports" in <path> imported from <path>')
+		expect(maskHostPaths('Package subpath \'.\' is not defined by "exports" in /home/someone/node_modules/x/package.json imported from file:///home/someone/a.mjs', [root])).toBe('Package subpath \'.\' is not defined by "exports" in <path> <path>')
 		expect(maskHostPaths('at (C:\\Users\\someone\\x.js) and \\\\server\\share\\y.js', [root])).toBe('at (<path>) and <path>')
 		expect(maskHostPaths('kit/package.json is not a regular file.', [root])).toBe('kit/package.json is not a regular file.')
 	})
@@ -735,7 +735,7 @@ describe('host paths in the Product Kit Resource', () => {
 		const root = '/srv/acme/ws'
 		expect(maskHostPaths(`in ${root}`, [root])).toBe('in <workspace>')
 		expect(maskHostPaths(`in ${root}/kit/a.mjs.`, [root])).toBe('in <workspace>/kit/a.mjs.')
-		expect(maskHostPaths(`in ${root}-other/kit/a.mjs and ${root}other`, [root])).toBe('in <path> and <path>')
+		expect(maskHostPaths(`in ${root}-other/kit/a.mjs and ${root}other`, [root])).toBe('in <path> <path>')
 		expect(maskHostPaths(`in /mnt${root}/kit/a.mjs`, [root])).toBe('in <path>')
 		expect(maskHostPaths(`in file://${root}-other/a.mjs`, [root])).toBe('in <path>')
 		expect(maskHostPaths(`in "${root}-other/a.mjs"`, [root])).toBe('in "<path>"')
@@ -755,10 +755,40 @@ describe('host paths in the Product Kit Resource', () => {
 	it('masks a path with spaces whole', () => {
 		const root = '/srv/my acme/ws'
 		expect(maskHostPaths('Cannot find module \'/Users/John Smith/My File.js\' imported from "/Users/John Smith/a b.mjs"', [root])).toBe('Cannot find module \'<path>\' imported from "<path>"')
-		expect(maskHostPaths('in /Users/John Smith/node_modules/x/package.json imported from /home/a b/c d.mjs', [root])).toBe('in <path> imported from <path>')
+		expect(maskHostPaths('in /Users/John Smith/node_modules/x/package.json imported from /home/a b/c d.mjs', [root])).toBe('in <path> <path>')
 		expect(maskHostPaths('at file:///Users/John%20Smith/x.js', [root])).toBe('at <path>')
 		expect(maskHostPaths(`in ${root}/kit/a b.mjs imported from file:///srv/my%20acme/ws/kit/x.mjs`, [root])).toBe('in <workspace>/kit/a b.mjs imported from <workspace>/kit/x.mjs')
 		expect(maskHostPaths(`in '${root}/kit/a.mjs'`, [root])).toBe('in \'<workspace>/kit/a.mjs\'')
+	})
+
+	// Once an absolute path starts, it is masked to the line end, a quote, the next path or
+	// path-terminating punctuation, so the words after a path may be masked with it.
+	const root = '/srv/acme/ws'
+	it.each([
+		['the root after a non-path character', `;${root}/kit/a.js`, ';<workspace>/kit/a.js'],
+		['the root after a word', `x${root}/kit/a.js`, 'x<workspace>/kit/a.js'],
+		['the root inside another path', `in /mnt${root}/kit/a.js`, 'in <path>'],
+		['the root inside a path below the root', `in ${root}/kit${root}/a.js`, 'in <workspace>/kit/srv/acme/ws/a.js'],
+		['a path after ;', 'x;/home/someone/a.js', 'x;<path>'],
+		['a path after |', 'a|/home/someone/a.js', 'a|<path>'],
+		['a path after >', '>/home/someone/a.js', '><path>'],
+		['a path in braces', '{/home/someone/a.js}', '{<path>}'],
+		['a path after <', '</home/someone/a.js', '<<path>'],
+		['a path after !', '!/home/someone/a.js', '!<path>'],
+		['a path after @', 'x@/home/someone/a.js', 'x@<path>'],
+		['a path after -', '-/home/someone/a.js', '-<path>'],
+		['an apostrophe in a bare path', 'in /home/o\'brien/x.js', 'in <path>'],
+		['an apostrophe in a quoted path', 'in \'/home/o\'brien/x.js\' from /home/o\'brien/a.mjs', 'in \'<path>\' from <path>'],
+		['an apostrophe in a file URL', 'at file:///home/o\'brien/x.js', 'at <path>'],
+		['tabs', 'in\t/home/a\tb/x.js\tz', 'in\t<path>'],
+		['a next word with no separator or extension', 'in /Users/John Smith', 'in <path>'],
+		['an outside path after a Workspace path', `in ${root}/kit/a.mjs imported from /home/x/y.mjs`, 'in <workspace>/kit/a.mjs imported from <path>'],
+		['a path ended by punctuation', 'in /home/x/a.js, then (/home/y/b.js).', 'in <path>, then (<path>).'],
+		['a path on its own line', 'in /home/x/a.js\nnext line', 'in <path>\nnext line'],
+		['a relative path', 'kit/src/a.js and ./b.js', 'kit/src/a.js and ./b.js'],
+		['a lone slash', 'a / b', 'a / b'],
+	])('masks %s', (_case, message, masked) => {
+		expect(maskHostPaths(message, [root])).toBe(masked)
 	})
 
 	it('names no host path outside the Workspace in an Adapter\'s resolution failure', async () => {
