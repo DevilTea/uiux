@@ -511,6 +511,17 @@ describe('member keys over the administration wire (issue #142, P5)', () => {
 		expect((await fetch(`${origin}/api/access/members/${lead.id}`, { method: 'DELETE', headers: headers() })).status).toBe(200)
 	})
 
+	it('renames a member alone without rewriting a stored key set that lacks a requirement (Rule 01a11c33-24ab)', async () => {
+		const { member } = await (await add({ nickname: 'gap', keys: keysForRole('human', 'viewer') })).json() as { member: WireMember }
+		await writeStoredKeys('gap', ['views.write'])
+		const renamed = await patch(member.id, { nickname: 'gap-2' })
+		expect(renamed.status).toBe(200)
+		expect((await renamed.json() as { member: WireMember }).member).toMatchObject({ nickname: 'gap-2', keys: ['views.write'] })
+		// Any key change stores the set anew, so it is checked, as `uiux member set --grant` checks it.
+		expect(await (await patch(member.id, { grant: ['views.write'] })).json()).toMatchObject({ code: 'access.key_requires' })
+		expect((await fetch(`${origin}/api/access/members/${member.id}`, { method: 'DELETE', headers: headers() })).status).toBe(200)
+	})
+
 	it('does not remove a CLI grant when a page loaded before it saves an unrelated change', async () => {
 		const { member: rae } = await (await add({ nickname: 'rae', keys: keysForRole('human', 'viewer') })).json() as { member: WireMember }
 		const snapshot = (await listed()).members.find(item => item.id === rae.id)!

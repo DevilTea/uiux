@@ -418,7 +418,8 @@ export type KeyChanges = Readonly<{ grant?: unknown; revoke?: unknown }>
  * these instead of a whole key set, so a change made meanwhile through the CLI or by another manager
  * is not reverted (owner ruling 1 of 2026-10-11 on PR #191,
  * https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18864075). Revoking a key the
- * member does not hold changes nothing. Returns undefined when the keys stay as they are.
+ * member does not hold changes nothing; the result is stored anew, so it is checked like any key set.
+ * Returns undefined when neither is given.
  */
 function adjustedKeys(member: StoredMember, changes: KeyChanges & MemberAccessInput): string[] | undefined {
 	if (changes.grant === undefined && changes.revoke === undefined) return undefined
@@ -428,8 +429,7 @@ function adjustedKeys(member: StoredMember, changes: KeyChanges & MemberAccessIn
 	const revoke = changes.revoke === undefined ? [] : normalizeKeys(changes.revoke)
 	const both = grant.filter(key => revoke.includes(key))
 	if (both.length > 0) throw new AccessError('access.invalid_keys', `${keyList(both)} ${both.length > 1 ? 'are' : 'is'} both granted and revoked.`)
-	const keys = normalizeKeys([...member.keys, ...grant].filter(key => !revoke.includes(key)))
-	return sameKeys(keys, member.keys) ? undefined : keys
+	return normalizeKeys([...member.keys, ...grant].filter(key => !revoke.includes(key)))
 }
 
 export function setMember(
