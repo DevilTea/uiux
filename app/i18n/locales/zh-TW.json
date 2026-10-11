@@ -2073,6 +2073,7 @@
       "invalid_style_specifier": "樣式表請使用套件匯出，或 kit/ 內的 ./ 路徑。",
       "invalid_theme_attribute": "主題屬性名稱不可包含空白、引號、>、/ 或 =。",
       "invalid_widget_import": "請指定套件及其中一個匯出。",
+      "missing": "product-kit.json 不存在或無法讀取。",
       "unknown_component": "必須指向登錄中的另一個項目。"
     }
   },
