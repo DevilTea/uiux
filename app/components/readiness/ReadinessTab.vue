@@ -5,6 +5,7 @@ import type { HandoffRoot } from '../../../src/domain/handoff/schema'
 import { anchorViewId, REVIEW_RESOLUTIONS } from '../../../src/domain/reviews/schema'
 import { resolveDiagnosticWidgetTarget } from '../../../src/preview/checks-navigation'
 import { flattenWidgetTree } from '../../../src/preview/widget-tree'
+import { useAccess } from '../../composables/useAccess'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { useReadiness } from '../../composables/useReadiness'
 import { useWorkbench } from '../../composables/useWorkbench'
@@ -29,7 +30,8 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const workbench = useWorkbench()
-const { selectedView, selectedViewId, reviews, widgetTreeResult, currentActiveContext, authorReadOnly, preview } = workbench
+const { selectedView, selectedViewId, reviews, widgetTreeResult, currentActiveContext, preview } = workbench
+const access = useAccess()
 const readiness = useReadiness()
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const atLeastTablet = useMediaQuery('(min-width: 768px)')
@@ -77,7 +79,7 @@ const needsCapture = computed(() => evidence.value.filter(entry => entry.freshne
 const STALE_PREVIEW = 3
 const staleExpanded = ref(false)
 const staleShown = computed(() => staleExpanded.value ? needsCapture.value : needsCapture.value.slice(0, STALE_PREVIEW))
-const canCapture = computed(() => !authorReadOnly.value && isDesktop.value)
+const canCapture = computed(() => workbench.canWrite('evidence.capture') && isDesktop.value)
 const captureOpen = ref(false)
 const captureContexts = ref<readonly CaptureContext[]>([])
 
@@ -122,7 +124,7 @@ const coverage = computed(() => reviewCoverageSummary(entry.value?.readiness))
 const resolvedParts = computed(() => REVIEW_RESOLUTIONS
 	.filter(kind => coverage.value.resolved[kind] > 0)
 	.map(kind => ({ kind, count: coverage.value.resolved[kind] })))
-const canExport = computed(() => !authorReadOnly.value && atLeastTablet.value)
+const canExport = computed(() => workbench.canWrite('handoff.export') && atLeastTablet.value)
 const exportOpen = ref(false)
 const exportRoots = computed<HandoffRoot[]>(() => selectedViewId.value ? [{ type: 'view', viewId: selectedViewId.value }] : [])
 
@@ -314,15 +316,16 @@ const handoffFacet = computed<Facet>(() => {
             </template>
           </dd>
           <dd
-            v-if="authorReadOnly"
+            v-if="!access.can('evidence.capture')"
             class="flex items-center gap-1.5 text-xs text-muted"
             data-access-notice="capture"
+            data-missing-key="evidence.capture"
           >
             <UIcon
               name="i-lucide-user-lock"
               class="size-3.5"
             />
-            {{ t('evidence.requiresEditor') }}
+            {{ t('access.requiresKey', { key: 'evidence.capture' }) }}
           </dd>
           <dd
             v-else-if="!isDesktop"
@@ -456,15 +459,16 @@ const handoffFacet = computed<Facet>(() => {
             </dd>
           </template>
           <dd
-            v-if="authorReadOnly"
+            v-if="!access.can('handoff.export')"
             class="flex items-center gap-1.5 text-xs text-muted"
             data-access-notice="export"
+            data-missing-key="handoff.export"
           >
             <UIcon
               name="i-lucide-user-lock"
               class="size-3.5"
             />
-            {{ t('handoff.requiresEditor') }}
+            {{ t('access.requiresKey', { key: 'handoff.export' }) }}
           </dd>
         </dl>
       </div>

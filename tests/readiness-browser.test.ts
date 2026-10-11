@@ -122,7 +122,7 @@ describe('Overview and readiness (R9)', () => {
 		finally { await context.close() }
 	}, 120_000)
 
-	it('gates capture and export by role: a Viewer can read readiness but not capture or export', async () => {
+	it('gates capture and export by key: a Viewer can read readiness but not capture or export, and the notices name the keys', async () => {
 		const token = await provisionToken(server.workspaceRoot, { nickname: 'r9viewer', kind: 'human', role: 'viewer' })
 		const cookie = await sessionCookieFor(server.origin, token)
 		const refused = await api('/api/evidence/capture', {
@@ -145,8 +145,8 @@ describe('Overview and readiness (R9)', () => {
 			expect(await page.locator('[data-capture-open]').count()).toBe(0)
 			expect(await page.locator('[data-capture-stale]').count()).toBe(0)
 			expect(await page.locator('[data-export-open]').count()).toBe(0)
-			expect(await page.locator('[data-access-notice="capture"]').innerText()).toContain('Editor')
-			expect(await page.locator('[data-access-notice="export"]').innerText()).toContain('Editor')
+			expect(await page.locator('[data-access-notice="capture"]').innerText()).toContain('evidence.capture')
+			expect(await page.locator('[data-access-notice="export"]').innerText()).toContain('handoff.export')
 		}
 		finally { await context.close() }
 	}, 90_000)

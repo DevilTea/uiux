@@ -7,7 +7,8 @@ import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 
 /**
  * "Locked by <nickname> · until HH:MM" on a resource an agent holds an edit lease on (accepted
- * identity decision 12). An Owner gets "Release lock" (force-release). The lease list is polled
+ * identity decision 12). A holder of `locks.force-release` gets "Release lock" (Rule
+ * 01a11485-f118-764c-ab2b-1b54b4270625). The lease list is polled
  * from `GET /api/locks` because no event stream exists yet.
  */
 const props = defineProps<{ kind: LockableKind; resourceKey?: string }>()
@@ -62,7 +63,7 @@ async function release(): Promise<void> {
       </UBadge>
     </UTooltip>
     <UButton
-      v-if="access.isOwner.value"
+      v-if="access.can('locks.force-release')"
       color="neutral"
       variant="outline"
       size="xs"

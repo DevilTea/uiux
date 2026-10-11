@@ -156,7 +156,6 @@
     },
     "none": "No Evidence yet",
     "summary": "{fresh} fresh · {stale} stale · {unknown} unknown",
-    "requiresEditor": "Capturing requires the Editor role.",
     "desktopOnly": "Capture on desktop.",
     "loadFailed": "Couldn't load Evidence.",
     "sectionLabel": "Evidence",
@@ -377,7 +376,6 @@
     "assessment": "Assessment",
     "diagnostic": "Diagnostic snapshot",
     "diagnosticNote": "You can still export a diagnostic snapshot. It won't claim readiness.",
-    "requiresEditor": "Exporting requires the Editor role.",
     "copied": "Copied.",
     "copyFailed": "Couldn't copy to the clipboard.",
     "roots": {
@@ -1334,12 +1332,11 @@
       "agent": "Agent"
     },
     "chip": {
-      "label": "Signed in as {nickname}, {role}",
+      "label": "Signed in as {nickname}, {kind}, {label}",
       "members": "Members",
       "signOut": "Sign out",
       "signedOut": "Signed out."
     },
-    "requiresRole": "Requires the {role} role.",
     "members": {
       "title": "Members",
       "subtitle": "Who can open this Workspace, and with which role.",
@@ -1435,7 +1432,11 @@
       "releaseFailed": "Couldn't release the lock.",
       "saveRefused": "{nickname} holds the edit lock until {time}",
       "saveRefusedBody": "Your changes are kept. Save again after the lock is released or expires."
-    }
+    },
+    "label": {
+      "custom": "Custom"
+    },
+    "requiresKey": "Requires the permission key {key}."
   },
   "comments": {
     "errors": {
@@ -1621,12 +1622,12 @@
     "migration": "Read-only until this Workspace is migrated. Run uiux migrate.",
     "unsupported": "Read-only: this Workspace's schema isn't supported by this version of UIUX.",
     "signed-out": "Sign in to comment.",
-    "role": "Read-only: commenting requires the Reviewer role. You're signed in as {role}.",
     "handset": "Not available on phones. Reply and triage here; add comments on a tablet or desktop.",
     "no-view": "Open a View to comment.",
     "connecting": "Connecting to the preview…",
     "reconnecting": "Reconnecting to the preview…",
-    "stopped": "The preview stopped. Retry from the session status."
+    "stopped": "The preview stopped. Retry from the session status.",
+    "key": "Read-only: commenting requires the permission key {key}."
   },
   "a11y": {
     "notification": "Notification",
@@ -1679,7 +1680,7 @@
       "invalid_credential": "This link or token is not valid for this Workspace.",
       "rate_limited": "Too many sign-in attempts. Wait a minute and try again.",
       "required": "Sign in to continue.",
-      "scope_denied": "Your role does not allow this.",
+      "scope_denied": "Your permission keys don’t allow this.",
       "time_ignored": "The server stamped its own time on this change."
     },
     "resource": {
@@ -2309,7 +2310,6 @@
       "created": "Checkpoint “{name}” created",
       "failed": "Couldn't create the Checkpoint.",
       "retryable": "Nothing was saved. Try again in a moment.",
-      "blockedRole": "Creating a Checkpoint requires the Reviewer role",
       "blockedMigration": "Not available until the Workspace is migrated"
     },
     "delete": {
@@ -2397,7 +2397,7 @@
         "invalid": "This version can't be restored",
         "not_found": "There is nothing to restore",
         "blocked": "The restore is blocked",
-        "denied": "Your role can't restore this resource",
+        "denied": "Your permission keys don’t allow restoring this resource",
         "failed": "Couldn't restore this version"
       }
     },

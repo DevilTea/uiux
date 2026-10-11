@@ -156,7 +156,6 @@
     },
     "none": "還沒有 Evidence",
     "summary": "{fresh} 項最新・{stale} 項過時・{unknown} 項未知",
-    "requiresEditor": "擷取需要 Editor 角色。",
     "desktopOnly": "請在桌面版擷取。",
     "loadFailed": "無法載入 Evidence。",
     "sectionLabel": "Evidence",
@@ -377,7 +376,6 @@
     "assessment": "評估結果",
     "diagnostic": "診斷用快照",
     "diagnosticNote": "仍可匯出診斷用快照，但不會標示為已就緒。",
-    "requiresEditor": "匯出需要 Editor 角色。",
     "copied": "已複製。",
     "copyFailed": "無法複製到剪貼簿。",
     "roots": {
@@ -1334,12 +1332,11 @@
       "agent": "Agent"
     },
     "chip": {
-      "label": "已以 {nickname}（{role}）登入",
+      "label": "已以 {nickname}（{kind}，{label}）登入",
       "members": "成員",
       "signOut": "登出",
       "signedOut": "已登出。"
     },
-    "requiresRole": "需要 {role} 角色。",
     "members": {
       "title": "成員",
       "subtitle": "誰能開啟這個 Workspace，以及各自的角色。",
@@ -1435,7 +1432,11 @@
       "releaseFailed": "無法解除鎖定。",
       "saveRefused": "{nickname} 持有編輯鎖，至 {time}",
       "saveRefusedBody": "你的變更已保留。鎖定解除或到期後再儲存一次。"
-    }
+    },
+    "label": {
+      "custom": "自訂"
+    },
+    "requiresKey": "需要權限鍵 {key}。"
   },
   "comments": {
     "errors": {
@@ -1621,12 +1622,12 @@
     "migration": "此 Workspace 遷移前為唯讀。請執行 uiux migrate。",
     "unsupported": "唯讀：此版本的 UIUX 不支援這個 Workspace 的 Schema。",
     "signed-out": "登入後即可留言。",
-    "role": "唯讀：留言需要 Reviewer 角色。你目前的角色是 {role}。",
     "handset": "手機無法新增留言。可在此回覆與分類；請在平板或桌面新增留言。",
     "no-view": "開啟 View 後即可留言。",
     "connecting": "正在連線預覽…",
     "reconnecting": "正在重新連線預覽…",
-    "stopped": "預覽已停止，請從工作階段狀態重試。"
+    "stopped": "預覽已停止，請從工作階段狀態重試。",
+    "key": "唯讀：留言需要權限鍵 {key}。"
   },
   "a11y": {
     "notification": "通知",
@@ -1679,7 +1680,7 @@
       "invalid_credential": "此連結或 Token 對這個 Workspace 無效。",
       "rate_limited": "登入嘗試次數過多，請稍候一分鐘再試。",
       "required": "請登入以繼續。",
-      "scope_denied": "你的角色無法執行此操作。",
+      "scope_denied": "你的權限鍵無法執行此操作。",
       "time_ignored": "伺服器已使用自己的時間記錄這次變更。"
     },
     "resource": {
@@ -2309,7 +2310,6 @@
       "created": "已建立 Checkpoint「{name}」",
       "failed": "無法建立 Checkpoint。",
       "retryable": "沒有儲存任何內容，請稍後再試一次。",
-      "blockedRole": "建立 Checkpoint 需要 Reviewer 角色",
       "blockedMigration": "Workspace 遷移完成前無法使用"
     },
     "delete": {
@@ -2397,7 +2397,7 @@
         "invalid": "無法還原這個版本",
         "not_found": "沒有可還原的內容",
         "blocked": "還原已被阻擋",
-        "denied": "你的角色無法還原這項資源",
+        "denied": "你的權限鍵無法還原此資源",
         "failed": "無法還原這個版本"
       }
     },

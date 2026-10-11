@@ -57,11 +57,13 @@ export function memberLabelName(label: MemberLabel): string {
 }
 
 /**
- * A role for the surfaces that still speak roles until they move to keys and labels (issue #142:
- * the session wire, the Members page and the MCP instructions): the highest built-in preset whose
- * keys, without `humanOnly` keys for an Agent, the member's granted keys all include, and
- * `viewer` when none does. The built-in presets are nested, so a member labeled with a built-in
- * preset gets that preset's `id`. It authorizes nothing: the server checks keys.
+ * A role for the one surface that still speaks roles until it moves to keys and labels (issue
+ * #142): the Members page's role select, through the administration wire's `role` on a member
+ * and on the roster summary. `uiux member list` shows the label and keys instead. It is the
+ * highest built-in preset whose keys, without `humanOnly` keys for an Agent, the member's granted
+ * keys all include, and `viewer` when none does. The built-in presets are nested, so a member
+ * labeled with a built-in preset gets that preset's `id`. It authorizes nothing: the server
+ * checks keys.
  */
 export function compatibilityRole(member: LabeledMember): AccessRole {
 	const held = new Set<string>(grantedKeys(member.kind, member.keys))

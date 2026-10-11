@@ -1,7 +1,8 @@
 import { getRouterParam, readBody, setResponseHeader, setResponseStatus, type H3Event } from 'h3'
 import { z } from 'zod'
 
-import { compatibilityRole } from '../../application/access/labels'
+import { compatibilityRole, memberLabel } from '../../application/access/labels'
+import { effectiveKeys } from '../../application/access/policy'
 import { ACCESS_ROLES, MEMBER_KINDS } from '../../application/access/principal'
 import { getSelectedWorkspaceServerRuntime } from '../selected-workspace'
 import { requestOrigin, servesRosterAdministration } from '../loopback-guard'
@@ -9,6 +10,7 @@ import { requestSession } from '../request-session'
 import { accessErrorResponse, clearedCookie, denyUnlessAllowed, requestPrincipal, secureCookieFor, sessionCookie } from './http'
 import { parseHttpPayload } from '../authoring-http'
 import type { StoredMember } from './roster'
+import { memberKeys } from './service'
 
 /**
  * HTTP surface for sessions, edit leases and Owner administration (accepted identity decisions
@@ -59,11 +61,23 @@ function respond(event: H3Event, status: number, body: unknown) {
 const access = () => getSelectedWorkspaceServerRuntime().access()
 
 /**
- * A stored member on the administration wire, with the role the Members page still shows,
- * derived from its keys (`compatibilityRole`) until the page edits keys (issue #142).
+ * A stored member on the administration wire, with its label (Clause
+ * 01a11c09-a49b-78c7-9304-7b8239f8a8cf, computed now and never stored) and the role the Members
+ * page's role select still shows, derived from its keys (`compatibilityRole`) until the page edits
+ * keys (issue #142). The role authorizes nothing.
  */
 function memberBody(member: StoredMember) {
-	return { ...member, role: compatibilityRole(member) }
+	return { ...member, label: memberLabel(member), role: compatibilityRole(member) }
+}
+
+/**
+ * The member on the session wire (Clause 01a11485-faa9-74fe-8e0a-068cd770ff1c):
+ * `{ id, nickname, kind, keys, label }`. `keys` are the keys that take effect on this cookie
+ * session (`effectiveKeys`): catalog keys only, never a `humanOnly` key for an Agent, so the
+ * Workbench offers exactly what the server allows. The label comes from the stored keys.
+ */
+function sessionMemberBody(member: StoredMember, keys: readonly string[]) {
+	return { id: member.id, nickname: member.nickname, kind: member.kind, keys, label: memberLabel(member) }
 }
 
 export async function loginForHttp(event: H3Event) {
@@ -80,8 +94,8 @@ export async function loginForHttp(event: H3Event) {
 		return respond(event, outcome.status, { status: 'rejected', code: outcome.code, message: outcome.message, diagnostics: [{ code: outcome.code, path: '/credential', message: outcome.message }] })
 	}
 	setResponseHeader(event, 'Set-Cookie', sessionCookie(outcome.cookieName, outcome.cookieValue, outcome.maxAgeSeconds, secureCookieFor(event)))
-	const { id, nickname, kind } = outcome.member
-	return respond(event, 200, { member: { id, nickname, kind, role: compatibilityRole(outcome.member) } })
+	// A fresh cookie session: every granted key takes effect (`memberKeys` already drops `humanOnly` keys for an Agent).
+	return respond(event, 200, { member: sessionMemberBody(outcome.member, memberKeys(outcome.member)) })
 }
 
 export async function readSessionForHttp(event: H3Event) {
@@ -91,7 +105,7 @@ export async function readSessionForHttp(event: H3Event) {
 	if (principal.type !== 'member') return respond(event, 403, { status: 'blocked', code: 'auth.scope_denied', message: 'Not a member session.' })
 	const service = await access()
 	return respond(event, 200, {
-		member: { id: principal.memberId, nickname: principal.nickname, kind: principal.kind, role: principal.role },
+		member: { id: principal.memberId, nickname: principal.nickname, kind: principal.kind, keys: effectiveKeys(principal), label: principal.label },
 		credential: principal.credential,
 		workspaceRoot: service.workspaceRoot,
 		hint: service.hint,
@@ -151,7 +165,17 @@ async function admin<T>(event: H3Event, run: (service: Awaited<ReturnType<typeof
 	}
 }
 
-export const listMembersForHttp = (event: H3Event) => admin(event, service => service.roster())
+/** The roster's members, each with its stored keys and its label (Scenario 01a11c09-d61f). */
+export const listMembersForHttp = (event: H3Event) => admin(event, (service) => {
+	const roster = service.roster()
+	return {
+		...roster,
+		members: roster.members.map((summary) => {
+			const stored = service.member(summary.id)
+			return stored ? { ...summary, keys: stored.keys, label: memberLabel(stored) } : summary
+		}),
+	}
+})
 
 export async function addMemberForHttp(event: H3Event) {
 	const refused = refuseAdminOrigin(event)

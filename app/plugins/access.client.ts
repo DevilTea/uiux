@@ -12,6 +12,8 @@ import { isRetryableRead, shouldRetryRead, transientRetryDelay } from '../utils/
  *   `401 auth.required` or `auth.invalid_credential`; the Workbench returns to `/login`, keeping
  *   the page to come back to. The session probe itself (`GET /api/session`) and the sign-in
  *   request own their 401: for them it is the expected signed-out answer, handled by their callers.
+ * - A request refused with `403` re-reads the session (`useAccess().reload()`), so changed keys
+ *   apply to what the Workbench offers until the `/api/events` stream exists (issue #69).
  * - A request that gets no response at all reports the server unreachable (brief h); any response
  *   reports it reachable again.
  * - A read answered `503` (`persistence.busy`: the Workspace was momentarily busy and nothing was
@@ -67,6 +69,9 @@ export default defineNuxtPlugin({
 			if (api) {
 				connectivity.markReachable()
 				if (response.status === 401) sessionEnded(path)
+				// A refusal may mean the member's keys changed since the session was read: re-read it,
+				// so the Workbench stops offering what the server now refuses (Rule 01a116f0-963f).
+				else if (response.status === 403 && !path.startsWith('/api/session')) void useAccess().reload()
 			}
 			return response
 		}

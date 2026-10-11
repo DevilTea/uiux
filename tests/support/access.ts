@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 
 import { keysForRole } from '../../src/application/access/keys'
+import { memberLabel } from '../../src/application/access/labels'
 import { createLeaseManager, type LeaseManager } from '../../src/application/access/leases'
 import type { AccessRole, MemberKind, MemberPrincipal } from '../../src/application/access/principal'
 import { createScopedWorkspaceSession, type AccessTransport, type ScopedSessionOptions, type ScopedWorkspaceSession } from '../../src/application/access/scoped-session'
@@ -15,18 +16,20 @@ import { AccessStore } from '../../src/server/access/store'
  * Tests inject a principal (accepted identity migration plan): in-process HTTP helpers get a
  * scoped session and the MCP handler gets `authInfo`, exactly as the live routes pass them.
  * `role` is sugar: unless `keys` is given, the member holds the keys the live server derives from
- * that role (the built-in preset of that `id`, with no `humanOnly` key for an Agent).
+ * that role (the built-in preset of that `id`, with no `humanOnly` key for an Agent). The label is
+ * computed from those keys unless given.
  */
-export function testMember(overrides: Partial<Omit<MemberPrincipal, 'type'>> = {}): MemberPrincipal {
+export function testMember(overrides: Partial<Omit<MemberPrincipal, 'type'>> & Readonly<{ role?: AccessRole }> = {}): MemberPrincipal {
 	const kind: MemberKind = overrides.kind ?? 'human'
 	const role = overrides.role ?? (kind === 'agent' ? 'editor' : 'owner')
+	const keys = overrides.keys ?? keysForRole(kind, role)
 	return {
 		type: 'member',
 		memberId: overrides.memberId ?? randomUUID(),
 		nickname: overrides.nickname ?? (kind === 'agent' ? 'claude' : 'owner'),
 		kind,
-		role,
-		keys: overrides.keys ?? keysForRole(kind, role),
+		keys,
+		label: overrides.label ?? memberLabel({ kind, keys }),
 		credential: overrides.credential ?? (kind === 'agent' ? 'token' : 'session'),
 		credentialId: overrides.credentialId ?? 'aaaaaaaaaa',
 	}
@@ -69,16 +72,18 @@ export async function connectMcp(
 
 /**
  * Provisions a member and a bearer token in a Workspace's host-local roster under the test
- * `UIUX_HOME`, before (or while) a server for that Workspace runs.
+ * `UIUX_HOME`, before (or while) a server for that Workspace runs. `keys` gives the member exactly
+ * that key set; otherwise `role` stands for its built-in preset's keys.
  */
 export async function provisionToken(
 	workspaceRoot: string,
-	member: Readonly<{ nickname?: string; kind?: MemberKind; role?: AccessRole }> = {},
+	member: Readonly<{ nickname?: string; kind?: MemberKind; role?: AccessRole; keys?: readonly string[] }> = {},
 ): Promise<string> {
 	const store = (await AccessStore.open({ workspaceRoot, create: true }))!
 	const nickname = member.nickname ?? (member.kind === 'agent' ? 'claude' : 'tester')
+	const access = member.keys ? { keys: [...member.keys] } : { role: member.role ?? (member.kind === 'agent' ? 'editor' : 'owner') }
 	if (!findMemberByNickname(store.data, nickname))
-		await store.update(file => addMember(file, { nickname, role: member.role ?? (member.kind === 'agent' ? 'editor' : 'owner'), kind: member.kind ?? 'human' }))
+		await store.update(file => addMember(file, { nickname, ...access, kind: member.kind ?? 'human' }))
 	const issued = await store.update(file => createToken(file, { nickname, label: 'test' }))
 	return issued.credential
 }
