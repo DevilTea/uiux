@@ -469,6 +469,21 @@ describe('the uiux://product-kit Resource (Clause 01a11bb1-b0f1)', () => {
 	})
 })
 
+describe('widgets.import names a declared dependency (#139 owner ruling 2026-10-11, 2)', () => {
+	it('refuses an import of a package kit/package.json does not declare, and accepts a declared one with a subpath', async () => {
+		const ctx = await v5Fixture()
+		const bytes = await readFile(ctx.kitPath, 'utf8')
+		const session = http(ctx.app, HUMAN_EDITOR)
+		for (const specifier of ['@evil/widgets', 'left-pad/x']) {
+			const refused = await updateComponentRegistryForHttp(session, { expectedRevision: await revision(ctx.app), components: {}, widgets: { DatePicker: { import: specifier, export: 'DatePicker' } } })
+			expect(refused, specifier).toMatchObject({ status: 400, body: { status: 'invalid', diagnostics: [expect.objectContaining({ code: 'product_kit.package_undeclared', path: '/widgets/DatePicker/import' })] } })
+		}
+		expect(await readFile(ctx.kitPath, 'utf8')).toBe(bytes)
+		const accepted = await updateComponentRegistryForHttp(session, { expectedRevision: await revision(ctx.app), components: {}, widgets: { DatePicker: { import: '@acme/design-system/date', export: 'DatePicker' } } })
+		expect(accepted, JSON.stringify(accepted.body)).toMatchObject({ status: 200 })
+	})
+})
+
 describe('the service guard of the Product Kit operations', () => {
 	it('returns the guard\'s refusal on the file the write replaces, storing nothing, and stores when the guard passes', async () => {
 		const ctx = await v5Fixture()

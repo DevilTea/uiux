@@ -15,8 +15,9 @@ import { realDirectoryIdentity } from './resolution'
  *
  * - Adapter and `styles` specifiers follow the kit project's specifier rules, as written
  *   (Clauses 01a115cd-d109-76d3-9622-85d0080c60b6 and 01a11bb1-8787-786a-a87e-49672393abd1).
- * - `designSystems` and each component's `packages` are dependencies `kit/package.json` declares
- *   (Rule 01a11bb1-a120-70a9-a875-3842da36c587, Clause 01a11bb1-8a44-793a-8306-21fea501acad).
+ * - `designSystems`, each component's `packages` and each `widgets` entry's `import` are
+ *   dependencies `kit/package.json` declares (Rule 01a11bb1-a120-70a9-a875-3842da36c587, Clauses
+ *   01a11bb1-8a44-793a-8306-21fea501acad and 01a11bb1-8aa9-7815-bfc4-1e3a997a6d25).
  * - Registry validation (Rule 01a11bb1-a2ac-754e-97c8-4f118218a051): every file a component
  *   declares is a regular file under `kit/src/`, by its real path, and none is a wrapper entry,
  *   until the kit build (K7) the module of a `./` Adapter (Clause 01a11bb1-89e2-75f8-8131-97b0a07d540a).
@@ -156,6 +157,19 @@ export async function checkProductKitAgainstKit(input: KitCheckInput): Promise<K
 				if (!kitDependencies.has(name))
 					refusals.push({ code: 'product_kit.package_undeclared', path: jsonPointer('/designSystems', index), message: `${name} is not a dependency that ${codeDirectoryName}/package.json declares; a Design System package enters the Product Kit only as a declared dependency.` })
 			})
+		}
+	}
+	// #139 owner ruling 2026-10-11, 2 (https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18864076):
+	// a `widgets` entry's `import` names a declared dependency, as a component's `packages` do.
+	if (changed('widgets')) {
+		const imports = Object.entries(next.widgets).flatMap(([type, mapping]) => 'import' in mapping ? [[type, mapping.import] as const] : [])
+		const kitDependencies = imports.length > 0 ? await declared() : undefined
+		if (kitDependencies) {
+			for (const [type, specifier] of imports) {
+				const packageName = bareSpecifierPackageName(specifier)
+				if (packageName === undefined || !kitDependencies.has(packageName))
+					refusals.push({ code: 'product_kit.package_undeclared', path: `${jsonPointer('/widgets', type)}/import`, message: `Widget type ${type} imports ${specifier}, which names no dependency that ${codeDirectoryName}/package.json declares.` })
+			}
 		}
 	}
 	if (changed('components') || changed('adapters')) {
