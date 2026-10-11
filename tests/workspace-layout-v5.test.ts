@@ -354,19 +354,21 @@ describe('persistence on a schemaVersion 5 root', () => {
 		await expect(parent.withLock(() => parent.readRecordSchemaVersionUnlocked())).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
 	})
 
-	it('refuses, before writing anything, a migration that would move an old-layout Workspace to the v5 layout', async () => {
+	it('refuses, before writing anything, a relocation into a metadata directory that already holds a data directory', async () => {
 		const root = await makeRoot()
 		const manifest = await writeManifest(root, currentManifest())
+		await mkdir(join(root, '.uiux', 'views'))
 		const before = await readFile(manifest)
 		const persistence = new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY })
 		expect(persistence.layout).toBe(LEGACY_LAYOUT)
 		expect((await persistence.workspace.readInspected()).inspection).toMatchObject({ state: 'migration_required', version: 4, targetVersion: 5 })
 		let beforeSteps = false
-		await expect(persistence.migrateWorkspace({ async beforeSteps() { beforeSteps = true } })).rejects.toMatchObject({ code: 'workspace.migration_failed' })
+		await expect(persistence.migrateWorkspace({ async beforeSteps() { beforeSteps = true } })).rejects.toMatchObject({ code: 'workspace.migration_failed', message: expect.stringContaining('.uiux/views') })
 		await expect(persistence.planWorkspaceMigration()).rejects.toMatchObject({ code: 'workspace.migration_failed' })
 		expect(beforeSteps).toBe(false)
 		expect(await readFile(manifest)).toEqual(before)
 		expect(await readdir(root)).toEqual(['.uiux'])
+		expect((await readdir(join(root, '.uiux'))).sort()).toEqual(['views', 'workspace.json'])
 	})
 })
 

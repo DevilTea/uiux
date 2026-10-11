@@ -3,13 +3,14 @@ import { resolve } from 'node:path'
 
 import { createMigrationHistoryRecorder, type MigrationCheckpointReport } from '../application/services/history-recorder'
 import { migrationCheckpointName } from '../domain/history/constants'
-import { FileNativePersistence, type PersistenceFaultHook } from '../persistence/file-native'
+import { FileNativePersistence, type PersistenceFaultHook, type WorkspaceRelocation } from '../persistence/file-native'
 import { CheckpointHostBlobsError } from '../persistence/history/snapshot-checkpoint'
 import { PersistenceError } from '../persistence/errors'
+import { layoutForSchemaVersion } from '../persistence/paths'
 import type { WorkspaceSchemaPolicy } from '../persistence/schema-policy'
-import { readActiveServerHold } from '../persistence/server-hold'
+import { readActiveServerHold, type ServerHold } from '../persistence/server-hold'
 import { checkWorkspaceSelection } from '../persistence/workspace-selection'
-import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY, WORKSPACE_GITIGNORE_RULES } from '../product/workspace-schema'
 import { resolveUiuxHome } from '../server/access/store'
 import { createHistoryStoreFactory } from '../server/history-stores'
 
@@ -24,6 +25,14 @@ export type MigrateCommandOptions = Readonly<{
 	schemaPolicy?: WorkspaceSchemaPolicy
 	fault?: PersistenceFaultHook
 }>
+
+/** A UIUX server started serving the Workspace after the first check; no step ran. */
+class ServedWorkspaceError extends Error {
+	constructor(readonly hold: ServerHold) {
+		super(`a UIUX server (pid ${hold.pid} on ${hold.hostname}) is serving this Workspace`)
+		this.name = 'ServedWorkspaceError'
+	}
+}
 
 /** The pre-migration history could not be recorded; no step ran. */
 class PreMigrationHistoryError extends Error {
@@ -48,6 +57,12 @@ class PreMigrationHistoryError extends Error {
  * migration committed it records the migration as a system version on the host. A failed migration
  * leaves the Checkpoint in place. A dry run, and a Workspace already at the current version, write
  * nothing, history included.
+ *
+ * A run that includes `uiux.v4-to-v5` moves the Workspace root into the selected directory's
+ * `.uiux/`. Its refusals are checked before anything, the Checkpoint included, is written (Rule
+ * 01a11bb1-9658-7f9e-972e-bd09136a5735, Clause 01a12626-e5c9-7753-8019-cdf82a5410ce); its host
+ * versions stay in the selected (old) root's host history (Rule 01a12626-5a0c-7c1a-942f-666101981e29),
+ * and it prints the new root, the `uiux access copy` command and the suggested `.gitignore` rules.
  *
  * Returns the process exit code: 0 on success (including "already current"), 1 when the
  * migration is refused or fails, 2 for an unusable Workspace root.
@@ -98,6 +113,9 @@ export async function runMigrateCommand(options: MigrateCommandOptions): Promise
 			const history = createMigrationHistoryRecorder({ persistence, stores: () => stores.open(), log: err })
 			result = await persistence.migrateWorkspace({
 				async beforeSteps({ toVersion }) {
+					// Under the migration's lock: a server that started since the check above is refused too.
+					const late = await readActiveServerHold(root, persistence.layout)
+					if (late) throw new ServedWorkspaceError(late)
 					try {
 						checkpoint = await history.beforeMigrationUnlocked(toVersion)
 					}
@@ -105,10 +123,15 @@ export async function runMigrateCommand(options: MigrateCommandOptions): Promise
 						throw new PreMigrationHistoryError(error)
 					}
 				},
-				async afterCommit() {
+				async afterCommit(committed) {
 					// The migration is committed: a failure here is reported, never turned into a failed migration.
 					try {
-						systemVersion = await history.afterMigrationUnlocked()
+						// After `uiux.v4-to-v5` the version is taken in the new root, with its layout, and still
+						// recorded in the old root's host history (Rule 01a12626-5a0c-7c1a-942f-666101981e29).
+						const migrated = committed.relocation
+							? new FileNativePersistence({ root: committed.relocation.root, schemaPolicy, layout: layoutForSchemaVersion(committed.version) })
+							: undefined
+						systemVersion = await history.afterMigrationUnlocked(migrated)
 					}
 					catch (error) {
 						systemVersionError = error
@@ -123,9 +146,14 @@ export async function runMigrateCommand(options: MigrateCommandOptions): Promise
 		out(options.dryRun ? `Migration plan for UIUX Workspace ${root} (dry run, nothing written)` : `Migrated UIUX Workspace ${root}`)
 		out(`  schemaVersion: ${result.fromVersion} -> ${result.version}`)
 		out(`  steps: ${result.steps.join(', ')}`)
+		if (result.relocation) {
+			out(`  moved (${result.relocation.moved.length}):`)
+			for (const directory of result.relocation.moved) out(`    ${directory}/ -> ${result.relocation.metadataDir}/${directory}/`)
+		}
 		out(`  changedFiles (${result.changedFiles.length}):`)
 		for (const file of result.changedFiles) out(`    ${file}`)
 		if (options.dryRun) {
+			if (result.relocation) out(`  new Workspace root (after a real run): ${result.relocation.root}`)
 			if (hold) out(`  note: a UIUX server (pid ${hold.pid}) is serving this Workspace; stop it before the real run.`)
 		}
 		else {
@@ -134,10 +162,15 @@ export async function runMigrateCommand(options: MigrateCommandOptions): Promise
 			if (systemVersion) out(`  system version: ${systemVersion}`)
 			if (systemVersionError !== undefined)
 				err(`uiux: warning: the migration is complete, but its system version could not be recorded (${message(systemVersionError)}); the next server start records its changes as changes outside UIUX.`)
+			if (result.relocation) printRelocation(out, root, result.relocation)
 		}
 		return 0
 	}
 	catch (error) {
+		if (error instanceof ServedWorkspaceError) {
+			err(`uiux: refusing to migrate ${root}: ${error.message} (started ${error.hold.startedAt}). Stop that server, then run uiux migrate again.`)
+			return 1
+		}
 		if (error instanceof PreMigrationHistoryError) {
 			err(`uiux: refusing to migrate ${root}: the pre-migration history could not be recorded, so no step ran: ${error.message}`)
 			if (error.checkpointId) err(`  The pre-migration Checkpoint ${error.checkpointId} was written and stays in the Workspace.`)
@@ -159,6 +192,24 @@ function printHistory(out: (line: string) => void, report: MigrationCheckpointRe
 	if (report.boundary.autosave) out(`  history: closed the leftover autosave ${report.boundary.autosave}`)
 	if (report.boundary.external) out(`  history: recorded changes outside UIUX as ${report.boundary.external}`)
 	out(`  pre-migration Checkpoint: ${report.checkpoint} (${migrationCheckpointName(version)})`)
+}
+
+/**
+ * After `uiux.v4-to-v5`: the new Workspace root, the `uiux access copy` command that carries the
+ * roster and the host history over to it (Clause 01a1144e-5605-722c-a662-2b483ddaad73), and the
+ * suggested `.gitignore` rules, which migrate never writes (Clause 01a12626-e8fe-7354-aa20-31dd8491f841).
+ */
+function printRelocation(out: (line: string) => void, oldRoot: string, relocation: WorkspaceRelocation): void {
+	out(`  new Workspace root: ${relocation.root}`)
+	out('  Next, before the first uiux dev there, carry the roster and the host history over:')
+	out(`    uiux access copy --from ${shellQuote(oldRoot)} --workspace ${shellQuote(relocation.root)}`)
+	out(`  Suggested .gitignore rules for ${relocation.root} (uiux migrate writes no .gitignore):`)
+	for (const rule of WORKSPACE_GITIGNORE_RULES) out(`    ${rule}`)
+}
+
+/** A path as one POSIX shell word: unchanged when it holds only safe characters, single-quoted otherwise. */
+function shellQuote(path: string): string {
+	return /^[\w@%+=:,./-]+$/u.test(path) ? path : `'${path.replaceAll('\'', '\'\\\'\'')}'`
 }
 
 function message(error: unknown): string {

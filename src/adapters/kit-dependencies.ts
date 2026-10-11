@@ -48,19 +48,38 @@ export function bareSpecifierPackageName(specifier: string): string | undefined 
  */
 export async function readDeclaredKitDependencies(codeDirectory: string): Promise<ReadonlySet<string>> {
 	const path = join(codeDirectory, KIT_PACKAGE_FILENAME)
+	let info: Awaited<ReturnType<typeof lstat>>
 	try {
-		const info = await lstat(path)
-		if (!info.isFile())
-			throw new Error(`kit/${KIT_PACKAGE_FILENAME} is not a regular file.`)
+		info = await lstat(path)
 	}
 	catch (error) {
 		const code = (error as NodeJS.ErrnoException | undefined)?.code
 		if (code === 'ENOENT' || code === 'ENOTDIR') return new Set()
-		throw error
+		throw unreadable(error)
 	}
+	if (!info.isFile())
+		throw new Error(`kit/${KIT_PACKAGE_FILENAME} is not a regular file.`)
+	let text: string
+	try {
+		text = await readFile(path, 'utf8')
+	}
+	catch (error) {
+		throw unreadable(error)
+	}
+	return declaredKitDependencies(text)
+}
+
+/**
+ * The dependency names a kit `package.json` with the text `text` declares in any of
+ * {@link KIT_DEPENDENCY_MEMBERS}; `undefined` (no file) declares none. Text that is not a JSON
+ * object, or a member that is not an object, throws, so a caller fails closed. Reading the file is
+ * the caller's: it must refuse a symbolic link, as {@link readDeclaredKitDependencies} does.
+ */
+export function declaredKitDependencies(text: string | undefined): ReadonlySet<string> {
+	if (text === undefined) return new Set()
 	let parsed: unknown
 	try {
-		parsed = JSON.parse(await readFile(path, 'utf8'))
+		parsed = JSON.parse(text)
 	}
 	catch (error) {
 		throw new Error(`kit/${KIT_PACKAGE_FILENAME} could not be read as JSON.`, { cause: error })
@@ -76,6 +95,14 @@ export async function readDeclaredKitDependencies(codeDirectory: string): Promis
 		for (const name of Object.keys(value)) declared.add(name)
 	}
 	return declared
+}
+
+/**
+ * A read failure (EACCES, EISDIR, EIO, ...) as a message without the host's absolute path, which
+ * would otherwise reach Workbench and MCP diagnostics; the original error stays as the cause.
+ */
+function unreadable(cause: unknown): Error {
+	return new Error(`kit/${KIT_PACKAGE_FILENAME} could not be read.`, { cause })
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
