@@ -24,6 +24,7 @@ import {
 } from '../src/product/workspace-schema'
 import { verifyCredential } from '../src/server/access/roster'
 import { AccessStore, hostHistoryPaths } from '../src/server/access/store'
+import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 import { V5_TEST_SCHEMA_POLICY } from './support/workspace-layout'
 
 /**
@@ -201,7 +202,7 @@ describe('uiux.v4-to-v5 on the logical snapshot', () => {
 	})
 })
 
-describe('uiux migrate relocates an old-layout Workspace in place', () => {
+describe('uiux migrate relocates an old-layout Workspace in place', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('moves the data directories into .uiux/, keeps the manifest, artifact and kit paths, and leaves everything else alone', async () => {
 		const root = await seedOldLayout()
 		const before = await tree(root)
@@ -311,7 +312,7 @@ describe('uiux migrate relocates an old-layout Workspace in place', () => {
 	})
 })
 
-describe('uiux.v4-to-v5 refusals, before anything is written', () => {
+describe('uiux.v4-to-v5 refusals, before anything is written', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('lists every ./ Adapter outside .uiux/kit/ with its exact replacement, in a dry run and a real run, and writes nothing, not even the Checkpoint', async () => {
 		const root = await seedOldLayout({ adapters: [
 			{ moduleSpecifier: './adapters/reference.ts' },
@@ -384,7 +385,7 @@ describe('uiux.v4-to-v5 refusals, before anything is written', () => {
 	})
 })
 
-describe('uiux.v4-to-v5 refuses Adapters the kit project does not declare (owner ruling 2 of #139 c18858856)', () => {
+describe('uiux.v4-to-v5 refuses Adapters the kit project does not declare (owner ruling 2 of #139 c18858856)', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	async function refusal(seed: Seed): Promise<Readonly<{ root: string; errors: string; before: Record<string, string>; home: string }>> {
 		const root = await seedOldLayout(seed)
 		const home = join(await makeDirectory('uiux-relocation-home-'), 'home')
@@ -473,7 +474,7 @@ const FAULT_POINTS: readonly (readonly [PersistenceFaultPoint, string])[] = [
 	['migration.before_apply', 'workspace.json'],
 ]
 
-describe('relocation crash safety', () => {
+describe('relocation crash safety', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it.each(FAULT_POINTS)('rolls a failure at %s %s back in place, and a second run then succeeds', async (point, path) => {
 		const root = await seedOldLayout()
 		const before = await canonicalTree(root)
@@ -644,7 +645,7 @@ describe('relocation crash safety', () => {
 
 })
 
-describe('history across the relocation', () => {
+describe('history across the relocation', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('records the Checkpoint and the system version under the old root, the version read in the new layout', async () => {
 		const root = await seedOldLayout()
 		const home = join(await makeDirectory('uiux-relocation-home-'), 'home')
@@ -704,7 +705,7 @@ describe('history across the relocation', () => {
 	})
 })
 
-describe('the relocated-source exception to the entry check of access copy --from', () => {
+describe('the relocated-source exception to the entry check of access copy --from', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	async function relocated(): Promise<Readonly<{ root: string; newRoot: string }>> {
 		const root = await seedOldLayout()
 		await new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY }).migrateWorkspace()
@@ -745,12 +746,10 @@ describe('the relocated-source exception to the entry check of access copy --fro
 		expect(isRelocatedSourceOf(parent, newRoot, V5_TEST_SCHEMA_POLICY)).toBe(false)
 	})
 
-	it('fails while an old-layout data directory is left in the source', async () => {
-		for (const directory of ['views', 'flows', 'reviews', 'i18n', 'assets']) {
-			const { root, newRoot } = await relocated()
-			await mkdir(join(root, directory))
-			expect(isRelocatedSourceOf(root, newRoot, V5_TEST_SCHEMA_POLICY), directory).toBe(false)
-		}
+	it.each(['views', 'flows', 'reviews', 'i18n', 'assets'])('fails while the old-layout data directory %s is left in the source', async directory => {
+		const { root, newRoot } = await relocated()
+		await mkdir(join(root, directory))
+		expect(isRelocatedSourceOf(root, newRoot, V5_TEST_SCHEMA_POLICY)).toBe(false)
 	})
 
 	it('makes access copy refuse the source when the exception does not hold', async () => {
