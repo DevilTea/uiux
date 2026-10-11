@@ -139,8 +139,16 @@ export const BUILT_IN_ACCESS_PRESETS: readonly BuiltInAccessPreset[] = Object.fr
  * 01a11c09-b698-7ee3-861b-f02eaba61269), so an Agent's mapped set omits them.
  */
 export function keysForRole(kind: MemberKind, role: AccessRole): readonly PermissionKey[] {
-	const preset = BUILT_IN_ACCESS_PRESETS.find(item => item.id === role)!
-	return kind === 'agent' ? preset.keys.filter(key => !isHumanOnlyKey(key)) : preset.keys
+	return keysOfPreset(kind, BUILT_IN_ACCESS_PRESETS.find(item => item.id === role)!.keys)
+}
+
+/**
+ * The keys that applying a preset copies to a member: the preset's keys as they are at that
+ * moment (Rule 01a11c09-b8c6-741e-b3b7-97f4840985c5), without its `humanOnly` keys for an Agent
+ * (Rule 01a11c74-26ef-7894-9b2c-2714f487aeb8). The member keeps no reference to the preset.
+ */
+export function keysOfPreset<Key extends string>(kind: MemberKind, presetKeys: readonly Key[]): Key[] {
+	return kind === 'agent' ? presetKeys.filter(key => !isHumanOnlyKey(key)) : [...presetKeys]
 }
 
 /**

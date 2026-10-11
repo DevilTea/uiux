@@ -18,7 +18,7 @@ const feedback = useWorkbenchFeedback()
 
 const endpoint = computed(() => typeof window === 'undefined' ? '/mcp' : `${window.location.origin}/mcp`)
 const workspaceDir = computed(() => access.session.value?.workspaceRoot ?? '<dir>')
-const memberCommand = computed(() => `uiux member add <agent> --workspace ${workspaceDir.value} --kind agent --role editor`)
+const memberCommand = computed(() => `uiux member add <agent> --workspace ${workspaceDir.value} --kind agent --preset Editor`)
 const tokenCommand = computed(() => `uiux token create --workspace ${workspaceDir.value} --member <agent>`)
 
 async function copy(text: string): Promise<void> {

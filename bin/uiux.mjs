@@ -44,8 +44,13 @@ Commands:
                            files without writing anything
 
 Access (each takes --workspace <dir>; rosters live in $UIUX_HOME, default ~/.uiux):
-  member add <nick> --role <owner|editor|reviewer|viewer> [--kind human|agent]
-  member list | member set <nick> [--role <role>] [--nickname <new>] | member remove <nick>
+  member add <nick> (--preset <name> | --keys <k,...> | --all-keys) [--kind human|agent]
+  member set <nick> [--preset <name>] [--grant <k,...>] [--revoke <k,...>] [--nickname <new>]
+  member list [--keys] | member remove <nick>
+                           --preset copies an Access preset's keys (Viewer, Reviewer,
+                           Editor or Owner); an Agent never gets humanOnly keys such
+                           as members.manage. Keys are comma-separated, such as
+                           views.write,flows.write
   token create --member <nick> [--label <text>] [--expires <days>|never]
   token list [--member <nick>] [--all] | token revoke <token-id>
   invite create --member <nick> [--origin <url>] [--expires <hours>]
