@@ -647,6 +647,9 @@ describe('Adapter resolution from kit/ in a schemaVersion 5 Workspace (Clause 01
 		await putPackage(join(modules, 'legacy-main'), { name: 'legacy-main', main: './index.mjs' })
 		await putPackage(join(modules, 'undeclared'), { name: 'undeclared' })
 		await putPackage(join(modules, 'legacy-main-evil'), { name: 'legacy-main-evil' })
+		// An undeclared package installed inside a declared one.
+		await putPackage(join(modules, 'legacy-main', 'node_modules', 'undeclared'), { name: 'undeclared' })
+		await put(join(modules, 'legacy-main', 'node_modules', 'undeclared', 'x.js'))
 
 		// Without kit/package.json no package is declared.
 		await expect(resolver().resolve(root, '@fixture/declared')).rejects.toThrow(/does not declare/i)
@@ -673,6 +676,8 @@ describe('Adapter resolution from kit/ in a schemaVersion 5 Workspace (Clause 01
 		for (const specifier of [
 			'legacy-main/../undeclared/index.mjs',
 			'legacy-main/%2e%2e/undeclared/index.mjs',
+			'legacy-main/node_modules/undeclared/x.js',
+			'legacy-main/NODE_MODULES/undeclared/x.js',
 			'legacy-main/./index.mjs',
 			'legacy-main/',
 			'#internal',
