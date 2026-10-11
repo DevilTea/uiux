@@ -546,6 +546,32 @@ describe('the import scan (Rule 01a11bb1-a310)', () => {
 		expect(performance.now() - started).toBeLessThan(1000)
 		expect(checked).toEqual({ refusals: [], findings: [] })
 	})
+
+	const manyImports = (count: number) => Array.from({ length: count }, (_, index) => `import './missing-${index}'`).join('\n')
+
+	it('resolves each import once per check, however many components share the file', async () => {
+		const ctx = await v5Fixture()
+		await write(join(ctx.root, 'kit', 'src', 'many.ts'), manyImports(1000))
+		const components = Object.fromEntries(Array.from({ length: 50 }, (_, index) => [`c${index}`, { files: ['src/many.ts'], layer: 'product' as const }]))
+		const started = performance.now()
+		const checked = await checkProductKitAgainstKit({ root: ctx.root, codeDirectoryName: 'kit', next: { ...KIT, components } })
+		expect(performance.now() - started).toBeLessThan(2000)
+		expect(checked).toEqual({ refusals: [], findings: [] })
+	})
+
+	it('stops at its limit with one finding', async () => {
+		const ctx = await v5Fixture()
+		const components: ProductKit['components'] = {}
+		for (const name of ['a', 'b', 'c', 'd']) {
+			await write(join(ctx.root, 'kit', 'src', name, 'many.ts'), manyImports(1000))
+			components[name] = { files: [`src/${name}/many.ts`], layer: 'product' }
+		}
+		const started = performance.now()
+		const checked = await checkProductKitAgainstKit({ root: ctx.root, codeDirectoryName: 'kit', next: { ...KIT, components } })
+		expect(performance.now() - started).toBeLessThan(2000)
+		expect(checked.refusals).toEqual([])
+		expect(checked.findings).toEqual([expect.objectContaining({ code: 'kit.component_invalid', path: '/components', message: expect.stringContaining('limit') })])
+	})
 })
 
 describe('kit project containment', () => {

@@ -1,4 +1,4 @@
-import { lstat, readFile, realpath } from 'node:fs/promises'
+import { lstat, readdir, readFile, realpath } from 'node:fs/promises'
 import { isAbsolute, join, posix, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -26,7 +26,8 @@ import { realDirectoryIdentity } from './resolution'
  *   linear scan of the static and dynamic imports of each script file of a component flags a kit
  *   file it imports that its closure (its files and its `requires`, transitively) does not
  *   declare, an import of a wrapper entry, and a declared script file after the first (the
- *   component's entry) that no file of the component imports.
+ *   component's entry) that no file of the component imports. Its work per check is bounded; past
+ *   the bound it stops with one finding.
  *
  * Containment: `kit/` and `kit/src/` count only as real directories, not symbolic links, under
  * the Workspace root's real path, and every file is judged by its real path. A file outside them
@@ -48,6 +49,13 @@ const MAX_SCANNED_FILE_BYTES = 1024 * 1024
 const MAX_IMPORTS_PER_FILE = 1000
 /** The longest import specifier the scan reads. */
 const MAX_SPECIFIER_LENGTH = 1024
+/**
+ * The most work one check's import scan does: distinct files read, their total size, and distinct
+ * imports resolved. Past any of them the scan stops with one finding.
+ */
+const MAX_SCANNED_FILES = 500
+const MAX_SCANNED_BYTES = 16 * 1024 * 1024
+const MAX_IMPORT_RESOLUTIONS = 2000
 
 /**
  * Where the kit project lies: the Workspace root's real path, and `kit/` and `kit/src/` under it,
@@ -298,7 +306,17 @@ async function scanImports(kitDirectory: string, realFiles: ReadonlyMap<string, 
 		closures.set(name, files)
 		return files
 	}
-	const specifiersOf = new Map<string, Promise<readonly string[]>>()
+	const specifiersOf = new Map<string, readonly string[]>()
+	// One resolution per kit-relative import path (the importing file's directory joined with the
+	// specifier), however many files or components share it.
+	const resolutions = new Map<string, string | undefined>()
+	const listings = new Map<string, Promise<ReadonlySet<string> | undefined>>()
+	const budget: ScanBudget = { files: 0, bytes: 0, resolutions: 0 }
+	const limitReached = (): Diagnostic[] => [...findings, {
+		code: KIT_COMPONENT_INVALID,
+		path: '/components',
+		message: `The import scan stopped at its limit (${MAX_SCANNED_FILES} files, ${MAX_SCANNED_BYTES} bytes or ${MAX_IMPORT_RESOLUTIONS} distinct imports per check); the imports after it are not checked.`,
+	}]
 
 	for (const [name, component] of Object.entries(kit.components)) {
 		const componentPath = jsonPointer('/components', name)
@@ -309,10 +327,22 @@ async function scanImports(kitDirectory: string, realFiles: ReadonlyMap<string, 
 		for (const file of own) {
 			const real = realFiles.get(file)
 			if (!isScript(file) || real === undefined) continue
-			if (!specifiersOf.has(real)) specifiersOf.set(real, importSpecifiers(real))
-			for (const specifier of await specifiersOf.get(real)!) {
+			let specifiers = specifiersOf.get(real)
+			if (specifiers === undefined) {
+				specifiers = await importSpecifiers(real, budget)
+				if (specifiers === undefined) return limitReached()
+				specifiersOf.set(real, specifiers)
+			}
+			for (const specifier of specifiers) {
 				if (!specifier.startsWith('./') && !specifier.startsWith('../')) continue
-				const target = await resolveKitImport(kitDirectory, posix.join(posix.dirname(file), specifier))
+				const joined = posix.join(posix.dirname(file), specifier)
+				let target = resolutions.get(joined)
+				if (!resolutions.has(joined)) {
+					if (budget.resolutions >= MAX_IMPORT_RESOLUTIONS) return limitReached()
+					budget.resolutions++
+					target = await resolveKitImport(kitDirectory, joined, listings)
+					resolutions.set(joined, target)
+				}
 				if (target === undefined) continue
 				imported.add(target)
 				if (reported.has(target)) continue
@@ -339,10 +369,19 @@ function isScript(file: string): boolean {
 	return SCRIPT_EXTENSIONS.some(extension => file.endsWith(extension))
 }
 
-/** The import specifiers of the file at the real path `path`, or none when it is larger than the scan reads. */
-async function importSpecifiers(path: string): Promise<readonly string[]> {
+/** The work one check's import scan has done so far. */
+type ScanBudget = { files: number; bytes: number; resolutions: number }
+
+/**
+ * The import specifiers of the file at the real path `path`, none when it is larger than the scan
+ * reads, or `undefined` when reading it would pass the check's file or byte limit.
+ */
+async function importSpecifiers(path: string, budget: ScanBudget): Promise<readonly string[] | undefined> {
 	const info = await lstat(path).catch(() => undefined)
 	if (!info?.isFile() || info.size > MAX_SCANNED_FILE_BYTES) return []
+	if (budget.files >= MAX_SCANNED_FILES || budget.bytes + info.size > MAX_SCANNED_BYTES) return undefined
+	budget.files++
+	budget.bytes += info.size
 	const text = await readFile(path, 'utf8').catch(() => '')
 	return scanImportSpecifiers(text)
 }
@@ -463,9 +502,11 @@ export function scanImportSpecifiers(text: string): string[] {
 /**
  * The kit-relative path of the regular file a relative import names, trying script extensions and
  * `index` files, when its real path lies in the real `kit/`; a file reached through a link out of
- * `kit/` is treated as missing.
+ * `kit/` is treated as missing. A candidate whose directory does not list its name (compared without
+ * case or Unicode normalization differences) is skipped without looking it up; `listings` holds
+ * those listings for one check.
  */
-async function resolveKitImport(kitDirectory: string, joined: string): Promise<string | undefined> {
+async function resolveKitImport(kitDirectory: string, joined: string, listings: Map<string, Promise<ReadonlySet<string> | undefined>>): Promise<string | undefined> {
 	const base = posix.normalize(joined)
 	if (base === '..' || base.startsWith('../') || posix.isAbsolute(base)) return undefined
 	const stripped = base.replace(/\?.*$/u, '')
@@ -473,10 +514,28 @@ async function resolveKitImport(kitDirectory: string, joined: string): Promise<s
 	// A TypeScript import may name the emitted `.js` of a `.ts` source.
 	if (/\.[cm]?js$/u.test(stripped)) candidates.push(stripped.replace(/js$/u, 'ts'))
 	for (const candidate of candidates) {
+		const directory = posix.dirname(candidate)
+		if (!listings.has(directory)) listings.set(directory, kitDirectoryNames(kitDirectory, directory))
+		if (!(await listings.get(directory))?.has(foldName(posix.basename(candidate)))) continue
 		const real = await containedRealPath(kitDirectory, join(kitDirectory, ...candidate.split('/')))
 		if (real === undefined) continue
 		const info = await lstat(real).catch(() => undefined)
 		if (info?.isFile()) return candidate
 	}
 	return undefined
+}
+
+function foldName(name: string): string {
+	return name.normalize('NFC').toLowerCase()
+}
+
+/**
+ * The folded names in the kit-relative directory `directory`, when its real path is `kit/` or lies
+ * in it; a directory reached through a link out of `kit/`, or one that cannot be listed, lists none.
+ */
+async function kitDirectoryNames(kitDirectory: string, directory: string): Promise<ReadonlySet<string> | undefined> {
+	const path = join(kitDirectory, ...directory.split('/'))
+	if (directory !== '.' && await containedRealPath(kitDirectory, path) === undefined) return undefined
+	const names = await readdir(path).catch(() => undefined)
+	return names && new Set(names.map(foldName))
 }
