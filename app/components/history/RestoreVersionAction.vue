@@ -36,8 +36,9 @@ import WbErrorDescription from '../workbench/WbErrorDescription.vue'
  * For the Workspace settings that comparison is semantic: a restore that would change the
  * `adapters` entries also needs `product-kit.compose` (#140 owner ruling 2026-10-10, 1), so
  * without it the dialog names the key and offers no Restore (`restoreExtraKeys`).
- * A Product Kit restore asks for `product-kit.compose` too, for now whatever it changes (#139
- * owner ruling 2026-10-11, 1), until the Workbench compares the Product Kit precisely (K6).
+ * A Product Kit restore that would change `designSystems` or the Adapter specifiers or their order
+ * asks for `product-kit.compose` too (#139 owner ruling 2026-10-11, 1), read from its structural
+ * comparison.
  *
  * A restore forms a version of its own naming its source (Rules 01a11a5e-14ce-… and
  * 01a11e0d-d911-…), so on success every timeline and the Workbench's resources are read again.
@@ -78,8 +79,8 @@ const stageRegion = useTemplateRef<HTMLElement>('stageRegion')
 /** The version compared with the current state, for this resource alone, while the dialog is open. */
 const match = useVersionDiff(() => ({ from: props.versionId, to: CURRENT_COMPARE }), {
 	resources: () => [props.resource],
-	// Only the Workspace settings need the semantic diff, to see an `adapters` change.
-	detail: props.resource.kind === 'workspace' ? 'semantic' : 'summary',
+	// Only the Workspace settings and the Product Kit file need the diff itself, to see an Adapter list change.
+	detail: props.resource.kind === 'workspace' || props.resource.kind === 'product-kit' ? 'semantic' : 'summary',
 	enabled: open,
 })
 /** `true` when the resource already matches the version; `undefined` while unknown. A failed comparison blocks nothing: the server decides. */

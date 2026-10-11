@@ -71,6 +71,8 @@ describe('Workspace settings page (R10)', () => {
 			expect(after.resource.adapters).toEqual(before.resource.adapters)
 			expect(requests).toHaveLength(1)
 			expect((requests[0] as { expectedRevision: string }).expectedRevision).toBe(before.revision)
+			// A schemaVersion 5 manifest holds no adapters, so the full replace sends none.
+			expect((requests[0] as { settings: Record<string, unknown> }).settings).not.toHaveProperty('adapters')
 		}
 		finally { await context.close() }
 	}, 60_000)
@@ -258,6 +260,48 @@ describe('Workspace pages navigation', () => {
 			await option.click()
 			await expect.poll(scrollTop).toBeGreaterThan(0)
 			expect(new URL(page.url()).searchParams.get('section')).toBe('adapters')
+		}
+		finally { await context.close() }
+	}, 60_000)
+})
+
+describe('Settings › Adapters on a schemaVersion 5 Workspace', () => {
+	type ProductKitRead = { revision: string; resource: { adapters: { moduleSpecifier: string; config?: unknown }[] } }
+
+	/**
+	 * Discussion #139 owner ruling 6: the section reads and writes the Product Kit file through the
+	 * Product Kit operations, never the manifest's `adapters`, which a schemaVersion 5 manifest refuses.
+	 */
+	it('saves an Adapter config through update_product_kit and sends no adapters to the Workspace settings', async () => {
+		const before = await api<ProductKitRead>('/api/product-kit')
+		const workspaceBefore = await readWorkspace()
+		expect(workspaceBefore.resource).not.toHaveProperty('adapters')
+		expect(before.resource.adapters.map(adapter => adapter.moduleSpecifier)).toEqual(['./adapters/reference.ts'])
+		const { context, page } = await open('/workspace/settings?section=adapters')
+		try {
+			const requests: { url: string; body: unknown }[] = []
+			page.on('request', (request) => {
+				if (request.method() === 'PUT') requests.push({ url: new URL(request.url()).pathname, body: request.postDataJSON() })
+			})
+			const section = page.locator('#settings-adapters')
+			await section.getByText('Packages or kit/ modules that supply Widgets').waitFor()
+			await section.getByRole('button', { name: 'Config', exact: true }).click()
+			const config = section.getByRole('textbox', { name: 'Config for ./adapters/reference.ts' })
+			await config.fill('{"note":"kit"}')
+			await section.getByRole('button', { name: 'Save changes' }).click()
+			await section.locator('[data-save-bar]').waitFor({ state: 'detached' })
+			const after = await api<ProductKitRead>('/api/product-kit')
+			expect(after.revision).not.toBe(before.revision)
+			expect(after.resource.adapters).toEqual([{ moduleSpecifier: './adapters/reference.ts', config: { note: 'kit' } }])
+			expect(requests.map(request => request.url)).toEqual(['/api/product-kit/settings'])
+			expect(requests[0]!.body).toMatchObject({ expectedRevision: before.revision, adapters: [{ moduleSpecifier: './adapters/reference.ts', config: { note: 'kit' } }] })
+			expect((await readWorkspace()).revision).toBe(workspaceBefore.revision)
+
+			// Clearing the config stores the entry without one.
+			await config.fill('')
+			await section.getByRole('button', { name: 'Save changes' }).click()
+			await section.locator('[data-save-bar]').waitFor({ state: 'detached' })
+			expect((await api<ProductKitRead>('/api/product-kit')).resource.adapters).toEqual([{ moduleSpecifier: './adapters/reference.ts' }])
 		}
 		finally { await context.close() }
 	}, 60_000)

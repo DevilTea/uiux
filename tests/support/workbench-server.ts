@@ -47,8 +47,9 @@ async function freePort(): Promise<number> {
 export async function startWorkbenchServer(): Promise<WorkbenchServer> {
 	const workspaceRoot = await mkdtemp(join(REPOSITORY_ROOT, '.uiux-browser-test-'))
 	await cp(WORKBENCH_FIXTURE_WORKSPACE, workspaceRoot, { recursive: true })
-	// The frozen fixture stays at the schemaVersion it was captured at; the private copy is migrated
-	// to the current product schema the way an operator would (`uiux migrate`), never hand-edited.
+	// The frozen fixture is a schemaVersion 5 Workspace (its root holds workspace.json and its
+	// Adapter is in kit/). A later product schema migrates the private copy the way an operator would
+	// (`uiux migrate`), never hand-edited; at the current schema this is a no-op.
 	await new FileNativePersistence({ root: workspaceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).migrateWorkspace()
 	const token = await provisionToken(workspaceRoot, { nickname: 'tester', kind: 'human', role: 'owner' })
 	const port = await freePort()

@@ -81,12 +81,16 @@ export function matchesCurrent(summary: readonly Pick<ResourceChangeSummary, 'ki
  *
  * #139 owner ruling 2026-10-11, 1 (https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18864076):
  * a `product-kit` restore that changes `designSystems` or the Adapter specifiers or their order
- * also needs `product-kit.compose`. Until the Workbench reads that from a precise comparison (K6),
- * it asks for `product-kit.compose` for every `product-kit` restore, which never offers a
- * restore the server refuses.
+ * also needs `product-kit.compose`. The Workbench reads that from the structural comparison of the
+ * Product Kit file (`productKitComposes`); until the comparison is known, or when it is not a
+ * structural one, it asks for `product-kit.compose`, which never offers a restore the server
+ * refuses.
  */
 export function restoreExtraKeys(kind: string, comparison: Pick<VersionDiffResult, 'to' | 'changes'> | undefined): readonly PermissionKey[] {
-	if (kind === 'product-kit') return ['product-kit.compose']
+	if (kind === 'product-kit') {
+		const diff = comparison?.changes?.find(change => change.kind === 'product-kit')?.diff
+		return diff?.type === 'structural' && !productKitComposes(diff.changes) ? [] : ['product-kit.compose']
+	}
 	if (kind !== 'workspace' || !comparison || comparison.to.workspaceSchemaVersion >= PRODUCT_KIT_SCHEMA_VERSION) return []
 	const diff = comparison.changes?.find(change => change.kind === 'workspace')?.diff
 	if (diff?.type !== 'workspace') return []
@@ -96,6 +100,16 @@ export function restoreExtraKeys(kind: string, comparison: Pick<VersionDiffResul
 	// replaced whole, or a changed `moduleSpecifier`, changes the list; a deeper change does not.
 	const structural = adaptersChanges?.some(change => /^(?:\/[^/]+(?:\/moduleSpecifier)?)?$/u.test(change.path)) === true
 	return matched || structural ? ['product-kit.compose'] : []
+}
+
+/**
+ * Whether a structural change of the Product Kit file changes what `compose_product_kit` owns: the
+ * whole file, `designSystems`, or the Adapter list's entries, their specifiers or their order. Matched
+ * by position, a changed `moduleSpecifier` or an entry added, removed or replaced whole changes the
+ * list; a change inside an entry's `config` does not.
+ */
+export function productKitComposes(changes: readonly Readonly<{ path: string }>[]): boolean {
+	return changes.some(change => /^(?:|\/designSystems(?:\/.*)?|\/adapters(?:\/\d+(?:\/moduleSpecifier)?)?)$/u.test(change.path))
 }
 
 /** The impact list's groups, in the order the confirmation shows them (Rules 01a11a5e-174b-… and 17a0-…). */

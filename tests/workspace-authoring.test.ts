@@ -12,11 +12,13 @@ import {
 	localeTableKeys,
 	moveItem,
 	packageNameOf,
+	productKitAdapterWrites,
 	registryRecord,
 	registryRowIssues,
 	registryRows,
 	sameJson,
 } from '../app/utils/workspace-authoring'
+import { emptyProductKit, type ProductKit } from '../src/domain/product-kit/schema'
 import type { WorkspaceManifest } from '../src/domain/workspace/schema'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 
@@ -92,6 +94,45 @@ describe('Workspace settings payload', () => {
 			{ path: '/b', theirs: '{}', yours: undefined },
 			{ path: '/c', theirs: undefined, yours: '{}' },
 		])
+	})
+})
+
+describe('Adapters from schemaVersion 5 (Product Kit file)', () => {
+	const { adapters: _adapters, ...V5_MANIFEST } = MANIFEST
+	const KIT: ProductKit = {
+		...emptyProductKit(),
+		designSystems: ['@acme/ds'],
+		adapters: [{ moduleSpecifier: './a.ts', config: { x: 1 } }, { moduleSpecifier: 'b' }, { moduleSpecifier: './a.ts' }],
+		styles: ['./styles.css'],
+		themes: { dark: { 'data-theme': 'dark' } },
+	}
+
+	it('sends no adapters in the Workspace settings when the manifest holds none', () => {
+		void _adapters
+		const payload = buildSettingsPayload(V5_MANIFEST as WorkspaceManifest, 'themes', { light: {} })
+		expect(Object.keys(payload).sort()).toEqual(['i18n', 'themes', 'viewports'])
+	})
+
+	it('writes nothing for an unchanged selection', () => {
+		expect(productKitAdapterWrites(KIT, KIT.adapters)).toEqual({})
+	})
+
+	it('changes only configs with update_product_kit, resending styles and themes', () => {
+		const selections = [{ moduleSpecifier: './a.ts' }, { moduleSpecifier: 'b', config: { y: 2 } }, { moduleSpecifier: './a.ts' }]
+		expect(productKitAdapterWrites(KIT, selections)).toEqual({ update: { adapters: selections, styles: KIT.styles, themes: KIT.themes } })
+	})
+
+	it('reorders with compose_product_kit alone when each entry keeps the config of its occurrence', () => {
+		const selections = [{ moduleSpecifier: 'b' }, { moduleSpecifier: './a.ts', config: { x: 1 } }, { moduleSpecifier: './a.ts' }]
+		expect(productKitAdapterWrites(KIT, selections)).toEqual({ compose: { designSystems: ['@acme/ds'], adapters: ['b', './a.ts', './a.ts'] } })
+	})
+
+	it('adds an Adapter with compose_product_kit, then gives it its config with update_product_kit', () => {
+		const selections = [...KIT.adapters, { moduleSpecifier: '@acme/widgets', config: { z: true } }]
+		expect(productKitAdapterWrites(KIT, selections)).toEqual({
+			compose: { designSystems: ['@acme/ds'], adapters: ['./a.ts', 'b', './a.ts', '@acme/widgets'] },
+			update: { adapters: selections, styles: KIT.styles, themes: KIT.themes },
+		})
 	})
 })
 

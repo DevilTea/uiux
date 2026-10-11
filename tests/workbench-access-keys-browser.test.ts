@@ -170,12 +170,14 @@ describe('authoring pages follow their own write key', () => {
 	}, 90_000)
 
 	it('offers Adapter config but not composition without `product-kit.compose`', async () => {
-		const { context, page } = await open('/workspace/settings?section=adapters', await memberCookie(['workspace.read', 'settings.write']))
+		// From schemaVersion 5 the Adapters are the Product Kit file's: their config needs `product-kit.write`.
+		const { context, page } = await open('/workspace/settings?section=adapters', await memberCookie(['workspace.read', 'settings.write', 'product-kit.source.read', 'product-kit.write']))
 		try {
 			const notice = page.locator('[data-access-notice="compose"]')
 			await notice.waitFor({ timeout: 15_000 })
 			expect(await notice.innerText()).toContain('Requires the permission key product-kit.compose.')
 			expect(await page.locator('[data-access-notice][data-missing-key="settings.write"]').count()).toBe(0)
+			expect(await page.locator('[data-access-notice][data-missing-key="product-kit.write"]').count()).toBe(0)
 			await page.locator('[data-adapter-row]').first().waitFor()
 			expect(await page.getByRole('button', { name: 'Add adapter', exact: true }).count()).toBe(0)
 			expect(await page.locator('[data-adapter-specifier]').count()).toBe(0)
@@ -190,6 +192,16 @@ describe('authoring pages follow their own write key', () => {
 			expect(await composer.page.locator('[data-access-notice="compose"]').count()).toBe(0)
 		}
 		finally { await composer.context.close() }
+
+		// Without `product-kit.write` the section is read-only and names the key, whatever settings.write allows.
+		const settingsOnly = await open('/workspace/settings?section=adapters', await memberCookie(['workspace.read', 'settings.write']))
+		try {
+			const missing = settingsOnly.page.locator('#settings-adapters [data-access-notice][data-missing-key="product-kit.write"]')
+			await missing.waitFor({ timeout: 15_000 })
+			expect(await missing.innerText()).toContain('Requires the permission key product-kit.write.')
+			expect(await settingsOnly.page.getByRole('button', { name: 'Add adapter', exact: true }).count()).toBe(0)
+		}
+		finally { await settingsOnly.context.close() }
 	}, 90_000)
 })
 
