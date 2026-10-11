@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { userInfo } from 'node:os'
 
-import { grantedKeys, PERMISSION_KEYS, writeKeyForKind } from '../../application/access/keys'
+import { BUILT_IN_ACCESS_PRESETS, grantedKeys, keysOfPreset, PERMISSION_KEYS, writeKeyForKind } from '../../application/access/keys'
 import { compatibilityRole } from '../../application/access/labels'
 import type { Lease, LeaseManager } from '../../application/access/leases'
 import {
@@ -361,7 +361,7 @@ export class AccessService {
 				: '  Sign in (single use, expires in 24 h):',
 			...origins.map(origin => `    ${origin}/login#${outcome.invite}`),
 			'/mcp requires a token. For an agent:',
-			`  uiux member add claude --workspace ${root} --kind agent --role editor`,
+			`  uiux member add claude --workspace ${root} --kind agent ${agentAccessOption(BUILT_IN_ACCESS_PRESETS)}`,
 			`  uiux token create --workspace ${root} --member claude`,
 			'Moved, renamed, or a git worktree? Reuse the old roster instead:',
 			`  uiux access copy --from <old-dir> --workspace ${root} --replace`,
@@ -450,6 +450,18 @@ function uniqueNickname(file: AccessFile, base: string): string {
 		const candidate = `${base.slice(0, 28)}-${index}`
 		if (!file.members.some(member => member.nickname === candidate)) return candidate
 	}
+}
+
+/**
+ * The access option of the bootstrap banner's command for adding an Agent (Rule
+ * 01a11c09-b9a6-70a6-a9f6-481c8c3f7386): an existing preset, the one with `id` `editor` when there
+ * is one, or `--keys` with the built-in Editor keys an Agent can hold when the Workspace has no
+ * preset. Below `schemaVersion` 6 the presets are the built-in ones.
+ */
+export function agentAccessOption(presets: readonly Readonly<{ id: string; name: string }>[]): string {
+	const preset = presets.find(item => item.id === 'editor') ?? presets[0]
+	if (preset) return `--preset ${/^[\w.-]+$/u.test(preset.name) ? preset.name : `'${preset.name.replaceAll('\'', '\'\\\'\'')}'`}`
+	return `--keys ${keysOfPreset('agent', BUILT_IN_ACCESS_PRESETS.find(item => item.id === 'editor')!.keys).join(',')}`
 }
 
 export function systemPrincipal(id: SystemPrincipalId): SystemPrincipal {

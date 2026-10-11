@@ -91,7 +91,7 @@ try {
 	for (const command of ['member add <nick>', 'token create --member <nick>', 'invite create --member <nick>', 'session list', 'access copy --from <old-dir>']) {
 		if (!helpOutput.includes(command)) throw new Error(`Packed CLI help did not expose ${command}.`)
 	}
-	execFileSync(cliPath, ['member', 'add', 'package-agent', '--kind', 'agent', '--role', 'editor', '--workspace', workspaceDirectory], { encoding: 'utf8' })
+	execFileSync(cliPath, ['member', 'add', 'package-agent', '--kind', 'agent', '--preset', 'Editor', '--workspace', workspaceDirectory], { encoding: 'utf8' })
 	const token = execFileSync(cliPath, ['token', 'create', '--member', 'package-agent', '--workspace', workspaceDirectory], { encoding: 'utf8' }).match(/uiux_t_\S+/u)?.[0]
 	if (!token) throw new Error('Packed CLI token create printed no token.')
 	const auth = { authorization: `Bearer ${token}` }

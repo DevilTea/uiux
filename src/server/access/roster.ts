@@ -101,6 +101,7 @@ export type AccessErrorCode =
 	| 'access.lock_busy'
 	| 'access.workspace_invalid'
 	| 'access.last_manager'
+	| 'access.preset_not_found'
 
 /** Status codes used when an AccessError reaches HTTP (Clause 01a114ec-ea2d-7f54-97d1-f981d48795fb: `access.last_manager` is 409). */
 export const ACCESS_ERROR_HTTP_STATUS: Readonly<Partial<Record<AccessErrorCode, number>>> = {
@@ -368,8 +369,8 @@ export function assertManagerKept(before: AccessFile | undefined, after: AccessF
 }
 
 /**
- * The key set a member write asks for: explicit `keys`, or a `role`, which the CLI's `--role` and
- * the Members page still send and which stands for the keys of the built-in preset with that
+ * The key set a member write asks for: explicit `keys`, or a `role`, which the Members page still
+ * sends and which stands for the keys of the built-in preset with that
  * `id` (Clause 01a11bb1-b427-777e-8175-fa24d61d434b), without `humanOnly` keys for an Agent. An
  * Agent asking for the Owner role is refused: its keys are the human-only administration keys.
  */
@@ -665,8 +666,8 @@ export function copyRoster(source: AccessFile, target: Readonly<{ workspaceRoot:
 
 /**
  * A member as roster administration lists it. `role` is derived from the stored keys
- * (`compatibilityRole`) for the Members page and `uiux member list`, which still show roles until
- * they show keys and labels (issue #142).
+ * (`compatibilityRole`) for the Members page, which still shows roles until it shows keys and
+ * labels (issue #142).
  */
 export type MemberSummary = Readonly<{
 	id: string

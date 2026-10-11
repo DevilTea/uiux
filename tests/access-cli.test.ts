@@ -7,12 +7,14 @@ import { fileURLToPath } from 'node:url'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { keysForRole } from '../src/application/access/keys'
+import { BUILT_IN_ACCESS_PRESETS, HUMAN_ONLY_PERMISSION_KEYS, keysForRole, PERMISSION_KEYS } from '../src/application/access/keys'
+import { createLeaseManager } from '../src/application/access/leases'
 import { runAccessCommand } from '../src/cli/access'
 import type { HostVersionRecord } from '../src/domain/history/schema'
 import { blobDigest, HostHistoryStore } from '../src/persistence/history/host-store'
 import { acquireServerHold } from '../src/persistence/server-hold'
 import { verifyCredential } from '../src/server/access/roster'
+import { AccessService, agentAccessOption } from '../src/server/access/service'
 import { AccessStore, accessStorePaths, copyHostHistory, hostHistoryPaths, planHostHistoryCopy } from '../src/server/access/store'
 import { CURRENT_TEST_LAYOUT } from './support/workspace-layout'
 
@@ -67,14 +69,14 @@ describe('uiux access commands', () => {
 	it('adds, lists, changes and removes members of one Workspace roster', async () => {
 		const { workspace, run } = await setup()
 		expect((await run('member', 'list', '--workspace', workspace)).out).toContain('No roster yet')
-		expect(await run('member', 'add', 'deviltea', '--role', 'owner', '--workspace', workspace)).toMatchObject({ code: 0 })
-		expect(await run('member', 'add', 'claude', '--kind', 'agent', '--role', 'editor', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('uiux token create') })
-		expect(await run('member', 'add', 'bot', '--kind', 'agent', '--role', 'owner', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('humanOnly') })
+		expect(await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)).toMatchObject({ code: 0 })
+		expect(await run('member', 'add', 'claude', '--kind', 'agent', '--preset', 'Editor', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('uiux token create') })
 		const list = await run('member', 'list', '--workspace', workspace)
 		expect(list.out).toMatch(/Roster [a-z2-7]{4} for /u)
 		expect(list.out).toContain(workspace)
-		expect(list.out).toMatch(/claude\s+agent\s+editor\s+0\s+0/u)
-		expect(await run('member', 'set', 'deviltea', '--role', 'editor', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('last human holder of `members.manage`') })
+		expect(list.out).toMatch(/NICKNAME\s+KIND\s+ACCESS\s+TOKENS\s+SESSIONS\s+KEYS/u)
+		expect(list.out).toMatch(new RegExp(`claude\\s+agent\\s+Editor\\s+0\\s+0\\s+${keysForRole('agent', 'editor').length}$`, 'mu'))
+		expect(await run('member', 'set', 'deviltea', '--preset', 'Editor', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('last human holder of `members.manage`') })
 		expect(await run('member', 'set', 'claude', '--nickname', 'claude-main', '--workspace', workspace)).toMatchObject({ code: 0 })
 		expect(await run('member', 'set', 'claude-main', '--workspace', workspace)).toMatchObject({ code: 2 })
 		expect(await run('member', 'remove', 'claude-main', '--workspace', workspace)).toMatchObject({ code: 0 })
@@ -83,7 +85,7 @@ describe('uiux access commands', () => {
 
 	it('creates a token once, lists it without the secret, and revokes it', async () => {
 		const { workspace, home, run } = await setup()
-		await run('member', 'add', 'claude', '--kind', 'agent', '--role', 'editor', '--workspace', workspace)
+		await run('member', 'add', 'claude', '--kind', 'agent', '--preset', 'Editor', '--workspace', workspace)
 		const created = await run('token', 'create', '--member', 'claude', '--label', 'laptop', '--workspace', workspace)
 		expect(created.code).toBe(0)
 		const token = created.out.match(/uiux_t_[a-z2-7]{4}_[a-z2-7]{10}_[a-z2-7]{52}/u)?.[0]
@@ -110,8 +112,8 @@ describe('uiux access commands', () => {
 
 	it('creates human-only sign-in links and lists and revokes sessions', async () => {
 		const { workspace, home, run } = await setup()
-		await run('member', 'add', 'mei', '--role', 'reviewer', '--workspace', workspace)
-		await run('member', 'add', 'claude', '--kind', 'agent', '--role', 'editor', '--workspace', workspace)
+		await run('member', 'add', 'mei', '--preset', 'Reviewer', '--workspace', workspace)
+		await run('member', 'add', 'claude', '--kind', 'agent', '--preset', 'Editor', '--workspace', workspace)
 		expect(await run('invite', 'create', '--member', 'claude', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('human members only') })
 		const invite = await run('invite', 'create', '--member', 'mei', '--origin', 'http://127.0.0.1:3700/x', '--workspace', workspace)
 		expect(invite.out).toMatch(/http:\/\/127\.0\.0\.1:3700\/login#uiux_i_[a-z2-7]{4}_/u)
@@ -132,7 +134,7 @@ describe('uiux access commands', () => {
 
 	it('names the loopback origin on the server\'s port when invite create has no --origin', async () => {
 		const { workspace, run, runWithEnv } = await setup()
-		await run('member', 'add', 'mei', '--role', 'reviewer', '--workspace', workspace)
+		await run('member', 'add', 'mei', '--preset', 'Reviewer', '--workspace', workspace)
 		const link = (output: string) => output.match(/(\S+)\/login#uiux_i_/u)?.[1]
 		expect(link((await run('invite', 'create', '--member', 'mei', '--workspace', workspace)).out)).toBe('http://127.0.0.1:3000')
 		// The port uiux dev would use, as Nitro reads it.
@@ -150,15 +152,15 @@ describe('uiux access commands', () => {
 
 	it('copies a roster to a new Workspace path once, keeping tokens and dropping sessions', async () => {
 		const { base, workspace, home, run } = await setup()
-		await run('member', 'add', 'deviltea', '--role', 'owner', '--workspace', workspace)
-		await run('member', 'add', 'claude', '--kind', 'agent', '--role', 'editor', '--workspace', workspace)
+		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
+		await run('member', 'add', 'claude', '--kind', 'agent', '--preset', 'Editor', '--workspace', workspace)
 		const token = (await run('token', 'create', '--member', 'claude', '--workspace', workspace)).out.match(/uiux_t_\S+/u)![0]
 		await run('invite', 'create', '--member', 'deviltea', '--workspace', workspace)
 		const worktree = join(base, 'worktree', 'design')
 		await mkdir(join(worktree, '.uiux'), { recursive: true })
 		await writeFile(join(worktree, '.uiux', 'workspace.json'), '{}\n')
 		// The target already has a roster (for example one uiux dev bootstrapped): --replace is required.
-		await run('member', 'add', 'someone', '--role', 'owner', '--workspace', worktree)
+		await run('member', 'add', 'someone', '--preset', 'Owner', '--workspace', worktree)
 		expect(await run('access', 'copy', '--from', workspace, '--workspace', worktree)).toMatchObject({ code: 1, err: expect.stringContaining('--replace') })
 		const copied = await run('access', 'copy', '--from', workspace, '--workspace', worktree, '--replace')
 		expect(copied.code).toBe(0)
@@ -186,7 +188,7 @@ describe('uiux access commands', () => {
 
 	it('copies a version 1 roster as version 2 with the keys the upgrade maps, leaving the source as it was (Clause 01a1144e-56bd)', async () => {
 		const { base, workspace, home, run } = await setup()
-		await run('member', 'add', 'deviltea', '--role', 'owner', '--workspace', workspace)
+		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
 		const paths = accessStorePaths(home, workspace)
 		const current = JSON.parse(await readFile(paths.file, 'utf8')) as { members: { id: string; nickname: string; createdAt: string }[] }
 		const owner = current.members[0]!
@@ -208,18 +210,18 @@ describe('uiux access commands', () => {
 		expect(copied.members.every(member => !('role' in member))).toBe(true)
 		// Reading a copy source writes nothing to it; the source upgrades when it is next opened.
 		expect(await readFile(paths.file, 'utf8')).toBe(legacyText)
-		expect(await run('member', 'list', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringMatching(/claude\s+agent\s+editor/u) })
+		expect(await run('member', 'list', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringMatching(/claude\s+agent\s+Editor/u) })
 		expect(JSON.parse(await readFile(paths.file, 'utf8')).version).toBe(2)
 		expect(await readFile(paths.v1Backup, 'utf8')).toBe(legacyText)
 	})
 
 	it('refuses an access copy --replace that would drop the target\'s last human manager, before copying anything', async () => {
 		const { base, workspace, home, run } = await setup()
-		await run('member', 'add', 'claude', '--kind', 'agent', '--role', 'editor', '--workspace', workspace)
+		await run('member', 'add', 'claude', '--kind', 'agent', '--preset', 'Editor', '--workspace', workspace)
 		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
 		await sourceHost.writeVersion(hostVersion())
 		const target = await initWorkspace(base, 'moved')
-		await run('member', 'add', 'deviltea', '--role', 'owner', '--workspace', target)
+		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', target)
 		const rosterBefore = await readFile(accessStorePaths(home, target).file, 'utf8')
 		expect(await run('access', 'copy', '--from', workspace, '--workspace', target, '--replace')).toMatchObject({ code: 1, err: expect.stringContaining('deviltea is the last human holder of `members.manage`') })
 		expect(await readFile(accessStorePaths(home, target).file, 'utf8')).toBe(rosterBefore)
@@ -228,11 +230,11 @@ describe('uiux access commands', () => {
 
 	it('refuses to replace a roster written by a newer UIUX, and replaces a damaged one with a warning (owner ruling of 2026-10-11)', async () => {
 		const { base, workspace, home, run } = await setup()
-		await run('member', 'add', 'deviltea', '--role', 'owner', '--workspace', workspace)
+		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
 		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
 		await sourceHost.writeVersion(hostVersion())
 		const target = await initWorkspace(base, 'moved')
-		await run('member', 'add', 'mei', '--role', 'owner', '--workspace', target)
+		await run('member', 'add', 'mei', '--preset', 'Owner', '--workspace', target)
 		const targetFile = accessStorePaths(home, target).file
 		const newer = JSON.stringify({ ...JSON.parse(await readFile(targetFile, 'utf8')), version: 3 })
 		await writeFile(targetFile, newer)
@@ -252,14 +254,14 @@ describe('uiux access commands', () => {
 		expect(await run('member', 'list')).toMatchObject({ code: 2, err: expect.stringContaining('requires --workspace') })
 		expect(await run('member', 'frobnicate', '--workspace', workspace)).toMatchObject({ code: 2 })
 		const out: string[] = []
-		const inside = await runAccessCommand({ argv: ['member', 'add', 'x', '--role', 'owner', '--workspace', workspace], env: { UIUX_HOME: join(workspace, 'home') }, stdout: () => {}, stderr: line => out.push(line) })
+		const inside = await runAccessCommand({ argv: ['member', 'add', 'x', '--preset', 'Owner', '--workspace', workspace], env: { UIUX_HOME: join(workspace, 'home') }, stdout: () => {}, stderr: line => out.push(line) })
 		expect(inside).toBe(2)
 		expect(out.join('\n')).toContain('resolves inside the Workspace')
 	})
 
 	it('copies the host history once with the roster, with the roster\'s permissions, and replaces it only with --replace', async () => {
 		const { base, workspace, home, run } = await setup()
-		await run('member', 'add', 'deviltea', '--role', 'owner', '--workspace', workspace)
+		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
 		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
 		await sourceHost.putBlob(new TextEncoder().encode('{"blob":1}\n'))
 		await sourceHost.writeVersion(hostVersion())
@@ -304,7 +306,7 @@ describe('uiux access commands', () => {
 
 	it('refuses a source history holding a symbolic link, and a target a running server holds, before writing anything', async () => {
 		const { base, workspace, home, run } = await setup()
-		await run('member', 'add', 'deviltea', '--role', 'owner', '--workspace', workspace)
+		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
 		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
 		await sourceHost.writeVersion(hostVersion())
 		const outside = join(base, 'outside.json')
@@ -336,7 +338,7 @@ describe('uiux access commands', () => {
 
 		// A source without host history copies the roster alone.
 		const third = await initWorkspace(base, 'third')
-		await run('member', 'add', 'deviltea', '--role', 'owner', '--workspace', third)
+		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', third)
 		const fourth = await initWorkspace(base, 'fourth')
 		expect(await run('access', 'copy', '--from', third, '--workspace', fourth)).toMatchObject({ code: 0, out: expect.stringContaining(`No host history recorded for ${third}; none copied.`) })
 		expect(await lstat(hostHistoryPaths(home, fourth).dir).catch(() => undefined)).toBeUndefined()
@@ -344,7 +346,7 @@ describe('uiux access commands', () => {
 
 	it('copies the history before the roster, so a failed history copy leaves the target unchanged', async () => {
 		const { base, workspace, home, run } = await setup()
-		await run('member', 'add', 'deviltea', '--role', 'owner', '--workspace', workspace)
+		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
 		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
 		const digest = await sourceHost.putBlob(new TextEncoder().encode('unreadable\n'))
 		const blob = join(sourceHost.paths.objects, digest.slice(7, 9), digest.slice(7))
@@ -398,7 +400,7 @@ describe('uiux access commands', () => {
 			const code = await runAccessCommand({ argv, env: { UIUX_HOME: home }, cwd: base, stdout: line => out.push(line), stderr: line => err.push(line) })
 			return { code, out: out.join('\n'), err: err.join('\n') }
 		}
-		await run('member', 'add', 'deviltea', '--role', 'owner', '--workspace', workspace)
+		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
 		const copied = await run('access', 'copy', '--from', workspace, '--workspace', other)
 		expect(copied.code).toBe(0)
 		expect(copied.err).toContain('1 blob(s) that copied versions name are missing from the source host history too')
@@ -434,13 +436,166 @@ describe('uiux access commands', () => {
 
 	it('dispatches the access commands from the installed CLI and lists them in --help', async () => {
 		const { home, workspace } = await setup()
-		const result = spawnSync(process.execPath, [CLI, 'member', 'add', 'mei', '--role', 'viewer', '--workspace', workspace], { encoding: 'utf8', env: { ...process.env, UIUX_HOME: home } })
+		const result = spawnSync(process.execPath, [CLI, 'member', 'add', 'mei', '--preset', 'Viewer', '--workspace', workspace], { encoding: 'utf8', env: { ...process.env, UIUX_HOME: home } })
 		expect(result.status).toBe(0)
-		expect(result.stdout).toContain('Added human member mei (viewer)')
+		expect(result.stdout).toContain('Added human member mei (Viewer, 3 keys)')
 		const help = spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' }).stdout
-		for (const command of ['member add', 'token create', 'invite create', 'session list', 'access copy'])
+		for (const command of ['member add', '--preset <name>', '--all-keys', '--grant <k,...>', 'member list [--keys]', 'token create', 'invite create', 'session list', 'access copy'])
 			expect(help).toContain(command)
 		expect(help).toMatch(/Copy members, tokens and host history from another\s+Workspace path, once/u)
 		expect(help).not.toContain('--lan')
+		expect(help).not.toContain('--role')
 	}, 30_000)
+})
+
+describe('uiux member on permission keys and Access presets (issue #142)', () => {
+	const presetKeys = (id: string) => [...BUILT_IN_ACCESS_PRESETS.find(preset => preset.id === id)!.keys]
+	async function storedMembers(home: string, workspace: string) {
+		const store = (await AccessStore.open({ workspaceRoot: workspace, home, create: false }))!
+		return store.data.members
+	}
+
+	it('refuses --role, naming --preset, and needs exactly one of --preset, --keys and --all-keys (Clauses 01a1144e-5660, 01a11c09-acaf)', async () => {
+		const { home, workspace, run } = await setup()
+		for (const argv of [['member', 'add', 'mei', '--role', 'editor'], ['member', 'set', 'mei', '--role', 'editor'], ['member', 'add', 'mei', '--role'], ['member', 'add', 'mei', '--role=editor'], ['member', 'set', 'mei', '--role=owner']]) {
+			const refused = await run(...argv, '--workspace', workspace)
+			expect(refused).toMatchObject({ code: 2, err: expect.stringContaining('--role was removed; give an Access preset with --preset <name>') })
+		}
+		expect(await run('member', 'add', 'mei', '--workspace', workspace)).toMatchObject({ code: 2, err: expect.stringContaining('exactly one of --preset <name>, --keys <k,...> or --all-keys') })
+		expect(await run('member', 'add', 'mei', '--preset', 'Viewer', '--all-keys', '--workspace', workspace)).toMatchObject({ code: 2 })
+		expect(await run('member', 'add', 'mei', '--preset', 'Viewer', '--keys', 'workspace.read', '--workspace', workspace)).toMatchObject({ code: 2 })
+		// Nothing was written, not even an empty roster.
+		expect(await lstat(accessStorePaths(home, workspace).file).catch(() => undefined)).toBeUndefined()
+	})
+
+	it('resolves --preset by name, ignoring case, and names the available presets when none matches (Rules 01a11c09-ccc6, 01a11c09-cb79)', async () => {
+		const { home, workspace, run } = await setup()
+		const unknown = await run('member', 'add', 'mei', '--preset', 'Translator', '--workspace', workspace)
+		expect(unknown).toMatchObject({ code: 1, err: expect.stringContaining('No Access preset named "Translator". The presets are Viewer, Reviewer, Editor, Owner.') })
+		expect(await lstat(accessStorePaths(home, workspace).file).catch(() => undefined)).toBeUndefined()
+		expect(await run('member', 'add', 'mei', '--preset', 'reviewer', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('Added human member mei (Reviewer, 8 keys)') })
+		// The preset's keys are copied; the member records no reference to the preset (Rule 01a11c09-b8c6).
+		const [mei] = await storedMembers(home, workspace)
+		expect(mei).toEqual({ id: expect.any(String), nickname: 'mei', kind: 'human', keys: presetKeys('reviewer'), createdAt: expect.any(String) })
+		expect(await run('member', 'set', 'mei', '--preset', 'Nope', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('The presets are Viewer, Reviewer, Editor, Owner.') })
+	})
+
+	it('applies a preset to an Agent without its humanOnly keys, through add and set (Rule 01a11c74-26ef)', async () => {
+		const { home, workspace, run } = await setup()
+		const added = await run('member', 'add', 'claude', '--kind', 'agent', '--preset', 'Owner', '--workspace', workspace)
+		expect(added.code).toBe(0)
+		expect(added.out).toContain(`Applied the Owner preset without ${HUMAN_ONLY_PERMISSION_KEYS.filter(key => presetKeys('owner').includes(key)).join(', ')}: an Agent cannot hold humanOnly keys.`)
+		// The Owner keys an Agent can hold are the Editor keys an Agent can hold, so the label is Editor.
+		expect(added.out).toContain(`Added agent member claude (Editor, ${keysForRole('agent', 'editor').length} keys)`)
+		expect((await storedMembers(home, workspace))[0]!.keys).toEqual(keysForRole('agent', 'owner'))
+		expect((await storedMembers(home, workspace))[0]!.keys.some(key => HUMAN_ONLY_PERMISSION_KEYS.includes(key as never))).toBe(false)
+		const set = await run('member', 'set', 'claude', '--preset', 'Reviewer', '--workspace', workspace)
+		expect(set).toMatchObject({ code: 0, out: expect.stringContaining('Applied the Reviewer preset without reviews.resolve') })
+		expect((await storedMembers(home, workspace))[0]!.keys).toEqual(presetKeys('reviewer').filter(key => key !== 'reviews.resolve'))
+		// A preset without humanOnly keys applies whole, without a note.
+		expect((await run('member', 'set', 'claude', '--preset', 'Viewer', '--workspace', workspace)).out).not.toContain('Applied the')
+	})
+
+	it('takes explicit keys and --all-keys under the roster invariants (Clauses 01a11c09-a349, 01a128be-9a51)', async () => {
+		const { home, workspace, run } = await setup()
+		const root = await run('member', 'add', 'root', '--all-keys', '--workspace', workspace)
+		expect(root).toMatchObject({ code: 0, out: expect.stringContaining(`(Owner, ${PERMISSION_KEYS.length} keys)`) })
+		expect(root.out).not.toContain('without')
+		// --all-keys names the humanOnly keys it leaves out for an Agent, as a preset does.
+		const bot = await run('member', 'add', 'bot', '--kind', 'agent', '--all-keys', '--workspace', workspace)
+		expect(bot).toMatchObject({ code: 0, out: expect.stringContaining(`Gave every catalog key without ${HUMAN_ONLY_PERMISSION_KEYS.join(', ')}: an Agent cannot hold humanOnly keys.`) })
+		expect((await storedMembers(home, workspace)).map(member => member.keys)).toEqual([[...PERMISSION_KEYS], PERMISSION_KEYS.filter(key => !HUMAN_ONLY_PERMISSION_KEYS.includes(key))])
+		const translator = await run('member', 'add', 'lin', '--keys', ' locales.write , workspace.read,reviews.write', '--workspace', workspace)
+		expect(translator).toMatchObject({ code: 0, out: expect.stringContaining('Added human member lin (Custom, 3 keys)') })
+		expect((await storedMembers(home, workspace))[2]!.keys).toEqual(['workspace.read', 'reviews.write', 'locales.write'])
+		expect(await run('member', 'add', 'x1', '--keys', 'views.write', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('`views.write` requires `workspace.read`') })
+		expect(await run('member', 'add', 'x2', '--kind', 'agent', '--keys', 'workspace.read,members.manage', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('is an Agent and cannot hold `members.manage`') })
+		// A key outside this version's catalog is refused on input (owner ruling 1 of 2026-10-11).
+		expect(await run('member', 'add', 'x3', '--keys', 'workspace.read,widgets.paint', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('`widgets.paint` is not a permission key of this UIUX version') })
+		expect(await run('member', 'add', 'x4', '--keys', 'Views', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('is not a permission key name') })
+		expect((await storedMembers(home, workspace)).map(member => member.nickname)).toEqual(['root', 'bot', 'lin'])
+	})
+
+	it('grants and revokes keys with member set, keeping the invariants (Rules 01a11c09-b932, 01a11485-ea91)', async () => {
+		const { home, workspace, run } = await setup()
+		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
+		await run('member', 'add', 'mei', '--preset', 'Viewer', '--workspace', workspace)
+		await run('member', 'add', 'claude', '--kind', 'agent', '--preset', 'Editor', '--workspace', workspace)
+		// A host user restores a manager with --grant (Rule 01a11c09-b932).
+		expect(await run('member', 'set', 'mei', '--grant', 'members.manage', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('Updated mei: human, Custom, 4 keys.') })
+		expect(await run('member', 'set', 'deviltea', '--revoke', 'members.manage', '--workspace', workspace)).toMatchObject({ code: 0 })
+		expect(await run('member', 'set', 'mei', '--revoke', 'members.manage', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('last human holder of `members.manage`') })
+		expect(await run('member', 'set', 'claude', '--grant', 'reviews.resolve', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('humanOnly') })
+		expect(await run('member', 'set', 'claude', '--revoke', 'reviews.write', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('`reviews.submit` requires `reviews.write`') })
+		expect(await run('member', 'set', 'claude', '--grant', 'widgets.paint', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('`widgets.paint` is not a permission key of this UIUX version') })
+		expect(await run('member', 'set', 'claude', '--grant', 'views.write', '--revoke', 'views.write', '--workspace', workspace)).toMatchObject({ code: 2, err: expect.stringContaining('--grant and --revoke both name views.write') })
+		// A preset, then an adjustment, in one write; a revoke of a key not held only warns.
+		const adjusted = await run('member', 'set', 'claude', '--preset', 'Reviewer', '--grant', 'locales.write', '--revoke', 'reviews.promote,flows.write', '--nickname', 'claude-l10n', '--workspace', workspace)
+		expect(adjusted).toMatchObject({ code: 0, err: 'uiux: warning: claude-l10n did not hold flows.write; nothing to revoke there.' })
+		expect((await storedMembers(home, workspace))[2]).toMatchObject({ nickname: 'claude-l10n', keys: ['workspace.read', 'history.read', 'product-kit.source.read', 'reviews.write', 'reviews.submit', 'locales.write', 'checkpoints.create'] })
+	})
+
+	it('keeps a stored key unknown to this version through grants and shows it in member list --keys (Rule 01a11c09-b7ec)', async () => {
+		const { home, workspace, run } = await setup()
+		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
+		await run('member', 'add', 'mei', '--preset', 'Viewer', '--workspace', workspace)
+		// A newer UIUX stored a key this version does not know (written by hand: this version refuses to give it).
+		const rosterFile = accessStorePaths(home, workspace).file
+		const roster = JSON.parse(await readFile(rosterFile, 'utf8')) as { members: { nickname: string; keys: string[] }[] }
+		roster.members.find(member => member.nickname === 'mei')!.keys.push('future.capability')
+		await writeFile(rosterFile, `${JSON.stringify(roster, null, 2)}\n`)
+		expect(await run('member', 'set', 'mei', '--grant', 'reviews.write,future.capability', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('Updated mei: human, Custom, 5 keys.') })
+		expect((await storedMembers(home, workspace))[1]!.keys).toEqual([...presetKeys('viewer'), 'reviews.write', 'future.capability'])
+		const list = await run('member', 'list', '--workspace', workspace)
+		expect(list.out).toMatch(/deviltea\s+human\s+Owner\s+0\s+0\s+22$/mu)
+		expect(list.out).toMatch(/mei\s+human\s+Custom\s+0\s+0\s+5$/mu)
+		const full = await run('member', 'list', '--keys', '--workspace', workspace)
+		expect(full.out).toMatch(/mei\s+human\s+Custom\s+0\s+0\s+workspace\.read, history\.read, product-kit\.source\.read, reviews\.write, future\.capability \(unknown\)$/mu)
+		expect(full.out).toMatch(new RegExp(`deviltea\\s+human\\s+Owner\\s+0\\s+0\\s+${PERMISSION_KEYS.join(', ').replaceAll('.', '\\.')}$`, 'mu'))
+	})
+
+	it('keeps a stored key unknown to this version when a preset is applied, so the label is Custom (owner ruling of 2026-10-11 on PR #189)', async () => {
+		const { home, workspace, run } = await setup()
+		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
+		await run('member', 'add', 'mei', '--preset', 'Editor', '--workspace', workspace)
+		const rosterFile = accessStorePaths(home, workspace).file
+		const roster = JSON.parse(await readFile(rosterFile, 'utf8')) as { members: { nickname: string; keys: string[] }[] }
+		roster.members.find(member => member.nickname === 'mei')!.keys.push('future.key')
+		await writeFile(rosterFile, `${JSON.stringify(roster, null, 2)}\n`)
+		// The preset replaces only the keys this version knows.
+		expect(await run('member', 'set', 'mei', '--preset', 'Viewer', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('Updated mei: human, Custom, 4 keys.') })
+		expect((await storedMembers(home, workspace))[1]!.keys).toEqual([...presetKeys('viewer'), 'future.key'])
+		expect((await run('member', 'list', '--workspace', workspace)).out).toMatch(/mei\s+human\s+Custom\s+0\s+0\s+4$/mu)
+		// --grant and --revoke of known keys keep it too.
+		expect(await run('member', 'set', 'mei', '--grant', 'reviews.write', '--revoke', 'history.read', '--workspace', workspace)).toMatchObject({ code: 0 })
+		expect((await storedMembers(home, workspace))[1]!.keys).toEqual(['workspace.read', 'product-kit.source.read', 'reviews.write', 'future.key'])
+	})
+
+	it('says a humanOnly key revoked from an Agent was never granted to it, not that it was not held', async () => {
+		const { workspace, run } = await setup()
+		await run('member', 'add', 'claude', '--kind', 'agent', '--preset', 'Editor', '--workspace', workspace)
+		const revoked = await run('member', 'set', 'claude', '--preset', 'Owner', '--revoke', 'members.manage,handoff.export', '--workspace', workspace)
+		expect(revoked.code).toBe(0)
+		expect(revoked.err).toBe('uiux: warning: members.manage is a humanOnly key, not granted to an Agent such as claude; nothing to revoke there.')
+		expect(revoked.out).not.toContain('did not hold')
+		const notHeld = await run('member', 'set', 'claude', '--revoke', 'handoff.export,reviews.resolve', '--workspace', workspace)
+		expect(notHeld.err).toBe([
+			'uiux: warning: claude did not hold handoff.export; nothing to revoke there.',
+			'uiux: warning: reviews.resolve is a humanOnly key, not granted to an Agent such as claude; nothing to revoke there.',
+		].join('\n'))
+	})
+
+	it('prints a bootstrap command for an Agent that works as printed (Rule 01a11c09-b9a6)', async () => {
+		const { home, workspace, run } = await setup()
+		const store = (await AccessStore.open({ workspaceRoot: workspace, home, create: true }))!
+		const banner = await new AccessService({ store, leases: createLeaseManager() }).bootstrap(['http://127.0.0.1:3000'])
+		const command = banner!.find(line => line.includes('uiux member add claude'))!.trim()
+		expect(command).toBe(`uiux member add claude --workspace ${workspace} --kind agent --preset Editor`)
+		expect(await run(...command.split(' ').slice(1))).toMatchObject({ code: 0, out: expect.stringContaining('Added agent member claude (Editor,') })
+		// A Workspace without presets gets --keys instead, which works too.
+		const fallback = agentAccessOption([])
+		expect(fallback).toBe(`--keys ${keysForRole('agent', 'editor').join(',')}`)
+		expect(await run('member', 'add', 'claude-2', '--kind', 'agent', ...fallback.split(' '), '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('(Editor,') })
+		expect(agentAccessOption([{ id: 'qa', name: 'QA team' }])).toBe('--preset \'QA team\'')
+	})
 })
