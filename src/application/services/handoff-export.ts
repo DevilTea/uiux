@@ -180,6 +180,12 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			}
 		}
 		const wsSchemaVersion = wsRead.resource.schemaVersion ?? 1
+		// From schemaVersion 5 the Adapter list is the Product Kit file's, and a `./` Adapter resolves
+		// from `kit/` (Clauses 01a1144e-538e-705f-afdc-841028c410e4 and 01a115cd-d109-76d3-9622-85d0080c60b6).
+		const workspaceAdapters = persistence.layout.productKitPath
+			? (await persistence.productKit.read())?.resource.adapters ?? []
+			: wsRead.resource.adapters ?? []
+		const adapterModuleResolver = () => new NodeWorkspaceAdapterModuleResolver({ layout: persistence.layout })
 
 		const viewsToInclude = new Set<string>()
 		const flowsToInclude = new Set<string>()
@@ -313,7 +319,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 		// canonical {$asset} bindings. Discover those references from View IR before
 		// materializing the Asset closure; do not guess from arbitrary strings.
 		const assetCatalogByWidgetType = new Map<string, AdapterWidgetCatalogEntry[]>()
-		const rawAdaptersForAssetDiscovery = wsRead.resource.adapters ?? []
+		const rawAdaptersForAssetDiscovery = workspaceAdapters
 		const nonRootWidgetTypes = new Set([...usedWidgetTypes].filter(type => type !== 'RootShell'))
 		if (nonRootWidgetTypes.size > 0 && rawAdaptersForAssetDiscovery.length > 0) {
 			for (const selection of rawAdaptersForAssetDiscovery) {
@@ -321,7 +327,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 					const single = await resolveWorkspaceAdapterSet({
 						workspaceRoot: persistence.root,
 						adapters: [selection],
-						resolver: new NodeWorkspaceAdapterModuleResolver(),
+						resolver: adapterModuleResolver(),
 						loader: new NodeAdapterManifestLoader(extractProductAdapterManifest),
 						apiCompatibility: productAdapterApiCompatibility,
 						registryInspector: productAdapterRegistryInspector,
@@ -610,7 +616,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 
 		// 8. Adapters & Widget Implementation References
 		const neededWidgetTypes = new Set([...usedWidgetTypes].filter(t => t !== 'RootShell'))
-		const rawAdapters = wsRead.resource.adapters ?? []
+		const rawAdapters = workspaceAdapters
 		const neededAdapterSelections: typeof rawAdapters = []
 
 		if (neededWidgetTypes.size > 0 && rawAdapters.length > 0) {
@@ -620,7 +626,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 					const singleRes = await resolveWorkspaceAdapterSet({
 						workspaceRoot: persistence.root,
 						adapters: [selection],
-						resolver: new NodeWorkspaceAdapterModuleResolver(),
+						resolver: adapterModuleResolver(),
 						loader: new NodeAdapterManifestLoader(extractProductAdapterManifest),
 						apiCompatibility: productAdapterApiCompatibility,
 						registryInspector: productAdapterRegistryInspector,
@@ -650,7 +656,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			adaptersResolution = await resolveWorkspaceAdapterSet({
 				workspaceRoot: persistence.root,
 				adapters: neededAdapterSelections,
-				resolver: new NodeWorkspaceAdapterModuleResolver(),
+				resolver: adapterModuleResolver(),
 				loader: new NodeAdapterManifestLoader(extractProductAdapterManifest),
 				apiCompatibility: productAdapterApiCompatibility,
 				registryInspector: productAdapterRegistryInspector,
