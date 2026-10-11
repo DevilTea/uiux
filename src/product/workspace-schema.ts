@@ -1,11 +1,11 @@
 import { posix } from 'node:path'
 
 import { canonicalJsonBytes } from '../domain/canonical-json'
-import { emptyProductKit } from '../domain/product-kit/schema'
+import { emptyProductKit, isProductKitPackageName } from '../domain/product-kit/schema'
 import { validateReviewThread } from '../domain/reviews/schema'
-import { isRecord } from '../domain/validation'
+import { isRecord, isSafeRelativePath } from '../domain/validation'
 import { LEGACY_LAYOUT, layoutForSchemaVersion, V5_LAYOUT } from '../persistence/paths'
-import { defineWorkspaceSchemaPolicy, type WorkspaceMigrationRefusal, type WorkspaceMigrationStep, type WorkspaceSnapshot } from '../persistence/schema-policy'
+import { defineWorkspaceSchemaPolicy, type WorkspaceMigrationContext, type WorkspaceMigrationRefusal, type WorkspaceMigrationStep, type WorkspaceSnapshot } from '../persistence/schema-policy'
 import packageJson from '../../package.json' with { type: 'json' }
 
 /**
@@ -137,37 +137,93 @@ export const WORKSPACE_V3_TO_V4_STEP: WorkspaceMigrationStep = Object.freeze({
 const OLD_METADATA_DIRECTORY = LEGACY_LAYOUT.metadataDir
 /** The kit project inside the old metadata directory, as a path relative to the old Workspace root. */
 const OLD_KIT_DIRECTORY = `${OLD_METADATA_DIRECTORY}/${V5_LAYOUT.codeDir!}`
+/** The kit project's package file, relative to the old Workspace root; `uiux migrate` only reads it. */
+const OLD_KIT_PACKAGE_FILE = `${OLD_KIT_DIRECTORY}/package.json`
 
 /**
- * Where a v4 `./` Adapter specifier goes in `schemaVersion` 5, by the module path `<p>` normalized
- * relative to the old Workspace root:
+ * The `package.json` members whose keys are the kit project's declared dependencies (owner ruling
+ * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18858542).
  *
- * - `kit`: `<p>` lies in `.uiux/kit/`, and `rebased` is the specifier relative to `kit/`
- *   (Clause 01a11bb1-8f5f-77ea-817b-46679c5a6475);
- * - `outside`: `<p>` lies outside `.uiux/kit/`, which `uiux.v4-to-v5` refuses
- *   (Rule 01a11bb1-9658-7f9e-972e-bd09136a5735), and `replacement` is the specifier to write by hand
- *   once the module was moved (Clause 01a12626-e5c9-7753-8019-cdf82a5410ce: `./.uiux/kit/<p>`).
- *   The edge forms the Contract leaves to this step get the closest useful replacement: a path
- *   already under `.uiux/` keeps its place below `.uiux/kit/`; a path in a `node_modules/` directory
- *   names that package with a bare specifier, which the kit project declares instead; and a path that
- *   leaves the old root keeps only its file name, with `exact: false` since the module's place in the
- *   kit project is the operator's choice.
+ * TODO(#141): unify with `KIT_DEPENDENCY_MEMBERS`, `bareSpecifierPackageName` and
+ * `readDeclaredKitDependencies` of `src/adapters/kit-dependencies.ts` (PR #186) once both have landed.
+ */
+const KIT_DEPENDENCY_MEMBERS = Object.freeze(['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'] as const)
+
+/**
+ * The npm package a bare specifier names (`name` or `@scope/name`, then an optional plain subpath),
+ * or `undefined` when it names none (a `#` import, a malformed name, or a subpath with an empty,
+ * `.` or `..` segment or a percent escape), the same reading as the v5 dependency guard.
+ */
+export function bareSpecifierPackageName(specifier: string): string | undefined {
+	const segments = specifier.split('/')
+	const nameSegments = specifier.startsWith('@') ? 2 : 1
+	if (segments.length < nameSegments) return undefined
+	const name = segments.slice(0, nameSegments).join('/')
+	if (!isProductKitPackageName(name)) return undefined
+	if (segments.length > nameSegments) {
+		const subpath = segments.slice(nameSegments).join('/')
+		if (!isSafeRelativePath(subpath) || subpath.includes('%')) return undefined
+	}
+	return name
+}
+
+/**
+ * The dependency names a kit `package.json` declares in any of the four dependency members; a kit
+ * without the file declares none. A file that is not a JSON object, or whose member is not an
+ * object, throws: the check fails closed rather than guess.
+ */
+export function declaredKitDependencies(bytes: Uint8Array | undefined): ReadonlySet<string> {
+	if (!bytes) return new Set()
+	const parsed = parseJson(bytes, OLD_KIT_PACKAGE_FILE)
+	if (!isRecord(parsed)) throw new TypeError(`${OLD_KIT_PACKAGE_FILE} is not a JSON object.`)
+	const declared = new Set<string>()
+	for (const member of KIT_DEPENDENCY_MEMBERS) {
+		const value = parsed[member]
+		if (value === undefined) continue
+		if (!isRecord(value)) throw new TypeError(`${OLD_KIT_PACKAGE_FILE} member ${member} is not an object.`)
+		for (const name of Object.keys(value)) declared.add(name)
+	}
+	return declared
+}
+
+/**
+ * Where a v4 Adapter specifier goes in `schemaVersion` 5. A `./` specifier is placed by its module
+ * path `<p>` normalized relative to the old Workspace root:
+ *
+ * - `bare`: a bare specifier, kept as it is; `packageName` is the package it names, if any;
+ * - `kit`: `<p>` lies in `.uiux/kit/` (outside `.uiux/kit/node_modules/`), and `rebased` is the
+ *   specifier relative to `kit/` (Clause 01a11bb1-8f5f-77ea-817b-46679c5a6475);
+ * - `outside`: `uiux.v4-to-v5` refuses it (Rule 01a11bb1-9658-7f9e-972e-bd09136a5735), and
+ *   `replacement` is the specifier to write by hand: `./.uiux/kit/<p>` once the module was moved
+ *   (Clause 01a12626-e5c9-7753-8019-cdf82a5410ce). A path in a `node_modules/` directory, the kit
+ *   project's own included, gets the bare specifier of its package instead (owner ruling 2 of
+ *   https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18858856), with that package
+ *   in `packageName`. The other edge forms the Contract leaves to this step: a path already under
+ *   `.uiux/` keeps its place below `.uiux/kit/`, and a path that leaves the old root keeps only its
+ *   file name, with `exact: false` since the module's place in the kit project is the operator's choice.
  */
 export type V4AdapterSpecifierPlacement =
-	| Readonly<{ kind: 'bare' }>
+	| Readonly<{ kind: 'bare'; packageName?: string }>
 	| Readonly<{ kind: 'kit'; rebased: string }>
-	| Readonly<{ kind: 'outside'; replacement: string; exact: boolean }>
+	| Readonly<{ kind: 'outside'; replacement: string; exact: boolean; packageName?: string }>
 
 export function placeV4AdapterSpecifier(specifier: string): V4AdapterSpecifierPlacement {
-	if (!specifier.startsWith('./')) return { kind: 'bare' }
+	if (!specifier.startsWith('./')) {
+		const packageName = bareSpecifierPackageName(specifier)
+		return packageName ? { kind: 'bare', packageName } : { kind: 'bare' }
+	}
 	const path = posix.normalize(specifier.slice(2))
 	if (path === '..' || path.startsWith('../'))
 		return { kind: 'outside', replacement: `./${OLD_KIT_DIRECTORY}/${posix.basename(path)}`, exact: false }
+	const packagePath = /(?:^|\/)node_modules\/(?<rest>.+)$/u.exec(path)?.groups?.rest
+	if (packagePath !== undefined) {
+		const packageName = bareSpecifierPackageName(packagePath)
+		return packageName
+			? { kind: 'outside', replacement: packagePath, exact: true, packageName }
+			: { kind: 'outside', replacement: '<package>/<subpath>', exact: false }
+	}
 	if (path.startsWith(`${OLD_KIT_DIRECTORY}/`))
 		return { kind: 'kit', rebased: `./${path.slice(OLD_KIT_DIRECTORY.length + 1)}` }
-	const packagePath = /(?:^|\/)node_modules\/(?<rest>.+)$/u.exec(path)?.groups?.rest
-	if (packagePath && !packagePath.startsWith('.'))
-		return { kind: 'outside', replacement: packagePath, exact: true }
 	if (path === '.' || path === OLD_METADATA_DIRECTORY || path === OLD_KIT_DIRECTORY)
 		return { kind: 'outside', replacement: `./${OLD_KIT_DIRECTORY}/<module>`, exact: false }
 	const inKit = path.startsWith(`${OLD_METADATA_DIRECTORY}/`) ? path.slice(OLD_METADATA_DIRECTORY.length + 1) : path
@@ -185,35 +241,74 @@ export const WORKSPACE_V4_TO_V5_STEP_ID = 'uiux.v4-to-v5'
  * move of the data directories (`FileNativePersistence.migrateWorkspace`). Deterministic and
  * idempotent; it re-validates every Review file that was valid under 4 against 5.
  *
- * `refuse` lists every `./` Adapter outside `.uiux/kit/` with its replacement (Rule
- * 01a11bb1-9658-7f9e-972e-bd09136a5735, Clause 01a12626-e5c9-7753-8019-cdf82a5410ce); `uiux
- * migrate` runs it before anything is written. `apply` alone never refuses, so an in-memory upgrade
- * of a version recorded before the hand edit (Rule 01a12626-6a4f-72dc-af92-67b3b6355d66) still
- * reads: it keeps such a specifier unchanged.
+ * `refuse`, which `uiux migrate` runs before anything is written, lists every Adapter the
+ * relocated Workspace could not resolve: a `./` Adapter outside `.uiux/kit/` with its replacement
+ * (Rule 01a11bb1-9658-7f9e-972e-bd09136a5735, Clause 01a12626-e5c9-7753-8019-cdf82a5410ce), and,
+ * per owner ruling 2 of https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18858856,
+ * a bare Adapter whose package `.uiux/kit/package.json` does not declare, or a `./` Adapter in
+ * `.uiux/kit/node_modules/`, with its bare replacement. It names the packages to declare and writes
+ * no `package.json`. `apply` alone never refuses, so an in-memory upgrade of a version recorded
+ * before the hand edit (Rule 01a12626-6a4f-72dc-af92-67b3b6355d66) still reads: it keeps such a
+ * specifier unchanged.
  */
 export const WORKSPACE_V4_TO_V5_STEP: WorkspaceMigrationStep = Object.freeze({
 	id: WORKSPACE_V4_TO_V5_STEP_ID,
 	fromVersion: 4,
 	toVersion: 5,
-	refuse(snapshot: WorkspaceSnapshot): WorkspaceMigrationRefusal | undefined {
-		const adapters = v4Adapters(snapshot)
-		const items = adapters.flatMap((adapter, index) => {
+	async refuse(snapshot: WorkspaceSnapshot, context: WorkspaceMigrationContext): Promise<WorkspaceMigrationRefusal | undefined> {
+		let declared: ReadonlySet<string> | undefined
+		const isDeclared = async (packageName: string) => {
+			declared ??= declaredKitDependencies(await context.readWorkspaceFile(OLD_KIT_PACKAGE_FILE))
+			return declared.has(packageName)
+		}
+		const items: { path: string; message: string }[] = []
+		const toDeclare = new Set<string>()
+		let toMove = false
+		let toEdit = false
+		for (const [index, adapter] of v4Adapters(snapshot).entries()) {
 			const specifier = isRecord(adapter) ? adapter.moduleSpecifier : undefined
-			if (typeof specifier !== 'string') return []
+			if (typeof specifier !== 'string') continue
+			const path = `/adapters/${index}/moduleSpecifier`
 			const placement = placeV4AdapterSpecifier(specifier)
-			if (placement.kind !== 'outside') return []
-			const replacement = placement.exact
-				? `replace it with ${placement.replacement}`
-				: `move the module into ${OLD_KIT_DIRECTORY}/ and replace it with its path there, such as ${placement.replacement}`
-			return [{ path: `/adapters/${index}/moduleSpecifier`, message: `${specifier} lies outside ${OLD_KIT_DIRECTORY}/: ${replacement}` }]
-		})
+			if (placement.kind === 'kit') continue
+			if (placement.kind === 'bare') {
+				if (!placement.packageName) {
+					toEdit = true
+					items.push({ path, message: `${specifier} names no npm package, so ${OLD_KIT_PACKAGE_FILE} cannot declare it: replace it with a package specifier or a ./ module in ${OLD_KIT_DIRECTORY}/` })
+				}
+				else if (!await isDeclared(placement.packageName)) {
+					toDeclare.add(placement.packageName)
+					items.push({ path, message: `${specifier} names the package ${placement.packageName}, which ${OLD_KIT_PACKAGE_FILE} does not declare: declare it there` })
+				}
+				continue
+			}
+			toEdit = true
+			if (placement.packageName !== undefined) {
+				const undeclared = !await isDeclared(placement.packageName)
+				if (undeclared) toDeclare.add(placement.packageName)
+				items.push({ path, message: `${specifier} lies in a node_modules/ directory: replace it with ${placement.replacement}${undeclared ? ` and declare ${placement.packageName} in ${OLD_KIT_PACKAGE_FILE}` : ''}` })
+				continue
+			}
+			toMove = true
+			items.push({
+				path,
+				message: placement.exact
+					? `${specifier} lies outside ${OLD_KIT_DIRECTORY}/: replace it with ${placement.replacement}`
+					: `${specifier} lies outside ${OLD_KIT_DIRECTORY}/: move the module into ${OLD_KIT_DIRECTORY}/ and replace it with its path there, such as ${placement.replacement}`,
+			})
+		}
 		if (items.length === 0) return undefined
-		const manifestPath = LEGACY_LAYOUT.manifestPath
+		const actions = [
+			...(toMove ? [`Move each ./ module into ${OLD_KIT_DIRECTORY}/.`] : []),
+			...(toEdit ? [`Edit each listed specifier in ${LEGACY_LAYOUT.manifestPath} by hand as shown.`] : []),
+			...(toDeclare.size > 0 ? [`Declare ${[...toDeclare].sort().join(', ')} in ${OLD_KIT_PACKAGE_FILE} (dependencies, devDependencies, peerDependencies or optionalDependencies); uiux migrate writes no package.json.`] : []),
+		]
 		return {
-			message: `${WORKSPACE_V4_TO_V5_STEP_ID} refuses ${items.length} ./ Adapter${items.length === 1 ? '' : 's'} outside ${OLD_KIT_DIRECTORY}/, and nothing was written. Move each module into ${OLD_KIT_DIRECTORY}/, edit its specifier in ${manifestPath} by hand as listed, then run uiux migrate again.`,
+			message: `${WORKSPACE_V4_TO_V5_STEP_ID} refuses ${items.length} Adapter${items.length === 1 ? '' : 's'} that the relocated Workspace could not resolve, and nothing was written. ${actions.join(' ')} Then run uiux migrate again.`,
 			items,
 		}
 	},
+
 	apply(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
 		const from = layoutForSchemaVersion(4)
 		const to = layoutForSchemaVersion(5)

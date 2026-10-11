@@ -23,9 +23,20 @@ export type WorkspaceMigrationStep = Readonly<{
 	 * Optional refusal check, run on the step's input snapshot by a real or dry-run `uiux migrate`
 	 * before the step applies, never by an in-memory upgrade of a recorded version. A result refuses
 	 * the whole migration: `message` explains it, and each item names one JSON Pointer path of the
-	 * source snapshot's manifest with what to change there.
+	 * source snapshot's manifest with what to change there. `context` reads the Workspace files the
+	 * check needs beyond the canonical snapshot (the kit project's package file).
 	 */
-	refuse?(snapshot: WorkspaceSnapshot): WorkspaceMigrationRefusal | undefined
+	refuse?(snapshot: WorkspaceSnapshot, context: WorkspaceMigrationContext): WorkspaceMigrationRefusal | undefined | Promise<WorkspaceMigrationRefusal | undefined>
+}>
+
+/** What a step's refusal check may read of the Workspace being migrated. */
+export type WorkspaceMigrationContext = Readonly<{
+	/**
+	 * The bytes of a regular file at `relativePath` (relative to the selected Workspace root, `/`
+	 * separated, never through a symbolic link), or `undefined` when it does not exist. Any other
+	 * problem throws, so a check never decides on a guess.
+	 */
+	readWorkspaceFile(relativePath: string): Promise<Uint8Array | undefined>
 }>
 
 /** Why a migration step refuses a Workspace (see `WorkspaceMigrationStep.refuse`). */

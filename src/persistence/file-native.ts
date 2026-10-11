@@ -39,6 +39,7 @@ import {
 	findMigrationPlan,
 	inspectWorkspaceManifest,
 	type WorkspaceInspection,
+	type WorkspaceMigrationContext,
 	type WorkspaceMigrationStep,
 	type WorkspaceSchemaPolicy,
 	type WorkspaceSnapshot,
@@ -58,6 +59,7 @@ export type PersistenceFaultPoint =
 	| 'migration.after_apply'
 	| 'relocation.before_move'
 	| 'relocation.after_move'
+	| 'relocation.before_rollback_move'
 
 export type TransactionOperation = 'asset' | 'migration' | 'decision-promotion'
 
@@ -298,14 +300,18 @@ type PlannedMigration = Readonly<{
 }>
 
 /**
- * The pending journal of a relocation, in the format of its target layout (`{ layout, entries }`,
- * `entries` relative to the new root) plus `relocation`: the old layout, its metadata directory
+ * The pending journal of a relocation, `{ layout, relocationEntries, relocation }`: `layout` names the
+ * target layout as the `schemaVersion` 5 journal format does, `relocationEntries` are the files to
+ * write, relative to the new root, and `relocation` records the old layout, its metadata directory
  * (which becomes the new root), the data directories moved into it, and the digest of the new
- * manifest, whose presence marks the commit point.
+ * manifest, whose presence marks the commit point. The journal has neither `changes` (the old
+ * layout's format) nor `entries` (the plain `schemaVersion` 5 format), so every build that predates
+ * relocations, an old-layout one or a dormant `schemaVersion` 5 one, fails its recovery and keeps
+ * the journal instead of applying it as a plain transaction.
  */
 type RelocationJournal = Readonly<{
 	layout: string
-	entries: readonly JournalEntry[]
+	relocationEntries: readonly JournalEntry[]
 	relocation: Readonly<{ from: string; metadataDir: string; moves: readonly string[]; manifest: string }>
 }>
 
@@ -332,14 +338,14 @@ async function readRelocationJournal(journalPath: string): Promise<RelocationJou
 	catch { return undefined }
 	if (!isRecord(value) || !Object.hasOwn(value, 'relocation')) return undefined
 	const relocation = value.relocation
-	if (value.layout !== V5_LAYOUT.id || Object.hasOwn(value, 'changes') || !Array.isArray(value.entries) || !isRecord(relocation))
+	if (value.layout !== V5_LAYOUT.id || Object.hasOwn(value, 'changes') || Object.hasOwn(value, 'entries') || !Array.isArray(value.relocationEntries) || !isRecord(relocation))
 		throw new TypeError('Relocation journal has an invalid shape.')
 	if (relocation.from !== LEGACY_LAYOUT.id || relocation.metadataDir !== LEGACY_LAYOUT.metadataDir || typeof relocation.manifest !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(relocation.manifest)
 		|| !Array.isArray(relocation.moves) || relocation.moves.some(move => typeof move !== 'string' || !RELOCATED_DATA_DIRECTORIES.includes(move))
 		|| new Set(relocation.moves).size !== relocation.moves.length)
 		throw new TypeError('Relocation journal has an invalid relocation record.')
 	const entries: JournalEntry[] = []
-	for (const entry of value.entries) {
+	for (const entry of value.relocationEntries) {
 		if (!isRecord(entry) || typeof entry.path !== 'string' || typeof entry.existed !== 'boolean')
 			throw new TypeError('Relocation journal contains an invalid entry.')
 		assertTransactionalPath(V5_LAYOUT, entry.path)
@@ -349,7 +355,18 @@ async function readRelocationJournal(journalPath: string): Promise<RelocationJou
 	}
 	if (new Set(entries.map(entry => entry.path)).size !== entries.length)
 		throw new TypeError('Relocation journal repeats a path.')
-	return { layout: V5_LAYOUT.id, entries, relocation: { from: LEGACY_LAYOUT.id, metadataDir: LEGACY_LAYOUT.metadataDir, moves: relocation.moves as string[], manifest: relocation.manifest } }
+	return { layout: V5_LAYOUT.id, relocationEntries: entries, relocation: { from: LEGACY_LAYOUT.id, metadataDir: LEGACY_LAYOUT.metadataDir, moves: relocation.moves as string[], manifest: relocation.manifest } }
+}
+
+/** Removes a directory only when it exists and is empty; anything else stays. */
+async function removeEmptyDirectory(absoluteDirectory: string): Promise<void> {
+	try { await fs.rmdir(absoluteDirectory) }
+	catch (error) {
+		const code = (error as NodeJS.ErrnoException).code
+		if (code !== 'ENOENT' && code !== 'ENOTEMPTY' && code !== 'ENOTDIR' && code !== 'EEXIST') throw error
+		return
+	}
+	await syncDirectory(dirname(absoluteDirectory))
 }
 
 async function lstatOrUndefined(absolutePath: string): Promise<import('node:fs').Stats | undefined> {
@@ -501,20 +518,25 @@ export class FileNativePersistence {
 		if (target === this.layout) {
 			await beforeSteps?.({ fromVersion, toVersion })
 			const initialSnapshot = await this.scanCanonicalSnapshotUnlocked()
-			const { snapshot, steps } = await applyMigrationPlan(initialSnapshot, read.inspection.migrationPlan, this.schemaPolicy, { refusals: true })
+			const { snapshot, steps } = await applyMigrationPlan(initialSnapshot, read.inspection.migrationPlan, this.schemaPolicy, { refusals: this.migrationContext() })
 			return { fromVersion, toVersion, revision: read.revision, steps, changes: diffSnapshots(initialSnapshot, snapshot), initialSnapshot }
 		}
 		// A plan that ends in another layout relocates the Workspace (`uiux.v4-to-v5`). It is planned in
 		// full, refusals and the relocation's own checks included, before the pre-migration Checkpoint, so
 		// a refused relocation writes nothing at all (Rule 01a11bb1-9658-7f9e-972e-bd09136a5735).
 		const initialSnapshot = await this.scanCanonicalSnapshotUnlocked()
-		const { snapshot, steps } = await applyMigrationPlan(initialSnapshot, read.inspection.migrationPlan, this.schemaPolicy, { refusals: true })
+		const { snapshot, steps } = await applyMigrationPlan(initialSnapshot, read.inspection.migrationPlan, this.schemaPolicy, { refusals: this.migrationContext() })
 		const moves = await this.preflightRelocationUnlocked(target)
 		await beforeSteps?.({ fromVersion, toVersion })
 		// The files to write in the new root, compared with the current files at their logical paths
 		// there: the data files keep their paths, and only the manifest's path changes.
 		const relocatedInitial = new Map([...initialSnapshot].map(([path, bytes]) => [path === this.layout.manifestPath ? target.manifestPath : path, bytes]))
 		return { fromVersion, toVersion, revision: read.revision, steps, changes: diffSnapshots(relocatedInitial, snapshot), initialSnapshot, relocation: { target, moves, relocatedInitial } }
+	}
+
+	/** What a migration step's refusal check may read: Workspace files, by the persistence path rules (no symbolic links). */
+	private migrationContext(): WorkspaceMigrationContext {
+		return { readWorkspaceFile: async relativePath => await this.readOptionalBytesUnlocked(relativePath) }
 	}
 
 	/** The changed files a migration reports: for a relocation, relative to the old root, where they end up. */
@@ -568,8 +590,9 @@ export class FileNativePersistence {
 	 *
 	 * 1. A pending journal in the shared transaction directory records the moves, every file to write
 	 *    in the new root (relative to it) with its staged bytes and its backup, and the digest of the
-	 *    new manifest. It uses the `schemaVersion` 5 journal format (`{ layout, entries }`), so a build
-	 *    that predates layouts, or relocations, keeps it instead of applying it.
+	 *    new manifest (`RelocationJournal`). It names the `schemaVersion` 5 layout but carries its files
+	 *    in `relocationEntries`, so a build that predates layouts, or relocations, keeps it instead of
+	 *    applying it.
 	 * 2. Each data directory is renamed into `<meta>/`; a rename never follows a symbolic link.
 	 * 3. The files are written in the new root, the new manifest last. Replacing the manifest, at the
 	 *    same physical path, is the commit point: up to it the old root is a `schemaVersion` 4
@@ -595,9 +618,10 @@ export class FileNativePersistence {
 		const transactionAbsolute = resolveWorkspacePath(this.root, transactionRelative)
 		await ensureSafeDirectory(this.root, this.layout.transactionsDir)
 		await fs.mkdir(transactionAbsolute)
+		await syncDirectory(dirname(transactionAbsolute))
 		const journal: RelocationJournal = {
 			layout: target.id,
-			entries: ordered.map(change => ({ path: change.path, existed: relocation.relocatedInitial.has(change.path) })),
+			relocationEntries: ordered.map(change => ({ path: change.path, existed: relocation.relocatedInitial.has(change.path) })),
 			relocation: { from: this.layout.id, metadataDir, moves: [...relocation.moves], manifest: digestBytes(manifest.bytes) },
 		}
 		let journalWritten = false
@@ -695,13 +719,17 @@ export class FileNativePersistence {
 			else if (!atSource || atDestination)
 				throw new Error(`Cannot tell whether the data directory ${directory} was moved into ${metadataDir}/: it is ${atSource ? 'in both places' : 'in neither place'}.`)
 		}
-		for (const entry of [...journal.entries].reverse()) {
+		for (const entry of [...journal.relocationEntries].reverse()) {
 			const directory = entry.path.includes('/') ? entry.path.split('/')[0]! : undefined
 			if (directory !== undefined && moves.includes(directory) && !moved.has(directory)) continue
 			const physical = `${metadataDir}/${entry.path}`
 			if (!entry.existed) {
 				await assertSafePath(this.root, physical, true)
 				await fs.rm(resolveWorkspacePath(this.root, physical), { force: true })
+				// A directory below a data directory that held only this file (a new Asset's) goes too.
+				const segments = entry.path.split('/')
+				for (let depth = segments.length - 1; depth > 1; depth--)
+					await removeEmptyDirectory(resolveWorkspacePath(this.root, `${metadataDir}/${segments.slice(0, depth).join('/')}`))
 				continue
 			}
 			let backup: Buffer
@@ -709,8 +737,9 @@ export class FileNativePersistence {
 			catch (cause) { throw new Error(`Relocation backup for ${entry.path} is missing or unreadable.`, { cause }) }
 			await atomicWriteWithoutFault(this.root, physical, backup)
 		}
-		for (const directory of [...moves].reverse()) {
+		for (const [index, directory] of [...moves].reverse().entries()) {
 			if (!moved.has(directory)) continue
+			await this.hitFault('relocation.before_rollback_move', { path: directory, index, operation: 'migration' })
 			await assertSafePath(this.root, `${metadataDir}/${directory}/.placeholder`, true)
 			const destination = resolveWorkspacePath(this.root, `${metadataDir}/${directory}`)
 			await fs.rename(destination, resolveWorkspacePath(this.root, directory))
@@ -720,10 +749,7 @@ export class FileNativePersistence {
 		// A data directory the relocation created in the new root goes again once it is empty.
 		for (const directory of RELOCATED_DATA_DIRECTORIES) {
 			if (moves.includes(directory)) continue
-			await fs.rmdir(resolveWorkspacePath(this.root, `${metadataDir}/${directory}`)).catch((error: unknown) => {
-				const code = (error as NodeJS.ErrnoException).code
-				if (code !== 'ENOENT' && code !== 'ENOTEMPTY' && code !== 'ENOTDIR' && code !== 'EEXIST') throw error
-			})
+			await removeEmptyDirectory(resolveWorkspacePath(this.root, `${metadataDir}/${directory}`))
 		}
 	}
 
@@ -1213,6 +1239,7 @@ export class FileNativePersistence {
 		const transactionAbsolute = resolveWorkspacePath(this.root, transactionRelative)
 		await ensureSafeDirectory(this.root, this.layout.transactionsDir)
 		await fs.mkdir(transactionAbsolute)
+		await syncDirectory(dirname(transactionAbsolute))
 		const records: { path: string; existed: boolean }[] = []
 		let journalWritten = false
 		let applied = false
@@ -2588,16 +2615,17 @@ export async function upgradeSnapshotInMemory(snapshot: WorkspaceSnapshot, fromV
 }
 
 /**
- * Applies `plan` in memory. With `refusals`, each step's refusal check runs on its input first, and a
- * refusal ends the plan with `workspace.migration_failed` and one diagnostic per refused item
- * (`uiux migrate` only; an in-memory upgrade of a recorded version never refuses).
+ * Applies `plan` in memory. With `refusals` (the context of the Workspace being migrated), each
+ * step's refusal check runs on its input first, and a refusal ends the plan with
+ * `workspace.migration_failed` and one diagnostic per refused item (`uiux migrate` only; an
+ * in-memory upgrade of a recorded version never refuses).
  */
-async function applyMigrationPlan(initialSnapshot: WorkspaceSnapshot, plan: readonly WorkspaceMigrationStep[], policy: WorkspaceSchemaPolicy, options: Readonly<{ refusals?: boolean }> = {}): Promise<Readonly<{ snapshot: Map<string, Uint8Array>; steps: readonly string[] }>> {
+async function applyMigrationPlan(initialSnapshot: WorkspaceSnapshot, plan: readonly WorkspaceMigrationStep[], policy: WorkspaceSchemaPolicy, options: Readonly<{ refusals?: WorkspaceMigrationContext }> = {}): Promise<Readonly<{ snapshot: Map<string, Uint8Array>; steps: readonly string[] }>> {
 	let snapshot = cloneSnapshot(initialSnapshot)
 	const steps: string[] = []
 	try {
 		for (const step of plan) {
-			const refusal = options.refusals ? step.refuse?.(cloneSnapshot(snapshot)) : undefined
+			const refusal = options.refusals ? await step.refuse?.(cloneSnapshot(snapshot), options.refusals) : undefined
 			if (refusal)
 				throw new PersistenceError('workspace.migration_failed', refusal.message, {
 					diagnostics: refusal.items.map(item => ({ code: 'workspace.migration_failed', path: item.path, message: item.message })),
@@ -2820,7 +2848,7 @@ async function ensureSafeDirectory(root: string, relativeDirectory: string): Pro
 	if (relativeDirectory === '.' || relativeDirectory.length === 0) return
 	const absolute = resolveWorkspacePath(root, relativeDirectory)
 	await assertSafePath(root, `${relativeDirectory}/.placeholder`, true)
-	await fs.mkdir(absolute, { recursive: true })
+	await makeDirectorySynced(absolute)
 	await assertSafePath(root, `${relativeDirectory}/.placeholder`, true)
 }
 
@@ -2844,8 +2872,24 @@ async function assertSafePath(root: string, relativePath: string, allowMissingFi
 	}
 }
 
+/**
+ * Creates `absoluteDirectory` and any missing ancestor, then syncs the parent of every directory it
+ * created, so a crash cannot lose a directory entry (a transaction directory, or a `staged/` or
+ * `backup/` directory) that a synced file inside it relies on.
+ */
+async function makeDirectorySynced(absoluteDirectory: string): Promise<void> {
+	const first = await fs.mkdir(absoluteDirectory, { recursive: true })
+	if (first === undefined) return
+	const top = dirname(resolve(first))
+	for (let directory = resolve(absoluteDirectory); ; directory = dirname(directory)) {
+		const parent = dirname(directory)
+		await syncDirectory(parent)
+		if (parent === top || parent === directory) break
+	}
+}
+
 async function writeSyncedFile(absolutePath: string, bytes: Uint8Array, createParents: boolean): Promise<void> {
-	if (createParents) await fs.mkdir(dirname(absolutePath), { recursive: true })
+	if (createParents) await makeDirectorySynced(dirname(absolutePath))
 	const handle = await fs.open(absolutePath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
 	try {
 		await handle.writeFile(bytes)

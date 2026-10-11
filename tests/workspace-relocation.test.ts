@@ -11,6 +11,7 @@ import { emptyProductKit } from '../src/domain/product-kit/schema'
 import { canonicalJsonBytes, FileNativePersistence, upgradeSnapshotInMemory, type PersistenceFaultPoint } from '../src/persistence/file-native'
 import { HostHistoryStore } from '../src/persistence/history/host-store'
 import { LEGACY_LAYOUT, V5_LAYOUT } from '../src/persistence/paths'
+import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
 import { acquireServerHold } from '../src/persistence/server-hold'
 import { checkWorkspaceSelection, isRelocatedSourceOf } from '../src/persistence/workspace-selection'
 import {
@@ -79,7 +80,7 @@ function v1ResolvedReview() {
 	}
 }
 
-type Seed = Readonly<{ version?: number; adapters?: readonly { moduleSpecifier: string; config?: unknown }[] }>
+type Seed = Readonly<{ version?: number; adapters?: readonly { moduleSpecifier: string; config?: unknown }[]; kitPackage?: unknown }>
 
 /**
  * An old-layout Workspace `<parent>/design` at `schemaVersion` 4 (or `version`), with every data
@@ -101,6 +102,8 @@ async function seedOldLayout(seed: Seed = {}): Promise<string> {
 	await mkdir(join(root, 'adapters'), { recursive: true })
 	await writeFile(join(root, '.uiux', 'workspace.json'), `${JSON.stringify({ schemaVersion: version, i18n: { defaultLocale: 'en-US' }, adapters, viewports: {}, themes: {} }, null, 2)}\n`)
 	await writeFile(join(root, '.uiux', 'kit', 'adapters', 'reference.ts'), 'export default {}\n')
+	const kitPackage = seed.kitPackage === undefined ? { name: 'kit', dependencies: { '@acme/uiux-adapter': '1.0.0' } } : seed.kitPackage
+	if (kitPackage !== null) await writeFile(join(root, '.uiux', 'kit', 'package.json'), typeof kitPackage === 'string' ? kitPackage : `${JSON.stringify(kitPackage)}\n`)
 	await writeFile(join(root, '.uiux', 'artifacts', 'sha256', 'ab', ARTIFACT_HEX), 'artifact bytes')
 	await writeFile(join(root, 'views', `${VIEW_ID}.view.json`), `${JSON.stringify(view)}\n`)
 	const review = version === 1 ? v1ResolvedReview() : { ...v1ResolvedReview(), history: v1ResolvedReview().history.map((entry, index) => index === 1 ? { ...entry, resolution: 'verified' } : entry) }
@@ -161,11 +164,14 @@ describe('uiux.v4-to-v5 on the logical snapshot', () => {
 		// Deterministic, and refused on its own output rather than applied twice.
 		expect(await WORKSPACE_V4_TO_V5_STEP.apply(snapshot)).toEqual(next)
 		expect(() => WORKSPACE_V4_TO_V5_STEP.apply(next)).toThrow(/requires \.uiux\/workspace\.json/u)
-		expect(WORKSPACE_V4_TO_V5_STEP.refuse!(snapshot)).toBeUndefined()
+		expect(await WORKSPACE_V4_TO_V5_STEP.refuse!(snapshot, { readWorkspaceFile: async () => new TextEncoder().encode(JSON.stringify({ peerDependencies: { '@acme/uiux-adapter': '*' } })) })).toBeUndefined()
 	})
 
 	it('places each v4 specifier: rebased inside .uiux/kit/, and an exact replacement for the ones outside', () => {
-		expect(placeV4AdapterSpecifier('@acme/uiux-adapter')).toEqual({ kind: 'bare' })
+		expect(placeV4AdapterSpecifier('@acme/uiux-adapter')).toEqual({ kind: 'bare', packageName: '@acme/uiux-adapter' })
+		expect(placeV4AdapterSpecifier('lodash/fp/map.js')).toEqual({ kind: 'bare', packageName: 'lodash' })
+		expect(placeV4AdapterSpecifier('#internal/adapter')).toEqual({ kind: 'bare' })
+		expect(placeV4AdapterSpecifier('lodash/%2e%2e/other')).toEqual({ kind: 'bare' })
 		expect(placeV4AdapterSpecifier('./.uiux/kit/adapters/reference.ts')).toEqual({ kind: 'kit', rebased: './adapters/reference.ts' })
 		expect(placeV4AdapterSpecifier('./adapters/../.uiux/kit/index.ts')).toEqual({ kind: 'kit', rebased: './index.ts' })
 		// Clause 01a12626-e5c9: `./<p>` -> `./.uiux/kit/<p>`, with `<p>` normalized relative to the old root.
@@ -174,7 +180,10 @@ describe('uiux.v4-to-v5 on the logical snapshot', () => {
 		// The edge forms the Contract leaves to the step.
 		expect(placeV4AdapterSpecifier('./.uiux/adapters/reference.ts')).toEqual({ kind: 'outside', replacement: './.uiux/kit/adapters/reference.ts', exact: true })
 		expect(placeV4AdapterSpecifier('./.uiux/kit/../reference.ts')).toEqual({ kind: 'outside', replacement: './.uiux/kit/reference.ts', exact: true })
-		expect(placeV4AdapterSpecifier('./node_modules/@acme/adapter/dist/index.js')).toEqual({ kind: 'outside', replacement: '@acme/adapter/dist/index.js', exact: true })
+		expect(placeV4AdapterSpecifier('./node_modules/@acme/adapter/dist/index.js')).toEqual({ kind: 'outside', replacement: '@acme/adapter/dist/index.js', exact: true, packageName: '@acme/adapter' })
+		// Owner ruling 2 of #139 c18858856: a ./ specifier in kit/node_modules/ gets its bare replacement.
+		expect(placeV4AdapterSpecifier('./.uiux/kit/node_modules/@acme/adapter/index.js')).toEqual({ kind: 'outside', replacement: '@acme/adapter/index.js', exact: true, packageName: '@acme/adapter' })
+		expect(placeV4AdapterSpecifier('./.uiux/kit/node_modules/.bin/adapter')).toEqual({ kind: 'outside', replacement: '<package>/<subpath>', exact: false })
 		expect(placeV4AdapterSpecifier('./../shared/adapter.ts')).toEqual({ kind: 'outside', replacement: './.uiux/kit/adapter.ts', exact: false })
 		expect(placeV4AdapterSpecifier('./.uiux/kit')).toMatchObject({ kind: 'outside', exact: false })
 	})
@@ -311,7 +320,7 @@ describe('uiux.v4-to-v5 refusals, before anything is written', () => {
 			const run = capture()
 			expect(await runMigrateCommand({ workspaceRoot: root, dryRun, home, schemaPolicy: V5_TEST_SCHEMA_POLICY, stdout: run.stdout, stderr: run.stderr })).toBe(1)
 			const errors = run.err.join('\n')
-			expect(errors).toContain('uiux.v4-to-v5 refuses 2 ./ Adapters outside .uiux/kit/, and nothing was written.')
+			expect(errors).toContain('uiux.v4-to-v5 refuses 2 Adapters that the relocated Workspace could not resolve, and nothing was written. Move each ./ module into .uiux/kit/. Edit each listed specifier in .uiux/workspace.json by hand as shown. Then run uiux migrate again.')
 			expect(errors).toContain('/adapters/0/moduleSpecifier: ./adapters/reference.ts lies outside .uiux/kit/: replace it with ./.uiux/kit/adapters/reference.ts')
 			expect(errors).toContain('/adapters/3/moduleSpecifier: ./.uiux/adapters/legacy.ts lies outside .uiux/kit/: replace it with ./.uiux/kit/adapters/legacy.ts')
 			expect(errors).not.toContain('/adapters/1/')
@@ -367,6 +376,83 @@ describe('uiux.v4-to-v5 refusals, before anything is written', () => {
 		finally {
 			await hold.release()
 		}
+	})
+})
+
+describe('uiux.v4-to-v5 refuses Adapters the kit project does not declare (owner ruling 2 of #139 c18858856)', () => {
+	async function refusal(seed: Seed): Promise<Readonly<{ root: string; errors: string; before: Record<string, string>; home: string }>> {
+		const root = await seedOldLayout(seed)
+		const home = join(await makeDirectory('uiux-relocation-home-'), 'home')
+		const before = await tree(root)
+		let errors = ''
+		for (const dryRun of [true, false]) {
+			const run = capture()
+			expect(await runMigrateCommand({ workspaceRoot: root, dryRun, home, schemaPolicy: V5_TEST_SCHEMA_POLICY, stdout: run.stdout, stderr: run.stderr })).toBe(1)
+			errors = run.err.join('\n')
+			expect(await tree(root)).toEqual(before)
+			expect(await exists(home)).toBe(false)
+		}
+		return { root, errors, before, home }
+	}
+
+	it('refuses a bare Adapter whose package kit/package.json does not declare, lists the packages to declare, and writes no package.json', async () => {
+		const { root, errors } = await refusal({
+			adapters: [{ moduleSpecifier: '@acme/uiux-adapter' }, { moduleSpecifier: 'lodash/fp.js' }, { moduleSpecifier: './.uiux/kit/adapters/reference.ts' }, { moduleSpecifier: '@acme/declared' }],
+			kitPackage: { name: 'kit', devDependencies: { '@acme/declared': '1.0.0' } },
+		})
+		expect(errors).toContain('uiux.v4-to-v5 refuses 2 Adapters that the relocated Workspace could not resolve, and nothing was written. Declare @acme/uiux-adapter, lodash in .uiux/kit/package.json (dependencies, devDependencies, peerDependencies or optionalDependencies); uiux migrate writes no package.json. Then run uiux migrate again.')
+		expect(errors).toContain('/adapters/0/moduleSpecifier: @acme/uiux-adapter names the package @acme/uiux-adapter, which .uiux/kit/package.json does not declare: declare it there')
+		expect(errors).toContain('/adapters/1/moduleSpecifier: lodash/fp.js names the package lodash, which .uiux/kit/package.json does not declare: declare it there')
+		expect(errors).not.toContain('/adapters/2/')
+		expect(errors).not.toContain('/adapters/3/')
+		expect(errors).not.toContain('pre-migration Checkpoint')
+		expect(JSON.parse(await readFile(join(root, '.uiux', 'kit', 'package.json'), 'utf8'))).toEqual({ name: 'kit', devDependencies: { '@acme/declared': '1.0.0' } })
+	})
+
+	it('refuses every bare Adapter when the kit project has no package.json, and creates none', async () => {
+		const { root, errors } = await refusal({ kitPackage: null })
+		expect(errors).toContain('/adapters/1/moduleSpecifier: @acme/uiux-adapter names the package @acme/uiux-adapter, which .uiux/kit/package.json does not declare')
+		expect(await exists(join(root, '.uiux', 'kit', 'package.json'))).toBe(false)
+	})
+
+	it.each(['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'])('accepts a package declared in %s', async member => {
+		const root = await seedOldLayout({ kitPackage: { [member]: { '@acme/uiux-adapter': '*' } } })
+		const plan = await new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY }).planWorkspaceMigration()
+		expect(plan).toMatchObject({ fromVersion: 4, version: 5, steps: [WORKSPACE_V4_TO_V5_STEP_ID] })
+	})
+
+	it('refuses a ./ Adapter inside .uiux/kit/node_modules/ with its bare replacement, and asks to declare it only when undeclared', async () => {
+		const undeclared = await refusal({ adapters: [{ moduleSpecifier: './.uiux/kit/node_modules/@acme/uiux-adapter/index.js' }], kitPackage: { name: 'kit' } })
+		expect(undeclared.errors).toContain('/adapters/0/moduleSpecifier: ./.uiux/kit/node_modules/@acme/uiux-adapter/index.js lies in a node_modules/ directory: replace it with @acme/uiux-adapter/index.js and declare @acme/uiux-adapter in .uiux/kit/package.json')
+		expect(undeclared.errors).toContain('Edit each listed specifier in .uiux/workspace.json by hand as shown. Declare @acme/uiux-adapter in .uiux/kit/package.json')
+		const declared = await refusal({ adapters: [{ moduleSpecifier: './.uiux/kit/node_modules/@acme/uiux-adapter/index.js' }] })
+		expect(declared.errors).toMatch(/lies in a node_modules\/ directory: replace it with @acme\/uiux-adapter\/index\.js$/mu)
+		expect(declared.errors).not.toContain('Declare ')
+	})
+
+	it('refuses a bare specifier that names no npm package', async () => {
+		const { errors } = await refusal({ adapters: [{ moduleSpecifier: '#internal/adapter' }] })
+		expect(errors).toContain('/adapters/0/moduleSpecifier: #internal/adapter names no npm package')
+	})
+
+	it('fails closed on a kit package.json that is not a well-formed package file or is a symbolic link, writing nothing', async () => {
+		const malformed = await refusal({ kitPackage: '{ not json' })
+		expect(malformed.errors).toContain('.uiux/kit/package.json')
+		const wrongMember = await refusal({ kitPackage: { dependencies: ['@acme/uiux-adapter'] } })
+		expect(wrongMember.errors).toContain('member dependencies is not an object')
+
+		const root = await seedOldLayout({ kitPackage: null })
+		const elsewhere = join(await makeDirectory('uiux-relocation-elsewhere-'), 'package.json')
+		await writeFile(elsewhere, JSON.stringify({ dependencies: { '@acme/uiux-adapter': '*' } }))
+		await symlink(elsewhere, join(root, '.uiux', 'kit', 'package.json'))
+		const before = await tree(root)
+		await expect(new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY }).migrateWorkspace()).rejects.toMatchObject({ code: 'persistence.path_rejected' })
+		expect(await tree(root)).toEqual(before)
+	})
+
+	it('reads no package.json when no Adapter needs it, so a malformed one does not refuse a Workspace without bare Adapters', async () => {
+		const root = await seedOldLayout({ adapters: [{ moduleSpecifier: './.uiux/kit/adapters/reference.ts' }], kitPackage: '{ not json' })
+		expect(await new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY }).migrateWorkspace()).toMatchObject({ version: 5 })
 	})
 })
 
@@ -483,6 +569,73 @@ describe('relocation crash safety', () => {
 		expect(await readdir(join(killed, '.uiux', '.transactions'))).toHaveLength(1)
 		expect(await exists(join(killed, '.uiux', 'views', `${VIEW_ID}.view.json`))).toBe(true)
 	})
+	it('writes a journal that names no `entries` and no `changes`, so builds before relocations fail closed on it', async () => {
+		const { killed } = await killedAt('relocation.after_move', 'views')
+		const [transaction] = await readdir(join(killed, '.uiux', '.transactions'))
+		const journal = JSON.parse(await readFile(join(killed, '.uiux', '.transactions', transaction!, 'journal.json'), 'utf8')) as Record<string, unknown>
+		expect(journal).not.toHaveProperty('entries')
+		expect(journal).not.toHaveProperty('changes')
+		expect(journal.relocationEntries).toEqual([{ path: 'product-kit.json', existed: false }, { path: 'workspace.json', existed: true }])
+		// A relocation journal that also carries a plain `entries` list is not guessed at either.
+		await writeFile(join(killed, '.uiux', '.transactions', transaction!, 'journal.json'), JSON.stringify({ ...journal, entries: [] }))
+		await expect(new FileNativePersistence({ root: killed, schemaPolicy: V5_TEST_SCHEMA_POLICY }).inspectWorkspace()).rejects.toMatchObject({ code: 'persistence.recovery_failed' })
+		expect(await readdir(join(killed, '.uiux', '.transactions'))).toEqual([transaction])
+	})
+
+	it('completes, on the next open, a rollback that a kill interrupted, with nothing lost', async () => {
+		const { original, killed } = await killedAt('migration.before_apply', 'workspace.json')
+		// The recovery itself is killed after it moved one directory back.
+		const killedAgain = join(await makeDirectory('uiux-relocation-killed-again-'), 'design')
+		let failures = 0
+		const interrupted = new FileNativePersistence({ root: killed, schemaPolicy: V5_TEST_SCHEMA_POLICY, async fault(hit, details) {
+			if (hit === 'relocation.before_rollback_move' && details.index === 1) {
+				await cp(killed, killedAgain, { recursive: true, verbatimSymlinks: true })
+				failures += 1
+				throw new Error('injected kill during the rollback')
+			}
+		} })
+		await expect(interrupted.inspectWorkspace()).rejects.toMatchObject({ code: 'persistence.recovery_failed' })
+		expect(failures).toBe(1)
+		await rm(join(killedAgain, '.uiux', '.persistence.lock'), { force: true })
+		// Mid-rollback: the last directory is back at the old root, the others are still in .uiux/.
+		expect(await exists(join(killedAgain, 'assets'))).toBe(true)
+		expect(await exists(join(killedAgain, '.uiux', 'views'))).toBe(true)
+		expect(await readdir(join(killedAgain, '.uiux', '.transactions'))).toHaveLength(1)
+
+		for (const root of [killed, killedAgain]) {
+			const reopened = new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY })
+			expect((await reopened.inspectWorkspace()).inspection).toMatchObject({ state: 'migration_required', version: 4 })
+			expect(await canonicalTree(root)).toEqual(original)
+			expect(await reopened.migrateWorkspace()).toMatchObject({ version: 5 })
+		}
+	})
+
+	it('removes the directories a rolled-back relocation created below a data directory', async () => {
+		const NEW_ASSET = '66666666-6666-4666-8666-666666666666'
+		// A step that, like a future one might, adds an Asset in a new directory while relocating.
+		const policy = defineWorkspaceSchemaPolicy({
+			currentVersion: 5,
+			recognizedVersions: [4, 5],
+			steps: [{
+				...WORKSPACE_V4_TO_V5_STEP,
+				async apply(snapshot) {
+					const next = new Map(await WORKSPACE_V4_TO_V5_STEP.apply(snapshot))
+					next.set(`assets/${NEW_ASSET}/asset.json`, canonicalJsonBytes({ id: NEW_ASSET, name: 'new', contentFilename: 'new.svg', mediaType: 'image/svg+xml' }))
+					next.set(`assets/${NEW_ASSET}/new.svg`, new TextEncoder().encode('<svg/>'))
+					return next
+				},
+			}],
+		})
+		const root = await seedOldLayout()
+		const before = await canonicalTree(root)
+		const persistence = new FileNativePersistence({ root, schemaPolicy: policy, fault(hit, details) {
+			if (hit === 'migration.before_apply' && details.path === 'workspace.json') throw new Error('injected fault before the commit point')
+		} })
+		await expect(persistence.migrateWorkspace()).rejects.toMatchObject({ code: 'workspace.migration_failed' })
+		expect(await canonicalTree(root)).toEqual(before)
+		expect(await exists(join(root, 'assets', NEW_ASSET))).toBe(false)
+	})
+
 })
 
 describe('history across the relocation', () => {
