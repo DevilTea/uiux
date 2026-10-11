@@ -15,8 +15,9 @@ import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-
  *   holding it without the rest of the Owner set reaches them (P2 review note F5);
  * - an authoring page follows its own write key and names the missing one (Rule 01a11485-eba3);
  * - "Release lock" follows `locks.force-release` (Rule 01a11485-f118);
- * - the timeline follows `history.read`, and Resolve and Reopen follow `reviews.resolve` and
- *   `reviews.submit` (Rule 01a116f0-8fd3).
+ * - the Activity timeline and the View history panel follow `history.read`, and Resolve, Submit
+ *   for review and Reopen follow `reviews.resolve` and `reviews.submit`, in the Reviews inbox and in
+ *   the canvas thread bubble alike (Rule 01a116f0-8fd3).
  */
 
 const VIEW_ID = '7f3d7780-3cb9-4e57-8f0b-2e8d569905c1'
@@ -68,6 +69,24 @@ async function chip(page: Page): Promise<{ badge: string; ariaLabel: string; ent
 	await page.keyboard.press('Escape')
 	await menu.waitFor({ state: 'detached' })
 	return { badge, ariaLabel, entries }
+}
+
+async function owner<T>(path: string, body?: unknown): Promise<T> {
+	const response = await fetch(`${server.origin}${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'content-type': 'application/json', ...server.headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+	if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`)
+	return await response.json() as T
+}
+
+/** An open thread on the fixture View's RootShell with its first message, as the owner. */
+async function seedThread(body: string): Promise<string> {
+	const created = await owner<{ key: string; revision: string }>('/api/reviews', { anchor: { viewId: VIEW_ID, widgetId: 'root' } })
+	await owner(`/api/reviews/${created.key}/messages`, { expectedRevision: created.revision, body })
+	return created.key
+}
+
+async function resolveThread(key: string): Promise<void> {
+	const read = await owner<{ revision: string }>(`/api/resources/review/${key}`)
+	await owner(`/api/reviews/${key}/resolve`, { expectedRevision: read.revision, resolution: 'answered' })
 }
 
 const OWNER = keysForRole('human', 'owner')
@@ -215,6 +234,80 @@ describe('history and Review actions follow their keys', () => {
 		}
 		finally { await reader.context.close() }
 	}, 60_000)
+
+	it('names `history.read` instead of the View history panel for a member without it', async () => {
+		const { context, page } = await open(`/views/${VIEW_ID}?panel=history`, await memberCookie(['workspace.read', 'reviews.write']))
+		try {
+			const notice = page.locator('[data-view-history] [data-access-notice="history"]')
+			await notice.waitFor({ timeout: 15_000 })
+			expect(await notice.innerText()).toContain('Requires the permission key history.read.')
+			expect(await page.locator('[data-view-history] [data-version-timeline]').count()).toBe(0)
+		}
+		finally { await context.close() }
+
+		const reader = await open(`/views/${VIEW_ID}?panel=history`, await memberCookie(VIEWER))
+		try {
+			await reader.page.locator('[data-view-history] [data-version-timeline]').waitFor({ timeout: 15_000 })
+			expect(await reader.page.locator('[data-view-history] [data-access-notice="history"]').count()).toBe(0)
+		}
+		finally { await reader.context.close() }
+	}, 60_000)
+
+	it('offers the canvas bubble\'s Resolve only with `reviews.resolve`, and Submit and Reopen only with `reviews.submit`', async () => {
+		const thread = await seedThread('P4 canvas gating thread.')
+		/** The bubble of the thread, opened through the address, and whether its menu offers Submit for review. */
+		async function bubbleFor(keys: readonly PermissionKey[]) {
+			const opened = await open(`/views/${VIEW_ID}?thread=${thread}`, await memberCookie(keys))
+			const bubble = opened.page.locator('[data-thread-bubble]')
+			await bubble.locator('[data-timeline-kind="message"]').first().waitFor({ timeout: 20_000 })
+			return { ...opened, bubble }
+		}
+		async function offersSubmit(page: Page, bubble: ReturnType<Page['locator']>): Promise<boolean> {
+			await bubble.getByRole('button', { name: 'More', exact: true }).click()
+			const menu = page.locator('[role="menu"]')
+			await menu.waitFor()
+			const offered = (await menu.locator('[role="menuitem"]').allInnerTexts()).some(text => text.includes('Submit for review'))
+			await page.keyboard.press('Escape')
+			await menu.waitFor({ state: 'detached' })
+			return offered
+		}
+
+		// Commenting alone: no Resolve and the key named, no Submit.
+		const commenter = await bubbleFor(['workspace.read', 'reviews.write'])
+		try {
+			expect(await commenter.bubble.locator('[data-thread-resolve]').count()).toBe(0)
+			await commenter.bubble.getByText('Requires the permission key reviews.resolve.').waitFor()
+			expect(await offersSubmit(commenter.page, commenter.bubble)).toBe(false)
+		}
+		finally { await commenter.context.close() }
+
+		// `reviews.resolve` alone adds Resolve; `reviews.submit` alone adds Submit for review.
+		const resolver = await bubbleFor(['workspace.read', 'reviews.write', 'reviews.resolve'])
+		try {
+			await resolver.bubble.locator('[data-thread-resolve]').waitFor()
+			expect(await offersSubmit(resolver.page, resolver.bubble)).toBe(false)
+		}
+		finally { await resolver.context.close() }
+		const submitter = await bubbleFor(['workspace.read', 'reviews.write', 'reviews.submit'])
+		try {
+			expect(await submitter.bubble.locator('[data-thread-resolve]').count()).toBe(0)
+			expect(await offersSubmit(submitter.page, submitter.bubble)).toBe(true)
+		}
+		finally { await submitter.context.close() }
+
+		// Resolved: Reopen needs `reviews.submit`, not `reviews.resolve`.
+		await resolveThread(thread)
+		const reopener = await bubbleFor(['workspace.read', 'reviews.write', 'reviews.submit'])
+		try {
+			await reopener.bubble.locator('[data-thread-reopen]').waitFor({ timeout: 15_000 })
+		}
+		finally { await reopener.context.close() }
+		const nonReopener = await bubbleFor(['workspace.read', 'reviews.write', 'reviews.resolve'])
+		try {
+			expect(await nonReopener.bubble.locator('[data-thread-reopen]').count()).toBe(0)
+		}
+		finally { await nonReopener.context.close() }
+	}, 120_000)
 
 	it('offers Resolve only with `reviews.resolve` and Reopen only with `reviews.submit`, naming the missing key', async () => {
 		const created = await (await fetch(`${server.origin}/api/reviews`, { method: 'POST', headers: { 'content-type': 'application/json', ...server.headers }, body: JSON.stringify({ anchor: { viewId: VIEW_ID, widgetId: 'root' } }) })).json() as { key: string; revision: string }
