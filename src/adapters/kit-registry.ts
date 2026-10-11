@@ -1,6 +1,6 @@
-import { lstat, readFile, realpath } from 'node:fs/promises'
+import { lstat, readdir, readFile, realpath } from 'node:fs/promises'
 import { isAbsolute, join, posix, relative, sep } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 import { canonicalJsonStringify } from '../domain/canonical-json'
 import type { ProductKit } from '../domain/product-kit/schema'
@@ -26,7 +26,8 @@ import { realDirectoryIdentity } from './resolution'
  *   linear scan of the static and dynamic imports of each script file of a component flags a kit
  *   file it imports that its closure (its files and its `requires`, transitively) does not
  *   declare, an import of a wrapper entry, and a declared script file after the first (the
- *   component's entry) that no file of the component imports.
+ *   component's entry) that no file of the component imports. Its work per check is bounded; past
+ *   the bound it stops with one finding.
  *
  * Containment: `kit/` and `kit/src/` count only as real directories, not symbolic links, under
  * the Workspace root's real path, and every file is judged by its real path. A file outside them
@@ -48,6 +49,13 @@ const MAX_SCANNED_FILE_BYTES = 1024 * 1024
 const MAX_IMPORTS_PER_FILE = 1000
 /** The longest import specifier the scan reads. */
 const MAX_SPECIFIER_LENGTH = 1024
+/**
+ * The most work one check's import scan does: distinct files read, their total size, and distinct
+ * imports resolved. Past any of them the scan stops with one finding.
+ */
+const MAX_SCANNED_FILES = 500
+const MAX_SCANNED_BYTES = 16 * 1024 * 1024
+const MAX_IMPORT_RESOLUTIONS = 2000
 
 /**
  * Where the kit project lies: the Workspace root's real path, and `kit/` and `kit/src/` under it,
@@ -80,20 +88,55 @@ function escapesBase(rel: string): boolean {
 	return rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith('../') || isAbsolute(rel)
 }
 
+/** Characters that end a path in a message, and the ones that may precede one. */
+const PATH_END = String.raw`\s'"\x60<>()\],`
+const PATH_LEAD = String.raw`^|[\s'"\x60(=:,[]`
+/** A marker standing for the `index`-th Workspace root, written where the root starts a path. */
+const ROOT_MARK = '\u0001'
+const PATH_START = String.raw`(?:${ROOT_MARK}\d+${ROOT_MARK}|\/|[A-Za-z]:\\|\\\\)`
+/** A file URL. */
+const FILE_URL = new RegExp(String.raw`file:[^${PATH_END}]*`, 'gu')
+/** A path in quotes: everything up to the same closing quote on the line, spaces included. */
+const QUOTED_PATH = new RegExp(String.raw`(['"\x60])(${PATH_START}[^'"\x60\n]*)(?=\1)`, 'gu')
 /**
- * `message` without host paths: the Workspace root's paths and file URLs become `<workspace>`, and
- * any other absolute path or file URL becomes `<path>`, so a Resource or a refusal never names a
- * host path outside the Workspace.
+ * A path outside quotes. It continues past a space when the next word holds a path separator or
+ * ends in a file extension, so a path with spaces is masked whole; masking too much is harmless.
+ */
+const BARE_PATH = new RegExp(String.raw`(${PATH_LEAD})(${PATH_START}[^${PATH_END}]*(?: +(?:[^${PATH_END}]*[\/\\][^${PATH_END}]*|[^${PATH_END}\/\\]*\.[A-Za-z0-9]+(?=$|[${PATH_END}.;:])))*)`, 'gu')
+
+/**
+ * `message` without host paths: a path inside a Workspace root becomes `<workspace>` and its path
+ * below the root, and any other absolute path or file URL, including one that leaves a root
+ * through `..` or only shares a root's name as a prefix (`<root>-other`), becomes `<path>`, so a
+ * Resource or a refusal never names a host path outside the Workspace.
  */
 export function maskHostPaths(message: string, roots: readonly string[]): string {
-	let result = message
-	for (const root of roots) {
-		result = result.split(pathToFileURL(root).href).join('<workspace>')
-		result = result.split(root).join('<workspace>')
+	const ordered = [...new Set(roots)].filter(root => root !== '').sort((a, b) => b.length - a.length)
+	const describe = (path: string): string => {
+		const marked = new RegExp(String.raw`^${ROOT_MARK}(\d+)${ROOT_MARK}`, 'u').exec(path)
+		const candidates = marked ? [[ordered[Number(marked[1])]!, path.slice(marked[0].length)] as const] : ordered.flatMap(root => path === root || path.startsWith(`${root}/`) || path.startsWith(`${root}\\`) ? [[root, path.slice(root.length)] as const] : [])
+		for (const [root, rest] of candidates) {
+			const inside = relative(root, `${root}${rest}`)
+			if (inside === '') return '<workspace>'
+			if (!escapesBase(inside)) return `<workspace>/${inside.split(sep).join('/')}`
+		}
+		return '<path>'
 	}
+	let result = message.replaceAll(ROOT_MARK, '').replace(FILE_URL, (url) => {
+		try {
+			return describe(fileURLToPath(url))
+		}
+		catch {
+			return '<path>'
+		}
+	})
+	ordered.forEach((root, index) => {
+		const escaped = root.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+		result = result.replace(new RegExp(String.raw`(${PATH_LEAD})${escaped}(?=$|[\/\\${PATH_END}.;:!?])`, 'gu'), `$1${ROOT_MARK}${index}${ROOT_MARK}`)
+	})
 	return result
-		.replace(/file:[^\s'"`<>()]*/gu, '<path>')
-		.replace(/(^|[\s'"`(=:,[])(?:\/|[A-Za-z]:\\|\\\\)[^\s'"`<>()\],]*/gu, '$1<path>')
+		.replace(QUOTED_PATH, (_match, quote: string, path: string) => `${quote}${describe(path)}`)
+		.replace(BARE_PATH, (_match, lead: string, path: string) => `${lead}${describe(path)}`)
 }
 
 export type KitCheckInput = Readonly<{
@@ -263,7 +306,17 @@ async function scanImports(kitDirectory: string, realFiles: ReadonlyMap<string, 
 		closures.set(name, files)
 		return files
 	}
-	const specifiersOf = new Map<string, Promise<readonly string[]>>()
+	const specifiersOf = new Map<string, readonly string[]>()
+	// One resolution per kit-relative import path (the importing file's directory joined with the
+	// specifier), however many files or components share it.
+	const resolutions = new Map<string, string | undefined>()
+	const listings = new Map<string, Promise<ReadonlySet<string> | undefined>>()
+	const budget: ScanBudget = { files: 0, bytes: 0, resolutions: 0 }
+	const limitReached = (): Diagnostic[] => [...findings, {
+		code: KIT_COMPONENT_INVALID,
+		path: '/components',
+		message: `The import scan stopped at its limit (${MAX_SCANNED_FILES} files, ${MAX_SCANNED_BYTES} bytes or ${MAX_IMPORT_RESOLUTIONS} distinct imports per check); the imports after it are not checked.`,
+	}]
 
 	for (const [name, component] of Object.entries(kit.components)) {
 		const componentPath = jsonPointer('/components', name)
@@ -274,10 +327,22 @@ async function scanImports(kitDirectory: string, realFiles: ReadonlyMap<string, 
 		for (const file of own) {
 			const real = realFiles.get(file)
 			if (!isScript(file) || real === undefined) continue
-			if (!specifiersOf.has(real)) specifiersOf.set(real, importSpecifiers(real))
-			for (const specifier of await specifiersOf.get(real)!) {
+			let specifiers = specifiersOf.get(real)
+			if (specifiers === undefined) {
+				specifiers = await importSpecifiers(real, budget)
+				if (specifiers === undefined) return limitReached()
+				specifiersOf.set(real, specifiers)
+			}
+			for (const specifier of specifiers) {
 				if (!specifier.startsWith('./') && !specifier.startsWith('../')) continue
-				const target = await resolveKitImport(kitDirectory, posix.join(posix.dirname(file), specifier))
+				const joined = posix.join(posix.dirname(file), specifier)
+				let target = resolutions.get(joined)
+				if (!resolutions.has(joined)) {
+					if (budget.resolutions >= MAX_IMPORT_RESOLUTIONS) return limitReached()
+					budget.resolutions++
+					target = await resolveKitImport(kitDirectory, joined, listings)
+					resolutions.set(joined, target)
+				}
 				if (target === undefined) continue
 				imported.add(target)
 				if (reported.has(target)) continue
@@ -304,10 +369,19 @@ function isScript(file: string): boolean {
 	return SCRIPT_EXTENSIONS.some(extension => file.endsWith(extension))
 }
 
-/** The import specifiers of the file at the real path `path`, or none when it is larger than the scan reads. */
-async function importSpecifiers(path: string): Promise<readonly string[]> {
+/** The work one check's import scan has done so far. */
+type ScanBudget = { files: number; bytes: number; resolutions: number }
+
+/**
+ * The import specifiers of the file at the real path `path`, none when it is larger than the scan
+ * reads, or `undefined` when reading it would pass the check's file or byte limit.
+ */
+async function importSpecifiers(path: string, budget: ScanBudget): Promise<readonly string[] | undefined> {
 	const info = await lstat(path).catch(() => undefined)
 	if (!info?.isFile() || info.size > MAX_SCANNED_FILE_BYTES) return []
+	if (budget.files >= MAX_SCANNED_FILES || budget.bytes + info.size > MAX_SCANNED_BYTES) return undefined
+	budget.files++
+	budget.bytes += info.size
 	const text = await readFile(path, 'utf8').catch(() => '')
 	return scanImportSpecifiers(text)
 }
@@ -325,8 +399,10 @@ function isWordChar(char: string | undefined): boolean {
 
 /**
  * The distinct module specifiers of `text`'s static imports and re-exports (`import … from 'x'`,
- * `export … from 'x'`), side-effect imports (`import 'x'`), dynamic imports (`import('x')`) and
- * `require('x')` calls, at most {@link MAX_IMPORTS_PER_FILE}.
+ * `export … from 'x'`), side-effect imports (`import 'x'`), dynamic imports (`import('x')`, also
+ * with an options argument) and `require('x')` calls, at most {@link MAX_IMPORTS_PER_FILE}. A
+ * static clause may start without a space (`import{a}from'x'`, `export*from'x'`), and a dynamic
+ * import or `require` may name a template literal without interpolation.
  *
  * A single forward pass: each keyword is looked at once, and the clause of a static import, which
  * reaches the next quote, backtick or semicolon, is judged from that terminator, which is found
@@ -338,17 +414,29 @@ export function scanImportSpecifiers(text: string): string[] {
 	let terminator = -2
 	let consumed = 0
 
-	/** The string literal opening at `quote`: its value and the index after it, or `undefined`. */
+	/**
+	 * The string literal opening at `quote`: its value and the index after it, or `undefined`. A
+	 * template literal counts only on one line and without interpolation (`${`).
+	 */
 	const stringAt = (quote: number): Readonly<{ value: string; end: number }> | undefined => {
 		if (strings.has(quote)) return strings.get(quote)
 		const mark = text[quote]
 		let result: Readonly<{ value: string; end: number }> | undefined
+		const limit = Math.min(text.length, quote + 1 + MAX_SPECIFIER_LENGTH + 1)
 		if (mark === '\'' || mark === '"') {
-			const limit = Math.min(text.length, quote + 1 + MAX_SPECIFIER_LENGTH + 1)
 			for (let index = quote + 1; index < limit; index++) {
 				const char = text[index]
 				if (char === '\n' || char === '\'' || char === '"') {
 					if (char === mark && index > quote + 1) result = { value: text.slice(quote + 1, index), end: index + 1 }
+					break
+				}
+			}
+		}
+		else if (mark === '`') {
+			for (let index = quote + 1; index < limit; index++) {
+				const char = text[index]
+				if (char === '\n' || char === '`' || (char === '$' && text[index + 1] === '{')) {
+					if (char === '`' && index > quote + 1) result = { value: text.slice(quote + 1, index), end: index + 1 }
 					break
 				}
 			}
@@ -381,12 +469,13 @@ export function scanImportSpecifiers(text: string): string[] {
 		fromEndsAt.set(at, result)
 		return result
 	}
-	const take = (literal: Readonly<{ value: string; end: number }> | undefined, closeParen: boolean): boolean => {
+	/** Takes `literal`; with `close`, only when one of its characters follows it (spaces aside). */
+	const take = (literal: Readonly<{ value: string; end: number }> | undefined, close?: string): boolean => {
 		if (!literal) return false
 		let end = literal.end
-		if (closeParen) {
+		if (close !== undefined) {
 			end = skipSpace(end)
-			if (text[end] !== ')') return false
+			if (!close.includes(text[end] ?? '\n')) return false
 			end++
 		}
 		found.add(literal.value)
@@ -402,25 +491,26 @@ export function scanImportSpecifiers(text: string): string[] {
 		const after = start + keyword.length
 		const next = skipSpace(after)
 		if (keyword === 'require') {
-			if (text[next] === '(') take(stringAt(skipSpace(next + 1)), true)
+			if (text[next] === '(') take(stringAt(skipSpace(next + 1)), ')')
 			continue
 		}
 		if (keyword === 'import') {
 			if (text[next] === '\'' || text[next] === '"') {
-				take(stringAt(next), false)
+				take(stringAt(next))
 				continue
 			}
+			// `import('x')`, or `import('x', options)`.
 			if (text[next] === '(') {
-				take(stringAt(skipSpace(next + 1)), true)
+				take(stringAt(skipSpace(next + 1)), '),')
 				continue
 			}
 		}
-		// `import … from 'x'` and `export … from 'x'`: a space, then a clause up to the first quote.
-		if (next === after) continue
+		// `import … from 'x'` and `export … from 'x'`: a space, `{` or `*`, then a clause up to the first quote.
+		if (next === after && text[next] !== '{' && text[next] !== '*') continue
 		const quote = nextTerminator(after + 1)
 		if (quote < 0 || (text[quote] !== '\'' && text[quote] !== '"')) continue
 		const fromStart = fromStartBefore(quote)
-		if (fromStart > after) take(stringAt(quote), false)
+		if (fromStart > after) take(stringAt(quote))
 	}
 	return [...found]
 }
@@ -428,9 +518,11 @@ export function scanImportSpecifiers(text: string): string[] {
 /**
  * The kit-relative path of the regular file a relative import names, trying script extensions and
  * `index` files, when its real path lies in the real `kit/`; a file reached through a link out of
- * `kit/` is treated as missing.
+ * `kit/` is treated as missing. A candidate whose directory does not list its name (compared without
+ * case or Unicode normalization differences) is skipped without looking it up; `listings` holds
+ * those listings for one check.
  */
-async function resolveKitImport(kitDirectory: string, joined: string): Promise<string | undefined> {
+async function resolveKitImport(kitDirectory: string, joined: string, listings: Map<string, Promise<ReadonlySet<string> | undefined>>): Promise<string | undefined> {
 	const base = posix.normalize(joined)
 	if (base === '..' || base.startsWith('../') || posix.isAbsolute(base)) return undefined
 	const stripped = base.replace(/\?.*$/u, '')
@@ -438,10 +530,28 @@ async function resolveKitImport(kitDirectory: string, joined: string): Promise<s
 	// A TypeScript import may name the emitted `.js` of a `.ts` source.
 	if (/\.[cm]?js$/u.test(stripped)) candidates.push(stripped.replace(/js$/u, 'ts'))
 	for (const candidate of candidates) {
+		const directory = posix.dirname(candidate)
+		if (!listings.has(directory)) listings.set(directory, kitDirectoryNames(kitDirectory, directory))
+		if (!(await listings.get(directory))?.has(foldName(posix.basename(candidate)))) continue
 		const real = await containedRealPath(kitDirectory, join(kitDirectory, ...candidate.split('/')))
 		if (real === undefined) continue
 		const info = await lstat(real).catch(() => undefined)
 		if (info?.isFile()) return candidate
 	}
 	return undefined
+}
+
+function foldName(name: string): string {
+	return name.normalize('NFC').toLowerCase()
+}
+
+/**
+ * The folded names in the kit-relative directory `directory`, when its real path is `kit/` or lies
+ * in it; a directory reached through a link out of `kit/`, or one that cannot be listed, lists none.
+ */
+async function kitDirectoryNames(kitDirectory: string, directory: string): Promise<ReadonlySet<string> | undefined> {
+	const path = join(kitDirectory, ...directory.split('/'))
+	if (directory !== '.' && await containedRealPath(kitDirectory, path) === undefined) return undefined
+	const names = await readdir(path).catch(() => undefined)
+	return names && new Set(names.map(foldName))
 }

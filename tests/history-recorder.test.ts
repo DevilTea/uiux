@@ -642,17 +642,27 @@ describe('recording failures', () => {
 		await editView(ctx, HUMAN, 'abandoned boundary')
 		expect(errors.mock.calls.map(call => String(call[0]))).toContainEqual(expect.stringContaining('beforeCanonicalWrite did not finish within 1000 ms and was abandoned'))
 		// The recorder is busy with the abandoned work, which holds the journal queue until `stalled`
-		// settles. Each hook must be refused as busy, not left to wait on that queue: a hook that waits
-		// can only end by being abandoned at the observer timeout, because nothing releases the
-		// boundary before this loop ends. So the assertion is on how each hook ended, not on how long it took.
-		for (const intent of ['busy 1', 'busy 2']) {
-			errors.mockClear()
-			await editView(ctx, HUMAN, intent)
-			const logged = errors.mock.calls.map(call => String(call[0]))
-			expect(logged.filter(line => line.includes('did not finish within'))).toEqual([])
-			expect(logged).toEqual([
-				expect.stringContaining('beforeCanonicalWrite failed; the write was kept and the gap is recorded at the next history boundary: the history recorder is still finishing an abandoned operation'),
-			])
+		// settles. Each hook must be refused as busy, not left to wait on that queue or on any timer.
+		// With `setTimeout` faked and never advanced, neither the observer timeout nor any other timed
+		// wait can fire: an edit that settles before a real-timer sentinel did not wait on one.
+		const realSetTimeout = globalThis.setTimeout
+		const realClearTimeout = globalThis.clearTimeout
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+		try {
+			for (const intent of ['busy 1', 'busy 2']) {
+				errors.mockClear()
+				let sentinel: ReturnType<typeof setTimeout> | undefined
+				const stuck = new Promise<'stuck'>(resolve => { sentinel = realSetTimeout(() => resolve('stuck'), 2_000) })
+				const outcome = await Promise.race([editView(ctx, HUMAN, intent).then(() => 'settled' as const), stuck])
+				realClearTimeout(sentinel)
+				expect(outcome, intent).toBe('settled')
+				const logged = errors.mock.calls.map(call => String(call[0]))
+				expect(logged.filter(line => line.includes('did not finish within'))).toEqual([])
+				expect(logged).toEqual([expect.stringMatching(/beforeCanonicalWrite failed\b[\s\S]*still finishing an abandoned operation/u)])
+			}
+		}
+		finally {
+			vi.useRealTimers()
 		}
 		release()
 		await vi.waitFor(async () => expect((await ctx.host.readOpenJournal())?.entries.filter(entry => entry.type === 'gap').length).toBeGreaterThanOrEqual(3))

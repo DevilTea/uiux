@@ -427,9 +427,10 @@ function adjustedKeys(member: StoredMember, changes: KeyChanges & MemberAccessIn
 		throw new AccessError('access.invalid_keys', 'Give either a key set or keys to grant and revoke, not both.')
 	const grant = changes.grant === undefined ? [] : normalizeKeys(changes.grant)
 	const revoke = changes.revoke === undefined ? [] : normalizeKeys(changes.revoke)
-	const both = grant.filter(key => revoke.includes(key))
+	const revoked = new Set(revoke)
+	const both = grant.filter(key => revoked.has(key))
 	if (both.length > 0) throw new AccessError('access.invalid_keys', `${keyList(both)} ${both.length > 1 ? 'are' : 'is'} both granted and revoked.`)
-	return normalizeKeys([...member.keys, ...grant].filter(key => !revoke.includes(key)))
+	return normalizeKeys([...member.keys, ...grant].filter(key => !revoked.has(key)))
 }
 
 export function setMember(
@@ -454,6 +455,8 @@ export function setMember(
 		if (clash && clash.id !== member.id) throw new AccessError('access.nickname_taken', `Nickname ${JSON.stringify(renamed)} is already used in this roster.`)
 		next = { ...next, nickname: renamed }
 	}
+	// An edit that changes nothing (`{}`, or the current nickname or kind) leaves the roster unwritten.
+	if (next === member) return { file, result: member }
 	const written: AccessFile = { ...file, members: file.members.map(item => item.id === member.id ? next : item) }
 	assertRosterWrite(file, written)
 	return { file: written, result: next }

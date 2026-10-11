@@ -528,10 +528,27 @@ describe('the import scan (Rule 01a11bb1-a310)', () => {
 		expect(scanImportSpecifiers(text)).toEqual(['./a', './b.js', './side.css', './c', './e', './f', './g'])
 	})
 
+	it('reads clauses without spaces, dynamic imports with options and template literals without interpolation', () => {
+		const text = [
+			'import{a}from\'./a\'',
+			'import*as b from"./b"',
+			'export*from\'./c\'',
+			'export{d}from"./d"',
+			'const e = await import(\'./e\', { with: { type: \'json\' } })',
+			'const f = await import( "./f" , {})',
+			'const g = await import(`./g`)',
+			'const h = require(`./h`)',
+			'const i = await import(`./${name}`)',
+			'const j = require(`./j-${name}`)',
+			'const k = `import{x}`',
+		].join('\n')
+		expect(scanImportSpecifiers(text)).toEqual(['./a', './b', './c', './d', './e', './f', './g', './h'])
+	})
+
 	it('scans a pathological 1 MB file well under a second', async () => {
 		const size = 1024 * 1024
 		const fill = (unit: string, tail = '') => unit.repeat(Math.floor((size - tail.length) / unit.length)) + tail
-		for (const text of [fill('import '), fill('export '), fill('export { a, ', 'from \'./x\''), fill('import(\'', ''), fill('from '), fill('import \'a', '\'')]) {
+		for (const text of [fill('import '), fill('export '), fill('export { a, ', 'from \'./x\''), fill('import(\'', ''), fill('from '), fill('import \'a', '\''), fill('import{'), fill('export*'), fill('import(`'), fill('require(`$'), fill('import(\'a\','), fill('import{a}from')]) {
 			const started = performance.now()
 			scanImportSpecifiers(text)
 			expect(performance.now() - started, text.slice(0, 20)).toBeLessThan(500)
@@ -545,6 +562,32 @@ describe('the import scan (Rule 01a11bb1-a310)', () => {
 		const checked = await checkProductKitAgainstKit({ root: ctx.root, codeDirectoryName: 'kit', next })
 		expect(performance.now() - started).toBeLessThan(1000)
 		expect(checked).toEqual({ refusals: [], findings: [] })
+	})
+
+	const manyImports = (count: number) => Array.from({ length: count }, (_, index) => `import './missing-${index}'`).join('\n')
+
+	it('resolves each import once per check, however many components share the file', async () => {
+		const ctx = await v5Fixture()
+		await write(join(ctx.root, 'kit', 'src', 'many.ts'), manyImports(1000))
+		const components = Object.fromEntries(Array.from({ length: 50 }, (_, index) => [`c${index}`, { files: ['src/many.ts'], layer: 'product' as const }]))
+		const started = performance.now()
+		const checked = await checkProductKitAgainstKit({ root: ctx.root, codeDirectoryName: 'kit', next: { ...KIT, components } })
+		expect(performance.now() - started).toBeLessThan(2000)
+		expect(checked).toEqual({ refusals: [], findings: [] })
+	})
+
+	it('stops at its limit with one finding', async () => {
+		const ctx = await v5Fixture()
+		const components: ProductKit['components'] = {}
+		for (const name of ['a', 'b', 'c', 'd']) {
+			await write(join(ctx.root, 'kit', 'src', name, 'many.ts'), manyImports(1000))
+			components[name] = { files: [`src/${name}/many.ts`], layer: 'product' }
+		}
+		const started = performance.now()
+		const checked = await checkProductKitAgainstKit({ root: ctx.root, codeDirectoryName: 'kit', next: { ...KIT, components } })
+		expect(performance.now() - started).toBeLessThan(2000)
+		expect(checked.refusals).toEqual([])
+		expect(checked.findings).toEqual([expect.objectContaining({ code: 'kit.component_invalid', path: '/components', message: expect.stringContaining('limit') })])
 	})
 })
 
@@ -636,6 +679,47 @@ describe('kit project containment', () => {
 		const nestedRead = await nested.app.readProductKit()
 		expect(nestedRead?.packages).toEqual([{ package: '@acme/design-system', status: 'missing' }])
 	})
+
+	it('answers one way for a ./ Adapter through a link out of the Workspace, whether or not its target exists', async () => {
+		const outside = await outsideKit()
+		const ctx = await v5Fixture()
+		await symlink(join(outside, 'src'), join(ctx.root, 'kit', 'link'))
+		await symlink(join(outside, 'gone'), join(ctx.root, 'kit', 'gone'))
+		await symlink(join(outside, 'secret.ts'), join(ctx.root, 'kit', 'leak.ts'))
+		await symlink(join(outside, 'nothing.ts'), join(ctx.root, 'kit', 'dangling.ts'))
+		const specifiers = ['./link/secret.ts', './link/nothing.ts', './link/deeper/nothing.ts', './gone/x.ts', './leak.ts', './dangling.ts', './absent.ts']
+		await writeFile(ctx.kitPath, canonicalJsonBytes({ ...KIT, adapters: specifiers.map(moduleSpecifier => ({ moduleSpecifier })) }))
+		const read = await ctx.app.readProductKit()
+		const answers = new Set(read?.adapters.map(entry => JSON.stringify({ ...entry, moduleSpecifier: '<specifier>', ...('message' in entry ? { message: entry.message.replace(entry.moduleSpecifier, '<specifier>') } : {}) })))
+		expect(read?.adapters.map(entry => entry.status)).toEqual(specifiers.map(() => 'failed'))
+		expect([...answers]).toEqual([JSON.stringify({ moduleSpecifier: '<specifier>', status: 'failed', message: 'Adapter module specifier <specifier> does not resolve to a file inside kit/.' })])
+		const text = JSON.stringify(read)
+		expect(text).not.toContain(outside)
+		expect(text).not.toContain('<path>')
+	})
+
+	for (const [label, link] of [
+		['kit/node_modules/ is a link out of the Workspace', async (root: string, outside: string) => {
+			await rm(join(root, 'kit', 'node_modules'), { recursive: true })
+			await symlink(join(outside, 'node_modules'), join(root, 'kit', 'node_modules'))
+		}],
+		['a scope directory in kit/node_modules/ is a link out of the Workspace', async (root: string, outside: string) => {
+			await rm(join(root, 'kit', 'node_modules', '@acme'), { recursive: true })
+			await symlink(join(outside, 'node_modules', '@acme'), join(root, 'kit', 'node_modules', '@acme'))
+		}],
+	] as const) {
+		it(`reports a package as linked, whether or not it exists there, when ${label}`, async () => {
+			const outside = await outsideKit()
+			const ctx = await v5Fixture({ ...KIT, designSystems: ['@acme/design-system', '@acme/absent'] })
+			await link(ctx.root, outside)
+			const read = await ctx.app.readProductKit()
+			expect(read?.packages).toEqual([
+				{ package: '@acme/design-system', status: 'resolved', linked: true },
+				{ package: '@acme/absent', status: 'resolved', linked: true },
+			])
+			expect(JSON.stringify(read)).not.toContain('9.9.9')
+		})
+	}
 })
 
 describe('host paths in the Product Kit Resource', () => {
@@ -645,6 +729,36 @@ describe('host paths in the Product Kit Resource', () => {
 		expect(maskHostPaths('Package subpath \'.\' is not defined by "exports" in /home/someone/node_modules/x/package.json imported from file:///home/someone/a.mjs', [root])).toBe('Package subpath \'.\' is not defined by "exports" in <path> imported from <path>')
 		expect(maskHostPaths('at (C:\\Users\\someone\\x.js) and \\\\server\\share\\y.js', [root])).toBe('at (<path>) and <path>')
 		expect(maskHostPaths('kit/package.json is not a regular file.', [root])).toBe('kit/package.json is not a regular file.')
+	})
+
+	it('keeps <workspace> to paths inside the root, by path segment', () => {
+		const root = '/srv/acme/ws'
+		expect(maskHostPaths(`in ${root}`, [root])).toBe('in <workspace>')
+		expect(maskHostPaths(`in ${root}/kit/a.mjs.`, [root])).toBe('in <workspace>/kit/a.mjs.')
+		expect(maskHostPaths(`in ${root}-other/kit/a.mjs and ${root}other`, [root])).toBe('in <path> and <path>')
+		expect(maskHostPaths(`in /mnt${root}/kit/a.mjs`, [root])).toBe('in <path>')
+		expect(maskHostPaths(`in file://${root}-other/a.mjs`, [root])).toBe('in <path>')
+		expect(maskHostPaths(`in "${root}-other/a.mjs"`, [root])).toBe('in "<path>"')
+		// The longer of two roots wins.
+		expect(maskHostPaths(`in ${root}/kit/a.mjs`, ['/srv', root])).toBe('in <workspace>/kit/a.mjs')
+	})
+
+	it('masks a path that leaves the root through ..', () => {
+		const root = '/srv/acme/ws'
+		expect(maskHostPaths(`in ${root}/../x.mjs`, [root])).toBe('in <path>')
+		expect(maskHostPaths(`in ${root}/kit/../../other/x.mjs`, [root])).toBe('in <path>')
+		expect(maskHostPaths(`in '${root}/..'`, [root])).toBe('in \'<path>\'')
+		expect(maskHostPaths(`in file://${root}/../x.mjs`, [root])).toBe('in <path>')
+		expect(maskHostPaths(`in ${root}/kit/../src/a.ts`, [root])).toBe('in <workspace>/src/a.ts')
+	})
+
+	it('masks a path with spaces whole', () => {
+		const root = '/srv/my acme/ws'
+		expect(maskHostPaths('Cannot find module \'/Users/John Smith/My File.js\' imported from "/Users/John Smith/a b.mjs"', [root])).toBe('Cannot find module \'<path>\' imported from "<path>"')
+		expect(maskHostPaths('in /Users/John Smith/node_modules/x/package.json imported from /home/a b/c d.mjs', [root])).toBe('in <path> imported from <path>')
+		expect(maskHostPaths('at file:///Users/John%20Smith/x.js', [root])).toBe('at <path>')
+		expect(maskHostPaths(`in ${root}/kit/a b.mjs imported from file:///srv/my%20acme/ws/kit/x.mjs`, [root])).toBe('in <workspace>/kit/a b.mjs imported from <workspace>/kit/x.mjs')
+		expect(maskHostPaths(`in '${root}/kit/a.mjs'`, [root])).toBe('in \'<workspace>/kit/a.mjs\'')
 	})
 
 	it('names no host path outside the Workspace in an Adapter\'s resolution failure', async () => {

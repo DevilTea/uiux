@@ -286,9 +286,12 @@ export function composeAdapters(current: readonly WorkspaceAdapterSelection[], s
 /**
  * An external package as Node module resolution finds it inside the Workspace: the first
  * `node_modules/<name>/package.json` in `kit/` or the Workspace root. `linked` marks a package
- * directory reached through a symbolic link (Clause 01a11bb1-8b6e-7185-b0ac-cb84c3fcc24a). A link
- * whose target lies outside the Workspace, or does not resolve, is reported as `linked` with no
- * version: nothing outside the Workspace is read or told apart.
+ * directory reached through a symbolic link (Clause 01a11bb1-8b6e-7185-b0ac-cb84c3fcc24a).
+ *
+ * A link on the way (`node_modules` itself, a scope directory or the package directory) whose
+ * target lies outside the Workspace, or does not resolve, ends the lookup there: the package is
+ * reported as `resolved` and `linked` with no version, whether or not anything exists behind the
+ * link, so nothing outside the Workspace is read or told apart.
  */
 async function resolvePackage(project: KitProject, name: string): Promise<ProductKitPackage> {
 	if (!project.directory) return { package: name, status: 'missing' }
@@ -297,19 +300,20 @@ async function resolvePackage(project: KitProject, name: string): Promise<Produc
 		let linked = false
 		let present = true
 		for (let index = 0; index <= segments.length; index++) {
-			const info = await lstat(join(directory, 'node_modules', ...segments.slice(0, index))).catch(() => undefined)
+			const path = join(directory, 'node_modules', ...segments.slice(0, index))
+			const info = await lstat(path).catch(() => undefined)
 			if (!info) {
 				present = false
 				break
 			}
-			if (info.isSymbolicLink()) linked = true
+			if (info.isSymbolicLink()) {
+				linked = true
+				if (await containedRealPath(project.realRoot, path) === undefined) return { package: name, status: 'resolved', linked: true }
+			}
 		}
 		if (!present) continue
 		const real = await containedRealPath(project.realRoot, join(directory, 'node_modules', ...segments))
-		if (real === undefined) {
-			if (linked) return { package: name, status: 'resolved', linked: true }
-			continue
-		}
+		if (real === undefined) continue
 		const manifestPath = await containedRealPath(project.realRoot, join(real, 'package.json'))
 		const manifest = manifestPath === undefined ? undefined : await readFile(manifestPath, 'utf8').catch(() => undefined)
 		if (manifest === undefined) continue

@@ -535,6 +535,24 @@ describe('uiux member on permission keys and Access presets (issue #142)', () =>
 		expect((await storedMembers(home, workspace))[2]).toMatchObject({ nickname: 'claude-l10n', keys: ['workspace.read', 'history.read', 'product-kit.source.read', 'reviews.write', 'reviews.submit', 'locales.write', 'checkpoints.create'] })
 	})
 
+	it('applies a service key edit to the roster read under the lock, keeping a CLI change it has not refreshed', async () => {
+		const { home, workspace, run } = await setup()
+		expect(await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)).toMatchObject({ code: 0 })
+		expect(await run('member', 'add', 'mei', '--preset', 'Editor', '--workspace', workspace)).toMatchObject({ code: 0 })
+		const store = (await AccessStore.open({ workspaceRoot: workspace, home }))!
+		const service = new AccessService({ store, leases: createLeaseManager() })
+		const mei = store.data.members.find(member => member.nickname === 'mei')!
+		expect(mei.keys).toEqual(expect.arrayContaining(['views.write', 'flows.write']))
+
+		// The CLI revokes views.write; the service does not refresh, so its snapshot still holds it.
+		expect(await run('member', 'set', 'mei', '--revoke', 'views.write', '--workspace', workspace)).toMatchObject({ code: 0 })
+		expect(store.data.members.find(member => member.id === mei.id)!.keys).toContain('views.write')
+
+		const expected = keysForRole('human', 'editor').filter(key => key !== 'views.write' && key !== 'flows.write')
+		expect((await service.setMember(mei.id, { revoke: ['flows.write'] })).keys).toEqual(expected)
+		expect((await storedMembers(home, workspace)).find(member => member.nickname === 'mei')).toMatchObject({ keys: expected })
+	})
+
 	it('keeps a stored key unknown to this version through grants and shows it in member list --keys (Rule 01a11c09-b7ec)', async () => {
 		const { home, workspace, run } = await setup()
 		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
