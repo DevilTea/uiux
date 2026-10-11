@@ -416,6 +416,7 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 						home: context.home,
 						replace,
 						file: realRoot => copyRoster(source, { workspaceRoot: realRoot, hint: generateHint() }),
+						onManagerCheckSkipped: reason => context.err(`uiux: warning: the roster being replaced is damaged (${reason}); --replace repairs it without checking that a human member keeps members.manage.`),
 					})
 				}
 				catch (error) {

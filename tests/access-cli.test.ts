@@ -226,6 +226,26 @@ describe('uiux access commands', () => {
 		await expect(lstat(hostHistoryPaths(home, target).dir)).rejects.toMatchObject({ code: 'ENOENT' })
 	})
 
+	it('refuses to replace a roster written by a newer UIUX, and replaces a damaged one with a warning (owner ruling of 2026-10-11)', async () => {
+		const { base, workspace, home, run } = await setup()
+		await run('member', 'add', 'deviltea', '--role', 'owner', '--workspace', workspace)
+		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
+		await sourceHost.writeVersion(hostVersion())
+		const target = await initWorkspace(base, 'moved')
+		await run('member', 'add', 'mei', '--role', 'owner', '--workspace', target)
+		const targetFile = accessStorePaths(home, target).file
+		const newer = JSON.stringify({ ...JSON.parse(await readFile(targetFile, 'utf8')), version: 3 })
+		await writeFile(targetFile, newer)
+		expect(await run('access', 'copy', '--from', workspace, '--workspace', target, '--replace')).toMatchObject({ code: 1, err: expect.stringContaining('written by a newer UIUX; this UIUX will not replace it. Run uiux access copy with that newer UIUX.') })
+		expect(await readFile(targetFile, 'utf8')).toBe(newer)
+		await expect(lstat(hostHistoryPaths(home, target).dir)).rejects.toMatchObject({ code: 'ENOENT' })
+
+		await writeFile(targetFile, '{ damaged')
+		const repaired = await run('access', 'copy', '--from', workspace, '--workspace', target, '--replace')
+		expect(repaired).toMatchObject({ code: 0, err: expect.stringContaining(`uiux: warning: the roster being replaced is damaged (${targetFile} is not valid JSON); --replace repairs it without checking that a human member keeps members.manage.`) })
+		expect(JSON.parse(await readFile(targetFile, 'utf8')).members).toMatchObject([{ nickname: 'deviltea' }])
+	})
+
 	it('refuses an uninitialized Workspace, a missing --workspace and a UIUX_HOME inside the Workspace', async () => {
 		const { base, workspace, run } = await setup()
 		expect(await run('member', 'list', '--workspace', join(base, 'typo'))).toMatchObject({ code: 2, err: expect.stringContaining('not an initialized UIUX Workspace') })

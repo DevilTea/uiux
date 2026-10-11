@@ -222,6 +222,17 @@ describe('the version 1 roster upgrade (Scenario 01a11c09-d7ef)', () => {
 		expect(await readFile(paths.file, 'utf8')).toBe(text)
 		await expect(stat(paths.v1Backup)).rejects.toMatchObject({ code: 'ENOENT' })
 	})
+
+	it('refuses a roster whose version is not an integer it knows, such as "2", 0 or 1.5, and writes nothing', async () => {
+		const { workspace, home, paths } = await workspaceAndHome()
+		for (const version of ['2', 0, 1.5, -1, null]) {
+			const text = await writeRoster(workspace, home, { ...v2Roster(workspace, []), version })
+			await expect(AccessStore.open({ workspaceRoot: workspace, home }), String(version)).rejects.toMatchObject({ code: 'access.store_invalid', message: expect.stringContaining(`The access store ${paths.file} is invalid: unsupported version ${JSON.stringify(version)}`) })
+			expectAccessError(() => readAccessFile({ ...v2Roster(workspace, []), version }), 'access.store_invalid', /unsupported version/u)
+			expect(await readFile(paths.file, 'utf8')).toBe(text)
+		}
+		await expect(stat(paths.v1Backup)).rejects.toMatchObject({ code: 'ENOENT' })
+	})
 })
 
 describe('recovery from a refused roster', () => {
@@ -247,6 +258,24 @@ describe('recovery from a refused roster', () => {
 		for (const name of leftovers) expect(names).not.toContain(name)
 		for (const name of kept) expect(names).toContain(name)
 	})
+
+	it('leaves the temporary files when another process holds the lock, and still opens the roster without waiting', async () => {
+		const { workspace, home, paths } = await workspaceAndHome()
+		await AccessStore.open({ workspaceRoot: workspace, home, create: true })
+		const leftover = join(paths.dir, 'access.json.0123456789ab.tmp')
+		await writeFile(leftover, 'x', { mode: 0o600 })
+		// A live holder: this process.
+		await writeFile(paths.lock, JSON.stringify({ pid: process.pid, token: 'held' }), { mode: 0o600 })
+		const started = Date.now()
+		const store = await AccessStore.open({ workspaceRoot: workspace, home })
+		expect(store?.data.version).toBe(2)
+		// Far below the lock's wait, which would end in `access.lock_busy`.
+		expect(Date.now() - started).toBeLessThan(2_000)
+		expect(await readdir(paths.dir)).toContain('access.json.0123456789ab.tmp')
+		await rm(paths.lock)
+		await AccessStore.open({ workspaceRoot: workspace, home })
+		expect(await readdir(paths.dir)).not.toContain('access.json.0123456789ab.tmp')
+	})
 })
 
 describe('roster invariants on write', () => {
@@ -262,9 +291,40 @@ describe('roster invariants on write', () => {
 		await writeNewRoster({ workspaceRoot: workspace, home, replace: true, file: root => v2Roster(root, [v2Member('mei', 'human', presetKeys('owner'))]) })
 		await writeRoster(workspace, home, agentsOnly(workspace))
 		await writeNewRoster({ workspaceRoot: workspace, home, replace: true, file: agentsOnly })
-		await writeFile(paths.file, '{ broken')
-		await writeNewRoster({ workspaceRoot: workspace, home, replace: true, file: agentsOnly })
-		expect(JSON.parse(await readFile(paths.file, 'utf8')).members).toMatchObject([{ nickname: 'claude' }])
+		// A damaged roster is replaced, and the caller is told the last-manager check was skipped.
+		const skipped: string[] = []
+		for (const damaged of ['{ broken', JSON.stringify({ ...v2Roster(workspace, []), members: 'none' })]) {
+			await writeFile(paths.file, damaged)
+			await writeNewRoster({ workspaceRoot: workspace, home, replace: true, file: agentsOnly, onManagerCheckSkipped: reason => skipped.push(reason) })
+			expect(JSON.parse(await readFile(paths.file, 'utf8')).members).toMatchObject([{ nickname: 'claude' }])
+		}
+		expect(skipped).toEqual([`${paths.file} is not valid JSON`, expect.stringContaining(`${paths.file}: The access store is invalid: members must be an array`)])
+		// A replacement of a manager-less roster that is readable warns about nothing.
+		await writeNewRoster({ workspaceRoot: workspace, home, replace: true, file: agentsOnly, onManagerCheckSkipped: reason => skipped.push(reason) })
+		expect(skipped).toHaveLength(2)
+	})
+
+	it('refuses to replace a roster written by a newer UIUX, asking for it (owner ruling of 2026-10-11)', async () => {
+		const { workspace, home, paths } = await workspaceAndHome()
+		const newer = await writeRoster(workspace, home, { ...v2Roster(workspace, []), version: 3 })
+		const replacement = (root: string) => v2Roster(root, [v2Member('mei', 'human', presetKeys('owner'))])
+		const message = `The roster ${paths.file} is roster version 3, written by a newer UIUX; this UIUX will not replace it. Run uiux access copy with that newer UIUX.`
+		await expect(writeNewRoster({ workspaceRoot: workspace, home, replace: true, file: replacement })).rejects.toMatchObject({ code: 'access.store_invalid', message })
+		await expect(assertReplacementKeepsManager(home, workspace, replacement(workspace))).rejects.toMatchObject({ code: 'access.store_invalid', message })
+		expect(await readFile(paths.file, 'utf8')).toBe(newer)
+	})
+
+	it('refuses any write that changes an existing member\'s kind, whatever the mutation', async () => {
+		const { workspace, home, paths } = await workspaceAndHome()
+		await writeRoster(workspace, home, v2Roster(workspace, [v2Member('deviltea', 'human', presetKeys('owner')), v2Member('claude', 'agent', ['workspace.read'])]))
+		const store = (await AccessStore.open({ workspaceRoot: workspace, home }))!
+		const before = await readFile(paths.file, 'utf8')
+		// A forged write turning the Agent into a human, even with keys unchanged, is refused.
+		for (const keys of [['workspace.read'], presetKeys('owner')]) {
+			const forged = store.update(file => ({ file: { ...file, members: file.members.map(member => member.nickname === 'claude' ? { ...member, kind: 'human' as const, keys } : member) }, result: undefined }))
+			await expect(forged).rejects.toMatchObject({ code: 'access.kind_immutable', message: expect.stringContaining('claude\'s kind is agent') })
+		}
+		expect(await readFile(paths.file, 'utf8')).toBe(before)
 	})
 
 	const HUMAN_KEYS = presetKeys('owner')

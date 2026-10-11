@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { HostHistoryPaths } from '../../persistence/history/host-store'
 import { generateHint } from './credentials'
 import {
+	ACCESS_FILE_VERSION,
 	AccessError,
 	assertManagerKept,
 	assertRosterWrite,
@@ -184,7 +185,7 @@ async function writeAtomically(path: string, contents: string): Promise<void> {
 	await syncDirectory(dirname(path))
 }
 
-async function acquireLock(lockPath: string): Promise<() => Promise<void>> {
+async function acquireLock(lockPath: string, waitMs: number = LOCK_WAIT_MS): Promise<() => Promise<void>> {
 	const started = Date.now()
 	const token = randomBytes(8).toString('hex')
 	for (;;) {
@@ -204,7 +205,7 @@ async function acquireLock(lockPath: string): Promise<() => Promise<void>> {
 			if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
 		}
 		if (await removeStaleLock(lockPath)) continue
-		if (Date.now() - started > LOCK_WAIT_MS)
+		if (Date.now() - started > waitMs)
 			throw new AccessError('access.lock_busy', `Timed out waiting for another UIUX process holding ${lockPath}.`)
 		await new Promise(resolveDelay => setTimeout(resolveDelay, 15))
 	}
@@ -440,7 +441,14 @@ export class AccessStore {
 
 /** Creates (or with `replace`, overwrites) a target roster from a ready-made file (`access copy`). */
 export async function writeNewRoster(
-	options: Readonly<{ workspaceRoot: string; home: string; file: (realRoot: string) => AccessFile; replace: boolean }>,
+	options: Readonly<{
+		workspaceRoot: string
+		home: string
+		file: (realRoot: string) => AccessFile
+		replace: boolean
+		/** Told when the replaced roster is damaged, so the last-manager check is skipped. */
+		onManagerCheckSkipped?: (message: string) => void
+	}>,
 ): Promise<{ paths: AccessStorePaths; file: AccessFile }> {
 	const realRoot = workspaceRealRoot(options.workspaceRoot)
 	assertHomeOutsideWorkspace(options.home, realRoot)
@@ -453,7 +461,11 @@ export async function writeNewRoster(
 			throw new AccessError('access.roster_exists', `Workspace ${realRoot} already has a roster (${paths.file}). Pass --replace to discard it.`)
 		const file = validateAccessFile(options.file(realRoot))
 		// A replacement keeps the last human manager like any other write (owner ruling 2 of 2026-10-11).
-		if (existing) assertManagerKept(await readReplacedRoster(paths, realRoot), file)
+		if (existing) {
+			const replaced = await readReplacedRoster(paths, realRoot)
+			if (replaced.damaged) options.onManagerCheckSkipped?.(replaced.damaged)
+			assertManagerKept(replaced.file, file)
+		}
 		await writeAtomically(paths.file, serialize(file))
 		return { paths, file }
 	}
@@ -738,17 +750,33 @@ function withStorePath(paths: AccessStorePaths, error: unknown): unknown {
 }
 
 /**
- * The roster `access copy --replace` is about to replace, for the last-manager check, or
- * `undefined` when the store refuses it: replacing a roster that cannot be read is how it is
- * recovered, and such a roster grants nothing to keep.
+ * The roster `access copy --replace` is about to replace, for the last-manager check (Clause
+ * 01a12928-61ba-7191-b94d-cf3e0f0ffdda; owner ruling of 2026-10-11,
+ * https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18858540):
+ * - a roster written by a newer UIUX (a roster version above this one's) is refused, so its data
+ *   is never discarded by an older UIUX;
+ * - a damaged roster may be replaced, which is how it is repaired: `damaged` says why the
+ *   last-manager check is skipped.
  */
-async function readReplacedRoster(paths: AccessStorePaths, realRoot: string): Promise<AccessFile | undefined> {
+async function readReplacedRoster(paths: AccessStorePaths, realRoot: string): Promise<Readonly<{ file?: AccessFile; damaged?: string }>> {
+	let parsed: unknown
 	try {
-		const { file } = readAccessFile(JSON.parse(await readFile(paths.file, 'utf8')))
-		return file.workspaceRoot === realRoot ? file : undefined
+		parsed = JSON.parse(await readFile(paths.file, 'utf8'))
 	}
 	catch (error) {
-		if (error instanceof AccessError || error instanceof SyntaxError || isNotFound(error)) return undefined
+		if (isNotFound(error)) return {}
+		if (error instanceof SyntaxError) return { damaged: `${paths.file} is not valid JSON` }
+		throw error
+	}
+	const version = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>).version : undefined
+	if (Number.isInteger(version) && (version as number) > ACCESS_FILE_VERSION)
+		throw new AccessError('access.store_invalid', `The roster ${paths.file} is roster version ${String(version)}, written by a newer UIUX; this UIUX will not replace it. Run uiux access copy with that newer UIUX.`)
+	try {
+		const { file } = readAccessFile(parsed)
+		return file.workspaceRoot === realRoot ? { file } : { damaged: `${paths.file} records Workspace ${file.workspaceRoot}` }
+	}
+	catch (error) {
+		if (error instanceof AccessError) return { damaged: `${paths.file}: ${error.message}` }
 		throw error
 	}
 }
@@ -761,17 +789,26 @@ async function readReplacedRoster(paths: AccessStorePaths, realRoot: string): Pr
 export async function assertReplacementKeepsManager(home: string, workspaceRoot: string, replacement: AccessFile): Promise<void> {
 	const realRoot = workspaceRealRoot(workspaceRoot)
 	if (!await rosterExists(home, realRoot)) return
-	assertManagerKept(await readReplacedRoster(accessStorePaths(home, realRoot), realRoot), replacement)
+	assertManagerKept((await readReplacedRoster(accessStorePaths(home, realRoot), realRoot)).file, replacement)
 }
 
 /**
  * Removes temporary files that a killed writer left beside the roster. Every roster write holds
- * the store lock while its temporary file exists, so under the lock any such file is stale.
+ * the store lock while its temporary file exists, so under the lock any such file is stale. It
+ * is best effort: when another process holds the lock, the files stay for a later open, and
+ * opening never waits for the lock or fails on it.
  */
 async function removeStaleTemporaries(paths: AccessStorePaths): Promise<void> {
 	const stale = async () => (await readdir(paths.dir)).filter(name => ROSTER_TEMPORARY.test(name))
 	if ((await stale()).length === 0) return
-	const release = await acquireLock(paths.lock)
+	let release: () => Promise<void>
+	try {
+		release = await acquireLock(paths.lock, 0)
+	}
+	catch (error) {
+		if (error instanceof AccessError && error.code === 'access.lock_busy') return
+		throw error
+	}
 	try {
 		for (const name of await stale()) await rm(join(paths.dir, name), { force: true })
 	}

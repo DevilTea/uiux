@@ -329,7 +329,9 @@ function sameKeys(left: readonly string[], right: readonly string[]): boolean {
 
 /**
  * The invariants of a roster write, checked against the roster it replaces (`before`):
- * - each new member, and each member whose kind or keys change, gets no key outside the catalog
+ * - an existing member keeps its kind (`access.kind_immutable`, Clause
+ *   01a12928-6237-7c28-8652-0b129079329b), so no write turns an Agent into a human;
+ * - each new member, and each member whose keys change, gets no key outside the catalog
  *   that it did not hold (`assertKnownKeys`) and has a storable key set (`assertStorableKeys`);
  *   an unchanged member keeps its keys, so a set written by hand that lacks a requirement stays
  *   as it is and grants only the keys it lists (Rule 01a11c09-b779-7f5f-ba47-170a584a09ce);
@@ -339,7 +341,10 @@ export function assertRosterWrite(before: AccessFile | undefined, after: AccessF
 	const previous = new Map((before?.members ?? []).map(member => [member.id, member]))
 	for (const member of after.members) {
 		const prior = previous.get(member.id)
-		if (prior && prior.kind === member.kind && sameKeys(prior.keys, member.keys)) continue
+		// Rule 01a11485-ea75-7964-bc21-29aa78049abf: whatever the mutation, an existing member keeps its kind.
+		if (prior && prior.kind !== member.kind)
+			throw new AccessError('access.kind_immutable', `${prior.nickname}'s kind is ${prior.kind}, fixed at creation; a roster write cannot change it.`)
+		if (prior && sameKeys(prior.keys, member.keys)) continue
 		assertKnownKeys(member.nickname, member.keys, prior?.keys)
 		assertStorableKeys(member)
 	}
