@@ -5,10 +5,11 @@ import type { AuthoringAccess } from '../../composables/useAuthoringAccess'
 
 /**
  * Why a Workspace authoring page is read-only. Tablet and mobile get "Edit on desktop";
- * a migration-required Workspace names the reason, and a member below Editor names the role
- * required. A held edit lock already has its Lock badge, so it shows nothing here.
+ * a migration-required Workspace names the reason, and a member without the page's write key
+ * names that key (Discussion #140, decision 12). A held edit lock already has its Lock badge, so
+ * it shows nothing here.
  */
-const props = defineProps<{ access: AuthoringAccess }>()
+const props = defineProps<{ access: AuthoringAccess; writeKey: string }>()
 const { t } = useI18n()
 
 const notice = computed(() => {
@@ -16,8 +17,8 @@ const notice = computed(() => {
 		return { icon: 'i-lucide-monitor', title: t('common.editOnDesktop'), description: t('authoring.access.device') }
 	if (props.access === 'migration')
 		return { icon: 'i-lucide-lock', title: t('common.readOnly'), description: t('authoring.access.migration') }
-	if (props.access === 'role')
-		return { icon: 'i-lucide-user-lock', title: t('common.readOnly'), description: t('access.requiresRole', { role: t('access.role.editor') }) }
+	if (props.access === 'key')
+		return { icon: 'i-lucide-user-lock', title: t('common.readOnly'), description: t('access.requiresKey', { key: props.writeKey }) }
 	return undefined
 })
 </script>
@@ -27,6 +28,7 @@ const notice = computed(() => {
     v-if="notice"
     class="flex items-start gap-2 text-sm text-muted"
     data-access-notice
+    :data-missing-key="access === 'key' ? writeKey : undefined"
   >
     <UIcon
       :name="notice.icon"

@@ -8,8 +8,9 @@ import { DISCOVERABLE_RESOURCE_KINDS, MAX_RESOURCE_DISCOVERY_LIMIT, REVIEW_ANCHO
 import type { PointResourceKind } from '../application/dto/point-resources'
 import type { WorkspaceApplicationSession } from '../application/services/workspace-session'
 import { LOCKABLE_KINDS, MAX_ACQUIRE_RESOURCES, type LeaseManager } from '../application/access/leases'
-import { principalRole, type Principal } from '../application/access/principal'
-import { effectiveKeys, roleLabel } from '../application/access/policy'
+import { memberLabelName } from '../application/access/labels'
+import type { Principal } from '../application/access/principal'
+import { effectiveKeys } from '../application/access/policy'
 import { createScopedWorkspaceSession, type ScopedSessionOptions, type ScopedWorkspaceSession } from '../application/access/scoped-session'
 import type { ViewSpecContent } from '../application/services/view-authoring'
 import { VERSION_DIFF_DETAILS } from '../application/services/history-diff'
@@ -393,10 +394,16 @@ const releaseLockSchema = z.object({ resources: leaseResourcesSchema.optional() 
 
 export const LEASE_RECIPE = 'Edit leases: your first successful write to a View, Flow, Locale, Asset, the Workspace settings or the Product Kit takes a 5-minute lease on it, renewed by each of your writes; other writers get status "locked" (resource.locked) with your nickname and expiry. For a multi-step task, call acquire_lock up front for every resource you will write, call acquire_lock again as a heartbeat before a long pause (a build, a capture), and finish with release_lock and no arguments. Leases never replace expectedRevision: a conflict still means re-read. Review threads are never locked.'
 
-/** Per-request server instructions: the agent learns its identity and role without a new tool (decision 10). */
+/**
+ * Per-request server instructions (Clause 01a11485-f6ea-7918-bd58-0cdca6d0c432): the Agent learns
+ * its identity, label and effective permission keys without a new tool (Discussion #140, decision
+ * 12). The keys are the ones that take effect on this credential (`effectiveKeys`), so a bearer
+ * Token never lists a `humanOnly` key.
+ */
 export function uiuxMcpInstructions(principal: Principal): string {
+	const keys = effectiveKeys(principal)
 	const identity = principal.type === 'member'
-		? `Authenticated as ${principal.nickname} (${principal.kind}, ${roleLabel(principalRole(principal)).toLowerCase()}).`
+		? `Authenticated as ${principal.nickname} (${principal.kind}, ${memberLabelName(principal.label)}). Your effective permission keys: ${keys.length > 0 ? keys.join(', ') : 'none'}.`
 		: `Authenticated as ${principal.id}.`
 	return `${identity} Actors and times on Review records are stamped by the server from this identity; do not send actor or at. Tools your permission keys do not allow refuse with auth.scope_denied naming the missing keys (requiredKeys). Resolving Review threads is human-only, in the UIUX Workbench. You may edit your own Review messages (until a later submission or resolution) and retract your own brand-new threads nobody has engaged with. ${LEASE_RECIPE} ${CHECKPOINT_RECOMMENDATION}`
 }

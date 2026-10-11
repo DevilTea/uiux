@@ -20,6 +20,8 @@ export const GLOSSARY_NOUNS = [
 	'Token', 'Agent', 'Slot', 'Runtime', 'Manifest', 'Bundle', 'Schema',
 	// Owner decision, 2026-10-09: the version timeline's Checkpoint stays English in zh-TW.
 	'Checkpoint',
+	// Owner ruling, 2026-10-11 (Discussion #139, ruling 4): Product Kit stays English, since 「套件」 means a package.
+	'Product Kit',
 ]
 
 /** Other English words a zh-TW string may carry, each a name or a literal rather than prose. */
@@ -60,6 +62,8 @@ const NOUNS = String.raw`(?:${GLOSSARY_NOUNS.join('|')}|UX Flow)s?`
 export const RAW_TEXT_IGNORE_PATTERN = `^(?:${[...LITERAL_PATTERNS, NOUNS].join('|')})?$`
 
 const WORD_ALLOWED = new Set([...GLOSSARY_NOUNS, ...GLOSSARY_NOUNS.map(noun => `${noun}s`), ...ALLOWED_WORDS])
+/** Glossary nouns of more than one word (Product Kit), set aside whole before the text is split into words. */
+const NOUN_PHRASES = GLOSSARY_NOUNS.filter(noun => noun.includes(' ')).map(noun => new RegExp(String.raw`\b${noun}s?\b`, 'gu'))
 const LITERAL_TOKEN = new RegExp(`^(?:${LITERAL_PATTERNS.join('|')})$`, 'u')
 
 /**
@@ -76,8 +80,9 @@ export function untranslatedWords(text) {
 		.replace(/「[^」]*」/g, ' ')
 		.replace(/\buiux [a-z][a-z-]*/g, ' ')
 		.replace(/Authorization: Bearer/g, ' ')
+	const prose = NOUN_PHRASES.reduce((out, phrase) => out.replace(phrase, ' '), rest)
 	const words = []
-	for (const raw of rest.split(/[\s，。、：；！？（）「」『』・／·•…—–,;!?()[\]"“”]+/u)) {
+	for (const raw of prose.split(/[\s，。、：；！？（）「」『』・／·•…—–,;!?()[\]"“”]+/u)) {
 		const token = raw.replace(/[.:]+$/g, '')
 		if (!token || !/\p{L}/u.test(token) || !/[A-Za-z]/.test(token)) continue
 		if (LITERAL_TOKEN.test(token) || WORD_ALLOWED.has(token)) continue

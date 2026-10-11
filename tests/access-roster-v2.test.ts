@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { BUILT_IN_ACCESS_PRESETS, HUMAN_ONLY_PERMISSION_KEYS, keysForRole, PERMISSION_KEYS } from '../src/application/access/keys'
-import { compatibilityRole, memberLabel } from '../src/application/access/labels'
+import { memberLabel } from '../src/application/access/labels'
 import { createLeaseManager } from '../src/application/access/leases'
 import { authorizeOperation, effectiveKeys } from '../src/application/access/policy'
 import { generateCredential, generateHint } from '../src/server/access/credentials'
@@ -478,17 +478,17 @@ describe('principals from stored keys', () => {
 			for (const key of HUMAN_ONLY_PERMISSION_KEYS) expect(effectiveKeys(principal)).not.toContain(key)
 			expect(authorizeOperation(principal, 'administerAccess')).toMatchObject({ code: 'auth.scope_denied', requiredKeys: ['members.manage'] })
 			expect(authorizeOperation(principal, 'forceReleaseLease')).toMatchObject({ code: 'auth.scope_denied', requiredKeys: ['locks.force-release'] })
-			expect(principal.role).toBe('editor')
+			// Labeled from the stored keys, which no preset matches once its humanOnly keys are ignored.
+			expect(principal.label).toEqual({ custom: true })
 		}
 	})
 
-	it('resolves exactly the stored catalog keys for a human member, with a role derived from them', () => {
+	it('resolves exactly the stored catalog keys for a human member, labeled from them', () => {
 		const mei = v2Member('mei', 'human', ['workspace.read', 'reviews.write', 'checkpoints.delete'])
 		const principal = memberPrincipal(mei, 'session', 'aaaaaaaaaa')
 		expect(principal.keys).toEqual(['workspace.read', 'reviews.write', 'checkpoints.delete'])
-		expect(principal.role).toBe('viewer')
-		expect(compatibilityRole(v2Member('lead', 'human', presetKeys('owner')))).toBe('owner')
-		expect(compatibilityRole(v2Member('ed', 'human', [...presetKeys('editor'), 'members.manage']))).toBe('editor')
+		expect(principal.label).toEqual({ custom: true })
+		expect(memberPrincipal(v2Member('lead', 'human', presetKeys('owner')), 'session', 'aaaaaaaaaa').label).toEqual({ preset: { id: 'owner', name: 'Owner' } })
 	})
 })
 

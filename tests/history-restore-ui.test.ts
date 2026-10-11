@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { RESTORABLE_RESOURCE_KINDS } from '../src/domain/history/constants'
 import { RESTORABLE_RESOURCE_KINDS as SERVICE_KINDS } from '../src/application/services/history-restore'
 import type { ImpactItem } from '../src/domain/impact/analyzer'
+import { diffWorkspaceSettings } from '../src/domain/history/diff/settings'
+import type { JsonValue } from '../src/domain/validation'
 import { comparisonRefreshKey, forgetComparisonsAfterDeletion, refreshKeyChanged } from '../app/utils/comparison-refresh'
 import { diffRequestQuery } from '../app/utils/version-history'
-import { classifyRestoreAnswer, groupImpacts, matchesCurrent, restoreSourceVersion, shortId, type RestoreGateInput } from '../app/utils/version-restore'
+import { classifyRestoreAnswer, groupImpacts, matchesCurrent, restoreExtraKeys, restoreSourceVersion, shortId, type RestoreGateInput } from '../app/utils/version-restore'
 
 /**
  * The Workbench restore's pure parts (issue #132, B10): when a resource's diff offers "Restore this
@@ -20,7 +22,7 @@ const OTHER = '00000000-0000-4000-8000-00000000000b'
 function gate(overrides: Partial<RestoreGateInput> = {}): RestoreGateInput {
 	return {
 		desktop: true,
-		canAuthor: true,
+		canWrite: () => true,
 		resource: { kind: 'view', status: 'modified' },
 		selectedVersion: SELECTED,
 		endpoints: { from: 'parent', to: SELECTED },
@@ -36,9 +38,23 @@ describe('the restore gate', () => {
 		expect(restoreSourceVersion(gate({ endpoints: { from: SELECTED, to: OTHER } }))).toBe(SELECTED)
 	})
 
-	it('is offered only on a desktop layout to a member who may author', () => {
+	it('is offered only on a desktop layout to a member who may write', () => {
 		expect(restoreSourceVersion(gate({ desktop: false }))).toBeUndefined()
-		expect(restoreSourceVersion(gate({ canAuthor: false }))).toBeUndefined()
+		expect(restoreSourceVersion(gate({ canWrite: () => false }))).toBeUndefined()
+	})
+
+	it('needs `history.restore` and the write key of the restored kind, each on its own (Rule 01a11c09-c648)', () => {
+		const holding = (...keys: string[]) => (key: string) => keys.includes(key)
+		for (const [kind, writeKey] of [['view', 'views.write'], ['flow', 'flows.write'], ['locale', 'locales.write'], ['asset', 'assets.write'], ['workspace', 'settings.write']] as const) {
+			const resource = { kind, status: 'modified' as const }
+			expect(restoreSourceVersion(gate({ resource, canWrite: holding('history.restore', writeKey) })), kind).toBe(SELECTED)
+			expect(restoreSourceVersion(gate({ resource, canWrite: holding(writeKey) })), `${kind} without history.restore`).toBeUndefined()
+			expect(restoreSourceVersion(gate({ resource, canWrite: holding('history.restore') })), `${kind} without ${writeKey}`).toBeUndefined()
+		}
+		// A translator-like member restores a Locale but not a View.
+		const translator = holding('history.restore', 'locales.write')
+		expect(restoreSourceVersion(gate({ resource: { kind: 'locale', status: 'modified' }, canWrite: translator }))).toBe(SELECTED)
+		expect(restoreSourceVersion(gate({ resource: { kind: 'view', status: 'modified' }, canWrite: translator }))).toBeUndefined()
 	})
 
 	it('is offered for the restorable kinds only: never a Review thread, access presets or an unknown kind', () => {
@@ -188,5 +204,32 @@ describe('cached comparisons after a Checkpoint is deleted (B8 follow-up c)', ()
 		])
 		forgetComparisonsAfterDeletion(cache, deleted)
 		expect([...cache.values()]).toEqual([5, 6])
+	})
+})
+
+describe('the keys a Workspace settings restore needs beyond its write key (#140 owner ruling 2026-10-10, 1)', () => {
+	const ref = (moduleSpecifier: string, config?: Record<string, string>) => ({ moduleSpecifier, ...(config ? { config } : {}) })
+	/** The semantic comparison of a version's manifest (`from`) with the current one, as the dialog reads it. */
+	function compared(version: JsonValue[], current: JsonValue[], schemaVersion = 4) {
+		const diff = diffWorkspaceSettings({ schemaVersion, adapters: version }, { schemaVersion, adapters: current })
+		return { to: { id: 'current' as const, workspaceSchemaVersion: schemaVersion }, changes: [{ kind: 'workspace', key: 'workspace', status: 'modified' as const, diff }] }
+	}
+
+	it('needs `product-kit.compose` when the restore adds, removes, reorders or re-points an `adapters` entry', () => {
+		expect(restoreExtraKeys('workspace', compared([ref('./a.ts')], [ref('./a.ts'), ref('./b.ts')]))).toEqual(['product-kit.compose'])
+		expect(restoreExtraKeys('workspace', compared([ref('./a.ts'), ref('./b.ts')], [ref('./a.ts')]))).toEqual(['product-kit.compose'])
+		expect(restoreExtraKeys('workspace', compared([ref('./a.ts'), ref('./b.ts')], [ref('./b.ts'), ref('./a.ts')]))).toEqual(['product-kit.compose'])
+		expect(restoreExtraKeys('workspace', compared([ref('./a.ts')], [ref('./b.ts')]))).toEqual(['product-kit.compose'])
+		// Unmatched by `moduleSpecifier` (a duplicate), the list is compared by position.
+		expect(restoreExtraKeys('workspace', compared([ref('./a.ts'), ref('./a.ts')], [ref('./a.ts'), ref('./b.ts')]))).toEqual(['product-kit.compose'])
+	})
+
+	it('needs nothing more for a change to an entry\'s `config` alone, for other kinds, from `schemaVersion` 5, or without a comparison', () => {
+		expect(restoreExtraKeys('workspace', compared([ref('./a.ts', { tone: 'warm' })], [ref('./a.ts', { tone: 'cold' })]))).toEqual([])
+		expect(restoreExtraKeys('workspace', compared([ref('./a.ts', { x: '1' }), ref('./a.ts')], [ref('./a.ts', { x: '2' }), ref('./a.ts')]))).toEqual([])
+		expect(restoreExtraKeys('workspace', compared([ref('./a.ts')], [ref('./a.ts')]))).toEqual([])
+		expect(restoreExtraKeys('view', compared([ref('./a.ts')], [ref('./b.ts')]))).toEqual([])
+		expect(restoreExtraKeys('workspace', compared([ref('./a.ts')], [ref('./b.ts')], 5))).toEqual([])
+		expect(restoreExtraKeys('workspace', undefined)).toEqual([])
 	})
 })

@@ -4,6 +4,7 @@ import { anchorViewId, type ReviewResolution, type ReviewThread } from '../../sr
 import { deriveWidgetTree, flattenWidgetTree } from '../../src/preview/widget-tree'
 import { effectiveRenderContext } from '../../src/preview/render-context-options'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
+import { resolveBlock, resolveBlockMessage } from '../utils/comment-availability'
 import {
 	buildInboxThread,
 	canvasLinkOptions,
@@ -79,7 +80,7 @@ function createReviewInbox() {
 	const access = useAccess()
 	const workbench = useWorkbench()
 	const recordedContext = useRecordedRenderContext()
-	const { reviews, views, reviewReadOnly, authorReadOnly, preview } = workbench
+	const { reviews, views, reviewReadOnly, preview } = workbench
 
 	// -------------------------------------------------------------------------------------------
 	// Route state: the filter and the selected thread
@@ -315,12 +316,25 @@ function createReviewInbox() {
 	// Permissions (accepted identity decisions; direct-resolve decision 9)
 	// -------------------------------------------------------------------------------------------
 
-	/** Reviewers and above reply, reopen and re-anchor; Viewers read only. */
+	/** Replying, composing, editing and deleting one's own messages, and re-anchoring need `reviews.write`. */
 	const canReply = computed(() => !reviewReadOnly.value)
-	/** Resolution is a human act on a Workbench cookie session. */
-	const canResolve = computed(() => !reviewReadOnly.value && member.value?.kind === 'human' && access.session.value?.credential === 'session')
-	/** Promotion writes the View Spec, so it needs authoring rights. */
-	const canPromote = computed(() => !authorReadOnly.value)
+	/** Submitting for review and reopening need `reviews.submit`. */
+	const canSubmit = computed(() => workbench.canWrite('reviews.submit'))
+	/**
+	 * Resolving needs `reviews.resolve`, a `humanOnly` key: the session's keys hold it only for a
+	 * human member on this Workbench cookie session (Rule 01a11c09-bec8-7dee-971a-4c10eaf83eef).
+	 */
+	const canResolve = computed(() => workbench.canWrite('reviews.resolve'))
+	/**
+	 * Why the member cannot resolve (`resolveBlock`): a write-blocked Workspace, then an Agent, which
+	 * never can, then the missing key; a holder of the key on a write-blocked Workspace is told why.
+	 */
+	const resolveBlockedReason = computed(() => {
+		const code = resolveBlock({ workspaceState: workbench.workspace.value?.inspection?.state, agent: member.value?.kind === 'agent', holdsResolve: access.can('reviews.resolve') })
+		return code ? resolveBlockMessage(code, t) : undefined
+	})
+	/** Promoting to a Decision needs `reviews.promote`. */
+	const canPromote = computed(() => workbench.canWrite('reviews.promote'))
 
 	// -------------------------------------------------------------------------------------------
 	// Mutations
@@ -497,7 +511,7 @@ function createReviewInbox() {
 	}
 
 	async function reopen(threadId: string, reason?: string): Promise<boolean> {
-		if (!canReply.value) return false
+		if (!canSubmit.value) return false
 		const ok = await mutate(threadId, 'reopen', revision => post(path(threadId, 'reopen'), { expectedRevision: revision, ...(reason?.trim() ? { reason: reason.trim() } : {}) }), t('comments.errors.reopenFailed'))
 		if (ok) announce(t('comments.announce.reopened'))
 		return ok
@@ -507,7 +521,7 @@ function createReviewInbox() {
 	async function submit(threadId: string, draft: ReviewSubmissionDraft): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		const viewId = item?.viewId
-		if (!item || !viewId || !canReply.value || item.status !== 'open') return false
+		if (!item || !viewId || !canSubmit.value || item.status !== 'open') return false
 		const ok = await mutate(threadId, 'submit', async (revision) => {
 			const view = await uiux.readResource<ViewRead>('view', viewId)
 			if (!view) throw new Error(t('inbox.errors.viewMissing'))
@@ -633,7 +647,9 @@ function createReviewInbox() {
 		isUnread,
 		markSeen,
 		canReply,
+		canSubmit,
 		canResolve,
+		resolveBlockedReason,
 		canPromote,
 		busy,
 		conflict,

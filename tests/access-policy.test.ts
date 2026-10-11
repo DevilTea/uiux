@@ -28,6 +28,7 @@ import {
 } from '../src/application/access/policy'
 import { ACCESS_ROLES, MEMBER_KINDS, principalActor, type AccessRole, type MemberPrincipal, type Principal, type SystemPrincipal } from '../src/application/access/principal'
 import { resolutionRefusal } from '../src/application/access/scoped-session'
+import { uiuxMcpInstructions } from '../src/mcp/server'
 import { RESTORABLE_RESOURCE_KINDS } from '../src/domain/history/constants'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
@@ -63,12 +64,24 @@ async function fixture() {
 
 const CAPTURE: SystemPrincipal = { type: 'system', id: 'system:capture', credential: 'system' }
 
+/** The role each parity member was derived from; a principal carries keys and a label, never a role. */
+const ROLE_OF = new Map<Principal, AccessRole>()
+
 /** Every role, member kind and credential, as the live server derives their keys, plus the system credential. */
 const PRINCIPALS: readonly Principal[] = [
-	...ACCESS_ROLES.flatMap(role => MEMBER_KINDS.flatMap(kind => (['session', 'token'] as const).map(credential =>
-		testMember({ nickname: `${kind}-${role}-${credential}`, role, kind, credential })))),
+	...ACCESS_ROLES.flatMap(role => MEMBER_KINDS.flatMap(kind => (['session', 'token'] as const).map((credential) => {
+		const principal = testMember({ nickname: `${kind}-${role}-${credential}`, role, kind, credential })
+		ROLE_OF.set(principal, role)
+		return principal
+	}))),
 	CAPTURE,
 ]
+
+/** The role matrix's effective role: Agents were capped at Editor. */
+function legacyRole(principal: MemberPrincipal): AccessRole {
+	const role = ROLE_OF.get(principal)!
+	return principal.kind === 'agent' && role === 'owner' ? 'editor' : role
+}
 
 function describePrincipal(principal: Principal): string {
 	return principal.type === 'system' ? principal.id : principal.nickname
@@ -133,7 +146,7 @@ const ROLE_MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; 
 function roleMatrixAllows(principal: Principal, operation: AccessOperation): boolean {
 	const rule = ROLE_MATRIX[operation]
 	if (principal.type === 'system') return rule.system === true
-	const effective = principal.kind === 'agent' && principal.role === 'owner' ? 'editor' : principal.role
+	const effective = legacyRole(principal)
 	return ACCESS_ROLES.indexOf(effective) >= ACCESS_ROLES.indexOf(rule.min) && (!rule.H || principal.kind === 'human') && (!rule.S || principal.credential === 'session')
 }
 
@@ -189,7 +202,7 @@ describe('parity: role-derived keys decide as the role matrix did', () => {
 	it('keeps the HTTP resolve refusals: scope_denied without the key, resolve_requires_workbench for a bearer Token, resolve_requires_human for an Agent session', () => {
 		const legacy = (principal: Principal): string | undefined => {
 			if (principal.type === 'system') return 'auth.scope_denied'
-			const effective = principal.kind === 'agent' && principal.role === 'owner' ? 'editor' : principal.role
+			const effective = legacyRole(principal)
 			if (ACCESS_ROLES.indexOf(effective) < ACCESS_ROLES.indexOf('reviewer')) return 'auth.scope_denied'
 			if (principal.credential !== 'session') return 'review.resolve_requires_workbench'
 			if (principal.kind !== 'human') return 'review.resolve_requires_human'
@@ -532,17 +545,32 @@ describe('authorization in the shared application layer', () => {
 		expect(after.resource.adapters).toEqual([])
 	})
 
-	it('tells the agent its identity and role in the per-request instructions', async () => {
+	it('tells the agent its identity, label and effective keys in the per-request instructions (Clause 01a11485-f6ea)', async () => {
 		const ctx = await fixture()
 		const mcp = await connectMcp(ctx.app, testMember({ nickname: 'claude-wt-a', kind: 'agent', role: 'editor', credential: 'token' }))
 		try {
 			const instructions = mcp.client.getInstructions() ?? ''
-			expect(instructions.startsWith('Authenticated as claude-wt-a (agent, editor).')).toBe(true)
+			const editorKeys = keysForRole('agent', 'editor')
+			expect(instructions.startsWith(`Authenticated as claude-wt-a (agent, Editor). Your effective permission keys: ${editorKeys.join(', ')}.`)).toBe(true)
+			expect(editorKeys).not.toContain('reviews.resolve')
+			expect(instructions).not.toMatch(/\brole\b/u)
 			expect(instructions).toContain('requiredKeys')
 			expect(instructions).toContain('acquire_lock')
 			expect(instructions).toContain('release_lock')
 		}
 		finally { await mcp.close() }
+	})
+
+	it('names Custom for a key set no preset matches, and lists only the keys a bearer Token makes effective', () => {
+		const translator = testMember({ nickname: 'tina', kind: 'agent', credential: 'token', keys: ['workspace.read', 'reviews.write', 'locales.write'] })
+		expect(uiuxMcpInstructions(translator).startsWith('Authenticated as tina (agent, Custom). Your effective permission keys: workspace.read, reviews.write, locales.write.')).toBe(true)
+		// A human Owner's Token: labeled Owner from the stored keys, but humanOnly keys take effect only on a cookie session.
+		const owner = testMember({ nickname: 'mei', kind: 'human', role: 'owner', credential: 'token' })
+		const listed = /Your effective permission keys: (.+?)\. Actors/u.exec(uiuxMcpInstructions(owner))![1]!.split(', ')
+		expect(uiuxMcpInstructions(owner).startsWith('Authenticated as mei (human, Owner).')).toBe(true)
+		expect(listed).toEqual(PERMISSION_KEYS.filter(key => !HUMAN_ONLY_PERMISSION_KEYS.includes(key)))
+		const none = testMember({ nickname: 'nobody', kind: 'human', credential: 'token', keys: [] })
+		expect(uiuxMcpInstructions(none).startsWith('Authenticated as nobody (human, Custom). Your effective permission keys: none.')).toBe(true)
 	})
 })
 

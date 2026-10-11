@@ -20,7 +20,8 @@ import WbErrorDescription from '../workbench/WbErrorDescription.vue'
  * the ones the reader looks at. A View's canvas before and after (B9) goes in the `canvas` slot.
  * The open diff offers "Restore this version" for the selected version (Rule
  * 01a11a5e-18f2-7991-8f7d-aa4c8015d14a) when `restoreSourceVersion` allows it: desktop only (Rule
- * 01a11a5e-1bfa-71e9-9611-152b5b665379), Editor or above, a restorable kind held by that version.
+ * 01a11a5e-1bfa-71e9-9611-152b5b665379), with `history.restore` and the kind's write key (Rule
+ * 01a11c09-c648-71be-a550-2ecabf12f5d0), a restorable kind held by that version.
  */
 const props = defineProps<{
 	row: Readonly<Pick<ResourceChangeSummary, 'kind' | 'key' | 'status'>>
@@ -45,11 +46,11 @@ const semantic = useVersionDiff(() => props.endpoints, { resources, detail: 'sem
 const change = computed(() => semantic.result.value?.changes?.find(item => item.kind === props.row.kind && item.key === props.row.key))
 const name = computed(() => labels.resourceName(props.row))
 
-const { authorReadOnly } = useWorkbench()
+const { canWrite } = useWorkbench()
 const desktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const restoreFrom = computed(() => restoreSourceVersion({
 	desktop: desktop.value,
-	canAuthor: !authorReadOnly.value,
+	canWrite,
 	resource: props.row,
 	selectedVersion: props.selectedVersion,
 	endpoints: props.endpoints,

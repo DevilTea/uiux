@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
 import { inCatalogOrder, isCatalogKey, isHumanOnlyKey, isPermissionKeyName, keysForRole, missingRequirements, type PermissionKey } from '../../application/access/keys'
-import { compatibilityRole } from '../../application/access/labels'
 import { isAccessRole, isMemberKind, type AccessRole, type MemberKind } from '../../application/access/principal'
 import { isFullUuid } from '../../domain/validation'
 import {
@@ -369,8 +368,9 @@ export function assertManagerKept(before: AccessFile | undefined, after: AccessF
 }
 
 /**
- * The key set a member write asks for: explicit `keys`, or a `role`, which the Members page still
- * sends and which stands for the keys of the built-in preset with that
+ * The key set a member write asks for: explicit `keys`, or a `role`, an in-process shorthand that
+ * no surface sends (the CLI refuses `--role` and the administration wire takes keys) and that
+ * stands for the keys of the built-in preset with that
  * `id` (Clause 01a11bb1-b427-777e-8175-fa24d61d434b), without `humanOnly` keys for an Agent. An
  * Agent asking for the Owner role is refused: its keys are the human-only administration keys.
  */
@@ -409,17 +409,40 @@ export function addMember(
 	return { file: next, result: member }
 }
 
+/** Keys to grant and keys to revoke, the administration wire's key change. */
+export type KeyChanges = Readonly<{ grant?: unknown; revoke?: unknown }>
+
+/**
+ * Keys to grant and to revoke, applied to the member's keys as the roster holds them now:
+ * `(current ∪ grant) − revoke`, as `uiux member set --grant/--revoke` does. The Members page sends
+ * these instead of a whole key set, so a change made meanwhile through the CLI or by another manager
+ * is not reverted (owner ruling 1 of 2026-10-11 on PR #191,
+ * https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18864075). Revoking a key the
+ * member does not hold changes nothing; the result is stored anew, so it is checked like any key set.
+ * Returns undefined when neither is given.
+ */
+function adjustedKeys(member: StoredMember, changes: KeyChanges & MemberAccessInput): string[] | undefined {
+	if (changes.grant === undefined && changes.revoke === undefined) return undefined
+	if (changes.keys !== undefined || changes.role !== undefined)
+		throw new AccessError('access.invalid_keys', 'Give either a key set or keys to grant and revoke, not both.')
+	const grant = changes.grant === undefined ? [] : normalizeKeys(changes.grant)
+	const revoke = changes.revoke === undefined ? [] : normalizeKeys(changes.revoke)
+	const both = grant.filter(key => revoke.includes(key))
+	if (both.length > 0) throw new AccessError('access.invalid_keys', `${keyList(both)} ${both.length > 1 ? 'are' : 'is'} both granted and revoked.`)
+	return normalizeKeys([...member.keys, ...grant].filter(key => !revoke.includes(key)))
+}
+
 export function setMember(
 	file: AccessFile,
 	nickname: string,
-	changes: Readonly<{ nickname?: string; kind?: unknown } & MemberAccessInput>,
+	changes: Readonly<{ nickname?: string; kind?: unknown } & MemberAccessInput & KeyChanges>,
 ): Mutation<StoredMember> {
 	const member = requireMember(file, nickname)
 	// Rule 01a11485-ea75-7964-bc21-29aa78049abf: the kind is fixed at creation.
 	if (changes.kind !== undefined && changes.kind !== member.kind)
 		throw new AccessError('access.kind_immutable', 'A member\'s kind is fixed at creation and cannot be changed.')
 	let next: StoredMember = member
-	const keys = requestedKeys(member.kind, member.nickname, changes, member.keys)
+	const keys = adjustedKeys(member, changes) ?? requestedKeys(member.kind, member.nickname, changes, member.keys)
 	if (keys !== undefined) {
 		// Writing a member's keys stores them anew, so they must be storable even when unchanged.
 		assertStorableKeys({ nickname: member.nickname, kind: member.kind, keys })
@@ -664,16 +687,11 @@ export function copyRoster(source: AccessFile, target: Readonly<{ workspaceRoot:
 	}
 }
 
-/**
- * A member as roster administration lists it. `role` is derived from the stored keys
- * (`compatibilityRole`) for the Members page, which still shows roles until it shows keys and
- * labels (issue #142).
- */
+/** A member as roster administration lists it; the administration wire adds its keys and label. */
 export type MemberSummary = Readonly<{
 	id: string
 	nickname: string
 	kind: MemberKind
-	role: AccessRole
 	createdAt: string
 	activeTokens: number
 	activeSessions: number
@@ -684,7 +702,6 @@ export function summarizeMembers(file: AccessFile, now: number): readonly Member
 		id: member.id,
 		nickname: member.nickname,
 		kind: member.kind,
-		role: compatibilityRole(member),
 		createdAt: member.createdAt,
 		activeTokens: file.tokens.filter(token => token.memberId === member.id && isTokenActive(token, now)).length,
 		activeSessions: file.sessions.filter(session => session.memberId === member.id && isSessionActive(session, now)).length,

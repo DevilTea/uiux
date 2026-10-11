@@ -1,6 +1,9 @@
+import { writeKeyForKind, type PermissionKey } from '../../src/application/access/keys'
+import type { VersionDiffResult } from '../../src/application/services/history-diff'
 import { isRestorableResourceKind } from '../../src/domain/history/constants'
 import type { ImpactCategory, ImpactItem } from '../../src/domain/impact/analyzer'
 import type { ResourceChangeSummary } from '../../src/domain/history/summary'
+import { PRODUCT_KIT_SCHEMA_VERSION } from '../../src/domain/workspace/schema'
 import { CURRENT_COMPARE, PARENT_COMPARE, type ComparisonEndpoints } from './version-history'
 
 /**
@@ -13,11 +16,11 @@ export type RestoreGateInput = Readonly<{
 	/** A desktop layout: Restore is never offered on a tablet or a phone (Rule 01a11a5e-1bfa-71e9-9611-152b5b665379). */
 	desktop: boolean
 	/**
-	 * The member may author on this live, migrated Workspace: Editor or above, the role the Access
-	 * Contract gives `history.restore` and every restorable kind's write key (the Workbench's
-	 * `authorReadOnly`); the server's check stays the authority.
+	 * Whether the member may write with a key on this live, migrated Workspace (the Workbench's
+	 * `canWrite`). A restore needs `history.restore` and the restored kind's write key (Rule
+	 * 01a11c09-c648-71be-a550-2ecabf12f5d0); the server's check stays the authority.
 	 */
-	canAuthor: boolean
+	canWrite: (key: PermissionKey) => boolean
 	/** The changed resource of the comparison, with its status from `from` to `to`. */
 	resource: Pick<ResourceChangeSummary, 'kind' | 'status'>
 	/** The selected version (the address's `version`). */
@@ -33,7 +36,7 @@ export type RestoreGateInput = Readonly<{
  * is about, whichever side of the comparison it is: with the parent it is the newer side (restoring
  * brings the resource back to what that version made it), with the current state or another
  * version it is the side the reader chose. It is offered only when:
- * - the layout is desktop and the member may author (see `RestoreGateInput`);
+ * - the layout is desktop and the member holds `history.restore` and the kind's write key (see `RestoreGateInput`);
  * - the kind is one this build restores (`RESTORABLE_RESOURCE_KINDS`: never a Review thread,
  *   access presets or a kind this build does not know);
  * - the selected version is a real version, not `current` or `parent`;
@@ -41,9 +44,11 @@ export type RestoreGateInput = Readonly<{
  *   newer side, not `added` when it is the older side.
  */
 export function restoreSourceVersion(input: RestoreGateInput): string | undefined {
-	const { desktop, canAuthor, resource, selectedVersion: version, endpoints } = input
-	if (!desktop || !canAuthor || !endpoints || !version) return undefined
+	const { desktop, canWrite, resource, selectedVersion: version, endpoints } = input
+	if (!desktop || !endpoints || !version) return undefined
 	if (!isRestorableResourceKind(resource.kind)) return undefined
+	const writeKey = writeKeyForKind(resource.kind)
+	if (!writeKey || !canWrite('history.restore') || !canWrite(writeKey)) return undefined
 	if (version === CURRENT_COMPARE || version === PARENT_COMPARE) return undefined
 	if (endpoints.to === version) return resource.status === 'removed' ? undefined : version
 	if (endpoints.from === version) return resource.status === 'added' ? undefined : version
@@ -60,6 +65,30 @@ export function restoreSourceVersion(input: RestoreGateInput): string | undefine
  */
 export function matchesCurrent(summary: readonly Pick<ResourceChangeSummary, 'kind' | 'key' | 'status'>[], resource: Readonly<{ kind: string; key: string }>): boolean {
 	return summary.find(row => row.kind === resource.kind && row.key === resource.key)?.status === 'unchanged'
+}
+
+/**
+ * The keys a restore needs beyond `history.restore` and the kind's write key, read from the
+ * semantic comparison of the selected version with the current state (`from=<version>&to=current`).
+ *
+ * #140 owner ruling 2026-10-10, 1 (https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18852724):
+ * a `workspace` restore that adds, removes, reorders or re-points an `adapters` entry also needs
+ * `product-kit.compose`, as the server checks (`adapterChangeKeys`, Clause
+ * 01a11bb1-b35a-7e69-bba5-978e3f47c4fa), so the Workbench offers only what the server allows (Rule
+ * 01a11485-eba3-7c07-a94f-0d69e610a0b6). A change to an entry's `config` alone is not one; from
+ * `schemaVersion` 5 the manifest holds no `adapters`. Without a comparison nothing is required:
+ * the server decides.
+ */
+export function restoreExtraKeys(kind: string, comparison: Pick<VersionDiffResult, 'to' | 'changes'> | undefined): readonly PermissionKey[] {
+	if (kind !== 'workspace' || !comparison || comparison.to.workspaceSchemaVersion >= PRODUCT_KIT_SCHEMA_VERSION) return []
+	const diff = comparison.changes?.find(change => change.kind === 'workspace')?.diff
+	if (diff?.type !== 'workspace') return []
+	const { adapters, adaptersChanges } = diff
+	const matched = adapters !== undefined && (adapters.added.length > 0 || adapters.removed.length > 0 || adapters.reordered === true)
+	// Unmatched by `moduleSpecifier`, the list is compared by position: an entry added, removed or
+	// replaced whole, or a changed `moduleSpecifier`, changes the list; a deeper change does not.
+	const structural = adaptersChanges?.some(change => /^(?:\/[^/]+(?:\/moduleSpecifier)?)?$/u.test(change.path)) === true
+	return matched || structural ? ['product-kit.compose'] : []
 }
 
 /** The impact list's groups, in the order the confirmation shows them (Rules 01a11a5e-174b-… and 17a0-…). */

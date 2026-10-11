@@ -1,4 +1,5 @@
 import type { PermissionKey } from './keys'
+import type { MemberLabel } from './labels'
 
 /**
  * Authenticated principals (accepted identity decision 1). Every request on `/api/*` and `/mcp`
@@ -20,17 +21,18 @@ export type MemberPrincipal = Readonly<{
 	nickname: string
 	kind: MemberKind
 	/**
-	 * A role derived from `keys` (`compatibilityRole`), still shown on the session wire and in the
-	 * MCP instructions until they carry keys and labels (issue #142). It authorizes nothing.
-	 */
-	role: AccessRole
-	/**
 	 * The member's permission keys, resolved from its stored keys on every request (Rule
 	 * 01a11485-ebdd-70fc-b853-0621caf056b8): catalog keys only, and never a `humanOnly` key for an
 	 * Agent (`grantedKeys`). Which of them take effect depends on the credential: see
 	 * `effectiveKeys` in `policy.ts`.
 	 */
 	keys: readonly PermissionKey[]
+	/**
+	 * The member's label (Clause 01a11c09-a49b-78c7-9304-7b8239f8a8cf), computed from its stored
+	 * keys when the request authenticates and never stored (Rule 01a11c09-c9be-736b-95a4-0b39d6f64cf0).
+	 * It authorizes nothing.
+	 */
+	label: MemberLabel
 	credential: 'session' | 'token'
 	/** Public id of the token or session that authenticated the request. */
 	credentialId: string
@@ -60,22 +62,9 @@ export function isMemberKind(value: unknown): value is MemberKind {
 	return typeof value === 'string' && (MEMBER_KINDS as readonly string[]).includes(value)
 }
 
-/** Agents are capped at Editor whatever the roster says (decision 1, default D3). */
-export function effectiveRole(kind: MemberKind, role: AccessRole): AccessRole {
-	return kind === 'agent' && role === 'owner' ? 'editor' : role
-}
-
-export function principalRole(principal: MemberPrincipal): AccessRole {
-	return effectiveRole(principal.kind, principal.role)
-}
-
 /** The server-stamped Review/Decision actor (decision 6). */
 export type StampedActor = Readonly<{ type: MemberKind; id: string; displayName: string }>
 
 export function principalActor(principal: MemberPrincipal): StampedActor {
 	return { type: principal.kind, id: `member:${principal.memberId}`, displayName: principal.nickname }
-}
-
-export function principalLabel(principal: Principal): string {
-	return principal.type === 'system' ? principal.id : `${principal.nickname} (${principal.kind}, ${principalRole(principal)})`
 }

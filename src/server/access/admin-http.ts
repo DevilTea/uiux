@@ -1,29 +1,48 @@
 import { getRouterParam, readBody, setResponseHeader, setResponseStatus, type H3Event } from 'h3'
 import { z } from 'zod'
 
-import { compatibilityRole } from '../../application/access/labels'
-import { ACCESS_ROLES, MEMBER_KINDS } from '../../application/access/principal'
+import { BUILT_IN_ACCESS_PRESETS } from '../../application/access/keys'
+import { memberLabel, type LabelPreset } from '../../application/access/labels'
+import { effectiveKeys } from '../../application/access/policy'
+import { MEMBER_KINDS } from '../../application/access/principal'
 import { getSelectedWorkspaceServerRuntime } from '../selected-workspace'
 import { requestOrigin, servesRosterAdministration } from '../loopback-guard'
 import { requestSession } from '../request-session'
 import { accessErrorResponse, clearedCookie, denyUnlessAllowed, requestPrincipal, secureCookieFor, sessionCookie } from './http'
 import { parseHttpPayload } from '../authoring-http'
 import type { StoredMember } from './roster'
+import { memberKeys } from './service'
 
 /**
  * HTTP surface for sessions, edit leases and Owner administration (accepted identity decisions
  * 5, 11 and 12, *Session model*). Administration is a human Owner's cookie session on a loopback
  * origin or an `https` configured origin (Rule 01a12500-b105-7773-822f-359d4dcbd1da).
  */
+/**
+ * Permission key names (Rule 01a11c09-b85c-7d0b-a390-ca3dcd2e4a10). The roster checks each name and
+ * refuses a new key outside the catalog (Clause 01a128be-9a51-726b-b5d9-f73bace107c5).
+ */
+const keysSchema = z.array(z.string())
+
 const addMemberSchema = z.object({
 	nickname: z.string(),
-	role: z.enum(ACCESS_ROLES),
+	keys: keysSchema,
 	kind: z.enum(MEMBER_KINDS).optional(),
 }).strict()
 
+/**
+ * An edit sends the keys to grant and the keys to revoke, never the whole set: the server applies
+ * them to the member's keys under the store lock, as `uiux member set` does, so a change made
+ * meanwhile through the CLI or by another manager is not reverted (owner ruling 1 of 2026-10-11 on
+ * PR #191, https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18864075). `kind` is
+ * accepted so that a change of it is refused with `access.kind_immutable` (Clause
+ * 01a12928-6237-7c28-8652-0b129079329b).
+ */
 const setMemberSchema = z.object({
-	role: z.enum(ACCESS_ROLES).optional(),
+	grant: keysSchema.optional(),
+	revoke: keysSchema.optional(),
 	nickname: z.string().optional(),
+	kind: z.enum(MEMBER_KINDS).optional(),
 }).strict()
 
 const createTokenSchema = z.object({
@@ -59,11 +78,30 @@ function respond(event: H3Event, status: number, body: unknown) {
 const access = () => getSelectedWorkspaceServerRuntime().access()
 
 /**
- * A stored member on the administration wire, with the role the Members page still shows,
- * derived from its keys (`compatibilityRole`) until the page edits keys (issue #142).
+ * The Workspace's Access presets, which label members and which the Members page offers to start
+ * from. Below `schemaVersion` 6 a Workspace has no presets file, so they are the built-in presets
+ * (Rule 01a11c09-cb79-744e-bbf6-ec38d6f159ba).
+ */
+function workspacePresets(): readonly LabelPreset[] {
+	return BUILT_IN_ACCESS_PRESETS
+}
+
+/**
+ * A stored member on the administration wire: its stored keys, unknown ones included, and its
+ * label (Clause 01a11c09-a49b-78c7-9304-7b8239f8a8cf, computed now and never stored).
  */
 function memberBody(member: StoredMember) {
-	return { ...member, role: compatibilityRole(member) }
+	return { ...member, label: memberLabel(member, workspacePresets()) }
+}
+
+/**
+ * The member on the session wire (Clause 01a11485-faa9-74fe-8e0a-068cd770ff1c):
+ * `{ id, nickname, kind, keys, label }`. `keys` are the keys that take effect on this cookie
+ * session (`effectiveKeys`): catalog keys only, never a `humanOnly` key for an Agent, so the
+ * Workbench offers exactly what the server allows. The label comes from the stored keys.
+ */
+function sessionMemberBody(member: StoredMember, keys: readonly string[]) {
+	return { id: member.id, nickname: member.nickname, kind: member.kind, keys, label: memberLabel(member) }
 }
 
 export async function loginForHttp(event: H3Event) {
@@ -80,8 +118,8 @@ export async function loginForHttp(event: H3Event) {
 		return respond(event, outcome.status, { status: 'rejected', code: outcome.code, message: outcome.message, diagnostics: [{ code: outcome.code, path: '/credential', message: outcome.message }] })
 	}
 	setResponseHeader(event, 'Set-Cookie', sessionCookie(outcome.cookieName, outcome.cookieValue, outcome.maxAgeSeconds, secureCookieFor(event)))
-	const { id, nickname, kind } = outcome.member
-	return respond(event, 200, { member: { id, nickname, kind, role: compatibilityRole(outcome.member) } })
+	// A fresh cookie session: every granted key takes effect (`memberKeys` already drops `humanOnly` keys for an Agent).
+	return respond(event, 200, { member: sessionMemberBody(outcome.member, memberKeys(outcome.member)) })
 }
 
 export async function readSessionForHttp(event: H3Event) {
@@ -91,7 +129,7 @@ export async function readSessionForHttp(event: H3Event) {
 	if (principal.type !== 'member') return respond(event, 403, { status: 'blocked', code: 'auth.scope_denied', message: 'Not a member session.' })
 	const service = await access()
 	return respond(event, 200, {
-		member: { id: principal.memberId, nickname: principal.nickname, kind: principal.kind, role: principal.role },
+		member: { id: principal.memberId, nickname: principal.nickname, kind: principal.kind, keys: effectiveKeys(principal), label: principal.label },
 		credential: principal.credential,
 		workspaceRoot: service.workspaceRoot,
 		hint: service.hint,
@@ -151,7 +189,23 @@ async function admin<T>(event: H3Event, run: (service: Awaited<ReturnType<typeof
 	}
 }
 
-export const listMembersForHttp = (event: H3Event) => admin(event, service => service.roster())
+/**
+ * The roster's members, each with its stored keys and its label (Scenario 01a11c09-d61f), and the
+ * presets the Members page starts a key set from (Rule 01a11c09-ba80-7bef-96fe-4a4bae3ab528), each
+ * with its keys as they are now.
+ */
+export const listMembersForHttp = (event: H3Event) => admin(event, (service) => {
+	const roster = service.roster()
+	const presets = workspacePresets()
+	return {
+		...roster,
+		members: roster.members.map((summary) => {
+			const stored = service.member(summary.id)
+			return stored ? { ...summary, keys: stored.keys, label: memberLabel(stored, presets) } : summary
+		}),
+		presets: presets.map(preset => ({ id: preset.id, name: preset.name, keys: preset.keys })),
+	}
+})
 
 export async function addMemberForHttp(event: H3Event) {
 	const refused = refuseAdminOrigin(event)

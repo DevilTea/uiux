@@ -156,7 +156,6 @@
     },
     "none": "還沒有 Evidence",
     "summary": "{fresh} 項最新・{stale} 項過時・{unknown} 項未知",
-    "requiresEditor": "擷取需要 Editor 角色。",
     "desktopOnly": "請在桌面版擷取。",
     "loadFailed": "無法載入 Evidence。",
     "sectionLabel": "Evidence",
@@ -377,7 +376,6 @@
     "assessment": "評估結果",
     "diagnostic": "診斷用快照",
     "diagnosticNote": "仍可匯出診斷用快照，但不會標示為已就緒。",
-    "requiresEditor": "匯出需要 Editor 角色。",
     "copied": "已複製。",
     "copyFailed": "無法複製到剪貼簿。",
     "roots": {
@@ -1323,26 +1321,19 @@
       "expiredTitle": "你的工作階段已結束",
       "expiredDescription": "請重新登入，即可回到剛才的頁面。"
     },
-    "role": {
-      "owner": "Owner",
-      "editor": "Editor",
-      "reviewer": "Reviewer",
-      "viewer": "Viewer"
-    },
     "kind": {
       "human": "人員",
       "agent": "Agent"
     },
     "chip": {
-      "label": "已以 {nickname}（{role}）登入",
+      "label": "已以 {nickname}（{kind}，{label}）登入",
       "members": "成員",
       "signOut": "登出",
       "signedOut": "已登出。"
     },
-    "requiresRole": "需要 {role} 角色。",
     "members": {
       "title": "成員",
-      "subtitle": "誰能開啟這個 Workspace，以及各自的角色。",
+      "subtitle": "誰能開啟這個 Workspace，以及各自持有哪些權限鍵。",
       "actionsColumn": "操作",
       "rosterLabel": "名冊 {hint}",
       "rosterHelp": "儲存在這台主機上，不會進入 Workspace 或 Git。",
@@ -1351,33 +1342,42 @@
       "addDescription": "之後可以給人員登入連結，或給 Agent 一個 Token。",
       "nicknameLabel": "暱稱",
       "nicknameHelp": "小寫英文字母、數字、句點、底線與連字號，最多 32 個字元。",
-      "roleLabel": "角色",
       "kindLabel": "類型",
-      "kindHelp": "建立後無法變更。Agent 最高為 Editor，且永遠不能標記為已解決。",
+      "kindHelp": "建立後無法變更。Agent 永遠不會持有僅限人員的權限鍵。",
       "added": "已新增 {nickname}。",
       "you": "你",
       "remove": "移除",
       "removeTitle": "要移除 {nickname} 嗎？",
       "removeDescription": "其 Token、登入連結與工作階段會立即失效。其寫下的紀錄會保留原名稱。",
       "removed": "已移除 {nickname}。",
-      "roleChanged": "{nickname} 現在是 {role}。",
       "actionsLabel": "{nickname} 的操作",
       "createToken": "建立 Token",
       "invite": "登入連結",
       "columns": {
         "member": "成員",
-        "role": "角色",
+        "kind": "類型",
+        "label": "權限",
+        "keys": "權限鍵",
         "tokens": "Token",
         "sessions": "工作階段"
       },
       "errorTitle": "無法更新名冊",
-      "adminOriginTitle": "這個網址無法管理名冊"
+      "adminOriginTitle": "這個網址無法管理名冊",
+      "editAccess": "編輯權限",
+      "editAccessFor": "編輯 {nickname} 的權限",
+      "editTitle": "編輯 {nickname} 的權限",
+      "editDescription": "重新命名這位成員，或變更其權限鍵。變更會在其下一次請求時生效。",
+      "updated": "已更新 {nickname}。",
+      "save": "儲存",
+      "unheldTitle": "有 {n} 個權限鍵沒有任何人員持有 | 有 {n} 個權限鍵沒有任何人員持有",
+      "unheldDescription": "目前沒有任何人員持有這些權限鍵，在有人獲得之前，沒有人能在 Workbench 中使用它們。",
+      "unheldAction": "開啟你的權限鍵清單"
     },
     "tokens": {
       "title": "Token",
       "empty": "沒有有效的 Token。",
       "createTitle": "為 {nickname} 建立 Token",
-      "createDescription": "MCP 用戶端與指令碼會以 Bearer Token 傳送它，並依成員目前的角色運作。",
+      "createDescription": "MCP 用戶端與指令碼會以 Bearer Token 傳送它，並依成員目前的權限鍵運作。",
       "labelLabel": "標籤",
       "labelPlaceholder": "例如「筆電」或「CI」",
       "expiresLabel": "到期",
@@ -1435,7 +1435,68 @@
       "releaseFailed": "無法解除鎖定。",
       "saveRefused": "{nickname} 持有編輯鎖，至 {time}",
       "saveRefusedBody": "你的變更已保留。鎖定解除或到期後再儲存一次。"
-    }
+    },
+    "label": {
+      "custom": "自訂"
+    },
+    "keys": {
+      "resultingLabel": "權限",
+      "count": "沒有權限鍵 | {n} 個權限鍵 | {n} 個權限鍵",
+      "startFromPreset": "從預設集開始",
+      "applied": "已從 {preset} 開始。",
+      "appliedAgent": "已從 {preset} 開始，但不含 {keys}：Agent 不能持有僅限人員的權限鍵。",
+      "manageWarningTitle": "這位成員可以授予所有權限鍵",
+      "manageWarning": "持有 members.manage 的成員可以把任何權限鍵授予任何成員（包括自己），即使是自己沒有的權限鍵。",
+      "humanOnly": "僅限人員",
+      "humanOnlyAgent": "Agent 不能持有這個權限鍵。",
+      "missing": "還需要 {keys}",
+      "unknownTitle": "這個版本的 UIUX 不認得的權限鍵",
+      "unknownHelp": "它們會原樣保留，但不授予任何權限。從預設集開始時也會保留。",
+      "gap": "{key} 需要 {keys}。",
+      "gapBadge": "缺少必要權限鍵",
+      "domain": {
+        "workspace": "Workspace",
+        "history": "歷程",
+        "product_kit": "Product Kit",
+        "reviews": "Review",
+        "views": "View",
+        "flows": "UX Flow",
+        "locales": "Locale",
+        "assets": "Asset",
+        "settings": "設定",
+        "evidence": "Evidence",
+        "handoff": "Handoff",
+        "checkpoints": "Checkpoint",
+        "locks": "編輯鎖定",
+        "presets": "存取預設集",
+        "members": "成員"
+      },
+      "description": {
+        "workspace_read": "開啟 Workspace：View、UX Flow、Locale、Asset、Evidence 與預覽。",
+        "history_read": "瀏覽版本歷程並比較版本。",
+        "product_kit_source_read": "瀏覽 Product Kit 原始碼、建置輸出與建置記錄。",
+        "reviews_write": "建立 Review 討論串、回覆、重新錨定與釘選，並編輯或撤回自己的討論串。",
+        "reviews_submit": "將 Review 討論串送出為待審核，並重新開啟討論串。",
+        "reviews_promote": "將 Review 提升為 Decision。",
+        "reviews_resolve": "在 Workbench 中將 Review 討論串標記為已解決。",
+        "views_write": "建立與編輯 View。",
+        "flows_write": "建立與編輯 UX Flow。",
+        "locales_write": "建立與編輯 Locale。",
+        "assets_write": "新增與取代 Asset。",
+        "settings_write": "變更 Workspace 設定。",
+        "product_kit_write": "變更 Adapter 設定、樣式、主題、登錄表與 Product Kit 建置。",
+        "product_kit_compose": "變更設計系統，以及 Workspace 使用哪些 Adapter 與其順序。",
+        "evidence_capture": "擷取正式 Evidence。",
+        "handoff_export": "匯出 Handoff。",
+        "checkpoints_create": "建立 Checkpoint。",
+        "history_restore": "從較早的版本還原資源。",
+        "checkpoints_delete": "刪除 Checkpoint。",
+        "locks_force_release": "解除其他成員的編輯鎖定。",
+        "presets_manage": "編輯存取預設集。",
+        "members_manage": "管理成員、Token、登入連結與工作階段。"
+      }
+    },
+    "requiresKey": "需要權限鍵 {key}。"
   },
   "comments": {
     "errors": {
@@ -1621,12 +1682,12 @@
     "migration": "此 Workspace 遷移前為唯讀。請執行 uiux migrate。",
     "unsupported": "唯讀：此版本的 UIUX 不支援這個 Workspace 的 Schema。",
     "signed-out": "登入後即可留言。",
-    "role": "唯讀：留言需要 Reviewer 角色。你目前的角色是 {role}。",
     "handset": "手機無法新增留言。可在此回覆與分類；請在平板或桌面新增留言。",
     "no-view": "開啟 View 後即可留言。",
     "connecting": "正在連線預覽…",
     "reconnecting": "正在重新連線預覽…",
-    "stopped": "預覽已停止，請從工作階段狀態重試。"
+    "stopped": "預覽已停止，請從工作階段狀態重試。",
+    "key": "唯讀：留言需要權限鍵 {key}。"
   },
   "a11y": {
     "notification": "通知",
@@ -1679,7 +1740,7 @@
       "invalid_credential": "此連結或 Token 對這個 Workspace 無效。",
       "rate_limited": "登入嘗試次數過多，請稍候一分鐘再試。",
       "required": "請登入以繼續。",
-      "scope_denied": "你的角色無法執行此操作。",
+      "scope_denied": "你的權限鍵無法執行此操作。",
       "time_ignored": "伺服器已使用自己的時間記錄這次變更。"
     },
     "resource": {
@@ -2318,7 +2379,6 @@
       "created": "已建立 Checkpoint「{name}」",
       "failed": "無法建立 Checkpoint。",
       "retryable": "沒有儲存任何內容，請稍後再試一次。",
-      "blockedRole": "建立 Checkpoint 需要 Reviewer 角色",
       "blockedMigration": "Workspace 遷移完成前無法使用"
     },
     "delete": {
@@ -2406,7 +2466,7 @@
         "invalid": "無法還原這個版本",
         "not_found": "沒有可還原的內容",
         "blocked": "還原已被阻擋",
-        "denied": "你的角色無法還原這項資源",
+        "denied": "你的權限鍵無法還原此資源",
         "failed": "無法還原這個版本"
       }
     },

@@ -73,7 +73,7 @@ const error = computed(() => thread.value && inbox.lastError.value?.threadId ===
  * no Re-anchor, Promote or Submit for review there. Submit is also desktop-first.
  */
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
-const canSubmit = computed(() => !!thread.value && thread.value.status === 'open' && inbox.canReply.value && viewExists.value && isDesktop.value && !compact.value)
+const canSubmit = computed(() => !!thread.value && thread.value.status === 'open' && inbox.canSubmit.value && viewExists.value && isDesktop.value && !compact.value)
 
 const actions = useThreadActions({
 	thread: () => thread.value,
@@ -507,7 +507,7 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           @click="submitOpen = true"
         />
         <UButton
-          v-if="thread.status !== 'open'"
+          v-if="thread.status !== 'open' && inbox.canSubmit.value"
           color="neutral"
           variant="outline"
           :size="compact ? 'md' : 'sm'"
@@ -563,7 +563,7 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
         class="text-xs text-muted"
         :class="compact ? 'text-center' : 'text-end'"
       >
-        {{ t('comments.resolveNeedsPerson') }}
+        {{ inbox.resolveBlockedReason.value }}
       </p>
     </footer>
     <p

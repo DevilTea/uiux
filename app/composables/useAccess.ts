@@ -1,13 +1,18 @@
 import { computed, readonly, shallowRef } from 'vue'
 
-import { ACCESS_ROLES, type AccessRole, type MemberKind } from '../../src/application/access/principal'
+import type { PermissionKey } from '../../src/application/access/keys'
+import type { MemberLabel } from '../../src/application/access/labels'
+import type { MemberKind } from '../../src/application/access/principal'
 import type { LockableKind, PublicLease } from '../../src/application/access/leases'
 
 /**
- * The signed-in member of this Workbench session (accepted identity decision 12). The server is
- * the authority: this only hides or disables what the role cannot do and names the role required.
+ * The signed-in member of this Workbench session, as `GET /api/session` returns it (Clause
+ * 01a11485-faa9-74fe-8e0a-068cd770ff1c): its permission keys and its label. `keys` are the keys
+ * that take effect on this cookie session. The server is the authority: the Workbench only hides
+ * or disables what the keys do not allow and names the missing key (Rule
+ * 01a11485-eba3-7c07-a94f-0d69e610a0b6).
  */
-export type SessionMember = Readonly<{ id: string; nickname: string; kind: MemberKind; role: AccessRole }>
+export type SessionMember = Readonly<{ id: string; nickname: string; kind: MemberKind; keys: readonly string[]; label: MemberLabel }>
 
 export type AccessSession = Readonly<{
 	member: SessionMember
@@ -96,22 +101,29 @@ function expire(): void {
 	writeSessionHint(false)
 }
 
-export function roleRank(role: AccessRole): number {
-	return ACCESS_ROLES.indexOf(role)
+const heldKeys = computed(() => new Set(session.value?.member.keys ?? []))
+
+/**
+ * Whether the signed-in member holds `key` on this session (Discussion #140, decision 12:
+ * `useAccess().can(key)` replaces role ranks). Each key stands alone: no key implies another
+ * (Rule 01a11485-eaac-7523-998b-26123d7618df). Signed out, nothing is allowed.
+ */
+function can(key: PermissionKey): boolean {
+	return heldKeys.value.has(key)
+}
+
+/**
+ * Re-reads the session, so a change to the member's keys applies to what the Workbench offers
+ * (Rule 01a116f0-963f-7222-95fa-ae80ce735859). Without the `/api/events` stream (issue #69), the
+ * Workbench calls it when the server refuses a request for a missing key (`plugins/access.client.ts`).
+ */
+async function reloadSession(): Promise<AccessSession | undefined> {
+	if (!loaded.value || !session.value) return session.value
+	return loadSession(true).catch(() => session.value)
 }
 
 export function useAccess() {
 	const member = computed(() => session.value?.member)
-	const role = computed(() => member.value?.role)
-
-	/** True when the signed-in member's role is at least `minimum`. */
-	function can(minimum: AccessRole): boolean {
-		return role.value !== undefined && roleRank(role.value) >= roleRank(minimum)
-	}
-
-	const isOwner = computed(() => member.value?.kind === 'human' && role.value === 'owner')
-	const canReview = computed(() => can('reviewer'))
-	const canAuthor = computed(() => can('editor'))
 
 	async function signOut(): Promise<void> {
 		try {
@@ -156,12 +168,9 @@ export function useAccess() {
 		session: readonly(session),
 		loaded: readonly(loaded),
 		member,
-		role,
 		can,
-		isOwner,
-		canReview,
-		canAuthor,
 		load: loadSession,
+		reload: reloadSession,
 		expire,
 		signOut,
 		locks: readonly(locks),

@@ -37,7 +37,7 @@ export type SpecConflict = Readonly<{
  * Per-section Spec editing through `update_view_spec` (`PUT /api/views/:id/spec`). The revision
  * observed when editing starts is the `expectedRevision`; a 409 shows the conflict and never
  * overwrites. The rest of the Spec is sent exactly as it was read, and Decisions are preserved
- * by the server. Editing needs Editor or above; while someone else holds the View's edit lease
+ * by the server. Editing needs `views.write`; while someone else holds the View's edit lease
  * nothing new opens and Save waits, and a `423 resource.locked` keeps the draft as a 409 does.
  */
 export function useSpecEditor(workbench: Workbench) {
@@ -68,7 +68,7 @@ export function useSpecEditor(workbench: Workbench) {
 
 	function start(section: SpecSectionKey): void {
 		const view = workbench.selectedView.value
-		if (!view || workbench.authorReadOnly.value || access.lockFor('view', view.key) || saving.value) return
+		if (!view || !workbench.canWrite('views.write') || access.lockFor('view', view.key) || saving.value) return
 		editing.value = section
 		draft.value = draftOf(view, section)
 		base.value = { viewId: view.key, revision: view.revision, content: specContentOf(view) }

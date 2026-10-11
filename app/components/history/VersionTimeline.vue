@@ -16,7 +16,7 @@ import WbErrorDescription from '../workbench/WbErrorDescription.vue'
  * events; consecutive autosaves with no net change collapse into one row (Rule
  * 01a11a5e-19f4-77a0-8e8b-30ea280b7b24). Each row links to its comparison with the parent; the
  * address is the caller's (`linkFor`). The Delete row action is offered only when `canDelete`
- * (an Owner on a desktop layout; Rules 01a11e0d-da2f-718f-b3c3-acf2f11fb683 and 01a11e0d-dada-7f49-a4a0-5b45d70b23e8).
+ * (a holder of `checkpoints.delete` on a desktop layout; Rules 01a11e0d-da2f-718f-b3c3-acf2f11fb683 and 01a11e0d-dada-7f49-a4a0-5b45d70b23e8).
  */
 const props = withDefaults(defineProps<{
 	versions: readonly VersionListItem[]

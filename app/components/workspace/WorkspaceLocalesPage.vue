@@ -60,7 +60,7 @@ const workbench = useWorkbench()
 const { workspace } = workbench
 const uiux = useUiuxClient()
 const feedback = useWorkbenchFeedback()
-const { access, canEdit, isMobile } = useAuthoringAccess()
+const { access, writeKey, canEdit, isMobile } = useAuthoringAccess('locales.write')
 const member = useAccess()
 /** Each Locale is its own lockable resource: someone else's edit lease makes just that column read-only. */
 function isLocaleLocked(locale: string): boolean {
@@ -445,7 +445,10 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
             </UButton>
           </div>
         </div>
-        <AuthoringAccessNotice :access="access" />
+        <AuthoringAccessNotice
+          :access="access"
+          :write-key="writeKey"
+        />
         <LockBadge
           v-for="state in ordered"
           :key="`lock-${state.key}`"

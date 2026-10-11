@@ -8,12 +8,12 @@ import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { CURRENT_COMPARE, type HistoryResourceRef } from '../../utils/version-history'
-import { classifyRestoreAnswer, groupImpacts, matchesCurrent, shortId, type ImpactGroup, type ReceivedImpact } from '../../utils/version-restore'
+import { classifyRestoreAnswer, groupImpacts, matchesCurrent, restoreExtraKeys, shortId, type ImpactGroup, type ReceivedImpact } from '../../utils/version-restore'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 
 /**
  * "Restore this version" on a resource's diff (Rule 01a11a5e-18f2-7991-8f7d-aa4c8015d14a; offered
- * by the caller only on a desktop layout to an Editor or above, Rule 01a11a5e-1bfa-71e9-9611-152b5b665379).
+ * by the caller only on a desktop layout to a holder of `history.restore` and the kind's write key, Rule 01a11a5e-1bfa-71e9-9611-152b5b665379).
  *
  * Opening the dialog reads the resource's current revision, the `expectedRevision` of the write
  * (`null` when the resource no longer exists, owner ruling 3 of
@@ -32,6 +32,10 @@ import WbErrorDescription from '../workbench/WbErrorDescription.vue'
  * (Clause 01a11a5e-2768-76ad-b02a-e15f50f91268), so the guard is the Workbench's alone. Compared
  * with its parent (`afterChange`), the version restored is still the selected one: its content right
  * after that change, never the content before it (Rule 01a11a5e-18f2-…, owner decision on PR #166).
+ *
+ * For the Workspace settings that comparison is semantic: a restore that would change the
+ * `adapters` entries also needs `product-kit.compose` (#140 owner ruling 2026-10-10, 1), so
+ * without it the dialog names the key and offers no Restore (`restoreExtraKeys`).
  *
  * A restore forms a version of its own naming its source (Rules 01a11a5e-14ce-… and
  * 01a11e0d-d911-…), so on success every timeline and the Workbench's resources are read again.
@@ -72,7 +76,8 @@ const stageRegion = useTemplateRef<HTMLElement>('stageRegion')
 /** The version compared with the current state, for this resource alone, while the dialog is open. */
 const match = useVersionDiff(() => ({ from: props.versionId, to: CURRENT_COMPARE }), {
 	resources: () => [props.resource],
-	detail: 'summary',
+	// Only the Workspace settings need the semantic diff, to see an `adapters` change.
+	detail: props.resource.kind === 'workspace' ? 'semantic' : 'summary',
 	enabled: open,
 })
 /** `true` when the resource already matches the version; `undefined` while unknown. A failed comparison blocks nothing: the server decides. */
@@ -81,6 +86,9 @@ const unchanged = computed(() => {
 	if (match.error.value || !match.result.value) return match.error.value ? false : undefined
 	return matchesCurrent(match.result.value.summary, props.resource)
 })
+
+/** Keys the restore needs that the member lacks; the server re-checks them. */
+const missingKeys = computed(() => restoreExtraKeys(props.resource.kind, match.result.value).filter(key => !workbench.canWrite(key)))
 
 const versionName = computed(() => record.value ? labels.versionTitle(record.value) : t('history.restore.thisVersion'))
 const versionTime = computed(() => record.value ? labels.dateTime(record.value.at) : '')
@@ -147,7 +155,7 @@ async function reload(): Promise<void> {
 }
 
 async function restore(acknowledgeImpact: boolean): Promise<void> {
-	if (submitting.value || reading.value || expectedRevision.value === undefined || unchanged.value !== false) return
+	if (submitting.value || reading.value || expectedRevision.value === undefined || unchanged.value !== false || missingKeys.value.length > 0) return
 	submitting.value = true
 	error.value = undefined
 	let status: number | undefined
@@ -338,6 +346,19 @@ function groupLabel(group: ImpactGroup): string {
               <p class="text-muted">
                 {{ t('history.restore.impactNote') }}
               </p>
+              <p
+                v-for="key in missingKeys"
+                :key="key"
+                class="flex items-center gap-1.5 text-xs text-muted"
+                data-access-notice="restore"
+                :data-missing-key="key"
+              >
+                <UIcon
+                  name="i-lucide-user-lock"
+                  class="size-3.5 shrink-0"
+                />
+                {{ t('access.requiresKey', { key }) }}
+              </p>
             </template>
             <USkeleton
               v-if="reading || unchanged === undefined"
@@ -444,7 +465,7 @@ function groupLabel(group: ImpactGroup): string {
             variant="solid"
             icon="i-lucide-history"
             :loading="submitting"
-            :disabled="reading || expectedRevision === undefined || unchanged !== false"
+            :disabled="reading || expectedRevision === undefined || unchanged !== false || missingKeys.length > 0"
             :label="t('history.restore.confirm')"
             data-restore-confirm
             @click="restore(false)"
