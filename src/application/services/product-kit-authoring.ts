@@ -2,6 +2,7 @@ import { lstat, readFile } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 
 import { NodeWorkspaceAdapterModuleResolver } from '../../adapters/resolution'
+import { bareSpecifierPackageName } from '../../adapters/kit-dependencies'
 import { checkProductKitAgainstKit, containedRealPath, locateKitProject, maskHostPaths, type KitProject } from '../../adapters/kit-registry'
 import {
 	PRODUCT_KIT_RESOURCE_KEY,
@@ -241,6 +242,13 @@ export function createProductKitAuthoringService(persistence: FileNativePersiste
 		const roots = [...new Set([project.realRoot, persistence.root])]
 		const results: ProductKitAdapterResolution[] = []
 		for (const entry of entries) {
+			// A bare Adapter reached through a link out of the Workspace, or a dangling one, is reported
+			// one way whether or not anything exists behind the link, as a Design System package is.
+			// Only the report is uniform: loading the Adapter still resolves it.
+			if (!entry.moduleSpecifier.startsWith('./') && await bareAdapterLeavesWorkspace(project, entry.moduleSpecifier)) {
+				results.push({ moduleSpecifier: entry.moduleSpecifier, status: 'resolved' })
+				continue
+			}
 			try {
 				const resolved = await resolver.resolve(persistence.root, entry.moduleSpecifier)
 				const inKit = project.directory ? relative(project.directory, resolved.resolvedPath) : '..'
@@ -297,21 +305,10 @@ async function resolvePackage(project: KitProject, name: string): Promise<Produc
 	if (!project.directory) return { package: name, status: 'missing' }
 	const segments = name.split('/')
 	for (const directory of [project.directory, project.realRoot]) {
-		let linked = false
-		let present = true
-		for (let index = 0; index <= segments.length; index++) {
-			const path = join(directory, 'node_modules', ...segments.slice(0, index))
-			const info = await lstat(path).catch(() => undefined)
-			if (!info) {
-				present = false
-				break
-			}
-			if (info.isSymbolicLink()) {
-				linked = true
-				if (await containedRealPath(project.realRoot, path) === undefined) return { package: name, status: 'resolved', linked: true }
-			}
-		}
-		if (!present) continue
+		const layers = await packageLinkLayers(project, directory, segments)
+		if (layers === 'outside') return { package: name, status: 'resolved', linked: true }
+		if (layers === 'absent') continue
+		const linked = layers === 'linked'
 		const real = await containedRealPath(project.realRoot, join(directory, 'node_modules', ...segments))
 		if (real === undefined) continue
 		const manifestPath = await containedRealPath(project.realRoot, join(real, 'package.json'))
@@ -326,4 +323,41 @@ async function resolvePackage(project: KitProject, name: string): Promise<Produc
 		return { package: name, status: 'resolved', ...(version ? { version } : {}), linked }
 	}
 	return { package: name, status: 'missing' }
+}
+
+/**
+ * The layers on the way to `<directory>/node_modules/<segments>` (`node_modules` itself, a scope
+ * directory, the package directory): `outside` when one is a link whose target lies outside the
+ * Workspace or does not resolve (the lookup ends there), else `absent` when one is missing, else
+ * `linked` or `plain` by whether one is a link.
+ */
+async function packageLinkLayers(project: KitProject, directory: string, segments: readonly string[]): Promise<'outside' | 'absent' | 'linked' | 'plain'> {
+	let linked = false
+	for (let index = 0; index <= segments.length; index++) {
+		const path = join(directory, 'node_modules', ...segments.slice(0, index))
+		const info = await lstat(path).catch(() => undefined)
+		if (!info) return 'absent'
+		if (info.isSymbolicLink()) {
+			linked = true
+			if (await containedRealPath(project.realRoot, path) === undefined) return 'outside'
+		}
+	}
+	return linked ? 'linked' : 'plain'
+}
+
+/**
+ * Whether Node module resolution of the bare Adapter specifier `specifier` from `kit/` meets an
+ * outside or dangling link on the way to its package (as `resolvePackage` looks it up) before it
+ * finds the package inside the Workspace.
+ */
+async function bareAdapterLeavesWorkspace(project: KitProject, specifier: string): Promise<boolean> {
+	const name = bareSpecifierPackageName(specifier)
+	if (!project.directory || name === undefined) return false
+	const segments = name.split('/')
+	for (const directory of [project.directory, project.realRoot]) {
+		const layers = await packageLinkLayers(project, directory, segments)
+		if (layers === 'outside') return true
+		if (layers !== 'absent' && await containedRealPath(project.realRoot, join(directory, 'node_modules', ...segments, 'package.json')) !== undefined) return false
+	}
+	return false
 }

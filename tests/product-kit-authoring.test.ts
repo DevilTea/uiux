@@ -1,10 +1,11 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { checkProductKitAgainstKit, maskHostPaths, scanImportSpecifiers } from '../src/adapters/kit-registry'
+import { NodeWorkspaceAdapterModuleResolver } from '../src/adapters/resolution'
 import { createLeaseManager, type LeaseManager } from '../src/application/access/leases'
 import { productKitChangeKeys } from '../src/application/access/policy'
 import type { MemberPrincipal } from '../src/application/access/principal'
@@ -718,6 +719,41 @@ describe('kit project containment', () => {
 				{ package: '@acme/absent', status: 'resolved', linked: true },
 			])
 			expect(JSON.stringify(read)).not.toContain('9.9.9')
+		})
+	}
+
+	for (const [label, link] of [
+		['the package directory', async (root: string, outside: string, target: string) => {
+			await symlink(join(outside, 'node_modules', '@acme', target), join(root, 'kit', 'node_modules', '@acme', 'uiux-adapter'))
+		}],
+		['kit/node_modules/', async (root: string, outside: string, target: string) => {
+			if (target === 'adapter') await rename(join(outside, 'node_modules', '@acme', target), join(outside, 'node_modules', '@acme', 'uiux-adapter'))
+			await rm(join(root, 'kit', 'node_modules'), { recursive: true })
+			await symlink(join(outside, 'node_modules'), join(root, 'kit', 'node_modules'))
+		}],
+	] as const) {
+		it(`reports a bare Adapter one way through a link out of the Workspace at ${label}, whether or not its target exists`, async () => {
+			const answers: unknown[] = []
+			for (const target of ['adapter', 'absent']) {
+				const outside = await outsideKit()
+				await write(join(outside, 'node_modules', '@acme', 'adapter', 'package.json'), JSON.stringify({ name: '@acme/uiux-adapter', version: '9.9.9', type: 'module', exports: { './uiux': './uiux.js' } }))
+				await write(join(outside, 'node_modules', '@acme', 'adapter', 'uiux.js'), 'export const adapter = {}\n')
+				const ctx = await v5Fixture({ ...KIT, adapters: [{ moduleSpecifier: '@acme/uiux-adapter/uiux' }] })
+				await link(ctx.root, outside, target)
+				const read = await ctx.app.readProductKit()
+				answers.push(read?.adapters)
+				const text = JSON.stringify(read)
+				expect(text).not.toContain(outside)
+				expect(text).not.toContain('9.9.9')
+				// Loading is unchanged: the linked package that exists still resolves.
+				const resolving = new NodeWorkspaceAdapterModuleResolver({ layout: ctx.persistence.layout }).resolve(ctx.root, '@acme/uiux-adapter/uiux')
+				if (target === 'adapter') await expect(resolving).resolves.toMatchObject({ resolvedPath: await realpath(join(ctx.root, 'kit', 'node_modules', '@acme', 'uiux-adapter', 'uiux.js')) })
+				else await expect(resolving).rejects.toThrow()
+			}
+			expect(answers).toEqual([
+				[{ moduleSpecifier: '@acme/uiux-adapter/uiux', status: 'resolved' }],
+				[{ moduleSpecifier: '@acme/uiux-adapter/uiux', status: 'resolved' }],
+			])
 		})
 	}
 })
