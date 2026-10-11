@@ -5,7 +5,12 @@ import type { MemberKind } from './principal'
  * fail-fast, 5 minutes after the holder's last successful write or explicit acquire, in process
  * memory only. A lease is coordination; CAS stays the correctness guarantee.
  */
-export const LOCKABLE_KINDS = ['view', 'flow', 'locale', 'asset', 'workspace'] as const
+/**
+ * Rule 01a11485-efb6-7a68-a726-0f1875b8d015: one lease per View, UX Flow, Locale, authored Asset,
+ * the Workspace settings and the Product Kit file. The two singletons have the key of their kind.
+ */
+export const LOCKABLE_KINDS = ['view', 'flow', 'locale', 'asset', 'workspace', 'product-kit'] as const
+const SINGLETON_LOCKABLE_KINDS: readonly string[] = ['workspace', 'product-kit']
 export type LockableKind = typeof LOCKABLE_KINDS[number]
 export const LEASE_TTL_MS = 5 * 60 * 1000
 export const MAX_ACQUIRE_RESOURCES = 16
@@ -24,7 +29,7 @@ export function isValidLeaseAddress(value: unknown): value is LeaseAddress {
 	if (typeof value !== 'object' || value === null) return false
 	const { kind, key } = value as Record<string, unknown>
 	if (!isLockableKind(kind) || typeof key !== 'string' || key.length === 0 || key.length > 256) return false
-	return kind !== 'workspace' || key === 'workspace'
+	return !SINGLETON_LOCKABLE_KINDS.includes(kind) || key === kind
 }
 
 export function publicLease(lease: Lease): PublicLease {

@@ -8,6 +8,7 @@ import type { ViewSpecContent } from '../application/services/view-authoring'
 import type { VariantEntry } from '../domain/views/schema'
 import type { WorkspaceSettingsUpdate } from '../application/services/workspace-authoring'
 import type { I18nResource } from '../domain/i18n/schema'
+import type { ProductKitComponent, ProductKitWidgetMapping } from '../domain/product-kit/schema'
 import type { FlowStep } from '../domain/flows/schema'
 import {
 	REVIEW_RESOLUTIONS,
@@ -85,10 +86,11 @@ const updateWorkspaceSettingsHttpSchema = z.object({
 		i18n: z.object({
 			defaultLocale: z.string(),
 		}).catchall(z.unknown()),
+		// Required below Workspace schemaVersion 5 and refused from 5 (Clause 01a11485-f769-727c-8eda-c33cff801911).
 		adapters: z.array(z.object({
 			moduleSpecifier: z.string(),
 			config: z.unknown().optional(),
-		})),
+		})).optional(),
 		viewports: z.record(z.string(), z.object({
 			dimensions: z.object({
 				width: z.number(),
@@ -97,6 +99,29 @@ const updateWorkspaceSettingsHttpSchema = z.object({
 		}).catchall(z.unknown())),
 		themes: z.record(z.string(), z.record(z.string(), z.unknown())),
 	}).strict(),
+}).strict()
+
+// The Product Kit operations (Clause 01a11bb1-b15c-734e-8968-c378db1444ca); the domain validator reports member shapes.
+const composeProductKitHttpSchema = z.object({
+	expectedRevision: z.string(),
+	designSystems: z.array(z.string()),
+	adapters: z.array(z.string()),
+}).strict()
+
+const updateProductKitHttpSchema = z.object({
+	expectedRevision: z.string(),
+	adapters: z.array(z.object({
+		moduleSpecifier: z.string(),
+		config: z.unknown().optional(),
+	}).strict()),
+	styles: z.array(z.string()),
+	themes: z.record(z.string(), z.record(z.string(), z.unknown())),
+}).strict()
+
+const updateComponentRegistryHttpSchema = z.object({
+	expectedRevision: z.string(),
+	components: z.record(z.string(), z.unknown()),
+	widgets: z.record(z.string(), z.unknown()),
 }).strict()
 
 const createLocaleHttpSchema = z.object({
@@ -378,6 +403,47 @@ export async function updateWorkspaceSettingsForHttp(app: ScopedWorkspaceSession
 	const result = await app.updateWorkspaceSettings({
 		expectedRevision: data.expectedRevision,
 		settings: data.settings as WorkspaceSettingsUpdate,
+	})
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
+}
+
+/** `GET /api/product-kit`: the Product Kit Resource, `workspace.read` only; 404 below `schemaVersion` 5. */
+export async function readProductKitForHttp(app: ScopedWorkspaceSession): Promise<AuthoringHttpResult> {
+	const denied = app.authorize('readProductKit')
+	if (denied) return { status: 403, body: { status: 'blocked', key: 'product-kit', code: denied.code, requiredKeys: denied.requiredKeys, message: denied.message, diagnostics: [{ code: denied.code, path: '/', message: denied.message }] } }
+	const read = await app.readProductKit()
+	if (!read) return { status: 404, body: { status: 'not_found', key: 'product-kit' } }
+	return { status: 200, body: read }
+}
+
+export async function composeProductKitForHttp(app: ScopedWorkspaceSession, body: unknown): Promise<AuthoringHttpResult> {
+	const parsed = parseHttpPayload(composeProductKitHttpSchema, body)
+	if (!parsed.ok) return parsed.result
+	const result = await app.composeProductKit(parsed.data)
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
+}
+
+export async function updateProductKitForHttp(app: ScopedWorkspaceSession, body: unknown): Promise<AuthoringHttpResult> {
+	const parsed = parseHttpPayload(updateProductKitHttpSchema, body)
+	if (!parsed.ok) return parsed.result
+	const data = parsed.data
+	const result = await app.updateProductKit({
+		expectedRevision: data.expectedRevision,
+		adapters: data.adapters.map(entry => ({ moduleSpecifier: entry.moduleSpecifier, ...(entry.config === undefined ? {} : { config: entry.config as JsonValue }) })),
+		styles: data.styles,
+		themes: data.themes as Record<string, Record<string, string>>,
+	})
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
+}
+
+export async function updateComponentRegistryForHttp(app: ScopedWorkspaceSession, body: unknown): Promise<AuthoringHttpResult> {
+	const parsed = parseHttpPayload(updateComponentRegistryHttpSchema, body)
+	if (!parsed.ok) return parsed.result
+	const data = parsed.data
+	const result = await app.updateComponentRegistry({
+		expectedRevision: data.expectedRevision,
+		components: data.components as Record<string, ProductKitComponent>,
+		widgets: data.widgets as Record<string, ProductKitWidgetMapping>,
 	})
 	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }

@@ -19,7 +19,8 @@ import type { ViewResource } from '../domain/views/schema'
 import type { FlowStep } from '../domain/flows/schema'
 import { REVIEW_RESOLUTIONS, type ReviewAnchor, type ReviewDisplayHint, type ReviewEvidenceRef, type ReviewRenderContext, type ReviewResourceRevision } from '../domain/reviews/schema'
 import type { WorkspaceAdapterSelection, ThemeEntry, ViewportPreset } from '../domain/workspace/schema'
-import { isFullUuid, isSha256Digest, type JsonObject } from '../domain/validation'
+import type { ProductKitComponent, ProductKitWidgetMapping } from '../domain/product-kit/schema'
+import { isFullUuid, isSha256Digest, type JsonObject, type JsonValue } from '../domain/validation'
 import type { ResolvedRenderContext } from '../domain/render-context/schema'
 import type { HandoffRoot } from '../domain/handoff/schema'
 import { isPersistenceBusyError, persistenceBusyResult } from '../persistence/busy'
@@ -76,7 +77,7 @@ const updateWorkspaceSettingsSchema = z.object({
 		adapters: z.array(z.object({
 			moduleSpecifier: z.string(),
 			config: z.unknown().optional(),
-		})),
+		})).optional().describe('Required below Workspace schemaVersion 5 and refused from 5, where the Product Kit holds the Adapters (compose_product_kit, update_product_kit).'),
 		viewports: z.record(z.string(), z.object({
 			dimensions: z.object({
 				width: z.number(),
@@ -86,6 +87,32 @@ const updateWorkspaceSettingsSchema = z.object({
 		themes: z.record(z.string(), z.record(z.string(), z.unknown())),
 	}).strict(),
 }).strict()
+
+// Clause 01a11bb1-b15c-734e-8968-c378db1444ca: the Product Kit operations; the domain validator reports member shapes.
+const composeProductKitSchema = z.object({
+	expectedRevision: z.string().describe('The Product Kit revision, read from uiux://product-kit.'),
+	designSystems: z.array(z.string()).describe('External Design System package names, each a dependency kit/package.json declares.'),
+	adapters: z.array(z.string()).describe('The Adapter module specifiers in order: a bare specifier of a package kit/package.json declares, or a ./ specifier relative to kit/. A kept Adapter keeps its config; an added one has none.'),
+}).strict()
+
+const updateProductKitSchema = z.object({
+	expectedRevision: z.string().describe('The Product Kit revision, read from uiux://product-kit.'),
+	adapters: z.array(z.object({
+		moduleSpecifier: z.string(),
+		config: z.unknown().optional(),
+	}).strict()).describe('The current Adapters, with the same specifiers in the same order, each with the config to store (none when omitted).'),
+	styles: z.array(z.string()).describe('Stylesheet specifiers: a bare specifier into a declared package, or a ./ path inside kit/.'),
+	themes: z.record(z.string(), z.record(z.string(), z.unknown())).describe('Root attributes per theme ID, such as { "dark": { "data-theme": "dark" } }.'),
+}).strict()
+
+const updateComponentRegistrySchema = z.object({
+	expectedRevision: z.string().describe('The Product Kit revision, read from uiux://product-kit.'),
+	components: z.record(z.string(), z.unknown()).describe('The component registry: name → { files, requires?, packages?, layer: "design-system" | "product" }, files relative to kit/ under kit/src/.'),
+	widgets: z.record(z.string(), z.unknown()).describe('The component table: Widget type → { component } naming a registry component, or { import, export } naming an external package export.'),
+}).strict()
+
+/** The URI of the Product Kit Resource (Clause 01a11bb1-b0f1-7e5d-85ad-230c43ad99fb). */
+export const PRODUCT_KIT_RESOURCE_URI = 'uiux://product-kit'
 
 const createLocaleSchema = z.object({
 	locale: z.string(),
@@ -364,7 +391,7 @@ const leaseResourcesSchema = z.array(z.object({
 const acquireLockSchema = z.object({ resources: leaseResourcesSchema }).strict()
 const releaseLockSchema = z.object({ resources: leaseResourcesSchema.optional() }).strict()
 
-export const LEASE_RECIPE = 'Edit leases: your first successful write to a View, Flow, Locale, Asset or the Workspace settings takes a 5-minute lease on it, renewed by each of your writes; other writers get status "locked" (resource.locked) with your nickname and expiry. For a multi-step task, call acquire_lock up front for every resource you will write, call acquire_lock again as a heartbeat before a long pause (a build, a capture), and finish with release_lock and no arguments. Leases never replace expectedRevision: a conflict still means re-read. Review threads are never locked.'
+export const LEASE_RECIPE = 'Edit leases: your first successful write to a View, Flow, Locale, Asset, the Workspace settings or the Product Kit takes a 5-minute lease on it, renewed by each of your writes; other writers get status "locked" (resource.locked) with your nickname and expiry. For a multi-step task, call acquire_lock up front for every resource you will write, call acquire_lock again as a heartbeat before a long pause (a build, a capture), and finish with release_lock and no arguments. Leases never replace expectedRevision: a conflict still means re-read. Review threads are never locked.'
 
 /** Per-request server instructions: the agent learns its identity and role without a new tool (decision 10). */
 export function uiuxMcpInstructions(principal: Principal): string {
@@ -396,6 +423,20 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			async uri => resourceResult(app, uri),
 		)
 	}
+
+	// Clause 01a11bb1-b0f1-7e5d-85ad-230c43ad99fb: the Product Kit file with its build state, Adapter
+	// resolution, resolved external packages and findings. A Workspace without one (below schemaVersion
+	// 5) has no such Resource. The kit file template uiux://product-kit/file/{path} is not served yet.
+	server.registerResource(
+		'product-kit',
+		PRODUCT_KIT_RESOURCE_URI,
+		{ title: 'UIUX Product Kit', mimeType: 'application/json' },
+		async (uri) => {
+			const read = await app.readProductKit()
+			if (!read) throw new ResourceNotFoundError(uri.href, `UIUX Product Kit not found: this Workspace has no ${PRODUCT_KIT_RESOURCE_URI} (it needs Workspace schemaVersion 5).`)
+			return { contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(read) }] }
+		},
+	)
 
 	server.registerResource(
 		'artifact',
@@ -521,7 +562,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'update_workspace_settings',
 		{
 			title: 'Update UIUX Workspace Settings',
-			description: 'Update manifest-owned Workspace settings (i18n.defaultLocale, adapters, viewports, themes) with revision CAS while preserving schemaVersion.',
+			description: 'Update manifest-owned Workspace settings (i18n.defaultLocale, viewports, themes, and below Workspace schemaVersion 5 adapters) with revision CAS while preserving schemaVersion.',
 			inputSchema: updateWorkspaceSettingsSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
@@ -529,10 +570,53 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			expectedRevision: input.expectedRevision,
 			settings: {
 				i18n: input.settings.i18n,
-				adapters: input.settings.adapters as WorkspaceAdapterSelection[],
+				...(input.settings.adapters === undefined ? {} : { adapters: input.settings.adapters as WorkspaceAdapterSelection[] }),
 				viewports: input.settings.viewports as Record<string, ViewportPreset>,
 				themes: input.settings.themes as Record<string, ThemeEntry>,
 			},
+		})),
+	)
+
+	const productKitRefusals = 'Refusals: conflict (re-read uiux://product-kit), locked, invalid (the file\'s own validation, product_kit.specifier_refused, product_kit.package_undeclared, kit.component_invalid), blocked (auth.scope_denied naming requiredKeys, workspace.migration_required below Workspace schemaVersion 5).'
+	server.registerTool(
+		'compose_product_kit',
+		{
+			title: 'Compose the UIUX Product Kit',
+			description: `Set the Product Kit's external Design System packages (designSystems) and its Adapter specifiers and order. Needs product-kit.compose. Writes only the Product Kit file, with revision CAS; specifiers are checked against kit/ before anything is stored. Returns { status: "updated", revision, diagnostics, findings }. ${productKitRefusals}`,
+			inputSchema: composeProductKitSchema,
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async input => productKitToolResult(await app.composeProductKit(input)),
+	)
+
+	server.registerTool(
+		'update_product_kit',
+		{
+			title: 'Update the UIUX Product Kit settings',
+			description: `Set the Adapters' config, the style entries (styles) and the theme root attributes (themes) of the Product Kit. Needs product-kit.write; the Adapter specifiers and order stay as they are (compose_product_kit changes them). Writes only the Product Kit file, with revision CAS. Returns { status: "updated", revision, diagnostics, findings }. ${productKitRefusals}`,
+			inputSchema: updateProductKitSchema,
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async input => productKitToolResult(await app.updateProductKit({
+			expectedRevision: input.expectedRevision,
+			adapters: input.adapters.map(entry => ({ moduleSpecifier: entry.moduleSpecifier, ...(entry.config === undefined ? {} : { config: entry.config as JsonValue }) })),
+			styles: input.styles,
+			themes: input.themes as Record<string, Record<string, string>>,
+		})),
+	)
+
+	server.registerTool(
+		'update_component_registry',
+		{
+			title: 'Update the UIUX component registry',
+			description: `Set the Product Kit's component registry (components) and component table (widgets). Needs product-kit.write. Every declared file must exist under kit/src/ and none may be a wrapper entry; each component's packages must be declared in kit/package.json; an entry that fails is refused with kit.component_invalid. A best-effort import scan returns findings (kit.component_invalid) for undeclared imports and unimported files without refusing. Writes only the Product Kit file, with revision CAS. Returns { status: "updated", revision, diagnostics, findings }. ${productKitRefusals}`,
+			inputSchema: updateComponentRegistrySchema,
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async input => productKitToolResult(await app.updateComponentRegistry({
+			expectedRevision: input.expectedRevision,
+			components: input.components as Record<string, ProductKitComponent>,
+			widgets: input.widgets as Record<string, ProductKitWidgetMapping>,
 		})),
 	)
 
@@ -998,7 +1082,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'acquire_lock',
 		{
 			title: 'Acquire UIUX edit leases',
-			description: `Take (or renew) 5-minute edit leases on 1-${MAX_ACQUIRE_RESOURCES} resources, all or nothing. Lockable kinds: view, flow, locale, asset, workspace (key "workspace"); Review threads are never locked. Returns { status: "acquired", leases } or { status: "locked", locks } naming each conflicting holder and expiry. ${LEASE_RECIPE}`,
+			description: `Take (or renew) 5-minute edit leases on 1-${MAX_ACQUIRE_RESOURCES} resources, all or nothing. Lockable kinds: view, flow, locale, asset, workspace (key "workspace"), product-kit (key "product-kit"); Review threads are never locked. Returns { status: "acquired", leases } or { status: "locked", locks } naming each conflicting holder and expiry. ${LEASE_RECIPE}`,
 			inputSchema: acquireLockSchema,
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
@@ -1137,6 +1221,15 @@ async function discoveryToolResult(app: ScopedWorkspaceSession, mode: 'list' | '
 	return {
 		content: [{ type: 'text' as const, text: JSON.stringify(output) }],
 		structuredContent: output,
+	}
+}
+
+function productKitToolResult(result: { status: string; key: string; [key: string]: unknown }) {
+	const output = result.status === 'updated' ? { ...result, resourceUri: PRODUCT_KIT_RESOURCE_URI } : result
+	return {
+		content: [{ type: 'text' as const, text: JSON.stringify(output) }],
+		structuredContent: output,
+		...(result.status === 'updated' ? {} : { isError: true }),
 	}
 }
 

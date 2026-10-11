@@ -2065,7 +2065,12 @@
       "unknown_type": "不支援這種參照類型。",
       "invalid_absolute_uri": "請使用完整網址，例如 https://example.com/spec。"
     },
+    "kit": {
+      "component_invalid": "登錄中的元件與 kit/ 專案不符。"
+    },
     "product_kit": {
+      "adapters_not_current": "若要變更 Adapter 的指定方式或順序，請改用組合操作。",
+      "current_invalid": "目前儲存的 product-kit.json 無效，請先修正再變更。",
       "invalid_component_file": "登錄中的檔案路徑必須位於 kit/src/ 之下。",
       "invalid_component_layer": "層級必須是設計系統層（design-system）或產品層。",
       "invalid_component_name": "登錄中的名稱須為以連字號連接的小寫單字。",
@@ -2073,7 +2078,10 @@
       "invalid_style_specifier": "樣式表請使用套件匯出，或 kit/ 內的 ./ 路徑。",
       "invalid_theme_attribute": "主題屬性名稱不可包含空白、引號、>、/ 或 =。",
       "invalid_widget_import": "請指定套件及其中一個匯出。",
+      "kit_package_unreadable": "無法讀取 kit/package.json。",
       "missing": "product-kit.json 不存在或無法讀取。",
+      "package_undeclared": "請先在 kit/package.json 中將此套件宣告為相依套件。",
+      "specifier_refused": "請指定已宣告的套件，或 kit/ 內、node_modules/ 以外的 ./ 路徑。",
       "unknown_component": "必須指向登錄中的另一個項目。"
     }
   },
@@ -2093,6 +2101,7 @@
     "history": "版本歷程紀錄無效。",
     "i18n": "翻譯有問題。",
     "identity": "識別碼無效。",
+    "kit": "kit/ 專案有問題。",
     "lease": "無法取得編輯鎖定。",
     "persistence": "無法讀取或寫入 Workspace 檔案。",
     "product_kit": "product-kit.json 有問題。",
