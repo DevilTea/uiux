@@ -212,9 +212,9 @@ function emittedCodes(): Map<string, string> {
 /**
  * Codes the Workbench never shows, so they need only their namespace sentence: the preview wire
  * protocol (browser-to-browser validation), MCP-only discovery and lease requests, the
- * CLI-only access store, and internal sentinels.
+ * CLI-only access store and `--preset`, and internal sentinels.
  */
-const NAMESPACE_ONLY = /^(?:protocol|discovery|lease|time|revision)\.|^access\.(?:home_inside_workspace|roster_exists|store_root_mismatch|store_unsafe|workspace_invalid)$/
+const NAMESPACE_ONLY = /^(?:protocol|discovery|lease|time|revision)\.|^access\.(?:home_inside_workspace|preset_not_found|roster_exists|store_root_mismatch|store_unsafe|workspace_invalid)$/
 
 describe('Workbench copy for server diagnostics', () => {
 	const codes = emittedCodes()
