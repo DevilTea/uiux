@@ -30,7 +30,7 @@ import { createHistoryStoreFactory, type HistoryStores } from '../src/server/his
 import { diffVersionsForHttp } from '../src/server/history-http'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { bearer, connectMcp, provisionToken, scoped, testMember } from './support/access'
-import { V4_TEST_SCHEMA_POLICY, writeManifest } from './support/workspace-layout'
+import { V4_TEST_SCHEMA_POLICY, writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
 
 /**
  * Version comparison through the service, `GET /api/history/diff` and MCP `get_version_diff`
@@ -363,7 +363,10 @@ describe('GET /api/history/diff access (Clause 01a11485-f978-767a-b977-33028aee7
 
 	beforeAll(async () => {
 		root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-http-')))
-		await writeManifest(root, `${JSON.stringify(MANIFEST)}\n`, LEGACY_LAYOUT)
+		// The packaged runtime uses UIUX's own policy, so this Workspace is a current (schemaVersion 5) one.
+		const { schemaVersion: _schemaVersion, ...settings } = MANIFEST
+		void _schemaVersion
+		await writeCurrentWorkspace(root, settings)
 		await mkdir(join(root, 'i18n'), { recursive: true })
 		await writeFile(join(root, localeRelativePath('en-US')), '{"greeting":"Hello"}\n')
 		process.env.UIUX_WORKSPACE_ROOT = root
@@ -379,9 +382,9 @@ describe('GET /api/history/diff access (Clause 01a11485-f978-767a-b977-33028aee7
 
 		const runtime = getSelectedWorkspaceServerRuntime()
 		const snapshot = await runtime.persistence.withReadLock(() => runtime.persistence.scanVersionedSnapshotUnlocked())
-		const built = versionResourcesFromSnapshot(snapshot, LEGACY_LAYOUT)
+		const built = versionResourcesFromSnapshot(snapshot, runtime.persistence.layout)
 		checkpointId = randomUUID()
-		await new CheckpointStore(runtime.persistence).create({ historySchemaVersion: 1, id: checkpointId, type: 'checkpoint', actor: HUMAN, at: '2026-10-01T00:00:00.000Z', workspaceSchemaVersion: 4, resources: built.resources, name: 'Before', source: 'workbench' }, built.blobs)
+		await new CheckpointStore(runtime.persistence).create({ historySchemaVersion: 1, id: checkpointId, type: 'checkpoint', actor: HUMAN, at: '2026-10-01T00:00:00.000Z', workspaceSchemaVersion: 5, resources: built.resources, name: 'Before', source: 'workbench' }, built.blobs)
 	})
 
 	afterAll(async () => {
