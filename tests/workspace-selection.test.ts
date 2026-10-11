@@ -14,7 +14,12 @@ import { canonicalJsonBytes, checkWorkspaceSelection, FileNativePersistence, LEG
 import { blobDigest, CheckpointStore, HostHistoryStore, runWithDesignWriteContext } from '../src/persistence/history'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { hostHistoryPaths } from '../src/server/access/store'
-import { currentManifest, V5_TEST_SCHEMA_POLICY, v5Manifest, writeManifest } from './support/workspace-layout'
+import { V4_TEST_SCHEMA_POLICY, V5_TEST_SCHEMA_POLICY, v5Manifest, writeManifest } from './support/workspace-layout'
+
+/** A schemaVersion 4 manifest, as the old layout keeps it in `.uiux/`, holding `adapters`. */
+function v4Manifest(): Record<string, unknown> {
+	return { schemaVersion: 4, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }
+}
 
 /**
  * Layout mismatches at the entry points and in recovery (owner ruling of
@@ -69,7 +74,7 @@ function view(name: string) {
 /** An old-layout Workspace `X` at schemaVersion 4 with one View. */
 async function legacyWorkspace(): Promise<string> {
 	const root = await makeRoot()
-	await writeManifest(root, canonicalJsonBytes(currentManifest()), LEGACY_LAYOUT)
+	await writeManifest(root, canonicalJsonBytes(v4Manifest()), LEGACY_LAYOUT)
 	await mkdir(join(root, 'views'))
 	await writeFile(join(root, viewRelativePath(VIEW_ID)), canonicalJsonBytes(view('Now')))
 	return root
@@ -114,7 +119,9 @@ describe('checkWorkspaceSelection', () => {
 	it('accepts each layout with its own manifest, and an uninitialized directory', async () => {
 		expect(checkWorkspaceSelection(await legacyWorkspace(), PRODUCT_WORKSPACE_SCHEMA_POLICY)).toEqual({ ok: true, layout: LEGACY_LAYOUT })
 		expect(checkWorkspaceSelection((await relocatedWorkspace()).root, V5_TEST_SCHEMA_POLICY)).toEqual({ ok: true, layout: V5_LAYOUT })
-		expect(checkWorkspaceSelection(await makeRoot(), PRODUCT_WORKSPACE_SCHEMA_POLICY)).toEqual({ ok: true, layout: LEGACY_LAYOUT })
+		// An uninitialized directory gets the layout of the policy's current version.
+		expect(checkWorkspaceSelection(await makeRoot(), V4_TEST_SCHEMA_POLICY)).toEqual({ ok: true, layout: LEGACY_LAYOUT })
+		expect(checkWorkspaceSelection(await makeRoot(), PRODUCT_WORKSPACE_SCHEMA_POLICY)).toEqual({ ok: true, layout: V5_LAYOUT })
 		expect(checkWorkspaceSelection(await makeRoot(), V5_TEST_SCHEMA_POLICY)).toEqual({ ok: true, layout: V5_LAYOUT })
 		// The old-layout manifest decides when another tool's workspace.json sits beside it.
 		const both = await legacyWorkspace()
@@ -131,7 +138,7 @@ describe('checkWorkspaceSelection', () => {
 		expect(checkWorkspaceSelection(foreign, PRODUCT_WORKSPACE_SCHEMA_POLICY)).toEqual({ ok: false, reason: 'foreign_manifest', message: expect.stringContaining('is not a UIUX Workspace manifest') })
 
 		const misplaced = await makeRoot()
-		await writeManifest(misplaced, currentManifest(), V5_LAYOUT)
+		await writeManifest(misplaced, v4Manifest(), V5_LAYOUT)
 		expect(checkWorkspaceSelection(misplaced, PRODUCT_WORKSPACE_SCHEMA_POLICY)).toEqual({ ok: false, reason: 'version_layout_mismatch', message: expect.stringContaining('is a schemaVersion 4 manifest') })
 
 		const { parent } = await relocatedWorkspace()
@@ -143,14 +150,14 @@ describe('checkWorkspaceSelection', () => {
 	})
 
 	it('names an unrecognized schemaVersion as unsupported instead of suggesting another directory', async () => {
-		// UIUX's own policy does not recognize 5, so the parent of a relocated root is not pointed at its child.
+		// A build that does not recognize 5 does not point the parent of a relocated root at its child.
 		const { parent } = await relocatedWorkspace()
-		const refused = checkWorkspaceSelection(parent, PRODUCT_WORKSPACE_SCHEMA_POLICY)
+		const refused = checkWorkspaceSelection(parent, V4_TEST_SCHEMA_POLICY)
 		expect(refused).toEqual({ ok: false, reason: 'unknown_schema', message: expect.stringContaining('schemaVersion 5, which this UIUX build does not support') })
 		expect(refused.ok === false && refused.message).not.toMatch(/; select /)
 
 		const future = await makeRoot()
-		await writeManifest(future, { ...currentManifest(), schemaVersion: 99 }, LEGACY_LAYOUT)
+		await writeManifest(future, { ...v4Manifest(), schemaVersion: 99 }, LEGACY_LAYOUT)
 		expect(checkWorkspaceSelection(future, V5_TEST_SCHEMA_POLICY)).toEqual({ ok: false, reason: 'unknown_schema', message: expect.stringContaining('schemaVersion 99, which this UIUX build does not support') })
 	})
 })
@@ -261,7 +268,8 @@ describe('entry points refuse a mismatched selection with exit status 2 before t
 			const home = join(await makeRoot('uiux-selection-home-'), 'home')
 			const errors: string[] = []
 			const run = (argv: readonly string[]) => runAccessCommand({ argv, env: { UIUX_HOME: home }, stdout: () => undefined, stderr: line => errors.push(line) })
-			expect(await run(['member', 'list', '--workspace', selected]), name).toBe(2)
+			// --workspace <parent of a relocated root> selects that root (Clause 01a1144e-5584), so only --from refuses it.
+			if (name !== 'the parent of a relocated root') expect(await run(['member', 'list', '--workspace', selected]), name).toBe(2)
 			const target = await legacyWorkspace()
 			expect(await run(['access', 'copy', '--from', selected, '--workspace', target]), name).toBe(2)
 			expect(errors.join('\n'), name).not.toMatch(/at .*\(/)
@@ -305,9 +313,10 @@ describe('history records check their layout before storing anything', () => {
 
 	/** An old-layout Workspace whose persistence and history stores are open, and a way to make the manifest belong to the v5 layout. */
 	async function fixture() {
+		// A build where 4 is current, so the old-layout Workspace is current and history records.
 		const root = await legacyWorkspace()
 		const home = join(await makeRoot('uiux-selection-home-'), 'home')
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })
 		const host = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, root), create: true }))!
 		const checkpoints = new CheckpointStore(persistence)
 		const relocatedManifest = canonicalJsonBytes(v5Manifest())

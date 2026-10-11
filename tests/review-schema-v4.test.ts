@@ -8,7 +8,11 @@ import { createWorkspaceApplicationSession } from '../src/application/services/w
 import { validateReviewRenderContextInput, validateReviewThread } from '../src/domain/reviews/schema'
 import { FileNativePersistence } from '../src/persistence/file-native'
 import { localeRelativePath, reviewRelativePath, viewRelativePath, workspaceRelativePath } from '../src/persistence/paths'
-import { PRODUCT_WORKSPACE_SCHEMA_POLICY, WORKSPACE_V3_TO_V4_STEP } from '../src/product/workspace-schema'
+import { WORKSPACE_V3_TO_V4_STEP } from '../src/product/workspace-schema'
+import { V4_TEST_SCHEMA_POLICY } from './support/workspace-layout'
+
+/** The step from 3 to 4 and renderContext authoring, in the old layout under a build where 4 is current. */
+const V4_POLICY = V4_TEST_SCHEMA_POLICY
 
 /**
  * Accepted decision group "Review render context" (Part 7, Discussion #7 c11), persisted shape only:
@@ -210,7 +214,7 @@ describe('uiux.v3-to-v4 (manifest-only step)', () => {
 	it('bumps only the manifest, backfills no renderContext, and is idempotent', async () => {
 		const root = await seedV3Workspace([thread({ anchor: WORKSPACE })])
 		const before = await snapshot(root)
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_POLICY })
 		expect((await persistence.inspectWorkspace()).inspection).toMatchObject({ state: 'migration_required', version: 3, targetVersion: 4 })
 		expect(await persistence.planWorkspaceMigration()).toMatchObject({ fromVersion: 3, version: 4, steps: ['uiux.v3-to-v4'], changedFiles: ['.uiux/workspace.json'] })
 		expect(await snapshot(root)).toEqual(before)
@@ -226,7 +230,7 @@ describe('uiux.v3-to-v4 (manifest-only step)', () => {
 
 	it('decodes a v4 thread with renderContext through persistence once migrated', async () => {
 		const root = await seedV3Workspace([])
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_POLICY })
 		await persistence.migrateWorkspace()
 		await writeFile(join(root, reviewRelativePath(REVIEW_ID)), `${JSON.stringify(thread({ renderContext: ZH_MOBILE_DARK }))}\n`)
 		expect((await persistence.reviews.readInspected(REVIEW_ID))?.diagnostics).toEqual([])
@@ -236,7 +240,7 @@ describe('uiux.v3-to-v4 (manifest-only step)', () => {
 	it('leaves v4-only content smuggled into a v3 file byte-identical: refused under v3, decoded under v4 once migrated', async () => {
 		const smuggled = thread({ id: '77777777-7777-4777-8777-777777777777', renderContext: ZH_MOBILE_DARK })
 		const root = await seedV3Workspace([thread(), smuggled])
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_POLICY })
 		expect((await persistence.reviews.readInspected(smuggled.id as string))?.diagnostics.map(item => item.code)).toEqual(['schema.unknown_field'])
 		const bytes = await readFile(join(root, reviewRelativePath(smuggled.id as string)), 'utf8')
 		expect((await persistence.migrateWorkspace()).changedFiles).toEqual(['.uiux/workspace.json'])
@@ -260,7 +264,7 @@ describe('uiux.v3-to-v4 (manifest-only step)', () => {
 describe('re-anchor keeps or clears the recorded renderContext (owner ruling 1, omitted keeps)', () => {
 	async function seedThreadWithContext() {
 		const root = await seedV3Workspace([])
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_POLICY })
 		await persistence.migrateWorkspace()
 		await writeFile(join(root, reviewRelativePath(REVIEW_ID)), `${JSON.stringify(thread({ renderContext: ZH_MOBILE_DARK }))}\n`)
 		return { root, persistence, app: createWorkspaceApplicationSession(persistence) }
@@ -329,7 +333,7 @@ describe('validateReviewRenderContextInput (writer-side shape check)', () => {
 describe('Review authoring records only Workspace keys in renderContext', () => {
 	async function seedV4Workspace() {
 		const root = await seedV3Workspace([])
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_POLICY })
 		await persistence.migrateWorkspace()
 		await mkdir(join(root, 'i18n'), { recursive: true })
 		await writeFile(join(root, localeRelativePath('zh-TW')), '{}\n')

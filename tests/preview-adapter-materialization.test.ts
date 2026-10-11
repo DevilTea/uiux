@@ -21,7 +21,7 @@ import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import { HUMAN_OWNER } from './support/access'
-import { v5Manifest, writeManifest } from './support/workspace-layout'
+import { v5Manifest, writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
 
 const temporaryRoots: string[] = []
 
@@ -37,13 +37,12 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 	await symlink(join(process.cwd(), 'node_modules', '@deviltea', 'widget-core'), join(root, 'node_modules', '@deviltea', 'widget-core')).catch(() => undefined)
 	await symlink(join(process.cwd(), 'node_modules', '@deviltea', 'widget-vue'), join(root, 'node_modules', '@deviltea', 'widget-vue')).catch(() => undefined)
 	await symlink(join(process.cwd(), 'node_modules', 'vue'), join(root, 'node_modules', 'vue')).catch(() => undefined)
-	await writeManifest(root, JSON.stringify({
-		schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
+	await writeCurrentWorkspace(root, {
 		i18n: { defaultLocale: 'en-US' },
 		adapters,
 		viewports: {},
 		themes: {},
-	}))
+	})
 	return root
 }
 
@@ -155,8 +154,8 @@ function setupDom(): { window: Window; document: Document } {
 describe('preview adapter materialization transport', () => {
 	it('proves valid workspace-relative adapter -> non-empty rendered runtime path available', async () => {
 		const root = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		const resolution = await resolveSelectedWorkspaceAdapters(root)
 		expect(resolution.state).toBe('valid')
@@ -195,7 +194,8 @@ describe('preview adapter materialization transport', () => {
 
 	it('proves valid package-relative (bare specifier) adapter resolution and mounting', async () => {
 		const root = await createTestWorkspace([{ moduleSpecifier: 'pkg-counter' }])
-		const packageDir = join(root, 'node_modules', 'pkg-counter')
+		// From schemaVersion 5 a bare Adapter resolves from the kit project, kit/node_modules/.
+		const packageDir = join(root, 'kit', 'node_modules', 'pkg-counter')
 		await mkdir(packageDir, { recursive: true })
 		await writeFile(join(packageDir, 'package.json'), JSON.stringify({
 			name: 'pkg-counter',
@@ -205,6 +205,9 @@ describe('preview adapter materialization transport', () => {
 			main: './index.mjs',
 		}))
 		await writeFile(join(packageDir, 'index.mjs'), makeCounterAdapterSource())
+		// From schemaVersion 5 a bare Adapter is a dependency the kit project declares.
+		await mkdir(join(root, 'kit'), { recursive: true })
+		await writeFile(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', private: true, dependencies: { 'pkg-counter': '1.0.0' } }))
 
 		const resolution = await resolveSelectedWorkspaceAdapters(root)
 		if (resolution.state === 'invalid') {
@@ -239,8 +242,8 @@ describe('preview adapter materialization transport', () => {
 	it('fails closed when manifest is invalid or config schema is violated or adapter collision occurs', async () => {
 		// 1. Invalid manifest (missing apiVersion)
 		const rootInvalidManifest = await createTestWorkspace([{ moduleSpecifier: './adapters/invalid.mjs' }])
-		await mkdir(join(rootInvalidManifest, 'adapters'), { recursive: true })
-		await writeFile(join(rootInvalidManifest, 'adapters', 'invalid.mjs'), `
+		await mkdir(join(rootInvalidManifest, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(rootInvalidManifest, 'kit', 'adapters', 'invalid.mjs'), `
 			export const manifest = { id: 'invalid-one' };
 		`)
 		const resInvalid = await resolveSelectedWorkspaceAdapters(rootInvalidManifest)
@@ -254,8 +257,8 @@ describe('preview adapter materialization transport', () => {
 			moduleSpecifier: './adapters/with-schema.mjs',
 			config: { port: 'invalid-string-expected-number' },
 		}])
-		await mkdir(join(rootConfigViolation, 'adapters'), { recursive: true })
-		await writeFile(join(rootConfigViolation, 'adapters', 'with-schema.mjs'), `
+		await mkdir(join(rootConfigViolation, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(rootConfigViolation, 'kit', 'adapters', 'with-schema.mjs'), `
 			export const manifest = {
 				id: 'with-schema',
 				apiVersion: '1',
@@ -284,9 +287,9 @@ describe('preview adapter materialization transport', () => {
 			{ moduleSpecifier: './adapters/first.mjs' },
 			{ moduleSpecifier: './adapters/second.mjs' },
 		])
-		await mkdir(join(rootCollision, 'adapters'), { recursive: true })
-		await writeFile(join(rootCollision, 'adapters', 'first.mjs'), makeCounterAdapterSource())
-		await writeFile(join(rootCollision, 'adapters', 'second.mjs'), makeCounterAdapterSource())
+		await mkdir(join(rootCollision, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(rootCollision, 'kit', 'adapters', 'first.mjs'), makeCounterAdapterSource())
+		await writeFile(join(rootCollision, 'kit', 'adapters', 'second.mjs'), makeCounterAdapterSource())
 
 		const resCollision = await resolveSelectedWorkspaceAdapters(rootCollision)
 		expect(resCollision.state).toBe('invalid')
@@ -297,8 +300,8 @@ describe('preview adapter materialization transport', () => {
 
 	it('fails closed when adapter module exports ambiguous manifests', async () => {
 		const root = await createTestWorkspace([{ moduleSpecifier: './adapters/ambiguous.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'ambiguous.mjs'), `
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'ambiguous.mjs'), `
 			export const manifestA = {
 				id: 'adapter-a',
 				apiVersion: '1',
@@ -330,8 +333,8 @@ describe('preview adapter materialization transport', () => {
 
 	it('fails closed in the browser runtime when runtime ownership mismatch occurs', async () => {
 		const root = await createTestWorkspace([{ moduleSpecifier: './adapters/mismatch.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'mismatch.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'mismatch.mjs'), makeCounterAdapterSource())
 
 		const resolution = await resolveSelectedWorkspaceAdapters(root)
 		expect(resolution.state).toBe('valid')
@@ -415,8 +418,8 @@ describe('preview adapter materialization transport', () => {
 
 	it('ensures adapter module changes on disk are not incorrectly masked by cache', async () => {
 		const root = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		const resolution = await resolveSelectedWorkspaceAdapters(root)
 		if (resolution.state !== 'valid') throw new Error('Expected valid resolution')
@@ -430,7 +433,7 @@ describe('preview adapter materialization transport', () => {
 
 		// Modify adapter file on disk
 		const modifiedSource = makeCounterAdapterSource().replace('Value: ', 'CountIs: ')
-		await writeFile(join(root, 'adapters', 'counter.mjs'), modifiedSource)
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), modifiedSource)
 
 		// Build again: must detect modified file and return updated bundle with new hash
 		const bundle2 = await buildWorkspacePreviewBundle({ workspaceRoot: root, set: resolution.set })
@@ -440,8 +443,8 @@ describe('preview adapter materialization transport', () => {
 
 	it('serves preview adapters plan and runtime bundle through internal Nitro routes', async () => {
 		const root = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		const prevEnv = process.env.UIUX_WORKSPACE_ROOT
 		process.env.UIUX_WORKSPACE_ROOT = root
@@ -473,15 +476,15 @@ describe('preview adapter materialization transport', () => {
 
 	it('fails closed deterministically when an adapter source file cannot be read', async () => {
 		const root = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		const resolution = await resolveSelectedWorkspaceAdapters(root)
 		expect(resolution.state).toBe('valid')
 		if (resolution.state !== 'valid') return
 
 		// Remove the adapter file so it becomes unreadable
-		await rm(join(root, 'adapters', 'counter.mjs'))
+		await rm(join(root, 'kit', 'adapters', 'counter.mjs'))
 
 		// computeBundleContentHash must throw structured error instead of Date.now() fallback
 		await expect(buildWorkspacePreviewBundle({ workspaceRoot: root, set: resolution.set }))
@@ -538,8 +541,8 @@ export const manifest = {
 };
 `
 		const root = await createTestWorkspace([{ moduleSpecifier: './adapters/greeting.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'greeting.mjs'), greetingAdapterSource)
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'greeting.mjs'), greetingAdapterSource)
 
 		const resolution = await resolveSelectedWorkspaceAdapters(root)
 		expect(resolution.state).toBe('valid')

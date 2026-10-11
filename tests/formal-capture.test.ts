@@ -17,7 +17,7 @@ import { AGENT_EDITOR, provisionToken, sessionCookieFor } from './support/access
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
-import { writeManifest } from './support/workspace-layout'
+import { writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
 
 const temporaryRoots: string[] = []
 const runningServers: ChildProcess[] = []
@@ -85,8 +85,7 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 	await symlink(widgetVuePath, join(root, 'node_modules', '@deviltea', 'widget-vue')).catch(() => undefined)
 	await symlink(vuePath, join(root, 'node_modules', 'vue')).catch(() => undefined)
 
-	await writeManifest(root, JSON.stringify({
-		schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
+	await writeCurrentWorkspace(root, {
 		i18n: { defaultLocale: 'en-US' },
 		adapters,
 		viewports: {
@@ -97,7 +96,7 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 			light: { label: 'Light' },
 			dark: { label: 'Dark' },
 		},
-	}))
+	})
 
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 	return { root, persistence }
@@ -204,8 +203,8 @@ function createCounterView(): ViewResource {
 describe('Formal capture service & fresh-runtime proof', () => {
 	it('proves fresh isolated runtime: widget state mutated in page does not bleed into formal capture', { timeout: 30_000 }, async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		// Persist the view
 		await persistence.views.create(VIEW_COUNTER_ID, createCounterView())
@@ -299,8 +298,8 @@ describe('Formal capture service & fresh-runtime proof', () => {
 
 	it('produces new evidence digest when view revision or spec changes', { timeout: 30_000 }, async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		const view = createCounterView()
 		await persistence.views.create(VIEW_COUNTER_ID, view)
@@ -414,8 +413,8 @@ describe('Formal capture service & fresh-runtime proof', () => {
 
 	it('provides context-scoped error isolation: successful contexts succeed even when another context fails', { timeout: 30_000 }, async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 		await persistence.views.create(VIEW_COUNTER_ID, createCounterView())
 
 		const server = await startTestServer(root)
@@ -480,8 +479,8 @@ describe('Formal capture service & fresh-runtime proof', () => {
 
 	it('exposes capture_formal_evidence through MCP with structured outcome', { timeout: 30_000 }, async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 		await persistence.views.create(VIEW_COUNTER_ID, createCounterView())
 
 		const server = await startTestServer(root)
@@ -529,8 +528,8 @@ describe('Formal capture service & fresh-runtime proof', () => {
 
 	it('rejects hostile Host / X-Forwarded-Host: capture never sends requests to attacker origin', { timeout: 30_000 }, async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 		await persistence.views.create(VIEW_COUNTER_ID, createCounterView())
 
 		const server = await startTestServer(root)

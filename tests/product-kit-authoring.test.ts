@@ -14,7 +14,7 @@ import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } f
 import type { HostVersionRecord } from '../src/domain/history/schema'
 import { emptyProductKit, type ProductKit } from '../src/domain/product-kit/schema'
 import { createHistoryStoreFactory } from '../src/server/history-stores'
-import { canonicalJsonBytes, FileNativePersistence, V5_LAYOUT } from '../src/persistence'
+import { canonicalJsonBytes, FileNativePersistence, LEGACY_LAYOUT, V5_LAYOUT } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import {
 	composeProductKitForHttp,
@@ -228,7 +228,7 @@ describe('compose_product_kit, update_product_kit and update_component_registry 
 	it('refuses on a Workspace below schemaVersion 5 with workspace.migration_required, over HTTP and MCP', async () => {
 		const root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-product-kit-legacy-')))
 		roots.push(root)
-		await writeManifest(root, currentManifest())
+		await writeManifest(root, { ...currentManifest(), schemaVersion: 4, adapters: [] }, LEGACY_LAYOUT)
 		const app = createWorkspaceApplicationSession(new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }))
 		const refused = await composeProductKitForHttp(http(app, HUMAN_EDITOR), { expectedRevision: 'sha256:x', designSystems: [], adapters: [] })
 		expect(refused).toMatchObject({ status: 422, body: { status: 'blocked', code: 'workspace.migration_required' } })

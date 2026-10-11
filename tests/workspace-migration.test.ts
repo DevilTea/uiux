@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
 import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { hostname, tmpdir } from 'node:os'
 import { dirname, join, relative, sep } from 'node:path'
@@ -22,10 +23,12 @@ import {
 	WORKSPACE_V2_TO_V3_STEP_ID,
 	WORKSPACE_V3_TO_V4_STEP,
 	WORKSPACE_V3_TO_V4_STEP_ID,
+	WORKSPACE_V4_TO_V5_STEP_ID,
 } from '../src/product/workspace-schema'
 import { hostHistoryPaths } from '../src/server/access/store'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
-import { CURRENT_TEST_LAYOUT } from './support/workspace-layout'
+import { LEGACY_LAYOUT } from '../src/persistence/paths'
+import { CURRENT_TEST_LAYOUT, V4_TEST_SCHEMA_POLICY } from './support/workspace-layout'
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('..', import.meta.url))
 const CLI = join(REPOSITORY_ROOT, 'bin', 'uiux.mjs')
@@ -104,6 +107,9 @@ async function snapshotTree(root: string): Promise<Record<string, string>> {
 }
 
 const DOGFOOD_ROOT = join(REPOSITORY_ROOT, 'design')
+/** True while the dogfood is the schemaVersion 4 old-layout Workspace in design/, before the owner relocates it (D1). */
+const OLD_DOGFOOD = existsSync(join(DOGFOOD_ROOT, ...LEGACY_LAYOUT.manifestPath.split('/')))
+	&& (JSON.parse(readFileSync(join(DOGFOOD_ROOT, ...LEGACY_LAYOUT.manifestPath.split('/')), 'utf8')) as { schemaVersion?: unknown }).schemaVersion === 4
 const DOGFOOD_ARTIFACT_SHARDS = join(DOGFOOD_ROOT, WORKSPACE_ARTIFACTS_DIRECTORY, 'sha256')
 
 /**
@@ -136,25 +142,31 @@ async function snapshotFiles(root: string): Promise<Record<string, string>> {
 	return files
 }
 
-describe('product Workspace schema policy v4', () => {
-	it('makes schemaVersion 4 current, recognizes 1 to 3, and ships the uiux.v1-to-v2, uiux.v2-to-v3 and uiux.v3-to-v4 steps', async () => {
+/**
+ * The steps from 1 to 4 keep the old layout, so beyond the version facts these runs use a build where
+ * schemaVersion 4 is current (`V4_TEST_SCHEMA_POLICY`); `uiux.v4-to-v5` is covered by
+ * `workspace-relocation.test.ts` and, on the dogfood, `dogfood-relocate.test.ts`.
+ */
+describe('product Workspace schema policy', () => {
+	it('makes schemaVersion 5 current, recognizes 1 to 4, and ships the uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4 and uiux.v4-to-v5 steps', async () => {
 		const packageJson = JSON.parse(await readFile(join(REPOSITORY_ROOT, 'package.json'), 'utf8')) as { uiuxWorkspaceSchemaVersion: number }
-		expect(packageJson.uiuxWorkspaceSchemaVersion).toBe(4)
-		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(4)
-		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.currentVersion).toBe(4)
-		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.recognizedVersions).toEqual([1, 2, 3, 4])
+		expect(packageJson.uiuxWorkspaceSchemaVersion).toBe(5)
+		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(5)
+		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.currentVersion).toBe(5)
+		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.recognizedVersions).toEqual([1, 2, 3, 4, 5])
 		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.steps.map(step => [step.id, step.fromVersion, step.toVersion]))
-			.toEqual([[WORKSPACE_V1_TO_V2_STEP_ID, 1, 2], [WORKSPACE_V2_TO_V3_STEP_ID, 2, 3], [WORKSPACE_V3_TO_V4_STEP_ID, 3, 4]])
+			.toEqual([[WORKSPACE_V1_TO_V2_STEP_ID, 1, 2], [WORKSPACE_V2_TO_V3_STEP_ID, 2, 3], [WORKSPACE_V3_TO_V4_STEP_ID, 3, 4], [WORKSPACE_V4_TO_V5_STEP_ID, 4, 5]])
 		expect(WORKSPACE_V1_TO_V2_STEP_ID).toBe('uiux.v1-to-v2')
 		expect(WORKSPACE_V2_TO_V3_STEP_ID).toBe('uiux.v2-to-v3')
 		expect(WORKSPACE_V3_TO_V4_STEP_ID).toBe('uiux.v3-to-v4')
+		expect(WORKSPACE_V4_TO_V5_STEP_ID).toBe('uiux.v4-to-v5')
 	})
 
 	it('opens a v1 Workspace as migration_required: readable, v1-decoded, and every Review mutation blocked', async () => {
 		const root = await seedV1Workspace()
 		const before = await snapshotFiles(root)
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
-		expect((await persistence.inspectWorkspace()).inspection).toMatchObject({ state: 'migration_required', version: 1, targetVersion: CURRENT_WORKSPACE_SCHEMA_VERSION })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })
+		expect((await persistence.inspectWorkspace()).inspection).toMatchObject({ state: 'migration_required', version: 1, targetVersion: V4_TEST_SCHEMA_POLICY.currentVersion })
 		const read = await persistence.reviews.readInspected(RESOLVED_REVIEW_ID)
 		expect(read?.diagnostics).toEqual([])
 
@@ -173,7 +185,7 @@ describe('product Workspace schema policy v4', () => {
 	it('plans a dry run in memory without writing anything', async () => {
 		const root = await seedV1Workspace()
 		const before = await snapshotFiles(root)
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })
 		const plan = await persistence.planWorkspaceMigration()
 		expect(plan).toMatchObject({ fromVersion: 1, version: 4, steps: ['uiux.v1-to-v2', 'uiux.v2-to-v3', 'uiux.v3-to-v4'] })
 		expect(plan.changedFiles).toEqual(['.uiux/workspace.json', reviewRelativePath(RESOLVED_REVIEW_ID)])
@@ -185,12 +197,12 @@ describe('product Workspace schema policy v4', () => {
 	it('migrates v1 fixtures: bumps the manifest, backfills verified on v1 resolves only, and leaves other files byte-identical', async () => {
 		const root = await seedV1Workspace()
 		const before = await snapshotFiles(root)
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })
 		const result = await persistence.migrateWorkspace()
 		expect(result).toMatchObject({ fromVersion: 1, version: 4, steps: ['uiux.v1-to-v2', 'uiux.v2-to-v3', 'uiux.v3-to-v4'] })
 		expect(result.changedFiles).toEqual(['.uiux/workspace.json', reviewRelativePath(RESOLVED_REVIEW_ID)])
 		const after = await snapshotFiles(root)
-		expect(JSON.parse(after[workspaceRelativePath()]!)).toEqual({ ...v1Manifest, schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION })
+		expect(JSON.parse(after[workspaceRelativePath()]!)).toEqual({ ...v1Manifest, schemaVersion: V4_TEST_SCHEMA_POLICY.currentVersion })
 		expect(result.revision).toBe((await persistence.workspace.read('workspace'))?.revision)
 
 		const migrated = JSON.parse(after[reviewRelativePath(RESOLVED_REVIEW_ID)]!) as ReturnType<typeof v1ResolvedReview>
@@ -211,15 +223,15 @@ describe('product Workspace schema policy v4', () => {
 	it('is deterministic and idempotent', async () => {
 		const first = await seedV1Workspace()
 		const second = await seedV1Workspace()
-		const a = await new FileNativePersistence({ root: first, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).migrateWorkspace()
-		const b = await new FileNativePersistence({ root: second, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).migrateWorkspace()
+		const a = await new FileNativePersistence({ root: first, schemaPolicy: V4_TEST_SCHEMA_POLICY }).migrateWorkspace()
+		const b = await new FileNativePersistence({ root: second, schemaPolicy: V4_TEST_SCHEMA_POLICY }).migrateWorkspace()
 		expect(a.revision).toBe(b.revision)
 		expect(await snapshotFiles(first)).toEqual(await snapshotFiles(second))
 
-		const persistence = new FileNativePersistence({ root: first, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root: first, schemaPolicy: V4_TEST_SCHEMA_POLICY })
 		const settled = await snapshotFiles(first)
-		expect(await persistence.planWorkspaceMigration()).toMatchObject({ fromVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, version: CURRENT_WORKSPACE_SCHEMA_VERSION, steps: [], changedFiles: [] })
-		expect(await persistence.migrateWorkspace()).toMatchObject({ version: CURRENT_WORKSPACE_SCHEMA_VERSION, steps: [], changedFiles: [], revision: a.revision })
+		expect(await persistence.planWorkspaceMigration()).toMatchObject({ fromVersion: V4_TEST_SCHEMA_POLICY.currentVersion, version: V4_TEST_SCHEMA_POLICY.currentVersion, steps: [], changedFiles: [] })
+		expect(await persistence.migrateWorkspace()).toMatchObject({ version: V4_TEST_SCHEMA_POLICY.currentVersion, steps: [], changedFiles: [], revision: a.revision })
 		expect(await snapshotFiles(first)).toEqual(settled)
 
 		// Applying the step to its own output is refused rather than silently re-applied.
@@ -233,7 +245,7 @@ describe('product Workspace schema policy v4', () => {
 		const root = await seedV1Workspace()
 		const broken = { ...v1ResolvedReview(), history: [v1ResolvedReview().history[0]!, { ...v1ResolvedReview().history[1]!, actor: { type: 'agent' } }] }
 		await writeFile(join(root, reviewRelativePath(RESOLVED_REVIEW_ID)), `${JSON.stringify(broken)}\n`)
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })
 		expect((await persistence.reviews.readInspected(RESOLVED_REVIEW_ID))?.diagnostics.map(item => item.code)).toEqual(['review.resolve_requires_human'])
 		await persistence.migrateWorkspace()
 		expect((await persistence.reviews.readInspected(RESOLVED_REVIEW_ID))?.diagnostics.map(item => item.code)).toEqual(['review.resolve_requires_human'])
@@ -243,7 +255,7 @@ describe('product Workspace schema policy v4', () => {
 		const root = await seedV1Workspace()
 		const before = await snapshotFiles(root)
 		await writeFile(join(root, 'reviews', '66666666-6666-4666-8666-666666666666.review.json'), '{ not json')
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })
 		await expect(persistence.planWorkspaceMigration()).rejects.toMatchObject({ code: 'persistence.invalid_json' })
 		await expect(persistence.migrateWorkspace()).rejects.toMatchObject({ code: 'persistence.invalid_json' })
 		expect(await snapshotFiles(root)).toEqual(before)
@@ -253,13 +265,15 @@ describe('product Workspace schema policy v4', () => {
 describe('uiux migrate CLI', () => {
 	it('lists migrate in honest help text and validates its arguments', () => {
 		const help = execFileSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' })
-		expect(help).toContain('migrate --workspace <dir> [--dry-run]')
-		expect(help).toMatch(/a real run first writes the Checkpoint "Before migration to\s+schemaVersion 4"/u)
-		expect(help).toMatch(/--dry-run prints the steps and changed\s+files without writing anything/u)
-		for (const args of [['migrate'], ['migrate', '--workspace'], ['migrate', '--dry-run'], ['migrate', '--workspace', '.', 'extra'], ['migrate', '--workspace', '.', '--dry-run', '--dry-run']]) {
-			const result = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8' })
+		expect(help).toContain('migrate [--workspace <dir>] [--dry-run]')
+		expect(help).toMatch(/a real run first writes the Checkpoint "Before\s+migration to schemaVersion 5"/u)
+		expect(help).toMatch(/--dry-run prints the steps\s+and changed files without writing anything/u)
+		// Outside the repository, so nothing past the usage check could discover the dogfood.
+		const cwd = tmpdir()
+		for (const args of [['migrate', '--workspace'], ['migrate', '--workspace', '.', 'extra'], ['migrate', '--workspace', '.', '--dry-run', '--dry-run']]) {
+			const result = spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: 'utf8' })
 			expect(result.status).toBe(2)
-			expect(result.stderr).toContain('uiux: migrate requires --workspace <dir> and accepts --dry-run.')
+			expect(result.stderr).toContain('uiux: migrate accepts --workspace <dir> and --dry-run.')
 		}
 		const missing = spawnSync(process.execPath, [CLI, 'migrate', '--workspace', join(tmpdir(), 'uiux-definitely-missing-workspace')], { encoding: 'utf8' })
 		expect(missing.status).toBe(2)
@@ -271,7 +285,7 @@ describe('uiux migrate CLI', () => {
 		roots.push(parent)
 		const root = join(parent, 'design')
 		execFileSync(process.execPath, [CLI, 'init', '--workspace', root], { encoding: 'utf8' })
-		expect(JSON.parse(await readFile(join(root, workspaceRelativePath()), 'utf8')).schemaVersion).toBe(CURRENT_WORKSPACE_SCHEMA_VERSION)
+		expect(JSON.parse(await readFile(join(root, CURRENT_TEST_LAYOUT.manifestPath), 'utf8')).schemaVersion).toBe(CURRENT_WORKSPACE_SCHEMA_VERSION)
 		expect((await new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).inspectWorkspace()).inspection.state).toBe('current')
 		const migrate = spawnSync(process.execPath, [CLI, 'migrate', '--workspace', root, '--dry-run'], { encoding: 'utf8' })
 		expect(migrate.status).toBe(0)
@@ -284,17 +298,19 @@ describe('uiux migrate CLI', () => {
 		const dryRun = spawnSync(process.execPath, [CLI, 'migrate', '--dry-run', '--workspace', root], { encoding: 'utf8' })
 		expect(dryRun.status).toBe(0)
 		expect(dryRun.stdout).toContain('dry run, nothing written')
-		expect(dryRun.stdout).toContain('schemaVersion: 1 -> 4')
-		expect(dryRun.stdout).toContain('steps: uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4')
-		expect(dryRun.stdout).toContain(`    ${reviewRelativePath(RESOLVED_REVIEW_ID)}`)
+		expect(dryRun.stdout).toContain('schemaVersion: 1 -> 5')
+		expect(dryRun.stdout).toContain('steps: uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4, uiux.v4-to-v5')
+		expect(dryRun.stdout).toContain(`new Workspace root (after a real run): ${join(root, '.uiux')}`)
+		// Relocated files are named by their path from the old root.
+		expect(dryRun.stdout).toContain(`    .uiux/${reviewRelativePath(RESOLVED_REVIEW_ID)}`)
 		expect(dryRun.stdout).not.toContain('manifest revision')
 		expect(await snapshotFiles(root)).toEqual(before)
 
 		const real = spawnSync(process.execPath, [CLI, 'migrate', '--workspace', root], { encoding: 'utf8' })
 		expect(real.status).toBe(0)
 		expect(real.stdout).toContain(`Migrated UIUX Workspace ${root}`)
-		expect(real.stdout).toContain('changedFiles (2):')
-		const revision = (await new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).workspace.read('workspace'))?.revision
+		expect(real.stdout).toContain(`new Workspace root: ${join(root, '.uiux')}`)
+		const revision = (await new FileNativePersistence({ root: join(root, '.uiux'), schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).workspace.read('workspace'))?.revision
 		expect(real.stdout).toContain(`manifest revision: ${revision}`)
 
 		const again = spawnSync(process.execPath, [CLI, 'migrate', '--workspace', root], { encoding: 'utf8' })
@@ -305,9 +321,10 @@ describe('uiux migrate CLI', () => {
 	it('refuses the real run while a live UIUX server holds the Workspace, and ignores a stale hold', async () => {
 		const root = await seedV1Workspace()
 		const before = await snapshotFiles(root)
-		const hold = await acquireServerHold(root, { layout: CURRENT_TEST_LAYOUT })
+		// The v1 Workspace is in the old layout, so its server hold is in .uiux/.
+		const hold = await acquireServerHold(root, { layout: LEGACY_LAYOUT })
 		expect(hold).toBeDefined()
-		expect(await readActiveServerHold(root, CURRENT_TEST_LAYOUT)).toMatchObject({ pid: process.pid })
+		expect(await readActiveServerHold(root, LEGACY_LAYOUT)).toMatchObject({ pid: process.pid })
 		const lines: string[] = []
 		const refused = await runMigrateCommand({ workspaceRoot: root, dryRun: false, stdout: line => lines.push(line), stderr: line => lines.push(line) })
 		expect(refused).toBe(1)
@@ -318,17 +335,17 @@ describe('uiux migrate CLI', () => {
 		expect(await runMigrateCommand({ workspaceRoot: root, dryRun: true, stdout: line => lines.push(line), stderr: line => lines.push(line) })).toBe(0)
 		expect(lines.join('\n')).toContain('stop it before the real run')
 		await hold!.release()
-		expect(await readActiveServerHold(root, CURRENT_TEST_LAYOUT)).toBeUndefined()
+		expect(await readActiveServerHold(root, LEGACY_LAYOUT)).toBeUndefined()
 
 		await writeFile(join(root, SERVER_HOLD_RELATIVE_PATH), JSON.stringify({ pid: 2_000_000_000, hostname: hostname(), startedAt: TIME, token: 'stale' }))
-		expect(await readActiveServerHold(root, CURRENT_TEST_LAYOUT)).toBeUndefined()
+		expect(await readActiveServerHold(root, LEGACY_LAYOUT)).toBeUndefined()
 		expect(await runMigrateCommand({ workspaceRoot: root, dryRun: false, stdout: () => undefined, stderr: () => undefined })).toBe(0)
-		expect((await new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).inspectWorkspace()).inspection.state).toBe('current')
+		expect((await new FileNativePersistence({ root: join(root, '.uiux'), schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).inspectWorkspace()).inspection.state).toBe('current')
 	})
 
-	it('finds nothing to migrate in a copy of the current dogfood Workspace, whose Reviews all read without diagnostics', async () => {
+	it.skipIf(!OLD_DOGFOOD)('finds nothing to migrate in a copy of the schemaVersion 4 dogfood under a build where 4 is current, and its Reviews all read without diagnostics', async () => {
 		const root = await copyDogfoodWorkspace('uiux-dogfood-migration-')
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })
 		const result = await persistence.migrateWorkspace()
 		expect(result).toMatchObject({ fromVersion: 4, version: 4, steps: [], changedFiles: [] })
 		expect((await persistence.inspectWorkspace()).inspection.state).toBe('current')
@@ -338,7 +355,13 @@ describe('uiux migrate CLI', () => {
 
 	// Three real CLI runs (each bundles the command with esbuild in a fresh Node process) plus an
 	// fsynced migration transaction: about 0.6 s alone, close to 4 s under CPU and I/O load.
-	it('replays the dogfood uiux.v3-to-v4 migration through the CLI: one step, only the manifest changes, a pre-migration Checkpoint and a system version are recorded, re-runs are no-ops', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, async () => {
+	it.skipIf(!OLD_DOGFOOD)('replays the dogfood uiux.v3-to-v4 migration through uiux migrate under a build where 4 is current: one step, only the manifest changes, a pre-migration Checkpoint and a system version are recorded, re-runs are no-ops', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, async () => {
+		/** `uiux migrate` with the v4 build's policy, as the CLI runs it; its output joined like the CLI's stdout. */
+		const migrateV4 = async (args: Readonly<{ dryRun: boolean; home?: string }>) => {
+			const stdout: string[] = []
+			const code = await runMigrateCommand({ workspaceRoot: root, dryRun: args.dryRun, schemaPolicy: V4_TEST_SCHEMA_POLICY, home: args.home ?? join(tmpdir(), 'uiux-never-created-home'), stdout: line => stdout.push(line), stderr: line => stdout.push(line) })
+			return { status: code, stdout: `${stdout.join('\n')}\n` }
+		}
 		const root = await copyDogfoodWorkspace('uiux-dogfood-v3-to-v4-')
 		// The committed dogfood Workspace was migrated by this step; restore its v3 manifest in the copy.
 		const manifestPath = join(root, workspaceRelativePath())
@@ -347,7 +370,7 @@ describe('uiux migrate CLI', () => {
 		const before = await snapshotTree(root)
 		expect(Object.keys(before).filter(path => path.startsWith(`${WORKSPACE_ARTIFACTS_DIRECTORY}/`))).toHaveLength(1)
 
-		const dryRun = spawnSync(process.execPath, [CLI, 'migrate', '--workspace', root, '--dry-run'], { encoding: 'utf8' })
+		const dryRun = await migrateV4({ dryRun: true })
 		expect(dryRun.status).toBe(0)
 		expect(dryRun.stdout).toContain('schemaVersion: 3 -> 4')
 		expect(dryRun.stdout).toContain(`steps: ${WORKSPACE_V3_TO_V4_STEP_ID}\n`)
@@ -357,11 +380,11 @@ describe('uiux migrate CLI', () => {
 		// Its own UIUX_HOME, so the host history the real run records can be inspected (and nothing else shares it).
 		const home = join(await mkdtemp(join(tmpdir(), 'uiux-dogfood-v3-to-v4-home-')), 'home')
 		roots.push(dirname(home))
-		expect(spawnSync(process.execPath, [CLI, 'migrate', '--workspace', root, '--dry-run'], { encoding: 'utf8', env: { ...process.env, UIUX_HOME: home } }).status).toBe(0)
+		expect((await migrateV4({ dryRun: true, home })).status).toBe(0)
 		expect(await snapshotTree(root)).toEqual(before)
 		expect(await readdir(home).catch(() => undefined)).toBeUndefined()
 
-		const real = spawnSync(process.execPath, [CLI, 'migrate', '--workspace', root], { encoding: 'utf8', env: { ...process.env, UIUX_HOME: home } })
+		const real = await migrateV4({ dryRun: false, home })
 		expect(real.status).toBe(0)
 		const after = await snapshotTree(root)
 		// Besides the manifest, the run adds only the pre-migration Checkpoint and the blobs it names.
@@ -380,12 +403,12 @@ describe('uiux migrate CLI', () => {
 		expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toEqual({ ...current, schemaVersion: 4 })
 		expect(await readFile(manifestPath, 'utf8')).toBe(await readFile(join(REPOSITORY_ROOT, 'design', workspaceRelativePath()), 'utf8'))
 
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })
 		expect((await persistence.inspectWorkspace()).inspection).toMatchObject({ state: 'current', version: 4 })
 		for (const key of await persistence.reviews.discoverKeys())
 			expect((await persistence.reviews.readInspected(key))?.diagnostics).toEqual([])
 
-		const again = spawnSync(process.execPath, [CLI, 'migrate', '--workspace', root], { encoding: 'utf8', env: { ...process.env, UIUX_HOME: home } })
+		const again = await migrateV4({ dryRun: false, home })
 		expect(again.status).toBe(0)
 		expect(again.stdout).toContain('is already at schemaVersion 4; nothing to migrate.')
 		expect(await snapshotTree(root)).toEqual(after)

@@ -17,7 +17,15 @@ import {
 } from '../src/domain/reviews/schema'
 import { FileNativePersistence } from '../src/persistence/file-native'
 import { reviewRelativePath, viewRelativePath, workspaceRelativePath } from '../src/persistence/paths'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY, WORKSPACE_V2_TO_V3_STEP } from '../src/product/workspace-schema'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY, WORKSPACE_V2_TO_V3_STEP } from '../src/product/workspace-schema'
+import { V4_TEST_SCHEMA_POLICY } from './support/workspace-layout'
+
+/**
+ * The manifest-only steps are exercised under a build where schemaVersion 4 is current, so their
+ * result stays in the old layout; `uiux.v4-to-v5` is covered by `workspace-relocation.test.ts`.
+ */
+const V4_POLICY = V4_TEST_SCHEMA_POLICY
+const CURRENT_WORKSPACE_SCHEMA_VERSION = V4_POLICY.currentVersion
 
 /**
  * Accepted decision group "Workspace-scoped Review threads and editable Review messages" (Part 7):
@@ -299,7 +307,7 @@ async function snapshot(root: string): Promise<Record<string, string>> {
 describe('uiux.v2-to-v3 (manifest-only step)', () => {
 	it('opens a v2 Workspace as migration_required and blocks every Review mutation, including the new ones', async () => {
 		const root = await seedV2Workspace()
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_POLICY })
 		expect((await persistence.inspectWorkspace()).inspection).toMatchObject({ state: 'migration_required', version: 2, targetVersion: CURRENT_WORKSPACE_SCHEMA_VERSION })
 		expect((await persistence.reviews.readInspected(REVIEW_ID))?.diagnostics).toEqual([])
 		const { createWorkspaceApplicationSession } = await import('../src/application/services/workspace-session')
@@ -315,7 +323,7 @@ describe('uiux.v2-to-v3 (manifest-only step)', () => {
 	it('plans a dry run that changes only the manifest and writes nothing', async () => {
 		const root = await seedV2Workspace()
 		const before = await snapshot(root)
-		const plan = await new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).planWorkspaceMigration()
+		const plan = await new FileNativePersistence({ root, schemaPolicy: V4_POLICY }).planWorkspaceMigration()
 		expect(plan).toMatchObject({ fromVersion: 2, version: 4, steps: ['uiux.v2-to-v3', 'uiux.v3-to-v4'], changedFiles: ['.uiux/workspace.json'] })
 		expect(await snapshot(root)).toEqual(before)
 	})
@@ -323,7 +331,7 @@ describe('uiux.v2-to-v3 (manifest-only step)', () => {
 	it('bumps only the manifest, leaves every Review byte-identical, and is idempotent', async () => {
 		const root = await seedV2Workspace()
 		const before = await snapshot(root)
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_POLICY })
 		const result = await persistence.migrateWorkspace()
 		expect(result).toMatchObject({ fromVersion: 2, version: 4, steps: ['uiux.v2-to-v3', 'uiux.v3-to-v4'], changedFiles: ['.uiux/workspace.json'] })
 		const after = await snapshot(root)
@@ -333,13 +341,13 @@ describe('uiux.v2-to-v3 (manifest-only step)', () => {
 		expect(await persistence.migrateWorkspace()).toMatchObject({ version: CURRENT_WORKSPACE_SCHEMA_VERSION, steps: [], changedFiles: [], revision: result.revision })
 		expect(await snapshot(root)).toEqual(after)
 		const second = await seedV2Workspace()
-		expect((await new FileNativePersistence({ root: second, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).migrateWorkspace()).revision).toBe(result.revision)
+		expect((await new FileNativePersistence({ root: second, schemaPolicy: V4_POLICY }).migrateWorkspace()).revision).toBe(result.revision)
 	})
 
 	it('never repairs v3-only content smuggled into a v2 file, and carries the v2 diagnostics through', async () => {
 		const smuggled = { ...v2Review, id: '77777777-7777-4777-8777-777777777777', anchor: { scope: 'workspace' }, displayHint: undefined, messages: [{ ...v2Review.messages[0], edits: [{ id: EDIT_ID, actor: AUTHOR, at: T1, previousBody: 'x' }] }] }
 		const root = await seedV2Workspace([v2Review, smuggled])
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_POLICY })
 		expect((await persistence.reviews.readInspected(smuggled.id))?.diagnostics.map(item => item.code)).toContain('schema.unknown_field')
 		const bytes = await readFile(join(root, reviewRelativePath(smuggled.id)), 'utf8')
 		const result = await persistence.migrateWorkspace()
@@ -361,16 +369,18 @@ describe('uiux.v2-to-v3 (manifest-only step)', () => {
 	it('runs through the CLI: dry run first, then the real run, then already current', async () => {
 		const root = await seedV2Workspace()
 		const before = await snapshot(root)
+		// The product build chains on to uiux.v4-to-v5, which moves the Workspace into root/.uiux/.
 		const dryRun = spawnSync(process.execPath, [CLI, 'migrate', '--workspace', root, '--dry-run'], { encoding: 'utf8' })
 		expect(dryRun.status).toBe(0)
-		expect(dryRun.stdout).toContain('schemaVersion: 2 -> 4')
-		expect(dryRun.stdout).toContain('steps: uiux.v2-to-v3, uiux.v3-to-v4')
-		expect(dryRun.stdout).toContain('changedFiles (1):')
+		expect(dryRun.stdout).toContain(`schemaVersion: 2 -> ${PRODUCT_WORKSPACE_SCHEMA_POLICY.currentVersion}`)
+		expect(dryRun.stdout).toContain('steps: uiux.v2-to-v3, uiux.v3-to-v4, uiux.v4-to-v5')
 		expect(await snapshot(root)).toEqual(before)
 		const real = spawnSync(process.execPath, [CLI, 'migrate', '--workspace', root], { encoding: 'utf8' })
-		expect(real.status).toBe(0)
+		expect(real.status, real.stderr).toBe(0)
 		expect(real.stdout).toContain('manifest revision:')
+		expect(real.stdout).toContain(`new Workspace root: ${join(root, '.uiux')}`)
+		// --workspace <old root> now names the directory whose .uiux/ child is the Workspace.
 		const again = spawnSync(process.execPath, [CLI, 'migrate', '--workspace', root], { encoding: 'utf8' })
-		expect(again.stdout).toContain(`already at schemaVersion ${CURRENT_WORKSPACE_SCHEMA_VERSION}`)
+		expect(again.stdout).toContain(`already at schemaVersion ${PRODUCT_WORKSPACE_SCHEMA_POLICY.currentVersion}`)
 	})
 })

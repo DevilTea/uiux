@@ -33,7 +33,7 @@ import { canonicalJsonBytes } from '../src/domain/canonical-json'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import type { ReviewThread } from '../src/domain/reviews/schema'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
-import { writeManifest } from './support/workspace-layout'
+import { writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
 
 const temporaryRoots: string[] = []
 const runningServers: ChildProcess[] = []
@@ -110,8 +110,7 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 	await symlink(widgetVuePath, join(root, 'node_modules', '@deviltea', 'widget-vue')).catch(() => undefined)
 	await symlink(vuePath, join(root, 'node_modules', 'vue')).catch(() => undefined)
 
-	await writeManifest(root, JSON.stringify({
-		schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
+	await writeCurrentWorkspace(root, {
 		i18n: { defaultLocale: 'en-US' },
 		adapters,
 		viewports: {
@@ -120,7 +119,7 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 		themes: {
 			light: { label: 'Light' },
 		},
-	}))
+	})
 
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 	await persistence.locales.create('en-US', { 'app.title': 'UIUX Workspace' })
@@ -301,8 +300,8 @@ async function putFormalEvidence(
 describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('proves deterministic closure identity: same roots and content produce identical bundleIdentity across invocations', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		const view = createSampleView(VIEW_1_ID, 'View One')
 		const viewRev = await persistence.views.create(VIEW_1_ID, view)
@@ -359,8 +358,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 
 	it('changes bundle identity when canonical content or revision changes', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		const view = createSampleView(VIEW_1_ID, 'View One')
 		const viewRev = await persistence.views.create(VIEW_1_ID, view)
@@ -394,8 +393,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 
 	it('ensures closure isolation: unrelated invalid resource outside closure does not block export or readiness', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		// Create valid VIEW_1
 		const view1 = createSampleView(VIEW_1_ID, 'Valid View')
@@ -429,8 +428,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 
 	it('blocks implementation-ready when review threads are unresolved, while still exporting coherent snapshot', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		const view1 = createSampleView(VIEW_1_ID, 'View With Open Review')
 		const viewRev1 = await persistence.views.create(VIEW_1_ID, view1)
@@ -485,8 +484,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 
 	it('reports per-resolution review counts, never blocks on closed threads, and flags wont-fix as advisory only', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 		const viewRev = await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'View With Closed Reviews'))
 		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
 
@@ -559,8 +558,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 
 	it('blocks implementation-ready when formal evidence is missing or incomplete', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		const view1 = createSampleView(VIEW_1_ID, 'View Without Evidence')
 		const viewRev = await persistence.views.create(VIEW_1_ID, view1)
@@ -585,8 +584,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 
 	it('computes transitive closure from Flow root to target Views, referenced Assets, Locales, and Adapters', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		// Create Asset
 		const assetData = createSampleAsset(ASSET_1_ID)
@@ -635,8 +634,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 
 	it('includes authored Assets referenced only through Adapter Catalog assetFields in View IR', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		const assetData = createSampleAsset(ASSET_1_ID)
 		await persistence.assets.create(ASSET_1_ID, assetData)
@@ -677,8 +676,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 	})
 	it('materializes widget implementation references and flags unavailable widget types', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		// View using both Counter and an unregistered UnknownWidget
 		const view: ViewResource = {
@@ -742,8 +741,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 
 	it('deduplicates content-addressed artifacts when multiple views share the same asset', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		// Create shared asset
 		const assetData = createSampleAsset(ASSET_1_ID)
@@ -785,8 +784,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 
 	it('consumer fixture: standalone downstream consumer validates manifest and resolves all snapshots and artifacts offline', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		const assetData = createSampleAsset(ASSET_1_ID)
 		await persistence.assets.create(ASSET_1_ID, assetData)
@@ -866,8 +865,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 
 	it('exposes handoff readiness assessment and export via MCP tools and HTTP endpoints', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		const view = createSampleView(VIEW_1_ID, 'HTTP Test View')
 		const viewRev = await persistence.views.create(VIEW_1_ID, view)
@@ -954,8 +953,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 
 	it('materializes RootShell source snapshot with real bytes matching root-shell.ts and verifies digest', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		const view = createSampleView(VIEW_1_ID, 'RootShell View')
 		const viewRev = await persistence.views.create(VIEW_1_ID, view)
@@ -987,8 +986,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 
 	it('excludes stale evidence from readiness and export when View revision changes (r1 -> r2 regression)', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		const view = createSampleView(VIEW_1_ID, 'Revision Test View')
 		const r1 = await persistence.views.create(VIEW_1_ID, view)
@@ -1109,9 +1108,9 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 			{ moduleSpecifier: './adapters/counter.mjs' },
 			{ moduleSpecifier: './adapters/broken.mjs' },
 		])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
-		await writeFile(join(root, 'adapters', 'broken.mjs'), 'export const broken = syntax error !@#$;')
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await writeFile(join(root, 'kit', 'adapters', 'broken.mjs'), 'export const broken = syntax error !@#$;')
 
 		const view = createSampleView(VIEW_1_ID, 'Counter View')
 		const viewRev = await persistence.views.create(VIEW_1_ID, view)
@@ -1138,8 +1137,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 
 	it('proves end-to-end integration: real Playwright formal capture output directly satisfies handoff readiness and export', { timeout: 30_000 }, async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
-		await mkdir(join(root, 'adapters'), { recursive: true })
-		await writeFile(join(root, 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
 
 		const view = createSampleView(VIEW_1_ID, 'Real Capture Handoff View')
 		await persistence.views.create(VIEW_1_ID, view)
