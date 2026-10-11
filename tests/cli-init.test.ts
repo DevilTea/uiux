@@ -114,6 +114,41 @@ describe('uiux init', () => {
 		expect(await readFile(join(root, '.gitignore'), 'utf8')).toBe(`# mine\n${WORKSPACE_GITIGNORE_RULES.join('\n')}\n`)
 	})
 
+	it('refuses a .gitignore that is not a regular file before writing anything', async () => {
+		const cwd = await makeDirectory()
+		const root = join(cwd, 'ws')
+		await mkdir(join(root, '.gitignore'), { recursive: true })
+		const run = capture()
+		expect(await runInitCommand({ cwd, workspace: 'ws', ...run.options })).toBe(2)
+		expect(run.stderr.join('\n')).toContain('.gitignore is not a regular file')
+		expect(await readdir(root)).toEqual(['.gitignore'])
+	})
+
+	// Owner ruling 2 of https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18870730
+	// (Clause 01a1144e-5649-7ba2-bb90-ad49658f0400).
+	it('refuses a directory that is UIUX_HOME, lies inside it or contains it, and creates nothing', async () => {
+		const cwd = await makeDirectory()
+		const home = join(cwd, 'host', 'uiux-home')
+		await mkdir(home, { recursive: true })
+		for (const [workspace, created] of [[home, home], [join(home, 'ws'), join(home, 'ws')], [join(cwd, 'host'), join(cwd, 'host')]] as const) {
+			const run = capture()
+			expect(await runInitCommand({ cwd, workspace, env: { UIUX_HOME: home }, ...run.options })).toBe(2)
+			expect(run.stderr.join('\n')).toContain(`overlaps UIUX_HOME (${home})`)
+			expect(run.stderr.join('\n')).toContain('--workspace <dir>, or set UIUX_HOME')
+			expect(await readdir(created).catch(() => 'absent')).toEqual(created === join(home, 'ws') ? 'absent' : created === home ? [] : ['uiux-home'])
+		}
+
+		// The default location: `uiux init` in the home directory would create ~/.uiux, the default UIUX_HOME.
+		const user = join(cwd, 'user')
+		await mkdir(user)
+		const run = capture()
+		expect(await runInitCommand({ cwd: user, gitToplevel: () => undefined, env: { UIUX_HOME: join(user, '.uiux') }, ...run.options })).toBe(2)
+		expect(await readdir(user)).toEqual([])
+
+		// A sibling of UIUX_HOME is fine.
+		expect(await runInitCommand({ cwd, workspace: join(cwd, 'host', 'ws'), env: { UIUX_HOME: home }, ...capture().options })).toBe(0)
+	})
+
 	it('refuses a --workspace that is a file', async () => {
 		const cwd = await makeDirectory()
 		await writeFile(join(cwd, 'file'), '')

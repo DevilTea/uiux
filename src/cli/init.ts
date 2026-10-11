@@ -5,6 +5,7 @@ import { basename, join, resolve } from 'node:path'
 import { emptyProductKit } from '../domain/product-kit/schema'
 import { LEGACY_LAYOUT, V5_LAYOUT } from '../persistence/paths'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, WORKSPACE_GITIGNORE_RULES } from '../product/workspace-schema'
+import { isSameOrInside, realFuturePath, resolveUiuxHome } from '../server/access/store'
 
 export type InitCommandOptions = Readonly<{
 	/** `--workspace <dir>` as given; omitted, the default location is used. */
@@ -14,6 +15,8 @@ export type InitCommandOptions = Readonly<{
 	stderr?: (line: string) => void
 	/** Test seam: the Git toplevel of `cwd`, or `undefined` outside a Git repository. */
 	gitToplevel?: (cwd: string) => string | undefined
+	/** The environment that names `UIUX_HOME`; `process.env` by default. */
+	env?: Readonly<Record<string, string | undefined>>
 }>
 
 /**
@@ -27,7 +30,10 @@ export type InitCommandOptions = Readonly<{
  * leaves a directory that looks initialized.
  *
  * It refuses, changing nothing, a directory whose manifest already exists, including an old-layout
- * Workspace root whose manifest is in `.uiux/`. Returns 0 on success, 2 when refused.
+ * Workspace root whose manifest is in `.uiux/`, and a directory that is `UIUX_HOME`, lies inside it
+ * or contains it, by real path (Clause 01a1144e-5649-7ba2-bb90-ad49658f0400, owner ruling 2 of
+ * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18870730). Every check runs
+ * before the first write. Returns 0 on success, 2 when refused.
  */
 export async function runInitCommand(options: InitCommandOptions = {}): Promise<number> {
 	const out = options.stdout ?? (line => console.log(line))
@@ -37,28 +43,48 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 		? join((options.gitToplevel ?? gitToplevel)(cwd) ?? cwd, LEGACY_LAYOUT.metadataDir)
 		: resolve(cwd, options.workspace)
 
+	const home = resolveUiuxHome(options.env ?? process.env)
+	const realRoot = realFuturePath(root)
+	const realHome = realFuturePath(home)
+	if (isSameOrInside(realHome, realRoot) || isSameOrInside(realRoot, realHome)) {
+		err(`uiux: the Workspace directory ${root} overlaps UIUX_HOME (${home}), which holds host-local rosters and history. Choose another directory with --workspace <dir>, or set UIUX_HOME to a directory outside it.`)
+		return 2
+	}
+
+	let rootExists: boolean
 	try {
 		if (!(await stat(root)).isDirectory()) {
 			err(`uiux: Workspace root is not a directory: ${root}`)
 			return 2
 		}
+		rootExists = true
 	}
 	catch (error) {
 		if ((error as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') throw error
-		await mkdir(root, { recursive: true })
+		rootExists = false
 	}
 
-	for (const manifest of [V5_LAYOUT.manifestPath, LEGACY_LAYOUT.manifestPath]) {
-		const path = join(root, ...manifest.split('/'))
-		if (await exists(path)) {
-			err(`uiux: Workspace is already initialized: ${path}`)
+	const productKitPath = join(root, V5_LAYOUT.productKitPath!)
+	const gitignorePath = join(root, '.gitignore')
+	if (rootExists) {
+		for (const manifest of [V5_LAYOUT.manifestPath, LEGACY_LAYOUT.manifestPath]) {
+			const path = join(root, ...manifest.split('/'))
+			if (await exists(path)) {
+				err(`uiux: Workspace is already initialized: ${path}`)
+				return 2
+			}
+		}
+		if (await exists(productKitPath)) {
+			err(`uiux: ${root} already holds ${V5_LAYOUT.productKitPath}; remove it or choose another directory.`)
+			return 2
+		}
+		if (await exists(gitignorePath) && !(await lstat(gitignorePath)).isFile()) {
+			err(`uiux: ${gitignorePath} is not a regular file; remove it or choose another directory.`)
 			return 2
 		}
 	}
-	const productKitPath = join(root, V5_LAYOUT.productKitPath!)
-	if (await exists(productKitPath)) {
-		err(`uiux: ${root} already holds ${V5_LAYOUT.productKitPath}; remove it or choose another directory.`)
-		return 2
+	else {
+		await mkdir(root, { recursive: true })
 	}
 
 	const manifest = {
@@ -68,7 +94,7 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 		themes: {},
 	}
 	await writeFile(productKitPath, json(emptyProductKit()), { encoding: 'utf8', flag: 'wx' })
-	await writeGitignore(join(root, '.gitignore'))
+	await writeGitignore(gitignorePath)
 	try {
 		await writeFile(join(root, V5_LAYOUT.manifestPath), json(manifest), { encoding: 'utf8', flag: 'wx' })
 	}

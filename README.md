@@ -23,7 +23,7 @@ uiux init   # creates <git toplevel>/.uiux/ (./.uiux/ outside a repository), or 
 uiux dev    # from anywhere in the repository
 ```
 
-`uiux init` writes `workspace.json`, an empty `product-kit.json` and a `.gitignore` for the runtime files, `kit/node_modules/` and `kit/dist/`. The Workspace's Adapters live in `product-kit.json`; a `./` Adapter is a module in the Workspace's `kit/` directory.
+`uiux init` writes `workspace.json`, an empty `product-kit.json` and a `.gitignore` for the runtime files, `kit/node_modules/` and `kit/dist/`. The Workspace's Adapters live in `product-kit.json`; a `./` Adapter is a module in the Workspace's `kit/` directory. It refuses a directory that is `$UIUX_HOME` (default `~/.uiux`), lies inside it or contains it, since that directory holds host-local rosters and history.
 
 Every command that acts on a Workspace (`dev`, `migrate` and the access commands) takes an optional `--workspace <dir>`: the Workspace root, or a directory whose `.uiux/` holds one. Without it, the command uses the `.uiux/` of the nearest directory, from the current one upward, that has a `.uiux/workspace.json`. When that is a Workspace from before `schemaVersion` 5, whose `.uiux/` held only its metadata, its parent directory is the Workspace. The search examines your home directory but nothing above it, and it refuses a `.uiux/` that is a symbolic link, that another user owns, or that sits in a directory others can write (such as `/tmp`) and you do not own; pass `--workspace` to select such a Workspace explicitly. Where the platform has no user id (Windows), only the home-directory bound and the symbolic link check apply.
 
