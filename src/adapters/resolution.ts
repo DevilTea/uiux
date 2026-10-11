@@ -12,6 +12,7 @@ import {
 	WORKSPACE_MANIFEST_PATH,
 	type WorkspaceLayout,
 } from '../persistence/paths'
+import { maskHostPaths } from './host-paths'
 import { bareKitSpecifierProblem, bareSpecifierPackageName, readDeclaredKitDependencies, relativeKitSpecifierProblem } from './kit-dependencies'
 
 import { resolve as resolveImport } from 'import-meta-resolve'
@@ -159,14 +160,24 @@ async function resolveFromWorkspaceRoot(root: string, moduleSpecifier: string): 
 	}
 
 	const parentUrl = pathToFileURL(join(root, '.uiux-adapter-resolution.mjs')).href
-	const moduleIdentity = resolveImport(moduleSpecifier, parentUrl)
-	if (!moduleIdentity.startsWith('file:'))
-		throw new Error('Adapter module must resolve to a file-backed module.')
-	const resolvedPath = await realpath(fileURLToPath(moduleIdentity))
+	// A `./` specifier that does not resolve and one that resolves outside the root get one answer,
+	// naming no path: a link inside the root may point anywhere, and its target is not described.
+	const unresolvedInRoot = () => new Error(`Workspace-relative adapter module specifier ${moduleSpecifier} does not resolve to a file inside the selected Workspace root.`)
+	let resolvedPath: string
+	try {
+		const moduleIdentity = resolveImport(moduleSpecifier, parentUrl)
+		if (!moduleIdentity.startsWith('file:'))
+			throw new Error('Adapter module must resolve to a file-backed module.')
+		resolvedPath = await realpath(fileURLToPath(moduleIdentity))
+	}
+	catch (error) {
+		if (relativeSelection) throw unresolvedInRoot()
+		throw error
+	}
 
 	const realRoot = await realpath(root)
 	if (relativeSelection && !isContainedPath(realRoot, resolvedPath))
-		throw new Error('Workspace-relative adapter module resolves outside the selected Workspace root.')
+		throw unresolvedInRoot()
 	await assertOutsideWorkspaceData(resolvedPath, realRoot)
 	return resolvedAdapterModule(moduleSpecifier, resolvedPath, relativeSelection)
 }
@@ -276,6 +287,10 @@ export async function resolveWorkspaceAdapterSet(input: ResolveWorkspaceAdapterS
 	const summaries: AdapterResolutionSummary[] = []
 	const entries: ValidatedAdapterEntry[] = []
 	const ownership: ResolvedAdapterRegistries[] = []
+	// A cause's message names host paths: the Workspace root, as given and by its real path, reads `<workspace>`.
+	const givenRoot = resolve(input.workspaceRoot)
+	const realRoot = await realpath(givenRoot).catch(() => undefined)
+	const roots = realRoot === undefined ? [givenRoot] : [givenRoot, realRoot]
 
 	for (const [index, selection] of input.adapters.entries()) {
 		const basePath = `/adapters/${index}`
@@ -296,7 +311,7 @@ export async function resolveWorkspaceAdapterSet(input: ResolveWorkspaceAdapterS
 			diagnostics.push({
 				code: 'adapter.resolution_failed',
 				path: `${basePath}/moduleSpecifier`,
-				message: diagnosticMessage('Adapter module could not be resolved from the selected Workspace root.', cause),
+				message: diagnosticMessage('Adapter module could not be resolved from the selected Workspace root.', cause, roots),
 			})
 			summaries.push({ index, moduleSpecifier: selection.moduleSpecifier })
 			continue
@@ -310,7 +325,7 @@ export async function resolveWorkspaceAdapterSet(input: ResolveWorkspaceAdapterS
 			diagnostics.push({
 				code: 'adapter.manifest_load_failed',
 				path: `${basePath}/moduleSpecifier`,
-				message: diagnosticMessage('Resolved adapter module did not provide a readable canonical manifest.', cause),
+				message: diagnosticMessage('Resolved adapter module did not provide a readable canonical manifest.', cause, roots),
 			})
 			summaries.push({ index, moduleSpecifier: selection.moduleSpecifier, resolvedModule })
 			continue
@@ -361,7 +376,7 @@ export async function resolveWorkspaceAdapterSet(input: ResolveWorkspaceAdapterS
 			diagnostics.push({
 				code: 'adapter.registry_inspection_failed',
 				path: `${basePath}/manifest`,
-				message: diagnosticMessage('Adapter registry ownership could not be inspected.', cause),
+				message: diagnosticMessage('Adapter registry ownership could not be inspected.', cause, roots),
 			})
 			continue
 		}
@@ -439,8 +454,9 @@ function mapSetDiagnosticsToWorkspaceAdapters(
 	})
 }
 
-function diagnosticMessage(prefix: string, cause: unknown): string {
-	return cause instanceof Error && cause.message ? `${prefix} ${cause.message}` : prefix
+/** `prefix`, then the cause's message with its host paths masked (`maskHostPaths`) against the Workspace roots. */
+function diagnosticMessage(prefix: string, cause: unknown, roots: readonly string[]): string {
+	return cause instanceof Error && cause.message ? `${prefix} ${maskHostPaths(cause.message, roots)}` : prefix
 }
 
 function isContainedPath(root: string, candidate: string): boolean {

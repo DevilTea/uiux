@@ -60,7 +60,54 @@ describe('Workspace adapter resolution and validated-set installation', () => {
 		const symlinkTarget = join(outsideRoot, 'symlink-adapter.mjs')
 		await writeFile(symlinkTarget, 'export const marker = true\n')
 		await symlink(symlinkTarget, join(root, 'linked-adapter.mjs'))
-		await expect(resolver.resolve(root, './linked-adapter.mjs')).rejects.toThrow(/outside/i)
+		await expect(resolver.resolve(root, './linked-adapter.mjs')).rejects.toThrow(/does not resolve to a file inside the selected Workspace root/i)
+	})
+
+	it('answers one way, naming no path, for a ./ Adapter through a link out of a below-5 root, whether or not its target exists', async () => {
+		const root = await makeRoot()
+		const outside = await makeRoot()
+		await writeFile(join(outside, 'adapter.mjs'), 'export const marker = true\n')
+		await symlink(outside, join(root, 'link'))
+		await symlink(join(outside, 'adapter.mjs'), join(root, 'leak.mjs'))
+		await symlink(join(outside, 'nothing.mjs'), join(root, 'dangling.mjs'))
+		const specifiers = ['./link/adapter.mjs', './link/nothing.mjs', './leak.mjs', './dangling.mjs', './absent.mjs']
+		const resolver = new NodeWorkspaceAdapterModuleResolver()
+		const answers = new Set<string>()
+		for (const specifier of specifiers) {
+			const error = await resolver.resolve(root, specifier).then(() => undefined, (cause: unknown) => cause)
+			expect(error, specifier).toBeInstanceOf(Error)
+			answers.add((error as Error).message.replace(specifier, '<specifier>'))
+		}
+		expect([...answers]).toEqual(['Workspace-relative adapter module specifier <specifier> does not resolve to a file inside the selected Workspace root.'])
+
+		const result = await resolveWorkspaceAdapterSet({ ...fixtureInput(specifiers.map(moduleSpecifier => ({ moduleSpecifier })), {}), workspaceRoot: root, resolver })
+		expect(result.diagnostics.map(diagnostic => diagnostic.code)).toEqual(specifiers.map(() => 'adapter.resolution_failed'))
+		const text = JSON.stringify(result.diagnostics)
+		expect(text).not.toContain(outside)
+		expect(text).not.toContain(root)
+	})
+
+	it('masks host paths in the causes of resolution, manifest-load and inspection diagnostics', async () => {
+		const root = await makeRoot()
+		const input = fixtureInput([{ moduleSpecifier: 'missing' }, { moduleSpecifier: 'loader-fails' }, { moduleSpecifier: 'good' }], {
+			'loader-fails': new Error(`Cannot load ${root}/kit/a.mjs from /home/someone/x.mjs`),
+			good: manifest('good'),
+		}, {
+			registryInspector: { inspect: () => { throw new Error(`at file:///home/someone/inspect.mjs and ${root}/b.mjs`) } },
+		})
+		input.resolver.resolve = async () => {
+			throw new Error(`Cannot find package 'missing' imported from ${root}/.uiux-adapter-resolution.mjs`)
+		}
+		const result = await resolveWorkspaceAdapterSet({ ...input, adapters: [{ moduleSpecifier: 'missing' }], workspaceRoot: root })
+		expect(result.diagnostics.map(diagnostic => diagnostic.message)).toEqual([
+			'Adapter module could not be resolved from the selected Workspace root. Cannot find package \'missing\' imported from <workspace>/.uiux-adapter-resolution.mjs',
+		])
+		input.resolver.resolve = async (_root, moduleSpecifier) => ({ moduleSpecifier, resolvedPath: `/virtual/${moduleSpecifier}.mjs`, moduleIdentity: `file:///virtual/${moduleSpecifier}.mjs` })
+		const loaded = await resolveWorkspaceAdapterSet({ ...input, adapters: [{ moduleSpecifier: 'loader-fails' }, { moduleSpecifier: 'good' }], workspaceRoot: root })
+		expect(loaded.diagnostics.map(diagnostic => diagnostic.message)).toEqual([
+			'Resolved adapter module did not provide a readable canonical manifest. Cannot load <workspace>/kit/a.mjs from <path>',
+			'Adapter registry ownership could not be inspected. at <path> and <workspace>/b.mjs',
+		])
 	})
 
 	it('refuses relative adapters that resolve inside canonical Workspace data directories while allowing adapters/', async () => {
