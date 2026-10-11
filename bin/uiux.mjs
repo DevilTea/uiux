@@ -51,8 +51,9 @@ Commands:
 
 Workspace selection: --workspace <dir> names the Workspace root, or a directory whose
 .uiux/ holds one. Without it, a command uses the .uiux/ of the nearest directory, from
-the current one upward, that has a .uiux/workspace.json; when that is a Workspace
-from before schemaVersion 5, its parent directory is the Workspace.
+the current one upward to your home directory, that has a .uiux/workspace.json; when
+that is a Workspace from before schemaVersion 5, its parent directory is the Workspace.
+A .uiux/ that another user owns, or in a directory others can write, is refused.
 
 Access (each takes [--workspace <dir>]; rosters live in $UIUX_HOME, default ~/.uiux):
   member add <nick> (--preset <name> | --keys <k,...> | --all-keys) [--kind human|agent]

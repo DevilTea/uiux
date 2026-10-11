@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { lstatSync } from 'node:fs'
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,7 +11,7 @@ import { runAccessCommand } from '../src/cli/access'
 import { runInitCommand } from '../src/cli/init'
 import { runSelectedMigrateCommand } from '../src/cli/migrate'
 import { LEGACY_LAYOUT, V5_LAYOUT } from '../src/persistence/paths'
-import { selectWorkspace } from '../src/persistence/workspace-selection'
+import { type DiscoveryHost, selectWorkspace } from '../src/persistence/workspace-selection'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 
@@ -90,6 +91,111 @@ describe('Workspace discovery (no --workspace)', () => {
 		await mkdir(join(withoutKit, '.uiux'))
 		await writeFile(join(withoutKit, '.uiux', 'workspace.json'), '{"schemaVersion":5,"i18n":{"defaultLocale":"en-US"},"viewports":{},"themes":{}}\n')
 		expect(selectWorkspace({ cwd: withoutKit }, POLICY)).toMatchObject({ ok: false, reason: 'missing_product_kit' })
+	})
+})
+
+/**
+ * The trust boundary of discovery (owner ruling 1 of
+ * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18870730): the walk ends at the
+ * home directory, and a candidate `.uiux/` that another user owns, or that sits in a directory
+ * others can write and the current user does not own, is refused. Tests cannot chown, so they stub
+ * the owner that `lstat` reports through the discovery host seam.
+ */
+describe('discovery trust boundary', () => {
+	const uid = process.getuid?.()
+	const posix = uid !== undefined
+
+	/** A discovery host over the real `lstat`, reporting `foreignOwned` paths as owned by another user. */
+	function host(homeDirectory: string, foreignOwned: readonly string[] = []): DiscoveryHost {
+		return {
+			homeDirectory,
+			userId: uid,
+			lstat: (path) => {
+				const entry = lstatSync(path)
+				return {
+					uid: foreignOwned.includes(path) ? (uid ?? 0) + 1 : entry.uid,
+					mode: entry.mode,
+					isDirectory: () => entry.isDirectory(),
+					isSymbolicLink: () => entry.isSymbolicLink(),
+				}
+			},
+		}
+	}
+
+	it('examines the home directory but stops there, whether the walk crosses it or starts above it', async () => {
+		const base = await makeDirectory()
+		expect(await runInitCommand({ cwd: base, gitToplevel: () => base, stdout: () => undefined })).toBe(0)
+		const home = join(base, 'home')
+		const project = join(home, 'project')
+		await mkdir(project, { recursive: true })
+
+		// Without the bound, the walk from the project finds the Workspace above the home directory.
+		expect(selectWorkspace({ cwd: project, discoveryHost: host(base) }, POLICY)).toMatchObject({ ok: true, root: join(base, '.uiux') })
+		for (const cwd of [project, home, base]) {
+			expect(selectWorkspace({ cwd, discoveryHost: host(home) }, POLICY)).toMatchObject({
+				ok: false,
+				reason: 'not_discovered',
+				message: expect.stringContaining(`does not search above the home directory ${home}`),
+			})
+		}
+
+		expect(await runInitCommand({ cwd: home, gitToplevel: () => home, stdout: () => undefined })).toBe(0)
+		expect(selectWorkspace({ cwd: project, discoveryHost: host(home) }, POLICY)).toEqual({ ok: true, root: join(home, '.uiux'), layout: V5_LAYOUT, discovered: true })
+	})
+
+	it.skipIf(!posix)('refuses a schemaVersion 5 .uiux/ in a mode 1777 directory that another user owns', async () => {
+		const base = await makeDirectory()
+		const shared = join(base, 'shared')
+		await mkdir(shared)
+		await chmod(shared, 0o1777)
+		expect(await runInitCommand({ cwd: base, workspace: join(shared, '.uiux'), stdout: () => undefined })).toBe(0)
+		const nested = join(shared, 'project')
+		await mkdir(nested)
+
+		const refused = selectWorkspace({ cwd: nested, discoveryHost: host(base, [shared]) }, POLICY)
+		expect(refused).toMatchObject({ ok: false, reason: 'untrusted_candidate', message: expect.stringContaining('Pass --workspace <dir>') })
+		expect(refused.ok ? '' : refused.message).toContain(`${shared} is writable by other users and not owned by the current user`)
+		// The same directory is trusted when the current user owns it.
+		expect(selectWorkspace({ cwd: nested, discoveryHost: host(base) }, POLICY)).toMatchObject({ ok: true, root: join(shared, '.uiux') })
+		// An explicit --workspace is unaffected.
+		expect(selectWorkspace({ cwd: nested, workspace: join(shared, '.uiux'), discoveryHost: host(base, [shared]) }, POLICY)).toMatchObject({ ok: true, root: join(shared, '.uiux'), discovered: false })
+	})
+
+	it.skipIf(!posix)('refuses a .uiux/ or a manifest that another user owns, and an explicit --workspace still selects it', async () => {
+		const { repository, root, nested } = await repositoryWithWorkspace()
+		for (const foreign of [root, join(root, 'workspace.json')]) {
+			expect(selectWorkspace({ cwd: nested, discoveryHost: host(repository, [foreign]) }, POLICY)).toMatchObject({
+				ok: false,
+				reason: 'untrusted_candidate',
+				message: expect.stringContaining(`${foreign} is not owned by the current user`),
+			})
+			expect(selectWorkspace({ cwd: nested, workspace: root, discoveryHost: host(repository, [foreign]) }, POLICY)).toEqual({ ok: true, root, layout: V5_LAYOUT, discovered: false })
+		}
+	})
+
+	it('refuses a .uiux that is a symbolic link, without following it', async () => {
+		const { root } = await repositoryWithWorkspace()
+		const elsewhere = await makeDirectory()
+		await symlink(root, join(elsewhere, '.uiux'), 'dir')
+		expect(selectWorkspace({ cwd: elsewhere, discoveryHost: host(elsewhere) }, POLICY)).toMatchObject({
+			ok: false,
+			reason: 'untrusted_candidate',
+			message: expect.stringContaining('is a symbolic link'),
+		})
+	})
+
+	it.skipIf(!posix || uid === 0)('passes over a .uiux/ it cannot read and goes on upward', async () => {
+		const { repository, root } = await repositoryWithWorkspace()
+		const inner = join(repository, 'packages', 'locked')
+		await mkdir(join(inner, '.uiux'), { recursive: true })
+		await writeFile(join(inner, '.uiux', 'workspace.json'), '{}\n')
+		await chmod(join(inner, '.uiux'), 0o000)
+		try {
+			expect(selectWorkspace({ cwd: inner, discoveryHost: host(repository) }, POLICY)).toEqual({ ok: true, root, layout: V5_LAYOUT, discovered: true })
+		}
+		finally {
+			await chmod(join(inner, '.uiux'), 0o755)
+		}
 	})
 })
 
