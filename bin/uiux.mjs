@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
-import { lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join, resolve } from 'node:path'
@@ -85,6 +85,12 @@ function loopbackHostFromEnv(env) {
 	return { ok: true, host: selected }
 }
 
+/** `[--workspace <dir>]`: `{ workspace }` (undefined when omitted), or undefined for invalid usage. */
+function parseOptionalWorkspaceArgument(args) {
+	if (args.length === 0) return { workspace: undefined }
+	return args.length === 2 && args[0] === '--workspace' && args[1] && !args[1].startsWith('--') ? { workspace: args[1] } : undefined
+}
+
 function parseWorkspaceArgument(args) {
 	return args.length === 2 && args[0] === '--workspace' && args[1] ? args[1] : undefined
 }
@@ -157,48 +163,8 @@ async function runAccess(argv) {
 	await runBundled('src/cli/access.ts', ({ runAccessCommand }) => runAccessCommand({ argv }))
 }
 
-async function runInit(workspaceArgument) {
-	const workspaceRoot = resolve(process.cwd(), workspaceArgument)
-	try {
-		const rootStat = await stat(workspaceRoot)
-		if (!rootStat.isDirectory()) {
-			console.error(`uiux: Workspace root is not a directory: ${workspaceRoot}`)
-			process.exitCode = 2
-			return
-		}
-	}
-	catch (error) {
-		if (error?.code !== 'ENOENT') throw error
-		await mkdir(workspaceRoot, { recursive: true })
-	}
-
-	const metadataRoot = join(workspaceRoot, '.uiux')
-	await mkdir(metadataRoot, { recursive: true })
-	const metadataStat = await lstat(metadataRoot)
-	if (!metadataStat.isDirectory() || metadataStat.isSymbolicLink()) {
-		console.error(`uiux: Workspace metadata path must be a real directory: ${metadataRoot}`)
-		process.exitCode = 2
-		return
-	}
-
-	const manifestPath = join(metadataRoot, 'workspace.json')
-	const manifest = {
-		schemaVersion: workspaceSchemaVersion,
-		i18n: { defaultLocale: 'en-US' },
-		adapters: [],
-		viewports: {},
-		themes: {},
-	}
-	try {
-		await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' })
-	}
-	catch (error) {
-		if (error?.code !== 'EEXIST') throw error
-		console.error(`uiux: Workspace is already initialized: ${manifestPath}`)
-		process.exitCode = 2
-		return
-	}
-	console.log(`Initialized UIUX Workspace at ${workspaceRoot}`)
+async function runInit(workspace) {
+	await runBundled('src/cli/init.ts', ({ runInitCommand }) => runInitCommand(workspace === undefined ? {} : { workspace }))
 }
 
 async function runDev(options) {
@@ -298,12 +264,12 @@ if (extraArgs.length === 0 && (command === undefined || command === '--help' || 
 } else if (extraArgs.length === 0 && (command === '--version' || command === '-v')) {
 	console.log(`uiux ${packageJson.version}`)
 } else if (command === 'init') {
-	const workspace = parseWorkspaceArgument(extraArgs)
-	if (!workspace) {
-		console.error('uiux: init requires exactly --workspace <dir>.')
+	const options = parseOptionalWorkspaceArgument(extraArgs)
+	if (!options) {
+		console.error('uiux: init accepts only --workspace <dir>.')
 		process.exitCode = 2
 	} else {
-		await runInit(workspace)
+		await runInit(options.workspace)
 	}
 } else if (command === 'dev') {
 	const options = parseDevArguments(extraArgs)
