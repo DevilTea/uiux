@@ -19,12 +19,16 @@ export type MemberPrincipal = Readonly<{
 	memberId: string
 	nickname: string
 	kind: MemberKind
-	/** The roster role, still shown on the session wire and in the MCP instructions (issue #142). */
+	/**
+	 * A role derived from `keys` (`compatibilityRole`), still shown on the session wire and in the
+	 * MCP instructions until they carry keys and labels (issue #142). It authorizes nothing.
+	 */
 	role: AccessRole
 	/**
-	 * The member's permission keys, resolved on every request (Rule 01a11485-ebdd-70fc-b853-0621caf056b8).
-	 * Until the roster stores keys they are derived from `role` by `keysForRole`. Which of them take
-	 * effect depends on the credential: see `effectiveKeys` in `policy.ts`.
+	 * The member's permission keys, resolved from its stored keys on every request (Rule
+	 * 01a11485-ebdd-70fc-b853-0621caf056b8): catalog keys only, and never a `humanOnly` key for an
+	 * Agent (`grantedKeys`). Which of them take effect depends on the credential: see
+	 * `effectiveKeys` in `policy.ts`.
 	 */
 	keys: readonly PermissionKey[]
 	credential: 'session' | 'token'

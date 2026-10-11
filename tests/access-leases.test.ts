@@ -11,6 +11,7 @@ import type { ViewSpecContent } from '../src/application/services/view-authoring
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { FileNativePersistence } from '../src/persistence'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { setMember } from '../src/server/access/roster'
 import { AccessService } from '../src/server/access/service'
 import { AccessStore } from '../src/server/access/store'
 import { appendReviewMessageForHttp, mapAuthoringResultToHttpStatus, updateViewSpecForHttp } from '../src/server/authoring-http'
@@ -295,5 +296,49 @@ describe('leases by write key (Rules 01a11c09-c125, 01a11485-f074, 01a11485-f08f
 		expect(leases.list().map(lease => [lease.holder.nickname, lease.kind])).toEqual([['pal', 'workspace']])
 		await service.removeMember(pal.id)
 		expect(leases.list()).toEqual([])
+	})
+
+	it('treats a lease whose holder fails the holder check as released wherever it is looked up', () => {
+		const held = new Set(['a'])
+		const leases = createLeaseManager()
+		leases.acquire([VIEW], A)
+		expect(leases.beginWrite(VIEW, B, { autoAcquire: true })).toMatchObject({ status: 'locked', lease: { holder: A } })
+		leases.setHolderCheck(lease => held.has(lease.holder.memberId))
+		expect(leases.acquire([VIEW], B)).toMatchObject({ status: 'locked' })
+		held.delete('a')
+		const changes: string[] = []
+		leases.onChange(change => changes.push(change.key))
+		expect(leases.find(VIEW)).toBeUndefined()
+		expect(changes).toEqual([VIEW_ID])
+		held.add('b')
+		expect(leases.acquire([VIEW], B)).toMatchObject({ status: 'acquired' })
+		expect(leases.list()).toMatchObject([{ holder: B }])
+	})
+
+	it('lets no lease of a holder that lost the kind\'s write key block another member, even before a reconcile', async () => {
+		const base = await mkdtemp(join(tmpdir(), 'uiux-leases-lazy-'))
+		roots.push(base)
+		const workspaceRoot = join(base, 'design')
+		const home = join(base, 'home')
+		await mkdir(workspaceRoot, { recursive: true })
+		const store = (await AccessStore.open({ workspaceRoot, home, create: true }))!
+		const leases = createLeaseManager()
+		const service = new AccessService({ store, leases })
+		const bot = await service.addMember({ nickname: 'bot', role: 'editor', kind: 'agent' })
+		const pal = await service.addMember({ nickname: 'pal', role: 'editor', kind: 'agent' })
+		const botHolder: LeaseHolder = { memberId: bot.id, nickname: 'bot', kind: 'agent' }
+		const palHolder: LeaseHolder = { memberId: pal.id, nickname: 'pal', kind: 'agent' }
+		expect(leases.acquire([VIEW], botHolder)).toMatchObject({ status: 'acquired' })
+
+		// The CLI takes `views.write` from bot; the server then reads that roster through a write of
+		// its own (as a usage flush does), which does not reconcile leases.
+		const cli = (await AccessStore.open({ workspaceRoot, home }))!
+		await cli.update(file => setMember(file, 'bot', { role: 'reviewer' }))
+		await store.update(file => ({ file, result: undefined }))
+		expect(store.data.members.find(member => member.id === bot.id)!.keys).not.toContain('views.write')
+
+		// bot's lease no longer blocks pal, and the lease is gone.
+		expect(leases.beginWrite(VIEW, palHolder, { autoAcquire: true })).toMatchObject({ status: 'ok' })
+		expect(leases.list()).toMatchObject([{ kind: 'view', key: VIEW_ID, holder: { nickname: 'pal' } }])
 	})
 })

@@ -1,12 +1,14 @@
 import { getRouterParam, readBody, setResponseHeader, setResponseStatus, type H3Event } from 'h3'
 import { z } from 'zod'
 
+import { compatibilityRole } from '../../application/access/labels'
 import { ACCESS_ROLES, MEMBER_KINDS } from '../../application/access/principal'
 import { getSelectedWorkspaceServerRuntime } from '../selected-workspace'
 import { requestOrigin, servesRosterAdministration } from '../loopback-guard'
 import { requestSession } from '../request-session'
 import { accessErrorResponse, clearedCookie, denyUnlessAllowed, requestPrincipal, secureCookieFor, sessionCookie } from './http'
 import { parseHttpPayload } from '../authoring-http'
+import type { StoredMember } from './roster'
 
 /**
  * HTTP surface for sessions, edit leases and Owner administration (accepted identity decisions
@@ -56,6 +58,14 @@ function respond(event: H3Event, status: number, body: unknown) {
 
 const access = () => getSelectedWorkspaceServerRuntime().access()
 
+/**
+ * A stored member on the administration wire, with the role the Members page still shows,
+ * derived from its keys (`compatibilityRole`) until the page edits keys (issue #142).
+ */
+function memberBody(member: StoredMember) {
+	return { ...member, role: compatibilityRole(member) }
+}
+
 export async function loginForHttp(event: H3Event) {
 	const parsed = parseHttpPayload(loginSchema, await readBody(event))
 	if (!parsed.ok) return respond(event, parsed.result.status, parsed.result.body)
@@ -70,8 +80,8 @@ export async function loginForHttp(event: H3Event) {
 		return respond(event, outcome.status, { status: 'rejected', code: outcome.code, message: outcome.message, diagnostics: [{ code: outcome.code, path: '/credential', message: outcome.message }] })
 	}
 	setResponseHeader(event, 'Set-Cookie', sessionCookie(outcome.cookieName, outcome.cookieValue, outcome.maxAgeSeconds, secureCookieFor(event)))
-	const { id, nickname, kind, role } = outcome.member
-	return respond(event, 200, { member: { id, nickname, kind, role } })
+	const { id, nickname, kind } = outcome.member
+	return respond(event, 200, { member: { id, nickname, kind, role: compatibilityRole(outcome.member) } })
 }
 
 export async function readSessionForHttp(event: H3Event) {
@@ -149,7 +159,7 @@ export async function addMemberForHttp(event: H3Event) {
 	const body = await readBody(event)
 	const parsed = parseHttpPayload(addMemberSchema, body)
 	if (!parsed.ok) return respond(event, parsed.result.status, parsed.result.body)
-	return admin(event, async service => ({ member: await service.addMember(parsed.data) }), 201)
+	return admin(event, async service => ({ member: memberBody(await service.addMember(parsed.data)) }), 201)
 }
 
 export async function setMemberForHttp(event: H3Event) {
@@ -158,12 +168,12 @@ export async function setMemberForHttp(event: H3Event) {
 	const id = getRouterParam(event, 'id', { decode: true }) ?? ''
 	const parsed = parseHttpPayload(setMemberSchema, await readBody(event))
 	if (!parsed.ok) return respond(event, parsed.result.status, parsed.result.body)
-	return admin(event, async service => ({ member: await service.setMember(id, parsed.data) }))
+	return admin(event, async service => ({ member: memberBody(await service.setMember(id, parsed.data)) }))
 }
 
 export function removeMemberForHttp(event: H3Event) {
 	const id = getRouterParam(event, 'id', { decode: true }) ?? ''
-	return admin(event, async service => ({ member: await service.removeMember(id) }))
+	return admin(event, async service => ({ member: memberBody(await service.removeMember(id)) }))
 }
 
 export const listTokensForHttp = (event: H3Event) => admin(event, service => ({ tokens: service.tokens() }))

@@ -44,11 +44,11 @@ import {
 	type PublicLease,
 } from './leases'
 import {
-	adapterChangeKeys,
 	authorizeLeaseAcquire,
 	authorizeOperation,
 	authorizeRestore,
 	effectiveKeys,
+	manifestAdapterChangeKeys,
 	type AccessOperation,
 	type ScopeDenied,
 } from './policy'
@@ -321,13 +321,8 @@ export function createScopedWorkspaceSession(
 	 * manifest the compare-and-swap replaces, so the keys are those of the change actually written.
 	 */
 	function adapterChangeRefusal(current: unknown, next: unknown, authorize: (keys: readonly PermissionKey[]) => ScopeDenied | undefined, key: string): AccessRefusal | undefined {
-		const record = (value: unknown): Readonly<Record<string, unknown>> => typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
-		const specifiers = (value: unknown) => Array.isArray(value)
-			? value.map(entry => ({ moduleSpecifier: String(record(entry).moduleSpecifier) }))
-			: []
 		// An unknown schema version counts as below 5, so the check fails closed.
-		const schemaVersion = record(next).schemaVersion ?? record(current).schemaVersion
-		const denied = authorize(adapterChangeKeys(typeof schemaVersion === 'number' ? schemaVersion : 0, specifiers(record(current).adapters), specifiers(record(next).adapters)))
+		const denied = authorize(manifestAdapterChangeKeys(current, next))
 		return denied ? refusalFromScope(key, denied) : undefined
 	}
 
