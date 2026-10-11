@@ -210,8 +210,8 @@ describe('cached comparisons after a Checkpoint is deleted (B8 follow-up c)', ()
 describe('the keys a Workspace settings restore needs beyond its write key (#140 owner ruling 2026-10-10, 1)', () => {
 	const ref = (moduleSpecifier: string, config?: Record<string, string>) => ({ moduleSpecifier, ...(config ? { config } : {}) })
 	/** The semantic comparison of a version's manifest (`from`) with the current one, as the dialog reads it. */
-	function compared(version: readonly unknown[], current: readonly unknown[], schemaVersion = 4) {
-		const diff = diffWorkspaceSettings({ schemaVersion, adapters: version } as JsonValue, { schemaVersion, adapters: current } as JsonValue)
+	function compared(version: JsonValue[], current: JsonValue[], schemaVersion = 4) {
+		const diff = diffWorkspaceSettings({ schemaVersion, adapters: version }, { schemaVersion, adapters: current })
 		return { to: { id: 'current' as const, workspaceSchemaVersion: schemaVersion }, changes: [{ kind: 'workspace', key: 'workspace', status: 'modified' as const, diff }] }
 	}
 
