@@ -964,6 +964,7 @@
     "sectionIndex": "設定區段",
     "saved": "設定已儲存",
     "saveFailed": "無法儲存",
+    "adaptersPartlySaved": "已儲存模組指定符，但組態未儲存",
     "locale": {
       "description": "預覽產品的主要 Locale。",
       "primaryLocale": "主要 Locale",

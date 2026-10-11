@@ -58,6 +58,8 @@ const props = defineProps<{
 	productKitFailed?: boolean
 	/** The key the signed-in member lacks to edit this section, when it is not the page's own. */
 	missingKey?: string
+	/** The last save wrote the specifiers but not their `config`, which the draft still holds. */
+	partlySaved?: boolean
 }>()
 const emit = defineEmits<{ save: []; discard: []; reload: []; keepMine: []; retryResolution: [] }>()
 const { t } = useI18n()
@@ -261,7 +263,7 @@ defineExpose({ save })
     />
     <AuthoringErrorAlert
       v-else-if="section.error"
-      :title="t('settings.saveFailed')"
+      :title="partlySaved ? t('settings.adaptersPartlySaved') : t('settings.saveFailed')"
       :error="section.error"
       @close="section.clearError()"
     />

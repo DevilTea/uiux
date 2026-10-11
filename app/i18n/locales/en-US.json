@@ -964,6 +964,7 @@
     "sectionIndex": "Settings sections",
     "saved": "Settings saved",
     "saveFailed": "Couldn't save",
+    "adaptersPartlySaved": "Specifiers saved, config not saved",
     "locale": {
       "description": "The primary Locale of the previewed product.",
       "primaryLocale": "Primary Locale",

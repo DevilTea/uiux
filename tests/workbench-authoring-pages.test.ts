@@ -306,3 +306,58 @@ describe('Settings › Adapters on a schemaVersion 5 Workspace', () => {
 		finally { await context.close() }
 	}, 60_000)
 })
+
+describe('Settings › Adapters when the config write fails after the specifiers are saved', () => {
+	type ProductKitRead = { revision: string; resource: { adapters: { moduleSpecifier: string; config?: unknown }[] } }
+
+	/**
+	 * The section saves in two writes, `compose` then `settings`. When `compose` lands and `settings`
+	 * fails, the section reloads the Product Kit file and carries the draft onto it (keep mine), says
+	 * the specifiers were saved and the config was not, and raises no conflict over its own write.
+	 */
+	it('keeps the unsaved config on the composed revision and saves it on the next try', async () => {
+		const before = await api<ProductKitRead>('/api/product-kit')
+		const { context, page } = await open('/workspace/settings?section=adapters')
+		try {
+			const requests: { url: string; body: unknown }[] = []
+			page.on('request', (request) => {
+				if (request.method() === 'PUT') requests.push({ url: new URL(request.url()).pathname, body: request.postDataJSON() })
+			})
+			await page.route('**/api/product-kit/settings', route => route.fulfill({
+				status: 500,
+				contentType: 'application/json',
+				body: JSON.stringify({ statusCode: 500, statusMessage: 'Server Error', message: 'The config write failed.' }),
+			}))
+			const section = page.locator('#settings-adapters')
+			await section.getByText('Packages or kit/ modules that supply Widgets').waitFor()
+			await section.locator('[data-adapter-specifier]').fill('./adapters/second.ts')
+			await section.getByRole('button', { name: 'Config', exact: true }).click()
+			const config = section.getByRole('textbox', { name: /^Config for / })
+			await config.fill('{"note":"second"}')
+			await section.getByRole('button', { name: 'Save changes' }).click()
+
+			await section.getByText('Specifiers saved, config not saved').waitFor()
+			const composed = await api<ProductKitRead>('/api/product-kit')
+			expect(composed.revision).not.toBe(before.revision)
+			expect(composed.resource.adapters).toEqual([{ moduleSpecifier: './adapters/second.ts' }])
+			expect(requests.map(request => request.url)).toEqual(['/api/product-kit/compose', '/api/product-kit/settings'])
+			expect(await section.getByText('Settings changed since you opened them.').count()).toBe(0)
+			expect(await config.inputValue()).toBe('{"note":"second"}')
+			await section.locator('[data-save-bar]').waitFor()
+
+			// The next save sends only the config, against the composed revision.
+			await page.unroute('**/api/product-kit/settings')
+			requests.length = 0
+			await section.getByRole('button', { name: 'Save changes' }).click()
+			await section.locator('[data-save-bar]').waitFor({ state: 'detached' })
+			expect(requests.map(request => request.url)).toEqual(['/api/product-kit/settings'])
+			expect(requests[0]!.body).toMatchObject({ expectedRevision: composed.revision })
+			expect((await api<ProductKitRead>('/api/product-kit')).resource.adapters).toEqual([{ moduleSpecifier: './adapters/second.ts', config: { note: 'second' } }])
+		}
+		finally {
+			await context.close()
+			const current = await api<ProductKitRead>('/api/product-kit')
+			await agentPut('/api/product-kit/compose', { expectedRevision: current.revision, designSystems: [], adapters: ['./adapters/reference.ts'] })
+		}
+	}, 60_000)
+})

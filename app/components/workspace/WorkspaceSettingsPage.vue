@@ -204,10 +204,18 @@ async function save(id: SettingsSectionId): Promise<void> {
 	}
 }
 
+/** The last Adapters save wrote the specifiers (`compose`) but not their `config` (`settings`). */
+const kitPartlySaved = ref(false)
+
 /**
  * Saves the Adapters of a `schemaVersion` 5 Workspace through the Product Kit operations: `compose`
  * when the specifiers or their order change, then `update` with the new revision when a `config`
  * differs (`productKitAdapterWrites`). Each write is a compare-and-swap on the Product Kit file.
+ *
+ * When `compose` landed and the `config` write then failed for any reason but a conflict, the
+ * Product Kit file is reloaded and the draft carried onto it (`keepMine`): the specifiers are
+ * saved, the draft keeps the unsaved `config`, and the section says so instead of raising a
+ * conflict over its own write.
  */
 async function saveKitAdapters(): Promise<void> {
 	const section = kitAdapters
@@ -215,13 +223,24 @@ async function saveKitAdapters(): Promise<void> {
 	if (!kitAccess.canEdit.value || !kit || !section.base || section.conflict || section.saving || !section.dirty) return
 	section.saving = true
 	section.clearError()
+	kitPartlySaved.value = false
 	lockRefusal.value = undefined
+	let composedRevision: string | undefined
+	/** Reloads the Product Kit file and, after a landed `compose`, carries the draft onto it. */
+	const reloadBase = async (): Promise<void> => {
+		await loadProductKit()
+		if (composedRevision !== undefined && productKit.value) {
+			section.keepMine(productKit.value)
+			kitPartlySaved.value = true
+		}
+	}
 	try {
 		const writes = productKitAdapterWrites(kit.resource, section.draftPayload as WorkspaceAdapterSelection[])
 		let revision = section.base.revision
 		if (writes.compose) {
 			const composed = await $fetch<{ revision: string }>('/api/product-kit/compose', { method: 'PUT', body: { expectedRevision: revision, ...writes.compose } })
 			revision = composed.revision
+			composedRevision = composed.revision
 		}
 		if (writes.update)
 			await $fetch('/api/product-kit/settings', { method: 'PUT', body: { expectedRevision: revision, ...writes.update } })
@@ -238,12 +257,14 @@ async function saveKitAdapters(): Promise<void> {
 			void focusFirstProblem('#settings-adapters')
 		}
 		else if (isLockedError(details)) {
+			// The base moves to the Product Kit file as it is now, a landed compose included.
+			await reloadBase()
+			if (kitPartlySaved.value) section.error = details
 			lockRefusal.value = { lock: details.lock }
 			void focusFirstProblem('main')
 		}
 		else {
-			// A compose that landed before a refused update is shown as the new saved state.
-			await loadProductKit()
+			await reloadBase()
 			section.error = details
 			void focusFirstProblem('#settings-adapters')
 		}
@@ -255,6 +276,7 @@ async function saveKitAdapters(): Promise<void> {
 
 function discard(id: SettingsSectionId): void {
 	if (id === 'adapters' && usesProductKit.value) {
+		kitPartlySaved.value = false
 		if (productKit.value) kitAdapters.adopt(productKit.value)
 	}
 	else if (workspace.value) {
@@ -500,6 +522,7 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
                 :product-kit-failed="productKitFailed"
                 :missing-key="usesProductKit && !member.can('product-kit.write') ? 'product-kit.write' : undefined"
                 :can-compose="member.can('product-kit.compose')"
+                :partly-saved="usesProductKit && kitPartlySaved"
                 :resolution="resolution"
                 :resolution-failed="resolutionFailed"
                 @save="save('adapters')"
