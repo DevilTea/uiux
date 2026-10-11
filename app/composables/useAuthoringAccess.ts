@@ -12,7 +12,7 @@ import { useWorkbench } from './useWorkbench'
  * - `tablet`: 768–1279px, read-only with an "Edit on desktop" hint;
  * - `mobile`: under 768px, read-only lists;
  * - `migration`: an older Workspace schema, read-only until `uiux migrate` runs;
- * - `key`: the signed-in member lacks the page's write key, read-only and naming it (`missingKey`);
+ * - `key`: the signed-in member lacks the page's write key, read-only and naming it (`writeKey`);
  * - `locked`: someone else (an agent) holds the edit lease on the page's resource, read-only
  *   beside the Lock badge until the lease is released or expires.
  */

@@ -112,11 +112,6 @@ function can(key: PermissionKey): boolean {
 	return heldKeys.value.has(key)
 }
 
-/** The first of `keys` the signed-in member lacks, for a notice that names it; undefined when it holds them all. */
-function missingKey(...keys: readonly PermissionKey[]): PermissionKey | undefined {
-	return keys.find(key => !can(key))
-}
-
 /**
  * Re-reads the session, so a change to the member's keys applies to what the Workbench offers
  * (Rule 01a116f0-963f-7222-95fa-ae80ce735859). Without the `/api/events` stream (issue #69), the
@@ -174,7 +169,6 @@ export function useAccess() {
 		loaded: readonly(loaded),
 		member,
 		can,
-		missingKey,
 		load: loadSession,
 		reload: reloadSession,
 		expire,
