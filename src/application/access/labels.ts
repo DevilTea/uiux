@@ -1,5 +1,5 @@
-import { ACCESS_ROLES, type AccessRole, type MemberKind } from './principal'
-import { BUILT_IN_ACCESS_PRESETS, grantedKeys, isCatalogKey, isHumanOnlyKey, type BuiltInAccessPreset } from './keys'
+import type { MemberKind } from './principal'
+import { BUILT_IN_ACCESS_PRESETS, isCatalogKey, isHumanOnlyKey } from './keys'
 
 /**
  * Member labels (Discussion #140, decision 5): a label names the Access preset whose key set
@@ -56,21 +56,3 @@ export function memberLabelName(label: MemberLabel): string {
 	return 'preset' in label ? label.preset.name : 'Custom'
 }
 
-/**
- * A role for the one surface that still speaks roles until it moves to keys and labels (issue
- * #142): the Members page's role select, through the administration wire's `role` on a member
- * and on the roster summary. `uiux member list` shows the label and keys instead. It is the
- * highest built-in preset whose keys, without `humanOnly` keys for an Agent, the member's granted
- * keys all include, and `viewer` when none does. The built-in presets are nested, so a member
- * labeled with a built-in preset gets that preset's `id`. It authorizes nothing: the server
- * checks keys.
- */
-export function compatibilityRole(member: LabeledMember): AccessRole {
-	const held = new Set<string>(grantedKeys(member.kind, member.keys))
-	const holds = (preset: BuiltInAccessPreset) => preset.keys.every(key => held.has(key) || (member.kind === 'agent' && isHumanOnlyKey(key)))
-	for (const role of [...ACCESS_ROLES].reverse()) {
-		if (member.kind === 'agent' && role === 'owner') continue
-		if (holds(BUILT_IN_ACCESS_PRESETS.find(preset => preset.id === role)!)) return role
-	}
-	return 'viewer'
-}

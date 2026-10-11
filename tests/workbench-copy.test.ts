@@ -33,7 +33,7 @@ const zh = flatten(JSON.parse(readFileSync(join(LOCALES, 'zh-TW.json'), 'utf8'))
 const DOMAIN_NOUNS = ['View', 'Variant', 'Widget', 'Review', 'Flow', 'Spec', 'Decision', 'Evidence', 'Handoff', 'Workspace', 'Locale', 'Asset', 'MCP', 'Token', 'Agent', 'Slot', 'Runtime', 'Manifest', 'Bundle', 'Schema']
 
 /** Chinese renderings of those nouns that must not appear in the zh-TW catalog. */
-const FORBIDDEN_TRANSLATIONS = ['變體', '視圖', '畫面元件', '元件', '流程', '規格', '決策', '證據', '交付', '工作區', '語系', '素材', '資產', '審查', '權杖', '代理程式', '插槽', '執行環境', '資訊清單', '匯出包', '結構描述']
+const FORBIDDEN_TRANSLATIONS = ['變體', '視圖', '畫面元件', '元件', '流程', '規格', '決策', '證據', '交付', '工作區', '語系', '素材', '資產', '審查', '權杖', '代理程式', '插槽', '執行環境', '資訊清單', '匯出包', '結構描述', '產品套件']
 
 function walk(dir: string): string[] {
 	return readdirSync(dir).flatMap((entry) => {
