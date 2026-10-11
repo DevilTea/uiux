@@ -8,10 +8,13 @@ import type { WorkspaceAdapterSelection } from '../src/domain/workspace/schema'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import {
 	CANONICAL_WORKSPACE_DATA_DIRECTORIES,
+	LEGACY_LAYOUT,
+	V5_LAYOUT,
 	WORKSPACE_DATA_DIRECTORY,
 	WORKSPACE_MANIFEST_PATH,
 } from '../src/persistence/paths'
 import {
+	adapterResolutionBase,
 	NodeAdapterManifestLoader,
 	NodeWorkspaceAdapterModuleResolver,
 	resolveAndInstallWorkspaceAdapterSet,
@@ -409,6 +412,12 @@ describe('the data boundary of a schemaVersion 5 Workspace root (only kit/ may h
 	const MODULE = 'export const marker = true\n'
 	const V5_MANIFEST = JSON.stringify({ schemaVersion: 5, i18n: { defaultLocale: 'en-US' }, viewports: {}, themes: {} })
 	const KIT = JSON.stringify({ designSystems: [], adapters: [], styles: [], themes: {}, components: {}, widgets: {} })
+	/**
+	 * A resolver given the below-5 base (the Workspace root) on purpose, so specifiers reach every
+	 * path of a v5 root: these tests prove the data boundary alone holds, whatever the base. The
+	 * resolver of a v5 Workspace resolves from kit/ (see the next describe block).
+	 */
+	const rootBasedResolver = () => new NodeWorkspaceAdapterModuleResolver({ layout: LEGACY_LAYOUT })
 
 	async function v5Root(root: string): Promise<string> {
 		await mkdir(root, { recursive: true })
@@ -425,7 +434,7 @@ describe('the data boundary of a schemaVersion 5 Workspace root (only kit/ may h
 
 	it('refuses every path of a selected v5 root but kit/, also through a symlink out of kit/', async () => {
 		const root = await v5Root(await makeRoot())
-		const resolver = new NodeWorkspaceAdapterModuleResolver()
+		const resolver = rootBasedResolver()
 		const ok = await put(join(root, 'kit', 'dist', 'uiux.mjs'))
 		expect((await resolver.resolve(root, './kit/dist/uiux.mjs')).resolvedPath).toBe(ok)
 		for (const relative of ['views/x.mjs', 'flows/x.mjs', 'reviews/x.mjs', 'i18n/x.mjs', 'assets/u/x.mjs', 'artifacts/sha256/ab/x.mjs', 'history/checkpoints/x.mjs', '.transactions/t/staged/x.mjs', 'adapter.mjs', 'lib/x.mjs']) {
@@ -442,7 +451,7 @@ describe('the data boundary of a schemaVersion 5 Workspace root (only kit/ may h
 		await put(join(root, 'kit', 'adapter.mjs'))
 		await put(join(root, 'views', 'x.mjs'))
 		// <repo> holds `.uiux/workspace.json`, but that `.uiux/` is a relocated root, not old-layout metadata.
-		const resolver = new NodeWorkspaceAdapterModuleResolver()
+		const resolver = rootBasedResolver()
 		expect((await resolver.resolve(root, './kit/adapter.mjs')).resolvedPath).toBe(join(root, 'kit', 'adapter.mjs'))
 		// Another Workspace reaching into it through a package symlink.
 		const other = await makeRoot()
@@ -467,7 +476,7 @@ describe('the data boundary of a schemaVersion 5 Workspace root (only kit/ may h
 		await writeFile(join(pkg, 'package.json'), JSON.stringify({ name: 'app', type: 'module' }))
 		await mkdir(join(base, 'node_modules'), { recursive: true })
 		await symlink(pkg, join(base, 'node_modules', 'app'))
-		const resolver = new NodeWorkspaceAdapterModuleResolver()
+		const resolver = rootBasedResolver()
 		await expect(resolver.resolve(selected, 'app/ws-b/assets/u/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
 		expect((await resolver.resolve(selected, 'app/ws-b/kit/ok.mjs')).resolvedPath).toBe(join(sibling, 'kit', 'ok.mjs'))
 		// Below schemaVersion 5 the whole .uiux/ stays data (Clause 01a115cd-d109, below-5 half).
@@ -486,7 +495,7 @@ describe('the data boundary of a schemaVersion 5 Workspace root (only kit/ may h
 	})
 
 	it('treats a directory whose name begins with two dots as inside the root', async () => {
-		const resolver = new NodeWorkspaceAdapterModuleResolver()
+		const resolver = rootBasedResolver()
 		const root = await v5Root(await makeRoot())
 		await put(join(root, '..dotted', 'x.mjs'))
 		await expect(resolver.resolve(root, './..dotted/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
@@ -501,15 +510,17 @@ describe('the data boundary of a schemaVersion 5 Workspace root (only kit/ may h
 		const root = await v5Root(await makeRoot())
 		await put(join(root, 'views', 'x.mjs'))
 		await symlink(join(root, 'views'), join(root, 'kit'))
-		await expect(new NodeWorkspaceAdapterModuleResolver().resolve(root, './kit/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+		await expect(rootBasedResolver().resolve(root, './kit/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
 		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'views', 'x.mjs'), root)).toBe(true)
+		// The resolver of the v5 Workspace refuses the linked kit/ as its base before resolving anything.
+		await expect(new NodeWorkspaceAdapterModuleResolver().resolve(root, './x.mjs')).rejects.toThrow(/no kit\/ directory/i)
 	})
 
 	it('refuses ./kit/ when kit is a symbolic link to artifacts/, a directory outside the old-layout data directories', async () => {
 		const root = await v5Root(await makeRoot())
 		await put(join(root, 'artifacts', 'x.mjs'))
 		await symlink(join(root, 'artifacts'), join(root, 'kit'))
-		await expect(new NodeWorkspaceAdapterModuleResolver().resolve(root, './kit/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
+		await expect(rootBasedResolver().resolve(root, './kit/x.mjs')).rejects.toThrow(/canonical Workspace data directory/i)
 		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'artifacts', 'x.mjs'), root)).toBe(true)
 		// Followed through the link, kit/ would look like artifacts/ itself: only the lstat reader keeps it out.
 		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'artifacts', 'x.mjs'), root, statFileIdentity, statFileIdentity)).toBe(false)
@@ -532,6 +543,248 @@ describe('the data boundary of a schemaVersion 5 Workspace root (only kit/ may h
 		// An unselected v5 root met on the way up is a boundary too.
 		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'Kit2', 'x.mjs'), '/elsewhere', reader, reader)).toBe(true)
 		expect(await resolvedPathEntersWorkspaceDataDirectory(join(root, 'kit', 'x.mjs'), '/elsewhere', reader, reader)).toBe(false)
+	})
+})
+
+describe('Adapter resolution from kit/ in a schemaVersion 5 Workspace (Clause 01a115cd-d109, from-5 half)', () => {
+	const MODULE = 'export const marker = true\n'
+	const V5_MANIFEST = JSON.stringify({ schemaVersion: 5, i18n: { defaultLocale: 'en-US' }, viewports: {}, themes: {} })
+	const KIT = JSON.stringify({ designSystems: [], adapters: [], styles: [], themes: {}, components: {}, widgets: {} })
+
+	/** A v5 Workspace root with an empty kit/ (the resolver detects the layout from its manifest). */
+	async function v5Workspace(root: string): Promise<string> {
+		await mkdir(join(root, 'kit'), { recursive: true })
+		await writeFile(join(root, 'workspace.json'), V5_MANIFEST)
+		await writeFile(join(root, 'product-kit.json'), KIT)
+		return root
+	}
+
+	async function put(path: string, content = MODULE): Promise<string> {
+		await mkdir(dirname(path), { recursive: true })
+		await writeFile(path, content)
+		return path
+	}
+
+	async function putJson(path: string, value: unknown): Promise<string> {
+		return put(path, JSON.stringify(value))
+	}
+
+	/** A package `<directory>` with `package.json` fields (by default `main` is its `index.mjs`) and that `index.mjs`. */
+	async function putPackage(directory: string, fields: Record<string, unknown>): Promise<string> {
+		await putJson(join(directory, 'package.json'), { type: 'module', main: './index.mjs', ...fields })
+		return put(join(directory, 'index.mjs'))
+	}
+
+	const resolver = () => new NodeWorkspaceAdapterModuleResolver()
+
+	it('resolves a ./ specifier from kit/, never from the Workspace root (minimal form: no kit package file)', async () => {
+		const root = await v5Workspace(await makeRoot())
+		const inKit = await put(join(root, 'kit', 'adapter.mjs'))
+		await put(join(root, 'adapter.mjs'))
+		expect((await resolver().resolve(root, './adapter.mjs')).resolvedPath).toBe(inKit)
+		expect((await new NodeWorkspaceAdapterModuleResolver({ layout: V5_LAYOUT }).resolve(root, './adapter.mjs')).resolvedPath).toBe(inKit)
+		const nested = await put(join(root, 'kit', 'src', 'wrapper', 'uiux.mjs'))
+		expect((await resolver().resolve(root, './src/wrapper/uiux.mjs')).resolvedPath).toBe(nested)
+		// The root-relative spelling of the same file names kit/kit/…, which does not exist.
+		await expect(resolver().resolve(root, './kit/adapter.mjs')).rejects.toThrow()
+		// A directory whose name begins with two dots is inside kit/, not an escape.
+		const dotted = await put(join(root, 'kit', '..dotted', 'x.mjs'))
+		expect((await resolver().resolve(root, './..dotted/x.mjs')).resolvedPath).toBe(dotted)
+	})
+
+	it('refuses resolution when kit/ is missing or is not a real directory', async () => {
+		const missing = await makeRoot()
+		await writeFile(join(missing, 'workspace.json'), V5_MANIFEST)
+		await writeFile(join(missing, 'product-kit.json'), KIT)
+		await put(join(missing, 'adapter.mjs'))
+		await expect(resolver().resolve(missing, './adapter.mjs')).rejects.toThrow(/no kit\/ directory/i)
+		await rm(join(missing, 'adapter.mjs'))
+		await writeFile(join(missing, 'kit'), MODULE)
+		await expect(resolver().resolve(missing, './adapter.mjs')).rejects.toThrow(/no kit\/ directory/i)
+	})
+
+	it('keeps a ./ specifier inside kit/, as written and by its real path', async () => {
+		const root = await v5Workspace(await makeRoot())
+		await put(join(root, 'views', 'x.mjs'))
+		await put(join(root, 'lib', 'x.mjs'))
+		await put(join(root, 'adapter.mjs'))
+		for (const specifier of ['./../views/x.mjs', './../adapter.mjs', './src/../../lib/x.mjs', './.'])
+			await expect(resolver().resolve(root, specifier), specifier).rejects.toThrow(/escapes kit\//i)
+		// Percent-encoded dot segments pass the lexical check but resolve, as URLs, out of kit/.
+		await mkdir(join(root, 'kit', 'src'), { recursive: true })
+		await expect(resolver().resolve(root, './src/%2e%2e/%2e%2e/views/x.mjs')).rejects.toThrow(/resolves outside kit\//i)
+		// A file link and a directory link out of kit/.
+		await symlink(join(root, 'views', 'x.mjs'), join(root, 'kit', 'linked.mjs'))
+		await expect(resolver().resolve(root, './linked.mjs')).rejects.toThrow(/resolves outside kit\//i)
+		await symlink(join(root, 'lib'), join(root, 'kit', 'lib'))
+		await expect(resolver().resolve(root, './lib/x.mjs')).rejects.toThrow(/resolves outside kit\//i)
+	})
+
+	it('keeps a ./ specifier outside kit/node_modules/, as written, by its real path and by identity', async () => {
+		const root = await v5Workspace(await makeRoot())
+		await putPackage(join(root, 'kit', 'node_modules', 'pkg'), { name: 'pkg' })
+		for (const specifier of ['./node_modules/pkg/index.mjs', './NODE_MODULES/pkg/index.mjs', './src/../node_modules/pkg/index.mjs'])
+			await expect(resolver().resolve(root, specifier), specifier).rejects.toThrow(/names a file in kit\/node_modules\//i)
+		await mkdir(join(root, 'kit', 'src'), { recursive: true })
+		await symlink(join(root, 'kit', 'node_modules', 'pkg', 'index.mjs'), join(root, 'kit', 'src', 'linked.mjs'))
+		await expect(resolver().resolve(root, './src/linked.mjs')).rejects.toThrow(/resolves inside kit\/node_modules\//i)
+
+		// node_modules linked to another directory of kit/: that directory is the dependency directory.
+		const other = await v5Workspace(await makeRoot())
+		await putPackage(join(other, 'kit', 'deps', 'pkg'), { name: 'pkg' })
+		await symlink(join(other, 'kit', 'deps'), join(other, 'kit', 'node_modules'))
+		await expect(resolver().resolve(other, './deps/pkg/index.mjs')).rejects.toThrow(/resolves inside kit\/node_modules\//i)
+	})
+
+	it('resolves a bare specifier only when kit/package.json declares its package (the dependency guard)', async () => {
+		const root = await v5Workspace(await makeRoot())
+		const modules = join(root, 'kit', 'node_modules')
+		const declared = await putPackage(join(modules, '@fixture', 'declared'), {
+			name: '@fixture/declared', version: '2.3.0', exports: { '.': './index.mjs', './sub': './sub.mjs' },
+		})
+		const sub = await put(join(modules, '@fixture', 'declared', 'sub.mjs'))
+		const devOnly = await putPackage(join(modules, 'dev-only'), { name: 'dev-only' })
+		await putPackage(join(modules, 'legacy-main'), { name: 'legacy-main', main: './index.mjs' })
+		await putPackage(join(modules, 'undeclared'), { name: 'undeclared' })
+		await putPackage(join(modules, 'legacy-main-evil'), { name: 'legacy-main-evil' })
+		// An undeclared package installed inside a declared one.
+		await putPackage(join(modules, 'legacy-main', 'node_modules', 'undeclared'), { name: 'undeclared' })
+		await put(join(modules, 'legacy-main', 'node_modules', 'undeclared', 'x.js'))
+
+		// Without kit/package.json no package is declared.
+		await expect(resolver().resolve(root, '@fixture/declared')).rejects.toThrow(/does not declare/i)
+
+		await putJson(join(root, 'kit', 'package.json'), {
+			private: true,
+			dependencies: { '@fixture/declared': '^2.3.0', 'legacy-main': '1.0.0' },
+			devDependencies: { 'dev-only': '1.0.0' },
+			imports: { '#internal': './internal.mjs' },
+		})
+		await put(join(root, 'kit', 'internal.mjs'))
+		const resolved = await resolver().resolve(root, '@fixture/declared')
+		expect(resolved).toMatchObject({ resolvedPath: declared, packageName: '@fixture/declared', packageVersion: '2.3.0' })
+		expect((await resolver().resolve(root, '@fixture/declared/sub')).resolvedPath).toBe(sub)
+		expect((await resolver().resolve(root, 'dev-only')).resolvedPath).toBe(devOnly)
+
+		for (const specifier of [
+			'undeclared',
+			'legacy-main-evil',
+			'@fixture/undeclared',
+		])
+			await expect(resolver().resolve(root, specifier), specifier).rejects.toThrow(/does not declare/i)
+		// A subpath that would walk from a declared package to an undeclared one, and a `#` import.
+		for (const specifier of [
+			'legacy-main/../undeclared/index.mjs',
+			'legacy-main/%2e%2e/undeclared/index.mjs',
+			'legacy-main/node_modules/undeclared/x.js',
+			'legacy-main/NODE_MODULES/undeclared/x.js',
+			'legacy-main/./index.mjs',
+			'legacy-main/',
+			'#internal',
+			'@fixture',
+		])
+			await expect(resolver().resolve(root, specifier), specifier).rejects.toThrow(/does not name an npm package/i)
+	})
+
+	it('fails closed when kit/package.json is malformed or is not a regular file', async () => {
+		const root = await v5Workspace(await makeRoot())
+		await putPackage(join(root, 'kit', 'node_modules', 'dep'), { name: 'dep' })
+		const packageFile = join(root, 'kit', 'package.json')
+		for (const content of [
+			'{',
+			'[]',
+			JSON.stringify({ dependencies: ['dep'] }),
+			// A malformed member fails the whole file, even when another member declares the package.
+			JSON.stringify({ dependencies: 'dep', devDependencies: { dep: '1.0.0' } }),
+		]) {
+			await writeFile(packageFile, content)
+			await expect(resolver().resolve(root, 'dep'), content).rejects.toThrow(/kit\/package\.json (could not be read|is not a JSON object|member)/i)
+		}
+		// A link standing in for the package file (here to a data file an Editor could write) is refused.
+		await rm(packageFile)
+		await putJson(join(root, 'views', 'deps.json'), { dependencies: { dep: '1.0.0' } })
+		await symlink(join(root, 'views', 'deps.json'), packageFile)
+		await expect(resolver().resolve(root, 'dep')).rejects.toThrow(/not a regular file/i)
+	})
+
+	it('refuses a declared package whose main, exports target or link leads into the Workspace root outside kit/', async () => {
+		const root = await v5Workspace(await makeRoot())
+		const modules = join(root, 'kit', 'node_modules')
+		await put(join(root, 'views', 'x.mjs'))
+		await put(join(root, 'lib', 'x.mjs'))
+		await put(join(root, 'assets', 'u', 'index.mjs'))
+		await putJson(join(root, 'assets', 'u', 'package.json'), { name: 'linked-into-data', type: 'module', main: './index.mjs' })
+		const kitSource = await put(join(root, 'kit', 'src', 'a.mjs'))
+		await putJson(join(root, 'kit', 'src', 'package.json'), { name: 'linked-into-kit', type: 'module', main: './a.mjs' })
+		await putJson(join(modules, 'main-into-data', 'package.json'), { name: 'main-into-data', main: '../../../views/x.mjs' })
+		await putJson(join(modules, 'main-into-root', 'package.json'), { name: 'main-into-root', main: '../../../lib/x.mjs' })
+		await putJson(join(modules, 'main-into-kit', 'package.json'), { name: 'main-into-kit', main: '../../src/a.mjs' })
+		await putJson(join(modules, 'exports-dotdot', 'package.json'), { name: 'exports-dotdot', exports: { '.': '../../../views/x.mjs' } })
+		await putJson(join(modules, 'exports-link', 'package.json'), { name: 'exports-link', exports: { '.': './entry.mjs' } })
+		await symlink(join(root, 'views', 'x.mjs'), join(modules, 'exports-link', 'entry.mjs'))
+		await symlink(join(root, 'assets', 'u'), join(modules, 'linked-into-data'))
+		await symlink(join(root, 'kit', 'src'), join(modules, 'linked-into-kit'))
+		await putPackage(join(root, 'node_modules', 'hoisted-in-root'), { name: 'hoisted-in-root' })
+		const names = ['main-into-data', 'main-into-root', 'main-into-kit', 'exports-dotdot', 'exports-link', 'linked-into-data', 'linked-into-kit', 'hoisted-in-root']
+		await putJson(join(root, 'kit', 'package.json'), { dependencies: Object.fromEntries(names.map(name => [name, '*'])) })
+
+		for (const specifier of ['main-into-data', 'exports-link', 'linked-into-data'])
+			await expect(resolver().resolve(root, specifier), specifier).rejects.toThrow(/outside kit\/|canonical Workspace data directory/i)
+		for (const specifier of ['main-into-root', 'hoisted-in-root'])
+			await expect(resolver().resolve(root, specifier), specifier).rejects.toThrow(/inside the selected Workspace root but outside kit\//i)
+		// Node refuses an exports target that leaves its package before any path exists.
+		await expect(resolver().resolve(root, 'exports-dotdot')).rejects.toThrow(/package target|exports/i)
+		// A declared package may lead into kit/ itself (a linked kit package, a main into kit/src/).
+		expect((await resolver().resolve(root, 'main-into-kit')).resolvedPath).toBe(kitSource)
+		expect((await resolver().resolve(root, 'linked-into-kit')).resolvedPath).toBe(kitSource)
+	})
+
+	it('allows a declared package hoisted above the Workspace root, and still refuses an enclosing Workspace\'s data', async () => {
+		const outer = await makeRoot()
+		const root = await v5Workspace(join(outer, 'packages', 'app', '.uiux'))
+		const hoisted = await putPackage(join(outer, 'node_modules', 'hoisted'), { name: 'hoisted' })
+		await putJson(join(root, 'kit', 'package.json'), { dependencies: { hoisted: '*', 'into-outer-data': '*' } })
+		expect((await resolver().resolve(root, 'hoisted')).resolvedPath).toBe(hoisted)
+
+		// The directory above is an old-layout Workspace; a hoisted link into its assets/ is refused.
+		await mkdir(join(outer, '.uiux'), { recursive: true })
+		await writeFile(join(outer, WORKSPACE_MANIFEST_PATH), JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }))
+		await putPackage(join(outer, 'assets', 'pkg'), { name: 'into-outer-data' })
+		await symlink(join(outer, 'assets', 'pkg'), join(outer, 'node_modules', 'into-outer-data'))
+		await expect(resolver().resolve(root, 'into-outer-data')).rejects.toThrow(/canonical Workspace data directory/i)
+	})
+
+	it('refuses a module in the data of a Workspace nested inside kit/', async () => {
+		const root = await v5Workspace(await makeRoot())
+		const nestedV5 = await v5Workspace(join(root, 'kit', 'vendor'))
+		await put(join(nestedV5, 'views', 'x.mjs'))
+		const nestedOld = join(root, 'kit', 'old')
+		await mkdir(join(nestedOld, '.uiux'), { recursive: true })
+		await writeFile(join(nestedOld, WORKSPACE_MANIFEST_PATH), JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }))
+		await put(join(nestedOld, 'assets', 'u', 'x.mjs'))
+		await put(join(nestedOld, '.uiux', 'x.mjs'))
+		for (const specifier of ['./vendor/views/x.mjs', './old/assets/u/x.mjs', './old/.uiux/x.mjs'])
+			await expect(resolver().resolve(root, specifier), specifier).rejects.toThrow(/canonical Workspace data directory/i)
+		const nestedCode = await put(join(nestedV5, 'kit', 'ok.mjs'))
+		expect((await resolver().resolve(root, './vendor/kit/ok.mjs')).resolvedPath).toBe(nestedCode)
+	})
+
+	it('keeps the selected root\'s non-kit paths out when the v5 layout is given for a root without its marker files', async () => {
+		// Persistence passes its own layout; the boundary must not depend on the manifest and the
+		// Product Kit file both being present for the data-boundary walk to recognize the root.
+		const root = await makeRoot()
+		await put(join(root, 'lib', 'x.mjs'))
+		await putJson(join(root, 'kit', 'node_modules', 'main-into-root', 'package.json'), { name: 'main-into-root', main: '../../../lib/x.mjs' })
+		await putJson(join(root, 'kit', 'package.json'), { dependencies: { 'main-into-root': '*' } })
+		const v5 = new NodeWorkspaceAdapterModuleResolver({ layout: V5_LAYOUT })
+		await expect(v5.resolve(root, 'main-into-root')).rejects.toThrow(/inside the selected Workspace root but outside kit\//i)
+		const inKit = await put(join(root, 'kit', 'adapter.mjs'))
+		expect((await v5.resolve(root, './adapter.mjs')).resolvedPath).toBe(inKit)
+	})
+
+	it('names the resolution base: kit/ from schemaVersion 5, the Workspace root below it', () => {
+		expect(adapterResolutionBase('/w', V5_LAYOUT)).toBe(join('/w', 'kit'))
+		expect(adapterResolutionBase('/w', LEGACY_LAYOUT)).toBe(join('/w'))
 	})
 })
 
