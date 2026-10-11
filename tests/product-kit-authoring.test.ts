@@ -756,6 +756,48 @@ describe('kit project containment', () => {
 			])
 		})
 	}
+
+	for (const [label, link] of [
+		['the module file', async (pkg: string, outside: string, target: string) => {
+			await symlink(join(outside, 'lib', target), join(pkg, 'dist', 'uiux.js'))
+		}],
+		['a directory above the module file', async (pkg: string, outside: string, target: string) => {
+			await rm(join(pkg, 'dist'), { recursive: true })
+			await symlink(join(outside, target === 'uiux.js' ? 'lib' : 'gone'), join(pkg, 'dist'))
+		}],
+	] as const) {
+		it(`reports a bare Adapter one way when ${label} of a package in the Workspace links out of it, whether or not its target exists`, async () => {
+			const answers: unknown[] = []
+			for (const target of ['uiux.js', 'nothing.js']) {
+				const outside = await outsideKit()
+				await write(join(outside, 'lib', 'uiux.js'), 'export const adapter = {}\n')
+				const ctx = await v5Fixture({ ...KIT, adapters: [{ moduleSpecifier: '@acme/uiux-adapter/uiux' }] })
+				const pkg = join(ctx.root, 'kit', 'node_modules', '@acme', 'uiux-adapter')
+				await write(join(pkg, 'package.json'), JSON.stringify({ name: '@acme/uiux-adapter', version: '2.0.0', type: 'module', exports: { './uiux': './dist/uiux.js' } }))
+				await mkdir(join(pkg, 'dist'))
+				await link(pkg, outside, target)
+				const read = await ctx.app.readProductKit()
+				answers.push(read?.adapters)
+				expect(JSON.stringify(read)).not.toContain(outside)
+				// Loading is unchanged: the linked module that exists still resolves.
+				const resolving = new NodeWorkspaceAdapterModuleResolver({ layout: ctx.persistence.layout }).resolve(ctx.root, '@acme/uiux-adapter/uiux')
+				if (target === 'uiux.js') await expect(resolving).resolves.toMatchObject({ resolvedPath: join(outside, 'lib', 'uiux.js') })
+				else await expect(resolving).rejects.toThrow('Adapter module specifier @acme/uiux-adapter/uiux does not resolve to a readable module file.')
+			}
+			expect(answers).toEqual([
+				[{ moduleSpecifier: '@acme/uiux-adapter/uiux', status: 'resolved' }],
+				[{ moduleSpecifier: '@acme/uiux-adapter/uiux', status: 'resolved' }],
+			])
+		})
+	}
+
+	it('still reports a missing module file of a package in the Workspace, with no link on its way, as failed', async () => {
+		const ctx = await v5Fixture({ ...KIT, adapters: [{ moduleSpecifier: '@acme/uiux-adapter/uiux' }] })
+		await write(join(ctx.root, 'kit', 'node_modules', '@acme', 'uiux-adapter', 'package.json'), JSON.stringify({ name: '@acme/uiux-adapter', exports: { './uiux': './dist/uiux.js' } }))
+		const read = await ctx.app.readProductKit()
+		expect(read?.adapters).toEqual([expect.objectContaining({ moduleSpecifier: '@acme/uiux-adapter/uiux', status: 'failed', message: expect.stringContaining('<workspace>/kit/node_modules/@acme/uiux-adapter/dist/uiux.js') })])
+		expect(JSON.stringify(read)).not.toContain(ctx.root)
+	})
 })
 
 describe('host paths in the Product Kit Resource', () => {

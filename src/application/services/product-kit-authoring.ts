@@ -1,7 +1,7 @@
 import { lstat, readFile } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 
-import { NodeWorkspaceAdapterModuleResolver } from '../../adapters/resolution'
+import { AdapterModuleBehindLinkError, NodeWorkspaceAdapterModuleResolver } from '../../adapters/resolution'
 import { bareSpecifierPackageName } from '../../adapters/kit-dependencies'
 import { checkProductKitAgainstKit, containedRealPath, locateKitProject, maskHostPaths, type KitProject } from '../../adapters/kit-registry'
 import {
@@ -266,6 +266,12 @@ export function createProductKitAuthoringService(persistence: FileNativePersiste
 				})
 			}
 			catch (error) {
+				// A module file behind a link out of the Workspace, or a dangling one, is reported as one
+				// that exists there: nothing tells the two apart.
+				if (error instanceof AdapterModuleBehindLinkError) {
+					results.push({ moduleSpecifier: entry.moduleSpecifier, status: 'resolved' })
+					continue
+				}
 				results.push({ moduleSpecifier: entry.moduleSpecifier, status: 'failed', message: maskHostPaths(error instanceof Error ? error.message : String(error), roots) })
 			}
 		}

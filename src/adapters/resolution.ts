@@ -216,14 +216,19 @@ async function resolveFromCodeDirectory(root: string, codeDirectoryName: string,
 	// naming no path: a link inside `kit/` may point anywhere, and its target is not described.
 	const unresolvedInKit = () => new Error(`Adapter module specifier ${moduleSpecifier} does not resolve to a file inside ${codeDirectoryName}/.`)
 	let resolvedPath: string
+	let modulePath: string | undefined
 	try {
 		const moduleIdentity = resolveImport(moduleSpecifier, parentUrl)
 		if (!moduleIdentity.startsWith('file:'))
 			throw new Error('Adapter module must resolve to a file-backed module.')
-		resolvedPath = await realpath(fileURLToPath(moduleIdentity))
+		modulePath = fileURLToPath(moduleIdentity)
+		resolvedPath = await realpath(modulePath)
 	}
 	catch (error) {
 		if (relativeSelection) throw unresolvedInKit()
+		// A bare specifier's module behind a link out of the root, or a dangling one, names no path.
+		if (modulePath !== undefined && await passesUnresolvedLink(realRoot, modulePath))
+			throw new AdapterModuleBehindLinkError(moduleSpecifier)
 		throw error
 	}
 
@@ -239,6 +244,34 @@ async function resolveFromCodeDirectory(root: string, codeDirectoryName: string,
 		throw new Error(`Adapter module resolves inside the selected Workspace root but outside ${codeDirectoryName}/, which is Workspace data like a canonical Workspace data directory; Adapter code must live outside authored data that Editors and Agents can write.`)
 	await assertOutsideWorkspaceData(resolvedPath, realRoot)
 	return resolvedAdapterModule(moduleSpecifier, resolvedPath, relativeSelection)
+}
+
+/**
+ * A bare Adapter specifier whose module file, inside the selected root as Node module resolution
+ * names it, cannot be read and lies behind a link whose target is outside the root or does not
+ * resolve. Its message names no path, so what lies behind the link is not described.
+ */
+export class AdapterModuleBehindLinkError extends Error {
+	constructor(moduleSpecifier: string) {
+		super(`Adapter module specifier ${moduleSpecifier} does not resolve to a readable module file.`)
+		this.name = 'AdapterModuleBehindLinkError'
+	}
+}
+
+/**
+ * Whether `path`, inside `realRoot` as written, passes a link (itself or a directory above it, below
+ * the root) whose target lies outside `realRoot` or does not resolve.
+ */
+async function passesUnresolvedLink(realRoot: string, path: string): Promise<boolean> {
+	const rel = relative(realRoot, path)
+	if (rel === '' || escapesBase(rel)) return false
+	for (let current = path; current !== realRoot && current !== dirname(current); current = dirname(current)) {
+		const info = await lstat(current).catch(() => undefined)
+		if (!info?.isSymbolicLink()) continue
+		const target = await realpath(current).catch(() => undefined)
+		if (target === undefined || !isContainedPath(realRoot, target)) return true
+	}
+	return false
 }
 
 async function assertOutsideWorkspaceData(resolvedPath: string, realRoot: string): Promise<void> {
