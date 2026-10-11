@@ -6,10 +6,15 @@ import { fileURLToPath } from 'node:url'
  *
  * The rule is deliberately conservative: once an absolute path starts, it runs to the end of the
  * line, a quote, the start of another path, or path-terminating punctuation (`.,;:!?)]}>|` followed
- * by whitespace, a quote or the end). A path may hold spaces, tabs and apostrophes (`o'brien`), and
- * the next word cannot tell a path with spaces (`/Users/John Smith`) from the prose after it, so the
- * prose after a path is masked with it until one of those ends: `in /a/b imported from /c/d` reads
- * `in <path> <path>`. Masking too much is harmless; naming a host path is not.
+ * by the end, a quote, or whitespace and a word with no path separator). A path may hold spaces,
+ * tabs, apostrophes (`o'brien`) and punctuation before a space (`/Users/J. Smith/x`), and the next
+ * word cannot tell a path with spaces (`/Users/John Smith`) from the prose after it, so the prose
+ * after a path is masked with it until one of those ends: `in /a/b imported from /c/d` reads
+ * `in <path> <path>`. A Workspace root standing alone, as a path ends, is kept as `<workspace>`
+ * and the words after it stay. Masking too much is harmless; naming a host path is not.
+ *
+ * Every pattern runs in linear time: a check that looks across a run of whitespace or punctuation
+ * is made only at the run's first character.
  */
 
 /** A marker standing for the `index`-th Workspace root, written where the root occurs. */
@@ -22,8 +27,14 @@ const SPAN = String.raw`\u0002\d+\u0002`
 const LEAD = String.raw`(?<![A-Za-z0-9_.~\/\\\u0001])`
 /** The start of an absolute path: `/` (not a lone one before whitespace), a drive (`C:\`) or a UNC prefix (`\\`). */
 const START = String.raw`(?:\/(?!\s)|[A-Za-z]:\\|\\\\)`
-/** Punctuation that ends a path when whitespace, a quote or the end follows it. */
-const CLOSE = String.raw`[.,;:!?)\]}>|]+(?=$|[\s'"\x60])`
+/**
+ * Where a path may end: the end, a line end, a quote, or a run of spaces and tabs (taken whole)
+ * whose next word holds no path separator.
+ */
+const PATH_ENDS = String.raw`(?:$|[\r\n'"\x60]|[^\S\r\n]+(?![^\S\r\n])(?![^\s'"\x60]*[\/\\]))`
+const PUNCTUATION = String.raw`[.,;:!?)\]}>|]`
+/** Punctuation that ends a path where a path may end, checked from the first of a run. */
+const CLOSE = String.raw`(?<!${PUNCTUATION})${PUNCTUATION}+(?=${PATH_ENDS})`
 /** A quote ends a path, except an apostrophe a letter or digit follows (`o'brien`). */
 const QUOTE_END = String.raw`["\x60]|'(?![\p{L}\p{N}_])`
 /** A file URL: no whitespace, ending like a path. */
@@ -31,11 +42,13 @@ const FILE_URL = new RegExp(String.raw`file:(?:(?!${CLOSE}|${QUOTE_END})[^\s<>])
 /** A path in quotes: everything up to the matching quote on the line, spaces included. */
 const QUOTED = String.raw`(['"\x60])((?:${ROOT}|${START})[^\r\n]*?)(?=\1(?![\p{L}\p{N}_]))`
 /**
- * A path outside quotes. A Workspace root starts one wherever it occurs; another absolute path
- * starts one after a non-path character. It ends at a line end, a quote, path-terminating
- * punctuation, or where another path starts (that one is masked on its own).
+ * A path outside quotes. A Workspace root starts one wherever it occurs, and is one by itself where
+ * a path may end; another absolute path starts one after a non-path character. It ends at a line
+ * end, a quote, path-terminating punctuation, or where another path starts after optional
+ * whitespace (that one is masked on its own; the check is made from the first whitespace of a run).
  */
-const BARE = String.raw`(?:${ROOT}|${LEAD}${START})(?:(?!${CLOSE}|${QUOTE_END}|\s*(?:${LEAD}(?:${START}|${ROOT})|${SPAN}))[^\r\n])*`
+const NEXT_PATH = String.raw`(?<!\s)\s*(?:${LEAD}(?:${START}|${ROOT})|${SPAN})`
+const BARE = String.raw`${ROOT}(?=${PUNCTUATION}*${PATH_ENDS})|(?:${ROOT}|${LEAD}${START})(?:(?!${CLOSE}|${QUOTE_END}|${NEXT_PATH})[^\r\n])*`
 const PATHS = new RegExp(String.raw`${QUOTED}|${BARE}`, 'gu')
 const ROOT_MARKS = new RegExp(ROOT, 'gu')
 const SPAN_MARKS = new RegExp(SPAN, 'gu')
@@ -87,8 +100,8 @@ export function maskHostPaths(message: string, roots: readonly string[]): string
 	})
 	result = result.replace(PATHS, (match, quote: string | undefined, quoted: string | undefined) => {
 		if (quote !== undefined && quoted !== undefined) return `${quote}${span(describe(quoted))}`
-		const [, path = match, trailing = ''] = /^(.*?)(\s*)$/su.exec(match) ?? []
-		return `${span(describe(path))}${trailing}`
+		const path = match.trimEnd()
+		return `${span(describe(path))}${match.slice(path.length)}`
 	})
 	return unmarkSpans(result)
 }

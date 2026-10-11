@@ -823,8 +823,30 @@ describe('host paths in the Product Kit Resource', () => {
 		['a path on its own line', 'in /home/x/a.js\nnext line', 'in <path>\nnext line'],
 		['a relative path', 'kit/src/a.js and ./b.js', 'kit/src/a.js and ./b.js'],
 		['a lone slash', 'a / b', 'a / b'],
+		['a directory name ending in .', 'in /Users/J. Smith/other/x', 'in <path>'],
+		['a directory name ending in ;', 'in /Users/J; Smith/other/x', 'in <path>'],
+		['a directory name ending in :', 'in /Users/J: Smith/other/x', 'in <path>'],
+		['a directory name ending in !', 'in /Users/J! Smith/other/x', 'in <path>'],
+		['a directory name ending in ?', 'in /Users/J? Smith/other/x', 'in <path>'],
+		['a directory name ending in }', 'in /Users/J} Smith/other/x', 'in <path>'],
+		['a directory name ending in |', 'in /Users/J| Smith/other/x', 'in <path>'],
+		['a directory name ending in . before a Windows separator', 'in C:\\Users\\J. Smith\\x', 'in <path>'],
+		['the root alone before prose', `Workspace ${root} is not writable`, 'Workspace <workspace> is not writable'],
+		['the root alone before punctuation', `Workspace ${root}. Next`, 'Workspace <workspace>. Next'],
+		['a sibling of the root sharing its name', `in ${root}.bak/x`, 'in <path>'],
+		['a sibling of the root with a space', `in ${root} other/x`, 'in <path>'],
 	])('masks %s', (_case, message, masked) => {
 		expect(maskHostPaths(message, [root])).toBe(masked)
+	})
+
+	it('masks in linear time across long runs of whitespace and punctuation', () => {
+		const whitespace = ' \t\u00A0\u2003'.repeat(10_000)
+		const started = performance.now()
+		expect(maskHostPaths(`in /home/x${whitespace}`, [root])).toBe(`in <path>${whitespace}`)
+		maskHostPaths(`in /home/x.${whitespace}y`, [root])
+		maskHostPaths(`in ${root}${whitespace}y`, [root])
+		maskHostPaths(`in /home/x${'.;'.repeat(20_000)} y`, [root])
+		expect(performance.now() - started).toBeLessThan(50)
 	})
 
 	it('names no host path outside the Workspace in an Adapter\'s resolution failure', async () => {
