@@ -340,8 +340,8 @@ export const WORKSPACE_GITIGNORE_RULES: readonly string[] = Object.freeze([
 
 export const PRODUCT_WORKSPACE_SCHEMA_POLICY = defineWorkspaceSchemaPolicy({
 	currentVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
-	recognizedVersions: [1, 2, 3, 4],
-	steps: [WORKSPACE_V1_TO_V2_STEP, WORKSPACE_V2_TO_V3_STEP, WORKSPACE_V3_TO_V4_STEP],
+	recognizedVersions: [1, 2, 3, 4, 5],
+	steps: [WORKSPACE_V1_TO_V2_STEP, WORKSPACE_V2_TO_V3_STEP, WORKSPACE_V3_TO_V4_STEP, WORKSPACE_V4_TO_V5_STEP],
 })
 
 /** Returns the same object when no lifecycle resolve event lacks a resolution. */
