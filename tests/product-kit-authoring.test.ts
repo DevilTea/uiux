@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -902,5 +902,37 @@ describe('host paths in the Product Kit Resource', () => {
 		const text = JSON.stringify(read)
 		expect(text).not.toContain(parent)
 		expect(text).not.toContain(tmpdir())
+	})
+})
+
+describe('authoring never writes inside the kit project (Scenario 01a11bb1-c0b4)', () => {
+	/** Every file under `kit/`, with its bytes. */
+	async function kitTree(root: string): Promise<Record<string, string>> {
+		const files: Record<string, string> = {}
+		for (const entry of await readdir(join(root, 'kit'), { recursive: true, withFileTypes: true })) {
+			if (!entry.isFile()) continue
+			const path = join(entry.parentPath, entry.name)
+			files[path.slice(root.length + 1)] = (await readFile(path)).toString('base64')
+		}
+		return files
+	}
+
+	it('leaves every file under kit/ unchanged when an Editor creates a View, updates the Workspace settings and changes the Product Kit file', async () => {
+		const ctx = await v5Fixture()
+		// Build output beside the component sources.
+		await write(join(ctx.root, 'kit', 'dist', 'kit.css'), '.button { color: red }\n')
+		const before = await kitTree(ctx.root)
+		expect(Object.keys(before)).toEqual(expect.arrayContaining(['kit/src/button.ts', 'kit/dist/kit.css', 'kit/package.json']))
+		const session = http(ctx.app, HUMAN_EDITOR)
+
+		expect(await session.createView({ id: '66666666-6666-4666-8666-666666666666', name: 'Checkout', spec: { intent: 'Pay', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [] } })).toMatchObject({ status: 'created' })
+		const workspace = await ctx.app.readPointResource('workspace', 'workspace')
+		if (workspace?.kind !== 'workspace') throw new Error('workspace')
+		expect(await updateWorkspaceSettingsForHttp(session, { expectedRevision: workspace.revision, settings: { i18n: { defaultLocale: 'en-US' }, viewports: { desktop: { dimensions: { width: 1280, height: 800 } } }, themes: {} } })).toMatchObject({ status: 200 })
+		expect(await composeProductKitForHttp(session, { expectedRevision: await revision(ctx.app), designSystems: ['@acme/design-system'], adapters: ['./uiux.js', '@acme/uiux-adapter'] })).toMatchObject({ status: 200 })
+		expect(await updateProductKitForHttp(session, { expectedRevision: await revision(ctx.app), adapters: [{ moduleSpecifier: './uiux.js' }, { moduleSpecifier: '@acme/uiux-adapter' }], styles: ['./dist/kit.css'], themes: {} })).toMatchObject({ status: 200 })
+		expect(await updateComponentRegistryForHttp(session, { expectedRevision: await revision(ctx.app), components: { button: { files: ['src/button.ts'], layer: 'design-system' } }, widgets: { Button: { component: 'button' } } })).toMatchObject({ status: 200 })
+
+		expect(await kitTree(ctx.root)).toEqual(before)
 	})
 })
