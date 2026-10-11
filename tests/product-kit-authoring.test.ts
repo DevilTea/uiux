@@ -528,10 +528,27 @@ describe('the import scan (Rule 01a11bb1-a310)', () => {
 		expect(scanImportSpecifiers(text)).toEqual(['./a', './b.js', './side.css', './c', './e', './f', './g'])
 	})
 
+	it('reads clauses without spaces, dynamic imports with options and template literals without interpolation', () => {
+		const text = [
+			'import{a}from\'./a\'',
+			'import*as b from"./b"',
+			'export*from\'./c\'',
+			'export{d}from"./d"',
+			'const e = await import(\'./e\', { with: { type: \'json\' } })',
+			'const f = await import( "./f" , {})',
+			'const g = await import(`./g`)',
+			'const h = require(`./h`)',
+			'const i = await import(`./${name}`)',
+			'const j = require(`./j-${name}`)',
+			'const k = `import{x}`',
+		].join('\n')
+		expect(scanImportSpecifiers(text)).toEqual(['./a', './b', './c', './d', './e', './f', './g', './h'])
+	})
+
 	it('scans a pathological 1 MB file well under a second', async () => {
 		const size = 1024 * 1024
 		const fill = (unit: string, tail = '') => unit.repeat(Math.floor((size - tail.length) / unit.length)) + tail
-		for (const text of [fill('import '), fill('export '), fill('export { a, ', 'from \'./x\''), fill('import(\'', ''), fill('from '), fill('import \'a', '\'')]) {
+		for (const text of [fill('import '), fill('export '), fill('export { a, ', 'from \'./x\''), fill('import(\'', ''), fill('from '), fill('import \'a', '\''), fill('import{'), fill('export*'), fill('import(`'), fill('require(`$'), fill('import(\'a\','), fill('import{a}from')]) {
 			const started = performance.now()
 			scanImportSpecifiers(text)
 			expect(performance.now() - started, text.slice(0, 20)).toBeLessThan(500)

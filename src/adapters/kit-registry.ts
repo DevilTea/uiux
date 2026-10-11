@@ -399,8 +399,10 @@ function isWordChar(char: string | undefined): boolean {
 
 /**
  * The distinct module specifiers of `text`'s static imports and re-exports (`import … from 'x'`,
- * `export … from 'x'`), side-effect imports (`import 'x'`), dynamic imports (`import('x')`) and
- * `require('x')` calls, at most {@link MAX_IMPORTS_PER_FILE}.
+ * `export … from 'x'`), side-effect imports (`import 'x'`), dynamic imports (`import('x')`, also
+ * with an options argument) and `require('x')` calls, at most {@link MAX_IMPORTS_PER_FILE}. A
+ * static clause may start without a space (`import{a}from'x'`, `export*from'x'`), and a dynamic
+ * import or `require` may name a template literal without interpolation.
  *
  * A single forward pass: each keyword is looked at once, and the clause of a static import, which
  * reaches the next quote, backtick or semicolon, is judged from that terminator, which is found
@@ -412,17 +414,29 @@ export function scanImportSpecifiers(text: string): string[] {
 	let terminator = -2
 	let consumed = 0
 
-	/** The string literal opening at `quote`: its value and the index after it, or `undefined`. */
+	/**
+	 * The string literal opening at `quote`: its value and the index after it, or `undefined`. A
+	 * template literal counts only on one line and without interpolation (`${`).
+	 */
 	const stringAt = (quote: number): Readonly<{ value: string; end: number }> | undefined => {
 		if (strings.has(quote)) return strings.get(quote)
 		const mark = text[quote]
 		let result: Readonly<{ value: string; end: number }> | undefined
+		const limit = Math.min(text.length, quote + 1 + MAX_SPECIFIER_LENGTH + 1)
 		if (mark === '\'' || mark === '"') {
-			const limit = Math.min(text.length, quote + 1 + MAX_SPECIFIER_LENGTH + 1)
 			for (let index = quote + 1; index < limit; index++) {
 				const char = text[index]
 				if (char === '\n' || char === '\'' || char === '"') {
 					if (char === mark && index > quote + 1) result = { value: text.slice(quote + 1, index), end: index + 1 }
+					break
+				}
+			}
+		}
+		else if (mark === '`') {
+			for (let index = quote + 1; index < limit; index++) {
+				const char = text[index]
+				if (char === '\n' || char === '`' || (char === '$' && text[index + 1] === '{')) {
+					if (char === '`' && index > quote + 1) result = { value: text.slice(quote + 1, index), end: index + 1 }
 					break
 				}
 			}
@@ -455,12 +469,13 @@ export function scanImportSpecifiers(text: string): string[] {
 		fromEndsAt.set(at, result)
 		return result
 	}
-	const take = (literal: Readonly<{ value: string; end: number }> | undefined, closeParen: boolean): boolean => {
+	/** Takes `literal`; with `close`, only when one of its characters follows it (spaces aside). */
+	const take = (literal: Readonly<{ value: string; end: number }> | undefined, close?: string): boolean => {
 		if (!literal) return false
 		let end = literal.end
-		if (closeParen) {
+		if (close !== undefined) {
 			end = skipSpace(end)
-			if (text[end] !== ')') return false
+			if (!close.includes(text[end] ?? '\n')) return false
 			end++
 		}
 		found.add(literal.value)
@@ -476,25 +491,26 @@ export function scanImportSpecifiers(text: string): string[] {
 		const after = start + keyword.length
 		const next = skipSpace(after)
 		if (keyword === 'require') {
-			if (text[next] === '(') take(stringAt(skipSpace(next + 1)), true)
+			if (text[next] === '(') take(stringAt(skipSpace(next + 1)), ')')
 			continue
 		}
 		if (keyword === 'import') {
 			if (text[next] === '\'' || text[next] === '"') {
-				take(stringAt(next), false)
+				take(stringAt(next))
 				continue
 			}
+			// `import('x')`, or `import('x', options)`.
 			if (text[next] === '(') {
-				take(stringAt(skipSpace(next + 1)), true)
+				take(stringAt(skipSpace(next + 1)), '),')
 				continue
 			}
 		}
-		// `import … from 'x'` and `export … from 'x'`: a space, then a clause up to the first quote.
-		if (next === after) continue
+		// `import … from 'x'` and `export … from 'x'`: a space, `{` or `*`, then a clause up to the first quote.
+		if (next === after && text[next] !== '{' && text[next] !== '*') continue
 		const quote = nextTerminator(after + 1)
 		if (quote < 0 || (text[quote] !== '\'' && text[quote] !== '"')) continue
 		const fromStart = fromStartBefore(quote)
-		if (fromStart > after) take(stringAt(quote), false)
+		if (fromStart > after) take(stringAt(quote))
 	}
 	return [...found]
 }
