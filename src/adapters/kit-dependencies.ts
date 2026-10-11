@@ -1,5 +1,5 @@
 import { lstat, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, posix } from 'node:path'
 
 import { isProductKitPackageName } from '../domain/product-kit/schema'
 import { isSafeRelativePath } from '../domain/validation'
@@ -107,4 +107,34 @@ function unreadable(cause: unknown): Error {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * The as-written rule for a `./` specifier resolved from the kit project (Clause
+ * 01a115cd-d109-76d3-9622-85d0080c60b6, from `schemaVersion` 5): it names a path inside
+ * `<codeDirectoryName>/` and outside its `node_modules/`. Returns the problem, or `undefined`.
+ * Shared by Adapter resolution and the Product Kit authoring operations, which apply it before
+ * storing a specifier; resolution also checks the real path the specifier resolves to.
+ */
+export function relativeKitSpecifierProblem(codeDirectoryName: string, moduleSpecifier: string): string | undefined {
+	const authored = posix.normalize(moduleSpecifier.slice(2))
+	if (authored === '.' || authored === './' || authored === '..' || authored.startsWith('../') || posix.isAbsolute(authored))
+		return `Adapter module specifier ${moduleSpecifier} escapes ${codeDirectoryName}/.`
+	if ((authored.split('/')[0] ?? '').toLowerCase() === DEPENDENCY_DIRECTORY)
+		return `Adapter module specifier ${moduleSpecifier} names a file in ${codeDirectoryName}/${DEPENDENCY_DIRECTORY}/; select a dependency by its bare package name.`
+	return undefined
+}
+
+/**
+ * The dependency guard for a bare specifier resolved from the kit project (Clause
+ * 01a115cd-d109-76d3-9622-85d0080c60b6): it names an npm package, followed by a plain subpath,
+ * that `<codeDirectoryName>/package.json` declares (`declared`). Returns the problem, or `undefined`.
+ */
+export function bareKitSpecifierProblem(codeDirectoryName: string, moduleSpecifier: string, declared: ReadonlySet<string>): string | undefined {
+	const packageName = bareSpecifierPackageName(moduleSpecifier)
+	if (packageName === undefined)
+		return `Adapter module specifier ${moduleSpecifier} does not name an npm package followed by a plain subpath.`
+	if (!declared.has(packageName))
+		return `Adapter module specifier ${moduleSpecifier} names ${packageName}, which ${codeDirectoryName}/${KIT_PACKAGE_FILENAME} does not declare as a dependency.`
+	return undefined
 }
