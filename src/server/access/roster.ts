@@ -455,6 +455,8 @@ export function setMember(
 		if (clash && clash.id !== member.id) throw new AccessError('access.nickname_taken', `Nickname ${JSON.stringify(renamed)} is already used in this roster.`)
 		next = { ...next, nickname: renamed }
 	}
+	// An edit that changes nothing (`{}`, or the current nickname or kind) leaves the roster unwritten.
+	if (next === member) return { file, result: member }
 	const written: AccessFile = { ...file, members: file.members.map(item => item.id === member.id ? next : item) }
 	assertRosterWrite(file, written)
 	return { file: written, result: next }

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type OutgoingHttpHeaders, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -427,6 +427,21 @@ describe('member keys over the administration wire (issue #142, P5)', () => {
 			expect(await refused.json()).toMatchObject({ code: 'malformed_payload' })
 		}
 		expect((await patch(owner.id, { revoke: many.slice(0, 256) })).status).toBe(200)
+	})
+
+	it('answers an edit that changes nothing with the member and leaves the roster unwritten', async () => {
+		const owner = (await listed()).members.find(item => item.kind === 'human')!
+		const { file } = accessStorePaths(resolveUiuxHome(), root)
+		const before = await stat(file, { bigint: true })
+		const text = await readFile(file, 'utf8')
+		for (const body of [{}, { nickname: owner.nickname }, { kind: owner.kind }]) {
+			const response = await patch(owner.id, body)
+			expect(response.status).toBe(200)
+			expect(await response.json()).toMatchObject({ member: { id: owner.id, nickname: owner.nickname, keys: owner.keys } })
+		}
+		const after = await stat(file, { bigint: true })
+		expect([after.ino, after.mtimeNs]).toEqual([before.ino, before.mtimeNs])
+		expect(await readFile(file, 'utf8')).toBe(text)
 	})
 
 	it('refuses a key outside the catalog, a humanOnly key for an Agent and a set lacking a requirement, naming the keys', async () => {
