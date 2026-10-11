@@ -12,11 +12,13 @@ import {
 	layoutForSchemaVersion,
 	readActiveServerHold,
 	SERVER_HOLD_RELATIVE_PATH,
+	V5_LAYOUT,
 	WORKSPACE_DATA_DIRECTORY,
 	workspaceRelativePath,
 } from '../src/persistence'
 import { CheckpointStore } from '../src/persistence/history'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { CURRENT_TEST_LAYOUT } from './support/workspace-layout'
 
 const HEX = 'ab'.repeat(32)
 const CHECKPOINT_ID = '11111111-1111-4111-8111-111111111111'
@@ -61,9 +63,11 @@ describe('Workspace layout seam', () => {
 		expect([...CANONICAL_WORKSPACE_DATA_DIRECTORIES].sort()).toEqual(['.uiux', 'assets', 'flows', 'i18n', 'reviews', 'views'])
 	})
 
-	it('selects the legacy layout for every schemaVersion this build knows, and for any other version', () => {
-		for (const version of [...PRODUCT_WORKSPACE_SCHEMA_POLICY.recognizedVersions, CURRENT_WORKSPACE_SCHEMA_VERSION, 0, -1, 99, Number.NaN])
+	it('selects the legacy layout for every schemaVersion this build knows and for unusable versions, and the schemaVersion 5 layout from 5', () => {
+		for (const version of [...PRODUCT_WORKSPACE_SCHEMA_POLICY.recognizedVersions, CURRENT_WORKSPACE_SCHEMA_VERSION, 0, -1, Number.NaN])
 			expect(layoutForSchemaVersion(version), String(version)).toBe(LEGACY_LAYOUT)
+		for (const version of [5, 6, 99])
+			expect(layoutForSchemaVersion(version), String(version)).toBe(V5_LAYOUT)
 	})
 
 	it('writes the lock, transactions, artifacts, Checkpoints and server hold at the legacy paths', async () => {
@@ -108,10 +112,10 @@ describe('Workspace layout seam', () => {
 		}, new Map())
 		expect(await readdir(join(root, '.uiux', 'history', 'checkpoints'))).toEqual([`${CHECKPOINT_ID}.json`])
 
-		const hold = await acquireServerHold(root)
+		const hold = await acquireServerHold(root, { layout: CURRENT_TEST_LAYOUT })
 		expect(hold).toBeDefined()
 		expect((await lstat(join(root, '.uiux', '.server-hold.json'))).isFile()).toBe(true)
-		expect((await readActiveServerHold(root))?.token).toBe(hold!.hold.token)
+		expect((await readActiveServerHold(root, CURRENT_TEST_LAYOUT))?.token).toBe(hold!.hold.token)
 		await hold!.release()
 		expect(await exists(join(root, '.uiux', '.server-hold.json'))).toBe(false)
 		expect((await readdir(join(root, '.uiux'))).filter(name => name.endsWith('.tmp'))).toEqual([])
