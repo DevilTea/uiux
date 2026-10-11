@@ -54,7 +54,8 @@ export type AccessCommandOptions = Readonly<{
 	schemaPolicy?: WorkspaceSchemaPolicy
 }>
 
-export const ACCESS_HELP = `Access commands (each takes --workspace <dir>; the roster lives in $UIUX_HOME, default ~/.uiux):
+export const ACCESS_HELP = `Access commands (each takes [--workspace <dir>], otherwise the Workspace is discovered from the
+current directory; the roster lives in $UIUX_HOME, default ~/.uiux):
   member add <nick> (--preset <name> | --keys <k,...> | --all-keys) [--kind human|agent]
   member set <nick> [--preset <name>] [--grant <k,...>] [--revoke <k,...>] [--nickname <new>]
                                              (--preset copies an Access preset's keys: Viewer, Reviewer,
@@ -71,8 +72,10 @@ export const ACCESS_HELP = `Access commands (each takes --workspace <dir>; the r
                                              (--origin defaults to the loopback origin on the server's port)
   session list
   session revoke <session-id> | --member <nick>
-  access copy --from <old-dir> [--replace]   (roster and host history, once; copy before uiux migrate:
-                                             --replace discards the target's roster and own host history)`
+  access copy --from <old-dir> [--replace]   (roster and host history, once; after uiux migrate moves a
+                                             Workspace into <old-dir>/.uiux/, copy --from <old-dir> before
+                                             the first uiux dev there; --replace discards the target's
+                                             roster and own host history)`
 
 class UsageError extends Error {}
 

@@ -20,8 +20,12 @@ Options:
   -v, --version  Show version
 
 Commands:
-  init --workspace <dir>  Initialize a Workspace
-  dev --workspace <dir> [--host <address>] [--origin <url>]...
+  init [--workspace <dir>]
+                           Initialize a Workspace in <dir>, by default in .uiux/ of the
+                           Git repository's top level (of the current directory outside
+                           a repository): workspace.json, product-kit.json and a
+                           .gitignore for the runtime files, kit/node_modules/ and kit/dist/
+  dev [--workspace <dir>] [--host <address>] [--origin <url>]...
                            Start the unified UIUX Workbench/Nitro server. By default
                            it listens on loopback only (127.0.0.1; PORT selects the
                            port, default 3000) and accepts only loopback host names.
@@ -35,15 +39,22 @@ Commands:
                            Every /api and /mcp request needs a credential; the first
                            start of a Workspace creates its Owner and prints a
                            one-time sign-in link on each URL
-  migrate --workspace <dir> [--dry-run]
+  migrate [--workspace <dir>] [--dry-run]
                            Migrate an older Workspace schema to schemaVersion ${workspaceSchemaVersion}
-                           (steps chain: uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4);
-                           a real run first writes the Checkpoint "Before migration to
-                           schemaVersion ${workspaceSchemaVersion}" and then records the migration in the host
-                           history ($UIUX_HOME); --dry-run prints the steps and changed
-                           files without writing anything
+                           (steps chain: uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4,
+                           uiux.v4-to-v5); a real run first writes the Checkpoint "Before
+                           migration to schemaVersion ${workspaceSchemaVersion}" and then records the migration
+                           in the host history ($UIUX_HOME); --dry-run prints the steps
+                           and changed files without writing anything. uiux.v4-to-v5
+                           moves the Workspace into <dir>/.uiux/ and prints the
+                           uiux access copy command to run next
 
-Access (each takes --workspace <dir>; rosters live in $UIUX_HOME, default ~/.uiux):
+Workspace selection: --workspace <dir> names the Workspace root, or a directory whose
+.uiux/ holds one. Without it, a command uses the .uiux/ of the nearest directory, from
+the current one upward, that has a .uiux/workspace.json; when that is a Workspace
+from before schemaVersion 5, its parent directory is the Workspace.
+
+Access (each takes [--workspace <dir>]; rosters live in $UIUX_HOME, default ~/.uiux):
   member add <nick> (--preset <name> | --keys <k,...> | --all-keys) [--kind human|agent]
   member set <nick> [--preset <name>] [--grant <k,...>] [--revoke <k,...>] [--nickname <new>]
   member list [--keys] | member remove <nick>
@@ -57,9 +68,10 @@ Access (each takes --workspace <dir>; rosters live in $UIUX_HOME, default ~/.uiu
   session list | session revoke <session-id> | session revoke --member <nick>
   access copy --from <old-dir> [--replace]
                            Copy members, tokens and host history from another
-                           Workspace path, once. Copy before running uiux migrate on
-                           the new path: --replace discards the target's roster and
-                           its own host history, migration system versions included`)
+                           Workspace path, once. After uiux migrate moves a Workspace
+                           into <old-dir>/.uiux/, run it with --from <old-dir> before
+                           the first uiux dev there. --replace discards the target's
+                           roster and its own host history`)
 }
 
 // `uiux dev` takes its bind address only from --host. For compatibility, a loopback HOST or

@@ -2,7 +2,7 @@
 
 `@deviltea/uiux` is the single-package home for the UIUX local-first UI/UX specification, preview, and review workbench.
 
-The package provides a Nuxt SPA and a unified Nitro server. `uiux init --workspace <dir>` creates a minimal current-schema file-native Workspace, and `uiux dev --workspace <dir>` explicitly selects one Workspace and starts the Workbench/API/MCP process against it.
+The package provides a Nuxt SPA and a unified Nitro server. `uiux init` creates a minimal current-schema file-native Workspace, by default in `.uiux/` at the top of your Git repository, and `uiux dev` selects one Workspace and starts the Workbench/API/MCP process against it.
 
 ## Requirements
 
@@ -19,9 +19,13 @@ pnpm dev
 For product use, initialize a Workspace once and then start the unified server:
 
 ```sh
-uiux init --workspace ./design
-uiux dev --workspace ./design
+uiux init   # creates <git toplevel>/.uiux/ (./.uiux/ outside a repository), or --workspace <dir>
+uiux dev    # from anywhere in the repository
 ```
+
+`uiux init` writes `workspace.json`, an empty `product-kit.json` and a `.gitignore` for the runtime files, `kit/node_modules/` and `kit/dist/`. The Workspace's Adapters live in `product-kit.json`; a `./` Adapter is a module in the Workspace's `kit/` directory.
+
+Every command that acts on a Workspace (`dev`, `migrate` and the access commands) takes an optional `--workspace <dir>`: the Workspace root, or a directory whose `.uiux/` holds one. Without it, the command uses the `.uiux/` of the nearest directory, from the current one upward, that has a `.uiux/workspace.json`. When that is a Workspace from before `schemaVersion` 5, whose `.uiux/` held only its metadata, its parent directory is the Workspace.
 
 ## The Workbench
 
@@ -70,7 +74,7 @@ Every `/api/*` and `/mcp` request needs a credential. Each Workspace has its own
 
 The first `uiux dev` of a Workspace with no human holder of `members.manage` creates one with every key, named after your OS user, and prints a single-use sign-in link (valid for 24 hours). Open it in the browser to sign in. The session lasts 14 days idle and 30 days at most, and it survives restarts. Lost the link? Run `uiux invite create --workspace <dir> --member <nick>` for a new one.
 
-Manage the roster with the CLI (each command needs `--workspace <dir>` and works while the server runs), or as the Owner on the Workbench **Members** page (on a loopback URL or an `https` origin, see Network access):
+Manage the roster with the CLI (each command selects the Workspace like `uiux dev` and works while the server runs), or as the Owner on the Workbench **Members** page (on a loopback URL or an `https` origin, see Network access):
 
 ```sh
 uiux member add <nick> --preset Editor  # or --keys workspace.read,reviews.write, or --all-keys
@@ -85,7 +89,7 @@ uiux access copy --from <old-dir> --workspace <new-dir> [--replace]
 
 Rosters are not downgrade-compatible: a roster that this version has written, for example with a session that records its origin, may not load in an older UIUX ([owner ruling 3, Discussion #174](https://github.com/DevilTea/uiux/discussions/174#discussioncomment-18849995)). Rosters written by older versions keep loading. The first command or server that opens a roster written with roles (`version: 1`) upgrades it to keys (`version: 2`) and keeps the old file beside it as `access.v1.json`; an older UIUX then refuses the upgraded roster.
 
-A moved or renamed Workspace, and every git worktree, starts with an empty roster. `uiux access copy` carries members, tokens and the host version history over once, so existing agent tokens keep working and the timeline continues; it refuses to copy history into a Workspace that a running server holds. Copy before you run `uiux migrate` on the new path: the target's own history (such as the migration's Checkpoint boundary versions and its system version) is not merged, and `--replace` discards the target's roster and that history, printing how many versions it discarded.
+A moved or renamed Workspace, and every git worktree, starts with an empty roster. `uiux access copy` carries members, tokens and the host version history over once, so existing agent tokens keep working and the timeline continues; it refuses to copy history into a Workspace that a running server holds. Histories are never merged: the target must have no roster, and `--replace` discards the target's roster and its own history, printing how many versions it discarded. After `uiux migrate` moves a Workspace into `<old-dir>/.uiux/` (see below), run `uiux access copy --from <old-dir> --workspace <old-dir>/.uiux` before the first `uiux dev` there: the migration recorded its versions in the old path's history, and the copy carries them over.
 
 Review actors and times on `/api/*` and `/mcp` are stamped by the server from the signed-in member (`member:<uuid>`). A supplied `actor` or `at` is ignored with the warnings `auth.actor_ignored` and `auth.time_ignored`. Resolving needs a human member on a Workbench session; bearer tokens get `review.resolve_requires_workbench`. Each operation needs permission keys; a refusal is `403 auth.scope_denied` whose `requiredKeys` names the keys the request lacks.
 
@@ -133,14 +137,16 @@ Consider denying `uiux member`, `token`, `invite`, `session` and `access` in you
 
 ### Workspace schema migration
 
-A Workspace records its format in `.uiux/workspace.json` `schemaVersion`. An older recognized Workspace opens read-only (`migration_required`) until it is migrated explicitly, from the command line only:
+A Workspace records its format in `workspace.json` `schemaVersion` (before `schemaVersion` 5, in `.uiux/workspace.json`). An older recognized Workspace opens read-only (`migration_required`) until it is migrated explicitly, from the command line only:
 
 ```sh
 uiux migrate --workspace ./design --dry-run   # print the steps and changed files, write nothing
 uiux migrate --workspace ./design             # apply atomically and print the new manifest revision
 ```
 
-The current format is `schemaVersion` 4. Steps chain: `uiux.v1-to-v2` (resolution kinds, pin hints), `uiux.v2-to-v3` (Workspace-scoped threads and editable messages; it changes only the manifest), then `uiux.v3-to-v4` (the optional Review thread `renderContext`; it changes only the manifest), so a version 1 Workspace migrates in one run. `uiux init` writes version 4.
+The current format is `schemaVersion` 5. Steps chain: `uiux.v1-to-v2` (resolution kinds, pin hints), `uiux.v2-to-v3` (Workspace-scoped threads and editable messages; it changes only the manifest), `uiux.v3-to-v4` (the optional Review thread `renderContext`; it changes only the manifest), then `uiux.v4-to-v5` (the Product Kit), so a version 1 Workspace migrates in one run. `uiux init` writes version 5.
+
+`uiux.v4-to-v5` moves the Workspace in place: the old `.uiux/` directory becomes the Workspace root, the data directories (`views/`, `flows/`, `reviews/`, `i18n/`, `assets/`) move into it, `workspace.json` loses `adapters`, and a new `product-kit.json` holds them. A `./` Adapter must already be a module under `.uiux/kit/`, where it resolves from after the move; `uiux migrate` refuses any other `./` Adapter, writing nothing, and prints the exact replacement specifier, such as `./.uiux/kit/adapters/reference.ts` for `./adapters/reference.ts`. Move the module, edit the specifier in `.uiux/workspace.json` by hand, then run `uiux migrate` again. A bare Adapter package must be declared in `.uiux/kit/package.json`. After the move `uiux migrate` prints the new root, the `uiux access copy --from <old-dir>` command to run before the first `uiux dev` there, and suggested `.gitignore` rules; it writes no `.gitignore` itself. You may then move the new root, for example to `<repo>/.uiux/`, before the copy.
 
 `uiux migrate` refuses while a running UIUX server holds the Workspace; stop `uiux dev` first. There is no MCP or HTTP migration entrypoint. Before its first step a real run writes the Checkpoint `Before migration to schemaVersion <N>` (`<N>` the target version) into the Workspace (a failed migration leaves it in place), and after it succeeds it records the migration as a system version in the host history under `$UIUX_HOME`. A dry run, and a Workspace that is already current, write nothing.
 
@@ -206,7 +212,7 @@ A proxy that rewrites `Host` to the loopback address makes its requests look loc
 
 ## Dogfood Workspace
 
-This repository keeps its own UIUX specification in `design/`. Initialize a new Workspace with `uiux init`; once a UIUX server is running against it, agents should author canonical resources through domain-specific MCP tools rather than editing files in `design/` directly. The Workbench is the human inspection surface for the same canonical state.
+This repository keeps its own UIUX specification in `design/`, still a `schemaVersion` 4 Workspace until its owner relocates it with `scripts/dogfood-relocate.sh` (to `<repo>/.uiux/`); until then the current UIUX opens it read-only. Initialize a new Workspace with `uiux init`; once a UIUX server is running against it, agents should author canonical resources through domain-specific MCP tools rather than editing files in `design/` directly. The Workbench is the human inspection surface for the same canonical state.
 
 ## Checks
 
