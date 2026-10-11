@@ -63,6 +63,12 @@ export function clearPreviewBundleCache(): void {
 
 export async function buildWorkspacePreviewBundle(input: Readonly<{
 	workspaceRoot: string
+	/**
+	 * The Adapter resolution base (`adapterResolutionBase`): `kit/` from `schemaVersion` 5, the
+	 * Workspace root (the default) below it. Its `node_modules/` is the Workspace's fallback module
+	 * directory, so a `schemaVersion` 5 bundle never falls back to the root's own `node_modules/`.
+	 */
+	moduleBase?: string
 	packageRoot?: string
 	set: ValidatedAdapterSet
 }>): Promise<PreviewBundleResult> {
@@ -109,7 +115,7 @@ export async function buildWorkspacePreviewBundle(input: Readonly<{
 		write: false,
 		nodePaths: [
 			join(packageRoot, 'node_modules'),
-			join(input.workspaceRoot, 'node_modules'),
+			join(input.moduleBase ?? input.workspaceRoot, 'node_modules'),
 		],
 		plugins: [coreResolvePlugin],
 		define: {
