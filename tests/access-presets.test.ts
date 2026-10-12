@@ -552,10 +552,16 @@ describe('labels and --preset from the Workspace\'s presets (Rules 01a11c09-c724
 		// A preset key this version does not know is never applied; the member is then Custom.
 		const added = await run('member', 'add', 'lee', '--preset', 'Lead', '--workspace', root)
 		expect(added).toMatchObject({ code: 0, out: expect.stringContaining('(Custom, 3 keys)') })
+		// The keys it applied are printed, not only their count.
+		expect(added.out).toContain('Keys from the Lead preset: workspace.read, history.read, views.write')
 		expect(added.out).toContain('The Lead preset holds future.capability, unknown to this UIUX version; it was not applied.')
+		const agent = await run('member', 'add', 'bot', '--kind', 'agent', '--preset', 'Owner', '--workspace', root)
+		expect(agent.out).toContain(`Keys from the Owner preset: ${keysOfPreset('agent', PERMISSION_KEYS).join(', ')}`)
 		await writeFile(join(root, ACCESS_PRESETS_FILENAME), JSON.stringify({ presets: [...builtIns(), { ...lead, keys: lead.keys.slice(0, 3) }] }))
 		const list = await run('member', 'list', '--workspace', root)
 		expect(list.out).toMatch(/lee\s+human\s+Lead\s+/u)
 		expect(list.out).toMatch(/deviltea\s+human\s+Owner\s+/u)
+		const set = await run('member', 'set', 'lee', '--preset', 'Viewer', '--workspace', root)
+		expect(set.out).toContain(`Keys from the Viewer preset: ${builtIns()[0]!.keys.join(', ')}`)
 	})
 })

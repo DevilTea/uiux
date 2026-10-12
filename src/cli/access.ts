@@ -163,13 +163,15 @@ function droppedKeysNote(source: string, keys: readonly string[], kind: MemberKi
 }
 
 /**
- * The notes printed after applying a preset: the `humanOnly` keys an Agent did not get, and the
- * preset's keys this UIUX version does not know, which are never applied (owner ruling of
- * 2026-10-11 on PR #189).
+ * The notes printed after applying a preset: the keys it applied, the `humanOnly` keys an Agent did
+ * not get, and the preset's keys this UIUX version does not know, which are never applied (owner
+ * ruling of 2026-10-11 on PR #189).
  */
 function presetNotes(preset: LabelPreset, kind: MemberKind): string[] {
 	const unknown = preset.keys.filter(key => !isCatalogKey(key))
+	const applied = keysOfPreset(kind, preset.keys)
 	return [
+		`  Keys from the ${preset.name} preset: ${applied.length > 0 ? applied.join(', ') : '(none)'}`,
 		droppedKeysNote(`Applied the ${preset.name} preset`, preset.keys, kind),
 		unknown.length > 0 ? `  The ${preset.name} preset holds ${unknown.join(', ')}, unknown to this UIUX version; ${unknown.length > 1 ? 'they were' : 'it was'} not applied.` : undefined,
 	].filter((note): note is string => note !== undefined)
