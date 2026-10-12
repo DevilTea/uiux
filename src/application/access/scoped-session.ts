@@ -40,6 +40,7 @@ import type {
 	UpdateProductKitCommand,
 } from '../services/product-kit-authoring'
 import type { AccessPresetsAuthoringResult, AccessPresetsRead, UpdateAccessPresetsCommand } from '../services/access-presets-authoring'
+import type { KitBuildLogRead, KitBuildRead, RestartKitBuildResult } from '../services/kit-build'
 import { keyRequirements, writeKeyForKind, type PermissionKey } from './keys'
 import {
 	LOCKABLE_KINDS,
@@ -171,6 +172,12 @@ export interface ScopedWorkspaceSession {
 	 * `humanOnly` key, so only a human member's Workbench session; takes no lease (no Agent writes it).
 	 */
 	updateAccessPresets(command: UpdateAccessPresetsCommand): Promise<Scoped<AccessPresetsAuthoringResult>>
+	/** The kit build state; `workspace.read` only (Clause 01a11bb1-b3c2-7937-96fb-e139c5e566f5). */
+	readKitBuild(): KitBuildRead | undefined | AccessRefusal
+	/** The kit build log, host paths masked; `product-kit.source.read` (Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa). */
+	readKitBuildLog(): KitBuildLogRead | undefined | AccessRefusal
+	/** `restart_kit_build`; `product-kit.write` (Clauses 01a11be8-5b64-72b3-ad18-81994368a1ed and 01a11bb1-b35a-…). No edit lease: it writes no resource. */
+	restartKitBuild(): Promise<RestartKitBuildResult | AccessRefusal>
 	createLocale(command: CreateLocaleCommand): Promise<Scoped<LocaleAuthoringResult>>
 	updateLocale(command: UpdateLocaleCommand): Promise<Scoped<LocaleAuthoringResult>>
 	createFlow(command: CreateFlowCommand): Promise<Scoped<FlowAuthoringResult>>
@@ -575,6 +582,18 @@ export function createScopedWorkspaceSession(
 			return write('retractReviewThread', command.reviewId, undefined, () => app.retractReviewThread(stamped.command), stamped.warnings)
 		},
 
+		readKitBuild() {
+			const denied = authorizeOperation(principal, 'readProductKit')
+			return denied ? refusalFromScope(PRODUCT_KIT_KEY, denied) : app.readKitBuild()
+		},
+		readKitBuildLog() {
+			const denied = authorizeOperation(principal, 'readKitBuildLog')
+			return denied ? refusalFromScope(PRODUCT_KIT_KEY, denied) : app.readKitBuildLog()
+		},
+		async restartKitBuild() {
+			const denied = authorizeOperation(principal, 'restartKitBuild')
+			return denied ? refusalFromScope(PRODUCT_KIT_KEY, denied) : app.restartKitBuild()
+		},
 		async captureFormalEvidence(command) {
 			const denied = authorizeOperation(principal, 'captureFormalEvidence')
 			return denied ? refusalFromScope('evidence', denied) : app.captureFormalEvidence(command)

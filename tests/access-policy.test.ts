@@ -139,6 +139,8 @@ const ROLE_MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; 
 	replaceAsset: { min: 'editor' },
 	composeProductKit: { min: 'editor' },
 	updateProductKit: { min: 'editor' },
+	restartKitBuild: { min: 'editor' },
+	readKitBuildLog: { min: 'viewer' },
 	updateComponentRegistry: { min: 'editor' },
 	captureFormalEvidence: { min: 'editor' },
 	exportHandoff: { min: 'editor' },

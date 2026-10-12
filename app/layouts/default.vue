@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { navigateTo, useI18n, useRoute } from '#imports'
 import { provideWorkbench } from '../composables/useWorkbench'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../composables/useMediaQuery'
 import { provideWorkbenchShell } from '../composables/useWorkbenchShell'
 import { useConnectivity } from '../composables/useConnectivity'
+import { useKitBuild } from '../composables/useKitBuild'
 import WorkbenchNavbar from '../components/workbench/WorkbenchNavbar.vue'
 import WorkbenchSidebar from '../components/workbench/WorkbenchSidebar.vue'
 import WorkbenchCommandPalette from '../components/workbench/WorkbenchCommandPalette.vue'
@@ -27,6 +28,21 @@ const { error, workspace } = workbench
 // (`uiux migrate`), so the banner names the command and offers no in-app action.
 const migrationRequired = computed(() => workspace.value?.inspection?.state === 'migration_required')
 const MIGRATE_COMMAND = 'uiux migrate --workspace <dir>'
+
+// Rule 01a11be8-6147-7e6e-a288-689144151a0b: while the last kit build run has failed, a banner says
+// so; UIUX keeps using the last good output meanwhile. Only a current Workspace from schemaVersion 5
+// has a kit project, so only then is the build state polled.
+const kitBuild = useKitBuild()
+const kitBuildFailed = computed(() => kitBuild.build.value.state === 'failed')
+const hasKitProject = computed(() => workspace.value?.inspection?.state === 'current' && workspace.value.resource.schemaVersion >= 5)
+let stopKitBuild: (() => void) | undefined
+watch(hasKitProject, (present) => {
+	if (present && !stopKitBuild) stopKitBuild = kitBuild.watch()
+	else if (!present && stopKitBuild) {
+		stopKitBuild()
+		stopKitBuild = undefined
+	}
+}, { immediate: true })
 
 // Server unreachable (brief h): one persistent alert under the navbar with Retry. It replaces the
 // generic load error, which would only repeat the same cause in transport words.
@@ -82,6 +98,7 @@ onMounted(() => {
 
 onUnmounted(() => {
 	stopRecover()
+	stopKitBuild?.()
 	workbench.preview.unmount()
 })
 </script>
@@ -127,6 +144,19 @@ onUnmounted(() => {
         </i18n-t>
       </template>
     </UAlert>
+
+    <UAlert
+      v-if="kitBuildFailed"
+      id="uiux-kit-build-failed"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-hammer"
+      role="alert"
+      :title="t('workbench.kitBuild.failedTitle')"
+      :description="t('workbench.kitBuild.failedDescription')"
+      :ui="{ root: 'rounded-none border-b border-default' }"
+      data-kit-build-failed
+    />
 
     <UAlert
       v-if="offline"

@@ -570,6 +570,10 @@
     "migration": {
       "title": "This Workspace uses an older format",
       "description": "It's read-only until it's migrated. Stop this server, run {command}, then start uiux dev again."
+    },
+    "kitBuild": {
+      "failedTitle": "The kit build failed",
+      "failedDescription": "The Preview keeps using the last good build output, and formal capture waits until a build succeeds. Fix the kit project, then restart the build."
     }
   },
   "nav": {
@@ -1943,7 +1947,8 @@
     },
     "capture": {
       "browser_launch_failed": "The capture browser could not start. Check that Playwright is installed.",
-      "execution_failed": "The capture did not finish."
+      "execution_failed": "The capture did not finish.",
+      "kit_build_not_ready": "Formal capture waits until the kit build is ready. Fix a failed build, then restart it."
     },
     "evidence": {
       "invalid_coverage": "The Evidence coverage record is not valid.",
@@ -2137,9 +2142,14 @@
       "invalid_absolute_uri": "Use a full address, such as https://example.com/spec."
     },
     "kit": {
+      "build_declaration_invalid": "The build declared in kit/package.json (uiux) is not valid.",
+      "build_output_missing": "The kit build has produced no output yet.",
+      "build_restart_throttled": "The kit build was restarted moments ago. Wait a few seconds, then restart it again.",
+      "build_unavailable": "No kit build runs in this server; uiux dev runs it.",
       "component_invalid": "A component in the registry does not match the kit project."
     },
     "product_kit": {
+      "adapter_outside_build_output": "With a kit build, a ./ Adapter must name a file in its output directory.",
       "adapters_not_current": "Change Adapter specifiers or their order by composing the Product Kit.",
       "current_invalid": "The stored Product Kit file is not valid. Fix it before changing it.",
       "invalid_component_file": "A component file must be a path under kit/src/.",

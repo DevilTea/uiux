@@ -57,12 +57,21 @@ export interface AdapterManifestLoader {
 
 export type AdapterManifestExtractor = (moduleNamespace: Readonly<Record<string, unknown>>) => unknown | Promise<unknown>
 
-/** Loads ESM using the resolved identity while leaving export-name semantics to the integration boundary. */
+/**
+ * Loads ESM using the resolved identity while leaving export-name semantics to the integration boundary.
+ *
+ * `version`, when given, is appended to the identity of each `./` Adapter module as `?v=<version>`:
+ * Node caches a module by its URL, so each kit build output generation is imported anew (Rule
+ * 01a11bb1-9df8-762d-b5e5-306f9898aae2). The modules it imports keep their own URLs and cache.
+ */
 export class NodeAdapterManifestLoader implements AdapterManifestLoader {
-	constructor(private readonly extractManifest: AdapterManifestExtractor) {}
+	constructor(private readonly extractManifest: AdapterManifestExtractor, private readonly options: Readonly<{ version?: string }> = {}) {}
 
 	async loadManifest(resolved: ResolvedAdapterModule): Promise<unknown> {
-		const namespace = await import(resolved.moduleIdentity) as Readonly<Record<string, unknown>>
+		const identity = this.options.version !== undefined && resolved.moduleSpecifier.startsWith('./')
+			? `${resolved.moduleIdentity}?v=${encodeURIComponent(this.options.version)}`
+			: resolved.moduleIdentity
+		const namespace = await import(identity) as Readonly<Record<string, unknown>>
 		return this.extractManifest(namespace)
 	}
 }

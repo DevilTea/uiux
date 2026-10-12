@@ -110,6 +110,8 @@ import {
 	type AccessPresetsRead,
 	type UpdateAccessPresetsCommand,
 } from './access-presets-authoring'
+import { createKitBuildService, type KitBuildLogRead, type KitBuildRead, type RestartKitBuildResult } from './kit-build'
+import type { KitBuildControl } from '../ports/kit-build'
 
 export type AssetContentDescriptor = Readonly<{
 	mediaType: string
@@ -150,6 +152,9 @@ export interface WorkspaceApplicationSession {
 	updateComponentRegistry<R = never>(command: UpdateComponentRegistryCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
 	readAccessPresets(): Promise<AccessPresetsRead | undefined>
 	updateAccessPresets(command: UpdateAccessPresetsCommand): Promise<AccessPresetsAuthoringResult>
+	readKitBuild(): KitBuildRead | undefined
+	readKitBuildLog(): KitBuildLogRead | undefined
+	restartKitBuild(): Promise<RestartKitBuildResult>
 	createLocale(command: CreateLocaleCommand): Promise<LocaleAuthoringResult>
 	updateLocale(command: UpdateLocaleCommand): Promise<LocaleAuthoringResult>
 	createFlow(command: CreateFlowCommand): Promise<FlowAuthoringResult>
@@ -197,6 +202,8 @@ export function createWorkspaceApplicationSession(
 		 * 01a11a5e-00b9-7bf5-8005-9380a388afb8); absent where no recorder runs.
 		 */
 		historyBoundary?: () => CheckpointBoundary | undefined
+		/** The kit build runner under `uiux dev`; without it no kit build runs and its state is `none`. */
+		kitBuild?: KitBuildControl
 	},
 ): WorkspaceApplicationSession {
 	const viewAuthoring = createViewAuthoringService(persistence)
@@ -205,14 +212,15 @@ export function createWorkspaceApplicationSession(
 	const flowAuthoring = createFlowAuthoringService(persistence)
 	const reviewAuthoring = createReviewAuthoringService(persistence)
 	const assetAuthoring = createAssetAuthoringService(persistence)
-	const formalCapture = createFormalCaptureService(persistence, { serverOrigin: options?.serverOrigin, captureCookie: options?.captureCookie })
+	const formalCapture = createFormalCaptureService(persistence, { serverOrigin: options?.serverOrigin, captureCookie: options?.captureCookie, ...(options?.kitBuild ? { kitBuild: () => options.kitBuild!.status() } : {}) })
 	const handoffExport = createHandoffExportService(persistence)
 	const historyDiff = createHistoryDiffService(persistence, options?.history)
 	const historyService = createHistoryService(persistence, options?.history, options?.historyBoundary ? { boundary: options.historyBoundary } : {})
 	const historyRestore = createHistoryRestoreService(persistence, options?.history)
 	const historyPreview = createHistoryPreviewService(persistence, options?.history)
-	const productKitAuthoring = createProductKitAuthoringService(persistence)
+	const productKitAuthoring = createProductKitAuthoringService(persistence, options?.kitBuild ? { buildStatus: () => options.kitBuild!.status() } : {})
 	const accessPresetsAuthoring = createAccessPresetsAuthoringService(persistence)
+	const kitBuild = createKitBuildService(persistence, options?.kitBuild)
 
 	async function readPointResource(kind: PointResourceKind, key: string): Promise<PointResourceRead | undefined> {
 		if (!isValidPointResourceAddress({ kind, key })) return undefined
@@ -346,6 +354,9 @@ export function createWorkspaceApplicationSession(
 		updateComponentRegistry: productKitAuthoring.updateComponentRegistry,
 		readAccessPresets: accessPresetsAuthoring.readAccessPresets,
 		updateAccessPresets: accessPresetsAuthoring.updateAccessPresets,
+		readKitBuild: kitBuild.readKitBuild,
+		readKitBuildLog: kitBuild.readKitBuildLog,
+		restartKitBuild: kitBuild.restartKitBuild,
 		createLocale: localeAuthoring.createLocale,
 		updateLocale: localeAuthoring.updateLocale,
 		createFlow: flowAuthoring.createFlow,

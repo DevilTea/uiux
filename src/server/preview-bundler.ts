@@ -37,13 +37,20 @@ export function resolvePackageRoot(): string {
 
 const bundleCache = new Map<string, { hash: string; bundleJs: string }>()
 
-export async function computeBundleContentHash(workspaceRoot: string, set: ValidatedAdapterSet): Promise<string> {
+/**
+ * The bundle's cache key. With `pin`, the kit build output generation the set was resolved from,
+ * the files are not read: the bundle of that generation stays in use until the next settled output,
+ * even when a failed build has changed the files since (Rule 01a11bb1-9e5e-79ab-841e-c953e8b44bbf).
+ */
+export async function computeBundleContentHash(workspaceRoot: string, set: ValidatedAdapterSet, pin?: string): Promise<string> {
 	const hash = createHash('sha256')
 	hash.update(workspaceRoot)
+	if (pin !== undefined) hash.update(`\0kit-build-output\0${pin}\0`)
 	for (const entry of set.entries) {
 		hash.update(entry.manifest.id)
 		hash.update(entry.manifest.apiVersion)
 		hash.update(entry.resolvedModule.resolvedPath)
+		if (pin !== undefined) continue
 		try {
 			const statResult = await stat(entry.resolvedModule.resolvedPath)
 			hash.update(String(statResult.mtimeMs))
@@ -73,9 +80,11 @@ export async function buildWorkspacePreviewBundle(input: Readonly<{
 	moduleBase?: string
 	packageRoot?: string
 	set: ValidatedAdapterSet
+	/** The kit build output generation the set was resolved from (see `computeBundleContentHash`). */
+	pin?: string
 }>): Promise<PreviewBundleResult> {
 	const packageRoot = input.packageRoot ?? resolvePackageRoot()
-	const hash = await computeBundleContentHash(input.workspaceRoot, input.set)
+	const hash = await computeBundleContentHash(input.workspaceRoot, input.set, input.pin)
 	const cached = bundleCache.get(input.workspaceRoot)
 	if (cached && cached.hash === hash) {
 		return { bundleJs: cached.bundleJs, hash }

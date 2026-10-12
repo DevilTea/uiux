@@ -432,9 +432,10 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		)
 	}
 
-	// Clause 01a11bb1-b0f1-7e5d-85ad-230c43ad99fb: the Product Kit file with its build state, Adapter
-	// resolution, resolved external packages and findings. A Workspace without one (below schemaVersion
-	// 5) has no such Resource. The kit file template uiux://product-kit/file/{path} is not served yet.
+	// Clause 01a11bb1-b0f1-7e5d-85ad-230c43ad99fb: the Product Kit file with its build state (the kit
+	// build runner's under uiux dev), Adapter resolution, resolved external packages and findings. A
+	// Workspace without one (below schemaVersion 5) has no such Resource. The kit file template
+	// uiux://product-kit/file/{path} is not served yet.
 	server.registerResource(
 		'product-kit',
 		PRODUCT_KIT_RESOURCE_URI,
@@ -626,6 +627,27 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			components: input.components as Record<string, ProductKitComponent>,
 			widgets: input.widgets as Record<string, ProductKitWidgetMapping>,
 		})),
+	)
+
+	// Clause 01a11be8-5b64-72b3-ad18-81994368a1ed; `product-kit.write` (Clause 01a11bb1-b35a-…). It takes
+	// no command or argument: only kit/package.json decides what runs (Rule 01a11bb1-9d17-7205-abee-c2aa7058c107).
+	server.registerTool(
+		'restart_kit_build',
+		{
+			title: 'Restart the UIUX kit build',
+			description: 'Stop the running kit build process, if any, and start the Workspace\'s kit build again, as kit/package.json declares it (uiux.build: its watch command, else its build command once). Takes no input: no command or argument can be supplied. Needs product-kit.write. Returns { status: "restarted", build: { state } } with state building, ready or failed, or { status: "no_build" } when kit/package.json declares no build. A call made while another restart is still queued shares the result of that restart. Read the build state later from uiux://product-kit. Refusals: blocked (auth.scope_denied naming requiredKeys, workspace.migration_required below Workspace schemaVersion 5, kit.build_unavailable when no kit build runs in this server, kit.build_restart_throttled within 2 s of the previous restart).',
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async () => {
+			const result = await app.restartKitBuild()
+			const output = result.status === 'blocked' ? result : { ...result, resourceUri: PRODUCT_KIT_RESOURCE_URI }
+			return {
+				content: [{ type: 'text' as const, text: JSON.stringify(output) }],
+				structuredContent: output,
+				...(result.status === 'blocked' ? { isError: true } : {}),
+			}
+		},
 	)
 
 	server.registerTool(
