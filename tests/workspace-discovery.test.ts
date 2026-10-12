@@ -12,7 +12,7 @@ import { runInitCommand } from '../src/cli/init'
 import { runSelectedMigrateCommand } from '../src/cli/migrate'
 import { LEGACY_LAYOUT, V5_LAYOUT } from '../src/persistence/paths'
 import { type DiscoveryHost, selectWorkspace } from '../src/persistence/workspace-selection'
-import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 
 /**
@@ -268,7 +268,7 @@ describe('commands without --workspace', () => {
 		const home = join(await makeDirectory(), 'home')
 		const out: string[] = []
 		expect(await runSelectedMigrateCommand({ cwd: nested, dryRun: true, home, stdout: line => out.push(line), stderr: line => out.push(line) })).toBe(0)
-		expect(out.join('\n')).toContain(`UIUX Workspace ${root} is already at schemaVersion 5`)
+		expect(out.join('\n')).toContain(`UIUX Workspace ${root} is already at schemaVersion ${CURRENT_WORKSPACE_SCHEMA_VERSION}`)
 
 		const access: string[] = []
 		expect(await runAccessCommand({ argv: ['member', 'add', 'ada', '--preset', 'Owner'], cwd: nested, env: { UIUX_HOME: home }, stdout: line => access.push(line), stderr: line => access.push(line) })).toBe(0)

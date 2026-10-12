@@ -21,6 +21,7 @@ import type { FlowStep } from '../domain/flows/schema'
 import { REVIEW_RESOLUTIONS, type ReviewAnchor, type ReviewDisplayHint, type ReviewEvidenceRef, type ReviewRenderContext, type ReviewResourceRevision } from '../domain/reviews/schema'
 import type { WorkspaceAdapterSelection, ThemeEntry, ViewportPreset } from '../domain/workspace/schema'
 import type { ProductKitComponent, ProductKitWidgetMapping } from '../domain/product-kit/schema'
+import { ACCESS_PRESETS_RESOURCE_KIND } from '../domain/access-presets/schema'
 import { isFullUuid, isSha256Digest, type JsonObject, type JsonValue } from '../domain/validation'
 import type { ResolvedRenderContext } from '../domain/render-context/schema'
 import type { HandoffRoot } from '../domain/handoff/schema'
@@ -1046,6 +1047,12 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
 		async (input) => {
+			// Rule 01a11c09-cbea-7341-9d5a-01719e9c5d94: the Access presets are changed over HTTP only.
+			if (input.resource.kind === ACCESS_PRESETS_RESOURCE_KIND) {
+				const message = 'The Access presets are read and changed over HTTP only, in the UIUX Workbench; MCP cannot restore them.'
+				const refused = { status: 'invalid', kind: input.resource.kind, key: input.resource.key, code: 'history.restore_unsupported_kind', message, diagnostics: [{ code: 'history.restore_unsupported_kind', path: '/resource/kind', message }] }
+				return { content: [{ type: 'text' as const, text: JSON.stringify(refused) }], structuredContent: refused, isError: true }
+			}
 			const outcome = await app.restoreResourceVersion({
 				versionId: input.versionId,
 				resource: input.resource,
@@ -1055,7 +1062,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			const written = outcome.status === 'created' || outcome.status === 'updated'
 			// As for every authoring tool, a written result adds the restored resource's URI.
 			const output = outcome.status === 'created' || outcome.status === 'updated'
-				? { ...outcome, resourceUri: outcome.kind === 'product-kit' ? PRODUCT_KIT_RESOURCE_URI : pointResourceUri({ kind: outcome.kind, key: outcome.key }) }
+				? { ...outcome, resourceUri: outcome.kind === 'product-kit' ? PRODUCT_KIT_RESOURCE_URI : outcome.kind === ACCESS_PRESETS_RESOURCE_KIND ? undefined : pointResourceUri({ kind: outcome.kind, key: outcome.key }) }
 				: outcome
 			return {
 				content: [{ type: 'text' as const, text: JSON.stringify(output) }],

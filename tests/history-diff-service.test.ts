@@ -384,7 +384,7 @@ describe('GET /api/history/diff access (Clause 01a11485-f978-767a-b977-33028aee7
 		const snapshot = await runtime.persistence.withReadLock(() => runtime.persistence.scanVersionedSnapshotUnlocked())
 		const built = versionResourcesFromSnapshot(snapshot, runtime.persistence.layout)
 		checkpointId = randomUUID()
-		await new CheckpointStore(runtime.persistence).create({ historySchemaVersion: 1, id: checkpointId, type: 'checkpoint', actor: HUMAN, at: '2026-10-01T00:00:00.000Z', workspaceSchemaVersion: 5, resources: built.resources, name: 'Before', source: 'workbench' }, built.blobs)
+		await new CheckpointStore(runtime.persistence).create({ historySchemaVersion: 1, id: checkpointId, type: 'checkpoint', actor: HUMAN, at: '2026-10-01T00:00:00.000Z', workspaceSchemaVersion: runtime.persistence.schemaPolicy.currentVersion, resources: built.resources, name: 'Before', source: 'workbench' }, built.blobs)
 	})
 
 	afterAll(async () => {

@@ -309,13 +309,26 @@ export const WORKSPACE_V5_TO_V6_STEP_ID = 'uiux.v5-to-v6'
  * presets file `access-presets.json` holding the built-in Access presets (Clause
  * 01a11c09-a9a4-79b4-aab4-8734e4702b47) and otherwise changes only the manifest `schemaVersion`. The
  * layout is the same at 5 and 6, so nothing moves. Deterministic and idempotent; it re-validates
- * every Review file that was valid under 5 against 6. A schemaVersion 5 snapshot that already holds
- * the presets file is refused rather than overwritten: such a file was not written by UIUX at 5.
+ * every Review file that was valid under 5 against 6.
+ *
+ * `refuse`, which `uiux migrate` runs before anything is written, refuses a schemaVersion 5
+ * Workspace that already holds a presets file rather than overwrite it: UIUX writes none at 5.
+ * `apply` alone never refuses, so an in-memory upgrade of a version recorded with such a file still
+ * reads; it holds the built-in presets, as the migrated Workspace would.
  */
 export const WORKSPACE_V5_TO_V6_STEP: WorkspaceMigrationStep = Object.freeze({
 	id: WORKSPACE_V5_TO_V6_STEP_ID,
 	fromVersion: 5,
 	toVersion: 6,
+	async refuse(snapshot: WorkspaceSnapshot): Promise<WorkspaceMigrationRefusal | undefined> {
+		const presetsPath = layoutForSchemaVersion(6).accessPresetsPath!
+		if (!snapshot.has(presetsPath)) return undefined
+		return {
+			message: `${WORKSPACE_V5_TO_V6_STEP_ID} writes ${presetsPath}, which this schemaVersion 5 Workspace already holds, and nothing was written. Move it away, then run uiux migrate again.`,
+			items: [{ path: `/${presetsPath}`, message: `${presetsPath} exists before the migration that adds it.` }],
+		}
+	},
+
 	apply(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
 		const layout = layoutForSchemaVersion(6)
 		const presetsPath = layout.accessPresetsPath!
@@ -325,8 +338,6 @@ export const WORKSPACE_V5_TO_V6_STEP: WorkspaceMigrationStep = Object.freeze({
 		const manifest = parseJson(manifestBytes, layout.manifestPath)
 		if (!isRecord(manifest) || manifest.schemaVersion !== 5)
 			throw new TypeError(`${WORKSPACE_V5_TO_V6_STEP_ID} applies only to a schemaVersion 5 manifest.`)
-		if (next.has(presetsPath))
-			throw new TypeError(`${WORKSPACE_V5_TO_V6_STEP_ID} found ${presetsPath} in a schemaVersion 5 Workspace; move it away, then run uiux migrate again.`)
 		next.set(layout.manifestPath, canonicalJsonBytes({ ...manifest, schemaVersion: 6 }))
 		next.set(presetsPath, canonicalJsonBytes(builtInAccessPresetsFile()))
 

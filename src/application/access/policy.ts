@@ -40,6 +40,8 @@ export const ACCESS_OPERATIONS = {
 	listLeases: { requiredKeys: ['workspace.read'] },
 	// Clause 01a11bb1-b3c2-7937-96fb-e139c5e566f5: the Product Kit file, its build state and findings need no Product Kit key.
 	readProductKit: { requiredKeys: ['workspace.read'] },
+	// Clause 01a11485-fa00-72da-bc46-98302a3c106e: reading the Access presets on HTTP.
+	readAccessPresets: { requiredKeys: ['workspace.read'] },
 	// `history.read`: version history reads, which a system credential never gets (Clause 01a11485-f978-767a-b977-33028aee7ae7).
 	diffVersions: { requiredKeys: ['history.read'] },
 	listVersions: { requiredKeys: ['history.read'] },
@@ -95,6 +97,10 @@ export const ACCESS_OPERATIONS = {
 	// Served only on a loopback origin or an `https` configured origin (Rule 01a12500-b105-7773-822f-359d4dcbd1da);
 	// the HTTP layer refuses every other origin before this rule runs (Clause 01a12500-a619-7fa5-b7f6-797adaf52f34).
 	administerAccess: { requiredKeys: ['members.manage'] },
+	// Clause 01a11485-fa66-7cde-a10f-b8b796d01469: `presets.manage` allows `update_access_presets`, on HTTP
+	// only (Rule 01a11c09-cbea-7341-9d5a-01719e9c5d94). The key is `humanOnly`, so only a human member's
+	// Workbench cookie session can use it.
+	updateAccessPresets: { requiredKeys: ['presets.manage'] },
 } as const satisfies Record<string, OperationRule>
 
 export type AccessOperation = keyof typeof ACCESS_OPERATIONS

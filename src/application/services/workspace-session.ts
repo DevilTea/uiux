@@ -104,6 +104,12 @@ import {
 	type UpdateComponentRegistryCommand,
 	type UpdateProductKitCommand,
 } from './product-kit-authoring'
+import {
+	createAccessPresetsAuthoringService,
+	type AccessPresetsAuthoringResult,
+	type AccessPresetsRead,
+	type UpdateAccessPresetsCommand,
+} from './access-presets-authoring'
 
 export type AssetContentDescriptor = Readonly<{
 	mediaType: string
@@ -142,6 +148,8 @@ export interface WorkspaceApplicationSession {
 	composeProductKit<R = never>(command: ComposeProductKitCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
 	updateProductKit<R = never>(command: UpdateProductKitCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
 	updateComponentRegistry<R = never>(command: UpdateComponentRegistryCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
+	readAccessPresets(): Promise<AccessPresetsRead | undefined>
+	updateAccessPresets(command: UpdateAccessPresetsCommand): Promise<AccessPresetsAuthoringResult>
 	createLocale(command: CreateLocaleCommand): Promise<LocaleAuthoringResult>
 	updateLocale(command: UpdateLocaleCommand): Promise<LocaleAuthoringResult>
 	createFlow(command: CreateFlowCommand): Promise<FlowAuthoringResult>
@@ -204,6 +212,7 @@ export function createWorkspaceApplicationSession(
 	const historyRestore = createHistoryRestoreService(persistence, options?.history)
 	const historyPreview = createHistoryPreviewService(persistence, options?.history)
 	const productKitAuthoring = createProductKitAuthoringService(persistence)
+	const accessPresetsAuthoring = createAccessPresetsAuthoringService(persistence)
 
 	async function readPointResource(kind: PointResourceKind, key: string): Promise<PointResourceRead | undefined> {
 		if (!isValidPointResourceAddress({ kind, key })) return undefined
@@ -335,6 +344,8 @@ export function createWorkspaceApplicationSession(
 		composeProductKit: productKitAuthoring.composeProductKit,
 		updateProductKit: productKitAuthoring.updateProductKit,
 		updateComponentRegistry: productKitAuthoring.updateComponentRegistry,
+		readAccessPresets: accessPresetsAuthoring.readAccessPresets,
+		updateAccessPresets: accessPresetsAuthoring.updateAccessPresets,
 		createLocale: localeAuthoring.createLocale,
 		updateLocale: localeAuthoring.updateLocale,
 		createFlow: flowAuthoring.createFlow,

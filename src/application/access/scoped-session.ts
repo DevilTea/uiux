@@ -39,6 +39,7 @@ import type {
 	UpdateComponentRegistryCommand,
 	UpdateProductKitCommand,
 } from '../services/product-kit-authoring'
+import type { AccessPresetsAuthoringResult, AccessPresetsRead, UpdateAccessPresetsCommand } from '../services/access-presets-authoring'
 import { keyRequirements, writeKeyForKind, type PermissionKey } from './keys'
 import {
 	LOCKABLE_KINDS,
@@ -163,6 +164,13 @@ export interface ScopedWorkspaceSession {
 	composeProductKit(command: ComposeProductKitCommand): Promise<Scoped<ProductKitAuthoringResult>>
 	updateProductKit(command: UpdateProductKitCommand): Promise<Scoped<ProductKitAuthoringResult>>
 	updateComponentRegistry(command: UpdateComponentRegistryCommand): Promise<Scoped<ProductKitAuthoringResult>>
+	/** The Access presets resource; `workspace.read` only, HTTP only (Rule 01a11c09-cbea-7341-9d5a-01719e9c5d94). */
+	readAccessPresets(): Promise<AccessPresetsRead | undefined>
+	/**
+	 * `update_access_presets` (Clause 01a11c09-a50e-7531-b16e-74ba685c6bad): needs `presets.manage`, a
+	 * `humanOnly` key, so only a human member's Workbench session; takes no lease (no Agent writes it).
+	 */
+	updateAccessPresets(command: UpdateAccessPresetsCommand): Promise<Scoped<AccessPresetsAuthoringResult>>
 	createLocale(command: CreateLocaleCommand): Promise<Scoped<LocaleAuthoringResult>>
 	updateLocale(command: UpdateLocaleCommand): Promise<Scoped<LocaleAuthoringResult>>
 	createFlow(command: CreateFlowCommand): Promise<Scoped<FlowAuthoringResult>>
@@ -521,6 +529,8 @@ export function createScopedWorkspaceSession(
 		composeProductKit: command => write('composeProductKit', PRODUCT_KIT_KEY, PRODUCT_KIT_LEASE, () => app.composeProductKit(command, productKitGuard('composeProductKit'))),
 		updateProductKit: command => write('updateProductKit', PRODUCT_KIT_KEY, PRODUCT_KIT_LEASE, () => app.updateProductKit(command, productKitGuard('updateProductKit'))),
 		updateComponentRegistry: command => write('updateComponentRegistry', PRODUCT_KIT_KEY, PRODUCT_KIT_LEASE, () => app.updateComponentRegistry(command, productKitGuard('updateComponentRegistry'))),
+		async readAccessPresets() { assert('readAccessPresets'); return app.readAccessPresets() },
+		updateAccessPresets: command => write('updateAccessPresets', 'access-presets', undefined, () => app.updateAccessPresets(command)),
 		createLocale: command => write('createLocale', command.locale, { kind: 'locale', key: command.locale }, () => app.createLocale(command)),
 		updateLocale: command => write('updateLocale', command.locale, { kind: 'locale', key: command.locale }, () => app.updateLocale(command)),
 		createFlow: (command) => {

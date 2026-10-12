@@ -11,6 +11,8 @@ import { isCanonicalLocaleTag, isFullUuid, isRecord, type Diagnostic, type Valid
 import { validateViewResource, type ViewResource } from '../../domain/views/schema'
 import { validateWorkspaceManifest, type WorkspaceManifest } from '../../domain/workspace/schema'
 import { validateProductKit, type ProductKit } from '../../domain/product-kit/schema'
+import type { AccessPresetsFile } from '../../domain/access-presets/schema'
+import { accessPresetsWriteDiagnostics } from './access-presets-authoring'
 import { checkProductKitAgainstKit } from '../../adapters/kit-registry'
 import { PersistenceError } from '../../persistence/errors'
 import { canonicalJsonBytes, revisionForResourceFiles, upgradeSnapshotInMemory, type FileNativePersistence } from '../../persistence/file-native'
@@ -163,7 +165,7 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 		}
 
 		const next = compose(target, restored.value, currentFiles)
-		const diagnostics = validateNext(target, next)
+		const diagnostics = validateNext(target, next, currentFiles)
 		if (diagnostics.length > 0)
 			return { status: 'invalid', kind: target.kind, key: target.key, code: 'history.restore_invalid_content', message: `The ${target.kind} content of version ${parsed.versionId} is not valid for this UIUX build, so it cannot be restored.`, diagnostics }
 
@@ -294,9 +296,11 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 					case 'flow': revision = await persistence.flows.create(target.key, next as FlowResource); break
 					case 'locale': revision = await persistence.locales.create(target.key, next as I18nResource); break
 					case 'asset': revision = await persistence.assets.create(target.key, next as AuthoredAssetResource); break
-					// The manifest and the Product Kit file always exist while the Workspace is writable; `null` already conflicted.
+					// The manifest, the Product Kit file and the Access presets file exist while the Workspace is
+					// writable; `null` already conflicted. A missing presets file is not re-created by a restore.
 					case 'workspace':
-					case 'product-kit': return await conflict()
+					case 'product-kit':
+					case 'access-presets': return await conflict()
 				}
 			}
 			else {
@@ -306,7 +310,8 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 						: target.kind === 'locale' ? await persistence.locales.compareAndSwap({ ...swap, resource: next as I18nResource })
 							: target.kind === 'asset' ? await persistence.assets.compareAndSwap({ ...swap, resource: next as AuthoredAssetResource })
 								: target.kind === 'product-kit' ? await persistence.productKit.compareAndSwap({ ...swap, key: 'product-kit', resource: next as ProductKit })
-									: await persistence.workspace.compareAndSwap({ ...swap, key: 'workspace', resource: next as WorkspaceManifest })
+									: target.kind === 'access-presets' ? await persistence.accessPresets.compareAndSwap({ ...swap, key: 'access-presets', resource: next as AccessPresetsFile })
+										: await persistence.workspace.compareAndSwap({ ...swap, key: 'workspace', resource: next as WorkspaceManifest })
 				if (!commit.ok) return { status: 'conflict', kind: target.kind, key: target.key, currentRevision: commit.conflict.currentRevision }
 				revision = commit.revision
 			}
@@ -354,6 +359,7 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 			case 'asset': return persistence.assets.readRevision(target.key)
 			case 'workspace': return (await persistence.workspace.readInspected()).revision
 			case 'product-kit': return persistence.productKit.readRevision()
+			case 'access-presets': return persistence.accessPresets.readRevision()
 		}
 	}
 
@@ -366,13 +372,14 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 			case 'asset': return (await persistence.assets.readInspected(target.key))?.diagnostics ?? []
 			case 'workspace': return (await persistence.workspace.readInspected()).diagnostics
 			case 'product-kit': return (await persistence.productKit.readInspected())?.diagnostics ?? []
+			case 'access-presets': return (await persistence.accessPresets.readInspected())?.diagnostics ?? []
 		}
 	}
 
 	return Object.freeze({ restoreResourceVersion })
 }
 
-type RestoredResource = ViewResource | FlowResource | I18nResource | WorkspaceManifest | ProductKit | AuthoredAssetResource
+type RestoredResource = ViewResource | FlowResource | I18nResource | WorkspaceManifest | ProductKit | AccessPresetsFile | AuthoredAssetResource
 
 function parseCommand(command: RestoreResourceVersionCommand): ParsedCommand | RestoreRefusal {
 	const raw = (command ?? {}) as Readonly<Record<string, unknown>>
@@ -400,6 +407,7 @@ function validKey(kind: RestorableResourceKind, key: string): boolean {
 	switch (kind) {
 		case 'workspace': return key === 'workspace'
 		case 'product-kit': return key === 'product-kit'
+		case 'access-presets': return key === 'access-presets'
 		case 'locale': return isCanonicalLocaleTag(key)
 		default: return isFullUuid(key)
 	}
@@ -456,7 +464,7 @@ function compose(target: Target, restored: unknown, currentFiles: ReadonlyMap<st
 }
 
 /** Rule 01a11a5e-1580-…: the same checks the authoring write of that kind makes before writing. */
-function validateNext(target: Target, next: RestoredResource): readonly Diagnostic[] {
+function validateNext(target: Target, next: RestoredResource, currentFiles: ReadonlyMap<string, Uint8Array>): readonly Diagnostic[] {
 	const failed = (result: ValidationResult<unknown>) => result.ok ? [] : result.diagnostics
 	switch (target.kind) {
 		case 'view': return failed(validateViewResource(next, `${target.key}.view.json`))
@@ -464,6 +472,8 @@ function validateNext(target: Target, next: RestoredResource): readonly Diagnost
 		case 'locale': return failed(validateI18nResource(next, `${target.key}.json`))
 		case 'workspace': return failed(validateWorkspaceManifest(next))
 		case 'product-kit': return failed(validateProductKit(next))
+		// `update_access_presets`'s checks: a key outside the catalog is kept only when the current file holds it.
+		case 'access-presets': return accessPresetsWriteDiagnostics(next, currentFiles.size === 1 ? parseJson([...currentFiles.values()][0]!) : undefined)
 		case 'asset': {
 			const { metadata, content } = next as AuthoredAssetResource
 			const metadataValidation = validateAssetMetadata(metadata, target.key)

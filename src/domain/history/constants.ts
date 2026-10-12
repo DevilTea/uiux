@@ -85,11 +85,13 @@ export type ComparisonSummaryStatus = typeof COMPARISON_SUMMARY_STATUSES[number]
 /**
  * The resource kinds this build can restore from a version (Feature
  * 01a11a5d-fd6b-7f9d-be15-2bc2bc3adc13). Review threads are never restored (Rule
- * 01a11a5e-189f-7b86-8270-e9b5d62aaa65); `access-presets` and kinds this build does not know are
- * refused (seam 3). `product-kit` exists only from `schemaVersion` 5. Shared by the restore service
- * and the Workbench, which offers "Restore this version" for these kinds only.
+ * 01a11a5e-189f-7b86-8270-e9b5d62aaa65), and kinds this build does not know are refused (seam 3).
+ * `product-kit` exists only from `schemaVersion` 5 and `access-presets` only from 6; restoring the
+ * Access presets needs `presets.manage`, their write key (Clause 01a11c09-a42a-7d6b-bb5e-01d7cf1ce2de).
+ * Shared by the restore service and the Workbench, which offers "Restore this version" for these
+ * kinds only.
  */
-export const RESTORABLE_RESOURCE_KINDS = Object.freeze(['workspace', 'product-kit', 'view', 'flow', 'locale', 'asset'] as const satisfies readonly KnownHistoryResourceKind[])
+export const RESTORABLE_RESOURCE_KINDS = Object.freeze(['workspace', 'product-kit', 'access-presets', 'view', 'flow', 'locale', 'asset'] as const satisfies readonly KnownHistoryResourceKind[])
 export type RestorableResourceKind = typeof RESTORABLE_RESOURCE_KINDS[number]
 
 export function isRestorableResourceKind(kind: unknown): kind is RestorableResourceKind {

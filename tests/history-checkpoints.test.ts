@@ -33,7 +33,7 @@ import { createCheckpointForHttp, deleteCheckpointForHttp, diffVersionsForHttp, 
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { bearer, connectMcp, provisionToken, scoped, sessionCookieFor, testMember } from './support/access'
 import { createCurrentWorkspace, CURRENT_TEST_LAYOUT, metadataPath, writeManifest } from './support/workspace-layout'
-import { LEGACY_LAYOUT } from '../src/persistence/paths'
+import { layoutForSchemaVersion, LEGACY_LAYOUT } from '../src/persistence/paths'
 
 /**
  * Named Checkpoints, the version listing and their access (issue #132 B4): Feature
@@ -176,7 +176,7 @@ describe('creating a Checkpoint', () => {
 		const before = await canonicalBytes(ctx)
 		ctx.clock.advance(1_000)
 		const outcome = await scoped(ctx.app, REVIEWER, { leases }).createCheckpoint({ name: '  v1 layout approved  ', note: 'Signed off in the design review.' })
-		expect(outcome).toMatchObject({ status: 'created', versionId: expect.any(String), at: expect.any(String), resources: 4 })
+		expect(outcome).toMatchObject({ status: 'created', versionId: expect.any(String), at: expect.any(String), resources: 5 })
 		const { versionId, at } = outcome as { versionId: string; at: string }
 
 		const record = await readCheckpointFile(ctx, versionId)
@@ -209,7 +209,7 @@ describe('creating a Checkpoint', () => {
 			const created = await mcp.client.callTool({ name: 'create_checkpoint', arguments: { name: 'Agent task done' } })
 			expect(created.isError).not.toBe(true)
 			const output = created.structuredContent as { status: string; versionId: string; at: string; resources: number; resourceUri: string }
-			expect(output).toMatchObject({ status: 'created', resources: 4, resourceUri: versionResourceUri(output.versionId) })
+			expect(output).toMatchObject({ status: 'created', resources: 5, resourceUri: versionResourceUri(output.versionId) })
 			expect(await readCheckpointFile(ctx, output.versionId)).toMatchObject({ actor: actorOf(AGENT_REVIEWER), source: 'mcp' })
 			expect(await readCheckpointFile(ctx, output.versionId)).not.toHaveProperty('note')
 			// The schema is closed: no caller-supplied actor or time (Rule 01a11a5e-025f-71d7-8d08-63948220de57).
@@ -301,7 +301,7 @@ describe('creating a Checkpoint', () => {
 
 		// An old-layout Workspace (schemaVersion 4, manifest in .uiux/) needs uiux migrate first.
 		const old = await tempDir('uiux-checkpoints-old-ws-')
-		await writeManifest(old, { schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }, LEGACY_LAYOUT)
+		await writeManifest(old, { schemaVersion: 4, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }, LEGACY_LAYOUT)
 		const oldPersistence = new FileNativePersistence({ root: old, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		const oldHome = join(await tempDir('uiux-checkpoints-old-home-'), 'home')
 		const oldApp = createWorkspaceApplicationSession(oldPersistence, { history: createHistoryStoreFactory({ workspaceRoot: old, persistence: oldPersistence, home: () => oldHome }) })
@@ -456,7 +456,7 @@ describe('the version listing', () => {
 		const { ctx, b, a1, e1, c2, a2, all } = await timeline()
 		expect(all.map(version => version.parent)).toEqual([c2.id, e1.id, a1.id, b.id, null])
 		expect(b).toMatchObject({ type: 'checkpoint', name: 'Baseline', actor: { type: 'system', id: 'system:baseline' } })
-		expect(b.summary.map(row => `${row.kind}:${row.status}`)).toEqual(['locale:added', 'product-kit:added', 'view:added', 'workspace:added'])
+		expect(b.summary.map(row => `${row.kind}:${row.status}`)).toEqual(['access-presets:added', 'locale:added', 'product-kit:added', 'view:added', 'workspace:added'])
 		// Owner ruling https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18835031 item 1: name is null off Checkpoints.
 		expect(a1).toMatchObject({ name: null, actor: actorOf(OWNER), netChange: true, summary: [{ kind: 'view', key: VIEW_ID, status: 'modified' }] })
 		expect(e1).toMatchObject({ name: null, actor: { type: 'external' }, summary: [{ kind: 'locale', key: 'en-US', status: 'modified' }] })
@@ -489,19 +489,18 @@ describe('the version listing', () => {
 	})
 
 	/**
-	 * A pre-migration Checkpoint recorded under the previous schema version, before the Baseline: in
-	 * the old layout, with the manifest in `.uiux/` holding the Adapters and no Product Kit file.
+	 * A pre-migration Checkpoint recorded under the previous schema version (5), before the Baseline:
+	 * in the same layout, without the Access presets file that `uiux.v5-to-v6` adds.
 	 */
 	async function previousSchemaCheckpoint(ctx: Fixture) {
 		const previousSchema = CURRENT_WORKSPACE_SCHEMA_VERSION - 1
+		const layout = layoutForSchemaVersion(previousSchema)
 		const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
 		const manifest = JSON.parse(Buffer.from(snapshot.get(CURRENT_TEST_LAYOUT.manifestPath)!).toString('utf8')) as Record<string, unknown>
-		const productKit = JSON.parse(Buffer.from(snapshot.get(CURRENT_TEST_LAYOUT.productKitPath!)!).toString('utf8')) as { adapters: unknown[] }
-		snapshot.delete(CURRENT_TEST_LAYOUT.manifestPath)
-		snapshot.delete(CURRENT_TEST_LAYOUT.productKitPath!)
-		const manifestPath = LEGACY_LAYOUT.manifestPath
-		snapshot.set(manifestPath, new TextEncoder().encode(`${JSON.stringify({ ...manifest, schemaVersion: previousSchema, adapters: productKit.adapters })}\n`))
-		const built = versionResourcesFromSnapshot(snapshot, LEGACY_LAYOUT)
+		snapshot.delete(CURRENT_TEST_LAYOUT.accessPresetsPath!)
+		const manifestPath = layout.manifestPath
+		snapshot.set(manifestPath, new TextEncoder().encode(`${JSON.stringify({ ...manifest, schemaVersion: previousSchema })}\n`))
+		const built = versionResourcesFromSnapshot(snapshot, layout)
 		const before = randomUUID()
 		await (await ctx.history.open())!.checkpoints.create({
 			historySchemaVersion: 1,
@@ -550,9 +549,9 @@ describe('the version listing', () => {
 		expect(compare).toHaveBeenCalledWith({ from: before, to: ctx.baseline })
 		expect(await compare.mock.results[0]!.value).toMatchObject({ status: 'failed', code: 'history.blob_missing' })
 		expect(warnings).toEqual([expect.stringContaining('history.blob_missing')])
-		// The fallback is the revision comparison: the manifest's schemaVersion change shows, and the Product Kit
-		// file, which the old layout's record does not have, is added.
-		expect(first[0]).toMatchObject({ id: ctx.baseline, summary: [{ kind: 'product-kit', key: 'product-kit', status: 'added' }, { kind: 'workspace', key: 'workspace', status: 'modified' }] })
+		// The fallback is the revision comparison: the manifest's schemaVersion change shows, and the Access presets
+		// file, which the schemaVersion 5 record does not have, is added.
+		expect(first[0]).toMatchObject({ id: ctx.baseline, summary: [{ kind: 'access-presets', key: 'access-presets', status: 'added' }, { kind: 'workspace', key: 'workspace', status: 'modified' }] })
 		// Versions are immutable: a second listing reuses the pair's result.
 		expect(listed(await service.listVersions({ resource: { kind: 'workspace', key: 'workspace' } })).versions.map(row => row.id)).toEqual([ctx.baseline, before])
 		expect(compare).toHaveBeenCalledTimes(1)

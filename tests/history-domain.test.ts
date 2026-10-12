@@ -54,6 +54,8 @@ import {
 } from '../src/persistence'
 import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
 import { V5_LAYOUT } from '../src/persistence/paths'
+import { canonicalJsonBytes } from '../src/domain/canonical-json'
+import { builtInAccessPresetsFile } from '../src/domain/access-presets/schema'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { V4_TEST_SCHEMA_POLICY } from './support/workspace-layout'
 
@@ -381,7 +383,8 @@ describe('in-memory snapshot upgrade', () => {
 		const older = policy.recognizedVersions.filter(version => version < policy.currentVersion)
 		// Every version from 1 up to the one before current, each through the full step chain.
 		expect(older).toEqual(Array.from({ length: policy.currentVersion - 1 }, (_, index) => index + 1))
-		for (const fromVersion of older) {
+		// Below 5 the old layout: the manifest in `.uiux/`, holding the Adapters.
+		for (const fromVersion of older.filter(version => version < 5)) {
 			const snapshot = designSnapshot(fromVersion)
 			const frozen = cloneSnapshot(snapshot)
 			const upgraded = await upgradeSnapshotInMemory(snapshot, fromVersion, policy)
@@ -391,7 +394,9 @@ describe('in-memory snapshot upgrade', () => {
 			expect(upgradedManifest).toMatchObject({ schemaVersion: policy.currentVersion })
 			expect(upgradedManifest).not.toHaveProperty('adapters')
 			expect(JSON.parse(new TextDecoder().decode(upgraded.snapshot.get(V5_LAYOUT.productKitPath!)))).toMatchObject({ adapters: [] })
-			expect([...upgraded.snapshot.keys()].sort()).toEqual([...[...snapshot.keys()].filter(path => path !== WORKSPACE_MANIFEST_PATH), V5_LAYOUT.manifestPath, V5_LAYOUT.productKitPath!].sort())
+			// uiux.v5-to-v6 then adds access-presets.json holding the built-in presets.
+			expect([...upgraded.snapshot.keys()].sort()).toEqual([...[...snapshot.keys()].filter(path => path !== WORKSPACE_MANIFEST_PATH), V5_LAYOUT.manifestPath, V5_LAYOUT.productKitPath!, V5_LAYOUT.accessPresetsPath!].sort())
+			expect(Buffer.from(upgraded.snapshot.get(V5_LAYOUT.accessPresetsPath!)!).equals(Buffer.from(canonicalJsonBytes(builtInAccessPresetsFile())))).toBe(true)
 			for (const [path, bytes] of snapshot) {
 				if (path === WORKSPACE_MANIFEST_PATH) continue
 				expect(Buffer.from(upgraded.snapshot.get(path)!).equals(Buffer.from(bytes)), path).toBe(true)
@@ -399,6 +404,17 @@ describe('in-memory snapshot upgrade', () => {
 			// The input snapshot is never mutated.
 			for (const [path, bytes] of frozen) expect(Buffer.from(snapshot.get(path)!).equals(Buffer.from(bytes))).toBe(true)
 		}
+		// From 5 the same layout: uiux.v5-to-v6 only adds the presets file and raises the manifest's schemaVersion.
+		const v5 = new Map([...designSnapshot(5)].filter(([path]) => path !== WORKSPACE_MANIFEST_PATH))
+		const { adapters: _adapters, ...v5Manifest } = manifest(5) as Record<string, unknown>
+		void _adapters
+		v5.set(V5_LAYOUT.manifestPath, json(v5Manifest))
+		v5.set(V5_LAYOUT.productKitPath!, json({ designSystems: [], adapters: [], styles: [], themes: {}, components: {}, widgets: {} }))
+		const fromV5 = await upgradeSnapshotInMemory(v5, 5, policy)
+		expect(fromV5.steps).toEqual(['uiux.v5-to-v6'])
+		expect([...fromV5.snapshot.keys()].sort()).toEqual([...v5.keys(), V5_LAYOUT.accessPresetsPath!].sort())
+		expect(JSON.parse(new TextDecoder().decode(fromV5.snapshot.get(V5_LAYOUT.manifestPath)))).toEqual({ ...v5Manifest, schemaVersion: 6 })
+		for (const [path, bytes] of v5) if (path !== V5_LAYOUT.manifestPath) expect(Buffer.from(fromV5.snapshot.get(path)!).equals(Buffer.from(bytes)), path).toBe(true)
 	})
 
 	it('returns the current version unchanged and refuses an unrecognized version', async () => {
