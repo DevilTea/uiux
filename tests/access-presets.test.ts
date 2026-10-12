@@ -244,6 +244,40 @@ describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01
 		expect((JSON.parse(await readFile(ctx.presetsPath, 'utf8')) as { presets: AccessPreset[] }).presets[0]).toEqual(renamed)
 	})
 
+	it('reads a presets file a merge left conflict markers in as no resource with persistence.invalid_json, and replaces it with its revision (Rules 01a11c09-cb08 and 01a12f9c-3dab, Clause 01a12f98-f466)', async () => {
+		const ctx = await workspace()
+		const conflicted = [
+			'{',
+			'  "presets": [',
+			'<<<<<<< HEAD',
+			'    { "id": "viewer", "name": "Viewer", "keys": ["workspace.read"] }',
+			'=======',
+			'    { "id": "viewer", "name": "Reader", "keys": ["workspace.read"] }',
+			'>>>>>>> theirs',
+			'  ]',
+			'}',
+			'',
+		].join('\n')
+		await writeFile(ctx.presetsPath, conflicted)
+		const bytesRevision = await ctx.persistence.accessPresets.readRevision()
+		const read = await readAccessPresetsForHttp(http(ctx.app, VIEWER))
+		expect(read).toMatchObject({ status: 200, body: { kind: 'access-presets', key: 'access-presets', resource: null, revision: bytesRevision, diagnostics: [{ code: 'persistence.invalid_json', path: '/access-presets.json' }] } })
+		expect((read.body as { diagnostics: unknown[] }).diagnostics).toHaveLength(1)
+		// No preset labels anybody meanwhile.
+		expect(await readWorkspaceAccessPresets(ctx.root)).toEqual([])
+
+		const [viewer] = builtIns()
+		expect(await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: bytesRevision!.replace(/.$/u, '0'), presets: [viewer] })).toMatchObject({ status: 409, body: { currentRevision: bytesRevision } })
+		expect(await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: null, presets: [viewer] })).toMatchObject({ status: 409, body: { currentRevision: bytesRevision } })
+		expect(await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: bytesRevision, presets: [{ id: 'x', name: 'Custom', keys: [] }] })).toMatchObject({ status: 400 })
+		expect(await readFile(ctx.presetsPath, 'utf8')).toBe(conflicted)
+
+		const replaced = await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: bytesRevision, presets: builtIns() })
+		expect(replaced).toMatchObject({ status: 200, body: { status: 'updated', diagnostics: [] } })
+		expect(JSON.parse(await readFile(ctx.presetsPath, 'utf8'))).toEqual(builtInAccessPresetsFile())
+		expect(await readAccessPresetsForHttp(http(ctx.app, VIEWER))).toMatchObject({ status: 200, body: { resource: builtInAccessPresetsFile(), diagnostics: [] } })
+	})
+
 	it('keeps a schemaVersion 6 Workspace without its presets file usable: the read reports access.presets_missing and a write with expectedRevision null creates the file (Rules 01a12f98-c032 and 01a12f98-d643, Clause 01a12f98-f466)', async () => {
 		const ctx = await workspace()
 		await rm(ctx.presetsPath)

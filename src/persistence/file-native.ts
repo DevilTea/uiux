@@ -1970,13 +1970,26 @@ export class AccessPresetsFileRepository {
 		})
 	}
 
-	async readInspected(): Promise<InspectedResource<AccessPresetsFile> | undefined> {
+	/**
+	 * The file with its diagnostics on disk. A file that is not JSON, such as one a Git merge left
+	 * conflict markers in, reads as no resource with the revision of its bytes and
+	 * `persistence.invalid_json` (Clause 01a12f98-f466-7c86-af94-5887f1d1b50d), so a write naming that
+	 * revision can replace it (Rule 01a12f9c-3dab-7391-bef5-168f684187e7).
+	 */
+	async readInspected(): Promise<InspectedResource<AccessPresetsFile | null> | undefined> {
 		return this.persistence.withReadLock(async () => {
 			const path = this.persistence.layout.accessPresetsPath
 			if (!path) return undefined
 			const bytes = await this.persistence.readOptionalBytesUnlocked(path)
 			if (!bytes) return undefined
-			const resource = parseJsonBytes(bytes, path)
+			let resource: unknown
+			try {
+				resource = parseJsonBytes(bytes, path)
+			}
+			catch (error) {
+				if (!(error instanceof PersistenceError) || error.code !== 'persistence.invalid_json') throw error
+				return { resource: null, revision: revisionForBytes(bytes), diagnostics: [{ code: 'persistence.invalid_json', path: `/${path}`, message: `${error.message} A write with this revision replaces the whole file.` }] }
+			}
 			return { resource: resource as AccessPresetsFile, revision: revisionForBytes(bytes), diagnostics: validateAccessPresetsFile(resource).diagnostics }
 		})
 	}

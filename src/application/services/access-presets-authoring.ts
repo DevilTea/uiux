@@ -35,7 +35,10 @@ import { validateResourceRevision } from '../dto/revisions'
  * A `schemaVersion` 6 Workspace whose presets file is missing is not blocked, since presets only
  * affect labels (Rule 01a12f98-c032-7e1f-806c-41648565004c): its read answers no resource with
  * `access.presets_missing` (Clause 01a12f98-f466-7c86-af94-5887f1d1b50d), and a write whose
- * `expectedRevision` is `null` creates the file (Rule 01a12f98-d643-7e29-9273-23564146d518).
+ * `expectedRevision` is `null` creates the file (Rule 01a12f98-d643-7e29-9273-23564146d518). A
+ * presets file that is not JSON, such as one a Git merge left conflict markers in, reads as no
+ * resource with the revision of its bytes and `persistence.invalid_json`, and a write naming that
+ * revision replaces the whole file (Rule 01a12f9c-3dab-7391-bef5-168f684187e7).
  *
  * Access (`workspace.read` to read, `presets.manage` to write) and the design-write context belong
  * to the scoped session. Below `schemaVersion` 6 the Workspace has no presets file: reads find none,
@@ -197,8 +200,9 @@ export function createAccessPresetsAuthoringService(persistence: FileNativePersi
 					const currentRevision = await persistence.accessPresets.readRevision()
 					return currentRevision ? { status: 'conflict', key: KEY, currentRevision } : { status: 'not_found', key: KEY }
 				}
+				// An Access presets file that is not JSON reads as no resource and is replaced; this is another file, such as the manifest.
 				case 'persistence.invalid_json':
-					return blocked(error.code, `The current Access presets file is not readable JSON, so it cannot be replaced. ${error.message}`, error.diagnostics)
+					return blocked(error.code, error.message, error.diagnostics)
 				default:
 					throw error
 			}
