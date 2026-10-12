@@ -264,6 +264,33 @@ describe('the kit build runner (Feature 01a11bb1-8534)', () => {
 		expect(build.log()).toContain('built version 1')
 	})
 
+	it('passes shell metacharacters in the argument array literally, running no shell', async () => {
+		const root = await kitWorkspace({ output: 'dist', build: { command: [process.execPath, 'build.mjs', '$(touch pwned)', ';touch x', '`touch y`', '&& touch z'] } }, { 'build.mjs': BUILD_OK })
+		const { build } = runner(root)
+		await build.start()
+		expect(await settledState(build)).toEqual({ state: 'ready' })
+		const seen = JSON.parse(await readFile(join(root, 'kit', 'seen.json'), 'utf8'))
+		expect(seen.argv).toEqual(['$(touch pwned)', ';touch x', '`touch y`', '&& touch z'])
+		for (const name of ['pwned', 'x', 'y', 'z', 'touch']) {
+			expect(existsSync(join(root, 'kit', name))).toBe(false)
+			expect(existsSync(join(root, name))).toBe(false)
+		}
+	})
+
+	it('is none and spawns nothing when kit/ is a symbolic link', async () => {
+		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK })
+		const { rename, symlink } = await import('node:fs/promises')
+		await rename(join(root, 'kit'), join(root, 'kit-real'))
+		await symlink(join(root, 'kit-real'), join(root, 'kit'))
+		const { build, printed } = runner(root)
+		expect(await build.start()).toEqual({ state: 'none' })
+		expect(build.status()).toEqual({ state: 'none' })
+		expect(printed).toEqual([])
+		await new Promise(resolveDelay => setTimeout(resolveDelay, 300))
+		expect(existsSync(join(root, 'kit-real', 'seen.json'))).toBe(false)
+		expect(existsSync(join(root, 'kit-real', 'dist'))).toBe(false)
+	})
+
 	it('is none and runs nothing when kit/package.json declares no build', async () => {
 		const root = await kitWorkspace(undefined)
 		const { build, printed } = runner(root)
