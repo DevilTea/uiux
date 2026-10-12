@@ -1,5 +1,6 @@
 import { isCatalogKey } from '../access/keys'
 import {
+	ACCESS_PRESETS_FILENAME,
 	ACCESS_PRESETS_RESOURCE_KEY,
 	ACCESS_PRESETS_RESOURCE_KIND,
 	ACCESS_PRESETS_SCHEMA_VERSION,
@@ -31,36 +32,46 @@ import { validateResourceRevision } from '../dto/revisions'
  * must be in the catalog). Editing presets never changes a member's keys (Rule
  * 01a11c09-ca2d-7b0e-b428-e2d66f5252dd): it writes only this file.
  *
+ * A `schemaVersion` 6 Workspace whose presets file is missing is not blocked, since presets only
+ * affect labels (Rule 01a12f98-c032-7e1f-806c-41648565004c): its read answers no resource with
+ * `access.presets_missing` (Clause 01a12f98-f466-7c86-af94-5887f1d1b50d), and a write whose
+ * `expectedRevision` is `null` creates the file (Rule 01a12f98-d643-7e29-9273-23564146d518).
+ *
  * Access (`workspace.read` to read, `presets.manage` to write) and the design-write context belong
- * to the scoped session. Below `schemaVersion` 6 the Workspace has no presets file: reads find none
+ * to the scoped session. Below `schemaVersion` 6 the Workspace has no presets file: reads find none,
  * and the write refuses with `workspace.migration_required`.
  */
 export type UpdateAccessPresetsCommand = Readonly<{
-	expectedRevision: string
+	/** The revision of the file the write replaces, or `null` to create the file while there is none. */
+	expectedRevision: string | null
 	presets: readonly unknown[]
 }>
 
 type Key = typeof ACCESS_PRESETS_RESOURCE_KEY
 
 export type AccessPresetsAuthoringResult =
-	| Readonly<{ status: 'updated'; key: Key; revision: ResourceRevision; diagnostics: readonly Diagnostic[] }>
+	| Readonly<{ status: 'updated' | 'created'; key: Key; revision: ResourceRevision; diagnostics: readonly Diagnostic[] }>
 	| Readonly<{ status: 'not_found'; key: Key }>
 	| Readonly<{ status: 'conflict'; key: Key; currentRevision: ResourceRevision }>
 	| Readonly<{ status: 'invalid_expected_revision'; key: Key; diagnostics: readonly Diagnostic[] }>
 	| Readonly<{ status: 'invalid'; key: Key; code?: string; message?: string; diagnostics: readonly Diagnostic[] }>
 	| Readonly<{ status: 'blocked'; key: Key; code: string; message: string; diagnostics: readonly Diagnostic[] }>
 
-/** The Access presets resource: the file as it is, with its diagnostics on disk (Rule 01a11c09-cb08-7007-bcdd-8a04e54d02b5). */
+/**
+ * The Access presets resource: the file as it is, with its diagnostics on disk (Rule
+ * 01a11c09-cb08-7007-bcdd-8a04e54d02b5). `resource` and `revision` are `null` while a
+ * `schemaVersion` 6 Workspace has no presets file (Clause 01a12f98-f466-7c86-af94-5887f1d1b50d).
+ */
 export type AccessPresetsRead = Readonly<{
 	kind: typeof ACCESS_PRESETS_RESOURCE_KIND
 	key: Key
-	resource: AccessPresetsFile
-	revision: ResourceRevision
+	resource: AccessPresetsFile | null
+	revision: ResourceRevision | null
 	diagnostics: readonly Diagnostic[]
 }>
 
 export type AccessPresetsAuthoringService = Readonly<{
-	/** The Access presets resource, or `undefined` when the Workspace has no presets file. */
+	/** The Access presets resource, or `undefined` below `schemaVersion` 6, where a Workspace keeps no presets file. */
 	readAccessPresets(): Promise<AccessPresetsRead | undefined>
 	updateAccessPresets(command: UpdateAccessPresetsCommand): Promise<AccessPresetsAuthoringResult>
 }>
@@ -101,21 +112,46 @@ export function accessPresetsWriteDiagnostics(next: unknown, current: unknown): 
 	return [...rules, ...unknown]
 }
 
+/** Clause 01a12f98-f466-7c86-af94-5887f1d1b50d: a `schemaVersion` 6 Workspace without its presets file. */
+const PRESETS_MISSING: Diagnostic = Object.freeze({
+	code: 'access.presets_missing',
+	path: `/${ACCESS_PRESETS_FILENAME}`,
+	message: `This Workspace has no ${ACCESS_PRESETS_FILENAME}, so no preset labels a member. Saving the Access presets with expectedRevision null creates it.`,
+})
+
 export function createAccessPresetsAuthoringService(persistence: FileNativePersistence): AccessPresetsAuthoringService {
 	function blocked(code: string, message: string, diagnostics: readonly Diagnostic[]): AccessPresetsAuthoringResult {
 		return { status: 'blocked', key: KEY, code, message, diagnostics: diagnostics.length > 0 ? diagnostics : [{ code, path: '/schemaVersion', message }] }
 	}
 
+	/**
+	 * Whether the Workspace keeps a presets file: from `schemaVersion` 6 (Clause
+	 * 01a11c09-a855-7d7e-93ec-cd9a85fdb65e). A file at that path below 6 is not the Workspace's.
+	 */
+	async function keepsPresetsFile(): Promise<boolean> {
+		if (!persistence.layout.accessPresetsPath) return false
+		try {
+			const { inspection } = await persistence.inspectWorkspace()
+			return 'version' in inspection && inspection.version !== undefined && inspection.version >= ACCESS_PRESETS_SCHEMA_VERSION
+		}
+		catch (error) {
+			if (error instanceof PersistenceError) return false
+			throw error
+		}
+	}
+
 	async function readAccessPresets(): Promise<AccessPresetsRead | undefined> {
-		if (!persistence.layout.accessPresetsPath) return undefined
+		if (!await keepsPresetsFile()) return undefined
 		const read = await persistence.accessPresets.readInspected()
-		if (!read) return undefined
+		if (!read) return { kind: ACCESS_PRESETS_RESOURCE_KIND, key: KEY, resource: null, revision: null, diagnostics: [PRESETS_MISSING] }
 		return { kind: ACCESS_PRESETS_RESOURCE_KIND, key: KEY, resource: read.resource, revision: read.revision, diagnostics: read.diagnostics }
 	}
 
 	async function updateAccessPresets(command: UpdateAccessPresetsCommand): Promise<AccessPresetsAuthoringResult> {
+		// `null` names the absent file (Clause 01a11c09-a50e-7531-b16e-74ba685c6bad).
+		const creating = command.expectedRevision === null
 		const expectedRevision = validateResourceRevision(command.expectedRevision, '/expectedRevision')
-		if (!expectedRevision.ok)
+		if (!creating && !expectedRevision.ok)
 			return { status: 'invalid_expected_revision', key: KEY, diagnostics: expectedRevision.diagnostics }
 		const legacy = `Access presets exist from Workspace schemaVersion ${ACCESS_PRESETS_SCHEMA_VERSION}. Run: uiux migrate --workspace <dir>`
 		if (!persistence.layout.accessPresetsPath) return blocked('workspace.migration_required', legacy, [])
@@ -128,18 +164,22 @@ export function createAccessPresetsAuthoringService(persistence: FileNativePersi
 				return blocked('workspace.schema_unsupported', 'This UIUX build cannot change the Access presets of this Workspace.', workspace.diagnostics)
 
 			const current = await persistence.accessPresets.readInspected()
-			if (!current) return { status: 'not_found', key: KEY }
-			if (current.revision !== expectedRevision.value)
+			if (!current && !creating) return { status: 'not_found', key: KEY }
+			if (current && (!expectedRevision.ok || current.revision !== expectedRevision.value))
 				return { status: 'conflict', key: KEY, currentRevision: current.revision }
 
 			const next = { presets: normalizeAccessPresets(command.presets) }
-			const diagnostics = accessPresetsWriteDiagnostics(next, current.resource)
+			const diagnostics = accessPresetsWriteDiagnostics(next, current?.resource)
 			if (diagnostics.length > 0) {
 				const refusal = diagnostics.find(item => item.code.startsWith('access.'))
 				return { status: 'invalid', key: KEY, ...(refusal ? { code: refusal.code, message: refusal.message } : {}), diagnostics }
 			}
 
-			const commit = await persistence.accessPresets.compareAndSwap({ key: KEY, expectedRevision: expectedRevision.value, resource: next as AccessPresetsFile })
+			if (!current) {
+				const revision = await persistence.accessPresets.create(next as AccessPresetsFile)
+				return { status: 'created', key: KEY, revision, diagnostics: (await persistence.accessPresets.readInspected())?.diagnostics ?? [] }
+			}
+			const commit = await persistence.accessPresets.compareAndSwap({ key: KEY, expectedRevision: current.revision, resource: next as AccessPresetsFile })
 			if (!commit.ok) return { status: 'conflict', key: KEY, currentRevision: commit.conflict.currentRevision }
 			const after = await persistence.accessPresets.readInspected()
 			return { status: 'updated', key: KEY, revision: commit.revision, diagnostics: after?.diagnostics ?? [] }
@@ -152,6 +192,11 @@ export function createAccessPresetsAuthoringService(persistence: FileNativePersi
 					return blocked(error.code, error.message, error.diagnostics)
 				case 'persistence.resource_not_found':
 					return { status: 'not_found', key: KEY }
+				case 'persistence.resource_exists': {
+					// Another write created the file after it was read as absent.
+					const currentRevision = await persistence.accessPresets.readRevision()
+					return currentRevision ? { status: 'conflict', key: KEY, currentRevision } : { status: 'not_found', key: KEY }
+				}
 				case 'persistence.invalid_json':
 					return blocked(error.code, `The current Access presets file is not readable JSON, so it cannot be replaced. ${error.message}`, error.diagnostics)
 				default:

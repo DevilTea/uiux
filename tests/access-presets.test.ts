@@ -58,7 +58,7 @@ async function workspace() {
 
 async function revision(app: WorkspaceApplicationSession): Promise<string> {
 	const read = await app.readAccessPresets()
-	if (!read) throw new Error('no Access presets file')
+	if (!read?.revision) throw new Error('no Access presets file')
 	return read.revision
 }
 
@@ -242,6 +242,32 @@ describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01
 		const updated = await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: await revision(ctx.app), presets: [renamed, ...builtIns()] })
 		expect(updated).toMatchObject({ status: 200, body: { status: 'updated', diagnostics: [expect.objectContaining({ code: 'access.unknown_key' })] } })
 		expect((JSON.parse(await readFile(ctx.presetsPath, 'utf8')) as { presets: AccessPreset[] }).presets[0]).toEqual(renamed)
+	})
+
+	it('keeps a schemaVersion 6 Workspace without its presets file usable: the read reports access.presets_missing and a write with expectedRevision null creates the file (Rules 01a12f98-c032 and 01a12f98-d643, Clause 01a12f98-f466)', async () => {
+		const ctx = await workspace()
+		await rm(ctx.presetsPath)
+		expect((await ctx.persistence.inspectWorkspace()).inspection.state).toBe('current')
+		expect(await readAccessPresetsForHttp(http(ctx.app, VIEWER))).toMatchObject({
+			status: 200,
+			body: { kind: 'access-presets', key: 'access-presets', resource: null, revision: null, diagnostics: [{ code: 'access.presets_missing', path: '/access-presets.json' }] },
+		})
+		// The rest of the Workspace stays writable.
+		const settings = await ctx.app.readPointResource('workspace', 'workspace')
+		if (settings?.kind !== 'workspace') throw new Error('workspace')
+		expect(await ctx.app.updateWorkspaceSettings({ expectedRevision: settings.revision, settings: { ...settings.resource, viewports: { desktop: { dimensions: { width: 1280, height: 800 } } } } })).toMatchObject({ status: 'updated' })
+
+		// A revision names an existing file, so it finds none; a refused write creates nothing.
+		expect(await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: 'r_missing', presets: [] })).toMatchObject({ status: 404, body: { status: 'not_found' } })
+		expect(await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: null, presets: [{ id: 'x', name: 'Custom', keys: [] }] })).toMatchObject({ status: 400, body: { code: 'access.preset_name_invalid' } })
+		expect(await updateAccessPresetsForHttp(http(ctx.app, EDITOR), { expectedRevision: null, presets: [] })).toMatchObject({ status: 403, body: { code: 'auth.scope_denied' } })
+		await expect(readFile(ctx.presetsPath)).rejects.toMatchObject({ code: 'ENOENT' })
+
+		const created = await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: null, presets: builtIns() })
+		expect(created).toMatchObject({ status: 201, body: { status: 'created', key: 'access-presets', revision: await revision(ctx.app), diagnostics: [] } })
+		expect(JSON.parse(await readFile(ctx.presetsPath, 'utf8'))).toEqual(builtInAccessPresetsFile())
+		// Once the file exists, `null` conflicts with it.
+		expect(await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: null, presets: [] })).toMatchObject({ status: 409, body: { status: 'conflict', currentRevision: await revision(ctx.app) } })
 	})
 
 	it('lets the next save fix a file a merge broke', async () => {
