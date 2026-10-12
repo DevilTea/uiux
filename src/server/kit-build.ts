@@ -28,7 +28,9 @@ import type { KitBuildControl, KitBuildRestart, KitBuildStatus } from '../applic
  *   new Preview bundle (Rule 01a11bb1-9df8-762d-b5e5-306f9898aae2); a failed run leaves the
  *   generation, so the last good output stays in use (Rule 01a11bb1-9e5e-79ab-841e-c953e8b44bbf).
  * - States follow Clause 01a11bb1-8856-737f-945c-e44c596f7782: `none` without a declaration,
- *   `building` while a run is in progress, `ready` once its output settled, else `failed`.
+ *   `building` while a run is in progress, `ready` once its output settled, else `failed`. A watch
+ *   run is first `ready` only after its output changed since it started, so an output left from
+ *   before the start is never taken (Rule 01a12f9d-a14e-70fe-b44a-cb8c7a85b899).
  * - A run that exceeds `timeoutSeconds` is stopped and fails (Rule
  *   01a11bb1-9f91-7528-a71c-6cd206e25121): the `command` run as a whole, and a `watch` run until
  *   its first settled output (a watch process runs on after that).

@@ -306,6 +306,41 @@ describe('the kit build runner (Feature 01a11bb1-8534)', () => {
 		expect(existsSync(join(root, 'kit', 'late.txt'))).toBe(false)
 	}, 20_000)
 
+	it('applies the timeout to a watch build only until its first settled output (Rule 01a11bb1-9f91)', async () => {
+		const lateWatch = `
+import { mkdirSync, writeFileSync } from 'node:fs'
+setTimeout(() => {
+	mkdirSync('dist', { recursive: true })
+	writeFileSync('dist/uiux.js', 'export {}\\n')
+}, 100)
+setInterval(() => {}, 1000)
+`
+		const root = await kitWorkspace(nodeBuild('build.mjs', { watch: [process.execPath, 'late-watch.mjs'], timeoutSeconds: 1 }), { 'build.mjs': BUILD_OK, 'late-watch.mjs': lateWatch })
+		const { build } = runner(root)
+		await build.start()
+		expect(await settledState(build)).toEqual({ state: 'ready' })
+		// Well past the 1 s timeout, the watch process runs on and its output stays ready.
+		await new Promise(resolveDelay => setTimeout(resolveDelay, 1500))
+		expect(build.status()).toEqual({ state: 'ready' })
+	})
+
+	it('makes a watch build ready only after its output changes, so an output left from before the start is not taken (Rule 01a12f9d-a14e)', async () => {
+		const idleWatch = `
+import { writeFileSync } from 'node:fs'
+writeFileSync('idle.pid', String(process.pid))
+setInterval(() => {}, 1000)
+`
+		const root = await kitWorkspace(nodeBuild('build.mjs', { watch: [process.execPath, 'idle-watch.mjs'], timeoutSeconds: 1 }), { 'build.mjs': BUILD_OK, 'idle-watch.mjs': idleWatch, 'dist/uiux.js': adapterModule('stale-output') })
+		const { build } = runner(root)
+		await build.start()
+		// The stale output is quiet for well over 500 ms, yet the build is not ready; the timeout fails it.
+		await new Promise(resolveDelay => setTimeout(resolveDelay, 700))
+		expect(build.status()).toEqual({ state: 'building' })
+		expect(await settledState(build)).toEqual({ state: 'failed', message: 'The watch command produced no settled output within 1 s and was stopped.' })
+		const pid = Number(await readFile(join(root, 'kit', 'idle.pid'), 'utf8'))
+		await waitFor(() => processAlive(pid), alive => !alive)
+	})
+
 	it('runs the watch command, not the build command, and settles each rebuild (Rule 01a11bb1-9d90)', async () => {
 		const root = await kitWorkspace(nodeBuild('build.mjs', { watch: [process.execPath, 'watch.mjs'] }), { 'build.mjs': BUILD_OK, 'watch.mjs': WATCH })
 		const { build, printed } = runner(root)
