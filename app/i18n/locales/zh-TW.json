@@ -1737,9 +1737,10 @@
       "unknown_key": "這個版本的 UIUX 沒有這個權限鍵。",
       "preset_duplicate": "兩個存取預設集的權限鍵會完全相同，每個預設集都需要不同的權限鍵組合。",
       "preset_name_taken": "已有另一個存取預設集使用這個名稱。",
-      "preset_name_invalid": "預設集名稱需為 1 到 40 個字元，且不能與「自訂」標籤同名。",
+      "preset_name_invalid": "預設集名稱需為 1 到 40 個字元，不能含控制字元或不可見的格式字元，且不能與「自訂」標籤同名。",
       "preset_id_invalid": "預設集 ID 只能使用小寫字母、數字與單一連字號。",
       "preset_keys_unordered": "這個預設集的權限鍵排列順序不正確。",
+      "presets_missing": "這個 Workspace 沒有存取預設集檔案，因此所有成員都標示為「自訂」。儲存預設集即會建立此檔案。",
       "roster_missing": "這個 Workspace 還沒有成員名單。",
       "store_invalid": "成員名單檔案已損壞。",
       "admin_origin_rejected": "成員、Token、登入連結與工作階段只能在伺服器主機的本機迴路網址或 HTTPS 網址上管理，不會透過網路上未加密的 HTTP 進行。請改用上述網址，或在主機上使用 uiux member、uiux token、uiux invite 與 uiux session 指令。"

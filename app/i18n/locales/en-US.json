@@ -1737,9 +1737,10 @@
       "unknown_key": "That permission key does not exist in this version of UIUX.",
       "preset_duplicate": "Two Access presets would have the same keys. Each preset needs its own key set.",
       "preset_name_taken": "Another Access preset already uses this name.",
-      "preset_name_invalid": "A preset name needs 1 to 40 characters and cannot be Custom.",
+      "preset_name_invalid": "A preset name needs 1 to 40 characters, no control or invisible formatting characters, and cannot be Custom.",
       "preset_id_invalid": "A preset ID uses lowercase letters, digits and single hyphens.",
       "preset_keys_unordered": "The preset lists its keys out of order.",
+      "presets_missing": "This Workspace has no Access presets file, so every member is Custom. Saving the presets creates it.",
       "roster_missing": "This Workspace has no member list yet.",
       "store_invalid": "The member list file is damaged.",
       "admin_origin_rejected": "Members, Tokens, sign-in links and sessions are managed only on the server host’s loopback URL or on an https address, never over plain HTTP on the network. Use one of those, or the uiux member, token, invite and session commands on the host."
