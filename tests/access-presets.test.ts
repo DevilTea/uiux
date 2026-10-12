@@ -286,6 +286,22 @@ describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01
 		expect((JSON.parse(await readFile(ctx.presetsPath, 'utf8')) as { presets: AccessPreset[] }).presets[0]).toEqual(renamed)
 	})
 
+	it('keeps an unknown key only on the preset whose id holds it: moving future.x from F to Viewer is refused', async () => {
+		const ctx = await workspace()
+		const [viewer, ...others] = builtIns()
+		const f = { id: 'f', name: 'F', keys: ['workspace.read', 'history.read', 'future.x'] }
+		await writeFile(ctx.presetsPath, `${JSON.stringify({ presets: [viewer, ...others, f] })}\n`)
+		const before = await readFile(ctx.presetsPath)
+		const moved = [{ ...viewer, keys: [...viewer!.keys, 'future.x'] }, ...others, { ...f, keys: ['workspace.read', 'history.read'] }]
+		const refused = await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: await revision(ctx.app), presets: moved })
+		expect(refused).toMatchObject({ status: 400, body: { status: 'invalid', code: 'access.unknown_key', diagnostics: [{ code: 'access.unknown_key', path: '/presets/0' }] } })
+		expect((refused.body as { message: string }).message).toContain('preset "Viewer"')
+		// Keeping it on F, or under a new id, is still the same rule: only the id that holds it keeps it.
+		expect(await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: await revision(ctx.app), presets: [...others, { ...f, id: 'g' }] })).toMatchObject({ status: 400, body: { code: 'access.unknown_key' } })
+		expect(await readFile(ctx.presetsPath)).toEqual(before)
+		expect(await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: await revision(ctx.app), presets: [...others, { ...f, name: 'Future' }] })).toMatchObject({ status: 200 })
+	})
+
 	it('reads a presets file a merge left conflict markers in as no resource with persistence.invalid_json, and replaces it with its revision (Rules 01a11c09-cb08 and 01a12f9c-3dab, Clause 01a12f98-f466)', async () => {
 		const ctx = await workspace()
 		const conflicted = [

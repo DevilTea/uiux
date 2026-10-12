@@ -27,9 +27,9 @@ import { validateResourceRevision } from '../dto/revisions'
  * presets equal (`access.preset_duplicate`, Rule 01a11c09-c7ff-72bb-8afe-2a7d1dc1024d), give two
  * presets one name ignoring case (`access.preset_name_taken`) or leave a requirement of a key out
  * (`access.key_requires`) is refused, and nothing is written. A key unknown to this UIUX version is
- * kept when the current file already holds it, as a newer UIUX wrote it, and refused with
- * `access.unknown_key` otherwise (#140 owner ruling 1 of 2026-10-11: a key newly supplied over HTTP
- * must be in the catalog). Editing presets never changes a member's keys (Rule
+ * kept on a preset whose `id` already holds it in the current file, as a newer UIUX wrote it, and
+ * refused with `access.unknown_key` otherwise, also when another preset holds it (#140 owner ruling 1
+ * of 2026-10-11: a key newly supplied over HTTP must be in the catalog). Editing presets never changes a member's keys (Rule
  * 01a11c09-ca2d-7b0e-b428-e2d66f5252dd): it writes only this file.
  *
  * A `schemaVersion` 6 Workspace whose presets file is missing is not blocked, since presets only
@@ -97,18 +97,25 @@ export function normalizeAccessPresets(presets: readonly unknown[]): unknown[] {
 
 /**
  * The checks a presets write makes on the file it writes, `current` being the file it replaces (or
- * `undefined`): its shape, the rules of Clause 01a11c09-a57d-7d3d-a46f-1e9512200f74 and the keys
- * outside the catalog the current file does not already hold. Also used by a restore of the
+ * `undefined` or `null`): its shape, the rules of Clause 01a11c09-a57d-7d3d-a46f-1e9512200f74 and
+ * the keys outside the catalog that the preset of the same `id` in the current file does not
+ * already hold, so a write cannot move such a key to another preset. Also used by a restore of the
  * `access-presets` resource, which writes a version's file through the same checks.
  */
 export function accessPresetsWriteDiagnostics(next: unknown, current: unknown): readonly Diagnostic[] {
 	const shape = validateAccessPresetsShape(next)
 	if (!shape.ok) return shape.diagnostics
 	const rules = accessPresetsRuleDiagnostics(shape.value.presets, { unknownKeys: 'ignore' })
-	const stored = new Set(labelPresetsOf(current).flatMap(preset => preset.keys))
+	const stored = new Map<string, Set<string>>()
+	for (const preset of labelPresetsOf(current)) {
+		const keys = stored.get(preset.id) ?? new Set<string>()
+		for (const key of preset.keys) keys.add(key)
+		stored.set(preset.id, keys)
+	}
 	const unknown: Diagnostic[] = []
 	shape.value.presets.forEach((preset, index) => {
-		const added = preset.keys.filter(key => !isCatalogKey(key) && !stored.has(key))
+		const held = stored.get(preset.id)
+		const added = preset.keys.filter(key => !isCatalogKey(key) && !held?.has(key))
 		if (added.length > 0)
 			unknown.push({ code: 'access.unknown_key', path: jsonPointer('/presets', index), message: `${added.map(key => `\`${key}\``).join(', ')} ${added.length > 1 ? 'are not permission keys' : 'is not a permission key'} of this UIUX version, so preset ${JSON.stringify(preset.name)} cannot be given ${added.length > 1 ? 'them' : 'it'}.` })
 	})
