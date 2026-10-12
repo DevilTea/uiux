@@ -190,7 +190,7 @@ describe('creating a Checkpoint', () => {
 			parentCheckpoint: ctx.baseline,
 			workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 		})
-		expect(record.resources.map(resource => `${resource.kind}:${resource.key}`)).toEqual(['locale:en-US', 'product-kit:product-kit', `view:${VIEW_ID}`, 'workspace:workspace'])
+		expect(record.resources.map(resource => `${resource.kind}:${resource.key}`)).toEqual(['access-presets:access-presets', 'locale:en-US', 'product-kit:product-kit', `view:${VIEW_ID}`, 'workspace:workspace'])
 		// Its blobs are in the derived-artifact store (Clause 01a11a5e-1e0e-7539-b925-c54dcb1afb55).
 		for (const digest of record.resources.flatMap(resource => Object.values(resource.files)))
 			expect(await ctx.persistence.artifacts.read(digest)).toBeInstanceOf(Uint8Array)
@@ -277,9 +277,9 @@ describe('creating a Checkpoint', () => {
 		const manifestPath = join(ctx.root, CURRENT_TEST_LAYOUT.manifestPath)
 		const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>
 		const files = await checkpointFiles(ctx)
-		// In a schemaVersion 5 root an older manifest does not match the layout, so it is unsupported too;
-		// migration_required, an old-layout Workspace, is checked below.
-		for (const [schemaVersion, code] of [[CURRENT_WORKSPACE_SCHEMA_VERSION - 1, 'workspace.schema_unsupported'], [99, 'workspace.schema_unsupported']] as const) {
+		// A schemaVersion 5 manifest in the same root needs uiux migrate (uiux.v5-to-v6 keeps the layout); a future
+		// one is unsupported. An old-layout Workspace, which needs migration too, is checked below.
+		for (const [schemaVersion, code] of [[CURRENT_WORKSPACE_SCHEMA_VERSION - 1, 'workspace.migration_required'], [99, 'workspace.schema_unsupported']] as const) {
 			await writeFile(manifestPath, `${JSON.stringify({ ...manifest, schemaVersion })}\n`)
 			const http = await createCheckpointForHttp(scoped(ctx.app, REVIEWER), { name: 'Blocked' })
 			expect(http).toMatchObject({ status: 422, body: { status: 'blocked', code } })

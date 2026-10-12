@@ -297,6 +297,61 @@ describe('Access presets history and restore (Clauses 01a11a5e-1fc4, 01a11a5e-21
 	})
 })
 
+describe('the Access presets Scenarios', () => {
+	/** A Workspace with a host roster holding `members`, labeled through the server's presets reader. */
+	async function withRoster(members: readonly Readonly<{ nickname: string; kind: 'human' | 'agent'; preset: string }>[]) {
+		const ctx = await workspace()
+		const home = join(await makeRoot('uiux-access-presets-home-'), 'home')
+		const store = (await AccessStore.open({ workspaceRoot: ctx.root, home, create: true }))!
+		for (const member of members)
+			await store.update(file => addMember(file, { nickname: member.nickname, kind: member.kind, keys: keysOfPreset(member.kind, builtIns().find(preset => preset.id === member.preset)!.keys) }))
+		const service = new AccessService({ store, leases: createLeaseManager(), presets: () => readWorkspaceAccessPresets(ctx.root) })
+		const labels = async () => {
+			const presets = await service.presets()
+			return Object.fromEntries(store.data.members.map(member => [member.nickname, memberLabel(member, presets)]))
+		}
+		const keys = () => Object.fromEntries(store.data.members.map(member => [member.nickname, member.keys]))
+		return { ...ctx, store, service, labels, keys }
+	}
+
+	it('renames a preset in a pulled commit, which changes labels only (Scenario 01a11c09-d68e)', async () => {
+		const ctx = await withRoster([{ nickname: 'erin', kind: 'human', preset: 'editor' }])
+		expect(await ctx.labels()).toEqual({ erin: { preset: { id: 'editor', name: 'Editor' } } })
+		const keys = ctx.keys()
+		// A pulled commit is a change of the file on disk, outside any UIUX operation.
+		await writeFile(ctx.presetsPath, `${JSON.stringify({ presets: builtIns().map(preset => preset.id === 'editor' ? { ...preset, name: 'Author' } : preset) }, null, 2)}\n`)
+		expect(await ctx.labels()).toEqual({ erin: { preset: { id: 'editor', name: 'Author' } } })
+		await ctx.service.refresh(true)
+		expect(ctx.keys()).toEqual(keys)
+	})
+
+	it('deletes every preset, which leaves every member Custom with unchanged keys (Scenario 01a11c09-d6fe)', async () => {
+		const ctx = await withRoster([
+			{ nickname: 'olga', kind: 'human', preset: 'owner' },
+			{ nickname: 'mei', kind: 'human', preset: 'reviewer' },
+			{ nickname: 'claude', kind: 'agent', preset: 'editor' },
+		])
+		expect(Object.values(await ctx.labels()).every(label => 'preset' in label)).toBe(true)
+		const keys = ctx.keys()
+		expect(await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: await revision(ctx.app), presets: [] })).toMatchObject({ status: 200 })
+		expect(await ctx.labels()).toEqual({ olga: { custom: true }, mei: { custom: true }, claude: { custom: true } })
+		await ctx.service.refresh(true)
+		expect(ctx.keys()).toEqual(keys)
+	})
+
+	it('refuses saving QA with the keys of Reviewer, naming both, and leaves the file unchanged (Scenario 01a11c09-d774)', async () => {
+		const ctx = await workspace()
+		const reviewer = builtIns().find(preset => preset.id === 'reviewer')!
+		const qa = { id: 'qa', name: 'QA', keys: ['workspace.read', 'reviews.write'] }
+		expect(await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: await revision(ctx.app), presets: [...builtIns(), qa] })).toMatchObject({ status: 200 })
+		const before = await readFile(ctx.presetsPath)
+		const refused = await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: await revision(ctx.app), presets: [...builtIns(), { ...qa, keys: reviewer.keys }] })
+		expect(refused).toMatchObject({ status: 400, body: { status: 'invalid', code: 'access.preset_duplicate' } })
+		expect((refused.body as { message: string }).message).toContain('"Reviewer" (reviewer) and "QA" (qa)')
+		expect(await readFile(ctx.presetsPath)).toEqual(before)
+	})
+})
+
 describe('labels and --preset from the Workspace\'s presets (Rules 01a11c09-c724, 01a11c09-ca2d, 01a11c09-ca9b, 01a11c33-265e and 01a11c09-cb79)', () => {
 	it('reads the built-in presets below schemaVersion 6 and the presets file from 6, first match first and unknown keys labeling nobody', async () => {
 		const old = await makeRoot()
