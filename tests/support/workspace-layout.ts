@@ -1,12 +1,13 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
+import { builtInAccessPresetsFile } from '../../src/domain/access-presets/schema'
 import { emptyProductKit, type ProductKit } from '../../src/domain/product-kit/schema'
 import type { WorkspaceAdapterSelection, WorkspaceManifest } from '../../src/domain/workspace/schema'
 import type { FileNativePersistence } from '../../src/persistence/file-native'
 import { V5_LAYOUT, type WorkspaceLayout } from '../../src/persistence/paths'
 import { defineWorkspaceSchemaPolicy, type WorkspaceSchemaPolicy } from '../../src/persistence/schema-policy'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY, WORKSPACE_V4_TO_V5_STEP } from '../../src/product/workspace-schema'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY, WORKSPACE_V4_TO_V5_STEP, WORKSPACE_V5_TO_V6_STEP } from '../../src/product/workspace-schema'
 
 /**
  * Test helpers that place Workspace files through the layout seam (`src/persistence/paths.ts`)
@@ -76,7 +77,17 @@ export const V5_TEST_SCHEMA_POLICY: WorkspaceSchemaPolicy = PRODUCT_WORKSPACE_SC
 export const V4_TEST_SCHEMA_POLICY: WorkspaceSchemaPolicy = defineWorkspaceSchemaPolicy({
 	currentVersion: 4,
 	recognizedVersions: [1, 2, 3, 4],
-	steps: PRODUCT_WORKSPACE_SCHEMA_POLICY.steps.filter(step => step !== WORKSPACE_V4_TO_V5_STEP),
+	steps: PRODUCT_WORKSPACE_SCHEMA_POLICY.steps.filter(step => step !== WORKSPACE_V4_TO_V5_STEP && step !== WORKSPACE_V5_TO_V6_STEP),
+})
+
+/**
+ * The policy of a UIUX build before `schemaVersion` 6 (current 5, versions 1 to 5, no
+ * `uiux.v5-to-v6`), for tests that exercise a `schemaVersion` 5 Workspace as current.
+ */
+export const V5_ONLY_TEST_SCHEMA_POLICY: WorkspaceSchemaPolicy = defineWorkspaceSchemaPolicy({
+	currentVersion: 5,
+	recognizedVersions: [1, 2, 3, 4, 5],
+	steps: PRODUCT_WORKSPACE_SCHEMA_POLICY.steps.filter(step => step !== WORKSPACE_V5_TO_V6_STEP),
 })
 
 /** A manifest as tests wrote it below `schemaVersion` 5: settings plus an optional `adapters` list. */
@@ -96,23 +107,26 @@ export function currentWorkspaceFiles(settings: TestWorkspaceSettings = {}): Rea
 
 /**
  * Creates a current-schema Workspace through persistence: the manifest, then the Product Kit file
- * holding `settings.adapters`. Resolves to the manifest's revision.
+ * holding `settings.adapters`, then the Access presets file holding the built-in presets. Resolves
+ * to the manifest's revision.
  */
 export async function createCurrentWorkspace(persistence: FileNativePersistence, settings: TestWorkspaceSettings = {}): Promise<string> {
 	const { manifest, productKit } = currentWorkspaceFiles(settings)
 	const revision = await persistence.workspace.create(manifest)
 	await persistence.productKit.create(productKit)
+	await persistence.accessPresets.create(builtInAccessPresetsFile())
 	return revision
 }
 
 /**
- * Writes a current-schema Workspace's manifest and Product Kit file directly, creating the root.
- * Resolves to the manifest's absolute path.
+ * Writes a current-schema Workspace's manifest, Product Kit file and Access presets file directly,
+ * creating the root. Resolves to the manifest's absolute path.
  */
 export async function writeCurrentWorkspace(root: string, settings: TestWorkspaceSettings = {}): Promise<string> {
 	const { manifest, productKit } = currentWorkspaceFiles(settings)
 	const path = await writeManifest(root, manifest, V5_LAYOUT)
 	await writeFile(join(root, V5_LAYOUT.productKitPath!), `${JSON.stringify(productKit, null, 2)}\n`)
+	await writeFile(join(root, V5_LAYOUT.accessPresetsPath!), `${JSON.stringify(builtInAccessPresetsFile(), null, 2)}\n`)
 	return path
 }
 

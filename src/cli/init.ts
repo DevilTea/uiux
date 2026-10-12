@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 
+import { builtInAccessPresetsFile } from '../domain/access-presets/schema'
 import { emptyProductKit } from '../domain/product-kit/schema'
 import { LEGACY_LAYOUT, V5_LAYOUT } from '../persistence/paths'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, WORKSPACE_GITIGNORE_RULES } from '../product/workspace-schema'
@@ -24,7 +25,8 @@ export type InitCommandOptions = Readonly<{
  * 01a1144e-55be-785d-b494-7f7da834572a): creates a minimal current-schema Workspace in `<dir>`, by
  * default `<git toplevel>/.uiux/` inside a Git repository and `<cwd>/.uiux/` otherwise. `<dir>`
  * holds the manifest directly. It writes `workspace.json` (a `defaultLocale`, empty viewport and
- * theme registries), a `product-kit.json` whose members are all empty, and a `.gitignore` listing
+ * theme registries), a `product-kit.json` whose members are all empty, an `access-presets.json`
+ * holding the built-in Access presets (Clause 01a11c09-a930-7e31-bb0a-9e2bee79490c), and a `.gitignore` listing
  * the runtime files, `kit/node_modules/` and `kit/dist/`; an existing `.gitignore` keeps its lines
  * and gains only the missing rules. The manifest is written last, so an interrupted run never
  * leaves a directory that looks initialized.
@@ -70,6 +72,7 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 	}
 
 	const productKitPath = join(root, V5_LAYOUT.productKitPath!)
+	const accessPresetsPath = join(root, V5_LAYOUT.accessPresetsPath!)
 	const gitignorePath = join(root, '.gitignore')
 	if (rootExists) {
 		for (const manifest of [V5_LAYOUT.manifestPath, LEGACY_LAYOUT.manifestPath]) {
@@ -79,9 +82,11 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 				return 2
 			}
 		}
-		if (await exists(productKitPath)) {
-			err(`uiux: ${root} already holds ${V5_LAYOUT.productKitPath}; remove it or choose another directory.`)
-			return 2
+		for (const [path, name] of [[productKitPath, V5_LAYOUT.productKitPath!], [accessPresetsPath, V5_LAYOUT.accessPresetsPath!]] as const) {
+			if (await exists(path)) {
+				err(`uiux: ${root} already holds ${name}; remove it or choose another directory.`)
+				return 2
+			}
 		}
 		if (await exists(gitignorePath) && !(await lstat(gitignorePath)).isFile()) {
 			err(`uiux: ${gitignorePath} is not a regular file; remove it or choose another directory.`)
@@ -109,6 +114,7 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 		themes: {},
 	}
 	await writeFile(productKitPath, json(emptyProductKit()), { encoding: 'utf8', flag: 'wx' })
+	await writeFile(accessPresetsPath, json(builtInAccessPresetsFile()), { encoding: 'utf8', flag: 'wx' })
 	await writeGitignore(gitignorePath)
 	try {
 		await writeFile(join(root, V5_LAYOUT.manifestPath), json(manifest), { encoding: 'utf8', flag: 'wx' })

@@ -2,6 +2,7 @@ import { posix } from 'node:path'
 
 import { canonicalJsonBytes } from '../domain/canonical-json'
 import { bareSpecifierPackageName, declaredKitDependencies, KIT_PACKAGE_FILENAME } from '../adapters/kit-dependencies'
+import { builtInAccessPresetsFile } from '../domain/access-presets/schema'
 import { emptyProductKit } from '../domain/product-kit/schema'
 import { validateReviewThread } from '../domain/reviews/schema'
 import { isRecord } from '../domain/validation'
@@ -301,6 +302,46 @@ export const WORKSPACE_V4_TO_V5_STEP: WorkspaceMigrationStep = Object.freeze({
 	},
 })
 
+export const WORKSPACE_V5_TO_V6_STEP_ID = 'uiux.v5-to-v6'
+
+/**
+ * The `5 -> 6` step of Part 15 (Rule 01a11c09-c6b5-7a65-86fd-8b5dddf3de6e): it adds the Access
+ * presets file `access-presets.json` holding the built-in Access presets (Clause
+ * 01a11c09-a9a4-79b4-aab4-8734e4702b47) and otherwise changes only the manifest `schemaVersion`. The
+ * layout is the same at 5 and 6, so nothing moves. Deterministic and idempotent; it re-validates
+ * every Review file that was valid under 5 against 6. A schemaVersion 5 snapshot that already holds
+ * the presets file is refused rather than overwritten: such a file was not written by UIUX at 5.
+ */
+export const WORKSPACE_V5_TO_V6_STEP: WorkspaceMigrationStep = Object.freeze({
+	id: WORKSPACE_V5_TO_V6_STEP_ID,
+	fromVersion: 5,
+	toVersion: 6,
+	apply(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+		const layout = layoutForSchemaVersion(6)
+		const presetsPath = layout.accessPresetsPath!
+		const next = new Map(snapshot)
+		const manifestBytes = next.get(layout.manifestPath)
+		if (!manifestBytes) throw new TypeError(`${WORKSPACE_V5_TO_V6_STEP_ID} requires ${layout.manifestPath}.`)
+		const manifest = parseJson(manifestBytes, layout.manifestPath)
+		if (!isRecord(manifest) || manifest.schemaVersion !== 5)
+			throw new TypeError(`${WORKSPACE_V5_TO_V6_STEP_ID} applies only to a schemaVersion 5 manifest.`)
+		if (next.has(presetsPath))
+			throw new TypeError(`${WORKSPACE_V5_TO_V6_STEP_ID} found ${presetsPath} in a schemaVersion 5 Workspace; move it away, then run uiux migrate again.`)
+		next.set(layout.manifestPath, canonicalJsonBytes({ ...manifest, schemaVersion: 6 }))
+		next.set(presetsPath, canonicalJsonBytes(builtInAccessPresetsFile()))
+
+		for (const [path, bytes] of snapshot) {
+			if (!/^reviews\/[^/]+\.review\.json$/u.test(path)) continue
+			let review: unknown
+			try { review = parseJson(bytes, path) }
+			catch { continue } // Unparseable JSON stays byte-identical and keeps its persistence diagnostic.
+			const filename = path.slice('reviews/'.length)
+			if (validateReviewThread(review, { schemaVersion: 5, filename }).ok) assertValidUnder(review, filename, 6, WORKSPACE_V5_TO_V6_STEP_ID)
+		}
+		return next
+	},
+})
+
 /**
  * The dependencies `.uiux/kit/package.json` declares, by the reading of the v5 dependency guard
  * (`declaredKitDependencies`). The context refuses a symbolic link or a non-regular file, and an
@@ -340,8 +381,8 @@ export const WORKSPACE_GITIGNORE_RULES: readonly string[] = Object.freeze([
 
 export const PRODUCT_WORKSPACE_SCHEMA_POLICY = defineWorkspaceSchemaPolicy({
 	currentVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
-	recognizedVersions: [1, 2, 3, 4, 5],
-	steps: [WORKSPACE_V1_TO_V2_STEP, WORKSPACE_V2_TO_V3_STEP, WORKSPACE_V3_TO_V4_STEP, WORKSPACE_V4_TO_V5_STEP],
+	recognizedVersions: [1, 2, 3, 4, 5, 6],
+	steps: [WORKSPACE_V1_TO_V2_STEP, WORKSPACE_V2_TO_V3_STEP, WORKSPACE_V3_TO_V4_STEP, WORKSPACE_V4_TO_V5_STEP, WORKSPACE_V5_TO_V6_STEP],
 })
 
 /** Returns the same object when no lifecycle resolve event lacks a resolution. */

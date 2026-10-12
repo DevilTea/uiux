@@ -8,13 +8,13 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createHistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { runMigrateCommand } from '../src/cli/migrate'
+import { builtInAccessPresetsFile } from '../src/domain/access-presets/schema'
 import type { HostVersionRecord } from '../src/domain/history/schema'
 import { emptyProductKit, validateProductKit, type ProductKit } from '../src/domain/product-kit/schema'
 import { validateWorkspaceManifest } from '../src/domain/workspace/schema'
 import {
 	acquireServerHold,
 	canonicalJsonBytes,
-	defineWorkspaceSchemaPolicy,
 	detectWorkspaceLayout,
 	detectWorkspaceLayoutSync,
 	FileNativePersistence,
@@ -28,7 +28,7 @@ import { CheckpointStore, HostHistoryStore, runWithDesignWriteContext, versionRe
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { hostHistoryPaths } from '../src/server/access/store'
 import { createHistoryStoreFactory } from '../src/server/history-stores'
-import { transactionsPath, V4_TEST_SCHEMA_POLICY, V5_TEST_SCHEMA_POLICY, v5Manifest, writeManifest } from './support/workspace-layout'
+import { transactionsPath, V4_TEST_SCHEMA_POLICY, V5_ONLY_TEST_SCHEMA_POLICY as V5_TEST_SCHEMA_POLICY, v5Manifest, writeManifest } from './support/workspace-layout'
 
 /** A schemaVersion 4 manifest, as the old layout keeps it in `.uiux/`, holding `adapters`. */
 function v4Manifest(overrides: Readonly<Record<string, unknown>> = {}): Record<string, unknown> {
@@ -108,8 +108,8 @@ describe('the schemaVersion 5 layout', () => {
 		expect(V5_LAYOUT.metadataFilePath('.server-hold-x.tmp')).toBe('.server-hold-x.tmp')
 		expect(V5_LAYOUT.artifactRelativePath(`sha256:${HEX}`)).toBe(`artifacts/sha256/cd/${HEX}`)
 		expect(V5_LAYOUT.checkpointRelativePath(CHECKPOINT_ID)).toBe(`history/checkpoints/${CHECKPOINT_ID}.json`)
-		expect(V5_LAYOUT.canonicalFiles).toEqual(['workspace.json', 'product-kit.json'])
-		expect(V5_LAYOUT.versionedRoots).toEqual(['workspace.json', 'product-kit.json', 'views/', 'flows/', 'i18n/', 'assets/'])
+		expect(V5_LAYOUT.canonicalFiles).toEqual(['workspace.json', 'product-kit.json', 'access-presets.json'])
+		expect(V5_LAYOUT.versionedRoots).toEqual(['workspace.json', 'product-kit.json', 'access-presets.json', 'views/', 'flows/', 'i18n/', 'assets/'])
 		expect(V5_LAYOUT.excluded).toEqual(['reviews/', 'artifacts/', 'history/', '.transactions/', 'kit/'])
 		expect(LEGACY_LAYOUT.productKitPath).toBeUndefined()
 		expect(LEGACY_LAYOUT.codeDir).toBeUndefined()
@@ -155,10 +155,15 @@ describe('the schemaVersion 5 layout', () => {
 		}
 	})
 
-	it('is current: UIUX\'s own policy is schemaVersion 5, whose layout a new Workspace gets', () => {
-		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(5)
+	it('is current: UIUX\'s own policy is schemaVersion 6, which keeps the schemaVersion 5 layout a new Workspace gets', () => {
+		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(6)
 		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.recognizedVersions).toContain(5)
+		expect(layoutForSchemaVersion(5)).toBe(V5_LAYOUT)
 		expect(layoutForSchemaVersion(PRODUCT_WORKSPACE_SCHEMA_POLICY.currentVersion)).toBe(V5_LAYOUT)
+		// Clause 01a11c09-a855-7d7e-93ec-cd9a85fdb65e: the Access presets file is a canonical, versioned root file.
+		expect(V5_LAYOUT.accessPresetsPath).toBe('access-presets.json')
+		expect(V5_LAYOUT.canonicalFiles).toContain('access-presets.json')
+		expect(V5_LAYOUT.classifyVersionedPath('access-presets.json')).toEqual({ kind: 'access-presets', key: 'access-presets' })
 	})
 })
 
@@ -378,22 +383,8 @@ describe('persistence on a schemaVersion 5 root', () => {
 })
 
 describe('uiux migrate on a schemaVersion 5 root', () => {
-	// A later schema inside the same layout, to exercise migrate on the v5 paths.
-	const V6_TEST_POLICY = defineWorkspaceSchemaPolicy({
-		currentVersion: 6,
-		recognizedVersions: [1, 2, 3, 4, 5, 6],
-		steps: [...V5_TEST_SCHEMA_POLICY.steps, {
-			id: 'test.v5-to-v6',
-			fromVersion: 5,
-			toVersion: 6,
-			apply(snapshot) {
-				const next = new Map(snapshot)
-				const manifest = JSON.parse(new TextDecoder().decode(next.get('workspace.json')!)) as Record<string, unknown>
-				next.set('workspace.json', canonicalJsonBytes({ ...manifest, schemaVersion: 6 }))
-				return next
-			},
-		}],
-	})
+	// UIUX's own policy: schemaVersion 6 keeps the v5 layout, so `uiux.v5-to-v6` exercises migrate on the v5 paths.
+	const V6_TEST_POLICY = PRODUCT_WORKSPACE_SCHEMA_POLICY
 
 	it('finds the server hold at the v5 path and refuses, then migrates in place with history at the v5 paths', async () => {
 		const { root } = await v5Workspace(KIT)
@@ -410,6 +401,7 @@ describe('uiux migrate on a schemaVersion 5 root', () => {
 		expect(await run(), lines.join('\n')).toBe(0)
 		expect(JSON.parse(await readFile(join(root, 'workspace.json'), 'utf8')).schemaVersion).toBe(6)
 		expect(await readFile(join(root, 'product-kit.json'))).toEqual(canonicalJsonBytes(KIT))
+		expect(await readFile(join(root, 'access-presets.json'))).toEqual(canonicalJsonBytes(builtInAccessPresetsFile()))
 		const [checkpoint] = await readdir(join(root, 'history', 'checkpoints'))
 		expect(JSON.parse(await readFile(join(root, 'history', 'checkpoints', checkpoint!), 'utf8'))).toMatchObject({ workspaceSchemaVersion: 5, name: 'Before migration to schemaVersion 6' })
 		expect(lines.join('\n')).toMatch(/system version: [0-9a-f-]{36}/)
