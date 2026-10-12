@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest'
-import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Window } from 'happy-dom'
@@ -20,15 +19,11 @@ import { createStandalonePreviewMount } from '../src/preview/browser-runtime'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
 
-/**
- * The dogfood Workspace and its reference Adapter: design/ with design/adapters/reference.ts while the
- * dogfood is the schemaVersion 4 Workspace, and <repo>/.uiux/ with .uiux/kit/adapters/reference.ts
- * once the owner has relocated it (D1, scripts/dogfood-relocate.mjs).
- */
-const DOGFOOD = [
-	{ root: join(process.cwd(), '.uiux'), adapter: join(process.cwd(), '.uiux', 'kit', 'adapters', 'reference.ts') },
-	{ root: join(process.cwd(), 'design'), adapter: join(process.cwd(), 'design', 'adapters', 'reference.ts') },
-].find(candidate => existsSync(candidate.adapter))!
+/** The dogfood Workspace `<repo>/.uiux/` and its reference Adapter `.uiux/kit/adapters/reference.ts`, only read. */
+const DOGFOOD = {
+	root: join(process.cwd(), '.uiux'),
+	adapter: join(process.cwd(), '.uiux', 'kit', 'adapters', 'reference.ts'),
+}
 
 async function importReferenceAdapter(): Promise<Record<string, unknown>> {
 	return await import(pathToFileURL(DOGFOOD.adapter).href) as Record<string, unknown>

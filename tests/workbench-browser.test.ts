@@ -7,8 +7,9 @@ import { provisionToken, sessionCookieFor } from './support/access'
 
 /**
  * Browser checks against the built Workbench (`pnpm build` output) serving a copy of the
- * dogfood `design/` Workspace. They cover the DESIGN.md token, type and focus contracts and
- * the independence of the Workbench chrome from the Preview render context.
+ * frozen dogfood Workspace snapshot (`tests/fixtures/workbench-workspace`). They cover the
+ * DESIGN.md token, type and focus contracts and the independence of the Workbench chrome from the
+ * Preview render context.
  */
 
 const VIEW_ID = '7f3d7780-3cb9-4e57-8f0b-2e8d569905c1'
@@ -413,7 +414,7 @@ describe('Workbench shell (R3)', () => {
 	}
 })
 
-/** The dogfood Workspace viewport presets (design/.uiux/workspace.json). */
+/** The dogfood Workspace viewport presets (.uiux/workspace.json). */
 const VIEWPORT_PRESETS = { desktop: [1920, 1080], tablet: [1024, 768], mobile: [390, 844] } as const
 
 type CanvasMetrics = Readonly<{

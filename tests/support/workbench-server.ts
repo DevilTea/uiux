@@ -23,7 +23,7 @@ const REPOSITORY_ROOT = join(import.meta.dirname, '..', '..')
 /**
  * Frozen snapshot of the dogfood Workspace the browser tests were written against (the
  * pre-Quiet-Canvas Workbench View, its Review threads, evidence and reference adapter). The live
- * `design/` Workspace is authored freely through MCP, so tests must not depend on its contents.
+ * `.uiux/` Workspace is authored freely through MCP, so tests must not depend on its contents.
  */
 export const WORKBENCH_FIXTURE_WORKSPACE = join(REPOSITORY_ROOT, 'tests', 'fixtures', 'workbench-workspace')
 

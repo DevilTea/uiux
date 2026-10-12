@@ -9,11 +9,6 @@
  * The global default stays 5 s so every other suite still fails fast; only these suites opt in, and
  * 20 s is several times the observed worst case, so a real hang still fails.
  *
- * The dogfood uiux.v3-to-v4 CLI replay test in `workspace-migration.test.ts` also uses it, per test.
- * That test runs the CLI three times as real child processes (each bundles its command with esbuild)
- * plus an fsynced migration transaction. It takes about 0.6 s alone and close to 4 s under CPU and
- * I/O load.
- *
  * `history-restore.test.ts` uses it too: each test starts a history recorder, writes Checkpoints and
  * fsynced host versions and restores through the full write path (one also assesses Handoff
  * readiness), taking 0.7 to 2.5 s alone and about 5.5 s for the readiness test.

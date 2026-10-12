@@ -13,7 +13,7 @@ import {
 	ZOOM_STEPS,
 } from '../app/utils/canvas-zoom'
 
-/** The three dogfood Workspace viewport presets (design/.uiux/workspace.json). */
+/** The three dogfood Workspace viewport presets (.uiux/workspace.json). */
 const PRESETS = { desktop: { width: 1920, height: 1080 }, tablet: { width: 1024, height: 768 }, mobile: { width: 390, height: 844 } }
 /** Representative canvas stages inside the three Workbench window sizes (both panels open at FHD). */
 const STAGES = { fhd: { width: 1316, height: 992 }, tablet: { width: 968, height: 680 }, phone: { width: 390, height: 708 } }
