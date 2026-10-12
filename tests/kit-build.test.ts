@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 
@@ -83,9 +83,10 @@ const NO_OUTPUT = 'console.log("nothing to build")\n'
 
 type Declaration = Readonly<{ output?: string; build?: Record<string, unknown> }> | undefined
 
-async function kitWorkspace(uiux: unknown, files: Readonly<Record<string, string>> = {}, adapters: ProductKit['adapters'] = [{ moduleSpecifier: './dist/uiux.js' }]) {
-	const root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-kit-build-')))
-	roots.push(root)
+async function kitWorkspace(uiux: unknown, files: Readonly<Record<string, string>> = {}, adapters: ProductKit['adapters'] = [{ moduleSpecifier: './dist/uiux.js' }], at?: string) {
+	const root = at ?? await realpath(await mkdtemp(join(tmpdir(), 'uiux-kit-build-')))
+	if (!at) roots.push(root)
+	await mkdir(root, { recursive: true })
 	await writeManifest(root, canonicalJsonBytes(v5Manifest()), V5_LAYOUT)
 	await writeFile(join(root, 'product-kit.json'), canonicalJsonBytes({ ...emptyProductKit(), adapters }))
 	await write(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', private: true, type: 'module', ...(uiux === undefined ? {} : { uiux }) }))
@@ -170,11 +171,31 @@ describe('the kit build declaration (Clause 01a11bb1-86af)', () => {
 })
 
 describe('the build process environment (Clause 01a11bb1-88ba)', () => {
-	it('drops every UIUX_INTERNAL_* variable and puts the node_modules/.bin of kit/ and its ancestors first on PATH', () => {
-		const env = kitBuildEnvironment({ UIUX_INTERNAL_DEV_NETWORK: 'handoff', uiux_internal_lower: 'x', UIUX_HOME: '/h', KEEP: '1', PATH: '/usr/bin' }, '/w/.uiux/kit')
+	it('drops every UIUX_INTERNAL_* variable and puts only the node_modules/.bin of kit/ and of the Workspace root first on PATH', () => {
+		const env = kitBuildEnvironment({ UIUX_INTERNAL_DEV_NETWORK: 'handoff', uiux_internal_lower: 'x', UIUX_HOME: '/h', KEEP: '1', PATH: '/usr/bin' }, '/w/.uiux/kit', '/w/.uiux')
 		expect(Object.keys(env).some(name => name.toUpperCase().startsWith('UIUX_INTERNAL_'))).toBe(false)
 		expect(env).toMatchObject({ UIUX_HOME: '/h', KEEP: '1' })
-		expect(env.PATH!.split(delimiter)).toEqual(['/w/.uiux/kit/node_modules/.bin', '/w/.uiux/node_modules/.bin', '/w/node_modules/.bin', '/node_modules/.bin', '/usr/bin'])
+		// No ancestor of the Workspace root (owner ruling 1 of 2026-10-12).
+		expect(env.PATH!.split(delimiter)).toEqual(['/w/.uiux/kit/node_modules/.bin', '/w/.uiux/node_modules/.bin', '/usr/bin'])
+	})
+
+	it('never runs a node planted in the node_modules/.bin of an ancestor of the Workspace root', async () => {
+		const outer = await realpath(await mkdtemp(join(tmpdir(), 'uiux-kit-build-outer-')))
+		roots.push(outer)
+		const marker = join(outer, 'planted-ran')
+		for (const bin of [join(outer, 'node_modules', '.bin'), join(outer, 'project', 'node_modules', '.bin')]) {
+			await write(join(bin, 'node'), `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexit 1\n`)
+			await chmod(join(bin, 'node'), 0o755)
+		}
+		const root = join(outer, 'project', '.uiux')
+		await kitWorkspace({ output: 'dist', build: { command: ['node', 'build.mjs'] } }, { 'build.mjs': BUILD_OK }, undefined, root)
+		// The real node is found on the inherited PATH, after kit/ and the Workspace root.
+		const { build } = runner(root, { env: { ...process.env, PATH: [dirname(process.execPath), process.env.PATH ?? ''].join(delimiter) } })
+		await build.start()
+		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(existsSync(marker)).toBe(false)
+		const seen = JSON.parse(await readFile(join(root, 'kit', 'seen.json'), 'utf8'))
+		expect(seen.env.PATH.split(delimiter).slice(0, 3)).toEqual([join(root, 'kit', 'node_modules', '.bin'), join(root, 'node_modules', '.bin'), dirname(process.execPath)])
 	})
 
 	it('runs the build in the real kit/ directory with that environment and standard input closed', async () => {

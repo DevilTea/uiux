@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { lstat, readdir, realpath } from 'node:fs/promises'
-import { delimiter, dirname, join } from 'node:path'
+import { delimiter, join } from 'node:path'
 
 import { containedRealPath, maskHostPaths } from '../adapters/kit-registry'
 import { readKitBuildDeclaration, type KitBuildDeclaration } from '../adapters/kit-build-declaration'
@@ -18,9 +18,9 @@ import type { KitBuildControl, KitBuildStatus } from '../application/ports/kit-b
  *
  * - The process runs in the real `kit/` directory, through `spawn` with an argument array and no
  *   shell, with UIUX's environment minus every `UIUX_INTERNAL_*` variable, the `node_modules/.bin`
- *   directories of `kit/` and its ancestors first on `PATH`, and standard input closed (Clause
- *   01a11bb1-88ba-7030-a7dd-5c7e843c31ea). It leads its own process group, so stopping it stops
- *   what it started.
+ *   directories of `kit/` and of the Workspace root, and no other, first on `PATH`, and standard
+ *   input closed (Clause 01a11bb1-88ba-7030-a7dd-5c7e843c31ea). It leads its own process group, so
+ *   stopping it stops what it started.
  * - Its argument array is printed before it runs (Rule 01a11bb1-a05b-7686-beaa-22a90aa90fc2).
  * - The output is settled once 500 ms pass without a change in the output directory (Clause
  *   01a11bb1-87ed-7fec-b485-ede3986675d4), watched by polling its listing. Each settled output
@@ -81,10 +81,11 @@ const MAX_OUTPUT_ENTRIES = 20_000
 
 /**
  * The build process environment (Clause 01a11bb1-88ba-7030-a7dd-5c7e843c31ea): `base` minus every
- * `UIUX_INTERNAL_*` variable, with `<dir>/node_modules/.bin` for `kitDirectory` and each of its
- * ancestors, nearest first, ahead of the inherited `PATH`.
+ * `UIUX_INTERNAL_*` variable, with `kit/node_modules/.bin` and `<workspace root>/node_modules/.bin`
+ * ahead of the inherited `PATH`. No other ancestor directory is added (owner ruling 1 of
+ * 2026-10-12): a tool elsewhere is named by an absolute path in the build command.
  */
-export function kitBuildEnvironment(base: NodeJS.ProcessEnv, kitDirectory: string): Record<string, string> {
+export function kitBuildEnvironment(base: NodeJS.ProcessEnv, kitDirectory: string, workspaceRoot: string): Record<string, string> {
 	const env: Record<string, string> = {}
 	for (const [name, value] of Object.entries(base)) {
 		if (value === undefined) continue
@@ -93,11 +94,7 @@ export function kitBuildEnvironment(base: NodeJS.ProcessEnv, kitDirectory: strin
 		env[name] = value
 	}
 	const pathName = Object.keys(env).find(name => name.toUpperCase() === 'PATH') ?? 'PATH'
-	const bins: string[] = []
-	for (let directory = kitDirectory; ; directory = dirname(directory)) {
-		bins.push(join(directory, 'node_modules', '.bin'))
-		if (dirname(directory) === directory) break
-	}
+	const bins = [join(kitDirectory, 'node_modules', '.bin'), join(workspaceRoot, 'node_modules', '.bin')]
 	const inherited = env[pathName]
 	env[pathName] = [...bins, ...(inherited ? [inherited] : [])].join(delimiter)
 	return env
@@ -229,7 +226,7 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 		maskRoots = realRoot && realRoot !== options.root ? [realRoot, options.root] : [options.root]
 		const kitDirectory = name && realRoot ? join(realRoot, name) : undefined
 		// Without a real kit/ directory (or below schemaVersion 5) there is no kit project to build.
-		if (!kitDirectory || !await realDirectoryIdentity(kitDirectory).catch(() => undefined)) {
+		if (!kitDirectory || !realRoot || !await realDirectoryIdentity(kitDirectory).catch(() => undefined)) {
 			status = { state: 'none' }
 			return status
 		}
@@ -258,7 +255,7 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 		try {
 			child = spawn(argv[0]!, argv.slice(1), {
 				cwd: kitDirectory,
-				env: kitBuildEnvironment(options.env ?? process.env, kitDirectory),
+				env: kitBuildEnvironment(options.env ?? process.env, kitDirectory, realRoot),
 				stdio: ['ignore', 'pipe', 'pipe'],
 				shell: false,
 				detached,
