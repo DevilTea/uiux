@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:f
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { parseKitBuildDeclaration, readKitBuildDeclaration } from '../src/adapters/kit-build-declaration'
 import type { KitBuildControl, KitBuildStatus } from '../src/application/ports/kit-build'
@@ -370,6 +370,33 @@ writeFileSync('dist/uiux.js', 'export {}\\n')
 		expect(log).toContain('linked <path>')
 		expect(log).not.toContain(root)
 		expect(log).not.toContain('/opt/secret')
+	})
+
+	it.skipIf(process.platform === 'win32')('kills the process group once as the build exits, and never signals it after that', async () => {
+		const leaving = `
+import { spawn } from 'node:child_process'
+import { mkdirSync, writeFileSync } from 'node:fs'
+const straggler = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+writeFileSync('straggler.pid', String(straggler.pid))
+straggler.unref()
+mkdirSync('dist', { recursive: true })
+writeFileSync('dist/uiux.js', 'export {}\\n')
+`
+		const root = await kitWorkspace(nodeBuild('leaving.mjs'), { 'leaving.mjs': leaving })
+		const kill = vi.spyOn(process, 'kill')
+		cleanups.push(() => kill.mockRestore())
+		const groupSignals = () => kill.mock.calls.filter(([pid]) => typeof pid === 'number' && pid < 0)
+		const { build } = runner(root)
+		await build.start()
+		expect(await settledState(build)).toEqual({ state: 'ready' })
+		const straggler = Number(await readFile(join(root, 'kit', 'straggler.pid'), 'utf8'))
+		// What the build left running dies with its group.
+		await waitFor(() => processAlive(straggler), alive => !alive)
+		expect(groupSignals()).toEqual([[expect.any(Number), 'SIGKILL']])
+		// The group's ID may be reused by now, so neither stop signals it again.
+		await build.stop()
+		build.stopSync()
+		expect(groupSignals()).toHaveLength(1)
 	})
 
 	it('keeps a ring of the last bytes written', () => {

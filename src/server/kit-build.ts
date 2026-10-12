@@ -193,6 +193,11 @@ type Run = {
 	child?: ChildProcess
 	exited: Promise<void>
 	stopping: boolean
+	/**
+	 * Set once the leader has exited and its group was killed: the group's ID may then be reused,
+	 * so it is never signalled again.
+	 */
+	groupDone: boolean
 	timer?: NodeJS.Timeout
 	poll?: NodeJS.Timeout
 }
@@ -267,8 +272,9 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 		run.poll = undefined
 	}
 
-	function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
-		if (child.pid === undefined) return
+	function signalGroup(run: Run, signal: NodeJS.Signals): void {
+		const child = run.child
+		if (!child || child.pid === undefined || run.groupDone) return
 		try {
 			if (detached) process.kill(-child.pid, signal)
 			else child.kill(signal)
@@ -279,17 +285,17 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 	async function terminate(run: Run): Promise<void> {
 		run.stopping = true
 		clearTimers(run)
-		const child = run.child
-		if (!child) return
-		signalGroup(child, 'SIGTERM')
+		if (!run.child) return
+		signalGroup(run, 'SIGTERM')
 		const exited = await Promise.race([run.exited.then(() => true), delay(killGraceMs).then(() => false)])
-		// What the process started may outlive it, so the group is killed either way.
-		signalGroup(child, 'SIGKILL')
+		// A leader still running after the grace period is killed with its group; one that exited
+		// had its group killed then (`groupDone`), so nothing is signalled again.
+		signalGroup(run, 'SIGKILL')
 		if (!exited) await Promise.race([run.exited, delay(killGraceMs)])
 	}
 
 	async function begin(): Promise<KitBuildStatus> {
-		const run: Run = { id: ++runs, exited: Promise.resolve(), stopping: false }
+		const run: Run = { id: ++runs, exited: Promise.resolve(), stopping: false, groupDone: false }
 		current = run
 		log.clear()
 		declared = undefined
@@ -341,7 +347,12 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 			return status
 		}
 		run.child = child
-		run.exited = new Promise<void>(resolveExit => child.once('exit', () => resolveExit()))
+		run.exited = new Promise<void>(resolveExit => child.once('exit', () => {
+			// What the process started may outlive it, so its group is killed once, as it exits.
+			signalGroup(run, 'SIGKILL')
+			run.groupDone = true
+			resolveExit()
+		}))
 		child.stdout?.on('data', (chunk: Buffer) => log.write(chunk))
 		child.stderr?.on('data', (chunk: Buffer) => log.write(chunk))
 
@@ -429,7 +440,7 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 			if (!run) return
 			run.stopping = true
 			clearTimers(run)
-			if (run.child) signalGroup(run.child, 'SIGKILL')
+			signalGroup(run, 'SIGKILL')
 		},
 	})
 }
