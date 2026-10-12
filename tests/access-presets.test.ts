@@ -106,6 +106,21 @@ describe('the Access presets file (Clauses 01a11c09-a855, 01a11c09-a8c3 and 01a1
 		expect(codes({ id: 'a', name: 'A', keys: ['workspace.read', 'workspace.read'] })).toEqual(['identity.duplicate'])
 		expect(validateAccessPresetsFile({ presets: [], extra: 1 }).diagnostics.map(item => item.code)).toEqual(['schema.unknown_field'])
 	})
+
+	it('compares names after NFC normalization and trimming, and refuses control and format characters, without folding confusables (Clause 01a11c09-a8c3, #140 owner ruling 4 of 2026-10-12)', () => {
+		const codes = (presets: unknown[]) => validateAccessPresetsFile({ presets }).diagnostics.map(item => item.code)
+		const [viewer, reviewer] = builtIns()
+		// A Greek capital Omicron makes another name: confusables are not detected.
+		expect(codes([{ ...viewer, name: 'Owner' }, { ...reviewer, name: 'Οwner' }])).toEqual([])
+		// NFC and NFD spell one name, and so do names that differ only in surrounding spaces.
+		expect(codes([{ ...viewer, name: 'Café' }, { ...reviewer, name: 'Café' }])).toEqual(['access.preset_name_taken'])
+		expect(codes([{ ...viewer, name: 'Lead' }, { ...reviewer, name: '  lead ' }])).toEqual(['access.preset_name_taken'])
+		// A zero-width space, a right-to-left override, a newline, a tab, and a name of a zero-width joiner alone.
+		for (const name of ['Edi​tor', '‮Editor', 'Edi\ntor', 'Editor\t', '‍'])
+			expect(codes([{ ...viewer, name }]), JSON.stringify(name)).toEqual(['access.preset_name_invalid'])
+		expect(codes([{ ...viewer, name: ' custom ' }])).toEqual(['access.preset_name_invalid'])
+		expect(codes([{ ...viewer, name: '   ' }])).toEqual(['access.preset_name_invalid'])
+	})
 })
 
 describe('uiux.v5-to-v6 and uiux init (Clauses 01a11c09-a9a4 and 01a1144e-55a3, Rule 01a11c09-c6b5)', () => {
@@ -232,6 +247,19 @@ describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01
 			.toMatchObject({ status: 400, body: { code: 'access.preset_id_invalid' } })
 		expect(await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision, presets: 'all' })).toMatchObject({ status: 400, body: { code: 'malformed_payload' } })
 		expect(await readFile(ctx.presetsPath)).toEqual(before)
+	})
+
+	it('refuses a name that is another preset\'s after NFC normalization and trimming, " custom " and a bidirectional control, and allows a confusable name (Clause 01a11c09-a8c3)', async () => {
+		const ctx = await workspace()
+		const before = await readFile(ctx.presetsPath)
+		const expectedRevision = await revision(ctx.app)
+		const [viewer, reviewer] = builtIns()
+		const save = (presets: unknown[]) => updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision, presets })
+		expect(await save([{ ...viewer, name: 'Café' }, { ...reviewer, name: 'Café' }])).toMatchObject({ status: 400, body: { code: 'access.preset_name_taken' } })
+		expect(await save([{ ...viewer, name: ' custom ' }])).toMatchObject({ status: 400, body: { code: 'access.preset_name_invalid' } })
+		expect(await save([{ ...viewer, name: 'Edi‮tor' }])).toMatchObject({ status: 400, body: { code: 'access.preset_name_invalid' } })
+		expect(await readFile(ctx.presetsPath)).toEqual(before)
+		expect(await save([{ ...viewer, name: 'Owner' }, { ...reviewer, name: 'Οwner' }])).toMatchObject({ status: 200, body: { status: 'updated' } })
 	})
 
 	it('keeps a key unknown to this version that the file already holds, and reports it as a diagnostic (#140 owner ruling 1 of 2026-10-11)', async () => {

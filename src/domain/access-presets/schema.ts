@@ -16,12 +16,12 @@ import { jsonPointer, rejectUnknownKeys, Validator, type Diagnostic, type Valida
  *
  * The checks fall in two groups:
  * - the shape (Clause 01a11c09-a8c3-776f-bc9f-26c6513816f5): `{ presets }`, each preset
- *   `{ id, name, keys }`, ids unique slugs, names non-empty, at most 40 characters and never
- *   `Custom`, keys unique permission key names in catalog order, with the codes of Clause
- *   01a12f9d-eb8d-7eba-b618-84e1bf1b7d08 (`access.preset_id_invalid`, `access.preset_name_invalid`
- *   and, for a file on disk, `access.preset_keys_unordered`);
+ *   `{ id, name, keys }`, ids unique slugs, names of at most 40 characters without control or
+ *   format characters, non-empty and never `Custom`, keys unique permission key names in catalog
+ *   order, with the codes of Clause 01a12f9d-eb8d-7eba-b618-84e1bf1b7d08 (`access.preset_id_invalid`,
+ *   `access.preset_name_invalid` and, for a file on disk, `access.preset_keys_unordered`);
  * - the rules of Clause 01a11c09-a57d-7d3d-a46f-1e9512200f74: no two presets with equal key sets
- *   (`access.preset_duplicate`, naming both), no two names equal ignoring case
+ *   (`access.preset_duplicate`, naming both), no two names the same ({@link presetNameKey})
  *   (`access.preset_name_taken`), every requirement of each key present (`access.key_requires`)
  *   and, for a file on disk, no key outside the catalog (`access.unknown_key`).
  *
@@ -68,6 +68,23 @@ function characters(value: string): number {
 }
 
 /**
+ * Control and format characters (Unicode categories Cc and Cf), which a preset name may not hold
+ * (Clause 01a11c09-a8c3-776f-bc9f-26c6513816f5): newlines and tabs, zero-width characters and the
+ * bidirectional controls among them.
+ */
+const CONTROL_OR_FORMAT_CHARACTER = /[\p{Cc}\p{Cf}]/u
+
+/**
+ * The form in which preset names are compared (Clause 01a11c09-a8c3-776f-bc9f-26c6513816f5): NFC,
+ * trimmed, ignoring case. Two names of one form are the same name, and a name whose form is
+ * `custom` is the reserved Custom label. Confusable characters, such as a Greek Omicron for an O,
+ * are not folded (#140 owner rulings of 2026-10-12, ruling 4).
+ */
+export function presetNameKey(name: string): string {
+	return name.normalize('NFC').trim().toLowerCase()
+}
+
+/**
  * The shape of the presets file (Clause 01a11c09-a8c3-776f-bc9f-26c6513816f5). The rules of Clause
  * 01a11c09-a57d-7d3d-a46f-1e9512200f74 are separate: {@link accessPresetsRuleDiagnostics}.
  */
@@ -95,9 +112,11 @@ export function validateAccessPresetsShape(input: unknown): ValidationResult<Acc
 			ids.add(id)
 		}
 		const name = preset.name
-		if (typeof name !== 'string' || name.trim().length === 0 || characters(name) > ACCESS_PRESET_NAME_MAX_LENGTH)
+		if (typeof name !== 'string' || presetNameKey(name).length === 0 || characters(name) > ACCESS_PRESET_NAME_MAX_LENGTH)
 			v.issue('access.preset_name_invalid', `${path}/name`, `A preset name is a non-empty string of at most ${ACCESS_PRESET_NAME_MAX_LENGTH} characters.`)
-		else if (name.toLowerCase() === CUSTOM_LABEL_NAME.toLowerCase())
+		else if (CONTROL_OR_FORMAT_CHARACTER.test(name))
+			v.issue('access.preset_name_invalid', `${path}/name`, 'A preset name holds no control or format character, such as a newline, a zero-width character or a bidirectional control.')
+		else if (presetNameKey(name) === presetNameKey(CUSTOM_LABEL_NAME))
 			v.issue('access.preset_name_invalid', `${path}/name`, `${CUSTOM_LABEL_NAME} is the label of members no preset matches, so no preset may take the name.`)
 		const keys = v.array(preset.keys, `${path}/keys`)
 		if (!keys) return
@@ -127,7 +146,7 @@ const keyList = (keys: readonly string[]) => keys.map(key => `\`${key}\``).join(
  * The rules of Clause 01a11c09-a57d-7d3d-a46f-1e9512200f74 on presets of a valid shape:
  * `access.preset_duplicate` for each preset whose key set equals an earlier one's, naming both
  * (Rule 01a11c09-c7ff-72bb-8afe-2a7d1dc1024d); `access.preset_name_taken` for each name equal to
- * an earlier one ignoring case; `access.key_requires` for each preset lacking a requirement of one
+ * an earlier one as {@link presetNameKey} compares them; `access.key_requires` for each preset lacking a requirement of one
  * of its keys; and `access.unknown_key` for each key outside the catalog when `unknownKeys` is
  * `report` (a file on disk). Key sets are compared as sets, unknown keys included.
  */
@@ -146,11 +165,11 @@ export function accessPresetsRuleDiagnostics(presets: readonly AccessPreset[], o
 		else {
 			bySet.set(set, index)
 		}
-		const folded = preset.name.toLowerCase()
+		const folded = presetNameKey(preset.name)
 		const namesake = byName.get(folded)
 		if (namesake !== undefined) {
 			const other = presets[namesake]!
-			diagnostics.push({ code: 'access.preset_name_taken', path: `${path}/name`, message: `Presets ${quote(other.name)} (${other.id}) and ${quote(preset.name)} (${preset.id}) have the same name ignoring case; preset names are unique.` })
+			diagnostics.push({ code: 'access.preset_name_taken', path: `${path}/name`, message: `Presets ${quote(other.name)} (${other.id}) and ${quote(preset.name)} (${preset.id}) have the same name, compared ignoring case, surrounding spaces and Unicode normalization; preset names are unique.` })
 		}
 		else {
 			byName.set(folded, index)

@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 
 import { isCatalogKey, isHumanOnlyKey, keysOfPreset, PERMISSION_KEYS } from '../application/access/keys'
 import { memberLabel, memberLabelName, type LabelPreset } from '../application/access/labels'
+import { presetNameKey } from '../domain/access-presets/schema'
 import { isMemberKind, type MemberKind } from '../application/access/principal'
 import { FileNativePersistence } from '../persistence/file-native'
 import { detectWorkspaceLayout, layoutForSchemaVersion, resolveLayoutDirectory, resolveWorkspacePath, type WorkspaceLayout } from '../persistence/paths'
@@ -132,12 +133,12 @@ const accessSummary = (member: StoredMember, presets: readonly LabelPreset[]) =>
 
 /**
  * `--preset <name>` (Rule 01a11c09-ccc6-705c-96c6-9f4ba7a2ad58): the Workspace's preset of that
- * name at this moment, ignoring case as preset names are unique ignoring case; otherwise the
+ * name at this moment, compared as preset names are (`presetNameKey`: NFC, trimmed, ignoring case); otherwise the
  * command fails naming the available presets. While a presets file broken on disk holds two
  * presets with one name, the first in file order is taken.
  */
 function resolvePreset(name: string, presets: readonly LabelPreset[]): LabelPreset {
-	const preset = presets.find(item => item.name.toLowerCase() === name.toLowerCase())
+	const preset = presets.find(item => presetNameKey(item.name) === presetNameKey(name))
 	if (preset) return preset
 	throw new AccessError('access.preset_not_found', presets.length > 0
 		? `No Access preset named ${JSON.stringify(name)}. The presets are ${presets.map(item => item.name).join(', ')}.`
