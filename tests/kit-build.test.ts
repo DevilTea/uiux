@@ -12,7 +12,7 @@ import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
 import { emptyProductKit, type ProductKit } from '../src/domain/product-kit/schema'
 import { canonicalJsonBytes, FileNativePersistence, V5_LAYOUT } from '../src/persistence'
 import { readKitBuildForHttp, readKitBuildLogForHttp, readProductKitForHttp, restartKitBuildForHttp } from '../src/server/authoring-http'
-import { createKitBuildRunner, KIT_BUILD_LOG_BYTES, KitBuildLog, kitBuildEnvironment, registerKitBuildRunner, type KitBuildRunner } from '../src/server/kit-build'
+import { createKitBuildRunner, KIT_BUILD_GENERATION_WARNING, KIT_BUILD_LOG_BYTES, KIT_BUILD_RESTART_INTERVAL_MS, KitBuildLog, kitBuildEnvironment, registerKitBuildRunner, type KitBuildRunner } from '../src/server/kit-build'
 import { getSelectedWorkspacePreviewBundle, resolveSelectedWorkspaceAdapters } from '../src/server/workspace-adapters'
 import { connectMcp, scoped, testMember } from './support/access'
 import { V5_TEST_SCHEMA_POLICY, v5Manifest, writeManifest } from './support/workspace-layout'
@@ -358,11 +358,59 @@ writeFileSync('dist/uiux.js', 'export {}\\n')
 		await write(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', type: 'module', uiux: nodeBuild('build.mjs') }))
 		await write(join(root, 'kit', 'version.txt'), '7')
 		const restarted = await build.restart()
-		expect(restarted.state).toBe('building')
+		expect(restarted).toEqual({ outcome: 'started', build: { state: 'building' } })
 		expect(processAlive(first)).toBe(false)
 		expect(printed.at(-1)).toContain(JSON.stringify([process.execPath, 'build.mjs']))
 		expect(await settledState(build)).toEqual({ state: 'ready' })
 		expect(await readFile(join(root, 'kit', 'dist', 'uiux.js'), 'utf8')).toContain('kit-adapter-7')
+	})
+
+	it('shares a queued restart with a second request and refuses a restart within 2 s of the previous one (Rule 01a12f9a-f31e, Clause 01a12f9a-ef7c)', async () => {
+		expect(KIT_BUILD_RESTART_INTERVAL_MS).toBe(2000)
+		const root = await kitWorkspace(nodeBuild('build.mjs', { watch: [process.execPath, 'watch.mjs'] }), { 'build.mjs': BUILD_OK, 'watch.mjs': WATCH })
+		const { build, printed } = runner(root)
+		const runs = () => printed.filter(line => line.includes('kit build: running')).length
+		await build.start()
+		await waitFor(() => build.status().state, state => state === 'ready')
+		expect(runs()).toBe(1)
+
+		const first = build.restart()
+		const second = build.restart()
+		expect(second).toBe(first)
+		expect(await first).toEqual({ outcome: 'started', build: { state: 'building' } })
+		expect(runs()).toBe(2)
+
+		const early = await build.restart()
+		expect(early).toMatchObject({ outcome: 'throttled', retryAfterMs: expect.any(Number) })
+		const wait = early.outcome === 'throttled' ? early.retryAfterMs : 0
+		expect(wait).toBeGreaterThan(0)
+		expect(wait).toBeLessThanOrEqual(KIT_BUILD_RESTART_INTERVAL_MS)
+		expect(runs()).toBe(2)
+		await new Promise(resolveDelay => setTimeout(resolveDelay, wait + 50))
+		expect(await build.restart()).toMatchObject({ outcome: 'started' })
+		expect(runs()).toBe(3)
+	}, 20_000)
+
+	it('prints a warning once the output generations pass the threshold', async () => {
+		expect(KIT_BUILD_GENERATION_WARNING).toBe(50)
+		const rebuilding = `
+import { mkdirSync, writeFileSync } from 'node:fs'
+mkdirSync('dist', { recursive: true })
+let round = 0
+const timer = setInterval(() => {
+	writeFileSync('dist/uiux.js', 'export const round = ' + round + '\\n')
+	if (++round >= 8) clearInterval(timer)
+}, 150)
+setInterval(() => {}, 1000)
+`
+		const root = await kitWorkspace(nodeBuild('build.mjs', { watch: [process.execPath, 'rebuilding.mjs'] }), { 'build.mjs': BUILD_OK, 'rebuilding.mjs': rebuilding })
+		const printed: string[] = []
+		const build = createKitBuildRunner({ root, codeDirectoryName: 'kit', pollMs: 5, settleMs: 40, killGraceMs: 500, generationWarning: 2, print: line => printed.push(line) })
+		cleanups.push(() => build.stop())
+		await build.start()
+		await waitFor(() => build.outputGeneration() ?? 0, generation => generation >= 5)
+		const warnings = printed.filter(line => line.startsWith('uiux: warning:'))
+		expect(warnings).toEqual([expect.stringContaining('more than 2 outputs')])
 	})
 })
 
@@ -439,7 +487,7 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 	})
 })
 
-type StubControl = KitBuildControl & { restarts: number; current: KitBuildStatus }
+type StubControl = KitBuildControl & { restarts: number; current: KitBuildStatus; throttled?: boolean }
 
 function stubControl(state: KitBuildStatus['state']): StubControl {
 	const control: StubControl = {
@@ -447,9 +495,10 @@ function stubControl(state: KitBuildStatus['state']): StubControl {
 		current: { state },
 		status: () => control.current,
 		async restart() {
+			if (control.throttled) return { outcome: 'throttled', retryAfterMs: 1200 }
 			control.restarts++
 			control.current = { state: 'building' }
-			return control.current
+			return { outcome: 'started', build: control.current }
 		},
 		log: () => 'error in <workspace>/kit/src/x.ts',
 	}
@@ -515,6 +564,21 @@ describe('restart_kit_build and the build state over MCP and HTTP (Clauses 01a11
 		expect(await app.restartKitBuild()).toMatchObject({ status: 'no_build', build: { state: 'none' } })
 		const without = createWorkspaceApplicationSession(persistence)
 		expect(await without.restartKitBuild()).toMatchObject({ status: 'blocked', code: 'kit.build_unavailable' })
+	})
+
+	it('refuses a throttled restart with kit.build_restart_throttled over MCP (blocked) and HTTP (429) (Clause 01a12f9a-ef7c)', async () => {
+		const control = stubControl('ready')
+		control.throttled = true
+		const { app } = await sessionWith(control)
+		const mcp = await connectMcp(app, EDITOR_AGENT)
+		try {
+			const refused = await mcp.client.callTool({ name: 'restart_kit_build', arguments: {} })
+			expect(refused.isError).toBe(true)
+			expect(refused.structuredContent).toMatchObject({ status: 'blocked', code: 'kit.build_restart_throttled', diagnostics: [{ code: 'kit.build_restart_throttled' }] })
+		}
+		finally { await mcp.close() }
+		expect(await restartKitBuildForHttp(scoped(app, EDITOR_AGENT))).toMatchObject({ status: 429, body: { code: 'kit.build_restart_throttled', message: expect.stringContaining('Try again in 2 s') } })
+		expect(control.restarts).toBe(0)
 	})
 
 	it('reads the build state with workspace.read, in uiux://product-kit and GET /api/product-kit/build', async () => {

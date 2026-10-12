@@ -2138,6 +2138,7 @@
     "kit": {
       "build_declaration_invalid": "The build declared in kit/package.json (uiux) is not valid.",
       "build_output_missing": "The kit build has produced no output yet.",
+      "build_restart_throttled": "The kit build was restarted moments ago. Wait a few seconds, then restart it again.",
       "build_unavailable": "No kit build runs in this server; uiux dev runs it.",
       "component_invalid": "A component in the registry does not match the kit project."
     },

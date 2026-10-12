@@ -14,14 +14,25 @@ export type KitBuildStatus = Readonly<{
 	message?: string
 }>
 
+/**
+ * What a restart did: started the build again (`build` is the new run's state), or refused because
+ * the previous restart is more recent than the minimum interval (Clause
+ * 01a12f9a-ef7c-7d41-86ac-2f2b3f1acd8a), naming how long until one is accepted.
+ */
+export type KitBuildRestart =
+	| Readonly<{ outcome: 'started'; build: KitBuildStatus }>
+	| Readonly<{ outcome: 'throttled'; retryAfterMs: number }>
+
 export interface KitBuildControl {
 	status(): KitBuildStatus
 	/**
 	 * Stops the running build process, if any, and starts the Workspace's kit build again, reading
 	 * its declaration anew (Clause 01a11be8-5b64-72b3-ad18-81994368a1ed). Resolves once the new run
-	 * has started (or found nothing to run).
+	 * has started (or found nothing to run). A restart requested while another is queued shares that
+	 * queued restart's result; one requested sooner than the minimum interval after the previous
+	 * restart is refused.
 	 */
-	restart(): Promise<KitBuildStatus>
+	restart(): Promise<KitBuildRestart>
 	/** The build log (Clause 01a11bb1-891e-7fa5-bf48-4c459fd60d11) with host paths masked. */
 	log(): string
 }

@@ -7,10 +7,13 @@ import type { KitBuildControl, KitBuildStatus } from '../ports/kit-build'
  * The kit build operations of a `schemaVersion` 5 Workspace (Feature 01a11bb1-8534-7f0f-b8d0-de7efabe31f7):
  * its build state (`workspace.read`, Clause 01a11bb1-b3c2-7937-96fb-e139c5e566f5), its build log
  * (`product-kit.source.read`) and `restart_kit_build` (`product-kit.write`, Clauses
- * 01a11be8-5b64-72b3-ad18-81994368a1ed and 01a11bb1-b35a-7e69-bba5-978e3f47c4fa). The keys are the
+ * 01a11be8-5b64-72b3-ad18-81994368a1ed and 01a11bb1-b35a-7e69-bba5-978e3f47c4fa), refused with
+ * `kit.build_restart_throttled` within the minimum interval after the previous restart (Clause
+ * 01a12f9a-ef7c-7d41-86ac-2f2b3f1acd8a). The keys are the
  * scoped session's. No operation takes a command or an argument (Rule 01a11bb1-9d17-7205-abee-c2aa7058c107).
  */
 type Key = typeof PRODUCT_KIT_RESOURCE_KEY
+type RestartBlockedCode = 'workspace.migration_required' | 'kit.build_unavailable' | 'kit.build_restart_throttled'
 
 export type KitBuildRead = Readonly<{ key: Key; build: KitBuildStatus }>
 export type KitBuildLogRead = Readonly<{ key: Key; log: string }>
@@ -19,7 +22,7 @@ export type RestartKitBuildResult =
 	| Readonly<{ status: 'restarted'; key: Key; build: KitBuildStatus }>
 	/** `kit/package.json` declares no build: nothing was started. */
 	| Readonly<{ status: 'no_build'; key: Key; build: KitBuildStatus; message: string }>
-	| Readonly<{ status: 'blocked'; key: Key; code: 'workspace.migration_required' | 'kit.build_unavailable'; message: string; diagnostics: readonly Diagnostic[] }>
+	| Readonly<{ status: 'blocked'; key: Key; code: RestartBlockedCode; message: string; diagnostics: readonly Diagnostic[] }>
 
 export type KitBuildService = Readonly<{
 	/** The build state, or `undefined` below `schemaVersion` 5, where there is no kit project. */
@@ -33,7 +36,7 @@ const KEY: Key = PRODUCT_KIT_RESOURCE_KEY
 export function createKitBuildService(persistence: FileNativePersistence, control: KitBuildControl | undefined): KitBuildService {
 	const hasKit = () => persistence.layout.productKitPath !== undefined && persistence.layout.codeDir !== undefined
 
-	function blocked(code: 'workspace.migration_required' | 'kit.build_unavailable', message: string): RestartKitBuildResult {
+	function blocked(code: RestartBlockedCode, message: string): RestartKitBuildResult {
 		return { status: 'blocked', key: KEY, code, message, diagnostics: [{ code, path: '/', message }] }
 	}
 
@@ -45,7 +48,10 @@ export function createKitBuildService(persistence: FileNativePersistence, contro
 				return blocked('workspace.migration_required', `The kit build exists from Workspace schemaVersion ${PRODUCT_KIT_SCHEMA_VERSION}. Run: uiux migrate --workspace <dir>`)
 			if (!control)
 				return blocked('kit.build_unavailable', 'No kit build runs in this process; uiux dev runs it.')
-			const build = await control.restart()
+			const restarted = await control.restart()
+			if (restarted.outcome === 'throttled')
+				return blocked('kit.build_restart_throttled', `The kit build was restarted moments ago; restarts are at least 2 s apart. Try again in ${Math.ceil(restarted.retryAfterMs / 1000)} s.`)
+			const build = restarted.build
 			if (build.state === 'none')
 				return { status: 'no_build', key: KEY, build, message: 'kit/package.json declares no build (uiux.build), so nothing was started.' }
 			return { status: 'restarted', key: KEY, build }

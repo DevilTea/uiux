@@ -441,7 +441,7 @@ export async function restartKitBuildForHttp(app: ScopedWorkspaceSession): Promi
 	const denied = app.authorize('restartKitBuild')
 	if (denied) return { status: 403, body: productKitRefusalBody(denied) }
 	const result = await app.restartKitBuild()
-	if (result.status === 'blocked') return { status: result.code === 'auth.scope_denied' ? 403 : 409, body: result }
+	if (result.status === 'blocked') return { status: result.code === 'auth.scope_denied' ? 403 : result.code === 'kit.build_restart_throttled' ? 429 : 409, body: result }
 	return { status: 200, body: result }
 }
 

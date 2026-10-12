@@ -2138,6 +2138,7 @@
     "kit": {
       "build_declaration_invalid": "kit/package.json 中宣告的建置無效。",
       "build_output_missing": "kit 建置尚未產生任何輸出。",
+      "build_restart_throttled": "kit 建置剛剛才重新啟動。請稍候幾秒，再重新啟動一次。",
       "build_unavailable": "此伺服器沒有執行 kit 建置；kit 建置由 uiux dev 執行。",
       "component_invalid": "登錄中的項目與 kit/ 專案不符。"
     },

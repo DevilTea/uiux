@@ -6,7 +6,7 @@ import { delimiter, join } from 'node:path'
 import { containedRealPath, maskHostPaths } from '../adapters/kit-registry'
 import { readKitBuildDeclaration, type KitBuildDeclaration } from '../adapters/kit-build-declaration'
 import { realDirectoryIdentity } from '../adapters/resolution'
-import type { KitBuildControl, KitBuildStatus } from '../application/ports/kit-build'
+import type { KitBuildControl, KitBuildRestart, KitBuildStatus } from '../application/ports/kit-build'
 
 /**
  * The kit build runner (Feature 01a11bb1-8534-7f0f-b8d0-de7efabe31f7). Under `uiux dev` it runs the
@@ -66,6 +66,10 @@ export type KitBuildRunnerOptions = Readonly<{
 	pollMs?: number
 	/** How long a stopped process gets after `SIGTERM` before `SIGKILL`. */
 	killGraceMs?: number
+	/** The minimum interval between restarts; `KIT_BUILD_RESTART_INTERVAL_MS` by default. */
+	restartIntervalMs?: number
+	/** The output generation past which a warning is printed once; `KIT_BUILD_GENERATION_WARNING` by default. */
+	generationWarning?: number
 	/** Where the argument array and failures are printed; `console.log` by default. */
 	print?: (line: string) => void
 }>
@@ -74,6 +78,13 @@ export type KitBuildRunnerOptions = Readonly<{
 export const KIT_BUILD_SETTLE_MS = 500
 /** Clause 01a11bb1-891e-7fa5-bf48-4c459fd60d11. */
 export const KIT_BUILD_LOG_BYTES = 256 * 1024
+/** Clause 01a12f9a-ef7c-7d41-86ac-2f2b3f1acd8a: restarts are at least this far apart. */
+export const KIT_BUILD_RESTART_INTERVAL_MS = 2000
+/**
+ * Each output generation imports the `./` Adapter module under a new URL, which Node keeps for the
+ * life of the process, so past this many a warning is printed once (owner ruling 3 of 2026-10-12).
+ */
+export const KIT_BUILD_GENERATION_WARNING = 50
 const INTERNAL_VARIABLE_PREFIX = 'UIUX_INTERNAL_'
 /** The Agent Token variable the CLI suggests; never passed to a build (owner ruling 2 of 2026-10-12). */
 const MCP_TOKEN_VARIABLE = 'UIUX_MCP_TOKEN'
@@ -199,6 +210,35 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 	let declared: KitBuildDeclaration | undefined
 	let maskRoots: string[] = [options.root]
 	let queue: Promise<unknown> = Promise.resolve()
+	const restartIntervalMs = options.restartIntervalMs ?? KIT_BUILD_RESTART_INTERVAL_MS
+	const generationWarning = options.generationWarning ?? KIT_BUILD_GENERATION_WARNING
+	let warnedGenerations = false
+	/** The restart waiting in the queue, not yet begun, which a further request shares. */
+	let queuedRestart: Promise<KitBuildRestart> | undefined
+	let lastRestartAt: number | undefined
+
+	function advanceGeneration(): void {
+		generation = (generation ?? 0) + 1
+		if (!warnedGenerations && generation > generationWarning) {
+			warnedGenerations = true
+			print(`uiux: warning: the kit build has produced more than ${generationWarning} outputs in this server; each one loads its Adapter module anew and Node keeps every loaded module in memory. Restart uiux dev to release them.`)
+		}
+	}
+
+	function restart(): Promise<KitBuildRestart> {
+		if (queuedRestart) return queuedRestart
+		const now = Date.now()
+		if (lastRestartAt !== undefined && now - lastRestartAt < restartIntervalMs)
+			return Promise.resolve({ outcome: 'throttled', retryAfterMs: restartIntervalMs - (now - lastRestartAt) })
+		lastRestartAt = now
+		const queued: Promise<KitBuildRestart> = serialize(async () => {
+			if (queuedRestart === queued) queuedRestart = undefined
+			if (current) await terminate(current)
+			return { outcome: 'started', build: await begin() }
+		})
+		queuedRestart = queued
+		return queued
+	}
 
 	function serialize<T>(task: () => Promise<T>): Promise<T> {
 		const next = queue.then(task, task)
@@ -348,14 +388,14 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 			if (status.state === 'building' && quiet) {
 				if (exitedCleanly) {
 					if (listing?.files) {
-						generation = (generation ?? 0) + 1
+						advanceGeneration()
 						settle(run, { state: 'ready' })
 					}
 					else settle(run, { state: 'failed', message: `The build produced no output in ${name}/${declaration.output}/.` })
 				}
 				else if (watching && changedSinceReady && listing?.files) {
 					changedSinceReady = false
-					generation = (generation ?? 0) + 1
+					advanceGeneration()
 					status = { state: 'ready' }
 					if (run.timer) clearTimeout(run.timer)
 					run.timer = undefined
@@ -377,10 +417,7 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 			if (current) return status
 			return begin()
 		}),
-		restart: () => serialize(async () => {
-			if (current) await terminate(current)
-			return begin()
-		}),
+		restart,
 		stop: () => serialize(async () => {
 			const run = current
 			if (run) await terminate(run)
