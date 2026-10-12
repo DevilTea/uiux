@@ -6,7 +6,7 @@ import {
 } from '@deviltea/widget-core'
 import { defineComponent, h, type VNode } from 'vue'
 import { useWidget } from '@deviltea/widget-vue'
-import type { AdapterManifest, AdapterWidgetCatalogEntry } from '../../src/domain/adapters/schema'
+import type { AdapterManifest, AdapterWidgetCatalogEntry } from '../../../src/domain/adapters/schema'
 
 // ---------------------------------------------------------------------------
 // Render-context helpers (theme, viewport tier, locale) shared by every Widget
