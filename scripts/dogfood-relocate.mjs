@@ -7,6 +7,9 @@
  * under $UIUX_HOME (owner ruling 4 of https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18851627;
  * AGENTS.md: agents never run uiux migrate or uiux dev against design/).
  *
+ * D1 is done: the owner ran this script on 2026-10-12 (commit da4a3ce). It stays as the record of
+ * that run, and on this repository it now refuses with nothing changed, since design/ is gone.
+ *
  * Usage, from the repository root, with no uiux dev running for design/:
  *
  *   node scripts/dogfood-relocate.mjs --check   # print the plan and check the preconditions; change nothing

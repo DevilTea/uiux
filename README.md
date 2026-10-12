@@ -106,8 +106,8 @@ When UIUX refuses a roster (`access.store_invalid`), the message names the file,
 `/mcp` always requires `Authorization: Bearer <token>`, loopback included. Give every concurrently running agent its own member:
 
 ```sh
-uiux member add claude --workspace ./design --kind agent --preset Editor
-uiux token create --workspace ./design --member claude
+uiux member add claude --workspace ./.uiux --kind agent --preset Editor
+uiux token create --workspace ./.uiux --member claude
 export UIUX_MCP_TOKEN=uiux_t_...   # in your shell profile or a gitignored .envrc, never in Git
 ```
 
@@ -158,10 +158,10 @@ Other machines reach the server only through origins you configure with `--origi
 
 ```sh
 # Behind a reverse proxy on the same host: keep the loopback bind and list the public origin.
-uiux dev --workspace ./design --origin https://uiux.corp.example
+uiux dev --workspace ./.uiux --origin https://uiux.corp.example
 
 # Directly on a LAN: listen on every interface and list the origin people type.
-uiux dev --workspace ./design --host 0.0.0.0 --origin http://10.0.0.5:3000
+uiux dev --workspace ./.uiux --host 0.0.0.0 --origin http://10.0.0.5:3000
 ```
 
 An origin is `http://` or `https://`, a host and an optional `:<port>`, with no path: UIUX is served on a dedicated hostname, never under a path prefix. `uiux dev` refuses to start in these cases:
@@ -212,7 +212,7 @@ A proxy that rewrites `Host` to the loopback address makes its requests look loc
 
 ## Dogfood Workspace
 
-This repository keeps its own UIUX specification in `design/`, still a `schemaVersion` 4 Workspace until its owner relocates it with `scripts/dogfood-relocate.mjs` (to `<repo>/.uiux/`); until then the current UIUX opens it read-only. Initialize a new Workspace with `uiux init`; once a UIUX server is running against it, agents should author canonical resources through domain-specific MCP tools rather than editing files in `design/` directly. The Workbench is the human inspection surface for the same canonical state.
+This repository keeps its own UIUX specification in `<repo>/.uiux/`, a `schemaVersion` 5 Workspace that its owner relocated from `design/` (`schemaVersion` 4) with `scripts/dogfood-relocate.mjs`. Initialize a new Workspace with `uiux init`; once a UIUX server is running against it, agents should author canonical resources through domain-specific MCP tools rather than editing files in `.uiux/` directly. The Workbench is the human inspection surface for the same canonical state.
 
 ## Checks
 
