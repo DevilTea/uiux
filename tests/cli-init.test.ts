@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -147,6 +147,20 @@ describe('uiux init', () => {
 
 		// A sibling of UIUX_HOME is fine.
 		expect(await runInitCommand({ cwd, workspace: join(cwd, 'host', 'ws'), env: { UIUX_HOME: home }, ...capture().options })).toBe(0)
+	})
+
+	it('refuses a --workspace that is a dangling symbolic link, or lies below one, without a stack trace', async () => {
+		const cwd = await makeDirectory()
+		const home = join(cwd, 'uiux-home')
+		await mkdir(home)
+		await symlink(join(home, 'missing'), join(cwd, 'link'))
+		const run = capture()
+		expect(await runInitCommand({ cwd, workspace: 'link', env: { UIUX_HOME: home }, ...run.options })).toBe(2)
+		expect(run.stderr.join('\n')).toContain(`symbolic link whose target does not exist: ${join(cwd, 'link')}`)
+		const below = capture()
+		expect(await runInitCommand({ cwd, workspace: 'link/ws', env: { UIUX_HOME: home }, ...below.options })).toBe(2)
+		expect(below.stderr.join('\n')).toContain(`cannot create the Workspace directory ${join(cwd, 'link', 'ws')}`)
+		expect(await readdir(home)).toEqual([])
 	})
 
 	it('refuses a --workspace that is a file', async () => {

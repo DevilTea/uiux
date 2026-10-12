@@ -60,7 +60,12 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 		rootExists = true
 	}
 	catch (error) {
-		if ((error as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') throw error
+		const code = (error as NodeJS.ErrnoException | undefined)?.code
+		if (code === 'ENOTDIR') {
+			err(`uiux: Workspace root is not a directory: ${root}`)
+			return 2
+		}
+		if (code !== 'ENOENT') throw error
 		rootExists = false
 	}
 
@@ -84,7 +89,17 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 		}
 	}
 	else {
-		await mkdir(root, { recursive: true })
+		// A symbolic link whose target is missing: its target is not checked against UIUX_HOME above,
+		// and mkdir cannot create through it.
+		if ((await lstat(root).catch(() => undefined))?.isSymbolicLink()) {
+			err(`uiux: Workspace root is a symbolic link whose target does not exist: ${root}. Pass --workspace <dir> naming a real directory.`)
+			return 2
+		}
+		try { await mkdir(root, { recursive: true }) }
+		catch (error) {
+			err(`uiux: cannot create the Workspace directory ${root}: ${error instanceof Error ? error.message : String(error)}`)
+			return 2
+		}
 	}
 
 	const manifest = {
