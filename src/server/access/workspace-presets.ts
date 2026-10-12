@@ -34,6 +34,38 @@ export async function readWorkspaceAccessPresets(workspaceRoot: string, givenLay
 	return labelPresetsOf(await readJson(workspaceRoot, layout.accessPresetsPath))
 }
 
+/**
+ * {@link readWorkspaceAccessPresets} for a server, which labels every authenticated request: it
+ * stats the manifest and the presets file, and reads and parses them again only when either
+ * changed (another inode, size, modification or change time, in nanoseconds), so a pulled commit
+ * or a presets write still changes the next label.
+ */
+export function createWorkspaceAccessPresetsReader(workspaceRoot: string, layout: WorkspaceLayout): () => Promise<readonly LabelPreset[]> {
+	let cached: Readonly<{ stamp: string; presets: Promise<readonly LabelPreset[]> }> | undefined
+	return async () => {
+		const stamp = (await Promise.all([layout.manifestPath, layout.accessPresetsPath].map(path => fileStamp(workspaceRoot, path)))).join('|')
+		if (cached?.stamp !== stamp) {
+			const presets = readWorkspaceAccessPresets(workspaceRoot, layout)
+			cached = { stamp, presets }
+			// A failed read is not kept.
+			presets.catch(() => { if (cached?.presets === presets) cached = undefined })
+		}
+		return cached.presets
+	}
+}
+
+/** What identifies a version of a Workspace file without reading it, or `-` when it cannot be examined. */
+async function fileStamp(workspaceRoot: string, relativePath: string | undefined): Promise<string> {
+	if (!relativePath) return '-'
+	try {
+		const stats = await lstat(resolveWorkspacePath(workspaceRoot, relativePath), { bigint: true })
+		return `${stats.ino}:${stats.size}:${stats.mtimeNs}:${stats.ctimeNs}:${stats.isFile() ? 'f' : 'o'}`
+	}
+	catch {
+		return '-'
+	}
+}
+
 /** A Workspace file's JSON, or `undefined` when it is missing, a symbolic link, unreadable or not JSON. */
 async function readJson(workspaceRoot: string, relativePath: string): Promise<unknown> {
 	try {

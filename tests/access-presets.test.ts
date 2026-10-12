@@ -26,7 +26,7 @@ import { readAccessPresetsForHttp, updateAccessPresetsForHttp } from '../src/ser
 import { addMember } from '../src/server/access/roster'
 import { AccessService, memberPrincipal } from '../src/server/access/service'
 import { AccessStore } from '../src/server/access/store'
-import { readWorkspaceAccessPresets } from '../src/server/access/workspace-presets'
+import { createWorkspaceAccessPresetsReader, readWorkspaceAccessPresets } from '../src/server/access/workspace-presets'
 import { createHistoryStoreFactory } from '../src/server/history-stores'
 import { connectMcp, scoped, testMember } from './support/access'
 import { createCurrentWorkspace, v5Manifest, writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
@@ -511,6 +511,26 @@ describe('labels and --preset from the Workspace\'s presets (Rules 01a11c09-c724
 		expect(await readWorkspaceAccessPresets(ctx.root)).toEqual([])
 		await symlink(join(old, 'workspace.json'), ctx.presetsPath)
 		expect(await readWorkspaceAccessPresets(ctx.root)).toEqual([])
+	})
+
+	it('reads the presets for the server again only when the manifest or the presets file changed', async () => {
+		const ctx = await workspace()
+		const read = createWorkspaceAccessPresetsReader(ctx.root, ctx.persistence.layout)
+		const first = await read()
+		expect(first).toEqual(builtIns())
+		expect(await read()).toBe(first)
+
+		const renamed = builtIns().map(preset => preset.id === 'viewer' ? { ...preset, name: 'Reader' } : preset)
+		expect(await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: await revision(ctx.app), presets: renamed })).toMatchObject({ status: 200 })
+		const second = await read()
+		expect(second.map(preset => preset.name)).toEqual(['Reader', 'Reviewer', 'Editor', 'Owner'])
+		expect(await read()).toBe(second)
+
+		// A file rewritten in place with bytes of the same length is noticed too.
+		await writeFile(ctx.presetsPath, (await readFile(ctx.presetsPath, 'utf8')).replace('"Reader"', '"Lector"'))
+		expect((await read()).map(preset => preset.name)).toEqual(['Lector', 'Reviewer', 'Editor', 'Owner'])
+		await rm(ctx.presetsPath)
+		expect(await read()).toEqual([])
 	})
 
 	it('labels sessions and Tokens from the presets file, so editing a preset changes labels only, never keys', async () => {
