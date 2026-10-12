@@ -9,20 +9,21 @@ import { parseKitBuildDeclaration, readKitBuildDeclaration } from '../src/adapte
 import type { KitBuildControl, KitBuildStatus } from '../src/application/ports/kit-build'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
+import { ACCESS_PRESETS_FILENAME, builtInAccessPresetsFile } from '../src/domain/access-presets/schema'
 import { emptyProductKit, type ProductKit } from '../src/domain/product-kit/schema'
 import { canonicalJsonBytes, FileNativePersistence, V5_LAYOUT } from '../src/persistence'
 import { readKitBuildForHttp, readKitBuildLogForHttp, readProductKitForHttp, restartKitBuildForHttp } from '../src/server/authoring-http'
 import { createKitBuildRunner, KIT_BUILD_GENERATION_WARNING, KIT_BUILD_LOG_BYTES, KIT_BUILD_RESTART_INTERVAL_MS, KitBuildLog, kitBuildEnvironment, registerKitBuildRunner, type KitBuildRunner } from '../src/server/kit-build'
 import { getSelectedWorkspacePreviewBundle, resolveSelectedWorkspaceAdapters } from '../src/server/workspace-adapters'
 import { connectMcp, scoped, testMember } from './support/access'
-import { V5_TEST_SCHEMA_POLICY, v5Manifest, writeManifest } from './support/workspace-layout'
+import { currentManifest, V5_TEST_SCHEMA_POLICY, writeManifest } from './support/workspace-layout'
 
 /**
  * The kit build (issue #141, unit K7): Feature 01a11bb1-8534-7f0f-b8d0-de7efabe31f7 and its Rules,
  * Product Kit Contract Clauses 01a11bb1-86af-…, 01a11bb1-8721-…, 01a11bb1-87ed-…, 01a11bb1-8856-…,
  * 01a11bb1-88ba-… and 01a11bb1-891e-…, MCP Contract Clauses 01a11bb1-b0f1-… and 01a11be8-5b64-…,
  * and the keys of Clauses 01a11bb1-b35a-… and 01a11bb1-b3c2-…. Builds are tiny Node scripts in a
- * temporary `schemaVersion` 5 Workspace.
+ * temporary current-schema Workspace.
  */
 
 const roots: string[] = []
@@ -87,8 +88,9 @@ async function kitWorkspace(uiux: unknown, files: Readonly<Record<string, string
 	const root = at ?? await realpath(await mkdtemp(join(tmpdir(), 'uiux-kit-build-')))
 	if (!at) roots.push(root)
 	await mkdir(root, { recursive: true })
-	await writeManifest(root, canonicalJsonBytes(v5Manifest()), V5_LAYOUT)
+	await writeManifest(root, canonicalJsonBytes(currentManifest()), V5_LAYOUT)
 	await writeFile(join(root, 'product-kit.json'), canonicalJsonBytes({ ...emptyProductKit(), adapters }))
+	await writeFile(join(root, ACCESS_PRESETS_FILENAME), canonicalJsonBytes(builtInAccessPresetsFile()))
 	await write(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', private: true, type: 'module', ...(uiux === undefined ? {} : { uiux }) }))
 	for (const [path, content] of Object.entries(files)) await write(join(root, 'kit', path), content)
 	return root

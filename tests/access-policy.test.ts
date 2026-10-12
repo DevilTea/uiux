@@ -204,8 +204,8 @@ describe('parity: role-derived keys decide as the role matrix did', () => {
 				if ((denied === undefined) !== before) changed.push(`${id}: ${before ? 'allowed' : 'refused'} → ${denied ? 'refused' : 'allowed'}`)
 			}
 		}
-		// 49 operations, 7 lease acquires, 7 restores and 1 settings adapters change, for 16 members and the system credential.
-		expect(compared).toBe(64 * 17)
+		// 51 operations, 7 lease acquires, 7 restores and 1 settings adapters change, for 16 members and the system credential.
+		expect(compared).toBe(66 * 17)
 		expect(changed.sort()).toEqual([...INTENDED_CHANGES].sort())
 	})
 
