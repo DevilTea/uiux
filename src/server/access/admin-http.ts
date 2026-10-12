@@ -1,7 +1,6 @@
 import { getRouterParam, readBody, setResponseHeader, setResponseStatus, type H3Event } from 'h3'
 import { z } from 'zod'
 
-import { BUILT_IN_ACCESS_PRESETS } from '../../application/access/keys'
 import { memberLabel, type LabelPreset } from '../../application/access/labels'
 import { effectiveKeys } from '../../application/access/policy'
 import { MEMBER_KINDS } from '../../application/access/principal'
@@ -80,20 +79,13 @@ function respond(event: H3Event, status: number, body: unknown) {
 const access = () => getSelectedWorkspaceServerRuntime().access()
 
 /**
- * The Workspace's Access presets, which label members and which the Members page offers to start
- * from. Below `schemaVersion` 6 a Workspace has no presets file, so they are the built-in presets
- * (Rule 01a11c09-cb79-744e-bbf6-ec38d6f159ba).
- */
-function workspacePresets(): readonly LabelPreset[] {
-	return BUILT_IN_ACCESS_PRESETS
-}
-
-/**
  * A stored member on the administration wire: its stored keys, unknown ones included, and its
- * label (Clause 01a11c09-a49b-78c7-9304-7b8239f8a8cf, computed now and never stored).
+ * label (Clause 01a11c09-a49b-78c7-9304-7b8239f8a8cf, computed now and never stored) among the
+ * Workspace's Access presets (`AccessService.presets`: the presets file from `schemaVersion` 6, the
+ * built-in presets below it, Rule 01a11c09-cb79-744e-bbf6-ec38d6f159ba).
  */
-function memberBody(member: StoredMember) {
-	return { ...member, label: memberLabel(member, workspacePresets()) }
+function memberBody(member: StoredMember, presets: readonly LabelPreset[]) {
+	return { ...member, label: memberLabel(member, presets) }
 }
 
 /**
@@ -102,8 +94,8 @@ function memberBody(member: StoredMember) {
  * session (`effectiveKeys`): catalog keys only, never a `humanOnly` key for an Agent, so the
  * Workbench offers exactly what the server allows. The label comes from the stored keys.
  */
-function sessionMemberBody(member: StoredMember, keys: readonly string[]) {
-	return { id: member.id, nickname: member.nickname, kind: member.kind, keys, label: memberLabel(member) }
+function sessionMemberBody(member: StoredMember, keys: readonly string[], presets: readonly LabelPreset[]) {
+	return { id: member.id, nickname: member.nickname, kind: member.kind, keys, label: memberLabel(member, presets) }
 }
 
 export async function loginForHttp(event: H3Event) {
@@ -121,7 +113,7 @@ export async function loginForHttp(event: H3Event) {
 	}
 	setResponseHeader(event, 'Set-Cookie', sessionCookie(outcome.cookieName, outcome.cookieValue, outcome.maxAgeSeconds, secureCookieFor(event)))
 	// A fresh cookie session: every granted key takes effect (`memberKeys` already drops `humanOnly` keys for an Agent).
-	return respond(event, 200, { member: sessionMemberBody(outcome.member, memberKeys(outcome.member)) })
+	return respond(event, 200, { member: sessionMemberBody(outcome.member, memberKeys(outcome.member), await service.presets()) })
 }
 
 export async function readSessionForHttp(event: H3Event) {
@@ -196,9 +188,9 @@ async function admin<T>(event: H3Event, run: (service: Awaited<ReturnType<typeof
  * presets the Members page starts a key set from (Rule 01a11c09-ba80-7bef-96fe-4a4bae3ab528), each
  * with its keys as they are now.
  */
-export const listMembersForHttp = (event: H3Event) => admin(event, (service) => {
+export const listMembersForHttp = (event: H3Event) => admin(event, async (service) => {
 	const roster = service.roster()
-	const presets = workspacePresets()
+	const presets = await service.presets()
 	return {
 		...roster,
 		members: roster.members.map((summary) => {
@@ -215,7 +207,7 @@ export async function addMemberForHttp(event: H3Event) {
 	const body = await readBody(event)
 	const parsed = parseHttpPayload(addMemberSchema, body)
 	if (!parsed.ok) return respond(event, parsed.result.status, parsed.result.body)
-	return admin(event, async service => ({ member: memberBody(await service.addMember(parsed.data)) }), 201)
+	return admin(event, async service => ({ member: memberBody(await service.addMember(parsed.data), await service.presets()) }), 201)
 }
 
 export async function setMemberForHttp(event: H3Event) {
@@ -224,12 +216,12 @@ export async function setMemberForHttp(event: H3Event) {
 	const id = getRouterParam(event, 'id', { decode: true }) ?? ''
 	const parsed = parseHttpPayload(setMemberSchema, await readBody(event))
 	if (!parsed.ok) return respond(event, parsed.result.status, parsed.result.body)
-	return admin(event, async service => ({ member: memberBody(await service.setMember(id, parsed.data)) }))
+	return admin(event, async service => ({ member: memberBody(await service.setMember(id, parsed.data), await service.presets()) }))
 }
 
 export function removeMemberForHttp(event: H3Event) {
 	const id = getRouterParam(event, 'id', { decode: true }) ?? ''
-	return admin(event, async service => ({ member: memberBody(await service.removeMember(id)) }))
+	return admin(event, async service => ({ member: memberBody(await service.removeMember(id), await service.presets()) }))
 }
 
 export const listTokensForHttp = (event: H3Event) => admin(event, service => ({ tokens: service.tokens() }))

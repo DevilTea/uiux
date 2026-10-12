@@ -73,7 +73,8 @@ export function applyPreset(presetKeys: readonly string[], current: readonly str
 	const copied = keysOfPreset(kind, presetKeys)
 	return {
 		keys: orderedKeys([...copied, ...current.filter(key => !isCatalogKey(key))]),
-		dropped: presetKeys.filter(key => !copied.includes(key)),
+		// The humanOnly keys an Agent does not get; a preset key this version does not know is never applied.
+		dropped: presetKeys.filter(key => isCatalogKey(key) && !copied.includes(key)),
 	}
 }
 

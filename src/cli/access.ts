@@ -2,7 +2,7 @@ import { lstat, stat } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { resolve } from 'node:path'
 
-import { BUILT_IN_ACCESS_PRESETS, isCatalogKey, isHumanOnlyKey, keysOfPreset, PERMISSION_KEYS } from '../application/access/keys'
+import { isCatalogKey, isHumanOnlyKey, keysOfPreset, PERMISSION_KEYS } from '../application/access/keys'
 import { memberLabel, memberLabelName, type LabelPreset } from '../application/access/labels'
 import { isMemberKind, type MemberKind } from '../application/access/principal'
 import { FileNativePersistence } from '../persistence/file-native'
@@ -12,6 +12,7 @@ import { checkWorkspaceSelection, isRelocatedSourceOf, selectWorkspace } from '.
 import { readActiveServerHold } from '../persistence/server-hold'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 import { generateHint } from '../server/access/credentials'
+import { readWorkspaceAccessPresets } from '../server/access/workspace-presets'
 import { DEFAULT_LOOPBACK_BIND_HOST, isLoopbackHostname, resolveListenPort } from '../server/network-access'
 import {
 	AccessError,
@@ -117,25 +118,25 @@ function table(rows: readonly (readonly string[])[]): string[] {
 
 const day = (value: string | null) => value ? value.slice(0, 10) : 'never'
 /**
- * The Workspace's Access presets. Below `schemaVersion` 6 a Workspace has no presets file, so
- * labels and `--preset` use the built-in presets (Rule 01a11c09-cb79-744e-bbf6-ec38d6f159ba).
+ * The Workspace's Access presets at this moment (`readWorkspaceAccessPresets`): the presets file
+ * from `schemaVersion` 6, the built-in presets below it (Rule 01a11c09-cb79-744e-bbf6-ec38d6f159ba).
  */
-function workspacePresets(): readonly LabelPreset[] {
-	return BUILT_IN_ACCESS_PRESETS
+function workspacePresets(context: Context): Promise<readonly LabelPreset[]> {
+	return readWorkspaceAccessPresets(context.workspaceRoot)
 }
 
 /** A member's label among the Workspace's presets: the preset's name, or `Custom`. */
-const access = (member: StoredMember) => memberLabelName(memberLabel(member, workspacePresets()))
+const access = (member: StoredMember, presets: readonly LabelPreset[]) => memberLabelName(memberLabel(member, presets))
 const keyCount = (keys: readonly string[]) => `${keys.length} key${keys.length === 1 ? '' : 's'}`
-const accessSummary = (member: StoredMember) => `${access(member)}, ${keyCount(member.keys)}`
+const accessSummary = (member: StoredMember, presets: readonly LabelPreset[]) => `${access(member, presets)}, ${keyCount(member.keys)}`
 
 /**
  * `--preset <name>` (Rule 01a11c09-ccc6-705c-96c6-9f4ba7a2ad58): the Workspace's preset of that
  * name at this moment, ignoring case as preset names are unique ignoring case; otherwise the
- * command fails naming the available presets.
+ * command fails naming the available presets. While a presets file broken on disk holds two
+ * presets with one name, the first in file order is taken.
  */
-function resolvePreset(name: string): LabelPreset {
-	const presets = workspacePresets()
+function resolvePreset(name: string, presets: readonly LabelPreset[]): LabelPreset {
 	const preset = presets.find(item => item.name.toLowerCase() === name.toLowerCase())
 	if (preset) return preset
 	throw new AccessError('access.preset_not_found', presets.length > 0
@@ -155,12 +156,23 @@ function keyListOption(raw: string): string[] {
  */
 function droppedKeysNote(source: string, keys: readonly string[], kind: MemberKind): string | undefined {
 	const applied = keysOfPreset(kind, keys)
-	const dropped = keys.filter(key => !applied.includes(key))
+	const dropped = keys.filter(key => isCatalogKey(key) && !applied.includes(key))
 	if (dropped.length === 0) return undefined
 	return `  ${source} without ${dropped.join(', ')}: an Agent cannot hold humanOnly keys.`
 }
 
-const presetNote = (preset: LabelPreset, kind: MemberKind) => droppedKeysNote(`Applied the ${preset.name} preset`, preset.keys, kind)
+/**
+ * The notes printed after applying a preset: the `humanOnly` keys an Agent did not get, and the
+ * preset's keys this UIUX version does not know, which are never applied (owner ruling of
+ * 2026-10-11 on PR #189).
+ */
+function presetNotes(preset: LabelPreset, kind: MemberKind): string[] {
+	const unknown = preset.keys.filter(key => !isCatalogKey(key))
+	return [
+		droppedKeysNote(`Applied the ${preset.name} preset`, preset.keys, kind),
+		unknown.length > 0 ? `  The ${preset.name} preset holds ${unknown.join(', ')}, unknown to this UIUX version; ${unknown.length > 1 ? 'they were' : 'it was'} not applied.` : undefined,
+	].filter((note): note is string => note !== undefined)
+}
 
 const ROLE_REMOVED = '--role was removed; give an Access preset with --preset <name>, such as --preset Editor.'
 
@@ -289,7 +301,8 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				// An invalid kind is refused by addMember; meanwhile it is treated as human, which drops no key.
 				const memberKind = isMemberKind(kind) ? kind : 'human'
 				// Resolved before the store is opened, so a refused preset or key list writes nothing.
-				const preset = presetName !== undefined ? resolvePreset(presetName) : undefined
+				const presets = await workspacePresets(context)
+				const preset = presetName !== undefined ? resolvePreset(presetName, presets) : undefined
 				const keys = preset
 					? keysOfPreset(memberKind, preset.keys)
 					: flags.has('all-keys')
@@ -298,11 +311,11 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 						: keyListOption(keyList!)
 				const store = await requireStore(context)
 				const member = await store.update(file => addMember(file, { nickname: context.parsed.positionals[0]!, keys, kind }, context.now()))
-				context.out(`Added ${member.kind} member ${member.nickname} (${accessSummary(member)}) to roster ${store.data.hint} for ${store.data.workspaceRoot}.`)
-				const note = preset
-					? presetNote(preset, member.kind)
-					: flags.has('all-keys') ? droppedKeysNote('Gave every catalog key', PERMISSION_KEYS, member.kind) : undefined
-				if (note) context.out(note)
+				context.out(`Added ${member.kind} member ${member.nickname} (${accessSummary(member, presets)}) to roster ${store.data.hint} for ${store.data.workspaceRoot}.`)
+				const notes = preset
+					? presetNotes(preset, member.kind)
+					: [flags.has('all-keys') ? droppedKeysNote('Gave every catalog key', PERMISSION_KEYS, member.kind) : undefined].filter(note => note !== undefined)
+				for (const note of notes) context.out(note)
 				if (member.kind === 'agent') context.out(`  Next: uiux token create --workspace ${store.data.workspaceRoot} --member ${member.nickname}`)
 				else context.out(`  Next: uiux invite create --workspace ${store.data.workspaceRoot} --member ${member.nickname}`)
 				return 0
@@ -328,10 +341,11 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				const keysCell = (keys: readonly string[]) => context.parsed.flags.has('keys')
 					? keys.map(key => isCatalogKey(key) ? key : `${key} (unknown)`).join(', ') || '(none)'
 					: String(keys.length)
+				const presets = await workspacePresets(context)
 				const members = summarizeMembers(file, context.now().getTime())
 				context.out(table([
 					['NICKNAME', 'KIND', 'ACCESS', 'TOKENS', 'SESSIONS', 'KEYS'],
-					...members.map((member, index) => [member.nickname, member.kind, access(file.members[index]!), String(member.activeTokens), String(member.activeSessions), keysCell(file.members[index]!.keys)]),
+					...members.map((member, index) => [member.nickname, member.kind, access(file.members[index]!, presets), String(member.activeTokens), String(member.activeSessions), keysCell(file.members[index]!.keys)]),
 				]).join('\n'))
 				return 0
 			},
@@ -350,7 +364,8 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				const revoke = revokeList !== undefined ? keyListOption(revokeList) : []
 				const both = grant.filter(key => revoke.includes(key))
 				if (both.length > 0) throw new UsageError(`--grant and --revoke both name ${both.join(', ')}.`)
-				const preset = presetName !== undefined ? resolvePreset(presetName) : undefined
+				const presets = await workspacePresets(context)
+				const preset = presetName !== undefined ? resolvePreset(presetName, presets) : undefined
 				const changesKeys = preset !== undefined || grantList !== undefined || revokeList !== undefined
 				let notHeld: string[] = []
 				let notGranted: string[] = []
@@ -375,9 +390,8 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				if (notHeld.length > 0) context.err(`uiux: warning: ${member.nickname} did not hold ${notHeld.join(', ')}; nothing to revoke there.`)
 				if (notGranted.length > 0)
 					context.err(`uiux: warning: ${notGranted.join(', ')} ${notGranted.length > 1 ? 'are humanOnly keys' : 'is a humanOnly key'}, not granted to an Agent such as ${member.nickname}; nothing to revoke there.`)
-				context.out(`Updated ${member.nickname}: ${member.kind}, ${accessSummary(member)}.`)
-				const note = preset && presetNote(preset, member.kind)
-				if (note) context.out(note)
+				context.out(`Updated ${member.nickname}: ${member.kind}, ${accessSummary(member, presets)}.`)
+				for (const note of preset ? presetNotes(preset, member.kind) : []) context.out(note)
 				return 0
 			},
 		}
@@ -403,7 +417,7 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 					...(expiresInDays !== undefined ? { expiresInDays } : {}),
 				}, context.now()))
 				const member = store.data.members.find(item => item.id === issued.entry.memberId)!
-				context.out(`Created token ${issued.entry.id} for ${member.nickname} (${member.kind}, ${access(member)}; expires ${day(issued.entry.expiresAt)}).`)
+				context.out(`Created token ${issued.entry.id} for ${member.nickname} (${member.kind}, ${access(member, await workspacePresets(context))}; expires ${day(issued.entry.expiresAt)}).`)
 				context.out(issued.credential)
 				context.out('Store it in an environment variable such as UIUX_MCP_TOKEN, never commit it. It is shown only once.')
 				return 0
