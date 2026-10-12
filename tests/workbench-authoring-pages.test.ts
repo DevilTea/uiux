@@ -360,4 +360,31 @@ describe('Settings › Adapters when the config write fails after the specifiers
 			await agentPut('/api/product-kit/compose', { expectedRevision: current.revision, designSystems: [], adapters: ['./adapters/reference.ts'] })
 		}
 	}, 60_000)
+
+	it('raises the conflict instead when someone else wrote the Product Kit after the compose', async () => {
+		const { context, page } = await open('/workspace/settings?section=adapters')
+		try {
+			// Another writer changes the file between this save's compose and its failed settings write.
+			await page.route('**/api/product-kit/settings', async (route) => {
+				const current = await api<ProductKitRead>('/api/product-kit')
+				await agentPut('/api/product-kit/compose', { expectedRevision: current.revision, designSystems: [], adapters: ['./adapters/third.ts'] })
+				await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ statusCode: 500, statusMessage: 'Server Error', message: 'The config write failed.' }) })
+			})
+			const section = page.locator('#settings-adapters')
+			await section.getByText('Packages or kit/ modules that supply Widgets').waitFor()
+			await section.locator('[data-adapter-specifier]').fill('./adapters/second.ts')
+			await section.getByRole('button', { name: 'Config', exact: true }).click()
+			await section.getByRole('textbox', { name: /^Config for / }).fill('{"note":"second"}')
+			await section.getByRole('button', { name: 'Save changes' }).click()
+
+			await section.getByText('Settings changed since you opened them.').waitFor()
+			expect(await section.getByText('Specifiers saved, config not saved').count()).toBe(0)
+			expect((await api<ProductKitRead>('/api/product-kit')).resource.adapters).toEqual([{ moduleSpecifier: './adapters/third.ts' }])
+		}
+		finally {
+			await context.close()
+			const current = await api<ProductKitRead>('/api/product-kit')
+			await agentPut('/api/product-kit/compose', { expectedRevision: current.revision, designSystems: [], adapters: ['./adapters/reference.ts'] })
+		}
+	}, 60_000)
 })

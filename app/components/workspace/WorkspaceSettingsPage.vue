@@ -213,9 +213,10 @@ const kitPartlySaved = ref(false)
  * differs (`productKitAdapterWrites`). Each write is a compare-and-swap on the Product Kit file.
  *
  * When `compose` landed and the `config` write then failed for any reason but a conflict, the
- * Product Kit file is reloaded and the draft carried onto it (`keepMine`): the specifiers are
- * saved, the draft keeps the unsaved `config`, and the section says so instead of raising a
- * conflict over its own write.
+ * Product Kit file is reloaded. When it is still the revision `compose` wrote, the draft is carried
+ * onto it (`keepMine`): the specifiers are saved, the draft keeps the unsaved `config`, and the
+ * section says so instead of raising a conflict over its own write. When someone else wrote it
+ * since, the section raises the conflict as for any concurrent change.
  */
 async function saveKitAdapters(): Promise<void> {
 	const section = kitAdapters
@@ -226,13 +227,16 @@ async function saveKitAdapters(): Promise<void> {
 	kitPartlySaved.value = false
 	lockRefusal.value = undefined
 	let composedRevision: string | undefined
-	/** Reloads the Product Kit file and, after a landed `compose`, carries the draft onto it. */
+	/** Reloads the Product Kit file and, after a landed `compose`, carries the draft onto it if no one wrote since. */
 	const reloadBase = async (): Promise<void> => {
 		await loadProductKit()
-		if (composedRevision !== undefined && productKit.value) {
-			section.keepMine(productKit.value)
-			kitPartlySaved.value = true
+		if (composedRevision === undefined || !productKit.value) return
+		if (productKit.value.revision !== composedRevision) {
+			section.conflict = true
+			return
 		}
+		section.keepMine(productKit.value)
+		kitPartlySaved.value = true
 	}
 	try {
 		const writes = productKitAdapterWrites(kit.resource, section.draftPayload as WorkspaceAdapterSelection[])
