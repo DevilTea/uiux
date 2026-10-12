@@ -81,6 +81,9 @@ export const ACCESS_OPERATIONS = {
 	composeProductKit: { requiredKeys: ['product-kit.compose'] },
 	updateProductKit: { requiredKeys: ['product-kit.write'] },
 	updateComponentRegistry: { requiredKeys: ['product-kit.write'] },
+	// Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa: restarting the kit build (`restart_kit_build`) and reading its log.
+	restartKitBuild: { requiredKeys: ['product-kit.write'] },
+	readKitBuildLog: { requiredKeys: ['product-kit.source.read'] },
 	captureFormalEvidence: { requiredKeys: ['evidence.capture'] },
 	exportHandoff: { requiredKeys: ['handoff.export'] },
 	// A restore also needs the restored kind's write key (Rule 01a11c09-c648-71be-a550-2ecabf12f5d0): see `authorizeRestore`.

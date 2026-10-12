@@ -12,6 +12,7 @@ import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 import { AccessService } from './access/service'
 import { AccessStore, resolveUiuxHome } from './access/store'
 import { createHistoryStoreFactory, type HistoryStoreFactory } from './history-stores'
+import { createKitBuildRunner, registerKitBuildRunner, type KitBuildRunner } from './kit-build'
 
 export type SelectedWorkspaceServerRuntime = Readonly<{
 	root: string
@@ -29,6 +30,11 @@ export type SelectedWorkspaceServerRuntime = Readonly<{
 	 */
 	historyRecorder: HistoryRecorder
 	mcp: McpHttpHandler
+	/**
+	 * The kit build runner (Feature 01a11bb1-8534-7f0f-b8d0-de7efabe31f7). The Nitro plugin starts it
+	 * under `uiux dev`; `close()` stops its process.
+	 */
+	kitBuild: KitBuildRunner
 	close(): Promise<void>
 }>
 
@@ -67,6 +73,8 @@ export function createSelectedWorkspaceServerRuntime(
 		home: () => options?.uiuxHome ?? resolveUiuxHome(),
 	})
 	const historyRecorder = createHistoryRecorder({ persistence, stores: () => history.open() })
+	const kitBuild = createKitBuildRunner({ root: selectedRoot, codeDirectoryName: persistence.layout.codeDir })
+	const unregisterKitBuild = registerKitBuildRunner(selectedRoot, kitBuild)
 	const app = createWorkspaceApplicationSession(persistence, {
 		serverOrigin,
 		// Formal capture loads Preview as the in-memory `system:capture` principal (cookie-scoped to the internal origin).
@@ -74,6 +82,7 @@ export function createSelectedWorkspaceServerRuntime(
 		history,
 		// A Checkpoint first closes the open autosave and records outside changes (Rule 01a11a5e-00b9-7bf5-8005-9380a388afb8).
 		historyBoundary: () => historyRecorder,
+		kitBuild,
 	})
 	let pending: Promise<AccessService> | undefined
 	function access(): Promise<AccessService> {
@@ -95,7 +104,10 @@ export function createSelectedWorkspaceServerRuntime(
 		history,
 		historyRecorder,
 		mcp,
+		kitBuild,
 		async close() {
+			unregisterKitBuild()
+			await kitBuild.stop()
 			await historyRecorder.stop()
 			await accessService?.flushUsage()
 			await mcp.close()

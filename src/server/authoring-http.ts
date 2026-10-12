@@ -416,6 +416,35 @@ export async function readProductKitForHttp(app: ScopedWorkspaceSession): Promis
 	return { status: 200, body: read }
 }
 
+function productKitRefusalBody(denied: Readonly<{ code: string; requiredKeys: readonly string[]; message: string }>) {
+	return { status: 'blocked', key: 'product-kit', code: denied.code, requiredKeys: denied.requiredKeys, message: denied.message, diagnostics: [{ code: denied.code, path: '/', message: denied.message }] }
+}
+
+/** `GET /api/product-kit/build`: the kit build state, `workspace.read` only; 404 below `schemaVersion` 5. */
+export function readKitBuildForHttp(app: ScopedWorkspaceSession): AuthoringHttpResult {
+	const read = app.readKitBuild()
+	if (read && 'status' in read) return { status: 403, body: read }
+	if (!read) return { status: 404, body: { status: 'not_found', key: 'product-kit' } }
+	return { status: 200, body: read }
+}
+
+/** `GET /api/product-kit/build/log`: the kit build log, host paths masked; `product-kit.source.read`. */
+export function readKitBuildLogForHttp(app: ScopedWorkspaceSession): AuthoringHttpResult {
+	const read = app.readKitBuildLog()
+	if (read && 'status' in read) return { status: 403, body: read }
+	if (!read) return { status: 404, body: { status: 'not_found', key: 'product-kit' } }
+	return { status: 200, body: read }
+}
+
+/** `POST /api/product-kit/build/restart` (`restart_kit_build`): takes no body; `product-kit.write`. */
+export async function restartKitBuildForHttp(app: ScopedWorkspaceSession): Promise<AuthoringHttpResult> {
+	const denied = app.authorize('restartKitBuild')
+	if (denied) return { status: 403, body: productKitRefusalBody(denied) }
+	const result = await app.restartKitBuild()
+	if (result.status === 'blocked') return { status: result.code === 'auth.scope_denied' ? 403 : result.code === 'kit.build_restart_throttled' ? 429 : 409, body: result }
+	return { status: 200, body: result }
+}
+
 export async function composeProductKitForHttp(app: ScopedWorkspaceSession, body: unknown): Promise<AuthoringHttpResult> {
 	const parsed = parseHttpPayload(composeProductKitHttpSchema, body)
 	if (!parsed.ok) return parsed.result

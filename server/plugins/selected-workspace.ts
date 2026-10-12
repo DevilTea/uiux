@@ -56,6 +56,12 @@ export default defineNitroPlugin((nitroApp) => {
 					return undefined
 				})
 			process.once('exit', () => acquiredHold?.releaseSync())
+			// The kit build (Rule 01a11bb1-9d90-79c0-a51d-44382359bb6b): one process for the Workspace, the
+			// declared watch command or else the build command once. Its argument array is printed first.
+			void runtime.kitBuild.start().catch((error: unknown) => {
+				console.warn(`uiux: could not start the kit build: ${error instanceof Error ? error.message : String(error)}`)
+			})
+			process.once('exit', () => runtime.kitBuild.stopSync())
 		}
 	}
 	nitroApp.hooks.hook('close', async () => {

@@ -17,6 +17,7 @@ import type { WorkspaceAdapterSelection } from '../../domain/workspace/schema'
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
 import type { ResourceRevision } from '../dto/revisions'
+import type { KitBuildState, KitBuildStatus } from '../ports/kit-build'
 import { validateResourceRevision } from '../dto/revisions'
 
 /**
@@ -76,8 +77,8 @@ export type ProductKitAuthoringResult =
 /** A caller's check of a Product Kit change against the file it replaces; see `WorkspaceSettingsGuard`. */
 export type ProductKitGuard<R> = (change: Readonly<{ current: ProductKit; next: ProductKit }>) => R | undefined
 
-/** The build state (Clause 01a11bb1-8856-737f-945c-e44c596f7782); UIUX runs no kit build yet, so it is `none`. */
-export type ProductKitBuildState = 'none' | 'building' | 'ready' | 'failed'
+/** The build state (Clause 01a11bb1-8856-737f-945c-e44c596f7782). */
+export type ProductKitBuildState = KitBuildState
 
 export type ProductKitAdapterResolution =
 	| Readonly<{ moduleSpecifier: string; status: 'resolved'; path?: string; packageName?: string; packageVersion?: string }>
@@ -92,7 +93,7 @@ export type ProductKitRead = Readonly<{
 	resource: ProductKit
 	revision: ResourceRevision
 	diagnostics: readonly Diagnostic[]
-	build: Readonly<{ state: ProductKitBuildState }>
+	build: KitBuildStatus
 	adapters: readonly ProductKitAdapterResolution[]
 	packages: readonly ProductKitPackage[]
 	findings: readonly Diagnostic[]
@@ -110,7 +111,11 @@ const KEY: Key = PRODUCT_KIT_RESOURCE_KEY
 
 type Build = (current: ProductKit) => Readonly<{ next: ProductKit }> | Readonly<{ diagnostics: readonly Diagnostic[] }>
 
-export function createProductKitAuthoringService(persistence: FileNativePersistence): ProductKitAuthoringService {
+/**
+ * `buildStatus` is the kit build runner's state under `uiux dev`; without one, no build runs here and
+ * the state is `none`.
+ */
+export function createProductKitAuthoringService(persistence: FileNativePersistence, options: Readonly<{ buildStatus?: () => KitBuildStatus }> = {}): ProductKitAuthoringService {
 	function kitLocation(): Readonly<{ directory: string; name: string }> | undefined {
 		const name = persistence.layout.codeDir
 		return name ? { directory: join(persistence.root, name), name } : undefined
@@ -234,7 +239,7 @@ export function createProductKitAuthoringService(persistence: FileNativePersiste
 			adapters = await resolveAdapters(project, validation.value.adapters)
 			packages = await Promise.all(validation.value.designSystems.map(name => resolvePackage(project, name)))
 		}
-		return { kind: 'product-kit', key: KEY, resource, revision: read.revision, diagnostics: read.diagnostics, build: { state: 'none' }, adapters, packages, findings }
+		return { kind: 'product-kit', key: KEY, resource, revision: read.revision, diagnostics: read.diagnostics, build: options.buildStatus?.() ?? { state: 'none' }, adapters, packages, findings }
 	}
 
 	async function resolveAdapters(project: KitProject, entries: readonly WorkspaceAdapterSelection[]): Promise<ProductKitAdapterResolution[]> {

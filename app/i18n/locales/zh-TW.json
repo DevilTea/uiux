@@ -570,6 +570,10 @@
     "migration": {
       "title": "此 Workspace 使用較舊的格式",
       "description": "完成遷移前為唯讀。請停止此伺服器，執行 {command}，然後重新啟動 uiux dev。"
+    },
+    "kitBuild": {
+      "failedTitle": "kit 建置失敗",
+      "failedDescription": "預覽會繼續使用上一次成功的建置輸出，正式擷取則會等到建置成功。請修正 kit 專案，再重新啟動建置。"
     }
   },
   "nav": {
@@ -1937,7 +1941,8 @@
     },
     "capture": {
       "browser_launch_failed": "無法啟動擷取用的瀏覽器，請確認已安裝 Playwright。",
-      "execution_failed": "擷取未完成。"
+      "execution_failed": "擷取未完成。",
+      "kit_build_not_ready": "正式擷取會等到 kit 建置就緒。若建置失敗，請先修正再重新啟動建置。"
     },
     "evidence": {
       "invalid_coverage": "Evidence 的涵蓋範圍紀錄無效。",
@@ -2131,9 +2136,14 @@
       "invalid_absolute_uri": "請使用完整網址，例如 https://example.com/spec。"
     },
     "kit": {
+      "build_declaration_invalid": "kit/package.json 中宣告的建置無效。",
+      "build_output_missing": "kit 建置尚未產生任何輸出。",
+      "build_restart_throttled": "kit 建置剛剛才重新啟動。請稍候幾秒，再重新啟動一次。",
+      "build_unavailable": "此伺服器沒有執行 kit 建置；kit 建置由 uiux dev 執行。",
       "component_invalid": "登錄中的項目與 kit/ 專案不符。"
     },
     "product_kit": {
+      "adapter_outside_build_output": "宣告了 kit 建置時，./ Adapter 必須指向其輸出目錄中的檔案。",
       "adapters_not_current": "若要變更 Adapter 的指定方式或順序，請改用組合操作。",
       "current_invalid": "目前儲存的 product-kit.json 無效，請先修正再變更。",
       "invalid_component_file": "登錄中的檔案路徑必須位於 kit/src/ 之下。",
