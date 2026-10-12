@@ -328,7 +328,7 @@ describe('uiux.v4-to-v5 refusals, before anything is written', { timeout: HEAVY_
 			const run = capture()
 			expect(await runMigrateCommand({ workspaceRoot: root, dryRun, home, schemaPolicy: V5_TEST_SCHEMA_POLICY, stdout: run.stdout, stderr: run.stderr })).toBe(1)
 			const errors = run.err.join('\n')
-			expect(errors).toContain('uiux.v4-to-v5 refuses 2 Adapters that the relocated Workspace could not resolve, and nothing was written. Move each ./ module into .uiux/kit/. Edit each listed specifier in .uiux/workspace.json by hand as shown. Then run uiux migrate again.')
+			expect(errors).toContain('uiux.v4-to-v5 refuses 2 Adapters that the relocated Workspace could not resolve, so no migration step ran. Move each ./ module into .uiux/kit/. Edit each listed specifier in .uiux/workspace.json by hand as shown. Then run uiux migrate again.')
 			expect(errors).toContain('/adapters/0/moduleSpecifier: ./adapters/reference.ts lies outside .uiux/kit/: replace it with ./.uiux/kit/adapters/reference.ts')
 			expect(errors).toContain('/adapters/3/moduleSpecifier: ./.uiux/adapters/legacy.ts lies outside .uiux/kit/: replace it with ./.uiux/kit/adapters/legacy.ts')
 			expect(errors).not.toContain('/adapters/1/')
@@ -408,7 +408,7 @@ describe('uiux.v4-to-v5 refuses Adapters the kit project does not declare (owner
 			adapters: [{ moduleSpecifier: '@acme/uiux-adapter' }, { moduleSpecifier: 'lodash/fp.js' }, { moduleSpecifier: './.uiux/kit/adapters/reference.ts' }, { moduleSpecifier: '@acme/declared' }],
 			kitPackage: { name: 'kit', devDependencies: { '@acme/declared': '1.0.0' } },
 		})
-		expect(errors).toContain('uiux.v4-to-v5 refuses 2 Adapters that the relocated Workspace could not resolve, and nothing was written. Declare @acme/uiux-adapter, lodash in .uiux/kit/package.json (dependencies, devDependencies, peerDependencies or optionalDependencies); uiux migrate writes no package.json. Then run uiux migrate again.')
+		expect(errors).toContain('uiux.v4-to-v5 refuses 2 Adapters that the relocated Workspace could not resolve, so no migration step ran. Declare @acme/uiux-adapter, lodash in .uiux/kit/package.json (dependencies, devDependencies, peerDependencies or optionalDependencies); uiux migrate writes no package.json. Then run uiux migrate again.')
 		expect(errors).toContain('/adapters/0/moduleSpecifier: @acme/uiux-adapter names the package @acme/uiux-adapter, which .uiux/kit/package.json does not declare: declare it there')
 		expect(errors).toContain('/adapters/1/moduleSpecifier: lodash/fp.js names the package lodash, which .uiux/kit/package.json does not declare: declare it there')
 		expect(errors).not.toContain('/adapters/2/')

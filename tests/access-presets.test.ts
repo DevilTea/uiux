@@ -12,6 +12,7 @@ import { createHistoryRecorder, type HistoryRecorderClock } from '../src/applica
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { runAccessCommand } from '../src/cli/access'
 import { runInitCommand } from '../src/cli/init'
+import { runMigrateCommand } from '../src/cli/migrate'
 import {
 	ACCESS_PRESETS_FILENAME,
 	builtInAccessPresetsFile,
@@ -157,6 +158,21 @@ describe('uiux.v5-to-v6 and uiux init (Clauses 01a11c09-a9a4 and 01a1144e-55a3, 
 		await expect(persistence.migrateWorkspace()).rejects.toMatchObject({ code: 'workspace.migration_failed' })
 		expect(JSON.parse(await readFile(join(root, 'workspace.json'), 'utf8')).schemaVersion).toBe(5)
 		expect(await readFile(join(root, ACCESS_PRESETS_FILENAME), 'utf8')).toBe('{"presets":[]}')
+	})
+
+	it('reports, when uiux migrate refuses the stray presets file, that no step ran and that the pre-migration Checkpoint stays', async () => {
+		const root = await makeRoot()
+		await writeManifest(root, canonicalJsonBytes(v5Manifest()), V5_LAYOUT)
+		await writeFile(join(root, 'product-kit.json'), canonicalJsonBytes({ designSystems: [], adapters: [], styles: [], themes: {}, components: {}, widgets: {} }))
+		await writeFile(join(root, ACCESS_PRESETS_FILENAME), '{"presets":[]}')
+		const errors: string[] = []
+		expect(await runMigrateCommand({ workspaceRoot: root, home: join(await makeRoot('uiux-access-presets-home-'), 'home'), stdout: () => undefined, stderr: line => errors.push(line) })).toBe(1)
+		const text = errors.join('\n')
+		expect(text).toContain('uiux.v5-to-v6 writes access-presets.json, which this schemaVersion 5 Workspace already holds, so no migration step ran.')
+		expect(text).toMatch(/The pre-migration Checkpoint \S+ stays in the Workspace\./u)
+		expect(text).not.toContain('nothing was written')
+		expect(JSON.parse(await readFile(join(root, 'workspace.json'), 'utf8')).schemaVersion).toBe(5)
+		expect((await readdir(join(root, 'history', 'checkpoints'))).length).toBe(1)
 	})
 
 	it('writes the presets file in a new Workspace', async () => {

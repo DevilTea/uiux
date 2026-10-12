@@ -264,7 +264,7 @@ export const WORKSPACE_V4_TO_V5_STEP: WorkspaceMigrationStep = Object.freeze({
 			...(toDeclare.size > 0 ? [`Declare ${[...toDeclare].sort().join(', ')} in ${OLD_KIT_PACKAGE_FILE} (dependencies, devDependencies, peerDependencies or optionalDependencies); uiux migrate writes no package.json.`] : []),
 		]
 		return {
-			message: `${WORKSPACE_V4_TO_V5_STEP_ID} refuses ${items.length} Adapter${items.length === 1 ? '' : 's'} that the relocated Workspace could not resolve, and nothing was written. ${actions.join(' ')} Then run uiux migrate again.`,
+			message: `${WORKSPACE_V4_TO_V5_STEP_ID} refuses ${items.length} Adapter${items.length === 1 ? '' : 's'} that the relocated Workspace could not resolve, so no migration step ran. ${actions.join(' ')} Then run uiux migrate again.`,
 			items,
 		}
 	},
@@ -311,8 +311,10 @@ export const WORKSPACE_V5_TO_V6_STEP_ID = 'uiux.v5-to-v6'
  * layout is the same at 5 and 6, so nothing moves. Deterministic and idempotent; it re-validates
  * every Review file that was valid under 5 against 6.
  *
- * `refuse`, which `uiux migrate` runs before anything is written, refuses a schemaVersion 5
- * Workspace that already holds a presets file rather than overwrite it: UIUX writes none at 5.
+ * `refuse`, which `uiux migrate` runs before any step changes the Workspace, refuses a
+ * schemaVersion 5 Workspace that already holds a presets file rather than overwrite it: UIUX writes
+ * none at 5. The layout does not change, so the pre-migration Checkpoint is already written by then
+ * and stays (`uiux migrate` reports it); the refusal therefore says only that no step ran.
  * `apply` alone never refuses, so an in-memory upgrade of a version recorded with such a file still
  * reads; it holds the built-in presets, as the migrated Workspace would.
  */
@@ -324,7 +326,7 @@ export const WORKSPACE_V5_TO_V6_STEP: WorkspaceMigrationStep = Object.freeze({
 		const presetsPath = layoutForSchemaVersion(6).accessPresetsPath!
 		if (!snapshot.has(presetsPath)) return undefined
 		return {
-			message: `${WORKSPACE_V5_TO_V6_STEP_ID} writes ${presetsPath}, which this schemaVersion 5 Workspace already holds, and nothing was written. Move it away, then run uiux migrate again.`,
+			message: `${WORKSPACE_V5_TO_V6_STEP_ID} writes ${presetsPath}, which this schemaVersion 5 Workspace already holds, so no migration step ran. Move it away, then run uiux migrate again.`,
 			items: [{ path: `/${presetsPath}`, message: `${presetsPath} exists before the migration that adds it.` }],
 		}
 	},
