@@ -108,8 +108,9 @@ export type SelectedWorkspace =
  *   explicitly selected old-layout `.uiux/` directory is refused, naming its parent (Clause
  *   01a126c7-7c2a-7bb7-b4db-c86fa04ac9e9).
  * - Without it, discovery (Clause 01a11bb1-9847-751f-a1ba-943ad111a02a) selects the `.uiux/` child of
- *   the nearest directory, from `cwd` upward to the home directory, that has a
- *   `.uiux/workspace.json`, after the trust check of `untrustedCandidate`; when that manifest's
+ *   the nearest directory, from `cwd` upward to the home directory (only `cwd` itself when it is
+ *   outside the home directory), that has a `.uiux/workspace.json`, after the trust check of
+ *   `untrustedCandidate`; when that manifest's
  *   `schemaVersion` is below 5, the `.uiux/` directory is an old-layout metadata directory and its
  *   parent is selected (Clause 01a11bb1-98a9-7881-8fa0-ee1e355a3a9a). The mapping comes before the
  *   entry check (owner ruling
@@ -133,13 +134,15 @@ export function selectWorkspace(input: Readonly<{ workspace?: string; cwd: strin
 }
 
 /**
- * The upward walk of discovery, bounded by the trust boundary of owner ruling 1 of
- * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18870730 (Clauses
- * 01a11bb1-9847-751f-a1ba-943ad111a02a and the trust Clause it names):
+ * The walk of discovery, bounded by the trust boundary of owner ruling 1 of
+ * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18870730 and the owner ruling
+ * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18871377 (Clauses
+ * 01a11bb1-9847-751f-a1ba-943ad111a02a and 01a12d48-2ba3-79f2-884f-9d90abec0ac2), on every platform:
  *
- * - The walk examines the home directory itself but nothing above it: a directory that is a proper
- *   ancestor of the home directory is never examined, so a walk that starts there or crosses the
- *   home directory ends without a Workspace. Both paths are compared as real paths.
+ * - From a current directory inside the home directory (or the home directory itself), the walk
+ *   goes upward and examines the home directory but nothing above it.
+ * - From a current directory outside the home directory, only that directory is examined.
+ * - Both paths are compared as real paths.
  * - A `.uiux/workspace.json` that cannot be inspected (`EACCES`, `EPERM`, a link loop) makes its
  *   directory no candidate, and the walk goes on upward: an unreadable `.uiux/` is typically
  *   another user's, and every directory further up gets the same trust check.
@@ -148,12 +151,9 @@ export function selectWorkspace(input: Readonly<{ workspace?: string; cwd: strin
 function discoverWorkspace(cwd: string, policy: Pick<WorkspaceSchemaPolicy, 'currentVersion' | 'recognizedVersions'>, host: DiscoveryHost): SelectedWorkspace {
 	const start = realOrResolved(cwd)
 	const home = realOrResolved(host.homeDirectory)
-	let stoppedAtHome = false
+	const insideHome = start === home || isProperAncestor(home, start)
+	const last = insideHome ? home : start
 	for (let directory = start; ; directory = dirname(directory)) {
-		if (isProperAncestor(directory, home)) {
-			stoppedAtHome = true
-			break
-		}
 		const metadata = join(directory, LEGACY_LAYOUT.metadataDir)
 		const manifest = join(metadata, V5_LAYOUT.manifestPath)
 		if (inspect(manifest) !== undefined) {
@@ -164,14 +164,12 @@ function discoverWorkspace(cwd: string, policy: Pick<WorkspaceSchemaPolicy, 'cur
 			const root = version !== undefined && layoutForSchemaVersion(version) === LEGACY_LAYOUT ? directory : metadata
 			return withSelection(root, checkWorkspaceSelection(root, policy), true)
 		}
-		if (directory === home) {
-			stoppedAtHome = true
-			break
-		}
-		if (dirname(directory) === directory) break
+		if (directory === last || dirname(directory) === directory) break
 	}
-	const bound = stoppedAtHome ? ` (discovery does not search above the home directory ${home})` : ''
-	return refuseLocation('not_discovered', `No UIUX Workspace found: no directory from ${start} upward has a ${LEGACY_LAYOUT.manifestPath}${bound}. Pass --workspace <dir>, or create one with uiux init.`)
+	const searched = insideHome
+		? `no directory from ${start} upward has a ${LEGACY_LAYOUT.manifestPath} (discovery does not search above the home directory ${home})`
+		: `${start} has no ${LEGACY_LAYOUT.manifestPath}, and discovery outside the home directory ${home} examines only the current directory`
+	return refuseLocation('not_discovered', `No UIUX Workspace found: ${searched}. Pass --workspace <dir>, or create one with uiux init.`)
 }
 
 /**
@@ -180,12 +178,17 @@ function discoverWorkspace(cwd: string, policy: Pick<WorkspaceSchemaPolicy, 'cur
  * Every entry is read with `lstat`, so no symbolic link is followed:
  *
  * - `.uiux` must be a real directory, not a symbolic link, and its manifest not a symbolic link;
- * - `.uiux` and its `workspace.json` must be owned by the current user;
+ * - `.uiux` and its `workspace.json` must be owned by the current user, and `.uiux` must not be
+ *   writable by others (`o+w`);
  * - `directory` must not be writable by others (`o+w`) unless the current user owns it, as with
  *   `/tmp`.
  *
  * Where the platform has no user id (`process.getuid` is absent, as on Windows), the ownership and
  * writability checks are skipped; the home-directory bound and the symbolic link checks remain.
+ *
+ * The checks read paths, not open directory handles (Node has no `openat`), so someone who can
+ * write an ancestor directory could swap the directory after the check; that residual risk is
+ * accepted, as with Git's `safe.directory`.
  */
 function untrustedCandidate(directory: string, host: DiscoveryHost): string | undefined {
 	const metadata = join(directory, LEGACY_LAYOUT.metadataDir)
@@ -197,6 +200,7 @@ function untrustedCandidate(directory: string, host: DiscoveryHost): string | un
 	const uid = host.userId
 	if (uid === undefined) return undefined
 	if (metadataEntry.uid !== uid) return `${metadata} is not owned by the current user`
+	if ((metadataEntry.mode & 0o002) !== 0) return `${metadata} is writable by other users`
 	if (manifestEntry.uid !== uid) return `${manifest} is not owned by the current user`
 	const parent = host.lstat(directory)
 	if ((parent.mode & 0o002) !== 0 && parent.uid !== uid) return `${directory} is writable by other users and not owned by the current user`
