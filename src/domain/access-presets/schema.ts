@@ -17,7 +17,9 @@ import { jsonPointer, rejectUnknownKeys, Validator, type Diagnostic, type Valida
  * The checks fall in two groups:
  * - the shape (Clause 01a11c09-a8c3-776f-bc9f-26c6513816f5): `{ presets }`, each preset
  *   `{ id, name, keys }`, ids unique slugs, names non-empty, at most 40 characters and never
- *   `Custom`, keys unique permission key names in catalog order;
+ *   `Custom`, keys unique permission key names in catalog order, with the codes of Clause
+ *   01a12f9d-eb8d-7eba-b618-84e1bf1b7d08 (`access.preset_id_invalid`, `access.preset_name_invalid`
+ *   and, for a file on disk, `access.preset_keys_unordered`);
  * - the rules of Clause 01a11c09-a57d-7d3d-a46f-1e9512200f74: no two presets with equal key sets
  *   (`access.preset_duplicate`, naming both), no two names equal ignoring case
  *   (`access.preset_name_taken`), every requirement of each key present (`access.key_requires`)

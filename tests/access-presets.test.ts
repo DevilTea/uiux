@@ -95,7 +95,7 @@ describe('the Access presets file (Clauses 01a11c09-a855, 01a11c09-a8c3 and 01a1
 		expect(codes([{ id: 'future', name: 'Future', keys: ['workspace.read', 'future.capability'] }])).toEqual(['access.unknown_key'])
 	})
 
-	it('refuses a name that is empty, longer than 40 characters or Custom, a bad id, and keys out of catalog order', () => {
+	it('refuses a name that is empty, longer than 40 characters or Custom, a bad id, and keys out of catalog order, with the codes of Clause 01a12f9d-eb8d', () => {
 		const codes = (preset: unknown) => validateAccessPresetsFile({ presets: [preset] }).diagnostics.map(item => item.code)
 		expect(codes({ id: 'a', name: '', keys: ['workspace.read'] })).toEqual(['access.preset_name_invalid'])
 		expect(codes({ id: 'a', name: 'x'.repeat(41), keys: ['workspace.read'] })).toEqual(['access.preset_name_invalid'])
@@ -228,6 +228,8 @@ describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01
 		expect((duplicate.body as { message: string }).message).toMatch(/"Viewer" \(viewer\) and "Readers" \(readers\)/u)
 		expect(await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision, presets: [{ id: 'x', name: 'Custom', keys: ['workspace.read'] }] }))
 			.toMatchObject({ status: 400, body: { code: 'access.preset_name_invalid' } })
+		expect(await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision, presets: [{ id: 'Not A Slug', name: 'A', keys: ['workspace.read'] }] }))
+			.toMatchObject({ status: 400, body: { code: 'access.preset_id_invalid' } })
 		expect(await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision, presets: 'all' })).toMatchObject({ status: 400, body: { code: 'malformed_payload' } })
 		expect(await readFile(ctx.presetsPath)).toEqual(before)
 	})
