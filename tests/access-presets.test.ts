@@ -192,6 +192,18 @@ describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01
 		expect(await updateAccessPresetsForHttp(http(oldApp, OWNER), { expectedRevision: 'r', presets: [] })).toMatchObject({ status: 422, body: { status: 'blocked', code: 'workspace.migration_required' } })
 	})
 
+	it('finds no presets below schemaVersion 6 even when a stray presets file lies at the path, as labels do (Clause 01a11c09-a855)', async () => {
+		const old = await makeRoot()
+		await writeManifest(old, canonicalJsonBytes(v5Manifest()), V5_LAYOUT)
+		await writeFile(join(old, 'product-kit.json'), canonicalJsonBytes({ designSystems: [], adapters: [], styles: [], themes: {}, components: {}, widgets: {} }))
+		await writeFile(join(old, ACCESS_PRESETS_FILENAME), JSON.stringify({ presets: [{ id: 'stray', name: 'Stray', keys: ['workspace.read'] }] }))
+		const oldApp = createWorkspaceApplicationSession(new FileNativePersistence({ root: old, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }))
+		expect(await oldApp.readAccessPresets()).toBeUndefined()
+		expect(await readAccessPresetsForHttp(http(oldApp, VIEWER))).toMatchObject({ status: 404, body: { status: 'not_found' } })
+		expect(await readWorkspaceAccessPresets(old)).toBe(BUILT_IN_ACCESS_PRESETS)
+		expect(await updateAccessPresetsForHttp(http(oldApp, OWNER), { expectedRevision: null, presets: [] })).toMatchObject({ status: 422, body: { code: 'workspace.migration_required' } })
+	})
+
 	it('replaces the whole presets array with compare-and-swap, keys stored in catalog order, and an empty array is valid (Rule 01a11c09-c78f)', async () => {
 		const ctx = await workspace()
 		const presets = [
