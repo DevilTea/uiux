@@ -570,6 +570,10 @@
     "migration": {
       "title": "This Workspace uses an older format",
       "description": "It's read-only until it's migrated. Stop this server, run {command}, then start uiux dev again."
+    },
+    "kitBuild": {
+      "failedTitle": "The kit build failed",
+      "failedDescription": "The Preview keeps using the last good build output, and formal capture waits until a build succeeds. Fix the kit project, then restart the build."
     }
   },
   "nav": {

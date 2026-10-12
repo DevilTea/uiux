@@ -570,6 +570,10 @@
     "migration": {
       "title": "此 Workspace 使用較舊的格式",
       "description": "完成遷移前為唯讀。請停止此伺服器，執行 {command}，然後重新啟動 uiux dev。"
+    },
+    "kitBuild": {
+      "failedTitle": "kit 建置失敗",
+      "failedDescription": "Preview 會繼續使用上一次成功的建置輸出，正式擷取則會等到建置成功。請修正 kit 專案，再重新啟動建置。"
     }
   },
   "nav": {
