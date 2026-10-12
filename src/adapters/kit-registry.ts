@@ -5,6 +5,7 @@ import { canonicalJsonStringify } from '../domain/canonical-json'
 import type { ProductKit } from '../domain/product-kit/schema'
 import { jsonPointer, type Diagnostic } from '../domain/validation'
 import { maskHostPaths } from './host-paths'
+import { readKitBuildDeclaration, specifierInBuildOutput } from './kit-build-declaration'
 import { bareKitSpecifierProblem, bareSpecifierPackageName, readDeclaredKitDependencies, relativeKitSpecifierProblem } from './kit-dependencies'
 import { realDirectoryIdentity } from './resolution'
 
@@ -19,8 +20,10 @@ import { realDirectoryIdentity } from './resolution'
  *   dependencies `kit/package.json` declares (Rule 01a11bb1-a120-70a9-a875-3842da36c587, Clauses
  *   01a11bb1-8a44-793a-8306-21fea501acad and 01a11bb1-8aa9-7815-bfc4-1e3a997a6d25).
  * - Registry validation (Rule 01a11bb1-a2ac-754e-97c8-4f118218a051): every file a component
- *   declares is a regular file under `kit/src/`, by its real path, and none is a wrapper entry,
- *   until the kit build (K7) the module of a `./` Adapter (Clause 01a11bb1-89e2-75f8-8131-97b0a07d540a).
+ *   declares is a regular file under `kit/src/`, by its real path, and none is a wrapper entry
+ *   (Clause 01a11bb1-89e2-75f8-8131-97b0a07d540a; see `wrapperEntries`).
+ * - With a declared kit build, every `./` Adapter names a file in its output (Clause
+ *   01a11bb1-8721-721e-80b6-3cffed19e5ef).
  *   A registry entry that fails is reported with `kit.component_invalid` (Clause 01a11bb1-8d03-7751-9173-b3c3f1ab7156).
  * - The best-effort import scan (Rule 01a11bb1-a310-70a6-9f9b-c87ec2bcfaf9), `findings` only: a
  *   linear scan of the static and dynamic imports of each script file of a component flags a kit
@@ -131,11 +134,21 @@ export async function checkProductKitAgainstKit(input: KitCheckInput): Promise<K
 		}
 	}
 
+	// The kit build declaration (Clause 01a11bb1-86af-7d2c-946e-6217b40c8ad3), which decides where `./`
+	// Adapters lie and what a wrapper entry is.
+	const build = kit.directory ? await readKitBuildDeclaration(kit.directory) : { state: 'none' as const }
+	if (build.state === 'invalid' && current === undefined)
+		findings.push({ code: 'kit.build_declaration_invalid', path: '/', message: build.message })
+	const output = build.state === 'declared' ? build.declaration.output : undefined
+
 	if (changed('adapters')) {
 		const kitDependencies = next.adapters.some(entry => !entry.moduleSpecifier.startsWith('./')) ? await declared() : new Set<string>()
 		next.adapters.forEach((entry, index) => {
 			const problem = specifierProblem(codeDirectoryName, entry.moduleSpecifier, kitDependencies)
 			if (problem) refusals.push({ code: 'product_kit.specifier_refused', path: `${jsonPointer('/adapters', index)}/moduleSpecifier`, message: problem })
+			// Clause 01a11bb1-8721-721e-80b6-3cffed19e5ef: with a build, a `./` Adapter lies in its output.
+			else if (output !== undefined && entry.moduleSpecifier.startsWith('./') && !specifierInBuildOutput(entry.moduleSpecifier, output))
+				refusals.push({ code: 'product_kit.adapter_outside_build_output', path: `${jsonPointer('/adapters', index)}/moduleSpecifier`, message: `${codeDirectoryName}/package.json declares a build, so the ./ Adapter ${entry.moduleSpecifier} must name a file in its output ${codeDirectoryName}/${output}/.` })
 		})
 	}
 	if (changed('styles')) {
@@ -168,7 +181,7 @@ export async function checkProductKitAgainstKit(input: KitCheckInput): Promise<K
 		}
 	}
 	if (changed('components') || changed('adapters')) {
-		const registry = await checkRegistry(kit, codeDirectoryName, next, () => declared())
+		const registry = await checkRegistry(kit, codeDirectoryName, next, output, () => declared())
 		// A registry change is refused for its entries; a composition that makes an existing entry
 		// name a wrapper entry is reported, not refused, since it changed no entry.
 		if (changed('components')) refusals.push(...registry.refusals)
@@ -186,16 +199,20 @@ function specifierProblem(codeDirectoryName: string, specifier: string, declared
 }
 
 /**
- * The kit-relative paths of the wrapper entries. Until the kit build lands (K7), a wrapper entry is
- * the module of a `./` Adapter (#139 owner ruling 2026-10-11, 3).
+ * The kit-relative paths of the wrapper entries (Clause 01a11bb1-89e2-75f8-8131-97b0a07d540a). When
+ * `kit/package.json` declares a build, a wrapper entry is the `uiux` export of the build: the module
+ * of a `./` Adapter, which lies in the build output `output` (Clause 01a11bb1-8721-…). Without a build
+ * (the minimal form), it is the module of a `./` Adapter (#139 owner ruling 2026-10-11, 3).
  */
-function wrapperEntries(kit: ProductKit): ReadonlySet<string> {
-	return new Set(kit.adapters.filter(entry => entry.moduleSpecifier.startsWith('./')).map(entry => posix.normalize(entry.moduleSpecifier.slice(2))))
+function wrapperEntries(kit: ProductKit, output: string | undefined): ReadonlySet<string> {
+	return new Set(kit.adapters
+		.filter(entry => entry.moduleSpecifier.startsWith('./') && (output === undefined || specifierInBuildOutput(entry.moduleSpecifier, output)))
+		.map(entry => posix.normalize(entry.moduleSpecifier.slice(2))))
 }
 
-async function checkRegistry(project: KitProject, codeDirectoryName: string, kit: ProductKit, declared: () => Promise<ReadonlySet<string> | undefined>): Promise<KitCheckOutcome> {
+async function checkRegistry(project: KitProject, codeDirectoryName: string, kit: ProductKit, output: string | undefined, declared: () => Promise<ReadonlySet<string> | undefined>): Promise<KitCheckOutcome> {
 	const refusals: Diagnostic[] = []
-	const wrappers = wrapperEntries(kit)
+	const wrappers = wrapperEntries(kit, output)
 	const realFiles = new Map<string, string>()
 	const invalid = (path: string, message: string) => refusals.push({ code: KIT_COMPONENT_INVALID, path, message })
 

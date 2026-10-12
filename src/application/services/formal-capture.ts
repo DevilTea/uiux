@@ -13,6 +13,7 @@ import {
 } from '../../domain/render-context/schema'
 import type { Diagnostic, JsonObject } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
+import type { KitBuildStatus } from '../ports/kit-build'
 
 export type FormalContextCaptureResult = Readonly<{
 	context: ResolvedRenderContext
@@ -56,6 +57,8 @@ export function createFormalCaptureService(
 		serverOrigin?: string
 		/** The in-memory `system:capture` credential, sent as a cookie scoped to the internal origin only. */
 		captureCookie?: () => Readonly<{ name: string; value: string }> | undefined
+		/** The kit build state under `uiux dev`; without it no build runs and capture is not held back. */
+		kitBuild?: () => KitBuildStatus
 	},
 ): FormalCaptureService {
 	async function buildRegistries(contexts: readonly ResolvedRenderContext[]): Promise<
@@ -136,6 +139,22 @@ export function createFormalCaptureService(
 			const diagnostics: readonly Diagnostic[] = inspection.state === 'migration_required'
 				? [{ code: 'workspace.migration_required', path: '/schemaVersion', message: `Workspace schema ${inspection.version} requires explicit migration to policy target ${inspection.targetVersion}. Run: uiux migrate --workspace <dir>` }]
 				: inspection.diagnostics
+			return {
+				status: 'failed',
+				results: contexts.map(context => ({ context, status: 'failed', diagnostics })),
+				summary: { total: contexts.length, captured: 0, failed: contexts.length },
+				executedAt: new Date().toISOString(),
+			}
+		}
+
+		// Rule 01a11bb1-9f2f-7559-b2ae-d61320f46627: formal capture is refused while a kit build is
+		// running or after its last run failed, before a browser is launched or anything is stored.
+		const build = options?.kitBuild?.()
+		if (build && (build.state === 'building' || build.state === 'failed')) {
+			const message = build.state === 'building'
+				? 'Formal capture waits for the kit build: a build is running. Capture again once the build state is ready (uiux://product-kit).'
+				: 'Formal capture is refused while the last kit build has failed. Fix the kit project, then restart the build (restart_kit_build).'
+			const diagnostics: readonly Diagnostic[] = [{ code: 'capture.kit_build_not_ready', path: '/product-kit/build', message }]
 			return {
 				status: 'failed',
 				results: contexts.map(context => ({ context, status: 'failed', diagnostics })),
