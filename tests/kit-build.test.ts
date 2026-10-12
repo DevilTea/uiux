@@ -179,6 +179,42 @@ describe('the build process environment (Clause 01a11bb1-88ba)', () => {
 		expect(env.PATH!.split(delimiter)).toEqual(['/w/.uiux/kit/node_modules/.bin', '/w/.uiux/node_modules/.bin', '/usr/bin'])
 	})
 
+	it('drops UIUX_MCP_TOKEN, in any case, from the build environment', () => {
+		const env = kitBuildEnvironment({ UIUX_MCP_TOKEN: 'uiux_agent_token_value', uiux_mcp_token: 'lower-case-token', UIUX_HOME: '/h', PATH: '/usr/bin' }, '/w/.uiux/kit', '/w/.uiux')
+		expect(Object.keys(env).sort()).toEqual(['PATH', 'UIUX_HOME'])
+	})
+
+	it('masks the secrets of the build environment and of the server environment, 8 characters or longer, in the build log', async () => {
+		const leaky = `
+import { mkdirSync, writeFileSync } from 'node:fs'
+console.log('api key=' + process.env.MY_API_KEY)
+console.log('db password=' + process.env.db_password)
+console.log('short token=' + process.env.SHORT_TOKEN)
+console.log('plain=' + process.env.PLAIN_SETTING)
+console.log('mcp token=' + process.env.UIUX_MCP_TOKEN)
+console.log('server secret=server-own-secret-value-42')
+mkdirSync('dist', { recursive: true })
+writeFileSync('dist/uiux.js', 'export {}\\n')
+`
+		const root = await kitWorkspace(nodeBuild('leaky.mjs'), { 'leaky.mjs': leaky })
+		// A secret only in the server's own environment, not in the build's.
+		process.env.KIT_BUILD_TEST_SERVER_SECRET = 'server-own-secret-value-42'
+		cleanups.push(() => { delete process.env.KIT_BUILD_TEST_SERVER_SECRET })
+		const { build } = runner(root, { env: { PATH: process.env.PATH, MY_API_KEY: 'sk-live-0123456789', db_password: 'hunter2hunter2', SHORT_TOKEN: 'abc1234', PLAIN_SETTING: 'visible-setting-value', UIUX_MCP_TOKEN: 'uiux_mcp_token_value' } })
+		await build.start()
+		expect(await settledState(build)).toEqual({ state: 'ready' })
+		const log = build.log()
+		expect(log).toContain('api key=<secret>')
+		expect(log).toContain('db password=<secret>')
+		expect(log).toContain('server secret=<secret>')
+		// Under 8 characters, or a name that names no secret, stays as written.
+		expect(log).toContain('short token=abc1234')
+		expect(log).toContain('plain=visible-setting-value')
+		// The Agent Token never reaches the build.
+		expect(log).toContain('mcp token=undefined')
+		for (const value of ['sk-live-0123456789', 'hunter2hunter2', 'server-own-secret-value-42', 'uiux_mcp_token_value']) expect(log).not.toContain(value)
+	})
+
 	it('never runs a node planted in the node_modules/.bin of an ancestor of the Workspace root', async () => {
 		const outer = await realpath(await mkdtemp(join(tmpdir(), 'uiux-kit-build-outer-')))
 		roots.push(outer)

@@ -17,10 +17,10 @@ import type { KitBuildControl, KitBuildStatus } from '../application/ports/kit-b
  * restart reads the declaration anew from the host file (Rule 01a11bb1-9d17-7205-abee-c2aa7058c107).
  *
  * - The process runs in the real `kit/` directory, through `spawn` with an argument array and no
- *   shell, with UIUX's environment minus every `UIUX_INTERNAL_*` variable, the `node_modules/.bin`
- *   directories of `kit/` and of the Workspace root, and no other, first on `PATH`, and standard
- *   input closed (Clause 01a11bb1-88ba-7030-a7dd-5c7e843c31ea). It leads its own process group, so
- *   stopping it stops what it started.
+ *   shell, with UIUX's environment minus `UIUX_MCP_TOKEN` and every `UIUX_INTERNAL_*` variable, the
+ *   `node_modules/.bin` directories of `kit/` and of the Workspace root, and no other, first on
+ *   `PATH`, and standard input closed (Clause 01a11bb1-88ba-7030-a7dd-5c7e843c31ea). It leads its
+ *   own process group, so stopping it stops what it started.
  * - Its argument array is printed before it runs (Rule 01a11bb1-a05b-7686-beaa-22a90aa90fc2).
  * - The output is settled once 500 ms pass without a change in the output directory (Clause
  *   01a11bb1-87ed-7fec-b485-ede3986675d4), watched by polling its listing. Each settled output
@@ -33,7 +33,8 @@ import type { KitBuildControl, KitBuildStatus } from '../application/ports/kit-b
  *   01a11bb1-9f91-7528-a71c-6cd206e25121): the `command` run as a whole, and a `watch` run until
  *   its first settled output (a watch process runs on after that).
  * - The log is the last 256 KiB of the process output, in memory only (Clause
- *   01a11bb1-891e-7fa5-bf48-4c459fd60d11), read with host paths masked.
+ *   01a11bb1-891e-7fa5-bf48-4c459fd60d11), read with secret values (`maskSecrets`) and host paths
+ *   masked.
  *
  * Known limit (Product Kit Contract, Notes): a watch rebuild that fails without exiting leaves the
  * old output `ready`; the log shows the error. The build runs with the host user's privileges.
@@ -74,14 +75,21 @@ export const KIT_BUILD_SETTLE_MS = 500
 /** Clause 01a11bb1-891e-7fa5-bf48-4c459fd60d11. */
 export const KIT_BUILD_LOG_BYTES = 256 * 1024
 const INTERNAL_VARIABLE_PREFIX = 'UIUX_INTERNAL_'
+/** The Agent Token variable the CLI suggests; never passed to a build (owner ruling 2 of 2026-10-12). */
+const MCP_TOKEN_VARIABLE = 'UIUX_MCP_TOKEN'
+/** Variable names whose values the build log masks (Clause 01a11bb1-891e-7fa5-bf48-4c459fd60d11). */
+const SECRET_NAME = /TOKEN|SECRET|KEY|PASSWORD/i
+/** The shortest value masked, so that a short value such as `1` leaves the log readable. */
+export const KIT_BUILD_SECRET_MIN_LENGTH = 8
+export const KIT_BUILD_SECRET_MASK = '<secret>'
 const DEFAULT_POLL_MS = 100
 const DEFAULT_KILL_GRACE_MS = 2000
 /** The most output entries one listing reads; past it the listing stops, still changing with the files read. */
 const MAX_OUTPUT_ENTRIES = 20_000
 
 /**
- * The build process environment (Clause 01a11bb1-88ba-7030-a7dd-5c7e843c31ea): `base` minus every
- * `UIUX_INTERNAL_*` variable, with `kit/node_modules/.bin` and `<workspace root>/node_modules/.bin`
+ * The build process environment (Clause 01a11bb1-88ba-7030-a7dd-5c7e843c31ea): `base` minus
+ * `UIUX_MCP_TOKEN` and every `UIUX_INTERNAL_*` variable, with `kit/node_modules/.bin` and `<workspace root>/node_modules/.bin`
  * ahead of the inherited `PATH`. No other ancestor directory is added (owner ruling 1 of
  * 2026-10-12): a tool elsewhere is named by an absolute path in the build command.
  */
@@ -89,8 +97,9 @@ export function kitBuildEnvironment(base: NodeJS.ProcessEnv, kitDirectory: strin
 	const env: Record<string, string> = {}
 	for (const [name, value] of Object.entries(base)) {
 		if (value === undefined) continue
-		// Variable names are case-insensitive on Windows, so the prefix is too.
-		if (name.toUpperCase().startsWith(INTERNAL_VARIABLE_PREFIX)) continue
+		// Variable names are case-insensitive on Windows, so the names compared are too.
+		const upper = name.toUpperCase()
+		if (upper.startsWith(INTERNAL_VARIABLE_PREFIX) || upper === MCP_TOKEN_VARIABLE) continue
 		env[name] = value
 	}
 	const pathName = Object.keys(env).find(name => name.toUpperCase() === 'PATH') ?? 'PATH'
@@ -98,6 +107,28 @@ export function kitBuildEnvironment(base: NodeJS.ProcessEnv, kitDirectory: strin
 	const inherited = env[pathName]
 	env[pathName] = [...bins, ...(inherited ? [inherited] : [])].join(delimiter)
 	return env
+}
+
+/**
+ * The values the build log masks (Clause 01a11bb1-891e-7fa5-bf48-4c459fd60d11): those of every
+ * variable in `envs` whose name contains TOKEN, SECRET, KEY or PASSWORD, in any case, and whose value
+ * has at least `KIT_BUILD_SECRET_MIN_LENGTH` characters; longest first.
+ */
+export function secretValues(...envs: readonly NodeJS.ProcessEnv[]): string[] {
+	const values = new Set<string>()
+	for (const env of envs) {
+		for (const [name, value] of Object.entries(env)) {
+			if (value !== undefined && value.length >= KIT_BUILD_SECRET_MIN_LENGTH && SECRET_NAME.test(name)) values.add(value)
+		}
+	}
+	return [...values].sort((a, b) => b.length - a.length)
+}
+
+/** `text` with each of `values` replaced by `KIT_BUILD_SECRET_MASK`. */
+export function maskSecrets(text: string, values: readonly string[]): string {
+	let masked = text
+	for (const value of values) masked = masked.replaceAll(value, KIT_BUILD_SECRET_MASK)
+	return masked
 }
 
 /** The last `capacity` bytes written, in memory only. */
@@ -175,8 +206,9 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 		return next
 	}
 
+	/** Secret values first, from the build's environment and the server's own, then host paths. */
 	function mask(text: string): string {
-		return maskHostPaths(text, maskRoots)
+		return maskHostPaths(maskSecrets(text, secretValues(options.env ?? process.env, process.env)), maskRoots)
 	}
 
 	function settle(run: Run, next: KitBuildStatus): void {
