@@ -12,8 +12,7 @@ import { WidgetEventObserver, type WidgetEventReport } from '../src/preview/widg
 import { RuntimePreviewProtocolBridge, type PreviewWireMessage } from '../src/preview/protocol/bridge'
 import type { PreviewRuntimeBridge, PreviewRuntimeMountOptions } from '../src/preview/browser-runtime'
 import type { ViewResource } from '../src/domain/views/schema'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
-import { writeManifest } from './support/workspace-layout'
+import { writeCurrentWorkspace } from './support/workspace-layout'
 
 /**
  * The runtime observer of Widget Event reporting (Part 2 decision group, decision 4): the
@@ -271,12 +270,12 @@ function tapView(): ViewResource {
 async function tapWorkspace(): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-widget-events-test-'))
 	temporaryRoots.push(root)
-	await mkdir(join(root, 'adapters'), { recursive: true })
+	await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
 	await mkdir(join(root, 'node_modules', '@deviltea'), { recursive: true })
 	for (const name of ['@deviltea/widget-core', '@deviltea/widget-vue', 'vue'])
 		await symlink(join(process.cwd(), 'node_modules', name), join(root, 'node_modules', name)).catch(() => undefined)
-	await writeManifest(root, JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [{ moduleSpecifier: './adapters/tap.mjs' }], viewports: {}, themes: {} }))
-	await writeFile(join(root, 'adapters', 'tap.mjs'), tapAdapterSource())
+	await writeCurrentWorkspace(root, { i18n: { defaultLocale: 'en-US' }, adapters: [{ moduleSpecifier: './adapters/tap.mjs' }], viewports: {}, themes: {} })
+	await writeFile(join(root, 'kit', 'adapters', 'tap.mjs'), tapAdapterSource())
 	return root
 }
 

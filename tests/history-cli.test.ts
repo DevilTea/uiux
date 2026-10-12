@@ -15,24 +15,26 @@ import { CheckpointStore, HostHistoryStore } from '../src/persistence/history'
 import { defineWorkspaceSchemaPolicy, type WorkspaceMigrationStep, type WorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
 import { acquireServerHold } from '../src/persistence/server-hold'
 import {
-	PRODUCT_WORKSPACE_SCHEMA_POLICY,
 	WORKSPACE_V1_TO_V2_STEP,
 	WORKSPACE_V2_TO_V3_STEP,
 	WORKSPACE_V3_TO_V4_STEP,
 } from '../src/product/workspace-schema'
 import { hostHistoryPaths } from '../src/server/access/store'
 import { scoped, testMember } from './support/access'
-import { CURRENT_TEST_LAYOUT } from './support/workspace-layout'
+import { LEGACY_LAYOUT } from '../src/persistence/paths'
+import { V4_TEST_SCHEMA_POLICY } from './support/workspace-layout'
 
 /**
  * `uiux migrate` and version history (issue #132 B7): Rules 01a11a5e-0b23-7d4f-954a-26fcde4a8014
  * and 01a11a5e-0422-78fe-b28b-d877417932e9; Clauses 01a1144e-5605-722c-a662-2b483ddaad73 and
  * 01a11a5e-22ca-756e-8128-8f730ca887c9. Every test runs against its own temporary Workspace and
- * its own temporary UIUX_HOME (AGENTS.md).
+ * its own temporary UIUX_HOME (AGENTS.md). How a migration records history does not depend on its
+ * steps, so these runs keep the old layout under a build where schemaVersion 4 is current; the
+ * relocating `uiux.v4-to-v5` and its history are covered by `workspace-relocation.test.ts`.
  */
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
-const CHECKPOINTS_DIR = CURRENT_TEST_LAYOUT.checkpointsDir
+const CHECKPOINTS_DIR = LEGACY_LAYOUT.checkpointsDir
 const AGENT = testMember({ memberId: 'agent-1', nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' })
 
 /** The policy under which schemaVersion 3 was current, so a v3 server can run and record history. */
@@ -40,7 +42,7 @@ const V3_POLICY = defineWorkspaceSchemaPolicy({ currentVersion: 3, recognizedVer
 
 /** The product policy with its last step replaced. */
 function productPolicyWith(lastStep: WorkspaceMigrationStep): WorkspaceSchemaPolicy {
-	return defineWorkspaceSchemaPolicy({ ...PRODUCT_WORKSPACE_SCHEMA_POLICY, steps: [WORKSPACE_V1_TO_V2_STEP, WORKSPACE_V2_TO_V3_STEP, lastStep] })
+	return defineWorkspaceSchemaPolicy({ ...V4_TEST_SCHEMA_POLICY, steps: [WORKSPACE_V1_TO_V2_STEP, WORKSPACE_V2_TO_V3_STEP, lastStep] })
 }
 
 /** Timers never fire: the recorder of a crashed server must not close anything on its own later. */
@@ -65,7 +67,7 @@ function spec(intent: string): ViewSpecContent {
 async function seed(schemaVersion: number) {
 	const root = await tempDir('uiux-history-cli-ws-')
 	const home = join(await tempDir('uiux-history-cli-home-'), 'home')
-	const policy = schemaVersion === 3 ? V3_POLICY : PRODUCT_WORKSPACE_SCHEMA_POLICY
+	const policy = schemaVersion === 3 ? V3_POLICY : V4_TEST_SCHEMA_POLICY
 	const persistence = new FileNativePersistence({ root, schemaPolicy: policy })
 	await persistence.workspace.create({ schemaVersion, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
 	const app = createWorkspaceApplicationSession(persistence)
@@ -82,7 +84,7 @@ async function migrate(options: Readonly<{ root: string; home: string; dryRun?: 
 		home: options.home,
 		stdout: line => out.push(line),
 		stderr: line => err.push(line),
-		...(options.schemaPolicy ? { schemaPolicy: options.schemaPolicy } : {}),
+		schemaPolicy: options.schemaPolicy ?? V4_TEST_SCHEMA_POLICY,
 		...(options.fault ? { fault: options.fault } : {}),
 	})
 	return { code, out: out.join('\n'), err: err.join('\n') }
@@ -172,7 +174,7 @@ describe('uiux migrate records history', () => {
 		// Rule 01a11a5e-0b23: written before any step ran, outside every step.
 		expect(checkpointsAtStep).toEqual([`${started.baseline}.json`, `${checkpoint.id}.json`].sort())
 
-		const manifestAfter = (await new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).workspace.read('workspace'))!.revision
+		const manifestAfter = (await new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY }).workspace.read('workspace'))!.revision
 		expect(system).toMatchObject({
 			type: 'system',
 			actor: { type: 'system', id: 'system:migrate' },
@@ -195,7 +197,7 @@ describe('uiux migrate records history', () => {
 		expect(result.out).toContain(`system version: ${system!.id}`)
 
 		// The next server start finds the timeline explaining the Workspace: no Baseline, no drift.
-		const current = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const current = new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })
 		const next = createHistoryRecorder({ persistence: current, stores: async () => ({ host, checkpoints: new CheckpointStore(current) }), clock: FROZEN_TIMERS, log: () => undefined })
 		expect(await next.start()).toMatchObject({ enabled: true, boundary: { reason: 'start' } })
 		expect((await host.listVersions()).records).toHaveLength(3)
@@ -212,7 +214,7 @@ describe('uiux migrate records history', () => {
 		expect(others).toEqual([])
 		expect(system).toMatchObject({ type: 'system', actor: { id: 'system:migrate' }, netChange: true })
 		expect(system).not.toHaveProperty('parent')
-		const [checkpoint] = (await new CheckpointStore(new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })).list()).records
+		const [checkpoint] = (await new CheckpointStore(new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })).list()).records
 		expect(checkpoint).toMatchObject({ name: 'Before migration to schemaVersion 4', actor: { type: 'system', id: 'system:migrate' }, source: 'cli', workspaceSchemaVersion: 3 })
 		expect(checkpoint).not.toHaveProperty('parentCheckpoint')
 		// Every blob either side names is on the host, as the recorder expects of its recorded state.
@@ -236,7 +238,7 @@ describe('uiux migrate records history', () => {
 			const result = await migrate({ root, home, ...failure })
 			expect(result.code).toBe(1)
 			expect(result.err).toContain('migrate failed (workspace.migration_failed)')
-			const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+			const persistence = new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })
 			const [checkpoint, ...others] = (await new CheckpointStore(persistence).list()).records
 			expect(others).toEqual([])
 			expect(checkpoint).toMatchObject({ name: 'Before migration to schemaVersion 4', actor: { id: 'system:migrate' }, workspaceSchemaVersion: 3 })
@@ -278,7 +280,7 @@ describe('uiux migrate records history', () => {
 
 	it('writes nothing when a server holds the Workspace or the Checkpoint cannot be written', async () => {
 		const { root, home } = await seed(3)
-		const hold = (await acquireServerHold(root, { layout: CURRENT_TEST_LAYOUT }))!
+		const hold = (await acquireServerHold(root, { layout: LEGACY_LAYOUT }))!
 		const before = await snapshotTree(root)
 		expect((await migrate({ root, home })).code).toBe(1)
 		await hold.release()
@@ -303,7 +305,7 @@ describe('uiux migrate records history', () => {
 			expect(result.code).toBe(1)
 			expect(result.err).toContain('the pre-migration history could not be recorded, so no step ran')
 			expect(result.err).not.toContain('Checkpoint could not be written')
-			const [checkpoint, ...others] = (await new CheckpointStore(new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })).list()).records
+			const [checkpoint, ...others] = (await new CheckpointStore(new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })).list()).records
 			expect(others).toEqual([])
 			expect(result.err).toContain(`The pre-migration Checkpoint ${checkpoint!.id} was written and stays in the Workspace.`)
 			expect(await canonicalFiles(root)).toEqual(before)

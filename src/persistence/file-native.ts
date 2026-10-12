@@ -307,7 +307,7 @@ type PlannedMigration = Readonly<{
  * that do not exist yet (`createdDirectories`, relative to the new root, parents first), which a
  * rollback removes again, and the digest of the new manifest, whose presence marks the commit point. The journal has neither `changes` (the old
  * layout's format) nor `entries` (the plain `schemaVersion` 5 format), so every build that predates
- * relocations, an old-layout one or a dormant `schemaVersion` 5 one, fails its recovery and keeps
+ * relocations, an old-layout one or one that knew `schemaVersion` 5 only dormant, fails its recovery and keeps
  * the journal instead of applying it as a plain transaction.
  */
 type RelocationJournal = Readonly<{

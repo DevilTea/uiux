@@ -964,6 +964,7 @@
     "sectionIndex": "Settings sections",
     "saved": "Settings saved",
     "saveFailed": "Couldn't save",
+    "adaptersPartlySaved": "Specifiers saved, config not saved",
     "locale": {
       "description": "The primary Locale of the previewed product.",
       "primaryLocale": "Primary Locale",
@@ -1051,6 +1052,7 @@
     "invalid": "The Adapter set is invalid. Preview and Catalog are paused until it's fixed.",
     "repair": "Run this in your project to fix it:",
     "description": "Packages or Workspace modules that supply Widgets, in resolution order.",
+    "kitDescription": "Packages or kit/ modules that supply Widgets, in resolution order.",
     "add": "Add adapter",
     "moduleSpecifier": "Module specifier",
     "unnamed": "New Adapter",
@@ -1079,11 +1081,13 @@
     "copied": "Copied",
     "copyFailed": "Couldn't copy",
     "resolutionUnknown": "Couldn't check the Adapter set.",
+    "productKitUnavailable": "Couldn't read the Product Kit file.",
     "saveNote": "Saving checks the Adapter set again.",
     "validation": {
       "required": "Enter a module specifier.",
       "specifier": "Use a package name or a ./ path inside the Workspace.",
-      "json": "This isn't valid JSON."
+      "json": "This isn't valid JSON.",
+      "kitSpecifier": "Use a package name or a ./ path inside kit/."
     }
   },
   "comment": {

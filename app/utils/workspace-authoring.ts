@@ -1,3 +1,4 @@
+import type { ProductKit } from '../../src/domain/product-kit/schema'
 import type { WorkspaceAdapterSelection, WorkspaceManifest } from '../../src/domain/workspace/schema'
 
 /**
@@ -75,16 +76,21 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionId[] = ['general', 'view
 
 export type SettingsPayload = Readonly<{
 	i18n: WorkspaceManifest['i18n']
-	adapters: WorkspaceManifest['adapters']
+	/** Only below `schemaVersion` 5; from 5 the Adapters live in the Product Kit file. */
+	adapters?: WorkspaceManifest['adapters']
 	viewports: WorkspaceManifest['viewports']
 	themes: WorkspaceManifest['themes']
 }>
 
-/** The manifest fields that `update_workspace_settings` replaces as one document. */
+/**
+ * The manifest fields that `update_workspace_settings` replaces as one document. `adapters` is
+ * sent only when the manifest holds it (below `schemaVersion` 5): from 5 the manifest refuses it,
+ * and the Adapters section writes the Product Kit file instead (`productKitAdapterWrites`).
+ */
 export function settingsFromManifest(manifest: WorkspaceManifest): SettingsPayload {
 	return {
 		i18n: cloneJson(manifest.i18n ?? { defaultLocale: 'en-US' }),
-		adapters: cloneJson(manifest.adapters ?? []),
+		...(Array.isArray(manifest.adapters) ? { adapters: cloneJson(manifest.adapters) } : {}),
 		viewports: cloneJson(manifest.viewports ?? {}),
 		themes: cloneJson(manifest.themes ?? {}),
 	}
@@ -214,6 +220,37 @@ export function adapterSelections(rows: readonly AdapterRow[]): WorkspaceAdapter
 		const config = parsed.ok ? parsed.value : row.configText
 		return { moduleSpecifier: row.moduleSpecifier.trim(), ...(config !== undefined ? { config } : {}) }
 	})
+}
+
+export type ProductKitAdapterWrites = Readonly<{
+	/** `compose_product_kit` (`PUT /api/product-kit/compose`): the new Adapter specifiers and order. */
+	compose?: Readonly<{ designSystems: readonly string[]; adapters: readonly string[] }>
+	/** `update_product_kit` (`PUT /api/product-kit/settings`): every Adapter's `config`, after `compose`. */
+	update?: Readonly<{ adapters: readonly WorkspaceAdapterSelection[]; styles: readonly string[]; themes: ProductKit['themes'] }>
+}>
+
+/**
+ * The Product Kit operations that store an Adapter selection from `schemaVersion` 5: `compose`
+ * when the specifiers or their order change, then `update` when a `config` differs from what
+ * `compose` leaves, which keeps the `config` of the entry with the same specifier at the same
+ * occurrence and gives an added entry none (Clause 01a11bb1-b15c-734e-8968-c378db1444ca). Every
+ * other member of the Product Kit file is resent as read.
+ */
+export function productKitAdapterWrites(current: ProductKit, selections: readonly WorkspaceAdapterSelection[]): ProductKitAdapterWrites {
+	const specifiers = selections.map(selection => selection.moduleSpecifier)
+	const composeNeeded = !sameJson(current.adapters.map(adapter => adapter.moduleSpecifier), specifiers)
+	const seen = new Map<string, number>()
+	const composed = specifiers.map((moduleSpecifier) => {
+		const occurrence = seen.get(moduleSpecifier) ?? 0
+		seen.set(moduleSpecifier, occurrence + 1)
+		const kept = current.adapters.filter(adapter => adapter.moduleSpecifier === moduleSpecifier)[occurrence]
+		return kept?.config === undefined ? { moduleSpecifier } : { moduleSpecifier, config: kept.config }
+	})
+	const updateNeeded = !sameJson(composed, selections)
+	return {
+		...(composeNeeded ? { compose: { designSystems: cloneJson(current.designSystems), adapters: specifiers } } : {}),
+		...(updateNeeded ? { update: { adapters: cloneJson(selections), styles: cloneJson(current.styles), themes: cloneJson(current.themes) } } : {}),
+	}
 }
 
 /** Moves one item and returns a new array; out-of-range moves return the input unchanged. */

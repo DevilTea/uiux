@@ -964,6 +964,7 @@
     "sectionIndex": "設定區段",
     "saved": "設定已儲存",
     "saveFailed": "無法儲存",
+    "adaptersPartlySaved": "已儲存模組指定符，但組態未儲存",
     "locale": {
       "description": "預覽產品的主要 Locale。",
       "primaryLocale": "主要 Locale",
@@ -1051,6 +1052,7 @@
     "invalid": "Adapter 組合無效，修正前會暫停預覽與型錄。",
     "repair": "請在專案中執行以下指令修正：",
     "description": "提供 Widget 的套件或 Workspace 模組，依解析順序排列。",
+    "kitDescription": "提供 Widget 的套件或 kit/ 模組，依解析順序排列。",
     "add": "新增 Adapter",
     "moduleSpecifier": "模組指定符",
     "unnamed": "新 Adapter",
@@ -1079,11 +1081,13 @@
     "copied": "已複製",
     "copyFailed": "無法複製",
     "resolutionUnknown": "無法檢查 Adapter 組合。",
+    "productKitUnavailable": "無法讀取 Product Kit 檔案。",
     "saveNote": "儲存後會重新檢查 Adapter 組合。",
     "validation": {
       "required": "請輸入模組指定符。",
       "specifier": "請使用套件名稱，或 Workspace 內以 ./ 開頭的路徑。",
-      "json": "這不是有效的 JSON。"
+      "json": "這不是有效的 JSON。",
+      "kitSpecifier": "請使用套件名稱，或 kit/ 內的 ./ 路徑。"
     }
   },
   "comment": {

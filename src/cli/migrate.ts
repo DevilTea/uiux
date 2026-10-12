@@ -9,7 +9,7 @@ import { PersistenceError } from '../persistence/errors'
 import { layoutForSchemaVersion } from '../persistence/paths'
 import type { WorkspaceSchemaPolicy } from '../persistence/schema-policy'
 import { readActiveServerHold, type ServerHold } from '../persistence/server-hold'
-import { checkWorkspaceSelection } from '../persistence/workspace-selection'
+import { checkWorkspaceSelection, selectWorkspace } from '../persistence/workspace-selection'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY, WORKSPACE_GITIGNORE_RULES } from '../product/workspace-schema'
 import { resolveUiuxHome } from '../server/access/store'
 import { createHistoryStoreFactory } from '../server/history-stores'
@@ -47,7 +47,7 @@ class PreMigrationHistoryError extends Error {
 }
 
 /**
- * `uiux migrate --workspace <dir> [--dry-run]`: the only entrypoint that applies the product
+ * `uiux migrate [--workspace <dir>] [--dry-run]` on a selected root: the only entrypoint that applies the product
  * Workspace schema migration (CLI-only by decision; there is no MCP tool and no HTTP route).
  *
  * A real run that has steps to apply records history under the migration's lock, outside every
@@ -185,6 +185,28 @@ export async function runMigrateCommand(options: MigrateCommandOptions): Promise
 		}
 		throw error
 	}
+}
+
+export type SelectedMigrateCommandOptions = Omit<MigrateCommandOptions, 'workspaceRoot'> & Readonly<{
+	/** `--workspace <dir>` as given; omitted, the Workspace is discovered from `cwd`. */
+	workspace?: string
+	cwd: string
+}>
+
+/**
+ * `uiux migrate [--workspace <dir>] [--dry-run]`: selects the Workspace (`selectWorkspace`: the
+ * given directory, or discovery, which maps a found old-layout `.uiux/` to its parent, Clauses
+ * 01a1144e-5584-7101-98c0-dc3cbadbacdf, 01a11bb1-9847-751f-a1ba-943ad111a02a and
+ * 01a11bb1-98a9-7881-8fa0-ee1e355a3a9a), then runs `runMigrateCommand` on it.
+ */
+export async function runSelectedMigrateCommand(options: SelectedMigrateCommandOptions): Promise<number> {
+	const { workspace, cwd, ...rest } = options
+	const selection = selectWorkspace({ ...(workspace === undefined ? {} : { workspace }), cwd }, options.schemaPolicy ?? PRODUCT_WORKSPACE_SCHEMA_POLICY)
+	if (!selection.ok) {
+		(options.stderr ?? (line => console.error(line)))(`uiux: ${selection.message}`)
+		return 2
+	}
+	return runMigrateCommand({ ...rest, workspaceRoot: selection.root })
 }
 
 function printHistory(out: (line: string) => void, report: MigrationCheckpointReport, version: number): void {

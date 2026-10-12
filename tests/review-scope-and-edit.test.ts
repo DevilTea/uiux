@@ -24,6 +24,7 @@ import {
 } from '../src/server/authoring-http'
 import { listResourcesForHttp, searchResourcesForHttp, type ResourceDiscoveryHttpResult } from '../src/server/resource-discovery'
 import { AGENT_EDITOR, connectMcp, scoped, testMember } from './support/access'
+import { createCurrentWorkspace } from './support/workspace-layout'
 
 /**
  * Accepted decision group "Workspace-scoped Review threads and editable Review messages" (Part 7,
@@ -52,7 +53,7 @@ async function session() {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-review-v3-'))
 	roots.push(root)
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
-	await persistence.workspace.create({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
+	await createCurrentWorkspace(persistence, { i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
 	const app = createWorkspaceApplicationSession(persistence)
 	const view = await app.createView({ id: VIEW_ID, name: 'Checkout', spec: spec('Pay') })
 	const other = await app.createView({ id: OTHER_VIEW_ID, name: 'Receipt', spec: spec('Show') })

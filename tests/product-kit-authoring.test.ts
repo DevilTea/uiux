@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -14,7 +14,7 @@ import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } f
 import type { HostVersionRecord } from '../src/domain/history/schema'
 import { emptyProductKit, type ProductKit } from '../src/domain/product-kit/schema'
 import { createHistoryStoreFactory } from '../src/server/history-stores'
-import { canonicalJsonBytes, FileNativePersistence, V5_LAYOUT } from '../src/persistence'
+import { canonicalJsonBytes, FileNativePersistence, LEGACY_LAYOUT, V5_LAYOUT } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import {
 	composeProductKitForHttp,
@@ -27,8 +27,8 @@ import { connectMcp, scoped, testMember } from './support/access'
 import { currentManifest, V5_TEST_SCHEMA_POLICY, v5Manifest, writeManifest } from './support/workspace-layout'
 
 /**
- * The Product Kit authoring operations (issue #141, unit K5), dormant at `schemaVersion` 5 under the
- * injected `V5_TEST_SCHEMA_POLICY`: Clauses 01a11bb1-b15c-…, 01a11bb1-b35a-…, 01a11bb1-b3c2-…,
+ * The Product Kit authoring operations (issue #141, units K5 and K6) on a `schemaVersion` 5 Workspace,
+ * under `V5_TEST_SCHEMA_POLICY`, UIUX's own policy: Clauses 01a11bb1-b15c-…, 01a11bb1-b35a-…, 01a11bb1-b3c2-…,
  * 01a11bb1-b0f1-…, 01a11bb1-8d03-…, 01a11485-f769-… and 01a11485-f70a-…, Rules 01a11485-efb6-…,
  * 01a11bb1-a120-…, 01a11bb1-a2ac-… and 01a11bb1-a310-….
  */
@@ -228,7 +228,7 @@ describe('compose_product_kit, update_product_kit and update_component_registry 
 	it('refuses on a Workspace below schemaVersion 5 with workspace.migration_required, over HTTP and MCP', async () => {
 		const root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-product-kit-legacy-')))
 		roots.push(root)
-		await writeManifest(root, currentManifest())
+		await writeManifest(root, { ...currentManifest(), schemaVersion: 4, adapters: [] }, LEGACY_LAYOUT)
 		const app = createWorkspaceApplicationSession(new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }))
 		const refused = await composeProductKitForHttp(http(app, HUMAN_EDITOR), { expectedRevision: 'sha256:x', designSystems: [], adapters: [] })
 		expect(refused).toMatchObject({ status: 422, body: { status: 'blocked', code: 'workspace.migration_required' } })
@@ -902,5 +902,37 @@ describe('host paths in the Product Kit Resource', () => {
 		const text = JSON.stringify(read)
 		expect(text).not.toContain(parent)
 		expect(text).not.toContain(tmpdir())
+	})
+})
+
+describe('authoring never writes inside the kit project (Scenario 01a11bb1-c0b4)', () => {
+	/** Every file under `kit/`, with its bytes. */
+	async function kitTree(root: string): Promise<Record<string, string>> {
+		const files: Record<string, string> = {}
+		for (const entry of await readdir(join(root, 'kit'), { recursive: true, withFileTypes: true })) {
+			if (!entry.isFile()) continue
+			const path = join(entry.parentPath, entry.name)
+			files[path.slice(root.length + 1)] = (await readFile(path)).toString('base64')
+		}
+		return files
+	}
+
+	it('leaves every file under kit/ unchanged when an Editor creates a View, updates the Workspace settings and changes the Product Kit file', async () => {
+		const ctx = await v5Fixture()
+		// Build output beside the component sources.
+		await write(join(ctx.root, 'kit', 'dist', 'kit.css'), '.button { color: red }\n')
+		const before = await kitTree(ctx.root)
+		expect(Object.keys(before)).toEqual(expect.arrayContaining(['kit/src/button.ts', 'kit/dist/kit.css', 'kit/package.json']))
+		const session = http(ctx.app, HUMAN_EDITOR)
+
+		expect(await session.createView({ id: '66666666-6666-4666-8666-666666666666', name: 'Checkout', spec: { intent: 'Pay', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [] } })).toMatchObject({ status: 'created' })
+		const workspace = await ctx.app.readPointResource('workspace', 'workspace')
+		if (workspace?.kind !== 'workspace') throw new Error('workspace')
+		expect(await updateWorkspaceSettingsForHttp(session, { expectedRevision: workspace.revision, settings: { i18n: { defaultLocale: 'en-US' }, viewports: { desktop: { dimensions: { width: 1280, height: 800 } } }, themes: {} } })).toMatchObject({ status: 200 })
+		expect(await composeProductKitForHttp(session, { expectedRevision: await revision(ctx.app), designSystems: ['@acme/design-system'], adapters: ['./uiux.js', '@acme/uiux-adapter'] })).toMatchObject({ status: 200 })
+		expect(await updateProductKitForHttp(session, { expectedRevision: await revision(ctx.app), adapters: [{ moduleSpecifier: './uiux.js' }, { moduleSpecifier: '@acme/uiux-adapter' }], styles: ['./dist/kit.css'], themes: {} })).toMatchObject({ status: 200 })
+		expect(await updateComponentRegistryForHttp(session, { expectedRevision: await revision(ctx.app), components: { button: { files: ['src/button.ts'], layer: 'design-system' } }, widgets: { Button: { component: 'button' } } })).toMatchObject({ status: 200 })
+
+		expect(await kitTree(ctx.root)).toEqual(before)
 	})
 })

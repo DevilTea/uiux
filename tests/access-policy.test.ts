@@ -33,10 +33,11 @@ import { RESTORABLE_RESOURCE_KINDS } from '../src/domain/history/constants'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { FileNativePersistence } from '../src/persistence'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { appendReviewMessageForHttp, createViewForHttp, resolveReviewThreadForHttp, submitReadyForReviewForHttp, updateViewSpecForHttp } from '../src/server/authoring-http'
 import { connectMcp, scoped, testMember } from './support/access'
-import { manifestPath as workspaceManifestPath } from './support/workspace-layout'
+import { createCurrentWorkspace, manifestPath as workspaceManifestPath, V4_TEST_SCHEMA_POLICY } from './support/workspace-layout'
+import { LEGACY_LAYOUT } from '../src/persistence/paths'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const NEW_VIEW_ID = '22222222-2222-4222-8222-222222222222'
@@ -50,11 +51,16 @@ function spec(intent: string): ViewSpecContent {
 	return { intent, entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [] }
 }
 
-async function fixture() {
+/**
+ * A Workspace with one View and one Review thread. `legacy` makes it a `schemaVersion` 4 Workspace under
+ * the policy of a build where 4 is current, whose manifest still holds `adapters` (Clause 01a11bb1-b35a).
+ */
+async function fixture(options: Readonly<{ legacy?: boolean }> = {}) {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-access-policy-'))
 	roots.push(root)
-	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
-	await persistence.workspace.create({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
+	const persistence = new FileNativePersistence({ root, schemaPolicy: options.legacy ? V4_TEST_SCHEMA_POLICY : PRODUCT_WORKSPACE_SCHEMA_POLICY })
+	if (options.legacy) await persistence.workspace.create({ schemaVersion: 4, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
+	else await createCurrentWorkspace(persistence, { i18n: { defaultLocale: 'en-US' }, viewports: {}, themes: {} })
 	const app = createWorkspaceApplicationSession(persistence)
 	const view = await app.createView({ id: VIEW_ID, name: 'Checkout', spec: spec('Pay') })
 	const review = await app.createReviewThread({ id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' } })
@@ -487,9 +493,9 @@ describe('authorization in the shared application layer', () => {
 		expect((await ctx.app.readPointResource('view', VIEW_ID))?.revision).toBe(ctx.viewRevision)
 	})
 
-	it('needs product-kit.compose besides settings.write to change the adapters list, but not for other settings (Clause 01a11bb1-b35a)', async () => {
-		const ctx = await fixture()
-		const manifestPath = workspaceManifestPath(ctx.root)
+	it('needs product-kit.compose besides settings.write to change the adapters list below schemaVersion 5, but not for other settings (Clause 01a11bb1-b35a)', async () => {
+		const ctx = await fixture({ legacy: true })
+		const manifestPath = workspaceManifestPath(ctx.root, LEGACY_LAYOUT)
 		const settingsOnly = scoped(ctx.app, testMember({ nickname: 'sam', kind: 'human', credential: 'session', keys: ['workspace.read', 'settings.write'] }))
 		const read = async () => {
 			const current = await ctx.app.readPointResource('workspace', 'workspace')
@@ -516,7 +522,7 @@ describe('authorization in the shared application layer', () => {
 	})
 
 	it('decides the compose check on the manifest the write replaces, even when another write lands between authorization and the write', async () => {
-		const ctx = await fixture()
+		const ctx = await fixture({ legacy: true })
 		const read = async () => {
 			const current = await ctx.app.readPointResource('workspace', 'workspace')
 			if (current?.kind !== 'workspace') throw new Error('workspace')

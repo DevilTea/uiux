@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { RESTORABLE_RESOURCE_KINDS } from '../src/domain/history/constants'
 import { RESTORABLE_RESOURCE_KINDS as SERVICE_KINDS } from '../src/application/services/history-restore'
 import type { ImpactItem } from '../src/domain/impact/analyzer'
+import { diffJson } from '../src/domain/history/diff/json-pointer'
 import { diffWorkspaceSettings } from '../src/domain/history/diff/settings'
 import type { JsonValue } from '../src/domain/validation'
 import { comparisonRefreshKey, forgetComparisonsAfterDeletion, refreshKeyChanged } from '../app/utils/comparison-refresh'
@@ -235,7 +236,28 @@ describe('the keys a Workspace settings restore needs beyond its write key (#140
 })
 
 describe('the keys a Product Kit restore needs beyond its write key (#139 owner ruling 2026-10-11, 1)', () => {
-	it('always needs `product-kit.compose` until the Workbench compares the Product Kit precisely (K6)', () => {
+	const KIT = { designSystems: ['@acme/ds'], adapters: [{ moduleSpecifier: './a.ts', config: { tone: 'warm' } }, { moduleSpecifier: 'b' }], styles: [], themes: {}, components: {}, widgets: {} }
+	/** The structural comparison of a version's Product Kit file (`from`) with the current one, as the dialog reads it. */
+	function compared(version: unknown, current: unknown) {
+		const diff = { type: 'structural' as const, changes: diffJson(version as JsonValue | undefined, current as JsonValue | undefined) }
+		return { to: { id: 'current' as const, workspaceSchemaVersion: 5 }, changes: [{ kind: 'product-kit', key: 'product-kit', status: 'modified' as const, diff }] }
+	}
+
+	it('needs `product-kit.compose` when the restore changes `designSystems` or the Adapter specifiers or their order', () => {
+		expect(restoreExtraKeys('product-kit', compared({ ...KIT, designSystems: [] }, KIT))).toEqual(['product-kit.compose'])
+		expect(restoreExtraKeys('product-kit', compared({ ...KIT, adapters: [KIT.adapters[1]!, KIT.adapters[0]!] }, KIT))).toEqual(['product-kit.compose'])
+		expect(restoreExtraKeys('product-kit', compared({ ...KIT, adapters: [KIT.adapters[0]!] }, KIT))).toEqual(['product-kit.compose'])
+		expect(restoreExtraKeys('product-kit', compared({ ...KIT, adapters: [...KIT.adapters, { moduleSpecifier: 'c' }] }, KIT))).toEqual(['product-kit.compose'])
+		expect(restoreExtraKeys('product-kit', compared(undefined, KIT))).toEqual(['product-kit.compose'])
+	})
+
+	it('needs nothing more for a change to an Adapter `config`, `styles` or `themes` alone', () => {
+		expect(restoreExtraKeys('product-kit', compared({ ...KIT, adapters: [{ moduleSpecifier: './a.ts', config: { tone: 'cold' } }, KIT.adapters[1]!] }, KIT))).toEqual([])
+		expect(restoreExtraKeys('product-kit', compared({ ...KIT, adapters: [{ moduleSpecifier: './a.ts' }, KIT.adapters[1]!] }, KIT))).toEqual([])
+		expect(restoreExtraKeys('product-kit', compared({ ...KIT, styles: ['./x.css'], themes: { dark: { 'data-theme': 'dark' } } }, KIT))).toEqual([])
+	})
+
+	it('needs `product-kit.compose` while the comparison is unknown or not structural, so it never offers a refused restore', () => {
 		expect(restoreExtraKeys('product-kit', undefined)).toEqual(['product-kit.compose'])
 		expect(restoreExtraKeys('product-kit', { to: { id: 'current', workspaceSchemaVersion: 5 }, changes: [] })).toEqual(['product-kit.compose'])
 	})

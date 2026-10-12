@@ -1,6 +1,6 @@
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { createApp, createRouter, defineEventHandler, toNodeListener } from 'h3'
-import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type OutgoingHttpHeaders, type Server } from 'node:http'
 import { connect, type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -20,8 +20,8 @@ import {
 import { resolveNetworkConfig } from '../src/server/network-access'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { createAccessGuardHandler } from '../src/server/access/http'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import { provisionToken } from './support/access'
+import { writeCurrentWorkspace } from './support/workspace-layout'
 
 const PORT = 4321
 const VIEW_ID = '77777777-7777-4777-8777-777777777777'
@@ -265,8 +265,7 @@ describe('loopback guard on a live h3 server with the real /mcp and /api routes'
 
 	beforeAll(async () => {
 		root = await mkdtemp(join(tmpdir(), 'uiux-loopback-guard-'))
-		await mkdir(join(root, '.uiux'), { recursive: true })
-		await writeFile(join(root, '.uiux', 'workspace.json'), `${JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }, null, 2)}\n`)
+		await writeCurrentWorkspace(root, { i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
 		process.env.UIUX_WORKSPACE_ROOT = root
 		process.env.UIUX_SERVER_ORIGIN = 'http://127.0.0.1:1'
 		token = await provisionToken(root, { nickname: 'claude', kind: 'agent', role: 'editor' })

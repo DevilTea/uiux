@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
-import { lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join, resolve } from 'node:path'
@@ -20,8 +20,12 @@ Options:
   -v, --version  Show version
 
 Commands:
-  init --workspace <dir>  Initialize a Workspace
-  dev --workspace <dir> [--host <address>] [--origin <url>]...
+  init [--workspace <dir>]
+                           Initialize a Workspace in <dir>, by default in .uiux/ of the
+                           Git repository's top level (of the current directory outside
+                           a repository): workspace.json, product-kit.json and a
+                           .gitignore for the runtime files, kit/node_modules/ and kit/dist/
+  dev [--workspace <dir>] [--host <address>] [--origin <url>]...
                            Start the unified UIUX Workbench/Nitro server. By default
                            it listens on loopback only (127.0.0.1; PORT selects the
                            port, default 3000) and accepts only loopback host names.
@@ -35,15 +39,24 @@ Commands:
                            Every /api and /mcp request needs a credential; the first
                            start of a Workspace creates its Owner and prints a
                            one-time sign-in link on each URL
-  migrate --workspace <dir> [--dry-run]
+  migrate [--workspace <dir>] [--dry-run]
                            Migrate an older Workspace schema to schemaVersion ${workspaceSchemaVersion}
-                           (steps chain: uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4);
-                           a real run first writes the Checkpoint "Before migration to
-                           schemaVersion ${workspaceSchemaVersion}" and then records the migration in the host
-                           history ($UIUX_HOME); --dry-run prints the steps and changed
-                           files without writing anything
+                           (steps chain: uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4,
+                           uiux.v4-to-v5); a real run first writes the Checkpoint "Before
+                           migration to schemaVersion ${workspaceSchemaVersion}" and then records the migration
+                           in the host history ($UIUX_HOME); --dry-run prints the steps
+                           and changed files without writing anything. uiux.v4-to-v5
+                           moves the Workspace into <dir>/.uiux/ and prints the
+                           uiux access copy command to run next
 
-Access (each takes --workspace <dir>; rosters live in $UIUX_HOME, default ~/.uiux):
+Workspace selection: --workspace <dir> names the Workspace root, or a directory whose
+.uiux/ holds one. Without it, a command uses the .uiux/ of the nearest directory, from
+the current one upward to your home directory (outside it, only the current directory),
+that has a .uiux/workspace.json; when that is a Workspace from before schemaVersion 5,
+its parent directory is the Workspace. A .uiux/ that another user owns or others can
+write, or in a directory others can write, is refused.
+
+Access (each takes [--workspace <dir>]; rosters live in $UIUX_HOME, default ~/.uiux):
   member add <nick> (--preset <name> | --keys <k,...> | --all-keys) [--kind human|agent]
   member set <nick> [--preset <name>] [--grant <k,...>] [--revoke <k,...>] [--nickname <new>]
   member list [--keys] | member remove <nick>
@@ -57,9 +70,10 @@ Access (each takes --workspace <dir>; rosters live in $UIUX_HOME, default ~/.uiu
   session list | session revoke <session-id> | session revoke --member <nick>
   access copy --from <old-dir> [--replace]
                            Copy members, tokens and host history from another
-                           Workspace path, once. Copy before running uiux migrate on
-                           the new path: --replace discards the target's roster and
-                           its own host history, migration system versions included`)
+                           Workspace path, once. After uiux migrate moves a Workspace
+                           into <old-dir>/.uiux/, run it with --from <old-dir> before
+                           the first uiux dev there. --replace discards the target's
+                           roster and its own host history`)
 }
 
 // `uiux dev` takes its bind address only from --host. For compatibility, a loopback HOST or
@@ -85,11 +99,13 @@ function loopbackHostFromEnv(env) {
 	return { ok: true, host: selected }
 }
 
-function parseWorkspaceArgument(args) {
-	return args.length === 2 && args[0] === '--workspace' && args[1] ? args[1] : undefined
+/** `[--workspace <dir>]`: `{ workspace }` (undefined when omitted), or undefined for invalid usage. */
+function parseOptionalWorkspaceArgument(args) {
+	if (args.length === 0) return { workspace: undefined }
+	return args.length === 2 && args[0] === '--workspace' && args[1] && !args[1].startsWith('--') ? { workspace: args[1] } : undefined
 }
 
-/** `dev --workspace <dir> [--host <address>] [--origin <url>]...`; undefined for invalid usage. */
+/** `dev [--workspace <dir>] [--host <address>] [--origin <url>]...`; undefined for invalid usage. */
 function parseDevArguments(args) {
 	let workspace
 	let host
@@ -103,15 +119,15 @@ function parseDevArguments(args) {
 		else if (name === '--origin') origins.push(value)
 		else return undefined
 	}
-	return workspace === undefined ? undefined : { workspace, host, origins }
+	return { workspace, host, origins }
 }
 
 function parseMigrateArguments(args) {
 	const dryRun = args.includes('--dry-run')
 	const rest = args.filter(arg => arg !== '--dry-run')
 	if (args.length - rest.length > 1) return undefined
-	const workspace = parseWorkspaceArgument(rest)
-	return workspace ? { workspace, dryRun } : undefined
+	const options = parseOptionalWorkspaceArgument(rest)
+	return options ? { workspace: options.workspace, dryRun } : undefined
 }
 
 /**
@@ -147,8 +163,9 @@ async function withBundled(entry, use) {
 }
 
 async function runMigrate(options) {
-	await runBundled('src/cli/migrate.ts', ({ runMigrateCommand }) => runMigrateCommand({
-		workspaceRoot: resolve(process.cwd(), options.workspace),
+	await runBundled('src/cli/migrate.ts', ({ runSelectedMigrateCommand }) => runSelectedMigrateCommand({
+		...(options.workspace === undefined ? {} : { workspace: options.workspace }),
+		cwd: process.cwd(),
 		dryRun: options.dryRun,
 	}))
 }
@@ -157,73 +174,20 @@ async function runAccess(argv) {
 	await runBundled('src/cli/access.ts', ({ runAccessCommand }) => runAccessCommand({ argv }))
 }
 
-async function runInit(workspaceArgument) {
-	const workspaceRoot = resolve(process.cwd(), workspaceArgument)
-	try {
-		const rootStat = await stat(workspaceRoot)
-		if (!rootStat.isDirectory()) {
-			console.error(`uiux: Workspace root is not a directory: ${workspaceRoot}`)
-			process.exitCode = 2
-			return
-		}
-	}
-	catch (error) {
-		if (error?.code !== 'ENOENT') throw error
-		await mkdir(workspaceRoot, { recursive: true })
-	}
-
-	const metadataRoot = join(workspaceRoot, '.uiux')
-	await mkdir(metadataRoot, { recursive: true })
-	const metadataStat = await lstat(metadataRoot)
-	if (!metadataStat.isDirectory() || metadataStat.isSymbolicLink()) {
-		console.error(`uiux: Workspace metadata path must be a real directory: ${metadataRoot}`)
-		process.exitCode = 2
-		return
-	}
-
-	const manifestPath = join(metadataRoot, 'workspace.json')
-	const manifest = {
-		schemaVersion: workspaceSchemaVersion,
-		i18n: { defaultLocale: 'en-US' },
-		adapters: [],
-		viewports: {},
-		themes: {},
-	}
-	try {
-		await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' })
-	}
-	catch (error) {
-		if (error?.code !== 'EEXIST') throw error
-		console.error(`uiux: Workspace is already initialized: ${manifestPath}`)
-		process.exitCode = 2
-		return
-	}
-	console.log(`Initialized UIUX Workspace at ${workspaceRoot}`)
+async function runInit(workspace) {
+	await runBundled('src/cli/init.ts', ({ runInitCommand }) => runInitCommand(workspace === undefined ? {} : { workspace }))
 }
 
 async function runDev(options) {
-	const workspaceRoot = resolve(process.cwd(), options.workspace)
-	let workspaceStat
-	try {
-		workspaceStat = await stat(workspaceRoot)
-	}
-	catch {
-		console.error(`uiux: Workspace root does not exist: ${workspaceRoot}`)
-		process.exitCode = 2
-		return
-	}
-	if (!workspaceStat.isDirectory()) {
-		console.error(`uiux: Workspace root is not a directory: ${workspaceRoot}`)
-		process.exitCode = 2
-		return
-	}
-	// The layout entry check, before the server starts (and so before any lock or server hold).
-	const selection = await withBundled('src/cli/workspace-selection.ts', module => module.checkSelectedWorkspace(workspaceRoot))
+	// `--workspace <dir>` or discovery, then the layout entry check, before the server starts (and so
+	// before any lock or server hold).
+	const selection = await withBundled('src/cli/workspace-selection.ts', module => module.selectCliWorkspace(options.workspace, process.cwd()))
 	if (!selection.ok) {
 		console.error(`uiux: ${selection.message}`)
 		process.exitCode = 2
 		return
 	}
+	const workspaceRoot = selection.root
 
 	// UIUX serves plain HTTP only; an https origin is served by a TLS-terminating front end.
 	if (process.env.NITRO_SSL_CERT || process.env.NITRO_SSL_KEY) {
@@ -298,17 +262,17 @@ if (extraArgs.length === 0 && (command === undefined || command === '--help' || 
 } else if (extraArgs.length === 0 && (command === '--version' || command === '-v')) {
 	console.log(`uiux ${packageJson.version}`)
 } else if (command === 'init') {
-	const workspace = parseWorkspaceArgument(extraArgs)
-	if (!workspace) {
-		console.error('uiux: init requires exactly --workspace <dir>.')
+	const options = parseOptionalWorkspaceArgument(extraArgs)
+	if (!options) {
+		console.error('uiux: init accepts only --workspace <dir>.')
 		process.exitCode = 2
 	} else {
-		await runInit(workspace)
+		await runInit(options.workspace)
 	}
 } else if (command === 'dev') {
 	const options = parseDevArguments(extraArgs)
 	if (!options) {
-		console.error('uiux: dev requires --workspace <dir> and accepts --host <address> and repeated --origin <url>.')
+		console.error('uiux: dev accepts --workspace <dir>, --host <address> and repeated --origin <url>.')
 		process.exitCode = 2
 	} else {
 		await runDev(options)
@@ -316,7 +280,7 @@ if (extraArgs.length === 0 && (command === undefined || command === '--help' || 
 } else if (command === 'migrate') {
 	const options = parseMigrateArguments(extraArgs)
 	if (!options) {
-		console.error('uiux: migrate requires --workspace <dir> and accepts --dry-run.')
+		console.error('uiux: migrate accepts --workspace <dir> and --dry-run.')
 		process.exitCode = 2
 	} else {
 		try {

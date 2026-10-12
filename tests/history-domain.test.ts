@@ -53,7 +53,9 @@ import {
 	type WorkspaceSnapshot,
 } from '../src/persistence'
 import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
+import { V5_LAYOUT } from '../src/persistence/paths'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { V4_TEST_SCHEMA_POLICY } from './support/workspace-layout'
 
 const VERSION_ID = '0199aaaa-0000-7000-8000-000000000001'
 const PARENT_ID = '0199aaaa-0000-7000-8000-000000000002'
@@ -331,9 +333,10 @@ const EXCLUDED_PATHS = [
 
 describe('revision parity with file-native persistence', () => {
 	it('computes the same revision persistence reads for every resource kind', async () => {
+		// The walk below classifies the old layout's paths, so the Workspace is a schemaVersion 4 one.
 		const root = await makeRoot()
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
-		await persistence.workspace.create(manifest(PRODUCT_WORKSPACE_SCHEMA_POLICY.currentVersion))
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })
+		await persistence.workspace.create(manifest(V4_TEST_SCHEMA_POLICY.currentVersion))
 		await persistence.views.create(VIEW_ID, { id: VIEW_ID, name: 'Checkout', ir: { type: 'RootShell', id: 'root', slots: { content: [] } }, variants: {}, spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] } })
 		await persistence.flows.create(FLOW_ID, { id: FLOW_ID, name: 'Flow', entryStepId: VIEW_ID, steps: { [VIEW_ID]: { target: { viewId: VIEW_ID }, transitions: [] } } })
 		await persistence.locales.create('zh-TW', { greeting: '你好' })
@@ -373,7 +376,7 @@ describe('revision parity with file-native persistence', () => {
 })
 
 describe('in-memory snapshot upgrade', () => {
-	it('upgrades every older recognized version with the product policy and leaves design files identical', async () => {
+	it('upgrades every older recognized version with the product policy, relocating only the manifest and adding the Product Kit file, and leaves design files identical', async () => {
 		const policy = PRODUCT_WORKSPACE_SCHEMA_POLICY
 		const older = policy.recognizedVersions.filter(version => version < policy.currentVersion)
 		// Every version from 1 up to the one before current, each through the full step chain.
@@ -383,8 +386,12 @@ describe('in-memory snapshot upgrade', () => {
 			const frozen = cloneSnapshot(snapshot)
 			const upgraded = await upgradeSnapshotInMemory(snapshot, fromVersion, policy)
 			expect(upgraded.steps).toHaveLength(policy.currentVersion - fromVersion)
-			expect(JSON.parse(new TextDecoder().decode(upgraded.snapshot.get(WORKSPACE_MANIFEST_PATH)))).toMatchObject({ schemaVersion: policy.currentVersion })
-			expect([...upgraded.snapshot.keys()].sort()).toEqual([...snapshot.keys()].sort())
+			// uiux.v4-to-v5 changes logical paths only for the manifest, and adds product-kit.json holding the Adapters.
+			const upgradedManifest = JSON.parse(new TextDecoder().decode(upgraded.snapshot.get(V5_LAYOUT.manifestPath))) as Record<string, unknown>
+			expect(upgradedManifest).toMatchObject({ schemaVersion: policy.currentVersion })
+			expect(upgradedManifest).not.toHaveProperty('adapters')
+			expect(JSON.parse(new TextDecoder().decode(upgraded.snapshot.get(V5_LAYOUT.productKitPath!)))).toMatchObject({ adapters: [] })
+			expect([...upgraded.snapshot.keys()].sort()).toEqual([...[...snapshot.keys()].filter(path => path !== WORKSPACE_MANIFEST_PATH), V5_LAYOUT.manifestPath, V5_LAYOUT.productKitPath!].sort())
 			for (const [path, bytes] of snapshot) {
 				if (path === WORKSPACE_MANIFEST_PATH) continue
 				expect(Buffer.from(upgraded.snapshot.get(path)!).equals(Buffer.from(bytes)), path).toBe(true)

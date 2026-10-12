@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type OutgoingHttpHeaders, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -39,9 +39,9 @@ import { AccessStore, accessStorePaths, resolveUiuxHome } from '../src/server/ac
 import { createLoopbackGuardHandler } from '../src/server/loopback-guard'
 import { LOOPBACK_ONLY_NETWORK, resolveNetworkConfig, setServerNetwork, type NetworkConfig } from '../src/server/network-access'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import { provisionToken } from './support/access'
 import { BUILT_IN_ACCESS_PRESETS, keysForRole, PERMISSION_KEYS } from '../src/application/access/keys'
+import { writeCurrentWorkspace } from './support/workspace-layout'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const spec = { intent: 'x', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [] }
@@ -56,8 +56,7 @@ const previous = { root: process.env.UIUX_WORKSPACE_ROOT, origin: process.env.UI
 
 beforeAll(async () => {
 	root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-access-http-')))
-	await mkdir(join(root, '.uiux'), { recursive: true })
-	await writeFile(join(root, '.uiux', 'workspace.json'), `${JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }, null, 2)}\n`)
+	await writeCurrentWorkspace(root, { i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
 	process.env.UIUX_WORKSPACE_ROOT = root
 
 	server = createServer(toNodeListener(buildApp()))

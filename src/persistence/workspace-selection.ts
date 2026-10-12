@@ -1,5 +1,6 @@
-import { lstatSync, readFileSync, realpathSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 
 import { isRecord } from '../domain/validation'
 import { LEGACY_LAYOUT, layoutForSchemaVersion, V5_LAYOUT, WORKSPACE_DATA_DIRECTORY, type WorkspaceLayout } from './paths'
@@ -72,6 +73,168 @@ export function checkWorkspaceSelection(root: string, policy: Pick<WorkspaceSche
 		return { ok: true, layout: V5_LAYOUT }
 	}
 	return { ok: true, layout: layoutForSchemaVersion(policy.currentVersion) }
+}
+
+/** Why no Workspace directory could be selected at all, before the entry check. */
+export type WorkspaceLocationRefusalReason = 'not_found' | 'not_a_directory' | 'not_discovered' | 'untrusted_candidate'
+
+/** The directory entry facts discovery's trust check reads, from `lstat` (no symbolic link is followed). */
+export type DiscoveryEntry = Readonly<{ uid: number; mode: number; isDirectory: () => boolean; isSymbolicLink: () => boolean }>
+
+/**
+ * What discovery reads from the host: the home directory where the upward walk ends, the current
+ * user's id (`undefined` where the platform has none, such as Windows), and `lstat`. Tests replace
+ * it to simulate entries owned by another user, which they cannot create.
+ */
+export type DiscoveryHost = Readonly<{
+	homeDirectory: string
+	userId: number | undefined
+	lstat: (path: string) => DiscoveryEntry
+}>
+
+function defaultDiscoveryHost(): DiscoveryHost {
+	return { homeDirectory: homedir(), userId: process.getuid?.(), lstat: path => lstatSync(path) }
+}
+
+export type SelectedWorkspace =
+	| Readonly<{ ok: true; root: string; layout: WorkspaceLayout; discovered: boolean }>
+	| Readonly<{ ok: false; reason: WorkspaceSelectionRefusalReason | WorkspaceLocationRefusalReason; message: string }>
+
+/**
+ * Selects the Workspace a command acts on, then runs the entry check on it.
+ *
+ * - With `--workspace <dir>` (Clause 01a1144e-5584-7101-98c0-dc3cbadbacdf), `<dir>` is the root, or
+ *   the parent of a `schemaVersion` 5 root in its `.uiux/` child, which is then selected. An
+ *   explicitly selected old-layout `.uiux/` directory is refused, naming its parent (Clause
+ *   01a126c7-7c2a-7bb7-b4db-c86fa04ac9e9).
+ * - Without it, discovery (Clause 01a11bb1-9847-751f-a1ba-943ad111a02a) selects the `.uiux/` child of
+ *   the nearest directory, from `cwd` upward to the home directory (only `cwd` itself when it is
+ *   outside the home directory), that has a `.uiux/workspace.json`, after the trust check of
+ *   `untrustedCandidate`; when that manifest's
+ *   `schemaVersion` is below 5, the `.uiux/` directory is an old-layout metadata directory and its
+ *   parent is selected (Clause 01a11bb1-98a9-7881-8fa0-ee1e355a3a9a). The mapping comes before the
+ *   entry check (owner ruling
+ *   https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18857361).
+ *
+ * Like the entry check, it reads only directory entries and manifests.
+ */
+export function selectWorkspace(input: Readonly<{ workspace?: string; cwd: string; discoveryHost?: DiscoveryHost }>, policy: Pick<WorkspaceSchemaPolicy, 'currentVersion' | 'recognizedVersions'>): SelectedWorkspace {
+	if (input.workspace === undefined) return discoverWorkspace(resolve(input.cwd), policy, input.discoveryHost ?? defaultDiscoveryHost())
+	const directory = resolve(input.cwd, input.workspace)
+	let isDirectory: boolean
+	try { isDirectory = statSync(directory).isDirectory() }
+	catch { return refuseLocation('not_found', `Workspace root does not exist: ${directory}`) }
+	if (!isDirectory) return refuseLocation('not_a_directory', `Workspace root is not a directory: ${directory}`)
+	const selection = checkWorkspaceSelection(directory, policy)
+	if (!selection.ok && selection.reason === 'relocated_parent') {
+		const child = join(directory, LEGACY_LAYOUT.metadataDir)
+		return withSelection(child, checkWorkspaceSelection(child, policy), false)
+	}
+	return withSelection(directory, selection, false)
+}
+
+/**
+ * The walk of discovery, bounded by the trust boundary of owner ruling 1 of
+ * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18870730 and the owner ruling
+ * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18871377 (Clauses
+ * 01a11bb1-9847-751f-a1ba-943ad111a02a and 01a12d48-2ba3-79f2-884f-9d90abec0ac2), on every platform:
+ *
+ * - From a current directory inside the home directory (or the home directory itself), the walk
+ *   goes upward and examines the home directory but nothing above it.
+ * - From a current directory outside the home directory, only that directory is examined.
+ * - Both paths are compared as real paths.
+ * - A `.uiux/workspace.json` that cannot be inspected (`EACCES`, `EPERM`, a link loop) makes its
+ *   directory no candidate, and the walk goes on upward: an unreadable `.uiux/` is typically
+ *   another user's, and every directory further up gets the same trust check.
+ * - The first candidate found is selected or refused; a refused candidate never lets the walk go on.
+ */
+function discoverWorkspace(cwd: string, policy: Pick<WorkspaceSchemaPolicy, 'currentVersion' | 'recognizedVersions'>, host: DiscoveryHost): SelectedWorkspace {
+	const start = realOrResolved(cwd)
+	const home = realOrResolved(host.homeDirectory)
+	const insideHome = start === home || isProperAncestor(home, start)
+	const last = insideHome ? home : start
+	for (let directory = start; ; directory = dirname(directory)) {
+		const metadata = join(directory, LEGACY_LAYOUT.metadataDir)
+		const manifest = join(metadata, V5_LAYOUT.manifestPath)
+		if (inspect(manifest) !== undefined) {
+			const untrusted = untrustedCandidate(directory, host)
+			if (untrusted !== undefined)
+				return refuseLocation('untrusted_candidate', `Discovery found ${manifest} but does not select it: ${untrusted}. Pass --workspace <dir> to select a Workspace explicitly.`)
+			const version = manifestVersion(manifest)
+			const root = version !== undefined && layoutForSchemaVersion(version) === LEGACY_LAYOUT ? directory : metadata
+			return withSelection(root, checkWorkspaceSelection(root, policy), true)
+		}
+		if (directory === last || dirname(directory) === directory) break
+	}
+	const searched = insideHome
+		? `no directory from ${start} upward has a ${LEGACY_LAYOUT.manifestPath} (discovery does not search above the home directory ${home})`
+		: `${start} has no ${LEGACY_LAYOUT.manifestPath}, and discovery outside the home directory ${home} examines only the current directory`
+	return refuseLocation('not_discovered', `No UIUX Workspace found: ${searched}. Pass --workspace <dir>, or create one with uiux init.`)
+}
+
+/**
+ * Why discovery refuses the candidate `.uiux/` in `directory`, or `undefined` when it may be used
+ * (owner ruling 1 of https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18870730).
+ * Every entry is read with `lstat`, so no symbolic link is followed:
+ *
+ * - `.uiux` must be a real directory, not a symbolic link, and its manifest not a symbolic link;
+ * - `.uiux` and its `workspace.json` must be owned by the current user, and `.uiux` must not be
+ *   writable by others (`o+w`);
+ * - `directory` must not be writable by others (`o+w`) unless the current user owns it, as with
+ *   `/tmp`.
+ *
+ * Where the platform has no user id (`process.getuid` is absent, as on Windows), the ownership and
+ * writability checks are skipped; the home-directory bound and the symbolic link checks remain.
+ *
+ * The checks read paths, not open directory handles (Node has no `openat`), so someone who can
+ * write an ancestor directory could swap the directory after the check; that residual risk is
+ * accepted, as with Git's `safe.directory`.
+ */
+function untrustedCandidate(directory: string, host: DiscoveryHost): string | undefined {
+	const metadata = join(directory, LEGACY_LAYOUT.metadataDir)
+	const manifest = join(metadata, V5_LAYOUT.manifestPath)
+	const metadataEntry = host.lstat(metadata)
+	if (metadataEntry.isSymbolicLink() || !metadataEntry.isDirectory()) return `${metadata} is a symbolic link or not a directory`
+	const manifestEntry = host.lstat(manifest)
+	if (manifestEntry.isSymbolicLink()) return `${manifest} is a symbolic link`
+	const uid = host.userId
+	if (uid === undefined) return undefined
+	if (metadataEntry.uid !== uid) return `${metadata} is not owned by the current user`
+	if ((metadataEntry.mode & 0o002) !== 0) return `${metadata} is writable by other users`
+	if (manifestEntry.uid !== uid) return `${manifest} is not owned by the current user`
+	const parent = host.lstat(directory)
+	if ((parent.mode & 0o002) !== 0 && parent.uid !== uid) return `${directory} is writable by other users and not owned by the current user`
+	return undefined
+}
+
+/** True when `directory` is a proper ancestor of `path`, both absolute and normalized. */
+function isProperAncestor(directory: string, path: string): boolean {
+	if (directory === path) return false
+	const prefix = directory.endsWith(sep) ? directory : `${directory}${sep}`
+	return path.startsWith(prefix)
+}
+
+function realOrResolved(path: string): string {
+	try { return realpathSync.native(path) }
+	catch { return resolve(path) }
+}
+
+/** The `lstat` of `path`, or `undefined` when it is missing or cannot be inspected. */
+function inspect(path: string): ReturnType<typeof lstatSync> | undefined {
+	try { return lstatSync(path) }
+	catch (error) {
+		const code = (error as NodeJS.ErrnoException | undefined)?.code
+		if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EACCES' || code === 'EPERM' || code === 'ELOOP' || code === 'ENAMETOOLONG') return undefined
+		throw error
+	}
+}
+
+function withSelection(root: string, selection: WorkspaceSelection, discovered: boolean): SelectedWorkspace {
+	return selection.ok ? { ok: true, root, layout: selection.layout, discovered } : selection
+}
+
+function refuseLocation(reason: WorkspaceLocationRefusalReason, message: string): SelectedWorkspace {
+	return { ok: false, reason, message }
 }
 
 /** The old layout's data directories, which `uiux.v4-to-v5` moves into `.uiux/`. */

@@ -22,7 +22,7 @@ import { createHistoryService, type CheckpointBoundary, type VersionListing, typ
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { CheckpointRecord, HostVersionRecord } from '../src/domain/history/schema'
-import { artifactRelativePath, FileNativePersistence, localeRelativePath, WORKSPACE_CHECKPOINTS_DIRECTORY, workspaceRelativePath } from '../src/persistence'
+import { FileNativePersistence, localeRelativePath } from '../src/persistence'
 import { readMergedTimeline, versionResourcesFromSnapshot } from '../src/persistence/history'
 import { CHECKPOINT_RECOMMENDATION, versionResourceUri } from '../src/mcp/server'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
@@ -32,7 +32,8 @@ import { createHistoryStoreFactory, type HistoryStoreFactory } from '../src/serv
 import { createCheckpointForHttp, deleteCheckpointForHttp, diffVersionsForHttp, listVersionsForHttp, readVersionForHttp } from '../src/server/history-http'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { bearer, connectMcp, provisionToken, scoped, sessionCookieFor, testMember } from './support/access'
-import { CURRENT_TEST_LAYOUT, metadataPath } from './support/workspace-layout'
+import { createCurrentWorkspace, CURRENT_TEST_LAYOUT, metadataPath, writeManifest } from './support/workspace-layout'
+import { LEGACY_LAYOUT } from '../src/persistence/paths'
 
 /**
  * Named Checkpoints, the version listing and their access (issue #132 B4): Feature
@@ -105,7 +106,7 @@ async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
 	const root = await tempDir('uiux-checkpoints-ws-')
 	const home = join(await tempDir('uiux-checkpoints-home-'), 'home')
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
-	await persistence.workspace.create({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
+	await createCurrentWorkspace(persistence, { i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
 	await persistence.locales.create('en-US', { greeting: 'Hello' })
 	const history = createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home })
 	const clock = manualClock()
@@ -152,11 +153,11 @@ async function canonicalBytes(ctx: Fixture): Promise<Map<string, string>> {
 }
 
 async function checkpointFiles(ctx: Fixture): Promise<string[]> {
-	return (await readdir(join(ctx.root, WORKSPACE_CHECKPOINTS_DIRECTORY))).sort()
+	return (await readdir(join(ctx.root, CURRENT_TEST_LAYOUT.checkpointsDir))).sort()
 }
 
 async function readCheckpointFile(ctx: Fixture, id: string): Promise<CheckpointRecord> {
-	return JSON.parse(await readFile(join(ctx.root, WORKSPACE_CHECKPOINTS_DIRECTORY, `${id}.json`), 'utf8')) as CheckpointRecord
+	return JSON.parse(await readFile(join(ctx.root, CURRENT_TEST_LAYOUT.checkpointsDir, `${id}.json`), 'utf8')) as CheckpointRecord
 }
 
 function listed(outcome: unknown): VersionListing {
@@ -175,7 +176,7 @@ describe('creating a Checkpoint', () => {
 		const before = await canonicalBytes(ctx)
 		ctx.clock.advance(1_000)
 		const outcome = await scoped(ctx.app, REVIEWER, { leases }).createCheckpoint({ name: '  v1 layout approved  ', note: 'Signed off in the design review.' })
-		expect(outcome).toMatchObject({ status: 'created', versionId: expect.any(String), at: expect.any(String), resources: 3 })
+		expect(outcome).toMatchObject({ status: 'created', versionId: expect.any(String), at: expect.any(String), resources: 4 })
 		const { versionId, at } = outcome as { versionId: string; at: string }
 
 		const record = await readCheckpointFile(ctx, versionId)
@@ -189,7 +190,7 @@ describe('creating a Checkpoint', () => {
 			parentCheckpoint: ctx.baseline,
 			workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 		})
-		expect(record.resources.map(resource => `${resource.kind}:${resource.key}`)).toEqual(['locale:en-US', `view:${VIEW_ID}`, 'workspace:workspace'])
+		expect(record.resources.map(resource => `${resource.kind}:${resource.key}`)).toEqual(['locale:en-US', 'product-kit:product-kit', `view:${VIEW_ID}`, 'workspace:workspace'])
 		// Its blobs are in the derived-artifact store (Clause 01a11a5e-1e0e-7539-b925-c54dcb1afb55).
 		for (const digest of record.resources.flatMap(resource => Object.values(resource.files)))
 			expect(await ctx.persistence.artifacts.read(digest)).toBeInstanceOf(Uint8Array)
@@ -208,7 +209,7 @@ describe('creating a Checkpoint', () => {
 			const created = await mcp.client.callTool({ name: 'create_checkpoint', arguments: { name: 'Agent task done' } })
 			expect(created.isError).not.toBe(true)
 			const output = created.structuredContent as { status: string; versionId: string; at: string; resources: number; resourceUri: string }
-			expect(output).toMatchObject({ status: 'created', resources: 3, resourceUri: versionResourceUri(output.versionId) })
+			expect(output).toMatchObject({ status: 'created', resources: 4, resourceUri: versionResourceUri(output.versionId) })
 			expect(await readCheckpointFile(ctx, output.versionId)).toMatchObject({ actor: actorOf(AGENT_REVIEWER), source: 'mcp' })
 			expect(await readCheckpointFile(ctx, output.versionId)).not.toHaveProperty('note')
 			// The schema is closed: no caller-supplied actor or time (Rule 01a11a5e-025f-71d7-8d08-63948220de57).
@@ -273,10 +274,12 @@ describe('creating a Checkpoint', () => {
 
 	it('is refused while migration is required or the schema is unsupported, while listing still works (Rules 01a11a5e-0a5e and 07c1)', async () => {
 		const ctx = await fixture()
-		const manifestPath = join(ctx.root, workspaceRelativePath())
+		const manifestPath = join(ctx.root, CURRENT_TEST_LAYOUT.manifestPath)
 		const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>
 		const files = await checkpointFiles(ctx)
-		for (const [schemaVersion, code] of [[CURRENT_WORKSPACE_SCHEMA_VERSION - 1, 'workspace.migration_required'], [99, 'workspace.schema_unsupported']] as const) {
+		// In a schemaVersion 5 root an older manifest does not match the layout, so it is unsupported too;
+		// migration_required, an old-layout Workspace, is checked below.
+		for (const [schemaVersion, code] of [[CURRENT_WORKSPACE_SCHEMA_VERSION - 1, 'workspace.schema_unsupported'], [99, 'workspace.schema_unsupported']] as const) {
 			await writeFile(manifestPath, `${JSON.stringify({ ...manifest, schemaVersion })}\n`)
 			const http = await createCheckpointForHttp(scoped(ctx.app, REVIEWER), { name: 'Blocked' })
 			expect(http).toMatchObject({ status: 422, body: { status: 'blocked', code } })
@@ -295,6 +298,15 @@ describe('creating a Checkpoint', () => {
 			expect(listed((await listVersionsForHttp(scoped(ctx.app, VIEWER), {})).body).versions.map(version => version.id)).toEqual([ctx.baseline])
 			expect(await checkpointFiles(ctx)).toEqual(files)
 		}
+
+		// An old-layout Workspace (schemaVersion 4, manifest in .uiux/) needs uiux migrate first.
+		const old = await tempDir('uiux-checkpoints-old-ws-')
+		await writeManifest(old, { schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }, LEGACY_LAYOUT)
+		const oldPersistence = new FileNativePersistence({ root: old, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const oldHome = join(await tempDir('uiux-checkpoints-old-home-'), 'home')
+		const oldApp = createWorkspaceApplicationSession(oldPersistence, { history: createHistoryStoreFactory({ workspaceRoot: old, persistence: oldPersistence, home: () => oldHome }) })
+		expect(await createCheckpointForHttp(scoped(oldApp, REVIEWER), { name: 'Blocked' })).toMatchObject({ status: 422, body: { status: 'blocked', code: 'workspace.migration_required' } })
+		expect((await listVersionsForHttp(scoped(oldApp, VIEWER), {})).status).toBe(200)
 	})
 
 	it('refuses, writing nothing, when the open autosave cannot be closed first', async () => {
@@ -414,11 +426,11 @@ describe('Checkpoints are immutable and deleted record-only', () => {
 		// A record this build cannot read is never deleted (owner ruling
 		// https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18835031 item 2).
 		const corrupt = randomUUID()
-		const corruptPath = join(ctx.root, WORKSPACE_CHECKPOINTS_DIRECTORY, `${corrupt}.json`)
+		const corruptPath = join(ctx.root, CURRENT_TEST_LAYOUT.checkpointsDir, `${corrupt}.json`)
 		await writeFile(corruptPath, '{"historySchemaVersion":2}\n')
 		expect(await deleteCheckpointForHttp(scoped(ctx.app, OWNER), corrupt)).toMatchObject({ status: 422, body: { status: 'blocked', code: 'history.record_invalid' } })
 		expect(await readFile(corruptPath, 'utf8')).toBe('{"historySchemaVersion":2}\n')
-		expect(listed(await ctx.app.listVersions({})).invalid).toEqual([expect.objectContaining({ file: `${WORKSPACE_CHECKPOINTS_DIRECTORY}/${corrupt}.json` })])
+		expect(listed(await ctx.app.listVersions({})).invalid).toEqual([expect.objectContaining({ file: `${CURRENT_TEST_LAYOUT.checkpointsDir}/${corrupt}.json` })])
 	})
 })
 
@@ -444,7 +456,7 @@ describe('the version listing', () => {
 		const { ctx, b, a1, e1, c2, a2, all } = await timeline()
 		expect(all.map(version => version.parent)).toEqual([c2.id, e1.id, a1.id, b.id, null])
 		expect(b).toMatchObject({ type: 'checkpoint', name: 'Baseline', actor: { type: 'system', id: 'system:baseline' } })
-		expect(b.summary.map(row => `${row.kind}:${row.status}`)).toEqual(['locale:added', 'view:added', 'workspace:added'])
+		expect(b.summary.map(row => `${row.kind}:${row.status}`)).toEqual(['locale:added', 'product-kit:added', 'view:added', 'workspace:added'])
 		// Owner ruling https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18835031 item 1: name is null off Checkpoints.
 		expect(a1).toMatchObject({ name: null, actor: actorOf(OWNER), netChange: true, summary: [{ kind: 'view', key: VIEW_ID, status: 'modified' }] })
 		expect(e1).toMatchObject({ name: null, actor: { type: 'external' }, summary: [{ kind: 'locale', key: 'en-US', status: 'modified' }] })
@@ -476,14 +488,20 @@ describe('the version listing', () => {
 		expect(listed(await ctx.app.listVersions({ resource: { kind: 'flow', key: randomUUID() } })).versions).toEqual([])
 	})
 
-	/** A pre-migration Checkpoint recorded under the previous schema version, before the Baseline. */
+	/**
+	 * A pre-migration Checkpoint recorded under the previous schema version, before the Baseline: in
+	 * the old layout, with the manifest in `.uiux/` holding the Adapters and no Product Kit file.
+	 */
 	async function previousSchemaCheckpoint(ctx: Fixture) {
 		const previousSchema = CURRENT_WORKSPACE_SCHEMA_VERSION - 1
 		const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
-		const manifestPath = workspaceRelativePath()
-		const manifest = JSON.parse(Buffer.from(snapshot.get(manifestPath)!).toString('utf8')) as Record<string, unknown>
-		snapshot.set(manifestPath, new TextEncoder().encode(`${JSON.stringify({ ...manifest, schemaVersion: previousSchema })}\n`))
-		const built = versionResourcesFromSnapshot(snapshot, CURRENT_TEST_LAYOUT)
+		const manifest = JSON.parse(Buffer.from(snapshot.get(CURRENT_TEST_LAYOUT.manifestPath)!).toString('utf8')) as Record<string, unknown>
+		const productKit = JSON.parse(Buffer.from(snapshot.get(CURRENT_TEST_LAYOUT.productKitPath!)!).toString('utf8')) as { adapters: unknown[] }
+		snapshot.delete(CURRENT_TEST_LAYOUT.manifestPath)
+		snapshot.delete(CURRENT_TEST_LAYOUT.productKitPath!)
+		const manifestPath = LEGACY_LAYOUT.manifestPath
+		snapshot.set(manifestPath, new TextEncoder().encode(`${JSON.stringify({ ...manifest, schemaVersion: previousSchema, adapters: productKit.adapters })}\n`))
+		const built = versionResourcesFromSnapshot(snapshot, LEGACY_LAYOUT)
 		const before = randomUUID()
 		await (await ctx.history.open())!.checkpoints.create({
 			historySchemaVersion: 1,
@@ -522,7 +540,7 @@ describe('the version listing', () => {
 		const ctx = await fixture()
 		const { before, manifestDigest } = await previousSchemaCheckpoint(ctx)
 		// The pre-migration manifest blob is lost, so the comparison is refused (history.blob_missing).
-		await rm(join(ctx.root, artifactRelativePath(manifestDigest)))
+		await rm(join(ctx.root, CURRENT_TEST_LAYOUT.artifactRelativePath(manifestDigest)))
 		const inner = createHistoryDiffService(ctx.persistence, ctx.history)
 		const compare = vi.fn(inner.diffVersions)
 		const warnings: string[] = []
@@ -532,8 +550,9 @@ describe('the version listing', () => {
 		expect(compare).toHaveBeenCalledWith({ from: before, to: ctx.baseline })
 		expect(await compare.mock.results[0]!.value).toMatchObject({ status: 'failed', code: 'history.blob_missing' })
 		expect(warnings).toEqual([expect.stringContaining('history.blob_missing')])
-		// The fallback is the revision comparison: the manifest's schemaVersion change shows.
-		expect(first[0]).toMatchObject({ id: ctx.baseline, summary: [{ kind: 'workspace', key: 'workspace', status: 'modified' }] })
+		// The fallback is the revision comparison: the manifest's schemaVersion change shows, and the Product Kit
+		// file, which the old layout's record does not have, is added.
+		expect(first[0]).toMatchObject({ id: ctx.baseline, summary: [{ kind: 'product-kit', key: 'product-kit', status: 'added' }, { kind: 'workspace', key: 'workspace', status: 'modified' }] })
 		// Versions are immutable: a second listing reuses the pair's result.
 		expect(listed(await service.listVersions({ resource: { kind: 'workspace', key: 'workspace' } })).versions.map(row => row.id)).toEqual([ctx.baseline, before])
 		expect(compare).toHaveBeenCalledTimes(1)
@@ -656,7 +675,7 @@ describe('/api/history/* over HTTP', () => {
 		origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 		process.env.UIUX_SERVER_ORIGIN = origin
 		const runtime = getSelectedWorkspaceServerRuntime()
-		await runtime.persistence.workspace.create({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
+		await createCurrentWorkspace(runtime.persistence, { i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
 		await runtime.persistence.locales.create('en-US', { greeting: 'Hello' })
 		expect(await runtime.historyRecorder.start()).toMatchObject({ enabled: true, baseline: expect.any(String) })
 	})

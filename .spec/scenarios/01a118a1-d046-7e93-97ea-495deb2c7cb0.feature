@@ -3,8 +3,9 @@ Feature: Workspace migration
   # Test: code@c384e72 `tests/workspace-migration.test.ts#L155` "migrates v1 fixtures: bumps the manifest, backfills verified on v1 resolves only, and leaves other files byte-identical". https://github.com/DevilTea/uiux/blob/c384e72341032d267df8e8d6d0bc690117e3224b/tests/workspace-migration.test.ts#L155
   # Test: code@c384e72 `tests/workspace-migration.test.ts#L181` "is deterministic and idempotent". https://github.com/DevilTea/uiux/blob/c384e72341032d267df8e8d6d0bc690117e3224b/tests/workspace-migration.test.ts#L181
   # Test: code@c384e72 `tests/workspace-migration.test.ts#L249` "prints the dry-run plan, then migrates with the new manifest revision, then reports already current". https://github.com/DevilTea/uiux/blob/c384e72341032d267df8e8d6d0bc690117e3224b/tests/workspace-migration.test.ts#L249
-  # Status: partly built as of c384e72: the chain ends at `schemaVersion` 4; see the Implementation gaps entries of 01a1144e-534c-7087-a504-76075f73df0d and 01a114ec-890a-73a1-808b-cb08087a9597 in their owner.
-  # Note: Steps made version-neutral because Discussion #139 raised the current version; the tests above check the chain to `schemaVersion` 4.
+  # Test: code@3b20412 `tests/workspace-migration.test.ts#L295` "prints the dry-run plan, then migrates with the new manifest revision, then reports already current". https://github.com/DevilTea/uiux/blob/3b20412aff65b677618b90a4a841ad8dfccf4218/tests/workspace-migration.test.ts#L295
+  # Status: partly built as of 3b20412: the chain ends at `schemaVersion` 5, and `uiux.v5-to-v6` is tracked in issue #142; see the Implementation gaps entries of 01a1144e-534c-7087-a504-76075f73df0d and 01a114ec-890a-73a1-808b-cb08087a9597 in their owner.
+  # Note: Steps made version-neutral because Discussion #139 raised the current version; the tests at c384e72 check the chain to `schemaVersion` 4, the one at 3b20412 the chain to `schemaVersion` 5.
   @spec:id:01a118a1-d046-7443-87a8-6f196b38fc19
   @spec:demonstrates:01a1144e-501c-746b-9f23-4cd321628f7c
   @spec:demonstrates:01a1144e-502f-7a30-bf11-69d72ea164db

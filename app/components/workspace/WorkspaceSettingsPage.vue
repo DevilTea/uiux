@@ -15,9 +15,11 @@ import {
 	adapterSelections,
 	buildSettingsPayload,
 	cloneJson,
+	productKitAdapterWrites,
 	registryRecord,
 	registryRows,
 	SETTINGS_SECTIONS,
+	type AdapterRow,
 	type SettingsSectionId,
 } from '../../utils/workspace-authoring'
 import WorkbenchPage from '../workbench/WorkbenchPage.vue'
@@ -30,6 +32,8 @@ import SettingsGeneralSection from './SettingsGeneralSection.vue'
 import SettingsRegistrySection from './SettingsRegistrySection.vue'
 import SettingsAdaptersSection, { type AdapterResolution } from './SettingsAdaptersSection.vue'
 import { focusFirstProblem } from '../../utils/focus-problem'
+import { PRODUCT_KIT_SCHEMA_VERSION, type ProductKit } from '../../../src/domain/product-kit/schema'
+import type { WorkspaceAdapterSelection } from '../../../src/domain/workspace/schema'
 
 /**
  * Workspace settings as a full page (brief g): a section index, then one form column with
@@ -37,6 +41,13 @@ import { focusFirstProblem } from '../../utils/focus-problem'
  * own through `update_workspace_settings` (`PUT /api/workspace/settings`, a full replace)
  * with its own `expectedRevision`, so a concurrent write surfaces as a conflict, never as
  * a silent overwrite.
+ *
+ * From `schemaVersion` 5 the Adapter selection lives in the Product Kit file, not the manifest:
+ * the Adapters section reads `GET /api/product-kit` and saves through the Product Kit operations
+ * (`PUT /api/product-kit/compose` for the specifiers and their order, then
+ * `PUT /api/product-kit/settings` for their `config`), with the Product Kit file's own revision,
+ * key and edit lease (Discussion #139 owner ruling 6,
+ * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18851627).
  *
  * `?section=<id>` opens the page at that section; `/workspace/adapters` redirects here with
  * `section=adapters`.
@@ -74,16 +85,57 @@ const themes = createSettingsSection({
 	fromManifest: manifest => registryRows(manifest.themes, 'themes'),
 	toPayload: draft => registryRecord(draft, 'themes'),
 })
-const adapters = createSettingsSection({
+/** Below `schemaVersion` 5: the manifest's `adapters`. */
+const manifestAdapters = createSettingsSection({
 	id: 'adapters',
 	fromManifest: manifest => adapterRows(manifest.adapters),
 	toPayload: draft => adapterSelections(draft),
 })
-const sections = { general, viewports, themes, adapters } as const
+/** From `schemaVersion` 5: the Product Kit file's `adapters`. */
+const kitAdapters = createSettingsSection<AdapterRow[], ProductKit>({
+	id: 'adapters',
+	fromManifest: kit => adapterRows(kit.adapters),
+	toPayload: draft => adapterSelections(draft),
+})
+const usesProductKit = computed(() => (workspace.value?.resource?.schemaVersion ?? 0) >= PRODUCT_KIT_SCHEMA_VERSION)
+const kitAccess = useAuthoringAccess('product-kit.write', { kind: 'product-kit', key: 'product-kit' })
+const sections = {
+	general,
+	viewports,
+	themes,
+	get adapters() { return usesProductKit.value ? kitAdapters : manifestAdapters },
+}
+/** Whether the signed-in member may save a section now: the Adapters' own key and lease from 5. */
+function canEditSection(id: SettingsSectionId): boolean {
+	return id === 'adapters' && usesProductKit.value ? kitAccess.canEdit.value : canEdit.value
+}
+const adaptersCanEdit = computed(() => canEditSection('adapters'))
+/** The files this page edits, as the subtitle names them. */
+const settingsFile = computed(() => usesProductKit.value ? 'workspace.json' : '.uiux/workspace.json')
+
+type ProductKitResponse = Readonly<{ resource: ProductKit; revision: string }>
+const productKit = shallowRef<ProductKitResponse>()
+const productKitFailed = ref(false)
+async function loadProductKit(): Promise<void> {
+	if (!usesProductKit.value) {
+		productKit.value = undefined
+		return
+	}
+	try {
+		productKit.value = await $fetch<ProductKitResponse>('/api/product-kit')
+		productKitFailed.value = false
+	}
+	catch {
+		productKitFailed.value = true
+	}
+}
 
 watch(workspace, (read) => {
-	for (const section of Object.values(sections)) section.sync(read)
+	for (const section of [general, viewports, themes, manifestAdapters]) section.sync(read)
+	// A Workspace read (live refresh included) also re-reads the Product Kit file.
+	void loadProductKit()
 }, { immediate: true })
+watch(productKit, read => kitAdapters.sync(read))
 
 const dirtyCount = computed(() => Object.values(sections).reduce((sum, section) => sum + section.changeCount, 0))
 const guard = useUnsavedGuard(() => dirtyCount.value > 0)
@@ -111,6 +163,7 @@ function countEvidence(field: 'viewportId' | 'themeId') {
 }
 
 async function save(id: SettingsSectionId): Promise<void> {
+	if (id === 'adapters' && usesProductKit.value) return saveKitAdapters()
 	const section = sections[id]
 	const read = workspace.value
 	if (!canEdit.value || !read?.resource || !section.base || section.conflict || section.saving || !section.dirty) return
@@ -151,17 +204,99 @@ async function save(id: SettingsSectionId): Promise<void> {
 	}
 }
 
+/** The last Adapters save wrote the specifiers (`compose`) but not their `config` (`settings`). */
+const kitPartlySaved = ref(false)
+
+/**
+ * Saves the Adapters of a `schemaVersion` 5 Workspace through the Product Kit operations: `compose`
+ * when the specifiers or their order change, then `update` with the new revision when a `config`
+ * differs (`productKitAdapterWrites`). Each write is a compare-and-swap on the Product Kit file.
+ *
+ * When `compose` landed and the `config` write then failed for any reason but a conflict, the
+ * Product Kit file is reloaded. When it is still the revision `compose` wrote, the draft is carried
+ * onto it (`keepMine`): the specifiers are saved, the draft keeps the unsaved `config`, and the
+ * section says so instead of raising a conflict over its own write. When someone else wrote it
+ * since, the section raises the conflict as for any concurrent change.
+ */
+async function saveKitAdapters(): Promise<void> {
+	const section = kitAdapters
+	const kit = productKit.value
+	if (!kitAccess.canEdit.value || !kit || !section.base || section.conflict || section.saving || !section.dirty) return
+	section.saving = true
+	section.clearError()
+	kitPartlySaved.value = false
+	lockRefusal.value = undefined
+	let composedRevision: string | undefined
+	/** Reloads the Product Kit file and, after a landed `compose`, carries the draft onto it if no one wrote since. */
+	const reloadBase = async (): Promise<void> => {
+		await loadProductKit()
+		if (composedRevision === undefined || !productKit.value) return
+		if (productKit.value.revision !== composedRevision) {
+			section.conflict = true
+			return
+		}
+		section.keepMine(productKit.value)
+		kitPartlySaved.value = true
+	}
+	try {
+		const writes = productKitAdapterWrites(kit.resource, section.draftPayload as WorkspaceAdapterSelection[])
+		let revision = section.base.revision
+		if (writes.compose) {
+			const composed = await $fetch<{ revision: string }>('/api/product-kit/compose', { method: 'PUT', body: { expectedRevision: revision, ...writes.compose } })
+			revision = composed.revision
+			composedRevision = composed.revision
+		}
+		if (writes.update)
+			await $fetch('/api/product-kit/settings', { method: 'PUT', body: { expectedRevision: revision, ...writes.update } })
+		feedback.success(t('settings.saved'))
+		await loadProductKit()
+		await workbench.refreshAll()
+		void loadResolution()
+	}
+	catch (cause) {
+		const details = describeFetchError(cause, t('settings.saveFailed'))
+		if (details.statusCode === 409 || details.status === 'conflict') {
+			section.conflict = true
+			await loadProductKit()
+			void focusFirstProblem('#settings-adapters')
+		}
+		else if (isLockedError(details)) {
+			// The base moves to the Product Kit file as it is now, a landed compose included.
+			await reloadBase()
+			if (kitPartlySaved.value) section.error = details
+			lockRefusal.value = { lock: details.lock }
+			void focusFirstProblem('main')
+		}
+		else {
+			await reloadBase()
+			section.error = details
+			void focusFirstProblem('#settings-adapters')
+		}
+	}
+	finally {
+		section.saving = false
+	}
+}
+
 function discard(id: SettingsSectionId): void {
-	if (workspace.value) sections[id].adopt(workspace.value)
+	if (id === 'adapters' && usesProductKit.value) {
+		kitPartlySaved.value = false
+		if (productKit.value) kitAdapters.adopt(productKit.value)
+	}
+	else if (workspace.value) {
+		[general, viewports, themes, manifestAdapters].find(section => section.id === id)?.adopt(workspace.value)
+	}
 }
 
 async function reloadTheirs(id: SettingsSectionId): Promise<void> {
 	await workbench.refreshAll()
-	if (workspace.value) sections[id].adopt(workspace.value)
+	if (id === 'adapters' && usesProductKit.value) await loadProductKit()
+	discard(id)
 }
 
 function keepMine(id: SettingsSectionId): void {
-	sections[id].keepMine(workspace.value)
+	if (id === 'adapters' && usesProductKit.value) kitAdapters.keepMine(productKit.value)
+	else [general, viewports, themes, manifestAdapters].find(section => section.id === id)?.keepMine(workspace.value)
 }
 
 // Section index with scroll-spy.
@@ -267,11 +402,10 @@ onBeforeUnmount(() => {
 function onKeydown(event: KeyboardEvent): void {
 	if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 's' || event.shiftKey || event.altKey) return
 	event.preventDefault()
-	if (!canEdit.value) return
 	const focused = (document.activeElement?.closest('[data-settings-section]')?.id ?? '').replace('settings-', '') as SettingsSectionId
 	const dirty = Object.values(sections).filter(section => section.dirty)
 	const id = focused && sections[focused]?.dirty ? focused : dirty.length === 1 ? dirty[0]!.id : undefined
-	if (id) sectionRefs[id].value?.save()
+	if (id && canEditSection(id)) sectionRefs[id].value?.save()
 }
 
 const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
@@ -320,7 +454,7 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
               class="text-sm text-muted"
             >
               <template #file>
-                <code class="font-mono text-xs">.uiux/workspace.json</code>
+                <code class="font-mono text-xs">{{ settingsFile }}</code>
               </template>
             </i18n-t>
             <AuthoringAccessNotice
@@ -330,6 +464,11 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
             <LockBadge
               kind="workspace"
               resource-key="workspace"
+            />
+            <LockBadge
+              v-if="usesProductKit"
+              kind="product-kit"
+              resource-key="product-kit"
             />
             <LockedSaveAlert
               v-if="lockRefusal"
@@ -381,9 +520,13 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
             <div class="min-h-[calc(100dvh-var(--ui-header-height)-8rem)]">
               <SettingsAdaptersSection
                 :ref="(el) => { sectionRefs.adapters.value = el as InstanceType<typeof SettingsAdaptersSection> }"
-                :section="adapters"
-                :can-edit="canEdit"
+                :section="sections.adapters"
+                :can-edit="adaptersCanEdit"
+                :product-kit="usesProductKit"
+                :product-kit-failed="productKitFailed"
+                :missing-key="usesProductKit && !member.can('product-kit.write') ? 'product-kit.write' : undefined"
                 :can-compose="member.can('product-kit.compose')"
+                :partly-saved="usesProductKit && kitPartlySaved"
                 :resolution="resolution"
                 :resolution-failed="resolutionFailed"
                 @save="save('adapters')"

@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { Window } from 'happy-dom'
 import { defineComponent, h } from 'vue'
 import { createWidgetPlugin } from '@deviltea/widget-core'
@@ -18,6 +20,20 @@ import { createStandalonePreviewMount } from '../src/preview/browser-runtime'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
 
+/**
+ * The dogfood Workspace and its reference Adapter: design/ with design/adapters/reference.ts while the
+ * dogfood is the schemaVersion 4 Workspace, and <repo>/.uiux/ with .uiux/kit/adapters/reference.ts
+ * once the owner has relocated it (D1, scripts/dogfood-relocate.mjs).
+ */
+const DOGFOOD = [
+	{ root: join(process.cwd(), '.uiux'), adapter: join(process.cwd(), '.uiux', 'kit', 'adapters', 'reference.ts') },
+	{ root: join(process.cwd(), 'design'), adapter: join(process.cwd(), 'design', 'adapters', 'reference.ts') },
+].find(candidate => existsSync(candidate.adapter))!
+
+async function importReferenceAdapter(): Promise<Record<string, unknown>> {
+	return await import(pathToFileURL(DOGFOOD.adapter).href) as Record<string, unknown>
+}
+
 function setupDom(): { window: Window; document: Document } {
 	const win = new Window()
 	globalThis.window = win as unknown as typeof globalThis.window
@@ -31,7 +47,7 @@ function setupDom(): { window: Window; document: Document } {
 
 describe('UIUX Reference Adapter', () => {
 	it('exports a valid canonical AdapterManifest with all reference widgets', async () => {
-		const mod = await import('../design/adapters/reference.ts')
+		const mod = await importReferenceAdapter()
 		const manifest = extractProductAdapterManifest(mod)
 
 		expect(manifest.id).toBe('uiux-reference-adapter')
@@ -52,10 +68,10 @@ describe('UIUX Reference Adapter', () => {
 	})
 
 	it('renders a non-empty widget tree with correct data-widget-id attributes', async () => {
-		const workspaceRoot = join(process.cwd(), 'design')
+		const workspaceRoot = DOGFOOD.root
 		await resolveSelectedWorkspaceAdapters(workspaceRoot)
 		// Even if workspace.json is not yet updated, we can test bundling with the adapter directly
-		const mod = await import('../design/adapters/reference.ts')
+		const mod = await importReferenceAdapter()
 		const manifest = extractProductAdapterManifest(mod)
 		const ownership = await productAdapterRegistryInspector.inspect(manifest)
 

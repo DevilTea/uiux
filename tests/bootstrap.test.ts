@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -25,8 +25,12 @@ describe('bootstrap', () => {
 		const output = execFileSync(process.execPath, [cliPath, '--help'], { encoding: 'utf8' })
 
 		expect(output).toContain('Usage: uiux <command>')
-		expect(output).toContain('init --workspace <dir>  Initialize a Workspace')
-		expect(output).toContain('dev --workspace <dir> [--host <address>] [--origin <url>]...')
+		expect(output).toContain('init [--workspace <dir>]')
+		expect(output).toContain('Initialize a Workspace in <dir>')
+		expect(output).toContain('dev [--workspace <dir>] [--host <address>] [--origin <url>]...')
+		expect(output).toContain('migrate [--workspace <dir>] [--dry-run]')
+		expect(output).toContain('uiux.v4-to-v5')
+		expect(output).not.toMatch(/copy before/iu)
 		expect(output).toContain('Start the unified UIUX Workbench/Nitro server')
 		expect(output).not.toContain('publish')
 	})
@@ -52,7 +56,6 @@ describe('bootstrap', () => {
 			expect(manifest).toEqual({
 				schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 				i18n: { defaultLocale: 'en-US' },
-				adapters: [],
 				viewports: {},
 				themes: {},
 			})
@@ -66,16 +69,26 @@ describe('bootstrap', () => {
 	})
 
 	it('rejects malformed init and dev Workspace selection before side effects', () => {
-		for (const args of [['init'], ['init', '--workspace'], ['init', '--workspace', '.', 'extra'], ['init', '--other', '.']]) {
-			const result = spawnSync(process.execPath, [cliPath, ...args], { encoding: 'utf8' })
-			expect(result.status).toBe(2)
-			expect(result.stderr).toContain('uiux: init requires exactly --workspace <dir>.')
+		// Outside the repository, so a run that got past the usage check could discover nothing here.
+		const cwd = mkdtempSync(join(tmpdir(), 'uiux-bootstrap-usage-'))
+		try {
+			for (const args of [['init', '--workspace'], ['init', '--workspace', '.', 'extra'], ['init', '--other', '.']]) {
+				const result = spawnSync(process.execPath, [cliPath, ...args], { cwd, encoding: 'utf8' })
+				expect(result.status).toBe(2)
+				expect(result.stderr).toContain('uiux: init accepts only --workspace <dir>.')
+			}
+			for (const args of [['dev', '--workspace'], ['dev', '--workspace', '.', 'extra'], ['dev', '--other', '.'], ['dev', '--workspace', '.', '--host', '::1', '--host', '127.0.0.1'], ['dev', '--workspace', '.', '--origin']]) {
+				const result = spawnSync(process.execPath, [cliPath, ...args], { cwd, encoding: 'utf8' })
+				expect(result.status).toBe(2)
+				expect(result.stderr).toContain('uiux: dev accepts --workspace <dir>, --host <address> and repeated --origin <url>.')
+			}
+			// Without --workspace, dev discovers the Workspace, and refuses when there is none.
+			const undiscovered = spawnSync(process.execPath, [cliPath, 'dev'], { cwd, encoding: 'utf8', timeout: 20_000 })
+			expect(undiscovered.status).toBe(2)
+			expect(undiscovered.stderr).toContain('No UIUX Workspace found')
+			expect(readdirSync(cwd)).toEqual([])
 		}
-		for (const args of [['dev'], ['dev', '--workspace'], ['dev', '--workspace', '.', 'extra'], ['dev', '--other', '.'], ['dev', '--host', '0.0.0.0'], ['dev', '--workspace', '.', '--host', '::1', '--host', '127.0.0.1'], ['dev', '--workspace', '.', '--origin']]) {
-			const result = spawnSync(process.execPath, [cliPath, ...args], { encoding: 'utf8' })
-			expect(result.status).toBe(2)
-			expect(result.stderr).toContain('uiux: dev requires --workspace <dir> and accepts --host <address> and repeated --origin <url>.')
-		}
+		finally { rmSync(cwd, { recursive: true, force: true }) }
 	})
 
 	it('rejects a dev Workspace root that does not exist instead of silently creating it', () => {

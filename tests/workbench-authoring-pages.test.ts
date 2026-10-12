@@ -71,6 +71,8 @@ describe('Workspace settings page (R10)', () => {
 			expect(after.resource.adapters).toEqual(before.resource.adapters)
 			expect(requests).toHaveLength(1)
 			expect((requests[0] as { expectedRevision: string }).expectedRevision).toBe(before.revision)
+			// A schemaVersion 5 manifest holds no adapters, so the full replace sends none.
+			expect((requests[0] as { settings: Record<string, unknown> }).settings).not.toHaveProperty('adapters')
 		}
 		finally { await context.close() }
 	}, 60_000)
@@ -260,5 +262,129 @@ describe('Workspace pages navigation', () => {
 			expect(new URL(page.url()).searchParams.get('section')).toBe('adapters')
 		}
 		finally { await context.close() }
+	}, 60_000)
+})
+
+describe('Settings › Adapters on a schemaVersion 5 Workspace', () => {
+	type ProductKitRead = { revision: string; resource: { adapters: { moduleSpecifier: string; config?: unknown }[] } }
+
+	/**
+	 * Discussion #139 owner ruling 6: the section reads and writes the Product Kit file through the
+	 * Product Kit operations, never the manifest's `adapters`, which a schemaVersion 5 manifest refuses.
+	 */
+	it('saves an Adapter config through update_product_kit and sends no adapters to the Workspace settings', async () => {
+		const before = await api<ProductKitRead>('/api/product-kit')
+		const workspaceBefore = await readWorkspace()
+		expect(workspaceBefore.resource).not.toHaveProperty('adapters')
+		expect(before.resource.adapters.map(adapter => adapter.moduleSpecifier)).toEqual(['./adapters/reference.ts'])
+		const { context, page } = await open('/workspace/settings?section=adapters')
+		try {
+			const requests: { url: string; body: unknown }[] = []
+			page.on('request', (request) => {
+				if (request.method() === 'PUT') requests.push({ url: new URL(request.url()).pathname, body: request.postDataJSON() })
+			})
+			const section = page.locator('#settings-adapters')
+			await section.getByText('Packages or kit/ modules that supply Widgets').waitFor()
+			await section.getByRole('button', { name: 'Config', exact: true }).click()
+			const config = section.getByRole('textbox', { name: 'Config for ./adapters/reference.ts' })
+			await config.fill('{"note":"kit"}')
+			await section.getByRole('button', { name: 'Save changes' }).click()
+			await section.locator('[data-save-bar]').waitFor({ state: 'detached' })
+			const after = await api<ProductKitRead>('/api/product-kit')
+			expect(after.revision).not.toBe(before.revision)
+			expect(after.resource.adapters).toEqual([{ moduleSpecifier: './adapters/reference.ts', config: { note: 'kit' } }])
+			expect(requests.map(request => request.url)).toEqual(['/api/product-kit/settings'])
+			expect(requests[0]!.body).toMatchObject({ expectedRevision: before.revision, adapters: [{ moduleSpecifier: './adapters/reference.ts', config: { note: 'kit' } }] })
+			expect((await readWorkspace()).revision).toBe(workspaceBefore.revision)
+
+			// Clearing the config stores the entry without one.
+			await config.fill('')
+			await section.getByRole('button', { name: 'Save changes' }).click()
+			await section.locator('[data-save-bar]').waitFor({ state: 'detached' })
+			expect((await api<ProductKitRead>('/api/product-kit')).resource.adapters).toEqual([{ moduleSpecifier: './adapters/reference.ts' }])
+		}
+		finally { await context.close() }
+	}, 60_000)
+})
+
+describe('Settings › Adapters when the config write fails after the specifiers are saved', () => {
+	type ProductKitRead = { revision: string; resource: { adapters: { moduleSpecifier: string; config?: unknown }[] } }
+
+	/**
+	 * The section saves in two writes, `compose` then `settings`. When `compose` lands and `settings`
+	 * fails, the section reloads the Product Kit file and carries the draft onto it (keep mine), says
+	 * the specifiers were saved and the config was not, and raises no conflict over its own write.
+	 */
+	it('keeps the unsaved config on the composed revision and saves it on the next try', async () => {
+		const before = await api<ProductKitRead>('/api/product-kit')
+		const { context, page } = await open('/workspace/settings?section=adapters')
+		try {
+			const requests: { url: string; body: unknown }[] = []
+			page.on('request', (request) => {
+				if (request.method() === 'PUT') requests.push({ url: new URL(request.url()).pathname, body: request.postDataJSON() })
+			})
+			await page.route('**/api/product-kit/settings', route => route.fulfill({
+				status: 500,
+				contentType: 'application/json',
+				body: JSON.stringify({ statusCode: 500, statusMessage: 'Server Error', message: 'The config write failed.' }),
+			}))
+			const section = page.locator('#settings-adapters')
+			await section.getByText('Packages or kit/ modules that supply Widgets').waitFor()
+			await section.locator('[data-adapter-specifier]').fill('./adapters/second.ts')
+			await section.getByRole('button', { name: 'Config', exact: true }).click()
+			const config = section.getByRole('textbox', { name: /^Config for / })
+			await config.fill('{"note":"second"}')
+			await section.getByRole('button', { name: 'Save changes' }).click()
+
+			await section.getByText('Specifiers saved, config not saved').waitFor()
+			const composed = await api<ProductKitRead>('/api/product-kit')
+			expect(composed.revision).not.toBe(before.revision)
+			expect(composed.resource.adapters).toEqual([{ moduleSpecifier: './adapters/second.ts' }])
+			expect(requests.map(request => request.url)).toEqual(['/api/product-kit/compose', '/api/product-kit/settings'])
+			expect(await section.getByText('Settings changed since you opened them.').count()).toBe(0)
+			expect(await config.inputValue()).toBe('{"note":"second"}')
+			await section.locator('[data-save-bar]').waitFor()
+
+			// The next save sends only the config, against the composed revision.
+			await page.unroute('**/api/product-kit/settings')
+			requests.length = 0
+			await section.getByRole('button', { name: 'Save changes' }).click()
+			await section.locator('[data-save-bar]').waitFor({ state: 'detached' })
+			expect(requests.map(request => request.url)).toEqual(['/api/product-kit/settings'])
+			expect(requests[0]!.body).toMatchObject({ expectedRevision: composed.revision })
+			expect((await api<ProductKitRead>('/api/product-kit')).resource.adapters).toEqual([{ moduleSpecifier: './adapters/second.ts', config: { note: 'second' } }])
+		}
+		finally {
+			await context.close()
+			const current = await api<ProductKitRead>('/api/product-kit')
+			await agentPut('/api/product-kit/compose', { expectedRevision: current.revision, designSystems: [], adapters: ['./adapters/reference.ts'] })
+		}
+	}, 60_000)
+
+	it('raises the conflict instead when someone else wrote the Product Kit after the compose', async () => {
+		const { context, page } = await open('/workspace/settings?section=adapters')
+		try {
+			// Another writer changes the file between this save's compose and its failed settings write.
+			await page.route('**/api/product-kit/settings', async (route) => {
+				const current = await api<ProductKitRead>('/api/product-kit')
+				await agentPut('/api/product-kit/compose', { expectedRevision: current.revision, designSystems: [], adapters: ['./adapters/third.ts'] })
+				await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ statusCode: 500, statusMessage: 'Server Error', message: 'The config write failed.' }) })
+			})
+			const section = page.locator('#settings-adapters')
+			await section.getByText('Packages or kit/ modules that supply Widgets').waitFor()
+			await section.locator('[data-adapter-specifier]').fill('./adapters/second.ts')
+			await section.getByRole('button', { name: 'Config', exact: true }).click()
+			await section.getByRole('textbox', { name: /^Config for / }).fill('{"note":"second"}')
+			await section.getByRole('button', { name: 'Save changes' }).click()
+
+			await section.getByText('Settings changed since you opened them.').waitFor()
+			expect(await section.getByText('Specifiers saved, config not saved').count()).toBe(0)
+			expect((await api<ProductKitRead>('/api/product-kit')).resource.adapters).toEqual([{ moduleSpecifier: './adapters/third.ts' }])
+		}
+		finally {
+			await context.close()
+			const current = await api<ProductKitRead>('/api/product-kit')
+			await agentPut('/api/product-kit/compose', { expectedRevision: current.revision, designSystems: [], adapters: ['./adapters/reference.ts'] })
+		}
 	}, 60_000)
 })

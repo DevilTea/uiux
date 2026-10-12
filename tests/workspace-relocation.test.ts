@@ -25,13 +25,13 @@ import {
 import { verifyCredential } from '../src/server/access/roster'
 import { AccessStore, hostHistoryPaths } from '../src/server/access/store'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
-import { V5_TEST_SCHEMA_POLICY } from './support/workspace-layout'
+import { V4_TEST_SCHEMA_POLICY, V5_TEST_SCHEMA_POLICY } from './support/workspace-layout'
 
 /**
- * The dormant `uiux.v4-to-v5` relocation (issue #141, unit K4): Clause 01a11bb1-8f5f-77ea-817b-46679c5a6475,
+ * The `uiux.v4-to-v5` relocation (issue #141, units K4 and K6): Clause 01a11bb1-8f5f-77ea-817b-46679c5a6475,
  * Rules 01a11bb1-95f2-…, 01a11bb1-9658-…, 01a12626-6a4f-…, 01a11bb1-96bb-… and 01a12626-5a0c-…, Clauses
- * 01a1144e-5605-…, 01a12626-e5c9-…, 01a12626-e8fe-… and 01a1144e-56bd-…. UIUX's own schema stays 4, so
- * every run here uses the injected `V5_TEST_SCHEMA_POLICY`.
+ * 01a1144e-5605-…, 01a12626-e5c9-…, 01a12626-e8fe-… and 01a1144e-56bd-…. The runs use
+ * `V5_TEST_SCHEMA_POLICY`, which is UIUX's own policy now that schemaVersion 5 is current.
  */
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
@@ -146,11 +146,11 @@ async function exists(path: string): Promise<boolean> {
 }
 
 describe('uiux.v4-to-v5 on the logical snapshot', () => {
-	it('is dormant: UIUX stays at schemaVersion 4 and registers the step only in an injected policy', () => {
-		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(4)
-		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.steps.map(step => step.id)).not.toContain(WORKSPACE_V4_TO_V5_STEP_ID)
+	it('is UIUX\'s last step: schemaVersion 5 is current and uiux.v4-to-v5 is registered in UIUX\'s own policy', () => {
+		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(5)
+		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.steps.map(step => step.id).at(-1)).toBe(WORKSPACE_V4_TO_V5_STEP_ID)
 		expect(WORKSPACE_V4_TO_V5_STEP).toMatchObject({ id: 'uiux.v4-to-v5', fromVersion: 4, toVersion: 5 })
-		expect(V5_TEST_SCHEMA_POLICY.steps.at(-1)).toBe(WORKSPACE_V4_TO_V5_STEP)
+		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.steps.at(-1)).toBe(WORKSPACE_V4_TO_V5_STEP)
 	})
 
 	it('moves the manifest without adapters, writes product-kit.json with rebased Adapters, and keeps every data path', async () => {
@@ -739,9 +739,9 @@ describe('the relocated-source exception to the entry check of access copy --fro
 		const plain = await seedOldLayout()
 		expect(isRelocatedSourceOf(plain, join(plain, '.uiux'), V5_TEST_SCHEMA_POLICY)).toBe(false)
 		const { root, newRoot } = await relocated()
-		// UIUX's own policy does not recognize 5 yet: the source is `unknown_schema`, never relocated.
-		expect(checkWorkspaceSelection(root, PRODUCT_WORKSPACE_SCHEMA_POLICY)).toMatchObject({ ok: false, reason: 'unknown_schema' })
-		expect(isRelocatedSourceOf(root, newRoot, PRODUCT_WORKSPACE_SCHEMA_POLICY)).toBe(false)
+		// A build that does not recognize 5 sees the source as `unknown_schema`, never relocated.
+		expect(checkWorkspaceSelection(root, V4_TEST_SCHEMA_POLICY)).toMatchObject({ ok: false, reason: 'unknown_schema' })
+		expect(isRelocatedSourceOf(root, newRoot, V4_TEST_SCHEMA_POLICY)).toBe(false)
 	})
 
 	it('fails when <old>/.uiux does not pass the v5 entry check', async () => {

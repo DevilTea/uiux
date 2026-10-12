@@ -38,6 +38,7 @@ import {
 } from '../src/server/authoring-http'
 import { listResourcesForHttp, type ResourceDiscoveryHttpResult } from '../src/server/resource-discovery'
 import { STORED_CONTENT_SECURITY_POLICY, storedContentSecurityHeaders } from '../src/server/stored-content-headers'
+import { createCurrentWorkspace } from './support/workspace-layout'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const DECISION_ID = '22222222-2222-4222-8222-222222222222'
@@ -546,7 +547,6 @@ describe('Workspace manifest authoring', () => {
 					expectedRevision: initialRev,
 					settings: {
 						i18n: { defaultLocale: 'zh-TW' },
-						adapters: [{ moduleSpecifier: '@deviltea/widget-vue' }],
 						viewports: { mobile: { dimensions: { width: 375, height: 667 } } },
 						themes: { dark: { mode: 'dark' } },
 					},
@@ -564,7 +564,8 @@ describe('Workspace manifest authoring', () => {
 			const readAfter = await app.readPointResource('workspace', 'workspace')
 			expect(readAfter?.kind === 'workspace' ? readAfter.resource.schemaVersion : undefined).toBe(CURRENT_WORKSPACE_SCHEMA_VERSION)
 			expect(readAfter?.kind === 'workspace' ? readAfter.resource.i18n.defaultLocale : undefined).toBe('zh-TW')
-			expect(readAfter?.kind === 'workspace' ? readAfter.resource.adapters : undefined).toEqual([{ moduleSpecifier: '@deviltea/widget-vue' }])
+			// From schemaVersion 5 the Adapters are the Product Kit file's, never the manifest's.
+			expect(readAfter?.kind === 'workspace' ? readAfter.resource : {}).not.toHaveProperty('adapters')
 		}
 		finally { await close() }
 	})
@@ -578,7 +579,6 @@ describe('Workspace manifest authoring', () => {
 			expectedRevision: initialRead.revision,
 			settings: {
 				i18n: { defaultLocale: 'en-US' },
-				adapters: [],
 				viewports: {},
 				themes: { light: {} },
 			},
@@ -593,8 +593,7 @@ describe('Workspace manifest authoring', () => {
 					expectedRevision: initialRead.revision,
 					settings: {
 						i18n: { defaultLocale: 'fr-FR' },
-						adapters: [],
-						viewports: {},
+								viewports: {},
 						themes: {},
 					},
 				},
@@ -621,8 +620,7 @@ describe('Workspace manifest authoring', () => {
 					expectedRevision: initialRead.revision,
 					settings: {
 						i18n: { defaultLocale: 'not_a_locale' },
-						adapters: [],
-						viewports: {},
+								viewports: {},
 						themes: {},
 					},
 				},
@@ -631,6 +629,18 @@ describe('Workspace manifest authoring', () => {
 			expect(invalid.structuredContent).toMatchObject({ status: 'invalid', key: 'workspace' })
 		}
 		finally { await close() }
+	})
+
+	it('refuses adapters in the settings from schemaVersion 5, which keeps them in the Product Kit file', async () => {
+		const { app } = await emptySession()
+		const initialRead = await app.readPointResource('workspace', 'workspace')
+		if (initialRead?.kind !== 'workspace') return
+		const refused = await updateWorkspaceSettingsForHttp(scoped(app), {
+			expectedRevision: initialRead.revision,
+			settings: { i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} },
+		})
+		expect(refused).toMatchObject({ status: 400, body: { status: 'invalid', key: 'workspace', diagnostics: [{ path: '/adapters' }] } })
+		expect((await app.readPointResource('workspace', 'workspace'))?.revision).toBe(initialRead.revision)
 	})
 
 	it('provides HTTP transport parity for updating workspace settings', async () => {
@@ -642,7 +652,6 @@ describe('Workspace manifest authoring', () => {
 			expectedRevision: initialRead.revision,
 			settings: {
 				i18n: { defaultLocale: 'de-DE' },
-				adapters: [],
 				viewports: {},
 				themes: {},
 			},
@@ -1210,8 +1219,7 @@ describe('Review renderContext over MCP and HTTP', () => {
 		const root = await mkdtemp(join(tmpdir(), 'uiux-render-context-'))
 		roots.push(root)
 		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
-		await persistence.workspace.create({
-			schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
+		await createCurrentWorkspace(persistence, {
 			i18n: { defaultLocale: 'en-US' },
 			adapters: [],
 			viewports: { mobile: { label: 'Mobile', dimensions: { width: 390, height: 844 } } },
@@ -1880,8 +1888,7 @@ async function emptySession() {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-authoring-'))
 	roots.push(root)
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
-	await persistence.workspace.create({
-		schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
+	await createCurrentWorkspace(persistence, {
 		i18n: { defaultLocale: 'en-US' },
 		adapters: [],
 		viewports: {},

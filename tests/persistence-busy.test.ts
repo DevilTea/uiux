@@ -16,7 +16,7 @@ import { sendPersistenceBusyError } from '../src/server/persistence-busy'
 import { describeFetchError, isTransientError } from '../app/utils/fetch-error'
 import { isRetryableRead, shouldRetryRead, transientRetryDelay } from '../app/utils/fetch-retry'
 import { AGENT_EDITOR } from './support/access'
-import { writeManifest } from './support/workspace-layout'
+import { writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const ASSET_ID = '55555555-5555-4555-8555-555555555555'
@@ -39,7 +39,8 @@ async function seedWorkspace(schemaVersion: number): Promise<string> {
 	roots.push(root)
 	await mkdir(join(root, 'views'), { recursive: true })
 	await mkdir(join(root, 'assets', ASSET_ID), { recursive: true })
-	await writeManifest(root, `${JSON.stringify({ schemaVersion, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })}\n`, layoutForSchemaVersion(schemaVersion))
+	if (schemaVersion === CURRENT_WORKSPACE_SCHEMA_VERSION) await writeCurrentWorkspace(root)
+	else await writeManifest(root, `${JSON.stringify({ schemaVersion, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })}\n`, layoutForSchemaVersion(schemaVersion))
 	await writeFile(join(root, 'views', `${VIEW_ID}.view.json`), `${JSON.stringify(view)}\n`)
 	await writeFile(join(root, 'assets', ASSET_ID, 'asset.json'), `${JSON.stringify({ id: ASSET_ID, name: 'icon', contentFilename: 'icon.svg', mediaType: 'image/svg+xml' })}\n`)
 	await writeFile(join(root, 'assets', ASSET_ID, 'icon.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')

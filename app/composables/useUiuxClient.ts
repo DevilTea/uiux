@@ -11,6 +11,9 @@ type PreviewAdaptersResponse =
 export function useUiuxClient() {
 	async function readResource<T>(kind: string, key: string): Promise<T | undefined> {
 		try {
+			// The Product Kit file (from schemaVersion 5) is read through its own route, which answers
+			// the same `{ kind, key, resource, revision }` plus its resolution state.
+			if (kind === 'product-kit') return await $fetch<T>('/api/product-kit') as unknown as T
 			return await $fetch<T>(`/api/resources/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`) as unknown as T
 		}
 		catch (cause) {

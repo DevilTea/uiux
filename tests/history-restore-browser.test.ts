@@ -409,16 +409,16 @@ describe('comparison reads (B8 follow-up)', () => {
 	}, 90_000)
 })
 
-describe('restoring the Workspace settings (#140 owner ruling 2026-10-10, 1)', () => {
-	type WorkspaceRead = Read<{ adapters: unknown[] } & Record<string, unknown>>
-	async function setAdapters(adapters: unknown[]): Promise<void> {
-		const workspace = await api<WorkspaceRead>('/api/resources/workspace/workspace')
-		const { i18n, viewports, themes } = workspace.resource
-		await api('/api/workspace/settings', { expectedRevision: workspace.revision, settings: { i18n, adapters, viewports, themes } }, 'PUT')
+describe('restoring the Product Kit file (#139 owner ruling 2026-10-11, 1)', () => {
+	type ProductKitRead = Read<{ designSystems: string[]; adapters: { moduleSpecifier: string }[] } & Record<string, unknown>>
+	/** From schemaVersion 5 the Adapter list is the Product Kit file's, set by `compose_product_kit`. */
+	async function setAdapters(adapters: readonly string[]): Promise<void> {
+		const kit = await api<ProductKitRead>('/api/product-kit')
+		await api('/api/product-kit/compose', { expectedRevision: kit.revision, designSystems: kit.resource.designSystems, adapters }, 'PUT')
 	}
 
-	it('names `product-kit.compose` and offers no Restore when the restore would change the `adapters` entries', async () => {
-		const original = (await api<WorkspaceRead>('/api/resources/workspace/workspace')).resource.adapters
+	it('names `product-kit.compose` and offers no Restore when the restore would change the Adapter specifiers', async () => {
+		const original = (await api<ProductKitRead>('/api/product-kit')).resource.adapters.map(adapter => adapter.moduleSpecifier)
 		const earlier = await checkpoint(`b10 adapters ${unique()}`)
 		await setAdapters([])
 		try {
@@ -426,9 +426,9 @@ describe('restoring the Workspace settings (#140 owner ruling 2026-10-10, 1)', (
 			for (const keys of [editor.filter(key => key !== 'product-kit.compose'), editor]) {
 				const composes = keys.includes('product-kit.compose')
 				const token = await provisionToken(server.workspaceRoot, { nickname: `b10-adapters-${unique()}`, kind: 'human', keys })
-				const { context, page } = await open(`/?tab=activity&version=${earlier}&compare=current&resource=workspace:workspace`, { cookie: await sessionCookieFor(server.origin, token) })
+				const { context, page } = await open(`/?tab=activity&version=${earlier}&compare=current&resource=product-kit:product-kit`, { cookie: await sessionCookieFor(server.origin, token) })
 				try {
-					const block = page.locator('[data-version-comparison] [data-resource-diff="workspace:workspace"][data-open]')
+					const block = page.locator('[data-version-comparison] [data-resource-diff="product-kit:product-kit"][data-open]')
 					await block.locator('[data-restore-version]').click({ timeout: 15_000 })
 					await dialog(page).waitFor()
 					const notice = page.locator('[data-access-notice="restore"][data-missing-key="product-kit.compose"]')

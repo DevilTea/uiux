@@ -18,7 +18,7 @@ import loginRoute from '../server/api/session/login.post'
 import type { VersionListing } from '../src/application/services/history-service'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { HistoryResourceEntry, HostVersionRecord, VersionRecord } from '../src/domain/history/schema'
-import { FileNativePersistence, assetDirectoryRelativePath, assetMetadataRelativePath, canonicalJsonBytes, localeRelativePath, viewRelativePath, workspaceRelativePath } from '../src/persistence'
+import { FileNativePersistence, assetDirectoryRelativePath, assetMetadataRelativePath, canonicalJsonBytes, localeRelativePath, viewRelativePath } from '../src/persistence'
 import { versionResourcesFromSnapshot } from '../src/persistence/history'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createAccessGuardHandler } from '../src/server/access/http'
@@ -27,7 +27,8 @@ import { createHistoryStoreFactory, type HistoryStores } from '../src/server/his
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { STORED_CONTENT_SECURITY_POLICY } from '../src/server/stored-content-headers'
 import { bearer, provisionToken, scoped, sessionCookieFor, testMember } from './support/access'
-import { CURRENT_TEST_LAYOUT, writeManifest } from './support/workspace-layout'
+import { LEGACY_LAYOUT, layoutForSchemaVersion, V5_LAYOUT } from '../src/persistence/paths'
+import { createCurrentWorkspace, writeCurrentWorkspace } from './support/workspace-layout'
 
 /**
  * The version reads for Preview and the version blob route (issue #132, B9): Rule
@@ -85,7 +86,7 @@ beforeAll(async () => {
 	origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 	process.env.UIUX_SERVER_ORIGIN = origin
 	const runtime = getSelectedWorkspaceServerRuntime()
-	await runtime.persistence.workspace.create({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: { phone: { dimensions: { width: 390, height: 844 } } }, themes: {} })
+	await createCurrentWorkspace(runtime.persistence, { i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: { phone: { dimensions: { width: 390, height: 844 } } }, themes: {} })
 	await runtime.persistence.locales.create('en-US', { greeting: 'Hello' })
 	expect(await runtime.historyRecorder.start()).toMatchObject({ enabled: true, baseline: expect.any(String) })
 
@@ -216,7 +217,10 @@ describe('version reads for Preview across schema versions', () => {
 	const PEER_VIEW_ID = '55555555-5555-4555-8555-555555555555'
 	const AGENT = { type: 'agent', id: 'member:m-agent', displayName: 'claude' } as const
 	const VIEWER = testMember({ nickname: 'vera', kind: 'human', role: 'viewer', credential: 'session' })
-	const MANIFEST = { schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: { desktop: { label: 'Desktop', dimensions: { width: 1280, height: 800 } } }, themes: {} }
+	/** The current manifest, with no `adapters` from schemaVersion 5. */
+	const MANIFEST = { schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, viewports: { desktop: { label: 'Desktop', dimensions: { width: 1280, height: 800 } } }, themes: {} }
+	/** The manifest as a schemaVersion 2 Workspace kept it, in `.uiux/` and with its `adapters`. */
+	const V2_MANIFEST = { ...MANIFEST, schemaVersion: 2, adapters: [] }
 	const view = (id: string, name: string) => ({
 		id,
 		name,
@@ -235,7 +239,7 @@ describe('version reads for Preview across schema versions', () => {
 		const dir = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-preview-schema-')))
 		const home = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-preview-home-')))
 		cleanup.push(dir, home)
-		await writeManifest(dir, canonicalJsonBytes(MANIFEST))
+		await writeCurrentWorkspace(dir, MANIFEST)
 		await mkdir(join(dir, 'views'), { recursive: true })
 		await writeFile(join(dir, viewRelativePath(VIEW_ID)), canonicalJsonBytes(view(VIEW_ID, 'Checkout')))
 		const persistence = new FileNativePersistence({ root: dir, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
@@ -244,11 +248,20 @@ describe('version reads for Preview across schema versions', () => {
 		return { persistence, stores: (await history.open())!, app: createWorkspaceApplicationSession(persistence, { history }) }
 	}
 
-	/** Records the Workspace's files, as `edit` changes them, as an autosave under `workspaceSchemaVersion`; the files in `drop` have no stored blob. */
+	/**
+	 * Records the Workspace's files, as `edit` changes them, as an autosave under `workspaceSchemaVersion`,
+	 * in that version's layout: below 5 the manifest is in `.uiux/` and there is no Product Kit file. The
+	 * files in `drop` have no stored blob.
+	 */
 	async function record(ctx: Context, workspaceSchemaVersion: number, edit: (snapshot: Map<string, Uint8Array>) => void, drop: readonly string[] = []): Promise<HostVersionRecord> {
 		const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
+		const layout = layoutForSchemaVersion(workspaceSchemaVersion)
+		if (layout === LEGACY_LAYOUT) {
+			snapshot.delete(V5_LAYOUT.manifestPath)
+			snapshot.delete(V5_LAYOUT.productKitPath!)
+		}
 		edit(snapshot)
-		const built = versionResourcesFromSnapshot(snapshot, CURRENT_TEST_LAYOUT)
+		const built = versionResourcesFromSnapshot(snapshot, layout)
 		const files = new Map(built.resources.flatMap(resource => Object.entries(resource.files)))
 		const dropped = new Set(drop.map(path => files.get(path)!))
 		for (const [digest, bytes] of built.blobs) if (!dropped.has(digest)) await ctx.stores.host.putBlob(bytes)
@@ -259,7 +272,7 @@ describe('version reads for Preview across schema versions', () => {
 	}
 
 	const v2 = (snapshot: Map<string, Uint8Array>) => {
-		snapshot.set(workspaceRelativePath(), canonicalJsonBytes({ ...MANIFEST, schemaVersion: 2 }))
+		snapshot.set(LEGACY_LAYOUT.manifestPath, canonicalJsonBytes(V2_MANIFEST))
 		snapshot.set(viewRelativePath(VIEW_ID), canonicalJsonBytes(view(VIEW_ID, 'Checkout before migration')))
 	}
 
@@ -270,7 +283,7 @@ describe('version reads for Preview across schema versions', () => {
 
 		const manifest = await read('workspace', 'workspace')
 		expect(manifest.status).toBe(200)
-		// The uiux.v2-to-v3 and uiux.v3-to-v4 steps ran: the manifest is in the current schema.
+		// The uiux.v2-to-v3, uiux.v3-to-v4 and uiux.v4-to-v5 steps ran: the manifest is in the current schema.
 		expect(manifest.body).toEqual({
 			status: 'found',
 			versionId: old.id,
@@ -288,7 +301,7 @@ describe('version reads for Preview across schema versions', () => {
 
 	it('refuses a version recorded under an unrecognized schemaVersion with workspace.schema_unsupported (422)', async () => {
 		const ctx = await workspace()
-		const future = await record(ctx, 99, snapshot => snapshot.set(workspaceRelativePath(), canonicalJsonBytes({ ...MANIFEST, schemaVersion: 99 })))
+		const future = await record(ctx, 99, snapshot => snapshot.set(V5_LAYOUT.manifestPath, canonicalJsonBytes({ ...MANIFEST, schemaVersion: 99 })))
 		for (const [kind, key] of [['view', VIEW_ID], ['workspace', 'workspace']] as const) {
 			const result = await readVersionResourceForHttp(scoped(ctx.app, VIEWER), future.id, kind, key)
 			expect(result.status).toBe(422)
@@ -313,8 +326,8 @@ describe('version reads for Preview across schema versions', () => {
 		const noManifest = await record(ctx, 2, (snapshot) => {
 			v2(snapshot)
 			// Other manifest bytes than the version above, whose blob is stored.
-			snapshot.set(workspaceRelativePath(), canonicalJsonBytes({ ...MANIFEST, schemaVersion: 2, i18n: { defaultLocale: 'zh-TW' } }))
-		}, [workspaceRelativePath()])
+			snapshot.set(LEGACY_LAYOUT.manifestPath, canonicalJsonBytes({ ...V2_MANIFEST, i18n: { defaultLocale: 'zh-TW' } }))
+		}, [LEGACY_LAYOUT.manifestPath])
 		expect(await readVersionResourceForHttp(scoped(ctx.app, VIEWER), noManifest.id, 'view', VIEW_ID)).toMatchObject({ status: 500, body: { status: 'failed', code: 'history.blob_missing' } })
 	})
 

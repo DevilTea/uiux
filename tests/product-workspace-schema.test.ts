@@ -10,7 +10,7 @@ import {
 	CURRENT_WORKSPACE_SCHEMA_VERSION,
 	PRODUCT_WORKSPACE_SCHEMA_POLICY,
 } from '../src/product/workspace-schema'
-import { manifestPath, writeManifest } from './support/workspace-layout'
+import { createCurrentWorkspace, manifestPath, writeManifest } from './support/workspace-layout'
 
 const temporaryRoots: string[] = []
 
@@ -19,11 +19,11 @@ afterEach(async () => {
 })
 
 describe('product Workspace schema authority', () => {
-	it('defines the product format as version 4, recognizing versions 1 to 3 through the chained migration steps', () => {
-		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(4)
-		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.currentVersion).toBe(4)
-		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.recognizedVersions).toEqual([1, 2, 3, 4])
-		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.steps.map(step => step.id)).toEqual(['uiux.v1-to-v2', 'uiux.v2-to-v3', 'uiux.v3-to-v4'])
+	it('defines the product format as version 5, recognizing versions 1 to 4 through the chained migration steps (Clauses 01a1144e-534c and 01a114ec-890a)', () => {
+		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(5)
+		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.currentVersion).toBe(5)
+		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.recognizedVersions).toEqual([1, 2, 3, 4, 5])
+		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.steps.map(step => step.id)).toEqual(['uiux.v1-to-v2', 'uiux.v2-to-v3', 'uiux.v3-to-v4', 'uiux.v4-to-v5'])
 	})
 
 	it('treats the current schemaVersion as current through the real file-native persistence boundary', async () => {
@@ -33,7 +33,7 @@ describe('product Workspace schema authority', () => {
 			schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY,
 		})
 
-		await persistence.workspace.create(workspaceFixture(CURRENT_WORKSPACE_SCHEMA_VERSION))
+		await createCurrentWorkspace(persistence, workspaceFixture(CURRENT_WORKSPACE_SCHEMA_VERSION))
 
 		const inspected = await persistence.inspectWorkspace()
 		expect(inspected.inspection).toMatchObject({

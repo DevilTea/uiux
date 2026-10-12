@@ -98,7 +98,8 @@ export function realFuturePath(path: string): string {
 	}
 }
 
-function isSameOrInside(parent: string, candidate: string): boolean {
+/** True when `candidate` is `parent` or lies inside it, both absolute paths. */
+export function isSameOrInside(parent: string, candidate: string): boolean {
 	const rel = relative(parent, candidate)
 	return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel))
 }

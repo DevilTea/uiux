@@ -2,23 +2,26 @@ import { computed, reactive, ref, shallowRef } from 'vue'
 import type { WorkspaceManifest } from '../../src/domain/workspace/schema'
 import type { FetchErrorDetails } from '../utils/fetch-error'
 import { cloneJson, diffJson, sameJson, type SettingsSectionId } from '../utils/workspace-authoring'
-import type { WorkspaceRead } from './workbench-types'
 
 /**
  * One Workspace settings section with its own draft, base revision and conflict state
- * (brief g, "Save per section").
+ * (brief g, "Save per section"). Its value comes from one revisioned resource `R`: the manifest,
+ * or from `schemaVersion` 5 the Product Kit file for the Adapters section.
  *
- * Sync rules when a newer Workspace read arrives:
+ * Sync rules when a newer read of the resource arrives:
  * - no draft: adopt it;
  * - the newer value already equals the draft (our own save landed): adopt it;
  * - the newer value left this section untouched: move the base revision forward and keep the draft;
  * - otherwise: raise the conflict and keep the draft. Nothing is merged.
  */
-export type SettingsSection<D> = ReturnType<typeof createSettingsSection<D>>
+export type SettingsSection<D, R = WorkspaceManifest> = ReturnType<typeof createSettingsSection<D, R>>
 
-export function createSettingsSection<D>(options: Readonly<{
+/** A revisioned read of the section's resource. */
+export type SettingsSectionRead<R> = Readonly<{ revision: string; resource: R }>
+
+export function createSettingsSection<D, R = WorkspaceManifest>(options: Readonly<{
 	id: SettingsSectionId
-	fromManifest: (manifest: WorkspaceManifest) => D
+	fromManifest: (resource: R) => D
 	toPayload: (draft: D) => unknown
 }>) {
 	const base = shallowRef<{ revision: string; draft: D }>()
@@ -34,7 +37,7 @@ export function createSettingsSection<D>(options: Readonly<{
 	const dirty = computed(() => !!base.value && !sameJson(savedPayload.value, draftPayload.value))
 	const changeCount = computed(() => dirty.value ? Math.max(1, diffJson(savedPayload.value, draftPayload.value).length) : 0)
 
-	function adopt(read: WorkspaceRead): void {
+	function adopt(read: SettingsSectionRead<R>): void {
 		const value = options.fromManifest(read.resource)
 		base.value = { revision: read.revision, draft: cloneJson(value) }
 		draft.value = value
@@ -43,7 +46,7 @@ export function createSettingsSection<D>(options: Readonly<{
 		error.value = undefined
 	}
 
-	function sync(read: WorkspaceRead | undefined): void {
+	function sync(read: SettingsSectionRead<R> | undefined): void {
 		if (!read?.resource) return
 		const latest = options.toPayload(options.fromManifest(read.resource))
 		theirs.value = latest
@@ -58,7 +61,7 @@ export function createSettingsSection<D>(options: Readonly<{
 	}
 
 	/** "Keep mine": carry the draft onto the newer revision, still unsaved. */
-	function keepMine(read: WorkspaceRead | undefined): void {
+	function keepMine(read: SettingsSectionRead<R> | undefined): void {
 		if (!read?.resource) return
 		base.value = { revision: read.revision, draft: options.fromManifest(read.resource) }
 		conflict.value = false
