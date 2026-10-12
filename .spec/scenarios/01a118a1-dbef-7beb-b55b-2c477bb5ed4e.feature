@@ -4,7 +4,8 @@ Feature: Command line
   # Test: code@d3bc3a3 `tests/workspace-migration.test.ts#L237` "initializes new Workspaces at the current schemaVersion, which migrate reports as already current". https://github.com/DevilTea/uiux/blob/d3bc3a3502315c0105f0cb2d3c2b5c9e43256fa5/tests/workspace-migration.test.ts#L237
   # Test: code@3b20412 `tests/cli-init.test.ts#L66` "creates the Workspace in <cwd>/.uiux/ outside a Git repository". https://github.com/DevilTea/uiux/blob/3b20412aff65b677618b90a4a841ad8dfccf4218/tests/cli-init.test.ts#L66
   # Test: code@3b20412 `tests/cli-init.test.ts#L82` "refuses an initialized Workspace, of either layout, and changes nothing". https://github.com/DevilTea/uiux/blob/3b20412aff65b677618b90a4a841ad8dfccf4218/tests/cli-init.test.ts#L82
-  # Status: partly built as of 3b20412: `uiux init` writes `workspace.json` at `schemaVersion` 5, an empty `product-kit.json` and a `.gitignore`, but no Access presets file; see the Implementation gaps entry of 01a1144e-55a3-74c4-8bf8-3205e968e275 in its owner.
+  # Test: code@39e99da `tests/access-presets.test.ts#L147` "writes the presets file in a new Workspace". https://github.com/DevilTea/uiux/blob/39e99da86eec36860acb97077deddd836cce9a33/tests/access-presets.test.ts#L147
+  # Status: built as of 39e99da: `uiux init` writes `workspace.json` at the current `schemaVersion` 6, an empty `product-kit.json`, an `access-presets.json` holding the built-in Access presets and a `.gitignore`.
   @spec:id:01a118a1-dbef-7660-92f6-c0b2aaf8afa6
   @spec:demonstrates:01a1144e-55a3-74c4-8bf8-3205e968e275
   @spec:demonstrates:01a1144e-55be-785d-b494-7f7da834572a
