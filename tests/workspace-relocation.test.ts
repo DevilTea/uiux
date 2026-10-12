@@ -25,13 +25,14 @@ import {
 import { verifyCredential } from '../src/server/access/roster'
 import { AccessStore, hostHistoryPaths } from '../src/server/access/store'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
-import { V4_TEST_SCHEMA_POLICY, V5_TEST_SCHEMA_POLICY } from './support/workspace-layout'
+import { V4_TEST_SCHEMA_POLICY, V5_ONLY_TEST_SCHEMA_POLICY as V5_TEST_SCHEMA_POLICY } from './support/workspace-layout'
 
 /**
  * The `uiux.v4-to-v5` relocation (issue #141, units K4 and K6): Clause 01a11bb1-8f5f-77ea-817b-46679c5a6475,
  * Rules 01a11bb1-95f2-…, 01a11bb1-9658-…, 01a12626-6a4f-…, 01a11bb1-96bb-… and 01a12626-5a0c-…, Clauses
  * 01a1144e-5605-…, 01a12626-e5c9-…, 01a12626-e8fe-… and 01a1144e-56bd-…. The runs use
- * `V5_TEST_SCHEMA_POLICY`, which is UIUX's own policy now that schemaVersion 5 is current.
+ * `V5_TEST_SCHEMA_POLICY`, the policy of a UIUX build where schemaVersion 5 is current; UIUX's own policy
+ * chains `uiux.v5-to-v6` after it (`tests/workspace-migration.test.ts` and `tests/access-presets.test.ts`).
  */
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
@@ -146,11 +147,12 @@ async function exists(path: string): Promise<boolean> {
 }
 
 describe('uiux.v4-to-v5 on the logical snapshot', () => {
-	it('is UIUX\'s last step: schemaVersion 5 is current and uiux.v4-to-v5 is registered in UIUX\'s own policy', () => {
-		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(5)
-		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.steps.map(step => step.id).at(-1)).toBe(WORKSPACE_V4_TO_V5_STEP_ID)
+	it('is registered in UIUX\'s own policy, followed only by uiux.v5-to-v6 (schemaVersion 6 is current)', () => {
+		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(6)
+		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.steps.map(step => step.id).slice(-2)).toEqual([WORKSPACE_V4_TO_V5_STEP_ID, 'uiux.v5-to-v6'])
 		expect(WORKSPACE_V4_TO_V5_STEP).toMatchObject({ id: 'uiux.v4-to-v5', fromVersion: 4, toVersion: 5 })
-		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.steps.at(-1)).toBe(WORKSPACE_V4_TO_V5_STEP)
+		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.steps.at(-2)).toBe(WORKSPACE_V4_TO_V5_STEP)
+		expect(V5_TEST_SCHEMA_POLICY.steps.at(-1)).toBe(WORKSPACE_V4_TO_V5_STEP)
 	})
 
 	it('moves the manifest without adapters, writes product-kit.json with rebased Adapters, and keeps every data path', async () => {
@@ -326,7 +328,7 @@ describe('uiux.v4-to-v5 refusals, before anything is written', { timeout: HEAVY_
 			const run = capture()
 			expect(await runMigrateCommand({ workspaceRoot: root, dryRun, home, schemaPolicy: V5_TEST_SCHEMA_POLICY, stdout: run.stdout, stderr: run.stderr })).toBe(1)
 			const errors = run.err.join('\n')
-			expect(errors).toContain('uiux.v4-to-v5 refuses 2 Adapters that the relocated Workspace could not resolve, and nothing was written. Move each ./ module into .uiux/kit/. Edit each listed specifier in .uiux/workspace.json by hand as shown. Then run uiux migrate again.')
+			expect(errors).toContain('uiux.v4-to-v5 refuses 2 Adapters that the relocated Workspace could not resolve, so no migration step ran. Move each ./ module into .uiux/kit/. Edit each listed specifier in .uiux/workspace.json by hand as shown. Then run uiux migrate again.')
 			expect(errors).toContain('/adapters/0/moduleSpecifier: ./adapters/reference.ts lies outside .uiux/kit/: replace it with ./.uiux/kit/adapters/reference.ts')
 			expect(errors).toContain('/adapters/3/moduleSpecifier: ./.uiux/adapters/legacy.ts lies outside .uiux/kit/: replace it with ./.uiux/kit/adapters/legacy.ts')
 			expect(errors).not.toContain('/adapters/1/')
@@ -406,7 +408,7 @@ describe('uiux.v4-to-v5 refuses Adapters the kit project does not declare (owner
 			adapters: [{ moduleSpecifier: '@acme/uiux-adapter' }, { moduleSpecifier: 'lodash/fp.js' }, { moduleSpecifier: './.uiux/kit/adapters/reference.ts' }, { moduleSpecifier: '@acme/declared' }],
 			kitPackage: { name: 'kit', devDependencies: { '@acme/declared': '1.0.0' } },
 		})
-		expect(errors).toContain('uiux.v4-to-v5 refuses 2 Adapters that the relocated Workspace could not resolve, and nothing was written. Declare @acme/uiux-adapter, lodash in .uiux/kit/package.json (dependencies, devDependencies, peerDependencies or optionalDependencies); uiux migrate writes no package.json. Then run uiux migrate again.')
+		expect(errors).toContain('uiux.v4-to-v5 refuses 2 Adapters that the relocated Workspace could not resolve, so no migration step ran. Declare @acme/uiux-adapter, lodash in .uiux/kit/package.json (dependencies, devDependencies, peerDependencies or optionalDependencies); uiux migrate writes no package.json. Then run uiux migrate again.')
 		expect(errors).toContain('/adapters/0/moduleSpecifier: @acme/uiux-adapter names the package @acme/uiux-adapter, which .uiux/kit/package.json does not declare: declare it there')
 		expect(errors).toContain('/adapters/1/moduleSpecifier: lodash/fp.js names the package lodash, which .uiux/kit/package.json does not declare: declare it there')
 		expect(errors).not.toContain('/adapters/2/')

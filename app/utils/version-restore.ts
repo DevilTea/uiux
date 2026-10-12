@@ -37,8 +37,8 @@ export type RestoreGateInput = Readonly<{
  * brings the resource back to what that version made it), with the current state or another
  * version it is the side the reader chose. It is offered only when:
  * - the layout is desktop and the member holds `history.restore` and the kind's write key (see `RestoreGateInput`);
- * - the kind is one this build restores (`RESTORABLE_RESOURCE_KINDS`: never a Review thread,
- *   access presets or a kind this build does not know);
+ * - the kind is one this build restores (`RESTORABLE_RESOURCE_KINDS`: never a Review thread or a
+ *   kind this build does not know);
  * - the selected version is a real version, not `current` or `parent`;
  * - the resource exists in the selected version: not `removed` when the selected version is the
  *   newer side, not `added` when it is the older side.

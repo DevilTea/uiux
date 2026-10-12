@@ -34,10 +34,10 @@ export type ImpactWorkspace = Readonly<{
 export type ImpactEvidence = Readonly<{ digest: string; record: FormalEvidenceRecord }>
 
 /**
- * The design resource kinds the analysis follows. The Product Kit file is followed by its revision
- * only: no other resource references its content.
+ * The design resource kinds the analysis follows. The Product Kit file and the Access presets file
+ * are followed by their revisions only: no other resource references their content.
  */
-export const IMPACT_RESOURCE_KINDS = Object.freeze(['workspace', 'product-kit', 'view', 'flow', 'locale', 'asset'] as const)
+export const IMPACT_RESOURCE_KINDS = Object.freeze(['workspace', 'product-kit', 'access-presets', 'view', 'flow', 'locale', 'asset'] as const)
 export type ImpactResourceKind = typeof IMPACT_RESOURCE_KINDS[number]
 
 export function isImpactResourceKind(kind: string): kind is ImpactResourceKind {
@@ -68,7 +68,8 @@ export function withResource(
 	}
 	switch (identity.kind) {
 		case 'workspace': return { ...workspace, revisions, manifest: resource }
-		case 'product-kit': return { ...workspace, revisions }
+		case 'product-kit':
+		case 'access-presets': return { ...workspace, revisions }
 		case 'view': return { ...workspace, revisions, views: replace(workspace.views) }
 		case 'flow': return { ...workspace, revisions, flows: replace(workspace.flows) }
 		case 'locale': return { ...workspace, revisions, locales: replace(workspace.locales) }

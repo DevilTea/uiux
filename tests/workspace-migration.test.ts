@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
+import { builtInAccessPresetsFile } from '../src/domain/access-presets/schema'
 import { runMigrateCommand } from '../src/cli/migrate'
 import { validateReviewThread } from '../src/domain/reviews/schema'
 import { FileNativePersistence } from '../src/persistence/file-native'
@@ -22,6 +23,7 @@ import {
 	WORKSPACE_V3_TO_V4_STEP,
 	WORKSPACE_V3_TO_V4_STEP_ID,
 	WORKSPACE_V4_TO_V5_STEP_ID,
+	WORKSPACE_V5_TO_V6_STEP_ID,
 } from '../src/product/workspace-schema'
 import { LEGACY_LAYOUT } from '../src/persistence/paths'
 import { artifactShardsPath, CURRENT_TEST_LAYOUT, V4_TEST_SCHEMA_POLICY } from './support/workspace-layout'
@@ -127,6 +129,11 @@ async function copyDogfoodWorkspace(prefix: string): Promise<string> {
 	return root
 }
 
+/** The `schemaVersion` of a dogfood copy's manifest. */
+async function dogfoodSchemaVersion(root: string): Promise<number> {
+	return (JSON.parse(await readFile(join(root, CURRENT_TEST_LAYOUT.manifestPath), 'utf8')) as { schemaVersion: number }).schemaVersion
+}
+
 async function snapshotFiles(root: string): Promise<Record<string, string>> {
 	const files: Record<string, string> = {}
 	for (const path of [workspaceRelativePath(), viewRelativePath(VIEW_ID), reviewRelativePath(RESOLVED_REVIEW_ID), reviewRelativePath(OPEN_REVIEW_ID), `assets/${ASSET_ID}/asset.json`, `assets/${ASSET_ID}/icon.svg`])
@@ -141,18 +148,19 @@ async function snapshotFiles(root: string): Promise<Record<string, string>> {
  * (D1, `scripts/dogfood-relocate.mjs`), and the dogfood tests below read a copy of the result.
  */
 describe('product Workspace schema policy', () => {
-	it('makes schemaVersion 5 current, recognizes 1 to 4, and ships the uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4 and uiux.v4-to-v5 steps', async () => {
+	it('makes schemaVersion 6 current, recognizes 1 to 5, and ships the uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4, uiux.v4-to-v5 and uiux.v5-to-v6 steps', async () => {
 		const packageJson = JSON.parse(await readFile(join(REPOSITORY_ROOT, 'package.json'), 'utf8')) as { uiuxWorkspaceSchemaVersion: number }
-		expect(packageJson.uiuxWorkspaceSchemaVersion).toBe(5)
-		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(5)
-		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.currentVersion).toBe(5)
-		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.recognizedVersions).toEqual([1, 2, 3, 4, 5])
+		expect(packageJson.uiuxWorkspaceSchemaVersion).toBe(6)
+		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(6)
+		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.currentVersion).toBe(6)
+		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.recognizedVersions).toEqual([1, 2, 3, 4, 5, 6])
 		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.steps.map(step => [step.id, step.fromVersion, step.toVersion]))
-			.toEqual([[WORKSPACE_V1_TO_V2_STEP_ID, 1, 2], [WORKSPACE_V2_TO_V3_STEP_ID, 2, 3], [WORKSPACE_V3_TO_V4_STEP_ID, 3, 4], [WORKSPACE_V4_TO_V5_STEP_ID, 4, 5]])
+			.toEqual([[WORKSPACE_V1_TO_V2_STEP_ID, 1, 2], [WORKSPACE_V2_TO_V3_STEP_ID, 2, 3], [WORKSPACE_V3_TO_V4_STEP_ID, 3, 4], [WORKSPACE_V4_TO_V5_STEP_ID, 4, 5], [WORKSPACE_V5_TO_V6_STEP_ID, 5, 6]])
 		expect(WORKSPACE_V1_TO_V2_STEP_ID).toBe('uiux.v1-to-v2')
 		expect(WORKSPACE_V2_TO_V3_STEP_ID).toBe('uiux.v2-to-v3')
 		expect(WORKSPACE_V3_TO_V4_STEP_ID).toBe('uiux.v3-to-v4')
 		expect(WORKSPACE_V4_TO_V5_STEP_ID).toBe('uiux.v4-to-v5')
+		expect(WORKSPACE_V5_TO_V6_STEP_ID).toBe('uiux.v5-to-v6')
 	})
 
 	it('opens a v1 Workspace as migration_required: readable, v1-decoded, and every Review mutation blocked', async () => {
@@ -259,8 +267,9 @@ describe('uiux migrate CLI', () => {
 	it('lists migrate in honest help text and validates its arguments', () => {
 		const help = execFileSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' })
 		expect(help).toContain('migrate [--workspace <dir>] [--dry-run]')
-		expect(help).toMatch(/a real run first writes the Checkpoint "Before\s+migration to schemaVersion 5"/u)
-		expect(help).toMatch(/--dry-run prints the steps\s+and changed files without writing anything/u)
+		expect(help).toMatch(/a real run first writes the\s+Checkpoint "Before migration to schemaVersion 6"/u)
+		expect(help).toMatch(/--dry-run prints the steps and changed files without writing\s+anything/u)
+		expect(help).toMatch(/uiux\.v5-to-v6 adds access-presets\.json with the built-in\s+Access presets/u)
 		// Outside the repository, so nothing past the usage check could discover the dogfood.
 		const cwd = tmpdir()
 		for (const args of [['migrate', '--workspace'], ['migrate', '--workspace', '.', 'extra'], ['migrate', '--workspace', '.', '--dry-run', '--dry-run']]) {
@@ -291,8 +300,9 @@ describe('uiux migrate CLI', () => {
 		const dryRun = spawnSync(process.execPath, [CLI, 'migrate', '--dry-run', '--workspace', root], { encoding: 'utf8' })
 		expect(dryRun.status).toBe(0)
 		expect(dryRun.stdout).toContain('dry run, nothing written')
-		expect(dryRun.stdout).toContain('schemaVersion: 1 -> 5')
-		expect(dryRun.stdout).toContain('steps: uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4, uiux.v4-to-v5')
+		expect(dryRun.stdout).toContain('schemaVersion: 1 -> 6')
+		expect(dryRun.stdout).toContain('steps: uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4, uiux.v4-to-v5, uiux.v5-to-v6')
+		expect(dryRun.stdout).toContain('    .uiux/access-presets.json')
 		expect(dryRun.stdout).toContain(`new Workspace root (after a real run): ${join(root, '.uiux')}`)
 		// Relocated files are named by their path from the old root.
 		expect(dryRun.stdout).toContain(`    .uiux/${reviewRelativePath(RESOLVED_REVIEW_ID)}`)
@@ -336,29 +346,54 @@ describe('uiux migrate CLI', () => {
 		expect((await new FileNativePersistence({ root: join(root, '.uiux'), schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).inspectWorkspace()).inspection.state).toBe('current')
 	})
 
-	it('finds nothing to migrate in a copy of the schemaVersion 5 dogfood, and its Reviews all read without diagnostics', async () => {
+	// The dogfood may still be at schemaVersion 5 until the owner runs its uiux.v5-to-v6 migration
+	// (#140 owner ruling 3 of 2026-10-10), so these tests accept 5 or the current version.
+	it('migrates a copy of the dogfood to the current schema (from 5, only uiux.v5-to-v6), and its Reviews all read without diagnostics', async () => {
 		const root = await copyDogfoodWorkspace('uiux-dogfood-migration-')
+		const fromVersion = await dogfoodSchemaVersion(root)
+		expect([5, CURRENT_WORKSPACE_SCHEMA_VERSION]).toContain(fromVersion)
 		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		const result = await persistence.migrateWorkspace()
-		expect(result).toMatchObject({ fromVersion: 5, version: 5, steps: [], changedFiles: [] })
+		expect(result).toMatchObject(fromVersion === 5
+			? { fromVersion: 5, version: CURRENT_WORKSPACE_SCHEMA_VERSION, steps: [WORKSPACE_V5_TO_V6_STEP_ID] }
+			: { fromVersion, version: fromVersion, steps: [], changedFiles: [] })
+		if (fromVersion === 5) expect([...result.changedFiles].sort()).toEqual(['access-presets.json', 'workspace.json'])
 		expect((await persistence.inspectWorkspace()).inspection.state).toBe('current')
+		expect((await persistence.accessPresets.readInspected())?.diagnostics).toEqual([])
 		for (const key of await persistence.reviews.discoverKeys())
 			expect((await persistence.reviews.readInspected(key))?.diagnostics, key).toEqual([])
 	})
 
-	it('runs uiux migrate on a copy of the schemaVersion 5 dogfood as a no-op: the dry run and the real run write nothing, in the Workspace or under UIUX_HOME', async () => {
+	it('runs uiux migrate on a copy of the dogfood: the dry run writes nothing, and the real run writes only the presets file, the manifest and the pre-migration Checkpoint (none when current)', async () => {
 		const root = await copyDogfoodWorkspace('uiux-dogfood-current-')
+		const fromVersion = await dogfoodSchemaVersion(root)
 		const before = await snapshotTree(root)
 		expect(Object.keys(before).filter(path => path.startsWith(`${CURRENT_TEST_LAYOUT.artifactsDir}/`))).toHaveLength(1)
 		const home = join(await mkdtemp(join(tmpdir(), 'uiux-dogfood-current-home-')), 'home')
 		roots.push(dirname(home))
 
-		for (const dryRun of [true, false]) {
-			const lines: string[] = []
-			expect(await runMigrateCommand({ workspaceRoot: root, dryRun, home, stdout: line => lines.push(line), stderr: line => lines.push(line) })).toBe(0)
-			expect(lines.join('\n')).toContain('is already at schemaVersion 5; nothing to migrate.')
-			expect(await snapshotTree(root)).toEqual(before)
-			expect(await readdir(home).catch(() => undefined)).toBeUndefined()
+		const dryLines: string[] = []
+		expect(await runMigrateCommand({ workspaceRoot: root, dryRun: true, home, stdout: line => dryLines.push(line), stderr: line => dryLines.push(line) })).toBe(0)
+		expect(dryLines.join('\n')).toContain(fromVersion === CURRENT_WORKSPACE_SCHEMA_VERSION
+			? `is already at schemaVersion ${fromVersion}; nothing to migrate.`
+			: `steps: ${WORKSPACE_V5_TO_V6_STEP_ID}`)
+		expect(await snapshotTree(root)).toEqual(before)
+		expect(await readdir(home).catch(() => undefined)).toBeUndefined()
+
+		const lines: string[] = []
+		expect(await runMigrateCommand({ workspaceRoot: root, dryRun: false, home, stdout: line => lines.push(line), stderr: line => lines.push(line) })).toBe(0)
+		const after = await snapshotTree(root)
+		const changed = Object.keys({ ...before, ...after }).filter(path => before[path] !== after[path]).sort()
+		if (fromVersion === CURRENT_WORKSPACE_SCHEMA_VERSION) {
+			expect(lines.join('\n')).toContain(`is already at schemaVersion ${fromVersion}; nothing to migrate.`)
+			expect(changed).toEqual([])
+			return
 		}
+		// The Checkpoint stores the files it records by digest in the artifact store.
+		const recorded = (path: string) => path.startsWith(`${CURRENT_TEST_LAYOUT.checkpointsDir}/`) || path.startsWith(`${CURRENT_TEST_LAYOUT.artifactsDir}/`)
+		expect(changed.filter(path => !recorded(path))).toEqual(['access-presets.json', 'workspace.json'])
+		expect(changed.filter(path => path.startsWith(`${CURRENT_TEST_LAYOUT.artifactsDir}/`)).every(path => before[path] === undefined)).toBe(true)
+		expect(changed.filter(path => path.startsWith(`${CURRENT_TEST_LAYOUT.checkpointsDir}/`))).toHaveLength(1)
+		expect(JSON.parse(Buffer.from(after['access-presets.json']!, 'base64').toString('utf8'))).toEqual(builtInAccessPresetsFile())
 	})
 })

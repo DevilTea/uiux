@@ -335,12 +335,13 @@ describe('restoring every other kind', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS 
 
 	it('restores the Workspace settings, keeping the current schemaVersion, after acknowledging a removed viewport key (Rules 01a11a5e-15e9 and 17a0)', async () => {
 		const ctx = await fixture()
-		// A Checkpoint recorded under the previous schema version, in its old layout (the manifest in .uiux/,
-		// holding the Adapters, and no Product Kit file), holding settings without the mobile viewport.
+		// A Checkpoint recorded under schemaVersion 4, in its old layout (the manifest in .uiux/,
+		// holding the Adapters, and neither a Product Kit nor an Access presets file), holding settings without the mobile viewport.
 		const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
 		snapshot.delete(CURRENT_TEST_LAYOUT.manifestPath)
 		snapshot.delete(CURRENT_TEST_LAYOUT.productKitPath!)
-		snapshot.set(LEGACY_LAYOUT.manifestPath, canonicalJsonBytes({ ...MANIFEST, schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1, adapters: [], themes: { light: { label: 'Light' }, dark: { label: 'Dark' } } }))
+		snapshot.delete(CURRENT_TEST_LAYOUT.accessPresetsPath!)
+		snapshot.set(LEGACY_LAYOUT.manifestPath, canonicalJsonBytes({ ...MANIFEST, schemaVersion: 4, adapters: [], themes: { light: { label: 'Light' }, dark: { label: 'Dark' } } }))
 		const built = versionResourcesFromSnapshot(snapshot, LEGACY_LAYOUT)
 		const earlier = randomUUID()
 		await (await ctx.history.open())!.checkpoints.create({
@@ -349,7 +350,7 @@ describe('restoring every other kind', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS 
 			type: 'checkpoint',
 			actor: { type: 'human', id: 'member:owner-1', displayName: 'mei' },
 			at: new Date(START + 500).toISOString(),
-			workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1,
+			workspaceSchemaVersion: 4,
 			resources: built.resources,
 			name: 'Older settings',
 			source: 'workbench',
@@ -460,7 +461,7 @@ describe('refusals', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('refuses kinds it cannot restore, Reviews included, and resources or versions that do not exist (Rule 01a11a5e-189f; seam 3)', async () => {
 		const ctx = await fixture()
 		const earlier = await checkpoint(ctx, 'Start')
-		for (const kind of ['review', 'access-presets', 'something-new']) {
+		for (const kind of ['review', 'something-new']) {
 			const outcome = await restore(ctx, OWNER, { versionId: earlier, resource: { kind, key: REVIEW_ID }, expectedRevision: 'r_x' })
 			expect(outcome, kind).toMatchObject({ status: 'invalid', code: 'history.restore_unsupported_kind' })
 		}
@@ -494,7 +495,7 @@ describe('refusals', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 		// An old-layout Workspace (schemaVersion 4, the manifest in .uiux/) opened by this build.
 		const root = await tempDir('uiux-restore-old-ws-')
 		const home = join(await tempDir('uiux-restore-old-home-'), 'home')
-		await writeManifest(root, { ...MANIFEST, schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1, adapters: [] }, LEGACY_LAYOUT)
+		await writeManifest(root, { ...MANIFEST, schemaVersion: 4, adapters: [] }, LEGACY_LAYOUT)
 		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		const app = createWorkspaceApplicationSession(persistence, { history: createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home }) })
 		expect(await scoped(app, OWNER).restoreResourceVersion({ versionId: randomUUID(), resource: { kind: 'view', key: VIEW_ID }, expectedRevision: null })).toMatchObject({ status: 'blocked', code: 'workspace.migration_required' })

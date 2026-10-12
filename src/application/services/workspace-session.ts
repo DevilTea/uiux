@@ -104,6 +104,12 @@ import {
 	type UpdateComponentRegistryCommand,
 	type UpdateProductKitCommand,
 } from './product-kit-authoring'
+import {
+	createAccessPresetsAuthoringService,
+	type AccessPresetsAuthoringResult,
+	type AccessPresetsRead,
+	type UpdateAccessPresetsCommand,
+} from './access-presets-authoring'
 import { createKitBuildService, type KitBuildLogRead, type KitBuildRead, type RestartKitBuildResult } from './kit-build'
 import type { KitBuildControl } from '../ports/kit-build'
 
@@ -144,6 +150,8 @@ export interface WorkspaceApplicationSession {
 	composeProductKit<R = never>(command: ComposeProductKitCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
 	updateProductKit<R = never>(command: UpdateProductKitCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
 	updateComponentRegistry<R = never>(command: UpdateComponentRegistryCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
+	readAccessPresets(): Promise<AccessPresetsRead | undefined>
+	updateAccessPresets(command: UpdateAccessPresetsCommand): Promise<AccessPresetsAuthoringResult>
 	readKitBuild(): KitBuildRead | undefined
 	readKitBuildLog(): KitBuildLogRead | undefined
 	restartKitBuild(): Promise<RestartKitBuildResult>
@@ -211,6 +219,7 @@ export function createWorkspaceApplicationSession(
 	const historyRestore = createHistoryRestoreService(persistence, options?.history)
 	const historyPreview = createHistoryPreviewService(persistence, options?.history)
 	const productKitAuthoring = createProductKitAuthoringService(persistence, options?.kitBuild ? { buildStatus: () => options.kitBuild!.status() } : {})
+	const accessPresetsAuthoring = createAccessPresetsAuthoringService(persistence)
 	const kitBuild = createKitBuildService(persistence, options?.kitBuild)
 
 	async function readPointResource(kind: PointResourceKind, key: string): Promise<PointResourceRead | undefined> {
@@ -343,6 +352,8 @@ export function createWorkspaceApplicationSession(
 		composeProductKit: productKitAuthoring.composeProductKit,
 		updateProductKit: productKitAuthoring.updateProductKit,
 		updateComponentRegistry: productKitAuthoring.updateComponentRegistry,
+		readAccessPresets: accessPresetsAuthoring.readAccessPresets,
+		updateAccessPresets: accessPresetsAuthoring.updateAccessPresets,
 		readKitBuild: kitBuild.readKitBuild,
 		readKitBuildLog: kitBuild.readKitBuildLog,
 		restartKitBuild: kitBuild.restartKitBuild,

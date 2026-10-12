@@ -11,6 +11,7 @@ import { FileNativePersistence } from '../persistence/file-native'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 import { AccessService } from './access/service'
 import { AccessStore, resolveUiuxHome } from './access/store'
+import { createWorkspaceAccessPresetsReader } from './access/workspace-presets'
 import { createHistoryStoreFactory, type HistoryStoreFactory } from './history-stores'
 import { createKitBuildRunner, registerKitBuildRunner, type KitBuildRunner } from './kit-build'
 
@@ -88,7 +89,7 @@ export function createSelectedWorkspaceServerRuntime(
 	function access(): Promise<AccessService> {
 		pending ??= (async () => {
 			const store = (await AccessStore.open({ workspaceRoot: selectedRoot, home: options?.uiuxHome ?? resolveUiuxHome(), create: true }))!
-			accessService = new AccessService({ store, leases })
+			accessService = new AccessService({ store, leases, presets: createWorkspaceAccessPresetsReader(selectedRoot, persistence.layout) })
 			return accessService
 		})()
 		return pending

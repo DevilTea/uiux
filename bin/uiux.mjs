@@ -23,7 +23,8 @@ Commands:
   init [--workspace <dir>]
                            Initialize a Workspace in <dir>, by default in .uiux/ of the
                            Git repository's top level (of the current directory outside
-                           a repository): workspace.json, product-kit.json and a
+                           a repository): workspace.json, product-kit.json,
+                           access-presets.json (the built-in Access presets) and a
                            .gitignore for the runtime files, kit/node_modules/ and kit/dist/
   dev [--workspace <dir>] [--host <address>] [--origin <url>]...
                            Start the unified UIUX Workbench/Nitro server. By default
@@ -42,12 +43,14 @@ Commands:
   migrate [--workspace <dir>] [--dry-run]
                            Migrate an older Workspace schema to schemaVersion ${workspaceSchemaVersion}
                            (steps chain: uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4,
-                           uiux.v4-to-v5); a real run first writes the Checkpoint "Before
-                           migration to schemaVersion ${workspaceSchemaVersion}" and then records the migration
-                           in the host history ($UIUX_HOME); --dry-run prints the steps
-                           and changed files without writing anything. uiux.v4-to-v5
-                           moves the Workspace into <dir>/.uiux/ and prints the
-                           uiux access copy command to run next
+                           uiux.v4-to-v5, uiux.v5-to-v6); a real run first writes the
+                           Checkpoint "Before migration to schemaVersion ${workspaceSchemaVersion}" and then
+                           records the migration in the host history ($UIUX_HOME);
+                           --dry-run prints the steps and changed files without writing
+                           anything. uiux.v4-to-v5 moves the Workspace into <dir>/.uiux/
+                           and prints the uiux access copy command to run next;
+                           uiux.v5-to-v6 adds access-presets.json with the built-in
+                           Access presets
 
 Workspace selection: --workspace <dir> names the Workspace root, or a directory whose
 .uiux/ holds one. Without it, a command uses the .uiux/ of the nearest directory, from

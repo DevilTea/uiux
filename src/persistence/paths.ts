@@ -3,6 +3,7 @@ import { lstat } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 
 import { artifactStoreShardPath } from '../domain/artifacts/schema'
+import { ACCESS_PRESETS_FILENAME, ACCESS_PRESETS_RESOURCE_KEY, ACCESS_PRESETS_RESOURCE_KIND } from '../domain/access-presets/schema'
 import { PRODUCT_KIT_FILENAME, PRODUCT_KIT_RESOURCE_KEY, PRODUCT_KIT_RESOURCE_KIND, PRODUCT_KIT_SCHEMA_VERSION } from '../domain/product-kit/schema'
 import { isCanonicalLocaleFilename, isCanonicalLocaleTag, isFullUuid, isSafeRelativePath, isSha256Digest } from '../domain/validation'
 import { PersistenceError } from './errors'
@@ -61,8 +62,13 @@ export type VersionedResourceIdentity = Readonly<{ kind: string; key: string }>
  *   itself (from `schemaVersion` 5); {@link resolveLayoutDirectory} resolves it.
  * - `productKitPath` is the Product Kit file, and `codeDir` the code directory authoring never
  *   writes in; both are absent below `schemaVersion` 5.
+ * - `accessPresetsPath` is the Access presets file. The `schemaVersion` 5 layout names it because
+ *   `schemaVersion` 6 keeps every path of 5 and only adds this file (Rule
+ *   01a11c09-c6b5-7a65-86fd-8b5dddf3de6e), so one layout serves both; a `schemaVersion` 5 Workspace
+ *   has no such file, and writes need the current schema. Absent below `schemaVersion` 5.
  * - `canonicalFiles` lists the canonical files directly under the Workspace root (the manifest and,
- *   from 5, the Product Kit file); the canonical data directories are the same in every layout.
+ *   from 5, the Product Kit file, and from 6 the Access presets file); the canonical data directories
+ *   are the same in every layout.
  * - `versionedRoots` lists the versioned files and the versioned directories (with a trailing
  *   `/`), per Clause 01a11a5e-1eba-78ae-a204-52e286a95ddb.
  * - `excluded` lists the directories next to them that are never versioned (`reviews/`, the
@@ -80,6 +86,7 @@ export type WorkspaceLayout = Readonly<{
 	metadataDir: string
 	manifestPath: string
 	productKitPath?: string
+	accessPresetsPath?: string
 	codeDir?: string
 	artifactsDir: string
 	checkpointsDir: string
@@ -142,29 +149,34 @@ export const V5_CODE_DIRECTORY = 'kit'
 const V5_ARTIFACTS_DIRECTORY = 'artifacts'
 const V5_CHECKPOINTS_DIRECTORY = 'history/checkpoints'
 const PRODUCT_KIT_RESOURCE: VersionedResourceIdentity = Object.freeze({ kind: PRODUCT_KIT_RESOURCE_KIND, key: PRODUCT_KIT_RESOURCE_KEY })
+const ACCESS_PRESETS_RESOURCE: VersionedResourceIdentity = Object.freeze({ kind: ACCESS_PRESETS_RESOURCE_KIND, key: ACCESS_PRESETS_RESOURCE_KEY })
 
 /**
  * The `schemaVersion` 5 layout (Clauses 01a1144e-531c-…, 01a11bb1-8d67-…, 01a11bb1-8dcc-…,
  * 01a1144e-5508-…, 01a1144e-551f-… and 01a11a5e-1e0e-…): the former `.uiux/` directory is the
  * Workspace root. It holds the manifest `workspace.json`, the Product Kit file, the data
  * directories, `artifacts/`, `history/`, the code directory `kit/` and the runtime files, all
- * directly under the root. The data directories keep their names and inner layout.
+ * directly under the root. The data directories keep their names and inner layout. It is also the
+ * `schemaVersion` 6 layout, which adds the Access presets file `access-presets.json` (Clauses
+ * 01a11bb1-8d67-71c5-929f-138afd0c66ec and 01a11c09-a855-7d7e-93ec-cd9a85fdb65e).
  */
 export const V5_LAYOUT: WorkspaceLayout = Object.freeze({
 	id: 'v5',
 	metadataDir: '',
 	manifestPath: V5_MANIFEST_PATH,
 	productKitPath: PRODUCT_KIT_FILENAME,
+	accessPresetsPath: ACCESS_PRESETS_FILENAME,
 	codeDir: V5_CODE_DIRECTORY,
 	artifactsDir: V5_ARTIFACTS_DIRECTORY,
 	checkpointsDir: V5_CHECKPOINTS_DIRECTORY,
 	transactionsDir: '.transactions',
 	lockPath: '.persistence.lock',
 	serverHoldPath: '.server-hold.json',
-	canonicalFiles: Object.freeze([V5_MANIFEST_PATH, PRODUCT_KIT_FILENAME]),
+	canonicalFiles: Object.freeze([V5_MANIFEST_PATH, PRODUCT_KIT_FILENAME, ACCESS_PRESETS_FILENAME]),
 	versionedRoots: Object.freeze([
 		V5_MANIFEST_PATH,
 		PRODUCT_KIT_FILENAME,
+		ACCESS_PRESETS_FILENAME,
 		`${WORKSPACE_DATA_DIRECTORY.views}/`,
 		`${WORKSPACE_DATA_DIRECTORY.flows}/`,
 		`${WORKSPACE_DATA_DIRECTORY.locales}/`,
@@ -187,10 +199,11 @@ export const V5_LAYOUT: WorkspaceLayout = Object.freeze({
 	artifactRelativePath(identity: string): string {
 		return `${V5_ARTIFACTS_DIRECTORY}/${artifactShardRelativePath(identity)}`
 	},
-	isCanonicalPath: path => path === V5_MANIFEST_PATH || path === PRODUCT_KIT_FILENAME || isCanonicalDataPath(path),
+	isCanonicalPath: path => path === V5_MANIFEST_PATH || path === PRODUCT_KIT_FILENAME || path === ACCESS_PRESETS_FILENAME || isCanonicalDataPath(path),
 	classifyVersionedPath(path: string): VersionedResourceIdentity | undefined {
 		if (path === V5_MANIFEST_PATH) return WORKSPACE_RESOURCE
 		if (path === PRODUCT_KIT_FILENAME) return PRODUCT_KIT_RESOURCE
+		if (path === ACCESS_PRESETS_FILENAME) return ACCESS_PRESETS_RESOURCE
 		return classifyDataVersionedPath(path)
 	},
 })

@@ -4,8 +4,9 @@ Feature: Workspace migration
   # Test: code@c384e72 `tests/workspace-migration.test.ts#L249` "prints the dry-run plan, then migrates with the new manifest revision, then reports already current". https://github.com/DevilTea/uiux/blob/c384e72341032d267df8e8d6d0bc690117e3224b/tests/workspace-migration.test.ts#L249
   # Test: code@8b8dc84 `tests/history-cli.test.ts#L256` "writes nothing at all on a dry run" (no pre-migration Checkpoint, no host history). https://github.com/DevilTea/uiux/blob/8b8dc84c32fb9c7c1868ed84939f65bf1781fda6/tests/history-cli.test.ts#L256
   # Test: code@3b20412 `tests/workspace-migration.test.ts#L295` "prints the dry-run plan, then migrates with the new manifest revision, then reports already current". https://github.com/DevilTea/uiux/blob/3b20412aff65b677618b90a4a841ad8dfccf4218/tests/workspace-migration.test.ts#L295
-  # Status: partly built as of 3b20412: the chain ends at `schemaVersion` 5, and `uiux.v5-to-v6` is tracked in issue #142; see the Implementation gaps entries of 01a1144e-534c-7087-a504-76075f73df0d and 01a114ec-890a-73a1-808b-cb08087a9597 in their owner.
-  # Note: Steps made version-neutral because Discussion #139 raised the current version; the tests at c384e72 check the chain to `schemaVersion` 4, the one at 3b20412 the chain to `schemaVersion` 5.
+  # Test: code@39e99da `tests/workspace-migration.test.ts#L297` "prints the dry-run plan, then migrates with the new manifest revision, then reports already current". https://github.com/DevilTea/uiux/blob/39e99da86eec36860acb97077deddd836cce9a33/tests/workspace-migration.test.ts#L297
+  # Status: built as of 39e99da: the chain reaches `schemaVersion` 6 through `uiux.v5-to-v6`.
+  # Note: Steps made version-neutral because Discussion #139 raised the current version; the tests at c384e72 check the chain to `schemaVersion` 4, the one at 3b20412 the chain to `schemaVersion` 5, the one at 39e99da the chain to `schemaVersion` 6.
   @spec:id:01a118a1-cff9-75ac-82b2-35c863ed571a
   @spec:demonstrates:01a1144e-5054-7fc1-9c23-49ae8c9886c1
   @spec:demonstrates:01a1144e-5605-722c-a662-2b483ddaad73

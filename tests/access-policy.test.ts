@@ -109,6 +109,7 @@ const ROLE_MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; 
 	assessHandoffReadiness: { min: 'viewer' },
 	listLeases: { min: 'viewer' },
 	readProductKit: { min: 'viewer' },
+	readAccessPresets: { min: 'viewer' },
 	diffVersions: { min: 'viewer' },
 	listVersions: { min: 'viewer' },
 	readVersion: { min: 'viewer' },
@@ -149,6 +150,7 @@ const ROLE_MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; 
 	forceReleaseLease: { min: 'owner', H: true, S: true },
 	deleteCheckpoint: { min: 'owner', H: true, S: true },
 	administerAccess: { min: 'owner', H: true, S: true },
+	updateAccessPresets: { min: 'owner', H: true, S: true },
 }
 
 function roleMatrixAllows(principal: Principal, operation: AccessOperation): boolean {
@@ -202,8 +204,8 @@ describe('parity: role-derived keys decide as the role matrix did', () => {
 				if ((denied === undefined) !== before) changed.push(`${id}: ${before ? 'allowed' : 'refused'} → ${denied ? 'refused' : 'allowed'}`)
 			}
 		}
-		// 49 operations, 7 lease acquires, 7 restores and 1 settings adapters change, for 16 members and the system credential.
-		expect(compared).toBe(64 * 17)
+		// 51 operations, 7 lease acquires, 7 restores and 1 settings adapters change, for 16 members and the system credential.
+		expect(compared).toBe(66 * 17)
 		expect(changed.sort()).toEqual([...INTENDED_CHANGES].sort())
 	})
 

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { userInfo } from 'node:os'
 
 import { BUILT_IN_ACCESS_PRESETS, grantedKeys, keysOfPreset, PERMISSION_KEYS, writeKeyForKind } from '../../application/access/keys'
-import { memberLabel } from '../../application/access/labels'
+import { memberLabel, type LabelPreset } from '../../application/access/labels'
 import type { Lease, LeaseManager } from '../../application/access/leases'
 import {
 	type MemberPrincipal,
@@ -82,6 +82,11 @@ export type AccessServiceOptions = Readonly<{
 	now?: () => number
 	/** Shown in 401 messages; defaults to the Workspace root. */
 	workspaceLabel?: string
+	/**
+	 * The Workspace's Access presets at this moment, which label members and which the bootstrap
+	 * hint names (`readWorkspaceAccessPresets`); the built-in presets when omitted.
+	 */
+	presets?: () => Promise<readonly LabelPreset[]>
 }>
 
 const RATE_WINDOW_MS = 60_000
@@ -104,11 +109,13 @@ export class AccessService {
 	private readonly attempts: McpAttempt[] = []
 	private attemptCount = 0
 	readonly captureCredential: string
+	private readonly readPresets: () => Promise<readonly LabelPreset[]>
 
 	constructor(options: AccessServiceOptions) {
 		this.store = options.store
 		this.leases = options.leases
 		this.now = options.now ?? (() => Date.now())
+		this.readPresets = options.presets ?? (async () => BUILT_IN_ACCESS_PRESETS)
 		this.captureCredential = generateCredential('session', this.store.data.hint).value
 		this.system.set(this.captureCredential, systemPrincipal('system:capture'))
 		// A lease whose holder lost the kind's write key ends when next looked at, even before a reconcile.
@@ -117,6 +124,11 @@ export class AccessService {
 
 	get hint(): string {
 		return this.store.data.hint
+	}
+
+	/** The Workspace's Access presets now (Rule 01a11c09-c724-7a1b-9505-3146b5b2b241); labels are computed from them. */
+	presets(): Promise<readonly LabelPreset[]> {
+		return this.readPresets()
 	}
 
 	get cookieName(): string {
@@ -257,7 +269,7 @@ export class AccessService {
 		}
 		if (verification.kind === 'token') {
 			this.recordUsage(this.tokenUsage, verification.token!.id, now)
-			return { ok: true, principal: memberPrincipal(verification.member, 'token', verification.token!.id) }
+			return { ok: true, principal: memberPrincipal(verification.member, 'token', verification.token!.id, await this.presets()) }
 		}
 		// A session belongs to the origin where it was created (Rule 01a11485-ed4a-766b-a51c-af2b9ffb1fcb):
 		// a cookie presented on another origin, or with no matched origin, authenticates nothing. It is
@@ -265,7 +277,7 @@ export class AccessService {
 		if (!input.origin || !sessionServesOrigin(verification.session!, input.origin))
 			return { ok: false, status: 401, code: 'auth.invalid_credential', message: 'This session was created on another origin of this server. Sign in again here.' }
 		this.recordUsage(this.sessionUsage, verification.session!.id, now)
-		return { ok: true, principal: memberPrincipal(verification.member, 'session', verification.session!.id) }
+		return { ok: true, principal: memberPrincipal(verification.member, 'session', verification.session!.id, await this.presets()) }
 	}
 
 	private recordUsage(map: Map<string, number>, id: string, now: number): void {
@@ -361,7 +373,7 @@ export class AccessService {
 				: '  Sign in (single use, expires in 24 h):',
 			...origins.map(origin => `    ${origin}/login#${outcome.invite}`),
 			'/mcp requires a token. For an agent:',
-			`  uiux member add claude --workspace ${root} --kind agent ${agentAccessOption(BUILT_IN_ACCESS_PRESETS)}`,
+			`  uiux member add claude --workspace ${root} --kind agent ${agentAccessOption(await this.presets())}`,
 			`  uiux token create --workspace ${root} --member claude`,
 			'Moved, renamed, or a git worktree? Reuse the old roster instead:',
 			`  uiux access copy --from <old-dir> --workspace ${root} --replace`,
@@ -460,7 +472,8 @@ function uniqueNickname(file: AccessFile, base: string): string {
  * The access option of the bootstrap banner's command for adding an Agent (Rule
  * 01a11c09-b9a6-70a6-a9f6-481c8c3f7386): an existing preset, the one with `id` `editor` when there
  * is one, or `--keys` with the built-in Editor keys an Agent can hold when the Workspace has no
- * preset. Below `schemaVersion` 6 the presets are the built-in ones.
+ * preset. The presets are the Workspace's (`readWorkspaceAccessPresets`): below `schemaVersion` 6
+ * the built-in ones.
  */
 export function agentAccessOption(presets: readonly Readonly<{ id: string; name: string }>[]): string {
 	const preset = presets.find(item => item.id === 'editor') ?? presets[0]
@@ -484,16 +497,17 @@ export function memberKeys(member: Pick<StoredMember, 'kind' | 'keys'>) {
 /**
  * The principal of a request authenticated as `member`, its keys resolved now (Rule
  * 01a11485-ebdd-70fc-b853-0621caf056b8) and its label computed from its stored keys (Rule
- * 01a11c09-c9be-736b-95a4-0b39d6f64cf0), so a stored key unknown to this version makes it Custom.
+ * 01a11c09-c9be-736b-95a4-0b39d6f64cf0) among the Workspace's presets, so a stored key unknown to
+ * this version makes it Custom.
  */
-export function memberPrincipal(member: StoredMember, credential: 'session' | 'token', credentialId: string): MemberPrincipal {
+export function memberPrincipal(member: StoredMember, credential: 'session' | 'token', credentialId: string, presets: readonly LabelPreset[] = BUILT_IN_ACCESS_PRESETS): MemberPrincipal {
 	return {
 		type: 'member',
 		memberId: member.id,
 		nickname: member.nickname,
 		kind: member.kind,
 		keys: memberKeys(member),
-		label: memberLabel(member),
+		label: memberLabel(member, presets),
 		credential,
 		credentialId,
 	}

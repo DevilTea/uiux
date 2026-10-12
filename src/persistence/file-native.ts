@@ -9,6 +9,7 @@ import type { MutableResourceRepository } from '../application/ports/resources'
 import { validateAssetContentFiles, validateAssetContentMetadata, validateAssetMetadata, type AuthoredAsset, type AuthoredAssetResource } from '../domain/assets/schema'
 import { validateFlowResource, type FlowResource } from '../domain/flows/schema'
 import { validateI18nResource, type I18nResource } from '../domain/i18n/schema'
+import { ACCESS_PRESETS_RESOURCE_KIND, ACCESS_PRESETS_SCHEMA_VERSION, validateAccessPresetsFile, type AccessPresetsFile } from '../domain/access-presets/schema'
 import { PRODUCT_KIT_RESOURCE_KEY, PRODUCT_KIT_RESOURCE_KIND, PRODUCT_KIT_SCHEMA_VERSION, validateProductKit, type ProductKit } from '../domain/product-kit/schema'
 import { isCanonicalLocaleFilename, isFullUuid, isJsonValue, isRecord, isSafeRelativePath, type Diagnostic } from '../domain/validation'
 import { validateReviewThread, type ReviewThread } from '../domain/reviews/schema'
@@ -390,6 +391,8 @@ export class FileNativePersistence {
 	readonly workspace: WorkspaceFileRepository
 	/** The Product Kit file (from `schemaVersion` 5; the old layout has none). */
 	readonly productKit: ProductKitFileRepository
+	/** The Access presets file (from `schemaVersion` 6; older Workspaces have none). */
+	readonly accessPresets: AccessPresetsFileRepository
 	readonly views: JsonResourceRepository<string, ViewResource>
 	readonly flows: JsonResourceRepository<string, FlowResource>
 	readonly reviews: JsonResourceRepository<string, ReviewThread>
@@ -413,6 +416,7 @@ export class FileNativePersistence {
 		this.lockWaitMilliseconds = options.lockWaitMilliseconds ?? MAX_LOCK_WAIT_MS
 		this.workspace = new WorkspaceFileRepository(this)
 		this.productKit = new ProductKitFileRepository(this)
+		this.accessPresets = new AccessPresetsFileRepository(this)
 		this.views = new JsonResourceRepository(this, viewRelativePath, 'id', (resource, filename) => validateViewResource(resource, filename).diagnostics, { directory: 'views', suffix: '.view.json' })
 		this.flows = new JsonResourceRepository(this, flowRelativePath, 'id', (resource, filename) => validateFlowResource(resource, filename).diagnostics, { directory: 'flows', suffix: '.flow.json' })
 		this.reviews = new JsonResourceRepository(this, reviewRelativePath, 'id', (resource, filename, schemaVersion) => validateReviewThread(resource, { filename, schemaVersion }).diagnostics, { directory: 'reviews', suffix: '.review.json' })
@@ -1949,6 +1953,83 @@ export class ProductKitFileRepository implements MutableResourceRepository<'prod
 }
 
 /**
+ * The Access presets file `access-presets.json` (Clause 01a11c09-a855-7d7e-93ec-cd9a85fdb65e), one
+ * single-file resource of kind and key `access-presets`, from `schemaVersion` 6. A Workspace below 6
+ * has none: reads find nothing, and writes need the current schema like every mutation. Writes are
+ * canonical design writes (versioned, observed by history). Reads report the file's diagnostics on
+ * disk (Rule 01a11c09-cb08-7007-bcdd-8a04e54d02b5); refusing a write is the authoring operation's job.
+ */
+export class AccessPresetsFileRepository {
+	constructor(private readonly persistence: FileNativePersistence) {}
+
+	async readRevision(): Promise<ResourceRevision | undefined> {
+		return this.persistence.withReadLock(async () => {
+			const path = this.persistence.layout.accessPresetsPath
+			const bytes = path ? await this.persistence.readOptionalBytesUnlocked(path) : undefined
+			return bytes ? revisionForBytes(bytes) : undefined
+		})
+	}
+
+	/**
+	 * The file with its diagnostics on disk. A file that is not JSON, such as one a Git merge left
+	 * conflict markers in, reads as no resource with the revision of its bytes and
+	 * `persistence.invalid_json` (Clause 01a12f98-f466-7c86-af94-5887f1d1b50d), so a write naming that
+	 * revision can replace it (Rule 01a12f9c-3dab-7391-bef5-168f684187e7).
+	 */
+	async readInspected(): Promise<InspectedResource<AccessPresetsFile | null> | undefined> {
+		return this.persistence.withReadLock(async () => {
+			const path = this.persistence.layout.accessPresetsPath
+			if (!path) return undefined
+			const bytes = await this.persistence.readOptionalBytesUnlocked(path)
+			if (!bytes) return undefined
+			let resource: unknown
+			try {
+				resource = parseJsonBytes(bytes, path)
+			}
+			catch (error) {
+				if (!(error instanceof PersistenceError) || error.code !== 'persistence.invalid_json') throw error
+				return { resource: null, revision: revisionForBytes(bytes), diagnostics: [{ code: 'persistence.invalid_json', path: `/${path}`, message: `${error.message} A write with this revision replaces the whole file.` }] }
+			}
+			return { resource: resource as AccessPresetsFile, revision: revisionForBytes(bytes), diagnostics: validateAccessPresetsFile(resource).diagnostics }
+		})
+	}
+
+	/** Creates the file in a current-schema Workspace that has none (a Workspace set up file by file). */
+	async create(resource: AccessPresetsFile): Promise<ResourceRevision> {
+		return this.persistence.withLock(async () => {
+			await this.persistence.assertWritableUnlocked()
+			const path = this.persistence.layout.accessPresetsPath
+			if (!path)
+				throw new PersistenceError('persistence.path_rejected', `A Workspace below schemaVersion ${ACCESS_PRESETS_SCHEMA_VERSION} has no Access presets file.`)
+			if (await this.persistence.readOptionalBytesUnlocked(path))
+				throw new PersistenceError('persistence.resource_exists', 'The Access presets file already exists.')
+			const bytes = this.persistence.serializeJson(resource, path)
+			if (!await commitCanonicalWrite(this.persistence, [{ path, bytes }], () => this.persistence.atomicCreateUnlocked(path, bytes)))
+				throw new PersistenceError('persistence.resource_exists', 'The Access presets file already exists.')
+			return revisionForBytes(bytes)
+		})
+	}
+
+	async compareAndSwap(input: Readonly<{ key: 'access-presets'; expectedRevision: ResourceRevision; resource: AccessPresetsFile }>): Promise<Readonly<{ ok: true; revision: ResourceRevision } | { ok: false; conflict: RevisionConflict }>> {
+		return this.persistence.withLock(async () => {
+			await this.persistence.assertWritableUnlocked()
+			const path = this.persistence.layout.accessPresetsPath
+			if (!path)
+				throw new PersistenceError('persistence.path_rejected', `A Workspace below schemaVersion ${ACCESS_PRESETS_SCHEMA_VERSION} has no Access presets file.`)
+			const currentBytes = await this.persistence.readOptionalBytesUnlocked(path)
+			if (!currentBytes)
+				throw new PersistenceError('persistence.resource_not_found', 'The Access presets file does not exist.')
+			const currentRevision = revisionForBytes(currentBytes)
+			if (input.expectedRevision !== currentRevision)
+				return { ok: false, conflict: { code: 'revision_conflict', currentRevision } }
+			const bytes = this.persistence.serializeJson(input.resource, path)
+			await commitCanonicalWrite(this.persistence, [{ path, bytes }], () => this.persistence.atomicWriteUnlocked(path, bytes, currentBytes))
+			return { ok: true, revision: revisionForBytes(bytes) }
+		})
+	}
+}
+
+/**
  * How the `i18n/` directory holds one canonical locale filename. Locale identity is the exact,
  * case-sensitive canonical tag (discovery accepts only exactly cased canonical filenames), but a
  * case-insensitive volume resolves `i18n/zh-TW.json` to a case variant such as `zh-tw.json`.
@@ -2610,7 +2691,7 @@ export function revisionForResourceFiles(kind: string, files: ReadonlyMap<string
 		catch { return revisionForBytes(metadataBytes) }
 		return assetRevision(metadataBytes, contentFiles)
 	}
-	if (kind !== 'workspace' && kind !== PRODUCT_KIT_RESOURCE_KIND && kind !== 'view' && kind !== 'flow' && kind !== 'locale') return undefined
+	if (kind !== 'workspace' && kind !== PRODUCT_KIT_RESOURCE_KIND && kind !== ACCESS_PRESETS_RESOURCE_KIND && kind !== 'view' && kind !== 'flow' && kind !== 'locale') return undefined
 	if (files.size === 0) return undefined
 	if (files.size > 1)
 		throw new TypeError(`A ${kind} resource is exactly one file; received ${files.size}.`)
@@ -2769,13 +2850,16 @@ function validateCanonicalSnapshot(snapshot: WorkspaceSnapshot, expectedVersion:
 	// Clause 01a11bb1-8e31-7b25-b6b8-da667b201670: from schemaVersion 5 the Product Kit file is required.
 	if (layout.productKitPath && !snapshot.has(layout.productKitPath))
 		throw new PersistenceError('workspace.migration_failed', `Migration result must contain ${layout.productKitPath}.`)
+	// Clause 01a11c09-a855-7d7e-93ec-cd9a85fdb65e: from schemaVersion 6 the Access presets file is required.
+	if (expectedVersion >= ACCESS_PRESETS_SCHEMA_VERSION && layout.accessPresetsPath && !snapshot.has(layout.accessPresetsPath))
+		throw new PersistenceError('workspace.migration_failed', `Migration result must contain ${layout.accessPresetsPath}.`)
 	const assetFiles = new Map<string, string[]>()
 	for (const [relativePath, bytes] of snapshot) {
 		assertTransactionalPath(layout, relativePath)
 		if (!(bytes instanceof Uint8Array))
 			throw new PersistenceError('workspace.migration_failed', `Migration result ${relativePath} must contain bytes.`)
 		if (relativePath === manifestPath) continue
-		if (relativePath === layout.productKitPath) {
+		if (relativePath === layout.productKitPath || relativePath === layout.accessPresetsPath) {
 			parseJsonBytes(bytes, relativePath)
 			continue
 		}

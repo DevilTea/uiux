@@ -2,6 +2,7 @@ import { posix } from 'node:path'
 
 import { canonicalJsonBytes } from '../domain/canonical-json'
 import { bareSpecifierPackageName, declaredKitDependencies, KIT_PACKAGE_FILENAME } from '../adapters/kit-dependencies'
+import { builtInAccessPresetsFile } from '../domain/access-presets/schema'
 import { emptyProductKit } from '../domain/product-kit/schema'
 import { validateReviewThread } from '../domain/reviews/schema'
 import { isRecord } from '../domain/validation'
@@ -263,7 +264,7 @@ export const WORKSPACE_V4_TO_V5_STEP: WorkspaceMigrationStep = Object.freeze({
 			...(toDeclare.size > 0 ? [`Declare ${[...toDeclare].sort().join(', ')} in ${OLD_KIT_PACKAGE_FILE} (dependencies, devDependencies, peerDependencies or optionalDependencies); uiux migrate writes no package.json.`] : []),
 		]
 		return {
-			message: `${WORKSPACE_V4_TO_V5_STEP_ID} refuses ${items.length} Adapter${items.length === 1 ? '' : 's'} that the relocated Workspace could not resolve, and nothing was written. ${actions.join(' ')} Then run uiux migrate again.`,
+			message: `${WORKSPACE_V4_TO_V5_STEP_ID} refuses ${items.length} Adapter${items.length === 1 ? '' : 's'} that the relocated Workspace could not resolve, so no migration step ran. ${actions.join(' ')} Then run uiux migrate again.`,
 			items,
 		}
 	},
@@ -296,6 +297,59 @@ export const WORKSPACE_V4_TO_V5_STEP: WorkspaceMigrationStep = Object.freeze({
 			catch { continue } // Unparseable JSON stays byte-identical and keeps its persistence diagnostic.
 			const filename = path.slice('reviews/'.length)
 			if (validateReviewThread(review, { schemaVersion: 4, filename }).ok) assertValidUnder(review, filename, 5, WORKSPACE_V4_TO_V5_STEP_ID)
+		}
+		return next
+	},
+})
+
+export const WORKSPACE_V5_TO_V6_STEP_ID = 'uiux.v5-to-v6'
+
+/**
+ * The `5 -> 6` step of Part 15 (Rule 01a11c09-c6b5-7a65-86fd-8b5dddf3de6e): it adds the Access
+ * presets file `access-presets.json` holding the built-in Access presets (Clause
+ * 01a11c09-a9a4-79b4-aab4-8734e4702b47) and otherwise changes only the manifest `schemaVersion`. The
+ * layout is the same at 5 and 6, so nothing moves. Deterministic and idempotent; it re-validates
+ * every Review file that was valid under 5 against 6.
+ *
+ * `refuse`, which `uiux migrate` runs before any step changes the Workspace, refuses a
+ * schemaVersion 5 Workspace that already holds a presets file rather than overwrite it: UIUX writes
+ * none at 5. The layout does not change, so the pre-migration Checkpoint is already written by then
+ * and stays (`uiux migrate` reports it); the refusal therefore says only that no step ran.
+ * `apply` alone never refuses, so an in-memory upgrade of a version recorded with such a file still
+ * reads; it holds the built-in presets, as the migrated Workspace would.
+ */
+export const WORKSPACE_V5_TO_V6_STEP: WorkspaceMigrationStep = Object.freeze({
+	id: WORKSPACE_V5_TO_V6_STEP_ID,
+	fromVersion: 5,
+	toVersion: 6,
+	async refuse(snapshot: WorkspaceSnapshot): Promise<WorkspaceMigrationRefusal | undefined> {
+		const presetsPath = layoutForSchemaVersion(6).accessPresetsPath!
+		if (!snapshot.has(presetsPath)) return undefined
+		return {
+			message: `${WORKSPACE_V5_TO_V6_STEP_ID} writes ${presetsPath}, which this schemaVersion 5 Workspace already holds, so no migration step ran. Move it away, then run uiux migrate again.`,
+			items: [{ path: `/${presetsPath}`, message: `${presetsPath} exists before the migration that adds it.` }],
+		}
+	},
+
+	apply(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+		const layout = layoutForSchemaVersion(6)
+		const presetsPath = layout.accessPresetsPath!
+		const next = new Map(snapshot)
+		const manifestBytes = next.get(layout.manifestPath)
+		if (!manifestBytes) throw new TypeError(`${WORKSPACE_V5_TO_V6_STEP_ID} requires ${layout.manifestPath}.`)
+		const manifest = parseJson(manifestBytes, layout.manifestPath)
+		if (!isRecord(manifest) || manifest.schemaVersion !== 5)
+			throw new TypeError(`${WORKSPACE_V5_TO_V6_STEP_ID} applies only to a schemaVersion 5 manifest.`)
+		next.set(layout.manifestPath, canonicalJsonBytes({ ...manifest, schemaVersion: 6 }))
+		next.set(presetsPath, canonicalJsonBytes(builtInAccessPresetsFile()))
+
+		for (const [path, bytes] of snapshot) {
+			if (!/^reviews\/[^/]+\.review\.json$/u.test(path)) continue
+			let review: unknown
+			try { review = parseJson(bytes, path) }
+			catch { continue } // Unparseable JSON stays byte-identical and keeps its persistence diagnostic.
+			const filename = path.slice('reviews/'.length)
+			if (validateReviewThread(review, { schemaVersion: 5, filename }).ok) assertValidUnder(review, filename, 6, WORKSPACE_V5_TO_V6_STEP_ID)
 		}
 		return next
 	},
@@ -340,8 +394,8 @@ export const WORKSPACE_GITIGNORE_RULES: readonly string[] = Object.freeze([
 
 export const PRODUCT_WORKSPACE_SCHEMA_POLICY = defineWorkspaceSchemaPolicy({
 	currentVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
-	recognizedVersions: [1, 2, 3, 4, 5],
-	steps: [WORKSPACE_V1_TO_V2_STEP, WORKSPACE_V2_TO_V3_STEP, WORKSPACE_V3_TO_V4_STEP, WORKSPACE_V4_TO_V5_STEP],
+	recognizedVersions: [1, 2, 3, 4, 5, 6],
+	steps: [WORKSPACE_V1_TO_V2_STEP, WORKSPACE_V2_TO_V3_STEP, WORKSPACE_V3_TO_V4_STEP, WORKSPACE_V4_TO_V5_STEP, WORKSPACE_V5_TO_V6_STEP],
 })
 
 /** Returns the same object when no lifecycle resolve event lacks a resolution. */

@@ -145,10 +145,13 @@ export function keysForRole(kind: MemberKind, role: AccessRole): readonly Permis
 /**
  * The keys that applying a preset copies to a member: the preset's keys as they are at that
  * moment (Rule 01a11c09-b8c6-741e-b3b7-97f4840985c5), without its `humanOnly` keys for an Agent
- * (Rule 01a11c74-26ef-7894-9b2c-2714f487aeb8). The member keeps no reference to the preset.
+ * (Rule 01a11c74-26ef-7894-9b2c-2714f487aeb8). The member keeps no reference to the preset. Only the
+ * keys this UIUX version knows are applied (owner ruling of 2026-10-11 on PR #189): a preset in the
+ * Workspace's presets file may hold a key a newer UIUX wrote, which this version never grants.
  */
 export function keysOfPreset<Key extends string>(kind: MemberKind, presetKeys: readonly Key[]): Key[] {
-	return kind === 'agent' ? presetKeys.filter(key => !isHumanOnlyKey(key)) : [...presetKeys]
+	const known = presetKeys.filter(key => isCatalogKey(key))
+	return kind === 'agent' ? known.filter(key => !isHumanOnlyKey(key)) : known
 }
 
 /**
