@@ -35,8 +35,8 @@ import type { KitBuildControl, KitBuildRestart, KitBuildStatus } from '../applic
  *   01a11bb1-9f91-7528-a71c-6cd206e25121): the `command` run as a whole, and a `watch` run until
  *   its first settled output (a watch process runs on after that).
  * - The log is the last 256 KiB of the process output, in memory only (Clause
- *   01a11bb1-891e-7fa5-bf48-4c459fd60d11), read with secret values (`maskSecrets`) and host paths
- *   masked.
+ *   01a11bb1-891e-7fa5-bf48-4c459fd60d11), read with secret values masked (`maskSecrets`, Clause
+ *   01a12f99-bb0c-7b87-b500-561feb853ae3), then host paths.
  *
  * Known limit (Product Kit Contract, Notes): a watch rebuild that fails without exiting leaves the
  * old output `ready`; the log shows the error. The build runs with the host user's privileges.
@@ -90,7 +90,7 @@ export const KIT_BUILD_GENERATION_WARNING = 50
 const INTERNAL_VARIABLE_PREFIX = 'UIUX_INTERNAL_'
 /** The Agent Token variable the CLI suggests; never passed to a build (owner ruling 2 of 2026-10-12). */
 const MCP_TOKEN_VARIABLE = 'UIUX_MCP_TOKEN'
-/** Variable names whose values the build log masks (Clause 01a11bb1-891e-7fa5-bf48-4c459fd60d11). */
+/** Variable names whose values the build log masks (Clause 01a12f99-bb0c-7b87-b500-561feb853ae3). */
 const SECRET_NAME = /TOKEN|SECRET|KEY|PASSWORD/i
 /** The shortest value masked, so that a short value such as `1` leaves the log readable. */
 export const KIT_BUILD_SECRET_MIN_LENGTH = 8
@@ -102,9 +102,10 @@ const MAX_OUTPUT_ENTRIES = 20_000
 
 /**
  * The build process environment (Clause 01a11bb1-88ba-7030-a7dd-5c7e843c31ea): `base` minus
- * `UIUX_MCP_TOKEN` and every `UIUX_INTERNAL_*` variable, with `kit/node_modules/.bin` and `<workspace root>/node_modules/.bin`
- * ahead of the inherited `PATH`. No other ancestor directory is added (owner ruling 1 of
- * 2026-10-12): a tool elsewhere is named by an absolute path in the build command.
+ * `UIUX_MCP_TOKEN` and every `UIUX_INTERNAL_*` variable, with `kit/node_modules/.bin` and
+ * `<workspace root>/node_modules/.bin` ahead of the inherited `PATH`. No other ancestor directory is
+ * added (owner ruling 1 of 2026-10-12): a tool elsewhere is named by an absolute path in the build
+ * command.
  */
 export function kitBuildEnvironment(base: NodeJS.ProcessEnv, kitDirectory: string, workspaceRoot: string): Record<string, string> {
 	const env: Record<string, string> = {}
@@ -123,7 +124,7 @@ export function kitBuildEnvironment(base: NodeJS.ProcessEnv, kitDirectory: strin
 }
 
 /**
- * The values the build log masks (Clause 01a11bb1-891e-7fa5-bf48-4c459fd60d11): those of every
+ * The values the build log masks (Clause 01a12f99-bb0c-7b87-b500-561feb853ae3): those of every
  * variable in `envs` whose name contains TOKEN, SECRET, KEY or PASSWORD, in any case, and whose value
  * has at least `KIT_BUILD_SECRET_MIN_LENGTH` characters; longest first.
  */
