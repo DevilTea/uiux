@@ -144,7 +144,7 @@ const STEPS: readonly Step[] = [
 	{ name: 'Reviews · message menu', path: `/reviews?thread=${OPEN_THREAD}`, act: async (page) => { await page.locator('[data-message-menu]').first().click() } },
 	{ name: 'Reviews · submit for review', path: `/reviews?thread=${OPEN_THREAD}`, act: async (page) => { await page.locator('[data-review-submit]').first().click(); await page.locator('[data-submit-domains]').waitFor() } },
 	{ name: 'Workspace settings', path: '/workspace/settings' },
-	{ name: 'Adapters', path: '/workspace/adapters' },
+	{ name: 'Product Kit', path: '/workspace/product-kit' },
 	{ name: 'Access presets', path: '/workspace/access-presets' },
 	{ name: 'Locales', path: '/workspace/locales' },
 	{ name: 'Assets', path: '/workspace/assets' },

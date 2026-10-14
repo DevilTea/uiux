@@ -573,7 +573,8 @@
     },
     "kitBuild": {
       "failedTitle": "The kit build failed",
-      "failedDescription": "The Preview keeps using the last good build output, and formal capture waits until a build succeeds. Fix the kit project, then restart the build."
+      "failedDescription": "The Preview keeps using the last good build output, and formal capture waits until a build succeeds. Fix the kit project, then restart the build.",
+      "open": "Open Product Kit"
     }
   },
   "nav": {
@@ -583,6 +584,7 @@
     "reviews": "Reviews",
     "workspace": "Workspace",
     "settings": "Settings",
+    "productKit": "Product Kit",
     "locales": "Locales",
     "assets": "Assets",
     "accessPresets": "Access presets",
@@ -961,7 +963,6 @@
     "general": "General",
     "viewports": "Viewports",
     "themes": "Themes",
-    "adapters": "Adapters",
     "keyChange": "Renaming a key changes its identity. Check references first.",
     "unsaved": "{n} unsaved change | {n} unsaved changes",
     "conflict": "Settings changed since you opened them.",
@@ -969,7 +970,6 @@
     "sectionIndex": "Settings sections",
     "saved": "Settings saved",
     "saveFailed": "Couldn't save",
-    "adaptersPartlySaved": "Specifiers saved, config not saved",
     "locale": {
       "description": "The primary Locale of the previewed product.",
       "primaryLocale": "Primary Locale",
@@ -1022,6 +1022,52 @@
       "dimensionRequired": "Enter a width and height of at least 1."
     }
   },
+  "productKit": {
+    "title": "Product Kit",
+    "subtitle": "Stored in {file}.",
+    "overview": "Overview",
+    "adapters": "Adapters",
+    "conflict": "The Product Kit changed since you opened it.",
+    "saved": "Product Kit saved",
+    "saveFailed": "Couldn't save",
+    "adaptersPartlySaved": "Specifiers saved, config not saved",
+    "legacy": "This Workspace has no Product Kit file until it's migrated. Its Adapters are shown read-only.",
+    "problems": "{n} problem in the Product Kit | {n} problems in the Product Kit",
+    "packages": {
+      "title": "Packages",
+      "description": "Design System packages that {field} lists, in order.",
+      "installed": "Installed",
+      "linked": "Linked",
+      "missing": "Not installed",
+      "empty": "No Design System packages.",
+      "missingHelp": "The Workbench never installs packages. Install them in the kit project yourself, then reload."
+    },
+    "build": {
+      "title": "Build",
+      "description": "The kit project's build, as kit/package.json declares it.",
+      "restart": "Restart build",
+      "restarted": "Build restarted",
+      "noBuildDeclared": "kit/package.json declares no build",
+      "restartFailed": "Couldn't restart the build",
+      "state": {
+        "none": "No build",
+        "building": "Building",
+        "ready": "Ready",
+        "failed": "Failed"
+      },
+      "stateHelp": {
+        "none": "The kit project declares no build, or none has run yet.",
+        "building": "The Preview uses the last good output until this run ends.",
+        "ready": "The Preview uses this build's output.",
+        "failed": "The Preview keeps using the last good output."
+      },
+      "log": "Build log",
+      "logEmpty": "No output yet.",
+      "reloadLog": "Reload log",
+      "logFailed": "Couldn't load the build log.",
+      "logRequiresKey": "Reading the build log requires the permission key {key}."
+    }
+  },
   "authoring": {
     "discard": "Discard",
     "saveChanges": "Save changes",
@@ -1068,6 +1114,7 @@
       "unknown": "Not checked"
     },
     "adapterId": "ID",
+    "package": "Package",
     "version": "Version",
     "apiVersion": "API",
     "config": "Config",

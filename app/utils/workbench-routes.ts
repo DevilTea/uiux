@@ -33,10 +33,26 @@ export function flowPath(flowId: string): string {
 export const VIEWS_LOCATION = { path: '/', query: { tab: 'views' } } as const
 
 /**
- * The Adapters section of Workspace settings. The Adapter set is part of the settings document,
- * so it has no page of its own; `/workspace/adapters` redirects here.
+ * The sections of the Product Kit page (Clause 01a11be8-5cab-7e50-89fe-b89c243d773d) that this build
+ * has. Components, Styles & themes and Files are not built yet (issue #141), so their `section`
+ * values open the page at its top, like an unknown value.
  */
-export const ADAPTERS_LOCATION = { path: '/workspace/settings', query: { section: 'adapters' } } as const
+export type ProductKitSectionId = 'overview'
+export const PRODUCT_KIT_SECTIONS: readonly ProductKitSectionId[] = ['overview']
+export const PRODUCT_KIT_PATH = '/workspace/product-kit'
+
+/** The section a `section` query names, if this build has it. */
+export function parseProductKitSection(query: LocationQuery): ProductKitSectionId | undefined {
+	const value = single(query.section)
+	return (PRODUCT_KIT_SECTIONS as readonly string[]).includes(value) ? value as ProductKitSectionId : undefined
+}
+
+/**
+ * Adapters: the Overview section of the Product Kit page (Rule 01a116f0-8a46-76bc-a29f-affaa302c44c).
+ * `/workspace/adapters` and `/workspace/settings?section=adapters` redirect here (Clause
+ * 01a116f0-9739-754b-b024-346b1c16a866).
+ */
+export const ADAPTERS_LOCATION = { path: PRODUCT_KIT_PATH, query: { section: 'overview' } } as const
 
 /** Builds the query for a View deep link; empty values mean "the effective default" and are omitted. */
 export function viewQuery(options: ViewLinkOptions): LocationQueryRaw {

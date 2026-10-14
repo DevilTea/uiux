@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { useI18n, useRoute, useRouter } from '#imports'
-import { useAccess } from '../../composables/useAccess'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
@@ -11,15 +10,11 @@ import { useUnsavedGuard } from '../../composables/useUnsavedGuard'
 import { createSettingsSection } from '../../composables/useSettingsSection'
 import { describeFetchError, isLockedError, type FetchErrorLock } from '../../utils/fetch-error'
 import {
-	adapterRows,
-	adapterSelections,
 	buildSettingsPayload,
 	cloneJson,
-	productKitAdapterWrites,
 	registryRecord,
 	registryRows,
 	SETTINGS_SECTIONS,
-	type AdapterRow,
 	type SettingsSectionId,
 } from '../../utils/workspace-authoring'
 import WorkbenchPage from '../workbench/WorkbenchPage.vue'
@@ -30,27 +25,21 @@ import LockedSaveAlert from '../workbench/LockedSaveAlert.vue'
 import UnsavedLeaveModal from './UnsavedLeaveModal.vue'
 import SettingsGeneralSection from './SettingsGeneralSection.vue'
 import SettingsRegistrySection from './SettingsRegistrySection.vue'
-import SettingsAdaptersSection, { type AdapterResolution } from './SettingsAdaptersSection.vue'
 import { focusFirstProblem } from '../../utils/focus-problem'
-import { PRODUCT_KIT_SCHEMA_VERSION, type ProductKit } from '../../../src/domain/product-kit/schema'
-import type { WorkspaceAdapterSelection } from '../../../src/domain/workspace/schema'
+import { PRODUCT_KIT_SCHEMA_VERSION } from '../../../src/domain/product-kit/schema'
 
 /**
  * Workspace settings as a full page (brief g): a section index, then one form column with
- * General, Viewports, Themes and Adapters separated by hairlines. Each section saves on its
- * own through `update_workspace_settings` (`PUT /api/workspace/settings`, a full replace)
- * with its own `expectedRevision`, so a concurrent write surfaces as a conflict, never as
- * a silent overwrite.
+ * General, Viewports and Themes separated by hairlines. Each section saves on its own through
+ * `update_workspace_settings` (`PUT /api/workspace/settings`, a full replace) with its own
+ * `expectedRevision`, so a concurrent write surfaces as a conflict, never as a silent overwrite.
  *
- * From `schemaVersion` 5 the Adapter selection lives in the Product Kit file, not the manifest:
- * the Adapters section reads `GET /api/product-kit` and saves through the Product Kit operations
- * (`PUT /api/product-kit/compose` for the specifiers and their order, then
- * `PUT /api/product-kit/settings` for their `config`), with the Product Kit file's own revision,
- * key and edit lease (Discussion #139 owner ruling 6,
- * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18851627).
+ * Adapters are not a section here: they live in the Overview section of the Product Kit page
+ * (Rule 01a116f0-8a46-76bc-a29f-affaa302c44c), and `?section=adapters` redirects there (Clause
+ * 01a116f0-9739-754b-b024-346b1c16a866).
  *
- * `?section=<id>` opens the page at that section; `/workspace/adapters` redirects here with
- * `section=adapters`.
+ * `?section=<id>` opens the page at that section, one of `general`, `viewports` and `themes`;
+ * an unknown value opens the page at its top (Clause 01a116f0-9782-7640-865e-c340df7b06b0).
  */
 const { t } = useI18n()
 const route = useRoute()
@@ -65,7 +54,6 @@ const { workspace, discoveredLocales } = workbench
 const uiux = useUiuxClient()
 const feedback = useWorkbenchFeedback()
 // The Workspace settings document is one lockable resource (accepted identity decision 11).
-const member = useAccess()
 const { access, writeKey, canEdit } = useAuthoringAccess('settings.write', { kind: 'workspace', key: 'workspace' })
 /** A save refused by someone else's edit lease; every section's draft is kept. */
 const lockRefusal = shallowRef<Readonly<{ lock?: FetchErrorLock }>>()
@@ -85,69 +73,17 @@ const themes = createSettingsSection({
 	fromManifest: manifest => registryRows(manifest.themes, 'themes'),
 	toPayload: draft => registryRecord(draft, 'themes'),
 })
-/** Below `schemaVersion` 5: the manifest's `adapters`. */
-const manifestAdapters = createSettingsSection({
-	id: 'adapters',
-	fromManifest: manifest => adapterRows(manifest.adapters),
-	toPayload: draft => adapterSelections(draft),
-})
-/** From `schemaVersion` 5: the Product Kit file's `adapters`. */
-const kitAdapters = createSettingsSection<AdapterRow[], ProductKit>({
-	id: 'adapters',
-	fromManifest: kit => adapterRows(kit.adapters),
-	toPayload: draft => adapterSelections(draft),
-})
+const sections = { general, viewports, themes }
 const usesProductKit = computed(() => (workspace.value?.resource?.schemaVersion ?? 0) >= PRODUCT_KIT_SCHEMA_VERSION)
-const kitAccess = useAuthoringAccess('product-kit.write', { kind: 'product-kit', key: 'product-kit' })
-const sections = {
-	general,
-	viewports,
-	themes,
-	get adapters() { return usesProductKit.value ? kitAdapters : manifestAdapters },
-}
-/** Whether the signed-in member may save a section now: the Adapters' own key and lease from 5. */
-function canEditSection(id: SettingsSectionId): boolean {
-	return id === 'adapters' && usesProductKit.value ? kitAccess.canEdit.value : canEdit.value
-}
-const adaptersCanEdit = computed(() => canEditSection('adapters'))
-/** The files this page edits, as the subtitle names them. */
+/** The file this page edits, as the subtitle names it. */
 const settingsFile = computed(() => usesProductKit.value ? 'workspace.json' : '.uiux/workspace.json')
 
-type ProductKitResponse = Readonly<{ resource: ProductKit; revision: string }>
-const productKit = shallowRef<ProductKitResponse>()
-const productKitFailed = ref(false)
-async function loadProductKit(): Promise<void> {
-	if (!usesProductKit.value) {
-		productKit.value = undefined
-		return
-	}
-	try {
-		productKit.value = await $fetch<ProductKitResponse>('/api/product-kit')
-		productKitFailed.value = false
-	}
-	catch {
-		productKitFailed.value = true
-	}
-}
-
 watch(workspace, (read) => {
-	for (const section of [general, viewports, themes, manifestAdapters]) section.sync(read)
-	// A Workspace read (live refresh included) also re-reads the Product Kit file.
-	void loadProductKit()
+	for (const section of [general, viewports, themes]) section.sync(read)
 }, { immediate: true })
-watch(productKit, read => kitAdapters.sync(read))
 
 const dirtyCount = computed(() => Object.values(sections).reduce((sum, section) => sum + section.changeCount, 0))
 const guard = useUnsavedGuard(() => dirtyCount.value > 0)
-
-// Adapter package state, read-only (Part 8 10b).
-const resolution = shallowRef<AdapterResolution>()
-const resolutionFailed = ref(false)
-async function loadResolution(): Promise<void> {
-	resolutionFailed.value = false
-	try { resolution.value = await uiux.previewAdapters() as AdapterResolution }
-	catch { resolutionFailed.value = true }
-}
 
 // Reference impact for registry key changes: Evidence captured with a key.
 let evidence: Promise<readonly { record?: { executionContext?: Record<string, unknown> } }[]> | undefined
@@ -163,7 +99,6 @@ function countEvidence(field: 'viewportId' | 'themeId') {
 }
 
 async function save(id: SettingsSectionId): Promise<void> {
-	if (id === 'adapters' && usesProductKit.value) return saveKitAdapters()
 	const section = sections[id]
 	const read = workspace.value
 	if (!canEdit.value || !read?.resource || !section.base || section.conflict || section.saving || !section.dirty) return
@@ -181,7 +116,6 @@ async function save(id: SettingsSectionId): Promise<void> {
 		feedback.success(t('settings.saved'))
 		evidence = undefined
 		await workbench.refreshAll()
-		if (id === 'adapters') void loadResolution()
 	}
 	catch (cause) {
 		const details = describeFetchError(cause, t('settings.saveFailed'))
@@ -204,99 +138,17 @@ async function save(id: SettingsSectionId): Promise<void> {
 	}
 }
 
-/** The last Adapters save wrote the specifiers (`compose`) but not their `config` (`settings`). */
-const kitPartlySaved = ref(false)
-
-/**
- * Saves the Adapters of a `schemaVersion` 5 Workspace through the Product Kit operations: `compose`
- * when the specifiers or their order change, then `update` with the new revision when a `config`
- * differs (`productKitAdapterWrites`). Each write is a compare-and-swap on the Product Kit file.
- *
- * When `compose` landed and the `config` write then failed for any reason but a conflict, the
- * Product Kit file is reloaded. When it is still the revision `compose` wrote, the draft is carried
- * onto it (`keepMine`): the specifiers are saved, the draft keeps the unsaved `config`, and the
- * section says so instead of raising a conflict over its own write. When someone else wrote it
- * since, the section raises the conflict as for any concurrent change.
- */
-async function saveKitAdapters(): Promise<void> {
-	const section = kitAdapters
-	const kit = productKit.value
-	if (!kitAccess.canEdit.value || !kit || !section.base || section.conflict || section.saving || !section.dirty) return
-	section.saving = true
-	section.clearError()
-	kitPartlySaved.value = false
-	lockRefusal.value = undefined
-	let composedRevision: string | undefined
-	/** Reloads the Product Kit file and, after a landed `compose`, carries the draft onto it if no one wrote since. */
-	const reloadBase = async (): Promise<void> => {
-		await loadProductKit()
-		if (composedRevision === undefined || !productKit.value) return
-		if (productKit.value.revision !== composedRevision) {
-			section.conflict = true
-			return
-		}
-		section.keepMine(productKit.value)
-		kitPartlySaved.value = true
-	}
-	try {
-		const writes = productKitAdapterWrites(kit.resource, section.draftPayload as WorkspaceAdapterSelection[])
-		let revision = section.base.revision
-		if (writes.compose) {
-			const composed = await $fetch<{ revision: string }>('/api/product-kit/compose', { method: 'PUT', body: { expectedRevision: revision, ...writes.compose } })
-			revision = composed.revision
-			composedRevision = composed.revision
-		}
-		if (writes.update)
-			await $fetch('/api/product-kit/settings', { method: 'PUT', body: { expectedRevision: revision, ...writes.update } })
-		feedback.success(t('settings.saved'))
-		await loadProductKit()
-		await workbench.refreshAll()
-		void loadResolution()
-	}
-	catch (cause) {
-		const details = describeFetchError(cause, t('settings.saveFailed'))
-		if (details.statusCode === 409 || details.status === 'conflict') {
-			section.conflict = true
-			await loadProductKit()
-			void focusFirstProblem('#settings-adapters')
-		}
-		else if (isLockedError(details)) {
-			// The base moves to the Product Kit file as it is now, a landed compose included.
-			await reloadBase()
-			if (kitPartlySaved.value) section.error = details
-			lockRefusal.value = { lock: details.lock }
-			void focusFirstProblem('main')
-		}
-		else {
-			await reloadBase()
-			section.error = details
-			void focusFirstProblem('#settings-adapters')
-		}
-	}
-	finally {
-		section.saving = false
-	}
-}
-
 function discard(id: SettingsSectionId): void {
-	if (id === 'adapters' && usesProductKit.value) {
-		kitPartlySaved.value = false
-		if (productKit.value) kitAdapters.adopt(productKit.value)
-	}
-	else if (workspace.value) {
-		[general, viewports, themes, manifestAdapters].find(section => section.id === id)?.adopt(workspace.value)
-	}
+	if (workspace.value) sections[id].adopt(workspace.value)
 }
 
 async function reloadTheirs(id: SettingsSectionId): Promise<void> {
 	await workbench.refreshAll()
-	if (id === 'adapters' && usesProductKit.value) await loadProductKit()
 	discard(id)
 }
 
 function keepMine(id: SettingsSectionId): void {
-	if (id === 'adapters' && usesProductKit.value) kitAdapters.keepMine(productKit.value)
-	else [general, viewports, themes, manifestAdapters].find(section => section.id === id)?.keepMine(workspace.value)
+	sections[id].keepMine(workspace.value)
 }
 
 // Section index with scroll-spy.
@@ -306,7 +158,6 @@ const sectionRefs = {
 	general: ref<InstanceType<typeof SettingsGeneralSection>>(),
 	viewports: ref<InstanceType<typeof SettingsRegistrySection>>(),
 	themes: ref<InstanceType<typeof SettingsRegistrySection>>(),
-	adapters: ref<InstanceType<typeof SettingsAdaptersSection>>(),
 }
 
 /** Scrolls only the page's own scroller; `scrollIntoView` would also move the shell around it. */
@@ -325,19 +176,16 @@ function scrollTo(id: SettingsSectionId): void {
 	document.getElementById(`settings-${id}`)?.querySelector<HTMLElement>('h2')?.focus({ preventScroll: true })
 }
 
-const invalidAdapters = computed(() => resolution.value?.state === 'invalid')
-const index = computed<NavigationMenuItem[]>(() => (['general', 'viewports', 'themes', 'adapters'] as const).map(id => ({
+const index = computed<NavigationMenuItem[]>(() => SETTINGS_SECTIONS.map(id => ({
 	label: t(`settings.${id}`),
 	active: active.value === id,
 	onSelect: (event: Event) => { event.preventDefault(); scrollTo(id) },
-	...(id === 'adapters' && invalidAdapters.value
-		? { trailingIcon: 'i-lucide-triangle-alert', ui: { linkTrailingIcon: 'text-error' } }
-		: sections[id].dirty
-			? { badge: { label: t('authoring.unsavedShort'), color: 'neutral' as const, variant: 'soft' as const, size: 'sm' as const } }
-			: {}),
+	...(sections[id].dirty
+		? { badge: { label: t('authoring.unsavedShort'), color: 'neutral' as const, variant: 'soft' as const, size: 'sm' as const } }
+		: {}),
 })))
 
-const ORDER: readonly SettingsSectionId[] = ['general', 'viewports', 'themes', 'adapters']
+const ORDER = SETTINGS_SECTIONS
 let spyFrame = 0
 /** Scroll-spy: the last section whose heading passed the top third, or the last one at the end. */
 function updateActive(): void {
@@ -369,7 +217,6 @@ async function onSectionsRendered(): Promise<void> {
 		reveal(section, false)
 }
 onMounted(() => {
-	void loadResolution()
 	window.addEventListener('keydown', onKeydown)
 	scroller.value?.addEventListener('scroll', onScroll, { passive: true })
 	let started = false
@@ -378,12 +225,12 @@ onMounted(() => {
 		started = true
 		void onSectionsRendered()
 	}, { immediate: true })
-	// Asked for another section while already here (⌘K "Adapters", a canvas link).
+	// Asked for another section while already here (a link to `?section=themes`).
 	watch(requestedSection, (section) => {
 		if (section && started) scrollTo(section)
 	})
-	// Asked for the section the URL already names (`?section=adapters`, then scrolled back to
-	// General, then ⌘K "Adapters"): the router refuses a duplicate navigation, so the query does
+	// Asked for the section the URL already names (`?section=themes`, then scrolled back to
+	// General, then the same link again): the router refuses a duplicate navigation, so the query does
 	// not change and the watcher above never fires. Every failed navigation still reaches
 	// `afterEach`; one that stays on this page re-reveals the requested section.
 	stopAfterEach = router.afterEach((to, _from, failure) => {
@@ -404,8 +251,8 @@ function onKeydown(event: KeyboardEvent): void {
 	event.preventDefault()
 	const focused = (document.activeElement?.closest('[data-settings-section]')?.id ?? '').replace('settings-', '') as SettingsSectionId
 	const dirty = Object.values(sections).filter(section => section.dirty)
-	const id = focused && sections[focused]?.dirty ? focused : dirty.length === 1 ? dirty[0]!.id : undefined
-	if (id && canEditSection(id)) sectionRefs[id].value?.save()
+	const id = focused && sections[focused]?.dirty ? focused : dirty.length === 1 ? dirty[0]!.id as SettingsSectionId : undefined
+	if (id && canEdit.value) sectionRefs[id].value?.save()
 }
 
 const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
@@ -465,11 +312,6 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
               kind="workspace"
               resource-key="workspace"
             />
-            <LockBadge
-              v-if="usesProductKit"
-              kind="product-kit"
-              resource-key="product-kit"
-            />
             <LockedSaveAlert
               v-if="lockRefusal"
               :lock="lockRefusal.lock"
@@ -503,37 +345,19 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
               @keep-mine="keepMine('viewports')"
             />
             <USeparator />
-            <SettingsRegistrySection
-              :ref="(el) => { sectionRefs.themes.value = el as InstanceType<typeof SettingsRegistrySection> }"
-              kind="themes"
-              :section="themes"
-              :can-edit="canEdit"
-              :diagnostics="viewportDiagnostics"
-              :count-evidence="countEvidence('themeId')"
-              @save="save('themes')"
-              @discard="discard('themes')"
-              @reload="reloadTheirs('themes')"
-              @keep-mine="keepMine('themes')"
-            />
-            <USeparator />
-            <!-- The last section is at least a screen tall, so ?section=adapters can scroll it to the top. -->
+            <!-- The last section is at least a screen tall, so ?section=themes can scroll it to the top. -->
             <div class="min-h-[calc(100dvh-var(--ui-header-height)-8rem)]">
-              <SettingsAdaptersSection
-                :ref="(el) => { sectionRefs.adapters.value = el as InstanceType<typeof SettingsAdaptersSection> }"
-                :section="sections.adapters"
-                :can-edit="adaptersCanEdit"
-                :product-kit="usesProductKit"
-                :product-kit-failed="productKitFailed"
-                :missing-key="usesProductKit && !member.can('product-kit.write') ? 'product-kit.write' : undefined"
-                :can-compose="member.can('product-kit.compose')"
-                :partly-saved="usesProductKit && kitPartlySaved"
-                :resolution="resolution"
-                :resolution-failed="resolutionFailed"
-                @save="save('adapters')"
-                @discard="discard('adapters')"
-                @reload="reloadTheirs('adapters')"
-                @keep-mine="keepMine('adapters')"
-                @retry-resolution="loadResolution"
+              <SettingsRegistrySection
+                :ref="(el) => { sectionRefs.themes.value = el as InstanceType<typeof SettingsRegistrySection> }"
+                kind="themes"
+                :section="themes"
+                :can-edit="canEdit"
+                :diagnostics="viewportDiagnostics"
+                :count-evidence="countEvidence('themeId')"
+                @save="save('themes')"
+                @discard="discard('themes')"
+                @reload="reloadTheirs('themes')"
+                @keep-mine="keepMine('themes')"
               />
             </div>
           </template>

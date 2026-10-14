@@ -191,7 +191,7 @@ describe('Assets page (R10)', () => {
 })
 
 describe('Tablet is read-only (R10)', () => {
-	for (const route of ['/workspace/settings', '/workspace/locales', '/workspace/assets']) {
+	for (const route of ['/workspace/settings', '/workspace/product-kit', '/workspace/locales', '/workspace/assets']) {
 		it(`shows "Edit on desktop" and no editable fields on ${route} at 1024×768`, async () => {
 			const { context, page } = await open(route, 1024, 768)
 			try {
@@ -211,17 +211,21 @@ describe('Tablet is read-only (R10)', () => {
 })
 
 describe('Workspace pages navigation', () => {
-	it('reaches Settings, Locales and Assets from one sidebar entry and the pages\' own sub-navigation', async () => {
+	it('reaches Settings, Product Kit, Access presets, Locales and Assets from one sidebar entry and the pages\' own sub-navigation', async () => {
 		const { context, page } = await open('/')
 		try {
 			const sidebar = page.locator('[data-landmark="navigation"]')
-			for (const name of ['Settings', 'Locales', 'Assets', 'Adapters'])
+			for (const name of ['Settings', 'Product Kit', 'Locales', 'Assets', 'Adapters'])
 				expect(await sidebar.getByRole('link', { name, exact: true }).count(), name).toBe(0)
 			await sidebar.getByRole('link', { name: 'Workspace', exact: true }).click()
 			await page.waitForURL(url => url.pathname === '/workspace/settings')
 			const subnav = page.getByRole('navigation', { name: 'Workspace pages' })
-			for (const name of ['Settings', 'Locales', 'Assets'])
-				expect(await subnav.getByRole('link', { name }).count(), name).toBe(1)
+			// Rule 01a116f0-8a01-7cd2-807d-cc26f7bf8b16: the sub-navigation, in this order.
+			expect((await subnav.getByRole('link').allInnerTexts()).map(text => text.trim())).toEqual(['Settings', 'Product Kit', 'Access presets', 'Locales', 'Assets'])
+			await subnav.getByRole('link', { name: 'Product Kit' }).click()
+			await page.waitForURL(url => url.pathname === '/workspace/product-kit')
+			await page.locator('#product-kit-overview').waitFor()
+			expect(await page.getByRole('heading', { level: 1 }).innerText()).toBe('Product Kit')
 			await subnav.getByRole('link', { name: 'Locales' }).click()
 			await page.waitForURL(url => url.pathname === '/workspace/locales')
 			// The one sidebar entry stays marked on every Workspace page.
@@ -230,27 +234,42 @@ describe('Workspace pages navigation', () => {
 		finally { await context.close() }
 	}, 60_000)
 
-	it('redirects /workspace/adapters to the Adapters section of Settings', async () => {
-		const { context, page } = await open('/workspace/adapters')
+	it('has no Adapters section in Settings (Rule 01a116f0-8a46-76bc-a29f-affaa302c44c)', async () => {
+		const { context, page } = await open('/workspace/settings')
 		try {
-			await page.waitForURL(url => url.pathname === '/workspace/settings' && url.searchParams.get('section') === 'adapters')
-			await page.locator('#settings-adapters').waitFor()
-			// The page opens scrolled to the section, not at General.
-			await page.waitForFunction(() => (document.querySelector('#settings-adapters')?.closest('[role="region"]')?.scrollTop ?? 0) > 0)
+			await page.locator('#settings-themes').waitFor()
+			expect(await page.locator('#settings-adapters').count()).toBe(0)
+			expect(await page.locator('[data-adapter-row]').count()).toBe(0)
+			const index = page.getByRole('navigation', { name: 'Settings sections' })
+			expect((await index.locator('a, button').allInnerTexts()).map(text => text.trim())).toEqual(['General', 'Viewports', 'Themes'])
 		}
 		finally { await context.close() }
 	}, 60_000)
 
-	it('scrolls to Adapters again when ⌘K asks for the section the URL already names', async () => {
-		const { context, page } = await open('/workspace/settings?section=adapters')
-		try {
-			const scrollTop = () => page.evaluate(() => document.querySelector('#settings-adapters')?.closest('[role="region"]')?.scrollTop ?? 0)
-			await page.locator('#settings-adapters').waitFor()
-			await expect.poll(scrollTop).toBeGreaterThan(0)
-			// Back to General by hand: the URL still says ?section=adapters.
-			await page.evaluate(() => document.querySelector('#settings-adapters')?.closest('[role="region"]')?.scrollTo({ top: 0 }))
-			await expect.poll(scrollTop).toBe(0)
+	for (const retired of ['/workspace/adapters', '/workspace/settings?section=adapters']) {
+		it(`redirects ${retired} to the Overview section of the Product Kit page`, async () => {
+			const { context, page } = await open(retired)
+			try {
+				await page.waitForURL(url => url.pathname === '/workspace/product-kit' && url.searchParams.get('section') === 'overview')
+				await page.locator('#product-kit-overview #product-kit-adapters').waitFor()
+			}
+			finally { await context.close() }
+		}, 60_000)
+	}
 
+	it('opens Settings at the section `?section=` names (Clause 01a116f0-9782-7640-865e-c340df7b06b0)', async () => {
+		const { context, page } = await open('/workspace/settings?section=themes')
+		try {
+			await page.locator('#settings-themes').waitFor()
+			await page.waitForFunction(() => (document.querySelector('#settings-themes')?.closest('[role="region"]')?.scrollTop ?? 0) > 0)
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('opens the Product Kit page from ⌘K "Adapters"', async () => {
+		const { context, page } = await open('/workspace/settings')
+		try {
+			await page.locator('#settings-general').waitFor()
 			await page.keyboard.press('ControlOrMeta+k')
 			const search = page.locator('[role="dialog"] input').first()
 			await search.waitFor()
@@ -258,14 +277,14 @@ describe('Workspace pages navigation', () => {
 			const option = page.locator('[role="option"]').filter({ hasText: 'Adapters' }).first()
 			await option.waitFor()
 			await option.click()
-			await expect.poll(scrollTop).toBeGreaterThan(0)
-			expect(new URL(page.url()).searchParams.get('section')).toBe('adapters')
+			await page.waitForURL(url => url.pathname === '/workspace/product-kit' && url.searchParams.get('section') === 'overview')
+			await page.locator('#product-kit-adapters').waitFor()
 		}
 		finally { await context.close() }
 	}, 60_000)
 })
 
-describe('Settings › Adapters on a schemaVersion 5 Workspace', () => {
+describe('Product Kit › Adapters on a schemaVersion 5 Workspace', () => {
 	type ProductKitRead = { revision: string; resource: { adapters: { moduleSpecifier: string; config?: unknown }[] } }
 
 	/**
@@ -277,13 +296,13 @@ describe('Settings › Adapters on a schemaVersion 5 Workspace', () => {
 		const workspaceBefore = await readWorkspace()
 		expect(workspaceBefore.resource).not.toHaveProperty('adapters')
 		expect(before.resource.adapters.map(adapter => adapter.moduleSpecifier)).toEqual(['./adapters/reference.ts'])
-		const { context, page } = await open('/workspace/settings?section=adapters')
+		const { context, page } = await open('/workspace/product-kit?section=overview')
 		try {
 			const requests: { url: string; body: unknown }[] = []
 			page.on('request', (request) => {
 				if (request.method() === 'PUT') requests.push({ url: new URL(request.url()).pathname, body: request.postDataJSON() })
 			})
-			const section = page.locator('#settings-adapters')
+			const section = page.locator('#product-kit-adapters')
 			await section.getByText('Packages or kit/ modules that supply Widgets').waitFor()
 			await section.getByRole('button', { name: 'Config', exact: true }).click()
 			const config = section.getByRole('textbox', { name: 'Config for ./adapters/reference.ts' })
@@ -307,7 +326,7 @@ describe('Settings › Adapters on a schemaVersion 5 Workspace', () => {
 	}, 60_000)
 })
 
-describe('Settings › Adapters when the config write fails after the specifiers are saved', () => {
+describe('Product Kit › Adapters when the config write fails after the specifiers are saved', () => {
 	type ProductKitRead = { revision: string; resource: { adapters: { moduleSpecifier: string; config?: unknown }[] } }
 
 	/**
@@ -317,7 +336,7 @@ describe('Settings › Adapters when the config write fails after the specifiers
 	 */
 	it('keeps the unsaved config on the composed revision and saves it on the next try', async () => {
 		const before = await api<ProductKitRead>('/api/product-kit')
-		const { context, page } = await open('/workspace/settings?section=adapters')
+		const { context, page } = await open('/workspace/product-kit?section=overview')
 		try {
 			const requests: { url: string; body: unknown }[] = []
 			page.on('request', (request) => {
@@ -328,7 +347,7 @@ describe('Settings › Adapters when the config write fails after the specifiers
 				contentType: 'application/json',
 				body: JSON.stringify({ statusCode: 500, statusMessage: 'Server Error', message: 'The config write failed.' }),
 			}))
-			const section = page.locator('#settings-adapters')
+			const section = page.locator('#product-kit-adapters')
 			await section.getByText('Packages or kit/ modules that supply Widgets').waitFor()
 			await section.locator('[data-adapter-specifier]').fill('./adapters/second.ts')
 			await section.getByRole('button', { name: 'Config', exact: true }).click()
@@ -341,7 +360,7 @@ describe('Settings › Adapters when the config write fails after the specifiers
 			expect(composed.revision).not.toBe(before.revision)
 			expect(composed.resource.adapters).toEqual([{ moduleSpecifier: './adapters/second.ts' }])
 			expect(requests.map(request => request.url)).toEqual(['/api/product-kit/compose', '/api/product-kit/settings'])
-			expect(await section.getByText('Settings changed since you opened them.').count()).toBe(0)
+			expect(await section.getByText('The Product Kit changed since you opened it.').count()).toBe(0)
 			expect(await config.inputValue()).toBe('{"note":"second"}')
 			await section.locator('[data-save-bar]').waitFor()
 
@@ -362,7 +381,7 @@ describe('Settings › Adapters when the config write fails after the specifiers
 	}, 60_000)
 
 	it('raises the conflict instead when someone else wrote the Product Kit after the compose', async () => {
-		const { context, page } = await open('/workspace/settings?section=adapters')
+		const { context, page } = await open('/workspace/product-kit?section=overview')
 		try {
 			// Another writer changes the file between this save's compose and its failed settings write.
 			await page.route('**/api/product-kit/settings', async (route) => {
@@ -370,14 +389,14 @@ describe('Settings › Adapters when the config write fails after the specifiers
 				await agentPut('/api/product-kit/compose', { expectedRevision: current.revision, designSystems: [], adapters: ['./adapters/third.ts'] })
 				await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ statusCode: 500, statusMessage: 'Server Error', message: 'The config write failed.' }) })
 			})
-			const section = page.locator('#settings-adapters')
+			const section = page.locator('#product-kit-adapters')
 			await section.getByText('Packages or kit/ modules that supply Widgets').waitFor()
 			await section.locator('[data-adapter-specifier]').fill('./adapters/second.ts')
 			await section.getByRole('button', { name: 'Config', exact: true }).click()
 			await section.getByRole('textbox', { name: /^Config for / }).fill('{"note":"second"}')
 			await section.getByRole('button', { name: 'Save changes' }).click()
 
-			await section.getByText('Settings changed since you opened them.').waitFor()
+			await section.getByText('The Product Kit changed since you opened it.').waitFor()
 			expect(await section.getByText('Specifiers saved, config not saved').count()).toBe(0)
 			expect((await api<ProductKitRead>('/api/product-kit')).resource.adapters).toEqual([{ moduleSpecifier: './adapters/third.ts' }])
 		}

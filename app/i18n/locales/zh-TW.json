@@ -573,7 +573,8 @@
     },
     "kitBuild": {
       "failedTitle": "kit 建置失敗",
-      "failedDescription": "預覽會繼續使用上一次成功的建置輸出，正式擷取則會等到建置成功。請修正 kit 專案，再重新啟動建置。"
+      "failedDescription": "預覽會繼續使用上一次成功的建置輸出，正式擷取則會等到建置成功。請修正 kit 專案，再重新啟動建置。",
+      "open": "開啟 Product Kit"
     }
   },
   "nav": {
@@ -583,6 +584,7 @@
     "reviews": "Reviews",
     "workspace": "Workspace",
     "settings": "設定",
+    "productKit": "Product Kit",
     "locales": "Locale",
     "assets": "Asset",
     "accessPresets": "存取預設集",
@@ -961,7 +963,6 @@
     "general": "一般",
     "viewports": "檢視區",
     "themes": "主題",
-    "adapters": "Adapter",
     "keyChange": "重新命名鍵會變更其識別，請先檢查參照。",
     "unsaved": "{n} 項未儲存 | {n} 項未儲存",
     "conflict": "開啟後設定已有變更。",
@@ -969,7 +970,6 @@
     "sectionIndex": "設定區段",
     "saved": "設定已儲存",
     "saveFailed": "無法儲存",
-    "adaptersPartlySaved": "已儲存模組指定符，但組態未儲存",
     "locale": {
       "description": "預覽產品的主要 Locale。",
       "primaryLocale": "主要 Locale",
@@ -1022,6 +1022,52 @@
       "dimensionRequired": "請輸入至少為 1 的寬與高。"
     }
   },
+  "productKit": {
+    "title": "Product Kit",
+    "subtitle": "儲存於 {file}。",
+    "overview": "總覽",
+    "adapters": "Adapter",
+    "conflict": "開啟後 Product Kit 已有變更。",
+    "saved": "Product Kit 已儲存",
+    "saveFailed": "無法儲存",
+    "adaptersPartlySaved": "已儲存模組指定符，但組態未儲存",
+    "legacy": "此 Workspace 遷移前沒有 Product Kit 檔案，以下以唯讀方式顯示其 Adapter。",
+    "problems": "Product Kit 有 {n} 個問題 | Product Kit 有 {n} 個問題",
+    "packages": {
+      "title": "套件",
+      "description": "{field} 列出的設計系統套件，依序排列。",
+      "installed": "已安裝",
+      "linked": "已連結",
+      "missing": "未安裝",
+      "empty": "沒有設計系統套件。",
+      "missingHelp": "Workbench 不會安裝套件。請自行在 kit 專案中安裝，再重新載入。"
+    },
+    "build": {
+      "title": "建置",
+      "description": "kit 專案的建置，依「kit/package.json」的宣告執行。",
+      "restart": "重新啟動建置",
+      "restarted": "已重新啟動建置",
+      "noBuildDeclared": "「kit/package.json」未宣告建置",
+      "restartFailed": "無法重新啟動建置",
+      "state": {
+        "none": "沒有建置",
+        "building": "建置中",
+        "ready": "就緒",
+        "failed": "失敗"
+      },
+      "stateHelp": {
+        "none": "kit 專案未宣告建置，或尚未執行過。",
+        "building": "此次執行結束前，預覽會使用上一次成功的輸出。",
+        "ready": "預覽使用此次建置的輸出。",
+        "failed": "預覽會繼續使用上一次成功的輸出。"
+      },
+      "log": "建置記錄",
+      "logEmpty": "尚無輸出。",
+      "reloadLog": "重新載入記錄",
+      "logFailed": "無法載入建置記錄。",
+      "logRequiresKey": "讀取建置記錄需要權限鍵 {key}。"
+    }
+  },
   "authoring": {
     "discard": "捨棄",
     "saveChanges": "儲存變更",
@@ -1068,6 +1114,7 @@
       "unknown": "尚未檢查"
     },
     "adapterId": "ID",
+    "package": "套件",
     "version": "版本",
     "apiVersion": "API",
     "config": "組態",

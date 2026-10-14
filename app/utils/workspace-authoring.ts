@@ -71,8 +71,9 @@ export function diffJson(theirs: unknown, yours: unknown): JsonDifference[] {
 // Workspace settings
 // ---------------------------------------------------------------------------
 
-export type SettingsSectionId = 'general' | 'viewports' | 'themes' | 'adapters'
-export const SETTINGS_SECTIONS: readonly SettingsSectionId[] = ['general', 'viewports', 'themes', 'adapters']
+/** The sections of Workspace settings (Clause 01a116f0-9782-7640-865e-c340df7b06b0); Adapters live on the Product Kit page. */
+export type SettingsSectionId = 'general' | 'viewports' | 'themes'
+export const SETTINGS_SECTIONS: readonly SettingsSectionId[] = ['general', 'viewports', 'themes']
 
 export type SettingsPayload = Readonly<{
 	i18n: WorkspaceManifest['i18n']
@@ -84,8 +85,9 @@ export type SettingsPayload = Readonly<{
 
 /**
  * The manifest fields that `update_workspace_settings` replaces as one document. `adapters` is
- * sent only when the manifest holds it (below `schemaVersion` 5): from 5 the manifest refuses it,
- * and the Adapters section writes the Product Kit file instead (`productKitAdapterWrites`).
+ * resent unchanged only when the manifest holds it (below `schemaVersion` 5): from 5 the manifest
+ * refuses it, and the Product Kit page writes the Adapters to the Product Kit file instead
+ * (`productKitAdapterWrites`).
  */
 export function settingsFromManifest(manifest: WorkspaceManifest): SettingsPayload {
 	return {
@@ -107,7 +109,6 @@ export function buildSettingsPayload(current: WorkspaceManifest, section: Settin
 		case 'general': return { ...base, i18n: value as SettingsPayload['i18n'] }
 		case 'viewports': return { ...base, viewports: value as SettingsPayload['viewports'] }
 		case 'themes': return { ...base, themes: value as SettingsPayload['themes'] }
-		case 'adapters': return { ...base, adapters: value as SettingsPayload['adapters'] }
 	}
 }
 

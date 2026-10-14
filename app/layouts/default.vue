@@ -6,6 +6,7 @@ import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../composables/useMediaQue
 import { provideWorkbenchShell } from '../composables/useWorkbenchShell'
 import { useConnectivity } from '../composables/useConnectivity'
 import { useKitBuild } from '../composables/useKitBuild'
+import { PRODUCT_KIT_PATH } from '../utils/workbench-routes'
 import WorkbenchNavbar from '../components/workbench/WorkbenchNavbar.vue'
 import WorkbenchSidebar from '../components/workbench/WorkbenchSidebar.vue'
 import WorkbenchCommandPalette from '../components/workbench/WorkbenchCommandPalette.vue'
@@ -154,6 +155,7 @@ onUnmounted(() => {
       role="alert"
       :title="t('workbench.kitBuild.failedTitle')"
       :description="t('workbench.kitBuild.failedDescription')"
+      :actions="route.path === PRODUCT_KIT_PATH ? undefined : [{ label: t('workbench.kitBuild.open'), color: 'neutral', variant: 'outline', to: PRODUCT_KIT_PATH }]"
       :ui="{ root: 'rounded-none border-b border-default' }"
       data-kit-build-failed
     />

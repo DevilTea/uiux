@@ -1,12 +1,12 @@
 import { computed, reactive, ref, shallowRef } from 'vue'
 import type { WorkspaceManifest } from '../../src/domain/workspace/schema'
 import type { FetchErrorDetails } from '../utils/fetch-error'
-import { cloneJson, diffJson, sameJson, type SettingsSectionId } from '../utils/workspace-authoring'
+import { cloneJson, diffJson, sameJson } from '../utils/workspace-authoring'
 
 /**
  * One Workspace settings section with its own draft, base revision and conflict state
  * (brief g, "Save per section"). Its value comes from one revisioned resource `R`: the manifest,
- * or from `schemaVersion` 5 the Product Kit file for the Adapters section.
+ * or from `schemaVersion` 5 the Product Kit file for the Adapters of the Product Kit page.
  *
  * Sync rules when a newer read of the resource arrives:
  * - no draft: adopt it;
@@ -20,7 +20,7 @@ export type SettingsSection<D, R = WorkspaceManifest> = ReturnType<typeof create
 export type SettingsSectionRead<R> = Readonly<{ revision: string; resource: R }>
 
 export function createSettingsSection<D, R = WorkspaceManifest>(options: Readonly<{
-	id: SettingsSectionId
+	id: string
 	fromManifest: (resource: R) => D
 	toPayload: (draft: D) => unknown
 }>) {
