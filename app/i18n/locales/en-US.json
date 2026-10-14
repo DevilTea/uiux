@@ -1403,10 +1403,12 @@
         "taken": "Another preset is already named {name}."
       },
       "duplicate": "{name} already has exactly these keys. No two presets can be equal.",
+      "removedWhileEditing": "{name} was removed from the Access presets meanwhile, so these changes can’t be saved. To keep them, cancel and add a new preset.",
       "save": "Save",
       "saved": "{name} saved.",
       "added": "{name} added.",
       "deleted": "{name} deleted.",
+      "deletedMeanwhile": "{name} was already removed from the Access presets.",
       "reordered": "Order saved.",
       "errorTitle": "Couldn’t save the Access presets",
       "loadError": "Couldn’t load the Access presets",

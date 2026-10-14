@@ -19,6 +19,16 @@ export function useWorkbenchFeedback() {
 		})
 	}
 
+	/** Something the person should know that is neither a success nor a failure of their action. */
+	function notice(title: string, description?: string): void {
+		toast.add({
+			title,
+			...(description ? { description } : {}),
+			color: 'warning',
+			icon: 'i-lucide-info',
+		})
+	}
+
 	function error(cause: unknown, fallback: string): FetchErrorDetails {
 		const details = describeFetchError(cause, fallback)
 		const extra = diagnosticLines(details.message, details.diagnostics)
@@ -34,5 +44,5 @@ export function useWorkbenchFeedback() {
 		return details
 	}
 
-	return { success, error, describe: describeFetchError }
+	return { success, notice, error, describe: describeFetchError }
 }

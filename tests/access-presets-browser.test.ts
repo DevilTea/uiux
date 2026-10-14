@@ -199,6 +199,53 @@ describe('editing', () => {
 		finally { await context.close() }
 	}, 60_000)
 
+	it('retries only the members not yet updated after a partial failure', async () => {
+		const old = [...VIEWER, 'locales.write'] as PermissionKey[]
+		await setPresets([...BUILT_IN, { id: 'qa', name: 'QA', keys: old }])
+		const ann = await member('human', old)
+		const bea = await member('human', old)
+		const beaId = (await rosterMember(bea)).id
+		const { context, page } = await open()
+		try {
+			const patched: string[] = []
+			page.on('request', (sent) => {
+				if (sent.method() === 'PATCH' && sent.url().includes('/api/access/members/')) patched.push(decodeURIComponent(sent.url().split('/').pop()!))
+			})
+			// The server refuses Bea's first update once, as it would a change leaving no manager.
+			let refused = false
+			await page.route(`**/api/access/members/${encodeURIComponent(beaId)}`, async (route) => {
+				if (route.request().method() !== 'PATCH' || refused) return await route.continue()
+				refused = true
+				const message = 'bea is the last human holder of `members.manage` in this roster; this change would leave none.'
+				await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ status: 'invalid', code: 'access.last_manager', message, diagnostics: [{ code: 'access.last_manager', path: '/', message }] }) })
+			})
+			const editor = await editPreset(page, 'qa')
+			await checkbox(editor, 'flows.write').click()
+			await editor.locator('[data-preset-editor-save]').click()
+			const followUp = page.locator('[data-preset-follow-up]')
+			await followUp.waitFor()
+			expect(await followUp.getAttribute('data-holders')).toBe('2')
+			await followUp.getByRole('button', { name: 'Also update these members' }).click()
+			const dialog = page.locator('[data-preset-update]')
+			await dialog.waitFor()
+			await dialog.locator('[data-preset-update-confirm]').click()
+			await dialog.locator('[data-preset-update-error]').waitFor()
+			await page.getByText('Updated 1 member.').first().waitFor()
+			// Only Bea is left to update.
+			expect(await dialog.locator('[data-preset-update-member]').count()).toBe(1)
+			expect(await dialog.locator(`[data-preset-update-member="${bea}"]`).count()).toBe(1)
+			await dialog.locator('[data-preset-update-confirm]').click()
+			await dialog.waitFor({ state: 'detached' })
+			const annId = (await rosterMember(ann)).id
+			expect(patched.filter(id => id === annId)).toHaveLength(1)
+			expect(patched.filter(id => id === beaId)).toHaveLength(2)
+			expect(await page.getByText('Updated 2 members.').count()).toBe(0)
+			expect((await rosterMember(ann)).keys).toEqual(orderedKeys([...old, 'flows.write']))
+			expect((await rosterMember(bea)).keys).toEqual(orderedKeys([...old, 'flows.write']))
+		}
+		finally { await context.close() }
+	}, 60_000)
+
 	it('adds, renames, reorders and deletes presets without changing any member\'s keys', async () => {
 		const keys = [...VIEWER, 'reviews.write', 'flows.write'] as PermissionKey[]
 		await setPresets(BUILT_IN)
@@ -261,6 +308,89 @@ describe('a concurrent change', () => {
 		}
 		finally { await context.close() }
 	}, 60_000)
+
+	it('counts the holders of the old keys against the roster as it is when saving', async () => {
+		const old = [...VIEWER, 'views.write'] as PermissionKey[]
+		await setPresets([...BUILT_IN, { id: 'qa', name: 'QA', keys: old }])
+		const ann = await member('human', old)
+		const bea = await member('human', old)
+		const { context, page } = await open()
+		try {
+			await expect.poll(async () => (await row(page, 'qa').locator('[data-preset-member-count]').innerText()).trim()).toBe('2 members')
+			// Meanwhile Ann's keys change elsewhere, as `uiux member set <ann> --preset viewer` would.
+			await request(`/api/access/members/${(await rosterMember(ann)).id}`, 'PATCH', { revoke: ['views.write'] })
+			const editor = await editPreset(page, 'qa')
+			await checkbox(editor, 'flows.write').click()
+			await editor.locator('[data-preset-editor-save]').click()
+			const followUp = page.locator('[data-preset-follow-up]')
+			await followUp.waitFor()
+			expect(await followUp.getAttribute('data-holders')).toBe('1')
+			await followUp.getByRole('button', { name: 'Also update these members' }).click()
+			const dialog = page.locator('[data-preset-update]')
+			await dialog.waitFor()
+			expect(await dialog.locator('[data-preset-update-member]').count()).toBe(1)
+			expect(await dialog.locator(`[data-preset-update-member="${ann}"]`).count()).toBe(0)
+			await dialog.locator('[data-preset-update-confirm]').click()
+			await dialog.waitFor({ state: 'detached' })
+			expect((await rosterMember(ann)).keys).toEqual(orderedKeys(VIEWER))
+			expect((await rosterMember(bea)).keys).toEqual(orderedKeys([...old, 'flows.write']))
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('deletes the preset chosen, not the one now at its place, after a refused delete', async () => {
+		const qa: AccessPreset = { id: 'qa', name: 'QA', keys: [...VIEWER, 'reviews.write'] }
+		const qb: AccessPreset = { id: 'qb', name: 'QB', keys: [...VIEWER, 'flows.write'] }
+		await setPresets([...BUILT_IN, qa, qb])
+		const { context, page } = await open()
+		try {
+			await action(page, 'qb', 'Delete')
+			const confirm = page.locator('[data-preset-delete]')
+			await confirm.waitFor()
+			// Meanwhile another manager adds a preset in front, so QA now sits where QB was.
+			await setPresets([{ id: 'qz', name: 'QZ', keys: [...VIEWER, 'checkpoints.create'] }, ...BUILT_IN, qa, qb])
+			await confirm.locator('[data-preset-delete-confirm]').click()
+			await expect.poll(async () => await names(page)).toEqual(['QZ', 'Viewer', 'Reviewer', 'Editor', 'Owner', 'QA', 'QB'])
+			expect(await page.getByRole('dialog').innerText()).toContain('Delete QB?')
+			await confirm.locator('[data-preset-delete-confirm]').click()
+			await confirm.waitFor({ state: 'detached' })
+			expect((await readPresets()).resource!.presets.map(preset => preset.id)).toEqual(['qz', 'viewer', 'reviewer', 'editor', 'owner', 'qa'])
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('closes the delete dialog with a notice when the preset was deleted meanwhile', async () => {
+		const qa: AccessPreset = { id: 'qa', name: 'QA', keys: [...VIEWER, 'reviews.write'] }
+		await setPresets([...BUILT_IN, qa])
+		const { context, page } = await open()
+		try {
+			await action(page, 'qa', 'Delete')
+			const confirm = page.locator('[data-preset-delete]')
+			await confirm.waitFor()
+			await setPresets([...BUILT_IN, { id: 'qb', name: 'QB', keys: [...VIEWER, 'flows.write'] }])
+			await confirm.locator('[data-preset-delete-confirm]').click()
+			await confirm.waitFor({ state: 'detached' })
+			await page.getByText('QA was already removed from the Access presets.').first().waitFor()
+			expect((await readPresets()).resource!.presets.map(preset => preset.id)).toEqual(['viewer', 'reviewer', 'editor', 'owner', 'qb'])
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('refuses to save an edit of a preset deleted meanwhile instead of adding it again', async () => {
+		await setPresets([...BUILT_IN, { id: 'qa', name: 'QA', keys: [...VIEWER, 'reviews.write'] }])
+		const { context, page } = await open()
+		try {
+			const editor = await editPreset(page, 'qa')
+			await checkbox(editor, 'flows.write').click()
+			await setPresets(BUILT_IN)
+			await editor.locator('[data-preset-editor-save]').click()
+			await editor.locator('[data-preset-editor-removed]').waitFor()
+			expect((await editor.locator('[data-preset-editor-removed]').innerText()).trim()).toContain('QA was removed from the Access presets meanwhile')
+			expect(await editor.locator('[data-preset-editor-save]').isDisabled()).toBe(true)
+			expect((await readPresets()).resource!.presets.map(preset => preset.id)).toEqual(['viewer', 'reviewer', 'editor', 'owner'])
+		}
+		finally { await context.close() }
+	}, 60_000)
 })
 
 describe('read-only', () => {
@@ -278,6 +408,35 @@ describe('read-only', () => {
 			expect(await editor.locator('[data-preset-editor-name]').count()).toBe(0)
 			expect(await editor.locator('[data-preset-editor-save]').count()).toBe(0)
 			expect(await checkbox(editor, 'workspace.read').isDisabled()).toBe(true)
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('edits presets with presets.manage alone, but neither counts nor updates the holders without members.manage', async () => {
+		const old = [...VIEWER, 'settings.write'] as PermissionKey[]
+		await setPresets([...BUILT_IN, { id: 'qa', name: 'QA', keys: old }])
+		const holder = await member('human', old)
+		const cookie = await sessionCookieFor(server.origin, await provisionToken(server.workspaceRoot, { nickname: `p7-${unique()}`, kind: 'human', keys: [...VIEWER, 'presets.manage'] }))
+		const { context, page } = await open({ cookie })
+		try {
+			const patches: string[] = []
+			page.on('request', (sent) => {
+				if (sent.method() === 'PATCH') patches.push(sent.url())
+			})
+			expect(await page.locator('[data-preset-add]').count()).toBe(1)
+			expect(await row(page, 'qa').locator('[data-preset-member-count]').getAttribute('data-preset-member-count')).toBe('unavailable')
+			const editor = await editPreset(page, 'qa')
+			await checkbox(editor, 'flows.write').click()
+			await editor.locator('[data-preset-editor-save]').click()
+			await editor.waitFor({ state: 'detached' })
+			const followUp = page.locator('[data-preset-follow-up]')
+			await followUp.waitFor()
+			expect(await followUp.getAttribute('data-holders')).toBeNull()
+			expect(await followUp.innerText()).toContain('Members who held the old keys of QA keep them. Counting them on this host needs members.manage on this address.')
+			expect(await followUp.getByRole('button', { name: 'Also update these members' }).count()).toBe(0)
+			expect((await readPresets()).resource!.presets.at(-1)!.keys).toEqual(orderedKeys([...old, 'flows.write']))
+			expect(patches).toEqual([])
+			expect((await rosterMember(holder)).keys).toEqual(old)
 		}
 		finally { await context.close() }
 	}, 60_000)

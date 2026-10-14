@@ -1403,10 +1403,12 @@
         "taken": "已有另一個預設集名為 {name}。"
       },
       "duplicate": "{name} 已持有完全相同的權限鍵。任兩個預設集都不能相同。",
+      "removedWhileEditing": "{name} 已在這段期間從存取預設集中移除，因此無法儲存這些變更。若要保留，請取消後新增預設集。",
       "save": "儲存",
       "saved": "已儲存 {name}。",
       "added": "已新增 {name}。",
       "deleted": "已刪除 {name}。",
+      "deletedMeanwhile": "{name} 已從存取預設集中移除。",
       "reordered": "已儲存順序。",
       "errorTitle": "無法儲存存取預設集",
       "loadError": "無法載入存取預設集",

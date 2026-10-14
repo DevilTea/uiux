@@ -169,20 +169,25 @@ async function useBuiltIns(): Promise<void> {
 
 // ---- Add, edit or view a preset ----
 /** The preset being edited is found by its `id`, so a reload after a conflict keeps the right one. */
-type Editor = { id?: string; name: string; keys: string[]; readonly: boolean }
+type Editor = { id?: string; openedName: string; name: string; keys: string[]; readonly: boolean }
 const editorOpen = ref(false)
-const editor = reactive<Editor>({ name: '', keys: [], readonly: false })
+const editor = reactive<Editor>({ openedName: '', name: '', keys: [], readonly: false })
 const editorError = shallowRef<FetchErrorDetails>()
 const editorIndex = computed(() => {
 	const index = editor.id === undefined ? -1 : presets.value.findIndex(preset => preset.id === editor.id)
 	return index < 0 ? undefined : index
 })
 const editing = computed(() => editorIndex.value === undefined ? undefined : presets.value[editorIndex.value])
+/**
+ * The preset being edited is gone from the presets read again after a conflict: saving would add it
+ * back under a new id, so the editor refuses and says so instead.
+ */
+const editorRemoved = computed(() => editor.id !== undefined && editing.value === undefined)
 /** The other presets the editor may start from. */
 const otherPresets = computed(() => presets.value.filter((_, index) => index !== editorIndex.value))
 
 function openAdd(): void {
-	Object.assign(editor, { id: undefined, name: '', keys: [], readonly: false })
+	Object.assign(editor, { id: undefined, openedName: '', name: '', keys: [], readonly: false })
 	editorError.value = undefined
 	editorOpen.value = true
 }
@@ -190,7 +195,7 @@ function openAdd(): void {
 function openPreset(index: number): void {
 	const preset = presets.value[index]
 	if (!preset) return
-	Object.assign(editor, { id: preset.id, name: preset.name, keys: [...preset.keys], readonly: !canEdit.value })
+	Object.assign(editor, { id: preset.id, openedName: preset.name, name: preset.name, keys: [...preset.keys], readonly: !canEdit.value })
 	editorError.value = undefined
 	editorOpen.value = true
 }
@@ -208,7 +213,7 @@ const editorChanged = computed(() => {
 	const before = editing.value
 	return !before || before.name !== normalizePresetName(editor.name) || !sameKeySet(before.keys, editor.keys)
 })
-const canSave = computed(() => !editor.readonly && !duplicate.value && !nameProblem.value && editorChanged.value)
+const canSave = computed(() => !editor.readonly && !editorRemoved.value && !duplicate.value && !nameProblem.value && editorChanged.value)
 
 // ---- After a key edit: the members on this host who held the old keys ----
 type FollowUp = Readonly<{ name: string; keys: readonly string[]; holders?: readonly HostMember[] }>
@@ -220,15 +225,21 @@ async function saveEditor(): Promise<void> {
 	const before = editing.value
 	const edited: AccessPreset = { id: before?.id ?? newPresetId(name, presets.value), name, keys: orderedKeys(editor.keys) }
 	const next = before ? presets.value.map(preset => preset.id === before.id ? edited : preset) : [...presets.value, edited]
-	// Counted against the roster as loaded, before the write changes any label.
-	const holders = before && members.value ? holdersOf(before, members.value) : undefined
+	const keysChanged = before !== undefined && !sameKeySet(before.keys, edited.keys)
 	writing.value = true
 	editorError.value = undefined
 	try {
+		// Counted against the roster as it is now, read again because it may have changed since the
+		// page loaded it (from the CLI or another Workbench), and before the write changes any label.
+		if (keysChanged) await loadMembers()
+		const holders = keysChanged && members.value ? holdersOf(before, members.value) : undefined
 		await writePresets(next)
 		feedback.success(before ? t('access.presets.saved', { name }) : t('access.presets.added', { name }))
 		editorOpen.value = false
-		if (before && !sameKeySet(before.keys, edited.keys)) followUp.value = { name, keys: edited.keys, ...(holders ? { holders } : {}) }
+		if (keysChanged) {
+			followUp.value = { name, keys: edited.keys, ...(holders ? { holders } : {}) }
+			updatedIds.value = new Set()
+		}
 		await loadMembers()
 	}
 	catch (cause) {
@@ -246,7 +257,11 @@ async function saveEditor(): Promise<void> {
 const updateOpen = ref(false)
 const updating = ref(false)
 const updateFailures = ref<readonly Readonly<{ nickname: string; error: FetchErrorDetails }>[]>([])
-const updates = computed<MemberUpdate<HostMember>[]>(() => followUp.value?.holders ? memberUpdates(followUp.value.keys, followUp.value.holders) : [])
+/** The holders this follow-up already updated: a retry after a partial failure sends only the rest. */
+const updatedIds = ref<ReadonlySet<string>>(new Set())
+const updates = computed<MemberUpdate<HostMember>[]>(() => followUp.value?.holders
+	? memberUpdates(followUp.value.keys, followUp.value.holders).filter(update => !updatedIds.value.has(update.member.id))
+	: [])
 const dropsHumanOnly = computed(() => Boolean(followUp.value?.keys.some(isHumanOnlyKey) && updates.value.some(update => update.member.kind === 'agent')))
 
 function openUpdate(): void {
@@ -258,9 +273,11 @@ async function updateMembers(): Promise<void> {
 	if (updating.value) return
 	updating.value = true
 	const failures: { nickname: string; error: FetchErrorDetails }[] = []
+	const pending = updates.value
+	const done = new Set(updatedIds.value)
 	let updated = 0
 	try {
-		for (const update of updates.value) {
+		for (const update of pending) {
 			try {
 				// Only the keys to grant and revoke: the server applies them to the member's current keys
 				// (owner ruling 1 of 2026-10-11 on PR #191).
@@ -268,6 +285,7 @@ async function updateMembers(): Promise<void> {
 					method: 'PATCH',
 					body: { ...(update.grant.length > 0 ? { grant: update.grant } : {}), ...(update.revoke.length > 0 ? { revoke: update.revoke } : {}) },
 				})
+				done.add(update.member.id)
 				updated += 1
 			}
 			catch (cause) {
@@ -276,10 +294,11 @@ async function updateMembers(): Promise<void> {
 		}
 	}
 	finally {
+		updatedIds.value = done
 		updating.value = false
 	}
 	if (updated > 0) feedback.success(t('access.presets.update.done', { n: updated }, updated))
-	if (updates.value.some(update => update.member.id === access.member.value?.id)) await access.reload()
+	if (pending.some(update => update.member.id === access.member.value?.id && done.has(update.member.id))) await access.reload()
 	await loadMembers()
 	updateFailures.value = failures
 	if (failures.length === 0) {
@@ -289,14 +308,20 @@ async function updateMembers(): Promise<void> {
 }
 
 // ---- Delete ----
-const deleting = ref<number>()
-const deletingPreset = computed(() => deleting.value === undefined ? undefined : presets.value[deleting.value])
+/** The preset to delete, by its `id`: a reload after a conflict may move it, or remove it. */
+const deleting = ref<string>()
+const deletingPreset = computed(() => deleting.value === undefined ? undefined : presets.value.find(preset => preset.id === deleting.value))
 async function deletePreset(): Promise<void> {
 	const preset = deletingPreset.value
 	if (!preset) return
-	if (await write(presets.value.filter((_, index) => index !== deleting.value), t('access.presets.deleted', { name: preset.name }))) {
+	if (await write(presets.value.filter(item => item.id !== preset.id), t('access.presets.deleted', { name: preset.name }))) {
 		deleting.value = undefined
 		await loadMembers()
+	}
+	else if (deleting.value !== undefined && !deletingPreset.value) {
+		// The presets read again no longer hold it: someone else deleted it meanwhile.
+		deleting.value = undefined
+		feedback.notice(t('access.presets.deletedMeanwhile', { name: preset.name }))
 	}
 }
 
@@ -307,7 +332,7 @@ function presetActions(index: number): DropdownMenuItem[][] {
 			{ label: t('access.presets.moveUp'), icon: 'i-lucide-arrow-up', disabled: index === 0, onSelect: () => move(index, -1) },
 			{ label: t('access.presets.moveDown'), icon: 'i-lucide-arrow-down', disabled: index === presets.value.length - 1, onSelect: () => move(index, 1) },
 		],
-		[{ label: t('access.presets.delete'), icon: 'i-lucide-trash-2', color: 'error', onSelect: () => { deleting.value = index } }],
+		[{ label: t('access.presets.delete'), icon: 'i-lucide-trash-2', color: 'error', onSelect: () => { deleting.value = presets.value[index]?.id } }],
 	]
 }
 
@@ -545,8 +570,8 @@ const unknownHelp = (preset: AccessPreset) => t('access.presets.unknownKeysHelp'
     <USlideover
       v-model:open="editorOpen"
       side="right"
-      :title="editor.readonly ? t('access.presets.viewTitle', { name: editing?.name ?? '' }) : editing ? t('access.presets.editTitle', { name: editing.name }) : t('access.presets.addTitle')"
-      :description="editor.readonly ? t('access.presets.viewDescription') : editing ? t('access.presets.editDescription') : t('access.presets.addDescription')"
+      :title="editor.readonly ? t('access.presets.viewTitle', { name: editing?.name ?? editor.openedName }) : editor.id !== undefined ? t('access.presets.editTitle', { name: editing?.name ?? editor.openedName }) : t('access.presets.addTitle')"
+      :description="editor.readonly ? t('access.presets.viewDescription') : editor.id !== undefined ? t('access.presets.editDescription') : t('access.presets.addDescription')"
       :dismissible="!writing"
       :ui="{ content: 'max-w-xl', body: 'flex min-h-0 flex-col gap-4 p-4 sm:p-4' }"
     >
@@ -589,7 +614,16 @@ const unknownHelp = (preset: AccessPreset) => t('access.presets.unknownKeysHelp'
             data-preset-editor-duplicate
           />
           <UAlert
-            v-if="editorError"
+            v-if="editorRemoved && !editor.readonly"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-triangle-alert"
+            :title="t('access.presets.removedWhileEditing', { name: editor.openedName })"
+            role="alert"
+            data-preset-editor-removed
+          />
+          <UAlert
+            v-else-if="editorError"
             color="error"
             variant="subtle"
             icon="i-lucide-circle-alert"
@@ -626,7 +660,7 @@ const unknownHelp = (preset: AccessPreset) => t('access.presets.unknownKeysHelp'
               :disabled="!canSave"
               data-preset-editor-save
             >
-              {{ editing ? t('access.presets.save') : t('access.presets.add') }}
+              {{ editor.id !== undefined ? t('access.presets.save') : t('access.presets.add') }}
             </UButton>
           </div>
         </UForm>
