@@ -1,6 +1,7 @@
 import { readFile, realpath } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { extname, join, resolve } from 'node:path'
 
+import { maskHostPaths } from '../adapters/host-paths'
 import { readKitBuildDeclaration, specifierInBuildOutput } from '../adapters/kit-build-declaration'
 import { containedRealPath } from '../adapters/kit-registry'
 import {
@@ -190,9 +191,12 @@ async function buildOutputExists(kitDirectory: string, output: string): Promise<
 	return realKit !== undefined && await containedRealPath(realKit, directory) !== undefined
 }
 
+/** The active theme's root attributes come from this map: Workspace theme ID to attribute name and value. */
+export type PreviewThemes = Readonly<Record<string, Readonly<Record<string, string>>>>
+
 export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, givenLayout?: WorkspaceLayout): Promise<
-	| (PreviewBundleResult & { state: 'valid' })
-	| { state: 'invalid'; diagnostics: readonly unknown[] }
+	| (PreviewBundleResult & { state: 'valid'; themes: PreviewThemes })
+	| { state: 'invalid'; diagnostics: readonly Diagnostic[] }
 > {
 	const layout = await selectedLayout(workspaceRoot, givenLayout)
 	const resolution = await resolveSelectedWorkspaceAdapters(workspaceRoot, layout)
@@ -202,11 +206,83 @@ export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, g
 	// The set of a pinned kit build output generation keeps its bundle until the next generation.
 	const generation = layout.codeDir ? kitBuildRunnerFor(resolve(workspaceRoot))?.outputGeneration() : undefined
 	const pinned = generation !== undefined && pinnedResolutions.get(resolve(workspaceRoot))?.resolution === resolution
-	const bundle = await buildWorkspacePreviewBundle({
-		workspaceRoot,
-		moduleBase: adapterResolutionBase(workspaceRoot, layout),
-		set: resolution.set,
-		...(pinned ? { pin: String(generation) } : {}),
-	})
-	return { state: 'valid', ...bundle }
+	// Below schemaVersion 5 there is no Product Kit file, so no style and no theme.
+	const productKit = layout.productKitPath ? await readRawProductKit(workspaceRoot, layout.productKitPath) : undefined
+	const styles = layout.codeDir && productKit
+		? await resolveProductKitStyles(workspaceRoot, layout, productKit.styles, pinned ? generation : undefined)
+		: { state: 'valid' as const, paths: [] }
+	if (styles.state === 'invalid') return { state: 'invalid', diagnostics: styles.diagnostics }
+	try {
+		const bundle = await buildWorkspacePreviewBundle({
+			workspaceRoot,
+			moduleBase: adapterResolutionBase(workspaceRoot, layout),
+			set: resolution.set,
+			styles: styles.paths,
+			...(pinned ? { pin: String(generation) } : {}),
+		})
+		return { state: 'valid', ...bundle, themes: productKit?.themes ?? {} }
+	}
+	catch (error) {
+		// A module graph esbuild cannot bundle (a missing import, a CSS `url()` that names no file, a
+		// file type it has no loader for) makes the Preview invalid instead of failing the request.
+		// The Workspace root by its real path too: esbuild reads files through it.
+		const message = error instanceof Error ? error.message : String(error)
+		const realRoot = await realpath(workspaceRoot).catch(() => resolve(workspaceRoot))
+		return { state: 'invalid', diagnostics: [{
+			code: 'preview.bundle_failed',
+			path: '/product-kit',
+			message: maskHostPaths(`The Preview bundle could not be built: ${message}`, [resolve(workspaceRoot), realRoot]),
+		}] }
+	}
+}
+
+type StyleResolution =
+	| Readonly<{ state: 'valid'; paths: readonly string[] }>
+	| Readonly<{ state: 'invalid'; diagnostics: readonly Diagnostic[] }>
+
+/** The style resolution of a pinned kit build output generation, per Workspace root, like `pinnedResolutions`. */
+const pinnedStyles = new Map<string, Readonly<{ generation: number; styles: string; resolution: StyleResolution }>>()
+
+/**
+ * The Product Kit `styles` entries' files, in order. Each resolves like an Adapter module specifier
+ * and names a CSS file (Clause 01a11bb1-8787-786a-a87e-49672393abd1); when `kit/package.json`
+ * declares a build, a `./` style names a file of its output, otherwise an export of an external
+ * package (Clause 01a11bb1-8e98-7270-9662-682c048f9929). Under a pinned output generation the
+ * resolution of that generation stays in use, as the Adapters' does.
+ */
+async function resolveProductKitStyles(workspaceRoot: string, layout: WorkspaceLayout, styles: readonly string[], generation: number | undefined): Promise<StyleResolution> {
+	if (styles.length === 0) return { state: 'valid', paths: [] }
+	const root = resolve(workspaceRoot)
+	const key = canonicalJsonStringify(styles)
+	const pinned = pinnedStyles.get(root)
+	if (generation !== undefined && pinned && pinned.generation === generation && pinned.styles === key) return pinned.resolution
+
+	const codeDir = layout.codeDir!
+	const declaration = await readKitBuildDeclaration(join(root, codeDir))
+	const output = declaration.state === 'declared' ? declaration.declaration.output : undefined
+	const resolver = new NodeWorkspaceAdapterModuleResolver({ layout })
+	const paths: string[] = []
+	const diagnostics: Diagnostic[] = []
+	for (const [index, style] of styles.entries()) {
+		const path = `/styles/${index}`
+		if (output !== undefined && style.startsWith('./') && !specifierInBuildOutput(style, output)) {
+			diagnostics.push({ code: 'product_kit.style_outside_build_output', path, message: `${codeDir}/package.json declares a build, so the ./ style ${style} must name a file in its output ${codeDir}/${output}/.` })
+			continue
+		}
+		try {
+			const resolved = await resolver.resolve(root, style)
+			if (extname(resolved.resolvedPath).toLowerCase() !== '.css') {
+				diagnostics.push({ code: 'product_kit.style_not_css', path, message: `The style ${style} does not name a CSS file.` })
+				continue
+			}
+			paths.push(resolved.resolvedPath)
+		}
+		catch (error) {
+			const message = error instanceof Error ? error.message : String(error)
+			diagnostics.push({ code: 'product_kit.style_unresolved', path, message: maskHostPaths(`The style ${style} does not resolve: ${message.replaceAll('Adapter module specifier', 'Style specifier')}`, [root]) })
+		}
+	}
+	const resolution: StyleResolution = diagnostics.length > 0 ? { state: 'invalid', diagnostics } : { state: 'valid', paths }
+	if (generation !== undefined) pinnedStyles.set(root, { generation, styles: key, resolution })
+	return resolution
 }

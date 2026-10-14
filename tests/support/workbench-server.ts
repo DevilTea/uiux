@@ -42,9 +42,10 @@ async function freePort(): Promise<number> {
 /**
  * Starts the built Nitro server (`.output/server/index.mjs`, produced by `pnpm build`)
  * against a private copy of the frozen fixture Workspace. The copy lives under the
- * repository so its adapter resolves the repository's `@deviltea/widget-core`.
+ * repository so its adapter resolves the repository's `@deviltea/widget-core`. `prepare`, when
+ * given, changes the private copy before the server starts (a kit project for one test, say).
  */
-export async function startWorkbenchServer(): Promise<WorkbenchServer> {
+export async function startWorkbenchServer(options: Readonly<{ prepare?: (workspaceRoot: string) => Promise<void> }> = {}): Promise<WorkbenchServer> {
 	const workspaceRoot = await mkdtemp(join(REPOSITORY_ROOT, '.uiux-browser-test-'))
 	let token: string
 	try {
@@ -53,6 +54,7 @@ export async function startWorkbenchServer(): Promise<WorkbenchServer> {
 		// Adapter is in kit/). A later product schema migrates the private copy the way an operator would
 		// (`uiux migrate`), never hand-edited; at the current schema this is a no-op.
 		await new FileNativePersistence({ root: workspaceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).migrateWorkspace()
+		await options.prepare?.(workspaceRoot)
 		token = await provisionToken(workspaceRoot, { nickname: 'tester', kind: 'human', role: 'owner' })
 	}
 	catch (error) {

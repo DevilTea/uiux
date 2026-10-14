@@ -449,21 +449,38 @@ describe('preview adapter materialization transport', () => {
 		process.env.UIUX_WORKSPACE_ROOT = root
 		try {
 			const { default: adaptersHandler } = await import('../server/api/preview/adapters.get')
-			const { default: runtimeHandler } = await import('../server/api/preview/runtime.get')
+			const { default: runtimeHandler } = await import('../server/api/preview/runtime/[hash]/[...file].get')
 
 			// Routes read the principal the access guard attached (identity decision 4).
-			const mockEvent = { context: { uiuxPrincipal: HUMAN_OWNER }, node: { res: { setHeader() {} } } } as never
-			const adaptersResp = await adaptersHandler(mockEvent)
+			const headers: Record<string, unknown> = {}
+			const mockEvent = (params: Record<string, string> = {}) => ({
+				context: { uiuxPrincipal: HUMAN_OWNER, params },
+				node: { res: { setHeader(name: string, value: unknown) { headers[name.toLowerCase()] = value }, getHeader(name: string) { return headers[name.toLowerCase()] } } },
+			}) as never
+			const adaptersResp = await adaptersHandler(mockEvent()) as { bundleUrl: string; stylesheetUrl?: string; themes: unknown }
 			expect(adaptersResp).toMatchObject({
 				state: 'valid',
 				diagnostics: [],
+				themes: {},
 			})
-			expect(adaptersResp).toMatchObject({ bundleUrl: expect.stringContaining('/api/preview/runtime?v=') })
+			// The bundle's files are served by content hash; a bundle without CSS has no stylesheet.
+			const match = /^\/api\/preview\/runtime\/([0-9a-f]{16})\/runtime\.js$/.exec(adaptersResp.bundleUrl)
+			expect(match).not.toBeNull()
+			expect(adaptersResp.stylesheetUrl).toBeUndefined()
 
-			const runtimeJs = await runtimeHandler(mockEvent)
-			expect(typeof runtimeJs).toBe('string')
-			expect(runtimeJs).toContain('mountPreviewRuntime')
-			expect(runtimeJs).toContain('my-counter')
+			const runtimeJs = await runtimeHandler(mockEvent({ hash: match![1]!, file: 'runtime.js' })) as Buffer
+			expect(Buffer.isBuffer(runtimeJs)).toBe(true)
+			expect(headers['content-type']).toBe('text/javascript; charset=utf-8')
+			expect(runtimeJs.toString('utf8')).toContain('mountPreviewRuntime')
+			expect(runtimeJs.toString('utf8')).toContain('my-counter')
+			// A served bundle carries its source map (Rule 01a11bb1-ae8c-721f-b1e4-f6936ffe5d5a).
+			expect(runtimeJs.toString('utf8')).toContain(`//# sourceMappingURL=/api/preview/runtime/${match![1]}/runtime.js.map`)
+			const map = JSON.parse((await runtimeHandler(mockEvent({ hash: match![1]!, file: 'runtime.js.map' })) as Buffer).toString('utf8')) as { sources: string[] }
+			expect(map.sources).toContain('workspace:///kit/adapters/counter.mjs')
+			expect(map.sources.every(source => !source.includes(root))).toBe(true)
+
+			// A hash that is not the current bundle's names nothing.
+			expect(await runtimeHandler(mockEvent({ hash: '0000000000000000', file: 'runtime.js' }))).toEqual({ error: 'preview_runtime_file_not_found' })
 		}
 		finally {
 			if (prevEnv !== undefined) process.env.UIUX_WORKSPACE_ROOT = prevEnv

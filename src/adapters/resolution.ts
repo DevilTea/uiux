@@ -13,6 +13,7 @@ import {
 	type WorkspaceLayout,
 } from '../persistence/paths'
 import { maskHostPaths } from './host-paths'
+import { allowStyleAndAssetImportsOnServer } from './style-imports'
 import { bareKitSpecifierProblem, bareSpecifierPackageName, readDeclaredKitDependencies, relativeKitSpecifierProblem } from './kit-dependencies'
 
 import { resolve as resolveImport } from 'import-meta-resolve'
@@ -71,6 +72,7 @@ export class NodeAdapterManifestLoader implements AdapterManifestLoader {
 		const identity = this.options.version !== undefined && resolved.moduleSpecifier.startsWith('./')
 			? `${resolved.moduleIdentity}?v=${encodeURIComponent(this.options.version)}`
 			: resolved.moduleIdentity
+		allowStyleAndAssetImportsOnServer()
 		const namespace = await import(identity) as Readonly<Record<string, unknown>>
 		return this.extractManifest(namespace)
 	}

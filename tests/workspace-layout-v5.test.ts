@@ -188,6 +188,11 @@ describe('the Product Kit file and the versioned manifest shape', () => {
 		expect(codes({ ...KIT, styles: ['../outside.css', './../outside.css', './dist/../../x.css', './dist//x.css', '@acme/ds/../../x.css', './dist/./x.css'] })).toEqual([0, 1, 2, 3, 4, 5].map(index => `product_kit.invalid_style_specifier /styles/${index}`))
 		expect(codes({ ...KIT, styles: ['./dist/kit.css', '@acme/design-system/styles.css', 'normalize.css'] })).toEqual([])
 		expect(codes({ ...KIT, themes: { dark: { 'data theme': 'dark', 'data-mode': 1 } } })).toEqual(['product_kit.invalid_theme_attribute /themes/dark/data theme', 'schema.expected_string /themes/dark/data-mode'])
+		// Theme root attributes are allow-listed to class and data-* (Clause 01a11bb1-8efc-77df-a0bb-78033bb35d56).
+		expect(codes({ ...KIT, themes: { dark: { onclick: 'alert(1)', style: 'color: red', href: 'javascript:alert(1)', 'data-': 'x', 'DATA-theme': 'x', 'data-X': 'x' } } })).toEqual(
+			['onclick', 'style', 'href', 'data-', 'DATA-theme', 'data-X'].map(name => `product_kit.theme_attribute_not_allowed /themes/dark/${name}`),
+		)
+		expect(codes({ ...KIT, themes: { dark: { 'class': 'dark', 'data-theme': 'dark' } } })).toEqual([])
 		expect(codes({ ...KIT, widgets: {}, components: { Button: { files: ['components/button.vue', 'src/../x.ts'], requires: ['ghost', 'Button'], layer: 'ui', extra: true } } })).toEqual([
 			'product_kit.invalid_component_name /components/Button',
 			'schema.unknown_field /components/Button/extra',

@@ -5,7 +5,16 @@ export type VersionResourceRead<T> = Readonly<{ versionId: string; kind: string;
 type ResourceListPage<T> = Readonly<{ items: readonly T[]; nextCursor?: string }>
 
 type PreviewAdaptersResponse =
-	| { state: 'valid'; diagnostics: readonly []; summaries: readonly unknown[]; bundleUrl: string }
+	| {
+		state: 'valid'
+		diagnostics: readonly []
+		summaries: readonly unknown[]
+		bundleUrl: string
+		/** The Product Kit stylesheet, when the bundle has CSS. */
+		stylesheetUrl?: string
+		/** Workspace theme ID to the root attributes the Product Kit sets for it. */
+		themes: Readonly<Record<string, Readonly<Record<string, string>>>>
+	}
 	| { state: 'invalid'; diagnostics: readonly { code: string; path: string; message: string }[]; summaries: readonly unknown[] }
 
 export function useUiuxClient() {
