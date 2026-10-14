@@ -51,6 +51,23 @@ Commands:
                            and prints the uiux access copy command to run next;
                            uiux.v5-to-v6 adds access-presets.json with the built-in
                            Access presets
+  components list [--workspace <dir>]
+                           List the components of the Workspace's Product Kit registry
+  components add <name...> --to <dir> [--project <dir>] [--force] [--workspace <dir>]
+                           Copy the named components and the components they require
+                           from the Workspace's kit/src/ into <dir> of a product project,
+                           keeping their paths below kit/src/, record them in the
+                           project's uiux-components.json, and print the packages, with
+                           their version ranges, they need. The product project is
+                           --project, else the nearest directory at or above <dir> with
+                           a package.json, else the Git top level. A changed copy, an
+                           unrecorded file in the way, or a component already copied to
+                           another directory refuses the copy; --force overwrites and
+                           moves. Needs no credential
+  components diff [--project <dir>] [--workspace <dir>] [--check]
+                           Report each recorded file as unchanged, modified, upstream,
+                           diverged, missing or removed; the product project defaults
+                           to the current directory's. --check exits 1 on any drift
 
 Workspace selection: --workspace <dir> names the Workspace root, or a directory whose
 .uiux/ holds one. Without it, a command uses the .uiux/ of the nearest directory, from
@@ -293,6 +310,14 @@ if (extraArgs.length === 0 && (command === undefined || command === '--help' || 
 			console.error('uiux: migrate failed: ' + (error instanceof Error ? error.message : String(error)))
 			process.exitCode = 1
 		}
+	}
+} else if (command === 'components') {
+	try {
+		await runBundled('src/cli/components.ts', ({ runComponentsCommand }) => runComponentsCommand({ argv: extraArgs, cwd: process.cwd() }))
+	}
+	catch (error) {
+		console.error('uiux: components failed: ' + (error instanceof Error ? error.message : String(error)))
+		process.exitCode = 1
 	}
 } else if (['member', 'token', 'invite', 'session', 'access'].includes(command)) {
 	try {

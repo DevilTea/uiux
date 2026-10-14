@@ -59,6 +59,11 @@ export function emptyProductKit(): ProductKit {
 	return { designSystems: [], adapters: [], styles: [], themes: {}, components: {}, widgets: {} }
 }
 
+/** A registry component name: lowercase words joined by single hyphens (Clause 01a11bb1-8a44-…). */
+export function isProductKitComponentName(value: unknown): value is string {
+	return typeof value === 'string' && COMPONENT_NAME_PATTERN.test(value)
+}
+
 export function isProductKitPackageName(value: unknown): value is string {
 	return typeof value === 'string' && value.length <= PACKAGE_NAME_MAX_LENGTH && PACKAGE_NAME_PATTERN.test(value)
 }
