@@ -1792,7 +1792,9 @@
       "unavailable": "預覽 Runtime 無法使用。"
     },
     "preview": {
-      "runtime_failed": "預覽無法呈現這個 View。"
+      "bundle_failed": "無法以 kit 的模組與樣式表建置預覽套件。",
+      "runtime_failed": "預覽無法呈現這個 View。",
+      "stylesheet_load_failed": "Product Kit 樣式表未能載入，因此預覽無法呈現。"
     },
     "schema": {
       "empty_string": "此值不可為空白。",
@@ -2163,6 +2165,9 @@
       "missing": "product-kit.json 不存在或無法讀取。",
       "package_undeclared": "請先在 kit/package.json 中將此套件宣告為相依套件。",
       "specifier_refused": "請指定已宣告的套件，或 kit/ 內、node_modules/ 以外的 ./ 路徑。",
+      "style_not_css": "樣式必須指向 CSS 檔案。",
+      "style_outside_build_output": "宣告了 kit 建置時，./ 樣式必須指向其輸出目錄中的檔案。",
+      "style_unresolved": "這個樣式無法解析為檔案。",
       "unknown_component": "必須指向登錄中的另一個項目。"
     }
   },
