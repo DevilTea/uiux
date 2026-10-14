@@ -48,7 +48,7 @@ const VISIBLE_ATTRS = new Set(['label', 'placeholder', 'title', 'aria-label', 'a
 /** Object keys whose value a person reads (Nuxt UI items, actions, columns, toasts). */
 const VISIBLE_KEYS = new Set(['label', 'title', 'description', 'placeholder', 'header', 'text', 'ariaLabel', 'aria-label', 'empty', 'help', 'hint', 'suffix', 'prefix'])
 /** Calls whose string arguments reach the screen or a live region. */
-const VISIBLE_CALLS = /(?:^|\.)(?:success|announce|setAttribute)$/
+const VISIBLE_CALLS = /(?:^|\.)(?:success|notice|announce|setAttribute)$/
 
 type Finding = Readonly<{ file: string; line: number; text: string }>
 

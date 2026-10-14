@@ -18,6 +18,7 @@ const { selectedView, views, flows, loading } = workbench
 
 const WORKSPACE_PAGES: Record<string, string> = {
 	'/workspace/settings': 'nav.settings',
+	'/workspace/access-presets': 'nav.accessPresets',
 	'/workspace/locales': 'nav.locales',
 	'/workspace/assets': 'nav.assets',
 }
