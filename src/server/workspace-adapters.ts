@@ -225,11 +225,13 @@ export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, g
 	catch (error) {
 		// A module graph esbuild cannot bundle (a missing import, a CSS `url()` that names no file, a
 		// file type it has no loader for) makes the Preview invalid instead of failing the request.
+		// The Workspace root by its real path too: esbuild reads files through it.
 		const message = error instanceof Error ? error.message : String(error)
+		const realRoot = await realpath(workspaceRoot).catch(() => resolve(workspaceRoot))
 		return { state: 'invalid', diagnostics: [{
 			code: 'preview.bundle_failed',
 			path: '/product-kit',
-			message: maskHostPaths(`The Preview bundle could not be built: ${message}`, [resolve(workspaceRoot)]),
+			message: maskHostPaths(`The Preview bundle could not be built: ${message}`, [resolve(workspaceRoot), realRoot]),
 		}] }
 	}
 }

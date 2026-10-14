@@ -282,9 +282,13 @@ describe('Product Kit stylesheet bundling', () => {
 		const broken = await createKitWorkspace({ buttonCss: `.fui-button { background: url('./missing.png'); }\n` })
 		const result = await getSelectedWorkspacePreviewBundle(broken)
 		expect(result).toMatchObject({ state: 'invalid', diagnostics: [{ code: 'preview.bundle_failed', path: '/product-kit' }] })
-		// The esbuild error names no host path.
-		expect(JSON.stringify(result)).toContain('missing.png')
-		expect(JSON.stringify(result)).not.toMatch(/\/(?:private|var|Users|tmp|home)\//)
+		// The esbuild error names the file by its path inside the Workspace and no host path, though the
+		// temporary directory's path runs through a symlink on some hosts (`/var` on macOS).
+		const message = JSON.stringify(result)
+		expect(message).toContain('missing.png')
+		expect(message).toContain('kit/node_modules/fake-ui/button.css')
+		expect(message).not.toMatch(/\/(?:private|var|Users|tmp|home)\//)
+		expect(message).not.toMatch(/private|\.\.\//)
 	})
 })
 

@@ -194,7 +194,11 @@ async function buildBundle(input: Readonly<{
 
 	// Nothing is written: `outdir` only names where the output files lie relative to each other.
 	const outdir = join(input.moduleBase ?? input.workspaceRoot, '.uiux-preview-bundle')
+	const realWorkspaceRoot = await realpath(input.workspaceRoot).catch(() => resolve(input.workspaceRoot))
 	const buildResult = await esbuild.build({
+		// esbuild names a file in its messages relative to this directory, so a build error names a
+		// Workspace file by its path inside the Workspace, never through the host's directories.
+		absWorkingDir: realWorkspaceRoot,
 		stdin: {
 			contents: entrySource,
 			resolveDir: packageRoot,
@@ -227,7 +231,7 @@ async function buildBundle(input: Readonly<{
 	})
 
 	const files = new Map<string, PreviewBundleFile>()
-	const labels = sourceLabels(await realpath(input.workspaceRoot).catch(() => input.workspaceRoot), await realpath(packageRoot).catch(() => packageRoot))
+	const labels = sourceLabels(realWorkspaceRoot, await realpath(packageRoot).catch(() => packageRoot))
 	for (const output of buildResult.outputFiles) {
 		const path = relative(outdir, output.path).split(sep).join('/')
 		const contents = path.endsWith('.map') ? relabelSourceMap(output.text, outdir, labels) : output.contents
