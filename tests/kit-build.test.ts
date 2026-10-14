@@ -566,6 +566,29 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		expect(composed).toMatchObject({ status: 'updated' })
 	})
 
+	it('requires a ./ style in the build output when a build is declared, in the Preview bundle and in update_product_kit (Clause 01a11bb1-8e98)', async () => {
+		const root = await kitWorkspace(nodeBuild('build.mjs'), {
+			'build.mjs': BUILD_OK,
+			'dist/uiux.js': adapterModule('built'),
+			'dist/kit.css': '.kit-built { color: red; }\n',
+			'src/kit.css': '.kit-source { color: blue; }\n',
+		}, [{ moduleSpecifier: './dist/uiux.js' }])
+		const app = createWorkspaceApplicationSession(new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY }))
+		const revision = (await app.readProductKit())!.revision
+		const refused = await app.updateProductKit({ expectedRevision: revision, adapters: [{ moduleSpecifier: './dist/uiux.js' }], styles: ['./src/kit.css'], themes: {} })
+		expect(refused).toMatchObject({ status: 'invalid', diagnostics: [expect.objectContaining({ code: 'product_kit.style_outside_build_output', path: '/styles/0' })] })
+		const updated = await app.updateProductKit({ expectedRevision: revision, adapters: [{ moduleSpecifier: './dist/uiux.js' }], styles: ['./dist/kit.css'], themes: {} })
+		expect(updated).toMatchObject({ status: 'updated' })
+		const bundle = await getSelectedWorkspacePreviewBundle(root, V5_LAYOUT)
+		expect(bundle).toMatchObject({ state: 'valid', stylesheet: 'runtime.css' })
+		if (bundle.state === 'valid') expect(new TextDecoder().decode(bundle.files.get('runtime.css')!.contents)).toContain('.kit-built')
+
+		// A file that names a style outside the output anyway makes the Preview invalid.
+		const kitFile = JSON.parse(await readFile(join(root, 'product-kit.json'), 'utf8')) as Record<string, unknown>
+		await writeFile(join(root, 'product-kit.json'), canonicalJsonBytes({ ...kitFile, styles: ['./src/kit.css'] }))
+		expect(await getSelectedWorkspacePreviewBundle(root, V5_LAYOUT)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'product_kit.style_outside_build_output', path: '/styles/0' })] })
+	})
+
 	it('takes the wrapper entry from the build output: a component importing it is flagged (Clause 01a11bb1-89e2)', async () => {
 		const root = await kitWorkspace(nodeBuild('build.mjs'), {
 			'build.mjs': BUILD_OK,

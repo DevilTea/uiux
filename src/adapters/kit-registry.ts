@@ -156,6 +156,9 @@ export async function checkProductKitAgainstKit(input: KitCheckInput): Promise<K
 		next.styles.forEach((style, index) => {
 			const problem = specifierProblem(codeDirectoryName, style, kitDependencies)
 			if (problem) refusals.push({ code: 'product_kit.specifier_refused', path: jsonPointer('/styles', index), message: problem.replace('Adapter module specifier', 'Style specifier') })
+			// Clause 01a11bb1-8e98-7270-9662-682c048f9929: with a build, a `./` style is a file of its output.
+			else if (output !== undefined && style.startsWith('./') && !specifierInBuildOutput(style, output))
+				refusals.push({ code: 'product_kit.style_outside_build_output', path: jsonPointer('/styles', index), message: `${codeDirectoryName}/package.json declares a build, so the ./ style ${style} must name a file in its output ${codeDirectoryName}/${output}/.` })
 		})
 	}
 	if (changed('designSystems') && next.designSystems.length > 0) {
