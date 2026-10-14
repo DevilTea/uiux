@@ -442,7 +442,7 @@ Every component below is a Nuxt UI 4 component themed through `app.config.ts` an
   - Active: `bg-elevated` with `text-highlighted`, plus a 2px Iris inset bar on the leading edge.
   - Inactive: `text-muted`. Hover: `bg-muted`.
 - **Detail routes:** a View or Flow page keeps its area's item active (Overview for a View, UX Flows for a Flow); a View page's parent crumb is Overview. On a View page the sidebar body becomes the View navigator ("All Views" back link, View name, Widget tree); on a Flow page it lists Flows with "New Flow" (desktop).
-- **Secondary navigation:** one smaller "Workspace" entry sits below a separator at the sidebar foot, active on every `/workspace` page. Those pages carry their own sub-navigation (Settings, Locales, Assets) in a `UDashboardToolbar` with a horizontal `UNavigationMenu`. Adapters are a section of Settings (`/workspace/settings?section=adapters`; `/workspace/adapters` redirects there). Members is in the member menu (Owners).
+- **Secondary navigation:** one smaller "Workspace" entry sits below a separator at the sidebar foot, active on every `/workspace` page. Those pages carry their own sub-navigation (Settings, Access presets, Locales, Assets) in a `UDashboardToolbar` with a horizontal `UNavigationMenu`. Adapters are a section of Settings (`/workspace/settings?section=adapters`; `/workspace/adapters` redirects there). Members is in the member menu (Owners).
 - **Collapsed rail:** 56px, icons only, with tooltips; the active item keeps its elevated fill and Iris bar. Counts move into the item's accessible name.
 - **Mobile:** a custom bottom bar (three links: Overview, UX Flows, Reviews; 56px plus the safe area), each a 20px icon over a 12px label. Active: highlighted text, Iris icon and a 2px Iris bar on the top edge. Reviews carries a Marker count.
 - **Breadcrumbs:** neutral; ancestor crumbs keep their width and only the current page's label truncates.
@@ -512,7 +512,7 @@ Lucide only, through `UIcon` with `i-lucide-*` names. 16px in 13px UI, 14px inli
 | Capture evidence / Handoff export | `i-lucide-camera` / `i-lucide-package` |
 | Fit / Zoom in / Zoom out | `i-lucide-scan` / `i-lucide-zoom-in` / `i-lucide-zoom-out` |
 | Agent / Human / System actor | `i-lucide-bot` / avatar initials / `i-lucide-cog` |
-| Workspace entry and settings / Locales / Assets / Adapters | `i-lucide-settings-2` / `i-lucide-globe` / `i-lucide-image` / `i-lucide-puzzle` |
+| Workspace entry and settings / Access presets / Locales / Assets / Adapters | `i-lucide-settings-2` / `i-lucide-key-square` / `i-lucide-globe` / `i-lucide-image` / `i-lucide-puzzle` |
 
 ### Motion
 State changes only, 120–240ms, never choreography.

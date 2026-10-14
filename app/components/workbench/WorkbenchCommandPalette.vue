@@ -34,6 +34,7 @@ const groups = computed<CommandPaletteGroup<CommandPaletteItem>[]>(() => {
 				{ label: t('nav.flows'), icon: 'i-lucide-workflow', to: '/flows', kbds: ['g', 'f'] },
 				{ label: t('nav.reviews'), icon: 'i-lucide-inbox', to: '/reviews', kbds: ['g', 'r'] },
 				{ label: t('nav.settings'), icon: 'i-lucide-settings-2', to: '/workspace/settings' },
+				{ label: t('nav.accessPresets'), icon: 'i-lucide-key-square', to: '/workspace/access-presets' },
 				{ label: t('nav.locales'), icon: 'i-lucide-globe', to: '/workspace/locales' },
 				{ label: t('nav.assets'), icon: 'i-lucide-image', to: '/workspace/assets' },
 				{ label: t('nav.adapters'), icon: 'i-lucide-puzzle', to: ADAPTERS_LOCATION },

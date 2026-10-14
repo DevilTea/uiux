@@ -14,9 +14,18 @@ import { memberLabelText } from '../../utils/member-label'
  * identifier and description, a preset to start from, and the label the keys would get, updated as
  * they change. `humanOnly` keys are marked and disabled for an Agent; checking a key checks its
  * requirements. Keys this UIUX version does not know are listed apart, kept and granting nothing.
+ *
+ * The Access presets page edits a preset's keys with it too (`subject: 'preset'`, kind `human`): a
+ * preset has no label of its own, and one holding an unknown key labels no member (Rule
+ * 01a11c09-ca9b-7c86-9277-22b0397bee03). `readonly` shows the keys without letting them change.
  */
 const keys = defineModel<string[]>('keys', { required: true })
-const props = defineProps<{ kind: MemberKind; presets: readonly LabelPreset[] }>()
+const props = withDefaults(defineProps<{
+	kind: MemberKind
+	presets: readonly LabelPreset[]
+	subject?: 'member' | 'preset'
+	readonly?: boolean
+}>(), { subject: 'member', readonly: false })
 const { t } = useI18n()
 
 const domains = catalogByDomain()
@@ -69,8 +78,12 @@ const presetItems = computed<DropdownMenuItem[]>(() => props.presets.map(preset 
   >
     <div class="flex flex-wrap items-center justify-between gap-2">
       <p class="flex items-center gap-2 text-sm">
-        <span class="text-muted">{{ t('access.keys.resultingLabel') }}</span>
+        <span
+          v-if="subject === 'member'"
+          class="text-muted"
+        >{{ t('access.keys.resultingLabel') }}</span>
         <UBadge
+          v-if="subject === 'member'"
           color="neutral"
           variant="soft"
           data-key-editor-label
@@ -83,7 +96,7 @@ const presetItems = computed<DropdownMenuItem[]>(() => props.presets.map(preset 
         >{{ t('access.keys.count', { n: keys.length }, keys.length) }}</span>
       </p>
       <UDropdownMenu
-        v-if="presets.length > 0"
+        v-if="presets.length > 0 && !readonly"
         :items="presetItems"
         :content="{ align: 'end' }"
       >
@@ -112,7 +125,7 @@ const presetItems = computed<DropdownMenuItem[]>(() => props.presets.map(preset 
       color="warning"
       variant="subtle"
       icon="i-lucide-shield-alert"
-      :title="t('access.keys.manageWarningTitle')"
+      :title="subject === 'preset' ? t('access.keys.manageWarningPresetTitle') : t('access.keys.manageWarningTitle')"
       :description="t('access.keys.manageWarning')"
       data-key-editor-manage-warning
     />
@@ -135,7 +148,7 @@ const presetItems = computed<DropdownMenuItem[]>(() => props.presets.map(preset 
         >
           <UCheckbox
             :model-value="held.has(key)"
-            :disabled="disabledFor(key)"
+            :disabled="readonly || disabledFor(key)"
             :ui="{ wrapper: 'min-w-0 flex-1' }"
             @update:model-value="(value: boolean | 'indeterminate') => setKey(key, value === true)"
           >
@@ -200,7 +213,7 @@ const presetItems = computed<DropdownMenuItem[]>(() => props.presets.map(preset 
         {{ t('access.keys.unknownTitle') }}
       </h3>
       <p class="text-xs text-muted">
-        {{ t('access.keys.unknownHelp') }}
+        {{ subject === 'preset' ? t('access.keys.unknownHelpPreset') : t('access.keys.unknownHelp') }}
       </p>
       <ul class="divide-y divide-(--ui-border) rounded-md border border-default">
         <li
@@ -211,6 +224,7 @@ const presetItems = computed<DropdownMenuItem[]>(() => props.presets.map(preset 
         >
           <UCheckbox
             :model-value="held.has(key)"
+            :disabled="readonly"
             @update:model-value="(value: boolean | 'indeterminate') => setKey(key, value === true)"
           >
             <template #label>
