@@ -26,7 +26,8 @@ import { isFullUuid, isSha256Digest, type JsonObject, type JsonValue } from '../
 import type { ResolvedRenderContext } from '../domain/render-context/schema'
 import type { HandoffRoot } from '../domain/handoff/schema'
 import { isPersistenceBusyError, persistenceBusyResult } from '../persistence/busy'
-import { parsePointResourceUri, pointResourceUri } from './resource-uri'
+import { KIT_FILE_RESOURCE_TEMPLATE, kitFileResourceUri, parsePointResourceUri, pointResourceUri } from './resource-uri'
+import { kitFileContent } from '../application/services/kit-source'
 
 const dynamicKinds = ['view', 'flow', 'locale', 'review', 'asset'] as const satisfies readonly PointResourceKind[]
 const discoveryKindsSchema = z.array(z.enum(DISCOVERABLE_RESOURCE_KINDS)).optional()
@@ -111,6 +112,23 @@ const updateComponentRegistrySchema = z.object({
 	expectedRevision: z.string().describe('The Product Kit revision, read from uiux://product-kit.'),
 	components: z.record(z.string(), z.unknown()).describe('The component registry: name → { files, requires?, packages?, layer: "design-system" | "product" }, files relative to kit/ under kit/src/.'),
 	widgets: z.record(z.string(), z.unknown()).describe('The component table: Widget type → { component } naming a registry component, or { import, export } naming an external package export.'),
+}).strict()
+
+// Clauses 01a11bb1-b227-77a8-ab57-c287ca5d2bfd and 01a11bb1-b28f-7be6-9d53-3782729297a7: the kit source Tools.
+const getComponentSourceSchema = z.object({
+	name: z.string().describe('A component name of the Product Kit registry (resource.components of uiux://product-kit).'),
+	withRequires: z.boolean().optional().describe('true also returns every component it requires, transitively, as uiux components add copies them; false by default.'),
+}).strict()
+
+const recordedCopySchema = z.object({
+	target: z.string().optional(),
+	componentDigest: z.string().optional(),
+	exportedAt: z.string().optional(),
+	files: z.record(z.string(), z.object({ source: z.string(), digest: z.string() }).strict()),
+}).strict()
+
+const compareComponentCopiesSchema = z.object({
+	copies: z.record(z.string(), recordedCopySchema).describe('The components member of the product project\'s copy record (uiux-components.json): component name → { target, componentDigest, exportedAt, files }, files mapping each copied file\'s path to { source, digest }. Only files is read.'),
 }).strict()
 
 /** The URI of the Product Kit Resource (Clause 01a11bb1-b0f1-7e5d-85ad-230c43ad99fb). */
@@ -434,8 +452,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 
 	// Clause 01a11bb1-b0f1-7e5d-85ad-230c43ad99fb: the Product Kit file with its build state (the kit
 	// build runner's under uiux dev), Adapter resolution, resolved external packages and findings. A
-	// Workspace without one (below schemaVersion 5) has no such Resource. The kit file template
-	// uiux://product-kit/file/{path} is not served yet.
+	// Workspace without one (below schemaVersion 5) has no such Resource.
 	server.registerResource(
 		'product-kit',
 		PRODUCT_KIT_RESOURCE_URI,
@@ -444,6 +461,33 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			const read = await app.readProductKit()
 			if (!read) throw new ResourceNotFoundError(uri.href, `UIUX Product Kit not found: this Workspace has no ${PRODUCT_KIT_RESOURCE_URI} (it needs Workspace schemaVersion 5).`)
 			return { contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(read) }] }
+		},
+	)
+
+	// Clause 01a11bb1-b0f1-7e5d-85ad-230c43ad99fb: one kit project file by its path relative to kit/,
+	// percent-encoded as one segment (each / as %2F). Clause 01a11485-fa00-…: `product-kit.source.read`,
+	// not `workspace.read`. A path that is not a kit path (absolute, `..`, inside kit/node_modules/) is
+	// invalid; a file that is missing, a link or below one is not found (Clause 01a11485-f70a-…), as is
+	// every kit file below schemaVersion 5. Nothing names a host path.
+	server.registerResource(
+		'product-kit-file',
+		new ResourceTemplate(KIT_FILE_RESOURCE_TEMPLATE, { list: undefined }),
+		{ title: 'UIUX kit project file (read-only)', description: 'One file of the kit project by its path relative to kit/, with each / as %2F. Needs product-kit.source.read. UTF-8 text, else a base64 blob. list_kit_files lists the files.' },
+		async (uri, { path }) => {
+			let decoded: string
+			try { decoded = decodeURIComponent(typeof path === 'string' ? path : String(path)) }
+			catch { throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Invalid kit file path: it is not percent-encoded UTF-8.') }
+			const read = await app.readKitFile(decoded)
+			if (read.status === 'invalid_path') throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Invalid kit file path: ${read.message}`)
+			if (read.status === 'not_found') throw new ResourceNotFoundError(uri.href, `UIUX kit file not found: kit/${read.path} is not a regular file reached without a symbolic link.`)
+			if (read.status === 'blocked') {
+				if (read.code === 'workspace.migration_required') throw new ResourceNotFoundError(uri.href, `UIUX kit file not found: this Workspace has no kit project (it needs Workspace schemaVersion 5).`)
+				throw new ProtocolError(ProtocolErrorCode.InternalError, `${read.code}: ${read.message}`, read)
+			}
+			const content = kitFileContent(read.bytes)
+			return { contents: [content.encoding === 'base64'
+				? { uri: uri.href, mimeType: 'application/octet-stream', blob: content.content }
+				: { uri: uri.href, mimeType: 'text/plain', text: content.content }] }
 		},
 	)
 
@@ -648,6 +692,46 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 				...(result.status === 'blocked' ? { isError: true } : {}),
 			}
 		},
+	)
+
+	// Rule 01a11bb1-a184-7e00-a8de-c81056ad5a35: the kit project is read-only in UIUX; these Tools
+	// read it (Clauses 01a11bb1-b1c2-…, 01a11bb1-b227-… and 01a11bb1-b28f-…), each with
+	// `product-kit.source.read` (Clause 01a11485-fa00-72da-bc46-98302a3c106e).
+	const kitSourceBlocked = 'blocked (auth.scope_denied naming requiredKeys, workspace.migration_required below Workspace schemaVersion 5)'
+	server.registerTool(
+		'list_kit_files',
+		{
+			title: 'List the UIUX kit project files',
+			description: `List the files of the kit project, the Workspace's kit/ directory: every regular file by its path relative to kit/, sorted by path, leaving out kit/node_modules/, every symbolic link and whatever lies below a linked directory. Read-only: kit code is changed outside UIUX. Takes no input. Needs product-kit.source.read. Returns { status: "listed", key: "product-kit", files: [{ path, size, resourceUri }] }; read a file from its resourceUri, uiux://product-kit/file/{path} with each / in path as %2F. Refusals: ${kitSourceBlocked}.`,
+			inputSchema: z.object({}).strict(),
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async () => {
+			const result = await app.listKitFiles()
+			return kitSourceToolResult(result.status === 'listed' ? { ...result, files: result.files.map(file => ({ ...file, resourceUri: kitFileResourceUri(file.path) })) } : result, 'listed')
+		},
+	)
+
+	server.registerTool(
+		'get_component_source',
+		{
+			title: 'Get a UIUX component\'s source',
+			description: `Return the source of a Product Kit registry component, for copying it into a product project yourself. Read-only. Needs product-kit.source.read. Returns { status: "found", key: "product-kit", components }: the named component, then, with withRequires, every component it requires, each { name, componentDigest, requires, packages, files, copyRecordEntry }. files are [{ path, digest, content }]: path relative to kit/, digest "sha256:" and the lowercase hex SHA-256 of the file's bytes, content the UTF-8 text, or base64 with encoding: "base64" when the bytes are not UTF-8. packages maps each external package the component declares to the version range kit/package.json gives it (null when it gives none); the product project needs them. Copy each file to its path relative to kit/src/ below one target directory of the product project, then write copyRecordEntry ({ componentDigest, exportedAt, files }) into the project's copy record, uiux-components.json ({ formatVersion: 1, components }), as components[name], adding target (that directory, relative to the project root) and prefixing each files key with target/. The digests are those uiux components add records, so uiux components diff and compare_component_copies read the entry. Refusals: not_found (the registry has no such component; components names it), invalid (kit.component_invalid when a declared file is not a regular file under kit/src/ reached without a symbolic link, or kit/package.json cannot be read; the Product Kit file's own validation), ${kitSourceBlocked}.`,
+			inputSchema: getComponentSourceSchema,
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async input => kitSourceToolResult(await app.getComponentSource({ name: input.name, ...(input.withRequires === undefined ? {} : { withRequires: input.withRequires }) }), 'found'),
+	)
+
+	server.registerTool(
+		'compare_component_copies',
+		{
+			title: 'Compare UIUX component copies with the Workspace',
+			description: `Return the Workspace side of the drift of copied components: for each file recorded in copies, whether its Workspace original still matches the recorded digest. Read-only. Needs product-kit.source.read. Returns { status: "compared", key: "product-kit", files: [{ component, path, source, recordedDigest, original, originalDigest }] }, sorted by component, then path. original is "matches"; "differs" when the original changed, is gone or is no longer declared by its component (originalDigest is its digest now, null when it cannot be read); or "removed" when the component is no longer in the registry (no originalDigest). To report drift as uiux components diff does, compare the digest of your copy at path with recordedDigest: removed is removed; a copy that is gone is missing; else a changed copy with an original that differs is diverged, a changed copy alone modified, an original that differs alone upstream, and neither unchanged. Refusals: invalid (the Product Kit file's own validation), ${kitSourceBlocked}.`,
+			inputSchema: compareComponentCopiesSchema,
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async input => kitSourceToolResult(await app.compareComponentCopies({ copies: input.copies }), 'compared'),
 	)
 
 	server.registerTool(
@@ -1257,6 +1341,14 @@ async function discoveryToolResult(app: ScopedWorkspaceSession, mode: 'list' | '
 	return {
 		content: [{ type: 'text' as const, text: JSON.stringify(output) }],
 		structuredContent: output,
+	}
+}
+
+function kitSourceToolResult(result: { status: string; [key: string]: unknown }, succeeded: string) {
+	return {
+		content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+		structuredContent: result,
+		...(result.status === succeeded ? {} : { isError: true }),
 	}
 }
 

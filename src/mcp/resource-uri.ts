@@ -25,3 +25,14 @@ export function parsePointResourceUri(input: string | URL): UiuxResourceAddress 
 	}
 	catch { return undefined }
 }
+
+/** The kit project file Resource template (Clause 01a11bb1-b0f1-7e5d-85ad-230c43ad99fb). */
+export const KIT_FILE_RESOURCE_TEMPLATE = 'uiux://product-kit/file/{path}'
+
+/**
+ * The URI of the kit project file `path` (relative to `kit/`): the template's `{path}` in RFC 6570
+ * simple expansion, so each `/` is `%2F`, as the template's variable matches one URI segment.
+ */
+export function kitFileResourceUri(path: string): string {
+	return `uiux://product-kit/file/${encodeURIComponent(path)}`
+}

@@ -42,7 +42,12 @@ export function emptyCopyRecord(): CopyRecord {
  * 01a11bb1-a376-719c-86e0-5f5e4d11cb8c). Both are project-relative.
  */
 export function copyDestination(target: string, source: string): string {
-	return `${target}/${source.slice(KIT_SOURCE_PREFIX.length)}`
+	return `${target}/${copyPathBelowTarget(source)}`
+}
+
+/** Where a copy of the kit file `source` (`src/…`) lies relative to its target directory: its path relative to `kit/src/`. */
+export function copyPathBelowTarget(source: string): string {
+	return source.slice(KIT_SOURCE_PREFIX.length)
 }
 
 /**

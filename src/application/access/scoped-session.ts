@@ -41,6 +41,7 @@ import type {
 } from '../services/product-kit-authoring'
 import type { AccessPresetsAuthoringResult, AccessPresetsRead, UpdateAccessPresetsCommand } from '../services/access-presets-authoring'
 import type { KitBuildLogRead, KitBuildRead, RestartKitBuildResult } from '../services/kit-build'
+import type { KitSourceService } from '../services/kit-source'
 import { keyRequirements, writeKeyForKind, type PermissionKey } from './keys'
 import {
 	LOCKABLE_KINDS,
@@ -178,6 +179,14 @@ export interface ScopedWorkspaceSession {
 	readKitBuildLog(): KitBuildLogRead | undefined | AccessRefusal
 	/** `restart_kit_build`; `product-kit.write` (Clauses 01a11be8-5b64-72b3-ad18-81994368a1ed and 01a11bb1-b35a-…). No edit lease: it writes no resource. */
 	restartKitBuild(): Promise<RestartKitBuildResult | AccessRefusal>
+	/**
+	 * The read-only kit source operations; each needs `product-kit.source.read` (Clause
+	 * 01a11485-fa00-72da-bc46-98302a3c106e) and takes no lease: none writes.
+	 */
+	listKitFiles(): Promise<Awaited<ReturnType<KitSourceService['listKitFiles']>> | AccessRefusal>
+	readKitFile(path: string): Promise<Awaited<ReturnType<KitSourceService['readKitFile']>> | AccessRefusal>
+	getComponentSource(input: Parameters<KitSourceService['getComponentSource']>[0]): Promise<Awaited<ReturnType<KitSourceService['getComponentSource']>> | AccessRefusal>
+	compareComponentCopies(input: Parameters<KitSourceService['compareComponentCopies']>[0]): Promise<Awaited<ReturnType<KitSourceService['compareComponentCopies']>> | AccessRefusal>
 	createLocale(command: CreateLocaleCommand): Promise<Scoped<LocaleAuthoringResult>>
 	updateLocale(command: UpdateLocaleCommand): Promise<Scoped<LocaleAuthoringResult>>
 	createFlow(command: CreateFlowCommand): Promise<Scoped<FlowAuthoringResult>>
@@ -593,6 +602,22 @@ export function createScopedWorkspaceSession(
 		async restartKitBuild() {
 			const denied = authorizeOperation(principal, 'restartKitBuild')
 			return denied ? refusalFromScope(PRODUCT_KIT_KEY, denied) : app.restartKitBuild()
+		},
+		async listKitFiles() {
+			const denied = authorizeOperation(principal, 'readKitSource')
+			return denied ? refusalFromScope(PRODUCT_KIT_KEY, denied) : app.listKitFiles()
+		},
+		async readKitFile(path) {
+			const denied = authorizeOperation(principal, 'readKitSource')
+			return denied ? refusalFromScope(PRODUCT_KIT_KEY, denied) : app.readKitFile(path)
+		},
+		async getComponentSource(input) {
+			const denied = authorizeOperation(principal, 'readKitSource')
+			return denied ? refusalFromScope(PRODUCT_KIT_KEY, denied) : app.getComponentSource(input)
+		},
+		async compareComponentCopies(input) {
+			const denied = authorizeOperation(principal, 'readKitSource')
+			return denied ? refusalFromScope(PRODUCT_KIT_KEY, denied) : app.compareComponentCopies(input)
 		},
 		async captureFormalEvidence(command) {
 			const denied = authorizeOperation(principal, 'captureFormalEvidence')
