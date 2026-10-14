@@ -412,6 +412,28 @@ describe('Product Kit stylesheet in a Preview Runtime construction', () => {
 		expect(element.getAttributeNames()).toEqual([])
 	})
 
+	it('lowercases theme attribute names, so a mixed-case name leaves nothing behind on a swap or dispose', async () => {
+		const root = await createKitWorkspace()
+		const bundle = await validBundle(root)
+		const origin = await serveRuntime(root)
+		const { document, container, mount } = await previewDocument(root, origin, bundle.bundleJs)
+
+		// A Product Kit file the validator would refuse: HTML stores `data-X` as `data-x`.
+		const themes = { dark: { 'data-X': 'a', 'data-x': 'b', 'CLASS': 'kit-dark' }, light: { 'data-mode': 'light' } }
+		const statuses: PreviewRuntimeStatus[] = []
+		const bridge = mount(container, { view: buttonView(), context: context('dark'), themes, onStatusChange: status => statuses.push(status) })
+		expect(statuses).toEqual([expect.objectContaining({ status: 'ready' })])
+		const element = document.documentElement
+		expect(element.getAttributeNames().sort()).toEqual(['class', 'data-x'])
+		expect(element.getAttribute('data-x')).toBe('b')
+
+		bridge.updateContext(context('light'))
+		expect(element.getAttributeNames()).toEqual(['data-mode'])
+		bridge.updateContext(context('dark'))
+		bridge.dispose()
+		expect(element.getAttributeNames()).toEqual([])
+	})
+
 	it('fails the construction when the stylesheet does not load, naming it, and keeps nothing of it', async () => {
 		const root = await createKitWorkspace()
 		const bundle = await validBundle(root)

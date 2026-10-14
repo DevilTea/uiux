@@ -121,10 +121,13 @@ function createThemeRootAttributes(element: Element, themes: PreviewThemeAttribu
 		apply(themeId: string): void {
 			restore()
 			const attributes = Object.hasOwn(themes, themeId) ? themes[themeId]! : {}
-			for (const [name, value] of Object.entries(attributes)) {
+			for (const [rawName, value] of Object.entries(attributes)) {
+				// HTML lowercases attribute names, so track the name the element stores: a mixed-case name
+				// would otherwise be recorded twice and leave the first value behind on restore.
+				const name = rawName.toLowerCase()
 				// Defense in depth: only `class` and `data-*`, even when the validator was bypassed.
 				if (!isAllowedThemeAttributeName(name) || typeof value !== 'string') continue
-				replaced.set(name, element.getAttribute(name))
+				if (!replaced.has(name)) replaced.set(name, element.getAttribute(name))
 				element.setAttribute(name, value)
 			}
 		},
