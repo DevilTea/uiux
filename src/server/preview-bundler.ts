@@ -7,6 +7,7 @@ import esbuild from 'esbuild'
 import { resolve as resolveImport } from 'import-meta-resolve'
 
 import type { ValidatedAdapterSet } from '../adapters/resolution'
+import { BUNDLED_ASSET_TYPES } from '../adapters/style-imports'
 
 /** One output file of a Preview bundle: its bytes and the media type it is served with. */
 export type PreviewBundleFile = Readonly<{
@@ -40,21 +41,7 @@ export function previewRuntimeFileUrl(hash: string, file: string): string {
 }
 
 /** The fonts and images a stylesheet or a module imports, emitted as files of the bundle. */
-const FILE_LOADER_TYPES: Readonly<Record<string, string>> = Object.freeze({
-	'.woff2': 'font/woff2',
-	'.woff': 'font/woff',
-	'.ttf': 'font/ttf',
-	'.otf': 'font/otf',
-	'.eot': 'application/vnd.ms-fontobject',
-	'.png': 'image/png',
-	'.jpg': 'image/jpeg',
-	'.jpeg': 'image/jpeg',
-	'.gif': 'image/gif',
-	'.webp': 'image/webp',
-	'.avif': 'image/avif',
-	'.svg': 'image/svg+xml',
-	'.ico': 'image/x-icon',
-})
+const FILE_LOADER_TYPES = BUNDLED_ASSET_TYPES
 
 const OUTPUT_TYPES: Readonly<Record<string, string>> = Object.freeze({
 	...FILE_LOADER_TYPES,
