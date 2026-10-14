@@ -22,7 +22,7 @@ type Key = typeof PRODUCT_KIT_RESOURCE_KEY
 const KEY: Key = PRODUCT_KIT_RESOURCE_KEY
 
 export type KitSourceBlocked = Readonly<{ status: 'blocked'; key: Key; code: 'workspace.migration_required'; message: string; diagnostics: readonly Diagnostic[] }>
-/** The Product Kit file is missing or fails its own validation, so it has no registry to read. */
+/** The Product Kit file fails its own validation, so it has no registry to read. */
 export type KitSourceInvalid = Readonly<{ status: 'invalid'; key: Key; code: string; message: string; diagnostics: readonly Diagnostic[] }>
 
 export type ListKitFilesResult = Readonly<{ status: 'listed'; key: Key; files: readonly KitFileEntry[] }> | KitSourceBlocked

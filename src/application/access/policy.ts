@@ -86,7 +86,7 @@ export const ACCESS_OPERATIONS = {
 	// Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa: restarting the kit build (`restart_kit_build`) and reading its log.
 	restartKitBuild: { requiredKeys: ['product-kit.write'] },
 	readKitBuildLog: { requiredKeys: ['product-kit.source.read'] },
-	// Clause 01a11485-fa00-72da-bc46-98302a3c106e: the kit file Resources, list_kit_files, get_component_source and
+	// Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa: the kit file Resources, list_kit_files, get_component_source and
 	// compare_component_copies, and their Workbench mirrors.
 	readKitSource: { requiredKeys: ['product-kit.source.read'] },
 	captureFormalEvidence: { requiredKeys: ['evidence.capture'] },

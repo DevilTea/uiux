@@ -9,7 +9,7 @@ import { parseHttpPayload, type AuthoringHttpResult } from './authoring-http'
  * `GET /api/product-kit/files` (`list_kit_files`), `GET /api/product-kit/file?path=` (the Resource
  * `uiux://product-kit/file/{path}`), `POST /api/product-kit/components/source` (`get_component_source`)
  * and `POST /api/product-kit/components/compare` (`compare_component_copies`). Each needs
- * `product-kit.source.read` (Clause 01a11485-fa00-72da-bc46-98302a3c106e), checked before the request
+ * `product-kit.source.read` (Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa), checked before the request
  * is read, and answers with the body the MCP Tool returns: `auth.scope_denied` is 403, `not_found`
  * 404, an invalid path or input 400, and `workspace.migration_required` 422.
  */

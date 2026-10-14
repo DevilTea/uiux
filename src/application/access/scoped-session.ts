@@ -181,7 +181,7 @@ export interface ScopedWorkspaceSession {
 	restartKitBuild(): Promise<RestartKitBuildResult | AccessRefusal>
 	/**
 	 * The read-only kit source operations; each needs `product-kit.source.read` (Clause
-	 * 01a11485-fa00-72da-bc46-98302a3c106e) and takes no lease: none writes.
+	 * 01a11bb1-b35a-7e69-bba5-978e3f47c4fa) and takes no lease: none writes.
 	 */
 	listKitFiles(): Promise<Awaited<ReturnType<KitSourceService['listKitFiles']>> | AccessRefusal>
 	readKitFile(path: string): Promise<Awaited<ReturnType<KitSourceService['readKitFile']>> | AccessRefusal>

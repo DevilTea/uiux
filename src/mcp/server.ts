@@ -696,7 +696,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 
 	// Rule 01a11bb1-a184-7e00-a8de-c81056ad5a35: the kit project is read-only in UIUX; these Tools
 	// read it (Clauses 01a11bb1-b1c2-…, 01a11bb1-b227-… and 01a11bb1-b28f-…), each with
-	// `product-kit.source.read` (Clause 01a11485-fa00-72da-bc46-98302a3c106e).
+	// `product-kit.source.read` (Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa).
 	const kitSourceBlocked = 'blocked (auth.scope_denied naming requiredKeys, workspace.migration_required below Workspace schemaVersion 5)'
 	server.registerTool(
 		'list_kit_files',
