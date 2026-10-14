@@ -72,6 +72,61 @@ export interface PreviewRuntimeMountOptions {
 	defaultLocale?: string
 	/** Receives at most one report per Widget Event arm; never any Event argument. */
 	onWidgetEvent?: (report: WidgetEventReport) => void
+	/**
+	 * The Product Kit stylesheet's URL. The construction links it first, at the end of the document's
+	 * head, and renders only once it has loaded; a load error fails the construction (Rules
+	 * 01a11a5a-4d38-7f2c-98be-755d8c404d98, 01a11bb1-ad41-761c-ad47-a0e7ed5b8240 and
+	 * 01a11be8-6078-7669-8e6d-6005d42c16dd). Without it the construction renders at once.
+	 */
+	stylesheetHref?: string
+	/**
+	 * The Product Kit `themes`: Workspace theme ID to root attributes, set on the document element for
+	 * the active theme and swapped on a live theme change (Rules 01a11bb1-ada4-7dd7-b3da-733de7a85df4
+	 * and 01a11bb1-ae0b-7120-888f-97234df0aa3b).
+	 */
+	themes?: PreviewThemeAttributes
+}
+
+/** Workspace theme ID to the root attributes (name to value) the Product Kit sets for it. */
+export type PreviewThemeAttributes = Readonly<Record<string, Readonly<Record<string, string>>>>
+
+/** The diagnostic of a Product Kit stylesheet that failed to load (Rule 01a11a5a-5059-716e-b0a5-d178395be034). */
+export function stylesheetLoadFailedDiagnostic(href: string): Diagnostic {
+	return {
+		code: 'preview.stylesheet_load_failed',
+		path: '/product-kit',
+		message: `The Product Kit stylesheet ${href} failed to load, so the Preview cannot be constructed.`,
+	}
+}
+
+/** Marks the Product Kit stylesheet link a construction inserts. */
+export const PRODUCT_KIT_STYLESHEET_ATTRIBUTE = 'data-uiux-product-kit-stylesheet'
+
+/**
+ * The active theme's root attributes on a document element. Applying a theme first restores what
+ * the previous one replaced, so a swap leaves no attribute of the old theme behind, and `restore`
+ * returns the element to how the construction found it.
+ */
+function createThemeRootAttributes(element: Element, themes: PreviewThemeAttributes) {
+	const replaced = new Map<string, string | null>()
+	function restore(): void {
+		for (const [name, previous] of replaced) {
+			if (previous === null) element.removeAttribute(name)
+			else element.setAttribute(name, previous)
+		}
+		replaced.clear()
+	}
+	return {
+		apply(themeId: string): void {
+			restore()
+			const attributes = Object.hasOwn(themes, themeId) ? themes[themeId]! : {}
+			for (const [name, value] of Object.entries(attributes)) {
+				replaced.set(name, element.getAttribute(name))
+				element.setAttribute(name, value)
+			}
+		},
+		restore,
+	}
 }
 
 /** A Widget type's declared Events, from `inspectPlugin(plugin).events` (metadata only). */
@@ -401,6 +456,17 @@ export function createStandalonePreviewMount(input: Readonly<{
 		let activeController: LiveViewRuntimeController = controllerResult
 		const activeRuntime = shallowRef(activeController.runtime)
 		let disposed = false
+		/**
+		 * `linking` until the Product Kit stylesheet has loaded (the first render waits for it),
+		 * `mounted` from the first render, `failed` once the stylesheet failed to load.
+		 */
+		let phase: 'linking' | 'mounted' | 'failed' = 'mounted'
+		/** The latest status an update reported while linking, reported at the first render instead of `ready`. */
+		let statusWhileLinking: PreviewRuntimeStatus | undefined
+		function reportStatus(status: PreviewRuntimeStatus): void {
+			if (phase === 'linking') statusWhileLinking = status
+			else if (phase === 'mounted') options.onStatusChange?.(status)
+		}
 		// Widget Event observation (decision 4): it starts once a Runtime has mounted, so creation and
 		// mount-time emissions never count, and it follows every Runtime instance swap.
 		const eventObserver = new WidgetEventObserver(report => options.onWidgetEvent?.(report))
@@ -409,7 +475,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 		function showRuntime(runtime: WidgetSystemRuntime): void {
 			activeRuntime.value = runtime
 			void nextTick().then(() => {
-				if (!disposed && activeRuntime.value === runtime) eventObserver.attach(runtime)
+				if (!disposed && phase === 'mounted' && activeRuntime.value === runtime) eventObserver.attach(runtime)
 			})
 		}
 
@@ -421,22 +487,60 @@ export function createStandalonePreviewMount(input: Readonly<{
 			},
 		})
 
-		container.innerHTML = ''
-		app.mount(container)
+		const ownerDocument = container.ownerDocument
+		// The active theme's root attributes are on the document before the stylesheet applies.
+		const rootAttributes = createThemeRootAttributes(ownerDocument.documentElement, options.themes ?? {})
+		let appliedThemeId = currentContext.themeId
+		rootAttributes.apply(appliedThemeId)
 
-		options.onStatusChange?.({
-			status: 'ready',
-			supportedTypes: Object.freeze([...supportedTypes]),
-		})
-		eventObserver.attach(activeRuntime.value)
+		function firstRender(): void {
+			phase = 'mounted'
+			container.innerHTML = ''
+			app.mount(container)
+			options.onStatusChange?.(statusWhileLinking ?? {
+				status: 'ready',
+				supportedTypes: Object.freeze([...supportedTypes]),
+			})
+			eventObserver.attach(activeRuntime.value)
+		}
+
+		// The Product Kit stylesheet is linked first, after UIUX's own stylesheets in the head, and the
+		// first render waits for it; a load error fails the whole construction and keeps nothing of it.
+		let stylesheetLink: HTMLLinkElement | undefined
+		if (options.stylesheetHref) {
+			const href = options.stylesheetHref
+			phase = 'linking'
+			const link = ownerDocument.createElement('link')
+			link.rel = 'stylesheet'
+			link.href = href
+			link.setAttribute(PRODUCT_KIT_STYLESHEET_ATTRIBUTE, '')
+			link.addEventListener('load', () => {
+				if (!disposed && phase === 'linking') firstRender()
+			}, { once: true })
+			link.addEventListener('error', () => {
+				if (disposed || phase !== 'linking') return
+				phase = 'failed'
+				link.remove()
+				rootAttributes.restore()
+				eventObserver.dispose()
+				activeController.dispose()
+				options.onStatusChange?.({ status: 'invalid', diagnostics: [stylesheetLoadFailedDiagnostic(href)] })
+			}, { once: true })
+			stylesheetLink = link
+			ownerDocument.head.append(link)
+		}
+		else {
+			firstRender()
+		}
 
 		return {
 			updateView(newView: ViewResource) {
+				if (disposed || phase === 'failed') return
 				if (newView.id !== currentView.id) eventObserver.clearArm()
 				currentView = newView
 				const nextUnsupported = checkViewSupport(currentView)
 				if (nextUnsupported.length > 0) {
-					options.onStatusChange?.({
+					reportStatus({
 						status: 'adapter_unavailable',
 						unsupportedTypes: Object.freeze(nextUnsupported),
 						diagnostics: Object.freeze([
@@ -459,7 +563,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 				})
 
 				if (!(nextController instanceof LiveViewRuntimeController)) {
-					options.onStatusChange?.({
+					reportStatus({
 						status: 'invalid',
 						diagnostics: nextController.state === 'invalid' ? nextController.diagnostics : [],
 					})
@@ -468,14 +572,20 @@ export function createStandalonePreviewMount(input: Readonly<{
 
 				activeController = nextController
 				showRuntime(activeController.runtime)
-				options.onStatusChange?.({
+				reportStatus({
 					status: 'ready',
 					supportedTypes: Object.freeze([...supportedTypes]),
 				})
 			},
 
 			updateContext(nextContext: ResolvedRenderContext) {
+				if (disposed || phase === 'failed') return
 				currentContext = nextContext
+				// A live theme change swaps the root attributes inside this construction.
+				if (nextContext.themeId !== appliedThemeId) {
+					appliedThemeId = nextContext.themeId
+					rootAttributes.apply(appliedThemeId)
+				}
 				if (nextContext.locale !== activeController.context.locale) {
 					currentTranslationRuntime = getTranslationRuntime(nextContext.locale)
 					activeController.updateLocale(nextContext.locale)
@@ -499,8 +609,8 @@ export function createStandalonePreviewMount(input: Readonly<{
 						showRuntime(activeController.runtime)
 					}
 					else {
-						eventObserver.attach(activeController.runtime)
-						options.onStatusChange?.({
+						if (phase === 'mounted') eventObserver.attach(activeController.runtime)
+						reportStatus({
 							status: 'invalid',
 							diagnostics: switchResult.diagnostics,
 						})
@@ -509,6 +619,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 			},
 
 			updateLocales(locales: ReadonlyMap<string, I18nResource> | Record<string, I18nResource>) {
+				if (disposed || phase === 'failed') return
 				if (locales instanceof Map) {
 					for (const [k, v] of locales) resourceMap.set(k, v)
 				}
@@ -534,9 +645,14 @@ export function createStandalonePreviewMount(input: Readonly<{
 			},
 
 			dispose() {
+				if (disposed) return
 				disposed = true
+				// The construction's stylesheet link and root attributes go with it.
+				stylesheetLink?.remove()
+				if (phase === 'failed') return
+				rootAttributes.restore()
 				eventObserver.dispose()
-				app.unmount()
+				if (phase === 'mounted') app.unmount()
 				activeController.dispose()
 				container.innerHTML = ''
 			},

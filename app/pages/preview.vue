@@ -378,7 +378,7 @@ async function evaluateRuntime() {
 	disposeCurrentRuntime()
 
 	type PreviewAdaptersResponse =
-		| { state: 'valid'; diagnostics: []; summaries: unknown[]; bundleUrl: string }
+		| { state: 'valid'; diagnostics: []; summaries: unknown[]; bundleUrl: string; stylesheetUrl?: string; themes?: Readonly<Record<string, Readonly<Record<string, string>>>> }
 		| { state: 'invalid'; diagnostics: readonly Diagnostic[]; summaries: unknown[] }
 
 	try {
@@ -442,6 +442,10 @@ async function evaluateRuntime() {
 			context: activeContext.value,
 			locales: localesMap,
 			...(workspaceDefaultLocale.value ? { defaultLocale: workspaceDefaultLocale.value } : {}),
+			// The construction links the Product Kit stylesheet and renders once it has loaded, and sets
+			// the active theme's root attributes on this document (Rules 01a11a5a-4d38, 01a11bb1-ad41, 01a11bb1-ada4).
+			...(adapterStatus.stylesheetUrl ? { stylesheetHref: adapterStatus.stylesheetUrl } : {}),
+			themes: adapterStatus.themes ?? {},
 			onStatusChange(status: PreviewMaterializationResult) {
 				materializationResult.value = status
 			},
