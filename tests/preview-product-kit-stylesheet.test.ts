@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Window } from 'happy-dom'
@@ -241,6 +241,29 @@ describe('Product Kit stylesheet bundling', () => {
 		expect(new TextDecoder().decode(rebuilt.files.get('runtime.css')!.contents)).toContain('4px')
 		// The earlier bundle stays servable by its own hash while a Preview may still load it.
 		expect((await readPreviewRuntimeFile(root, undefined, bundle.hash, 'runtime.css')).status).toBe(200)
+	})
+
+	it('serves source maps that name no host path, in their sources or their sourcesContent', async () => {
+		const root = await createKitWorkspace()
+		const bundle = await validBundle(root)
+		const hostPaths = [...new Set([root, await realpath(root), process.cwd(), await realpath(process.cwd())])]
+		for (const file of ['runtime.js.map', 'runtime.css.map']) {
+			const served = await readPreviewRuntimeFile(root, undefined, bundle.hash, file)
+			expect(served.status, file).toBe(200)
+			if (served.status !== 200) continue
+			const text = new TextDecoder().decode(served.file.contents)
+			const map = JSON.parse(text) as { sources: string[]; sourcesContent?: Array<string | null> }
+			expect(map.sources.length, file).toBeGreaterThan(0)
+			for (const hostPath of hostPaths) expect(text, `${file} names ${hostPath}`).not.toContain(hostPath)
+			expect(text, file).not.toMatch(/\/(?:private|var|Users|tmp|home)\//)
+			expect(text, file).not.toContain('file://')
+			for (const source of map.sources) expect(source, file).toMatch(/^(?:workspace|uiux|external):\/\/\/|^<stdin>$/)
+		}
+		// The generated entry is mapped, but its content (absolute import paths) is not served.
+		const js = JSON.parse(new TextDecoder().decode(bundle.files.get('runtime.js.map')!.contents)) as { sources: string[]; sourcesContent: Array<string | null> }
+		const entry = js.sources.indexOf('<stdin>')
+		expect(entry).toBeGreaterThanOrEqual(0)
+		expect(js.sourcesContent[entry]).toBeNull()
 	})
 
 	it('makes the Preview invalid for a style that does not resolve or names no CSS file, and for CSS it cannot bundle', async () => {

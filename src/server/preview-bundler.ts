@@ -255,11 +255,19 @@ function sourceLabels(workspaceRoot: string, packageRoot: string): readonly Sour
 }
 
 /**
- * Rewrites a source map's `sources` so they name no host path: a source inside the Workspace or
- * UIUX's package reads `<label>:///<path inside it>`, any other one `external:///<file name>`.
+ * Rewrites a source map so it names no host path. A source inside the Workspace or UIUX's package
+ * reads `<label>:///<path inside it>`, any other one `external:///<file name>`. The generated entry
+ * (`<stdin>`) imports every style and Adapter module by its absolute path, so its `sourcesContent`
+ * is dropped.
  */
 function relabelSourceMap(text: string, outdir: string, labels: readonly SourceLabel[]): Uint8Array {
-	const map = JSON.parse(text) as { sources?: unknown }
+	const map = JSON.parse(text) as { sources?: unknown; sourcesContent?: unknown }
+	if (Array.isArray(map.sources) && Array.isArray(map.sourcesContent)) {
+		const contents = map.sourcesContent
+		map.sources.forEach((source: unknown, index: number) => {
+			if (source === '<stdin>' && index < contents.length) contents[index] = null
+		})
+	}
 	if (Array.isArray(map.sources)) {
 		map.sources = map.sources.map((source: unknown) => {
 			if (typeof source !== 'string' || source === '<stdin>') return source
