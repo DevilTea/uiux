@@ -47,12 +47,15 @@ export function parseProductKitSection(query: LocationQuery): ProductKitSectionI
 	return (PRODUCT_KIT_SECTIONS as readonly string[]).includes(value) ? value as ProductKitSectionId : undefined
 }
 
+/** The fragment of the Adapters block, inside the Overview section of the Product Kit page. */
+export const ADAPTERS_HASH = '#product-kit-adapters'
+
 /**
- * Adapters: the Overview section of the Product Kit page (Rule 01a116f0-8a46-76bc-a29f-affaa302c44c).
- * `/workspace/adapters` and `/workspace/settings?section=adapters` redirect here (Clause
- * 01a116f0-9739-754b-b024-346b1c16a866).
+ * Adapters: the Overview section of the Product Kit page (Rule 01a116f0-8a46-76bc-a29f-affaa302c44c),
+ * scrolled to the Adapters block. `/workspace/adapters` and `/workspace/settings?section=adapters`
+ * redirect here (Clause 01a116f0-9739-754b-b024-346b1c16a866).
  */
-export const ADAPTERS_LOCATION = { path: PRODUCT_KIT_PATH, query: { section: 'overview' } } as const
+export const ADAPTERS_LOCATION = { path: PRODUCT_KIT_PATH, query: { section: 'overview' }, hash: ADAPTERS_HASH } as const
 
 /** Builds the query for a View deep link; empty values mean "the effective default" and are omitted. */
 export function viewQuery(options: ViewLinkOptions): LocationQueryRaw {

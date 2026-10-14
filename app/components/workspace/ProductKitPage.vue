@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { useI18n, useRoute } from '#imports'
+import { useI18n, useRoute, useRouter } from '#imports'
 import { useAccess } from '../../composables/useAccess'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useUiuxClient } from '../../composables/useUiuxClient'
@@ -11,7 +11,7 @@ import { useKitBuild } from '../../composables/useKitBuild'
 import { createSettingsSection } from '../../composables/useSettingsSection'
 import { describeFetchError, isLockedError, type FetchErrorLock } from '../../utils/fetch-error'
 import { adapterRows, adapterSelections, productKitAdapterWrites, type AdapterRow } from '../../utils/workspace-authoring'
-import { parseProductKitSection } from '../../utils/workbench-routes'
+import { ADAPTERS_HASH, parseProductKitSection, PRODUCT_KIT_PATH } from '../../utils/workbench-routes'
 import { diagnosticText } from '../../utils/diagnostic-copy'
 import { focusFirstProblem } from '../../utils/focus-problem'
 import WorkbenchPage from '../workbench/WorkbenchPage.vue'
@@ -44,10 +44,12 @@ import type { Diagnostic } from '../../composables/workbench-types'
  * The server enforces every key; the page only reflects them.
  *
  * Below `schemaVersion` 5 the Workspace has no Product Kit file: the page shows the manifest's
- * Adapters read-only until `uiux migrate` runs.
+ * Adapters read-only until `uiux migrate` runs. From 5 the build reads its own endpoint, so it and
+ * its restart stay available when the Product Kit file cannot be read.
  */
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const workbench = useWorkbench()
 const { workspace } = workbench
 const uiux = useUiuxClient()
@@ -57,6 +59,8 @@ const kitBuild = useKitBuild()
 
 const requestedSection = computed(() => parseProductKitSection(route.query))
 const { access, writeKey, canEdit } = useAuthoringAccess('product-kit.write', { kind: 'product-kit', key: 'product-kit' })
+/** The build restart follows the same access as the page's writes, except the edit lease: it writes no file. */
+const { canEdit: canRestart } = useAuthoringAccess('product-kit.write')
 /** A save refused by someone else's edit lease; the draft is kept. */
 const lockRefusal = shallowRef<Readonly<{ lock?: FetchErrorLock }>>()
 
@@ -231,13 +235,49 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 const scroller = ref<HTMLElement>()
+
+/**
+ * Shows what an address asks for: `ADAPTERS_HASH` (the Adapter addresses and ⌘K "Adapters") scrolls
+ * only the page's own scroller to the Adapters block, and `?section=overview` alone opens Overview,
+ * the page's top.
+ */
+function reveal(target: Readonly<{ hash: string; section?: string }>, moveFocus: boolean): void {
+	const container = scroller.value
+	if (!container) return
+	if (target.hash === ADAPTERS_HASH) {
+		const block = document.getElementById(ADAPTERS_HASH.slice(1))
+		if (!block) return
+		const top = block.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 24
+		const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+		container.scrollTo({ top: Math.max(0, top), behavior: moveFocus && !reduced ? 'smooth' : 'auto' })
+		if (moveFocus) block.querySelector<HTMLElement>('h2')?.focus({ preventScroll: true })
+	}
+	else if (target.section === 'overview') {
+		container.scrollTo({ top: 0 })
+	}
+}
+
+/** The blocks above the Adapters are laid out once the Product Kit file was read, or failed to be. */
+const laidOut = computed(() => !!workspace.value?.resource && (!usesProductKit.value || !!productKit.value || productKitFailed.value))
+let stopAfterEach: (() => void) | undefined
 onMounted(() => {
 	void loadResolution()
 	window.addEventListener('keydown', onKeydown)
-	// `?section=overview` (the retired Adapter addresses) opens the page at Overview, its top.
-	if (requestedSection.value === 'overview') void nextTick(() => scroller.value?.scrollTo({ top: 0 }))
+	let started = false
+	watch(laidOut, (ready) => {
+		if (!ready || started) return
+		started = true
+		void nextTick(() => reveal({ hash: route.hash, section: requestedSection.value }, false))
+	}, { immediate: true })
+	// Asked again while already here, the same address included: the router refuses a duplicate
+	// navigation, but every navigation, failed or not, still reaches `afterEach`.
+	stopAfterEach = router.afterEach((to) => {
+		if (started && to.path === PRODUCT_KIT_PATH)
+			void nextTick(() => reveal({ hash: to.hash, section: parseProductKitSection(to.query) }, true))
+	})
 })
 onBeforeUnmount(() => {
+	stopAfterEach?.()
 	window.removeEventListener('keydown', onKeydown)
 })
 </script>
@@ -304,6 +344,27 @@ onBeforeUnmount(() => {
               data-product-kit-legacy
             />
             <UAlert
+              v-else-if="productKitFailed"
+              color="warning"
+              variant="subtle"
+              icon="i-lucide-triangle-alert"
+              :title="t('productKit.unavailable')"
+              :actions="[{ label: t('common.retry'), color: 'neutral', variant: 'outline', onClick: () => { void loadProductKit() } }]"
+              data-product-kit-unavailable
+            >
+              <template #description>
+                <i18n-t
+                  keypath="productKit.unavailableHelp"
+                  tag="span"
+                  scope="global"
+                >
+                  <template #file>
+                    <code class="font-mono text-xs">{{ PRODUCT_KIT_FILENAME }}</code>
+                  </template>
+                </i18n-t>
+              </template>
+            </UAlert>
+            <UAlert
               v-else-if="problems.length"
               color="warning"
               variant="subtle"
@@ -324,12 +385,14 @@ onBeforeUnmount(() => {
               </template>
             </UAlert>
 
-            <template v-if="usesProductKit && productKit">
-              <ProductKitPackagesSection :packages="productKit.packages" />
-              <USeparator />
+            <template v-if="usesProductKit">
+              <template v-if="productKit">
+                <ProductKitPackagesSection :packages="productKit.packages" />
+                <USeparator />
+              </template>
               <ProductKitBuildSection
                 :build="build"
-                :can-restart="member.can('product-kit.write')"
+                :can-restart="canRestart"
                 :can-read-log="member.can('product-kit.source.read')"
                 @restarted="onRestarted"
               />
@@ -341,7 +404,6 @@ onBeforeUnmount(() => {
               :section="adapters"
               :can-edit="usesProductKit && canEdit"
               :product-kit="usesProductKit"
-              :product-kit-failed="productKitFailed"
               :can-compose="member.can('product-kit.compose')"
               :partly-saved="usesProductKit && kitPartlySaved"
               :resolution="resolution"

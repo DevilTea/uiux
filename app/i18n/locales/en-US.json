@@ -1032,6 +1032,8 @@
     "saveFailed": "Couldn't save",
     "adaptersPartlySaved": "Specifiers saved, config not saved",
     "legacy": "This Workspace has no Product Kit file until it's migrated. Its Adapters are shown read-only.",
+    "unavailable": "Couldn't read the Product Kit file.",
+    "unavailableHelp": "Check that {file} is valid JSON, then try again. The build below doesn't need it.",
     "problems": "{n} problem in the Product Kit | {n} problems in the Product Kit",
     "packages": {
       "title": "Packages",
@@ -1133,7 +1135,6 @@
     "copied": "Copied",
     "copyFailed": "Couldn't copy",
     "resolutionUnknown": "Couldn't check the Adapter set.",
-    "productKitUnavailable": "Couldn't read the Product Kit file.",
     "saveNote": "Saving checks the Adapter set again.",
     "validation": {
       "required": "Enter a module specifier.",

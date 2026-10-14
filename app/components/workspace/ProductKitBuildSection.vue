@@ -9,8 +9,8 @@ import AuthoringErrorAlert from './AuthoringErrorAlert.vue'
 /**
  * The build, in the Overview section of the Product Kit page (Rule 01a11bb1-b918-7cb5-b581-a3fd3f647f09):
  * the kit build state (Clause 01a11bb1-8856-737f-945c-e44c596f7782) with why the last run failed,
- * `restart_kit_build` (Clause 01a11be8-5b64-72b3-ad18-81994368a1ed) for a holder of
- * `product-kit.write`, and the build log (Clause 01a11bb1-891e-7fa5-bf48-4c459fd60d11), which only a
+ * `restart_kit_build` (Clause 01a11be8-5b64-72b3-ad18-81994368a1ed) where the page offers its writes
+ * (`canRestart`: `product-kit.write`, on a desktop-width window), and the build log (Clause 01a11bb1-891e-7fa5-bf48-4c459fd60d11), which only a
  * holder of `product-kit.source.read` may read. The server enforces both keys; this only reflects them.
  */
 const props = defineProps<{

@@ -56,8 +56,6 @@ const props = defineProps<{
 	resolutionFailed?: boolean
 	/** The Workspace keeps its Adapters in the Product Kit file (`schemaVersion` 5 or later). */
 	productKit?: boolean
-	/** The Product Kit file could not be read. */
-	productKitFailed?: boolean
 	/** The key the signed-in member lacks to edit this section, when it is not the page's own. */
 	missingKey?: string
 	/** The last save wrote the specifiers but not their `config`, which the draft still holds. */
@@ -247,14 +245,6 @@ defineExpose({ save })
       </UButton>
     </header>
 
-    <UAlert
-      v-if="productKitFailed"
-      color="warning"
-      variant="subtle"
-      icon="i-lucide-triangle-alert"
-      data-product-kit-unavailable
-      :title="t('adapters.productKitUnavailable')"
-    />
     <AuthoringConflictAlert
       v-if="section.conflict"
       :title="t('productKit.conflict')"

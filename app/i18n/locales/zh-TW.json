@@ -1032,6 +1032,8 @@
     "saveFailed": "無法儲存",
     "adaptersPartlySaved": "已儲存模組指定符，但組態未儲存",
     "legacy": "此 Workspace 遷移前沒有 Product Kit 檔案，以下以唯讀方式顯示其 Adapter。",
+    "unavailable": "無法讀取 Product Kit 檔案。",
+    "unavailableHelp": "請確認 {file} 是有效的 JSON，再重試一次。下方的建置不需要這個檔案。",
     "problems": "Product Kit 有 {n} 個問題 | Product Kit 有 {n} 個問題",
     "packages": {
       "title": "套件",
@@ -1133,7 +1135,6 @@
     "copied": "已複製",
     "copyFailed": "無法複製",
     "resolutionUnknown": "無法檢查 Adapter 組合。",
-    "productKitUnavailable": "無法讀取 Product Kit 檔案。",
     "saveNote": "儲存後會重新檢查 Adapter 組合。",
     "validation": {
       "required": "請輸入模組指定符。",

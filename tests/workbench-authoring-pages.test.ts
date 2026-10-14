@@ -201,7 +201,7 @@ describe('Tablet is read-only (R10)', () => {
 				// Search and filter inputs are reading aids, not authoring fields.
 				const editable = await main.locator('input:not([type="search"]):not([disabled]):not([readonly]):not([placeholder^="Filter"]), textarea:not([disabled]):not([readonly])').count()
 				expect(editable).toBe(0)
-				for (const name of ['Save changes', 'Add viewport', 'Add adapter', 'New Locale', 'Add key', 'Upload'])
+				for (const name of ['Save changes', 'Add viewport', 'Add adapter', 'Restart build', 'New Locale', 'Add key', 'Upload'])
 					expect(await main.getByRole('button', { name, exact: true }).count(), name).toBe(0)
 				expect(await main.locator('[data-locale-cell]').count()).toBe(0)
 			}
@@ -246,16 +246,36 @@ describe('Workspace pages navigation', () => {
 		finally { await context.close() }
 	}, 60_000)
 
+	/** How far the Product Kit page's own scroller has moved; a short window makes the Adapters block start below the fold. */
+	const productKitScrollTop = (page: Page) => page.evaluate(() => document.querySelector('#product-kit-adapters')?.closest('[role="region"]')?.scrollTop ?? 0)
+
 	for (const retired of ['/workspace/adapters', '/workspace/settings?section=adapters']) {
-		it(`redirects ${retired} to the Overview section of the Product Kit page`, async () => {
-			const { context, page } = await open(retired)
+		it(`redirects ${retired} to the Overview section of the Product Kit page, scrolled to the Adapters`, async () => {
+			const { context, page } = await open(retired, 1920, 600)
 			try {
-				await page.waitForURL(url => url.pathname === '/workspace/product-kit' && url.searchParams.get('section') === 'overview')
+				await page.waitForURL(url => url.pathname === '/workspace/product-kit' && url.searchParams.get('section') === 'overview' && url.hash === '#product-kit-adapters')
 				await page.locator('#product-kit-overview #product-kit-adapters').waitFor()
+				await expect.poll(() => productKitScrollTop(page)).toBeGreaterThan(0)
 			}
 			finally { await context.close() }
 		}, 60_000)
 	}
+
+	it('keeps the page the retired link was followed from in the history', async () => {
+		const { context, page } = await open('/workspace/locales')
+		try {
+			await page.getByRole('heading', { level: 1 }).waitFor()
+			// A client-side navigation, as a link inside the Workbench makes it.
+			await page.evaluate(() => {
+				const app = (document.querySelector('[data-v-app]') as unknown as { __vue_app__: { config: { globalProperties: { $router: { push: (to: string) => Promise<unknown> } } } } }).__vue_app__
+				void app.config.globalProperties.$router.push('/workspace/settings?section=adapters')
+			})
+			await page.waitForURL(url => url.pathname === '/workspace/product-kit')
+			await page.goBack()
+			await page.waitForURL(url => url.pathname === '/workspace/locales')
+		}
+		finally { await context.close() }
+	}, 60_000)
 
 	it('opens Settings at the section `?section=` names (Clause 01a116f0-9782-7640-865e-c340df7b06b0)', async () => {
 		const { context, page } = await open('/workspace/settings?section=themes')
@@ -266,19 +286,28 @@ describe('Workspace pages navigation', () => {
 		finally { await context.close() }
 	}, 60_000)
 
-	it('opens the Product Kit page from ⌘K "Adapters"', async () => {
-		const { context, page } = await open('/workspace/settings')
+	it('brings the Adapters into view from ⌘K "Adapters" while already on the Product Kit page, again at the same address', async () => {
+		const { context, page } = await open('/workspace/product-kit', 1920, 600)
 		try {
-			await page.locator('#settings-general').waitFor()
-			await page.keyboard.press('ControlOrMeta+k')
-			const search = page.locator('[role="dialog"] input').first()
-			await search.waitFor()
-			await search.fill('Adapters')
-			const option = page.locator('[role="option"]').filter({ hasText: 'Adapters' }).first()
-			await option.waitFor()
-			await option.click()
-			await page.waitForURL(url => url.pathname === '/workspace/product-kit' && url.searchParams.get('section') === 'overview')
 			await page.locator('#product-kit-adapters').waitFor()
+			expect(await productKitScrollTop(page)).toBe(0)
+			const pickAdapters = async (): Promise<void> => {
+				await page.keyboard.press('ControlOrMeta+k')
+				const search = page.locator('[role="dialog"] input').first()
+				await search.waitFor()
+				await search.fill('Adapters')
+				const option = page.locator('[role="option"]').filter({ hasText: 'Adapters' }).first()
+				await option.waitFor()
+				await option.click()
+			}
+			await pickAdapters()
+			await page.waitForURL(url => url.pathname === '/workspace/product-kit' && url.searchParams.get('section') === 'overview' && url.hash === '#product-kit-adapters')
+			await expect.poll(() => productKitScrollTop(page)).toBeGreaterThan(0)
+			// Back to the top by hand: the address still names the Adapters, so the router sees a duplicate.
+			await page.evaluate(() => document.querySelector('#product-kit-adapters')?.closest('[role="region"]')?.scrollTo({ top: 0 }))
+			await expect.poll(() => productKitScrollTop(page)).toBe(0)
+			await pickAdapters()
+			await expect.poll(() => productKitScrollTop(page)).toBeGreaterThan(0)
 		}
 		finally { await context.close() }
 	}, 60_000)
