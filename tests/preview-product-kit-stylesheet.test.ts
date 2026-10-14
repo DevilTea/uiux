@@ -300,6 +300,14 @@ describe('Product Kit stylesheet bundling', () => {
 			diagnostics: [{ code: 'product_kit.style_unresolved', path: '/styles/0' }],
 		})
 
+		// Without a declared build, a ./ style is any CSS file inside kit/ but outside kit/node_modules/,
+		// contained like a ./ Adapter (Clause 01a11bb1-8e98-7270-9662-682c048f9929).
+		const dependency = await createKitWorkspace({ styles: ['./node_modules/fake-ui/theme.css'] })
+		expect(await getSelectedWorkspacePreviewBundle(dependency)).toMatchObject({
+			state: 'invalid',
+			diagnostics: [{ code: 'product_kit.style_unresolved', path: '/styles/0' }],
+		})
+
 		const notCss = await createKitWorkspace({ styles: ['./styles/notes.txt'], files: { 'styles/notes.txt': 'not css' } })
 		expect(await getSelectedWorkspacePreviewBundle(notCss)).toMatchObject({
 			state: 'invalid',
