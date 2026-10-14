@@ -1,6 +1,6 @@
 Feature: Adapter selection and resolution
   # Source: Discussion #130 (Part 12, Adapter contract amendments), decisions 3 and 4, R15, R16, R19 https://github.com/DevilTea/uiux/discussions/130; accepted in full 2026-10-08 https://github.com/DevilTea/uiux/discussions/130#discussioncomment-18807264.
-  # Status: not built as of cf3b984; see the Implementation gaps entry of 01a11a5a-4d38-7f2c-98be-755d8c404d98 in its owner.
+  # Status: not built as of cf3b984: no design-token or style element is inserted; 01a11a5a-4d38-7f2c-98be-755d8c404d98 and 01a11a5a-4dbe-79e9-808e-6128ab510097 are partly built as of 87211f6 (the Product Kit stylesheet link only, which this Scenario does not show); see their Implementation gaps entries in their owner.
   # Note: No test exists yet.
   @spec:id:01a11a5b-18d2-736c-8663-3e612026f24b
   @spec:demonstrates:01a11a5a-440a-76e8-ac5f-bdea102b17ec
