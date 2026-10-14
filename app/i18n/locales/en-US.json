@@ -2302,6 +2302,10 @@
       "style_unresolved": "This style does not resolve to a file.",
       "theme_attribute_not_allowed": "A theme may set only class and data-* attributes.",
       "unknown_component": "This must name another component of the registry."
+    },
+    "copy_record": {
+      "invalid_path": "A copy record path must be a relative path inside the product project, or under kit/src/ for a source.",
+      "unsupported_format": "This copy record has a format version that UIUX does not support."
     }
   },
   "diagnosticFallback": {
@@ -2340,7 +2344,8 @@
     "protocol": "The preview sent a message the Workbench could not read.",
     "reference": "A Spec reference is not valid.",
     "time": "A time is not in the expected format.",
-    "revision": "The revision record is not valid."
+    "revision": "The revision record is not valid.",
+    "copy_record": "There is a problem with the copy record, uiux-components.json."
   },
   "threadContext": {
     "srPrefix": "Recorded Preview context:",

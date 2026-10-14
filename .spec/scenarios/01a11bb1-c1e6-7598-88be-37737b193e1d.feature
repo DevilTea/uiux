@@ -1,7 +1,8 @@
 Feature: Product Kit
   # Source: Discussion #139 (Part 14, Product Kit), decision 9, A: Drift; R12; Key Scenarios https://github.com/DevilTea/uiux/discussions/139; accepted as written 2026-10-08 https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18816364.
-  # Status: not built as of 9691b8c; see the Implementation gaps entry of 01a11bb1-a630-7c7c-8dd3-5e0a11e4e919 in its owner.
-  # Note: No test exists yet; tracked in issue #141.
+  # Status: built as of 0d30bb6.
+  # Test: code@0d30bb6 `tests/components-cli.test.ts#L273` "reports an edited copy as modified, and diff --check exits 1". https://github.com/DevilTea/uiux/blob/0d30bb62bc68e0dabb04666d77bf0a84c928ff15/tests/components-cli.test.ts#L273
+  # Test: code@0d30bb6 `tests/components-cli.test.ts#L396` "runs through the uiux binary without a credential, and help lists the commands". https://github.com/DevilTea/uiux/blob/0d30bb62bc68e0dabb04666d77bf0a84c928ff15/tests/components-cli.test.ts#L396
   @spec:id:01a11bb1-c1e6-7fdf-bcae-6579414fab33
   @spec:demonstrates:01a11bb1-8c9b-78a8-b359-c083412d9789
   @spec:demonstrates:01a11bb1-9bef-7d8f-8577-c525dd917149

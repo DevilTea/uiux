@@ -2302,6 +2302,10 @@
       "style_unresolved": "這個樣式無法解析為檔案。",
       "theme_attribute_not_allowed": "主題只能設定「class」與「data-*」屬性。",
       "unknown_component": "必須指向登錄中的另一個項目。"
+    },
+    "copy_record": {
+      "invalid_path": "複製紀錄中的路徑必須是產品專案內的相對路徑；來源則必須位於 kit/src/ 之下。",
+      "unsupported_format": "此複製紀錄的格式版本不受 UIUX 支援。"
     }
   },
   "diagnosticFallback": {
@@ -2340,7 +2344,8 @@
     "protocol": "預覽傳送了 Workbench 無法讀取的訊息。",
     "reference": "Spec 參照無效。",
     "time": "時間格式不正確。",
-    "revision": "修訂紀錄無效。"
+    "revision": "修訂紀錄無效。",
+    "copy_record": "複製紀錄 uiux-components.json 有問題。"
   },
   "threadContext": {
     "srPrefix": "記錄的預覽情境：",

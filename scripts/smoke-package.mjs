@@ -98,6 +98,12 @@ try {
 	const auth = { authorization: `Bearer ${token}` }
 	if (!helpOutput.includes('migrate [--workspace <dir>] [--dry-run]'))
 		throw new Error('Packed CLI help did not expose Workspace migration.')
+	for (const usage of ['components list [--workspace <dir>]', 'components add <name...> --to <dir>', 'components diff [--project <dir>]']) {
+		if (!helpOutput.includes(usage)) throw new Error(`Packed CLI help did not expose ${usage}.`)
+	}
+	const componentsList = execFileSync(cliPath, ['components', 'list', '--workspace', workspaceDirectory], { encoding: 'utf8' })
+	if (!componentsList.includes('The Product Kit registry has no components.'))
+		throw new Error(`Packed CLI components list did not read the new Workspace's empty registry: ${componentsList}`)
 	const legacyWorkspace = join(temporaryDirectory, 'legacy-workspace')
 	await mkdir(join(legacyWorkspace, '.uiux'), { recursive: true })
 	// A schemaVersion 1 Workspace in the old layout (its manifest, with adapters, in .uiux/).

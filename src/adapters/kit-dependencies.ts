@@ -47,6 +47,30 @@ export function bareSpecifierPackageName(specifier: string): string | undefined 
  * throwing, so a bare specifier is never resolved on a guess.
  */
 export async function readDeclaredKitDependencies(codeDirectory: string): Promise<ReadonlySet<string>> {
+	return declaredKitDependencies(await readKitPackageText(codeDirectory))
+}
+
+/**
+ * The version range each dependency of `<codeDirectory>/package.json` is declared with, taken from
+ * the first of {@link KIT_DEPENDENCY_MEMBERS} that declares it; a range that is not a string is left
+ * out. It reads and fails as {@link readDeclaredKitDependencies} does.
+ */
+export async function readKitDependencyRanges(codeDirectory: string): Promise<ReadonlyMap<string, string>> {
+	const text = await readKitPackageText(codeDirectory)
+	const ranges = new Map<string, string>()
+	if (text === undefined) return ranges
+	declaredKitDependencies(text)
+	const parsed = JSON.parse(text) as Record<string, Record<string, unknown> | undefined>
+	for (const member of KIT_DEPENDENCY_MEMBERS) {
+		for (const [name, range] of Object.entries(parsed[member] ?? {})) {
+			if (!ranges.has(name) && typeof range === 'string') ranges.set(name, range)
+		}
+	}
+	return ranges
+}
+
+/** The text of `<codeDirectory>/package.json`, `undefined` when there is none; a link or an unreadable file throws. */
+async function readKitPackageText(codeDirectory: string): Promise<string | undefined> {
 	const path = join(codeDirectory, KIT_PACKAGE_FILENAME)
 	let info: Awaited<ReturnType<typeof lstat>>
 	try {
@@ -54,19 +78,17 @@ export async function readDeclaredKitDependencies(codeDirectory: string): Promis
 	}
 	catch (error) {
 		const code = (error as NodeJS.ErrnoException | undefined)?.code
-		if (code === 'ENOENT' || code === 'ENOTDIR') return new Set()
+		if (code === 'ENOENT' || code === 'ENOTDIR') return undefined
 		throw unreadable(error)
 	}
 	if (!info.isFile())
 		throw new Error(`kit/${KIT_PACKAGE_FILENAME} is not a regular file.`)
-	let text: string
 	try {
-		text = await readFile(path, 'utf8')
+		return await readFile(path, 'utf8')
 	}
 	catch (error) {
 		throw unreadable(error)
 	}
-	return declaredKitDependencies(text)
 }
 
 /**
