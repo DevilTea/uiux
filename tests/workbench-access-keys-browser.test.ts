@@ -170,8 +170,8 @@ describe('authoring pages follow their own write key', () => {
 	}, 90_000)
 
 	it('offers Adapter config but not composition without `product-kit.compose`', async () => {
-		// From schemaVersion 5 the Adapters are the Product Kit file's: their config needs `product-kit.write`.
-		const { context, page } = await open('/workspace/settings?section=adapters', await memberCookie(['workspace.read', 'settings.write', 'product-kit.source.read', 'product-kit.write']))
+		// From schemaVersion 5 the Adapters are the Product Kit file's, on the Product Kit page: their config needs `product-kit.write`.
+		const { context, page } = await open('/workspace/product-kit?section=overview', await memberCookie(['workspace.read', 'product-kit.source.read', 'product-kit.write']))
 		try {
 			const notice = page.locator('[data-access-notice="compose"]')
 			await notice.waitFor({ timeout: 15_000 })
@@ -186,17 +186,19 @@ describe('authoring pages follow their own write key', () => {
 		finally { await context.close() }
 
 		// With the key, the same page composes, as for an Editor.
-		const composer = await open('/workspace/settings?section=adapters', await memberCookie(['workspace.read', 'settings.write', 'product-kit.source.read', 'product-kit.write', 'product-kit.compose']))
+		const composer = await open('/workspace/product-kit?section=overview', await memberCookie(['workspace.read', 'product-kit.source.read', 'product-kit.write', 'product-kit.compose']))
 		try {
 			await composer.page.getByRole('button', { name: 'Add adapter', exact: true }).waitFor({ timeout: 15_000 })
 			expect(await composer.page.locator('[data-access-notice="compose"]').count()).toBe(0)
 		}
 		finally { await composer.context.close() }
 
-		// Without `product-kit.write` the section is read-only and names the key, whatever settings.write allows.
+		// Without `product-kit.write` the page is read-only and names the key, whatever settings.write allows;
+		// the retired Settings address opens it.
 		const settingsOnly = await open('/workspace/settings?section=adapters', await memberCookie(['workspace.read', 'settings.write']))
 		try {
-			const missing = settingsOnly.page.locator('#settings-adapters [data-access-notice][data-missing-key="product-kit.write"]')
+			await settingsOnly.page.waitForURL(url => url.pathname === '/workspace/product-kit')
+			const missing = settingsOnly.page.locator('[data-access-notice][data-missing-key="product-kit.write"]')
 			await missing.waitFor({ timeout: 15_000 })
 			expect(await missing.innerText()).toContain('Requires the permission key product-kit.write.')
 			expect(await settingsOnly.page.getByRole('button', { name: 'Add adapter', exact: true }).count()).toBe(0)

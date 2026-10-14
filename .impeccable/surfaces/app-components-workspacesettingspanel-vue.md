@@ -39,7 +39,7 @@ Settings-page conventions in the Linear manner: a left section index, then one f
 ## 4. Scope and boundaries
 
 - **In scope:**
-  - **Settings:** General, Viewports, Themes, Adapters (selection, order, config; read-only package state with repair guidance).
+  - **Settings:** General, Viewports, Themes. Adapters (selection, order, config; read-only package state with repair guidance) moved to the Overview section of the Product Kit page (`/workspace/product-kit`, issue #141).
   - **Locales:** key × locale table, primary locale, reminders.
   - **Assets:** library, upload, replace, metadata, usage, validation.
   - **Flows:** list, graph, step and transition editor, validation, and the Prototype player.
@@ -174,7 +174,8 @@ The player opens full-canvas, reusing the frame. A step strip runs across the to
 | Key | en-US | zh-TW |
 |---|---|---|
 | settings.title | Workspace settings | Workspace 設定 |
-| settings.general / viewports / themes / adapters | General / Viewports / Themes / Adapters | 一般／檢視區／主題／Adapter |
+| settings.general / viewports / themes | General / Viewports / Themes | 一般／檢視區／主題 |
+| productKit.adapters | Adapters | Adapter |
 | settings.keyChange | Renaming a key changes its identity. Check references first. | 重新命名鍵會變更其識別，請先檢查參照。 |
 | settings.unsaved | {n} unsaved | {n} 項未儲存 |
 | settings.conflict | Settings changed since you opened them. | 開啟後設定已有變更。 |

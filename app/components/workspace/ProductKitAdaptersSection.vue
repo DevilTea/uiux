@@ -34,7 +34,9 @@ export type AdapterResolution = Readonly<{
 }>
 
 /**
- * Adapters (brief g): the ordered selection, read-only package state per Adapter, and repair
+ * Adapters, in the Overview section of the Product Kit page (Rules 01a116f0-8a46-76bc-a29f-affaa302c44c
+ * and 01a115cd-af57-781e-9493-89d037e41b06): the ordered selection, read-only package state per Adapter
+ * (resolution, package, identity, API, config) and the set's collision diagnostics, with repair
  * guidance for an invalid set. The Workbench never runs a package manager (Part 8 10a); it
  * prints the command to run. Order is changed by dragging or with the Move up / Move down buttons.
  *
@@ -54,8 +56,6 @@ const props = defineProps<{
 	resolutionFailed?: boolean
 	/** The Workspace keeps its Adapters in the Product Kit file (`schemaVersion` 5 or later). */
 	productKit?: boolean
-	/** The Product Kit file could not be read. */
-	productKitFailed?: boolean
 	/** The key the signed-in member lacks to edit this section, when it is not the page's own. */
 	missingKey?: string
 	/** The last save wrote the specifiers but not their `config`, which the draft still holds. */
@@ -178,7 +178,7 @@ function onDragEnd(): void {
 function save(): void {
 	showIssues.value = true
 	if (hasIssues.value) {
-		void nextTick(() => document.querySelector<HTMLElement>('#settings-adapters [aria-invalid="true"]')?.focus())
+		void nextTick(() => document.querySelector<HTMLElement>('#product-kit-adapters [aria-invalid="true"]')?.focus())
 		return
 	}
 	emit('save')
@@ -193,19 +193,19 @@ defineExpose({ save })
 
 <template>
   <section
-    id="settings-adapters"
-    aria-labelledby="settings-adapters-title"
+    id="product-kit-adapters"
+    aria-labelledby="product-kit-adapters-title"
     class="flex scroll-mt-6 flex-col gap-4"
-    data-settings-section
+    data-product-kit-section="adapters"
   >
     <header class="flex items-start justify-between gap-4">
       <div class="min-w-0 space-y-1">
         <h2
-          id="settings-adapters-title"
+          id="product-kit-adapters-title"
           tabindex="-1"
           class="text-title font-semibold text-highlighted focus:outline-none"
         >
-          {{ t('settings.adapters') }}
+          {{ t('productKit.adapters') }}
         </h2>
         <p class="text-sm text-muted">
           {{ t(productKit ? 'adapters.kitDescription' : 'adapters.description') }}
@@ -245,17 +245,9 @@ defineExpose({ save })
       </UButton>
     </header>
 
-    <UAlert
-      v-if="productKitFailed"
-      color="warning"
-      variant="subtle"
-      icon="i-lucide-triangle-alert"
-      data-product-kit-unavailable
-      :title="t('adapters.productKitUnavailable')"
-    />
     <AuthoringConflictAlert
       v-if="section.conflict"
-      :title="t('settings.conflict')"
+      :title="t('productKit.conflict')"
       :theirs="section.theirs"
       :yours="section.draftPayload"
       @reload="emit('reload')"
@@ -263,7 +255,7 @@ defineExpose({ save })
     />
     <AuthoringErrorAlert
       v-else-if="section.error"
-      :title="partlySaved ? t('settings.adaptersPartlySaved') : t('settings.saveFailed')"
+      :title="partlySaved ? t('productKit.adaptersPartlySaved') : t('productKit.saveFailed')"
       :error="section.error"
       @close="section.clearError()"
     />
@@ -407,6 +399,19 @@ defineExpose({ save })
                 translate="no"
               >
                 {{ summaryOf(row)?.adapterId }}
+              </dd>
+            </div>
+            <div
+              v-if="summaryOf(row)?.resolvedModule?.packageName"
+              class="flex gap-1"
+            >
+              <dt>{{ t('adapters.package') }}</dt>
+              <dd
+                class="font-mono text-default"
+                translate="no"
+                data-adapter-package
+              >
+                {{ summaryOf(row)?.resolvedModule?.packageName }}
               </dd>
             </div>
             <div

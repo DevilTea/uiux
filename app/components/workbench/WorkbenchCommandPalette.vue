@@ -6,7 +6,7 @@ import { isWidgetAnchor, isWorkspaceAnchor } from '../../../src/domain/reviews/s
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
 import { useCheckpointAccess } from '../../composables/useCheckpointAccess'
-import { ADAPTERS_LOCATION, flowPath, viewLocation, VIEWS_LOCATION } from '../../utils/workbench-routes'
+import { ADAPTERS_LOCATION, flowPath, PRODUCT_KIT_PATH, viewLocation, VIEWS_LOCATION } from '../../utils/workbench-routes'
 
 /** ⌘K: go to an area, a View, a Flow or a thread, or run a Workbench action (brief a). */
 const { t } = useI18n()
@@ -34,6 +34,7 @@ const groups = computed<CommandPaletteGroup<CommandPaletteItem>[]>(() => {
 				{ label: t('nav.flows'), icon: 'i-lucide-workflow', to: '/flows', kbds: ['g', 'f'] },
 				{ label: t('nav.reviews'), icon: 'i-lucide-inbox', to: '/reviews', kbds: ['g', 'r'] },
 				{ label: t('nav.settings'), icon: 'i-lucide-settings-2', to: '/workspace/settings' },
+				{ label: t('nav.productKit'), icon: 'i-lucide-blocks', to: PRODUCT_KIT_PATH },
 				{ label: t('nav.accessPresets'), icon: 'i-lucide-key-square', to: '/workspace/access-presets' },
 				{ label: t('nav.locales'), icon: 'i-lucide-globe', to: '/workspace/locales' },
 				{ label: t('nav.assets'), icon: 'i-lucide-image', to: '/workspace/assets' },
