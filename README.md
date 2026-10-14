@@ -150,6 +150,18 @@ The current format is `schemaVersion` 6. Steps chain: `uiux.v1-to-v2` (resolutio
 
 `uiux migrate` refuses while a running UIUX server holds the Workspace; stop `uiux dev` first. There is no MCP or HTTP migration entrypoint. Before its first step a real run writes the Checkpoint `Before migration to schemaVersion <N>` (`<N>` the target version) into the Workspace (a failed migration leaves it in place), and after it succeeds it records the migration as a system version in the host history under `$UIUX_HOME`. A dry run, and a Workspace that is already current, write nothing.
 
+### Copying components into a product project
+
+`uiux components` copies registry components of the Product Kit out of the Workspace's `kit/src/` into a product project. It reads the Workspace directly and needs no credential:
+
+```sh
+uiux components list --workspace ./design                          # the registry components
+uiux components add button --to src/ui --workspace ./design         # copy button and what it requires into src/ui/
+uiux components diff --check --workspace ./design                   # report drift; exit 1 on any
+```
+
+`add` copies each named component and its `requires` closure into the `--to` directory, keeping each file's path below `kit/src/` (`kit/src/ds/Button.vue` becomes `src/ui/ds/Button.vue`), and prints the packages, with the version ranges `kit/package.json` declares, that the copies need. The product project is `--project <dir>`, else the nearest directory with a `package.json` at or above `--to` (the current directory for `diff`), else the Git top level. Its `uiux-components.json` records every copy: the target, a digest per file and per component, and paths relative to the project and to `kit/` only. Without `--force`, `add` refuses a copy that was changed since it was copied, a file in the way that is not a recorded copy, and a component already copied to another directory (naming it); with `--force` it overwrites and moves the component. It never writes through a symbolic link in the product project nor reads one in `kit/src/`. `diff` reports each recorded file as `unchanged`, `modified`, `upstream`, `diverged`, `missing` or `removed`.
+
 ### Network access
 
 By default `uiux dev` listens on loopback only: `127.0.0.1`, with the port taken from the standard Nitro `PORT` / `NITRO_PORT` variables (default `3000`). It accepts only the loopback host names, and it prints its loopback URL at startup. `--host` picks the bind address. It takes a loopback address (`127.0.0.1`, `::1` or `localhost`), or a wildcard address (`0.0.0.0` or `::`) that listens on every interface. A loopback `HOST` or `NITRO_HOST` still works when `--host` is absent; any other value makes `uiux dev` refuse to start.
