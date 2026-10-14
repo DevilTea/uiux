@@ -49,6 +49,8 @@ export function copyDestination(target: string, source: string): string {
  * Validates a copy record. Paths must be plain relative paths (no empty, `.` or `..` segment, no
  * backslash or control character), so a record can never name a file outside the product project
  * or `kit/src/`; each `files` key must be the copy destination of its `source` under `target`.
+ * Whether a recorded path stays out of the Workspace and of `.git` depends on where the project and
+ * the Workspace lie, so `uiux components` checks that itself before acting on a record.
  */
 export function validateCopyRecord(input: unknown): ValidationResult<CopyRecord> {
 	const v = new Validator()
@@ -85,6 +87,28 @@ export function validateCopyRecord(input: unknown): ValidationResult<CopyRecord>
 		}
 	}
 	return v.finish<CopyRecord>(input)
+}
+
+/** True when a segment of the project-relative path `path` is `.git`, in any letter case. */
+export function hasGitSegment(path: string): boolean {
+	return path.split('/').some(segment => segment.toLowerCase() === '.git')
+}
+
+/**
+ * The pairs of distinct paths in `paths` that differ only in letter case or Unicode normalization,
+ * which a case-insensitive file system (the macOS default) treats as one file. Each pair names the
+ * path seen first, then the other.
+ */
+export function caseOnlyCollisions(paths: Iterable<string>): Array<readonly [string, string]> {
+	const byFold = new Map<string, string>()
+	const pairs: Array<readonly [string, string]> = []
+	for (const path of new Set(paths)) {
+		const fold = path.normalize('NFC').toLowerCase()
+		const seen = byFold.get(fold)
+		if (seen === undefined) byFold.set(fold, path)
+		else pairs.push([seen, path])
+	}
+	return pairs
 }
 
 /** The record as JSON text: keys sorted, two-space indentation and a final newline. */

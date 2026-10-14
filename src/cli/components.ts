@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { constants } from 'node:fs'
+import { constants, lstatSync, realpathSync, type Stats } from 'node:fs'
 import { lstat, mkdir, open, readdir, readFile, realpath, rename, rm, rmdir, stat } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -9,11 +9,13 @@ import { locateKitProject, type KitProject } from '../adapters/kit-registry'
 import { readKitSourceFile } from '../adapters/kit-source-files'
 import { componentClosure, componentPackages, componentsRequiring } from '../domain/product-kit/closure'
 import {
+	caseOnlyCollisions,
 	COPY_RECORD_FILENAME,
 	copyDestination,
 	driftState,
 	DRIFT_STATES,
 	emptyCopyRecord,
+	hasGitSegment,
 	serializeCopyRecord,
 	validateCopyRecord,
 	type CopyRecord,
@@ -37,8 +39,9 @@ import { selectCliWorkspace } from './workspace-selection'
  *
  * Containment: a source file is read only when it is a regular file under the real `kit/src/`
  * reached without a symbolic link (`readKitSourceFile`). In the product project, no path between the
- * project root and a file it reads or writes may be a symbolic link, every target lies strictly
- * inside the project, and neither the project nor a target may lie inside the Workspace.
+ * project root and a file it reads or writes may be a symbolic link, every target and copied file,
+ * whether `--to` names it or the copy record does, lies strictly inside the project, outside the
+ * Workspace and outside any `.git` directory, and the project itself lies outside the Workspace.
  *
  * Returns the exit code: 0 on success, 1 when refused or when `diff --check` finds drift, and 2 for
  * invalid usage or an unusable Workspace or product project.
@@ -201,6 +204,57 @@ function projectRelative(realProject: string, path: string): string | undefined 
 	return isSafeRelativePath(posixRel) ? posixRel : undefined
 }
 
+/**
+ * Why `uiux components` may not write or remove at the project-relative path `rel`, or `undefined`
+ * when it may: it must be a plain relative path with no `.git` segment whose real path lies strictly
+ * inside the project and outside the Workspace. Every target and copied file passes this check,
+ * whether `--to` names it or the copy record does. A path through a symbolic link is left to
+ * `inspectProjectPath`, which refuses it, naming the link, before anything is read or written.
+ */
+function projectPathProblem(realProject: string, realWorkspace: string, rel: string): string | undefined {
+	if (!isSafeRelativePath(rel)) return 'is not a plain relative path'
+	if (hasGitSegment(rel)) return 'lies in a .git directory'
+	// The real path, segment by segment: the existing ones in their on-disk spelling (a
+	// case-insensitive file system answers to any letter case), the rest as written.
+	const segments = rel.split('/')
+	let real = realProject
+	for (const [index, segment] of segments.entries()) {
+		const next = join(real, segment)
+		let info: Stats | undefined
+		try {
+			info = lstatSync(next, { throwIfNoEntry: false })
+		}
+		catch {
+			info = undefined // Below a file (ENOTDIR): `inspectProjectPath` refuses it.
+		}
+		if (info?.isSymbolicLink()) return undefined
+		if (!info) {
+			real = join(next, ...segments.slice(index + 1))
+			break
+		}
+		real = realpathSync.native(next)
+	}
+	if (relative(realProject, real) === '' || !isSameOrInside(realProject, real)) return 'does not lie strictly inside the product project'
+	if (isSameOrInside(realWorkspace, real)) return `lies inside the Workspace ${realWorkspace}`
+	return undefined
+}
+
+/**
+ * Each target or file in the copy record that fails `projectPathProblem`. Any one refuses the whole
+ * command before it reads or writes a copy: the record lies in the product project, and anyone who
+ * can edit it there could otherwise steer `add` into the Workspace or `.git`.
+ */
+function recordedPathProblems(realProject: string, realWorkspace: string, record: CopyRecord): string[] {
+	const problems: string[] = []
+	for (const [name, entry] of Object.entries(record.components)) {
+		for (const path of [entry.target, ...Object.keys(entry.files)]) {
+			const problem = projectPathProblem(realProject, realWorkspace, path)
+			if (problem !== undefined) problems.push(`${COPY_RECORD_FILENAME} records ${path} for ${name}, which ${problem}; correct or remove that entry.`)
+		}
+	}
+	return problems
+}
+
 type PathState = 'absent' | 'file' | 'directory' | 'other'
 
 /**
@@ -228,6 +282,27 @@ async function readProjectFile(realProject: string, rel: string): Promise<Uint8A
 	return readFile(join(realProject, ...rel.split('/')))
 }
 
+/** Refuses unless every directory between the project root and the file `rel` is a directory reached without a symbolic link. */
+async function assertDirectoriesWithoutLinks(realProject: string, segments: readonly string[]): Promise<void> {
+	let path = realProject
+	for (const [index, segment] of segments.slice(0, -1).entries()) {
+		path = join(path, segment)
+		const info = await lstat(path)
+		if (info.isSymbolicLink() || !info.isDirectory())
+			throw new Refusal(`${segments.slice(0, index + 1).join('/')} in the product project is not a directory reached without a symbolic link.`)
+	}
+}
+
+/**
+ * Writes the project file `rel`, creating its directories one at a time and checking each before
+ * descending into it. The file is opened with `O_NOFOLLOW` and without truncating it; only when the
+ * path, walked again without links, still reaches the file opened is it truncated and written.
+ *
+ * Residual risk: Node offers no `openat` or `O_BENEATH`, so a local user who can write in the
+ * product project and swaps a checked directory for a symbolic link between the walk and the open
+ * can make `O_CREAT` leave an empty file where that link points. The check after the open refuses
+ * to write anything into such a file, and the window is a few system calls wide.
+ */
 async function writeProjectFile(realProject: string, rel: string, bytes: Uint8Array): Promise<void> {
 	const segments = rel.split('/')
 	let path = realProject
@@ -240,8 +315,15 @@ async function writeProjectFile(realProject: string, rel: string, bytes: Uint8Ar
 		if (info.isSymbolicLink() || !info.isDirectory())
 			throw new Refusal(`${segments.slice(0, index + 1).join('/')} in the product project is not a directory reached without a symbolic link.`)
 	}
-	const handle = await open(join(path, segments.at(-1)!), constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o666)
+	const leaf = join(path, segments.at(-1)!)
+	const handle = await open(leaf, constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW, 0o666)
 	try {
+		const opened = await handle.stat()
+		await assertDirectoriesWithoutLinks(realProject, segments)
+		const current = await lstat(leaf)
+		if (!opened.isFile() || current.dev !== opened.dev || current.ino !== opened.ino)
+			throw new Refusal(`${rel} in the product project changed while it was being written.`)
+		await handle.truncate(0)
 		await handle.writeFile(bytes)
 	}
 	finally {
@@ -249,15 +331,28 @@ async function writeProjectFile(realProject: string, rel: string, bytes: Uint8Ar
 	}
 }
 
-/** Removes the project file `rel`, then the directories it leaves empty, strictly below `stopAt`. */
-async function removeProjectFile(realProject: string, rel: string, stopAt: string): Promise<void> {
-	if (await inspectProjectPath(realProject, rel) !== 'file') return
-	await rm(join(realProject, ...rel.split('/')))
+/** The `dev:ino` identity of a file, to recognise one file reached by two spellings of its path. */
+function fileIdentity(info: Readonly<{ dev: number; ino: number }>): string {
+	return `${info.dev}:${info.ino}`
+}
+
+/**
+ * Removes the project file `rel`, then the directories it leaves empty, strictly below `stopAt`.
+ * A file whose identity is in `keep` (a file this command just wrote or left in place) is never
+ * removed, so two spellings of one path on a case-insensitive file system cannot lose it. Returns
+ * whether the file was removed. The residual risk of `writeProjectFile` applies to the unlink too.
+ */
+async function removeProjectFile(realProject: string, rel: string, stopAt: string, keep: ReadonlySet<string>): Promise<boolean> {
+	if (await inspectProjectPath(realProject, rel) !== 'file') return false
+	const path = join(realProject, ...rel.split('/'))
+	if (keep.has(fileIdentity(await lstat(path)))) return false
+	await rm(path)
 	for (let directory = rel.split('/').slice(0, -1).join('/'); directory.startsWith(`${stopAt}/`); directory = directory.split('/').slice(0, -1).join('/')) {
-		const path = join(realProject, ...directory.split('/'))
-		if ((await readdir(path).catch(() => ['?'])).length > 0) break
-		await rmdir(path).catch(() => undefined)
+		const directoryPath = join(realProject, ...directory.split('/'))
+		if ((await readdir(directoryPath).catch(() => ['?'])).length > 0) break
+		await rmdir(directoryPath).catch(() => undefined)
 	}
+	return true
 }
 
 async function readCopyRecord(realProject: string): Promise<CopyRecord | undefined> {
@@ -331,21 +426,29 @@ async function addCommand(parsed: ParsedArguments, context: Context): Promise<nu
 	if (!closure.ok)
 		throw new Refusal(`The Product Kit registry has no component ${closure.unknown.join(', ')}. uiux components list shows the registry.`)
 
+	if (to.includes('\\'))
+		throw new Refusal(`--to ${to} contains a backslash; separate its directories with /.`, 2)
 	const toPath = resolve(context.cwd, to)
 	const { chosen: chosenProject, real: realProject } = await selectProductProject(stringOption(parsed, 'project'), toPath, context, workspace)
 	const realTo = realFuturePath(toPath)
 	// The target as written below the project, so a link on the way is seen and refused; the real
-	// paths only when --to and the project are spelled through different links.
+	// paths only when --to and the project are spelled through different links. Clause
+	// 01a11bb1-9c51-…: strictly inside the project, never its root.
 	const target = projectRelative(chosenProject, toPath) ?? projectRelative(realProject, realTo)
 	if (target === undefined)
-		throw new Refusal(`--to ${to} must name a directory strictly inside the product project ${realProject}.`, 2)
+		throw new Refusal(`--to ${to} must name a directory strictly inside the product project ${realProject}, not the project root.`, 2)
 	if (isSameOrInside(workspace.realRoot, realTo))
 		throw new Refusal(`--to ${to} lies inside the Workspace ${workspace.realRoot}; components are copied out of it, never into it.`, 2)
+	const targetProblem = projectPathProblem(realProject, workspace.realRoot, target)
+	if (targetProblem !== undefined)
+		throw new Refusal(`--to ${to} ${targetProblem}.`, 2)
 	const targetState = await inspectProjectPath(realProject, target)
 	if (targetState !== 'absent' && targetState !== 'directory')
 		throw new Refusal(`--to ${to} is not a directory.`, 2)
 
 	const record = await readCopyRecord(realProject) ?? emptyCopyRecord()
+	const recordProblems = recordedPathProblems(realProject, workspace.realRoot, record)
+	if (recordProblems.length > 0) throw new Refusal([...recordProblems, 'Nothing was written.'].join('\n'))
 	const inClosure = new Set(closure.components)
 	const refusals: string[] = []
 
@@ -358,8 +461,9 @@ async function addCommand(parsed: ParsedArguments, context: Context): Promise<nu
 		if (force) moved.set(name, recorded.target)
 		else refusals.push(`${name}${names.includes(name) ? '' : ` (required by ${requiredBy(kit, name, inClosure).join(', ')})`} is already copied to ${recorded.target}; run the command with --to ${recorded.target}, or with --force to move it to ${target}.`)
 	}
-	// Rule 01a11c09-d0d9-…: no recorded component outside this copy may be left requiring one that
-	// ends up at another target directory, since its relative imports would no longer resolve.
+	// Rules 01a11c09-d0d9-… and 01a11be8-5931-…: no recorded component outside this copy may be left
+	// requiring one that ends up at another target directory, since its relative imports would no
+	// longer resolve; --force does not lift this, and naming the dependent moves it too.
 	for (const [name, recorded] of Object.entries(record.components)) {
 		if (inClosure.has(name) || recorded.target === target) continue
 		const stranded = closure.components.filter(required => kit.components[name]?.requires?.includes(required))
@@ -381,6 +485,12 @@ async function addCommand(parsed: ParsedArguments, context: Context): Promise<nu
 			}
 			const digest = await fileDigest(bytes)
 			const destination = copyDestination(target, source)
+			const problem = projectPathProblem(realProject, workspace.realRoot, destination)
+			if (problem !== undefined) {
+				refusals.push(`${name} would copy kit/${source} to ${destination}, which ${problem}.`)
+				continue
+			}
+			// Clause 01a11bb1-8b0c-…: the component digest keys each file by its kit-relative source path.
 			files[source] = digest
 			recordFiles[destination] = { source, digest }
 			planned.set(destination, { component: name, source, destination, bytes, digest })
@@ -403,7 +513,7 @@ async function addCommand(parsed: ParsedArguments, context: Context): Promise<nu
 	}
 
 	// Rule 01a11bb1-a444-…: a copied file that differs from its recorded digest is overwritten or
-	// removed only when forced; so is a file the record does not list.
+	// removed only when forced; so is a file the record does not list (Rule 01a13a68-5ea6-…).
 	const writes: PlannedFile[] = []
 	let unchanged = 0
 	for (const file of [...planned.values()].sort((a, b) => a.destination.localeCompare(b.destination))) {
@@ -435,19 +545,37 @@ async function addCommand(parsed: ParsedArguments, context: Context): Promise<nu
 	}
 
 	// Recorded files of these components that this copy no longer writes: the files of a moved
-	// component at its former target, and files its component no longer declares.
+	// component at its former target. Only a file recorded for the component whose source the
+	// registry still declares for it is removed; a file the component no longer declares stays in
+	// place, unrecorded, and is named in the output.
 	const removals: Array<Readonly<{ file: string; target: string }>> = []
+	const leftInPlace = new Map<string, string>()
 	for (const name of closure.components) {
 		const recorded = record.components[name]
 		if (recorded === undefined) continue
-		for (const [file, { digest }] of Object.entries(recorded.files)) {
+		const declared = new Set(kit.components[name]!.files)
+		for (const [file, { source, digest }] of Object.entries(recorded.files)) {
 			if (planned.has(file) || recordedElsewhere.has(file)) continue
 			const state = await inspectProjectPath(realProject, file)
 			if (state !== 'file') continue
+			if (!declared.has(source)) {
+				leftInPlace.set(file, `Left ${file} in place: ${name} no longer declares kit/${source}, so it is no longer recorded.`)
+				continue
+			}
 			if (!force && await fileDigest((await readProjectFile(realProject, file))!) !== digest)
 				refusals.push(`${file} was changed since it was copied, and this copy would remove it; --force removes it.`)
 			removals.push({ file, target: recorded.target })
 		}
+	}
+
+	// Two paths that differ only in letter case are one file on a case-insensitive file system: a
+	// write would land on a file this copy removes, leaves in place or another component's copy, and
+	// a removal on a file it just wrote. Refused everywhere, so a project stays portable between
+	// file systems; the identity check in `removeProjectFile` backs this up.
+	const removalFiles = new Set(removals.map(removal => removal.file))
+	for (const [first, second] of caseOnlyCollisions([...planned.keys(), ...removalFiles, ...leftInPlace.keys(), ...recordedElsewhere.keys()])) {
+		if (!planned.has(first) && !planned.has(second) && !removalFiles.has(first) && !removalFiles.has(second)) continue
+		refusals.push(`${first} and ${second} differ only in letter case, which a case-insensitive file system treats as one file; rename or remove ${planned.has(first) ? second : first}${moved.size > 0 ? ', or run the command with --to set to the recorded target' : ''}.`)
 	}
 
 	let ranges: ReadonlyMap<string, string> = new Map()
@@ -464,9 +592,6 @@ async function addCommand(parsed: ParsedArguments, context: Context): Promise<nu
 	if (refusals.length > 0)
 		throw new Refusal([...refusals, 'Nothing was written.'].join('\n'))
 
-	// Apply: the target files, the removals, then the record (Rule 01a11bb1-a50a-…: nothing else).
-	for (const file of writes) await writeProjectFile(realProject, file.destination, file.bytes)
-	for (const removal of removals) await removeProjectFile(realProject, removal.file, removal.target)
 	const exportedAt = context.now().toISOString()
 	const next: CopyRecord = { formatVersion: record.formatVersion, components: { ...record.components } }
 	for (const [name, entry] of entries) {
@@ -475,11 +600,40 @@ async function addCommand(parsed: ParsedArguments, context: Context): Promise<nu
 			&& serializeFiles(previous.files) === serializeFiles(entry.files)
 		next.components[name] = same ? previous : { ...entry, exportedAt }
 	}
-	if (serializeCopyRecord(next) !== serializeCopyRecord(record) || (await inspectProjectPath(realProject, COPY_RECORD_FILENAME)) === 'absent')
-		await writeCopyRecord(realProject, next)
+
+	// Apply (Rule 01a11bb1-a50a-…: nothing else is written): the new files, then the removals, then
+	// the record, renamed into place. Until the record is replaced it still describes the former
+	// copy, so after a failure at any step the same command finds the files already written
+	// unchanged, removes what is left at a former target and records the copy: a rerun converges.
+	// Writing the record before the removals would instead leave unrecorded leftovers that no rerun
+	// removes, a component copied twice (Rule 01a11be8-59a6-…).
+	const written: string[] = []
+	const removed: string[] = []
+	try {
+		for (const file of writes) {
+			await writeProjectFile(realProject, file.destination, file.bytes)
+			written.push(file.destination)
+		}
+		const keep = new Set<string>()
+		for (const destination of planned.keys()) keep.add(fileIdentity(await lstat(join(realProject, ...destination.split('/')))))
+		for (const removal of removals) {
+			if (await removeProjectFile(realProject, removal.file, removal.target, keep)) removed.push(removal.file)
+		}
+		if (serializeCopyRecord(next) !== serializeCopyRecord(record) || (await inspectProjectPath(realProject, COPY_RECORD_FILENAME)) === 'absent')
+			await writeCopyRecord(realProject, next)
+	}
+	catch (error) {
+		throw new Refusal([
+			`Copying stopped: ${error instanceof Error ? error.message : String(error)}`,
+			written.length > 0 ? `Written: ${written.join(', ')}.` : 'No file was written.',
+			...(removed.length > 0 ? [`Removed: ${removed.join(', ')}.`] : []),
+			`${COPY_RECORD_FILENAME} was not changed. Fix the cause and run the same command again to finish the copy.`,
+		].join('\n'))
+	}
 
 	context.out(`Copied ${closure.components.join(', ')} to ${target} (${writes.length} file${writes.length === 1 ? '' : 's'} written, ${unchanged} unchanged); recorded in ${COPY_RECORD_FILENAME}.`)
 	for (const [name, from] of moved) context.out(`Moved ${name} from ${from} to ${target}.`)
+	for (const line of leftInPlace.values()) context.out(line)
 	if (packages.length > 0) {
 		context.out('The copied components need these packages in the product project:')
 		for (const name of packages) {
@@ -509,7 +663,12 @@ async function diffCommand(parsed: ParsedArguments, context: Context): Promise<n
 		context.out(`No components are recorded in ${join(realProject, COPY_RECORD_FILENAME)}.`)
 		return 0
 	}
+	const recordProblems = recordedPathProblems(realProject, workspace.realRoot, record)
+	if (recordProblems.length > 0) throw new Refusal(recordProblems.join('\n'))
 	// Rule 01a11bb1-a630-…: each recorded file's digest against its copy and its Workspace original.
+	// A copy reached through a symbolic link has no drift state of Clause 01a11bb1-8c9b-…, so it
+	// refuses the whole report, naming the link; the report is printed only once every file has one.
+	const lines: string[] = []
 	const counts = new Map<DriftState, number>(DRIFT_STATES.map(state => [state, 0]))
 	for (const name of Object.keys(record.components).sort()) {
 		const entry = record.components[name]!
@@ -524,9 +683,10 @@ async function diffCommand(parsed: ParsedArguments, context: Context): Promise<n
 			}
 			const state = driftState({ recorded: digest, copy: copyBytes === undefined ? undefined : await fileDigest(copyBytes), original })
 			counts.set(state, counts.get(state)! + 1)
-			context.out(`${state.padEnd(9)} ${file} (${name})`)
+			lines.push(`${state.padEnd(9)} ${file} (${name})`)
 		}
 	}
+	for (const line of lines) context.out(line)
 	const drifted = [...counts].filter(([state, count]) => state !== 'unchanged' && count > 0)
 	context.out(drifted.length === 0 ? 'Every recorded file is unchanged.' : `Drift: ${drifted.map(([state, count]) => `${count} ${state}`).join(', ')}.`)
 	return parsed.values.check === true && drifted.length > 0 ? 1 : 0

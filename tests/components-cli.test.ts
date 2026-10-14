@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { runComponentsCommand } from '../src/cli/components'
 import { runInitCommand } from '../src/cli/init'
 import { componentClosure } from '../src/domain/product-kit/closure'
-import { driftState, validateCopyRecord } from '../src/domain/product-kit/copy-record'
+import { caseOnlyCollisions, driftState, hasGitSegment, validateCopyRecord } from '../src/domain/product-kit/copy-record'
 import { componentDigest, fileDigest } from '../src/domain/product-kit/digest'
 import { emptyProductKit, type ProductKit } from '../src/domain/product-kit/schema'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
@@ -146,6 +146,16 @@ describe('Product Kit digests, closure and drift states', () => {
 		expect(validateCopyRecord(entry({ 'src/ui/x': { source: 'src/../../x', digest: sha256('b') } })).ok).toBe(false)
 		expect(validateCopyRecord(entry({ 'src/other/ds/Button.vue': { source: 'src/ds/Button.vue', digest: sha256('b') } })).ok).toBe(false)
 		expect(validateCopyRecord(entry({ 'src/ui/package.json': { source: 'package.json', digest: sha256('b') } })).ok).toBe(false)
+	})
+
+	it('finds paths that differ only in letter case or normalization, and .git segments in any case', () => {
+		expect(caseOnlyCollisions(['src/ui/ds/button.vue', 'src/ui/ds/Button.vue', 'src/ui/ds/Badge.vue', 'src/ui/ds/button.vue'])).toEqual([['src/ui/ds/button.vue', 'src/ui/ds/Button.vue']])
+		expect(caseOnlyCollisions(['src/UI/ds/Button.vue', 'src/ui/ds/Button.vue'])).toEqual([['src/UI/ds/Button.vue', 'src/ui/ds/Button.vue']])
+		expect(caseOnlyCollisions(['src/café.vue', 'src/café.vue'])).toEqual([['src/café.vue', 'src/café.vue']])
+		expect(caseOnlyCollisions(['src/ui/a.vue', 'src/ui/b.vue'])).toEqual([])
+		expect(hasGitSegment('.git')).toBe(true)
+		expect(hasGitSegment('vendor/.GIT/config')).toBe(true)
+		expect(hasGitSegment('src/.gitkeep')).toBe(false)
 	})
 })
 
@@ -405,5 +415,144 @@ describe('uiux components', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 		const help = spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' })
 		for (const usage of ['components list [--workspace <dir>]', 'components add <name...> --to <dir>', 'components diff [--project <dir>]'])
 			expect(help.stdout).toContain(usage)
+		expect(help.stdout).toContain('still refuses a move')
+	})
+
+	// Rule 01a11be8-5931-…: naming the recorded dependents moves them with the forced move.
+	it('moves a recorded dependent too when the forced command names it', async () => {
+		const fixture = await makeFixture()
+		expect((await run(fixture, ['add', 'order-summary-card', '--to', 'src/ui'])).code).toBe(0)
+		const result = await run(fixture, ['add', 'button', 'order-summary-card', '--to', 'src/elsewhere', '--force'])
+		expect(result.code, result.stderr).toBe(0)
+		const record = await readRecord(fixture.project)
+		expect([record.components.button.target, record.components['order-summary-card'].target]).toEqual(['src/elsewhere', 'src/elsewhere'])
+		// Clause 01a11bb1-8b0c-…: the component digest keys files by source path, whatever the target.
+		expect(record.components.button.componentDigest).toBe(await componentDigest({ 'src/ds/Button.vue': sha256(BUTTON) }))
+		expect(Object.keys(await snapshot(fixture.project)).filter(path => path.endsWith('.vue')).sort()).toEqual(['src/elsewhere/ds/Button.vue', 'src/elsewhere/product/OrderSummaryCard.vue'])
+	})
+
+	// Finding: a copy record edited in the product project must not steer add into the Workspace or .git.
+	it('refuses a tampered copy record whose paths reach the Workspace, .git or outside the project, before writing anything', async () => {
+		const fixture = await makeFixture()
+		// The product project contains the Workspace, as when both live in one repository.
+		const project = fixture.base
+		const runIn = (argv: string[]) => run(fixture, [...argv, '--project', '.'], project)
+		expect((await runIn(['add', 'button', '--to', 'src/ui'])).code).toBe(0)
+		const original = await readRecord(project)
+		const tamper = async (target: string) => {
+			const record = structuredClone(original)
+			record.components.button.target = target
+			record.components.button.files = { [`${target}/ds/Button.vue`]: original.components.button.files['src/ui/ds/Button.vue'] }
+			await writeFile(join(project, 'uiux-components.json'), `${JSON.stringify(record, null, 2)}\n`)
+		}
+		for (const [target, message] of [
+			['workspace/kit', 'lies inside the Workspace'],
+			['workspace/KIT', 'lies inside the Workspace'],
+			['.git', 'lies in a .git directory'],
+			['vendor/.Git', 'lies in a .git directory'],
+		] as const) {
+			await writeKitFile(project, `${target}/ds/Button.vue`, BUTTON)
+			await tamper(target)
+			const before = await snapshot(project)
+			const result = await runIn(['add', 'order-summary-card', '--to', 'src/ui', '--force'])
+			expect(result.code, target).toBe(1)
+			expect(result.stderr).toContain(`records ${target} for button, which ${message}`)
+			expect(result.stderr).toContain('Nothing was written.')
+			expect(await snapshot(project), target).toEqual(before)
+			expect((await runIn(['diff'])).code).toBe(1)
+		}
+		await tamper('../outside')
+		const outside = await runIn(['add', 'order-summary-card', '--to', 'src/ui', '--force'])
+		expect(outside.code).toBe(1)
+		expect(outside.stderr).toContain('uiux-components.json in')
+		expect(outside.stderr).toContain('is invalid')
+		expect(await lstat(join(fixture.base, '..', 'outside')).catch(() => undefined)).toBeUndefined()
+		expect(await readFile(join(fixture.kit, 'src/ds/Button.vue'), 'utf8')).toBe(BUTTON)
+
+		const git = await runIn(['add', 'badge', '--to', '.git/hooks'])
+		expect(git.code).toBe(2)
+		expect(git.stderr).toContain('lies in a .git directory')
+	})
+
+	it('removes only recorded files whose source the registry still declares for the component', async () => {
+		const fixture = await makeFixture()
+		expect((await run(fixture, ['add', 'button', '--to', 'src/ui'])).code).toBe(0)
+		const record = await readRecord(fixture.project)
+		record.components.button.files['src/ui/ds/Other.vue'] = { source: 'src/ds/Other.vue', digest: sha256('other\n') }
+		await writeFile(join(fixture.project, 'uiux-components.json'), JSON.stringify(record))
+		await writeFile(join(fixture.project, 'src/ui/ds/Other.vue'), 'other\n')
+		const result = await run(fixture, ['add', 'button', '--to', 'src/moved', '--force'])
+		expect(result.code, result.stderr).toBe(0)
+		expect(result.stdout).toContain('Left src/ui/ds/Other.vue in place: button no longer declares kit/src/ds/Other.vue')
+		expect(await readFile(join(fixture.project, 'src/ui/ds/Other.vue'), 'utf8')).toBe('other\n')
+		expect(await lstat(join(fixture.project, 'src/ui/ds/Button.vue')).catch(() => undefined)).toBeUndefined()
+		expect(Object.keys((await readRecord(fixture.project)).components.button.files)).toEqual(['src/moved/ds/Button.vue'])
+	})
+
+	// Finding: on a case-insensitive file system two spellings of one path are one file.
+	it('refuses a write and a removal or a file left in place that differ only in letter case, losing nothing', async () => {
+		const fixture = await makeFixture()
+		expect((await run(fixture, ['add', 'button', '--to', 'src/ui'])).code).toBe(0)
+		const before = await snapshot(fixture.project)
+		const recased = await run(fixture, ['add', 'button', '--to', 'src/UI', '--force'])
+		expect(recased.code).toBe(1)
+		expect(recased.stderr).toContain('src/UI/ds/Button.vue and src/ui/ds/Button.vue differ only in letter case')
+		expect(await snapshot(fixture.project)).toEqual(before)
+
+		// An upstream rename that changes only the letter case of a file.
+		await rm(join(fixture.kit, 'src/ds/Button.vue'))
+		await writeKitFile(fixture.kit, 'src/ds/button.vue', BUTTON)
+		await setRegistry(fixture.workspace, { ...REGISTRY, button: { ...REGISTRY.button!, files: ['src/ds/button.vue'] } })
+		const renamed = await run(fixture, ['add', 'button', '--to', 'src/ui', '--force'])
+		expect(renamed.code).toBe(1)
+		expect(renamed.stderr).toContain('src/ui/ds/button.vue and src/ui/ds/Button.vue differ only in letter case')
+		expect(await snapshot(fixture.project)).toEqual(before)
+		expect(await readFile(join(fixture.project, 'src/ui/ds/Button.vue'), 'utf8')).toBe(BUTTON)
+	})
+
+	// Finding: a failure part-way reports what was written, leaves the record alone, and a rerun converges.
+	it.skipIf(process.getuid?.() === 0)('reports a failed write with what was written, keeps the record, and finishes on a rerun', async () => {
+		const fixture = await makeFixture()
+		expect((await run(fixture, ['add', 'button', '--to', 'src/ui'])).code).toBe(0)
+		const record = await readFile(join(fixture.project, 'uiux-components.json'), 'utf8')
+		const product = join(fixture.project, 'src/ui/product')
+		await mkdir(product)
+		await chmod(product, 0o555)
+		try {
+			const failed = await run(fixture, ['add', 'order-summary-card', 'badge', '--to', 'src/ui'])
+			expect(failed.code).toBe(1)
+			expect(failed.stderr).toContain('uiux: Copying stopped:')
+			expect(failed.stderr).toContain('uiux: Written: src/ui/ds/Badge.vue.')
+			expect(failed.stderr).toContain('uiux-components.json was not changed')
+			expect(await readFile(join(fixture.project, 'uiux-components.json'), 'utf8')).toBe(record)
+		}
+		finally {
+			await chmod(product, 0o755)
+		}
+		const rerun = await run(fixture, ['add', 'order-summary-card', 'badge', '--to', 'src/ui'])
+		expect(rerun.code, rerun.stderr).toBe(0)
+		expect(rerun.stdout).toContain('(1 file written, 2 unchanged)')
+		expect(Object.keys((await readRecord(fixture.project)).components).sort()).toEqual(['badge', 'button', 'order-summary-card'])
+	})
+
+	it('refuses --to with a backslash', async () => {
+		const fixture = await makeFixture()
+		const result = await run(fixture, ['add', 'badge', '--to', 'src\\ui'])
+		expect(result.code).toBe(2)
+		expect(result.stderr).toContain('contains a backslash')
+		expect(Object.keys(await snapshot(fixture.project))).toEqual(['package.json'])
+	})
+
+	it('refuses diff, naming the link, when a copy was replaced by a symbolic link, and prints no partial report', async () => {
+		const fixture = await makeFixture()
+		expect((await run(fixture, ['add', 'button', 'badge', '--to', 'src/ui'])).code).toBe(0)
+		const elsewhere = join(fixture.base, 'Button.vue')
+		await writeFile(elsewhere, BUTTON)
+		await rm(join(fixture.project, 'src/ui/ds/Button.vue'))
+		await symlink(elsewhere, join(fixture.project, 'src/ui/ds/Button.vue'))
+		const result = await run(fixture, ['diff'])
+		expect(result.code).toBe(1)
+		expect(result.stderr).toContain('src/ui/ds/Button.vue in the product project is a symbolic link')
+		expect(result.stdout).toBe('')
 	})
 })

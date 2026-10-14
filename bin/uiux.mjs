@@ -60,10 +60,12 @@ Commands:
                            project's uiux-components.json, and print the packages, with
                            their version ranges, they need. The product project is
                            --project, else the nearest directory at or above <dir> with
-                           a package.json, else the Git top level. A changed copy, an
-                           unrecorded file in the way, or a component already copied to
-                           another directory refuses the copy; --force overwrites and
-                           moves. Needs no credential
+                           a package.json, else the Git top level; <dir> lies strictly
+                           inside it. A changed copy, an unrecorded file in the way, or
+                           a component already copied to another directory refuses the
+                           copy; --force overwrites and moves, but still refuses a move
+                           that would break a recorded component requiring a moved one
+                           (name that component too to move it). Needs no credential
   components diff [--project <dir>] [--workspace <dir>] [--check]
                            Report the drift state of every file in the product
                            project's uiux-components.json (the project defaults to the
