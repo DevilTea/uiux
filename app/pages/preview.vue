@@ -98,6 +98,12 @@ const handshakeStatus = ref<'initiating' | 'open' | 'failed'>('initiating')
 
 const previewHostElement = ref<HTMLElement>()
 let activeBridge: PreviewRuntimeBridge | undefined
+/**
+ * Counts `evaluateRuntime` calls. A call superseded by a later one while it awaits stops before it
+ * mounts or reports, so no construction is left behind (with its stylesheet link and theme root
+ * attributes) without being disposed.
+ */
+let runtimeEvaluation = 0
 let runtimeBridge: RuntimePreviewProtocolBridge | undefined
 let geometryProducer: RuntimeGeometryProducer | undefined
 let geometrySignals: GeometrySignalSubscription | undefined
@@ -375,6 +381,8 @@ function disposeCurrentRuntime() {
 
 async function evaluateRuntime() {
 	if (!viewData.value?.resource || !viewId.value) return
+	const evaluation = ++runtimeEvaluation
+	const superseded = () => evaluation !== runtimeEvaluation
 	disposeCurrentRuntime()
 
 	type PreviewAdaptersResponse =
@@ -383,6 +391,7 @@ async function evaluateRuntime() {
 
 	try {
 		const adapterStatus = await uiux.previewAdapters() as PreviewAdaptersResponse
+		if (superseded()) return
 		if (adapterStatus.state === 'invalid') {
 			materializationResult.value = {
 				status: 'invalid',
@@ -396,6 +405,7 @@ async function evaluateRuntime() {
 		const bundleModule = await import(/* @vite-ignore */ adapterStatus.bundleUrl) as {
 			mountPreviewRuntime?: (container: HTMLElement, opts: unknown) => PreviewRuntimeBridge
 		}
+		if (superseded()) return
 
 		const mount = bundleModule.mountPreviewRuntime
 			|| (window as unknown as { __UIUX_PREVIEW_RUNTIME__?: { mountPreviewRuntime: typeof bundleModule.mountPreviewRuntime } }).__UIUX_PREVIEW_RUNTIME__?.mountPreviewRuntime
@@ -435,7 +445,7 @@ async function evaluateRuntime() {
 		}
 
 		await nextTick()
-		if (!previewHostElement.value) return
+		if (superseded() || !previewHostElement.value) return
 
 		activeBridge = mount(previewHostElement.value, {
 			view: viewData.value.resource,
@@ -455,6 +465,7 @@ async function evaluateRuntime() {
 		if (widgetEventArm && !widgetEventArm.spent) activeBridge.armWidgetEvents?.(widgetEventArm.armId, widgetEventArm.triggers)
 	}
 	catch (cause) {
+		if (superseded()) return
 		materializationResult.value = {
 			status: 'invalid',
 			diagnostics: [{
