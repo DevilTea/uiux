@@ -2168,6 +2168,7 @@
       "style_not_css": "A style must name a CSS file.",
       "style_outside_build_output": "With a kit build, a ./ style must name a file in its output directory.",
       "style_unresolved": "This style does not resolve to a file.",
+      "theme_attribute_not_allowed": "A theme may set only class and data-* attributes.",
       "unknown_component": "This must name another component of the registry."
     }
   },

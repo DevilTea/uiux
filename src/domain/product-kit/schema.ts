@@ -8,6 +8,7 @@ import {
 	type ValidationResult,
 } from '../validation'
 import { isPortableAdapterModuleSpecifier, validateAdapterSelections, type WorkspaceAdapterSelection } from '../workspace/schema'
+import { isAllowedThemeAttributeName } from './theme-attributes'
 
 export { PRODUCT_KIT_SCHEMA_VERSION } from '../workspace/schema'
 
@@ -132,6 +133,8 @@ function validateThemes(input: unknown, v: Validator): void {
 			const attributePath = jsonPointer(themePath, name)
 			if (!isAttributeName(name))
 				v.issue('product_kit.invalid_theme_attribute', attributePath, 'A theme root attribute name is a valid HTML attribute name.')
+			else if (!isAllowedThemeAttributeName(name))
+				v.issue('product_kit.theme_attribute_not_allowed', attributePath, 'A theme root attribute is class or a data-* attribute.')
 			if (typeof value !== 'string')
 				v.issue('schema.expected_string', attributePath, 'A theme root attribute value is a string.')
 		}

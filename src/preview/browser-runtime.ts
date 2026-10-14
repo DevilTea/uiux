@@ -8,6 +8,7 @@ import type { ResolvedRenderContext } from '../domain/render-context/schema'
 import type { ViewResource } from '../domain/views/schema'
 import type { I18nResource } from '../domain/i18n/schema'
 import { validateAdapterManifest, type AdapterManifest } from '../domain/adapters/schema'
+import { isAllowedThemeAttributeName } from '../domain/product-kit/theme-attributes'
 import { createTranslationRuntime, type TranslationRuntime } from '../i18n'
 import {
 	createAdapterWidgetSystem,
@@ -121,6 +122,8 @@ function createThemeRootAttributes(element: Element, themes: PreviewThemeAttribu
 			restore()
 			const attributes = Object.hasOwn(themes, themeId) ? themes[themeId]! : {}
 			for (const [name, value] of Object.entries(attributes)) {
+				// Defense in depth: only `class` and `data-*`, even when the validator was bypassed.
+				if (!isAllowedThemeAttributeName(name) || typeof value !== 'string') continue
 				replaced.set(name, element.getAttribute(name))
 				element.setAttribute(name, value)
 			}

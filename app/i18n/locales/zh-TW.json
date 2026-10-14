@@ -2168,6 +2168,7 @@
       "style_not_css": "樣式必須指向 CSS 檔案。",
       "style_outside_build_output": "宣告了 kit 建置時，./ 樣式必須指向其輸出目錄中的檔案。",
       "style_unresolved": "這個樣式無法解析為檔案。",
+      "theme_attribute_not_allowed": "主題只能設定 class 與 data-* 屬性。",
       "unknown_component": "必須指向登錄中的另一個項目。"
     }
   },

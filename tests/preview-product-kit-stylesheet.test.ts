@@ -332,6 +332,24 @@ describe('Product Kit stylesheet in a Preview Runtime construction', () => {
 		expect(document.documentElement.getAttribute('data-kit-theme')).toBe('host')
 	})
 
+	it('sets only class and data-* theme attributes, ignoring any other name that reaches it', async () => {
+		const root = await createKitWorkspace()
+		const bundle = await validBundle(root)
+		const origin = await serveRuntime(root)
+		const { document, container, mount } = await previewDocument(root, origin, bundle.bundleJs)
+
+		// A Product Kit file the validator would refuse (Clause 01a11bb1-8efc-77df-a0bb-78033bb35d56).
+		const themes = { dark: { 'onclick': 'globalThis.pwned = true', 'style': 'color: red', 'href': 'javascript:void 0', 'data-': 'x', 'class': 'kit-dark', 'data-kit-theme': 'dark' } }
+		const statuses: PreviewRuntimeStatus[] = []
+		const bridge = mount(container, { view: buttonView(), context: context('dark'), themes, onStatusChange: status => statuses.push(status) })
+		expect(statuses).toEqual([expect.objectContaining({ status: 'ready' })])
+		const element = document.documentElement
+		expect(element.getAttributeNames().sort()).toEqual(['class', 'data-kit-theme'])
+		expect(element.getAttribute('class')).toBe('kit-dark')
+		bridge.dispose()
+		expect(element.getAttributeNames()).toEqual([])
+	})
+
 	it('fails the construction when the stylesheet does not load, naming it, and keeps nothing of it', async () => {
 		const root = await createKitWorkspace()
 		const bundle = await validBundle(root)

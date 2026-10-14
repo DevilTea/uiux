@@ -209,6 +209,8 @@ describe('compose_product_kit, update_product_kit and update_component_registry 
 		expect(undeclared.body).toMatchObject({ status: 'invalid', diagnostics: [expect.objectContaining({ code: 'product_kit.package_undeclared', path: '/designSystems/0' })] })
 		const style = await updateProductKitForHttp(session, { expectedRevision: await revision(ctx.app), adapters: [{ moduleSpecifier: './uiux.js' }], styles: ['./../theme.css'], themes: {} })
 		expect(style.body).toMatchObject({ status: 'invalid', diagnostics: [expect.objectContaining({ code: 'product_kit.invalid_style_specifier', path: '/styles/0' })] })
+		const handler = await updateProductKitForHttp(session, { expectedRevision: await revision(ctx.app), adapters: [{ moduleSpecifier: './uiux.js' }], styles: [], themes: { t: { onclick: 'alert(document.cookie)' } } })
+		expect(handler.body).toMatchObject({ status: 'invalid', diagnostics: [expect.objectContaining({ code: 'product_kit.theme_attribute_not_allowed', path: '/themes/t/onclick' })] })
 		const undeclaredStyle = await updateProductKitForHttp(session, { expectedRevision: await revision(ctx.app), adapters: [{ moduleSpecifier: './uiux.js' }], styles: ['@evil/theme/theme.css'], themes: {} })
 		expect(undeclaredStyle.body).toMatchObject({ status: 'invalid', diagnostics: [expect.objectContaining({ code: 'product_kit.specifier_refused', path: '/styles/0' })] })
 		expect(await readFile(ctx.kitPath, 'utf8')).toBe(bytes)
