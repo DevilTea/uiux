@@ -168,16 +168,21 @@ async function useBuiltIns(): Promise<void> {
 }
 
 // ---- Add, edit or view a preset ----
-type Editor = { index?: number; name: string; keys: string[]; readonly: boolean }
+/** The preset being edited is found by its `id`, so a reload after a conflict keeps the right one. */
+type Editor = { id?: string; name: string; keys: string[]; readonly: boolean }
 const editorOpen = ref(false)
 const editor = reactive<Editor>({ name: '', keys: [], readonly: false })
 const editorError = shallowRef<FetchErrorDetails>()
-const editing = computed(() => editor.index === undefined ? undefined : presets.value[editor.index])
+const editorIndex = computed(() => {
+	const index = editor.id === undefined ? -1 : presets.value.findIndex(preset => preset.id === editor.id)
+	return index < 0 ? undefined : index
+})
+const editing = computed(() => editorIndex.value === undefined ? undefined : presets.value[editorIndex.value])
 /** The other presets the editor may start from. */
-const otherPresets = computed(() => presets.value.filter((_, index) => index !== editor.index))
+const otherPresets = computed(() => presets.value.filter((_, index) => index !== editorIndex.value))
 
 function openAdd(): void {
-	Object.assign(editor, { index: undefined, name: '', keys: [], readonly: false })
+	Object.assign(editor, { id: undefined, name: '', keys: [], readonly: false })
 	editorError.value = undefined
 	editorOpen.value = true
 }
@@ -185,18 +190,18 @@ function openAdd(): void {
 function openPreset(index: number): void {
 	const preset = presets.value[index]
 	if (!preset) return
-	Object.assign(editor, { index, name: preset.name, keys: [...preset.keys], readonly: !canEdit.value })
+	Object.assign(editor, { id: preset.id, name: preset.name, keys: [...preset.keys], readonly: !canEdit.value })
 	editorError.value = undefined
 	editorOpen.value = true
 }
 
 /** Rule 01a11c09-ce14-7f47-bea9-9db3d283abf7: equal presets are refused before saving. */
-const duplicate = computed(() => editor.readonly ? undefined : presetWithKeys(presets.value, editor.keys, editor.index))
-const nameProblem = computed(() => editor.readonly ? undefined : presetNameProblem(presets.value, editor.name, editor.index))
+const duplicate = computed(() => editor.readonly ? undefined : presetWithKeys(presets.value, editor.keys, editorIndex.value))
+const nameProblem = computed(() => editor.readonly ? undefined : presetNameProblem(presets.value, editor.name, editorIndex.value))
 const nameError = computed(() => {
 	const problem = nameProblem.value
 	if (!problem) return undefined
-	const taken = problem === 'taken' ? presets.value.find((preset, index) => index !== editor.index && presetNameKey(preset.name) === presetNameKey(editor.name)) : undefined
+	const taken = problem === 'taken' ? presets.value.find((preset, index) => index !== editorIndex.value && presetNameKey(preset.name) === presetNameKey(editor.name)) : undefined
 	return t(`access.presets.nameProblem.${problem}`, { name: taken?.name ?? normalizePresetName(editor.name) })
 })
 const editorChanged = computed(() => {
@@ -214,7 +219,7 @@ async function saveEditor(): Promise<void> {
 	const name = normalizePresetName(editor.name)
 	const before = editing.value
 	const edited: AccessPreset = { id: before?.id ?? newPresetId(name, presets.value), name, keys: orderedKeys(editor.keys) }
-	const next = before ? presets.value.map((preset, index) => index === editor.index ? edited : preset) : [...presets.value, edited]
+	const next = before ? presets.value.map(preset => preset.id === before.id ? edited : preset) : [...presets.value, edited]
 	// Counted against the roster as loaded, before the write changes any label.
 	const holders = before && members.value ? holdersOf(before, members.value) : undefined
 	writing.value = true
@@ -228,6 +233,9 @@ async function saveEditor(): Promise<void> {
 	}
 	catch (cause) {
 		editorError.value = describeFetchError(cause, t('access.presets.errorTitle'))
+		// Someone changed the file meanwhile: read it again, keeping the draft, so saving again
+		// checks the draft against the newer presets and names their revision.
+		if (editorError.value.statusCode === 409) await loadPresets()
 	}
 	finally {
 		writing.value = false

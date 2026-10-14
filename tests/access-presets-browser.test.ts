@@ -241,6 +241,28 @@ describe('editing', () => {
 	}, 60_000)
 })
 
+describe('a concurrent change', () => {
+	it('refuses a save against an older revision, then saves the draft against the newer presets', async () => {
+		await setPresets(BUILT_IN)
+		const { context, page } = await open()
+		try {
+			const editor = await editPreset(page, 'viewer')
+			await checkbox(editor, 'flows.write').click()
+			// Meanwhile another manager reorders the presets.
+			await setPresets([BUILT_IN[1]!, BUILT_IN[0]!, BUILT_IN[2]!, BUILT_IN[3]!])
+			await editor.locator('[data-preset-editor-save]').click()
+			await editor.locator('[data-preset-editor-error]').waitFor()
+			expect((await readPresets()).resource!.presets[1]).toEqual(BUILT_IN[0])
+			await editor.locator('[data-preset-editor-save]').click()
+			await editor.waitFor({ state: 'detached' })
+			const presets = (await readPresets()).resource!.presets
+			expect(presets.map(preset => preset.id)).toEqual(['reviewer', 'viewer', 'editor', 'owner'])
+			expect(presets[1]!.keys).toEqual(orderedKeys([...VIEWER, 'flows.write']))
+		}
+		finally { await context.close() }
+	}, 60_000)
+})
+
 describe('read-only', () => {
 	it('is read-only without presets.manage, naming it, and cannot count members without members.manage', async () => {
 		await setPresets(BUILT_IN)
