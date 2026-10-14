@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Window } from 'happy-dom'
@@ -243,6 +243,33 @@ describe('Product Kit stylesheet bundling', () => {
 		expect((await readPreviewRuntimeFile(root, undefined, bundle.hash, 'runtime.css')).status).toBe(200)
 	})
 
+	it('keeps the eight most recently used bundles servable and evicts the least recently used one', async () => {
+		const root = await createKitWorkspace()
+		const base = join(root, 'kit', 'styles', 'base.css')
+		// Each generation of base.css has its own content and mtime, so the same generation rebuilds to the same hash.
+		const generation = async (n: number): Promise<string> => {
+			await writeFile(base, `.uiux-kit-base { margin-top: ${n}px; }\n`)
+			const time = new Date(Date.UTC(2026, 0, 1, 0, 0, n))
+			await utimes(base, time, time)
+			return (await validBundle(root)).hash
+		}
+		const servable = async (hash: string) => (await readPreviewRuntimeFile(root, undefined, hash, 'runtime.css')).status
+
+		const hashes: string[] = []
+		for (let n = 0; n < 8; n++) hashes.push(await generation(n))
+		expect(new Set(hashes).size).toBe(8)
+		// The current bundle is generation 7; the seven earlier ones are still served from the cache.
+		for (const hash of hashes) expect(await servable(hash)).toBe(200)
+
+		// Using generation 0 again makes it the most recent, so the ninth bundle evicts generation 1.
+		expect(await generation(0)).toBe(hashes[0])
+		const ninth = await generation(8)
+		expect(await servable(ninth)).toBe(200)
+		expect(await servable(hashes[0]!)).toBe(200)
+		expect(await servable(hashes[1]!)).toBe(404)
+		for (const hash of hashes.slice(2)) expect(await servable(hash)).toBe(200)
+	})
+
 	it('serves source maps that name no host path, in their sources or their sourcesContent', async () => {
 		const root = await createKitWorkspace()
 		const bundle = await validBundle(root)
@@ -406,6 +433,38 @@ describe('Product Kit stylesheet in a Preview Runtime construction', () => {
 		expect(document.documentElement.hasAttribute('data-kit-theme')).toBe(false)
 		expect(statuses).toHaveLength(1)
 		bridge.dispose()
+	})
+
+	it('reports no status while the stylesheet is linking, then the status of the latest update instead of ready', async () => {
+		const root = await createKitWorkspace()
+		const bundle = await validBundle(root)
+		const origin = await serveRuntime(root)
+		const { container, mount } = await previewDocument(root, origin, bundle.bundleJs)
+		const stylesheetHref = `${origin}${previewRuntimeFileUrl(bundle.hash, bundle.stylesheet!)}`
+		const unsupported: ViewResource = { ...buttonView(), ir: { type: 'RootShell', id: 'root', slots: { content: [{ id: 'g1', type: 'GhostWidget' }] } } as never }
+
+		// An update that reports while linking holds its status until the first render.
+		const held: PreviewRuntimeStatus[] = []
+		const first = mount(container, { view: buttonView(), context: context('dark'), stylesheetHref, themes: bundle.themes, onStatusChange: status => held.push(status) })
+		first.updateView(unsupported)
+		first.updateContext(context('light'))
+		expect(held).toEqual([])
+		expect(container.innerHTML).toBe('')
+		await until(() => held.length > 0, 'the first render')
+		expect(held).toEqual([expect.objectContaining({ status: 'adapter_unavailable', unsupportedTypes: ['GhostWidget'] })])
+		first.dispose()
+
+		// A later update back to a supported View while linking reports ready, once.
+		const recovered: PreviewRuntimeStatus[] = []
+		const second = mount(container, { view: buttonView(), context: context('dark'), stylesheetHref, themes: bundle.themes, onStatusChange: status => recovered.push(status) })
+		second.updateView(unsupported)
+		second.updateView(buttonView())
+		expect(recovered).toEqual([])
+		await until(() => recovered.length > 0, 'the first render')
+		await new Promise(resolve => setTimeout(resolve, 50))
+		expect(recovered).toEqual([{ status: 'ready', supportedTypes: expect.arrayContaining(['KitButton']) }])
+		expect(container.querySelector('button.fui-button')).not.toBeNull()
+		second.dispose()
 	})
 
 	it('removes the link of a construction disposed before its stylesheet loaded', async () => {
