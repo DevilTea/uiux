@@ -65,9 +65,10 @@ Commands:
                            another directory refuses the copy; --force overwrites and
                            moves. Needs no credential
   components diff [--project <dir>] [--workspace <dir>] [--check]
-                           Report each recorded file as unchanged, modified, upstream,
-                           diverged, missing or removed; the product project defaults
-                           to the current directory's. --check exits 1 on any drift
+                           Report the drift state of every file in the product
+                           project's uiux-components.json (the project defaults to the
+                           current directory's); --check exits 1 when any file is not
+                           unchanged
 
 Workspace selection: --workspace <dir> names the Workspace root, or a directory whose
 .uiux/ holds one. Without it, a command uses the .uiux/ of the nearest directory, from
