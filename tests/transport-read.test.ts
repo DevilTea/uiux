@@ -121,6 +121,7 @@ describe('shared HTTP/MCP point-resource reads', { timeout: HEAVY_SERVER_SUITE_T
 				'append_review_message',
 				'assess_handoff_readiness',
 				'capture_formal_evidence',
+				'compare_component_copies',
 				'compose_product_kit',
 				'create_asset',
 				'create_checkpoint',
@@ -130,7 +131,9 @@ describe('shared HTTP/MCP point-resource reads', { timeout: HEAVY_SERVER_SUITE_T
 				'create_view',
 				'edit_review_message',
 				'export_handoff',
+				'get_component_source',
 				'get_version_diff',
+				'list_kit_files',
 				'list_resources',
 				'list_versions',
 				'promote_review_to_decision',
@@ -155,6 +158,8 @@ describe('shared HTTP/MCP point-resource reads', { timeout: HEAVY_SERVER_SUITE_T
 			])
 			expect(tools.tools.find(tool => tool.name === 'list_resources')?.annotations?.readOnlyHint).toBe(true)
 			expect(tools.tools.find(tool => tool.name === 'search_resources')?.annotations?.readOnlyHint).toBe(true)
+			for (const name of ['list_kit_files', 'get_component_source', 'compare_component_copies'])
+				expect(tools.tools.find(tool => tool.name === name)?.annotations?.readOnlyHint, name).toBe(true)
 			expect(tools.tools.find(tool => tool.name === 'create_view')?.annotations?.readOnlyHint).toBe(false)
 			expect(tools.tools.find(tool => tool.name === 'update_view_spec')?.annotations?.destructiveHint).toBe(true)
 			expect(tools.tools.find(tool => tool.name === 'update_view_structure')?.annotations?.destructiveHint).toBe(true)

@@ -153,6 +153,9 @@ describe('Product Kit digests, closure and drift states', () => {
 		expect(caseOnlyCollisions(['src/UI/ds/Button.vue', 'src/ui/ds/Button.vue'])).toEqual([['src/UI/ds/Button.vue', 'src/ui/ds/Button.vue']])
 		expect(caseOnlyCollisions(['src/café.vue', 'src/café.vue'])).toEqual([['src/café.vue', 'src/café.vue']])
 		expect(caseOnlyCollisions(['src/ui/a.vue', 'src/ui/b.vue'])).toEqual([])
+		// The long s folds to s in upper case, as segmentNamesInAnyCase compares.
+		expect(caseOnlyCollisions(['src/a/Foſ.vue', 'src/a/Fos.vue'])).toEqual([['src/a/Foſ.vue', 'src/a/Fos.vue']])
+		expect(caseOnlyCollisions(['src/a/FOS.vue', 'src/a/foſ.vue'])).toEqual([['src/a/FOS.vue', 'src/a/foſ.vue']])
 		expect(hasGitSegment('.git')).toBe(true)
 		expect(hasGitSegment('vendor/.GIT/config')).toBe(true)
 		expect(hasGitSegment('src/.gitkeep')).toBe(false)
@@ -508,6 +511,23 @@ describe('uiux components', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 		expect(renamed.stderr).toContain('src/ui/ds/button.vue and src/ui/ds/Button.vue differ only in letter case')
 		expect(await snapshot(fixture.project)).toEqual(before)
 		expect(await readFile(join(fixture.project, 'src/ui/ds/Button.vue'), 'utf8')).toBe(BUTTON)
+	})
+
+	// Finding: `Foſ.vue` and `Fos.vue` are one file on APFS, whose fold maps the long s to s.
+	it('refuses a component whose copy differs from another recorded copy only by a fold beyond lower case', async () => {
+		const fixture = await makeFixture({
+			alpha: { files: ['src/a/Foſ.vue'], layer: 'design-system' },
+			beta: { files: ['src/a/Fos.vue'], layer: 'design-system' },
+		})
+		await writeKitFile(fixture.kit, 'src/a/Foſ.vue', BADGE)
+		await writeKitFile(fixture.kit, 'src/a/Fos.vue', BADGE)
+		expect((await run(fixture, ['add', 'alpha', '--to', 'x'])).code).toBe(0)
+		const before = await snapshot(fixture.project)
+		const second = await run(fixture, ['add', 'beta', '--to', 'x'])
+		expect(second.code).toBe(1)
+		expect(second.stderr).toContain('x/a/Fos.vue and x/a/Foſ.vue differ only in letter case')
+		expect(await snapshot(fixture.project)).toEqual(before)
+		expect(Object.keys((await readRecord(fixture.project)).components)).toEqual(['alpha'])
 	})
 
 	// Finding: a failure part-way reports what was written, leaves the record alone, and a rerun converges.

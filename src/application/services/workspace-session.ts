@@ -112,6 +112,7 @@ import {
 } from './access-presets-authoring'
 import { createKitBuildService, type KitBuildLogRead, type KitBuildRead, type RestartKitBuildResult } from './kit-build'
 import type { KitBuildControl } from '../ports/kit-build'
+import { createKitSourceService, type KitSourceService } from './kit-source'
 
 export type AssetContentDescriptor = Readonly<{
 	mediaType: string
@@ -155,6 +156,10 @@ export interface WorkspaceApplicationSession {
 	readKitBuild(): KitBuildRead | undefined
 	readKitBuildLog(): KitBuildLogRead | undefined
 	restartKitBuild(): Promise<RestartKitBuildResult>
+	listKitFiles: KitSourceService['listKitFiles']
+	readKitFile: KitSourceService['readKitFile']
+	getComponentSource: KitSourceService['getComponentSource']
+	compareComponentCopies: KitSourceService['compareComponentCopies']
 	createLocale(command: CreateLocaleCommand): Promise<LocaleAuthoringResult>
 	updateLocale(command: UpdateLocaleCommand): Promise<LocaleAuthoringResult>
 	createFlow(command: CreateFlowCommand): Promise<FlowAuthoringResult>
@@ -221,6 +226,7 @@ export function createWorkspaceApplicationSession(
 	const productKitAuthoring = createProductKitAuthoringService(persistence, options?.kitBuild ? { buildStatus: () => options.kitBuild!.status() } : {})
 	const accessPresetsAuthoring = createAccessPresetsAuthoringService(persistence)
 	const kitBuild = createKitBuildService(persistence, options?.kitBuild)
+	const kitSource = createKitSourceService(persistence)
 
 	async function readPointResource(kind: PointResourceKind, key: string): Promise<PointResourceRead | undefined> {
 		if (!isValidPointResourceAddress({ kind, key })) return undefined
@@ -357,6 +363,10 @@ export function createWorkspaceApplicationSession(
 		readKitBuild: kitBuild.readKitBuild,
 		readKitBuildLog: kitBuild.readKitBuildLog,
 		restartKitBuild: kitBuild.restartKitBuild,
+		listKitFiles: kitSource.listKitFiles,
+		readKitFile: kitSource.readKitFile,
+		getComponentSource: kitSource.getComponentSource,
+		compareComponentCopies: kitSource.compareComponentCopies,
 		createLocale: localeAuthoring.createLocale,
 		updateLocale: localeAuthoring.updateLocale,
 		createFlow: flowAuthoring.createFlow,

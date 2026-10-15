@@ -2,6 +2,7 @@ import {
 	isSafeRelativePath,
 	jsonPointer,
 	rejectUnknownKeys,
+	segmentNamesInAnyCase,
 	validateDigest,
 	validateUtcTimestamp,
 	Validator,
@@ -42,7 +43,12 @@ export function emptyCopyRecord(): CopyRecord {
  * 01a11bb1-a376-719c-86e0-5f5e4d11cb8c). Both are project-relative.
  */
 export function copyDestination(target: string, source: string): string {
-	return `${target}/${source.slice(KIT_SOURCE_PREFIX.length)}`
+	return `${target}/${copyPathBelowTarget(source)}`
+}
+
+/** Where a copy of the kit file `source` (`src/…`) lies relative to its target directory: its path relative to `kit/src/`. */
+export function copyPathBelowTarget(source: string): string {
+	return source.slice(KIT_SOURCE_PREFIX.length)
 }
 
 /**
@@ -89,24 +95,33 @@ export function validateCopyRecord(input: unknown): ValidationResult<CopyRecord>
 	return v.finish<CopyRecord>(input)
 }
 
-/** True when a segment of the project-relative path `path` is `.git`, in any letter case. */
+/** True when a segment of the project-relative path `path` is `.git`, in any letter case (`segmentNamesInAnyCase`). */
 export function hasGitSegment(path: string): boolean {
-	return path.split('/').some(segment => segment.toLowerCase() === '.git')
+	return path.split('/').some(segment => segmentNamesInAnyCase(segment, '.git'))
 }
 
 /**
  * The pairs of distinct paths in `paths` that differ only in letter case or Unicode normalization,
- * which a case-insensitive file system (the macOS default) treats as one file. Each pair names the
- * path seen first, then the other.
+ * which a case-insensitive file system (the macOS default) treats as one file. Two paths match by
+ * the fold of `segmentNamesInAnyCase`: after NFC normalization their upper case or their lower case
+ * agree (so `Foſ` matches `Fos`, whose upper cases agree). Each pair names the path seen first, then
+ * the other.
  */
 export function caseOnlyCollisions(paths: Iterable<string>): Array<readonly [string, string]> {
-	const byFold = new Map<string, string>()
+	const byUpper = new Map<string, string>()
+	const byLower = new Map<string, string>()
 	const pairs: Array<readonly [string, string]> = []
 	for (const path of new Set(paths)) {
-		const fold = path.normalize('NFC').toLowerCase()
-		const seen = byFold.get(fold)
-		if (seen === undefined) byFold.set(fold, path)
-		else pairs.push([seen, path])
+		const normalized = path.normalize('NFC')
+		const upper = normalized.toUpperCase()
+		const lower = normalized.toLowerCase()
+		const seen = byUpper.get(upper) ?? byLower.get(lower)
+		if (seen !== undefined) {
+			pairs.push([seen, path])
+			continue
+		}
+		byUpper.set(upper, path)
+		byLower.set(lower, path)
 	}
 	return pairs
 }
