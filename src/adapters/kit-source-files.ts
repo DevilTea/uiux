@@ -264,9 +264,10 @@ export type KitFileListing = Readonly<{ files: readonly KitFileEntry[]; truncate
  * swap can list the names and sizes of files outside `kit/`.
  *
  * Directories are walked in name order. Past `maxEntries` files the walk stops and `truncated` is
- * set; the files returned are the first found, sorted.
+ * set; the files returned are the first found, sorted. `include`, when given, prunes the walk: a
+ * directory or file whose kit-relative path it refuses is neither entered nor listed nor counted.
  */
-export async function listKitFiles(kit: KitProject, maxEntries = MAX_KIT_FILE_ENTRIES): Promise<KitFileListing> {
+export async function listKitFiles(kit: KitProject, maxEntries = MAX_KIT_FILE_ENTRIES, include?: (path: string, directory: boolean) => boolean): Promise<KitFileListing> {
 	const anchor = await anchorKit(kit)
 	if (!anchor) return { files: [], truncated: false }
 	const files: KitFileEntry[] = []
@@ -290,6 +291,7 @@ export async function listKitFiles(kit: KitProject, maxEntries = MAX_KIT_FILE_EN
 		for (const entry of entries) {
 			const path = root ? entry.name : `${prefix}/${entry.name}`
 			if (!isKitFilePath(path)) continue
+			if (include && !include(path, entry.isDirectory())) continue
 			const absolute = join(directory, entry.name)
 			if (entry.isDirectory()) {
 				directories.push([absolute, path])

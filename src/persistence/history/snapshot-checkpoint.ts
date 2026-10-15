@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
+import { productKitRecordFieldUnlocked } from '../../adapters/kit-provenance'
+
 import type { HistorySource } from '../../domain/history/constants'
 import { HISTORY_SCHEMA_VERSION } from '../../domain/history/constants'
 import type { CheckpointRecord, HistoryActor } from '../../domain/history/schema'
@@ -41,6 +43,8 @@ export async function writeSnapshotCheckpointUnlocked(input: SnapshotCheckpointI
 		at: input.at,
 		workspaceSchemaVersion: await input.persistence.readRecordSchemaVersionUnlocked(),
 		resources: snapshot.resources,
+		// Clause 01a11bb1-b6ae-7cf7-9838-9628757d1190: the Product Kit provenance when it was taken.
+		...await productKitRecordFieldUnlocked(input.persistence),
 		name: input.name,
 		...(input.note !== undefined ? { note: input.note } : {}),
 		source: input.source,
