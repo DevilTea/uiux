@@ -15,7 +15,8 @@ import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-
  *
  * - `?section=` takes `overview`, `components`, `styles` and `files`, and the section navigation
  *   moves between them (Clause 01a11be8-5cab-7e50-89fe-b89c243d773d);
- * - Components lists the registry, browses a component's props and emits, and gives its copy commands;
+ * - Components lists the registry and the component table (`widgets`, issue #217), browses a
+ *   component's props and emits, and gives its copy commands;
  *   Styles & themes saves through `update_product_kit`, keeps the draft on a conflict, refuses an
  *   invalid theme attribute inline and shows the server's refusal; Files lists and reads kit files as
  *   text only (Rules 01a11bb1-b918-7cb5-b581-a3fd3f647f09 and 01a11bb1-a184-7e00-a8de-c81056ad5a35);
@@ -30,6 +31,8 @@ const ICON = '<template><svg data-injected-icon /><img src=x onerror="window.__c
 /** A directory and a file whose names are markup. */
 const HTML_DIRECTORY = '<i data-injected-directory>'
 const HTML_NAME = '<img src=x onerror="window.__kitNameRan = true">.txt'
+/** A Widget type whose name is markup. */
+const HTML_WIDGET_TYPE = '<b data-injected-widget>Card</b>'
 const HTML_FILE = '<script>window.__kitFileRan = true</script><b data-injected>bold</b><img src=x onerror="window.__kitFileRan = true">\n'
 const BUTTON = [
 	'<script setup lang="ts">',
@@ -50,7 +53,8 @@ async function write(path: string, content: string | Uint8Array): Promise<void> 
 
 async function prepareKit(root: string): Promise<void> {
 	const kit = join(root, 'kit')
-	await write(join(kit, 'package.json'), JSON.stringify({ name: 'kit', private: true, type: 'module' }))
+	// The component table's package import names a dependency that kit/package.json declares.
+	await write(join(kit, 'package.json'), JSON.stringify({ name: 'kit', private: true, type: 'module', dependencies: { '@acme/date-picker': '1.0.0' } }))
 	await write(join(kit, 'src', 'button', 'Button.vue'), BUTTON)
 	await write(join(kit, 'src', 'icon', 'Icon.vue'), ICON)
 	await write(join(kit, 'notes', HTML_DIRECTORY, HTML_NAME), 'named\n')
@@ -68,6 +72,11 @@ async function prepareKit(root: string): Promise<void> {
 		components: {
 			button: { files: ['src/button/Button.vue'], requires: ['icon'], layer: 'design-system' },
 			icon: { files: ['src/icon/Icon.vue'], layer: 'product' },
+		},
+		widgets: {
+			Button: { component: 'button' },
+			DatePicker: { import: '@acme/date-picker', export: 'DatePicker' },
+			[HTML_WIDGET_TYPE]: { component: 'icon' },
 		},
 	}))
 }
@@ -102,7 +111,7 @@ async function open(path: string, options: Readonly<{ cookie?: Cookie; width?: n
 	return { context, page }
 }
 
-type ProductKitRead = Readonly<{ revision: string; resource: Readonly<{ adapters: readonly unknown[]; styles: readonly string[]; themes: Readonly<Record<string, Readonly<Record<string, string>>>> }> }>
+type ProductKitRead = Readonly<{ revision: string; resource: Readonly<{ adapters: readonly unknown[]; styles: readonly string[]; themes: Readonly<Record<string, Readonly<Record<string, string>>>>; components: Readonly<Record<string, unknown>>; widgets: Readonly<Record<string, unknown>> }> }>
 
 async function readProductKit(): Promise<ProductKitRead> {
 	return await (await fetch(`${server.origin}/api/product-kit`, { headers: server.headers })).json() as ProductKitRead
@@ -115,6 +124,16 @@ async function updateProductKit(change: Readonly<{ styles?: readonly string[]; t
 		method: 'PUT',
 		headers: { ...server.headers, 'content-type': 'application/json' },
 		body: JSON.stringify({ expectedRevision: read.revision, adapters: read.resource.adapters, styles: change.styles ?? read.resource.styles, themes: change.themes ?? read.resource.themes }),
+	})
+}
+
+/** Replaces the component table through `update_component_registry`, keeping the registry. */
+async function updateWidgets(widgets: Readonly<Record<string, unknown>>): Promise<Response> {
+	const read = await readProductKit()
+	return await fetch(`${server.origin}/api/product-kit/registry`, {
+		method: 'PUT',
+		headers: { ...server.headers, 'content-type': 'application/json' },
+		body: JSON.stringify({ expectedRevision: read.revision, components: read.resource.components, widgets }),
 	})
 }
 
@@ -181,6 +200,46 @@ describe('Product Kit page › Components', () => {
 			expect(await page.evaluate(() => (window as unknown as { __componentRan?: boolean }).__componentRan)).toBeUndefined()
 		}
 		finally { await context.close() }
+	}, 60_000)
+
+	it('shows the component table: each Widget type with its registry component or package export, as text', async () => {
+		const { context, page } = await open('/workspace/product-kit?section=components')
+		try {
+			const table = page.locator('[data-widgets-table]')
+			await table.waitFor({ timeout: 15_000 })
+			expect(await page.getByRole('heading', { name: 'Component table' }).count()).toBe(1)
+			expect(await table.locator('thead th').allInnerTexts()).toEqual(['Widget type', 'Component', 'From'])
+			const rows = await table.locator('[data-widget-row]').evaluateAll(elements => elements.map(row => [
+				row.getAttribute('data-widget-row'),
+				row.querySelector('[data-widget-component]')?.textContent?.trim(),
+				row.querySelector('[data-widget-from]')?.textContent?.trim(),
+			]))
+			expect(rows).toEqual([
+				[HTML_WIDGET_TYPE, 'icon', 'Component registry'],
+				['Button', 'button', 'Component registry'],
+				['DatePicker', 'DatePicker', '@acme/date-picker'],
+			])
+			expect(await page.locator('[data-injected-widget]').count()).toBe(0)
+			expect(await page.locator('[data-widgets-empty]').count()).toBe(0)
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('says when no Widget type is mapped, with the registry still listed', async () => {
+		const saved = (await readProductKit()).resource.widgets
+		expect((await updateWidgets({})).status).toBe(200)
+		const { context, page } = await open('/workspace/product-kit?section=components')
+		try {
+			const empty = page.locator('[data-widgets-empty]')
+			await empty.waitFor({ timeout: 15_000 })
+			expect(await empty.innerText()).toBe('No Widget type is mapped to a component.')
+			expect(await page.locator('[data-widgets-table]').count()).toBe(0)
+			expect(await page.locator('[data-component-row]').count()).toBe(2)
+		}
+		finally {
+			await context.close()
+			expect((await updateWidgets(saved)).status).toBe(200)
+		}
 	}, 60_000)
 })
 
@@ -526,6 +585,7 @@ describe('Product Kit page › key gating', () => {
 			expect(await page.locator('[data-component-browse]').count()).toBe(0)
 			expect(await page.locator('[data-access-notice="component-source"]').getAttribute('data-missing-key')).toBe('product-kit.source.read')
 			expect(await page.locator('[data-component-copy-cli]').count()).toBe(2)
+			expect(await page.locator('[data-widget-row]').count()).toBe(3)
 
 			await page.getByRole('navigation', { name: 'Product Kit sections' }).getByRole('link', { name: 'Files' }).click()
 			const notice = page.locator('[data-access-notice="kit-files"]')
