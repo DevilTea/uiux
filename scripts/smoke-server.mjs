@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { createServer as createHttpServer, request as httpRequest } from 'node:http'
 import { createServer as createHttpsServer, request as httpsRequest } from 'node:https'
 import { connect, createServer } from 'node:net'
@@ -9,9 +9,12 @@ import { networkInterfaces, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const host = '127.0.0.1'
+const KIT_BUILD_LOG_LINE = 'smoke kit build: copied the Adapter into dist/'
 let workspaceRoot
 let uiuxHome
 let otherWorkspace
+// The product project `uiux components add` copies into, outside the Workspace and any Git repository.
+let productProject
 // The configured-origin run: a fresh roster home (first run), and the self-signed TLS material of its proxy.
 let originsHome
 let tlsDir
@@ -30,7 +33,7 @@ function cleanup() {
 	cleanupPromise ??= (async () => {
 		await Promise.all([...children.keys()].map(stopChild))
 		await Promise.all([...proxies].map(proxy => new Promise((resolve) => { proxy.closeAllConnections(); proxy.close(() => resolve()) })))
-		const dirs = [workspaceRoot, otherWorkspace, uiuxHome, originsHome, tlsDir].filter(dir => dir !== undefined)
+		const dirs = [workspaceRoot, otherWorkspace, productProject, uiuxHome, originsHome, tlsDir].filter(dir => dir !== undefined)
 		const removed = await Promise.allSettled(dirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 })))
 		const failures = removed.filter(result => result.status === 'rejected').map(result => result.reason)
 		if (failures.length > 0) throw new AggregateError(failures, 'Server smoke cleanup could not remove its temporary directories.')
@@ -70,9 +73,27 @@ try {
 	const uiuxCli = (...args) => execFileSync(process.execPath, ['bin/uiux.mjs', ...args], { encoding: 'utf8', env: cliBaseEnv })
 
 	// A current-schema Workspace from uiux init (the manifest and the Access presets file at the root),
-	// with the Adapter list in product-kit.json and a ./ Adapter resolved from kit/.
+	// with the Adapter list in product-kit.json and a ./ Adapter resolved from the output of a
+	// node-script kit build (Feature 01a11bb1-8534-7f0f-b8d0-de7efabe31f7): kit/package.json declares
+	// `node build.mjs`, which copies the Adapter source into kit/dist/. kit/src/ holds one component
+	// for `uiux components add|diff`.
 	uiuxCli('init', '--workspace', workspaceRoot)
 	await mkdir(join(workspaceRoot, 'kit', 'adapters'), { recursive: true })
+	await mkdir(join(workspaceRoot, 'kit', 'src', 'ds'), { recursive: true })
+	await writeFile(join(workspaceRoot, 'kit', 'package.json'), `${JSON.stringify({
+		name: 'smoke-kit',
+		private: true,
+		type: 'module',
+		uiux: { output: 'dist', build: { command: [process.execPath, 'build.mjs'], timeoutSeconds: 30 } },
+	}, null, 2)}\n`)
+	await writeFile(join(workspaceRoot, 'kit', 'build.mjs'), [
+		"import { cpSync, mkdirSync } from 'node:fs'",
+		"mkdirSync('dist/adapters', { recursive: true })",
+		"cpSync('adapters/smoke.mjs', 'dist/adapters/smoke.mjs')",
+		`console.log(${JSON.stringify(KIT_BUILD_LOG_LINE)})`,
+		'',
+	].join('\n'))
+	await writeFile(join(workspaceRoot, 'kit', 'src', 'ds', 'SmokeBadge.vue'), '<template><span class="smoke-badge"><slot /></span></template>\n')
 	await writeFile(join(workspaceRoot, 'kit', 'adapters', 'smoke.mjs'), [
 		"import { createWidgetPlugin } from '@deviltea/widget-core'",
 		'',
@@ -101,10 +122,10 @@ try {
 		throw new Error('uiux init did not write the current schemaVersion.')
 	await writeFile(join(workspaceRoot, 'product-kit.json'), `${JSON.stringify({
 		designSystems: [],
-		adapters: [{ moduleSpecifier: './adapters/smoke.mjs' }],
+		adapters: [{ moduleSpecifier: './dist/adapters/smoke.mjs' }],
 		styles: [],
 		themes: {},
-		components: {},
+		components: { 'smoke-badge': { files: ['src/ds/SmokeBadge.vue'], layer: 'design-system' } },
 		widgets: {},
 	}, null, 2)}\n`)
 
@@ -174,6 +195,22 @@ try {
 	if (body.resource?.schemaVersion !== uiuxWorkspaceSchemaVersion || body.inspection?.state !== 'current')
 		throw new Error(`Selected Workspace route returned an unexpected body: ${JSON.stringify(body)}`)
 
+	// The server starts the declared kit build; its output, not kit/adapters/, provides the Adapter.
+	const buildDeadline = Date.now() + 15_000
+	let build
+	for (;;) {
+		const read = await fetch(`http://${host}:${port}/api/product-kit/build`, { headers: auth })
+		if (read.status !== 200) throw new Error(`GET /api/product-kit/build returned HTTP ${read.status}.`)
+		build = (await read.json()).build
+		if (build?.state === 'ready') break
+		if (build?.state !== 'building' || Date.now() > buildDeadline)
+			throw new Error(`The node-script kit build did not become ready: ${JSON.stringify(build)}\n${serverOutput}`)
+		await new Promise(resolve => setTimeout(resolve, 100))
+	}
+	const buildLog = await fetch(`http://${host}:${port}/api/product-kit/build/log`, { headers: auth })
+	if (buildLog.status !== 200 || !(await buildLog.json()).log?.includes(KIT_BUILD_LOG_LINE))
+		throw new Error(`The kit build log does not hold the build's output (HTTP ${buildLog.status}).`)
+
 	const adapters = await fetch(`http://${host}:${port}/api/preview/adapters`, { headers: auth })
 	if (adapters.status !== 200) throw new Error(`Preview adapters route returned HTTP ${adapters.status}.`)
 	const adapterBody = await adapters.json()
@@ -184,11 +221,16 @@ try {
 	if (!runtime.ok || !(await runtime.text()).includes('mountPreviewRuntime'))
 		throw new Error('Preview runtime bundle was not materialized for the production identity smoke Adapter.')
 
-	console.log(`Nitro smoke passed: health, 401 without a token and for another Workspace's token, a CLI-created token on /api and /mcp, selected Workspace API, and cross-module Workspace Adapter preview resolution against schemaVersion ${uiuxWorkspaceSchemaVersion}.`)
+	console.log(`Nitro smoke passed: health, 401 without a token and for another Workspace's token, a CLI-created token on /api and /mcp, selected Workspace API, a node-script kit build reaching ready with its log, and cross-module Workspace Adapter preview resolution from the build output against schemaVersion ${uiuxWorkspaceSchemaVersion}.`)
+
+	await smokeComponents()
 
 	const historyStarted = Date.now()
 	await smokeHistory({ origin: `http://${host}:${port}`, auth, mcpHeaders })
 	console.log(`History smoke passed in ${Date.now() - historyStarted} ms: an Agent's MCP task ended by release_lock is one autosave, a Checkpoint, its diff against current naming only the changed View, a restore naming restoredFrom, release_lock recording nothing more, and an on-disk edit recorded as an external version.`)
+
+	// After the history smoke, whose diffs assume no other write to the Workspace.
+	await smokeAccessPresets(uiuxCli)
 
 	// `uiux dev` below reuses the port, so this server must have exited first.
 	await stopChild(server)
@@ -637,6 +679,83 @@ async function smokeHistory({ origin, auth, mcpHeaders }) {
 	// The list is newest first: the Checkpoint that detected the edit comes before the external version.
 	if (boundaryAt > externalAt)
 		throw new Error('The external version is not recorded before the Checkpoint that detected it.')
+}
+
+// `uiux components add|diff` through the binary (Clauses 01a11bb1-9b89-… and 01a11bb1-9bef-…): a
+// copy of the kit's component into a product project with its copy record, a clean `diff --check`,
+// and a hand-edited copy reported as `modified` with exit 1. The commands need no credential.
+async function smokeComponents() {
+	productProject = await realpath(await mkdtemp(join(tmpdir(), 'uiux-smoke-product-')))
+	await writeFile(join(productProject, 'package.json'), '{ "name": "smoke-product" }\n')
+	const cli = join(process.cwd(), 'bin', 'uiux.mjs')
+	const components = (...args) => spawnSync(process.execPath, [cli, 'components', ...args, '--project', productProject, '--workspace', workspaceRoot], {
+		// --to names a directory relative to the working directory, here the product project.
+		cwd: productProject,
+		encoding: 'utf8',
+		env: { ...process.env, UIUX_HOME: uiuxHome },
+		timeout: 15_000,
+	})
+	const add = components('add', 'smoke-badge', '--to', 'src/ui')
+	if (add.status !== 0) throw new Error(`uiux components add exited ${add.status}.\n${add.stdout}${add.stderr}`)
+	const copyPath = join(productProject, 'src', 'ui', 'ds', 'SmokeBadge.vue')
+	if (await readFile(copyPath, 'utf8') !== await readFile(join(workspaceRoot, 'kit', 'src', 'ds', 'SmokeBadge.vue'), 'utf8'))
+		throw new Error('uiux components add did not copy the kit source unchanged.')
+	const record = JSON.parse(await readFile(join(productProject, 'uiux-components.json'), 'utf8'))
+	if (record.components?.['smoke-badge']?.files?.['src/ui/ds/SmokeBadge.vue']?.source !== 'src/ds/SmokeBadge.vue')
+		throw new Error(`uiux components add wrote an unexpected copy record: ${JSON.stringify(record)}`)
+
+	const clean = components('diff', '--check')
+	if (clean.status !== 0 || !clean.stdout.includes('unchanged src/ui/ds/SmokeBadge.vue (smoke-badge)'))
+		throw new Error(`uiux components diff --check on an untouched copy exited ${clean.status}.\n${clean.stdout}${clean.stderr}`)
+	await writeFile(copyPath, '<template><span class="smoke-badge edited"><slot /></span></template>\n')
+	const drifted = components('diff', '--check')
+	if (drifted.status !== 1 || !drifted.stdout.includes('modified  src/ui/ds/SmokeBadge.vue (smoke-badge)'))
+		throw new Error(`uiux components diff --check on an edited copy exited ${drifted.status}, expected 1 naming it modified.\n${drifted.stdout}${drifted.stderr}`)
+	console.log('Components smoke passed: uiux components add copied the kit component with its copy record, and diff --check reported it unchanged (exit 0), then modified after an edit (exit 1).')
+}
+
+// The Access presets on HTTP (Clause 01a11c09-a50e-7531-b16e-74ba685c6bad) and the permission keys: a human Owner's
+// Workbench session edits the Workspace's presets file; an Agent's token is refused that edit
+// (`presets.manage` is humanOnly); the CLI applies the new preset from the Workspace file; and the
+// member it made, holding `workspace.read` only, is refused a View write naming `views.write`.
+async function smokeAccessPresets(uiuxCli) {
+	const origin = `http://${host}:${port}`
+	uiuxCli('member', 'add', 'smoke-owner', '--kind', 'human', '--preset', 'Owner', '--workspace', workspaceRoot)
+	const invite = uiuxCli('invite', 'create', '--member', 'smoke-owner', '--workspace', workspaceRoot).match(/uiux_i_\S+/u)?.[0]
+	if (!invite) throw new Error('uiux invite create printed no invite.')
+	const login = await request('POST', '/api/session/login', { 'content-type': 'application/json', origin }, JSON.stringify({ credential: invite }))
+	const cookie = String(login.headers['set-cookie'] ?? '').split(';', 1)[0]
+	if (login.status !== 200 || !cookie) throw new Error(`Signing in with the Owner's invite returned HTTP ${login.status}: ${login.body}`)
+	const session = { cookie, origin, 'sec-fetch-site': 'same-origin' }
+
+	const read = await request('GET', '/api/access-presets', session)
+	const current = JSON.parse(read.body)
+	if (read.status !== 200 || !current.revision || !current.resource?.presets?.some(preset => preset.id === 'editor'))
+		throw new Error(`GET /api/access-presets returned HTTP ${read.status}: ${read.body}`)
+	const edit = JSON.stringify({ expectedRevision: current.revision, presets: [...current.resource.presets, { id: 'smoke-reader', name: 'Smoke reader', keys: ['workspace.read'] }] })
+
+	const refused = await request('PUT', '/api/access-presets', { 'content-type': 'application/json', ...auth }, edit)
+	const refusal = JSON.parse(refused.body)
+	if (refused.status !== 403 || refusal.code !== 'auth.scope_denied' || JSON.stringify(refusal.requiredKeys) !== JSON.stringify(['presets.manage']))
+		throw new Error(`An Agent's PUT /api/access-presets returned HTTP ${refused.status}, expected 403 auth.scope_denied naming presets.manage: ${refused.body}`)
+	const updated = await request('PUT', '/api/access-presets', { 'content-type': 'application/json', ...session }, edit)
+	if (updated.status !== 200 || JSON.parse(updated.body).status !== 'updated')
+		throw new Error(`The Owner's PUT /api/access-presets returned HTTP ${updated.status}: ${updated.body}`)
+	const onDisk = JSON.parse(await readFile(join(workspaceRoot, 'access-presets.json'), 'utf8'))
+	if (!onDisk.presets?.some(preset => preset.id === 'smoke-reader'))
+		throw new Error(`access-presets.json does not hold the edited preset: ${JSON.stringify(onDisk)}`)
+
+	uiuxCli('member', 'add', 'smoke-reader', '--kind', 'agent', '--preset', 'Smoke reader', '--workspace', workspaceRoot)
+	const listed = uiuxCli('member', 'list', '--workspace', workspaceRoot).split('\n').find(line => line.includes('smoke-reader'))
+	if (!listed?.includes('Smoke reader')) throw new Error(`uiux member list does not label smoke-reader with the edited preset: ${listed}`)
+	const token = uiuxCli('token', 'create', '--member', 'smoke-reader', '--workspace', workspaceRoot).match(/uiux_t_\S+/u)?.[0]
+	if (!token) throw new Error('uiux token create printed no token.')
+	const viewSpec = { intent: 'refused', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [] }
+	const write = await request('POST', '/api/views', { 'content-type': 'application/json', authorization: `Bearer ${token}` }, JSON.stringify({ name: 'Refused', spec: viewSpec }))
+	const writeRefusal = JSON.parse(write.body)
+	if (write.status !== 403 || writeRefusal.code !== 'auth.scope_denied' || JSON.stringify(writeRefusal.requiredKeys) !== JSON.stringify(['views.write']))
+		throw new Error(`A workspace.read-only token's POST /api/views returned HTTP ${write.status}, expected 403 auth.scope_denied naming views.write: ${write.body}`)
+	console.log('Access presets smoke passed: an Owner session edited access-presets.json over HTTP, an Agent token was refused that edit naming presets.manage, uiux member add applied the new preset from the Workspace file, and its workspace.read-only member was refused a View write naming views.write.')
 }
 
 function canConnect(address, targetPort) {
