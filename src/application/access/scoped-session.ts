@@ -4,7 +4,7 @@ import { HISTORY_WRITE_OPERATIONS, isRestorableResourceKind, type HistoryWriteOp
 import { isFullUuid, type Diagnostic } from '../../domain/validation'
 import { runWithDesignWriteContext, type DesignWriteContext } from '../../persistence/history/write-context'
 import type { ReviewResolution } from '../../domain/reviews/schema'
-import type { ProductKitProvenance } from '../../domain/product-kit/provenance'
+import type { CurrentProductKitProvenance } from '../../domain/product-kit/provenance'
 import type { PointResourceKind } from '../dto/point-resources'
 import type { ResourceDiscoveryOutcome } from '../dto/resource-discovery'
 import type { AssetAuthoringResult, CreateAssetCommand, ReplaceAssetCommand } from '../services/asset-authoring'
@@ -138,7 +138,7 @@ export interface ScopedWorkspaceSession {
 	searchPointResources(input: unknown): Promise<ResourceDiscoveryOutcome>
 	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
 	/** The current Product Kit provenance that Evidence freshness is judged against; read with the Evidence, under its key. */
-	productKitProvenance(): Promise<ProductKitProvenance | undefined>
+	productKitProvenance(): Promise<CurrentProductKitProvenance>
 	readArtifact(identity: string): Promise<Uint8Array | undefined>
 	assessHandoffReadiness(command: AssessHandoffReadinessCommand): Promise<AssessHandoffReadinessResult | AccessRefusal>
 	diffVersions(command: DiffVersionsCommand): Promise<VersionDiffOutcome | AccessRefusal>

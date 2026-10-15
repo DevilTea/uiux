@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import { productKitRecordFieldUnlocked } from '../../adapters/kit-provenance'
+import { productKitRecordFieldUnlocked, warmProductKitProvenance } from '../../adapters/kit-provenance'
 
 import {
 	AUTOSAVE_IDLE_MS,
@@ -290,6 +290,9 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 				return { enabled: false }
 			}
 			this.stores = stores
+			// Digest the kit before taking the lock, so the Baseline and the versions recorded under it
+			// find the Product Kit provenance cached instead of digesting the kit while writers wait.
+			await warmProductKitProvenance(this.persistence)
 			const report = await this.persistence.withLock(async () => {
 				const started = await this.startUnlocked(stores)
 				if (!started.enabled) return started

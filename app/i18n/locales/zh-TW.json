@@ -187,6 +187,7 @@
       "noLocaleRevision": "這筆紀錄沒有記錄 Locale {subject} 的修訂版本，因此無法判斷是否最新。",
       "productKitChanged": "擷取後 Product Kit 已變更。",
       "noProductKit": "這筆紀錄沒有記錄擷取時的 Product Kit，因此無法判斷是否最新。請重新擷取。",
+      "productKitUnavailable": "目前的 Product Kit 無法完整讀取，因此無法判斷這筆擷取是否最新。",
       "other": "已與目前的 Workspace 不一致。"
     },
     "thumbAlt": "{view} 的擷取畫面，{context}",

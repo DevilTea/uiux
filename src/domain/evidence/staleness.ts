@@ -15,17 +15,23 @@ export type EvidenceStalenessContext = Readonly<{
 	localeRevisions?: Readonly<Record<string, string>>
 	/**
 	 * The Workspace's current Product Kit provenance. Absent when the Workspace has no Product Kit
-	 * (below `schemaVersion` 5) or the caller cannot tell it; the Product Kit is then not judged.
+	 * (below `schemaVersion` 5), and then the Product Kit is not judged, or when it is unavailable.
 	 */
 	productKit?: ProductKitProvenance
+	/**
+	 * True when the Workspace has a Product Kit file but its current provenance cannot be computed
+	 * (`productKitFreshnessContext`): every capture's freshness is then unknown, never fresh.
+	 */
+	productKitUnavailable?: boolean
 }>
 
 export type EvidenceStalenessAssessment = Readonly<{
 	isStale: boolean
 	reason?: string
 	/**
-	 * Rule 01a1161b-ff68-76af-8237-dbc8ef2c27d1: the capture records no Product Kit provenance, so
-	 * its freshness is unknown, which counts as not fresh (`isStale` is true).
+	 * Rule 01a1161b-ff68-76af-8237-dbc8ef2c27d1: the capture records no Product Kit provenance, or the
+	 * current one cannot be computed, so its freshness is unknown, which counts as not fresh
+	 * (`isStale` is true).
 	 */
 	unknown?: true
 }>
@@ -35,6 +41,9 @@ export const PRODUCT_KIT_CHANGED_REASON = 'Product Kit changed since capture'
 
 /** The reason a capture without Product Kit provenance is not fresh (Rule 01a1161b-ff68-76af-8237-dbc8ef2c27d1). */
 export const PRODUCT_KIT_PROVENANCE_MISSING_REASON = 'Capture records no Product Kit provenance; capture it again'
+
+/** The reason no capture is fresh while the current Product Kit provenance cannot be computed (Rule 01a1161b-ff68-76af-8237-dbc8ef2c27d1). */
+export const PRODUCT_KIT_PROVENANCE_UNAVAILABLE_REASON = 'Current Product Kit provenance cannot be computed'
 
 export function isCompleteEvidenceForViewRevision(
 	record: FormalEvidenceRecord,
@@ -122,6 +131,9 @@ export function evaluateEvidenceStaleness(
 		}
 	}
 
+	// Rules 01a1161b-ff68-… and 01a11bb1-be4a-…: with a Product Kit whose current provenance cannot be
+	// computed, nothing tells whether the capture still matches it, so its freshness is unknown.
+	if (context.productKitUnavailable) return { isStale: true, unknown: true, reason: PRODUCT_KIT_PROVENANCE_UNAVAILABLE_REASON }
 	if (context.productKit) {
 		const recorded = record.provenance.productKit
 		if (!recorded) return { isStale: true, unknown: true, reason: PRODUCT_KIT_PROVENANCE_MISSING_REASON }

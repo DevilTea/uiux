@@ -70,8 +70,8 @@ import {
 	type CaptureFormalEvidenceResult,
 	type FormalEvidenceItem,
 } from './formal-capture'
-import { readWorkspaceProductKitProvenance } from './product-kit-provenance'
-import type { ProductKitProvenance } from '../../domain/product-kit/provenance'
+import { readCurrentProductKitProvenance } from './product-kit-provenance'
+import type { CurrentProductKitProvenance } from '../../domain/product-kit/provenance'
 import {
 	createHandoffExportService,
 	type AssessHandoffReadinessCommand,
@@ -180,8 +180,8 @@ export interface WorkspaceApplicationSession {
 	replaceAsset(command: ReplaceAssetCommand): Promise<AssetAuthoringResult>
 	captureFormalEvidence(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult>
 	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
-	/** The current Product Kit provenance, against which Evidence freshness is judged (Rule 01a11bb1-be4a-…); none below schemaVersion 5. */
-	productKitProvenance(): Promise<ProductKitProvenance | undefined>
+	/** The current Product Kit provenance, against which Evidence freshness is judged (Rules 01a11bb1-be4a-… and 01a1161b-ff68-…); `none` below schemaVersion 5. */
+	productKitProvenance(): Promise<CurrentProductKitProvenance>
 	assessHandoffReadiness(command: AssessHandoffReadinessCommand): Promise<AssessHandoffReadinessResult>
 	exportHandoff(command: ExportHandoffCommand): Promise<ExportHandoffResult>
 	readArtifact(identity: string): Promise<Uint8Array | undefined>
@@ -389,7 +389,7 @@ export function createWorkspaceApplicationSession(
 		replaceAsset: assetAuthoring.replaceAsset,
 		captureFormalEvidence: formalCapture.capture,
 		listEvidence: formalCapture.listEvidence,
-		productKitProvenance: () => readWorkspaceProductKitProvenance(persistence),
+		productKitProvenance: () => readCurrentProductKitProvenance(persistence),
 		assessHandoffReadiness: handoffExport.assessReadiness,
 		exportHandoff: handoffExport.exportHandoff,
 		readArtifact: identity => persistence.artifacts.read(identity),

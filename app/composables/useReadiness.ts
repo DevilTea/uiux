@@ -67,8 +67,11 @@ type CaptureResponse = Readonly<{
 
 // Module state: one Workbench per document, shared by the Overview and the right panel.
 const evidenceItems = shallowRef<readonly EvidenceItem[]>([])
-/** The current Product Kit provenance, read with the Evidence list; absent below schemaVersion 5. */
-const currentProductKit = shallowRef<ProductKitProvenance>()
+/**
+ * The current Product Kit provenance, read with the Evidence list: `productKit`, or
+ * `productKitUnavailable` when it cannot be computed; neither below schemaVersion 5.
+ */
+const currentProductKit = shallowRef<Readonly<{ productKit?: ProductKitProvenance; productKitUnavailable?: boolean }>>({})
 const evidenceLoaded = shallowRef(false)
 const evidenceLoading = shallowRef(false)
 const evidenceError = shallowRef<FetchErrorDetails>()
@@ -139,8 +142,8 @@ export function useReadiness() {
 		if (evidencePromise && !force) return evidencePromise
 		evidenceLoading.value = true
 		const run = uiux.listEvidenceForFreshness<EvidenceItem, ProductKitProvenance>()
-			.then(({ items, productKit }) => {
-				currentProductKit.value = productKit
+			.then(({ items, productKit, productKitUnavailable }) => {
+				currentProductKit.value = { ...(productKit ? { productKit } : {}), ...(productKitUnavailable === true ? { productKitUnavailable } : {}) }
 				evidenceItems.value = (items ?? []).filter(item => item?.record?.kind === 'formal_capture')
 				evidenceError.value = undefined
 			})
@@ -162,7 +165,7 @@ export function useReadiness() {
 			workspace: workspace.value,
 			discoveredLocales: discoveredLocales.value,
 			localeRevisions: localeRevisions.value,
-			...(currentProductKit.value ? { productKit: currentProductKit.value } : {}),
+			...currentProductKit.value,
 		}
 		return evidenceItems.value.map((item) => {
 			const context = contextFromRecord(item.record)

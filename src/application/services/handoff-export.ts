@@ -43,8 +43,8 @@ import { locateKitProject, type KitProject } from '../../adapters/kit-registry'
 import { readKitSourceFile } from '../../adapters/kit-source-files'
 import { componentDigest } from '../../domain/product-kit/digest'
 import { PRODUCT_KIT_RESOURCE_KEY, PRODUCT_KIT_RESOURCE_KIND, validateProductKit, type ProductKit } from '../../domain/product-kit/schema'
-import type { ProductKitProvenance } from '../../domain/product-kit/provenance'
-import { readWorkspaceProductKitProvenance } from './product-kit-provenance'
+import { productKitFreshnessContext, type ProductKitProvenance } from '../../domain/product-kit/provenance'
+import { readCurrentProductKitProvenance } from './product-kit-provenance'
 import {
 	extractProductAdapterManifest,
 	productAdapterApiCompatibility,
@@ -152,10 +152,11 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			const read = await readKitSourceFile(kit, path, { maxBytes: Number.POSITIVE_INFINITY })
 			if (read.status !== 'found') return { problem: `the registry component ${name}, whose file kit/${path} is not a regular file under kit/src/ reached without a symbolic link.` }
 			const digest = await contentIdentity(read.bytes, materialize)
-			artifacts.set(digest, { kind: 'component-file', artifact: digest, context: { component: name, path } })
 			digests[path] = digest
 			files.push({ path, digest })
 		}
+		// Referenced only once every file was read: a component the manifest does not name adds no file.
+		for (const { path, digest } of files) artifacts.set(digest, { kind: 'component-file', artifact: digest, context: { component: name, path } })
 		return { component: { name, componentDigest: await componentDigest(digests), files, add: `uiux components add ${name}` } }
 	}
 
@@ -499,7 +500,8 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			: undefined
 		const productKitValidation = productKitRead ? validateProductKit(productKitRead.resource) : undefined
 		const productKit = productKitValidation?.ok ? productKitValidation.value : undefined
-		const productKitProvenance = await readWorkspaceProductKitProvenance(persistence)
+		const currentProductKit = await readCurrentProductKitProvenance(persistence)
+		const productKitProvenance = currentProductKit.state === 'available' ? currentProductKit.provenance : undefined
 
 		// 6. Review Threads in the closure: those anchored to a View in the closure, and every
 		// Workspace-scoped thread (owner decision O1: the Workspace manifest is in every bundle, so a
@@ -585,7 +587,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 					workspace: wsRead,
 					discoveredLocales: Object.keys(currentLocaleRevisions),
 					localeRevisions: currentLocaleRevisions,
-					...(productKitProvenance ? { productKit: productKitProvenance } : {}),
+					...productKitFreshnessContext(currentProductKit),
 				})
 
 				if (!staleness.isStale) {

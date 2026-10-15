@@ -26,7 +26,27 @@ export type ProductKitProvenance = Readonly<{
 }>
 
 /**
- * The digest of a set of files: the `sha256:` identity of the canonical JSON of the map from each
+ * The Workspace's current Product Kit provenance: `none` when the Workspace has no Product Kit file
+ * (below `schemaVersion` 5), so the Product Kit judges nothing; `unavailable` when it has one but the
+ * provenance cannot be computed now (the file or a kit file cannot be read, or the kit holds too
+ * many files), so freshness judged against it is unknown; else `available`.
+ */
+export type CurrentProductKitProvenance =
+	| Readonly<{ state: 'none' }>
+	| Readonly<{ state: 'unavailable' }>
+	| Readonly<{ state: 'available'; provenance: ProductKitProvenance }>
+
+/**
+ * The members of an Evidence staleness context (and of the Evidence list) that carry `current`:
+ * `{ productKit }` when available, `{ productKitUnavailable: true }` when unavailable, else none.
+ */
+export function productKitFreshnessContext(current: CurrentProductKitProvenance): Readonly<{ productKit?: ProductKitProvenance; productKitUnavailable?: true }> {
+	if (current.state === 'available') return { productKit: current.provenance }
+	return current.state === 'unavailable' ? { productKitUnavailable: true } : {}
+}
+
+/**
+ * The digest of a set of files:the `sha256:` identity of the canonical JSON of the map from each
  * file's path relative to `kit/` to its file digest, the reduction a component digest uses (Clause
  * 01a11bb1-8b0c-7590-9478-0348530b1ea7). An empty set has the digest of `{}`.
  */
