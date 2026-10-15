@@ -407,6 +407,16 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
           >
             {{ t('access.members.unheldAction') }}
           </UButton>
+          <UButton
+            to="/workspace/access-presets"
+            color="neutral"
+            variant="outline"
+            size="sm"
+            icon="i-lucide-key-square"
+            data-unheld-open-presets
+          >
+            {{ t('access.members.unheldPresetsAction') }}
+          </UButton>
         </template>
       </UAlert>
 

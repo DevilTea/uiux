@@ -1553,7 +1553,8 @@
       "save": "Save",
       "unheldTitle": "{n} permission key no person holds | {n} permission keys no person holds",
       "unheldDescription": "No human member holds these keys yet, so nobody can use them in the Workbench until someone is given them.",
-      "unheldAction": "Open your key checklist"
+      "unheldAction": "Open your key checklist",
+      "unheldPresetsAction": "Open Access presets"
     },
     "presets": {
       "title": "Access presets",

@@ -1553,7 +1553,8 @@
       "save": "儲存",
       "unheldTitle": "有 {n} 個權限鍵沒有任何人員持有 | 有 {n} 個權限鍵沒有任何人員持有",
       "unheldDescription": "目前沒有任何人員持有這些權限鍵，在有人獲得之前，沒有人能在 Workbench 中使用它們。",
-      "unheldAction": "開啟你的權限鍵清單"
+      "unheldAction": "開啟你的權限鍵清單",
+      "unheldPresetsAction": "開啟存取預設集"
     },
     "presets": {
       "title": "存取預設集",

@@ -337,7 +337,7 @@ describe('refusals shown in place', () => {
 })
 
 describe('the notice of keys no person holds', () => {
-	it('lists the catalog keys no human member holds and opens the signed-in member\'s checklist', async () => {
+	it('lists the catalog keys no human member holds, links to the Access presets page and opens the signed-in member\'s checklist', async () => {
 		const { context, page } = await openMembers()
 		try {
 			await page.locator('[data-members-table] tbody tr').first().waitFor({ timeout: 15_000 })
@@ -354,6 +354,14 @@ describe('the notice of keys no person holds', () => {
 			const notice = second.page.locator('[data-testid="unheld-keys"]')
 			await notice.waitFor({ timeout: 15_000 })
 			expect((await notice.locator('[data-unheld-keys]').innerText()).trim()).toBe('checkpoints.delete, locks.force-release, presets.manage')
+			const presets = notice.locator('[data-unheld-open-presets]')
+			expect(await presets.getAttribute('href')).toBe('/workspace/access-presets')
+			expect((await presets.innerText()).trim()).toBe('Open Access presets')
+			await presets.click()
+			await second.page.waitForURL(url => url.pathname === '/workspace/access-presets')
+			await second.page.locator('[data-access-presets]').waitFor({ timeout: 15_000 })
+			await second.page.goBack()
+			await notice.waitFor({ timeout: 15_000 })
 			await notice.locator('[data-unheld-open-checklist]').click()
 			const editor = second.page.locator('[data-member-editor]')
 			await editor.waitFor()
