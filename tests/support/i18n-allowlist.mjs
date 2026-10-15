@@ -22,6 +22,9 @@ export const GLOSSARY_NOUNS = [
 	'Checkpoint',
 	// Owner ruling, 2026-10-11 (Discussion #139, ruling 4): Product Kit stays English, since 「套件」 means a package.
 	'Product Kit',
+	// Owner ruling, 2026-10-15 (Discussion #139, https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18942505):
+	// a kit Component stays English too, since 「元件」 is reserved for Widget.
+	'Component',
 ]
 
 /** Other English words a zh-TW string may carry, each a name or a literal rather than prose. */

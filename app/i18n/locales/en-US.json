@@ -1071,6 +1071,7 @@
     },
     "sections": "Product Kit sections",
     "legacySection": "This Workspace has no Product Kit file until it's migrated. Run uiux migrate to use this section.",
+    "saveWhich": "More than one section has unsaved changes. Open the one to save.",
     "components": {
       "title": "Components",
       "description": "The component registry, {field} in the Product Kit file. Copy a component into a product project with the CLI or an Agent.",
@@ -1104,6 +1105,7 @@
       "emits": "Emits",
       "notDeclared": "None found in the source.",
       "interfaceHelp": "As each Vue file declares them with defineProps and defineEmits. A type named there is in the file.",
+      "interfaceIncomplete": "{file} is too large to read every declaration from. Read it in the source files below.",
       "sourceFiles": "Source files"
     },
     "styles": {

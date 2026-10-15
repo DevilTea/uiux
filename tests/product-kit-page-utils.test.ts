@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { componentDeclarations, MAX_DECLARATION_LENGTH } from '../app/utils/component-interface'
+import { componentAddCommand, componentSourceCall, shellWord } from '../app/utils/component-commands'
+import { componentDeclarations, MAX_DECLARATION_LENGTH, MAX_DECLARATION_SCAN } from '../app/utils/component-interface'
 import { kitFileTree, kitPathAncestors, visibleKitTreeRows } from '../app/utils/kit-file-tree'
 import { styleIssue, stylesThemesDraft, stylesThemesPayload, stylesThemesValid, themeAttributeIssues } from '../app/utils/product-kit-styles'
 import { parseProductKitSection } from '../app/utils/workbench-routes'
@@ -116,19 +117,55 @@ describe('Product Kit page › props and emits', () => {
 			'</script>',
 		].join('\n')
 		const found = componentDeclarations('src/button/Button.vue', source)
-		expect(found).toEqual([
+		expect(found.complete).toBe(true)
+		expect(found.declarations).toEqual([
 			{ kind: 'props', file: 'src/button/Button.vue', text: 'defineProps<{ label: string; onPress?: (event: MouseEvent) => void; tone?: \'a\' | \'b)\' }>()' },
 			{ kind: 'emits', file: 'src/button/Button.vue', text: 'defineEmits<(e: \'change\', id: number) => void>()' },
 		])
 	})
 
 	it('reads the runtime forms, ignores other files, and cuts a long declaration', () => {
-		expect(componentDeclarations('a.vue', 'defineProps({ size: { type: String, default: \'md\' } })\ndefineEmits([\'close\'])').map(item => item.text))
+		expect(componentDeclarations('a.vue', 'defineProps({ size: { type: String, default: \'md\' } })\ndefineEmits([\'close\'])').declarations.map(item => item.text))
 			.toEqual(['defineProps({ size: { type: String, default: \'md\' } })', 'defineEmits([\'close\'])'])
-		expect(componentDeclarations('a.ts', 'defineProps<{ a: string }>()')).toEqual([])
-		expect(componentDeclarations('a.vue', 'defineProps<{ a: string }>(')).toEqual([])
-		const long = componentDeclarations('a.vue', `defineProps<{ ${'a: string; '.repeat(400)} }>()`)[0]!.text
+		expect(componentDeclarations('a.ts', 'defineProps<{ a: string }>()')).toEqual({ declarations: [], complete: true })
+		expect(componentDeclarations('a.vue', 'defineProps<{ a: string }>(')).toEqual({ declarations: [], complete: true })
+		const long = componentDeclarations('a.vue', `defineProps<{ ${'a: string; '.repeat(400)} }>()`).declarations[0]!.text
 		expect(long).toHaveLength(MAX_DECLARATION_LENGTH + 1)
 		expect(long.endsWith('…')).toBe(true)
+	})
+
+	it('bounds the scan of an 8 MiB file of unclosed calls, and says it stopped', () => {
+		const size = 8 * 1024 * 1024
+		// Each shape left the old scan reading to the end of the file once per call.
+		for (const unit of ['defineProps(', 'defineEmits<', 'defineProps("', 'defineProps(/*']) {
+			const source = unit.repeat(Math.ceil(size / unit.length))
+			const started = performance.now()
+			const found = componentDeclarations('Huge.vue', source)
+			const elapsed = performance.now() - started
+			expect(found, unit).toEqual({ declarations: [], complete: false })
+			// Linear in the file, capped in the scan: well under a second (the old scan took hours).
+			expect(elapsed, unit).toBeLessThan(1500)
+		}
+	})
+
+	it('reads a call that closes within the bound, and marks one that closes past it', () => {
+		const near = `defineProps<{ ${'a: string; '.repeat(1000)} }>()\ndefineEmits(['x'])`
+		expect(componentDeclarations('a.vue', near).complete).toBe(true)
+		expect(componentDeclarations('a.vue', near).declarations.map(item => item.kind)).toEqual(['props', 'emits'])
+		const far = `defineProps({ ${' '.repeat(MAX_DECLARATION_SCAN)} })\ndefineEmits(['x'])`
+		expect(componentDeclarations('a.vue', far)).toEqual({ declarations: [{ kind: 'emits', file: 'a.vue', text: 'defineEmits([\'x\'])' }], complete: false })
+	})
+})
+
+describe('Product Kit page › copy commands', () => {
+	it('keeps a safe directory as typed and single-quotes anything else as one POSIX shell word', () => {
+		expect(componentAddCommand('button', 'src/ui')).toBe('uiux components add button --to src/ui')
+		expect(componentAddCommand('button', '  ')).toBe('uiux components add button --to src/components')
+		expect(componentAddCommand('button', 'a;b')).toBe('uiux components add button --to \'a;b\'')
+		expect(componentAddCommand('button', '$(x)')).toBe('uiux components add button --to \'$(x)\'')
+		expect(componentAddCommand('button', 'it\'s')).toBe('uiux components add button --to \'it\'\\\'\'s\'')
+		for (const unsafe of ['a b', '`x`', 'a|b', 'a&b', 'a<b>', '*', '#x', '~/x', '"x"', 'a\\b'])
+			expect(shellWord(unsafe), unsafe).toBe(`'${unsafe}'`)
+		expect(componentSourceCall('button')).toBe('get_component_source {"name":"button","withRequires":true}')
 	})
 })

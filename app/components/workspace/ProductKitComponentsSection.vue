@@ -3,7 +3,8 @@ import { computed, nextTick, ref, shallowRef } from 'vue'
 import { useI18n, useToast } from '#imports'
 import type { ProductKitComponent } from '../../../src/domain/product-kit/schema'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
-import { componentDeclarations, type ComponentDeclaration } from '../../utils/component-interface'
+import { componentDeclarations } from '../../utils/component-interface'
+import { componentAddCommand, componentSourceCall, DEFAULT_COMPONENT_TARGET } from '../../utils/component-commands'
 import { copyText } from '../../utils/copy-text'
 
 /**
@@ -33,16 +34,10 @@ const REGISTRY_FIELD = 'components'
 const names = computed(() => Object.keys(props.components).sort())
 
 /** Where `uiux components add` copies to, relative to the product project; only the shown commands use it. */
-const target = ref('src/components')
-const targetText = computed(() => target.value.trim() || 'src/components')
+const target = ref(DEFAULT_COMPONENT_TARGET)
 
 function cliCommand(name: string): string {
-	const dir = targetText.value
-	return `uiux components add ${name} --to ${/[\s"'$`\\]/u.test(dir) ? JSON.stringify(dir) : dir}`
-}
-
-function mcpCall(name: string): string {
-	return `get_component_source ${JSON.stringify({ name, withRequires: true })}`
+	return componentAddCommand(name, target.value)
 }
 
 async function copy(text: string): Promise<void> {
@@ -82,9 +77,13 @@ async function browse(name: string): Promise<void> {
 	document.getElementById('product-kit-component-detail-title')?.focus()
 }
 
-const declarations = computed<ComponentDeclaration[]>(() => (source.value?.files ?? [])
+/** Each text file's declarations, read within the scan bounds of `componentDeclarations`. */
+const fileDeclarations = computed(() => (source.value?.files ?? [])
 	.filter(file => file.encoding !== 'base64')
-	.flatMap(file => componentDeclarations(file.path, file.content)))
+	.map(file => ({ path: file.path, ...componentDeclarations(file.path, file.content) })))
+const declarations = computed(() => fileDeclarations.value.flatMap(file => file.declarations))
+/** Files too large to read every declaration from. */
+const incompleteFiles = computed(() => fileDeclarations.value.filter(file => !file.complete).map(file => file.path))
 const propsDeclarations = computed(() => declarations.value.filter(item => item.kind === 'props'))
 const emitsDeclarations = computed(() => declarations.value.filter(item => item.kind === 'emits'))
 </script>
@@ -322,7 +321,7 @@ const emitsDeclarations = computed(() => declarations.value.filter(item => item.
             {{ t('productKit.components.copyCommands') }}
           </h4>
           <div
-            v-for="command in [{ id: 'cli', label: t('productKit.components.cli'), text: cliCommand(selected) }, { id: 'mcp', label: t('productKit.components.mcp'), text: mcpCall(selected) }]"
+            v-for="command in [{ id: 'cli', label: t('productKit.components.cli'), text: cliCommand(selected) }, { id: 'mcp', label: t('productKit.components.mcp'), text: componentSourceCall(selected) }]"
             :key="command.id"
             class="flex items-center gap-2"
           >
@@ -397,6 +396,14 @@ const emitsDeclarations = computed(() => declarations.value.filter(item => item.
                 </figcaption>
               </figure>
             </div>
+            <p
+              v-for="path in incompleteFiles"
+              :key="path"
+              class="text-xs text-warning"
+              data-component-interface-incomplete
+            >
+              {{ t('productKit.components.interfaceIncomplete', { file: path }) }}
+            </p>
             <p class="text-xs text-muted">
               {{ t('productKit.components.interfaceHelp') }}
             </p>

@@ -72,6 +72,8 @@ type FoundFile = Readonly<{ status: 'found'; path: string; size: number; digest:
 
 async function open(path: string): Promise<void> {
 	selected.value = path
+	// The viewer shows the loading state, not the previous file under the newly selected path.
+	file.value = undefined
 	const ticket = ++request
 	fileLoading.value = true
 	let read: FileRead

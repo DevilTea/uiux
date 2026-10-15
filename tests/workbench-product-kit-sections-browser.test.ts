@@ -26,6 +26,10 @@ import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-
 let server: WorkbenchServer
 let browser: Browser
 
+const ICON = '<template><svg data-injected-icon /><img src=x onerror="window.__componentRan = true"></template>\n'
+/** A directory and a file whose names are markup. */
+const HTML_DIRECTORY = '<i data-injected-directory>'
+const HTML_NAME = '<img src=x onerror="window.__kitNameRan = true">.txt'
 const HTML_FILE = '<script>window.__kitFileRan = true</script><b data-injected>bold</b><img src=x onerror="window.__kitFileRan = true">\n'
 const BUTTON = [
 	'<script setup lang="ts">',
@@ -48,7 +52,8 @@ async function prepareKit(root: string): Promise<void> {
 	const kit = join(root, 'kit')
 	await write(join(kit, 'package.json'), JSON.stringify({ name: 'kit', private: true, type: 'module' }))
 	await write(join(kit, 'src', 'button', 'Button.vue'), BUTTON)
-	await write(join(kit, 'src', 'icon', 'Icon.vue'), '<template><svg /></template>\n')
+	await write(join(kit, 'src', 'icon', 'Icon.vue'), ICON)
+	await write(join(kit, 'notes', HTML_DIRECTORY, HTML_NAME), 'named\n')
 	await write(join(kit, 'styles', 'base.css'), ':root { --kit: 1; }\n')
 	await write(join(kit, 'notes', 'extra.css'), 'body { margin: 0; }\n')
 	await write(join(kit, 'notes', 'page.html'), HTML_FILE)
@@ -83,7 +88,8 @@ async function memberCookie(keys: readonly PermissionKey[]): Promise<Cookie> {
 	return await sessionCookieFor(server.origin, await provisionToken(server.workspaceRoot, { nickname: `k13-${randomUUID().slice(0, 8)}`, kind: 'human', keys }))
 }
 
-async function open(path: string, options: Readonly<{ cookie?: Cookie; width?: number }> = {}): Promise<{ context: BrowserContext; page: Page }> {
+/** Opens `path`; `requests` collects the path of every request the page sends, from the first. */
+async function open(path: string, options: Readonly<{ cookie?: Cookie; width?: number; requests?: string[] }> = {}): Promise<{ context: BrowserContext; page: Page }> {
 	const context = await browser.newContext({ viewport: { width: options.width ?? 1920, height: 1080 }, colorScheme: 'light' })
 	await context.addInitScript(() => {
 		localStorage.setItem('nuxt-color-mode', 'light')
@@ -91,6 +97,7 @@ async function open(path: string, options: Readonly<{ cookie?: Cookie; width?: n
 	})
 	await context.addCookies([{ ...(options.cookie ?? server.cookie), url: server.origin, httpOnly: true, sameSite: 'Strict' }])
 	const page = await context.newPage()
+	if (options.requests) page.on('request', request => options.requests!.push(new URL(request.url()).pathname))
 	await page.goto(`${server.origin}${path}`, { waitUntil: 'networkidle' })
 	return { context, page }
 }
@@ -160,6 +167,21 @@ describe('Product Kit page › Components', () => {
 		}
 		finally { await context.close() }
 	}, 60_000)
+
+	it('shows a component\'s source that holds markup as text, never as markup', async () => {
+		const { context, page } = await open('/workspace/product-kit?section=components')
+		try {
+			await page.locator('[data-component-row="icon"] [data-component-browse]').click({ timeout: 15_000 })
+			const detail = page.locator('[data-component-detail][data-component="icon"]')
+			await detail.locator('[data-component-file="src/icon/Icon.vue"] summary').click({ timeout: 15_000 })
+			const content = detail.locator('[data-component-file-content]')
+			expect(await content.textContent()).toBe(ICON)
+			expect(await content.locator('*').count()).toBe(0)
+			expect(await page.locator('[data-injected-icon]').count()).toBe(0)
+			expect(await page.evaluate(() => (window as unknown as { __componentRan?: boolean }).__componentRan)).toBeUndefined()
+		}
+		finally { await context.close() }
+	}, 60_000)
 })
 
 describe('Product Kit page › Styles & themes', () => {
@@ -211,6 +233,31 @@ describe('Product Kit page › Styles & themes', () => {
 			await context.close()
 			expect((await updateProductKit({ themes: { dark: { 'data-theme': 'dark' } } })).status).toBe(200)
 		}
+	}, 60_000)
+
+	it('keeps the draft when someone else\'s edit lease refuses the save (423)', async () => {
+		const { context, page } = await open('/workspace/product-kit?section=styles')
+		try {
+			const section = page.locator('#product-kit-styles')
+			const input = section.locator('[data-style-input]').first()
+			await input.waitFor({ timeout: 15_000 })
+			await input.fill('./notes/extra.css')
+			// The refusal as the server sends it while an Agent holds the Product Kit's lease.
+			const lock = { kind: 'product-kit', key: 'product-kit', holder: { nickname: 'claude', kind: 'agent' }, expiresAt: new Date(Date.now() + 60_000).toISOString() }
+			await page.route('**/api/product-kit/settings', route => route.fulfill({
+				status: 423,
+				contentType: 'application/json',
+				body: JSON.stringify({ status: 'locked', key: 'product-kit', code: 'resource.locked', message: 'The Product Kit is being edited.', lock }),
+			}))
+			await section.getByRole('button', { name: 'Save changes' }).click()
+			const alert = page.locator('[data-locked-alert]')
+			await alert.waitFor()
+			expect(await alert.innerText()).toContain('claude')
+			expect(await input.inputValue()).toBe('./notes/extra.css')
+			expect(await section.locator('[data-save-bar]').count()).toBe(1)
+			expect((await readProductKit()).resource.styles).toEqual(['./styles/base.css'])
+		}
+		finally { await context.close() }
 	}, 60_000)
 
 	it('refuses a theme attribute other than class or data-* inline, and shows the server\'s refusal', async () => {
@@ -267,6 +314,110 @@ describe('Product Kit page › Styles & themes', () => {
 	}, 60_000)
 })
 
+describe('Product Kit page › drafts across sections', () => {
+	const CONFIG = 'Config for ./adapters/reference.ts'
+
+	/** Puts the Product Kit file back as `prepareKit` wrote it. */
+	async function resetProductKit(): Promise<void> {
+		const read = await readProductKit()
+		const response = await fetch(`${server.origin}/api/product-kit/settings`, {
+			method: 'PUT',
+			headers: { ...server.headers, 'content-type': 'application/json' },
+			body: JSON.stringify({ expectedRevision: read.revision, adapters: [{ moduleSpecifier: './adapters/reference.ts' }], styles: ['./styles/base.css'], themes: { dark: { 'data-theme': 'dark' } } }),
+		})
+		expect(response.status).toBe(200)
+	}
+
+	/** Drafts an Adapter config in Overview and a style in Styles & themes, then opens Components. */
+	async function draftBoth(page: Page, note: string): Promise<void> {
+		const nav = page.getByRole('navigation', { name: 'Product Kit sections' })
+		const adapters = page.locator('#product-kit-adapters')
+		await adapters.getByRole('button', { name: 'Config', exact: true }).click({ timeout: 15_000 })
+		await adapters.getByRole('textbox', { name: CONFIG }).fill(`{"note":"${note}"}`)
+		await nav.getByRole('link', { name: 'Styles & themes' }).click()
+		await page.locator('#product-kit-styles [data-style-input]').first().fill('./notes/extra.css')
+		await nav.getByRole('link', { name: 'Components' }).click()
+		await page.locator('[data-components-table]').waitFor()
+	}
+
+	it('keeps both drafts across section switches, and the leave guard counts them', async () => {
+		const { context, page } = await open('/workspace/product-kit?section=overview')
+		try {
+			const nav = page.getByRole('navigation', { name: 'Product Kit sections' })
+			await draftBoth(page, 'kept')
+			expect(await nav.locator('[data-product-kit-section-link="overview"]').innerText()).toContain('Unsaved')
+			expect(await nav.locator('[data-product-kit-section-link="styles"]').innerText()).toContain('Unsaved')
+			await nav.getByRole('link', { name: 'Overview' }).click()
+			expect(await page.locator('#product-kit-adapters').getByRole('textbox', { name: CONFIG }).inputValue()).toBe('{"note":"kept"}')
+			await nav.getByRole('link', { name: 'Styles & themes' }).click()
+			expect(await page.locator('#product-kit-styles [data-style-input]').first().inputValue()).toBe('./notes/extra.css')
+
+			await page.getByRole('navigation', { name: 'Workspace pages' }).getByRole('link', { name: 'Settings' }).click()
+			const leave = page.getByRole('dialog', { name: 'Leave without saving?' })
+			await leave.waitFor()
+			expect(await leave.innerText()).toContain('2 unsaved changes will be lost.')
+			await leave.getByRole('button', { name: 'Keep editing' }).click()
+			expect(new URL(page.url()).pathname).toBe('/workspace/product-kit')
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('saves the Styles & themes draft with ⌘S from another section', async () => {
+		const { context, page } = await open('/workspace/product-kit?section=styles')
+		try {
+			await page.locator('#product-kit-styles [data-style-input]').first().fill('./notes/extra.css', { timeout: 15_000 })
+			await page.getByRole('navigation', { name: 'Product Kit sections' }).getByRole('link', { name: 'Files' }).click()
+			await page.locator('#product-kit-files').waitFor()
+			const saved = page.waitForResponse(response => response.url().endsWith('/api/product-kit/settings') && response.request().method() === 'PUT')
+			await page.keyboard.press('ControlOrMeta+s')
+			expect((await saved).status()).toBe(200)
+			await page.waitForURL(url => url.searchParams.get('section') === 'styles')
+			await expect.poll(async () => (await readProductKit()).resource.styles).toEqual(['./notes/extra.css'])
+			await expect.poll(() => page.locator('#product-kit-styles [data-save-bar]').count()).toBe(0)
+		}
+		finally {
+			await context.close()
+			await resetProductKit()
+		}
+	}, 60_000)
+
+	it('saves one draft and keeps the other, and ⌘S with both asks which', async () => {
+		const { context, page } = await open('/workspace/product-kit?section=overview')
+		try {
+			const nav = page.getByRole('navigation', { name: 'Product Kit sections' })
+			await draftBoth(page, 'both')
+			let puts = 0
+			page.on('request', (request) => { if (request.method() === 'PUT') puts += 1 })
+			await page.keyboard.press('ControlOrMeta+s')
+			await page.getByText('More than one section has unsaved changes.').waitFor()
+			expect(puts).toBe(0)
+
+			await nav.getByRole('link', { name: 'Styles & themes' }).click()
+			const styles = page.locator('#product-kit-styles')
+			await styles.getByRole('button', { name: 'Save changes' }).click()
+			await styles.locator('[data-save-bar]').waitFor({ state: 'detached' })
+			let read = await readProductKit()
+			expect(read.resource.styles).toEqual(['./notes/extra.css'])
+			expect(read.resource.adapters).toEqual([{ moduleSpecifier: './adapters/reference.ts' }])
+			expect(await nav.locator('[data-product-kit-section-link="overview"]').innerText()).toContain('Unsaved')
+
+			await nav.getByRole('link', { name: 'Overview' }).click()
+			const adapters = page.locator('#product-kit-adapters')
+			expect(await adapters.getByRole('textbox', { name: CONFIG }).inputValue()).toBe('{"note":"both"}')
+			await adapters.getByRole('button', { name: 'Save changes' }).click()
+			await adapters.locator('[data-save-bar]').waitFor({ state: 'detached' })
+			read = await readProductKit()
+			expect(read.resource.adapters).toEqual([{ moduleSpecifier: './adapters/reference.ts', config: { note: 'both' } }])
+			expect(read.resource.styles).toEqual(['./notes/extra.css'])
+			expect(puts).toBe(2)
+		}
+		finally {
+			await context.close()
+			await resetProductKit()
+		}
+	}, 60_000)
+})
+
 describe('Product Kit page › Files', () => {
 	it('lists the kit files and shows an HTML file as text, never as markup', async () => {
 		const { context, page } = await open('/workspace/product-kit?section=files')
@@ -285,6 +436,41 @@ describe('Product Kit page › Files', () => {
 			expect(await page.locator('[data-kit-file-path]').innerText()).toBe('kit/notes/page.html')
 			// The build log stays in Overview, linked from here.
 			expect(await page.locator('[data-kit-files-build-log]').getAttribute('href')).toBe('/workspace/product-kit?section=overview#product-kit-build')
+
+			// While another file loads, the viewer shows neither the previous path nor its content.
+			let answer: (() => void) | undefined
+			await page.route('**/api/product-kit/file?path=notes%2Fextra.css', async (route) => {
+				await new Promise<void>((resolve) => { answer = resolve })
+				await route.continue()
+			})
+			await tree.locator('[data-kit-file="notes/extra.css"]').click()
+			await expect.poll(() => answer !== undefined).toBe(true)
+			expect(await tree.locator('[aria-current="true"]').getAttribute('data-kit-file')).toBe('notes/extra.css')
+			expect(await page.locator('[data-kit-file-content]').count()).toBe(0)
+			expect(await page.locator('[data-kit-file-path]').count()).toBe(0)
+			answer!()
+			await expect.poll(() => page.locator('[data-kit-file-path]').innerText()).toBe('kit/notes/extra.css')
+			expect(await content.textContent()).toBe('body { margin: 0; }\n')
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('shows file and directory names that are markup as text', async () => {
+		const { context, page } = await open('/workspace/product-kit?section=files')
+		try {
+			const tree = page.locator('[data-kit-files-tree]')
+			await tree.locator('[data-kit-directory="notes"]').click({ timeout: 15_000 })
+			const directory = tree.locator(`[data-kit-directory="notes/${HTML_DIRECTORY}"]`)
+			expect(await directory.innerText()).toBe(HTML_DIRECTORY)
+			await directory.click()
+			const file = tree.locator('[data-kit-file]').filter({ hasText: HTML_NAME })
+			expect(await file.getAttribute('data-kit-file')).toBe(`notes/${HTML_DIRECTORY}/${HTML_NAME}`)
+			await file.click()
+			await expect.poll(() => page.locator('[data-kit-file-path]').innerText()).toBe(`kit/notes/${HTML_DIRECTORY}/${HTML_NAME}`)
+			expect(await page.locator('[data-kit-file-content]').textContent()).toBe('named\n')
+			expect(await page.locator('[data-injected-directory]').count()).toBe(0)
+			expect(await page.locator('[data-kit-files-tree] img, [data-kit-file-viewer] img').count()).toBe(0)
+			expect(await page.evaluate(() => (window as unknown as { __kitNameRan?: boolean }).__kitNameRan)).toBeUndefined()
 		}
 		finally { await context.close() }
 	}, 60_000)
@@ -332,7 +518,8 @@ describe('Product Kit page › Files', () => {
 describe('Product Kit page › key gating', () => {
 	it('shows a member with `workspace.read` alone the registry and the styles, read-only, and no kit sources', async () => {
 		const cookie = await memberCookie(['workspace.read'])
-		const { context, page } = await open('/workspace/product-kit?section=components', { cookie })
+		const requests: string[] = []
+		const { context, page } = await open('/workspace/product-kit?section=components', { cookie, requests })
 		try {
 			await page.locator('[data-component-row="button"]').waitFor({ timeout: 15_000 })
 			expect(await page.locator('[data-component-browse]').count()).toBe(0)
@@ -350,6 +537,9 @@ describe('Product Kit page › key gating', () => {
 			expect(await page.locator('[data-access-notice][data-missing-key="product-kit.write"]').count()).toBe(1)
 			expect(await page.locator('#product-kit-styles input').count()).toBe(0)
 			expect(await page.locator('[data-style-add], [data-theme-map], [data-theme-attribute-add]').count()).toBe(0)
+			// The page asked for no kit source at all.
+			expect(requests).toContain('/api/product-kit')
+			expect(requests.filter(path => path.startsWith('/api/product-kit/file') || path === '/api/product-kit/components/source')).toEqual([])
 
 			const headers = { cookie: `${cookie.name}=${cookie.value}` }
 			expect((await fetch(`${server.origin}/api/product-kit/files`, { headers })).status).toBe(403)

@@ -321,13 +321,27 @@ async function reloadStylesThemes(): Promise<void> {
 const adaptersRef = ref<InstanceType<typeof ProductKitAdaptersSection>>()
 const stylesRef = ref<InstanceType<typeof ProductKitStylesSection>>()
 
-/** ⌘S / Ctrl+S saves the draft of the section shown. */
+/**
+ * ⌘S / Ctrl+S saves the draft of the section shown, else the only section with a draft, as Workspace
+ * settings saves the focused section or the only one with a draft. That section opens first, so the
+ * save and any problem it finds show there; with drafts in both, the shortcut says to open one.
+ */
 function onKeydown(event: KeyboardEvent): void {
 	if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 's' || event.shiftKey || event.altKey) return
 	event.preventDefault()
 	if (!canEdit.value || !usesProductKit.value) return
-	if (currentSection.value === 'overview' && kitAdapters.dirty) adaptersRef.value?.save()
-	else if (currentSection.value === 'styles' && stylesThemes.dirty) stylesRef.value?.save()
+	const drafts: ProductKitSectionId[] = [...kitAdapters.dirty ? ['overview' as const] : [], ...stylesThemes.dirty ? ['styles' as const] : []]
+	const target = drafts.includes(currentSection.value) ? currentSection.value : drafts.length === 1 ? drafts[0] : undefined
+	if (target) void saveSection(target)
+	else if (drafts.length) feedback.notice(t('productKit.saveWhich'))
+}
+async function saveSection(target: ProductKitSectionId): Promise<void> {
+	if (target !== currentSection.value) {
+		await router.push(productKitSectionLocation(target))
+		await nextTick()
+	}
+	if (target === 'overview') adaptersRef.value?.save()
+	else stylesRef.value?.save()
 }
 
 const scroller = ref<HTMLElement>()
