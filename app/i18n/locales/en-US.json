@@ -1138,7 +1138,16 @@
       "notDeclared": "None found in the source.",
       "interfaceHelp": "As each Vue file declares them with defineProps and defineEmits. A type named there is in the file.",
       "interfaceIncomplete": "{file} is too large to read every declaration from. Read it in the source files below.",
-      "sourceFiles": "Source files"
+      "sourceFiles": "Source files",
+      "widgets": {
+        "title": "Component table",
+        "description": "{field} in the Product Kit file: the component each Widget type maps to, for Handoff and browsing. It doesn’t change how a Widget renders.",
+        "empty": "No Widget type is mapped to a component.",
+        "type": "Widget type",
+        "component": "Component",
+        "from": "From",
+        "registry": "Component registry"
+      }
     },
     "styles": {
       "sectionTitle": "Styles & themes",

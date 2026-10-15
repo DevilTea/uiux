@@ -1138,7 +1138,16 @@
       "notDeclared": "原始碼中找不到。",
       "interfaceHelp": "依各 Vue 檔案中「defineProps」與「defineEmits」的宣告列出；其中提到的型別請在該檔案中查看。",
       "interfaceIncomplete": "{file} 太大，無法讀出所有宣告。請在下方的原始碼檔案中查看。",
-      "sourceFiles": "原始碼檔案"
+      "sourceFiles": "原始碼檔案",
+      "widgets": {
+        "title": "Component 對照表",
+        "description": "Product Kit 檔案中的 {field}：各 Widget 類型對應的 Component，供 Handoff 與瀏覽使用，不會改變 Widget 的呈現方式。",
+        "empty": "沒有任何 Widget 類型對應到 Component。",
+        "type": "Widget 類型",
+        "component": "Component",
+        "from": "來源",
+        "registry": "Component 登錄表"
+      }
     },
     "styles": {
       "sectionTitle": "樣式與主題",
