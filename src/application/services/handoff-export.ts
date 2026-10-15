@@ -18,6 +18,7 @@ import {
 	validateHandoffRoot,
 	type HandoffArtifactReference,
 	type HandoffBlockingDiagnostic,
+	type HandoffComponentReference,
 	type HandoffManifest,
 	type HandoffReadiness,
 	type HandoffReadinessAssessment,
@@ -29,11 +30,21 @@ import type { ResolvedRenderContext } from '../../domain/render-context/schema'
 import type { Diagnostic, JsonObject } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
 import {
+	adapterResolutionBase,
 	NodeAdapterManifestLoader,
 	NodeWorkspaceAdapterModuleResolver,
 	resolveWorkspaceAdapterSet,
 	type AdapterSetResolutionResult,
 } from '../../adapters/resolution'
+import { adapterGraphDigest } from '../../adapters/adapter-graph-digest'
+import { bareSpecifierPackageName } from '../../adapters/kit-dependencies'
+import { resolveKitPackage } from '../../adapters/kit-packages'
+import { locateKitProject, type KitProject } from '../../adapters/kit-registry'
+import { readKitSourceFile } from '../../adapters/kit-source-files'
+import { componentDigest } from '../../domain/product-kit/digest'
+import { PRODUCT_KIT_RESOURCE_KEY, PRODUCT_KIT_RESOURCE_KIND, validateProductKit, type ProductKit } from '../../domain/product-kit/schema'
+import type { ProductKitProvenance } from '../../domain/product-kit/provenance'
+import { readWorkspaceProductKitProvenance } from './product-kit-provenance'
 import {
 	extractProductAdapterManifest,
 	productAdapterApiCompatibility,
@@ -110,6 +121,44 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 		return materialize ? (await persistence.artifacts.put(bytes)).identity : await sha256Identity(bytes)
 	}
 
+	/**
+	 * The `component` of an implementation reference (Clause 01a11bb1-bbed-7588-bce6-5e1f4f0bcf72)
+	 * for the component table entry `mapping`. A registry component's files are read as `uiux
+	 * components add` reads them (`readKitSourceFile`, kit-relative paths, never through a link),
+	 * each stored as a `component-file` artifact by content identity; its digest is the component
+	 * digest of Clause 01a11bb1-8b0c-…. An external export names its package and the version found
+	 * installed, none when none is. A component the kit cannot supply gives a `problem` instead.
+	 */
+	async function componentReference(
+		mapping: ProductKit['widgets'][string],
+		productKit: ProductKit,
+		kit: KitProject | undefined,
+		materialize: boolean,
+		artifacts: Map<string, HandoffArtifactReference>,
+	): Promise<Readonly<{ component: HandoffComponentReference } | { problem: string }>> {
+		if ('import' in mapping) {
+			const packageName = bareSpecifierPackageName(mapping.import) ?? mapping.import
+			const installed = kit ? await resolveKitPackage(kit, packageName) : undefined
+			const version = installed?.status === 'resolved' ? installed.version : undefined
+			return { component: { import: mapping.import, export: mapping.export, package: packageName, ...(version ? { version } : {}) } }
+		}
+		const name = mapping.component
+		const registered = Object.hasOwn(productKit.components, name) ? productKit.components[name] : undefined
+		if (!registered) return { problem: `the registry component ${name}, which the registry does not hold.` }
+		if (!kit) return { problem: `the registry component ${name}, but the Workspace has no kit project to read it from.` }
+		const files: Array<Readonly<{ path: string; digest: string }>> = []
+		const digests: Record<string, string> = {}
+		for (const path of registered.files) {
+			const read = await readKitSourceFile(kit, path, { maxBytes: Number.POSITIVE_INFINITY })
+			if (read.status !== 'found') return { problem: `the registry component ${name}, whose file kit/${path} is not a regular file under kit/src/ reached without a symbolic link.` }
+			const digest = await contentIdentity(read.bytes, materialize)
+			artifacts.set(digest, { kind: 'component-file', artifact: digest, context: { component: name, path } })
+			digests[path] = digest
+			files.push({ path, digest })
+		}
+		return { component: { name, componentDigest: await componentDigest(digests), files, add: `uiux components add ${name}` } }
+	}
+
 	async function computeClosure(roots: readonly HandoffRoot[], materialize: boolean): Promise<
 		| {
 				ok: true
@@ -121,6 +170,8 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 				adaptersInClosure: readonly AdapterProvenance[]
 				contextsInClosure: readonly ResolvedRenderContext[]
 				wsSchemaVersion: number
+				/** The Product Kit provenance at export; none below schemaVersion 5. */
+				productKitProvenance?: ProductKitProvenance
 				/** `coverage.review`: completeness plus per-resolution counts over the closure. */
 				reviewCoverage: Readonly<{ complete: boolean; threads: number; workspaceThreads: number; resolved: Readonly<Record<ReviewResolution, number>> }>
 		  }
@@ -439,6 +490,17 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			snapshot: wsRead.resource as JsonObject,
 		}
 
+		// 5b. Rule 01a11bb1-bd7c-7117-8c54-ceb9881db19c: the Product Kit file travels with every bundle,
+		// so implementers get its style entries and theme attributes; Clause 01a115cd-d7ba-…: its
+		// provenance at export. A Workspace below schemaVersion 5 has neither.
+		const productKitRead = persistence.layout.productKitPath ? await persistence.productKit.readInspected().catch(() => undefined) : undefined
+		const productKitSnapshot: HandoffResourceSnapshot | undefined = productKitRead
+			? { type: PRODUCT_KIT_RESOURCE_KIND, identity: { id: PRODUCT_KIT_RESOURCE_KEY }, revision: productKitRead.revision, snapshot: productKitRead.resource as unknown as JsonObject }
+			: undefined
+		const productKitValidation = productKitRead ? validateProductKit(productKitRead.resource) : undefined
+		const productKit = productKitValidation?.ok ? productKitValidation.value : undefined
+		const productKitProvenance = await readWorkspaceProductKitProvenance(persistence)
+
 		// 6. Review Threads in the closure: those anchored to a View in the closure, and every
 		// Workspace-scoped thread (owner decision O1: the Workspace manifest is in every bundle, so a
 		// thread about the Workspace is in the closure of every export and never silently skipped).
@@ -523,6 +585,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 					workspace: wsRead,
 					discoveredLocales: Object.keys(currentLocaleRevisions),
 					localeRevisions: currentLocaleRevisions,
+					...(productKitProvenance ? { productKit: productKitProvenance } : {}),
 				})
 
 				if (!staleness.isStale) {
@@ -668,19 +731,25 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 
 		if (adaptersResolution.state === 'valid') {
 			for (const entry of adaptersResolution.set.entries) {
-				let contentDigest: string | undefined
 				try {
 					const modBytes = await fs.readFile(entry.resolvedModule.resolvedPath)
-					contentDigest = await contentIdentity(modBytes, materialize)
-					referencedArtifacts.set(contentDigest, {
+					const moduleIdentity = await contentIdentity(modBytes, materialize)
+					referencedArtifacts.set(moduleIdentity, {
 						kind: 'adapter-module',
-						artifact: contentDigest,
+						artifact: moduleIdentity,
 						context: { adapterId: entry.manifest.id },
 					})
 				}
 				catch {
 					// could not read local file
 				}
+				// Clause 01a115cd-d7f6-74a1-ba9f-c20a24a31ae5: the content digest covers the Adapter's whole
+				// bundled module graph (its imports, stylesheets and assets), not only its entry module.
+				const contentDigest = await adapterGraphDigest({
+					workspaceRoot: persistence.root,
+					moduleBase: adapterResolutionBase(persistence.root, persistence.layout),
+					entry: entry.resolvedModule.resolvedPath,
+				})
 
 				adapterProvenances.push({
 					moduleSpecifier: entry.selection.moduleSpecifier,
@@ -839,9 +908,32 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			}
 		}
 
+		// 9. Rule 01a11bb1-bde1-7146-abc4-31a3e7f4e371: the implementation reference of a used Widget
+		// type that the component table maps names its registry component, each file materialized by
+		// content identity, or its external export (Clause 01a11bb1-bbed-7588-bce6-5e1f4f0bcf72).
+		if (productKit && Object.keys(productKit.widgets).length > 0) {
+			const kitProject = persistence.layout.codeDir ? await locateKitProject(persistence.root, persistence.layout.codeDir).catch(() => undefined) : undefined
+			for (const [index, reference] of implementationReferences.entries()) {
+				const mapping = Object.hasOwn(productKit.widgets, reference.widgetType) ? productKit.widgets[reference.widgetType] : undefined
+				if (!mapping) continue
+				const component = await componentReference(mapping, productKit, kitProject, materialize, referencedArtifacts)
+				if ('problem' in component) {
+					blockingDiagnostics.push({
+						code: 'handoff.component_unavailable',
+						message: `Widget type ${reference.widgetType} maps to ${component.problem}`,
+						blocking: false,
+						path: `/product-kit/widgets/${escapeJsonPointer(reference.widgetType)}`,
+					})
+					continue
+				}
+				implementationReferences[index] = { ...reference, component: component.component }
+			}
+		}
+
 		// Assemble all resources
 		const resources: HandoffResourceSnapshot[] = [
 			workspaceSnapshot,
+			...(productKitSnapshot ? [productKitSnapshot] : []),
 			...viewSnapshots.values(),
 			...flowSnapshots.values(),
 			...assetSnapshots.values(),
@@ -908,6 +1000,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			adaptersInClosure: adapterProvenances,
 			contextsInClosure,
 			wsSchemaVersion,
+			...(productKitProvenance ? { productKitProvenance } : {}),
 		}
 	}
 
@@ -962,6 +1055,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			adaptersInClosure,
 			contextsInClosure,
 			wsSchemaVersion,
+			productKitProvenance,
 			reviewCoverage,
 		} = closureRes
 
@@ -992,6 +1086,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 				uiux: packageJson.version,
 			},
 			adapters: adaptersInClosure,
+			...(productKitProvenance ? { productKit: productKitProvenance } : {}),
 		}
 
 		// Deterministic bundle payload: defines bundleIdentity over deterministic content

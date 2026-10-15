@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
 import { readFile, realpath, stat } from 'node:fs/promises'
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import esbuild from 'esbuild'
 import { resolve as resolveImport } from 'import-meta-resolve'
 
+import { PREVIEW_HOST_PACKAGES } from '../adapters/adapter-graph-digest'
+import { resolvePackageRoot } from '../adapters/package-root'
 import type { ValidatedAdapterSet } from '../adapters/resolution'
 import { BUNDLED_ASSET_TYPES } from '../adapters/style-imports'
 
@@ -50,27 +51,8 @@ const OUTPUT_TYPES: Readonly<Record<string, string>> = Object.freeze({
 	'.map': 'application/json; charset=utf-8',
 })
 
-export function resolvePackageRoot(): string {
-	if (process.env.UIUX_PACKAGE_ROOT) {
-		return resolve(process.env.UIUX_PACKAGE_ROOT)
-	}
-	let dir = dirname(fileURLToPath(import.meta.url))
-	while (true) {
-		try {
-			const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name?: string }
-			if (pkg.name === '@deviltea/uiux') {
-				return dir
-			}
-		}
-		catch {
-			// keep searching
-		}
-		const parent = dirname(dir)
-		if (parent === dir) break
-		dir = parent
-	}
-	return process.cwd()
-}
+/** UIUX's own package root (`src/adapters/package-root.ts`). */
+export { resolvePackageRoot }
 
 /** How many bundles the cache keeps: the current one and a few earlier ones a Preview may still load. */
 const BUNDLE_CACHE_LIMIT = 8
@@ -175,20 +157,16 @@ async function buildBundle(input: Readonly<{
 	const entrySource = generateBundleEntrySource(browserRuntimePath, input.set, input.styles)
 
 	const packageFileUrl = pathToFileURL(resolve(packageRoot, 'package.json')).href
-	const vuePath = fileURLToPath(resolveImport('vue', packageFileUrl))
-	const widgetCorePath = fileURLToPath(resolveImport('@deviltea/widget-core', packageFileUrl))
-	const widgetCoreInspectionPath = fileURLToPath(resolveImport('@deviltea/widget-core/inspection', packageFileUrl))
-	const widgetCoreIntegrationPath = fileURLToPath(resolveImport('@deviltea/widget-core/integration', packageFileUrl))
-	const widgetVuePath = fileURLToPath(resolveImport('@deviltea/widget-vue', packageFileUrl))
+	// The host packages resolve to UIUX's own copies, one for every Adapter (`PREVIEW_HOST_PACKAGES`,
+	// which an Adapter's content digest leaves out for the same reason).
+	const hostPaths = new Map<string, string>(PREVIEW_HOST_PACKAGES.map(name => [name, fileURLToPath(resolveImport(name, packageFileUrl))]))
+	// esbuild runs the filter as a Go regular expression, without flags; the names hold no metacharacter.
+	const hostFilter = new RegExp(`^(?:${PREVIEW_HOST_PACKAGES.join('|')})$`)
 
 	const coreResolvePlugin: esbuild.Plugin = {
 		name: 'uiux-core-resolve',
 		setup(build) {
-			build.onResolve({ filter: /^vue$/ }, () => ({ path: vuePath }))
-			build.onResolve({ filter: /^@deviltea\/widget-core$/ }, () => ({ path: widgetCorePath }))
-			build.onResolve({ filter: /^@deviltea\/widget-core\/inspection$/ }, () => ({ path: widgetCoreInspectionPath }))
-			build.onResolve({ filter: /^@deviltea\/widget-core\/integration$/ }, () => ({ path: widgetCoreIntegrationPath }))
-			build.onResolve({ filter: /^@deviltea\/widget-vue$/ }, () => ({ path: widgetVuePath }))
+			build.onResolve({ filter: hostFilter }, args => ({ path: hostPaths.get(args.path)! }))
 		},
 	}
 
