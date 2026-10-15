@@ -4,6 +4,7 @@ import { lstat, mkdir, open, readdir, readFile, realpath, rename, rm, rmdir, sta
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
 
+import { NO_FOLLOW, openedFilePath, PATH_BINDING } from '../adapters/bound-open'
 import { readKitDependencyRanges } from '../adapters/kit-dependencies'
 import { locateKitProject, type KitProject } from '../adapters/kit-registry'
 import { readKitSourceFile, type KitFileReadOptions } from '../adapters/kit-source-files'
@@ -298,13 +299,17 @@ async function assertDirectoriesWithoutLinks(realProject: string, segments: read
 
 /**
  * Writes the project file `rel`, creating its directories one at a time and checking each before
- * descending into it. The file is opened with `O_NOFOLLOW` and without truncating it; only when the
- * path, walked again without links, still reaches the file opened is it truncated and written.
+ * descending into it. The file is opened without following a link ({@link NO_FOLLOW}) and without
+ * truncating it; only when the path, walked again without links, still reaches the file opened, and
+ * on linux `/proc/self/fd` places the open file inside the product project, is it truncated and
+ * written.
  *
- * Residual risk: Node offers no `openat` or `O_BENEATH`, so a local user who can write in the
- * product project and swaps a checked directory for a symbolic link between the walk and the open
- * can make `O_CREAT` leave an empty file where that link points. The check after the open refuses
- * to write anything into such a file, and the window is a few system calls wide.
+ * Residual risk: Node offers no `openat` or `O_BENEATH`. On darwin the open refuses a link in any
+ * component, so nothing is created through one. Elsewhere a local user who can write in the product
+ * project and swaps a checked directory for a symbolic link between the walk and the open can make
+ * `O_CREAT` leave an empty file where that link points; the checks after the open refuse to write
+ * into it (on linux bound to the open file, elsewhere by path only), and the window is a few system
+ * calls wide (issue #206).
  */
 async function writeProjectFile(realProject: string, rel: string, bytes: Uint8Array): Promise<void> {
 	const segments = rel.split('/')
@@ -319,12 +324,16 @@ async function writeProjectFile(realProject: string, rel: string, bytes: Uint8Ar
 			throw new Refusal(`${segments.slice(0, index + 1).join('/')} in the product project is not a directory reached without a symbolic link.`)
 	}
 	const leaf = join(path, segments.at(-1)!)
-	const handle = await open(leaf, constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW, 0o666)
+	const handle = await open(leaf, constants.O_WRONLY | constants.O_CREAT | NO_FOLLOW, 0o666).catch((error: NodeJS.ErrnoException) => {
+		if (error.code === 'ELOOP') throw new Refusal(`${rel} in the product project is not a file reached without a symbolic link.`)
+		throw error
+	})
 	try {
 		const opened = await handle.stat()
 		await assertDirectoriesWithoutLinks(realProject, segments)
 		const current = await lstat(leaf)
-		if (!opened.isFile() || current.dev !== opened.dev || current.ino !== opened.ino)
+		const where = PATH_BINDING === 'fd' ? await openedFilePath(handle) : leaf
+		if (!opened.isFile() || current.dev !== opened.dev || current.ino !== opened.ino || where === undefined || where === realProject || !isSameOrInside(realProject, where))
 			throw new Refusal(`${rel} in the product project changed while it was being written.`)
 		await handle.truncate(0)
 		await handle.writeFile(bytes)
