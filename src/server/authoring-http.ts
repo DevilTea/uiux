@@ -416,6 +416,17 @@ export async function readProductKitForHttp(app: ScopedWorkspaceSession): Promis
 	return { status: 200, body: read }
 }
 
+/**
+ * `POST /api/product-kit/checks`: Run Checks' Product Kit part (issue #141 Part 14 decision 7), a
+ * Workbench session with `workspace.read`. A run already in progress answers 409.
+ */
+export async function runProductKitChecksForHttp(app: ScopedWorkspaceSession): Promise<AuthoringHttpResult> {
+	const result = await app.runProductKitChecks()
+	if (result.status === 'blocked') return { status: 403, body: result }
+	if (result.status === 'busy') return { status: 409, body: result }
+	return { status: 200, body: result }
+}
+
 function productKitRefusalBody(denied: Readonly<{ code: string; requiredKeys: readonly string[]; message: string }>) {
 	return { status: 'blocked', key: 'product-kit', code: denied.code, requiredKeys: denied.requiredKeys, message: denied.message, diagnostics: [{ code: denied.code, path: '/', message: denied.message }] }
 }

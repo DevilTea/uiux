@@ -10,6 +10,7 @@ import type { ResourceDiscoveryOutcome } from '../dto/resource-discovery'
 import type { AssetAuthoringResult, CreateAssetCommand, ReplaceAssetCommand } from '../services/asset-authoring'
 import type { CreateFlowCommand, FlowAuthoringResult, UpdateFlowCommand } from '../services/flow-authoring'
 import type { CaptureFormalEvidenceCommand, CaptureFormalEvidenceResult, FormalEvidenceItem } from '../services/formal-capture'
+import type { ProductKitChecksResult } from '../services/product-kit-checks'
 import type { AssessHandoffReadinessCommand, AssessHandoffReadinessResult, ExportHandoffCommand, ExportHandoffResult } from '../services/handoff-export'
 import type { DiffVersionsCommand, VersionDiffOutcome } from '../services/history-diff'
 import type { ReadVersionBlobOutcome, ReadVersionResourceOutcome } from '../services/history-preview'
@@ -207,6 +208,8 @@ export interface ScopedWorkspaceSession {
 	editReviewMessage(command: Unstamped<EditReviewMessageCommand>): Promise<Scoped<ReviewAuthoringResult>>
 	retractReviewThread(command: Unstamped<RetractReviewThreadCommand>): Promise<Scoped<ReviewAuthoringResult>>
 	captureFormalEvidence(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult | AccessRefusal>
+	/** Run Checks' Product Kit part: a Workbench session with `workspace.read` only. */
+	runProductKitChecks(): Promise<ProductKitChecksResult | AccessRefusal>
 	exportHandoff(command: ExportHandoffCommand): Promise<ExportHandoffResult | AccessRefusal>
 	acquireLeases(input: unknown): AcquireLeasesOutcome
 	/** With no `resources`, an Agent's release also closes the autosave it wrote (Rule 01a11a5e-0068-7a4b-b4bc-3cb282b4ae5a). */
@@ -626,6 +629,10 @@ export function createScopedWorkspaceSession(
 		async captureFormalEvidence(command) {
 			const denied = authorizeOperation(principal, 'captureFormalEvidence')
 			return denied ? refusalFromScope('evidence', denied) : app.captureFormalEvidence(command)
+		},
+		async runProductKitChecks() {
+			const denied = authorizeOperation(principal, 'runProductKitChecks')
+			return denied ? refusalFromScope(PRODUCT_KIT_KEY, denied) : app.runProductKitChecks()
 		},
 		async exportHandoff(command) {
 			const denied = authorizeOperation(principal, 'exportHandoff')

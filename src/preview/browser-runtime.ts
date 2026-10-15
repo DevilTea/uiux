@@ -61,6 +61,12 @@ export interface PreviewRuntimeBridge {
 	 * replacement, no triggers disarms. The host checks the arm's View and Variant first.
 	 */
 	armWidgetEvents?(armId: string, triggers: readonly WidgetEventTrigger[]): void
+	/**
+	 * The capture harness's live-versus-fresh hook (Rule 01a11bb1-a7bf-74ae-9639-b39f246fa117): writes
+	 * a Variant's State into the mounted base-state Runtime in place, without remounting anything, and
+	 * returns the diagnostics of that write. Only the formal capture harness calls it.
+	 */
+	applyVariantStateLive?(variantName: string): readonly Diagnostic[]
 	dispose(): void
 }
 
@@ -648,6 +654,13 @@ export function createStandalonePreviewMount(input: Readonly<{
 
 			armWidgetEvents(armId: string, triggers: readonly WidgetEventTrigger[]) {
 				eventObserver.setArm(armId, triggers)
+			},
+
+			applyVariantStateLive(variantName: string): readonly Diagnostic[] {
+				if (disposed || phase === 'failed') return [{ code: 'preview.runtime_failed', path: '/preview', message: 'The Preview runtime is not mounted.' }]
+				const diagnostics = activeController.applyVariantStateLive(variantName)
+				currentContext = activeController.context
+				return diagnostics
 			},
 
 			dispose() {

@@ -14,6 +14,7 @@ import {
 import type { Diagnostic, JsonObject } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
 import type { KitBuildStatus } from '../ports/kit-build'
+import { captureHarnessScreenshot, openHarnessPreview, type HarnessPreview } from './capture-harness'
 import { readWorkspaceProductKitProvenance } from './product-kit-provenance'
 
 export type FormalContextCaptureResult = Readonly<{
@@ -269,55 +270,12 @@ export function createFormalCaptureService(
 		try {
 			// 2. Execute each valid context in a fresh isolated browser context & page
 			for (const { context, index } of validContexts) {
-				const browserContext = await browser.newContext({
-					viewport: {
-						width: context.viewport.width,
-						height: context.viewport.height,
-					},
-					reducedMotion: 'reduce',
-				})
-				const captureCookie = options?.captureCookie?.()
-				if (captureCookie) {
-					await browserContext.addCookies([{ name: captureCookie.name, value: captureCookie.value, url: baseUrl, httpOnly: true, sameSite: 'Strict' }])
-				}
-
-				const page = await browserContext.newPage()
+				let preview: HarnessPreview | undefined
 				try {
-					const url = new URL(`${baseUrl}/preview`)
-					url.searchParams.set('viewId', context.viewId)
-					url.searchParams.set('locale', context.locale)
-					url.searchParams.set('viewportId', context.viewportId)
-					url.searchParams.set('viewportWidth', String(context.viewport.width))
-					url.searchParams.set('viewportHeight', String(context.viewport.height))
-					url.searchParams.set('themeId', context.themeId)
-					if (context.variantName) {
-						url.searchParams.set('variant', context.variantName)
-					}
-					url.searchParams.set('harness', 'formal')
+					preview = await openHarnessPreview(browser, { baseUrl, context, cookie: options?.captureCookie?.() })
 
-					await page.goto(url.href, { waitUntil: 'load', timeout: 15_000 })
-
-					// Inject deterministic capture harness normalization CSS
-					await page.addStyleTag({
-						content: `
-							*, *::before, *::after {
-								animation-duration: 0s !important;
-								animation-delay: 0s !important;
-								transition-duration: 0s !important;
-								transition-delay: 0s !important;
-								caret-color: transparent !important;
-							}
-						`,
-					})
-
-					// Wait for ready condition
-					const statusEl = await page.waitForSelector(
-						'[data-preview-status]:not([data-preview-status="loading"])',
-						{ timeout: 15_000 },
-					)
-					const status = await statusEl?.getAttribute('data-preview-status')
-
-					if (status !== 'ready') {
+					if (preview.status !== 'ready') {
+						const status = preview.previewStatus
 						const isUnavailable = status === 'adapter_unavailable'
 						results[index] = {
 							context,
@@ -331,15 +289,8 @@ export function createFormalCaptureService(
 						continue
 					}
 
-					// Ensure web fonts are completely ready before capture
-					await page.evaluate(() => document.fonts?.ready)
-
 					// Capture deterministic PNG bytes
-					const screenshotBytes = await page.screenshot({
-						type: 'png',
-						fullPage: false,
-						animations: 'disabled',
-					})
+					const screenshotBytes = await captureHarnessScreenshot(preview.page)
 
 					// Store screenshot in ImmutableArtifactStore
 					const { identity: screenshotDigest } = await persistence.artifacts.put(screenshotBytes)
@@ -429,8 +380,7 @@ export function createFormalCaptureService(
 					}
 				}
 				finally {
-					await page.close().catch(() => undefined)
-					await browserContext.close().catch(() => undefined)
+					await preview?.close()
 				}
 			}
 		}

@@ -233,7 +233,7 @@ export function expandContexts(list: readonly CaptureContext[], dimension: Captu
 // Checks: findings grouped problem → resource → Widget (Part 5, findings only)
 // ---------------------------------------------------------------------------------------------
 
-export type FindingResource = Readonly<{ kind: 'workspace' | 'view' | 'flow' | 'locale' | 'asset'; key: string; name: string }>
+export type FindingResource = Readonly<{ kind: 'workspace' | 'view' | 'flow' | 'locale' | 'asset' | 'product-kit'; key: string; name: string }>
 
 export type Finding = Readonly<{
 	code: string
@@ -244,10 +244,24 @@ export type Finding = Readonly<{
 	widgetId?: string
 	/** The resolved Widget's type, for the blueprint label. */
 	widgetType?: string
+	/** The Variant a Product Kit capture finding concerns; absent for the base state. */
+	variantName?: string
+	/** The registry component a Product Kit finding concerns. */
+	component?: string
+	/**
+	 * The group's plain sentence, in place of the first message under its code; and, for a finding
+	 * that has no code (the props and emits check, which Discussion #139 gives no code, with `code`
+	 * empty), the key it groups by.
+	 */
+	group?: Readonly<{ key: string; title: string }>
 }>
 
 export type FindingGroup = Readonly<{
+	/** Empty for a group of findings without a code; `title` names it then. */
 	code: string
+	title?: string
+	/** The group's key: the code, or the codeless group's own key. */
+	key: string
 	category: string
 	/** The first message under this code, as the group's plain sentence. */
 	message: string
@@ -263,11 +277,12 @@ export function findingCategory(code: string): string {
 
 /** Groups findings by code, then by resource, keeping first-seen order at every level. */
 export function groupFindings(findings: readonly Finding[]): FindingGroup[] {
-	const groups = new Map<string, { code: string; message: string; findings: Finding[] }>()
+	const groups = new Map<string, { key: string; code: string; title?: string; message: string; findings: Finding[] }>()
 	for (const finding of findings) {
-		const group = groups.get(finding.code) ?? { code: finding.code, message: finding.message, findings: [] }
+		const key = finding.code || `group:${finding.group?.key ?? ''}`
+		const group = groups.get(key) ?? { key, code: finding.code, ...(finding.group ? { title: finding.group.title } : {}), message: finding.message, findings: [] }
 		group.findings.push(finding)
-		groups.set(finding.code, group)
+		groups.set(key, group)
 	}
 	return [...groups.values()].map((group) => {
 		const resources = new Map<string, { resource: FindingResource; findings: Finding[] }>()
@@ -278,8 +293,10 @@ export function groupFindings(findings: readonly Finding[]): FindingGroup[] {
 			resources.set(key, entry)
 		}
 		return {
+			key: group.key,
 			code: group.code,
-			category: findingCategory(group.code),
+			...(group.title ? { title: group.title } : {}),
+			category: group.code ? findingCategory(group.code) : 'kit',
 			message: group.message,
 			count: group.findings.length,
 			resources: [...resources.values()],

@@ -90,6 +90,9 @@ export const ACCESS_OPERATIONS = {
 	// compare_component_copies, and their Workbench mirrors.
 	readKitSource: { requiredKeys: ['product-kit.source.read'] },
 	captureFormalEvidence: { requiredKeys: ['evidence.capture'] },
+	// Run Checks' Product Kit part (Discussion #139 decision 7): part of the Workbench's Checks browsing
+	// (Clause 01a11485-fa00-72da-bc46-98302a3c106e), so Workbench sessions only; it launches the capture browser.
+	runProductKitChecks: { requiredKeys: ['workspace.read'], sessionOnly: true },
 	exportHandoff: { requiredKeys: ['handoff.export'] },
 	// A restore also needs the restored kind's write key (Rule 01a11c09-c648-71be-a550-2ecabf12f5d0): see `authorizeRestore`.
 	restoreResourceVersion: { requiredKeys: ['history.restore'] },
