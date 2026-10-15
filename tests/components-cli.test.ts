@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, open, readdir, readFile, realpath, rm, symlink, writeFile, type FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { runComponentsCommand } from '../src/cli/components'
 import { runInitCommand } from '../src/cli/init'
@@ -490,6 +490,56 @@ describe('uiux components', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 		expect(await readFile(join(fixture.project, 'src/ui/ds/Other.vue'), 'utf8')).toBe('other\n')
 		expect(await lstat(join(fixture.project, 'src/ui/ds/Button.vue')).catch(() => undefined)).toBeUndefined()
 		expect(Object.keys((await readRecord(fixture.project)).components.button.files)).toEqual(['src/moved/ds/Button.vue'])
+	})
+
+	// Issue #206: a write that fails after its file was truncated (a full disk) leaves no partly
+	// written file behind, so the same command, run again without --force, finishes the copy.
+	it('removes a file a failed write left partly written, so running the same command again converges', async () => {
+		const fixture = await makeFixture()
+		const probe = await open(join(fixture.base, 'probe'), 'w')
+		const prototype = Object.getPrototypeOf(probe) as { writeFile: (this: FileHandle, data: Uint8Array) => Promise<void> }
+		await probe.close()
+		const original = prototype.writeFile
+		/** Fails the `failing`-th write after writing ten bytes of it, as a disk filling up would. */
+		const failWrite = async (failing: number, argv: string[]) => {
+			let calls = 0
+			const spy = vi.spyOn(prototype, 'writeFile').mockImplementation(async function (this: FileHandle, data: Uint8Array) {
+				if (++calls !== failing) return original.call(this, data)
+				await original.call(this, data.subarray(0, 10))
+				throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' })
+			})
+			try {
+				return await run(fixture, argv)
+			}
+			finally {
+				spy.mockRestore()
+			}
+		}
+
+		// A new copy: the first file is written, the second fails partway and is removed again.
+		const failed = await failWrite(2, ['add', 'order-summary-card', '--to', 'src/ui'])
+		expect(failed.code).toBe(1)
+		expect(failed.stderr).toContain('Copying stopped: ENOSPC: no space left on device, write')
+		expect(failed.stderr).toContain('Written: src/ui/ds/Button.vue.')
+		expect(failed.stderr).toContain('src/ui/product/OrderSummaryCard.vue was only partly written and was removed again.')
+		expect(await lstat(join(fixture.project, 'src/ui/product/OrderSummaryCard.vue')).catch(() => undefined)).toBeUndefined()
+		expect(await lstat(join(fixture.project, 'uiux-components.json')).catch(() => undefined)).toBeUndefined()
+		const rerun = await run(fixture, ['add', 'order-summary-card', '--to', 'src/ui'])
+		expect(rerun.code, rerun.stderr).toBe(0)
+		expect(await readFile(join(fixture.project, 'src/ui/product/OrderSummaryCard.vue'), 'utf8')).toBe(CARD)
+
+		// An update of a recorded copy: the truncated copy is removed, and the rerun writes it whole.
+		await writeKitFile(fixture.kit, 'src/ds/Button.vue', `${BUTTON}<!-- v2 -->\n`)
+		const before = await readFile(join(fixture.project, 'uiux-components.json'), 'utf8')
+		const update = await failWrite(1, ['add', 'button', '--to', 'src/ui'])
+		expect(update.code).toBe(1)
+		expect(update.stderr).toContain('src/ui/ds/Button.vue was only partly written and was removed again.')
+		expect(await lstat(join(fixture.project, 'src/ui/ds/Button.vue')).catch(() => undefined)).toBeUndefined()
+		expect(await readFile(join(fixture.project, 'uiux-components.json'), 'utf8')).toBe(before)
+		const again = await run(fixture, ['add', 'button', '--to', 'src/ui'])
+		expect(again.code, again.stderr).toBe(0)
+		expect(await readFile(join(fixture.project, 'src/ui/ds/Button.vue'), 'utf8')).toBe(`${BUTTON}<!-- v2 -->\n`)
+		expect((await run(fixture, ['diff', '--check'])).code).toBe(0)
 	})
 
 	// Finding: on a case-insensitive file system two spellings of one path are one file.

@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { constants, lstatSync, realpathSync, type Stats } from 'node:fs'
-import { lstat, mkdir, open, readdir, readFile, realpath, rename, rm, rmdir, stat } from 'node:fs/promises'
+import { lstat, mkdir, open, readdir, readFile, realpath, rename, rm, rmdir, stat, unlink } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
 
@@ -302,7 +302,9 @@ async function assertDirectoriesWithoutLinks(realProject: string, segments: read
  * descending into it. The file is opened without following a link ({@link NO_FOLLOW}) and without
  * truncating it; only when the path, walked again without links, still reaches the file opened, and
  * on linux `/proc/self/fd` places the open file inside the product project, is it truncated and
- * written.
+ * written. When the write fails after the truncation (a full disk, say), the partly written file is
+ * removed again ({@link unlinkProjectFile}, bound to the file opened), so a rerun of the command
+ * finds the path absent and converges; a {@link PartialWrite} says whether that removal succeeded.
  *
  * Residual risk: Node offers no `openat` or `O_BENEATH`. On darwin the open refuses a link in any
  * component, so nothing is created through one. Elsewhere a local user who can write in the product
@@ -336,10 +338,70 @@ async function writeProjectFile(realProject: string, rel: string, bytes: Uint8Ar
 		if (!opened.isFile() || current.dev !== opened.dev || current.ino !== opened.ino || where === undefined || where === realProject || !isSameOrInside(realProject, where))
 			throw new Refusal(`${rel} in the product project changed while it was being written.`)
 		await handle.truncate(0)
-		await handle.writeFile(bytes)
+		try {
+			await handle.writeFile(bytes)
+		}
+		catch (error) {
+			const removed = await unlinkProjectFile(realProject, segments, opened).then(() => true, () => false)
+			throw new PartialWrite(rel, removed, error)
+		}
 	}
 	finally {
 		await handle.close()
+	}
+}
+
+/** A project file write that failed after its file was truncated; `removed` tells whether the partly written file was removed again. */
+class PartialWrite extends Error {
+	constructor(readonly file: string, readonly removed: boolean, cause: unknown) {
+		super(cause instanceof Error ? cause.message : String(cause), { cause })
+		this.name = 'PartialWrite'
+	}
+}
+
+/**
+ * Unlinks the project file at `segments` when it is still the regular file `expected` (by `dev` and
+ * `ino`). Its directory is opened without following a link ({@link NO_FOLLOW}) and must still be the
+ * directory its path, walked again without links, reaches; on linux `/proc/self/fd` must place it
+ * inside the product project, and the file is then named and unlinked through that open directory,
+ * so the unlink happens in the directory checked whatever its path leads to by then.
+ *
+ * Residual risk, as for {@link writeProjectFile}: Node offers no `unlinkat`. On darwin (`/dev/fd`
+ * cannot be walked into) and elsewhere the unlink goes by path after these checks, so a local user
+ * who can write in the product project and swaps a checked directory for a symbolic link in the few
+ * system calls between the last check and the unlink can make it remove a same-named file where that
+ * link points, outside the copy (issue #206). On linux that window is closed; a swap of the file
+ * itself within the checked directory can only make it remove that entry, which unlink never follows.
+ */
+async function unlinkProjectFile(realProject: string, segments: readonly string[], expected: Readonly<{ dev: number; ino: number }>): Promise<void> {
+	const rel = segments.join('/')
+	const changed = () => new Refusal(`${rel} in the product project changed while it was being removed.`)
+	const parent = join(realProject, ...segments.slice(0, -1))
+	const name = segments.at(-1)!
+	const check = async (leaf: string) => {
+		const info = await lstat(leaf)
+		if (!info.isFile() || info.dev !== expected.dev || info.ino !== expected.ino) throw changed()
+	}
+	if (PATH_BINDING === 'none') {
+		await assertDirectoriesWithoutLinks(realProject, segments)
+		await check(join(parent, name))
+		await unlink(join(parent, name))
+		return
+	}
+	const directory = await open(parent, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | NO_FOLLOW)
+	try {
+		const opened = await directory.stat()
+		await assertDirectoriesWithoutLinks(realProject, segments)
+		const current = await lstat(parent)
+		const where = PATH_BINDING === 'fd' ? await openedFilePath(directory) : parent
+		if (!opened.isDirectory() || current.dev !== opened.dev || current.ino !== opened.ino || where === undefined || !isSameOrInside(realProject, where))
+			throw changed()
+		const leaf = PATH_BINDING === 'fd' ? `/proc/self/fd/${directory.fd}/${name}` : join(parent, name)
+		await check(leaf)
+		await unlink(leaf)
+	}
+	finally {
+		await directory.close()
 	}
 }
 
@@ -352,13 +414,15 @@ function fileIdentity(info: Readonly<{ dev: number; ino: number }>): string {
  * Removes the project file `rel`, then the directories it leaves empty, strictly below `stopAt`.
  * A file whose identity is in `keep` (a file this command just wrote or left in place) is never
  * removed, so two spellings of one path on a case-insensitive file system cannot lose it. Returns
- * whether the file was removed. The residual risk of `writeProjectFile` applies to the unlink too.
+ * whether the file was removed. The file is unlinked by {@link unlinkProjectFile}, whose residual
+ * risk applies; the empty directories are removed by path, so the same swap can at worst remove an
+ * empty directory where a link points (`rmdir` removes nothing else).
  */
 async function removeProjectFile(realProject: string, rel: string, stopAt: string, keep: ReadonlySet<string>): Promise<boolean> {
 	if (await inspectProjectPath(realProject, rel) !== 'file') return false
-	const path = join(realProject, ...rel.split('/'))
-	if (keep.has(fileIdentity(await lstat(path)))) return false
-	await rm(path)
+	const info = await lstat(join(realProject, ...rel.split('/')))
+	if (keep.has(fileIdentity(info))) return false
+	await unlinkProjectFile(realProject, rel.split('/'), info)
 	for (let directory = rel.split('/').slice(0, -1).join('/'); directory.startsWith(`${stopAt}/`); directory = directory.split('/').slice(0, -1).join('/')) {
 		const directoryPath = join(realProject, ...directory.split('/'))
 		if ((await readdir(directoryPath).catch(() => ['?'])).length > 0) break
@@ -638,9 +702,17 @@ async function addCommand(parsed: ParsedArguments, context: Context): Promise<nu
 			await writeCopyRecord(realProject, next)
 	}
 	catch (error) {
+		// A file left partly written would make the rerun refuse it as an unrecorded file, so it is
+		// removed again; when that fails too, it is named, with how to finish anyway (issue #206).
+		const partial = error instanceof PartialWrite
+			? [error.removed
+					? `${error.file} was only partly written and was removed again.`
+					: `${error.file} was only partly written and could not be removed; remove it, or add --force to the same command.`]
+			: []
 		throw new Refusal([
 			`Copying stopped: ${error instanceof Error ? error.message : String(error)}`,
 			written.length > 0 ? `Written: ${written.join(', ')}.` : 'No file was written.',
+			...partial,
 			...(removed.length > 0 ? [`Removed: ${removed.join(', ')}.`] : []),
 			`${COPY_RECORD_FILENAME} was not changed. Fix the cause and run the same command again to finish the copy.`,
 		].join('\n'))
