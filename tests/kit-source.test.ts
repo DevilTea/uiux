@@ -433,21 +433,34 @@ describe('kit file reads stay inside kit/ and within their limits', { timeout: H
 		const kit = await locateKitProject(ctx.workspace, 'kit')
 		const source = join(ctx.kit, 'src')
 		const moved = join(ctx.kit, 'src-moved')
+		let swapped = false
 		const swapSource = async () => {
 			await rename(source, moved)
 			await symlink(join(ctx.base, 'decoy'), source)
+			swapped = true
 		}
 		const restoreSource = async () => {
+			if (!swapped) return
 			await rm(source)
 			await rename(moved, source)
+			swapped = false
 		}
-		// The link still in place when the open file is judged: its real path lies outside kit/.
+		const text = (outcome: Awaited<ReturnType<typeof readKitFile>>) => outcome.status === 'found' ? Buffer.from(outcome.bytes).toString() : outcome.status
+		// The link still in place when the open file is judged: its real path lies outside kit/ (on
+		// darwin the open itself refuses the link).
 		expect(await readKitFile(kit, 'src/ds/Button.vue', { beforeOpen: swapSource })).toEqual({ status: 'not_found' })
 		await restoreSource()
 		// The link swapped back before the open file is judged: the path is inside kit/ again, but the
-		// open file is not the one there (the identity check).
+		// open file is not the one there.
 		expect(await readKitFile(kit, 'src/ds/Button.vue', { beforeOpen: swapSource, afterOpen: restoreSource })).toEqual({ status: 'not_found' })
-		expect(await readKitFile(kit, 'src/ds/Button.vue')).toMatchObject({ status: 'found' })
+		await restoreSource()
+		expect(text(await readKitFile(kit, 'src/ds/Button.vue'))).toBe(BUTTON)
+		// The link swapped in after the open file was judged: the bytes come from the open file, never
+		// from the path, which now names the decoy.
+		expect(text(await readKitFile(kit, 'src/ds/Button.vue', { beforeRead: swapSource }))).toBe(BUTTON)
+		await restoreSource()
+		expect(text(await readKitFile(kit, 'src/ds/Button.vue', { maxBytes: Number.POSITIVE_INFINITY, beforeRead: swapSource }))).toBe(BUTTON)
+		await restoreSource()
 
 		// kit/ itself swapped for a link to a copy outside the Workspace.
 		const kitMoved = join(ctx.base, 'kit-moved')
