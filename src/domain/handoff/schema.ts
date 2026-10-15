@@ -12,6 +12,7 @@ import {
 } from '../validation'
 import { validateAdapterProvenance, type AdapterProvenance } from '../adapters/schema'
 import { validateEvidenceReference, type EvidenceReference } from '../evidence/schema'
+import { validateProductKitProvenance, type ProductKitProvenance } from '../product-kit/provenance'
 import { validateResolvedRenderContext, type ResolvedRenderContext } from '../render-context/schema'
 import { validateAssetMetadata } from '../assets/schema'
 
@@ -44,7 +45,16 @@ export type HandoffWidgetImplementationReference = Readonly<{
 	rendererSource: HandoffSourceReference
 	designSystemSource?: HandoffSourceReference
 	supportingSources?: readonly HandoffSourceReference[]
+	component?: HandoffComponentReference
 }>
+/**
+ * Clause 01a11bb1-bbed-7588-bce6-5e1f4f0bcf72: the Product Kit component a used Widget type maps
+ * to, a registry component or an external export. `version` is absent when no installed version of
+ * the package is known.
+ */
+export type HandoffComponentReference =
+	| Readonly<{ name: string; componentDigest: string; files: readonly Readonly<{ path: string; digest: string }>[]; add: string }>
+	| Readonly<{ import: string; export: string; package: string; version?: string }>
 export type HandoffProvenance = Readonly<{
 	workspaceSchemaVersion: number
 	scope: readonly HandoffRoot[]
@@ -52,6 +62,8 @@ export type HandoffProvenance = Readonly<{
 	contexts: readonly ResolvedRenderContext[]
 	versions: Readonly<Record<string, string>>
 	adapters: readonly AdapterProvenance[]
+	/** Clause 01a115cd-d7ba-71b5-9cab-7c473cdcf54a: the Product Kit provenance at export; absent below schemaVersion 5. */
+	productKit?: ProductKitProvenance
 	gitCommit?: string
 }>
 export type HandoffCoverage = Readonly<{
@@ -200,7 +212,35 @@ function validateImplementationReferences(input: unknown, path: string, v: Valid
 			const supporting = v.array(reference.supportingSources, `${itemPath}/supportingSources`)
 			supporting?.forEach((source, sourceIndex) => validateSourceReference(source, jsonPointer(`${itemPath}/supportingSources`, sourceIndex), v))
 		}
+		if (Object.hasOwn(reference, 'component'))
+			validateComponentReference(reference.component, `${itemPath}/component`, v)
 	})
+}
+
+function validateComponentReference(input: unknown, path: string, v: Validator): void {
+	const component = v.object(input, path)
+	if (!component) return
+	if (Object.hasOwn(component, 'name')) {
+		rejectUnknownKeys(component, ['name', 'componentDigest', 'files', 'add'], path, v)
+		v.string(component.name, `${path}/name`, true)
+		validateDigest(component.componentDigest, `${path}/componentDigest`, v)
+		v.array(component.files, `${path}/files`)?.forEach((file, index) => {
+			const filePath = jsonPointer(`${path}/files`, index)
+			const entry = v.object(file, filePath)
+			if (!entry) return
+			rejectUnknownKeys(entry, ['path', 'digest'], filePath, v)
+			v.string(entry.path, `${filePath}/path`, true)
+			validateDigest(entry.digest, `${filePath}/digest`, v)
+		})
+		if (typeof component.name === 'string' && component.add !== `uiux components add ${component.name}`)
+			v.issue('handoff.invalid_component_add', `${path}/add`, 'A registry component reference names the command uiux components add <name>.')
+		return
+	}
+	rejectUnknownKeys(component, ['import', 'export', 'package', 'version'], path, v)
+	v.string(component.import, `${path}/import`, true)
+	v.string(component.export, `${path}/export`, true)
+	v.string(component.package, `${path}/package`, true)
+	if (Object.hasOwn(component, 'version')) v.string(component.version, `${path}/version`, true)
 }
 
 function validateSourceReference(input: unknown, path: string, v: Validator): void {
@@ -264,6 +304,7 @@ function validateHandoffProvenance(input: unknown, path: string, v: Validator): 
 			}
 		}
 	})
+	if (Object.hasOwn(provenance, 'productKit')) validateProductKitProvenance(provenance.productKit, `${path}/productKit`, v)
 	if (Object.hasOwn(provenance, 'gitCommit')) v.string(provenance.gitCommit, `${path}/gitCommit`, true)
 }
 

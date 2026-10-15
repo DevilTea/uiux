@@ -14,6 +14,7 @@ import {
 import type { Diagnostic, JsonObject } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
 import type { KitBuildStatus } from '../ports/kit-build'
+import { readWorkspaceProductKitProvenance } from './product-kit-provenance'
 
 export type FormalContextCaptureResult = Readonly<{
 	context: ResolvedRenderContext
@@ -235,6 +236,10 @@ export function createFormalCaptureService(
 			|| process.env.UIUX_SERVER_URL
 			|| `http://${normalizedHost}:${defaultPort}`
 
+		// Clause 01a11bb1-8fc4-7b7d-87da-d3fc5d457d98: each record carries the Product Kit provenance
+		// of the Workspace at capture time, taken once for the run (none below schemaVersion 5).
+		const productKit = await readWorkspaceProductKitProvenance(persistence)
+
 		let browser: Browser | undefined
 		try {
 			browser = await chromium.launch({ headless: true })
@@ -379,6 +384,7 @@ export function createFormalCaptureService(
 							versions: {
 								uiux: packageJson.version,
 							},
+							...(productKit ? { productKit } : {}),
 						},
 						artifactRefs: [screenshotDigest],
 						data: {

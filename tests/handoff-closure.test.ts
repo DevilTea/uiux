@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -15,6 +15,7 @@ import {
 	type ExportHandoffCommand,
 } from '../src/application/services/handoff-export'
 import { createFormalCaptureService } from '../src/application/services/formal-capture'
+import { readWorkspaceProductKitProvenance } from '../src/application/services/product-kit-provenance'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
 import { createLeaseManager } from '../src/application/access/leases'
@@ -260,12 +261,16 @@ async function putFormalEvidence(
 	viewId: string,
 	viewRevision: string,
 	complete = true,
+	withProductKit = true,
 ): Promise<string> {
 	const dummyScreenshotBytes = new TextEncoder().encode(`screenshot-bytes-for-${viewId}`)
 	const screenshotPut = await persistence.artifacts.put(dummyScreenshotBytes)
 	const workspaceRead = await persistence.workspace.readInspected()
 	const localeRead = await persistence.locales.readInspected('en-US')
 	if (!workspaceRead.revision || !localeRead) throw new Error('Test Workspace provenance is incomplete.')
+	// A capture without Product Kit provenance has unknown freshness (Rule 01a1161b-ff68-…), so the
+	// fixture records the current one, as formal capture does.
+	const productKit = withProductKit ? await readWorkspaceProductKitProvenance(persistence) : undefined
 
 	const record: FormalEvidenceRecord = {
 		schemaVersion: 1,
@@ -286,6 +291,7 @@ async function putFormalEvidence(
 				{ identity: { type: 'locale', id: 'en-US' }, revision: localeRead.revision },
 			],
 			versions: { uiux: '0.1.0' },
+			...(productKit ? { productKit } : {}),
 		},
 		artifactRefs: [screenshotPut.identity],
 		evidenceRefs: [],
@@ -1182,4 +1188,170 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 			expect(exportRes.manifest?.artifactRefs.some(ref => ref.artifact === realEvidenceDigest)).toBe(true)
 		}
 	})
+})
+
+function makeOrderAdapterSource(): string {
+	return `
+import { createWidgetPlugin } from '@deviltea/widget-core';
+import { defineComponent, h } from 'vue';
+
+const plugin = (type) => createWidgetPlugin(type)
+  .interfaces()
+  .state(s => s.count({ authorWritable: true, validate: (v) => typeof v === 'number', default: () => 1 }))
+  .done();
+export const orderSummaryPlugin = plugin('OrderSummary');
+export const productCardPlugin = plugin('ProductCard');
+const render = (label) => defineComponent({ name: label, setup: () => () => h('div', label) });
+
+export const manifest = {
+  id: 'order-kit',
+  apiVersion: '1',
+  widgetPlugins: [orderSummaryPlugin, productCardPlugin],
+  catalog: { widgets: {} },
+  renderers: [{ type: 'OrderSummary', component: render('OrderSummary') }, { type: 'ProductCard', component: render('ProductCard') }],
+  providers: [],
+  styles: [],
+  tokens: [],
+};
+`
+}
+
+const ORDER_CARD_FILES = {
+	'src/components/order-summary-card/OrderSummaryCard.vue': '<template><section class="order-summary-card"><slot /></section></template>\n',
+	'src/components/order-summary-card/index.ts': 'export { default as OrderSummaryCard } from \'./OrderSummaryCard.vue\'\n',
+} as const
+
+/** A Workspace whose Product Kit maps `OrderSummary` to a registry component and `ProductCard` to an external export, with a View that uses both. */
+async function productKitHandoffWorkspace(): Promise<{ root: string; persistence: FileNativePersistence }> {
+	const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/order.mjs' }])
+	await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+	await writeFile(join(root, 'kit', 'adapters', 'order.mjs'), makeOrderAdapterSource())
+	for (const [path, content] of Object.entries(ORDER_CARD_FILES)) {
+		await mkdir(join(root, 'kit', path, '..'), { recursive: true })
+		await writeFile(join(root, 'kit', path), content)
+	}
+	await writeFile(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', private: true, dependencies: { '@acme/ds': '^2.0.0' } }))
+	await mkdir(join(root, 'kit', 'node_modules', '@acme', 'ds'), { recursive: true })
+	await writeFile(join(root, 'kit', 'node_modules', '@acme', 'ds', 'package.json'), JSON.stringify({ name: '@acme/ds', version: '2.3.4' }))
+	const current = (await persistence.productKit.read())!
+	const swapped = await persistence.productKit.compareAndSwap({
+		key: 'product-kit',
+		expectedRevision: current.revision,
+		resource: {
+			...current.resource,
+			designSystems: ['@acme/ds'],
+			components: { 'order-summary-card': { files: Object.keys(ORDER_CARD_FILES), layer: 'product' } },
+			widgets: { OrderSummary: { component: 'order-summary-card' }, ProductCard: { import: '@acme/ds', export: 'ProductCard' } },
+		},
+	})
+	expect(swapped.ok).toBe(true)
+	const view = createSampleView(VIEW_1_ID, 'Order View')
+	await persistence.views.create(VIEW_1_ID, {
+		...view,
+		ir: {
+			type: 'RootShell',
+			id: 'root',
+			slots: {
+				content: [
+					{ type: 'OrderSummary', id: 'summary-1', props: {}, bindings: {}, events: {} },
+					{ type: 'ProductCard', id: 'card-1', props: {}, bindings: {}, events: {} },
+				],
+			},
+		},
+	} as ViewResource)
+	return { root, persistence }
+}
+
+describe('Handoff Product Kit references (Feature 01a111e4-0272-…)', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
+	// Scenario 01a11bb1-c2b2-7e8c-a058-29a8320af7ff: Handoff names the mapped registry component with its digest.
+	it('names the mapped registry component with its digest, materializes its files, and snapshots the Product Kit', async () => {
+		const { root, persistence } = await productKitHandoffWorkspace()
+		await putFormalEvidence(persistence, VIEW_1_ID, (await persistence.views.readRevision(VIEW_1_ID))!, true)
+
+		const exported = await currentSchemaHandoff(persistence).exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(exported.status, JSON.stringify(exported.diagnostics)).toBe('exported')
+		const manifest = exported.manifest!
+
+		// Clause 01a11bb1-bbed-…: { name, componentDigest, files, add }, each file stored by content identity.
+		const fileDigests: Record<string, string> = {}
+		for (const [path, content] of Object.entries(ORDER_CARD_FILES))
+			fileDigests[path] = `sha256:${createHash('sha256').update(content).digest('hex')}`
+		const orderSummary = manifest.implementationReferences.find(reference => reference.widgetType === 'OrderSummary')
+		expect(orderSummary?.component).toEqual({
+			name: 'order-summary-card',
+			componentDigest: `sha256:${createHash('sha256').update(canonicalJsonBytes(fileDigests)).digest('hex')}`,
+			files: Object.entries(fileDigests).map(([path, digest]) => ({ path, digest })),
+			add: 'uiux components add order-summary-card',
+		})
+		for (const [path, digest] of Object.entries(fileDigests)) {
+			expect(manifest.artifactRefs).toContainEqual({ kind: 'component-file', artifact: digest, context: { component: 'order-summary-card', path } })
+			expect(new TextDecoder().decode(await persistence.artifacts.read(digest))).toBe(ORDER_CARD_FILES[path as keyof typeof ORDER_CARD_FILES])
+		}
+
+		// An external export names its package and the installed version.
+		const productCard = manifest.implementationReferences.find(reference => reference.widgetType === 'ProductCard')
+		expect(productCard?.component).toEqual({ import: '@acme/ds', export: 'ProductCard', package: '@acme/ds', version: '2.3.4' })
+
+		// Rule 01a11bb1-bd7c-…: the Product Kit file travels as a resource snapshot; Clause 01a115cd-d7ba-…: its provenance.
+		const productKitFile = (await persistence.productKit.read())!
+		expect(manifest.resources).toContainEqual({ type: 'product-kit', identity: { id: 'product-kit' }, revision: productKitFile.revision, snapshot: productKitFile.resource })
+		expect(manifest.provenance.productKit).toEqual(await readWorkspaceProductKitProvenance(persistence))
+		expect(manifest.provenance.adapters[0]?.contentDigest).toMatch(/^sha256:[0-9a-f]{64}$/)
+
+		// No host path enters what the Product Kit adds to the manifest (the Adapter `moduleIdentity` is a
+		// resolved file URL, unchanged here).
+		const real = await realpath(root)
+		for (const part of [manifest.provenance.productKit, orderSummary?.component, productCard?.component, manifest.resources.find(resource => resource.type === 'product-kit')]) {
+			expect(JSON.stringify(part)).not.toContain(root)
+			expect(JSON.stringify(part)).not.toContain(real)
+		}
+		expect(manifest.readiness.implementationReady).toBe(true)
+	})
+
+	it('does not count a capture recorded without Product Kit provenance as fresh Evidence (owner ruling 8 of 2026-10-10)', async () => {
+		const { persistence } = await productKitHandoffWorkspace()
+		await putFormalEvidence(persistence, VIEW_1_ID, (await persistence.views.readRevision(VIEW_1_ID))!, true, false)
+		const assessed = await currentSchemaHandoff(persistence).assessReadiness({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(assessed.readiness?.implementationReady).toBe(false)
+		expect(assessed.readiness?.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'handoff.stale_view_evidence', path: `/views/${VIEW_1_ID}` }))
+	})
+
+	// Owner ruling 4 of 2026-10-15 (https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18942505).
+	it('omits the version of an external export whose installed version cannot be determined', async () => {
+		const { root, persistence } = await productKitHandoffWorkspace()
+		await rm(join(root, 'kit', 'node_modules', '@acme', 'ds'), { recursive: true })
+		await putFormalEvidence(persistence, VIEW_1_ID, (await persistence.views.readRevision(VIEW_1_ID))!, true)
+		const exported = await currentSchemaHandoff(persistence).exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(exported.status, JSON.stringify(exported.diagnostics)).toBe('exported')
+		const component = exported.manifest!.implementationReferences.find(reference => reference.widgetType === 'ProductCard')?.component
+		expect(component).toEqual({ import: '@acme/ds', export: 'ProductCard', package: '@acme/ds' })
+		expect(Object.hasOwn(component!, 'version')).toBe(false)
+	})
+
+	for (const [title, arrange] of [
+		['a component file that is a symbolic link', async (root: string) => {
+			const linked = join(root, 'kit', 'src', 'components', 'order-summary-card', 'index.ts')
+			await writeFile(join(root, 'kit', 'src', 'components', 'order-summary-card', 'real-index.ts'), 'export {}\n')
+			await rm(linked)
+			await symlink('./real-index.ts', linked)
+		}],
+		['component files that lie outside kit/src/ by their real path (kit/src is a link)', async (root: string) => {
+			await rename(join(root, 'kit', 'src'), join(root, 'kit', 'real-src'))
+			await symlink('./real-src', join(root, 'kit', 'src'))
+		}],
+	] as const) {
+		it(`names no component, with handoff.component_unavailable, for ${title}`, async () => {
+			const { root, persistence } = await productKitHandoffWorkspace()
+			await arrange(root)
+			await putFormalEvidence(persistence, VIEW_1_ID, (await persistence.views.readRevision(VIEW_1_ID))!, true)
+			const exported = await currentSchemaHandoff(persistence).exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+			expect(exported.status, JSON.stringify(exported.diagnostics)).toBe('exported')
+			const manifest = exported.manifest!
+			expect(manifest.implementationReferences.find(reference => reference.widgetType === 'OrderSummary')?.component).toBeUndefined()
+			expect(manifest.readiness.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'handoff.component_unavailable', blocking: false, path: '/product-kit/widgets/OrderSummary' }))
+			expect(manifest.artifactRefs.some(reference => reference.kind === 'component-file')).toBe(false)
+			// The external export is unaffected.
+			expect(manifest.implementationReferences.find(reference => reference.widgetType === 'ProductCard')?.component).toMatchObject({ package: '@acme/ds', version: '2.3.4' })
+		})
+	}
 })

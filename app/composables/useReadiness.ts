@@ -2,6 +2,7 @@ import { computed, shallowRef, triggerRef } from 'vue'
 import { useI18n } from '#imports'
 import type { FormalEvidenceRecord } from '../../src/domain/evidence/schema'
 import type { HandoffManifest, HandoffReadiness, HandoffReadinessAssessment, HandoffRoot } from '../../src/domain/handoff/schema'
+import type { ProductKitProvenance } from '../../src/domain/product-kit/provenance'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
 import {
 	contextFromRecord,
@@ -66,6 +67,11 @@ type CaptureResponse = Readonly<{
 
 // Module state: one Workbench per document, shared by the Overview and the right panel.
 const evidenceItems = shallowRef<readonly EvidenceItem[]>([])
+/**
+ * The current Product Kit provenance, read with the Evidence list: `productKit`, or
+ * `productKitUnavailable` when it cannot be computed; neither below schemaVersion 5.
+ */
+const currentProductKit = shallowRef<Readonly<{ productKit?: ProductKitProvenance; productKitUnavailable?: boolean }>>({})
 const evidenceLoaded = shallowRef(false)
 const evidenceLoading = shallowRef(false)
 const evidenceError = shallowRef<FetchErrorDetails>()
@@ -135,8 +141,9 @@ export function useReadiness() {
 		if (evidenceLoaded.value && !force) return
 		if (evidencePromise && !force) return evidencePromise
 		evidenceLoading.value = true
-		const run = uiux.listEvidence<EvidenceItem>()
-			.then((items) => {
+		const run = uiux.listEvidenceForFreshness<EvidenceItem, ProductKitProvenance>()
+			.then(({ items, productKit, productKitUnavailable }) => {
+				currentProductKit.value = { ...(productKit ? { productKit } : {}), ...(productKitUnavailable === true ? { productKitUnavailable } : {}) }
 				evidenceItems.value = (items ?? []).filter(item => item?.record?.kind === 'formal_capture')
 				evidenceError.value = undefined
 			})
@@ -158,6 +165,7 @@ export function useReadiness() {
 			workspace: workspace.value,
 			discoveredLocales: discoveredLocales.value,
 			localeRevisions: localeRevisions.value,
+			...currentProductKit.value,
 		}
 		return evidenceItems.value.map((item) => {
 			const context = contextFromRecord(item.record)

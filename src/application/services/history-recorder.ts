@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
+import { productKitRecordFieldUnlocked, warmProductKitProvenance } from '../../adapters/kit-provenance'
+
 import {
 	AUTOSAVE_IDLE_MS,
 	AUTOSAVE_MAX_EVENTS,
@@ -288,6 +290,9 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 				return { enabled: false }
 			}
 			this.stores = stores
+			// Digest the kit before taking the lock, so the Baseline and the versions recorded under it
+			// find the Product Kit provenance cached instead of digesting the kit while writers wait.
+			await warmProductKitProvenance(this.persistence)
 			const report = await this.persistence.withLock(async () => {
 				const started = await this.startUnlocked(stores)
 				if (!started.enabled) return started
@@ -550,6 +555,7 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 			if (!await stores.host.hasBlob(digest)) await stores.host.putBlob(bytes)
 		}
 		const actualMap = resourceMap(actual.resources)
+		const productKit = await productKitRecordFieldUnlocked(persistence)
 		// Rule 01a11a5e-0422-78fe-b28b-d877417932e9: the migration's changes are their own system
 		// version. Migration is not a design operation, so the version carries no write event.
 		const record: HostVersionRecord = {
@@ -560,6 +566,7 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 			at: this.stamp(),
 			workspaceSchemaVersion,
 			resources: actual.resources,
+			...productKit,
 			startedAt,
 			netChange: !sameResources(this.expected ?? new Map(), actualMap),
 			events: [],
@@ -713,6 +720,7 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 		else if (open) {
 			const resources = sortedResources(this.expected ?? new Map())
 			const workspaceSchemaVersion = await this.persistence.readRecordSchemaVersionUnlocked()
+			const productKit = await productKitRecordFieldUnlocked(this.persistence)
 			assertHeld(signal)
 			const record: HostVersionRecord = {
 				historySchemaVersion: HISTORY_SCHEMA_VERSION,
@@ -722,6 +730,7 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 				at: this.stamp(),
 				workspaceSchemaVersion,
 				resources,
+				...productKit,
 				startedAt: open.startedAt,
 				// Rule 01a11a5e-020b-7716-aa2b-a6e403c59c85: recorded even when nothing changed on net.
 				netChange: !sameResources(open.base, this.expected ?? new Map()),
@@ -779,6 +788,8 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 			}
 			assertHeld(signal)
 		}
+		const productKit = await productKitRecordFieldUnlocked(this.persistence)
+		assertHeld(signal)
 		const windowStart = this.lastAtMs > 0 ? new Date(this.lastAtMs).toISOString() : undefined
 		const at = this.stamp()
 		const record: HostVersionRecord = {
@@ -789,6 +800,7 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 			at,
 			workspaceSchemaVersion,
 			resources: actual.resources,
+			...productKit,
 			// The earliest the change can have happened: the previous version.
 			startedAt: windowStart ?? at,
 			netChange: true,

@@ -10,6 +10,7 @@ import {
 	type ValidationResult,
 } from '../validation'
 import { validateI18nOccurrence, validateI18nWarning, type I18nOccurrence, type I18nWarning } from '../i18n/schema'
+import { validateProductKitProvenance, type ProductKitProvenance } from '../product-kit/provenance'
 
 export type EvidenceKind = string
 export type EvidenceReference = Readonly<{ kind: EvidenceKind; evidence: string }>
@@ -18,6 +19,8 @@ export type EvidenceProvenance = Readonly<{
 	workspaceSchemaVersion: number
 	resources: readonly EvidenceResourceRevision[]
 	versions: Readonly<Record<string, string>>
+	/** Clause 01a11bb1-8fc4-7b7d-87da-d3fc5d457d98: the Product Kit provenance at capture time; absent on a capture recorded without it. */
+	productKit?: ProductKitProvenance
 	gitCommit?: string
 }>
 export type EvidenceCoverage = Readonly<{
@@ -100,6 +103,7 @@ function validateEvidenceProvenance(input: unknown, path: string, v: Validator):
 		for (const [key, value] of Object.entries(versions))
 			v.string(value, jsonPointer(`${path}/versions`, key), true)
 	}
+	if (Object.hasOwn(provenance, 'productKit')) validateProductKitProvenance(provenance.productKit, `${path}/productKit`, v)
 	if (Object.hasOwn(provenance, 'gitCommit')) v.string(provenance.gitCommit, `${path}/gitCommit`, true)
 }
 

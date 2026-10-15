@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { constants, type BigIntStats } from 'node:fs'
 import { lstat, open, readdir, realpath, type FileHandle } from 'node:fs/promises'
 import { isAbsolute, join, relative, sep } from 'node:path'
@@ -189,6 +190,31 @@ async function readBounded(handle: FileHandle, limit: number): Promise<Uint8Arra
 }
 
 /**
+ * Opens the kit project file `file` (relative to `kit/`) as {@link readKitFile} describes: the path
+ * checked segment by segment, then opened ({@link openInsideKit}) and judged by the open file,
+ * which must be a regular file inside `kit/` outside `kit/node_modules/`. `undefined` otherwise.
+ * The caller reads from the returned handle and closes it.
+ */
+async function openKitFile(kit: KitProject, file: string, options: Pick<KitFileReadOptions, 'beforeOpen' | 'afterOpen'>): Promise<OpenedKitEntry | undefined> {
+	if (!kit.directory || !isKitFilePath(file)) return undefined
+	const anchor = await anchorKit(kit)
+	if (!anchor) return undefined
+	const segments = file.split('/')
+	let path = anchor.real
+	for (const [index, segment] of segments.entries()) {
+		path = join(path, segment)
+		const info = await lstatOrUndefined(path)
+		const last = index === segments.length - 1
+		if (!info || info.isSymbolicLink() || (last ? !info.isFile() : !info.isDirectory())) return undefined
+	}
+	await options.beforeOpen?.()
+	const opened = await openInsideKit(anchor, path, FILE_OPEN_FLAGS, { afterOpen: options.afterOpen })
+	if (opened && opened.info.isFile()) return opened
+	await opened?.handle.close().catch(() => {})
+	return undefined
+}
+
+/**
  * Reads the kit project file `file` (relative to `kit/`; Rule 01a13d3e-e253-76b7-84e5-5f3fb167b635).
  * The path is checked segment by segment (no symbolic link, each parent a directory, the last a
  * regular file), then opened ({@link openInsideKit}) without blocking, and the open file itself
@@ -199,23 +225,10 @@ async function readBounded(handle: FileHandle, limit: number): Promise<Uint8Arra
  */
 export async function readKitFile(kit: KitProject, file: string, options: KitFileReadOptions = {}): Promise<KitFileReadOutcome> {
 	const maxBytes = options.maxBytes ?? MAX_KIT_FILE_BYTES
-	if (!kit.directory || !isKitFilePath(file)) return NOT_FOUND
-	const anchor = await anchorKit(kit)
-	if (!anchor) return NOT_FOUND
-	const segments = file.split('/')
-	let path = anchor.real
-	for (const [index, segment] of segments.entries()) {
-		path = join(path, segment)
-		const info = await lstatOrUndefined(path)
-		const last = index === segments.length - 1
-		if (!info || info.isSymbolicLink() || (last ? !info.isFile() : !info.isDirectory())) return NOT_FOUND
-	}
-	await options.beforeOpen?.()
-	const opened = await openInsideKit(anchor, path, FILE_OPEN_FLAGS, { afterOpen: options.afterOpen })
+	const opened = await openKitFile(kit, file, options)
 	if (!opened) return NOT_FOUND
 	const { handle, info } = opened
 	try {
-		if (!info.isFile()) return NOT_FOUND
 		if (info.size > BigInt(Number.isFinite(maxBytes) ? maxBytes : Number.MAX_SAFE_INTEGER)) return { status: 'too_large', limit: maxBytes }
 		await options.beforeRead?.()
 		const bytes = await readBounded(handle, maxBytes)
@@ -223,6 +236,61 @@ export async function readKitFile(kit: KitProject, file: string, options: KitFil
 	}
 	catch {
 		return NOT_FOUND
+	}
+	finally {
+		await handle.close().catch(() => {})
+	}
+}
+
+/**
+ * The stat fields of a kit entry that a cached file digest is keyed by: its identity (`dev`,
+ * `ino`), `size`, and its modification and change times in nanoseconds.
+ */
+export type KitEntryStamp = Readonly<{ dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint }>
+
+function stampOf(info: BigIntStats): KitEntryStamp {
+	return { dev: info.dev, ino: info.ino, size: info.size, mtimeNs: info.mtimeNs, ctimeNs: info.ctimeNs }
+}
+
+export function sameStamp(a: KitEntryStamp | undefined, b: KitEntryStamp | undefined): boolean {
+	return a !== undefined && b !== undefined && a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs
+}
+
+/** The chunk a streamed digest reads from the file at a time. */
+const DIGEST_CHUNK_BYTES = 1024 * 1024
+
+const DIGEST_NOT_FOUND = Object.freeze({ status: 'not_found' as const })
+
+/**
+ * The file digest of a kit file: `sha256:` and the lowercase hex SHA-256 of its bytes (Clause
+ * 01a11bb1-8b0c-7590-9478-0348530b1ea7), with the stamp of the open file taken before it was read;
+ * or `not_found`, also when a read fails.
+ */
+export type KitFileDigestOutcome =
+	| Readonly<{ status: 'found'; digest: string; stamp: KitEntryStamp }>
+	| Readonly<{ status: 'not_found' }>
+
+/**
+ * The file digest of the kit project file `file`, opened as {@link readKitFile} opens it and hashed
+ * in chunks from the open file, so a file of any size is digested and none is held in memory whole.
+ */
+export async function digestKitFile(kit: KitProject, file: string, options: Omit<KitFileReadOptions, 'maxBytes'> = {}): Promise<KitFileDigestOutcome> {
+	const opened = await openKitFile(kit, file, options)
+	if (!opened) return DIGEST_NOT_FOUND
+	const { handle, info } = opened
+	try {
+		await options.beforeRead?.()
+		const hash = createHash('sha256')
+		const chunk = Buffer.allocUnsafe(DIGEST_CHUNK_BYTES)
+		for (;;) {
+			const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, null)
+			if (bytesRead === 0) break
+			hash.update(chunk.subarray(0, bytesRead))
+		}
+		return { status: 'found', digest: `sha256:${hash.digest('hex')}`, stamp: stampOf(info) }
+	}
+	catch {
+		return DIGEST_NOT_FOUND
 	}
 	finally {
 		await handle.close().catch(() => {})
@@ -264,9 +332,10 @@ export type KitFileListing = Readonly<{ files: readonly KitFileEntry[]; truncate
  * swap can list the names and sizes of files outside `kit/`.
  *
  * Directories are walked in name order. Past `maxEntries` files the walk stops and `truncated` is
- * set; the files returned are the first found, sorted.
+ * set; the files returned are the first found, sorted. `include`, when given, prunes the walk: a
+ * directory or file whose kit-relative path it refuses is neither entered nor listed nor counted.
  */
-export async function listKitFiles(kit: KitProject, maxEntries = MAX_KIT_FILE_ENTRIES): Promise<KitFileListing> {
+export async function listKitFiles(kit: KitProject, maxEntries = MAX_KIT_FILE_ENTRIES, include?: (path: string, directory: boolean) => boolean): Promise<KitFileListing> {
 	const anchor = await anchorKit(kit)
 	if (!anchor) return { files: [], truncated: false }
 	const files: KitFileEntry[] = []
@@ -290,6 +359,7 @@ export async function listKitFiles(kit: KitProject, maxEntries = MAX_KIT_FILE_EN
 		for (const entry of entries) {
 			const path = root ? entry.name : `${prefix}/${entry.name}`
 			if (!isKitFilePath(path)) continue
+			if (include && !include(path, entry.isDirectory())) continue
 			const absolute = join(directory, entry.name)
 			if (entry.isDirectory()) {
 				directories.push([absolute, path])
@@ -310,4 +380,121 @@ export async function listKitFiles(kit: KitProject, maxEntries = MAX_KIT_FILE_EN
 	const truncated = full()
 	const sorted = files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
 	return { files: truncated ? sorted.slice(0, maxEntries) : sorted, truncated }
+}
+
+/** How many kit files one walk or stamp check opens or stats at a time. */
+const STAT_CONCURRENCY = 32
+
+/**
+ * A walk of the kit project ({@link scanKitTree}): `kit/`'s real path, each directory walked by its
+ * path relative to `kit/` (`''` for `kit/` itself) with the stamp of the open directory taken before
+ * its names were read, each file listed with the stamp of the open file, and whether the walk
+ * stopped early because its caller's limit was reached.
+ */
+export type KitTreeScan = Readonly<{
+	real: string
+	directories: ReadonlyMap<string, KitEntryStamp>
+	files: ReadonlyMap<string, KitEntryStamp>
+	truncated: boolean
+}>
+
+/**
+ * The outcome of a kit walk: the walk; `no_kit` when there is no kit (`kit/` missing or a link);
+ * or `unreadable` when a directory or a regular file the walk met could not be opened and judged
+ * inside `kit/` (a permission refused, or an entry swapped or removed while it was walked), so no
+ * file is ever left out of the walk silently.
+ */
+export type KitTreeScanOutcome =
+	| Readonly<{ status: 'scanned'; scan: KitTreeScan }>
+	| Readonly<{ status: 'no_kit' }>
+	| Readonly<{ status: 'unreadable' }>
+
+/**
+ * Walks the kit project as {@link listKitFiles} does (every open judged inside `kit/` outside
+ * `kit/node_modules/`, no symbolic link followed, `include` pruning the walk), recording the stamp of
+ * each directory and file, for Product Kit provenance. `full` is asked after each file is listed and
+ * stops the walk (`truncated`) when it answers true. Unlike the listing, a directory or file that
+ * cannot be opened makes the walk `unreadable` instead of being left out.
+ */
+export async function scanKitTree(kit: KitProject, include: (path: string, directory: boolean) => boolean, full: (path: string) => boolean): Promise<KitTreeScanOutcome> {
+	const anchor = await anchorKit(kit)
+	if (!anchor) return { status: 'no_kit' }
+	const directories = new Map<string, KitEntryStamp>()
+	const files = new Map<string, KitEntryStamp>()
+	let truncated = false
+	let unreadable = false
+	const opened = async (path: string, flags: number, root: boolean, kind: (info: BigIntStats) => boolean): Promise<BigIntStats | undefined> => {
+		const entry = await openInsideKit(anchor, path, flags, { root })
+		if (!entry) return undefined
+		await entry.handle.close().catch(() => {})
+		return kind(entry.info) ? entry.info : undefined
+	}
+	const directoryInfo = (directory: string, root: boolean) => opened(directory, DIRECTORY_OPEN_FLAGS, root, info => info.isDirectory())
+	const visit = async (directory: string, prefix: string): Promise<void> => {
+		const root = prefix === ''
+		const before = await directoryInfo(directory, root)
+		const entries = before ? await readdir(directory, { withFileTypes: true }).catch(() => undefined) : undefined
+		if (!before || !entries || !sameIdentity(before, await directoryInfo(directory, root))) {
+			unreadable = true
+			return
+		}
+		directories.set(prefix, stampOf(before))
+		entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
+		const subdirectories: Array<readonly [string, string]> = []
+		const regularFiles: Array<readonly [string, string]> = []
+		for (const entry of entries) {
+			const path = root ? entry.name : `${prefix}/${entry.name}`
+			if (!isKitFilePath(path) || !include(path, entry.isDirectory())) continue
+			if (entry.isDirectory()) subdirectories.push([join(directory, entry.name), path])
+			else if (entry.isFile()) regularFiles.push([join(directory, entry.name), path])
+		}
+		for (let start = 0; start < regularFiles.length; start += STAT_CONCURRENCY) {
+			const batch = regularFiles.slice(start, start + STAT_CONCURRENCY)
+			const infos = await Promise.all(batch.map(([absolute]) => opened(absolute, FILE_OPEN_FLAGS, false, info => info.isFile())))
+			for (const [index, info] of infos.entries()) {
+				if (!info) {
+					unreadable = true
+					return
+				}
+				const path = batch[index]![1]
+				files.set(path, stampOf(info))
+				if (full(path)) {
+					truncated = true
+					return
+				}
+			}
+		}
+		for (const [absolute, path] of subdirectories) {
+			await visit(absolute, path)
+			if (truncated || unreadable) return
+		}
+	}
+	await visit(anchor.real, '')
+	return unreadable ? { status: 'unreadable' } : { status: 'scanned', scan: { real: anchor.real, directories, files, truncated } }
+}
+
+/**
+ * True when every directory and file of the walk `scan` still has the stamp it was walked with, by
+ * `lstat` alone: no file is opened or read. A directory whose names change (an entry added,
+ * removed, renamed or swapped for a link) changes its modification and change times, so an
+ * unchanged directory still names the entries the walk met; an unchanged file keeps its identity,
+ * size and times. `kit/` must still be the real directory it was.
+ */
+export async function kitTreeUnchanged(kit: KitProject, scan: KitTreeScan): Promise<boolean> {
+	const anchor = await anchorKit(kit)
+	if (!anchor || anchor.real !== scan.real) return false
+	const entries: Array<readonly [string, KitEntryStamp, boolean]> = []
+	for (const [path, stamp] of scan.directories) entries.push([path, stamp, true])
+	for (const [path, stamp] of scan.files) entries.push([path, stamp, false])
+	let next = 0
+	let unchanged = true
+	const worker = async (): Promise<void> => {
+		while (unchanged && next < entries.length) {
+			const [path, stamp, directory] = entries[next++]!
+			const info = await lstatOrUndefined(path === '' ? anchor.real : join(anchor.real, ...path.split('/')))
+			if (!info || (directory ? !info.isDirectory() : !info.isFile()) || !sameStamp(stampOf(info), stamp)) unchanged = false
+		}
+	}
+	await Promise.all(Array.from({ length: STAT_CONCURRENCY }, worker))
+	return unchanged
 }

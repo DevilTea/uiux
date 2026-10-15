@@ -185,6 +185,9 @@
       "noView": "This record names no View.",
       "noViewRevision": "This record doesn't carry the View revision, so its freshness can't be judged.",
       "noLocaleRevision": "This record doesn't carry the revision of Locale {subject}, so its freshness can't be judged.",
+      "productKitChanged": "The Product Kit changed after capture.",
+      "noProductKit": "This record doesn't carry the Product Kit it was captured with, so its freshness can't be judged. Capture it again.",
+      "productKitUnavailable": "The current Product Kit can't be read in full, so this capture's freshness can't be judged.",
       "other": "It no longer matches the current Workspace."
     },
     "thumbAlt": "Capture of {view}, {context}",
@@ -2024,6 +2027,7 @@
     "schema": {
       "empty_string": "This value must not be empty.",
       "expected_array": "This value must be a list.",
+      "expected_boolean": "This value must be true or false.",
       "expected_finite_number": "This value must be a number.",
       "expected_object": "This value must be an object.",
       "expected_positive_integer": "This value must be a whole number above zero.",
@@ -2202,6 +2206,7 @@
     },
     "handoff": {
       "asset_content_digest_missing": "An Asset in the Handoff has no content digest.",
+      "component_unavailable": "A Widget type maps to a Product Kit component whose files could not be read, so the Handoff names no component for it.",
       "duplicate_artifact": "A file appears twice in the Handoff.",
       "duplicate_root": "A starting point is listed twice.",
       "duplicate_widget_mapping": "A Widget type is mapped twice.",
@@ -2212,6 +2217,7 @@
       "invalid_diagnostic_blocking": "A Handoff check is not marked as blocking or not.",
       "invalid_readiness_claim": "The readiness claim is not valid.",
       "invalid_root_type": "A starting point must be a View or a Flow.",
+      "invalid_component_add": "A component reference does not name the command that copies it.",
       "invalid_source_availability": "A source’s availability is not valid.",
       "missing_asset": "An Asset could not be read.",
       "missing_pinned_source": "A source does not pin an exact version.",

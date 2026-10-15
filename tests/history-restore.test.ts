@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -9,6 +9,8 @@ import { createApp, createRouter, toNodeListener } from 'h3'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import restoreRoute from '../server/api/history/versions/[id]/restore.post'
+import { kitFileDigestCache } from '../src/adapters/kit-provenance'
+import { digestKitFile } from '../src/adapters/kit-source-files'
 import { createLeaseManager, type LeaseManager } from '../src/application/access/leases'
 import { writeKeyForKind } from '../src/application/access/keys'
 import { ACCESS_OPERATIONS } from '../src/application/access/policy'
@@ -17,6 +19,7 @@ import { createScopedWorkspaceSession } from '../src/application/access/scoped-s
 import { createHistoryRecorder, type HistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
 import type { RestoreResourceVersionCommand } from '../src/application/services/history-restore'
 import type { VersionListing } from '../src/application/services/history-service'
+import { readWorkspaceProductKitProvenance } from '../src/application/services/product-kit-provenance'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
@@ -218,6 +221,36 @@ describe('restoring a View (Scenario 01a11a5e-9106-73c2-b51b-107557aa88e8)', { t
 		expect(restored).toMatchObject({ type: 'autosave', restoredFrom: earlier, actor: { type: 'human', id: 'member:editor-1' } })
 		const record = await hostVersion(ctx, restored.id)
 		expect(record.events.map(event => [event.operation, event.source, event.beforeRevision, event.afterRevision])).toEqual([['restoreResourceVersion', 'workbench', before.revision, after.revision]])
+	})
+
+	it('restores from and diffs a version recorded without productKit (Clause 01a11bb1-b6ae-…: the member is optional)', async () => {
+		const ctx = await fixture()
+		await setStructure(ctx, EDITOR, ir({ type: 'Button', id: 'pay', config: { label: 'Pay' } }))
+		// A kit file that cannot be digested leaves the provenance unknown, so the Checkpoint records none,
+		// as every version recorded before Product Kit provenance existed.
+		await mkdir(join(ctx.root, 'kit', 'src'), { recursive: true })
+		await writeFile(join(ctx.root, 'kit', 'src', 'button.ts'), 'export const button = 1\n')
+		kitFileDigestCache.hashFile = async () => ({ status: 'not_found' })
+		let earlier: string
+		try {
+			earlier = await checkpoint(ctx, 'Without Product Kit provenance')
+		}
+		finally {
+			kitFileDigestCache.hashFile = digestKitFile
+		}
+		const read = await ctx.app.readVersion(earlier)
+		expect(read.status).toBe('found')
+		expect(Object.hasOwn((read as { version: object }).version, 'productKit')).toBe(false)
+		const earlierView = (await ctx.persistence.views.read(VIEW_ID))!.resource
+
+		await setStructure(ctx, EDITOR, ir({ type: 'Button', id: 'pay', config: { label: 'Pay now' } }))
+		const diffed = await ctx.app.diffVersions({ from: earlier, to: 'current', detail: 'semantic' })
+		expect(diffed.status, JSON.stringify(diffed)).toBe('compared')
+		expect((diffed as { summary: readonly Readonly<{ kind: string; status: string }>[] }).summary).toContainEqual(expect.objectContaining({ kind: 'view', status: 'modified' }))
+
+		const outcome = await restore(ctx, EDITOR, { versionId: earlier, resource: { kind: 'view', key: VIEW_ID }, expectedRevision: await viewRevision(ctx) })
+		expect(outcome, JSON.stringify(outcome)).toMatchObject({ status: 'updated', kind: 'view', key: VIEW_ID, restoredFrom: earlier })
+		expect((await ctx.persistence.views.read(VIEW_ID))!.resource.ir).toEqual(earlierView.ir)
 	})
 
 	it('closes the open autosave before the restore and right after it (Rules 01a11a5e-00b9 and 01a11e0d-d911)', async () => {
@@ -507,6 +540,8 @@ describe('effects on Evidence, Handoff readiness and Reviews (Rules 01a11a5e-17f
 		const workspace = await ctx.persistence.workspace.readInspected()
 		const locale = (await ctx.persistence.locales.readInspected('en-US'))!
 		const screenshot = await ctx.persistence.artifacts.put(new TextEncoder().encode('screenshot'))
+		// Recorded as formal capture records it: without it the capture's freshness is unknown (Rule 01a1161b-ff68-…).
+		const productKit = await readWorkspaceProductKitProvenance(ctx.persistence)
 		const record: FormalEvidenceRecord = {
 			schemaVersion: 1,
 			kind: 'formal_capture',
@@ -520,6 +555,7 @@ describe('effects on Evidence, Handoff readiness and Reviews (Rules 01a11a5e-17f
 					{ identity: { type: 'locale', id: 'en-US' }, revision: locale.revision },
 				],
 				versions: { uiux: '0.1.0' },
+				...(productKit ? { productKit } : {}),
 			},
 			artifactRefs: [screenshot.identity],
 			evidenceRefs: [],
