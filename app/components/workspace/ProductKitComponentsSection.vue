@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, shallowRef } from 'vue'
 import { useI18n, useToast } from '#imports'
-import type { ProductKitComponent } from '../../../src/domain/product-kit/schema'
+import type { ProductKitComponent, ProductKitWidgetMapping } from '../../../src/domain/product-kit/schema'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { componentDeclarations } from '../../utils/component-interface'
 import { componentAddCommand, componentSourceCall, DEFAULT_COMPONENT_TARGET } from '../../utils/component-commands'
@@ -11,15 +11,18 @@ import { copyText } from '../../utils/copy-text'
  * The Components section of the Product Kit page (Rule 01a11bb1-b918-7cb5-b581-a3fd3f647f09): the
  * component registry as a table (name, layer, files, `requires`, packages), browsing one component's
  * source with the props and emits it declares, and the commands that copy it into a product project
- * (`uiux components add`, Clause 01a11bb1-8b0c-…, and its MCP counterpart `get_component_source`).
+ * (`uiux components add`, Clause 01a11bb1-8b0c-…, and its MCP counterpart `get_component_source`),
+ * and the component table, `widgets`, read-only: each Widget type with the registry component or
+ * package export it maps to (Rule 01a11bb1-a1e5-70b6-a524-c1955425b1b2, issue #217).
  *
- * The registry reads with `workspace.read`, as the Product Kit file does. Browsing reads the
+ * The registry and the component table read with `workspace.read`, as the Product Kit file does. Browsing reads the
  * component's files through `POST /api/product-kit/components/source`, which needs
  * `product-kit.source.read` (`canBrowse`); the server enforces it. Source text is shown as text only.
  * The Catalog part of the section waits on issue #116.
  */
 const props = defineProps<{
 	components: Readonly<Record<string, ProductKitComponent>>
+	widgets: Readonly<Record<string, ProductKitWidgetMapping>>
 	canBrowse: boolean
 }>()
 const { t } = useI18n()
@@ -30,8 +33,18 @@ const api = $fetch as unknown as <T = unknown>(url: string, options?: Readonly<R
 
 /** The Product Kit member that holds the registry. */
 const REGISTRY_FIELD = 'components'
+/** The Product Kit member that holds the component table. */
+const WIDGETS_FIELD = 'widgets'
 
 const names = computed(() => Object.keys(props.components).sort())
+
+/** The component table, by Widget type: a registry component, or one export of a package. */
+const widgetRows = computed(() => Object.keys(props.widgets).sort().map((type) => {
+	const mapping = props.widgets[type]!
+	return 'component' in mapping
+		? { type, component: mapping.component, from: undefined }
+		: { type, component: mapping.export, from: mapping.import }
+}))
 
 /** Where `uiux components add` copies to, relative to the product project; only the shown commands use it. */
 const target = ref(DEFAULT_COMPONENT_TARGET)
@@ -446,5 +459,110 @@ const emitsDeclarations = computed(() => declarations.value.filter(item => item.
         </template>
       </div>
     </template>
+
+    <section
+      aria-labelledby="product-kit-widgets-title"
+      class="flex flex-col gap-3"
+      data-product-kit-widgets
+    >
+      <header class="space-y-1">
+        <h3
+          id="product-kit-widgets-title"
+          class="text-sm font-semibold text-highlighted"
+        >
+          {{ t('productKit.components.widgets.title') }}
+        </h3>
+        <i18n-t
+          keypath="productKit.components.widgets.description"
+          tag="p"
+          scope="global"
+          class="text-sm text-muted"
+        >
+          <template #field>
+            <code class="font-mono text-xs">{{ WIDGETS_FIELD }}</code>
+          </template>
+        </i18n-t>
+      </header>
+
+      <p
+        v-if="!widgetRows.length"
+        class="rounded-md border border-dashed border-default p-4 text-sm text-muted"
+        data-widgets-empty
+      >
+        {{ t('productKit.components.widgets.empty') }}
+      </p>
+      <div
+        v-else
+        class="overflow-x-auto rounded-md border border-default"
+      >
+        <table
+          class="w-full text-start text-sm"
+          data-widgets-table
+        >
+          <caption class="sr-only">
+            {{ t('productKit.components.widgets.title') }}
+          </caption>
+          <thead class="bg-elevated/50 text-xs text-muted">
+            <tr>
+              <th
+                scope="col"
+                class="px-3 py-2 text-start font-medium"
+              >
+                {{ t('productKit.components.widgets.type') }}
+              </th>
+              <th
+                scope="col"
+                class="px-3 py-2 text-start font-medium"
+              >
+                {{ t('productKit.components.widgets.component') }}
+              </th>
+              <th
+                scope="col"
+                class="px-3 py-2 text-start font-medium"
+              >
+                {{ t('productKit.components.widgets.from') }}
+              </th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-default">
+            <tr
+              v-for="row in widgetRows"
+              :key="row.type"
+              class="align-top"
+              :data-widget-row="row.type"
+            >
+              <th
+                scope="row"
+                class="px-3 py-2 text-start font-mono text-xs font-medium text-highlighted break-all"
+                translate="no"
+              >
+                {{ row.type }}
+              </th>
+              <td
+                class="px-3 py-2 font-mono text-xs break-all"
+                translate="no"
+                data-widget-component
+              >
+                {{ row.component }}
+              </td>
+              <td
+                class="px-3 py-2 text-xs"
+                data-widget-from
+              >
+                <span
+                  v-if="row.from === undefined"
+                  class="text-muted"
+                >{{ t('productKit.components.widgets.registry') }}</span>
+                <code
+                  v-else
+                  class="font-mono break-all"
+                  translate="no"
+                >{{ row.from }}</code>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </section>
 </template>

@@ -39,7 +39,7 @@ import type { Diagnostic } from '../../composables/workbench-types'
  * - Overview: the Design System packages, the kit build with its log, and the Adapters (Rules
  *   01a116f0-8a46-76bc-a29f-affaa302c44c and 01a115cd-af57-781e-9493-89d037e41b06), which moved here
  *   from Workspace settings;
- * - Components: the component registry, browsing a component and its copy commands;
+ * - Components: the component registry, the component table, browsing a component and its copy commands;
  * - Styles & themes: `styles` and `themes`, saved through `update_product_kit`;
  * - Files: the kit project's files and build output, read-only (Rule 01a11bb1-a184-7e00-a8de-c81056ad5a35).
  * Drafts live on the page, so switching sections keeps them.
@@ -607,6 +607,7 @@ onBeforeUnmount(() => {
             <ProductKitComponentsSection
               v-if="currentSection === 'components'"
               :components="productKit.resource.components"
+              :widgets="productKit.resource.widgets"
               :can-browse="member.can('product-kit.source.read')"
             />
             <ProductKitStylesSection
