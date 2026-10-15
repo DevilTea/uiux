@@ -212,6 +212,7 @@ export function createHistoryService(
 				name: name!,
 				...(command.note === undefined || command.note === '' ? {} : { note: command.note }),
 				source: command.source,
+				log,
 			})
 			return { status: 'created', versionId: record.id, at: record.at, resources: record.resources.length }
 		})

@@ -23,6 +23,8 @@ export type SnapshotCheckpointInput = Readonly<{
 	name: string
 	note?: string
 	source: HistorySource
+	/** Where a Checkpoint left without Product Kit provenance for its time budget is logged; `console.error` when omitted. */
+	log?: (message: string) => void
 }>
 
 /**
@@ -44,7 +46,7 @@ export async function writeSnapshotCheckpointUnlocked(input: SnapshotCheckpointI
 		workspaceSchemaVersion: await input.persistence.readRecordSchemaVersionUnlocked(),
 		resources: snapshot.resources,
 		// Clause 01a11bb1-b6ae-7cf7-9838-9628757d1190: the Product Kit provenance when it was taken.
-		...await productKitRecordFieldUnlocked(input.persistence),
+		...await productKitRecordFieldUnlocked(input.persistence, input.log ? { log: input.log } : {}),
 		name: input.name,
 		...(input.note !== undefined ? { note: input.note } : {}),
 		source: input.source,
