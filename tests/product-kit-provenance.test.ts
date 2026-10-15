@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { adapterGraphDigest } from '../src/adapters/adapter-graph-digest'
-import { kitFileDigestCache, type KitFileHasher } from '../src/adapters/kit-provenance'
+import { IN_LOCK_PROVENANCE_BUDGET_MS, KitFileDigestCache, kitFileDigestCache, provenanceBudgetMessage, type KitFileHasher } from '../src/adapters/kit-provenance'
 import { locateKitProject } from '../src/adapters/kit-registry'
 import { digestKitFile, listKitFiles, readKitFile } from '../src/adapters/kit-source-files'
 import { createHistoryRecorder, type HistoryRecorder } from '../src/application/services/history-recorder'
@@ -242,6 +242,40 @@ describe('the kit digest cache', () => {
 		expect(results[0]).toEqual(await uncachedDigests(root))
 	})
 
+	// Issue #211: a kit over the file limit has no digests, and computes them again once it drops back
+	// under the limit, wherever the files it lost lay, the directories the file listing never reached included.
+	it('has no digests over the file limit, and computes them again once the kit drops back under it', async () => {
+		const { root } = await kitWorkspace()
+		const project = await locateKitProject(root, 'kit')
+		// Source files in walk order (a directory's files before its subdirectories): package.json,
+		// src/button.ts, src/a/1.ts, src/a/2.ts, src/b/deep/3.ts, src/b/deep/4.ts. With a limit of 3
+		// the listing stops at src/a/2.ts and never reaches src/b/.
+		await put(root, 'kit/src/a/1.ts', 'export const one = 1\n')
+		await put(root, 'kit/src/a/2.ts', 'export const two = 2\n')
+		await put(root, 'kit/src/b/deep/3.ts', 'export const three = 3\n')
+		await put(root, 'kit/src/b/deep/4.ts', 'export const four = 4\n')
+		const hashed: string[] = []
+		const cache = new KitFileDigestCache(4, 3)
+		cache.hashFile = (kit, path) => {
+			hashed.push(path)
+			return digestKitFile(kit, path)
+		}
+		expect(await cache.digests(project)).toBeUndefined()
+		expect(hashed).toEqual([])
+		// Files removed where the listing never reached: four source files remain, still over the limit.
+		await rm(join(root, 'kit/src/b/deep/3.ts'))
+		await rm(join(root, 'kit/src/b/deep/4.ts'))
+		expect(await cache.digests(project)).toBeUndefined()
+		// One more removed: three remain, and the digests are computed.
+		await rm(join(root, 'kit/src/a/1.ts'))
+		expect(await cache.digests(project)).toEqual(await uncachedDigests(root))
+		// Over the limit again, then back at it by a removal in a directory the listing did not reach.
+		await put(root, 'kit/src/b/deep/3.ts', 'export const three = 3\n')
+		expect(await cache.digests(project)).toBeUndefined()
+		await rm(join(root, 'kit/src/b/deep/3.ts'))
+		expect(await cache.digests(project)).toEqual(await uncachedDigests(root))
+	})
+
 	it('digests a file of any size in chunks from the open file', async () => {
 		const { root, persistence } = await kitWorkspace()
 		const bytes = new Uint8Array(3 * 1024 * 1024 + 7).map((_, index) => index % 251)
@@ -347,7 +381,8 @@ describe('version records carry Product Kit provenance (Clause 01a11bb1-b6ae-7cf
 		await persistence.locales.create('en-US', { greeting: 'Hello' })
 		const home = join(await tempDir('uiux-kit-provenance-home-'), 'home')
 		const history = createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home })
-		const recorder = createHistoryRecorder({ persistence, stores: () => history.open(), log: () => undefined })
+		const logged: string[] = []
+		const recorder = createHistoryRecorder({ persistence, stores: () => history.open(), log: message => logged.push(message) })
 		recorders.push(recorder)
 		const hashed = countHashes()
 		// Starting digests the kit once, before the lock is taken.
@@ -394,6 +429,9 @@ describe('version records carry Product Kit provenance (Clause 01a11bb1-b6ae-7cf
 		expect(slow.elapsed).toBeLessThan(OBSERVER_HOOK_TIMEOUT_MS)
 		expect(slow.record.productKit).toBeUndefined()
 		expect(slow.record.recordingGap).toBeUndefined()
+		// Issue #211: the record left without productKit is logged, naming no host path.
+		expect(logged).toEqual([provenanceBudgetMessage(IN_LOCK_PROVENANCE_BUDGET_MS)])
+		expect(logged[0]).not.toContain(root)
 
 		// The digest finishes outside the lock, and the next record finds it cached.
 		release()
@@ -403,6 +441,7 @@ describe('version records carry Product Kit provenance (Clause 01a11bb1-b6ae-7cf
 		expect(hashed).toEqual([])
 		expect(next.record.productKit).toEqual(await provenance(persistence))
 		expect(next.record.recordingGap).toBeUndefined()
+		expect(logged).toHaveLength(1)
 	}, 60_000)
 })
 

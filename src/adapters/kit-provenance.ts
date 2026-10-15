@@ -33,7 +33,8 @@ export const MAX_PROVENANCE_FILES = 50_000
  * the kit file digests: well below the observer hook bound (`OBSERVER_HOOK_TIMEOUT_MS`, 5 s), which
  * the rest of the record also needs. With the digests cached and the kit unchanged the wait is
  * a stat of each kit entry; a cold or much changed kit can take longer, and then the record goes
- * without `productKit` while the digests finish outside the lock for the next record.
+ * without `productKit`, with a log line ({@link provenanceBudgetMessage}), while the digests finish
+ * outside the lock for the next record.
  */
 export const IN_LOCK_PROVENANCE_BUDGET_MS = 2_000
 
@@ -80,7 +81,8 @@ export class KitFileDigestCache {
 	private readonly kits = new Map<string, CachedKit>()
 	private readonly running = new Map<string, Promise<KitFileSetDigests | undefined>>()
 
-	constructor(private readonly capacity = 4) {}
+	/** `maxFiles` is {@link MAX_PROVENANCE_FILES} but in tests. */
+	constructor(private readonly capacity = 4, private readonly maxFiles = MAX_PROVENANCE_FILES) {}
 
 	/**
 	 * The digests of the kit `project` now: `undefined` when it holds more than
@@ -112,7 +114,7 @@ export class KitFileDigestCache {
 		const scanned = await scanKitTree(
 			project,
 			(path, directory) => inSourceDigest(path, output) || inOutputDigest(path, directory, output),
-			path => (inSourceDigest(path, output) ? ++sourceFiles : ++outputFiles) > MAX_PROVENANCE_FILES,
+			path => (inSourceDigest(path, output) ? ++sourceFiles : ++outputFiles) > this.maxFiles,
 		)
 		if (scanned.status === 'no_kit') {
 			this.kits.delete(key)
@@ -120,6 +122,10 @@ export class KitFileDigestCache {
 		}
 		if (scanned.status === 'unreadable') return undefined
 		const { scan } = scanned
+		// Over the limit: the walk stopped at the first file past it, so the files it listed alone
+		// exceed the limit. The kit can drop back under it only by losing a listed file, which changes
+		// the stamp of a directory the walk holds, so the next request walks it again. The directories
+		// the walk never reached need no stamp (issue #211).
 		if (scan.truncated) {
 			this.store(key, { output, scan, digests: previous?.digests ?? new Map(), result: undefined })
 			return undefined
@@ -250,11 +256,24 @@ export type ProductKitProvenanceSource = Readonly<{
 	readOptionalBytesUnlocked(relativePath: string): Promise<Uint8Array | undefined>
 }>
 
-/** `work`'s result, or `undefined` once `milliseconds` pass first; `work` then goes on, and a later failure of it is dropped. */
-async function withinBudget<Result>(work: Promise<Result>, milliseconds: number): Promise<Result | undefined> {
+/** Where a caller that holds the persistence lock logs a record left without `productKit`. */
+export type ProvenanceLog = (message: string) => void
+
+/** What a caller that holds the persistence lock passes: the wait for the kit digests, and where a record left without them is logged. */
+export type InLockProvenanceOptions = Readonly<{ budgetMilliseconds?: number; log?: ProvenanceLog }>
+
+/** The log line of a record left without `productKit` because its digests outlasted the budget. It names no host path. */
+export function provenanceBudgetMessage(milliseconds: number): string {
+	return `uiux: the Product Kit provenance was not computed within ${milliseconds} ms under the persistence lock; this history record goes without productKit, and the kit digests finish outside the lock for the next record.`
+}
+
+const EXPIRED: unique symbol = Symbol('expired')
+
+/** `work`'s result (`undefined` when it fails), or {@link EXPIRED} once `milliseconds` pass first; `work` then goes on, and a later failure of it is dropped. */
+async function withinBudget<Result>(work: Promise<Result>, milliseconds: number): Promise<Result | undefined | typeof EXPIRED> {
 	let timer: ReturnType<typeof setTimeout> | undefined
-	const expired = new Promise<undefined>((resolve) => {
-		timer = setTimeout(resolve, milliseconds, undefined)
+	const expired = new Promise<typeof EXPIRED>((resolve) => {
+		timer = setTimeout(resolve, milliseconds, EXPIRED)
 	})
 	try {
 		return await Promise.race([work.catch(() => undefined), expired])
@@ -269,9 +288,12 @@ async function withinBudget<Result>(work: Promise<Result>, milliseconds: number)
  * persistence lock (a version or Checkpoint record): the Product Kit file read under that lock, and
  * the kit digests awaited for at most `budgetMilliseconds` ({@link IN_LOCK_PROVENANCE_BUDGET_MS}).
  * `undefined` for a Workspace below `schemaVersion` 5, which has no Product Kit file, when the file
- * is missing or not a JSON object, or when the provenance is not known within the budget.
+ * is missing or not a JSON object, or when the provenance is not known within the budget. When the
+ * budget runs out, `log` is told ({@link provenanceBudgetMessage}; `console.error` without one, as
+ * the history recorder logs), so the missing `productKit` does not go unnoticed (issue #211).
  */
-export async function workspaceProductKitProvenanceUnlocked(persistence: ProductKitProvenanceSource, budgetMilliseconds = IN_LOCK_PROVENANCE_BUDGET_MS): Promise<ProductKitProvenance | undefined> {
+export async function workspaceProductKitProvenanceUnlocked(persistence: ProductKitProvenanceSource, options: InLockProvenanceOptions = {}): Promise<ProductKitProvenance | undefined> {
+	const budgetMilliseconds = options.budgetMilliseconds ?? IN_LOCK_PROVENANCE_BUDGET_MS
 	const { productKitPath, codeDir } = persistence.layout
 	if (!productKitPath || !codeDir) return undefined
 	const bytes = await persistence.readOptionalBytesUnlocked(productKitPath)
@@ -286,18 +308,22 @@ export async function workspaceProductKitProvenanceUnlocked(persistence: Product
 	if (!isRecord(parsed)) return undefined
 	// Only the kit (code, not canonical Workspace data) is read after this point, so a digest that
 	// outlasts the budget, and with it the lock, reads nothing the lock guards.
-	return withinBudget(computeProductKitProvenance({ root: persistence.root, codeDirectoryName: codeDir, productKit: parsed as JsonObject }), budgetMilliseconds)
+	const provenance = await withinBudget(computeProductKitProvenance({ root: persistence.root, codeDirectoryName: codeDir, productKit: parsed as JsonObject }), budgetMilliseconds)
+	if (provenance !== EXPIRED) return provenance
+	const log = options.log ?? (message => console.error(message))
+	log(provenanceBudgetMessage(budgetMilliseconds))
+	return undefined
 }
 
 /**
  * The `productKit` member of a version or Checkpoint record (Clause 01a11bb1-b6ae-7cf7-9838-
  * 9628757d1190), for a caller that holds the persistence lock: `{ productKit }`, or `{}` when the
  * Workspace has none or it cannot be computed within the budget, so recording a version never fails
- * or overstays the lock for it.
+ * or overstays the lock for it. A record left without it because the budget ran out is logged.
  */
-export async function productKitRecordFieldUnlocked(persistence: ProductKitProvenanceSource, budgetMilliseconds = IN_LOCK_PROVENANCE_BUDGET_MS): Promise<Readonly<{ productKit?: JsonObject }>> {
+export async function productKitRecordFieldUnlocked(persistence: ProductKitProvenanceSource, options: InLockProvenanceOptions = {}): Promise<Readonly<{ productKit?: JsonObject }>> {
 	try {
-		const productKit = await workspaceProductKitProvenanceUnlocked(persistence, budgetMilliseconds)
+		const productKit = await workspaceProductKitProvenanceUnlocked(persistence, options)
 		return productKit ? { productKit: productKit as unknown as JsonObject } : {}
 	}
 	catch {

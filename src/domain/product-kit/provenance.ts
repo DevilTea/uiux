@@ -46,7 +46,7 @@ export function productKitFreshnessContext(current: CurrentProductKitProvenance)
 }
 
 /**
- * The digest of a set of files:the `sha256:` identity of the canonical JSON of the map from each
+ * The digest of a set of files: the `sha256:` identity of the canonical JSON of the map from each
  * file's path relative to `kit/` to its file digest, the reduction a component digest uses (Clause
  * 01a11bb1-8b0c-7590-9478-0348530b1ea7). An empty set has the digest of `{}`.
  */

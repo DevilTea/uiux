@@ -508,6 +508,7 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 			actor: { type: 'system', id: 'system:baseline' },
 			name: BASELINE_CHECKPOINT_NAME,
 			source: 'cli',
+			log: this.log,
 		})
 		this.expected = resourceMap(record.resources)
 		return record.id
@@ -535,6 +536,7 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 			actor: MIGRATE_ACTOR,
 			name: migrationCheckpointName(targetSchemaVersion),
 			source: 'cli',
+			log: this.log,
 		})
 		this.expected = resourceMap(checkpoint.resources)
 		this.migrationStartedAt = checkpoint.at
@@ -555,7 +557,7 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 			if (!await stores.host.hasBlob(digest)) await stores.host.putBlob(bytes)
 		}
 		const actualMap = resourceMap(actual.resources)
-		const productKit = await productKitRecordFieldUnlocked(persistence)
+		const productKit = await productKitRecordFieldUnlocked(persistence, { log: this.log })
 		// Rule 01a11a5e-0422-78fe-b28b-d877417932e9: the migration's changes are their own system
 		// version. Migration is not a design operation, so the version carries no write event.
 		const record: HostVersionRecord = {
@@ -720,7 +722,7 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 		else if (open) {
 			const resources = sortedResources(this.expected ?? new Map())
 			const workspaceSchemaVersion = await this.persistence.readRecordSchemaVersionUnlocked()
-			const productKit = await productKitRecordFieldUnlocked(this.persistence)
+			const productKit = await productKitRecordFieldUnlocked(this.persistence, { log: this.log })
 			assertHeld(signal)
 			const record: HostVersionRecord = {
 				historySchemaVersion: HISTORY_SCHEMA_VERSION,
@@ -788,7 +790,7 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 			}
 			assertHeld(signal)
 		}
-		const productKit = await productKitRecordFieldUnlocked(this.persistence)
+		const productKit = await productKitRecordFieldUnlocked(this.persistence, { log: this.log })
 		assertHeld(signal)
 		const windowStart = this.lastAtMs > 0 ? new Date(this.lastAtMs).toISOString() : undefined
 		const at = this.stamp()
