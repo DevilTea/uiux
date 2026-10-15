@@ -14,3 +14,17 @@ const DATA_ATTRIBUTE_NAME = /^data-[^\s"'>/=A-Z\u0000-\u001F\u007F]+$/u
 export function isAllowedThemeAttributeName(name: string): boolean {
 	return name === 'class' || DATA_ATTRIBUTE_NAME.test(name)
 }
+
+/** An HTML attribute name: non-empty, without whitespace, `"`, `'`, `>`, `/`, `=` or an ASCII control character. */
+// eslint-disable-next-line no-control-regex
+const HTML_ATTRIBUTE_NAME = /^[^\s"'>/=\u0000-\u001F\u007F]+$/u
+
+/**
+ * The code the Product Kit validator refuses a theme root attribute name with, or `undefined` when it
+ * accepts the name. The Workbench checks a draft with the same function before it saves.
+ */
+export function themeAttributeNameProblem(name: string): 'product_kit.invalid_theme_attribute' | 'product_kit.theme_attribute_not_allowed' | undefined {
+	if (!HTML_ATTRIBUTE_NAME.test(name)) return 'product_kit.invalid_theme_attribute'
+	if (!isAllowedThemeAttributeName(name)) return 'product_kit.theme_attribute_not_allowed'
+	return undefined
+}

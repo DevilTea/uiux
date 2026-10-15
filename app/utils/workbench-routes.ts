@@ -33,15 +33,19 @@ export function flowPath(flowId: string): string {
 export const VIEWS_LOCATION = { path: '/', query: { tab: 'views' } } as const
 
 /**
- * The sections of the Product Kit page (Clause 01a11be8-5cab-7e50-89fe-b89c243d773d) that this build
- * has. Components, Styles & themes and Files are not built yet (issue #141), so their `section`
- * values open the page at its top, like an unknown value.
+ * The sections of the Product Kit page (Clause 01a11be8-5cab-7e50-89fe-b89c243d773d), in their order
+ * on the page. An unknown `section` value, or none, shows Overview, the page's top.
  */
-export type ProductKitSectionId = 'overview'
-export const PRODUCT_KIT_SECTIONS: readonly ProductKitSectionId[] = ['overview']
+export type ProductKitSectionId = 'overview' | 'components' | 'styles' | 'files'
+export const PRODUCT_KIT_SECTIONS: readonly ProductKitSectionId[] = ['overview', 'components', 'styles', 'files']
 export const PRODUCT_KIT_PATH = '/workspace/product-kit'
 
-/** The section a `section` query names, if this build has it. */
+/** The address of one Product Kit section. */
+export function productKitSectionLocation(section: ProductKitSectionId) {
+	return { path: PRODUCT_KIT_PATH, query: { section } }
+}
+
+/** The section a `section` query names, if it is one. */
 export function parseProductKitSection(query: LocationQuery): ProductKitSectionId | undefined {
 	const value = single(query.section)
 	return (PRODUCT_KIT_SECTIONS as readonly string[]).includes(value) ? value as ProductKitSectionId : undefined

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import ProductKitPage from '../../components/workspace/ProductKitPage.vue'
 
-/** The Product Kit page (Clause 01a11be8-5cab-7e50-89fe-b89c243d773d): its Overview section. */
+/** The Product Kit page (Clause 01a11be8-5cab-7e50-89fe-b89c243d773d) with its sections, one at a time by `?section=`. */
 </script>
 
 <template>

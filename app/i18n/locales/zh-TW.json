@@ -1068,6 +1068,99 @@
       "reloadLog": "重新載入記錄",
       "logFailed": "無法載入建置記錄。",
       "logRequiresKey": "讀取建置記錄需要權限鍵 {key}。"
+    },
+    "sections": "Product Kit 區段",
+    "legacySection": "此 Workspace 遷移前沒有 Product Kit 檔案。請執行 uiux migrate 後再使用此區段。",
+    "saveWhich": "多個區段有未儲存的變更。請開啟要儲存的區段。",
+    "components": {
+      "title": "Component",
+      "description": "Product Kit 檔案中 {field} 的 Component 登錄表。可用 CLI 或 Agent 將 Component 複製到產品專案。",
+      "empty": "登錄表中沒有 Component。",
+      "target": "複製到",
+      "targetHelp": "產品專案中的目錄，只用於下方的指令。",
+      "name": "名稱",
+      "layer": "層級",
+      "files": "檔案",
+      "requires": "相依 Component",
+      "packages": "套件",
+      "actions": "動作",
+      "layers": {
+        "designSystem": "設計系統",
+        "product": "產品"
+      },
+      "browse": "瀏覽",
+      "browseNamed": "瀏覽 {name}",
+      "copyCommand": "複製指令",
+      "copyCommandNamed": "複製用來複製 {name} 的指令",
+      "browseRequiresKey": "瀏覽 Component 原始碼需要權限鍵 {key}。",
+      "copyCommands": "複製指令",
+      "cli": "命令列",
+      "mcp": "MCP",
+      "copyNamed": "複製{what}指令",
+      "copied": "已複製",
+      "copyFailed": "無法複製，請自行選取文字後複製。",
+      "sourceFailed": "無法載入 Component 原始碼。",
+      "interface": "「props」與「emits」",
+      "props": "「props」",
+      "emits": "「emits」",
+      "notDeclared": "原始碼中找不到。",
+      "interfaceHelp": "依各 Vue 檔案中「defineProps」與「defineEmits」的宣告列出；其中提到的型別請在該檔案中查看。",
+      "interfaceIncomplete": "{file} 太大，無法讀出所有宣告。請在下方的原始碼檔案中查看。",
+      "sourceFiles": "原始碼檔案"
+    },
+    "styles": {
+      "sectionTitle": "樣式與主題",
+      "sectionDescription": "預覽載入的樣式表，以及各 Workspace 主題在預覽文件上設定的屬性。",
+      "title": "樣式",
+      "help": "依此順序載入。請指定已宣告套件匯出的 CSS，或以「./」開頭、位於「kit/」內且不在「node_modules/」中的 CSS 檔案路徑。若「kit/package.json」宣告了建置，「./」路徑須指向建置輸出中的檔案。",
+      "add": "新增樣式",
+      "empty": "沒有樣式。",
+      "placeholder": "./styles/theme.css",
+      "specifierLabel": "樣式 {n}",
+      "moveUp": "上移",
+      "moveDown": "下移",
+      "remove": "移除樣式",
+      "issue": {
+        "required": "請輸入指定符，或移除此樣式。"
+      }
+    },
+    "themes": {
+      "title": "主題",
+      "help": "各 Workspace 主題在預覽文件根元素上設定的屬性：「class」，或小寫的「data-」屬性。",
+      "map": "對應主題",
+      "empty": "沒有主題設定根元素屬性。",
+      "noWorkspaceThemes": "此 Workspace 沒有主題，請先在 Workspace 設定中新增。",
+      "notWorkspaceTheme": "不是 Workspace 主題",
+      "unmap": "移除 {id} 的對應",
+      "noAttributes": "未設定任何屬性。",
+      "namePlaceholder": "data-theme",
+      "nameLabel": "{id} 的屬性名稱",
+      "valueLabel": "{id} 的 {name} 值",
+      "removeAttribute": "移除屬性",
+      "addAttribute": "新增屬性",
+      "issue": {
+        "required": "請輸入屬性名稱，或移除此屬性。",
+        "duplicate": "此主題已設定這個屬性。"
+      }
+    },
+    "files": {
+      "title": "檔案",
+      "description": "kit 專案的檔案與建置輸出，唯讀。不含「node_modules/」與連結。",
+      "reload": "重新載入",
+      "requiresKey": "瀏覽 kit 檔案需要權限鍵 {key}。",
+      "buildLog": "{link}位於總覽。",
+      "listFailed": "無法列出 kit 檔案。",
+      "truncated": "只顯示前 {n} 個檔案。 | 只顯示前 {n} 個檔案。",
+      "truncatedHelp": "kit 專案的檔案超過單次列出的上限，其餘檔案請直接在 kit 專案中查看。",
+      "tree": "kit 檔案",
+      "empty": "kit 專案沒有可顯示的檔案。",
+      "pick": "選擇檔案以閱讀內容。",
+      "content": "{path} 的內容",
+      "binary": "此檔案不是文字，因此不顯示。",
+      "tooLarge": "此檔案大於 {limit}，因此不顯示。",
+      "tooLargeHelp": "請直接在 kit 專案中開啟。",
+      "notFound": "此檔案已不存在，或不是一般檔案。請重新載入清單。",
+      "readFailed": "無法讀取此檔案。"
     }
   },
   "authoring": {
@@ -2280,7 +2373,8 @@
       "build_output_missing": "kit 建置尚未產生任何輸出。",
       "build_restart_throttled": "kit 建置剛剛才重新啟動。請稍候幾秒，再重新啟動一次。",
       "build_unavailable": "此伺服器沒有執行 kit 建置；kit 建置由 uiux dev 執行。",
-      "component_invalid": "登錄中的項目與 kit/ 專案不符。"
+      "component_invalid": "登錄中的項目與 kit/ 專案不符。",
+      "file_too_large": "此 kit 檔案太大，無法在此讀取。"
     },
     "product_kit": {
       "adapter_outside_build_output": "宣告了 kit 建置時，./ Adapter 必須指向其輸出目錄中的檔案。",
