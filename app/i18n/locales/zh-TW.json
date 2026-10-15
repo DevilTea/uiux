@@ -2206,7 +2206,7 @@
     },
     "handoff": {
       "asset_content_digest_missing": "Handoff 中有 Asset 缺少內容摘要。",
-      "component_unavailable": "有 Widget 類型對應到無法讀取檔案的 Product Kit 元件，因此 Handoff 不會為它指名元件。",
+      "component_unavailable": "有 Widget 類型對應到檔案無法讀取的 Product Kit Component，因此 Handoff 不會為它指名 Component。",
       "duplicate_artifact": "Handoff 中有檔案重複出現。",
       "duplicate_root": "起點重複列出。",
       "duplicate_widget_mapping": "有 Widget 類型重複對應。",
@@ -2217,7 +2217,7 @@
       "invalid_diagnostic_blocking": "Handoff 的檢查項目沒有標示是否阻擋。",
       "invalid_readiness_claim": "就緒宣告無效。",
       "invalid_root_type": "起點必須是 View 或 Flow。",
-      "invalid_component_add": "元件參照沒有指名複製它的命令。",
+      "invalid_component_add": "Component 參照沒有指名複製它的命令。",
       "invalid_source_availability": "來源的可用狀態無效。",
       "missing_asset": "無法讀取 Asset。",
       "missing_pinned_source": "有來源沒有固定確切版本。",
