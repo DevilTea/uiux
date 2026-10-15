@@ -102,17 +102,26 @@ export function hasGitSegment(path: string): boolean {
 
 /**
  * The pairs of distinct paths in `paths` that differ only in letter case or Unicode normalization,
- * which a case-insensitive file system (the macOS default) treats as one file. Each pair names the
- * path seen first, then the other.
+ * which a case-insensitive file system (the macOS default) treats as one file. Two paths match by
+ * the fold of `segmentNamesInAnyCase`: after NFC normalization their upper case or their lower case
+ * agree (so `Foſ` matches `Fos`, whose upper cases agree). Each pair names the path seen first, then
+ * the other.
  */
 export function caseOnlyCollisions(paths: Iterable<string>): Array<readonly [string, string]> {
-	const byFold = new Map<string, string>()
+	const byUpper = new Map<string, string>()
+	const byLower = new Map<string, string>()
 	const pairs: Array<readonly [string, string]> = []
 	for (const path of new Set(paths)) {
-		const fold = path.normalize('NFC').toLowerCase()
-		const seen = byFold.get(fold)
-		if (seen === undefined) byFold.set(fold, path)
-		else pairs.push([seen, path])
+		const normalized = path.normalize('NFC')
+		const upper = normalized.toUpperCase()
+		const lower = normalized.toLowerCase()
+		const seen = byUpper.get(upper) ?? byLower.get(lower)
+		if (seen !== undefined) {
+			pairs.push([seen, path])
+			continue
+		}
+		byUpper.set(upper, path)
+		byLower.set(lower, path)
 	}
 	return pairs
 }
