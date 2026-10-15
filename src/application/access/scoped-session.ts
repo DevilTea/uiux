@@ -4,6 +4,7 @@ import { HISTORY_WRITE_OPERATIONS, isRestorableResourceKind, type HistoryWriteOp
 import { isFullUuid, type Diagnostic } from '../../domain/validation'
 import { runWithDesignWriteContext, type DesignWriteContext } from '../../persistence/history/write-context'
 import type { ReviewResolution } from '../../domain/reviews/schema'
+import type { ProductKitProvenance } from '../../domain/product-kit/provenance'
 import type { PointResourceKind } from '../dto/point-resources'
 import type { ResourceDiscoveryOutcome } from '../dto/resource-discovery'
 import type { AssetAuthoringResult, CreateAssetCommand, ReplaceAssetCommand } from '../services/asset-authoring'
@@ -136,6 +137,8 @@ export interface ScopedWorkspaceSession {
 	listPointResources(input: unknown): Promise<ResourceDiscoveryOutcome>
 	searchPointResources(input: unknown): Promise<ResourceDiscoveryOutcome>
 	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
+	/** The current Product Kit provenance that Evidence freshness is judged against; read with the Evidence, under its key. */
+	productKitProvenance(): Promise<ProductKitProvenance | undefined>
 	readArtifact(identity: string): Promise<Uint8Array | undefined>
 	assessHandoffReadiness(command: AssessHandoffReadinessCommand): Promise<AssessHandoffReadinessResult | AccessRefusal>
 	diffVersions(command: DiffVersionsCommand): Promise<VersionDiffOutcome | AccessRefusal>
@@ -467,6 +470,7 @@ export function createScopedWorkspaceSession(
 		async listPointResources(input) { assert('listPointResources'); return app.listPointResources(input) },
 		async searchPointResources(input) { assert('searchPointResources'); return app.searchPointResources(input) },
 		async listEvidence(viewId) { assert('listEvidence'); return app.listEvidence(viewId) },
+		async productKitProvenance() { assert('listEvidence'); return app.productKitProvenance() },
 		async readArtifact(identity) { assert('readArtifact'); return app.readArtifact(identity) },
 		async assessHandoffReadiness(command) {
 			const denied = authorizeOperation(principal, 'assessHandoffReadiness')

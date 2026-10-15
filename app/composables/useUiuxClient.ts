@@ -72,6 +72,11 @@ export function useUiuxClient() {
 		return result.items
 	}
 
+	/** The formal Evidence with the current Product Kit provenance its freshness is judged against (absent below schemaVersion 5). */
+	async function listEvidenceForFreshness<T, P>(): Promise<Readonly<{ items: readonly T[]; productKit?: P }>> {
+		return await $fetch<{ items: T[]; productKit?: P }>('/api/evidence/list')
+	}
+
 	async function assessHandoff<T>(roots: readonly HandoffRoot[]): Promise<T> {
 		return await $fetch<T>('/api/handoff/assess', {
 			method: 'POST',
@@ -101,6 +106,7 @@ export function useUiuxClient() {
 		readVersionResource,
 		listResources,
 		listEvidence,
+		listEvidenceForFreshness,
 		assessHandoff,
 		previewAdapters,
 		assetUrl,

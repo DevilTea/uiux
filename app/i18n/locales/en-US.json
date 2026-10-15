@@ -185,6 +185,8 @@
       "noView": "This record names no View.",
       "noViewRevision": "This record doesn't carry the View revision, so its freshness can't be judged.",
       "noLocaleRevision": "This record doesn't carry the revision of Locale {subject}, so its freshness can't be judged.",
+      "productKitChanged": "The Product Kit changed after capture.",
+      "noProductKit": "This record doesn't carry the Product Kit it was captured with, so its freshness can't be judged. Capture it again.",
       "other": "It no longer matches the current Workspace."
     },
     "thumbAlt": "Capture of {view}, {context}",

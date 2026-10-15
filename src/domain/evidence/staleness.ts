@@ -1,3 +1,4 @@
+import { productKitChanged, type ProductKitProvenance } from '../product-kit/provenance'
 import type { FormalEvidenceRecord } from './schema'
 
 export type EvidenceStalenessContext = Readonly<{
@@ -12,12 +13,28 @@ export type EvidenceStalenessContext = Readonly<{
 	}
 	discoveredLocales?: readonly string[]
 	localeRevisions?: Readonly<Record<string, string>>
+	/**
+	 * The Workspace's current Product Kit provenance. Absent when the Workspace has no Product Kit
+	 * (below `schemaVersion` 5) or the caller cannot tell it; the Product Kit is then not judged.
+	 */
+	productKit?: ProductKitProvenance
 }>
 
 export type EvidenceStalenessAssessment = Readonly<{
 	isStale: boolean
 	reason?: string
+	/**
+	 * Rule 01a1161b-ff68-76af-8237-dbc8ef2c27d1: the capture records no Product Kit provenance, so
+	 * its freshness is unknown, which counts as not fresh (`isStale` is true).
+	 */
+	unknown?: true
 }>
+
+/** The reason a capture is stale once the Product Kit changed (Rule 01a11bb1-be4a-7f9b-9fd6-a6e71241113c). */
+export const PRODUCT_KIT_CHANGED_REASON = 'Product Kit changed since capture'
+
+/** The reason a capture without Product Kit provenance is not fresh (Rule 01a1161b-ff68-76af-8237-dbc8ef2c27d1). */
+export const PRODUCT_KIT_PROVENANCE_MISSING_REASON = 'Capture records no Product Kit provenance; capture it again'
 
 export function isCompleteEvidenceForViewRevision(
 	record: FormalEvidenceRecord,
@@ -103,6 +120,12 @@ export function evaluateEvidenceStaleness(
 		if (!Object.hasOwn(context.workspace.resource.themes, ctx.themeId)) {
 			return { isStale: true, reason: `Theme '${ctx.themeId}' was removed` }
 		}
+	}
+
+	if (context.productKit) {
+		const recorded = record.provenance.productKit
+		if (!recorded) return { isStale: true, unknown: true, reason: PRODUCT_KIT_PROVENANCE_MISSING_REASON }
+		if (productKitChanged(recorded, context.productKit)) return { isStale: true, reason: PRODUCT_KIT_CHANGED_REASON }
 	}
 
 	return { isStale: false }

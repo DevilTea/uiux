@@ -17,6 +17,7 @@ import { createScopedWorkspaceSession } from '../src/application/access/scoped-s
 import { createHistoryRecorder, type HistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
 import type { RestoreResourceVersionCommand } from '../src/application/services/history-restore'
 import type { VersionListing } from '../src/application/services/history-service'
+import { readWorkspaceProductKitProvenance } from '../src/application/services/product-kit-provenance'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
@@ -507,6 +508,8 @@ describe('effects on Evidence, Handoff readiness and Reviews (Rules 01a11a5e-17f
 		const workspace = await ctx.persistence.workspace.readInspected()
 		const locale = (await ctx.persistence.locales.readInspected('en-US'))!
 		const screenshot = await ctx.persistence.artifacts.put(new TextEncoder().encode('screenshot'))
+		// Recorded as formal capture records it: without it the capture's freshness is unknown (Rule 01a1161b-ff68-…).
+		const productKit = await readWorkspaceProductKitProvenance(ctx.persistence)
 		const record: FormalEvidenceRecord = {
 			schemaVersion: 1,
 			kind: 'formal_capture',
@@ -520,6 +523,7 @@ describe('effects on Evidence, Handoff readiness and Reviews (Rules 01a11a5e-17f
 					{ identity: { type: 'locale', id: 'en-US' }, revision: locale.revision },
 				],
 				versions: { uiux: '0.1.0' },
+				...(productKit ? { productKit } : {}),
 			},
 			artifactRefs: [screenshot.identity],
 			evidenceRefs: [],
