@@ -100,9 +100,18 @@ function nodeBuild(script: string, extra: Readonly<Record<string, unknown>> = {}
 	return { output: 'dist', build: { command: [process.execPath, script], ...extra } }
 }
 
-function runner(root: string, options: Readonly<{ env?: NodeJS.ProcessEnv; register?: boolean }> = {}) {
+function runner(root: string, options: Readonly<{ env?: NodeJS.ProcessEnv; register?: boolean; capture?: boolean }> = {}) {
 	const printed: string[] = []
-	const build = createKitBuildRunner({ root, codeDirectoryName: 'kit', pollMs: 25, killGraceMs: 500, print: line => printed.push(line), ...(options.env ? { env: options.env } : {}) })
+	const build = createKitBuildRunner({
+		root,
+		codeDirectoryName: 'kit',
+		pollMs: 25,
+		killGraceMs: 500,
+		print: line => printed.push(line),
+		...(options.env ? { env: options.env } : {}),
+		// As the selected Workspace runtime does under `uiux dev`.
+		...(options.capture ? { captureOutput: () => getSelectedWorkspacePreviewBundle(root, V5_LAYOUT) } : {}),
+	})
 	const unregister = options.register ? registerKitBuildRunner(root, build) : () => {}
 	cleanups.push(async () => {
 		unregister()
@@ -538,6 +547,51 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		expect(after).toBe(good)
 		const afterBundle = await getSelectedWorkspacePreviewBundle(root, V5_LAYOUT)
 		expect(afterBundle).toMatchObject({ state: 'valid', hash: (goodBundle as { hash: string }).hash })
+	}, 30_000)
+
+	it('captures each settled output at once, so a failed restart before any request still leaves the last good output in use', async () => {
+		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK, 'fail.mjs': BUILD_FAIL })
+		const { build } = runner(root, { register: true, capture: true })
+		await build.start()
+		expect(await settledState(build)).toEqual({ state: 'ready' })
+
+		// No request resolves the good output before the failing build runs.
+		await write(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', type: 'module', uiux: nodeBuild('fail.mjs') }))
+		await build.restart()
+		expect(await settledState(build)).toMatchObject({ state: 'failed' })
+		expect(await readFile(join(root, 'kit', 'dist', 'uiux.js'), 'utf8')).toContain('half-written output')
+
+		const after = await resolveSelectedWorkspaceAdapters(root, V5_LAYOUT)
+		expect(after.state, JSON.stringify(after.diagnostics)).toBe('valid')
+		expect(after.summaries[0]?.adapterId).toBe('kit-adapter-1')
+		const bundle = await getSelectedWorkspacePreviewBundle(root, V5_LAYOUT)
+		expect(bundle.state).toBe('valid')
+		expect((bundle as { bundleJs: string }).bundleJs).toContain('kit-adapter-1')
+		expect((bundle as { bundleJs: string }).bundleJs).not.toContain('half-written output')
+	}, 30_000)
+
+	it('keeps using the last good output after a restart of the server whose new build fails', async () => {
+		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK, 'fail.mjs': BUILD_FAIL })
+		const before = runner(root, { register: true, capture: true })
+		await before.build.start()
+		expect(await settledState(before.build)).toEqual({ state: 'ready' })
+		// The server stops; the host breaks the kit; `uiux dev` starts again with a new runner.
+		await cleanups.pop()!()
+		await write(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', type: 'module', uiux: nodeBuild('fail.mjs') }))
+
+		const { build } = runner(root, { register: true, capture: true })
+		await build.start()
+		expect(build.outputGeneration()).toBe(0)
+		expect(await settledState(build)).toMatchObject({ state: 'failed' })
+		expect(await readFile(join(root, 'kit', 'dist', 'uiux.js'), 'utf8')).toContain('half-written output')
+
+		const after = await resolveSelectedWorkspaceAdapters(root, V5_LAYOUT)
+		expect(after.state, JSON.stringify(after.diagnostics)).toBe('valid')
+		expect(after.summaries[0]?.adapterId).toBe('kit-adapter-1')
+		const bundle = await getSelectedWorkspacePreviewBundle(root, V5_LAYOUT)
+		expect(bundle.state).toBe('valid')
+		expect((bundle as { bundleJs: string }).bundleJs).toContain('kit-adapter-1')
+		expect((bundle as { bundleJs: string }).bundleJs).not.toContain('half-written output')
 	}, 30_000)
 
 	it('makes the Adapter set invalid while no build output exists', async () => {

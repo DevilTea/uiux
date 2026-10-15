@@ -14,6 +14,7 @@ import { AccessStore, resolveUiuxHome } from './access/store'
 import { createWorkspaceAccessPresetsReader } from './access/workspace-presets'
 import { createHistoryStoreFactory, type HistoryStoreFactory } from './history-stores'
 import { createKitBuildRunner, registerKitBuildRunner, type KitBuildRunner } from './kit-build'
+import { getSelectedWorkspacePreviewBundle } from './workspace-adapters'
 
 export type SelectedWorkspaceServerRuntime = Readonly<{
 	root: string
@@ -74,7 +75,13 @@ export function createSelectedWorkspaceServerRuntime(
 		home: () => options?.uiuxHome ?? resolveUiuxHome(),
 	})
 	const historyRecorder = createHistoryRecorder({ persistence, stores: () => history.open() })
-	const kitBuild = createKitBuildRunner({ root: selectedRoot, codeDirectoryName: persistence.layout.codeDir })
+	const kitBuild = createKitBuildRunner({
+		root: selectedRoot,
+		codeDirectoryName: persistence.layout.codeDir,
+		// Each output generation is resolved and bundled as it settles, before a later build can change
+		// its files (Rules 01a11bb1-9df8-762d-b5e5-306f9898aae2 and 01a11bb1-9e5e-79ab-841e-c953e8b44bbf).
+		captureOutput: () => getSelectedWorkspacePreviewBundle(selectedRoot, persistence.layout),
+	})
 	const unregisterKitBuild = registerKitBuildRunner(selectedRoot, kitBuild)
 	const app = createWorkspaceApplicationSession(persistence, {
 		serverOrigin,

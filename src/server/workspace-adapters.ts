@@ -115,27 +115,37 @@ export async function resolveSelectedWorkspaceAdapters(workspaceRoot: string, gi
 		}
 	}
 
-	const resolution = await resolveWorkspaceAdapterSet({
+	const resolution = resolveWorkspaceAdapterSet({
 		workspaceRoot,
 		adapters,
 		resolver: new NodeWorkspaceAdapterModuleResolver({ layout }),
-		loader: new NodeAdapterManifestLoader(extractProductAdapterManifest, pin ? { version: String(pin.generation) } : {}),
+		loader: new NodeAdapterManifestLoader(extractProductAdapterManifest, pin ? { version: pin.version, versionScope: pin.kitDirectory } : {}),
 		apiCompatibility: productAdapterApiCompatibility,
 		registryInspector: productAdapterRegistryInspector,
 	})
-	if (pin && resolution.state === 'valid') pin.remember(resolution)
-	return resolution
+	pin?.remember(resolution)
+	return await resolution
 }
 
 type KitOutputPin = Readonly<{
-	generation: number
-	/** The resolution already made from this generation for the same Adapter list, if any. */
-	resolution?: AdapterSetResolutionResult
-	remember(resolution: AdapterSetResolutionResult): void
+	/** The runner's `outputVersion()` of the generation. */
+	version: string
+	/** The real `kit/` directory: the modules the Adapter imports from it are imported anew per generation. */
+	kitDirectory?: string
+	/** The resolution made, or being made, from this generation for the same Adapter list, if any. */
+	resolution?: Promise<AdapterSetResolutionResult>
+	/** Keeps a resolution in progress for the callers that follow; dropped again unless it is valid. */
+	remember(resolution: Promise<AdapterSetResolutionResult>): void
 }>
 
-/** The resolution of the last good kit build output, per Workspace root: its generation, Adapter list and result. */
-const pinnedResolutions = new Map<string, Readonly<{ generation: number; adapters: string; resolution: AdapterSetResolutionResult }>>()
+type PinnedResolution = Readonly<{ version: string; adapters: string; resolution: Promise<AdapterSetResolutionResult> }>
+
+/**
+ * The resolution of the last good kit build output, per Workspace root: its output version, Adapter
+ * list and result. A resolution in progress is kept too, so that the capture of a settled output
+ * and a request arriving meanwhile share one resolution, and so one pinned Preview bundle.
+ */
+const pinnedResolutions = new Map<string, PinnedResolution>()
 
 /**
  * The kit build's part in resolving a `schemaVersion` 5 Workspace's Adapters (Feature
@@ -168,11 +178,11 @@ async function kitBuildPin(workspaceRoot: string, codeDir: string, adapters: rea
 			message: `${codeDir}/package.json declares a build, so the ./ Adapter ${adapters[index]!.moduleSpecifier} must name a file in its output ${codeDir}/${output}/.`,
 		})) }
 	}
-	const generation = kitBuildRunnerFor(root)?.outputGeneration()
+	const version = kitBuildRunnerFor(root)?.outputVersion()
 	const key = canonicalJsonStringify(adapters)
 	const pinned = pinnedResolutions.get(root)
-	if (generation !== undefined && pinned && pinned.generation === generation && pinned.adapters === key)
-		return { state: 'valid', pin: { generation, resolution: pinned.resolution, remember: () => {} } }
+	if (version !== undefined && pinned && pinned.version === version && pinned.adapters === key)
+		return { state: 'valid', pin: { version, resolution: pinned.resolution, remember: () => {} } }
 	if (!await buildOutputExists(kitDirectory, output)) {
 		return { state: 'invalid', diagnostics: [{
 			code: 'kit.build_output_missing',
@@ -180,8 +190,20 @@ async function kitBuildPin(workspaceRoot: string, codeDir: string, adapters: rea
 			message: `The kit build output ${codeDir}/${output}/ does not exist yet, so the Product Kit is invalid until a build produces it.`,
 		}] }
 	}
-	if (generation === undefined) return { state: 'valid' }
-	return { state: 'valid', pin: { generation, remember: resolution => pinnedResolutions.set(root, { generation, adapters: key, resolution }) } }
+	if (version === undefined) return { state: 'valid' }
+	const realKit = await realpath(kitDirectory).catch(() => undefined)
+	return { state: 'valid', pin: {
+		version,
+		...(realKit ? { kitDirectory: realKit } : {}),
+		remember(resolution) {
+			const entry: PinnedResolution = { version, adapters: key, resolution }
+			pinnedResolutions.set(root, entry)
+			const drop = () => {
+				if (pinnedResolutions.get(root) === entry) pinnedResolutions.delete(root)
+			}
+			resolution.then(result => result.state === 'valid' ? undefined : drop(), drop)
+		},
+	} }
 }
 
 async function buildOutputExists(kitDirectory: string, output: string): Promise<boolean> {
@@ -204,12 +226,13 @@ export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, g
 		return { state: 'invalid', diagnostics: resolution.diagnostics }
 	}
 	// The set of a pinned kit build output generation keeps its bundle until the next generation.
-	const generation = layout.codeDir ? kitBuildRunnerFor(resolve(workspaceRoot))?.outputGeneration() : undefined
-	const pinned = generation !== undefined && pinnedResolutions.get(resolve(workspaceRoot))?.resolution === resolution
+	const version = layout.codeDir ? kitBuildRunnerFor(resolve(workspaceRoot))?.outputVersion() : undefined
+	const pinnedResolution = version !== undefined ? pinnedResolutions.get(resolve(workspaceRoot)) : undefined
+	const pin = pinnedResolution?.version === version && await pinnedResolution?.resolution.catch(() => undefined) === resolution ? version : undefined
 	// Below schemaVersion 5 there is no Product Kit file, so no style and no theme.
 	const productKit = layout.productKitPath ? await readRawProductKit(workspaceRoot, layout.productKitPath) : undefined
 	const styles = layout.codeDir && productKit
-		? await resolveProductKitStyles(workspaceRoot, layout, productKit.styles, pinned ? generation : undefined)
+		? await resolveProductKitStyles(workspaceRoot, layout, productKit.styles, pin)
 		: { state: 'valid' as const, paths: [] }
 	if (styles.state === 'invalid') return { state: 'invalid', diagnostics: styles.diagnostics }
 	try {
@@ -218,7 +241,7 @@ export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, g
 			moduleBase: adapterResolutionBase(workspaceRoot, layout),
 			set: resolution.set,
 			styles: styles.paths,
-			...(pinned ? { pin: String(generation) } : {}),
+			...(pin !== undefined ? { pin } : {}),
 		})
 		return { state: 'valid', ...bundle, themes: productKit?.themes ?? {} }
 	}
@@ -241,7 +264,7 @@ type StyleResolution =
 	| Readonly<{ state: 'invalid'; diagnostics: readonly Diagnostic[] }>
 
 /** The style resolution of a pinned kit build output generation, per Workspace root, like `pinnedResolutions`. */
-const pinnedStyles = new Map<string, Readonly<{ generation: number; styles: string; resolution: StyleResolution }>>()
+const pinnedStyles = new Map<string, Readonly<{ version: string; styles: string; resolution: StyleResolution }>>()
 
 /**
  * The Product Kit `styles` entries' files, in order. Each resolves like an Adapter module specifier
@@ -250,12 +273,12 @@ const pinnedStyles = new Map<string, Readonly<{ generation: number; styles: stri
  * package (Clause 01a11bb1-8e98-7270-9662-682c048f9929). Under a pinned output generation the
  * resolution of that generation stays in use, as the Adapters' does.
  */
-async function resolveProductKitStyles(workspaceRoot: string, layout: WorkspaceLayout, styles: readonly string[], generation: number | undefined): Promise<StyleResolution> {
+async function resolveProductKitStyles(workspaceRoot: string, layout: WorkspaceLayout, styles: readonly string[], version: string | undefined): Promise<StyleResolution> {
 	if (styles.length === 0) return { state: 'valid', paths: [] }
 	const root = resolve(workspaceRoot)
 	const key = canonicalJsonStringify(styles)
 	const pinned = pinnedStyles.get(root)
-	if (generation !== undefined && pinned && pinned.generation === generation && pinned.styles === key) return pinned.resolution
+	if (version !== undefined && pinned && pinned.version === version && pinned.styles === key) return pinned.resolution
 
 	const codeDir = layout.codeDir!
 	const declaration = await readKitBuildDeclaration(join(root, codeDir))
@@ -283,6 +306,6 @@ async function resolveProductKitStyles(workspaceRoot: string, layout: WorkspaceL
 		}
 	}
 	const resolution: StyleResolution = diagnostics.length > 0 ? { state: 'invalid', diagnostics } : { state: 'valid', paths }
-	if (generation !== undefined) pinnedStyles.set(root, { generation, styles: key, resolution })
+	if (version !== undefined) pinnedStyles.set(root, { version, styles: key, resolution })
 	return resolution
 }

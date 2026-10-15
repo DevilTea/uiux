@@ -14,6 +14,7 @@ import {
 } from '../persistence/paths'
 import { maskHostPaths } from './host-paths'
 import { allowStyleAndAssetImportsOnServer } from './style-imports'
+import { KIT_OUTPUT_VERSION_PARAMETER, shareVersionWithKitImports } from './kit-output-imports'
 import { bareKitSpecifierProblem, bareSpecifierPackageName, readDeclaredKitDependencies, relativeKitSpecifierProblem } from './kit-dependencies'
 
 import { resolve as resolveImport } from 'import-meta-resolve'
@@ -63,15 +64,19 @@ export type AdapterManifestExtractor = (moduleNamespace: Readonly<Record<string,
  *
  * `version`, when given, is appended to the identity of each `./` Adapter module as `?v=<version>`:
  * Node caches a module by its URL, so each kit build output generation is imported anew (Rule
- * 01a11bb1-9df8-762d-b5e5-306f9898aae2). The modules it imports keep their own URLs and cache.
+ * 01a11bb1-9df8-762d-b5e5-306f9898aae2). With `versionScope`, the real kit directory, the modules it
+ * imports from inside that directory, outside `node_modules/`, are imported anew with it
+ * (`shareVersionWithKitImports`); without it they keep their own URLs and cache.
  */
 export class NodeAdapterManifestLoader implements AdapterManifestLoader {
-	constructor(private readonly extractManifest: AdapterManifestExtractor, private readonly options: Readonly<{ version?: string }> = {}) {}
+	constructor(private readonly extractManifest: AdapterManifestExtractor, private readonly options: Readonly<{ version?: string; versionScope?: string }> = {}) {}
 
 	async loadManifest(resolved: ResolvedAdapterModule): Promise<unknown> {
-		const identity = this.options.version !== undefined && resolved.moduleSpecifier.startsWith('./')
-			? `${resolved.moduleIdentity}?v=${encodeURIComponent(this.options.version)}`
+		const version = resolved.moduleSpecifier.startsWith('./') ? this.options.version : undefined
+		const identity = version !== undefined
+			? `${resolved.moduleIdentity}?${KIT_OUTPUT_VERSION_PARAMETER}=${encodeURIComponent(version)}`
 			: resolved.moduleIdentity
+		if (version !== undefined && this.options.versionScope !== undefined) shareVersionWithKitImports(this.options.versionScope, version)
 		allowStyleAndAssetImportsOnServer()
 		const namespace = await import(identity) as Readonly<Record<string, unknown>>
 		return this.extractManifest(namespace)
