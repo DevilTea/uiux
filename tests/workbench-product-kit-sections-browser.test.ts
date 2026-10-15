@@ -389,7 +389,8 @@ describe('Product Kit page › drafts across sections', () => {
 			let puts = 0
 			page.on('request', (request) => { if (request.method() === 'PUT') puts += 1 })
 			await page.keyboard.press('ControlOrMeta+s')
-			await page.getByText('More than one section has unsaved changes.').waitFor()
+			// The toast title, not the screen-reader live region that repeats it.
+			await page.locator('[data-slot="title"]', { hasText: 'More than one section has unsaved changes.' }).waitFor()
 			expect(puts).toBe(0)
 
 			await nav.getByRole('link', { name: 'Styles & themes' }).click()
