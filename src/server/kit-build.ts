@@ -24,9 +24,13 @@ import type { KitBuildControl, KitBuildRestart, KitBuildStatus } from '../applic
  * - Its argument array is printed before it runs (Rule 01a11bb1-a05b-7686-beaa-22a90aa90fc2).
  * - The output is settled once 500 ms pass without a change in the output directory (Clause
  *   01a11bb1-87ed-7fec-b485-ede3986675d4), watched by polling its listing. Each settled output
- *   advances the output generation, from which the server resolves the Adapters anew and builds a
- *   new Preview bundle (Rule 01a11bb1-9df8-762d-b5e5-306f9898aae2); a failed run leaves the
- *   generation, so the last good output stays in use (Rule 01a11bb1-9e5e-79ab-841e-c953e8b44bbf).
+ *   advances the output generation and triggers `captureOutput`, with which the server resolves the
+ *   Adapters anew and builds a new Preview bundle at once (Rule 01a11bb1-9df8-762d-b5e5-306f9898aae2);
+ *   a failed run leaves the generation, so the last good output stays in use (Rule
+ *   01a11bb1-9e5e-79ab-841e-c953e8b44bbf). An output present when the runner first starts is
+ *   generation `0`, captured before the build process is spawned, and a run waits for the capture
+ *   in progress before it spawns: so after a restart of `uiux dev` whose build fails, the output
+ *   found at the start stays in use, not the files the failed build left.
  * - States follow Clause 01a11bb1-8856-737f-945c-e44c596f7782: `none` without a declaration,
  *   `building` while a run is in progress, `ready` once its output settled, else `failed`. A watch
  *   run is first `ready` only after its output changed since it started, so an output left from
@@ -53,6 +57,12 @@ export type KitBuildRunner = KitBuildControl & Readonly<{
 	 * started, then one more for each settled output; `undefined` while there has been none.
 	 */
 	outputGeneration(): number | undefined
+	/**
+	 * The identity of the last good output, unique in this process (another runner for the same
+	 * Workspace root starts its generations at `0` again): it names the generation's module URLs
+	 * (`?v=<version>`) and pins its Adapter resolution and Preview bundle. `undefined` with no generation.
+	 */
+	outputVersion(): string | undefined
 	/** The declaration the current run follows, if any. */
 	declaration(): KitBuildDeclaration | undefined
 }>
@@ -74,6 +84,14 @@ export type KitBuildRunnerOptions = Readonly<{
 	generationWarning?: number
 	/** Where the argument array and failures are printed; `console.log` by default. */
 	print?: (line: string) => void
+	/**
+	 * Resolves the Adapters and builds the Preview bundle of the current output generation, which
+	 * then stay in use until the next one (`src/server/workspace-adapters.ts`). Called for the output
+	 * found at the first start and for each settled output; its failure is the resolution's own state.
+	 */
+	captureOutput?: () => Promise<unknown>
+	/** The longest a run waits for a capture in progress before it spawns; `KIT_BUILD_CAPTURE_WAIT_MS` by default. */
+	captureWaitMs?: number
 }>
 
 /** Clause 01a11bb1-87ed-7fec-b485-ede3986675d4. */
@@ -83,10 +101,18 @@ export const KIT_BUILD_LOG_BYTES = 256 * 1024
 /** Clause 01a12f9a-ef7c-7d41-86ac-2f2b3f1acd8a: restarts are at least this far apart. */
 export const KIT_BUILD_RESTART_INTERVAL_MS = 2000
 /**
- * Each output generation imports the `./` Adapter module under a new URL, which Node keeps for the
- * life of the process, so past this many a warning is printed once (owner ruling 3 of 2026-10-12).
+ * Each output generation imports the `./` Adapter module, and the kit modules it imports, under new
+ * URLs, which Node keeps for the life of the process, so past this many a warning is printed once
+ * (owner ruling 3 of 2026-10-12).
  */
 export const KIT_BUILD_GENERATION_WARNING = 50
+/**
+ * The longest a run waits for the capture of the output before it spawns the build, which may
+ * change the output; past it the build starts and the capture goes on.
+ */
+export const KIT_BUILD_CAPTURE_WAIT_MS = 10_000
+/** Numbers each runner in this process, for `outputVersion`. */
+let runnerInstances = 0
 const INTERNAL_VARIABLE_PREFIX = 'UIUX_INTERNAL_'
 /** The Agent Token variable the CLI suggests; never passed to a build (owner ruling 2 of 2026-10-12). */
 const MCP_TOKEN_VARIABLE = 'UIUX_MCP_TOKEN'
@@ -224,13 +250,36 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 	/** The restart waiting in the queue, not yet begun, which a further request shares. */
 	let queuedRestart: Promise<KitBuildRestart> | undefined
 	let lastRestartAt: number | undefined
+	const instance = ++runnerInstances
+	const captureWaitMs = options.captureWaitMs ?? KIT_BUILD_CAPTURE_WAIT_MS
+	/** The capture of the current generation in progress, if any. */
+	let capturing: Promise<void> | undefined
 
 	function advanceGeneration(): void {
 		generation = (generation ?? 0) + 1
 		if (!warnedGenerations && generation > generationWarning) {
 			warnedGenerations = true
-			print(`uiux: warning: the kit build has produced more than ${generationWarning} outputs in this server; each one loads its Adapter module anew and Node keeps every loaded module in memory. Restart uiux dev to release them.`)
+			print(`uiux: warning: the kit build has produced more than ${generationWarning} outputs in this server; each one loads its Adapter module and the kit modules it imports anew, and Node keeps every loaded module in memory. Restart uiux dev to release them.`)
 		}
+		capture()
+	}
+
+	/** Starts the capture of the current generation (Rule 01a11bb1-9df8-…); a failure stays the resolution's own state. */
+	function capture(): void {
+		const captureOutput = options.captureOutput
+		if (!captureOutput) return
+		const pending: Promise<void> = Promise.resolve()
+			.then(captureOutput)
+			.then(() => undefined, () => undefined)
+			.finally(() => {
+				if (capturing === pending) capturing = undefined
+			})
+		capturing = pending
+	}
+
+	/** Waits, at most `captureWaitMs`, for the capture in progress, so a build spawned next cannot change the files it reads. */
+	async function captured(): Promise<void> {
+		if (capturing) await Promise.race([capturing, delay(captureWaitMs)])
 	}
 
 	function restart(): Promise<KitBuildRestart> {
@@ -323,14 +372,19 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 		const declaration = read.declaration
 		declared = declaration
 		const outputDirectory = join(kitDirectory, ...declaration.output.split('/'))
-		// An output a previous session left is the last good output until this run settles (Rule 01a11bb1-9e5e-…).
-		if (first && generation === undefined && (await outputListing(kitDirectory, outputDirectory))?.files)
+		// An output a previous session left is the last good output until this run settles (Rule
+		// 01a11bb1-9e5e-…): it is captured before the build can change it.
+		if (first && generation === undefined && (await outputListing(kitDirectory, outputDirectory))?.files) {
 			generation = 0
+			capture()
+		}
 
 		const watching = declaration.watch !== undefined
 		const argv = declaration.watch ?? declaration.command
 		print(`uiux: kit build: running ${JSON.stringify(argv)} in ${name}/${watching ? ' (watch)' : ''}`)
 		status = { state: 'building' }
+		await captured()
+		if (run.stopping || current?.id !== run.id) return status
 
 		let child: ChildProcess
 		try {
@@ -426,6 +480,7 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 		status: () => status,
 		log: () => mask(log.text()),
 		outputGeneration: () => generation,
+		outputVersion: () => generation === undefined ? undefined : `${instance}.${generation}`,
 		declaration: () => declared,
 		start: () => serialize(async () => {
 			if (current) return status

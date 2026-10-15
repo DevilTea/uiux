@@ -62,8 +62,8 @@ const bundleCache = new Map<string, Promise<PreviewBundleResult>>()
 
 /**
  * The bundle's cache key, over the Workspace root, every Adapter module and every style entry. With
- * `pin`, the kit build output generation the set was resolved from, the files are not read: the
- * bundle of that generation stays in use until the next settled output, even when a failed build
+ * `pin`, the version of the kit build output generation the set was resolved from, the files are
+ * not read: the bundle of that generation stays in use until the next settled output, even when a failed build
  * has changed the files since (Rule 01a11bb1-9e5e-79ab-841e-c953e8b44bbf).
  */
 export async function computeBundleContentHash(workspaceRoot: string, set: ValidatedAdapterSet, pin?: string, styles: readonly string[] = []): Promise<string> {
@@ -122,7 +122,7 @@ export async function buildWorkspacePreviewBundle(input: Readonly<{
 	 * them before the Adapter modules, so their CSS leads the stylesheet.
 	 */
 	styles?: readonly string[]
-	/** The kit build output generation the set was resolved from (see `computeBundleContentHash`). */
+	/** The version (`outputVersion()`) of the kit build output generation the set was resolved from (`computeBundleContentHash`). */
 	pin?: string
 }>): Promise<PreviewBundleResult> {
 	const packageRoot = input.packageRoot ?? resolvePackageRoot()
