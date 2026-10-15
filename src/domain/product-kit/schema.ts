@@ -1,5 +1,4 @@
 import {
-	hasAsciiControlCharacter,
 	isSafeRelativePath,
 	jsonPointer,
 	rejectUnknownKeys,
@@ -8,7 +7,7 @@ import {
 	type ValidationResult,
 } from '../validation'
 import { isPortableAdapterModuleSpecifier, validateAdapterSelections, type WorkspaceAdapterSelection } from '../workspace/schema'
-import { isAllowedThemeAttributeName } from './theme-attributes'
+import { themeAttributeNameProblem } from './theme-attributes'
 
 export { PRODUCT_KIT_SCHEMA_VERSION } from '../workspace/schema'
 
@@ -25,10 +24,6 @@ const COMPONENT_NAME_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/u
 /** An npm package name: an optional `@scope/` and a lowercase, URL-safe name of at most 214 characters. */
 const PACKAGE_NAME_PATTERN = /^(?:@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/u
 const PACKAGE_NAME_MAX_LENGTH = 214
-/** An HTML attribute name: non-empty, without whitespace, `"`, `'`, `>`, `/`, `=` or an ASCII control character. */
-function isAttributeName(name: string): boolean {
-	return /^[^\s"'>/=]+$/u.test(name) && !hasAsciiControlCharacter(name)
-}
 
 export type ProductKitComponent = {
 	files: string[]
@@ -136,10 +131,11 @@ function validateThemes(input: unknown, v: Validator): void {
 		if (!entry) continue
 		for (const [name, value] of Object.entries(entry)) {
 			const attributePath = jsonPointer(themePath, name)
-			if (!isAttributeName(name))
-				v.issue('product_kit.invalid_theme_attribute', attributePath, 'A theme root attribute name is a valid HTML attribute name.')
-			else if (!isAllowedThemeAttributeName(name))
-				v.issue('product_kit.theme_attribute_not_allowed', attributePath, 'A theme root attribute is class or a data-* attribute.')
+			const problem = themeAttributeNameProblem(name)
+			if (problem === 'product_kit.invalid_theme_attribute')
+				v.issue(problem, attributePath, 'A theme root attribute name is a valid HTML attribute name.')
+			else if (problem === 'product_kit.theme_attribute_not_allowed')
+				v.issue(problem, attributePath, 'A theme root attribute is class or a data-* attribute.')
 			if (typeof value !== 'string')
 				v.issue('schema.expected_string', attributePath, 'A theme root attribute value is a string.')
 		}
@@ -213,7 +209,7 @@ function validateWidgets(input: unknown, componentNames: ReadonlySet<string>, v:
  * part has no empty, `.` or `..` segment, so a `./` entry stays inside `kit/` and a bare entry names
  * a path inside its package.
  */
-function isStyleSpecifier(value: unknown): value is string {
+export function isStyleSpecifier(value: unknown): value is string {
 	if (!isPortableAdapterModuleSpecifier(value)) return false
 	return isSafeRelativePath(value.startsWith('./') ? value.slice(2) : value)
 }

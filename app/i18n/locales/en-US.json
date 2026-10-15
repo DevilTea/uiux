@@ -1071,6 +1071,99 @@
       "reloadLog": "Reload log",
       "logFailed": "Couldn't load the build log.",
       "logRequiresKey": "Reading the build log requires the permission key {key}."
+    },
+    "sections": "Product Kit sections",
+    "legacySection": "This Workspace has no Product Kit file until it's migrated. Run uiux migrate to use this section.",
+    "saveWhich": "More than one section has unsaved changes. Open the one to save.",
+    "components": {
+      "title": "Components",
+      "description": "The component registry, {field} in the Product Kit file. Copy a component into a product project with the CLI or an Agent.",
+      "empty": "No components in the registry.",
+      "target": "Copy into",
+      "targetHelp": "A directory of the product project. Only the commands below use it.",
+      "name": "Name",
+      "layer": "Layer",
+      "files": "Files",
+      "requires": "Requires",
+      "packages": "Packages",
+      "actions": "Actions",
+      "layers": {
+        "designSystem": "Design system",
+        "product": "Product"
+      },
+      "browse": "Browse",
+      "browseNamed": "Browse {name}",
+      "copyCommand": "Copy command",
+      "copyCommandNamed": "Copy the command that copies {name}",
+      "browseRequiresKey": "Browsing a component's source requires the permission key {key}.",
+      "copyCommands": "Copy commands",
+      "cli": "CLI",
+      "mcp": "MCP",
+      "copyNamed": "Copy the {what} command",
+      "copied": "Copied",
+      "copyFailed": "Couldn't copy. Select the text and copy it yourself.",
+      "sourceFailed": "Couldn't load the component's source.",
+      "interface": "Props and emits",
+      "props": "Props",
+      "emits": "Emits",
+      "notDeclared": "None found in the source.",
+      "interfaceHelp": "As each Vue file declares them with defineProps and defineEmits. A type named there is in the file.",
+      "interfaceIncomplete": "{file} is too large to read every declaration from. Read it in the source files below.",
+      "sourceFiles": "Source files"
+    },
+    "styles": {
+      "sectionTitle": "Styles & themes",
+      "sectionDescription": "The stylesheets the Preview loads, and what each Workspace theme sets on the Preview document.",
+      "title": "Styles",
+      "help": "Loaded in this order. Name a CSS export of a declared package, or a ./ path to a CSS file inside kit/ outside node_modules/. When kit/package.json declares a build, a ./ path names a file of its output.",
+      "add": "Add style",
+      "empty": "No styles.",
+      "placeholder": "./styles/theme.css",
+      "specifierLabel": "Style {n}",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "remove": "Remove style",
+      "issue": {
+        "required": "Enter a specifier, or remove this style."
+      }
+    },
+    "themes": {
+      "title": "Themes",
+      "help": "Root attributes each Workspace theme sets on the Preview document: class, or a data- attribute in lowercase.",
+      "map": "Map a theme",
+      "empty": "No theme sets root attributes.",
+      "noWorkspaceThemes": "This Workspace has no themes. Add them in Workspace settings.",
+      "notWorkspaceTheme": "Not a Workspace theme",
+      "unmap": "Remove the mapping of {id}",
+      "noAttributes": "Sets no attributes.",
+      "namePlaceholder": "data-theme",
+      "nameLabel": "Attribute name for {id}",
+      "valueLabel": "Value of {name} for {id}",
+      "removeAttribute": "Remove attribute",
+      "addAttribute": "Add attribute",
+      "issue": {
+        "required": "Enter an attribute name, or remove this attribute.",
+        "duplicate": "This theme already sets this attribute."
+      }
+    },
+    "files": {
+      "title": "Files",
+      "description": "The kit project's files and build output, read-only. node_modules/ and links are left out.",
+      "reload": "Reload",
+      "requiresKey": "Browsing kit files requires the permission key {key}.",
+      "buildLog": "The {link} is in Overview.",
+      "listFailed": "Couldn't list the kit files.",
+      "truncated": "Showing the first {n} file. | Showing the first {n} files.",
+      "truncatedHelp": "The kit project has more files than one listing returns. Read the rest in the kit project itself.",
+      "tree": "Kit files",
+      "empty": "The kit project has no files to show.",
+      "pick": "Pick a file to read it.",
+      "content": "Content of {path}",
+      "binary": "This file isn't text, so it isn't shown.",
+      "tooLarge": "This file is larger than {limit}, so it isn't shown.",
+      "tooLargeHelp": "Open it in the kit project itself.",
+      "notFound": "This file is gone, or it isn't a regular file. Reload the list.",
+      "readFailed": "Couldn't read this file."
     }
   },
   "authoring": {
@@ -2286,7 +2379,8 @@
       "build_output_missing": "The kit build has produced no output yet.",
       "build_restart_throttled": "The kit build was restarted moments ago. Wait a few seconds, then restart it again.",
       "build_unavailable": "No kit build runs in this server; uiux dev runs it.",
-      "component_invalid": "A component in the registry does not match the kit project."
+      "component_invalid": "A component in the registry does not match the kit project.",
+      "file_too_large": "This kit file is too large to read here."
     },
     "product_kit": {
       "adapter_outside_build_output": "With a kit build, a ./ Adapter must name a file in its output directory.",
