@@ -40,6 +40,7 @@ Settings-page conventions in the Linear manner: a left section index, then one f
 
 - **In scope:**
   - **Settings:** General, Viewports, Themes. Adapters (selection, order, config; read-only package state with repair guidance) moved to the Overview section of the Product Kit page (`/workspace/product-kit`, issue #141).
+  - **Product Kit:** one section at a time, chosen from section links under the title and carried in `?section=`: Overview (packages, build and log, Adapters); Components (registry table, browsing a component's source with its props and emits, copy commands for `uiux components add` and `get_component_source`; the Catalog waits on issue #116); Styles & themes (ordered `styles`, the root attributes of each Workspace theme, Save per section); Files (read-only tree and text-only viewer of the kit project and its build output). Wider sections (Components, Files) use a 1024px column.
   - **Locales:** key × locale table, primary locale, reminders.
   - **Assets:** library, upload, replace, metadata, usage, validation.
   - **Flows:** list, graph, step and transition editor, validation, and the Prototype player.
@@ -176,6 +177,12 @@ The player opens full-canvas, reusing the frame. A step strip runs across the to
 | settings.title | Workspace settings | Workspace 設定 |
 | settings.general / viewports / themes | General / Viewports / Themes | 一般／檢視區／主題 |
 | productKit.adapters | Adapters | Adapter |
+| productKit.sections | Product Kit sections | Product Kit 區段 |
+| productKit.components.title | Components | 登錄項目 |
+| productKit.styles.sectionTitle | Styles & themes | 樣式與主題 |
+| productKit.files.title | Files | 檔案 |
+| productKit.themes.issue.duplicate | This theme already sets this attribute. | 此主題已設定這個屬性。 |
+| productKit.files.notFound | This file is gone, or it isn't a regular file. Reload the list. | 此檔案已不存在，或不是一般檔案。請重新載入清單。 |
 | settings.keyChange | Renaming a key changes its identity. Check references first. | 重新命名鍵會變更其識別，請先檢查參照。 |
 | settings.unsaved | {n} unsaved | {n} 項未儲存 |
 | settings.conflict | Settings changed since you opened them. | 開啟後設定已有變更。 |
