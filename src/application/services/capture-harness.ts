@@ -11,6 +11,27 @@ import type { ResolvedRenderContext } from '../../domain/render-context/schema'
 /** How long a page load, and then the wait for the Preview's status, may each take. */
 export const HARNESS_LOAD_TIMEOUT_MS = 15_000
 
+/**
+ * `task`, or a rejection with a `TimeoutError` once `timeoutMs` has passed. It bounds a step that
+ * Playwright puts no timeout on (`page.evaluate`); the caller closes the page, which ends the step.
+ */
+export async function withStepTimeout<T>(task: Promise<T>, timeoutMs: number, step: string): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => {
+			const error = new Error(`${step} did not finish within ${timeoutMs} ms.`)
+			error.name = 'TimeoutError'
+			reject(error)
+		}, timeoutMs)
+	})
+	try {
+		return await Promise.race([task, timeout])
+	}
+	finally {
+		clearTimeout(timer)
+	}
+}
+
 /** Stops animations, transitions and the caret, so a capture does not depend on timing. */
 export const HARNESS_NORMALIZATION_CSS = `
 	*, *::before, *::after {
@@ -53,6 +74,8 @@ export async function openHarnessPreview(browser: Browser, input: Readonly<{
 	context: ResolvedRenderContext
 	cookie?: HarnessCookie
 	timeoutMs?: number
+	/** A bound on the wait for web fonts. Formal capture passes none, so its wait stays unbounded as before. */
+	fontsTimeoutMs?: number
 }>): Promise<HarnessPreview> {
 	const timeout = input.timeoutMs ?? HARNESS_LOAD_TIMEOUT_MS
 	const browserContext = await browser.newContext({
@@ -71,7 +94,8 @@ export async function openHarnessPreview(browser: Browser, input: Readonly<{
 		const statusElement = await page.waitForSelector('[data-preview-status]:not([data-preview-status="loading"])', { timeout })
 		const previewStatus = await statusElement?.getAttribute('data-preview-status') ?? null
 		if (previewStatus !== 'ready') return { status: 'not_ready', previewStatus, close }
-		await page.evaluate(() => document.fonts?.ready)
+		const fonts = page.evaluate(() => document.fonts?.ready).then(() => undefined)
+		await (input.fontsTimeoutMs === undefined ? fonts : withStepTimeout(fonts, input.fontsTimeoutMs, 'The web font wait'))
 		return { status: 'ready', page, close }
 	}
 	catch (cause) {

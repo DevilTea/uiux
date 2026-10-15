@@ -182,7 +182,7 @@ export interface WorkspaceApplicationSession {
 	captureFormalEvidence(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult>
 	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
 	/** The Product Kit Checks (issue #141 Part 14 decision 7), run on request and non-blocking. */
-	runProductKitChecks(): Promise<ProductKitChecksResult>
+	runProductKitChecks(command?: Readonly<{ readSource?: boolean }>): Promise<ProductKitChecksResult>
 	/** The current Product Kit provenance, against which Evidence freshness is judged (Rules 01a11bb1-be4a-… and 01a1161b-ff68-…); `none` below schemaVersion 5. */
 	productKitProvenance(): Promise<CurrentProductKitProvenance>
 	assessHandoffReadiness(command: AssessHandoffReadinessCommand): Promise<AssessHandoffReadinessResult>
@@ -398,7 +398,7 @@ export function createWorkspaceApplicationSession(
 		replaceAsset: assetAuthoring.replaceAsset,
 		captureFormalEvidence: formalCapture.capture,
 		listEvidence: formalCapture.listEvidence,
-		runProductKitChecks: () => productKitChecks.run(),
+		runProductKitChecks: command => productKitChecks.run({ ...(command?.readSource === false ? { readSource: false } : {}) }),
 		productKitProvenance: () => readCurrentProductKitProvenance(persistence),
 		assessHandoffReadiness: handoffExport.assessReadiness,
 		exportHandoff: handoffExport.exportHandoff,

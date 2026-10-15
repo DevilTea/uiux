@@ -208,7 +208,7 @@ export interface ScopedWorkspaceSession {
 	editReviewMessage(command: Unstamped<EditReviewMessageCommand>): Promise<Scoped<ReviewAuthoringResult>>
 	retractReviewThread(command: Unstamped<RetractReviewThreadCommand>): Promise<Scoped<ReviewAuthoringResult>>
 	captureFormalEvidence(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult | AccessRefusal>
-	/** Run Checks' Product Kit part: a Workbench session with `workspace.read` only. */
+	/** Run Checks' Product Kit part: a Workbench session with `evidence.capture`; its props and emits check also needs `product-kit.source.read`. */
 	runProductKitChecks(): Promise<ProductKitChecksResult | AccessRefusal>
 	exportHandoff(command: ExportHandoffCommand): Promise<ExportHandoffResult | AccessRefusal>
 	acquireLeases(input: unknown): AcquireLeasesOutcome
@@ -632,7 +632,9 @@ export function createScopedWorkspaceSession(
 		},
 		async runProductKitChecks() {
 			const denied = authorizeOperation(principal, 'runProductKitChecks')
-			return denied ? refusalFromScope(PRODUCT_KIT_KEY, denied) : app.runProductKitChecks()
+			if (denied) return refusalFromScope('evidence', denied)
+			// Without `product-kit.source.read` the run goes ahead and its props and emits check is incomplete.
+			return app.runProductKitChecks({ readSource: authorizeOperation(principal, 'readKitSource') === undefined })
 		},
 		async exportHandoff(command) {
 			const denied = authorizeOperation(principal, 'exportHandoff')

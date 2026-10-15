@@ -4,6 +4,7 @@ import { navigateTo, useI18n } from '#imports'
 import type { TreeItem } from '@nuxt/ui'
 import { resolveDiagnosticWidgetTarget } from '../../../src/preview/checks-navigation'
 import { deriveWidgetTree, flattenWidgetTree } from '../../../src/preview/widget-tree'
+import { useAccess } from '../../composables/useAccess'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
@@ -23,9 +24,12 @@ import { diagnosticText } from '../../utils/diagnostic-copy'
  * #141 Part 14 decision 7): registry problems, repeat capture, live versus fresh, and props and
  * emits. They take longer than the resource reads, so they report their own state per check, and
  * their findings join the list when they finish. They are non-blocking (Rule
- * 01a11bb1-a88c-7d78-8633-1c3b55588910): nothing here gates Preview, capture or Handoff.
+ * 01a11bb1-a88c-7d78-8633-1c3b55588910): nothing here gates Preview, capture or Handoff. They need
+ * `evidence.capture`, and their props and emits check `product-kit.source.read` (Clause
+ * 01a11485-fa44-7b6a-99f8-de4e1e8edcfc): without the first, Run Checks never asks for them.
  */
 const { t } = useI18n()
+const access = useAccess()
 const uiux = useUiuxClient()
 const fmt = useWorkbenchFormat()
 const { views, flows, workspaceFindingCount } = useWorkbench()
@@ -46,7 +50,7 @@ async function read(kind: string, key: string): Promise<ResourceRead | undefined
 async function runChecks(): Promise<void> {
 	if (running.value) return
 	running.value = true
-	if (!kitRunning.value) void runKitChecks()
+	if (!kitRunning.value && canRunKitChecks.value) void runKitChecks()
 	const collected: Finding[] = []
 	const failed: { name: string; error: FetchErrorDetails }[] = []
 	const push = (resource: FindingResource, diagnostics: readonly Diagnostic[] | undefined, widgetFor?: (diagnostic: Diagnostic) => string | undefined, types?: ReadonlyMap<string, string>) => {
@@ -106,6 +110,8 @@ type KitChecksResponse =
 
 const api = $fetch as unknown as <T = unknown>(url: string, options?: Readonly<Record<string, unknown>>) => Promise<T>
 const kitRunning = ref(false)
+const canRunKitChecks = computed(() => access.can('evidence.capture'))
+const canReadKitSource = computed(() => access.can('product-kit.source.read'))
 const kitResult = shallowRef<KitChecksResponse>()
 const kitError = shallowRef<FetchErrorDetails>()
 
@@ -151,12 +157,19 @@ const findings = computed<readonly Finding[]>(() => {
 	return [...resourceFindings.value, ...kit]
 })
 
-/** One row per Product Kit check: its state, or the run's state while none has finished. */
+/**
+ * One row per Product Kit check: its state, or the run's state while none has finished. Without
+ * `evidence.capture` every row says which key it needs; an incomplete props and emits row without
+ * `product-kit.source.read` names that key.
+ */
 const kitRows = computed(() => KIT_CHECKS.map((check) => {
 	const result = kitResult.value
 	const summary = result && 'checks' in result ? result.checks[check] : undefined
-	const state = kitRunning.value ? 'checking' : summary?.state ?? (result?.status === 'not_applicable' ? 'not_applicable' : kitError.value ? 'failed' : 'not_run')
-	return { check, state, checked: summary?.checked ?? 0, unchecked: summary?.unchecked ?? 0, diagnostics: summary?.diagnostics ?? [] }
+	const state = !canRunKitChecks.value
+		? 'not_permitted'
+		: kitRunning.value ? 'checking' : summary?.state ?? (result?.status === 'not_applicable' ? 'not_applicable' : kitError.value ? 'failed' : 'not_run')
+	const requiredKey = state === 'not_permitted' ? 'evidence.capture' : check === 'props_emits' && state === 'incomplete' && !canReadKitSource.value ? 'product-kit.source.read' : undefined
+	return { check, state, requiredKey, checked: summary?.checked ?? 0, unchecked: summary?.unchecked ?? 0, diagnostics: summary?.diagnostics ?? [] }
 }))
 
 const KIT_STATE_ICON: Record<string, string> = {
@@ -165,6 +178,7 @@ const KIT_STATE_ICON: Record<string, string> = {
 	incomplete: 'i-lucide-circle-dashed',
 	failed: 'i-lucide-circle-x',
 	not_applicable: 'i-lucide-circle-minus',
+	not_permitted: 'i-lucide-lock',
 	not_run: 'i-lucide-circle',
 }
 
@@ -311,6 +325,11 @@ const items = computed<CheckTreeItem[]>(() => groups.value.map(group => ({
           />
           <span class="text-default">{{ t(`checks.kit.checks.${row.check}`) }}</span>
           <span class="text-xs text-muted">{{ t(`checks.kit.state.${row.state}`, { checked: row.checked, unchecked: row.unchecked }) }}</span>
+          <span
+            v-if="row.requiredKey"
+            class="text-xs text-muted"
+            :data-kit-check-required-key="row.requiredKey"
+          >{{ t('access.requiresKey', { key: row.requiredKey }) }}</span>
           <ul
             v-if="row.diagnostics.length && row.state !== 'checking'"
             class="w-full ps-6 text-xs text-muted"

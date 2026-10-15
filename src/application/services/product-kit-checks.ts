@@ -12,7 +12,7 @@ import { CAPTURE_HARNESS_GLOBAL, type CaptureHarnessHooks } from '../../preview/
 import { resolveDefaultLocale, resolveDefaultThemeId, resolveDefaultViewport } from '../../preview/render-context-options'
 import { deriveWidgetTree, flattenWidgetTree } from '../../preview/widget-tree'
 import type { KitBuildStatus } from '../ports/kit-build'
-import { captureHarnessScreenshot, openHarnessPreview, type HarnessCookie } from './capture-harness'
+import { captureHarnessScreenshot, HARNESS_LOAD_TIMEOUT_MS, openHarnessPreview, withStepTimeout, type HarnessCookie } from './capture-harness'
 import type { ProductKitRead } from './product-kit-authoring'
 
 /**
@@ -42,9 +42,15 @@ import type { ProductKitRead } from './product-kit-authoring'
  *
  * Bounds: one run at a time per Workspace session (`busy` otherwise); at most
  * {@link MAX_CHECKED_CONTEXTS} render contexts, three page loads each, in one browser; each load
- * under the formal capture timeouts; and no new render context after {@link RUN_DEADLINE_MS}. A
+ * under the formal capture timeouts, and each in-page step (the font and image waits, the live
+ * State write, the markup snapshot) under the same step timeout; and {@link RUN_DEADLINE_MS} for
+ * the capture checks, at which the browser is closed and whatever is in flight is abandoned. A
  * context left out by a bound makes its check `incomplete`, never clean. No finding or diagnostic
  * carries a host path.
+ *
+ * The props and emits check reads kit sources, so it runs only for a caller holding
+ * `product-kit.source.read`; without it the check is `incomplete` (owner ruling 1 of
+ * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18945630).
  */
 
 export const PRODUCT_KIT_CHECKS = Object.freeze(['registry', 'repeat_capture', 'live_versus_fresh', 'props_emits'] as const)
@@ -102,9 +108,20 @@ export type ProductKitChecksResult =
 	/** Another run is in progress for this Workspace. */
 	| Readonly<{ status: 'busy'; diagnostics: readonly Diagnostic[] }>
 
-export type ProductKitChecksService = Readonly<{
-	run(command?: Readonly<{ baseUrl?: string }>): Promise<ProductKitChecksResult>
+export type ProductKitChecksCommand = Readonly<{
+	baseUrl?: string
+	/** Whether the caller may read kit sources (`product-kit.source.read`); the props and emits check needs it. Default true. */
+	readSource?: boolean
 }>
+
+export type ProductKitChecksService = Readonly<{
+	run(command?: ProductKitChecksCommand): Promise<ProductKitChecksResult>
+}>
+
+/** The capture checks' run deadline passed while a render context was in flight. */
+class RunDeadlineError extends Error {
+	override name = 'RunDeadlineError'
+}
 
 type CheckContext = Readonly<{ view: ViewResource; context: ResolvedRenderContext; types: ReadonlyMap<string, string> }>
 type Capture = Readonly<{ bytes: Uint8Array; widgets: Readonly<Record<string, string>> }>
@@ -160,6 +177,15 @@ function snapshotWidgetMarkup(input: Readonly<{ limit: number }>): Record<string
 	return result
 }
 
+/**
+ * Runs in the Preview page: waits until every `<img>` has loaded and decoded, or failed, but no
+ * longer than `timeoutMs`, so an image loaded after the View mounts does not make two captures differ.
+ */
+async function settleImages(input: Readonly<{ timeoutMs: number }>): Promise<void> {
+	const pending = Array.from(document.images, image => image.complete ? undefined : image.decode().catch(() => undefined))
+	await Promise.race([Promise.all(pending), new Promise(resolve => setTimeout(resolve, input.timeoutMs))])
+}
+
 export function createProductKitChecksService(
 	persistence: FileNativePersistence,
 	options: Readonly<{
@@ -167,14 +193,26 @@ export function createProductKitChecksService(
 		serverOrigin?: string
 		captureCookie?: () => HarnessCookie | undefined
 		kitBuild?: () => KitBuildStatus
-		/** Test seam: the clock the run deadline reads. */
+		/** Test seam: the clock the run deadline reads before each render context. */
 		now?: () => number
+		/** Test seam: {@link RUN_DEADLINE_MS}. */
+		runDeadlineMs?: number
+		/** Test seam: the in-page step timeout, {@link HARNESS_LOAD_TIMEOUT_MS} by default. */
+		stepTimeoutMs?: number
+		/** Test seam: {@link MAX_CHECKED_CONTEXTS}. */
+		maxCheckedContexts?: number
+		/** Test seam: how a render context's Preview is opened. */
+		openPreview?: typeof openHarnessPreview
 	}>,
 ): ProductKitChecksService {
 	let running = false
 	const now = options.now ?? Date.now
+	const runDeadlineMs = options.runDeadlineMs ?? RUN_DEADLINE_MS
+	const stepTimeoutMs = options.stepTimeoutMs ?? HARNESS_LOAD_TIMEOUT_MS
+	const maxCheckedContexts = options.maxCheckedContexts ?? MAX_CHECKED_CONTEXTS
+	const openPreview = options.openPreview ?? openHarnessPreview
 
-	function baseUrlFor(command?: Readonly<{ baseUrl?: string }>): string {
+	function baseUrlFor(command?: ProductKitChecksCommand): string {
 		const port = process.env.PORT || process.env.NITRO_PORT || '3000'
 		const host = process.env.HOST || process.env.NITRO_HOST || '127.0.0.1'
 		const normalizedHost = (host === '0.0.0.0' || host === '::' || host === '') ? '127.0.0.1' : host
@@ -284,23 +322,25 @@ export function createProductKitChecksService(
 	}
 
 	async function captureOnce(browser: Browser, baseUrl: string, context: ResolvedRenderContext, live?: string): Promise<Capture | Readonly<{ unavailable: Diagnostic }>> {
-		const preview = await openHarnessPreview(browser, { baseUrl, context, cookie: options.captureCookie?.() })
+		const preview = await openPreview(browser, { baseUrl, context, cookie: options.captureCookie?.(), fontsTimeoutMs: stepTimeoutMs })
 		try {
 			const variant = context.variantName ?? live
 			const path = `/views/${escapePointer(context.viewId)}${variant ? `/variants/${escapePointer(variant)}` : ''}`
 			if (preview.status !== 'ready')
 				return { unavailable: { code: 'preview.runtime_failed', path, message: `The Preview of this render context reported '${preview.previewStatus}', so it was not checked.` } }
 			if (live !== undefined) {
-				const diagnostics = await preview.page.evaluate(async ({ global, name }) => {
+				const diagnostics = await withStepTimeout(preview.page.evaluate(async ({ global, name }) => {
 					const hooks = (window as unknown as Record<string, CaptureHarnessHooks | undefined>)[global]
 					return hooks ? await hooks.applyVariantStateLive(name) : [{ code: 'preview.runtime_failed', path: '/preview', message: 'The capture harness hooks are missing.' }]
-				}, { global: CAPTURE_HARNESS_GLOBAL, name: live })
+				}, { global: CAPTURE_HARNESS_GLOBAL, name: live }), stepTimeoutMs, 'The live State write')
 				if (diagnostics.length > 0)
 					return { unavailable: { code: diagnostics[0]!.code, path, message: `The Variant's State could not be written into a live Preview, so it was not checked: ${diagnostics.map(d => d.message).join(' ')}` } }
 			}
 			const page: Page = preview.page
+			// The in-page wait gives up after the step timeout; the outer bound only catches a stuck page.
+			await withStepTimeout(page.evaluate(settleImages, { timeoutMs: stepTimeoutMs }), stepTimeoutMs * 2, 'The image wait')
 			const bytes = await captureHarnessScreenshot(page)
-			const widgets = await page.evaluate(snapshotWidgetMarkup, { limit: MAX_SNAPSHOT_WIDGETS })
+			const widgets = await withStepTimeout(page.evaluate(snapshotWidgetMarkup, { limit: MAX_SNAPSHOT_WIDGETS }), stepTimeoutMs, 'The markup snapshot')
 			return { bytes, widgets }
 		}
 		finally {
@@ -308,13 +348,16 @@ export function createProductKitChecksService(
 		}
 	}
 
-	async function guarded<T>(task: () => Promise<T>, path: string): Promise<T | Readonly<{ unavailable: Diagnostic }>> {
+	/** `task`, raced against the run deadline; a failure, a step timeout or the deadline leaves the render context unchecked. */
+	async function guarded<T>(task: () => Promise<T>, path: string, deadline: Promise<never>): Promise<T | Readonly<{ unavailable: Diagnostic }>> {
 		try {
-			return await task()
+			return await Promise.race([task(), deadline])
 		}
 		catch (cause) {
+			if (cause instanceof RunDeadlineError)
+				return { unavailable: { code: 'checks.limit_reached', path, message: `The run reached its ${runDeadlineMs / 1000} s limit while checking this render context, so it was not checked.` } }
 			const timeout = cause instanceof Error && cause.name === 'TimeoutError'
-			return { unavailable: { code: 'capture.execution_failed', path, message: timeout ? 'The Preview did not become ready within the capture timeout, so this render context was not checked.' : 'The capture browser failed while loading this render context, so it was not checked.' } }
+			return { unavailable: { code: 'capture.execution_failed', path, message: timeout ? 'The Preview did not finish loading or a capture step within the capture timeout, so this render context was not checked.' : 'The capture browser failed while loading this render context, so it was not checked.' } }
 		}
 	}
 
@@ -343,26 +386,38 @@ export function createProductKitChecksService(
 			return
 		}
 		const started = now()
+		// The run deadline: it closes the browser, which ends every page step in flight, and rejects
+		// whatever the run is waiting on, so no hung step can keep the run (and its lock) forever.
+		let expired = false
+		let deadlineTimer: ReturnType<typeof setTimeout> | undefined
+		const deadline = new Promise<never>((_, reject) => {
+			deadlineTimer = setTimeout(() => {
+				expired = true
+				reject(new RunDeadlineError())
+				void browser.close().catch(() => undefined)
+			}, runDeadlineMs)
+		})
+		deadline.catch(() => undefined)
 		/** The Views whose base state C1 flagged: their Variants are not compared live. */
 		const flaggedBases = new Set<string>()
 		try {
 			for (const [position, target] of contexts.entries()) {
-				if (position >= MAX_CHECKED_CONTEXTS || now() - started > RUN_DEADLINE_MS) {
+				if (position >= maxCheckedContexts || expired || now() - started > runDeadlineMs) {
 					const left = contexts.slice(position)
 					c1.unchecked += left.length
 					const leftVariants = left.filter(entry => entry.context.variantName !== undefined).length
 					c2.unchecked += leftVariants
-					const message = position >= MAX_CHECKED_CONTEXTS
-						? `One run checks at most ${MAX_CHECKED_CONTEXTS} render contexts; ${left.length} were not checked.`
-						: `The run reached its ${RUN_DEADLINE_MS / 1000} s limit; ${left.length} render contexts were not checked.`
+					const message = position >= maxCheckedContexts
+						? `One run checks at most ${maxCheckedContexts} render contexts; ${left.length} were not checked.`
+						: `The run reached its ${runDeadlineMs / 1000} s limit; ${left.length} render contexts were not checked.`
 					c1.diagnostics.push({ code: 'checks.limit_reached', path: '/views', message })
 					if (leftVariants > 0) c2.diagnostics.push({ code: 'checks.limit_reached', path: '/views', message })
 					break
 				}
 				const variantName = target.context.variantName
 				const path = `/views/${escapePointer(target.context.viewId)}${variantName ? `/variants/${escapePointer(variantName)}` : ''}`
-				const first = await guarded(() => captureOnce(browser, baseUrl, target.context), path)
-				const second = 'unavailable' in first ? first : await guarded(() => captureOnce(browser, baseUrl, target.context), path)
+				const first = await guarded(() => captureOnce(browser, baseUrl, target.context), path, deadline)
+				const second = 'unavailable' in first ? first : await guarded(() => captureOnce(browser, baseUrl, target.context), path, deadline)
 				if ('unavailable' in first || 'unavailable' in second) {
 					const diagnostic = 'unavailable' in first ? first.unavailable : (second as { unavailable: Diagnostic }).unavailable
 					c1.unchecked += 1
@@ -387,7 +442,7 @@ export function createProductKitChecksService(
 				}
 				const base: ResolvedRenderContext = { ...target.context }
 				delete (base as { variantName?: string }).variantName
-				const live = await guarded(() => captureOnce(browser, baseUrl, base, variantName), path)
+				const live = await guarded(() => captureOnce(browser, baseUrl, base, variantName), path, deadline)
 				if ('unavailable' in live) {
 					c2.unchecked += 1
 					c2.diagnostics.push(live.unavailable)
@@ -399,11 +454,12 @@ export function createProductKitChecksService(
 			}
 		}
 		finally {
+			clearTimeout(deadlineTimer)
 			await browser.close().catch(() => undefined)
 		}
 	}
 
-	async function run(command?: Readonly<{ baseUrl?: string }>): Promise<ProductKitChecksResult> {
+	async function run(command?: ProductKitChecksCommand): Promise<ProductKitChecksResult> {
 		if (running) return { status: 'busy', diagnostics: [{ code: 'checks.busy', path: '/checks', message: 'The Product Kit Checks are already running for this Workspace; wait for that run to finish.' }] }
 		running = true
 		try {
@@ -430,8 +486,14 @@ export function createProductKitChecksService(
 				}
 			}
 			else {
-				const project = await locateKitProject(persistence.root, codeDirectory)
-				Object.assign(propsEmits, await checkPropsAndEmits(validation.value, project, findings))
+				if (command?.readSource === false) {
+					propsEmits.unchecked = Object.keys(validation.value.components).length
+					propsEmits.diagnostics.push({ code: 'auth.scope_denied', path: '/components', message: 'The props and emits check reads kit sources, which needs product-kit.source.read, so no component was checked.' })
+				}
+				else {
+					const project = await locateKitProject(persistence.root, codeDirectory)
+					Object.assign(propsEmits, await checkPropsAndEmits(validation.value, project, findings))
+				}
 				await checkCaptures(validation.value, baseUrlFor(command), findings, c1, c2)
 			}
 			const checks = {

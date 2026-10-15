@@ -119,6 +119,7 @@
         "incomplete": "Incomplete · {checked} checked, {unchecked} not checked",
         "failed": "Couldn't run",
         "not_applicable": "No Product Kit in this Workspace",
+        "not_permitted": "Not run",
         "not_run": "Not run yet"
       }
     }

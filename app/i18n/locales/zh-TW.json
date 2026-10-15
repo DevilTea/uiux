@@ -119,6 +119,7 @@
         "incomplete": "未完成 · 已檢查 {checked} 項，{unchecked} 項未檢查",
         "failed": "無法執行",
         "not_applicable": "這個 Workspace 沒有 Product Kit",
+        "not_permitted": "未執行",
         "not_run": "尚未執行"
       }
     }

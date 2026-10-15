@@ -90,9 +90,12 @@ export const ACCESS_OPERATIONS = {
 	// compare_component_copies, and their Workbench mirrors.
 	readKitSource: { requiredKeys: ['product-kit.source.read'] },
 	captureFormalEvidence: { requiredKeys: ['evidence.capture'] },
-	// Run Checks' Product Kit part (Discussion #139 decision 7): part of the Workbench's Checks browsing
-	// (Clause 01a11485-fa00-72da-bc46-98302a3c106e), so Workbench sessions only; it launches the capture browser.
-	runProductKitChecks: { requiredKeys: ['workspace.read'], sessionOnly: true },
+	// Run Checks' Product Kit part (Discussion #139 decision 7) in the Workbench, so Workbench sessions
+	// only. It launches the capture browser, so it needs `evidence.capture` as formal capture does
+	// (Clause 01a11485-fa44-7b6a-99f8-de4e1e8edcfc; owner ruling 1 of
+	// https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18945630). Its props and emits
+	// check also needs `product-kit.source.read` (`readKitSource`): see `runProductKitChecks` in `scoped-session.ts`.
+	runProductKitChecks: { requiredKeys: ['evidence.capture'], sessionOnly: true },
 	exportHandoff: { requiredKeys: ['handoff.export'] },
 	// A restore also needs the restored kind's write key (Rule 01a11c09-c648-71be-a550-2ecabf12f5d0): see `authorizeRestore`.
 	restoreResourceVersion: { requiredKeys: ['history.restore'] },

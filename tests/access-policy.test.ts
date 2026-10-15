@@ -144,8 +144,8 @@ const ROLE_MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; 
 	readKitSource: { min: 'viewer' },
 	updateComponentRegistry: { min: 'editor' },
 	captureFormalEvidence: { min: 'editor' },
-	// Added with the Product Kit Checks (issue #141 Part 14): Checks browsing, Workbench sessions only.
-	runProductKitChecks: { min: 'viewer', S: true },
+	// Added with the Product Kit Checks (issue #141 Part 14): `evidence.capture`, Workbench sessions only.
+	runProductKitChecks: { min: 'editor', S: true },
 	exportHandoff: { min: 'editor' },
 	restoreResourceVersion: { min: 'editor' },
 	acquireLeases: { min: 'editor' },

@@ -418,7 +418,7 @@ export async function readProductKitForHttp(app: ScopedWorkspaceSession): Promis
 
 /**
  * `POST /api/product-kit/checks`: Run Checks' Product Kit part (issue #141 Part 14 decision 7), a
- * Workbench session with `workspace.read`. A run already in progress answers 409.
+ * Workbench session with `evidence.capture`. A run already in progress answers 409.
  */
 export async function runProductKitChecksForHttp(app: ScopedWorkspaceSession): Promise<AuthoringHttpResult> {
 	const result = await app.runProductKitChecks()

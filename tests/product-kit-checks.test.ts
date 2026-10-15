@@ -7,8 +7,13 @@ import { canonicalJsonBytes } from '../src/persistence'
 import { FileNativePersistence } from '../src/persistence/file-native'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createProductKitAuthoringService } from '../src/application/services/product-kit-authoring'
+import { keysForRole } from '../src/application/access/keys'
+import { harnessPreviewUrl, openHarnessPreview } from '../src/application/services/capture-harness'
 import { createProductKitChecksService, RUN_DEADLINE_MS, type ProductKitChecksResult, type ProductKitCheckFinding } from '../src/application/services/product-kit-checks'
+import type { WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { ViewResource } from '../src/domain/views/schema'
+import { CAPTURE_HARNESS_GLOBAL } from '../src/preview/capture-harness-hooks'
+import { provisionToken, scoped, sessionCookieFor, testMember } from './support/access'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
@@ -141,10 +146,28 @@ let result: Extract<ProductKitChecksResult, { status: 'completed' | 'incomplete'
 
 beforeAll(async () => {
 	server = await startWorkbenchServer({ prepare })
-	const response = await fetch(`${server.origin}/api/product-kit/checks`, { method: 'POST', headers: server.headers })
-	expect(response.status).toBe(200)
-	result = await response.json() as typeof result
+	// Two requests at once: one runs, the other is answered 409 while it does.
+	const responses = await Promise.all([0, 1].map(() => fetch(`${server.origin}/api/product-kit/checks`, { method: 'POST', headers: server.headers })))
+	expect(responses.map(response => response.status).sort()).toEqual([200, 409])
+	const busy = responses.find(response => response.status === 409)!
+	expect(await busy.json()).toMatchObject({ status: 'busy', diagnostics: [{ code: 'checks.busy' }] })
+	result = await responses.find(response => response.status === 200)!.json() as typeof result
 }, 180_000)
+
+function directService(overrides: Partial<Parameters<typeof createProductKitChecksService>[1]> = {}) {
+	const persistence = new FileNativePersistence({ root: server.workspaceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+	return createProductKitChecksService(persistence, {
+		readProductKit: createProductKitAuthoringService(persistence).readProductKit,
+		captureCookie: () => server.cookie,
+		...overrides,
+	})
+}
+
+/** A clock that passes the run deadline right after each run starts, so no render context is captured. */
+function lateClock(): () => number {
+	let calls = 0
+	return () => (calls++ % 2 === 0 ? 0 : RUN_DEADLINE_MS + 1)
+}
 
 afterAll(async () => {
 	await server?.close()
@@ -231,6 +254,121 @@ describe('Product Kit Checks', () => {
 			},
 		})
 		expect((outcome as typeof result).findings.filter(finding => finding.check === 'repeat_capture' || finding.check === 'live_versus_fresh')).toEqual([])
+	}, 60_000)
+
+	it('times out a live State write that never resolves, reports it not checked and releases the run', async () => {
+		const service = directService({
+			stepTimeoutMs: 2_000,
+			// The capture-harness hook never resolves, as a hung component would leave it.
+			openPreview: async (browser, input) => {
+				const preview = await openHarnessPreview(browser, input)
+				if (preview.status === 'ready')
+					await preview.page.evaluate(global => Object.defineProperty(window, global, { value: { applyVariantStateLive: () => new Promise(() => undefined) }, configurable: true }), CAPTURE_HARNESS_GLOBAL)
+				return preview
+			},
+		})
+		const outcome = await service.run({ baseUrl: server.origin })
+		expect(outcome).toMatchObject({
+			status: 'incomplete',
+			checks: {
+				repeat_capture: { state: 'completed', checked: 6 },
+				live_versus_fresh: { state: 'incomplete', checked: 0, unchecked: 2, diagnostics: [{ code: 'capture.execution_failed' }, { code: 'capture.execution_failed' }] },
+			},
+		})
+		expect((outcome as typeof result).findings.filter(finding => finding.check === 'live_versus_fresh')).toEqual([])
+		// The lock is free again: the next run starts instead of answering busy.
+		const fast = directService({ now: lateClock() })
+		expect((await fast.run({ baseUrl: server.origin })).status).toBe('incomplete')
+	}, 120_000)
+
+	it('abandons a render context still in flight at the run deadline, reports the rest not checked and releases the run', async () => {
+		const service = directService({ runDeadlineMs: 500, openPreview: () => new Promise(() => undefined) })
+		const outcome = await service.run({ baseUrl: server.origin })
+		expect(outcome).toMatchObject({
+			status: 'incomplete',
+			checks: {
+				repeat_capture: { state: 'incomplete', checked: 0, unchecked: 6, diagnostics: [{ code: 'checks.limit_reached' }, { code: 'checks.limit_reached' }] },
+				live_versus_fresh: { state: 'incomplete', checked: 0, unchecked: 2 },
+			},
+		})
+		expect((await service.run({ baseUrl: server.origin })).status).toBe('incomplete')
+	}, 60_000)
+
+	it('reports the render contexts past its context cap as not checked, never clean', async () => {
+		const outcome = await directService({ maxCheckedContexts: 1 }).run({ baseUrl: server.origin })
+		expect(outcome).toMatchObject({
+			status: 'incomplete',
+			checks: {
+				repeat_capture: { state: 'incomplete', checked: 1, unchecked: 5, diagnostics: [{ code: 'checks.limit_reached', message: expect.stringContaining('at most 1 render contexts') }] },
+				live_versus_fresh: { state: 'incomplete', checked: 0, unchecked: 2 },
+			},
+		})
+	}, 60_000)
+
+	it('leaves the props and emits check incomplete for a caller without product-kit.source.read', async () => {
+		const outcome = await directService({ now: lateClock() }).run({ baseUrl: server.origin, readSource: false })
+		expect(outcome).toMatchObject({ checks: { props_emits: { state: 'incomplete', checked: 0, unchecked: 6, diagnostics: [{ code: 'auth.scope_denied', path: '/components' }] } } })
+		expect((outcome as typeof result).findings.filter(finding => finding.check === 'props_emits')).toEqual([])
+	})
+
+	it('needs evidence.capture, and passes whether the caller may read kit sources', async () => {
+		const calls: unknown[] = []
+		const app = { runProductKitChecks: async (command: unknown) => { calls.push(command); return { status: 'busy', diagnostics: [] } } } as unknown as WorkspaceApplicationSession
+		const editor = keysForRole('human', 'editor')
+		expect(await scoped(app, testMember({ keys: editor.filter(key => key !== 'evidence.capture') })).runProductKitChecks())
+			.toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['evidence.capture'] })
+		await scoped(app, testMember({ keys: editor.filter(key => key !== 'product-kit.source.read') })).runProductKitChecks()
+		await scoped(app, testMember({ keys: editor })).runProductKitChecks()
+		expect(calls).toEqual([{ readSource: false }, { readSource: true }])
+	})
+
+	it('refuses a Workbench session without evidence.capture, and Run Checks then never asks for the Product Kit Checks', async () => {
+		const viewer = await sessionCookieFor(server.origin, await provisionToken(server.workspaceRoot, { nickname: 'checks-viewer', role: 'viewer' }))
+		const refused = await fetch(`${server.origin}/api/product-kit/checks`, { method: 'POST', headers: { cookie: `${viewer.name}=${viewer.value}` } })
+		expect(refused.status).toBe(403)
+		expect(await refused.json()).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['evidence.capture'] })
+
+		const browser = await chromium.launch({ headless: true })
+		try {
+			const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+			await context.addCookies([{ ...viewer, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
+			const page = await context.newPage()
+			const kitRequests: string[] = []
+			page.on('request', (request) => {
+				if (request.url().includes('/api/product-kit/checks')) kitRequests.push(request.url())
+			})
+			await page.goto(`${server.origin}/?tab=checks`, { waitUntil: 'load' })
+			await page.locator('[data-run-checks]').click()
+			const row = page.locator('[data-kit-check="registry"]')
+			await row.waitFor({ timeout: 15_000 })
+			expect(await page.locator('[data-kit-check]').evaluateAll(rows => rows.map(entry => entry.getAttribute('data-kit-check-state'))))
+				.toEqual(['not_permitted', 'not_permitted', 'not_permitted', 'not_permitted'])
+			expect(await row.locator('[data-kit-check-required-key]').textContent()).toContain('evidence.capture')
+			expect(kitRequests).toEqual([])
+		}
+		finally {
+			await browser.close()
+		}
+	}, 60_000)
+
+	it('installs the capture-harness hooks in harness mode only', async () => {
+		const browser = await chromium.launch({ headless: true })
+		try {
+			const context = await browser.newContext()
+			await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
+			const page = await context.newPage()
+			const harness = harnessPreviewUrl(server.origin, { viewId: STABLE, locale: 'en-US', viewportId: 'desktop', viewport: { width: 1280, height: 800 }, themeId: 'dark' })
+			const plain = new URL(harness)
+			plain.searchParams.delete('harness')
+			for (const [url, installed] of [[plain.href, false], [harness, true]] as const) {
+				await page.goto(url, { waitUntil: 'load' })
+				await page.waitForSelector('[data-preview-status]:not([data-preview-status="loading"])', { timeout: 15_000 })
+				expect(await page.evaluate(global => global in window, CAPTURE_HARNESS_GLOBAL), url).toBe(installed)
+			}
+		}
+		finally {
+			await browser.close()
+		}
 	}, 60_000)
 
 	it('shows each check\'s state and the Product Kit findings in Overview › Checks after Run Checks', async () => {
