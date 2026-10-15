@@ -1,11 +1,11 @@
 import { readKitDependencyRanges } from '../../adapters/kit-dependencies'
 import { locateKitProject, maskHostPaths, type KitProject } from '../../adapters/kit-registry'
-import { isKitFilePath, listKitFiles, readKitFile, readKitSourceFile, type KitFileEntry } from '../../adapters/kit-source-files'
+import { isKitFilePath, listKitFiles, MAX_KIT_FILE_BYTES, readKitFile, readKitSourceFile, type KitFileEntry } from '../../adapters/kit-source-files'
 import { componentClosure } from '../../domain/product-kit/closure'
 import { copyPathBelowTarget, type CopyRecordEntry } from '../../domain/product-kit/copy-record'
 import { componentDigest, fileDigest } from '../../domain/product-kit/digest'
 import { PRODUCT_KIT_RESOURCE_KEY, PRODUCT_KIT_SCHEMA_VERSION, validateProductKit, type ProductKit } from '../../domain/product-kit/schema'
-import type { Diagnostic } from '../../domain/validation'
+import { jsonPointer, type Diagnostic } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
 
 /**
@@ -25,12 +25,23 @@ export type KitSourceBlocked = Readonly<{ status: 'blocked'; key: Key; code: 'wo
 /** The Product Kit file fails its own validation, so it has no registry to read. */
 export type KitSourceInvalid = Readonly<{ status: 'invalid'; key: Key; code: string; message: string; diagnostics: readonly Diagnostic[] }>
 
-export type ListKitFilesResult = Readonly<{ status: 'listed'; key: Key; files: readonly KitFileEntry[] }> | KitSourceBlocked
+/**
+ * A kit file above the read limit (Clause 01a13d3e-c4b5-…), refused with `kit.file_too_large` and
+ * never read; `path` is relative to `kit/` and `limit` is the limit in bytes.
+ */
+export type KitSourceTooLarge = Readonly<{ status: 'too_large'; key: Key; code: typeof KIT_FILE_TOO_LARGE; path: string; limit: number; message: string; diagnostics: readonly Diagnostic[] }>
+
+/** The code of a kit file read refused for its size (Clause 01a13d3e-c4b5-…). */
+export const KIT_FILE_TOO_LARGE = 'kit.file_too_large'
+
+/** `truncated` is true when the listing stopped at its entry limit (Clause 01a13d3e-c4b5-…). */
+export type ListKitFilesResult = Readonly<{ status: 'listed'; key: Key; files: readonly KitFileEntry[]; truncated: boolean }> | KitSourceBlocked
 
 export type KitFileRead =
 	| Readonly<{ status: 'found'; key: Key; path: string; size: number; digest: string; bytes: Uint8Array }>
 	| Readonly<{ status: 'not_found'; key: Key; path: string }>
 	| Readonly<{ status: 'invalid_path'; key: Key; path: string; message: string }>
+	| KitSourceTooLarge
 	| KitSourceBlocked
 
 /** A file's content: UTF-8 text, or base64 (`encoding: "base64"`) when its bytes are not UTF-8. */
@@ -54,6 +65,7 @@ export type ComponentSource = Readonly<{
 export type GetComponentSourceResult =
 	| Readonly<{ status: 'found'; key: Key; components: readonly ComponentSource[] }>
 	| Readonly<{ status: 'not_found'; key: Key; components: readonly string[]; message: string }>
+	| KitSourceTooLarge
 	| KitSourceInvalid
 	| KitSourceBlocked
 
@@ -76,6 +88,7 @@ export type ComparedCopyFile = Readonly<{
 
 export type CompareComponentCopiesResult =
 	| Readonly<{ status: 'compared'; key: Key; files: readonly ComparedCopyFile[] }>
+	| KitSourceTooLarge
 	| KitSourceInvalid
 	| KitSourceBlocked
 
@@ -106,6 +119,12 @@ export function createKitSourceService(persistence: FileNativePersistence, optio
 		return { status: 'blocked', key: KEY, code: 'workspace.migration_required', message, diagnostics: [{ code: 'workspace.migration_required', path: '/schemaVersion', message }] }
 	}
 
+	/** The refusal of the kit file `path` (relative to `kit/`) for its size; `pointer` locates it in the request. */
+	function tooLarge(path: string, pointer: string): KitSourceTooLarge {
+		const message = `kit/${path} is larger than ${MAX_KIT_FILE_BYTES} bytes (8 MiB), the most one kit file read returns; it was not read.`
+		return { status: 'too_large', key: KEY, code: KIT_FILE_TOO_LARGE, path, limit: MAX_KIT_FILE_BYTES, message, diagnostics: [{ code: KIT_FILE_TOO_LARGE, path: pointer, message }] }
+	}
+
 	async function kitProject(): Promise<KitProject | undefined> {
 		const name = persistence.layout.codeDir
 		if (!persistence.layout.productKitPath || !name) return undefined
@@ -125,7 +144,8 @@ export function createKitSourceService(persistence: FileNativePersistence, optio
 		async listKitFiles(): Promise<ListKitFilesResult> {
 			const kit = await kitProject()
 			if (!kit) return blocked()
-			return { status: 'listed', key: KEY, files: await listKitFiles(kit) }
+			const listing = await listKitFiles(kit)
+			return { status: 'listed', key: KEY, files: listing.files, truncated: listing.truncated }
 		},
 
 		async readKitFile(path: string): Promise<KitFileRead> {
@@ -133,9 +153,10 @@ export function createKitSourceService(persistence: FileNativePersistence, optio
 			if (!kit) return blocked()
 			if (!isKitFilePath(path))
 				return { status: 'invalid_path', key: KEY, path, message: 'A kit file path is relative to kit/: no empty, ".", or ".." segment, no backslash or control character, and not inside kit/node_modules/.' }
-			const bytes = await readKitFile(kit, path)
-			if (!bytes) return { status: 'not_found', key: KEY, path }
-			return { status: 'found', key: KEY, path, size: bytes.byteLength, digest: await fileDigest(bytes), bytes }
+			const read = await readKitFile(kit, path, { maxBytes: MAX_KIT_FILE_BYTES })
+			if (read.status === 'too_large') return tooLarge(path, '/')
+			if (read.status === 'not_found') return { status: 'not_found', key: KEY, path }
+			return { status: 'found', key: KEY, path, size: read.bytes.byteLength, digest: await fileDigest(read.bytes), bytes: read.bytes }
 		},
 
 		async getComponentSource(input): Promise<GetComponentSourceResult> {
@@ -165,11 +186,13 @@ export function createKitSourceService(persistence: FileNativePersistence, optio
 				const digests: Record<string, string> = {}
 				const recordFiles: Record<string, { source: string; digest: string }> = {}
 				for (const [index, source] of component.files.entries()) {
-					const bytes = await readKitSourceFile(kit, source)
-					if (bytes === undefined) {
+					const read = await readKitSourceFile(kit, source, { maxBytes: MAX_KIT_FILE_BYTES })
+					if (read.status === 'too_large') return tooLarge(source, `${jsonPointer('/components', name)}/files/${index}`)
+					if (read.status === 'not_found') {
 						problems.push({ code: 'kit.component_invalid', path: `/components/${name}/files/${index}`, message: `${name} declares kit/${source}, which is not a regular file under kit/src/ reached without a symbolic link.` })
 						continue
 					}
+					const bytes = read.bytes
 					const digest = await fileDigest(bytes)
 					digests[source] = digest
 					// Rule 01a11bb1-a376-…: a copy keeps its path relative to kit/src/, below the target directory.
@@ -202,8 +225,9 @@ export function createKitSourceService(persistence: FileNativePersistence, optio
 						files.push({ component: name, path, source, recordedDigest: digest, original: 'removed' })
 						continue
 					}
-					const bytes = component.files.includes(source) ? await readKitSourceFile(kit, source) : undefined
-					const originalDigest = bytes === undefined ? null : await fileDigest(bytes)
+					const read = component.files.includes(source) ? await readKitSourceFile(kit, source, { maxBytes: MAX_KIT_FILE_BYTES }) : undefined
+					if (read?.status === 'too_large') return tooLarge(source, jsonPointer(`${jsonPointer('/copies', name)}/files`, path))
+					const originalDigest = read?.status === 'found' ? await fileDigest(read.bytes) : null
 					files.push({ component: name, path, source, recordedDigest: digest, original: originalDigest === digest ? 'matches' : 'differs', originalDigest })
 				}
 			}

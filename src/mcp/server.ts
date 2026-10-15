@@ -468,17 +468,19 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 	// percent-encoded as one segment (each / as %2F). Clause 01a11485-fa00-…: `product-kit.source.read`,
 	// not `workspace.read`. A path that is not a kit path (absolute, `..`, inside kit/node_modules/) is
 	// invalid; a file that is missing, a link or below one is not found (Clause 01a11485-f70a-…), as is
-	// every kit file below schemaVersion 5. Nothing names a host path.
+	// every kit file below schemaVersion 5. A file above 8 MiB is refused with kit.file_too_large
+	// (Clause 01a13d3e-c4b5-…). Nothing names a host path.
 	server.registerResource(
 		'product-kit-file',
 		new ResourceTemplate(KIT_FILE_RESOURCE_TEMPLATE, { list: undefined }),
-		{ title: 'UIUX kit project file (read-only)', description: 'One file of the kit project by its path relative to kit/, with each / as %2F. Needs product-kit.source.read. UTF-8 text, else a base64 blob. list_kit_files lists the files.' },
+		{ title: 'UIUX kit project file (read-only)', description: 'One file of the kit project by its path relative to kit/, with each / as %2F. Needs product-kit.source.read. UTF-8 text, else a base64 blob; a file above 8 MiB is refused with kit.file_too_large. list_kit_files lists the files.' },
 		async (uri, { path }) => {
 			let decoded: string
 			try { decoded = decodeURIComponent(typeof path === 'string' ? path : String(path)) }
 			catch { throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Invalid kit file path: it is not percent-encoded UTF-8.') }
 			const read = await app.readKitFile(decoded)
 			if (read.status === 'invalid_path') throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Invalid kit file path: ${read.message}`)
+			if (read.status === 'too_large') throw new ProtocolError(ProtocolErrorCode.InvalidParams, `${read.code}: ${read.message}`, { code: read.code, path: read.path, limit: read.limit })
 			if (read.status === 'not_found') throw new ResourceNotFoundError(uri.href, `UIUX kit file not found: kit/${read.path} is not a regular file reached without a symbolic link.`)
 			if (read.status === 'blocked') {
 				if (read.code === 'workspace.migration_required') throw new ResourceNotFoundError(uri.href, `UIUX kit file not found: this Workspace has no kit project (it needs Workspace schemaVersion 5).`)
@@ -697,12 +699,13 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 	// Rule 01a11bb1-a184-7e00-a8de-c81056ad5a35: the kit project is read-only in UIUX; these Tools
 	// read it (Clauses 01a11bb1-b1c2-…, 01a11bb1-b227-… and 01a11bb1-b28f-…), each with
 	// `product-kit.source.read` (Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa).
+	const kitFileTooLarge = 'too_large (kit.file_too_large: a kit file above 8 MiB, named by path, is not read)'
 	const kitSourceBlocked = 'blocked (auth.scope_denied naming requiredKeys, workspace.migration_required below Workspace schemaVersion 5)'
 	server.registerTool(
 		'list_kit_files',
 		{
 			title: 'List the UIUX kit project files',
-			description: `List the files of the kit project, the Workspace's kit/ directory: every regular file by its path relative to kit/, sorted by path, leaving out kit/node_modules/, every symbolic link and whatever lies below a linked directory. Read-only: kit code is changed outside UIUX. Takes no input. Needs product-kit.source.read. Returns { status: "listed", key: "product-kit", files: [{ path, size, resourceUri }] }; read a file from its resourceUri, uiux://product-kit/file/{path} with each / in path as %2F. Refusals: ${kitSourceBlocked}.`,
+			description: `List the files of the kit project, the Workspace's kit/ directory: every regular file by its path relative to kit/, sorted by path, leaving out kit/node_modules/, every symbolic link and whatever lies below a linked directory. Read-only: kit code is changed outside UIUX. Takes no input. Needs product-kit.source.read. Returns { status: "listed", key: "product-kit", files: [{ path, size, resourceUri }], truncated }: at most 10000 files, truncated true when more were left out. Read a file from its resourceUri, uiux://product-kit/file/{path} with each / in path as %2F. Refusals: ${kitSourceBlocked}.`,
 			inputSchema: z.object({}).strict(),
 			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
@@ -716,7 +719,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'get_component_source',
 		{
 			title: 'Get a UIUX component\'s source',
-			description: `Return the source of a Product Kit registry component, for copying it into a product project yourself. Read-only. Needs product-kit.source.read. Returns { status: "found", key: "product-kit", components }: the named component, then, with withRequires, every component it requires, each { name, componentDigest, requires, packages, files, copyRecordEntry }. files are [{ path, digest, content }]: path relative to kit/, digest "sha256:" and the lowercase hex SHA-256 of the file's bytes, content the UTF-8 text, or base64 with encoding: "base64" when the bytes are not UTF-8. packages maps each external package the component declares to the version range kit/package.json gives it (null when it gives none); the product project needs them. Copy each file to its path relative to kit/src/ below one target directory of the product project, then write copyRecordEntry ({ componentDigest, exportedAt, files }) into the project's copy record, uiux-components.json ({ formatVersion: 1, components }), as components[name], adding target (that directory, relative to the project root) and prefixing each files key with target/. The digests are those uiux components add records, so uiux components diff and compare_component_copies read the entry. Refusals: not_found (the registry has no such component; components names it), invalid (kit.component_invalid when a declared file is not a regular file under kit/src/ reached without a symbolic link, or kit/package.json cannot be read; the Product Kit file's own validation), ${kitSourceBlocked}.`,
+			description: `Return the source of a Product Kit registry component, for copying it into a product project yourself. Read-only. Needs product-kit.source.read. Returns { status: "found", key: "product-kit", components }: the named component, then, with withRequires, every component it requires, each { name, componentDigest, requires, packages, files, copyRecordEntry }. files are [{ path, digest, content }]: path relative to kit/, digest "sha256:" and the lowercase hex SHA-256 of the file's bytes, content the UTF-8 text, or base64 with encoding: "base64" when the bytes are not UTF-8. packages maps each external package the component declares to the version range kit/package.json gives it (null when it gives none); the product project needs them. Copy each file to its path relative to kit/src/ below one target directory of the product project, then write copyRecordEntry ({ componentDigest, exportedAt, files }) into the project's copy record, uiux-components.json ({ formatVersion: 1, components }), as components[name], adding target (that directory, relative to the project root) and prefixing each files key with target/. The digests are those uiux components add records, so uiux components diff and compare_component_copies read the entry. Refusals: not_found (the registry has no such component; components names it), invalid (kit.component_invalid when a declared file is not a regular file under kit/src/ reached without a symbolic link, or kit/package.json cannot be read; the Product Kit file's own validation), ${kitFileTooLarge}, ${kitSourceBlocked}.`,
 			inputSchema: getComponentSourceSchema,
 			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},
@@ -727,7 +730,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'compare_component_copies',
 		{
 			title: 'Compare UIUX component copies with the Workspace',
-			description: `Return the Workspace side of the drift of copied components: for each file recorded in copies, whether its Workspace original still matches the recorded digest. Read-only. Needs product-kit.source.read. Returns { status: "compared", key: "product-kit", files: [{ component, path, source, recordedDigest, original, originalDigest }] }, sorted by component, then path. original is "matches"; "differs" when the original changed, is gone or is no longer declared by its component (originalDigest is its digest now, null when it cannot be read); or "removed" when the component is no longer in the registry (no originalDigest). To report drift as uiux components diff does, compare the digest of your copy at path with recordedDigest: removed is removed; a copy that is gone is missing; else a changed copy with an original that differs is diverged, a changed copy alone modified, an original that differs alone upstream, and neither unchanged. Refusals: invalid (the Product Kit file's own validation), ${kitSourceBlocked}.`,
+			description: `Return the Workspace side of the drift of copied components: for each file recorded in copies, whether its Workspace original still matches the recorded digest. Read-only. Needs product-kit.source.read. Returns { status: "compared", key: "product-kit", files: [{ component, path, source, recordedDigest, original, originalDigest }] }, sorted by component, then path. original is "matches"; "differs" when the original changed, is gone or is no longer declared by its component (originalDigest is its digest now, null when it cannot be read); or "removed" when the component is no longer in the registry (no originalDigest). To report drift as uiux components diff does, compare the digest of your copy at path with recordedDigest: removed is removed; a copy that is gone is missing; else a changed copy with an original that differs is diverged, a changed copy alone modified, an original that differs alone upstream, and neither unchanged. Refusals: invalid (the Product Kit file's own validation), ${kitFileTooLarge}, ${kitSourceBlocked}.`,
 			inputSchema: compareComponentCopiesSchema,
 			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},

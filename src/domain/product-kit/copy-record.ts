@@ -2,6 +2,7 @@ import {
 	isSafeRelativePath,
 	jsonPointer,
 	rejectUnknownKeys,
+	segmentNamesInAnyCase,
 	validateDigest,
 	validateUtcTimestamp,
 	Validator,
@@ -94,9 +95,9 @@ export function validateCopyRecord(input: unknown): ValidationResult<CopyRecord>
 	return v.finish<CopyRecord>(input)
 }
 
-/** True when a segment of the project-relative path `path` is `.git`, in any letter case. */
+/** True when a segment of the project-relative path `path` is `.git`, in any letter case (`segmentNamesInAnyCase`). */
 export function hasGitSegment(path: string): boolean {
-	return path.split('/').some(segment => segment.toLowerCase() === '.git')
+	return path.split('/').some(segment => segmentNamesInAnyCase(segment, '.git'))
 }
 
 /**

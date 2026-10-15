@@ -11,7 +11,7 @@ import { parseHttpPayload, type AuthoringHttpResult } from './authoring-http'
  * and `POST /api/product-kit/components/compare` (`compare_component_copies`). Each needs
  * `product-kit.source.read` (Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa), checked before the request
  * is read, and answers with the body the MCP Tool returns: `auth.scope_denied` is 403, `not_found`
- * 404, an invalid path or input 400, and `workspace.migration_required` 422.
+ * 404, an invalid path or input 400, and `workspace.migration_required` and `kit.file_too_large` 422.
  */
 const SUCCESS = new Set(['listed', 'found', 'compared'])
 

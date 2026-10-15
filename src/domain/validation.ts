@@ -50,6 +50,17 @@ export function isAbsoluteUri(value: unknown): value is string {
 	}
 }
 
+/**
+ * True when the path segment `segment` names the ASCII name `name` on a case-insensitive file system
+ * (the macOS default): compared after NFC normalization in upper and in lower case, so a letter whose
+ * case mapping reaches an ASCII one (U+017F `ſ` to `S`, U+212A `K` to `k`) also counts. It may count
+ * a spelling the file system keeps apart, never the reverse, so a refusal built on it fails closed.
+ */
+export function segmentNamesInAnyCase(segment: string, name: string): boolean {
+	const normalized = segment.normalize('NFC')
+	return normalized.toUpperCase() === name.toUpperCase() || normalized.toLowerCase() === name.toLowerCase()
+}
+
 /** A non-empty `/`-separated relative path with no empty, `.` or `..` segment, backslash or ASCII control character. */
 export function isSafeRelativePath(path: unknown): path is string {
 	return typeof path === 'string'

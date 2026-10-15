@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util'
 
 import { readKitDependencyRanges } from '../adapters/kit-dependencies'
 import { locateKitProject, type KitProject } from '../adapters/kit-registry'
-import { readKitSourceFile } from '../adapters/kit-source-files'
+import { readKitSourceFile, type KitFileReadOptions } from '../adapters/kit-source-files'
 import { componentClosure, componentPackages, componentsRequiring } from '../domain/product-kit/closure'
 import {
 	caseOnlyCollisions,
@@ -28,6 +28,9 @@ import { isSafeRelativePath } from '../domain/validation'
 import { isSameOrInside, realFuturePath } from '../server/access/store'
 import { selectCliWorkspace } from './workspace-selection'
 
+/** The CLI reads kit source files of any size: the 8 MiB limit is the MCP and Workbench reads' (Clause 01a13d3e-c4b5-…). */
+const KIT_READ: KitFileReadOptions = { maxBytes: Number.POSITIVE_INFINITY }
+
 /**
  * `uiux components list|add|diff` (Clauses 01a11bb1-9b24-…, 01a11bb1-9b89-…, 01a11bb1-9bef-… and
  * 01a11bb1-9c51-…): copying Product Kit components out of the Workspace's `kit/` into a product
@@ -38,7 +41,7 @@ import { selectCliWorkspace } from './workspace-selection'
  * record it keeps there is the only record of copies (Rule 01a11bb1-a5cf-7723-8b36-e6dc808381e1).
  *
  * Containment: a source file is read only when it is a regular file under the real `kit/src/`
- * reached without a symbolic link (`readKitSourceFile`). In the product project, no path between the
+ * reached without a symbolic link, judged again on the open file (`readKitSourceFile`). In the product project, no path between the
  * project root and a file it reads or writes may be a symbolic link, every target and copied file,
  * whether `--to` names it or the copy record does, lies strictly inside the project, outside the
  * Workspace and outside any `.git` directory, and the project itself lies outside the Workspace.
@@ -478,11 +481,14 @@ async function addCommand(parsed: ParsedArguments, context: Context): Promise<nu
 		const files: Record<string, string> = {}
 		const recordFiles: CopyRecordEntry['files'] = {}
 		for (const source of kit.components[name]!.files) {
-			const bytes = await readKitSourceFile(workspace.project, source)
-			if (bytes === undefined) {
-				refusals.push(`${name} declares kit/${source}, which is not a regular file under kit/src/ reached without a symbolic link.`)
+			const read = await readKitSourceFile(workspace.project, source, KIT_READ)
+			if (read.status !== 'found') {
+				refusals.push(read.status === 'too_large'
+					? `${name} declares kit/${source}, which is too large to read.`
+					: `${name} declares kit/${source}, which is not a regular file under kit/src/ reached without a symbolic link.`)
 				continue
 			}
+			const bytes = read.bytes
 			const digest = await fileDigest(bytes)
 			const destination = copyDestination(target, source)
 			const problem = projectPathProblem(realProject, workspace.realRoot, destination)
@@ -678,8 +684,8 @@ async function diffCommand(parsed: ParsedArguments, context: Context): Promise<n
 			const copyBytes = await readProjectFile(realProject, file)
 			let original: string | undefined | 'removed' = 'removed'
 			if (component !== undefined) {
-				const bytes = component.files.includes(source) ? await readKitSourceFile(workspace.project, source) : undefined
-				original = bytes === undefined ? undefined : await fileDigest(bytes)
+				const read = component.files.includes(source) ? await readKitSourceFile(workspace.project, source, KIT_READ) : undefined
+				original = read?.status === 'found' ? await fileDigest(read.bytes) : undefined
 			}
 			const state = driftState({ recorded: digest, copy: copyBytes === undefined ? undefined : await fileDigest(copyBytes), original })
 			counts.set(state, counts.get(state)! + 1)

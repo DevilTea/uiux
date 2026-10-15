@@ -1,14 +1,19 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { appendFile, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { locateKitProject } from '../src/adapters/kit-registry'
+import { isKitFilePath, listKitFiles, MAX_KIT_FILE_BYTES, MAX_KIT_FILE_ENTRIES, readKitFile } from '../src/adapters/kit-source-files'
 import type { MemberPrincipal } from '../src/application/access/principal'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { runComponentsCommand } from '../src/cli/components'
 import { runInitCommand } from '../src/cli/init'
+import { hasGitSegment } from '../src/domain/product-kit/copy-record'
 import { emptyProductKit, type ProductKit } from '../src/domain/product-kit/schema'
+import { segmentNamesInAnyCase } from '../src/domain/validation'
 import { kitFileResourceUri } from '../src/mcp/resource-uri'
 import { FileNativePersistence } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
@@ -283,5 +288,186 @@ describe('the kit source Workbench mirrors (HTTP)', () => {
 			await getComponentSourceForHttp(denied, undefined),
 			await compareComponentCopiesForHttp(denied, { copies: {} }),
 		]) expect(result).toMatchObject({ status: 403, body: { code: 'auth.scope_denied', requiredKeys: ['product-kit.source.read'] } })
+	})
+})
+
+/** `mkfifo` where the host has it (macOS and Linux); `false` elsewhere, which skips the FIFO checks. */
+function makeFifo(path: string): boolean {
+	try {
+		execFileSync('mkfifo', [path], { stdio: 'ignore' })
+		return true
+	}
+	catch {
+		return false
+	}
+}
+
+/** Fails when `promise` takes longer than `ms`: a read that blocks on a FIFO would. */
+async function promptly<T>(promise: Promise<T>, ms = 2000): Promise<T> {
+	let timer: NodeJS.Timeout | undefined
+	try {
+		return await Promise.race([promise, new Promise<never>((_resolve, reject) => {
+			timer = setTimeout(() => reject(new Error(`did not settle within ${ms} ms`)), ms)
+		})])
+	}
+	finally {
+		clearTimeout(timer)
+	}
+}
+
+// Rule 01a13d3e-e253-76b7-84e5-5f3fb167b635 and Clause 01a13d3e-c4b5-7cc3-a36b-3be6f45cf7ac.
+describe('kit file reads stay inside kit/ and within their limits', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
+	it('reads nothing through a symbolic link standing in for kit/ or kit/src/', async () => {
+		const ctx = await fixture()
+		const allowed = scoped(ctx.app, SOURCE_HUMAN)
+		const outside = join(ctx.base, 'outside-kit')
+		await rename(ctx.kit, outside)
+		await symlink(outside, ctx.kit)
+		expect((await listKitFilesForHttp(allowed)).body).toMatchObject({ status: 'listed', files: [], truncated: false })
+		expect((await readKitFileForHttp(allowed, 'src/ds/Button.vue')).status).toBe(404)
+
+		await rm(ctx.kit)
+		await rename(outside, ctx.kit)
+		await rename(join(ctx.kit, 'src'), join(ctx.base, 'outside-src'))
+		await symlink(join(ctx.base, 'outside-src'), join(ctx.kit, 'src'))
+		const listed = (await listKitFilesForHttp(allowed)).body as { files: Array<{ path: string }> }
+		expect(listed.files.map(file => file.path)).toEqual(['dist/uiux.js', 'package.json'])
+		expect((await readKitFileForHttp(allowed, 'src/ds/Button.vue')).status).toBe(404)
+		const source = await getComponentSourceForHttp(allowed, { name: 'button' })
+		expect(source.body).toMatchObject({ status: 'invalid', code: 'kit.component_invalid' })
+		expect(JSON.stringify(source.body)).not.toContain(ctx.base)
+	})
+
+	it('refuses a FIFO promptly, never blocking on it', async () => {
+		const ctx = await fixture()
+		const fifo = join(ctx.kit, 'src', 'pipe.vue')
+		if (!makeFifo(fifo)) return
+		const allowed = scoped(ctx.app, SOURCE_HUMAN)
+		expect((await promptly(readKitFileForHttp(allowed, 'src/pipe.vue'))).status).toBe(404)
+		const listed = (await promptly(listKitFilesForHttp(allowed))).body as { files: Array<{ path: string }> }
+		expect(listed.files.map(file => file.path)).not.toContain('src/pipe.vue')
+		// A FIFO swapped in after the path checks is opened without blocking and refused on the open file.
+		const kit = await locateKitProject(ctx.workspace, 'kit')
+		const button = join(ctx.kit, 'src', 'ds', 'Button.vue')
+		const swapped = await promptly(readKitFile(kit, 'src/ds/Button.vue', {
+			beforeOpen: async () => {
+				await rm(button)
+				expect(makeFifo(button)).toBe(true)
+			},
+		}))
+		expect(swapped).toEqual({ status: 'not_found' })
+	})
+
+	it('refuses a path with a NUL or another control character', async () => {
+		const ctx = await fixture()
+		const allowed = scoped(ctx.app, SOURCE_HUMAN)
+		for (const path of ['src/ds/Button.vue\u0000', 'src\u0000/ds/Button.vue', 'src/ds/Button.vue\u0000.png', 'src/\u0007.vue'])
+			expect((await readKitFileForHttp(allowed, path)).status, JSON.stringify(path)).toBe(400)
+		await withMcp(ctx.app, AGENT, async (_call, read) => {
+			await expect(read('uiux://product-kit/file/src%2Fds%2FButton.vue%00')).rejects.toThrow(/Invalid kit file path/u)
+		})
+	})
+
+	it('treats every spelling a case-insensitive file system folds to node_modules as kit/node_modules/', async () => {
+		const ctx = await fixture()
+		const allowed = scoped(ctx.app, SOURCE_HUMAN)
+		for (const spelling of ['NODE_MODULES', 'Node_Modules', 'node_moduleſ', 'NODE_MODULEſ', 'nodE_moduleS']) {
+			expect(isKitFilePath(`${spelling}/vue/package.json`), spelling).toBe(false)
+			expect((await readKitFileForHttp(allowed, `${spelling}/vue/package.json`)).status, spelling).toBe(400)
+		}
+		// .git in the product project (`uiux components`), by the same fold.
+		expect(hasGitSegment('src/.GIT/config')).toBe(true)
+		expect(hasGitSegment('src/.Git')).toBe(true)
+		expect(hasGitSegment('src/.gitignore')).toBe(false)
+		expect(segmentNamesInAnyCase('node_moduleſ', 'node_modules')).toBe(true)
+		expect(segmentNamesInAnyCase('node_module', 'node_modules')).toBe(false)
+	})
+
+	it('refuses a kit file above 8 MiB with kit.file_too_large on every read, and reads one of exactly 8 MiB', async () => {
+		const ctx = await fixture({ ...REGISTRY, big: { files: ['src/big.bin'], layer: 'product' } })
+		await write(join(ctx.kit, 'src', 'big.bin'), new Uint8Array(MAX_KIT_FILE_BYTES + 1))
+		await write(join(ctx.kit, 'src', 'edge.bin'), new Uint8Array(MAX_KIT_FILE_BYTES))
+		const allowed = scoped(ctx.app, SOURCE_HUMAN)
+		const refused = { status: 'too_large', code: 'kit.file_too_large', path: 'src/big.bin', limit: MAX_KIT_FILE_BYTES }
+		expect(await readKitFileForHttp(allowed, 'src/big.bin')).toMatchObject({ status: 422, body: refused })
+		expect(await readKitFileForHttp(allowed, 'src/edge.bin')).toMatchObject({ status: 200, body: { status: 'found', size: MAX_KIT_FILE_BYTES } })
+		await withMcp(ctx.app, AGENT, async (call, read) => {
+			await expect(read(kitFileResourceUri('src/big.bin'))).rejects.toThrow(/kit\.file_too_large/u)
+			const source = await call('get_component_source', { name: 'big' })
+			expect(source.isError).toBe(true)
+			expect(source.structuredContent).toMatchObject(refused)
+			const compared = await call('compare_component_copies', { copies: { big: { files: { 'src/components/big.bin': { source: 'src/big.bin', digest: `sha256:${'0'.repeat(64)}` } } } } })
+			expect(compared.isError).toBe(true)
+			expect(compared.structuredContent).toMatchObject(refused)
+			expect(JSON.stringify(compared)).not.toContain(ctx.base)
+		})
+		// A file that grew past the limit after its size was checked is refused, never cut short.
+		const kit = await locateKitProject(ctx.workspace, 'kit')
+		const grown = await readKitFile(kit, 'src/ds/Button.vue', { maxBytes: Buffer.byteLength(BUTTON), afterOpen: () => appendFile(join(ctx.kit, 'src', 'ds', 'Button.vue'), 'more') })
+		expect(grown).toEqual({ status: 'too_large', limit: Buffer.byteLength(BUTTON) })
+	})
+
+	it('lists at most 10,000 files and marks a cut-off listing truncated', async () => {
+		const ctx = await fixture()
+		const many = join(ctx.kit, 'many')
+		await mkdir(many)
+		for (let start = 0; start <= MAX_KIT_FILE_ENTRIES; start += 500)
+			await Promise.all(Array.from({ length: Math.min(500, MAX_KIT_FILE_ENTRIES + 1 - start) }, (_, offset) => writeFile(join(many, `f${String(start + offset).padStart(5, '0')}.txt`), '')))
+		const listed = (await listKitFilesForHttp(scoped(ctx.app, SOURCE_HUMAN))).body as { files: Array<{ path: string }>; truncated: boolean }
+		expect(listed.truncated).toBe(true)
+		expect(listed.files).toHaveLength(MAX_KIT_FILE_ENTRIES)
+		expect(listed.files.map(file => file.path)).toEqual(listed.files.map(file => file.path).sort())
+		await withMcp(ctx.app, AGENT, async (call) => {
+			expect((await call('list_kit_files')).structuredContent).toMatchObject({ status: 'listed', truncated: true })
+		})
+		// 9,994 generated files and the fixture's 5 fit.
+		for (const index of [0, 1, 2, 3, 4, 5, 6]) await rm(join(many, `f${String(index).padStart(5, '0')}.txt`))
+		const exact = await listKitFiles(await locateKitProject(ctx.workspace, 'kit'))
+		expect(exact.truncated).toBe(false)
+		expect(exact.files).toHaveLength(MAX_KIT_FILE_ENTRIES - 1)
+	})
+
+	it('refuses, never reads, a file whose directory is swapped for a link between the checks and the open', async () => {
+		const ctx = await fixture()
+		await write(join(ctx.base, 'decoy', 'ds', 'Button.vue'), 'SECRET\n')
+		const kit = await locateKitProject(ctx.workspace, 'kit')
+		const source = join(ctx.kit, 'src')
+		const moved = join(ctx.kit, 'src-moved')
+		const swapSource = async () => {
+			await rename(source, moved)
+			await symlink(join(ctx.base, 'decoy'), source)
+		}
+		const restoreSource = async () => {
+			await rm(source)
+			await rename(moved, source)
+		}
+		// The link still in place when the open file is judged: its real path lies outside kit/.
+		expect(await readKitFile(kit, 'src/ds/Button.vue', { beforeOpen: swapSource })).toEqual({ status: 'not_found' })
+		await restoreSource()
+		// The link swapped back before the open file is judged: the path is inside kit/ again, but the
+		// open file is not the one there (the identity check).
+		expect(await readKitFile(kit, 'src/ds/Button.vue', { beforeOpen: swapSource, afterOpen: restoreSource })).toEqual({ status: 'not_found' })
+		expect(await readKitFile(kit, 'src/ds/Button.vue')).toMatchObject({ status: 'found' })
+
+		// kit/ itself swapped for a link to a copy outside the Workspace.
+		const kitMoved = join(ctx.base, 'kit-moved')
+		await write(join(ctx.base, 'kit-copy', 'src', 'ds', 'Button.vue'), 'SECRET\n')
+		expect(await readKitFile(kit, 'src/ds/Button.vue', {
+			beforeOpen: async () => {
+				await rename(ctx.kit, kitMoved)
+				await symlink(join(ctx.base, 'kit-copy'), ctx.kit)
+			},
+		})).toEqual({ status: 'not_found' })
+		await rm(ctx.kit)
+		await rename(kitMoved, ctx.kit)
+
+		// The file itself swapped for a link: opened without following it.
+		const button = join(ctx.kit, 'src', 'ds', 'Button.vue')
+		expect(await readKitFile(kit, 'src/ds/Button.vue', {
+			beforeOpen: async () => {
+				await rm(button)
+				await symlink(join(ctx.base, 'secret', 'secret.vue'), button)
+			},
+		})).toEqual({ status: 'not_found' })
 	})
 })
