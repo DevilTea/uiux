@@ -70,6 +70,7 @@ import {
 	type CaptureFormalEvidenceResult,
 	type FormalEvidenceItem,
 } from './formal-capture'
+import { createProductKitChecksService, type ProductKitChecksResult } from './product-kit-checks'
 import { readCurrentProductKitProvenance } from './product-kit-provenance'
 import type { CurrentProductKitProvenance } from '../../domain/product-kit/provenance'
 import {
@@ -180,6 +181,8 @@ export interface WorkspaceApplicationSession {
 	replaceAsset(command: ReplaceAssetCommand): Promise<AssetAuthoringResult>
 	captureFormalEvidence(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult>
 	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
+	/** The Product Kit Checks (issue #141 Part 14 decision 7), run on request and non-blocking. */
+	runProductKitChecks(command?: Readonly<{ readSource?: boolean }>): Promise<ProductKitChecksResult>
 	/** The current Product Kit provenance, against which Evidence freshness is judged (Rules 01a11bb1-be4a-… and 01a1161b-ff68-…); `none` below schemaVersion 5. */
 	productKitProvenance(): Promise<CurrentProductKitProvenance>
 	assessHandoffReadiness(command: AssessHandoffReadinessCommand): Promise<AssessHandoffReadinessResult>
@@ -231,6 +234,12 @@ export function createWorkspaceApplicationSession(
 	const accessPresetsAuthoring = createAccessPresetsAuthoringService(persistence)
 	const kitBuild = createKitBuildService(persistence, options?.kitBuild)
 	const kitSource = createKitSourceService(persistence)
+	const productKitChecks = createProductKitChecksService(persistence, {
+		readProductKit: productKitAuthoring.readProductKit,
+		serverOrigin: options?.serverOrigin,
+		captureCookie: options?.captureCookie,
+		...(options?.kitBuild ? { kitBuild: () => options.kitBuild!.status() } : {}),
+	})
 
 	async function readPointResource(kind: PointResourceKind, key: string): Promise<PointResourceRead | undefined> {
 		if (!isValidPointResourceAddress({ kind, key })) return undefined
@@ -389,6 +398,7 @@ export function createWorkspaceApplicationSession(
 		replaceAsset: assetAuthoring.replaceAsset,
 		captureFormalEvidence: formalCapture.capture,
 		listEvidence: formalCapture.listEvidence,
+		runProductKitChecks: command => productKitChecks.run({ ...(command?.readSource === false ? { readSource: false } : {}) }),
 		productKitProvenance: () => readCurrentProductKitProvenance(persistence),
 		assessHandoffReadiness: handoffExport.assessReadiness,
 		exportHandoff: handoffExport.exportHandoff,

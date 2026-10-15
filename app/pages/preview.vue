@@ -27,6 +27,7 @@ import type {
 	PreviewMaterializationResult,
 } from '../../src/preview/preview-runtime'
 import type { PreviewRuntimeBridge } from '../../src/preview/browser-runtime'
+import { CAPTURE_HARNESS_GLOBAL, type CaptureHarnessHooks } from '../../src/preview/capture-harness-hooks'
 import type { ViewResource } from '../../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../../src/domain/render-context/schema'
 import type { I18nResource } from '../../src/domain/i18n/schema'
@@ -573,12 +574,33 @@ function absorbCanvasZoomWheel(event: WheelEvent) {
 	if (event.ctrlKey || event.metaKey) event.preventDefault()
 }
 
+/**
+ * Harness mode only: the hooks the Product Kit live-versus-fresh check drives (Rule
+ * 01a11bb1-a7bf-74ae-9639-b39f246fa117). A Variant's State is written into the mounted base-state
+ * Runtime in place, and the hook resolves once that write has rendered.
+ */
+function installCaptureHarnessHooks() {
+	if (!harnessMode.value) return
+	const hooks: CaptureHarnessHooks = Object.freeze({
+		async applyVariantStateLive(name: string) {
+			const bridge = activeBridge
+			if (!bridge?.applyVariantStateLive) return [{ code: 'preview.runtime_failed', path: '/preview', message: 'The Preview runtime is not mounted.' }]
+			const diagnostics = bridge.applyVariantStateLive(name)
+			await nextTick()
+			await new Promise<void>(resolve => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())))
+			return diagnostics
+		},
+	})
+	Object.defineProperty(window, CAPTURE_HARNESS_GLOBAL, { value: hooks, configurable: true })
+}
+
 onMounted(() => {
 	window.addEventListener('message', onWindowMessage)
 	window.addEventListener('keydown', handleKeydown)
 	window.addEventListener('blur', handleWindowBlur)
 	if (window.parent !== window) window.addEventListener('wheel', absorbCanvasZoomWheel, { passive: false })
 	initBridge()
+	installCaptureHarnessHooks()
 	loadView()
 })
 

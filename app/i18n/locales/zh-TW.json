@@ -93,6 +93,35 @@
     "readFailedFor": "無法檢查 {name}",
     "resource": {
       "workspace": "Workspace 設定"
+    },
+    "kit": {
+      "title": "Product Kit 檢查",
+      "description": "由「執行檢查」在伺服器上執行。這些問題不會阻擋預覽、擷取或 Handoff。",
+      "failed": "無法執行 Product Kit 檢查。",
+      "resource": "Product Kit",
+      "variant": "Variant {name}",
+      "component": "Component {name}",
+      "groups": {
+        "registry": "Product Kit 問題",
+        "repeat_capture": "每次算繪結果都不同",
+        "live_versus_fresh": "未依照「props」算繪",
+        "props_emits": "Component 未宣告「props」或「emits」"
+      },
+      "checks": {
+        "registry": "登錄",
+        "repeat_capture": "重複擷取",
+        "live_versus_fresh": "即時與全新比對",
+        "props_emits": "已宣告「props」與「emits」"
+      },
+      "state": {
+        "checking": "正在檢查…",
+        "completed": "完成 · 已檢查 {checked} 項",
+        "incomplete": "未完成 · 已檢查 {checked} 項，{unchecked} 項未檢查",
+        "failed": "無法執行",
+        "not_applicable": "這個 Workspace 沒有 Product Kit",
+        "not_permitted": "未執行",
+        "not_run": "尚未執行"
+      }
     }
   },
   "app": {
@@ -2163,7 +2192,9 @@
       "empty_widget_id": "Variant 為沒有 ID 的 Widget 設定了狀態。",
       "not_found": "沒有這個 Variant。",
       "root_shell_state_managed": "RootShell 的狀態由預覽設定，Variant 無法變更。",
-      "state_not_author_writable": "Variant 無法設定這個狀態。"
+      "state_not_author_writable": "Variant 無法設定這個狀態。",
+      "live_apply_needs_base": "Variant 只能在基本狀態上即時套用。",
+      "live_apply_failed": "無法將這個 Variant 的狀態即時寫入預覽。"
     },
     "render_context": {
       "empty_selection": "請至少選擇一個要擷取的情境。",
@@ -2380,7 +2411,9 @@
       "build_restart_throttled": "kit 建置剛剛才重新啟動。請稍候幾秒，再重新啟動一次。",
       "build_unavailable": "此伺服器沒有執行 kit 建置；kit 建置由 uiux dev 執行。",
       "component_invalid": "登錄中的項目與 kit/ 專案不符。",
-      "file_too_large": "此 kit 檔案太大，無法在此讀取。"
+      "file_too_large": "此 kit 檔案太大，無法在此讀取。",
+      "nondeterministic_render": "同一個算繪情境每次擷取時，這個 Component 的算繪結果都不同。",
+      "state_not_controlled": "這個 Component 未依照其「props」算繪：即時預覽與全新預覽的結果不同。"
     },
     "product_kit": {
       "adapter_outside_build_output": "宣告了 kit 建置時，./ Adapter 必須指向其輸出目錄中的檔案。",
@@ -2406,6 +2439,14 @@
     "copy_record": {
       "invalid_path": "複製紀錄中的路徑必須是產品專案內的相對路徑；來源則必須位於 kit/src/ 之下。",
       "unsupported_format": "此複製紀錄的格式版本不受 UIUX 支援。"
+    },
+    "checks": {
+      "busy": "Product Kit 檢查已在執行中，請等候該次執行完成。",
+      "limit_reached": "每次執行只檢查有限的項目，其餘項目未檢查。",
+      "no_product_kit": "這個 Workspace 沒有可檢查的 Product Kit。",
+      "component_unread": "無法完整讀取這個 Component 的原始碼，因此未檢查。",
+      "nondeterministic_context": "這個算繪情境兩次擷取的結果不同，因此未進行即時比對。",
+      "product_kit_invalid": "Product Kit 檔案無效，因此未檢查其中的 Component。"
     }
   },
   "diagnosticFallback": {
@@ -2445,7 +2486,8 @@
     "reference": "Spec 參照無效。",
     "time": "時間格式不正確。",
     "revision": "修訂紀錄無效。",
-    "copy_record": "複製紀錄 uiux-components.json 有問題。"
+    "copy_record": "複製紀錄 uiux-components.json 有問題。",
+    "checks": "有一項檢查無法完成。"
   },
   "threadContext": {
     "srPrefix": "記錄的預覽情境：",

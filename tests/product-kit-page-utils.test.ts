@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { componentAddCommand, componentSourceCall, shellWord } from '../app/utils/component-commands'
-import { componentDeclarations, MAX_DECLARATION_LENGTH, MAX_DECLARATION_SCAN } from '../app/utils/component-interface'
+import { componentDeclarations, declaredInterface, MAX_DECLARATION_LENGTH, MAX_DECLARATION_SCAN } from '../app/utils/component-interface'
 import { kitFileTree, kitPathAncestors, visibleKitTreeRows } from '../app/utils/kit-file-tree'
 import { styleIssue, stylesThemesDraft, stylesThemesPayload, stylesThemesValid, themeAttributeIssues } from '../app/utils/product-kit-styles'
 import { parseProductKitSection } from '../app/utils/workbench-routes'
@@ -167,5 +167,21 @@ describe('Product Kit page › copy commands', () => {
 		for (const unsafe of ['a b', '`x`', 'a|b', 'a&b', 'a<b>', '*', '#x', '~/x', '"x"', 'a\\b'])
 			expect(shellWord(unsafe), unsafe).toBe(`'${unsafe}'`)
 		expect(componentSourceCall('button')).toBe('get_component_source {"name":"button","withRequires":true}')
+	})
+})
+
+describe('declaredInterface (the props and emits check, Rule 01a11bb1-a827-75e3-b05f-4099146cff2a)', () => {
+	it('finds defineProps and defineEmits calls and options-object props and emits members', () => {
+		expect(declaredInterface('src/A.vue', '<script setup lang="ts">\ndefineProps<{ a: string }>()\nconst emit = defineEmits([\'change\'])\n</script>')).toEqual({ props: true, emits: true, complete: true })
+		expect(declaredInterface('src/B.vue', '<script setup>\nconst x = 1\n</script>\n<template><span>{{ x }}</span></template>')).toEqual({ props: false, emits: false, complete: true })
+		expect(declaredInterface('src/c.ts', 'export const C = defineComponent({ props: { a: String }, setup() {} })')).toEqual({ props: true, emits: false, complete: true })
+		expect(declaredInterface('src/d.js', 'export default { emits: [\'close\'], render() {} }')).toEqual({ props: false, emits: true, complete: true })
+		// A file that is not a script declares nothing and needs no scan.
+		expect(declaredInterface('src/e.css', '.props: { }')).toEqual({ props: false, emits: false, complete: true })
+	})
+
+	it('is incomplete when a defineProps call runs past its scan bound', () => {
+		const source = `<script setup>\ndefineProps({ a: ${'1 + '.repeat(MAX_DECLARATION_SCAN)}1 })\n</script>`
+		expect(declaredInterface('src/F.vue', source)).toMatchObject({ props: false, complete: false })
 	})
 })

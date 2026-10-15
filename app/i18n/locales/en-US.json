@@ -93,6 +93,35 @@
     "readFailedFor": "Couldn't check {name}",
     "resource": {
       "workspace": "Workspace settings"
+    },
+    "kit": {
+      "title": "Product Kit checks",
+      "description": "Run on the server with Run Checks. Their findings never block Preview, capture or Handoff.",
+      "failed": "Couldn't run the Product Kit checks.",
+      "resource": "Product Kit",
+      "variant": "Variant {name}",
+      "component": "component {name}",
+      "groups": {
+        "registry": "Product Kit problem",
+        "repeat_capture": "Renders differently each time",
+        "live_versus_fresh": "Doesn't follow its props",
+        "props_emits": "Component declares no props or emits"
+      },
+      "checks": {
+        "registry": "Registry",
+        "repeat_capture": "Repeat capture",
+        "live_versus_fresh": "Live versus fresh",
+        "props_emits": "Props and emits declared"
+      },
+      "state": {
+        "checking": "Checking…",
+        "completed": "Done · {checked} checked",
+        "incomplete": "Incomplete · {checked} checked, {unchecked} not checked",
+        "failed": "Couldn't run",
+        "not_applicable": "No Product Kit in this Workspace",
+        "not_permitted": "Not run",
+        "not_run": "Not run yet"
+      }
     }
   },
   "app": {
@@ -2163,7 +2192,9 @@
       "empty_widget_id": "A Variant sets state for a Widget with no id.",
       "not_found": "This Variant does not exist.",
       "root_shell_state_managed": "RootShell state is set by the preview and cannot be changed by a Variant.",
-      "state_not_author_writable": "This state cannot be set by a Variant."
+      "state_not_author_writable": "This state cannot be set by a Variant.",
+      "live_apply_needs_base": "A Variant is applied live only over the base state.",
+      "live_apply_failed": "This Variant's State could not be written into the live Preview."
     },
     "render_context": {
       "empty_selection": "Choose at least one context to capture.",
@@ -2380,7 +2411,9 @@
       "build_restart_throttled": "The kit build was restarted moments ago. Wait a few seconds, then restart it again.",
       "build_unavailable": "No kit build runs in this server; uiux dev runs it.",
       "component_invalid": "A component in the registry does not match the kit project.",
-      "file_too_large": "This kit file is too large to read here."
+      "file_too_large": "This kit file is too large to read here.",
+      "nondeterministic_render": "This component renders differently each time the same render context is captured.",
+      "state_not_controlled": "This component doesn't follow its props: a live Preview differs from a fresh one."
     },
     "product_kit": {
       "adapter_outside_build_output": "With a kit build, a ./ Adapter must name a file in its output directory.",
@@ -2406,6 +2439,14 @@
     "copy_record": {
       "invalid_path": "A copy record path must be a relative path inside the product project, or under kit/src/ for a source.",
       "unsupported_format": "This copy record has a format version that UIUX does not support."
+    },
+    "checks": {
+      "busy": "The Product Kit checks are already running. Wait for that run to finish.",
+      "limit_reached": "A run checks a limited number of items; the rest were not checked.",
+      "no_product_kit": "This Workspace has no Product Kit to check.",
+      "component_unread": "This component's source could not be read in full, so it was not checked.",
+      "nondeterministic_context": "This render context doesn't capture the same way twice, so it was not compared live.",
+      "product_kit_invalid": "The Product Kit file is not valid, so its components were not checked."
     }
   },
   "diagnosticFallback": {
@@ -2445,7 +2486,8 @@
     "reference": "A Spec reference is not valid.",
     "time": "A time is not in the expected format.",
     "revision": "The revision record is not valid.",
-    "copy_record": "There is a problem with the copy record, uiux-components.json."
+    "copy_record": "There is a problem with the copy record, uiux-components.json.",
+    "checks": "A check could not finish."
   },
   "threadContext": {
     "srPrefix": "Recorded Preview context:",

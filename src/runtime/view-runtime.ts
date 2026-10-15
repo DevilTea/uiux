@@ -88,6 +88,40 @@ export class LiveViewRuntimeController {
 		return next
 	}
 
+	/**
+	 * The capture harness's live-versus-fresh hook (Rule 01a11bb1-a7bf-74ae-9639-b39f246fa117): writes
+	 * a Variant's State into the current Runtime in place, as a live change does, instead of building
+	 * a fresh Runtime for it (which `switchVariant` does, and which remounts every component). The
+	 * Variant is validated exactly as a fresh Runtime of it would be; the current Runtime must be the
+	 * base state's, so the result is the base state with that Variant's State written over it.
+	 */
+	applyVariantStateLive(variantName: string): readonly Diagnostic[] {
+		this.assertActive()
+		if (this.currentContext.variantName !== undefined)
+			return [{ code: 'variant.live_apply_needs_base', path: '/variantName', message: 'A Variant is applied live only over the base state.' }]
+		const nextContext: ResolvedRenderContext = { ...this.currentContext, variantName }
+		const probe = buildViewRuntime({ view: this.view, adapters: this.adapters, context: nextContext })
+		if (probe.state === 'invalid') return probe.diagnostics
+		probe.runtime.dispose()
+		const variant = this.view.variants[variantName]!
+		const diagnostics: Diagnostic[] = []
+		for (const [widgetId, members] of Object.entries(variant.state)) {
+			const widget = this.currentRuntime.getWidget(widgetId) as unknown as { state?: Record<string, { set(value: unknown): { ok: true } | { ok: false; failure: { diagnostics: readonly WidgetSystemRuntimeDiagnostic[] } } } | undefined> } | null
+			for (const [member, value] of Object.entries(members)) {
+				const path = `/variants/${escapePointer(variantName)}/state/${escapePointer(widgetId)}/${escapePointer(member)}`
+				const state = widget?.state?.[member]
+				if (!state) {
+					diagnostics.push({ code: 'variant.live_apply_failed', path, message: `Widget ${widgetId} has no State member ${member} to write.` })
+					continue
+				}
+				const result = state.set(value)
+				if (!result.ok) diagnostics.push(...coreDiagnostics(result.failure.diagnostics, path))
+			}
+		}
+		this.currentContext = nextContext
+		return diagnostics
+	}
+
 	dispose(): void {
 		if (this.disposed) return
 		this.disposed = true
