@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -1315,4 +1315,43 @@ describe('Handoff Product Kit references (Feature 01a111e4-0272-…)', { timeout
 		expect(assessed.readiness?.implementationReady).toBe(false)
 		expect(assessed.readiness?.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'handoff.stale_view_evidence', path: `/views/${VIEW_1_ID}` }))
 	})
+
+	// Owner ruling 4 of 2026-10-15 (https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18942505).
+	it('omits the version of an external export whose installed version cannot be determined', async () => {
+		const { root, persistence } = await productKitHandoffWorkspace()
+		await rm(join(root, 'kit', 'node_modules', '@acme', 'ds'), { recursive: true })
+		await putFormalEvidence(persistence, VIEW_1_ID, (await persistence.views.readRevision(VIEW_1_ID))!, true)
+		const exported = await currentSchemaHandoff(persistence).exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(exported.status, JSON.stringify(exported.diagnostics)).toBe('exported')
+		const component = exported.manifest!.implementationReferences.find(reference => reference.widgetType === 'ProductCard')?.component
+		expect(component).toEqual({ import: '@acme/ds', export: 'ProductCard', package: '@acme/ds' })
+		expect(Object.hasOwn(component!, 'version')).toBe(false)
+	})
+
+	for (const [title, arrange] of [
+		['a component file that is a symbolic link', async (root: string) => {
+			const linked = join(root, 'kit', 'src', 'components', 'order-summary-card', 'index.ts')
+			await writeFile(join(root, 'kit', 'src', 'components', 'order-summary-card', 'real-index.ts'), 'export {}\n')
+			await rm(linked)
+			await symlink('./real-index.ts', linked)
+		}],
+		['component files that lie outside kit/src/ by their real path (kit/src is a link)', async (root: string) => {
+			await rename(join(root, 'kit', 'src'), join(root, 'kit', 'real-src'))
+			await symlink('./real-src', join(root, 'kit', 'src'))
+		}],
+	] as const) {
+		it(`names no component, with handoff.component_unavailable, for ${title}`, async () => {
+			const { root, persistence } = await productKitHandoffWorkspace()
+			await arrange(root)
+			await putFormalEvidence(persistence, VIEW_1_ID, (await persistence.views.readRevision(VIEW_1_ID))!, true)
+			const exported = await currentSchemaHandoff(persistence).exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+			expect(exported.status, JSON.stringify(exported.diagnostics)).toBe('exported')
+			const manifest = exported.manifest!
+			expect(manifest.implementationReferences.find(reference => reference.widgetType === 'OrderSummary')?.component).toBeUndefined()
+			expect(manifest.readiness.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'handoff.component_unavailable', blocking: false, path: '/product-kit/widgets/OrderSummary' }))
+			expect(manifest.artifactRefs.some(reference => reference.kind === 'component-file')).toBe(false)
+			// The external export is unaffected.
+			expect(manifest.implementationReferences.find(reference => reference.widgetType === 'ProductCard')?.component).toMatchObject({ package: '@acme/ds', version: '2.3.4' })
+		})
+	}
 })
