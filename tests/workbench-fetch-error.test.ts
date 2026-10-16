@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { describeFetchError, formatFetchError, isLockedError } from '../app/utils/fetch-error'
+import { promoteConflictTitleKey, promoteMovedOf } from '../app/utils/promote-conflict'
 
 function fetchError(statusCode: number, data: unknown, message = `[POST] "/api/evidence/capture": ${statusCode} Unprocessable Entity`) {
 	return Object.assign(new Error(message), { statusCode, status: statusCode, data })
@@ -58,5 +59,31 @@ describe('describeFetchError', () => {
 		const fromList = describeFetchError(fetchError(423, { status: 'locked', code: 'resource.locked', message: 'Locked.', locks: [lock] }), 'Save failed')
 		expect(fromList.lock?.holder.nickname).toBe('codex')
 		expect(isLockedError(describeFetchError(fetchError(409, { status: 'conflict' }), 'Save failed'))).toBe(false)
+	})
+})
+
+// Rule 01a11544-611c-73e0-990b-c094b48b3eb6 and Clause 01a11544-6d0a-70f4-b6b7-76e42f95d42e: a
+// promotion conflict names which resource moved through `conflicts[]`.
+describe('promotion conflicts', () => {
+	const entry = (resource: string, key: string) => ({ resource, key, expectedRevision: 'sha256:a', currentRevision: 'sha256:b' })
+
+	it('reads the moved resources of a conflict body, thread first', () => {
+		const both = describeFetchError(fetchError(409, { status: 'conflict', key: 'r', currentRevision: 'sha256:b', conflicts: [entry('view', 'v'), entry('review', 'r')] }), 'Promote failed')
+		expect(both.conflicts).toEqual([{ resource: 'view', key: 'v' }, { resource: 'review', key: 'r' }])
+		expect(promoteMovedOf(both)).toEqual(['review', 'view'])
+		expect(promoteConflictTitleKey(promoteMovedOf(both))).toBe('reviews.promote.conflict.both')
+
+		const viewOnly = describeFetchError(fetchError(409, { status: 'conflict', key: 'v', conflicts: [entry('view', 'v')] }), 'Promote failed')
+		expect(promoteConflictTitleKey(promoteMovedOf(viewOnly))).toBe('reviews.promote.conflict.view')
+		const reviewOnly = describeFetchError(fetchError(409, { status: 'conflict', key: 'r', conflicts: [entry('review', 'r')] }), 'Promote failed')
+		expect(promoteConflictTitleKey(promoteMovedOf(reviewOnly))).toBe('reviews.promote.conflict.review')
+	})
+
+	it('names nothing when the body lists no conflicts', () => {
+		const bare = describeFetchError(fetchError(409, { status: 'conflict', key: 'r', currentRevision: 'sha256:b' }), 'Promote failed')
+		expect(bare.conflicts).toBeUndefined()
+		expect(promoteMovedOf(bare)).toEqual([])
+		expect(promoteConflictTitleKey(promoteMovedOf(bare))).toBeUndefined()
+		expect(promoteMovedOf(describeFetchError(fetchError(409, { conflicts: [{ resource: 'review' }, 'x'] }), 'Promote failed'))).toEqual([])
 	})
 })

@@ -549,7 +549,13 @@
       "summaryPlaceholder": "例如：核准，側邊面板改為可收合",
       "rationaleLabel": "理由",
       "rationalePlaceholder": "討論得出此結論的原因…",
-      "submit": "升級"
+      "submit": "升級",
+      "conflict": {
+        "review": "升級期間這個討論串已有變更。",
+        "view": "升級期間這個 View 已有變更。",
+        "both": "升級期間這個討論串和它的 View 都已有變更。",
+        "hint": "已載入最新版本，填寫的內容都已保留。請確認後再按一次「升級」。"
+      }
     },
     "feedback": {
       "promoted": "已升級為 Decision。"

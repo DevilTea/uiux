@@ -32,6 +32,7 @@ import { createThreadBody, reanchorThreadBody } from '../utils/canvas-comment-re
 import { recordedContextParts, recordedContextText } from '../utils/thread-render-context'
 import { useRecordedRenderContext } from './useRecordedRenderContext'
 import { threadState, type ReplyConflict } from '../utils/reply-conflict'
+import { promoteMovedOf, type PromoteConflict } from '../utils/promote-conflict'
 
 /** The RootShell: a thread anchored here is about the View as a whole, not one Widget. */
 export const VIEW_ANCHOR_WIDGET_ID = 'root'
@@ -495,10 +496,13 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	/** The conflict was a reply's: what the thread looked like when it was sent (Rule 01a116f0-95fc). */
 	const replyConflict = ref<ReplyConflict>()
 	watch(conflict, (id) => { if (replyConflict.value && replyConflict.value.threadId !== id) replyConflict.value = undefined }, { flush: 'sync' })
+	/** The conflict was a promotion's: which resource moved, the thread or the View (Rule 01a11544-611c). */
+	const promoteConflict = ref<PromoteConflict>()
+	watch(conflict, (id) => { if (promoteConflict.value && promoteConflict.value.threadId !== id) promoteConflict.value = undefined }, { flush: 'sync' })
 	const busy = ref<string>()
 	const replyDrafts = ref<Record<string, string>>({})
 
-	async function mutate(threadId: string, action: string, run: (revision: string) => Promise<unknown>, fallback: string, onConflict?: () => void): Promise<boolean> {
+	async function mutate(threadId: string, action: string, run: (revision: string) => Promise<unknown>, fallback: string, onConflict?: (details: FetchErrorDetails) => void | Promise<void>): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		if (!item || busy.value) return false
 		busy.value = action
@@ -512,7 +516,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 			const details = describeFetchError(cause, fallback)
 			if (details.statusCode === 409 || details.status === 'conflict') {
 				conflict.value = threadId
-				onConflict?.()
+				await onConflict?.(details)
 				await refreshReviews()
 			}
 			else {
@@ -676,6 +680,11 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		return ok
 	}
 
+	/**
+	 * Promotes against the thread's and the open View's revisions. A conflict names what moved (Rule
+	 * 01a11544-611c-73e0-990b-c094b48b3eb6) and re-reads it, the thread and, when it moved, the View;
+	 * the next confirm is the user's, never an automatic retry.
+	 */
 	async function promote(threadId: string, form: Readonly<{ question: string; summary: string; rationale: string }>): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		const view = selectedView.value
@@ -687,7 +696,11 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 			expectedViewRevision: view.revision,
 			question: form.question.trim(),
 			outcome: { summary: form.summary.trim(), rationale: form.rationale.trim() },
-		}), t('comments.errors.promoteFailed'))
+		}), t('comments.errors.promoteFailed'), async (details) => {
+			const moved = promoteMovedOf(details)
+			promoteConflict.value = { threadId, moved }
+			if (moved.includes('view')) await workbench.loadSelectedView(preview.notifyIframeContext)
+		})
 	}
 
 	// -------------------------------------------------------------------------------------------
@@ -1086,6 +1099,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		replyDrafts,
 		conflict,
 		replyConflict,
+		promoteConflict,
 		lastError,
 		busy,
 		reply,

@@ -33,7 +33,15 @@ export type FetchErrorDetails = Readonly<{
 	 * same request can simply be tried again.
 	 */
 	transient?: boolean
+	/**
+	 * A revision conflict's moved resources, from the body's `conflicts[]` (a promotion lists each
+	 * moved resource, `review` or `view`; Clause 01a11544-6d0a-70f4-b6b7-76e42f95d42e).
+	 */
+	conflicts?: readonly FetchErrorConflict[]
 }>
+
+/** One resource whose revision moved since the caller read it. */
+export type FetchErrorConflict = Readonly<{ resource: string; key: string }>
 
 /** Who holds the edit lease on the resource, and until when. */
 export type FetchErrorLock = Readonly<{ kind: string; key: string; holder: Readonly<{ nickname: string; kind: string }>; expiresAt: string }>
@@ -60,6 +68,7 @@ export function describeFetchError(cause: unknown, fallback: string): FetchError
 	const bodyMessage = stringField(bodyRecord, 'message') ?? stringField(bodyRecord, 'statusMessage')
 	const status = stringField(bodyRecord, 'status')
 	const lock = lockField(bodyRecord)
+	const conflicts = conflictsField(bodyRecord)
 	const transient = (statusCode !== undefined && TRANSIENT_HTTP_STATUSES.has(statusCode))
 		|| stringField(bodyRecord, 'code') === 'persistence.busy'
 		|| bodyRecord?.retryable === true
@@ -80,8 +89,21 @@ export function describeFetchError(cause: unknown, fallback: string): FetchError
 		...(statusCode !== undefined ? { statusCode } : {}),
 		...(status ? { status } : {}),
 		...(lock ? { lock } : {}),
+		...(conflicts ? { conflicts } : {}),
 		...(transient ? { transient: true } : {}),
 	})
+}
+
+function conflictsField(body: Record<string, unknown> | undefined): readonly FetchErrorConflict[] | undefined {
+	if (!Array.isArray(body?.conflicts)) return undefined
+	const conflicts: FetchErrorConflict[] = []
+	for (const entry of body.conflicts) {
+		const record = isRecord(entry) ? entry : undefined
+		const resource = stringField(record, 'resource')
+		const key = stringField(record, 'key')
+		if (resource && key) conflicts.push(Object.freeze({ resource, key }))
+	}
+	return conflicts.length ? Object.freeze(conflicts) : undefined
 }
 
 function lockField(body: Record<string, unknown> | undefined): FetchErrorLock | undefined {
