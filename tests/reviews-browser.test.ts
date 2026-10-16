@@ -327,4 +327,68 @@ describe('Reviews inbox (R8)', () => {
 		}
 		finally { await context.close() }
 	}, 60_000)
+
+	// The tests below seed threads of their own and run last, so the queues asserted above stay as seeded.
+
+	it('accepts a ready thread with one-click Resolve as verified, naming its current submission', async () => {
+		const target = await seedThread('ana', 'header-tab-views', 'Views tab badge overlaps the label.')
+		await submit(target)
+		const { context, page } = await openInbox(`/reviews?thread=${target}`)
+		try {
+			const posts: { url: string; body: Record<string, unknown> }[] = []
+			page.on('request', (request) => {
+				if (request.method() === 'POST' && new URL(request.url()).pathname.startsWith('/api/reviews'))
+					posts.push({ url: new URL(request.url()).pathname, body: JSON.parse(request.postData() ?? '{}') as Record<string, unknown> })
+			})
+			const before = await api<{ resource: { status: string; submissions: { id: string }[] } }>('tester', `/api/resources/review/${target}`)
+			expect(before.resource.status).toBe('ready-for-review')
+			expect(before.resource.submissions).toHaveLength(1)
+			const submissionId = before.resource.submissions.at(-1)!.id
+
+			const detail = page.locator(`[data-review-detail][data-thread-id="${target}"]`)
+			await detail.waitFor()
+			const resolveButton = detail.locator('[data-review-resolve]')
+			await poll(() => resolveButton.textContent()).toContain('Accept and resolve')
+			await resolveButton.click()
+
+			await poll(() => posts.find(post => post.url === `/api/reviews/${target}/resolve`)?.body)
+				.toMatchObject({ resolution: 'verified', submissionId, expectedRevision: expect.any(String) })
+			expect(posts.find(post => post.url === `/api/reviews/${target}/resolve`)!.body).not.toHaveProperty('actor')
+			await poll(async () => (await api<{ resource: { status: string } }>('tester', `/api/resources/review/${target}`)).resource.status).toBe('resolved')
+			const stored = await api<{ resource: { history: { to?: string; resolution?: string; submissionId?: string; actor: { displayName: string } }[] } }>('tester', `/api/resources/review/${target}`)
+			expect(stored.resource.history.at(-1)).toMatchObject({ to: 'resolved', resolution: 'verified', submissionId, actor: { displayName: 'tester' } })
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('narrows the queue to threads changed since the member last looked, with no thread selected', async () => {
+		const changed = await seedThread('mei', 'header-tab-history', 'History tab needs a tooltip.')
+		const unchanged = await seedThread('jun', 'header-tab-members', 'Members tab order looks off.')
+		const { context, page } = await openInbox(`/reviews?thread=${changed}`)
+		try {
+			const seenThreads = () => page.evaluate(() => Object.keys(localStorage)
+				.filter(key => key.startsWith('uiux.reviews.seen:'))
+				.flatMap(key => Object.keys(JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, string>)))
+			// Opening each thread marks it seen at its latest change.
+			await page.locator(`[data-review-detail][data-thread-id="${changed}"] [data-timeline-kind="message"]`).first().waitFor({ timeout: 15_000 })
+			await poll(seenThreads).toContain(changed)
+			await page.goto(`${server.origin}/reviews?thread=${unchanged}`, { waitUntil: 'networkidle' })
+			await page.locator(`[data-review-detail][data-thread-id="${unchanged}"] [data-timeline-kind="message"]`).first().waitFor({ timeout: 15_000 })
+			await poll(seenThreads).toContain(unchanged)
+
+			// Another member replies to the first thread after the member last saw it.
+			await reply('ana', changed, 'Agreed, a tooltip would help.')
+
+			// No thread selected: the selected thread always stays listed, which would hide the narrowing.
+			await page.goto(`${server.origin}/reviews`, { waitUntil: 'networkidle' })
+			await page.locator('[data-review-row]').first().waitFor({ timeout: 15_000 })
+			expect(new URL(page.url()).searchParams.has('thread')).toBe(false)
+			expect(await rowIds(page)).toEqual(expect.arrayContaining([changed, unchanged]))
+			await page.locator('[data-review-toggle="unread"]').click()
+			await poll(() => new URL(page.url()).searchParams.get('unread')).toBe('1')
+			await poll(() => rowIds(page)).toContain(changed)
+			expect(await rowIds(page)).not.toContain(unchanged)
+		}
+		finally { await context.close() }
+	}, 60_000)
 })
