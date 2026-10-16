@@ -17,11 +17,13 @@ export type KitBuildStatus = Readonly<{
 /**
  * What a restart did: started the build again (`build` is the new run's state), or refused because
  * the previous restart is more recent than the minimum interval (Clause
- * 01a12f9a-ef7c-7d41-86ac-2f2b3f1acd8a), naming how long until one is accepted.
+ * 01a12f9a-ef7c-7d41-86ac-2f2b3f1acd8a), naming how long until one is accepted, or found the
+ * build stopped (the server is stopping) before it could start anything.
  */
 export type KitBuildRestart =
 	| Readonly<{ outcome: 'started'; build: KitBuildStatus }>
 	| Readonly<{ outcome: 'throttled'; retryAfterMs: number }>
+	| Readonly<{ outcome: 'stopped' }>
 
 export interface KitBuildControl {
 	status(): KitBuildStatus

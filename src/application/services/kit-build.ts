@@ -51,6 +51,8 @@ export function createKitBuildService(persistence: FileNativePersistence, contro
 			const restarted = await control.restart()
 			if (restarted.outcome === 'throttled')
 				return blocked('kit.build_restart_throttled', `The kit build was restarted moments ago; restarts are at least 2 s apart. Try again in ${Math.ceil(restarted.retryAfterMs / 1000)} s.`)
+			if (restarted.outcome === 'stopped')
+				return blocked('kit.build_unavailable', 'The kit build was stopped, as the server stops, so the restart started nothing.')
 			const build = restarted.build
 			if (build.state === 'none')
 				return { status: 'no_build', key: KEY, build, message: 'kit/package.json declares no build (uiux.build), so nothing was started.' }
