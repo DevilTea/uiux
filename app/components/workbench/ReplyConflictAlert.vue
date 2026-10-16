@@ -47,6 +47,7 @@ const description = computed(() => {
     :title="t('comments.replyConflict.title')"
     :description="description"
     :ui="{ title: 'text-sm', description: 'text-xs' }"
+    role="alert"
     data-reply-conflict
     :data-new-replies="change.newMessages"
     :data-status="change.status"

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright'
+import { chromium, type Browser, type BrowserContext, type Locator, type Page, type Request } from 'playwright'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 import { bearer, provisionToken } from './support/access'
 
@@ -79,10 +79,13 @@ async function driveConflict(page: Page, threadId: string, surface: Surface): Pr
 	const messages = scope.locator('[data-timeline-kind="message"]')
 	await expect.poll(() => messages.count(), { timeout: 15_000 }).toBe(1)
 
+	// Replies sent (counted when the request leaves) and their answers: equal counts mean none is in flight.
+	const isReply = (request: Request) => request.method() === 'POST' && new URL(request.url()).pathname === `/api/reviews/${threadId}/messages`
+	let sent = 0
 	const posts: number[] = []
-	page.on('response', (response) => {
-		if (response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/reviews/${threadId}/messages`) posts.push(response.status())
-	})
+	page.on('request', (request) => { if (isReply(request)) sent++ })
+	page.on('response', (response) => { if (isReply(response.request())) posts.push(response.status()) })
+	const settled = () => expect.poll(() => sent - posts.length, { timeout: 10_000 }).toBe(0)
 	await replyElsewhere(threadId, 'First reply from elsewhere.')
 	await replyElsewhere(threadId, 'Second reply from elsewhere.')
 
@@ -91,13 +94,15 @@ async function driveConflict(page: Page, threadId: string, surface: Surface): Pr
 
 	const alert = scope.locator('[data-reply-conflict]')
 	await alert.waitFor({ timeout: 10_000 })
+	expect(await alert.getAttribute('role')).toBe('alert')
 	await expect.poll(() => alert.getAttribute('data-new-replies'), { timeout: 10_000 }).toBe('2')
 	expect(await alert.innerText()).toContain('2 new replies.')
 	expect(await alert.innerText()).toContain('This thread changed before your reply was sent.')
 	await expect.poll(() => messages.count(), { timeout: 10_000 }).toBe(3)
 	expect(await scope.locator(surface.reply).inputValue()).toBe(REPLY)
-	// Never resent by itself.
-	await page.waitForTimeout(1000)
+	// Never resent by itself: the re-read has landed, and no second reply was sent.
+	await settled()
+	expect(sent).toBe(1)
 	expect(posts).toEqual([409])
 
 	await alert.locator('[data-reply-send-again]').click()
@@ -106,7 +111,10 @@ async function driveConflict(page: Page, threadId: string, surface: Surface): Pr
 	await expect.poll(() => messages.count(), { timeout: 10_000 }).toBe(4)
 	await alert.waitFor({ state: 'detached', timeout: 10_000 })
 	expect(await scope.locator(surface.reply).inputValue()).toBe('')
-	await page.waitForTimeout(500)
+	// The alert held focus; focus returns to the reply box, not the body.
+	await expect.poll(() => scope.locator(surface.reply).evaluate(element => element === document.activeElement), { timeout: 10_000 }).toBe(true)
+	await settled()
+	expect(sent).toBe(2)
 	expect(posts).toHaveLength(2)
 	const read = await api<{ resource: { messages: { body: string }[] } }>(`/api/resources/review/${threadId}`)
 	expect(read.resource.messages.map(message => message.body)).toEqual(['Run checks reads like a destructive action.', 'First reply from elsewhere.', 'Second reply from elsewhere.', REPLY])

@@ -157,6 +157,11 @@ const {
 async function sendReply(): Promise<void> {
 	await comments.reply(props.threadId)
 }
+/** Send again removes the alert that held focus; focus returns to the reply box. */
+async function sendAgain(): Promise<void> {
+	await sendReply()
+	void nextTick(() => replyArea.value?.textareaRef?.focus({ preventScroll: true }))
+}
 
 function onReplyKeydown(event: KeyboardEvent): void {
 	// ↑ in an empty reply box edits the viewer's latest editable message (scope/edit decision 16).
@@ -378,7 +383,7 @@ watch(() => props.threadId, () => {
       :after="threadState(thread)"
       :can-send="canSendAgain"
       :busy="comments.busy.value === 'reply'"
-      @send-again="sendReply"
+      @send-again="sendAgain"
     />
     <UAlert
       v-else-if="conflict"

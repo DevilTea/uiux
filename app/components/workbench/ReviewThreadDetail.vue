@@ -127,6 +127,11 @@ async function resolvePrimary(): Promise<void> {
 async function sendReply(): Promise<void> {
 	if (thread.value) await inbox.reply(thread.value.id)
 }
+/** Send again removes the alert that held focus; focus returns to the reply box. */
+async function sendAgain(): Promise<void> {
+	await sendReply()
+	void nextTick(() => replyArea.value?.textareaRef?.focus())
+}
 
 function onReplyKeydown(event: KeyboardEvent): void {
 	// ↑ in an empty reply box edits the viewer's latest editable message (scope/edit decision 16).
@@ -353,7 +358,7 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           :after="threadState(thread)"
           :can-send="canSendAgain"
           :busy="inbox.busy.value === 'reply'"
-          @send-again="sendReply"
+          @send-again="sendAgain"
         />
         <UAlert
           v-else-if="conflict"
