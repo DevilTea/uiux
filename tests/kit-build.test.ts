@@ -100,7 +100,7 @@ function nodeBuild(script: string, extra: Readonly<Record<string, unknown>> = {}
 	return { output: 'dist', build: { command: [process.execPath, script], ...extra } }
 }
 
-function runner(root: string, options: Readonly<{ env?: NodeJS.ProcessEnv; register?: boolean; capture?: boolean }> = {}) {
+function runner(root: string, options: Readonly<{ env?: NodeJS.ProcessEnv; register?: boolean; capture?: boolean; captureOutput?: () => Promise<unknown>; captureWaitMs?: number }> = {}) {
 	const printed: string[] = []
 	const build = createKitBuildRunner({
 		root,
@@ -111,6 +111,8 @@ function runner(root: string, options: Readonly<{ env?: NodeJS.ProcessEnv; regis
 		...(options.env ? { env: options.env } : {}),
 		// As the selected Workspace runtime does under `uiux dev`.
 		...(options.capture ? { captureOutput: () => getSelectedWorkspacePreviewBundle(root, V5_LAYOUT) } : {}),
+		...(options.captureOutput ? { captureOutput: options.captureOutput } : {}),
+		...(options.captureWaitMs !== undefined ? { captureWaitMs: options.captureWaitMs } : {}),
 	})
 	const unregister = options.register ? registerKitBuildRunner(root, build) : () => {}
 	cleanups.push(async () => {
@@ -593,6 +595,58 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		expect((bundle as { bundleJs: string }).bundleJs).toContain('kit-adapter-1')
 		expect((bundle as { bundleJs: string }).bundleJs).not.toContain('half-written output')
 	}, 30_000)
+
+	it('spawns the build only once the capture of the output found at the start has finished', async () => {
+		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK, 'dist/uiux.js': adapterModule('kit-adapter-old') })
+		let finishCapture!: () => void
+		let spawnedDuringCapture: boolean | undefined
+		const captureOutput = vi.fn(() => new Promise<void>(resolveCapture => {
+			finishCapture = () => {
+				spawnedDuringCapture = existsSync(join(root, 'kit', 'seen.json'))
+				resolveCapture()
+			}
+		}))
+		const { build } = runner(root, { captureOutput })
+		const started = build.start()
+		await waitFor(() => captureOutput.mock.calls.length, calls => calls === 1)
+		await new Promise(resolveDelay => setTimeout(resolveDelay, 300))
+		expect(existsSync(join(root, 'kit', 'seen.json'))).toBe(false)
+		finishCapture()
+		await started
+		expect(spawnedDuringCapture).toBe(false)
+		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(build.outputGeneration()).toBe(1)
+	}, 30_000)
+
+	it('abandons a capture of the output found at the start that exceeds the wait, so the build starts with no last good output', async () => {
+		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK, 'dist/uiux.js': adapterModule('kit-adapter-old') })
+		const captureOutput = vi.fn(() => new Promise<void>(() => {}))
+		const { build, printed } = runner(root, { captureOutput, captureWaitMs: 200 })
+		await build.start()
+		expect(captureOutput).toHaveBeenCalledTimes(1)
+		expect(printed.some(line => line.includes('was abandoned'))).toBe(true)
+		// The capture still runs, but its generation is not the last good output.
+		expect(build.outputGeneration()).toBeUndefined()
+		expect(build.outputVersion()).toBeUndefined()
+		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(build.outputGeneration()).toBe(1)
+		expect(captureOutput).toHaveBeenCalledTimes(2)
+	}, 30_000)
+
+	it('stops at once, spawning nothing, while the capture of the output found at the start is in progress', async () => {
+		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK, 'dist/uiux.js': adapterModule('kit-adapter-old') })
+		const captureOutput = vi.fn(() => new Promise<void>(() => {}))
+		const { build, printed } = runner(root, { captureOutput })
+		const started = build.start()
+		await waitFor(() => captureOutput.mock.calls.length, calls => calls === 1)
+		const stopping = Date.now()
+		await build.stop()
+		await started
+		expect(Date.now() - stopping).toBeLessThan(1000)
+		await new Promise(resolveDelay => setTimeout(resolveDelay, 300))
+		expect(existsSync(join(root, 'kit', 'seen.json'))).toBe(false)
+		expect(printed.some(line => line.includes('running'))).toBe(false)
+	})
 
 	it('makes the Adapter set invalid while no build output exists', async () => {
 		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK })
