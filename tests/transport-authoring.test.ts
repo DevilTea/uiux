@@ -1202,6 +1202,82 @@ describe('Review thread domain authoring', () => {
 		const unchanged = await app.readPointResource('view', OTHER_VIEW_ID)
 		expect(unchanged?.kind === 'view' ? unchanged.resource.spec.decisions : undefined).toEqual([])
 	})
+
+	// Clause 01a11544-6d0a-70f4-b6b7-76e42f95d42e: every promotion conflict lists each moved resource
+	// in `conflicts`, including when only one moved, the same over MCP and HTTP.
+	it('lists each moved resource in conflicts when only the Review, only the View or both moved, over MCP and HTTP', async () => {
+		const { app } = await emptySession()
+		const review = await app.createReviewThread({ id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' } })
+		const view = await app.createView({ id: VIEW_ID, name: 'Test View', spec: spec('Intent') })
+		if (review.status !== 'created' || view.status !== 'created') throw new Error('setup failed')
+		const staleReview = review.revision
+		const staleView = view.revision
+
+		const moveReview = async (body: string) => {
+			const current = await app.readPointResource('review', REVIEW_ID)
+			const moved = await app.appendReviewMessage({ reviewId: REVIEW_ID, expectedRevision: current!.revision, actor: { type: 'agent', id: 'claude' }, body })
+			if (moved.status !== 'updated') throw new Error(`append failed: ${moved.status}`)
+			return moved.revision
+		}
+		const moveView = async (intent: string) => {
+			const current = await app.readPointResource('view', VIEW_ID)
+			const moved = await app.updateViewSpec({ key: VIEW_ID, expectedRevision: current!.revision, spec: spec(intent) })
+			if (moved.status !== 'updated') throw new Error(`update failed: ${moved.status}`)
+			return moved.revision
+		}
+		const request = (expectedReviewRevision: string, expectedViewRevision: string) => ({
+			expectedReviewRevision,
+			viewId: VIEW_ID,
+			expectedViewRevision,
+			question: 'Keep header padding?',
+		})
+
+		const { client, close } = await connectedClient(app)
+		try {
+			const viaBoth = async (expectedReviewRevision: string, expectedViewRevision: string) => {
+				const mcp = await client.callTool({ name: 'promote_review_to_decision', arguments: { reviewId: REVIEW_ID, ...request(expectedReviewRevision, expectedViewRevision) } })
+				const http = await promoteReviewToDecisionForHttp(scoped(app), REVIEW_ID, request(expectedReviewRevision, expectedViewRevision))
+				expect(mcp.isError).toBe(true)
+				expect(http.status).toBe(409)
+				expect(http.body).toEqual(mcp.structuredContent)
+				return mcp.structuredContent
+			}
+
+			// Only the Review moved.
+			const reviewNow = await moveReview('A reply moves the thread.')
+			expect(await viaBoth(staleReview, staleView)).toEqual({
+				status: 'conflict',
+				key: REVIEW_ID,
+				currentRevision: reviewNow,
+				conflicts: [{ resource: 'review', key: REVIEW_ID, expectedRevision: staleReview, currentRevision: reviewNow }],
+			})
+
+			// Only the View moved.
+			const viewNow = await moveView('The View moved.')
+			expect(await viaBoth(reviewNow, staleView)).toEqual({
+				status: 'conflict',
+				key: VIEW_ID,
+				currentRevision: viewNow,
+				conflicts: [{ resource: 'view', key: VIEW_ID, expectedRevision: staleView, currentRevision: viewNow }],
+			})
+
+			// Both moved.
+			expect(await viaBoth(staleReview, staleView)).toEqual({
+				status: 'conflict',
+				key: REVIEW_ID,
+				currentRevision: reviewNow,
+				conflicts: [
+					{ resource: 'review', key: REVIEW_ID, expectedRevision: staleReview, currentRevision: reviewNow },
+					{ resource: 'view', key: VIEW_ID, expectedRevision: staleView, currentRevision: viewNow },
+				],
+			})
+
+			// Nothing was written by any conflicting attempt.
+			const after = await app.readPointResource('view', VIEW_ID)
+			expect(after?.kind === 'view' ? after.resource.spec.decisions : undefined).toEqual([])
+		}
+		finally { await close() }
+	})
 })
 
 /**
