@@ -491,6 +491,40 @@ async function evaluateRuntime() {
 	}
 }
 
+/**
+ * A blocked Preview (Rule 01a115cd-b30b-706e-b8a2-46e62259156e) has no mounted runtime, and no
+ * `/api/events` stream tells it when the default-Locale file appears (another tab or an Agent may
+ * create it). While blocked, the current Preview re-reads that file and renders once it exists; a
+ * version frame's Locales never change, so it does not.
+ */
+const BLOCKED_RECHECK_MS = 2000
+let blockedRecheckTimer: ReturnType<typeof setInterval> | undefined
+let blockedRechecking = false
+
+async function recheckBlockedPreview() {
+	const defaultLocale = workspaceDefaultLocale.value
+	if (blockedRechecking || !defaultLocale || materializationResult.value?.status !== 'blocked') return
+	blockedRechecking = true
+	try {
+		const evaluation = runtimeEvaluation
+		const messages = await readLocale(defaultLocale).catch(() => undefined)
+		if (messages && evaluation === runtimeEvaluation && materializationResult.value?.status === 'blocked') await evaluateRuntime()
+	}
+	finally {
+		blockedRechecking = false
+	}
+}
+
+function stopBlockedRecheck() {
+	if (blockedRecheckTimer) clearInterval(blockedRecheckTimer)
+	blockedRecheckTimer = undefined
+}
+
+watch(() => materializationResult.value?.status === 'blocked', (blocked) => {
+	stopBlockedRecheck()
+	if (blocked && !versionId) blockedRecheckTimer = setInterval(() => { void recheckBlockedPreview() }, BLOCKED_RECHECK_MS)
+})
+
 /** One inbound envelope, alone or from a batch, through the runtime bridge's gates. */
 function receiveWire(input: unknown) {
 	if (!runtimeBridge) return
@@ -624,6 +658,7 @@ onUnmounted(() => {
 	window.removeEventListener('wheel', absorbCanvasZoomWheel)
 	geometrySignals?.dispose()
 	geometryProducer?.dispose()
+	stopBlockedRecheck()
 	disposeCurrentRuntime()
 })
 </script>

@@ -18,7 +18,8 @@ import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-
  * - Workspace settings and non-i18n View authoring stay usable (Rule 01a115cd-b33a-7c3e-ba1f-bed8759b67d6);
  * - the Preview reports a blocked state instead of rendering, and Checks shows the persistent error
  *   with a way to the create action (Rules 01a115cd-b2ad-7989-8faa-07d48bc8ee30, 01a115cd-b2dc-78a5-911b-a377bfcab278);
- * - once the file exists, the Preview renders and capture succeeds again.
+ * - once the Locales page creates the file, the open Preview renders without being reopened, and
+ *   capture succeeds again.
  *
  * The tests run in order: the last one creates the file.
  */
@@ -171,23 +172,35 @@ describe('a default Locale without its Locale file', () => {
 		finally { await checks.context.close() }
 	})
 
-	it('renders the Preview and captures again once the file exists', { timeout: 60_000 }, async () => {
-		const created = await api('/api/locales', { locale: 'en-US', messages: {} })
-		expect(created.ok, await created.clone().text()).toBe(true)
+	it('renders the open blocked Preview, without reopening it, once the Locales page creates the file, and captures again', { timeout: 60_000 }, async () => {
+		const canvas = await open(`/views/${viewId}`)
+		try {
+			const frame = await previewFrame(canvas.page)
+			await frame.locator('[data-preview-status="blocked"]').waitFor({ timeout: 15_000 })
+			const frameElement = await frame.frameElement()
+
+			// Another tab creates the file through the Locales page (`create_locale`).
+			const locales = await canvas.context.newPage()
+			await locales.goto(`${server.origin}/workspace/locales`, { waitUntil: 'networkidle' })
+			await locales.getByRole('button', { name: 'Create Locale' }).first().click()
+			const dialog = locales.getByRole('dialog')
+			await dialog.getByRole('button', { name: 'Create Locale' }).click()
+			await dialog.waitFor({ state: 'hidden', timeout: 15_000 })
+			await locales.close()
+
+			// The same Preview document renders: its iframe and runtime document were not replaced.
+			await frame.waitForSelector('[data-preview-ready="true"]', { state: 'visible', timeout: 15_000 })
+			expect(await frame.locator('[data-preview-status="blocked"]').count()).toBe(0)
+			expect(frame.isDetached()).toBe(false)
+			expect(await frameElement.evaluate(element => element.isConnected)).toBe(true)
+		}
+		finally { await canvas.context.close() }
 
 		const http = await api('/api/evidence/capture', { contexts: contexts().slice(0, 1) })
 		const result = await json<CaptureResult>(http)
 		expect(http.status, JSON.stringify(result)).toBe(200)
 		expect(result.results[0]?.status).toBe('captured')
 		expect(await evidenceCount()).toBe(1)
-
-		const canvas = await open(`/views/${viewId}`)
-		try {
-			const frame = await previewFrame(canvas.page)
-			await frame.waitForSelector('[data-preview-ready="true"]', { state: 'visible', timeout: 15_000 })
-			expect(await frame.locator('[data-preview-status="blocked"]').count()).toBe(0)
-		}
-		finally { await canvas.context.close() }
 
 		const checks = await open('/?tab=checks')
 		try {
