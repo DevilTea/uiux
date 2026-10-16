@@ -309,16 +309,22 @@ try {
 		if (wsUpdate.isError || wsUpdate.structuredContent?.status !== 'updated')
 			throw new Error(`Packed MCP update_workspace_settings failed: ${JSON.stringify(wsUpdate.structuredContent)}`)
 
-		// Create canonical default locale via MCP
-		const locCreate = await client.callTool({
-			name: 'create_locale',
+		// uiux init wrote the empty default Locale (issue #94); fill it via MCP.
+		const locRead = await client.readResource({ uri: 'uiux://locale/en-US' })
+		const locContent = locRead.contents[0]
+		const initialLocale = locContent && 'text' in locContent ? JSON.parse(locContent.text) : undefined
+		if (JSON.stringify(initialLocale?.resource) !== '{}' || typeof initialLocale?.revision !== 'string')
+			throw new Error(`Packed CLI init did not write the empty default Locale: ${JSON.stringify(initialLocale)}`)
+		const locUpdate = await client.callTool({
+			name: 'update_locale',
 			arguments: {
 				locale: 'en-US',
+				expectedRevision: initialLocale.revision,
 				messages: { 'smoke.hello': 'Hello' },
 			},
 		})
-		if (locCreate.isError || locCreate.structuredContent?.status !== 'created')
-			throw new Error(`Packed MCP create_locale failed: ${JSON.stringify(locCreate.structuredContent)}`)
+		if (locUpdate.isError || locUpdate.structuredContent?.status !== 'updated')
+			throw new Error(`Packed MCP update_locale failed: ${JSON.stringify(locUpdate.structuredContent)}`)
 
 		// Create a view with RootShell for formal capture & handoff
 		const captureViewId = '22222222-2222-4222-8222-222222222222'

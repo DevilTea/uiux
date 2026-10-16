@@ -4,7 +4,7 @@ import { basename, join, resolve } from 'node:path'
 
 import { builtInAccessPresetsFile } from '../domain/access-presets/schema'
 import { emptyProductKit } from '../domain/product-kit/schema'
-import { LEGACY_LAYOUT, V5_LAYOUT } from '../persistence/paths'
+import { LEGACY_LAYOUT, V5_LAYOUT, WORKSPACE_DATA_DIRECTORY } from '../persistence/paths'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, WORKSPACE_GITIGNORE_RULES } from '../product/workspace-schema'
 import { isSameOrInside, realFuturePath, resolveUiuxHome } from '../server/access/store'
 
@@ -26,8 +26,10 @@ export type InitCommandOptions = Readonly<{
  * default `<git toplevel>/.uiux/` inside a Git repository and `<cwd>/.uiux/` otherwise. `<dir>`
  * holds the manifest directly. It writes `workspace.json` (a `defaultLocale`, empty viewport and
  * theme registries), a `product-kit.json` whose members are all empty, an `access-presets.json`
- * holding the built-in Access presets (Clause 01a11c09-a930-7e31-bb0a-9e2bee79490c), and a `.gitignore` listing
- * the runtime files, `kit/node_modules/` and `kit/dist/`; an existing `.gitignore` keeps its lines
+ * holding the built-in Access presets (Clause 01a11c09-a930-7e31-bb0a-9e2bee79490c), an empty
+ * default-Locale file `i18n/<defaultLocale>.json` holding `{}`, so a new Workspace renders a Preview
+ * right away (owner ruling 2 of https://github.com/DevilTea/uiux/issues/94#issuecomment-6218608568),
+ * and a `.gitignore` listing the runtime files, `kit/node_modules/` and `kit/dist/`; an existing `.gitignore` keeps its lines
  * and gains only the missing rules. The manifest is written last, so an interrupted run never
  * leaves a directory that looks initialized.
  *
@@ -74,6 +76,10 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 	const productKitPath = join(root, V5_LAYOUT.productKitPath!)
 	const accessPresetsPath = join(root, V5_LAYOUT.accessPresetsPath!)
 	const gitignorePath = join(root, '.gitignore')
+	const defaultLocale = 'en-US'
+	const localesPath = join(root, WORKSPACE_DATA_DIRECTORY.locales)
+	const defaultLocaleName = `${WORKSPACE_DATA_DIRECTORY.locales}/${defaultLocale}.json`
+	const defaultLocalePath = join(root, defaultLocaleName)
 	if (rootExists) {
 		for (const manifest of [V5_LAYOUT.manifestPath, LEGACY_LAYOUT.manifestPath]) {
 			const path = join(root, ...manifest.split('/'))
@@ -87,6 +93,14 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 				err(`uiux: ${root} already holds ${name}; remove it or choose another directory.`)
 				return 2
 			}
+		}
+		if (await exists(localesPath) && !(await lstat(localesPath)).isDirectory()) {
+			err(`uiux: ${localesPath} is not a directory; remove it or choose another directory.`)
+			return 2
+		}
+		if (await exists(defaultLocalePath)) {
+			err(`uiux: ${root} already holds ${defaultLocaleName}; remove it or choose another directory.`)
+			return 2
 		}
 		if (await exists(gitignorePath) && !(await lstat(gitignorePath)).isFile()) {
 			err(`uiux: ${gitignorePath} is not a regular file; remove it or choose another directory.`)
@@ -109,12 +123,14 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 
 	const manifest = {
 		schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
-		i18n: { defaultLocale: 'en-US' },
+		i18n: { defaultLocale },
 		viewports: {},
 		themes: {},
 	}
 	await writeFile(productKitPath, json(emptyProductKit()), { encoding: 'utf8', flag: 'wx' })
 	await writeFile(accessPresetsPath, json(builtInAccessPresetsFile()), { encoding: 'utf8', flag: 'wx' })
+	await mkdir(localesPath, { recursive: true })
+	await writeFile(defaultLocalePath, json({}), { encoding: 'utf8', flag: 'wx' })
 	await writeGitignore(gitignorePath)
 	try {
 		await writeFile(join(root, V5_LAYOUT.manifestPath), json(manifest), { encoding: 'utf8', flag: 'wx' })

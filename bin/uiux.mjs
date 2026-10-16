@@ -24,8 +24,9 @@ Commands:
                            Initialize a Workspace in <dir>, by default in .uiux/ of the
                            Git repository's top level (of the current directory outside
                            a repository): workspace.json, product-kit.json,
-                           access-presets.json (the built-in Access presets) and a
-                           .gitignore for the runtime files, kit/node_modules/ and kit/dist/
+                           access-presets.json (the built-in Access presets), an empty
+                           default-Locale file i18n/en-US.json and a .gitignore for
+                           the runtime files, kit/node_modules/ and kit/dist/
   dev [--workspace <dir>] [--host <address>] [--origin <url>]...
                            Start the unified UIUX Workbench/Nitro server. By default
                            it listens on loopback only (127.0.0.1; PORT selects the

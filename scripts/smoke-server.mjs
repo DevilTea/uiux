@@ -120,6 +120,9 @@ try {
 	const { uiuxWorkspaceSchemaVersion } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 	if (JSON.parse(await readFile(join(workspaceRoot, 'workspace.json'), 'utf8')).schemaVersion !== uiuxWorkspaceSchemaVersion)
 		throw new Error('uiux init did not write the current schemaVersion.')
+	// The empty default-Locale file, so a new Workspace renders a Preview right away (issue #94).
+	if (await readFile(join(workspaceRoot, 'i18n', 'en-US.json'), 'utf8') !== '{}\n')
+		throw new Error('uiux init did not write the empty default-Locale file i18n/en-US.json.')
 	await writeFile(join(workspaceRoot, 'product-kit.json'), `${JSON.stringify({
 		designSystems: [],
 		adapters: [{ moduleSpecifier: './dist/adapters/smoke.mjs' }],
