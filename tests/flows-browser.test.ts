@@ -280,4 +280,64 @@ describe('Prototype player (R11, Discussion #6 item 6)', () => {
 		}
 		finally { await context.close() }
 	}, 120_000)
+
+	// Issue #136: re-entering a step keeps the iframe element and loads a new document, so the
+	// replaced, acknowledged generation can still post while the new handshake runs. Such a message is
+	// stale even when it would not decode, and never stops the session.
+	it('ignores an undecodable message of the replaced generation during the next handshake', async () => {
+		const { context, page } = await open(`/flows/${flowId}`)
+		try {
+			await page.locator('[data-flow-play]').click()
+			await page.locator('[data-flow-player]').waitFor()
+			let replaced = await waitForGenerationChange(page, '')
+			await page.locator('[data-flow-player-next]', { hasText: 'btn-run-checks' }).click()
+			replaced = await waitForGenerationChange(page, replaced)
+			await page.waitForSelector('[data-session-status][data-status="live"]', { timeout: 15_000 })
+			const src = new URL(await page.locator('iframe[src*="/preview"]').getAttribute('src') ?? '', server.origin)
+			const previewSessionId = src.searchParams.get('session') ?? ''
+			const replacedFrame = page.frames().find(frame => frame.url().includes(`generation=${replaced}`))
+			if (!replacedFrame) throw new Error('The acknowledged generation has no Preview frame.')
+
+			// Hold the next document, so the replaced one stays in the iframe during the new handshake.
+			let release = () => {}
+			const held = new Promise<void>((resolve) => { release = resolve })
+			let requested = () => {}
+			const nextRequested = new Promise<void>((resolve) => { requested = resolve })
+			await page.route(url => url.pathname === '/preview' && url.searchParams.get('generation') !== replaced, async (route) => {
+				requested()
+				await held
+				await route.continue()
+			})
+			// Every session status the chip shows from here on, and a marker that follows the stale post.
+			await page.evaluate(() => {
+				const probe = window as unknown as { __statuses: string[]; __marker: Promise<void> }
+				probe.__statuses = []
+				new MutationObserver((records) => {
+					for (const record of records) probe.__statuses.push((record.target as Element).getAttribute('data-status') ?? '')
+				}).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-status'] })
+				probe.__marker = new Promise<void>((resolve) => {
+					window.addEventListener('message', (event) => {
+						if ((event.data as { channel?: unknown } | null)?.channel === 'test:marker') resolve()
+					})
+				})
+			})
+
+			await page.locator('[data-flow-player-next]', { hasText: 'retry-button' }).click()
+			await nextRequested
+			// Posts from one window arrive in order: once the marker is handled, so is the stale message,
+			// and Vue has rendered whatever it changed.
+			await replacedFrame.evaluate(([sessionId, generationId]) => {
+				const message = { type: 'geometry.future', context: { previewSessionId: sessionId, runtimeGenerationId: generationId }, payload: {} }
+				parent.postMessage({ channel: 'uiux:preview:wire', message }, location.origin)
+				parent.postMessage({ channel: 'test:marker' }, location.origin)
+			}, [previewSessionId, replaced] as const)
+			await page.evaluate(() => (window as unknown as { __marker: Promise<void> }).__marker)
+			expect(await page.locator('[data-session-status]').getAttribute('data-status')).toBe('reconnecting')
+
+			release()
+			await page.waitForSelector('[data-session-status][data-status="live"]', { timeout: 15_000 })
+			expect(await page.evaluate(() => (window as unknown as { __statuses: string[] }).__statuses)).not.toContain('stopped')
+		}
+		finally { await context.close() }
+	}, 120_000)
 })

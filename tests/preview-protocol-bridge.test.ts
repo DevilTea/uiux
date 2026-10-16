@@ -196,6 +196,52 @@ describe('Preview protocol bridge', () => {
 		expect(workbench.snapshot().session).toMatchObject({ currentGenerationPhase: 'bootstrap' })
 	})
 
+	// Issue #136: a message of the replaced, acknowledged generation that is still in flight when the
+	// new generation's handshake starts must be discarded as stale, even when it would not decode.
+	it('discards an undecodable message of the replaced generation during the new handshake', () => {
+		const outbound: PreviewWireMessage[] = []
+		const workbench = new WorkbenchPreviewProtocolBridge('session-a', collector(outbound), () => compatible)
+		workbench.admitGeneration('generation-a', 'initial')
+		expect(workbench.receive(capabilityDeclaration('generation-a')).status).toBe('ack-dispatched')
+
+		// The runtime of generation-a posted these just before the Workbench replaced the generation.
+		const unknownType = { type: 'geometry.future', context: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a' }, payload: {} }
+		const malformedResponse = { ...acquireResponse(), payload: { rect: 'not-a-rect' } }
+		const malformedDeclaration = { ...capabilityDeclaration('generation-a'), payload: { protocolVersion: 'one' } }
+		expect(workbench.replaceGenerationForLifecycle('generation-b', 'reload').status).toBe('admitted')
+
+		for (const stale of [unknownType, malformedResponse, malformedDeclaration])
+			expect(workbench.receive(stale)).toEqual({ status: 'stale-generation' })
+		// A message of another Preview session is stale before its generation is even read.
+		expect(workbench.receive({ ...unknownType, context: { previewSessionId: 'session-old', runtimeGenerationId: 'generation-b' } }))
+			.toEqual({ status: 'stale-session' })
+		expect(workbench.snapshot().session).toMatchObject({ currentGenerationId: 'generation-b', currentGenerationPhase: 'bootstrap', recoveryNeeded: false })
+
+		expect(workbench.receive(capabilityDeclaration('generation-b')).status).toBe('ack-dispatched')
+		expect(outbound.map(message => message.context.runtimeGenerationId)).toEqual(['generation-a', 'generation-b'])
+	})
+
+	it('still rejects an undecodable message of the current generation as invalid', () => {
+		const workbench = new WorkbenchPreviewProtocolBridge('session-a', collector([]), () => compatible)
+		workbench.admitGeneration('generation-a', 'initial')
+		const unknownType = { type: 'geometry.future', context: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a' }, payload: {} }
+		expect(workbench.receive(unknownType).status).toBe('invalid')
+		// An envelope whose identities cannot be read is judged by the full decode, never as stale.
+		expect(workbench.receive({ type: 'geometry.future', context: { previewSessionId: 'session-a' }, payload: {} }).status).toBe('invalid')
+		expect(workbench.receive({ type: 'geometry.future', context: { previewSessionId: 7, runtimeGenerationId: 'generation-old' }, payload: {} }).status).toBe('invalid')
+		expect(workbench.receive({ type: 'geometry.future', payload: {} }).status).toBe('invalid')
+		expect(workbench.receive(capabilityDeclaration('generation-a')).status).toBe('ack-dispatched')
+		expect(workbench.receive(unknownType).status).toBe('invalid')
+	})
+
+	it('discards an undecodable message of another generation on the runtime side', () => {
+		const runtime = new RuntimePreviewProtocolBridge('session-a', 'generation-b', declaration, collector([]))
+		const unknownType = { type: 'geometry.future', context: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a' }, payload: {} }
+		expect(runtime.receive(unknownType)).toEqual({ status: 'stale-generation' })
+		expect(runtime.receive({ ...unknownType, context: { previewSessionId: 'session-old', runtimeGenerationId: 'generation-b' } })).toEqual({ status: 'stale-session' })
+		expect(runtime.receive({ ...unknownType, context: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-b' } }).status).toBe('invalid')
+	})
+
 	it('resets the automatic recovery budget only after the recovery generation ACK is dispatched', () => {
 		const outbound: PreviewWireMessage[] = []
 		const workbench = new WorkbenchPreviewProtocolBridge('session-a', collector(outbound), () => compatible)

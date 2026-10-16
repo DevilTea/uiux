@@ -75,8 +75,12 @@ export class WorkbenchPreviewProtocolBridge {
 
 	receive(input: unknown): BridgeReceiveResult {
 		const type = messageType(input)
-		if (type === 'capability.declare') return this.receiveCapabilityDeclaration(input)
 		if (type === 'capability.ack') return { status: 'wrong-direction' }
+		// Correlation before the full decode: a stale envelope is discarded whatever its type or
+		// payload, so an undecodable message of a retired generation never fails the current one.
+		const stale = this.staleCorrelation(input)
+		if (stale) return { status: stale }
+		if (type === 'capability.declare') return this.receiveCapabilityDeclaration(input)
 		if (isTargetingMessageType(type)) {
 			const targeting = validateTargetingMessage(input)
 			if (!targeting.ok) return { status: 'invalid', diagnostics: targeting.diagnostics }
@@ -182,6 +186,14 @@ export class WorkbenchPreviewProtocolBridge {
 		return { status: 'ack-dispatched', acknowledgement }
 	}
 
+	private staleCorrelation(input: unknown): 'stale-session' | 'stale-generation' | undefined {
+		const correlation = envelopeCorrelation(input)
+		if (!correlation) return undefined
+		if (correlation.previewSessionId !== this.session.previewSessionId) return 'stale-session'
+		if (correlation.runtimeGenerationId === undefined) return undefined
+		return this.classify(correlation.previewSessionId, correlation.runtimeGenerationId) === 'stale-generation' ? 'stale-generation' : undefined
+	}
+
 	private classify(previewSessionId: string, runtimeGenerationId: string): 'gated' | 'stale-session' | 'stale-generation' | undefined {
 		const gate = this.session.classifyGeometryTraffic(previewSessionId, runtimeGenerationId)
 		return gate === 'open' ? undefined : gate
@@ -244,6 +256,11 @@ export class RuntimePreviewProtocolBridge {
 	receive(input: unknown): BridgeReceiveResult {
 		const type = messageType(input)
 		if (type === 'capability.declare') return { status: 'wrong-direction' }
+		// Correlation before the full decode, as on the Workbench side.
+		const correlation = envelopeCorrelation(input)
+		if (correlation && correlation.previewSessionId !== this.previewSessionId) return { status: 'stale-session' }
+		if (correlation?.runtimeGenerationId !== undefined && correlation.runtimeGenerationId !== this.runtimeGenerationId)
+			return { status: 'stale-generation' }
 		if (type === 'capability.ack') return this.receiveAcknowledgement(input)
 		if (isTargetingMessageType(type)) {
 			const targeting = validateTargetingMessage(input)
@@ -350,6 +367,22 @@ function messageType(input: unknown): string | undefined {
 	if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
 	const type = (input as Record<string, unknown>).type
 	return typeof type === 'string' ? type : undefined
+}
+
+/**
+ * Reads only an envelope's session and generation identities, before any schema decode, so a
+ * receiver can check correlation outermost first. An identity that is missing or not a non-empty
+ * string is left to the full decode, which then judges the envelope.
+ */
+function envelopeCorrelation(input: unknown): Readonly<{ previewSessionId: string; runtimeGenerationId?: string }> | undefined {
+	if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
+	const context = (input as Record<string, unknown>).context
+	if (!context || typeof context !== 'object' || Array.isArray(context)) return undefined
+	const { previewSessionId, runtimeGenerationId } = context as Record<string, unknown>
+	if (typeof previewSessionId !== 'string' || !previewSessionId) return undefined
+	return typeof runtimeGenerationId === 'string' && runtimeGenerationId
+		? { previewSessionId, runtimeGenerationId }
+		: { previewSessionId }
 }
 
 function cloneDeclaration(value: CapabilityDeclareMessage['payload']): CapabilityDeclareMessage['payload'] {
