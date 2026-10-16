@@ -31,6 +31,7 @@ import { renderContextDiffers, type PinRenderContext } from '../../src/preview/p
 import { createThreadBody, reanchorThreadBody } from '../utils/canvas-comment-requests'
 import { recordedContextParts, recordedContextText } from '../utils/thread-render-context'
 import { useRecordedRenderContext } from './useRecordedRenderContext'
+import { threadState, type ReplyConflict } from '../utils/reply-conflict'
 
 /** The RootShell: a thread anchored here is about the View as a whole, not one Widget. */
 export const VIEW_ANCHOR_WIDGET_ID = 'root'
@@ -491,10 +492,13 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 
 	/** The open thread changed elsewhere since it was read: the draft is kept, Retry is explicit. */
 	const conflict = ref<string>()
+	/** The conflict was a reply's: what the thread looked like when it was sent (Rule 01a116f0-95fc). */
+	const replyConflict = ref<ReplyConflict>()
+	watch(conflict, (id) => { if (replyConflict.value && replyConflict.value.threadId !== id) replyConflict.value = undefined }, { flush: 'sync' })
 	const busy = ref<string>()
 	const replyDrafts = ref<Record<string, string>>({})
 
-	async function mutate(threadId: string, action: string, run: (revision: string) => Promise<unknown>, fallback: string): Promise<boolean> {
+	async function mutate(threadId: string, action: string, run: (revision: string) => Promise<unknown>, fallback: string, onConflict?: () => void): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		if (!item || busy.value) return false
 		busy.value = action
@@ -508,6 +512,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 			const details = describeFetchError(cause, fallback)
 			if (details.statusCode === 409 || details.status === 'conflict') {
 				conflict.value = threadId
+				onConflict?.()
 				await refreshReviews()
 			}
 			else {
@@ -521,11 +526,17 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	}
 	const lastError = ref<Readonly<{ threadId: string; error: FetchErrorDetails }>>()
 
+	/**
+	 * Sends the reply draft against the thread's current revision. After a conflict the draft stays
+	 * and nothing is resent until the user sends again (Rule 01a11485-f451-72eb-81ad-686aeec7b3eb).
+	 */
 	async function reply(threadId: string): Promise<boolean> {
 		const body = replyDrafts.value[threadId]?.trim()
-		if (!body) return false
+		const item = threadById.value.get(threadId)
+		if (!body || !item) return false
 		lastError.value = undefined
-		const ok = await mutate(threadId, 'reply', revision => postMessage(threadId, revision, body), t('comments.errors.replyFailed'))
+		const before = threadState(item)
+		const ok = await mutate(threadId, 'reply', revision => postMessage(threadId, revision, body), t('comments.errors.replyFailed'), () => { replyConflict.value = { threadId, before } })
 		if (ok) replyDrafts.value = { ...replyDrafts.value, [threadId]: '' }
 		return ok
 	}
@@ -1074,6 +1085,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		sendComposer,
 		replyDrafts,
 		conflict,
+		replyConflict,
 		lastError,
 		busy,
 		reply,

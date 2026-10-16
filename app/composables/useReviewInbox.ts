@@ -24,6 +24,7 @@ import {
 } from '../utils/review-inbox'
 import { parseThread, viewLocation } from '../utils/workbench-routes'
 import { submissionBody, type ReviewSubmissionDraft } from '../utils/review-submission'
+import { threadState, type ReplyConflict } from '../utils/reply-conflict'
 import { useAccess } from './useAccess'
 import { useUiuxClient } from './useUiuxClient'
 import { useWorkbench } from './useWorkbench'
@@ -89,6 +90,9 @@ function createReviewInbox() {
 	/** Mutation state: the running action, a revision conflict or error per thread, unsent replies. */
 	const busy = ref<string>()
 	const conflict = ref<string>()
+	/** The conflict was a reply's: what the thread looked like when it was sent (Rule 01a116f0-95fc). */
+	const replyConflict = ref<ReplyConflict>()
+	watch(conflict, (id) => { if (replyConflict.value && replyConflict.value.threadId !== id) replyConflict.value = undefined }, { flush: 'sync' })
 	const lastError = ref<Readonly<{ threadId: string; error: FetchErrorDetails }>>()
 	const replyDrafts = ref<Record<string, string>>({})
 	const announcement = ref('')
@@ -345,7 +349,7 @@ function createReviewInbox() {
 		void nextTick(() => { announcement.value = text })
 	}
 
-	async function mutate(threadId: string, action: string, run: (revision: string) => Promise<unknown>, fallback: string): Promise<boolean> {
+	async function mutate(threadId: string, action: string, run: (revision: string) => Promise<unknown>, fallback: string, onConflict?: () => void): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		if (!item || busy.value) return false
 		busy.value = action
@@ -360,6 +364,7 @@ function createReviewInbox() {
 			const details = describeFetchError(cause, fallback)
 			if (details.statusCode === 409 || details.status === 'conflict') {
 				conflict.value = threadId
+				onConflict?.()
 				await loadSummaries()
 			}
 			else if (details.statusCode === 404) {
@@ -379,10 +384,16 @@ function createReviewInbox() {
 		return `/api/reviews/${encodeURIComponent(threadId)}/${action}`
 	}
 
+	/**
+	 * Sends the reply draft against the thread's current revision. After a conflict the draft stays
+	 * and nothing is resent until the user sends again (Rule 01a11485-f451-72eb-81ad-686aeec7b3eb).
+	 */
 	async function reply(threadId: string): Promise<boolean> {
 		const body = replyDrafts.value[threadId]?.trim()
-		if (!body || !canReply.value) return false
-		const ok = await mutate(threadId, 'reply', revision => post(path(threadId, 'messages'), { expectedRevision: revision, body }), t('comments.errors.replyFailed'))
+		const item = threadById.value.get(threadId)
+		if (!body || !item || !canReply.value) return false
+		const before = threadState(item)
+		const ok = await mutate(threadId, 'reply', revision => post(path(threadId, 'messages'), { expectedRevision: revision, body }), t('comments.errors.replyFailed'), () => { replyConflict.value = { threadId, before } })
 		if (ok) {
 			replyDrafts.value = { ...replyDrafts.value, [threadId]: '' }
 			announce(t('inbox.announce.replied'))
@@ -653,6 +664,7 @@ function createReviewInbox() {
 		canPromote,
 		busy,
 		conflict,
+		replyConflict,
 		lastError,
 		replyDrafts,
 		announcement,

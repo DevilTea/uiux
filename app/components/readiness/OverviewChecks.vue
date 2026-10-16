@@ -7,6 +7,7 @@ import { deriveWidgetTree, flattenWidgetTree } from '../../../src/preview/widget
 import { useAccess } from '../../composables/useAccess'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbench } from '../../composables/useWorkbench'
+import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import type { Diagnostic } from '../../composables/workbench-types'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
@@ -32,6 +33,7 @@ const { t } = useI18n()
 const access = useAccess()
 const uiux = useUiuxClient()
 const fmt = useWorkbenchFormat()
+const feedback = useWorkbenchFeedback()
 const { views, flows, workspaceFindingCount } = useWorkbench()
 
 type ResourceRead = Readonly<{ key: string; revision: string; diagnostics?: readonly Diagnostic[]; resource?: Record<string, unknown> }>
@@ -200,9 +202,29 @@ const RESOURCE_ICON: Record<FindingResource['kind'], string> = {
 
 type CheckTreeItem = TreeItem & { id: string; level: 'problem' | 'resource' | 'finding'; code?: string; count?: number; detail?: string; mono?: boolean; action?: string; children?: CheckTreeItem[] }
 
-function open(finding: Finding): void {
+/** The newest finding opened; an older request still checking its View never navigates. */
+let openSequence = 0
+
+/**
+ * Follows a finding. A View finding first re-reads its View: the findings were read when Checks
+ * ran, and the View may be gone since. Then Checks stays where it is and says so in a non-blocking
+ * notice instead of opening a missing View (Rule 01a11658-1fde-7b27-ba6d-6de27224b90c). A read that
+ * fails otherwise leaves the decision to the View page, as a deep link does.
+ */
+async function open(finding: Finding): Promise<void> {
 	const { resource } = finding
-	if (resource.kind === 'view') void navigateTo(viewLocation(resource.key, { ...(finding.variantName ? { variant: finding.variantName } : {}), ...(finding.widgetId ? { widget: finding.widgetId, panel: 'inspect' } : { panel: 'readiness' }) }))
+	const sequence = ++openSequence
+	if (resource.kind === 'view') {
+		let exists = true
+		try { exists = !!await uiux.readResource('view', resource.key) }
+		catch { /* unknown: the View page decides */ }
+		if (sequence !== openSequence) return
+		if (!exists) {
+			feedback.notice(t('checks.viewGone.title'), t('checks.viewGone.description', { name: resource.name }))
+			return
+		}
+		void navigateTo(viewLocation(resource.key, { ...(finding.variantName ? { variant: finding.variantName } : {}), ...(finding.widgetId ? { widget: finding.widgetId, panel: 'inspect' } : { panel: 'readiness' }) }))
+	}
 	else if (resource.kind === 'product-kit') void navigateTo('/workspace/product-kit')
 	else if (resource.kind === 'flow') void navigateTo(flowPath(resource.key))
 	else if (resource.kind === 'locale') void navigateTo('/workspace/locales')
@@ -241,7 +263,7 @@ const items = computed<CheckTreeItem[]>(() => groups.value.map(group => ({
 			detail: finding.widgetId ? findingDetail(finding) : finding.path,
 			action: finding.widgetId ? t('checks.openWidget') : t('checks.open'),
 			icon: finding.widgetId ? 'i-lucide-crosshair' : 'i-lucide-arrow-up-right',
-			onSelect: () => open(finding),
+			onSelect: () => { void open(finding) },
 		})),
 	})),
 })))
