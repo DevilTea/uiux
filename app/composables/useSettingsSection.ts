@@ -8,7 +8,9 @@ import { cloneJson, diffJson, sameJson } from '../utils/workspace-authoring'
  * (brief g, "Save per section"). Its value comes from one revisioned resource `R`: the manifest,
  * or from `schemaVersion` 5 the Product Kit file for the Adapters of the Product Kit page.
  *
- * Sync rules when a newer read of the resource arrives:
+ * Sync rules when a read of the resource arrives:
+ * - the revision the section already holds, with no conflict or error shown: change nothing, so
+ *   re-reading an unchanged resource keeps the draft's rows (and the fields they render) in place;
  * - no draft: adopt it;
  * - the newer value already equals the draft (our own save landed): adopt it;
  * - the newer value left this section untouched: move the base revision forward and keep the draft;
@@ -50,6 +52,9 @@ export function createSettingsSection<D, R = WorkspaceManifest>(options: Readonl
 		if (!read?.resource) return
 		const latest = options.toPayload(options.fromManifest(read.resource))
 		theirs.value = latest
+		// The revision the section already holds: nothing changed. Adopting it again would only
+		// rebuild the draft's rows, remounting their fields under the user's cursor.
+		if (base.value?.revision === read.revision && !conflict.value && !error.value) return
 		if (!base.value || !dirty.value) return adopt(read)
 		if (base.value.revision === read.revision) return
 		if (sameJson(latest, draftPayload.value)) return adopt(read)

@@ -30,6 +30,23 @@ async function agentPut(path: string, body: unknown): Promise<void> {
 	if (!response.ok) throw new Error(`Agent write failed: ${response.status} ${await response.text()}`)
 }
 
+type ProductKitRead = { revision: string; resource: { adapters: { moduleSpecifier: string; config?: unknown }[]; styles: unknown; themes: unknown } }
+
+/**
+ * Puts the fixture's Adapters back (`./adapters/reference.ts`, no config) after a Product Kit test,
+ * passed or failed, so the next test does not start from its leftovers: a config left behind opens
+ * the Config field by default, and the next test's "Config" click then closes it.
+ */
+async function restoreProductKitAdapters(): Promise<void> {
+	let current = await api<ProductKitRead>('/api/product-kit')
+	if (current.resource.adapters.map(adapter => adapter.moduleSpecifier).join() !== './adapters/reference.ts') {
+		await agentPut('/api/product-kit/compose', { expectedRevision: current.revision, designSystems: [], adapters: ['./adapters/reference.ts'] })
+		current = await api<ProductKitRead>('/api/product-kit')
+	}
+	if (current.resource.adapters.some(adapter => adapter.config !== undefined))
+		await agentPut('/api/product-kit/settings', { expectedRevision: current.revision, adapters: [{ moduleSpecifier: './adapters/reference.ts' }], styles: current.resource.styles, themes: current.resource.themes })
+}
+
 async function open(path: string, width = 1920, height = 1080): Promise<{ context: BrowserContext; page: Page }> {
 	const context = await browser.newContext({ viewport: { width, height } })
 	await context.addInitScript(() => {
@@ -248,6 +265,18 @@ describe('Workspace pages navigation', () => {
 
 	/** How far the Product Kit page's own scroller has moved; a short window makes the Adapters block start below the fold. */
 	const productKitScrollTop = (page: Page) => page.evaluate(() => document.querySelector('#product-kit-adapters')?.closest('[role="region"]')?.scrollTop ?? 0)
+	/**
+	 * Whether the scroller has arrived at the Adapters block (its top 24px below the scroller's, or as
+	 * far as the scroller goes). ⌘K scrolls there smoothly, so `scrollTop > 0` already holds on the
+	 * animation's first frame; a scroll started before the animation ends is overtaken by it.
+	 */
+	const productKitAtAdapters = (page: Page) => page.evaluate(() => {
+		const block = document.querySelector('#product-kit-adapters')
+		const scroller = block?.closest('[role="region"]')
+		if (!block || !scroller) return false
+		const target = block.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop - 24
+		return scroller.scrollTop > 0 && Math.abs(scroller.scrollTop - Math.min(target, scroller.scrollHeight - scroller.clientHeight)) < 1
+	})
 
 	for (const retired of ['/workspace/adapters', '/workspace/settings?section=adapters']) {
 		it(`redirects ${retired} to the Overview section of the Product Kit page, scrolled to the Adapters`, async () => {
@@ -302,20 +331,18 @@ describe('Workspace pages navigation', () => {
 			}
 			await pickAdapters()
 			await page.waitForURL(url => url.pathname === '/workspace/product-kit' && url.searchParams.get('section') === 'overview' && url.hash === '#product-kit-adapters')
-			await expect.poll(() => productKitScrollTop(page)).toBeGreaterThan(0)
+			await expect.poll(() => productKitAtAdapters(page)).toBe(true)
 			// Back to the top by hand: the address still names the Adapters, so the router sees a duplicate.
 			await page.evaluate(() => document.querySelector('#product-kit-adapters')?.closest('[role="region"]')?.scrollTo({ top: 0 }))
 			await expect.poll(() => productKitScrollTop(page)).toBe(0)
 			await pickAdapters()
-			await expect.poll(() => productKitScrollTop(page)).toBeGreaterThan(0)
+			await expect.poll(() => productKitAtAdapters(page)).toBe(true)
 		}
 		finally { await context.close() }
 	}, 60_000)
 })
 
 describe('Product Kit › Adapters on a schemaVersion 5 Workspace', () => {
-	type ProductKitRead = { revision: string; resource: { adapters: { moduleSpecifier: string; config?: unknown }[] } }
-
 	/**
 	 * Discussion #139 owner ruling 6: the section reads and writes the Product Kit file through the
 	 * Product Kit operations, never the manifest's `adapters`, which a schemaVersion 5 manifest refuses.
@@ -351,13 +378,14 @@ describe('Product Kit › Adapters on a schemaVersion 5 Workspace', () => {
 			await section.locator('[data-save-bar]').waitFor({ state: 'detached' })
 			expect((await api<ProductKitRead>('/api/product-kit')).resource.adapters).toEqual([{ moduleSpecifier: './adapters/reference.ts' }])
 		}
-		finally { await context.close() }
+		finally {
+			await context.close()
+			await restoreProductKitAdapters()
+		}
 	}, 60_000)
 })
 
 describe('Product Kit › Adapters when the config write fails after the specifiers are saved', () => {
-	type ProductKitRead = { revision: string; resource: { adapters: { moduleSpecifier: string; config?: unknown }[] } }
-
 	/**
 	 * The section saves in two writes, `compose` then `settings`. When `compose` lands and `settings`
 	 * fails, the section reloads the Product Kit file and carries the draft onto it (keep mine), says
@@ -404,8 +432,7 @@ describe('Product Kit › Adapters when the config write fails after the specifi
 		}
 		finally {
 			await context.close()
-			const current = await api<ProductKitRead>('/api/product-kit')
-			await agentPut('/api/product-kit/compose', { expectedRevision: current.revision, designSystems: [], adapters: ['./adapters/reference.ts'] })
+			await restoreProductKitAdapters()
 		}
 	}, 60_000)
 
@@ -431,8 +458,7 @@ describe('Product Kit › Adapters when the config write fails after the specifi
 		}
 		finally {
 			await context.close()
-			const current = await api<ProductKitRead>('/api/product-kit')
-			await agentPut('/api/product-kit/compose', { expectedRevision: current.revision, designSystems: [], adapters: ['./adapters/reference.ts'] })
+			await restoreProductKitAdapters()
 		}
 	}, 60_000)
 })
