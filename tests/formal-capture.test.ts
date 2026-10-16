@@ -102,6 +102,8 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 	})
 
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+	// The default Locale's file: without it every capture is refused (Rule 01a115cd-b30b-706e-b8a2-46e62259156e).
+	await persistence.locales.create('en-US', {})
 	return { root, persistence }
 }
 

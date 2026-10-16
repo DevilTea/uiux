@@ -37,6 +37,20 @@ export function createTranslationRuntime(
 	}
 }
 
+/**
+ * The persistent Workspace configuration error of a default Locale without its Locale file (Rule
+ * 01a115cd-b2ad-7989-8faa-07d48bc8ee30). While it holds, translation resolution, Locale-dependent
+ * Preview and capture, and formal translation Evidence are unavailable (Rule
+ * 01a115cd-b30b-706e-b8a2-46e62259156e), and no other Locale stands in for the default.
+ */
+export function missingDefaultLocaleDiagnostic(defaultLocale: string): Diagnostic {
+	return {
+		code: 'i18n.missing_default_locale',
+		path: `/i18n/${escapePointer(defaultLocale)}`,
+		message: `Workspace default locale ${defaultLocale} has no canonical locale resource.`,
+	}
+}
+
 export function inspectTranslationResources(
 	defaultLocale: string,
 	resources: TranslationResourceMap,
@@ -44,11 +58,7 @@ export function inspectTranslationResources(
 	const findings: I18nCheckFinding[] = []
 	if (!resources.has(defaultLocale)) {
 		findings.push({
-			diagnostic: {
-				code: 'i18n.missing_default_locale',
-				path: `/i18n/${escapePointer(defaultLocale)}`,
-				message: `Workspace default locale ${defaultLocale} has no canonical locale resource.`,
-			},
+			diagnostic: missingDefaultLocaleDiagnostic(defaultLocale),
 			severity: 'error',
 			blocksTranslationExecution: true,
 		})

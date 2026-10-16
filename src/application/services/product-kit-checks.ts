@@ -13,6 +13,7 @@ import { resolveDefaultLocale, resolveDefaultThemeId, resolveDefaultViewport } f
 import { deriveWidgetTree, flattenWidgetTree } from '../../preview/widget-tree'
 import type { KitBuildStatus } from '../ports/kit-build'
 import { captureHarnessScreenshot, HARNESS_LOAD_TIMEOUT_MS, openHarnessPreview, withStepTimeout, type HarnessCookie } from './capture-harness'
+import { missingDefaultLocaleError } from './default-locale-gate'
 import type { ProductKitRead } from './product-kit-authoring'
 
 /**
@@ -368,6 +369,16 @@ export function createProductKitChecksService(
 			for (const t of [c1, c2]) {
 				t.failed = true
 				t.diagnostics.push(diagnostic)
+			}
+			return
+		}
+		// Rule 01a115cd-b30b-706e-b8a2-46e62259156e: no Locale-dependent capture while the default
+		// Locale has no Locale file.
+		const localeError = await missingDefaultLocaleError(persistence)
+		if (localeError) {
+			for (const t of [c1, c2]) {
+				t.failed = true
+				t.diagnostics.push(localeError)
 			}
 			return
 		}

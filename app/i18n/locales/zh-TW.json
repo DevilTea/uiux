@@ -90,6 +90,11 @@
     "open": "開啟",
     "openWidget": "選取",
     "readFailed": "無法讀取這個資源。",
+    "missingDefaultLocale": {
+      "title": "主要 Locale 沒有檔案",
+      "description": "{locale} 是主要 Locale，但沒有檔案。建立前無法解析翻譯、預覽、擷取或產生正式翻譯 Evidence，其他編輯不受影響。",
+      "action": "開啟 Locale"
+    },
     "readFailedFor": "無法檢查 {name}",
     "viewGone": {
       "title": "這個 View 已不存在",
@@ -522,6 +527,10 @@
       "note": "目前預覽只能渲染內建的 {rootShell}。"
     },
     "invalidTitle": "無法渲染此 View",
+    "blocked": {
+      "title": "無法預覽",
+      "description": "{locale} 是主要 Locale，但沒有檔案，因此無法預覽或擷取。請到「Workspace › Locale」建立。"
+    },
     "emptySlotTitle": "尚無 Widget",
     "emptySlotDescription": "在 {slot} Slot 中加入子 Widget，即可透過 {core} 渲染。",
     "errors": {
@@ -530,6 +539,7 @@
       "viewLoadFailed": "無法載入 View。",
       "bundleInvalid": "預覽 Runtime 不完整。請重新建置 UIUX 後重新載入。",
       "bundleLoadFailed": "無法載入預覽 Runtime。",
+      "localeLoadFailed": "無法載入主要 Locale。",
       "viewNotInVersion": "這個版本中沒有這個 View。"
     }
   },

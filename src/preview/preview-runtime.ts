@@ -31,6 +31,11 @@ export type PreviewMaterializationResult =
 		status: 'invalid'
 		diagnostics: readonly Diagnostic[]
 	}>
+	/** A persistent Workspace configuration error keeps the Preview from rendering (the missing default-Locale file). */
+	| Readonly<{
+		status: 'blocked'
+		diagnostics: readonly Diagnostic[]
+	}>
 
 /**
  * Builds the canonical UIUX-owned RootShell adapter bundle for the browser preview. A widget-core

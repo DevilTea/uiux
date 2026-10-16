@@ -180,7 +180,7 @@ describe('uiux.v5-to-v6 and uiux init (Clauses 01a11c09-a9a4 and 01a1144e-55a3, 
 		const root = join(parent, 'ws')
 		expect(await runInitCommand({ workspace: root, cwd: parent, env: { UIUX_HOME: join(parent, 'home') }, stdout: () => undefined, stderr: () => undefined })).toBe(0)
 		expect(JSON.parse(await readFile(join(root, ACCESS_PRESETS_FILENAME), 'utf8'))).toEqual(builtInAccessPresetsFile())
-		expect((await readdir(root)).sort()).toEqual(['.gitignore', 'access-presets.json', 'product-kit.json', 'workspace.json'])
+		expect((await readdir(root)).sort()).toEqual(['.gitignore', 'access-presets.json', 'i18n', 'product-kit.json', 'workspace.json'])
 	})
 
 	it('refuses to initialize a directory that already holds a presets file', async () => {

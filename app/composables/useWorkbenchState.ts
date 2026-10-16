@@ -73,8 +73,17 @@ export function createWorkbenchState() {
 	const unresolvedReviewCount = computed(() => reviews.value.filter(review => review.summary.status !== 'resolved').length)
 	const readyReviewCount = computed(() => reviews.value.filter(review => review.summary.status === 'ready-for-review').length)
 	const openReviewCount = computed(() => reviews.value.filter(review => (review.summary.status ?? 'open') === 'open').length)
-	/** Checks findings across the Workspace manifest and every View. */
-	const workspaceFindingCount = computed(() => (workspace.value?.diagnostics?.length || 0) + views.value.reduce((sum, view) => sum + (view.diagnosticCount || 0), 0))
+	/**
+	 * The Workspace default Locale while it has no Locale file: a persistent Workspace configuration
+	 * error (Rule 01a115cd-b2ad-7989-8faa-07d48bc8ee30) that blocks Preview and capture (Rule
+	 * 01a115cd-b30b-706e-b8a2-46e62259156e). `undefined` while the file exists or before the manifest is read.
+	 */
+	const missingDefaultLocale = computed(() => {
+		const defaultLocale = workspace.value?.resource?.i18n?.defaultLocale
+		return defaultLocale && !discoveredLocales.value.includes(defaultLocale) ? defaultLocale : undefined
+	})
+	/** Checks findings across the Workspace manifest and every View, with the missing default-Locale file. */
+	const workspaceFindingCount = computed(() => (workspace.value?.diagnostics?.length || 0) + (missingDefaultLocale.value ? 1 : 0) + views.value.reduce((sum, view) => sum + (view.diagnosticCount || 0), 0))
 	const localeCount = computed(() => discoveredLocales.value.length)
 	const checkCount = computed(() => (selectedView.value?.diagnostics?.length || 0) + (workspace.value?.diagnostics?.length || 0))
 
@@ -287,6 +296,7 @@ export function createWorkbenchState() {
 		unresolvedReviewCount,
 		readyReviewCount,
 		openReviewCount,
+		missingDefaultLocale,
 		workspaceFindingCount,
 		localeCount,
 		checkCount,

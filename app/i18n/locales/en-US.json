@@ -90,6 +90,11 @@
     "open": "Open",
     "openWidget": "Select",
     "readFailed": "Couldn't read this resource.",
+    "missingDefaultLocale": {
+      "title": "Primary Locale has no file",
+      "description": "{locale} is the primary Locale but has no file. Until it exists, translations, the Preview, capture and formal translation Evidence are unavailable; other authoring keeps working.",
+      "action": "Open Locales"
+    },
     "readFailedFor": "Couldn't check {name}",
     "viewGone": {
       "title": "This View no longer exists",
@@ -522,6 +527,10 @@
       "note": "Only the built-in {rootShell} renders in the preview for now."
     },
     "invalidTitle": "This View cannot be rendered",
+    "blocked": {
+      "title": "Preview is blocked",
+      "description": "{locale} is the primary Locale but has no file, so nothing is previewed or captured. Create it in Workspace › Locales."
+    },
     "emptySlotTitle": "No Widgets yet",
     "emptySlotDescription": "Add child Widgets to the {slot} slot to render them with {core}.",
     "errors": {
@@ -530,6 +539,7 @@
       "viewLoadFailed": "Could not load the View.",
       "bundleInvalid": "The preview runtime is incomplete. Rebuild UIUX, then reload.",
       "bundleLoadFailed": "Could not load the preview runtime.",
+      "localeLoadFailed": "Could not load the primary Locale.",
       "viewNotInVersion": "This View doesn't exist in this version."
     }
   },

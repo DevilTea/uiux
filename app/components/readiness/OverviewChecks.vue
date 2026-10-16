@@ -15,6 +15,7 @@ import { groupFindings, type Finding, type FindingResource } from '../../utils/r
 import { flowPath, viewLocation } from '../../utils/workbench-routes'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 import { diagnosticText } from '../../utils/diagnostic-copy'
+import { missingDefaultLocaleDiagnostic } from '../../../src/i18n/runtime'
 
 /**
  * Overview › Checks (Part 5): one normalized findings surface for the Workspace, grouped
@@ -34,7 +35,7 @@ const access = useAccess()
 const uiux = useUiuxClient()
 const fmt = useWorkbenchFormat()
 const feedback = useWorkbenchFeedback()
-const { views, flows, workspaceFindingCount } = useWorkbench()
+const { views, flows, workspaceFindingCount, missingDefaultLocale } = useWorkbench()
 
 type ResourceRead = Readonly<{ key: string; revision: string; diagnostics?: readonly Diagnostic[]; resource?: Record<string, unknown> }>
 
@@ -63,10 +64,11 @@ async function runChecks(): Promise<void> {
 		}
 	}
 	type Job = Readonly<{ kind: FindingResource['kind']; key: string; name: string }>
-	const [locales, assets] = await Promise.all([
-		uiux.listResources<{ key: string }>(['locale'], { limit: 100 }).then(page => page.items).catch(() => []),
+	const [localePage, assets] = await Promise.all([
+		uiux.listResources<{ key: string }>(['locale'], { limit: 100 }).catch(() => undefined),
 		uiux.listResources<{ key: string; summary?: { name?: string } }>(['asset'], { limit: 100 }).then(page => page.items).catch(() => []),
 	])
+	const locales = localePage?.items ?? []
 	const jobs: Job[] = [
 		{ kind: 'workspace', key: 'workspace', name: t('checks.resource.workspace') },
 		...views.value.map(view => ({ kind: 'view' as const, key: view.key, name: view.summary.name || t('common.unnamed') })),
@@ -80,6 +82,11 @@ async function runChecks(): Promise<void> {
 				const result = await read(job.kind, job.key)
 				if (!result) return
 				const resource: FindingResource = { kind: job.kind, key: job.key, name: job.name }
+				// Rule 01a115cd-b2ad-7989-8faa-07d48bc8ee30: a default Locale without its Locale file is a
+				// Workspace error, listed on that Locale. Only a Locale list that was read can show it missing.
+				const defaultLocale = job.kind === 'workspace' ? (result.resource?.i18n as { defaultLocale?: unknown } | undefined)?.defaultLocale : undefined
+				if (localePage && typeof defaultLocale === 'string' && !locales.some(locale => locale.key === defaultLocale))
+					push({ kind: 'locale', key: defaultLocale, name: defaultLocale }, [missingDefaultLocaleDiagnostic(defaultLocale)])
 				if (job.kind !== 'view') {
 					push(resource, result.diagnostics)
 					return
@@ -301,6 +308,28 @@ const items = computed<CheckTreeItem[]>(() => groups.value.map(group => ({
         class="ms-auto w-44"
       />
     </div>
+
+    <UAlert
+      v-if="missingDefaultLocale"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-globe-lock"
+      :title="t('checks.missingDefaultLocale.title')"
+      :actions="[{ label: t('checks.missingDefaultLocale.action'), color: 'neutral', variant: 'outline', onClick: () => { void navigateTo('/workspace/locales') } }]"
+      data-checks-persistent-error="i18n.missing_default_locale"
+    >
+      <template #description>
+        <i18n-t
+          keypath="checks.missingDefaultLocale.description"
+          tag="p"
+          scope="global"
+        >
+          <template #locale>
+            <code class="font-mono">{{ missingDefaultLocale }}</code>
+          </template>
+        </i18n-t>
+      </template>
+    </UAlert>
 
     <UAlert
       v-for="failure in failures"

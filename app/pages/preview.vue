@@ -5,6 +5,7 @@ import { useUiuxClient } from '../composables/useUiuxClient'
 import { describeFetchError } from '../utils/fetch-error'
 import { diagnosticText } from '../utils/diagnostic-copy'
 import { resolveDefaultLocale, resolveDefaultThemeId } from '../../src/preview/render-context-options'
+import { missingDefaultLocaleDiagnostic } from '../../src/i18n/runtime'
 import { resolveFrameContext } from '../../src/preview/version-frame-context'
 import type { WorkspaceManifest } from '../../src/domain/workspace/schema'
 import { RuntimePreviewProtocolBridge } from '../../src/preview/protocol/bridge'
@@ -386,6 +387,27 @@ async function evaluateRuntime() {
 	const superseded = () => evaluation !== runtimeEvaluation
 	disposeCurrentRuntime()
 
+	// Rule 01a115cd-b30b-706e-b8a2-46e62259156e: while the default Locale has no Locale file the
+	// Preview is blocked, and no other Locale stands in for it. A read that fails for another reason
+	// is a load error, not a missing file.
+	const defaultLocale = workspaceDefaultLocale.value
+	let defaultMessages: I18nResource | undefined
+	try {
+		defaultMessages = defaultLocale ? await readLocale(defaultLocale) : undefined
+	}
+	catch (cause) {
+		if (superseded()) return
+		materializationResult.value = undefined
+		error.value = describeFetchError(cause, t('preview.errors.localeLoadFailed')).message
+		return
+	}
+	if (superseded()) return
+	if (defaultLocale && !defaultMessages) {
+		localesMap.delete(defaultLocale)
+		materializationResult.value = { status: 'blocked', diagnostics: [missingDefaultLocaleDiagnostic(defaultLocale)] }
+		return
+	}
+
 	type PreviewAdaptersResponse =
 		| { state: 'valid'; diagnostics: []; summaries: unknown[]; bundleUrl: string; stylesheetUrl?: string; themes?: Readonly<Record<string, Readonly<Record<string, string>>>> }
 		| { state: 'invalid'; diagnostics: readonly Diagnostic[]; summaries: unknown[] }
@@ -423,25 +445,16 @@ async function evaluateRuntime() {
 			return
 		}
 
-		try {
-			const messages = await readLocale(locale.value)
-			if (messages) {
-				localesMap.set(locale.value, messages)
-			}
-		}
-		catch {
-			// preserve accepted missing-key behavior
-		}
-		const fallbackLocale = workspaceDefaultLocale.value
-		if (fallbackLocale && locale.value !== fallbackLocale) {
+		if (defaultLocale && defaultMessages) localesMap.set(defaultLocale, defaultMessages)
+		if (locale.value !== defaultLocale) {
 			try {
-				const messages = await readLocale(fallbackLocale)
+				const messages = await readLocale(locale.value)
 				if (messages) {
-					localesMap.set(fallbackLocale, messages)
+					localesMap.set(locale.value, messages)
 				}
 			}
 			catch {
-				// optional fallback missing
+				// preserve accepted missing-key behavior: the default Locale is the fallback
 			}
 		}
 
@@ -477,6 +490,40 @@ async function evaluateRuntime() {
 		}
 	}
 }
+
+/**
+ * A blocked Preview (Rule 01a115cd-b30b-706e-b8a2-46e62259156e) has no mounted runtime, and no
+ * `/api/events` stream tells it when the default-Locale file appears (another tab or an Agent may
+ * create it). While blocked, the current Preview re-reads that file and renders once it exists; a
+ * version frame's Locales never change, so it does not.
+ */
+const BLOCKED_RECHECK_MS = 2000
+let blockedRecheckTimer: ReturnType<typeof setInterval> | undefined
+let blockedRechecking = false
+
+async function recheckBlockedPreview() {
+	const defaultLocale = workspaceDefaultLocale.value
+	if (blockedRechecking || !defaultLocale || materializationResult.value?.status !== 'blocked') return
+	blockedRechecking = true
+	try {
+		const evaluation = runtimeEvaluation
+		const messages = await readLocale(defaultLocale).catch(() => undefined)
+		if (messages && evaluation === runtimeEvaluation && materializationResult.value?.status === 'blocked') await evaluateRuntime()
+	}
+	finally {
+		blockedRechecking = false
+	}
+}
+
+function stopBlockedRecheck() {
+	if (blockedRecheckTimer) clearInterval(blockedRecheckTimer)
+	blockedRecheckTimer = undefined
+}
+
+watch(() => materializationResult.value?.status === 'blocked', (blocked) => {
+	stopBlockedRecheck()
+	if (blocked && !versionId) blockedRecheckTimer = setInterval(() => { void recheckBlockedPreview() }, BLOCKED_RECHECK_MS)
+})
 
 /** One inbound envelope, alone or from a batch, through the runtime bridge's gates. */
 function receiveWire(input: unknown) {
@@ -611,6 +658,7 @@ onUnmounted(() => {
 	window.removeEventListener('wheel', absorbCanvasZoomWheel)
 	geometrySignals?.dispose()
 	geometryProducer?.dispose()
+	stopBlockedRecheck()
 	disposeCurrentRuntime()
 })
 </script>
@@ -751,6 +799,43 @@ onUnmounted(() => {
               <span class="font-mono font-medium">[{{ diag.code }}]</span> {{ diag.path }}: {{ diagnosticText(diag) }}
             </li>
           </ul>
+        </template>
+      </UAlert>
+    </div>
+
+    <!-- Blocked by a Workspace configuration error: the default Locale has no Locale file -->
+    <div
+      v-else-if="materializationResult?.status === 'blocked'"
+      data-preview-status="blocked"
+      class="p-4"
+    >
+      <UAlert
+        color="error"
+        variant="subtle"
+        icon="i-lucide-globe-lock"
+        :title="t('preview.blocked.title')"
+      >
+        <template #description>
+          <div class="space-y-2">
+            <i18n-t
+              keypath="preview.blocked.description"
+              tag="p"
+              class="text-sm leading-relaxed"
+              scope="global"
+            >
+              <template #locale>
+                <code class="font-mono font-medium">{{ workspaceDefaultLocale }}</code>
+              </template>
+            </i18n-t>
+            <ul class="space-y-1 text-xs">
+              <li
+                v-for="diag in materializationResult.diagnostics"
+                :key="diag.code + diag.path"
+              >
+                <span class="font-mono font-medium">[{{ diag.code }}]</span> {{ diag.path }}: {{ diagnosticText(diag) }}
+              </li>
+            </ul>
+          </div>
         </template>
       </UAlert>
     </div>

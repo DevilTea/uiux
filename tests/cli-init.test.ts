@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { missingDefaultLocaleError } from '../src/application/services/default-locale-gate'
 import { runInitCommand } from '../src/cli/init'
 import { emptyProductKit } from '../src/domain/product-kit/schema'
 import { FileNativePersistence } from '../src/persistence/file-native'
@@ -44,10 +45,15 @@ async function expectInitialized(root: string): Promise<void> {
 		themes: {},
 	})
 	expect(JSON.parse(await readFile(join(root, 'product-kit.json'), 'utf8'))).toEqual(emptyProductKit())
+	// Owner ruling 2 of https://github.com/DevilTea/uiux/issues/94#issuecomment-6218608568.
+	expect(await readFile(join(root, 'i18n', 'en-US.json'), 'utf8')).toBe('{}\n')
 	expect((await readFile(join(root, '.gitignore'), 'utf8')).split('\n').filter(Boolean)).toEqual([...WORKSPACE_GITIGNORE_RULES])
 	expect(checkWorkspaceSelection(root, PRODUCT_WORKSPACE_SCHEMA_POLICY)).toEqual({ ok: true, layout: V5_LAYOUT })
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 	expect((await persistence.inspectWorkspace()).inspection).toMatchObject({ state: 'current', version: CURRENT_WORKSPACE_SCHEMA_VERSION })
+	// The default Locale has its file, so Preview and capture are not blocked by i18n.missing_default_locale.
+	expect((await persistence.locales.read('en-US'))?.resource).toEqual({})
+	expect(await missingDefaultLocaleError(persistence)).toBeUndefined()
 }
 
 describe('uiux init', () => {
@@ -112,6 +118,26 @@ describe('uiux init', () => {
 		await writeFile(join(root, '.gitignore'), `# mine\n${WORKSPACE_GITIGNORE_RULES[0]}`)
 		expect(await runInitCommand({ cwd, workspace: 'ws', ...capture().options })).toBe(0)
 		expect(await readFile(join(root, '.gitignore'), 'utf8')).toBe(`# mine\n${WORKSPACE_GITIGNORE_RULES.join('\n')}\n`)
+	})
+
+	it('refuses an existing default-Locale file, or an i18n entry that is not a directory, before writing anything', async () => {
+		const cwd = await makeDirectory()
+		const root = join(cwd, 'ws')
+		await mkdir(join(root, 'i18n'), { recursive: true })
+		await writeFile(join(root, 'i18n', 'en-US.json'), '{"keep":"me"}\n')
+		const run = capture()
+		expect(await runInitCommand({ cwd, workspace: 'ws', ...run.options })).toBe(2)
+		expect(run.stderr.join('\n')).toContain('already holds i18n/en-US.json')
+		expect(await readdir(root)).toEqual(['i18n'])
+		expect(await readFile(join(root, 'i18n', 'en-US.json'), 'utf8')).toBe('{"keep":"me"}\n')
+
+		const other = join(cwd, 'other')
+		await mkdir(other)
+		await writeFile(join(other, 'i18n'), '')
+		const file = capture()
+		expect(await runInitCommand({ cwd, workspace: 'other', ...file.options })).toBe(2)
+		expect(file.stderr.join('\n')).toContain(`${join(other, 'i18n')} is not a directory`)
+		expect(await readdir(other)).toEqual(['i18n'])
 	})
 
 	it('refuses a .gitignore that is not a regular file before writing anything', async () => {
