@@ -8,6 +8,7 @@ import { createServer as createHttpServer } from 'node:http'
 import { chromium } from 'playwright'
 
 import { FileNativePersistence } from '../src/persistence'
+import { CheckpointStore, referencedDigests } from '../src/persistence/history'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createFormalCaptureService } from '../src/application/services/formal-capture'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
@@ -484,8 +485,6 @@ describe('Formal capture service & fresh-runtime proof', () => {
 			themeId: 'light',
 		}
 
-		// The server stores artifacts of its own at startup; only what capture adds counts here.
-		const before = new Set(await persistence.artifacts.listIdentities())
 		const outcome = await formalService.capture({
 			contexts: [
 				{ ...base, variantName: 'unknownMember' },
@@ -512,8 +511,14 @@ describe('Formal capture service & fresh-runtime proof', () => {
 		// The valid Variant renders its override, so it differs from the base context.
 		expect(captured[1]!.screenshotDigest).not.toBe(captured[0]!.screenshotDigest)
 
-		// Only the valid contexts' screenshots and Evidence records were stored.
-		const added = (await persistence.artifacts.listIdentities()).filter(identity => !before.has(identity))
+		// Only the valid contexts' screenshots and Evidence records were stored. The server's history
+		// also stores the Baseline Checkpoint's file blobs in this artifact store, from a start it does
+		// not await before /api/health answers, so they can land before, during or after capture.
+		// They are left out by digest. The store is listed before the Checkpoints, so a Baseline that
+		// lands in between only adds digests to leave out, never a blob that is not left out.
+		const stored = await persistence.artifacts.listIdentities()
+		const historyBlobs = referencedDigests((await new CheckpointStore(persistence).list()).records.flatMap(record => record.resources))
+		const added = stored.filter(identity => !historyBlobs.has(identity))
 		expect(added.sort()).toEqual(captured.flatMap(item => [item.evidenceDigest!, item.screenshotDigest!]).sort())
 		// No Evidence of either invalid Variant exists, so a ready-for-review submission has none to cite.
 		const evidence = await formalService.listEvidence(VIEW_COUNTER_ID)
