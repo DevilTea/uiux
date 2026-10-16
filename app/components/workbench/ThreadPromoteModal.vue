@@ -1,19 +1,23 @@
 <script setup lang="ts">
-import { nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import type { FetchErrorDetails } from '../../utils/fetch-error'
 import type { PromoteForm } from '../../composables/useThreadActions'
+import { promoteConflictTitleKey, type PromoteMoved } from '../../utils/promote-conflict'
 
 /**
  * Promote to Decision, shared by the canvas bubble and the Reviews detail. It opens on the
  * thread's title as the question; a rejected promotion shows its error inside the dialog (not
- * behind it) and takes focus there.
+ * behind it) and takes focus there. A conflict names what moved, the thread or the View, and keeps
+ * the form for the user to confirm again (Rule 01a11544-611c-73e0-990b-c094b48b3eb6).
  */
 const props = defineProps<{
 	question?: string
 	busy?: boolean
 	error?: FetchErrorDetails
 	conflict?: boolean
+	/** The resources the conflict named, when the server listed them. */
+	moved?: readonly PromoteMoved[]
 	submit: (form: Readonly<PromoteForm>) => Promise<boolean>
 }>()
 const open = defineModel<boolean>('open', { required: true })
@@ -21,6 +25,9 @@ const open = defineModel<boolean>('open', { required: true })
 const { t } = useI18n()
 const form = reactive<PromoteForm>({ question: '', summary: '', rationale: '' })
 const failed = ref(false)
+const movedTitleKey = computed(() => promoteConflictTitleKey(props.moved))
+const conflictTitle = computed(() => movedTitleKey.value ? t(movedTitleKey.value) : t('comments.conflict'))
+const conflictHint = computed(() => movedTitleKey.value ? t('reviews.promote.conflict.hint') : t('comments.conflictHint'))
 
 watch(open, (value) => {
 	if (!value) return
@@ -61,8 +68,9 @@ async function onSubmit(): Promise<void> {
           :icon="conflict ? 'i-lucide-refresh-cw' : 'i-lucide-circle-alert'"
           role="alert"
           tabindex="-1"
-          :title="conflict ? t('comments.conflict') : error?.message"
-          :description="conflict ? t('comments.conflictHint') : undefined"
+          :title="conflict ? conflictTitle : error?.message"
+          :description="conflict ? conflictHint : undefined"
+          :data-promote-moved="conflict && moved?.length ? moved.join(' ') : undefined"
           data-promote-error
         />
         <UFormField

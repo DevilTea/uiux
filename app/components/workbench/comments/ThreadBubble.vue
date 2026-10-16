@@ -22,6 +22,7 @@ import WbErrorDescription from '../WbErrorDescription.vue'
 import RecordedContextLabel from '../RecordedContextLabel.vue'
 import ReplyConflictAlert from '../ReplyConflictAlert.vue'
 import { threadState } from '../../../utils/reply-conflict'
+import { promoteConflictTitleKey } from '../../../utils/promote-conflict'
 import { effectiveRenderContext } from '../../../../src/preview/render-context-options'
 
 /**
@@ -101,6 +102,12 @@ const reply = computed({
 const conflict = computed(() => comments.conflict.value === props.threadId)
 /** A reply refused for a conflict: the alert says what changed and offers Send again (Rule 01a116f0-95fc). */
 const replyConflict = computed(() => conflict.value && comments.replyConflict.value?.threadId === props.threadId ? comments.replyConflict.value : undefined)
+/** A promotion refused for a conflict: what moved, the thread or the View (Rule 01a11544-611c). */
+const promoteMoved = computed(() => conflict.value && comments.promoteConflict.value?.threadId === props.threadId ? comments.promoteConflict.value.moved : undefined)
+const conflictTitle = computed(() => {
+	const key = promoteConflictTitleKey(promoteMoved.value)
+	return key ? t(key) : t('comments.conflict')
+})
 const canSendAgain = computed(() => comments.canComment.value && thread.value?.status !== 'resolved' && !!reply.value.trim())
 const error = computed(() => comments.lastError.value?.threadId === props.threadId ? comments.lastError.value.error : undefined)
 
@@ -390,7 +397,7 @@ watch(() => props.threadId, () => {
       color="warning"
       variant="subtle"
       icon="i-lucide-refresh-cw"
-      :title="t('comments.conflict')"
+      :title="conflictTitle"
       :description="t('comments.conflictHint')"
       :ui="{ title: 'text-sm', description: 'text-xs' }"
       data-thread-conflict
@@ -670,6 +677,7 @@ watch(() => props.threadId, () => {
       :busy="comments.busy.value === 'promote'"
       :error="error"
       :conflict="conflict"
+      :moved="promoteMoved"
       :submit="submitPromote"
     />
   </div>

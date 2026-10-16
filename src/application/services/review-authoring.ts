@@ -867,21 +867,17 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 			}
 		}
 
-		if (review.revision !== expectedReviewRevision.value && view.revision !== expectedViewRevision.value) {
-			return {
-				status: 'conflict',
-				key: command.reviewId,
-				currentRevision: review.revision,
-				conflicts: [
-					{ resource: 'review', key: command.reviewId, expectedRevision: expectedReviewRevision.value, currentRevision: review.revision },
-					{ resource: 'view', key: command.viewId, expectedRevision: expectedViewRevision.value, currentRevision: view.revision },
-				],
-			}
-		}
+		// Every promotion conflict lists each moved resource, even when only one moved
+		// (Clause 01a11544-6d0a-70f4-b6b7-76e42f95d42e); `key` and `currentRevision` name the first.
+		const conflicts: { resource: 'review' | 'view'; key: string; expectedRevision: ResourceRevision; currentRevision: ResourceRevision }[] = []
 		if (review.revision !== expectedReviewRevision.value)
-			return { status: 'conflict', key: command.reviewId, currentRevision: review.revision }
+			conflicts.push({ resource: 'review', key: command.reviewId, expectedRevision: expectedReviewRevision.value, currentRevision: review.revision })
 		if (view.revision !== expectedViewRevision.value)
-			return { status: 'conflict', key: command.viewId, currentRevision: view.revision }
+			conflicts.push({ resource: 'view', key: command.viewId, expectedRevision: expectedViewRevision.value, currentRevision: view.revision })
+		if (conflicts.length > 0) {
+			const first = conflicts[0]!
+			return { status: 'conflict', key: first.key, currentRevision: first.currentRevision, conflicts }
+		}
 
 
 		const decisionId = command.decisionId ?? randomUUID()

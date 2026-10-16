@@ -549,7 +549,13 @@
       "summaryPlaceholder": "e.g. Approved with collapsible side panels",
       "rationaleLabel": "Rationale",
       "rationalePlaceholder": "Why the discussion landed here…",
-      "submit": "Promote"
+      "submit": "Promote",
+      "conflict": {
+        "review": "This thread changed while you were promoting it.",
+        "view": "This View changed while you were promoting the thread.",
+        "both": "This thread and its View both changed while you were promoting.",
+        "hint": "The latest version is loaded and your entries are kept. Check them, then select Promote again."
+      }
     },
     "feedback": {
       "promoted": "Promoted to Decision."

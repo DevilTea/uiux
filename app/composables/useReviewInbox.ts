@@ -25,6 +25,7 @@ import {
 import { parseThread, viewLocation } from '../utils/workbench-routes'
 import { submissionBody, type ReviewSubmissionDraft } from '../utils/review-submission'
 import { threadState, type ReplyConflict } from '../utils/reply-conflict'
+import { promoteMovedOf, type PromoteConflict } from '../utils/promote-conflict'
 import { useAccess } from './useAccess'
 import { useUiuxClient } from './useUiuxClient'
 import { useWorkbench } from './useWorkbench'
@@ -93,6 +94,9 @@ function createReviewInbox() {
 	/** The conflict was a reply's: what the thread looked like when it was sent (Rule 01a116f0-95fc). */
 	const replyConflict = ref<ReplyConflict>()
 	watch(conflict, (id) => { if (replyConflict.value && replyConflict.value.threadId !== id) replyConflict.value = undefined }, { flush: 'sync' })
+	/** The conflict was a promotion's: which resource moved, the thread or the View (Rule 01a11544-611c). */
+	const promoteConflict = ref<PromoteConflict>()
+	watch(conflict, (id) => { if (promoteConflict.value && promoteConflict.value.threadId !== id) promoteConflict.value = undefined }, { flush: 'sync' })
 	const lastError = ref<Readonly<{ threadId: string; error: FetchErrorDetails }>>()
 	const replyDrafts = ref<Record<string, string>>({})
 	const announcement = ref('')
@@ -349,7 +353,7 @@ function createReviewInbox() {
 		void nextTick(() => { announcement.value = text })
 	}
 
-	async function mutate(threadId: string, action: string, run: (revision: string) => Promise<unknown>, fallback: string, onConflict?: () => void): Promise<boolean> {
+	async function mutate(threadId: string, action: string, run: (revision: string) => Promise<unknown>, fallback: string, onConflict?: (details: FetchErrorDetails) => void): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		if (!item || busy.value) return false
 		busy.value = action
@@ -364,7 +368,7 @@ function createReviewInbox() {
 			const details = describeFetchError(cause, fallback)
 			if (details.statusCode === 409 || details.status === 'conflict') {
 				conflict.value = threadId
-				onConflict?.()
+				onConflict?.(details)
 				await loadSummaries()
 			}
 			else if (details.statusCode === 404) {
@@ -542,6 +546,11 @@ function createReviewInbox() {
 		return ok
 	}
 
+	/**
+	 * Reads the View, then promotes against both revisions. A conflict names what moved (Rule
+	 * 01a11544-611c-73e0-990b-c094b48b3eb6): the thread is re-read here and the View on the next
+	 * confirm, which only the user sends; nothing is retried automatically.
+	 */
 	async function promote(threadId: string, form: Readonly<{ question: string; summary: string; rationale: string }>): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		const viewId = item?.viewId
@@ -556,7 +565,7 @@ function createReviewInbox() {
 				question: form.question.trim(),
 				outcome: { summary: form.summary.trim(), rationale: form.rationale.trim() || form.summary.trim() },
 			})
-		}, t('comments.errors.promoteFailed'))
+		}, t('comments.errors.promoteFailed'), (details) => { promoteConflict.value = { threadId, moved: promoteMovedOf(details) } })
 	}
 
 	// -------------------------------------------------------------------------------------------
@@ -665,6 +674,7 @@ function createReviewInbox() {
 		busy,
 		conflict,
 		replyConflict,
+		promoteConflict,
 		lastError,
 		replyDrafts,
 		announcement,

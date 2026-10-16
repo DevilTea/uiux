@@ -14,6 +14,7 @@ import WbErrorDescription from './WbErrorDescription.vue'
 import RecordedContextLabel from './RecordedContextLabel.vue'
 import ReplyConflictAlert from './ReplyConflictAlert.vue'
 import { threadState } from '../../utils/reply-conflict'
+import { promoteConflictTitleKey } from '../../utils/promote-conflict'
 import { latestEditableMessageId } from '../../utils/review-message-actions'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { isLockedError } from '../../utils/fetch-error'
@@ -70,6 +71,12 @@ const reply = computed({
 const conflict = computed(() => !!thread.value && inbox.conflict.value === thread.value.id)
 /** A reply refused for a conflict: the alert says what changed and offers Send again (Rule 01a116f0-95fc). */
 const replyConflict = computed(() => conflict.value && inbox.replyConflict.value?.threadId === thread.value?.id ? inbox.replyConflict.value : undefined)
+/** A promotion refused for a conflict: what moved, the thread or the View (Rule 01a11544-611c). */
+const promoteMoved = computed(() => conflict.value && inbox.promoteConflict.value?.threadId === thread.value?.id ? inbox.promoteConflict.value?.moved : undefined)
+const conflictTitle = computed(() => {
+	const key = promoteConflictTitleKey(promoteMoved.value)
+	return key ? t(key) : t('conflict.thread')
+})
 const canSendAgain = computed(() => inbox.canReply.value && thread.value?.status !== 'resolved' && !!reply.value.trim())
 const error = computed(() => thread.value && inbox.lastError.value?.threadId === thread.value.id ? inbox.lastError.value.error : undefined)
 
@@ -365,7 +372,7 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           color="warning"
           variant="subtle"
           icon="i-lucide-refresh-cw"
-          :title="t('conflict.thread')"
+          :title="conflictTitle"
           :description="t('comments.conflictHint')"
           :ui="{ title: 'text-sm', description: 'text-xs' }"
           data-review-conflict
@@ -607,6 +614,7 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
       :busy="inbox.busy.value === 'promote'"
       :error="error"
       :conflict="conflict"
+      :moved="promoteMoved"
       :submit="submitPromote"
     />
   </div>
