@@ -100,7 +100,7 @@ function nodeBuild(script: string, extra: Readonly<Record<string, unknown>> = {}
 	return { output: 'dist', build: { command: [process.execPath, script], ...extra } }
 }
 
-function runner(root: string, options: Readonly<{ env?: NodeJS.ProcessEnv; register?: boolean; capture?: boolean; captureOutput?: () => Promise<unknown>; captureWaitMs?: number }> = {}) {
+function runner(root: string, options: Readonly<{ env?: NodeJS.ProcessEnv; register?: boolean; capture?: boolean; captureOutput?: () => Promise<unknown>; captureWaitMs?: number; restartIntervalMs?: number }> = {}) {
 	const printed: string[] = []
 	const build = createKitBuildRunner({
 		root,
@@ -113,6 +113,7 @@ function runner(root: string, options: Readonly<{ env?: NodeJS.ProcessEnv; regis
 		...(options.capture ? { captureOutput: () => getSelectedWorkspacePreviewBundle(root, V5_LAYOUT) } : {}),
 		...(options.captureOutput ? { captureOutput: options.captureOutput } : {}),
 		...(options.captureWaitMs !== undefined ? { captureWaitMs: options.captureWaitMs } : {}),
+		...(options.restartIntervalMs !== undefined ? { restartIntervalMs: options.restartIntervalMs } : {}),
 	})
 	const unregister = options.register ? registerKitBuildRunner(root, build) : () => {}
 	cleanups.push(async () => {
@@ -599,21 +600,25 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 	it('spawns the build only once the capture of the output found at the start has finished', async () => {
 		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK, 'dist/uiux.js': adapterModule('kit-adapter-old') })
 		let finishCapture!: () => void
-		let spawnedDuringCapture: boolean | undefined
 		const captureOutput = vi.fn(() => new Promise<void>(resolveCapture => {
-			finishCapture = () => {
-				spawnedDuringCapture = existsSync(join(root, 'kit', 'seen.json'))
-				resolveCapture()
-			}
+			finishCapture = resolveCapture
 		}))
-		const { build } = runner(root, { captureOutput })
-		const started = build.start()
+		const { build, printed } = runner(root, { captureOutput })
+		// The runner prints the argument array right before it spawns, so the lines count the spawns.
+		const spawns = () => printed.filter(line => line.includes('kit build: running')).length
+		let begun = false
+		const started = build.start().then(status => {
+			begun = true
+			return status
+		})
+		// The capture starts after the output is listed; from there to the spawn the run awaits only the capture.
 		await waitFor(() => captureOutput.mock.calls.length, calls => calls === 1)
-		await new Promise(resolveDelay => setTimeout(resolveDelay, 300))
-		expect(existsSync(join(root, 'kit', 'seen.json'))).toBe(false)
+		expect(build.status()).toEqual({ state: 'building' })
+		expect(spawns()).toBe(0)
+		expect(begun).toBe(false)
 		finishCapture()
 		await started
-		expect(spawnedDuringCapture).toBe(false)
+		expect(spawns()).toBe(1)
 		expect(await settledState(build)).toEqual({ state: 'ready' })
 		expect(build.outputGeneration()).toBe(1)
 	}, 30_000)
@@ -636,16 +641,70 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 	it('stops at once, spawning nothing, while the capture of the output found at the start is in progress', async () => {
 		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK, 'dist/uiux.js': adapterModule('kit-adapter-old') })
 		const captureOutput = vi.fn(() => new Promise<void>(() => {}))
-		const { build, printed } = runner(root, { captureOutput })
+		// A wait far past the test timeout: only the stop request can end it.
+		const { build, printed } = runner(root, { captureOutput, captureWaitMs: 60 * 60_000 })
 		const started = build.start()
 		await waitFor(() => captureOutput.mock.calls.length, calls => calls === 1)
-		const stopping = Date.now()
 		await build.stop()
 		await started
-		expect(Date.now() - stopping).toBeLessThan(1000)
-		await new Promise(resolveDelay => setTimeout(resolveDelay, 300))
-		expect(existsSync(join(root, 'kit', 'seen.json'))).toBe(false)
-		expect(printed.some(line => line.includes('running'))).toBe(false)
+		// The run has returned without printing the argument array, which it prints right before it spawns.
+		expect(printed.some(line => line.includes('kit build: running'))).toBe(false)
+		expect(printed.some(line => line.includes('was abandoned'))).toBe(false)
+		expect(build.outputGeneration()).toBe(0)
+	})
+
+	it('keeps the previous output as the last good output when a later capture is abandoned (Rule 01a11bb1-9e5e)', async () => {
+		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK, 'fail.mjs': BUILD_FAIL })
+		let hang = false
+		const captureOutput = vi.fn(() => hang ? new Promise<void>(() => {}) : getSelectedWorkspacePreviewBundle(root, V5_LAYOUT))
+		const { build, printed } = runner(root, { register: true, captureOutput, captureWaitMs: 200, restartIntervalMs: 0 })
+		await build.start()
+		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(build.outputGeneration()).toBe(1)
+		await captureOutput.mock.results[0]!.value
+		const good = await resolveSelectedWorkspaceAdapters(root, V5_LAYOUT)
+		expect(good.summaries[0]?.adapterId).toBe('kit-adapter-1')
+
+		// Generation 2 settles, but its capture never finishes.
+		hang = true
+		await write(join(root, 'kit', 'version.txt'), '2')
+		expect(await build.restart()).toMatchObject({ outcome: 'started' })
+		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(build.outputGeneration()).toBe(2)
+
+		// The next restart abandons that capture: generation 1 is the last good output again.
+		await write(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', type: 'module', uiux: nodeBuild('fail.mjs') }))
+		expect(await build.restart()).toMatchObject({ outcome: 'started' })
+		expect(printed.some(line => line.includes('was abandoned; the build starts with the previous output as the last good output'))).toBe(true)
+		expect(build.outputGeneration()).toBe(1)
+		expect(await settledState(build)).toMatchObject({ state: 'failed' })
+		expect(await readFile(join(root, 'kit', 'dist', 'uiux.js'), 'utf8')).toContain('half-written output')
+
+		const after = await resolveSelectedWorkspaceAdapters(root, V5_LAYOUT)
+		expect(after).toBe(good)
+		const bundle = await getSelectedWorkspacePreviewBundle(root, V5_LAYOUT)
+		expect(bundle.state).toBe('valid')
+		expect((bundle as { bundleJs: string }).bundleJs).toContain('kit-adapter-1')
+		expect((bundle as { bundleJs: string }).bundleJs).not.toContain('half-written output')
+	}, 30_000)
+
+	it('starts nothing for a restart queued before a stop, and reports it stopped', async () => {
+		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK })
+		const { build, printed } = runner(root, { restartIntervalMs: 0 })
+		const spawns = () => printed.filter(line => line.includes('kit build: running')).length
+		await build.start()
+		expect(await settledState(build)).toEqual({ state: 'ready' })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY })
+		const app = createWorkspaceApplicationSession(persistence, { kitBuild: build })
+
+		const restarted = build.restart()
+		const stopped = build.stop()
+		expect(await restarted).toEqual({ outcome: 'stopped' })
+		await stopped
+		const refused = app.restartKitBuild()
+		await build.stop()
+		expect(await refused).toMatchObject({ status: 'blocked', code: 'kit.build_unavailable' })
+		expect(spawns()).toBe(1)
 	})
 
 	it('makes the Adapter set invalid while no build output exists', async () => {

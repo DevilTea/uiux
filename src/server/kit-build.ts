@@ -233,6 +233,9 @@ type Run = {
 	poll?: NodeJS.Timeout
 }
 
+/** The capture of one output generation. */
+type Capture = { readonly generation: number; done: Promise<void>; abandoned: boolean }
+
 export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRunner {
 	const settleMs = options.settleMs ?? KIT_BUILD_SETTLE_MS
 	const pollMs = options.pollMs ?? DEFAULT_POLL_MS
@@ -259,7 +262,9 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 	/** The highest generation given so far: an abandoned one is never given again, so neither is its version. */
 	let lastGeneration = 0
 	/** The capture of the current generation in progress, if any. */
-	let capturing: Readonly<{ generation: number; done: Promise<void> }> | undefined
+	let capturing: Capture | undefined
+	/** The newest generation whose capture finished: the last good output once a later capture is abandoned. */
+	let captured: number | undefined
 	/** Counts the stop requests: a run begun for an earlier count spawns nothing. */
 	let stops = 0
 	/** Settles at the next stop request. */
@@ -284,12 +289,13 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 	function capture(): void {
 		const captureOutput = options.captureOutput
 		if (!captureOutput || generation === undefined) return
-		const pending: { generation: number; done: Promise<void> } = { generation, done: Promise.resolve() }
+		const pending: Capture = { generation, done: Promise.resolve(), abandoned: false }
 		pending.done = Promise.resolve()
 			.then(captureOutput)
 			.then(() => undefined, () => undefined)
 			.finally(() => {
 				if (capturing === pending) capturing = undefined
+				if (!pending.abandoned && (captured === undefined || pending.generation > captured)) captured = pending.generation
 			})
 		capturing = pending
 	}
@@ -297,7 +303,8 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 	/**
 	 * Waits for the capture in progress, so a build spawned next cannot change the files it reads.
 	 * Past `captureWaitMs` the capture is abandoned: its generation stops being the last good output,
-	 * so nothing it reads from then on is used. A stop request ends the wait at once. Resolves
+	 * so nothing it reads from then on is used, and the newest generation whose capture finished, if
+	 * any, is the last good output again. A stop request ends the wait at once. Resolves
 	 * whether the run begun for stop count `stopsAtStart` may still spawn.
 	 */
 	async function captureSettled(stopsAtStart: number): Promise<boolean> {
@@ -310,8 +317,9 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 			])
 			if (outcome === 'late' && capturing === pending) {
 				capturing = undefined
-				if (generation === pending.generation) generation = undefined
-				print(`uiux: kit build: the capture of the build output took longer than ${captureWaitMs / 1000} s and was abandoned; the build starts without a last good output.`)
+				pending.abandoned = true
+				if (generation === pending.generation) generation = captured
+				print(`uiux: kit build: the capture of the build output took longer than ${captureWaitMs / 1000} s and was abandoned; the build starts ${generation === undefined ? 'without a last good output' : 'with the previous output as the last good output'}.`)
 			}
 		}
 		return stops === stopsAtStart
@@ -326,8 +334,11 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 		const stopsAtStart = stops
 		const queued: Promise<KitBuildRestart> = serialize(async () => {
 			if (queuedRestart === queued) queuedRestart = undefined
+			// A stop requested after this restart was: the restart spawns nothing.
+			if (stops !== stopsAtStart) return { outcome: 'stopped' }
 			if (current) await terminate(current)
-			return { outcome: 'started', build: await begin(stopsAtStart) }
+			const build = await begin(stopsAtStart)
+			return stops === stopsAtStart ? { outcome: 'started', build } : { outcome: 'stopped' }
 		})
 		queuedRestart = queued
 		return queued
