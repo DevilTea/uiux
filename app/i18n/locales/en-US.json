@@ -1855,6 +1855,15 @@
     "switchTo": "Switch to {variant}",
     "conflict": "This thread changed.",
     "conflictHint": "It was reloaded; your text is kept. Try again.",
+    "replyConflict": {
+      "title": "This thread changed before your reply was sent.",
+      "newReplies": "1 new reply. | {n} new replies.",
+      "status": "It's now {status}.",
+      "changed": "Something else in it changed.",
+      "kept": "Your reply wasn't sent and is kept below.",
+      "keptResolved": "Your reply wasn't sent. Reopen the thread to send it.",
+      "sendAgain": "Send again"
+    },
     "timeline": "Thread history",
     "agent": "agent",
     "submitted": "Submitted for review",

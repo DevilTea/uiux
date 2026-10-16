@@ -20,6 +20,8 @@ import ThreadPromoteModal from '../ThreadPromoteModal.vue'
 import ThreadReasonPrompt from '../ThreadReasonPrompt.vue'
 import WbErrorDescription from '../WbErrorDescription.vue'
 import RecordedContextLabel from '../RecordedContextLabel.vue'
+import ReplyConflictAlert from '../ReplyConflictAlert.vue'
+import { threadState } from '../../../utils/reply-conflict'
 import { effectiveRenderContext } from '../../../../src/preview/render-context-options'
 
 /**
@@ -97,6 +99,9 @@ const reply = computed({
 	set: (value: string) => { comments.replyDrafts.value = { ...comments.replyDrafts.value, [props.threadId]: value } },
 })
 const conflict = computed(() => comments.conflict.value === props.threadId)
+/** A reply refused for a conflict: the alert says what changed and offers Send again (Rule 01a116f0-95fc). */
+const replyConflict = computed(() => conflict.value && comments.replyConflict.value?.threadId === props.threadId ? comments.replyConflict.value : undefined)
+const canSendAgain = computed(() => comments.canComment.value && thread.value?.status !== 'resolved' && !!reply.value.trim())
 const error = computed(() => comments.lastError.value?.threadId === props.threadId ? comments.lastError.value.error : undefined)
 
 function startReanchor(): void {
@@ -367,8 +372,16 @@ watch(() => props.threadId, () => {
       />
     </p>
 
+    <ReplyConflictAlert
+      v-if="replyConflict"
+      :before="replyConflict.before"
+      :after="threadState(thread)"
+      :can-send="canSendAgain"
+      :busy="comments.busy.value === 'reply'"
+      @send-again="sendReply"
+    />
     <UAlert
-      v-if="conflict"
+      v-else-if="conflict"
       color="warning"
       variant="subtle"
       icon="i-lucide-refresh-cw"

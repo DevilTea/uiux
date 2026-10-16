@@ -12,6 +12,8 @@ import ThreadPromoteModal from './ThreadPromoteModal.vue'
 import ThreadReasonPrompt from './ThreadReasonPrompt.vue'
 import WbErrorDescription from './WbErrorDescription.vue'
 import RecordedContextLabel from './RecordedContextLabel.vue'
+import ReplyConflictAlert from './ReplyConflictAlert.vue'
+import { threadState } from '../../utils/reply-conflict'
 import { latestEditableMessageId } from '../../utils/review-message-actions'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { isLockedError } from '../../utils/fetch-error'
@@ -66,6 +68,9 @@ const reply = computed({
 	},
 })
 const conflict = computed(() => !!thread.value && inbox.conflict.value === thread.value.id)
+/** A reply refused for a conflict: the alert says what changed and offers Send again (Rule 01a116f0-95fc). */
+const replyConflict = computed(() => conflict.value && inbox.replyConflict.value?.threadId === thread.value?.id ? inbox.replyConflict.value : undefined)
+const canSendAgain = computed(() => inbox.canReply.value && thread.value?.status !== 'resolved' && !!reply.value.trim())
 const error = computed(() => thread.value && inbox.lastError.value?.threadId === thread.value.id ? inbox.lastError.value.error : undefined)
 
 /**
@@ -342,8 +347,16 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
             />
           </template>
         </UAlert>
+        <ReplyConflictAlert
+          v-if="replyConflict"
+          :before="replyConflict.before"
+          :after="threadState(thread)"
+          :can-send="canSendAgain"
+          :busy="inbox.busy.value === 'reply'"
+          @send-again="sendReply"
+        />
         <UAlert
-          v-if="conflict"
+          v-else-if="conflict"
           color="warning"
           variant="subtle"
           icon="i-lucide-refresh-cw"
