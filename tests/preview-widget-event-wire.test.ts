@@ -114,6 +114,8 @@ describe('widget.event.* wire schema', () => {
 	it('still decodes an unknown type as protocol.unknown_message_type', () => {
 		expect(codes({ type: 'widget.event.log', context, payload: {} })).toEqual(['protocol.unknown_message_type'])
 		const workbench = new WorkbenchPreviewProtocolBridge('session-a', collector([]), () => ({ ok: true }))
+		// Only an envelope of the current generation reaches the decode; any other is stale first.
+		workbench.admitGeneration('generation-a', 'initial')
 		const result = workbench.receive({ type: 'widget.event.replay', context, payload: {} })
 		expect(result.status).toBe('invalid')
 		if (result.status === 'invalid') expect(result.diagnostics.map(item => item.code)).toContain('protocol.unknown_message_type')
