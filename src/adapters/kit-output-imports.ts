@@ -6,7 +6,7 @@ export const KIT_OUTPUT_VERSION_PARAMETER = 'v'
 
 /**
  * The `file:` URL, ending in `/`, of each directory whose modules share their importer's version,
- * with the version its CommonJS modules were last forgotten for.
+ * with the version it was last given (and its CommonJS modules last forgotten for).
  */
 const scopes = new Map<string, string>()
 let registered = false
@@ -14,16 +14,21 @@ let registered = false
 /**
  * Lets the kit build output generation `version` import, anew, the modules its Adapter module
  * imports (Rule 01a11bb1-9df8-762d-b5e5-306f9898aae2), so an edit to a file the Adapter imports
- * reaches the server with the next settled output instead of the next restart.
+ * reaches the server with the next settled output instead of the next restart. A kit module is one
+ * whose real path lies in `directory` (the real `kit/`), outside any `node_modules/`.
  *
  * - Node caches an ES module by its URL, so the Adapter module of each generation is imported under
- *   `?v=<version>`; this resolve hook gives every module it imports, directly or through others,
- *   the same `?v=<version>` while both lie in `directory` (the real `kit/`) and outside any
- *   `node_modules/`. A specifier that already carries a query keeps it.
- * - Node caches a CommonJS module by its file name, whatever the URL: those in `directory`, outside
- *   any `node_modules/`, leave the `require` cache once per new version, before it is imported.
+ *   `?v=<version>`; this resolve hook gives each kit module that a kit module loads, by `import`,
+ *   `import()` or `require`, a `?v` too: its importer's own, or, for an importer without one (a
+ *   CommonJS module, whose URL never carries the query), the version `directory` was last given.
+ *   A specifier that already carries a query keeps it.
+ * - Node caches a CommonJS module by its file name, whatever the URL: the kit modules leave the
+ *   `require` cache once per new version, before it is imported.
  *
- * Installed packages keep one copy per process.
+ * Installed packages keep one copy per process. One path cannot be versioned in Node 24: an ES
+ * module that `require()` loads (require(esm)) is cached by its file URL without the query this hook
+ * adds (`importSyncForRequire` in Node's ES module loader), so a kit ES module first loaded that way
+ * keeps that copy for the life of the process (Implementation gap on Rule 01a11bb1-9df8).
  */
 export function shareVersionWithKitImports(directory: string, version: string): void {
 	const href = pathToFileURL(directory).href
@@ -38,13 +43,13 @@ export function shareVersionWithKitImports(directory: string, version: string): 
 		resolve(specifier, context, nextResolve) {
 			const resolved = nextResolve(specifier, context)
 			const parent = context.parentURL
-			if (parent === undefined || !context.conditions?.includes('import')) return resolved
-			if (!inScope(parent) || !inScope(resolved.url)) return resolved
-			const parentVersion = new URL(parent).searchParams.get(KIT_OUTPUT_VERSION_PARAMETER)
-			if (parentVersion === null) return resolved
+			if (parent === undefined || !inScope(resolved.url)) return resolved
+			const parentScope = scopeOf(parent)
+			if (parentScope === undefined) return resolved
 			const url = new URL(resolved.url)
 			if (url.search !== '') return resolved
-			url.searchParams.set(KIT_OUTPUT_VERSION_PARAMETER, parentVersion)
+			const version = new URL(parent).searchParams.get(KIT_OUTPUT_VERSION_PARAMETER) ?? scopes.get(parentScope)!
+			url.searchParams.set(KIT_OUTPUT_VERSION_PARAMETER, version)
 			return { ...resolved, url: url.href }
 		},
 	})
@@ -58,11 +63,16 @@ function forgetCommonJsModules(scope: string): void {
 }
 
 function inScope(url: string, within: Iterable<string> = scopes.keys()): boolean {
-	if (!url.startsWith('file:')) return false
+	return scopeOf(url, within) !== undefined
+}
+
+/** The scope of `within` that holds `url` outside any `node_modules/`, if any. */
+function scopeOf(url: string, within: Iterable<string> = scopes.keys()): string | undefined {
+	if (!url.startsWith('file:')) return undefined
 	for (const scope of within) {
 		if (!url.startsWith(scope)) continue
 		const inside = new URL(url).pathname.slice(new URL(scope).pathname.length)
-		if (!inside.split('/').includes('node_modules')) return true
+		if (!inside.split('/').includes('node_modules')) return scope
 	}
-	return false
+	return undefined
 }
