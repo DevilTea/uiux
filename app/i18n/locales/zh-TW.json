@@ -91,6 +91,10 @@
     "openWidget": "選取",
     "readFailed": "無法讀取這個資源。",
     "readFailedFor": "無法檢查 {name}",
+    "viewGone": {
+      "title": "這個 View 已不存在",
+      "description": "未開啟「{name}」，你仍在檢查頁面。"
+    },
     "resource": {
       "workspace": "Workspace 設定"
     },

@@ -91,6 +91,10 @@
     "openWidget": "Select",
     "readFailed": "Couldn't read this resource.",
     "readFailedFor": "Couldn't check {name}",
+    "viewGone": {
+      "title": "This View no longer exists",
+      "description": "{name} wasn't opened, so you're still on Checks."
+    },
     "resource": {
       "workspace": "Workspace settings"
     },
