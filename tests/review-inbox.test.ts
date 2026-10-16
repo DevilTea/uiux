@@ -148,6 +148,17 @@ describe('Reviews inbox threads and filters', () => {
 		expect(isUnreadThread(item, {}, 'member:jun')).toBe(false)
 	})
 
+	it('narrows the queue to threads changed since the member last looked (Updated)', () => {
+		// mei saw A at minute 2; jun replied at minute 5. mei saw B at its latest change.
+		const a = buildInboxThread(summary('a', 'open', 5), thread('a', { messages: [{ id: 'a1', actor: mei, at: at(1), body: 'A' }, { id: 'a2', actor: jun, at: at(5), body: 'A2' }] }), views)
+		const b = buildInboxThread(summary('b', 'open', 3), thread('b', { messages: [{ id: 'b1', actor: ana, at: at(3), body: 'B' }] }), views)
+		const seen = { a: at(2), b: at(3) }
+		const context = { me: 'member:mei', isUnread: (item: InboxThread) => isUnreadThread(item, seen, 'member:mei') }
+		const ids = (filter: InboxFilter) => [a, b].filter(item => matchesInboxFilter(item, filter, context)).map(item => item.id)
+		expect(ids({ ...DEFAULT_INBOX_FILTER, unread: true })).toEqual(['a'])
+		expect(ids(DEFAULT_INBOX_FILTER)).toEqual(['a', 'b'])
+	})
+
 	it('round-trips the filter and the open thread through the URL', () => {
 		expect(inboxQuery(DEFAULT_INBOX_FILTER)).toEqual({})
 		expect(parseInboxQuery({})).toEqual(DEFAULT_INBOX_FILTER)

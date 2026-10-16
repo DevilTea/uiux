@@ -37,7 +37,9 @@ import { useWidget } from '@deviltea/widget-vue';
 
 export const counterPlugin = createWidgetPlugin('Counter')
   .interfaces()
-  .state(s => s.count({ authorWritable: true, validate: (v) => typeof v === 'number', default: () => 42 }))
+  .state(s => s
+    .count({ authorWritable: true, validate: (v) => typeof v === 'number', default: () => 42 })
+    .internal({ validate: (v) => typeof v === 'number', default: () => 0 }))
   .done();
 
 export const CounterRenderer = defineComponent({
@@ -447,6 +449,76 @@ describe('Formal capture service & fresh-runtime proof', () => {
 		expect(batchResult.results[0]?.evidenceDigest).toBeDefined()
 		expect(batchResult.results[1]?.status).toBe('failed')
 		expect(batchResult.results[1]?.diagnostics?.[0]?.code).toBe('view.not_found')
+	})
+
+	// Rule 01a1144e-524c-7715-8fd8-d9ce46969cc6 (issue #119): an authored but invalid Variant is never
+	// used, even partly, for formal capture, so no Review submission can cite Evidence of it.
+	it('refuses to capture an authored invalid Variant and stores nothing for it, while other contexts still capture', { timeout: 60_000 }, async () => {
+		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		const view = createCounterView()
+		await persistence.views.create(VIEW_COUNTER_ID, {
+			...view,
+			variants: {
+				...view.variants,
+				filled: { description: 'Overrides an author-writable State member', state: { 'counter-1': { count: 7 } } },
+				// One valid override next to an unknown State member: the valid half must not be applied either.
+				unknownMember: { description: 'Overrides an unknown State member', state: { 'counter-1': { count: 7, unknown: 3 } } },
+				notWritable: { description: 'Overrides a State member that is not author-writable', state: { 'counter-1': { internal: 3 } } },
+			},
+		})
+		// The invalid Variants keep their authored data for repair.
+		expect((await persistence.views.readInspected(VIEW_COUNTER_ID))?.resource.variants).toMatchObject({
+			unknownMember: { state: { 'counter-1': { count: 7, unknown: 3 } } },
+			notWritable: { state: { 'counter-1': { internal: 3 } } },
+		})
+
+		const server = await startTestServer(root)
+		const formalService = createFormalCaptureService(persistence, { captureCookie: () => server.cookie })
+		const base: ResolvedRenderContext = {
+			viewId: VIEW_COUNTER_ID,
+			locale: 'en-US',
+			viewportId: 'desktop',
+			viewport: { width: 1280, height: 800 },
+			themeId: 'light',
+		}
+
+		// The server stores artifacts of its own at startup; only what capture adds counts here.
+		const before = new Set(await persistence.artifacts.listIdentities())
+		const outcome = await formalService.capture({
+			contexts: [
+				{ ...base, variantName: 'unknownMember' },
+				base,
+				{ ...base, variantName: 'notWritable' },
+				{ ...base, variantName: 'filled' },
+			],
+			baseUrl: server.url,
+		})
+
+		expect(outcome.status).toBe('incomplete')
+		expect(outcome.summary).toEqual({ total: 4, captured: 2, failed: 2 })
+		for (const index of [0, 2]) {
+			const failed = outcome.results[index]!
+			expect(failed.status).toBe('failed')
+			expect(failed.diagnostics?.[0]).toMatchObject({ code: 'preview.runtime_failed', path: '/preview' })
+			expect(failed.diagnostics?.[0]?.message).toContain('invalid')
+			expect(failed.evidenceDigest).toBeUndefined()
+			expect(failed.screenshotDigest).toBeUndefined()
+			expect(failed.evidence).toBeUndefined()
+		}
+		const captured = [outcome.results[1]!, outcome.results[3]!]
+		expect(captured.map(item => item.status)).toEqual(['captured', 'captured'])
+		// The valid Variant renders its override, so it differs from the base context.
+		expect(captured[1]!.screenshotDigest).not.toBe(captured[0]!.screenshotDigest)
+
+		// Only the valid contexts' screenshots and Evidence records were stored.
+		const added = (await persistence.artifacts.listIdentities()).filter(identity => !before.has(identity))
+		expect(added.sort()).toEqual(captured.flatMap(item => [item.evidenceDigest!, item.screenshotDigest!]).sort())
+		// No Evidence of either invalid Variant exists, so a ready-for-review submission has none to cite.
+		const evidence = await formalService.listEvidence(VIEW_COUNTER_ID)
+		expect(evidence.map(item => item.digest).sort()).toEqual(captured.map(item => item.evidenceDigest!).sort())
+		expect(evidence.map(item => item.record.executionContext.variantName ?? null).sort()).toEqual(['filled', null])
 	})
 
 	it('serves immutable artifacts over HTTP with security headers and rejects invalid digests', async () => {
