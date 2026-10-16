@@ -22,15 +22,17 @@ async function write(path: string, content: string): Promise<void> {
 
 /**
  * Writes `dist/uiux.js`, the same each time, whose Adapter ID comes from the ES module
- * `dist/parts/id.js` and the CommonJS module `dist/parts/suffix.cjs` (both named by `version.txt`), and
- * from how many times the installed package `kit-counter` was evaluated.
+ * `dist/parts/id.js`, the CommonJS module `dist/parts/suffix.cjs` and the ES module
+ * `dist/parts/late.js` that it imports with `import()` (all named by `version.txt`), and from how
+ * many times the installed package `kit-counter` was evaluated.
  */
 const BUILD_SPLIT = `
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 const version = existsSync('version.txt') ? readFileSync('version.txt', 'utf8').trim() : '1'
 mkdirSync('dist/parts', { recursive: true })
-writeFileSync('dist/parts/suffix.cjs', "exports.suffix = 'c" + version + "'\\n")
-writeFileSync('dist/parts/id.js', "import { loads } from 'kit-counter'\\nimport { suffix } from './suffix.cjs'\\nexport const id = 'kit-split-" + version + "-' + loads() + '-' + suffix\\n")
+writeFileSync('dist/parts/late.js', "export const late = 'l" + version + "'\\n")
+writeFileSync('dist/parts/suffix.cjs', "exports.suffix = 'c" + version + "'\\nexports.late = () => import('./late.js').then(module => module.late)\\n")
+writeFileSync('dist/parts/id.js', "import { loads } from 'kit-counter'\\nimport { suffix, late } from './suffix.cjs'\\nexport const id = 'kit-split-" + version + "-' + loads() + '-' + suffix + '-' + await late()\\n")
 writeFileSync('dist/uiux.js', "import { id } from './parts/id.js'\\nexport const manifest = { id, apiVersion: '1', widgetPlugins: [], catalog: { widgets: {} }, renderers: [], providers: [], styles: [], tokens: [] }\\n")
 `
 
@@ -86,9 +88,9 @@ afterAll(async () => {
 })
 
 describe('settled kit build output in the built server (Rule 01a11bb1-9df8)', () => {
-	it('imports anew the ES and CommonJS kit modules the Adapter module imports, and keeps one copy of an installed package', async () => {
+	it('imports anew the ES and CommonJS kit modules the Adapter module imports, also by import() from CommonJS, and keeps one copy of an installed package', async () => {
 		expect(await settled()).toBe('ready')
-		expect(await adapterId()).toBe('kit-split-1-1-c1')
+		expect(await adapterId()).toBe('kit-split-1-1-c1-l1')
 		const entry = await readFile(join(server.workspaceRoot, 'kit', 'dist', 'uiux.js'), 'utf8')
 
 		// Only the module the Adapter imports changes; the Adapter module is the same file.
@@ -97,6 +99,6 @@ describe('settled kit build output in the built server (Rule 01a11bb1-9df8)', ()
 		expect(restarted.status, JSON.stringify(restarted.body)).toBe(200)
 		expect(await settled()).toBe('ready')
 		expect(await readFile(join(server.workspaceRoot, 'kit', 'dist', 'uiux.js'), 'utf8')).toBe(entry)
-		expect(await adapterId()).toBe('kit-split-2-1-c2')
+		expect(await adapterId()).toBe('kit-split-2-1-c2-l2')
 	}, 60_000)
 })

@@ -196,6 +196,8 @@ async function kitBuildPin(workspaceRoot: string, codeDir: string, adapters: rea
 		version,
 		...(realKit ? { kitDirectory: realKit } : {}),
 		remember(resolution) {
+			// A generation that is no longer the runner's, such as one whose capture was abandoned, is never pinned.
+			if (kitBuildRunnerFor(root)?.outputVersion() !== version) return
 			const entry: PinnedResolution = { version, adapters: key, resolution }
 			pinnedResolutions.set(root, entry)
 			const drop = () => {
@@ -306,6 +308,6 @@ async function resolveProductKitStyles(workspaceRoot: string, layout: WorkspaceL
 		}
 	}
 	const resolution: StyleResolution = diagnostics.length > 0 ? { state: 'invalid', diagnostics } : { state: 'valid', paths }
-	if (version !== undefined) pinnedStyles.set(root, { version, styles: key, resolution })
+	if (version !== undefined && kitBuildRunnerFor(root)?.outputVersion() === version) pinnedStyles.set(root, { version, styles: key, resolution })
 	return resolution
 }

@@ -30,7 +30,10 @@ import type { KitBuildControl, KitBuildRestart, KitBuildStatus } from '../applic
  *   01a11bb1-9e5e-79ab-841e-c953e8b44bbf). An output present when the runner first starts is
  *   generation `0`, captured before the build process is spawned, and a run waits for the capture
  *   in progress before it spawns: so after a restart of `uiux dev` whose build fails, the output
- *   found at the start stays in use, not the files the failed build left.
+ *   found at the start stays in use, not the files the failed build left. A capture still running
+ *   after `captureWaitMs` is abandoned before the build is spawned: its generation is no longer
+ *   the last good output (for the output found at the start, there is then none), so nothing it
+ *   reads while the build changes the files is used. A stop ends that wait at once.
  * - States follow Clause 01a11bb1-8856-737f-945c-e44c596f7782: `none` without a declaration,
  *   `building` while a run is in progress, `ready` once its output settled, else `failed`. A watch
  *   run is first `ready` only after its output changed since it started, so an output left from
@@ -90,7 +93,7 @@ export type KitBuildRunnerOptions = Readonly<{
 	 * found at the first start and for each settled output; its failure is the resolution's own state.
 	 */
 	captureOutput?: () => Promise<unknown>
-	/** The longest a run waits for a capture in progress before it spawns; `KIT_BUILD_CAPTURE_WAIT_MS` by default. */
+	/** The longest a run waits for a capture in progress before it abandons it and spawns; `KIT_BUILD_CAPTURE_WAIT_MS` by default. */
 	captureWaitMs?: number
 }>
 
@@ -108,7 +111,8 @@ export const KIT_BUILD_RESTART_INTERVAL_MS = 2000
 export const KIT_BUILD_GENERATION_WARNING = 50
 /**
  * The longest a run waits for the capture of the output before it spawns the build, which may
- * change the output; past it the build starts and the capture goes on.
+ * change the output; past it the capture is abandoned (its generation is no longer the last good
+ * output) and the build starts.
  */
 export const KIT_BUILD_CAPTURE_WAIT_MS = 10_000
 /** Numbers each runner in this process, for `outputVersion`. */
@@ -229,6 +233,9 @@ type Run = {
 	poll?: NodeJS.Timeout
 }
 
+/** The capture of one output generation. */
+type Capture = { readonly generation: number; done: Promise<void>; abandoned: boolean }
+
 export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRunner {
 	const settleMs = options.settleMs ?? KIT_BUILD_SETTLE_MS
 	const pollMs = options.pollMs ?? DEFAULT_POLL_MS
@@ -252,11 +259,25 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 	let lastRestartAt: number | undefined
 	const instance = ++runnerInstances
 	const captureWaitMs = options.captureWaitMs ?? KIT_BUILD_CAPTURE_WAIT_MS
+	/** The highest generation given so far: an abandoned one is never given again, so neither is its version. */
+	let lastGeneration = 0
 	/** The capture of the current generation in progress, if any. */
-	let capturing: Promise<void> | undefined
+	let capturing: Capture | undefined
+	/** The newest generation whose capture finished: the last good output once a later capture is abandoned. */
+	let captured: number | undefined
+	/** Counts the stop requests: a run begun for an earlier count spawns nothing. */
+	let stops = 0
+	/** Settles at the next stop request. */
+	let stopRequested = deferred()
+
+	function requestStop(): void {
+		stops++
+		stopRequested.resolve()
+		stopRequested = deferred()
+	}
 
 	function advanceGeneration(): void {
-		generation = (generation ?? 0) + 1
+		generation = ++lastGeneration
 		if (!warnedGenerations && generation > generationWarning) {
 			warnedGenerations = true
 			print(`uiux: warning: the kit build has produced more than ${generationWarning} outputs in this server; each one loads its Adapter module and the kit modules it imports anew, and Node keeps every loaded module in memory. Restart uiux dev to release them.`)
@@ -267,19 +288,41 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 	/** Starts the capture of the current generation (Rule 01a11bb1-9df8-…); a failure stays the resolution's own state. */
 	function capture(): void {
 		const captureOutput = options.captureOutput
-		if (!captureOutput) return
-		const pending: Promise<void> = Promise.resolve()
+		if (!captureOutput || generation === undefined) return
+		const pending: Capture = { generation, done: Promise.resolve(), abandoned: false }
+		pending.done = Promise.resolve()
 			.then(captureOutput)
 			.then(() => undefined, () => undefined)
 			.finally(() => {
 				if (capturing === pending) capturing = undefined
+				if (!pending.abandoned && (captured === undefined || pending.generation > captured)) captured = pending.generation
 			})
 		capturing = pending
 	}
 
-	/** Waits, at most `captureWaitMs`, for the capture in progress, so a build spawned next cannot change the files it reads. */
-	async function captured(): Promise<void> {
-		if (capturing) await Promise.race([capturing, delay(captureWaitMs)])
+	/**
+	 * Waits for the capture in progress, so a build spawned next cannot change the files it reads.
+	 * Past `captureWaitMs` the capture is abandoned: its generation stops being the last good output,
+	 * so nothing it reads from then on is used, and the newest generation whose capture finished, if
+	 * any, is the last good output again. A stop request ends the wait at once. Resolves
+	 * whether the run begun for stop count `stopsAtStart` may still spawn.
+	 */
+	async function captureSettled(stopsAtStart: number): Promise<boolean> {
+		const pending = capturing
+		if (pending && stops === stopsAtStart) {
+			const outcome = await Promise.race([
+				pending.done.then(() => 'captured' as const),
+				delay(captureWaitMs).then(() => 'late' as const),
+				stopRequested.promise.then(() => 'stopped' as const),
+			])
+			if (outcome === 'late' && capturing === pending) {
+				capturing = undefined
+				pending.abandoned = true
+				if (generation === pending.generation) generation = captured
+				print(`uiux: kit build: the capture of the build output took longer than ${captureWaitMs / 1000} s and was abandoned; the build starts ${generation === undefined ? 'without a last good output' : 'with the previous output as the last good output'}.`)
+			}
+		}
+		return stops === stopsAtStart
 	}
 
 	function restart(): Promise<KitBuildRestart> {
@@ -288,10 +331,14 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 		if (lastRestartAt !== undefined && now - lastRestartAt < restartIntervalMs)
 			return Promise.resolve({ outcome: 'throttled', retryAfterMs: restartIntervalMs - (now - lastRestartAt) })
 		lastRestartAt = now
+		const stopsAtStart = stops
 		const queued: Promise<KitBuildRestart> = serialize(async () => {
 			if (queuedRestart === queued) queuedRestart = undefined
+			// A stop requested after this restart was: the restart spawns nothing.
+			if (stops !== stopsAtStart) return { outcome: 'stopped' }
 			if (current) await terminate(current)
-			return { outcome: 'started', build: await begin() }
+			const build = await begin(stopsAtStart)
+			return stops === stopsAtStart ? { outcome: 'started', build } : { outcome: 'stopped' }
 		})
 		queuedRestart = queued
 		return queued
@@ -344,7 +391,9 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 		if (!exited) await Promise.race([run.exited, delay(killGraceMs)])
 	}
 
-	async function begin(): Promise<KitBuildStatus> {
+	/** Begins a run, unless a stop was requested after stop count `stopsAtStart`. */
+	async function begin(stopsAtStart: number): Promise<KitBuildStatus> {
+		if (stops !== stopsAtStart) return status
 		const run: Run = { id: ++runs, exited: Promise.resolve(), stopping: false, groupDone: false }
 		current = run
 		log.clear()
@@ -381,10 +430,9 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 
 		const watching = declaration.watch !== undefined
 		const argv = declaration.watch ?? declaration.command
-		print(`uiux: kit build: running ${JSON.stringify(argv)} in ${name}/${watching ? ' (watch)' : ''}`)
 		status = { state: 'building' }
-		await captured()
-		if (run.stopping || current?.id !== run.id) return status
+		if (!await captureSettled(stopsAtStart) || run.stopping || current?.id !== run.id) return status
+		print(`uiux: kit build: running ${JSON.stringify(argv)} in ${name}/${watching ? ' (watch)' : ''}`)
 
 		let child: ChildProcess
 		try {
@@ -482,16 +530,24 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 		outputGeneration: () => generation,
 		outputVersion: () => generation === undefined ? undefined : `${instance}.${generation}`,
 		declaration: () => declared,
-		start: () => serialize(async () => {
-			if (current) return status
-			return begin()
-		}),
+		start() {
+			const stopsAtStart = stops
+			return serialize(async () => {
+				if (current) return status
+				return begin(stopsAtStart)
+			})
+		},
 		restart,
-		stop: () => serialize(async () => {
-			const run = current
-			if (run) await terminate(run)
-		}),
+		stop() {
+			// A run waiting for a capture stops waiting at once, and spawns nothing.
+			requestStop()
+			return serialize(async () => {
+				const run = current
+				if (run) await terminate(run)
+			})
+		},
 		stopSync() {
+			requestStop()
 			const run = current
 			if (!run) return
 			run.stopping = true
@@ -532,6 +588,14 @@ async function outputListing(kitDirectory: string, outputDirectory: string): Pro
 
 function delay(ms: number): Promise<void> {
 	return new Promise(resolveDelay => setTimeout(resolveDelay, ms).unref?.())
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+	let resolve!: () => void
+	const promise = new Promise<void>(resolvePromise => {
+		resolve = resolvePromise
+	})
+	return { promise, resolve }
 }
 
 /**
