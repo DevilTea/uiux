@@ -5,6 +5,7 @@ import { useUiuxClient } from '../composables/useUiuxClient'
 import { describeFetchError } from '../utils/fetch-error'
 import { diagnosticText } from '../utils/diagnostic-copy'
 import { resolveDefaultLocale, resolveDefaultThemeId } from '../../src/preview/render-context-options'
+import { missingDefaultLocaleDiagnostic } from '../../src/i18n/runtime'
 import { resolveFrameContext } from '../../src/preview/version-frame-context'
 import type { WorkspaceManifest } from '../../src/domain/workspace/schema'
 import { RuntimePreviewProtocolBridge } from '../../src/preview/protocol/bridge'
@@ -386,6 +387,27 @@ async function evaluateRuntime() {
 	const superseded = () => evaluation !== runtimeEvaluation
 	disposeCurrentRuntime()
 
+	// Rule 01a115cd-b30b-706e-b8a2-46e62259156e: while the default Locale has no Locale file the
+	// Preview is blocked, and no other Locale stands in for it. A read that fails for another reason
+	// is a load error, not a missing file.
+	const defaultLocale = workspaceDefaultLocale.value
+	let defaultMessages: I18nResource | undefined
+	try {
+		defaultMessages = defaultLocale ? await readLocale(defaultLocale) : undefined
+	}
+	catch (cause) {
+		if (superseded()) return
+		materializationResult.value = undefined
+		error.value = describeFetchError(cause, t('preview.errors.localeLoadFailed')).message
+		return
+	}
+	if (superseded()) return
+	if (defaultLocale && !defaultMessages) {
+		localesMap.delete(defaultLocale)
+		materializationResult.value = { status: 'blocked', diagnostics: [missingDefaultLocaleDiagnostic(defaultLocale)] }
+		return
+	}
+
 	type PreviewAdaptersResponse =
 		| { state: 'valid'; diagnostics: []; summaries: unknown[]; bundleUrl: string; stylesheetUrl?: string; themes?: Readonly<Record<string, Readonly<Record<string, string>>>> }
 		| { state: 'invalid'; diagnostics: readonly Diagnostic[]; summaries: unknown[] }
@@ -423,25 +445,16 @@ async function evaluateRuntime() {
 			return
 		}
 
-		try {
-			const messages = await readLocale(locale.value)
-			if (messages) {
-				localesMap.set(locale.value, messages)
-			}
-		}
-		catch {
-			// preserve accepted missing-key behavior
-		}
-		const fallbackLocale = workspaceDefaultLocale.value
-		if (fallbackLocale && locale.value !== fallbackLocale) {
+		if (defaultLocale && defaultMessages) localesMap.set(defaultLocale, defaultMessages)
+		if (locale.value !== defaultLocale) {
 			try {
-				const messages = await readLocale(fallbackLocale)
+				const messages = await readLocale(locale.value)
 				if (messages) {
-					localesMap.set(fallbackLocale, messages)
+					localesMap.set(locale.value, messages)
 				}
 			}
 			catch {
-				// optional fallback missing
+				// preserve accepted missing-key behavior: the default Locale is the fallback
 			}
 		}
 
@@ -751,6 +764,43 @@ onUnmounted(() => {
               <span class="font-mono font-medium">[{{ diag.code }}]</span> {{ diag.path }}: {{ diagnosticText(diag) }}
             </li>
           </ul>
+        </template>
+      </UAlert>
+    </div>
+
+    <!-- Blocked by a Workspace configuration error: the default Locale has no Locale file -->
+    <div
+      v-else-if="materializationResult?.status === 'blocked'"
+      data-preview-status="blocked"
+      class="p-4"
+    >
+      <UAlert
+        color="error"
+        variant="subtle"
+        icon="i-lucide-globe-lock"
+        :title="t('preview.blocked.title')"
+      >
+        <template #description>
+          <div class="space-y-2">
+            <i18n-t
+              keypath="preview.blocked.description"
+              tag="p"
+              class="text-sm leading-relaxed"
+              scope="global"
+            >
+              <template #locale>
+                <code class="font-mono font-medium">{{ workspaceDefaultLocale }}</code>
+              </template>
+            </i18n-t>
+            <ul class="space-y-1 text-xs">
+              <li
+                v-for="diag in materializationResult.diagnostics"
+                :key="diag.code + diag.path"
+              >
+                <span class="font-mono font-medium">[{{ diag.code }}]</span> {{ diag.path }}: {{ diagnosticText(diag) }}
+              </li>
+            </ul>
+          </div>
         </template>
       </UAlert>
     </div>

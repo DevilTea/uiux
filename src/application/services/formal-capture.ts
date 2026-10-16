@@ -15,6 +15,7 @@ import type { Diagnostic, JsonObject } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
 import type { KitBuildStatus } from '../ports/kit-build'
 import { captureHarnessScreenshot, openHarnessPreview, type HarnessPreview } from './capture-harness'
+import { missingDefaultLocaleError } from './default-locale-gate'
 import { readWorkspaceProductKitProvenance } from './product-kit-provenance'
 
 export type FormalContextCaptureResult = Readonly<{
@@ -157,6 +158,19 @@ export function createFormalCaptureService(
 				? 'Formal capture waits for the kit build: a build is running. Capture again once the build state is ready (uiux://product-kit).'
 				: 'Formal capture is refused while the last kit build has failed. Fix the kit project, then restart the build (restart_kit_build).'
 			const diagnostics: readonly Diagnostic[] = [{ code: 'capture.kit_build_not_ready', path: '/product-kit/build', message }]
+			return {
+				status: 'failed',
+				results: contexts.map(context => ({ context, status: 'failed', diagnostics })),
+				summary: { total: contexts.length, captured: 0, failed: contexts.length },
+				executedAt: new Date().toISOString(),
+			}
+		}
+
+		// Rule 01a115cd-b30b-706e-b8a2-46e62259156e: while the default Locale has no Locale file, every
+		// context is refused (no Locale stands in for the default), so no formal Evidence is produced.
+		const localeError = await missingDefaultLocaleError(persistence)
+		if (localeError) {
+			const diagnostics: readonly Diagnostic[] = [localeError]
 			return {
 				status: 'failed',
 				results: contexts.map(context => ({ context, status: 'failed', diagnostics })),

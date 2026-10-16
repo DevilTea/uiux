@@ -9,7 +9,7 @@ import type { ViewResource } from '../domain/views/schema'
 import type { I18nResource } from '../domain/i18n/schema'
 import { validateAdapterManifest, type AdapterManifest } from '../domain/adapters/schema'
 import { isAllowedThemeAttributeName } from '../domain/product-kit/theme-attributes'
-import { createTranslationRuntime, type TranslationRuntime } from '../i18n'
+import { createTranslationRuntime, missingDefaultLocaleDiagnostic, type TranslationRuntime } from '../i18n'
 import {
 	createAdapterWidgetSystem,
 	createRootShellPlugin,
@@ -49,6 +49,11 @@ export type PreviewRuntimeStatus =
 	}>
 	| Readonly<{
 		status: 'invalid'
+		diagnostics: readonly Diagnostic[]
+	}>
+	/** A persistent Workspace configuration error keeps the Preview from rendering (the missing default-Locale file). */
+	| Readonly<{
+		status: 'blocked'
 		diagnostics: readonly Diagnostic[]
 	}>
 
@@ -146,18 +151,20 @@ export type DeclaredWidgetEvent = Readonly<{ name: string; description: string }
 export type DeclaredWidgetEvents = Readonly<Record<string, readonly DeclaredWidgetEvent[]>>
 
 /**
- * Chooses the translation runtime's default (fallback) locale: the Workspace
- * default locale when its resource is loaded, otherwise the requested locale.
- * Callers that do not know the Workspace default get the same fallback the
- * render context uses when no Workspace manifest is available.
+ * Chooses the translation runtime's default (fallback) locale: always the Workspace default locale
+ * when one is known. UIUX never substitutes another Locale for it (Rule
+ * 01a115cd-b24f-7bcd-acd8-6b00d0aceff2); a known default without its resource blocks the Preview
+ * instead (`mountPreviewRuntime`, Rule 01a115cd-b30b-706e-b8a2-46e62259156e). Callers that do not
+ * know the Workspace default get the same fallback the render context uses when no Workspace
+ * manifest is available, else the requested locale.
  */
 export function resolveTranslationFallbackLocale(
 	requestedLocale: string,
 	workspaceDefaultLocale: string | undefined,
 	resources: ReadonlyMap<string, unknown>,
 ): string {
-	const fallback = workspaceDefaultLocale || FALLBACK_LOCALE
-	if (resources.has(fallback)) return fallback
+	if (workspaceDefaultLocale) return workspaceDefaultLocale
+	if (resources.has(FALLBACK_LOCALE)) return FALLBACK_LOCALE
 	return requestedLocale
 }
 
@@ -322,6 +329,16 @@ export function createStandalonePreviewMount(input: Readonly<{
 			else {
 				for (const [k, v] of Object.entries(options.locales)) resourceMap.set(k, v)
 			}
+		}
+
+		// Rule 01a115cd-b30b-706e-b8a2-46e62259156e: while the Workspace default Locale has no Locale
+		// file, the Preview is blocked; it never renders with another Locale as the fallback.
+		if (options.defaultLocale && !resourceMap.has(options.defaultLocale)) {
+			options.onStatusChange?.({
+				status: 'blocked',
+				diagnostics: [missingDefaultLocaleDiagnostic(options.defaultLocale)],
+			})
+			return createNoopBridge()
 		}
 
 		function getTranslationRuntime(currentLocale: string): TranslationRuntime {
