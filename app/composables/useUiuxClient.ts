@@ -20,10 +20,10 @@ type PreviewAdaptersResponse =
 export function useUiuxClient() {
 	async function readResource<T>(kind: string, key: string): Promise<T | undefined> {
 		try {
-			// The Product Kit file (from schemaVersion 5) is read through its own route, which answers
+			// The Product Kit file is read through its own route, which answers
 			// the same `{ kind, key, resource, revision }` plus its resolution state.
 			if (kind === 'product-kit') return await $fetch<T>('/api/product-kit') as unknown as T
-			// The Access presets file (from schemaVersion 6) likewise has its own route, read over HTTP only.
+			// The Access presets file likewise has its own route, read over HTTP only.
 			if (kind === 'access-presets') return await $fetch<T>('/api/access-presets') as unknown as T
 			return await $fetch<T>(`/api/resources/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`) as unknown as T
 		}
@@ -74,7 +74,7 @@ export function useUiuxClient() {
 
 	/**
 	 * The formal Evidence with the current Product Kit provenance its freshness is judged against:
-	 * `productKit`, or `productKitUnavailable` when it cannot be computed; neither below schemaVersion 5.
+	 * `productKit`, or `productKitUnavailable` when it cannot be computed.
 	 */
 	async function listEvidenceForFreshness<T, P>(): Promise<Readonly<{ items: readonly T[]; productKit?: P; productKitUnavailable?: boolean }>> {
 		return await $fetch<{ items: T[]; productKit?: P; productKitUnavailable?: boolean }>('/api/evidence/list')

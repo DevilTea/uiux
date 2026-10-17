@@ -10,8 +10,8 @@ export type WorkspaceRead = Readonly<{
 	revision: string
 	diagnostics: readonly Diagnostic[]
 	resource: WorkspaceManifest
-	/** Schema-policy state of the opened manifest; `migration_required` blocks every mutation. */
-	inspection?: Readonly<{ state: 'current' | 'migration_required' | 'unsupported' | 'missing_manifest'; version?: number; targetVersion: number }>
+	/** Schema-policy state of the opened manifest; `unsupported` blocks every mutation. */
+	inspection?: Readonly<{ state: 'current' | 'unsupported' | 'missing_manifest'; version?: number; targetVersion: number }>
 }>
 
 export type ViewSummary = Readonly<{

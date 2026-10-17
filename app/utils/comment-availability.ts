@@ -7,7 +7,6 @@
  * Replies, resolve and reopen have their own rules; this is only about creating a thread.
  */
 export type CommentBlockCode =
-	| 'migration'
 	| 'unsupported'
 	| 'signed-out'
 	| 'key'
@@ -18,7 +17,7 @@ export type CommentBlockCode =
 	| 'stopped'
 
 export type CommentAvailabilityInput = Readonly<{
-	/** `workspace.inspection.state`: the server refuses every write until `uiux migrate`. */
+	/** `workspace.inspection.state`: the server refuses every write while it is `unsupported`. */
 	workspaceState?: string
 	/** A member is signed in to this Workbench. */
 	signedIn: boolean
@@ -38,7 +37,6 @@ export type CommentAvailabilityInput = Readonly<{
  * it targets the RootShell and never waits for the Preview to hit-test a Widget.
  */
 export function commentCreateBlock(input: CommentAvailabilityInput): CommentBlockCode | undefined {
-	if (input.workspaceState === 'migration_required') return 'migration'
 	if (input.workspaceState === 'unsupported') return 'unsupported'
 	if (!input.signedIn) return 'signed-out'
 	if (!input.canWriteReviews) return 'key'
@@ -60,7 +58,7 @@ export function commentToolBlock(input: CommentAvailabilityInput): CommentBlockC
 }
 
 /** Why a thread cannot be resolved: the Workspace, an Agent, or the missing `reviews.resolve`. */
-export type ResolveBlockCode = 'migration' | 'unsupported' | 'agent' | 'key'
+export type ResolveBlockCode = 'unsupported' | 'agent' | 'key'
 
 /**
  * Why the member cannot resolve, in the same order as `commentCreateBlock`: a write-blocked
@@ -69,7 +67,6 @@ export type ResolveBlockCode = 'migration' | 'unsupported' | 'agent' | 'key'
  * missing key. `undefined` when nothing blocks it.
  */
 export function resolveBlock(input: Readonly<{ workspaceState?: string; agent: boolean; holdsResolve: boolean }>): ResolveBlockCode | undefined {
-	if (input.workspaceState === 'migration_required') return 'migration'
 	if (input.workspaceState === 'unsupported') return 'unsupported'
 	if (input.agent) return 'agent'
 	if (!input.holdsResolve) return 'key'

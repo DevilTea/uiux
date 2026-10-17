@@ -4,9 +4,7 @@ import { BUILT_IN_ACCESS_PRESETS, isCatalogKey, isHumanOnlyKey } from './keys'
 /**
  * Member labels (Discussion #140, decision 5): a label names the Access preset whose key set
  * matches a member's keys, or says Custom. Labels are computed whenever the server answers and
- * never stored (Rule 01a11c09-c9be-736b-95a4-0b39d6f64cf0). Below `schemaVersion` 6 the
- * Workspace has no presets file, so the built-in presets label members (Rule
- * 01a11c09-cb79-744e-bbf6-ec38d6f159ba).
+ * never stored (Rule 01a11c09-c9be-736b-95a4-0b39d6f64cf0).
  */
 
 /** Clause 01a11c09-a49b-78c7-9304-7b8239f8a8cf: `{ preset: { id, name } }` or `{ custom: true }`. */

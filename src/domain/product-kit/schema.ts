@@ -9,8 +9,6 @@ import {
 import { isPortableAdapterModuleSpecifier, validateAdapterSelections, type WorkspaceAdapterSelection } from '../workspace/schema'
 import { themeAttributeNameProblem } from './theme-attributes'
 
-export { PRODUCT_KIT_SCHEMA_VERSION } from '../workspace/schema'
-
 /** Clause 01a11bb1-8e31-7b25-b6b8-da667b201670: the Product Kit file's path under the Workspace root, kind and key. */
 export const PRODUCT_KIT_FILENAME = 'product-kit.json'
 export const PRODUCT_KIT_RESOURCE_KIND = 'product-kit'

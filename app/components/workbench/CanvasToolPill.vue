@@ -19,7 +19,7 @@ const props = defineProps<{
 	active: CanvasToolId
 	/** Why every tool is unavailable (no live preview yet); undefined when they work. */
 	disabledReason?: string
-	/** Why new comments can't be started here (role, migration, phone…); undefined when they can. */
+	/** Why new comments can't be started here (role, unsupported schema, phone…); undefined when they can. */
 	commentDisabledReason?: string
 	/** Offers the Comment tool and "Comment on this View" (the canvas has a comments layer). */
 	comments?: boolean
@@ -124,7 +124,7 @@ function commentOnView(): void {
           @click="choose(tool.id, tool.blocked)"
         >
           {{ tool.label }}
-          <!-- A tool that can't be used here at all (role, migration, phone) shows no key to press. -->
+          <!-- A tool that can't be used here at all (role, unsupported schema, phone) shows no key to press. -->
           <UKbd
             v-if="keys && !(tool.blocked && !disabledReason)"
             :value="tool.kbd"

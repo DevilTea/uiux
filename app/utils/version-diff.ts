@@ -169,14 +169,6 @@ export function describeResourceDiff(diff: ResourceDiff): DescribedDiff {
 					...section('i18n', [...valueItem('defaultLocale', diff.defaultLocale), ...pointerItems(diff.i18nChanges, '/i18n')]),
 					...section('viewports', keyedItems(diff.viewports)),
 					...section('themes', keyedItems(diff.themes)),
-					...section('adapters', diff.adapters
-						? [
-								...diff.adapters.added.map(adapter => ({ op: 'added' as const, label: adapter.moduleSpecifier })),
-								...diff.adapters.removed.map(adapter => ({ op: 'removed' as const, label: adapter.moduleSpecifier })),
-								...diff.adapters.changed.map(adapter => ({ op: 'changed' as const, label: adapter.moduleSpecifier, changes: adapter.changes })),
-								...(diff.adapters.reordered ? [{ op: 'reordered' as const }] : []),
-							]
-						: pointerItems(diff.adaptersChanges, '/adapters')),
 					...section('other', pointerItems(diff.otherChanges)),
 				],
 			}

@@ -2,7 +2,7 @@
 import { computed, nextTick, ref } from 'vue'
 import { useI18n, useToast } from '#imports'
 import type { ProductKit } from '../../../src/domain/product-kit/schema'
-import { isPortableAdapterModuleSpecifier, type WorkspaceManifest } from '../../../src/domain/workspace/schema'
+import { isPortableAdapterModuleSpecifier } from '../../../src/domain/workspace/schema'
 import type { Diagnostic } from '../../composables/workbench-types'
 import type { SettingsSection } from '../../composables/useSettingsSection'
 import {
@@ -40,22 +40,18 @@ export type AdapterResolution = Readonly<{
  * guidance for an invalid set. The Workbench never runs a package manager (Part 8 10a); it
  * prints the command to run. Order is changed by dragging or with the Move up / Move down buttons.
  *
- * Below `schemaVersion` 5, adding, removing, reordering or re-pointing an Adapter also needs
- * `product-kit.compose` (Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa): without it (`canCompose`)
- * only an Adapter's config stays editable, and the section names the missing key.
- *
- * From `schemaVersion` 5 (`productKit`) the selection is the Product Kit file's: the page saves it
- * through the Product Kit operations, `product-kit.compose` still gates the selection itself, and
- * a `./` specifier names a module in the Workspace's `kit/` directory.
+ * The selection is the Product Kit file's: the page saves it through the Product Kit operations.
+ * Adding, removing, reordering or re-pointing an Adapter needs `product-kit.compose` (Clause
+ * 01a11bb1-b35a-7e69-bba5-978e3f47c4fa): without it (`canCompose`) only an Adapter's config stays
+ * editable, and the section names the missing key. A `./` specifier names a module in the
+ * Workspace's `kit/` directory.
  */
 const props = defineProps<{
-	section: SettingsSection<AdapterRow[], WorkspaceManifest> | SettingsSection<AdapterRow[], ProductKit>
+	section: SettingsSection<AdapterRow[], ProductKit>
 	canEdit: boolean
 	canCompose: boolean
 	resolution?: AdapterResolution
 	resolutionFailed?: boolean
-	/** The Workspace keeps its Adapters in the Product Kit file (`schemaVersion` 5 or later). */
-	productKit?: boolean
 	/** The key the signed-in member lacks to edit this section, when it is not the page's own. */
 	missingKey?: string
 	/** The last save wrote the specifiers but not their `config`, which the draft still holds. */
@@ -74,7 +70,7 @@ function specifierError(row: AdapterRow): string | undefined {
 	if (!showIssues.value && row.savedIndex !== undefined) return undefined
 	const value = row.moduleSpecifier.trim()
 	if (!value) return showIssues.value ? t('adapters.validation.required') : undefined
-	return isPortableAdapterModuleSpecifier(value) ? undefined : t(props.productKit ? 'adapters.validation.kitSpecifier' : 'adapters.validation.specifier')
+	return isPortableAdapterModuleSpecifier(value) ? undefined : t('adapters.validation.kitSpecifier')
 }
 
 function configError(row: AdapterRow): string | undefined {
@@ -122,8 +118,8 @@ const repairs = computed(() => {
 		const summary = props.resolution?.summaries.find(item => item.index === index)
 		const found = summary ? adapterRepair(diagnostic.code, summary.moduleSpecifier) : undefined
 		if (!found) continue
-		// From schemaVersion 5 a ./ specifier resolves from kit/.
-		const repair: AdapterRepair = found.kind === 'file' && props.productKit ? { kind: 'file', path: `kit/${found.path.slice(2)}` } : found
+		// A ./ specifier resolves from kit/.
+		const repair: AdapterRepair = found.kind === 'file' ? { kind: 'file', path: `kit/${found.path.slice(2)}` } : found
 		const key = repair.kind === 'command' ? repair.command : repair.path
 		if (!list.some(item => item.key === key)) list.push({ key, repair })
 	}
@@ -208,7 +204,7 @@ defineExpose({ save })
           {{ t('productKit.adapters') }}
         </h2>
         <p class="text-sm text-muted">
-          {{ t(productKit ? 'adapters.kitDescription' : 'adapters.description') }}
+          {{ t('adapters.kitDescription') }}
         </p>
         <p
           v-if="missingKey"

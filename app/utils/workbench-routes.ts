@@ -56,8 +56,7 @@ export const ADAPTERS_HASH = '#product-kit-adapters'
 
 /**
  * Adapters: the Overview section of the Product Kit page (Rule 01a116f0-8a46-76bc-a29f-affaa302c44c),
- * scrolled to the Adapters block. `/workspace/adapters` and `/workspace/settings?section=adapters`
- * redirect here (Clause 01a116f0-9739-754b-b024-346b1c16a866).
+ * scrolled to the Adapters block.
  */
 export const ADAPTERS_LOCATION = { path: PRODUCT_KIT_PATH, query: { section: 'overview' }, hash: ADAPTERS_HASH } as const
 

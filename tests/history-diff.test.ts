@@ -213,7 +213,6 @@ describe('Workspace settings diff (Rules 01a11a5e-102f-7caa-b63f-d7c6fb5189c0 an
 	const manifest = (overrides: Json = {}): Json => ({
 		schemaVersion: 4,
 		i18n: { defaultLocale: 'en-US' },
-		adapters: [{ moduleSpecifier: './adapters/a.ts' }, { moduleSpecifier: '@x/b', config: { dense: false } }],
 		viewports: { desktop: { label: 'Desktop', dimensions: { width: 1280, height: 800 } } },
 		themes: { light: { label: 'Light' }, dark: { label: 'Dark' } },
 		...overrides,
@@ -233,15 +232,6 @@ describe('Workspace settings diff (Rules 01a11a5e-102f-7caa-b63f-d7c6fb5189c0 an
 				changed: [{ key: 'desktop', changes: [{ op: 'replace', path: '/dimensions/height', before: 800, after: 900 }, { op: 'replace', path: '/dimensions/width', before: 1280, after: 1440 }] }],
 			},
 			themes: { added: [], removed: [{ key: 'dark', value: { label: 'Dark' } }], changed: [] },
-		}],
-		['Adapters by member', manifest({ adapters: [{ moduleSpecifier: '@x/b', config: { dense: true } }, { moduleSpecifier: './adapters/a.ts' }, { moduleSpecifier: '@y/c' }] }), {
-			type: 'workspace',
-			adapters: {
-				added: [{ moduleSpecifier: '@y/c', adapter: { moduleSpecifier: '@y/c' } }],
-				removed: [],
-				changed: [{ moduleSpecifier: '@x/b', changes: [{ op: 'replace', path: '/config/dense', before: false, after: true }] }],
-				reordered: true,
-			},
 		}],
 		['other members structurally, never schemaVersion', manifest({ schemaVersion: 5, extra: 1 }), { type: 'workspace', otherChanges: [{ op: 'add', path: '/extra', after: 1 }] }],
 		['a member of another shape structurally, never schemaVersion', manifest({ schemaVersion: 2, themes: ['dark'] }), {

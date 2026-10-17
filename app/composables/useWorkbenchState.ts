@@ -29,15 +29,12 @@ export function createWorkbenchState() {
 	const access = useAccess()
 	const workspace = ref<WorkspaceRead>()
 	/**
-	 * The server refuses every canonical write until an older Workspace schema is migrated
-	 * (`uiux migrate`, an explicit operator act), so authoring and review controls step back too.
+	 * The server refuses every canonical write while the Workspace's `schemaVersion` is not the one
+	 * this UIUX reads (`unsupported`), so authoring and review controls step back too.
 	 */
-	const writeBlocked = computed(() => {
-		const state = workspace.value?.inspection?.state
-		return state === 'migration_required' || state === 'unsupported'
-	})
+	const writeBlocked = computed(() => workspace.value?.inspection?.state === 'unsupported')
 	/**
-	 * Whether the Workbench offers a write that needs `key`: the Workspace is live and migrated, and
+	 * Whether the Workbench offers a write that needs `key`: the Workspace is live and supported, and
 	 * the signed-in member holds the key (Discussion #140, decision 12: each page and action checks
 	 * its own key). Device tiers narrow this further where each surface decides.
 	 */

@@ -61,7 +61,6 @@ import {
 	authorizeOperation,
 	authorizeRestore,
 	effectiveKeys,
-	manifestAdapterChangeKeys,
 	productKitChangeKeys,
 	type AccessOperation,
 	type ScopeDenied,
@@ -367,19 +366,7 @@ export function createScopedWorkspaceSession(
 	}
 
 	/**
-	 * Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa: below `schemaVersion` 5 a settings change or a
-	 * `workspace` restore that adds, removes, reorders or re-points an `adapters` entry also needs
-	 * `product-kit.compose`. The services call this guard after their revision check, on the
-	 * manifest the compare-and-swap replaces, so the keys are those of the change actually written.
-	 */
-	function adapterChangeRefusal(current: unknown, next: unknown, authorize: (keys: readonly PermissionKey[]) => ScopeDenied | undefined, key: string): AccessRefusal | undefined {
-		// An unknown schema version counts as below 5, so the check fails closed.
-		const denied = authorize(manifestAdapterChangeKeys(current, next))
-		return denied ? refusalFromScope(key, denied) : undefined
-	}
-
-	/**
-	 * Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa, from `schemaVersion` 5: a Product Kit operation
+	 * Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa: a Product Kit operation
 	 * needs its own key and the keys of what its change touches (`productKitChangeKeys`). The service
 	 * calls this guard after its revision check, on the file the compare-and-swap replaces, so the
 	 * keys are those of the change actually written.
@@ -528,12 +515,9 @@ export function createScopedWorkspaceSession(
 			if (denied) return refusalFromScope(key || 'history', denied)
 			const target = isValidLeaseAddress({ kind, key }) ? { kind: kind as LockableKind, key } : undefined
 			const versionId: unknown = command.versionId
-			// #140 owner ruling 2026-10-10, 1: a `workspace` restore that changes `adapters` needs `product-kit.compose` too.
 			// Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa: a `product-kit` restore needs the keys of what it
 			// changes, so one that changes `designSystems` or the Adapter specifiers needs `product-kit.compose`.
 			const guard: RestoreGuard<AccessRefusal> = (change) => {
-				if (change.kind === 'workspace')
-					return adapterChangeRefusal(change.current, change.next, keys => authorizeRestore(principal, change.kind, keys), key || 'history')
 				if (change.kind === 'product-kit') {
 					const denied = authorizeRestore(principal, change.kind, productKitChangeKeys(change.current, change.next))
 					return denied ? refusalFromScope(key || 'history', denied) : undefined
@@ -546,8 +530,7 @@ export function createScopedWorkspaceSession(
 		createView: command => write('createView', command.id, { kind: 'view', key: command.id }, () => app.createView(command)),
 		updateViewSpec: command => write('updateViewSpec', command.key, { kind: 'view', key: command.key }, () => app.updateViewSpec(command)),
 		updateViewStructure: command => write('updateViewStructure', command.key, { kind: 'view', key: command.key }, () => app.updateViewStructure(command)),
-		updateWorkspaceSettings: command => write('updateWorkspaceSettings', 'workspace', { kind: 'workspace', key: 'workspace' }, () => app.updateWorkspaceSettings(command, change =>
-			adapterChangeRefusal(change.current, change.next, keys => authorizeOperation(principal, 'updateWorkspaceSettings', keys), 'workspace'))),
+		updateWorkspaceSettings: command => write('updateWorkspaceSettings', 'workspace', { kind: 'workspace', key: 'workspace' }, () => app.updateWorkspaceSettings(command)),
 		async readProductKit() { assert('readProductKit'); return app.readProductKit() },
 		composeProductKit: command => write('composeProductKit', PRODUCT_KIT_KEY, PRODUCT_KIT_LEASE, () => app.composeProductKit(command, productKitGuard('composeProductKit'))),
 		updateProductKit: command => write('updateProductKit', PRODUCT_KIT_KEY, PRODUCT_KIT_LEASE, () => app.updateProductKit(command, productKitGuard('updateProductKit'))),

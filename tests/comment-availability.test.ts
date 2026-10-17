@@ -16,8 +16,7 @@ describe('comment availability (review feedback 8dd59d25)', () => {
 	})
 
 	it('names each blocking state, in the order a person can fix it', () => {
-		expect(commentCreateBlock({ ...READY, workspaceState: 'migration_required', canWriteReviews: false })).toBe('migration')
-		expect(commentCreateBlock({ ...READY, workspaceState: 'unsupported' })).toBe('unsupported')
+		expect(commentCreateBlock({ ...READY, workspaceState: 'unsupported', canWriteReviews: false })).toBe('unsupported')
 		expect(commentCreateBlock({ ...READY, signedIn: false, canWriteReviews: false })).toBe('signed-out')
 		expect(commentCreateBlock({ ...READY, canWriteReviews: false, handset: true })).toBe('key')
 		expect(commentCreateBlock({ ...READY, handset: true })).toBe('handset')
@@ -39,9 +38,7 @@ describe('why a thread cannot be resolved (PR #190 review note N1)', () => {
 	const t = (key: string, params?: Record<string, unknown>) => params ? `${key} ${JSON.stringify(params)}` : key
 
 	it('tells a holder of `reviews.resolve` on a write-blocked Workspace why, not that it lacks the key', () => {
-		expect(resolveBlock({ workspaceState: 'migration_required', agent: false, holdsResolve: true })).toBe('migration')
 		expect(resolveBlock({ workspaceState: 'unsupported', agent: false, holdsResolve: true })).toBe('unsupported')
-		expect(resolveBlockMessage('migration', t)).toBe('commentBlock.migration')
 		expect(resolveBlockMessage('unsupported', t)).toBe('commentBlock.unsupported')
 	})
 

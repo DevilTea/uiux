@@ -18,12 +18,10 @@ import {
 import { createLeaseManager, LOCKABLE_KINDS } from '../src/application/access/leases'
 import {
 	ACCESS_OPERATIONS,
-	adapterChangeKeys,
 	authorizeLeaseAcquire,
 	authorizeOperation,
 	authorizeRestore,
 	effectiveKeys,
-	manifestAdapterChangeKeys,
 	type AccessOperation,
 	type ScopeDenied,
 } from '../src/application/access/policy'
@@ -181,8 +179,6 @@ const PARITY_CASES: readonly ParityCase[] = [
 	...LOCKABLE_KINDS.map(kind => ({ label: `acquireLeases(${kind})`, operation: 'acquireLeases' as const, decide: (principal: Principal) => authorizeLeaseAcquire(principal, [kind]) })),
 	{ label: 'acquireLeases(every kind)', operation: 'acquireLeases', decide: principal => authorizeLeaseAcquire(principal, LOCKABLE_KINDS) },
 	...RESTORABLE_KINDS.map(kind => ({ label: `restoreResourceVersion(${kind})`, operation: 'restoreResourceVersion' as const, decide: (principal: Principal) => authorizeRestore(principal, kind) })),
-	{ label: 'restoreResourceVersion(workspace, adapters changed)', operation: 'restoreResourceVersion', decide: principal => authorizeRestore(principal, 'workspace', adapterChangeKeys(4, [], [{ moduleSpecifier: '@acme/adapter' }])) },
-	{ label: 'updateWorkspaceSettings(adapters changed)', operation: 'updateWorkspaceSettings', decide: principal => authorizeOperation(principal, 'updateWorkspaceSettings', adapterChangeKeys(4, [], [{ moduleSpecifier: '@acme/adapter' }])) },
 ]
 
 /**
@@ -210,8 +206,8 @@ describe('parity: role-derived keys decide as the role matrix did', () => {
 				if ((denied === undefined) !== before) changed.push(`${id}: ${before ? 'allowed' : 'refused'} → ${denied ? 'refused' : 'allowed'}`)
 			}
 		}
-		// 53 operations, 7 lease acquires, 7 restores and 1 settings adapters change, for 16 members and the system credential.
-		expect(compared).toBe(68 * 17)
+		// 53 operations, 7 lease acquires and 6 restores, for 16 members and the system credential.
+		expect(compared).toBe(66 * 17)
 		expect(changed.sort()).toEqual([...INTENDED_CHANGES].sort())
 	})
 
@@ -412,36 +408,6 @@ describe('authorization by permission keys', () => {
 		expect(authorizeLeaseAcquire(CAPTURE, ['view'])).toMatchObject({ code: 'auth.scope_denied' })
 	})
 
-	it('needs product-kit.compose for an adapters change below schemaVersion 5 (Clause 01a11bb1-b35a)', () => {
-		const a = { moduleSpecifier: '@acme/a', config: { dense: true } }
-		const b = { moduleSpecifier: './adapters/b.ts' }
-		expect(adapterChangeKeys(4, [a, b], [a, b])).toEqual([])
-		const reconfigured = { ...a, config: { dense: false } }
-		expect(adapterChangeKeys(4, [a, b], [reconfigured, b])).toEqual([])
-		expect(adapterChangeKeys(4, [a], [a, b])).toEqual(['product-kit.compose'])
-		expect(adapterChangeKeys(4, [a, b], [a])).toEqual(['product-kit.compose'])
-		expect(adapterChangeKeys(4, [a, b], [b, a])).toEqual(['product-kit.compose'])
-		expect(adapterChangeKeys(4, [a], [{ moduleSpecifier: '@acme/c' }])).toEqual(['product-kit.compose'])
-		expect(adapterChangeKeys(5, [a], [b])).toEqual([])
-	})
-
-	it('treats a missing or non-numeric manifest schemaVersion as below 5, so an adapters change needs product-kit.compose', () => {
-		const before = { adapters: [{ moduleSpecifier: '@acme/a' }] }
-		const after = { adapters: [{ moduleSpecifier: '@acme/b' }] }
-		for (const schemaVersion of [undefined, null, '5', '6', 5.5, Number.NaN, true, {}, [5]]) {
-			const label = String(JSON.stringify(schemaVersion))
-			expect(manifestAdapterChangeKeys({ ...before, schemaVersion }, { ...after, schemaVersion }), label).toEqual(['product-kit.compose'])
-		}
-		expect(manifestAdapterChangeKeys(before, after)).toEqual(['product-kit.compose'])
-		expect(manifestAdapterChangeKeys(undefined, after)).toEqual(['product-kit.compose'])
-		// The written manifest's version decides; the replaced one's stands in only when it has none.
-		expect(manifestAdapterChangeKeys({ ...before, schemaVersion: 5 }, { ...after, schemaVersion: '5' })).toEqual(['product-kit.compose'])
-		expect(manifestAdapterChangeKeys({ ...before, schemaVersion: 4 }, { ...after, schemaVersion: 5 })).toEqual([])
-		expect(manifestAdapterChangeKeys({ ...before, schemaVersion: 5 }, after)).toEqual([])
-		// A non-array adapters list is empty, so adding a first entry is a change.
-		expect(manifestAdapterChangeKeys({ adapters: 'none' }, after)).toEqual(['product-kit.compose'])
-		expect(manifestAdapterChangeKeys({ ...before, schemaVersion: 4 }, { ...before, schemaVersion: 4 })).toEqual([])
-	})
 })
 
 describe('authorization in the shared application layer', () => {

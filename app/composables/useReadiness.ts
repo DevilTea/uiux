@@ -69,7 +69,7 @@ type CaptureResponse = Readonly<{
 const evidenceItems = shallowRef<readonly EvidenceItem[]>([])
 /**
  * The current Product Kit provenance, read with the Evidence list: `productKit`, or
- * `productKitUnavailable` when it cannot be computed; neither below schemaVersion 5.
+ * `productKitUnavailable` when it cannot be computed.
  */
 const currentProductKit = shallowRef<Readonly<{ productKit?: ProductKitProvenance; productKitUnavailable?: boolean }>>({})
 const evidenceLoaded = shallowRef(false)
@@ -219,16 +219,16 @@ export function useReadiness() {
 			return empty
 		}
 		// Until the Workspace is read, its schema state is unknown: wait (the signature changes once it
-		// loads, so callers ask again) rather than risk a request an older schema would refuse.
+		// loads, so callers ask again) rather than risk a request an unsupported schema would refuse.
 		if (!workspace.value) {
 			const pending: AssessmentEntry = { status: 'loading', signature: expected }
 			setAssessment(key, pending)
 			return pending
 		}
-		// The server refuses Handoff for an older schema (`422 workspace.migration_required`): say why
-		// instead of sending a request that can only fail.
+		// The server refuses Handoff for an unsupported schema (`422 workspace.schema_unsupported`): say
+		// why instead of sending a request that can only fail.
 		if (writeBlocked.value) {
-			const blocked: AssessmentEntry = { status: 'failed', signature: expected, error: { message: t('handoff.migrationBlocked'), diagnostics: [] } }
+			const blocked: AssessmentEntry = { status: 'failed', signature: expected, error: { message: t('handoff.unsupportedBlocked'), diagnostics: [] } }
 			setAssessment(key, blocked)
 			return blocked
 		}

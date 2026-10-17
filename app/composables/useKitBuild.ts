@@ -5,8 +5,7 @@ import type { KitBuildStatus } from '../../src/application/ports/kit-build'
 /**
  * The kit build state (Clause 01a11bb1-8856-737f-945c-e44c596f7782), as `GET /api/product-kit/build`
  * returns it (`workspace.read`). No `/api/events` stream exists yet, so the Workbench polls it while
- * the shell is mounted. A Workspace below `schemaVersion` 5 (404) or a member without the key reads
- * as `none`.
+ * the shell is mounted. A failed read, such as a member without the key, reads as `none`.
  */
 const build = shallowRef<KitBuildStatus>({ state: 'none' })
 let timer: ReturnType<typeof setInterval> | undefined

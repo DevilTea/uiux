@@ -472,8 +472,7 @@ function uniqueNickname(file: AccessFile, base: string): string {
  * The access option of the bootstrap banner's command for adding an Agent (Rule
  * 01a11c09-b9a6-70a6-a9f6-481c8c3f7386): an existing preset, the one with `id` `editor` when there
  * is one, or `--keys` with the built-in Editor keys an Agent can hold when the Workspace has no
- * preset. The presets are the Workspace's (`readWorkspaceAccessPresets`): below `schemaVersion` 6
- * the built-in ones.
+ * preset. The presets are the Workspace's (`readWorkspaceAccessPresets`).
  */
 export function agentAccessOption(presets: readonly Readonly<{ id: string; name: string }>[]): string {
 	const preset = presets.find(item => item.id === 'editor') ?? presets[0]

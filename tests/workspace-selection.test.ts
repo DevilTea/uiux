@@ -120,6 +120,19 @@ describe('checkWorkspaceSelection', () => {
 		}
 	})
 
+	it('refuses the directory above a root at another schemaVersion with that refusal, not as the root\'s parent', async () => {
+		for (const version of [4, 5]) {
+			const { parent, root } = await workspace(version)
+			const refused = checkWorkspaceSelection(parent, POLICY)
+			expect(refused, String(version)).toMatchObject({ ok: false, reason: 'unsupported_schema', message: expect.stringContaining(join(root, 'workspace.json')) })
+			expectSchemaRefusal(refused.ok ? '' : refused.message, version)
+		}
+		const x = await oldBuildWorkspace()
+		const refused = checkWorkspaceSelection(x, POLICY)
+		expect(refused).toMatchObject({ ok: false, reason: 'unsupported_schema' })
+		expectSchemaRefusal(refused.ok ? '' : refused.message, 4)
+	})
+
 	it('refuses each other selection with a reason a caller can act on', async () => {
 		const foreign = await makeRoot()
 		await writeFile(join(foreign, 'workspace.json'), '{"version":2,"projects":{}}\n')
@@ -223,9 +236,10 @@ describe('entry points refuse a Workspace that is not current with exit status 2
 			for (const command of [['member', 'list'], ['token', 'list'], ['session', 'list'], ['invite', 'create', '--member', 'someone']])
 				expect(await run([...command, '--workspace', selected]), `${name}: ${command.join(' ')}`).toBe(2)
 			expect(await run(['access', 'copy', '--from', current, '--workspace', selected]), name).toBe(2)
-			// A copy from a Workspace root this UIUX cannot read is refused too; the target is current. (A
-			// directory above a root is refused as such, naming the root, since --from names a path literally.)
-			if (version !== undefined && selected.endsWith('.uiux')) expect(await run(['access', 'copy', '--from', selected, '--workspace', current]), name).toBe(2)
+			// A copy from a Workspace this UIUX cannot read is refused too, naming its version, whether --from
+			// names the root or the directory above it, such as an old build's Workspace (issue #232); the
+			// target is current.
+			if (version !== undefined) expect(await run(['access', 'copy', '--from', selected, '--workspace', current]), name).toBe(2)
 			expect(await tree(scope), name).toEqual(before)
 			expect(await tree(current), name).toEqual(currentBefore)
 			expect(await exists(home), name).toBe(false)

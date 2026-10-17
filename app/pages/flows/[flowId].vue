@@ -38,11 +38,10 @@ provideFlowEditor(editor)
 const { draft, saved, dirty, problems, saveBlockers, playBlockedReason, checkingReferences, conflict, saveError, locked, saving, loading, notFound, loadError, lossless } = editor
 
 const access = useAccess()
-const migrationRequired = computed(() => workbench.workspace.value?.inspection?.state === 'migration_required')
 /** Someone else (an agent) holds this Flow's edit lease: read-only beside the Lock badge (identity decision 11). */
 const lockedByOther = computed(() => !!access.lockFor('flow', flowId.value))
-// Editing needs `flows.write`, a desktop window and no foreign lease.
-const canEdit = computed(() => workbench.canWrite('flows.write') && !lockedByOther.value && isDesktop.value && lossless.value && !migrationRequired.value)
+// Editing needs `flows.write` on a supported Workspace, a desktop window and no foreign lease.
+const canEdit = computed(() => workbench.canWrite('flows.write') && !lockedByOther.value && isDesktop.value && lossless.value)
 const showEditOnDesktop = computed(() => workbench.canWrite('flows.write') && !isDesktop.value)
 
 // ---------------------------------------------------------------------------------------------

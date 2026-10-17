@@ -227,7 +227,7 @@ export type ProductKitAdapterWrites = Readonly<{
 }>
 
 /**
- * The Product Kit operations that store an Adapter selection from `schemaVersion` 5: `compose`
+ * The Product Kit operations that store an Adapter selection: `compose`
  * when the specifiers or their order change, then `update` when a `config` differs from what
  * `compose` leaves, which keeps the `config` of the entry with the same specifier at the same
  * occurrence and gives an added entry none (Clause 01a11bb1-b15c-734e-8968-c378db1444ca). Every

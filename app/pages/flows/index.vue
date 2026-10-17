@@ -16,7 +16,7 @@ const { t } = useI18n()
 const workbench = useWorkbench()
 const { flows, loading } = workbench
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
-const canCreate = computed(() => workbench.canWrite('flows.write') && isDesktop.value && workbench.workspace.value?.inspection?.state !== 'migration_required')
+const canCreate = computed(() => workbench.canWrite('flows.write') && isDesktop.value)
 const createOpen = ref(false)
 
 function onCreated(flowId: string): void {
