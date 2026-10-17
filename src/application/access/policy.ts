@@ -70,7 +70,6 @@ export const ACCESS_OPERATIONS = {
 	createView: { requiredKeys: ['views.write'] },
 	updateViewSpec: { requiredKeys: ['views.write'] },
 	updateViewStructure: { requiredKeys: ['views.write'] },
-	// Below `schemaVersion` 5 a change to the `adapters` list also needs `product-kit.compose`: see `adapterChangeKeys`.
 	updateWorkspaceSettings: { requiredKeys: ['settings.write'] },
 	createLocale: { requiredKeys: ['locales.write'] },
 	updateLocale: { requiredKeys: ['locales.write'] },
@@ -190,7 +189,7 @@ function refuse(message: string): ScopeDenied {
  * Rule 01a11c09-c648-71be-a550-2ecabf12f5d0: a restore needs `history.restore` and the restored
  * kind's write key, so `history.restore` never stands in for a missing write key. A kind with no
  * write key is refused. `additionalKeys` are keys the restore's result needs, such as
- * `product-kit.compose` for an `adapters` change (`adapterChangeKeys`).
+ * `product-kit.compose` for a Product Kit change to its Adapter list (`productKitChangeKeys`).
  */
 export function authorizeRestore(principal: Principal, kind: string, additionalKeys: readonly PermissionKey[] = []): ScopeDenied | undefined {
 	const writeKey = writeKeyForKind(kind)
@@ -210,39 +209,6 @@ export function authorizeLeaseAcquire(principal: Principal, kinds: readonly stri
 		keys.push(writeKey)
 	}
 	return authorizeOperation(principal, 'acquireLeases', keys)
-}
-
-/** The `schemaVersion` from which the `adapters` list leaves the manifest for the Product Kit file. */
-const PRODUCT_KIT_SCHEMA_VERSION = 5
-
-/**
- * Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa, below `schemaVersion` 5: an
- * `update_workspace_settings` that adds, removes, reorders or re-points an `adapters` entry also
- * needs `product-kit.compose`. A change to an entry's `config` alone is not one.
- */
-export function adapterChangeKeys(
-	schemaVersion: number,
-	current: readonly Readonly<{ moduleSpecifier: string }>[],
-	next: readonly Readonly<{ moduleSpecifier: string }>[],
-): readonly PermissionKey[] {
-	if (schemaVersion >= PRODUCT_KIT_SCHEMA_VERSION) return []
-	const same = current.length === next.length && current.every((entry, index) => entry.moduleSpecifier === next[index]!.moduleSpecifier)
-	return same ? [] : ['product-kit.compose']
-}
-
-/**
- * `adapterChangeKeys` for two raw manifests: the one a write replaces and the one it writes. The
- * schema version is the written manifest's, else the replaced one's; a missing or non-integer
- * version counts as below 5, so the check fails closed. A missing or non-array `adapters` is an
- * empty list.
- */
-export function manifestAdapterChangeKeys(current: unknown, next: unknown): readonly PermissionKey[] {
-	const record = (value: unknown): Readonly<Record<string, unknown>> => typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
-	const specifiers = (value: unknown) => Array.isArray(value)
-		? value.map(entry => ({ moduleSpecifier: String(record(entry).moduleSpecifier) }))
-		: []
-	const schemaVersion = record(next).schemaVersion ?? record(current).schemaVersion
-	return adapterChangeKeys(Number.isInteger(schemaVersion) ? schemaVersion as number : 0, specifiers(record(current).adapters), specifiers(record(next).adapters))
 }
 
 /** The Product Kit members whose change needs `product-kit.write` besides Adapter configuration. */
