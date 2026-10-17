@@ -133,7 +133,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 /**
  * The as-written rule for a `./` specifier resolved from the kit project (Clause
- * 01a115cd-d109-76d3-9622-85d0080c60b6, from `schemaVersion` 5): it names a path inside
+ * 01a115cd-d109-76d3-9622-85d0080c60b6): it names a path inside
  * `<codeDirectoryName>/` and outside its `node_modules/`. Returns the problem, or `undefined`.
  * Shared by Adapter resolution and the Product Kit authoring operations, which apply it before
  * storing a specifier; resolution also checks the real path the specifier resolves to.

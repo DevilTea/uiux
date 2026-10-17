@@ -27,7 +27,7 @@ import { createHistoryStoreFactory, type HistoryStores } from '../src/server/his
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { STORED_CONTENT_SECURITY_POLICY } from '../src/server/stored-content-headers'
 import { bearer, provisionToken, scoped, sessionCookieFor, testMember } from './support/access'
-import { LEGACY_LAYOUT, layoutForSchemaVersion, V5_LAYOUT } from '../src/persistence/paths'
+import { V5_LAYOUT } from '../src/persistence/paths'
 import { createCurrentWorkspace, writeCurrentWorkspace } from './support/workspace-layout'
 
 /**
@@ -244,19 +244,13 @@ describe('version reads for Preview across schema versions', () => {
 	}
 
 	/**
-	 * Records the Workspace's files, as `edit` changes them, as an autosave under `workspaceSchemaVersion`,
-	 * in that version's layout: below 5 the manifest is in `.uiux/` and there is no Product Kit file. The
-	 * files in `drop` have no stored blob.
+	 * Records the Workspace's files, as `edit` changes them, as an autosave under `workspaceSchemaVersion`.
+	 * The files in `drop` have no stored blob.
 	 */
 	async function record(ctx: Context, workspaceSchemaVersion: number, edit: (snapshot: Map<string, Uint8Array>) => void, drop: readonly string[] = []): Promise<HostVersionRecord> {
 		const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
-		const layout = layoutForSchemaVersion(workspaceSchemaVersion)
-		if (layout === LEGACY_LAYOUT) {
-			snapshot.delete(V5_LAYOUT.manifestPath)
-			snapshot.delete(V5_LAYOUT.productKitPath!)
-		}
 		edit(snapshot)
-		const built = versionResourcesFromSnapshot(snapshot, layout)
+		const built = versionResourcesFromSnapshot(snapshot, V5_LAYOUT)
 		const files = new Map(built.resources.flatMap(resource => Object.entries(resource.files)))
 		const dropped = new Set(drop.map(path => files.get(path)!))
 		for (const [digest, bytes] of built.blobs) if (!dropped.has(digest)) await ctx.stores.host.putBlob(bytes)
@@ -266,13 +260,16 @@ describe('version reads for Preview across schema versions', () => {
 		return version
 	}
 
-	it('refuses a version recorded under an unrecognized schemaVersion with workspace.schema_unsupported (422)', async () => {
+	it('refuses a version recorded under an older or newer schemaVersion with workspace.schema_unsupported (422)', async () => {
 		const ctx = await workspace()
-		const future = await record(ctx, 99, snapshot => snapshot.set(V5_LAYOUT.manifestPath, canonicalJsonBytes({ ...MANIFEST, schemaVersion: 99 })))
-		for (const [kind, key] of [['view', VIEW_ID], ['workspace', 'workspace']] as const) {
-			const result = await readVersionResourceForHttp(scoped(ctx.app, VIEWER), future.id, kind, key)
-			expect(result.status).toBe(422)
-			expect(result.body).toMatchObject({ status: 'blocked', code: 'workspace.schema_unsupported', diagnostics: [{ path: '/id' }] })
+		for (const schemaVersion of [5, 99]) {
+			const other = await record(ctx, schemaVersion, snapshot => snapshot.set(V5_LAYOUT.manifestPath, canonicalJsonBytes({ ...MANIFEST, schemaVersion })))
+			for (const [kind, key] of [['view', VIEW_ID], ['workspace', 'workspace']] as const) {
+				const result = await readVersionResourceForHttp(scoped(ctx.app, VIEWER), other.id, kind, key)
+				expect(result.status).toBe(422)
+				expect(result.body).toMatchObject({ status: 'blocked', code: 'workspace.schema_unsupported', diagnostics: [{ path: '/id' }] })
+				expect((result.body as { message: string }).message).toContain(`schemaVersion ${schemaVersion}`)
+			}
 		}
 	})
 })

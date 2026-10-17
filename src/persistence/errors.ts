@@ -14,10 +14,7 @@ export type PersistenceErrorCode =
 	| 'persistence.asset_shape_invalid'
 	| 'persistence.artifact_corrupt'
 	| 'workspace.manifest_missing'
-	| 'workspace.migration_required'
 	| 'workspace.schema_unsupported'
-	| 'workspace.migration_unavailable'
-	| 'workspace.migration_failed'
 
 export class PersistenceError extends Error {
 	readonly code: PersistenceErrorCode

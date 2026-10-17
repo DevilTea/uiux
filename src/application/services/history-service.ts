@@ -8,7 +8,7 @@ import { HostHistoryError } from '../../persistence/history/host-store'
 import { compareVersionOrder } from '../../persistence/history/order'
 import { writeSnapshotCheckpointUnlocked } from '../../persistence/history/snapshot-checkpoint'
 import { mergeTimeline, pageTimeline, readMergedTimeline, TimelineCursorError, type MergedTimeline, type TimelineVersion } from '../../persistence/history/timeline'
-import { createHistoryDiffService, type HistoryDiffService, type HistoryStoreSource } from './history-diff'
+import type { HistoryStoreSource } from './history-diff'
 import type { HistoryRecorder } from './history-recorder'
 
 /**
@@ -43,8 +43,7 @@ export type CheckpointDeleted = Readonly<{ status: 'deleted'; versionId: string 
  * `parent` is the version's predecessor on the merged timeline (Rule
  * 01a11e0d-d550-78e4-9787-f0023bbc1b93), `null` for the first version, whatever filter the listing
  * applies; `summary` lists the resources that differ from that predecessor, judged as
- * `get_version_diff` judges them (across a migration, a change the migration alone made is not one,
- * Rule 01a11a5e-1085-71ec-ac82-d60263ae8173). `name` is `null` on every version that is not a
+ * the recorded revisions decide them. `name` is `null` on every version that is not a
  * Checkpoint (owner ruling https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18835031 item 1).
  */
 export type VersionListItem = Readonly<{
@@ -126,18 +125,13 @@ export type HistoryService = Readonly<{
 export const DEFAULT_VERSION_LIST_LIMIT = 50
 export const MAX_VERSION_LIST_LIMIT = 200
 const BOUNDARY_RETRY_AFTER_SECONDS = 1
-/** Cross-schema pairs are one per migration, so a few hundred cover any realistic timeline. */
-const CROSS_SCHEMA_CACHE_LIMIT = 256
 
 export function createHistoryService(
 	persistence: FileNativePersistence,
 	history: HistoryStoreSource | undefined,
-	options: Readonly<{ boundary?: () => CheckpointBoundary | undefined; comparison?: HistoryDiffService; log?: (message: string) => void }> = {},
+	options: Readonly<{ boundary?: () => CheckpointBoundary | undefined; log?: (message: string) => void }> = {},
 ): HistoryService {
-	const comparison = options.comparison ?? createHistoryDiffService(persistence, history)
 	const log = options.log ?? ((message: string) => console.warn(message))
-	/** Cross-schema pair summaries by `(fromId, toId)`, least recently used first. */
-	const crossSchemaCache = new Map<string, readonly ChangedResource[]>()
 
 	async function openStores(): Promise<Awaited<ReturnType<HistoryStoreSource['open']>> | HistoryRefusal> {
 		try {
@@ -202,7 +196,7 @@ export function createHistoryService(
 			// its own next stamp also follows this Checkpoint.
 			const at = boundary ? boundary.nextVersionAt(latest) : laterThan(new Date().toISOString(), latest)
 			// The snapshot, the schema version and `parentCheckpoint` are the shared Checkpoint writer's
-			// (the Baseline and `uiux migrate` use it too); the blobs stay in the artifact store only,
+			// (the Baseline uses it too); the blobs stay in the artifact store only,
 			// since the boundary above already left the recorder's state equal to these files.
 			const record = await writeSnapshotCheckpointUnlocked({
 				persistence,
@@ -293,48 +287,18 @@ export function createHistoryService(
 	}
 
 	/**
-	 * Every version's changed resources against its merged-timeline parent. Within one schema
-	 * version the recorded revisions decide. Across a migration the pair goes through the comparison
-	 * service itself, so the listing says what `get_version_diff` says (a change the migration alone
-	 * made, such as the manifest `schemaVersion`, is not one: Rule 01a11a5e-1085-71ec-ac82-d60263ae8173).
-	 * A pair the comparison refuses (an unrecognized schema, Rule 01a11a5e-081c-…, or a lost or
-	 * corrupt blob) keeps its revision summary, with a logged warning. Versions are immutable, so a
-	 * pair's result is kept in a bounded in-process cache.
+	 * Every version's changed resources against its merged-timeline parent, as the recorded
+	 * revisions decide. A version recorded under another schema version is listed like any other,
+	 * though comparing it is refused (Rule 01a11a5e-081c-7149-9345-836ce2267c0a).
 	 */
 	async function changeSummaries(timeline: MergedTimeline): Promise<ReadonlyMap<string, readonly ChangedResource[]>> {
 		const byId = new Map(timeline.versions.map(entry => [entry.version.id, entry.version]))
 		const summaries = new Map<string, readonly ChangedResource[]>()
 		for (const entry of timeline.versions) {
 			const parent = entry.predecessor === undefined ? undefined : byId.get(entry.predecessor)
-			const rows = parent && parent.workspaceSchemaVersion !== entry.version.workspaceSchemaVersion
-				? await crossSchemaSummary(parent, entry.version)
-				: changedOnly(summarizeResourceChanges(parent?.resources, entry.version.resources))
-			summaries.set(entry.version.id, rows)
+			summaries.set(entry.version.id, changedOnly(summarizeResourceChanges(parent?.resources, entry.version.resources)))
 		}
 		return summaries
-	}
-
-	async function crossSchemaSummary(parent: VersionRecord, version: VersionRecord): Promise<readonly ChangedResource[]> {
-		const key = `${parent.id}\0${version.id}`
-		const cached = crossSchemaCache.get(key)
-		if (cached) {
-			// Least recently used first: a hit moves the pair to the end.
-			crossSchemaCache.delete(key)
-			crossSchemaCache.set(key, cached)
-			return cached
-		}
-		const compared = await comparison.diffVersions({ from: parent.id, to: version.id })
-		let rows: readonly ChangedResource[]
-		if (compared.status === 'compared') {
-			rows = changedOnly(compared.summary)
-		}
-		else {
-			log(`uiux: the version listing could not compare ${parent.id} with ${version.id} across schema versions ${parent.workspaceSchemaVersion} and ${version.workspaceSchemaVersion} (${compared.code}: ${compared.message}); its summary falls back to the recorded revisions.`)
-			rows = changedOnly(summarizeResourceChanges(parent.resources, version.resources))
-		}
-		crossSchemaCache.set(key, rows)
-		while (crossSchemaCache.size > CROSS_SCHEMA_CACHE_LIMIT) crossSchemaCache.delete(crossSchemaCache.keys().next().value!)
-		return rows
 	}
 
 	async function readTimeline(): Promise<MergedTimeline | HistoryRefusal> {
@@ -451,9 +415,7 @@ function refusal(status: HistoryRefusal['status'], code: string, path: string, m
 
 /** Rule 01a11a5e-0a5e-7562-91cd-8c48eac71529: the persisted format Contract's schema diagnostic. */
 function schemaRefusal(error: PersistenceError): HistoryRefusal {
-	const message = error.code === 'workspace.migration_required'
-		? 'A Checkpoint cannot be created until the Workspace is migrated. Run: uiux migrate --workspace <dir>'
-		: `A Checkpoint cannot be created for this Workspace schema state: ${error.message}`
+	const message = `A Checkpoint cannot be created for this Workspace schema state: ${error.message}`
 	return { status: 'blocked', code: error.code, message, diagnostics: error.diagnostics.length > 0 ? error.diagnostics : [{ code: error.code, path: '/schemaVersion', message: error.message }] }
 }
 

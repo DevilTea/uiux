@@ -4,7 +4,7 @@ import { isKitFilePath, listKitFiles, MAX_KIT_FILE_BYTES, readKitFile, readKitSo
 import { componentClosure } from '../../domain/product-kit/closure'
 import { copyPathBelowTarget, type CopyRecordEntry } from '../../domain/product-kit/copy-record'
 import { componentDigest, fileDigest } from '../../domain/product-kit/digest'
-import { PRODUCT_KIT_RESOURCE_KEY, PRODUCT_KIT_SCHEMA_VERSION, validateProductKit, type ProductKit } from '../../domain/product-kit/schema'
+import { PRODUCT_KIT_RESOURCE_KEY, validateProductKit, type ProductKit } from '../../domain/product-kit/schema'
 import { jsonPointer, type Diagnostic } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
 
@@ -21,7 +21,6 @@ import type { FileNativePersistence } from '../../persistence'
 type Key = typeof PRODUCT_KIT_RESOURCE_KEY
 const KEY: Key = PRODUCT_KIT_RESOURCE_KEY
 
-export type KitSourceBlocked = Readonly<{ status: 'blocked'; key: Key; code: 'workspace.migration_required'; message: string; diagnostics: readonly Diagnostic[] }>
 /** The Product Kit file fails its own validation, so it has no registry to read. */
 export type KitSourceInvalid = Readonly<{ status: 'invalid'; key: Key; code: string; message: string; diagnostics: readonly Diagnostic[] }>
 
@@ -35,14 +34,13 @@ export type KitSourceTooLarge = Readonly<{ status: 'too_large'; key: Key; code: 
 export const KIT_FILE_TOO_LARGE = 'kit.file_too_large'
 
 /** `truncated` is true when the listing stopped at its entry limit (Clause 01a13d3e-c4b5-…). */
-export type ListKitFilesResult = Readonly<{ status: 'listed'; key: Key; files: readonly KitFileEntry[]; truncated: boolean }> | KitSourceBlocked
+export type ListKitFilesResult = Readonly<{ status: 'listed'; key: Key; files: readonly KitFileEntry[]; truncated: boolean }>
 
 export type KitFileRead =
 	| Readonly<{ status: 'found'; key: Key; path: string; size: number; digest: string; bytes: Uint8Array }>
 	| Readonly<{ status: 'not_found'; key: Key; path: string }>
 	| Readonly<{ status: 'invalid_path'; key: Key; path: string; message: string }>
 	| KitSourceTooLarge
-	| KitSourceBlocked
 
 /** A file's content: UTF-8 text, or base64 (`encoding: "base64"`) when its bytes are not UTF-8. */
 export type KitFileContent = Readonly<{ content: string; encoding?: 'base64' }>
@@ -67,7 +65,6 @@ export type GetComponentSourceResult =
 	| Readonly<{ status: 'not_found'; key: Key; components: readonly string[]; message: string }>
 	| KitSourceTooLarge
 	| KitSourceInvalid
-	| KitSourceBlocked
 
 /** A recorded copy as the copy record holds it; only `files` is read. */
 export type RecordedCopy = Readonly<{ files: Readonly<Record<string, Readonly<{ source: string; digest: string }>>> }>
@@ -90,7 +87,6 @@ export type CompareComponentCopiesResult =
 	| Readonly<{ status: 'compared'; key: Key; files: readonly ComparedCopyFile[] }>
 	| KitSourceTooLarge
 	| KitSourceInvalid
-	| KitSourceBlocked
 
 export type KitSourceService = Readonly<{
 	listKitFiles(): Promise<ListKitFilesResult>
@@ -114,21 +110,14 @@ export function kitFileContent(bytes: Uint8Array): KitFileContent {
 export function createKitSourceService(persistence: FileNativePersistence, options: Readonly<{ now?: () => Date }> = {}): KitSourceService {
 	const now = options.now ?? (() => new Date())
 
-	function blocked(): KitSourceBlocked {
-		const message = `The kit project exists from Workspace schemaVersion ${PRODUCT_KIT_SCHEMA_VERSION}. Run: uiux migrate --workspace <dir>`
-		return { status: 'blocked', key: KEY, code: 'workspace.migration_required', message, diagnostics: [{ code: 'workspace.migration_required', path: '/schemaVersion', message }] }
-	}
-
 	/** The refusal of the kit file `path` (relative to `kit/`) for its size; `pointer` locates it in the request. */
 	function tooLarge(path: string, pointer: string): KitSourceTooLarge {
 		const message = `kit/${path} is larger than ${MAX_KIT_FILE_BYTES} bytes (8 MiB), the most one kit file read returns; it was not read.`
 		return { status: 'too_large', key: KEY, code: KIT_FILE_TOO_LARGE, path, limit: MAX_KIT_FILE_BYTES, message, diagnostics: [{ code: KIT_FILE_TOO_LARGE, path: pointer, message }] }
 	}
 
-	async function kitProject(): Promise<KitProject | undefined> {
-		const name = persistence.layout.codeDir
-		if (!persistence.layout.productKitPath || !name) return undefined
-		return locateKitProject(persistence.root, name)
+	async function kitProject(): Promise<KitProject> {
+		return locateKitProject(persistence.root, persistence.layout.codeDir)
 	}
 
 	/** The component registry; a missing Product Kit file has none, and an invalid one refuses with its own diagnostics. */
@@ -143,14 +132,12 @@ export function createKitSourceService(persistence: FileNativePersistence, optio
 	return Object.freeze({
 		async listKitFiles(): Promise<ListKitFilesResult> {
 			const kit = await kitProject()
-			if (!kit) return blocked()
 			const listing = await listKitFiles(kit)
 			return { status: 'listed', key: KEY, files: listing.files, truncated: listing.truncated }
 		},
 
 		async readKitFile(path: string): Promise<KitFileRead> {
 			const kit = await kitProject()
-			if (!kit) return blocked()
 			if (!isKitFilePath(path))
 				return { status: 'invalid_path', key: KEY, path, message: 'A kit file path is relative to kit/: no empty, ".", or ".." segment, no backslash or control character, and not inside kit/node_modules/.' }
 			const read = await readKitFile(kit, path, { maxBytes: MAX_KIT_FILE_BYTES })
@@ -161,7 +148,6 @@ export function createKitSourceService(persistence: FileNativePersistence, optio
 
 		async getComponentSource(input): Promise<GetComponentSourceResult> {
 			const kit = await kitProject()
-			if (!kit) return blocked()
 			const productKit = await registry()
 			if ('status' in productKit) return productKit
 			const closure = componentClosure(productKit, [input.name])
@@ -210,7 +196,6 @@ export function createKitSourceService(persistence: FileNativePersistence, optio
 
 		async compareComponentCopies(input): Promise<CompareComponentCopiesResult> {
 			const kit = await kitProject()
-			if (!kit) return blocked()
 			const productKit = await registry()
 			if ('status' in productKit) return productKit
 			// Rule 01a11bb1-a630-… and Clause 01a11bb1-8c9b-…, the Workspace side: as `uiux components diff`

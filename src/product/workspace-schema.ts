@@ -21,8 +21,8 @@ export const WORKSPACE_GITIGNORE_RULES: readonly string[] = Object.freeze([
 	V5_LAYOUT.lockPath,
 	V5_LAYOUT.metadataFilePath('.persistence-lock-*'),
 	`${V5_LAYOUT.transactionsDir}/`,
-	`${V5_LAYOUT.codeDir!}/node_modules/`,
-	`${V5_LAYOUT.codeDir!}/dist/`,
+	`${V5_LAYOUT.codeDir}/node_modules/`,
+	`${V5_LAYOUT.codeDir}/dist/`,
 ])
 
 /**
@@ -32,6 +32,4 @@ export const WORKSPACE_GITIGNORE_RULES: readonly string[] = Object.freeze([
  */
 export const PRODUCT_WORKSPACE_SCHEMA_POLICY = defineWorkspaceSchemaPolicy({
 	currentVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
-	recognizedVersions: [CURRENT_WORKSPACE_SCHEMA_VERSION],
-	steps: [],
 })

@@ -36,8 +36,8 @@ import { restoreResourceVersionForHttp } from '../src/server/history-http'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { bearer, connectMcp, provisionToken, scoped, testMember } from './support/access'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
-import { createCurrentWorkspace, CURRENT_TEST_LAYOUT, V4_TEST_SCHEMA_POLICY, writeManifest } from './support/workspace-layout'
-import { LEGACY_LAYOUT, type WorkspaceLayout } from '../src/persistence/paths'
+import { createCurrentWorkspace, CURRENT_TEST_LAYOUT, writeManifest } from './support/workspace-layout'
+import type { WorkspaceLayout } from '../src/persistence/paths'
 
 /**
  * Single-resource restore (issue #132 B6): Feature 01a11a5d-fd6b-7f9d-be15-2bc2bc3adc13 Rules 1428,
@@ -112,16 +112,12 @@ type Fixture = Readonly<{
 	baseline: string
 }>
 
-/**
- * A started Workspace with one View and a Locale. `legacy` makes it a `schemaVersion` 4 Workspace, in the
- * old layout, under the policy of a build where 4 is current, for the rules about the manifest's `adapters`.
- */
-async function fixture(options: Readonly<{ legacy?: boolean }> = {}): Promise<Fixture> {
+/** A started Workspace with one View and a Locale. */
+async function fixture(): Promise<Fixture> {
 	const root = await tempDir('uiux-restore-ws-')
 	const home = join(await tempDir('uiux-restore-home-'), 'home')
-	const persistence = new FileNativePersistence({ root, schemaPolicy: options.legacy ? V4_TEST_SCHEMA_POLICY : PRODUCT_WORKSPACE_SCHEMA_POLICY })
-	if (options.legacy) await persistence.workspace.create({ ...MANIFEST, schemaVersion: 4, adapters: [] })
-	else await createCurrentWorkspace(persistence, MANIFEST)
+	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+	await createCurrentWorkspace(persistence, MANIFEST)
 	await persistence.locales.create('en-US', { greeting: 'Hello' })
 	const history = createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home })
 	const clock = manualClock()
@@ -512,30 +508,35 @@ describe('refusals', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 		expect(await restore(ctx, OWNER, { versionId: earlier, resource: { kind: 'view', key: 'not-a-uuid' }, expectedRevision: null })).toMatchObject({ status: 'invalid', code: 'history.invalid_restore' })
 	})
 
-	it('refuses a version recorded under an unrecognized schema version (Rule 01a11a5e-081c)', async () => {
+	it('refuses a version recorded under another schemaVersion, older or newer, and writes nothing (Rule 01a11a5e-081c, Clause 01a11a5e-2434)', async () => {
 		const ctx = await fixture()
 		const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
 		const built = versionResourcesFromSnapshot(snapshot, CURRENT_TEST_LAYOUT)
-		const future = randomUUID()
-		await (await ctx.history.open())!.checkpoints.create({
-			historySchemaVersion: 1,
-			id: future,
-			type: 'checkpoint',
-			actor: { type: 'human', id: 'member:owner-1', displayName: 'mei' },
-			at: new Date(START + 500).toISOString(),
-			workspaceSchemaVersion: 99,
-			resources: built.resources,
-			name: 'From a newer build',
-			source: 'workbench',
-		}, built.blobs)
-		expect(await restore(ctx, OWNER, { versionId: future, resource: { kind: 'view', key: VIEW_ID }, expectedRevision: await viewRevision(ctx) })).toMatchObject({ status: 'blocked', code: 'workspace.schema_unsupported' })
+		const before = await viewRevision(ctx)
+		for (const [index, workspaceSchemaVersion] of [5, 99].entries()) {
+			const other = randomUUID()
+			await (await ctx.history.open())!.checkpoints.create({
+				historySchemaVersion: 1,
+				id: other,
+				type: 'checkpoint',
+				actor: { type: 'human', id: 'member:owner-1', displayName: 'mei' },
+				at: new Date(START + 500 + index).toISOString(),
+				workspaceSchemaVersion,
+				resources: built.resources,
+				name: `Recorded at ${workspaceSchemaVersion}`,
+				source: 'workbench',
+			}, built.blobs)
+			const refused = await restore(ctx, OWNER, { versionId: other, resource: { kind: 'view', key: VIEW_ID }, expectedRevision: before })
+			expect(refused).toMatchObject({ status: 'blocked', code: 'workspace.schema_unsupported' })
+			expect((refused as { message: string }).message).toContain(`schemaVersion ${workspaceSchemaVersion} `)
+		}
+		expect(await viewRevision(ctx)).toBe(before)
 	})
 
 	it('is refused while the Workspace is at an older schemaVersion (Rule 01a1144e-4fcf)', async () => {
-		// An old-layout Workspace (schemaVersion 4, the manifest in .uiux/) opened by this build.
 		const root = await tempDir('uiux-restore-old-ws-')
 		const home = join(await tempDir('uiux-restore-old-home-'), 'home')
-		await writeManifest(root, { ...MANIFEST, schemaVersion: 4, adapters: [] }, LEGACY_LAYOUT)
+		await writeManifest(root, { ...MANIFEST, schemaVersion: 5 })
 		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		const app = createWorkspaceApplicationSession(persistence, { history: createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home }) })
 		expect(await scoped(app, OWNER).restoreResourceVersion({ versionId: randomUUID(), resource: { kind: 'view', key: VIEW_ID }, expectedRevision: null })).toMatchObject({ status: 'blocked', code: 'workspace.schema_unsupported' })
@@ -670,42 +671,6 @@ describe('access (Clause 01a11485-fa44, Rule 01a11c09-c648)', { timeout: HEAVY_S
 		expect(refused).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['views.write'] })
 		expect(await viewRevision(ctx)).toBe(before)
 		expect(ctx.leases.list()).toEqual([])
-	})
-
-	it('needs product-kit.compose for a workspace restore that changes the adapters below schemaVersion 5, judged on the restore\'s result (#140 owner ruling 2026-10-10, 1)', async () => {
-		const ctx = await fixture({ legacy: true })
-		const settings = async () => {
-			const read = await ctx.app.readPointResource('workspace', 'workspace')
-			if (read?.kind !== 'workspace') throw new Error('workspace')
-			return read
-		}
-		const update = async (changes: Partial<WorkspaceManifest>) => {
-			const current = await settings()
-			const outcome = await session(ctx, EDITOR).updateWorkspaceSettings({ expectedRevision: current.revision, settings: { ...current.resource, ...changes, adapters: changes.adapters ?? current.resource.adapters ?? [] } })
-			expect(outcome).toMatchObject({ status: 'updated' })
-		}
-		await update({ adapters: [{ moduleSpecifier: '@acme/adapter' }] })
-		const withAdapter = await checkpoint(ctx, 'With the Adapter')
-		await update({ viewports: { desktop: { dimensions: { width: 1440, height: 900 } } } })
-		const widened = await checkpoint(ctx, 'Wider desktop')
-		await update({ adapters: [] })
-
-		const restorer = testMember({ nickname: 'rhea', kind: 'human', credential: 'session', keys: ['workspace.read', 'history.read', 'history.restore', 'settings.write'] })
-		const before = await settings()
-		const refused = await restore(ctx, restorer, { versionId: withAdapter, resource: { kind: 'workspace', key: 'workspace' }, expectedRevision: before.revision, acknowledgeImpact: true })
-		expect(refused).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['product-kit.compose'] })
-		expect((await settings()).revision).toBe(before.revision)
-
-		// Restoring the same adapters with other settings changed needs no compose key.
-		await update({ adapters: [{ moduleSpecifier: '@acme/adapter' }], viewports: MANIFEST.viewports })
-		const sameAdapters = await settings()
-		expect(await restore(ctx, restorer, { versionId: widened, resource: { kind: 'workspace', key: 'workspace' }, expectedRevision: sameAdapters.revision, acknowledgeImpact: true })).toMatchObject({ status: 'updated' })
-
-		// With product-kit.compose the adapters restore goes through.
-		await update({ adapters: [] })
-		const composer = testMember({ nickname: 'cara', kind: 'human', credential: 'session', keys: ['workspace.read', 'history.read', 'history.restore', 'settings.write', 'product-kit.source.read', 'product-kit.write', 'product-kit.compose'] })
-		expect(await restore(ctx, composer, { versionId: withAdapter, resource: { kind: 'workspace', key: 'workspace' }, expectedRevision: (await settings()).revision, acknowledgeImpact: true })).toMatchObject({ status: 'updated' })
-		expect((await settings()).resource.adapters).toEqual([{ moduleSpecifier: '@acme/adapter' }])
 	})
 })
 

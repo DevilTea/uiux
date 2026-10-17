@@ -77,22 +77,18 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionId[] = ['general', 'view
 
 export type SettingsPayload = Readonly<{
 	i18n: WorkspaceManifest['i18n']
-	/** Only below `schemaVersion` 5; from 5 the Adapters live in the Product Kit file. */
-	adapters?: WorkspaceManifest['adapters']
 	viewports: WorkspaceManifest['viewports']
 	themes: WorkspaceManifest['themes']
 }>
 
 /**
- * The manifest fields that `update_workspace_settings` replaces as one document. `adapters` is
- * resent unchanged only when the manifest holds it (below `schemaVersion` 5): from 5 the manifest
- * refuses it, and the Product Kit page writes the Adapters to the Product Kit file instead
+ * The manifest fields that `update_workspace_settings` replaces as one document. The Adapters are
+ * not among them: the Product Kit page writes them to the Product Kit file
  * (`productKitAdapterWrites`).
  */
 export function settingsFromManifest(manifest: WorkspaceManifest): SettingsPayload {
 	return {
 		i18n: cloneJson(manifest.i18n ?? { defaultLocale: 'en-US' }),
-		...(Array.isArray(manifest.adapters) ? { adapters: cloneJson(manifest.adapters) } : {}),
 		viewports: cloneJson(manifest.viewports ?? {}),
 		themes: cloneJson(manifest.themes ?? {}),
 	}

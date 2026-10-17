@@ -18,8 +18,7 @@ const REOPEN_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const TIME = '2026-10-05T09:00:00Z'
 const LATER = '2026-10-05T09:05:00Z'
 const DIGEST = `sha256:${'b'.repeat(64)}`
-const V1 = { schemaVersion: 1 } as const
-const V2 = { schemaVersion: 2 } as const
+const V2 = {} as const
 const human = { type: 'human', displayName: 'Mei' }
 
 const open: ReviewThread = { id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'submit' }, variantNames: [], status: 'open', messages: [], history: [], submissions: [] }
@@ -42,7 +41,7 @@ function readyThenResolve(event: Record<string, unknown>) {
 	}
 }
 
-function codes(input: unknown, context: { schemaVersion: number }): string[] {
+function codes(input: unknown, context: Parameters<typeof validateReviewThread>[1]): string[] {
 	return validateReviewThread(input, context).diagnostics.map(item => item.code)
 }
 
@@ -133,17 +132,6 @@ describe('Review resolution kinds (schemaVersion 2)', () => {
 		expect(deriveReviewResolution(directResolve('obsolete') as ReviewThread)).toBe('obsolete')
 		expect(deriveReviewResolution(open)).toBeUndefined()
 		expect(deriveReviewResolution(readyThenResolve({ submissionId: SUBMISSION_ID }) as ReviewThread)).toBeUndefined()
-	})
-})
-
-describe('Review schema version gating', () => {
-	it('keeps v1 decoding exactly: resolution is an unknown field and open -> resolved is invalid', () => {
-		const v1Resolve = readyThenResolve({ submissionId: SUBMISSION_ID })
-		expect(validateReviewThread(v1Resolve, V1).ok).toBe(true)
-		expect(codes(readyThenResolve({ submissionId: SUBMISSION_ID, resolution: 'verified' }), V1)).toContain('schema.unknown_field')
-		const direct = codes(directResolve('answered'), V1)
-		expect(direct).toEqual(expect.arrayContaining(['schema.unknown_field', 'review.invalid_transition', 'review.resolve_missing_submission']))
-		expect(codes({ ...open, displayHint: { pin: { x: 0.5, y: 0.5 } } }, V1)).toEqual(['schema.unknown_field'])
 	})
 })
 

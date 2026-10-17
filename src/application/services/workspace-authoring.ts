@@ -5,7 +5,6 @@ import {
 	validateWorkspaceManifest,
 	type ThemeEntry,
 	type ViewportPreset,
-	type WorkspaceAdapterSelection,
 	type WorkspaceManifest,
 } from '../../domain/workspace/schema'
 import type { FileNativePersistence } from '../../persistence'
@@ -13,11 +12,6 @@ import { PersistenceError } from '../../persistence/errors'
 
 export type WorkspaceSettingsUpdate = Readonly<{
 	i18n: Readonly<{ defaultLocale: string; [key: string]: unknown }>
-	/**
-	 * Below `schemaVersion` 5 only, where it is required; from 5 the Product Kit file holds the
-	 * Adapters and a settings update carries none (Clause 01a11485-f769-727c-8eda-c33cff801911).
-	 */
-	adapters?: readonly WorkspaceAdapterSelection[]
 	viewports: Readonly<Record<string, ViewportPreset>>
 	themes: Readonly<Record<string, ThemeEntry>>
 }>
@@ -65,15 +59,13 @@ export function createWorkspaceAuthoringService(persistence: FileNativePersisten
 				key: 'workspace',
 				diagnostics: current.diagnostics.length > 0
 					? current.diagnostics
-					: [{ code: 'workspace.migration_required', path: '/schemaVersion', message: 'Workspace requires migration before settings can be updated.' }],
+					: [{ code: 'workspace.schema_unsupported', path: '/schemaVersion', message: 'Workspace settings cannot be updated for an unsupported Workspace schema.' }],
 			}
 		}
 
 		const next: WorkspaceManifest = {
 			schemaVersion: current.resource.schemaVersion,
 			i18n: { ...command.settings.i18n, defaultLocale: command.settings.i18n.defaultLocale },
-			// The manifest validator requires `adapters` below 5 and refuses them from 5.
-			...(command.settings.adapters === undefined ? {} : { adapters: [...command.settings.adapters] }),
 			viewports: command.settings.viewports,
 			themes: command.settings.themes,
 		}
@@ -98,8 +90,6 @@ export function createWorkspaceAuthoringService(persistence: FileNativePersisten
 		}
 		catch (error) {
 			if (error instanceof PersistenceError) {
-				if (error.code === 'workspace.migration_required')
-					return { status: 'blocked', key: 'workspace', diagnostics: error.diagnostics }
 				if (error.code === 'workspace.schema_unsupported')
 					return { status: 'invalid', key: 'workspace', diagnostics: [{ code: 'workspace.schema_unsupported', path: '/schemaVersion', message: error.message }] }
 			}

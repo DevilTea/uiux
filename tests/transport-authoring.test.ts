@@ -631,15 +631,20 @@ describe('Workspace manifest authoring', () => {
 		finally { await close() }
 	})
 
-	it('refuses adapters in the settings from schemaVersion 5, which keeps them in the Product Kit file', async () => {
+	it('refuses an adapters member in the settings as invalid input over HTTP and MCP; the Product Kit file keeps the Adapters (Clause 01a11485-f769)', async () => {
 		const { app } = await emptySession()
 		const initialRead = await app.readPointResource('workspace', 'workspace')
 		if (initialRead?.kind !== 'workspace') return
-		const refused = await updateWorkspaceSettingsForHttp(scoped(app), {
-			expectedRevision: initialRead.revision,
-			settings: { i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} },
-		})
-		expect(refused).toMatchObject({ status: 400, body: { status: 'invalid', key: 'workspace', diagnostics: [{ path: '/adapters' }] } })
+		const settings = { i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }
+		const refused = await updateWorkspaceSettingsForHttp(scoped(app), { expectedRevision: initialRead.revision, settings })
+		expect(refused).toMatchObject({ status: 400, body: { status: 'invalid', code: 'malformed_payload', diagnostics: [{ code: 'transport.malformed_payload', path: '/settings', message: expect.stringContaining('adapters') }] } })
+		const { client, close } = await connectedClient(app)
+		try {
+			const viaMcp = await client.callTool({ name: 'update_workspace_settings', arguments: { expectedRevision: initialRead.revision, settings } })
+			expect(viaMcp.isError).toBe(true)
+			expect(JSON.stringify(viaMcp.content)).toContain('adapters')
+		}
+		finally { await close() }
 		expect((await app.readPointResource('workspace', 'workspace'))?.revision).toBe(initialRead.revision)
 	})
 

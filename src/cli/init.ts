@@ -4,7 +4,7 @@ import { basename, join, resolve } from 'node:path'
 
 import { builtInAccessPresetsFile } from '../domain/access-presets/schema'
 import { emptyProductKit } from '../domain/product-kit/schema'
-import { LEGACY_LAYOUT, V5_LAYOUT, WORKSPACE_DATA_DIRECTORY } from '../persistence/paths'
+import { V5_LAYOUT, WORKSPACE_DATA_DIRECTORY } from '../persistence/paths'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, WORKSPACE_GITIGNORE_RULES } from '../product/workspace-schema'
 import { isSameOrInside, realFuturePath, resolveUiuxHome } from '../server/access/store'
 
@@ -33,7 +33,7 @@ export type InitCommandOptions = Readonly<{
  * and gains only the missing rules. The manifest is written last, so an interrupted run never
  * leaves a directory that looks initialized.
  *
- * It refuses, changing nothing, a directory whose manifest already exists, including an old-layout
+ * It refuses, changing nothing, a directory whose manifest already exists, including the parent of a
  * Workspace root whose manifest is in `.uiux/`, and a directory that is `UIUX_HOME`, lies inside it
  * or contains it, by real path (Clause 01a1144e-5649-7ba2-bb90-ad49658f0400, owner ruling 2 of
  * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18870730). Every check runs
@@ -44,7 +44,7 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 	const err = options.stderr ?? (line => console.error(line))
 	const cwd = resolve(options.cwd ?? process.cwd())
 	const root = options.workspace === undefined
-		? join((options.gitToplevel ?? gitToplevel)(cwd) ?? cwd, LEGACY_LAYOUT.metadataDir)
+		? join((options.gitToplevel ?? gitToplevel)(cwd) ?? cwd, WORKSPACE_DATA_DIRECTORY.workspaceMeta)
 		: resolve(cwd, options.workspace)
 
 	const home = resolveUiuxHome(options.env ?? process.env)
@@ -73,22 +73,22 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 		rootExists = false
 	}
 
-	const productKitPath = join(root, V5_LAYOUT.productKitPath!)
-	const accessPresetsPath = join(root, V5_LAYOUT.accessPresetsPath!)
+	const productKitPath = join(root, V5_LAYOUT.productKitPath)
+	const accessPresetsPath = join(root, V5_LAYOUT.accessPresetsPath)
 	const gitignorePath = join(root, '.gitignore')
 	const defaultLocale = 'en-US'
 	const localesPath = join(root, WORKSPACE_DATA_DIRECTORY.locales)
 	const defaultLocaleName = `${WORKSPACE_DATA_DIRECTORY.locales}/${defaultLocale}.json`
 	const defaultLocalePath = join(root, defaultLocaleName)
 	if (rootExists) {
-		for (const manifest of [V5_LAYOUT.manifestPath, LEGACY_LAYOUT.manifestPath]) {
+		for (const manifest of [V5_LAYOUT.manifestPath, `${WORKSPACE_DATA_DIRECTORY.workspaceMeta}/${V5_LAYOUT.manifestPath}`]) {
 			const path = join(root, ...manifest.split('/'))
 			if (await exists(path)) {
 				err(`uiux: Workspace is already initialized: ${path}`)
 				return 2
 			}
 		}
-		for (const [path, name] of [[productKitPath, V5_LAYOUT.productKitPath!], [accessPresetsPath, V5_LAYOUT.accessPresetsPath!]] as const) {
+		for (const [path, name] of [[productKitPath, V5_LAYOUT.productKitPath], [accessPresetsPath, V5_LAYOUT.accessPresetsPath]] as const) {
 			if (await exists(path)) {
 				err(`uiux: ${root} already holds ${name}; remove it or choose another directory.`)
 				return 2
@@ -142,7 +142,7 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 	}
 
 	out(`Initialized UIUX Workspace at ${root}`)
-	out(basename(root) === LEGACY_LAYOUT.metadataDir
+	out(basename(root) === WORKSPACE_DATA_DIRECTORY.workspaceMeta
 		? `  Start it with: uiux dev (from ${resolve(root, '..')} or below), or uiux dev --workspace ${root}`
 		: `  Start it with: uiux dev --workspace ${root}`)
 	return 0

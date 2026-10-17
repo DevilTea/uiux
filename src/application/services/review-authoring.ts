@@ -32,6 +32,7 @@ import { isCompleteEvidenceForViewRevision } from '../../domain/evidence/stalene
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
 import { viewRelativePath } from '../../persistence/paths'
+import { workspaceRefusalMessage } from '../../persistence/schema-policy'
 
 export type CreateReviewThreadCommand = Readonly<{
 	id?: string
@@ -210,29 +211,20 @@ function sameStampedActor(left: ReviewActor | undefined, right: ReviewActor | un
 }
 
 export function createReviewAuthoringService(persistence: FileNativePersistence): ReviewAuthoringService {
-	/** Writes only ever happen at the policy currentVersion, so candidates are validated under it. */
+	/** Writes only ever happen at the policy currentVersion, whose shape every candidate has. */
 	function validateCandidate(resource: ReviewThread) {
-		return validateReviewThread(resource, { schemaVersion: persistence.schemaPolicy.currentVersion })
+		return validateReviewThread(resource, {})
 	}
 
 	/**
 	 * Every Review mutation is rejected unless the Workspace is at the current schema version, before
-	 * any candidate is built: a v1 file is never re-validated under v2 rules on the way to a write.
+	 * any candidate is built.
 	 */
 	async function blockedUnlessWritable(key: string): Promise<ReviewAuthoringResult | undefined> {
 		const { inspection } = await persistence.inspectWorkspace()
 		if (inspection.state === 'current') return undefined
-		if (inspection.state === 'migration_required') {
-			return {
-				status: 'blocked',
-				key,
-				code: 'workspace.migration_required',
-				message: `Workspace schemaVersion ${inspection.version} requires explicit migration to ${inspection.targetVersion}. Run: uiux migrate --workspace <dir>`,
-				diagnostics: [{ code: 'workspace.migration_required', path: '/schemaVersion', message: `Workspace schema ${inspection.version} requires explicit migration to policy target ${inspection.targetVersion}.` }],
-			}
-		}
 		const code = inspection.state === 'missing_manifest' ? 'workspace.manifest_missing' : 'workspace.schema_unsupported'
-		return { status: 'blocked', key, code, message: 'Review mutations are blocked for this Workspace schema state.', diagnostics: inspection.diagnostics }
+		return { status: 'blocked', key, code, message: workspaceRefusalMessage(inspection, 'Review mutations are blocked for this Workspace schema state.'), diagnostics: inspection.diagnostics }
 	}
 
 	/**

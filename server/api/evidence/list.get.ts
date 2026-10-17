@@ -13,7 +13,7 @@ export default defineEventHandler(async (event) => {
 	const items = await session.listEvidence(viewId)
 	// The current Product Kit provenance, so the Workbench judges each capture's freshness against it
 	// (Rules 01a11bb1-be4a-… and 01a1161b-ff68-…): `productKit`, or `productKitUnavailable` when the
-	// Workspace has a Product Kit whose provenance cannot be computed; neither below schemaVersion 5.
+	// Product Kit provenance cannot be computed.
 	// The kit digests are cached and shared by concurrent requests.
 	return { items, ...productKitFreshnessContext(await session.productKitProvenance()) }
 })

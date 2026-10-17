@@ -14,8 +14,7 @@ export type EvidenceStalenessContext = Readonly<{
 	discoveredLocales?: readonly string[]
 	localeRevisions?: Readonly<Record<string, string>>
 	/**
-	 * The Workspace's current Product Kit provenance. Absent when the Workspace has no Product Kit
-	 * (below `schemaVersion` 5), and then the Product Kit is not judged, or when it is unavailable.
+	 * The Workspace's current Product Kit provenance. Absent when it is unavailable.
 	 */
 	productKit?: ProductKitProvenance
 	/**

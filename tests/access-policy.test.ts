@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -32,13 +32,12 @@ import { resolutionRefusal } from '../src/application/access/scoped-session'
 import { uiuxMcpInstructions } from '../src/mcp/server'
 import { RESTORABLE_RESOURCE_KINDS } from '../src/domain/history/constants'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
-import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
+import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { FileNativePersistence } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { appendReviewMessageForHttp, createViewForHttp, resolveReviewThreadForHttp, submitReadyForReviewForHttp, updateViewSpecForHttp } from '../src/server/authoring-http'
 import { connectMcp, presetKeys, scoped, testMember } from './support/access'
-import { createCurrentWorkspace, manifestPath as workspaceManifestPath, V4_TEST_SCHEMA_POLICY } from './support/workspace-layout'
-import { LEGACY_LAYOUT } from '../src/persistence/paths'
+import { createCurrentWorkspace } from './support/workspace-layout'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const NEW_VIEW_ID = '22222222-2222-4222-8222-222222222222'
@@ -52,16 +51,12 @@ function spec(intent: string): ViewSpecContent {
 	return { intent, entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [] }
 }
 
-/**
- * A Workspace with one View and one Review thread. `legacy` makes it a `schemaVersion` 4 Workspace under
- * the policy of a build where 4 is current, whose manifest still holds `adapters` (Clause 01a11bb1-b35a).
- */
-async function fixture(options: Readonly<{ legacy?: boolean }> = {}) {
+/** A Workspace with one View and one Review thread. */
+async function fixture() {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-access-policy-'))
 	roots.push(root)
-	const persistence = new FileNativePersistence({ root, schemaPolicy: options.legacy ? V4_TEST_SCHEMA_POLICY : PRODUCT_WORKSPACE_SCHEMA_POLICY })
-	if (options.legacy) await persistence.workspace.create({ schemaVersion: 4, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
-	else await createCurrentWorkspace(persistence, { i18n: { defaultLocale: 'en-US' }, viewports: {}, themes: {} })
+	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+	await createCurrentWorkspace(persistence, { i18n: { defaultLocale: 'en-US' }, viewports: {}, themes: {} })
 	const app = createWorkspaceApplicationSession(persistence)
 	const view = await app.createView({ id: VIEW_ID, name: 'Checkout', spec: spec('Pay') })
 	const review = await app.createReviewThread({ id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' } })
@@ -506,64 +501,6 @@ describe('authorization in the shared application layer', () => {
 		expect(view.status).toBe(403)
 		expect(view.body).toMatchObject({ code: 'auth.scope_denied', requiredKeys: ['views.write'] })
 		expect((await ctx.app.readPointResource('view', VIEW_ID))?.revision).toBe(ctx.viewRevision)
-	})
-
-	it('needs product-kit.compose besides settings.write to change the adapters list below schemaVersion 5, but not for other settings (Clause 01a11bb1-b35a)', async () => {
-		const ctx = await fixture({ legacy: true })
-		const manifestPath = workspaceManifestPath(ctx.root, LEGACY_LAYOUT)
-		const settingsOnly = scoped(ctx.app, testMember({ nickname: 'sam', kind: 'human', credential: 'session', keys: ['workspace.read', 'settings.write'] }))
-		const read = async () => {
-			const current = await ctx.app.readPointResource('workspace', 'workspace')
-			if (current?.kind !== 'workspace') throw new Error('workspace')
-			return current
-		}
-		const first = await read()
-		const resized = await settingsOnly.updateWorkspaceSettings({ expectedRevision: first.revision, settings: { ...first.resource, adapters: first.resource.adapters ?? [], viewports: { desktop: { dimensions: { width: 1280, height: 800 } } } } })
-		expect(resized).toMatchObject({ status: 'updated' })
-
-		const second = await read()
-		const bytes = await readFile(manifestPath, 'utf8')
-		const withAdapter = { ...second.resource, adapters: [{ moduleSpecifier: '@acme/adapter' }] }
-		expect(await settingsOnly.updateWorkspaceSettings({ expectedRevision: second.revision, settings: withAdapter })).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['product-kit.compose'] })
-		expect(await readFile(manifestPath, 'utf8')).toBe(bytes)
-		// A stale revision is a conflict, whatever the adapters say.
-		expect(await settingsOnly.updateWorkspaceSettings({ expectedRevision: first.revision, settings: withAdapter })).toMatchObject({ status: 'conflict' })
-
-		const composer = scoped(ctx.app, testMember({ nickname: 'cara', kind: 'human', credential: 'session', keys: ['workspace.read', 'settings.write', 'product-kit.source.read', 'product-kit.write', 'product-kit.compose'] }))
-		expect(await composer.updateWorkspaceSettings({ expectedRevision: second.revision, settings: withAdapter })).toMatchObject({ status: 'updated' })
-		// A config change of the same entries is a settings change only.
-		const third = await read()
-		expect(await settingsOnly.updateWorkspaceSettings({ expectedRevision: third.revision, settings: { ...third.resource, adapters: [{ moduleSpecifier: '@acme/adapter', config: { dense: true } }] } })).toMatchObject({ status: 'updated' })
-	})
-
-	it('decides the compose check on the manifest the write replaces, even when another write lands between authorization and the write', async () => {
-		const ctx = await fixture({ legacy: true })
-		const read = async () => {
-			const current = await ctx.app.readPointResource('workspace', 'workspace')
-			if (current?.kind !== 'workspace') throw new Error('workspace')
-			return current
-		}
-		const original = await read()
-		const resized = { ...original.resource, adapters: original.resource.adapters ?? [], viewports: { desktop: { dimensions: { width: 1280, height: 800 } } } }
-		// The revision a concurrent viewport edit produces, found by making that edit and undoing it.
-		const edited = await ctx.app.updateWorkspaceSettings({ expectedRevision: original.revision, settings: resized })
-		if (edited.status !== 'updated') throw new Error('edit')
-		expect(await ctx.app.updateWorkspaceSettings({ expectedRevision: edited.revision, settings: { ...original.resource, adapters: original.resource.adapters ?? [] } })).toMatchObject({ status: 'updated', revision: original.revision })
-
-		// The concurrent edit lands after the scoped session authorized the request and before the service reads the manifest.
-		const racing: WorkspaceApplicationSession = {
-			...ctx.app,
-			updateWorkspaceSettings: (async (command, guard) => {
-				expect(await ctx.app.updateWorkspaceSettings({ expectedRevision: original.revision, settings: resized })).toMatchObject({ status: 'updated', revision: edited.revision })
-				return ctx.app.updateWorkspaceSettings(command, guard)
-			}) as WorkspaceApplicationSession['updateWorkspaceSettings'],
-		}
-		const settingsOnly = scoped(racing, testMember({ nickname: 'sam', kind: 'human', credential: 'session', keys: ['workspace.read', 'settings.write'] }))
-		const outcome = await settingsOnly.updateWorkspaceSettings({ expectedRevision: edited.revision, settings: { ...resized, adapters: [{ moduleSpecifier: '@acme/adapter' }] } })
-		expect(outcome).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['product-kit.compose'] })
-		const after = await read()
-		expect(after.revision).toBe(edited.revision)
-		expect(after.resource.adapters).toEqual([])
 	})
 
 	it('tells the agent its identity, label and effective keys in the per-request instructions (Clause 01a11485-f6ea)', async () => {

@@ -73,7 +73,7 @@ export type KitBuildRunner = KitBuildControl & Readonly<{
 export type KitBuildRunnerOptions = Readonly<{
 	/** The Workspace root. */
 	root: string
-	/** The kit project's directory name (`kit`), absent below `schemaVersion` 5. */
+	/** The kit project's directory name (`kit`). */
 	codeDirectoryName: string | undefined
 	/** The environment the build's is made from; `process.env` by default. */
 	env?: NodeJS.ProcessEnv
@@ -404,7 +404,7 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 		const realRoot = await realpath(options.root).catch(() => undefined)
 		maskRoots = realRoot && realRoot !== options.root ? [realRoot, options.root] : [options.root]
 		const kitDirectory = name && realRoot ? join(realRoot, name) : undefined
-		// Without a real kit/ directory (or below schemaVersion 5) there is no kit project to build.
+		// Without a real kit/ directory there is no kit project to build.
 		if (!kitDirectory || !realRoot || !await realDirectoryIdentity(kitDirectory).catch(() => undefined)) {
 			status = { state: 'none' }
 			return status

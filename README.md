@@ -137,7 +137,7 @@ Consider denying `uiux member`, `token`, `invite`, `session` and `access` in you
 
 ### Workspace format
 
-A Workspace records its format in `workspace.json` `schemaVersion`. This UIUX reads only `schemaVersion` 6, which `uiux init` writes. There is no migration: no command, MCP tool or HTTP route upgrades a Workspace, and UIUX refuses to change a Workspace at any other `schemaVersion` (`workspace.schema_unsupported`). To start over, run `uiux init` in a new directory ([Discussion #231](https://github.com/DevilTea/uiux/discussions/231)).
+A Workspace records its format in `workspace.json` `schemaVersion`. This UIUX reads only `schemaVersion` 6, which `uiux init` writes. There is no migration: no command, MCP tool or HTTP route upgrades a Workspace. `uiux dev`, the packaged server and every roster command refuse a Workspace at any other `schemaVersion` before touching it (exit status 2, `workspace.schema_unsupported`, naming the version found), and a Workspace whose manifest changes to another version under a running server cannot be changed. To start over, run `uiux init` in a new directory ([Discussion #231](https://github.com/DevilTea/uiux/discussions/231)).
 
 ### Copying components into a product project
 

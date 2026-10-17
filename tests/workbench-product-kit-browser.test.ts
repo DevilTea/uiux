@@ -1,14 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import type { PermissionKey } from '../src/application/access/keys'
 import { canonicalJsonBytes } from '../src/persistence'
-import { LEGACY_LAYOUT } from '../src/persistence/paths'
 import { provisionToken, sessionCookieFor } from './support/access'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
-import { writeManifest } from './support/workspace-layout'
 
 /**
  * The Product Kit page's Overview section (issue #141, unit K12) against a private copy of the fixture
@@ -22,8 +20,7 @@ import { writeManifest } from './support/workspace-layout'
  * - the build log follows `product-kit.source.read` and the restart `product-kit.write`; the server
  *   enforces both, so a member without the log key reads no log at all;
  * - a failed build says why, a refused restart says why, the build stays usable when the Product Kit
- *   file cannot be read, and a Workspace below `schemaVersion` 5 shows its Adapters read-only, each
- *   against a server of its own.
+ *   file cannot be read, each against a server of its own.
  */
 
 let server: WorkbenchServer
@@ -215,28 +212,6 @@ describe('Product Kit page › an unreadable Product Kit file', () => {
 			const answered = page.waitForResponse(response => response.url().endsWith('/api/product-kit/build/restart'))
 			await restart.click()
 			expect((await answered).status()).toBe(200)
-		}
-		finally { await context.close() }
-	}, 60_000)
-})
-
-describe('Product Kit page › a Workspace below schemaVersion 5', () => {
-	const legacy = withServer(async (root) => {
-		// The schemaVersion 4 layout: the manifest holds the Adapters, and there is no Product Kit file or kit build.
-		for (const name of ['workspace.json', 'product-kit.json', 'access-presets.json', 'kit', 'views', 'reviews', 'flows', 'i18n', 'assets', 'artifacts'])
-			await rm(join(root, name), { recursive: true, force: true })
-		await writeManifest(root, { schemaVersion: 4, i18n: { defaultLocale: 'en-US' }, adapters: [{ moduleSpecifier: './adapters/reference.ts' }], viewports: {}, themes: {} }, LEGACY_LAYOUT)
-	})
-
-	it('shows the manifest\'s Adapters read-only, and no build', async () => {
-		const { context, page } = await open('/workspace/product-kit', legacy().cookie, legacy())
-		try {
-			await page.locator('[data-product-kit-legacy]').waitFor({ timeout: 15_000 })
-			await page.locator('#product-kit-adapters [data-adapter-row]').first().waitFor()
-			expect(await page.locator('#product-kit-adapters [data-adapter-row]').count()).toBe(1)
-			expect(await page.getByRole('button', { name: 'Add adapter', exact: true }).count()).toBe(0)
-			expect(await page.locator('#product-kit-adapters textarea').count()).toBe(0)
-			expect(await page.locator('#product-kit-build').count()).toBe(0)
 		}
 		finally { await context.close() }
 	}, 60_000)

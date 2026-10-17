@@ -85,7 +85,7 @@ try {
 	const initOutput = execFileSync(cliPath, ['init', '--workspace', workspaceDirectory], { encoding: 'utf8' })
 	if (!initOutput.includes('Initialized UIUX Workspace'))
 		throw new Error(`Packed CLI init returned an unexpected response: ${initOutput}`)
-	// --workspace <dir> names the Workspace root, which holds the schemaVersion 5 manifest directly.
+	// --workspace <dir> names the Workspace root, which holds the manifest directly.
 	const initializedManifest = JSON.parse(await readFile(join(workspaceDirectory, 'workspace.json'), 'utf8'))
 	if (initializedManifest.schemaVersion !== installedPackage.uiuxWorkspaceSchemaVersion)
 		throw new Error('Packed CLI init did not use the package Workspace schema authority.')
@@ -104,6 +104,17 @@ try {
 		if (migrate.status !== 2 || !migrate.stderr.includes('uiux: unknown command or option: migrate') || !migrate.stdout.includes('Usage: uiux <command>'))
 			throw new Error(`Packed CLI did not refuse the removed migrate command as unknown: status ${migrate.status}, stderr ${migrate.stderr}`)
 	}
+	// A Workspace at another schemaVersion is refused before anything is touched (Discussion #231, Part 17).
+	const olderDirectory = join(temporaryDirectory, 'older-workspace')
+	execFileSync(cliPath, ['init', '--workspace', olderDirectory], { encoding: 'utf8' })
+	const olderManifestPath = join(olderDirectory, 'workspace.json')
+	await writeFile(olderManifestPath, `${JSON.stringify({ ...JSON.parse(await readFile(olderManifestPath, 'utf8')), schemaVersion: 5 })}\n`)
+	const olderManifest = await readFile(olderManifestPath, 'utf8')
+	const olderDev = spawnSync(cliPath, ['dev', '--workspace', olderDirectory], { encoding: 'utf8' })
+	if (olderDev.status !== 2 || !olderDev.stderr.includes('workspace.schema_unsupported') || !olderDev.stderr.includes('schemaVersion 5 ') || !olderDev.stderr.includes('uiux init'))
+		throw new Error(`Packed CLI did not refuse a schemaVersion 5 Workspace: status ${olderDev.status}, stderr ${olderDev.stderr}`)
+	if (await readFile(olderManifestPath, 'utf8') !== olderManifest)
+		throw new Error('Packed CLI changed a Workspace it refused.')
 	for (const usage of ['components list [--workspace <dir>]', 'components add <name...> --to <dir>', 'components diff [--project <dir>]']) {
 		if (!helpOutput.includes(usage)) throw new Error(`Packed CLI help did not expose ${usage}.`)
 	}

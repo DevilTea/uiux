@@ -10,7 +10,6 @@ import { createLeaseManager } from '../src/application/access/leases'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
 import { FileNativePersistence, PersistenceError, isPersistenceBusyError, persistenceBusyResult } from '../src/persistence'
-import { layoutForSchemaVersion } from '../src/persistence/paths'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { sendPersistenceBusyError } from '../src/server/persistence-busy'
 import { describeFetchError, isTransientError } from '../app/utils/fetch-error'
@@ -39,8 +38,8 @@ async function seedWorkspace(schemaVersion: number): Promise<string> {
 	roots.push(root)
 	await mkdir(join(root, 'views'), { recursive: true })
 	await mkdir(join(root, 'assets', ASSET_ID), { recursive: true })
-	if (schemaVersion === CURRENT_WORKSPACE_SCHEMA_VERSION) await writeCurrentWorkspace(root)
-	else await writeManifest(root, `${JSON.stringify({ schemaVersion, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })}\n`, layoutForSchemaVersion(schemaVersion))
+	await writeCurrentWorkspace(root)
+	if (schemaVersion !== CURRENT_WORKSPACE_SCHEMA_VERSION) await writeManifest(root, { schemaVersion, i18n: { defaultLocale: 'en-US' }, viewports: {}, themes: {} })
 	await writeFile(join(root, 'views', `${VIEW_ID}.view.json`), `${JSON.stringify(view)}\n`)
 	await writeFile(join(root, 'assets', ASSET_ID, 'asset.json'), `${JSON.stringify({ id: ASSET_ID, name: 'icon', contentFilename: 'icon.svg', mediaType: 'image/svg+xml' })}\n`)
 	await writeFile(join(root, 'assets', ASSET_ID, 'icon.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
@@ -145,7 +144,7 @@ describe('persistence.busy transport mapping', () => {
 	it('recognizes the lock timeout directly and through h3 error wrapping, and nothing else', () => {
 		expect(isPersistenceBusyError(busy())).toBe(true)
 		expect(isPersistenceBusyError(createError(busy()))).toBe(true)
-		expect(isPersistenceBusyError(new PersistenceError('workspace.migration_required', 'migrate'))).toBe(false)
+		expect(isPersistenceBusyError(new PersistenceError('workspace.schema_unsupported', 'unsupported'))).toBe(false)
 		expect(isPersistenceBusyError(new Error('Timed out'))).toBe(false)
 	})
 
@@ -198,7 +197,7 @@ describe('persistence.busy transport mapping', () => {
 		const details = describeFetchError({ statusCode: 503, data: persistenceBusyResult() }, 'fallback')
 		expect(isTransientError(details)).toBe(true)
 		expect(details.diagnostics[0]?.code).toBe('persistence.busy')
-		expect(isTransientError(describeFetchError({ statusCode: 422, data: { status: 'blocked', code: 'workspace.migration_required' } }, 'fallback'))).toBe(false)
+		expect(isTransientError(describeFetchError({ statusCode: 422, data: { status: 'blocked', code: 'workspace.schema_unsupported' } }, 'fallback'))).toBe(false)
 	})
 
 	it('retries only reads, once, after the capped Retry-After', () => {

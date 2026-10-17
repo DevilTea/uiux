@@ -32,7 +32,6 @@ import { createCheckpointForHttp, deleteCheckpointForHttp, diffVersionsForHttp, 
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { bearer, connectMcp, provisionToken, scoped, sessionCookieFor, testMember } from './support/access'
 import { createCurrentWorkspace, CURRENT_TEST_LAYOUT, metadataPath, writeManifest } from './support/workspace-layout'
-import { LEGACY_LAYOUT } from '../src/persistence/paths'
 
 /**
  * Named Checkpoints, the version listing and their access (issue #132 B4): Feature
@@ -298,13 +297,15 @@ describe('creating a Checkpoint', () => {
 			expect(await checkpointFiles(ctx)).toEqual(files)
 		}
 
-		// An old-layout Workspace (schemaVersion 4, manifest in .uiux/) is unsupported too.
+		// A Workspace at an older schemaVersion is unsupported too.
 		const old = await tempDir('uiux-checkpoints-old-ws-')
-		await writeManifest(old, { schemaVersion: 4, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }, LEGACY_LAYOUT)
+		await writeManifest(old, { schemaVersion: 5, i18n: { defaultLocale: 'en-US' }, viewports: {}, themes: {} })
 		const oldPersistence = new FileNativePersistence({ root: old, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		const oldHome = join(await tempDir('uiux-checkpoints-old-home-'), 'home')
 		const oldApp = createWorkspaceApplicationSession(oldPersistence, { history: createHistoryStoreFactory({ workspaceRoot: old, persistence: oldPersistence, home: () => oldHome }) })
-		expect(await createCheckpointForHttp(scoped(oldApp, REVIEWER), { name: 'Blocked' })).toMatchObject({ status: 422, body: { status: 'blocked', code: 'workspace.schema_unsupported' } })
+		const blocked = await createCheckpointForHttp(scoped(oldApp, REVIEWER), { name: 'Blocked' })
+		expect(blocked).toMatchObject({ status: 422, body: { status: 'blocked', code: 'workspace.schema_unsupported' } })
+		expect((blocked.body as { message: string }).message).toMatch(/schemaVersion 5 .*uiux init/u)
 		expect((await listVersionsForHttp(scoped(oldApp, VIEWER), {})).status).toBe(200)
 	})
 

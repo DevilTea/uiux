@@ -8,7 +8,7 @@ import { createWorkspaceApplicationSession } from '../src/application/services/w
 import { validateReviewRenderContextInput, validateReviewThread } from '../src/domain/reviews/schema'
 import { FileNativePersistence } from '../src/persistence/file-native'
 import { localeRelativePath, reviewRelativePath, viewRelativePath } from '../src/persistence/paths'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { currentManifest, manifestPath, writeCurrentWorkspace } from './support/workspace-layout'
 
 /**
@@ -17,8 +17,7 @@ import { currentManifest, manifestPath, writeCurrentWorkspace } from './support/
  * `before`/`after`).
  */
 
-const V3 = { schemaVersion: 3 } as const
-const V4 = { schemaVersion: 4 } as const
+const V4 = {} as const
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const REVIEW_ID = '22222222-2222-4222-8222-222222222222'
 const MESSAGE_ID = '33333333-3333-4333-8333-333333333333'
@@ -50,11 +49,11 @@ function reanchor(id: string, at: string, before: Record<string, unknown>, after
 	return { id, kind: 'reanchor', actor: AUTHOR, at, before: { variantNames: [], ...before }, after: { variantNames: [], ...after } }
 }
 
-function codes(input: unknown, context: { schemaVersion: number } = V4): string[] {
+function codes(input: unknown, context: Parameters<typeof validateReviewThread>[1] = V4): string[] {
 	return validateReviewThread(input, context).diagnostics.map(item => item.code)
 }
 
-function paths(input: unknown, context: { schemaVersion: number } = V4): string[] {
+function paths(input: unknown, context: Parameters<typeof validateReviewThread>[1] = V4): string[] {
 	return validateReviewThread(input, context).diagnostics.map(item => item.path)
 }
 
@@ -153,25 +152,6 @@ describe('re-anchor renderContext continuity (schemaVersion 4)', () => {
 	})
 })
 
-describe('version gating', () => {
-	it('rejects renderContext on the thread and in re-anchor events under schemaVersion 3 and earlier', () => {
-		for (const schemaVersion of [1, 2, 3]) {
-			expect(codes(thread({ renderContext: ZH_MOBILE_DARK }), { schemaVersion })).toEqual(['schema.unknown_field'])
-			const event = reanchor(EVENT_ID, T1, { anchor: WIDGET }, { anchor: ROOT, renderContext: ZH_MOBILE_DARK })
-			expect(codes(thread({ anchor: ROOT, history: [event] }), { schemaVersion })).toEqual(['schema.unknown_field'])
-		}
-		expect(validateReviewThread(thread({ renderContext: ZH_MOBILE_DARK }), V3).diagnostics[0]?.path).toBe('/renderContext')
-	})
-
-	it('decodes every v3-valid thread under v4 unchanged', () => {
-		const event = reanchor(EVENT_ID, T1, { anchor: WIDGET }, { anchor: WORKSPACE })
-		for (const input of [thread(), thread({ anchor: WORKSPACE, history: [event] }), thread({ displayHint: { pin: { x: 0.5, y: 0.5 } } })]) {
-			expect(validateReviewThread(input, V3).ok).toBe(true)
-			expect(validateReviewThread(input, V4).ok).toBe(true)
-		}
-	})
-})
-
 const roots: string[] = []
 afterEach(async () => {
 	await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
@@ -210,7 +190,7 @@ describe('re-anchor keeps or clears the recorded renderContext (owner ruling 1, 
 	async function readBack(root: string, persistence: FileNativePersistence) {
 		expect((await persistence.reviews.readInspected(REVIEW_ID))?.diagnostics).toEqual([])
 		const stored = JSON.parse(await readFile(join(root, reviewRelativePath(REVIEW_ID)), 'utf8')) as Record<string, unknown> & { history: Record<string, unknown>[] }
-		expect(validateReviewThread(stored, { schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION }).ok).toBe(true)
+		expect(validateReviewThread(stored, {}).ok).toBe(true)
 		return stored
 	}
 

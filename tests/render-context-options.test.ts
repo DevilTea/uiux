@@ -32,7 +32,6 @@ function baseWorkspace(overrides: Partial<WorkspaceManifest> = {}): WorkspaceMan
 	return {
 		schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 		i18n: { defaultLocale: 'en-US' },
-		adapters: [],
 		viewports: {},
 		themes: {},
 		...overrides,

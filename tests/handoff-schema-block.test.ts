@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { FileNativePersistence } from '../src/persistence'
-import { layoutForSchemaVersion } from '../src/persistence/paths'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { artifactShardsPath, CURRENT_TEST_LAYOUT, writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
 
@@ -31,8 +30,8 @@ async function seedWorkspace(schemaVersion: number): Promise<string> {
 	roots.push(root)
 	await mkdir(join(root, 'views'), { recursive: true })
 	await mkdir(join(root, 'assets', ASSET_ID), { recursive: true })
-	if (schemaVersion === CURRENT_WORKSPACE_SCHEMA_VERSION) await writeCurrentWorkspace(root)
-	else await writeManifest(root, `${JSON.stringify({ schemaVersion, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })}\n`, layoutForSchemaVersion(schemaVersion))
+	await writeCurrentWorkspace(root)
+	if (schemaVersion !== CURRENT_WORKSPACE_SCHEMA_VERSION) await writeManifest(root, { schemaVersion, i18n: { defaultLocale: 'en-US' }, viewports: {}, themes: {} })
 	await writeFile(join(root, 'views', `${VIEW_ID}.view.json`), `${JSON.stringify(view)}\n`)
 	await writeFile(join(root, 'assets', ASSET_ID, 'asset.json'), `${JSON.stringify({ id: ASSET_ID, name: 'icon', contentFilename: 'icon.svg', mediaType: 'image/svg+xml' })}\n`)
 	await writeFile(join(root, 'assets', ASSET_ID, 'icon.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
@@ -43,20 +42,26 @@ function open(root: string): FileNativePersistence {
 	return new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 }
 
-async function artifactFiles(root: string, layout = CURRENT_TEST_LAYOUT): Promise<string[]> {
-	return readdir(artifactShardsPath(root, layout)).catch(() => [])
+async function artifactFiles(root: string): Promise<string[]> {
+	return readdir(artifactShardsPath(root, CURRENT_TEST_LAYOUT)).catch(() => [])
 }
 
 describe('read-only Handoff assessment on a Workspace at an older schemaVersion', () => {
 	it('returns blocked workspace.schema_unsupported for assess and export instead of throwing, and writes nothing', async () => {
-		const root = await seedWorkspace(1)
+		const root = await seedWorkspace(5)
 		const app = createWorkspaceApplicationSession(open(root))
 		const assessed = await app.assessHandoffReadiness({ roots: [{ type: 'view', viewId: VIEW_ID }] })
 		expect(assessed).toMatchObject({ status: 'blocked', key: 'handoff', code: 'workspace.schema_unsupported' })
+		// Clause 01a14928-275b-74d5-ad43-c82932e39cb3: the version read, the current one and `uiux init`, never `uiux migrate`.
+		const message = (assessed as { message?: string }).message
+		expect(message).toContain('schemaVersion 5')
+		expect(message).toContain(`schemaVersion ${CURRENT_WORKSPACE_SCHEMA_VERSION}`)
+		expect(message).toContain('uiux init')
+		expect(JSON.stringify(assessed)).not.toContain('migrat')
 		expect(assessed.diagnostics?.[0]).toMatchObject({ code: 'workspace.schema_unsupported', path: '/schemaVersion' })
 		const exported = await app.exportHandoff({ roots: [{ type: 'workspace' }] })
 		expect(exported).toMatchObject({ status: 'blocked', code: 'workspace.schema_unsupported' })
-		expect(await artifactFiles(root, layoutForSchemaVersion(1))).toEqual([])
+		expect(await artifactFiles(root)).toEqual([])
 	})
 
 	it('assesses a current Workspace without materializing closure artifacts, which export still stores', async () => {

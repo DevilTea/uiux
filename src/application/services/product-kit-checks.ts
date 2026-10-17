@@ -104,7 +104,7 @@ export type ProductKitChecksResult =
 		findings: readonly ProductKitCheckFinding[]
 		executedAt: string
 	}>
-	/** The Workspace has no Product Kit (below `schemaVersion` 5, or no readable file). */
+	/** The Workspace has no readable Product Kit file. */
 	| Readonly<{ status: 'not_applicable'; diagnostics: readonly Diagnostic[]; executedAt: string }>
 	/** Another run is in progress for this Workspace. */
 	| Readonly<{ status: 'busy'; diagnostics: readonly Diagnostic[] }>

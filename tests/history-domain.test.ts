@@ -35,22 +35,15 @@ import {
 	type HostVersionRecord,
 } from '../src/domain/history/schema'
 import { summarizeResourceChanges } from '../src/domain/history/summary'
-import type { WorkspaceManifest } from '../src/domain/workspace/schema'
 import {
 	FileNativePersistence,
-	LEGACY_LAYOUT,
-	PersistenceError,
 	WORKSPACE_MANIFEST_PATH,
 	assetMetadataRelativePath,
 	flowRelativePath,
 	localeRelativePath,
 	revisionForResourceFiles,
-	upgradeSnapshotInMemory,
 	viewRelativePath,
-	workspaceRelativePath,
-	type WorkspaceSnapshot,
 } from '../src/persistence'
-import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
 import { V5_LAYOUT } from '../src/persistence/paths'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createCurrentWorkspace } from './support/workspace-layout'
@@ -259,41 +252,6 @@ describe('comparison summary and resource projection', () => {
 	})
 })
 
-describe('legacy Workspace layout', () => {
-	it('names the history directories from the existing path constants', () => {
-		expect(LEGACY_LAYOUT.manifestPath).toBe(workspaceRelativePath())
-		expect(LEGACY_LAYOUT.artifactsDir).toBe('.uiux/artifacts')
-		expect(LEGACY_LAYOUT.checkpointsDir).toBe('.uiux/history/checkpoints')
-		expect(LEGACY_LAYOUT.checkpointRelativePath(VERSION_ID)).toBe(`.uiux/history/checkpoints/${VERSION_ID}.json`)
-		expect(() => LEGACY_LAYOUT.checkpointRelativePath('../x')).toThrow(PersistenceError)
-		expect(LEGACY_LAYOUT.versionedRoots).toEqual(['.uiux/workspace.json', 'views/', 'flows/', 'i18n/', 'assets/'])
-		expect(LEGACY_LAYOUT.excluded).toEqual(['reviews/', '.uiux/'])
-	})
-
-	it('classifies every versioned path family and excludes Reviews, runtime files and everything else', () => {
-		const classify = LEGACY_LAYOUT.classifyVersionedPath
-		expect(classify(WORKSPACE_MANIFEST_PATH)).toEqual({ kind: 'workspace', key: 'workspace' })
-		expect(classify(viewRelativePath(VIEW_ID))).toEqual({ kind: 'view', key: VIEW_ID })
-		expect(classify(flowRelativePath(FLOW_ID))).toEqual({ kind: 'flow', key: FLOW_ID })
-		expect(classify(localeRelativePath('zh-TW'))).toEqual({ kind: 'locale', key: 'zh-TW' })
-		expect(classify(assetMetadataRelativePath(ASSET_ID))).toEqual({ kind: 'asset', key: ASSET_ID })
-		expect(classify(`assets/${ASSET_ID}/logo.svg`)).toEqual({ kind: 'asset', key: ASSET_ID })
-		for (const excluded of EXCLUDED_PATHS)
-			expect(classify(excluded), excluded).toBeUndefined()
-	})
-
-	it('classifies only paths under a versioned root, and none under an excluded one except the manifest', () => {
-		const classified = [...VERSIONED_PATHS, ...EXCLUDED_PATHS].filter(path => LEGACY_LAYOUT.classifyVersionedPath(path))
-		expect(classified).toEqual(VERSIONED_PATHS)
-		const under = (path: string, root: string) => root.endsWith('/') ? path.startsWith(root) : path === root
-		for (const path of classified) {
-			expect(LEGACY_LAYOUT.versionedRoots.some(root => under(path, root)), path).toBe(true)
-			if (path !== LEGACY_LAYOUT.manifestPath)
-				expect(LEGACY_LAYOUT.excluded.some(root => under(path, root)), path).toBe(false)
-		}
-	})
-})
-
 describe('current Workspace layout', () => {
 	it('classifies every versioned path family and excludes Reviews, runtime files, kit/ and everything else', () => {
 		const classify = V5_LAYOUT.classifyVersionedPath
@@ -419,39 +377,6 @@ describe('revision parity with file-native persistence', () => {
 	})
 })
 
-describe('in-memory snapshot upgrade', () => {
-	it('returns the current version unchanged and refuses an unrecognized version', async () => {
-		const policy = PRODUCT_WORKSPACE_SCHEMA_POLICY
-		const current = designSnapshot(policy.currentVersion)
-		const same = await upgradeSnapshotInMemory(current, policy.currentVersion, policy)
-		expect(same.steps).toEqual([])
-		expect(snapshotsEqual(same.snapshot, current)).toBe(true)
-		await expect(upgradeSnapshotInMemory(designSnapshot(policy.currentVersion + 1), policy.currentVersion + 1, policy)).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
-		await expect(upgradeSnapshotInMemory(current, 0, policy)).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
-	})
-
-	it('applies the injected policy steps and wraps a failing step', async () => {
-		const policy = defineWorkspaceSchemaPolicy({
-			currentVersion: 2,
-			recognizedVersions: [1, 2],
-			steps: [{
-				id: 'synthetic-1-to-2',
-				fromVersion: 1,
-				toVersion: 2,
-				apply(snapshot: WorkspaceSnapshot) {
-					const next = new Map(snapshot)
-					next.set(WORKSPACE_MANIFEST_PATH, json(manifest(2)))
-					return next
-				},
-			}],
-		})
-		const upgraded = await upgradeSnapshotInMemory(designSnapshot(1), 1, policy)
-		expect(upgraded.steps).toEqual(['synthetic-1-to-2'])
-		const failing = defineWorkspaceSchemaPolicy({ ...policy, steps: [{ ...policy.steps[0]!, apply: () => { throw new Error('boom') } }] })
-		await expect(upgradeSnapshotInMemory(designSnapshot(1), 1, failing)).rejects.toMatchObject({ code: 'workspace.migration_failed' })
-	})
-})
-
 // These builders take arbitrary overrides so tests can make a record invalid on purpose; the casts type
 // the valid defaults, and the validators under test receive the result as `unknown` input anyway.
 function checkpoint(overrides: Record<string, unknown> = {}): CheckpointRecord {
@@ -509,30 +434,6 @@ function baseResources(): HistoryResourceEntry[] {
 
 function codes(result: Readonly<{ diagnostics: readonly Readonly<{ code: string }>[] }>): string[] {
 	return result.diagnostics.map(diagnostic => diagnostic.code)
-}
-
-function manifest(schemaVersion: number): WorkspaceManifest {
-	return { schemaVersion, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }
-}
-
-function json(value: unknown): Uint8Array {
-	return Buffer.from(`${JSON.stringify(value, null, '\t')}\n`)
-}
-
-/** The versioned files only: history snapshots never contain Reviews. */
-function designSnapshot(schemaVersion: number): Map<string, Uint8Array> {
-	return new Map<string, Uint8Array>([
-		[WORKSPACE_MANIFEST_PATH, json(manifest(schemaVersion))],
-		[viewRelativePath(VIEW_ID), json({ id: VIEW_ID, name: 'Checkout', ir: { type: 'RootShell', id: 'root', slots: { content: [] } }, variants: {} })],
-		[flowRelativePath(FLOW_ID), json({ id: FLOW_ID, name: 'Flow', entryStepId: VIEW_ID, steps: {} })],
-		[localeRelativePath('zh-TW'), json({ greeting: '你好' })],
-		[assetMetadataRelativePath(ASSET_ID), json({ id: ASSET_ID, name: 'Logo', contentFilename: 'logo.bin', mediaType: 'application/octet-stream' })],
-		[`assets/${ASSET_ID}/logo.bin`, Buffer.from('logo-bytes')],
-	])
-}
-
-function snapshotsEqual(left: WorkspaceSnapshot, right: WorkspaceSnapshot): boolean {
-	return left.size === right.size && [...left].every(([path, bytes]) => right.has(path) && Buffer.from(right.get(path)!).equals(Buffer.from(bytes)))
 }
 
 async function makeRoot(): Promise<string> {

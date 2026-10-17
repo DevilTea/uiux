@@ -118,10 +118,10 @@ const kitAdapters = createSettingsSection<AdapterRow[], ProductKit>({
 	fromManifest: kit => adapterRows(kit.adapters),
 	toPayload: draft => adapterSelections(draft),
 })
-/** Below `schemaVersion` 5: the manifest's `adapters`, read-only until the Workspace is migrated. */
+/** A Workspace without the Product Kit schema: the manifest holds no Adapters, so none are shown. */
 const manifestAdapters = createSettingsSection({
 	id: 'adapters',
-	fromManifest: manifest => adapterRows(manifest.adapters),
+	fromManifest: () => adapterRows([]),
 	toPayload: draft => adapterSelections(draft),
 })
 const adapters = computed(() => usesProductKit.value ? kitAdapters : manifestAdapters)

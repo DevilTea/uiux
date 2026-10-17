@@ -15,13 +15,8 @@ import type { VersionDiffOutcome, VersionDiffResult } from '../src/application/s
 import type { CheckpointRecord, HistoryResourceEntry, HostVersionRecord } from '../src/domain/history/schema'
 import {
 	FileNativePersistence,
-	canonicalJsonBytes,
-	defineWorkspaceSchemaPolicy,
-	layoutForSchemaVersion,
 	localeRelativePath,
 	viewRelativePath,
-	workspaceRelativePath,
-	type WorkspaceSnapshot,
 } from '../src/persistence'
 import { CheckpointStore, versionResourcesFromSnapshot } from '../src/persistence/history'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
@@ -30,7 +25,7 @@ import { createHistoryStoreFactory, type HistoryStores } from '../src/server/his
 import { diffVersionsForHttp } from '../src/server/history-http'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { bearer, connectMcp, provisionToken, scoped, testMember } from './support/access'
-import { currentManifest, manifestPath, writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
+import { currentManifest, manifestPath, writeCurrentWorkspace } from './support/workspace-layout'
 
 /**
  * Version comparison through the service, `GET /api/history/diff` and MCP `get_version_diff`
@@ -54,9 +49,6 @@ type Context = Readonly<{ root: string; persistence: FileNativePersistence; stor
 
 /** The Workspace settings of every comparison here; the current manifest adds `schemaVersion`. */
 const SETTINGS = { i18n: { defaultLocale: 'en-US' }, viewports: { desktop: { label: 'Desktop', dimensions: { width: 1280, height: 800 } } }, themes: {} }
-
-/** The manifest as a `schemaVersion` 4 Workspace kept it, in the old layout and with its `adapters`. */
-const MANIFEST = { ...SETTINGS, schemaVersion: 4, adapters: [] }
 
 /** A current-schema Workspace with one View, a Locale and an Asset, and its history stores. */
 async function workspace(): Promise<Context> {
@@ -195,60 +187,20 @@ describe('diffVersions', () => {
 		expect(new Set(firstVersion.summary.map(row => row.status))).toEqual(new Set(['added']))
 	})
 
-	it('upgrades an older side in memory with the policy steps before comparing, so a migration adds no change', async () => {
-		const root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-upgrade-')))
-		const home = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-home-')))
-		cleanup.push(root, home)
-		// A synthetic 1 -> 2 step that renames a View member, as a real migration could.
-		const policy = defineWorkspaceSchemaPolicy({
-			currentVersion: 2,
-			recognizedVersions: [1, 2],
-			steps: [{
-				id: 'synthetic-1-to-2',
-				fromVersion: 1,
-				toVersion: 2,
-				apply(snapshot: WorkspaceSnapshot) {
-					const next = new Map(snapshot)
-					for (const [path, bytes] of snapshot) {
-						const value = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
-						if (path === workspaceRelativePath()) next.set(path, canonicalJsonBytes({ ...value, schemaVersion: 2 }))
-						else if (path.startsWith('views/')) {
-							const { title, ...rest } = value
-							next.set(path, canonicalJsonBytes({ ...rest, name: title }))
-						}
-					}
-					return next
-				},
-			}],
-		})
-		await writeManifest(root, canonicalJsonBytes({ ...MANIFEST, schemaVersion: 2 }), layoutForSchemaVersion(2))
-		await mkdir(join(root, 'views'), { recursive: true })
-		await writeFile(join(root, viewRelativePath(VIEW_ID)), canonicalJsonBytes(view()))
-		const persistence = new FileNativePersistence({ root, schemaPolicy: policy })
-		const history = createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home })
-		const ctx: Context = { root, persistence, stores: (await history.open())!, app: createWorkspaceApplicationSession(persistence, { history }) }
-		const { name, ...v1View } = view()
-		const old = await record(ctx, 'autosave', {
-			at: '2026-10-01T00:00:00.000Z',
-			workspaceSchemaVersion: 1,
-			edit: (snapshot) => {
-				snapshot.set(workspaceRelativePath(), canonicalJsonBytes({ ...MANIFEST, schemaVersion: 1 }))
-				snapshot.set(viewRelativePath(VIEW_ID), canonicalJsonBytes({ ...v1View, title: name }))
-			},
-		})
-		const result = compared(await ctx.app.diffVersions({ from: old, detail: 'semantic' }))
-		expect(statuses(result)).toEqual({ [`view:${VIEW_ID}`]: 'unchanged', 'workspace:workspace': 'unchanged' })
-		expect(result.changes).toEqual([])
-		// The recorded revisions are reported as recorded.
-		expect(result.summary.find(row => row.kind === 'view')!.fromRevision).not.toBe(result.summary.find(row => row.kind === 'view')!.toRevision)
-	})
-
-	it('refuses a version recorded under an unrecognized schema with workspace.schema_unsupported (Clause 01a11a5e-2434-7342-a3c1-6d63aa74334c)', async () => {
+	it('lists a version recorded under another schemaVersion, older or newer, but refuses to compare it with workspace.schema_unsupported (Rule 01a11a5e-081c, Clause 01a11a5e-2434-7342-a3c1-6d63aa74334c)', async () => {
 		const ctx = await workspace()
 		const known = await record(ctx, 'autosave', { at: '2026-10-01T00:00:00.000Z' })
-		const future = await record(ctx, 'autosave', { at: '2026-10-02T00:00:00.000Z', workspaceSchemaVersion: 99 })
-		for (const command of [{ from: future }, { from: known, to: future }, { from: { parentOf: future } }])
-			expect(await ctx.app.diffVersions(command)).toMatchObject({ status: 'blocked', code: 'workspace.schema_unsupported' })
+		const older = await record(ctx, 'autosave', { at: '2026-10-02T00:00:00.000Z', workspaceSchemaVersion: 5 })
+		const future = await record(ctx, 'autosave', { at: '2026-10-02T12:00:00.000Z', workspaceSchemaVersion: 99 })
+		const listing = await ctx.app.listVersions({})
+		expect(listing.status === 'listed' && listing.versions.map(version => version.id)).toEqual(expect.arrayContaining([older, future]))
+		for (const other of [older, future]) {
+			for (const command of [{ from: other }, { from: known, to: other }, { from: { parentOf: other } }]) {
+				const refused = await ctx.app.diffVersions(command)
+				expect(refused).toMatchObject({ status: 'blocked', code: 'workspace.schema_unsupported' })
+				expect(refused.status === 'blocked' && refused.message).toMatch(/schemaVersion (5|99) .*schemaVersion 6/u)
+			}
+		}
 
 		// The live Workspace on an unsupported schema: only the comparison with current is refused (Rule 01a11a5e-07c1-70d6-b4fb-69c99be791e3).
 		const other = await record(ctx, 'autosave', { at: '2026-10-03T00:00:00.000Z' })

@@ -10,7 +10,7 @@ import { jsonPointer, rejectUnknownKeys, Validator, type Diagnostic, type Valida
 
 /**
  * The Access presets file (Discussion #140, Part 15): named permission key sets a Workspace keeps
- * in `access-presets.json` from `schemaVersion` 6 (Clause 01a11c09-a855-7d7e-93ec-cd9a85fdb65e).
+ * in `access-presets.json` (Clause 01a11c09-a855-7d7e-93ec-cd9a85fdb65e).
  * Presets are Workspace data (Rule 01a11c09-c724-7a1b-9505-3146b5b2b241): the built-in presets are
  * only the content a new or migrated Workspace starts with (Rule 01a11c09-c78f-773d-ad98-5c6def1b22e3).
  *

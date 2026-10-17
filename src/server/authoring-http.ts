@@ -86,11 +86,6 @@ const updateWorkspaceSettingsHttpSchema = z.object({
 		i18n: z.object({
 			defaultLocale: z.string(),
 		}).catchall(z.unknown()),
-		// Required below Workspace schemaVersion 5 and refused from 5 (Clause 01a11485-f769-727c-8eda-c33cff801911).
-		adapters: z.array(z.object({
-			moduleSpecifier: z.string(),
-			config: z.unknown().optional(),
-		})).optional(),
 		viewports: z.record(z.string(), z.object({
 			dimensions: z.object({
 				width: z.number(),
@@ -407,7 +402,7 @@ export async function updateWorkspaceSettingsForHttp(app: ScopedWorkspaceSession
 	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
-/** `GET /api/product-kit`: the Product Kit Resource, `workspace.read` only; 404 below `schemaVersion` 5. */
+/** `GET /api/product-kit`: the Product Kit Resource, `workspace.read` only; 404 without a readable Product Kit file. */
 export async function readProductKitForHttp(app: ScopedWorkspaceSession): Promise<AuthoringHttpResult> {
 	const denied = app.authorize('readProductKit')
 	if (denied) return { status: 403, body: { status: 'blocked', key: 'product-kit', code: denied.code, requiredKeys: denied.requiredKeys, message: denied.message, diagnostics: [{ code: denied.code, path: '/', message: denied.message }] } }
@@ -431,7 +426,7 @@ function productKitRefusalBody(denied: Readonly<{ code: string; requiredKeys: re
 	return { status: 'blocked', key: 'product-kit', code: denied.code, requiredKeys: denied.requiredKeys, message: denied.message, diagnostics: [{ code: denied.code, path: '/', message: denied.message }] }
 }
 
-/** `GET /api/product-kit/build`: the kit build state, `workspace.read` only; 404 below `schemaVersion` 5. */
+/** `GET /api/product-kit/build`: the kit build state, `workspace.read` only. */
 export function readKitBuildForHttp(app: ScopedWorkspaceSession): AuthoringHttpResult {
 	const read = app.readKitBuild()
 	if (read && 'status' in read) return { status: 403, body: read }
