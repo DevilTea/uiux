@@ -129,8 +129,8 @@ const attention = computed<AttentionPart[]>(() => ([
 // ----- Tabs, data and shortcuts ---------------------------------------------------------------
 
 /**
- * `?tab=` is the active tab, both ways. `/views` (the old View index) redirects to `?tab=views`, and
- * `G V`, ⌘K "Views", the View page's parent crumb and the Reviews empty state all link there.
+ * `?tab=` is the active tab, both ways. `G V`, ⌘K "Views", the View page's parent crumb and the
+ * Reviews empty state all link to `?tab=views`.
  * Switching tabs replaces the query (no history entry per tab), so a link to the Views tab is never
  * a same-location no-op while another tab is showing. Views is the default: no `?tab=` means
  * Views, and switching back to Views drops the query, so a bare `/` stays bare (a phone cold load of
