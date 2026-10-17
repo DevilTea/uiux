@@ -26,7 +26,9 @@ import {
 	type WorkspaceSnapshot,
 } from '../src/persistence'
 import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { isCaseSensitiveDirectory } from './support/filesystem'
+import { createCurrentWorkspace, currentManifest, manifestPath } from './support/workspace-layout'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const OTHER_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -58,7 +60,8 @@ describe('file-native persistence', () => {
 	})
 
 	it('writes every authored resource kind only under canonical data directories', async () => {
-		const { root, persistence } = await newWorkspace()
+		// The old layout's Adapter resolution boundary trusts this set; a current-layout root refuses everything outside kit/ instead.
+		const { root, persistence } = await newLegacyWorkspace()
 		await persistence.views.create(VIEW_ID, viewFixture())
 		await persistence.flows.create(FLOW_ID, flowFixture())
 		await persistence.reviews.create(REVIEW_ID, reviewFixture())
@@ -108,7 +111,7 @@ describe('file-native persistence', () => {
 		const { root, persistence } = await newWorkspace()
 		await persistence.views.create(VIEW_ID, viewFixture())
 		const initial = await persistence.views.read(VIEW_ID)
-		const secondProcess = new FileNativePersistence({ root, schemaPolicy: policy() })
+		const secondProcess = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		const secondRead = await secondProcess.views.read(VIEW_ID)
 		expect(secondRead?.revision).toBe(initial?.revision)
 
@@ -135,7 +138,7 @@ describe('file-native persistence', () => {
 		let held = false
 		const first = new FileNativePersistence({
 			root,
-			schemaPolicy: policy(),
+			schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY,
 			async fault(point) {
 				if (point === 'file.before_rename' && !held) {
 					held = true
@@ -144,7 +147,7 @@ describe('file-native persistence', () => {
 				}
 			},
 		})
-		const second = new FileNativePersistence({ root, schemaPolicy: policy(), lockWaitMilliseconds: 2_000 })
+		const second = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY, lockWaitMilliseconds: 2_000 })
 		const firstWrite = first.views.compareAndSwap({
 			key: VIEW_ID, expectedRevision: initial!.revision, resource: { ...viewFixture(), name: 'First writer' },
 		})
@@ -168,7 +171,7 @@ describe('file-native persistence', () => {
 		const target = join(outside, 'lock-target.json')
 		const targetBytes = Buffer.from(JSON.stringify({ pid: process.pid, token: 'not-a-uiux-lock' }))
 		await writeFile(target, targetBytes)
-		const lockPath = join(root, '.uiux', '.persistence.lock')
+		const lockPath = join(root, persistence.layout.lockPath)
 		await symlink(target, lockPath)
 		await expect(persistence.inspectWorkspace()).rejects.toMatchObject({ code: 'persistence.path_rejected' })
 		expect(await readFile(target)).toEqual(targetBytes)
@@ -181,7 +184,7 @@ describe('file-native persistence', () => {
 		let injected = false
 		const persistence = new FileNativePersistence({
 			root,
-			schemaPolicy: policy(),
+			schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY,
 			async fault(point, details) {
 				if (!injected && point === 'file.before_rename' && details.path === viewRelativePath(VIEW_ID)) {
 					injected = true
@@ -190,7 +193,7 @@ describe('file-native persistence', () => {
 				}
 			},
 		})
-		await persistence.workspace.create(workspaceFixture())
+		await createCurrentWorkspace(persistence)
 		await expect(persistence.views.create(VIEW_ID, viewFixture())).rejects.toMatchObject({ code: 'persistence.resource_exists' })
 		expect(await readFile(join(root, viewRelativePath(VIEW_ID)))).toEqual(external)
 	})
@@ -215,7 +218,7 @@ describe('file-native persistence', () => {
 		let targetPoint: PersistenceFaultPoint = 'file.before_rename'
 		const persistence = new FileNativePersistence({
 			root,
-			schemaPolicy: policy(),
+			schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY,
 			fault(point) {
 				if (armed && point === targetPoint) {
 					armed = false
@@ -223,7 +226,7 @@ describe('file-native persistence', () => {
 				}
 			},
 		})
-		await persistence.workspace.create(workspaceFixture())
+		await createCurrentWorkspace(persistence)
 		await persistence.views.create(VIEW_ID, viewFixture())
 		const path = join(root, viewRelativePath(VIEW_ID))
 		const original = await readFile(path)
@@ -298,7 +301,7 @@ describe('file-native persistence', () => {
 		let failure: { point: PersistenceFaultPoint; index: number } | undefined
 		const persistence = new FileNativePersistence({
 			root,
-			schemaPolicy: policy(),
+			schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY,
 			fault(point, details) {
 				if (failure && point === failure.point && details.index === failure.index) {
 					failure = undefined
@@ -306,12 +309,12 @@ describe('file-native persistence', () => {
 				}
 			},
 		})
-		await persistence.workspace.create(workspaceFixture())
+		await createCurrentWorkspace(persistence)
 		const originalContent = Buffer.from('original source bytes')
 		await persistence.assets.create(ASSET_ID, { metadata: assetFixture('original.bin', 'Original'), content: originalContent })
 		const original = await persistence.assets.readInspected(ASSET_ID)
 		const originalMetadataBytes = await readFile(join(root, assetMetadataRelativePath(ASSET_ID)))
-		const secondProcess = new FileNativePersistence({ root, schemaPolicy: policy() })
+		const secondProcess = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		expect((await secondProcess.assets.read(ASSET_ID))?.revision).toBe(original?.revision)
 
 		const replacementContent = Buffer.from('replacement bytes')
@@ -352,7 +355,7 @@ describe('file-native persistence', () => {
 		const storedSecond = await persistence.artifacts.put(second)
 		expect(storedSecond.identity).not.toBe(storedFirst.identity)
 		expect(Buffer.from((await persistence.artifacts.read(storedFirst.identity))!)).toEqual(first)
-		const artifactPath = join(root, artifactRelativePath(storedFirst.identity))
+		const artifactPath = join(root, persistence.layout.artifactRelativePath(storedFirst.identity))
 		const corrupted = Buffer.from('external replacement')
 		await writeFile(artifactPath, corrupted)
 		await expect(persistence.artifacts.put(first)).rejects.toMatchObject({ code: 'persistence.artifact_corrupt' })
@@ -376,7 +379,7 @@ describe('file-native persistence', () => {
 		await mkdir(join(root, 'assets', ASSET_ID), { recursive: true })
 		await writeFile(join(root, assetMetadataRelativePath(ASSET_ID)), JSON.stringify(assetFixture('logo.svg', 'Logo')))
 		await writeFile(join(root, 'assets', ASSET_ID, 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
-		const persistence = new FileNativePersistence({ root, schemaPolicy: policy() })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: migrationPolicy() })
 		const plan = await persistence.planWorkspaceMigration()
 		expect(plan.changedFiles).toEqual(['.uiux/workspace.json', `views/${VIEW_ID}.view.json`])
 		expect((await persistence.inspectWorkspace()).inspection.state).toBe('migration_required')
@@ -425,7 +428,7 @@ describe('file-native persistence', () => {
 			let failure: { point: PersistenceFaultPoint; index: number } | undefined = target
 			const persistence = new FileNativePersistence({
 				root,
-				schemaPolicy: policy(),
+				schemaPolicy: migrationPolicy(),
 				fault(point, details) {
 					if (failure && point === failure.point && details.index === failure.index) {
 						failure = undefined
@@ -444,9 +447,27 @@ describe('file-native persistence', () => {
 		}
 	})
 
+	it('recovers an interrupted transaction before exposing canonical reads', async () => {
+		const { root, persistence } = await newWorkspace()
+		await persistence.views.create(VIEW_ID, viewFixture())
+		const oldView = await readFile(join(root, viewRelativePath(VIEW_ID)))
+		await writeFile(join(root, viewRelativePath(VIEW_ID)), JSON.stringify({ ...viewFixture(), name: 'Half written' }, null, 2))
+
+		const transactionId = '66666666-6666-4666-8666-666666666666'
+		const transactionRoot = join(root, persistence.layout.transactionsDir, transactionId)
+		await mkdir(join(transactionRoot, 'backup', 'views'), { recursive: true })
+		await writeFile(join(transactionRoot, 'backup', viewRelativePath(VIEW_ID)), oldView)
+		await writeFile(join(transactionRoot, 'journal.json'), JSON.stringify({ layout: persistence.layout.id, entries: [{ path: viewRelativePath(VIEW_ID), existed: true }] }))
+		await writeFile(join(root, persistence.layout.lockPath), JSON.stringify({ pid: 2_000_000_000, token: '66666666-6666-4666-8666-666666666667' }))
+
+		expect((await persistence.inspectWorkspace()).inspection.state).toBe('current')
+		expect(await readFile(join(root, viewRelativePath(VIEW_ID)))).toEqual(oldView)
+		expect(await readdir(join(root, persistence.layout.transactionsDir))).toEqual([])
+	})
+
 	it('recovers an interrupted migration transaction before exposing canonical reads', async () => {
 		const root = await makeRoot()
-		const persistence = new FileNativePersistence({ root, schemaPolicy: policy() })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: migrationPolicy() })
 		const oldManifest = Buffer.from(JSON.stringify(workspaceFixture(1), null, 2))
 		const oldView = Buffer.from(JSON.stringify(viewFixture(), null, 2))
 		const newManifest = Buffer.from(JSON.stringify(workspaceFixture(2), null, 2))
@@ -475,19 +496,16 @@ describe('file-native persistence', () => {
 	})
 
 	it('leaves unknown future schema data unchanged and diagnoses unsupported state', async () => {
-		const root = await makeRoot()
-		const persistence = new FileNativePersistence({ root, schemaPolicy: policy() })
-		const future = workspaceFixture(Number.MAX_SAFE_INTEGER)
-		const bytes = Buffer.from(JSON.stringify(future, null, 2))
-		await mkdir(join(root, '.uiux'), { recursive: true })
-		await writeFile(join(root, workspaceRelativePath()), bytes)
+		const { root, persistence } = await newWorkspace()
+		const bytes = Buffer.from(JSON.stringify(currentManifest({ schemaVersion: Number.MAX_SAFE_INTEGER }), null, 2))
+		await writeFile(manifestPath(root), bytes)
 		const result = await persistence.inspectWorkspace()
 		expect(result.inspection.state).toBe('unsupported')
 		expect(result.inspection.diagnostics.some(item => item.code === 'workspace.schema_unsupported')).toBe(true)
-		await expect(persistence.workspace.compareAndSwap({ key: 'workspace', expectedRevision: result.revision!, resource: workspaceFixture() }))
+		await expect(persistence.workspace.compareAndSwap({ key: 'workspace', expectedRevision: result.revision!, resource: currentManifest() as WorkspaceManifest }))
 			.rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
 		await expect(persistence.migrateWorkspace()).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
-		expect(await readFile(join(root, workspaceRelativePath()))).toEqual(bytes)
+		expect(await readFile(manifestPath(root))).toEqual(bytes)
 	})
 
 	it('keeps syntactically valid but semantically invalid authored JSON available with diagnostics', async () => {
@@ -632,7 +650,7 @@ describe('file-native persistence', () => {
 		let injectedFault: { point: PersistenceFaultPoint; index: number } | undefined
 		const persistence = new FileNativePersistence({
 			root,
-			schemaPolicy: policy(),
+			schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY,
 			fault(point, details) {
 				if (injectedFault && point === injectedFault.point && details.index === injectedFault.index && details.operation === 'decision-promotion') {
 					injectedFault = undefined
@@ -640,7 +658,7 @@ describe('file-native persistence', () => {
 				}
 			},
 		})
-		await persistence.workspace.create(workspaceFixture())
+		await createCurrentWorkspace(persistence)
 		await persistence.views.create(VIEW_ID, viewFixture())
 		await persistence.reviews.create(REVIEW_ID, reviewFixture())
 
@@ -709,16 +727,16 @@ describe('file-native persistence', () => {
 	it('cleans up and recovers pending transactions where COMMITTED marker exists', async () => {
 		const { root, persistence } = await newWorkspace()
 		const txId = '77777777-7777-4777-8777-777777777777'
-		const txDir = join(root, '.uiux', '.transactions', txId)
+		const txDir = join(root, persistence.layout.transactionsDir, txId)
 		await mkdir(txDir, { recursive: true })
 		await writeFile(join(txDir, 'COMMITTED'), 'committed')
-		await writeFile(join(txDir, 'journal.json'), JSON.stringify({ operation: 'decision-promotion', changes: [] }))
+		await writeFile(join(txDir, 'journal.json'), JSON.stringify({ layout: persistence.layout.id, entries: [] }))
 
 		// Any locked operation recovers pending transactions
 		await persistence.withLock(async () => {})
 
 		// Verify txDir was cleaned up
-		const remaining = await readdir(join(root, '.uiux', '.transactions'))
+		const remaining = await readdir(join(root, persistence.layout.transactionsDir))
 		expect(remaining).not.toContain(txId)
 	})
 
@@ -768,9 +786,18 @@ describe('file-native persistence', () => {
 	})
 })
 
+/** A current-schema Workspace under UIUX's own policy. */
 async function newWorkspace(): Promise<{ root: string; persistence: FileNativePersistence }> {
 	const root = await makeRoot()
-	const persistence = new FileNativePersistence({ root, schemaPolicy: policy() })
+	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+	await createCurrentWorkspace(persistence)
+	return { root, persistence }
+}
+
+/** A `schemaVersion` 2 Workspace in the old layout under the synthetic migration policy. */
+async function newLegacyWorkspace(): Promise<{ root: string; persistence: FileNativePersistence }> {
+	const root = await makeRoot()
+	const persistence = new FileNativePersistence({ root, schemaPolicy: migrationPolicy() })
 	await persistence.workspace.create(workspaceFixture())
 	return { root, persistence }
 }
@@ -781,7 +808,8 @@ async function makeRoot(): Promise<string> {
 	return root
 }
 
-function policy() {
+/** A synthetic policy where 2 is current and one step migrates 1 to 2, in the old layout, for the migration tests. */
+function migrationPolicy() {
 	return defineWorkspaceSchemaPolicy({
 		currentVersion: 2,
 		recognizedVersions: [1, 2],
@@ -870,7 +898,7 @@ async function seedOldWorkspace(root: string, manifest: Uint8Array, view: Uint8A
 
 async function runSuccessfulMigration(): Promise<{ changedFiles: readonly string[]; steps: readonly string[]; manifest: string; view: string }> {
 	const root = await makeRoot()
-	const persistence = new FileNativePersistence({ root, schemaPolicy: policy() })
+	const persistence = new FileNativePersistence({ root, schemaPolicy: migrationPolicy() })
 	await seedOldWorkspace(root, Buffer.from(JSON.stringify(workspaceFixture(1), null, 2)), Buffer.from(JSON.stringify(viewFixture(), null, 2)))
 	const before = await persistence.inspectWorkspace()
 	expect(before.inspection.state).toBe('migration_required')

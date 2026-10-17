@@ -8,10 +8,10 @@ import { assetLookupFromInspectedSource, resolveAssetBindingForExecution } from 
 import type { AuthoredAssetResource } from '../src/domain/assets/schema'
 import { validateAdapterManifest } from '../src/domain/adapters/schema'
 import type { I18nFieldMapping } from '../src/domain/i18n/schema'
-import type { WorkspaceManifest } from '../src/domain/workspace/schema'
 import { lowerI18nBinding, createTranslationRuntime, inspectTranslationResources, inspectWorkspaceI18n, interpolateTemplate } from '../src/i18n'
 import { FileNativePersistence, type PersistenceFaultPoint } from '../src/persistence'
-import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { createCurrentWorkspace } from './support/workspace-layout'
 import { isCaseSensitiveDirectory } from './support/filesystem'
 
 const ASSET_ID = '44444444-4444-4444-8444-444444444444'
@@ -212,12 +212,12 @@ describe('authored Asset application and execution semantics', () => {
 		const root = await makeRoot()
 		let armed = false
 		const persistence = new FileNativePersistence({
-			root, schemaPolicy: policy(),
+			root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY,
 			fault(point: PersistenceFaultPoint, details) {
 				if (armed && point === 'asset.before_apply' && details.index === 1) { armed = false; throw new Error('injected asset apply failure') }
 			},
 		})
-		await persistence.workspace.create(workspaceFixture())
+		await createCurrentWorkspace(persistence)
 		const original = asset('original.png', 'Original', pngBytes(1))
 		await persistence.assets.create(ASSET_ID, original)
 		const current = await persistence.assets.read(ASSET_ID)
@@ -348,15 +348,7 @@ async function makeRoot(): Promise<string> {
 
 async function newWorkspace(defaultLocale = 'en-US'): Promise<{ root: string; persistence: FileNativePersistence }> {
 	const root = await makeRoot()
-	const persistence = new FileNativePersistence({ root, schemaPolicy: policy() })
-	await persistence.workspace.create(workspaceFixture(defaultLocale))
+	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+	await createCurrentWorkspace(persistence, { i18n: { defaultLocale } })
 	return { root, persistence }
-}
-
-function policy() {
-	return defineWorkspaceSchemaPolicy({ currentVersion: 2, recognizedVersions: [2], steps: [] })
-}
-
-function workspaceFixture(defaultLocale = 'en-US'): WorkspaceManifest {
-	return { schemaVersion: 2, i18n: { defaultLocale }, adapters: [], viewports: {}, themes: {} }
 }

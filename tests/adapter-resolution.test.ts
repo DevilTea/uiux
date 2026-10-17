@@ -457,7 +457,7 @@ describe('Canonical Workspace data-directory membership is decided by file ident
 
 describe('the data boundary of a schemaVersion 5 Workspace root (only kit/ may hold Adapter code)', () => {
 	const MODULE = 'export const marker = true\n'
-	const V5_MANIFEST = JSON.stringify({ schemaVersion: 5, i18n: { defaultLocale: 'en-US' }, viewports: {}, themes: {} })
+	const V5_MANIFEST = JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, viewports: {}, themes: {} })
 	const KIT = JSON.stringify({ designSystems: [], adapters: [], styles: [], themes: {}, components: {}, widgets: {} })
 	/**
 	 * A resolver given the below-5 base (the Workspace root) on purpose, so specifiers reach every
@@ -595,7 +595,7 @@ describe('the data boundary of a schemaVersion 5 Workspace root (only kit/ may h
 
 describe('Adapter resolution from kit/ in a schemaVersion 5 Workspace (Clause 01a115cd-d109, from-5 half)', () => {
 	const MODULE = 'export const marker = true\n'
-	const V5_MANIFEST = JSON.stringify({ schemaVersion: 5, i18n: { defaultLocale: 'en-US' }, viewports: {}, themes: {} })
+	const V5_MANIFEST = JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, viewports: {}, themes: {} })
 	const KIT = JSON.stringify({ designSystems: [], adapters: [], styles: [], themes: {}, components: {}, widgets: {} })
 
 	/** A v5 Workspace root with an empty kit/ (the resolver detects the layout from its manifest). */

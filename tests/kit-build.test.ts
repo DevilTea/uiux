@@ -12,11 +12,12 @@ import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
 import { ACCESS_PRESETS_FILENAME, builtInAccessPresetsFile } from '../src/domain/access-presets/schema'
 import { emptyProductKit, type ProductKit } from '../src/domain/product-kit/schema'
 import { canonicalJsonBytes, FileNativePersistence, V5_LAYOUT } from '../src/persistence'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { readKitBuildForHttp, readKitBuildLogForHttp, readProductKitForHttp, restartKitBuildForHttp } from '../src/server/authoring-http'
 import { createKitBuildRunner, KIT_BUILD_GENERATION_WARNING, KIT_BUILD_LOG_BYTES, KIT_BUILD_RESTART_INTERVAL_MS, KitBuildLog, kitBuildEnvironment, registerKitBuildRunner, type KitBuildRunner } from '../src/server/kit-build'
 import { getSelectedWorkspacePreviewBundle, resolveSelectedWorkspaceAdapters } from '../src/server/workspace-adapters'
 import { connectMcp, scoped, testMember } from './support/access'
-import { currentManifest, V5_TEST_SCHEMA_POLICY, writeManifest } from './support/workspace-layout'
+import { currentManifest, writeManifest } from './support/workspace-layout'
 
 /**
  * The kit build (issue #141, unit K7): Feature 01a11bb1-8534-7f0f-b8d0-de7efabe31f7 and its Rules,
@@ -694,7 +695,7 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		const spawns = () => printed.filter(line => line.includes('kit build: running')).length
 		await build.start()
 		expect(await settledState(build)).toEqual({ state: 'ready' })
-		const persistence = new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		const app = createWorkspaceApplicationSession(persistence, { kitBuild: build })
 
 		const restarted = build.restart()
@@ -712,7 +713,7 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		const resolution = await resolveSelectedWorkspaceAdapters(root, V5_LAYOUT)
 		expect(resolution).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'kit.build_output_missing' })] })
 		expect(resolution.diagnostics[0]?.message).not.toContain(root)
-		const app = createWorkspaceApplicationSession(new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY }))
+		const app = createWorkspaceApplicationSession(new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }))
 		const bundle = await getSelectedWorkspacePreviewBundle(root, V5_LAYOUT)
 		expect(bundle.state).toBe('invalid')
 		expect((await app.readProductKit())?.build).toEqual({ state: 'none' })
@@ -725,7 +726,7 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 
 		// A composition that adds a ./ Adapter outside the output is refused, one inside it stored.
 		await writeFile(join(root, 'product-kit.json'), canonicalJsonBytes(emptyProductKit()))
-		const app = createWorkspaceApplicationSession(new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY }))
+		const app = createWorkspaceApplicationSession(new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }))
 		const revision = (await app.readProductKit())!.revision
 		const refused = await app.composeProductKit({ expectedRevision: revision, designSystems: [], adapters: ['./uiux.js'] })
 		expect(refused).toMatchObject({ status: 'invalid', diagnostics: [expect.objectContaining({ code: 'product_kit.adapter_outside_build_output' })] })
@@ -740,7 +741,7 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 			'dist/kit.css': '.kit-built { color: red; }\n',
 			'src/kit.css': '.kit-source { color: blue; }\n',
 		}, [{ moduleSpecifier: './dist/uiux.js' }])
-		const app = createWorkspaceApplicationSession(new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY }))
+		const app = createWorkspaceApplicationSession(new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }))
 		const revision = (await app.readProductKit())!.revision
 		const refused = await app.updateProductKit({ expectedRevision: revision, adapters: [{ moduleSpecifier: './dist/uiux.js' }], styles: ['./src/kit.css'], themes: {} })
 		expect(refused).toMatchObject({ status: 'invalid', diagnostics: [expect.objectContaining({ code: 'product_kit.style_outside_build_output', path: '/styles/0' })] })
@@ -762,7 +763,7 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 			'dist/uiux.js': adapterModule('built'),
 			'src/card.ts': 'import \'../dist/uiux.js\'\nexport const card = 1\n',
 		})
-		const app = createWorkspaceApplicationSession(new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY }))
+		const app = createWorkspaceApplicationSession(new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }))
 		const updated = await app.updateComponentRegistry({ expectedRevision: (await app.readProductKit())!.revision, components: { card: { files: ['src/card.ts'], layer: 'product' } }, widgets: {} })
 		expect(updated).toMatchObject({ status: 'updated', findings: [expect.objectContaining({ code: 'kit.component_invalid', message: expect.stringContaining('kit/dist/uiux.js, a wrapper entry') })] })
 	})
@@ -788,7 +789,7 @@ function stubControl(state: KitBuildStatus['state']): StubControl {
 
 async function sessionWith(control: KitBuildControl | undefined) {
 	const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK })
-	const persistence = new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY })
+	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 	return { root, app: createWorkspaceApplicationSession(persistence, control ? { kitBuild: control } : {}) }
 }
 
@@ -838,7 +839,7 @@ describe('restart_kit_build and the build state over MCP and HTTP (Clauses 01a11
 
 	it('reports no_build when kit/package.json declares none, and is blocked when no build runs here', async () => {
 		const root = await kitWorkspace(undefined)
-		const persistence = new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		const build = createKitBuildRunner({ root, codeDirectoryName: 'kit', print: () => {} })
 		cleanups.push(() => build.stop())
 		const app = createWorkspaceApplicationSession(persistence, { kitBuild: build })
