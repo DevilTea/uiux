@@ -16,7 +16,8 @@ const WORKSPACE_DIRECTORY = WORKSPACE_DATA_DIRECTORY.workspaceMeta
  *   the root, and `selectWorkspace` selects it);
  * - `foreign_manifest`: a `workspace.json` that is not a Workspace manifest;
  * - `missing_product_kit`: a root without `product-kit.json`;
- * - `unsupported_schema`: a manifest whose `schemaVersion` is not the current one, older or newer.
+ * - `unsupported_schema`: a manifest, its own or its `.uiux/` child's, whose `schemaVersion` is not
+ *   the current one, older or newer.
  */
 export type WorkspaceSelectionRefusalReason =
 	| 'relocated_parent'
@@ -33,24 +34,31 @@ export type WorkspaceSelection =
  * packaged server's configured root): Clause 01a126c7-7c2a-7bb7-b4db-c86fa04ac9e9. It reads only the
  * manifest files, so a caller runs it before any lock, server hold, recovery, read or write.
  *
- * A directory whose `.uiux/workspace.json` exists is the parent of a root, whatever that manifest
- * holds. Otherwise its own `workspace.json` decides: a manifest whose `schemaVersion` is not the
- * policy's current version is refused with the message of Clause
+ * A directory whose `.uiux/workspace.json` exists is the parent of a root (`relocated_parent`),
+ * unless that child manifest's `schemaVersion` is not the policy's current version: then it is
+ * refused like the child itself. Otherwise its own `workspace.json` decides: a manifest whose
+ * `schemaVersion` is not the policy's current version is refused with the message of Clause
  * 01a14928-275b-74d5-ad43-c82932e39cb3, which also names `workspace.schema_unsupported`. A directory
  * with neither manifest is not refused here, and the command reports the missing manifest.
  */
 export function checkWorkspaceSelection(root: string, policy: Pick<WorkspaceSchemaPolicy, 'currentVersion'>): WorkspaceSelection {
 	const directory = resolve(root)
 	const childManifest = join(directory, WORKSPACE_DIRECTORY, V5_LAYOUT.manifestPath)
-	if (exists(childManifest))
+	if (exists(childManifest)) {
+		// A child at another `schemaVersion` (such as an old-layout Workspace's `.uiux/`) could not be
+		// selected either, so the refusal names its version at once (issue #232).
+		const childVersion = manifestVersion(childManifest)
+		if (childVersion !== undefined && childVersion !== policy.currentVersion)
+			return refuse('unsupported_schema', schemaRefusal(childManifest, childVersion, policy.currentVersion))
 		return refuse('relocated_parent', `${directory} is not a Workspace root: its Workspace root is ${join(directory, WORKSPACE_DIRECTORY)}; select that directory instead.`)
+	}
 	const manifest = join(directory, V5_LAYOUT.manifestPath)
 	if (exists(manifest)) {
 		const version = manifestVersion(manifest)
 		if (version === undefined)
 			return refuse('foreign_manifest', `${manifest} is not a UIUX Workspace manifest, so ${directory} is not a Workspace root.`)
 		if (version !== policy.currentVersion)
-			return refuse('unsupported_schema', `${manifest} is refused (workspace.schema_unsupported): ${unsupportedSchemaVersionMessage(version, policy.currentVersion)}`)
+			return refuse('unsupported_schema', schemaRefusal(manifest, version, policy.currentVersion))
 		const productKit = join(directory, V5_LAYOUT.productKitPath)
 		if (!isRegularFile(productKit))
 			return refuse('missing_product_kit', `${directory} has a schemaVersion ${version} manifest but no ${V5_LAYOUT.productKitPath}, which a Workspace requires.`)
@@ -218,6 +226,11 @@ function refuseLocation(reason: WorkspaceLocationRefusalReason, message: string)
 
 function refuse(reason: WorkspaceSelectionRefusalReason, message: string): WorkspaceSelection {
 	return { ok: false, reason, message }
+}
+
+/** The refusal of a manifest at another `schemaVersion` (Clause 01a14928-275b-74d5-ad43-c82932e39cb3). */
+function schemaRefusal(manifest: string, version: number, currentVersion: number): string {
+	return `${manifest} is refused (workspace.schema_unsupported): ${unsupportedSchemaVersionMessage(version, currentVersion)}`
 }
 
 /** The manifest's positive integer `schemaVersion`, or `undefined` when the file is not a manifest. */
