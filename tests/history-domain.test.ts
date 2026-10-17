@@ -20,7 +20,6 @@ import {
 	HOST_PRUNE_INTERVAL_MS,
 	HOST_RETENTION_MAX_AGE_MS,
 	HOST_RETENTION_MIN_KEPT,
-	migrationCheckpointName,
 } from '../src/domain/history/constants'
 import { projectResourceHistory } from '../src/domain/history/projection'
 import {
@@ -53,8 +52,6 @@ import {
 } from '../src/persistence'
 import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
 import { V5_LAYOUT } from '../src/persistence/paths'
-import { canonicalJsonBytes } from '../src/domain/canonical-json'
-import { builtInAccessPresetsFile } from '../src/domain/access-presets/schema'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createCurrentWorkspace } from './support/workspace-layout'
 
@@ -87,7 +84,7 @@ describe('history constants', () => {
 		expect(CHECKPOINT_NAME_MAX_LENGTH).toBe(120)
 		expect(CHECKPOINT_NOTE_MAX_LENGTH).toBe(2000)
 		expect(HISTORY_ACTOR_TYPES).toEqual(['human', 'agent', 'system', 'external'])
-		expect(HISTORY_SYSTEM_ACTOR_IDS).toEqual(['system:migrate', 'system:baseline'])
+		expect(HISTORY_SYSTEM_ACTOR_IDS).toEqual(['system:baseline'])
 		expect(HISTORY_SOURCES).toEqual(['workbench', 'mcp', 'cli'])
 		expect(COMPARISON_SUMMARY_STATUSES).toEqual(['added', 'removed', 'modified', 'unchanged'])
 		expect(HISTORY_RESOURCE_KINDS).toEqual(['workspace', 'product-kit', 'access-presets', 'view', 'flow', 'locale', 'asset'])
@@ -110,7 +107,6 @@ describe('history constants', () => {
 			'restoreResourceVersion',
 		])
 		expect(BASELINE_CHECKPOINT_NAME).toBe('Baseline')
-		expect(migrationCheckpointName(7)).toBe('Before migration to schemaVersion 7')
 	})
 
 	it('cannot be changed at runtime', () => {
@@ -126,7 +122,7 @@ describe('version record validators', () => {
 			checkpoint({ note: 'Before the redesign', parentCheckpoint: PARENT_ID }),
 			hostVersion(),
 			hostVersion({ type: 'external', actor: { type: 'external' }, events: [], netChange: true, recordingGap: true }),
-			hostVersion({ type: 'system', actor: { type: 'system', id: 'system:migrate' }, events: [], parent: PARENT_ID }),
+			hostVersion({ type: 'system', actor: { type: 'system', id: 'system:baseline' }, events: [], parent: PARENT_ID }),
 			hostVersion({ restoredFrom: PARENT_ID, adapters: [{ specifier: './adapters/reference.ts' }] }),
 		]
 		for (const record of records) {
@@ -185,13 +181,12 @@ describe('version record validators', () => {
 		expect(noteCodes('n'.repeat(2001))).toEqual(['history.invalid_checkpoint_note'])
 	})
 
-	it('requires the system checkpoint names', () => {
+	it('requires the Baseline name and refuses the retired system:migrate actor', () => {
 		const system = (id: string, name: string) => codes(validateCheckpointRecord(checkpoint({ actor: { type: 'system', id }, name, source: 'cli' })))
 		expect(system('system:baseline', 'Baseline')).toEqual([])
-		expect(system('system:migrate', migrationCheckpointName(4))).toEqual([])
 		expect(system('system:baseline', 'First')).toEqual(['history.invalid_system_checkpoint_name'])
-		expect(system('system:migrate', 'Before migration')).toEqual(['history.invalid_system_checkpoint_name'])
-		expect(system('system:migrate', 'Before migration to schemaVersion 0')).toEqual(['history.invalid_system_checkpoint_name'])
+		expect(system('system:migrate', 'Before migration to schemaVersion 4')).toEqual(['history.invalid_system_actor'])
+		expect(codes(validateHostVersionRecord(hostVersion({ type: 'system', actor: { type: 'system', id: 'system:migrate' }, events: [] })))).toEqual(['history.invalid_system_actor'])
 	})
 
 	it('validates actors, sources, operations and the closed record shapes', () => {
@@ -425,45 +420,6 @@ describe('revision parity with file-native persistence', () => {
 })
 
 describe('in-memory snapshot upgrade', () => {
-	it('upgrades every older recognized version with the product policy, relocating only the manifest and adding the Product Kit file, and leaves design files identical', async () => {
-		const policy = PRODUCT_WORKSPACE_SCHEMA_POLICY
-		const older = policy.recognizedVersions.filter(version => version < policy.currentVersion)
-		// Every version from 1 up to the one before current, each through the full step chain.
-		expect(older).toEqual(Array.from({ length: policy.currentVersion - 1 }, (_, index) => index + 1))
-		// Below 5 the old layout: the manifest in `.uiux/`, holding the Adapters.
-		for (const fromVersion of older.filter(version => version < 5)) {
-			const snapshot = designSnapshot(fromVersion)
-			const frozen = cloneSnapshot(snapshot)
-			const upgraded = await upgradeSnapshotInMemory(snapshot, fromVersion, policy)
-			expect(upgraded.steps).toHaveLength(policy.currentVersion - fromVersion)
-			// uiux.v4-to-v5 changes logical paths only for the manifest, and adds product-kit.json holding the Adapters.
-			const upgradedManifest = JSON.parse(new TextDecoder().decode(upgraded.snapshot.get(V5_LAYOUT.manifestPath))) as Record<string, unknown>
-			expect(upgradedManifest).toMatchObject({ schemaVersion: policy.currentVersion })
-			expect(upgradedManifest).not.toHaveProperty('adapters')
-			expect(JSON.parse(new TextDecoder().decode(upgraded.snapshot.get(V5_LAYOUT.productKitPath!)))).toMatchObject({ adapters: [] })
-			// uiux.v5-to-v6 then adds access-presets.json holding the built-in presets.
-			expect([...upgraded.snapshot.keys()].sort()).toEqual([...[...snapshot.keys()].filter(path => path !== WORKSPACE_MANIFEST_PATH), V5_LAYOUT.manifestPath, V5_LAYOUT.productKitPath!, V5_LAYOUT.accessPresetsPath!].sort())
-			expect(Buffer.from(upgraded.snapshot.get(V5_LAYOUT.accessPresetsPath!)!).equals(Buffer.from(canonicalJsonBytes(builtInAccessPresetsFile())))).toBe(true)
-			for (const [path, bytes] of snapshot) {
-				if (path === WORKSPACE_MANIFEST_PATH) continue
-				expect(Buffer.from(upgraded.snapshot.get(path)!).equals(Buffer.from(bytes)), path).toBe(true)
-			}
-			// The input snapshot is never mutated.
-			for (const [path, bytes] of frozen) expect(Buffer.from(snapshot.get(path)!).equals(Buffer.from(bytes))).toBe(true)
-		}
-		// From 5 the same layout: uiux.v5-to-v6 only adds the presets file and raises the manifest's schemaVersion.
-		const v5 = new Map([...designSnapshot(5)].filter(([path]) => path !== WORKSPACE_MANIFEST_PATH))
-		const { adapters: _adapters, ...v5Manifest } = manifest(5) as Record<string, unknown>
-		void _adapters
-		v5.set(V5_LAYOUT.manifestPath, json(v5Manifest))
-		v5.set(V5_LAYOUT.productKitPath!, json({ designSystems: [], adapters: [], styles: [], themes: {}, components: {}, widgets: {} }))
-		const fromV5 = await upgradeSnapshotInMemory(v5, 5, policy)
-		expect(fromV5.steps).toEqual(['uiux.v5-to-v6'])
-		expect([...fromV5.snapshot.keys()].sort()).toEqual([...v5.keys(), V5_LAYOUT.accessPresetsPath!].sort())
-		expect(JSON.parse(new TextDecoder().decode(fromV5.snapshot.get(V5_LAYOUT.manifestPath)))).toEqual({ ...v5Manifest, schemaVersion: 6 })
-		for (const [path, bytes] of v5) if (path !== V5_LAYOUT.manifestPath) expect(Buffer.from(fromV5.snapshot.get(path)!).equals(Buffer.from(bytes)), path).toBe(true)
-	})
-
 	it('returns the current version unchanged and refuses an unrecognized version', async () => {
 		const policy = PRODUCT_WORKSPACE_SCHEMA_POLICY
 		const current = designSnapshot(policy.currentVersion)
@@ -573,10 +529,6 @@ function designSnapshot(schemaVersion: number): Map<string, Uint8Array> {
 		[assetMetadataRelativePath(ASSET_ID), json({ id: ASSET_ID, name: 'Logo', contentFilename: 'logo.bin', mediaType: 'application/octet-stream' })],
 		[`assets/${ASSET_ID}/logo.bin`, Buffer.from('logo-bytes')],
 	])
-}
-
-function cloneSnapshot(snapshot: WorkspaceSnapshot): Map<string, Uint8Array> {
-	return new Map([...snapshot].map(([path, bytes]) => [path, Uint8Array.from(bytes)]))
 }
 
 function snapshotsEqual(left: WorkspaceSnapshot, right: WorkspaceSnapshot): boolean {

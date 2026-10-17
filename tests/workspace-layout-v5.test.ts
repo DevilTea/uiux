@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,7 +6,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { createHistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
-import { runMigrateCommand } from '../src/cli/migrate'
 import { builtInAccessPresetsFile } from '../src/domain/access-presets/schema'
 import type { HostVersionRecord } from '../src/domain/history/schema'
 import { emptyProductKit, validateProductKit, type ProductKit } from '../src/domain/product-kit/schema'
@@ -168,7 +166,6 @@ describe('the schemaVersion 5 layout', () => {
 
 	it('is current: UIUX\'s own policy is schemaVersion 6, which keeps the schemaVersion 5 layout a new Workspace gets', () => {
 		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(6)
-		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY.recognizedVersions).toContain(5)
 		expect(layoutForSchemaVersion(5)).toBe(V5_LAYOUT)
 		expect(layoutForSchemaVersion(PRODUCT_WORKSPACE_SCHEMA_POLICY.currentVersion)).toBe(V5_LAYOUT)
 		// Clause 01a11c09-a855-7d7e-93ec-cd9a85fdb65e: the Access presets file is a canonical, versioned root file.
@@ -364,13 +361,12 @@ describe('persistence on a schemaVersion 5 root', () => {
 		// An old-layout `.uiux/` directory selected as the root: its workspace.json is below 5.
 		const oldParent = await makeRoot()
 		await writeManifest(oldParent, v4Manifest(), LEGACY_LAYOUT)
-		const metadataDir = new FileNativePersistence({ root: join(oldParent, '.uiux'), schemaPolicy: V5_TEST_SCHEMA_POLICY })
+		const metadataDir = new FileNativePersistence({ root: join(oldParent, '.uiux'), schemaPolicy: V4_TEST_SCHEMA_POLICY })
 		expect(metadataDir.layout).toBe(V5_LAYOUT)
 		const inspected = (await metadataDir.workspace.readInspected()).inspection
 		expect(inspected).toMatchObject({ state: 'unsupported', version: 4 })
 		expect(inspected.diagnostics).toContainEqual(expect.objectContaining({ code: 'workspace.schema_unsupported', message: expect.stringMatching(/select its parent/) }))
 		await expect(metadataDir.views.create(VIEW_ID, view() as never)).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
-		await expect(metadataDir.planWorkspaceMigration()).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
 
 		// The old-layout parent of a relocated Workspace: its .uiux/workspace.json is version 5.
 		const relocatedParent = await makeRoot()
@@ -380,50 +376,6 @@ describe('persistence on a schemaVersion 5 root', () => {
 		expect((await parent.workspace.readInspected()).inspection).toMatchObject({ state: 'unsupported', version: 5 })
 		await expect(parent.views.create(VIEW_ID, view() as never)).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
 		await expect(parent.withLock(() => parent.readRecordSchemaVersionUnlocked())).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
-	})
-
-	it('refuses, before writing anything, a relocation into a metadata directory that already holds a data directory', async () => {
-		const root = await makeRoot()
-		const manifest = await writeManifest(root, v4Manifest(), LEGACY_LAYOUT)
-		await mkdir(join(root, '.uiux', 'views'))
-		const before = await readFile(manifest)
-		const persistence = new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY })
-		expect(persistence.layout).toBe(LEGACY_LAYOUT)
-		expect((await persistence.workspace.readInspected()).inspection).toMatchObject({ state: 'migration_required', version: 4, targetVersion: 5 })
-		let beforeSteps = false
-		await expect(persistence.migrateWorkspace({ async beforeSteps() { beforeSteps = true } })).rejects.toMatchObject({ code: 'workspace.migration_failed', message: expect.stringContaining('.uiux/views') })
-		await expect(persistence.planWorkspaceMigration()).rejects.toMatchObject({ code: 'workspace.migration_failed' })
-		expect(beforeSteps).toBe(false)
-		expect(await readFile(manifest)).toEqual(before)
-		expect(await readdir(root)).toEqual(['.uiux'])
-		expect((await readdir(join(root, '.uiux'))).sort()).toEqual(['views', 'workspace.json'])
-	})
-})
-
-describe('uiux migrate on a schemaVersion 5 root', () => {
-	// UIUX's own policy: schemaVersion 6 keeps the v5 layout, so `uiux.v5-to-v6` exercises migrate on the v5 paths.
-	const V6_TEST_POLICY = PRODUCT_WORKSPACE_SCHEMA_POLICY
-
-	it('finds the server hold at the v5 path and refuses, then migrates in place with history at the v5 paths', async () => {
-		const { root } = await v5Workspace(KIT)
-		const home = join(await makeRoot('uiux-layout-v5-home-'), 'home')
-		const hold = (await acquireServerHold(root, { layout: V5_LAYOUT }))!
-		const lines: string[] = []
-		const run = () => runMigrateCommand({ workspaceRoot: root, dryRun: false, home, schemaPolicy: V6_TEST_POLICY, stdout: line => lines.push(line), stderr: line => lines.push(line) })
-		expect(await run()).toBe(1)
-		expect(lines.join('\n')).toContain(`a UIUX server (pid ${process.pid}`)
-		expect(JSON.parse(await readFile(join(root, 'workspace.json'), 'utf8')).schemaVersion).toBe(5)
-		await hold.release()
-
-		lines.length = 0
-		expect(await run(), lines.join('\n')).toBe(0)
-		expect(JSON.parse(await readFile(join(root, 'workspace.json'), 'utf8')).schemaVersion).toBe(6)
-		expect(await readFile(join(root, 'product-kit.json'))).toEqual(canonicalJsonBytes(KIT))
-		expect(await readFile(join(root, 'access-presets.json'))).toEqual(canonicalJsonBytes(builtInAccessPresetsFile()))
-		const [checkpoint] = await readdir(join(root, 'history', 'checkpoints'))
-		expect(JSON.parse(await readFile(join(root, 'history', 'checkpoints', checkpoint!), 'utf8'))).toMatchObject({ workspaceSchemaVersion: 5, name: 'Before migration to schemaVersion 6' })
-		expect(lines.join('\n')).toMatch(/system version: [0-9a-f-]{36}/)
-		expect(await exists(join(root, '.uiux'))).toBe(false)
 	})
 })
 
@@ -456,47 +408,6 @@ describe('history on a schemaVersion 5 Workspace', () => {
 		expect(versions).toHaveLength(1)
 		expect(versions[0]).toMatchObject({ type: 'autosave', workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, events: [expect.objectContaining({ operation: 'updateProductKit' })] })
 		expect(versions[0]!.resources.find(resource => resource.kind === 'product-kit')?.revision).toBe(await ctx.persistence.productKit.readRevision())
-	})
-
-	it('compares and restores a version recorded in the old layout against the v5 current, by each record\'s own layout', async () => {
-		const ctx = await historyFixture(v5Workspace)
-		await ctx.persistence.views.create(VIEW_ID, view('Pay') as never)
-		const stores = (await ctx.history.open())!
-		// A version recorded at schemaVersion 4: the manifest at .uiux/workspace.json holds the Adapters.
-		const recorded = new Map<string, Uint8Array>([
-			[LEGACY_LAYOUT.manifestPath, canonicalJsonBytes(v4Manifest({ adapters: [{ moduleSpecifier: '@acme/uiux-adapter' }] }))],
-			[viewRelativePath(VIEW_ID), canonicalJsonBytes(view('Checkout'))],
-		])
-		const built = versionResourcesFromSnapshot(recorded, layoutForSchemaVersion(4))
-		for (const bytes of built.blobs.values()) await stores.host.putBlob(bytes)
-		const version: HostVersionRecord = { historySchemaVersion: 1, id: randomUUID(), type: 'autosave', actor: HUMAN, at: '2026-10-09T00:00:00.000Z', workspaceSchemaVersion: 4, resources: built.resources, startedAt: '2026-10-09T00:00:00.000Z', netChange: true, events: [] }
-		await stores.host.writeVersion(version)
-
-		const diff = await ctx.app.diffVersions({ from: version.id, to: 'current', detail: 'semantic' })
-		expect(diff.status, JSON.stringify(diff)).toBe('compared')
-		if (diff.status !== 'compared') return
-		expect(Object.fromEntries(diff.summary.map(row => [`${row.kind}:${row.key}`, row.status]))).toEqual({
-			'product-kit:product-kit': 'unchanged',
-			[`view:${VIEW_ID}`]: 'modified',
-			'workspace:workspace': 'unchanged',
-		})
-		// A Product Kit changed since is compared with what the upgrade made of the old manifest's Adapters.
-		const kit = (await ctx.persistence.productKit.read())!
-		await ctx.persistence.productKit.compareAndSwap({ key: 'product-kit', expectedRevision: kit.revision, resource: { ...kit.resource, styles: ['./dist/kit.css'] } })
-		const changed = await ctx.app.diffVersions({ from: version.id, to: 'current', detail: 'semantic', resources: [{ kind: 'product-kit', key: 'product-kit' }] })
-		expect(changed).toMatchObject({ status: 'compared', summary: [{ kind: 'product-kit', status: 'modified' }], changes: [{ kind: 'product-kit', diff: { type: 'structural', changes: [expect.objectContaining({ path: '/styles/0', after: './dist/kit.css' })] } }] })
-		// No record holds the upgraded side's revision, so the row names none.
-		expect(changed.status === 'compared' && changed.summary[0]).not.toHaveProperty('fromRevision')
-
-		const current = await ctx.persistence.views.readRevision(VIEW_ID)
-		const restored = await ctx.app.restoreResourceVersion({ versionId: version.id, resource: { kind: 'view', key: VIEW_ID }, expectedRevision: current! })
-		expect(restored).toMatchObject({ status: 'updated', kind: 'view', key: VIEW_ID })
-		expect((await ctx.persistence.views.read(VIEW_ID))?.resource).toMatchObject({ name: 'Checkout' })
-		expect(await exists(join(ctx.root, '.uiux'))).toBe(false)
-
-		// The Product Kit file is restorable (Rule 01a11c09-c648), but a version recorded at 4 holds none.
-		const kitRevision = await ctx.persistence.productKit.readRevision()
-		expect(await ctx.app.restoreResourceVersion({ versionId: version.id, resource: { kind: 'product-kit', key: 'product-kit' }, expectedRevision: kitRevision! })).toMatchObject({ status: 'not_found', code: 'history.resource_not_in_version' })
 	})
 
 	it('fails loudly instead of recording a version whose layout differs from the persistence layout', async () => {

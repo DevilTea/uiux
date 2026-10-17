@@ -4,7 +4,9 @@ import { isRecord } from '../domain/validation'
 export type WorkspaceSnapshot = ReadonlyMap<string, Uint8Array>
 
 /**
- * One step of the Workspace schema migration chain.
+ * One step of an injected Workspace schema upgrade chain. UIUX's own policy has none (Rule
+ * 01a1144e-5079-7c4e-99a4-912094aba0d4); the in-memory upgrade of recorded versions still accepts
+ * a policy that has steps.
  *
  * Invariant: a step never reads across resources. It rewrites each resource from that resource's
  * own files plus the manifest (`.uiux/workspace.json`), never from another resource's files.
@@ -19,30 +21,6 @@ export type WorkspaceMigrationStep = Readonly<{
 	id: string
 	/** Implementations must be deterministic and return the complete resulting canonical file set. */
 	apply(snapshot: WorkspaceSnapshot): WorkspaceSnapshot | Promise<WorkspaceSnapshot>
-	/**
-	 * Optional refusal check, run on the step's input snapshot by a real or dry-run `uiux migrate`
-	 * before the step applies, never by an in-memory upgrade of a recorded version. A result refuses
-	 * the whole migration: `message` explains it, and each item names one JSON Pointer path of the
-	 * source snapshot's manifest with what to change there. `context` reads the Workspace files the
-	 * check needs beyond the canonical snapshot (the kit project's package file).
-	 */
-	refuse?(snapshot: WorkspaceSnapshot, context: WorkspaceMigrationContext): WorkspaceMigrationRefusal | undefined | Promise<WorkspaceMigrationRefusal | undefined>
-}>
-
-/** What a step's refusal check may read of the Workspace being migrated. */
-export type WorkspaceMigrationContext = Readonly<{
-	/**
-	 * The bytes of a regular file at `relativePath` (relative to the selected Workspace root, `/`
-	 * separated, never through a symbolic link), or `undefined` when it does not exist. Any other
-	 * problem throws, so a check never decides on a guess.
-	 */
-	readWorkspaceFile(relativePath: string): Promise<Uint8Array | undefined>
-}>
-
-/** Why a migration step refuses a Workspace (see `WorkspaceMigrationStep.refuse`). */
-export type WorkspaceMigrationRefusal = Readonly<{
-	message: string
-	items: readonly Readonly<{ path: string; message: string }>[]
 }>
 
 export type WorkspaceSchemaPolicy = Readonly<{

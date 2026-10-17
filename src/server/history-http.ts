@@ -77,7 +77,7 @@ export function diffHttpStatus(outcome: VersionDiffOutcome | AccessRefusal): num
  *
  * - `type`: repeated, each `autosave`, `checkpoint`, `external` or `system`;
  * - `resource`: `<kind>:<key>` (split at the first colon), the per-resource projection;
- * - `actor`: an actor ID (`member:<id>`, `system:migrate`, `system:baseline`) or `external`;
+ * - `actor`: an actor ID (`member:<id>`, `system:baseline`) or `external`;
  * - `limit`: 1 to 200 (default 50); `cursor`: the `nextCursor` of the previous page.
  */
 const listVersionsQuerySchema = z.object({

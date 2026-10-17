@@ -28,8 +28,7 @@ describe('bootstrap', () => {
 		expect(output).toContain('init [--workspace <dir>]')
 		expect(output).toContain('Initialize a Workspace in <dir>')
 		expect(output).toContain('dev [--workspace <dir>] [--host <address>] [--origin <url>]...')
-		expect(output).toContain('migrate [--workspace <dir>] [--dry-run]')
-		expect(output).toContain('uiux.v4-to-v5')
+		expect(output).not.toMatch(/\bmigrate\b/u)
 		expect(output).not.toMatch(/copy before/iu)
 		expect(output).toContain('Start the unified UIUX Workbench/Nitro server')
 		expect(output).not.toContain('publish')
@@ -37,6 +36,17 @@ describe('bootstrap', () => {
 
 	it('treats publish as an unknown command now that static publication is removed', () => {
 		for (const args of [['publish'], ['publish', '--workspace', '.', '--out', 'site']]) {
+			const result = spawnSync(process.execPath, [cliPath, ...args], { encoding: 'utf8' })
+			expect(result.status).toBe(2)
+			expect(result.stderr).toContain(`uiux: unknown command or option: ${args.join(' ')}`)
+			// Usage follows, with no removal notice.
+			expect(result.stdout).toContain('Usage: uiux <command>')
+			expect(`${result.stdout}${result.stderr}`).not.toMatch(/removed|no longer/iu)
+		}
+	})
+
+	it('treats migrate as an unknown command now that Workspace migration is removed (Discussion #231)', () => {
+		for (const args of [['migrate'], ['migrate', '--workspace', '.'], ['migrate', '--workspace', '.', '--dry-run']]) {
 			const result = spawnSync(process.execPath, [cliPath, ...args], { encoding: 'utf8' })
 			expect(result.status).toBe(2)
 			expect(result.stderr).toContain(`uiux: unknown command or option: ${args.join(' ')}`)

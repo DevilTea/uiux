@@ -362,91 +362,6 @@ describe('file-native persistence', () => {
 		expect(await readFile(artifactPath)).toEqual(corrupted)
 	})
 
-	it('allows inspection of recognized old schemas, blocks normal writes, then migrates complete results deterministically', async () => {
-		const resultA = await runSuccessfulMigration()
-		const resultB = await runSuccessfulMigration()
-		expect(resultA.changedFiles).toEqual(['.uiux/workspace.json', `views/${VIEW_ID}.view.json`])
-		expect(resultA.steps).toEqual(['synthetic-1-to-2'])
-		expect(resultA.manifest).toEqual(resultB.manifest)
-		expect(resultA.view).toEqual(resultB.view)
-		expect(JSON.parse(resultA.manifest).schemaVersion).toBe(2)
-		expect(JSON.parse(resultA.view).name).toBe('Checkout migrated')
-	})
-
-	it('migrates a Workspace containing an authored Asset (result validation checks Asset filenames, not the directory UUID)', async () => {
-		const root = await makeRoot()
-		await seedOldWorkspace(root, Buffer.from(JSON.stringify(workspaceFixture(1), null, 2)), Buffer.from(JSON.stringify(viewFixture(), null, 2)))
-		await mkdir(join(root, 'assets', ASSET_ID), { recursive: true })
-		await writeFile(join(root, assetMetadataRelativePath(ASSET_ID)), JSON.stringify(assetFixture('logo.svg', 'Logo')))
-		await writeFile(join(root, 'assets', ASSET_ID, 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
-		const persistence = new FileNativePersistence({ root, schemaPolicy: migrationPolicy() })
-		const plan = await persistence.planWorkspaceMigration()
-		expect(plan.changedFiles).toEqual(['.uiux/workspace.json', `views/${VIEW_ID}.view.json`])
-		expect((await persistence.inspectWorkspace()).inspection.state).toBe('migration_required')
-		const migration = await persistence.migrateWorkspace()
-		expect(migration.steps).toEqual(['synthetic-1-to-2'])
-		expect((await persistence.inspectWorkspace()).inspection.state).toBe('current')
-	})
-
-	it('aborts migration if canonical files change out of band during migration planning', async () => {
-		const root = await makeRoot()
-		const oldManifest = Buffer.from(JSON.stringify(workspaceFixture(1), null, 2))
-		const oldView = Buffer.from(JSON.stringify(viewFixture(), null, 2))
-		await seedOldWorkspace(root, oldManifest, oldView)
-		const externalView = Buffer.from(JSON.stringify({ ...viewFixture(), name: 'External edit during planning' }, null, 2))
-		const migrationPolicy = defineWorkspaceSchemaPolicy({
-			currentVersion: 2,
-			recognizedVersions: [1, 2],
-			steps: [{
-				id: 'synthetic-oob-1-to-2',
-				fromVersion: 1,
-				toVersion: 2,
-				async apply(snapshot: WorkspaceSnapshot) {
-					await writeFile(join(root, viewRelativePath(VIEW_ID)), externalView)
-					const next = new Map(snapshot)
-					const manifest = JSON.parse(new TextDecoder().decode(next.get(workspaceRelativePath())!)) as Record<string, unknown>
-					manifest.schemaVersion = 2
-					next.set(workspaceRelativePath(), Buffer.from(`${JSON.stringify(manifest)}\n`))
-					return next
-				},
-			}],
-		})
-		const persistence = new FileNativePersistence({ root, schemaPolicy: migrationPolicy })
-		await expect(persistence.migrateWorkspace()).rejects.toMatchObject({ code: 'workspace.migration_failed' })
-		expect(await readFile(join(root, workspaceRelativePath()))).toEqual(oldManifest)
-		expect(await readFile(join(root, viewRelativePath(VIEW_ID)))).toEqual(externalView)
-		expect(await readdir(join(root, '.uiux', '.transactions')).catch(() => [])).toEqual([])
-	})
-
-	it('rolls back migration failures at multiple apply points without a mixed authoritative workspace', async () => {
-		for (const target of [
-			{ point: 'migration.before_apply' as const, index: 0 },
-			{ point: 'migration.after_apply' as const, index: 0 },
-			{ point: 'migration.before_apply' as const, index: 1 },
-		]) {
-			const root = await makeRoot()
-			let failure: { point: PersistenceFaultPoint; index: number } | undefined = target
-			const persistence = new FileNativePersistence({
-				root,
-				schemaPolicy: migrationPolicy(),
-				fault(point, details) {
-					if (failure && point === failure.point && details.index === failure.index) {
-						failure = undefined
-						throw new Error('migration apply interruption')
-					}
-				},
-			})
-			const oldManifest = Buffer.from(JSON.stringify(workspaceFixture(1), null, 2))
-			const oldView = Buffer.from(JSON.stringify(viewFixture(), null, 2))
-			await seedOldWorkspace(root, oldManifest, oldView)
-			await expect(persistence.migrateWorkspace()).rejects.toMatchObject({ code: 'workspace.migration_failed' })
-			expect(await readFile(join(root, workspaceRelativePath()))).toEqual(oldManifest)
-			expect(await readFile(join(root, viewRelativePath(VIEW_ID)))).toEqual(oldView)
-			expect((await persistence.inspectWorkspace()).inspection.state).toBe('migration_required')
-			expect(await readdir(join(root, '.uiux', '.transactions')).catch(() => [])).toEqual([])
-		}
-	})
-
 	it('recovers an interrupted transaction before exposing canonical reads', async () => {
 		const { root, persistence } = await newWorkspace()
 		await persistence.views.create(VIEW_ID, viewFixture())
@@ -504,7 +419,6 @@ describe('file-native persistence', () => {
 		expect(result.inspection.diagnostics.some(item => item.code === 'workspace.schema_unsupported')).toBe(true)
 		await expect(persistence.workspace.compareAndSwap({ key: 'workspace', expectedRevision: result.revision!, resource: currentManifest() as WorkspaceManifest }))
 			.rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
-		await expect(persistence.migrateWorkspace()).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
 		expect(await readFile(manifestPath(root))).toEqual(bytes)
 	})
 
@@ -894,22 +808,4 @@ async function seedOldWorkspace(root: string, manifest: Uint8Array, view: Uint8A
 	await mkdir(join(root, 'views'), { recursive: true })
 	await writeFile(join(root, workspaceRelativePath()), manifest)
 	await writeFile(join(root, viewRelativePath(VIEW_ID)), view)
-}
-
-async function runSuccessfulMigration(): Promise<{ changedFiles: readonly string[]; steps: readonly string[]; manifest: string; view: string }> {
-	const root = await makeRoot()
-	const persistence = new FileNativePersistence({ root, schemaPolicy: migrationPolicy() })
-	await seedOldWorkspace(root, Buffer.from(JSON.stringify(workspaceFixture(1), null, 2)), Buffer.from(JSON.stringify(viewFixture(), null, 2)))
-	const before = await persistence.inspectWorkspace()
-	expect(before.inspection.state).toBe('migration_required')
-	const view = await persistence.views.read(VIEW_ID)
-	await expect(persistence.views.compareAndSwap({ key: VIEW_ID, expectedRevision: view!.revision, resource: viewFixture() }))
-		.rejects.toMatchObject({ code: 'workspace.migration_required' })
-	const migration = await persistence.migrateWorkspace()
-	return {
-		changedFiles: migration.changedFiles,
-		steps: migration.steps,
-		manifest: await readFile(join(root, workspaceRelativePath()), 'utf8'),
-		view: await readFile(join(root, viewRelativePath(VIEW_ID)), 'utf8'),
-	}
 }

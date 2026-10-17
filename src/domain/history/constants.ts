@@ -65,18 +65,15 @@ export type HistoryWriteOperation = typeof HISTORY_WRITE_OPERATIONS[number]
 /** Clause 01a11a5e-21c4-79f7-b6f9-4128d842c278: actor types and system actor ids. */
 export const HISTORY_ACTOR_TYPES = Object.freeze(['human', 'agent', 'system', 'external'] as const)
 export type HistoryActorType = typeof HISTORY_ACTOR_TYPES[number]
-export const HISTORY_SYSTEM_ACTOR_IDS = Object.freeze(['system:migrate', 'system:baseline'] as const)
+export const HISTORY_SYSTEM_ACTOR_IDS = Object.freeze(['system:baseline'] as const)
 export type HistorySystemActorId = typeof HISTORY_SYSTEM_ACTOR_IDS[number]
 
 /** Clause 01a11a5e-221b-7a04-a6cb-66bc9608c11f. */
 export const HISTORY_SOURCES = Object.freeze(['workbench', 'mcp', 'cli'] as const)
 export type HistorySource = typeof HISTORY_SOURCES[number]
 
-/** Clause 01a11a5e-22ca-756e-8128-8f730ca887c9: system checkpoint names. */
+/** Clause 01a11a5e-22ca-756e-8128-8f730ca887c9: the Baseline Checkpoint's name. */
 export const BASELINE_CHECKPOINT_NAME = 'Baseline'
-export function migrationCheckpointName(targetSchemaVersion: number): string {
-	return `Before migration to schemaVersion ${targetSchemaVersion}`
-}
 
 /** Clause 01a11a5e-23cd-718c-b4db-807f823238ed: per-resource comparison summary statuses. */
 export const COMPARISON_SUMMARY_STATUSES = Object.freeze(['added', 'removed', 'modified', 'unchanged'] as const)

@@ -12,9 +12,5 @@
  * `history-restore.test.ts` uses it too: each test starts a history recorder, writes Checkpoints and
  * fsynced host versions and restores through the full write path (one also assesses Handoff
  * readiness), taking 0.7 to 2.5 s alone and about 5.5 s for the readiness test.
- *
- * `workspace-relocation.test.ts` uses it for its on-disk suites: each test seeds a Workspace and runs
- * one or more fsynced relocations, rollbacks or `uiux migrate` runs (several, and copies of the disk
- * state, for the crash tests), under a second each alone but past 5 s under the full run's load.
  */
 export const HEAVY_SERVER_SUITE_TIMEOUT_MS = 20_000

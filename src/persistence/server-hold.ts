@@ -8,8 +8,8 @@ import { LEGACY_LAYOUT, resolveLayoutDirectory, resolveWorkspacePath, type Works
 
 /**
  * A live UIUX server's claim on its selected Workspace. It is local runtime state (never a
- * canonical file, never migrated or exported) that lets operator commands such as
- * `uiux migrate` refuse to rewrite a Workspace that a running server is serving. This is its path in
+ * canonical file, never exported) that lets operator commands such as `uiux access copy` refuse
+ * to change the host history of a Workspace that a running server is serving. This is its path in
  * the legacy layout; a caller that holds a layout reads `layout.serverHoldPath`.
  */
 export const SERVER_HOLD_RELATIVE_PATH = LEGACY_LAYOUT.serverHoldPath

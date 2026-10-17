@@ -7,17 +7,14 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { validateReviewRenderContextInput, validateReviewThread } from '../src/domain/reviews/schema'
 import { FileNativePersistence } from '../src/persistence/file-native'
-import { localeRelativePath, reviewRelativePath, viewRelativePath, workspaceRelativePath } from '../src/persistence/paths'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY, WORKSPACE_V3_TO_V4_STEP } from '../src/product/workspace-schema'
-import { currentManifest, manifestPath, V4_TEST_SCHEMA_POLICY, writeCurrentWorkspace } from './support/workspace-layout'
-
-/** The step from 3 to 4, in the old layout under a build where 4 is current. */
-const V4_POLICY = V4_TEST_SCHEMA_POLICY
+import { localeRelativePath, reviewRelativePath, viewRelativePath } from '../src/persistence/paths'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { currentManifest, manifestPath, writeCurrentWorkspace } from './support/workspace-layout'
 
 /**
  * Accepted decision group "Review render context" (Part 7, Discussion #7 c11), persisted shape only:
  * Clause 01a1170f-baf0-7eea-a904-7367227c10b3 (thread `renderContext`, Widget arm only, re-anchor
- * `before`/`after`) and the manifest-only `uiux.v3-to-v4` step (01a114ec-890a-73a1-808b-cb08087a9597).
+ * `before`/`after`).
  */
 
 const V3 = { schemaVersion: 3 } as const
@@ -180,25 +177,12 @@ afterEach(async () => {
 	await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
-const v3Manifest = { schemaVersion: 3, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: { mobile: { dimensions: { width: 390, height: 844 } } }, themes: { dark: {} } }
 const view = {
 	id: VIEW_ID,
 	name: 'Checkout',
 	ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 	variants: {},
 	spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
-}
-
-async function seedV3Workspace(reviews: readonly Record<string, unknown>[]): Promise<string> {
-	const root = await mkdtemp(join(tmpdir(), 'uiux-v3-to-v4-'))
-	roots.push(root)
-	await mkdir(join(root, '.uiux'), { recursive: true })
-	await mkdir(join(root, 'views'), { recursive: true })
-	await mkdir(join(root, 'reviews'), { recursive: true })
-	await writeFile(join(root, workspaceRelativePath()), `${JSON.stringify(v3Manifest, null, 2)}\n`)
-	await writeFile(join(root, viewRelativePath(VIEW_ID)), `${JSON.stringify(view)}\n`)
-	for (const review of reviews) await writeFile(join(root, reviewRelativePath(review.id as string)), `${JSON.stringify(review)}\n`)
-	return root
 }
 
 /** The settings of the Workspaces below: one authored viewport and one authored theme. */
@@ -214,66 +198,6 @@ async function seedCurrentWorkspace(): Promise<string> {
 	await writeFile(join(root, viewRelativePath(VIEW_ID)), `${JSON.stringify(view)}\n`)
 	return root
 }
-
-async function snapshot(root: string): Promise<Record<string, string>> {
-	const files: Record<string, string> = {}
-	for (const directory of ['.uiux', 'views', 'reviews']) {
-		for (const entry of await readdir(join(root, directory), { withFileTypes: true }))
-			if (entry.isFile()) files[`${directory}/${entry.name}`] = await readFile(join(root, directory, entry.name), 'utf8')
-	}
-	return files
-}
-
-describe('uiux.v3-to-v4 (manifest-only step)', () => {
-	it('bumps only the manifest, backfills no renderContext, and is idempotent', async () => {
-		const root = await seedV3Workspace([thread({ anchor: WORKSPACE })])
-		const before = await snapshot(root)
-		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_POLICY })
-		expect((await persistence.inspectWorkspace()).inspection).toMatchObject({ state: 'migration_required', version: 3, targetVersion: 4 })
-		expect(await persistence.planWorkspaceMigration()).toMatchObject({ fromVersion: 3, version: 4, steps: ['uiux.v3-to-v4'], changedFiles: ['.uiux/workspace.json'] })
-		expect(await snapshot(root)).toEqual(before)
-		const result = await persistence.migrateWorkspace()
-		expect(result).toMatchObject({ fromVersion: 3, version: 4, steps: ['uiux.v3-to-v4'], changedFiles: ['.uiux/workspace.json'] })
-		const after = await snapshot(root)
-		expect(JSON.parse(after['.uiux/workspace.json']!)).toEqual({ ...v3Manifest, schemaVersion: 4 })
-		for (const path of Object.keys(before).filter(path => path !== '.uiux/workspace.json')) expect(after[path]).toBe(before[path])
-		expect((await persistence.reviews.readInspected(REVIEW_ID))?.diagnostics).toEqual([])
-		expect(await persistence.migrateWorkspace()).toMatchObject({ version: 4, steps: [], changedFiles: [], revision: result.revision })
-		expect(await snapshot(root)).toEqual(after)
-	})
-
-	it('decodes a v4 thread with renderContext through persistence once migrated', async () => {
-		const root = await seedV3Workspace([])
-		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_POLICY })
-		await persistence.migrateWorkspace()
-		await writeFile(join(root, reviewRelativePath(REVIEW_ID)), `${JSON.stringify(thread({ renderContext: ZH_MOBILE_DARK }))}\n`)
-		expect((await persistence.reviews.readInspected(REVIEW_ID))?.diagnostics).toEqual([])
-		expect((await persistence.reviews.read(REVIEW_ID))?.resource.renderContext).toEqual(ZH_MOBILE_DARK)
-	})
-
-	it('leaves v4-only content smuggled into a v3 file byte-identical: refused under v3, decoded under v4 once migrated', async () => {
-		const smuggled = thread({ id: '77777777-7777-4777-8777-777777777777', renderContext: ZH_MOBILE_DARK })
-		const root = await seedV3Workspace([thread(), smuggled])
-		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_POLICY })
-		expect((await persistence.reviews.readInspected(smuggled.id as string))?.diagnostics.map(item => item.code)).toEqual(['schema.unknown_field'])
-		const bytes = await readFile(join(root, reviewRelativePath(smuggled.id as string)), 'utf8')
-		expect((await persistence.migrateWorkspace()).changedFiles).toEqual(['.uiux/workspace.json'])
-		expect(await readFile(join(root, reviewRelativePath(smuggled.id as string)), 'utf8')).toBe(bytes)
-		expect((await persistence.reviews.readInspected(smuggled.id as string))?.diagnostics).toEqual([])
-	})
-
-	it('refuses to apply to anything but a v3 manifest and leaves unparseable Reviews to persistence', async () => {
-		const manifest = (version: number) => new Map<string, Uint8Array>([[workspaceRelativePath(), new TextEncoder().encode(JSON.stringify({ ...v3Manifest, schemaVersion: version }))]])
-		expect(() => WORKSPACE_V3_TO_V4_STEP.apply(manifest(2))).toThrow(/schemaVersion 3/)
-		expect(() => WORKSPACE_V3_TO_V4_STEP.apply(manifest(4))).toThrow(/schemaVersion 3/)
-		expect(() => WORKSPACE_V3_TO_V4_STEP.apply(new Map())).toThrow(/workspace\.json/)
-		const withBroken = manifest(3)
-		withBroken.set('reviews/x.review.json', new TextEncoder().encode('{ not json'))
-		const next = await WORKSPACE_V3_TO_V4_STEP.apply(withBroken)
-		expect(new TextDecoder().decode(next.get('reviews/x.review.json'))).toBe('{ not json')
-		expect(JSON.parse(new TextDecoder().decode(next.get(workspaceRelativePath()))).schemaVersion).toBe(4)
-	})
-})
 
 describe('re-anchor keeps or clears the recorded renderContext (owner ruling 1, omitted keeps)', () => {
 	async function seedThreadWithContext() {

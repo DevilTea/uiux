@@ -23,7 +23,8 @@ export default defineNitroPlugin((nitroApp) => {
 			process.exit(2)
 		}
 		const runtime = getSelectedWorkspaceServerRuntime()
-		// A live server holds its selected Workspace so `uiux migrate` refuses to rewrite it underneath.
+		// A live server holds its selected Workspace so `uiux access copy` refuses to copy host history
+		// underneath it, and `uiux invite create` can name its port.
 		if (!import.meta.prerender) {
 			// Secrets never appear in logs (identity decision 3).
 			installLogRedaction()

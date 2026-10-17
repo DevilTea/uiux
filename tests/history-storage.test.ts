@@ -81,7 +81,7 @@ function iso(ms: number): string {
 
 function hostVersion(overrides: Partial<HostVersionRecord> & Pick<HostVersionRecord, 'type'>): HostVersionRecord {
 	const at = overrides.at ?? NOW.toISOString()
-	const actor: HistoryActor = overrides.type === 'external' ? { type: 'external' } : overrides.type === 'system' ? { type: 'system', id: 'system:migrate' } : AGENT
+	const actor: HistoryActor = overrides.type === 'external' ? { type: 'external' } : overrides.type === 'system' ? { type: 'system', id: 'system:baseline' } : AGENT
 	return {
 		historySchemaVersion: 1,
 		id: randomUUID(),

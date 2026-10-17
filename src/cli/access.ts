@@ -74,10 +74,10 @@ current directory; the roster lives in $UIUX_HOME, default ~/.uiux):
                                              (--origin defaults to the loopback origin on the server's port)
   session list
   session revoke <session-id> | --member <nick>
-  access copy --from <old-dir> [--replace]   (roster and host history, once; after uiux migrate moves a
-                                             Workspace into <old-dir>/.uiux/, copy --from <old-dir> before
-                                             the first uiux dev there; --replace discards the target's
-                                             roster and own host history)`
+  access copy --from <old-dir> [--replace]   (roster and host history from another Workspace path, once,
+                                             such as after moving a Workspace; copy before the first
+                                             uiux dev there; --replace discards the target's roster and
+                                             own host history)`
 
 class UsageError extends Error {}
 
@@ -585,7 +585,7 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				if (copied) {
 					context.out(`Copied the host history (${copied.files} file(s)) from ${history.source.dir} to ${history.target.dir}.`)
 					if (history.targetExists)
-						context.out(`--replace discarded the target's own host history: ${copied.discardedVersions} version(s), such as the system version of a uiux migrate run there.`)
+						context.out(`--replace discarded the target's own host history: ${copied.discardedVersions} version(s).`)
 					if (copied.missingBlobs.length > 0)
 						context.err(`uiux: warning: ${copied.missingBlobs.length} blob(s) that copied versions name are missing from the source host history too; those versions cannot be compared or restored.`)
 				}
