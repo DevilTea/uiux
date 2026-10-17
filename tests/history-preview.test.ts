@@ -90,9 +90,9 @@ beforeAll(async () => {
 	await runtime.persistence.locales.create('en-US', { greeting: 'Hello' })
 	expect(await runtime.historyRecorder.start()).toMatchObject({ enabled: true, baseline: expect.any(String) })
 
-	ownerToken = await provisionToken(root, { nickname: 'mei', kind: 'human', role: 'owner' })
-	agentToken = await provisionToken(root, { nickname: 'claude', kind: 'agent', role: 'editor' })
-	viewerToken = await provisionToken(root, { nickname: 'vera', kind: 'human', role: 'viewer' })
+	ownerToken = await provisionToken(root, { nickname: 'mei', kind: 'human', preset: 'owner' })
+	agentToken = await provisionToken(root, { nickname: 'claude', kind: 'agent', preset: 'editor' })
+	viewerToken = await provisionToken(root, { nickname: 'vera', kind: 'human', preset: 'viewer' })
 
 	const created = await fetch(`${origin}/api/views`, {
 		method: 'POST',
@@ -213,7 +213,7 @@ describe('access to the version reads for Preview (Clauses 01a11485-fa00 and f97
  */
 describe('version reads for Preview across schema versions', () => {
 	const AGENT = { type: 'agent', id: 'member:m-agent', displayName: 'claude' } as const
-	const VIEWER = testMember({ nickname: 'vera', kind: 'human', role: 'viewer', credential: 'session' })
+	const VIEWER = testMember({ nickname: 'vera', kind: 'human', preset: 'viewer', credential: 'session' })
 	/** The current manifest, with no `adapters` from schemaVersion 5. */
 	const MANIFEST = { schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, viewports: { desktop: { label: 'Desktop', dimensions: { width: 1280, height: 800 } } }, themes: {} }
 	const view = (id: string, name: string) => ({

@@ -15,7 +15,7 @@ import { setMember } from '../src/server/access/roster'
 import { AccessService } from '../src/server/access/service'
 import { AccessStore } from '../src/server/access/store'
 import { appendReviewMessageForHttp, mapAuthoringResultToHttpStatus, updateViewSpecForHttp } from '../src/server/authoring-http'
-import { connectMcp, scoped, testMember } from './support/access'
+import { connectMcp, presetKeys, scoped, testMember } from './support/access'
 import { createCurrentWorkspace } from './support/workspace-layout'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
@@ -129,9 +129,9 @@ describe('leases through MCP and HTTP', () => {
 	it('locks a View for other writers with 423 resource.locked, complements CAS, and yields to an Owner force-release', async () => {
 		const ctx = await fixture()
 		const leases = createLeaseManager()
-		const claude = testMember({ nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' })
-		const other = testMember({ nickname: 'claude-wt-a', kind: 'agent', role: 'editor', credential: 'token' })
-		const owner = testMember({ nickname: 'deviltea', kind: 'human', role: 'owner', credential: 'session' })
+		const claude = testMember({ nickname: 'claude', kind: 'agent', preset: 'editor', credential: 'token' })
+		const other = testMember({ nickname: 'claude-wt-a', kind: 'agent', preset: 'editor', credential: 'token' })
+		const owner = testMember({ nickname: 'deviltea', kind: 'human', preset: 'owner', credential: 'session' })
 		const agent = await connectMcp(ctx.app, claude, { leases })
 		const second = await connectMcp(ctx.app, other, { leases })
 		try {
@@ -188,8 +188,8 @@ describe('leases through MCP and HTTP', () => {
 	it('serves acquire_lock / release_lock: all-or-nothing, renewing, idempotent and covering creates', async () => {
 		const ctx = await fixture()
 		const leases = createLeaseManager()
-		const agent = await connectMcp(ctx.app, testMember({ nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' }), { leases })
-		const other = await connectMcp(ctx.app, testMember({ nickname: 'other', kind: 'agent', role: 'editor', credential: 'token' }), { leases })
+		const agent = await connectMcp(ctx.app, testMember({ nickname: 'claude', kind: 'agent', preset: 'editor', credential: 'token' }), { leases })
+		const other = await connectMcp(ctx.app, testMember({ nickname: 'other', kind: 'agent', preset: 'editor', credential: 'token' }), { leases })
 		try {
 			const acquired = await agent.client.callTool({ name: 'acquire_lock', arguments: { resources: [{ kind: 'view', key: VIEW_ID }, { kind: 'workspace', key: 'workspace' }] } })
 			expect(acquired.structuredContent).toMatchObject({ status: 'acquired', leases: [{ kind: 'view', key: VIEW_ID }, { kind: 'workspace', key: 'workspace' }] })
@@ -231,7 +231,7 @@ describe('leases by write key (Rules 01a11c09-c125, 01a11485-f074, 01a11485-f08f
 		expect(translator.acquireLeases({ resources: [{ kind: 'locale', key: 'en-US' }] })).toMatchObject({ status: 'acquired', leases: [{ kind: 'locale', key: 'en-US' }] })
 		// Malformed input is the request's fault once the member may lease some kind; a member that may lease none is refused first.
 		expect(translator.acquireLeases({ resources: [] })).toMatchObject({ status: 'invalid', code: 'lease.invalid_resources' })
-		const reader = scoped(ctx.app, testMember({ nickname: 'vera', kind: 'agent', role: 'viewer', credential: 'token' }), { leases })
+		const reader = scoped(ctx.app, testMember({ nickname: 'vera', kind: 'agent', preset: 'viewer', credential: 'token' }), { leases })
 		expect(reader.acquireLeases({ resources: [] })).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['views.write', 'flows.write', 'locales.write', 'assets.write', 'settings.write', 'product-kit.write'] })
 		// Releasing needs no key, and releases only one's own leases.
 		expect(await reader.releaseLeases({})).toMatchObject({ status: 'released', released: [] })
@@ -243,7 +243,7 @@ describe('leases by write key (Rules 01a11c09-c125, 01a11485-f074, 01a11485-f08f
 	it('exempts no key holder from another member\'s lease: even every catalog key needs a force-release first', async () => {
 		const ctx = await fixture()
 		const leases = createLeaseManager()
-		const claude = testMember({ nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' })
+		const claude = testMember({ nickname: 'claude', kind: 'agent', preset: 'editor', credential: 'token' })
 		expect(scoped(ctx.app, claude, { leases }).acquireLeases({ resources: [{ kind: 'view', key: VIEW_ID }] })).toMatchObject({ status: 'acquired' })
 		const everyKey = scoped(ctx.app, testMember({ nickname: 'root', kind: 'human', credential: 'session', keys: PERMISSION_KEYS }), { leases })
 		expect(await everyKey.updateViewSpec({ key: VIEW_ID, expectedRevision: ctx.viewRevision, spec: spec('mine') })).toMatchObject({ status: 'locked', code: 'resource.locked' })
@@ -256,8 +256,8 @@ describe('leases by write key (Rules 01a11c09-c125, 01a11485-f074, 01a11485-f08f
 		const leases = createLeaseManager()
 		const promote = (principal: MemberPrincipal, viewRevision: string, reviewRevision: string) => scoped(ctx.app, principal, { leases })
 			.promoteReviewToDecision({ reviewId: REVIEW_ID, expectedReviewRevision: reviewRevision, viewId: VIEW_ID, expectedViewRevision: viewRevision, question: 'Keep it?' })
-		const critic = testMember({ nickname: 'critic', kind: 'agent', role: 'reviewer', credential: 'token' })
-		const holder = testMember({ nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' })
+		const critic = testMember({ nickname: 'critic', kind: 'agent', preset: 'reviewer', credential: 'token' })
+		const holder = testMember({ nickname: 'claude', kind: 'agent', preset: 'editor', credential: 'token' })
 
 		// Another member's lease blocks the promotion, which writes the View.
 		expect(scoped(ctx.app, holder, { leases }).acquireLeases({ resources: [{ kind: 'view', key: VIEW_ID }] })).toMatchObject({ status: 'acquired' })
@@ -286,14 +286,14 @@ describe('leases by write key (Rules 01a11c09-c125, 01a11485-f074, 01a11485-f08f
 		const store = (await AccessStore.open({ workspaceRoot, home: join(base, 'home'), create: true }))!
 		const leases = createLeaseManager()
 		const service = new AccessService({ store, leases })
-		const bot = await service.addMember({ nickname: 'bot', role: 'editor', kind: 'agent' })
-		const pal = await service.addMember({ nickname: 'pal', role: 'editor', kind: 'agent' })
+		const bot = await service.addMember({ nickname: 'bot', keys: presetKeys('editor', 'agent'), kind: 'agent' })
+		const pal = await service.addMember({ nickname: 'pal', keys: presetKeys('editor', 'agent'), kind: 'agent' })
 		leases.acquire([{ kind: 'view', key: VIEW_ID }, { kind: 'flow', key: FLOW_KEY }], { memberId: bot.id, nickname: 'bot', kind: 'agent' })
 		leases.acquire([{ kind: 'workspace', key: 'workspace' }], { memberId: pal.id, nickname: 'pal', kind: 'agent' })
 
 		await service.setMember(bot.id, { nickname: 'bot-renamed' })
 		expect(leases.list().map(lease => lease.kind)).toEqual(['flow', 'view', 'workspace'])
-		await service.setMember(bot.id, { role: 'reviewer' })
+		await service.setMember(bot.id, { keys: presetKeys('reviewer', 'agent') })
 		expect(leases.list().map(lease => [lease.holder.nickname, lease.kind])).toEqual([['pal', 'workspace']])
 		await service.removeMember(pal.id)
 		expect(leases.list()).toEqual([])
@@ -325,8 +325,8 @@ describe('leases by write key (Rules 01a11c09-c125, 01a11485-f074, 01a11485-f08f
 		const store = (await AccessStore.open({ workspaceRoot, home, create: true }))!
 		const leases = createLeaseManager()
 		const service = new AccessService({ store, leases })
-		const bot = await service.addMember({ nickname: 'bot', role: 'editor', kind: 'agent' })
-		const pal = await service.addMember({ nickname: 'pal', role: 'editor', kind: 'agent' })
+		const bot = await service.addMember({ nickname: 'bot', keys: presetKeys('editor', 'agent'), kind: 'agent' })
+		const pal = await service.addMember({ nickname: 'pal', keys: presetKeys('editor', 'agent'), kind: 'agent' })
 		const botHolder: LeaseHolder = { memberId: bot.id, nickname: 'bot', kind: 'agent' }
 		const palHolder: LeaseHolder = { memberId: pal.id, nickname: 'pal', kind: 'agent' }
 		expect(leases.acquire([VIEW], botHolder)).toMatchObject({ status: 'acquired' })
@@ -334,7 +334,7 @@ describe('leases by write key (Rules 01a11c09-c125, 01a11485-f074, 01a11485-f08f
 		// The CLI takes `views.write` from bot; the server then reads that roster through a write of
 		// its own (as a usage flush does), which does not reconcile leases.
 		const cli = (await AccessStore.open({ workspaceRoot, home }))!
-		await cli.update(file => setMember(file, 'bot', { role: 'reviewer' }))
+		await cli.update(file => setMember(file, 'bot', { keys: presetKeys('reviewer', 'agent') }))
 		await store.update(file => ({ file, result: undefined }))
 		expect(store.data.members.find(member => member.id === bot.id)!.keys).not.toContain('views.write')
 

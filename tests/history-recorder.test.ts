@@ -40,9 +40,9 @@ const OTHER_VIEW_ID = '22222222-2222-4222-8222-222222222222'
 const REVIEW_ID = '33333333-3333-4333-8333-333333333333'
 const START = Date.parse('2026-10-09T00:00:00.000Z')
 
-const AGENT = testMember({ memberId: 'agent-1', nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' })
-const OTHER_AGENT = testMember({ memberId: 'agent-2', nickname: 'codex', kind: 'agent', role: 'editor', credential: 'token' })
-const HUMAN = testMember({ memberId: 'human-1', nickname: 'mei', kind: 'human', role: 'owner', credential: 'session' })
+const AGENT = testMember({ memberId: 'agent-1', nickname: 'claude', kind: 'agent', preset: 'editor', credential: 'token' })
+const OTHER_AGENT = testMember({ memberId: 'agent-2', nickname: 'codex', kind: 'agent', preset: 'editor', credential: 'token' })
+const HUMAN = testMember({ memberId: 'human-1', nickname: 'mei', kind: 'human', preset: 'owner', credential: 'session' })
 
 const cleanup: string[] = []
 beforeEach(async () => {

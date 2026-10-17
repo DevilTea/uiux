@@ -123,7 +123,7 @@ describe('Overview and readiness (R9)', () => {
 	}, 120_000)
 
 	it('gates capture and export by key: a Viewer can read readiness but not capture or export, and the notices name the keys', async () => {
-		const token = await provisionToken(server.workspaceRoot, { nickname: 'r9viewer', kind: 'human', role: 'viewer' })
+		const token = await provisionToken(server.workspaceRoot, { nickname: 'r9viewer', kind: 'human', preset: 'viewer' })
 		const cookie = await sessionCookieFor(server.origin, token)
 		const refused = await api('/api/evidence/capture', {
 			method: 'POST',

@@ -67,7 +67,7 @@ beforeAll(async () => {
 	server = await startWorkbenchServer()
 	browser = await chromium.launch({ headless: true })
 	for (const [nickname, kind, role] of [['mei', 'human', 'reviewer'], ['jun', 'human', 'reviewer'], ['claude', 'agent', 'editor']] as const)
-		authors[nickname] = bearer(await provisionToken(server.workspaceRoot, { nickname, kind, role }))
+		authors[nickname] = bearer(await provisionToken(server.workspaceRoot, { nickname, kind, preset: role }))
 	authors.tester = { ...server.headers }
 
 	await api('/api/views', { id: VIEW_ID, name: 'Pin stress', spec: { intent: 'Fifty comment threads across forty-two Widgets, three viewports tall.', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [] } })

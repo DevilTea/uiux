@@ -3,11 +3,11 @@ import { rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright'
-import { BUILT_IN_ACCESS_PRESETS, keysForRole, keysOfPreset, type PermissionKey } from '../src/application/access/keys'
+import { BUILT_IN_ACCESS_PRESETS, keysOfPreset, type PermissionKey } from '../src/application/access/keys'
 import type { MemberKind } from '../src/application/access/principal'
 import { ACCESS_PRESETS_FILENAME, type AccessPreset } from '../src/domain/access-presets/schema'
 import { orderedKeys } from '../app/utils/member-keys'
-import { provisionToken, sessionCookieFor } from './support/access'
+import { presetKeys, provisionToken, sessionCookieFor } from './support/access'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
@@ -32,7 +32,7 @@ let server: WorkbenchServer
 let browser: Browser
 
 const unique = () => randomUUID().slice(0, 8)
-const VIEWER = keysForRole('human', 'viewer')
+const VIEWER = presetKeys('viewer')
 const BUILT_IN: AccessPreset[] = BUILT_IN_ACCESS_PRESETS.map(preset => ({ id: preset.id, name: preset.name, keys: [...preset.keys] }))
 
 beforeAll(async () => {

@@ -50,8 +50,8 @@ async function reply(who: string, id: string, body: string): Promise<void> {
 beforeAll(async () => {
 	server = await startWorkbenchServer()
 	browser = await chromium.launch({ headless: true })
-	tokens.mei = await provisionToken(server.workspaceRoot, { nickname: 'mei', kind: 'human', role: 'reviewer' })
-	tokens.claude = await provisionToken(server.workspaceRoot, { nickname: 'claude', kind: 'agent', role: 'editor' })
+	tokens.mei = await provisionToken(server.workspaceRoot, { nickname: 'mei', kind: 'human', preset: 'reviewer' })
+	tokens.claude = await provisionToken(server.workspaceRoot, { nickname: 'claude', kind: 'agent', preset: 'editor' })
 }, 60_000)
 
 afterAll(async () => {

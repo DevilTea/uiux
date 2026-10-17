@@ -59,8 +59,8 @@ async function resolve(id: string, resolution: string, reason?: string): Promise
 beforeAll(async () => {
 	server = await startWorkbenchServer()
 	browser = await chromium.launch({ headless: true })
-	for (const nickname of ['mei', 'jun', 'ana']) tokens[nickname] = await provisionToken(server.workspaceRoot, { nickname, kind: 'human', role: 'reviewer' })
-	tokens.claude = await provisionToken(server.workspaceRoot, { nickname: 'claude', kind: 'agent', role: 'editor' })
+	for (const nickname of ['mei', 'jun', 'ana']) tokens[nickname] = await provisionToken(server.workspaceRoot, { nickname, kind: 'human', preset: 'reviewer' })
+	tokens.claude = await provisionToken(server.workspaceRoot, { nickname: 'claude', kind: 'agent', preset: 'editor' })
 
 	// Activity order (oldest first) is the creation order below, so 10a's expected order is known.
 	seeded.openOld = await seedThread('mei', 'btn-run-checks', 'Run checks reads like a destructive action.')
@@ -313,7 +313,7 @@ describe('Reviews inbox (R8)', () => {
 	}, 60_000)
 
 	it('gives the Viewer role a read-only inbox', async () => {
-		const token = await provisionToken(server.workspaceRoot, { nickname: 'viewer', kind: 'human', role: 'viewer' })
+		const token = await provisionToken(server.workspaceRoot, { nickname: 'viewer', kind: 'human', preset: 'viewer' })
 		const { sessionCookieFor } = await import('./support/access')
 		const cookie = await sessionCookieFor(server.origin, token)
 		const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } })

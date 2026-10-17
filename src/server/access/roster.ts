@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
-import { inCatalogOrder, isCatalogKey, isHumanOnlyKey, isPermissionKeyName, keysForRole, missingRequirements, type PermissionKey } from '../../application/access/keys'
-import { isAccessRole, isMemberKind, type AccessRole, type MemberKind } from '../../application/access/principal'
+import { inCatalogOrder, isCatalogKey, isHumanOnlyKey, isPermissionKeyName, missingRequirements, type PermissionKey } from '../../application/access/keys'
+import { isMemberKind, type MemberKind } from '../../application/access/principal'
 import { isFullUuid } from '../../domain/validation'
 import {
 	CREDENTIAL_ID_PATTERN,
@@ -15,12 +15,11 @@ import {
 /**
  * Host-local roster format (`$UIUX_HOME/workspaces/<wsid>/access.json`, `version: 2`, Clause
  * 01a11485-f895-7a0c-94d1-ed2b9cb092a9). It is not a Workspace schema: it never lives in the
- * Workspace and holds only hashes of secrets. A `version: 1` roster, whose members carry `role`,
- * is upgraded to `version: 2` when opened (Clause 01a11c09-a195-768b-ba6e-a64eb7f05eca; see
- * `upgradeAccessFile` and the store).
+ * Workspace and holds only hashes of secrets. It is the only roster version this UIUX reads: a
+ * roster at any other version is refused and never rewritten (Clause
+ * 01a14917-7898-72fa-a8ad-ed737e4a9eae).
  */
 export const ACCESS_FILE_VERSION = 2
-export const LEGACY_ACCESS_FILE_VERSION = 1
 
 /**
  * Clause 01a11485-f8b6-7b96-aa48-e6ff70b3facd: `{ id, nickname, kind, keys, createdAt }`. `keys`
@@ -33,8 +32,6 @@ export type StoredToken = Readonly<{
 	memberId: string
 	label: string
 	hash: string
-	/** Written before the LAN listener design was retired (Discussion #174): kept when read, never written, without effect. */
-	lan?: boolean
 	createdAt: string
 	expiresAt: string | null
 	lastUsedAt: string | null
@@ -45,13 +42,8 @@ export type StoredSession = Readonly<{
 	id: string
 	memberId: string
 	hash: string
-	/**
-	 * The origin the session was created on (Rule 01a11485-ed4a-766b-a51c-af2b9ffb1fcb). A session
-	 * written before configured origins existed has `listener` instead and is a loopback session.
-	 */
-	origin?: string
-	/** Legacy (before Discussion #174): `'loopback'`, or `'lan'` for the never-shipped LAN listener. */
-	listener?: 'loopback' | 'lan'
+	/** The origin the session was created on (Rule 01a11485-ed4a-766b-a51c-af2b9ffb1fcb). */
+	origin: string
 	userAgent: string
 	createdAt: string
 	lastSeenAt: string
@@ -78,7 +70,6 @@ export const SESSION_ABSOLUTE_MS = 30 * DAY_MS
 export type AccessErrorCode =
 	| 'access.invalid_nickname'
 	| 'access.nickname_taken'
-	| 'access.invalid_role'
 	| 'access.invalid_keys'
 	| 'access.invalid_kind'
 	| 'access.key_requires'
@@ -128,16 +119,22 @@ const isoOrNull = (value: unknown) => value === null || (typeof value === 'strin
 const iso = (value: unknown) => typeof value === 'string' && !Number.isNaN(Date.parse(value))
 const hash = (value: unknown) => typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value)
 
-/** A session names its origin, or (written before configured origins existed) its listener. */
-function sessionOriginValid(session: Record<string, unknown>): boolean {
-	if (session.origin !== undefined) return typeof session.origin === 'string' && session.origin.length > 0 && session.origin.length <= 300
-	return session.listener === 'loopback' || session.listener === 'lan'
-}
+const originValid = (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 300
 
 const storeInvalid = (detail: string): never => { throw new AccessError('access.store_invalid', `The access store is invalid: ${detail}.`) }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Clause 01a11485-f895-7a0c-94d1-ed2b9cb092a9: a Token record has no `lan` and a session record no
+ * `listener`. Rosters written before Discussion #174 carried them; Clause
+ * 01a14917-7898-72fa-a8ad-ed737e4a9eae refuses such a roster, naming the field.
+ */
+function refuseRetiredField(kind: 'Token' | 'session', entry: Record<string, unknown>, field: 'lan' | 'listener'): void {
+	if (Object.hasOwn(entry, field))
+		storeInvalid(`the ${kind} ${typeof entry.id === 'string' ? JSON.stringify(entry.id) : 'entry'} carries \`${field}\`, a field this roster version does not have; remove it from the roster file`)
 }
 
 /** A `version: 2` member's `keys`: unique key names, and no `humanOnly` key on an Agent. */
@@ -155,12 +152,17 @@ function validateStoredKeys(member: Record<string, unknown>): void {
 		storeInvalid(`Agent member ${nickname} holds the humanOnly key${humanOnly.length > 1 ? 's' : ''} ${humanOnly.join(', ')}, which an Agent never holds; remove ${humanOnly.length > 1 ? 'them' : 'it'} from the roster file`)
 }
 
-/** Strict structural validation of a parsed roster of `version` (members carry `role` in version 1 and `keys` in version 2). */
-function validateRoster(value: unknown, version: typeof ACCESS_FILE_VERSION | typeof LEGACY_ACCESS_FILE_VERSION): void {
+/**
+ * Strict structural validation of a parsed `access.json`. Only `version: 2` is read: any other
+ * version, older or newer, is refused with `access.store_invalid` naming it (Clause
+ * 01a14917-7898-72fa-a8ad-ed737e4a9eae); the store adds the file and never rewrites it.
+ */
+export function validateAccessFile(value: unknown): AccessFile {
 	const fail = storeInvalid
 	if (!isRecord(value)) fail('expected a JSON object')
 	const file = value as Record<string, unknown>
-	if (file.version !== version) fail(`unsupported version ${JSON.stringify(file.version)}`)
+	if (file.version !== ACCESS_FILE_VERSION)
+		fail(`it is roster version ${JSON.stringify(file.version)}, and this UIUX reads only roster version ${ACCESS_FILE_VERSION}`)
 	if (typeof file.workspaceRoot !== 'string' || !file.workspaceRoot) fail('workspaceRoot is missing')
 	if (typeof file.hint !== 'string' || !HINT_PATTERN.test(file.hint)) fail('hint must be 4 base32 characters')
 	for (const name of ['members', 'tokens', 'invites', 'sessions'] as const)
@@ -171,18 +173,14 @@ function validateRoster(value: unknown, version: typeof ACCESS_FILE_VERSION | ty
 		if (!isFullUuid(member.id)) fail('member id must be a full UUID')
 		if (typeof member.nickname !== 'string' || !NICKNAME_PATTERN.test(member.nickname)) fail(`member nickname ${JSON.stringify(member.nickname)} is invalid`)
 		if (!isMemberKind(member.kind)) fail('member kind is invalid')
-		if (version === LEGACY_ACCESS_FILE_VERSION) {
-			if (!isAccessRole(member.role)) fail('member role is invalid')
-		}
-		else {
-			validateStoredKeys(member)
-		}
+		validateStoredKeys(member)
 		if (!iso(member.createdAt)) fail('member createdAt is invalid')
 	}
 	if (new Set(members.map(member => member.id)).size !== members.length) fail('a member id is duplicated')
 	for (const token of file.tokens as Record<string, unknown>[]) {
 		if (typeof token !== 'object' || token === null) fail('token entry is not an object')
-		if (typeof token.id !== 'string' || !CREDENTIAL_ID_PATTERN.test(token.id) || !isFullUuid(token.memberId) || typeof token.label !== 'string' || !hash(token.hash) || (token.lan !== undefined && typeof token.lan !== 'boolean') || !iso(token.createdAt) || !isoOrNull(token.expiresAt) || !isoOrNull(token.lastUsedAt) || !isoOrNull(token.revokedAt))
+		refuseRetiredField('Token', token, 'lan')
+		if (typeof token.id !== 'string' || !CREDENTIAL_ID_PATTERN.test(token.id) || !isFullUuid(token.memberId) || typeof token.label !== 'string' || !hash(token.hash) || !iso(token.createdAt) || !isoOrNull(token.expiresAt) || !isoOrNull(token.lastUsedAt) || !isoOrNull(token.revokedAt))
 			fail('token entry is invalid')
 	}
 	for (const invite of file.invites as Record<string, unknown>[]) {
@@ -192,7 +190,8 @@ function validateRoster(value: unknown, version: typeof ACCESS_FILE_VERSION | ty
 	}
 	for (const session of file.sessions as Record<string, unknown>[]) {
 		if (typeof session !== 'object' || session === null) fail('session entry is not an object')
-		if (typeof session.id !== 'string' || !CREDENTIAL_ID_PATTERN.test(session.id) || !isFullUuid(session.memberId) || !hash(session.hash) || !sessionOriginValid(session) || typeof session.userAgent !== 'string' || !iso(session.createdAt) || !iso(session.lastSeenAt) || !iso(session.expiresAt))
+		refuseRetiredField('session', session, 'listener')
+		if (typeof session.id !== 'string' || !CREDENTIAL_ID_PATTERN.test(session.id) || !isFullUuid(session.memberId) || !hash(session.hash) || !originValid(session.origin) || typeof session.userAgent !== 'string' || !iso(session.createdAt) || !iso(session.lastSeenAt) || !iso(session.expiresAt))
 			fail('session entry is invalid')
 	}
 	const nicknames = new Set<string>()
@@ -201,43 +200,7 @@ function validateRoster(value: unknown, version: typeof ACCESS_FILE_VERSION | ty
 		if (nicknames.has(key)) fail(`nickname ${JSON.stringify(member.nickname)} is duplicated`)
 		nicknames.add(key)
 	}
-}
-
-/** Strict structural validation of a parsed `version: 2` `access.json`. */
-export function validateAccessFile(value: unknown): AccessFile {
-	validateRoster(value, ACCESS_FILE_VERSION)
 	return value as AccessFile
-}
-
-/**
- * Clause 01a11c09-a195-768b-ba6e-a64eb7f05eca: a validated `version: 1` roster as `version: 2`.
- * Each member gets the keys its `role` maps to (Clause 01a11bb1-b427-777e-8175-fa24d61d434b),
- * without `humanOnly` keys for an Agent (Rule 01a11c09-b698-7ee3-861b-f02eaba61269), so an Agent
- * written as Owner by hand gets the Editor keys it could hold. Any `keys` a version 1 member
- * carries are not trusted and are replaced. Fields this version does not know are kept.
- */
-export function upgradeAccessFile(legacy: Readonly<Record<string, unknown>>): Record<string, unknown> {
-	const members = (legacy.members as Record<string, unknown>[]).map(({ role, keys: _untrusted, ...member }) => {
-		void _untrusted
-		return { ...member, keys: [...keysForRole(member.kind as MemberKind, role as AccessRole)] }
-	})
-	return { ...legacy, version: ACCESS_FILE_VERSION, members }
-}
-
-/**
- * Parses a roster of either version: a `version: 2` roster is validated, and a `version: 1`
- * roster is validated as written, then upgraded in memory (`legacy` says so; the store writes the
- * upgrade and its backup). Any other version is refused, so an older roster format is never
- * misread and a newer one is never silently rewritten.
- */
-export function readAccessFile(value: unknown): Readonly<{ file: AccessFile; legacy: boolean }> {
-	if (isRecord(value) && Number.isInteger(value.version) && (value.version as number) > ACCESS_FILE_VERSION)
-		storeInvalid(`it is roster version ${String(value.version)}, written by a newer UIUX; this UIUX reads versions ${LEGACY_ACCESS_FILE_VERSION} and ${ACCESS_FILE_VERSION}. Use that newer UIUX`)
-	if (isRecord(value) && value.version === LEGACY_ACCESS_FILE_VERSION) {
-		validateRoster(value, LEGACY_ACCESS_FILE_VERSION)
-		return { file: validateAccessFile(upgradeAccessFile(value)), legacy: true }
-	}
-	return { file: validateAccessFile(value), legacy: false }
 }
 
 export function assertNickname(nickname: string): string {
@@ -272,11 +235,6 @@ function isHumanManager(member: StoredMember): boolean {
 /** Whether a human member holds `members.manage` (Rule 01a11485-eae3-7080-8f02-da27fc260e09). */
 export function hasHumanManager(file: AccessFile): boolean {
 	return file.members.some(isHumanManager)
-}
-
-function assertRole(role: unknown): AccessRole {
-	if (!isAccessRole(role)) throw new AccessError('access.invalid_role', `Role must be one of owner, editor, reviewer or viewer (received ${JSON.stringify(role)}).`)
-	return role
 }
 
 const keyList = (keys: readonly string[]) => keys.map(key => `\`${key}\``).join(', ')
@@ -367,30 +325,17 @@ export function assertManagerKept(before: AccessFile | undefined, after: AccessF
 	throw new AccessError('access.last_manager', `${names} ${lost.length > 1 ? 'are the last human holders' : 'is the last human holder'} of \`members.manage\` in this roster; this change would leave none. Give another human member \`members.manage\` first.`)
 }
 
-/**
- * The key set a member write asks for: explicit `keys`, or a `role`, an in-process shorthand that
- * no surface sends (the CLI refuses `--role` and the administration wire takes keys) and that
- * stands for the keys of the built-in preset with that
- * `id` (Clause 01a11bb1-b427-777e-8175-fa24d61d434b), without `humanOnly` keys for an Agent. An
- * Agent asking for the Owner role is refused: its keys are the human-only administration keys.
- */
-function requestedKeys(kind: MemberKind, nickname: string, input: Readonly<{ keys?: unknown; role?: unknown }>, held: readonly string[] = []): string[] | undefined {
-	if (input.keys !== undefined && input.role !== undefined) throw new AccessError('access.invalid_keys', 'Give either keys or a role, not both.')
-	if (input.keys !== undefined) {
-		const keys = normalizeKeys(input.keys)
-		assertKnownKeys(nickname, keys, held)
-		return keys
-	}
-	if (input.role === undefined) return undefined
-	const role = assertRole(input.role)
-	if (kind === 'agent' && role === 'owner')
-		assertStorableKeys({ nickname, kind, keys: keysForRole('human', 'owner') })
-	return [...keysForRole(kind, role)]
+/** The key set a member write asks for: explicit `keys`, giving no key outside the catalog that the member does not hold. */
+function requestedKeys(nickname: string, input: MemberAccessInput, held: readonly string[] = []): string[] | undefined {
+	if (input.keys === undefined) return undefined
+	const keys = normalizeKeys(input.keys)
+	assertKnownKeys(nickname, keys, held)
+	return keys
 }
 
 export type Mutation<T> = Readonly<{ file: AccessFile; result: T }>
 
-export type MemberAccessInput = Readonly<{ keys?: unknown; role?: unknown }>
+export type MemberAccessInput = Readonly<{ keys?: unknown }>
 
 export function addMember(
 	file: AccessFile,
@@ -400,8 +345,8 @@ export function addMember(
 	const nickname = assertNickname(input.nickname)
 	const kind = input.kind ?? 'human'
 	if (!isMemberKind(kind)) throw new AccessError('access.invalid_kind', `Kind must be human or agent (received ${JSON.stringify(kind)}).`)
-	const keys = requestedKeys(kind, nickname, input)
-	if (keys === undefined) throw new AccessError('access.invalid_keys', `A new member needs its keys (or a role) (received none for ${nickname}).`)
+	const keys = requestedKeys(nickname, input)
+	if (keys === undefined) throw new AccessError('access.invalid_keys', `A new member needs its keys (received none for ${nickname}).`)
 	if (findMemberByNickname(file, nickname)) throw new AccessError('access.nickname_taken', `Nickname ${JSON.stringify(nickname)} is already used in this roster.`)
 	const member: StoredMember = { id: randomUUID(), nickname, kind, keys, createdAt: now.toISOString() }
 	const next: AccessFile = { ...file, members: [...file.members, member] }
@@ -423,7 +368,7 @@ export type KeyChanges = Readonly<{ grant?: unknown; revoke?: unknown }>
  */
 function adjustedKeys(member: StoredMember, changes: KeyChanges & MemberAccessInput): string[] | undefined {
 	if (changes.grant === undefined && changes.revoke === undefined) return undefined
-	if (changes.keys !== undefined || changes.role !== undefined)
+	if (changes.keys !== undefined)
 		throw new AccessError('access.invalid_keys', 'Give either a key set or keys to grant and revoke, not both.')
 	const grant = changes.grant === undefined ? [] : normalizeKeys(changes.grant)
 	const revoke = changes.revoke === undefined ? [] : normalizeKeys(changes.revoke)
@@ -443,7 +388,7 @@ export function setMember(
 	if (changes.kind !== undefined && changes.kind !== member.kind)
 		throw new AccessError('access.kind_immutable', 'A member\'s kind is fixed at creation and cannot be changed.')
 	let next: StoredMember = member
-	const keys = adjustedKeys(member, changes) ?? requestedKeys(member.kind, member.nickname, changes, member.keys)
+	const keys = adjustedKeys(member, changes) ?? requestedKeys(member.nickname, changes, member.keys)
 	if (keys !== undefined) {
 		// Writing a member's keys stores them anew, so they must be storable even when unchanged.
 		assertStorableKeys({ nickname: member.nickname, kind: member.kind, keys })
@@ -675,8 +620,7 @@ export function applyUsage(
 
 /**
  * `uiux access copy`: members and tokens (hashes included), a new hint and root, no invites or
- * sessions. The copy is always `version: 2`: a `version: 1` source is read through its upgrade
- * (Clause 01a1144e-56bd-7988-8d2a-87b23954ca49).
+ * sessions (Clause 01a1144e-56bd-7988-8d2a-87b23954ca49).
  */
 export function copyRoster(source: AccessFile, target: Readonly<{ workspaceRoot: string; hint: string }>): AccessFile {
 	return {

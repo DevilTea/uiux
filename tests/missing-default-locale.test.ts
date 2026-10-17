@@ -101,7 +101,7 @@ describe('a default Locale without its Locale file', () => {
 			expect(result.diagnostics).toEqual([expect.objectContaining(MISSING)])
 		}
 
-		const agentToken = await provisionToken(server.workspaceRoot, { nickname: 'locale-gate-agent', kind: 'agent', role: 'editor' })
+		const agentToken = await provisionToken(server.workspaceRoot, { nickname: 'locale-gate-agent', kind: 'agent', preset: 'editor' })
 		const client = new Client({ name: 'missing-default-locale-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto' } })
 		await client.connect(new StreamableHTTPClientTransport(new URL(`${server.origin}/mcp`), { requestInit: { headers: bearer(agentToken) } }))
 		try {

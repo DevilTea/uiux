@@ -268,7 +268,7 @@ describe('loopback guard on a live h3 server with the real /mcp and /api routes'
 		await writeCurrentWorkspace(root, { i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })
 		process.env.UIUX_WORKSPACE_ROOT = root
 		process.env.UIUX_SERVER_ORIGIN = 'http://127.0.0.1:1'
-		token = await provisionToken(root, { nickname: 'claude', kind: 'agent', role: 'editor' })
+		token = await provisionToken(root, { nickname: 'claude', kind: 'agent', preset: 'editor' })
 
 		const app = createApp()
 		app.use(createLoopbackGuardHandler())

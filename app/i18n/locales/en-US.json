@@ -2023,7 +2023,6 @@
       "invalid_label": "The label is not valid.",
       "invalid_nickname": "Nicknames use lowercase letters, digits and hyphens.",
       "invalid_keys": "Those permission keys are not valid.",
-      "invalid_role": "That role does not exist.",
       "invite_human_only": "Sign-in links are for people. Give an agent a token instead.",
       "key_human_only": "An Agent cannot hold keys that are for people only.",
       "key_requires": "These keys need other keys that the member does not hold.",

@@ -960,7 +960,7 @@ describe('Canvas comments (R6 targeting and composer, R7a pins and bubble)', () 
 	}, 60_000)
 
 	it('gives a Viewer a disabled comment tool that names the missing key', async () => {
-		const token = await provisionToken(server.workspaceRoot, { nickname: 'viewer', kind: 'human', role: 'viewer' })
+		const token = await provisionToken(server.workspaceRoot, { nickname: 'viewer', kind: 'human', preset: 'viewer' })
 		const cookie = await sessionCookieFor(server.origin, token)
 		const { context, page } = await openWorkbench(`/views/${VIEW_ID}`, { mode: 'light', cookie })
 		try {

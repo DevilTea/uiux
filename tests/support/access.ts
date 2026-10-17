@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto'
 
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 
-import { keysForRole } from '../../src/application/access/keys'
+import { BUILT_IN_ACCESS_PRESETS, keysOfPreset, type BuiltInPresetId, type PermissionKey } from '../../src/application/access/keys'
 import { memberLabel } from '../../src/application/access/labels'
 import { createLeaseManager, type LeaseManager } from '../../src/application/access/leases'
-import type { AccessRole, MemberKind, MemberPrincipal } from '../../src/application/access/principal'
+import type { MemberKind, MemberPrincipal } from '../../src/application/access/principal'
 import { createScopedWorkspaceSession, type AccessTransport, type ScopedSessionOptions, type ScopedWorkspaceSession } from '../../src/application/access/scoped-session'
 import type { WorkspaceApplicationSession } from '../../src/application/services/workspace-session'
 import { createUiuxMcpHttpHandler, principalAuthInfo } from '../../src/mcp/server'
@@ -13,16 +13,23 @@ import { addMember, createToken, findMemberByNickname } from '../../src/server/a
 import { AccessStore } from '../../src/server/access/store'
 
 /**
+ * The keys that applying the built-in Access preset `id` gives a member of `kind`: the preset's
+ * keys, without the `humanOnly` keys for an Agent (`keysOfPreset`).
+ */
+export function presetKeys(id: BuiltInPresetId, kind: MemberKind = 'human'): PermissionKey[] {
+	return keysOfPreset(kind, BUILT_IN_ACCESS_PRESETS.find(preset => preset.id === id)!.keys)
+}
+
+/**
  * Tests inject a principal (accepted identity migration plan): in-process HTTP helpers get a
  * scoped session and the MCP handler gets `authInfo`, exactly as the live routes pass them.
- * `role` is sugar: unless `keys` is given, the member holds the keys the live server derives from
- * that role (the built-in preset of that `id`, with no `humanOnly` key for an Agent). The label is
- * computed from those keys unless given.
+ * Unless `keys` is given, the member holds the keys of the built-in preset `preset`
+ * (`presetKeys`; Owner for a human and Editor for an Agent by default). The label is computed from
+ * those keys unless given.
  */
-export function testMember(overrides: Partial<Omit<MemberPrincipal, 'type'>> & Readonly<{ role?: AccessRole }> = {}): MemberPrincipal {
+export function testMember(overrides: Partial<Omit<MemberPrincipal, 'type'>> & Readonly<{ preset?: BuiltInPresetId }> = {}): MemberPrincipal {
 	const kind: MemberKind = overrides.kind ?? 'human'
-	const role = overrides.role ?? (kind === 'agent' ? 'editor' : 'owner')
-	const keys = overrides.keys ?? keysForRole(kind, role)
+	const keys = overrides.keys ?? presetKeys(overrides.preset ?? (kind === 'agent' ? 'editor' : 'owner'), kind)
 	return {
 		type: 'member',
 		memberId: overrides.memberId ?? randomUUID(),
@@ -36,9 +43,9 @@ export function testMember(overrides: Partial<Omit<MemberPrincipal, 'type'>> & R
 }
 
 /** The Workbench default: a human Owner on a cookie session. */
-export const HUMAN_OWNER = testMember({ nickname: 'owner', kind: 'human', role: 'owner', credential: 'session' })
+export const HUMAN_OWNER = testMember({ nickname: 'owner', kind: 'human', preset: 'owner', credential: 'session' })
 /** The usual agent: an Editor with a bearer token. */
-export const AGENT_EDITOR = testMember({ nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' })
+export const AGENT_EDITOR = testMember({ nickname: 'claude', kind: 'agent', preset: 'editor', credential: 'token' })
 
 export function scoped(
 	app: WorkspaceApplicationSession,
@@ -73,17 +80,18 @@ export async function connectMcp(
 /**
  * Provisions a member and a bearer token in a Workspace's host-local roster under the test
  * `UIUX_HOME`, before (or while) a server for that Workspace runs. `keys` gives the member exactly
- * that key set; otherwise `role` stands for its built-in preset's keys.
+ * that key set; otherwise it gets the keys of the built-in preset `preset` (`presetKeys`).
  */
 export async function provisionToken(
 	workspaceRoot: string,
-	member: Readonly<{ nickname?: string; kind?: MemberKind; role?: AccessRole; keys?: readonly string[] }> = {},
+	member: Readonly<{ nickname?: string; kind?: MemberKind; preset?: BuiltInPresetId; keys?: readonly string[] }> = {},
 ): Promise<string> {
 	const store = (await AccessStore.open({ workspaceRoot, create: true }))!
-	const nickname = member.nickname ?? (member.kind === 'agent' ? 'claude' : 'tester')
-	const access = member.keys ? { keys: [...member.keys] } : { role: member.role ?? (member.kind === 'agent' ? 'editor' : 'owner') }
+	const kind = member.kind ?? 'human'
+	const nickname = member.nickname ?? (kind === 'agent' ? 'claude' : 'tester')
+	const keys = member.keys ? [...member.keys] : presetKeys(member.preset ?? (kind === 'agent' ? 'editor' : 'owner'), kind)
 	if (!findMemberByNickname(store.data, nickname))
-		await store.update(file => addMember(file, { nickname, ...access, kind: member.kind ?? 'human' }))
+		await store.update(file => addMember(file, { nickname, keys, kind }))
 	const issued = await store.update(file => createToken(file, { nickname, label: 'test' }))
 	return issued.credential
 }

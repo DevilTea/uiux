@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { HUMAN_ONLY_PERMISSION_KEYS, keysForRole, PERMISSION_KEYS } from '../src/application/access/keys'
+import { HUMAN_ONLY_PERMISSION_KEYS, PERMISSION_KEYS } from '../src/application/access/keys'
 import { applyPreset, catalogByDomain, keyChanges, keyDomain, keysNoHumanHolds, orderedKeys, toggleKey } from '../app/utils/member-keys'
+import { presetKeys } from './support/access'
 
 /** The Members page key checklist's rules (issue #142, P5), without the page. */
 
-const OWNER = keysForRole('human', 'owner')
-const VIEWER = keysForRole('human', 'viewer')
+const OWNER = presetKeys('owner')
+const VIEWER = presetKeys('viewer')
 
 describe('the key checklist', () => {
 	it('groups the catalog by domain, in catalog order (Rule 01a11c09-ba80)', () => {
@@ -36,20 +37,20 @@ describe('the key checklist', () => {
 	it('applies a preset as its keys now, without its humanOnly keys for an Agent (Rules 01a11c09-b8c6 and 01a11c74-26ef)', () => {
 		expect(applyPreset(OWNER, VIEWER, 'human')).toEqual({ keys: OWNER, dropped: [] })
 		const agent = applyPreset(OWNER, VIEWER, 'agent')
-		expect(agent.keys).toEqual(keysForRole('agent', 'owner'))
+		expect(agent.keys).toEqual(presetKeys('owner', 'agent'))
 		expect(agent.keys.some(key => (HUMAN_ONLY_PERMISSION_KEYS as readonly string[]).includes(key))).toBe(false)
 		expect(agent.dropped).toEqual(['reviews.resolve', 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'])
 	})
 
 	it('keeps the unknown keys the member holds when a preset is applied (owner ruling of 2026-10-11 on PR #189)', () => {
 		expect(applyPreset(VIEWER, ['future.capability', ...OWNER, 'other.thing'], 'human').keys).toEqual([...VIEWER, 'future.capability', 'other.thing'])
-		expect(applyPreset(OWNER, ['future.capability'], 'agent').keys).toEqual([...keysForRole('agent', 'owner'), 'future.capability'])
+		expect(applyPreset(OWNER, ['future.capability'], 'agent').keys).toEqual([...presetKeys('owner', 'agent'), 'future.capability'])
 	})
 
 	it('sends a preset or an edit as the keys to grant and revoke against the member as loaded (owner ruling 1 of 2026-10-11 on PR #191)', () => {
 		const loaded = [...VIEWER, 'future.capability']
-		const applied = applyPreset(keysForRole('human', 'editor'), loaded, 'human').keys
-		expect(keyChanges(loaded, applied)).toEqual({ grant: keysForRole('human', 'editor').filter(key => !VIEWER.includes(key)), revoke: VIEWER.filter(key => !keysForRole('human', 'editor').includes(key)) })
+		const applied = applyPreset(presetKeys('editor'), loaded, 'human').keys
+		expect(keyChanges(loaded, applied)).toEqual({ grant: presetKeys('editor').filter(key => !VIEWER.includes(key)), revoke: VIEWER.filter(key => !presetKeys('editor').includes(key)) })
 		// The unknown key the member holds is neither granted nor revoked.
 		expect(keyChanges(loaded, applied).revoke).not.toContain('future.capability')
 		expect(keyChanges(OWNER, applyPreset(VIEWER, OWNER, 'human').keys)).toEqual({ grant: [], revoke: OWNER.filter(key => !VIEWER.includes(key)) })
@@ -66,8 +67,8 @@ describe('the notice of keys no person holds (Rule 01a11c09-bbc9)', () => {
 	it('lists the catalog keys no human member holds; an Agent\'s keys do not count', () => {
 		expect(keysNoHumanHolds([{ kind: 'human', keys: OWNER }])).toEqual([])
 		expect(keysNoHumanHolds([
-			{ kind: 'human', keys: keysForRole('human', 'editor') },
-			{ kind: 'agent', keys: [...keysForRole('agent', 'editor'), 'future.capability'] },
+			{ kind: 'human', keys: presetKeys('editor') },
+			{ kind: 'agent', keys: [...presetKeys('editor', 'agent'), 'future.capability'] },
 		])).toEqual(['checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'])
 		expect(keysNoHumanHolds([])).toEqual([...PERMISSION_KEYS])
 	})
