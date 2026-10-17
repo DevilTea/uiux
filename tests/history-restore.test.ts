@@ -37,7 +37,7 @@ import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime 
 import { bearer, connectMcp, provisionToken, scoped, testMember } from './support/access'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 import { createCurrentWorkspace, CURRENT_TEST_LAYOUT, V4_TEST_SCHEMA_POLICY, writeManifest } from './support/workspace-layout'
-import { LEGACY_LAYOUT } from '../src/persistence/paths'
+import { LEGACY_LAYOUT, type WorkspaceLayout } from '../src/persistence/paths'
 
 /**
  * Single-resource restore (issue #132 B6): Feature 01a11a5d-fd6b-7f9d-be15-2bc2bc3adc13 Rules 1428,
@@ -366,16 +366,10 @@ describe('restoring every other kind', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS 
 		expect([...asset.resource.content]).toEqual([...PNG, 1])
 	})
 
-	it('restores the Workspace settings, keeping the current schemaVersion, after acknowledging a removed viewport key (Rules 01a11a5e-15e9 and 17a0)', async () => {
-		const ctx = await fixture()
-		// A Checkpoint recorded under schemaVersion 4, in its old layout (the manifest in .uiux/,
-		// holding the Adapters, and neither a Product Kit nor an Access presets file), holding settings without the mobile viewport.
+	/** Records a Checkpoint whose settings have no mobile viewport and two themes, built from the live files by `edit`, under `workspaceSchemaVersion`. */
+	async function olderSettingsCheckpoint(ctx: Fixture, workspaceSchemaVersion: number, edit: (snapshot: Map<string, Uint8Array>) => WorkspaceLayout): Promise<string> {
 		const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
-		snapshot.delete(CURRENT_TEST_LAYOUT.manifestPath)
-		snapshot.delete(CURRENT_TEST_LAYOUT.productKitPath!)
-		snapshot.delete(CURRENT_TEST_LAYOUT.accessPresetsPath!)
-		snapshot.set(LEGACY_LAYOUT.manifestPath, canonicalJsonBytes({ ...MANIFEST, schemaVersion: 4, adapters: [], themes: { light: { label: 'Light' }, dark: { label: 'Dark' } } }))
-		const built = versionResourcesFromSnapshot(snapshot, LEGACY_LAYOUT)
+		const built = versionResourcesFromSnapshot(snapshot, edit(snapshot))
 		const earlier = randomUUID()
 		await (await ctx.history.open())!.checkpoints.create({
 			historySchemaVersion: 1,
@@ -383,12 +377,39 @@ describe('restoring every other kind', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS 
 			type: 'checkpoint',
 			actor: { type: 'human', id: 'member:owner-1', displayName: 'mei' },
 			at: new Date(START + 500).toISOString(),
-			workspaceSchemaVersion: 4,
+			workspaceSchemaVersion,
 			resources: built.resources,
 			name: 'Older settings',
 			source: 'workbench',
 		}, built.blobs)
+		return earlier
+	}
 
+	it('restores the Workspace settings, keeping the current schemaVersion, after acknowledging a removed viewport key (Rules 01a11a5e-15e9 and 17a0)', async () => {
+		const ctx = await fixture()
+		// A Checkpoint recorded under the current schema, holding settings without the mobile viewport.
+		const earlier = await olderSettingsCheckpoint(ctx, CURRENT_WORKSPACE_SCHEMA_VERSION, (snapshot) => {
+			snapshot.set(CURRENT_TEST_LAYOUT.manifestPath, canonicalJsonBytes({ ...MANIFEST, themes: { light: { label: 'Light' }, dark: { label: 'Dark' } } }))
+			return CURRENT_TEST_LAYOUT
+		})
+		await restoresOlderSettings(ctx, earlier)
+	})
+
+	it('restores the Workspace settings recorded under schemaVersion 4, keeping the current schemaVersion (Rules 01a11a5e-15e9 and 17a0)', async () => {
+		const ctx = await fixture()
+		// A Checkpoint recorded under schemaVersion 4, in its old layout (the manifest in .uiux/,
+		// holding the Adapters, and neither a Product Kit nor an Access presets file), holding settings without the mobile viewport.
+		const earlier = await olderSettingsCheckpoint(ctx, 4, (snapshot) => {
+			snapshot.delete(CURRENT_TEST_LAYOUT.manifestPath)
+			snapshot.delete(CURRENT_TEST_LAYOUT.productKitPath!)
+			snapshot.delete(CURRENT_TEST_LAYOUT.accessPresetsPath!)
+			snapshot.set(LEGACY_LAYOUT.manifestPath, canonicalJsonBytes({ ...MANIFEST, schemaVersion: 4, adapters: [], themes: { light: { label: 'Light' }, dark: { label: 'Dark' } } }))
+			return LEGACY_LAYOUT
+		})
+		await restoresOlderSettings(ctx, earlier)
+	})
+
+	async function restoresOlderSettings(ctx: Fixture, earlier: string): Promise<void> {
 		const current = (await ctx.persistence.workspace.readInspected()).revision!
 		const added = await session(ctx, EDITOR).updateWorkspaceSettings({ expectedRevision: current, settings: { ...MANIFEST, viewports: { ...MANIFEST.viewports, mobile: { dimensions: { width: 390, height: 844 } } } } })
 		expect(added.status).toBe('updated')
@@ -411,7 +432,7 @@ describe('restoring every other kind', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS 
 		expect(manifest.schemaVersion).toBe(CURRENT_WORKSPACE_SCHEMA_VERSION)
 		expect(Object.keys(manifest.viewports)).toEqual(['desktop'])
 		expect(Object.keys(manifest.themes).sort()).toEqual(['dark', 'light'])
-	})
+	}
 })
 
 describe('impact acknowledgement (Scenario 01a11a5e-9174-7006-b506-038e979982b8)', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {

@@ -9,12 +9,13 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createHistoryRecorder, createMigrationHistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
 import { runAccessCommand } from '../src/cli/access'
 import { runMigrateCommand } from '../src/cli/migrate'
+import { builtInAccessPresetsFile } from '../src/domain/access-presets/schema'
 import { emptyProductKit } from '../src/domain/product-kit/schema'
 import { canonicalJsonBytes, checkWorkspaceSelection, FileNativePersistence, LEGACY_LAYOUT, V5_LAYOUT, viewRelativePath } from '../src/persistence'
 import { blobDigest, CheckpointStore, HostHistoryStore, runWithDesignWriteContext } from '../src/persistence/history'
-import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { hostHistoryPaths } from '../src/server/access/store'
-import { V4_TEST_SCHEMA_POLICY, V5_TEST_SCHEMA_POLICY, v5Manifest, writeManifest } from './support/workspace-layout'
+import { currentManifest, V4_TEST_SCHEMA_POLICY, V5_TEST_SCHEMA_POLICY, v5Manifest, writeManifest } from './support/workspace-layout'
 
 /** A schemaVersion 4 manifest, as the old layout keeps it in `.uiux/`, holding `adapters`. */
 function v4Manifest(): Record<string, unknown> {
@@ -80,12 +81,13 @@ async function legacyWorkspace(): Promise<string> {
 	return root
 }
 
-/** A schemaVersion 5 root at `<parent>/.uiux/` with one View. */
+/** A current-schema root at `<parent>/.uiux/` with one View. */
 async function relocatedWorkspace(): Promise<Readonly<{ parent: string; root: string }>> {
 	const parent = await makeRoot()
 	const root = join(parent, '.uiux')
-	await writeManifest(root, canonicalJsonBytes(v5Manifest()), V5_LAYOUT)
+	await writeManifest(root, canonicalJsonBytes(currentManifest()), V5_LAYOUT)
 	await writeFile(join(root, 'product-kit.json'), canonicalJsonBytes(emptyProductKit()))
+	await writeFile(join(root, 'access-presets.json'), canonicalJsonBytes(builtInAccessPresetsFile()))
 	await mkdir(join(root, 'views'))
 	await writeFile(join(root, viewRelativePath(VIEW_ID)), canonicalJsonBytes(view('Now')))
 	return { parent, root }
@@ -153,7 +155,7 @@ describe('checkWorkspaceSelection', () => {
 		// A build that does not recognize 5 does not point the parent of a relocated root at its child.
 		const { parent } = await relocatedWorkspace()
 		const refused = checkWorkspaceSelection(parent, V4_TEST_SCHEMA_POLICY)
-		expect(refused).toEqual({ ok: false, reason: 'unknown_schema', message: expect.stringContaining('schemaVersion 5, which this UIUX build does not support') })
+		expect(refused).toEqual({ ok: false, reason: 'unknown_schema', message: expect.stringContaining(`schemaVersion ${CURRENT_WORKSPACE_SCHEMA_VERSION}, which this UIUX build does not support`) })
 		expect(refused.ok === false && refused.message).not.toMatch(/; select /)
 
 		const future = await makeRoot()
@@ -221,12 +223,12 @@ describe('recovery refuses a journal written for another layout', () => {
 	})
 })
 
-describe('a schemaVersion 5 root without product-kit.json', () => {
+describe('a current-schema root without product-kit.json', () => {
 	it('cannot be written', async () => {
 		const { root } = await relocatedWorkspace()
 		await rm(join(root, 'product-kit.json'))
 		const persistence = new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY })
-		expect((await persistence.inspectWorkspace()).inspection).toMatchObject({ state: 'unsupported', version: 5 })
+		expect((await persistence.inspectWorkspace()).inspection).toMatchObject({ state: 'unsupported', version: CURRENT_WORKSPACE_SCHEMA_VERSION })
 		const current = (await persistence.views.read(VIEW_ID))!
 		await expect(persistence.views.compareAndSwap({ key: VIEW_ID, expectedRevision: current.revision, resource: view('Changed') as never })).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
 	})

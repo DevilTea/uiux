@@ -25,12 +25,13 @@ import {
 	type WorkspaceSnapshot,
 } from '../src/persistence'
 import { CheckpointStore, versionResourcesFromSnapshot } from '../src/persistence/history'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createAccessGuardHandler } from '../src/server/access/http'
 import { createHistoryStoreFactory, type HistoryStores } from '../src/server/history-stores'
 import { diffVersionsForHttp } from '../src/server/history-http'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { bearer, connectMcp, provisionToken, scoped, testMember } from './support/access'
-import { V4_TEST_SCHEMA_POLICY, writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
+import { currentManifest, manifestPath, V4_TEST_SCHEMA_POLICY, writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
 
 /**
  * Version comparison through the service, `GET /api/history/diff` and MCP `get_version_diff`
@@ -52,16 +53,35 @@ afterEach(async () => {
 
 type Context = Readonly<{ root: string; persistence: FileNativePersistence; stores: HistoryStores; app: WorkspaceApplicationSession }>
 
-/** The comparisons here are about history across schema versions 1 to 4, so the Workspace stays in the old layout under a build where 4 is current. */
-const MANIFEST = { schemaVersion: 4, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: { desktop: { label: 'Desktop', dimensions: { width: 1280, height: 800 } } }, themes: {} }
+/** The Workspace settings of every comparison here; the current manifest adds `schemaVersion`. */
+const SETTINGS = { i18n: { defaultLocale: 'en-US' }, viewports: { desktop: { label: 'Desktop', dimensions: { width: 1280, height: 800 } } }, themes: {} }
 
+/** The manifest as a `schemaVersion` 4 Workspace kept it, in the old layout and with its `adapters`. */
+const MANIFEST = { ...SETTINGS, schemaVersion: 4, adapters: [] }
+
+/** A current-schema Workspace with one View, a Locale and an Asset, and its history stores. */
 async function workspace(): Promise<Context> {
 	const root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-')))
 	const home = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-home-')))
 	cleanup.push(root, home)
 	// Hand-written (not canonical) JSON, as a Workspace edited outside UIUX has.
+	await writeCurrentWorkspace(root, SETTINGS)
+	return seeded(root, home, new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }))
+}
+
+/**
+ * The same Workspace at `schemaVersion` 4, in the old layout under a build where 4 is current, for
+ * the comparisons across schema versions 1 to 4.
+ */
+async function legacyWorkspace(): Promise<Context> {
+	const root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-')))
+	const home = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-home-')))
+	cleanup.push(root, home)
 	await writeManifest(root, `${JSON.stringify(MANIFEST, null, 2)}\n`, LEGACY_LAYOUT)
-	const persistence = new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })
+	return seeded(root, home, new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY }))
+}
+
+async function seeded(root: string, home: string, persistence: FileNativePersistence): Promise<Context> {
 	await writeView(root, view())
 	await persistence.locales.create('en-US', { greeting: 'Hello' })
 	await persistence.assets.create(ASSET_ID, { metadata: { id: ASSET_ID, name: 'Logo', contentFilename: 'logo.png', mediaType: 'image/png' }, content: Buffer.from('png-1') })
@@ -98,9 +118,9 @@ type RecordOptions = Readonly<{
 async function record(ctx: Context, type: 'checkpoint' | 'autosave', options: RecordOptions): Promise<string> {
 	const snapshot = await ctx.persistence.withReadLock(() => ctx.persistence.scanVersionedSnapshotUnlocked())
 	options.edit?.(snapshot)
-	const built = versionResourcesFromSnapshot(snapshot, LEGACY_LAYOUT)
+	const built = versionResourcesFromSnapshot(snapshot, ctx.persistence.layout)
 	const resources = options.resources ? options.resources([...built.resources]) : [...built.resources]
-	const base = { historySchemaVersion: 1 as const, id: randomUUID(), at: options.at, workspaceSchemaVersion: options.workspaceSchemaVersion ?? 4, resources }
+	const base = { historySchemaVersion: 1 as const, id: randomUUID(), at: options.at, workspaceSchemaVersion: options.workspaceSchemaVersion ?? ctx.persistence.schemaPolicy.currentVersion, resources }
 	if (type === 'checkpoint') {
 		const checkpoint: CheckpointRecord = { ...base, type: 'checkpoint', actor: HUMAN, name: `Checkpoint at ${options.at}`, source: 'workbench', ...(options.parentCheckpoint ? { parentCheckpoint: options.parentCheckpoint } : {}) }
 		await ctx.stores.checkpoints.create(checkpoint, built.blobs)
@@ -130,9 +150,16 @@ describe('diffVersions', () => {
 		await writeView(ctx.root, view({ name: 'Pay' }))
 
 		const summary = compared(await ctx.app.diffVersions({ from: first }))
-		expect(summary.from).toMatchObject({ id: first, type: 'checkpoint', workspaceSchemaVersion: 4 })
-		expect(summary.to).toEqual({ id: 'current', workspaceSchemaVersion: 4 })
-		expect(statuses(summary)).toEqual({ [`asset:${ASSET_ID}`]: 'unchanged', 'locale:en-US': 'unchanged', [`view:${VIEW_ID}`]: 'modified', 'workspace:workspace': 'unchanged' })
+		expect(summary.from).toMatchObject({ id: first, type: 'checkpoint', workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION })
+		expect(summary.to).toEqual({ id: 'current', workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION })
+		expect(statuses(summary)).toEqual({
+			'access-presets:access-presets': 'unchanged',
+			[`asset:${ASSET_ID}`]: 'unchanged',
+			'locale:en-US': 'unchanged',
+			'product-kit:product-kit': 'unchanged',
+			[`view:${VIEW_ID}`]: 'modified',
+			'workspace:workspace': 'unchanged',
+		})
 		expect(summary.changes).toBeUndefined()
 		const current = await ctx.persistence.views.readRevision(VIEW_ID)
 		expect(summary.summary.find(row => row.kind === 'view')).toMatchObject({ toRevision: current })
@@ -184,7 +211,7 @@ describe('diffVersions', () => {
 	})
 
 	it('shows no manifest change across the v3 to v4 migration (Rules 01a11a5e-118c-733d-92d7-27262bfbcd33 and 01a11a5e-1085-71ec-ac82-d60263ae8173)', async () => {
-		const ctx = await workspace()
+		const ctx = await legacyWorkspace()
 		const manifestV3 = (overrides: Record<string, unknown> = {}) => (snapshot: Map<string, Uint8Array>) => {
 			snapshot.set(workspaceRelativePath(), json({ ...MANIFEST, schemaVersion: 3, ...overrides }))
 			snapshot.set(viewRelativePath(VIEW_ID), json(view({ name: 'Before migration' })))
@@ -204,7 +231,7 @@ describe('diffVersions', () => {
 	})
 
 	it('gives the same summary at every detail for two versions recorded under the same older schema', async () => {
-		const ctx = await workspace()
+		const ctx = await legacyWorkspace()
 		const recordV3 = (at: string, manifestBytes: Uint8Array) => record(ctx, 'autosave', {
 			at,
 			workspaceSchemaVersion: 3,
@@ -277,7 +304,7 @@ describe('diffVersions', () => {
 
 		// The live Workspace on an unsupported schema: only the comparison with current is refused (Rule 01a11a5e-07c1-70d6-b4fb-69c99be791e3).
 		const other = await record(ctx, 'autosave', { at: '2026-10-03T00:00:00.000Z' })
-		await writeFile(join(ctx.root, workspaceRelativePath()), `${JSON.stringify({ ...MANIFEST, schemaVersion: 99 })}\n`)
+		await writeFile(manifestPath(ctx.root), `${JSON.stringify(currentManifest({ ...SETTINGS, schemaVersion: 99 }))}\n`)
 		expect(await ctx.app.diffVersions({ from: known })).toMatchObject({ status: 'blocked', code: 'workspace.schema_unsupported', diagnostics: [{ path: '/to' }] })
 		expect(compared(await ctx.app.diffVersions({ from: known, to: other })).summary.every(row => row.status === 'unchanged')).toBe(true)
 	})
@@ -363,10 +390,8 @@ describe('GET /api/history/diff access (Clause 01a11485-f978-767a-b977-33028aee7
 
 	beforeAll(async () => {
 		root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-http-')))
-		// The packaged runtime uses UIUX's own policy, so this Workspace is a current (schemaVersion 5) one.
-		const { schemaVersion: _schemaVersion, ...settings } = MANIFEST
-		void _schemaVersion
-		await writeCurrentWorkspace(root, settings)
+		// The packaged runtime uses UIUX's own policy, so this Workspace is a current one.
+		await writeCurrentWorkspace(root, SETTINGS)
 		await mkdir(join(root, 'i18n'), { recursive: true })
 		await writeFile(join(root, localeRelativePath('en-US')), '{"greeting":"Hello"}\n')
 		process.env.UIUX_WORKSPACE_ROOT = root
