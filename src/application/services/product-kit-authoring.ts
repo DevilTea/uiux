@@ -5,7 +5,6 @@ import { bareAdapterLeavesWorkspace, resolveKitPackage, type KitPackage } from '
 import { checkProductKitAgainstKit, containedRealPath, locateKitProject, maskHostPaths, type KitProject } from '../../adapters/kit-registry'
 import {
 	PRODUCT_KIT_RESOURCE_KEY,
-	PRODUCT_KIT_SCHEMA_VERSION,
 	validateProductKit,
 	type ProductKit,
 	type ProductKitComponent,
@@ -15,6 +14,7 @@ import { type Diagnostic, type JsonValue } from '../../domain/validation'
 import type { WorkspaceAdapterSelection } from '../../domain/workspace/schema'
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
+import { workspaceRefusalMessage } from '../../persistence/schema-policy'
 import type { ResourceRevision } from '../dto/revisions'
 import type { KitBuildState, KitBuildStatus } from '../ports/kit-build'
 import { validateResourceRevision } from '../dto/revisions'
@@ -37,8 +37,7 @@ import { validateResourceRevision } from '../dto/revisions'
  * design-write context belong to the scoped session; its key check runs here as the `guard`,
  * after the revision check and on the file the compare-and-swap replaces, so the keys checked are
  * those of the change written, and before the checks against the kit project, so a caller
- * without the keys causes no kit project I/O. A Workspace below `schemaVersion` 5 has no Product Kit file: the
- * operations refuse with `workspace.migration_required`.
+ * without the keys causes no kit project I/O.
  */
 export type ProductKitAdapterSettings = Readonly<{ moduleSpecifier: string; config?: JsonValue }>
 
@@ -115,14 +114,9 @@ type Build = (current: ProductKit) => Readonly<{ next: ProductKit }> | Readonly<
  * the state is `none`.
  */
 export function createProductKitAuthoringService(persistence: FileNativePersistence, options: Readonly<{ buildStatus?: () => KitBuildStatus }> = {}): ProductKitAuthoringService {
-	function kitLocation(): Readonly<{ directory: string; name: string }> | undefined {
+	function kitLocation(): Readonly<{ directory: string; name: string }> {
 		const name = persistence.layout.codeDir
-		return name ? { directory: join(persistence.root, name), name } : undefined
-	}
-
-	function legacyRefusal(): ProductKitAuthoringResult {
-		const message = `The Product Kit exists from Workspace schemaVersion ${PRODUCT_KIT_SCHEMA_VERSION}; this Workspace keeps its Adapters in the manifest. Run: uiux migrate --workspace <dir>`
-		return { status: 'blocked', key: KEY, code: 'workspace.migration_required', message, diagnostics: [{ code: 'workspace.migration_required', path: '/schemaVersion', message }] }
+		return { directory: join(persistence.root, name), name }
 	}
 
 	function blocked(code: string, message: string, diagnostics: readonly Diagnostic[]): ProductKitAuthoringResult {
@@ -134,14 +128,11 @@ export function createProductKitAuthoringService(persistence: FileNativePersiste
 		if (!expectedRevision.ok)
 			return { status: 'invalid_expected_revision', key: KEY, diagnostics: expectedRevision.diagnostics }
 		const kit = kitLocation()
-		if (!persistence.layout.productKitPath || !kit) return legacyRefusal()
 
 		try {
 			const workspace = await persistence.workspace.readInspected()
-			if (workspace.inspection.state === 'migration_required')
-				return blocked('workspace.migration_required', 'The Workspace requires migration before the Product Kit can be changed. Run: uiux migrate --workspace <dir>', workspace.diagnostics)
 			if (workspace.inspection.state !== 'current')
-				return blocked('workspace.schema_unsupported', 'This UIUX build cannot change the Product Kit of this Workspace.', workspace.diagnostics)
+				return blocked('workspace.schema_unsupported', workspaceRefusalMessage(workspace.inspection, 'This UIUX build cannot change the Product Kit of this Workspace.'), workspace.diagnostics)
 
 			const current = await persistence.productKit.readInspected()
 			if (!current) return { status: 'not_found', key: KEY }
@@ -174,7 +165,6 @@ export function createProductKitAuthoringService(persistence: FileNativePersiste
 		catch (error) {
 			if (!(error instanceof PersistenceError)) throw error
 			switch (error.code) {
-				case 'workspace.migration_required':
 				case 'workspace.schema_unsupported':
 					return blocked(error.code, error.message, error.diagnostics)
 				case 'persistence.resource_not_found':
@@ -223,7 +213,6 @@ export function createProductKitAuthoringService(persistence: FileNativePersiste
 
 	async function readProductKit(): Promise<ProductKitRead | undefined> {
 		const kit = kitLocation()
-		if (!persistence.layout.productKitPath || !kit) return undefined
 		const read = await persistence.productKit.readInspected()
 		if (!read) return undefined
 		const validation = validateProductKit(read.resource)

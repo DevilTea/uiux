@@ -15,8 +15,7 @@ import {
  * validator rules 2.1–2.6 and 13.1–13.7 under schemaVersion 3.
  */
 
-const V2 = { schemaVersion: 2 } as const
-const V3 = { schemaVersion: 3 } as const
+const V3 = {} as const
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const REVIEW_ID = '22222222-2222-4222-8222-222222222222'
 const MESSAGE_ID = '33333333-3333-4333-8333-333333333333'
@@ -71,7 +70,7 @@ function submission(at: string): Record<string, unknown> {
 	}
 }
 
-function codes(input: unknown, context: { schemaVersion: number } = V3): string[] {
+function codes(input: unknown, context: Parameters<typeof validateReviewThread>[1] = V3): string[] {
 	return validateReviewThread(input, context).diagnostics.map(item => item.code)
 }
 
@@ -80,14 +79,6 @@ describe('Workspace anchor arm (rules 2.1–2.6)', () => {
 		expect(validateReviewThread(workspaceThread(), V3).ok).toBe(true)
 		expect(validateReviewThread(widgetThread(), V3).ok).toBe(true)
 		expect(validateReviewThread(widgetThread({ displayHint: { pin: { x: 0.5, y: 0.5 } }, variantNames: ['empty'] }), V3).ok).toBe(true)
-	})
-
-	it('keeps the Workspace arm invalid under schemaVersion 1 and 2 (version gating)', () => {
-		for (const schemaVersion of [1, 2]) {
-			const found = codes(workspaceThread(), { schemaVersion })
-			expect(found).toContain('schema.unknown_field')
-			expect(found.length).toBeGreaterThan(1)
-		}
 	})
 
 	it('rejects another scope value, mixed members and an empty anchor', () => {
@@ -122,8 +113,6 @@ describe('Workspace anchor arm (rules 2.1–2.6)', () => {
 		expect(codes(widgetThread({ history: toWorkspace.history }))).toEqual(['review.anchor_history_mismatch'])
 		const variantsOnWorkspace = workspaceThread({ history: [{ ...toWorkspace.history[0], after: { anchor: { scope: 'workspace' }, variantNames: ['empty'] } }] })
 		expect(codes(variantsOnWorkspace)).toContain('review.workspace_anchor_variants')
-		// Under v2 a Workspace arm inside history is an unknown field.
-		expect(codes(toWorkspace, V2)).toContain('schema.unknown_field')
 	})
 
 	it('narrows the union with the exported guards', () => {
@@ -147,11 +136,6 @@ describe('message edits[] (rules 13.1–13.7)', () => {
 			{ id: SECOND_EDIT_ID, actor: AUTHOR, at: T1, previousBody: 'v2' },
 		], 'v3')] })
 		expect(validateReviewThread(twice, V3).ok).toBe(true)
-	})
-
-	it('keeps edits an unknown field under schemaVersion 2', () => {
-		const thread = workspaceThread({ anchor: { viewId: VIEW_ID, widgetId: 'root' }, messages: [edited([{ id: EDIT_ID, actor: AUTHOR, at: T1, previousBody: 'x' }])] })
-		expect(codes(thread, V2)).toEqual(['schema.unknown_field'])
 	})
 
 	it('rejects an empty edits array, unknown members and malformed entries', () => {

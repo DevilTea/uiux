@@ -15,12 +15,12 @@ import type { AccessPresetsFile } from '../../domain/access-presets/schema'
 import { accessPresetsWriteDiagnostics } from './access-presets-authoring'
 import { checkProductKitAgainstKit } from '../../adapters/kit-registry'
 import { PersistenceError } from '../../persistence/errors'
-import { canonicalJsonBytes, revisionForResourceFiles, upgradeSnapshotInMemory, type FileNativePersistence } from '../../persistence/file-native'
+import { canonicalJsonBytes, revisionForResourceFiles, type FileNativePersistence } from '../../persistence/file-native'
 import { HostHistoryError } from '../../persistence/history/host-store'
 import { versionResourcesFromSnapshot } from '../../persistence/history/snapshot'
 import { mergeTimeline } from '../../persistence/history/timeline'
 import { readVersionBlobUnlocked } from '../../persistence/history/version-blobs'
-import { assetMetadataRelativePath, layoutForSchemaVersion, REVIEW_FILE_SUFFIX, WORKSPACE_DATA_DIRECTORY, type WorkspaceLayout } from '../../persistence/paths'
+import { assetMetadataRelativePath, REVIEW_FILE_SUFFIX, WORKSPACE_DATA_DIRECTORY, type WorkspaceLayout } from '../../persistence/paths'
 import type { ResourceRevision } from '../dto/revisions'
 import type { HistoryStoreSource } from './history-diff'
 
@@ -39,8 +39,8 @@ import type { HistoryStoreSource } from './history-diff'
  * `restoredFrom`, which makes the recorder close the open autosave before and after the write, Rule
  * 01a11e0d-d911-7030-9565-7473aa0995e1) belong to the scoped session.
  *
- * - The version's content is upgraded in memory to the current schema and validated like an
- *   authoring write; invalid content is refused with diagnostics (Rule 01a11a5e-1580-…).
+ * - The version must be recorded under the current schema (Clause 01a11a5e-2434-…); its content is
+ *   validated like an authoring write; invalid content is refused with diagnostics (Rule 01a11a5e-1580-…).
  * - A View restore keeps the View's current Decisions (Rule 01a11a5e-1645-…); a settings restore
  *   keeps the manifest's current `schemaVersion` (Rule 01a11a5e-15e9-…); a resource that no longer
  *   exists is re-created with its identity (Rule 01a11a5e-16a2-…).
@@ -111,7 +111,7 @@ type ParsedCommand = Readonly<{ versionId: string; target: Target; expectedRevis
 /** What the restore reads under one shared persistence lock. */
 type Loaded = Readonly<{
 	version: VersionRecord
-	/** The version's files for the target, upgraded to the current schema when needed. */
+	/** The version's files for the target. */
 	restoredFiles: ReadonlyMap<string, Uint8Array>
 	/** The current versioned files of the Workspace. */
 	current: ReadonlyMap<string, Uint8Array>
@@ -125,12 +125,6 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 		const parsed = parseCommand(command)
 		if ('status' in parsed) return parsed
 		const { target } = parsed
-		// Below `schemaVersion` 5 a Workspace has no Product Kit file to restore.
-		if (target.kind === 'product-kit' && !persistence.layout.productKitPath) {
-			const message = 'Restoring the Product Kit needs a Workspace at schemaVersion 5 or later; this Workspace keeps its Adapters in the manifest.'
-			return { status: 'invalid', kind: target.kind, key: target.key, code: 'history.restore_unsupported_kind', message, diagnostics: [{ code: 'history.restore_unsupported_kind', path: '/resource/kind', message }] }
-		}
-
 		let stores: Awaited<ReturnType<HistoryStoreSource['open']>>
 		try {
 			stores = await history?.open()
@@ -213,9 +207,7 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 		}
 		catch (error) {
 			if (!(error instanceof PersistenceError)) throw error
-			const message = error.code === 'workspace.migration_required'
-				? 'A restore cannot run until the Workspace is migrated. Run: uiux migrate --workspace <dir>'
-				: `A restore cannot run for this Workspace schema state: ${error.message}`
+			const message = `A restore cannot run for this Workspace schema state: ${error.message}`
 			return { status: 'blocked', kind: target.kind, key: target.key, code: error.code, message, diagnostics: error.diagnostics.length > 0 ? error.diagnostics : [{ code: error.code, path: '/schemaVersion', message: error.message }] }
 		}
 
@@ -223,39 +215,22 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 		const version = timeline.versions.find(entry => entry.version.id === command.versionId)?.version
 		if (!version) return refusal('not_found', target, 'history.record_missing', '/versionId', `Version ${command.versionId} does not exist.`)
 		// Rule 01a11a5e-081c-7149-9345-836ce2267c0a and Clause 01a11a5e-2434-7342-a3c1-6d63aa74334c.
-		if (!policy.recognizedVersions.includes(version.workspaceSchemaVersion))
-			return refusal('blocked', target, 'workspace.schema_unsupported', '/versionId', `Version ${version.id} was recorded under Workspace schemaVersion ${version.workspaceSchemaVersion}, which this UIUX build does not recognize.`)
+		if (version.workspaceSchemaVersion !== policy.currentVersion)
+			return refusal('blocked', target, 'workspace.schema_unsupported', '/versionId', `Version ${version.id} was recorded under Workspace schemaVersion ${version.workspaceSchemaVersion} and cannot be restored: this UIUX reads only schemaVersion ${policy.currentVersion}.`)
 		const identity = resourceIdentityKey(target)
 		const entry = version.resources.find(resource => resourceIdentityKey(resource) === identity)
 		if (!entry) return refusal('not_found', target, 'history.resource_not_in_version', '/resource', `Version ${version.id} does not hold ${target.kind} ${target.key}.`)
 
-		// An older version is upgraded as a whole, with the same steps `uiux migrate` runs, so a step
-		// that reads more than the target (the manifest, other resources) sees what it expects.
-		const upgrade = version.workspaceSchemaVersion !== policy.currentVersion
-		const recordedLayout = layoutForSchemaVersion(version.workspaceSchemaVersion)
 		const snapshot = new Map<string, Uint8Array>()
-		for (const resource of upgrade ? version.resources : [entry]) {
-			if (!isDiffableResourceKind(resource.kind)) continue
-			for (const [path, digest] of Object.entries(resource.files)) {
-				if (!recordedLayout.classifyVersionedPath(path)) continue
+		if (isDiffableResourceKind(entry.kind)) {
+			for (const [path, digest] of Object.entries(entry.files)) {
+				if (!persistence.layout.classifyVersionedPath(path)) continue
 				const bytes = await readVersionBlobUnlocked(persistence, stores.host, digest)
 				if (!bytes) return refusal('failed', target, 'history.blob_missing', '/versionId', `Version ${version.id} names file ${path} (${digest}), whose content is no longer stored.`)
 				snapshot.set(path, bytes)
 			}
 		}
-		let restoredFiles: ReadonlyMap<string, Uint8Array>
-		if (upgrade) {
-			try {
-				restoredFiles = filesOf((await upgradeSnapshotInMemory(snapshot, version.workspaceSchemaVersion, policy)).snapshot, layoutForSchemaVersion(policy.currentVersion), target)
-			}
-			catch (error) {
-				if (!(error instanceof PersistenceError)) throw error
-				return { status: 'blocked', kind: target.kind, key: target.key, code: error.code, message: error.message, diagnostics: error.diagnostics.length > 0 ? error.diagnostics : [{ code: error.code, path: '/versionId', message: error.message }] }
-			}
-		}
-		else {
-			restoredFiles = filesOf(snapshot, recordedLayout, target)
-		}
+		const restoredFiles = filesOf(snapshot, persistence.layout, target)
 		return { version, restoredFiles, current: await persistence.scanVersionedSnapshotUnlocked(), reviews: await readReviewsUnlocked() }
 	}
 
@@ -333,7 +308,6 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 				case 'persistence.resource_not_found':
 				case 'workspace.manifest_missing':
 					return conflict()
-				case 'workspace.migration_required':
 				case 'workspace.schema_unsupported':
 					return { status: 'blocked', kind: target.kind, key: target.key, code: error.code, message: error.message, diagnostics: error.diagnostics.length > 0 ? error.diagnostics : [{ code: error.code, path: '/schemaVersion', message: error.message }] }
 				// The target's current file is not readable JSON, so its identity cannot be checked before

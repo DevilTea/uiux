@@ -1,24 +1,17 @@
 import { lstat, readFile } from 'node:fs/promises'
 
-import { BUILT_IN_ACCESS_PRESETS } from '../../application/access/keys'
 import type { LabelPreset } from '../../application/access/labels'
-import { ACCESS_PRESETS_SCHEMA_VERSION, labelPresetsOf } from '../../domain/access-presets/schema'
-import { isRecord } from '../../domain/validation'
-import { detectWorkspaceLayout, resolveWorkspacePath, type WorkspaceLayout } from '../../persistence/paths'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../../product/workspace-schema'
+import { labelPresetsOf } from '../../domain/access-presets/schema'
+import { resolveWorkspacePath, V5_LAYOUT, type WorkspaceLayout } from '../../persistence/paths'
 
 /**
  * The Access presets that label members and that `--preset` and the Members page apply, read from
  * the Workspace at this moment (Rules 01a11c09-c724-7a1b-9505-3146b5b2b241 and
- * 01a11c09-ccc6-705c-96c6-9f4ba7a2ad58):
- *
- * - below `schemaVersion` 6, where the Workspace has no presets file, the built-in presets (Rule
- *   01a11c09-cb79-744e-bbf6-ec38d6f159ba);
- * - from 6, the presets of `access-presets.json` in file order, as far as they can be read: a file
- *   that breaks the rules on disk still labels by the first match in file order (Rule
- *   01a11c33-265e-71f6-939f-4d0d3754a16f), and a preset holding a key unknown to this version
- *   labels nobody (`memberLabel`). A presets file that is missing, unreadable, not JSON or a symbolic
- *   link gives no presets: every member is then Custom.
+ * 01a11c09-ccc6-705c-96c6-9f4ba7a2ad58): the presets of `access-presets.json` in file order, as far
+ * as they can be read. A file that breaks the rules on disk still labels by the first match in file
+ * order (Rule 01a11c33-265e-71f6-939f-4d0d3754a16f), and a preset holding a key unknown to this
+ * version labels nobody (`memberLabel`). A presets file that is missing, unreadable, not JSON or a
+ * symbolic link gives no presets: every member is then Custom.
  *
  * Labels are computed whenever the server or the CLI answers and never stored (Rule
  * 01a11c09-c9be-736b-95a4-0b39d6f64cf0), so a presets edit changes labels only, never keys (Rule
@@ -26,24 +19,20 @@ import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../../product/workspace-schema
  * replaced atomically, so a read sees one whole version of it.
  */
 export async function readWorkspaceAccessPresets(workspaceRoot: string, givenLayout?: WorkspaceLayout): Promise<readonly LabelPreset[]> {
-	const layout = givenLayout ?? await detectWorkspaceLayout(workspaceRoot, CURRENT_WORKSPACE_SCHEMA_VERSION)
-	if (!layout.accessPresetsPath) return BUILT_IN_ACCESS_PRESETS
-	const manifest = await readJson(workspaceRoot, layout.manifestPath)
-	const version = isRecord(manifest) && Number.isInteger(manifest.schemaVersion) ? manifest.schemaVersion as number : undefined
-	if (version === undefined || version < ACCESS_PRESETS_SCHEMA_VERSION) return BUILT_IN_ACCESS_PRESETS
+	const layout = givenLayout ?? V5_LAYOUT
 	return labelPresetsOf(await readJson(workspaceRoot, layout.accessPresetsPath))
 }
 
 /**
  * {@link readWorkspaceAccessPresets} for a server, which labels every authenticated request: it
- * stats the manifest and the presets file, and reads and parses them again only when either
+ * stats the presets file, and reads and parses it again only when it
  * changed (another inode, size, modification or change time, in nanoseconds), so a pulled commit
  * or a presets write still changes the next label.
  */
 export function createWorkspaceAccessPresetsReader(workspaceRoot: string, layout: WorkspaceLayout): () => Promise<readonly LabelPreset[]> {
 	let cached: Readonly<{ stamp: string; presets: Promise<readonly LabelPreset[]> }> | undefined
 	return async () => {
-		const stamp = (await Promise.all([layout.manifestPath, layout.accessPresetsPath].map(path => fileStamp(workspaceRoot, path)))).join('|')
+		const stamp = await fileStamp(workspaceRoot, layout.accessPresetsPath)
 		if (cached?.stamp !== stamp) {
 			const presets = readWorkspaceAccessPresets(workspaceRoot, layout)
 			cached = { stamp, presets }
@@ -55,8 +44,7 @@ export function createWorkspaceAccessPresetsReader(workspaceRoot: string, layout
 }
 
 /** What identifies a version of a Workspace file without reading it, or `-` when it cannot be examined. */
-async function fileStamp(workspaceRoot: string, relativePath: string | undefined): Promise<string> {
-	if (!relativePath) return '-'
+async function fileStamp(workspaceRoot: string, relativePath: string): Promise<string> {
 	try {
 		const stats = await lstat(resolveWorkspacePath(workspaceRoot, relativePath), { bigint: true })
 		return `${stats.ino}:${stats.size}:${stats.mtimeNs}:${stats.ctimeNs}:${stats.isFile() ? 'f' : 'o'}`

@@ -28,15 +28,11 @@ import {
 } from './preview-bundler'
 import { validateProductKit, type ProductKit } from '../domain/product-kit/schema'
 import { validateWorkspaceManifest, type WorkspaceManifest } from '../domain/workspace/schema'
-import { detectWorkspaceLayout, resolveWorkspacePath, type WorkspaceLayout } from '../persistence/paths'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../product/workspace-schema'
+import { resolveWorkspacePath, V5_LAYOUT, type WorkspaceLayout } from '../persistence/paths'
 
-/**
- * The layout of the selected Workspace: the one given (a caller holding a persistence passes
- * `persistence.layout`), otherwise the one detected from where its manifest is.
- */
-async function selectedLayout(workspaceRoot: string, layout: WorkspaceLayout | undefined): Promise<WorkspaceLayout> {
-	return layout ?? detectWorkspaceLayout(workspaceRoot, CURRENT_WORKSPACE_SCHEMA_VERSION)
+/** The layout of the selected Workspace: the one given (a caller holding a persistence passes `persistence.layout`), otherwise the only one. */
+function selectedLayout(layout: WorkspaceLayout | undefined): WorkspaceLayout {
+	return layout ?? V5_LAYOUT
 }
 
 export async function readRawWorkspaceManifest(workspaceRoot: string, layout: WorkspaceLayout): Promise<WorkspaceManifest | undefined> {
@@ -51,7 +47,7 @@ export async function readRawWorkspaceManifest(workspaceRoot: string, layout: Wo
 	}
 }
 
-/** The Product Kit file of a `schemaVersion` 5 Workspace, or `undefined` when it is absent, unreadable or invalid. */
+/** The Product Kit file of a Workspace, or `undefined` when it is absent, unreadable or invalid. */
 export async function readRawProductKit(workspaceRoot: string, productKitPath: string): Promise<ProductKit | undefined> {
 	try {
 		const content = await readFile(resolveWorkspacePath(workspaceRoot, productKitPath), 'utf8')
@@ -64,7 +60,7 @@ export async function readRawProductKit(workspaceRoot: string, productKitPath: s
 }
 
 export async function resolveSelectedWorkspaceAdapters(workspaceRoot: string, givenLayout?: WorkspaceLayout): Promise<AdapterSetResolutionResult> {
-	const layout = await selectedLayout(workspaceRoot, givenLayout)
+	const layout = selectedLayout(givenLayout)
 	const manifest = await readRawWorkspaceManifest(workspaceRoot, layout)
 	if (!manifest) {
 		return {
@@ -78,31 +74,25 @@ export async function resolveSelectedWorkspaceAdapters(workspaceRoot: string, gi
 		}
 	}
 
-	// From schemaVersion 5 the Adapter list lives in the Product Kit file and resolves from `kit/`
-	// (Clauses 01a1144e-538e-705f-afdc-841028c410e4 and 01a115cd-d109-76d3-9622-85d0080c60b6).
-	let adapters = manifest.adapters ?? []
-	if (layout.productKitPath) {
-		const productKit = await readRawProductKit(workspaceRoot, layout.productKitPath)
-		if (!productKit) {
-			return {
-				state: 'invalid',
-				diagnostics: [{
-					code: 'product_kit.missing',
-					path: '/product-kit',
-					message: `Could not read a valid Product Kit file from ${layout.productKitPath}.`,
-				}],
-				summaries: [],
-			}
+	// The Adapter list lives in the Product Kit file and resolves from `kit/` (Clauses
+	// 01a1144e-538e-705f-afdc-841028c410e4 and 01a115cd-d109-76d3-9622-85d0080c60b6).
+	const productKit = await readRawProductKit(workspaceRoot, layout.productKitPath)
+	if (!productKit) {
+		return {
+			state: 'invalid',
+			diagnostics: [{
+				code: 'product_kit.missing',
+				path: '/product-kit',
+				message: `Could not read a valid Product Kit file from ${layout.productKitPath}.`,
+			}],
+			summaries: [],
 		}
-		adapters = productKit.adapters
 	}
-	let pin: KitOutputPin | undefined
-	if (layout.codeDir) {
-		const build = await kitBuildPin(workspaceRoot, layout.codeDir, adapters)
-		if (build.state === 'invalid') return { state: 'invalid', diagnostics: build.diagnostics, summaries: [] }
-		pin = build.pin
-		if (pin?.resolution) return pin.resolution
-	}
+	const adapters = productKit.adapters
+	const build = await kitBuildPin(workspaceRoot, layout.codeDir, adapters)
+	if (build.state === 'invalid') return { state: 'invalid', diagnostics: build.diagnostics, summaries: [] }
+	const pin: KitOutputPin | undefined = build.pin
+	if (pin?.resolution) return pin.resolution
 	if (adapters.length === 0) {
 		const emptySet: ValidatedAdapterSet = Object.freeze({
 			entries: Object.freeze([]),
@@ -222,18 +212,17 @@ export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, g
 	| (PreviewBundleResult & { state: 'valid'; themes: PreviewThemes })
 	| { state: 'invalid'; diagnostics: readonly Diagnostic[] }
 > {
-	const layout = await selectedLayout(workspaceRoot, givenLayout)
+	const layout = selectedLayout(givenLayout)
 	const resolution = await resolveSelectedWorkspaceAdapters(workspaceRoot, layout)
 	if (resolution.state === 'invalid') {
 		return { state: 'invalid', diagnostics: resolution.diagnostics }
 	}
 	// The set of a pinned kit build output generation keeps its bundle until the next generation.
-	const version = layout.codeDir ? kitBuildRunnerFor(resolve(workspaceRoot))?.outputVersion() : undefined
+	const version = kitBuildRunnerFor(resolve(workspaceRoot))?.outputVersion()
 	const pinnedResolution = version !== undefined ? pinnedResolutions.get(resolve(workspaceRoot)) : undefined
 	const pin = pinnedResolution?.version === version && await pinnedResolution?.resolution.catch(() => undefined) === resolution ? version : undefined
-	// Below schemaVersion 5 there is no Product Kit file, so no style and no theme.
-	const productKit = layout.productKitPath ? await readRawProductKit(workspaceRoot, layout.productKitPath) : undefined
-	const styles = layout.codeDir && productKit
+	const productKit = await readRawProductKit(workspaceRoot, layout.productKitPath)
+	const styles = productKit
 		? await resolveProductKitStyles(workspaceRoot, layout, productKit.styles, pin)
 		: { state: 'valid' as const, paths: [] }
 	if (styles.state === 'invalid') return { state: 'invalid', diagnostics: styles.diagnostics }
@@ -282,7 +271,7 @@ async function resolveProductKitStyles(workspaceRoot: string, layout: WorkspaceL
 	const pinned = pinnedStyles.get(root)
 	if (version !== undefined && pinned && pinned.version === version && pinned.styles === key) return pinned.resolution
 
-	const codeDir = layout.codeDir!
+	const codeDir = layout.codeDir
 	const declaration = await readKitBuildDeclaration(join(root, codeDir))
 	const output = declaration.state === 'declared' ? declaration.declaration.output : undefined
 	const resolver = new NodeWorkspaceAdapterModuleResolver({ layout })

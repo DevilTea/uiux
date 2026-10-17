@@ -1,22 +1,18 @@
-import { lstatSync } from 'node:fs'
-import { lstat } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 
 import { artifactStoreShardPath } from '../domain/artifacts/schema'
 import { ACCESS_PRESETS_FILENAME, ACCESS_PRESETS_RESOURCE_KEY, ACCESS_PRESETS_RESOURCE_KIND } from '../domain/access-presets/schema'
-import { PRODUCT_KIT_FILENAME, PRODUCT_KIT_RESOURCE_KEY, PRODUCT_KIT_RESOURCE_KIND, PRODUCT_KIT_SCHEMA_VERSION } from '../domain/product-kit/schema'
+import { PRODUCT_KIT_FILENAME, PRODUCT_KIT_RESOURCE_KEY, PRODUCT_KIT_RESOURCE_KIND } from '../domain/product-kit/schema'
 import { isCanonicalLocaleFilename, isCanonicalLocaleTag, isFullUuid, isSafeRelativePath, isSha256Digest } from '../domain/validation'
 import { PersistenceError } from './errors'
 
 /**
- * The top-level Workspace directories that hold authored, principal-writable canonical data.
- * This single source of truth is shared by the persistence path helpers below and by the Adapter
- * resolver (`src/adapters/resolution.ts`), which refuses any Adapter specifier — `./`-relative or
- * bare — that resolves inside one of them, so an Editor or Agent cannot select uploaded data as
- * executable Adapter code. `adapters/` is intentionally absent: it is code, not authored data, and
- * hosts legitimate `./adapters/*` local Adapters. These are the old layout's data directories
- * (below `schemaVersion` 5); in a `schemaVersion` 5 root the resolver refuses everything outside
- * `kit/` instead.
+ * The top-level directory names that hold authored, principal-writable canonical data. The data
+ * directories of the layout below use them, and the Adapter resolver (`src/adapters/resolution.ts`)
+ * refuses any Adapter specifier, `./`-relative or bare, that resolves inside one of them in any
+ * Workspace-like directory on the module's path, so an Editor or Agent cannot select uploaded data
+ * as executable Adapter code. Inside the selected root the resolver refuses everything outside
+ * `kit/` instead. `.uiux` is the directory a Workspace root usually lives in.
  */
 export const WORKSPACE_DATA_DIRECTORY = Object.freeze({
 	workspaceMeta: '.uiux',
@@ -31,11 +27,8 @@ export const CANONICAL_WORKSPACE_DATA_DIRECTORIES: readonly string[] = Object.fr
 	Object.values(WORKSPACE_DATA_DIRECTORY),
 )
 
+/** A manifest inside a `.uiux/` directory, which the Adapter resolver's data guard recognizes on a module's path. */
 export const WORKSPACE_MANIFEST_PATH = `${WORKSPACE_DATA_DIRECTORY.workspaceMeta}/workspace.json` as const
-
-export const WORKSPACE_ARTIFACTS_DIRECTORY = `${WORKSPACE_DATA_DIRECTORY.workspaceMeta}/artifacts` as const
-
-export const WORKSPACE_CHECKPOINTS_DIRECTORY = `${WORKSPACE_DATA_DIRECTORY.workspaceMeta}/history/checkpoints` as const
 
 const VIEW_FILE_SUFFIX = '.view.json'
 const FLOW_FILE_SUFFIX = '.flow.json'
@@ -50,44 +43,35 @@ export type VersionedResourceIdentity = Readonly<{ kind: string; key: string }>
  * Where a Workspace keeps its files: the one seam every path that depends on the Workspace layout
  * goes through (the manifest, the derived-artifact store, Checkpoints, the transaction journal,
  * the persistence lock, the server hold, and the versioned files history reads and writes).
- * Callers ask the layout instead of building path literals, so a later layout (Part 14,
- * `schemaVersion` 5) can be added beside this one: persistence picks the current Workspace's
- * layout, and history reads each record with `layoutForSchemaVersion` of the schema it was
- * recorded under.
+ * Callers ask the layout instead of building path literals. There is one layout, {@link V5_LAYOUT}.
  *
  * Every path is Workspace-relative and `/`-separated.
  *
  * - `metadataDir` is the directory that holds the manifest and the runtime files; a writer makes
- *   sure it exists before taking the lock. It is `''` when that directory is the Workspace root
- *   itself (from `schemaVersion` 5); {@link resolveLayoutDirectory} resolves it.
- * - `productKitPath` is the Product Kit file, and `codeDir` the code directory authoring never
- *   writes in; both are absent below `schemaVersion` 5.
- * - `accessPresetsPath` is the Access presets file. The `schemaVersion` 5 layout names it because
- *   `schemaVersion` 6 keeps every path of 5 and only adds this file (Rule
- *   01a11c09-c6b5-7a65-86fd-8b5dddf3de6e), so one layout serves both; a `schemaVersion` 5 Workspace
- *   has no such file, and writes need the current schema. Absent below `schemaVersion` 5.
- * - `canonicalFiles` lists the canonical files directly under the Workspace root (the manifest and,
- *   from 5, the Product Kit file, and from 6 the Access presets file); the canonical data directories
- *   are the same in every layout.
+ *   sure it exists before taking the lock. It is `''`, the Workspace root itself;
+ *   {@link resolveLayoutDirectory} resolves it.
+ * - `productKitPath` is the Product Kit file, `accessPresetsPath` the Access presets file, and
+ *   `codeDir` the code directory authoring never writes in.
+ * - `canonicalFiles` lists the canonical files directly under the Workspace root (the manifest, the
+ *   Product Kit file and the Access presets file).
  * - `versionedRoots` lists the versioned files and the versioned directories (with a trailing
  *   `/`), per Clause 01a11a5e-1eba-78ae-a204-52e286a95ddb.
  * - `excluded` lists the directories next to them that are never versioned (`reviews/`, the
- *   runtime, artifact and history directories, and `kit/`); an exact `versionedRoots` file inside
- *   one of them, the legacy manifest, stays versioned.
- * - `isCanonicalPath` is true exactly for the paths canonical writes, transactions and migrations
- *   may touch: the `canonicalFiles` and the resource files of the data directories. Nothing under
- *   `codeDir` is canonical.
+ *   runtime, artifact and history directories, and `kit/`).
+ * - `isCanonicalPath` is true exactly for the paths canonical writes and transactions may touch:
+ *   the `canonicalFiles` and the resource files of the data directories. Nothing under `codeDir`
+ *   is canonical.
  * - `classifyVersionedPath` returns the resource a canonical versioned file belongs to, or
  *   `undefined` for every other path, including excluded and non-canonical ones.
  */
 export type WorkspaceLayout = Readonly<{
-	/** A stable name of the layout, recorded in pending transaction journals (`legacy` is never written). */
-	id: 'legacy' | 'v5'
+	/** A stable name of the layout, recorded in pending transaction journals. */
+	id: 'v5'
 	metadataDir: string
 	manifestPath: string
-	productKitPath?: string
-	accessPresetsPath?: string
-	codeDir?: string
+	productKitPath: string
+	accessPresetsPath: string
+	codeDir: string
 	artifactsDir: string
 	checkpointsDir: string
 	transactionsDir: string
@@ -104,45 +88,7 @@ export type WorkspaceLayout = Readonly<{
 	classifyVersionedPath(path: string): VersionedResourceIdentity | undefined
 }>
 
-const LEGACY_METADATA_DIRECTORY = WORKSPACE_DATA_DIRECTORY.workspaceMeta
-
-/** The `schemaVersion` 1–4 layout: authored directories at the Workspace root, the manifest and runtime files under `.uiux/`. */
-export const LEGACY_LAYOUT: WorkspaceLayout = Object.freeze({
-	id: 'legacy',
-	metadataDir: LEGACY_METADATA_DIRECTORY,
-	manifestPath: WORKSPACE_MANIFEST_PATH,
-	artifactsDir: WORKSPACE_ARTIFACTS_DIRECTORY,
-	checkpointsDir: WORKSPACE_CHECKPOINTS_DIRECTORY,
-	transactionsDir: `${LEGACY_METADATA_DIRECTORY}/.transactions`,
-	lockPath: `${LEGACY_METADATA_DIRECTORY}/.persistence.lock`,
-	serverHoldPath: `${LEGACY_METADATA_DIRECTORY}/.server-hold.json`,
-	canonicalFiles: Object.freeze([WORKSPACE_MANIFEST_PATH]),
-	versionedRoots: Object.freeze([
-		WORKSPACE_MANIFEST_PATH,
-		`${WORKSPACE_DATA_DIRECTORY.views}/`,
-		`${WORKSPACE_DATA_DIRECTORY.flows}/`,
-		`${WORKSPACE_DATA_DIRECTORY.locales}/`,
-		`${WORKSPACE_DATA_DIRECTORY.assets}/`,
-	]),
-	excluded: Object.freeze([
-		`${WORKSPACE_DATA_DIRECTORY.reviews}/`,
-		`${LEGACY_METADATA_DIRECTORY}/`,
-	]),
-	metadataFilePath(filename: string): string {
-		return `${LEGACY_METADATA_DIRECTORY}/${filename}`
-	},
-	checkpointRelativePath(id: string): string {
-		assertUuidIdentity(id, 'Checkpoint')
-		return `${WORKSPACE_CHECKPOINTS_DIRECTORY}/${id}.json`
-	},
-	artifactRelativePath(identity: string): string {
-		return `${WORKSPACE_ARTIFACTS_DIRECTORY}/${artifactShardRelativePath(identity)}`
-	},
-	isCanonicalPath: path => path === WORKSPACE_MANIFEST_PATH || isCanonicalDataPath(path),
-	classifyVersionedPath: path => path === WORKSPACE_MANIFEST_PATH ? WORKSPACE_RESOURCE : classifyDataVersionedPath(path),
-})
-
-/** Clause 01a1144e-531c-7d71-9bc5-f62340aea55a: the manifest directly under the root from `schemaVersion` 5. */
+/** Clause 01a1144e-531c-7d71-9bc5-f62340aea55a: the manifest directly under the root. */
 export const V5_MANIFEST_PATH = 'workspace.json'
 /** Clause 01a11bb1-8dcc-7d24-99de-52ca7778fd50: the only code directory. */
 export const V5_CODE_DIRECTORY = 'kit'
@@ -152,13 +98,12 @@ const PRODUCT_KIT_RESOURCE: VersionedResourceIdentity = Object.freeze({ kind: PR
 const ACCESS_PRESETS_RESOURCE: VersionedResourceIdentity = Object.freeze({ kind: ACCESS_PRESETS_RESOURCE_KIND, key: ACCESS_PRESETS_RESOURCE_KEY })
 
 /**
- * The `schemaVersion` 5 layout (Clauses 01a1144e-531c-…, 01a11bb1-8d67-…, 01a11bb1-8dcc-…,
- * 01a1144e-5508-…, 01a1144e-551f-… and 01a11a5e-1e0e-…): the former `.uiux/` directory is the
- * Workspace root. It holds the manifest `workspace.json`, the Product Kit file, the data
- * directories, `artifacts/`, `history/`, the code directory `kit/` and the runtime files, all
- * directly under the root. The data directories keep their names and inner layout. It is also the
- * `schemaVersion` 6 layout, which adds the Access presets file `access-presets.json` (Clauses
- * 01a11bb1-8d67-71c5-929f-138afd0c66ec and 01a11c09-a855-7d7e-93ec-cd9a85fdb65e).
+ * The Workspace layout, the only one (Clauses 01a1144e-531c-…, 01a11bb1-8d67-…, 01a11bb1-8dcc-…,
+ * 01a1144e-5508-…, 01a1144e-551f-…, 01a11a5e-1e0e-… and 01a11c09-a855-…); its name records the
+ * `schemaVersion` that introduced it. The Workspace root, usually a `.uiux/` directory, holds the
+ * manifest `workspace.json`, the Product Kit file, the Access presets file `access-presets.json`,
+ * the data directories, `artifacts/`, `history/`, the code directory `kit/` and the runtime files,
+ * all directly under the root.
  */
 export const V5_LAYOUT: WorkspaceLayout = Object.freeze({
 	id: 'v5',
@@ -208,51 +153,6 @@ export const V5_LAYOUT: WorkspaceLayout = Object.freeze({
 	},
 })
 
-/**
- * Each layout with the first Workspace `schemaVersion` that uses it, oldest first. A layout holds
- * until the next entry's version.
- */
-const LAYOUTS_BY_SCHEMA_VERSION: readonly Readonly<{ fromVersion: number; layout: WorkspaceLayout }>[] = Object.freeze([
-	Object.freeze({ fromVersion: 1, layout: LEGACY_LAYOUT }),
-	Object.freeze({ fromVersion: PRODUCT_KIT_SCHEMA_VERSION, layout: V5_LAYOUT }),
-])
-
-/**
- * The layout of files recorded under Workspace `schemaVersion` `version` (a history record's
- * `workspaceSchemaVersion`, or a migration step's version). A version below the first entry, or
- * one that is not a number, falls back to the legacy layout; whether such a version is usable at
- * all is the schema policy's decision, not the layout's. History interprets each record by the
- * layout of its own `workspaceSchemaVersion` (owner ruling of
- * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18851627, adopted defaults).
- */
-export function layoutForSchemaVersion(version: number): WorkspaceLayout {
-	let selected = LEGACY_LAYOUT
-	for (const entry of LAYOUTS_BY_SCHEMA_VERSION)
-		if (version >= entry.fromVersion) selected = entry.layout
-	return selected
-}
-
-/**
- * Which layout the directory `root` uses, read from where its manifest is: an old-layout
- * Workspace keeps it in `.uiux/workspace.json`, a `schemaVersion` 5 Workspace in `workspace.json`
- * directly under the root. The old-layout manifest wins when both exist. A directory with neither
- * (a Workspace still to be initialized) gets `fallbackVersion`'s layout, normally the current
- * schema's. Whether the manifest's own `schemaVersion` matches the layout is persistence's check
- * (`FileNativePersistence.inspectWorkspace`), not this one's.
- */
-export async function detectWorkspaceLayout(root: string, fallbackVersion: number): Promise<WorkspaceLayout> {
-	if (await pathExists(resolveWorkspacePath(root, LEGACY_LAYOUT.manifestPath))) return LEGACY_LAYOUT
-	if (await pathExists(resolveWorkspacePath(root, V5_LAYOUT.manifestPath))) return V5_LAYOUT
-	return layoutForSchemaVersion(fallbackVersion)
-}
-
-/** {@link detectWorkspaceLayout} for synchronous callers (a persistence constructor). */
-export function detectWorkspaceLayoutSync(root: string, fallbackVersion: number): WorkspaceLayout {
-	if (pathExistsSync(resolveWorkspacePath(root, LEGACY_LAYOUT.manifestPath))) return LEGACY_LAYOUT
-	if (pathExistsSync(resolveWorkspacePath(root, V5_LAYOUT.manifestPath))) return V5_LAYOUT
-	return layoutForSchemaVersion(fallbackVersion)
-}
-
 /** The absolute path of a layout directory (`metadataDir` is `''` when it is the root itself). */
 export function resolveLayoutDirectory(root: string, relativeDirectory: string): string {
 	return relativeDirectory === '' ? resolve(root) : resolveWorkspacePath(root, relativeDirectory)
@@ -264,14 +164,13 @@ export function resolveLayoutDirectory(root: string, relativeDirectory: string):
  * so a case-insensitive volume cannot alias a differently cased spelling into it.
  */
 export function isInCodeDirectory(layout: WorkspaceLayout, path: string): boolean {
-	if (!layout.codeDir) return false
 	const first = path.split('/')[0] ?? ''
 	return first.toLowerCase() === layout.codeDir.toLowerCase()
 }
 
 const WORKSPACE_RESOURCE: VersionedResourceIdentity = Object.freeze({ kind: 'workspace', key: 'workspace' })
 
-/** The resource files of the data directories, the same in every layout (the former `assertTransactionalPath` rules). */
+/** The resource files of the data directories, (the former `assertTransactionalPath` rules). */
 function isCanonicalDataPath(path: string): boolean {
 	if (typeof path !== 'string') return false
 	const segments = path.split('/')
@@ -289,33 +188,6 @@ function isCanonicalDataPath(path: string): boolean {
 /** The suffix compares without case, as the transactional path rules always did. */
 function isUuidFile(filename: string, suffix: string): boolean {
 	return filename.toLowerCase().endsWith(suffix) && isFullUuid(filename.slice(0, -suffix.length))
-}
-
-function pathExistsSync(path: string): boolean {
-	try {
-		lstatSync(path)
-		return true
-	}
-	catch (error) {
-		if (isAbsent(error)) return false
-		throw error
-	}
-}
-
-async function pathExists(path: string): Promise<boolean> {
-	try {
-		await lstat(path)
-		return true
-	}
-	catch (error) {
-		if (isAbsent(error)) return false
-		throw error
-	}
-}
-
-function isAbsent(error: unknown): boolean {
-	const code = (error as NodeJS.ErrnoException | undefined)?.code
-	return code === 'ENOENT' || code === 'ENOTDIR'
 }
 
 function classifyDataVersionedPath(path: string): VersionedResourceIdentity | undefined {
@@ -338,11 +210,6 @@ function uuidFileIdentity(kind: string, filename: string, suffix: string): Versi
 	if (!filename.endsWith(suffix)) return undefined
 	const key = filename.slice(0, -suffix.length)
 	return isFullUuid(key) ? { kind, key } : undefined
-}
-
-/** The legacy layout's manifest path; code that holds a layout reads `layout.manifestPath` instead. */
-export function workspaceRelativePath(): typeof WORKSPACE_MANIFEST_PATH {
-	return WORKSPACE_MANIFEST_PATH
 }
 
 export function viewRelativePath(id: string): string {
@@ -375,12 +242,7 @@ export function assetMetadataRelativePath(id: string): string {
 	return `${assetDirectoryRelativePath(id)}/${ASSET_METADATA_FILENAME}`
 }
 
-/** The legacy layout's artifact path; code that holds a layout calls `layout.artifactRelativePath` instead. */
-export function artifactRelativePath(identity: string): string {
-	return LEGACY_LAYOUT.artifactRelativePath(identity)
-}
-
-/** An artifact's place inside the artifact directory: `sha256/<first two hex>/<hex>`, the same in every layout. */
+/** An artifact's place inside the artifact directory: `sha256/<first two hex>/<hex>`. */
 function artifactShardRelativePath(identity: string): string {
 	if (!isSha256Digest(identity))
 		throw invalidIdentity('Artifact identity must be sha256:<64 lowercase hexadecimal characters>.')

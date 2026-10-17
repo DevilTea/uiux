@@ -26,23 +26,21 @@ export type ProductKitProvenance = Readonly<{
 }>
 
 /**
- * The Workspace's current Product Kit provenance: `none` when the Workspace has no Product Kit file
- * (below `schemaVersion` 5), so the Product Kit judges nothing; `unavailable` when it has one but the
- * provenance cannot be computed now (the file or a kit file cannot be read, or the kit holds too
- * many files), so freshness judged against it is unknown; else `available`.
+ * The Workspace's current Product Kit provenance: `unavailable` when it cannot be computed now (the
+ * file or a kit file cannot be read, or the kit holds too many files), so freshness judged against
+ * it is unknown; else `available`.
  */
 export type CurrentProductKitProvenance =
-	| Readonly<{ state: 'none' }>
 	| Readonly<{ state: 'unavailable' }>
 	| Readonly<{ state: 'available'; provenance: ProductKitProvenance }>
 
 /**
  * The members of an Evidence staleness context (and of the Evidence list) that carry `current`:
- * `{ productKit }` when available, `{ productKitUnavailable: true }` when unavailable, else none.
+ * `{ productKit }` when available, else `{ productKitUnavailable: true }`.
  */
 export function productKitFreshnessContext(current: CurrentProductKitProvenance): Readonly<{ productKit?: ProductKitProvenance; productKitUnavailable?: true }> {
 	if (current.state === 'available') return { productKit: current.provenance }
-	return current.state === 'unavailable' ? { productKitUnavailable: true } : {}
+	return { productKitUnavailable: true }
 }
 
 /**

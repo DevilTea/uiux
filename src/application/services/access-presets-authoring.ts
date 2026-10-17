@@ -3,7 +3,6 @@ import {
 	ACCESS_PRESETS_FILENAME,
 	ACCESS_PRESETS_RESOURCE_KEY,
 	ACCESS_PRESETS_RESOURCE_KIND,
-	ACCESS_PRESETS_SCHEMA_VERSION,
 	accessPresetsRuleDiagnostics,
 	labelPresetsOf,
 	orderPresetKeys,
@@ -13,6 +12,7 @@ import {
 import { isRecord, jsonPointer, type Diagnostic } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
+import { workspaceRefusalMessage } from '../../persistence/schema-policy'
 import type { ResourceRevision } from '../dto/revisions'
 import { validateResourceRevision } from '../dto/revisions'
 
@@ -32,7 +32,7 @@ import { validateResourceRevision } from '../dto/revisions'
  * of 2026-10-11: a key newly supplied over HTTP must be in the catalog). Editing presets never changes a member's keys (Rule
  * 01a11c09-ca2d-7b0e-b428-e2d66f5252dd): it writes only this file.
  *
- * A `schemaVersion` 6 Workspace whose presets file is missing is not blocked, since presets only
+ * A Workspace whose presets file is missing is not blocked, since presets only
  * affect labels (Rule 01a12f98-c032-7e1f-806c-41648565004c): its read answers no resource with
  * `access.presets_missing` (Clause 01a12f98-f466-7c86-af94-5887f1d1b50d), and a write whose
  * `expectedRevision` is `null` creates the file (Rule 01a12f98-d643-7e29-9273-23564146d518). A
@@ -41,8 +41,7 @@ import { validateResourceRevision } from '../dto/revisions'
  * revision replaces the whole file (Rule 01a12f9c-3dab-7391-bef5-168f684187e7).
  *
  * Access (`workspace.read` to read, `presets.manage` to write) and the design-write context belong
- * to the scoped session. Below `schemaVersion` 6 the Workspace has no presets file: reads find none,
- * and the write refuses with `workspace.migration_required`.
+ * to the scoped session.
  */
 export type UpdateAccessPresetsCommand = Readonly<{
 	/** The revision of the file the write replaces, or `null` to create the file while there is none. */
@@ -74,8 +73,8 @@ export type AccessPresetsRead = Readonly<{
 }>
 
 export type AccessPresetsAuthoringService = Readonly<{
-	/** The Access presets resource, or `undefined` below `schemaVersion` 6, where a Workspace keeps no presets file. */
-	readAccessPresets(): Promise<AccessPresetsRead | undefined>
+	/** The Access presets resource. */
+	readAccessPresets(): Promise<AccessPresetsRead>
 	updateAccessPresets(command: UpdateAccessPresetsCommand): Promise<AccessPresetsAuthoringResult>
 }>
 
@@ -134,24 +133,7 @@ export function createAccessPresetsAuthoringService(persistence: FileNativePersi
 		return { status: 'blocked', key: KEY, code, message, diagnostics: diagnostics.length > 0 ? diagnostics : [{ code, path: '/schemaVersion', message }] }
 	}
 
-	/**
-	 * Whether the Workspace keeps a presets file: from `schemaVersion` 6 (Clause
-	 * 01a11c09-a855-7d7e-93ec-cd9a85fdb65e). A file at that path below 6 is not the Workspace's.
-	 */
-	async function keepsPresetsFile(): Promise<boolean> {
-		if (!persistence.layout.accessPresetsPath) return false
-		try {
-			const { inspection } = await persistence.inspectWorkspace()
-			return 'version' in inspection && inspection.version !== undefined && inspection.version >= ACCESS_PRESETS_SCHEMA_VERSION
-		}
-		catch (error) {
-			if (error instanceof PersistenceError) return false
-			throw error
-		}
-	}
-
-	async function readAccessPresets(): Promise<AccessPresetsRead | undefined> {
-		if (!await keepsPresetsFile()) return undefined
+	async function readAccessPresets(): Promise<AccessPresetsRead> {
 		const read = await persistence.accessPresets.readInspected()
 		if (!read) return { kind: ACCESS_PRESETS_RESOURCE_KIND, key: KEY, resource: null, revision: null, diagnostics: [PRESETS_MISSING] }
 		return { kind: ACCESS_PRESETS_RESOURCE_KIND, key: KEY, resource: read.resource, revision: read.revision, diagnostics: read.diagnostics }
@@ -163,15 +145,10 @@ export function createAccessPresetsAuthoringService(persistence: FileNativePersi
 		const expectedRevision = validateResourceRevision(command.expectedRevision, '/expectedRevision')
 		if (!creating && !expectedRevision.ok)
 			return { status: 'invalid_expected_revision', key: KEY, diagnostics: expectedRevision.diagnostics }
-		const legacy = `Access presets exist from Workspace schemaVersion ${ACCESS_PRESETS_SCHEMA_VERSION}. Run: uiux migrate --workspace <dir>`
-		if (!persistence.layout.accessPresetsPath) return blocked('workspace.migration_required', legacy, [])
-
 		try {
 			const workspace = await persistence.workspace.readInspected()
-			if (workspace.inspection.state === 'migration_required')
-				return blocked('workspace.migration_required', `The Workspace requires migration before its Access presets can be changed. ${legacy}`, workspace.diagnostics)
 			if (workspace.inspection.state !== 'current')
-				return blocked('workspace.schema_unsupported', 'This UIUX build cannot change the Access presets of this Workspace.', workspace.diagnostics)
+				return blocked('workspace.schema_unsupported', workspaceRefusalMessage(workspace.inspection, 'This UIUX build cannot change the Access presets of this Workspace.'), workspace.diagnostics)
 
 			const current = await persistence.accessPresets.readInspected()
 			if (!current && !creating) return { status: 'not_found', key: KEY }
@@ -197,7 +174,6 @@ export function createAccessPresetsAuthoringService(persistence: FileNativePersi
 		catch (error) {
 			if (!(error instanceof PersistenceError)) throw error
 			switch (error.code) {
-				case 'workspace.migration_required':
 				case 'workspace.schema_unsupported':
 					return blocked(error.code, error.message, error.diagnostics)
 				case 'persistence.resource_not_found':

@@ -21,8 +21,6 @@ export const PRODUCT_KIT_SCHEMA_VERSION = 5
 export type WorkspaceManifest = {
 	schemaVersion: number
 	i18n: { defaultLocale: string; [key: string]: JsonValue }
-	/** Required below {@link PRODUCT_KIT_SCHEMA_VERSION}, absent from it (the Product Kit file holds the list). */
-	adapters?: WorkspaceAdapterSelection[]
 	viewports: Record<string, ViewportPreset>
 	themes: Record<string, ThemeEntry>
 }
@@ -66,13 +64,10 @@ export function validateWorkspaceManifest(input: unknown): ValidationResult<Work
 	if (i18n && !isCanonicalLocaleTag(i18n.defaultLocale))
 		v.issue('workspace.invalid_default_locale', '/i18n/defaultLocale', 'Workspace defaultLocale must be a canonical BCP 47 tag.')
 
-	// Clause 01a1144e-5336-73e7-84a0-3bcd0cb454f6: `adapters` is required below schemaVersion 5 and,
-	// from 5, a member the manifest no longer has (it moved to the Product Kit file).
-	const productKitSchema = typeof root.schemaVersion === 'number' && root.schemaVersion >= PRODUCT_KIT_SCHEMA_VERSION
-	if (!productKitSchema)
-		validateAdapterSelections(root.adapters, '/adapters', v)
-	else if (Object.hasOwn(root, 'adapters'))
-		v.issue('schema.unknown_field', '/adapters', `From schemaVersion ${PRODUCT_KIT_SCHEMA_VERSION} the Adapter list lives in the Product Kit file, not in the manifest.`)
+	// Clause 01a1144e-5336-73e7-84a0-3bcd0cb454f6: the manifest has no `adapters`; the Adapter list
+	// lives in the Product Kit file.
+	if (Object.hasOwn(root, 'adapters'))
+		v.issue('schema.unknown_field', '/adapters', 'The Adapter list lives in the Product Kit file, not in the manifest.')
 
 	validateRegistry(root.viewports, '/viewports', v, (entry, path) => {
 		const viewport = v.object(entry, path)
@@ -94,8 +89,7 @@ export function validateWorkspaceManifest(input: unknown): ValidationResult<Work
 }
 
 /**
- * An ordered Adapter list (Clause 01a1144e-538e-705f-afdc-841028c410e4): in the manifest below
- * schemaVersion 5 and in the Product Kit file from 5.
+ * An ordered Adapter list (Clause 01a1144e-538e-705f-afdc-841028c410e4), in the Product Kit file.
  */
 export function validateAdapterSelections(input: unknown, path: string, v: Validator): void {
 	v.array(input, path)?.forEach((entry, index) => {

@@ -287,8 +287,7 @@ async function withinBudget<Result>(work: Promise<Result>, milliseconds: number)
  * The Product Kit provenance of the Workspace `persistence` selects, for a caller that holds its
  * persistence lock (a version or Checkpoint record): the Product Kit file read under that lock, and
  * the kit digests awaited for at most `budgetMilliseconds` ({@link IN_LOCK_PROVENANCE_BUDGET_MS}).
- * `undefined` for a Workspace below `schemaVersion` 5, which has no Product Kit file, when the file
- * is missing or not a JSON object, or when the provenance is not known within the budget. When the
+ * `undefined` when the Product Kit file is missing or not a JSON object, or when the provenance is not known within the budget. When the
  * budget runs out, `log` is told ({@link provenanceBudgetMessage}; `console.error` without one, as
  * the history recorder logs), so the missing `productKit` does not go unnoticed (issue #211).
  */

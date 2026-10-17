@@ -1,78 +1,62 @@
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, join, resolve, sep } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 
 import { isRecord } from '../domain/validation'
-import { LEGACY_LAYOUT, layoutForSchemaVersion, V5_LAYOUT, WORKSPACE_DATA_DIRECTORY, type WorkspaceLayout } from './paths'
-import type { WorkspaceSchemaPolicy } from './schema-policy'
+import { V5_LAYOUT, WORKSPACE_DATA_DIRECTORY, type WorkspaceLayout } from './paths'
+import { unsupportedSchemaVersionMessage, type WorkspaceSchemaPolicy } from './schema-policy'
+
+/** The directory a Workspace root usually is, and the one discovery looks for. */
+const WORKSPACE_DIRECTORY = WORKSPACE_DATA_DIRECTORY.workspaceMeta
 
 /**
  * Why a selected directory is refused, for callers that act on the case rather than the message:
  *
- * - `legacy_metadata_dir`: an old-layout Workspace's own `.uiux/` directory (its parent is the root);
- * - `relocated_parent`: the parent of a `schemaVersion` 5 root (the `.uiux/` child is the root);
+ * - `relocated_parent`: the parent of a Workspace root in its `.uiux/` child (the `.uiux/` child is
+ *   the root, and `selectWorkspace` selects it);
  * - `foreign_manifest`: a `workspace.json` that is not a Workspace manifest;
- * - `version_layout_mismatch`: a manifest whose `schemaVersion` belongs to the other layout;
- * - `missing_product_kit`: a `schemaVersion` 5 root without `product-kit.json`;
- * - `unknown_schema`: a manifest in the old layout's place whose `schemaVersion` this build does not
- *   recognize.
+ * - `missing_product_kit`: a root without `product-kit.json`;
+ * - `unsupported_schema`: a manifest whose `schemaVersion` is not the current one, older or newer.
  */
 export type WorkspaceSelectionRefusalReason =
-	| 'legacy_metadata_dir'
 	| 'relocated_parent'
 	| 'foreign_manifest'
-	| 'version_layout_mismatch'
 	| 'missing_product_kit'
-	| 'unknown_schema'
+	| 'unsupported_schema'
 
 export type WorkspaceSelection =
 	| Readonly<{ ok: true; layout: WorkspaceLayout }>
 	| Readonly<{ ok: false; reason: WorkspaceSelectionRefusalReason; message: string }>
 
 /**
- * The entry check for an explicitly selected Workspace directory (`--workspace`, or the packaged
- * server's configured root): Clause 01a126c7-7c2a-7bb7-b4db-c86fa04ac9e9 and the owner rulings of
- * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18853316 and
- * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18857361. It reads only the
+ * The entry check for a selected Workspace directory (`--workspace`, a discovered one, or the
+ * packaged server's configured root): Clause 01a126c7-7c2a-7bb7-b4db-c86fa04ac9e9. It reads only the
  * manifest files, so a caller runs it before any lock, server hold, recovery, read or write.
- * Discovery, which maps a found old-layout `.uiux/` to its parent, runs before this check.
  *
- * The old-layout manifest decides when both files exist, as layout detection does. A directory with
- * neither manifest is not refused here: it gets the policy's current layout, and the command reports
- * the missing manifest as before. An old-layout manifest that cannot be read is left to the command
- * too. The parent or the `.uiux/` child is suggested only for a `schemaVersion` the policy recognizes.
+ * A directory whose `.uiux/workspace.json` exists is the parent of a root, whatever that manifest
+ * holds. Otherwise its own `workspace.json` decides: a manifest whose `schemaVersion` is not the
+ * policy's current version is refused with the message of Clause
+ * 01a14928-275b-74d5-ad43-c82932e39cb3, which also names `workspace.schema_unsupported`. A directory
+ * with neither manifest is not refused here, and the command reports the missing manifest.
  */
-export function checkWorkspaceSelection(root: string, policy: Pick<WorkspaceSchemaPolicy, 'currentVersion' | 'recognizedVersions'>): WorkspaceSelection {
+export function checkWorkspaceSelection(root: string, policy: Pick<WorkspaceSchemaPolicy, 'currentVersion'>): WorkspaceSelection {
 	const directory = resolve(root)
-	const recognized = (version: number) => policy.recognizedVersions.includes(version)
-	const legacyManifest = join(directory, ...LEGACY_LAYOUT.manifestPath.split('/'))
-	if (exists(legacyManifest)) {
-		const version = manifestVersion(legacyManifest)
-		if (version !== undefined && layoutForSchemaVersion(version) !== LEGACY_LAYOUT) {
-			return recognized(version)
-				? refuse('relocated_parent', `${legacyManifest} is a schemaVersion ${version} manifest, whose Workspace root is ${join(directory, LEGACY_LAYOUT.metadataDir)}; select that directory instead.`)
-				: refuse('unknown_schema', `${legacyManifest} has schemaVersion ${version}, which this UIUX build does not support.`)
-		}
-		return { ok: true, layout: LEGACY_LAYOUT }
-	}
+	const childManifest = join(directory, WORKSPACE_DIRECTORY, V5_LAYOUT.manifestPath)
+	if (exists(childManifest))
+		return refuse('relocated_parent', `${directory} is not a Workspace root: its Workspace root is ${join(directory, WORKSPACE_DIRECTORY)}; select that directory instead.`)
 	const manifest = join(directory, V5_LAYOUT.manifestPath)
 	if (exists(manifest)) {
 		const version = manifestVersion(manifest)
 		if (version === undefined)
 			return refuse('foreign_manifest', `${manifest} is not a UIUX Workspace manifest, so ${directory} is not a Workspace root.`)
-		if (layoutForSchemaVersion(version) !== V5_LAYOUT) {
-			if (!recognized(version))
-				return refuse('unknown_schema', `${manifest} has schemaVersion ${version}, which this UIUX build does not support.`)
-			return basename(directory) === LEGACY_LAYOUT.metadataDir
-				? refuse('legacy_metadata_dir', `${directory} is the metadata directory of an old-layout Workspace (schemaVersion ${version}); select its parent ${dirname(directory)} instead.`)
-				: refuse('version_layout_mismatch', `${manifest} is a schemaVersion ${version} manifest, which an old-layout Workspace keeps in ${LEGACY_LAYOUT.manifestPath}; ${directory} is not a Workspace root.`)
-		}
-		const productKit = join(directory, V5_LAYOUT.productKitPath!)
+		if (version !== policy.currentVersion)
+			return refuse('unsupported_schema', `${manifest} is refused (workspace.schema_unsupported): ${unsupportedSchemaVersionMessage(version, policy.currentVersion)}`)
+		const productKit = join(directory, V5_LAYOUT.productKitPath)
 		if (!isRegularFile(productKit))
-			return refuse('missing_product_kit', `${directory} has a schemaVersion ${version} manifest but no ${V5_LAYOUT.productKitPath}, which such a Workspace requires.`)
+			return refuse('missing_product_kit', `${directory} has a schemaVersion ${version} manifest but no ${V5_LAYOUT.productKitPath}, which a Workspace requires.`)
 		return { ok: true, layout: V5_LAYOUT }
 	}
-	return { ok: true, layout: layoutForSchemaVersion(policy.currentVersion) }
+	return { ok: true, layout: V5_LAYOUT }
 }
 
 /** Why no Workspace directory could be selected at all, before the entry check. */
@@ -104,21 +88,17 @@ export type SelectedWorkspace =
  * Selects the Workspace a command acts on, then runs the entry check on it.
  *
  * - With `--workspace <dir>` (Clause 01a1144e-5584-7101-98c0-dc3cbadbacdf), `<dir>` is the root, or
- *   the parent of a `schemaVersion` 5 root in its `.uiux/` child, which is then selected. An
- *   explicitly selected old-layout `.uiux/` directory is refused, naming its parent (Clause
- *   01a126c7-7c2a-7bb7-b4db-c86fa04ac9e9).
+ *   the parent of a root in its `.uiux/` child, which is then selected.
  * - Without it, discovery (Clause 01a11bb1-9847-751f-a1ba-943ad111a02a) selects the `.uiux/` child of
  *   the nearest directory, from `cwd` upward to the home directory (only `cwd` itself when it is
  *   outside the home directory), that has a `.uiux/workspace.json`, after the trust check of
- *   `untrustedCandidate`; when that manifest's
- *   `schemaVersion` is below 5, the `.uiux/` directory is an old-layout metadata directory and its
- *   parent is selected (Clause 01a11bb1-98a9-7881-8fa0-ee1e355a3a9a). The mapping comes before the
- *   entry check (owner ruling
- *   https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18857361).
+ *   `untrustedCandidate`.
  *
- * Like the entry check, it reads only directory entries and manifests.
+ * Either way the selected root then gets the entry check (Clause
+ * 01a126c7-7c2a-7bb7-b4db-c86fa04ac9e9), which refuses a manifest at any `schemaVersion` but the
+ * current one. Like the entry check, it reads only directory entries and manifests.
  */
-export function selectWorkspace(input: Readonly<{ workspace?: string; cwd: string; discoveryHost?: DiscoveryHost }>, policy: Pick<WorkspaceSchemaPolicy, 'currentVersion' | 'recognizedVersions'>): SelectedWorkspace {
+export function selectWorkspace(input: Readonly<{ workspace?: string; cwd: string; discoveryHost?: DiscoveryHost }>, policy: Pick<WorkspaceSchemaPolicy, 'currentVersion'>): SelectedWorkspace {
 	if (input.workspace === undefined) return discoverWorkspace(resolve(input.cwd), policy, input.discoveryHost ?? defaultDiscoveryHost())
 	const directory = resolve(input.cwd, input.workspace)
 	let isDirectory: boolean
@@ -127,7 +107,7 @@ export function selectWorkspace(input: Readonly<{ workspace?: string; cwd: strin
 	if (!isDirectory) return refuseLocation('not_a_directory', `Workspace root is not a directory: ${directory}`)
 	const selection = checkWorkspaceSelection(directory, policy)
 	if (!selection.ok && selection.reason === 'relocated_parent') {
-		const child = join(directory, LEGACY_LAYOUT.metadataDir)
+		const child = join(directory, WORKSPACE_DIRECTORY)
 		return withSelection(child, checkWorkspaceSelection(child, policy), false)
 	}
 	return withSelection(directory, selection, false)
@@ -148,27 +128,26 @@ export function selectWorkspace(input: Readonly<{ workspace?: string; cwd: strin
  *   another user's, and every directory further up gets the same trust check.
  * - The first candidate found is selected or refused; a refused candidate never lets the walk go on.
  */
-function discoverWorkspace(cwd: string, policy: Pick<WorkspaceSchemaPolicy, 'currentVersion' | 'recognizedVersions'>, host: DiscoveryHost): SelectedWorkspace {
+function discoverWorkspace(cwd: string, policy: Pick<WorkspaceSchemaPolicy, 'currentVersion'>, host: DiscoveryHost): SelectedWorkspace {
 	const start = realOrResolved(cwd)
 	const home = realOrResolved(host.homeDirectory)
 	const insideHome = start === home || isProperAncestor(home, start)
 	const last = insideHome ? home : start
+	const candidateManifest = `${WORKSPACE_DIRECTORY}/${V5_LAYOUT.manifestPath}`
 	for (let directory = start; ; directory = dirname(directory)) {
-		const metadata = join(directory, LEGACY_LAYOUT.metadataDir)
-		const manifest = join(metadata, V5_LAYOUT.manifestPath)
+		const root = join(directory, WORKSPACE_DIRECTORY)
+		const manifest = join(root, V5_LAYOUT.manifestPath)
 		if (inspect(manifest) !== undefined) {
 			const untrusted = untrustedCandidate(directory, host)
 			if (untrusted !== undefined)
 				return refuseLocation('untrusted_candidate', `Discovery found ${manifest} but does not select it: ${untrusted}. Pass --workspace <dir> to select a Workspace explicitly.`)
-			const version = manifestVersion(manifest)
-			const root = version !== undefined && layoutForSchemaVersion(version) === LEGACY_LAYOUT ? directory : metadata
 			return withSelection(root, checkWorkspaceSelection(root, policy), true)
 		}
 		if (directory === last || dirname(directory) === directory) break
 	}
 	const searched = insideHome
-		? `no directory from ${start} upward has a ${LEGACY_LAYOUT.manifestPath} (discovery does not search above the home directory ${home})`
-		: `${start} has no ${LEGACY_LAYOUT.manifestPath}, and discovery outside the home directory ${home} examines only the current directory`
+		? `no directory from ${start} upward has a ${candidateManifest} (discovery does not search above the home directory ${home})`
+		: `${start} has no ${candidateManifest}, and discovery outside the home directory ${home} examines only the current directory`
 	return refuseLocation('not_discovered', `No UIUX Workspace found: ${searched}. Pass --workspace <dir>, or create one with uiux init.`)
 }
 
@@ -191,7 +170,7 @@ function discoverWorkspace(cwd: string, policy: Pick<WorkspaceSchemaPolicy, 'cur
  * accepted, as with Git's `safe.directory`.
  */
 function untrustedCandidate(directory: string, host: DiscoveryHost): string | undefined {
-	const metadata = join(directory, LEGACY_LAYOUT.metadataDir)
+	const metadata = join(directory, WORKSPACE_DIRECTORY)
 	const manifest = join(metadata, V5_LAYOUT.manifestPath)
 	const metadataEntry = host.lstat(metadata)
 	if (metadataEntry.isSymbolicLink() || !metadataEntry.isDirectory()) return `${metadata} is a symbolic link or not a directory`
@@ -238,7 +217,7 @@ function refuseLocation(reason: WorkspaceLocationRefusalReason, message: string)
 }
 
 /** The old layout's data directories, which `uiux.v4-to-v5` moves into `.uiux/`. */
-const OLD_LAYOUT_DATA_DIRECTORIES = Object.freeze(Object.values(WORKSPACE_DATA_DIRECTORY).filter(directory => directory !== LEGACY_LAYOUT.metadataDir))
+const OLD_LAYOUT_DATA_DIRECTORIES = Object.freeze(Object.values(WORKSPACE_DATA_DIRECTORY).filter(directory => directory !== WORKSPACE_DIRECTORY))
 
 /**
  * The one exception to the entry check: `uiux access copy --from <old>` right after `uiux migrate`
@@ -256,11 +235,11 @@ const OLD_LAYOUT_DATA_DIRECTORIES = Object.freeze(Object.values(WORKSPACE_DATA_D
  *
  * It reads only the manifests and directory entries, before any lock or store is touched.
  */
-export function isRelocatedSourceOf(source: string, targetRealRoot: string, policy: Pick<WorkspaceSchemaPolicy, 'currentVersion' | 'recognizedVersions'>): boolean {
+export function isRelocatedSourceOf(source: string, targetRealRoot: string, policy: Pick<WorkspaceSchemaPolicy, 'currentVersion'>): boolean {
 	const directory = resolve(source)
 	const selection = checkWorkspaceSelection(directory, policy)
 	if (selection.ok || selection.reason !== 'relocated_parent') return false
-	const relocated = join(directory, LEGACY_LAYOUT.metadataDir)
+	const relocated = join(directory, WORKSPACE_DIRECTORY)
 	// A relocation leaves a real directory there, never a symbolic link to some other root.
 	try { if (!lstatSync(relocated).isDirectory()) return false }
 	catch { return false }

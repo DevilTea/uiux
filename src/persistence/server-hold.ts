@@ -4,16 +4,14 @@ import * as fs from 'node:fs/promises'
 import { hostname } from 'node:os'
 
 import { isRecord } from '../domain/validation'
-import { LEGACY_LAYOUT, resolveLayoutDirectory, resolveWorkspacePath, type WorkspaceLayout } from './paths'
+import { resolveWorkspacePath, type WorkspaceLayout } from './paths'
 
 /**
  * A live UIUX server's claim on its selected Workspace. It is local runtime state (never a
  * canonical file, never exported) that lets operator commands such as `uiux access copy` refuse
- * to change the host history of a Workspace that a running server is serving. This is its path in
- * the legacy layout; a caller that holds a layout reads `layout.serverHoldPath`.
+ * to change the host history of a Workspace that a running server is serving. Its path is the
+ * layout's `serverHoldPath`.
  */
-export const SERVER_HOLD_RELATIVE_PATH = LEGACY_LAYOUT.serverHoldPath
-
 export type ServerHold = Readonly<{
 	pid: number
 	hostname: string
@@ -33,18 +31,14 @@ export type AcquiredServerHold = Readonly<{
 /**
  * Records the current process as the server holding `root`, at the path of `options.layout` (the
  * selected Workspace's layout; a caller that holds a persistence passes `persistence.layout`).
- * Returns undefined when the Workspace is not initialized: the old layout needs a real `.uiux/`
- * directory, and a `schemaVersion` 5 root, where the runtime files sit beside the manifest, needs
- * its manifest.
+ * Returns undefined when the Workspace is not initialized: the runtime files sit beside the
+ * manifest, which must be a regular file.
  */
 export async function acquireServerHold(root: string, options: Readonly<{ origin?: string; layout: WorkspaceLayout }>): Promise<AcquiredServerHold | undefined> {
 	const layout = options.layout
-	const initialized = layout.metadataDir === ''
-		? resolveWorkspacePath(root, layout.manifestPath)
-		: resolveLayoutDirectory(root, layout.metadataDir)
 	try {
-		const stat = await fs.lstat(initialized)
-		if (stat.isSymbolicLink() || (layout.metadataDir === '' ? !stat.isFile() : !stat.isDirectory())) return undefined
+		const stat = await fs.lstat(resolveWorkspacePath(root, layout.manifestPath))
+		if (stat.isSymbolicLink() || !stat.isFile()) return undefined
 	}
 	catch (error) {
 		if (isNotFound(error)) return undefined

@@ -13,33 +13,22 @@ import { validateWorkspaceManifest } from '../src/domain/workspace/schema'
 import {
 	acquireServerHold,
 	canonicalJsonBytes,
-	detectWorkspaceLayout,
-	detectWorkspaceLayoutSync,
 	FileNativePersistence,
-	LEGACY_LAYOUT,
-	layoutForSchemaVersion,
 	readActiveServerHold,
 	V5_LAYOUT,
 	viewRelativePath,
 } from '../src/persistence'
-import { CheckpointStore, HostHistoryStore, runWithDesignWriteContext, versionResourcesFromSnapshot, writeSnapshotCheckpointUnlocked } from '../src/persistence/history'
+import { runWithDesignWriteContext, versionResourcesFromSnapshot } from '../src/persistence/history'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
-import { hostHistoryPaths } from '../src/server/access/store'
 import { createHistoryStoreFactory } from '../src/server/history-stores'
-import { currentManifest, transactionsPath, V4_TEST_SCHEMA_POLICY, V5_ONLY_TEST_SCHEMA_POLICY as V5_TEST_SCHEMA_POLICY, v5Manifest, writeManifest } from './support/workspace-layout'
-
-/** A schemaVersion 4 manifest, as the old layout keeps it in `.uiux/`, holding `adapters`. */
-function v4Manifest(overrides: Readonly<Record<string, unknown>> = {}): Record<string, unknown> {
-	return { schemaVersion: 4, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {}, ...overrides }
-}
+import { currentManifest, transactionsPath, v5Manifest, writeManifest } from './support/workspace-layout'
 
 /**
  * The `schemaVersion` 5 layout (issue #141, units K2 and K6): Clauses 01a1144e-531c-…, 01a11bb1-8d67-…,
  * 01a11bb1-8dcc-…, 01a11bb1-8e31-…, 01a11bb1-8e98-…, 01a11bb1-8efc-…, 01a1144e-5336-…, 01a1144e-538e-…,
  * 01a1144e-5508-…, 01a1144e-551f-…, 01a11a5e-1e0e-…, 01a11a5e-1eba-… and 01a11a5e-1fc4-…, Rule
- * 01a11bb1-9585-…. The layout's current behavior is exercised on a current-schema Workspace (schemaVersion 6
- * keeps every path of 5) under UIUX's own policy; a schemaVersion 5 Workspace, under `V5_TEST_SCHEMA_POLICY`
- * (a build where 5 is current), only where a test is about schemaVersion 5 itself.
+ * 01a11bb1-9585-…. The layout, the only one, is exercised on a current-schema Workspace (schemaVersion 6
+ * keeps every path of 5) under UIUX's own policy; a schemaVersion 5 Workspace only to show it is refused.
  */
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
@@ -94,12 +83,12 @@ async function currentWorkspace(kit: ProductKit = emptyProductKit()): Promise<Re
 	return { root, persistence }
 }
 
-/** A fresh schemaVersion 5 Workspace root: the manifest at `workspace.json` and an empty Product Kit file. */
+/** A schemaVersion 5 Workspace root (the manifest at `workspace.json` and an empty Product Kit file), which UIUX refuses. */
 async function v5Workspace(kit: ProductKit = emptyProductKit()): Promise<Readonly<{ root: string; persistence: FileNativePersistence }>> {
 	const root = await makeRoot()
 	await writeManifest(root, canonicalJsonBytes(v5Manifest()), V5_LAYOUT)
 	await writeFile(join(root, 'product-kit.json'), canonicalJsonBytes(kit))
-	const persistence = new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY })
+	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 	return { root, persistence }
 }
 
@@ -120,8 +109,6 @@ describe('the schemaVersion 5 layout', () => {
 		expect(V5_LAYOUT.canonicalFiles).toEqual(['workspace.json', 'product-kit.json', 'access-presets.json'])
 		expect(V5_LAYOUT.versionedRoots).toEqual(['workspace.json', 'product-kit.json', 'access-presets.json', 'views/', 'flows/', 'i18n/', 'assets/'])
 		expect(V5_LAYOUT.excluded).toEqual(['reviews/', 'artifacts/', 'history/', '.transactions/', 'kit/'])
-		expect(LEGACY_LAYOUT.productKitPath).toBeUndefined()
-		expect(LEGACY_LAYOUT.codeDir).toBeUndefined()
 	})
 
 	it('classifies the manifest and the Product Kit file as their resources, and nothing in kit/ or the runtime directories', () => {
@@ -132,8 +119,6 @@ describe('the schemaVersion 5 layout', () => {
 		expect(classify('i18n/en-US.json')).toEqual({ kind: 'locale', key: 'en-US' })
 		for (const path of ['.uiux/workspace.json', 'kit/package.json', 'kit/src/button.vue', `kit/views/${VIEW_ID}.view.json`, `reviews/${VIEW_ID}.review.json`, `artifacts/sha256/cd/${HEX}`, `history/checkpoints/${CHECKPOINT_ID}.json`, '.server-hold.json'])
 			expect(classify(path), path).toBeUndefined()
-		// The old layout knows no Product Kit file.
-		expect(LEGACY_LAYOUT.classifyVersionedPath('product-kit.json')).toBeUndefined()
 	})
 
 	it('allows canonical writes only to the root files and the data directories (never kit/)', () => {
@@ -141,33 +126,11 @@ describe('the schemaVersion 5 layout', () => {
 			expect(V5_LAYOUT.isCanonicalPath(path), path).toBe(true)
 		for (const path of ['.uiux/workspace.json', 'kit/package.json', 'kit/product-kit.json', `kit/views/${VIEW_ID}.view.json`, 'artifacts/x', 'history/checkpoints/x.json', '.persistence.lock', 'notes.txt'])
 			expect(V5_LAYOUT.isCanonicalPath(path), path).toBe(false)
-		expect(LEGACY_LAYOUT.isCanonicalPath('.uiux/workspace.json')).toBe(true)
-		expect(LEGACY_LAYOUT.isCanonicalPath('workspace.json')).toBe(false)
-		expect(LEGACY_LAYOUT.isCanonicalPath('product-kit.json')).toBe(false)
-	})
-
-	it('detects the layout from where the manifest is, the old layout winning, and falls back to the given version', async () => {
-		const legacy = await makeRoot()
-		await writeManifest(legacy, v4Manifest(), LEGACY_LAYOUT)
-		const relocated = await makeRoot()
-		await writeManifest(relocated, v5Manifest(), V5_LAYOUT)
-		const both = await makeRoot()
-		await writeManifest(both, v4Manifest(), LEGACY_LAYOUT)
-		await writeFile(join(both, 'workspace.json'), '{"version":2}\n') // another tool's file
-		const empty = await makeRoot()
-		for (const detect of [detectWorkspaceLayout, async (root: string, version: number) => detectWorkspaceLayoutSync(root, version)]) {
-			expect(await detect(legacy, 5)).toBe(LEGACY_LAYOUT)
-			expect(await detect(relocated, 4)).toBe(V5_LAYOUT)
-			expect(await detect(both, 5)).toBe(LEGACY_LAYOUT)
-			expect(await detect(empty, 4)).toBe(LEGACY_LAYOUT)
-			expect(await detect(empty, 5)).toBe(V5_LAYOUT)
-		}
 	})
 
 	it('is current: UIUX\'s own policy is schemaVersion 6, which keeps the schemaVersion 5 layout a new Workspace gets', () => {
 		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(6)
-		expect(layoutForSchemaVersion(5)).toBe(V5_LAYOUT)
-		expect(layoutForSchemaVersion(PRODUCT_WORKSPACE_SCHEMA_POLICY.currentVersion)).toBe(V5_LAYOUT)
+		expect(new FileNativePersistence({ root: tmpdir(), schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).layout).toBe(V5_LAYOUT)
 		// Clause 01a11c09-a855-7d7e-93ec-cd9a85fdb65e: the Access presets file is a canonical, versioned root file.
 		expect(V5_LAYOUT.accessPresetsPath).toBe('access-presets.json')
 		expect(V5_LAYOUT.canonicalFiles).toContain('access-presets.json')
@@ -218,12 +181,12 @@ describe('the Product Kit file and the versioned manifest shape', () => {
 		])
 	})
 
-	it('requires adapters in the manifest below schemaVersion 5 and refuses them from 5', () => {
+	it('refuses adapters in the manifest at every schemaVersion', () => {
 		const base = { i18n: { defaultLocale: 'en-US' }, viewports: {}, themes: {} }
-		expect(validateWorkspaceManifest({ ...base, schemaVersion: 4, adapters: [] }).ok).toBe(true)
-		expect(validateWorkspaceManifest({ ...base, schemaVersion: 4 }).diagnostics).toEqual([expect.objectContaining({ code: 'schema.expected_array', path: '/adapters' })])
-		expect(validateWorkspaceManifest({ ...base, schemaVersion: 5 }).ok).toBe(true)
-		expect(validateWorkspaceManifest({ ...base, schemaVersion: 5, adapters: [] }).diagnostics).toEqual([expect.objectContaining({ code: 'schema.unknown_field', path: '/adapters' })])
+		for (const schemaVersion of [1, 4, 5, CURRENT_WORKSPACE_SCHEMA_VERSION]) {
+			expect(validateWorkspaceManifest({ ...base, schemaVersion }).ok, String(schemaVersion)).toBe(true)
+			expect(validateWorkspaceManifest({ ...base, schemaVersion, adapters: [] }).diagnostics, String(schemaVersion)).toEqual([expect.objectContaining({ code: 'schema.unknown_field', path: '/adapters' })])
+		}
 	})
 })
 
@@ -338,44 +301,24 @@ describe('persistence on a schemaVersion 5 root', () => {
 		expect(await readdir(join(root, 'kit', 'src'))).toEqual(['button.vue'])
 	})
 
-	it('is unsupported under a build where schemaVersion 4 is current, so such a build writes nothing there', async () => {
-		const { root } = await v5Workspace()
-		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })
-		expect(persistence.layout).toBe(V5_LAYOUT)
-		expect((await persistence.workspace.readInspected()).inspection).toMatchObject({ state: 'unsupported', version: 5 })
+	it('is unsupported at schemaVersion 5, so nothing is written there', async () => {
+		const { persistence } = await v5Workspace()
+		const inspection = (await persistence.workspace.readInspected()).inspection
+		expect(inspection).toMatchObject({ state: 'unsupported', version: 5 })
+		expect(inspection.diagnostics).toContainEqual(expect.objectContaining({ code: 'workspace.schema_unsupported', message: expect.stringMatching(/schemaVersion 5 .*uiux init/u) }))
 		await expect(persistence.views.create(VIEW_ID, view() as never)).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
 		await expect(persistence.productKit.compareAndSwap({ key: 'product-kit', expectedRevision: (await persistence.productKit.readRevision())!, resource: KIT })).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
 	})
 
-	it('has no Product Kit file in the old layout', async () => {
-		const root = await makeRoot()
-		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })
-		await persistence.workspace.create(v4Manifest() as never)
-		expect(persistence.layout).toBe(LEGACY_LAYOUT)
-		expect(await persistence.productKit.read()).toBeUndefined()
-		await expect(persistence.productKit.create(KIT)).rejects.toMatchObject({ code: 'persistence.path_rejected' })
-		expect(await exists(join(root, 'product-kit.json'))).toBe(false)
-	})
-
-	it('refuses a manifest whose schemaVersion belongs to the other layout', async () => {
-		// An old-layout `.uiux/` directory selected as the root: its workspace.json is below 5.
+	it('refuses an old build\'s .uiux/ opened as a root, naming its schemaVersion', async () => {
 		const oldParent = await makeRoot()
-		await writeManifest(oldParent, v4Manifest(), LEGACY_LAYOUT)
-		const metadataDir = new FileNativePersistence({ root: join(oldParent, '.uiux'), schemaPolicy: V4_TEST_SCHEMA_POLICY })
-		expect(metadataDir.layout).toBe(V5_LAYOUT)
+		await mkdir(join(oldParent, '.uiux'))
+		await writeFile(join(oldParent, '.uiux', 'workspace.json'), canonicalJsonBytes({ schemaVersion: 4, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }))
+		const metadataDir = new FileNativePersistence({ root: join(oldParent, '.uiux'), schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		const inspected = (await metadataDir.workspace.readInspected()).inspection
 		expect(inspected).toMatchObject({ state: 'unsupported', version: 4 })
-		expect(inspected.diagnostics).toContainEqual(expect.objectContaining({ code: 'workspace.schema_unsupported', message: expect.stringMatching(/select its parent/) }))
+		expect(inspected.diagnostics).toContainEqual(expect.objectContaining({ code: 'workspace.schema_unsupported', message: expect.stringMatching(/schemaVersion 4 .*uiux init/u) }))
 		await expect(metadataDir.views.create(VIEW_ID, view() as never)).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
-
-		// The old-layout parent of a relocated Workspace: its .uiux/workspace.json is version 5.
-		const relocatedParent = await makeRoot()
-		await writeManifest(relocatedParent, v5Manifest(), LEGACY_LAYOUT)
-		const parent = new FileNativePersistence({ root: relocatedParent, schemaPolicy: V5_TEST_SCHEMA_POLICY })
-		expect(parent.layout).toBe(LEGACY_LAYOUT)
-		expect((await parent.workspace.readInspected()).inspection).toMatchObject({ state: 'unsupported', version: 5 })
-		await expect(parent.views.create(VIEW_ID, view() as never)).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
-		await expect(parent.withLock(() => parent.readRecordSchemaVersionUnlocked())).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
 	})
 })
 
@@ -408,19 +351,5 @@ describe('history on a schemaVersion 5 Workspace', () => {
 		expect(versions).toHaveLength(1)
 		expect(versions[0]).toMatchObject({ type: 'autosave', workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, events: [expect.objectContaining({ operation: 'updateProductKit' })] })
 		expect(versions[0]!.resources.find(resource => resource.kind === 'product-kit')?.revision).toBe(await ctx.persistence.productKit.readRevision())
-	})
-
-	it('fails loudly instead of recording a version whose layout differs from the persistence layout', async () => {
-		const root = await makeRoot()
-		await writeManifest(root, v5Manifest(), LEGACY_LAYOUT)
-		// A persistence opened before a relocation keeps the old layout; the manifest now says 5.
-		const stale = new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY, layout: LEGACY_LAYOUT })
-		const home = join(await makeRoot('uiux-layout-v5-home-'), 'home')
-		const host = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, root), create: true }))!
-		await expect(stale.withLock(() => stale.readRecordSchemaVersionUnlocked())).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
-		await expect(stale.withLock(() => writeSnapshotCheckpointUnlocked({ persistence: stale, checkpoints: new CheckpointStore(stale), host, at: '2026-10-10T00:00:00.000Z', actor: HUMAN, name: 'Stale', source: 'cli' })))
-			.rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
-		expect(await exists(join(root, LEGACY_LAYOUT.checkpointsDir))).toBe(false)
-		expect((await host.listVersions()).records).toEqual([])
 	})
 })

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { BUILT_IN_ACCESS_PRESETS, keysOfPreset, PERMISSION_KEYS } from '../src/application/access/keys'
+import { keysOfPreset, PERMISSION_KEYS } from '../src/application/access/keys'
 import { memberLabel } from '../src/application/access/labels'
 import { createLeaseManager } from '../src/application/access/leases'
 import type { MemberPrincipal } from '../src/application/access/principal'
@@ -142,7 +142,7 @@ describe('uiux init (Clause 01a1144e-55a3)', () => {
 })
 
 describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01a11c09-a57d, 01a11485-fa00 and 01a11485-fa66)', () => {
-	it('reads the presets with workspace.read, and 404 below schemaVersion 6', async () => {
+	it('reads the presets with workspace.read, and refuses a write on a Workspace at another schemaVersion', async () => {
 		const ctx = await workspace()
 		const read = await readAccessPresetsForHttp(http(ctx.app, VIEWER))
 		expect(read).toMatchObject({ status: 200, body: { kind: 'access-presets', key: 'access-presets', resource: builtInAccessPresetsFile(), diagnostics: [] } })
@@ -153,20 +153,10 @@ describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01
 		await writeManifest(old, canonicalJsonBytes(v5Manifest()), V5_LAYOUT)
 		await writeFile(join(old, 'product-kit.json'), canonicalJsonBytes({ designSystems: [], adapters: [], styles: [], themes: {}, components: {}, widgets: {} }))
 		const oldApp = createWorkspaceApplicationSession(new FileNativePersistence({ root: old, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }))
-		expect(await readAccessPresetsForHttp(http(oldApp, VIEWER))).toMatchObject({ status: 404 })
-		expect(await updateAccessPresetsForHttp(http(oldApp, OWNER), { expectedRevision: 'r', presets: [] })).toMatchObject({ status: 422, body: { status: 'blocked', code: 'workspace.schema_unsupported' } })
-	})
-
-	it('finds no presets below schemaVersion 6 even when a stray presets file lies at the path, as labels do (Clause 01a11c09-a855)', async () => {
-		const old = await makeRoot()
-		await writeManifest(old, canonicalJsonBytes(v5Manifest()), V5_LAYOUT)
-		await writeFile(join(old, 'product-kit.json'), canonicalJsonBytes({ designSystems: [], adapters: [], styles: [], themes: {}, components: {}, widgets: {} }))
-		await writeFile(join(old, ACCESS_PRESETS_FILENAME), JSON.stringify({ presets: [{ id: 'stray', name: 'Stray', keys: ['workspace.read'] }] }))
-		const oldApp = createWorkspaceApplicationSession(new FileNativePersistence({ root: old, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }))
-		expect(await oldApp.readAccessPresets()).toBeUndefined()
-		expect(await readAccessPresetsForHttp(http(oldApp, VIEWER))).toMatchObject({ status: 404, body: { status: 'not_found' } })
-		expect(await readWorkspaceAccessPresets(old)).toBe(BUILT_IN_ACCESS_PRESETS)
-		expect(await updateAccessPresetsForHttp(http(oldApp, OWNER), { expectedRevision: null, presets: [] })).toMatchObject({ status: 422, body: { code: 'workspace.schema_unsupported' } })
+		const refused = await updateAccessPresetsForHttp(http(oldApp, OWNER), { expectedRevision: null, presets: [] })
+		expect(refused).toMatchObject({ status: 422, body: { status: 'blocked', code: 'workspace.schema_unsupported' } })
+		expect((refused.body as { message: string }).message).toMatch(/schemaVersion 5 .*uiux init/u)
+		expect(await readdir(old)).toEqual(['product-kit.json', 'workspace.json'])
 	})
 
 	it('replaces the whole presets array with compare-and-swap, keys stored in catalog order, and an empty array is valid (Rule 01a11c09-c78f)', async () => {
@@ -436,11 +426,7 @@ describe('the Access presets Scenarios', () => {
 })
 
 describe('labels and --preset from the Workspace\'s presets (Rules 01a11c09-c724, 01a11c09-ca2d, 01a11c09-ca9b, 01a11c33-265e and 01a11c09-cb79)', () => {
-	it('reads the built-in presets below schemaVersion 6 and the presets file from 6, first match first and unknown keys labeling nobody', async () => {
-		const old = await makeRoot()
-		await writeManifest(old, canonicalJsonBytes(v5Manifest()), V5_LAYOUT)
-		expect(await readWorkspaceAccessPresets(old)).toBe(BUILT_IN_ACCESS_PRESETS)
-
+	it('reads the presets file, first match first and unknown keys labeling nobody', async () => {
 		const ctx = await workspace()
 		expect(await readWorkspaceAccessPresets(ctx.root)).toEqual(builtIns())
 		const viewerKeys = builtIns()[0]!.keys
@@ -455,14 +441,14 @@ describe('labels and --preset from the Workspace\'s presets (Rules 01a11c09-c724
 		expect(memberLabel({ kind: 'human', keys: viewerKeys }, read)).toEqual({ preset: { id: 'readers', name: 'Readers' } })
 		expect(memberLabel({ kind: 'human', keys: [...builtIns()[1]!.keys, 'future.capability'] }, read)).toEqual({ custom: true })
 
-		// A missing or unreadable presets file at schemaVersion 6 gives no presets: every member is Custom.
+		// A missing or unreadable presets file gives no presets: every member is Custom.
 		await rm(ctx.presetsPath)
 		expect(await readWorkspaceAccessPresets(ctx.root)).toEqual([])
-		await symlink(join(old, 'workspace.json'), ctx.presetsPath)
+		await symlink(join(ctx.root, 'workspace.json'), ctx.presetsPath)
 		expect(await readWorkspaceAccessPresets(ctx.root)).toEqual([])
 	})
 
-	it('reads the presets for the server again only when the manifest or the presets file changed', async () => {
+	it('reads the presets for the server again only when the presets file changed', async () => {
 		const ctx = await workspace()
 		const read = createWorkspaceAccessPresetsReader(ctx.root, ctx.persistence.layout)
 		const first = await read()

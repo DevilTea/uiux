@@ -13,19 +13,16 @@ import {
 	CANONICAL_WORKSPACE_DATA_DIRECTORIES,
 	FileNativePersistence,
 	PersistenceError,
-	artifactRelativePath,
 	assetMetadataRelativePath,
 	assetDirectoryRelativePath,
 	flowRelativePath,
 	localeRelativePath,
 	reviewRelativePath,
 	resolveWorkspacePath,
+	V5_LAYOUT,
 	viewRelativePath,
-	workspaceRelativePath,
 	type PersistenceFaultPoint,
-	type WorkspaceSnapshot,
 } from '../src/persistence'
-import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { isCaseSensitiveDirectory } from './support/filesystem'
 import { createCurrentWorkspace, currentManifest, manifestPath } from './support/workspace-layout'
@@ -45,14 +42,14 @@ afterEach(async () => {
 
 describe('file-native persistence', () => {
 	it('derives canonical paths and rejects traversal or non-canonical identities before filesystem access', () => {
-		expect(workspaceRelativePath()).toBe('.uiux/workspace.json')
+		expect(V5_LAYOUT.manifestPath).toBe('workspace.json')
 		expect(viewRelativePath(VIEW_ID)).toBe(`views/${VIEW_ID}.view.json`)
 		expect(flowRelativePath(FLOW_ID)).toBe(`flows/${FLOW_ID}.flow.json`)
 		expect(reviewRelativePath(REVIEW_ID)).toBe(`reviews/${REVIEW_ID}.review.json`)
 		expect(localeRelativePath('zh-TW')).toBe('i18n/zh-TW.json')
 		expect(assetDirectoryRelativePath(ASSET_ID)).toBe(`assets/${ASSET_ID}`)
 		expect(assetMetadataRelativePath(ASSET_ID)).toBe(`assets/${ASSET_ID}/asset.json`)
-		expect(artifactRelativePath(`sha256:${'a'.repeat(64)}`)).toBe(`.uiux/artifacts/sha256/aa/${'a'.repeat(64)}`)
+		expect(V5_LAYOUT.artifactRelativePath(`sha256:${'a'.repeat(64)}`)).toBe(`artifacts/sha256/aa/${'a'.repeat(64)}`)
 		expect(() => viewRelativePath('../outside')).toThrow(PersistenceError)
 		expect(() => localeRelativePath('zh-tw')).toThrow(PersistenceError)
 		expect(() => resolveWorkspacePath('/tmp/workspace', '../outside')).toThrow(PersistenceError)
@@ -60,8 +57,7 @@ describe('file-native persistence', () => {
 	})
 
 	it('writes every authored resource kind only under canonical data directories', async () => {
-		// The old layout's Adapter resolution boundary trusts this set; a current-layout root refuses everything outside kit/ instead.
-		const { root, persistence } = await newLegacyWorkspace()
+		const { root, persistence } = await newWorkspace()
 		await persistence.views.create(VIEW_ID, viewFixture())
 		await persistence.flows.create(FLOW_ID, flowFixture())
 		await persistence.reviews.create(REVIEW_ID, reviewFixture())
@@ -71,13 +67,14 @@ describe('file-native persistence', () => {
 
 		const topLevelEntries = (await readdir(root)).map(String)
 
-		// Authoring must never create a top-level entry outside the canonical data directories; a new
-		// one here would be a silent fail-open for the Adapter resolution boundary that trusts this set.
+		// Authoring creates top-level entries only for the layout's root files, its data directories, the
+		// artifact store and the transaction directory, never in kit/, the one place Adapter code may live.
+		const allowed = new Set([...V5_LAYOUT.canonicalFiles, V5_LAYOUT.artifactsDir, V5_LAYOUT.transactionsDir, ...CANONICAL_WORKSPACE_DATA_DIRECTORIES])
 		for (const name of topLevelEntries)
-			expect(CANONICAL_WORKSPACE_DATA_DIRECTORIES).toContain(name)
-		// The resources above exercise each canonical directory (artifacts live under `.uiux`).
-		expect(topLevelEntries).toEqual(expect.arrayContaining(['.uiux', 'views', 'flows', 'reviews', 'i18n', 'assets']))
-		expect(topLevelEntries).not.toContain('adapters')
+			expect(allowed.has(name), name).toBe(true)
+		// The resources above exercise each canonical directory.
+		expect(topLevelEntries).toEqual(expect.arrayContaining(['artifacts', 'views', 'flows', 'reviews', 'i18n', 'assets']))
+		expect(topLevelEntries).not.toContain(V5_LAYOUT.codeDir)
 	})
 
 	it('preserves filename/id mismatches for View, Flow, and Review reads and rejects authoritative writes', async () => {
@@ -380,36 +377,6 @@ describe('file-native persistence', () => {
 		expect(await readdir(join(root, persistence.layout.transactionsDir))).toEqual([])
 	})
 
-	it('recovers an interrupted migration transaction before exposing canonical reads', async () => {
-		const root = await makeRoot()
-		const persistence = new FileNativePersistence({ root, schemaPolicy: migrationPolicy() })
-		const oldManifest = Buffer.from(JSON.stringify(workspaceFixture(1), null, 2))
-		const oldView = Buffer.from(JSON.stringify(viewFixture(), null, 2))
-		const newManifest = Buffer.from(JSON.stringify(workspaceFixture(2), null, 2))
-		await seedOldWorkspace(root, oldManifest, oldView)
-		await writeFile(join(root, workspaceRelativePath()), newManifest)
-
-		const transactionId = '66666666-6666-4666-8666-666666666666'
-		const transactionRoot = join(root, '.uiux', '.transactions', transactionId)
-		await mkdir(join(transactionRoot, 'backup', '.uiux'), { recursive: true })
-		await mkdir(join(transactionRoot, 'backup', 'views'), { recursive: true })
-		await writeFile(join(transactionRoot, 'backup', workspaceRelativePath()), oldManifest)
-		await writeFile(join(transactionRoot, 'backup', viewRelativePath(VIEW_ID)), oldView)
-		await writeFile(join(transactionRoot, 'journal.json'), JSON.stringify({
-			changes: [
-				{ path: workspaceRelativePath(), existed: true },
-				{ path: viewRelativePath(VIEW_ID), existed: true },
-			],
-		}))
-		await writeFile(join(root, '.uiux', '.persistence.lock'), JSON.stringify({ pid: 2_000_000_000, token: '66666666-6666-4666-8666-666666666667' }))
-
-		const inspected = await persistence.inspectWorkspace()
-		expect(inspected.inspection.state).toBe('migration_required')
-		expect(await readFile(join(root, workspaceRelativePath()))).toEqual(oldManifest)
-		expect(await readFile(join(root, viewRelativePath(VIEW_ID)))).toEqual(oldView)
-		expect(await readdir(join(root, '.uiux', '.transactions')).catch(() => [])).toEqual([])
-	})
-
 	it('leaves unknown future schema data unchanged and diagnoses unsupported state', async () => {
 		const { root, persistence } = await newWorkspace()
 		const bytes = Buffer.from(JSON.stringify(currentManifest({ schemaVersion: Number.MAX_SAFE_INTEGER }), null, 2))
@@ -708,55 +675,10 @@ async function newWorkspace(): Promise<{ root: string; persistence: FileNativePe
 	return { root, persistence }
 }
 
-/** A `schemaVersion` 2 Workspace in the old layout under the synthetic migration policy. */
-async function newLegacyWorkspace(): Promise<{ root: string; persistence: FileNativePersistence }> {
-	const root = await makeRoot()
-	const persistence = new FileNativePersistence({ root, schemaPolicy: migrationPolicy() })
-	await persistence.workspace.create(workspaceFixture())
-	return { root, persistence }
-}
-
 async function makeRoot(): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-persistence-'))
 	temporaryRoots.push(root)
 	return root
-}
-
-/** A synthetic policy where 2 is current and one step migrates 1 to 2, in the old layout, for the migration tests. */
-function migrationPolicy() {
-	return defineWorkspaceSchemaPolicy({
-		currentVersion: 2,
-		recognizedVersions: [1, 2],
-		steps: [{
-			id: 'synthetic-1-to-2',
-			fromVersion: 1,
-			toVersion: 2,
-			apply(snapshot: WorkspaceSnapshot) {
-				const next = new Map(snapshot)
-				const manifestPath = workspaceRelativePath()
-				const manifest = JSON.parse(new TextDecoder().decode(next.get(manifestPath)!)) as Record<string, unknown>
-				manifest.schemaVersion = 2
-				next.set(manifestPath, Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`))
-				const path = viewRelativePath(VIEW_ID)
-				if (next.has(path)) {
-					const view = JSON.parse(new TextDecoder().decode(next.get(path)!)) as Record<string, unknown>
-					view.name = `${String(view.name)} migrated`
-					next.set(path, Buffer.from(`${JSON.stringify(view, null, 2)}\n`))
-				}
-				return next
-			},
-		}],
-	})
-}
-
-function workspaceFixture(schemaVersion = 2): WorkspaceManifest {
-	return {
-		schemaVersion,
-		i18n: { defaultLocale: 'en-US' },
-		adapters: [],
-		viewports: {},
-		themes: {},
-	}
 }
 
 function viewFixture(): ViewResource {
@@ -803,9 +725,3 @@ function reviewFixture(): ReviewThread {
 	}
 }
 
-async function seedOldWorkspace(root: string, manifest: Uint8Array, view: Uint8Array): Promise<void> {
-	await mkdir(join(root, '.uiux'), { recursive: true })
-	await mkdir(join(root, 'views'), { recursive: true })
-	await writeFile(join(root, workspaceRelativePath()), manifest)
-	await writeFile(join(root, viewRelativePath(VIEW_ID)), view)
-}

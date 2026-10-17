@@ -136,12 +136,10 @@ export function createFormalCaptureService(
 		}
 
 		// Capture stores artifacts, so it is refused before launching a browser unless the Workspace
-		// is at the current schema (`workspace.migration_required` until `uiux migrate` runs).
+		// is at the current schema (`workspace.schema_unsupported` otherwise).
 		const { inspection } = await persistence.inspectWorkspace()
-		if (inspection.state === 'migration_required' || inspection.state === 'unsupported') {
-			const diagnostics: readonly Diagnostic[] = inspection.state === 'migration_required'
-				? [{ code: 'workspace.migration_required', path: '/schemaVersion', message: `Workspace schema ${inspection.version} requires explicit migration to policy target ${inspection.targetVersion}. Run: uiux migrate --workspace <dir>` }]
-				: inspection.diagnostics
+		if (inspection.state === 'unsupported') {
+			const diagnostics: readonly Diagnostic[] = inspection.diagnostics
 			return {
 				status: 'failed',
 				results: contexts.map(context => ({ context, status: 'failed', diagnostics })),
@@ -252,7 +250,7 @@ export function createFormalCaptureService(
 			|| `http://${normalizedHost}:${defaultPort}`
 
 		// Clause 01a11bb1-8fc4-7b7d-87da-d3fc5d457d98: each record carries the Product Kit provenance
-		// of the Workspace at capture time, taken once for the run (none below schemaVersion 5).
+		// of the Workspace at capture time, taken once for the run.
 		const productKit = await readWorkspaceProductKitProvenance(persistence)
 
 		let browser: Browser | undefined

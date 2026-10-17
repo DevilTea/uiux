@@ -7,11 +7,11 @@ import { memberLabel, memberLabelName, type LabelPreset } from '../application/a
 import { presetNameKey } from '../domain/access-presets/schema'
 import { isMemberKind, type MemberKind } from '../application/access/principal'
 import { FileNativePersistence } from '../persistence/file-native'
-import { detectWorkspaceLayout, layoutForSchemaVersion, resolveLayoutDirectory, resolveWorkspacePath, type WorkspaceLayout } from '../persistence/paths'
+import { resolveLayoutDirectory, resolveWorkspacePath, V5_LAYOUT, type WorkspaceLayout } from '../persistence/paths'
 import type { WorkspaceSchemaPolicy } from '../persistence/schema-policy'
 import { checkWorkspaceSelection, isRelocatedSourceOf, selectWorkspace } from '../persistence/workspace-selection'
 import { readActiveServerHold } from '../persistence/server-hold'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 import { generateHint } from '../server/access/credentials'
 import { readWorkspaceAccessPresets } from '../server/access/workspace-presets'
 import { DEFAULT_LOOPBACK_BIND_HOST, isLoopbackHostname, resolveListenPort } from '../server/network-access'
@@ -120,7 +120,7 @@ function table(rows: readonly (readonly string[])[]): string[] {
 const day = (value: string | null) => value ? value.slice(0, 10) : 'never'
 /**
  * The Workspace's Access presets at this moment (`readWorkspaceAccessPresets`): the presets file
- * from `schemaVersion` 6, the built-in presets below it (Rule 01a11c09-cb79-744e-bbf6-ec38d6f159ba).
+ * (`access-presets.json`).
  */
 function workspacePresets(context: Context): Promise<readonly LabelPreset[]> {
 	return readWorkspaceAccessPresets(context.workspaceRoot)
@@ -247,7 +247,7 @@ async function requireWorkspace(workspace: string | undefined, cwd: string, sche
 	const selection = selectWorkspace({ ...(workspace === undefined ? {} : { workspace }), cwd }, schemaPolicy)
 	if (!selection.ok) {
 		if (selection.reason === 'not_found' || selection.reason === 'not_a_directory')
-			throw new AccessError('access.workspace_invalid', `${resolve(cwd, workspace ?? '.')} is not an initialized UIUX Workspace (no ${layoutForSchemaVersion(CURRENT_WORKSPACE_SCHEMA_VERSION).manifestPath}). Run uiux init first.`)
+			throw new AccessError('access.workspace_invalid', `${resolve(cwd, workspace ?? '.')} is not an initialized UIUX Workspace (no ${V5_LAYOUT.manifestPath}). Run uiux init first.`)
 		throw new AccessError('access.workspace_invalid', selection.message)
 	}
 	const manifestPath = selection.layout.manifestPath
@@ -260,9 +260,9 @@ async function requireWorkspace(workspace: string | undefined, cwd: string, sche
 	return workspaceRealRoot(selection.root)
 }
 
-/** The layout of the Workspace at `root`, detected from where its manifest is. */
-function workspaceLayout(root: string): Promise<WorkspaceLayout> {
-	return detectWorkspaceLayout(root, CURRENT_WORKSPACE_SCHEMA_VERSION)
+/** The layout of a Workspace: the only one. */
+function workspaceLayout(): Promise<WorkspaceLayout> {
+	return Promise.resolve(V5_LAYOUT)
 }
 
 async function openStore(context: Context, create: boolean): Promise<AccessStore | undefined> {
@@ -608,7 +608,7 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
  * origin in its hold; otherwise the port is the one `uiux dev` would use (`NITRO_PORT`, `PORT`, 3000).
  */
 async function defaultInviteOrigin(context: Context): Promise<string> {
-	const hold = await workspaceLayout(context.workspaceRoot).then(layout => readActiveServerHold(context.workspaceRoot, layout)).catch(() => undefined)
+	const hold = await workspaceLayout().then(layout => readActiveServerHold(context.workspaceRoot, layout)).catch(() => undefined)
 	if (hold?.origin && hold.hostname === hostname()) {
 		try {
 			const recorded = new URL(hold.origin)
@@ -620,7 +620,7 @@ async function defaultInviteOrigin(context: Context): Promise<string> {
 }
 
 async function refuseWhileServed(workspaceRoot: string): Promise<void> {
-	const hold = await readActiveServerHold(workspaceRoot, await workspaceLayout(workspaceRoot))
+	const hold = await readActiveServerHold(workspaceRoot, await workspaceLayout())
 	if (hold)
 		throw new AccessError('access.lock_busy', `A UIUX server (pid ${hold.pid} on ${hold.hostname}) is serving ${workspaceRoot}. Stop that server, then run uiux access copy again to copy the host history.`)
 }
@@ -636,7 +636,7 @@ async function isRegularFile(path: string): Promise<boolean> {
  * since the copy checks its own consistency before it replaces anything.
  */
 async function withSourceLock<Result>(sourceRoot: string, warn: (line: string) => void, operation: () => Promise<Result>): Promise<Result> {
-	const layout = await workspaceLayout(sourceRoot).catch(() => undefined)
+	const layout = await workspaceLayout().catch(() => undefined)
 	if (!layout || !(await lstat(resolveLayoutDirectory(sourceRoot, layout.metadataDir)).then(stats => stats.isDirectory(), () => false))) return operation()
 	// Not read-only for the source: taking its persistence lock writes the lock file under the source's
 	// metadata directory (removed on release), and acquiring the lock runs the source's pending-transaction

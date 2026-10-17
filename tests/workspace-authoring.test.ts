@@ -27,7 +27,6 @@ import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schem
 const MANIFEST: WorkspaceManifest = {
 	schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 	i18n: { defaultLocale: 'en-US' },
-	adapters: [{ moduleSpecifier: './adapters/reference.ts' }],
 	viewports: {
 		mobile: { dimensions: { width: 390, height: 844 }, label: 'Mobile' },
 		desktop: { dimensions: { width: 1920, height: 1080 }, label: 'FHD Desktop', note: 'kept' },
@@ -56,9 +55,9 @@ describe('Workspace settings payload', () => {
 		const payload = buildSettingsPayload(MANIFEST, 'themes', { light: {} })
 		expect(payload.themes).toEqual({ light: {} })
 		expect(payload.viewports).toEqual(MANIFEST.viewports)
-		expect(payload.adapters).toEqual(MANIFEST.adapters)
 		expect(payload.i18n).toEqual(MANIFEST.i18n)
-		expect(Object.keys(payload).sort()).toEqual(['adapters', 'i18n', 'themes', 'viewports'])
+		// The Adapters are the Product Kit file's, never part of the settings.
+		expect(Object.keys(payload).sort()).toEqual(['i18n', 'themes', 'viewports'])
 	})
 
 	it('flags empty, spaced, duplicate keys and missing dimensions', () => {
@@ -98,7 +97,6 @@ describe('Workspace settings payload', () => {
 })
 
 describe('Adapters from schemaVersion 5 (Product Kit file)', () => {
-	const { adapters: _adapters, ...V5_MANIFEST } = MANIFEST
 	const KIT: ProductKit = {
 		...emptyProductKit(),
 		designSystems: ['@acme/ds'],
@@ -106,12 +104,6 @@ describe('Adapters from schemaVersion 5 (Product Kit file)', () => {
 		styles: ['./styles.css'],
 		themes: { dark: { 'data-theme': 'dark' } },
 	}
-
-	it('sends no adapters in the Workspace settings when the manifest holds none', () => {
-		void _adapters
-		const payload = buildSettingsPayload(V5_MANIFEST as WorkspaceManifest, 'themes', { light: {} })
-		expect(Object.keys(payload).sort()).toEqual(['i18n', 'themes', 'viewports'])
-	})
 
 	it('writes nothing for an unchanged selection', () => {
 		expect(productKitAdapterWrites(KIT, KIT.adapters)).toEqual({})

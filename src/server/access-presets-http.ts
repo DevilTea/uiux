@@ -8,8 +8,7 @@ import { mapAuthoringResultToHttpStatus, parseHttpPayload, type AuthoringHttpRes
  * offers no Tool or Resource for them):
  *
  * - `GET /api/access-presets` answers the Access presets resource `{ kind, key, resource, revision,
- *   diagnostics }`, needing `workspace.read` (Clause 01a11485-fa00-72da-bc46-98302a3c106e); 404
- *   below `schemaVersion` 6, where a Workspace keeps no presets file. From 6 a missing file answers
+ *   diagnostics }`, needing `workspace.read` (Clause 01a11485-fa00-72da-bc46-98302a3c106e). A missing file answers
  *   200 with `resource` and `revision` `null` and `access.presets_missing` (Clause
  *   01a12f98-f466-7c86-af94-5887f1d1b50d).
  * - `PUT /api/access-presets` is `update_access_presets { expectedRevision, presets }` (Clause

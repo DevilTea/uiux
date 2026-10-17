@@ -154,10 +154,10 @@ export interface WorkspaceApplicationSession {
 	composeProductKit<R = never>(command: ComposeProductKitCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
 	updateProductKit<R = never>(command: UpdateProductKitCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
 	updateComponentRegistry<R = never>(command: UpdateComponentRegistryCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
-	readAccessPresets(): Promise<AccessPresetsRead | undefined>
+	readAccessPresets(): Promise<AccessPresetsRead>
 	updateAccessPresets(command: UpdateAccessPresetsCommand): Promise<AccessPresetsAuthoringResult>
-	readKitBuild(): KitBuildRead | undefined
-	readKitBuildLog(): KitBuildLogRead | undefined
+	readKitBuild(): KitBuildRead
+	readKitBuildLog(): KitBuildLogRead
 	restartKitBuild(): Promise<RestartKitBuildResult>
 	listKitFiles: KitSourceService['listKitFiles']
 	readKitFile: KitSourceService['readKitFile']
@@ -183,7 +183,7 @@ export interface WorkspaceApplicationSession {
 	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
 	/** The Product Kit Checks (issue #141 Part 14 decision 7), run on request and non-blocking. */
 	runProductKitChecks(command?: Readonly<{ readSource?: boolean }>): Promise<ProductKitChecksResult>
-	/** The current Product Kit provenance, against which Evidence freshness is judged (Rules 01a11bb1-be4a-… and 01a1161b-ff68-…); `none` below schemaVersion 5. */
+	/** The current Product Kit provenance, against which Evidence freshness is judged (Rules 01a11bb1-be4a-… and 01a1161b-ff68-…). */
 	productKitProvenance(): Promise<CurrentProductKitProvenance>
 	assessHandoffReadiness(command: AssessHandoffReadinessCommand): Promise<AssessHandoffReadinessResult>
 	exportHandoff(command: ExportHandoffCommand): Promise<ExportHandoffResult>
@@ -232,7 +232,7 @@ export function createWorkspaceApplicationSession(
 	const historyPreview = createHistoryPreviewService(persistence, options?.history)
 	const productKitAuthoring = createProductKitAuthoringService(persistence, options?.kitBuild ? { buildStatus: () => options.kitBuild!.status() } : {})
 	const accessPresetsAuthoring = createAccessPresetsAuthoringService(persistence)
-	const kitBuild = createKitBuildService(persistence, options?.kitBuild)
+	const kitBuild = createKitBuildService(options?.kitBuild)
 	const kitSource = createKitSourceService(persistence)
 	const productKitChecks = createProductKitChecksService(persistence, {
 		readProductKit: productKitAuthoring.readProductKit,

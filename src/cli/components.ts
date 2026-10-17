@@ -141,8 +141,6 @@ async function loadProductKit(workspace: string | undefined, context: Context): 
 	const selection = selectCliWorkspace(workspace, context.cwd)
 	if (!selection.ok) throw new Refusal(selection.message, 2)
 	const { root, layout } = selection
-	if (layout.productKitPath === undefined || layout.codeDir === undefined)
-		throw new Refusal(`The Workspace ${root} is from before schemaVersion 5 and has no Product Kit; run uiux migrate first.`, 2)
 	const path = join(root, layout.productKitPath)
 	const info = await lstat(path).catch(() => undefined)
 	if (!info?.isFile()) throw new Refusal(`${layout.productKitPath} of the Workspace ${root} is missing or not a regular file.`)

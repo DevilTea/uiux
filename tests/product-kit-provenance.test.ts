@@ -348,7 +348,7 @@ describe('Evidence freshness against Product Kit provenance (Rules 01a11bb1-be4a
 		const current = await provenance(persistence)
 		expect(evaluateEvidenceStaleness(legacy, context(current))).toMatchObject({ isStale: true, unknown: true })
 		expect(evidenceFreshness(legacy, context(current))).toEqual({ state: 'unknown', reason: 'noProductKit' })
-		// Without a Product Kit to judge against (a Workspace below schemaVersion 5), the Product Kit is not judged.
+		// Without a current Product Kit provenance in the context, the Product Kit is not judged.
 		expect(evaluateEvidenceStaleness(legacy, context())).toEqual({ isStale: false })
 	})
 })

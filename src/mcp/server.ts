@@ -19,7 +19,7 @@ import { HISTORY_VERSION_TYPES } from '../domain/history/constants'
 import type { ViewResource } from '../domain/views/schema'
 import type { FlowStep } from '../domain/flows/schema'
 import { REVIEW_RESOLUTIONS, type ReviewAnchor, type ReviewDisplayHint, type ReviewEvidenceRef, type ReviewRenderContext, type ReviewResourceRevision } from '../domain/reviews/schema'
-import type { WorkspaceAdapterSelection, ThemeEntry, ViewportPreset } from '../domain/workspace/schema'
+import type { ThemeEntry, ViewportPreset } from '../domain/workspace/schema'
 import type { ProductKitComponent, ProductKitWidgetMapping } from '../domain/product-kit/schema'
 import { ACCESS_PRESETS_RESOURCE_KIND } from '../domain/access-presets/schema'
 import { isFullUuid, isSha256Digest, type JsonObject, type JsonValue } from '../domain/validation'
@@ -77,10 +77,6 @@ const updateWorkspaceSettingsSchema = z.object({
 		i18n: z.object({
 			defaultLocale: z.string(),
 		}).catchall(z.unknown()),
-		adapters: z.array(z.object({
-			moduleSpecifier: z.string(),
-			config: z.unknown().optional(),
-		})).optional().describe('Required below Workspace schemaVersion 5 and refused from 5, where the Product Kit holds the Adapters (compose_product_kit, update_product_kit).'),
 		viewports: z.record(z.string(), z.object({
 			dimensions: z.object({
 				width: z.number(),
@@ -452,14 +448,14 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 
 	// Clause 01a11bb1-b0f1-7e5d-85ad-230c43ad99fb: the Product Kit file with its build state (the kit
 	// build runner's under uiux dev), Adapter resolution, resolved external packages and findings. A
-	// Workspace without one (below schemaVersion 5) has no such Resource.
+	// Workspace without the file has no such Resource.
 	server.registerResource(
 		'product-kit',
 		PRODUCT_KIT_RESOURCE_URI,
 		{ title: 'UIUX Product Kit', mimeType: 'application/json' },
 		async (uri) => {
 			const read = await app.readProductKit()
-			if (!read) throw new ResourceNotFoundError(uri.href, `UIUX Product Kit not found: this Workspace has no ${PRODUCT_KIT_RESOURCE_URI} (it needs Workspace schemaVersion 5).`)
+			if (!read) throw new ResourceNotFoundError(uri.href, `UIUX Product Kit not found: this Workspace has no readable Product Kit file.`)
 			return { contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(read) }] }
 		},
 	)
@@ -467,8 +463,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 	// Clause 01a11bb1-b0f1-7e5d-85ad-230c43ad99fb: one kit project file by its path relative to kit/,
 	// percent-encoded as one segment (each / as %2F). Clause 01a11485-fa00-…: `product-kit.source.read`,
 	// not `workspace.read`. A path that is not a kit path (absolute, `..`, inside kit/node_modules/) is
-	// invalid; a file that is missing, a link or below one is not found (Clause 01a11485-f70a-…), as is
-	// every kit file below schemaVersion 5. A file above 8 MiB is refused with kit.file_too_large
+	// invalid; a file that is missing, a link or below one is not found (Clause 01a11485-f70a-…). A file above 8 MiB is refused with kit.file_too_large
 	// (Clause 01a13d3e-c4b5-…). Nothing names a host path.
 	server.registerResource(
 		'product-kit-file',
@@ -482,10 +477,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			if (read.status === 'invalid_path') throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Invalid kit file path: ${read.message}`)
 			if (read.status === 'too_large') throw new ProtocolError(ProtocolErrorCode.InvalidParams, `${read.code}: ${read.message}`, { code: read.code, path: read.path, limit: read.limit })
 			if (read.status === 'not_found') throw new ResourceNotFoundError(uri.href, `UIUX kit file not found: kit/${read.path} is not a regular file reached without a symbolic link.`)
-			if (read.status === 'blocked') {
-				if (read.code === 'workspace.migration_required') throw new ResourceNotFoundError(uri.href, `UIUX kit file not found: this Workspace has no kit project (it needs Workspace schemaVersion 5).`)
-				throw new ProtocolError(ProtocolErrorCode.InternalError, `${read.code}: ${read.message}`, read)
-			}
+			if (read.status === 'blocked') throw new ProtocolError(ProtocolErrorCode.InternalError, `${read.code}: ${read.message}`, read)
 			const content = kitFileContent(read.bytes)
 			return { contents: [content.encoding === 'base64'
 				? { uri: uri.href, mimeType: 'application/octet-stream', blob: content.content }
@@ -617,7 +609,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'update_workspace_settings',
 		{
 			title: 'Update UIUX Workspace Settings',
-			description: 'Update manifest-owned Workspace settings (i18n.defaultLocale, viewports, themes, and below Workspace schemaVersion 5 adapters) with revision CAS while preserving schemaVersion.',
+			description: 'Update manifest-owned Workspace settings (i18n.defaultLocale, viewports, themes) with revision CAS while preserving schemaVersion. The Adapters are the Product Kit\'s (compose_product_kit, update_product_kit).',
 			inputSchema: updateWorkspaceSettingsSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
@@ -625,14 +617,13 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			expectedRevision: input.expectedRevision,
 			settings: {
 				i18n: input.settings.i18n,
-				...(input.settings.adapters === undefined ? {} : { adapters: input.settings.adapters as WorkspaceAdapterSelection[] }),
 				viewports: input.settings.viewports as Record<string, ViewportPreset>,
 				themes: input.settings.themes as Record<string, ThemeEntry>,
 			},
 		})),
 	)
 
-	const productKitRefusals = 'Refusals: conflict (re-read uiux://product-kit), locked, invalid (the file\'s own validation, product_kit.specifier_refused, product_kit.package_undeclared, kit.component_invalid), blocked (auth.scope_denied naming requiredKeys, workspace.migration_required below Workspace schemaVersion 5).'
+	const productKitRefusals = 'Refusals: conflict (re-read uiux://product-kit), locked, invalid (the file\'s own validation, product_kit.specifier_refused, product_kit.package_undeclared, kit.component_invalid), blocked (auth.scope_denied naming requiredKeys, workspace.schema_unsupported).'
 	server.registerTool(
 		'compose_product_kit',
 		{
@@ -681,7 +672,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'restart_kit_build',
 		{
 			title: 'Restart the UIUX kit build',
-			description: 'Stop the running kit build process, if any, and start the Workspace\'s kit build again, as kit/package.json declares it (uiux.build: its watch command, else its build command once). Takes no input: no command or argument can be supplied. Needs product-kit.write. Returns { status: "restarted", build: { state } } with state building, ready or failed, or { status: "no_build" } when kit/package.json declares no build. A call made while another restart is still queued shares the result of that restart. Read the build state later from uiux://product-kit. Refusals: blocked (auth.scope_denied naming requiredKeys, workspace.migration_required below Workspace schemaVersion 5, kit.build_unavailable when no kit build runs in this server, kit.build_restart_throttled within 2 s of the previous restart).',
+			description: 'Stop the running kit build process, if any, and start the Workspace\'s kit build again, as kit/package.json declares it (uiux.build: its watch command, else its build command once). Takes no input: no command or argument can be supplied. Needs product-kit.write. Returns { status: "restarted", build: { state } } with state building, ready or failed, or { status: "no_build" } when kit/package.json declares no build. A call made while another restart is still queued shares the result of that restart. Read the build state later from uiux://product-kit. Refusals: blocked (auth.scope_denied naming requiredKeys, kit.build_unavailable when no kit build runs in this server, kit.build_restart_throttled within 2 s of the previous restart).',
 			inputSchema: z.object({}).strict(),
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},
@@ -700,7 +691,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 	// read it (Clauses 01a11bb1-b1c2-…, 01a11bb1-b227-… and 01a11bb1-b28f-…), each with
 	// `product-kit.source.read` (Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa).
 	const kitFileTooLarge = 'too_large (kit.file_too_large: a kit file above 8 MiB, named by path, is not read)'
-	const kitSourceBlocked = 'blocked (auth.scope_denied naming requiredKeys, workspace.migration_required below Workspace schemaVersion 5)'
+	const kitSourceBlocked = 'blocked (auth.scope_denied naming requiredKeys)'
 	server.registerTool(
 		'list_kit_files',
 		{
@@ -1083,7 +1074,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'get_version_diff',
 		{
 			title: 'Compare UIUX versions',
-			description: 'Compare a version of the Workspace timeline with another version or with the current files. Returns { status: "compared", from, to, summary }, where summary lists each resource as added, removed, modified or unchanged; with detail "semantic" it adds changes, one semantic diff per resource that is not unchanged (Widgets by id, Variants, Spec items and Decisions for a View; steps for a Flow; message keys for a Locale; settings members for the Workspace, never schemaVersion; metadata and content digest for an Asset; JSON pointers otherwise). A side recorded under an older schema is upgraded in memory first, so a migration adds no changes. Refusals: history.invalid_comparison, history.record_missing (unknown version), workspace.schema_unsupported (a version recorded under a schema this build does not recognize).',
+			description: 'Compare a version of the Workspace timeline with another version or with the current files. Returns { status: "compared", from, to, summary }, where summary lists each resource as added, removed, modified or unchanged; with detail "semantic" it adds changes, one semantic diff per resource that is not unchanged (Widgets by id, Variants, Spec items and Decisions for a View; steps for a Flow; message keys for a Locale; settings members for the Workspace, never schemaVersion; metadata and content digest for an Asset; JSON pointers otherwise). Refusals: history.invalid_comparison, history.record_missing (unknown version), workspace.schema_unsupported (a version recorded under a schemaVersion other than the current one, or a current Workspace at another schemaVersion).',
 			inputSchema: getVersionDiffSchema,
 			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
@@ -1132,7 +1123,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'create_checkpoint',
 		{
 			title: 'Create UIUX Checkpoint',
-			description: `Name the current state of the Workspace as a Checkpoint, a version kept until a human deletes it. Needs no edit lease and changes no design file; the open autosave closes first, and changes made outside UIUX are recorded before it. A Checkpoint is immutable: to correct one, create another. Returns { status: "created", versionId, at, resources }, resources being the number of resources it records. Refusals: history.invalid_checkpoint_name, history.invalid_checkpoint_note, workspace.migration_required, workspace.schema_unsupported, history.boundary_failed (retryable). ${CHECKPOINT_RECOMMENDATION}`,
+			description: `Name the current state of the Workspace as a Checkpoint, a version kept until a human deletes it. Needs no edit lease and changes no design file; the open autosave closes first, and changes made outside UIUX are recorded before it. A Checkpoint is immutable: to correct one, create another. Returns { status: "created", versionId, at, resources }, resources being the number of resources it records. Refusals: history.invalid_checkpoint_name, history.invalid_checkpoint_note, workspace.schema_unsupported, history.boundary_failed (retryable). ${CHECKPOINT_RECOMMENDATION}`,
 			inputSchema: createCheckpointSchema,
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},
@@ -1151,7 +1142,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'restore_resource_version',
 		{
 			title: 'Restore a UIUX resource from a version',
-			description: 'Write one design resource (a View, Flow, Locale, Asset, the Workspace settings or the Product Kit) back to its content in an earlier version, as a new current revision; history is never rewritten and there is no whole-version revert. It is a write of that resource: your edit lease is checked or taken, and expectedRevision is the resource\'s current revision (null to re-create a removed one). A View keeps its current Decisions; the settings keep the current schemaVersion. The content is validated like an authoring write. Before writing, the impact is analyzed (Review threads whose Widget anchor would become invalid or valid again, dangling $i18n and $asset references, UX Flow steps whose Widgets would disappear, ready-for-review submissions whose revision would stop or start being current, and for the settings removed viewport and theme keys and formal Evidence that would become stale); when it is not empty nothing is written and the result is impact_acknowledgement_required with impacts: call again with acknowledgeImpact true to write. The restore is recorded as its own version naming restoredFrom. Returns { status: "updated" | "created", kind, key, revision, restoredFrom, impacts, diagnostics }. Refusals: conflict (with currentRevision, null when the resource does not exist), locked, invalid (history.invalid_restore, history.restore_unsupported_kind, history.restore_invalid_content), impact_acknowledgement_required, not_found (history.record_missing, history.resource_not_in_version), blocked (workspace.migration_required, workspace.schema_unsupported).',
+			description: 'Write one design resource (a View, Flow, Locale, Asset, the Workspace settings or the Product Kit) back to its content in an earlier version, as a new current revision; history is never rewritten and there is no whole-version revert. It is a write of that resource: your edit lease is checked or taken, and expectedRevision is the resource\'s current revision (null to re-create a removed one). A View keeps its current Decisions; the settings keep the current schemaVersion. The content is validated like an authoring write. Before writing, the impact is analyzed (Review threads whose Widget anchor would become invalid or valid again, dangling $i18n and $asset references, UX Flow steps whose Widgets would disappear, ready-for-review submissions whose revision would stop or start being current, and for the settings removed viewport and theme keys and formal Evidence that would become stale); when it is not empty nothing is written and the result is impact_acknowledgement_required with impacts: call again with acknowledgeImpact true to write. The restore is recorded as its own version naming restoredFrom. Returns { status: "updated" | "created", kind, key, revision, restoredFrom, impacts, diagnostics }. Refusals: conflict (with currentRevision, null when the resource does not exist), locked, invalid (history.invalid_restore, history.restore_unsupported_kind, history.restore_invalid_content), impact_acknowledgement_required, not_found (history.record_missing, history.resource_not_in_version), blocked (workspace.schema_unsupported).',
 			inputSchema: restoreResourceVersionSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},

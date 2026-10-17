@@ -9,18 +9,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { runAccessCommand } from '../src/cli/access'
 import { runInitCommand } from '../src/cli/init'
-import { LEGACY_LAYOUT, V5_LAYOUT } from '../src/persistence/paths'
+import { V5_LAYOUT } from '../src/persistence/paths'
 import { type DiscoveryHost, selectWorkspace } from '../src/persistence/workspace-selection'
-import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
-import { V4_TEST_SCHEMA_POLICY } from './support/workspace-layout'
 
 /**
  * Workspace selection for every command that acts on a Workspace: the optional `--workspace <dir>`
  * (Clause 01a1144e-5584-7101-98c0-dc3cbadbacdf) and discovery without it (Clause
- * 01a11bb1-9847-751f-a1ba-943ad111a02a), with a found old-layout `.uiux/` mapped to its parent
- * before the entry check (Clause 01a11bb1-98a9-7881-8fa0-ee1e355a3a9a; Scenario
- * 01a11bb1-bf1b-7e2f-9256-170e5d400195).
+ * 01a11bb1-9847-751f-a1ba-943ad111a02a; Scenario 01a11bb1-bf1b-7e2f-9256-170e5d400195), then the
+ * entry check (Clause 01a126c7-7c2a-7bb7-b4db-c86fa04ac9e9).
  */
 const CLI = join(fileURLToPath(new URL('..', import.meta.url)), 'bin', 'uiux.mjs')
 const POLICY = PRODUCT_WORKSPACE_SCHEMA_POLICY
@@ -70,12 +68,12 @@ async function repositoryWithWorkspace(): Promise<Readonly<{ repository: string;
 	return { repository, root: join(repository, '.uiux'), nested }
 }
 
-/** A repository holding an old-layout Workspace in `design/` (manifest `design/.uiux/workspace.json`). */
+/** A repository holding a Workspace from an old build in `design/` (manifest `design/.uiux/workspace.json`). */
 async function repositoryWithOldLayout(version = 4): Promise<Readonly<{ repository: string; root: string; nested: string }>> {
 	const repository = await makeDirectory()
 	const root = join(repository, 'design')
 	await mkdir(join(root, '.uiux'), { recursive: true })
-	await writeFile(join(root, ...LEGACY_LAYOUT.manifestPath.split('/')), `${JSON.stringify({ schemaVersion: version, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })}\n`)
+	await writeFile(join(root, '.uiux', 'workspace.json'), `${JSON.stringify({ schemaVersion: version, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })}\n`)
 	const nested = join(root, 'views')
 	await mkdir(nested, { recursive: true })
 	return { repository, root, nested }
@@ -88,10 +86,13 @@ describe('Workspace discovery (no --workspace)', () => {
 			expect(selectWorkspace({ cwd, discoveryHost: host(repository) }, POLICY)).toEqual({ ok: true, root, layout: V5_LAYOUT, discovered: true })
 	})
 
-	it('maps a found .uiux/ below schemaVersion 5 to its parent, the old-layout root, before the entry check', async () => {
+	it('selects a found .uiux/ at an older schemaVersion as the root, which the entry check refuses', async () => {
 		const { repository, root, nested } = await repositoryWithOldLayout()
-		for (const cwd of [nested, root, join(root, '.uiux')])
-			expect(selectWorkspace({ cwd, discoveryHost: host(repository) }, POLICY)).toEqual({ ok: true, root, layout: LEGACY_LAYOUT, discovered: true })
+		for (const cwd of [nested, root, join(root, '.uiux')]) {
+			const selected = selectWorkspace({ cwd, discoveryHost: host(repository) }, POLICY)
+			expect(selected).toMatchObject({ ok: false, reason: 'unsupported_schema', message: expect.stringContaining(join(root, '.uiux', 'workspace.json')) })
+			expect(selected).toMatchObject({ message: expect.stringMatching(/workspace\.schema_unsupported.*schemaVersion 4 .*schemaVersion 6.*uiux init/u) })
+		}
 	})
 
 	it('picks the nearest Workspace when Workspaces nest', async () => {
@@ -114,7 +115,7 @@ describe('Workspace discovery (no --workspace)', () => {
 
 		const withoutKit = await makeDirectory()
 		await mkdir(join(withoutKit, '.uiux'))
-		await writeFile(join(withoutKit, '.uiux', 'workspace.json'), '{"schemaVersion":5,"i18n":{"defaultLocale":"en-US"},"viewports":{},"themes":{}}\n')
+		await writeFile(join(withoutKit, '.uiux', 'workspace.json'), `${JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, viewports: {}, themes: {} })}\n`)
 		expect(selectWorkspace({ cwd: withoutKit }, POLICY)).toMatchObject({ ok: false, reason: 'missing_product_kit' })
 	})
 })
@@ -247,10 +248,16 @@ describe('explicit --workspace', () => {
 		expect(selectWorkspace({ cwd: repository, workspace: '.' }, POLICY)).toEqual({ ok: true, root, layout: V5_LAYOUT, discovered: false })
 	})
 
-	it('selects an old-layout root, and refuses its own .uiux/ directory, naming the parent', async () => {
+	it('refuses a Workspace at an older schemaVersion, given as its .uiux/ or as the directory above it', async () => {
 		const { repository, root } = await repositoryWithOldLayout()
-		expect(selectWorkspace({ cwd: repository, workspace: 'design' }, POLICY)).toEqual({ ok: true, root, layout: LEGACY_LAYOUT, discovered: false })
-		expect(selectWorkspace({ cwd: repository, workspace: 'design/.uiux' }, V4_TEST_SCHEMA_POLICY)).toMatchObject({ ok: false, reason: 'legacy_metadata_dir', message: expect.stringContaining(`select its parent ${root}`) })
+		for (const workspace of ['design', 'design/.uiux']) {
+			expect(selectWorkspace({ cwd: repository, workspace }, POLICY), workspace).toMatchObject({
+				ok: false,
+				reason: 'unsupported_schema',
+				message: expect.stringMatching(/workspace\.schema_unsupported.*schemaVersion 4 .*uiux init/u),
+			})
+			expect(selectWorkspace({ cwd: repository, workspace }, POLICY)).toMatchObject({ message: expect.stringContaining(join(root, '.uiux')) })
+		}
 	})
 
 	it('refuses a missing directory and a file', async () => {

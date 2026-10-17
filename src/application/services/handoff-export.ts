@@ -29,6 +29,7 @@ import {
 import type { ResolvedRenderContext } from '../../domain/render-context/schema'
 import type { Diagnostic, JsonObject } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
+import { workspaceRefusalMessage } from '../../persistence/schema-policy'
 import {
 	adapterResolutionBase,
 	NodeAdapterManifestLoader,
@@ -58,13 +59,13 @@ export type ExportHandoffCommand = Readonly<{
 }>
 
 /**
- * Handoff is refused while the Workspace is not at the current schema: export would write artifacts
- * and readiness claims would be computed against files `uiux migrate` is about to rewrite.
+ * Handoff is refused while the Workspace is not at the current schema: this UIUX cannot read the
+ * files that export and readiness would be computed against.
  */
 export type HandoffSchemaBlocked = Readonly<{
 	status: 'blocked'
 	key: 'handoff'
-	code: 'workspace.migration_required' | 'workspace.schema_unsupported'
+	code: 'workspace.schema_unsupported'
 	message: string
 	diagnostics: readonly Diagnostic[]
 }>
@@ -98,18 +99,8 @@ export interface HandoffExportService {
 export function createHandoffExportService(persistence: FileNativePersistence): HandoffExportService {
 	async function blockedForSchema(): Promise<HandoffSchemaBlocked | undefined> {
 		const { inspection } = await persistence.inspectWorkspace()
-		if (inspection.state === 'migration_required') {
-			const detail = `Workspace schema ${inspection.version} requires explicit migration to policy target ${inspection.targetVersion}.`
-			return {
-				status: 'blocked',
-				key: 'handoff',
-				code: 'workspace.migration_required',
-				message: `Workspace schemaVersion ${inspection.version} requires explicit migration to ${inspection.targetVersion}. Run: uiux migrate --workspace <dir>`,
-				diagnostics: [{ code: 'workspace.migration_required', path: '/schemaVersion', message: detail }],
-			}
-		}
 		if (inspection.state === 'unsupported')
-			return { status: 'blocked', key: 'handoff', code: 'workspace.schema_unsupported', message: 'Handoff is blocked for an unsupported Workspace schema.', diagnostics: inspection.diagnostics }
+			return { status: 'blocked', key: 'handoff', code: 'workspace.schema_unsupported', message: workspaceRefusalMessage(inspection, 'Handoff is blocked for an unsupported Workspace schema.'), diagnostics: inspection.diagnostics }
 		return undefined
 	}
 
@@ -171,7 +162,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 				adaptersInClosure: readonly AdapterProvenance[]
 				contextsInClosure: readonly ResolvedRenderContext[]
 				wsSchemaVersion: number
-				/** The Product Kit provenance at export; none below schemaVersion 5. */
+				/** The Product Kit provenance at export, when it is available. */
 				productKitProvenance?: ProductKitProvenance
 				/** `coverage.review`: completeness plus per-resolution counts over the closure. */
 				reviewCoverage: Readonly<{ complete: boolean; threads: number; workspaceThreads: number; resolved: Readonly<Record<ReviewResolution, number>> }>
@@ -232,11 +223,9 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 			}
 		}
 		const wsSchemaVersion = wsRead.resource.schemaVersion ?? 1
-		// From schemaVersion 5 the Adapter list is the Product Kit file's, and a `./` Adapter resolves
-		// from `kit/` (Clauses 01a1144e-538e-705f-afdc-841028c410e4 and 01a115cd-d109-76d3-9622-85d0080c60b6).
-		const workspaceAdapters = persistence.layout.productKitPath
-			? (await persistence.productKit.read())?.resource.adapters ?? []
-			: wsRead.resource.adapters ?? []
+		// The Adapter list is the Product Kit file's, and a `./` Adapter resolves from `kit/` (Clauses
+		// 01a1144e-538e-705f-afdc-841028c410e4 and 01a115cd-d109-76d3-9622-85d0080c60b6).
+		const workspaceAdapters = (await persistence.productKit.read())?.resource.adapters ?? []
 		const adapterModuleResolver = () => new NodeWorkspaceAdapterModuleResolver({ layout: persistence.layout })
 
 		const viewsToInclude = new Set<string>()
@@ -493,8 +482,8 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 
 		// 5b. Rule 01a11bb1-bd7c-7117-8c54-ceb9881db19c: the Product Kit file travels with every bundle,
 		// so implementers get its style entries and theme attributes; Clause 01a115cd-d7ba-…: its
-		// provenance at export. A Workspace below schemaVersion 5 has neither.
-		const productKitRead = persistence.layout.productKitPath ? await persistence.productKit.readInspected().catch(() => undefined) : undefined
+		// provenance at export.
+		const productKitRead = await persistence.productKit.readInspected().catch(() => undefined)
 		const productKitSnapshot: HandoffResourceSnapshot | undefined = productKitRead
 			? { type: PRODUCT_KIT_RESOURCE_KIND, identity: { id: PRODUCT_KIT_RESOURCE_KEY }, revision: productKitRead.revision, snapshot: productKitRead.resource as unknown as JsonObject }
 			: undefined

@@ -6,7 +6,7 @@ import { emptyProductKit, type ProductKit } from '../../src/domain/product-kit/s
 import type { WorkspaceAdapterSelection, WorkspaceManifest } from '../../src/domain/workspace/schema'
 import type { FileNativePersistence } from '../../src/persistence/file-native'
 import { V5_LAYOUT, type WorkspaceLayout } from '../../src/persistence/paths'
-import { defineWorkspaceSchemaPolicy, type WorkspaceSchemaPolicy } from '../../src/persistence/schema-policy'
+import type { WorkspaceSchemaPolicy } from '../../src/persistence/schema-policy'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../../src/product/workspace-schema'
 
 /**
@@ -67,35 +67,15 @@ export function currentManifest(overrides: Readonly<Record<string, unknown>> = {
 	return { schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, viewports: {}, themes: {}, ...overrides }
 }
 
-/** UIUX's own policy, which makes `schemaVersion` 5 current; the name predates the switch to 5. */
+/** UIUX's own policy; the name predates the single current schema. */
 export const V5_TEST_SCHEMA_POLICY: WorkspaceSchemaPolicy = PRODUCT_WORKSPACE_SCHEMA_POLICY
 
-/**
- * A policy whose current version is 4 (the old layout), with no other version and no steps, for
- * tests that keep exercising the old layout on purpose.
- */
-export const V4_TEST_SCHEMA_POLICY: WorkspaceSchemaPolicy = defineWorkspaceSchemaPolicy({
-	currentVersion: 4,
-	recognizedVersions: [4],
-	steps: [],
-})
-
-/**
- * A policy whose current version is 5, with no other version and no steps, for tests that exercise
- * a `schemaVersion` 5 Workspace as current.
- */
-export const V5_ONLY_TEST_SCHEMA_POLICY: WorkspaceSchemaPolicy = defineWorkspaceSchemaPolicy({
-	currentVersion: 5,
-	recognizedVersions: [5],
-	steps: [],
-})
-
-/** A manifest as tests wrote it below `schemaVersion` 5: settings plus an optional `adapters` list. */
+/** A test's Workspace settings: the manifest settings plus an optional `adapters` list for the Product Kit file. */
 export type TestWorkspaceSettings = Readonly<Record<string, unknown> & { adapters?: readonly Readonly<{ moduleSpecifier: string; config?: unknown }>[] }>
 
 /**
- * Splits a test's Workspace settings into the current-schema manifest and the Product Kit file: from
- * `schemaVersion` 5 the `adapters` list lives in `product-kit.json`, not in the manifest.
+ * Splits a test's Workspace settings into the current-schema manifest and the Product Kit file: the
+ * `adapters` list lives in `product-kit.json`, not in the manifest.
  */
 export function currentWorkspaceFiles(settings: TestWorkspaceSettings = {}): Readonly<{ manifest: WorkspaceManifest; productKit: ProductKit }> {
 	const { adapters, ...rest } = settings
@@ -125,12 +105,12 @@ export async function createCurrentWorkspace(persistence: FileNativePersistence,
 export async function writeCurrentWorkspace(root: string, settings: TestWorkspaceSettings = {}): Promise<string> {
 	const { manifest, productKit } = currentWorkspaceFiles(settings)
 	const path = await writeManifest(root, manifest, V5_LAYOUT)
-	await writeFile(join(root, V5_LAYOUT.productKitPath!), `${JSON.stringify(productKit, null, 2)}\n`)
-	await writeFile(join(root, V5_LAYOUT.accessPresetsPath!), `${JSON.stringify(builtInAccessPresetsFile(), null, 2)}\n`)
+	await writeFile(join(root, V5_LAYOUT.productKitPath), `${JSON.stringify(productKit, null, 2)}\n`)
+	await writeFile(join(root, V5_LAYOUT.accessPresetsPath), `${JSON.stringify(builtInAccessPresetsFile(), null, 2)}\n`)
 	return path
 }
 
-/** A minimal `schemaVersion` 5 manifest (no `adapters`), with `overrides` merged over it. */
+/** A minimal `schemaVersion` 5 manifest (no `adapters`), with `overrides` merged over it: a Workspace this UIUX refuses. */
 export function v5Manifest(overrides: Readonly<Record<string, unknown>> = {}): WorkspaceManifest {
 	return { schemaVersion: 5, i18n: { defaultLocale: 'en-US' }, viewports: {}, themes: {}, ...overrides } as WorkspaceManifest
 }

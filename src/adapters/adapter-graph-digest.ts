@@ -37,7 +37,7 @@ export const PREVIEW_HOST_PACKAGES = Object.freeze([
  */
 export async function adapterGraphDigest(input: Readonly<{
 	workspaceRoot: string
-	/** The Adapter resolution base (`kit/` from `schemaVersion` 5), as the Preview bundle's `moduleBase`. */
+	/** The Adapter resolution base (`kit/`), as the Preview bundle's `moduleBase`. */
 	moduleBase?: string
 	/** The resolved Adapter entry module. */
 	entry: string

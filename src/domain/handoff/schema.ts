@@ -62,7 +62,7 @@ export type HandoffProvenance = Readonly<{
 	contexts: readonly ResolvedRenderContext[]
 	versions: Readonly<Record<string, string>>
 	adapters: readonly AdapterProvenance[]
-	/** Clause 01a115cd-d7ba-71b5-9cab-7c473cdcf54a: the Product Kit provenance at export; absent below schemaVersion 5. */
+	/** Clause 01a115cd-d7ba-71b5-9cab-7c473cdcf54a: the Product Kit provenance at export; absent when it is unavailable. */
 	productKit?: ProductKitProvenance
 	gitCommit?: string
 }>

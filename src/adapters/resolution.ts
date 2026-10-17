@@ -5,8 +5,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { PRODUCT_KIT_FILENAME } from '../domain/product-kit/schema'
 import {
 	CANONICAL_WORKSPACE_DATA_DIRECTORIES,
-	detectWorkspaceLayout,
 	V5_CODE_DIRECTORY,
+	V5_LAYOUT,
 	V5_MANIFEST_PATH,
 	WORKSPACE_DATA_DIRECTORY,
 	WORKSPACE_MANIFEST_PATH,
@@ -131,24 +131,17 @@ export interface AdapterSetInstaller<Result> {
 }
 
 export type NodeWorkspaceAdapterModuleResolverOptions = Readonly<{
-	/**
-	 * The selected Workspace's layout (a caller holding a persistence passes `persistence.layout`).
-	 * When omitted it is detected from where the Workspace's manifest is; a directory with no
-	 * manifest resolves as below `schemaVersion` 5, from its root.
-	 */
+	/** The selected Workspace's layout (a caller holding a persistence passes `persistence.layout`); omitted, the only one. */
 	layout?: WorkspaceLayout
 }>
-
-/** The schema version whose layout detection falls back to when a directory has no manifest. */
-const MANIFESTLESS_FALLBACK_SCHEMA_VERSION = 1
 
 /**
  * The base a `./` Adapter specifier resolves from, which is also the root of a `./` Adapter's file
  * references (Clauses 01a115cd-d109-76d3-9622-85d0080c60b6 and 01a11a5a-45a7-7139-ac1c-d3881976eb71):
- * `kit/` from `schemaVersion` 5, the Workspace root below it.
+ * `kit/`.
  */
 export function adapterResolutionBase(workspaceRoot: string, layout: WorkspaceLayout): string {
-	return layout.codeDir ? join(resolve(workspaceRoot), layout.codeDir) : resolve(workspaceRoot)
+	return join(resolve(workspaceRoot), layout.codeDir)
 }
 
 export class NodeWorkspaceAdapterModuleResolver implements AdapterModuleResolver {
@@ -159,50 +152,16 @@ export class NodeWorkspaceAdapterModuleResolver implements AdapterModuleResolver
 			throw new Error('Adapter module specifier is not a canonical portable module reference.')
 
 		const root = resolve(workspaceRoot)
-		const layout = this.options.layout ?? await detectWorkspaceLayout(root, MANIFESTLESS_FALLBACK_SCHEMA_VERSION)
-		return layout.codeDir
-			? resolveFromCodeDirectory(root, layout.codeDir, moduleSpecifier)
-			: resolveFromWorkspaceRoot(root, moduleSpecifier)
+		const layout = this.options.layout ?? V5_LAYOUT
+		return resolveFromCodeDirectory(root, layout.codeDir, moduleSpecifier)
 	}
-}
-
-/** Below `schemaVersion` 5: both specifier kinds resolve from the Workspace root (Clause 01a115cd-d109, below-5 half). */
-async function resolveFromWorkspaceRoot(root: string, moduleSpecifier: string): Promise<ResolvedAdapterModule> {
-	const relativeSelection = moduleSpecifier.startsWith('./')
-	if (relativeSelection) {
-		const authoredTarget = resolve(root, moduleSpecifier)
-		if (!isContainedPath(root, authoredTarget))
-			throw new Error('Workspace-relative adapter module specifier escapes the selected Workspace root.')
-	}
-
-	const parentUrl = pathToFileURL(join(root, '.uiux-adapter-resolution.mjs')).href
-	// A `./` specifier that does not resolve and one that resolves outside the root get one answer,
-	// naming no path: a link inside the root may point anywhere, and its target is not described.
-	const unresolvedInRoot = () => new Error(`Workspace-relative adapter module specifier ${moduleSpecifier} does not resolve to a file inside the selected Workspace root.`)
-	let resolvedPath: string
-	try {
-		const moduleIdentity = resolveImport(moduleSpecifier, parentUrl)
-		if (!moduleIdentity.startsWith('file:'))
-			throw new Error('Adapter module must resolve to a file-backed module.')
-		resolvedPath = await realpath(fileURLToPath(moduleIdentity))
-	}
-	catch (error) {
-		if (relativeSelection) throw unresolvedInRoot()
-		throw error
-	}
-
-	const realRoot = await realpath(root)
-	if (relativeSelection && !isContainedPath(realRoot, resolvedPath))
-		throw unresolvedInRoot()
-	await assertOutsideWorkspaceData(resolvedPath, realRoot)
-	return resolvedAdapterModule(moduleSpecifier, resolvedPath, relativeSelection)
 }
 
 /** `kit/node_modules/`, which a `./` specifier never names or resolves into. */
 const KIT_DEPENDENCY_DIRECTORY = 'node_modules'
 
 /**
- * From `schemaVersion` 5 (Clause 01a115cd-d109-76d3-9622-85d0080c60b6; Discussion #139 decision 3
+ * Clause 01a115cd-d109-76d3-9622-85d0080c60b6 (Discussion #139 decision 3
  * and owner ruling 3 of 2026-10-08): the base is `kit/`, which must be a real directory, never a
  * symbolic link standing in for one. A `./` specifier stays inside `kit/` and outside
  * `kit/node_modules/`, both as written and by its real path. A bare specifier names a dependency

@@ -15,7 +15,7 @@ import type { HostVersionRecord } from '../src/domain/history/schema'
 import { builtInAccessPresetsFile } from '../src/domain/access-presets/schema'
 import { emptyProductKit, type ProductKit } from '../src/domain/product-kit/schema'
 import { createHistoryStoreFactory } from '../src/server/history-stores'
-import { canonicalJsonBytes, FileNativePersistence, LEGACY_LAYOUT, V5_LAYOUT } from '../src/persistence'
+import { canonicalJsonBytes, FileNativePersistence, V5_LAYOUT } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import {
 	composeProductKitForHttp,
@@ -229,22 +229,22 @@ describe('compose_product_kit, update_product_kit and update_component_registry 
 		expect(await readFile(ctx.kitPath, 'utf8')).toBe(bytes)
 	})
 
-	it('refuses on a Workspace below schemaVersion 5 with workspace.migration_required, over HTTP and MCP', async () => {
-		const root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-product-kit-legacy-')))
-		roots.push(root)
-		await writeManifest(root, { ...currentManifest(), schemaVersion: 4, adapters: [] }, LEGACY_LAYOUT)
-		const app = createWorkspaceApplicationSession(new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }))
-		const refused = await composeProductKitForHttp(http(app, HUMAN_EDITOR), { expectedRevision: 'sha256:x', designSystems: [], adapters: [] })
-		expect(refused).toMatchObject({ status: 422, body: { status: 'blocked', code: 'workspace.migration_required' } })
-		expect(await readProductKitForHttp(http(app, HUMAN_EDITOR))).toMatchObject({ status: 404 })
-		const mcp = await connectMcp(app, AGENT)
+	it('refuses on a Workspace at an older schemaVersion with workspace.schema_unsupported, over HTTP and MCP, and writes nothing', async () => {
+		const ctx = await kitFixture()
+		const rev = await revision(ctx.app)
+		await writeManifest(ctx.root, canonicalJsonBytes({ ...currentManifest(), schemaVersion: 5 }), V5_LAYOUT)
+		const bytes = await readFile(ctx.kitPath, 'utf8')
+		const refused = await composeProductKitForHttp(http(ctx.app, HUMAN_EDITOR), { expectedRevision: rev, designSystems: [], adapters: [] })
+		expect(refused).toMatchObject({ status: 422, body: { status: 'blocked', code: 'workspace.schema_unsupported' } })
+		expect((refused.body as { message: string }).message).toMatch(/schemaVersion 5 .*uiux init/u)
+		const mcp = await connectMcp(ctx.app, AGENT)
 		try {
-			const viaMcp = await mcp.client.callTool({ name: 'update_component_registry', arguments: { expectedRevision: 'sha256:x', components: {}, widgets: {} } })
+			const viaMcp = await mcp.client.callTool({ name: 'update_component_registry', arguments: { expectedRevision: rev, components: {}, widgets: {} } })
 			expect(viaMcp.isError).toBe(true)
-			expect(viaMcp.structuredContent).toMatchObject({ status: 'blocked', code: 'workspace.migration_required' })
-			await expect(mcp.client.readResource({ uri: 'uiux://product-kit' })).rejects.toThrow(/not found/iu)
+			expect(viaMcp.structuredContent).toMatchObject({ status: 'blocked', code: 'workspace.schema_unsupported' })
 		}
 		finally { await mcp.close() }
+		expect(await readFile(ctx.kitPath, 'utf8')).toBe(bytes)
 	})
 
 	it('updates the Workspace settings without adapters from schemaVersion 5 and refuses adapters there (Clause 01a11485-f769)', async () => {

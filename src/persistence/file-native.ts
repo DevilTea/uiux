@@ -9,8 +9,8 @@ import type { MutableResourceRepository } from '../application/ports/resources'
 import { validateAssetContentFiles, validateAssetContentMetadata, validateAssetMetadata, type AuthoredAsset, type AuthoredAssetResource } from '../domain/assets/schema'
 import { validateFlowResource, type FlowResource } from '../domain/flows/schema'
 import { validateI18nResource, type I18nResource } from '../domain/i18n/schema'
-import { ACCESS_PRESETS_RESOURCE_KIND, ACCESS_PRESETS_SCHEMA_VERSION, validateAccessPresetsFile, type AccessPresetsFile } from '../domain/access-presets/schema'
-import { PRODUCT_KIT_RESOURCE_KEY, PRODUCT_KIT_RESOURCE_KIND, PRODUCT_KIT_SCHEMA_VERSION, validateProductKit, type ProductKit } from '../domain/product-kit/schema'
+import { ACCESS_PRESETS_RESOURCE_KIND, validateAccessPresetsFile, type AccessPresetsFile } from '../domain/access-presets/schema'
+import { PRODUCT_KIT_RESOURCE_KEY, PRODUCT_KIT_RESOURCE_KIND, validateProductKit, type ProductKit } from '../domain/product-kit/schema'
 import { isCanonicalLocaleFilename, isFullUuid, isJsonValue, isRecord, type Diagnostic } from '../domain/validation'
 import { validateReviewThread, type ReviewThread } from '../domain/reviews/schema'
 import { validateViewResource, type ViewResource } from '../domain/views/schema'
@@ -26,20 +26,17 @@ import {
 	resolveWorkspacePath,
 	viewRelativePath,
 	isSafeAssetContentFilename,
-	detectWorkspaceLayoutSync,
 	isInCodeDirectory,
-	layoutForSchemaVersion,
+	V5_LAYOUT,
 	type VersionedResourceIdentity,
 	type WorkspaceLayout,
 } from './paths'
 import {
 	defineWorkspaceSchemaPolicy,
-	findMigrationPlan,
 	inspectWorkspaceManifest,
+	workspaceRefusalMessage,
 	type WorkspaceInspection,
-	type WorkspaceMigrationStep,
 	type WorkspaceSchemaPolicy,
-	type WorkspaceSnapshot,
 } from './schema-policy'
 
 export type PersistenceFaultPoint =
@@ -66,11 +63,7 @@ export type FileNativePersistenceOptions = Readonly<{
 	writeObserver?: CanonicalWriteObserver
 	/** How long one observer hook may hold the lock before it is abandoned; defaults to {@link OBSERVER_HOOK_TIMEOUT_MS}. */
 	observerTimeoutMilliseconds?: number
-	/**
-	 * The Workspace layout. Omitted, it is detected from where the manifest is
-	 * (`detectWorkspaceLayoutSync`); a directory without a manifest gets the layout of the policy's
-	 * current version.
-	 */
+	/** The Workspace layout; omitted, it is {@link V5_LAYOUT}, the only one. */
 	layout?: WorkspaceLayout
 }>
 
@@ -205,18 +198,14 @@ type JournalEntry = Readonly<{ path: string; existed: boolean }>
 type TransactionJournal = Readonly<{ changes: readonly JournalEntry[] }>
 
 /**
- * The bytes of `journal.json`. The legacy layout writes `{ changes }`, the format every UIUX build
- * reads. Other layouts write `{ layout, entries }` and no `changes` array, so a build that predates
- * layouts, which requires `changes`, fails its recovery and keeps the journal instead of applying it.
- * The file keeps its name: a transaction directory without `journal.json` is discarded as never
- * started.
+ * The bytes of `journal.json`: `{ layout, entries }`. A journal in any other format, such as the
+ * `{ changes }` of the removed old layout, is refused at recovery and kept. The file keeps its name:
+ * a transaction directory without `journal.json` is discarded as never started.
  */
 function encodeTransactionJournal(layout: WorkspaceLayout, entries: readonly JournalEntry[]): Buffer {
-	const journal = layout.id === 'legacy' ? { changes: entries } : { layout: layout.id, entries }
-	return Buffer.from(JSON.stringify(journal), 'utf8')
+	return Buffer.from(JSON.stringify({ layout: layout.id, entries }), 'utf8')
 }
-/** `schemaVersion` is the selected Workspace manifest version every canonical file is decoded under. */
-type JsonValidator = (resource: unknown, filename: string, schemaVersion: number) => readonly Diagnostic[]
+type JsonValidator = (resource: unknown, filename: string) => readonly Diagnostic[]
 
 const MAX_LOCK_WAIT_MS = 15_000
 /**
@@ -225,7 +214,7 @@ const MAX_LOCK_WAIT_MS = 15_000
  * now and then and another UIUX process waiting on it gets a turn.
  */
 const MAX_SHARED_BATCH_MS = 1_000
-/** The deepest versioned file of the legacy layout is `assets/<uuid>/<file>`: three path segments. */
+/** The deepest versioned file is `assets/<uuid>/<file>`: three path segments. */
 const VERSIONED_SCAN_MAX_SEGMENTS = 3
 
 /** File-native persistence implementation. The schema policy is deliberately injected. */
@@ -235,9 +224,9 @@ export class FileNativePersistence {
 	readonly layout: WorkspaceLayout
 	readonly schemaPolicy: WorkspaceSchemaPolicy
 	readonly workspace: WorkspaceFileRepository
-	/** The Product Kit file (from `schemaVersion` 5; the old layout has none). */
+	/** The Product Kit file. */
 	readonly productKit: ProductKitFileRepository
-	/** The Access presets file (from `schemaVersion` 6; older Workspaces have none). */
+	/** The Access presets file. */
 	readonly accessPresets: AccessPresetsFileRepository
 	readonly views: JsonResourceRepository<string, ViewResource>
 	readonly flows: JsonResourceRepository<string, FlowResource>
@@ -257,7 +246,7 @@ export class FileNativePersistence {
 	constructor(options: FileNativePersistenceOptions) {
 		this.root = resolve(options.root)
 		this.schemaPolicy = defineWorkspaceSchemaPolicy(options.schemaPolicy)
-		this.layout = options.layout ?? detectWorkspaceLayoutSync(this.root, this.schemaPolicy.currentVersion)
+		this.layout = options.layout ?? V5_LAYOUT
 		this.fault = options.fault
 		this.lockWaitMilliseconds = options.lockWaitMilliseconds ?? MAX_LOCK_WAIT_MS
 		this.workspace = new WorkspaceFileRepository(this)
@@ -265,7 +254,7 @@ export class FileNativePersistence {
 		this.accessPresets = new AccessPresetsFileRepository(this)
 		this.views = new JsonResourceRepository(this, viewRelativePath, 'id', (resource, filename) => validateViewResource(resource, filename).diagnostics, { directory: 'views', suffix: '.view.json' })
 		this.flows = new JsonResourceRepository(this, flowRelativePath, 'id', (resource, filename) => validateFlowResource(resource, filename).diagnostics, { directory: 'flows', suffix: '.flow.json' })
-		this.reviews = new JsonResourceRepository(this, reviewRelativePath, 'id', (resource, filename, schemaVersion) => validateReviewThread(resource, { filename, schemaVersion }).diagnostics, { directory: 'reviews', suffix: '.review.json' })
+		this.reviews = new JsonResourceRepository(this, reviewRelativePath, 'id', (resource, filename) => validateReviewThread(resource, { filename }).diagnostics, { directory: 'reviews', suffix: '.review.json' })
 		this.locales = new LocaleFileRepository(this)
 		this.assets = new AuthoredAssetFileRepository(this)
 		this.artifacts = new ImmutableArtifactStore(this)
@@ -344,7 +333,7 @@ export class FileNativePersistence {
 				}
 			}
 
-			const reviewValidation = validateReviewThread(input.reviewResource, { filename: `${input.reviewId}.review.json`, schemaVersion: this.schemaPolicy.currentVersion })
+			const reviewValidation = validateReviewThread(input.reviewResource, { filename: `${input.reviewId}.review.json` })
 			if (!reviewValidation.ok) {
 				throw new PersistenceError('persistence.invalid_resource', 'ReviewThread resource failed schema validation before atomic promotion write.', { diagnostics: reviewValidation.diagnostics })
 			}
@@ -474,20 +463,16 @@ export class FileNativePersistence {
 
 	/**
 	 * Refuses a mutation unless the Workspace is at the current schema. `productKitMayBeMissing` is
-	 * for creating the Product Kit file itself, the one write a `schemaVersion` 5 root may make
-	 * before that file exists.
+	 * for creating the Product Kit file itself, the one write a root may make before that file exists.
 	 */
 	async assertWritableUnlocked(options: Readonly<{ productKitMayBeMissing?: boolean }> = {}): Promise<void> {
 		const inspection = (await this.inspectWorkspaceUnlocked(options)).inspection
 		if (inspection.state === 'current')
 			return
-		if (inspection.state === 'migration_required')
-			throw new PersistenceError('workspace.migration_required', 'Normal canonical mutations are blocked until explicit Workspace migration completes.', {
-				diagnostics: [{ code: 'workspace.migration_required', path: '/schemaVersion', message: `Workspace schema ${inspection.version} requires explicit migration to policy target ${inspection.targetVersion}.` }],
-			})
 		if (inspection.state === 'missing_manifest')
 			throw new PersistenceError('workspace.manifest_missing', 'Create a current-policy Workspace manifest before mutating Workspace resources.', { diagnostics: inspection.diagnostics })
-		throw new PersistenceError('workspace.schema_unsupported', 'Normal canonical mutations are blocked for an unsupported Workspace schema.', { diagnostics: inspection.diagnostics })
+		// Clause 01a14928-275b-74d5-ad43-c82932e39cb3: another version is named with the current one.
+		throw new PersistenceError('workspace.schema_unsupported', workspaceRefusalMessage(inspection, 'Normal canonical mutations are blocked for an unsupported Workspace schema.'), { diagnostics: inspection.diagnostics })
 	}
 
 	async inspectWorkspaceUnlocked(options: Readonly<{ productKitMayBeMissing?: boolean }> = {}): Promise<WorkspaceReadInspection> {
@@ -508,9 +493,9 @@ export class FileNativePersistence {
 			throw error
 		}
 		const resource = parseJsonBytes(bytes, relativePath)
-		let inspection = this.inspectLayout(inspectWorkspaceManifest(resource, this.schemaPolicy))
-		// Clause 01a11bb1-8d67-71c5-929f-138afd0c66ec: a schemaVersion 5 root holds product-kit.json.
-		if (this.layout.productKitPath && !options.productKitMayBeMissing && (inspection.state === 'current' || inspection.state === 'migration_required')
+		let inspection = inspectWorkspaceManifest(resource, this.schemaPolicy)
+		// Clause 01a11bb1-8d67-71c5-929f-138afd0c66ec: a Workspace root holds product-kit.json.
+		if (!options.productKitMayBeMissing && inspection.state === 'current'
 			&& !await this.readOptionalBytesUnlocked(this.layout.productKitPath)) {
 			inspection = {
 				state: 'unsupported',
@@ -527,37 +512,9 @@ export class FileNativePersistence {
 		return { resource: resource as WorkspaceManifest, revision: revisionForBytes(bytes), inspection, diagnostics }
 	}
 
-	/**
-	 * A manifest whose `schemaVersion` belongs to another layout than the one this root was opened
-	 * with is `unsupported`: an old-layout `.uiux/` directory selected as a root (its `workspace.json`
-	 * is below version 5), or an old-layout parent of a relocated Workspace (its `.uiux/workspace.json`
-	 * is version 5 or later). Reads and writes would otherwise look for files in the wrong places.
-	 */
-	private inspectLayout(inspection: WorkspaceInspection): WorkspaceInspection {
-		if (inspection.state !== 'current' && inspection.state !== 'migration_required') return inspection
-		if (layoutForSchemaVersion(inspection.version) === this.layout) return inspection
-		const message = this.layout.codeDir
-			? `${this.layout.manifestPath} holds a schemaVersion ${inspection.version} manifest, but only a schemaVersion ${PRODUCT_KIT_SCHEMA_VERSION} or later Workspace keeps it there; this directory is the metadata directory of an old-layout Workspace, so select its parent.`
-			: `${this.layout.manifestPath} holds a schemaVersion ${inspection.version} manifest, whose Workspace root is that .uiux/ directory itself; select it.`
-		return {
-			state: 'unsupported',
-			version: inspection.version,
-			targetVersion: inspection.targetVersion,
-			diagnostics: [...inspection.diagnostics, { code: 'workspace.schema_unsupported', path: '/schemaVersion', message }],
-		}
-	}
-
-	/**
-	 * The `workspaceSchemaVersion` of a history record taken from this Workspace now. History reads
-	 * each record by the layout of that version, so a record must never pair one layout's paths with
-	 * another layout's version: when the manifest's version belongs to another layout than this
-	 * persistence's (a stale persistence after a relocation), this throws instead of recording.
-	 */
+	/** The `workspaceSchemaVersion` of a history record taken from this Workspace now. */
 	async readRecordSchemaVersionUnlocked(): Promise<number> {
-		const version = await this.readDecodeSchemaVersionUnlocked()
-		if (layoutForSchemaVersion(version) !== this.layout)
-			throw new PersistenceError('workspace.schema_unsupported', `A history record cannot be taken: the manifest is schemaVersion ${version}, whose layout differs from the layout this Workspace was opened with (manifest ${this.layout.manifestPath}).`)
-		return version
+		return this.readDecodeSchemaVersionUnlocked()
 	}
 
 	/**
@@ -831,7 +788,7 @@ export class FileNativePersistence {
 
 	async scanCanonicalSnapshotUnlocked(): Promise<Map<string, Uint8Array>> {
 		const snapshot = new Map<string, Uint8Array>()
-		// The manifest and, from schemaVersion 5, the Product Kit file; `kit/` is never part of it.
+		// The manifest, the Product Kit file and the Access presets file; `kit/` is never part of it.
 		for (const path of this.layout.canonicalFiles) {
 			const bytes = await this.readOptionalBytesUnlocked(path)
 			if (bytes)
@@ -971,10 +928,11 @@ export class FileNativePersistence {
 				await fs.rm(transactionAbsolute, { recursive: true, force: true })
 				continue
 			}
-			// A journal written for another layout belongs to another root's files: keep it and stop.
+			// A journal not written for this layout (another layout, or the removed old layout's `{ changes }`
+			// format, which names none) belongs to other files: keep it and stop.
 			const recordedLayout = await readJournalLayout(journalPath)
 			if (recordedLayout !== undefined && recordedLayout !== this.layout.id)
-				throw new PersistenceError('persistence.recovery_failed', `Pending transaction ${entry.name} was written for the ${recordedLayout} Workspace layout, not the ${this.layout.id} layout this root was opened with; it was kept, and canonical reads and writes are blocked.`)
+				throw new PersistenceError('persistence.recovery_failed', `Pending transaction ${entry.name} was not written for the ${this.layout.id} Workspace layout this root was opened with (${recordedLayout === null ? 'it names no layout' : `it names the ${recordedLayout} layout`}); it was kept, and canonical reads and writes are blocked.`)
 			const committedPath = resolveWorkspacePath(this.root, `${transactionRelative}/COMMITTED`)
 			await assertSafePath(this.root, `${transactionRelative}/COMMITTED`, false).catch(error => {
 				if (!isNotFound(error)) throw error
@@ -1244,8 +1202,7 @@ export class JsonResourceRepository<Key extends string, Resource> implements Mut
 			const bytes = await this.persistence.readOptionalBytesUnlocked(path)
 			if (!bytes) return undefined
 			const resource = parseJsonBytes(bytes, path)
-			const schemaVersion = await this.persistence.readDecodeSchemaVersionUnlocked()
-			return { resource: resource as Resource, revision: revisionForBytes(bytes), diagnostics: this.validate(resource, basename(path), schemaVersion) }
+			return { resource: resource as Resource, revision: revisionForBytes(bytes), diagnostics: this.validate(resource, basename(path)) }
 		})
 	}
 
@@ -1365,9 +1322,7 @@ export class WorkspaceFileRepository implements MutableResourceRepository<'works
 
 /**
  * The Product Kit file `product-kit.json` (Clause 01a11bb1-8e31-7b25-b6b8-da667b201670), one
- * single-file resource of kind and key `product-kit`, from `schemaVersion` 5. In the old layout
- * the Workspace has none: reads find nothing and writes are refused. Writes are canonical design
- * writes like the manifest's (versioned, observed by history); validating the content is the
+ * single-file resource of kind and key `product-kit`. Writes are canonical design writes like the manifest's (versioned, observed by history); validating the content is the
  * authoring operation's job, as for the other repositories.
  */
 export class ProductKitFileRepository implements MutableResourceRepository<'product-kit', ProductKit> {
@@ -1381,8 +1336,7 @@ export class ProductKitFileRepository implements MutableResourceRepository<'prod
 
 	async readRevision(): Promise<ResourceRevision | undefined> {
 		return this.persistence.withReadLock(async () => {
-			const path = this.persistence.layout.productKitPath
-			const bytes = path ? await this.persistence.readOptionalBytesUnlocked(path) : undefined
+			const bytes = await this.persistence.readOptionalBytesUnlocked(this.persistence.layout.productKitPath)
 			return bytes ? revisionForBytes(bytes) : undefined
 		})
 	}
@@ -1390,7 +1344,6 @@ export class ProductKitFileRepository implements MutableResourceRepository<'prod
 	async readInspected(): Promise<InspectedResource<ProductKit> | undefined> {
 		return this.persistence.withReadLock(async () => {
 			const path = this.persistence.layout.productKitPath
-			if (!path) return undefined
 			const bytes = await this.persistence.readOptionalBytesUnlocked(path)
 			if (!bytes) return undefined
 			const resource = parseJsonBytes(bytes, path)
@@ -1401,7 +1354,7 @@ export class ProductKitFileRepository implements MutableResourceRepository<'prod
 	async create(resource: ProductKit): Promise<ResourceRevision> {
 		return this.persistence.withLock(async () => {
 			await this.persistence.assertWritableUnlocked({ productKitMayBeMissing: true })
-			const path = this.pathUnlocked()
+			const path = this.persistence.layout.productKitPath
 			if (await this.persistence.readOptionalBytesUnlocked(path))
 				throw new PersistenceError('persistence.resource_exists', 'The Product Kit file already exists.')
 			const bytes = this.persistence.serializeJson(resource, path)
@@ -1414,7 +1367,7 @@ export class ProductKitFileRepository implements MutableResourceRepository<'prod
 	async compareAndSwap(input: Readonly<{ key: 'product-kit'; expectedRevision: ResourceRevision; resource: ProductKit }>): Promise<Readonly<{ ok: true; revision: ResourceRevision } | { ok: false; conflict: RevisionConflict }>> {
 		return this.persistence.withLock(async () => {
 			await this.persistence.assertWritableUnlocked()
-			const path = this.pathUnlocked()
+			const path = this.persistence.layout.productKitPath
 			const currentBytes = await this.persistence.readOptionalBytesUnlocked(path)
 			if (!currentBytes)
 				throw new PersistenceError('persistence.resource_not_found', 'The Product Kit file does not exist.')
@@ -1426,20 +1379,12 @@ export class ProductKitFileRepository implements MutableResourceRepository<'prod
 			return { ok: true, revision: revisionForBytes(bytes) }
 		})
 	}
-
-	private pathUnlocked(): string {
-		const path = this.persistence.layout.productKitPath
-		if (!path)
-			throw new PersistenceError('persistence.path_rejected', `A Workspace below schemaVersion ${PRODUCT_KIT_SCHEMA_VERSION} has no Product Kit file; its Adapter list is in the manifest.`)
-		return path
-	}
 }
 
 /**
  * The Access presets file `access-presets.json` (Clause 01a11c09-a855-7d7e-93ec-cd9a85fdb65e), one
- * single-file resource of kind and key `access-presets`, from `schemaVersion` 6. A Workspace below 6
- * has none: reads find nothing, and writes need the current schema like every mutation. Writes are
- * canonical design writes (versioned, observed by history). Reads report the file's diagnostics on
+ * single-file resource of kind and key `access-presets`. Writes need the current schema like every
+ * mutation, and are canonical design writes (versioned, observed by history). Reads report the file's diagnostics on
  * disk (Rule 01a11c09-cb08-7007-bcdd-8a04e54d02b5); refusing a write is the authoring operation's job.
  */
 export class AccessPresetsFileRepository {
@@ -1447,8 +1392,7 @@ export class AccessPresetsFileRepository {
 
 	async readRevision(): Promise<ResourceRevision | undefined> {
 		return this.persistence.withReadLock(async () => {
-			const path = this.persistence.layout.accessPresetsPath
-			const bytes = path ? await this.persistence.readOptionalBytesUnlocked(path) : undefined
+			const bytes = await this.persistence.readOptionalBytesUnlocked(this.persistence.layout.accessPresetsPath)
 			return bytes ? revisionForBytes(bytes) : undefined
 		})
 	}
@@ -1462,7 +1406,6 @@ export class AccessPresetsFileRepository {
 	async readInspected(): Promise<InspectedResource<AccessPresetsFile | null> | undefined> {
 		return this.persistence.withReadLock(async () => {
 			const path = this.persistence.layout.accessPresetsPath
-			if (!path) return undefined
 			const bytes = await this.persistence.readOptionalBytesUnlocked(path)
 			if (!bytes) return undefined
 			let resource: unknown
@@ -1482,8 +1425,6 @@ export class AccessPresetsFileRepository {
 		return this.persistence.withLock(async () => {
 			await this.persistence.assertWritableUnlocked()
 			const path = this.persistence.layout.accessPresetsPath
-			if (!path)
-				throw new PersistenceError('persistence.path_rejected', `A Workspace below schemaVersion ${ACCESS_PRESETS_SCHEMA_VERSION} has no Access presets file.`)
 			if (await this.persistence.readOptionalBytesUnlocked(path))
 				throw new PersistenceError('persistence.resource_exists', 'The Access presets file already exists.')
 			const bytes = this.persistence.serializeJson(resource, path)
@@ -1497,8 +1438,6 @@ export class AccessPresetsFileRepository {
 		return this.persistence.withLock(async () => {
 			await this.persistence.assertWritableUnlocked()
 			const path = this.persistence.layout.accessPresetsPath
-			if (!path)
-				throw new PersistenceError('persistence.path_rejected', `A Workspace below schemaVersion ${ACCESS_PRESETS_SCHEMA_VERSION} has no Access presets file.`)
 			const currentBytes = await this.persistence.readOptionalBytesUnlocked(path)
 			if (!currentBytes)
 				throw new PersistenceError('persistence.resource_not_found', 'The Access presets file does not exist.')
@@ -2181,46 +2120,6 @@ export function revisionForResourceFiles(kind: string, files: ReadonlyMap<string
 	return revisionForBytes([...files.values()][0]!)
 }
 
-/**
- * Upgrades a recorded snapshot of the versioned files from `fromVersion` to the policy's current
- * schema entirely in memory, with the policy's steps; nothing is read or written. A version not
- * recognized by the policy, or without a migration plan, is refused with
- * `workspace.schema_unsupported` (Clause 01a11a5e-2434-7342-a3c1-6d63aa74334c).
- */
-export async function upgradeSnapshotInMemory(snapshot: WorkspaceSnapshot, fromVersion: number, policy: WorkspaceSchemaPolicy): Promise<Readonly<{ snapshot: WorkspaceSnapshot; steps: readonly string[] }>> {
-	if (!policy.recognizedVersions.includes(fromVersion))
-		throw new PersistenceError('workspace.schema_unsupported', `Workspace schemaVersion ${fromVersion} is not recognized by the injected policy.`)
-	const plan = findMigrationPlan(policy, fromVersion)
-	if (!plan)
-		throw new PersistenceError('workspace.schema_unsupported', `Workspace schemaVersion ${fromVersion} has no migration plan to the current version.`)
-	if (plan.length === 0) return { snapshot: cloneSnapshot(snapshot), steps: [] }
-	return applyMigrationPlan(snapshot, plan, policy)
-}
-
-/** Applies `plan` in memory. */
-async function applyMigrationPlan(initialSnapshot: WorkspaceSnapshot, plan: readonly WorkspaceMigrationStep[], policy: WorkspaceSchemaPolicy): Promise<Readonly<{ snapshot: Map<string, Uint8Array>; steps: readonly string[] }>> {
-	let snapshot = cloneSnapshot(initialSnapshot)
-	const steps: string[] = []
-	try {
-		for (const step of plan) {
-			const inputSnapshot = cloneSnapshot(snapshot)
-			const next = await step.apply(inputSnapshot)
-			if (!(next instanceof Map))
-				throw new TypeError(`Migration step ${step.id} did not return a WorkspaceSnapshot Map.`)
-			snapshot = cloneSnapshot(next)
-			validateCanonicalSnapshot(snapshot, step.toVersion, policy)
-			steps.push(step.id)
-		}
-		validateCanonicalSnapshot(snapshot, policy.currentVersion, policy)
-	}
-	catch (cause) {
-		if (cause instanceof PersistenceError)
-			throw cause
-		throw new PersistenceError('workspace.migration_failed', 'Workspace migration planning failed before canonical files were changed.', { cause })
-	}
-	return { snapshot, steps }
-}
-
 function revisionForBytes(bytes: Uint8Array): ResourceRevision {
 	return `r_${createHash('sha256').update('uiux-resource-revision\0').update(bytes).digest('base64url')}` as ResourceRevision
 }
@@ -2284,102 +2183,26 @@ function parseJsonBytes(bytes: Uint8Array, relativePath: string): unknown {
 	}
 }
 
-function cloneSnapshot(snapshot: WorkspaceSnapshot): Map<string, Uint8Array> {
-	return new Map([...snapshot].map(([path, bytes]) => [path, Uint8Array.from(bytes)]))
-}
-
-function validateCanonicalSnapshot(snapshot: WorkspaceSnapshot, expectedVersion: number, policy: WorkspaceSchemaPolicy): void {
-	const layout = layoutForSchemaVersion(expectedVersion)
-	const manifestPath = layout.manifestPath
-	const manifestBytes = snapshot.get(manifestPath)
-	if (!manifestBytes)
-		throw new PersistenceError('workspace.migration_failed', `Migration result must contain ${manifestPath}.`)
-	const manifest = parseJsonBytes(manifestBytes, manifestPath)
-	if (!isRecord(manifest) || manifest.schemaVersion !== expectedVersion)
-		throw new PersistenceError('workspace.migration_failed', `Migration result manifest schemaVersion must equal its policy step target ${expectedVersion}.`)
-	if (!policy.recognizedVersions.includes(expectedVersion) && expectedVersion !== policy.currentVersion)
-		throw new PersistenceError('workspace.migration_failed', `Migration step target ${expectedVersion} is not recognized by the injected policy.`)
-	// Clause 01a11bb1-8e31-7b25-b6b8-da667b201670: from schemaVersion 5 the Product Kit file is required.
-	if (layout.productKitPath && !snapshot.has(layout.productKitPath))
-		throw new PersistenceError('workspace.migration_failed', `Migration result must contain ${layout.productKitPath}.`)
-	// Clause 01a11c09-a855-7d7e-93ec-cd9a85fdb65e: from schemaVersion 6 the Access presets file is required.
-	if (expectedVersion >= ACCESS_PRESETS_SCHEMA_VERSION && layout.accessPresetsPath && !snapshot.has(layout.accessPresetsPath))
-		throw new PersistenceError('workspace.migration_failed', `Migration result must contain ${layout.accessPresetsPath}.`)
-	const assetFiles = new Map<string, string[]>()
-	for (const [relativePath, bytes] of snapshot) {
-		assertTransactionalPath(layout, relativePath)
-		if (!(bytes instanceof Uint8Array))
-			throw new PersistenceError('workspace.migration_failed', `Migration result ${relativePath} must contain bytes.`)
-		if (relativePath === manifestPath) continue
-		if (relativePath === layout.productKitPath || relativePath === layout.accessPresetsPath) {
-			parseJsonBytes(bytes, relativePath)
-			continue
-		}
-		const segments = relativePath.split('/')
-		const [directory, filename] = segments
-		if (directory === 'assets') {
-			if (segments.length !== 3 || !isFullUuid(segments[1]!))
-				throw new PersistenceError('workspace.migration_failed', `Migration result contains non-canonical Asset path ${relativePath}.`)
-			const assetFilename = segments[2]!
-			const files = assetFiles.get(segments[1]!) ?? []
-			files.push(assetFilename)
-			assetFiles.set(segments[1]!, files)
-			if (assetFilename === 'asset.json') {
-				const metadata = parseJsonBytes(bytes, relativePath)
-				if (!isRecord(metadata) || metadata.id !== segments[1] || !isSafeAssetContentFilename(metadata.contentFilename))
-					throw new PersistenceError('workspace.migration_failed', `Migrated Asset metadata at ${relativePath} must retain its directory UUID and safe contentFilename.`)
-			}
-			continue
-		}
-		if (directory === 'i18n') {
-			if (segments.length !== 2 || !isCanonicalLocaleFilename(filename))
-				throw new PersistenceError('workspace.migration_failed', `Migration result contains non-canonical locale path ${relativePath}.`)
-			parseJsonBytes(bytes, relativePath)
-			continue
-		}
-		if (directory === 'views' || directory === 'flows' || directory === 'reviews') {
-			const suffix = directory === 'views' ? '.view.json' : directory === 'flows' ? '.flow.json' : '.review.json'
-			const id = filename!.endsWith(suffix) ? filename!.slice(0, -suffix.length) : ''
-			if (segments.length !== 2 || !isFullUuid(id))
-				throw new PersistenceError('workspace.migration_failed', `Migration result contains non-canonical resource path ${relativePath}.`)
-			const resource = parseJsonBytes(bytes, relativePath)
-			if (!isRecord(resource) || resource.id !== id)
-				throw new PersistenceError('workspace.migration_failed', `Migrated resource identity must match canonical filename ${filename}.`)
-			continue
-		}
-		throw new PersistenceError('workspace.migration_failed', `Migration result contains a path outside the canonical authored layout: ${relativePath}.`)
-	}
-	for (const [id, filenames] of assetFiles) {
-		const metadataNames = filenames.filter(filename => filename === 'asset.json')
-		const sourceNames = filenames.filter(filename => filename !== 'asset.json')
-		if (metadataNames.length !== 1 || sourceNames.length !== 1)
-			throw new PersistenceError('workspace.migration_failed', `Migrated Asset ${id} must contain asset.json and exactly one source-content file.`)
-		const metadata = parseJsonBytes(snapshot.get(`assets/${id}/asset.json`)!, `assets/${id}/asset.json`)
-		if (!isRecord(metadata) || metadata.contentFilename !== sourceNames[0])
-			throw new PersistenceError('workspace.migration_failed', `Migrated Asset ${id} source filename must exactly match asset.json.`)
-	}
-}
-
 /**
- * The layout a journal was written for: `legacy` when it names none, `undefined` when the journal
+ * The layout a journal was written for: `null` when it names none, `undefined` when the journal
  * cannot be read as a JSON object (recovery then handles it as before).
  */
-async function readJournalLayout(journalPath: string): Promise<string | undefined> {
+async function readJournalLayout(journalPath: string): Promise<string | null | undefined> {
 	let value: unknown
 	try { value = JSON.parse(await fs.readFile(journalPath, 'utf8')) as unknown }
 	catch { return undefined }
 	if (!isRecord(value)) return undefined
-	return value.layout === undefined ? 'legacy' : String(value.layout)
+	return value.layout === undefined ? null : String(value.layout)
 }
 
 function validateTransactionJournal(value: unknown, layout: WorkspaceLayout): TransactionJournal {
 	if (!isRecord(value))
 		throw new TypeError('Persistence transaction journal has an invalid shape.')
-	if ((value.layout ?? 'legacy') !== layout.id)
-		throw new TypeError(`Persistence transaction journal was written for the ${String(value.layout ?? 'legacy')} layout, not ${layout.id}.`)
-	// The legacy format is `{ changes }`; every other layout's is `{ layout, entries }` (`encodeTransactionJournal`).
-	const recorded = layout.id === 'legacy' ? value.changes : value.entries
-	if (!Array.isArray(recorded) || (layout.id === 'legacy' ? Object.hasOwn(value, 'entries') : Object.hasOwn(value, 'changes')))
+	if (value.layout !== layout.id)
+		throw new TypeError(`Persistence transaction journal was not written for the ${layout.id} layout.`)
+	// The format is `{ layout, entries }` (`encodeTransactionJournal`).
+	const recorded = value.entries
+	if (!Array.isArray(recorded) || Object.hasOwn(value, 'changes'))
 		throw new TypeError('Persistence transaction journal has an invalid shape.')
 	const changes: JournalEntry[] = []
 	for (const change of recorded) {

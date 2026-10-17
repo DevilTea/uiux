@@ -1,16 +1,15 @@
 import type { HistoryVersionType } from '../../domain/history/constants'
-import { diffResource, isDiffableResourceKind, jsonEqual, omit, type ResourceDiff, type ResourceFile, type ResourceFiles } from '../../domain/history/diff'
+import { diffResource, isDiffableResourceKind, type ResourceDiff, type ResourceFile, type ResourceFiles } from '../../domain/history/diff'
 import type { HistoryResourceEntry, HistoryResourceIdentity, VersionRecord } from '../../domain/history/schema'
 import { resourceIdentityKey, summarizeResourceChanges, type ResourceChangeSummary } from '../../domain/history/summary'
-import { isFullUuid, type Diagnostic, type JsonValue } from '../../domain/validation'
-import { PersistenceError } from '../../persistence/errors'
-import { upgradeSnapshotInMemory, type FileNativePersistence } from '../../persistence/file-native'
+import { isFullUuid, type Diagnostic } from '../../domain/validation'
+import type { FileNativePersistence } from '../../persistence/file-native'
 import type { CheckpointStore } from '../../persistence/history/checkpoint-store'
 import { HostHistoryError, type HostHistoryStore } from '../../persistence/history/host-store'
 import { versionResourcesFromSnapshot } from '../../persistence/history/snapshot'
 import { mergeTimeline, type TimelineVersion } from '../../persistence/history/timeline'
 import { readVersionBlobUnlocked } from '../../persistence/history/version-blobs'
-import { layoutForSchemaVersion } from '../../persistence/paths'
+import { unsupportedSchemaVersionMessage } from '../../persistence/schema-policy'
 
 /** The selected Workspace's history stores, or `undefined` where history is off. */
 export type HistoryStoreSource = Readonly<{
@@ -41,7 +40,7 @@ export type ComparedVersion = Readonly<{
 	type: HistoryVersionType
 	at: string
 	name?: string
-	/** The schema version the side was recorded under; it is upgraded in memory before comparing. */
+	/** The schema version the side was recorded under, always the current one. */
 	workspaceSchemaVersion: number
 }>
 
@@ -88,19 +87,14 @@ type Request = Readonly<{
 /** One side of a comparison as read under the lock. */
 type LoadedSide = Readonly<{
 	ref: ComparedVersion | ComparedCurrent
-	schemaVersion: number
 	/** The recorded resources (for `current`, the ones computed from its files). */
 	resources: readonly HistoryResourceEntry[]
 	/** The bytes read for this side, by Workspace-relative path. */
 	bytes: ReadonlyMap<string, Uint8Array>
-	/** True when every file of every resource this build can diff was read, so the side can be upgraded. */
-	complete: boolean
 }>
 
-/** A side ready to compare: decoded under one schema version, the policy's current one when upgraded. */
+/** A side ready to compare. */
 type PreparedSide = Readonly<{
-	/** Revisions by identity after any in-memory upgrade. */
-	revisions: ReadonlyMap<string, string>
 	files: ReadonlyMap<string, ResourceFiles>
 }>
 
@@ -110,11 +104,9 @@ type PreparedSide = Readonly<{
  *
  * The timeline, the version files and the current files are read under one persistence read lock,
  * so the comparison sees one consistent state; the diff itself is computed after the lock is
- * released. A side recorded under an older schema version is upgraded in memory with the migration
- * steps first (Rule 01a11a5e-118c-733d-92d7-27262bfbcd33), and a side whose schema version this build
- * does not recognize is refused with `workspace.schema_unsupported` (Clause
- * 01a11a5e-2434-7342-a3c1-6d63aa74334c). Comparing works in every Workspace schema state (Rule
- * 01a11a5e-07c1-70d6-b4fb-69c99be791e3); only a `current` side needs the live schema recognized.
+ * released. Both sides must be at the current schema version: a version recorded under another one,
+ * or a current Workspace at another one, is refused with `workspace.schema_unsupported` (Rule
+ * 01a11a5e-081c-7149-9345-836ce2267c0a, Clause 01a11a5e-2434-7342-a3c1-6d63aa74334c).
  */
 export function createHistoryDiffService(persistence: FileNativePersistence, history: HistoryStoreSource | undefined): HistoryDiffService {
 	const policy = persistence.schemaPolicy
@@ -170,42 +162,33 @@ export function createHistoryDiffService(persistence: FileNativePersistence, his
 		}
 
 		for (const [version, path] of [[fromVersion, '/from'], [toVersion, '/to']] as const) {
-			if (version && !policy.recognizedVersions.includes(version.workspaceSchemaVersion))
-				return refusal('blocked', 'workspace.schema_unsupported', path, `Version ${version.id} was recorded under Workspace schemaVersion ${version.workspaceSchemaVersion}, which this UIUX build does not recognize.`)
+			if (version && version.workspaceSchemaVersion !== policy.currentVersion)
+				return refusal('blocked', 'workspace.schema_unsupported', path, `Version ${version.id} was recorded under Workspace schemaVersion ${version.workspaceSchemaVersion} and cannot be compared: this UIUX reads only schemaVersion ${policy.currentVersion}.`)
 		}
 		let current: Readonly<{ schemaVersion: number; snapshot: Map<string, Uint8Array> }> | undefined
 		if (!toVersion) {
 			const schemaVersion = await persistence.readDecodeSchemaVersionUnlocked()
-			if (!policy.recognizedVersions.includes(schemaVersion))
-				return refusal('blocked', 'workspace.schema_unsupported', '/to', `The current Workspace uses schemaVersion ${schemaVersion}, which this UIUX build does not recognize.`)
+			if (schemaVersion !== policy.currentVersion)
+				return refusal('blocked', 'workspace.schema_unsupported', '/to', `The current Workspace cannot be compared. ${unsupportedSchemaVersionMessage(schemaVersion, policy.currentVersion)}`)
 			current = { schemaVersion, snapshot: await persistence.scanVersionedSnapshotUnlocked() }
 		}
 
 		const toResources = toVersion ? toVersion.resources : versionResourcesFromSnapshot(current!.snapshot, persistence.layout).resources
-		const toSchemaVersion = toVersion ? toVersion.workspaceSchemaVersion : current!.schemaVersion
-		const crossSchema = fromVersion !== undefined && fromVersion.workspaceSchemaVersion !== toSchemaVersion
-		const candidates = changedCandidates(fromVersion?.resources ?? [], toResources, request.resources)
-		const plan = (schemaVersion: number) => ({
-			all: crossSchema || (request.detail === 'semantic' && schemaVersion !== policy.currentVersion),
-			some: request.detail === 'semantic' ? candidates : new Set<string>(),
-		})
+		const candidates = request.detail === 'semantic' ? changedCandidates(fromVersion?.resources ?? [], toResources, request.resources) : new Set<string>()
 
 		const readSide = async (version: VersionRecord): Promise<LoadedSide | VersionDiffRefusal> => {
-			const { all, some } = plan(version.workspaceSchemaVersion)
 			const bytes = new Map<string, Uint8Array>()
 			for (const resource of version.resources) {
-				if (!isDiffableResourceKind(resource.kind) || !(all || some.has(resourceIdentityKey(resource)))) continue
+				if (!isDiffableResourceKind(resource.kind) || !candidates.has(resourceIdentityKey(resource))) continue
 				// Strict on purpose (owner ruling 2026-10-10): any blob this side reads that is no longer
-				// stored refuses the comparison with history.blob_missing. Unlike the version reads for
-				// Preview (`history-preview.ts`), a diff does not leave unrelated resources out of a
-				// cross-schema upgrade.
+				// stored refuses the comparison with history.blob_missing.
 				for (const [path, digest] of Object.entries(resource.files)) {
 					const blob = await readBlobUnlocked(stores, digest)
 					if (!blob) return refusal('failed', 'history.blob_missing', '/', `Version ${version.id} names file ${path} (${digest}), whose content is no longer stored.`)
 					bytes.set(path, blob)
 				}
 			}
-			return { ref: versionRef(version), schemaVersion: version.workspaceSchemaVersion, resources: version.resources, bytes, complete: all }
+			return { ref: versionRef(version), resources: version.resources, bytes }
 		}
 
 		const from = fromVersion ? await readSide(fromVersion) : undefined
@@ -216,7 +199,7 @@ export function createHistoryDiffService(persistence: FileNativePersistence, his
 		}
 		return {
 			...(from ? { from } : {}),
-			to: { ref: { id: CURRENT_VERSION_SELECTOR, workspaceSchemaVersion: current!.schemaVersion }, schemaVersion: current!.schemaVersion, resources: toResources, bytes: current!.snapshot, complete: true },
+			to: { ref: { id: CURRENT_VERSION_SELECTOR, workspaceSchemaVersion: current!.schemaVersion }, resources: toResources, bytes: current!.snapshot },
 		}
 	}
 
@@ -225,37 +208,12 @@ export function createHistoryDiffService(persistence: FileNativePersistence, his
 		return readVersionBlobUnlocked(persistence, stores?.host, digest)
 	}
 
-	async function compare(request: Request, from: LoadedSide | undefined, to: LoadedSide): Promise<VersionDiffOutcome> {
-		let before: PreparedSide | undefined
-		let after: PreparedSide
-		try {
-			before = from ? await prepare(from) : undefined
-			after = await prepare(to)
-		}
-		catch (error) {
-			if (error instanceof PersistenceError)
-				return { status: 'blocked', code: error.code, message: error.message, diagnostics: error.diagnostics.length > 0 ? error.diagnostics : [{ code: error.code, path: '/', message: error.message }] }
-			throw error
-		}
-		const crossSchema = from !== undefined && from.schemaVersion !== to.schemaVersion
+	function compare(request: Request, from: LoadedSide | undefined, to: LoadedSide): VersionDiffOutcome {
+		const before = from ? prepare(from) : undefined
+		const after = prepare(to)
+		// Both sides are at one schema version, so the recorded revisions decide, whatever the detail.
 		const summary = summarizeResourceChanges(from?.resources, to.resources)
 			.filter(row => !request.resources || request.resources.has(resourceIdentityKey(row)))
-			.map((row): ResourceChangeSummary => {
-				// Within one schema version the recorded revisions decide, whatever the detail: only a
-				// comparison across a migration can show differences the migration alone made.
-				if (!before || !crossSchema) return row
-				const identity = resourceIdentityKey(row)
-				const upgradedBefore = before.revisions.get(identity)
-				// A resource the migration itself creates (the Product Kit file of `uiux.v4-to-v5`) is no
-				// design change: it is compared with what the upgrade made of the older side.
-				if (row.status === 'added' && upgradedBefore !== undefined)
-					// No record holds the upgraded revision, so the row names no `fromRevision`.
-					return upgradedBefore === row.toRevision ? { ...row, status: 'unchanged' } : { ...row, status: 'modified' }
-				if (row.status !== 'modified') return row
-				if (upgradedBefore !== undefined && upgradedBefore === after.revisions.get(identity)) return { ...row, status: 'unchanged' }
-				if (row.kind === 'workspace' && sameSettings(before.files.get(identity), after.files.get(identity))) return { ...row, status: 'unchanged' }
-				return row
-			})
 		if (request.detail !== 'semantic') return { status: 'compared', from: from ? from.ref as ComparedVersion : null, to: to.ref, summary }
 		const changes: ResourceSemanticChange[] = []
 		for (const row of summary) {
@@ -266,44 +224,18 @@ export function createHistoryDiffService(persistence: FileNativePersistence, his
 		return { status: 'compared', from: from ? from.ref as ComparedVersion : null, to: to.ref, summary, changes }
 	}
 
-	/**
-	 * Groups a side's files by resource. A complete side recorded under an older schema version is
-	 * first upgraded in memory with the policy's migration steps; resources of kinds the layout does
-	 * not place in the Workspace snapshot keep their recorded files.
-	 */
-	async function prepare(side: LoadedSide): Promise<PreparedSide> {
+	/** Groups a side's files by resource. */
+	function prepare(side: LoadedSide): PreparedSide {
 		const files = new Map<string, ResourceFiles>()
-		const revisions = new Map<string, string>()
-		const fromRecord = (resource: HistoryResourceEntry, bytes: ReadonlyMap<string, Uint8Array>) => {
-			const identity = resourceIdentityKey(resource)
-			revisions.set(identity, resource.revision)
+		for (const resource of side.resources) {
 			const resourceFiles = new Map<string, ResourceFile>()
 			for (const [path, digest] of Object.entries(resource.files)) {
-				const content = bytes.get(path)
+				const content = side.bytes.get(path)
 				resourceFiles.set(path, content ? { digest, bytes: content } : { digest })
 			}
-			files.set(identity, resourceFiles)
+			files.set(resourceIdentityKey(resource), resourceFiles)
 		}
-		if (!side.complete || side.schemaVersion === policy.currentVersion) {
-			for (const resource of side.resources) fromRecord(resource, side.bytes)
-			return { revisions, files }
-		}
-		const sideLayout = layoutForSchemaVersion(side.schemaVersion)
-		const snapshot = new Map<string, Uint8Array>()
-		const placed = new Set<string>()
-		for (const resource of side.resources) {
-			for (const path of Object.keys(resource.files)) {
-				const bytes = side.bytes.get(path)
-				if (!bytes || !sideLayout.classifyVersionedPath(path)) continue
-				snapshot.set(path, bytes)
-				placed.add(resourceIdentityKey(resource))
-			}
-		}
-		const upgraded = await upgradeSnapshotInMemory(snapshot, side.schemaVersion, policy)
-		const regrouped = versionResourcesFromSnapshot(upgraded.snapshot, layoutForSchemaVersion(policy.currentVersion))
-		for (const resource of regrouped.resources) fromRecord(resource, upgraded.snapshot)
-		for (const resource of side.resources) if (!placed.has(resourceIdentityKey(resource))) fromRecord(resource, side.bytes)
-		return { revisions, files }
+		return { files }
 	}
 
 	return Object.freeze({ diffVersions })
@@ -317,20 +249,6 @@ function changedCandidates(from: readonly HistoryResourceEntry[], to: readonly H
 		if (row.status !== 'unchanged' && (!requested || requested.has(identity))) candidates.add(identity)
 	}
 	return candidates
-}
-
-/** The two manifests' settings are equal once `schemaVersion` is left out (Rule 01a11a5e-1085-71ec-ac82-d60263ae8173). */
-function sameSettings(before: ResourceFiles | undefined, after: ResourceFiles | undefined): boolean {
-	const left = singleJson(before)
-	const right = singleJson(after)
-	return left !== undefined && right !== undefined && jsonEqual(omit(left, ['schemaVersion']), omit(right, ['schemaVersion']))
-}
-
-function singleJson(files: ResourceFiles | undefined): JsonValue | undefined {
-	const bytes = files && files.size === 1 ? [...files.values()][0]!.bytes : undefined
-	if (!bytes) return undefined
-	try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as JsonValue }
-	catch { return undefined }
 }
 
 function versionRef(version: VersionRecord): ComparedVersion {
