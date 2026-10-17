@@ -96,27 +96,20 @@ try {
 	const token = execFileSync(cliPath, ['token', 'create', '--member', 'package-agent', '--workspace', workspaceDirectory], { encoding: 'utf8' }).match(/uiux_t_\S+/u)?.[0]
 	if (!token) throw new Error('Packed CLI token create printed no token.')
 	const auth = { authorization: `Bearer ${token}` }
-	if (!helpOutput.includes('migrate [--workspace <dir>] [--dry-run]'))
-		throw new Error('Packed CLI help did not expose Workspace migration.')
+	// Workspace migration was removed (Discussion #231, Part 17): `uiux migrate` is an unknown command.
+	if (/\bmigrate\b/u.test(helpOutput))
+		throw new Error('Packed CLI help still lists the removed migrate command.')
+	for (const args of [['migrate', '--workspace', workspaceDirectory], ['migrate', '--workspace', workspaceDirectory, '--dry-run']]) {
+		const migrate = spawnSync(cliPath, args, { encoding: 'utf8' })
+		if (migrate.status !== 2 || !migrate.stderr.includes('uiux: unknown command or option: migrate') || !migrate.stdout.includes('Usage: uiux <command>'))
+			throw new Error(`Packed CLI did not refuse the removed migrate command as unknown: status ${migrate.status}, stderr ${migrate.stderr}`)
+	}
 	for (const usage of ['components list [--workspace <dir>]', 'components add <name...> --to <dir>', 'components diff [--project <dir>]']) {
 		if (!helpOutput.includes(usage)) throw new Error(`Packed CLI help did not expose ${usage}.`)
 	}
 	const componentsList = execFileSync(cliPath, ['components', 'list', '--workspace', workspaceDirectory], { encoding: 'utf8' })
 	if (!componentsList.includes('The Product Kit registry has no components.'))
 		throw new Error(`Packed CLI components list did not read the new Workspace's empty registry: ${componentsList}`)
-	const legacyWorkspace = join(temporaryDirectory, 'legacy-workspace')
-	await mkdir(join(legacyWorkspace, '.uiux'), { recursive: true })
-	// A schemaVersion 1 Workspace in the old layout (its manifest, with adapters, in .uiux/).
-	await writeFile(join(legacyWorkspace, '.uiux', 'workspace.json'), `${JSON.stringify({ ...initializedManifest, schemaVersion: 1, adapters: [] }, null, 2)}\n`)
-	const migrateDryRun = execFileSync(cliPath, ['migrate', '--workspace', legacyWorkspace, '--dry-run'], { encoding: 'utf8' })
-	if (!migrateDryRun.includes('dry run, nothing written') || !migrateDryRun.includes('uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4, uiux.v4-to-v5')
-		|| JSON.parse(await readFile(join(legacyWorkspace, '.uiux', 'workspace.json'), 'utf8')).schemaVersion !== 1)
-		throw new Error(`Packed CLI migrate --dry-run returned an unexpected response or wrote files: ${migrateDryRun}`)
-	const migrateOutput = execFileSync(cliPath, ['migrate', '--workspace', legacyWorkspace], { encoding: 'utf8' })
-	// uiux.v4-to-v5 makes the old .uiux/ directory the Workspace root; its manifest keeps that physical path.
-	if (!migrateOutput.includes('manifest revision:') || !migrateOutput.includes(`new Workspace root: ${join(legacyWorkspace, '.uiux')}`)
-		|| JSON.parse(await readFile(join(legacyWorkspace, '.uiux', 'workspace.json'), 'utf8')).schemaVersion !== installedPackage.uiuxWorkspaceSchemaVersion)
-		throw new Error(`Packed CLI migrate did not reach the package Workspace schema: ${migrateOutput}`)
 
 	const port = await selectPort()
 	const server = spawn(cliPath, ['dev', '--workspace', workspaceDirectory], {

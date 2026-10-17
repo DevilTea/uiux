@@ -32,7 +32,7 @@ export type SnapshotCheckpointInput = Readonly<{
  * and 01a11a5e-2070-7c38-a62e-daae1fd8ac43): the resources scanned now, the Workspace schema version
  * the files are decoded under, and `parentCheckpoint` naming the latest Checkpoint already stored,
  * if any. The caller holds the exclusive persistence lock and has decided whether the Workspace
- * state allows the write (`uiux migrate` writes its Checkpoint while migration is required).
+ * state allows the write.
  */
 export async function writeSnapshotCheckpointUnlocked(input: SnapshotCheckpointInput): Promise<CheckpointRecord> {
 	const snapshot = versionResourcesFromSnapshot(await input.persistence.scanVersionedSnapshotUnlocked(), input.persistence.layout)

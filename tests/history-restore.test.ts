@@ -395,20 +395,6 @@ describe('restoring every other kind', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS 
 		await restoresOlderSettings(ctx, earlier)
 	})
 
-	it('restores the Workspace settings recorded under schemaVersion 4, keeping the current schemaVersion (Rules 01a11a5e-15e9 and 17a0)', async () => {
-		const ctx = await fixture()
-		// A Checkpoint recorded under schemaVersion 4, in its old layout (the manifest in .uiux/,
-		// holding the Adapters, and neither a Product Kit nor an Access presets file), holding settings without the mobile viewport.
-		const earlier = await olderSettingsCheckpoint(ctx, 4, (snapshot) => {
-			snapshot.delete(CURRENT_TEST_LAYOUT.manifestPath)
-			snapshot.delete(CURRENT_TEST_LAYOUT.productKitPath!)
-			snapshot.delete(CURRENT_TEST_LAYOUT.accessPresetsPath!)
-			snapshot.set(LEGACY_LAYOUT.manifestPath, canonicalJsonBytes({ ...MANIFEST, schemaVersion: 4, adapters: [], themes: { light: { label: 'Light' }, dark: { label: 'Dark' } } }))
-			return LEGACY_LAYOUT
-		})
-		await restoresOlderSettings(ctx, earlier)
-	})
-
 	async function restoresOlderSettings(ctx: Fixture, earlier: string): Promise<void> {
 		const current = (await ctx.persistence.workspace.readInspected()).revision!
 		const added = await session(ctx, EDITOR).updateWorkspaceSettings({ expectedRevision: current, settings: { ...MANIFEST, viewports: { ...MANIFEST.viewports, mobile: { dimensions: { width: 390, height: 844 } } } } })
@@ -545,14 +531,14 @@ describe('refusals', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 		expect(await restore(ctx, OWNER, { versionId: future, resource: { kind: 'view', key: VIEW_ID }, expectedRevision: await viewRevision(ctx) })).toMatchObject({ status: 'blocked', code: 'workspace.schema_unsupported' })
 	})
 
-	it('is refused while the Workspace needs migration (Rule 01a1144e-4fcf)', async () => {
+	it('is refused while the Workspace is at an older schemaVersion (Rule 01a1144e-4fcf)', async () => {
 		// An old-layout Workspace (schemaVersion 4, the manifest in .uiux/) opened by this build.
 		const root = await tempDir('uiux-restore-old-ws-')
 		const home = join(await tempDir('uiux-restore-old-home-'), 'home')
 		await writeManifest(root, { ...MANIFEST, schemaVersion: 4, adapters: [] }, LEGACY_LAYOUT)
 		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		const app = createWorkspaceApplicationSession(persistence, { history: createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home }) })
-		expect(await scoped(app, OWNER).restoreResourceVersion({ versionId: randomUUID(), resource: { kind: 'view', key: VIEW_ID }, expectedRevision: null })).toMatchObject({ status: 'blocked', code: 'workspace.migration_required' })
+		expect(await scoped(app, OWNER).restoreResourceVersion({ versionId: randomUUID(), resource: { kind: 'view', key: VIEW_ID }, expectedRevision: null })).toMatchObject({ status: 'blocked', code: 'workspace.schema_unsupported' })
 	})
 })
 

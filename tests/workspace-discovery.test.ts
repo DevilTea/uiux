@@ -9,11 +9,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { runAccessCommand } from '../src/cli/access'
 import { runInitCommand } from '../src/cli/init'
-import { runSelectedMigrateCommand } from '../src/cli/migrate'
 import { LEGACY_LAYOUT, V5_LAYOUT } from '../src/persistence/paths'
 import { type DiscoveryHost, selectWorkspace } from '../src/persistence/workspace-selection'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
+import { V4_TEST_SCHEMA_POLICY } from './support/workspace-layout'
 
 /**
  * Workspace selection for every command that acts on a Workspace: the optional `--workspace <dir>`
@@ -250,7 +250,7 @@ describe('explicit --workspace', () => {
 	it('selects an old-layout root, and refuses its own .uiux/ directory, naming the parent', async () => {
 		const { repository, root } = await repositoryWithOldLayout()
 		expect(selectWorkspace({ cwd: repository, workspace: 'design' }, POLICY)).toEqual({ ok: true, root, layout: LEGACY_LAYOUT, discovered: false })
-		expect(selectWorkspace({ cwd: repository, workspace: 'design/.uiux' }, POLICY)).toMatchObject({ ok: false, reason: 'legacy_metadata_dir', message: expect.stringContaining(`select its parent ${root}`) })
+		expect(selectWorkspace({ cwd: repository, workspace: 'design/.uiux' }, V4_TEST_SCHEMA_POLICY)).toMatchObject({ ok: false, reason: 'legacy_metadata_dir', message: expect.stringContaining(`select its parent ${root}`) })
 	})
 
 	it('refuses a missing directory and a file', async () => {
@@ -262,27 +262,13 @@ describe('explicit --workspace', () => {
 })
 
 describe('commands without --workspace', () => {
-	it('uiux migrate and the access commands act on the discovered Workspace', async () => {
+	it('the access commands act on the discovered Workspace', async () => {
 		const { repository, root, nested } = await repositoryWithWorkspace()
 		vi.stubEnv('HOME', repository)
 		const home = join(await makeDirectory(), 'home')
-		const out: string[] = []
-		expect(await runSelectedMigrateCommand({ cwd: nested, dryRun: true, home, stdout: line => out.push(line), stderr: line => out.push(line) })).toBe(0)
-		expect(out.join('\n')).toContain(`UIUX Workspace ${root} is already at schemaVersion ${CURRENT_WORKSPACE_SCHEMA_VERSION}`)
-
 		const access: string[] = []
 		expect(await runAccessCommand({ argv: ['member', 'add', 'ada', '--preset', 'Owner'], cwd: nested, env: { UIUX_HOME: home }, stdout: line => access.push(line), stderr: line => access.push(line) })).toBe(0)
 		expect(access.join('\n')).toContain(`for ${root}`)
-	})
-
-	it('a discovered old-layout Workspace is migrated in place by uiux migrate', async () => {
-		const { repository, root, nested } = await repositoryWithOldLayout()
-		vi.stubEnv('HOME', repository)
-		const home = join(await makeDirectory(), 'home')
-		const out: string[] = []
-		expect(await runSelectedMigrateCommand({ cwd: nested, dryRun: true, home, stdout: line => out.push(line), stderr: line => out.push(line) }), out.join('\n')).toBe(0)
-		expect(out.join('\n')).toContain(`Migration plan for UIUX Workspace ${root} (dry run, nothing written)`)
-		expect(out.join('\n')).toContain('uiux.v4-to-v5')
 	})
 
 	it('the access commands refuse when nothing is discovered, so no stray roster is created', async () => {

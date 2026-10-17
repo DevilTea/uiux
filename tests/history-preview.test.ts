@@ -18,7 +18,7 @@ import loginRoute from '../server/api/session/login.post'
 import type { VersionListing } from '../src/application/services/history-service'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { HistoryResourceEntry, HostVersionRecord, VersionRecord } from '../src/domain/history/schema'
-import { FileNativePersistence, assetDirectoryRelativePath, assetMetadataRelativePath, canonicalJsonBytes, localeRelativePath, viewRelativePath } from '../src/persistence'
+import { FileNativePersistence, canonicalJsonBytes, viewRelativePath } from '../src/persistence'
 import { versionResourcesFromSnapshot } from '../src/persistence/history'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createAccessGuardHandler } from '../src/server/access/http'
@@ -208,19 +208,14 @@ describe('access to the version reads for Preview (Clauses 01a11485-fa00 and f97
 })
 
 /**
- * Versions recorded under an older schema (Rule 01a11a5e-118c-733d-92d7-27262bfbcd33): every
- * migrated Workspace holds a pre-migration Checkpoint, which Preview reads upgraded in memory to the
- * current schema, and a version under a schema this build does not recognize is refused (Clause
+ * A version under a schema this build does not recognize is refused (Clause
  * 01a11a5e-2434-7342-a3c1-6d63aa74334c).
  */
 describe('version reads for Preview across schema versions', () => {
-	const PEER_VIEW_ID = '55555555-5555-4555-8555-555555555555'
 	const AGENT = { type: 'agent', id: 'member:m-agent', displayName: 'claude' } as const
 	const VIEWER = testMember({ nickname: 'vera', kind: 'human', role: 'viewer', credential: 'session' })
 	/** The current manifest, with no `adapters` from schemaVersion 5. */
 	const MANIFEST = { schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, i18n: { defaultLocale: 'en-US' }, viewports: { desktop: { label: 'Desktop', dimensions: { width: 1280, height: 800 } } }, themes: {} }
-	/** The manifest as a schemaVersion 2 Workspace kept it, in `.uiux/` and with its `adapters`. */
-	const V2_MANIFEST = { ...MANIFEST, schemaVersion: 2, adapters: [] }
 	const view = (id: string, name: string) => ({
 		id,
 		name,
@@ -271,34 +266,6 @@ describe('version reads for Preview across schema versions', () => {
 		return version
 	}
 
-	const v2 = (snapshot: Map<string, Uint8Array>) => {
-		snapshot.set(LEGACY_LAYOUT.manifestPath, canonicalJsonBytes(V2_MANIFEST))
-		snapshot.set(viewRelativePath(VIEW_ID), canonicalJsonBytes(view(VIEW_ID, 'Checkout before migration')))
-	}
-
-	it('reads a View and the manifest recorded under schemaVersion 2 in the current schema, beside the recorded revision', async () => {
-		const ctx = await workspace()
-		const old = await record(ctx, 2, v2)
-		const read = (kind: string, key: string) => readVersionResourceForHttp(scoped(ctx.app, VIEWER), old.id, kind, key)
-
-		const manifest = await read('workspace', 'workspace')
-		expect(manifest.status).toBe(200)
-		// The uiux.v2-to-v3, uiux.v3-to-v4 and uiux.v4-to-v5 steps ran: the manifest is in the current schema.
-		expect(manifest.body).toEqual({
-			status: 'found',
-			versionId: old.id,
-			kind: 'workspace',
-			key: 'workspace',
-			revision: old.resources.find(item => item.kind === 'workspace')!.revision,
-			workspaceSchemaVersion: 2,
-			resource: MANIFEST,
-		})
-		const viewRead = await read('view', VIEW_ID)
-		expect(viewRead.status).toBe(200)
-		expect(viewRead.body).toMatchObject({ status: 'found', workspaceSchemaVersion: 2, revision: old.resources.find(item => item.kind === 'view')!.revision, resource: view(VIEW_ID, 'Checkout before migration') })
-		expect(await read('locale', 'en-US')).toMatchObject({ status: 200, body: { status: 'found', resource: { greeting: 'Hello' } } })
-	})
-
 	it('refuses a version recorded under an unrecognized schemaVersion with workspace.schema_unsupported (422)', async () => {
 		const ctx = await workspace()
 		const future = await record(ctx, 99, snapshot => snapshot.set(V5_LAYOUT.manifestPath, canonicalJsonBytes({ ...MANIFEST, schemaVersion: 99 })))
@@ -307,42 +274,5 @@ describe('version reads for Preview across schema versions', () => {
 			expect(result.status).toBe(422)
 			expect(result.body).toMatchObject({ status: 'blocked', code: 'workspace.schema_unsupported', diagnostics: [{ path: '/id' }] })
 		}
-	})
-
-	it('reads an older version\'s View when another resource\'s content is no longer stored, and refuses only a resource without its own', async () => {
-		const ctx = await workspace()
-		const old = await record(ctx, 2, (snapshot) => {
-			v2(snapshot)
-			snapshot.set(viewRelativePath(PEER_VIEW_ID), canonicalJsonBytes(view(PEER_VIEW_ID, 'Peer')))
-		}, [localeRelativePath('en-US'), viewRelativePath(PEER_VIEW_ID)])
-		const read = (kind: string, key: string) => readVersionResourceForHttp(scoped(ctx.app, VIEWER), old.id, kind, key)
-
-		expect(await read('view', VIEW_ID)).toMatchObject({ status: 200, body: { status: 'found', resource: { name: 'Checkout before migration' } } })
-		expect(await read('workspace', 'workspace')).toMatchObject({ status: 200, body: { status: 'found', resource: MANIFEST } })
-		for (const [kind, key] of [['locale', 'en-US'], ['view', PEER_VIEW_ID]] as const)
-			expect(await read(kind, key)).toMatchObject({ status: 500, body: { status: 'failed', code: 'history.blob_missing' } })
-
-		// The manifest is the input of every migration step, so an older version without it is refused.
-		const noManifest = await record(ctx, 2, (snapshot) => {
-			v2(snapshot)
-			// Other manifest bytes than the version above, whose blob is stored.
-			snapshot.set(LEGACY_LAYOUT.manifestPath, canonicalJsonBytes({ ...V2_MANIFEST, i18n: { defaultLocale: 'zh-TW' } }))
-		}, [LEGACY_LAYOUT.manifestPath])
-		expect(await readVersionResourceForHttp(scoped(ctx.app, VIEWER), noManifest.id, 'view', VIEW_ID)).toMatchObject({ status: 500, body: { status: 'failed', code: 'history.blob_missing' } })
-	})
-
-	it('reads an older version\'s View when an Asset\'s content file is no longer stored, leaving that Asset out whole', async () => {
-		const ctx = await workspace()
-		const ASSET_ID = '66666666-6666-4666-8666-666666666666'
-		await ctx.persistence.assets.create(ASSET_ID, { metadata: { id: ASSET_ID, name: 'Logo', contentFilename: 'logo.bin', mediaType: 'application/octet-stream' }, content: Buffer.from('logo') })
-		const contentPath = `${assetDirectoryRelativePath(ASSET_ID)}/logo.bin`
-		const old = await record(ctx, 2, v2, [contentPath])
-		// The Asset is recorded with both files, but only its metadata blob is stored: a partial Asset.
-		expect(Object.keys(old.resources.find(resource => resource.kind === 'asset')!.files).sort()).toEqual([assetMetadataRelativePath(ASSET_ID), contentPath].sort())
-		const assetFiles = old.resources.find(resource => resource.kind === 'asset')!.files
-		expect(await ctx.stores.host.hasBlob(assetFiles[assetMetadataRelativePath(ASSET_ID)]!)).toBe(true)
-		expect(await ctx.stores.host.hasBlob(assetFiles[contentPath]!)).toBe(false)
-
-		expect(await readVersionResourceForHttp(scoped(ctx.app, VIEWER), old.id, 'view', VIEW_ID)).toMatchObject({ status: 200, body: { status: 'found', workspaceSchemaVersion: 2, resource: { name: 'Checkout before migration' } } })
 	})
 })

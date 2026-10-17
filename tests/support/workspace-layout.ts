@@ -7,7 +7,7 @@ import type { WorkspaceAdapterSelection, WorkspaceManifest } from '../../src/dom
 import type { FileNativePersistence } from '../../src/persistence/file-native'
 import { V5_LAYOUT, type WorkspaceLayout } from '../../src/persistence/paths'
 import { defineWorkspaceSchemaPolicy, type WorkspaceSchemaPolicy } from '../../src/persistence/schema-policy'
-import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY, WORKSPACE_V4_TO_V5_STEP, WORKSPACE_V5_TO_V6_STEP } from '../../src/product/workspace-schema'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../../src/product/workspace-schema'
 
 /**
  * Test helpers that place Workspace files through the layout seam (`src/persistence/paths.ts`)
@@ -71,23 +71,23 @@ export function currentManifest(overrides: Readonly<Record<string, unknown>> = {
 export const V5_TEST_SCHEMA_POLICY: WorkspaceSchemaPolicy = PRODUCT_WORKSPACE_SCHEMA_POLICY
 
 /**
- * The policy of a UIUX build before `schemaVersion` 5 (current 4, versions 1 to 4, no
- * `uiux.v4-to-v5`), for tests that keep exercising the old layout on purpose.
+ * A policy whose current version is 4 (the old layout), with no other version and no steps, for
+ * tests that keep exercising the old layout on purpose.
  */
 export const V4_TEST_SCHEMA_POLICY: WorkspaceSchemaPolicy = defineWorkspaceSchemaPolicy({
 	currentVersion: 4,
-	recognizedVersions: [1, 2, 3, 4],
-	steps: PRODUCT_WORKSPACE_SCHEMA_POLICY.steps.filter(step => step !== WORKSPACE_V4_TO_V5_STEP && step !== WORKSPACE_V5_TO_V6_STEP),
+	recognizedVersions: [4],
+	steps: [],
 })
 
 /**
- * The policy of a UIUX build before `schemaVersion` 6 (current 5, versions 1 to 5, no
- * `uiux.v5-to-v6`), for tests that exercise a `schemaVersion` 5 Workspace as current.
+ * A policy whose current version is 5, with no other version and no steps, for tests that exercise
+ * a `schemaVersion` 5 Workspace as current.
  */
 export const V5_ONLY_TEST_SCHEMA_POLICY: WorkspaceSchemaPolicy = defineWorkspaceSchemaPolicy({
 	currentVersion: 5,
-	recognizedVersions: [1, 2, 3, 4, 5],
-	steps: PRODUCT_WORKSPACE_SCHEMA_POLICY.steps.filter(step => step !== WORKSPACE_V5_TO_V6_STEP),
+	recognizedVersions: [5],
+	steps: [],
 })
 
 /** A manifest as tests wrote it below `schemaVersion` 5: settings plus an optional `adapters` list. */

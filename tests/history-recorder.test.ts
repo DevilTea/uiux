@@ -26,8 +26,7 @@ import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } fro
 import { hostHistoryPaths } from '../src/server/access/store'
 import { createSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { connectMcp, scoped, testMember } from './support/access'
-import { layoutForSchemaVersion } from '../src/persistence/paths'
-import { checkpointsPath, createCurrentWorkspace, V4_TEST_SCHEMA_POLICY, writeManifest } from './support/workspace-layout'
+import { checkpointsPath, createCurrentWorkspace, currentManifest, writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
 import type { WorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
 
 /**
@@ -760,12 +759,11 @@ describe('recording failures', () => {
 describe('review follow-ups on PR #156', () => {
 	const restart = (ctx: Fixture) => createHistoryRecorder({ persistence: ctx.persistence, stores: async () => ({ host: ctx.host, checkpoints: ctx.checkpoints }), clock: ctx.clock, log: () => undefined })
 
-	it('writes nothing to the host while migration is required, then creates the Baseline on the first start after migration (owner ruling 2, review M2)', async () => {
-		// A migration that keeps the root (here uiux.v3-to-v4, under a build where 4 is current): the
-		// recorder keeps its persistence across it. uiux.v4-to-v5 moves the root; see workspace-relocation.test.ts.
-		const CURRENT_WORKSPACE_SCHEMA_VERSION = V4_TEST_SCHEMA_POLICY.currentVersion
-		const ctx = await fixture({ seed: false, schemaPolicy: V4_TEST_SCHEMA_POLICY })
-		await writeManifest(ctx.root, `${JSON.stringify({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} })}\n`, layoutForSchemaVersion(CURRENT_WORKSPACE_SCHEMA_VERSION - 1))
+	it('writes nothing to the host while the Workspace is not writable, then creates the Baseline on the first start once it is (owner ruling 2, review M2)', async () => {
+		const ctx = await fixture({ seed: false })
+		await writeCurrentWorkspace(ctx.root)
+		// A schemaVersion this build does not read: the Workspace is unsupported, so it is not writable.
+		await writeManifest(ctx.root, `${JSON.stringify(currentManifest({ schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION - 1 }))}\n`)
 		// A Checkpoint committed by another worktree is already in the Workspace.
 		const other = randomUUID()
 		await ctx.persistence.withLock(async () => {
@@ -780,7 +778,7 @@ describe('review follow-ups on PR #156', () => {
 		expect((await ctx.checkpoints.list()).records.map(checkpoint => checkpoint.id)).toEqual([other])
 		await ctx.recorder.stop()
 
-		await ctx.persistence.migrateWorkspace()
+		await writeManifest(ctx.root, `${JSON.stringify(currentManifest())}\n`)
 		const after = restart(ctx)
 		const report = await after.start()
 		expect(report).toMatchObject({ enabled: true, baseline: expect.any(String) })

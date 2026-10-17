@@ -41,17 +41,6 @@ Commands:
                            Every /api and /mcp request needs a credential; the first
                            start of a Workspace creates its Owner and prints a
                            one-time sign-in link on each URL
-  migrate [--workspace <dir>] [--dry-run]
-                           Migrate an older Workspace schema to schemaVersion ${workspaceSchemaVersion}
-                           (steps chain: uiux.v1-to-v2, uiux.v2-to-v3, uiux.v3-to-v4,
-                           uiux.v4-to-v5, uiux.v5-to-v6); a real run first writes the
-                           Checkpoint "Before migration to schemaVersion ${workspaceSchemaVersion}" and then
-                           records the migration in the host history ($UIUX_HOME);
-                           --dry-run prints the steps and changed files without writing
-                           anything. uiux.v4-to-v5 moves the Workspace into <dir>/.uiux/
-                           and prints the uiux access copy command to run next;
-                           uiux.v5-to-v6 adds access-presets.json with the built-in
-                           Access presets
   components list [--workspace <dir>]
                            List the components of the Workspace's Product Kit registry
   components add <name...> --to <dir> [--project <dir>] [--force] [--workspace <dir>]
@@ -94,10 +83,10 @@ Access (each takes [--workspace <dir>]; rosters live in $UIUX_HOME, default ~/.u
   session list | session revoke <session-id> | session revoke --member <nick>
   access copy --from <old-dir> [--replace]
                            Copy members, tokens and host history from another
-                           Workspace path, once. After uiux migrate moves a Workspace
-                           into <old-dir>/.uiux/, run it with --from <old-dir> before
-                           the first uiux dev there. --replace discards the target's
-                           roster and its own host history`)
+                           Workspace path, once, such as after moving a Workspace or
+                           for a worktree; run it before the first uiux dev there.
+                           --replace discards the target's roster and its own host
+                           history`)
 }
 
 // `uiux dev` takes its bind address only from --host. For compatibility, a loopback HOST or
@@ -146,16 +135,8 @@ function parseDevArguments(args) {
 	return { workspace, host, origins }
 }
 
-function parseMigrateArguments(args) {
-	const dryRun = args.includes('--dry-run')
-	const rest = args.filter(arg => arg !== '--dry-run')
-	if (args.length - rest.length > 1) return undefined
-	const options = parseOptionalWorkspaceArgument(rest)
-	return options ? { workspace: options.workspace, dryRun } : undefined
-}
-
 /**
- * Migration and access administration reuse the TypeScript modules shipped in `src/`. They are
+ * Initialization, components and access administration reuse the TypeScript modules shipped in `src/`. They are
  * bundled on demand with the packaged esbuild dependency into a private temporary module, so the
  * CLI applies exactly the policy the server enforces.
  */
@@ -184,14 +165,6 @@ async function withBundled(entry, use) {
 	finally {
 		await rm(directory, { recursive: true, force: true })
 	}
-}
-
-async function runMigrate(options) {
-	await runBundled('src/cli/migrate.ts', ({ runSelectedMigrateCommand }) => runSelectedMigrateCommand({
-		...(options.workspace === undefined ? {} : { workspace: options.workspace }),
-		cwd: process.cwd(),
-		dryRun: options.dryRun,
-	}))
 }
 
 async function runAccess(argv) {
@@ -300,20 +273,6 @@ if (extraArgs.length === 0 && (command === undefined || command === '--help' || 
 		process.exitCode = 2
 	} else {
 		await runDev(options)
-	}
-} else if (command === 'migrate') {
-	const options = parseMigrateArguments(extraArgs)
-	if (!options) {
-		console.error('uiux: migrate accepts --workspace <dir> and --dry-run.')
-		process.exitCode = 2
-	} else {
-		try {
-			await runMigrate(options)
-		}
-		catch (error) {
-			console.error('uiux: migrate failed: ' + (error instanceof Error ? error.message : String(error)))
-			process.exitCode = 1
-		}
 	}
 } else if (command === 'components') {
 	try {

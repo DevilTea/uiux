@@ -47,15 +47,15 @@ async function artifactFiles(root: string, layout = CURRENT_TEST_LAYOUT): Promis
 	return readdir(artifactShardsPath(root, layout)).catch(() => [])
 }
 
-describe('read-only Handoff assessment on a Workspace that needs migration', () => {
-	it('returns blocked workspace.migration_required for assess and export instead of throwing, and writes nothing', async () => {
+describe('read-only Handoff assessment on a Workspace at an older schemaVersion', () => {
+	it('returns blocked workspace.schema_unsupported for assess and export instead of throwing, and writes nothing', async () => {
 		const root = await seedWorkspace(1)
 		const app = createWorkspaceApplicationSession(open(root))
 		const assessed = await app.assessHandoffReadiness({ roots: [{ type: 'view', viewId: VIEW_ID }] })
-		expect(assessed).toMatchObject({ status: 'blocked', key: 'handoff', code: 'workspace.migration_required' })
-		expect(assessed.diagnostics?.[0]).toMatchObject({ code: 'workspace.migration_required', path: '/schemaVersion' })
+		expect(assessed).toMatchObject({ status: 'blocked', key: 'handoff', code: 'workspace.schema_unsupported' })
+		expect(assessed.diagnostics?.[0]).toMatchObject({ code: 'workspace.schema_unsupported', path: '/schemaVersion' })
 		const exported = await app.exportHandoff({ roots: [{ type: 'workspace' }] })
-		expect(exported).toMatchObject({ status: 'blocked', code: 'workspace.migration_required' })
+		expect(exported).toMatchObject({ status: 'blocked', code: 'workspace.schema_unsupported' })
 		expect(await artifactFiles(root, layoutForSchemaVersion(1))).toEqual([])
 	})
 

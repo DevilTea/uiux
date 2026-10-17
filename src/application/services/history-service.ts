@@ -68,7 +68,7 @@ export type ListVersionsQuery = Readonly<{
 	/** The per-resource projection (Rule 01a11a5d-fe15-7ed2-ab74-4616dcc47a28). */
 	resource?: HistoryResourceIdentity
 	types?: readonly HistoryVersionType[]
-	/** An actor `id` (`member:<id>`, `system:migrate`, `system:baseline`) or `external`. */
+	/** An actor `id` (`member:<id>`, `system:baseline`) or `external`. */
 	actor?: string
 	limit?: number
 	cursor?: string

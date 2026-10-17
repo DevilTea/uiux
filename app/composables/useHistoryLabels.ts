@@ -64,7 +64,6 @@ export function useHistoryLabels() {
 	function actorName(actor: HistoryActor): string {
 		if (actor.type === 'external') return t('history.actor.external')
 		if (actor.type === 'system') {
-			if (actor.id === 'system:migrate') return t('history.actor.migrate')
 			if (actor.id === 'system:baseline') return t('history.actor.baseline')
 			return t('history.actor.system')
 		}
@@ -88,7 +87,6 @@ export function useHistoryLabels() {
 		if (version.type !== 'checkpoint' || !version.name) return t(`history.type.${version.type}`)
 		const system = systemCheckpointTitle(version)
 		if (system?.key === 'baseline') return t('history.systemName.baseline')
-		if (system?.key === 'migrate') return t('history.systemName.migrate', { version: system.target })
 		return version.name
 	}
 

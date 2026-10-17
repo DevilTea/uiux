@@ -9,7 +9,6 @@ import {
 	BASELINE_CHECKPOINT_NAME,
 	HISTORY_SCHEMA_VERSION,
 	HOST_PRUNE_INTERVAL_MS,
-	migrationCheckpointName,
 } from '../../domain/history/constants'
 import type { HistoryActor, HistoryResourceEntry, HistoryWriteEvent, HostVersionRecord } from '../../domain/history/schema'
 import { resourceIdentityKey } from '../../domain/history/summary'
@@ -73,7 +72,6 @@ export type AutosaveCloseReason =
 	| 'start'
 	| 'drift'
 	| 'recording_gap'
-	| 'migration'
 
 /** What one boundary recorded: the closed autosave and the external version, when either was written. */
 export type HistoryBoundaryReport = Readonly<{ reason: AutosaveCloseReason; autosave?: string; external?: string }>
@@ -130,55 +128,6 @@ export type HistoryRecorderOptions = Readonly<{
 	log?: (message: string) => void
 }>
 
-/** What `uiux migrate` recorded before its first step. */
-export type MigrationCheckpointReport = Readonly<{
-	/** The id of the pre-migration system Checkpoint. */
-	checkpoint: string
-	/** The boundary taken first: the leftover autosave it closed and the external version it recorded. */
-	boundary: HistoryBoundaryReport
-	/** The file name a corrupt `open.json` was moved to. */
-	quarantined?: string
-}>
-
-/**
- * History for `uiux migrate` (Rules 01a11a5e-0b23-7d4f-954a-26fcde4a8014 and
- * 01a11a5e-0422-78fe-b28b-d877417932e9, Clauses 01a1144e-5605-722c-a662-2b483ddaad73 and
- * 01a11a5e-22ca-756e-8128-8f730ca887c9). Both methods run under the migration's exclusive
- * persistence lock and outside every step; no server is involved and no observer is attached.
- */
-export interface MigrationHistoryRecorder {
-	/**
-	 * Before any step: closes a leftover autosave the host journal holds (a server that crashed or
-	 * lost its shutdown), records changes made outside UIUX as an external version, then writes the
-	 * Checkpoint `Before migration to schemaVersion <targetSchemaVersion>` with the actor
-	 * `system:migrate` and the source `cli`. It works while the Workspace needs migration.
-	 */
-	beforeMigrationUnlocked(targetSchemaVersion: number): Promise<MigrationCheckpointReport>
-	/**
-	 * After the migration committed: records its changes as one `system:migrate` system version and
-	 * returns its id. A migration that moved the Workspace to a new root (`uiux.v4-to-v5`) passes
-	 * that root's persistence as `migrated`, so the version is taken there, with its layout, while it
-	 * is still recorded in the host history this recorder opened, the old root's (Rule
-	 * 01a12626-5a0c-7c1a-942f-666101981e29). The migration's lock must cover both roots.
-	 */
-	afterMigrationUnlocked(migrated?: FileNativePersistence): Promise<string>
-}
-
-export type MigrationHistoryRecorderOptions = Readonly<{
-	persistence: FileNativePersistence
-	/** Opens the history stores; resolves `undefined` when history is disabled, which refuses the migration's history. */
-	stores: () => Promise<HistoryRecorderStores | undefined>
-	clock?: HistoryRecorderClock
-	log?: (message: string) => void
-}>
-
-export function createMigrationHistoryRecorder(options: MigrationHistoryRecorderOptions): MigrationHistoryRecorder {
-	return new AutosaveRecorder(options)
-}
-
-/** Clause 01a11a5e-21c4-79f7-b6f9-4128d842c278: the actor of everything `uiux migrate` records. */
-const MIGRATE_ACTOR: HistoryActor = Object.freeze({ type: 'system', id: 'system:migrate' })
-
 /** How long a timer close that could not take the lock waits before it tries again. */
 const CLOSE_RETRY_MS = 15_000
 const DEFAULT_OPERATION_TIMEOUT_MS = 5_000
@@ -234,7 +183,7 @@ class RecorderBusyError extends Error {
 	}
 }
 
-class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
+class AutosaveRecorder implements HistoryRecorder {
 	readonly observer: CanonicalWriteObserver
 	private readonly persistence: FileNativePersistence
 	private readonly openStores: HistoryRecorderOptions['stores']
@@ -242,7 +191,7 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 	private readonly operationTimeout: number
 	private readonly log: (message: string) => void
 
-	private phase: 'idle' | 'starting' | 'recording' | 'disabled' | 'stopped' | 'migrating' = 'idle'
+	private phase: 'idle' | 'starting' | 'recording' | 'disabled' | 'stopped' = 'idle'
 	private stopping = false
 	private stores?: HistoryRecorderStores
 	/** The state the timeline explains: the latest version plus the open autosave's events. */
@@ -256,8 +205,6 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 	/** Recorder work in progress, possibly abandoned by a timeout and still running without the lock. */
 	private inFlight?: symbol
 	private journalQueue: Promise<void> = Promise.resolve()
-	/** The pre-migration Checkpoint's time, the earliest a migration's changes can have happened. */
-	private migrationStartedAt?: string
 	private autosaveTimer?: unknown
 	private pruneTimer?: unknown
 
@@ -413,12 +360,10 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 	private async startUnlocked(stores: HistoryRecorderStores): Promise<HistoryStartReport> {
 		const { host } = stores
 		// Owner ruling (https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18832873,
-		// item 2): while the Workspace is not writable (migration required, unsupported schema), skip
-		// the Baseline and write nothing to the host store. No design write can happen meanwhile. The
-		// Baseline then follows on a later start only when the host still has no history at all, which
-		// owner ruling https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18834723
-		// item 2 limits to exactly that case: a real `uiux migrate` records its pre-migration Checkpoint
-		// and a host system version, so after it no Baseline is written.
+		// item 2): while the Workspace is not writable (an unsupported schema), skip the Baseline and
+		// write nothing to the host store. No design write can happen meanwhile. The Baseline then
+		// follows on a later start only when the host still has no history at all (owner ruling
+		// https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18834723, item 2).
 		try {
 			await this.persistence.assertWritableUnlocked()
 		}
@@ -511,73 +456,6 @@ class AutosaveRecorder implements HistoryRecorder, MigrationHistoryRecorder {
 			log: this.log,
 		})
 		this.expected = resourceMap(record.resources)
-		return record.id
-	}
-
-	// ── Migration (`uiux migrate`, under the migration's lock) ─────────────────
-
-	async beforeMigrationUnlocked(targetSchemaVersion: number): Promise<MigrationCheckpointReport> {
-		if (this.phase !== 'idle') throw new Error('The migration history recorder runs once, on a recorder that was never started.')
-		this.phase = 'migrating'
-		const stores = await this.openStores()
-		if (!stores) throw new Error('History is disabled, so the pre-migration Checkpoint cannot be written.')
-		this.stores = stores
-		const { journal, quarantined, hostListing } = await this.loadUnlocked(stores)
-		// The journal's leftover autosave first, then changes made outside UIUX, so the Checkpoint
-		// below follows a timeline that explains the state it records.
-		const boundary = (journal ? await this.closeLeftoverUnlocked(journal, hostListing) : undefined)
-			?? await this.boundaryUnlocked('migration', LOCK_HELD)
-		// Clause 01a11a5e-22ca-756e-8128-8f730ca887c9; Clause 01a11a5e-221b-7a04-a6cb-66bc9608c11f: a CLI command records `cli`.
-		const checkpoint = await writeSnapshotCheckpointUnlocked({
-			persistence: this.persistence,
-			checkpoints: stores.checkpoints,
-			host: stores.host,
-			at: this.stamp(),
-			actor: MIGRATE_ACTOR,
-			name: migrationCheckpointName(targetSchemaVersion),
-			source: 'cli',
-			log: this.log,
-		})
-		this.expected = resourceMap(checkpoint.resources)
-		this.migrationStartedAt = checkpoint.at
-		return { checkpoint: checkpoint.id, boundary, ...(quarantined ? { quarantined } : {}) }
-	}
-
-	async afterMigrationUnlocked(migrated?: FileNativePersistence): Promise<string> {
-		const stores = this.stores
-		const startedAt = this.migrationStartedAt
-		if (this.phase !== 'migrating' || !stores || !startedAt) throw new Error('The migration system version follows the pre-migration Checkpoint.')
-		const persistence = migrated ?? this.persistence
-		// Read before anything is stored: a migration that moved the Workspace to another layout leaves
-		// the old root's persistence layout stale, and the record must then fail loudly, not pair the old
-		// layout's scan with the new version.
-		const workspaceSchemaVersion = await persistence.readRecordSchemaVersionUnlocked()
-		const actual = versionResourcesFromSnapshot(await persistence.scanVersionedSnapshotUnlocked(), persistence.layout)
-		for (const [digest, bytes] of actual.blobs) {
-			if (!await stores.host.hasBlob(digest)) await stores.host.putBlob(bytes)
-		}
-		const actualMap = resourceMap(actual.resources)
-		const productKit = await productKitRecordFieldUnlocked(persistence, { log: this.log })
-		// Rule 01a11a5e-0422-78fe-b28b-d877417932e9: the migration's changes are their own system
-		// version. Migration is not a design operation, so the version carries no write event.
-		const record: HostVersionRecord = {
-			historySchemaVersion: HISTORY_SCHEMA_VERSION,
-			id: randomUUID(),
-			type: 'system',
-			actor: MIGRATE_ACTOR,
-			at: this.stamp(),
-			workspaceSchemaVersion,
-			resources: actual.resources,
-			...productKit,
-			startedAt,
-			netChange: !sameResources(this.expected ?? new Map(), actualMap),
-			events: [],
-			...(this.lastHostVersionId ? { parent: this.lastHostVersionId } : {}),
-		}
-		await stores.host.writeVersion(record)
-		this.lastHostVersionId = record.id
-		this.expected = actualMap
-		this.phase = 'stopped'
 		return record.id
 	}
 

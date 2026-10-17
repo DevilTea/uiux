@@ -2,7 +2,7 @@ import { selectWorkspace, type SelectedWorkspace } from '../persistence/workspac
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 
 /**
- * The Workspace `uiux dev` and `uiux migrate` act on: `--workspace <dir>` when given, otherwise the
+ * The Workspace `uiux dev` acts on: `--workspace <dir>` when given, otherwise the
  * discovered one, after the entry check, under UIUX's own schema policy (`selectWorkspace`).
  */
 export function selectCliWorkspace(workspace: string | undefined, cwd: string): SelectedWorkspace {

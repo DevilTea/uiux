@@ -136,10 +136,9 @@ describe('timeline grouping and filters', () => {
 
 	it('localizes system Checkpoint names by the creating actor and keeps member names as written', () => {
 		expect(systemCheckpointTitle({ type: 'checkpoint', name: 'Baseline', actor: { type: 'system', id: 'system:baseline' } })).toEqual({ key: 'baseline' })
-		expect(systemCheckpointTitle({ type: 'checkpoint', name: 'Before migration to schemaVersion 4', actor: { type: 'system', id: 'system:migrate' } })).toEqual({ key: 'migrate', target: '4' })
 		// A member may name a Checkpoint "Baseline": it is theirs, shown as written.
 		expect(systemCheckpointTitle({ type: 'checkpoint', name: 'Baseline', actor: { type: 'human', id: 'member:mei' } })).toBeUndefined()
-		expect(systemCheckpointTitle({ type: 'system', name: null, actor: { type: 'system', id: 'system:migrate' } })).toBeUndefined()
+		expect(systemCheckpointTitle({ type: 'system', name: null, actor: { type: 'system', id: 'system:baseline' } })).toBeUndefined()
 	})
 
 	it('finds the revision a version holds for a resource', () => {

@@ -6,9 +6,8 @@ import { join, relative, resolve } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { createHistoryRecorder, createMigrationHistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
+import { createHistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
 import { runAccessCommand } from '../src/cli/access'
-import { runMigrateCommand } from '../src/cli/migrate'
 import { builtInAccessPresetsFile } from '../src/domain/access-presets/schema'
 import { emptyProductKit } from '../src/domain/product-kit/schema'
 import { canonicalJsonBytes, checkWorkspaceSelection, FileNativePersistence, LEGACY_LAYOUT, V5_LAYOUT, viewRelativePath } from '../src/persistence'
@@ -133,7 +132,7 @@ describe('checkWorkspaceSelection', () => {
 
 	it('refuses each mismatched selection with a reason a caller can act on', async () => {
 		const legacy = await legacyWorkspace()
-		expect(checkWorkspaceSelection(join(legacy, '.uiux'), PRODUCT_WORKSPACE_SCHEMA_POLICY)).toEqual({ ok: false, reason: 'legacy_metadata_dir', message: expect.stringContaining(`select its parent ${legacy}`) })
+		expect(checkWorkspaceSelection(join(legacy, '.uiux'), V4_TEST_SCHEMA_POLICY)).toEqual({ ok: false, reason: 'legacy_metadata_dir', message: expect.stringContaining(`select its parent ${legacy}`) })
 
 		const foreign = await makeRoot()
 		await writeFile(join(foreign, 'workspace.json'), '{"version":2,"projects":{}}\n')
@@ -141,7 +140,7 @@ describe('checkWorkspaceSelection', () => {
 
 		const misplaced = await makeRoot()
 		await writeManifest(misplaced, v4Manifest(), V5_LAYOUT)
-		expect(checkWorkspaceSelection(misplaced, PRODUCT_WORKSPACE_SCHEMA_POLICY)).toEqual({ ok: false, reason: 'version_layout_mismatch', message: expect.stringContaining('is a schemaVersion 4 manifest') })
+		expect(checkWorkspaceSelection(misplaced, V4_TEST_SCHEMA_POLICY)).toEqual({ ok: false, reason: 'version_layout_mismatch', message: expect.stringContaining('is a schemaVersion 4 manifest') })
 
 		const { parent } = await relocatedWorkspace()
 		expect(checkWorkspaceSelection(parent, V5_TEST_SCHEMA_POLICY)).toEqual({ ok: false, reason: 'relocated_parent', message: expect.stringContaining(`whose Workspace root is ${join(parent, '.uiux')}`) })
@@ -250,20 +249,6 @@ describe('entry points refuse a mismatched selection with exit status 2 before t
 		]
 	}
 
-	it('uiux migrate and uiux migrate --dry-run', async () => {
-		for (const { name, selected, scope } of await mismatchedSelections()) {
-			const before = await tree(scope)
-			const home = join(await makeRoot('uiux-selection-home-'), 'home')
-			for (const dryRun of [false, true]) {
-				const errors: string[] = []
-				expect(await runMigrateCommand({ workspaceRoot: selected, dryRun, home, schemaPolicy: V5_TEST_SCHEMA_POLICY, stdout: () => undefined, stderr: line => errors.push(line) }), name).toBe(2)
-				expect(errors.join('\n'), name).toMatch(/^uiux: /)
-			}
-			expect(await tree(scope), name).toEqual(before)
-			expect(await exists(home), name).toBe(false)
-		}
-	})
-
 	it('uiux access, for the selected Workspace and for access copy --from', async () => {
 		for (const { name, selected, scope } of await mismatchedSelections()) {
 			const before = await tree(scope)
@@ -286,7 +271,7 @@ describe('entry points refuse a mismatched selection with exit status 2 before t
 		const home = join(await makeRoot('uiux-selection-home-'), 'home')
 		const result = spawnSync(process.execPath, [CLI, 'dev', '--workspace', selected], { encoding: 'utf8', env: { ...process.env, UIUX_HOME: home } })
 		expect(result.status, result.stderr).toBe(2)
-		expect(result.stderr).toContain('select its parent')
+		expect(result.stderr).toContain('has schemaVersion 4, which this UIUX build does not support')
 		expect(await tree(scope)).toEqual(before)
 		expect(await exists(home)).toBe(false)
 	}, 60_000)
@@ -304,7 +289,7 @@ describe('entry points refuse a mismatched selection with exit status 2 before t
 		server.stderr.setEncoding('utf8').on('data', (chunk: string) => { output += chunk })
 		const code = await new Promise<number | null>(resolveExit => server.once('exit', resolveExit))
 		expect(code, output).toBe(2)
-		expect(output).toContain('select its parent')
+		expect(output).toContain('has schemaVersion 4, which this UIUX build does not support')
 		expect(await tree(scope)).toEqual(before)
 		expect(await exists(home)).toBe(false)
 	}, 60_000)
@@ -356,15 +341,5 @@ describe('history records check their layout before storing anything', () => {
 		await ctx.makeStale()
 		await recorder.stop().catch(() => undefined)
 		expect((await ctx.host.listVersions()).records.filter(record => record.type === 'autosave')).toEqual([])
-	})
-
-	it('the migration system version', async () => {
-		const ctx = await fixture()
-		const history = createMigrationHistoryRecorder({ persistence: ctx.persistence, stores: async () => ({ host: ctx.host, checkpoints: ctx.checkpoints }), clock: clock(), log: () => undefined })
-		await ctx.persistence.withLock(() => history.beforeMigrationUnlocked(5))
-		await ctx.makeStale()
-		await expect(ctx.persistence.withLock(() => history.afterMigrationUnlocked())).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
-		expect((await ctx.host.listVersions()).records.filter(record => record.type === 'system')).toEqual([])
-		expect(await ctx.host.hasBlob(blobDigest(ctx.relocatedManifest))).toBe(false)
 	})
 })

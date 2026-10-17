@@ -12,7 +12,6 @@ import { createHistoryRecorder, type HistoryRecorderClock } from '../src/applica
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { runAccessCommand } from '../src/cli/access'
 import { runInitCommand } from '../src/cli/init'
-import { runMigrateCommand } from '../src/cli/migrate'
 import {
 	ACCESS_PRESETS_FILENAME,
 	builtInAccessPresetsFile,
@@ -21,7 +20,7 @@ import {
 } from '../src/domain/access-presets/schema'
 import type { HostVersionRecord } from '../src/domain/history/schema'
 import { canonicalJsonBytes, FileNativePersistence, V5_LAYOUT } from '../src/persistence'
-import { PRODUCT_WORKSPACE_SCHEMA_POLICY, WORKSPACE_V5_TO_V6_STEP } from '../src/product/workspace-schema'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { readAccessPresetsForHttp, updateAccessPresetsForHttp } from '../src/server/access-presets-http'
 import { addMember } from '../src/server/access/roster'
 import { AccessService, memberPrincipal } from '../src/server/access/service'
@@ -32,10 +31,10 @@ import { connectMcp, scoped, testMember } from './support/access'
 import { createCurrentWorkspace, v5Manifest, writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
 
 /**
- * The Access presets file, `uiux.v5-to-v6` and `update_access_presets` (issue #142, unit P6):
+ * The Access presets file and `update_access_presets` (issue #142, unit P6):
  * Feature 01a11c09-984a-7835-95ef-67164dd91746, Clauses 01a11c09-a855-…, 01a11c09-a8c3-…,
- * 01a11c09-a930-…, 01a11c09-a9a4-…, 01a11c09-a50e-…, 01a11c09-a57d-…, 01a11485-fa00-…,
- * 01a11485-fa66-…, 01a11c09-a42a-… and 01a11a5e-216d-…, Rule 01a11c09-c6b5-….
+ * 01a11c09-a930-…, 01a11c09-a50e-…, 01a11c09-a57d-…, 01a11485-fa00-…, 01a11485-fa66-…,
+ * 01a11c09-a42a-… and 01a11a5e-216d-….
  */
 
 const roots: string[] = []
@@ -124,57 +123,7 @@ describe('the Access presets file (Clauses 01a11c09-a855, 01a11c09-a8c3 and 01a1
 	})
 })
 
-describe('uiux.v5-to-v6 and uiux init (Clauses 01a11c09-a9a4 and 01a1144e-55a3, Rule 01a11c09-c6b5)', () => {
-	it('adds the presets file with the built-in presets and changes only the manifest schemaVersion', async () => {
-		const root = await makeRoot()
-		await writeManifest(root, canonicalJsonBytes(v5Manifest({ viewports: { phone: { dimensions: { width: 390, height: 844 } } } })), V5_LAYOUT)
-		await writeFile(join(root, 'product-kit.json'), canonicalJsonBytes({ designSystems: [], adapters: [], styles: [], themes: {}, components: {}, widgets: {} }))
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
-		expect((await persistence.inspectWorkspace()).inspection.state).toBe('migration_required')
-		const productKit = await readFile(join(root, 'product-kit.json'))
-		const result = await persistence.migrateWorkspace()
-		expect(result).toMatchObject({ fromVersion: 5, version: 6, steps: ['uiux.v5-to-v6'] })
-		expect([...result.changedFiles].sort()).toEqual(['access-presets.json', 'workspace.json'])
-		expect(JSON.parse(await readFile(join(root, 'workspace.json'), 'utf8'))).toEqual({ ...v5Manifest({ viewports: { phone: { dimensions: { width: 390, height: 844 } } } }), schemaVersion: 6 })
-		expect(await readFile(join(root, 'product-kit.json'))).toEqual(productKit)
-		expect(await readFile(join(root, ACCESS_PRESETS_FILENAME))).toEqual(canonicalJsonBytes(builtInAccessPresetsFile()))
-		expect(await persistence.accessPresets.readInspected()).toMatchObject({ diagnostics: [] })
-	})
-
-	it('makes uiux migrate refuse a schemaVersion 5 Workspace that already holds a presets file, writing nothing, while an in-memory upgrade still reads', async () => {
-		const snapshot = new Map<string, Uint8Array>([
-			['workspace.json', canonicalJsonBytes(v5Manifest())],
-			[ACCESS_PRESETS_FILENAME, canonicalJsonBytes({ presets: [] })],
-		])
-		const refusal = await WORKSPACE_V5_TO_V6_STEP.refuse!(snapshot, { readWorkspaceFile: async () => undefined })
-		expect(refusal?.message).toContain('access-presets.json, which this schemaVersion 5 Workspace already holds')
-		expect((await WORKSPACE_V5_TO_V6_STEP.apply(snapshot)).get(ACCESS_PRESETS_FILENAME)).toEqual(canonicalJsonBytes(builtInAccessPresetsFile()))
-
-		const root = await makeRoot()
-		await writeManifest(root, canonicalJsonBytes(v5Manifest()), V5_LAYOUT)
-		await writeFile(join(root, 'product-kit.json'), canonicalJsonBytes({ designSystems: [], adapters: [], styles: [], themes: {}, components: {}, widgets: {} }))
-		await writeFile(join(root, ACCESS_PRESETS_FILENAME), '{"presets":[]}')
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
-		await expect(persistence.migrateWorkspace()).rejects.toMatchObject({ code: 'workspace.migration_failed' })
-		expect(JSON.parse(await readFile(join(root, 'workspace.json'), 'utf8')).schemaVersion).toBe(5)
-		expect(await readFile(join(root, ACCESS_PRESETS_FILENAME), 'utf8')).toBe('{"presets":[]}')
-	})
-
-	it('reports, when uiux migrate refuses the stray presets file, that no step ran and that the pre-migration Checkpoint stays', async () => {
-		const root = await makeRoot()
-		await writeManifest(root, canonicalJsonBytes(v5Manifest()), V5_LAYOUT)
-		await writeFile(join(root, 'product-kit.json'), canonicalJsonBytes({ designSystems: [], adapters: [], styles: [], themes: {}, components: {}, widgets: {} }))
-		await writeFile(join(root, ACCESS_PRESETS_FILENAME), '{"presets":[]}')
-		const errors: string[] = []
-		expect(await runMigrateCommand({ workspaceRoot: root, dryRun: false, home: join(await makeRoot('uiux-access-presets-home-'), 'home'), stdout: () => undefined, stderr: line => errors.push(line) })).toBe(1)
-		const text = errors.join('\n')
-		expect(text).toContain('uiux.v5-to-v6 writes access-presets.json, which this schemaVersion 5 Workspace already holds, so no migration step ran.')
-		expect(text).toMatch(/The pre-migration Checkpoint \S+ stays in the Workspace\./u)
-		expect(text).not.toContain('nothing was written')
-		expect(JSON.parse(await readFile(join(root, 'workspace.json'), 'utf8')).schemaVersion).toBe(5)
-		expect((await readdir(join(root, 'history', 'checkpoints'))).length).toBe(1)
-	})
-
+describe('uiux init (Clause 01a1144e-55a3)', () => {
 	it('writes the presets file in a new Workspace', async () => {
 		const parent = await makeRoot()
 		const root = join(parent, 'ws')
@@ -205,7 +154,7 @@ describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01
 		await writeFile(join(old, 'product-kit.json'), canonicalJsonBytes({ designSystems: [], adapters: [], styles: [], themes: {}, components: {}, widgets: {} }))
 		const oldApp = createWorkspaceApplicationSession(new FileNativePersistence({ root: old, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }))
 		expect(await readAccessPresetsForHttp(http(oldApp, VIEWER))).toMatchObject({ status: 404 })
-		expect(await updateAccessPresetsForHttp(http(oldApp, OWNER), { expectedRevision: 'r', presets: [] })).toMatchObject({ status: 422, body: { status: 'blocked', code: 'workspace.migration_required' } })
+		expect(await updateAccessPresetsForHttp(http(oldApp, OWNER), { expectedRevision: 'r', presets: [] })).toMatchObject({ status: 422, body: { status: 'blocked', code: 'workspace.schema_unsupported' } })
 	})
 
 	it('finds no presets below schemaVersion 6 even when a stray presets file lies at the path, as labels do (Clause 01a11c09-a855)', async () => {
@@ -217,7 +166,7 @@ describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01
 		expect(await oldApp.readAccessPresets()).toBeUndefined()
 		expect(await readAccessPresetsForHttp(http(oldApp, VIEWER))).toMatchObject({ status: 404, body: { status: 'not_found' } })
 		expect(await readWorkspaceAccessPresets(old)).toBe(BUILT_IN_ACCESS_PRESETS)
-		expect(await updateAccessPresetsForHttp(http(oldApp, OWNER), { expectedRevision: null, presets: [] })).toMatchObject({ status: 422, body: { code: 'workspace.migration_required' } })
+		expect(await updateAccessPresetsForHttp(http(oldApp, OWNER), { expectedRevision: null, presets: [] })).toMatchObject({ status: 422, body: { code: 'workspace.schema_unsupported' } })
 	})
 
 	it('replaces the whole presets array with compare-and-swap, keys stored in catalog order, and an empty array is valid (Rule 01a11c09-c78f)', async () => {

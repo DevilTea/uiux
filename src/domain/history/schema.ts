@@ -102,7 +102,6 @@ const BASE_KEYS = ['historySchemaVersion', 'id', 'type', 'actor', 'at', 'workspa
 const CHECKPOINT_KEYS = [...BASE_KEYS, 'name', 'note', 'source', 'parentCheckpoint'] as const
 const HOST_VERSION_KEYS = [...BASE_KEYS, 'parent', 'startedAt', 'netChange', 'events', 'restoredFrom', 'recordingGap'] as const
 const STAMPED_ACTOR_ID = /^member:.+$/su
-const MIGRATION_CHECKPOINT_NAME = /^Before migration to schemaVersion [1-9]\d*$/u
 
 /** Dispatches on `type`: `checkpoint` records and host (`autosave`, `external`, `system`) versions. */
 export function validateVersionRecord(input: unknown, path = ''): ValidationResult<VersionRecord> {
@@ -304,8 +303,6 @@ function validateSystemCheckpointName(record: Record<string, unknown>, path: str
 	const actorId = isRecord(record.actor) && record.actor.type === 'system' ? record.actor.id : undefined
 	if (actorId === 'system:baseline' && record.name !== BASELINE_CHECKPOINT_NAME)
 		v.issue('history.invalid_system_checkpoint_name', `${path}/name`, `The first-start system Checkpoint is named ${BASELINE_CHECKPOINT_NAME}.`)
-	if (actorId === 'system:migrate' && (typeof record.name !== 'string' || !MIGRATION_CHECKPOINT_NAME.test(record.name)))
-		v.issue('history.invalid_system_checkpoint_name', `${path}/name`, 'The migration system Checkpoint is named Before migration to schemaVersion <N>.')
 }
 
 function isOneOf<T extends string>(values: readonly T[], value: unknown): value is T {

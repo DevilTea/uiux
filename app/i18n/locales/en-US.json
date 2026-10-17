@@ -2567,7 +2567,6 @@
     "actor": {
       "external": "Outside UIUX",
       "system": "System",
-      "migrate": "Migration",
       "baseline": "History start",
       "unknown": "Someone"
     },
@@ -2741,8 +2740,7 @@
     },
     "emptyFilteredMore": "None of the loaded versions match. Load older versions to look further back.",
     "systemName": {
-      "baseline": "History start",
-      "migrate": "Before migrating to schemaVersion {version}"
+      "baseline": "History start"
     },
     "restore": {
       "action": "Restore this version",

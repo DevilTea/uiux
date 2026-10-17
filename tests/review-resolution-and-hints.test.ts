@@ -1,8 +1,6 @@
-import { spawnSync } from 'node:child_process'
 import { access, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -10,7 +8,7 @@ import { createWorkspaceApplicationSession } from '../src/application/services/w
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import type { ReviewThread } from '../src/domain/reviews/schema'
 import { RESOLVE_REVIEW_THREAD_DESCRIPTION } from '../src/mcp/server'
-import { FileNativePersistence } from '../src/persistence'
+import { FileNativePersistence, readActiveServerHold } from '../src/persistence'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import {
 	createReviewThreadForHttp,
@@ -30,7 +28,6 @@ const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const REVIEW_ID = '44444444-4444-4444-8444-444444444444'
 const SECOND_REVIEW_ID = '77777777-7777-4777-8777-777777777777'
 const THIRD_REVIEW_ID = '88888888-8888-4888-8888-888888888888'
-const CLI = join(fileURLToPath(new URL('..', import.meta.url)), 'bin', 'uiux.mjs')
 /** The Workbench reviewer: a human member on a cookie session; actors are server-stamped from it. */
 const MEI = testMember({ nickname: 'mei', kind: 'human', role: 'reviewer', credential: 'session' })
 const AGENT_SESSION = testMember({ nickname: 'qa-bot', kind: 'agent', role: 'editor', credential: 'session' })
@@ -359,7 +356,7 @@ describe('Review pin display hint', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, 
 })
 
 describe('packaged Workbench server routes (requires pnpm build)', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
-	it('serves display-hint and resolution routes, holds its Workspace, and makes uiux migrate refuse while running', async () => {
+	it('serves display-hint and resolution routes, and holds its Workspace while running', async () => {
 		const server = await startWorkbenchServer()
 		try {
 			await access(join(server.workspaceRoot, CURRENT_TEST_LAYOUT.serverHoldPath))
@@ -387,9 +384,7 @@ describe('packaged Workbench server routes (requires pnpm build)', { timeout: HE
 			expect(read.resource.displayHint).toEqual({ pin: { x: 0.75, y: 0.25 } })
 			expect(read.resource.history.at(-1)).toMatchObject({ to: 'resolved', resolution: 'answered' })
 
-			const refused = spawnSync(process.execPath, [CLI, 'migrate', '--workspace', server.workspaceRoot], { encoding: 'utf8' })
-			expect(refused.status).toBe(1)
-			expect(refused.stderr).toContain('refusing to migrate')
+			expect(await readActiveServerHold(server.workspaceRoot, CURRENT_TEST_LAYOUT)).toMatchObject({ pid: expect.any(Number) })
 		}
 		finally { await server.close() }
 	}, 60_000)

@@ -2567,7 +2567,6 @@
     "actor": {
       "external": "UIUX 之外",
       "system": "系統",
-      "migrate": "遷移",
       "baseline": "歷程起點",
       "unknown": "某人"
     },
@@ -2741,8 +2740,7 @@
     },
     "emptyFilteredMore": "已載入的版本中沒有符合的項目。請載入較早的版本以繼續查看。",
     "systemName": {
-      "baseline": "歷程起點",
-      "migrate": "遷移到 schemaVersion {version} 之前"
+      "baseline": "歷程起點"
     },
     "restore": {
       "action": "還原這個版本",

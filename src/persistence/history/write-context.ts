@@ -9,7 +9,7 @@ import { isFullUuid } from '../../domain/validation'
  * design operation, through which source, and which operation it is. The application layer sets
  * it around one design write; persistence reads it to decide whether to call its history
  * observer. Without a context no observer hook is ever called, so in-process writes (tests, the
- * CLI, migration) stay invisible to history unless their caller opts in.
+ * CLI) stay invisible to history unless their caller opts in.
  *
  * `restoredFrom` names the version a `restoreResourceVersion` copied (Clause
  * 01a11a5e-20c6-7573-8530-e6fed6d8d4af).

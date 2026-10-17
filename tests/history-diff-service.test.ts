@@ -17,7 +17,6 @@ import {
 	FileNativePersistence,
 	canonicalJsonBytes,
 	defineWorkspaceSchemaPolicy,
-	LEGACY_LAYOUT,
 	layoutForSchemaVersion,
 	localeRelativePath,
 	viewRelativePath,
@@ -31,7 +30,7 @@ import { createHistoryStoreFactory, type HistoryStores } from '../src/server/his
 import { diffVersionsForHttp } from '../src/server/history-http'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { bearer, connectMcp, provisionToken, scoped, testMember } from './support/access'
-import { currentManifest, manifestPath, V4_TEST_SCHEMA_POLICY, writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
+import { currentManifest, manifestPath, writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
 
 /**
  * Version comparison through the service, `GET /api/history/diff` and MCP `get_version_diff`
@@ -67,18 +66,6 @@ async function workspace(): Promise<Context> {
 	// Hand-written (not canonical) JSON, as a Workspace edited outside UIUX has.
 	await writeCurrentWorkspace(root, SETTINGS)
 	return seeded(root, home, new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }))
-}
-
-/**
- * The same Workspace at `schemaVersion` 4, in the old layout under a build where 4 is current, for
- * the comparisons across schema versions 1 to 4.
- */
-async function legacyWorkspace(): Promise<Context> {
-	const root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-')))
-	const home = await realpath(await mkdtemp(join(tmpdir(), 'uiux-history-diff-home-')))
-	cleanup.push(root, home)
-	await writeManifest(root, `${JSON.stringify(MANIFEST, null, 2)}\n`, LEGACY_LAYOUT)
-	return seeded(root, home, new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY }))
 }
 
 async function seeded(root: string, home: string, persistence: FileNativePersistence): Promise<Context> {
@@ -131,8 +118,6 @@ async function record(ctx: Context, type: 'checkpoint' | 'autosave', options: Re
 	await ctx.stores.host.writeVersion(version)
 	return version.id
 }
-
-const json = (value: unknown) => new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`)
 
 function compared(outcome: VersionDiffOutcome): VersionDiffResult {
 	expect(outcome.status, JSON.stringify(outcome)).toBe('compared')
@@ -208,43 +193,6 @@ describe('diffVersions', () => {
 		const firstVersion = compared(await ctx.app.diffVersions({ from: { parentOf: first } }))
 		expect(firstVersion.from).toBeNull()
 		expect(new Set(firstVersion.summary.map(row => row.status))).toEqual(new Set(['added']))
-	})
-
-	it('shows no manifest change across the v3 to v4 migration (Rules 01a11a5e-118c-733d-92d7-27262bfbcd33 and 01a11a5e-1085-71ec-ac82-d60263ae8173)', async () => {
-		const ctx = await legacyWorkspace()
-		const manifestV3 = (overrides: Record<string, unknown> = {}) => (snapshot: Map<string, Uint8Array>) => {
-			snapshot.set(workspaceRelativePath(), json({ ...MANIFEST, schemaVersion: 3, ...overrides }))
-			snapshot.set(viewRelativePath(VIEW_ID), json(view({ name: 'Before migration' })))
-		}
-		const sameSettings = await record(ctx, 'autosave', { at: '2026-10-01T00:00:00.000Z', workspaceSchemaVersion: 3, edit: manifestV3() })
-		const otherLocale = await record(ctx, 'autosave', { at: '2026-10-02T00:00:00.000Z', workspaceSchemaVersion: 3, edit: manifestV3({ i18n: { defaultLocale: 'zh-TW' } }) })
-
-		for (const detail of ['summary', 'semantic'] as const) {
-			const result = compared(await ctx.app.diffVersions({ from: sameSettings, detail }))
-			expect(result.from).toMatchObject({ workspaceSchemaVersion: 3 })
-			expect(statuses(result)).toMatchObject({ 'workspace:workspace': 'unchanged', [`view:${VIEW_ID}`]: 'modified', 'locale:en-US': 'unchanged' })
-			if (detail === 'semantic') expect(result.changes!.map(change => change.kind)).toEqual(['view'])
-		}
-		const changed = compared(await ctx.app.diffVersions({ from: otherLocale, detail: 'semantic', resources: [{ kind: 'workspace', key: 'workspace' }] }))
-		expect(changed.changes).toEqual([{ kind: 'workspace', key: 'workspace', status: 'modified', diff: { type: 'workspace', defaultLocale: { before: 'zh-TW', after: 'en-US' } } }])
-		expect(JSON.stringify(changed)).not.toContain('schemaVersion')
-	})
-
-	it('gives the same summary at every detail for two versions recorded under the same older schema', async () => {
-		const ctx = await legacyWorkspace()
-		const recordV3 = (at: string, manifestBytes: Uint8Array) => record(ctx, 'autosave', {
-			at,
-			workspaceSchemaVersion: 3,
-			edit: snapshot => snapshot.set(workspaceRelativePath(), manifestBytes),
-		})
-		// The manifests differ in whitespace only; upgrading both would canonicalize them alike.
-		const pretty = await recordV3('2026-10-01T00:00:00.000Z', json({ ...MANIFEST, schemaVersion: 3 }))
-		const compact = await recordV3('2026-10-02T00:00:00.000Z', new TextEncoder().encode(`${JSON.stringify({ ...MANIFEST, schemaVersion: 3 })}\n`))
-		const summary = compared(await ctx.app.diffVersions({ from: pretty, to: compact }))
-		const semantic = compared(await ctx.app.diffVersions({ from: pretty, to: compact, detail: 'semantic' }))
-		expect(semantic.summary).toEqual(summary.summary)
-		expect(statuses(summary)['workspace:workspace']).toBe('modified')
-		expect(semantic.changes).toEqual([{ kind: 'workspace', key: 'workspace', status: 'modified', diff: { type: 'workspace' } }])
 	})
 
 	it('upgrades an older side in memory with the policy steps before comparing, so a migration adds no change', async () => {
