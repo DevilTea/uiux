@@ -42,8 +42,8 @@ const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const ASSET_ID = '44444444-4444-4444-8444-444444444444'
 const HUMAN = { type: 'human', id: 'member:m-owner', displayName: 'deviltea' } as const
 const AGENT = { type: 'agent', id: 'member:m-agent', displayName: 'claude' } as const
-const VIEWER = testMember({ nickname: 'vera', kind: 'human', role: 'viewer', credential: 'session' })
-const AGENT_VIEWER = testMember({ nickname: 'watcher', kind: 'agent', role: 'viewer', credential: 'token' })
+const VIEWER = testMember({ nickname: 'vera', kind: 'human', preset: 'viewer', credential: 'session' })
+const AGENT_VIEWER = testMember({ nickname: 'watcher', kind: 'agent', preset: 'viewer', credential: 'token' })
 
 const cleanup: string[] = []
 afterEach(async () => {
@@ -371,7 +371,7 @@ describe('GET /api/history/diff access (Clause 01a11485-f978-767a-b977-33028aee7
 	})
 
 	it('answers a Viewer and refuses the system credential', async () => {
-		const viewerToken = await provisionToken(root, { nickname: 'vera', kind: 'human', role: 'viewer' })
+		const viewerToken = await provisionToken(root, { nickname: 'vera', kind: 'human', preset: 'viewer' })
 		const allowed = await fetch(`${origin}/api/history/diff?from=${checkpointId}&resource=${encodeURIComponent('locale:en-US')}`, { headers: bearer(viewerToken) })
 		expect(allowed.status).toBe(200)
 		expect(allowed.headers.get('cache-control')).toBe('no-store')

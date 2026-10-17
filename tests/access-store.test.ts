@@ -33,9 +33,9 @@ import {
 	SESSION_IDLE_MS,
 	type AccessFile,
 } from '../src/server/access/roster'
-import { keysForRole } from '../src/application/access/keys'
 import { sessionServesOrigin } from '../src/server/access/service'
 import { AccessStore, accessStorePaths, workspaceStoreId } from '../src/server/access/store'
+import { presetKeys } from './support/access'
 
 const cleanup: string[] = []
 afterEach(async () => {
@@ -61,8 +61,8 @@ const NOW = new Date('2026-10-05T12:00:00Z')
 
 function rosterWithOwner(): AccessFile {
 	let file = createEmptyAccessFile('/work/design', 'k3x7')
-	file = addMember(file, { nickname: 'deviltea', role: 'owner' }, NOW).file
-	file = addMember(file, { nickname: 'claude', role: 'editor', kind: 'agent' }, NOW).file
+	file = addMember(file, { nickname: 'deviltea', keys: presetKeys('owner') }, NOW).file
+	file = addMember(file, { nickname: 'claude', keys: presetKeys('editor', 'agent'), kind: 'agent' }, NOW).file
 	return file
 }
 
@@ -110,30 +110,29 @@ describe('credential format', () => {
 describe('roster rules', () => {
 	it('enforces nickname shape and case-insensitive uniqueness, and sanitizes OS user names', () => {
 		const file = rosterWithOwner()
-		expectAccessError(() => addMember(file, { nickname: 'Bad Name', role: 'viewer' }), 'access.invalid_nickname')
-		expectAccessError(() => addMember(file, { nickname: '-dash', role: 'viewer' }), 'access.invalid_nickname')
-		expectAccessError(() => addMember(file, { nickname: 'a'.repeat(33), role: 'viewer' }), 'access.invalid_nickname')
-		expectAccessError(() => addMember(file, { nickname: 'claude', role: 'viewer' }), 'access.nickname_taken')
-		expectAccessError(() => addMember(file, { nickname: 'x', role: 'admin' }), 'access.invalid_role')
-		expectAccessError(() => addMember(file, { nickname: 'x', role: 'viewer', kind: 'robot' }), 'access.invalid_kind')
-		expect(addMember(file, { nickname: 'mei.l_2-x', role: 'reviewer' }).result).toMatchObject({ kind: 'human', keys: keysForRole('human', 'reviewer') })
+		expectAccessError(() => addMember(file, { nickname: 'Bad Name', keys: presetKeys('viewer') }), 'access.invalid_nickname')
+		expectAccessError(() => addMember(file, { nickname: '-dash', keys: presetKeys('viewer') }), 'access.invalid_nickname')
+		expectAccessError(() => addMember(file, { nickname: 'a'.repeat(33), keys: presetKeys('viewer') }), 'access.invalid_nickname')
+		expectAccessError(() => addMember(file, { nickname: 'claude', keys: presetKeys('viewer') }), 'access.nickname_taken')
+		expectAccessError(() => addMember(file, { nickname: 'x', keys: presetKeys('viewer'), kind: 'robot' }), 'access.invalid_kind')
+		expect(addMember(file, { nickname: 'mei.l_2-x', keys: presetKeys('reviewer') }).result).toMatchObject({ kind: 'human', keys: presetKeys('reviewer') })
 		expect(sanitizeNickname('William Chen')).toBe('william-chen')
 		expect(sanitizeNickname('___')).toBe('owner')
 		expect(sanitizeNickname(undefined)).toBe('owner')
 	})
 
-	it('refuses the Owner role\'s humanOnly keys for an Agent, keeps kind immutable and protects the last human manager', () => {
+	it('refuses the Owner preset\'s humanOnly keys for an Agent, keeps kind immutable and protects the last human manager', () => {
 		const file = rosterWithOwner()
-		expectAccessError(() => addMember(file, { nickname: 'bot', role: 'owner', kind: 'agent' }), 'access.key_human_only')
-		expectAccessError(() => setMember(file, 'claude', { role: 'owner' }), 'access.key_human_only')
+		expectAccessError(() => addMember(file, { nickname: 'bot', keys: presetKeys('owner'), kind: 'agent' }), 'access.key_human_only')
+		expectAccessError(() => setMember(file, 'claude', { keys: presetKeys('owner') }), 'access.key_human_only')
 		expectAccessError(() => setMember(file, 'claude', { kind: 'human' }), 'access.kind_immutable')
-		expectAccessError(() => setMember(file, 'deviltea', { role: 'editor' }), 'access.last_manager')
+		expectAccessError(() => setMember(file, 'deviltea', { keys: presetKeys('editor') }), 'access.last_manager')
 		expectAccessError(() => removeMember(file, 'deviltea'), 'access.last_manager')
-		const withSecond = addMember(file, { nickname: 'mei', role: 'owner' }).file
-		expect(setMember(withSecond, 'deviltea', { role: 'editor' }).result.keys).toEqual(keysForRole('human', 'editor'))
+		const withSecond = addMember(file, { nickname: 'mei', keys: presetKeys('owner') }).file
+		expect(setMember(withSecond, 'deviltea', { keys: presetKeys('editor') }).result.keys).toEqual(presetKeys('editor'))
 		expect(setMember(file, 'claude', { nickname: 'claude-main' }).result.nickname).toBe('claude-main')
 		expectAccessError(() => setMember(file, 'claude', { nickname: 'deviltea' }), 'access.nickname_taken')
-		expectAccessError(() => setMember(file, 'ghost', { role: 'viewer' }), 'access.member_not_found')
+		expectAccessError(() => setMember(file, 'ghost', { keys: presetKeys('viewer') }), 'access.member_not_found')
 	})
 
 	it('issues 90-day tokens by default, honours --expires never, and verifies by id + hash', () => {
@@ -242,42 +241,37 @@ describe('host-local access store', () => {
 		expect(await AccessStore.open({ workspaceRoot: join(base, 'other'), home }).catch((error: AccessError) => error.code)).toBe('access.workspace_invalid')
 	})
 
-	it('keeps loading rosters written before configured origins: Token LAN flags and session listeners', async () => {
+	it('refuses a roster whose Token carries `lan` or whose session carries `listener`, naming the field, and leaves it unchanged (Clause 01a14917-7898)', async () => {
 		const { workspace, home } = await workspaceAndHome()
 		await AccessStore.open({ workspaceRoot: workspace, home, create: true })
 		const paths = accessStorePaths(home, workspace)
 		let file = JSON.parse(await readFile(paths.file, 'utf8')) as AccessFile
-		file = addMember(file, { nickname: 'deviltea', role: 'owner' }, NOW).file
-		file = addMember(file, { nickname: 'claude', role: 'editor', kind: 'agent' }, NOW).file
+		file = addMember(file, { nickname: 'deviltea', keys: presetKeys('owner') }, NOW).file
+		file = addMember(file, { nickname: 'claude', keys: presetKeys('editor', 'agent'), kind: 'agent' }, NOW).file
 		const token = createToken(file, { nickname: 'claude' }, NOW)
 		const invite = createInvite(token.file, { nickname: 'deviltea' }, NOW)
 		const verified = verifyCredential(invite.file, invite.result.credential, NOW.getTime())
 		if (!verified.ok) throw new Error('invite should verify')
 		const login = loginWithCredential(invite.file, verified, { origin: 'http://127.0.0.1:3000', userAgent: 'old' }, NOW)
-		// The shape an earlier UIUX wrote: `lan` on every Token, `listener` instead of `origin` on sessions.
-		const legacy = {
-			...login.file,
-			tokens: login.file.tokens.map(item => ({ ...item, lan: true })),
-			sessions: login.file.sessions.map(item => ({ ...item, origin: undefined, listener: 'loopback' as const })),
+		// The shapes a UIUX before Discussion #174 wrote: `lan` on a Token, `listener` instead of `origin` on a session.
+		const withLan = { ...login.file, tokens: login.file.tokens.map(item => ({ ...item, lan: false })) }
+		const { origin: _origin, ...session } = login.file.sessions[0]!
+		void _origin
+		const withListener = { ...login.file, sessions: [{ ...session, listener: 'loopback' }] }
+		for (const [roster, field] of [[withLan, 'lan'], [withListener, 'listener']] as const) {
+			const text = `${JSON.stringify(roster, null, 2)}\n`
+			await writeFile(paths.file, text)
+			const refused = await AccessStore.open({ workspaceRoot: workspace, home }).then(() => undefined, (error: unknown) => error)
+			expect(refused).toBeInstanceOf(AccessError)
+			expect((refused as AccessError).code).toBe('access.store_invalid')
+			expect((refused as AccessError).message).toContain(paths.file)
+			expect((refused as AccessError).message).toContain(`\`${field}\``)
+			expect(await readFile(paths.file, 'utf8')).toBe(text)
 		}
-		await writeFile(paths.file, `${JSON.stringify(legacy, null, 2)}\n`)
-		const reopened = (await AccessStore.open({ workspaceRoot: workspace, home }))!
-		const now = NOW.getTime()
-		expect(verifyCredential(reopened.data, token.result.credential, now)).toMatchObject({ ok: true, kind: 'token' })
-		const session = verifyCredential(reopened.data, login.result.cookieValue, now)
-		expect(session).toMatchObject({ ok: true, kind: 'session' })
-		// A Token created with --lan behaves like any other; a legacy session is a loopback session.
-		if (!session.ok) throw new Error('session should verify')
-		expect(sessionServesOrigin(session.session!, { origin: 'http://localhost:3000', loopbackHost: true })).toBe(true)
-		expect(sessionServesOrigin(session.session!, { origin: 'https://uiux.corp.example', loopbackHost: false })).toBe(false)
-		expect(sessionServesOrigin({ ...session.session!, listener: 'lan' }, { origin: 'http://localhost:3000', loopbackHost: true })).toBe(false)
-		// Writing keeps the legacy fields it does not understand, and new sessions carry their origin.
-		await reopened.update(current => ({ file: current, result: undefined }))
-		expect(JSON.parse(await readFile(paths.file, 'utf8')).tokens[0]).toMatchObject({ lan: true })
-
-		const invalid = { ...legacy, sessions: legacy.sessions.map(item => ({ ...item, listener: undefined })) }
-		expectAccessError(() => validateAccessFile(invalid), 'access.store_invalid')
-		expectAccessError(() => validateAccessFile({ ...legacy, tokens: legacy.tokens.map(item => ({ ...item, lan: 'yes' })) }), 'access.store_invalid')
+		// Even alongside an `origin`, a `listener` is refused.
+		expectAccessError(() => validateAccessFile({ ...login.file, sessions: login.file.sessions.map(item => ({ ...item, listener: 'loopback' })) }), 'access.store_invalid')
+		// A session without an `origin` is invalid.
+		expectAccessError(() => validateAccessFile({ ...login.file, sessions: [session] }), 'access.store_invalid')
 	})
 
 	it('binds a session to the origin it was created on, with loopback origins sharing one scope', () => {
@@ -326,7 +320,7 @@ describe('host-local access store', () => {
 		const { workspace, home } = await workspaceAndHome()
 		const first = (await AccessStore.open({ workspaceRoot: workspace, home, create: true }))!
 		const second = (await AccessStore.open({ workspaceRoot: workspace, home }))!
-		await Promise.all(Array.from({ length: 12 }, (_, index) => (index % 2 ? first : second).update(file => addMember(file, { nickname: `m${index}`, role: 'viewer' }))))
+		await Promise.all(Array.from({ length: 12 }, (_, index) => (index % 2 ? first : second).update(file => addMember(file, { nickname: `m${index}`, keys: presetKeys('viewer') }))))
 		await second.refresh({ force: true })
 		await first.refresh({ force: true })
 		expect(first.data.members.map(member => member.nickname).sort()).toEqual(Array.from({ length: 12 }, (_, index) => `m${index}`).sort())

@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
-import { keysForRole, type PermissionKey } from '../src/application/access/keys'
-import { bearer, provisionToken, sessionCookieFor } from './support/access'
+import { type PermissionKey } from '../src/application/access/keys'
+import { bearer, presetKeys, provisionToken, sessionCookieFor } from './support/access'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
@@ -89,9 +89,9 @@ async function resolveThread(key: string): Promise<void> {
 	await owner(`/api/reviews/${key}/resolve`, { expectedRevision: read.revision, resolution: 'answered' })
 }
 
-const OWNER = keysForRole('human', 'owner')
-const EDITOR = keysForRole('human', 'editor')
-const VIEWER = keysForRole('human', 'viewer')
+const OWNER = presetKeys('owner')
+const EDITOR = presetKeys('editor')
+const VIEWER = presetKeys('viewer')
 
 describe('the header and the Members page follow `members.manage`', () => {
 	it('lets a member holding `members.manage` without the full Owner set open Members, labeled Custom', async () => {
@@ -209,7 +209,7 @@ describe('authoring pages follow their own write key', () => {
 
 describe('lock release follows `locks.force-release`', () => {
 	it('offers Release lock to a holder of the key alone and not to an Editor', async () => {
-		const agent = await provisionToken(server.workspaceRoot, { nickname: `p4-agent-${unique()}`, kind: 'agent', role: 'editor' })
+		const agent = await provisionToken(server.workspaceRoot, { nickname: `p4-agent-${unique()}`, kind: 'agent', preset: 'editor' })
 		const locale = 'fr'
 		const created = await fetch(`${server.origin}/api/locales`, { method: 'POST', headers: { 'content-type': 'application/json', ...bearer(agent) }, body: JSON.stringify({ locale, messages: { greeting: 'Hi' } }) })
 		expect(created.status, await created.clone().text()).toBeLessThan(300)
@@ -339,7 +339,7 @@ describe('history and Review actions follow their keys', () => {
 		finally { await commenter.context.close() }
 
 		// A Reviewer is offered Resolve, as before keys.
-		const reviewer = await open(`/reviews?thread=${created.key}`, await memberCookie(keysForRole('human', 'reviewer')))
+		const reviewer = await open(`/reviews?thread=${created.key}`, await memberCookie(presetKeys('reviewer')))
 		try {
 			await detail(reviewer.page).locator('[data-review-resolve]').waitFor({ timeout: 15_000 })
 		}
@@ -349,7 +349,7 @@ describe('history and Review actions follow their keys', () => {
 		const read = await (await fetch(`${server.origin}/api/resources/review/${created.key}`, { headers: server.headers })).json() as { revision: string }
 		const resolved = await fetch(`${server.origin}/api/reviews/${created.key}/resolve`, { method: 'POST', headers: { 'content-type': 'application/json', ...server.headers }, body: JSON.stringify({ expectedRevision: read.revision, resolution: 'answered' }) })
 		expect(resolved.status, await resolved.clone().text()).toBeLessThan(300)
-		const submitter = await open(`/reviews?status=resolved&thread=${created.key}`, await memberCookie(keysForRole('human', 'reviewer')))
+		const submitter = await open(`/reviews?status=resolved&thread=${created.key}`, await memberCookie(presetKeys('reviewer')))
 		try {
 			await detail(submitter.page).locator('[data-review-reopen]').waitFor({ timeout: 15_000 })
 		}

@@ -793,7 +793,7 @@ async function sessionWith(control: KitBuildControl | undefined) {
 	return { root, app: createWorkspaceApplicationSession(persistence, control ? { kitBuild: control } : {}) }
 }
 
-const EDITOR_AGENT = testMember({ nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' })
+const EDITOR_AGENT = testMember({ nickname: 'claude', kind: 'agent', preset: 'editor', credential: 'token' })
 const READER_AGENT = testMember({ nickname: 'reader', kind: 'agent', credential: 'token', keys: ['workspace.read', 'product-kit.source.read'] })
 const BARE_READER = testMember({ nickname: 'bare', kind: 'human', credential: 'session', keys: ['workspace.read'] })
 

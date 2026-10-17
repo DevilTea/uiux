@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BUILT_IN_ACCESS_PRESETS, keysForRole } from '../src/application/access/keys'
+import { BUILT_IN_ACCESS_PRESETS } from '../src/application/access/keys'
 import type { MemberKind } from '../src/application/access/principal'
 import type { AccessPreset } from '../src/domain/access-presets/schema'
 import {
@@ -12,13 +12,14 @@ import {
 	sameKeySet,
 	unknownPresetKeys,
 } from '../app/utils/access-presets'
+import { presetKeys } from './support/access'
 
 /** The Access presets page's rules (issue #142, P7), without the page. */
 
 const PRESETS: AccessPreset[] = BUILT_IN_ACCESS_PRESETS.map(preset => ({ id: preset.id, name: preset.name, keys: [...preset.keys] }))
-const VIEWER = keysForRole('human', 'viewer')
-const REVIEWER = keysForRole('human', 'reviewer')
-const EDITOR = keysForRole('human', 'editor')
+const VIEWER = presetKeys('viewer')
+const REVIEWER = presetKeys('reviewer')
+const EDITOR = presetKeys('editor')
 
 const member = (id: string, kind: MemberKind, keys: readonly string[]) => ({ id, nickname: id, kind, keys: [...keys] })
 
@@ -62,7 +63,7 @@ describe('the members on this host after an edit', () => {
 	const members = [
 		member('ann', 'human', REVIEWER),
 		member('bob', 'human', EDITOR),
-		member('bot', 'agent', keysForRole('agent', 'reviewer')),
+		member('bot', 'agent', presetKeys('reviewer', 'agent')),
 		member('odd', 'human', [...REVIEWER, 'future.key']),
 	]
 	const reviewer = PRESETS[1]!

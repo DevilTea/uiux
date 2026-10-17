@@ -32,9 +32,9 @@ import { createCurrentWorkspace, metadataPath } from './support/workspace-layout
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const REVIEW_ID = '22222222-2222-4222-8222-222222222222'
-const MEI = testMember({ nickname: 'mei', kind: 'human', role: 'reviewer', credential: 'session' })
-const RUI = testMember({ nickname: 'rui', kind: 'human', role: 'owner', credential: 'session' })
-const VIEWER = testMember({ nickname: 'vera', kind: 'human', role: 'viewer', credential: 'session' })
+const MEI = testMember({ nickname: 'mei', kind: 'human', preset: 'reviewer', credential: 'session' })
+const RUI = testMember({ nickname: 'rui', kind: 'human', preset: 'owner', credential: 'session' })
+const VIEWER = testMember({ nickname: 'vera', kind: 'human', preset: 'viewer', credential: 'session' })
 const roots: string[] = []
 
 afterEach(async () => {

@@ -29,8 +29,8 @@ const REVIEW_ID = '44444444-4444-4444-8444-444444444444'
 const SECOND_REVIEW_ID = '77777777-7777-4777-8777-777777777777'
 const THIRD_REVIEW_ID = '88888888-8888-4888-8888-888888888888'
 /** The Workbench reviewer: a human member on a cookie session; actors are server-stamped from it. */
-const MEI = testMember({ nickname: 'mei', kind: 'human', role: 'reviewer', credential: 'session' })
-const AGENT_SESSION = testMember({ nickname: 'qa-bot', kind: 'agent', role: 'editor', credential: 'session' })
+const MEI = testMember({ nickname: 'mei', kind: 'human', preset: 'reviewer', credential: 'session' })
+const AGENT_SESSION = testMember({ nickname: 'qa-bot', kind: 'agent', preset: 'editor', credential: 'session' })
 const human = principalActor(MEI)
 const agent = principalActor(AGENT_EDITOR)
 const roots: string[] = []
@@ -176,7 +176,7 @@ describe('resolve_review_thread on /mcp always refuses', { timeout: HEAVY_SERVER
 
 			// The refusal order is keyed on the principal, not on the payload (identity decision 7):
 			// a claimed `actor` changes nothing.
-			const humanClient = await connectedClient(ctx.app, testMember({ nickname: 'lead', kind: 'human', role: 'owner', credential: 'token' }))
+			const humanClient = await connectedClient(ctx.app, testMember({ nickname: 'lead', kind: 'human', preset: 'owner', credential: 'token' }))
 			const cases: Array<[typeof client, Record<string, unknown>, string]> = [
 				[humanClient.client, {}, 'review.resolve_requires_workbench'],
 				[humanClient.client, { resolution: 'answered' }, 'review.resolve_requires_workbench'],

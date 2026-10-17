@@ -2023,7 +2023,6 @@
       "invalid_label": "標籤無效。",
       "invalid_nickname": "暱稱只能使用小寫字母、數字與連字號。",
       "invalid_keys": "這些權限鍵無效。",
-      "invalid_role": "沒有這個角色。",
       "invite_human_only": "登入連結只能給人員使用。請改為 Agent 建立 Token。",
       "key_human_only": "Agent 不能持有僅限人員的權限鍵。",
       "key_requires": "這些權限鍵需要成員尚未持有的其他權限鍵。",

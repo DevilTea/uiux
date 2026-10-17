@@ -52,7 +52,7 @@ export async function startWorkbenchServer(options: Readonly<{ prepare?: (worksp
 		// its Adapter is in kit/. The private copy is served as copied.
 		await cp(WORKBENCH_FIXTURE_WORKSPACE, workspaceRoot, { recursive: true })
 		await options.prepare?.(workspaceRoot)
-		token = await provisionToken(workspaceRoot, { nickname: 'tester', kind: 'human', role: 'owner' })
+		token = await provisionToken(workspaceRoot, { nickname: 'tester', kind: 'human', preset: 'owner' })
 	}
 	catch (error) {
 		// A copy that never served leaves nothing behind in the repository.

@@ -172,7 +172,7 @@ describe('version timeline in Activity', () => {
 
 	it('filters by actor, by resource kind and to Checkpoints only', async () => {
 		const agentNickname = `b8-agent-${unique()}`
-		const agentToken = await provisionToken(server.workspaceRoot, { nickname: agentNickname, kind: 'agent', role: 'editor' })
+		const agentToken = await provisionToken(server.workspaceRoot, { nickname: agentNickname, kind: 'agent', preset: 'editor' })
 		const name = `b8 filters ${unique()}`
 		await checkpoint(`b8-before-${unique()}`)
 		await editViewIntent(`Filters ${unique()}`)
@@ -401,7 +401,7 @@ describe('View history panel', () => {
 
 describe('Checkpoints', () => {
 	it('creates a Checkpoint from the toolbar and the command palette, warning while an Agent holds a lease', async () => {
-		const agentToken = await provisionToken(server.workspaceRoot, { nickname: `b8-lease-${unique()}`, kind: 'agent', role: 'editor' })
+		const agentToken = await provisionToken(server.workspaceRoot, { nickname: `b8-lease-${unique()}`, kind: 'agent', preset: 'editor' })
 		await api('/api/locales', { locale: 'fr', messages: { greeting: 'Bonjour' } }, 'POST', bearer(agentToken))
 		const name = `b8 created ${unique()}`
 		const { context, page } = await open('/?tab=activity')
@@ -489,7 +489,7 @@ describe('Checkpoints', () => {
 		}
 		finally { await context.close() }
 
-		const editorToken = await provisionToken(server.workspaceRoot, { nickname: `b8-editor-${unique()}`, kind: 'human', role: 'editor' })
+		const editorToken = await provisionToken(server.workspaceRoot, { nickname: `b8-editor-${unique()}`, kind: 'human', preset: 'editor' })
 		const cookie = await sessionCookieFor(server.origin, editorToken)
 		const other = await checkpoint(`b8 kept ${unique()}`)
 		const editor = await open('/?tab=activity', { cookie })
@@ -502,7 +502,7 @@ describe('Checkpoints', () => {
 		finally { await editor.context.close() }
 
 		// A Viewer reads the timeline but is offered neither Create nor Delete.
-		const viewerToken = await provisionToken(server.workspaceRoot, { nickname: `b8-viewer-${unique()}`, kind: 'human', role: 'viewer' })
+		const viewerToken = await provisionToken(server.workspaceRoot, { nickname: `b8-viewer-${unique()}`, kind: 'human', preset: 'viewer' })
 		const viewer = await open('/?tab=activity', { cookie: await sessionCookieFor(server.origin, viewerToken) })
 		try {
 			await row(viewer.page, other).waitFor({ timeout: 15_000 })

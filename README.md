@@ -87,7 +87,7 @@ uiux session list|revoke ...
 uiux access copy --from <old-dir> --workspace <new-dir> [--replace]
 ```
 
-Rosters are not downgrade-compatible: a roster that this version has written, for example with a session that records its origin, may not load in an older UIUX ([owner ruling 3, Discussion #174](https://github.com/DevilTea/uiux/discussions/174#discussioncomment-18849995)). Rosters written by older versions keep loading. The first command or server that opens a roster written with roles (`version: 1`) upgrades it to keys (`version: 2`) and keeps the old file beside it as `access.v1.json`; an older UIUX then refuses the upgraded roster.
+UIUX reads one roster format, `version: 2`, whose members hold keys ([Discussion #231](https://github.com/DevilTea/uiux/discussions/231)). A roster at any other version, or one whose Token or session record carries a field from before Discussion #174 (`lan`, `listener`), is refused with `access.store_invalid` and is never rewritten.
 
 A moved or renamed Workspace, and every git worktree, starts with an empty roster. `uiux access copy` carries members, tokens and the host version history over once, so existing agent tokens keep working and the timeline continues; it refuses to copy history into a Workspace that a running server holds. Histories are never merged: the target must have no roster, and `--replace` discards the target's roster and its own history, printing how many versions it discarded.
 
@@ -98,8 +98,8 @@ Review actors and times on `/api/*` and `/mcp` are stamped by the server from th
 When UIUX refuses a roster (`access.store_invalid`), the message names the file, `$UIUX_HOME/workspaces/<sha256 of the Workspace root's real path>/access.json`, and what is wrong with it. Stop every `uiux dev` for that Workspace before you touch the file, and keep it mode 0600.
 
 - **A hand-edited roster.** Fix what the message names. Each member's `keys` must be an array of distinct permission key names. An Agent must not hold `reviews.resolve`, `checkpoints.delete`, `locks.force-release`, `presets.manage` or `members.manage`, so remove them or the member. When no human member holds `members.manage` after your fix, the next `uiux dev` creates one and prints its sign-in link.
-- **A roster written by a newer UIUX** (a `version` above 2): use that newer UIUX.
-- **Going back to a UIUX that reads only roster version 1.** Move `access.json` aside and copy `access.v1.json` from the same directory to `access.json`. **Restoring the version 1 file revives the roster as it was before the upgrade.** Tokens and sessions revoked since then work again, and removed members return. Members, Tokens and key changes made since then are lost. Revoke and remove them again right after restoring. A later upgrade by a newer UIUX overwrites `access.v1.json`.
+- **A roster at another version** (a `version` other than 2): one above 2 was written by a newer UIUX, so use that UIUX. An older roster is not upgraded: move its directory aside and start again; the next `uiux dev` creates a roster and prints a manager's sign-in link.
+- **A Token with `lan` or a session with `listener`.** These fields come from before Discussion #174. Delete the named field from the record, or revoke the session by removing its record.
 
 ### Connect an agent
 

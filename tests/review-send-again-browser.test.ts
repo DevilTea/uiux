@@ -43,7 +43,7 @@ async function replyElsewhere(id: string, body: string): Promise<void> {
 beforeAll(async () => {
 	server = await startWorkbenchServer()
 	browser = await chromium.launch({ headless: true })
-	agent = await provisionToken(server.workspaceRoot, { nickname: 'claude', kind: 'agent', role: 'editor' })
+	agent = await provisionToken(server.workspaceRoot, { nickname: 'claude', kind: 'agent', preset: 'editor' })
 }, 60_000)
 
 afterAll(async () => {

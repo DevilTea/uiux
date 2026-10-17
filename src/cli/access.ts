@@ -9,7 +9,7 @@ import { isMemberKind, type MemberKind } from '../application/access/principal'
 import { FileNativePersistence } from '../persistence/file-native'
 import { detectWorkspaceLayout, layoutForSchemaVersion, resolveLayoutDirectory, resolveWorkspacePath, type WorkspaceLayout } from '../persistence/paths'
 import type { WorkspaceSchemaPolicy } from '../persistence/schema-policy'
-import { checkWorkspaceSelection, isRelocatedSourceOf, selectWorkspace } from '../persistence/workspace-selection'
+import { checkWorkspaceSelection, selectWorkspace } from '../persistence/workspace-selection'
 import { readActiveServerHold } from '../persistence/server-hold'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 import { generateHint } from '../server/access/credentials'
@@ -83,7 +83,7 @@ class UsageError extends Error {}
 
 type Parsed = Readonly<{ positionals: string[]; values: Map<string, string>; flags: Set<string> }>
 
-function parse(args: readonly string[], valueOptions: readonly string[], flagOptions: readonly string[], removedOptions: Readonly<Record<string, string>> = {}): Parsed {
+function parse(args: readonly string[], valueOptions: readonly string[], flagOptions: readonly string[]): Parsed {
 	const positionals: string[] = []
 	const values = new Map<string, string>()
 	const flags = new Set<string>()
@@ -91,9 +91,6 @@ function parse(args: readonly string[], valueOptions: readonly string[], flagOpt
 		const arg = args[index]!
 		if (arg.startsWith('--')) {
 			const name = arg.slice(2)
-			// A removed option is named however it is given, `--role editor` or `--role=editor`.
-			const bare = name.split('=', 1)[0]!
-			if (Object.hasOwn(removedOptions, bare)) throw new UsageError(removedOptions[bare]!)
 			if (flagOptions.includes(name)) {
 				if (flags.has(name)) throw new UsageError(`--${name} was given twice.`)
 				flags.add(name)
@@ -177,8 +174,6 @@ function presetNotes(preset: LabelPreset, kind: MemberKind): string[] {
 	].filter((note): note is string => note !== undefined)
 }
 
-const ROLE_REMOVED = '--role was removed; give an Access preset with --preset <name>, such as --preset Editor.'
-
 const when = (value: string | null) => value ? value.replace('T', ' ').slice(0, 16) : '-'
 
 export async function runAccessCommand(options: AccessCommandOptions): Promise<number> {
@@ -194,7 +189,7 @@ export async function runAccessCommand(options: AccessCommandOptions): Promise<n
 		const home = resolveUiuxHome(env)
 		const spec = commandSpec(command, sub)
 		if (!spec) throw new UsageError(`Unknown command: uiux ${[command, sub].filter(Boolean).join(' ')}.`)
-		const parsed = parse(rest, ['workspace', ...spec.values], spec.flags, spec.removed)
+		const parsed = parse(rest, ['workspace', ...spec.values], spec.flags)
 		const workspaceArg = parsed.values.get('workspace')
 		if (spec.positionals >= 0 && parsed.positionals.length !== spec.positionals)
 			throw new UsageError(`uiux ${command} ${sub} takes ${spec.positionals === 0 ? 'no positional arguments' : `exactly ${spec.positionals} positional argument${spec.positionals > 1 ? 's' : ''}`}.`)
@@ -232,8 +227,6 @@ type CommandSpec = Readonly<{
 	positionals: number
 	values: readonly string[]
 	flags: readonly string[]
-	/** Options a command no longer takes, each with the usage error that names its replacement. */
-	removed?: Readonly<Record<string, string>>
 	run: (context: Context) => Promise<number>
 }>
 
@@ -293,7 +286,7 @@ function parseHours(raw: string | undefined): number | undefined {
 function commandSpec(command: string, sub: string | undefined): CommandSpec | undefined {
 	switch (`${command} ${sub ?? ''}`) {
 		case 'member add': return {
-			positionals: 1, values: ['preset', 'keys', 'kind'], flags: ['all-keys'], removed: { role: ROLE_REMOVED },
+			positionals: 1, values: ['preset', 'keys', 'kind'], flags: ['all-keys'],
 			async run(context) {
 				const { values, flags } = context.parsed
 				const presetName = values.get('preset')
@@ -354,7 +347,7 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 			},
 		}
 		case 'member set': return {
-			positionals: 1, values: ['preset', 'grant', 'revoke', 'nickname'], flags: [], removed: { role: ROLE_REMOVED },
+			positionals: 1, values: ['preset', 'grant', 'revoke', 'nickname'], flags: [],
 			async run(context) {
 				const { values } = context.parsed
 				const presetName = values.get('preset')
@@ -504,8 +497,7 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				const nick = (id: string) => file.members.find(item => item.id === id)?.nickname ?? '(removed)'
 				context.out(table([
 					['ID', 'MEMBER', 'ORIGIN', 'CREATED', 'LAST SEEN', 'EXPIRES', 'USER AGENT'],
-					// A session written before configured origins existed names its listener instead.
-					...sessions.map(session => [session.id, nick(session.memberId), session.origin ?? session.listener ?? '-', when(session.createdAt), when(session.lastSeenAt), day(session.expiresAt), session.userAgent.slice(0, 60) || '-']),
+					...sessions.map(session => [session.id, nick(session.memberId), session.origin, when(session.createdAt), when(session.lastSeenAt), day(session.expiresAt), session.userAgent.slice(0, 60) || '-']),
 				]).join('\n'))
 				return 0
 			},
@@ -522,11 +514,9 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				const fromPath = resolve(context.cwd, from)
 				// The old directory may already be gone; fall back to its nearest existing ancestor's real path.
 				const sourceRoot = realFuturePath(fromPath)
-				// The source gets the same entry check as the target before its lock is ever taken. Its one
-				// exception is the old root of a Workspace uiux migrate relocated into the target.
+				// The source gets the same entry check as the target before its lock is ever taken.
 				const sourceSelection = checkWorkspaceSelection(sourceRoot, context.schemaPolicy)
-				const relocatedSource = !sourceSelection.ok && isRelocatedSourceOf(sourceRoot, context.workspaceRoot, context.schemaPolicy)
-				if (!sourceSelection.ok && !relocatedSource) throw new AccessError('access.workspace_invalid', `The source ${sourceSelection.message}`)
+				if (!sourceSelection.ok) throw new AccessError('access.workspace_invalid', `The source ${sourceSelection.message}`)
 				if (sourceRoot === context.workspaceRoot) throw new AccessError('access.roster_exists', 'The source and target are the same Workspace.')
 				const source = await AccessStore.readRoster(context.home, sourceRoot)
 				if (!source) throw new AccessError('access.roster_missing', `No roster recorded for ${sourceRoot} under ${context.home}.`)
@@ -549,10 +539,8 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 					// Under the target Workspace's persistence lock, which every writer of its history holds,
 					// and where possible the source's, so no source writer or prune runs mid-copy.
 					const persistence = new FileNativePersistence({ root: context.workspaceRoot, schemaPolicy: context.schemaPolicy })
-					// A relocated source's lock file is the target's own, which this command already holds.
-					const underSourceLock = <Result>(operation: () => Promise<Result>) => relocatedSource ? operation() : withSourceLock(sourceRoot, context.err, operation)
 					try {
-						copied = await persistence.withLock(() => underSourceLock(() => copyHostHistory(history, {
+						copied = await persistence.withLock(() => withSourceLock(sourceRoot, context.err, () => copyHostHistory(history, {
 							replace,
 							// A server may have started since the check above.
 							beforeSwap: () => refuseWhileServed(context.workspaceRoot),

@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { BUILT_IN_ACCESS_PRESETS, HUMAN_ONLY_PERMISSION_KEYS, keysForRole, PERMISSION_KEYS } from '../src/application/access/keys'
+import { BUILT_IN_ACCESS_PRESETS, HUMAN_ONLY_PERMISSION_KEYS, PERMISSION_KEYS } from '../src/application/access/keys'
 import { memberLabel } from '../src/application/access/labels'
 import { createLeaseManager } from '../src/application/access/leases'
 import { authorizeOperation, effectiveKeys } from '../src/application/access/policy'
@@ -15,23 +15,22 @@ import {
 	addMember,
 	createEmptyAccessFile,
 	createToken,
-	readAccessFile,
 	removeMember,
 	setMember,
 	validateAccessFile,
-	verifyCredential,
 	DAY_MS,
 	type AccessFile,
 	type StoredMember,
 } from '../src/server/access/roster'
-import { AccessService, memberPrincipal, sessionServesOrigin } from '../src/server/access/service'
+import { AccessService, memberPrincipal } from '../src/server/access/service'
 import { AccessStore, accessStorePaths, assertReplacementKeepsManager, workspaceStoreId, writeNewRoster } from '../src/server/access/store'
+import { presetKeys } from './support/access'
 
 /**
- * Roster `version: 2` (issue #142, Discussion #140 Part 15): members store permission keys, a
- * `version: 1` roster upgrades on first open with a backup, every write keeps the key invariants,
- * a roster file edited by hand never grants more than the rules allow, and labels come from the
- * built-in presets below `schemaVersion` 6.
+ * Roster `version: 2` (issue #142, Discussion #140 Part 15): members store permission keys, any
+ * other roster version is refused and never rewritten (Discussion #231, Part 17), every write keeps
+ * the key invariants, a roster file edited by hand never grants more than the rules allow, and
+ * labels come from the built-in presets below `schemaVersion` 6.
  */
 
 const cleanup: string[] = []
@@ -74,14 +73,13 @@ function expectAccessError(run: () => unknown, code: string, message?: string | 
 
 const NOW = Date.now()
 const iso = (offset = 0) => new Date(NOW + offset).toISOString()
-const presetKeys = (id: string) => [...BUILT_IN_ACCESS_PRESETS.find(preset => preset.id === id)!.keys]
 const withoutHumanOnly = (keys: readonly string[]) => keys.filter(key => !(HUMAN_ONLY_PERMISSION_KEYS as readonly string[]).includes(key))
 
 /**
  * A roster as an earlier UIUX wrote it: `version: 1`, members with `role`, a Token with the
- * retired `lan` flag and a session with `listener` instead of `origin` (Part 16 compatibility).
+ * retired `lan` flag and a session with `listener` instead of `origin`. This UIUX refuses it.
  */
-function legacyRoster(workspaceRoot: string, members: readonly Readonly<{ nickname: string; kind: 'human' | 'agent'; role: string; keys?: unknown }>[]) {
+function versionOneRoster(workspaceRoot: string, members: readonly Readonly<{ nickname: string; kind: 'human' | 'agent'; role: string }>[]) {
 	const hint = generateHint()
 	const stored = members.map(member => ({ id: randomUUID(), createdAt: iso(-DAY_MS), ...member }))
 	const agent = stored.find(member => member.kind === 'agent')
@@ -108,130 +106,46 @@ function v2Roster(workspaceRoot: string, members: readonly StoredMember[]): Acce
 	return { ...createEmptyAccessFile(workspaceRoot, generateHint()), members }
 }
 
-describe('the version 1 roster upgrade (Scenario 01a11c09-d7ef)', () => {
-	it('upgrades a version 1 roster on first open, keeps it as access.v1.json and keeps every credential working', async () => {
+describe('only roster version 2 is read (Clause 01a14917-7898)', () => {
+	it('refuses a version 1 roster on open, naming the file and its version, and never rewrites it or backs it up (Scenario 01a14917-8c6c)', async () => {
 		const { workspace, home, paths } = await workspaceAndHome()
-		const legacy = legacyRoster(workspace, [{ nickname: 'deviltea', kind: 'human', role: 'owner' }, { nickname: 'claude', kind: 'agent', role: 'editor' }])
-		const original = await writeRoster(workspace, home, legacy.file)
-
-		const store = (await AccessStore.open({ workspaceRoot: workspace, home }))!
-		const onDisk = JSON.parse(await readFile(paths.file, 'utf8')) as AccessFile & { members: Record<string, unknown>[] }
-		expect(onDisk.version).toBe(2)
-		const human = onDisk.members.find(member => member.nickname === 'deviltea')!
-		const agent = onDisk.members.find(member => member.nickname === 'claude')!
-		// The human member holds the Owner preset's keys; the Agent the Editor keys except `reviews.resolve`.
-		expect(human.keys).toEqual(presetKeys('owner'))
-		expect(agent.keys).toEqual(presetKeys('editor').filter(key => key !== 'reviews.resolve'))
-		expect(human).not.toHaveProperty('role')
-		expect(store.data).toEqual(onDisk)
-
-		// The version 1 file, byte for byte, beside the roster with mode 0600.
-		expect(await readFile(paths.v1Backup, 'utf8')).toBe(original)
-		expect((await lstat(paths.v1Backup)).mode & 0o777).toBe(0o600)
-		expect((await lstat(paths.file)).mode & 0o777).toBe(0o600)
-
-		// No member's effective capabilities change (Rule 01a11c09-b698): the keys are the role's.
-		expect(memberPrincipal(store.data.members.find(member => member.nickname === 'claude')!, 'token', 'aaaaaaaaaa').keys).toEqual(keysForRole('agent', 'editor'))
-		expect(memberPrincipal(store.data.members.find(member => member.nickname === 'deviltea')!, 'session', 'aaaaaaaaaa').keys).toEqual(keysForRole('human', 'owner'))
-
-		// The Token LAN flag and the session listener of the old shape still load and work.
-		expect(verifyCredential(store.data, legacy.token, Date.now())).toMatchObject({ ok: true, kind: 'token', member: { nickname: 'claude' } })
-		const session = verifyCredential(store.data, legacy.session, Date.now())
-		expect(session).toMatchObject({ ok: true, kind: 'session', member: { nickname: 'deviltea' } })
-		if (!session.ok) throw new Error('session should verify')
-		expect(sessionServesOrigin(session.session!, { origin: 'http://127.0.0.1:3000', loopbackHost: true })).toBe(true)
-		expect(onDisk.tokens[0]).toMatchObject({ lan: true })
-		expect(onDisk.sessions[0]).toMatchObject({ listener: 'loopback' })
-
-		// The upgrade happens once: a later open leaves both files alone.
-		const before = await stat(paths.v1Backup)
-		const reopened = (await AccessStore.open({ workspaceRoot: workspace, home }))!
-		expect(reopened.data).toEqual(onDisk)
-		expect((await stat(paths.v1Backup)).mtimeMs).toBe(before.mtimeMs)
+		const original = await writeRoster(workspace, home, versionOneRoster(workspace, [{ nickname: 'deviltea', kind: 'human', role: 'owner' }, { nickname: 'claude', kind: 'agent', role: 'editor' }]).file)
+		const refusal = expect.objectContaining({ code: 'access.store_invalid', message: expect.stringContaining(`The access store ${paths.file} is invalid: it is roster version 1, and this UIUX reads only roster version 2`) })
+		await expect(AccessStore.open({ workspaceRoot: workspace, home })).rejects.toEqual(refusal)
+		await expect(AccessStore.open({ workspaceRoot: workspace, home, create: true })).rejects.toEqual(refusal)
+		// `access copy --from` reads the source the same way.
+		await expect(AccessStore.readRoster(home, workspace)).rejects.toEqual(refusal)
+		expect(await readFile(paths.file, 'utf8')).toBe(original)
+		expect(await readdir(paths.dir)).not.toContain('access.v1.json')
 	})
 
-	it('gives an Agent written as Owner by hand the Editor keys it can hold, and ignores keys a version 1 member carries', async () => {
-		const { workspace, home } = await workspaceAndHome()
-		const legacy = legacyRoster(workspace, [
-			{ nickname: 'deviltea', kind: 'human', role: 'owner' },
-			{ nickname: 'boss', kind: 'agent', role: 'owner' },
-			// A version 1 member never had keys; a hand-added list is not trusted.
-			{ nickname: 'peek', kind: 'agent', role: 'viewer', keys: ['members.manage', 'views.write'] },
-		])
-		await writeRoster(workspace, home, legacy.file)
-		const store = (await AccessStore.open({ workspaceRoot: workspace, home }))!
-		const boss = store.data.members.find(member => member.nickname === 'boss')!
-		expect(boss.keys).toEqual(withoutHumanOnly(presetKeys('owner')))
-		expect(memberLabel(boss)).toEqual({ preset: { id: 'editor', name: 'Editor' } })
-		expect(store.data.members.find(member => member.nickname === 'peek')!.keys).toEqual(presetKeys('viewer'))
-	})
-
-	it('upgrades once when several processes open the version 1 roster at the same time, backing up only the version 1 file', async () => {
-		const { workspace, home, paths } = await workspaceAndHome()
-		const original = await writeRoster(workspace, home, legacyRoster(workspace, [{ nickname: 'deviltea', kind: 'human', role: 'owner' }]).file)
-		const stores = await Promise.all(Array.from({ length: 6 }, () => AccessStore.open({ workspaceRoot: workspace, home })))
-		for (const store of stores) expect(store!.data.version).toBe(2)
-		expect(await readFile(paths.v1Backup, 'utf8')).toBe(original)
-		expect(JSON.parse(await readFile(paths.file, 'utf8')).version).toBe(2)
-	})
-
-	it('finishes an upgrade that stopped after the backup, replacing the stale backup', async () => {
-		const { workspace, home, paths } = await workspaceAndHome()
-		const original = await writeRoster(workspace, home, legacyRoster(workspace, [{ nickname: 'deviltea', kind: 'human', role: 'owner' }]).file)
-		// The state a crash between the two writes leaves: the version 1 roster, and a backup.
-		await writeFile(paths.v1Backup, 'partial', { mode: 0o600 })
-		const store = (await AccessStore.open({ workspaceRoot: workspace, home }))!
-		expect(store.data.version).toBe(2)
-		expect(await readFile(paths.v1Backup, 'utf8')).toBe(original)
-	})
-
-	it('upgrades a version 1 roster that appears while a store is open, and on the first write', async () => {
+	it('refuses a version 1 roster that appears while a store is open, on refresh and on a write, and leaves it unchanged', async () => {
 		const { workspace, home, paths } = await workspaceAndHome()
 		const store = (await AccessStore.open({ workspaceRoot: workspace, home, create: true }))!
-		const first = legacyRoster(workspace, [{ nickname: 'deviltea', kind: 'human', role: 'owner' }])
-		const firstText = `${JSON.stringify(first.file, null, 2)}\n`
-		await writeFile(paths.file, firstText)
-		expect(await store.refresh({ force: true })).toBe(true)
-		expect(store.data.members[0]!.keys).toEqual(presetKeys('owner'))
-		expect(JSON.parse(await readFile(paths.file, 'utf8')).version).toBe(2)
-		expect(await readFile(paths.v1Backup, 'utf8')).toBe(firstText)
-
-		// A write that finds a version 1 roster under the lock keeps its backup before writing.
-		const second = legacyRoster(workspace, [{ nickname: 'mei', kind: 'human', role: 'owner' }])
-		const secondText = `${JSON.stringify(second.file, null, 2)}\n`
-		await writeFile(paths.file, secondText)
-		await store.update(file => createToken(file, { nickname: 'mei' }))
-		expect(JSON.parse(await readFile(paths.file, 'utf8'))).toMatchObject({ version: 2, members: [{ nickname: 'mei', keys: presetKeys('owner') }] })
-		expect(await readFile(paths.v1Backup, 'utf8')).toBe(secondText)
+		const text = `${JSON.stringify(versionOneRoster(workspace, [{ nickname: 'deviltea', kind: 'human', role: 'owner' }]).file, null, 2)}\n`
+		await writeFile(paths.file, text)
+		await expect(store.refresh({ force: true })).rejects.toMatchObject({ code: 'access.store_invalid' })
+		await expect(store.update(file => createToken(file, { nickname: 'deviltea' }))).rejects.toMatchObject({ code: 'access.store_invalid' })
+		expect(await readFile(paths.file, 'utf8')).toBe(text)
+		expect(await readdir(paths.dir)).not.toContain('access.v1.json')
 	})
 
-	it('reads a version 1 copy source as its upgrade without writing it', async () => {
-		const { workspace, home, paths } = await workspaceAndHome()
-		const original = await writeRoster(workspace, home, legacyRoster(workspace, [{ nickname: 'deviltea', kind: 'human', role: 'owner' }]).file)
-		const read = await AccessStore.readRoster(home, workspace)
-		expect(read).toMatchObject({ version: 2, members: [{ nickname: 'deviltea', keys: presetKeys('owner') }] })
-		expect(await readFile(paths.file, 'utf8')).toBe(original)
-		await expect(stat(paths.v1Backup)).rejects.toMatchObject({ code: 'ENOENT' })
-	})
-
-	it('refuses a roster version it does not know, and writes nothing (an older UIUX refuses version 2 the same way)', async () => {
+	it('refuses a roster written by a newer UIUX, and writes nothing (an older UIUX refuses version 2 the same way)', async () => {
 		const { workspace, home, paths } = await workspaceAndHome()
 		const future = { ...v2Roster(workspace, []), version: 3 }
 		const text = await writeRoster(workspace, home, future)
-		await expect(AccessStore.open({ workspaceRoot: workspace, home })).rejects.toMatchObject({ code: 'access.store_invalid', message: expect.stringContaining(`The access store ${paths.file} is invalid: it is roster version 3, written by a newer UIUX`) })
+		await expect(AccessStore.open({ workspaceRoot: workspace, home })).rejects.toMatchObject({ code: 'access.store_invalid', message: expect.stringContaining(`The access store ${paths.file} is invalid: it is roster version 3, and this UIUX reads only roster version 2`) })
 		expect(await readFile(paths.file, 'utf8')).toBe(text)
-		await expect(stat(paths.v1Backup)).rejects.toMatchObject({ code: 'ENOENT' })
 	})
 
-	it('refuses a roster whose version is not an integer it knows, such as "2", 0 or 1.5, and writes nothing', async () => {
+	it('refuses a roster whose version is not 2, such as "2", 0 or 1.5, and writes nothing', async () => {
 		const { workspace, home, paths } = await workspaceAndHome()
 		for (const version of ['2', 0, 1.5, -1, null]) {
 			const text = await writeRoster(workspace, home, { ...v2Roster(workspace, []), version })
-			await expect(AccessStore.open({ workspaceRoot: workspace, home }), String(version)).rejects.toMatchObject({ code: 'access.store_invalid', message: expect.stringContaining(`The access store ${paths.file} is invalid: unsupported version ${JSON.stringify(version)}`) })
-			expectAccessError(() => readAccessFile({ ...v2Roster(workspace, []), version }), 'access.store_invalid', /unsupported version/u)
+			await expect(AccessStore.open({ workspaceRoot: workspace, home }), String(version)).rejects.toMatchObject({ code: 'access.store_invalid', message: expect.stringContaining(`The access store ${paths.file} is invalid: it is roster version ${JSON.stringify(version)}`) })
+			expectAccessError(() => validateAccessFile({ ...v2Roster(workspace, []), version }), 'access.store_invalid', /it is roster version/u)
 			expect(await readFile(paths.file, 'utf8')).toBe(text)
 		}
-		await expect(stat(paths.v1Backup)).rejects.toMatchObject({ code: 'ENOENT' })
 	})
 })
 
@@ -250,8 +164,8 @@ describe('recovery from a refused roster', () => {
 	it('removes the temporary files a killed writer left, and nothing else', async () => {
 		const { workspace, home, paths } = await workspaceAndHome()
 		await AccessStore.open({ workspaceRoot: workspace, home, create: true })
-		const leftovers = ['access.json.0123456789ab.tmp', 'access.v1.json.ba9876543210.tmp']
-		const kept = ['access.json.backup', 'access.json.xyz.tmp', 'notes.tmp']
+		const leftovers = ['access.json.0123456789ab.tmp']
+		const kept = ['access.json.backup', 'access.json.xyz.tmp', 'access.v1.json.ba9876543210.tmp', 'notes.tmp']
 		for (const name of [...leftovers, ...kept]) await writeFile(join(paths.dir, name), 'x', { mode: 0o600 })
 		await AccessStore.open({ workspaceRoot: workspace, home })
 		const names = await readdir(paths.dir)
@@ -281,7 +195,7 @@ describe('recovery from a refused roster', () => {
 describe('roster invariants on write', () => {
 	it('keeps the last human manager through a roster replacement, and lets a roster without one be replaced', async () => {
 		const { workspace, home, paths } = await workspaceAndHome()
-		const agentsOnly = (root: string) => v2Roster(root, [v2Member('claude', 'agent', keysForRole('agent', 'editor'))])
+		const agentsOnly = (root: string) => v2Roster(root, [v2Member('claude', 'agent', presetKeys('editor', 'agent'))])
 		await writeRoster(workspace, home, v2Roster(workspace, [v2Member('deviltea', 'human', presetKeys('owner'))]))
 		const before = await readFile(paths.file, 'utf8')
 		await expect(writeNewRoster({ workspaceRoot: workspace, home, replace: true, file: agentsOnly })).rejects.toMatchObject({ code: 'access.last_manager', message: expect.stringContaining('deviltea is the last human holder') })
@@ -337,7 +251,6 @@ describe('roster invariants on write', () => {
 		expectAccessError(() => addMember(file, { nickname: 'mei', keys: ['Views.Write'] }), 'access.invalid_keys')
 		expectAccessError(() => addMember(file, { nickname: 'mei', keys: 'views.write' }), 'access.invalid_keys')
 		expectAccessError(() => addMember(file, { nickname: 'mei' }), 'access.invalid_keys')
-		expectAccessError(() => addMember(file, { nickname: 'mei', keys: ['workspace.read'], role: 'viewer' }), 'access.invalid_keys')
 
 		// Rule 01a11c09-b85c: the manager may give any valid set, even keys it does not hold.
 		file = addMember(file, { nickname: 'mei', keys: ['views.write', 'workspace.read', 'views.write'] }).file
@@ -374,12 +287,12 @@ describe('roster invariants on write', () => {
 	})
 
 	it('refuses any write that leaves no human holding members.manage (Scenario 01a118a1-d128)', () => {
-		const file = v2Roster('/work/design', [v2Member('deviltea', 'human', HUMAN_KEYS), v2Member('claude', 'agent', keysForRole('agent', 'editor'))])
+		const file = v2Roster('/work/design', [v2Member('deviltea', 'human', HUMAN_KEYS), v2Member('claude', 'agent', presetKeys('editor', 'agent'))])
 		expectAccessError(() => setMember(file, 'deviltea', { keys: HUMAN_KEYS.filter(key => key !== 'members.manage') }), 'access.last_manager', /deviltea is the last human holder of `members\.manage`/u)
 		expectAccessError(() => removeMember(file, 'deviltea'), 'access.last_manager')
 		// With a second human manager, either may lose it.
 		const two = addMember(file, { nickname: 'mei', keys: HUMAN_KEYS }).file
-		expect(setMember(two, 'deviltea', { role: 'viewer' }).result.keys).toEqual(presetKeys('viewer'))
+		expect(setMember(two, 'deviltea', { keys: presetKeys('viewer') }).result.keys).toEqual(presetKeys('viewer'))
 		expect(removeMember(two, 'deviltea').file.members.map(member => member.nickname)).toEqual(['claude', 'mei'])
 	})
 
@@ -443,7 +356,7 @@ describe('a roster file edited by hand never grants more than the rules allow', 
 		expect(authorizeOperation(claude, 'createView')).toBeUndefined()
 		expect(authorizeOperation(claude, 'readPointResource')).toMatchObject({ code: 'auth.scope_denied', requiredKeys: ['workspace.read'] })
 		// Other writes leave the incoherent set as written; writing that member's keys must make them whole.
-		await store.update(file => addMember(file, { nickname: 'mei', role: 'viewer' }))
+		await store.update(file => addMember(file, { nickname: 'mei', keys: presetKeys('viewer') }))
 		expect(store.data.members[1]!.keys).toEqual(['views.write'])
 		await expect(store.update(file => setMember(file, 'claude', { keys: ['views.write'] }))).rejects.toMatchObject({ code: 'access.key_requires' })
 	})
@@ -451,11 +364,11 @@ describe('a roster file edited by hand never grants more than the rules allow', 
 	it('loads a roster with no human manager, grants nobody more than its keys, and bootstraps a manager with every key (Scenario 01a118a1-d172)', async () => {
 		const { workspace, home } = await workspaceAndHome()
 		// Agents only, plus a human without `members.manage`.
-		await writeRoster(workspace, home, v2Roster(workspace, [v2Member('claude', 'agent', keysForRole('agent', 'editor')), v2Member('mei', 'human', presetKeys('editor'))]))
+		await writeRoster(workspace, home, v2Roster(workspace, [v2Member('claude', 'agent', presetKeys('editor', 'agent')), v2Member('mei', 'human', presetKeys('editor'))]))
 		const store = (await AccessStore.open({ workspaceRoot: workspace, home }))!
 		expect(effectiveKeys(memberPrincipal(store.data.members[1]!, 'session', 'aaaaaaaaaa'))).not.toContain('members.manage')
 		// Writes that do not concern a manager are not refused: there was none to lose.
-		await store.update(file => addMember(file, { nickname: 'rui', role: 'reviewer' }))
+		await store.update(file => addMember(file, { nickname: 'rui', keys: presetKeys('reviewer') }))
 
 		const service = new AccessService({ store, leases: createLeaseManager() })
 		const banner = await service.bootstrap(['http://127.0.0.1:3000'])
@@ -520,14 +433,13 @@ describe('labels from the built-in presets (below schemaVersion 6)', () => {
 		expect(memberLabel({ kind: 'human', keys: ['workspace.read', 'future.capability'] }, presets)).toEqual({ custom: true })
 	})
 
-	it('computes labels from the keys alone, so a version 1 upgrade labels every member by its former role', () => {
-		const upgraded = readAccessFile(legacyRoster('/work/design', [
-			{ nickname: 'a', kind: 'human', role: 'viewer' },
-			{ nickname: 'b', kind: 'human', role: 'reviewer' },
-			{ nickname: 'c', kind: 'agent', role: 'editor' },
-			{ nickname: 'd', kind: 'human', role: 'owner' },
-		]).file)
-		expect(upgraded.legacy).toBe(true)
-		expect(upgraded.file.members.map(member => memberLabel(member))).toEqual(['viewer', 'reviewer', 'editor', 'owner'].map(id => ({ preset: { id, name: id[0]!.toUpperCase() + id.slice(1) } })))
+	it('computes labels from the keys alone, so a member holding a built-in preset\'s keys is labeled by that preset', () => {
+		const members = [
+			v2Member('a', 'human', presetKeys('viewer')),
+			v2Member('b', 'human', presetKeys('reviewer')),
+			v2Member('c', 'agent', presetKeys('editor', 'agent')),
+			v2Member('d', 'human', presetKeys('owner')),
+		]
+		expect(members.map(member => memberLabel(member))).toEqual(['viewer', 'reviewer', 'editor', 'owner'].map(id => ({ preset: { id, name: id[0]!.toUpperCase() + id.slice(1) } })))
 	})
 })

@@ -46,14 +46,14 @@ const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const START = Date.parse('2026-10-09T00:00:00.000Z')
 const VERBATIM_INSTRUCTION = 'When you finish a meaningful task that changed design resources, call `create_checkpoint` with a descriptive name, then `release_lock`.'
 
-const OWNER = testMember({ memberId: 'owner-1', nickname: 'mei', kind: 'human', role: 'owner', credential: 'session' })
-const OWNER_TOKEN = testMember({ memberId: 'owner-1', nickname: 'mei', kind: 'human', role: 'owner', credential: 'token' })
-const EDITOR = testMember({ memberId: 'editor-1', nickname: 'eve', kind: 'human', role: 'editor', credential: 'session' })
-const REVIEWER = testMember({ memberId: 'reviewer-1', nickname: 'rui', kind: 'human', role: 'reviewer', credential: 'session' })
-const VIEWER = testMember({ memberId: 'viewer-1', nickname: 'vera', kind: 'human', role: 'viewer', credential: 'session' })
-const AGENT = testMember({ memberId: 'agent-1', nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' })
-const AGENT_REVIEWER = testMember({ memberId: 'agent-2', nickname: 'critic', kind: 'agent', role: 'reviewer', credential: 'token' })
-const AGENT_OWNER = testMember({ memberId: 'agent-3', nickname: 'boss', kind: 'agent', role: 'owner', credential: 'token' })
+const OWNER = testMember({ memberId: 'owner-1', nickname: 'mei', kind: 'human', preset: 'owner', credential: 'session' })
+const OWNER_TOKEN = testMember({ memberId: 'owner-1', nickname: 'mei', kind: 'human', preset: 'owner', credential: 'token' })
+const EDITOR = testMember({ memberId: 'editor-1', nickname: 'eve', kind: 'human', preset: 'editor', credential: 'session' })
+const REVIEWER = testMember({ memberId: 'reviewer-1', nickname: 'rui', kind: 'human', preset: 'reviewer', credential: 'session' })
+const VIEWER = testMember({ memberId: 'viewer-1', nickname: 'vera', kind: 'human', preset: 'viewer', credential: 'session' })
+const AGENT = testMember({ memberId: 'agent-1', nickname: 'claude', kind: 'agent', preset: 'editor', credential: 'token' })
+const AGENT_REVIEWER = testMember({ memberId: 'agent-2', nickname: 'critic', kind: 'agent', preset: 'reviewer', credential: 'token' })
+const AGENT_OWNER = testMember({ memberId: 'agent-3', nickname: 'boss', kind: 'agent', preset: 'owner', credential: 'token' })
 
 const cleanup: string[] = []
 const running: HistoryRecorder[] = []
@@ -514,7 +514,7 @@ describe('the version listing', () => {
 	it('answers the same over MCP, with each version also a read-only Resource (Clauses 01a11a5e-26b9 and 27c1)', async () => {
 		const { ctx, a2, c2 } = await timeline()
 		const http = listed((await listVersionsForHttp(scoped(ctx.app, VIEWER), { type: 'checkpoint' })).body)
-		const mcp = await connectMcp(ctx.app, testMember({ nickname: 'watcher', kind: 'agent', role: 'viewer', credential: 'token' }))
+		const mcp = await connectMcp(ctx.app, testMember({ nickname: 'watcher', kind: 'agent', preset: 'viewer', credential: 'token' }))
 		try {
 			const tool = (await mcp.client.listTools()).tools.find(item => item.name === 'list_versions')!
 			expect(Object.keys(tool.inputSchema.properties ?? {}).sort()).toEqual(['cursor', 'limit', 'resource', 'types'])
@@ -621,10 +621,10 @@ describe('/api/history/* over HTTP', () => {
 	const json = { 'content-type': 'application/json' }
 
 	it('serves the access matrix and refuses the system credential on every /api/history/* route', async () => {
-		const viewer = await provisionToken(root, { nickname: 'vera', kind: 'human', role: 'viewer' })
-		const reviewer = await provisionToken(root, { nickname: 'rui', kind: 'human', role: 'reviewer' })
-		const owner = await provisionToken(root, { nickname: 'mei', kind: 'human', role: 'owner' })
-		const agent = await provisionToken(root, { nickname: 'claude', kind: 'agent', role: 'editor' })
+		const viewer = await provisionToken(root, { nickname: 'vera', kind: 'human', preset: 'viewer' })
+		const reviewer = await provisionToken(root, { nickname: 'rui', kind: 'human', preset: 'reviewer' })
+		const owner = await provisionToken(root, { nickname: 'mei', kind: 'human', preset: 'owner' })
+		const agent = await provisionToken(root, { nickname: 'claude', kind: 'agent', preset: 'editor' })
 
 		const created = await fetch(`${origin}/api/history/checkpoints`, { method: 'POST', headers: { ...bearer(reviewer), ...json }, body: JSON.stringify({ name: 'Over HTTP', note: 'With a bearer Token.' }) })
 		expect(created.status).toBe(201)

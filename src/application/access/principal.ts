@@ -6,9 +6,6 @@ import type { MemberLabel } from './labels'
  * resolves to exactly one principal or to none; the shared application layer authorizes and
  * stamps from it, so transports never decide permissions themselves.
  */
-export const ACCESS_ROLES = ['viewer', 'reviewer', 'editor', 'owner'] as const
-export type AccessRole = typeof ACCESS_ROLES[number]
-
 export const MEMBER_KINDS = ['human', 'agent'] as const
 export type MemberKind = typeof MEMBER_KINDS[number]
 
@@ -53,10 +50,6 @@ export type SystemPrincipal = Readonly<{
 }>
 
 export type Principal = MemberPrincipal | SystemPrincipal
-
-export function isAccessRole(value: unknown): value is AccessRole {
-	return typeof value === 'string' && (ACCESS_ROLES as readonly string[]).includes(value)
-}
 
 export function isMemberKind(value: unknown): value is MemberKind {
 	return typeof value === 'string' && (MEMBER_KINDS as readonly string[]).includes(value)
