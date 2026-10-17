@@ -69,7 +69,7 @@ type CaptureResponse = Readonly<{
 const evidenceItems = shallowRef<readonly EvidenceItem[]>([])
 /**
  * The current Product Kit provenance, read with the Evidence list: `productKit`, or
- * `productKitUnavailable` when it cannot be computed; neither below schemaVersion 5.
+ * `productKitUnavailable` when it cannot be computed.
  */
 const currentProductKit = shallowRef<Readonly<{ productKit?: ProductKitProvenance; productKitUnavailable?: boolean }>>({})
 const evidenceLoaded = shallowRef(false)

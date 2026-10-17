@@ -9,14 +9,6 @@ import {
 	type ValidationResult,
 } from '../validation'
 
-/**
- * The first Workspace `schemaVersion` with the Product Kit file and the relocated layout (Part 14,
- * Discussion #139): from it the manifest sits at the Workspace root and holds no `adapters`, which
- * live in the Product Kit file (Clauses 01a1144e-531c-7d71-9bc5-f62340aea55a,
- * 01a1144e-5336-73e7-84a0-3bcd0cb454f6 and 01a1144e-538e-705f-afdc-841028c410e4).
- */
-export const PRODUCT_KIT_SCHEMA_VERSION = 5
-
 /** Property names in this DTO realize the accepted Workspace concepts. */
 export type WorkspaceManifest = {
 	schemaVersion: number

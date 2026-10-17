@@ -215,7 +215,7 @@ export function authorizeLeaseAcquire(principal: Principal, kinds: readonly stri
 const PRODUCT_KIT_WRITE_MEMBERS = ['styles', 'themes', 'components', 'widgets'] as const
 
 /**
- * Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa, from `schemaVersion` 5: the keys a change of the
+ * Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa: the keys a change of the
  * Product Kit file needs, by what it changes between the file a write replaces (`current`) and the
  * file it writes (`next`). Changing `designSystems` or the Adapter specifiers or their order needs
  * `product-kit.compose`; changing an Adapter's `config`, `styles`, `themes`, `components` or

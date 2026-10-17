@@ -81,8 +81,7 @@ const access = () => getSelectedWorkspaceServerRuntime().access()
 /**
  * A stored member on the administration wire: its stored keys, unknown ones included, and its
  * label (Clause 01a11c09-a49b-78c7-9304-7b8239f8a8cf, computed now and never stored) among the
- * Workspace's Access presets (`AccessService.presets`: the presets file from `schemaVersion` 6, the
- * built-in presets below it, Rule 01a11c09-cb79-744e-bbf6-ec38d6f159ba).
+ * Workspace's Access presets (`AccessService.presets`, the presets file).
  */
 function memberBody(member: StoredMember, presets: readonly LabelPreset[]) {
 	return { ...member, label: memberLabel(member, presets) }

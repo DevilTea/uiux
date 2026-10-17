@@ -6,7 +6,7 @@ import { cloneJson, diffJson, sameJson } from '../utils/workspace-authoring'
 /**
  * One Workspace settings section with its own draft, base revision and conflict state
  * (brief g, "Save per section"). Its value comes from one revisioned resource `R`: the manifest,
- * or from `schemaVersion` 5 the Product Kit file for the Adapters of the Product Kit page.
+ * or the Product Kit file for the Adapters and Styles & themes of the Product Kit page.
  *
  * Sync rules when a read of the resource arrives:
  * - the revision the section already holds, with no conflict or error shown: change nothing, so
