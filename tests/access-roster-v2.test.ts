@@ -232,7 +232,7 @@ describe('roster invariants on write', () => {
 		const { workspace, home, paths } = await workspaceAndHome()
 		const replacement = (root: string) => v2Roster(root, [v2Member('mei', 'human', presetKeys('owner'))])
 		const skipped: string[] = []
-		for (const refused of [{ ...v2Roster(workspace, []), version: 1 }, (({ version: _version, ...rest }) => rest)(v2Roster(workspace, [])), { ...v2Roster(workspace, []), sessions: [{ id: 'ses_abcdefghijkl', listener: 'lan' }] }]) {
+		for (const refused of [{ ...v2Roster(workspace, []), version: 1 }, Object.fromEntries(Object.entries(v2Roster(workspace, [])).filter(([key]) => key !== 'version')), { ...v2Roster(workspace, []), sessions: [{ id: 'ses_abcdefghijkl', listener: 'lan' }] }]) {
 			const text = await writeRoster(workspace, home, refused)
 			await expect(writeNewRoster({ workspaceRoot: workspace, home, replace: true, file: replacement, onManagerCheckSkipped: reason => skipped.push(reason) })).rejects.toMatchObject({ code: 'access.store_invalid', message: expect.stringContaining(`The roster ${paths.file} is refused: `) })
 			await expect(assertReplacementKeepsManager(home, workspace, replacement(workspace))).rejects.toMatchObject({ code: 'access.store_invalid' })
