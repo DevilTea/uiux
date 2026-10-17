@@ -1,4 +1,4 @@
-Feature: Member roster and permission keys
+Feature: Access and roster
   # Source: Discussion #231 (Part 17, one current format) https://github.com/DevilTea/uiux/discussions/231; owner acceptance 2026-10-17 https://github.com/DevilTea/uiux/discussions/231#discussioncomment-18992111: Change 6.1, the `.spec/` units New table.
   # Status: not built as of 21c5130: a `version: 1` roster is still upgraded in place with an `access.v1.json` backup; see the Implementation gaps entry of 01a14917-7898-72fa-a8ad-ed737e4a9eae in its owner (issue #232).
   # Note: No test exists yet.
