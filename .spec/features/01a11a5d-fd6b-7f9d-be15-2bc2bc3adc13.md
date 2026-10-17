@@ -105,7 +105,7 @@ rules:
 
 ## Notes
 
-- The `restore_resource_version` input and results are owned by 01a11a5e-2768-76ad-b02a-e15f50f91268; the Editor role by 01a11485-fa44-7b6a-99f8-de4e1e8edcfc; Restore on desktop only by 01a11a5e-1bfa-71e9-9611-152b5b665379. Leases apply as to any write (01a11485-f005-7f10-baf7-58cb17e5d0e1, and an Agent's restore takes the lease by 01a11485-f020-74e0-b721-b4d6a5d15195), and a restore is a mutation, so 01a1144e-4fcf-7b8a-8978-73b1a0cc31f4 already refuses it while the Workspace needs migration or is unsupported.
+- The `restore_resource_version` input and results are owned by 01a11a5e-2768-76ad-b02a-e15f50f91268; the Editor role by 01a11485-fa44-7b6a-99f8-de4e1e8edcfc; Restore on desktop only by 01a11a5e-1bfa-71e9-9611-152b5b665379. Leases apply as to any write (01a11485-f005-7f10-baf7-58cb17e5d0e1, and an Agent's restore takes the lease by 01a11485-f020-74e0-b721-b4d6a5d15195), and a restore is a mutation, so 01a1144e-4fcf-7b8a-8978-73b1a0cc31f4 already refuses it while the Workspace is unsupported.
 - Whole-version revert (decision 10-B) is deferred by the owner (O2) to its own later decision.
 - Decision 10 rule 4 (R16) notes a derived consequence of 01a11a5e-1645-7f02-ae9e-05dd242e4a82: restore is the first operation that can change a View's `name` (no rename operation exists yet, #56); identity never changes.
 - Decision 10 rule 8 lets a restore re-create a resource that disappeared out of band. The owner settled how `expectedRevision` is supplied for a missing resource as `null` (ruling 3 of https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18825439); Clause 01a11a5e-2768-76ad-b02a-e15f50f91268 records it.
