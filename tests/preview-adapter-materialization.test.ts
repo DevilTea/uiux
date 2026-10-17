@@ -20,7 +20,7 @@ import {
 import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
 import { HUMAN_OWNER } from './support/access'
-import { v5Manifest, writeCurrentWorkspace } from './support/workspace-layout'
+import { currentManifest, writeCurrentWorkspace } from './support/workspace-layout'
 
 const temporaryRoots: string[] = []
 
@@ -630,7 +630,7 @@ export const manifest = {
 	})
 })
 
-describe('a schemaVersion 5 Workspace resolves its Adapters from the Product Kit', () => {
+describe('a current-schema Workspace resolves its Adapters from the Product Kit', () => {
 	const HOST_PACKAGES = [['@deviltea', 'widget-core'], ['@deviltea', 'widget-vue'], ['vue']] as const
 
 	/** Links the host's widget-core, widget-vue and vue into `<directory>/node_modules`, as a kit install would provide them. */
@@ -642,10 +642,10 @@ describe('a schemaVersion 5 Workspace resolves its Adapters from the Product Kit
 		}
 	}
 
-	/** A v5 Workspace at `<root>`: `workspace.json`, `product-kit.json` with `adapters`, and `kit/` (Clause 01a1144e-538e). */
-	async function createV5Workspace(root: string, adapters: Array<{ moduleSpecifier: string }>, kitPackage?: unknown): Promise<string> {
+	/** A current-schema Workspace at `<root>`: `workspace.json`, `product-kit.json` with `adapters`, and `kit/` (Clause 01a1144e-538e). */
+	async function createKitWorkspace(root: string, adapters: Array<{ moduleSpecifier: string }>, kitPackage?: unknown): Promise<string> {
 		await mkdir(join(root, 'kit'), { recursive: true })
-		await writeFile(join(root, 'workspace.json'), JSON.stringify(v5Manifest()))
+		await writeFile(join(root, 'workspace.json'), JSON.stringify(currentManifest()))
 		await writeFile(join(root, 'product-kit.json'), JSON.stringify({ ...emptyProductKit(), adapters }))
 		if (kitPackage !== undefined) await writeFile(join(root, 'kit', 'package.json'), JSON.stringify(kitPackage))
 		return root
@@ -671,7 +671,7 @@ describe('a schemaVersion 5 Workspace resolves its Adapters from the Product Kit
 	}
 
 	it('renders a plain-module Adapter in kit/ with no build, no registry and no kit package file (the minimal form)', async () => {
-		const root = await createV5Workspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
+		const root = await createKitWorkspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
 		await linkHostPackages(join(root, 'kit'))
 		await writeFile(join(root, 'kit', 'adapter.mjs'), makeCounterAdapterSource())
 
@@ -684,7 +684,7 @@ describe('a schemaVersion 5 Workspace resolves its Adapters from the Product Kit
 	})
 
 	it('reports an Adapter outside kit/ or an undeclared package as a resolution diagnostic of the Product Kit list', async () => {
-		const root = await createV5Workspace(await temporaryRoot(), [
+		const root = await createKitWorkspace(await temporaryRoot(), [
 			{ moduleSpecifier: './../views/counter.mjs' },
 			{ moduleSpecifier: 'undeclared-counter' },
 		], { private: true, dependencies: {} })
@@ -704,7 +704,7 @@ describe('a schemaVersion 5 Workspace resolves its Adapters from the Product Kit
 	})
 
 	it('fails closed when the Product Kit file or the manifest is missing or invalid', async () => {
-		const root = await createV5Workspace(await temporaryRoot(), [])
+		const root = await createKitWorkspace(await temporaryRoot(), [])
 		expect(await resolveSelectedWorkspaceAdapters(root)).toMatchObject({ state: 'valid', summaries: [] })
 		for (const content of [undefined, '{', JSON.stringify({ adapters: [] })]) {
 			if (content === undefined) await rm(join(root, 'product-kit.json'))
@@ -712,14 +712,14 @@ describe('a schemaVersion 5 Workspace resolves its Adapters from the Product Kit
 			const resolution = await resolveSelectedWorkspaceAdapters(root)
 			expect(resolution, String(content)).toMatchObject({ state: 'invalid', diagnostics: [{ code: 'product_kit.missing', path: '/product-kit' }] })
 		}
-		// A v5 manifest that still lists adapters is invalid (Clause 01a115cd-adb0): its Adapters are not read from it.
+		// A current manifest that still lists adapters is invalid (Clause 01a115cd-adb0): its Adapters are not read from it.
 		await writeFile(join(root, 'product-kit.json'), JSON.stringify(emptyProductKit()))
-		await writeFile(join(root, 'workspace.json'), JSON.stringify({ ...v5Manifest(), adapters: [] }))
+		await writeFile(join(root, 'workspace.json'), JSON.stringify({ ...currentManifest(), adapters: [] }))
 		expect(await resolveSelectedWorkspaceAdapters(root)).toMatchObject({ state: 'invalid', diagnostics: [{ code: 'workspace.manifest_missing' }] })
 	})
 
 	it('bundles the host widget-core even when kit/node_modules holds a second copy (#123)', async () => {
-		const root = await createV5Workspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
+		const root = await createKitWorkspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
 		await linkHostPackages(join(root, 'kit'))
 		// Replace the linked widget-core with a second copy: it re-exports the host copy (so the
 		// server-side manifest load still works) and carries a marker that a bundled copy would include.
@@ -741,7 +741,7 @@ describe('a schemaVersion 5 Workspace resolves its Adapters from the Product Kit
 	it('falls back to kit/node_modules, never the root node_modules, for a bare import of an Adapter outside kit/', async () => {
 		const outer = await temporaryRoot()
 		await linkHostPackages(outer)
-		const root = await createV5Workspace(join(outer, 'ws'), [{ moduleSpecifier: 'hoisted-counter' }], { dependencies: { 'hoisted-counter': '*' } })
+		const root = await createKitWorkspace(join(outer, 'ws'), [{ moduleSpecifier: 'hoisted-counter' }], { dependencies: { 'hoisted-counter': '*' } })
 		const hoisted = join(outer, 'node_modules', 'hoisted-counter')
 		await mkdir(hoisted, { recursive: true })
 		await writeFile(join(hoisted, 'package.json'), JSON.stringify({ name: 'hoisted-counter', type: 'module', main: './index.mjs' }))

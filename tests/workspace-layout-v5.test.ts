@@ -28,7 +28,7 @@ import { CheckpointStore, HostHistoryStore, runWithDesignWriteContext, versionRe
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { hostHistoryPaths } from '../src/server/access/store'
 import { createHistoryStoreFactory } from '../src/server/history-stores'
-import { transactionsPath, V4_TEST_SCHEMA_POLICY, V5_ONLY_TEST_SCHEMA_POLICY as V5_TEST_SCHEMA_POLICY, v5Manifest, writeManifest } from './support/workspace-layout'
+import { currentManifest, transactionsPath, V4_TEST_SCHEMA_POLICY, V5_ONLY_TEST_SCHEMA_POLICY as V5_TEST_SCHEMA_POLICY, v5Manifest, writeManifest } from './support/workspace-layout'
 
 /** A schemaVersion 4 manifest, as the old layout keeps it in `.uiux/`, holding `adapters`. */
 function v4Manifest(overrides: Readonly<Record<string, unknown>> = {}): Record<string, unknown> {
@@ -39,8 +39,9 @@ function v4Manifest(overrides: Readonly<Record<string, unknown>> = {}): Record<s
  * The `schemaVersion` 5 layout (issue #141, units K2 and K6): Clauses 01a1144e-531c-…, 01a11bb1-8d67-…,
  * 01a11bb1-8dcc-…, 01a11bb1-8e31-…, 01a11bb1-8e98-…, 01a11bb1-8efc-…, 01a1144e-5336-…, 01a1144e-538e-…,
  * 01a1144e-5508-…, 01a1144e-551f-…, 01a11a5e-1e0e-…, 01a11a5e-1eba-… and 01a11a5e-1fc4-…, Rule
- * 01a11bb1-9585-…. A v5 Workspace is exercised under `V5_TEST_SCHEMA_POLICY`, UIUX's own policy now
- * that schemaVersion 5 is current.
+ * 01a11bb1-9585-…. The layout's current behavior is exercised on a current-schema Workspace (schemaVersion 6
+ * keeps every path of 5) under UIUX's own policy; a schemaVersion 5 Workspace, under `V5_TEST_SCHEMA_POLICY`
+ * (a build where 5 is current), only where a test is about schemaVersion 5 itself.
  */
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
@@ -85,7 +86,17 @@ const KIT: ProductKit = {
 	widgets: { Button: { component: 'button' }, DatePicker: { import: '@acme/design-system', export: 'DatePicker' } },
 }
 
-/** A fresh v5 Workspace root: the manifest at `workspace.json` and an empty Product Kit file. */
+/** A fresh current-schema Workspace root: the manifest at `workspace.json`, a Product Kit file and the built-in Access presets. */
+async function currentWorkspace(kit: ProductKit = emptyProductKit()): Promise<Readonly<{ root: string; persistence: FileNativePersistence }>> {
+	const root = await makeRoot()
+	await writeManifest(root, canonicalJsonBytes(currentManifest()), V5_LAYOUT)
+	await writeFile(join(root, 'product-kit.json'), canonicalJsonBytes(kit))
+	await writeFile(join(root, 'access-presets.json'), canonicalJsonBytes(builtInAccessPresetsFile()))
+	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+	return { root, persistence }
+}
+
+/** A fresh schemaVersion 5 Workspace root: the manifest at `workspace.json` and an empty Product Kit file. */
 async function v5Workspace(kit: ProductKit = emptyProductKit()): Promise<Readonly<{ root: string; persistence: FileNativePersistence }>> {
 	const root = await makeRoot()
 	await writeManifest(root, canonicalJsonBytes(v5Manifest()), V5_LAYOUT)
@@ -225,24 +236,24 @@ describe('persistence on a schemaVersion 5 root', () => {
 		const seen: string[] = []
 		const persistence = new FileNativePersistence({
 			root,
-			schemaPolicy: V5_TEST_SCHEMA_POLICY,
+			schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY,
 			async fault(point) {
 				if (point === 'transaction.before_apply') seen.push(...await readdir(transactionsPath(root, V5_LAYOUT)))
 			},
 		})
 		// An empty directory gets the layout of the injected policy's current version.
 		expect(persistence.layout).toBe(V5_LAYOUT)
-		await persistence.workspace.create(v5Manifest())
-		expect(JSON.parse(await readFile(join(root, 'workspace.json'), 'utf8'))).toEqual(v5Manifest())
+		await persistence.workspace.create(currentManifest() as never)
+		expect(JSON.parse(await readFile(join(root, 'workspace.json'), 'utf8'))).toEqual(currentManifest())
 		expect(await exists(join(root, '.uiux'))).toBe(false)
 		// Until product-kit.json exists the root cannot be written (Clause 01a11bb1-8d67); creating that file is the one exception.
 		const withoutKit = (await persistence.workspace.readInspected()).inspection
-		expect(withoutKit).toMatchObject({ state: 'unsupported', version: 5 })
+		expect(withoutKit).toMatchObject({ state: 'unsupported', version: CURRENT_WORKSPACE_SCHEMA_VERSION })
 		expect(withoutKit.diagnostics).toContainEqual(expect.objectContaining({ code: 'workspace.schema_unsupported', path: '/product-kit.json' }))
 		await expect(persistence.views.create(VIEW_ID, view() as never)).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
 
 		const created = await persistence.productKit.create(KIT)
-		expect((await persistence.workspace.readInspected()).inspection).toMatchObject({ state: 'current', version: 5 })
+		expect((await persistence.workspace.readInspected()).inspection).toMatchObject({ state: 'current', version: CURRENT_WORKSPACE_SCHEMA_VERSION })
 		expect(await readFile(join(root, 'product-kit.json'))).toEqual(canonicalJsonBytes(KIT))
 		expect(await persistence.productKit.read()).toEqual({ resource: KIT, revision: created })
 		expect(await persistence.productKit.readRevision()).toBe(created)
@@ -285,7 +296,7 @@ describe('persistence on a schemaVersion 5 root', () => {
 	})
 
 	it('scans the Product Kit file with the versioned and canonical files, and never kit/, reviews/ or artifacts/', async () => {
-		const { root, persistence } = await v5Workspace(KIT)
+		const { root, persistence } = await currentWorkspace(KIT)
 		await persistence.views.create(VIEW_ID, view() as never)
 		await mkdir(join(root, 'kit', 'src'), { recursive: true })
 		await writeFile(join(root, 'kit', 'package.json'), '{"name":"kit"}\n')
@@ -295,21 +306,23 @@ describe('persistence on a schemaVersion 5 root', () => {
 		await persistence.artifacts.put(new TextEncoder().encode('blob'))
 
 		const versioned = await persistence.withReadLock(() => persistence.scanVersionedSnapshotUnlocked())
-		expect([...versioned.keys()]).toEqual(['product-kit.json', viewRelativePath(VIEW_ID), 'workspace.json'])
+		expect([...versioned.keys()]).toEqual(['access-presets.json', 'product-kit.json', viewRelativePath(VIEW_ID), 'workspace.json'])
 		const canonical = await persistence.withReadLock(() => persistence.scanCanonicalSnapshotUnlocked())
-		expect([...canonical.keys()].sort()).toEqual(['product-kit.json', viewRelativePath(VIEW_ID), 'workspace.json'])
+		expect([...canonical.keys()].sort()).toEqual(['access-presets.json', 'product-kit.json', viewRelativePath(VIEW_ID), 'workspace.json'])
 
 		const resources = versionResourcesFromSnapshot(versioned, persistence.layout).resources
 		expect(resources.map(resource => [resource.kind, resource.key, Object.keys(resource.files)])).toEqual([
+			['access-presets', 'access-presets', ['access-presets.json']],
 			['product-kit', 'product-kit', ['product-kit.json']],
 			['view', VIEW_ID, [viewRelativePath(VIEW_ID)]],
 			['workspace', 'workspace', ['workspace.json']],
 		])
-		expect(resources[0]!.revision).toBe(await persistence.productKit.readRevision())
+		expect(resources[0]!.revision).toBe(await persistence.accessPresets.readRevision())
+		expect(resources[1]!.revision).toBe(await persistence.productKit.readRevision())
 	})
 
 	it('never creates, changes or deletes anything in kit/ (Rule 01a11bb1-9585)', async () => {
-		const { root, persistence } = await v5Workspace()
+		const { root, persistence } = await currentWorkspace()
 		await mkdir(join(root, 'kit', 'src'), { recursive: true })
 		await writeFile(join(root, 'kit', 'src', 'button.vue'), 'original\n')
 		const bytes = new TextEncoder().encode('changed\n')
@@ -417,8 +430,8 @@ describe('uiux migrate on a schemaVersion 5 root', () => {
 describe('history on a schemaVersion 5 Workspace', () => {
 	const clock = (): HistoryRecorderClock => ({ now: () => Date.parse('2026-10-10T00:00:00.000Z'), setTimeout: () => Symbol('timer'), clearTimeout: () => undefined })
 
-	async function historyFixture() {
-		const { root, persistence } = await v5Workspace({ ...emptyProductKit(), adapters: [{ moduleSpecifier: '@acme/uiux-adapter' }] })
+	async function historyFixture(workspace = currentWorkspace) {
+		const { root, persistence } = await workspace({ ...emptyProductKit(), adapters: [{ moduleSpecifier: '@acme/uiux-adapter' }] })
 		const home = join(await makeRoot('uiux-layout-v5-home-'), 'home')
 		const history = createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home })
 		const recorder = createHistoryRecorder({ persistence, stores: () => history.open(), clock: clock(), log: () => undefined })
@@ -426,14 +439,14 @@ describe('history on a schemaVersion 5 Workspace', () => {
 		return { root, home, persistence, history, recorder, app }
 	}
 
-	it('writes the Baseline under history/checkpoints/ as schemaVersion 5 with the product-kit resource, and records Product Kit writes', async () => {
+	it('writes the Baseline under history/checkpoints/ at the current schemaVersion with the product-kit resource, and records Product Kit writes', async () => {
 		const ctx = await historyFixture()
 		const started = await ctx.recorder.start()
 		expect(await readdir(join(ctx.root, 'history', 'checkpoints'))).toEqual([`${started.baseline}.json`])
 		const baseline = JSON.parse(await readFile(join(ctx.root, 'history', 'checkpoints', `${started.baseline}.json`), 'utf8'))
-		expect(baseline).toMatchObject({ workspaceSchemaVersion: 5 })
-		expect(baseline.resources.map((resource: { kind: string }) => resource.kind)).toEqual(['product-kit', 'workspace'])
-		expect(Object.keys(baseline.resources[0].files)).toEqual(['product-kit.json'])
+		expect(baseline).toMatchObject({ workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION })
+		expect(baseline.resources.map((resource: { kind: string }) => resource.kind)).toEqual(['access-presets', 'product-kit', 'workspace'])
+		expect(Object.keys(baseline.resources[1].files)).toEqual(['product-kit.json'])
 
 		const before = (await ctx.persistence.productKit.read())!
 		await runWithDesignWriteContext({ actor: HUMAN, source: 'workbench', operation: 'updateProductKit' }, () =>
@@ -441,12 +454,12 @@ describe('history on a schemaVersion 5 Workspace', () => {
 		await ctx.recorder.stop()
 		const versions = (await (await ctx.history.open()).host.listVersions()).records as HostVersionRecord[]
 		expect(versions).toHaveLength(1)
-		expect(versions[0]).toMatchObject({ type: 'autosave', workspaceSchemaVersion: 5, events: [expect.objectContaining({ operation: 'updateProductKit' })] })
+		expect(versions[0]).toMatchObject({ type: 'autosave', workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, events: [expect.objectContaining({ operation: 'updateProductKit' })] })
 		expect(versions[0]!.resources.find(resource => resource.kind === 'product-kit')?.revision).toBe(await ctx.persistence.productKit.readRevision())
 	})
 
 	it('compares and restores a version recorded in the old layout against the v5 current, by each record\'s own layout', async () => {
-		const ctx = await historyFixture()
+		const ctx = await historyFixture(v5Workspace)
 		await ctx.persistence.views.create(VIEW_ID, view('Pay') as never)
 		const stores = (await ctx.history.open())!
 		// A version recorded at schemaVersion 4: the manifest at .uiux/workspace.json holds the Adapters.

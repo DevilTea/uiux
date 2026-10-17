@@ -8,10 +8,10 @@ import { createWorkspaceApplicationSession } from '../src/application/services/w
 import { validateReviewRenderContextInput, validateReviewThread } from '../src/domain/reviews/schema'
 import { FileNativePersistence } from '../src/persistence/file-native'
 import { localeRelativePath, reviewRelativePath, viewRelativePath, workspaceRelativePath } from '../src/persistence/paths'
-import { WORKSPACE_V3_TO_V4_STEP } from '../src/product/workspace-schema'
-import { V4_TEST_SCHEMA_POLICY } from './support/workspace-layout'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY, WORKSPACE_V3_TO_V4_STEP } from '../src/product/workspace-schema'
+import { currentManifest, manifestPath, V4_TEST_SCHEMA_POLICY, writeCurrentWorkspace } from './support/workspace-layout'
 
-/** The step from 3 to 4 and renderContext authoring, in the old layout under a build where 4 is current. */
+/** The step from 3 to 4, in the old layout under a build where 4 is current. */
 const V4_POLICY = V4_TEST_SCHEMA_POLICY
 
 /**
@@ -201,6 +201,20 @@ async function seedV3Workspace(reviews: readonly Record<string, unknown>[]): Pro
 	return root
 }
 
+/** The settings of the Workspaces below: one authored viewport and one authored theme. */
+const SETTINGS = { i18n: { defaultLocale: 'en-US' }, viewports: { mobile: { dimensions: { width: 390, height: 844 } } }, themes: { dark: {} } }
+
+/** A current-schema Workspace with the View above, an empty reviews/ and these settings. */
+async function seedCurrentWorkspace(): Promise<string> {
+	const root = await mkdtemp(join(tmpdir(), 'uiux-render-context-'))
+	roots.push(root)
+	await writeCurrentWorkspace(root, SETTINGS)
+	await mkdir(join(root, 'views'), { recursive: true })
+	await mkdir(join(root, 'reviews'), { recursive: true })
+	await writeFile(join(root, viewRelativePath(VIEW_ID)), `${JSON.stringify(view)}\n`)
+	return root
+}
+
 async function snapshot(root: string): Promise<Record<string, string>> {
 	const files: Record<string, string> = {}
 	for (const directory of ['.uiux', 'views', 'reviews']) {
@@ -263,9 +277,8 @@ describe('uiux.v3-to-v4 (manifest-only step)', () => {
 
 describe('re-anchor keeps or clears the recorded renderContext (owner ruling 1, omitted keeps)', () => {
 	async function seedThreadWithContext() {
-		const root = await seedV3Workspace([])
-		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_POLICY })
-		await persistence.migrateWorkspace()
+		const root = await seedCurrentWorkspace()
+		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		await writeFile(join(root, reviewRelativePath(REVIEW_ID)), `${JSON.stringify(thread({ renderContext: ZH_MOBILE_DARK }))}\n`)
 		return { root, persistence, app: createWorkspaceApplicationSession(persistence) }
 	}
@@ -273,7 +286,7 @@ describe('re-anchor keeps or clears the recorded renderContext (owner ruling 1, 
 	async function readBack(root: string, persistence: FileNativePersistence) {
 		expect((await persistence.reviews.readInspected(REVIEW_ID))?.diagnostics).toEqual([])
 		const stored = JSON.parse(await readFile(join(root, reviewRelativePath(REVIEW_ID)), 'utf8')) as Record<string, unknown> & { history: Record<string, unknown>[] }
-		expect(validateReviewThread(stored, V4).ok).toBe(true)
+		expect(validateReviewThread(stored, { schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION }).ok).toBe(true)
 		return stored
 	}
 
@@ -331,10 +344,9 @@ describe('validateReviewRenderContextInput (writer-side shape check)', () => {
  * and omitted keeps.
  */
 describe('Review authoring records only Workspace keys in renderContext', () => {
-	async function seedV4Workspace() {
-		const root = await seedV3Workspace([])
-		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_POLICY })
-		await persistence.migrateWorkspace()
+	async function seedRenderContextWorkspace() {
+		const root = await seedCurrentWorkspace()
+		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		await mkdir(join(root, 'i18n'), { recursive: true })
 		await writeFile(join(root, localeRelativePath('zh-TW')), '{}\n')
 		return { root, persistence, app: createWorkspaceApplicationSession(persistence) }
@@ -350,7 +362,7 @@ describe('Review authoring records only Workspace keys in renderContext', () => 
 	}
 
 	it('creates a thread with keys from the authored viewports and themes, an i18n file and the default Locale', async () => {
-		const { root, persistence, app } = await seedV4Workspace()
+		const { root, persistence, app } = await seedRenderContextWorkspace()
 		expect(await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET, renderContext: ZH_MOBILE_DARK })).toMatchObject({ status: 'created', diagnostics: [] })
 		expect((await storedThread(root)).renderContext).toEqual(ZH_MOBILE_DARK)
 		expect((await persistence.reviews.readInspected(REVIEW_ID))?.diagnostics).toEqual([])
@@ -360,7 +372,7 @@ describe('Review authoring records only Workspace keys in renderContext', () => 
 	})
 
 	it('refuses unknown keys, unauthored built-in fallbacks included, reports every one, and writes nothing', async () => {
-		const { root, app } = await seedV4Workspace()
+		const { root, app } = await seedRenderContextWorkspace()
 		const refused = await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET, renderContext: { locale: 'fr-FR', viewportId: 'default', themeId: 'light' } })
 		expect(refused).toMatchObject({ status: 'invalid', key: REVIEW_ID })
 		expect(refusals(refused)).toEqual([
@@ -375,16 +387,16 @@ describe('Review authoring records only Workspace keys in renderContext', () => 
 	})
 
 	it('accepts `default` and `light` when the Workspace authored them, since only unauthored fallbacks are refused', async () => {
-		const { root, persistence, app } = await seedV4Workspace()
-		const manifest = { ...v3Manifest, schemaVersion: 4, viewports: { default: { dimensions: { width: 1280, height: 800 } } }, themes: { light: {} } }
-		await writeFile(join(root, workspaceRelativePath()), `${JSON.stringify(manifest, null, 2)}\n`)
+		const { root, persistence, app } = await seedRenderContextWorkspace()
+		const manifest = currentManifest({ ...SETTINGS, viewports: { default: { dimensions: { width: 1280, height: 800 } } }, themes: { light: {} } })
+		await writeFile(manifestPath(root), `${JSON.stringify(manifest, null, 2)}\n`)
 		expect(await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET, renderContext: { viewportId: 'default', themeId: 'light' } }))
 			.toMatchObject({ status: 'created', diagnostics: [] })
 		expect((await persistence.reviews.read(REVIEW_ID))?.resource.renderContext).toEqual({ viewportId: 'default', themeId: 'light' })
 	})
 
 	it('refuses a non-canonical Locale tag at the service layer and writes nothing', async () => {
-		const { root, app } = await seedV4Workspace()
+		const { root, app } = await seedRenderContextWorkspace()
 		const refused = await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET, renderContext: { locale: 'zh-tw' } })
 		expect(refused).toMatchObject({ status: 'invalid' })
 		expect(refusals(refused)).toEqual([['review.render_context_invalid_locale', '/renderContext/locale']])
@@ -392,7 +404,7 @@ describe('Review authoring records only Workspace keys in renderContext', () => 
 	})
 
 	it('refuses a renderContext on a Workspace anchor and writes nothing', async () => {
-		const { root, app } = await seedV4Workspace()
+		const { root, app } = await seedRenderContextWorkspace()
 		const refused = await app.createReviewThread({ id: REVIEW_ID, anchor: { scope: 'workspace' }, renderContext: { locale: 'en-US' } })
 		expect(refused).toMatchObject({ status: 'invalid' })
 		expect(refusals(refused)).toEqual([['review.render_context_without_widget', '/renderContext']])
@@ -400,7 +412,7 @@ describe('Review authoring records only Workspace keys in renderContext', () => 
 	})
 
 	it('re-anchors: an object sets, omitted keeps, null clears, each recorded on both sides of the event', async () => {
-		const { root, persistence, app } = await seedV4Workspace()
+		const { root, persistence, app } = await seedRenderContextWorkspace()
 		const created = await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET })
 		if (created.status !== 'created') throw new Error('Thread fixture failed.')
 		const revision = async () => (await persistence.reviews.readRevision(REVIEW_ID))!
@@ -429,7 +441,7 @@ describe('Review authoring records only Workspace keys in renderContext', () => 
 	})
 
 	it('clears the context on a re-anchor to the Workspace arm with null and keeps it in before', async () => {
-		const { root, persistence, app } = await seedV4Workspace()
+		const { root, persistence, app } = await seedRenderContextWorkspace()
 		const created = await app.createReviewThread({ id: REVIEW_ID, anchor: WIDGET, renderContext: ZH_MOBILE_DARK })
 		if (created.status !== 'created') throw new Error('Thread fixture failed.')
 		expect(await app.reanchorReviewThread({ reviewId: REVIEW_ID, expectedRevision: created.revision, anchor: WORKSPACE as { scope: 'workspace' }, renderContext: null, actor: AUTHOR }))
@@ -443,7 +455,7 @@ describe('Review authoring records only Workspace keys in renderContext', () => 
 	})
 
 	it('refuses an unknown key, or an object with a Workspace target, on re-anchor without writing, and never re-checks a kept stale key', async () => {
-		const { root, persistence, app } = await seedV4Workspace()
+		const { root, persistence, app } = await seedRenderContextWorkspace()
 		// The Workspace has no `tablet` viewport (any more): the recorded key is stale but valid.
 		await writeFile(join(root, reviewRelativePath(REVIEW_ID)), `${JSON.stringify(thread({ renderContext: { viewportId: 'tablet' } }))}\n`)
 		const revision = (await persistence.reviews.readRevision(REVIEW_ID))!

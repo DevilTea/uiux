@@ -41,7 +41,6 @@ import {
 	FileNativePersistence,
 	LEGACY_LAYOUT,
 	PersistenceError,
-	WORKSPACE_DATA_DIRECTORY,
 	WORKSPACE_MANIFEST_PATH,
 	assetMetadataRelativePath,
 	flowRelativePath,
@@ -57,7 +56,7 @@ import { V5_LAYOUT } from '../src/persistence/paths'
 import { canonicalJsonBytes } from '../src/domain/canonical-json'
 import { builtInAccessPresetsFile } from '../src/domain/access-presets/schema'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
-import { V4_TEST_SCHEMA_POLICY } from './support/workspace-layout'
+import { createCurrentWorkspace } from './support/workspace-layout'
 
 const VERSION_ID = '0199aaaa-0000-7000-8000-000000000001'
 const PARENT_ID = '0199aaaa-0000-7000-8000-000000000002'
@@ -300,6 +299,32 @@ describe('legacy Workspace layout', () => {
 	})
 })
 
+describe('current Workspace layout', () => {
+	it('classifies every versioned path family and excludes Reviews, runtime files, kit/ and everything else', () => {
+		const classify = V5_LAYOUT.classifyVersionedPath
+		expect(classify('workspace.json')).toEqual({ kind: 'workspace', key: 'workspace' })
+		expect(classify('product-kit.json')).toEqual({ kind: 'product-kit', key: 'product-kit' })
+		expect(classify('access-presets.json')).toEqual({ kind: 'access-presets', key: 'access-presets' })
+		expect(classify(viewRelativePath(VIEW_ID))).toEqual({ kind: 'view', key: VIEW_ID })
+		expect(classify(flowRelativePath(FLOW_ID))).toEqual({ kind: 'flow', key: FLOW_ID })
+		expect(classify(localeRelativePath('zh-TW'))).toEqual({ kind: 'locale', key: 'zh-TW' })
+		expect(classify(assetMetadataRelativePath(ASSET_ID))).toEqual({ kind: 'asset', key: ASSET_ID })
+		expect(classify(`assets/${ASSET_ID}/logo.svg`)).toEqual({ kind: 'asset', key: ASSET_ID })
+		for (const excluded of CURRENT_EXCLUDED_PATHS)
+			expect(classify(excluded), excluded).toBeUndefined()
+	})
+
+	it('classifies only paths under a versioned root, and none under an excluded one', () => {
+		const classified = [...CURRENT_VERSIONED_PATHS, ...CURRENT_EXCLUDED_PATHS].filter(path => V5_LAYOUT.classifyVersionedPath(path))
+		expect(classified).toEqual(CURRENT_VERSIONED_PATHS)
+		const under = (path: string, root: string) => root.endsWith('/') ? path.startsWith(root) : path === root
+		for (const path of classified) {
+			expect(V5_LAYOUT.versionedRoots.some(root => under(path, root)), path).toBe(true)
+			expect(V5_LAYOUT.excluded.some(root => under(path, root)), path).toBe(false)
+		}
+	})
+})
+
 const VERSIONED_PATHS = [
 	WORKSPACE_MANIFEST_PATH,
 	viewRelativePath(VIEW_ID),
@@ -333,12 +358,32 @@ const EXCLUDED_PATHS = [
 	'',
 ]
 
+const CURRENT_VERSIONED_PATHS = [
+	'workspace.json',
+	'product-kit.json',
+	'access-presets.json',
+	...VERSIONED_PATHS.slice(1),
+]
+
+const CURRENT_EXCLUDED_PATHS = [
+	`reviews/${REVIEW_ID}.review.json`,
+	'artifacts/sha256/aa/' + 'a'.repeat(64),
+	`history/checkpoints/${VERSION_ID}.json`,
+	'.persistence.lock',
+	'.server-hold.json',
+	'.transactions/x/journal.json',
+	'kit/package.json',
+	`kit/views/${VIEW_ID}.view.json`,
+	'.uiux/workspace.json',
+	'README.md',
+	...EXCLUDED_PATHS.slice(EXCLUDED_PATHS.indexOf('views/notes.txt')),
+]
+
 describe('revision parity with file-native persistence', () => {
 	it('computes the same revision persistence reads for every resource kind', async () => {
-		// The walk below classifies the old layout's paths, so the Workspace is a schemaVersion 4 one.
 		const root = await makeRoot()
-		const persistence = new FileNativePersistence({ root, schemaPolicy: V4_TEST_SCHEMA_POLICY })
-		await persistence.workspace.create(manifest(V4_TEST_SCHEMA_POLICY.currentVersion))
+		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		await createCurrentWorkspace(persistence)
 		await persistence.views.create(VIEW_ID, { id: VIEW_ID, name: 'Checkout', ir: { type: 'RootShell', id: 'root', slots: { content: [] } }, variants: {}, spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] } })
 		await persistence.flows.create(FLOW_ID, { id: FLOW_ID, name: 'Flow', entryStepId: VIEW_ID, steps: { [VIEW_ID]: { target: { viewId: VIEW_ID }, transitions: [] } } })
 		await persistence.locales.create('zh-TW', { greeting: '你好' })
@@ -347,9 +392,11 @@ describe('revision parity with file-native persistence', () => {
 		await persistence.artifacts.put(Buffer.from('artifact'))
 
 		const grouped = await groupVersionedFiles(root)
-		expect([...grouped.keys()].sort()).toEqual(['asset\0' + ASSET_ID, 'flow\0' + FLOW_ID, 'locale\0zh-TW', 'view\0' + VIEW_ID, 'workspace\0workspace'])
+		expect([...grouped.keys()].sort()).toEqual(['access-presets\0access-presets', 'asset\0' + ASSET_ID, 'flow\0' + FLOW_ID, 'locale\0zh-TW', 'product-kit\0product-kit', 'view\0' + VIEW_ID, 'workspace\0workspace'])
 		const revision = (kind: string, key: string) => revisionForResourceFiles(kind, grouped.get(`${kind}\0${key}`)!)
 		expect(revision('workspace', 'workspace')).toBe((await persistence.workspace.read('workspace'))!.revision)
+		expect(revision('product-kit', 'product-kit')).toBe(await persistence.productKit.readRevision())
+		expect(revision('access-presets', 'access-presets')).toBe(await persistence.accessPresets.readRevision())
 		expect(revision('view', VIEW_ID)).toBe(await persistence.views.readRevision(VIEW_ID))
 		expect(revision('flow', FLOW_ID)).toBe(await persistence.flows.readRevision(FLOW_ID))
 		expect(revision('locale', 'zh-TW')).toBe(await persistence.locales.readRevision('zh-TW'))
@@ -549,9 +596,9 @@ async function groupVersionedFiles(root: string): Promise<Map<string, Map<string
 		for (const entry of await readdir(join(root, relative), { withFileTypes: true })) {
 			const path = relative ? `${relative}/${entry.name}` : entry.name
 			if (entry.isDirectory()) { await walk(path); continue }
-			const identity = LEGACY_LAYOUT.classifyVersionedPath(path)
+			const identity = V5_LAYOUT.classifyVersionedPath(path)
 			if (!identity) {
-				expect(path.startsWith(WORKSPACE_DATA_DIRECTORY.reviews) || path.startsWith(WORKSPACE_DATA_DIRECTORY.workspaceMeta), path).toBe(true)
+				expect(V5_LAYOUT.excluded.some(excluded => path.startsWith(excluded)), path).toBe(true)
 				continue
 			}
 			const key = `${identity.kind}\0${identity.key}`

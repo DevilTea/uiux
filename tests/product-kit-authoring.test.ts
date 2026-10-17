@@ -12,6 +12,7 @@ import type { MemberPrincipal } from '../src/application/access/principal'
 import { createHistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { HostVersionRecord } from '../src/domain/history/schema'
+import { builtInAccessPresetsFile } from '../src/domain/access-presets/schema'
 import { emptyProductKit, type ProductKit } from '../src/domain/product-kit/schema'
 import { createHistoryStoreFactory } from '../src/server/history-stores'
 import { canonicalJsonBytes, FileNativePersistence, LEGACY_LAYOUT, V5_LAYOUT } from '../src/persistence'
@@ -24,11 +25,11 @@ import {
 	updateWorkspaceSettingsForHttp,
 } from '../src/server/authoring-http'
 import { connectMcp, scoped, testMember } from './support/access'
-import { currentManifest, V5_ONLY_TEST_SCHEMA_POLICY as V5_TEST_SCHEMA_POLICY, v5Manifest, writeManifest } from './support/workspace-layout'
+import { currentManifest, writeManifest } from './support/workspace-layout'
 
 /**
- * The Product Kit authoring operations (issue #141, units K5 and K6) on a `schemaVersion` 5 Workspace,
- * under `V5_TEST_SCHEMA_POLICY`, the policy of a build where schemaVersion 5 is current (the operations are unchanged at 6): Clauses 01a11bb1-b15c-…, 01a11bb1-b35a-…, 01a11bb1-b3c2-…,
+ * The Product Kit authoring operations (issue #141, units K5 and K6) on a current-schema Workspace:
+ * Clauses 01a11bb1-b15c-…, 01a11bb1-b35a-…, 01a11bb1-b3c2-…,
  * 01a11bb1-b0f1-…, 01a11bb1-8d03-…, 01a11485-f769-… and 01a11485-f70a-…, Rules 01a11485-efb6-…,
  * 01a11bb1-a120-…, 01a11bb1-a2ac-… and 01a11bb1-a310-….
  */
@@ -49,20 +50,21 @@ async function write(path: string, content: string): Promise<void> {
 	await writeFile(path, content)
 }
 
-/** A v5 Workspace whose kit project declares two packages and holds a plain-module Adapter and three component files. */
-async function v5Fixture(kit: ProductKit = KIT, parent?: string) {
+/** A current-schema Workspace whose kit project declares two packages and holds a plain-module Adapter and three component files. */
+async function kitFixture(kit: ProductKit = KIT, parent?: string) {
 	const root = parent ? join(parent, 'workspace') : await realpath(await mkdtemp(join(tmpdir(), 'uiux-product-kit-')))
 	if (parent) await mkdir(root)
 	else roots.push(root)
-	await writeManifest(root, canonicalJsonBytes(v5Manifest()), V5_LAYOUT)
+	await writeManifest(root, canonicalJsonBytes(currentManifest()), V5_LAYOUT)
 	await writeFile(join(root, 'product-kit.json'), canonicalJsonBytes(kit))
+	await writeFile(join(root, 'access-presets.json'), canonicalJsonBytes(builtInAccessPresetsFile()))
 	await write(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', private: true, dependencies: { '@acme/design-system': '^1.0.0', '@acme/uiux-adapter': '^2.0.0' } }))
 	await write(join(root, 'kit', 'node_modules', '@acme', 'design-system', 'package.json'), JSON.stringify({ name: '@acme/design-system', version: '1.4.2' }))
 	await write(join(root, 'kit', 'uiux.js'), 'export const adapter = {}\n')
 	await write(join(root, 'kit', 'src', 'button.ts'), 'export const button = 1\n')
 	await write(join(root, 'kit', 'src', 'money.ts'), 'export const money = 1\n')
 	await write(join(root, 'kit', 'src', 'card.ts'), 'import { money } from \'./money\'\nimport { button } from \'./button.js\'\nexport const card = money + button\n')
-	const persistence = new FileNativePersistence({ root, schemaPolicy: V5_TEST_SCHEMA_POLICY })
+	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 	const app = createWorkspaceApplicationSession(persistence)
 	return { root, persistence, app, kitPath: join(root, 'product-kit.json') }
 }
@@ -86,7 +88,7 @@ function http(app: WorkspaceApplicationSession, principal: MemberPrincipal, leas
 
 describe('compose_product_kit, update_product_kit and update_component_registry over HTTP and MCP', () => {
 	it('composes designSystems and the Adapter list, keeping a kept Adapter\'s config, over HTTP', async () => {
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		const composed = await composeProductKitForHttp(http(ctx.app, HUMAN_EDITOR), {
 			expectedRevision: await revision(ctx.app),
 			designSystems: ['@acme/design-system'],
@@ -100,7 +102,7 @@ describe('compose_product_kit, update_product_kit and update_component_registry 
 	})
 
 	it('updates the Adapter config, styles and themes over MCP, and refuses a specifier change there', async () => {
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		const mcp = await connectMcp(ctx.app, AGENT)
 		try {
 			const updated = await mcp.client.callTool({ name: 'update_product_kit', arguments: {
@@ -129,7 +131,7 @@ describe('compose_product_kit, update_product_kit and update_component_registry 
 	})
 
 	it('updates the component registry over MCP and HTTP, with import-scan findings that do not refuse', async () => {
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		const mcp = await connectMcp(ctx.app, AGENT)
 		try {
 			const registered = await mcp.client.callTool({ name: 'update_component_registry', arguments: {
@@ -164,7 +166,7 @@ describe('compose_product_kit, update_product_kit and update_component_registry 
 	})
 
 	it('refuses a registry entry that fails validation with kit.component_invalid, storing nothing (Rule 01a11bb1-a2ac)', async () => {
-		const ctx = await v5Fixture({ ...KIT, adapters: [{ moduleSpecifier: './src/wrapper.js' }] })
+		const ctx = await kitFixture({ ...KIT, adapters: [{ moduleSpecifier: './src/wrapper.js' }] })
 		await write(join(ctx.root, 'kit', 'src', 'wrapper.js'), 'export const adapter = {}\n')
 		await write(join(ctx.root, 'outside.ts'), 'export const leak = 1\n')
 		await symlink(join(ctx.root, 'outside.ts'), join(ctx.root, 'kit', 'src', 'leak.ts'))
@@ -185,7 +187,7 @@ describe('compose_product_kit, update_product_kit and update_component_registry 
 	})
 
 	it('refuses invalid and escaping specifiers and undeclared Design System packages before storing anything', async () => {
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		const bytes = await readFile(ctx.kitPath, 'utf8')
 		const session = http(ctx.app, HUMAN_EDITOR)
 		const compose = async (adapters: string[], designSystems: string[] = []) =>
@@ -217,7 +219,7 @@ describe('compose_product_kit, update_product_kit and update_component_registry 
 	})
 
 	it('answers a stale expectedRevision with a conflict and writes nothing', async () => {
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		const stale = await revision(ctx.app)
 		const session = http(ctx.app, HUMAN_EDITOR)
 		expect(await composeProductKitForHttp(session, { expectedRevision: stale, designSystems: [], adapters: ['./uiux.js'] })).toMatchObject({ status: 200 })
@@ -246,7 +248,7 @@ describe('compose_product_kit, update_product_kit and update_component_registry 
 	})
 
 	it('updates the Workspace settings without adapters from schemaVersion 5 and refuses adapters there (Clause 01a11485-f769)', async () => {
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		const current = await ctx.app.readPointResource('workspace', 'workspace')
 		if (current?.kind !== 'workspace') throw new Error('workspace')
 		const session = http(ctx.app, HUMAN_EDITOR)
@@ -261,7 +263,7 @@ describe('compose_product_kit, update_product_kit and update_component_registry 
 
 describe('Product Kit authorization (Clauses 01a11bb1-b35a and 01a11bb1-b3c2)', () => {
 	it('refuses each operation without its key, naming it, and writes nothing', async () => {
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		const bytes = await readFile(ctx.kitPath, 'utf8')
 		const rev = await revision(ctx.app)
 		const compose = { expectedRevision: rev, designSystems: [], adapters: ['./uiux.js'] }
@@ -306,7 +308,7 @@ describe('Product Kit authorization (Clauses 01a11bb1-b35a and 01a11bb1-b3c2)', 
 	})
 
 	it('decides the keys on the file the write replaces, even when another write lands between authorization and the write', async () => {
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		const original = await revision(ctx.app)
 		// The concurrent composition the racing session lands, which re-points the Adapter.
 		const racing: WorkspaceApplicationSession = {
@@ -327,7 +329,7 @@ describe('Product Kit authorization (Clauses 01a11bb1-b35a and 01a11bb1-b3c2)', 
 
 describe('the product-kit edit lease (Rule 01a11485-efb6)', () => {
 	it('lets an Agent\'s write take the lease, which locks out another Agent and a human, while a human write takes none', async () => {
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		const leases = createLeaseManager()
 		const mcp = await connectMcp(ctx.app, AGENT, { leases })
 		try {
@@ -358,7 +360,7 @@ describe('Product Kit history and restore (Clauses 01a11a5e-216d and 01a11bb1-b3
 	const RESTORER = testMember({ nickname: 'rhea', kind: 'human', credential: 'session', keys: ['workspace.read', 'history.read', 'product-kit.source.read', 'product-kit.write', 'history.restore'] })
 
 	async function historyFixture() {
-		const base = await v5Fixture()
+		const base = await kitFixture()
 		const home = join(await realpath(await mkdtemp(join(tmpdir(), 'uiux-product-kit-home-'))), 'home')
 		roots.push(dirname(home))
 		const history = createHistoryStoreFactory({ workspaceRoot: base.root, persistence: base.persistence, home: () => home })
@@ -442,7 +444,7 @@ describe('Product Kit history and restore (Clauses 01a11a5e-216d and 01a11bb1-b3
 
 describe('the uiux://product-kit Resource (Clause 01a11bb1-b0f1)', () => {
 	it('holds the file, the build state, the Adapter resolution, the resolved packages and the findings, with no host path', async () => {
-		const ctx = await v5Fixture({
+		const ctx = await kitFixture({
 			...KIT,
 			adapters: [...KIT.adapters, { moduleSpecifier: '@acme/uiux-adapter' }],
 			components: { ghost: { files: ['src/ghost.ts'], layer: 'product' } },
@@ -474,7 +476,7 @@ describe('the uiux://product-kit Resource (Clause 01a11bb1-b0f1)', () => {
 
 describe('widgets.import names a declared dependency (#139 owner ruling 2026-10-11, 2)', () => {
 	it('refuses an import of a package kit/package.json does not declare, and accepts a declared one with a subpath', async () => {
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		const bytes = await readFile(ctx.kitPath, 'utf8')
 		const session = http(ctx.app, HUMAN_EDITOR)
 		for (const specifier of ['@evil/widgets', 'left-pad/x']) {
@@ -489,7 +491,7 @@ describe('widgets.import names a declared dependency (#139 owner ruling 2026-10-
 
 describe('the service guard of the Product Kit operations', () => {
 	it('returns the guard\'s refusal on the file the write replaces, storing nothing, and stores when the guard passes', async () => {
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		const bytes = await readFile(ctx.kitPath, 'utf8')
 		const seen: unknown[] = []
 		const refusal = { status: 'refused-by-guard' } as const
@@ -504,7 +506,7 @@ describe('the service guard of the Product Kit operations', () => {
 	})
 
 	it('runs the guard before the checks against the kit project', async () => {
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		const refusal = { status: 'refused-by-guard' } as const
 		// The change would fail the kit project check (an undeclared package); the guard answers first.
 		const command = { expectedRevision: await revision(ctx.app), designSystems: ['@evil/design-system'], adapters: ['./uiux.js'] }
@@ -558,7 +560,7 @@ describe('the import scan (Rule 01a11bb1-a310)', () => {
 		}
 
 		// Through the registry check, with the 1 MB file as a component's entry.
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		await write(join(ctx.root, 'kit', 'src', 'huge.ts'), fill('import '))
 		const next: ProductKit = { ...KIT, components: { huge: { files: ['src/huge.ts'], layer: 'product' } } }
 		const started = performance.now()
@@ -570,7 +572,7 @@ describe('the import scan (Rule 01a11bb1-a310)', () => {
 	const manyImports = (count: number) => Array.from({ length: count }, (_, index) => `import './missing-${index}'`).join('\n')
 
 	it('resolves each import once per check, however many components share the file', async () => {
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		await write(join(ctx.root, 'kit', 'src', 'many.ts'), manyImports(1000))
 		const components = Object.fromEntries(Array.from({ length: 50 }, (_, index) => [`c${index}`, { files: ['src/many.ts'], layer: 'product' as const }]))
 		const started = performance.now()
@@ -580,7 +582,7 @@ describe('the import scan (Rule 01a11bb1-a310)', () => {
 	})
 
 	it('stops at its limit with one finding', async () => {
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		const components: ProductKit['components'] = {}
 		for (const name of ['a', 'b', 'c', 'd']) {
 			await write(join(ctx.root, 'kit', 'src', name, 'many.ts'), manyImports(1000))
@@ -624,7 +626,7 @@ describe('kit project containment', () => {
 	] as const) {
 		it(`answers as for a missing file when ${label}, and reads nothing there`, async () => {
 			const outside = await outsideKit()
-			const ctx = await v5Fixture({ ...KIT, components: registry })
+			const ctx = await kitFixture({ ...KIT, components: registry })
 			await link(ctx.root, outside)
 			const read = await ctx.app.readProductKit()
 			const text = JSON.stringify(read)
@@ -645,7 +647,7 @@ describe('kit project containment', () => {
 
 	it('answers as for a missing file for a link inside kit/src/ out of the Workspace, and the import scan does not follow it', async () => {
 		const outside = await outsideKit()
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		await symlink(join(outside, 'secret.ts'), join(ctx.root, 'kit', 'src', 'leak.ts'))
 		await symlink(join(outside, 'nothing.ts'), join(ctx.root, 'kit', 'src', 'dangling.ts'))
 		await symlink(join(outside, 'src'), join(ctx.root, 'kit', 'src', 'out'))
@@ -666,7 +668,7 @@ describe('kit project containment', () => {
 
 	it('reports a Design System package linked out of the Workspace without its version, and never looks above the Workspace', async () => {
 		const outside = await outsideKit()
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		await rm(join(ctx.root, 'kit', 'node_modules', '@acme', 'design-system'), { recursive: true })
 		await symlink(join(outside, 'node_modules', '@acme', 'design-system'), join(ctx.root, 'kit', 'node_modules', '@acme', 'design-system'))
 		const read = await ctx.app.readProductKit()
@@ -677,7 +679,7 @@ describe('kit project containment', () => {
 		const parent = await realpath(await mkdtemp(join(tmpdir(), 'uiux-product-kit-parent-')))
 		roots.push(parent)
 		await write(join(parent, 'node_modules', '@acme', 'design-system', 'package.json'), JSON.stringify({ name: '@acme/design-system', version: '7.7.7' }))
-		const nested = await v5Fixture(KIT, parent)
+		const nested = await kitFixture(KIT, parent)
 		await rm(join(nested.root, 'kit', 'node_modules'), { recursive: true })
 		const nestedRead = await nested.app.readProductKit()
 		expect(nestedRead?.packages).toEqual([{ package: '@acme/design-system', status: 'missing' }])
@@ -685,7 +687,7 @@ describe('kit project containment', () => {
 
 	it('answers one way for a ./ Adapter through a link out of the Workspace, whether or not its target exists', async () => {
 		const outside = await outsideKit()
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		await symlink(join(outside, 'src'), join(ctx.root, 'kit', 'link'))
 		await symlink(join(outside, 'gone'), join(ctx.root, 'kit', 'gone'))
 		await symlink(join(outside, 'secret.ts'), join(ctx.root, 'kit', 'leak.ts'))
@@ -713,7 +715,7 @@ describe('kit project containment', () => {
 	] as const) {
 		it(`reports a package as linked, whether or not it exists there, when ${label}`, async () => {
 			const outside = await outsideKit()
-			const ctx = await v5Fixture({ ...KIT, designSystems: ['@acme/design-system', '@acme/absent'] })
+			const ctx = await kitFixture({ ...KIT, designSystems: ['@acme/design-system', '@acme/absent'] })
 			await link(ctx.root, outside)
 			const read = await ctx.app.readProductKit()
 			expect(read?.packages).toEqual([
@@ -740,7 +742,7 @@ describe('kit project containment', () => {
 				const outside = await outsideKit()
 				await write(join(outside, 'node_modules', '@acme', 'adapter', 'package.json'), JSON.stringify({ name: '@acme/uiux-adapter', version: '9.9.9', type: 'module', exports: { './uiux': './uiux.js' } }))
 				await write(join(outside, 'node_modules', '@acme', 'adapter', 'uiux.js'), 'export const adapter = {}\n')
-				const ctx = await v5Fixture({ ...KIT, adapters: [{ moduleSpecifier: '@acme/uiux-adapter/uiux' }] })
+				const ctx = await kitFixture({ ...KIT, adapters: [{ moduleSpecifier: '@acme/uiux-adapter/uiux' }] })
 				await link(ctx.root, outside, target)
 				const read = await ctx.app.readProductKit()
 				answers.push(read?.adapters)
@@ -773,7 +775,7 @@ describe('kit project containment', () => {
 			for (const target of ['uiux.js', 'nothing.js']) {
 				const outside = await outsideKit()
 				await write(join(outside, 'lib', 'uiux.js'), 'export const adapter = {}\n')
-				const ctx = await v5Fixture({ ...KIT, adapters: [{ moduleSpecifier: '@acme/uiux-adapter/uiux' }] })
+				const ctx = await kitFixture({ ...KIT, adapters: [{ moduleSpecifier: '@acme/uiux-adapter/uiux' }] })
 				const pkg = join(ctx.root, 'kit', 'node_modules', '@acme', 'uiux-adapter')
 				await write(join(pkg, 'package.json'), JSON.stringify({ name: '@acme/uiux-adapter', version: '2.0.0', type: 'module', exports: { './uiux': './dist/uiux.js' } }))
 				await mkdir(join(pkg, 'dist'))
@@ -794,7 +796,7 @@ describe('kit project containment', () => {
 	}
 
 	it('still reports a missing module file of a package in the Workspace, with no link on its way, as failed', async () => {
-		const ctx = await v5Fixture({ ...KIT, adapters: [{ moduleSpecifier: '@acme/uiux-adapter/uiux' }] })
+		const ctx = await kitFixture({ ...KIT, adapters: [{ moduleSpecifier: '@acme/uiux-adapter/uiux' }] })
 		await write(join(ctx.root, 'kit', 'node_modules', '@acme', 'uiux-adapter', 'package.json'), JSON.stringify({ name: '@acme/uiux-adapter', exports: { './uiux': './dist/uiux.js' } }))
 		const read = await ctx.app.readProductKit()
 		expect(read?.adapters).toEqual([expect.objectContaining({ moduleSpecifier: '@acme/uiux-adapter/uiux', status: 'failed', message: expect.stringContaining('<workspace>/kit/node_modules/@acme/uiux-adapter/dist/uiux.js') })])
@@ -898,7 +900,7 @@ describe('host paths in the Product Kit Resource', () => {
 		roots.push(parent)
 		// The declared Adapter package is not installed in kit/, so Node resolution finds the one above the Workspace, whose exports refuse it.
 		await write(join(parent, 'node_modules', '@acme', 'uiux-adapter', 'package.json'), JSON.stringify({ name: '@acme/uiux-adapter', version: '2.0.0', exports: { './other': './other.js' } }))
-		const ctx = await v5Fixture({ ...KIT, adapters: [{ moduleSpecifier: '@acme/uiux-adapter' }] }, parent)
+		const ctx = await kitFixture({ ...KIT, adapters: [{ moduleSpecifier: '@acme/uiux-adapter' }] }, parent)
 		const read = await ctx.app.readProductKit()
 		expect(read?.adapters).toEqual([expect.objectContaining({ moduleSpecifier: '@acme/uiux-adapter', status: 'failed', message: expect.stringContaining('<path>') })])
 		const text = JSON.stringify(read)
@@ -920,7 +922,7 @@ describe('authoring never writes inside the kit project (Scenario 01a11bb1-c0b4)
 	}
 
 	it('leaves every file under kit/ unchanged when an Editor creates a View, updates the Workspace settings and changes the Product Kit file', async () => {
-		const ctx = await v5Fixture()
+		const ctx = await kitFixture()
 		// Build output beside the component sources.
 		await write(join(ctx.root, 'kit', 'dist', 'kit.css'), '.button { color: red }\n')
 		const before = await kitTree(ctx.root)

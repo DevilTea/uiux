@@ -10,16 +10,16 @@ import type { AuthoredAssetResource } from '../src/domain/assets/schema'
 import type { FlowResource } from '../src/domain/flows/schema'
 import type { ReviewThread } from '../src/domain/reviews/schema'
 import type { ViewResource } from '../src/domain/views/schema'
-import type { WorkspaceManifest } from '../src/domain/workspace/schema'
 import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
 import { createLeaseManager } from '../src/application/access/leases'
 import { AGENT_EDITOR } from './support/access'
 import { parsePointResourceUri, pointResourceUri } from '../src/mcp/resource-uri'
 import { FileNativePersistence } from '../src/persistence'
-import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { readPointResourceForHttp } from '../src/server/point-resource'
 import { listResourcesForHttp, searchResourcesForHttp } from '../src/server/resource-discovery'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
+import { createCurrentWorkspace } from './support/workspace-layout'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const FLOW_ID = '22222222-2222-4222-8222-222222222222'
@@ -29,7 +29,6 @@ const ASSET_ID = '66666666-6666-4666-8666-666666666666'
 const MISSING_VIEW_ID = '99999999-9999-4999-8999-999999999999'
 const MISMATCHED_VIEW_ID = '88888888-8888-4888-8888-888888888888'
 const roots: string[] = []
-const testSchemaPolicy = defineWorkspaceSchemaPolicy({ currentVersion: 2, recognizedVersions: [2], steps: [] })
 
 afterEach(async () => {
 	await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
@@ -418,8 +417,8 @@ describe('shared HTTP/MCP point-resource reads', { timeout: HEAVY_SERVER_SUITE_T
 async function seededSession() {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-transport-'))
 	roots.push(root)
-	const persistence = new FileNativePersistence({ root, schemaPolicy: testSchemaPolicy })
-	await persistence.workspace.create(workspaceFixture())
+	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+	await createCurrentWorkspace(persistence, WORKSPACE_SETTINGS)
 	await persistence.views.create(VIEW_ID, viewFixture())
 	await persistence.views.create(VIEW_ID_2, viewFixture(VIEW_ID_2, 'Checkout panel', 'catalog'))
 	await persistence.flows.create(FLOW_ID, flowFixture())
@@ -428,14 +427,10 @@ async function seededSession() {
 	return { root, persistence, app: createWorkspaceApplicationSession(persistence) }
 }
 
-function workspaceFixture(): WorkspaceManifest {
-	return {
-		schemaVersion: 2,
-		i18n: { defaultLocale: 'en-US' },
-		adapters: [],
-		viewports: { desktop: { dimensions: { width: 1280, height: 800 } } },
-		themes: { light: {} },
-	}
+const WORKSPACE_SETTINGS = {
+	i18n: { defaultLocale: 'en-US' },
+	viewports: { desktop: { dimensions: { width: 1280, height: 800 } } },
+	themes: { light: {} },
 }
 
 function viewFixture(id = VIEW_ID, name = 'Transport fixture', feature?: string): ViewResource {

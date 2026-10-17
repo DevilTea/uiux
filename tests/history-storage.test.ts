@@ -12,16 +12,13 @@ import type { ViewResource } from '../src/domain/views/schema'
 import type { WorkspaceManifest } from '../src/domain/workspace/schema'
 import {
 	FileNativePersistence,
-	LEGACY_LAYOUT,
 	assetMetadataRelativePath,
 	flowRelativePath,
 	localeRelativePath,
 	viewRelativePath,
-	workspaceRelativePath,
 	type CanonicalResourceChange,
 	type CanonicalWriteObserver,
 	type PersistenceFaultPoint,
-	type WorkspaceSnapshot,
 } from '../src/persistence'
 import {
 	CheckpointStore,
@@ -43,10 +40,12 @@ import {
 	type HostHistoryPaths,
 	type OpenAutosaveEntry,
 } from '../src/persistence/history'
-import { defineWorkspaceSchemaPolicy } from '../src/persistence/schema-policy'
+import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { accessStorePaths, hostHistoryPaths, workspaceStoreId } from '../src/server/access/store'
 import { createSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
-import { metadataPath } from './support/workspace-layout'
+import { emptyProductKit } from '../src/domain/product-kit/schema'
+import { builtInAccessPresetsFile } from '../src/domain/access-presets/schema'
+import { createCurrentWorkspace, currentManifest, metadataPath } from './support/workspace-layout'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const FLOW_ID = '22222222-2222-4222-8222-222222222222'
@@ -88,7 +87,7 @@ function hostVersion(overrides: Partial<HostVersionRecord> & Pick<HostVersionRec
 		id: randomUUID(),
 		actor,
 		at,
-		workspaceSchemaVersion: 2,
+		workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 		resources: [],
 		startedAt: at,
 		netChange: true,
@@ -104,7 +103,7 @@ function checkpoint(overrides: Partial<CheckpointRecord> = {}): CheckpointRecord
 		type: 'checkpoint',
 		actor: HUMAN,
 		at: NOW.toISOString(),
-		workspaceSchemaVersion: 2,
+		workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
 		resources: [],
 		name: 'Before launch',
 		source: 'workbench',
@@ -340,7 +339,7 @@ describe('host retention', () => {
 		for (const version of [system, external, aged, young, ...recent]) await store.writeVersion(version)
 		const kept = checkpoint({ at: iso(NOW.getTime() - HOST_RETENTION_MAX_AGE_MS * 4), resources: [resourceWithBlob(checkpointOnly)] })
 		await checkpoints.create(kept, new Map([[blobDigest(checkpointOnly), checkpointOnly]]))
-		const checkpointBytes = await readFile(join(root, LEGACY_LAYOUT.checkpointRelativePath(kept.id)))
+		const checkpointBytes = await readFile(join(root, persistence.layout.checkpointRelativePath(kept.id)))
 		await store.appendOpenEntry({ type: 'event', event: { at: NOW.toISOString(), actor: AGENT, source: 'mcp', operation: 'updateViewSpec', resource: { kind: 'view', key: VIEW_ID }, beforeRevision: null, afterRevision: 'r_x' }, files: { [viewRelativePath(VIEW_ID)]: blobDigest(journalOnly) } })
 
 		// A timeline read holds the persistence read lock across both stores: a prune started while
@@ -381,7 +380,7 @@ describe('host retention', () => {
 		expect(await store.readVersion(external.id)).toBeUndefined()
 		expect(await store.readVersion(system.id)).toEqual(system)
 		expect((await store.listVersions()).records).toHaveLength(HOST_RETENTION_MIN_KEPT + 2)
-		expect(await readFile(join(root, LEGACY_LAYOUT.checkpointRelativePath(kept.id)))).toEqual(checkpointBytes)
+		expect(await readFile(join(root, persistence.layout.checkpointRelativePath(kept.id)))).toEqual(checkpointBytes)
 		expect([...result.gc.removed].sort()).toEqual([blobDigest(prunedOnly), blobDigest(unnamed)].sort())
 		expect(await store.hasBlob(blobDigest(checkpointOnly))).toBe(true)
 		expect(await store.hasBlob(blobDigest(journalOnly))).toBe(true)
@@ -464,7 +463,9 @@ describe('checkpoint store and versioned snapshot', () => {
 
 		const snapshot = await persistence.withLock(() => persistence.scanVersionedSnapshotUnlocked())
 		expect([...snapshot.keys()]).toEqual([
-			workspaceRelativePath(),
+			'access-presets.json',
+			'product-kit.json',
+			'workspace.json',
 			`assets/${ASSET_ID}/asset.json`,
 			`assets/${ASSET_ID}/logo.bin`,
 			flowRelativePath(FLOW_ID),
@@ -472,13 +473,13 @@ describe('checkpoint store and versioned snapshot', () => {
 			viewRelativePath(VIEW_ID),
 		].sort())
 
-		const { resources, blobs } = versionResourcesFromSnapshot(snapshot, LEGACY_LAYOUT)
-		expect(resources.map(resource => `${resource.kind}:${resource.key}`)).toEqual(['asset:' + ASSET_ID, 'flow:' + FLOW_ID, 'locale:zh-TW', 'view:' + VIEW_ID, 'workspace:workspace'])
+		const { resources, blobs } = versionResourcesFromSnapshot(snapshot, persistence.layout)
+		expect(resources.map(resource => `${resource.kind}:${resource.key}`)).toEqual(['access-presets:access-presets', 'asset:' + ASSET_ID, 'flow:' + FLOW_ID, 'locale:zh-TW', 'product-kit:product-kit', 'view:' + VIEW_ID, 'workspace:workspace'])
 		const revisionOf = (kind: string) => resources.find(resource => resource.kind === kind)!.revision
 		expect(revisionOf('view')).toBe(await persistence.views.readRevision(VIEW_ID))
 		expect(revisionOf('asset')).toBe(await persistence.assets.readRevision(ASSET_ID))
 		expect(revisionOf('workspace')).toBe((await persistence.workspace.read('workspace'))!.revision)
-		expect(blobs.size).toBe(6)
+		expect(blobs.size).toBe(8)
 		for (const [digest, bytes] of blobs) expect(blobDigest(bytes)).toBe(digest)
 
 		await rm(join(root, 'flows'), { recursive: true })
@@ -495,8 +496,8 @@ describe('checkpoint store and versioned snapshot', () => {
 		const first = checkpoint({ resources, at: iso(NOW.getTime() - 1000) })
 		await store.create(first, blobs)
 
-		const path = join(root, LEGACY_LAYOUT.checkpointRelativePath(first.id))
-		expect(path).toBe(join(root, '.uiux', 'history', 'checkpoints', `${first.id}.json`))
+		const path = join(root, persistence.layout.checkpointRelativePath(first.id))
+		expect(path).toBe(join(root, 'history', 'checkpoints', `${first.id}.json`))
 		const text = await readFile(path, 'utf8')
 		expect(JSON.parse(text)).toEqual(first)
 		expect(text).toBe(`${JSON.stringify(sortKeys(first))}\n`)
@@ -623,13 +624,16 @@ describe('persistence write observer', () => {
 
 	it('reports a Workspace create, and runs the before hook while the old bytes are still on disk', async () => {
 		const root = await tempDir('uiux-history-create-')
-		const persistence = new FileNativePersistence({ root, schemaPolicy: policy() })
+		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		const { observer, calls } = recorder()
 		persistence.setWriteObserver(observer)
 		await runWithDesignWriteContext({ ...CONTEXT, operation: 'updateWorkspaceSettings' }, () => persistence.workspace.create(workspaceFixture()))
 		expect(calls.map(call => call.hook)).toEqual(['before', 'after'])
 		expect(calls[1]!.changes).toMatchObject([{ resource: { kind: 'workspace', key: 'workspace' }, beforeRevision: null, afterRevision: (await persistence.workspace.read('workspace'))!.revision }])
 		await expectCommitted(root, calls[1]!.changes!)
+		// A current-schema Workspace is writable once its Product Kit and Access presets files exist.
+		await persistence.productKit.create(emptyProductKit())
+		await persistence.accessPresets.create(builtInAccessPresetsFile())
 
 		await persistence.views.create(VIEW_ID, viewFixture())
 		const oldBytes = await readFile(join(root, viewRelativePath(VIEW_ID)))
@@ -684,12 +688,12 @@ describe('persistence write observer', () => {
 		const root = await tempDir('uiux-history-nohook-')
 		const persistence = new FileNativePersistence({
 			root,
-			schemaPolicy: policy(),
+			schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY,
 			fault(point) {
 				if (failApply && point === 'transaction.after_apply') throw new Error('injected mid-transaction')
 			},
 		})
-		await persistence.workspace.create(workspaceFixture())
+		await createCurrentWorkspace(persistence)
 		const { observer, calls } = recorder()
 		persistence.setWriteObserver(observer)
 
@@ -789,8 +793,8 @@ describe('selected-Workspace history stores', () => {
 })
 
 async function newWorkspace(root: string): Promise<FileNativePersistence> {
-	const persistence = new FileNativePersistence({ root, schemaPolicy: policy() })
-	await persistence.workspace.create(workspaceFixture())
+	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+	await createCurrentWorkspace(persistence)
 	return persistence
 }
 
@@ -801,16 +805,8 @@ async function seedAllKinds(persistence: FileNativePersistence): Promise<void> {
 	await persistence.assets.create(ASSET_ID, { metadata: assetFixture('logo.bin'), content: Buffer.from('logo') })
 }
 
-function policy() {
-	return defineWorkspaceSchemaPolicy({
-		currentVersion: 2,
-		recognizedVersions: [1, 2],
-		steps: [{ id: 'synthetic-1-to-2', fromVersion: 1, toVersion: 2, apply: (snapshot: WorkspaceSnapshot) => new Map(snapshot) }],
-	})
-}
-
 function workspaceFixture(): WorkspaceManifest {
-	return { schemaVersion: 2, i18n: { defaultLocale: 'en-US' }, adapters: [], viewports: {}, themes: {} }
+	return currentManifest() as WorkspaceManifest
 }
 
 function viewFixture(): ViewResource {
