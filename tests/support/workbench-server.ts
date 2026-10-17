@@ -3,8 +3,6 @@ import { cp, mkdtemp, rm } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 
-import { FileNativePersistence } from '../../src/persistence/file-native'
-import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../../src/product/workspace-schema'
 import { provisionToken, sessionCookieFor } from './access'
 
 export type WorkbenchServer = Readonly<{
@@ -49,11 +47,10 @@ export async function startWorkbenchServer(options: Readonly<{ prepare?: (worksp
 	const workspaceRoot = await mkdtemp(join(REPOSITORY_ROOT, '.uiux-browser-test-'))
 	let token: string
 	try {
+		// The frozen fixture is a current-schema Workspace (schemaVersion 6, regenerated once with
+		// `uiux migrate`): its root holds workspace.json, product-kit.json and access-presets.json, and
+		// its Adapter is in kit/. The private copy is served as copied.
 		await cp(WORKBENCH_FIXTURE_WORKSPACE, workspaceRoot, { recursive: true })
-		// The frozen fixture is a schemaVersion 5 Workspace (its root holds workspace.json and its
-		// Adapter is in kit/). A later product schema migrates the private copy the way an operator would
-		// (`uiux migrate`), never hand-edited; at the current schema this is a no-op.
-		await new FileNativePersistence({ root: workspaceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).migrateWorkspace()
 		await options.prepare?.(workspaceRoot)
 		token = await provisionToken(workspaceRoot, { nickname: 'tester', kind: 'human', role: 'owner' })
 	}
