@@ -25,17 +25,12 @@ const workbench = provideWorkbench()
 const shell = provideWorkbenchShell()
 const { error, workspace } = workbench
 
-// Read-only banner for an older Workspace schema. Migration is a CLI-only operator act
-// (`uiux migrate`), so the banner names the command and offers no in-app action.
-const migrationRequired = computed(() => workspace.value?.inspection?.state === 'migration_required')
-const MIGRATE_COMMAND = 'uiux migrate --workspace <dir>'
-
 // Rule 01a11be8-6147-7e6e-a288-689144151a0b: while the last kit build run has failed, a banner says
-// so; UIUX keeps using the last good output meanwhile. Only a current Workspace from schemaVersion 5
-// has a kit project, so only then is the build state polled.
+// so; UIUX keeps using the last good output meanwhile. Only a current Workspace has a kit project
+// this UIUX builds, so only then is the build state polled.
 const kitBuild = useKitBuild()
 const kitBuildFailed = computed(() => kitBuild.build.value.state === 'failed')
-const hasKitProject = computed(() => workspace.value?.inspection?.state === 'current' && workspace.value.resource.schemaVersion >= 5)
+const hasKitProject = computed(() => workspace.value?.inspection?.state === 'current')
 let stopKitBuild: (() => void) | undefined
 watch(hasKitProject, (present) => {
 	if (present && !stopKitBuild) stopKitBuild = kitBuild.watch()
@@ -119,32 +114,6 @@ onUnmounted(() => {
     </a>
 
     <WorkbenchNavbar />
-
-    <UAlert
-      v-if="migrationRequired"
-      id="uiux-migration-required"
-      color="warning"
-      variant="subtle"
-      icon="i-lucide-database"
-      role="status"
-      :title="t('workbench.migration.title')"
-      :ui="{ root: 'rounded-none border-b border-default' }"
-    >
-      <template #description>
-        <i18n-t
-          keypath="workbench.migration.description"
-          tag="span"
-          scope="global"
-        >
-          <template #command>
-            <code
-              class="font-mono"
-              translate="no"
-            >{{ MIGRATE_COMMAND }}</code>
-          </template>
-        </i18n-t>
-      </template>
-    </UAlert>
 
     <UAlert
       v-if="kitBuildFailed"

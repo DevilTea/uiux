@@ -11,7 +11,7 @@ const AT_LEAST_TABLET = '(min-width: 768px)'
  * - Create Checkpoint on desktop and tablet, never on a phone in either orientation (Rule
  *   01a11a5e-1ba5-765e-966f-a681def5f472; a handset is a phone width or a short touch screen, as for
  *   canvas comments),
- *   for a holder of `checkpoints.create` on a live, migrated Workspace (the server's check stays
+ *   for a holder of `checkpoints.create` on a live, supported Workspace (the server's check stays
  *   the authority);
  * - Delete Checkpoint on desktop only (Rule 01a11e0d-dada-7f49-a4a0-5b45d70b23e8), for a holder of
  *   `checkpoints.delete`, a `humanOnly` key the session holds only for a person signed in to the
@@ -29,7 +29,7 @@ export function useCheckpointAccess() {
 	const createOffered = computed(() => atLeastTablet.value && !handset.value)
 	/** Why the signed-in member cannot create one here; undefined when they can. */
 	const createBlockedReason = computed(() => {
-		if (writeBlocked.value) return t('history.checkpoint.blockedMigration')
+		if (writeBlocked.value) return t('history.checkpoint.blockedUnsupported')
 		if (!canWrite('checkpoints.create')) return t('access.requiresKey', { key: 'checkpoints.create' })
 		return undefined
 	})

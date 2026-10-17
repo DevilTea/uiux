@@ -33,7 +33,7 @@ const readiness = useReadiness()
 const { views, reviews, loading, readyReviewCount, openReviewCount, workspaceFindingCount } = workbench
 const atLeastTablet = useMediaQuery('(min-width: 768px)')
 
-type ReadinessState = 'ready' | 'blocked' | 'checking' | 'failed' | 'migration'
+type ReadinessState = 'ready' | 'blocked' | 'checking' | 'failed' | 'unsupported'
 type ViewRow = Readonly<{
 	key: string
 	name: string
@@ -51,9 +51,9 @@ const rows = computed<ViewRow[]>(() => views.value.map((view) => {
 	const threads = reviews.value.filter(review => anchorViewId(review.summary.anchor) === view.key)
 	const entry = readiness.viewAssessment(view.key)
 	const blocking = splitReadinessDiagnostics(entry?.readiness?.blockingDiagnostics).blocking.length
-	// An older Workspace schema cannot be assessed until it is migrated: say that, not "blocked".
+	// A Workspace whose schema this UIUX does not support cannot be assessed: say that, not "blocked".
 	const state: ReadinessState = workbench.writeBlocked.value
-		? 'migration'
+		? 'unsupported'
 		: !entry || entry.status === 'loading' && !entry.readiness
 		? 'checking'
 		: entry.status === 'failed' ? 'failed' : entry.readiness?.implementationReady ? 'ready' : 'blocked'
@@ -97,7 +97,7 @@ const filtered = computed(() => rows.value.filter((row) => {
 // ----- Table ----------------------------------------------------------------------------------
 
 const sorting = ref([{ id: 'name', desc: false }])
-const READINESS_ORDER: Record<ReadinessState, number> = { failed: 0, blocked: 1, checking: 2, migration: 2, ready: 3 }
+const READINESS_ORDER: Record<ReadinessState, number> = { failed: 0, blocked: 1, checking: 2, unsupported: 2, ready: 3 }
 const columns = computed<TableColumn<ViewRow>[]>(() => [
 	{ id: 'name', accessorKey: 'name', header: t('overview.columns.view') },
 	{ id: 'feature', accessorKey: 'feature', header: t('overview.columns.feature') },
@@ -184,14 +184,14 @@ const READINESS_BADGE: Record<ReadinessState, { color: 'success' | 'error' | 'ne
 	blocked: { color: 'error', icon: 'i-lucide-circle-x' },
 	failed: { color: 'error', icon: 'i-lucide-circle-alert' },
 	checking: { color: 'neutral', icon: 'i-lucide-loader-circle' },
-	migration: { color: 'neutral', icon: 'i-lucide-database' },
+	unsupported: { color: 'neutral', icon: 'i-lucide-database' },
 }
 
 function readinessLabel(row: ViewRow): string {
 	if (row.readiness === 'ready') return t('ready.ready')
 	if (row.readiness === 'checking') return t('ready.checking')
 	if (row.readiness === 'failed') return t('overview.readinessFailed')
-	if (row.readiness === 'migration') return t('overview.readinessMigration')
+	if (row.readiness === 'unsupported') return t('overview.readinessUnsupported')
 	return row.blocking ? t('ready.blockedBy', row.blocking) : t('ready.notReadyShort')
 }
 
@@ -259,13 +259,13 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                   </template>
                 </span>
               </template>
-              <!-- An older schema is not "all clear": Reviews and readiness cannot be read yet. -->
+              <!-- An unsupported schema is not "all clear": Reviews and readiness cannot be read. -->
               <span
                 v-else-if="workbench.writeBlocked.value"
                 class="text-title font-medium text-muted"
-                data-attention-migration
+                data-attention-unsupported
               >
-                {{ t('overview.migrationWaiting') }}
+                {{ t('overview.unsupportedWaiting') }}
               </span>
               <span
                 v-else

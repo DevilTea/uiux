@@ -62,15 +62,15 @@ const access = useAccess()
 const feedback = useWorkbenchFeedback()
 const { access: authoringAccess, writeKey, canEdit: deviceAllowsEdit } = useAuthoringAccess('presets.manage')
 
-const state = ref<'loading' | 'ready' | 'legacy' | 'error'>('loading')
+const state = ref<'loading' | 'ready' | 'error'>('loading')
 const read = ref<PresetsRead>()
 const loadError = shallowRef<FetchErrorDetails>()
 const members = ref<readonly HostMember[]>()
 const countsUnavailable = ref<CountsUnavailable>()
 
-/** Below `schemaVersion` 6 the built-in presets label members (Rule 01a11c09-cb79-744e-bbf6-ec38d6f159ba). */
+/** The built-in presets, which "Use the built-in presets" writes to the file. */
 const BUILT_IN: readonly AccessPreset[] = BUILT_IN_ACCESS_PRESETS.map(preset => ({ id: preset.id, name: preset.name, keys: [...preset.keys] }))
-const presets = computed<readonly AccessPreset[]>(() => state.value === 'legacy' ? BUILT_IN : labelPresetsOf(read.value?.resource))
+const presets = computed<readonly AccessPreset[]>(() => labelPresetsOf(read.value?.resource))
 const diagnostics = computed(() => read.value?.diagnostics ?? [])
 /** Problems of a file that parses; a preset's unknown keys are flagged on its row instead. */
 const fileIssues = computed<FetchErrorDiagnostic[]>(() => diagnostics.value.filter(item => item.code !== 'access.unknown_key'))
@@ -88,13 +88,8 @@ async function loadPresets(): Promise<void> {
 		loadError.value = undefined
 	}
 	catch (cause) {
-		const details = describeFetchError(cause, t('access.presets.loadError'))
-		// 404: a Workspace below schemaVersion 6, which keeps no presets file.
-		if (details.statusCode === 404) state.value = 'legacy'
-		else {
-			state.value = 'error'
-			loadError.value = details
-		}
+		state.value = 'error'
+		loadError.value = describeFetchError(cause, t('access.presets.loadError'))
 	}
 }
 
@@ -384,7 +379,6 @@ const unknownHelp = (preset: AccessPreset) => t('access.presets.unknownKeysHelp'
             </template>
           </i18n-t>
           <AuthoringAccessNotice
-            v-if="state !== 'legacy'"
             :access="authoringAccess"
             :write-key="writeKey"
           />
@@ -420,17 +414,6 @@ const unknownHelp = (preset: AccessPreset) => t('access.presets.unknownKeysHelp'
           />
         </template>
       </UAlert>
-
-      <UAlert
-        v-if="state === 'legacy'"
-        color="info"
-        variant="subtle"
-        icon="i-lucide-info"
-        :title="t('access.presets.legacyTitle')"
-        :description="t('access.presets.legacyDescription')"
-        :ui="{ root: 'rounded-none border-b border-default' }"
-        data-presets-legacy
-      />
 
       <UAlert
         v-if="state === 'ready' && (fileState === 'missing' || fileState === 'unparsable')"

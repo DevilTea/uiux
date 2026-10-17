@@ -38,7 +38,7 @@ const isMobile = computed(() => !notMobile.value)
  * open section stays open while someone else's edit lease arrives (its Save waits, the draft is
  * kept); only starting a new edit needs the View to be free.
  */
-/** The member may write Views on this live, migrated Workspace, whatever the layout. */
+/** The member may write Views on this live, supported Workspace, whatever the layout. */
 const mayWriteViews = computed(() => workbench.canWrite('views.write'))
 const canAuthor = computed(() => isDesktop.value && mayWriteViews.value)
 const canEdit = computed(() => canAuthor.value && !access.lockFor('view', selectedViewId.value))

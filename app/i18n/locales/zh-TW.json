@@ -438,7 +438,7 @@
       "diagnosticNote": "尚未達到 implementation-ready。可用來檢視，請勿據此實作。"
     },
     "selectRoot": "請至少選擇一個根項目。",
-    "migrationBlocked": "此 Workspace 完成遷移前無法檢查就緒狀態。"
+    "unsupportedBlocked": "此版本的 UIUX 不支援這個 Workspace 的格式，無法檢查就緒狀態。"
   },
   "locales": {
     "title": "Workspace Locale",
@@ -618,10 +618,6 @@
       "viewUnavailable": "此 View 無法使用。",
       "viewLoadFailed": "無法載入 View。",
       "bridgeInitFailed": "預覽無法連線至 Workbench，請重新載入。"
-    },
-    "migration": {
-      "title": "此 Workspace 使用較舊的格式",
-      "description": "完成遷移前為唯讀。請停止此伺服器，執行 {command}，然後重新啟動 uiux dev。"
     },
     "kitBuild": {
       "failedTitle": "kit 建置失敗",
@@ -1083,7 +1079,6 @@
     "saved": "Product Kit 已儲存",
     "saveFailed": "無法儲存",
     "adaptersPartlySaved": "已儲存模組指定符，但組態未儲存",
-    "legacy": "此 Workspace 遷移前沒有 Product Kit 檔案，以下以唯讀方式顯示其 Adapter。",
     "unavailable": "無法讀取 Product Kit 檔案。",
     "unavailableHelp": "請確認 {file} 是有效的 JSON，再重試一次。下方的建置不需要這個檔案。",
     "problems": "Product Kit 有 {n} 個問題 | Product Kit 有 {n} 個問題",
@@ -1122,7 +1117,6 @@
       "logRequiresKey": "讀取建置記錄需要權限鍵 {key}。"
     },
     "sections": "Product Kit 區段",
-    "legacySection": "此 Workspace 遷移前沒有 Product Kit 檔案。請執行 uiux migrate 後再使用此區段。",
     "saveWhich": "多個區段有未儲存的變更。請開啟要儲存的區段。",
     "components": {
       "title": "Component",
@@ -1252,13 +1246,12 @@
     },
     "access": {
       "device": "編輯需要至少 1280px 寬的視窗。",
-      "migration": "這個 Workspace 使用舊版格式，執行 uiux migrate 後才能編輯。"
+      "unsupported": "此版本的 UIUX 不支援這個 Workspace 的格式，因此無法編輯。"
     }
   },
   "adapters": {
     "invalid": "Adapter 組合無效，修正前會暫停預覽與型錄。",
     "repair": "請在專案中執行以下指令修正：",
-    "description": "提供 Widget 的套件或 Workspace 模組，依解析順序排列。",
     "kitDescription": "提供 Widget 的套件或 kit/ 模組，依解析順序排列。",
     "add": "新增 Adapter",
     "moduleSpecifier": "模組指定符",
@@ -1292,7 +1285,6 @@
     "saveNote": "儲存後會重新檢查 Adapter 組合。",
     "validation": {
       "required": "請輸入模組指定符。",
-      "specifier": "請使用套件名稱，或 Workspace 內以 ./ 開頭的路徑。",
       "json": "這不是有效的 JSON。",
       "kitSpecifier": "請使用套件名稱，或 kit/ 內的 ./ 路徑。"
     }
@@ -1361,7 +1353,7 @@
     "attentionFindings": "{n} 個檢查問題 | {n} 個檢查問題",
     "allClear": "沒有待處理項目，{n} 個 View 已就緒。 | 沒有待處理項目，{n} 個 View 已就緒。",
     "nothingWaiting": "沒有待處理項目。",
-    "migrationWaiting": "Workspace 遷移後才能查看 Review 與就緒狀態。",
+    "unsupportedWaiting": "此版本的 UIUX 不支援這個 Workspace 的格式，無法查看 Review 與就緒狀態。",
     "tab": {
       "views": "Views",
       "checks": "檢查",
@@ -1399,7 +1391,7 @@
     },
     "readinessFailed": "無法檢查",
     "attentionBlocked": "{n} 個 View 受阻擋 | {n} 個 View 受阻擋",
-    "readinessMigration": "遷移後才能檢查"
+    "readinessUnsupported": "無法檢查"
   },
   "ready": {
     "title": "就緒狀態・{view}",
@@ -1646,8 +1638,6 @@
       "usedBuiltIns": "已儲存內建預設集。",
       "issuesTitle": "存取預設集檔案有問題",
       "issuesHelp": "在這裡儲存會以下方列出的預設集重寫整個檔案。",
-      "legacyTitle": "存取預設集需要較新的 Workspace",
-      "legacyDescription": "這個 Workspace 早於 schemaVersion 6，因此由下方的內建預設集標示成員。執行 uiux migrate 後才能編輯。",
       "followUp": {
         "held": "這台主機上沒有成員持有 {name} 原本的權限鍵。 | 這台主機上有 {n} 位成員持有 {name} 原本的權限鍵。 | 這台主機上有 {n} 位成員持有 {name} 原本的權限鍵。",
         "kept": "他們的權限鍵沒有改變，因此這個預設集不再標示他們。",
@@ -1983,7 +1973,6 @@
     "viewHint": "手機上為唯讀。點選圖釘即可開啟討論串。"
   },
   "commentBlock": {
-    "migration": "此 Workspace 遷移前為唯讀。請執行 uiux migrate。",
     "unsupported": "唯讀：此版本的 UIUX 不支援這個 Workspace 的 Schema。",
     "signed-out": "登入後即可留言。",
     "handset": "手機無法新增留言。可在此回覆與分類；請在平板或桌面新增留言。",
@@ -2121,9 +2110,6 @@
       "invalid_schema_version": "Workspace 格式版本無效。",
       "invalid_theme_entry": "每個主題都必須是物件。",
       "manifest_missing": "Workspace 設定檔不存在或無法讀取。",
-      "migration_failed": "無法套用遷移，沒有任何變更。",
-      "migration_required": "這個 Workspace 使用舊版格式，必須先遷移。",
-      "migration_unavailable": "這個 Workspace 的格式無法自動遷移。",
       "schema_unsupported": "此版本的 UIUX 不支援這個 Workspace 的格式。"
     },
     "adapter": {
@@ -2670,7 +2656,6 @@
         "i18n": "語言",
         "viewports": "檢視區",
         "themes": "主題",
-        "adapters": "Adapter",
         "metadata": "詳細資料",
         "content": "內容",
         "files": "檔案",
@@ -2721,7 +2706,7 @@
       "created": "已建立 Checkpoint「{name}」",
       "failed": "無法建立 Checkpoint。",
       "retryable": "沒有儲存任何內容，請稍後再試一次。",
-      "blockedMigration": "Workspace 遷移完成前無法使用"
+      "blockedUnsupported": "此版本的 UIUX 不支援這個 Workspace 的格式，無法使用"
     },
     "delete": {
       "action": "刪除 Checkpoint",

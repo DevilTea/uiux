@@ -93,10 +93,9 @@ describe('Parent crumbs land on the index (feedback 1)', () => {
 		finally { await context.close() }
 	}, 60_000)
 
-	it('keeps the old /views address on the View list', async () => {
-		const { context, page } = await open('/views')
+	it('opens the View list at /?tab=views', async () => {
+		const { context, page } = await open('/?tab=views')
 		try {
-			await page.waitForURL(url => url.pathname === '/' && url.searchParams.get('tab') === 'views')
 			await page.locator('[data-views-table] [data-view-row]').first().waitFor()
 		}
 		finally { await context.close() }

@@ -193,11 +193,9 @@ describe('authoring pages follow their own write key', () => {
 		}
 		finally { await composer.context.close() }
 
-		// Without `product-kit.write` the page is read-only and names the key, whatever settings.write allows;
-		// the retired Settings address opens it.
-		const settingsOnly = await open('/workspace/settings?section=adapters', await memberCookie(['workspace.read', 'settings.write']))
+		// Without `product-kit.write` the page is read-only and names the key, whatever settings.write allows.
+		const settingsOnly = await open('/workspace/product-kit?section=overview', await memberCookie(['workspace.read', 'settings.write']))
 		try {
-			await settingsOnly.page.waitForURL(url => url.pathname === '/workspace/product-kit')
 			const missing = settingsOnly.page.locator('[data-access-notice][data-missing-key="product-kit.write"]')
 			await missing.waitFor({ timeout: 15_000 })
 			expect(await missing.innerText()).toContain('Requires the permission key product-kit.write.')

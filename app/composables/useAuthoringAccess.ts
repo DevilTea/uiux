@@ -11,28 +11,27 @@ import { useWorkbench } from './useWorkbench'
  * - `edit`: a live server on a desktop-width window (≥ 1280px), signed in with the page's write key;
  * - `tablet`: 768–1279px, read-only with an "Edit on desktop" hint;
  * - `mobile`: under 768px, read-only lists;
- * - `migration`: an older Workspace schema, read-only until `uiux migrate` runs;
+ * - `unsupported`: a Workspace whose `schemaVersion` this UIUX does not read, read-only;
  * - `key`: the signed-in member lacks the page's write key, read-only and naming it (`writeKey`);
  * - `locked`: someone else (an agent) holds the edit lease on the page's resource, read-only
  *   beside the Lock badge until the lease is released or expires.
  */
-export type AuthoringAccess = 'edit' | 'tablet' | 'mobile' | 'migration' | 'key' | 'locked'
+export type AuthoringAccess = 'edit' | 'tablet' | 'mobile' | 'unsupported' | 'key' | 'locked'
 
 export type AuthoringLockTarget = Readonly<{ kind: LockableKind; key: string }>
 
 const MOBILE_MIN = '(min-width: 768px)'
 
 export function useAuthoringAccess(writeKey: PermissionKey, lockTarget?: MaybeRefOrGetter<AuthoringLockTarget | undefined>) {
-	const { canWrite, workspace } = useWorkbench()
+	const { canWrite } = useWorkbench()
 	const member = useAccess()
 	const desktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 	const atLeastTablet = useMediaQuery(MOBILE_MIN)
 
 	const access = computed<AuthoringAccess>(() => {
-		if (workspace.value?.inspection?.state === 'migration_required') return 'migration'
 		if (!member.can(writeKey)) return 'key'
-		// A Workspace this build cannot write at all (`unsupported`) is read-only like an unmigrated one.
-		if (!canWrite(writeKey)) return 'migration'
+		// The member holds the key, so only a Workspace this build cannot write blocks it.
+		if (!canWrite(writeKey)) return 'unsupported'
 		const target = toValue(lockTarget)
 		if (target && member.lockFor(target.kind, target.key)) return 'locked'
 		if (desktop.value) return 'edit'

@@ -27,7 +27,7 @@ import ProductKitAdaptersSection, { type AdapterResolution } from './ProductKitA
 import ProductKitComponentsSection from './ProductKitComponentsSection.vue'
 import ProductKitStylesSection from './ProductKitStylesSection.vue'
 import ProductKitFilesSection from './ProductKitFilesSection.vue'
-import { PRODUCT_KIT_FILENAME, PRODUCT_KIT_SCHEMA_VERSION, type ProductKit } from '../../../src/domain/product-kit/schema'
+import { PRODUCT_KIT_FILENAME, type ProductKit } from '../../../src/domain/product-kit/schema'
 import type { WorkspaceAdapterSelection } from '../../../src/domain/workspace/schema'
 import type { ProductKitRead } from '../../../src/application/services/product-kit-authoring'
 import type { Diagnostic } from '../../composables/workbench-types'
@@ -53,9 +53,8 @@ import type { Diagnostic } from '../../composables/workbench-types'
  * (Discussion #139 owner ruling 6, https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18851627).
  * The server enforces every key; the page only reflects them.
  *
- * Below `schemaVersion` 5 the Workspace has no Product Kit file: the page shows the manifest's
- * Adapters read-only until `uiux migrate` runs. From 5 the build reads its own endpoint, so it and
- * its restart stay available when the Product Kit file cannot be read.
+ * The build reads its own endpoint, so it and its restart stay available when the Product Kit file
+ * cannot be read.
  */
 const { t } = useI18n()
 const route = useRoute()
@@ -91,18 +90,12 @@ const { canEdit: canRestart } = useAuthoringAccess('product-kit.write')
 /** A save refused by someone else's edit lease; the draft is kept. */
 const lockRefusal = shallowRef<Readonly<{ lock?: FetchErrorLock }>>()
 
-const usesProductKit = computed(() => (workspace.value?.resource?.schemaVersion ?? 0) >= PRODUCT_KIT_SCHEMA_VERSION)
-
 // Untyped request helper: Nitro's typed-route inference overflows on this many routes.
 const api = $fetch as unknown as <T = unknown>(url: string, options?: Readonly<Record<string, unknown>>) => Promise<T>
 
 const productKit = shallowRef<ProductKitRead>()
 const productKitFailed = ref(false)
 async function loadProductKit(): Promise<void> {
-	if (!usesProductKit.value) {
-		productKit.value = undefined
-		return
-	}
 	try {
 		productKit.value = await api<ProductKitRead>('/api/product-kit')
 		productKitFailed.value = false
@@ -112,19 +105,12 @@ async function loadProductKit(): Promise<void> {
 	}
 }
 
-/** From `schemaVersion` 5: the Product Kit file's `adapters`. */
+/** The Product Kit file's `adapters`. */
 const kitAdapters = createSettingsSection<AdapterRow[], ProductKit>({
 	id: 'adapters',
 	fromManifest: kit => adapterRows(kit.adapters),
 	toPayload: draft => adapterSelections(draft),
 })
-/** A Workspace without the Product Kit schema: the manifest holds no Adapters, so none are shown. */
-const manifestAdapters = createSettingsSection({
-	id: 'adapters',
-	fromManifest: () => adapterRows([]),
-	toPayload: draft => adapterSelections(draft),
-})
-const adapters = computed(() => usesProductKit.value ? kitAdapters : manifestAdapters)
 /** The Product Kit file's `styles` and `themes` (the Styles & themes section). */
 const stylesThemes = createSettingsSection<StylesThemesDraft, ProductKit>({
 	id: 'styles',
@@ -132,9 +118,8 @@ const stylesThemes = createSettingsSection<StylesThemesDraft, ProductKit>({
 	toPayload: draft => stylesThemesPayload(draft),
 })
 
-watch(workspace, (read) => {
-	manifestAdapters.sync(read)
-	// A Workspace read (live refresh included) also re-reads the Product Kit file.
+// A Workspace read (live refresh included) also re-reads the Product Kit file.
+watch(workspace, () => {
 	void loadProductKit()
 }, { immediate: true })
 watch(productKit, (read) => {
@@ -142,8 +127,8 @@ watch(productKit, (read) => {
 	stylesThemes.sync(read)
 })
 
-const guard = useUnsavedGuard(() => adapters.value.dirty || stylesThemes.dirty)
-const unsavedCount = computed(() => adapters.value.changeCount + stylesThemes.changeCount)
+const guard = useUnsavedGuard(() => kitAdapters.dirty || stylesThemes.dirty)
+const unsavedCount = computed(() => kitAdapters.changeCount + stylesThemes.changeCount)
 
 /** The Workspace theme registry, whose IDs the Product Kit `themes` map. */
 const workspaceThemes = computed(() => Object.entries(workspace.value?.resource?.themes ?? {})
@@ -188,7 +173,7 @@ const kitPartlySaved = ref(false)
 async function saveAdapters(): Promise<void> {
 	const section = kitAdapters
 	const kit = productKit.value
-	if (!usesProductKit.value || !canEdit.value || !kit || !section.base || section.conflict || section.saving || !section.dirty) return
+	if (!canEdit.value || !kit || !section.base || section.conflict || section.saving || !section.dirty) return
 	section.saving = true
 	section.clearError()
 	kitPartlySaved.value = false
@@ -247,12 +232,7 @@ async function saveAdapters(): Promise<void> {
 
 function discard(): void {
 	kitPartlySaved.value = false
-	if (usesProductKit.value) {
-		if (productKit.value) kitAdapters.adopt(productKit.value)
-	}
-	else if (workspace.value) {
-		manifestAdapters.adopt(workspace.value)
-	}
+	if (productKit.value) kitAdapters.adopt(productKit.value)
 }
 
 async function reloadTheirs(): Promise<void> {
@@ -262,8 +242,7 @@ async function reloadTheirs(): Promise<void> {
 }
 
 function keepMine(): void {
-	if (usesProductKit.value) kitAdapters.keepMine(productKit.value)
-	else manifestAdapters.keepMine(workspace.value)
+	kitAdapters.keepMine(productKit.value)
 }
 
 /**
@@ -274,7 +253,7 @@ function keepMine(): void {
 async function saveStylesThemes(): Promise<void> {
 	const section = stylesThemes
 	const kit = productKit.value
-	if (!usesProductKit.value || !canEdit.value || !kit || !section.base || section.conflict || section.saving || !section.dirty) return
+	if (!canEdit.value || !kit || !section.base || section.conflict || section.saving || !section.dirty) return
 	section.saving = true
 	section.clearError()
 	lockRefusal.value = undefined
@@ -329,7 +308,7 @@ const stylesRef = ref<InstanceType<typeof ProductKitStylesSection>>()
 function onKeydown(event: KeyboardEvent): void {
 	if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 's' || event.shiftKey || event.altKey) return
 	event.preventDefault()
-	if (!canEdit.value || !usesProductKit.value) return
+	if (!canEdit.value) return
 	const drafts: ProductKitSectionId[] = [...kitAdapters.dirty ? ['overview' as const] : [], ...stylesThemes.dirty ? ['styles' as const] : []]
 	const target = drafts.includes(currentSection.value) ? currentSection.value : drafts.length === 1 ? drafts[0] : undefined
 	if (target) void saveSection(target)
@@ -367,7 +346,7 @@ function reveal(target: Readonly<{ hash: string; section?: string }>, moveFocus:
 }
 
 /** The blocks above the Adapters are laid out once the Product Kit file was read, or failed to be. */
-const laidOut = computed(() => !!workspace.value?.resource && (!usesProductKit.value || !!productKit.value || productKitFailed.value))
+const laidOut = computed(() => !!workspace.value?.resource && (!!productKit.value || productKitFailed.value))
 let stopAfterEach: (() => void) | undefined
 onMounted(() => {
 	void loadResolution()
@@ -429,7 +408,6 @@ onBeforeUnmount(() => {
             :write-key="writeKey"
           />
           <LockBadge
-            v-if="usesProductKit"
             kind="product-kit"
             resource-key="product-kit"
           />
@@ -480,15 +458,7 @@ onBeforeUnmount(() => {
         >
           <template v-if="workspace?.resource">
             <UAlert
-              v-if="!usesProductKit"
-              color="info"
-              variant="subtle"
-              icon="i-lucide-info"
-              :title="t('productKit.legacy')"
-              data-product-kit-legacy
-            />
-            <UAlert
-              v-else-if="productKitFailed"
+              v-if="productKitFailed"
               color="warning"
               variant="subtle"
               icon="i-lucide-triangle-alert"
@@ -529,27 +499,24 @@ onBeforeUnmount(() => {
               </template>
             </UAlert>
 
-            <template v-if="usesProductKit">
-              <template v-if="productKit">
-                <ProductKitPackagesSection :packages="productKit.packages" />
-                <USeparator />
-              </template>
-              <ProductKitBuildSection
-                :build="build"
-                :can-restart="canRestart"
-                :can-read-log="member.can('product-kit.source.read')"
-                @restarted="onRestarted"
-              />
+            <template v-if="productKit">
+              <ProductKitPackagesSection :packages="productKit.packages" />
               <USeparator />
             </template>
+            <ProductKitBuildSection
+              :build="build"
+              :can-restart="canRestart"
+              :can-read-log="member.can('product-kit.source.read')"
+              @restarted="onRestarted"
+            />
+            <USeparator />
 
             <ProductKitAdaptersSection
               ref="adaptersRef"
-              :section="adapters"
-              :can-edit="usesProductKit && canEdit"
-              :product-kit="usesProductKit"
+              :section="kitAdapters"
+              :can-edit="canEdit"
               :can-compose="member.can('product-kit.compose')"
-              :partly-saved="usesProductKit && kitPartlySaved"
+              :partly-saved="kitPartlySaved"
               :resolution="resolution"
               :resolution-failed="resolutionFailed"
               @save="saveAdapters"
@@ -580,15 +547,7 @@ onBeforeUnmount(() => {
         </section>
 
         <template v-else>
-          <UAlert
-            v-if="workspace?.resource && !usesProductKit"
-            color="info"
-            variant="subtle"
-            icon="i-lucide-info"
-            :title="t('productKit.legacySection')"
-            data-product-kit-legacy
-          />
-          <template v-else-if="currentSection === 'files'">
+          <template v-if="currentSection === 'files'">
             <ProductKitFilesSection
               v-if="workspace?.resource"
               :can-browse="member.can('product-kit.source.read')"

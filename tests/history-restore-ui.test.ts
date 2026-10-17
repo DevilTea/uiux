@@ -208,29 +208,12 @@ describe('cached comparisons after a Checkpoint is deleted (B8 follow-up c)', ()
 	})
 })
 
-describe('the keys a Workspace settings restore needs beyond its write key (#140 owner ruling 2026-10-10, 1)', () => {
-	const ref = (moduleSpecifier: string, config?: Record<string, string>) => ({ moduleSpecifier, ...(config ? { config } : {}) })
-	/** The semantic comparison of a version's manifest (`from`) with the current one, as the dialog reads it. */
-	function compared(version: JsonValue[], current: JsonValue[], schemaVersion = 4) {
-		const diff = diffWorkspaceSettings({ schemaVersion, adapters: version }, { schemaVersion, adapters: current })
-		return { to: { id: 'current' as const, workspaceSchemaVersion: schemaVersion }, changes: [{ kind: 'workspace', key: 'workspace', status: 'modified' as const, diff }] }
-	}
-
-	it('needs `product-kit.compose` when the restore adds, removes, reorders or re-points an `adapters` entry', () => {
-		expect(restoreExtraKeys('workspace', compared([ref('./a.ts')], [ref('./a.ts'), ref('./b.ts')]))).toEqual(['product-kit.compose'])
-		expect(restoreExtraKeys('workspace', compared([ref('./a.ts'), ref('./b.ts')], [ref('./a.ts')]))).toEqual(['product-kit.compose'])
-		expect(restoreExtraKeys('workspace', compared([ref('./a.ts'), ref('./b.ts')], [ref('./b.ts'), ref('./a.ts')]))).toEqual(['product-kit.compose'])
-		expect(restoreExtraKeys('workspace', compared([ref('./a.ts')], [ref('./b.ts')]))).toEqual(['product-kit.compose'])
-		// Unmatched by `moduleSpecifier` (a duplicate), the list is compared by position.
-		expect(restoreExtraKeys('workspace', compared([ref('./a.ts'), ref('./a.ts')], [ref('./a.ts'), ref('./b.ts')]))).toEqual(['product-kit.compose'])
-	})
-
-	it('needs nothing more for a change to an entry\'s `config` alone, for other kinds, from `schemaVersion` 5, or without a comparison', () => {
-		expect(restoreExtraKeys('workspace', compared([ref('./a.ts', { tone: 'warm' })], [ref('./a.ts', { tone: 'cold' })]))).toEqual([])
-		expect(restoreExtraKeys('workspace', compared([ref('./a.ts', { x: '1' }), ref('./a.ts')], [ref('./a.ts', { x: '2' }), ref('./a.ts')]))).toEqual([])
-		expect(restoreExtraKeys('workspace', compared([ref('./a.ts')], [ref('./a.ts')]))).toEqual([])
-		expect(restoreExtraKeys('view', compared([ref('./a.ts')], [ref('./b.ts')]))).toEqual([])
-		expect(restoreExtraKeys('workspace', compared([ref('./a.ts')], [ref('./b.ts')], 5))).toEqual([])
+describe('the keys a restore of another kind needs beyond its write key', () => {
+	it('needs nothing more for the Workspace settings or a View, with or without a comparison', () => {
+		const diff = diffWorkspaceSettings({ schemaVersion: 6, i18n: { defaultLocale: 'en-US' } }, { schemaVersion: 6, i18n: { defaultLocale: 'zh-TW' } })
+		const comparison = { changes: [{ kind: 'workspace', key: 'workspace', status: 'modified' as const, diff }] }
+		expect(restoreExtraKeys('workspace', comparison)).toEqual([])
+		expect(restoreExtraKeys('view', comparison)).toEqual([])
 		expect(restoreExtraKeys('workspace', undefined)).toEqual([])
 	})
 })
@@ -259,6 +242,6 @@ describe('the keys a Product Kit restore needs beyond its write key (#139 owner 
 
 	it('needs `product-kit.compose` while the comparison is unknown or not structural, so it never offers a refused restore', () => {
 		expect(restoreExtraKeys('product-kit', undefined)).toEqual(['product-kit.compose'])
-		expect(restoreExtraKeys('product-kit', { to: { id: 'current', workspaceSchemaVersion: 5 }, changes: [] })).toEqual(['product-kit.compose'])
+		expect(restoreExtraKeys('product-kit', { changes: [] })).toEqual(['product-kit.compose'])
 	})
 })

@@ -26,7 +26,6 @@ import UnsavedLeaveModal from './UnsavedLeaveModal.vue'
 import SettingsGeneralSection from './SettingsGeneralSection.vue'
 import SettingsRegistrySection from './SettingsRegistrySection.vue'
 import { focusFirstProblem } from '../../utils/focus-problem'
-import { PRODUCT_KIT_SCHEMA_VERSION } from '../../../src/domain/product-kit/schema'
 
 /**
  * Workspace settings as a full page (brief g): a section index, then one form column with
@@ -35,8 +34,7 @@ import { PRODUCT_KIT_SCHEMA_VERSION } from '../../../src/domain/product-kit/sche
  * `expectedRevision`, so a concurrent write surfaces as a conflict, never as a silent overwrite.
  *
  * Adapters are not a section here: they live in the Overview section of the Product Kit page
- * (Rule 01a116f0-8a46-76bc-a29f-affaa302c44c), and `?section=adapters` redirects there (Clause
- * 01a116f0-9739-754b-b024-346b1c16a866).
+ * (Rule 01a116f0-8a46-76bc-a29f-affaa302c44c).
  *
  * `?section=<id>` opens the page at that section, one of `general`, `viewports` and `themes`;
  * an unknown value opens the page at its top (Clause 01a116f0-9782-7640-865e-c340df7b06b0).
@@ -74,9 +72,8 @@ const themes = createSettingsSection({
 	toPayload: draft => registryRecord(draft, 'themes'),
 })
 const sections = { general, viewports, themes }
-const usesProductKit = computed(() => (workspace.value?.resource?.schemaVersion ?? 0) >= PRODUCT_KIT_SCHEMA_VERSION)
 /** The file this page edits, as the subtitle names it. */
-const settingsFile = computed(() => usesProductKit.value ? 'workspace.json' : '.uiux/workspace.json')
+const settingsFile = 'workspace.json'
 
 watch(workspace, (read) => {
 	for (const section of [general, viewports, themes]) section.sync(read)

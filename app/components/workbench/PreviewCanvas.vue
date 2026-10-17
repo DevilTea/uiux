@@ -373,7 +373,7 @@ const hoverNode = computed<WidgetTreeNode | undefined>(() => widgetTreeResult.va
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Viewers, a Workspace awaiting migration and phones can't start comments
+ * Viewers, a Workspace whose schema this UIUX does not support and phones can't start comments
  * (phones read, reply and resolve only). The Comment tool stays in the pill anyway, disabled with
  * the reason in its tooltip, so it never vanishes or silently does nothing (review feedback 8dd59d25).
  */

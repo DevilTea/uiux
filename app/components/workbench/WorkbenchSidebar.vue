@@ -52,7 +52,7 @@ const SECONDARY_NAV_UI = { ...NAV_UI, link: 'px-2 py-1.5 text-xs before:inset-x-
 
 /**
  * The area whose navigator the sidebar shows. The `/flows` index is the list itself, so the sidebar
- * does not repeat it beside it (`/views` never renders: it redirects to the Overview list).
+ * does not repeat it beside it.
  */
 const area = computed(() => {
 	const path = route.path.replace(/\/+$/, '')
@@ -79,7 +79,7 @@ const openFlowId = computed(() => typeof route.params.flowId === 'string' ? rout
 
 /** `create_flow` is desktop authoring (brief g, section 7). */
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
-const canCreateFlow = computed(() => workbench.canWrite('flows.write') && isDesktop.value && workbench.workspace.value?.inspection?.state !== 'migration_required')
+const canCreateFlow = computed(() => workbench.canWrite('flows.write') && isDesktop.value)
 const createFlowOpen = ref(false)
 </script>
 

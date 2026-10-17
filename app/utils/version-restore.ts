@@ -3,7 +3,6 @@ import type { VersionDiffResult } from '../../src/application/services/history-d
 import { isRestorableResourceKind } from '../../src/domain/history/constants'
 import type { ImpactCategory, ImpactItem } from '../../src/domain/impact/analyzer'
 import type { ResourceChangeSummary } from '../../src/domain/history/summary'
-import { PRODUCT_KIT_SCHEMA_VERSION } from '../../src/domain/workspace/schema'
 import { CURRENT_COMPARE, PARENT_COMPARE, type ComparisonEndpoints } from './version-history'
 
 /**
@@ -16,7 +15,7 @@ export type RestoreGateInput = Readonly<{
 	/** A desktop layout: Restore is never offered on a tablet or a phone (Rule 01a11a5e-1bfa-71e9-9611-152b5b665379). */
 	desktop: boolean
 	/**
-	 * Whether the member may write with a key on this live, migrated Workspace (the Workbench's
+	 * Whether the member may write with a key on this live, supported Workspace (the Workbench's
 	 * `canWrite`). A restore needs `history.restore` and the restored kind's write key (Rule
 	 * 01a11c09-c648-71be-a550-2ecabf12f5d0); the server's check stays the authority.
 	 */
@@ -69,15 +68,8 @@ export function matchesCurrent(summary: readonly Pick<ResourceChangeSummary, 'ki
 
 /**
  * The keys a restore needs beyond `history.restore` and the kind's write key, read from the
- * semantic comparison of the selected version with the current state (`from=<version>&to=current`).
- *
- * #140 owner ruling 2026-10-10, 1 (https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18852724):
- * a `workspace` restore that adds, removes, reorders or re-points an `adapters` entry also needs
- * `product-kit.compose`, as the server checks (`adapterChangeKeys`, Clause
- * 01a11bb1-b35a-7e69-bba5-978e3f47c4fa), so the Workbench offers only what the server allows (Rule
- * 01a11485-eba3-7c07-a94f-0d69e610a0b6). A change to an entry's `config` alone is not one; from
- * `schemaVersion` 5 the manifest holds no `adapters`. Without a comparison nothing is required:
- * the server decides.
+ * comparison of the selected version with the current state (`from=<version>&to=current`), so the
+ * Workbench offers only what the server allows (Rule 01a11485-eba3-7c07-a94f-0d69e610a0b6).
  *
  * #139 owner ruling 2026-10-11, 1 (https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18864076):
  * a `product-kit` restore that changes `designSystems` or the Adapter specifiers or their order
@@ -86,20 +78,10 @@ export function matchesCurrent(summary: readonly Pick<ResourceChangeSummary, 'ki
  * structural one, it asks for `product-kit.compose`, which never offers a restore the server
  * refuses.
  */
-export function restoreExtraKeys(kind: string, comparison: Pick<VersionDiffResult, 'to' | 'changes'> | undefined): readonly PermissionKey[] {
-	if (kind === 'product-kit') {
-		const diff = comparison?.changes?.find(change => change.kind === 'product-kit')?.diff
-		return diff?.type === 'structural' && !productKitComposes(diff.changes) ? [] : ['product-kit.compose']
-	}
-	if (kind !== 'workspace' || !comparison || comparison.to.workspaceSchemaVersion >= PRODUCT_KIT_SCHEMA_VERSION) return []
-	const diff = comparison.changes?.find(change => change.kind === 'workspace')?.diff
-	if (diff?.type !== 'workspace') return []
-	const { adapters, adaptersChanges } = diff
-	const matched = adapters !== undefined && (adapters.added.length > 0 || adapters.removed.length > 0 || adapters.reordered === true)
-	// Unmatched by `moduleSpecifier`, the list is compared by position: an entry added, removed or
-	// replaced whole, or a changed `moduleSpecifier`, changes the list; a deeper change does not.
-	const structural = adaptersChanges?.some(change => /^(?:\/[^/]+(?:\/moduleSpecifier)?)?$/u.test(change.path)) === true
-	return matched || structural ? ['product-kit.compose'] : []
+export function restoreExtraKeys(kind: string, comparison: Pick<VersionDiffResult, 'changes'> | undefined): readonly PermissionKey[] {
+	if (kind !== 'product-kit') return []
+	const diff = comparison?.changes?.find(change => change.kind === 'product-kit')?.diff
+	return diff?.type === 'structural' && !productKitComposes(diff.changes) ? [] : ['product-kit.compose']
 }
 
 /**

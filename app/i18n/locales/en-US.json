@@ -438,7 +438,7 @@
       "diagnosticNote": "Not implementation-ready. Inspect it; don't build from it."
     },
     "selectRoot": "Select at least one root.",
-    "migrationBlocked": "Readiness can't be checked until this Workspace is migrated."
+    "unsupportedBlocked": "Readiness can't be checked: this version of UIUX doesn't support this Workspace's schema."
   },
   "locales": {
     "title": "Workspace Locales",
@@ -618,10 +618,6 @@
       "viewUnavailable": "This View is unavailable.",
       "viewLoadFailed": "Could not load the View.",
       "bridgeInitFailed": "The preview could not connect to the Workbench. Try reloading."
-    },
-    "migration": {
-      "title": "This Workspace uses an older format",
-      "description": "It's read-only until it's migrated. Stop this server, run {command}, then start uiux dev again."
     },
     "kitBuild": {
       "failedTitle": "The kit build failed",
@@ -1083,7 +1079,6 @@
     "saved": "Product Kit saved",
     "saveFailed": "Couldn't save",
     "adaptersPartlySaved": "Specifiers saved, config not saved",
-    "legacy": "This Workspace has no Product Kit file until it's migrated. Its Adapters are shown read-only.",
     "unavailable": "Couldn't read the Product Kit file.",
     "unavailableHelp": "Check that {file} is valid JSON, then try again. The build below doesn't need it.",
     "problems": "{n} problem in the Product Kit | {n} problems in the Product Kit",
@@ -1122,7 +1117,6 @@
       "logRequiresKey": "Reading the build log requires the permission key {key}."
     },
     "sections": "Product Kit sections",
-    "legacySection": "This Workspace has no Product Kit file until it's migrated. Run uiux migrate to use this section.",
     "saveWhich": "More than one section has unsaved changes. Open the one to save.",
     "components": {
       "title": "Components",
@@ -1252,13 +1246,12 @@
     },
     "access": {
       "device": "Editing needs a window at least 1280px wide.",
-      "migration": "This Workspace uses an older format. Run uiux migrate to edit it."
+      "unsupported": "This version of UIUX doesn't support this Workspace's schema, so it can't be edited."
     }
   },
   "adapters": {
     "invalid": "The Adapter set is invalid. Preview and Catalog are paused until it's fixed.",
     "repair": "Run this in your project to fix it:",
-    "description": "Packages or Workspace modules that supply Widgets, in resolution order.",
     "kitDescription": "Packages or kit/ modules that supply Widgets, in resolution order.",
     "add": "Add adapter",
     "moduleSpecifier": "Module specifier",
@@ -1292,7 +1285,6 @@
     "saveNote": "Saving checks the Adapter set again.",
     "validation": {
       "required": "Enter a module specifier.",
-      "specifier": "Use a package name or a ./ path inside the Workspace.",
       "json": "This isn't valid JSON.",
       "kitSpecifier": "Use a package name or a ./ path inside kit/."
     }
@@ -1361,7 +1353,7 @@
     "attentionFindings": "{n} Checks finding | {n} Checks findings",
     "allClear": "Nothing waiting. {n} View ready. | Nothing waiting. {n} Views ready.",
     "nothingWaiting": "Nothing waiting.",
-    "migrationWaiting": "Reviews and readiness are available after the Workspace is migrated.",
+    "unsupportedWaiting": "Reviews and readiness aren't available: this version of UIUX doesn't support this Workspace's schema.",
     "tab": {
       "views": "Views",
       "checks": "Checks",
@@ -1399,7 +1391,7 @@
     },
     "readinessFailed": "Couldn't check",
     "attentionBlocked": "{n} View blocked | {n} Views blocked",
-    "readinessMigration": "Migrate to check"
+    "readinessUnsupported": "Can't check"
   },
   "ready": {
     "title": "Readiness · {view}",
@@ -1646,8 +1638,6 @@
       "usedBuiltIns": "The built-in presets were saved.",
       "issuesTitle": "The Access presets file has problems",
       "issuesHelp": "Saving here rewrites the file with the presets listed below.",
-      "legacyTitle": "Access presets need a newer Workspace",
-      "legacyDescription": "This Workspace is older than schemaVersion 6, so the built-in presets below label its members. Run uiux migrate to edit them.",
       "followUp": {
         "held": "No member on this host held the old keys of {name}. | {n} member on this host held the old keys of {name}. | {n} members on this host held the old keys of {name}.",
         "kept": "Their keys didn’t change, so this preset no longer labels them.",
@@ -1983,7 +1973,6 @@
     "viewHint": "Read-only on a phone. Tap a pin to open its thread."
   },
   "commentBlock": {
-    "migration": "Read-only until this Workspace is migrated. Run uiux migrate.",
     "unsupported": "Read-only: this Workspace's schema isn't supported by this version of UIUX.",
     "signed-out": "Sign in to comment.",
     "handset": "Not available on phones. Reply and triage here; add comments on a tablet or desktop.",
@@ -2121,9 +2110,6 @@
       "invalid_schema_version": "The Workspace format version is not valid.",
       "invalid_theme_entry": "Each theme must be an object.",
       "manifest_missing": "The Workspace settings file is missing or unreadable.",
-      "migration_failed": "The migration could not be applied. Nothing was changed.",
-      "migration_required": "This Workspace uses an older format and must be migrated first.",
-      "migration_unavailable": "This Workspace’s format cannot be migrated automatically.",
       "schema_unsupported": "This version of UIUX does not support this Workspace’s format."
     },
     "adapter": {
@@ -2670,7 +2656,6 @@
         "i18n": "Languages",
         "viewports": "Viewports",
         "themes": "Themes",
-        "adapters": "Adapters",
         "metadata": "Details",
         "content": "Content",
         "files": "Files",
@@ -2721,7 +2706,7 @@
       "created": "Checkpoint “{name}” created",
       "failed": "Couldn't create the Checkpoint.",
       "retryable": "Nothing was saved. Try again in a moment.",
-      "blockedMigration": "Not available until the Workspace is migrated"
+      "blockedUnsupported": "Not available: this version of UIUX doesn't support this Workspace's schema"
     },
     "delete": {
       "action": "Delete Checkpoint",

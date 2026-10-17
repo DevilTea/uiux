@@ -278,30 +278,36 @@ describe('Workspace pages navigation', () => {
 		return scroller.scrollTop > 0 && Math.abs(scroller.scrollTop - Math.min(target, scroller.scrollHeight - scroller.clientHeight)) < 1
 	})
 
-	for (const retired of ['/workspace/adapters', '/workspace/settings?section=adapters']) {
-		it(`redirects ${retired} to the Overview section of the Product Kit page, scrolled to the Adapters`, async () => {
-			const { context, page } = await open(retired, 1920, 600)
+	// Discussion #231 (Part 17), Change 7.2: the retired addresses no longer redirect.
+	for (const retired of ['/views', '/workspace/adapters']) {
+		it(`shows the not-found page at the retired address ${retired}`, async () => {
+			const { context, page } = await open(retired)
 			try {
-				await page.waitForURL(url => url.pathname === '/workspace/product-kit' && url.searchParams.get('section') === 'overview' && url.hash === '#product-kit-adapters')
-				await page.locator('#product-kit-overview #product-kit-adapters').waitFor()
-				await expect.poll(() => productKitScrollTop(page)).toBeGreaterThan(0)
+				await page.locator('[data-error-page]').waitFor()
+				expect(new URL(page.url()).pathname).toBe(retired)
+				expect(await page.getByText('Page not found').count()).toBe(1)
+				expect(await page.locator('[data-error-page] code').innerText()).toBe(retired)
 			}
 			finally { await context.close() }
 		}, 60_000)
 	}
 
-	it('keeps the page the retired link was followed from in the history', async () => {
-		const { context, page } = await open('/workspace/locales')
+	it('opens Settings at its top for the retired `?section=adapters` (Clause 01a116f0-9782-7640-865e-c340df7b06b0)', async () => {
+		const { context, page } = await open('/workspace/settings?section=adapters', 1920, 600)
 		try {
-			await page.getByRole('heading', { level: 1 }).waitFor()
-			// A client-side navigation, as a link inside the Workbench makes it.
-			await page.evaluate(() => {
-				const app = (document.querySelector('[data-v-app]') as unknown as { __vue_app__: { config: { globalProperties: { $router: { push: (to: string) => Promise<unknown> } } } } }).__vue_app__
-				void app.config.globalProperties.$router.push('/workspace/settings?section=adapters')
-			})
-			await page.waitForURL(url => url.pathname === '/workspace/product-kit')
-			await page.goBack()
-			await page.waitForURL(url => url.pathname === '/workspace/locales')
+			await page.locator('#settings-themes').waitFor()
+			const url = new URL(page.url())
+			expect([url.pathname, url.searchParams.get('section')]).toEqual(['/workspace/settings', 'adapters'])
+			expect(await page.locator('#settings-themes').evaluate(element => element.closest('[role="region"]')?.scrollTop ?? 0)).toBe(0)
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('still redirects the section entry /workspace to Settings (Clause 01a116f0-9739-754b-b024-346b1c16a866)', async () => {
+		const { context, page } = await open('/workspace')
+		try {
+			await page.waitForURL(url => url.pathname === '/workspace/settings')
+			await page.locator('#settings-themes').waitFor()
 		}
 		finally { await context.close() }
 	}, 60_000)
@@ -342,10 +348,10 @@ describe('Workspace pages navigation', () => {
 	}, 60_000)
 })
 
-describe('Product Kit › Adapters on a schemaVersion 5 Workspace', () => {
+describe('Product Kit › Adapters saved through the Product Kit operations', () => {
 	/**
 	 * Discussion #139 owner ruling 6: the section reads and writes the Product Kit file through the
-	 * Product Kit operations, never the manifest's `adapters`, which a schemaVersion 5 manifest refuses.
+	 * Product Kit operations, never the manifest's `adapters`, which the manifest refuses.
 	 */
 	it('saves an Adapter config through update_product_kit and sends no adapters to the Workspace settings', async () => {
 		const before = await api<ProductKitRead>('/api/product-kit')
