@@ -2,12 +2,12 @@ import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright'
-import { keysForRole, PERMISSION_KEYS } from '../src/application/access/keys'
+import { PERMISSION_KEYS } from '../src/application/access/keys'
 import type { MemberKind } from '../src/application/access/principal'
 import { accessStorePaths, resolveUiuxHome, workspaceRealRoot } from '../src/server/access/store'
 import { orderedKeys } from '../app/utils/member-keys'
 import { runAccessCommand } from '../src/cli/access'
-import { provisionToken } from './support/access'
+import { presetKeys, provisionToken } from './support/access'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
@@ -33,8 +33,8 @@ let server: WorkbenchServer
 let browser: Browser
 
 const unique = () => randomUUID().slice(0, 8)
-const VIEWER = keysForRole('human', 'viewer')
-const REVIEWER = keysForRole('human', 'reviewer')
+const VIEWER = presetKeys('viewer')
+const REVIEWER = presetKeys('reviewer')
 
 beforeAll(async () => {
 	server = await startWorkbenchServer()
@@ -113,8 +113,8 @@ async function save(editor: Locator): Promise<void> {
 
 describe('the member list', () => {
 	it('shows each member\'s kind, label and key count, and flags a stored key set lacking a requirement', async () => {
-		const editor = await member('human', keysForRole('human', 'editor'))
-		const agent = await member('agent', keysForRole('agent', 'editor'))
+		const editor = await member('human', presetKeys('editor'))
+		const agent = await member('agent', presetKeys('editor', 'agent'))
 		const gap = await member('human', VIEWER)
 		await writeStoredKeys(gap, ['views.write'])
 		const { context, page } = await openMembers()
@@ -123,7 +123,7 @@ describe('the member list', () => {
 			await editorRow.waitFor({ timeout: 15_000 })
 			expect(await editorRow.innerText()).toContain('Human')
 			expect((await editorRow.locator('[data-member-label]').innerText()).trim()).toBe('Editor')
-			expect((await editorRow.locator('[data-member-key-count]').innerText()).trim()).toBe(`${keysForRole('human', 'editor').length} keys`)
+			expect((await editorRow.locator('[data-member-key-count]').innerText()).trim()).toBe(`${presetKeys('editor').length} keys`)
 			expect(await editorRow.locator('[data-member-key-gap]').count()).toBe(0)
 
 			const agentRow = row(page, agent)
@@ -154,7 +154,7 @@ describe('Edit access', () => {
 
 			await startFrom(page, editor, 'Editor')
 			expect((await label(editor).innerText()).trim()).toBe('Editor')
-			expect(await checkedKeys(editor)).toEqual(keysForRole('human', 'editor'))
+			expect(await checkedKeys(editor)).toEqual(presetKeys('editor'))
 
 			await startFrom(page, editor, 'Viewer')
 			// Checking `reviews.promote` also checks `reviews.write`, which it requires.
@@ -191,13 +191,13 @@ describe('Edit access', () => {
 			expect(await keyRow(editor, 'views.write').locator('[data-key-human-only]').count()).toBe(0)
 
 			await startFrom(page, editor, 'Owner')
-			expect(await checkedKeys(editor)).toEqual(keysForRole('agent', 'owner'))
+			expect(await checkedKeys(editor)).toEqual(presetKeys('owner', 'agent'))
 			expect(await editor.locator('[data-key-editor-applied]').innerText()).toContain('Started from Owner without reviews.resolve, checkpoints.delete, locks.force-release, presets.manage, members.manage')
 			// An Agent holding the Owner keys it can hold is labeled by the preset with the fewest humanOnly keys.
 			expect((await label(editor).innerText()).trim()).toBe('Editor')
 			await save(editor)
 			await editor.waitFor({ state: 'detached' })
-			expect(await storedKeys(nickname)).toEqual(keysForRole('agent', 'owner'))
+			expect(await storedKeys(nickname)).toEqual(presetKeys('owner', 'agent'))
 		}
 		finally { await context.close() }
 	}, 60_000)
@@ -242,7 +242,7 @@ describe('Edit access', () => {
 	}, 60_000)
 
 	it('keeps a change made through the CLI while the page was open (owner ruling 1 of 2026-10-11 on PR #191)', async () => {
-		const EDITOR = keysForRole('human', 'editor')
+		const EDITOR = presetKeys('editor')
 		const nickname = await member('human', [...EDITOR, 'members.manage'])
 		const { context, page } = await openMembers()
 		try {
@@ -296,7 +296,7 @@ describe('refusals shown in place', () => {
 	}, 60_000)
 
 	it('flags a key whose requirement is unchecked and shows access.key_requires in zh-TW', async () => {
-		const nickname = await member('human', keysForRole('human', 'editor'))
+		const nickname = await member('human', presetKeys('editor'))
 		const { context, page } = await openMembers('zh-TW')
 		try {
 			const editor = await editAccess(page, nickname)
@@ -308,7 +308,7 @@ describe('refusals shown in place', () => {
 			await error.waitFor()
 			expect(await error.getAttribute('data-code')).toBe('access.key_requires')
 			expect(await error.innerText()).toContain('這些權限鍵需要成員尚未持有的其他權限鍵。')
-			expect(await storedKeys(nickname)).toEqual(keysForRole('human', 'editor'))
+			expect(await storedKeys(nickname)).toEqual(presetKeys('editor'))
 		}
 		finally { await context.close() }
 	}, 60_000)
@@ -347,8 +347,8 @@ describe('the notice of keys no person holds', () => {
 		finally { await context.close() }
 
 		// Another person takes over members.manage, and the Owner gives up the keys no one else holds.
-		const lead = await member('human', [...keysForRole('human', 'editor'), 'members.manage'], 'p5-lead')
-		await writeStoredKeys('tester', [...keysForRole('human', 'editor'), 'members.manage'])
+		const lead = await member('human', [...presetKeys('editor'), 'members.manage'], 'p5-lead')
+		await writeStoredKeys('tester', [...presetKeys('editor'), 'members.manage'])
 		const second = await openMembers()
 		try {
 			const notice = second.page.locator('[data-testid="unheld-keys"]')
@@ -370,7 +370,7 @@ describe('the notice of keys no person holds', () => {
 		finally {
 			await second.context.close()
 			await writeStoredKeys('tester', [...PERMISSION_KEYS])
-			await writeStoredKeys(lead, keysForRole('human', 'editor'))
+			await writeStoredKeys(lead, presetKeys('editor'))
 		}
 	}, 60_000)
 })

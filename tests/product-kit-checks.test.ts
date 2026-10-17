@@ -7,13 +7,12 @@ import { canonicalJsonBytes } from '../src/persistence'
 import { FileNativePersistence } from '../src/persistence/file-native'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createProductKitAuthoringService } from '../src/application/services/product-kit-authoring'
-import { keysForRole } from '../src/application/access/keys'
 import { harnessPreviewUrl, openHarnessPreview } from '../src/application/services/capture-harness'
 import { createProductKitChecksService, RUN_DEADLINE_MS, type ProductKitChecksResult, type ProductKitCheckFinding } from '../src/application/services/product-kit-checks'
 import type { WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { ViewResource } from '../src/domain/views/schema'
 import { CAPTURE_HARNESS_GLOBAL } from '../src/preview/capture-harness-hooks'
-import { provisionToken, scoped, sessionCookieFor, testMember } from './support/access'
+import { presetKeys, provisionToken, scoped, sessionCookieFor, testMember } from './support/access'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
@@ -314,7 +313,7 @@ describe('Product Kit Checks', () => {
 	it('needs evidence.capture, and passes whether the caller may read kit sources', async () => {
 		const calls: unknown[] = []
 		const app = { runProductKitChecks: async (command: unknown) => { calls.push(command); return { status: 'busy', diagnostics: [] } } } as unknown as WorkspaceApplicationSession
-		const editor = keysForRole('human', 'editor')
+		const editor = presetKeys('editor')
 		expect(await scoped(app, testMember({ keys: editor.filter(key => key !== 'evidence.capture') })).runProductKitChecks())
 			.toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['evidence.capture'] })
 		await scoped(app, testMember({ keys: editor.filter(key => key !== 'product-kit.source.read') })).runProductKitChecks()
@@ -323,7 +322,7 @@ describe('Product Kit Checks', () => {
 	})
 
 	it('refuses a Workbench session without evidence.capture, and Run Checks then never asks for the Product Kit Checks', async () => {
-		const viewer = await sessionCookieFor(server.origin, await provisionToken(server.workspaceRoot, { nickname: 'checks-viewer', role: 'viewer' }))
+		const viewer = await sessionCookieFor(server.origin, await provisionToken(server.workspaceRoot, { nickname: 'checks-viewer', preset: 'viewer' }))
 		const refused = await fetch(`${server.origin}/api/product-kit/checks`, { method: 'POST', headers: { cookie: `${viewer.name}=${viewer.value}` } })
 		expect(refused.status).toBe(403)
 		expect(await refused.json()).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['evidence.capture'] })

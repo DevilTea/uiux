@@ -36,9 +36,9 @@ const OTHER_VIEW_ID = '11111111-1111-4111-8111-111111111112'
 const REVIEW_ID = '22222222-2222-4222-8222-222222222222'
 const WIDGET_REVIEW_ID = '22222222-2222-4222-8222-222222222223'
 const EDIT_ID = '44444444-4444-4444-8444-444444444444'
-const MEI = testMember({ nickname: 'mei', kind: 'human', role: 'reviewer', credential: 'session' })
-const RUI = testMember({ nickname: 'rui', kind: 'human', role: 'owner', credential: 'session' })
-const VIEWER = testMember({ nickname: 'vera', kind: 'human', role: 'viewer', credential: 'session' })
+const MEI = testMember({ nickname: 'mei', kind: 'human', preset: 'reviewer', credential: 'session' })
+const RUI = testMember({ nickname: 'rui', kind: 'human', preset: 'owner', credential: 'session' })
+const VIEWER = testMember({ nickname: 'vera', kind: 'human', preset: 'viewer', credential: 'session' })
 const roots: string[] = []
 
 afterEach(async () => {
@@ -356,7 +356,7 @@ describe('editing a message (decisions 10–16)', { timeout: 30_000 }, () => {
 		const ctx = await session()
 		const { revision } = await workspaceThread(ctx)
 		const agentMcp = await connectMcp(ctx.app)
-		const humanMcp = await connectMcp(ctx.app, testMember({ nickname: 'hana', kind: 'human', role: 'owner', credential: 'token' }))
+		const humanMcp = await connectMcp(ctx.app, testMember({ nickname: 'hana', kind: 'human', preset: 'owner', credential: 'token' }))
 		try {
 			const byAgent = await agentMcp.client.callTool({ name: 'resolve_review_thread', arguments: { reviewId: REVIEW_ID, expectedRevision: revision, resolution: 'answered' } })
 			expect(byAgent.structuredContent).toMatchObject({ code: 'review.direct_resolve_requires_workbench' })

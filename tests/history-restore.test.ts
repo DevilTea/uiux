@@ -56,12 +56,12 @@ const STEP_ID = '66666666-6666-4666-8666-666666666666'
 const START = Date.parse('2026-10-09T00:00:00.000Z')
 const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
 
-const OWNER = testMember({ memberId: 'owner-1', nickname: 'mei', kind: 'human', role: 'owner', credential: 'session' })
-const EDITOR = testMember({ memberId: 'editor-1', nickname: 'eve', kind: 'human', role: 'editor', credential: 'session' })
-const REVIEWER = testMember({ memberId: 'reviewer-1', nickname: 'rui', kind: 'human', role: 'reviewer', credential: 'session' })
-const AGENT = testMember({ memberId: 'agent-1', nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' })
-const OTHER_AGENT = testMember({ memberId: 'agent-2', nickname: 'codex', kind: 'agent', role: 'editor', credential: 'token' })
-const AGENT_REVIEWER = testMember({ memberId: 'agent-3', nickname: 'critic', kind: 'agent', role: 'reviewer', credential: 'token' })
+const OWNER = testMember({ memberId: 'owner-1', nickname: 'mei', kind: 'human', preset: 'owner', credential: 'session' })
+const EDITOR = testMember({ memberId: 'editor-1', nickname: 'eve', kind: 'human', preset: 'editor', credential: 'session' })
+const REVIEWER = testMember({ memberId: 'reviewer-1', nickname: 'rui', kind: 'human', preset: 'reviewer', credential: 'session' })
+const AGENT = testMember({ memberId: 'agent-1', nickname: 'claude', kind: 'agent', preset: 'editor', credential: 'token' })
+const OTHER_AGENT = testMember({ memberId: 'agent-2', nickname: 'codex', kind: 'agent', preset: 'editor', credential: 'token' })
+const AGENT_REVIEWER = testMember({ memberId: 'agent-3', nickname: 'critic', kind: 'agent', preset: 'reviewer', credential: 'token' })
 
 const MANIFEST = {
 	schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
@@ -766,8 +766,8 @@ describe('POST /api/history/versions/:id/restore', { timeout: HEAVY_SERVER_SUITE
 		const runtime = getSelectedWorkspaceServerRuntime()
 		const baseline = listed(await runtime.app.listVersions({})).versions[0]!.id
 		await rm(join(root, 'i18n', 'en-US.json'))
-		const editor = await provisionToken(root, { nickname: 'eve', kind: 'human', role: 'editor' })
-		const reviewer = await provisionToken(root, { nickname: 'rui', kind: 'human', role: 'reviewer' })
+		const editor = await provisionToken(root, { nickname: 'eve', kind: 'human', preset: 'editor' })
+		const reviewer = await provisionToken(root, { nickname: 'rui', kind: 'human', preset: 'reviewer' })
 		const body = JSON.stringify({ resource: { kind: 'locale', key: 'en-US' }, expectedRevision: null })
 		const json = { 'content-type': 'application/json' }
 		const path = `${origin}/api/history/versions/${baseline}/restore`

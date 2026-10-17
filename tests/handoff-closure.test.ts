@@ -128,7 +128,7 @@ async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; co
 }
 
 async function startTestServer(workspaceRoot: string): Promise<{ url: string; close: () => void; token: string; cookie: { name: string; value: string }; headers: Record<string, string> }> {
-	const token = await provisionToken(workspaceRoot, { nickname: 'tester', kind: 'human', role: 'owner' })
+	const token = await provisionToken(workspaceRoot, { nickname: 'tester', kind: 'human', preset: 'owner' })
 	const probe = createServer()
 	await new Promise<void>((res, rej) => { probe.once('error', rej); probe.listen(0, '127.0.0.1', () => res()) })
 	const address = probe.address() as AddressInfo

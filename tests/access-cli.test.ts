@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { BUILT_IN_ACCESS_PRESETS, HUMAN_ONLY_PERMISSION_KEYS, keysForRole, PERMISSION_KEYS } from '../src/application/access/keys'
+import { HUMAN_ONLY_PERMISSION_KEYS, PERMISSION_KEYS } from '../src/application/access/keys'
 import { createLeaseManager } from '../src/application/access/leases'
 import { runAccessCommand } from '../src/cli/access'
 import type { HostVersionRecord } from '../src/domain/history/schema'
@@ -16,6 +16,7 @@ import { acquireServerHold } from '../src/persistence/server-hold'
 import { verifyCredential } from '../src/server/access/roster'
 import { AccessService, agentAccessOption } from '../src/server/access/service'
 import { AccessStore, accessStorePaths, copyHostHistory, hostHistoryPaths, planHostHistoryCopy } from '../src/server/access/store'
+import { presetKeys } from './support/access'
 import { CURRENT_TEST_LAYOUT, writeCurrentWorkspace } from './support/workspace-layout'
 
 const CLI = join(fileURLToPath(new URL('..', import.meta.url)), 'bin', 'uiux.mjs')
@@ -73,7 +74,7 @@ describe('uiux access commands', () => {
 		expect(list.out).toMatch(/Roster [a-z2-7]{4} for /u)
 		expect(list.out).toContain(workspace)
 		expect(list.out).toMatch(/NICKNAME\s+KIND\s+ACCESS\s+TOKENS\s+SESSIONS\s+KEYS/u)
-		expect(list.out).toMatch(new RegExp(`claude\\s+agent\\s+Editor\\s+0\\s+0\\s+${keysForRole('agent', 'editor').length}$`, 'mu'))
+		expect(list.out).toMatch(new RegExp(`claude\\s+agent\\s+Editor\\s+0\\s+0\\s+${presetKeys('editor', 'agent').length}$`, 'mu'))
 		expect(await run('member', 'set', 'deviltea', '--preset', 'Editor', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('last human holder of `members.manage`') })
 		expect(await run('member', 'set', 'claude', '--nickname', 'claude-main', '--workspace', workspace)).toMatchObject({ code: 0 })
 		expect(await run('member', 'set', 'claude-main', '--workspace', workspace)).toMatchObject({ code: 2 })
@@ -182,7 +183,7 @@ describe('uiux access commands', () => {
 		expect(await run('access', 'copy', '--from', join(base, 'never-existed'), '--workspace', join(base, 'third'), '--replace')).toMatchObject({ code: 1, err: expect.stringContaining('No roster recorded') })
 	})
 
-	it('copies a version 1 roster as version 2 with the keys the upgrade maps, leaving the source as it was (Clause 01a1144e-56bd)', async () => {
+	it('refuses a version 1 roster in uiux member list and as an access copy source, leaving it unchanged (Clause 01a14917-7898, Scenario 01a14917-8c6c)', async () => {
 		const { base, workspace, home, run } = await setup()
 		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
 		const paths = accessStorePaths(home, workspace)
@@ -198,17 +199,13 @@ describe('uiux access commands', () => {
 		}
 		const legacyText = `${JSON.stringify(legacy, null, 2)}\n`
 		await writeFile(paths.file, legacyText)
+		const refusal = `The access store ${paths.file} is invalid: it is roster version 1, and this UIUX reads only roster version 2.`
+		expect(await run('member', 'list', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining(refusal) })
 		const target = await initWorkspace(base, 'moved')
-		expect(await run('access', 'copy', '--from', workspace, '--workspace', target)).toMatchObject({ code: 0 })
-		const copied = JSON.parse(await readFile(accessStorePaths(home, target).file, 'utf8')) as { version: number; members: { nickname: string; keys: string[] }[] }
-		expect(copied.version).toBe(2)
-		expect(copied.members).toMatchObject([{ nickname: 'deviltea', keys: [...keysForRole('human', 'owner')] }, { nickname: 'claude', keys: [...keysForRole('agent', 'editor')] }])
-		expect(copied.members.every(member => !('role' in member))).toBe(true)
-		// Reading a copy source writes nothing to it; the source upgrades when it is next opened.
+		expect(await run('access', 'copy', '--from', workspace, '--workspace', target)).toMatchObject({ code: 1, err: expect.stringContaining(refusal) })
+		expect(await lstat(accessStorePaths(home, target).file).catch(() => undefined)).toBeUndefined()
 		expect(await readFile(paths.file, 'utf8')).toBe(legacyText)
-		expect(await run('member', 'list', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringMatching(/claude\s+agent\s+Editor/u) })
-		expect(JSON.parse(await readFile(paths.file, 'utf8')).version).toBe(2)
-		expect(await readFile(paths.v1Backup, 'utf8')).toBe(legacyText)
+		expect(await readdir(paths.dir)).not.toContain('access.v1.json')
 	})
 
 	it('refuses an access copy --replace that would drop the target\'s last human manager, before copying anything', async () => {
@@ -446,17 +443,18 @@ describe('uiux access commands', () => {
 })
 
 describe('uiux member on permission keys and Access presets (issue #142)', () => {
-	const presetKeys = (id: string) => [...BUILT_IN_ACCESS_PRESETS.find(preset => preset.id === id)!.keys]
 	async function storedMembers(home: string, workspace: string) {
 		const store = (await AccessStore.open({ workspaceRoot: workspace, home, create: false }))!
 		return store.data.members
 	}
 
-	it('refuses --role, naming --preset, and needs exactly one of --preset, --keys and --all-keys (Clauses 01a1144e-5660, 01a11c09-acaf)', async () => {
+	it('refuses --role as an unknown option, and needs exactly one of --preset, --keys and --all-keys (Clauses 01a1144e-5660, 01a11c09-acaf)', async () => {
 		const { home, workspace, run } = await setup()
 		for (const argv of [['member', 'add', 'mei', '--role', 'editor'], ['member', 'set', 'mei', '--role', 'editor'], ['member', 'add', 'mei', '--role'], ['member', 'add', 'mei', '--role=editor'], ['member', 'set', 'mei', '--role=owner']]) {
 			const refused = await run(...argv, '--workspace', workspace)
-			expect(refused).toMatchObject({ code: 2, err: expect.stringContaining('--role was removed; give an Access preset with --preset <name>') })
+			expect(refused).toMatchObject({ code: 2, err: expect.stringContaining(`Unknown option ${argv[3]}.`) })
+			expect(refused.err).toContain('member add <nick>')
+			expect(refused.err).not.toContain('--role was removed')
 		}
 		expect(await run('member', 'add', 'mei', '--workspace', workspace)).toMatchObject({ code: 2, err: expect.stringContaining('exactly one of --preset <name>, --keys <k,...> or --all-keys') })
 		expect(await run('member', 'add', 'mei', '--preset', 'Viewer', '--all-keys', '--workspace', workspace)).toMatchObject({ code: 2 })
@@ -483,8 +481,8 @@ describe('uiux member on permission keys and Access presets (issue #142)', () =>
 		expect(added.code).toBe(0)
 		expect(added.out).toContain(`Applied the Owner preset without ${HUMAN_ONLY_PERMISSION_KEYS.filter(key => presetKeys('owner').includes(key)).join(', ')}: an Agent cannot hold humanOnly keys.`)
 		// The Owner keys an Agent can hold are the Editor keys an Agent can hold, so the label is Editor.
-		expect(added.out).toContain(`Added agent member claude (Editor, ${keysForRole('agent', 'editor').length} keys)`)
-		expect((await storedMembers(home, workspace))[0]!.keys).toEqual(keysForRole('agent', 'owner'))
+		expect(added.out).toContain(`Added agent member claude (Editor, ${presetKeys('editor', 'agent').length} keys)`)
+		expect((await storedMembers(home, workspace))[0]!.keys).toEqual(presetKeys('owner', 'agent'))
 		expect((await storedMembers(home, workspace))[0]!.keys.some(key => HUMAN_ONLY_PERMISSION_KEYS.includes(key as never))).toBe(false)
 		const set = await run('member', 'set', 'claude', '--preset', 'Reviewer', '--workspace', workspace)
 		expect(set).toMatchObject({ code: 0, out: expect.stringContaining('Applied the Reviewer preset without reviews.resolve') })
@@ -545,7 +543,7 @@ describe('uiux member on permission keys and Access presets (issue #142)', () =>
 		expect(await run('member', 'set', 'mei', '--revoke', 'views.write', '--workspace', workspace)).toMatchObject({ code: 0 })
 		expect(store.data.members.find(member => member.id === mei.id)!.keys).toContain('views.write')
 
-		const expected = keysForRole('human', 'editor').filter(key => key !== 'views.write' && key !== 'flows.write')
+		const expected = presetKeys('editor').filter(key => key !== 'views.write' && key !== 'flows.write')
 		expect((await service.setMember(mei.id, { revoke: ['flows.write'] })).keys).toEqual(expected)
 		expect((await storedMembers(home, workspace)).find(member => member.nickname === 'mei')).toMatchObject({ keys: expected })
 	})
@@ -609,7 +607,7 @@ describe('uiux member on permission keys and Access presets (issue #142)', () =>
 		expect(await run(...command.split(' ').slice(1))).toMatchObject({ code: 0, out: expect.stringContaining('Added agent member claude (Editor,') })
 		// A Workspace without presets gets --keys instead, which works too.
 		const fallback = agentAccessOption([])
-		expect(fallback).toBe(`--keys ${keysForRole('agent', 'editor').join(',')}`)
+		expect(fallback).toBe(`--keys ${presetKeys('editor', 'agent').join(',')}`)
 		expect(await run('member', 'add', 'claude-2', '--kind', 'agent', ...fallback.split(' '), '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('(Editor,') })
 		expect(agentAccessOption([{ id: 'qa', name: 'QA team' }])).toBe('--preset \'QA team\'')
 	})

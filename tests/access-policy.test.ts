@@ -9,9 +9,10 @@ import {
 	HUMAN_ONLY_PERMISSION_KEYS,
 	isPermissionKeyName,
 	keyRequirements,
-	keysForRole,
+	keysOfPreset,
 	PERMISSION_KEYS,
 	writeKeyForKind,
+	type BuiltInPresetId,
 	type PermissionKey,
 } from '../src/application/access/keys'
 import { createLeaseManager, LOCKABLE_KINDS } from '../src/application/access/leases'
@@ -26,7 +27,7 @@ import {
 	type AccessOperation,
 	type ScopeDenied,
 } from '../src/application/access/policy'
-import { ACCESS_ROLES, MEMBER_KINDS, principalActor, type AccessRole, type MemberPrincipal, type Principal, type SystemPrincipal } from '../src/application/access/principal'
+import { MEMBER_KINDS, principalActor, type MemberPrincipal, type Principal, type SystemPrincipal } from '../src/application/access/principal'
 import { resolutionRefusal } from '../src/application/access/scoped-session'
 import { uiuxMcpInstructions } from '../src/mcp/server'
 import { RESTORABLE_RESOURCE_KINDS } from '../src/domain/history/constants'
@@ -35,7 +36,7 @@ import { createWorkspaceApplicationSession } from '../src/application/services/w
 import { FileNativePersistence } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { appendReviewMessageForHttp, createViewForHttp, resolveReviewThreadForHttp, submitReadyForReviewForHttp, updateViewSpecForHttp } from '../src/server/authoring-http'
-import { connectMcp, scoped, testMember } from './support/access'
+import { connectMcp, presetKeys, scoped, testMember } from './support/access'
 import { createCurrentWorkspace } from './support/workspace-layout'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
@@ -65,13 +66,20 @@ async function fixture() {
 
 const CAPTURE: SystemPrincipal = { type: 'system', id: 'system:capture', credential: 'system' }
 
-/** The role each parity member was derived from; a principal carries keys and a label, never a role. */
+/**
+ * The roles of the role matrix, which permission keys replaced (Discussion #140). Each is the id of
+ * the built-in Access preset that holds its keys; a principal carries keys and a label, never a role.
+ */
+type AccessRole = BuiltInPresetId
+const ACCESS_ROLES: readonly AccessRole[] = ['viewer', 'reviewer', 'editor', 'owner']
+
+/** The role each parity member was derived from. */
 const ROLE_OF = new Map<Principal, AccessRole>()
 
-/** Every role, member kind and credential, as the live server derives their keys, plus the system credential. */
+/** Every role, member kind and credential, holding the keys of that role's preset, plus the system credential. */
 const PRINCIPALS: readonly Principal[] = [
 	...ACCESS_ROLES.flatMap(role => MEMBER_KINDS.flatMap(kind => (['session', 'token'] as const).map((credential) => {
-		const principal = testMember({ nickname: `${kind}-${role}-${credential}`, role, kind, credential })
+		const principal = testMember({ nickname: `${kind}-${role}-${credential}`, preset: role, kind, credential })
 		ROLE_OF.set(principal, role)
 		return principal
 	}))),
@@ -300,7 +308,7 @@ describe('the permission key catalog (Clauses 01a11c09-a26e, 01a11c09-a200, 01a1
 		})
 	})
 
-	it('records the built-in presets, each holding every requirement of its keys, and maps a role to the preset with that id', () => {
+	it('records the built-in presets, each holding every requirement of its keys, and applies none of their humanOnly keys to an Agent', () => {
 		let accumulated: string[] = []
 		expect(BUILT_IN_ACCESS_PRESETS.map(preset => [preset.id, preset.name])).toEqual(PRESET_STEPS.map(step => [step.id, step.name]))
 		for (const [index, step] of PRESET_STEPS.entries()) {
@@ -308,13 +316,13 @@ describe('the permission key catalog (Clauses 01a11c09-a26e, 01a11c09-a200, 01a1
 			const preset = BUILT_IN_ACCESS_PRESETS[index]!
 			expect(preset.keys).toEqual(PERMISSION_KEYS.filter(key => accumulated.includes(key)))
 			for (const key of preset.keys) for (const required of keyRequirements(key)) expect(preset.keys, `${preset.id}: ${key}`).toContain(required)
-			expect(keysForRole('human', step.id)).toEqual(preset.keys)
+			expect(keysOfPreset('human', preset.keys)).toEqual(preset.keys)
 			// Agents never hold a humanOnly key.
-			expect(keysForRole('agent', step.id)).toEqual(preset.keys.filter(key => !HUMAN_ONLY_PERMISSION_KEYS.includes(key)))
+			expect(keysOfPreset('agent', preset.keys)).toEqual(preset.keys.filter(key => !HUMAN_ONLY_PERMISSION_KEYS.includes(key)))
 		}
 		expect(PRESET_STEPS.flatMap(step => step.adds).sort()).toEqual([...PERMISSION_KEYS].sort())
-		// The Agent cap: an Agent recorded as Owner holds exactly the Editor keys.
-		expect(keysForRole('agent', 'owner')).toEqual(keysForRole('agent', 'editor'))
+		// The Agent cap: the Owner preset applied to an Agent gives exactly the Editor keys.
+		expect(presetKeys('owner', 'agent')).toEqual(presetKeys('editor', 'agent'))
 	})
 
 	it('maps each resource kind to its write key', () => {
@@ -439,8 +447,8 @@ describe('authorization by permission keys', () => {
 describe('authorization in the shared application layer', () => {
 	it('refuses every write without its key before touching the Workspace', async () => {
 		const ctx = await fixture()
-		const viewer = scoped(ctx.app, testMember({ nickname: 'vera', role: 'viewer' }))
-		const reviewer = scoped(ctx.app, testMember({ nickname: 'rui', role: 'reviewer' }))
+		const viewer = scoped(ctx.app, testMember({ nickname: 'vera', preset: 'viewer' }))
+		const reviewer = scoped(ctx.app, testMember({ nickname: 'rui', preset: 'reviewer' }))
 		const before = await readdir(join(ctx.root, 'views'))
 
 		const create = await createViewForHttp(reviewer, { id: NEW_VIEW_ID, name: 'Nope', spec: spec('x') })
@@ -452,7 +460,7 @@ describe('authorization in the shared application layer', () => {
 		expect(await viewer.captureFormalEvidence({ contexts: [] })).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['evidence.capture'] })
 		expect(await reviewer.exportHandoff({ roots: [{ type: 'workspace' }] })).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['handoff.export'] })
 		expect(viewer.acquireLeases({ resources: [{ kind: 'view', key: VIEW_ID }] })).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['views.write'] })
-		expect(scoped(ctx.app, testMember({ role: 'editor' })).forceReleaseLease({ kind: 'view', key: VIEW_ID })).toMatchObject({ code: 'auth.scope_denied', requiredKeys: ['locks.force-release'] })
+		expect(scoped(ctx.app, testMember({ preset: 'editor' })).forceReleaseLease({ kind: 'view', key: VIEW_ID })).toMatchObject({ code: 'auth.scope_denied', requiredKeys: ['locks.force-release'] })
 		// Reads need only `workspace.read`, which every role holds.
 		expect((await viewer.readPointResource('view', VIEW_ID))?.kind).toBe('view')
 		expect(await readdir(join(ctx.root, 'views'))).toEqual(before)
@@ -461,7 +469,7 @@ describe('authorization in the shared application layer', () => {
 	it('keeps every tool listed whatever the keys and refuses one the keys do not allow, naming the missing key (Scenario 01a118a1-cecf)', async () => {
 		const ctx = await fixture()
 		const before = await readdir(join(ctx.root, 'views'))
-		const full = await connectMcp(ctx.app, testMember({ nickname: 'full', kind: 'agent', role: 'editor', credential: 'token' }))
+		const full = await connectMcp(ctx.app, testMember({ nickname: 'full', kind: 'agent', preset: 'editor', credential: 'token' }))
 		const everyTool = await (async () => {
 			try { return (await full.client.listTools()).tools.map(tool => tool.name) }
 			finally { await full.close() }
@@ -497,10 +505,10 @@ describe('authorization in the shared application layer', () => {
 
 	it('tells the agent its identity, label and effective keys in the per-request instructions (Clause 01a11485-f6ea)', async () => {
 		const ctx = await fixture()
-		const mcp = await connectMcp(ctx.app, testMember({ nickname: 'claude-wt-a', kind: 'agent', role: 'editor', credential: 'token' }))
+		const mcp = await connectMcp(ctx.app, testMember({ nickname: 'claude-wt-a', kind: 'agent', preset: 'editor', credential: 'token' }))
 		try {
 			const instructions = mcp.client.getInstructions() ?? ''
-			const editorKeys = keysForRole('agent', 'editor')
+			const editorKeys = presetKeys('editor', 'agent')
 			expect(instructions.startsWith(`Authenticated as claude-wt-a (agent, Editor). Your effective permission keys: ${editorKeys.join(', ')}.`)).toBe(true)
 			expect(editorKeys).not.toContain('reviews.resolve')
 			expect(instructions).not.toMatch(/\brole\b/u)
@@ -515,7 +523,7 @@ describe('authorization in the shared application layer', () => {
 		const translator = testMember({ nickname: 'tina', kind: 'agent', credential: 'token', keys: ['workspace.read', 'reviews.write', 'locales.write'] })
 		expect(uiuxMcpInstructions(translator).startsWith('Authenticated as tina (agent, Custom). Your effective permission keys: workspace.read, reviews.write, locales.write.')).toBe(true)
 		// A human Owner's Token: labeled Owner from the stored keys, but humanOnly keys take effect only on a cookie session.
-		const owner = testMember({ nickname: 'mei', kind: 'human', role: 'owner', credential: 'token' })
+		const owner = testMember({ nickname: 'mei', kind: 'human', preset: 'owner', credential: 'token' })
 		const listed = /Your effective permission keys: (.+?)\. Actors/u.exec(uiuxMcpInstructions(owner))![1]!.split(', ')
 		expect(uiuxMcpInstructions(owner).startsWith('Authenticated as mei (human, Owner).')).toBe(true)
 		expect(listed).toEqual(PERMISSION_KEYS.filter(key => !HUMAN_ONLY_PERMISSION_KEYS.includes(key)))
@@ -527,7 +535,7 @@ describe('authorization in the shared application layer', () => {
 describe('server-side actor and time stamping', () => {
 	it('stamps actor and at from the principal on HTTP, ignoring a supplied actor with auth.actor_ignored and at with auth.time_ignored', async () => {
 		const ctx = await fixture()
-		const mei = testMember({ nickname: 'mei', role: 'reviewer' })
+		const mei = testMember({ nickname: 'mei', preset: 'reviewer' })
 		const result = await appendReviewMessageForHttp(scoped(ctx.app, mei), REVIEW_ID, {
 			expectedRevision: ctx.reviewRevision,
 			actor: { type: 'human', id: 'member:spoof', displayName: 'Somebody Else' },
@@ -552,7 +560,7 @@ describe('server-side actor and time stamping', () => {
 
 	it('stamps agents on /mcp too, so existing prompts that send actor keep working', async () => {
 		const ctx = await fixture()
-		const claude = testMember({ nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' })
+		const claude = testMember({ nickname: 'claude', kind: 'agent', preset: 'editor', credential: 'token' })
 		const mcp = await connectMcp(ctx.app, claude)
 		try {
 			const result = await mcp.client.callTool({ name: 'append_review_message', arguments: { reviewId: REVIEW_ID, expectedRevision: ctx.reviewRevision, actor: { type: 'agent', id: 'agent:claude' }, body: 'On it.' } })
@@ -569,7 +577,7 @@ describe('resolve requires reviews.resolve on a human member\'s Workbench cookie
 	it('refuses bearer tokens with review.resolve_requires_workbench and agent sessions with review.resolve_requires_human', async () => {
 		const ctx = await fixture()
 		const evidence = await ctx.persistence.artifacts.put(new TextEncoder().encode('evidence'))
-		const ready = await submitReadyForReviewForHttp(scoped(ctx.app, testMember({ kind: 'agent', role: 'editor', credential: 'token' })), REVIEW_ID, {
+		const ready = await submitReadyForReviewForHttp(scoped(ctx.app, testMember({ kind: 'agent', preset: 'editor', credential: 'token' })), REVIEW_ID, {
 			expectedRevision: ctx.reviewRevision,
 			changeDomains: ['view-structure'],
 			resources: [{ identity: { type: 'view', id: VIEW_ID }, revision: ctx.viewRevision }],
@@ -579,10 +587,10 @@ describe('resolve requires reviews.resolve on a human member\'s Workbench cookie
 		const revision = (ready.body as { revision: string }).revision
 		const attempt = (principal: MemberPrincipal) => resolveReviewThreadForHttp(scoped(ctx.app, principal), REVIEW_ID, { expectedRevision: revision, actor: { type: 'human' } })
 
-		expect((await attempt(testMember({ kind: 'human', role: 'owner', credential: 'token' }))).body).toMatchObject({ status: 'blocked', code: 'review.resolve_requires_workbench' })
-		expect((await attempt(testMember({ kind: 'agent', role: 'editor', credential: 'token' }))).body).toMatchObject({ code: 'review.resolve_requires_workbench' })
-		expect((await attempt(testMember({ kind: 'agent', role: 'editor', credential: 'session' }))).body).toMatchObject({ code: 'review.resolve_requires_human' })
-		const viewer = await attempt(testMember({ kind: 'human', role: 'viewer', credential: 'session' }))
+		expect((await attempt(testMember({ kind: 'human', preset: 'owner', credential: 'token' }))).body).toMatchObject({ status: 'blocked', code: 'review.resolve_requires_workbench' })
+		expect((await attempt(testMember({ kind: 'agent', preset: 'editor', credential: 'token' }))).body).toMatchObject({ code: 'review.resolve_requires_workbench' })
+		expect((await attempt(testMember({ kind: 'agent', preset: 'editor', credential: 'session' }))).body).toMatchObject({ code: 'review.resolve_requires_human' })
+		const viewer = await attempt(testMember({ kind: 'human', preset: 'viewer', credential: 'session' }))
 		expect(viewer.status).toBe(403)
 		expect(viewer.body).toMatchObject({ code: 'auth.scope_denied', requiredKeys: ['reviews.resolve'] })
 		// A human session holding every other Review key still needs `reviews.resolve` itself.

@@ -216,42 +216,6 @@ function refuseLocation(reason: WorkspaceLocationRefusalReason, message: string)
 	return { ok: false, reason, message }
 }
 
-/** The old layout's data directories, which `uiux.v4-to-v5` moves into `.uiux/`. */
-const OLD_LAYOUT_DATA_DIRECTORIES = Object.freeze(Object.values(WORKSPACE_DATA_DIRECTORY).filter(directory => directory !== WORKSPACE_DIRECTORY))
-
-/**
- * The one exception to the entry check: `uiux access copy --from <old>` right after `uiux migrate`
- * relocated `<old>` into `<old>/.uiux/` (owner ruling 2 of
- * https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18851627, Rule
- * 01a12626-5a0c-7c1a-942f-666101981e29), where `--from` names the old root literally, as the key of
- * its roster and host history. True only when every one of these holds:
- *
- * - the entry check refuses `source` as `relocated_parent`, so `source/.uiux/workspace.json` has a
- *   `schemaVersion` of 5 or later that the policy recognizes;
- * - `source/.uiux` is a real directory (not a symbolic link) that passes the entry check as a
- *   `schemaVersion` 5 root;
- * - that directory is the copy's target root (`targetRealRoot`, a real path), by real path;
- * - no old-layout data directory is left in `source`, which a finished relocation never leaves.
- *
- * It reads only the manifests and directory entries, before any lock or store is touched.
- */
-export function isRelocatedSourceOf(source: string, targetRealRoot: string, policy: Pick<WorkspaceSchemaPolicy, 'currentVersion'>): boolean {
-	const directory = resolve(source)
-	const selection = checkWorkspaceSelection(directory, policy)
-	if (selection.ok || selection.reason !== 'relocated_parent') return false
-	const relocated = join(directory, WORKSPACE_DIRECTORY)
-	// A relocation leaves a real directory there, never a symbolic link to some other root.
-	try { if (!lstatSync(relocated).isDirectory()) return false }
-	catch { return false }
-	const relocatedSelection = checkWorkspaceSelection(relocated, policy)
-	if (!relocatedSelection.ok || relocatedSelection.layout !== V5_LAYOUT) return false
-	let realRelocated: string
-	try { realRelocated = realpathSync.native(relocated) }
-	catch { return false }
-	if (realRelocated !== targetRealRoot) return false
-	return OLD_LAYOUT_DATA_DIRECTORIES.every(name => !exists(join(directory, name)))
-}
-
 function refuse(reason: WorkspaceSelectionRefusalReason, message: string): WorkspaceSelection {
 	return { ok: false, reason, message }
 }

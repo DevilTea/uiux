@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
-import { keysForRole } from '../src/application/access/keys'
-import { provisionToken, sessionCookieFor } from './support/access'
+import { presetKeys, provisionToken, sessionCookieFor } from './support/access'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
@@ -342,7 +341,7 @@ describe('where Restore is offered', () => {
 		const earlier = await checkpoint(`b10 before ${unique()}`)
 		await setIntent(key, `Roles ${unique()}`)
 		for (const role of ['viewer', 'reviewer', 'editor'] as const) {
-			const token = await provisionToken(server.workspaceRoot, { nickname: `b10-${role}-${unique()}`, kind: 'human', role })
+			const token = await provisionToken(server.workspaceRoot, { nickname: `b10-${role}-${unique()}`, kind: 'human', preset: role })
 			const { context, page } = await open(comparisonPath(earlier, key), { cookie: await sessionCookieFor(server.origin, token) })
 			try {
 				await viewDiff(page, key)
@@ -422,7 +421,7 @@ describe('restoring the Product Kit file (#139 owner ruling 2026-10-11, 1)', () 
 		const earlier = await checkpoint(`b10 adapters ${unique()}`)
 		await setAdapters([])
 		try {
-			const editor = keysForRole('human', 'editor')
+			const editor = presetKeys('editor')
 			for (const keys of [editor.filter(key => key !== 'product-kit.compose'), editor]) {
 				const composes = keys.includes('product-kit.compose')
 				const token = await provisionToken(server.workspaceRoot, { nickname: `b10-adapters-${unique()}`, kind: 'human', keys })

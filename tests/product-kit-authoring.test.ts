@@ -75,10 +75,10 @@ async function revision(app: WorkspaceApplicationSession): Promise<string> {
 	return read.revision
 }
 
-const HUMAN_EDITOR = testMember({ nickname: 'erin', kind: 'human', role: 'editor', credential: 'session' })
-const AGENT = testMember({ nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' })
-const OTHER_AGENT = testMember({ nickname: 'codex', kind: 'agent', role: 'editor', credential: 'token' })
-const VIEWER = testMember({ nickname: 'vera', kind: 'human', role: 'viewer', credential: 'session' })
+const HUMAN_EDITOR = testMember({ nickname: 'erin', kind: 'human', preset: 'editor', credential: 'session' })
+const AGENT = testMember({ nickname: 'claude', kind: 'agent', preset: 'editor', credential: 'token' })
+const OTHER_AGENT = testMember({ nickname: 'codex', kind: 'agent', preset: 'editor', credential: 'token' })
+const VIEWER = testMember({ nickname: 'vera', kind: 'human', preset: 'viewer', credential: 'session' })
 const WRITER = testMember({ nickname: 'wes', kind: 'human', credential: 'session', keys: ['workspace.read', 'product-kit.source.read', 'product-kit.write'] })
 const COMPOSER_ONLY = testMember({ nickname: 'cole', kind: 'human', credential: 'session', keys: ['workspace.read', 'product-kit.compose'] })
 

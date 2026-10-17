@@ -63,11 +63,11 @@ async function revision(app: WorkspaceApplicationSession): Promise<string> {
 }
 
 const builtIns = (): AccessPreset[] => builtInAccessPresetsFile().presets
-const OWNER = testMember({ nickname: 'olga', kind: 'human', role: 'owner', credential: 'session' })
-const OWNER_TOKEN = testMember({ nickname: 'olga', kind: 'human', role: 'owner', credential: 'token' })
-const EDITOR = testMember({ nickname: 'erin', kind: 'human', role: 'editor', credential: 'session' })
-const VIEWER = testMember({ nickname: 'vera', kind: 'human', role: 'viewer', credential: 'session' })
-const AGENT = testMember({ nickname: 'claude', kind: 'agent', role: 'editor', credential: 'token' })
+const OWNER = testMember({ nickname: 'olga', kind: 'human', preset: 'owner', credential: 'session' })
+const OWNER_TOKEN = testMember({ nickname: 'olga', kind: 'human', preset: 'owner', credential: 'token' })
+const EDITOR = testMember({ nickname: 'erin', kind: 'human', preset: 'editor', credential: 'session' })
+const VIEWER = testMember({ nickname: 'vera', kind: 'human', preset: 'viewer', credential: 'session' })
+const AGENT = testMember({ nickname: 'claude', kind: 'agent', preset: 'editor', credential: 'token' })
 const MANAGER = testMember({ nickname: 'pia', kind: 'human', credential: 'session', keys: ['workspace.read', 'presets.manage'] })
 
 const http = (app: WorkspaceApplicationSession, principal: MemberPrincipal) => scoped(app, principal, { leases: createLeaseManager() })

@@ -418,15 +418,15 @@ export class AccessService {
 			})
 	}
 
-	addMember(input: Readonly<{ nickname: string; role?: unknown; keys?: unknown; kind?: unknown }>) {
+	addMember(input: Readonly<{ nickname: string; keys?: unknown; kind?: unknown }>) {
 		return this.mutate<StoredMember>(file => addMember(file, input, new Date(this.now())))
 	}
 
 	/**
 	 * `grant` and `revoke` apply to the member's keys as read under the store's lock, so a concurrent
-	 * writer's change is kept. `keys` and `role` replace them; no surface sends those (in-process only).
+	 * writer's change is kept. `keys` replaces them; no surface sends it (in-process only).
 	 */
-	setMember(memberId: string, changes: Readonly<{ role?: unknown; keys?: unknown; grant?: unknown; revoke?: unknown; nickname?: string; kind?: unknown }>) {
+	setMember(memberId: string, changes: Readonly<{ keys?: unknown; grant?: unknown; revoke?: unknown; nickname?: string; kind?: unknown }>) {
 		return this.mutate<StoredMember>(file => setMember(file, nicknameOf(file, memberId), changes))
 	}
 
@@ -519,13 +519,11 @@ function isLoopbackOrigin(origin: string): boolean {
 }
 
 /**
- * Whether a session serves a request on `origin`. Loopback sessions (a loopback host name, or a
- * session written before configured origins existed) serve every loopback origin, where the
- * browser already keeps one cookie per host name; a session created on any other origin serves
- * only that origin.
+ * Whether a session serves a request on `origin`. A session created on a loopback host name serves
+ * every loopback origin, where the browser already keeps one cookie per host name; a session
+ * created on any other origin serves only that origin.
  */
 export function sessionServesOrigin(session: StoredSession, origin: RequestOrigin): boolean {
-	if (session.origin === undefined) return session.listener === 'loopback' && origin.loopbackHost
 	if (origin.loopbackHost && isLoopbackOrigin(session.origin)) return true
 	return session.origin === origin.origin
 }

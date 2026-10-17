@@ -1,12 +1,10 @@
-import type { AccessRole, MemberKind } from './principal'
+import type { MemberKind } from './principal'
 
 /**
  * Permission keys (Discussion #140, Part 15): the catalog UIUX owns, each key's `humanOnly` flag
  * and requirements, the key-name grammar, the built-in Access presets and the write key of each
  * resource kind. Authorization (`policy.ts`) checks a principal's keys against the keys each
- * operation needs. A member's keys are the ones its roster record stores (roster `version: 2`);
- * the upgrade of a `version: 1` roster maps each stored `role` through the built-in preset of
- * that `id`.
+ * operation needs. A member's keys are the ones its roster record stores (roster `version: 2`).
  */
 
 /** Clause 01a11c09-a26e-73bb-9a29-eed40aae37bd: the permission key catalog, in catalog order. */
@@ -106,7 +104,10 @@ export function missingRequirements(keys: Iterable<string>): readonly Readonly<{
 	return gaps
 }
 
-export type BuiltInAccessPreset = Readonly<{ id: AccessRole; name: string; keys: readonly PermissionKey[] }>
+/** The `id` of a built-in Access preset (Clause 01a11c09-a930-7e31-bb0a-9e2bee79490c). */
+export type BuiltInPresetId = 'viewer' | 'reviewer' | 'editor' | 'owner'
+
+export type BuiltInAccessPreset = Readonly<{ id: BuiltInPresetId; name: string; keys: readonly PermissionKey[] }>
 
 const VIEWER_KEYS: readonly PermissionKey[] = ['workspace.read', 'history.read', 'product-kit.source.read']
 const REVIEWER_KEYS: readonly PermissionKey[] = [...VIEWER_KEYS, 'reviews.write', 'reviews.submit', 'reviews.promote', 'reviews.resolve', 'checkpoints.create']
@@ -132,15 +133,6 @@ export const BUILT_IN_ACCESS_PRESETS: readonly BuiltInAccessPreset[] = Object.fr
 	{ id: 'editor', name: 'Editor', keys: inCatalogOrder(EDITOR_KEYS) },
 	{ id: 'owner', name: 'Owner', keys: inCatalogOrder(OWNER_KEYS) },
 ].map(preset => Object.freeze({ ...preset, keys: Object.freeze(preset.keys) })) as BuiltInAccessPreset[])
-
-/**
- * Clause 01a11bb1-b427-777e-8175-fa24d61d434b: the roster upgrade maps a `role` to the keys of
- * the built-in Access preset with that `id`. An Agent never holds a `humanOnly` key (Rule
- * 01a11c09-b698-7ee3-861b-f02eaba61269), so an Agent's mapped set omits them.
- */
-export function keysForRole(kind: MemberKind, role: AccessRole): readonly PermissionKey[] {
-	return keysOfPreset(kind, BUILT_IN_ACCESS_PRESETS.find(item => item.id === role)!.keys)
-}
 
 /**
  * The keys that applying a preset copies to a member: the preset's keys as they are at that
