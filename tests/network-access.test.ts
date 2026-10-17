@@ -10,6 +10,7 @@ import { createLeaseManager } from '../src/application/access/leases'
 import { AccessService } from '../src/server/access/service'
 import { AccessStore } from '../src/server/access/store'
 import { configureServerNetwork } from '../src/server/loopback-guard'
+import { writeCurrentWorkspace } from './support/workspace-layout'
 import {
 	decodeDevHandoff,
 	DEV_HANDOFF_VARIABLE,
@@ -204,8 +205,8 @@ describe('uiux dev refusals', () => {
 	beforeAll(async () => {
 		base = await realpath(await mkdtemp(join(tmpdir(), 'uiux-network-cli-')))
 		workspace = join(base, 'design')
-		await mkdir(join(workspace, '.uiux'), { recursive: true })
-		await writeFile(join(workspace, '.uiux', 'workspace.json'), '{}\n')
+		// A current Workspace in `design/.uiux/`, so the entry check passes and each refusal is the network check's.
+		await writeCurrentWorkspace(join(workspace, '.uiux'))
 	})
 	afterAll(async () => { await rm(base, { recursive: true, force: true }) })
 
