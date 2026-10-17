@@ -221,6 +221,32 @@ describe('uiux access commands', () => {
 		await expect(lstat(hostHistoryPaths(home, target).dir)).rejects.toMatchObject({ code: 'ENOENT' })
 	})
 
+	it('refuses to replace a version 1 roster, or one with `lan` or `listener`, and copies nothing (Clause 01a14917-7898)', async () => {
+		const { base, workspace, home, run } = await setup()
+		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
+		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
+		await sourceHost.writeVersion(hostVersion())
+		const target = await initWorkspace(base, 'moved')
+		await run('member', 'add', 'mei', '--preset', 'Owner', '--workspace', target)
+		const targetFile = accessStorePaths(home, target).file
+		const current = JSON.parse(await readFile(targetFile, 'utf8')) as Record<string, unknown> & { members: { id: string }[] }
+		const memberId = current.members[0]!.id
+		const at = new Date().toISOString()
+		for (const [name, refused, detail] of [
+			['a version 1 roster', { ...current, version: 1 }, 'it is roster version 1, and this UIUX reads only roster version 2'],
+			['a Token with lan', { ...current, tokens: [{ id: 'tok_abcdefghijkl', memberId, label: 'old', hash: `sha256:${'0'.repeat(64)}`, createdAt: at, expiresAt: null, lastUsedAt: null, revokedAt: null, lan: true }] }, 'carries `lan`'],
+		] as const) {
+			const text = `${JSON.stringify(refused, null, 2)}\n`
+			await writeFile(targetFile, text)
+			const result = await run('access', 'copy', '--from', workspace, '--workspace', target, '--replace')
+			expect(result, name).toMatchObject({ code: 1, err: expect.stringContaining(`The roster ${targetFile} is refused: `) })
+			expect(result.err, name).toContain(detail)
+			expect(result.err, name).not.toContain('warning')
+			expect(await readFile(targetFile, 'utf8'), name).toBe(text)
+			await expect(lstat(hostHistoryPaths(home, target).dir), name).rejects.toMatchObject({ code: 'ENOENT' })
+		}
+	})
+
 	it('refuses to replace a roster written by a newer UIUX, and replaces a damaged one with a warning (owner ruling of 2026-10-11)', async () => {
 		const { base, workspace, home, run } = await setup()
 		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)

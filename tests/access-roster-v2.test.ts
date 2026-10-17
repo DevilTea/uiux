@@ -228,6 +228,19 @@ describe('roster invariants on write', () => {
 		expect(await readFile(paths.file, 'utf8')).toBe(newer)
 	})
 
+	it('refuses to replace a roster the store refuses, never rewriting it (Clause 01a14917-7898-72fa-a8ad-ed737e4a9eae)', async () => {
+		const { workspace, home, paths } = await workspaceAndHome()
+		const replacement = (root: string) => v2Roster(root, [v2Member('mei', 'human', presetKeys('owner'))])
+		const skipped: string[] = []
+		for (const refused of [{ ...v2Roster(workspace, []), version: 1 }, (({ version: _version, ...rest }) => rest)(v2Roster(workspace, [])), { ...v2Roster(workspace, []), sessions: [{ id: 'ses_abcdefghijkl', listener: 'lan' }] }]) {
+			const text = await writeRoster(workspace, home, refused)
+			await expect(writeNewRoster({ workspaceRoot: workspace, home, replace: true, file: replacement, onManagerCheckSkipped: reason => skipped.push(reason) })).rejects.toMatchObject({ code: 'access.store_invalid', message: expect.stringContaining(`The roster ${paths.file} is refused: `) })
+			await expect(assertReplacementKeepsManager(home, workspace, replacement(workspace))).rejects.toMatchObject({ code: 'access.store_invalid' })
+			expect(await readFile(paths.file, 'utf8')).toBe(text)
+		}
+		expect(skipped).toEqual([])
+	})
+
 	it('refuses any write that changes an existing member\'s kind, whatever the mutation', async () => {
 		const { workspace, home, paths } = await workspaceAndHome()
 		await writeRoster(workspace, home, v2Roster(workspace, [v2Member('deviltea', 'human', presetKeys('owner')), v2Member('claude', 'agent', ['workspace.read'])]))

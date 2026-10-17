@@ -707,7 +707,10 @@ function withStorePath(paths: AccessStorePaths, error: unknown): unknown {
  * https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18858540):
  * - a roster written by a newer UIUX (a roster version above this one's) is refused, so its data
  *   is never discarded by an older UIUX;
- * - a damaged roster may be replaced, which is how it is repaired: `damaged` says why the
+ * - a roster at any other version, or whose Token or session record carries `lan` or `listener`,
+ *   is refused as well: UIUX never rewrites a refused roster file (Clause
+ *   01a14917-7898-72fa-a8ad-ed737e4a9eae), so `--replace` does not either;
+ * - any other damaged roster may be replaced, which is how it is repaired: `damaged` says why the
  *   last-manager check is skipped.
  */
 async function readReplacedRoster(paths: AccessStorePaths, realRoot: string): Promise<Readonly<{ file?: AccessFile; damaged?: string }>> {
@@ -728,9 +731,25 @@ async function readReplacedRoster(paths: AccessStorePaths, realRoot: string): Pr
 		return file.workspaceRoot === realRoot ? { file } : { damaged: `${paths.file} records Workspace ${file.workspaceRoot}` }
 	}
 	catch (error) {
-		if (error instanceof AccessError) return { damaged: `${paths.file}: ${error.message}` }
-		throw error
+		if (!(error instanceof AccessError)) throw error
+		// A file that is not a JSON object is damaged rather than a roster at another version.
+		const isObject = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+		if (isObject && (version !== ACCESS_FILE_VERSION || carriesRetiredField(parsed))) {
+			const detail = error.message.replace(/^The access store is invalid: /u, '').replace(/\.$/u, '')
+			throw new AccessError('access.store_invalid', `The roster ${paths.file} is refused: ${detail}; uiux access copy --replace never rewrites a refused roster. ${RECOVERY_HINT}`)
+		}
+		return { damaged: `${paths.file}: ${error.message}` }
 	}
+}
+
+/** Whether a roster's Token or session record carries `lan` or `listener` (Clause 01a14917-7898-72fa-a8ad-ed737e4a9eae). */
+function carriesRetiredField(parsed: unknown): boolean {
+	const entries = (name: string): unknown[] => {
+		const value = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>)[name] : undefined
+		return Array.isArray(value) ? value : []
+	}
+	const has = (entry: unknown, field: string) => typeof entry === 'object' && entry !== null && Object.hasOwn(entry, field)
+	return entries('tokens').some(token => has(token, 'lan')) || entries('sessions').some(session => has(session, 'listener'))
 }
 
 /**
