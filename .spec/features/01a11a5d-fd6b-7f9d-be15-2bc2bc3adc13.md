@@ -75,6 +75,8 @@ rules:
 - Discussion #140 comment (2026-10-08), "Owner acceptance — 2026-10-08": accepted as written, every decision and Proposed default included. https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18816365
 - Discussion #140 comment (2026-10-08), "Owner rulings — 2026-10-08 (clarifications to the accepted proposal)": ruling 1, applying a preset to an Agent drops its `humanOnly` keys; ruling 2, Product Kit Tools that ship before permission keys authorize by the upgrade mapping's keys. https://github.com/DevilTea/uiux/discussions/140#discussioncomment-18819026
 - Discussion #122 comment (2026-10-09), "Owner rulings — 2026-10-09 (implementation clarifications, #132, continued)": rulings 1-8 on the address keys, a restore as its own version, `expectedRevision: null` for a missing resource, the standalone impact analyzer, Adapter-based Evidence staleness, stage-only synchronized scrolling, Checkpoint deletion in the Workbench and the separate Review event list. https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18825439
+- Discussion #231 body (Part 17, 2026-10-16), "Proposal: read only the current Workspace and roster formats, and remove migration": decisions "One format", "Reset allowed" and "Later restart", Changes 1–10, the `.spec/` units (Retire, Edit, New) and owner questions Q1–Q11. https://github.com/DevilTea/uiux/discussions/231
+- Discussion #231 comment (2026-10-17), "Owner acceptance": accepted as written, every decision included, with Q1–Q11 at their recommended defaults. https://github.com/DevilTea/uiux/discussions/231#discussioncomment-18992111
 
 ## Rule sources
 
