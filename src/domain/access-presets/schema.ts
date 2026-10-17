@@ -46,7 +46,7 @@ const PRESET_ID_MAX_LENGTH = 64
 export type AccessPreset = { id: string; name: string; keys: string[] }
 export type AccessPresetsFile = { presets: AccessPreset[] }
 
-/** The content of a new presets file (`uiux init`, `uiux.v5-to-v6`): the built-in presets (Clause 01a11c09-a930-7e31-bb0a-9e2bee79490c). */
+/** The content of a new presets file (`uiux init`): the built-in presets (Clause 01a11c09-a930-7e31-bb0a-9e2bee79490c). */
 export function builtInAccessPresetsFile(): AccessPresetsFile {
 	return { presets: BUILT_IN_ACCESS_PRESETS.map(preset => ({ id: preset.id, name: preset.name, keys: [...preset.keys] })) }
 }

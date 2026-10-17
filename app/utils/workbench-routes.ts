@@ -29,7 +29,7 @@ export function flowPath(flowId: string): string {
 	return `/flows/${encodeURIComponent(flowId)}`
 }
 
-/** The one list of every View: the Overview's Views tab (`/views` redirects here). */
+/** The one list of every View: the Overview's Views tab. */
 export const VIEWS_LOCATION = { path: '/', query: { tab: 'views' } } as const
 
 /**

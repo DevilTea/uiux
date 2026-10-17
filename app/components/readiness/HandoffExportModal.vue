@@ -378,7 +378,7 @@ function middle(value: string | undefined): string {
             name="i-lucide-user-lock"
             class="size-4"
           />
-          {{ access.can('handoff.export') ? t('authoring.access.unsupported') : t('access.requiresKey', { key: 'handoff.export' }) }}
+          {{ access.can('handoff.export') ? t('handoff.unsupported') : t('access.requiresKey', { key: 'handoff.export' }) }}
         </p>
         <template v-if="result">
           <UButton

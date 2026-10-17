@@ -417,6 +417,7 @@
     "assessment": "評估結果",
     "diagnostic": "診斷用快照",
     "diagnosticNote": "仍可匯出診斷用快照，但不會標示為已就緒。",
+    "unsupported": "此版本的 UIUX 不支援這個 Workspace 的格式，因此無法匯出 Handoff。",
     "copied": "已複製。",
     "copyFailed": "無法複製到剪貼簿。",
     "roots": {
