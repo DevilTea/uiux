@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 
@@ -37,6 +37,17 @@ afterEach(async () => {
 async function write(path: string, content: string): Promise<void> {
 	await mkdir(dirname(path), { recursive: true })
 	await writeFile(path, content)
+}
+
+/**
+ * Replaces a file at once, as an editor's atomic save does: a reader sees the old or the new
+ * content, never the empty file `writeFile` leaves between truncating and writing. A capture in
+ * progress reads `kit/package.json`, and an empty one makes its resolution invalid.
+ */
+async function replace(path: string, content: string): Promise<void> {
+	const staged = `${path}.${process.pid}.tmp`
+	await writeFile(staged, content)
+	await rename(staged, path)
 }
 
 function adapterModule(id: string): string {
@@ -294,7 +305,7 @@ describe('the kit build runner (Feature 01a11bb1-8534)', () => {
 
 	it('is none and spawns nothing when kit/ is a symbolic link', async () => {
 		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK })
-		const { rename, symlink } = await import('node:fs/promises')
+		const { symlink } = await import('node:fs/promises')
 		await rename(join(root, 'kit'), join(root, 'kit-real'))
 		await symlink(join(root, 'kit-real'), join(root, 'kit'))
 		const { build, printed } = runner(root)
@@ -559,8 +570,9 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		await build.start()
 		expect(await settledState(build)).toEqual({ state: 'ready' })
 
-		// No request resolves the good output before the failing build runs.
-		await write(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', type: 'module', uiux: nodeBuild('fail.mjs') }))
+		// No request resolves the good output before the failing build runs. The capture may still be
+		// reading kit/package.json, so the declaration is replaced at once.
+		await replace(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', type: 'module', uiux: nodeBuild('fail.mjs') }))
 		await build.restart()
 		expect(await settledState(build)).toMatchObject({ state: 'failed' })
 		expect(await readFile(join(root, 'kit', 'dist', 'uiux.js'), 'utf8')).toContain('half-written output')
@@ -572,6 +584,33 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		expect(bundle.state).toBe('valid')
 		expect((bundle as { bundleJs: string }).bundleJs).toContain('kit-adapter-1')
 		expect((bundle as { bundleJs: string }).bundleJs).not.toContain('half-written output')
+	}, 30_000)
+
+	it('keeps the captured output in use when kit/package.json is replaced while the capture runs', async () => {
+		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK, 'fail.mjs': BUILD_FAIL })
+		let replaced = false
+		// The declaration of the failing build replaces the old one after the capture of generation 1 began, before it ends.
+		const captureOutput = vi.fn(async () => {
+			const capturing = getSelectedWorkspacePreviewBundle(root, V5_LAYOUT)
+			if (!replaced) {
+				replaced = true
+				await replace(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', type: 'module', uiux: nodeBuild('fail.mjs') }))
+			}
+			return capturing
+		})
+		const { build } = runner(root, { register: true, captureOutput })
+		await build.start()
+		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(captureOutput).toHaveBeenCalledTimes(1)
+		// The restart reads the declaration before it waits for the capture, so the replacement ends first.
+		await captureOutput.mock.results[0]!.value
+
+		await build.restart()
+		expect(await settledState(build)).toMatchObject({ state: 'failed' })
+		expect(await readFile(join(root, 'kit', 'dist', 'uiux.js'), 'utf8')).toContain('half-written output')
+		const after = await resolveSelectedWorkspaceAdapters(root, V5_LAYOUT)
+		expect(after.state, JSON.stringify(after.diagnostics)).toBe('valid')
+		expect(after.summaries[0]?.adapterId).toBe('kit-adapter-1')
 	}, 30_000)
 
 	it('keeps using the last good output after a restart of the server whose new build fails', async () => {
