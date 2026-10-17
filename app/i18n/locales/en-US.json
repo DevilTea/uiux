@@ -417,6 +417,7 @@
     "assessment": "Assessment",
     "diagnostic": "Diagnostic snapshot",
     "diagnosticNote": "You can still export a diagnostic snapshot. It won't claim readiness.",
+    "unsupported": "This version of UIUX doesn't support this Workspace's schema, so it can't export a Handoff.",
     "copied": "Copied.",
     "copyFailed": "Couldn't copy to the clipboard.",
     "roots": {
