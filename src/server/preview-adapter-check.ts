@@ -1,15 +1,10 @@
 import { realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { Worker } from 'node:worker_threads'
 
 import { maskHostPaths } from '../adapters/host-paths'
 import type { Diagnostic } from '../domain/validation'
 import type { PreviewBundleResult } from './preview-bundler'
-
-/** What the server reads from an evaluated Preview bundle module (the entry `preview-bundler.ts` generates). */
-export type PreviewBundleModule = Readonly<{
-	describeDeclaredWidgetEvents?: () => unknown
-	describeAdapterDiagnostics?: () => unknown
-}>
 
 export type PreviewAdapterCheck =
 	| Readonly<{ state: 'valid' }>
@@ -17,24 +12,26 @@ export type PreviewAdapterCheck =
 
 type PreviewBundle = Pick<PreviewBundleResult, 'bundleJs'>
 
-/** Per built bundle: its evaluated module and its check, so each runs once per bundle. */
-const modules = new WeakMap<PreviewBundle, Promise<PreviewBundleModule>>()
+type WorkerReport =
+	| Readonly<{ ok: true; reported: unknown }>
+	| Readonly<{ ok: false; message: string }>
+
+/** Per built bundle, its check, so each bundle is checked once. */
 const checks = new WeakMap<PreviewBundle, Promise<PreviewAdapterCheck>>()
 
 /**
- * The Preview bundle's module, evaluated in this process once per built bundle. The bundle carries
- * the host's single widget-core copy (the bundler aliases it), so what the module reports about the
- * Adapters' members is what the Preview reports in the browser.
+ * Evaluates the bundle module given as a `data:` URL and posts what its
+ * `describeAdapterDiagnostics()` reports. It runs in a worker thread, so the bundle evaluates with
+ * globals of its own, as in a Preview document, not with those of the server, which has already
+ * evaluated the Adapter modules once to resolve them.
  */
-export function evaluatePreviewBundle(bundle: PreviewBundle): Promise<PreviewBundleModule> {
-	let evaluated = modules.get(bundle)
-	if (!evaluated) {
-		const url = `data:text/javascript;base64,${Buffer.from(bundle.bundleJs, 'utf8').toString('base64')}`
-		evaluated = import(/* @vite-ignore */ url) as Promise<PreviewBundleModule>
-		modules.set(bundle, evaluated)
-	}
-	return evaluated
-}
+const WORKER_SOURCE = `
+const { parentPort, workerData } = require('node:worker_threads')
+import(workerData.url).then(
+  (module) => parentPort.postMessage({ ok: true, reported: typeof module.describeAdapterDiagnostics === 'function' ? module.describeAdapterDiagnostics() : undefined }),
+  (error) => parentPort.postMessage({ ok: false, message: error instanceof Error ? error.message : String(error) }),
+)
+`
 
 /**
  * The one server-side check of an Adapter set's runtime members (Clause
@@ -62,24 +59,39 @@ export function checkPreviewBundleAdapters(bundle: PreviewBundle, workspaceRoot:
 
 async function runCheck(bundle: PreviewBundle, workspaceRoot: string): Promise<PreviewAdapterCheck> {
 	const roots = async () => [resolve(workspaceRoot), await realpath(workspaceRoot).catch(() => resolve(workspaceRoot))]
-	let reported: unknown
-	try {
-		reported = (await evaluatePreviewBundle(bundle)).describeAdapterDiagnostics?.()
-	}
-	catch (error) {
-		const message = error instanceof Error ? error.message : String(error)
+	const report = await evaluateInWorker(bundle.bundleJs)
+	if (!report.ok) {
 		return invalid([{
 			code: 'preview.bundle_failed',
 			path: '/product-kit',
-			message: maskHostPaths(`The Preview bundle could not be evaluated: ${message}`, await roots()),
+			message: maskHostPaths(`The Preview bundle could not be evaluated: ${report.message}`, await roots()),
 		}])
 	}
+	const reported = report.reported
 	if (!Array.isArray(reported) || !reported.every(isDiagnostic)) {
 		return invalid([{ code: 'preview.bundle_failed', path: '/product-kit', message: 'The Preview bundle did not report the checks of its Adapters.' }])
 	}
 	if (reported.length === 0) return { state: 'valid' }
 	const masked = await roots()
 	return invalid(reported.map(({ code, path, message }) => ({ code, path, message: maskHostPaths(message, masked) })))
+}
+
+/** Runs `WORKER_SOURCE` on the bundle; the worker is ended once it has reported, whatever the module left running. */
+function evaluateInWorker(bundleJs: string): Promise<WorkerReport> {
+	return new Promise((settle) => {
+		const url = `data:text/javascript;base64,${Buffer.from(bundleJs, 'utf8').toString('base64')}`
+		let done = false
+		const finish = (report: WorkerReport) => {
+			if (done) return
+			done = true
+			settle(report)
+			void worker.terminate()
+		}
+		const worker = new Worker(WORKER_SOURCE, { eval: true, workerData: { url } })
+		worker.once('message', (report: WorkerReport) => finish(report))
+		worker.once('error', error => finish({ ok: false, message: error instanceof Error ? error.message : String(error) }))
+		worker.once('exit', code => finish({ ok: false, message: `the evaluation ended (exit code ${code}) before it reported.` }))
+	})
 }
 
 function invalid(diagnostics: readonly Diagnostic[]): PreviewAdapterCheck {
