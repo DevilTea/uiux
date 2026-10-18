@@ -151,6 +151,18 @@ const STRING = createWidgetValueContract<string>(STRING_VALUE_CONTRACT_ID)
 export const manifest: AdapterManifest = { id: 'my-ds', apiVersion: '1', widgetPlugins: [], catalog: { widgets: {} }, renderers: [], providers: [] }
 ```
 
+
+### Cleaning up derived artifacts
+
+Captures, Checkpoints and Handoff exports store their blobs in the Workspace's content-addressed `artifacts/`, and no normal action deletes one. `uiux artifacts gc` is the only cleanup:
+
+```sh
+uiux artifacts gc --workspace ./.uiux --dry-run   # list what would be deleted; delete nothing
+uiux artifacts gc --workspace ./.uiux             # delete it
+```
+
+It keeps the Evidence that a Review submission references, the blobs that a Checkpoint references and the latest Evidence record of each View and render context, with the screenshots and Evidence those records reference; it also keeps every Evidence record that names its View's current revision. Handoff blobs are not kept: an exported bundle has its own copies. It prints each deleted blob's `sha256:` identity, then their count and total bytes. It refuses a Workspace that a running `uiux dev` serves (stop the server first), and, deleting nothing, one whose Review thread, Checkpoint or stored blob it cannot read.
+
 ### Copying components into a product project
 
 `uiux components` copies registry components of the Product Kit out of the Workspace's `kit/src/` into a product project. It reads the Workspace directly and needs no credential:
