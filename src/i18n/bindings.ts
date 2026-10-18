@@ -1,4 +1,4 @@
-import { validateI18nBindingEligibility, type I18nFieldMapping } from '../domain/i18n/schema'
+import { resolveI18nPropertyNames, validateI18nBindingEligibility, type I18nFieldMapping } from '../domain/i18n/schema'
 import type { Diagnostic } from '../domain/validation'
 
 export type LoweredI18nBinding = Readonly<{
@@ -31,8 +31,7 @@ export function lowerI18nBinding(input: Readonly<{
 			authorField: input.authorField,
 			configField: mapping.configField,
 			key: validation.value.$i18n,
-			resultProperty: mapping.resultProperty,
-			textProperty: mapping.textProperty,
+			...resolveI18nPropertyNames(input.authorField, mapping),
 			params: { ...(mapping.params ?? {}) },
 		},
 	}

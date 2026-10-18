@@ -151,6 +151,10 @@ const STRING = createWidgetValueContract<string>(STRING_VALUE_CONTRACT_ID)
 export const manifest: AdapterManifest = { id: 'my-ds', apiVersion: '1', widgetPlugins: [], catalog: { widgets: {} }, renderers: [], providers: [] }
 ```
 
+A translatable field is declared in the Catalog as `catalog.widgets.<Type>.i18n.fields.<field> = { configField, resultProperty?, textProperty?, params? }`. `configField` names the top-level string Config member that receives the key of an authored `{ "$i18n": "<key>" }`, and is always required. `resultProperty` (a `TranslationResult` Property) and `textProperty` (a string Property) may be omitted: an omitted `textProperty` is `<field>` and an omitted `resultProperty` is `<field>Result`. A declared name wins, and a derived name is checked like a declared one: the Widget plugin must declare it with the right value contract, and it must not collide with another name in the same Widget's mapping (`{ configField: 'title' }` for the field `title` collides with its derived `textProperty`). The reference Adapter's `i18nField` helper writes `{ configField: '<field>Key' }` and names its Properties `<field>Result` and `<field>`.
+
+Only a top-level Config member takes an `$i18n` binding; a binding inside an array or object member is not lowered. A translatable collection, such as a list of tabs or segments, is therefore one child Widget per item, each with its own translatable field, instead of an array of labels in the parent's Config: the reference Adapter's `TabBar` and `SegmentedControl` hold `TabBarItem` and `Segment` children, each declaring `i18nFields('label')`.
+
 
 ### Cleaning up derived artifacts
 

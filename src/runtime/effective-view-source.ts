@@ -1,4 +1,5 @@
 import type { AdapterWidgetCatalogEntry } from '../domain/adapters/schema'
+import type { I18nFieldMapping } from '../domain/i18n/schema'
 import type { Diagnostic, JsonValue } from '../domain/validation'
 import { lowerI18nBinding } from '../i18n/bindings'
 
@@ -66,12 +67,7 @@ function lowerWidget(
 
 function lowerI18nConfig(
 	config: Readonly<Record<string, JsonValue>>,
-	fields: Readonly<Record<string, Readonly<{
-		configField: string
-		resultProperty: string
-		textProperty: string
-		params?: Readonly<Record<string, string>>
-	}>>>,
+	fields: Readonly<Record<string, I18nFieldMapping>>,
 	path: string,
 	diagnostics: Diagnostic[],
 ): JsonValue {

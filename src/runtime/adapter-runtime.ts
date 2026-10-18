@@ -5,6 +5,7 @@ import type { Component } from 'vue'
 
 import type { ValidatedAdapterEntry, ValidatedAdapterSet } from '../adapters'
 import type { AdapterWidgetCatalogEntry } from '../domain/adapters/schema'
+import { derivedI18nPropertyNote, resolveI18nPropertyNames } from '../domain/i18n/schema'
 import type { Diagnostic } from '../domain/validation'
 import {
 	UIUX_STRING_VALUE_CONTRACT_ID,
@@ -154,20 +155,24 @@ function validateCatalogAgainstPlugin(
 			diagnostics.push({ code: 'adapter.i18n_config_field_not_proven_string', path: `${fieldPath}/configField`, message: `Config field ${mapping.configField} is not directly provable as string-only from the Widget plugin Config schema.` })
 		}
 
-		const resultProperty = inspection.properties?.get(mapping.resultProperty)
+		// A derived Property name is validated exactly as a declared one (Clause 01a14e30-3676-7212-8cee-1ef84da6316c).
+		const names = resolveI18nPropertyNames(authorField, mapping)
+		const resultName = `${names.resultProperty}${derivedI18nPropertyNote(mapping, 'resultProperty')}`
+		const resultProperty = inspection.properties?.get(names.resultProperty)
 		if (!resultProperty) {
-			diagnostics.push({ code: 'adapter.i18n_result_property_missing', path: `${fieldPath}/resultProperty`, message: `Mapped result Property ${mapping.resultProperty} is not declared by Widget plugin ${plugin.type}.` })
+			diagnostics.push({ code: 'adapter.i18n_result_property_missing', path: `${fieldPath}/resultProperty`, message: `Mapped result Property ${resultName} is not declared by Widget plugin ${plugin.type}.` })
 		}
 		else if (resultProperty.valueContractId !== UIUX_TRANSLATION_RESULT_VALUE_CONTRACT_ID) {
-			diagnostics.push({ code: 'adapter.i18n_result_property_contract_mismatch', path: `${fieldPath}/resultProperty`, message: `Mapped result Property ${mapping.resultProperty} does not declare the required UIUX TranslationResult value contract.` })
+			diagnostics.push({ code: 'adapter.i18n_result_property_contract_mismatch', path: `${fieldPath}/resultProperty`, message: `Mapped result Property ${resultName} does not declare the required UIUX TranslationResult value contract.` })
 		}
 
-		const textProperty = inspection.properties?.get(mapping.textProperty)
+		const textName = `${names.textProperty}${derivedI18nPropertyNote(mapping, 'textProperty')}`
+		const textProperty = inspection.properties?.get(names.textProperty)
 		if (!textProperty) {
-			diagnostics.push({ code: 'adapter.i18n_text_property_missing', path: `${fieldPath}/textProperty`, message: `Mapped text Property ${mapping.textProperty} is not declared by Widget plugin ${plugin.type}.` })
+			diagnostics.push({ code: 'adapter.i18n_text_property_missing', path: `${fieldPath}/textProperty`, message: `Mapped text Property ${textName} is not declared by Widget plugin ${plugin.type}.` })
 		}
 		else if (textProperty.valueContractId !== UIUX_STRING_VALUE_CONTRACT_ID) {
-			diagnostics.push({ code: 'adapter.i18n_text_property_contract_mismatch', path: `${fieldPath}/textProperty`, message: `Mapped text Property ${mapping.textProperty} does not declare the required UIUX string value contract.` })
+			diagnostics.push({ code: 'adapter.i18n_text_property_contract_mismatch', path: `${fieldPath}/textProperty`, message: `Mapped text Property ${textName} does not declare the required UIUX string value contract.` })
 		}
 
 		for (const [parameter, propertyName] of Object.entries(mapping.params ?? {})) {

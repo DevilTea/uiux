@@ -110,7 +110,59 @@ const localizedLabelCatalog: AdapterWidgetCatalogEntry = {
 	},
 }
 
-const unprovableLocalizedLabelPlugin = createWidgetPlugin('UnprovableLocalizedLabel')
+interface ConventionLabelInterfaces {
+	config: {
+		raw: { readonly titleKey?: string }
+		resolved: { readonly titleKey: string | null }
+	}
+	properties: { formattedCount: string; titleResult: TranslationResult; title: string }
+}
+
+/** Names its translation Properties by the derivation convention: `titleResult` and `title` for the field `title`. */
+const conventionLabelPlugin = createWidgetPlugin('ConventionLabel')
+	.description('Derived i18n Property name fixture')
+	.interfaces<ConventionLabelInterfaces>()
+	.config({
+		description: 'Convention label config',
+		schema: {
+			$schema: 'https://json-schema.org/draft/2020-12/schema',
+			type: 'object',
+			properties: { titleKey: { type: 'string' } },
+			additionalProperties: false,
+		},
+		validate: (input): input is ConventionLabelInterfaces['config']['raw'] => isOptionalStringConfig(input, ['titleKey']),
+		resolve: raw => ({ titleKey: raw?.titleKey ?? null }),
+	})
+	.properties(properties => properties
+		.formattedCount({ valueContract: UIUX_STRING_VALUE_CONTRACT, compute: () => '3' })
+		.titleResult({
+			valueContract: UIUX_TRANSLATION_RESULT_VALUE_CONTRACT,
+			registerDeps: ({ dep }) => ({
+				t: dep.root.methods.invoke('t').validate((value): value is TranslationResult => isTranslationResultLike(value)),
+				formattedCount: dep.self.properties.get('formattedCount'),
+			}),
+			compute: ({ config, deps }) => {
+				if (config.titleKey === null) return { text: '', warnings: [] }
+				const formattedCount = deps.formattedCount()
+				const translated = deps.t(config.titleKey, { count: formattedCount.ok ? formattedCount.value ?? '' : '' })
+				return translated.ok && translated.value ? translated.value : { text: '', warnings: [] }
+			},
+		})
+		.title({
+			valueContract: UIUX_STRING_VALUE_CONTRACT,
+			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('titleResult') }),
+			compute: ({ deps }) => {
+				const result = deps.result()
+				return result.ok ? result.value?.text ?? '' : ''
+			},
+		}))
+	.done()
+
+const conventionLabelCatalog: AdapterWidgetCatalogEntry = {
+	i18n: { fields: { title: { configField: 'titleKey', params: { count: 'formattedCount' } } } },
+}
+
+const unprovableLocalizedLabelPlugin =createWidgetPlugin('UnprovableLocalizedLabel')
 	.description('Schema proof fixture')
 	.interfaces<LocalizedLabelInterfaces>()
 	.config({
@@ -419,6 +471,56 @@ describe('View / RootShell / Variant runtime assembly', () => {
 		]))
 	})
 
+	it('validates and renders a mapping that omits both Property names through the derived <field>Result and <field> Properties', async () => {
+		const bundle = await runtimeBundle(conventionLabelPlugin, FixtureRenderer, conventionLabelCatalog)
+		const controller = createController(bundle, viewFixture({}, {
+			id: 'label', type: 'ConventionLabel', config: { title: { $i18n: 'countTitle' } },
+		}), context())
+		expect(controller).toBeInstanceOf(LiveViewRuntimeController)
+		if (!(controller instanceof LiveViewRuntimeController)) return
+		const label = controller.runtime.getWidget('label') as unknown as {
+			properties: {
+				title: { get(): { ok: boolean; value?: string | null } }
+				titleResult: { get(): { ok: boolean; value?: TranslationResult | null } }
+			}
+		}
+		expect(label.properties.titleResult.get()).toMatchObject({ ok: true, value: { text: 'Count 3', warnings: [] } })
+		expect(label.properties.title.get()).toMatchObject({ ok: true, value: 'Count 3' })
+		expect(controller.updateLocale('zh-TW')).toEqual([])
+		expect(label.properties.title.get()).toMatchObject({ ok: true, value: '計數 3' })
+		controller.dispose()
+	})
+
+	it('validates a derived Property name as a declared one, and a declared name overrides the derivation', async () => {
+		const materialize = async (catalog: AdapterWidgetCatalogEntry) => {
+			const rootShell = createRootShellPlugin(translationRuntime())
+			return materializeRuntimeAdapterBundle({
+				set: await validatedSet('LocalizedLabel', catalog), rootShellPlugin: rootShell, rootShellRenderer: createRootShellRenderer(rootShell),
+				decoder: {
+					async decodePlugin() { return localizedLabelPlugin },
+					async decodeRenderer() { return { type: 'LocalizedLabel', component: FixtureRenderer } },
+				},
+			})
+		}
+		// LocalizedLabel declares `titleResult` and `label`: the derived `titleResult` resolves, the derived `title` does not.
+		const derived = await materialize({ i18n: { fields: { title: { configField: 'titleKey' } } } })
+		expect(derived.state).toBe('invalid')
+		if (derived.state !== 'invalid') return
+		expect(derived.diagnostics).toEqual([expect.objectContaining({
+			code: 'adapter.i18n_text_property_missing',
+			path: '/adapters/0/manifest/catalog/widgets/LocalizedLabel/i18n/fields/title/textProperty',
+			message: expect.stringContaining('title (derived)'),
+		})])
+		// Declaring the text Property overrides the derivation; the omitted result Property is still derived.
+		expect((await materialize({ i18n: { fields: { title: { configField: 'titleKey', textProperty: 'label' } } } })).state).toBe('ready')
+		// A derived name naming a Property with the wrong value contract is refused like a declared one: the field
+		// `titleResult` derives the text Property `titleResult`, a TranslationResult, and the missing `titleResultResult`.
+		const mismatch = await materialize({ i18n: { fields: { titleResult: { configField: 'titleKey' } } } })
+		expect(mismatch.state).toBe('invalid')
+		if (mismatch.state !== 'invalid') return
+		expect(mismatch.diagnostics.map(item => item.code)).toEqual(['adapter.i18n_result_property_missing', 'adapter.i18n_text_property_contract_mismatch'])
+	})
+
 	it('fails closed when a Config field is string only through $ref rather than a direct local schema proof', async () => {
 		const translation = translationRuntime()
 		const rootShell = createRootShellPlugin(translation)
@@ -499,7 +601,7 @@ describe('View / RootShell / Variant runtime assembly', () => {
 })
 
 async function runtimeBundle(
-	plugin: typeof counterPlugin | typeof rootWriterPlugin | typeof localizedLabelPlugin,
+	plugin: typeof counterPlugin | typeof rootWriterPlugin | typeof localizedLabelPlugin | typeof conventionLabelPlugin,
 	renderer: ReturnType<typeof defineComponent>,
 	catalog?: AdapterWidgetCatalogEntry,
 ) {

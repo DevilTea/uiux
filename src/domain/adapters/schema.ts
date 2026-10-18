@@ -10,7 +10,7 @@ import {
 	type JsonValue,
 	type ValidationResult,
 } from '../validation'
-import { validateI18nFieldMapping } from '../i18n/schema'
+import { derivedI18nPropertyNote, resolveI18nPropertyNames, validateI18nFieldMapping } from '../i18n/schema'
 import type {
 	AdapterAssetCapability,
 	AdapterCatalog,
@@ -116,13 +116,15 @@ function validateAdapterWidgetCatalogEntry(entry: Record<string, unknown>, path:
 				const validation = validateI18nFieldMapping(mapping, fieldPath)
 				v.diagnostics.push(...validation.diagnostics)
 				if (!validation.ok) continue
+				// A derived Property name takes part exactly as a declared one (Clause 01a14e30-3676-7212-8cee-1ef84da6316c).
+				const names = resolveI18nPropertyNames(field, validation.value)
 				for (const [role, name] of [
 					['configField', validation.value.configField],
-					['resultProperty', validation.value.resultProperty],
-					['textProperty', validation.value.textProperty],
+					['resultProperty', names.resultProperty],
+					['textProperty', names.textProperty],
 				] as const) {
 					const owner = mappedNames.get(name)
-					if (owner !== undefined) v.issue('adapter.i18n_mapping_collision', `${fieldPath}/${role}`, `Mapped runtime member ${name} conflicts with ${owner}; i18n mapping names must be unique and non-conflicting within one Widget Catalog entry.`)
+					if (owner !== undefined) v.issue('adapter.i18n_mapping_collision', `${fieldPath}/${role}`, `Mapped runtime member ${name}${derivedI18nPropertyNote(validation.value, role)} conflicts with ${owner}; i18n mapping names must be unique and non-conflicting within one Widget Catalog entry.`)
 					else mappedNames.set(name, `${field}.${role}`)
 				}
 			}

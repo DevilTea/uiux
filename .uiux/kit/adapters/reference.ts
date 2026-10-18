@@ -12,6 +12,7 @@ import {
 	WIDGET_ID_ATTRIBUTE,
 	type AdapterManifest,
 	type AdapterWidgetCatalogEntry,
+	type I18nFieldMapping,
 	type TranslationResult,
 } from '@deviltea/uiux/adapter'
 // The reference CSS ("Quiet Canvas" tokens from DESIGN.md) reaches the Preview only through the one
@@ -3191,11 +3192,12 @@ export const EmptyStateRenderer = defineComponent({
 // ---------------------------------------------------------------------------
 // Canonical Adapter Manifest
 // ---------------------------------------------------------------------------
-function i18nField(field: string, params?: Readonly<Record<string, string>>) {
+// Each translatable field `<field>` keeps its literal key in the Config member `<field>Key`. Its Properties
+// follow UIUX's derivation convention, `<field>Result` (the TranslationResult) and `<field>` (the text), so the
+// mapping omits `resultProperty` and `textProperty`.
+function i18nField(field: string, params?: Readonly<Record<string, string>>): I18nFieldMapping {
 	return {
 		configField: `${field}Key`,
-		resultProperty: `${field}Result`,
-		textProperty: field,
 		...(params ? { params } : {}),
 	}
 }
