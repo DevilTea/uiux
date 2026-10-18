@@ -14,6 +14,8 @@ type PreviewAdaptersResponse =
 		stylesheetUrl?: string
 		/** Workspace theme ID to the root attributes the Product Kit sets for it. */
 		themes: Readonly<Record<string, Readonly<Record<string, string>>>>
+		/** The server-side Adapter check could not run on the bundle; the Preview's own guard decides. */
+		warnings?: readonly { code: string; path: string; message: string }[]
 	}
 	| { state: 'invalid'; diagnostics: readonly { code: string; path: string; message: string }[]; summaries: readonly unknown[] }
 

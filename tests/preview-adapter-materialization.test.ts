@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Worker } from 'node:worker_threads'
 import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -16,7 +17,12 @@ import { V5_LAYOUT } from '../src/persistence/paths'
 import {
 	buildWorkspacePreviewBundle,
 	clearPreviewBundleCache,
+	computeBundleContentHash,
 } from '../src/server/preview-bundler'
+import { readPreviewRuntimeFile } from '../src/server/preview-runtime-http'
+import { checkPreviewBundleAdapters } from '../src/server/preview-adapter-check'
+import { readSelectedWorkspaceDeclaredWidgetEvents } from '../src/server/declared-widget-events'
+import { bundleAdapterWithOwnWidgetCore } from './support/own-widget-core'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
 import { HUMAN_OWNER } from './support/access'
@@ -134,6 +140,26 @@ function defaultContext(viewId = VIEW_ID_1): ResolvedRenderContext {
 		viewportId: 'desktop',
 		viewport: { width: 1280, height: 800 },
 		themeId: 'light',
+	}
+}
+
+/** Runs `body` with `root` as the selected Workspace of the server routes and a temporary `UIUX_HOME`, then closes that runtime. */
+async function withSelectedWorkspace<T>(root: string, body: () => Promise<T>): Promise<T> {
+	const previous = { root: process.env.UIUX_WORKSPACE_ROOT, home: process.env.UIUX_HOME }
+	const home = await mkdtemp(join(tmpdir(), 'uiux-preview-home-'))
+	temporaryRoots.push(home)
+	process.env.UIUX_WORKSPACE_ROOT = root
+	process.env.UIUX_HOME = home
+	try {
+		return await body()
+	}
+	finally {
+		for (const [name, value] of [['UIUX_WORKSPACE_ROOT', previous.root], ['UIUX_HOME', previous.home]] as const) {
+			if (value !== undefined) process.env[name] = value
+			else delete process.env[name]
+		}
+		const { closeSelectedWorkspaceServerRuntime } = await import('../src/server/selected-workspace')
+		await closeSelectedWorkspaceServerRuntime()
 	}
 }
 
@@ -726,6 +752,139 @@ describe('a current-schema Workspace resolves its Adapters from the Product Kit'
 		if (bundle.state !== 'valid') return
 		expect(bundle.bundleJs).not.toContain('kit-second-widget-core-copy')
 		expect(await mountCounter(root, bundle.bundleJs)).toContain('Value: 42')
+	})
+
+	it('refuses, on the server and in the Preview alike, a Widget plugin from an Adapter that bundles its own widget-core copy (#123)', async () => {
+		const root = await createKitWorkspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
+		await linkHostPackages(join(root, 'kit'))
+		await writeFile(join(root, 'kit', 'adapter.mjs'), await bundleAdapterWithOwnWidgetCore({ source: makeCounterAdapterSource(), resolveDir: join(root, 'kit') }))
+		const pluginPath = '/adapters/0/manifest/widgetPlugins/0'
+
+		// Loading the manifest in Node reads only each plugin's type, so resolution itself passes ...
+		const resolution = await resolveSelectedWorkspaceAdapters(root)
+		expect(resolution).toMatchObject({ state: 'valid', summaries: [{ index: 0, adapterId: 'my-counter' }] })
+		if (resolution.state !== 'valid') return
+		// ... and the one server-side check of the Preview bundle refuses the foreign plugin (Clause 01a116f0-cae2-7c64-9c76-d472f252789a).
+		const bundle = await getSelectedWorkspacePreviewBundle(root)
+		expect(bundle.state).toBe('invalid')
+		expect(bundle.state === 'invalid' ? bundle.diagnostics : []).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: pluginPath }))
+
+		// The bundle the check evaluated is never served to a Preview.
+		const hash = await computeBundleContentHash(root, resolution.set)
+		const served = await readPreviewRuntimeFile(root, undefined, hash, 'runtime.js')
+		expect(served.status).toBe(409)
+		expect(served.status === 409 ? served.body.diagnostics : []).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: pluginPath }))
+
+		// The Preview's own guard, run in a DOM on the same bundle, reports the same diagnostic.
+		const built = await buildWorkspacePreviewBundle({ workspaceRoot: root, moduleBase: join(root, 'kit'), set: resolution.set })
+		setupDom()
+		const bundleFile = join(root, `bundle-${randomUUID()}.mjs`)
+		await writeFile(bundleFile, built.bundleJs)
+		const bundleMod = await import(bundleFile)
+		const container = document.createElement('div')
+		document.body.appendChild(container)
+		let reported: { status: string; diagnostics?: readonly { code: string; path: string }[] } | undefined
+		bundleMod.mountPreviewRuntime(container, { view: viewWithCounter(), context: defaultContext(), onStatusChange(status: unknown) { reported = status as typeof reported } })
+		expect(reported?.status).toBe('invalid')
+		expect(reported?.diagnostics).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: pluginPath }))
+		expect(container.innerHTML).not.toContain('Value: 42')
+
+		// `GET /api/preview/adapters` reports the set invalid with that diagnostic and the Adapter's summary.
+		const response = await withSelectedWorkspace(root, async () => {
+			const { default: adaptersHandler } = await import('../server/api/preview/adapters.get')
+			return await adaptersHandler({ context: { uiuxPrincipal: HUMAN_OWNER, params: {} } } as never) as Record<string, unknown>
+		})
+		expect(response).toMatchObject({ state: 'invalid', summaries: [{ index: 0, adapterId: 'my-counter' }] })
+		expect(response.bundleUrl).toBeUndefined()
+		expect(response.diagnostics).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: pluginPath }))
+	})
+
+	it('reports an Adapter that imports the host widget-core valid on every server surface (#123)', async () => {
+		const root = await createKitWorkspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
+		await linkHostPackages(join(root, 'kit'))
+		await writeFile(join(root, 'kit', 'adapter.mjs'), makeCounterAdapterSource())
+
+		const bundle = await getSelectedWorkspacePreviewBundle(root)
+		expect(bundle.state).toBe('valid')
+		if (bundle.state !== 'valid') return
+		expect((await readPreviewRuntimeFile(root, undefined, bundle.hash, 'runtime.js')).status).toBe(200)
+		const response = await withSelectedWorkspace(root, async () => {
+			const { default: adaptersHandler } = await import('../server/api/preview/adapters.get')
+			return await adaptersHandler({ context: { uiuxPrincipal: HUMAN_OWNER, params: {} } } as never) as Record<string, unknown>
+		})
+		expect(response).toMatchObject({ state: 'valid', diagnostics: [], bundleUrl: `/api/preview/runtime/${bundle.hash}/runtime.js` })
+	})
+
+	it('keeps an Adapter set valid, with a warning, when its bundle cannot run in the server worker, and lets the Preview decide (#123)', async () => {
+		const root = await createKitWorkspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
+		await linkHostPackages(join(root, 'kit'))
+		// A dependency whose `browser` export, which the Preview bundle takes, defines a custom element
+		// at its top level; Node, loading the manifest, takes its `default` export.
+		const dependency = join(root, 'kit', 'node_modules', 'fancy-element')
+		await mkdir(dependency, { recursive: true })
+		await writeFile(join(dependency, 'package.json'), JSON.stringify({ name: 'fancy-element', version: '1.0.0', type: 'module', exports: { browser: './browser.js', default: './node.js' } }))
+		await writeFile(join(dependency, 'browser.js'), 'export class FancyElement extends HTMLElement {}\n')
+		await writeFile(join(dependency, 'node.js'), 'export class FancyElement {}\n')
+		await writeFile(join(root, 'kit', 'adapter.mjs'), `export { FancyElement } from 'fancy-element';\n${makeCounterAdapterSource()}`)
+
+		const bundle = await getSelectedWorkspacePreviewBundle(root)
+		expect(bundle).toMatchObject({ state: 'valid', adapterCheck: 'unchecked', warnings: [{ code: 'preview.bundle_failed', path: '/product-kit' }] })
+		if (bundle.state !== 'valid') return
+		expect(bundle.warnings[0]?.message).toContain('HTMLElement')
+		// The bundle is served, and the Flow editor's Event read stays unavailable, as before the check.
+		expect((await readPreviewRuntimeFile(root, undefined, bundle.hash, 'runtime.js')).status).toBe(200)
+		expect(await readSelectedWorkspaceDeclaredWidgetEvents(root)).toEqual({ state: 'unavailable' })
+		const response = await withSelectedWorkspace(root, async () => {
+			const { default: adaptersHandler } = await import('../server/api/preview/adapters.get')
+			return await adaptersHandler({ context: { uiuxPrincipal: HUMAN_OWNER, params: {} } } as never) as Record<string, unknown>
+		})
+		expect(response).toMatchObject({ state: 'valid', diagnostics: [], bundleUrl: `/api/preview/runtime/${bundle.hash}/runtime.js`, warnings: [{ code: 'preview.bundle_failed' }] })
+
+		// In a DOM, the Preview's own guard runs the same bundle and accepts the Adapter.
+		expect(bundle.bundleJs).toContain('extends HTMLElement')
+		expect(await mountCounter(root, bundle.bundleJs)).toContain('Value: 42')
+	})
+
+	it('ends an evaluation that never reports and counts the check as not run, evaluating again on a later request', async () => {
+		const root = await temporaryRoot()
+		// A live handle and a top-level await that never settles.
+		const bundle = { bundleJs: 'setInterval(() => {}, 1000);\nawait new Promise(() => {});\n' }
+		const terminate = vi.spyOn(Worker.prototype, 'terminate')
+		const started = Date.now()
+		const check = checkPreviewBundleAdapters(bundle, root, { timeoutMs: 300 })
+		const result = await check
+		expect(terminate).toHaveBeenCalledTimes(1)
+		expect(Date.now() - started).toBeLessThan(10_000)
+		expect(result).toMatchObject({ state: 'unchecked', warnings: [{ code: 'preview.bundle_failed', path: '/product-kit' }] })
+		expect(result.state === 'unchecked' ? result.warnings[0]?.message : '').toContain('did not report within 300 ms')
+		// A timeout is transient: it is not kept, so a later request starts a new evaluation.
+		const again = checkPreviewBundleAdapters(bundle, root, { timeoutMs: 300 })
+		expect(again).not.toBe(check)
+		await again
+		expect(terminate).toHaveBeenCalledTimes(2)
+		terminate.mockRestore()
+	})
+
+	it('keeps a deterministic failed evaluation, evaluating the bundle once', async () => {
+		const root = await temporaryRoot()
+		const bundle = { bundleJs: 'throw new Error("always");\n' }
+		const check = checkPreviewBundleAdapters(bundle, root)
+		expect((await check).state).toBe('unchecked')
+		expect(checkPreviewBundleAdapters(bundle, root)).toBe(check)
+	})
+
+	it('names the bundle, not its data: URL, in the warning of a failed evaluation', async () => {
+		const root = await temporaryRoot()
+		const result = await checkPreviewBundleAdapters({ bundleJs: 'throw new Error(`failed in ${import.meta.url}`);\n' }, root)
+		expect(result.state).toBe('unchecked')
+		const message = result.state === 'unchecked' ? result.warnings[0]?.message ?? '' : ''
+		expect(message).toContain('failed in <preview bundle>')
+		expect(message).not.toContain('data:')
+		expect(message).not.toContain('base64')
+		// Only the bundle's own data: URL is masked, not other text that merely contains "data:".
+		const other = await checkPreviewBundleAdapters({ bundleJs: 'throw new Error("see metadata:x and data:text/plain,y");\n' }, root)
+		const otherMessage = other.state === 'unchecked' ? other.warnings[0]?.message ?? '' : ''
+		expect(otherMessage).toContain('see metadata:x and data:text/plain,y')
 	})
 
 	it('falls back to kit/node_modules, never the root node_modules, for a bare import of an Adapter outside kit/', async () => {

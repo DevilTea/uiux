@@ -16,7 +16,8 @@ let cached: { hash: string; result: Promise<DeclaredWidgetEventsResult> } | unde
  */
 export async function readSelectedWorkspaceDeclaredWidgetEvents(workspaceRoot: string, layout?: WorkspaceLayout): Promise<DeclaredWidgetEventsResult> {
 	const bundle = await getSelectedWorkspacePreviewBundle(workspaceRoot, layout)
-	if (bundle.state !== 'valid') return { state: 'unavailable' }
+	// A bundle the server's worker could not evaluate is not imported here either: its Events stay unavailable.
+	if (bundle.state !== 'valid' || bundle.adapterCheck === 'unchecked') return { state: 'unavailable' }
 	if (cached?.hash === bundle.hash) return await cached.result
 	const result = describe(bundle.bundleJs)
 	cached = { hash: bundle.hash, result }

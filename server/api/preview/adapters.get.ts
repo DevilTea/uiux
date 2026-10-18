@@ -36,5 +36,7 @@ export default defineEventHandler(async (event) => {
 		...(bundle.stylesheet ? { stylesheetUrl: previewRuntimeFileUrl(bundle.hash, bundle.stylesheet) } : {}),
 		// The Product Kit themes' root attributes (Rule 01a11bb1-ada4-7dd7-b3da-733de7a85df4).
 		themes: bundle.themes,
+		// The server-side Adapter check could not run on the bundle; the Preview's guard decides (Clause 01a116f0-cae2-7c64-9c76-d472f252789a).
+		...(bundle.warnings.length > 0 ? { warnings: bundle.warnings } : {}),
 	}
 })

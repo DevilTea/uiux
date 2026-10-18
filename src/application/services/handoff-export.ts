@@ -36,6 +36,7 @@ import {
 	NodeWorkspaceAdapterModuleResolver,
 	resolveWorkspaceAdapterSet,
 	type AdapterSetResolutionResult,
+	type ValidatedAdapterSet,
 } from '../../adapters/resolution'
 import { adapterGraphDigest } from '../../adapters/adapter-graph-digest'
 import { bareSpecifierPackageName } from '../../adapters/kit-dependencies'
@@ -91,12 +92,25 @@ export type AssessHandoffReadinessResult = HandoffSchemaBlocked | Readonly<{
 	diagnostics?: readonly Diagnostic[]
 }>
 
+/**
+ * The server-side check of a resolved Adapter set's runtime members (Clause
+ * 01a116f0-cae2-7c64-9c76-d472f252789a), plugin authenticity among them: `invalid` when the evaluated
+ * Preview bundle reported a mismatch, `unchecked` when the check could not run (owner decision during
+ * review of #248). The server injects it; without it Handoff resolves the manifests only. Diagnostic
+ * paths index the given set.
+ */
+export type AdapterSetRuntimeCheck = (set: ValidatedAdapterSet) => Promise<
+	| Readonly<{ state: 'valid' }>
+	| Readonly<{ state: 'invalid'; diagnostics: readonly Diagnostic[] }>
+	| Readonly<{ state: 'unchecked'; warnings: readonly Diagnostic[] }>
+>
+
 export interface HandoffExportService {
 	assessReadiness(command: AssessHandoffReadinessCommand): Promise<AssessHandoffReadinessResult>
 	exportHandoff(command: ExportHandoffCommand): Promise<ExportHandoffResult>
 }
 
-export function createHandoffExportService(persistence: FileNativePersistence): HandoffExportService {
+export function createHandoffExportService(persistence: FileNativePersistence, options: Readonly<{ checkAdapterSet?: AdapterSetRuntimeCheck }> = {}): HandoffExportService {
 	async function blockedForSchema(): Promise<HandoffSchemaBlocked | undefined> {
 		const { inspection } = await persistence.inspectWorkspace()
 		if (inspection.state === 'unsupported')
@@ -672,6 +686,8 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 		const neededWidgetTypes = new Set([...usedWidgetTypes].filter(t => t !== 'RootShell'))
 		const rawAdapters = workspaceAdapters
 		const neededAdapterSelections: typeof rawAdapters = []
+		/** The Product Kit index of each needed selection, to name it in a diagnostic. */
+		const neededAdapterIndexes: number[] = []
 
 		if (neededWidgetTypes.size > 0 && rawAdapters.length > 0) {
 			for (let i = 0; i < rawAdapters.length; i++) {
@@ -690,6 +706,7 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 						const providesNeeded = entry.ownership.widgetTypes.some(t => neededWidgetTypes.has(t))
 						if (providesNeeded) {
 							neededAdapterSelections.push(selection)
+							neededAdapterIndexes.push(i)
 						}
 					}
 				}
@@ -715,6 +732,23 @@ export function createHandoffExportService(persistence: FileNativePersistence): 
 				apiCompatibility: productAdapterApiCompatibility,
 				registryInspector: productAdapterRegistryInspector,
 			})
+		}
+
+		// The server-side runtime check of the Adapters (Clause 01a116f0-cae2-7c64-9c76-d472f252789a):
+		// an Adapter set the Preview refuses, such as one whose plugins come from another widget-core
+		// copy, contributes no source and blocks, as on every other surface. A check that could not run
+		// is a non-blocking note.
+		if (adaptersResolution.state === 'valid' && options.checkAdapterSet) {
+			const check = await options.checkAdapterSet(adaptersResolution.set)
+			const atWorkspaceIndex = (path: string) => path.replace(/^\/adapters\/(\d+)(?=\/|$)/u, (_, index: string) => `/adapters/${neededAdapterIndexes[Number(index)] ?? index}`)
+			if (check.state === 'invalid') {
+				closureValid = false
+				blockingDiagnostics.push(...check.diagnostics.map(diagnostic => ({ code: diagnostic.code, message: diagnostic.message, path: atWorkspaceIndex(diagnostic.path), blocking: true })))
+				adaptersResolution = { state: 'invalid', diagnostics: check.diagnostics, summaries: adaptersResolution.summaries }
+			}
+			else if (check.state === 'unchecked') {
+				blockingDiagnostics.push(...check.warnings.map(diagnostic => ({ code: diagnostic.code, message: diagnostic.message, path: diagnostic.path, blocking: false })))
+			}
 		}
 
 		const adapterProvenances: AdapterProvenance[] = []

@@ -1,5 +1,6 @@
 import type { Diagnostic } from '../domain/validation'
 import type { WorkspaceLayout } from '../persistence/paths'
+import { checkPreviewBundleAdapters } from './preview-adapter-check'
 import { cachedPreviewBundle, type PreviewBundleFile } from './preview-bundler'
 import { STORED_CONTENT_SECURITY_POLICY } from './stored-content-headers'
 import { getSelectedWorkspacePreviewBundle } from './workspace-adapters'
@@ -20,7 +21,12 @@ const LOADED_TYPES = ['text/javascript', 'text/css', 'application/json']
  */
 export async function readPreviewRuntimeFile(workspaceRoot: string, layout: WorkspaceLayout | undefined, hash: string, file: string): Promise<PreviewRuntimeFileResult> {
 	let bundle = await cachedPreviewBundle(hash)
-	if (!bundle) {
+	if (bundle) {
+		// A bundle whose Adapters the server-side check refuses is never served (Clause 01a116f0-cae2-7c64-9c76-d472f252789a).
+		const check = await checkPreviewBundleAdapters(bundle, workspaceRoot)
+		if (check.state === 'invalid') return { status: 409, body: { state: 'invalid', diagnostics: check.diagnostics } }
+	}
+	else {
 		const current = await getSelectedWorkspacePreviewBundle(workspaceRoot, layout)
 		if (current.state === 'invalid') return { status: 409, body: { state: 'invalid', diagnostics: current.diagnostics } }
 		if (current.hash === hash) bundle = current

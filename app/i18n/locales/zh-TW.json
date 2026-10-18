@@ -1253,6 +1253,8 @@
   "adapters": {
     "invalid": "Adapter 組合無效，修正前會暫停預覽與型錄。",
     "repair": "請在專案中執行以下指令修正：",
+    "repairSuggestion": "套件的較新版本可能已不再內含 widget-core，可以試試：",
+    "checkUnchecked": "伺服器無法對預覽套件執行 Adapter 檢查，預覽載入時會自行檢查 Adapter。",
     "kitDescription": "提供 Widget 的套件或 kit/ 模組，依解析順序排列。",
     "add": "新增 Adapter",
     "moduleSpecifier": "模組指定符",
@@ -2077,7 +2079,7 @@
       "unavailable": "預覽 Runtime 無法使用。"
     },
     "preview": {
-      "bundle_failed": "無法以 kit 的模組與樣式表建置預覽套件。",
+      "bundle_failed": "無法以 kit 的模組與樣式表建置或執行預覽套件。",
       "runtime_failed": "預覽無法呈現這個 View。",
       "stylesheet_load_failed": "Product Kit 樣式表未能載入，因此預覽無法呈現。"
     },

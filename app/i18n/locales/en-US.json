@@ -1253,6 +1253,8 @@
   "adapters": {
     "invalid": "The Adapter set is invalid. Preview and Catalog are paused until it's fixed.",
     "repair": "Run this in your project to fix it:",
+    "repairSuggestion": "A newer release of the package may no longer bundle widget-core. You can try:",
+    "checkUnchecked": "The server couldn't run its Adapter check on the Preview bundle. The Preview checks the Adapters when it loads.",
     "kitDescription": "Packages or kit/ modules that supply Widgets, in resolution order.",
     "add": "Add adapter",
     "moduleSpecifier": "Module specifier",
@@ -2077,7 +2079,7 @@
       "unavailable": "The preview runtime is not available."
     },
     "preview": {
-      "bundle_failed": "The preview bundle could not be built from the kit's modules and stylesheets.",
+      "bundle_failed": "The preview bundle of the kit's modules and stylesheets could not be built or run.",
       "runtime_failed": "The preview could not render this View.",
       "stylesheet_load_failed": "The Product Kit stylesheet did not load, so the preview cannot render."
     },

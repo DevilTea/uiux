@@ -35,6 +35,8 @@ import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import type { ReviewThread } from '../src/domain/reviews/schema'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 import { writeCurrentWorkspace } from './support/workspace-layout'
+import { bundleAdapterWithOwnWidgetCore } from './support/own-widget-core'
+import { checkAdapterSetRuntime } from '../src/server/workspace-adapters'
 
 const temporaryRoots: string[] = []
 const runningServers: ChildProcess[] = []
@@ -47,8 +49,8 @@ afterEach(async () => {
 })
 
 /** These Workspaces are on the current schema, so the schema gate never blocks; a blocked result fails the test. */
-function currentSchemaHandoff(persistence: FileNativePersistence) {
-	const service = createHandoffExportService(persistence)
+function currentSchemaHandoff(persistence: FileNativePersistence, options: Parameters<typeof createHandoffExportService>[1] = {}) {
+	const service = createHandoffExportService(persistence, options)
 	return {
 		async exportHandoff(command: ExportHandoffCommand) {
 			const result = await service.exportHandoff(command)
@@ -1137,6 +1139,62 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 			expect(exportRes.manifest?.provenance.adapters).toHaveLength(1)
 			expect(exportRes.manifest?.provenance.adapters[0]?.adapterId).toBe('my-counter')
 		}
+	})
+
+	it('refuses the sources of an Adapter whose Widget plugins come from its own widget-core copy, as the server-side check does (#123)', async () => {
+		const { root, persistence } = await createTestWorkspace([
+			{ moduleSpecifier: './adapters/broken.mjs' },
+			{ moduleSpecifier: './adapters/counter.mjs' },
+		])
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'broken.mjs'), 'export const broken = syntax error !@#$;')
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), await bundleAdapterWithOwnWidgetCore({ source: makeCounterAdapterSource(), resolveDir: join(root, 'kit') }))
+		const viewRev = await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'Counter View'))
+		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
+		// The check the server injects into the application session (Clause 01a116f0-cae2-7c64-9c76-d472f252789a).
+		const handoff = currentSchemaHandoff(persistence, { checkAdapterSet: set => checkAdapterSetRuntime(root, persistence.layout, set) })
+
+		const assess = await handoff.assessReadiness({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(assess.readiness?.implementationReady).toBe(false)
+		// The diagnostic names the Adapter by its Product Kit index, past the unrelated broken one.
+		expect(assess.readiness?.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: '/adapters/1/manifest/widgetPlugins/0', blocking: true }))
+
+		const exported = await handoff.exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(exported.status).toBe('exported')
+		const manifest = exported.manifest!
+		expect(manifest.readiness.implementationReady).toBe(false)
+		expect(manifest.implementationReferences.find(reference => reference.widgetType === 'Counter')?.semanticSource.availability).toBe('unavailable')
+		expect(manifest.provenance.adapters).toEqual([])
+		expect(manifest.artifactRefs.some(reference => reference.kind === 'adapter-module' || (reference.kind === 'widget-source' && reference.context?.widgetType === 'Counter'))).toBe(false)
+	})
+
+	it('keeps an Adapter that cannot be evaluated in the server worker non-blocking, with a note (#123)', async () => {
+		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		// Loads from the Workspace, but fails once inlined into the Preview bundle (a data: module), as a top level that needs a browser does in the server worker.
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), `if (import.meta.url.startsWith('data:')) throw new Error('needs a browser');\n${makeCounterAdapterSource()}`)
+		const viewRev = await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'Counter View'))
+		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
+		const handoff = currentSchemaHandoff(persistence, { checkAdapterSet: set => checkAdapterSetRuntime(root, persistence.layout, set) })
+
+		const assess = await handoff.assessReadiness({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(assess.readiness?.implementationReady).toBe(true)
+		expect(assess.readiness?.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'preview.bundle_failed', blocking: false }))
+	})
+
+	it('materializes the sources of an Adapter that imports the host widget-core under the same check (#123)', async () => {
+		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		const viewRev = await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'Counter View'))
+		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
+		const handoff = currentSchemaHandoff(persistence, { checkAdapterSet: set => checkAdapterSetRuntime(root, persistence.layout, set) })
+
+		const exported = await handoff.exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(exported.status).toBe('exported')
+		expect(exported.manifest?.readiness.implementationReady).toBe(true)
+		expect(exported.manifest?.implementationReferences.find(reference => reference.widgetType === 'Counter')?.semanticSource.availability).toBe('materialized')
+		expect(exported.manifest?.provenance.adapters.map(adapter => adapter.adapterId)).toEqual(['my-counter'])
 	})
 
 	it('proves end-to-end integration: real Playwright formal capture output directly satisfies handoff readiness and export', { timeout: 30_000 }, async () => {

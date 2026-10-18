@@ -139,9 +139,11 @@ export const productAdapterRegistryInspector: AdapterRegistryInspector = {
  * `foreign-plugin` error (`WidgetInspectionError` / `WidgetSystemConfigurationError`), so inspecting
  * here would refuse every Adapter whose widget-core copy differs from Nitro's.
  *
- * At this phase UIUX only needs the public semantic registry identity. Full plugin authenticity and
- * capability inspection stays at runtime materialization, where the preview bundler aliases Widget
- * dependencies to one authoritative copy before productAdapterRuntimeMemberDecoder.inspectPlugin runs.
+ * At this phase UIUX only needs the public semantic registry identity. Plugin authenticity is decided
+ * by the one server-side check of the Preview bundle (`src/server/preview-adapter-check.ts`, Clause
+ * 01a116f0-cae2-7c64-9c76-d472f252789a): the bundler aliases widget-core to the host's copy, and the
+ * evaluated bundle runs productAdapterRuntimeMemberDecoder.decodePlugin with that copy, as the
+ * Preview does in the browser.
  */
 function readRegistryPluginType(member: unknown): string {
 	if (typeof member !== 'object' || member === null)

@@ -18,12 +18,15 @@ import { diagnosticText } from '../../utils/diagnostic-copy'
 import AuthoringConflictAlert from './AuthoringConflictAlert.vue'
 import AuthoringErrorAlert from './AuthoringErrorAlert.vue'
 import AuthoringSaveBar from './AuthoringSaveBar.vue'
+import WbErrorDetails from '../workbench/WbErrorDetails.vue'
 import { copyText } from '../../utils/copy-text'
 
 /** What `/api/preview/adapters` reports about the saved Adapter set. */
 export type AdapterResolution = Readonly<{
 	state: 'valid' | 'invalid'
 	diagnostics: readonly Diagnostic[]
+	/** A valid set whose server-side Adapter check could not run (Clause 01a116f0-cae2-7c64-9c76-d472f252789a). */
+	warnings?: readonly Diagnostic[]
 	summaries: readonly Readonly<{
 		index: number
 		moduleSpecifier: string
@@ -125,6 +128,12 @@ const repairs = computed(() => {
 	}
 	return list
 })
+
+/** Known fixes first, then commands that may help (`suggestion`), each under its own heading. */
+const repairGroups = computed(() => [
+	{ heading: 'adapters.repair', items: repairs.value.filter(item => !(item.repair.kind === 'command' && item.repair.suggestion)) },
+	{ heading: 'adapters.repairSuggestion', items: repairs.value.filter(item => item.repair.kind === 'command' && item.repair.suggestion) },
+].filter(group => group.items.length > 0))
 
 async function copy(text: string): Promise<void> {
 	if (await copyText(text)) toast.add({ title: t('adapters.copied'), color: 'success', icon: 'i-lucide-check' })
@@ -278,11 +287,16 @@ defineExpose({ save })
             <code class="me-1 font-mono text-xs">{{ diagnostic.path || diagnostic.code }}</code>{{ diagnosticText(diagnostic) }}
           </li>
         </ul>
-        <template v-if="repairs.length">
-          <p>{{ t('adapters.repair') }}</p>
+        <template
+          v-for="group in repairGroups"
+          :key="group.heading"
+        >
+          <p class="mt-2 first:mt-0">
+            {{ t(group.heading) }}
+          </p>
           <ul class="mt-1.5 flex flex-col gap-1.5">
             <li
-              v-for="item in repairs"
+              v-for="item in group.items"
               :key="item.key"
               class="flex items-center gap-2"
             >
@@ -312,6 +326,18 @@ defineExpose({ save })
         <p class="mt-2 text-xs">
           {{ t('adapters.noInstall') }}
         </p>
+      </template>
+    </UAlert>
+    <UAlert
+      v-else-if="resolution?.warnings?.length"
+      color="warning"
+      variant="subtle"
+      icon="i-lucide-triangle-alert"
+      data-adapters-unchecked
+      :title="t('adapters.checkUnchecked')"
+    >
+      <template #description>
+        <WbErrorDetails :diagnostics="resolution?.warnings ?? []" />
       </template>
     </UAlert>
     <UAlert

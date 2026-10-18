@@ -6,6 +6,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import type { PermissionKey } from '../src/application/access/keys'
 import { canonicalJsonBytes } from '../src/persistence'
 import { provisionToken, sessionCookieFor } from './support/access'
+import { bundleAdapterWithOwnWidgetCore } from './support/own-widget-core'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
@@ -212,6 +213,74 @@ describe('Product Kit page › an unreadable Product Kit file', () => {
 			const answered = page.waitForResponse(response => response.url().endsWith('/api/product-kit/build/restart'))
 			await restart.click()
 			expect((await answered).status()).toBe(200)
+		}
+		finally { await context.close() }
+	}, 60_000)
+})
+
+describe('Product Kit page › an Adapter that bundles its own widget-core copy', () => {
+	// The fixture's reference Adapter, built with widget-core inlined (issue #123).
+	const ownCore = withServer(async (root) => {
+		await writeFile(join(root, 'kit', 'adapters', 'own-core.mjs'), await bundleAdapterWithOwnWidgetCore({ entry: join(root, 'kit', 'adapters', 'reference.ts') }))
+		const productKitPath = join(root, 'product-kit.json')
+		const productKit = JSON.parse(await readFile(productKitPath, 'utf8')) as Record<string, unknown>
+		await writeFile(productKitPath, canonicalJsonBytes({ ...productKit, adapters: [{ moduleSpecifier: './adapters/own-core.mjs' }] }))
+	})
+
+	it('shows the Adapter failed on its own row with the server diagnostic, as the Preview\'s Adapter check reports it', async () => {
+		const target = ownCore()
+		// The Preview's Adapter check (Clause 01a116f0-cae2-7c64-9c76-d472f252789a): invalid, and no bundle to load.
+		const response = await fetch(`${target.origin}/api/preview/adapters`, { headers: target.headers })
+		const body = await response.json() as { state: string; bundleUrl?: string; diagnostics: { code: string; path: string }[] }
+		expect(body.state).toBe('invalid')
+		expect(body.bundleUrl).toBeUndefined()
+		expect(body.diagnostics).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: '/adapters/0/manifest/widgetPlugins/0' }))
+
+		const { context, page } = await open('/workspace/product-kit?section=overview', target.cookie, target)
+		try {
+			const row = page.locator('#product-kit-adapters [data-adapter-row]')
+			await row.first().waitFor({ timeout: 15_000 })
+			expect(await row.count()).toBe(1)
+			await expect.poll(() => row.innerText(), { timeout: 15_000 }).toContain('adapter.runtime_widget_core_incompatible')
+			expect(await row.innerText()).toContain('Can\'t load')
+			expect(await page.locator('[data-adapters-invalid]').isVisible()).toBe(true)
+		}
+		finally { await context.close() }
+	}, 60_000)
+})
+
+describe('Product Kit page › an Adapter whose bundle cannot run on the server', () => {
+	// The fixture's reference Adapter plus a dependency whose `browser` export defines a custom
+	// element at its top level: the server's worker cannot evaluate the Preview bundle.
+	const browserOnly = withServer(async (root) => {
+		const dependency = join(root, 'kit', 'node_modules', 'fancy-element')
+		await mkdir(dependency, { recursive: true })
+		await writeFile(join(dependency, 'package.json'), JSON.stringify({ name: 'fancy-element', version: '1.0.0', type: 'module', exports: { browser: './browser.js', default: './node.js' } }))
+		await writeFile(join(dependency, 'browser.js'), 'export class FancyElement extends HTMLElement {}\n')
+		await writeFile(join(dependency, 'node.js'), 'export class FancyElement {}\n')
+		await writeFile(join(root, 'kit', 'adapters', 'browser-only.mjs'), "export { FancyElement } from 'fancy-element'\nexport * from './reference.ts'\nexport { default } from './reference.ts'\n")
+		const productKitPath = join(root, 'product-kit.json')
+		const productKit = JSON.parse(await readFile(productKitPath, 'utf8')) as Record<string, unknown>
+		await writeFile(productKitPath, canonicalJsonBytes({ ...productKit, adapters: [{ moduleSpecifier: './adapters/browser-only.mjs' }] }))
+	})
+
+	it('keeps the set valid and says the server-side check could not run (owner decision during review of #248)', async () => {
+		const target = browserOnly()
+		const response = await fetch(`${target.origin}/api/preview/adapters`, { headers: target.headers })
+		const body = await response.json() as { state: string; bundleUrl?: string; warnings?: { code: string }[] }
+		expect(body.state).toBe('valid')
+		expect(body.bundleUrl).toBeDefined()
+		expect(body.warnings).toContainEqual(expect.objectContaining({ code: 'preview.bundle_failed' }))
+
+		const { context, page } = await open('/workspace/product-kit?section=overview', target.cookie, target)
+		try {
+			const row = page.locator('#product-kit-adapters [data-adapter-row]')
+			await row.first().waitFor({ timeout: 15_000 })
+			await expect.poll(() => row.innerText(), { timeout: 15_000 }).toContain('Loaded')
+			const warning = page.locator('[data-adapters-unchecked]')
+			await warning.waitFor({ timeout: 15_000 })
+			expect(await warning.innerText()).toContain('couldn\'t run its Adapter check')
+			expect(await page.locator('[data-adapters-invalid]').count()).toBe(0)
 		}
 		finally { await context.close() }
 	}, 60_000)
