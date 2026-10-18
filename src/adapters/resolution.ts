@@ -359,7 +359,7 @@ export async function resolveWorkspaceAdapterSet(input: ResolveWorkspaceAdapterS
 			diagnostics.push({
 				code: 'adapter.api_version_incompatible',
 				path: `${basePath}/manifest/apiVersion`,
-				message: `Adapter ${manifest.id} declares an unsupported UIUX adapter API version.`,
+				message: `Adapter ${manifest.id} declares a malformed or unsupported UIUX adapter API version.`,
 			})
 			continue
 		}

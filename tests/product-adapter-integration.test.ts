@@ -9,6 +9,7 @@ import {
 	productAdapterRegistryInspector,
 	productAdapterRuntimeMemberDecoder,
 } from '../src/adapters/product-integration'
+import { resolveWorkspaceAdapterSet } from '../src/adapters/resolution'
 import type { AdapterManifest } from '../src/domain/adapters/schema'
 import { IncompatibleWidgetCoreError } from '../src/runtime/widget-core-diagnostics'
 
@@ -116,12 +117,50 @@ describe('product adapter integration', () => {
 	})
 
 	describe('productAdapterApiCompatibility', () => {
-		it('accepts supported API versions and rejects unsupported ones', () => {
-			expect(productAdapterApiCompatibility.isCompatible('1')).toBe(true)
-			expect(productAdapterApiCompatibility.isCompatible('1.0.0')).toBe(true)
+		it('accepts `1` and `1.<minor>` with a minor without leading zeros', () => {
+			for (const version of ['1', '1.0', '1.1', '1.12'])
+				expect(productAdapterApiCompatibility.isCompatible(version), version).toBe(true)
+		})
+
+		it('keeps the non-normative `test` hook', () => {
 			expect(productAdapterApiCompatibility.isCompatible('test')).toBe(true)
-			expect(productAdapterApiCompatibility.isCompatible('0.1.0')).toBe(false)
-			expect(productAdapterApiCompatibility.isCompatible('2.0.0')).toBe(false)
+		})
+
+		it('refuses API versions outside the `1` / `1.<minor>` grammar', () => {
+			for (const version of ['1.foo', '1.01', '01', '2', '', '1.', '.1', '1.0.0', '1.1.0', ' 1', '1 ', '1.-1', '1.1e2', '0.1.0', '2.0.0', '2.0'])
+				expect(productAdapterApiCompatibility.isCompatible(version), JSON.stringify(version)).toBe(false)
+		})
+	})
+
+	describe('Adapter set resolution with the product API policy', () => {
+		async function resolveWithApiVersion(apiVersion: string) {
+			return resolveWorkspaceAdapterSet({
+				workspaceRoot: '/virtual/workspace',
+				adapters: [{ moduleSpecifier: 'fixture-adapter' }],
+				resolver: {
+					async resolve(_root: string, moduleSpecifier: string) {
+						return { moduleSpecifier, resolvedPath: `/virtual/${moduleSpecifier}.mjs`, moduleIdentity: `file:///virtual/${moduleSpecifier}.mjs` }
+					},
+				},
+				loader: { async loadManifest() { return makeManifest('fixture', { apiVersion }) } },
+				apiCompatibility: productAdapterApiCompatibility,
+				registryInspector: productAdapterRegistryInspector,
+			})
+		}
+
+		it('refuses an Adapter whose apiVersion `1.foo` is malformed', async () => {
+			const result = await resolveWithApiVersion('1.foo')
+			expect(result.state).toBe('invalid')
+			expect(result.diagnostics).toEqual([expect.objectContaining({
+				code: 'adapter.api_version_incompatible',
+				path: '/adapters/0/manifest/apiVersion',
+			})])
+		})
+
+		it('accepts an Adapter whose apiVersion is `1.12`', async () => {
+			const result = await resolveWithApiVersion('1.12')
+			expect(result.diagnostics).toEqual([])
+			expect(result.state).not.toBe('invalid')
 		})
 	})
 })
