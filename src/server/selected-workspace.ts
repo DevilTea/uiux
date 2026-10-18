@@ -14,7 +14,7 @@ import { AccessStore, resolveUiuxHome } from './access/store'
 import { createWorkspaceAccessPresetsReader } from './access/workspace-presets'
 import { createHistoryStoreFactory, type HistoryStoreFactory } from './history-stores'
 import { createKitBuildRunner, registerKitBuildRunner, type KitBuildRunner } from './kit-build'
-import { getSelectedWorkspacePreviewBundle } from './workspace-adapters'
+import { checkAdapterSetRuntime, getSelectedWorkspacePreviewBundle } from './workspace-adapters'
 
 export type SelectedWorkspaceServerRuntime = Readonly<{
 	root: string
@@ -91,6 +91,8 @@ export function createSelectedWorkspaceServerRuntime(
 		// A Checkpoint first closes the open autosave and records outside changes (Rule 01a11a5e-00b9-7bf5-8005-9380a388afb8).
 		historyBoundary: () => historyRecorder,
 		kitBuild,
+		// Handoff refuses an Adapter set the Preview refuses (Clause 01a116f0-cae2-7c64-9c76-d472f252789a).
+		checkAdapterSet: set => checkAdapterSetRuntime(selectedRoot, persistence.layout, set),
 	})
 	let pending: Promise<AccessService> | undefined
 	function access(): Promise<AccessService> {

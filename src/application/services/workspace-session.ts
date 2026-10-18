@@ -75,6 +75,7 @@ import { readCurrentProductKitProvenance } from './product-kit-provenance'
 import type { CurrentProductKitProvenance } from '../../domain/product-kit/provenance'
 import {
 	createHandoffExportService,
+	type AdapterSetRuntimeCheck,
 	type AssessHandoffReadinessCommand,
 	type AssessHandoffReadinessResult,
 	type ExportHandoffCommand,
@@ -216,6 +217,8 @@ export function createWorkspaceApplicationSession(
 		historyBoundary?: () => CheckpointBoundary | undefined
 		/** The kit build runner under `uiux dev`; without it no kit build runs and its state is `none`. */
 		kitBuild?: KitBuildControl
+		/** The server-side Adapter check Handoff applies to the Adapters it materializes (Clause 01a116f0-cae2-7c64-9c76-d472f252789a). */
+		checkAdapterSet?: AdapterSetRuntimeCheck
 	},
 ): WorkspaceApplicationSession {
 	const viewAuthoring = createViewAuthoringService(persistence)
@@ -225,7 +228,7 @@ export function createWorkspaceApplicationSession(
 	const reviewAuthoring = createReviewAuthoringService(persistence)
 	const assetAuthoring = createAssetAuthoringService(persistence)
 	const formalCapture = createFormalCaptureService(persistence, { serverOrigin: options?.serverOrigin, captureCookie: options?.captureCookie, ...(options?.kitBuild ? { kitBuild: () => options.kitBuild!.status() } : {}) })
-	const handoffExport = createHandoffExportService(persistence)
+	const handoffExport = createHandoffExportService(persistence, options?.checkAdapterSet ? { checkAdapterSet: options.checkAdapterSet } : {})
 	const historyDiff = createHistoryDiffService(persistence, options?.history)
 	const historyService = createHistoryService(persistence, options?.history, options?.historyBoundary ? { boundary: options.historyBoundary } : {})
 	const historyRestore = createHistoryRestoreService(persistence, options?.history)
