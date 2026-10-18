@@ -5,7 +5,7 @@ import { delimiter, dirname, join } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { parseKitBuildDeclaration, readKitBuildDeclaration } from '../src/adapters/kit-build-declaration'
+import { KIT_BUILD_DECLARATION_READ_ATTEMPTS, KIT_BUILD_DECLARATION_RETRY_DELAY_MS, parseKitBuildDeclaration, readDeclaredKitBuildDeclaration, readKitBuildDeclaration } from '../src/adapters/kit-build-declaration'
 import type { KitBuildControl, KitBuildStatus } from '../src/application/ports/kit-build'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
@@ -193,6 +193,24 @@ describe('the kit build declaration (Clause 01a11bb1-86af)', () => {
 		await write(join(root, 'elsewhere.json'), JSON.stringify({ uiux: nodeBuild('build.mjs') }))
 		await symlink(join(root, 'elsewhere.json'), join(root, 'kit', 'package.json'))
 		expect(await readKitBuildDeclaration(join(root, 'kit'))).toMatchObject({ state: 'invalid' })
+	})
+
+	it('reads a declared build\'s kit/package.json again while it is half-written, a bounded number of times', async () => {
+		const root = await kitWorkspace(nodeBuild('build.mjs'))
+		const packagePath = join(root, 'kit', 'package.json')
+		await writeFile(packagePath, '')
+		const reading = readDeclaredKitBuildDeclaration(join(root, 'kit'))
+		await new Promise(resolve => setTimeout(resolve, KIT_BUILD_DECLARATION_RETRY_DELAY_MS / 2))
+		await writeFile(packagePath, JSON.stringify({ name: 'kit', uiux: nodeBuild('build.mjs') }))
+		expect(await reading).toMatchObject({ state: 'declared', declaration: { output: 'dist' } })
+
+		// A file that stays unreadable keeps its message once the reads are spent.
+		await writeFile(packagePath, '{"name": "ki')
+		const started = Date.now()
+		expect(await readDeclaredKitBuildDeclaration(join(root, 'kit'))).toEqual({ state: 'invalid', message: 'kit/package.json could not be read as JSON.' })
+		expect(Date.now() - started).toBeGreaterThanOrEqual((KIT_BUILD_DECLARATION_READ_ATTEMPTS - 1) * KIT_BUILD_DECLARATION_RETRY_DELAY_MS - 10)
+		await rm(packagePath)
+		expect(await readDeclaredKitBuildDeclaration(join(root, 'kit'))).toEqual({ state: 'none' })
 	})
 })
 
@@ -604,6 +622,35 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		expect(captureOutput).toHaveBeenCalledTimes(1)
 		// The restart reads the declaration before it waits for the capture, so the replacement ends first.
 		await captureOutput.mock.results[0]!.value
+
+		await build.restart()
+		expect(await settledState(build)).toMatchObject({ state: 'failed' })
+		expect(await readFile(join(root, 'kit', 'dist', 'uiux.js'), 'utf8')).toContain('half-written output')
+		const after = await resolveSelectedWorkspaceAdapters(root, V5_LAYOUT)
+		expect(after.state, JSON.stringify(after.diagnostics)).toBe('valid')
+		expect(after.summaries[0]?.adapterId).toBe('kit-adapter-1')
+	}, 30_000)
+
+	it('reads kit/package.json again when the capture finds it half-written by a non-atomic host write (issue #214)', async () => {
+		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK, 'fail.mjs': BUILD_FAIL })
+		const packagePath = join(root, 'kit', 'package.json')
+		let rewritten = false
+		// The capture of generation 1 starts while the host is in the middle of rewriting the declaration in place.
+		const captureOutput = vi.fn(async () => {
+			if (rewritten) return getSelectedWorkspacePreviewBundle(root, V5_LAYOUT)
+			rewritten = true
+			await writeFile(packagePath, '{"name": "ki')
+			const capturing = getSelectedWorkspacePreviewBundle(root, V5_LAYOUT)
+			await new Promise(resolve => setTimeout(resolve, KIT_BUILD_DECLARATION_RETRY_DELAY_MS / 2))
+			await writeFile(packagePath, JSON.stringify({ name: 'kit', type: 'module', uiux: nodeBuild('fail.mjs') }))
+			return capturing
+		})
+		const { build } = runner(root, { register: true, captureOutput })
+		await build.start()
+		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(captureOutput).toHaveBeenCalledTimes(1)
+		const captured = await captureOutput.mock.results[0]!.value
+		expect(captured.state, JSON.stringify(captured.diagnostics)).toBe('valid')
 
 		await build.restart()
 		expect(await settledState(build)).toMatchObject({ state: 'failed' })
