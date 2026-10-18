@@ -61,6 +61,17 @@ Commands:
                            project's uiux-components.json (the project defaults to the
                            current directory's); --check exits 1 when any file is not
                            unchanged
+  artifacts gc [--workspace <dir>] [--dry-run]
+                           Delete the blobs of the Workspace's derived-artifact store
+                           (artifacts/) that nothing still needs: what a Review
+                           submission, a Checkpoint or this host's history of the
+                           Workspace references and the latest Evidence of each View
+                           and render context are kept, with what they reference;
+                           Handoff blobs are not. Prints each
+                           deleted blob's sha256: identity, then their count and total
+                           bytes; --dry-run prints the same and deletes nothing. Refused
+                           while a uiux dev server serves the Workspace. No other
+                           command deletes artifacts
 
 Workspace selection: --workspace <dir> names the Workspace root, or a directory whose
 .uiux/ holds one. Without it, a command uses the .uiux/ of the nearest directory, from
@@ -136,7 +147,7 @@ function parseDevArguments(args) {
 }
 
 /**
- * Initialization, components and access administration reuse the TypeScript modules shipped in `src/`. They are
+ * Initialization, components, artifact cleanup and access administration reuse the TypeScript modules shipped in `src/`. They are
  * bundled on demand with the packaged esbuild dependency into a private temporary module, so the
  * CLI applies exactly the policy the server enforces.
  */
@@ -280,6 +291,14 @@ if (extraArgs.length === 0 && (command === undefined || command === '--help' || 
 	}
 	catch (error) {
 		console.error('uiux: components failed: ' + (error instanceof Error ? error.message : String(error)))
+		process.exitCode = 1
+	}
+} else if (command === 'artifacts') {
+	try {
+		await runBundled('src/cli/artifacts.ts', ({ runArtifactsCommand }) => runArtifactsCommand({ argv: extraArgs, cwd: process.cwd() }))
+	}
+	catch (error) {
+		console.error('uiux: artifacts failed: ' + (error instanceof Error ? error.message : String(error)))
 		process.exitCode = 1
 	}
 } else if (['member', 'token', 'invite', 'session', 'access'].includes(command)) {
