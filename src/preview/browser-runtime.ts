@@ -175,6 +175,14 @@ export type StandalonePreviewMountFactory = Readonly<{
 	 * widget-core copy the bundle runs. Declaration metadata only: no Runtime is created.
 	 */
 	describeDeclaredWidgetEvents(): DeclaredWidgetEvents
+	/**
+	 * The diagnostics of the checks the factory ran on the imported Adapter members with the bundle's
+	 * own widget-core copy: manifest, identity, API version, plugin authenticity (Clause
+	 * 01a116f0-cae2-7c64-9c76-d472f252789a), renderers and ownership. Empty when every Adapter passed.
+	 * The server evaluates the bundle and reads these (`src/server/preview-adapter-check.ts`), so
+	 * every surface reports what the Preview itself refuses.
+	 */
+	describeAdapterDiagnostics(): readonly Diagnostic[]
 }>
 
 /**
@@ -716,7 +724,11 @@ export function createStandalonePreviewMount(input: Readonly<{
 		return Object.freeze(result)
 	}
 
-	return { mountPreviewRuntime, describeDeclaredWidgetEvents }
+	function describeAdapterDiagnostics(): readonly Diagnostic[] {
+		return Object.freeze([...buildDiagnostics])
+	}
+
+	return { mountPreviewRuntime, describeDeclaredWidgetEvents, describeAdapterDiagnostics }
 }
 
 function createNoopBridge(): PreviewRuntimeBridge {

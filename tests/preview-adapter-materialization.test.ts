@@ -16,7 +16,10 @@ import { V5_LAYOUT } from '../src/persistence/paths'
 import {
 	buildWorkspacePreviewBundle,
 	clearPreviewBundleCache,
+	computeBundleContentHash,
 } from '../src/server/preview-bundler'
+import { readPreviewRuntimeFile } from '../src/server/preview-runtime-http'
+import { bundleAdapterWithOwnWidgetCore } from './support/own-widget-core'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
 import { HUMAN_OWNER } from './support/access'
@@ -134,6 +137,26 @@ function defaultContext(viewId = VIEW_ID_1): ResolvedRenderContext {
 		viewportId: 'desktop',
 		viewport: { width: 1280, height: 800 },
 		themeId: 'light',
+	}
+}
+
+/** Runs `body` with `root` as the selected Workspace of the server routes and a temporary `UIUX_HOME`, then closes that runtime. */
+async function withSelectedWorkspace<T>(root: string, body: () => Promise<T>): Promise<T> {
+	const previous = { root: process.env.UIUX_WORKSPACE_ROOT, home: process.env.UIUX_HOME }
+	const home = await mkdtemp(join(tmpdir(), 'uiux-preview-home-'))
+	temporaryRoots.push(home)
+	process.env.UIUX_WORKSPACE_ROOT = root
+	process.env.UIUX_HOME = home
+	try {
+		return await body()
+	}
+	finally {
+		for (const [name, value] of [['UIUX_WORKSPACE_ROOT', previous.root], ['UIUX_HOME', previous.home]] as const) {
+			if (value !== undefined) process.env[name] = value
+			else delete process.env[name]
+		}
+		const { closeSelectedWorkspaceServerRuntime } = await import('../src/server/selected-workspace')
+		await closeSelectedWorkspaceServerRuntime()
 	}
 }
 
@@ -726,6 +749,67 @@ describe('a current-schema Workspace resolves its Adapters from the Product Kit'
 		if (bundle.state !== 'valid') return
 		expect(bundle.bundleJs).not.toContain('kit-second-widget-core-copy')
 		expect(await mountCounter(root, bundle.bundleJs)).toContain('Value: 42')
+	})
+
+	it('refuses, on the server and in the Preview alike, a Widget plugin from an Adapter that bundles its own widget-core copy (#123)', async () => {
+		const root = await createKitWorkspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
+		await linkHostPackages(join(root, 'kit'))
+		await writeFile(join(root, 'kit', 'adapter.mjs'), await bundleAdapterWithOwnWidgetCore({ source: makeCounterAdapterSource(), resolveDir: join(root, 'kit') }))
+		const pluginPath = '/adapters/0/manifest/widgetPlugins/0'
+
+		// Loading the manifest in Node reads only each plugin's type, so resolution itself passes ...
+		const resolution = await resolveSelectedWorkspaceAdapters(root)
+		expect(resolution).toMatchObject({ state: 'valid', summaries: [{ index: 0, adapterId: 'my-counter' }] })
+		if (resolution.state !== 'valid') return
+		// ... and the one server-side check of the Preview bundle refuses the foreign plugin (Clause 01a116f0-cae2-7c64-9c76-d472f252789a).
+		const bundle = await getSelectedWorkspacePreviewBundle(root)
+		expect(bundle.state).toBe('invalid')
+		expect(bundle.state === 'invalid' ? bundle.diagnostics : []).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: pluginPath }))
+
+		// The bundle the check evaluated is never served to a Preview.
+		const hash = await computeBundleContentHash(root, resolution.set)
+		const served = await readPreviewRuntimeFile(root, undefined, hash, 'runtime.js')
+		expect(served.status).toBe(409)
+		expect(served.status === 409 ? served.body.diagnostics : []).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: pluginPath }))
+
+		// The Preview's own guard, run in a DOM on the same bundle, reports the same diagnostic.
+		const built = await buildWorkspacePreviewBundle({ workspaceRoot: root, moduleBase: join(root, 'kit'), set: resolution.set })
+		setupDom()
+		const bundleFile = join(root, `bundle-${randomUUID()}.mjs`)
+		await writeFile(bundleFile, built.bundleJs)
+		const bundleMod = await import(bundleFile)
+		const container = document.createElement('div')
+		document.body.appendChild(container)
+		let reported: { status: string; diagnostics?: readonly { code: string; path: string }[] } | undefined
+		bundleMod.mountPreviewRuntime(container, { view: viewWithCounter(), context: defaultContext(), onStatusChange(status: unknown) { reported = status as typeof reported } })
+		expect(reported?.status).toBe('invalid')
+		expect(reported?.diagnostics).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: pluginPath }))
+		expect(container.innerHTML).not.toContain('Value: 42')
+
+		// `GET /api/preview/adapters` reports the set invalid with that diagnostic and the Adapter's summary.
+		const response = await withSelectedWorkspace(root, async () => {
+			const { default: adaptersHandler } = await import('../server/api/preview/adapters.get')
+			return await adaptersHandler({ context: { uiuxPrincipal: HUMAN_OWNER, params: {} } } as never) as Record<string, unknown>
+		})
+		expect(response).toMatchObject({ state: 'invalid', summaries: [{ index: 0, adapterId: 'my-counter' }] })
+		expect(response.bundleUrl).toBeUndefined()
+		expect(response.diagnostics).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: pluginPath }))
+	})
+
+	it('reports an Adapter that imports the host widget-core valid on every server surface (#123)', async () => {
+		const root = await createKitWorkspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
+		await linkHostPackages(join(root, 'kit'))
+		await writeFile(join(root, 'kit', 'adapter.mjs'), makeCounterAdapterSource())
+
+		const bundle = await getSelectedWorkspacePreviewBundle(root)
+		expect(bundle.state).toBe('valid')
+		if (bundle.state !== 'valid') return
+		expect((await readPreviewRuntimeFile(root, undefined, bundle.hash, 'runtime.js')).status).toBe(200)
+		const response = await withSelectedWorkspace(root, async () => {
+			const { default: adaptersHandler } = await import('../server/api/preview/adapters.get')
+			return await adaptersHandler({ context: { uiuxPrincipal: HUMAN_OWNER, params: {} } } as never) as Record<string, unknown>
+		})
+		expect(response).toMatchObject({ state: 'valid', diagnostics: [], bundleUrl: `/api/preview/runtime/${bundle.hash}/runtime.js` })
 	})
 
 	it('falls back to kit/node_modules, never the root node_modules, for a bare import of an Adapter outside kit/', async () => {

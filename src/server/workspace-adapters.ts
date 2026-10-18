@@ -17,6 +17,7 @@ import { canonicalJsonStringify } from '../domain/canonical-json'
 import type { Diagnostic } from '../domain/validation'
 import type { WorkspaceAdapterSelection } from '../domain/workspace/schema'
 import { kitBuildRunnerFor } from './kit-build'
+import { checkPreviewBundleAdapters } from './preview-adapter-check'
 import {
 	extractProductAdapterManifest,
 	productAdapterApiCompatibility,
@@ -238,15 +239,15 @@ export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, g
 		? await resolveProductKitStyles(workspaceRoot, layout, productKit.styles, pin)
 		: { state: 'valid' as const, paths: [] }
 	if (styles.state === 'invalid') return { state: 'invalid', diagnostics: styles.diagnostics }
+	let bundle: PreviewBundleResult
 	try {
-		const bundle = await buildWorkspacePreviewBundle({
+		bundle = await buildWorkspacePreviewBundle({
 			workspaceRoot,
 			moduleBase: adapterResolutionBase(workspaceRoot, layout),
 			set: resolution.set,
 			styles: styles.paths,
 			...(pin !== undefined ? { pin } : {}),
 		})
-		return { state: 'valid', ...bundle, themes: productKit?.themes ?? {} }
 	}
 	catch (error) {
 		// A module graph esbuild cannot bundle (a missing import, a CSS `url()` that names no file, a
@@ -260,6 +261,11 @@ export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, g
 			message: maskHostPaths(`The Preview bundle could not be built: ${message}`, [resolve(workspaceRoot), realRoot]),
 		}] }
 	}
+	// The one server-side check of the Adapters' runtime members, plugin authenticity among them
+	// (Clause 01a116f0-cae2-7c64-9c76-d472f252789a): a set the Preview would refuse is invalid here.
+	const check = await checkPreviewBundleAdapters(bundle, workspaceRoot)
+	if (check.state === 'invalid') return { state: 'invalid', diagnostics: check.diagnostics }
+	return { state: 'valid', ...bundle, themes: productKit?.themes ?? {} }
 }
 
 type StyleResolution =

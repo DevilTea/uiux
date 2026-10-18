@@ -1,5 +1,6 @@
 import type { WorkspaceLayout } from '../persistence/paths'
 import type { DeclaredWidgetEvent, DeclaredWidgetEvents } from '../preview/browser-runtime'
+import { evaluatePreviewBundle } from './preview-adapter-check'
 import { getSelectedWorkspacePreviewBundle } from './workspace-adapters'
 
 export type DeclaredWidgetEventsResult =
@@ -18,15 +19,15 @@ export async function readSelectedWorkspaceDeclaredWidgetEvents(workspaceRoot: s
 	const bundle = await getSelectedWorkspacePreviewBundle(workspaceRoot, layout)
 	if (bundle.state !== 'valid') return { state: 'unavailable' }
 	if (cached?.hash === bundle.hash) return await cached.result
-	const result = describe(bundle.bundleJs)
+	const result = describe(bundle)
 	cached = { hash: bundle.hash, result }
 	return await result
 }
 
-async function describe(bundleJs: string): Promise<DeclaredWidgetEventsResult> {
+async function describe(bundle: Parameters<typeof evaluatePreviewBundle>[0]): Promise<DeclaredWidgetEventsResult> {
 	try {
-		const url = `data:text/javascript;base64,${Buffer.from(bundleJs, 'utf8').toString('base64')}`
-		const module = await import(/* @vite-ignore */ url) as { describeDeclaredWidgetEvents?: () => unknown }
+		// The module the server-side Adapter check evaluated (`preview-adapter-check.ts`).
+		const module = await evaluatePreviewBundle(bundle)
 		const widgets = module.describeDeclaredWidgetEvents?.()
 		return isDeclaredWidgetEvents(widgets) ? { state: 'valid', widgets } : { state: 'unavailable' }
 	}

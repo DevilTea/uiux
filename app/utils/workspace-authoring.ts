@@ -282,6 +282,11 @@ export function adapterRepair(code: string, moduleSpecifier: string): AdapterRep
 	}
 	if (code === 'adapter.api_version_incompatible' && packageName)
 		return { kind: 'command', command: `pnpm add ${packageName}@latest` }
+	// A package that bundles its own widget-core copy (Clause 01a116f0-cae2-7c64-9c76-d472f252789a)
+	// needs a release that keeps widget-core a peer; for a kit module, the diagnostic itself says to
+	// keep widget-core out of its build.
+	if (code === 'adapter.runtime_widget_core_incompatible' && packageName)
+		return { kind: 'command', command: `pnpm add ${packageName}@latest` }
 	return undefined
 }
 

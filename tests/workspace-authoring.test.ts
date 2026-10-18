@@ -85,6 +85,9 @@ describe('Workspace settings payload', () => {
 		expect(adapterRepair('adapter.api_version_incompatible', 'widgets')).toEqual({ kind: 'command', command: 'pnpm add widgets@latest' })
 		expect(adapterRepair('adapter.resolution_failed', './adapters/missing.ts')).toEqual({ kind: 'file', path: './adapters/missing.ts' })
 		expect(adapterRepair('adapter.config_schema_violation', 'widgets')).toBeUndefined()
+		// A package that bundles its own widget-core copy (Clause 01a116f0-cae2-7c64-9c76-d472f252789a).
+		expect(adapterRepair('adapter.runtime_widget_core_incompatible', '@scope/pkg')).toEqual({ kind: 'command', command: 'pnpm add @scope/pkg@latest' })
+		expect(adapterRepair('adapter.runtime_widget_core_incompatible', './adapter.mjs')).toBeUndefined()
 	})
 
 	it('lists differing leaves for the Compare dialog', () => {

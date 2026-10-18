@@ -6,6 +6,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import type { PermissionKey } from '../src/application/access/keys'
 import { canonicalJsonBytes } from '../src/persistence'
 import { provisionToken, sessionCookieFor } from './support/access'
+import { bundleAdapterWithOwnWidgetCore } from './support/own-widget-core'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
@@ -212,6 +213,37 @@ describe('Product Kit page › an unreadable Product Kit file', () => {
 			const answered = page.waitForResponse(response => response.url().endsWith('/api/product-kit/build/restart'))
 			await restart.click()
 			expect((await answered).status()).toBe(200)
+		}
+		finally { await context.close() }
+	}, 60_000)
+})
+
+describe('Product Kit page › an Adapter that bundles its own widget-core copy', () => {
+	// The fixture's reference Adapter, built with widget-core inlined (issue #123).
+	const ownCore = withServer(async (root) => {
+		await writeFile(join(root, 'kit', 'adapters', 'own-core.mjs'), await bundleAdapterWithOwnWidgetCore({ entry: join(root, 'kit', 'adapters', 'reference.ts') }))
+		const productKitPath = join(root, 'product-kit.json')
+		const productKit = JSON.parse(await readFile(productKitPath, 'utf8')) as Record<string, unknown>
+		await writeFile(productKitPath, canonicalJsonBytes({ ...productKit, adapters: [{ moduleSpecifier: './adapters/own-core.mjs' }] }))
+	})
+
+	it('shows the Adapter failed on its own row with the server diagnostic, as the Preview\'s Adapter check reports it', async () => {
+		const target = ownCore()
+		// The Preview's Adapter check (Clause 01a116f0-cae2-7c64-9c76-d472f252789a): invalid, and no bundle to load.
+		const response = await fetch(`${target.origin}/api/preview/adapters`, { headers: target.headers })
+		const body = await response.json() as { state: string; bundleUrl?: string; diagnostics: { code: string; path: string }[] }
+		expect(body.state).toBe('invalid')
+		expect(body.bundleUrl).toBeUndefined()
+		expect(body.diagnostics).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: '/adapters/0/manifest/widgetPlugins/0' }))
+
+		const { context, page } = await open('/workspace/product-kit?section=overview', target.cookie, target)
+		try {
+			const row = page.locator('#product-kit-adapters [data-adapter-row]')
+			await row.first().waitFor({ timeout: 15_000 })
+			expect(await row.count()).toBe(1)
+			await expect.poll(() => row.innerText(), { timeout: 15_000 }).toContain('adapter.runtime_widget_core_incompatible')
+			expect(await row.innerText()).toContain('Can\'t load')
+			expect(await page.locator('[data-adapters-invalid]').isVisible()).toBe(true)
 		}
 		finally { await context.close() }
 	}, 60_000)
