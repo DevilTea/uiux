@@ -1798,7 +1798,6 @@ export class ImmutableArtifactStore {
 		if (existing) {
 			if (digestBytes(existing) !== identity)
 				throw new PersistenceError('persistence.artifact_corrupt', `Existing immutable artifact ${identity} does not match its content identity.`)
-			await this.markProducedUnlocked(relativePath)
 			return { identity, created: false }
 		}
 		const created = await this.persistence.atomicCreateImmutableUnlocked(relativePath, bytes)
@@ -1806,22 +1805,9 @@ export class ImmutableArtifactStore {
 			const racedExisting = await this.persistence.readBytesUnlocked(relativePath)
 			if (digestBytes(racedExisting) !== identity)
 				throw new PersistenceError('persistence.artifact_corrupt', `Existing immutable artifact ${identity} does not match its content identity.`)
-			await this.markProducedUnlocked(relativePath)
 			return { identity, created: false }
 		}
 		return { identity, created }
-	}
-
-	/**
-	 * A producer that yields bytes already in the store (a capture that renders exactly what an
-	 * earlier one did) moves the blob's modification time to now, leaving its bytes untouched. The
-	 * modification time is when the blob was last produced, which artifact cleanup reads to find the
-	 * latest Evidence record of each View and render context (Rule 01a14e30-31c0-7289-a944-74af9556eabf).
-	 * Best effort: a store whose times cannot be set only keeps the earlier time.
-	 */
-	private async markProducedUnlocked(relativePath: string): Promise<void> {
-		const now = new Date()
-		await fs.utimes(resolveWorkspacePath(this.persistence.root, relativePath), now, now).catch(() => undefined)
 	}
 
 	async read(identity: string): Promise<Uint8Array | undefined> {

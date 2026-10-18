@@ -161,7 +161,9 @@ uiux artifacts gc --workspace ./.uiux --dry-run   # list what would be deleted; 
 uiux artifacts gc --workspace ./.uiux             # delete it
 ```
 
-It keeps the Evidence that a Review submission references, the blobs that a Checkpoint references and the latest Evidence record of each View and render context, with the screenshots and Evidence those records reference; it also keeps every Evidence record that names its View's current revision. Handoff blobs are not kept: an exported bundle has its own copies. It prints each deleted blob's `sha256:` identity, then their count and total bytes. It refuses a Workspace that a running `uiux dev` serves (stop the server first), and, deleting nothing, one whose Review thread, Checkpoint or stored blob it cannot read.
+It keeps the Evidence that a Review submission references, the blobs that a Checkpoint references, the blobs that this host's history of the Workspace (under `$UIUX_HOME`, including the open autosave) references, and the latest Evidence record of each View and render context, with everything those blobs reference: a kept JSON blob keeps every `sha256:` identity it contains. "Latest" follows the version timeline of the View revision an Evidence record names (Checkpoints, host versions, Review submissions and the View's current revision), never file times; when that order cannot be decided, every record of that View and render context is kept. Handoff blobs are not kept: an exported bundle has its own copies. It prints each deleted blob's `sha256:` identity, then their count and total bytes. It refuses a Workspace that a running `uiux dev` serves (stop the server first), and, deleting nothing, one whose Review thread, Checkpoint, host history or stored blob it cannot read.
+
+The cleanup sees only this checkout and this host's history. When `artifacts/` is committed, as in a shared Workspace, the deletions reach every other clone with the commit that records them, including blobs that another host's history still names; review the `--dry-run` list before you commit the result.
 
 ### Copying components into a product project
 

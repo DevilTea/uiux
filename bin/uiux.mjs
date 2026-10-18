@@ -64,9 +64,10 @@ Commands:
   artifacts gc [--workspace <dir>] [--dry-run]
                            Delete the blobs of the Workspace's derived-artifact store
                            (artifacts/) that nothing still needs: what a Review
-                           submission references, what a Checkpoint references and the
-                           latest Evidence of each View and render context are kept,
-                           with what they reference; Handoff blobs are not. Prints each
+                           submission, a Checkpoint or this host's history of the
+                           Workspace references and the latest Evidence of each View
+                           and render context are kept, with what they reference;
+                           Handoff blobs are not. Prints each
                            deleted blob's sha256: identity, then their count and total
                            bytes; --dry-run prints the same and deletes nothing. Refused
                            while a uiux dev server serves the Workspace. No other
