@@ -2,7 +2,7 @@ import { readFile, realpath } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
 
 import { maskHostPaths } from '../adapters/host-paths'
-import { readKitBuildDeclaration, specifierInBuildOutput } from '../adapters/kit-build-declaration'
+import { readDeclaredKitBuildDeclaration, readKitBuildDeclaration, specifierInBuildOutput } from '../adapters/kit-build-declaration'
 import { containedRealPath } from '../adapters/kit-registry'
 import {
 	adapterResolutionBase,
@@ -155,7 +155,7 @@ async function kitBuildPin(workspaceRoot: string, codeDir: string, adapters: rea
 > {
 	const root = resolve(workspaceRoot)
 	const kitDirectory = join(root, codeDir)
-	const read = await readKitBuildDeclaration(kitDirectory)
+	const read = await readKitBuildDeclarationFor(root, kitDirectory)
 	if (read.state === 'none') return { state: 'valid' }
 	if (read.state === 'invalid')
 		return { state: 'invalid', diagnostics: [{ code: 'kit.build_declaration_invalid', path: '/product-kit', message: read.message }] }
@@ -196,6 +196,18 @@ async function kitBuildPin(workspaceRoot: string, codeDir: string, adapters: rea
 			resolution.then(result => result.state === 'valid' ? undefined : drop(), drop)
 		},
 	} }
+}
+
+/**
+ * The kit build declaration as a resolution reads it. While the running build has an output
+ * generation, the build is known to be declared, so a missing or unparseable `kit/package.json`,
+ * as a non-atomic host rewrite leaves it for a moment, is read again before the capture of that
+ * output pins nothing (Rule 01a11bb1-9e5e-79ab-841e-c953e8b44bbf).
+ */
+function readKitBuildDeclarationFor(root: string, kitDirectory: string): ReturnType<typeof readKitBuildDeclaration> {
+	return kitBuildRunnerFor(root)?.outputVersion() !== undefined
+		? readDeclaredKitBuildDeclaration(kitDirectory)
+		: readKitBuildDeclaration(kitDirectory)
 }
 
 async function buildOutputExists(kitDirectory: string, output: string): Promise<boolean> {
@@ -272,7 +284,7 @@ async function resolveProductKitStyles(workspaceRoot: string, layout: WorkspaceL
 	if (version !== undefined && pinned && pinned.version === version && pinned.styles === key) return pinned.resolution
 
 	const codeDir = layout.codeDir
-	const declaration = await readKitBuildDeclaration(join(root, codeDir))
+	const declaration = await readKitBuildDeclarationFor(root, join(root, codeDir))
 	const output = declaration.state === 'declared' ? declaration.declaration.output : undefined
 	const resolver = new NodeWorkspaceAdapterModuleResolver({ layout })
 	const paths: string[] = []

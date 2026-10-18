@@ -36,32 +36,60 @@ const BUILD_MEMBERS = new Set(['command', 'watch', 'timeoutSeconds'])
  * `invalid`: no command is run on a guess. Messages name only kit-relative paths.
  */
 export async function readKitBuildDeclaration(codeDirectory: string): Promise<KitBuildDeclarationRead> {
+	return (await readKitBuildDeclarationOnce(codeDirectory)).read
+}
+
+/** How many reads of `kit/package.json` `readDeclaredKitBuildDeclaration` makes at most, and how far apart. */
+export const KIT_BUILD_DECLARATION_READ_ATTEMPTS = 4
+export const KIT_BUILD_DECLARATION_RETRY_DELAY_MS = 50
+
+/**
+ * The build declaration of a kit project whose build is known to be declared, such as one whose
+ * build output is being captured (Rule 01a11bb1-9e5e-79ab-841e-c953e8b44bbf). A host may rewrite
+ * `kit/package.json` non-atomically (truncate, then write), so a read that finds the file missing,
+ * unreadable or not well formed JSON is repeated, at most `KIT_BUILD_DECLARATION_READ_ATTEMPTS` reads
+ * in all, `KIT_BUILD_DECLARATION_RETRY_DELAY_MS` apart; the last read stands, with its own message.
+ * A well formed file with a malformed `uiux` member, and a package file that is not a regular file,
+ * are not read again.
+ */
+export async function readDeclaredKitBuildDeclaration(codeDirectory: string): Promise<KitBuildDeclarationRead> {
+	let attempt = await readKitBuildDeclarationOnce(codeDirectory)
+	for (let reads = 1; attempt.unreadable && reads < KIT_BUILD_DECLARATION_READ_ATTEMPTS; reads++) {
+		await new Promise(resolve => setTimeout(resolve, KIT_BUILD_DECLARATION_RETRY_DELAY_MS))
+		attempt = await readKitBuildDeclarationOnce(codeDirectory)
+	}
+	return attempt.read
+}
+
+/** One read of `kit/package.json`; `unreadable` when its content could not be had, as while a host rewrites it. */
+async function readKitBuildDeclarationOnce(codeDirectory: string): Promise<Readonly<{ read: KitBuildDeclarationRead; unreadable: boolean }>> {
 	const path = join(codeDirectory, KIT_PACKAGE_FILENAME)
+	const unreadable = (read: KitBuildDeclarationRead) => ({ read, unreadable: true })
 	let info: Awaited<ReturnType<typeof lstat>>
 	try {
 		info = await lstat(path)
 	}
 	catch (error) {
 		const code = (error as NodeJS.ErrnoException | undefined)?.code
-		if (code === 'ENOENT' || code === 'ENOTDIR') return { state: 'none' }
-		return { state: 'invalid', message: `kit/${KIT_PACKAGE_FILENAME} could not be read.` }
+		if (code === 'ENOENT' || code === 'ENOTDIR') return unreadable({ state: 'none' })
+		return unreadable({ state: 'invalid', message: `kit/${KIT_PACKAGE_FILENAME} could not be read.` })
 	}
-	if (!info.isFile()) return { state: 'invalid', message: `kit/${KIT_PACKAGE_FILENAME} is not a regular file.` }
+	if (!info.isFile()) return { read: { state: 'invalid', message: `kit/${KIT_PACKAGE_FILENAME} is not a regular file.` }, unreadable: false }
 	let text: string
 	try {
 		text = await readFile(path, 'utf8')
 	}
 	catch {
-		return { state: 'invalid', message: `kit/${KIT_PACKAGE_FILENAME} could not be read.` }
+		return unreadable({ state: 'invalid', message: `kit/${KIT_PACKAGE_FILENAME} could not be read.` })
 	}
 	let parsed: unknown
 	try {
 		parsed = JSON.parse(text)
 	}
 	catch {
-		return { state: 'invalid', message: `kit/${KIT_PACKAGE_FILENAME} could not be read as JSON.` }
+		return unreadable({ state: 'invalid', message: `kit/${KIT_PACKAGE_FILENAME} could not be read as JSON.` })
 	}
-	return parseKitBuildDeclaration(parsed)
+	return { read: parseKitBuildDeclaration(parsed), unreadable: false }
 }
 
 /** The build declaration of a parsed `kit/package.json`. */
