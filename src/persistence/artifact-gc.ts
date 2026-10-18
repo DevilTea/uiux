@@ -215,12 +215,21 @@ async function scanStoreUnlocked(persistence: FileNativePersistence): Promise<Ma
 			store.set(identity, {
 				identity,
 				bytes: bytes.byteLength,
-				references: json.ok ? [...identitiesIn(json.value)].filter(found => found !== identity) : [],
+				references: [...new Set([...rawIdentities(bytes), ...(json.ok ? identitiesIn(json.value) : [])])].filter(found => found !== identity),
 				...(validation?.ok ? { evidence: validation.value } : {}),
 			})
 		}
 	}
 	return store
+}
+
+/**
+ * Every `sha256:<64 hex>` in a blob's raw bytes, read as latin1 so each byte maps to one character
+ * (plain text, a UTF-8 BOM or any encoding that keeps ASCII). It adds to the parsed-JSON scan, which
+ * still finds identities written with `\u` escapes.
+ */
+function rawIdentities(bytes: Uint8Array): Set<string> {
+	return new Set(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('latin1').match(IDENTITY) ?? [])
 }
 
 /** The parsed value of a blob that is UTF-8 JSON text holding an object, an array or a string. */

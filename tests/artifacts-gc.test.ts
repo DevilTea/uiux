@@ -375,6 +375,54 @@ describe('uiux artifacts gc', () => {
 		for (const identity of [outer, inner, asKey, deepest]) expect(await exists(artifactPath(root, identity)), identity).toBe(true)
 	})
 
+	it('keeps the identities named by a kept blob that is not JSON, including one behind a UTF-8 BOM', async () => {
+		const workspace = await makeWorkspace()
+		const { root, persistence } = workspace
+		const plain = await put(persistence, 'png: named by plain text')
+		const bommed = await put(persistence, 'png: named behind a BOM')
+		const text = await put(persistence, `notes, not JSON: see ${plain}\n`)
+		const withBom = await put(persistence, new Uint8Array([0xEF, 0xBB, 0xBF, ...encoder.encode(JSON.stringify({ ref: bommed }))]))
+		const orphan = await put(persistence, 'png: orphan')
+		await writeReview(root, readyThread(text, [{ viewId: randomUUID(), revision: 'r_reviewed' }]))
+		await writeReview(root, readyThread(withBom, [{ viewId: randomUUID(), revision: 'r_reviewed' }]))
+		const run = await gc(workspace)
+		expect(run.status, run.stderr.join('\n')).toBe(0)
+		expect(run.stdout).toEqual([orphan, 'Deleted 1 blob, 11 bytes.'])
+		for (const identity of [text, plain, withBom, bommed]) expect(await exists(artifactPath(root, identity)), identity).toBe(true)
+	})
+
+	it('keeps the Evidence of a revision that a later host version records again, and deletes the one in between', async () => {
+		const workspace = await makeWorkspace()
+		const { root, home, persistence } = workspace
+		const viewId = randomUUID()
+		const first = await putEvidence(persistence, evidenceRecord({ viewId, viewRevision: 'r_1', screenshot: await put(persistence, 'png: r_1') }))
+		const second = await putEvidence(persistence, evidenceRecord({ viewId, viewRevision: 'r_2', screenshot: await put(persistence, 'png: r_2') }))
+		const v1 = encoder.encode('{"view":1}\n')
+		await createCheckpoint(persistence, [viewResource(viewId, v1, 'r_1')], [v1], '2026-10-01T00:00:00Z')
+		const host = await hostStore(root, home)
+		await host.writeVersion(hostVersion([viewResource(viewId, encoder.encode('{"view":2}\n'), 'r_2')], '2026-10-02T00:00:00Z'))
+		// The View is reverted: r_1 is seen again, later than r_2.
+		await host.writeVersion(hostVersion([viewResource(viewId, v1, 'r_1')], '2026-10-03T00:00:00Z'))
+		await checkout(root)
+		const run = await gc(workspace)
+		expect(run.status, run.stderr.join('\n')).toBe(0)
+		expect(run.stdout.slice(0, -1)).toContain(second)
+		expect(run.stdout.slice(0, -1)).not.toContain(first)
+		expect(await exists(artifactPath(root, second))).toBe(false)
+		expect(await exists(artifactPath(root, first))).toBe(true)
+	})
+
+	it('refuses, deleting nothing, when UIUX_HOME is inside the Workspace', async () => {
+		const workspace = await populated()
+		const { root } = workspace
+		const before = await storeListing(root)
+		const run = await gc({ root, home: join(root, 'nested-home') })
+		expect(run.status).toBe(1)
+		expect(run.stdout).toEqual([])
+		expect(run.stderr.join('\n')).not.toBe('')
+		expect(await storeListing(root)).toEqual(before)
+	})
+
 	it('refuses, deleting nothing, a Workspace that a running uiux dev server holds', async () => {
 		const workspace = await populated()
 		const { root, unreachable } = workspace
