@@ -1,6 +1,7 @@
-import { computed, shallowRef, triggerRef } from 'vue'
+import { computed, shallowRef, triggerRef, watch } from 'vue'
 import { useI18n } from '#imports'
 import type { FormalEvidenceRecord } from '../../src/domain/evidence/schema'
+import type { EvidenceStalenessContext } from '../../src/domain/evidence/staleness'
 import type { HandoffManifest, HandoffReadiness, HandoffReadinessAssessment, HandoffRoot } from '../../src/domain/handoff/schema'
 import type { ProductKitProvenance } from '../../src/domain/product-kit/provenance'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
@@ -10,7 +11,7 @@ import {
 	type CaptureContext,
 	type EvidenceFreshness,
 } from '../utils/readiness'
-import { useUiuxClient } from './useUiuxClient'
+import { useUiuxClient, type EvidenceViewRenderInput } from './useUiuxClient'
 import { useWorkbench } from './useWorkbench'
 
 /**
@@ -72,6 +73,11 @@ const evidenceItems = shallowRef<readonly EvidenceItem[]>([])
  * `productKitUnavailable` when it cannot be computed.
  */
 const currentProductKit = shallowRef<Readonly<{ productKit?: ProductKitProvenance; productKitUnavailable?: boolean }>>({})
+/**
+ * Each View's current render-input digest, read with the Evidence list, by View key (Rule
+ * 01a115cd-c5a5-…: the View condition compares it, not the View revision).
+ */
+const viewRenderInputs = shallowRef<ReadonlyMap<string, EvidenceViewRenderInput>>(new Map())
 const evidenceLoaded = shallowRef(false)
 const evidenceLoading = shallowRef(false)
 const evidenceError = shallowRef<FetchErrorDetails>()
@@ -92,6 +98,30 @@ function readLastSeen(): Record<string, string> {
 		return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, string> : {}
 	}
 	catch { return {} }
+}
+
+/**
+ * While a View's digest is older than its current revision (the list is being read again), a
+ * capture that recorded the current revision saw byte-identical content, so its own recorded
+ * digest is the current one.
+ */
+function unchangedSinceCapture(
+	record: FormalEvidenceRecord,
+	inputs: ReadonlyMap<string, EvidenceViewRenderInput>,
+	revisions: ReadonlyMap<string, string>,
+	context: EvidenceStalenessContext,
+): EvidenceStalenessContext {
+	const viewId = (record.executionContext as Record<string, unknown> | undefined)?.viewId
+	if (typeof viewId !== 'string') return context
+	const current = revisions.get(viewId)
+	const recordedDigest = record.provenance?.renderInputDigest
+	if (current === undefined || inputs.get(viewId)?.revision === current || !recordedDigest) return context
+	const recordedRevision = record.provenance.resources.find((resource) => {
+		const identity = resource.identity as Record<string, unknown>
+		return identity.type === 'view' && identity.id === viewId
+	})?.revision
+	if (recordedRevision !== current) return context
+	return { ...context, allViews: [...context.allViews.filter(view => view.key !== viewId), { key: viewId, renderInputDigest: recordedDigest }] }
 }
 
 export function rootKey(roots: readonly HandoffRoot[]): string {
@@ -142,8 +172,9 @@ export function useReadiness() {
 		if (evidencePromise && !force) return evidencePromise
 		evidenceLoading.value = true
 		const run = uiux.listEvidenceForFreshness<EvidenceItem, ProductKitProvenance>()
-			.then(({ items, productKit, productKitUnavailable }) => {
+			.then(({ items, views: inputs, productKit, productKitUnavailable }) => {
 				currentProductKit.value = { ...(productKit ? { productKit } : {}), ...(productKitUnavailable === true ? { productKitUnavailable } : {}) }
+				viewRenderInputs.value = new Map((inputs ?? []).map(input => [input.key, input]))
 				evidenceItems.value = (items ?? []).filter(item => item?.record?.kind === 'formal_capture')
 				evidenceError.value = undefined
 			})
@@ -159,9 +190,26 @@ export function useReadiness() {
 		return run
 	}
 
+	/**
+	 * A View edited since the Evidence list was read has a newer revision than its digest: read the
+	 * list again, so the View condition compares the current render-input digest.
+	 */
+	watch(() => views.value.map(view => `${view.key}@${view.revision}`).join(','), () => {
+		if (!evidenceLoaded.value || evidencePromise) return
+		const inputs = viewRenderInputs.value
+		if (views.value.every(view => inputs.get(view.key)?.revision === view.revision)) return
+		void loadEvidence(true)
+	})
+
 	const evidenceEntries = computed<readonly EvidenceEntry[]>(() => {
+		const inputs = viewRenderInputs.value
+		const revisions = new Map(views.value.map(view => [view.key, view.revision]))
+		const allViews = views.value.flatMap((view) => {
+			const input = inputs.get(view.key)
+			return input ? [{ key: view.key, renderInputDigest: input.renderInputDigest }] : []
+		})
 		const stalenessContext = {
-			allViews: views.value.map(view => ({ key: view.key, revision: view.revision })),
+			allViews,
 			workspace: workspace.value,
 			discoveredLocales: discoveredLocales.value,
 			localeRevisions: localeRevisions.value,
@@ -173,7 +221,7 @@ export function useReadiness() {
 				digest: item.digest,
 				record: item.record,
 				...(context ? { context } : {}),
-				freshness: evidenceFreshness(item.record, stalenessContext),
+				freshness: evidenceFreshness(item.record, unchangedSinceCapture(item.record, inputs, revisions, stalenessContext)),
 			}
 		})
 	})

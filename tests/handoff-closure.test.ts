@@ -31,6 +31,7 @@ import { validateWorkspaceManifest } from '../src/domain/workspace/schema'
 import { validateAssetMetadata, type AuthoredAsset } from '../src/domain/assets/schema'
 import { artifactBytesMatch } from '../src/domain/artifacts/schema'
 import { canonicalJsonBytes } from '../src/domain/canonical-json'
+import { renderInputDigest } from '../src/domain/evidence/render-input-digest'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import type { ReviewThread } from '../src/domain/reviews/schema'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
@@ -271,6 +272,9 @@ async function putFormalEvidence(
 	// A capture without Product Kit provenance has unknown freshness (Rule 01a1161b-ff68-…), so the
 	// fixture records the current one, as formal capture does.
 	const productKit = withProductKit ? await readWorkspaceProductKitProvenance(persistence) : undefined
+	// The View's render-input digest as it is stored now (Clause 01a14e30-2d4a-…), as formal capture records it.
+	const viewRead = await persistence.views.readInspected(viewId)
+	const viewRenderInput = viewRead?.resource ? renderInputDigest(viewRead.resource) : undefined
 
 	const record: FormalEvidenceRecord = {
 		schemaVersion: 1,
@@ -292,6 +296,7 @@ async function putFormalEvidence(
 			],
 			versions: { uiux: '0.1.0' },
 			...(productKit ? { productKit } : {}),
+			...(viewRenderInput ? { renderInputDigest: viewRenderInput } : {}),
 		},
 		artifactRefs: [screenshotPut.identity],
 		evidenceRefs: [],
@@ -1020,6 +1025,52 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		expect(Buffer.from(stored!)).toEqual(declarations)
 	})
 
+	// Scenario 01a14e30-3071-774a-bdc4-61ff3c92e303 (Rules 01a115cd-c5a5-… and 01a115cd-c749-…).
+	it('keeps evidence fresh in readiness and export after a Spec-only or metadata edit of its View', async () => {
+		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+
+		const view = createSampleView(VIEW_1_ID, 'Spec Only View')
+		const r1 = await persistence.views.create(VIEW_1_ID, view)
+		const captured = await putFormalEvidence(persistence, VIEW_1_ID, r1, true)
+		const handoff = currentSchemaHandoff(persistence)
+
+		const edited = { ...view, name: 'Renamed View', feature: 'billing', spec: { ...view.spec, intent: 'A new intent, same render input' } }
+		const casRes = await persistence.views.compareAndSwap({ key: VIEW_1_ID, expectedRevision: r1, resource: edited })
+		expect(casRes.ok).toBe(true)
+		if (!casRes.ok) throw new Error('CAS failed')
+		expect(casRes.revision).not.toBe(r1)
+
+		const assessed = await handoff.assessReadiness({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(assessed.readiness?.implementationReady).toBe(true)
+		expect(assessed.readiness?.blockingDiagnostics.some(b => b.code === 'handoff.stale_view_evidence')).toBe(false)
+		const exported = await handoff.exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(exported.status).toBe('exported')
+		if (exported.status === 'exported') expect(exported.manifest?.evidenceRefs.some(ref => ref.evidence === captured)).toBe(true)
+	})
+
+	// Rule 01a115cd-c53c-…: a capture that records no render-input digest is stale, even unchanged.
+	it('excludes a capture that records no render-input digest from readiness and export', async () => {
+		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		const view = createSampleView(VIEW_1_ID, 'Legacy Capture View')
+		const r1 = await persistence.views.create(VIEW_1_ID, view)
+		const captured = await putFormalEvidence(persistence, VIEW_1_ID, r1, true)
+		const record = JSON.parse(Buffer.from((await persistence.artifacts.read(captured))!).toString('utf8')) as FormalEvidenceRecord
+		const { renderInputDigest: _omitted, ...provenance } = record.provenance
+		void _omitted
+		const legacy = (await persistence.artifacts.put(canonicalJsonBytes({ ...record, provenance }))).identity
+		expect(legacy).not.toBe(captured)
+		// The same capture without the digest is left out; the one that records it is kept.
+		const handoff = currentSchemaHandoff(persistence)
+		const exported = await handoff.exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(exported.status).toBe('exported')
+		if (exported.status === 'exported') expect(exported.manifest?.evidenceRefs.map(ref => ref.evidence)).toEqual([captured])
+	})
+
+	// Scenario 01a118a1-d3f5-7ea8-875c-6ddf0ec00602: the change is an IR change.
 	it('excludes stale evidence from readiness and export when View revision changes (r1 -> r2 regression)', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
 		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
@@ -1040,8 +1091,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		})
 		expect(assessR1.readiness?.implementationReady).toBe(true)
 
-		// Mutate View to r2
-		const updatedView = { ...view, name: 'Revision Test View Mutated' }
+		// Mutate the View's IR to r2: what was rendered changed (Rule 01a115cd-c5a5-…).
+		const updatedView = { ...view, ir: { type: 'RootShell', id: 'root', slots: { content: [] } } }
 		const casRes = await persistence.views.compareAndSwap({
 			key: VIEW_1_ID,
 			expectedRevision: r1,

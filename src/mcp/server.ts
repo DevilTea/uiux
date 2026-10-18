@@ -19,6 +19,7 @@ import { HISTORY_VERSION_TYPES } from '../domain/history/constants'
 import type { ViewResource } from '../domain/views/schema'
 import type { FlowStep } from '../domain/flows/schema'
 import { REVIEW_RESOLUTIONS, type ReviewAnchor, type ReviewDisplayHint, type ReviewEvidenceRef, type ReviewRenderContext, type ReviewResourceRevision } from '../domain/reviews/schema'
+import { CHANGE_DOMAINS } from '../domain/reviews/change-domains'
 import type { ThemeEntry, ViewportPreset } from '../domain/workspace/schema'
 import type { ProductKitComponent, ProductKitWidgetMapping } from '../domain/product-kit/schema'
 import { ACCESS_PRESETS_RESOURCE_KIND } from '../domain/access-presets/schema'
@@ -247,7 +248,8 @@ const submitReadyForReviewSchema = z.object({
 	reviewId: z.string(),
 	expectedRevision: z.string(),
 	actor: reviewActorSchema.optional().describe(ACTOR_IGNORED_DESCRIPTION),
-	changeDomains: z.array(z.string()),
+	// A plain string list, so an unknown value is refused by the domain with its own code.
+	changeDomains: z.array(z.string()).describe(`What changed, one or more of ${CHANGE_DOMAINS.join(', ')}; any other value is refused with review.change_domain_unknown. spec and metadata (a View's name, feature and other fields outside its Spec and render input) affect no Evidence; flow only Flow Evidence; ir and variant the formal captures of the submission's Views; asset those of the Views binding a changed Asset; i18n those in a changed Locale; settings those in a changed viewport or theme; adapter and product-kit every formal capture.`),
 	resources: z.array(z.object({
 		identity: z.record(z.string(), z.unknown()),
 		revision: z.string(),
@@ -868,7 +870,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'submit_ready_for_review',
 		{
 			title: 'Submit UIUX Review Ready',
-			description: 'Submit an immutable ready-for-review submission and lifecycle event with revision CAS. A Widget thread\'s resources must name its anchor View at the current revision. A Workspace thread\'s resources must name the current Workspace manifest revision ({ type: "workspace" }) and every View they name must be valid and current; formal_capture evidence must be complete for the current revision of a View named in resources.',
+			description: 'Submit an immutable ready-for-review submission and lifecycle event with revision CAS. A Widget thread\'s resources must name its anchor View at the current revision. A Workspace thread\'s resources must name the current Workspace manifest revision ({ type: "workspace" }) and every View they name must be valid and current; formal_capture evidence must be complete for the current render input (IR and Variants) of a View named in resources, so a capture taken before a Spec-only or name edit still counts and one taken before an IR or Variant change does not (review.formal_evidence_not_current). changeDomains takes only the known values listed on it (review.change_domain_unknown).',
 			inputSchema: submitReadyForReviewSchema,
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},

@@ -545,7 +545,7 @@ describe('resolve requires reviews.resolve on a human member\'s Workbench cookie
 		const evidence = await ctx.persistence.artifacts.put(new TextEncoder().encode('evidence'))
 		const ready = await submitReadyForReviewForHttp(scoped(ctx.app, testMember({ kind: 'agent', preset: 'editor', credential: 'token' })), REVIEW_ID, {
 			expectedRevision: ctx.reviewRevision,
-			changeDomains: ['view-structure'],
+			changeDomains: ['ir'],
 			resources: [{ identity: { type: 'view', id: VIEW_ID }, revision: ctx.viewRevision }],
 			evidenceRefs: [{ kind: 'screenshot', evidence: evidence.identity }],
 		})

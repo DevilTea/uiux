@@ -1,9 +1,14 @@
 import { productKitChanged, type ProductKitProvenance } from '../product-kit/provenance'
 import type { FormalEvidenceRecord } from './schema'
 
+/**
+ * A View as freshness sees it: its key and its current render-input digest (Clause
+ * 01a14e30-2d4a-7ce9-ad68-58db56f36f47, `renderInputDigest` in `./render-input-digest`).
+ */
+export type EvidenceStalenessView = Readonly<{ key: string; renderInputDigest: string }>
+
 export type EvidenceStalenessContext = Readonly<{
-	allViews: readonly { key: string; revision: string }[]
-	selectedView?: { key: string; revision: string }
+	allViews: readonly EvidenceStalenessView[]
 	workspace?: {
 		resource?: {
 			i18n?: { defaultLocale?: string }
@@ -44,19 +49,36 @@ export const PRODUCT_KIT_PROVENANCE_MISSING_REASON = 'Capture records no Product
 /** The reason no capture is fresh while the current Product Kit provenance cannot be computed (Rule 01a1161b-ff68-76af-8237-dbc8ef2c27d1). */
 export const PRODUCT_KIT_PROVENANCE_UNAVAILABLE_REASON = 'Current Product Kit provenance cannot be computed'
 
-export function isCompleteEvidenceForViewRevision(
+/** The reason a capture without a View revision is stale (Rule 01a115cd-c53c-7121-ae74-8243c4890477). */
+export const VIEW_PROVENANCE_MISSING_REASON = 'Evidence provenance missing View reference'
+
+/** The reason a capture without a render-input digest is stale (Rule 01a115cd-c53c-7121-ae74-8243c4890477). */
+export const RENDER_INPUT_DIGEST_MISSING_REASON = 'Capture records no render-input digest; capture it again'
+
+/** The reason a capture is stale once its View's IR or Variants changed (Rule 01a115cd-c5a5-757a-b049-b5138fe75920). */
+export const RENDER_INPUT_CHANGED_REASON = 'View IR or Variants changed since capture'
+
+/**
+ * Rules 01a11544-558b-7b86-b4c7-76928862c948 and 01a115cd-c53c-…: a formal capture satisfies a
+ * submission for `viewId` when it is complete, captured that View, records a View revision for it
+ * and recorded `renderInputDigest`, the View's current render-input digest. A Spec-only or metadata
+ * edit keeps the digest, so it keeps the capture usable.
+ */
+export function isCompleteEvidenceForRenderInput(
 	record: FormalEvidenceRecord,
 	viewId: string,
-	revision: string,
+	renderInputDigest: string,
 ): boolean {
 	if (record.coverage.complete !== true) return false
 	const context = record.executionContext as Record<string, unknown>
 	if (context.viewId !== viewId) return false
+	if (record.provenance.renderInputDigest !== renderInputDigest) return false
 	return record.provenance.resources.some((resource) => {
 		const identity = resource.identity as Record<string, unknown>
 		return identity.type === 'view'
 			&& identity.id === viewId
-			&& resource.revision === revision
+			&& typeof resource.revision === 'string'
+			&& resource.revision.length > 0
 	})
 }
 
@@ -80,16 +102,19 @@ export function evaluateEvidenceStaleness(
 		r => (r.identity as Record<string, unknown>)?.type === 'view',
 	)
 
-	if (!provView) {
-		return { isStale: true, reason: 'Evidence provenance missing View reference' }
+	// Rule 01a115cd-c53c-…: a capture that records no View revision or no render-input digest is stale.
+	if (!provView || typeof provView.revision !== 'string' || provView.revision.length === 0) {
+		return { isStale: true, reason: VIEW_PROVENANCE_MISSING_REASON }
+	}
+	const recordedDigest = record.provenance.renderInputDigest
+	if (typeof recordedDigest !== 'string' || recordedDigest.length === 0) {
+		return { isStale: true, reason: RENDER_INPUT_DIGEST_MISSING_REASON }
 	}
 
-	const matchingRevision = (context.selectedView && context.selectedView.key === ctx.viewId)
-		? context.selectedView.revision
-		: viewSummary.revision
-
-	if (provView.revision !== matchingRevision) {
-		return { isStale: true, reason: 'View revision has changed since capture' }
+	// Rule 01a115cd-c5a5-…: the View condition follows what was rendered (IR and Variants), not the
+	// View revision, so a Spec-only or metadata edit leaves the capture fresh.
+	if (recordedDigest !== viewSummary.renderInputDigest) {
+		return { isStale: true, reason: RENDER_INPUT_CHANGED_REASON }
 	}
 
 	if (typeof ctx.locale === 'string') {

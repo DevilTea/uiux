@@ -9,7 +9,7 @@ import type { PointResourceKind } from '../dto/point-resources'
 import type { ResourceDiscoveryOutcome } from '../dto/resource-discovery'
 import type { AssetAuthoringResult, CreateAssetCommand, ReplaceAssetCommand } from '../services/asset-authoring'
 import type { CreateFlowCommand, FlowAuthoringResult, UpdateFlowCommand } from '../services/flow-authoring'
-import type { CaptureFormalEvidenceCommand, CaptureFormalEvidenceResult, FormalEvidenceItem } from '../services/formal-capture'
+import type { CaptureFormalEvidenceCommand, CaptureFormalEvidenceResult, FormalEvidenceItem, ViewRenderInput } from '../services/formal-capture'
 import type { ProductKitChecksResult } from '../services/product-kit-checks'
 import type { AssessHandoffReadinessCommand, AssessHandoffReadinessResult, ExportHandoffCommand, ExportHandoffResult } from '../services/handoff-export'
 import type { DiffVersionsCommand, VersionDiffOutcome } from '../services/history-diff'
@@ -139,6 +139,8 @@ export interface ScopedWorkspaceSession {
 	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
 	/** The current Product Kit provenance that Evidence freshness is judged against; read with the Evidence, under its key. */
 	productKitProvenance(): Promise<CurrentProductKitProvenance>
+	/** Each View's current render-input digest that Evidence freshness is judged against; read with the Evidence, under its key. */
+	viewRenderInputs(): Promise<readonly ViewRenderInput[]>
 	readArtifact(identity: string): Promise<Uint8Array | undefined>
 	assessHandoffReadiness(command: AssessHandoffReadinessCommand): Promise<AssessHandoffReadinessResult | AccessRefusal>
 	diffVersions(command: DiffVersionsCommand): Promise<VersionDiffOutcome | AccessRefusal>
@@ -461,6 +463,7 @@ export function createScopedWorkspaceSession(
 		async searchPointResources(input) { assert('searchPointResources'); return app.searchPointResources(input) },
 		async listEvidence(viewId) { assert('listEvidence'); return app.listEvidence(viewId) },
 		async productKitProvenance() { assert('listEvidence'); return app.productKitProvenance() },
+		async viewRenderInputs() { assert('listEvidence'); return app.viewRenderInputs() },
 		async readArtifact(identity) { assert('readArtifact'); return app.readArtifact(identity) },
 		async assessHandoffReadiness(command) {
 			const denied = authorizeOperation(principal, 'assessHandoffReadiness')

@@ -59,7 +59,9 @@ describe('Handoff assessment: blocking versus advisory (R9)', () => {
 	})
 })
 
-function record(overrides: Partial<{ resources: FormalEvidenceRecord['provenance']['resources']; context: Record<string, unknown>; complete: boolean }> = {}): FormalEvidenceRecord {
+const RENDER_INPUT = `sha256:${'d'.repeat(64)}`
+
+function record(overrides: Partial<{ resources: FormalEvidenceRecord['provenance']['resources']; context: Record<string, unknown>; complete: boolean; renderInputDigest: string | null }> = {}): FormalEvidenceRecord {
 	return {
 		schemaVersion: 1,
 		kind: 'formal_capture',
@@ -72,13 +74,14 @@ function record(overrides: Partial<{ resources: FormalEvidenceRecord['provenance
 				{ identity: { type: 'locale', id: 'en-US' }, revision: 'r_locale' },
 			],
 			versions: {},
+			...(overrides.renderInputDigest === null ? {} : { renderInputDigest: overrides.renderInputDigest ?? RENDER_INPUT }),
 		},
 		artifactRefs: [],
 	}
 }
 
 const CURRENT = {
-	allViews: [{ key: VIEW, revision: 'r_view' }],
+	allViews: [{ key: VIEW, renderInputDigest: RENDER_INPUT }],
 	workspace: { resource: { i18n: { defaultLocale: 'en-US' }, viewports: { desktop: { dimensions: { width: 1280, height: 800 } } }, themes: { light: {} } } },
 	discoveredLocales: ['en-US'],
 	localeRevisions: { 'en-US': 'r_locale' },
@@ -90,7 +93,7 @@ describe('Evidence freshness (R9 acceptance 5)', () => {
 	})
 
 	it('is stale when the View or Locale changed after capture', () => {
-		expect(evidenceFreshness(record(), { ...CURRENT, allViews: [{ key: VIEW, revision: 'r_next' }] })).toEqual({ state: 'stale', reason: 'viewChanged' })
+		expect(evidenceFreshness(record(), { ...CURRENT, allViews: [{ key: VIEW, renderInputDigest: `sha256:${'e'.repeat(64)}` }] })).toEqual({ state: 'stale', reason: 'viewChanged' })
 		expect(evidenceFreshness(record(), { ...CURRENT, localeRevisions: { 'en-US': 'r_next' } })).toEqual({ state: 'stale', reason: 'localeChanged', subject: 'en-US' })
 	})
 
@@ -98,6 +101,10 @@ describe('Evidence freshness (R9 acceptance 5)', () => {
 		expect(evidenceFreshness(record({ resources: [{ identity: { type: 'locale', id: 'en-US' }, revision: 'r_locale' }] }), CURRENT).state).toBe('unknown')
 		expect(evidenceFreshness(record({ resources: [{ identity: { type: 'view', id: VIEW }, revision: 'r_view' }] }), CURRENT)).toEqual({ state: 'unknown', reason: 'noLocaleRevision', subject: 'en-US' })
 		expect(evidenceFreshness(record({ context: { locale: 'en-US' } }), CURRENT)).toEqual({ state: 'unknown', reason: 'noView' })
+	})
+
+	it('is stale when the record carries no render-input digest (Rule 01a115cd-c53c-…)', () => {
+		expect(evidenceFreshness(record({ renderInputDigest: null }), CURRENT)).toEqual({ state: 'stale', reason: 'noRenderInputDigest' })
 	})
 
 	it('never calls an incomplete run fresh', () => {

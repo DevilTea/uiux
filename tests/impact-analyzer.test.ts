@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
+import { renderInputDigest } from '../src/domain/evidence/render-input-digest'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
+import { RENDER_INPUT_CHANGED_REASON } from '../src/domain/evidence/staleness'
 import { resourceIdentityKey } from '../src/domain/history/summary'
 import { analyzeImpact, bindingReferences, withResource, widgetIds, type ImpactWorkspace } from '../src/domain/impact'
 
@@ -181,22 +183,29 @@ describe('analyzeImpact', () => {
 	})
 
 	it('lists formal Evidence that would become stale, not Evidence already stale, and not Adapter changes yet', () => {
-		const record = (viewport: Readonly<{ width: number; height: number }>, viewRevision = 'r_view_1'): FormalEvidenceRecord => ({
+		const current = renderInputDigest(workspace().views.get(VIEW))
+		const record = (viewport: Readonly<{ width: number; height: number }>, digest = current): FormalEvidenceRecord => ({
 			schemaVersion: 1,
 			kind: 'formal_capture',
 			executionContext: { viewId: VIEW, locale: 'en-US', viewportId: 'desktop', viewport, themeId: 'light' },
 			coverage: { complete: true },
-			provenance: { workspaceSchemaVersion: 4, resources: [{ identity: { type: 'view', id: VIEW }, revision: viewRevision }, { identity: { type: 'locale', id: 'en-US' }, revision: 'r_en_1' }], versions: {} },
+			provenance: { workspaceSchemaVersion: 4, resources: [{ identity: { type: 'view', id: VIEW }, revision: 'r_view_1' }, { identity: { type: 'locale', id: 'en-US' }, revision: 'r_en_1' }], versions: {}, renderInputDigest: digest },
 			artifactRefs: [],
 		})
 		const fresh = `sha256:${'a'.repeat(64)}`
 		const alreadyStale = `sha256:${'b'.repeat(64)}`
-		const before = workspace({ evidence: [{ digest: fresh, record: record({ width: 1280, height: 800 }) }, { digest: alreadyStale, record: record({ width: 1280, height: 800 }, 'r_view_0') }] })
+		const before = workspace({ evidence: [{ digest: fresh, record: record({ width: 1280, height: 800 }) }, { digest: alreadyStale, record: record({ width: 1280, height: 800 }, `sha256:${'0'.repeat(64)}`) }] })
 		const resized = withResource(before, { kind: 'workspace', key: 'workspace' }, { ...MANIFEST, viewports: { ...MANIFEST.viewports, desktop: { dimensions: { width: 1440, height: 900 } } } }, 'r_ws_2')
 		expect(analyzeImpact(before, resized)).toEqual([{ category: 'evidence_stale', evidence: fresh, viewId: VIEW, reason: 'Viewport preset \'desktop\' dimensions changed since capture' }])
 		// Owner ruling 5 (https://github.com/DevilTea/uiux/discussions/122#discussioncomment-18825439): no Adapter provenance yet.
 		const adapters = withResource(before, { kind: 'workspace', key: 'workspace' }, { ...MANIFEST, adapters: [{ moduleSpecifier: './adapters/new.mjs' }] }, 'r_ws_2')
 		expect(analyzeImpact(before, adapters)).toEqual([])
+		// Rules 01a115cd-c5a5-… and 01a115cd-c749-…: a View restore that changes only its Spec or name
+		// leaves its Evidence fresh; one that changes its IR makes it stale.
+		const specOnly = withResource(before, { kind: 'view', key: VIEW }, { ...before.views.get(VIEW) as object, name: 'Renamed', spec: { intent: 'Other', decisions: [] } }, 'r_view_2')
+		expect(analyzeImpact(before, specOnly)).toEqual([])
+		const irChanged = withResource(before, { kind: 'view', key: VIEW }, view([{ type: 'Button', id: 'pay', config: { label: { $i18n: 'pay' } } }, { type: 'Text', id: 'note' }]), 'r_view_2')
+		expect(analyzeImpact(before, irChanged)).toContainEqual({ category: 'evidence_stale', evidence: fresh, viewId: VIEW, reason: RENDER_INPUT_CHANGED_REASON })
 		// Without Evidence in the picture nothing about Evidence is reported.
 		const { evidence: _evidence, ...withoutEvidence } = before
 		void _evidence

@@ -187,7 +187,7 @@ describe('Editing a message (scope/edit decisions 11–16)', () => {
 		const view = await api<{ revision: string }>('tester', `/api/resources/view/${VIEW_ID}`)
 		await api('claude', `/api/reviews/${id}/ready`, {
 			expectedRevision: (await read(id)).revision,
-			changeDomains: ['views'],
+			changeDomains: ['ir'],
 			resources: [{ identity: { kind: 'view', key: VIEW_ID }, revision: view.revision }],
 			evidenceRefs: [{ kind: 'visual', evidence: EVIDENCE }],
 		})
