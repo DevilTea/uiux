@@ -17,8 +17,10 @@ export type JsonValue = string | number | boolean | null | JsonValue[] | { [key:
 
 /**
  * The manifest `apiVersion`: `1` or `1.<minor>`, the lowest minor of Adapter API version 1 whose behavior
- * the Adapter relies on (Clause 01a115cd-d095-790b-bc0b-95297733fed4). The entry deliberately exports no value
- * naming the API version a host implements.
+ * the Adapter relies on. The server's grammar (Clause 01a115cd-d095-790b-bc0b-95297733fed4) is
+ * authoritative: TypeScript cannot express it, so this type also admits strings the server refuses, such
+ * as `1.01`, `1.-1` or `1.1e3`. The entry deliberately exports no value naming the API version a host
+ * implements.
  */
 export type AdapterApiVersion = '1' | `1.${number}`
 
@@ -41,24 +43,25 @@ export type I18nFieldMapping = Readonly<{
 }>
 
 /**
- * A JSON value whose arrays and objects may be read-only: the type of the Catalog's other members, which
- * the named members (`i18n`, `assetFields`, `widgets`) must also fit.
+ * A JSON value whose arrays and objects may be read-only: the type of what an author writes (the Catalog's
+ * other members, which the named members `i18n`, `assetFields` and `widgets` must also fit, and
+ * `configSchema`) and of the deep-frozen configuration a provider receives.
  */
-type CatalogJsonValue = string | number | boolean | null | readonly CatalogJsonValue[] | Readonly<{ [key: string]: CatalogJsonValue }>
+type ReadonlyJsonValue = string | number | boolean | null | readonly ReadonlyJsonValue[] | Readonly<{ [key: string]: ReadonlyJsonValue }>
 
 /** The Catalog authoring metadata of one Widget type. */
 export type AdapterWidgetCatalogEntry = Readonly<{
-	i18n?: Readonly<{ fields: Readonly<Record<string, I18nFieldMapping>>; [key: string]: CatalogJsonValue }>
+	i18n?: Readonly<{ fields: Readonly<Record<string, I18nFieldMapping>>; [key: string]: ReadonlyJsonValue }>
 	assetFields?: Readonly<Record<string, AdapterAssetCapability>>
 }> & Readonly<{
-	[key: string]: CatalogJsonValue
+	[key: string]: ReadonlyJsonValue
 }>
 
 /** The manifest `catalog`: Widget metadata only under `widgets.<widgetType>`; the root is reserved. */
 export type AdapterCatalog = Readonly<{
 	widgets: Readonly<Record<string, AdapterWidgetCatalogEntry>>
 }> & Readonly<{
-	[key: string]: CatalogJsonValue
+	[key: string]: ReadonlyJsonValue
 }>
 
 /**
@@ -67,7 +70,7 @@ export type AdapterCatalog = Readonly<{
  */
 export type AdapterProviderContext = Readonly<{
 	adapterId: string
-	config: JsonValue | undefined
+	config: ReadonlyJsonValue | undefined
 }>
 
 /**
@@ -87,7 +90,7 @@ export type AdapterManifest<
 	renderers: readonly RendererRegistration[]
 	providers: readonly Provider[]
 	/** A JSON Schema Draft 2020-12 schema: a boolean, or an object whose `$schema` names that dialect. */
-	configSchema?: { [key: string]: JsonValue } | boolean
+	configSchema?: Readonly<{ [key: string]: ReadonlyJsonValue }> | boolean
 }>
 
 /** A warning of RootShell's `t`; the union is closed, and another code needs a contract extension. */
@@ -122,5 +125,5 @@ export declare const STRING_VALUE_CONTRACT_ID: 'deviltea.uiux/string@1'
 export declare const WIDGET_ID_ATTRIBUTE: 'data-widget-id'
 
 // In a declaration file every top-level declaration is exported unless the file has an export list; this
-// empty one keeps `CatalogJsonValue` and the imported peer types private.
+// empty one keeps `ReadonlyJsonValue` and the imported peer types private.
 export {}

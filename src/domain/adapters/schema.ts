@@ -26,15 +26,17 @@ export type JsonSchema2020_12 = JsonObject | boolean
 
 /**
  * The manifest as UIUX validates it: the authoring entry's shape, with the runtime registration members
- * opaque (they remain owned by Widget and Adapter packages and are decoded by the runtime) and
- * `apiVersion` any string the grammar check then judges, the non-normative `test` hook included.
+ * opaque (they remain owned by Widget and Adapter packages and are decoded by the runtime),
+ * `apiVersion` any string the grammar check then judges, the non-normative `test` hook included, and
+ * `configSchema`, which an author may write read-only, the JSON the schema validator reads.
  */
 export type AdapterManifest<
 	PluginDefinition = unknown,
 	RendererRegistration = unknown,
 	ProviderSetup = unknown,
-> = Readonly<Omit<AuthoredAdapterManifest<PluginDefinition, RendererRegistration, ProviderSetup>, 'apiVersion'> & {
+> = Readonly<Omit<AuthoredAdapterManifest<PluginDefinition, RendererRegistration, ProviderSetup>, 'apiVersion' | 'configSchema'> & {
 	apiVersion: string
+	configSchema?: JsonSchema2020_12
 }>
 
 export type AuthoredAdapterConfig = Readonly<{ moduleSpecifier: string; config?: JsonValue }>

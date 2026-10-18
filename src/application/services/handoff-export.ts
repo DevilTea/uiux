@@ -24,6 +24,7 @@ import {
 	type HandoffReadinessAssessment,
 	type HandoffResourceSnapshot,
 	type HandoffRoot,
+	type HandoffSourceReference,
 	type HandoffWidgetImplementationReference,
 } from '../../domain/handoff/schema'
 import type { ResolvedRenderContext } from '../../domain/render-context/schema'
@@ -54,6 +55,11 @@ import {
 } from '../../adapters/product-integration'
 import { collectWidgetTypesFromIr } from '../../preview/preview-runtime'
 import { deriveReviewResolution, isWorkspaceAnchor, REVIEW_RESOLUTIONS, type ReviewResolution } from '../../domain/reviews/schema'
+
+/** The package path of UIUX's own RootShell source, whose semantic and renderer source a Handoff names. */
+const ROOT_SHELL_SOURCE_PATH = 'src/runtime/root-shell.ts'
+/** The public Adapter authoring entry's declarations, which RootShell's source imports its interfaces from. */
+const ROOT_SHELL_ENTRY_TYPES_PATH = 'src/adapter-entry/index.d.ts'
 
 export type ExportHandoffCommand = Readonly<{
 	roots: readonly HandoffRoot[]
@@ -789,22 +795,27 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 
 		for (const widgetType of usedWidgetTypes) {
 			if (widgetType === 'RootShell') {
+				// RootShell's source and the public Adapter authoring entry's declarations, which define the
+				// `RootShellInterfaces` its source imports by relative path (Discussion #241 owner decision 3
+				// during review of #251), are read from one package root.
 				let rsBytes: Uint8Array | undefined
-				const candidatePaths = [
-					resolve(process.env.UIUX_PACKAGE_ROOT ?? '', 'src/runtime/root-shell.ts'),
-					resolve(process.cwd(), 'src/runtime/root-shell.ts'),
-					resolve(dirname(fileURLToPath(import.meta.url)), '../../runtime/root-shell.ts'),
-					resolve(dirname(fileURLToPath(import.meta.url)), '../../../src/runtime/root-shell.ts'),
+				let entryTypesBytes: Uint8Array | undefined
+				const candidateRoots = [
+					resolve(process.env.UIUX_PACKAGE_ROOT ?? ''),
+					process.cwd(),
+					resolve(dirname(fileURLToPath(import.meta.url)), '../../..'),
 				]
-				for (const cand of candidatePaths) {
+				for (const packageRoot of candidateRoots) {
 					try {
-						rsBytes = await fs.readFile(cand)
-						break
+						rsBytes = await fs.readFile(resolve(packageRoot, ROOT_SHELL_SOURCE_PATH))
 					}
 					catch {
-						// continue searching
+						continue
 					}
+					entryTypesBytes = await fs.readFile(resolve(packageRoot, ROOT_SHELL_ENTRY_TYPES_PATH)).catch(() => undefined)
+					break
 				}
+				const rootShellProvenance = (path: string) => ({ package: '@deviltea/uiux', path, revision: packageJson.version })
 
 				if (rsBytes && rsBytes.length > 0) {
 					const putRs = { identity: await contentIdentity(rsBytes, materialize) }
@@ -813,26 +824,29 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 						artifact: putRs.identity,
 						context: { widgetType: 'RootShell' },
 					})
+					let entryTypesSource: HandoffSourceReference = { availability: 'provenance-only', provenance: rootShellProvenance(ROOT_SHELL_ENTRY_TYPES_PATH) }
+					if (entryTypesBytes && entryTypesBytes.length > 0) {
+						const entryTypesIdentity = await contentIdentity(entryTypesBytes, materialize)
+						referencedArtifacts.set(entryTypesIdentity, {
+							kind: 'widget-source',
+							artifact: entryTypesIdentity,
+							context: { widgetType: 'RootShell' },
+						})
+						entryTypesSource = { availability: 'materialized', provenance: rootShellProvenance(ROOT_SHELL_ENTRY_TYPES_PATH), contentDigest: entryTypesIdentity }
+					}
 					implementationReferences.push({
 						widgetType: 'RootShell',
 						semanticSource: {
 							availability: 'materialized',
-							provenance: {
-								package: '@deviltea/uiux',
-								path: 'src/runtime/root-shell.ts',
-								revision: packageJson.version,
-							},
+							provenance: rootShellProvenance(ROOT_SHELL_SOURCE_PATH),
 							contentDigest: putRs.identity,
 						},
 						rendererSource: {
 							availability: 'materialized',
-							provenance: {
-								package: '@deviltea/uiux',
-								path: 'src/runtime/root-shell.ts',
-								revision: packageJson.version,
-							},
+							provenance: rootShellProvenance(ROOT_SHELL_SOURCE_PATH),
 							contentDigest: putRs.identity,
 						},
+						supportingSources: [entryTypesSource],
 					})
 				}
 				else {
@@ -840,20 +854,13 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 						widgetType: 'RootShell',
 						semanticSource: {
 							availability: 'provenance-only',
-							provenance: {
-								package: '@deviltea/uiux',
-								path: 'src/runtime/root-shell.ts',
-								revision: packageJson.version,
-							},
+							provenance: rootShellProvenance(ROOT_SHELL_SOURCE_PATH),
 						},
 						rendererSource: {
 							availability: 'provenance-only',
-							provenance: {
-								package: '@deviltea/uiux',
-								path: 'src/runtime/root-shell.ts',
-								revision: packageJson.version,
-							},
+							provenance: rootShellProvenance(ROOT_SHELL_SOURCE_PATH),
 						},
+						supportingSources: [{ availability: 'provenance-only', provenance: rootShellProvenance(ROOT_SHELL_ENTRY_TYPES_PATH) }],
 					})
 				}
 				continue

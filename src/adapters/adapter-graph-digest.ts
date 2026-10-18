@@ -6,11 +6,13 @@ import { canonicalJsonBytes } from '../domain/canonical-json'
 import { sha256Identity } from '../domain/artifacts/schema'
 import { fileDigest } from '../domain/product-kit/digest'
 import { resolvePackageRoot } from './package-root'
+import { ADAPTER_ENTRY_SPECIFIER } from './host-adapter-entry'
 import { BUNDLED_ASSET_TYPES } from './style-imports'
 
 /**
  * The host packages the Preview bundle aliases to UIUX's own copies (`src/server/preview-bundler.ts`):
- * one Vue and one Widget runtime serve every Adapter, so they are no part of an Adapter's content.
+ * one Vue and one Widget runtime serve every Adapter, and the host supplies the public Adapter authoring
+ * entry from its own package (`ADAPTER_ENTRY_SPECIFIER`), so none of them is part of an Adapter's content.
  */
 export const PREVIEW_HOST_PACKAGES = Object.freeze([
 	'vue',
@@ -18,6 +20,7 @@ export const PREVIEW_HOST_PACKAGES = Object.freeze([
 	'@deviltea/widget-core/inspection',
 	'@deviltea/widget-core/integration',
 	'@deviltea/widget-vue',
+	ADAPTER_ENTRY_SPECIFIER,
 ] as const)
 
 /**

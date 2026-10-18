@@ -990,6 +990,36 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		expect(rsRef?.semanticSource.contentDigest).toBe(expectedDigest)
 	})
 
+	it('materializes the Adapter authoring entry declarations that RootShell\'s source imports its interfaces from', async () => {
+		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+
+		const viewRev = await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'RootShell View'))
+		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
+		const exportRes = await currentSchemaHandoff(persistence).exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(exportRes.status).toBe('exported')
+		if (exportRes.status !== 'exported') return
+
+		// RootShell's source imports `RootShellInterfaces` from the entry by relative path (Discussion #241
+		// owner decision 3 during review of #251); the Handoff carries the file that import names.
+		const rootShellSource = await readFile(resolve(process.cwd(), 'src/runtime/root-shell.ts'), 'utf8')
+		expect(rootShellSource).toContain(`import type { RootShellInterfaces } from '../adapter-entry'`)
+		const declarations = await readFile(resolve(process.cwd(), 'src/adapter-entry/index.d.ts'))
+		const digest = 'sha256:' + createHash('sha256').update(declarations).digest('hex')
+
+		const rsRef = exportRes.manifest?.implementationReferences.find(r => r.widgetType === 'RootShell')
+		expect(rsRef?.supportingSources).toEqual([{
+			availability: 'materialized',
+			provenance: { package: '@deviltea/uiux', path: 'src/adapter-entry/index.d.ts', revision: expect.any(String) },
+			contentDigest: digest,
+		}])
+		expect(rsRef?.supportingSources?.[0]?.provenance.revision).toBe(rsRef?.semanticSource.provenance.revision)
+		expect(exportRes.manifest?.artifactRefs).toContainEqual({ kind: 'widget-source', artifact: digest, context: { widgetType: 'RootShell' } })
+		const stored = await persistence.artifacts.read(digest)
+		expect(Buffer.from(stored!)).toEqual(declarations)
+	})
+
 	it('excludes stale evidence from readiness and export when View revision changes (r1 -> r2 regression)', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
 		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })

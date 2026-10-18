@@ -47,6 +47,8 @@ const entry: AdapterWidgetCatalogEntry = { i18n: { fields: { label: mapping } },
 const catalog: AdapterCatalog = { widgets: { Label: entry } }
 const version: AdapterApiVersion = '1.0'
 const config: JsonValue = { themeMap: { dark: 'midnight' } }
+// An author may write the schema read-only, as with `as const`.
+const configSchema = { $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object', required: ['themeMap'] } as const
 
 export const manifest: AdapterManifest = {
 	id: 'consumer-adapter',
@@ -55,7 +57,7 @@ export const manifest: AdapterManifest = {
 	catalog,
 	renderers: [{ type: 'Label', component: LabelRenderer }],
 	providers: [{ install(_app, context: AdapterProviderContext) { void context.adapterId } }],
-	configSchema: { $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object' },
+	configSchema,
 }
 
 export function describeWarning(warning: TranslationWarning): string {
@@ -74,5 +76,5 @@ export const wrongVersion: AdapterApiVersion = '2'
 // @ts-expect-error -- the warning union is closed.
 export const otherWarning: TranslationWarning = { code: 'other', key: 'k', requestedLocale: 'en-US' }
 // @ts-expect-error -- the entry exports only the types its Clause lists.
-import type { CatalogJsonValue } from '@deviltea/uiux/adapter'
-export type NotExported = CatalogJsonValue
+import type { ReadonlyJsonValue } from '@deviltea/uiux/adapter'
+export type NotExported = ReadonlyJsonValue

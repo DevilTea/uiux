@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import esbuild from 'esbuild'
 import ts from 'typescript'
 
@@ -12,6 +13,12 @@ import {
 	WIDGET_ID_ATTRIBUTE,
 } from '../src/adapter-entry'
 import { UIUX_STRING_VALUE_CONTRACT_ID, UIUX_TRANSLATION_RESULT_VALUE_CONTRACT_ID } from '../src/i18n/widget-contracts'
+import { adapterGraphDigest } from '../src/adapters/adapter-graph-digest'
+import { adapterResolutionBase } from '../src/adapters/resolution'
+import { V5_LAYOUT } from '../src/persistence/paths'
+import { clearPreviewBundleCache } from '../src/server/preview-bundler'
+import { getSelectedWorkspacePreviewBundle, resolveSelectedWorkspaceAdapters } from '../src/server/workspace-adapters'
+import { writeCurrentWorkspace } from './support/workspace-layout'
 
 /**
  * The public Adapter authoring entry `@deviltea/uiux/adapter` (Clauses 01a11a5a-462c-7f59-af78-6d01787a275f,
@@ -23,6 +30,7 @@ import { UIUX_STRING_VALUE_CONTRACT_ID, UIUX_TRANSLATION_RESULT_VALUE_CONTRACT_I
 const REPOSITORY_ROOT = process.cwd()
 const ENTRY_TYPES = join(REPOSITORY_ROOT, 'src', 'adapter-entry', 'index.d.ts')
 const ENTRY_MODULE = join(REPOSITORY_ROOT, 'src', 'adapter-entry', 'index.js')
+const HOST_ENTRY_HOOK = join(REPOSITORY_ROOT, 'src', 'adapters', 'host-adapter-entry.ts')
 const TSC = join(REPOSITORY_ROOT, 'node_modules', 'typescript', 'bin', 'tsc')
 
 const temporaryRoots: string[] = []
@@ -132,6 +140,13 @@ describe('the public Adapter authoring entry @deviltea/uiux/adapter', () => {
 		])
 		const values = exported.filter(symbol => symbol.flags & ts.SymbolFlags.Value).map(symbol => symbol.name).sort()
 		expect(values).toEqual(['STRING_VALUE_CONTRACT_ID', 'TRANSLATION_RESULT_VALUE_CONTRACT_ID', 'WIDGET_ID_ATTRIBUTE'])
+		// The checked-in declarations and runtime module each state the constants (Discussion #241 owner
+		// decision 1 during review of #251): each declared literal type is the runtime value.
+		const declaredLiterals = Object.fromEntries(exported.filter(symbol => symbol.flags & ts.SymbolFlags.Value).map(symbol => {
+			const type = checker.getTypeOfSymbol(symbol)
+			return [symbol.name, type.isStringLiteral() ? type.value : undefined]
+		}))
+		expect(declaredLiterals).toEqual({ STRING_VALUE_CONTRACT_ID, TRANSLATION_RESULT_VALUE_CONTRACT_ID, WIDGET_ID_ATTRIBUTE })
 		expect(ts.getPreEmitDiagnostics(program).map(diagnostic => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'))).toEqual([])
 	})
 
@@ -160,5 +175,104 @@ describe('the public Adapter authoring entry @deviltea/uiux/adapter', () => {
 		const deep = spawnSync(process.execPath, [TSC, '-p', resolve(root, 'tsconfig.json')], { cwd: root, encoding: 'utf8' })
 		expect(deep.status).not.toBe(0)
 		expect(deep.stdout).toContain('TS2307')
+	}, 60_000)
+})
+
+/** An Adapter module that imports the entry's constants at runtime, as the reference Adapter does. */
+const HOSTED_ENTRY_ADAPTER = `
+import { createWidgetPlugin } from '@deviltea/widget-core'
+import { defineComponent, h } from 'vue'
+import { useWidget } from '@deviltea/widget-vue'
+import { STRING_VALUE_CONTRACT_ID, TRANSLATION_RESULT_VALUE_CONTRACT_ID, WIDGET_ID_ATTRIBUTE } from '@deviltea/uiux/adapter'
+
+const plugin = createWidgetPlugin('HostedLabel')
+	.interfaces()
+	.state(state => state.text({ authorWritable: true, validate: value => typeof value === 'string', default: () => '' }))
+	.done()
+
+const HostedLabel = defineComponent({
+	setup() {
+		const { useState } = useWidget(plugin)
+		const state = useState()
+		return () => h('span', { [WIDGET_ID_ATTRIBUTE]: 'label' }, state.text.value)
+	},
+})
+
+export const manifest = {
+	id: 'hosted-entry',
+	apiVersion: '1',
+	widgetPlugins: [plugin],
+	catalog: { widgets: { HostedLabel: { contracts: [STRING_VALUE_CONTRACT_ID, TRANSLATION_RESULT_VALUE_CONTRACT_ID, WIDGET_ID_ATTRIBUTE] } } },
+	renderers: [{ type: 'HostedLabel', component: HostedLabel }],
+	providers: [],
+}
+`
+
+describe('the host supplies @deviltea/uiux/adapter (Discussion #241 owner decision 2 during review of #251)', () => {
+	afterAll(() => clearPreviewBundleCache())
+
+	/**
+	 * A Workspace whose kit declares its own `kit/package.json` and installs the peer packages, but not
+	 * `@deviltea/uiux`: no package scope or `node_modules/` above the kit names UIUX, so only the host can
+	 * supply the entry.
+	 */
+	async function kitWithoutUiux(): Promise<string> {
+		const root = await mkdtemp(join(tmpdir(), 'uiux-hosted-entry-'))
+		temporaryRoots.push(root)
+		await writeCurrentWorkspace(root, { adapters: [{ moduleSpecifier: './adapters/hosted.mjs' }] })
+		const kit = join(root, 'kit')
+		await mkdir(join(kit, 'node_modules', '@deviltea'), { recursive: true })
+		await mkdir(join(kit, 'adapters'), { recursive: true })
+		await writeFile(join(kit, 'package.json'), JSON.stringify({ name: 'kit', private: true, type: 'module' }))
+		for (const name of ['@deviltea/widget-core', '@deviltea/widget-vue', 'vue'])
+			await symlink(join(REPOSITORY_ROOT, 'node_modules', name), join(kit, 'node_modules', name))
+		await writeFile(join(kit, 'adapters', 'hosted.mjs'), HOSTED_ENTRY_ADAPTER)
+		return root
+	}
+
+	it('resolves it, under Node\'s loader on the server, to UIUX\'s own entry', async () => {
+		const root = await kitWithoutUiux()
+		// Node's loader runs the hook in a child process: a Vitest run of the source does not use it for `import()`.
+		const driver = (hook: boolean) => [
+			`import { pathToFileURL } from 'node:url'`,
+			`import { supplyAdapterEntryOnServer } from ${JSON.stringify(pathToFileURL(HOST_ENTRY_HOOK).href)}`,
+			hook ? `supplyAdapterEntryOnServer(${JSON.stringify(REPOSITORY_ROOT)})` : '',
+			`try {`,
+			`	const { manifest } = await import(pathToFileURL(${JSON.stringify(join(root, 'kit', 'adapters', 'hosted.mjs'))}).href)`,
+			`	process.stdout.write(JSON.stringify({ catalog: manifest.catalog, entry: import.meta.resolve('@deviltea/uiux/adapter') }))`,
+			`} catch (error) { process.stdout.write(JSON.stringify({ error: error.code })) }`,
+			'',
+		].join('\n')
+		const run = async (hook: boolean) => {
+			const path = join(root, hook ? 'hooked.mjs' : 'plain.mjs')
+			await writeFile(path, driver(hook))
+			const result = spawnSync(process.execPath, ['--no-warnings', path], { cwd: join(root, 'kit'), encoding: 'utf8' })
+			expect(result.stderr).toBe('')
+			return JSON.parse(result.stdout) as unknown
+		}
+		// The kit cannot resolve the entry itself: no package scope or `node_modules/` above it names UIUX.
+		expect(await run(false)).toEqual({ error: 'ERR_MODULE_NOT_FOUND' })
+		expect(await run(true)).toEqual({
+			catalog: { widgets: { HostedLabel: { contracts: [STRING_VALUE_CONTRACT_ID, TRANSLATION_RESULT_VALUE_CONTRACT_ID, WIDGET_ID_ATTRIBUTE] } } },
+			entry: pathToFileURL(ENTRY_MODULE).href,
+		})
+	}, 60_000)
+
+	it('resolves it to UIUX\'s own entry in the Preview bundle and in the Adapter graph digest', async () => {
+		const root = await kitWithoutUiux()
+		const resolution = await resolveSelectedWorkspaceAdapters(root)
+		expect(resolution.diagnostics).toEqual([])
+		if (resolution.state !== 'valid') return
+
+		// The bundle builds, and the server-side check evaluates it, with the entry aliased like the peer packages.
+		const bundle = await getSelectedWorkspacePreviewBundle(root)
+		expect(bundle.state === 'invalid' ? bundle.diagnostics : []).toEqual([])
+		if (bundle.state !== 'valid') return
+		expect(bundle.adapterCheck).toBe('passed')
+
+		// The digest leaves the host-supplied entry out of the graph, as it leaves out the peer packages.
+		const entry = resolution.set.entries[0]!.resolvedModule.resolvedPath
+		const digest = await adapterGraphDigest({ workspaceRoot: root, moduleBase: adapterResolutionBase(root, V5_LAYOUT), entry })
+		expect(digest).toMatch(/^sha256:[0-9a-f]{64}$/u)
 	}, 60_000)
 })
