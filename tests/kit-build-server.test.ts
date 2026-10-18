@@ -33,7 +33,7 @@ mkdirSync('dist/parts', { recursive: true })
 writeFileSync('dist/parts/late.js', "export const late = 'l" + version + "'\\n")
 writeFileSync('dist/parts/suffix.cjs', "exports.suffix = 'c" + version + "'\\nexports.late = () => import('./late.js').then(module => module.late)\\n")
 writeFileSync('dist/parts/id.js', "import { loads } from 'kit-counter'\\nimport { suffix, late } from './suffix.cjs'\\nexport const id = 'kit-split-" + version + "-' + loads() + '-' + suffix + '-' + await late()\\n")
-writeFileSync('dist/uiux.js', "import { id } from './parts/id.js'\\nexport const manifest = { id, apiVersion: '1', widgetPlugins: [], catalog: { widgets: {} }, renderers: [], providers: [], styles: [], tokens: [] }\\n")
+writeFileSync('dist/uiux.js', "import { id } from './parts/id.js'\\nexport const manifest = { id, apiVersion: '1', widgetPlugins: [], catalog: { widgets: {} }, renderers: [], providers: [] }\\n")
 `
 
 async function prepareKit(root: string): Promise<void> {

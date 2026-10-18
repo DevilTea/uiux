@@ -109,8 +109,6 @@ try {
 		'  catalog: { widgets: { SmokeWidget: {} } },',
 		'  renderers: [],',
 		'  providers: [],',
-		'  styles: [],',
-		'  tokens: [],',
 		'}',
 		'',
 		'export default manifest',

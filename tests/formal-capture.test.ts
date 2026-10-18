@@ -65,8 +65,6 @@ export const manifest = {
   catalog: { widgets: { Counter: {} } },
   renderers: [{ type: 'Counter', component: CounterRenderer }],
   providers: [],
-  styles: [],
-  tokens: [],
 };
 `
 }

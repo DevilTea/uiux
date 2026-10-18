@@ -65,8 +65,6 @@ export const manifest = {
   catalog: { widgets: { KitButton: {} } },
   renderers: [{ type: 'KitButton', component: KitButtonRenderer }],
   providers: [],
-  styles: [],
-  tokens: [],
 };
 `
 

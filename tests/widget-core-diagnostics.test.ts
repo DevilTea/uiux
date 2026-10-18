@@ -68,8 +68,6 @@ describe('standalone Preview mount and widget-core registration errors', () => {
 			catalog: { widgets: {} },
 			renderers: [{ type, component: Renderer }],
 			providers: [],
-			styles: [],
-			tokens: [],
 		}
 		return { index, id, apiVersion: '1', widgetTypes: [type], rendererKeys: [type], namespace: { default: manifest } }
 	}

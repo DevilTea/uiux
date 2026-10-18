@@ -12,7 +12,10 @@
 		"verbatimModuleSyntax": true,
 		"allowImportingTsExtensions": true,
 		"resolveJsonModule": true,
-		"types": []
+		"types": [],
+		// A kit module imports its CSS for the Preview bundler (Rule 01a11bb1-acdc-799f-aed7-c85ddbaf0d28),
+		// which resolves it; the type checker has no declarations for CSS files.
+		"noUncheckedSideEffectImports": false
 	},
 	"include": [".uiux/kit/**/*.ts"]
 }

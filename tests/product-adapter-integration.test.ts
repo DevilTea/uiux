@@ -24,8 +24,6 @@ function makeManifest(id: string, overrides: Partial<AdapterManifest> = {}): Ada
 		catalog: { widgets: { DummyWidget: {} } },
 		renderers: [{ type: 'DummyWidget', component: DummyRenderer }],
 		providers: [],
-		styles: [],
-		tokens: [],
 		...overrides,
 	}
 }

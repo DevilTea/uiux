@@ -189,8 +189,6 @@ describe('UIUX Reference Adapter', () => {
 				catalog: { widgets: { RootShell: {} } },
 				renderers: [{ type: 'RootShell', component: dummyRenderer }],
 				providers: [],
-				styles: [],
-				tokens: [],
 			}
 
 			setupDom()

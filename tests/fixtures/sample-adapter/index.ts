@@ -40,6 +40,4 @@ export const manifest = {
 		{ type: 'Counter', component: CounterRenderer },
 	],
 	providers: [],
-	styles: [],
-	tokens: [],
 }

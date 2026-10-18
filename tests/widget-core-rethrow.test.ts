@@ -104,8 +104,6 @@ describe('describeDeclaredWidgetEvents rethrows inspectPlugin defects', () => {
 			catalog: { widgets: {} },
 			renderers: [{ type: 'Alpha', component: Renderer }],
 			providers: [],
-			styles: [],
-			tokens: [],
 		}
 		const descriptor: StandaloneAdapterDescriptor = { index: 0, id: 'alpha-adapter', apiVersion: '1', widgetTypes: ['Alpha'], rendererKeys: ['Alpha'], namespace: { default: manifest } }
 		// Decoding runs the real inspectPlugin; the override applies only to the later Event read.

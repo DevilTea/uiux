@@ -72,8 +72,6 @@ export const manifest = {
   catalog: { widgets: { Counter: {} } },
   renderers: [{ type: 'Counter', component: CounterRenderer }],
   providers: [],
-  styles: [],
-  tokens: [],
 };
 `
 }
@@ -265,8 +263,6 @@ describe('preview adapter materialization transport', () => {
 				catalog: { widgets: {} },
 				renderers: [],
 				providers: [],
-				styles: [],
-				tokens: [],
 				configSchema: {
 					$schema: 'https://json-schema.org/draft/2020-12/schema',
 					type: 'object',
@@ -308,8 +304,6 @@ describe('preview adapter materialization transport', () => {
 				catalog: { widgets: {} },
 				renderers: [],
 				providers: [],
-				styles: [],
-				tokens: [],
 			};
 			export const manifestB = {
 				id: 'adapter-b',
@@ -318,8 +312,6 @@ describe('preview adapter materialization transport', () => {
 				catalog: { widgets: {} },
 				renderers: [],
 				providers: [],
-				styles: [],
-				tokens: [],
 			};
 		`)
 
@@ -552,8 +544,6 @@ export const manifest = {
   catalog: { widgets: { Greeting: {} } },
   renderers: [{ type: 'Greeting', component: GreetingRenderer }],
   providers: [],
-  styles: [],
-  tokens: [],
 };
 `
 		const root = await createTestWorkspace([{ moduleSpecifier: './adapters/greeting.mjs' }])
