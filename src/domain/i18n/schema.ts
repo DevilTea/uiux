@@ -73,14 +73,37 @@ export function validateI18nBindingEligibility(
 	return result
 }
 
+export type ResolvedI18nPropertyNames = Readonly<{ resultProperty: string; textProperty: string }>
+
+/**
+ * The Property names of a Catalog i18n field mapping (Clause 01a14e30-3676-7212-8cee-1ef84da6316c): a declared
+ * name wins; an omitted `textProperty` is the authoring field's name and an omitted `resultProperty` that name
+ * followed by `Result`. Every reader of a mapping's Property names goes through this, so a derived name is
+ * validated and used exactly as a declared one.
+ */
+export function resolveI18nPropertyNames(authorField: string, mapping: I18nFieldMapping): ResolvedI18nPropertyNames {
+	return {
+		resultProperty: mapping.resultProperty ?? `${authorField}Result`,
+		textProperty: mapping.textProperty ?? authorField,
+	}
+}
+
+/** ` (derived)` for a Property name the mapping omits, so a diagnostic says where the name came from; else empty. */
+export function derivedI18nPropertyNote(mapping: I18nFieldMapping, role: string): string {
+	return (role === 'resultProperty' || role === 'textProperty') && mapping[role] === undefined ? ' (derived)' : ''
+}
+
 export function validateI18nFieldMapping(input: unknown, path = ''): ValidationResult<I18nFieldMapping> {
 	const v = new Validator()
 	const mapping = v.object(input, path)
 	if (!mapping)
 		return v.finish<I18nFieldMapping>(input)
 	rejectUnknownKeys(mapping, ['configField', 'resultProperty', 'textProperty', 'params'], path, v)
-	for (const key of ['configField', 'resultProperty', 'textProperty'] as const)
-		v.string(mapping[key], `${path}/${key}`, true)
+	v.string(mapping.configField, `${path}/configField`, true)
+	// Either Property name may be omitted and is then derived (resolveI18nPropertyNames); a declared one is a
+	// non-empty string.
+	for (const key of ['resultProperty', 'textProperty'] as const)
+		if (Object.hasOwn(mapping, key)) v.string(mapping[key], `${path}/${key}`, true)
 	if (Object.hasOwn(mapping, 'params')) {
 		const params = v.object(mapping.params, `${path}/params`)
 		if (params) {

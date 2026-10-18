@@ -42,6 +42,8 @@ const LabelRenderer = defineComponent({
 })
 
 const mapping: I18nFieldMapping = { configField: 'label', resultProperty: 'labelResult', textProperty: 'labelText' }
+// The two Property names may be omitted; UIUX derives them from the authoring field.
+export const derivedMapping: I18nFieldMapping = { configField: 'captionKey' }
 const asset: AdapterAssetCapability = { acceptedMediaTypes: ['image/png'] }
 const entry: AdapterWidgetCatalogEntry = { i18n: { fields: { label: mapping } }, assetFields: { icon: asset } }
 const catalog: AdapterCatalog = { widgets: { Label: entry } }
@@ -73,6 +75,8 @@ export const values = [config]
 
 // @ts-expect-error -- `apiVersion` is `1` or `1.<minor>`.
 export const wrongVersion: AdapterApiVersion = '2'
+// @ts-expect-error -- `configField` is required; only the Property names are derived.
+export const noConfigField: I18nFieldMapping = { resultProperty: 'labelResult' }
 // @ts-expect-error -- the warning union is closed.
 export const otherWarning: TranslationWarning = { code: 'other', key: 'k', requestedLocale: 'en-US' }
 // @ts-expect-error -- the entry exports only the types its Clause lists.

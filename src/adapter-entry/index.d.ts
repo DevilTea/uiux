@@ -30,14 +30,21 @@ export type AdapterAssetCapability = Readonly<{
 	acceptedCategories?: readonly string[]
 }>
 
-/** `catalog.widgets.<widgetType>.i18n.fields.<authorField>`, keyed by the translatable authoring field. */
+/**
+ * `catalog.widgets.<widgetType>.i18n.fields.<authorField>`, keyed by the translatable authoring field.
+ * An omitted `textProperty` is `<authorField>` and an omitted `resultProperty` is `<authorField>Result`
+ * (Clause 01a14e30-3676-7212-8cee-1ef84da6316c); UIUX validates a derived name as it validates a declared one.
+ */
 export type I18nFieldMapping = Readonly<{
 	/** A top-level raw Config member, declared `type: "string"`, that holds the literal key. */
 	configField: string
-	/** A read-only computed Property with the value contract `TRANSLATION_RESULT_VALUE_CONTRACT_ID`. */
-	resultProperty: string
-	/** A read-only computed Property with the value contract `STRING_VALUE_CONTRACT_ID`. */
-	textProperty: string
+	/**
+	 * A read-only computed Property with the value contract `TRANSLATION_RESULT_VALUE_CONTRACT_ID`;
+	 * `<authorField>Result` when omitted.
+	 */
+	resultProperty?: string
+	/** A read-only computed Property with the value contract `STRING_VALUE_CONTRACT_ID`; `<authorField>` when omitted. */
+	textProperty?: string
 	/** Placeholder names mapped to readable Properties. */
 	params?: Readonly<Record<string, string>>
 }>

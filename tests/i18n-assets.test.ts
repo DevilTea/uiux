@@ -135,6 +135,59 @@ describe('i18n runtime and Checks semantics', () => {
 		expect(invalid.diagnostics.some(item => item.code === 'i18n.field_not_eligible')).toBe(true)
 	})
 
+	it('derives an omitted textProperty as the authoring field and an omitted resultProperty as <field>Result, and keeps a declared name (Clause 01a14e30-3676)', () => {
+		const fields: Record<string, I18nFieldMapping> = {
+			title: { configField: 'titleKey' },
+			subtitle: { configField: 'subtitleKey', textProperty: 'subtitleText' },
+			caption: { configField: 'captionKey', resultProperty: 'captionTranslation', params: { count: 'formattedCount' } },
+		}
+		const lowered = (authorField: string) => {
+			const result = lowerI18nBinding({ binding: { $i18n: `checkout.${authorField}` }, authorField, fields })
+			if (result.state !== 'ready') throw new Error(JSON.stringify(result.diagnostics))
+			return result.value
+		}
+		expect(lowered('title')).toEqual({
+			authorField: 'title', configField: 'titleKey', key: 'checkout.title', resultProperty: 'titleResult', textProperty: 'title', params: {},
+		})
+		expect(lowered('subtitle')).toMatchObject({ resultProperty: 'subtitleResult', textProperty: 'subtitleText' })
+		expect(lowered('caption')).toMatchObject({ resultProperty: 'captionTranslation', textProperty: 'caption', params: { count: 'formattedCount' } })
+	})
+
+	it('accepts a mapping that omits both Property names, still requires configField and refuses a declared empty name', () => {
+		const manifest = (fields: Readonly<Record<string, unknown>>) => validateAdapterManifest({
+			id: 'catalog', apiVersion: 'test', widgetPlugins: [], renderers: [], providers: [],
+			catalog: { widgets: { Label: { i18n: { fields } } } },
+		})
+		expect(manifest({ title: { configField: 'titleKey' } })).toEqual(expect.objectContaining({ ok: true, diagnostics: [] }))
+		const missingConfigField = manifest({ title: { resultProperty: 'titleResult', textProperty: 'title' } })
+		expect(missingConfigField.ok).toBe(false)
+		expect(missingConfigField.diagnostics.map(item => item.path)).toContain('/catalog/widgets/Label/i18n/fields/title/configField')
+		const emptyText = manifest({ title: { configField: 'titleKey', textProperty: '' } })
+		expect(emptyText.ok).toBe(false)
+		expect(emptyText.diagnostics.map(item => item.path)).toContain('/catalog/widgets/Label/i18n/fields/title/textProperty')
+	})
+
+	it('checks derived Property names for collisions exactly as declared ones (Clause 01a115cd-d25b)', () => {
+		const collisions = (fields: Readonly<Record<string, unknown>>) => validateAdapterManifest({
+			id: 'catalog', apiVersion: 'test', widgetPlugins: [], renderers: [], providers: [],
+			catalog: { widgets: { Label: { i18n: { fields } } } },
+		}).diagnostics.filter(item => item.code === 'adapter.i18n_mapping_collision')
+		// A configField named like the authoring field collides with the derived textProperty.
+		expect(collisions({ title: { configField: 'title' } })).toEqual([
+			expect.objectContaining({ path: '/catalog/widgets/Label/i18n/fields/title/textProperty', message: expect.stringContaining('title (derived) conflicts with title.configField') }),
+		])
+		// A derived name collides with a name another field derives.
+		expect(collisions({ title: { configField: 'titleKey' }, titleResult: { configField: 'otherKey' } })).toEqual([
+			expect.objectContaining({ path: '/catalog/widgets/Label/i18n/fields/titleResult/textProperty' }),
+		])
+		// A derived name collides with a declared one.
+		expect(collisions({ title: { configField: 'titleKey' }, subtitle: { configField: 'subtitleKey', textProperty: 'title' } })).toEqual([
+			expect.objectContaining({ path: '/catalog/widgets/Label/i18n/fields/subtitle/textProperty' }),
+		])
+		// A declared name that differs from the derived one avoids the collision.
+		expect(collisions({ title: { configField: 'title', textProperty: 'titleText' } })).toEqual([])
+	})
+
 	it('rejects conflicting Catalog i18n runtime member mappings before runtime assembly', () => {
 		const result = validateAdapterManifest({
 			id: 'catalog', apiVersion: 'fixture-api', widgetPlugins: [], renderers: [], providers: [],

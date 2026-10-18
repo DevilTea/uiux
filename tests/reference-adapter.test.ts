@@ -6,12 +6,15 @@ import { Window } from 'happy-dom'
 import { defineComponent, h } from 'vue'
 import { createWidgetPlugin } from '@deviltea/widget-core'
 
+import { resolveWorkspaceAdapterSet } from '../src/adapters'
 import {
 	extractProductAdapterManifest,
 	productAdapterRegistryInspector,
 	productAdapterApiCompatibility,
+	productAdapterRuntimeMemberDecoder,
 } from '../src/adapters/product-integration'
 import { validateAdapterManifest } from '../src/domain/adapters/schema'
+import { createRootShellPlugin, createRootShellRenderer, materializeRuntimeAdapterBundle } from '../src/runtime'
 import {
 	resolveSelectedWorkspaceAdapters,
 } from '../src/server/workspace-adapters'
@@ -60,6 +63,33 @@ describe('UIUX Reference Adapter', () => {
 		expect(ownership.rendererKeys).toEqual(expect.arrayContaining(expectedWidgets))
 		expect(ownership.widgetTypes).not.toContain('RootShell')
 		expect(ownership.rendererKeys).not.toContain('RootShell')
+	})
+
+	it('omits every i18n Property name, and each derived name passes the strict check against its Widget plugin', async () => {
+		const manifest = extractProductAdapterManifest(await importReferenceAdapter())
+		const mappings = Object.values(manifest.catalog.widgets).flatMap(entry => Object.values(entry.i18n?.fields ?? {}))
+		expect(mappings.length).toBeGreaterThan(0)
+		for (const mapping of mappings) {
+			expect(Object.hasOwn(mapping, 'resultProperty')).toBe(false)
+			expect(Object.hasOwn(mapping, 'textProperty')).toBe(false)
+		}
+		const ownership = await productAdapterRegistryInspector.inspect(manifest)
+		const resolved = await resolveWorkspaceAdapterSet({
+			workspaceRoot: '/fixture',
+			adapters: [{ moduleSpecifier: '@fixture/reference' }],
+			resolver: { async resolve(_root, moduleSpecifier) { return { moduleSpecifier, resolvedPath: '/fixture/reference.mjs', moduleIdentity: 'file:///fixture/reference.mjs' } } },
+			loader: { async loadManifest() { return manifest } },
+			apiCompatibility: productAdapterApiCompatibility,
+			registryInspector: { async inspect() { return ownership } },
+		})
+		expect(resolved.state).toBe('valid')
+		if (resolved.state !== 'valid') return
+		const rootShell = createRootShellPlugin({ defaultLocale: 'en-US', translate: (_locale, key) => ({ text: key, warnings: [] }) })
+		const materialized = await materializeRuntimeAdapterBundle({
+			set: resolved.set, rootShellPlugin: rootShell, rootShellRenderer: createRootShellRenderer(rootShell),
+			decoder: productAdapterRuntimeMemberDecoder,
+		})
+		expect(materialized.state === 'invalid' ? materialized.diagnostics : []).toEqual([])
 	})
 
 	it('renders a non-empty widget tree with correct data-widget-id attributes', async () => {
