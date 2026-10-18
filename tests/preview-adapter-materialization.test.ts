@@ -19,6 +19,8 @@ import {
 	computeBundleContentHash,
 } from '../src/server/preview-bundler'
 import { readPreviewRuntimeFile } from '../src/server/preview-runtime-http'
+import { checkPreviewBundleAdapters } from '../src/server/preview-adapter-check'
+import { readSelectedWorkspaceDeclaredWidgetEvents } from '../src/server/declared-widget-events'
 import { bundleAdapterWithOwnWidgetCore } from './support/own-widget-core'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
@@ -810,6 +812,60 @@ describe('a current-schema Workspace resolves its Adapters from the Product Kit'
 			return await adaptersHandler({ context: { uiuxPrincipal: HUMAN_OWNER, params: {} } } as never) as Record<string, unknown>
 		})
 		expect(response).toMatchObject({ state: 'valid', diagnostics: [], bundleUrl: `/api/preview/runtime/${bundle.hash}/runtime.js` })
+	})
+
+	it('keeps an Adapter set valid, with a warning, when its bundle cannot run in the server worker, and lets the Preview decide (#123)', async () => {
+		const root = await createKitWorkspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
+		await linkHostPackages(join(root, 'kit'))
+		// A dependency whose `browser` export, which the Preview bundle takes, defines a custom element
+		// at its top level; Node, loading the manifest, takes its `default` export.
+		const dependency = join(root, 'kit', 'node_modules', 'fancy-element')
+		await mkdir(dependency, { recursive: true })
+		await writeFile(join(dependency, 'package.json'), JSON.stringify({ name: 'fancy-element', version: '1.0.0', type: 'module', exports: { browser: './browser.js', default: './node.js' } }))
+		await writeFile(join(dependency, 'browser.js'), 'export class FancyElement extends HTMLElement {}\n')
+		await writeFile(join(dependency, 'node.js'), 'export class FancyElement {}\n')
+		await writeFile(join(root, 'kit', 'adapter.mjs'), `export { FancyElement } from 'fancy-element';\n${makeCounterAdapterSource()}`)
+
+		const bundle = await getSelectedWorkspacePreviewBundle(root)
+		expect(bundle).toMatchObject({ state: 'valid', adapterCheck: 'unchecked', warnings: [{ code: 'preview.bundle_failed', path: '/product-kit' }] })
+		if (bundle.state !== 'valid') return
+		expect(bundle.warnings[0]?.message).toContain('HTMLElement')
+		// The bundle is served, and the Flow editor's Event read stays unavailable, as before the check.
+		expect((await readPreviewRuntimeFile(root, undefined, bundle.hash, 'runtime.js')).status).toBe(200)
+		expect(await readSelectedWorkspaceDeclaredWidgetEvents(root)).toEqual({ state: 'unavailable' })
+		const response = await withSelectedWorkspace(root, async () => {
+			const { default: adaptersHandler } = await import('../server/api/preview/adapters.get')
+			return await adaptersHandler({ context: { uiuxPrincipal: HUMAN_OWNER, params: {} } } as never) as Record<string, unknown>
+		})
+		expect(response).toMatchObject({ state: 'valid', diagnostics: [], bundleUrl: `/api/preview/runtime/${bundle.hash}/runtime.js`, warnings: [{ code: 'preview.bundle_failed' }] })
+
+		// In a DOM, the Preview's own guard runs the same bundle and accepts the Adapter.
+		expect(bundle.bundleJs).toContain('extends HTMLElement')
+		expect(await mountCounter(root, bundle.bundleJs)).toContain('Value: 42')
+	})
+
+	it('ends an evaluation that never reports and counts the check as not run, once per bundle', async () => {
+		const root = await temporaryRoot()
+		// A live handle and a top-level await that never settles.
+		const bundle = { bundleJs: 'setInterval(() => {}, 1000);\nawait new Promise(() => {});\n' }
+		const started = Date.now()
+		const check = checkPreviewBundleAdapters(bundle, root, { timeoutMs: 300 })
+		const result = await check
+		expect(Date.now() - started).toBeLessThan(10_000)
+		expect(result).toMatchObject({ state: 'unchecked', warnings: [{ code: 'preview.bundle_failed', path: '/product-kit' }] })
+		expect(result.state === 'unchecked' ? result.warnings[0]?.message : '').toContain('did not report within 300 ms')
+		// The bundle's content never changes, so its failed check is kept, not run again.
+		expect(checkPreviewBundleAdapters(bundle, root, { timeoutMs: 300 })).toBe(check)
+	})
+
+	it('names the bundle, not its data: URL, in the warning of a failed evaluation', async () => {
+		const root = await temporaryRoot()
+		const result = await checkPreviewBundleAdapters({ bundleJs: 'throw new Error(`failed in ${import.meta.url}`);\n' }, root)
+		expect(result.state).toBe('unchecked')
+		const message = result.state === 'unchecked' ? result.warnings[0]?.message ?? '' : ''
+		expect(message).toContain('failed in <preview bundle>')
+		expect(message).not.toContain('data:')
+		expect(message).not.toContain('base64')
 	})
 
 	it('falls back to kit/node_modules, never the root node_modules, for a bare import of an Adapter outside kit/', async () => {

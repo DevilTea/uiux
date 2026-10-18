@@ -249,6 +249,43 @@ describe('Product Kit page › an Adapter that bundles its own widget-core copy'
 	}, 60_000)
 })
 
+describe('Product Kit page › an Adapter whose bundle cannot run on the server', () => {
+	// The fixture's reference Adapter plus a dependency whose `browser` export defines a custom
+	// element at its top level: the server's worker cannot evaluate the Preview bundle.
+	const browserOnly = withServer(async (root) => {
+		const dependency = join(root, 'kit', 'node_modules', 'fancy-element')
+		await mkdir(dependency, { recursive: true })
+		await writeFile(join(dependency, 'package.json'), JSON.stringify({ name: 'fancy-element', version: '1.0.0', type: 'module', exports: { browser: './browser.js', default: './node.js' } }))
+		await writeFile(join(dependency, 'browser.js'), 'export class FancyElement extends HTMLElement {}\n')
+		await writeFile(join(dependency, 'node.js'), 'export class FancyElement {}\n')
+		await writeFile(join(root, 'kit', 'adapters', 'browser-only.mjs'), "export { FancyElement } from 'fancy-element'\nexport * from './reference.ts'\nexport { default } from './reference.ts'\n")
+		const productKitPath = join(root, 'product-kit.json')
+		const productKit = JSON.parse(await readFile(productKitPath, 'utf8')) as Record<string, unknown>
+		await writeFile(productKitPath, canonicalJsonBytes({ ...productKit, adapters: [{ moduleSpecifier: './adapters/browser-only.mjs' }] }))
+	})
+
+	it('keeps the set valid and says the server-side check could not run (owner decision during review of #248)', async () => {
+		const target = browserOnly()
+		const response = await fetch(`${target.origin}/api/preview/adapters`, { headers: target.headers })
+		const body = await response.json() as { state: string; bundleUrl?: string; warnings?: { code: string }[] }
+		expect(body.state).toBe('valid')
+		expect(body.bundleUrl).toBeDefined()
+		expect(body.warnings).toContainEqual(expect.objectContaining({ code: 'preview.bundle_failed' }))
+
+		const { context, page } = await open('/workspace/product-kit?section=overview', target.cookie, target)
+		try {
+			const row = page.locator('#product-kit-adapters [data-adapter-row]')
+			await row.first().waitFor({ timeout: 15_000 })
+			await expect.poll(() => row.innerText(), { timeout: 15_000 }).toContain('Loaded')
+			const warning = page.locator('[data-adapters-unchecked]')
+			await warning.waitFor({ timeout: 15_000 })
+			expect(await warning.innerText()).toContain('couldn\'t run its Adapter check')
+			expect(await page.locator('[data-adapters-invalid]').count()).toBe(0)
+		}
+		finally { await context.close() }
+	}, 60_000)
+})
+
 describe('Product Kit page › key gating', () => {
 	it('names `product-kit.source.read` instead of the build log for a member without it, and the server refuses the log', async () => {
 		const cookie = await memberCookie(['workspace.read'])

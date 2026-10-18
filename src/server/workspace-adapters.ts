@@ -17,7 +17,7 @@ import { canonicalJsonStringify } from '../domain/canonical-json'
 import type { Diagnostic } from '../domain/validation'
 import type { WorkspaceAdapterSelection } from '../domain/workspace/schema'
 import { kitBuildRunnerFor } from './kit-build'
-import { checkPreviewBundleAdapters } from './preview-adapter-check'
+import { checkPreviewBundleAdapters, type PreviewAdapterCheck } from './preview-adapter-check'
 import {
 	extractProductAdapterManifest,
 	productAdapterApiCompatibility,
@@ -221,10 +221,17 @@ async function buildOutputExists(kitDirectory: string, output: string): Promise<
 /** The active theme's root attributes come from this map: Workspace theme ID to attribute name and value. */
 export type PreviewThemes = Readonly<Record<string, Readonly<Record<string, string>>>>
 
-export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, givenLayout?: WorkspaceLayout): Promise<
-	| (PreviewBundleResult & { state: 'valid'; themes: PreviewThemes })
+/**
+ * The selected Workspace's Preview bundle with the result of the server-side Adapter check (Clause
+ * 01a116f0-cae2-7c64-9c76-d472f252789a): `adapterCheck` is `passed` when the evaluated bundle
+ * reported no mismatch, `unchecked` when it could not be evaluated in Node; then `warnings` says so
+ * and the Preview's own guard decides in the browser.
+ */
+export type SelectedWorkspacePreviewBundle =
+	| (PreviewBundleResult & { state: 'valid'; themes: PreviewThemes; adapterCheck: 'passed' | 'unchecked'; warnings: readonly Diagnostic[] })
 	| { state: 'invalid'; diagnostics: readonly Diagnostic[] }
-> {
+
+export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, givenLayout?: WorkspaceLayout): Promise<SelectedWorkspacePreviewBundle> {
 	const layout = selectedLayout(givenLayout)
 	const resolution = await resolveSelectedWorkspaceAdapters(workspaceRoot, layout)
 	if (resolution.state === 'invalid') {
@@ -263,9 +270,41 @@ export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, g
 	}
 	// The one server-side check of the Adapters' runtime members, plugin authenticity among them
 	// (Clause 01a116f0-cae2-7c64-9c76-d472f252789a): a set the Preview would refuse is invalid here.
+	// A bundle that cannot run in Node stays valid with a warning (owner decision during review of #248).
 	const check = await checkPreviewBundleAdapters(bundle, workspaceRoot)
 	if (check.state === 'invalid') return { state: 'invalid', diagnostics: check.diagnostics }
-	return { state: 'valid', ...bundle, themes: productKit?.themes ?? {} }
+	return {
+		state: 'valid',
+		...bundle,
+		themes: productKit?.themes ?? {},
+		adapterCheck: check.state === 'valid' ? 'passed' : 'unchecked',
+		warnings: check.state === 'unchecked' ? check.warnings : [],
+	}
+}
+
+/**
+ * The server-side Adapter check (Clause 01a116f0-cae2-7c64-9c76-d472f252789a) of a given resolved
+ * set, for Handoff export, which resolves only the Adapters its closure needs: the set's Preview
+ * bundle, without the Product Kit styles, is built and checked as `getSelectedWorkspacePreviewBundle`
+ * checks the Workspace's. A bundle that cannot be built leaves the check `unchecked`, like one that
+ * cannot be evaluated. Diagnostic paths index the given set.
+ */
+export async function checkAdapterSetRuntime(workspaceRoot: string, givenLayout: WorkspaceLayout | undefined, set: ValidatedAdapterSet): Promise<PreviewAdapterCheck> {
+	if (set.entries.length === 0) return { state: 'valid' }
+	let bundle: PreviewBundleResult
+	try {
+		bundle = await buildWorkspacePreviewBundle({ workspaceRoot, moduleBase: adapterResolutionBase(workspaceRoot, selectedLayout(givenLayout)), set })
+	}
+	catch (error) {
+		const message = error instanceof Error ? error.message : String(error)
+		const realRoot = await realpath(workspaceRoot).catch(() => resolve(workspaceRoot))
+		return { state: 'unchecked', warnings: [{
+			code: 'preview.bundle_failed',
+			path: '/product-kit',
+			message: maskHostPaths(`The server could not run the Adapter check: the Adapters' Preview bundle could not be built: ${message}`, [resolve(workspaceRoot), realRoot]),
+		}] }
+	}
+	return await checkPreviewBundleAdapters(bundle, workspaceRoot)
 }
 
 type StyleResolution =
