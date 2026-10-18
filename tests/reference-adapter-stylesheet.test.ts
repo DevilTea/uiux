@@ -105,7 +105,7 @@ describe('Reference Adapter styles', () => {
 		const css = new TextDecoder().decode(bundle.files.get(PREVIEW_BUNDLE_STYLESHEET)!.contents)
 		for (const selector of ['.uiux-ref-scope', '.uiux-theme-dark', '.uiux-ref-badge', '.uiux-ref-empty'])
 			expect(css, selector).toContain(selector)
-		expect(bundle.bundleJs).not.toContain('.uiux-ref-badge{')
+		expect(bundle.bundleJs).not.toContain('.uiux-ref-badge {')
 		expect(bundle.bundleJs).not.toContain('uiux-reference-adapter-styles')
 	})
 
