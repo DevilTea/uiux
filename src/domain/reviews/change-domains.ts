@@ -88,9 +88,9 @@ function domainAffectsFormalCapture(domain: string, scope: ChangeScope, capture:
 		case 'i18n':
 			return named(scope.locales, capture.locale)
 		case 'settings':
-			if (scope.viewports === undefined && scope.themes === undefined) return true
-			return (scope.viewports !== undefined && capture.viewportId !== undefined && scope.viewports.has(capture.viewportId))
-				|| (scope.themes !== undefined && capture.themeId !== undefined && scope.themes.has(capture.themeId))
+			// A set the change does not name reads as "any", like every other set: the change may have
+			// touched any viewport or theme it leaves unnamed.
+			return named(scope.viewports, capture.viewportId) || named(scope.themes, capture.themeId)
 		case 'adapter':
 		case 'product-kit':
 			return true

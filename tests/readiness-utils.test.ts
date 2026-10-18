@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { EvidenceStalenessContext } from '../src/domain/evidence/staleness'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import type { HandoffBlockingDiagnostic, HandoffReadiness } from '../src/domain/handoff/schema'
 import {
@@ -9,6 +10,7 @@ import {
 	handoffDiagnosticSubject,
 	reviewCoverageSummary,
 	splitReadinessDiagnostics,
+	unchangedSinceCapture,
 	updatedSince,
 	type CaptureContext,
 	type Finding,
@@ -160,5 +162,32 @@ describe('Updated since you last looked', () => {
 		expect(updatedSince({ 'view:a': 'r1' }, 'view:a', 'r2')).toBe(true)
 		expect(updatedSince({ 'view:a': 'r1' }, 'view:a', 'r1')).toBe(false)
 		expect(updatedSince({}, 'view:a', 'r1')).toBe(false)
+	})
+})
+
+describe('unchangedSinceCapture', () => {
+	const record = {
+		schemaVersion: 1,
+		kind: 'formal_capture',
+		executionContext: { viewId: VIEW },
+		provenance: { resources: [{ identity: { type: 'view', id: VIEW }, revision: 'r2' }], renderInputDigest: 'sha256:recorded' },
+	} as unknown as FormalEvidenceRecord
+	const context = { allViews: [{ key: VIEW, renderInputDigest: 'sha256:old' }] } as unknown as EvidenceStalenessContext
+	const digestOf = (c: EvidenceStalenessContext) => c.allViews.find(view => view.key === VIEW)?.renderInputDigest
+
+	it('keeps the context while the digest is for the current revision', () => {
+		expect(unchangedSinceCapture(record, new Map([[VIEW, { revision: 'r2' }]]), new Map([[VIEW, 'r2']]), context)).toBe(context)
+	})
+
+	it('uses the recorded digest while the list lags and the capture saw the current revision', () => {
+		const next = unchangedSinceCapture(record, new Map([[VIEW, { revision: 'r1' }]]), new Map([[VIEW, 'r2']]), context)
+		expect(digestOf(next)).toBe('sha256:recorded')
+		// A View with no entry (unreadable) and a capture of the current revision reads the same.
+		expect(digestOf(unchangedSinceCapture(record, new Map(), new Map([[VIEW, 'r2']]), context))).toBe('sha256:recorded')
+	})
+
+	it('keeps the context when the capture saw another revision, or the View is unknown', () => {
+		expect(unchangedSinceCapture(record, new Map([[VIEW, { revision: 'r1' }]]), new Map([[VIEW, 'r3']]), context)).toBe(context)
+		expect(unchangedSinceCapture(record, new Map(), new Map(), context)).toBe(context)
 	})
 })

@@ -14,6 +14,7 @@ import {
 } from '../../domain/render-context/schema'
 import type { Diagnostic, JsonObject } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
+import { PersistenceError } from '../../persistence/errors'
 import type { KitBuildStatus } from '../ports/kit-build'
 import { captureHarnessScreenshot, openHarnessPreview, type HarnessPreview } from './capture-harness'
 import { missingDefaultLocaleError } from './default-locale-gate'
@@ -453,7 +454,12 @@ export function createFormalCaptureService(
 	async function viewRenderInputs(): Promise<readonly ViewRenderInput[]> {
 		const inputs: ViewRenderInput[] = []
 		for (const key of await persistence.views.discoverKeys()) {
-			const read = await persistence.views.readInspected(key)
+			// A View file that is not valid JSON has no render input: skip it (as View discovery does) so
+			// the other Views and the Evidence list still load; its Evidence then reads as stale (View missing).
+			const read = await persistence.views.readInspected(key).catch((error: unknown) => {
+				if (error instanceof PersistenceError && error.code === 'persistence.invalid_json') return undefined
+				throw error
+			})
 			if (!read?.resource || !read.revision) continue
 			inputs.push({ key, revision: read.revision, renderInputDigest: renderInputDigest(read.resource) })
 		}

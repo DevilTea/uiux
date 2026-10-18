@@ -96,8 +96,11 @@ describe('the Evidence a change domain affects (Clause 01a14e30-2e43-…)', () =
 	})
 
 	it('settings affects every formal capture in a changed viewport or theme, Workspace-wide', () => {
-		expect(affected(scope(['settings'], { viewports: new Set(['mobile']) }))).toEqual(['checkoutZh'])
-		expect(affected(scope(['settings'], { themes: new Set(['light']) }))).toEqual(['checkoutEn', 'receiptEn'])
+		expect(affected(scope(['settings'], { viewports: new Set(['mobile']), themes: new Set(['light']) }))).toEqual(['checkoutEn', 'checkoutZh', 'receiptEn'])
+		expect(affected(scope(['settings'], { viewports: new Set(['mobile']), themes: new Set(['sepia']) }))).toEqual(['checkoutZh'])
+		// A set the change leaves unnamed reads as any, like the other sets.
+		expect(affected(scope(['settings'], { viewports: new Set(['mobile']) }))).toEqual(['checkoutEn', 'checkoutZh', 'receiptEn'])
+		expect(affected(scope(['settings'], { themes: new Set(['light']) }))).toEqual(['checkoutEn', 'checkoutZh', 'receiptEn'])
 		// A submission names the manifest only as a whole, so its changed keys are unknown.
 		expect(affected(scope(['settings']))).toEqual(['checkoutEn', 'checkoutZh', 'receiptEn'])
 	})

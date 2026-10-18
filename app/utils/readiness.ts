@@ -315,3 +315,27 @@ export function updatedSince(lastSeen: Readonly<Record<string, string>>, key: st
 	const seen = lastSeen[key]
 	return seen !== undefined && seen !== revision
 }
+
+/**
+ * While a View's digest is older than its current revision (the list is being read again), a
+ * capture that recorded the current revision saw byte-identical content, so its own recorded
+ * digest is the current one.
+ */
+export function unchangedSinceCapture(
+	record: FormalEvidenceRecord,
+	inputs: ReadonlyMap<string, Readonly<{ revision: string }>>,
+	revisions: ReadonlyMap<string, string>,
+	context: EvidenceStalenessContext,
+): EvidenceStalenessContext {
+	const viewId = (record.executionContext as Record<string, unknown> | undefined)?.viewId
+	if (typeof viewId !== 'string') return context
+	const current = revisions.get(viewId)
+	const recordedDigest = record.provenance?.renderInputDigest
+	if (current === undefined || inputs.get(viewId)?.revision === current || !recordedDigest) return context
+	const recordedRevision = record.provenance.resources.find((resource) => {
+		const identity = resource.identity as Record<string, unknown>
+		return identity.type === 'view' && identity.id === viewId
+	})?.revision
+	if (recordedRevision !== current) return context
+	return { ...context, allViews: [...context.allViews.filter(view => view.key !== viewId), { key: viewId, renderInputDigest: recordedDigest }] }
+}

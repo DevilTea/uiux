@@ -1958,7 +1958,7 @@
     "domainsAffect": "These changes affect the formal captures of {view}. Capture it again after the change and cite the new captures.",
     "domainsKeep": "These changes leave the formal captures of {view} valid. Earlier captures need not be rerun.",
     "evidence": "Evidence",
-    "evidenceHelp": "Formal captures of {view} at its current revision. Stale captures can't be referenced.",
+    "evidenceHelp": "Formal captures of {view} whose rendered IR and Variants still match the current ones. Stale captures can't be referenced.",
     "evidenceCurrent": "Current",
     "noEvidence": "This View has no Evidence yet. Capture it in the contexts you checked first.",
     "noCurrentEvidence": "Every capture of this View is out of date. Capture it again first.",
