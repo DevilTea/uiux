@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Worker } from 'node:worker_threads'
 import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -844,18 +845,32 @@ describe('a current-schema Workspace resolves its Adapters from the Product Kit'
 		expect(await mountCounter(root, bundle.bundleJs)).toContain('Value: 42')
 	})
 
-	it('ends an evaluation that never reports and counts the check as not run, once per bundle', async () => {
+	it('ends an evaluation that never reports and counts the check as not run, evaluating again on a later request', async () => {
 		const root = await temporaryRoot()
 		// A live handle and a top-level await that never settles.
 		const bundle = { bundleJs: 'setInterval(() => {}, 1000);\nawait new Promise(() => {});\n' }
+		const terminate = vi.spyOn(Worker.prototype, 'terminate')
 		const started = Date.now()
 		const check = checkPreviewBundleAdapters(bundle, root, { timeoutMs: 300 })
 		const result = await check
+		expect(terminate).toHaveBeenCalledTimes(1)
 		expect(Date.now() - started).toBeLessThan(10_000)
 		expect(result).toMatchObject({ state: 'unchecked', warnings: [{ code: 'preview.bundle_failed', path: '/product-kit' }] })
 		expect(result.state === 'unchecked' ? result.warnings[0]?.message : '').toContain('did not report within 300 ms')
-		// The bundle's content never changes, so its failed check is kept, not run again.
-		expect(checkPreviewBundleAdapters(bundle, root, { timeoutMs: 300 })).toBe(check)
+		// A timeout is transient: it is not kept, so a later request starts a new evaluation.
+		const again = checkPreviewBundleAdapters(bundle, root, { timeoutMs: 300 })
+		expect(again).not.toBe(check)
+		await again
+		expect(terminate).toHaveBeenCalledTimes(2)
+		terminate.mockRestore()
+	})
+
+	it('keeps a deterministic failed evaluation, evaluating the bundle once', async () => {
+		const root = await temporaryRoot()
+		const bundle = { bundleJs: 'throw new Error("always");\n' }
+		const check = checkPreviewBundleAdapters(bundle, root)
+		expect((await check).state).toBe('unchecked')
+		expect(checkPreviewBundleAdapters(bundle, root)).toBe(check)
 	})
 
 	it('names the bundle, not its data: URL, in the warning of a failed evaluation', async () => {
@@ -866,6 +881,10 @@ describe('a current-schema Workspace resolves its Adapters from the Product Kit'
 		expect(message).toContain('failed in <preview bundle>')
 		expect(message).not.toContain('data:')
 		expect(message).not.toContain('base64')
+		// Only the bundle's own data: URL is masked, not other text that merely contains "data:".
+		const other = await checkPreviewBundleAdapters({ bundleJs: 'throw new Error("see metadata:x and data:text/plain,y");\n' }, root)
+		const otherMessage = other.state === 'unchecked' ? other.warnings[0]?.message ?? '' : ''
+		expect(otherMessage).toContain('see metadata:x and data:text/plain,y')
 	})
 
 	it('falls back to kit/node_modules, never the root node_modules, for a bare import of an Adapter outside kit/', async () => {

@@ -1168,6 +1168,20 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		expect(manifest.artifactRefs.some(reference => reference.kind === 'adapter-module' || (reference.kind === 'widget-source' && reference.context?.widgetType === 'Counter'))).toBe(false)
 	})
 
+	it('keeps an Adapter that cannot be evaluated in the server worker non-blocking, with a note (#123)', async () => {
+		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		// Loads from the Workspace, but fails once inlined into the Preview bundle (a data: module), as a top level that needs a browser does in the server worker.
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), `if (import.meta.url.startsWith('data:')) throw new Error('needs a browser');\n${makeCounterAdapterSource()}`)
+		const viewRev = await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'Counter View'))
+		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
+		const handoff = currentSchemaHandoff(persistence, { checkAdapterSet: set => checkAdapterSetRuntime(root, persistence.layout, set) })
+
+		const assess = await handoff.assessReadiness({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(assess.readiness?.implementationReady).toBe(true)
+		expect(assess.readiness?.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'preview.bundle_failed', blocking: false }))
+	})
+
 	it('materializes the sources of an Adapter that imports the host widget-core under the same check (#123)', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
 		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })

@@ -23,7 +23,7 @@ type PreviewBundle = Pick<PreviewBundleResult, 'bundleJs'>
 
 type WorkerReport =
 	| Readonly<{ ok: true; reported: unknown }>
-	| Readonly<{ ok: false; message: string }>
+	| Readonly<{ ok: false; message: string; transient?: true }>
 
 /**
  * How long the worker may take to evaluate a bundle and report before it is ended and the check
@@ -36,8 +36,10 @@ export const PREVIEW_ADAPTER_CHECK_TIMEOUT_MS = 30_000
 const WORKER_RESOURCE_LIMITS = { maxOldGenerationSizeMb: 512 } as const
 
 /**
- * Per built bundle, its check, so each bundle is checked once. A check that could not run is kept
- * too: a bundle's content never changes, so evaluating it again would fail again.
+ * Per built bundle, its check, so each bundle is checked once. A deterministic result is kept, among
+ * them a failed evaluation (a bundle's content never changes, so evaluating it again would fail
+ * again). A transient failure, a timeout or an exhausted worker heap, is dropped, so a later
+ * request evaluates the bundle again.
  */
 const checks = new WeakMap<PreviewBundle, Promise<PreviewAdapterCheck>>()
 
@@ -79,15 +81,19 @@ export function checkPreviewBundleAdapters(
 ): Promise<PreviewAdapterCheck> {
 	let check = checks.get(bundle)
 	if (!check) {
-		check = runCheck(bundle, workspaceRoot, options.timeoutMs ?? PREVIEW_ADAPTER_CHECK_TIMEOUT_MS)
+		const started: Promise<PreviewAdapterCheck> = runCheck(bundle, workspaceRoot, options.timeoutMs ?? PREVIEW_ADAPTER_CHECK_TIMEOUT_MS, () => {
+			if (checks.get(bundle) === started) checks.delete(bundle)
+		})
+		check = started
 		checks.set(bundle, check)
 	}
 	return check
 }
 
-async function runCheck(bundle: PreviewBundle, workspaceRoot: string, timeoutMs: number): Promise<PreviewAdapterCheck> {
+async function runCheck(bundle: PreviewBundle, workspaceRoot: string, timeoutMs: number, onTransient: () => void): Promise<PreviewAdapterCheck> {
 	const roots = async () => [resolve(workspaceRoot), await realpath(workspaceRoot).catch(() => resolve(workspaceRoot))]
 	const report = await evaluateInWorker(bundle.bundleJs, timeoutMs)
+	if (!report.ok && report.transient) onTransient()
 	if (!report.ok) return unchecked(maskHostPaths(withoutBundleUrl(report.message), await roots()))
 	const reported = report.reported
 	if (!Array.isArray(reported) || !reported.every(isDiagnostic))
@@ -99,7 +105,7 @@ async function runCheck(bundle: PreviewBundle, workspaceRoot: string, timeoutMs:
 
 /** An evaluation error may quote the module's URL, which is the whole bundle as `data:` base64. */
 export function withoutBundleUrl(message: string): string {
-	return message.replace(/data:[^"'\s]+/gu, '<preview bundle>')
+	return message.replace(/data:text\/javascript;base64,[A-Za-z0-9+/=]+/gu, '<preview bundle>')
 }
 
 /**
@@ -110,8 +116,15 @@ function evaluateInWorker(bundleJs: string, timeoutMs: number): Promise<WorkerRe
 	return new Promise((settle) => {
 		const url = `data:text/javascript;base64,${Buffer.from(bundleJs, 'utf8').toString('base64')}`
 		let done = false
-		const worker = new Worker(WORKER_SOURCE, { eval: true, workerData: { url }, resourceLimits: WORKER_RESOURCE_LIMITS })
-		const timer = setTimeout(() => finish({ ok: false, message: `the evaluation did not report within ${timeoutMs} ms.` }), timeoutMs)
+		let worker: Worker
+		try {
+			worker = new Worker(WORKER_SOURCE, { eval: true, workerData: { url }, resourceLimits: WORKER_RESOURCE_LIMITS })
+		}
+		catch (error) {
+			settle({ ok: false, transient: true, message: error instanceof Error ? error.message : String(error) })
+			return
+		}
+		const timer = setTimeout(() => finish({ ok: false, transient: true, message: `the evaluation did not report within ${timeoutMs} ms.` }), timeoutMs)
 		timer.unref()
 		function finish(report: WorkerReport): void {
 			if (done) return
@@ -121,7 +134,11 @@ function evaluateInWorker(bundleJs: string, timeoutMs: number): Promise<WorkerRe
 			void worker.terminate()
 		}
 		worker.once('message', (report: WorkerReport) => finish(report))
-		worker.once('error', error => finish({ ok: false, message: error instanceof Error ? error.message : String(error) }))
+		worker.once('error', error => finish({
+			ok: false,
+			message: error instanceof Error ? error.message : String(error),
+			...((error as { code?: unknown }).code === 'ERR_WORKER_OUT_OF_MEMORY' ? { transient: true as const } : {}),
+		}))
 		worker.once('exit', code => finish({ ok: false, message: `the evaluation ended (exit code ${code}) before it reported.` }))
 	})
 }

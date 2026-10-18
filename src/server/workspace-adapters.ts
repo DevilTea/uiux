@@ -287,7 +287,9 @@ export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, g
  * set, for Handoff export, which resolves only the Adapters its closure needs: the set's Preview
  * bundle, without the Product Kit styles, is built and checked as `getSelectedWorkspacePreviewBundle`
  * checks the Workspace's. A bundle that cannot be built leaves the check `unchecked`, like one that
- * cannot be evaluated. Diagnostic paths index the given set.
+ * cannot be evaluated. Unlike the Preview, where a build failure makes the set invalid, a Handoff
+ * check-bundle build failure is reported as `unchecked` (non-blocking), because Handoff did not
+ * build before this check. Diagnostic paths index the given set.
  */
 export async function checkAdapterSetRuntime(workspaceRoot: string, givenLayout: WorkspaceLayout | undefined, set: ValidatedAdapterSet): Promise<PreviewAdapterCheck> {
 	if (set.entries.length === 0) return { state: 'valid' }
