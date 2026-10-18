@@ -1,6 +1,6 @@
 Feature: Command-line interface
   # Source: Discussion #241 (Part 18, owner rulings 2026-10-18), R3 https://github.com/DevilTea/uiux/discussions/241; accepted 2026-10-18 https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19014804; owner confirmations A2: `uiux artifacts gc` refuses a Workspace that a running `uiux dev` server holds https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19015368; issue #58 https://github.com/DevilTea/uiux/issues/58.
-  # Test: code@4fc05a7 `tests/artifacts-gc.test.ts#L260` "refuses, deleting nothing, a Workspace that a running uiux dev server holds". https://github.com/DevilTea/uiux/blob/4fc05a7e72ee40e71415d3b1baeaec317585722f/tests/artifacts-gc.test.ts#L260
+  # Test: code@884a5d1 `tests/artifacts-gc.test.ts#L378` "refuses, deleting nothing, a Workspace that a running uiux dev server holds". https://github.com/DevilTea/uiux/blob/884a5d1c56b25a2fe67a3312a35ca5e1e54b7980/tests/artifacts-gc.test.ts#L378
   # Status: built as of 4fc05a7.
   # Note: The test writes the server hold of a live process on this host, as `uiux dev` does (`.server-hold.json`); a hold whose process is gone is stale and does not refuse.
   @spec:id:01a14f7a-1a27-730e-929c-59e9fe8ec7f7

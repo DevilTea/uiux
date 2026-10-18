@@ -1,8 +1,8 @@
 Feature: Content-addressed artifact store
-  # Source: Discussion #241 (Part 18, owner rulings 2026-10-18), R3: the roots of artifact cleanup and the explicit `artifacts gc` command with its `--dry-run` mode https://github.com/DevilTea/uiux/discussions/241; accepted 2026-10-18 https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19014804; owner confirmations A2, the output https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19015368; issue #58 https://github.com/DevilTea/uiux/issues/58.
-  # Test: code@4fc05a7 `tests/artifacts-gc.test.ts#L202` "with --dry-run lists only the unreachable blobs, then their count and total bytes, and deletes nothing". https://github.com/DevilTea/uiux/blob/4fc05a7e72ee40e71415d3b1baeaec317585722f/tests/artifacts-gc.test.ts#L202
-  # Test: code@4fc05a7 `tests/artifacts-gc.test.ts#L320` "runs through the uiux binary, which lists it in help and refuses invalid usage with status 2" (the dry run through `bin/uiux.mjs`). https://github.com/DevilTea/uiux/blob/4fc05a7e72ee40e71415d3b1baeaec317585722f/tests/artifacts-gc.test.ts#L320
-  # Status: built as of 4fc05a7.
+  # Source: Discussion #241 (Part 18, owner rulings 2026-10-18), R3: the roots of artifact cleanup and the explicit `artifacts gc` command with its `--dry-run` mode https://github.com/DevilTea/uiux/discussions/241; accepted 2026-10-18 https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19014804; owner confirmations A2, the output https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19015368; issue #58 https://github.com/DevilTea/uiux/issues/58; owner decisions for #252 (2026-10-18) https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19019221.
+  # Test: code@884a5d1 `tests/artifacts-gc.test.ts#L244` "with --dry-run lists only the unreachable blobs, then their count and total bytes, and deletes nothing". https://github.com/DevilTea/uiux/blob/884a5d1c56b25a2fe67a3312a35ca5e1e54b7980/tests/artifacts-gc.test.ts#L244
+  # Test: code@884a5d1 `tests/artifacts-gc.test.ts#L518` "runs through the uiux binary, which lists it in help and refuses invalid usage with status 2" (the dry run through `bin/uiux.mjs`). https://github.com/DevilTea/uiux/blob/884a5d1c56b25a2fe67a3312a35ca5e1e54b7980/tests/artifacts-gc.test.ts#L518
+  # Status: built as of 4fc05a7; the roots as amended, as of 884a5d1.
   @spec:id:01a14f79-cd79-7dcc-9e4e-faa7d3cd0ba3
   @spec:demonstrates:01a14e30-30de-70c3-888f-63e8982353d7
   @spec:demonstrates:01a14e30-31c0-7289-a944-74af9556eabf
