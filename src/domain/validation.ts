@@ -1,5 +1,10 @@
 /** Shared, dependency-free validation primitives for canonical domain resources. */
 
+import type { JsonValue } from '../adapter-entry'
+
+// `JsonValue` is defined once, by the public Adapter authoring entry.
+export type { JsonValue }
+
 export type Diagnostic = Readonly<{
 	code: string
 	path: string
@@ -11,7 +16,6 @@ export type ValidationResult<T> =
 	| Readonly<{ ok: false; diagnostics: readonly Diagnostic[] }>
 
 export type JsonPrimitive = string | number | boolean | null
-export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 export type JsonObject = { [key: string]: JsonValue }
 
 export const FULL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

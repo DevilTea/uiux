@@ -25,6 +25,13 @@
 	"bin": {
 		"uiux": "./bin/uiux.mjs"
 	},
+	"exports": {
+		"./adapter": {
+			"types": "./src/adapter-entry/index.d.ts",
+			"import": "./src/adapter-entry/index.js"
+		},
+		"./package.json": "./package.json"
+	},
 	"files": [
 		".output",
 		"app",

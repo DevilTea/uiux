@@ -2,27 +2,12 @@ import { createWidgetPlugin, type JsonValue } from '@deviltea/widget-core'
 import { defineComponent, h } from 'vue'
 import { useWidget } from '@deviltea/widget-vue'
 
-import type { TranslationResult } from '../domain/i18n/schema'
+import type { RootShellInterfaces } from '../adapter-entry'
 import type { TranslationRuntime } from '../i18n'
 
-export type RootShellViewport = Readonly<{
-	id: string
-	width: number
-	height: number
-}>
-
-export interface RootShellInterfaces {
-	slots: 'content'
-	state: {
-		locale: string
-		viewport: RootShellViewport
-		themeId: string
-		variantName: string | null
-	}
-	methods: {
-		t: (key: string, params?: Readonly<Record<string, string>>) => TranslationResult
-	}
-}
+// RootShell's interfaces are defined once, by the public Adapter authoring entry.
+export type { RootShellInterfaces }
+export type RootShellViewport = RootShellInterfaces['state']['viewport']
 
 export function createRootShellPlugin(translation: TranslationRuntime) {
 	return createWidgetPlugin('RootShell')

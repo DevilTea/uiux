@@ -41,6 +41,9 @@ async function referenceWorkspace(): Promise<string> {
 	await mkdir(join(root, 'node_modules', '@deviltea'), { recursive: true })
 	for (const name of ['@deviltea/widget-core', '@deviltea/widget-vue', 'vue'])
 		await symlink(join(process.cwd(), 'node_modules', name), join(root, 'node_modules', name))
+	// The reference Adapter imports the public authoring entry `@deviltea/uiux/adapter`, which the dogfood
+	// kit reaches as a self-reference of this repository; the copy reaches it as an installed package.
+	await symlink(process.cwd(), join(root, 'node_modules', '@deviltea', 'uiux'))
 	await writeCurrentWorkspace(root, {
 		i18n: { defaultLocale: 'en-US' },
 		adapters: [{ moduleSpecifier: './adapters/reference.ts' }],

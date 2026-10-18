@@ -6,7 +6,14 @@ import {
 } from '@deviltea/widget-core'
 import { defineComponent, h, type VNode } from 'vue'
 import { useWidget } from '@deviltea/widget-vue'
-import type { AdapterManifest, AdapterWidgetCatalogEntry } from '../../../src/domain/adapters/schema'
+import {
+	STRING_VALUE_CONTRACT_ID,
+	TRANSLATION_RESULT_VALUE_CONTRACT_ID,
+	WIDGET_ID_ATTRIBUTE,
+	type AdapterManifest,
+	type AdapterWidgetCatalogEntry,
+	type TranslationResult,
+} from '@deviltea/uiux/adapter'
 // The reference CSS ("Quiet Canvas" tokens from DESIGN.md) reaches the Preview only through the one
 // Product Kit stylesheet, which the Preview bundler builds from CSS imported anywhere in the Adapter
 // module graph (Discussion #241 R1, Rule 01a11bb1-acdc-799f-aed7-c85ddbaf0d28).
@@ -17,14 +24,12 @@ import './reference.css'
 // ---------------------------------------------------------------------------
 
 /**
- * UIUX TranslationResult and string value-contract identities. The reference adapter declares
- * them locally (instead of importing UIUX runtime values) so it stays a self-contained module,
- * exactly like a third-party adapter would.
+ * UIUX TranslationResult and string value contracts. Like a third-party Adapter, the reference
+ * Adapter takes their IDs from the public authoring entry `@deviltea/uiux/adapter` and builds the
+ * contracts with the host's `@deviltea/widget-core`.
  */
-type I18nWarning = Readonly<{ code: string; key: string; requestedLocale: string; [key: string]: string }>
-type TranslationResult = Readonly<{ text: string; warnings: readonly I18nWarning[] }>
-const TRANSLATION_RESULT = createWidgetValueContract<TranslationResult>('deviltea.uiux/translation-result@1')
-const STRING = createWidgetValueContract<string>('deviltea.uiux/string@1')
+const TRANSLATION_RESULT = createWidgetValueContract<TranslationResult>(TRANSLATION_RESULT_VALUE_CONTRACT_ID)
+const STRING = createWidgetValueContract<string>(STRING_VALUE_CONTRACT_ID)
 
 type RootOps = UnknownTargetDependencyOperations<'property', false>
 type DepResult = Readonly<{ ok: boolean; value?: unknown }>
@@ -447,7 +452,7 @@ export const StackRenderer = defineComponent({
 		return (): VNode => {
 			const layout = props.layout.value
 			return h('div', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				class: [
 					'uiux-ref-scope',
 					'uiux-ref-stack',
@@ -589,7 +594,7 @@ export const PanelRenderer = defineComponent({
 			const title = props.title.value ?? ''
 			const frame = props.frame.value
 			return h('section', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				'aria-label': title || undefined,
 				class: [
 					'uiux-ref-scope',
@@ -758,7 +763,7 @@ export const TextRenderer = defineComponent({
 			if (presentation?.align && presentation.align !== 'start') style.textAlign = presentation.align
 			if (presentation?.lines) style.webkitLineClamp = String(presentation.lines)
 			return h(tag, {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				class: [
 					'uiux-ref-scope',
 					'uiux-ref-text',
@@ -917,7 +922,7 @@ export const ButtonRenderer = defineComponent({
 			if (presentation?.trailingIcon && !presentation.iconOnly) children.push(iconNode(presentation.trailingIcon, 14))
 
 			return h('button', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				type: 'button',
 				disabled: state.disabled.value,
 				'aria-label': presentation?.iconOnly ? label : undefined,
@@ -1083,7 +1088,7 @@ export const BadgeRenderer = defineComponent({
 		const props = useProperties()
 
 		return (): VNode => h('span', {
-			'data-widget-id': widgetId,
+			[WIDGET_ID_ATTRIBUTE]: widgetId,
 			class: [
 				'uiux-ref-scope',
 				'uiux-ref-badge',
@@ -1298,7 +1303,7 @@ export const TextInputRenderer = defineComponent({
 				elements.push(h('p', { class: 'uiux-ref-input-help' }, props.help.value))
 
 			return h('div', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				class: ['uiux-ref-scope', 'uiux-ref-input-group', props.theme.value, presentation?.hidden ? 'uiux-ref-hidden' : ''],
 			}, elements)
 		}
@@ -1454,7 +1459,7 @@ export const NavItemRenderer = defineComponent({
 			}
 
 			return h('div', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				role: 'link',
 				tabindex: 0,
 				'aria-current': state.selected.value ? 'page' : undefined,
@@ -1543,7 +1548,7 @@ export const DividerRenderer = defineComponent({
 			const isHorizontal = presentation?.orientation !== 'vertical'
 			const spacing = presentation?.spacing ?? '8px'
 			return h('div', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				role: 'separator',
 				'aria-orientation': isHorizontal ? 'horizontal' : 'vertical',
 				class: [
@@ -1647,7 +1652,7 @@ export const AvatarRenderer = defineComponent({
 			const size = face?.size ?? 24
 			const label = props.label.value
 			return h('span', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				role: label ? 'img' : undefined,
 				'aria-label': label || undefined,
 				'aria-hidden': label ? undefined : 'true',
@@ -1700,7 +1705,7 @@ export const KbdRenderer = defineComponent({
 		const { widgetId, useProperties } = useWidget(kbdPlugin)
 		const props = useProperties()
 		return (): VNode => h('kbd', {
-			'data-widget-id': widgetId,
+			[WIDGET_ID_ATTRIBUTE]: widgetId,
 			class: ['uiux-ref-scope', 'uiux-ref-kbd', props.theme.value, props.hidden.value ? 'uiux-ref-hidden' : ''],
 		}, props.keys.value ?? '')
 	},
@@ -1805,7 +1810,7 @@ export const PinRenderer = defineComponent({
 			const placement = props.placement.value
 			const face = status === 'resolved' ? iconNode('check', 14) : actorFace(mark?.actor ?? 'human', mark?.initials ?? '', 14)
 			return h('button', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				type: 'button',
 				'aria-label': props.label.value || undefined,
 				'aria-expanded': state.selected.value ? 'true' : 'false',
@@ -1984,7 +1989,7 @@ export const BubbleRenderer = defineComponent({
 			if (props.context.value) meta.push(h('span', { class: 'uiux-ref-thread-meta' }, props.context.value))
 			if (props.target.value) meta.push(h('span', { class: ['uiux-ref-badge', 'variant-mono'] }, props.target.value))
 			return h('section', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				role: placement === 'inline' ? 'region' : 'dialog',
 				'aria-label': props.title.value || undefined,
 				class: [
@@ -2122,7 +2127,7 @@ export const CanvasStageRenderer = defineComponent({
 			const layout = props.layout.value
 			const mode = state.mode.value
 			return h('section', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				'aria-label': props.label.value || undefined,
 				'data-canvas-mode': mode,
 				class: [
@@ -2212,7 +2217,7 @@ export const SegmentedControlRenderer = defineComponent({
 			const layout = props.layout.value
 			const appearance = layout?.appearance ?? 'segment'
 			return h('div', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				role: appearance === 'tabs' ? 'tablist' : appearance === 'palette' ? 'toolbar' : 'group',
 				'aria-label': props.label.value || undefined,
 				class: ['uiux-ref-scope', 'uiux-ref-segmented', props.theme.value, `appearance-${appearance}`, layout?.fullWidth ? 'is-full-width' : '', layout?.hidden ? 'uiux-ref-hidden' : ''],
@@ -2339,7 +2344,7 @@ export const SegmentRenderer = defineComponent({
 			if (look?.count) children.push(h('span', { class: ['uiux-ref-badge', 'variant-count', `tone-${look.countTone}`] }, look.count))
 			if (look?.kbd && !look.iconOnly) children.push(kbdNode(look.kbd))
 			return h('button', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				type: 'button',
 				role: appearance === 'tabs' ? 'tab' : undefined,
 				'aria-selected': appearance === 'tabs' ? String(selected) : undefined,
@@ -2402,7 +2407,7 @@ export const TabBarRenderer = defineComponent({
 		const { widgetId, WidgetSlot, useProperties } = useWidget(tabBarPlugin)
 		const props = useProperties()
 		return (): VNode => h('nav', {
-			'data-widget-id': widgetId,
+			[WIDGET_ID_ATTRIBUTE]: widgetId,
 			'aria-label': props.label.value || undefined,
 			class: ['uiux-ref-scope', 'uiux-ref-tabbar', props.theme.value, props.hidden.value ? 'uiux-ref-hidden' : ''],
 		}, [h(WidgetSlot, { name: 'content' })])
@@ -2457,7 +2462,7 @@ export const TabBarItemRenderer = defineComponent({
 		return (): VNode => {
 			const look = props.look.value
 			return h('button', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				type: 'button',
 				'aria-current': state.selected.value ? 'page' : undefined,
 				class: ['uiux-ref-scope', 'uiux-ref-tabbar-item', props.theme.value, state.selected.value ? 'is-selected' : ''],
@@ -2535,7 +2540,7 @@ export const RailRenderer = defineComponent({
 		return (): VNode => {
 			const layout = props.layout.value
 			return h('nav', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				'aria-label': props.label.value || undefined,
 				class: ['uiux-ref-scope', 'uiux-ref-rail', props.theme.value, layout?.collapsed ? 'is-collapsed' : '', layout?.hidden ? 'uiux-ref-hidden' : ''],
 				style: { width: layout?.width ?? '264px' },
@@ -2590,7 +2595,7 @@ export const ContextBarRenderer = defineComponent({
 		const { widgetId, WidgetSlot, useProperties } = useWidget(contextBarPlugin)
 		const props = useProperties()
 		return (): VNode => h('div', {
-			'data-widget-id': widgetId,
+			[WIDGET_ID_ATTRIBUTE]: widgetId,
 			role: 'toolbar',
 			'aria-label': props.label.value || undefined,
 			class: ['uiux-ref-scope', 'uiux-ref-contextbar', props.theme.value, props.hidden.value ? 'uiux-ref-hidden' : ''],
@@ -2714,7 +2719,7 @@ export const ContextChipRenderer = defineComponent({
 			const look = props.look.value
 			const label = props.label.value ?? ''
 			return h('button', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				type: 'button',
 				'aria-haspopup': 'listbox',
 				'aria-label': look?.hideLabel ? `${label}: ${props.value.value ?? ''}` : undefined,
@@ -2828,7 +2833,7 @@ export const TimelineItemRenderer = defineComponent({
 			const look = props.look.value
 			if (look?.kind === 'event') {
 				return h('div', {
-					'data-widget-id': widgetId,
+					[WIDGET_ID_ATTRIBUTE]: widgetId,
 					class: ['uiux-ref-scope', 'uiux-ref-timeline', 'kind-event', `tone-${look.tone}`, props.theme.value],
 				}, [
 					h('span', { class: 'uiux-ref-timeline-marker' }, [iconNode(look.icon || 'circle-dot', 14)]),
@@ -2836,7 +2841,7 @@ export const TimelineItemRenderer = defineComponent({
 				])
 			}
 			return h('article', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				class: ['uiux-ref-scope', 'uiux-ref-timeline', 'kind-message', props.theme.value],
 			}, [
 				h('span', { class: ['uiux-ref-avatar'], style: { width: '24px', height: '24px' }, 'aria-hidden': 'true' }, [actorFace(look?.actor ?? 'human', look?.initials ?? '', 14)]),
@@ -2998,7 +3003,7 @@ export const ThreadRowRenderer = defineComponent({
 			if (look?.anchor) chips.push(h('span', { class: ['uiux-ref-badge', 'variant-mono'] }, look.anchor))
 			for (const chip of look?.chips ?? []) chips.push(h('span', { class: ['uiux-ref-badge', 'variant-mono'] }, chip))
 			return h('button', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				type: 'button',
 				'aria-current': state.selected.value ? 'true' : undefined,
 				class: ['uiux-ref-scope', 'uiux-ref-thread', props.theme.value, state.selected.value ? 'is-selected' : '', look?.touch ? 'is-touch' : '', look?.hidden ? 'uiux-ref-hidden' : ''],
@@ -3092,7 +3097,7 @@ export const AlertRenderer = defineComponent({
 		return (): VNode => {
 			const look = props.look.value
 			return h('div', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				role: look?.tone === 'danger' ? 'alert' : 'status',
 				class: ['uiux-ref-scope', 'uiux-ref-alert', props.theme.value, `tone-${look?.tone ?? 'info'}`, look?.toast ? 'is-toast' : '', state.visible.value ? '' : 'uiux-ref-hidden'],
 			}, [
@@ -3171,7 +3176,7 @@ export const EmptyStateRenderer = defineComponent({
 		return (): VNode => {
 			const look = props.look.value
 			return h('div', {
-				'data-widget-id': widgetId,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				class: ['uiux-ref-scope', 'uiux-ref-empty', props.theme.value, look?.dashed ? 'is-dashed' : '', state.visible.value ? '' : 'uiux-ref-hidden'],
 			}, [
 				look?.icon ? h('span', { class: 'uiux-ref-empty-icon' }, [iconNode(look.icon, 20)]) : null,

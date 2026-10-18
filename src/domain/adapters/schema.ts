@@ -10,40 +10,31 @@ import {
 	type JsonValue,
 	type ValidationResult,
 } from '../validation'
-import { validateI18nFieldMapping, type I18nFieldMapping } from '../i18n/schema'
+import { validateI18nFieldMapping } from '../i18n/schema'
+import type {
+	AdapterAssetCapability,
+	AdapterCatalog,
+	AdapterManifest as AuthoredAdapterManifest,
+	AdapterWidgetCatalogEntry,
+} from '../../adapter-entry'
+
+// The manifest and Catalog types are defined once, by the public Adapter authoring entry.
+export type { AdapterAssetCapability, AdapterCatalog, AdapterWidgetCatalogEntry }
 
 /** Draft 2020-12 schemas may be objects or the standard boolean schemas. */
 export type JsonSchema2020_12 = JsonObject | boolean
-export type AdapterAssetCapability = Readonly<{
-	acceptedMediaTypes?: readonly string[]
-	acceptedCategories?: readonly string[]
-}>
-export type AdapterWidgetCatalogEntry = Readonly<{
-	i18n?: Readonly<{ fields: Readonly<Record<string, I18nFieldMapping>>; [key: string]: JsonValue }>
-	assetFields?: Readonly<Record<string, AdapterAssetCapability>>
-}> & Readonly<{
-	[key: string]: JsonValue
-}>
 
-export type AdapterCatalog = Readonly<{
-	widgets: Readonly<Record<string, AdapterWidgetCatalogEntry>>
-}> & Readonly<{
-	[key: string]: JsonValue
-}>
-
-/** Runtime registration members remain owned by Widget and Adapter packages. */
+/**
+ * The manifest as UIUX validates it: the authoring entry's shape, with the runtime registration members
+ * opaque (they remain owned by Widget and Adapter packages and are decoded by the runtime) and
+ * `apiVersion` any string the grammar check then judges, the non-normative `test` hook included.
+ */
 export type AdapterManifest<
 	PluginDefinition = unknown,
 	RendererRegistration = unknown,
 	ProviderSetup = unknown,
-> = Readonly<{
-	id: string
+> = Readonly<Omit<AuthoredAdapterManifest<PluginDefinition, RendererRegistration, ProviderSetup>, 'apiVersion'> & {
 	apiVersion: string
-	widgetPlugins: readonly PluginDefinition[]
-	catalog: AdapterCatalog
-	renderers: readonly RendererRegistration[]
-	providers: readonly ProviderSetup[]
-	configSchema?: JsonSchema2020_12
 }>
 
 export type AuthoredAdapterConfig = Readonly<{ moduleSpecifier: string; config?: JsonValue }>
