@@ -1,7 +1,8 @@
 Feature: Evidence freshness
   # Source: Discussion #241 (Part 18, owner rulings 2026-10-18), R2: a Spec-only edit leaves the View's Evidence fresh https://github.com/DevilTea/uiux/discussions/241; accepted 2026-10-18 https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19014804.
-  # Status: not built as of 3477f81: a Spec-only edit changes the View revision, which makes the capture stale; see the Implementation gaps entries of 01a115cd-c5a5-757a-b049-b5138fe75920 and 01a115cd-c749-7a82-bf67-7d1634e31b35 in their owner.
-  # Note: No test exists yet.
+  # Test: code@959a7bd `tests/handoff-closure.test.ts#L1029` "keeps evidence fresh in readiness and export after a Spec-only or metadata edit of its View". https://github.com/DevilTea/uiux/blob/959a7bda83b8c52086144fa9366d67b52e4fd0ce/tests/handoff-closure.test.ts#L1029
+  # Test: code@959a7bd `tests/evidence-staleness.test.ts#L88` "stays fresh after a Spec-only or metadata edit of its View". https://github.com/DevilTea/uiux/blob/959a7bda83b8c52086144fa9366d67b52e4fd0ce/tests/evidence-staleness.test.ts#L88
+  # Status: built as of 959a7bd.
   @spec:id:01a14e30-3071-774a-bdc4-61ff3c92e303
   @spec:demonstrates:01a115cd-c5a5-757a-b049-b5138fe75920
   @spec:demonstrates:01a115cd-c749-7a82-bf67-7d1634e31b35
