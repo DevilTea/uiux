@@ -14,7 +14,7 @@ web
 
 ## Product Purpose
 
-UIUX (`@deviltea/uiux`) is a local-first UI/UX specification, preview and review workbench for human–agent collaboration. A file-native Workspace holds executable mockups. Views are made of Widget IR, rendered by the real Design System through Workspace adapters. Alongside them live named Variants, a structured View Spec (intent, entry conditions, interaction rules, constraints, accessibility, references, decisions), UX Flows, Review threads, Locales and authored Assets.
+UIUX (`@deviltea/uiux`) is a local-first UI/UX specification, preview and review workbench for human–agent collaboration. A file-native Workspace holds executable mockups. Views are made of Widget IR, rendered by the real Design System through Workspace adapters. Alongside them live named Variants (initial State presets: a Variant varies presentation only through author-writable State, never by patching Widget config), a structured View Spec (intent, entry conditions, interaction rules, constraints, accessibility, references, decisions), UX Flows, Review threads, Locales and authored Assets.
 
 The Workbench is a **review desk**. Its core loop:
 

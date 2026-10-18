@@ -135,9 +135,9 @@ async function prepare(root: string): Promise<void> {
 		widgets: { KitLabel: { component: 'label' }, KitSticky: { component: 'sticky' }, KitDice: { component: 'dice' }, KitClock: { component: 'clock' } },
 	}))
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
-	await persistence.views.create(STABLE, view(STABLE, 'Stable', [{ id: 'label', type: 'KitLabel' }], { alt: { description: 'Alt', state: { label: { text: 'alt' } } } }))
+	await persistence.views.create(STABLE, view(STABLE, 'Stable', [{ id: 'label', type: 'KitLabel' }], { alt: { state: { label: { text: 'alt' } } } }))
 	await persistence.views.create(RANDOM, view(RANDOM, 'Random', [{ id: 'dice', type: 'KitDice' }, { id: 'clock', type: 'KitClock' }, { id: 'steady', type: 'KitLabel' }]))
-	await persistence.views.create(STICKY, view(STICKY, 'Sticky', [{ id: 'sticky', type: 'KitSticky' }], { alt: { description: 'Alt', state: { sticky: { text: 'alt' } } } }))
+	await persistence.views.create(STICKY, view(STICKY, 'Sticky', [{ id: 'sticky', type: 'KitSticky' }], { alt: { state: { sticky: { text: 'alt' } } } }))
 }
 
 let server: WorkbenchServer

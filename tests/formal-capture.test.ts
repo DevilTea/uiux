@@ -189,7 +189,6 @@ function createCounterView(): ViewResource {
 		},
 		variants: {
 			alt: {
-				description: 'Alternative variant',
 				state: {},
 			},
 		},
@@ -465,10 +464,12 @@ describe('Formal capture service & fresh-runtime proof', () => {
 			...view,
 			variants: {
 				...view.variants,
-				filled: { description: 'Overrides an author-writable State member', state: { 'counter-1': { count: 7 } } },
+				// Overrides an author-writable State member.
+				filled: { state: { 'counter-1': { count: 7 } } },
 				// One valid override next to an unknown State member: the valid half must not be applied either.
-				unknownMember: { description: 'Overrides an unknown State member', state: { 'counter-1': { count: 7, unknown: 3 } } },
-				notWritable: { description: 'Overrides a State member that is not author-writable', state: { 'counter-1': { internal: 3 } } },
+				unknownMember: { state: { 'counter-1': { count: 7, unknown: 3 } } },
+				// Overrides a State member that is not author-writable.
+				notWritable: { state: { 'counter-1': { internal: 3 } } },
 			},
 		})
 		// The invalid Variants keep their authored data for repair.

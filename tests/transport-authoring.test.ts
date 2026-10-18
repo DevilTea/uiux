@@ -477,6 +477,54 @@ describe('MCP View authoring', () => {
 		finally { await close() }
 	})
 
+	it('accepts a Variant entry of exactly { state } and refuses any other entry key over MCP and HTTP', async () => {
+		const { app } = await emptySession()
+		const { client, close } = await connectedClient(app)
+		try {
+			const created = await client.callTool({
+				name: 'create_view',
+				arguments: { id: VIEW_ID, name: 'Variant entry view', spec: spec('Base view.') },
+			})
+			const ir = { type: 'RootShell', id: 'root', slots: { content: [] } }
+			const state = { root: { locale: 'zh-TW' } }
+
+			const accepted = await client.callTool({
+				name: 'update_view_structure',
+				arguments: { viewId: VIEW_ID, expectedRevision: (created.structuredContent as { revision: string }).revision, ir, variants: { compact: { state } } },
+			})
+			expect(accepted.isError).not.toBe(true)
+			expect(accepted.structuredContent).toMatchObject({ status: 'updated', key: VIEW_ID })
+			const baseline = await app.readPointResource('view', VIEW_ID)
+			if (baseline?.kind !== 'view') throw new Error('expected the View')
+			expect(baseline.resource.variants).toEqual({ compact: { state } })
+
+			const viaMcp = await client.callTool({
+				name: 'update_view_structure',
+				arguments: { viewId: VIEW_ID, expectedRevision: baseline.revision, ir, variants: { compact: { state, config: { root: { title: 'Compact' } } } } },
+			})
+			expect(viaMcp.isError).toBe(true)
+			expect(viaMcp.structuredContent).toMatchObject({
+				status: 'invalid',
+				key: VIEW_ID,
+				diagnostics: [expect.objectContaining({ code: 'schema.unknown_field', path: '/variants/compact/config' })],
+			})
+
+			const viaHttp = await updateViewStructureForHttp(scoped(app), VIEW_ID, {
+				expectedRevision: baseline.revision,
+				ir,
+				variants: { compact: { state, name: 'compact' } },
+			})
+			expect(viaHttp.status).toBe(400)
+			expect(viaHttp.body).toMatchObject({
+				status: 'invalid',
+				diagnostics: [expect.objectContaining({ code: 'schema.unknown_field', path: '/variants/compact/name' })],
+			})
+
+			expect(await app.readPointResource('view', VIEW_ID)).toEqual(baseline)
+		}
+		finally { await close() }
+	})
+
 	it('returns structured invalid result for malformed update view id in structure authoring', async () => {
 		const { app } = await emptySession()
 		const { client, close } = await connectedClient(app)
