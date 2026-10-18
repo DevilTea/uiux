@@ -1,6 +1,7 @@
 import { createWidgetPlugin } from '@deviltea/widget-core'
 import { defineComponent, h } from 'vue'
 import { useWidget } from '@deviltea/widget-vue'
+import type { AdapterManifest } from '@deviltea/uiux/adapter'
 
 export interface CounterInterfaces {
 	state: { count: number }
@@ -27,7 +28,7 @@ export const CounterRenderer = defineComponent({
 	},
 })
 
-export const manifest = {
+export const manifest: AdapterManifest = {
 	id: 'sample-adapter',
 	apiVersion: '1',
 	widgetPlugins: [counterPlugin],

@@ -6,6 +6,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const host = '127.0.0.1'
 const temporaryDirectory = await mkdtemp(join(tmpdir(), 'uiux-package-smoke-'))
@@ -67,6 +68,38 @@ try {
 
 	const packageRoot = join(installDirectory, 'node_modules', '@deviltea', 'uiux')
 	const installedPackage = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'))
+	// The public Adapter authoring entry `@deviltea/uiux/adapter` (Clauses 01a11a5a-462c-7f59-af78-6d01787a275f,
+	// 01a11a5a-46ac-75d1-99a4-1b06c8480028, 01a11a5a-472a-74f0-9d70-81a3b7f477a6, 01a11a5a-47bf-7a84-acc5-5ac420b500b1):
+	// a minimal Adapter that imports only the entry and the peer packages type-checks against the installed
+	// tarball, the entry's runtime module yields only the three constants, and other subpaths are not exported.
+	const consumerDirectory = join(installDirectory, 'consumer')
+	await mkdir(consumerDirectory, { recursive: true })
+	await writeFile(join(consumerDirectory, 'package.json'), JSON.stringify({ private: true, type: 'module' }))
+	await writeFile(join(consumerDirectory, 'adapter.ts'), await readFile(new URL('../tests/fixtures/adapter-consumer/adapter.ts', import.meta.url), 'utf8'))
+	await writeFile(join(consumerDirectory, 'tsconfig.json'), JSON.stringify({
+		compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', lib: ['ES2022', 'DOM'], strict: true, noEmit: true, skipLibCheck: false, types: [] },
+		files: ['adapter.ts'],
+	}))
+	const typescriptCli = fileURLToPath(new URL('../node_modules/typescript/bin/tsc', import.meta.url))
+	const consumerCheck = spawnSync(process.execPath, [typescriptCli, '-p', join(consumerDirectory, 'tsconfig.json')], { cwd: consumerDirectory, encoding: 'utf8' })
+	if (consumerCheck.status !== 0)
+		throw new Error(`A minimal Adapter did not type-check against the packed @deviltea/uiux/adapter:\n${consumerCheck.stdout}${consumerCheck.stderr}`)
+	const entryRead = spawnSync(process.execPath, ['--input-type=module', '-e', `
+		const results = { entry: { ...await import('@deviltea/uiux/adapter') } }
+		for (const specifier of ['@deviltea/uiux', '@deviltea/uiux/src/domain/adapters/schema.ts']) {
+			try { await import(specifier); results[specifier] = 'resolved' }
+			catch (error) { results[specifier] = error.code }
+		}
+		console.log(JSON.stringify(results))
+	`], { cwd: consumerDirectory, encoding: 'utf8' })
+	const expectedEntryRead = {
+		entry: { STRING_VALUE_CONTRACT_ID: 'deviltea.uiux/string@1', TRANSLATION_RESULT_VALUE_CONTRACT_ID: 'deviltea.uiux/translation-result@1', WIDGET_ID_ATTRIBUTE: 'data-widget-id' },
+		'@deviltea/uiux': 'ERR_PACKAGE_PATH_NOT_EXPORTED',
+		'@deviltea/uiux/src/domain/adapters/schema.ts': 'ERR_PACKAGE_PATH_NOT_EXPORTED',
+	}
+	if (entryRead.status !== 0 || entryRead.stdout.trim() !== JSON.stringify(expectedEntryRead))
+		throw new Error(`The packed @deviltea/uiux/adapter runtime module or exports map is not as expected: status ${entryRead.status}, stdout ${entryRead.stdout}, stderr ${entryRead.stderr}`)
+
 	const cliPath = join(installDirectory, 'node_modules', '.bin', 'uiux')
 	const helpOutput = execFileSync(cliPath, ['--help'], { encoding: 'utf8' })
 	if (!helpOutput.includes('dev [--workspace <dir>]'))
@@ -415,7 +448,7 @@ try {
 		await stopServer(server)
 	}
 
-	console.log(`Package smoke passed: packed @deviltea/uiux@${installedPackage.version} serves styled Workbench assets, initializes a Workspace, authenticates /api and /mcp with a CLI-created token, authors through MCP, and captures/evaluates evidence and handoff.`)
+	console.log(`Package smoke passed: packed @deviltea/uiux@${installedPackage.version} exposes the Adapter authoring entry, serves styled Workbench assets, initializes a Workspace, authenticates /api and /mcp with a CLI-created token, authors through MCP, and captures/evaluates evidence and handoff.`)
 }
 finally {
 	await rm(temporaryDirectory, { recursive: true, force: true })

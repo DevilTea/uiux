@@ -8,35 +8,17 @@ import {
 	Validator,
 	type ValidationResult,
 } from '../validation'
+import type { I18nFieldMapping, TranslationResult, TranslationWarning } from '../../adapter-entry'
+
+// The i18n field mapping, warning and result types are defined once, by the public Adapter authoring entry.
+export type { I18nFieldMapping, TranslationResult }
 
 export type I18nResource = Readonly<Record<string, string>>
 export type I18nBinding = Readonly<{ $i18n: string }>
-export type I18nFieldMapping = Readonly<{
-	configField: string
-	resultProperty: string
-	textProperty: string
-	params?: Readonly<Record<string, string>>
-}>
-
-export type MissingTranslationWarning = Readonly<{
-	code: 'missing-translation'
-	key: string
-	requestedLocale: string
-	fallbackLocale: string
-}>
-export type UnresolvedKeyWarning = Readonly<{
-	code: 'unresolved-key'
-	key: string
-	requestedLocale: string
-}>
-export type MissingParameterWarning = Readonly<{
-	code: 'missing-parameter'
-	key: string
-	requestedLocale: string
-	parameter: string
-}>
-export type I18nWarning = MissingTranslationWarning | UnresolvedKeyWarning | MissingParameterWarning
-export type TranslationResult = Readonly<{ text: string; warnings: readonly I18nWarning[] }>
+export type I18nWarning = TranslationWarning
+export type MissingTranslationWarning = Extract<TranslationWarning, Readonly<{ code: 'missing-translation' }>>
+export type UnresolvedKeyWarning = Extract<TranslationWarning, Readonly<{ code: 'unresolved-key' }>>
+export type MissingParameterWarning = Extract<TranslationWarning, Readonly<{ code: 'missing-parameter' }>>
 export type I18nOccurrence = Readonly<{
 	warning: I18nWarning
 	viewId: string

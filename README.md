@@ -139,6 +139,18 @@ Consider denying `uiux member`, `token`, `invite`, `session` and `access` in you
 
 A Workspace records its format in `workspace.json` `schemaVersion`. This UIUX reads only `schemaVersion` 6, which `uiux init` writes. There is no migration: no command, MCP tool or HTTP route upgrades a Workspace. `uiux dev`, the packaged server and every roster command refuse a Workspace at any other `schemaVersion` before touching it (exit status 2, `workspace.schema_unsupported`, naming the version found), and a Workspace whose manifest changes to another version under a running server cannot be changed. To start over, run `uiux init` in a new directory ([Discussion #231](https://github.com/DevilTea/uiux/discussions/231)).
 
+### Writing an Adapter
+
+An Adapter types its manifest with the public authoring entry `@deviltea/uiux/adapter`, the only module of the package besides `package.json` that its `exports` map exposes. It exports the types `AdapterManifest`, `AdapterCatalog`, `AdapterWidgetCatalogEntry`, `AdapterAssetCapability`, `I18nFieldMapping`, `TranslationResult`, `TranslationWarning`, `RootShellInterfaces`, `AdapterProviderContext`, `JsonValue` and `AdapterApiVersion`, and three string constants: `TRANSLATION_RESULT_VALUE_CONTRACT_ID` and `STRING_VALUE_CONTRACT_ID`, the value contracts of an i18n `resultProperty` and `textProperty`, and `WIDGET_ID_ATTRIBUTE`, the attribute a renderer puts on each Widget's outermost element. Its runtime module imports nothing, and its types import only from `@deviltea/widget-core`, `@deviltea/widget-vue` and `vue`, which an Adapter declares as peer dependencies: the Preview gives every Adapter the host's single `@deviltea/widget-core`, so an Adapter never bundles its own. UIUX supplies the entry from its own package wherever it loads an Adapter (the server, the Preview bundle and the Adapter's content digest), so a kit, even one with its own `kit/package.json`, needs no `@deviltea/uiux` installed to run one; installing it as a development dependency gives the kit's own TypeScript checks the types. The entry follows the Adapter API version: a new minor of API version 1 only adds to it, and a breaking type change needs a new major. It exports no value naming the API version a host implements; an Adapter writes the lowest minor it relies on as its `apiVersion`. The dogfood reference Adapter, `.uiux/kit/adapters/reference.ts`, uses it.
+
+```ts
+import { createWidgetValueContract } from '@deviltea/widget-core'
+import { STRING_VALUE_CONTRACT_ID, type AdapterManifest } from '@deviltea/uiux/adapter'
+
+const STRING = createWidgetValueContract<string>(STRING_VALUE_CONTRACT_ID)
+export const manifest: AdapterManifest = { id: 'my-ds', apiVersion: '1', widgetPlugins: [], catalog: { widgets: {} }, renderers: [], providers: [] }
+```
+
 ### Copying components into a product project
 
 `uiux components` copies registry components of the Product Kit out of the Workspace's `kit/src/` into a product project. It reads the Workspace directly and needs no credential:

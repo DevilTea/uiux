@@ -14,6 +14,8 @@ import {
 } from '../persistence/paths'
 import { maskHostPaths } from './host-paths'
 import { allowStyleAndAssetImportsOnServer } from './style-imports'
+import { supplyAdapterEntryOnServer } from './host-adapter-entry'
+import { resolvePackageRoot } from './package-root'
 import { KIT_OUTPUT_VERSION_PARAMETER, shareVersionWithKitImports } from './kit-output-imports'
 import { bareKitSpecifierProblem, bareSpecifierPackageName, readDeclaredKitDependencies, relativeKitSpecifierProblem } from './kit-dependencies'
 
@@ -78,6 +80,7 @@ export class NodeAdapterManifestLoader implements AdapterManifestLoader {
 			: resolved.moduleIdentity
 		if (version !== undefined && this.options.versionScope !== undefined) shareVersionWithKitImports(this.options.versionScope, version)
 		allowStyleAndAssetImportsOnServer()
+		supplyAdapterEntryOnServer(resolvePackageRoot())
 		const namespace = await import(identity) as Readonly<Record<string, unknown>>
 		return this.extractManifest(namespace)
 	}
