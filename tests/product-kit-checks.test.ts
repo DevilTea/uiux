@@ -68,8 +68,6 @@ export const manifest = {
   catalog: { widgets: { KitLabel: {}, KitSticky: {}, KitDice: {}, KitClock: {} } },
   renderers: Object.keys(plugins).map(type => ({ type, component: wrapper(type) })),
   providers: [],
-  styles: [],
-  tokens: [],
 }
 `
 

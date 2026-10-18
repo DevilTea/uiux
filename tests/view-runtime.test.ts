@@ -360,11 +360,11 @@ describe('View / RootShell / Variant runtime assembly', () => {
 	it('validates Catalog metadata against the decoded Plugin universe even when Catalog and Plugin are owned by different Adapter entries', async () => {
 		const pluginManifest: AdapterManifest = {
 			id: 'plugin-provider', apiVersion: 'test', widgetPlugins: ['LocalizedLabel'], catalog: { widgets: {} },
-			renderers: ['LocalizedLabel'], providers: [], styles: [], tokens: [],
+			renderers: ['LocalizedLabel'], providers: [],
 		}
 		const catalogManifest: AdapterManifest = {
 			id: 'catalog-provider', apiVersion: 'test', widgetPlugins: [], catalog: { widgets: { LocalizedLabel: localizedLabelCatalog } },
-			renderers: [], providers: [], styles: [], tokens: [],
+			renderers: [], providers: [],
 		}
 		const resolved = await resolveWorkspaceAdapterSet({
 			workspaceRoot: '/fixture',
@@ -521,7 +521,7 @@ async function validatedSet(type: string, catalog?: AdapterWidgetCatalogEntry) {
 	const manifest: AdapterManifest = {
 		id: 'fixture', apiVersion: 'test', widgetPlugins: [type],
 		catalog: { widgets: catalog ? { [type]: catalog } : {} },
-		renderers: [type], providers: [], styles: [], tokens: [],
+		renderers: [type], providers: [],
 	}
 	const result = await resolveWorkspaceAdapterSet({
 		workspaceRoot: '/fixture',

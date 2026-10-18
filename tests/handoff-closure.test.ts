@@ -90,8 +90,6 @@ export const manifest = {
   catalog: { widgets: { Counter: { assetFields: { image: { acceptedMediaTypes: ['image/png'] } } } } },
   renderers: [{ type: 'Counter', component: CounterRenderer }],
   providers: [],
-  styles: [],
-  tokens: [],
 };
 `
 }
@@ -1210,8 +1208,6 @@ export const manifest = {
   catalog: { widgets: {} },
   renderers: [{ type: 'OrderSummary', component: render('OrderSummary') }, { type: 'ProductCard', component: render('ProductCard') }],
   providers: [],
-  styles: [],
-  tokens: [],
 };
 `
 }

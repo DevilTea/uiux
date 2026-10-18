@@ -735,8 +735,6 @@ function manifest(
 		catalog: { widgets: {} },
 		renderers: [],
 		providers: [],
-		styles: [],
-		tokens: [],
 		...overrides,
 	}
 }

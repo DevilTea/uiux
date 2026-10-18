@@ -51,7 +51,7 @@ async function replace(path: string, content: string): Promise<void> {
 }
 
 function adapterModule(id: string): string {
-	return `export const manifest = ${JSON.stringify({ id, apiVersion: '1', widgetPlugins: [], catalog: { widgets: {} }, renderers: [], providers: [], styles: [], tokens: [] })}\n`
+	return `export const manifest = ${JSON.stringify({ id, apiVersion: '1', widgetPlugins: [], catalog: { widgets: {} }, renderers: [], providers: [] })}\n`
 }
 
 /** Writes `dist/uiux.js` (an Adapter named by `version.txt`), and what the process saw, then exits. */

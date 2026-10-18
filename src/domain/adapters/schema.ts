@@ -36,7 +36,6 @@ export type AdapterManifest<
 	PluginDefinition = unknown,
 	RendererRegistration = unknown,
 	ProviderSetup = unknown,
-	StyleOrTokenResource = unknown,
 > = Readonly<{
 	id: string
 	apiVersion: string
@@ -44,8 +43,6 @@ export type AdapterManifest<
 	catalog: AdapterCatalog
 	renderers: readonly RendererRegistration[]
 	providers: readonly ProviderSetup[]
-	styles: readonly StyleOrTokenResource[]
-	tokens: readonly StyleOrTokenResource[]
 	configSchema?: JsonSchema2020_12
 }>
 
@@ -76,7 +73,7 @@ export function validateAdapterManifest(input: unknown): ValidationResult<Adapte
 		return v.finish<AdapterManifest>(input)
 	v.string(manifest.id, '/id', true)
 	v.string(manifest.apiVersion, '/apiVersion', true)
-	for (const field of ['widgetPlugins', 'renderers', 'providers', 'styles', 'tokens'] as const)
+	for (const field of ['widgetPlugins', 'renderers', 'providers'] as const)
 	v.array(manifest[field], `/${field}`)
 	validateAdapterCatalog(manifest.catalog, '/catalog', v)
 	if (Object.hasOwn(manifest, 'configSchema')) {

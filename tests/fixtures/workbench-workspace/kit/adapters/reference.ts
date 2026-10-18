@@ -1622,8 +1622,6 @@ export const manifest: AdapterManifest = {
 		{ type: 'Divider', component: DividerRenderer },
 	],
 	providers: [],
-	styles: [],
-	tokens: [],
 }
 
 export default manifest

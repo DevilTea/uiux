@@ -203,7 +203,7 @@ describe('adapters, flows, reviews, and authored assets', () => {
 			additionalProperties: false,
 		}
 		const adapter = {
-			id: '@deviltea/base', apiVersion: '1', widgetPlugins: [], renderers: [], providers: [], styles: [], tokens: [],
+			id: '@deviltea/base', apiVersion: '1', widgetPlugins: [], renderers: [], providers: [],
 			catalog: { widgets: { Image: { i18n: { fields: {} }, assetFields: { image: { acceptedMediaTypes: ['image/png'] } } } } }, configSchema: schema,
 		}
 		expect(validateAdapterManifest(adapter).ok).toBe(true)
@@ -233,6 +233,15 @@ describe('adapters, flows, reviews, and authored assets', () => {
 		expect(validateAdapterConfig('any JSON value', true).ok).toBe(true)
 		expect(validateAdapterConfig('any JSON value', false).ok).toBe(false)
 		expect(validateResolvedAdapterSet([{ id: 'base', widgetTypes: ['Button'], rendererKeys: ['Button'], catalogKeys: ['Button'] }, { id: 'extension', widgetTypes: ['Button'], rendererKeys: [], catalogKeys: [] }]).ok).toBe(false)
+	})
+
+	it('has no Adapter manifest styles or tokens member, so neither is required or read (Discussion #241 R1)', () => {
+		const adapter = { id: '@deviltea/base', apiVersion: '1', widgetPlugins: [], catalog: { widgets: {} }, renderers: [], providers: [] }
+		expect(validateAdapterManifest(adapter)).toEqual(expect.objectContaining({ ok: true, diagnostics: [] }))
+		// Clause 01a115cd-d026-757d-a3ae-49d4dbf57538 lists the members; a former member is not one of them.
+		expect(validateAdapterManifest({ ...adapter, styles: 'not an array', tokens: 7 })).toEqual(expect.objectContaining({ ok: true, diagnostics: [] }))
+		// The members that remain are still required.
+		expect(validateAdapterManifest({ ...adapter, providers: undefined }).ok).toBe(false)
 	})
 
 	it('validates keyed Flow steps, reachability, and the absence of alternate graph shapes', () => {

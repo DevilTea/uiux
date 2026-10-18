@@ -137,7 +137,7 @@ describe('i18n runtime and Checks semantics', () => {
 
 	it('rejects conflicting Catalog i18n runtime member mappings before runtime assembly', () => {
 		const result = validateAdapterManifest({
-			id: 'catalog', apiVersion: 'fixture-api', widgetPlugins: [], renderers: [], providers: [], styles: [], tokens: [],
+			id: 'catalog', apiVersion: 'fixture-api', widgetPlugins: [], renderers: [], providers: [],
 			catalog: {
 				widgets: {
 					Label: {

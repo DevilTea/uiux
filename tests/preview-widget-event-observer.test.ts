@@ -249,8 +249,6 @@ export const manifest = {
   catalog: { widgets: { Tap: {} } },
   renderers: [{ type: 'Tap', component: TapRenderer }],
   providers: [],
-  styles: [],
-  tokens: [],
 };
 `
 }
