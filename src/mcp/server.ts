@@ -593,7 +593,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'update_view_structure',
 		{
 			title: 'Update UIUX View Structure',
-			description: 'Replace the canonical View IR and Variants together while preserving View identity, name, feature, and View Spec. Requires the revision previously read by the caller.',
+			description: 'Replace the canonical View IR and Variants together while preserving View identity, name, feature, and View Spec. Requires the revision previously read by the caller. A Variant varies presentation only through author-writable State: each variants entry is exactly { state }, where state maps Widget IDs to State member overrides; any other entry key (config, id, name) is refused.',
 			inputSchema: updateViewStructureSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},

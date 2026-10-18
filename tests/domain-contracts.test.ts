@@ -120,6 +120,9 @@ describe('canonical resource primitives', () => {
 	it('validates the View root boundary without taking ownership of Widget IR', () => {
 		expect(validateViewResource(view, `${VIEW_ID}.view.json`).ok).toBe(true)
 		expect(validateViewResource(view, `${STEP_A}.view.json`).diagnostics.some(item => item.code === 'identity.filename_id_mismatch')).toBe(true)
+		expect(validateViewResource({ ...view, variants: { Compact: { state: { root: { locale: 'zh-TW' } } } } }).ok).toBe(true)
+		expect(validateViewResource({ ...view, variants: { Compact: { state: {}, config: {} } } }).diagnostics).toEqual([expect.objectContaining({ code: 'schema.unknown_field', path: '/variants/Compact/config' })])
+		expect(validateViewResource({ ...view, variants: { Compact: { state: {}, id: VIEW_ID, name: 'Compact' } } }).diagnostics.map(item => item.path)).toEqual(['/variants/Compact/id', '/variants/Compact/name'])
 		expect(validateRootShellIdentity({ type: 'Button', id: 'root' }).ok).toBe(false)
 		expect(validateRootShellIdentity({ type: 'RootShell', id: 'not-root' }).ok).toBe(false)
 		expect(validateRootShellContentSlot([]).ok).toBe(true)

@@ -399,6 +399,22 @@ describe('file-native persistence', () => {
 		expect(result?.diagnostics.length).toBeGreaterThan(0)
 	})
 
+	it('diagnoses a stored View whose Variant entry holds a key other than state', async () => {
+		const { root, persistence } = await newWorkspace()
+		await mkdir(join(root, 'views'), { recursive: true })
+		const stored = {
+			id: VIEW_ID,
+			name: 'Checkout',
+			ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
+			variants: { compact: { state: { root: { locale: 'zh-TW' } }, config: { root: { title: 'Compact' } } } },
+			spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		}
+		await writeFile(join(root, viewRelativePath(VIEW_ID)), JSON.stringify(stored))
+		const result = await persistence.views.readInspected(VIEW_ID)
+		expect(result?.resource).toEqual(stored)
+		expect(result?.diagnostics).toEqual([expect.objectContaining({ code: 'schema.unknown_field', path: '/variants/compact/config' })])
+	})
+
 	it('returns a structured persistence diagnostic for syntactically invalid JSON without changing its bytes', async () => {
 		const { root, persistence } = await newWorkspace()
 		await mkdir(join(root, 'views'), { recursive: true })

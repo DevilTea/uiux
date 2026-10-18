@@ -3,7 +3,6 @@ import { validateViewSpec, type ViewSpec } from '../spec/schema'
 
 export type VariantEntry = Readonly<{
 	state: Readonly<Record<string, Readonly<Record<string, JsonValue>>>>
-	[key: string]: JsonValue
 }>
 
 export type ViewResource = Readonly<{
@@ -107,6 +106,8 @@ function validateVariants(value: unknown, v: Validator): void {
 		const variant = v.object(entry, path)
 		if (!variant)
 			continue
+		// A Variant entry is exactly `{ state }` (Clause 01a1144e-5423-7def-a70a-7962ad2d2af7).
+		rejectUnknownKeys(variant, ['state'], path, v)
 		const state = v.object(variant.state, `${path}/state`)
 		if (!state)
 			continue
