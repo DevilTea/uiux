@@ -45,7 +45,7 @@ async function submit(id: string): Promise<void> {
 	const view = await api<{ revision: string }>('tester', `/api/resources/view/${VIEW_ID}`)
 	await api('claude', `/api/reviews/${id}/ready`, {
 		expectedRevision: await revision(id),
-		changeDomains: ['views', 'i18n'],
+		changeDomains: ['ir', 'i18n'],
 		resources: [{ identity: { kind: 'view', key: VIEW_ID }, revision: view.revision }],
 		evidenceRefs: [{ kind: 'visual', evidence: EVIDENCE }],
 	})

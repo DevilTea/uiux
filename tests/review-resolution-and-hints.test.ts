@@ -77,7 +77,7 @@ async function submitReady(ctx: Awaited<ReturnType<typeof session>>, key: string
 	const result = await submitReadyForReviewForHttp(scoped(ctx.app, AGENT_EDITOR), key, {
 		expectedRevision,
 		actor: agent,
-		changeDomains: ['view-structure'],
+		changeDomains: ['ir'],
 		resources: [{ identity: { type: 'view', id: VIEW_ID }, revision: ctx.viewRevision }],
 		evidenceRefs: [{ kind: 'screenshot', evidence: evidence.identity }],
 	})

@@ -15,5 +15,8 @@ export default defineEventHandler(async (event) => {
 	// (Rules 01a11bb1-be4a-… and 01a1161b-ff68-…): `productKit`, or `productKitUnavailable` when the
 	// Product Kit provenance cannot be computed.
 	// The kit digests are cached and shared by concurrent requests.
-	return { items, ...productKitFreshnessContext(await session.productKitProvenance()) }
+	// `views`: each View's current render-input digest, with the revision it was read at, so the
+	// Workbench judges the View condition by the digest, not the revision (Rule 01a115cd-c5a5-…).
+	const views = await session.viewRenderInputs()
+	return { items, views, ...productKitFreshnessContext(await session.productKitProvenance()) }
 })

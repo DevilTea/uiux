@@ -7,14 +7,14 @@ describe('human Submit for review (R12)', () => {
 	it('needs a change domain and a piece of Evidence', () => {
 		expect(isSubmittable({ changeDomains: [], evidence: ['sha256:1'] })).toBe(false)
 		expect(isSubmittable({ changeDomains: ['  '], evidence: ['sha256:1'] })).toBe(false)
-		expect(isSubmittable({ changeDomains: ['Spec'], evidence: [] })).toBe(false)
-		expect(isSubmittable({ changeDomains: ['Spec'], evidence: ['sha256:1'] })).toBe(true)
+		expect(isSubmittable({ changeDomains: ['spec'], evidence: [] })).toBe(false)
+		expect(isSubmittable({ changeDomains: ['spec'], evidence: ['sha256:1'] })).toBe(true)
 	})
 
 	it('names the anchored View at its current revision and references formal captures', () => {
-		expect(submissionBody({ changeDomains: [' Spec', 'Spec', 'i18n'], evidence: ['sha256:1', 'sha256:1'], reason: '  check the copy ' }, view, 'r_thread')).toEqual({
+		expect(submissionBody({ changeDomains: [' spec', 'spec', 'i18n'], evidence: ['sha256:1', 'sha256:1'], reason: '  check the copy ' }, view, 'r_thread')).toEqual({
 			expectedRevision: 'r_thread',
-			changeDomains: ['Spec', 'i18n'],
+			changeDomains: ['spec', 'i18n'],
 			resources: [{ identity: { kind: 'view', key: view.key }, revision: 'r_abc' }],
 			evidenceRefs: [{ kind: 'formal_capture', evidence: 'sha256:1' }],
 			reason: 'check the copy',
@@ -22,6 +22,6 @@ describe('human Submit for review (R12)', () => {
 	})
 
 	it('omits an empty note', () => {
-		expect(submissionBody({ changeDomains: ['IR'], evidence: ['sha256:2'], reason: '  ' }, view, 'r_t')).not.toHaveProperty('reason')
+		expect(submissionBody({ changeDomains: ['ir'], evidence: ['sha256:2'], reason: '  ' }, view, 'r_t')).not.toHaveProperty('reason')
 	})
 })

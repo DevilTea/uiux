@@ -1,4 +1,4 @@
-import { computed, shallowRef, triggerRef } from 'vue'
+import { computed, shallowRef, triggerRef, watch } from 'vue'
 import { useI18n } from '#imports'
 import type { FormalEvidenceRecord } from '../../src/domain/evidence/schema'
 import type { HandoffManifest, HandoffReadiness, HandoffReadinessAssessment, HandoffRoot } from '../../src/domain/handoff/schema'
@@ -7,10 +7,11 @@ import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error
 import {
 	contextFromRecord,
 	evidenceFreshness,
+	unchangedSinceCapture,
 	type CaptureContext,
 	type EvidenceFreshness,
 } from '../utils/readiness'
-import { useUiuxClient } from './useUiuxClient'
+import { useUiuxClient, type EvidenceViewRenderInput } from './useUiuxClient'
 import { useWorkbench } from './useWorkbench'
 
 /**
@@ -72,6 +73,11 @@ const evidenceItems = shallowRef<readonly EvidenceItem[]>([])
  * `productKitUnavailable` when it cannot be computed.
  */
 const currentProductKit = shallowRef<Readonly<{ productKit?: ProductKitProvenance; productKitUnavailable?: boolean }>>({})
+/**
+ * Each View's current render-input digest, read with the Evidence list, by View key (Rule
+ * 01a115cd-c5a5-…: the View condition compares it, not the View revision).
+ */
+const viewRenderInputs = shallowRef<ReadonlyMap<string, EvidenceViewRenderInput>>(new Map())
 const evidenceLoaded = shallowRef(false)
 const evidenceLoading = shallowRef(false)
 const evidenceError = shallowRef<FetchErrorDetails>()
@@ -137,13 +143,19 @@ export function useReadiness() {
 
 	// ----- Evidence --------------------------------------------------------------------------
 
+	function viewSignature(): string {
+		return views.value.map(view => `${view.key}@${view.revision}`).join(',')
+	}
+
 	async function loadEvidence(force = false): Promise<void> {
 		if (evidenceLoaded.value && !force) return
 		if (evidencePromise && !force) return evidencePromise
 		evidenceLoading.value = true
+		const startedWith = viewSignature()
 		const run = uiux.listEvidenceForFreshness<EvidenceItem, ProductKitProvenance>()
-			.then(({ items, productKit, productKitUnavailable }) => {
+			.then(({ items, views: inputs, productKit, productKitUnavailable }) => {
 				currentProductKit.value = { ...(productKit ? { productKit } : {}), ...(productKitUnavailable === true ? { productKitUnavailable } : {}) }
+				viewRenderInputs.value = new Map((inputs ?? []).map(input => [input.key, input]))
 				evidenceItems.value = (items ?? []).filter(item => item?.record?.kind === 'formal_capture')
 				evidenceError.value = undefined
 			})
@@ -154,14 +166,34 @@ export function useReadiness() {
 				evidenceLoaded.value = true
 				evidenceLoading.value = false
 				if (evidencePromise === run) evidencePromise = undefined
+				// A View edited while this read was in flight is not in its digests: read once more.
+				// Each pass snapshots the signature it started with, so this ends once Views stop changing.
+				if (!evidencePromise && viewSignature() !== startedWith) void loadEvidence(true)
 			})
 		evidencePromise = run
 		return run
 	}
 
+	/**
+	 * A View edited since the Evidence list was read has a newer revision than its digest: read the
+	 * list again, so the View condition compares the current render-input digest.
+	 */
+	watch(viewSignature, () => {
+		if (!evidenceLoaded.value || evidencePromise) return
+		const inputs = viewRenderInputs.value
+		if (views.value.every(view => inputs.get(view.key)?.revision === view.revision)) return
+		void loadEvidence(true)
+	})
+
 	const evidenceEntries = computed<readonly EvidenceEntry[]>(() => {
+		const inputs = viewRenderInputs.value
+		const revisions = new Map(views.value.map(view => [view.key, view.revision]))
+		const allViews = views.value.flatMap((view) => {
+			const input = inputs.get(view.key)
+			return input ? [{ key: view.key, renderInputDigest: input.renderInputDigest }] : []
+		})
 		const stalenessContext = {
-			allViews: views.value.map(view => ({ key: view.key, revision: view.revision })),
+			allViews,
 			workspace: workspace.value,
 			discoveredLocales: discoveredLocales.value,
 			localeRevisions: localeRevisions.value,
@@ -173,7 +205,7 @@ export function useReadiness() {
 				digest: item.digest,
 				record: item.record,
 				...(context ? { context } : {}),
-				freshness: evidenceFreshness(item.record, stalenessContext),
+				freshness: evidenceFreshness(item.record, unchangedSinceCapture(item.record, inputs, revisions, stalenessContext)),
 			}
 		})
 	})

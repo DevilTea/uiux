@@ -1,5 +1,5 @@
 import type { FormalEvidenceRecord } from '../../src/domain/evidence/schema'
-import { evaluateEvidenceStaleness, PRODUCT_KIT_CHANGED_REASON, PRODUCT_KIT_PROVENANCE_UNAVAILABLE_REASON, type EvidenceStalenessContext } from '../../src/domain/evidence/staleness'
+import { evaluateEvidenceStaleness, PRODUCT_KIT_CHANGED_REASON, PRODUCT_KIT_PROVENANCE_UNAVAILABLE_REASON, RENDER_INPUT_CHANGED_REASON, RENDER_INPUT_DIGEST_MISSING_REASON, type EvidenceStalenessContext } from '../../src/domain/evidence/staleness'
 import type { HandoffBlockingDiagnostic, HandoffReadiness } from '../../src/domain/handoff/schema'
 import type { ResolvedRenderContext } from '../../src/domain/render-context/schema'
 import { REVIEW_RESOLUTIONS, type ReviewResolution } from '../../src/domain/reviews/schema'
@@ -91,6 +91,7 @@ export type EvidenceFreshnessReason =
 	| 'incomplete'
 	| 'noView'
 	| 'noViewRevision'
+	| 'noRenderInputDigest'
 	| 'noLocaleRevision'
 	| 'productKitChanged'
 	| 'noProductKit'
@@ -138,7 +139,8 @@ export function evidenceFreshness(record: FormalEvidenceRecord, context: Evidenc
 
 function staleReason(reason: string | undefined): Pick<EvidenceFreshness, 'reason' | 'subject'> {
 	if (!reason) return { reason: 'other' }
-	if (reason === 'View revision has changed since capture') return { reason: 'viewChanged' }
+	if (reason === RENDER_INPUT_CHANGED_REASON) return { reason: 'viewChanged' }
+	if (reason === RENDER_INPUT_DIGEST_MISSING_REASON) return { reason: 'noRenderInputDigest' }
 	if (reason === 'View no longer exists') return { reason: 'viewMissing' }
 	if (reason === PRODUCT_KIT_CHANGED_REASON) return { reason: 'productKitChanged' }
 	const patterns: ReadonlyArray<readonly [RegExp, EvidenceFreshnessReason]> = [
@@ -312,4 +314,28 @@ export function groupFindings(findings: readonly Finding[]): FindingGroup[] {
 export function updatedSince(lastSeen: Readonly<Record<string, string>>, key: string, revision: string): boolean {
 	const seen = lastSeen[key]
 	return seen !== undefined && seen !== revision
+}
+
+/**
+ * While a View's digest is older than its current revision (the list is being read again), a
+ * capture that recorded the current revision saw byte-identical content, so its own recorded
+ * digest is the current one.
+ */
+export function unchangedSinceCapture(
+	record: FormalEvidenceRecord,
+	inputs: ReadonlyMap<string, Readonly<{ revision: string }>>,
+	revisions: ReadonlyMap<string, string>,
+	context: EvidenceStalenessContext,
+): EvidenceStalenessContext {
+	const viewId = (record.executionContext as Record<string, unknown> | undefined)?.viewId
+	if (typeof viewId !== 'string') return context
+	const current = revisions.get(viewId)
+	const recordedDigest = record.provenance?.renderInputDigest
+	if (current === undefined || inputs.get(viewId)?.revision === current || !recordedDigest) return context
+	const recordedRevision = record.provenance.resources.find((resource) => {
+		const identity = resource.identity as Record<string, unknown>
+		return identity.type === 'view' && identity.id === viewId
+	})?.revision
+	if (recordedRevision !== current) return context
+	return { ...context, allViews: [...context.allViews.filter(view => view.key !== viewId), { key: viewId, renderInputDigest: recordedDigest }] }
 }

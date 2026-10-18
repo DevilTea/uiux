@@ -4,6 +4,9 @@ export type VersionResourceRead<T> = Readonly<{ versionId: string; kind: string;
 
 type ResourceListPage<T> = Readonly<{ items: readonly T[]; nextCursor?: string }>
 
+/** A View's current render-input digest (Clause 01a14e30-2d4a-…) and the revision it was read at. */
+export type EvidenceViewRenderInput = Readonly<{ key: string; revision: string; renderInputDigest: string }>
+
 type PreviewAdaptersResponse =
 	| {
 		state: 'valid'
@@ -75,11 +78,12 @@ export function useUiuxClient() {
 	}
 
 	/**
-	 * The formal Evidence with the current Product Kit provenance its freshness is judged against:
-	 * `productKit`, or `productKitUnavailable` when it cannot be computed.
+	 * The formal Evidence with what its freshness is judged against: each View's current
+	 * render-input digest (`views`), and the current Product Kit provenance, `productKit`, or
+	 * `productKitUnavailable` when it cannot be computed.
 	 */
-	async function listEvidenceForFreshness<T, P>(): Promise<Readonly<{ items: readonly T[]; productKit?: P; productKitUnavailable?: boolean }>> {
-		return await $fetch<{ items: T[]; productKit?: P; productKitUnavailable?: boolean }>('/api/evidence/list')
+	async function listEvidenceForFreshness<T, P>(): Promise<Readonly<{ items: readonly T[]; views?: readonly EvidenceViewRenderInput[]; productKit?: P; productKitUnavailable?: boolean }>> {
+		return await $fetch<{ items: T[]; views?: EvidenceViewRenderInput[]; productKit?: P; productKitUnavailable?: boolean }>('/api/evidence/list')
 	}
 
 	async function assessHandoff<T>(roots: readonly HandoffRoot[]): Promise<T> {

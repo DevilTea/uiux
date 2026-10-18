@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -9,8 +9,9 @@ import type { ResourceDiscoveryItem } from '../src/application/dto/resource-disc
 import { createHandoffExportService } from '../src/application/services/handoff-export'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
+import { renderInputDigest } from '../src/domain/evidence/render-input-digest'
 import type { ReviewThread } from '../src/domain/reviews/schema'
-import { FileNativePersistence } from '../src/persistence'
+import { canonicalJsonBytes, FileNativePersistence, reviewRelativePath } from '../src/persistence'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import {
 	appendReviewMessageForHttp,
@@ -62,6 +63,22 @@ async function session() {
 }
 
 type Ctx = Awaited<ReturnType<typeof session>>
+
+/**
+ * A complete formal capture of `viewId` recorded at `viewRevision`, with `digest` as its
+ * render-input digest (the View's current one by default; `null` records none).
+ */
+async function formal(ctx: Ctx, viewId: string, viewRevision: string, digest?: string | null): Promise<string> {
+	const recorded = digest === undefined ? renderInputDigest((await ctx.persistence.views.readInspected(viewId))!.resource) : digest
+	return (await ctx.persistence.artifacts.put(new TextEncoder().encode(JSON.stringify({
+		schemaVersion: 1,
+		kind: 'formal_capture',
+		executionContext: { viewId },
+		coverage: { complete: true },
+		provenance: { workspaceSchemaVersion: 3, resources: [{ identity: { type: 'view', id: viewId }, revision: viewRevision }], versions: { uiux: '0.1.0' }, ...(recorded === null ? {} : { renderInputDigest: recorded }) },
+		artifactRefs: [],
+	})))).identity
+}
 
 async function read(ctx: Ctx, key = REVIEW_ID) {
 	const result = await ctx.app.readPointResource('review', key)
@@ -206,26 +223,18 @@ describe('Workspace-scoped submissions (decision 4)', { timeout: 30_000 }, () =>
 		const evidence = await screenshot(ctx, 'ws')
 		const manifest = await workspaceRevision(ctx)
 		const submit = (resources: unknown[], evidenceRefs: unknown[] = [{ kind: 'screenshot', evidence }]) =>
-			submitReadyForReviewForHttp(agent, REVIEW_ID, { expectedRevision: revision, changeDomains: ['copy'], resources, evidenceRefs })
+			submitReadyForReviewForHttp(agent, REVIEW_ID, { expectedRevision: revision, changeDomains: ['i18n'], resources, evidenceRefs })
 
 		expect(codes(await submit([{ identity: { type: 'view', id: VIEW_ID }, revision: ctx.viewRevision }]))).toEqual(['review.target_workspace_revision_missing'])
 		expect(codes(await submit([{ identity: { type: 'workspace' }, revision: 'r_stale' }]))).toEqual(['review.target_workspace_revision_missing'])
 		expect(codes(await submit([{ identity: { type: 'workspace' }, revision: manifest }, { identity: { type: 'view', id: VIEW_ID }, revision: 'r_stale' }]))).toEqual(['review.resource_revision_not_current'])
 		expect(codes(await submit([{ identity: { type: 'workspace' }, revision: manifest }, { identity: { kind: 'view', key: '99999999-9999-4999-8999-999999999999' }, revision: 'r_1' }]))).toEqual(['review.target_view_missing'])
 
-		// formal_capture must be complete for the current revision of a View named in resources.
-		const formal = (viewId: string, viewRevision: string) => ctx.persistence.artifacts.put(new TextEncoder().encode(JSON.stringify({
-			schemaVersion: 1,
-			kind: 'formal_capture',
-			executionContext: { viewId },
-			coverage: { complete: true },
-			provenance: { workspaceSchemaVersion: 3, resources: [{ identity: { type: 'view', id: viewId }, revision: viewRevision }], versions: { uiux: '0.1.0' } },
-			artifactRefs: [],
-		})))
-		const capturedOther = (await formal(OTHER_VIEW_ID, ctx.otherRevision)).identity
+		// formal_capture must be complete for the current render-input digest of a View named in resources.
+		const capturedOther = await formal(ctx, OTHER_VIEW_ID, ctx.otherRevision)
 		expect(codes(await submit([{ identity: { type: 'workspace' }, revision: manifest }, { identity: { type: 'view', id: VIEW_ID }, revision: ctx.viewRevision }], [{ kind: 'formal_capture', evidence: capturedOther }])))
 			.toEqual(['review.formal_evidence_not_current'])
-		const stale = (await formal(VIEW_ID, 'r_old')).identity
+		const stale = await formal(ctx, VIEW_ID, 'r_old', `sha256:${'0'.repeat(64)}`)
 		expect(codes(await submit([{ identity: { type: 'workspace' }, revision: manifest }, { identity: { type: 'view', id: VIEW_ID }, revision: ctx.viewRevision }], [{ kind: 'formal_capture', evidence: stale }])))
 			.toEqual(['review.formal_evidence_not_current'])
 		expect((await read(ctx)).revision).toBe(revision)
@@ -297,7 +306,7 @@ describe('editing a message (decisions 10–16)', { timeout: 30_000 }, () => {
 		const manifest = await workspaceRevision(ctx)
 		const submitted = await submitReadyForReviewForHttp(scoped(ctx.app, AGENT_EDITOR), REVIEW_ID, {
 			expectedRevision: revision,
-			changeDomains: ['copy'],
+			changeDomains: ['i18n'],
 			resources: [{ identity: { type: 'workspace' }, revision: manifest }],
 			evidenceRefs: [{ kind: 'screenshot', evidence: await screenshot(ctx, 'freeze') }],
 		})
@@ -442,5 +451,107 @@ describe('Handoff closure (owner decision O1)', { timeout: 30_000 }, () => {
 			expect(after.readiness!.coverage.review).toMatchObject({ complete: true, threads: 1, workspaceThreads: 1, resolved: { 'wont-fix': 1 } })
 			expect(after.readiness!.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'handoff.review_declined', blocking: false, message: expect.stringContaining('Workspace-scoped Review thread') }))
 		}
+	})
+})
+
+describe('mark ready follows the render-input digest and the known change domains (Discussion #241 R2)', { timeout: 30_000 }, () => {
+	/** An open Widget thread on the View's RootShell, with one message. */
+	async function widgetThread(ctx: Ctx) {
+		const created = await createReviewThreadForHttp(scoped(ctx.app, MEI), { id: WIDGET_REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' } })
+		expect(created.status).toBe(201)
+		const posted = await appendReviewMessageForHttp(scoped(ctx.app, MEI), WIDGET_REVIEW_ID, { expectedRevision: body(created).revision!, body: 'Spacing is off.' })
+		expect(posted.status).toBe(200)
+		return (await read(ctx, WIDGET_REVIEW_ID)).revision
+	}
+
+	async function viewRevision(ctx: Ctx): Promise<string> {
+		return (await ctx.persistence.views.readRevision(VIEW_ID))!
+	}
+
+	function markReady(ctx: Ctx, revision: string, current: string, evidence: string, changeDomains: unknown[] = ['ir']) {
+		return submitReadyForReviewForHttp(scoped(ctx.app, AGENT_EDITOR), WIDGET_REVIEW_ID, {
+			expectedRevision: revision,
+			changeDomains: changeDomains as string[],
+			resources: [{ identity: { type: 'view', id: VIEW_ID }, revision: current }],
+			evidenceRefs: [{ kind: 'formal_capture', evidence }],
+		})
+	}
+
+	// Rule 01a11544-558b-… and Clause 01a115cd-3769-…: a Spec-only edit keeps the digest.
+	it('accepts a capture taken before a Spec-only edit of its View', async () => {
+		const ctx = await session()
+		const revision = await widgetThread(ctx)
+		const captured = await formal(ctx, VIEW_ID, ctx.viewRevision)
+		const edited = await ctx.app.updateViewSpec({ key: VIEW_ID, expectedRevision: ctx.viewRevision, spec: spec('Pay faster') })
+		expect(edited.status).toBe('updated')
+		const current = await viewRevision(ctx)
+		expect(current).not.toBe(ctx.viewRevision)
+		const ready = await markReady(ctx, revision, current, captured, ['spec'])
+		expect(ready.status, JSON.stringify(ready.body)).toBe(200)
+		expect((await read(ctx, WIDGET_REVIEW_ID)).resource.submissions.at(-1)?.changeDomains).toEqual(['spec'])
+	})
+
+	// Scenario 01a118a1-cb0e-…: a capture taken before an IR change is refused.
+	it('refuses a capture taken before an IR change with review.formal_evidence_not_current and keeps the thread open', async () => {
+		const ctx = await session()
+		const revision = await widgetThread(ctx)
+		const captured = await formal(ctx, VIEW_ID, ctx.viewRevision)
+		const changed = await ctx.app.updateViewStructure({ key: VIEW_ID, expectedRevision: ctx.viewRevision, ir: { type: 'RootShell', id: 'root', slots: { content: [{ type: 'Button', id: 'pay' }] } } as never, variants: {} })
+		expect(changed.status, JSON.stringify(changed)).toBe('updated')
+		const refused = await markReady(ctx, revision, await viewRevision(ctx), captured)
+		expect(refused.status).toBe(400)
+		expect(codes(refused)).toEqual(['review.formal_evidence_not_current'])
+		const thread = await read(ctx, WIDGET_REVIEW_ID)
+		expect(thread.revision).toBe(revision)
+		expect(thread.resource.status).toBe('open')
+		expect(thread.resource.submissions).toEqual([])
+	})
+
+	// Rule 01a115cd-c53c-…: a capture that records no render-input digest never counts.
+	it('refuses a capture that records no render-input digest', async () => {
+		const ctx = await session()
+		const revision = await widgetThread(ctx)
+		const legacy = await formal(ctx, VIEW_ID, ctx.viewRevision, null)
+		expect(codes(await markReady(ctx, revision, ctx.viewRevision, legacy))).toEqual(['review.formal_evidence_not_current'])
+	})
+
+	// Clause 01a14e57-637f-…: an unknown value is refused when written, naming each one.
+	it('refuses an unknown change domain with review.change_domain_unknown and writes nothing', async () => {
+		const ctx = await session()
+		const revision = await widgetThread(ctx)
+		const captured = await formal(ctx, VIEW_ID, ctx.viewRevision)
+		const refused = await markReady(ctx, revision, ctx.viewRevision, captured, ['ir', 'view-structure', 'IR'])
+		expect(refused.status).toBe(400)
+		expect(body(refused).diagnostics?.map(item => [item.code, item.path])).toEqual([
+			['review.change_domain_unknown', '/changeDomains/1'],
+			['review.change_domain_unknown', '/changeDomains/2'],
+		])
+		expect((await read(ctx, WIDGET_REVIEW_ID)).revision).toBe(revision)
+
+		const mcp = await connectMcp(ctx.app, AGENT_EDITOR)
+		try {
+			const viaMcp = await mcp.client.callTool({ name: 'submit_ready_for_review', arguments: { reviewId: WIDGET_REVIEW_ID, expectedRevision: revision, changeDomains: ['views'], resources: [{ identity: { type: 'view', id: VIEW_ID }, revision: ctx.viewRevision }], evidenceRefs: [{ kind: 'formal_capture', evidence: captured }] } })
+			expect(JSON.stringify(viaMcp.structuredContent ?? viaMcp.content)).toContain('review.change_domain_unknown')
+		}
+		finally { await mcp.close() }
+
+		// Every known value is accepted.
+		const accepted = await markReady(ctx, revision, ctx.viewRevision, captured, ['ir', 'variant', 'spec', 'metadata', 'flow', 'asset', 'i18n', 'settings', 'adapter', 'product-kit'])
+		expect(accepted.status, JSON.stringify(accepted.body)).toBe(200)
+	})
+
+	// Clause 01a14e30-2dce-…: a stored unknown value does not make the submission invalid.
+	it('reads a stored submission whose change domain is unknown without a diagnostic', async () => {
+		const ctx = await session()
+		const revision = await widgetThread(ctx)
+		const captured = await formal(ctx, VIEW_ID, ctx.viewRevision)
+		expect((await markReady(ctx, revision, ctx.viewRevision, captured)).status).toBe(200)
+		// The dogfood Workspace holds values such as `views` from before the known set.
+		const stored = await read(ctx, WIDGET_REVIEW_ID)
+		const legacy = { ...stored.resource, submissions: stored.resource.submissions.map(item => ({ ...item, changeDomains: ['views'] })) }
+		await writeFile(join(ctx.root, reviewRelativePath(WIDGET_REVIEW_ID)), canonicalJsonBytes(legacy))
+		const reread = await read(ctx, WIDGET_REVIEW_ID)
+		expect(reread.diagnostics).toEqual([])
+		expect(reread.resource.submissions[0]!.changeDomains).toEqual(['views'])
 	})
 })

@@ -1,6 +1,7 @@
 import { chromium, type Browser } from 'playwright'
 import packageJson from '../../../package.json' with { type: 'json' }
 import { canonicalJsonBytes } from '../../domain/canonical-json'
+import { renderInputDigest } from '../../domain/evidence/render-input-digest'
 import {
 	validateFormalEvidenceRecord,
 	type FormalEvidenceRecord,
@@ -13,6 +14,7 @@ import {
 } from '../../domain/render-context/schema'
 import type { Diagnostic, JsonObject } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
+import { PersistenceError } from '../../persistence/errors'
 import type { KitBuildStatus } from '../ports/kit-build'
 import { captureHarnessScreenshot, openHarnessPreview, type HarnessPreview } from './capture-harness'
 import { missingDefaultLocaleError } from './default-locale-gate'
@@ -49,9 +51,14 @@ export type FormalEvidenceItem = Readonly<{
 	record: FormalEvidenceRecord
 }>
 
+/** A View's current render-input digest (Clause 01a14e30-2d4a-…) and the revision it was read at. */
+export type ViewRenderInput = Readonly<{ key: string; revision: string; renderInputDigest: string }>
+
 export interface FormalCaptureService {
 	capture(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult>
 	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
+	/** Every readable View's current render-input digest, against which Evidence freshness is judged. */
+	viewRenderInputs(): Promise<readonly ViewRenderInput[]>
 }
 
 export function createFormalCaptureService(
@@ -310,6 +317,8 @@ export function createFormalCaptureService(
 					// Read exact current revisions
 					const viewRead = await persistence.views.readInspected(context.viewId)
 					const viewRevision = viewRead?.revision ?? 'r_unknown'
+					// Clause 01a14e30-2d4a-…: the render-input digest of the same read as the View revision.
+					const viewRenderInputDigest = viewRead?.resource ? renderInputDigest(viewRead.resource) : undefined
 					const localeRevision = await persistence.locales.readRevision(context.locale)
 
 					const provenanceResources: Array<{ identity: JsonObject; revision: string }> = [
@@ -348,6 +357,7 @@ export function createFormalCaptureService(
 								uiux: packageJson.version,
 							},
 							...(productKit ? { productKit } : {}),
+							...(viewRenderInputDigest ? { renderInputDigest: viewRenderInputDigest } : {}),
 						},
 						artifactRefs: [screenshotDigest],
 						data: {
@@ -441,8 +451,24 @@ export function createFormalCaptureService(
 		return items.sort((a, b) => a.digest.localeCompare(b.digest))
 	}
 
+	async function viewRenderInputs(): Promise<readonly ViewRenderInput[]> {
+		const inputs: ViewRenderInput[] = []
+		for (const key of await persistence.views.discoverKeys()) {
+			// A View file that is not valid JSON has no render input: skip it (as View discovery does) so
+			// the other Views and the Evidence list still load; its Evidence then reads as stale (View missing).
+			const read = await persistence.views.readInspected(key).catch((error: unknown) => {
+				if (error instanceof PersistenceError && error.code === 'persistence.invalid_json') return undefined
+				throw error
+			})
+			if (!read?.resource || !read.revision) continue
+			inputs.push({ key, revision: read.revision, renderInputDigest: renderInputDigest(read.resource) })
+		}
+		return inputs.sort((a, b) => a.key.localeCompare(b.key))
+	}
+
 	return {
 		capture,
 		listEvidence,
+		viewRenderInputs,
 	}
 }

@@ -119,4 +119,22 @@ describe('GET /api/evidence/list', () => {
 		expect(body.productKitUnavailable).toBe(true)
 		expect(body.productKit).toBeUndefined()
 	})
+
+	it('skips a View file that is not valid JSON and still answers the other Views and the list', async () => {
+		const good = '44444444-4444-4444-8444-444444444441'
+		const bad = '44444444-4444-4444-8444-444444444442'
+		const goodView = { id: good, name: 'Checkout', ir: { type: 'RootShell', id: 'root', slots: { content: [] } }, variants: {}, spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] } }
+		await write(join(root, 'views', `${good}.view.json`), `${JSON.stringify(goodView)}\n`)
+		await write(join(root, 'views', `${bad}.view.json`), '{ not json')
+		try {
+			const response = await list(bearer(readerToken))
+			expect(response.status).toBe(200)
+			const body = await response.json() as { items: unknown[]; views: { key: string }[] }
+			expect(body.items).toEqual([])
+			expect(body.views.map(view => view.key)).toEqual([good])
+		}
+		finally {
+			await rm(join(root, 'views'), { recursive: true, force: true })
+		}
+	})
 })

@@ -69,6 +69,7 @@ import {
 	type CaptureFormalEvidenceCommand,
 	type CaptureFormalEvidenceResult,
 	type FormalEvidenceItem,
+	type ViewRenderInput,
 } from './formal-capture'
 import { createProductKitChecksService, type ProductKitChecksResult } from './product-kit-checks'
 import { readCurrentProductKitProvenance } from './product-kit-provenance'
@@ -182,6 +183,8 @@ export interface WorkspaceApplicationSession {
 	replaceAsset(command: ReplaceAssetCommand): Promise<AssetAuthoringResult>
 	captureFormalEvidence(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult>
 	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
+	/** Every readable View's current render-input digest (Rule 01a115cd-c5a5-…). */
+	viewRenderInputs(): Promise<readonly ViewRenderInput[]>
 	/** The Product Kit Checks (issue #141 Part 14 decision 7), run on request and non-blocking. */
 	runProductKitChecks(command?: Readonly<{ readSource?: boolean }>): Promise<ProductKitChecksResult>
 	/** The current Product Kit provenance, against which Evidence freshness is judged (Rules 01a11bb1-be4a-… and 01a1161b-ff68-…). */
@@ -401,6 +404,7 @@ export function createWorkspaceApplicationSession(
 		replaceAsset: assetAuthoring.replaceAsset,
 		captureFormalEvidence: formalCapture.capture,
 		listEvidence: formalCapture.listEvidence,
+		viewRenderInputs: formalCapture.viewRenderInputs,
 		runProductKitChecks: command => productKitChecks.run({ ...(command?.readSource === false ? { readSource: false } : {}) }),
 		productKitProvenance: () => readCurrentProductKitProvenance(persistence),
 		assessHandoffReadiness: handoffExport.assessReadiness,

@@ -1,8 +1,8 @@
 /**
  * A human "Submit for review…" (brief c, section 12; Part 1 / Part 7 submission rules): the
- * thread moves to `ready-for-review` with structured change domains, the anchored View at its
- * current revision, and references to formal Evidence of that revision. The server validates
- * every claim; this only shapes the request.
+ * thread moves to `ready-for-review` with known change domains (Clause 01a14e30-2dce-…), the
+ * anchored View at its current revision, and references to formal Evidence of its current render
+ * input (IR and Variants). The server validates every claim; this only shapes the request.
  */
 export type ReviewSubmissionDraft = Readonly<{
 	changeDomains: readonly string[]
@@ -10,9 +10,6 @@ export type ReviewSubmissionDraft = Readonly<{
 	evidence: readonly string[]
 	reason?: string
 }>
-
-/** Change domains offered first; any other structured domain may be typed (Part 7 keeps them open). */
-export const SUGGESTED_CHANGE_DOMAINS = ['IR', 'Variant', 'Spec', 'i18n', 'Adapter/config', 'Flow'] as const
 
 export function submissionBody(draft: ReviewSubmissionDraft, view: Readonly<{ key: string; revision: string }>, expectedRevision: string): Record<string, unknown> {
 	const reason = draft.reason?.trim()

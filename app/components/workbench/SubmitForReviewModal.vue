@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from '#imports'
+import { CHANGE_DOMAINS, changeAffectsFormalCapture, changeScopeOfSubmission, type ChangeDomain } from '../../../src/domain/reviews/change-domains'
 import { useReadiness, type EvidenceEntry } from '../../composables/useReadiness'
 import { useWorkbench } from '../../composables/useWorkbench'
 import type { FetchErrorDetails } from '../../utils/fetch-error'
-import { isSubmittable, SUGGESTED_CHANGE_DOMAINS, type ReviewSubmissionDraft } from '../../utils/review-submission'
+import { isSubmittable, type ReviewSubmissionDraft } from '../../utils/review-submission'
 import { viewLocation } from '../../utils/workbench-routes'
 import WbErrorDescription from './WbErrorDescription.vue'
 
@@ -29,41 +30,33 @@ const { t } = useI18n()
 const workbench = useWorkbench()
 const readiness = useReadiness()
 
-const domains = ref<string[]>([])
+const domains = ref<ChangeDomain[]>([])
 const evidence = ref<string[]>([])
 const reason = ref('')
-const searchTerm = ref('')
-const domainInput = ref<{ inputRef?: HTMLInputElement }>()
+const domainInput = ref<{ triggerRef?: HTMLElement }>()
 const evidenceList = ref<HTMLElement>()
 const errorAlert = ref<HTMLElement>()
 
 const viewName = computed(() => workbench.views.value.find(view => view.key === props.viewId)?.summary.name ?? '')
 
-/** Domains used by earlier submissions in this Workspace come after the suggestions. */
-const domainItems = computed(() => {
-	const known = new Set<string>(SUGGESTED_CHANGE_DOMAINS)
-	return [...known, ...domains.value.filter(domain => !known.has(domain))]
-})
-
-/**
- * reka-ui names the menu's chevron trigger "Show popup" in English and Nuxt UI's InputMenu does
- * not forward an accessible name for it, so it is named here once the field is mounted.
- */
-watch([domainInput, () => t('submit.showDomains')], ([input, label]) => {
-	if (!input) return
-	void nextTick(() => {
-		document.querySelector('[data-submit-domains]')?.closest('[data-slot="base"]')?.querySelector('[data-slot="trailing"]')?.setAttribute('aria-label', label)
-	})
-}, { flush: 'post' })
-
-function onCreateDomain(item: string): void {
-	const value = item.trim()
-	if (value && !domains.value.includes(value)) domains.value = [...domains.value, value]
-	searchTerm.value = ''
-}
+/** Clause 01a14e30-2dce-…: only the known change domains can be chosen; the server refuses any other. */
+const domainItems = computed(() => CHANGE_DOMAINS.map(domain => ({ label: t(`changeDomain.${domain}`), value: domain })))
 
 const entries = computed<readonly EvidenceEntry[]>(() => readiness.evidenceForView(props.viewId))
 const usable = computed(() => entries.value.filter(entry => entry.freshness.state === 'fresh'))
+
+/**
+ * Rules 01a115cd-c715-… and 01a115cd-c749-… (Discussion #1 c159: the Workbench uses the change
+ * domains to tell which captures must be regenerated): whether the chosen domains affect this
+ * View's formal captures (Clause 01a14e30-2e43-…). The submission names only this View, so an
+ * `asset`, `i18n` or `settings` change is read as touching any of its captures.
+ */
+const domainEffect = computed<'affects' | 'keeps' | undefined>(() => {
+	if (domains.value.length === 0) return undefined
+	const scope = changeScopeOfSubmission({ changeDomains: domains.value, resources: [] }, props.viewId)
+	const captures = entries.value.length ? entries.value.map(entry => ({ viewId: props.viewId, ...entry.context })) : [{ viewId: props.viewId }]
+	return captures.some(capture => changeAffectsFormalCapture(scope, capture)) ? 'affects' : 'keeps'
+})
 
 function contextLabel(entry: EvidenceEntry): string {
 	const context = entry.context
@@ -102,7 +95,7 @@ watch(() => props.error, async (error) => {
 	if (!error || !open.value) return
 	await nextTick()
 	const paths = error.diagnostics.map(item => item.path ?? '')
-	if (paths.some(path => path.startsWith('/changeDomains'))) domainInput.value?.inputRef?.focus()
+	if (paths.some(path => path.startsWith('/changeDomains'))) domainInput.value?.triggerRef?.focus()
 	else if (paths.some(path => path.startsWith('/evidenceRefs'))) evidenceList.value?.querySelector<HTMLElement>('button[role="checkbox"]')?.focus()
 	else errorAlert.value?.focus()
 })
@@ -161,19 +154,25 @@ async function send(): Promise<void> {
           required
           name="changeDomains"
         >
-          <UInputMenu
+          <USelectMenu
             ref="domainInput"
             v-model="domains"
-            v-model:search-term="searchTerm"
             :items="domainItems"
+            value-key="value"
             multiple
-            create-item
-            :placeholder="domains.length ? '' : t('submit.domainsPlaceholder')"
+            :search-input="false"
+            :placeholder="t('submit.domainsPlaceholder')"
             class="w-full"
-            :ui="{ tagsItem: 'font-mono' }"
             data-submit-domains
-            @create="onCreateDomain"
           />
+          <p
+            v-if="domainEffect"
+            class="mt-1.5 text-xs"
+            :class="domainEffect === 'affects' ? 'text-warning' : 'text-muted'"
+            :data-submit-domain-effect="domainEffect"
+          >
+            {{ domainEffect === 'affects' ? t('submit.domainsAffect', { view: viewName }) : t('submit.domainsKeep', { view: viewName }) }}
+          </p>
         </UFormField>
 
         <fieldset class="grid gap-2">

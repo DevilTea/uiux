@@ -11,6 +11,7 @@ import {
 	type EvidenceReference,
 	type FormalEvidenceRecord,
 } from '../../domain/evidence/schema'
+import { renderInputDigest } from '../../domain/evidence/render-input-digest'
 import { evaluateEvidenceStaleness } from '../../domain/evidence/staleness'
 import {
 	mayClaimImplementationReady,
@@ -579,6 +580,8 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		const evidenceRefs: EvidenceReference[] = []
 		const contextsInClosure: ResolvedRenderContext[] = []
 		const artifactIdentities = await persistence.artifacts.listIdentities()
+		// Rule 01a115cd-c5a5-…: each closure View's current render-input digest, taken once.
+		const stalenessViews = [...viewSnapshots.entries()].map(([key, snapshot]) => ({ key, renderInputDigest: renderInputDigest(snapshot.snapshot) }))
 		const viewEvidenceMap = new Map<string, FormalEvidenceRecord[]>()
 		const staleEvidenceByView = new Map<string, number>()
 
@@ -592,7 +595,7 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 			const evViewId = execCtx?.viewId as string | undefined
 			if (evViewId && viewsToInclude.has(evViewId)) {
 				const staleness = evaluateEvidenceStaleness(formalRec, {
-					allViews: [...viewSnapshots.entries()].map(([key, snapshot]) => ({ key, revision: snapshot.revision })),
+					allViews: stalenessViews,
 					workspace: wsRead,
 					discoveredLocales: Object.keys(currentLocaleRevisions),
 					localeRevisions: currentLocaleRevisions,

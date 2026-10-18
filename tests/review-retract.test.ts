@@ -112,7 +112,7 @@ describe('retract eligibility (E1–E6)', { timeout: 30_000 }, () => {
 				const evidence = await ctx.persistence.artifacts.put(new TextEncoder().encode('evidence'))
 				return body(await submitReadyForReviewForHttp(scoped(ctx.app, AGENT_EDITOR), REVIEW_ID, {
 					expectedRevision: revision,
-					changeDomains: ['view-structure'],
+					changeDomains: ['ir'],
 					resources: [{ identity: { type: 'view', id: VIEW_ID }, revision: ctx.viewRevision }],
 					evidenceRefs: [{ kind: 'screenshot', evidence: evidence.identity }],
 				})).revision!

@@ -23,6 +23,7 @@ import { readWorkspaceProductKitProvenance } from '../src/application/services/p
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
+import { renderInputDigest } from '../src/domain/evidence/render-input-digest'
 import { evaluateEvidenceStaleness } from '../src/domain/evidence/staleness'
 import type { HostVersionRecord } from '../src/domain/history/schema'
 import type { ViewResource } from '../src/domain/views/schema'
@@ -136,6 +137,10 @@ function session(ctx: Fixture, principal: MemberPrincipal, leases: LeaseManager 
 
 async function viewRevision(ctx: Fixture): Promise<string> {
 	return (await ctx.persistence.views.readRevision(VIEW_ID))!
+}
+
+async function currentRenderInputDigest(ctx: Fixture): Promise<string> {
+	return renderInputDigest((await ctx.persistence.views.readInspected(VIEW_ID))!.resource)
 }
 
 async function setStructure(ctx: Fixture, principal: MemberPrincipal, structure: ViewResource['ir']): Promise<string> {
@@ -564,6 +569,7 @@ describe('effects on Evidence, Handoff readiness and Reviews (Rules 01a11a5e-17f
 				],
 				versions: { uiux: '0.1.0' },
 				...(productKit ? { productKit } : {}),
+				renderInputDigest: await currentRenderInputDigest(ctx),
 			},
 			artifactRefs: [screenshot.identity],
 			evidenceRefs: [],
@@ -578,7 +584,7 @@ describe('effects on Evidence, Handoff readiness and Reviews (Rules 01a11a5e-17f
 		const localeRevisions: Record<string, string> = {}
 		for (const locale of locales) localeRevisions[locale] = (await ctx.persistence.locales.readRevision(locale))!
 		return evaluateEvidenceStaleness(record, {
-			allViews: [{ key: VIEW_ID, revision: await viewRevision(ctx) }],
+			allViews: [{ key: VIEW_ID, renderInputDigest: await currentRenderInputDigest(ctx) }],
 			workspace: { resource: workspace.resource as never },
 			discoveredLocales: locales,
 			localeRevisions,
@@ -599,7 +605,13 @@ describe('effects on Evidence, Handoff readiness and Reviews (Rules 01a11a5e-17f
 		expect(await stale(ctx, evidence.record)).toBe(false)
 		expect(await staleViewEvidenceBlocks(ctx)).toBe(false)
 
-		await setIntent(ctx, EDITOR, 'Changed after capture')
+		// A Spec-only edit leaves the render input, so the Evidence stays fresh (Rule 01a115cd-c749-…).
+		await setIntent(ctx, EDITOR, 'Spec changed after capture')
+		expect(await stale(ctx, evidence.record)).toBe(false)
+		expect(await staleViewEvidenceBlocks(ctx)).toBe(false)
+
+		// An IR change makes it stale (Rule 01a115cd-c5a5-…).
+		await setStructure(ctx, EDITOR, ir({ type: 'Button', id: 'changed-after-capture' }))
 		expect(await stale(ctx, evidence.record)).toBe(true)
 		expect(await staleViewEvidenceBlocks(ctx)).toBe(true)
 

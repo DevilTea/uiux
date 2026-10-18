@@ -21,6 +21,11 @@ export type EvidenceProvenance = Readonly<{
 	versions: Readonly<Record<string, string>>
 	/** Clause 01a11bb1-8fc4-7b7d-87da-d3fc5d457d98: the Product Kit provenance at capture time; absent on a capture recorded without it. */
 	productKit?: ProductKitProvenance
+	/**
+	 * Clause 01a14e30-2d4a-7ce9-ad68-58db56f36f47: the render-input digest of the captured View at
+	 * capture time; absent on a capture recorded without it, which is stale (Rule 01a115cd-c53c-…).
+	 */
+	renderInputDigest?: string
 	gitCommit?: string
 }>
 export type EvidenceCoverage = Readonly<{
@@ -104,6 +109,7 @@ function validateEvidenceProvenance(input: unknown, path: string, v: Validator):
 			v.string(value, jsonPointer(`${path}/versions`, key), true)
 	}
 	if (Object.hasOwn(provenance, 'productKit')) validateProductKitProvenance(provenance.productKit, `${path}/productKit`, v)
+	if (Object.hasOwn(provenance, 'renderInputDigest')) validateDigest(provenance.renderInputDigest, `${path}/renderInputDigest`, v)
 	if (Object.hasOwn(provenance, 'gitCommit')) v.string(provenance.gitCommit, `${path}/gitCommit`, true)
 }
 

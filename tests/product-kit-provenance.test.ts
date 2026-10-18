@@ -84,14 +84,18 @@ function captureRecord(productKit?: ProductKitProvenance): FormalEvidenceRecord 
 			resources: [{ identity: { type: 'view', id: VIEW_ID }, revision: 'r1' }],
 			versions: { uiux: '0.0.0' },
 			...(productKit ? { productKit } : {}),
+			renderInputDigest: VIEW_RENDER_INPUT,
 		},
 		artifactRefs: [],
 	}
 }
 
 function context(productKit?: ProductKitProvenance): EvidenceStalenessContext {
-	return { allViews: [{ key: VIEW_ID, revision: 'r1' }], ...(productKit ? { productKit } : {}) }
+	return { allViews: [{ key: VIEW_ID, renderInputDigest: VIEW_RENDER_INPUT }], ...(productKit ? { productKit } : {}) }
 }
+
+/** The View's render-input digest, the same at capture and now: only the Product Kit varies here. */
+const VIEW_RENDER_INPUT = `sha256:${'c'.repeat(64)}`
 
 /** Counts every kit file the shared digest cache reads, by its kit-relative path. */
 function countHashes(): string[] {

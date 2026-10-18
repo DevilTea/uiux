@@ -28,7 +28,9 @@ import {
 import type { Decision, DecisionActor, DecisionHistoryEntry, DecisionOutcome, DecisionStatus } from '../../domain/spec/schema'
 import type { ViewResource } from '../../domain/views/schema'
 import { validateFormalEvidenceRecord } from '../../domain/evidence/schema'
-import { isCompleteEvidenceForViewRevision } from '../../domain/evidence/staleness'
+import { renderInputDigest } from '../../domain/evidence/render-input-digest'
+import { isCompleteEvidenceForRenderInput } from '../../domain/evidence/staleness'
+import { unknownChangeDomainDiagnostics } from '../../domain/reviews/change-domains'
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
 import { viewRelativePath } from '../../persistence/paths'
@@ -455,11 +457,15 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 				diagnostics: [{ code: 'review.invalid_transition', path: '/status', message: `Review cannot transition from ${current.resource.status} to ready-for-review.` }],
 			}
 		}
+		// Clause 01a14e57-637f-…: a change domain is checked against the known values when it is
+		// written, here; a stored submission that holds an unknown value stays readable.
+		const unknownDomains = unknownChangeDomainDiagnostics(command.changeDomains)
+		if (unknownDomains.length > 0) return { status: 'invalid', key: command.reviewId, diagnostics: unknownDomains }
 		// The target set (decision 4): a Widget thread's anchor View; a Workspace thread's manifest plus
 		// every View the submission names, each existing, valid and named at its current revision.
 		const targets = await submissionTargets(current.resource.anchor, command.resources)
 		if (!targets.ok) return { status: 'invalid', key: command.reviewId, diagnostics: targets.diagnostics }
-		const currentViewRevisions = targets.views
+		const currentViewDigests = targets.views
 
 		const evidenceDiagnostics: Diagnostic[] = []
 		for (const [index, ref] of command.evidenceRefs.entries()) {
@@ -483,15 +489,17 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 					const candidate = await persistence.artifacts.readCandidateJson(validation.value.evidence)
 					const formal = validateFormalEvidenceRecord(candidate)
 					const capturedViewId = formal.ok ? (formal.value.executionContext as Record<string, unknown>).viewId : undefined
-					const capturedRevision = typeof capturedViewId === 'string' ? currentViewRevisions.get(capturedViewId) : undefined
-					if (!formal.ok || formal.value.kind !== 'formal_capture' || typeof capturedViewId !== 'string' || capturedRevision === undefined
-						|| !isCompleteEvidenceForViewRevision(formal.value, capturedViewId, capturedRevision)) {
+					// Rule 01a11544-558b-… and Clause 01a115cd-3769-…: matched to the View's current
+					// render-input digest, so a capture taken before a Spec-only edit still counts.
+					const currentDigest = typeof capturedViewId === 'string' ? currentViewDigests.get(capturedViewId) : undefined
+					if (!formal.ok || formal.value.kind !== 'formal_capture' || typeof capturedViewId !== 'string' || currentDigest === undefined
+						|| !isCompleteEvidenceForRenderInput(formal.value, capturedViewId, currentDigest)) {
 						evidenceDiagnostics.push({
 							code: 'review.formal_evidence_not_current',
 							path: `${path}/evidence`,
 							message: targets.workspace
-								? `Formal evidence ${validation.value.evidence} must be complete for the current revision of the View it captured, and that View must be named in resources.`
-								: `Formal evidence ${validation.value.evidence} must be complete and match current target View ${[...currentViewRevisions.keys()][0]} revision ${[...currentViewRevisions.values()][0]}.`,
+								? `Formal evidence ${validation.value.evidence} must be complete for the current render input (IR and Variants) of the View it captured, and that View must be named in resources.`
+								: `Formal evidence ${validation.value.evidence} must be complete for the current render input (IR and Variants) of target View ${[...currentViewDigests.keys()][0]}.`,
 						})
 					}
 				}
@@ -950,7 +958,8 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 	}
 
 	type SubmissionTargets =
-		| Readonly<{ ok: true; workspace: boolean; views: ReadonlyMap<string, ResourceRevision> }>
+		/** `views`: each target View's current render-input digest (Clause 01a14e30-2d4a-…). */
+		| Readonly<{ ok: true; workspace: boolean; views: ReadonlyMap<string, string> }>
 		| Readonly<{ ok: false; diagnostics: readonly Diagnostic[] }>
 
 	async function submissionTargets(anchor: ReviewAnchor, resources: readonly ReviewResourceRevision[]): Promise<SubmissionTargets> {
@@ -973,7 +982,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 					}],
 				}
 			}
-			return { ok: true, workspace: false, views: new Map([[targetViewId, targetView.revision]]) }
+			return { ok: true, workspace: false, views: new Map([[targetViewId, renderInputDigest(targetView.resource)]]) }
 		}
 
 		const manifest = await persistence.workspace.readInspected()
@@ -994,7 +1003,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 			}
 		}
 		const diagnostics: Diagnostic[] = []
-		const views = new Map<string, ResourceRevision>()
+		const views = new Map<string, string>()
 		for (const [index, resource] of named.entries()) {
 			const viewId = namedViewId(resource)
 			if (viewId === undefined) continue
@@ -1012,7 +1021,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 				diagnostics.push({ code: 'review.resource_revision_not_current', path: `${path}/revision`, message: `View ${viewId} is named at revision ${resource.revision}; its current revision is ${view.revision}.` })
 				continue
 			}
-			views.set(viewId, view.revision)
+			views.set(viewId, renderInputDigest(view.resource))
 		}
 		if (diagnostics.length > 0) return { ok: false, diagnostics }
 		return { ok: true, workspace: true, views }
