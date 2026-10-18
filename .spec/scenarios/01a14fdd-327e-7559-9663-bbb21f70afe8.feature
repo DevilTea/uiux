@@ -4,7 +4,7 @@ Feature: Adapter Catalog and Widget integration
   # Test: code@893ec92 `tests/reference-adapter.test.ts#L68` "omits every i18n Property name, and each derived name passes the strict check against its Widget plugin" (the reference Adapter). https://github.com/DevilTea/uiux/blob/893ec92cb1cb8cc989d9ed5b0be09bee23fdf50d/tests/reference-adapter.test.ts#L68
   # Test: code@893ec92 `tests/i18n-assets.test.ts#L138` "derives an omitted textProperty as the authoring field and an omitted resultProperty as <field>Result, and keeps a declared name (Clause 01a14e30-3676)" (the lowered binding carries the derived names). https://github.com/DevilTea/uiux/blob/893ec92cb1cb8cc989d9ed5b0be09bee23fdf50d/tests/i18n-assets.test.ts#L138
   # Note: the check against the Widget plugin runs in `materializeRuntimeAdapterBundle` (`src/runtime/adapter-runtime.ts`), which the tests call; at 893ec92 neither the Preview nor the server calls it, so only the manifest check (shape and name collisions) runs there.
-  # Status: built as of 893ec92.
+  # Status: partly built as of 893ec92 — enforced by the runtime check in tests only; production load does not run it (#255).
   @spec:id:01a14fdd-327e-7fab-8f9a-0443530c1b4d
   @spec:demonstrates:01a115cd-d1ec-7ceb-9e0f-292719127bf4
   @spec:demonstrates:01a14e30-3676-7212-8cee-1ef84da6316c
