@@ -152,8 +152,16 @@ function readRegistryPluginType(member: unknown): string {
 	return type
 }
 
+/**
+ * Adapter API version 1: `1` or `1.<minor>`, where `<minor>` is `0` or a decimal integer without
+ * leading zeros. The declared minor is not yet bound to manifest members or capped by a host
+ * ceiling; that policy is deferred (Discussion #241 R5).
+ */
+const ADAPTER_API_VERSION_1 = /^1(?:\.(?:0|[1-9]\d*))?$/
+
 export const productAdapterApiCompatibility: AdapterApiCompatibilityPolicy = {
 	isCompatible(apiVersion: string): boolean {
-		return apiVersion === '1' || apiVersion === 'test' || apiVersion.startsWith('1.')
+		// `test` is a non-normative test hook (owner ruling 2026-10-07), not an Adapter API version.
+		return apiVersion === 'test' || ADAPTER_API_VERSION_1.test(apiVersion)
 	},
 }
