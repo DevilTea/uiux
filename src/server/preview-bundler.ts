@@ -247,8 +247,9 @@ async function graphUnchanged(graph: BundleGraph): Promise<boolean> {
  * every input the generated entry reaches through them (modules, stylesheets, fonts and images,
  * however deep), sorted by path, with its stat and its digest. The UIUX browser runtime the entry
  * imports and the host packages the bundle aliases (`PREVIEW_HOST_PACKAGES`) are not followed; they
- * are UIUX's own files. `racy` when an input was modified at or after the build's start (`RACY_WINDOW_MS`)
- * or could not be read again.
+ * are UIUX's own files. `racy` when an input's modification time lies within `RACY_WINDOW_MS` of the build's start (an edit during or just
+ * before the build, or just after it for a skewed clock) or the input could not be read again. A far-future
+ * time is not racy: the next build starts later, so a racy graph is rebuilt once, not on every request.
  */
 async function readBundleGraph(metafile: esbuild.Metafile, workingDir: string, browserRuntimePath: string, startedAt: number): Promise<{ inputs: GraphInput[]; racy: boolean }> {
 	const hostPackages = new Set<string>(PREVIEW_HOST_PACKAGES)
@@ -271,7 +272,7 @@ async function readBundleGraph(metafile: esbuild.Metafile, workingDir: string, b
 		try {
 			const before = await stat(path)
 			const digest = sha256(await readFile(path))
-			if (before.mtimeMs >= startedAt - RACY_WINDOW_MS) racy = true
+			if (Math.abs(before.mtimeMs - startedAt) <= RACY_WINDOW_MS) racy = true
 			inputs.push({ path, size: before.size, mtimeMs: before.mtimeMs, digest })
 		}
 		catch {

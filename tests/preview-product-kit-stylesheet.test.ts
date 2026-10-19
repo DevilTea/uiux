@@ -380,18 +380,18 @@ describe('Preview bundle cache', () => {
 		expect((await validBundle(root)).files).toBe(first.files)
 	})
 
-	it('builds again when an input changed at or after the start of the build that read it', async () => {
+	it('does not build again on every request for an input with a far-future modification time', async () => {
 		const root = await createKitWorkspace()
 		await backdate(join(root, 'kit'))
-		// A modification time after the build started: esbuild may have read other bytes than the digest's.
+		// A modification time far after the build (clock skew, an extracted archive) is not racy: at most one extra build, then reuse.
 		const css = join(root, 'kit', 'node_modules', 'fake-ui', 'button.css')
 		const later = new Date(Date.now() + 60_000)
 		await utimes(css, later, later)
 		const first = await validBundle(root)
 		const again = await validBundle(root)
+		const third = await validBundle(root)
 		expect(again.hash).toBe(first.hash)
-		// Other output files: it was built again (an identity check; `not.toBe` would diff the two maps).
-		expect(again.files === first.files).toBe(false)
+		expect(third.files).toBe(again.files)
 	})
 
 	it('leaves the host packages it aliases to UIUX\'s own copies out of the graph', async () => {
