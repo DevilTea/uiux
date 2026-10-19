@@ -381,7 +381,10 @@ describe('a concurrent change', () => {
 		const { context, page } = await open()
 		try {
 			const editor = await editPreset(page, 'qa')
-			await checkbox(editor, 'flows.write').click()
+			// `check` fails here if the click did not check the key, instead of leaving Save disabled
+			// for a reason the step after the concurrent change cannot tell apart (issue #263).
+			await checkbox(editor, 'flows.write').check()
+			await editor.locator('[data-preset-editor-save]:enabled').waitFor()
 			await setPresets(BUILT_IN)
 			await editor.locator('[data-preset-editor-save]').click()
 			await editor.locator('[data-preset-editor-removed]').waitFor()

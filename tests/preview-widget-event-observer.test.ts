@@ -231,9 +231,10 @@ export const TapRenderer = defineComponent({
     let timer;
     onMounted(() => {
       emit.mounted('${SECRET}-mount');
-      timer = setTimeout(() => emit.tick('${SECRET}-timer', { nested: '${SECRET}' }), 30);
+      // A timer that keeps ticking, so a tick follows an arm however late the arm comes.
+      timer = setInterval(() => emit.tick('${SECRET}-timer', { nested: '${SECRET}' }), 10);
     });
-    onBeforeUnmount(() => clearTimeout(timer));
+    onBeforeUnmount(() => clearInterval(timer));
     return () => h('button', {
       'data-widget-id': widgetId,
       onClick: (event) => emit.tap('${SECRET}-click', event.clientX, { text: '${SECRET}' }),
@@ -346,10 +347,9 @@ describe('mounted Preview runtime: Widget Event observation', () => {
 		await wait(0)
 		expect(reports).toEqual([{ armId: 'arm-1', widgetId: 'tap-1', event: 'tap' }])
 
-		// A timer emission after mount counts.
+		// A timer emission after mount counts: the next tick after the arm is reported.
 		bridge.armWidgetEvents?.('arm-2', [{ widgetId: 'tap-2', event: 'tick' }])
-		await wait(60)
-		expect(reports.at(-1)).toEqual({ armId: 'arm-2', widgetId: 'tap-2', event: 'tick' })
+		await expect.poll(() => reports.at(-1)).toEqual({ armId: 'arm-2', widgetId: 'tap-2', event: 'tick' })
 
 		// Privacy sentinel: nothing that left the runtime carries an argument.
 		expect(outbound.filter(message => message.type === 'widget.event.occurrence')).toHaveLength(2)

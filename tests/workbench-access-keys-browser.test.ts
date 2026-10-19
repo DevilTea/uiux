@@ -267,11 +267,17 @@ describe('history and Review actions follow their keys', () => {
 
 	it('offers the canvas bubble\'s Resolve only with `reviews.resolve`, and Submit and Reopen only with `reviews.submit`', async () => {
 		const thread = await seedThread('P4 canvas gating thread.')
-		/** The bubble of the thread, opened through the address, and whether its menu offers Submit for review. */
+		/**
+		 * The bubble of the thread, opened through the address, once it stands at the thread's pin.
+		 * Until the Preview draws the pin, the bubble stands in the canvas corner; when the pin is
+		 * drawn, it moves there. A click whose mouse-down and mouse-up straddle that move is lost (the
+		 * menu opens on `click`, and Playwright checks only the first event's target).
+		 */
 		async function bubbleFor(keys: readonly PermissionKey[]) {
 			const opened = await open(`/views/${VIEW_ID}?thread=${thread}`, await memberCookie(keys))
 			const bubble = opened.page.locator('[data-thread-bubble]')
 			await bubble.locator('[data-timeline-kind="message"]').first().waitFor({ timeout: 20_000 })
+			await opened.page.locator(`.pin-anchor:not([hidden]) [data-pin-thread="${thread}"]`).waitFor({ timeout: 20_000 })
 			return { ...opened, bubble }
 		}
 		async function offersSubmit(page: Page, bubble: ReturnType<Page['locator']>): Promise<boolean> {
