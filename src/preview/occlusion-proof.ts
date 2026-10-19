@@ -12,6 +12,19 @@ export type ReliableShape<Shape> = Readonly<{
 	shape: Shape
 }>
 
+/**
+ * A finite over-approximation of everything an occluder can paint, used when its exact covering
+ * shape is unproven (Discussion #241 R6). Cutting it removes at least the occluder's coverage, so
+ * whatever survives is still proven visible.
+ */
+export type PaintBound<Shape> = Readonly<{
+	kind: 'paint-bound'
+	shape: Shape
+}>
+
+/** One area a precise plan removes from the Widget's visible region. */
+export type OcclusionCut<Shape> = ReliableShape<Shape> | PaintBound<Shape>
+
 export type OcclusionEvidence<Shape> =
 	| Readonly<{
 		classification: 'opaque'
@@ -28,6 +41,12 @@ export type OcclusionEvidence<Shape> =
 		targetContribution: 'proven-nonzero'
 	}>
 	| Readonly<{
+		/** The exact covering shape or paint order is unproven, but the paint has a finite bound. */
+		classification: 'bounded'
+		targetContribution: 'unproven'
+		bound: PaintBound<Shape>
+	}>
+	| Readonly<{
 		classification: 'unsupported'
 		reason:
 			| 'blend-mode'
@@ -36,12 +55,13 @@ export type OcclusionEvidence<Shape> =
 			| 'complex-mask'
 			| 'unreliable-visible-shape'
 			| 'unknown-compositing'
+			| 'unbounded-paint'
 	}>
 
 export type OcclusionPlan<Shape> =
 	| Readonly<{
 		status: 'precise'
-		subtract: readonly ReliableShape<Shape>[]
+		subtract: readonly OcclusionCut<Shape>[]
 		translucentObstruction: boolean
 	}>
 	| Readonly<{
@@ -51,11 +71,13 @@ export type OcclusionPlan<Shape> =
 
 /**
  * Converts runtime rendering evidence into the only occlusion operations that are allowed to
- * affect precise Widget contours. No visual-opacity threshold, bbox approximation, or guessed
- * compositing classification is accepted here.
+ * affect precise Widget contours. No visual-opacity threshold or guessed compositing
+ * classification is accepted here. A bounding box is accepted only as a `bounded` occluder's
+ * finite paint bound, an over-approximation that cuts at least what the occluder covers
+ * (Discussion #241 R6); evidence without a finite bound stays `unsupported` and fails the plan.
  */
 export function planOcclusion<Shape>(evidence: readonly OcclusionEvidence<Shape>[]): OcclusionPlan<Shape> {
-	const subtract: ReliableShape<Shape>[] = []
+	const subtract: OcclusionCut<Shape>[] = []
 	let translucentObstruction = false
 
 	for (const item of evidence) {
@@ -67,9 +89,14 @@ export function planOcclusion<Shape>(evidence: readonly OcclusionEvidence<Shape>
 			continue
 		}
 
+		if (item.classification === 'bounded') {
+			subtract.push(cloneCut(item.bound))
+			continue
+		}
+
 		if (item.shape === undefined)
 			return { status: 'structural-only', reason: 'opaque-shape-unavailable' }
-		subtract.push(cloneReliableShape(item.shape))
+		subtract.push(cloneCut(item.shape))
 	}
 
 	return Object.freeze({
@@ -79,8 +106,8 @@ export function planOcclusion<Shape>(evidence: readonly OcclusionEvidence<Shape>
 	})
 }
 
-function cloneReliableShape<Shape>(shape: ReliableShape<Shape>): ReliableShape<Shape> {
-	return Object.freeze({ kind: shape.kind, shape: cloneUnknown(shape.shape) })
+function cloneCut<Shape>(cut: OcclusionCut<Shape>): OcclusionCut<Shape> {
+	return Object.freeze({ kind: cut.kind, shape: cloneUnknown(cut.shape) }) as OcclusionCut<Shape>
 }
 
 function cloneUnknown<T>(value: T): T {

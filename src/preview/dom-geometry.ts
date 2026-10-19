@@ -10,30 +10,43 @@ import { approximateRoundedRectContour, type RoundedRectRadii } from './rounded-
  *
  * For one Widget element it reports the full rendered border box (`rect`) and the regions of it
  * that are reliably visible: the part surviving the content viewport, every ancestor overflow or
- * paint-containment clip on its containing-block chain, minus proven opaque occluders. It never
- * guesses. Whenever the visible set cannot be proven inside the exact subset below, it reports
- * `regions: []` ("no reliably visible region", Part 4) instead of a bounding box.
+ * paint-containment clip on its containing-block chain, minus proven opaque occluders and minus the
+ * finite paint bound of every occluder whose exact covering shape is unproven. It never guesses.
+ * Whenever the visible set cannot be proven inside the subset below, it reports `regions: []`
+ * ("no reliably visible region", Part 4) instead of a bounding box.
  *
  * Exact subset:
- * - Widget and occluder boxes whose transform chain is translation plus uniform positive scale.
- *   Rotation, skew, flips, nonuniform scale, 3D and motion paths fail closed. The chain follows
- *   the flat tree (assigned slot, parent element, shadow host), and an SVG ancestor fails closed.
+ * - Widget boxes whose transform chain is translation plus uniform positive scale. Rotation, skew,
+ *   flips, nonuniform scale, 3D and motion paths fail closed. The chain follows the flat tree
+ *   (assigned slot, parent element, shadow host), and an SVG ancestor fails closed. A filter, blend
+ *   mode, mask or clip path on the Widget's own chain fails closed too.
  * - Rectangular clips are exact. One rounded shape may take part (the Widget's own border radius,
  *   or one rounded overflow clip whose corners reach the visible area): its contour is the
  *   `approximateRoundedRectContour` polygon clipped by the exact rectangle, with that contour's
- *   `maxError`. Two rounded shapes at once, or a rounded shape plus an opaque occluder, fail closed.
+ *   `maxError`. Two rounded shapes at once, or a rounded shape plus any cut, fail closed.
  * - Occluders are elements that paint above the Widget, determined from the CSS painting order
- *   (stacking contexts, z-index, positioned layers, tree order). Overlap between two in-flow boxes,
- *   whose backgrounds and inline content interleave, is not decided and fails closed.
- *   - Opaque (subtracted): opacity 1 along the chain, an opaque background colour, no filter,
- *     blend mode, mask or clip-path, square corners where they meet the Widget, painted area
- *     clipped by the occluder's own clip chain.
+ *   (stacking contexts, z-index, positioned layers, tree order). An undecided order (overlap
+ *   between two in-flow boxes, whose backgrounds and inline content interleave) is taken as above.
+ *   - Opaque (subtracted exactly): order proven above, opacity 1 along the chain, an opaque
+ *     background colour, no filter, blend mode, mask or clip-path, a uniform transform chain,
+ *     square corners where they meet the Widget, painted area clipped by the occluder's own clips.
  *   - Translucent (kept, Part 4): a background with alpha below 1, borders or text only.
- *   - Unsupported (fail closed): replaced content (images, SVG, canvas, video, frames, native
- *     controls), filters, blend modes, masks, clip paths, rounded opaque corners over the Widget.
+ *   - Bounded (Discussion #241 R6; subtracted by an over-approximation): replaced content (images,
+ *     SVG, canvas, video, frames, native controls), filters, blend modes, masks, clip paths,
+ *     rounded opaque corners over the Widget, transforms outside the uniform subset, rounded or
+ *     unsupported clips of the occluder, and an undecided paint order. The cut is the occluder's
+ *     transformed border box grown by its outline, outer box shadows, border-image outset and
+ *     replaced-content clip margin, then by the filter extent of it and every ancestor; clipped
+ *     by its clip chain only when no filter grows it and its chain is uniform. Subtracting more
+ *     than the occluder paints only shrinks what is reported visible.
+ *   - Unbounded (fail closed): a filter other than the CSS shorthand functions (such as `url()`),
+ *     a 3D transform or `-webkit-box-reflect` on the occluder's chain, replaced content whose
+ *     overflow is visible, an unparsed shadow, outline or outset, or an outset that a transform
+ *     without a measurable box makes unscalable.
  *
- * Not modelled: generated content (`::before`/`::after`), box shadows and outlines painted outside
- * an occluder's border box, and text overflowing its box. They are treated as not covering.
+ * Not modelled (issue #112): generated content (`::before`/`::after`), box shadows and outlines of
+ * exact or translucent occluders painted outside their border box, paint of an element whose border
+ * box does not overlap the Widget, and text overflowing its box. They are treated as not covering.
  */
 
 export type DomGeometryMeasurerOptions = Readonly<{
@@ -60,9 +73,10 @@ const STYLE_KEYS = [
 	'borderTopStyle', 'borderRightStyle', 'borderBottomStyle', 'borderLeftStyle',
 	'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor',
 	'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
-	'backgroundColor', 'backgroundImage', 'backgroundClip', 'boxShadow', 'outlineStyle', 'outlineWidth', 'appearance',
+	'backgroundColor', 'backgroundImage', 'backgroundClip', 'boxShadow', 'outlineStyle', 'outlineWidth', 'outlineOffset', 'appearance',
+	'borderImageSource', 'borderImageOutset',
 ] as const
-type StyleKey = typeof STYLE_KEYS[number] | 'webkitMaskImage' | 'webkitAppearance'
+type StyleKey = typeof STYLE_KEYS[number] | 'webkitMaskImage' | 'webkitAppearance' | 'webkitBoxReflect'
 type StyleFacts = Readonly<Record<StyleKey, string>>
 
 function snapshotStyle(style: CSSStyleDeclaration): StyleFacts {
@@ -71,6 +85,7 @@ function snapshotStyle(style: CSSStyleDeclaration): StyleFacts {
 	for (const key of STYLE_KEYS) facts[key] = source[key] ?? ''
 	facts.webkitMaskImage = style.getPropertyValue('-webkit-mask-image')
 	facts.webkitAppearance = style.getPropertyValue('-webkit-appearance')
+	facts.webkitBoxReflect = style.getPropertyValue('-webkit-box-reflect')
 	return facts
 }
 
@@ -161,7 +176,12 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		return candidates
 	}
 
-	type ChainFlags = Readonly<{ opacity: number; transformOk: boolean; compositing: boolean; shapeClip: boolean; hidden: boolean }>
+	/**
+	 * `planar`: no 3D transform on the chain, so every transform is 2D affine and an element's
+	 * rendered rect is the bounding box of its transformed border box. `reflect`: a box reflection
+	 * on the chain paints a copy of the element elsewhere.
+	 */
+	type ChainFlags = Readonly<{ opacity: number; transformOk: boolean; compositing: boolean; shapeClip: boolean; hidden: boolean; planar: boolean; reflect: boolean }>
 
 	/** Aggregated style facts of an element and all its flat-tree ancestors. */
 	function chainOf(element: Element): ChainFlags {
@@ -169,7 +189,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		if (cached) return cached
 		const style = styleOf(element)
 		const parent = flatTreeParent(element)
-		const inherited: ChainFlags = parent ? chainOf(parent) : { opacity: 1, transformOk: true, compositing: false, shapeClip: false, hidden: false }
+		const inherited: ChainFlags = parent ? chainOf(parent) : { opacity: 1, transformOk: true, compositing: false, shapeClip: false, hidden: false, planar: true, reflect: false }
 		const opacity = Number.parseFloat(style.opacity)
 		const flags: ChainFlags = {
 			opacity: inherited.opacity * (Number.isFinite(opacity) ? opacity : 1),
@@ -177,6 +197,8 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 			compositing: inherited.compositing || hasCompositing(style),
 			shapeClip: inherited.shapeClip || (style.clipPath !== '' && style.clipPath !== 'none') || hasMask(style),
 			hidden: false,
+			planar: inherited.planar && !hasThreeDTransform(style),
+			reflect: inherited.reflect || (style.webkitBoxReflect !== '' && style.webkitBoxReflect !== 'none'),
 		}
 		chainFlags.set(element, flags)
 		return flags
@@ -356,11 +378,12 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		if (chain.opacity === 0) return undefined
 		const paint = paintedContent(candidate, style)
 		if (paint === 'nothing') return undefined
+		// An undecided order is taken as above: covering paint that is really below only cuts more.
 		const order = paintOrder(candidate, target)
 		if (order === 'below') return undefined
-		if (order === 'unknown') return 'unsupported'
-		if (paint === 'replaced' || chain.compositing || chain.shapeClip || !chain.transformOk) return 'unsupported'
+		if (paint === 'replaced' || chain.compositing || chain.shapeClip || !chain.transformOk || chain.reflect) return boundedCut(candidate)
 		if (paint === 'translucent' || chain.opacity < 1) return { classification: 'translucent', targetContribution: 'proven-nonzero' }
+		if (order === 'unknown') return boundedCut(candidate)
 
 		// Opaque background: the covered area is the background painting area, clipped by the
 		// occluder's own clip chain. Rounded corners that reach the Widget are outside the exact subset.
@@ -369,13 +392,79 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		const inset = backgroundInset(style, scale)
 		const covered = { left: bounds.left + inset.left, top: bounds.top + inset.top, right: bounds.right - inset.right, bottom: bounds.bottom - inset.bottom }
 		const radii = radiiOf(candidate, { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height })
-		if (radii && cornersReach({ rect: { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height }, radii }, visible)) return 'unsupported'
+		if (radii && cornersReach({ rect: { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height }, radii }, visible)) return boundedCut(candidate)
 		const clips = clipChainOf(candidate)
-		if (clips === 'unsupported') return 'unsupported'
+		if (clips === 'unsupported') return boundedCut(candidate)
 		const painted = intersect(covered, clips.box)
 		if (!painted) return undefined
-		if (clips.rounded.some(shape => cornersReach(shape, intersect(painted, visible) ?? painted))) return 'unsupported'
+		if (clips.rounded.some(shape => cornersReach(shape, intersect(painted, visible) ?? painted))) return boundedCut(candidate)
 		return { classification: 'opaque', targetContribution: 'proven-zero', shape: { kind: 'rectangle', shape: rectOfBox(painted) } }
+	}
+
+	/**
+	 * Evidence for an occluder whose exact covering shape or paint order is unproven: its finite
+	 * paint bound (Discussion #241 R6), or `unsupported` when no finite bound is provable.
+	 */
+	function boundedCut(candidate: Element): OcclusionEvidence<WidgetRect> | 'unsupported' | undefined {
+		const bound = paintBound(candidate)
+		if (bound === 'unbounded') return 'unsupported'
+		if (bound === 'empty') return undefined
+		return { classification: 'bounded', targetContribution: 'unproven', bound: { kind: 'paint-bound', shape: rectOfBox(bound) } }
+	}
+
+	/**
+	 * An over-approximation of everything the element itself paints (its children are candidates of
+	 * their own), in inner CSS px: the rendered rect, which under a 2D affine chain bounds the
+	 * transformed border box, grown by the element's own outsets and then by the extent of every
+	 * filter on its flat-tree chain. A clip only removes paint, so the clip chain is applied only
+	 * when no filter grows the paint after it and the chain's clip boxes are exact (uniform chain).
+	 */
+	function paintBound(element: Element): Box | 'unbounded' | 'empty' {
+		const chain = chainOf(element)
+		if (!chain.planar || chain.reflect) return 'unbounded'
+		const own = ownPaintOutsets(element, styleOf(element))
+		if (!own) return 'unbounded'
+		const rect = rectOf(element)
+		let box: Box | undefined = growBox({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }, element, own)
+		let filtered = false
+		for (let node: Element | null = element; node && box; node = flatTreeParent(node)) {
+			const filter = styleOf(node).filter
+			if (filter === '' || filter === 'none') continue
+			const extent = filterOutsets(filter)
+			if (!extent) return 'unbounded'
+			if (isZeroOutsets(extent)) continue
+			filtered = true
+			box = growBox(box, node, extent)
+		}
+		if (!box || ![box.left, box.top, box.right, box.bottom].every(Number.isFinite)) return 'unbounded'
+		if (filtered || !chain.transformOk) return box
+		const clips = clipChainOf(element)
+		if (clips === 'unsupported') return box
+		return intersect(box, clips.box) ?? 'empty'
+	}
+
+	/**
+	 * Grows a client box by outsets given in the element's local CSS px. Under a uniform chain each
+	 * side scales by the element's scale. Under any other 2D affine chain the rendered rect W × H of
+	 * the local border box w × h gives |a| ≤ W/w and |c| ≤ W/h for the linear part [[a, c], [b, d]],
+	 * so an outset e grows x by at most e(W/w + W/h) on each side, and y likewise with H.
+	 */
+	function growBox(box: Box, element: Element, outsets: Outsets): Box | undefined {
+		if (isZeroOutsets(outsets)) return box
+		const html = element as HTMLElement
+		const width = typeof html.offsetWidth === 'number' ? html.offsetWidth : 0
+		const height = typeof html.offsetHeight === 'number' ? html.offsetHeight : 0
+		const rect = rectOf(element)
+		if (chainOf(element).transformOk) {
+			const scale = Math.max(width > 0 ? rect.width / width : 0, height > 0 ? rect.height / height : 0)
+			if (!(scale > 0)) return undefined
+			return { left: box.left - outsets.left * scale, top: box.top - outsets.top * scale, right: box.right + outsets.right * scale, bottom: box.bottom + outsets.bottom * scale }
+		}
+		if (!(width > 0) || !(height > 0)) return undefined
+		const extent = Math.max(outsets.left, outsets.top, outsets.right, outsets.bottom)
+		const x = extent * (rect.width / width + rect.width / height)
+		const y = extent * (rect.height / width + rect.height / height)
+		return { left: box.left - x, top: box.top - y, right: box.right + x, bottom: box.bottom + y }
 	}
 
 	/** What an element paints itself, children excluded (they are candidates of their own). */
@@ -585,6 +674,217 @@ function transformIsUniform(style: StyleFacts): boolean {
 	if (![a, b, c, d, e, f].every(Number.isFinite)) return false
 	if (b !== 0 || c !== 0 || !(a! > 0) || !(d! > 0)) return false
 	return Math.abs(a! - d!) <= UNIFORM_SCALE_TOLERANCE * Math.max(a!, d!)
+}
+
+/** Whether the element's own transform leaves the plane (any 3D transform function or component). */
+function hasThreeDTransform(style: StyleFacts): boolean {
+	if (/^matrix3d\(/.test(style.transform?.trim() ?? '')) return true
+	const parts = (value: string | undefined) => (value ?? '').trim().split(/\s+/).filter(Boolean)
+	if (style.translate && style.translate !== 'none' && parts(style.translate).length > 2) return true
+	if (style.scale && style.scale !== 'none' && parts(style.scale).length > 2) return true
+	const rotate = parts(style.rotate)
+	return style.rotate !== 'none' && rotate.length > 1 && rotate[0] !== 'z' && !(rotate.length === 4 && rotate[0] === '0' && rotate[1] === '0')
+}
+
+/** Per-side growth of a box, in CSS px, every side zero or positive. */
+export type Outsets = Readonly<{ left: number; top: number; right: number; bottom: number }>
+
+const ZERO_OUTSETS: Outsets = Object.freeze({ left: 0, top: 0, right: 0, bottom: 0 })
+
+function isZeroOutsets(outsets: Outsets): boolean {
+	return outsets.left === 0 && outsets.top === 0 && outsets.right === 0 && outsets.bottom === 0
+}
+
+function maxOutsets(a: Outsets, b: Outsets): Outsets {
+	return { left: Math.max(a.left, b.left), top: Math.max(a.top, b.top), right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom) }
+}
+
+/** Replaced elements whose content can leave the box only while their overflow is visible. */
+const CLIPPED_REPLACED_TAGS = new Set(['IMG', 'SVG', 'CANVAS', 'VIDEO', 'IFRAME', 'OBJECT', 'EMBED', 'AUDIO'])
+
+/**
+ * How far an element's own paint can reach beyond its border box, in its local CSS px: its
+ * outline, outer box shadows, border-image outset and, for replaced content, the overflow clip
+ * margin. Undefined when the reach has no provable finite bound or a value is not understood.
+ */
+function ownPaintOutsets(element: Element, style: StyleFacts): Outsets | undefined {
+	let outsets = ZERO_OUTSETS
+	if (CLIPPED_REPLACED_TAGS.has(element.tagName.toUpperCase())) {
+		// Replaced content (an image with `object-position`, say) is unbounded unless clipped.
+		if (style.overflowX === 'visible' || style.overflowY === 'visible') return undefined
+		if (style.overflowX === 'clip' || style.overflowY === 'clip') {
+			const margin = trailingLength(style.overflowClipMargin)
+			if (margin === undefined) return undefined
+			outsets = maxOutsets(outsets, uniformOutsets(margin))
+		}
+	}
+	const shadow = boxShadowOutsets(style.boxShadow)
+	if (!shadow) return undefined
+	outsets = maxOutsets(outsets, shadow)
+	if (style.outlineStyle !== '' && style.outlineStyle !== 'none') {
+		const width = lengthPx(style.outlineWidth)
+		const offset = lengthPx(style.outlineOffset)
+		if (width === undefined || offset === undefined) return undefined
+		// `auto` focus rings are drawn by the engine; take twice the usual ring width as headroom.
+		const reach = style.outlineStyle === 'auto' ? Math.max(0, offset) + 2 * Math.max(width, 3) + 4 : Math.max(0, width + offset)
+		outsets = maxOutsets(outsets, uniformOutsets(reach))
+	}
+	if (style.borderImageSource !== '' && style.borderImageSource !== 'none') {
+		const image = borderImageOutsets(style)
+		if (!image) return undefined
+		outsets = maxOutsets(outsets, image)
+	}
+	return outsets
+}
+
+function uniformOutsets(value: number): Outsets {
+	const side = Math.max(0, value)
+	return { left: side, top: side, right: side, bottom: side }
+}
+
+/** `border-image-outset`: one to four lengths or multiples of the matching border width. */
+function borderImageOutsets(style: StyleFacts): Outsets | undefined {
+	const tokens = style.borderImageOutset.trim().split(/\s+/).filter(Boolean)
+	if (tokens.length < 1 || tokens.length > 4) return undefined
+	const [top, right = top, bottom = top, left = right] = tokens as [string, ...string[]]
+	const side = (token: string, border: string) => {
+		if (/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(token)) return Number(token) * px(border)
+		return lengthPx(token)
+	}
+	const values = [side(top, style.borderTopWidth), side(right!, style.borderRightWidth), side(bottom!, style.borderBottomWidth), side(left!, style.borderLeftWidth)]
+	if (!values.every(value => value !== undefined && Number.isFinite(value))) return undefined
+	const [t, r, b, l] = values as number[]
+	return { left: Math.max(0, l!), top: Math.max(0, t!), right: Math.max(0, r!), bottom: Math.max(0, b!) }
+}
+
+/**
+ * Reach of a computed `box-shadow` list beyond the border box, per side. A blur radius b paints
+ * within 3σ of the shadow edge, where engines take σ ≤ 0.58b + 0.5; 2b + 2 covers it. Inset
+ * shadows paint inside the padding box. Undefined when the value is not understood.
+ */
+export function boxShadowOutsets(value: string): Outsets | undefined {
+	const text = value.trim()
+	if (text === '' || text === 'none') return ZERO_OUTSETS
+	let outsets = ZERO_OUTSETS
+	for (const layer of splitTopLevel(text, ',')) {
+		const tokens = splitTopLevel(layer, ' ')
+		const lengths: number[] = []
+		let inset = false
+		for (const token of tokens) {
+			if (token === 'inset') inset = true
+			else if (isColorToken(token)) continue
+			else {
+				const length = lengthPx(token)
+				if (length === undefined) return undefined
+				lengths.push(length)
+			}
+		}
+		if (lengths.length < 2 || lengths.length > 4) return undefined
+		if (inset) continue
+		const [dx, dy, blur = 0, spread = 0] = lengths as [number, number, number?, number?]
+		const reach = spread + (blur > 0 ? 2 * blur + 2 : 0)
+		outsets = maxOutsets(outsets, {
+			left: Math.max(0, reach - dx),
+			top: Math.max(0, reach - dy),
+			right: Math.max(0, reach + dx),
+			bottom: Math.max(0, reach + dy),
+		})
+	}
+	return outsets
+}
+
+const NON_GEOMETRIC_FILTERS = new Set(['brightness', 'contrast', 'grayscale', 'hue-rotate', 'invert', 'opacity', 'saturate', 'sepia'])
+
+/**
+ * How far a computed `filter` list can move paint, per side. The colour functions keep every
+ * transparent pixel transparent and move nothing. `blur(σ)` and `drop-shadow(… σ)` reach 3σ in
+ * engines; 4σ + 2 covers it, and a drop shadow adds its offset. Any other function, such as an
+ * SVG `url()` filter whose region can be anything, has no bound here: undefined.
+ */
+export function filterOutsets(value: string): Outsets | undefined {
+	const text = value.trim()
+	if (text === '' || text === 'none') return ZERO_OUTSETS
+	let left = 0
+	let top = 0
+	let right = 0
+	let bottom = 0
+	for (const token of splitTopLevel(text, ' ')) {
+		const match = /^([a-z-]+)\((.*)\)$/i.exec(token)
+		if (!match) return undefined
+		const name = match[1]!.toLowerCase()
+		if (NON_GEOMETRIC_FILTERS.has(name)) continue
+		if (name === 'blur') {
+			const sigma = match[2]!.trim() === '' ? 0 : lengthPx(match[2]!.trim())
+			if (sigma === undefined || sigma < 0) return undefined
+			const reach = sigma > 0 ? 4 * sigma + 2 : 0
+			left += reach
+			top += reach
+			right += reach
+			bottom += reach
+			continue
+		}
+		if (name === 'drop-shadow') {
+			const lengths: number[] = []
+			for (const part of splitTopLevel(match[2]!, ' ')) {
+				if (isColorToken(part)) continue
+				const length = lengthPx(part)
+				if (length === undefined) return undefined
+				lengths.push(length)
+			}
+			if (lengths.length < 2 || lengths.length > 3) return undefined
+			const [dx, dy, sigma = 0] = lengths as [number, number, number?]
+			if (sigma < 0) return undefined
+			const reach = sigma > 0 ? 4 * sigma + 2 : 0
+			left += Math.max(0, reach - dx)
+			top += Math.max(0, reach - dy)
+			right += Math.max(0, reach + dx)
+			bottom += Math.max(0, reach + dy)
+			continue
+		}
+		return undefined
+	}
+	return { left, top, right, bottom }
+}
+
+/** Splits at a separator outside parentheses; a space separator also collapses runs of spaces. */
+function splitTopLevel(value: string, separator: ',' | ' '): string[] {
+	const parts: string[] = []
+	let depth = 0
+	let current = ''
+	for (const char of value) {
+		if (char === '(') depth++
+		else if (char === ')') depth = Math.max(0, depth - 1)
+		if (depth === 0 && (separator === ' ' ? /\s/.test(char) : char === separator)) {
+			if (current.trim()) parts.push(current.trim())
+			current = ''
+			continue
+		}
+		current += char
+	}
+	if (current.trim()) parts.push(current.trim())
+	return parts
+}
+
+function isColorToken(token: string): boolean {
+	return /^(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark)\(.*\)$/i.test(token)
+		|| /^(?:transparent|currentcolor|#[0-9a-f]{3,8})$/i.test(token)
+}
+
+/** A computed length in px (`0` allowed), or undefined for anything else. */
+function lengthPx(value: string | undefined): number | undefined {
+	const text = (value ?? '').trim()
+	if (text === '0') return 0
+	const match = /^([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)px$/i.exec(text)
+	return match ? Number(match[1]) : undefined
+}
+
+/** The length at the end of `overflow-clip-margin` (`content-box 10px`, `0px`), 0 for a bare box. */
+function trailingLength(value: string): number | undefined {
+	const tokens = value.trim().split(/\s+/).filter(Boolean)
+	if (tokens.length === 0) return 0
+	const last = tokens[tokens.length - 1]!
+	if (/^(?:content|padding|border)-box$/.test(last)) return 0
+	return lengthPx(last)
 }
 
 function backgroundInset(style: StyleFacts, scale: number): Box {
