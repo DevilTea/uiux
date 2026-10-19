@@ -27,6 +27,9 @@ import { approximateRoundedRectContour, type RoundedRectRadii } from './rounded-
  * - Occluders are elements that paint above the Widget, determined from the CSS painting order
  *   (stacking contexts, z-index, positioned layers, tree order). An undecided order (overlap
  *   between two in-flow boxes, whose backgrounds and inline content interleave) is taken as above.
+ *   An element is examined when its paint extent overlaps the visible area: its border box grown
+ *   by its own outline, outer shadows, border-image outset and replaced-content clip margin and by
+ *   the filter extent of it and every ancestor (Discussion #241 owner decision 2).
  *   - Opaque (subtracted exactly): order proven above, opacity 1 along the chain, an opaque
  *     background colour, no filter, blend mode, mask or clip-path, a uniform transform chain,
  *     square corners where they meet the Widget, painted area clipped by the occluder's own clips.
@@ -35,18 +38,25 @@ import { approximateRoundedRectContour, type RoundedRectRadii } from './rounded-
  *     SVG, canvas, video, frames, native controls), filters, blend modes, masks, clip paths,
  *     rounded opaque corners over the Widget, transforms outside the uniform subset, rounded or
  *     unsupported clips of the occluder, and an undecided paint order. The cut is the occluder's
- *     transformed border box grown by its outline, outer box shadows, border-image outset and
- *     replaced-content clip margin, then by the filter extent of it and every ancestor; clipped
- *     by its clip chain only when no filter grows it and its chain is uniform. Subtracting more
- *     than the occluder paints only shrinks what is reported visible.
+ *     paint extent united with its own text (inline boxes grown by one em of glyph ink, its
+ *     decoration, stroke and text shadows), with the engine's pixel snapping under transforms,
+ *     clipped by its clip chain only when no filter grows it and its chain is uniform, and rounded
+ *     outward to whole device pixels. Outsets scale by the exact uniform chain scale (transforms
+ *     and zoom), otherwise by a bound from the snapped layout size. Subtracting more than the
+ *     occluder paints only shrinks what is reported visible. A bounded cut lying wholly inside the
+ *     visible area would leave only an unreported interior hole, so the Widget gets no precise
+ *     region (Discussion #241 owner decision 1); exact cuts may still leave such holes.
  *   - Unbounded (fail closed): a filter other than the CSS shorthand functions (such as `url()`),
  *     a 3D transform or `-webkit-box-reflect` on the occluder's chain, replaced content whose
- *     overflow is visible, an unparsed shadow, outline or outset, or an outset that a transform
- *     without a measurable box makes unscalable.
+ *     overflow is visible, an unparsed shadow, outline, outset or text style, or an outset that a
+ *     transform without a measurable box makes unscalable.
  *
- * Not modelled (issue #112): generated content (`::before`/`::after`), box shadows and outlines of
- * exact or translucent occluders painted outside their border box, paint of an element whose border
- * box does not overlap the Widget, and text overflowing its box. They are treated as not covering.
+ * Not modelled (issue #112): generated content (`::before`/`::after`, list markers); box shadows,
+ * outlines and overflowing text of exact or translucent occluders; the text of an element whose
+ * paint extent does not reach the Widget; paint without a finite bound of an element whose border
+ * box does not overlap the Widget; glyph ink farther than one em from its inline boxes (such as
+ * stacked combining marks) and decorations propagated from an ancestor. They are treated as not
+ * covering.
  */
 
 export type DomGeometryMeasurerOptions = Readonly<{
@@ -74,9 +84,10 @@ const STYLE_KEYS = [
 	'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor',
 	'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
 	'backgroundColor', 'backgroundImage', 'backgroundClip', 'boxShadow', 'outlineStyle', 'outlineWidth', 'outlineOffset', 'appearance',
-	'borderImageSource', 'borderImageOutset',
+	'borderImageSource', 'borderImageOutset', 'zoom',
+	'textShadow', 'fontSize', 'textDecorationLine', 'textUnderlineOffset', 'textDecorationThickness',
 ] as const
-type StyleKey = typeof STYLE_KEYS[number] | 'webkitMaskImage' | 'webkitAppearance' | 'webkitBoxReflect'
+type StyleKey = typeof STYLE_KEYS[number] | 'webkitMaskImage' | 'webkitAppearance' | 'webkitBoxReflect' | 'webkitTextStrokeWidth'
 type StyleFacts = Readonly<Record<StyleKey, string>>
 
 function snapshotStyle(style: CSSStyleDeclaration): StyleFacts {
@@ -86,6 +97,7 @@ function snapshotStyle(style: CSSStyleDeclaration): StyleFacts {
 	facts.webkitMaskImage = style.getPropertyValue('-webkit-mask-image')
 	facts.webkitAppearance = style.getPropertyValue('-webkit-appearance')
 	facts.webkitBoxReflect = style.getPropertyValue('-webkit-box-reflect')
+	facts.webkitTextStrokeWidth = style.getPropertyValue('-webkit-text-stroke-width')
 	return facts
 }
 
@@ -108,9 +120,12 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	let paintOrders = new Map<Element, Map<Element, 'above' | 'below' | 'unknown'>>()
 	let widgets: Map<string, Element> | undefined
 	let candidateElements: Element[] | undefined
+	let reaches = new Map<Element, boolean>()
+	let filteredChains = new Map<Element, boolean>()
 	// Per-pass caches: layout is read once per element per animation frame.
 	let rects = new Map<Element, DOMRect>()
 	let candidates: { elements: Element[]; boxes: Float64Array } | undefined
+	let paintBounds = new Map<Element, Box | 'unbounded' | 'empty'>()
 	let viewport: Box | undefined
 
 	function rectOf(element: Element): DOMRect {
@@ -150,7 +165,11 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		return viewport
 	}
 
-	/** Every element that can paint over a Widget, with its border box, measured once per pass. */
+	/**
+	 * Every element that can paint over a Widget, with the box it can paint in, measured once per
+	 * pass: its border box, grown by its own outsets and the filter extents of its chain when it has
+	 * any (Discussion #241 owner decision 2). Paint without a finite bound is selected by its border box.
+	 */
 	function candidateBoxes(): { elements: Element[]; boxes: Float64Array } {
 		if (candidates) return candidates
 		if (!candidateElements) {
@@ -166,22 +185,58 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		const elements = candidateElements
 		const boxes = new Float64Array(elements.length * 4)
 		elements.forEach((element, index) => {
-			const rect = rectOf(element)
-			boxes[index * 4] = rect.left
-			boxes[index * 4 + 1] = rect.top
-			boxes[index * 4 + 2] = rect.right
-			boxes[index * 4 + 3] = rect.bottom
+			let box: Box = rectOf(element)
+			if (mayPaintOutside(element)) {
+				const extent = paintExtent(element, false)
+				if (extent !== 'unbounded') box = union(box, extent)
+			}
+			boxes[index * 4] = box.left
+			boxes[index * 4 + 1] = box.top
+			boxes[index * 4 + 2] = box.right
+			boxes[index * 4 + 3] = box.bottom
 		})
 		candidates = { elements, boxes }
 		return candidates
 	}
 
 	/**
+	 * Whether an element's own paint may reach beyond its border box through an outline, an outer
+	 * shadow, a border-image outset, a replaced element's clip margin or a filter on its flat-tree
+	 * chain. A cheap per-style-epoch screen over a few computed values, so that only these elements
+	 * pay for the full paint extent in every pass.
+	 */
+	function mayPaintOutside(element: Element): boolean {
+		let value = reaches.get(element)
+		if (value === undefined) {
+			const style = view.getComputedStyle(element)
+			value = filteredChain(element)
+				|| style.boxShadow !== 'none'
+				|| style.outlineStyle !== 'none'
+				|| style.borderImageSource !== 'none'
+				|| (CLIPPED_REPLACED_TAGS.has(element.tagName.toUpperCase()) && trailingLength(style.overflowClipMargin) !== 0)
+			reaches.set(element, value)
+		}
+		return value
+	}
+
+	function filteredChain(element: Element): boolean {
+		let value = filteredChains.get(element)
+		if (value === undefined) {
+			const filter = view.getComputedStyle(element).filter
+			const parent = flatTreeParent(element)
+			value = (filter !== '' && filter !== 'none') || (!!parent && filteredChain(parent))
+			filteredChains.set(element, value)
+		}
+		return value
+	}
+
+	/**
 	 * `planar`: no 3D transform on the chain, so every transform is 2D affine and an element's
 	 * rendered rect is the bounding box of its transformed border box. `reflect`: a box reflection
-	 * on the chain paints a copy of the element elsewhere.
+	 * on the chain paints a copy of the element elsewhere. `scale`: the uniform chain's scale
+	 * (`uniformScaleOf`), NaN outside the uniform proof. `transformed`: a transform on the chain.
 	 */
-	type ChainFlags = Readonly<{ opacity: number; transformOk: boolean; compositing: boolean; shapeClip: boolean; hidden: boolean; planar: boolean; reflect: boolean }>
+	type ChainFlags = Readonly<{ opacity: number; transformOk: boolean; compositing: boolean; shapeClip: boolean; hidden: boolean; planar: boolean; reflect: boolean; scale: number; transformed: boolean }>
 
 	/** Aggregated style facts of an element and all its flat-tree ancestors. */
 	function chainOf(element: Element): ChainFlags {
@@ -189,26 +244,49 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		if (cached) return cached
 		const style = styleOf(element)
 		const parent = flatTreeParent(element)
-		const inherited: ChainFlags = parent ? chainOf(parent) : { opacity: 1, transformOk: true, compositing: false, shapeClip: false, hidden: false, planar: true, reflect: false }
+		const inherited: ChainFlags = parent ? chainOf(parent) : { opacity: 1, transformOk: true, compositing: false, shapeClip: false, hidden: false, planar: true, reflect: false, scale: 1, transformed: false }
 		const opacity = Number.parseFloat(style.opacity)
+		const transformOk = inherited.transformOk && !(parent && isSvgElement(parent)) && transformIsUniform(style)
 		const flags: ChainFlags = {
 			opacity: inherited.opacity * (Number.isFinite(opacity) ? opacity : 1),
-			transformOk: inherited.transformOk && !(parent && isSvgElement(parent)) && transformIsUniform(style),
+			transformOk,
 			compositing: inherited.compositing || hasCompositing(style),
 			shapeClip: inherited.shapeClip || (style.clipPath !== '' && style.clipPath !== 'none') || hasMask(style),
 			hidden: false,
 			planar: inherited.planar && !hasThreeDTransform(style),
 			reflect: inherited.reflect || (style.webkitBoxReflect !== '' && style.webkitBoxReflect !== 'none'),
+			scale: transformOk ? inherited.scale * uniformFactor(style) : Number.NaN,
+			transformed: inherited.transformed || hasTransform(style),
 		}
 		chainFlags.set(element, flags)
 		return flags
 	}
 
+	/**
+	 * Scale of an element's rendered box over its local CSS px under a uniform chain: the product of
+	 * the chain's transform scales and zoom factors, exact where the pixel-snapped `offsetWidth` and
+	 * `offsetHeight` (each within 1px of the layout size) are not. When that product disagrees with
+	 * the rendered rect (an unmodelled scaling), the rect over the smallest layout size the snapped
+	 * one allows bounds it from above; undefined when no bound is provable.
+	 */
+	function uniformScaleOf(element: Element): number | undefined {
+		const scale = chainOf(element).scale
+		if (!(scale > 0) || !Number.isFinite(scale)) return undefined
+		const html = element as HTMLElement
+		if (typeof html.offsetWidth !== 'number' || typeof html.offsetHeight !== 'number') return scale
+		const rect = rectOf(element)
+		const agrees = (rendered: number, snapped: number) => Math.abs(rendered - scale * snapped) <= scale + 1e-3
+		if (agrees(rect.width, html.offsetWidth) && agrees(rect.height, html.offsetHeight)) return scale
+		const bound = Math.max(rect.width / (html.offsetWidth - 1), rect.height / (html.offsetHeight - 1))
+		return html.offsetWidth > 1 && html.offsetHeight > 1 && Number.isFinite(bound) ? bound : undefined
+	}
+
 	/** Scale of an element's rendered box over its layout box (uniform under the transform proof). */
 	function scaleOf(element: Element): number {
+		const scale = uniformScaleOf(element)
+		if (scale !== undefined) return scale
 		const html = element as HTMLElement
-		const rect = rectOf(element)
-		return typeof html.offsetWidth === 'number' && html.offsetWidth > 0 ? rect.width / html.offsetWidth : 1
+		return typeof html.offsetWidth === 'number' && html.offsetWidth > 0 ? rectOf(element).width / html.offsetWidth : 1
 	}
 
 	function radiiOf(element: Element, rect: WidgetRect): RoundedRectRadii | undefined {
@@ -232,20 +310,32 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		return Object.values(radii).some(radius => radius.rx > 0) ? radii : undefined
 	}
 
-	/** The padding box of an overflow clip, its inner radii applying when the clip is rounded. */
-	function clipShapeOf(element: Element): Readonly<{ box: Box; rounded?: RoundedShape }> {
+	/**
+	 * The padding box of an overflow clip, its inner radii applying when the clip is rounded.
+	 * `outward` measures it from the exact border box and border widths instead of the integer
+	 * `clientLeft`/`clientWidth` (each within 1px of the layout values), scrollbars included, so that
+	 * it never under-covers the clip.
+	 */
+	function clipShapeOf(element: Element, outward = false): Readonly<{ box: Box; rounded?: RoundedShape }> {
 		const style = styleOf(element)
 		const rect = rectOf(element)
 		const scale = scaleOf(element)
 		const html = element as HTMLElement
 		const left = rect.left + (html.clientLeft ?? 0) * scale
 		const top = rect.top + (html.clientTop ?? 0) * scale
-		const box = {
-			left,
-			top,
-			right: left + (html.clientWidth ?? rect.width) * scale,
-			bottom: top + (html.clientHeight ?? rect.height) * scale,
-		}
+		const box = outward
+			? {
+					left: rect.left + px(style.borderLeftWidth) * scale,
+					top: rect.top + px(style.borderTopWidth) * scale,
+					right: rect.right - px(style.borderRightWidth) * scale,
+					bottom: rect.bottom - px(style.borderBottomWidth) * scale,
+				}
+			: {
+					left,
+					top,
+					right: left + (html.clientWidth ?? rect.width) * scale,
+					bottom: top + (html.clientHeight ?? rect.height) * scale,
+				}
 		const outer = radiiOf(element, { x: rect.left, y: rect.top, width: rect.width, height: rect.height })
 		if (!outer) return { box }
 		const bl = px(style.borderLeftWidth) * scale
@@ -273,7 +363,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	 * Absolutely positioned boxes escape overflow clips below their containing block; fixed boxes
 	 * escape every clip below an ancestor that contains fixed descendants.
 	 */
-	function clipChainOf(element: Element): ClipChain {
+	function clipChainOf(element: Element, outward = false): ClipChain {
 		let box = viewportBox()
 		const rounded: RoundedShape[] = []
 		let mode = positionMode(styleOf(element))
@@ -289,7 +379,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 			const clipY = style.overflowY !== 'visible' || containsPaint(style)
 			if (clipX || clipY) {
 				if ((style.overflowX === 'clip' || style.overflowY === 'clip') && px(style.overflowClipMargin) !== 0) return 'unsupported'
-				const shape = clipShapeOf(ancestor)
+				const shape = clipShapeOf(ancestor, outward)
 				box = {
 					left: clipX ? Math.max(box.left, shape.box.left) : box.left,
 					top: clipY ? Math.max(box.top, shape.box.top) : box.top,
@@ -347,6 +437,13 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 			return [Object.freeze({ regionId: 'r0', maxError: approximated.maxError, contour: Object.freeze({ commands: Object.freeze(polygonCommands(polygon)) }) })]
 		}
 
+		// A bounded cut lying wholly inside the visible area would leave only an interior hole, which
+		// is never reported (Rule 01a11687-3037): no precise region (Discussion #241 owner decision 1).
+		for (const cut of plan.subtract) {
+			if (cut.kind !== 'paint-bound') continue
+			const { x, y, width, height } = cut.shape
+			if (x > visible.left && y > visible.top && x + width < visible.right && y + height < visible.bottom) return []
+		}
 		const contours = subtractAxisAlignedRectangularOcclusion(rectOfBox(visible), plan.subtract.map(item => item.shape))
 		if (!contours) return []
 		return contours.map((contour, index) => Object.freeze({ regionId: `r${index}`, maxError: 0, contour }))
@@ -409,26 +506,70 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		const bound = paintBound(candidate)
 		if (bound === 'unbounded') return 'unsupported'
 		if (bound === 'empty') return undefined
-		return { classification: 'bounded', targetContribution: 'unproven', bound: { kind: 'paint-bound', shape: rectOfBox(bound) } }
+		// Rasterization covers every device pixel the paint touches, antialiased edges included.
+		const ratio = view.devicePixelRatio > 0 ? view.devicePixelRatio : 1
+		const outward = {
+			left: Math.floor(bound.left * ratio) / ratio,
+			top: Math.floor(bound.top * ratio) / ratio,
+			right: Math.ceil(bound.right * ratio) / ratio,
+			bottom: Math.ceil(bound.bottom * ratio) / ratio,
+		}
+		return { classification: 'bounded', targetContribution: 'unproven', bound: { kind: 'paint-bound', shape: rectOfBox(outward) } }
 	}
 
 	/**
 	 * An over-approximation of everything the element itself paints (its children are candidates of
-	 * their own), in inner CSS px: the rendered rect, which under a 2D affine chain bounds the
-	 * transformed border box, grown by the element's own outsets and then by the extent of every
-	 * filter on its flat-tree chain. A clip only removes paint, so the clip chain is applied only
-	 * when no filter grows the paint after it and the chain's clip boxes are exact (uniform chain).
+	 * their own), in inner CSS px: the paint extent with its own text (see `paintExtent`), cut by its
+	 * clip chain. A clip only removes paint, so the clip chain is applied only when no filter grows
+	 * the paint after it and the chain's clip boxes are exact (uniform chain); each clip box is first
+	 * grown by the rounding of the integer client sizes it is measured from.
 	 */
 	function paintBound(element: Element): Box | 'unbounded' | 'empty' {
+		let bound = paintBounds.get(element)
+		if (bound === undefined) {
+			const extent = paintExtent(element, true)
+			bound = extent
+			if (extent !== 'unbounded' && !extent.filtered && chainOf(element).transformOk) {
+				const clips = clipChainOf(element, true)
+				bound = clips === 'unsupported' ? extent : intersect(extent, clips.box) ?? 'empty'
+			}
+			paintBounds.set(element, bound)
+		}
+		return bound
+	}
+
+	/**
+	 * The element's own paint grown as far as it can reach, in inner CSS px: the rendered rect, which
+	 * under a 2D affine chain bounds the transformed border box, grown by the element's own outsets,
+	 * united with its own text (when `text` is set), then grown by the extent of every filter on its
+	 * flat-tree chain. `unbounded` when no finite bound is provable.
+	 */
+	function paintExtent(element: Element, text: boolean): (Box & { filtered: boolean }) | 'unbounded' {
 		const chain = chainOf(element)
 		if (!chain.planar || chain.reflect) return 'unbounded'
-		const own = ownPaintOutsets(element, styleOf(element))
-		if (!own) return 'unbounded'
+		const style = styleOf(element)
+		const outsets = ownPaintOutsets(element, style)
+		if (!outsets) return 'unbounded'
+		// Inside a transformed space the engine snaps box paint and paint offsets to whole pixels of
+		// that space, each moving an edge by up to half a local pixel: one local CSS px covers both.
+		// The offset of each transformed element is snapped in its parent's space (see below).
+		const own = chain.transformed ? { left: outsets.left + 1, top: outsets.top + 1, right: outsets.right + 1, bottom: outsets.bottom + 1 } : outsets
 		const rect = rectOf(element)
 		let box: Box | undefined = growBox({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }, element, own)
+		if (box && text) {
+			const glyphs = ownTextBound(element, style)
+			if (glyphs === 'unbounded') return 'unbounded'
+			if (glyphs) box = union(box, glyphs)
+		}
 		let filtered = false
 		for (let node: Element | null = element; node && box; node = flatTreeParent(node)) {
-			const filter = styleOf(node).filter
+			const nodeStyle = styleOf(node)
+			if (hasTransform(nodeStyle)) {
+				const parent = flatTreeParent(node)
+				box = parent ? growBox(box, parent, HALF_PIXEL) : { left: box.left - 0.5, top: box.top - 0.5, right: box.right + 0.5, bottom: box.bottom + 0.5 }
+				if (!box) break
+			}
+			const filter = nodeStyle.filter
 			if (filter === '' || filter === 'none') continue
 			const extent = filterOutsets(filter)
 			if (!extent) return 'unbounded'
@@ -437,30 +578,63 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 			box = growBox(box, node, extent)
 		}
 		if (!box || ![box.left, box.top, box.right, box.bottom].every(Number.isFinite)) return 'unbounded'
-		if (filtered || !chain.transformOk) return box
-		const clips = clipChainOf(element)
-		if (clips === 'unsupported') return box
-		return intersect(box, clips.box) ?? 'empty'
+		return { ...box, filtered }
+	}
+
+	/**
+	 * The client box of the element's own text nodes, grown by how far their glyphs, decorations,
+	 * strokes and text shadows can paint beyond the text's inline boxes; undefined without rendered
+	 * text. Glyph ink is taken to stay within one em of the inline boxes, a decoration within its
+	 * offset plus its thickness (one em when automatic) beyond that.
+	 */
+	function ownTextBound(element: Element, style: StyleFacts): Box | undefined | 'unbounded' {
+		let box: Box | undefined
+		for (const node of Array.from(element.childNodes)) {
+			if (node.nodeType !== 3 || !node.textContent) continue
+			const range = doc.createRange()
+			range.selectNodeContents(node)
+			const rect = range.getBoundingClientRect()
+			if (!(rect.width > 0) && !(rect.height > 0)) continue
+			box = box ? union(box, rect) : { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }
+		}
+		if (!box) return undefined
+		const shadow = shadowOutsets(style.textShadow, false)
+		const em = lengthPx(style.fontSize)
+		const stroke = style.webkitTextStrokeWidth === '' ? 0 : lengthPx(style.webkitTextStrokeWidth)
+		if (!shadow || em === undefined || stroke === undefined) return 'unbounded'
+		let decoration = 0
+		if (style.textDecorationLine !== '' && style.textDecorationLine !== 'none') {
+			const offset = style.textUnderlineOffset === 'auto' || style.textUnderlineOffset === '' ? 0 : lengthPx(style.textUnderlineOffset)
+			const thickness = /^(?:auto|from-font)?$/.test(style.textDecorationThickness) ? em : lengthPx(style.textDecorationThickness)
+			if (offset === undefined || thickness === undefined) return 'unbounded'
+			decoration = Math.abs(offset) + Math.abs(thickness)
+		}
+		const reach = em + Math.abs(stroke) + decoration
+		const grown = growBox(box, element, { left: reach + shadow.left, top: reach + shadow.top, right: reach + shadow.right, bottom: reach + shadow.bottom })
+		return grown ?? 'unbounded'
 	}
 
 	/**
 	 * Grows a client box by outsets given in the element's local CSS px. Under a uniform chain each
-	 * side scales by the element's scale. Under any other 2D affine chain the rendered rect W × H of
-	 * the local border box w × h gives |a| ≤ W/w and |c| ≤ W/h for the linear part [[a, c], [b, d]],
-	 * so an outset e grows x by at most e(W/w + W/h) on each side, and y likewise with H.
+	 * side scales by the element's scale (`uniformScaleOf`). Under any other 2D affine chain the
+	 * rendered rect W × H of the local border box w × h gives |a| ≤ W/w and |c| ≤ W/h for the linear
+	 * part [[a, c], [b, d]], so an outset e grows x by at most e(W/w + W/h) on each side, and y
+	 * likewise with H. The layout size is known only through the pixel-snapped `offsetWidth` and
+	 * `offsetHeight`, each within 1px of it, so w > offsetWidth - 1; a snapped size of 1px or less
+	 * leaves the growth unbounded (undefined).
 	 */
 	function growBox(box: Box, element: Element, outsets: Outsets): Box | undefined {
 		if (isZeroOutsets(outsets)) return box
-		const html = element as HTMLElement
-		const width = typeof html.offsetWidth === 'number' ? html.offsetWidth : 0
-		const height = typeof html.offsetHeight === 'number' ? html.offsetHeight : 0
-		const rect = rectOf(element)
 		if (chainOf(element).transformOk) {
-			const scale = Math.max(width > 0 ? rect.width / width : 0, height > 0 ? rect.height / height : 0)
-			if (!(scale > 0)) return undefined
+			const scale = uniformScaleOf(element)
+			if (scale === undefined) return undefined
 			return { left: box.left - outsets.left * scale, top: box.top - outsets.top * scale, right: box.right + outsets.right * scale, bottom: box.bottom + outsets.bottom * scale }
 		}
+		const html = element as HTMLElement
+		const width = typeof html.offsetWidth === 'number' ? html.offsetWidth - 1 : 0
+		const height = typeof html.offsetHeight === 'number' ? html.offsetHeight - 1 : 0
 		if (!(width > 0) || !(height > 0)) return undefined
+		const rect = rectOf(element)
 		const extent = Math.max(outsets.left, outsets.top, outsets.right, outsets.bottom)
 		const x = extent * (rect.width / width + rect.width / height)
 		const y = extent * (rect.height / width + rect.height / height)
@@ -592,6 +766,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 
 	function resetPass(): void {
 		rects = new Map()
+		paintBounds = new Map()
 		candidates = undefined
 		viewport = undefined
 	}
@@ -608,6 +783,8 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 			paintOrders = new Map()
 			widgets = undefined
 			candidateElements = undefined
+			reaches = new Map()
+			filteredChains = new Map()
 		},
 	})
 }
@@ -676,8 +853,21 @@ function transformIsUniform(style: StyleFacts): boolean {
 	return Math.abs(a! - d!) <= UNIFORM_SCALE_TOLERANCE * Math.max(a!, d!)
 }
 
+/**
+ * The scale an element applies to its subtree under the uniform proof: its zoom times the scale
+ * of its own `transform` and `scale`. NaN when a value is not understood.
+ */
+function uniformFactor(style: StyleFacts): number {
+	const zoom = style.zoom === '' || style.zoom === 'normal' ? 1 : Number(style.zoom)
+	let factor = zoom > 0 ? zoom : Number.NaN
+	if (style.scale !== undefined && style.scale !== '' && style.scale !== 'none') factor *= Number(style.scale.trim().split(/\s+/)[0])
+	const transform = style.transform?.trim()
+	if (transform && transform !== 'none') factor *= Number(/^matrix\(([^,)]*)/.exec(transform)?.[1])
+	return factor
+}
+
 /** Whether the element's own transform leaves the plane (any 3D transform function or component). */
-function hasThreeDTransform(style: StyleFacts): boolean {
+export function hasThreeDTransform(style: Readonly<Record<'transform' | 'translate' | 'scale' | 'rotate', string>>): boolean {
 	if (/^matrix3d\(/.test(style.transform?.trim() ?? '')) return true
 	const parts = (value: string | undefined) => (value ?? '').trim().split(/\s+/).filter(Boolean)
 	if (style.translate && style.translate !== 'none' && parts(style.translate).length > 2) return true
@@ -690,6 +880,7 @@ function hasThreeDTransform(style: StyleFacts): boolean {
 export type Outsets = Readonly<{ left: number; top: number; right: number; bottom: number }>
 
 const ZERO_OUTSETS: Outsets = Object.freeze({ left: 0, top: 0, right: 0, bottom: 0 })
+const HALF_PIXEL: Outsets = Object.freeze({ left: 0.5, top: 0.5, right: 0.5, bottom: 0.5 })
 
 function isZeroOutsets(outsets: Outsets): boolean {
 	return outsets.left === 0 && outsets.top === 0 && outsets.right === 0 && outsets.bottom === 0
@@ -743,7 +934,7 @@ function uniformOutsets(value: number): Outsets {
 }
 
 /** `border-image-outset`: one to four lengths or multiples of the matching border width. */
-function borderImageOutsets(style: StyleFacts): Outsets | undefined {
+export function borderImageOutsets(style: Readonly<Record<'borderImageOutset' | 'borderTopWidth' | 'borderRightWidth' | 'borderBottomWidth' | 'borderLeftWidth', string>>): Outsets | undefined {
 	const tokens = style.borderImageOutset.trim().split(/\s+/).filter(Boolean)
 	if (tokens.length < 1 || tokens.length > 4) return undefined
 	const [top, right = top, bottom = top, left = right] = tokens as [string, ...string[]]
@@ -763,6 +954,18 @@ function borderImageOutsets(style: StyleFacts): Outsets | undefined {
  * shadows paint inside the padding box. Undefined when the value is not understood.
  */
 export function boxShadowOutsets(value: string): Outsets | undefined {
+	return shadowOutsets(value, true)
+}
+
+/**
+ * Reach of a computed `text-shadow` list beyond the text's glyphs, per side: offsets and blur as
+ * for box shadows, without spread or inset. Undefined when the value is not understood.
+ */
+export function textShadowOutsets(value: string): Outsets | undefined {
+	return shadowOutsets(value, false)
+}
+
+function shadowOutsets(value: string, box: boolean): Outsets | undefined {
 	const text = value.trim()
 	if (text === '' || text === 'none') return ZERO_OUTSETS
 	let outsets = ZERO_OUTSETS
@@ -771,7 +974,7 @@ export function boxShadowOutsets(value: string): Outsets | undefined {
 		const lengths: number[] = []
 		let inset = false
 		for (const token of tokens) {
-			if (token === 'inset') inset = true
+			if (token === 'inset' && box) inset = true
 			else if (isColorToken(token)) continue
 			else {
 				const length = lengthPx(token)
@@ -779,7 +982,7 @@ export function boxShadowOutsets(value: string): Outsets | undefined {
 				lengths.push(length)
 			}
 		}
-		if (lengths.length < 2 || lengths.length > 4) return undefined
+		if (lengths.length < 2 || lengths.length > (box ? 4 : 3)) return undefined
 		if (inset) continue
 		const [dx, dy, blur = 0, spread = 0] = lengths as [number, number, number?, number?]
 		const reach = spread + (blur > 0 ? 2 * blur + 2 : 0)
@@ -879,7 +1082,7 @@ function lengthPx(value: string | undefined): number | undefined {
 }
 
 /** The length at the end of `overflow-clip-margin` (`content-box 10px`, `0px`), 0 for a bare box. */
-function trailingLength(value: string): number | undefined {
+export function trailingLength(value: string): number | undefined {
 	const tokens = value.trim().split(/\s+/).filter(Boolean)
 	if (tokens.length === 0) return 0
 	const last = tokens[tokens.length - 1]!
@@ -942,6 +1145,10 @@ function boxOfRect(rect: WidgetRect): Box {
 
 function rectOfBox(box: Box): WidgetRect {
 	return { x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top }
+}
+
+function union(a: Box, b: Box): Box {
+	return { left: Math.min(a.left, b.left), top: Math.min(a.top, b.top), right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom) }
 }
 
 function intersect(a: Box, b: Box): Box | undefined {

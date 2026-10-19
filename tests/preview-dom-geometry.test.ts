@@ -1,8 +1,8 @@
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { chromium, type Browser, type Page } from 'playwright'
-import { boxShadowOutsets, filterOutsets } from '../src/preview/dom-geometry'
+import { borderImageOutsets, boxShadowOutsets, filterOutsets, hasThreeDTransform, textShadowOutsets, trailingLength } from '../src/preview/dom-geometry'
 import type { WidgetGeometry } from '../src/preview/geometry-producer'
 import { validateGeometryMessage } from '../src/preview/protocol/schema'
 
@@ -26,6 +26,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	await browser?.close()
+})
+
+afterEach(async () => {
+	await page?.setViewportSize({ width: 800, height: 600 })
 })
 
 async function measure(body: string, widgetIds: readonly string[], scroll = 0): Promise<Record<string, WidgetGeometry>> {
@@ -69,12 +73,15 @@ function area(geometry: WidgetGeometry): number {
 }
 
 /**
- * Counts the screenshot pixels inside the given boxes whose colour is not the Widget's `#eee`,
- * that is, paint that a reported visible region wrongly includes.
+ * Counts, per Widget, the screenshot pixels whose centre lies inside one of its reported region
+ * polygons (so notches and holes count) and whose colour is not the Widget's `#eee`, that is,
+ * paint that a reported visible region wrongly includes. The page is rendered at device pixel
+ * ratio 1, so a CSS pixel is a screenshot pixel.
  */
-async function foreignPixels(boxes: readonly Box[]): Promise<number> {
-	const png = (await page.screenshot({ type: 'png' })).toString('base64')
-	return page.evaluate(async ({ png, boxes }) => {
+async function foreignPixels(geometries: Readonly<Record<string, WidgetGeometry>>): Promise<Record<string, number>> {
+	const png = (await page.screenshot({ type: 'png', fullPage: true })).toString('base64')
+	const polygons = Object.fromEntries(Object.entries(geometries).map(([id, geometry]) => [id, geometry.regions.map(region => region.contour.commands.flatMap(command => 'x' in command ? [[command.x, command.y] as const] : []))]))
+	return page.evaluate(async ({ png, polygons }) => {
 		const image = new Image()
 		image.src = `data:image/png;base64,${png}`
 		await image.decode()
@@ -84,17 +91,44 @@ async function foreignPixels(boxes: readonly Box[]): Promise<number> {
 		const context = canvas.getContext('2d')!
 		context.drawImage(image, 0, 0)
 		const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
-		let count = 0
-		for (const box of boxes) {
-			for (let y = Math.ceil(box.top); y < Math.floor(box.bottom); y++) {
-				for (let x = Math.ceil(box.left); x < Math.floor(box.right); x++) {
-					const index = (y * canvas.width + x) * 4
-					if (pixels[index] !== 238 || pixels[index + 1] !== 238 || pixels[index + 2] !== 238) count++
+		const inside = (polygon: ReadonlyArray<readonly [number, number]>, px: number, py: number) => {
+			let odd = false
+			for (let a = 0, b = polygon.length - 1; a < polygon.length; b = a++) {
+				const [xa, ya] = polygon[a]!
+				const [xb, yb] = polygon[b]!
+				if ((ya > py) !== (yb > py) && px < (xb - xa) * (py - ya) / (yb - ya) + xa) odd = !odd
+			}
+			return odd
+		}
+		return Object.fromEntries(Object.entries(polygons).map(([id, regions]) => {
+			let count = 0
+			for (const polygon of regions) {
+				const xs = polygon.map(([x]) => x)
+				const ys = polygon.map(([, y]) => y)
+				for (let y = Math.max(0, Math.floor(Math.min(...ys))); y < Math.min(canvas.height, Math.ceil(Math.max(...ys))); y++) {
+					for (let x = Math.max(0, Math.floor(Math.min(...xs))); x < Math.min(canvas.width, Math.ceil(Math.max(...xs))); x++) {
+						if (!inside(polygon, x + 0.5, y + 0.5)) continue
+						const index = (y * canvas.width + x) * 4
+						if (pixels[index] !== 238 || pixels[index + 1] !== 238 || pixels[index + 2] !== 238) count++
+					}
 				}
 			}
-		}
-		return count
-	}, { png, boxes })
+			return [id, count]
+		}))
+	}, { png, polygons })
+}
+
+/**
+ * Asserts that a Widget's reported area lost at least the occluder's rendered rect and at most
+ * that rect grown by `slack` px: a bounded cut adds pixel snapping and outward rounding to it.
+ */
+function expectCut(geometry: WidgetGeometry, occluder: Box, slack: number, label: string): void {
+	const { x, y, width, height } = geometry.rect
+	const widget = { left: x, top: y, right: x + width, bottom: y + height }
+	const grown = { left: occluder.left - slack, top: occluder.top - slack, right: occluder.right + slack, bottom: occluder.bottom + slack }
+	expect(geometry.regions.length, label).toBeGreaterThan(0)
+	expect(area(geometry), label).toBeLessThanOrEqual(width * height - overlapArea(occluder, widget) + 1e-6)
+	expect(area(geometry), label).toBeGreaterThanOrEqual(width * height - overlapArea(grown, widget) - 1e-6)
 }
 
 /** Test cells 400px apart in two columns and 170px apart in rows, so no cell's paint reaches another. */
@@ -108,6 +142,21 @@ function cellPair(id: string, occluder: string, index: number): string {
 	return `
 		<div data-widget-id="${id}" style="position:absolute;left:${left}px;top:${top}px;width:300px;height:100px;background:#eee"></div>
 		${occluder.replace('LEFT', String(left + 100)).replace('TOP', String(top))}`
+}
+
+/**
+ * Measures one Widget per case, laid out as `cellPair` does with every `LEFT`/`TOP` replaced, on a
+ * viewport tall enough for all rows (restored after each test).
+ */
+async function measureGrid(cases: ReadonlyArray<readonly [string, string]>): Promise<Record<string, WidgetGeometry>> {
+	await page.setViewportSize({ width: 800, height: Math.max(600, Math.ceil(cases.length / 2) * 170) })
+	const body = cases.map(([id, occluder], index) => {
+		const { left, top } = cell(index)
+		return `
+		<div data-widget-id="${id}" style="position:absolute;left:${left}px;top:${top}px;width:300px;height:100px;background:#eee"></div>
+		${occluder.replaceAll('LEFT', String(left + 100)).replaceAll('TOP', String(top))}`
+	}).join('')
+	return measure(body, cases.map(([id]) => id))
 }
 
 function overlapArea(a: Box, b: Box): number {
@@ -291,7 +340,7 @@ describe('Runtime DOM measurer', () => {
 		expect(pieces('image-shadow')).toEqual([[0, 79], [191, 300]])
 		expect(pieces('image-outline')).toEqual([[0, 94], [156, 300]])
 		// Over-approximation, checked against the rendering: no reported pixel shows occluder paint.
-		for (const [id] of occluders) expect(await foreignPixels(bounds(result[id]!)), id).toBe(0)
+		for (const [id, count] of Object.entries(await foreignPixels(result))) expect(count, id).toBe(0)
 	})
 
 	it('still fails closed for occluder paint without a finite bound', async () => {
@@ -300,6 +349,7 @@ describe('Runtime DOM measurer', () => {
 			['image-overflow', '<img alt="" style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;overflow:visible;object-fit:none">'],
 			['three-d', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;transform:rotateX(30deg);background:rgb(0,0,0)"></div>'],
 			['reflection', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;-webkit-box-reflect:right 0px;background:rgb(0,0,0)"></div>'],
+			['ancestor-reflection', '<div style="position:absolute;left:LEFTpx;top:TOPpx;-webkit-box-reflect:right 0px"><div style="width:50px;height:100px;background:rgb(0,0,0)"></div></div>'],
 		] as const
 		const body = `<svg width="0" height="0" style="position:absolute"><filter id="flood" x="-10" y="-10" width="20" height="20"><feFlood flood-color="black"></feFlood></filter></svg>` + occluders.map(([id, html], index) => cellPair(id, html, index)).join('')
 		const result = await measure(body, occluders.map(([id]) => id))
@@ -307,6 +357,108 @@ describe('Runtime DOM measurer', () => {
 			expect(result[id]!.rect.width, id).toBeGreaterThan(0)
 			expect(result[id]!.regions, id).toEqual([])
 		}
+	})
+
+	it('keeps every pixel an occluder paints out of the regions when its size is fractional (#259 review)', async () => {
+		// The snapped offsetWidth (10.5px → 11px) once gave a scale below 1 and shrank each outset.
+		const result = await measureGrid([
+			['outline-10.5', '<img alt="" style="position:absolute;left:LEFTpx;top:TOPpx;width:10.5px;height:10.5px;outline:40px solid rgb(0,0,0)">'],
+			['outline-1.5', '<img alt="" style="position:absolute;left:LEFTpx;top:TOPpx;width:1.5px;height:1.5px;outline:40px solid rgb(0,0,0)">'],
+			['spread-2.5', '<img alt="" style="position:absolute;left:calc(LEFTpx + 0.4px);top:TOPpx;width:2.5px;height:2.5px;box-shadow:0 0 0 40px rgb(0,0,0)">'],
+			['scaled-ancestor', '<div style="position:absolute;left:LEFTpx;top:TOPpx;transform-origin:0 0;transform:scale(1.5)"><img alt="" style="display:block;width:6.5px;height:6.5px;outline:20px solid rgb(0,0,0)"></div>'],
+			['zoomed-ancestor', '<div style="position:absolute;left:LEFTpx;top:TOPpx;zoom:2"><img alt="" style="display:block;width:6.5px;height:6.5px;outline:15px solid rgb(0,0,0)"></div>'],
+		])
+		for (const [id, count] of Object.entries(await foreignPixels(result))) {
+			expect(result[id]!.regions.length, id).toBeGreaterThan(0)
+			expect(count, id).toBe(0)
+		}
+	})
+
+	it('cuts a bounded occluder\'s own text with its overflow, text shadow and decoration (#259 review)', async () => {
+		const text = 'mix-blend-mode:multiply;font:30px/40px sans-serif;color:rgb(0,0,0)'
+		const result = await measureGrid([
+			['text-shadow', `<div style="position:absolute;left:LEFTpx;top:TOPpx;width:40px;height:40px;${text};text-shadow:60px 20px 0 rgb(0,0,0)">M</div>`],
+			['text-overflow', `<div style="position:absolute;left:LEFTpx;top:TOPpx;width:20px;height:40px;${text};white-space:nowrap">MMMMMM</div>`],
+			['underline', `<div style="position:absolute;left:LEFTpx;top:TOPpx;width:40px;height:40px;${text};text-decoration:underline 6px;text-underline-offset:30px">M</div>`],
+		])
+		for (const [id, count] of Object.entries(await foreignPixels(result))) {
+			expect(result[id]!.regions.length, id).toBeGreaterThan(0)
+			expect(count, id).toBe(0)
+		}
+	})
+
+	it('fails closed when a bounded cut would only leave an interior hole, and keeps exact cuts as they are', async () => {
+		// Discussion #241 owner decision 1: interior holes are never reported (Rule 01a11687-3037).
+		const inner = 'position:absolute;left:calc(LEFTpx + 20px);top:calc(TOPpx + 30px);width:40px;height:40px;background:rgb(0,0,0)'
+		const result = await measureGrid([
+			['bounded-hole', `<img alt="" style="${inner}">`],
+			['exact-hole', `<div style="${inner}"></div>`],
+			['bounded-notch', '<img alt="" style="position:absolute;left:LEFTpx;top:calc(TOPpx + 30px);width:40px;height:70px;background:rgb(0,0,0)">'],
+		])
+		expect(result['bounded-hole']!.rect.width).toBe(300)
+		expect(result['bounded-hole']!.regions).toEqual([])
+		expect(area(result['exact-hole']!)).toBe(300 * 100)
+		expect(area(result['bounded-notch']!)).toBe(300 * 100 - 40 * 70)
+	})
+
+	it('selects occluders by their paint extent, not only their border box (Discussion #241 owner decision 2)', async () => {
+		const result = await measureGrid([
+			['nearby-blur', '<div style="position:absolute;left:LEFTpx;top:calc(TOPpx + 104px);width:50px;height:30px;filter:blur(4px);background:rgb(0,0,0)"></div>'],
+			['child-outside', '<div style="position:absolute;left:LEFTpx;top:calc(TOPpx + 60px);width:30px;height:40px;filter:blur(3px);background:rgb(0,0,0)"><div style="position:absolute;left:60px;top:44px;width:40px;height:20px;background:rgb(0,0,0)"></div></div>'],
+			['nearby-shadow', '<img alt="" style="position:absolute;left:LEFTpx;top:calc(TOPpx + 104px);width:50px;height:30px;box-shadow:0 -20px 0 rgb(0,0,0)">'],
+			['nearby-outline', '<img alt="" style="position:absolute;left:LEFTpx;top:calc(TOPpx + 104px);width:50px;height:30px;outline:10px solid rgb(0,0,0)">'],
+		])
+		for (const [id, count] of Object.entries(await foreignPixels(result))) {
+			expect(result[id]!.regions.length, id).toBeGreaterThan(0)
+			expect(count, id).toBe(0)
+		}
+	})
+
+	it('rounds a bounded cut outward to whole device pixels, antialiased edges included', async () => {
+		const result = await measureGrid([0.3, 0.45, 0.6, 0.85].map(fraction => [`rotated-${fraction}`, `<div style="position:absolute;left:calc(LEFTpx + ${fraction}px);top:calc(TOPpx + ${70 + fraction}px);width:50px;height:20px;transform:rotate(30deg);background:rgb(0,0,0)"></div>`] as const))
+		for (const [id, geometry] of Object.entries(result)) {
+			for (const point of geometry.regions.flatMap(region => region.contour.commands.flatMap(command => 'x' in command ? [command] : []))) {
+				expect(Number.isInteger(point.x) && Number.isInteger(point.y), id).toBe(true)
+			}
+		}
+		for (const [id, count] of Object.entries(await foreignPixels(result))) expect(count, id).toBe(0)
+	})
+
+	it('grows a bound under rotation, skew and scale, and by border-image outsets, outline offsets and clip margins', async () => {
+		const image = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200"/></svg>')}`
+		const result = await measureGrid([
+			['rotated-outline', '<div style="position:absolute;left:LEFTpx;top:calc(TOPpx + 20px);width:50px;height:20px;transform:rotate(30deg);outline:15px solid rgb(0,0,0);background:rgb(0,0,0)"></div>'],
+			['skewed-shadow', '<div style="position:absolute;left:LEFTpx;top:calc(TOPpx + 20px);width:50px;height:20px;transform:skewX(40deg) scale(1.5, 0.5);box-shadow:20px 10px 6px 8px rgb(0,0,0);background:rgb(0,0,0)"></div>'],
+			['border-image', '<div style="position:absolute;left:LEFTpx;top:calc(TOPpx - 20px);width:40px;height:40px;mix-blend-mode:multiply;border:10px solid;border-image:linear-gradient(black,black) 10 / 10px / 25px stretch"></div>'],
+			['outline-negative', '<img alt="" style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;outline:6px solid rgb(0,0,0);outline-offset:-3px">'],
+			['outline-auto', '<img alt="" style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;outline:auto 2px rgb(0,0,0);outline-offset:4px">'],
+			['scaled-blur', '<div style="position:absolute;left:LEFTpx;top:TOPpx;transform-origin:0 0;transform:scale(2)"><div style="width:25px;height:50px;filter:blur(4px);background:rgb(0,0,0)"></div></div>'],
+			['drop-shadow', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:30px;height:30px;filter:drop-shadow(rgb(0,0,0) 40px 50px 10px);background:rgb(0,0,0)"></div>'],
+			['clip-margin', `<img alt="" src="${image}" style="position:absolute;left:LEFTpx;top:TOPpx;width:40px;height:40px;object-fit:none;object-position:0 0;overflow:clip;overflow-clip-margin:content-box 20px">`],
+			['clipped', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:30px;height:100px;overflow:hidden"><img alt="" style="display:block;width:80px;height:100px;background:rgb(0,0,0)"></div>'],
+		])
+		for (const [id, count] of Object.entries(await foreignPixels(result))) {
+			expect(result[id]!.regions.length, id).toBeGreaterThan(0)
+			expect(count, id).toBe(0)
+		}
+		const piece = (id: string) => {
+			const { x } = result[id]!.rect
+			return bounds(result[id]!).sort((a, b) => a.left - b.left).map(box => [box.left - x, box.right - x])
+		}
+		// Outline 6px at offset -3px reaches 3px out; the clip margin reaches 20px; the clip keeps 30px.
+		expect(piece('outline-negative')).toEqual([[0, 97], [153, 300]])
+		expect(bounds(result['clip-margin']!)).toHaveLength(1)
+		expect(area(result['clip-margin']!)).toBe(300 * 100 - 80 * 60)
+		expect(piece('clipped')).toEqual([[0, 100], [130, 300]])
+	})
+
+	it('keeps an undecided in-flow overlap that paints translucently', async () => {
+		const result = await measure(`
+			<div style="position:absolute;left:0;top:0;width:300px">
+				<div data-widget-id="flow" style="height:50px;background:#eee"></div>
+				<div style="margin-top:-20px;height:50px;background:rgba(0,0,0,0.5)"></div>
+			</div>`, ['flow'])
+		expect(bounds(result.flow!)).toEqual([{ left: 0, top: 0, right: 300, bottom: 50, maxError: 0 }])
 	})
 
 	it('fails closed for every adversarial transform family on the Widget and cuts an occluder by its transformed box', async () => {
@@ -317,14 +469,14 @@ describe('Runtime DOM measurer', () => {
 		const ids = ADVERSARIAL.flatMap(([id]) => [`own-${id}`, `under-${id}`])
 		const result = await measure(body, ids)
 		const occluders = await probes()
-		ADVERSARIAL.forEach(([id], index) => {
+		for (const [id] of ADVERSARIAL) {
 			expect(result[`own-${id}`]!.rect.width, id).toBeGreaterThan(0)
 			expect(result[`own-${id}`]!.regions, id).toEqual([])
 			// The occluder straddles the Widget's right edge, so its cut is a notch, never a hole.
-			const widget = { left: 400, top: index * 90, right: 600, bottom: index * 90 + 60 }
-			expect(result[`under-${id}`]!.regions.length, id).toBeGreaterThan(0)
-			expect(area(result[`under-${id}`]!), id).toBeCloseTo(200 * 60 - overlapArea(occluders[id]!, widget), 3)
-		})
+			expectCut(result[`under-${id}`]!, occluders[id]!, 6, id)
+		}
+		const counts = await foreignPixels(Object.fromEntries(ADVERSARIAL.map(([id]) => [id, result[`under-${id}`]!])))
+		for (const [id, count] of Object.entries(counts)) expect(count, id).toBe(0)
 	})
 
 	it('follows the flat tree into the shadow tree a Widget is slotted into', async () => {
@@ -358,11 +510,9 @@ describe('Runtime DOM measurer', () => {
 		const body = ADVERSARIAL.map(([id, transform], index) => pair(index, transform, id)).join('') + pair(ADVERSARIAL.length, 'none', 'control')
 		const result = await measure(body, [...ADVERSARIAL.map(([id]) => id), 'control'])
 		const occluders = await probes()
-		for (const [id] of ADVERSARIAL) {
-			const { x, y, width, height } = result[id]!.rect
-			expect(result[id]!.regions.length, id).toBeGreaterThan(0)
-			expect(area(result[id]!), id).toBeCloseTo(width * height - overlapArea(occluders[id]!, { left: x, top: y, right: x + width, bottom: y + height }), 3)
-		}
+		for (const [id] of ADVERSARIAL) expectCut(result[id]!, occluders[id]!, 6, id)
+		const counts = await foreignPixels(Object.fromEntries(ADVERSARIAL.map(([id]) => [id, result[id]!])))
+		for (const [id, count] of Object.entries(counts)) expect(count, id).toBe(0)
 		// The same occluder without a shadow-tree transform is proven opaque and subtracted.
 		const { x, y } = result.control!.rect
 		expect(bounds(result.control!)).toEqual([{ left: x, top: y, right: x + 100, bottom: y + 100, maxError: 0 }])
@@ -394,5 +544,48 @@ describe('Occluder paint reach (computed values)', () => {
 		expect(filterOutsets('blur(2px) url("#flood")')).toBeUndefined()
 		expect(filterOutsets('blur(1em)')).toBeUndefined()
 		expect(boxShadowOutsets('rgb(0, 0, 0) 1em 0px')).toBeUndefined()
+	})
+
+	it('bounds text shadows like box shadows, without spread or inset', () => {
+		expect(textShadowOutsets('none')).toEqual({ left: 0, top: 0, right: 0, bottom: 0 })
+		expect(textShadowOutsets('rgb(0, 0, 0) 60px 20px 0px')).toEqual({ left: 0, top: 0, right: 60, bottom: 20 })
+		expect(textShadowOutsets('rgb(0, 0, 0) 0px 0px 3px, rgb(255, 0, 0) -4px 0px 0px')).toEqual({ left: 8, top: 8, right: 8, bottom: 8 })
+		expect(textShadowOutsets('rgb(0, 0, 0) 1px 1px 1px 1px')).toBeUndefined()
+		expect(textShadowOutsets('rgb(0, 0, 0) 1px 1px inset')).toBeUndefined()
+	})
+
+	it('reads border-image outsets as lengths or multiples of the matching border width', () => {
+		const borders = { borderTopWidth: '10px', borderRightWidth: '4px', borderBottomWidth: '6px', borderLeftWidth: '8px' }
+		expect(borderImageOutsets({ ...borders, borderImageOutset: '0' })).toEqual({ left: 0, top: 0, right: 0, bottom: 0 })
+		expect(borderImageOutsets({ ...borders, borderImageOutset: '25px' })).toEqual({ left: 25, top: 25, right: 25, bottom: 25 })
+		expect(borderImageOutsets({ ...borders, borderImageOutset: '1 2' })).toEqual({ left: 16, top: 10, right: 8, bottom: 6 })
+		expect(borderImageOutsets({ ...borders, borderImageOutset: '5px 1.5 0px 2px' })).toEqual({ left: 2, top: 5, right: 6, bottom: 0 })
+		expect(borderImageOutsets({ ...borders, borderImageOutset: '1em' })).toBeUndefined()
+		expect(borderImageOutsets({ ...borders, borderImageOutset: '1 2 3 4 5' })).toBeUndefined()
+	})
+
+	it('tells 3D transforms from planar ones in computed transform, translate, scale and rotate', () => {
+		const none = { transform: 'none', translate: 'none', scale: 'none', rotate: 'none' }
+		expect(hasThreeDTransform(none)).toBe(false)
+		expect(hasThreeDTransform({ ...none, transform: 'matrix(1, 0, 0, 1, 10, 0)' })).toBe(false)
+		expect(hasThreeDTransform({ ...none, transform: 'matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)' })).toBe(true)
+		expect(hasThreeDTransform({ ...none, translate: '10px 20px' })).toBe(false)
+		expect(hasThreeDTransform({ ...none, translate: '10px 20px 5px' })).toBe(true)
+		expect(hasThreeDTransform({ ...none, scale: '2 2' })).toBe(false)
+		expect(hasThreeDTransform({ ...none, scale: '1 1 2' })).toBe(true)
+		expect(hasThreeDTransform({ ...none, rotate: '30deg' })).toBe(false)
+		expect(hasThreeDTransform({ ...none, rotate: 'z 30deg' })).toBe(false)
+		expect(hasThreeDTransform({ ...none, rotate: '0 0 1 30deg' })).toBe(false)
+		expect(hasThreeDTransform({ ...none, rotate: 'x 30deg' })).toBe(true)
+		expect(hasThreeDTransform({ ...none, rotate: '1 0 0 30deg' })).toBe(true)
+	})
+
+	it('reads the length at the end of overflow-clip-margin', () => {
+		expect(trailingLength('')).toBe(0)
+		expect(trailingLength('0px')).toBe(0)
+		expect(trailingLength('content-box')).toBe(0)
+		expect(trailingLength('10px')).toBe(10)
+		expect(trailingLength('padding-box 2.5px')).toBe(2.5)
+		expect(trailingLength('1em')).toBeUndefined()
 	})
 })
