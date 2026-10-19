@@ -35,6 +35,17 @@ export type UpdateViewStructureCommand = Readonly<{
 	variants: ViewResource['variants']
 }>
 
+/**
+ * The View metadata operation (Clause 01a15379-d8f7-7c0c-9b9a-05c07c64cc85): `name` and `feature`
+ * only, at least one of them. An omitted member keeps its value; `feature: null` removes the tag.
+ */
+export type UpdateViewMetadataCommand = Readonly<{
+	key: string
+	expectedRevision: string
+	name?: string
+	feature?: string | null
+}>
+
 export type ViewAuthoringResult =
 	| Readonly<{ status: 'created' | 'updated'; key: string; revision: ResourceRevision; diagnostics: readonly Diagnostic[] }>
 	| Readonly<{ status: 'already_exists'; key: string; currentRevision?: ResourceRevision }>
@@ -47,6 +58,7 @@ export type ViewAuthoringService = Readonly<{
 	createView(command: CreateViewCommand): Promise<ViewAuthoringResult>
 	updateViewSpec(command: UpdateViewSpecCommand): Promise<ViewAuthoringResult>
 	updateViewStructure(command: UpdateViewStructureCommand): Promise<ViewAuthoringResult>
+	updateViewMetadata(command: UpdateViewMetadataCommand): Promise<ViewAuthoringResult>
 }>
 
 export function createViewAuthoringService(persistence: FileNativePersistence): ViewAuthoringService {
@@ -144,7 +156,60 @@ export function createViewAuthoringService(persistence: FileNativePersistence): 
 		return { status: 'updated', key: command.key, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
 	}
 
-	return { createView, updateViewSpec, updateViewStructure }
+	/**
+	 * Clause 01a15379-d8f7-7c0c-9b9a-05c07c64cc85: changes only `name` (stored trimmed) and `feature`
+	 * (`null` removes it), with the same revision check, validation and result as the other View
+	 * writes. The edit lease is checked by the scoped session before this runs.
+	 */
+	async function updateViewMetadata(command: UpdateViewMetadataCommand): Promise<ViewAuthoringResult> {
+		if (!isFullUuid(command.key))
+			return {
+				status: 'invalid',
+				key: command.key,
+				diagnostics: [{ code: 'identity.invalid_uuid', path: '/viewId', message: 'View id must be a full UUID.' }],
+			}
+		const expectedRevision = validateResourceRevision(command.expectedRevision, '/expectedRevision')
+		if (!expectedRevision.ok)
+			return { status: 'invalid_expected_revision', key: command.key, diagnostics: expectedRevision.diagnostics }
+		if (command.name === undefined && command.feature === undefined)
+			return {
+				status: 'invalid',
+				key: command.key,
+				diagnostics: [{ code: 'schema.required_field', path: '/name', message: 'Give at least one of name and feature.' }],
+			}
+		const current = await persistence.views.read(command.key)
+		if (!current) return { status: 'not_found', key: command.key }
+		if (current.revision !== expectedRevision.value)
+			return { status: 'conflict', key: command.key, currentRevision: current.revision }
+
+		const { feature: currentFeature, ...rest } = current.resource
+		const feature = command.feature === undefined ? currentFeature : command.feature
+		const next: ViewResource = {
+			...rest,
+			name: command.name === undefined ? current.resource.name : trimmed(command.name),
+			...(feature === null || feature === undefined ? {} : { feature }),
+		}
+		const validation = validateViewResource(next)
+		if (!validation.ok)
+			return { status: 'invalid', key: command.key, diagnostics: validation.diagnostics }
+
+		const commit = await persistence.views.compareAndSwap({
+			key: command.key,
+			expectedRevision: expectedRevision.value,
+			resource: next,
+		})
+		if (!commit.ok)
+			return { status: 'conflict', key: command.key, currentRevision: commit.conflict.currentRevision }
+		const inspected = await persistence.views.readInspected(command.key)
+		return { status: 'updated', key: command.key, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
+	}
+
+	return { createView, updateViewSpec, updateViewStructure, updateViewMetadata }
+}
+
+/** A non-string is passed through so the View validator reports it. */
+function trimmed(value: string): string {
+	return typeof value === 'string' ? value.trim() : value
 }
 
 function withPreservedDecisions(content: ViewSpecContent, decisions: ViewSpec['decisions']): ViewSpec {

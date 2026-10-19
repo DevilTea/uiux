@@ -22,6 +22,7 @@ import { isValidPointResourceAddress, type PointResourceKind } from '../dto/poin
 import {
 	createViewAuthoringService,
 	type CreateViewCommand,
+	type UpdateViewMetadataCommand,
 	type UpdateViewSpecCommand,
 	type UpdateViewStructureCommand,
 	type ViewAuthoringResult,
@@ -151,6 +152,7 @@ export interface WorkspaceApplicationSession {
 	createView(command: CreateViewCommand): Promise<ViewAuthoringResult>
 	updateViewSpec(command: UpdateViewSpecCommand): Promise<ViewAuthoringResult>
 	updateViewStructure(command: UpdateViewStructureCommand): Promise<ViewAuthoringResult>
+	updateViewMetadata(command: UpdateViewMetadataCommand): Promise<ViewAuthoringResult>
 	updateWorkspaceSettings<R = never>(command: UpdateWorkspaceSettingsCommand, guard?: WorkspaceSettingsGuard<R>): Promise<WorkspaceAuthoringResult | R>
 	readProductKit(): Promise<ProductKitRead | undefined>
 	composeProductKit<R = never>(command: ComposeProductKitCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
@@ -372,6 +374,7 @@ export function createWorkspaceApplicationSession(
 		createView: viewAuthoring.createView,
 		updateViewSpec: viewAuthoring.updateViewSpec,
 		updateViewStructure: viewAuthoring.updateViewStructure,
+		updateViewMetadata: viewAuthoring.updateViewMetadata,
 		updateWorkspaceSettings: workspaceAuthoring.updateWorkspaceSettings,
 		readProductKit: productKitAuthoring.readProductKit,
 		composeProductKit: productKitAuthoring.composeProductKit,

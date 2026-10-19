@@ -46,6 +46,7 @@ export const HISTORY_WRITE_OPERATIONS = Object.freeze([
 	'createView',
 	'updateViewSpec',
 	'updateViewStructure',
+	'updateViewMetadata',
 	'updateWorkspaceSettings',
 	'composeProductKit',
 	'updateProductKit',

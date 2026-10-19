@@ -80,6 +80,12 @@ const updateViewStructureHttpSchema = z.object({
 	variants: z.record(z.string(), z.unknown()),
 }).strict()
 
+const updateViewMetadataHttpSchema = z.object({
+	expectedRevision: z.string(),
+	name: z.string().optional(),
+	feature: z.string().nullable().optional(),
+}).strict()
+
 const updateWorkspaceSettingsHttpSchema = z.object({
 	expectedRevision: z.string(),
 	settings: z.object({
@@ -387,6 +393,20 @@ export async function updateViewStructureForHttp(app: ScopedWorkspaceSession, vi
 		expectedRevision: data.expectedRevision,
 		ir: data.ir as JsonValue,
 		variants: data.variants as Record<string, VariantEntry>,
+	})
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
+}
+
+/** `PUT /api/views/:id/metadata` (Clause 01a15379-d8f7-7c0c-9b9a-05c07c64cc85): `update_view_metadata` over HTTP. */
+export async function updateViewMetadataForHttp(app: ScopedWorkspaceSession, viewId: string, body: unknown): Promise<AuthoringHttpResult> {
+	const parsed = parseHttpPayload(updateViewMetadataHttpSchema, body)
+	if (!parsed.ok) return parsed.result
+	const data = parsed.data
+	const result = await app.updateViewMetadata({
+		key: viewId,
+		expectedRevision: data.expectedRevision,
+		...(data.name === undefined ? {} : { name: data.name }),
+		...(data.feature === undefined ? {} : { feature: data.feature }),
 	})
 	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }

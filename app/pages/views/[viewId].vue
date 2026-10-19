@@ -11,7 +11,7 @@ import { parseThread, parseViewPanel, parseViewRouteContext, sameQuery, viewQuer
 import { parseHistoryAddress, type HistoryAddress } from '../../utils/version-history'
 import PreviewCanvas from '../../components/workbench/PreviewCanvas.vue'
 import ViewRightPanel from '../../components/workbench/ViewRightPanel.vue'
-import LockBadge from '../../components/workbench/LockBadge.vue'
+import ViewHeader from '../../components/workbench/ViewHeader.vue'
 import { provideCanvasComments } from '../../composables/useCanvasComments'
 import CommentsTab from '../../components/workbench/comments/CommentsTab.vue'
 import SpecDocument from '../../components/workbench/SpecDocument.vue'
@@ -223,9 +223,7 @@ onBeforeUnmount(() => {
         :aria-label="selectedView?.resource.name || t('workbench.canvas.label')"
         data-view-phone
       >
-        <h1 class="sr-only">
-          {{ selectedView?.resource.name || t('workbench.canvas.label') }}
-        </h1>
+        <ViewHeader :view-id="viewId" />
         <UTabs
           v-model="phoneTabModel"
           :items="phoneTabs"
@@ -274,15 +272,8 @@ onBeforeUnmount(() => {
           class="flex min-h-0 flex-1 flex-col"
           :aria-label="selectedView ? t('workbench.canvas.iframeTitle', { name: selectedView.resource.name }) : t('workbench.canvas.label')"
         >
-          <!-- The page heading for assistive tech; the View name is visible in the sidebar and breadcrumb. -->
-          <h1 class="sr-only">
-            {{ selectedView?.resource.name || t('workbench.canvas.label') }}
-          </h1>
-          <LockBadge
-            kind="view"
-            :resource-key="viewId"
-            class="justify-center border-b border-default bg-default px-3 py-1.5"
-          />
+          <!-- The page heading, the feature tag, the edit lease badge and the in-place rename. -->
+          <ViewHeader :view-id="viewId" />
           <VersionCanvas
             v-if="canvasComparison"
             :view-id="viewId"

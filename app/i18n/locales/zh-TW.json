@@ -1008,6 +1008,24 @@
       "relationPlaceholder": "例如「design」"
     }
   },
+  "viewHeader": {
+    "edit": "重新命名或變更功能標籤",
+    "editNamed": "重新命名 {name} 或變更其功能標籤",
+    "lockedHint": "其他人正在編輯這個 View。",
+    "name": "名稱",
+    "feature": "功能",
+    "featureHelp": "留空即可移除功能標籤。",
+    "featurePlaceholder": "沒有功能標籤",
+    "noFeature": "沒有功能標籤",
+    "nameRequired": "請輸入名稱。",
+    "saved": "已儲存 View 的名稱與功能標籤。",
+    "saveFailed": "無法儲存 View 的名稱與功能標籤。",
+    "invalidTitle": "名稱與功能標籤未儲存：",
+    "conflict": "你開始編輯後，這個 View 已有變更。",
+    "conflictBody": "目前儲存的是 {name}（{feature}）。你的草稿已保留，沒有覆寫任何內容。",
+    "keepMine": "繼續編輯我的版本",
+    "discardMine": "捨棄我的版本"
+  },
   "settings": {
     "title": "Workspace 設定",
     "general": "一般",
@@ -2584,6 +2602,7 @@
       "createView": "建立了 View",
       "updateViewSpec": "編輯了 Spec",
       "updateViewStructure": "編輯了結構",
+      "updateViewMetadata": "編輯了名稱或功能標籤",
       "updateWorkspaceSettings": "編輯了 Workspace 設定",
       "createLocale": "建立了 Locale",
       "updateLocale": "編輯了 Locale",
