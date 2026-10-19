@@ -190,7 +190,7 @@ export async function buildWorkspacePreviewBundle(input: Readonly<{
 		for (const style of styles) await assertReadable(style, 'style')
 		const startedAt = Date.now()
 		const built = await buildBundle({ ...input, packageRoot, entrySource, browserRuntimePath })
-		const inputs = await readBundleGraph(built.metafile, built.workingDir, browserRuntimePath, startedAt)
+		const inputs = await readBundleGraph(built.metafile, built.workingDir, browserRuntimePath, startedAt, Date.now())
 		const hash = contentHash(key, inputs.inputs)
 		remember(graphCache, key, { hash, inputs: inputs.inputs, racy: inputs.racy })
 		return built.finish(hash)
@@ -247,11 +247,12 @@ async function graphUnchanged(graph: BundleGraph): Promise<boolean> {
  * every input the generated entry reaches through them (modules, stylesheets, fonts and images,
  * however deep), sorted by path, with its stat and its digest. The UIUX browser runtime the entry
  * imports and the host packages the bundle aliases (`PREVIEW_HOST_PACKAGES`) are not followed; they
- * are UIUX's own files. `racy` when an input's modification time lies within `RACY_WINDOW_MS` of the build's start (an edit during or just
- * before the build, or just after it for a skewed clock) or the input could not be read again. A far-future
- * time is not racy: the next build starts later, so a racy graph is rebuilt once, not on every request.
+ * are UIUX's own files. `racy` when an input's modification time lies between `RACY_WINDOW_MS` before the build's start and `RACY_WINDOW_MS`
+ * after `digestTime` (when the build had finished and the graph is recorded), or the input could not be read again:
+ * an edit during the build has a time up to `digestTime`, and esbuild may have read other bytes than the digest. A
+ * far-future time (clock skew) is not racy: a racy graph is rebuilt once, not on every request. Exported for tests.
  */
-async function readBundleGraph(metafile: esbuild.Metafile, workingDir: string, browserRuntimePath: string, startedAt: number): Promise<{ inputs: GraphInput[]; racy: boolean }> {
+export async function readBundleGraph(metafile: esbuild.Metafile, workingDir: string, browserRuntimePath: string, startedAt: number, digestTime: number): Promise<{ inputs: GraphInput[]; racy: boolean }> {
 	const hostPackages = new Set<string>(PREVIEW_HOST_PACKAGES)
 	const reached = new Set<string>()
 	const pending = ['<stdin>']
@@ -272,7 +273,7 @@ async function readBundleGraph(metafile: esbuild.Metafile, workingDir: string, b
 		try {
 			const before = await stat(path)
 			const digest = sha256(await readFile(path))
-			if (Math.abs(before.mtimeMs - startedAt) <= RACY_WINDOW_MS) racy = true
+			if (before.mtimeMs >= startedAt - RACY_WINDOW_MS && before.mtimeMs <= digestTime + RACY_WINDOW_MS) racy = true
 			inputs.push({ path, size: before.size, mtimeMs: before.mtimeMs, digest })
 		}
 		catch {

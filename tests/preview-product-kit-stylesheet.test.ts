@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { Window } from 'happy-dom'
 
 import { getSelectedWorkspacePreviewBundle } from '../src/server/workspace-adapters'
-import { clearPreviewBundleCache, PREVIEW_BUNDLE_STYLESHEET, previewRuntimeFileUrl } from '../src/server/preview-bundler'
+import { clearPreviewBundleCache, PREVIEW_BUNDLE_STYLESHEET, previewRuntimeFileUrl, readBundleGraph } from '../src/server/preview-bundler'
 import { readPreviewRuntimeFile } from '../src/server/preview-runtime-http'
 import type { PreviewRuntimeBridge, PreviewRuntimeMountOptions, PreviewRuntimeStatus } from '../src/preview/browser-runtime'
 import type { ViewResource } from '../src/domain/views/schema'
@@ -392,6 +392,29 @@ describe('Preview bundle cache', () => {
 		const third = await validBundle(root)
 		expect(again.hash).toBe(first.hash)
 		expect(third.files).toBe(again.files)
+	})
+
+	it('marks a graph racy for an edit during a long build, and not for a far-future modification time', async () => {
+		const dir = await mkdtemp(join(tmpdir(), 'uiux-racy-'))
+		try {
+			const file = join(dir, 'a.css')
+			await writeFile(file, 'a{}')
+			const metafile = { inputs: { '<stdin>': { bytes: 0, imports: [{ path: 'a.css', kind: 'import-statement' }] }, 'a.css': { bytes: 3, imports: [] } }, outputs: {} } as never
+			const startedAt = Date.now()
+			const racy = async (mtimeMs: number, digestTime: number): Promise<boolean> => {
+				await utimes(file, new Date(mtimeMs), new Date(mtimeMs))
+				return (await readBundleGraph(metafile, dir, '', startedAt, digestTime)).racy
+			}
+			// Edited 2 s after the build started, in a build that took 10 s: racy.
+			expect(await racy(startedAt + 2000, startedAt + 10_000)).toBe(true)
+			// Far in the future, beyond the end of the build: not racy.
+			expect(await racy(startedAt + 60_000, startedAt + 10_000)).toBe(false)
+			// Long before the build: not racy.
+			expect(await racy(startedAt - 60_000, startedAt + 10_000)).toBe(false)
+		}
+		finally {
+			await rm(dir, { recursive: true, force: true })
+		}
 	})
 
 	it('leaves the host packages it aliases to UIUX\'s own copies out of the graph', async () => {
