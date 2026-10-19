@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
+import { bearer, provisionToken, sessionCookieFor } from './support/access'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
@@ -128,6 +129,7 @@ describe('View rename in the View page header (Rule 01a1537a-333f)', () => {
 	it('keeps the draft on a revision conflict and saves it only when asked again', async () => {
 		const { context, page } = await open('desktop')
 		try {
+			const currentName = (await readView()).resource.name
 			await startRename(page)
 			let writes = 0
 			await page.route('**/api/views/*/metadata', async (route) => {
@@ -147,7 +149,7 @@ describe('View rename in the View page header (Rule 01a1537a-333f)', () => {
 			await alert.waitFor()
 			expect(await alert.textContent()).toContain('The View changed since you started editing.')
 			expect(await header.getByRole('textbox', { name: 'Name' }).inputValue()).toBe('Renamed after a conflict')
-			expect((await readView()).resource.name).toBe('Workspace browser (phone)')
+			expect((await readView()).resource.name).toBe(currentName)
 			expect(writes).toBe(1)
 
 			await alert.getByRole('button', { name: 'Keep editing mine' }).click()
@@ -155,6 +157,66 @@ describe('View rename in the View page header (Rule 01a1537a-333f)', () => {
 			await header.getByRole('button', { name: 'Save' }).click()
 			await poll(async () => (await readView()).resource.name).toBe('Renamed after a conflict')
 			expect(writes).toBe(2)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('shows the lease holder and a visible reason when another member holds the View, and names it on a 423', async () => {
+		const agent = await provisionToken(server.workspaceRoot, { nickname: 'lease-agent', kind: 'agent', preset: 'editor' })
+		const agentWrite = async (name: string) => {
+			const view = await readView()
+			const response = await fetch(`${server.origin}/api/views/${VIEW_ID}/metadata`, {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json', ...bearer(agent) },
+				body: JSON.stringify({ expectedRevision: view.revision, name }),
+			})
+			expect(response.status, await response.clone().text()).toBe(200)
+		}
+		const { context, page } = await open('desktop')
+		try {
+			await startRename(page)
+			const header = page.locator('[data-view-header]')
+			// The agent takes the lease while the save is on its way: the save is refused as 423 and the draft kept.
+			let tripped = false
+			await page.route('**/api/views/*/metadata', async (route) => {
+				if (!tripped) {
+					tripped = true
+					await agentWrite('Agent rename')
+				}
+				await route.continue()
+			})
+			await header.getByRole('textbox', { name: 'Name' }).fill('Human rename')
+			await header.getByRole('button', { name: 'Save' }).click()
+			await poll(() => page.locator('[data-view-header] [role="alert"]').count()).toBeGreaterThan(0)
+			expect(await header.getByRole('textbox', { name: 'Name' }).inputValue()).toBe('Human rename')
+			// The lease shows in the editing form, Save is disabled and the reason is visible text.
+			await header.locator('[data-testid="lock-badge"]').waitFor({ timeout: 15_000 })
+			expect(await header.locator('[data-testid="lock-badge"]').innerText()).toContain('lease-agent')
+			await header.locator('[data-view-locked-hint]').waitFor()
+			expect(await header.locator('[data-view-locked-hint]').innerText()).toBe('Someone else is editing this View.')
+			expect(await header.locator('[data-view-metadata-save]').isDisabled()).toBe(true)
+			expect((await readView()).resource.name).toBe('Agent rename')
+			await header.getByRole('button', { name: 'Cancel' }).click()
+			// Outside the form the rename button is disabled while the lease lasts.
+			expect(await header.locator('[data-view-rename]').isDisabled()).toBe(true)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('hides the rename button from a member without views.write', async () => {
+		const cookie = await sessionCookieFor(server.origin, await provisionToken(server.workspaceRoot, { nickname: 'viewer-only', kind: 'human', keys: ['workspace.read'] }))
+		const context = await browser.newContext({ viewport: SIZES.desktop, colorScheme: 'light' })
+		await context.addInitScript(() => {
+			localStorage.setItem('nuxt-color-mode', 'light')
+			localStorage.setItem('uiux.workbench.locale', 'en-US')
+		})
+		await context.addCookies([{ ...cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
+		try {
+			const page = await context.newPage()
+			await page.goto(`${server.origin}/views/${VIEW_ID}`, { waitUntil: 'networkidle' })
+			const header = page.locator('[data-view-header]')
+			await header.locator('[data-view-name]').waitFor({ timeout: 20_000 })
+			expect(await header.locator('[data-view-rename]').count()).toBe(0)
 		}
 		finally { await context.close() }
 	}, 90_000)

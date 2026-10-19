@@ -1023,7 +1023,8 @@
     "invalidTitle": "The name and feature tag weren't saved:",
     "conflict": "The View changed since you started editing.",
     "conflictBody": "It's now saved as {name} ({feature}). Your draft is kept. Nothing was overwritten.",
-    "keepMine": "Keep editing mine"
+    "keepMine": "Keep editing mine",
+    "discardMine": "Discard mine"
   },
   "settings": {
     "title": "Workspace settings",

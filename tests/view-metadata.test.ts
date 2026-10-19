@@ -207,6 +207,7 @@ describe('update_view_metadata over MCP', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_
 		const read = await ctx.app.readVersion(autosave!.id)
 		if (read.status !== 'found' || read.version.type === 'checkpoint') throw new Error(JSON.stringify(read))
 		expect(read.version.events.map(event => [event.operation, event.source, event.resource.key])).toEqual([['updateViewMetadata', 'mcp', VIEW_ID]])
+		expect(read.version.events[0]!.actor).toEqual({ type: 'agent', id: `member:${AGENT.memberId}`, displayName: 'claude' })
 	})
 
 	it('refuses a stale revision as conflict carrying the current revision, and the name is unchanged (Scenario 01a1537a-6135)', async () => {

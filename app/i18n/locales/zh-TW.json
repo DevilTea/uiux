@@ -1023,7 +1023,8 @@
     "invalidTitle": "名稱與功能標籤未儲存：",
     "conflict": "你開始編輯後，這個 View 已有變更。",
     "conflictBody": "目前儲存的是 {name}（{feature}）。你的草稿已保留，沒有覆寫任何內容。",
-    "keepMine": "繼續編輯我的版本"
+    "keepMine": "繼續編輯我的版本",
+    "discardMine": "捨棄我的版本"
   },
   "settings": {
     "title": "Workspace 設定",

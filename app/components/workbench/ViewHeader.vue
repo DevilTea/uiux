@@ -55,7 +55,7 @@ function onKeydown(event: KeyboardEvent): void {
 
 const conflictActions = computed(() => [
 	{ label: t('viewHeader.keepMine'), color: 'warning' as const, variant: 'outline' as const, size: 'sm' as const, disabled: !conflict.value?.latest, onClick: () => { void editor.keepMine() } },
-	{ label: t('spec.discardMine'), color: 'neutral' as const, variant: 'outline' as const, size: 'sm' as const, onClick: () => { void editor.discardMine().then(() => focus('[data-view-rename]')) } },
+	{ label: t('viewHeader.discardMine'), color: 'neutral' as const, variant: 'outline' as const, size: 'sm' as const, onClick: () => { void editor.discardMine().then(() => focus('[data-view-rename]')) } },
 ])
 </script>
 
@@ -94,17 +94,24 @@ const conflictActions = computed(() => [
         v-if="canRename"
         :text="heldByOther ? t('viewHeader.lockedHint') : t('viewHeader.edit')"
       >
-        <UButton
-          color="neutral"
-          variant="ghost"
-          size="xs"
-          icon="i-lucide-pencil"
-          class="pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:justify-center"
-          :aria-label="t('viewHeader.editNamed', { name })"
-          :disabled="heldByOther"
-          data-view-rename
-          @click="start"
-        />
+        <span
+          class="inline-flex"
+          :tabindex="heldByOther ? 0 : undefined"
+          :aria-label="heldByOther ? t('viewHeader.lockedHint') : undefined"
+          data-view-rename-wrap
+        >
+          <UButton
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            icon="i-lucide-pencil"
+            class="pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:justify-center"
+            :aria-label="t('viewHeader.editNamed', { name })"
+            :disabled="heldByOther"
+            data-view-rename
+            @click="start"
+          />
+        </span>
       </UTooltip>
       <LockBadge
         kind="view"
@@ -172,6 +179,15 @@ const conflictActions = computed(() => [
             data-view-metadata-cancel
             @click="cancel"
           />
+          <LockBadge
+            kind="view"
+            :resource-key="viewId"
+          />
+          <span
+            v-if="heldByOther"
+            class="text-sm text-muted"
+            data-view-locked-hint
+          >{{ t('viewHeader.lockedHint') }}</span>
         </div>
       </UForm>
 
