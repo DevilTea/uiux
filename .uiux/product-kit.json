@@ -1,1 +1,1 @@
-{"adapters":[{"moduleSpecifier":"./adapters/reference.ts"}],"components":{},"designSystems":[],"styles":[],"themes":{},"widgets":{}}
+{"adapters":[{"moduleSpecifier":"./adapters/reference.ts"}],"components":{},"designSystems":[],"styles":["./adapters/reference.css"],"themes":{},"widgets":{}}
