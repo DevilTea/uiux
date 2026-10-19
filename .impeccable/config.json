@@ -6,5 +6,20 @@
       "maxFindings": 5,
       "maxChars": 8000
     }
+  },
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "tests/preview-dom-geometry.test.ts"
+        ],
+        "createdAt": "2026-10-19T09:19:20.704Z",
+        "reason": "Agent: deliberate src-less <img> geometry fixtures in a test file (PR #259), not shipped UI"
+      }
+    ]
   }
 }
