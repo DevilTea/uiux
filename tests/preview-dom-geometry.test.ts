@@ -75,13 +75,13 @@ function area(geometry: WidgetGeometry): number {
 /**
  * Counts, per Widget, the screenshot pixels whose centre lies inside one of its reported region
  * polygons (so notches and holes count) and whose colour is not the Widget's `#eee`, that is,
- * paint that a reported visible region wrongly includes. The page is rendered at device pixel
- * ratio 1, so a CSS pixel is a screenshot pixel.
+ * paint that a reported visible region wrongly includes. A screenshot pixel is a device pixel, so
+ * `ratio` is the page's device pixel ratio.
  */
-async function foreignPixels(geometries: Readonly<Record<string, WidgetGeometry>>): Promise<Record<string, number>> {
+async function foreignPixels(geometries: Readonly<Record<string, WidgetGeometry>>, ratio = 1): Promise<Record<string, number>> {
 	const png = (await page.screenshot({ type: 'png', fullPage: true })).toString('base64')
 	const polygons = Object.fromEntries(Object.entries(geometries).map(([id, geometry]) => [id, geometry.regions.map(region => region.contour.commands.flatMap(command => 'x' in command ? [[command.x, command.y] as const] : []))]))
-	return page.evaluate(async ({ png, polygons }) => {
+	return page.evaluate(async ({ png, polygons, ratio }) => {
 		const image = new Image()
 		image.src = `data:image/png;base64,${png}`
 		await image.decode()
@@ -105,9 +105,9 @@ async function foreignPixels(geometries: Readonly<Record<string, WidgetGeometry>
 			for (const polygon of regions) {
 				const xs = polygon.map(([x]) => x)
 				const ys = polygon.map(([, y]) => y)
-				for (let y = Math.max(0, Math.floor(Math.min(...ys))); y < Math.min(canvas.height, Math.ceil(Math.max(...ys))); y++) {
-					for (let x = Math.max(0, Math.floor(Math.min(...xs))); x < Math.min(canvas.width, Math.ceil(Math.max(...xs))); x++) {
-						if (!inside(polygon, x + 0.5, y + 0.5)) continue
+				for (let y = Math.max(0, Math.floor(Math.min(...ys) * ratio)); y < Math.min(canvas.height, Math.ceil(Math.max(...ys) * ratio)); y++) {
+					for (let x = Math.max(0, Math.floor(Math.min(...xs) * ratio)); x < Math.min(canvas.width, Math.ceil(Math.max(...xs) * ratio)); x++) {
+						if (!inside(polygon, (x + 0.5) / ratio, (y + 0.5) / ratio)) continue
 						const index = (y * canvas.width + x) * 4
 						if (pixels[index] !== 238 || pixels[index + 1] !== 238 || pixels[index + 2] !== 238) count++
 					}
@@ -115,7 +115,7 @@ async function foreignPixels(geometries: Readonly<Record<string, WidgetGeometry>
 			}
 			return [id, count]
 		}))
-	}, { png, polygons })
+	}, { png, polygons, ratio })
 }
 
 /**
@@ -367,6 +367,44 @@ describe('Runtime DOM measurer', () => {
 			['spread-2.5', '<img alt="" style="position:absolute;left:calc(LEFTpx + 0.4px);top:TOPpx;width:2.5px;height:2.5px;box-shadow:0 0 0 40px rgb(0,0,0)">'],
 			['scaled-ancestor', '<div style="position:absolute;left:LEFTpx;top:TOPpx;transform-origin:0 0;transform:scale(1.5)"><img alt="" style="display:block;width:6.5px;height:6.5px;outline:20px solid rgb(0,0,0)"></div>'],
 			['zoomed-ancestor', '<div style="position:absolute;left:LEFTpx;top:TOPpx;zoom:2"><img alt="" style="display:block;width:6.5px;height:6.5px;outline:15px solid rgb(0,0,0)"></div>'],
+		])
+		for (const [id, count] of Object.entries(await foreignPixels(result))) {
+			expect(result[id]!.regions.length, id).toBeGreaterThan(0)
+			expect(count, id).toBe(0)
+		}
+	})
+
+	it('keeps every pixel of a fractional occluder out of the regions at device pixel ratio 2 (#259 review)', async () => {
+		// The engine snaps box paint to whole CSS px before scaling it, so rounding the bound outward to
+		// device pixels alone once missed up to half a CSS px.
+		const standard = page
+		page = await browser.newPage({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 2 })
+		try {
+			const result = await measureGrid([
+				['outline-10.5', '<img alt="" style="position:absolute;left:LEFTpx;top:TOPpx;width:10.5px;height:10.5px;outline:40px solid rgb(0,0,0)">'],
+				['outline-1.5', '<img alt="" style="position:absolute;left:LEFTpx;top:TOPpx;width:1.5px;height:1.5px;outline:40px solid rgb(0,0,0)">'],
+				['spread-2.5', '<img alt="" style="position:absolute;left:calc(LEFTpx + 0.4px);top:TOPpx;width:2.5px;height:2.5px;box-shadow:0 0 0 40px rgb(0,0,0)">'],
+				['blend-10.25', '<div style="position:absolute;left:calc(LEFTpx + 0.3px);top:calc(TOPpx + 0.3px);width:10.25px;height:10.25px;mix-blend-mode:multiply;outline:40px solid rgb(0,0,0)"></div>'],
+			])
+			for (const [id, count] of Object.entries(await foreignPixels(result, 2))) {
+				expect(result[id]!.regions.length, id).toBeGreaterThan(0)
+				expect(count, id).toBe(0)
+			}
+		}
+		finally {
+			await page.close()
+			page = standard
+		}
+	})
+
+	it('ignores the computed transform of a box the engine does not transform (#259 review)', async () => {
+		// A non-replaced inline box or a box-less element keeps its computed transform, but the engine
+		// does not apply it: scaling the outsets by it once shrank the cut.
+		const result = await measureGrid([
+			['inline-span', '<div style="position:absolute;left:LEFTpx;top:calc(TOPpx + 10px);font-size:0"><span style="transform:scale(0.5)"><img alt="" style="width:1px;height:1px;outline:40px solid rgb(0,0,0)"></span></div>'],
+			['inline-span-zoom', '<div style="position:absolute;left:LEFTpx;top:calc(TOPpx + 10px);font-size:0"><span style="transform:scale(0.2);zoom:1"><img alt="" style="width:0.6px;height:0.6px;box-shadow:0 0 0 40px rgb(0,0,0)"></span></div>'],
+			['contents', '<div style="position:absolute;left:LEFTpx;top:calc(TOPpx + 10px)"><div style="display:contents;transform:scale(0.5)"><img alt="" style="display:block;width:1px;height:1px;outline:40px solid rgb(0,0,0)"></div></div>'],
+			['table-row', '<table style="position:absolute;left:LEFTpx;top:calc(TOPpx + 10px);border-spacing:0"><tr style="transform:scale(0.25)"><td style="padding:0"><img alt="" style="display:block;width:1px;height:1px;outline:40px solid rgb(0,0,0)"></td></tr></table>'],
 		])
 		for (const [id, count] of Object.entries(await foreignPixels(result))) {
 			expect(result[id]!.regions.length, id).toBeGreaterThan(0)

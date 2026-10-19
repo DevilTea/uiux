@@ -234,9 +234,11 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	 * `planar`: no 3D transform on the chain, so every transform is 2D affine and an element's
 	 * rendered rect is the bounding box of its transformed border box. `reflect`: a box reflection
 	 * on the chain paints a copy of the element elsewhere. `scale`: the uniform chain's scale
-	 * (`uniformScaleOf`), NaN outside the uniform proof. `transformed`: a transform on the chain.
+	 * (`uniformScaleOf`), NaN outside the uniform proof. `ceiling`: the product of every chain factor
+	 * above 1, transformable or not, which bounds the rendered scale from above whichever transforms
+	 * the engine applies. `transformed`: a transform on the chain.
 	 */
-	type ChainFlags = Readonly<{ opacity: number; transformOk: boolean; compositing: boolean; shapeClip: boolean; hidden: boolean; planar: boolean; reflect: boolean; scale: number; transformed: boolean }>
+	type ChainFlags = Readonly<{ opacity: number; transformOk: boolean; compositing: boolean; shapeClip: boolean; hidden: boolean; planar: boolean; reflect: boolean; scale: number; ceiling: number; transformed: boolean }>
 
 	/** Aggregated style facts of an element and all its flat-tree ancestors. */
 	function chainOf(element: Element): ChainFlags {
@@ -244,9 +246,12 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		if (cached) return cached
 		const style = styleOf(element)
 		const parent = flatTreeParent(element)
-		const inherited: ChainFlags = parent ? chainOf(parent) : { opacity: 1, transformOk: true, compositing: false, shapeClip: false, hidden: false, planar: true, reflect: false, scale: 1, transformed: false }
+		const inherited: ChainFlags = parent ? chainOf(parent) : { opacity: 1, transformOk: true, compositing: false, shapeClip: false, hidden: false, planar: true, reflect: false, scale: 1, ceiling: 1, transformed: false }
 		const opacity = Number.parseFloat(style.opacity)
 		const transformOk = inherited.transformOk && !(parent && isSvgElement(parent)) && transformIsUniform(style)
+		// The engine ignores the transform of a box that is not transformable, though it is computed.
+		const zoom = zoomFactor(style)
+		const transform = transformFactor(style)
 		const flags: ChainFlags = {
 			opacity: inherited.opacity * (Number.isFinite(opacity) ? opacity : 1),
 			transformOk,
@@ -255,7 +260,8 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 			hidden: false,
 			planar: inherited.planar && !hasThreeDTransform(style),
 			reflect: inherited.reflect || (style.webkitBoxReflect !== '' && style.webkitBoxReflect !== 'none'),
-			scale: transformOk ? inherited.scale * uniformFactor(style) : Number.NaN,
+			scale: transformOk ? inherited.scale * zoom * (isTransformable(element, style) ? transform : 1) : Number.NaN,
+			ceiling: transformOk ? inherited.ceiling * Math.max(1, zoom) * Math.max(1, transform) : Number.NaN,
 			transformed: inherited.transformed || hasTransform(style),
 		}
 		chainFlags.set(element, flags)
@@ -267,13 +273,14 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	 * the chain's transform scales and zoom factors, exact where the pixel-snapped `offsetWidth` and
 	 * `offsetHeight` (each within 1px of the layout size) are not. When that product disagrees with
 	 * the rendered rect (an unmodelled scaling), the rect over the smallest layout size the snapped
-	 * one allows bounds it from above; undefined when no bound is provable.
+	 * one allows bounds it from above; undefined when no bound is provable. Without a snapped size
+	 * above 1px the agreement cannot be checked, so the chain's ceiling bounds the scale instead.
 	 */
 	function uniformScaleOf(element: Element): number | undefined {
-		const scale = chainOf(element).scale
-		if (!(scale > 0) || !Number.isFinite(scale)) return undefined
+		const { scale, ceiling } = chainOf(element)
+		if (!(scale > 0) || !Number.isFinite(scale) || !Number.isFinite(ceiling)) return undefined
 		const html = element as HTMLElement
-		if (typeof html.offsetWidth !== 'number' || typeof html.offsetHeight !== 'number') return scale
+		if (typeof html.offsetWidth !== 'number' || typeof html.offsetHeight !== 'number' || html.offsetWidth <= 1 || html.offsetHeight <= 1) return Math.max(scale, ceiling)
 		const rect = rectOf(element)
 		const agrees = (rendered: number, snapped: number) => Math.abs(rendered - scale * snapped) <= scale + 1e-3
 		if (agrees(rect.width, html.offsetWidth) && agrees(rect.height, html.offsetHeight)) return scale
@@ -506,13 +513,16 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		const bound = paintBound(candidate)
 		if (bound === 'unbounded') return 'unsupported'
 		if (bound === 'empty') return undefined
-		// Rasterization covers every device pixel the paint touches, antialiased edges included.
+		// Rasterization covers every device pixel the paint touches, antialiased edges included. The
+		// engine snaps box paint to whole CSS px before scaling to device pixels, so an edge can move
+		// up to half a CSS px at any device pixel ratio: round outward to whole CSS px, then outward to
+		// device pixels.
 		const ratio = view.devicePixelRatio > 0 ? view.devicePixelRatio : 1
 		const outward = {
-			left: Math.floor(bound.left * ratio) / ratio,
-			top: Math.floor(bound.top * ratio) / ratio,
-			right: Math.ceil(bound.right * ratio) / ratio,
-			bottom: Math.ceil(bound.bottom * ratio) / ratio,
+			left: Math.floor(Math.floor(bound.left) * ratio) / ratio,
+			top: Math.floor(Math.floor(bound.top) * ratio) / ratio,
+			right: Math.ceil(Math.ceil(bound.right) * ratio) / ratio,
+			bottom: Math.ceil(Math.ceil(bound.bottom) * ratio) / ratio,
 		}
 		return { classification: 'bounded', targetContribution: 'unproven', bound: { kind: 'paint-bound', shape: rectOfBox(outward) } }
 	}
@@ -853,17 +863,36 @@ function transformIsUniform(style: StyleFacts): boolean {
 	return Math.abs(a! - d!) <= UNIFORM_SCALE_TOLERANCE * Math.max(a!, d!)
 }
 
-/**
- * The scale an element applies to its subtree under the uniform proof: its zoom times the scale
- * of its own `transform` and `scale`. NaN when a value is not understood.
- */
-function uniformFactor(style: StyleFacts): number {
+/** The zoom an element applies to its subtree. NaN when the value is not understood. */
+function zoomFactor(style: StyleFacts): number {
 	const zoom = style.zoom === '' || style.zoom === 'normal' ? 1 : Number(style.zoom)
-	let factor = zoom > 0 ? zoom : Number.NaN
+	return zoom > 0 ? zoom : Number.NaN
+}
+
+/**
+ * The scale of an element's own `transform` and `scale` under the uniform proof. NaN when a
+ * value is not understood.
+ */
+function transformFactor(style: StyleFacts): number {
+	let factor = 1
 	if (style.scale !== undefined && style.scale !== '' && style.scale !== 'none') factor *= Number(style.scale.trim().split(/\s+/)[0])
 	const transform = style.transform?.trim()
 	if (transform && transform !== 'none') factor *= Number(/^matrix\(([^,)]*)/.exec(transform)?.[1])
 	return factor
+}
+
+/**
+ * Whether the engine applies the element's transform (CSS Transforms 1 "transformable element"): not
+ * for a box-less element, a table-column or table-column-group box, or a non-replaced inline box.
+ * SVG elements and replaced or native-control elements keep it.
+ */
+function isTransformable(element: Element, style: StyleFacts): boolean {
+	const display = style.display.trim()
+	if (display === 'contents' || display === 'none' || display === 'table-column' || display === 'table-column-group') return false
+	const inline = display === 'inline' || /^inline (?:flow|list-item|flow list-item)$/.test(display) || display.startsWith('ruby')
+	if (!inline || isSvgElement(element)) return true
+	const tag = element.tagName.toUpperCase()
+	return CLIPPED_REPLACED_TAGS.has(tag) || NATIVE_CONTROL_TAGS.has(tag)
 }
 
 /** Whether the element's own transform leaves the plane (any 3D transform function or component). */
