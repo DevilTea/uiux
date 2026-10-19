@@ -17,7 +17,6 @@ import { V5_LAYOUT } from '../src/persistence/paths'
 import {
 	buildWorkspacePreviewBundle,
 	clearPreviewBundleCache,
-	computeBundleContentHash,
 } from '../src/server/preview-bundler'
 import { readPreviewRuntimeFile } from '../src/server/preview-runtime-http'
 import { checkPreviewBundleAdapters } from '../src/server/preview-adapter-check'
@@ -520,7 +519,7 @@ describe('preview adapter materialization transport', () => {
 		// Remove the adapter file so it becomes unreadable
 		await rm(join(root, 'kit', 'adapters', 'counter.mjs'))
 
-		// computeBundleContentHash must throw structured error instead of Date.now() fallback
+		// The bundle build must throw a structured error instead of a Date.now() fallback
 		await expect(buildWorkspacePreviewBundle({ workspaceRoot: root, set: resolution.set }))
 			.rejects
 			.toThrow(/Failed to read adapter source file at/)
@@ -769,14 +768,13 @@ describe('a current-schema Workspace resolves its Adapters from the Product Kit'
 		expect(bundle.state).toBe('invalid')
 		expect(bundle.state === 'invalid' ? bundle.diagnostics : []).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: pluginPath }))
 
-		// The bundle the check evaluated is never served to a Preview.
-		const hash = await computeBundleContentHash(root, resolution.set)
-		const served = await readPreviewRuntimeFile(root, undefined, hash, 'runtime.js')
+		// The bundle the check evaluated is never served to a Preview, even from the cache.
+		const built = await buildWorkspacePreviewBundle({ workspaceRoot: root, moduleBase: join(root, 'kit'), set: resolution.set })
+		const served = await readPreviewRuntimeFile(root, undefined, built.hash, 'runtime.js')
 		expect(served.status).toBe(409)
 		expect(served.status === 409 ? served.body.diagnostics : []).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: pluginPath }))
 
 		// The Preview's own guard, run in a DOM on the same bundle, reports the same diagnostic.
-		const built = await buildWorkspacePreviewBundle({ workspaceRoot: root, moduleBase: join(root, 'kit'), set: resolution.set })
 		setupDom()
 		const bundleFile = join(root, `bundle-${randomUUID()}.mjs`)
 		await writeFile(bundleFile, built.bundleJs)

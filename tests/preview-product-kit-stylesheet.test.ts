@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { Window } from 'happy-dom'
 
 import { getSelectedWorkspacePreviewBundle } from '../src/server/workspace-adapters'
@@ -322,6 +323,95 @@ describe('Product Kit stylesheet bundling', () => {
 		expect(message).toContain('kit/node_modules/fake-ui/button.css')
 		expect(message).not.toMatch(/\/(?:private|var|Users|tmp|home)\//)
 		expect(message).not.toMatch(/private|\.\.\//)
+	})
+})
+
+/** Sets every file under `dir` to a fixed past modification time, so no input is newer than a build that reads it. */
+async function backdate(dir: string): Promise<void> {
+	const time = new Date(Date.UTC(2026, 0, 1))
+	for (const entry of await readdir(dir, { recursive: true, withFileTypes: true }))
+		if (entry.isFile()) await utimes(join(entry.parentPath, entry.name), time, time)
+}
+
+/**
+ * The Preview bundle's cache key covers its whole module graph (issue #250): every file the build
+ * read for the style entries and the Adapter modules, without the host packages it aliases.
+ */
+describe('Preview bundle cache', () => {
+	it('builds again when a module or a CSS file the Adapter imports changes, though no entry changed', async () => {
+		const root = await createKitWorkspace()
+		const library = join(root, 'kit', 'node_modules', 'fake-ui')
+		const moduleSource = await readFile(join(library, 'index.js'), 'utf8')
+		const css = await readFile(join(library, 'button.css'), 'utf8')
+		const first = await validBundle(root)
+
+		// A module the Adapter entry imports.
+		await writeFile(join(library, 'index.js'), moduleSource.replace(`'fui-button'`, `'fui-button fui-edited'`))
+		const moduleEdited = await validBundle(root)
+		expect(moduleEdited.hash).not.toBe(first.hash)
+		expect(moduleEdited.bundleJs).toContain('fui-edited')
+
+		// A stylesheet that module imports.
+		await writeFile(join(library, 'button.css'), css.replace('.fui-button {', '.fui-button, .fui-edited-css {'))
+		const cssEdited = await validBundle(root)
+		expect(cssEdited.hash).not.toBe(moduleEdited.hash)
+		const served = await readPreviewRuntimeFile(root, undefined, cssEdited.hash, 'runtime.css')
+		expect(served.status).toBe(200)
+		expect(served.status === 200 && new TextDecoder().decode(served.file.contents)).toContain('.fui-edited-css')
+
+		// The hash follows the bytes: the files as they were give the first bundle's hash again.
+		await writeFile(join(library, 'index.js'), moduleSource)
+		await writeFile(join(library, 'button.css'), css)
+		expect((await validBundle(root)).hash).toBe(first.hash)
+	})
+
+	it('reuses the bundle while its module graph is unchanged, without building again', async () => {
+		const root = await createKitWorkspace()
+		await backdate(join(root, 'kit'))
+		const first = await validBundle(root)
+		const again = await validBundle(root)
+		expect(again.hash).toBe(first.hash)
+		// The same output files: nothing was built again.
+		expect(again.files).toBe(first.files)
+
+		// A file written again with the same bytes changes its stat, not the graph.
+		const css = join(root, 'kit', 'node_modules', 'fake-ui', 'button.css')
+		await writeFile(css, await readFile(css))
+		expect((await validBundle(root)).files).toBe(first.files)
+	})
+
+	it('builds again when an input changed at or after the start of the build that read it', async () => {
+		const root = await createKitWorkspace()
+		await backdate(join(root, 'kit'))
+		// A modification time after the build started: esbuild may have read other bytes than the digest's.
+		const css = join(root, 'kit', 'node_modules', 'fake-ui', 'button.css')
+		const later = new Date(Date.now() + 60_000)
+		await utimes(css, later, later)
+		const first = await validBundle(root)
+		const again = await validBundle(root)
+		expect(again.hash).toBe(first.hash)
+		// Other output files: it was built again (an identity check; `not.toBe` would diff the two maps).
+		expect(again.files === first.files).toBe(false)
+	})
+
+	it('leaves the host packages it aliases to UIUX\'s own copies out of the graph', async () => {
+		const root = await createKitWorkspace()
+		// The kit's own `vue`, which the Preview bundle never reads: `vue` resolves to UIUX's copy.
+		const kitVue = join(root, 'kit', 'node_modules', 'vue')
+		await mkdir(kitVue, { recursive: true })
+		await writeFile(join(kitVue, 'package.json'), JSON.stringify({ name: 'vue', version: '3.5.0', type: 'module', exports: './index.js' }))
+		const kitVueSource = `export * from ${JSON.stringify(pathToFileURL(join(process.cwd(), 'node_modules', 'vue', 'index.mjs')).href)};\n`
+		await writeFile(join(kitVue, 'index.js'), kitVueSource)
+		await backdate(join(root, 'kit'))
+		const first = await validBundle(root)
+		const map = JSON.parse(new TextDecoder().decode(first.files.get('runtime.js.map')!.contents)) as { sources: string[] }
+		expect(map.sources.some(source => source.startsWith('workspace:///kit/node_modules/vue/'))).toBe(false)
+		expect(map.sources.some(source => source.includes('runtime-core'))).toBe(true)
+
+		await writeFile(join(kitVue, 'index.js'), `${kitVueSource}// edited\n`)
+		const again = await validBundle(root)
+		expect(again.hash).toBe(first.hash)
+		expect(again.files).toBe(first.files)
 	})
 })
 
