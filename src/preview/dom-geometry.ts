@@ -372,7 +372,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	 * Absolutely positioned boxes escape overflow clips below their containing block; fixed boxes
 	 * escape every clip below an ancestor that contains fixed descendants.
 	 */
-	function clipChainOf(element: Element, outward = false): ClipChain {
+	function clipChainOf(element: Element, outward = false, conservative = false): ClipChain {
 		let box = viewportBox()
 		const rounded: RoundedShape[] = []
 		let mode = positionMode(styleOf(element))
@@ -384,7 +384,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 				|| (mode === 'absolute' && (style.position !== 'static' || containsFixed))
 				|| (mode === 'fixed' && containsFixed)
 			if (!containing) continue
-			const overflows = overflowApplies(ancestor, style)
+			const overflows = overflowApplies(ancestor, style, conservative)
 			const clipX = (overflows && style.overflowX !== 'visible') || containsPaint(style)
 			const clipY = (overflows && style.overflowY !== 'visible') || containsPaint(style)
 			if (clipX || clipY) {
@@ -421,7 +421,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		const chain = chainOf(element)
 		if (chain.opacity === 0 || !chain.transformOk || chain.compositing || chain.shapeClip) return []
 
-		const clips = clipChainOf(element)
+		const clips = clipChainOf(element, false, true)
 		if (clips === 'unsupported') return []
 		const visible = intersect(boxOfRect(rect), clips.box)
 		if (!visible) return []
@@ -885,6 +885,28 @@ function transformFactor(style: StyleFacts): number {
 }
 
 /**
+ * Whether an inline-level element is replaced-like, laid out as an atomic inline box: a replaced
+ * element, a native control or a fieldset. Shared by `isTransformable` and `overflowApplies` so the
+ * two cannot diverge. An `<object>` is replaced-like only while it has no fallback content.
+ */
+function isAtomicInlineTag(element: Element): boolean {
+	const tag = element.tagName.toUpperCase()
+	if (tag === 'OBJECT') return !element.hasChildNodes()
+	return CLIPPED_REPLACED_TAGS.has(tag) || NATIVE_CONTROL_TAGS.has(tag) || tag === 'FIELDSET'
+}
+
+/** Elements positively known to be non-replaced inline boxes when displayed `inline`. */
+const PLAIN_INLINE_TAGS = new Set([
+	'SPAN', 'A', 'B', 'I', 'U', 'S', 'EM', 'STRONG', 'SMALL', 'CODE', 'KBD', 'SAMP', 'VAR', 'MARK', 'ABBR', 'CITE', 'DFN',
+	'Q', 'SUB', 'SUP', 'TIME', 'DATA', 'BDI', 'BDO', 'LABEL', 'FONT', 'DEL', 'INS', 'TT', 'BIG', 'STRIKE',
+])
+
+function isInlineDisplay(style: StyleFacts): boolean {
+	const display = style.display.trim()
+	return display === 'inline' || /^inline (?:flow|list-item|flow list-item)$/.test(display) || display.startsWith('ruby')
+}
+
+/**
  * Whether the engine applies the element's transform (CSS Transforms 1 "transformable element"): not
  * for a box-less element, a table-column or table-column-group box, or a non-replaced inline box.
  * SVG elements and replaced or native-control elements keep it.
@@ -892,25 +914,23 @@ function transformFactor(style: StyleFacts): number {
 function isTransformable(element: Element, style: StyleFacts): boolean {
 	const display = style.display.trim()
 	if (display === 'contents' || display === 'none' || display === 'table-column' || display === 'table-column-group') return false
-	const inline = display === 'inline' || /^inline (?:flow|list-item|flow list-item)$/.test(display) || display.startsWith('ruby')
-	if (!inline || isSvgElement(element)) return true
-	const tag = element.tagName.toUpperCase()
-	if (tag === 'OBJECT') return !element.hasChildNodes()
-	return CLIPPED_REPLACED_TAGS.has(tag) || NATIVE_CONTROL_TAGS.has(tag) || tag === 'FIELDSET'
+	if (!isInlineDisplay(style) || isSvgElement(element)) return true
+	return isAtomicInlineTag(element)
 }
 
 /**
  * Whether CSS overflow clips the element's content: it does not apply to a non-replaced inline box
- * (an inline `<object>` with fallback content is not replaced, though the engine forces its overflow
- * to clip and ignores its transform), so a child's outline paints outside it.
+ * (an inline `<object>` with fallback content is not replaced: the engine forces only its computed
+ * overflow value to clip), so a child's outline paints outside it. With `conservative` (the Widget's
+ * own visible area) any doubt applies the clip, since a smaller visible area is the safe error:
+ * only a tag positively known to be a plain inline box is exempt.
  */
-function overflowApplies(element: Element, style: StyleFacts): boolean {
-	const display = style.display.trim()
-	const inline = display === 'inline' || /^inline (?:flow|list-item|flow list-item)$/.test(display) || display.startsWith('ruby')
-	if (!inline || isSvgElement(element)) return true
+function overflowApplies(element: Element, style: StyleFacts, conservative = false): boolean {
+	if (!isInlineDisplay(style) || isSvgElement(element)) return true
+	if (isAtomicInlineTag(element)) return true
+	if (!conservative) return false
 	const tag = element.tagName.toUpperCase()
-	if (tag === 'OBJECT') return !element.hasChildNodes()
-	return CLIPPED_REPLACED_TAGS.has(tag) || NATIVE_CONTROL_TAGS.has(tag)
+	return !PLAIN_INLINE_TAGS.has(tag) && !tag.includes('-')
 }
 
 /** Whether the element's own transform leaves the plane (any 3D transform function or component). */

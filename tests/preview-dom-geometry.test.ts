@@ -438,6 +438,21 @@ describe('Runtime DOM measurer', () => {
 			if (id.startsWith('span')) expect(result[id]!.regions.length, id).toBeGreaterThan(0)
 			expect(count, id).toBe(0)
 		}
+		// A wrongly applied 6px clip would shrink the occluder's bound to the box; the cut must keep
+		// the whole outline reach (the 6px box plus 40px on each side, 52px square).
+		for (const id of ['span-hidden', 'span-clip', 'span-object']) expect(area(result[id]!), id).toBeLessThanOrEqual(300 * 100 - 52 * 52 + 4)
+	})
+
+	it('applies the clip of an inline fieldset to the Widget it contains, but not that of a span (#259 review)', async () => {
+		// An inline fieldset is atomic and clips its overflow, so only 20 x 20 of the Widget is visible; a
+		// span is a non-replaced inline box that does not clip (control).
+		const widget = (id: string) => `<div data-widget-id="${id}" style="width:100px;height:100px;background:#eee"></div>`
+		const result = await measure(`
+			<div style="position:absolute;left:0;top:0;font-size:0"><fieldset style="display:inline;margin:0;padding:0;border:0;min-width:0;overflow:hidden;width:20px;height:20px">${widget('fieldset')}</fieldset></div>
+			<div style="position:absolute;left:300px;top:0;font-size:0"><span style="overflow:hidden">${widget('span')}</span></div>`, ['fieldset', 'span'])
+		expect(area(result.fieldset!)).toBeLessThanOrEqual(20 * 20)
+		expect(area(result.fieldset!)).toBeGreaterThan(0)
+		expect(area(result.span!)).toBe(100 * 100)
 	})
 
 	it('cuts a bounded occluder\'s own text with its overflow, text shadow and decoration (#259 review)', async () => {
