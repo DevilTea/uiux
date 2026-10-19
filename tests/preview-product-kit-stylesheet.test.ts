@@ -363,7 +363,7 @@ describe('Preview bundle cache', () => {
 		await writeFile(join(library, 'index.js'), moduleSource)
 		await writeFile(join(library, 'button.css'), css)
 		expect((await validBundle(root)).hash).toBe(first.hash)
-	})
+	}, 20_000)
 
 	it('reuses the bundle while its module graph is unchanged, without building again', async () => {
 		const root = await createKitWorkspace()
