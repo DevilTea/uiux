@@ -61,7 +61,9 @@ import(workerData.url).then(
  * The one server-side check of an Adapter set's runtime members (Clause
  * 01a116f0-cae2-7c64-9c76-d472f252789a, Discussion #241 R4): the Preview bundle is evaluated and
  * the checks its mount factory ran on the imported members are read back, among them whether each
- * Widget plugin was created by the host's `@deviltea/widget-core`. The bundle's own copy is the
+ * Widget plugin was created by the host's `@deviltea/widget-core` and whether each Catalog i18n
+ * mapping names Properties the plugin declares with the UIUX value contracts (Clause
+ * 01a115cd-d293-7515-a7bd-bb82a0674e5d). The bundle's own copy is the
  * host's, so a plugin from another copy (one inlined into a pre-built Adapter, which the bundler's
  * aliasing cannot reach) fails widget-core's inspection here exactly as it does in the browser.
  * Loading the manifest in Node cannot decide this: Node may resolve another widget-core copy for

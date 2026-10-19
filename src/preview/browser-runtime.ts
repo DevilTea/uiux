@@ -11,6 +11,7 @@ import { validateAdapterManifest, type AdapterManifest } from '../domain/adapter
 import { isAllowedThemeAttributeName } from '../domain/product-kit/theme-attributes'
 import { createTranslationRuntime, missingDefaultLocaleDiagnostic, type TranslationRuntime } from '../i18n'
 import {
+	catalogWidgetPath,
 	createAdapterWidgetSystem,
 	createRootShellPlugin,
 	createRootShellRenderer,
@@ -18,6 +19,7 @@ import {
 	IncompatibleWidgetCoreError,
 	LiveViewRuntimeController,
 	type RuntimeAdapterBundle,
+	validateCatalogAgainstPlugin,
 } from '../runtime'
 import {
 	extractProductAdapterManifest,
@@ -178,7 +180,9 @@ export type StandalonePreviewMountFactory = Readonly<{
 	/**
 	 * The diagnostics of the checks the factory ran on the imported Adapter members with the bundle's
 	 * own widget-core copy: manifest, identity, API version, plugin authenticity (Clause
-	 * 01a116f0-cae2-7c64-9c76-d472f252789a), renderers and ownership. Empty when every Adapter passed.
+	 * 01a116f0-cae2-7c64-9c76-d472f252789a), renderers, ownership and the Catalog's i18n mappings
+	 * against the decoded plugins (Clause 01a115cd-d293-7515-a7bd-bb82a0674e5d). Empty when every
+	 * Adapter passed.
 	 * The server evaluates the bundle and reads these (`src/server/preview-adapter-check.ts`), so
 	 * every surface reports what the Preview itself refuses.
 	 */
@@ -318,6 +322,18 @@ export function createStandalonePreviewMount(input: Readonly<{
 			decodedPluginPaths,
 			decodedRenderers,
 		})
+	}
+
+	// The Catalog-against-plugin check of the runtime materialization (Clause
+	// 01a115cd-d293-7515-a7bd-bb82a0674e5d), on the plugins this bundle decoded. A Catalog type
+	// without a decoded plugin has nothing to check against here; a plugin that failed to decode
+	// already has its own diagnostic.
+	const decodedPluginsByType = new Map(validatedEntries.flatMap(entry => entry.decodedPlugins.map(plugin => [plugin.type, plugin] as const)))
+	for (const entry of validatedEntries) {
+		for (const [type, catalog] of Object.entries(entry.manifest.catalog.widgets)) {
+			const plugin = decodedPluginsByType.get(type)
+			if (plugin) buildDiagnostics.push(...validateCatalogAgainstPlugin(plugin, catalog, catalogWidgetPath(entry.index, type)))
+		}
 	}
 
 	function mountPreviewRuntime(container: HTMLElement, options: PreviewRuntimeMountOptions): PreviewRuntimeBridge {

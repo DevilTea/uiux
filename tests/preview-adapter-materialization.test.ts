@@ -815,6 +815,135 @@ describe('a current-schema Workspace resolves its Adapters from the Product Kit'
 		expect(response).toMatchObject({ state: 'valid', diagnostics: [], bundleUrl: `/api/preview/runtime/${bundle.hash}/runtime.js` })
 	})
 
+	/**
+	 * A `Label` Adapter whose Widget plugin declares the string Config member `titleKey`, the
+	 * TranslationResult Property `titleResult` and the Property `title` with the value contract
+	 * `titleContract`, and whose Catalog declares the i18n mappings `fields`.
+	 */
+	function makeLabelAdapterSource(fields: Record<string, unknown>, titleContract = 'deviltea.uiux/string@1'): string {
+		return `
+import { createWidgetPlugin, createWidgetValueContract } from '@deviltea/widget-core';
+import { defineComponent, h } from 'vue';
+import { useWidget } from '@deviltea/widget-vue';
+
+const TRANSLATION_RESULT = createWidgetValueContract('deviltea.uiux/translation-result@1');
+const TITLE = createWidgetValueContract(${JSON.stringify(titleContract)});
+
+export const labelPlugin = createWidgetPlugin('Label')
+  .interfaces()
+  .config({
+    schema: { type: 'object', properties: { titleKey: { type: 'string' } }, additionalProperties: false },
+    validate: (input) => input === undefined || (typeof input === 'object' && input !== null),
+    resolve: (raw) => ({ titleKey: raw?.titleKey ?? null }),
+  })
+  .properties(p => p
+    .titleResult({ valueContract: TRANSLATION_RESULT, compute: () => ({ text: 'Hello', warnings: [] }) })
+    .title({ valueContract: TITLE, compute: () => 'Hello' }))
+  .done();
+
+export const LabelRenderer = defineComponent({
+  name: 'LabelRenderer',
+  setup() {
+    const { useProperties } = useWidget(labelPlugin);
+    const properties = useProperties();
+    return () => h('span', { class: 'real-label' }, 'Label: ' + String(properties.title.value));
+  }
+});
+
+export const manifest = {
+  id: 'my-label',
+  apiVersion: '1',
+  widgetPlugins: [labelPlugin],
+  catalog: { widgets: { Label: { i18n: { fields: ${JSON.stringify(fields)} } } } },
+  renderers: [{ type: 'Label', component: LabelRenderer }],
+  providers: [],
+};
+`
+	}
+
+	function viewWithLabel(): ViewResource {
+		return { ...viewWithCounter(), ir: { type: 'RootShell', id: 'root', slots: { content: [{ id: 'l1', type: 'Label' }] } } as never }
+	}
+
+	/** Runs the Preview's own guard in a DOM on the bundle built for `root`'s resolved set and returns the reported status and markup. */
+	async function mountLabelInPreview(root: string): Promise<{ status?: { status: string; diagnostics?: readonly { code: string; path: string }[] }; html: string }> {
+		const resolution = await resolveSelectedWorkspaceAdapters(root)
+		if (resolution.state !== 'valid') throw new Error('expected the Adapter set to resolve')
+		const built = await buildWorkspacePreviewBundle({ workspaceRoot: root, moduleBase: join(root, 'kit'), set: resolution.set })
+		setupDom()
+		const bundleFile = join(root, `bundle-${randomUUID()}.mjs`)
+		await writeFile(bundleFile, built.bundleJs)
+		const bundleMod = await import(bundleFile)
+		const container = document.createElement('div')
+		document.body.appendChild(container)
+		let status: { status: string; diagnostics?: readonly { code: string; path: string }[] } | undefined
+		const bridge = bundleMod.mountPreviewRuntime(container, { view: viewWithLabel(), context: defaultContext(), onStatusChange(next: unknown) { status = next as typeof status } })
+		const html = container.innerHTML
+		bridge.dispose()
+		return { status, html }
+	}
+
+	async function previewAdaptersResponse(root: string): Promise<Record<string, unknown>> {
+		return withSelectedWorkspace(root, async () => {
+			const { default: adaptersHandler } = await import('../server/api/preview/adapters.get')
+			return await adaptersHandler({ context: { uiuxPrincipal: HUMAN_OWNER, params: {} } } as never) as Record<string, unknown>
+		})
+	}
+
+	it.each([
+		{
+			// The field `subtitle` derives the text Property `subtitle`, which `Label` does not declare.
+			name: 'names a Property the Widget plugin does not declare',
+			source: () => makeLabelAdapterSource({ subtitle: { configField: 'titleKey', resultProperty: 'titleResult' } }),
+			code: 'adapter.i18n_text_property_missing',
+			field: 'subtitle',
+		},
+		{
+			// The field `title` derives the text Property `title`, declared here with another value contract.
+			name: 'names a Property whose value contract does not match',
+			source: () => makeLabelAdapterSource({ title: { configField: 'titleKey' } }, 'acme.example/string@1'),
+			code: 'adapter.i18n_text_property_contract_mismatch',
+			field: 'title',
+		},
+	])('refuses, on the server and in the Preview alike, a Catalog i18n mapping that $name (#255)', async ({ source, code, field }) => {
+		const root = await createKitWorkspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
+		await linkHostPackages(join(root, 'kit'))
+		await writeFile(join(root, 'kit', 'adapter.mjs'), source())
+		const expected = expect.objectContaining({ code, path: `/adapters/0/manifest/catalog/widgets/Label/i18n/fields/${field}/textProperty` })
+
+		// The manifest check passes, so resolution alone accepts the set ...
+		expect(await resolveSelectedWorkspaceAdapters(root)).toMatchObject({ state: 'valid' })
+		// ... and the server-side check of the Preview bundle refuses the mapping (Clause 01a115cd-d293-7515-a7bd-bb82a0674e5d).
+		const bundle = await getSelectedWorkspacePreviewBundle(root)
+		expect(bundle).toMatchObject({ state: 'invalid', diagnostics: [expected] })
+
+		const response = await previewAdaptersResponse(root)
+		expect(response).toMatchObject({ state: 'invalid', summaries: [{ index: 0, adapterId: 'my-label' }], diagnostics: [expected] })
+		expect(response.bundleUrl).toBeUndefined()
+
+		const mounted = await mountLabelInPreview(root)
+		expect(mounted.status).toMatchObject({ status: 'invalid', diagnostics: [expected] })
+		expect(mounted.html).not.toContain('Label:')
+	})
+
+	it.each([
+		{ name: 'derives both Property names', fields: { title: { configField: 'titleKey' } } },
+		// The derived names `heading` and `headingResult` are not declared; the declared names override them.
+		{ name: 'declares Property names that override the derivation', fields: { heading: { configField: 'titleKey', resultProperty: 'titleResult', textProperty: 'title' } } },
+	])('accepts, on every surface, a Catalog i18n mapping that $name and matches the Widget plugin (#255)', async ({ fields }) => {
+		const root = await createKitWorkspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
+		await linkHostPackages(join(root, 'kit'))
+		await writeFile(join(root, 'kit', 'adapter.mjs'), makeLabelAdapterSource(fields))
+
+		const bundle = await getSelectedWorkspacePreviewBundle(root)
+		expect(bundle).toMatchObject({ state: 'valid', adapterCheck: 'passed' })
+		if (bundle.state !== 'valid') return
+		expect(await previewAdaptersResponse(root)).toMatchObject({ state: 'valid', diagnostics: [], bundleUrl: `/api/preview/runtime/${bundle.hash}/runtime.js` })
+		const mounted = await mountLabelInPreview(root)
+		expect(mounted.status).toMatchObject({ status: 'ready' })
+		expect(mounted.html).toContain('Label: Hello')
+	})
+
 	it('keeps an Adapter set valid, with a warning, when its bundle cannot run in the server worker, and lets the Preview decide (#123)', async () => {
 		const root = await createKitWorkspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
 		await linkHostPackages(join(root, 'kit'))

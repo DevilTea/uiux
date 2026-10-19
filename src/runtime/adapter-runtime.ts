@@ -86,7 +86,7 @@ export async function materializeRuntimeAdapterBundle(input: Readonly<{
 			pendingCatalogEntries.push({
 				type,
 				catalog,
-				path: `/adapters/${entry.index}/manifest/catalog/widgets/${escapePointer(type)}`,
+				path: catalogWidgetPath(entry.index, type),
 			})
 		}
 		for (const { plugin, path } of decodedPlugins) {
@@ -133,7 +133,20 @@ export async function materializeRuntimeAdapterBundle(input: Readonly<{
 	}
 }
 
-function validateCatalogAgainstPlugin(
+/** The JSON Pointer of one Catalog Widget entry of the Adapter at `adapterIndex`. */
+export function catalogWidgetPath(adapterIndex: number, widgetType: string): string {
+	return `/adapters/${adapterIndex}/manifest/catalog/widgets/${escapePointer(widgetType)}`
+}
+
+/**
+ * The load-time check of one Catalog Widget entry against its decoded Widget plugin: each i18n
+ * mapping's Config member must be a provable string, and its result and text Properties (declared
+ * or derived) must exist with the UIUX value contracts (Clauses 01a115cd-d293-7515-a7bd-bb82a0674e5d
+ * and 01a14e30-3676-7212-8cee-1ef84da6316c). The runtime materialization and the Preview mount
+ * (`src/preview/browser-runtime.ts`, whose findings the server reads back through
+ * `describeAdapterDiagnostics()`) both run it, so they refuse the same mappings.
+ */
+export function validateCatalogAgainstPlugin(
 	plugin: AnyWidgetPlugin,
 	catalog: AdapterWidgetCatalogEntry,
 	path: string,
