@@ -100,4 +100,24 @@ describe('Preview occlusion proof policy', () => {
 			translucentObstruction: false,
 		})
 	})
+
+	it('subtracts the finite paint bound of an occluder whose exact shape is unproven (Discussion #241 R6)', () => {
+		const result = planOcclusion<Shape>([
+			opaque('rectangle'),
+			{ classification: 'bounded', targetContribution: 'unproven', bound: { kind: 'paint-bound', shape: { id: 'image' } } },
+			{ classification: 'translucent', targetContribution: 'proven-nonzero' },
+		])
+		expect(result).toEqual({
+			status: 'precise',
+			subtract: [{ kind: 'rectangle', shape: { id: 'rectangle' } }, { kind: 'paint-bound', shape: { id: 'image' } }],
+			translucentObstruction: true,
+		})
+	})
+
+	it('keeps paint without a finite bound fail-closed even beside bounded occluders', () => {
+		expect(planOcclusion<Shape>([
+			{ classification: 'bounded', targetContribution: 'unproven', bound: { kind: 'paint-bound', shape: { id: 'image' } } },
+			{ classification: 'unsupported', reason: 'unbounded-paint' },
+		])).toEqual({ status: 'structural-only', reason: 'unsupported-compositing' })
+	})
 })
