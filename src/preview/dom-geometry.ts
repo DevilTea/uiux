@@ -260,7 +260,9 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 			hidden: false,
 			planar: inherited.planar && !hasThreeDTransform(style),
 			reflect: inherited.reflect || (style.webkitBoxReflect !== '' && style.webkitBoxReflect !== 'none'),
-			scale: transformOk ? inherited.scale * zoom * (isTransformable(element, style) ? transform : 1) : Number.NaN,
+			// A box classified as not transformable still enlarges the scale: a misclassification may only
+			// ever over-estimate, never drop an applied scale-up.
+			scale: transformOk ? inherited.scale * zoom * (isTransformable(element, style) ? transform : Math.max(1, transform)) : Number.NaN,
 			ceiling: transformOk ? inherited.ceiling * Math.max(1, zoom) * Math.max(1, transform) : Number.NaN,
 			transformed: inherited.transformed || hasTransform(style),
 		}
@@ -382,8 +384,9 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 				|| (mode === 'absolute' && (style.position !== 'static' || containsFixed))
 				|| (mode === 'fixed' && containsFixed)
 			if (!containing) continue
-			const clipX = style.overflowX !== 'visible' || containsPaint(style)
-			const clipY = style.overflowY !== 'visible' || containsPaint(style)
+			const overflows = overflowApplies(ancestor, style)
+			const clipX = (overflows && style.overflowX !== 'visible') || containsPaint(style)
+			const clipY = (overflows && style.overflowY !== 'visible') || containsPaint(style)
 			if (clipX || clipY) {
 				if ((style.overflowX === 'clip' || style.overflowY === 'clip') && px(style.overflowClipMargin) !== 0) return 'unsupported'
 				const shape = clipShapeOf(ancestor, outward)
@@ -892,6 +895,21 @@ function isTransformable(element: Element, style: StyleFacts): boolean {
 	const inline = display === 'inline' || /^inline (?:flow|list-item|flow list-item)$/.test(display) || display.startsWith('ruby')
 	if (!inline || isSvgElement(element)) return true
 	const tag = element.tagName.toUpperCase()
+	if (tag === 'OBJECT') return !element.hasChildNodes()
+	return CLIPPED_REPLACED_TAGS.has(tag) || NATIVE_CONTROL_TAGS.has(tag) || tag === 'FIELDSET'
+}
+
+/**
+ * Whether CSS overflow clips the element's content: it does not apply to a non-replaced inline box
+ * (an inline `<object>` with fallback content is not replaced, though the engine forces its overflow
+ * to clip and ignores its transform), so a child's outline paints outside it.
+ */
+function overflowApplies(element: Element, style: StyleFacts): boolean {
+	const display = style.display.trim()
+	const inline = display === 'inline' || /^inline (?:flow|list-item|flow list-item)$/.test(display) || display.startsWith('ruby')
+	if (!inline || isSvgElement(element)) return true
+	const tag = element.tagName.toUpperCase()
+	if (tag === 'OBJECT') return !element.hasChildNodes()
 	return CLIPPED_REPLACED_TAGS.has(tag) || NATIVE_CONTROL_TAGS.has(tag)
 }
 

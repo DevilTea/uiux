@@ -404,10 +404,38 @@ describe('Runtime DOM measurer', () => {
 			['inline-span', '<div style="position:absolute;left:LEFTpx;top:calc(TOPpx + 10px);font-size:0"><span style="transform:scale(0.5)"><img alt="" style="width:1px;height:1px;outline:40px solid rgb(0,0,0)"></span></div>'],
 			['inline-span-zoom', '<div style="position:absolute;left:LEFTpx;top:calc(TOPpx + 10px);font-size:0"><span style="transform:scale(0.2);zoom:1"><img alt="" style="width:0.6px;height:0.6px;box-shadow:0 0 0 40px rgb(0,0,0)"></span></div>'],
 			['contents', '<div style="position:absolute;left:LEFTpx;top:calc(TOPpx + 10px)"><div style="display:contents;transform:scale(0.5)"><img alt="" style="display:block;width:1px;height:1px;outline:40px solid rgb(0,0,0)"></div></div>'],
+		])
+		for (const [id, count] of Object.entries(await foreignPixels(result))) {
+			expect(result[id]!.regions.length, id).toBeGreaterThan(0)
+			expect(count, id).toBe(0)
+		}
+	})
+
+	it('keeps the scale-up of an inline fieldset and a transformed table row (#259 review)', async () => {
+		// Chromium lays an inline fieldset out atomically and a table row is transformable: both apply
+		// their transform, so a scale-up must reach the chain scale (a control for the ignored cases above).
+		const box = (w: number) => `<div style="display:inline-block;vertical-align:top;width:${w}px;height:${w}px;mix-blend-mode:multiply;outline:40px solid rgb(0,0,0)"></div>`
+		const result = await measureGrid([
+			['fieldset-inline', `<div style="position:absolute;left:LEFTpx;top:calc(TOPpx + 10px);font-size:0"><fieldset style="display:inline;margin:0;padding:0;border:0;min-width:0;transform:scale(1.1);transform-origin:0 0">${box(10)}</fieldset></div>`],
 			['table-row', '<table style="position:absolute;left:LEFTpx;top:calc(TOPpx + 10px);border-spacing:0"><tr style="transform:scale(0.25)"><td style="padding:0"><img alt="" style="display:block;width:1px;height:1px;outline:40px solid rgb(0,0,0)"></td></tr></table>'],
 		])
 		for (const [id, count] of Object.entries(await foreignPixels(result))) {
 			expect(result[id]!.regions.length, id).toBeGreaterThan(0)
+			expect(count, id).toBe(0)
+		}
+	})
+
+	it('does not treat overflow on a non-replaced inline box as a clip (#259 review)', async () => {
+		// CSS overflow does not apply to an inline box, so a child's outline paints outside it.
+		const box = `<div style="display:inline-block;vertical-align:top;width:6px;height:6px;mix-blend-mode:multiply;outline:40px solid rgb(0,0,0)"></div>`
+		const result = await measureGrid([
+			['span-hidden', `<div style="position:absolute;left:LEFTpx;top:calc(TOPpx + 10px);font-size:0"><span style="overflow:hidden">${box}</span></div>`],
+			['span-clip', `<div style="position:absolute;left:LEFTpx;top:calc(TOPpx + 10px);font-size:0"><span style="overflow:clip">${box}</span></div>`],
+			['span-object', `<div style="position:absolute;left:LEFTpx;top:calc(TOPpx + 10px);font-size:0"><object style="display:inline;transform:scale(0.9);transform-origin:0 0">${box}</object></div>`],
+			['div-hidden', `<div style="position:absolute;left:LEFTpx;top:calc(TOPpx + 10px);font-size:0"><div style="overflow:hidden;width:6px;height:6px">${box}</div></div>`],
+		])
+		for (const [id, count] of Object.entries(await foreignPixels(result))) {
+			if (id.startsWith('span')) expect(result[id]!.regions.length, id).toBeGreaterThan(0)
 			expect(count, id).toBe(0)
 		}
 	})
