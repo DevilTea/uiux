@@ -131,6 +131,8 @@ const ROLE_MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; 
 	createView: { min: 'editor' },
 	updateViewSpec: { min: 'editor' },
 	updateViewStructure: { min: 'editor' },
+	// Added with the View metadata operation (issue #56): `views.write`, like the other View writes.
+	updateViewMetadata: { min: 'editor' },
 	updateWorkspaceSettings: { min: 'editor' },
 	createLocale: { min: 'editor' },
 	updateLocale: { min: 'editor' },
@@ -206,8 +208,8 @@ describe('parity: role-derived keys decide as the role matrix did', () => {
 				if ((denied === undefined) !== before) changed.push(`${id}: ${before ? 'allowed' : 'refused'} → ${denied ? 'refused' : 'allowed'}`)
 			}
 		}
-		// 53 operations, 7 lease acquires and 6 restores, for 16 members and the system credential.
-		expect(compared).toBe(66 * 17)
+		// 54 operations, 7 lease acquires and 6 restores, for 16 members and the system credential.
+		expect(compared).toBe(67 * 17)
 		expect(changed.sort()).toEqual([...INTENDED_CHANGES].sort())
 	})
 

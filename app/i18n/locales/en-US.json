@@ -1008,6 +1008,23 @@
       "relationPlaceholder": "design"
     }
   },
+  "viewHeader": {
+    "edit": "Rename or change the feature tag",
+    "editNamed": "Rename {name} or change its feature tag",
+    "lockedHint": "Someone else is editing this View.",
+    "name": "Name",
+    "feature": "Feature",
+    "featureHelp": "Leave empty to remove the feature tag.",
+    "featurePlaceholder": "No feature tag",
+    "noFeature": "no feature tag",
+    "nameRequired": "Enter a name.",
+    "saved": "View name and feature tag saved.",
+    "saveFailed": "Couldn't save the View name and feature tag.",
+    "invalidTitle": "The name and feature tag weren't saved:",
+    "conflict": "The View changed since you started editing.",
+    "conflictBody": "It's now saved as {name} ({feature}). Your draft is kept. Nothing was overwritten.",
+    "keepMine": "Keep editing mine"
+  },
   "settings": {
     "title": "Workspace settings",
     "general": "General",
@@ -2584,6 +2601,7 @@
       "createView": "Created the View",
       "updateViewSpec": "Edited the Spec",
       "updateViewStructure": "Edited the structure",
+      "updateViewMetadata": "Edited the name or feature tag",
       "updateWorkspaceSettings": "Edited the Workspace settings",
       "createLocale": "Created the Locale",
       "updateLocale": "Edited the Locale",

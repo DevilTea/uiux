@@ -70,6 +70,8 @@ export const ACCESS_OPERATIONS = {
 	createView: { requiredKeys: ['views.write'] },
 	updateViewSpec: { requiredKeys: ['views.write'] },
 	updateViewStructure: { requiredKeys: ['views.write'] },
+	// Clause 01a11485-fa44-7b6a-99f8-de4e1e8edcfc: `update_view_metadata` and `PUT /api/views/:id/metadata`.
+	updateViewMetadata: { requiredKeys: ['views.write'] },
 	updateWorkspaceSettings: { requiredKeys: ['settings.write'] },
 	createLocale: { requiredKeys: ['locales.write'] },
 	updateLocale: { requiredKeys: ['locales.write'] },

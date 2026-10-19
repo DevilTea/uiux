@@ -38,14 +38,14 @@ Sign in with the link `uiux dev` prints, then work from the sidebar (an icon rai
 - **UX Flows** are graphs of steps (a View, optionally a Variant) joined by transitions (a Widget event). Edit them on desktop; *Play prototype* runs the Flow as a clickable prototype on any device.
 - **Workspace**, one quieter entry at the foot of the sidebar, holds the secondary authoring pages, switched with the tabs at their top: **Settings** (General, Viewports, Themes), **Product Kit** (its packages, kit build and Adapters, then Components, Styles & themes and Files), **Access presets**, **Locales** and **Assets**; and **Members** (Owners, from the member menu at the top right) manages the roster, tokens and sessions.
 
-`⌘K` / `Ctrl+K` searches and jumps anywhere, `?` lists every keyboard shortcut, and Workbench preferences switch the UI language (English, 繁體中文) and theme. Desktop gets everything. Tablets get review: canvas, comments, resolve and reopen, Flows and the player; structural editing stays on desktop. Phones get reading the Spec plus triaging and replying to comments.
+`⌘K` / `Ctrl+K` searches and jumps anywhere, `?` lists every keyboard shortcut, and Workbench preferences switch the UI language (English, 繁體中文) and theme. Desktop gets everything. Tablets get review: canvas, comments, resolve and reopen, Flows and the player; structural editing stays on desktop. Phones get reading the Spec plus triaging and replying to comments. Renaming a View and editing its feature tag, from the View page header, work on every device.
 
 ## Server surfaces
 
 Nitro serves `GET /api/health`, selected-Workspace point reads under `/api/resources/:kind/:key`, discovery endpoints under `/api/resources/list` and `/api/resources/search`, safe binary asset content delivery under `/api/assets/:id/content`, authoring endpoints under `/api/*`, and MCP at `/mcp`. The Workbench lists canonical resources, displays their content and diagnostics, and refreshes from the same selected-Workspace application facade used by HTTP and MCP.
 
 MCP exposes compact read-only discovery plus domain-specific authoring operations with revision CAS:
-- Views: `create_view`, `update_view_spec`, `update_view_structure`
+- Views: `create_view`, `update_view_spec`, `update_view_structure`, `update_view_metadata`
 - Workspace settings: `update_workspace_settings`
 - Locales: `create_locale`, `update_locale`
 - UX Flows: `create_flow`, `update_flow`

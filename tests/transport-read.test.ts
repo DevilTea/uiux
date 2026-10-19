@@ -151,6 +151,7 @@ describe('shared HTTP/MCP point-resource reads', { timeout: HEAVY_SERVER_SUITE_T
 				'update_flow',
 				'update_locale',
 				'update_product_kit',
+				'update_view_metadata',
 				'update_view_spec',
 				'update_view_structure',
 				'update_workspace_settings',
@@ -162,6 +163,7 @@ describe('shared HTTP/MCP point-resource reads', { timeout: HEAVY_SERVER_SUITE_T
 			expect(tools.tools.find(tool => tool.name === 'create_view')?.annotations?.readOnlyHint).toBe(false)
 			expect(tools.tools.find(tool => tool.name === 'update_view_spec')?.annotations?.destructiveHint).toBe(true)
 			expect(tools.tools.find(tool => tool.name === 'update_view_structure')?.annotations?.destructiveHint).toBe(true)
+			expect(tools.tools.find(tool => tool.name === 'update_view_metadata')?.annotations?.destructiveHint).toBe(true)
 			expect(tools.tools.some(tool => /write|patch|filesystem/iu.test(tool.name))).toBe(false)
 		}
 		finally {

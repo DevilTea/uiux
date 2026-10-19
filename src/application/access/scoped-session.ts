@@ -30,7 +30,7 @@ import type {
 	SetReviewDisplayHintCommand,
 	SubmitReadyForReviewCommand,
 } from '../services/review-authoring'
-import type { CreateViewCommand, UpdateViewSpecCommand, UpdateViewStructureCommand, ViewAuthoringResult } from '../services/view-authoring'
+import type { CreateViewCommand, UpdateViewMetadataCommand, UpdateViewSpecCommand, UpdateViewStructureCommand, ViewAuthoringResult } from '../services/view-authoring'
 import type { PointResourceRead, WorkspaceApplicationSession } from '../services/workspace-session'
 import type { UpdateWorkspaceSettingsCommand, WorkspaceAuthoringResult } from '../services/workspace-authoring'
 import type {
@@ -161,6 +161,8 @@ export interface ScopedWorkspaceSession {
 	createView(command: CreateViewCommand): Promise<Scoped<ViewAuthoringResult>>
 	updateViewSpec(command: UpdateViewSpecCommand): Promise<Scoped<ViewAuthoringResult>>
 	updateViewStructure(command: UpdateViewStructureCommand): Promise<Scoped<ViewAuthoringResult>>
+	/** Renames a View or sets or clears its `feature` tag; `views.write` and the View's edit lease (Clause 01a15379-d8f7-7c0c-9b9a-05c07c64cc85). */
+	updateViewMetadata(command: UpdateViewMetadataCommand): Promise<Scoped<ViewAuthoringResult>>
 	updateWorkspaceSettings(command: UpdateWorkspaceSettingsCommand): Promise<Scoped<WorkspaceAuthoringResult>>
 	/** The Product Kit Resource; `workspace.read` only (Clause 01a11bb1-b3c2-7937-96fb-e139c5e566f5). */
 	readProductKit(): Promise<ProductKitRead | undefined>
@@ -533,6 +535,7 @@ export function createScopedWorkspaceSession(
 		createView: command => write('createView', command.id, { kind: 'view', key: command.id }, () => app.createView(command)),
 		updateViewSpec: command => write('updateViewSpec', command.key, { kind: 'view', key: command.key }, () => app.updateViewSpec(command)),
 		updateViewStructure: command => write('updateViewStructure', command.key, { kind: 'view', key: command.key }, () => app.updateViewStructure(command)),
+		updateViewMetadata: command => write('updateViewMetadata', command.key, { kind: 'view', key: command.key }, () => app.updateViewMetadata(command)),
 		updateWorkspaceSettings: command => write('updateWorkspaceSettings', 'workspace', { kind: 'workspace', key: 'workspace' }, () => app.updateWorkspaceSettings(command)),
 		async readProductKit() { assert('readProductKit'); return app.readProductKit() },
 		composeProductKit: command => write('composeProductKit', PRODUCT_KIT_KEY, PRODUCT_KIT_LEASE, () => app.composeProductKit(command, productKitGuard('composeProductKit'))),

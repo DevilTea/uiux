@@ -85,6 +85,7 @@ describe('history constants', () => {
 			'createView',
 			'updateViewSpec',
 			'updateViewStructure',
+			'updateViewMetadata',
 			'updateWorkspaceSettings',
 			'composeProductKit',
 			'updateProductKit',

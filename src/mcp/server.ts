@@ -72,6 +72,14 @@ const updateViewStructureSchema = z.object({
 	variants: z.record(z.string(), z.unknown()),
 }).strict()
 
+// Clause 01a15379-d8f7-7c0c-9b9a-05c07c64cc85: the service refuses a call that gives neither name nor feature as invalid.
+const updateViewMetadataSchema = z.object({
+	viewId: z.string(),
+	expectedRevision: z.string(),
+	name: z.string().optional().describe('The new display name, stored trimmed; non-empty after trimming, and need not be unique among Views.'),
+	feature: z.string().nullable().optional().describe('The new feature tag (a non-empty string), or null to remove the tag.'),
+}).strict()
+
 const updateWorkspaceSettingsSchema = z.object({
 	expectedRevision: z.string(),
 	settings: z.object({
@@ -604,6 +612,22 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			expectedRevision: input.expectedRevision,
 			ir: input.ir as ViewResource['ir'],
 			variants: input.variants as ViewResource['variants'],
+		})),
+	)
+
+	server.registerTool(
+		'update_view_metadata',
+		{
+			title: 'Update UIUX View Metadata',
+			description: 'Rename a View or set or clear its feature tag: changes only name and feature, at least one of them, and keeps the View identity, IR, Variants, Spec and Decisions, so formal Evidence stays fresh. An omitted field keeps its value; feature null removes the tag. Needs views.write and the revision previously read by the caller; subject to the View\'s edit lease. Refusals: conflict (re-read the View), locked, not_found, invalid_expected_revision, invalid.',
+			inputSchema: updateViewMetadataSchema,
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async input => authoringToolResult('view', await app.updateViewMetadata({
+			key: input.viewId,
+			expectedRevision: input.expectedRevision,
+			...(input.name === undefined ? {} : { name: input.name }),
+			...(input.feature === undefined ? {} : { feature: input.feature }),
 		})),
 	)
 
