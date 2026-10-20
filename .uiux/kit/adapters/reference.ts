@@ -65,7 +65,14 @@ function tierOf(viewport: ViewportValue | null): ViewportTier {
 	return 'wide'
 }
 
-/** Theme ids are opaque Workspace keys; `light` and `dark` are styled explicitly, anything else follows the OS scheme. */
+/** The Workspace theme IDs the reference CSS styles; the manifest's `themeSupport` rejects every other one. */
+const REFERENCE_THEME_IDS: ReadonlySet<string> = new Set(['light', 'dark'])
+
+/**
+ * Theme ids are opaque Workspace keys; `light` and `dark` are styled explicitly. UIUX never renders
+ * another theme with this Adapter (its `themeSupport` rejects it), so the OS-scheme `uiux-theme-auto`
+ * is left only for a RootShell `themeId` that cannot be read.
+ */
 function themeClassOf(result: DepResult): string {
 	const themeId = result.ok && typeof result.value === 'string' ? result.value : ''
 	if (themeId === 'light') return 'uiux-theme-light'
@@ -3299,6 +3306,11 @@ export const manifest: AdapterManifest = {
 		{ type: 'EmptyState', component: EmptyStateRenderer },
 	],
 	providers: [],
+	// The reference CSS styles exactly the Workspace themes `light` and `dark`; UIUX diagnoses any other
+	// theme instead of rendering it (Clause 01a11a5a-448c-76ba-94d4-6766435b9e2b, Rule 01a115cd-c27d-78ba-b95d-bf1aa50adec7).
+	themeSupport: {
+		supports: themeId => REFERENCE_THEME_IDS.has(themeId),
+	},
 }
 
 export default manifest
