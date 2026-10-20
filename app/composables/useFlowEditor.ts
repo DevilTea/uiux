@@ -58,7 +58,12 @@ export function useFlowEditor(flowId: Ref<string>) {
 	const locked = shallowRef<Readonly<{ lock?: FetchErrorLock }>>()
 	let loadSequence = 0
 
-	async function load(): Promise<void> {
+	/**
+	 * Reads the Flow and replaces the draft with it. A `quiet` read is a live refresh: it is dropped
+	 * when an edit, a save or a conflict began while it was in flight, so a draft started during the
+	 * read is kept and its save still meets the newer revision as a conflict.
+	 */
+	async function load(options: Readonly<{ quiet?: boolean }> = {}): Promise<void> {
 		const id = flowId.value
 		const sequence = ++loadSequence
 		loadError.value = undefined
@@ -73,6 +78,7 @@ export function useFlowEditor(flowId: Ref<string>) {
 		try {
 			const result = await uiux.readResource<FlowRead>('flow', id)
 			if (sequence !== loadSequence) return
+			if (options.quiet && (dirty.value || saving.value || conflict.value)) return
 			if (!result) {
 				notFound.value = true
 				read.value = undefined
@@ -107,7 +113,7 @@ export function useFlowEditor(flowId: Ref<string>) {
 		const current = read.value
 		if (!revision || !current || revision === current.revision || current.key !== flowId.value) return
 		if (dirty.value || saving.value || loading.value || conflict.value) return
-		void load()
+		void load({ quiet: true })
 	})
 
 	// ---------------------------------------------------------------------------------------------
@@ -311,6 +317,9 @@ export function useFlowEditor(flowId: Ref<string>) {
 		if (saved.value) draft.value = cloneDraft(saved.value)
 		saveError.value = undefined
 		locked.value = undefined
+		// A live re-read dropped while the draft was dirty leaves a newer Flow unread: fetch it now.
+		const live = workbench.flows.value.find(flow => flow.key === flowId.value)?.revision
+		if (read.value && live && live !== read.value.revision) void load({ quiet: true })
 	}
 
 	/** One atomic `update_flow` with the revision this draft started from. A 409 keeps the draft. */
