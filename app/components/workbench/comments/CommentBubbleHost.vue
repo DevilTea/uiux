@@ -76,6 +76,7 @@ function stopListening(): void {
 	window.removeEventListener('pointerup', onRelease, true)
 	window.removeEventListener('pointercancel', onRelease, true)
 	window.removeEventListener('blur', onRelease)
+	window.removeEventListener('contextmenu', onRelease, true)
 }
 
 function unhold(): void {
@@ -97,13 +98,16 @@ function onRelease(): void {
 }
 
 function onBubblePointerdown(event: PointerEvent): void {
-	if (!event.isPrimary) return
+	// Only the primary button holds; a right or middle press (or ctrl-click, the macOS context menu) never starts a drag.
+	if (!event.isPrimary || event.button !== 0 || (event.ctrlKey && /Mac/i.test(navigator.platform))) return
 	clearTimeout(releaseTimer)
 	releaseTimer = undefined
 	pressed = true
 	window.addEventListener('pointerup', onRelease, true)
 	window.addEventListener('pointercancel', onRelease, true)
 	window.addEventListener('blur', onRelease)
+	// A context menu may swallow the pointerup.
+	window.addEventListener('contextmenu', onRelease, true)
 	if (held) return
 	// The floating layer's wrapper, positioned by an inline transform the floating layer rewrites.
 	const wrapper = (event.currentTarget as HTMLElement).closest<HTMLElement>('[data-reka-popper-content-wrapper]')

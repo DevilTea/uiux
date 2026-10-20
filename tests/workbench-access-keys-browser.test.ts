@@ -269,9 +269,8 @@ describe('history and Review actions follow their keys', () => {
 		const thread = await seedThread('P4 canvas gating thread.')
 		/**
 		 * The bubble of the thread, opened through the address, once it stands at the thread's pin.
-		 * Until the Preview draws the pin, the bubble stands in the canvas corner; when the pin is
-		 * drawn, it moves there. A click whose mouse-down and mouse-up straddle that move is lost (the
-		 * menu opens on `click`, and Playwright checks only the first event's target).
+		 * The product holds the bubble still while it is pressed (#266), so a click straddling the pin
+		 * draw no longer loses its target; the pin wait remains to keep the test deterministic.
 		 */
 		async function bubbleFor(keys: readonly PermissionKey[]) {
 			const opened = await open(`/views/${VIEW_ID}?thread=${thread}`, await memberCookie(keys))
