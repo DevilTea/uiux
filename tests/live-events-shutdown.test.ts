@@ -45,7 +45,7 @@ async function start(mode: 'server' | 'cli'): Promise<{ child: ChildProcess; ori
 	const args = mode === 'server'
 		? [join(REPOSITORY_ROOT, '.output', 'server', 'index.mjs')]
 		: [join(REPOSITORY_ROOT, 'bin', 'uiux.mjs'), 'dev', '--workspace', root]
-	const env = { ...process.env, PORT: String(port), NITRO_PORT: String(port), ...(mode === 'server' ? { HOST: '127.0.0.1', NITRO_HOST: '127.0.0.1', UIUX_WORKSPACE_ROOT: root } : {}) }
+	const env: NodeJS.ProcessEnv = { ...process.env, PORT: String(port), NITRO_PORT: String(port), ...(mode === 'server' ? { HOST: '127.0.0.1', NITRO_HOST: '127.0.0.1', UIUX_WORKSPACE_ROOT: root } : {}) }
 	delete env.NITRO_SHUTDOWN_TIMEOUT
 	delete env.NITRO_SHUTDOWN_DISABLED
 	const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'], env })
