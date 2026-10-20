@@ -31,7 +31,8 @@ export default defineNitroPlugin((nitroApp) => {
 			installLogRedaction()
 			// The graceful shutdown waits for open connections before the `close` hook runs, and an
 			// event stream never ends by itself: close the streams as soon as the signal arrives.
-			closeEventStreamsOnShutdown(runtime.eventStreams)
+			// `nuxt dev` has no graceful shutdown, and a signal listener there would suppress Node's default exit.
+			if (!import.meta.dev) closeEventStreamsOnShutdown(runtime.eventStreams)
 			// Open (or create) this Workspace's host-local roster now: an unsafe or mismatched store
 			// stops the server instead of failing every request, and a roster without a human Owner
 			// bootstraps one and prints its one-time sign-in link (decision 8).

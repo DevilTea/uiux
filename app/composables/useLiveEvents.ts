@@ -156,8 +156,9 @@ function stale(stream: EventSource): void {
 	livenessFailures += 1
 	// Whatever was sent meanwhile is lost: the next `hello` resyncs.
 	connectedBefore = true
+	// Poll while the reopened stream owes its `hello`; that `hello` stops it.
+	startFallback()
 	if (livenessFailures >= LIVENESS_FAILURES_BEFORE_FALLBACK) {
-		startFallback()
 		scheduleRetry()
 		return
 	}

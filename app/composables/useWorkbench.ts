@@ -3,6 +3,7 @@ import { applyEvidenceContextSelection, createWorkbenchState, type WorkbenchStat
 import { createPreviewSession, type PreviewSession } from './usePreviewSession'
 import type { EvidenceContextSelection, ViewRouteContext } from './workbench-types'
 import type { LiveBatch } from './useLiveEvents'
+import { createProductKitTracker } from './product-kit-tracker'
 
 export type Workbench = WorkbenchState & Readonly<{
 	preview: PreviewSession
@@ -47,6 +48,8 @@ export function provideWorkbench(): Workbench {
 		state.selectedWidgetId.value = 'root'
 		state.selectedVariant.value = ''
 		saveLastView(id)
+		// The Preview renders from the Product Kit file as it is now: its revision is the baseline.
+		void productKit.startPreview()
 		// The preview session starts a fresh runtime generation once the new View is loaded.
 		await state.loadSelectedView(preview.notifyIframeContext)
 	}
@@ -60,6 +63,7 @@ export function provideWorkbench(): Workbench {
 		state.selectedWidgetId.value = context.widget || 'root'
 		saveLastView(id)
 		if (!changingView) return
+		void productKit.startPreview()
 		state.selectedViewId.value = id
 		await state.loadSelectedView(preview.notifyIframeContext)
 	}
@@ -89,28 +93,9 @@ export function provideWorkbench(): Workbench {
 		])
 	}
 
-	/** The Product Kit file's revision the open Preview was last known to render from. */
-	let productKitRevision: string | undefined
-	/**
-	 * Whether the Product Kit file moved (Discussion #241 owner decision 2,
-	 * https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19070362): its `product-kit`
-	 * event names the new revision; after a resync, which names nothing, the file is read again. Only
-	 * while a View is open, since only the Preview renders from it.
-	 */
-	async function productKitMoved(batch: LiveBatch): Promise<boolean> {
-		if (!state.selectedView.value) return false
-		const named = batch.changes.find(change => change.kind === 'product-kit')
-		if (!batch.resync && !named) return false
-		let revision = named?.revision
-		if (revision === undefined) {
-			try { revision = (await ($fetch as unknown as (url: string) => Promise<{ revision?: string }>)('/api/product-kit')).revision }
-			catch { return false }
-		}
-		const known = productKitRevision
-		productKitRevision = revision
-		// Without a revision known yet, only an event that named a change counts.
-		return known === undefined ? named !== undefined : known !== revision
-	}
+	/** Only while a View is open does the Product Kit file matter: only the Preview renders from it. */
+	const productKit = createProductKitTracker(async () => (await ($fetch as unknown as (url: string) => Promise<{ revision?: string }>)('/api/product-kit')).revision)
+	const productKitMoved = async (batch: LiveBatch): Promise<boolean> => state.selectedView.value ? await productKit.moved(batch) : false
 
 	async function applyLiveChanges(batch: LiveBatch): Promise<void> {
 		const viewId = state.selectedView.value?.key
