@@ -735,10 +735,30 @@ describe('Runtime geometry signals (animated occluder paint, #261)', () => {
 		const middle = await latestGeometry()
 		expect(middle.s!.regions.length, 'mid-animation').toBeGreaterThan(0)
 		expect(await foreignPixels(middle)).toEqual({ s: 0 })
-		// Finishing fires no event the listeners use; the per-frame check sees it end.
+		// Finishing fires no event the listeners use; the 250 ms idle check or the per-frame decision notices it end.
 		await page.evaluate(() => (window as never as { __anim: Animation }).__anim.finish())
 		await page.waitForTimeout(700)
 		expect(await producerWork(5)).toEqual({ frames: 0, pending: false })
+	})
+
+	it('notices a script animation whose keyframes change from an inert property to a geometry-relevant one', async () => {
+		await track(cellPair('k', '<img alt="" data-probe="keyed" style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;box-shadow:0 0 0 0 rgb(0,0,0)">', 0), ['k'])
+		await page.evaluate(() => {
+			const element = document.querySelector('[data-probe="keyed"]') as HTMLElement
+			;(window as never as { __anim: Animation }).__anim = element.animate(
+				[{ outlineColor: 'rgb(0,0,0)' }, { outlineColor: 'rgb(255,0,0)' }],
+				{ duration: 1_000_000, fill: 'forwards' },
+			)
+		})
+		// Inert property: several idle checks pass and the producer stays idle.
+		await page.waitForTimeout(700)
+		expect(await producerWork(5)).toEqual({ frames: 0, pending: false })
+		await page.evaluate(() => {
+			const animation = (window as never as { __anim: Animation }).__anim
+			;(animation.effect as KeyframeEffect).setKeyframes([{ boxShadow: '0 0 0 0 rgb(0,0,0)' }, { boxShadow: '0 0 0 40px rgb(0,0,0)' }])
+		})
+		await page.waitForTimeout(700)
+		expect((await producerWork(3)).frames).toBeGreaterThanOrEqual(2)
 	})
 
 	it('keeps measuring only on events while an animation changes nothing the measurer reads', async () => {

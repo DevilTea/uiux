@@ -2,6 +2,9 @@ import type { RuntimeGeometryProducer } from './geometry-producer'
 
 export type GeometrySignalSubscription = Readonly<{ dispose(): void; refreshObservedWidgets(): void }>
 
+/** Period of the idle animation check that notices script animations, which fire no event (#271). */
+const IDLE_ANIMATION_CHECK_MS = 250
+
 /**
  * CSS properties whose animation on an element that is neither a tracked Widget nor one of its
  * ancestors (checked separately) changes nothing the DOM measurer reads: colours it never reads
@@ -10,9 +13,6 @@ export type GeometrySignalSubscription = Readonly<{ dispose(): void; refreshObse
  * (`opacity`, `background-color`, `color` through `currentcolor` borders, ...) between two frames,
  * so a region measured at the animation's start could include paint the occluder covers (#261).
  */
-/** Period of the idle animation check that notices script animations, which fire no event (#271). */
-const IDLE_ANIMATION_CHECK_MS = 250
-
 const GEOMETRY_INERT_PROPERTIES = new Set([
 	'outline-color', 'text-decoration-color', 'caret-color', 'accent-color', 'fill', 'stroke',
 ])
@@ -75,17 +75,17 @@ export function attachGeometrySignals(
 			const target = effect?.target
 			if (!target) return false
 			for (const element of observed) if (target === element || target.contains(element)) return true
-			return animatedProperties(animation, effect).some(property => !GEOMETRY_INERT_PROPERTIES.has(property))
+			return animatedProperties(view, animation, effect).some(property => !GEOMETRY_INERT_PROPERTIES.has(property))
 		})
 	}
 
 	let animationCheck: number | undefined
-	let idleCheck: ReturnType<typeof setTimeout> | undefined
+	let idleCheck: number | undefined
 	let disposed = false
 	function scheduleAnimationCheck(): void {
 		if (disposed || animationCheck !== undefined) return
 		if (idleCheck !== undefined) {
-			clearTimeout(idleCheck)
+			view.clearTimeout(idleCheck)
 			idleCheck = undefined
 		}
 		// Decide after the frame's style update, when started/ended animations are reflected.
@@ -108,7 +108,7 @@ export function attachGeometrySignals(
 		// (#271): one `getAnimations()` pass per `IDLE_ANIMATION_CHECK_MS` straight from the timer, so
 		// an idle page schedules no animation frame.
 		else if (idleCheck === undefined) {
-			idleCheck = setTimeout(() => {
+			idleCheck = view.setTimeout(() => {
 				idleCheck = undefined
 				decideContinuous()
 			}, IDLE_ANIMATION_CHECK_MS)
@@ -160,7 +160,7 @@ export function attachGeometrySignals(
 			disposed = true
 			if (animationCheck !== undefined) view.cancelAnimationFrame(animationCheck)
 			animationCheck = undefined
-			if (idleCheck !== undefined) clearTimeout(idleCheck)
+			if (idleCheck !== undefined) view.clearTimeout(idleCheck)
 			idleCheck = undefined
 			resizeObserver.disconnect()
 			mutationObserver.disconnect()
@@ -174,11 +174,20 @@ export function attachGeometrySignals(
 
 const animatedPropertyCache = new WeakMap<Animation, string[]>()
 
-function animatedProperties(animation: Animation, effect: KeyframeEffect): string[] {
+// Only CSS-driven animations have fixed keyframes; a script animation can change them through
+// `effect.setKeyframes()` or replace `effect`, so it is read on every check.
+function isCssDriven(view: Window, animation: Animation): boolean {
+	const { CSSAnimation, CSSTransition } = view as Window & { CSSAnimation?: abstract new () => Animation, CSSTransition?: abstract new () => Animation }
+	return (typeof CSSAnimation === 'function' && animation instanceof CSSAnimation)
+		|| (typeof CSSTransition === 'function' && animation instanceof CSSTransition)
+}
+
+function animatedProperties(view: Window, animation: Animation, effect: KeyframeEffect): string[] {
+	if (!isCssDriven(view, animation)) return readAnimatedProperties(effect, animation)
 	const cached = animatedPropertyCache.get(animation)
 	if (cached) return cached
 	const properties = readAnimatedProperties(effect, animation)
-	animatedPropertyCache.set(animation, properties)
+	if (!properties.includes('unknown')) animatedPropertyCache.set(animation, properties)
 	return properties
 }
 
