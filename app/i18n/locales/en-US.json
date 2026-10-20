@@ -2324,7 +2324,7 @@
       "outcome_not_current": "The outcome is out of date."
     },
     "handoff": {
-      "adapter_provenance_unverifiable": "An Adapter has no package version, and its module graph could not be read for a content digest, so the Handoff cannot record it.",
+      "adapter_provenance_unverifiable": "The Handoff bundle's Adapter provenance cannot be verified: an Adapter has no package version, and its module graph could not be read for a content digest.",
       "asset_content_digest_missing": "An Asset in the Handoff has no content digest.",
       "component_unavailable": "A Widget type maps to a Product Kit component whose files could not be read, so the Handoff names no component for it.",
       "duplicate_artifact": "A file appears twice in the Handoff.",

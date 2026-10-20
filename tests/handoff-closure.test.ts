@@ -1296,10 +1296,11 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 	// Clause 01a115cd-d7f6-74a1-ba9f-c20a24a31ae5: an entry needs a `packageVersion` or a `contentDigest`.
 	it('blocks, rather than failing the export, when a local Adapter\'s module graph cannot be read for its content digest', async () => {
 		const { root, persistence } = await createTestWorkspace([
-			{ moduleSpecifier: './adapters/badge.mjs' },
 			{ moduleSpecifier: './adapters/counter.mjs' },
+			{ moduleSpecifier: './adapters/badge.mjs' },
 		])
 		await writeBadgeAdapter(root)
+		// The unverifiable Adapter sits at Workspace Adapter-list index 1 (the recorded set has one entry), so the path proves it names the list index.
 		// Node loads it, but the browser-platform bundle the digest is computed from cannot resolve a Node built-in.
 		await writeFile(join(root, 'kit', 'adapters', 'badge.mjs'), `import 'node:fs';\n${makeBadgeAdapterSource()}`)
 		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
@@ -1310,7 +1311,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		expect(exported.status).toBe('exported')
 		const manifest = exported.manifest!
 		expect(manifest.readiness.implementationReady).toBe(false)
-		expect(manifest.readiness.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'handoff.adapter_provenance_unverifiable', path: '/adapters/0', blocking: true }))
+		expect(manifest.readiness.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'handoff.adapter_provenance_unverifiable', path: '/adapters/1', blocking: true }))
 		expect(manifest.provenance.adapters.map(adapter => adapter.adapterId)).toEqual(['my-counter'])
 		// Its entry module is not stored either; the bundle names no Adapter it does not record.
 		expect(manifest.artifactRefs.some(reference => reference.context?.adapterId === 'zz-badge')).toBe(false)
