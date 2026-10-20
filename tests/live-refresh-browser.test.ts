@@ -43,7 +43,7 @@ afterAll(async () => {
 	await server?.close()
 })
 
-async function open(path: string): Promise<{ context: BrowserContext; page: Page; streams: () => number; connected: () => number }> {
+async function open(path: string, setup?: (page: Page) => Promise<void>): Promise<{ context: BrowserContext; page: Page; streams: () => number; connected: () => number }> {
 	const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' })
 	await context.addInitScript(() => {
 		localStorage.setItem('nuxt-color-mode', 'light')
@@ -56,6 +56,7 @@ async function open(path: string): Promise<{ context: BrowserContext; page: Page
 	page.on('request', (request) => { if (new URL(request.url()).pathname === '/api/events') opened += 1 })
 	// The stream answered: the server has accepted the subscription (what is sent before this is lost).
 	page.on('response', (response) => { if (new URL(response.url()).pathname === '/api/events' && response.ok()) connected += 1 })
+	await setup?.(page)
 	await page.goto(`${server.origin}${path}`, { waitUntil: 'domcontentloaded' })
 	// The page is never reloaded: this marker would be gone after a reload.
 	await page.evaluate(() => { (window as unknown as { liveMarker: number }).liveMarker = 1 })
@@ -107,5 +108,42 @@ describe('Live refresh in the Workbench (Rules 01a11485-f414-7882-b94f-cd4236c26
 			expect(await marker(page)).toBe(1)
 		}
 		finally { await context.close() }
+	}, 60_000)
+
+	it('shows a write that lands after the page read its data but before the server accepted its stream (the first hello resyncs, #281)', async () => {
+		let release!: () => void
+		const released = new Promise<void>((resolve) => { release = resolve })
+		let held = 0
+		let lastRead = Date.now()
+		const { context, page, connected } = await open(`/views/${VIEW_ID}`, async (target) => {
+			target.on('response', (response) => { if (new URL(response.url()).pathname.startsWith('/api/') && !response.url().includes('/api/events')) lastRead = Date.now() })
+			// The stream request is held back, so the server cannot have accepted the subscription yet.
+			await target.route('**/api/events', async (route) => {
+				held += 1
+				await released
+				await route.continue()
+			})
+		})
+		try {
+			const name = page.locator('[data-view-header] [data-view-name]').first()
+			await name.waitFor({ timeout: 20_000 })
+			await poll(() => held).toBe(1)
+			// The page's initial reads are done once no `/api/` response has arrived for a while.
+			await poll(() => Date.now() - lastRead >= 1_500).toBe(true)
+			expect(connected()).toBe(0)
+
+			// The page has read the View; the stream is not accepted yet, so this change is never sent as an event.
+			await call('update_view_metadata', { viewId: VIEW_ID, expectedRevision: await readRevision('view', VIEW_ID), name: 'Written before the stream' })
+			await call('release_lock', {})
+			release()
+			await poll(connected).toBe(1)
+
+			await poll(() => name.textContent()).toContain('Written before the stream')
+			expect(await marker(page)).toBe(1)
+		}
+		finally {
+			release()
+			await context.close()
+		}
 	}, 60_000)
 })

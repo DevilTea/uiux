@@ -64,13 +64,22 @@ afterEach(() => {
 
 const current = () => FakeEventSource.instances.at(-1)!
 
+/** Delivers the first `hello` and lets its resync (one per session start, #281) pass, so a test sees only what it triggers. */
+function openStream(): void {
+	current().emit('hello', { serverInstanceId: 'a' })
+	vi.advanceTimersByTime(LIVE_BATCH_MS)
+	batches.length = 0
+	locks = 0
+	access = 0
+}
+
 describe('useLiveEvents', () => {
 	it('opens one stream, and batches the events of a burst into one delivery, one entry per resource', () => {
 		live.start()
 		live.start()
 		expect(FakeEventSource.instances).toHaveLength(1)
 		expect(current().url).toBe(LIVE_EVENTS_PATH)
-		current().emit('hello', { serverInstanceId: 'a' })
+		openStream()
 		expect(live.state.value).toBe('open')
 		current().emit('resource.changed', { kind: 'view', key: 'v1', revision: 'r1' })
 		current().emit('resource.changed', { kind: 'view', key: 'v1', revision: 'r2' })
@@ -88,11 +97,18 @@ describe('useLiveEvents', () => {
 		expect(touchesKinds(batches[0]!, ['flow'])).toBe(false)
 	})
 
-	it('does not resync on the first hello, and resyncs everything after a reconnect or when the server instance changes', () => {
+	it('resyncs everything on the first hello (a write before the stream was accepted is never sent), after a reconnect, and when the server instance changes', () => {
 		live.start()
-		current().emit('hello', { serverInstanceId: 'a' })
 		vi.advanceTimersByTime(LIVE_BATCH_MS)
 		expect(batches).toEqual([])
+		current().emit('hello', { serverInstanceId: 'a' })
+		vi.advanceTimersByTime(LIVE_BATCH_MS)
+		expect(batches).toEqual([{ resync: true, changes: [] }])
+		expect(locks).toBe(1)
+		expect(access).toBe(1)
+		batches.length = 0
+		locks = 0
+		access = 0
 
 		// A dropped stream reconnects by itself; meanwhile the Workbench polls.
 		current().fail(FakeEventSource.CONNECTING)
@@ -143,7 +159,7 @@ describe('useLiveEvents', () => {
 
 	it('delivers access.changed to the access listeners only', () => {
 		live.start()
-		current().emit('hello', { serverInstanceId: 'a' })
+		openStream()
 		current().emit('access.changed', {})
 		vi.advanceTimersByTime(LIVE_BATCH_MS)
 		expect(access).toBe(1)
