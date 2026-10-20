@@ -74,6 +74,9 @@ import(workerData.url).then(
     let events
     try { events = typeof module.describeDeclaredWidgetEvents === 'function' ? module.describeDeclaredWidgetEvents() : undefined }
     catch { events = undefined }
+    // Events that cannot be cloned to the server are as unknown as ones that throw.
+    try { events = events === undefined ? undefined : structuredClone(events) }
+    catch { events = undefined }
     parentPort.postMessage({ ok: true, reported, events })
   },
   (error) => parentPort.postMessage({ ok: false, message: error instanceof Error ? error.message : String(error) }),

@@ -1111,6 +1111,9 @@ export const manifest = {
 			.toEqual({ check: { state: 'valid' }, declaredWidgetEvents: { state: 'unavailable' } })
 		expect(await evaluate('export const describeAdapterDiagnostics = () => [];\nexport const describeDeclaredWidgetEvents = () => ({ Tap: [{ name: 1 }] });\n'))
 			.toEqual({ check: { state: 'valid' }, declaredWidgetEvents: { state: 'unavailable' } })
+		// An Events value that cannot be cloned to the server (a function) leaves only the Events unknown too.
+		expect(await evaluate('export const describeAdapterDiagnostics = () => [];\nexport const describeDeclaredWidgetEvents = () => ({ Tap: [{ name: "tap", description: "Tapped", f() {} }] });\n'))
+			.toEqual({ check: { state: 'valid' }, declaredWidgetEvents: { state: 'unavailable' } })
 		// An evaluation that fails or does not report in time is `unchecked`, and the Events are unavailable.
 		expect(await evaluate('throw new Error("always");\n')).toMatchObject({ check: { state: 'unchecked' }, declaredWidgetEvents: { state: 'unavailable' } })
 		expect(await evaluate('await new Promise(() => {});\n', 300)).toMatchObject({ check: { state: 'unchecked' }, declaredWidgetEvents: { state: 'unavailable' } })
