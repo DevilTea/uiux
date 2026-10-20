@@ -1,7 +1,10 @@
 Feature: Render context
   # Source: Discussion #130 (Part 12, Adapter contract amendments), decision 8, R31 https://github.com/DevilTea/uiux/discussions/130; accepted in full 2026-10-08 https://github.com/DevilTea/uiux/discussions/130#discussioncomment-18807264.
-  # Status: not built as of cf3b984; see the Implementation gaps entry of 01a115cd-c27d-78ba-b95d-bf1aa50adec7 in its owner.
-  # Note: No test exists yet.
+  # Test: code@547ff0f `tests/adapter-theme-support-browser.test.ts#L103` "shows the render-context diagnostic in the Preview in place of the View, and renders again on a supported theme". https://github.com/DevilTea/uiux/blob/547ff0f6e758c64af4683f130e406ce436632adf/tests/adapter-theme-support-browser.test.ts#L103
+  # Test: code@547ff0f `tests/adapter-theme-support-browser.test.ts#L132` "is refused by formal capture, while a supported theme captures". https://github.com/DevilTea/uiux/blob/547ff0f6e758c64af4683f130e406ce436632adf/tests/adapter-theme-support-browser.test.ts#L132
+  # Test: code@547ff0f `tests/adapter-theme-support-browser.test.ts#L91` "is reported by the adapters route while the Adapter set stays valid". https://github.com/DevilTea/uiux/blob/547ff0f6e758c64af4683f130e406ce436632adf/tests/adapter-theme-support-browser.test.ts#L91
+  # Test: code@547ff0f `tests/adapter-theme-support.test.ts#L215` "refuses that context with render_context.incompatible_theme before any browser runs, and stores nothing". https://github.com/DevilTea/uiux/blob/547ff0f6e758c64af4683f130e406ce436632adf/tests/adapter-theme-support.test.ts#L215
+  # Status: built as of 547ff0f.
   @spec:id:01a11a5b-1af9-7359-bb53-add13edeb3be
   @spec:demonstrates:01a115cd-c27d-78ba-b95d-bf1aa50adec7
   @spec:demonstrates:01a11a5a-566b-70b1-b000-2918519c0d19

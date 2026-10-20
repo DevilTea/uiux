@@ -16,7 +16,7 @@ import { createWorkspaceAccessPresetsReader } from './access/workspace-presets'
 import { createEventStreamHub, type EventStreamHub } from './event-stream'
 import { createHistoryStoreFactory, type HistoryStoreFactory } from './history-stores'
 import { createKitBuildRunner, registerKitBuildRunner, type KitBuildRunner } from './kit-build'
-import { checkAdapterSetRuntime, getSelectedWorkspacePreviewBundle } from './workspace-adapters'
+import { checkAdapterSetRuntime, getSelectedWorkspacePreviewBundle, selectedWorkspaceThemeSupport } from './workspace-adapters'
 
 export type SelectedWorkspaceServerRuntime = Readonly<{
 	root: string
@@ -101,6 +101,8 @@ export function createSelectedWorkspaceServerRuntime(
 		kitBuild,
 		// Handoff refuses an Adapter set the Preview refuses (Clause 01a116f0-cae2-7c64-9c76-d472f252789a).
 		checkAdapterSet: set => checkAdapterSetRuntime(selectedRoot, persistence.layout, set),
+		// Formal capture refuses a theme the current Adapter resolution does not support (Rule 01a11add-f46d-7e92-8f5a-9d10dba6473d).
+		adapterThemeSupport: () => selectedWorkspaceThemeSupport(selectedRoot, persistence.layout),
 	})
 	// Every committed write (HTTP and MCP alike) and every lease change becomes a change event.
 	const events = createChangeEventBus()

@@ -34,6 +34,7 @@ import type { FileNativePersistence } from '../../persistence'
 import { workspaceRefusalMessage } from '../../persistence/schema-policy'
 import {
 	adapterResolutionBase,
+	allThemesSupported,
 	NodeAdapterManifestLoader,
 	NodeWorkspaceAdapterModuleResolver,
 	resolveWorkspaceAdapterSet,
@@ -730,6 +731,7 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 			diagnostics: [],
 			summaries: [],
 			set: Object.freeze({ entries: Object.freeze([]), [Symbol.for('ValidatedAdapterSet')]: true }) as never,
+			themeSupport: allThemesSupported(),
 		}
 
 		if (neededAdapterSelections.length > 0) {

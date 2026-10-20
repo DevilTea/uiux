@@ -51,6 +51,9 @@ export type FormalEvidenceItem = Readonly<{
 	record: FormalEvidenceRecord
 }>
 
+/** Reads the theme support of the current Adapter resolution: the theme IDs it does not support, or `undefined` while the set is invalid. */
+export type AdapterThemeSupportSource = () => Promise<Readonly<{ unsupportedThemeIds: readonly string[] }> | undefined>
+
 /** A View's current render-input digest (Clause 01a14e30-2d4a-…) and the revision it was read at. */
 export type ViewRenderInput = Readonly<{ key: string; revision: string; renderInputDigest: string }>
 
@@ -69,6 +72,12 @@ export function createFormalCaptureService(
 		captureCookie?: () => Readonly<{ name: string; value: string }> | undefined
 		/** The kit build state under `uiux dev`; without it no build runs and capture is not held back. */
 		kitBuild?: () => KitBuildStatus
+		/**
+		 * The theme support of the current Adapter resolution (Rule 01a11add-f46d-7e92-8f5a-9d10dba6473d),
+		 * `undefined` while the set is invalid (the Preview then refuses every context itself). Without
+		 * it no theme is refused here.
+		 */
+		themeSupport?: AdapterThemeSupportSource
 	},
 ): FormalCaptureService {
 	async function buildRegistries(contexts: readonly ResolvedRenderContext[]): Promise<
@@ -118,6 +127,11 @@ export function createFormalCaptureService(
 			}
 		}
 
+		// Rule 01a11a5a-566b-70b1-b000-2918519c0d19: a context whose theme the active Adapters do not
+		// support is refused (`render_context.incompatible_theme`), never captured with another theme.
+		const themeSupport = await options?.themeSupport?.()
+		const unsupportedThemes = new Set(themeSupport?.unsupportedThemeIds ?? [])
+
 		return {
 			ok: true,
 			registries: {
@@ -125,6 +139,7 @@ export function createFormalCaptureService(
 				viewports: viewportsRecord,
 				themes: themesSet,
 				variantsByView,
+				...(themeSupport ? { themeIsCompatible: (themeId: string) => !unsupportedThemes.has(themeId) } : {}),
 			},
 			workspaceInspection: wsRead.resource,
 			workspaceRevision: wsRead.revision,

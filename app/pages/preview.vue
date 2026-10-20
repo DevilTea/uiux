@@ -30,7 +30,7 @@ import type {
 import type { PreviewRuntimeBridge } from '../../src/preview/browser-runtime'
 import { CAPTURE_HARNESS_GLOBAL, type CaptureHarnessHooks } from '../../src/preview/capture-harness-hooks'
 import type { ViewResource } from '../../src/domain/views/schema'
-import type { ResolvedRenderContext } from '../../src/domain/render-context/schema'
+import { incompatibleThemeDiagnostic, type ResolvedRenderContext } from '../../src/domain/render-context/schema'
 import type { I18nResource } from '../../src/domain/i18n/schema'
 
 // The Preview document has no Workbench shell and never follows the Workbench color mode: pin
@@ -110,6 +110,14 @@ let runtimeBridge: RuntimePreviewProtocolBridge | undefined
 let geometryProducer: RuntimeGeometryProducer | undefined
 let geometrySignals: GeometrySignalSubscription | undefined
 const materializationResult = ref<PreviewMaterializationResult>()
+/**
+ * The Workspace themes the current Adapter resolution does not support, from the adapters route
+ * (Rule 01a11add-f46d-7e92-8f5a-9d10dba6473d). A context with one of them is not rendered: the
+ * document shows `render_context.incompatible_theme` in its place and no other theme stands in
+ * (Rules 01a115cd-c27d-78ba-b95d-bf1aa50adec7 and 01a11a5a-566b-70b1-b000-2918519c0d19).
+ */
+const unsupportedThemeIds = ref<readonly string[]>([])
+const themeDiagnostic = computed<Diagnostic | undefined>(() => unsupportedThemeIds.value.includes(themeId.value) ? incompatibleThemeDiagnostic(themeId.value) : undefined)
 
 const activeContext = computed<ResolvedRenderContext>(() => ({
 	viewId: viewId.value,
@@ -381,6 +389,18 @@ function disposeCurrentRuntime() {
 	}
 }
 
+/**
+ * A context change selected a theme the active Adapters do not support (Rule
+ * 01a11a5a-566b-70b1-b000-2918519c0d19): the construction is disposed, so the View is never shown
+ * under that theme or another one, and the diagnostic takes its place. A later context with a
+ * supported theme constructs anew; an evaluation in flight is superseded.
+ */
+function showThemeDiagnostic() {
+	runtimeEvaluation++
+	disposeCurrentRuntime()
+	materializationResult.value = undefined
+}
+
 async function evaluateRuntime() {
 	if (!viewData.value?.resource || !viewId.value) return
 	const evaluation = ++runtimeEvaluation
@@ -409,17 +429,25 @@ async function evaluateRuntime() {
 	}
 
 	type PreviewAdaptersResponse =
-		| { state: 'valid'; diagnostics: []; summaries: unknown[]; bundleUrl: string; stylesheetUrl?: string; themes?: Readonly<Record<string, Readonly<Record<string, string>>>> }
+		| { state: 'valid'; diagnostics: []; summaries: unknown[]; bundleUrl: string; stylesheetUrl?: string; themes?: Readonly<Record<string, Readonly<Record<string, string>>>>; themeSupport?: Readonly<{ unsupportedThemeIds: readonly string[] }> }
 		| { state: 'invalid'; diagnostics: readonly Diagnostic[]; summaries: unknown[] }
 
 	try {
 		const adapterStatus = await uiux.previewAdapters() as PreviewAdaptersResponse
 		if (superseded()) return
 		if (adapterStatus.state === 'invalid') {
+			unsupportedThemeIds.value = []
 			materializationResult.value = {
 				status: 'invalid',
 				diagnostics: adapterStatus.diagnostics,
 			}
+			return
+		}
+
+		unsupportedThemeIds.value = adapterStatus.themeSupport?.unsupportedThemeIds ?? []
+		// An unsupported theme is diagnosed in place of the View; nothing is constructed for it.
+		if (themeDiagnostic.value) {
+			materializationResult.value = undefined
 			return
 		}
 
@@ -459,7 +487,7 @@ async function evaluateRuntime() {
 		}
 
 		await nextTick()
-		if (superseded() || !previewHostElement.value) return
+		if (superseded() || !previewHostElement.value || themeDiagnostic.value) return
 
 		activeBridge = mount(previewHostElement.value, {
 			view: viewData.value.resource,
@@ -580,6 +608,7 @@ function onWindowMessage(event: MessageEvent) {
 			localesMap.clear()
 			void loadView()
 		}
+		else if (themeDiagnostic.value) showThemeDiagnostic()
 		else if (activeBridge) {
 			if (localeChanged && payload.locale) {
 				void uiux.readResource<{ resource?: I18nResource }>('locale', payload.locale)
@@ -613,7 +642,8 @@ watch(() => route.query, (nextQuery) => {
 	if (nextQuery.locale && nextQuery.locale !== locale.value) locale.value = nextQuery.locale as string
 	if (nextQuery.themeId && nextQuery.themeId !== themeId.value) themeId.value = nextQuery.themeId as string
 	if (nextQuery.variant !== undefined) variantName.value = (nextQuery.variant as string) || undefined
-	if (activeBridge) activeBridge.updateContext(activeContext.value)
+	if (themeDiagnostic.value) showThemeDiagnostic()
+	else if (activeBridge) activeBridge.updateContext(activeContext.value)
 	else evaluateRuntime()
 })
 
@@ -842,9 +872,47 @@ onUnmounted(() => {
       </UAlert>
     </div>
 
+    <!-- The active Adapters do not support the selected theme: a render-context diagnostic in place of the View -->
+    <div
+      v-else-if="themeDiagnostic"
+      data-preview-status="invalid"
+      data-preview-theme-unsupported
+      class="p-4"
+    >
+      <UAlert
+        color="error"
+        variant="subtle"
+        icon="i-lucide-palette"
+        :title="t('preview.themeUnsupported.title')"
+      >
+        <template #description>
+          <div class="space-y-2">
+            <i18n-t
+              keypath="preview.themeUnsupported.description"
+              tag="p"
+              class="text-sm leading-relaxed"
+              scope="global"
+            >
+              <template #theme>
+                <code
+                  class="font-mono font-medium"
+                  translate="no"
+                >{{ themeId }}</code>
+              </template>
+            </i18n-t>
+            <ul class="space-y-1 text-xs">
+              <li>
+                <span class="font-mono font-medium">[{{ themeDiagnostic.code }}]</span> {{ themeDiagnostic.path }}: {{ diagnosticText(themeDiagnostic) }}
+              </li>
+            </ul>
+          </div>
+        </template>
+      </UAlert>
+    </div>
+
     <!-- Ready / Materialized View IR State -->
     <div
-      v-show="materializationResult?.status === 'ready' && !loading && !error && viewId"
+      v-show="materializationResult?.status === 'ready' && !loading && !error && viewId && !themeDiagnostic"
       data-preview-status="ready"
       data-preview-ready="true"
       class="relative"
