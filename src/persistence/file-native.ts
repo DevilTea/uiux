@@ -27,6 +27,7 @@ import {
 	viewRelativePath,
 	isSafeAssetContentFilename,
 	isInCodeDirectory,
+	classifyCanonicalResourcePath,
 	V5_LAYOUT,
 	type VersionedResourceIdentity,
 	type WorkspaceLayout,
@@ -114,6 +115,22 @@ export type CanonicalWriteObserver = Readonly<{
 	beforeCanonicalWrite?(context: DesignWriteContext, resources: readonly CanonicalResourceBefore[], signal: AbortSignal): void | Promise<void>
 	afterCanonicalCommit?(context: DesignWriteContext, changes: readonly CanonicalResourceChange[], signal: AbortSignal): void | Promise<void>
 }>
+
+/**
+ * One canonical resource a committed write changed, as the change-event stream reports it (Clause
+ * 01a114ec-e839-7b11-957c-41c88b692e12): its kind and key, and its revision after the commit, or
+ * `null` when the commit removed it. It carries no content.
+ */
+export type CommittedResourceChange = Readonly<{ kind: string; key: string; revision: ResourceRevision | null }>
+
+/**
+ * Called once after every committed canonical write, from every transport alike (Rule
+ * 01a11485-f3bb-760b-9132-0e8c2f6bbf43), with the resources it changed, Review threads included.
+ * It runs synchronously while the exclusive lock is still held, so it must only hand the changes
+ * on (it must not read through this instance); a listener that throws is logged and never fails
+ * the write.
+ */
+export type CanonicalCommitListener = (changes: readonly CommittedResourceChange[]) => void
 
 /**
  * The longest one observer hook may hold the exclusive lock (issue #132 B3, review finding L4).
@@ -258,12 +275,19 @@ export class FileNativePersistence {
 		this.locales = new LocaleFileRepository(this)
 		this.assets = new AuthoredAssetFileRepository(this)
 		this.artifacts = new ImmutableArtifactStore(this)
-		observerStates.set(this, { observer: options.writeObserver, recordingGap: false, timeoutMilliseconds: options.observerTimeoutMilliseconds ?? OBSERVER_HOOK_TIMEOUT_MS })
+		observerStates.set(this, { observer: options.writeObserver, recordingGap: false, timeoutMilliseconds: options.observerTimeoutMilliseconds ?? OBSERVER_HOOK_TIMEOUT_MS, commitListeners: new Set() })
 	}
 
 	/** Attaches (or with `undefined`, detaches) the history observer. */
 	setWriteObserver(observer: CanonicalWriteObserver | undefined): void {
 		observerState(this).observer = observer
+	}
+
+	/** Adds a listener for committed canonical writes; returns its removal. */
+	onCanonicalCommit(listener: CanonicalCommitListener): () => void {
+		const listeners = observerState(this).commitListeners
+		listeners.add(listener)
+		return () => { listeners.delete(listener) }
 	}
 
 	/** True once an observer hook failed (or could not be prepared) since the flag was last consumed. */
@@ -1908,7 +1932,7 @@ export class ImmutableArtifactStore {
 	}
 }
 
-type ObserverState = { observer?: CanonicalWriteObserver; recordingGap: boolean; readonly timeoutMilliseconds: number }
+type ObserverState = { observer?: CanonicalWriteObserver; recordingGap: boolean; readonly timeoutMilliseconds: number; readonly commitListeners: Set<CanonicalCommitListener> }
 
 /** Per-instance observer state, private to this module so only `commitCanonicalWrite` calls the hooks. */
 const observerStates = new WeakMap<FileNativePersistence, ObserverState>()
@@ -1950,6 +1974,51 @@ type ResourceFilesBefore = Readonly<{ resource: VersionedResourceIdentity; files
  * instead of the next one (Rule 01a11a5e-03c9-745e-b23a-bb06b600377d).
  */
 async function commitCanonicalWrite<Written extends boolean | void>(
+	persistence: FileNativePersistence,
+	changes: readonly FileChange[],
+	write: () => Promise<Written>,
+): Promise<Written> {
+	const written = await commitObservedWrite(persistence, changes, write)
+	if (written !== false) await notifyCommitListeners(persistence, changes)
+	return written
+}
+
+/**
+ * Tells the commit listeners which resources a committed write changed, with their revision now.
+ * A single-file resource's revision is that of the bytes just written; an Asset's covers its whole
+ * directory, so it is read back (still under the lock) only when someone listens.
+ */
+async function notifyCommitListeners(persistence: FileNativePersistence, changes: readonly FileChange[]): Promise<void> {
+	const listeners = observerState(persistence).commitListeners
+	if (listeners.size === 0) return
+	const committed: CommittedResourceChange[] = []
+	try {
+		const seen = new Set<string>()
+		for (const change of changes) {
+			const resource = classifyCanonicalResourcePath(persistence.layout, change.path)
+			if (!resource) continue
+			const identity = `${resource.kind}\0${resource.key}`
+			if (seen.has(identity)) continue
+			seen.add(identity)
+			const revision = resource.kind === 'asset'
+				? revisionForResourceFiles('asset', await readVersionedResourceFilesUnlocked(persistence, resource, change.path)) ?? null
+				: change.bytes === undefined ? null : revisionForBytes(change.bytes)
+			committed.push({ kind: resource.kind, key: resource.key, revision })
+		}
+	}
+	catch (error) {
+		console.error(`uiux: could not describe a committed write for the change events: ${error instanceof Error ? error.message : String(error)}`)
+		return
+	}
+	if (committed.length === 0) return
+	for (const listener of listeners) {
+		try { listener(committed) }
+		catch (error) { console.error(`uiux: a commit listener failed: ${error instanceof Error ? error.message : String(error)}`) }
+	}
+}
+
+/** The history observer's part of {@link commitCanonicalWrite}. */
+async function commitObservedWrite<Written extends boolean | void>(
 	persistence: FileNativePersistence,
 	changes: readonly FileChange[],
 	write: () => Promise<Written>,

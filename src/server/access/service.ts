@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { userInfo } from 'node:os'
 
-import { BUILT_IN_ACCESS_PRESETS, grantedKeys, keysOfPreset, PERMISSION_KEYS, writeKeyForKind } from '../../application/access/keys'
+import { BUILT_IN_ACCESS_PRESETS, grantedKeys, keysOfPreset, PERMISSION_KEYS, writeKeyForKind, type PermissionKey } from '../../application/access/keys'
 import { memberLabel, type LabelPreset } from '../../application/access/labels'
 import type { Lease, LeaseManager } from '../../application/access/leases'
 import {
@@ -73,6 +73,9 @@ export type AuthFailure = Readonly<{
 
 export type AuthResult = Readonly<{ ok: true; principal: Principal }> | AuthFailure
 
+/** What an access change touched: `roster` when members, their kinds or their keys changed. */
+export type AccessChange = Readonly<{ roster: boolean }>
+
 /** A rejected `/mcp` attempt, with the origin its `Host` matched (Rule 01a11485-ed7e-7866-bec2-6deca0ec6cb1). */
 export type McpAttempt = Readonly<{ at: string; userAgent: string; origin: string; code: AuthFailureCode }>
 
@@ -110,6 +113,8 @@ export class AccessService {
 	private attemptCount = 0
 	readonly captureCredential: string
 	private readonly readPresets: () => Promise<readonly LabelPreset[]>
+	private readonly changeListeners = new Set<(change: AccessChange) => void>()
+	private rosterSignature: string
 
 	constructor(options: AccessServiceOptions) {
 		this.store = options.store
@@ -120,6 +125,47 @@ export class AccessService {
 		this.system.set(this.captureCredential, systemPrincipal('system:capture'))
 		// A lease whose holder lost the kind's write key ends when next looked at, even before a reconcile.
 		this.leases.setHolderCheck(lease => this.holderMayKeep(lease))
+		this.rosterSignature = rosterSignatureOf(this.store.data)
+	}
+
+	/**
+	 * Runs `listener` after the roster or its credentials may have changed: an administration
+	 * write of this server, or a change on disk (the CLI) found by `refresh`. `roster` is true when
+	 * the members, their kinds or their keys changed (Rule 01a114ec-e706-7c39-84a6-2e4a536daed2).
+	 */
+	onChange(listener: (change: AccessChange) => void): () => void {
+		this.changeListeners.add(listener)
+		return () => { this.changeListeners.delete(listener) }
+	}
+
+	private noticeChange(): void {
+		const signature = rosterSignatureOf(this.store.data)
+		const change: AccessChange = { roster: signature !== this.rosterSignature }
+		this.rosterSignature = signature
+		for (const listener of [...this.changeListeners]) {
+			try { listener(change) }
+			catch (error) { console.error(`uiux: an access change listener failed: ${error instanceof Error ? error.message : String(error)}`) }
+		}
+	}
+
+	/**
+	 * The keys a member principal's credential grants now, by the roster this server last read, or
+	 * `undefined` once the credential (Token or session) or its member has ended. An open event
+	 * stream is checked with it, so ending a session closes it (Rule 01a11485-f3f6-72df-b43a-91905eb4970c).
+	 */
+	credentialKeys(principal: MemberPrincipal): readonly PermissionKey[] | undefined {
+		const file = this.store.data
+		const now = this.now()
+		if (principal.credential === 'token') {
+			const token = file.tokens.find(item => item.id === principal.credentialId)
+			if (!token || token.memberId !== principal.memberId || !isTokenActive(token, now)) return undefined
+		}
+		else {
+			const session = file.sessions.find(item => item.id === principal.credentialId)
+			if (!session || session.memberId !== principal.memberId || !isSessionActive(session, now, this.sessionUsage.get(session.id))) return undefined
+		}
+		const member = file.members.find(item => item.id === principal.memberId)
+		return member ? memberKeys(member) : undefined
 	}
 
 	get hint(): string {
@@ -142,7 +188,10 @@ export class AccessService {
 	/** Re-reads the roster when it changed on disk, then drops leases of removed members and lost write keys. */
 	async refresh(force = false): Promise<void> {
 		const changed = await this.store.refresh({ force })
-		if (changed) this.reconcileLeases()
+		if (changed) {
+			this.reconcileLeases()
+			this.noticeChange()
+		}
 	}
 
 	/**
@@ -166,6 +215,7 @@ export class AccessService {
 	private async mutate<T>(mutation: (file: AccessFile) => Mutation<T>): Promise<T> {
 		const result = await this.store.update(mutation)
 		this.reconcileLeases()
+		this.noticeChange()
 		return result
 	}
 
@@ -453,6 +503,11 @@ export class AccessService {
 	member(memberId: string): StoredMember | undefined {
 		return this.store.data.members.find(member => member.id === memberId)
 	}
+}
+
+/** The members as the change events see them: identity, nickname, kind and keys, never credentials. */
+function rosterSignatureOf(file: AccessFile): string {
+	return JSON.stringify(file.members.map(member => [member.id, member.nickname, member.kind, [...member.keys].sort()]).sort((left, right) => String(left[0]) < String(right[0]) ? -1 : 1))
 }
 
 function nicknameOf(file: AccessFile, memberId: string): string {

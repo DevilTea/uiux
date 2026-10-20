@@ -206,6 +206,21 @@ function classifyDataVersionedPath(path: string): VersionedResourceIdentity | un
 	return undefined
 }
 
+/**
+ * The canonical resource a committed file belongs to: a versioned resource of the layout, or a
+ * Review thread (`reviews/<uuid>.review.json`, which version history excludes). The change-event
+ * stream (Clause 01a114ec-e839-7b11-957c-41c88b692e12) names resources by this identity.
+ */
+export function classifyCanonicalResourcePath(layout: WorkspaceLayout, path: string): VersionedResourceIdentity | undefined {
+	const versioned = layout.classifyVersionedPath(path)
+	if (versioned) return versioned
+	if (!isSafeRelativePath(path)) return undefined
+	const segments = path.split('/')
+	return segments.length === 2 && segments[0] === WORKSPACE_DATA_DIRECTORY.reviews
+		? uuidFileIdentity('review', segments[1]!, REVIEW_FILE_SUFFIX)
+		: undefined
+}
+
 function uuidFileIdentity(kind: string, filename: string, suffix: string): VersionedResourceIdentity | undefined {
 	if (!filename.endsWith(suffix)) return undefined
 	const key = filename.slice(0, -suffix.length)

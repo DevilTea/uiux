@@ -109,6 +109,8 @@ const ROLE_MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; 
 	readPreview: { min: 'viewer', system: true },
 	assessHandoffReadiness: { min: 'viewer' },
 	listLeases: { min: 'viewer' },
+	// Added with the change-event stream (issue #69): `workspace.read`, like the lease list.
+	subscribeEvents: { min: 'viewer' },
 	readProductKit: { min: 'viewer' },
 	readAccessPresets: { min: 'viewer' },
 	diffVersions: { min: 'viewer' },

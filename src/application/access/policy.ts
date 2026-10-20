@@ -38,6 +38,8 @@ export const ACCESS_OPERATIONS = {
 	readPreview: { requiredKeys: ['workspace.read'], system: true },
 	assessHandoffReadiness: { requiredKeys: ['workspace.read'] },
 	listLeases: { requiredKeys: ['workspace.read'] },
+	// Clause 01a11485-fa00-72da-bc46-98302a3c106e: `GET /api/events`, for members only (Rule 01a11485-f34a-7c7e-a69c-fba14914d62d).
+	subscribeEvents: { requiredKeys: ['workspace.read'] },
 	// Clause 01a11bb1-b3c2-7937-96fb-e139c5e566f5: the Product Kit file, its build state and findings need no Product Kit key.
 	readProductKit: { requiredKeys: ['workspace.read'] },
 	// Clause 01a11485-fa00-72da-bc46-98302a3c106e: reading the Access presets on HTTP.
