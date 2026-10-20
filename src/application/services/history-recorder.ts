@@ -10,10 +10,10 @@ import {
 	HISTORY_SCHEMA_VERSION,
 	HOST_PRUNE_INTERVAL_MS,
 } from '../../domain/history/constants'
-import type { HistoryActor, HistoryResourceEntry, HistoryWriteEvent, HostVersionRecord } from '../../domain/history/schema'
+import type { CheckpointRecord, HistoryActor, HistoryResourceEntry, HistoryWriteEvent, HostVersionRecord } from '../../domain/history/schema'
 import { resourceIdentityKey } from '../../domain/history/summary'
 import type { CanonicalResourceBefore, CanonicalResourceChange, CanonicalWriteObserver, FileNativePersistence } from '../../persistence/file-native'
-import type { CheckpointStore } from '../../persistence/history/checkpoint-store'
+import type { CheckpointListing, CheckpointStore } from '../../persistence/history/checkpoint-store'
 import { HostHistoryError, type HostHistoryStore, type HostVersionListing, type OpenAutosaveJournal } from '../../persistence/history/host-store'
 import { compareCodeUnits } from '../../persistence/history/order'
 import { pruneHostHistory, type HostPruneResult } from '../../persistence/history/retention'
@@ -386,7 +386,7 @@ class AutosaveRecorder implements HistoryRecorder {
 		let boundary = journal ? await this.closeLeftoverUnlocked(journal, hostListing) : undefined
 		// Rule 01a11a5e-0313-7d86-af79-8eafa1753853: drift detection at server start.
 		if (!boundary && !baseline) boundary = await this.boundaryUnlocked('start', LOCK_HELD)
-		await this.backfillBlobsUnlocked(host, hostListing)
+		await this.backfillBlobsUnlocked(host, hostListing, await stores.checkpoints.listUnlocked().catch(() => undefined))
 
 		let pruned: HostPruneResult | undefined
 		try {
@@ -608,7 +608,7 @@ class AutosaveRecorder implements HistoryRecorder {
 			assertHeld(signal)
 			// The events' blobs are already in host history; the resources they left unchanged may name
 			// blobs that only a Checkpoint base put in the artifact store.
-			await this.ownBlobsUnlocked(open.id, resources)
+			await this.ownBlobsUnlocked(open.id, resources, signal)
 			assertHeld(signal)
 			const record: HostVersionRecord = {
 				historySchemaVersion: HISTORY_SCHEMA_VERSION,
@@ -669,7 +669,7 @@ class AutosaveRecorder implements HistoryRecorder {
 		assertHeld(signal)
 		const id = randomUUID()
 		// Every resource's blobs, unchanged ones included: the scan holds all their bytes.
-		await this.ownBlobsUnlocked(id, actual.resources, actual.blobs)
+		await this.ownBlobsUnlocked(id, actual.resources, signal, actual.blobs)
 		assertHeld(signal)
 		const productKit = await productKitRecordFieldUnlocked(this.persistence, { log: this.log })
 		assertHeld(signal)
@@ -706,8 +706,8 @@ class AutosaveRecorder implements HistoryRecorder {
 	 * recorded on is deleted and artifact cleanup runs where this host's history is not a root. Only
 	 * the missing blobs are copied. One that cannot be supplied is logged; the version is still written.
 	 */
-	private async ownBlobsUnlocked(versionId: string, resources: readonly HistoryResourceEntry[], known?: ReadonlyMap<string, Uint8Array>): Promise<void> {
-		const { missing } = await copyVersionBlobsToHostUnlocked(this.persistence, this.stores!.host, referencedDigests(resources), known)
+	private async ownBlobsUnlocked(versionId: string, resources: readonly HistoryResourceEntry[], signal: AbortSignal, known?: ReadonlyMap<string, Uint8Array>): Promise<void> {
+		const { missing } = await copyVersionBlobsToHostUnlocked(this.persistence, this.stores!.host, referencedDigests(resources), known, () => assertHeld(signal))
 		if (missing.length > 0)
 			this.log(`uiux: history could not copy ${missing.length} blob(s) that version ${versionId} names into host history (${missing[0]!.digest}: ${missing[0]!.reason}); that version cannot be compared or restored where they are missing.`)
 	}
@@ -718,10 +718,13 @@ class AutosaveRecorder implements HistoryRecorder {
 	 * history lacks are copied there while the artifact store still has them. Best effort: a failure
 	 * is logged and recording starts anyway.
 	 */
-	private async backfillBlobsUnlocked(host: HostHistoryStore, listing: HostVersionListing): Promise<void> {
+	private async backfillBlobsUnlocked(host: HostHistoryStore, listing: HostVersionListing, checkpoints: CheckpointListing | undefined): Promise<void> {
 		try {
 			const hosted = new Set(await host.listBlobDigests())
-			const needed = [...referencedDigests(listing.records.flatMap(record => record.resources))].filter(digest => !hosted.has(digest))
+			// The newest Checkpoint is the base the next autosave starts on; copying its blobs here,
+			// with no time bound, keeps that first close from copying them inside its bound.
+			const newest = checkpoints?.records.reduce<CheckpointRecord | undefined>((latest, record) => !latest || Date.parse(record.at) >= Date.parse(latest.at) ? record : latest, undefined)
+			const needed = [...referencedDigests([...listing.records.flatMap(record => record.resources), ...(newest?.resources ?? [])])].filter(digest => !hosted.has(digest))
 			if (needed.length === 0) return
 			const { copied, missing } = await copyVersionBlobsToHostUnlocked(this.persistence, host, needed)
 			if (copied.length > 0) this.log(`uiux: history copied ${copied.length} blob(s) that earlier host versions name from the artifact store into host history.`)

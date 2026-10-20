@@ -41,7 +41,7 @@ export type HostBlobCopy = Readonly<{
  * live and where artifact cleanup on another host, which cannot see this host's history, may remove
  * them. Copies into the host store each of `digests` it lacks, taking the bytes from `known` (the
  * bytes the caller already holds) or else from the artifact store; a blob already there is never
- * copied again. A blob that cannot be supplied (absent, unreadable, or a corrupt artifact copy) is reported in
+ * copied again; `checkpoint` runs before each blob, so a bounded caller can abort between blobs. A blob that cannot be supplied (absent, unreadable, or a corrupt artifact copy) is reported in
  * `missing` rather than thrown, so a store that was already incomplete never stops recording. The
  * caller holds the persistence lock (shared or exclusive).
  */
@@ -50,10 +50,13 @@ export async function copyVersionBlobsToHostUnlocked(
 	host: HostHistoryStore,
 	digests: Iterable<string>,
 	known?: ReadonlyMap<string, Uint8Array>,
+	/** Called before each blob is copied; it throws to stop a copy that outlived its bound. Blobs already copied stay. */
+	checkpoint?: () => void,
 ): Promise<HostBlobCopy> {
 	const copied: string[] = []
 	const missing: { digest: string; reason: string }[] = []
 	for (const digest of new Set(digests)) {
+		checkpoint?.()
 		if (await host.hasBlob(digest)) continue
 		let bytes: Uint8Array | undefined
 		try {

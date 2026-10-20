@@ -28,6 +28,7 @@ import {
 	writeSnapshotCheckpointUnlocked,
 	type DesignWriteContext,
 } from '../src/persistence/history'
+import { copyVersionBlobsToHostUnlocked } from '../src/persistence/history/version-blobs'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { hostHistoryPaths } from '../src/server/access/store'
 import { createSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
@@ -1000,6 +1001,8 @@ describe('host history owns the blobs its versions name (Clause 01a11a5e-1e65, i
 		const { record: pulled, pulledView } = await pulledCheckpoint(first)
 		const ctx = restartedRecorder(first)
 		expect((await ctx.recorder.start()).boundary).toEqual({ reason: 'start' })
+		// The start already copied the newest Checkpoint's blobs, outside any boundary's time bound.
+		for (const digest of pulledView) expect(await ctx.host.hasBlob(digest)).toBe(true)
 		const hostedBefore = new Set(await ctx.host.listBlobDigests())
 
 		await editView(ctx, AGENT, 'Pay, after the pull')
@@ -1008,9 +1011,8 @@ describe('host history owns the blobs its versions name (Clause 01a11a5e-1e65, i
 		expect(autosave.type).toBe('autosave')
 		const named = referencedDigests(autosave.resources)
 		for (const digest of named) expect(await ctx.host.hasBlob(digest), digest).toBe(true)
-		// Only what host history lacked was added: the agent's write and the pulled View's blobs.
+		// Only what host history lacked was added: the agent's write.
 		const added = (await ctx.host.listBlobDigests()).filter(digest => !hostedBefore.has(digest))
-		expect(added).toEqual(expect.arrayContaining(pulledView))
 		for (const digest of added) expect(named.has(digest), digest).toBe(true)
 
 		// A later autosave on a host version base copies nothing but its own write's blobs.
@@ -1054,6 +1056,44 @@ describe('host history owns the blobs its versions name (Clause 01a11a5e-1e65, i
 		for (const digest of referencedDigests(external.resources)) expect(await ctx.host.hasBlob(digest), digest).toBe(true)
 		for (const digest of pulledView) expect(await ctx.host.hasBlob(digest)).toBe(true)
 		await ctx.recorder.stop()
+	})
+
+	it('writes a version that names a blob neither store has and logs it', async () => {
+		const first = await fixture()
+		await first.recorder.start()
+		await first.recorder.stop()
+		const { pulledView } = await pulledCheckpoint(first)
+		const lost = pulledView[0]!
+		await rm(join(first.root, first.persistence.layout.artifactRelativePath(lost)))
+		const ctx = restartedRecorder(first)
+		await ctx.recorder.start()
+		await editView(ctx, AGENT, 'Pay, with a lost blob')
+		await ctx.recorder.closeOpenAutosave('checkpoint')
+		const autosave = (await ctx.hostVersions()).at(-1)!
+		expect(autosave.type).toBe('autosave')
+		expect(referencedDigests(autosave.resources).has(lost)).toBe(true)
+		expect(await ctx.host.hasBlob(lost)).toBe(false)
+		expect(ctx.logs).toContainEqual(expect.stringContaining(`history could not copy 1 blob(s) that version ${autosave.id} names into host history (${lost}`))
+		await ctx.recorder.stop()
+	})
+
+	it('stops copying blobs between blobs once the boundary is abandoned', async () => {
+		const first = await fixture()
+		await first.recorder.start()
+		await first.recorder.stop()
+		const { record } = await pulledCheckpoint(first)
+		const lacking = (await Promise.all([...referencedDigests(record.resources)].map(async digest => (await first.host.hasBlob(digest)) ? undefined : digest))).filter((digest): digest is string => digest !== undefined)
+		expect(lacking.length).toBeGreaterThan(0)
+		const controller = new AbortController()
+		const put = vi.spyOn(first.host, 'putBlob').mockImplementation(async (bytes) => {
+			controller.abort()
+			return blobDigest(bytes) as never
+		})
+		await expect(first.persistence.withLock(() => copyVersionBlobsToHostUnlocked(first.persistence, first.host, [...lacking, `sha256:${'d'.repeat(64)}`], undefined, () => {
+			if (controller.signal.aborted) throw new Error('abandoned')
+		}))).rejects.toThrow('abandoned')
+		expect(put).toHaveBeenCalledTimes(1)
+		put.mockRestore()
 	})
 
 	it('copies, at start, the blobs that host versions recorded earlier name and only the artifact store keeps', async () => {
