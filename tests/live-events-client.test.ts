@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { FALLBACK_POLL_MS, LIVE_BATCH_MS, LIVE_EVENTS_PATH, REFUSED_RETRY_MS, changedKeys, touchesKinds, useLiveEvents, type LiveBatch } from '../app/composables/useLiveEvents'
+import { FALLBACK_POLL_MS, HELLO_TIMEOUT_MS, LIVE_BATCH_MS, LIVE_EVENTS_PATH, LIVENESS_FAILURES_BEFORE_FALLBACK, REFUSED_RETRY_MS, SERVER_HEARTBEAT_MS, SILENCE_TIMEOUT_MS, changedKeys, touchesKinds, useLiveEvents, type LiveBatch } from '../app/composables/useLiveEvents'
 
 /**
  * The Workbench side of live refresh (Rules 01a11485-f39f-7464-9f8f-608335ed9800 and
@@ -149,5 +149,72 @@ describe('useLiveEvents', () => {
 		expect(access).toBe(1)
 		expect(locks).toBe(0)
 		expect(batches).toEqual([])
+	})
+})
+
+describe('useLiveEvents liveness (Discussion #241 owner decision 3)', () => {
+	it('reopens a stream that sends no hello in time, keeps one alive on heartbeats, reopens one gone silent, and resyncs on recovery', () => {
+		live.start()
+		const first = current()
+		vi.advanceTimersByTime(HELLO_TIMEOUT_MS)
+		expect(first.readyState).toBe(FakeEventSource.CLOSED)
+		expect(FakeEventSource.instances).toHaveLength(2)
+		current().emit('hello', { serverInstanceId: 'a' })
+		expect(live.state.value).toBe('open')
+		vi.advanceTimersByTime(LIVE_BATCH_MS)
+		// Whatever the first, silent stream missed is read again.
+		expect(batches).toEqual([{ resync: true, changes: [] }])
+
+		// Heartbeats keep the stream open past the silence bound.
+		for (let beat = 0; beat < 4; beat++) {
+			vi.advanceTimersByTime(SERVER_HEARTBEAT_MS)
+			current().emit('heartbeat', {})
+		}
+		expect(FakeEventSource.instances).toHaveLength(2)
+		expect(live.state.value).toBe('open')
+
+		// Silence for two and a half heartbeat intervals: closed and reopened.
+		expect(SILENCE_TIMEOUT_MS).toBe(SERVER_HEARTBEAT_MS * 2.5)
+		const silent = current()
+		vi.advanceTimersByTime(SILENCE_TIMEOUT_MS)
+		expect(silent.readyState).toBe(FakeEventSource.CLOSED)
+		expect(FakeEventSource.instances).toHaveLength(3)
+		current().emit('hello', { serverInstanceId: 'a' })
+		vi.advanceTimersByTime(LIVE_BATCH_MS)
+		expect(batches).toHaveLength(2)
+		expect(batches.at(-1)).toEqual({ resync: true, changes: [] })
+	})
+
+	it('polls after repeated liveness failures, then tries the stream again later', () => {
+		live.start()
+		for (let attempt = 1; attempt < LIVENESS_FAILURES_BEFORE_FALLBACK; attempt++) {
+			vi.advanceTimersByTime(HELLO_TIMEOUT_MS)
+			expect(live.state.value).not.toBe('fallback')
+		}
+		vi.advanceTimersByTime(HELLO_TIMEOUT_MS)
+		expect(live.state.value).toBe('fallback')
+		const opened = FakeEventSource.instances.length
+		expect(opened).toBe(LIVENESS_FAILURES_BEFORE_FALLBACK)
+		expect(FakeEventSource.instances.every(stream => stream.readyState === FakeEventSource.CLOSED)).toBe(true)
+		vi.advanceTimersByTime(FALLBACK_POLL_MS + LIVE_BATCH_MS)
+		expect(batches).toEqual([{ resync: true, changes: [] }])
+		vi.advanceTimersByTime(REFUSED_RETRY_MS - FALLBACK_POLL_MS - LIVE_BATCH_MS)
+		expect(FakeEventSource.instances).toHaveLength(opened + 1)
+		current().emit('hello', { serverInstanceId: 'a' })
+		expect(live.state.value).toBe('open')
+		vi.advanceTimersByTime(LIVE_BATCH_MS)
+		expect(batches.at(-1)).toEqual({ resync: true, changes: [] })
+	})
+
+	it('owes a hello again while EventSource reconnects by itself', () => {
+		live.start()
+		current().emit('hello', { serverInstanceId: 'a' })
+		current().fail(FakeEventSource.CONNECTING)
+		expect(live.state.value).toBe('fallback')
+		vi.advanceTimersByTime(HELLO_TIMEOUT_MS)
+		// No hello on the browser's own reconnect: the stream is replaced.
+		expect(FakeEventSource.instances).toHaveLength(2)
+		current().emit('hello', { serverInstanceId: 'a' })
+		expect(live.state.value).toBe('open')
 	})
 })

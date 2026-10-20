@@ -13,8 +13,9 @@ export type Workbench = WorkbenchState & Readonly<{
 	refreshAll: () => Promise<void>
 	/**
 	 * Applies a batch of change events: re-reads what changed and, when what the canvas renders
-	 * changed (the View's Widget IR or Variants, a Locale it shows, the manifest's render settings),
-	 * starts a fresh Preview generation so the open page shows it without a reload.
+	 * changed (the View's Widget IR or Variants, a Locale it shows, the manifest's render settings,
+	 * the Product Kit file with the Adapters and their configuration), starts a fresh Preview
+	 * generation so the open page shows it without a reload.
 	 */
 	applyLiveChanges: (batch: LiveBatch) => Promise<void>
 	applyEvidenceContext: (context: EvidenceContextSelection) => Promise<void>
@@ -88,13 +89,36 @@ export function provideWorkbench(): Workbench {
 		])
 	}
 
+	/** The Product Kit file's revision the open Preview was last known to render from. */
+	let productKitRevision: string | undefined
+	/**
+	 * Whether the Product Kit file moved (Discussion #241 owner decision 2,
+	 * https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19070362): its `product-kit`
+	 * event names the new revision; after a resync, which names nothing, the file is read again. Only
+	 * while a View is open, since only the Preview renders from it.
+	 */
+	async function productKitMoved(batch: LiveBatch): Promise<boolean> {
+		if (!state.selectedView.value) return false
+		const named = batch.changes.find(change => change.kind === 'product-kit')
+		if (!batch.resync && !named) return false
+		let revision = named?.revision
+		if (revision === undefined) {
+			try { revision = (await ($fetch as unknown as (url: string) => Promise<{ revision?: string }>)('/api/product-kit')).revision }
+			catch { return false }
+		}
+		const known = productKitRevision
+		productKitRevision = revision
+		// Without a revision known yet, only an event that named a change counts.
+		return known === undefined ? named !== undefined : known !== revision
+	}
+
 	async function applyLiveChanges(batch: LiveBatch): Promise<void> {
 		const viewId = state.selectedView.value?.key
 		const before = renderSignature()
-		await state.applyLiveChanges(batch)
+		const [kitMoved] = await Promise.all([productKitMoved(batch), state.applyLiveChanges(batch)])
 		const after = renderSignature()
 		// Selecting another View meanwhile starts its own generation.
-		if (before && after && before !== after && state.selectedView.value?.key === viewId) preview.replaceGeneration()
+		if (before && after && (before !== after || kitMoved) && state.selectedView.value?.key === viewId) preview.replaceGeneration()
 	}
 
 	const workbench: Workbench = {

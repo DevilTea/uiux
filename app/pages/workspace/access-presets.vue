@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref, shallowRef } from 'vue'
+import { computed, h, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useI18n } from '#imports'
 import type { DropdownMenuItem, TableColumn } from '@nuxt/ui'
 import { BUILT_IN_ACCESS_PRESETS, isHumanOnlyKey } from '../../../src/application/access/keys'
@@ -82,13 +82,29 @@ const fileState = computed<'missing' | 'unparsable' | 'issues' | 'ok'>(() => {
 })
 const canEdit = computed(() => deviceAllowsEdit.value && state.value === 'ready')
 
-async function loadPresets(): Promise<void> {
+/**
+ * Reads the presets file. A `quiet` read (live refresh) is not applied while an action is pinned
+ * to the presets shown (`pinned`); it is applied once the action ends.
+ */
+async function loadPresets(options: Readonly<{ quiet?: boolean }> = {}): Promise<void> {
+	if (options.quiet && pinned.value) {
+		stale = true
+		return
+	}
 	try {
-		read.value = await api<PresetsRead>('/api/access-presets')
+		const next = await api<PresetsRead>('/api/access-presets')
+		if (options.quiet && pinned.value) {
+			stale = true
+			return
+		}
+		read.value = next
+		stale = false
 		state.value = 'ready'
 		loadError.value = undefined
 	}
 	catch (cause) {
+		// A failed live re-read keeps what is shown; the next event or resync reads again.
+		if (options.quiet && state.value === 'ready') return
 		state.value = 'error'
 		loadError.value = describeFetchError(cause, t('access.presets.loadError'))
 	}
@@ -115,7 +131,7 @@ onMounted(() => { void Promise.all([loadPresets(), loadMembers()]) })
 // Live refresh: the presets file changed elsewhere, or the roster did (the label counts).
 const live = useLiveEvents()
 live.onResources((batch) => {
-	if (touchesKinds(batch, ['access-presets']) && !writing.value) void loadPresets()
+	if (touchesKinds(batch, ['access-presets']) && !writing.value) void loadPresets({ quiet: true })
 })
 live.onAccess(() => { void loadMembers() })
 
@@ -326,6 +342,22 @@ async function deletePreset(): Promise<void> {
 		feedback.notice(t('access.presets.deletedMeanwhile', { name: preset.name }))
 	}
 }
+
+/**
+ * An edit or a delete aims at the presets shown when it started (Rule 01a11485-f451-72eb-81ad-686aeec7b3eb):
+ * while the editor is open for writing or the delete is being confirmed, live refresh does not
+ * replace them, so the save or delete is sent against the revision it was aimed at and a change
+ * made elsewhere meanwhile refuses it as a conflict (409) instead of being overwritten. The change
+ * is read once the action ends; a conflict reads it at once and keeps the draft.
+ */
+const pinned = computed(() => (editorOpen.value && !editor.readonly) || deleting.value !== undefined)
+/** A live re-read was skipped while pinned. */
+let stale = false
+watch(pinned, (now) => {
+	if (now || !stale) return
+	stale = false
+	void loadPresets({ quiet: true })
+})
 
 function presetActions(index: number): DropdownMenuItem[][] {
 	return [

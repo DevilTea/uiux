@@ -33,3 +33,29 @@ export function useReplyBases(
 		release: (threadId: string): void => { bases.delete(threadId) },
 	}
 }
+
+/**
+ * The thread revision one open action step was started on: a reason step, the Promote or Submit
+ * dialog, or a message being edited. Live refresh re-reads the thread while the step is open, and
+ * the step must not silently apply to a thread that changed meanwhile (Rule
+ * 01a11485-f451-72eb-81ad-686aeec7b3eb): its write carries the pinned revision, so a change made
+ * elsewhere refuses it as a conflict; after the conflict the step is pinned again to the thread as
+ * re-read and shown, and the user acts again.
+ */
+export function createRevisionPin(revisionOf: (threadId: string) => string | undefined) {
+	let pin: Readonly<{ threadId: string; revision: string }> | undefined
+	return {
+		/** Pins the thread's revision as shown now. */
+		pin(threadId: string | undefined): void {
+			const revision = threadId === undefined ? undefined : revisionOf(threadId)
+			pin = threadId !== undefined && revision !== undefined ? { threadId, revision } : undefined
+		},
+		/** The pinned revision when the step is for `threadId`. */
+		get(threadId: string): string | undefined {
+			return pin?.threadId === threadId ? pin.revision : undefined
+		},
+		release(): void {
+			pin = undefined
+		},
+	}
+}

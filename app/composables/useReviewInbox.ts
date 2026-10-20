@@ -24,7 +24,7 @@ import {
 } from '../utils/review-inbox'
 import { parseThread, viewLocation } from '../utils/workbench-routes'
 import { submissionBody, type ReviewSubmissionDraft } from '../utils/review-submission'
-import { useReplyBases } from './useReplyBases'
+import { createRevisionPin, useReplyBases } from './useReplyBases'
 import { threadState, type ReplyConflict } from '../utils/reply-conflict'
 import { promoteMovedOf, type PromoteConflict } from '../utils/promote-conflict'
 import { useAccess } from './useAccess'
@@ -356,14 +356,18 @@ function createReviewInbox() {
 		void nextTick(() => { announcement.value = text })
 	}
 
-	async function mutate(threadId: string, action: string, run: (revision: string) => Promise<unknown>, fallback: string, onConflict?: (details: FetchErrorDetails) => void): Promise<boolean> {
+	/**
+	 * Runs one write on a thread against `expectedRevision`, the revision an open step was pinned
+	 * to (Rule 01a11485-f451-72eb-81ad-686aeec7b3eb), or else the thread's revision as shown now.
+	 */
+	async function mutate(threadId: string, action: string, run: (revision: string) => Promise<unknown>, fallback: string, onConflict?: (details: FetchErrorDetails) => void, expectedRevision?: string): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		if (!item || busy.value) return false
 		busy.value = action
 		conflict.value = undefined
 		lastError.value = undefined
 		try {
-			await run(item.revision)
+			await run(expectedRevision ?? item.revision)
 			await loadSummaries()
 			return true
 		}
@@ -421,7 +425,7 @@ function createReviewInbox() {
 	 * Resolve: `verified` accepts the active ready submission; any other kind closes without a
 	 * verified change (direct-resolve decisions 2 and 10). `duplicate` needs a reason.
 	 */
-	async function resolve(threadId: string, resolution: ReviewResolution, reason?: string): Promise<boolean> {
+	async function resolve(threadId: string, resolution: ReviewResolution, reason?: string, expectedRevision?: string): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		if (!item || !canResolve.value || item.status === 'resolved') return false
 		const submission = item.detail?.submissions.at(-1)
@@ -432,21 +436,29 @@ function createReviewInbox() {
 			resolution,
 			...(resolution === 'verified' && submission ? { submissionId: submission.id } : {}),
 			...(reason?.trim() ? { reason: reason.trim() } : {}),
-		}), t('comments.errors.resolveFailed'))
+		}), t('comments.errors.resolveFailed'), undefined, expectedRevision)
 		if (ok) announce(t(isDismissal(resolution) ? 'inbox.announce.dismissed' : 'inbox.announce.resolved', { resolution: t(`comments.resolution.${resolution}`) }))
 		return ok
 	}
 
 	/** The message being edited inline, per thread view; one at a time. */
 	const editingMessage = ref<Readonly<{ threadId: string; messageId: string }>>()
+	/** The edit is aimed at the thread as it was when editing started (live refresh re-reads it meanwhile). */
+	const editBase = createRevisionPin(threadId => threadById.value.get(threadId)?.revision)
+	watch(editingMessage, (editing) => {
+		if (editing) editBase.pin(editing.threadId)
+		else editBase.release()
+	}, { flush: 'sync' })
 
 	/**
-	 * Edit the viewer's own message (scope/edit decisions 11–15). A `conflict` keeps the editor and
-	 * its text open: the thread is re-read and Save simply tries again on the new revision.
+	 * Edit the viewer's own message (scope/edit decisions 11–15), against the revision the edit
+	 * started on. A `conflict` keeps the editor and its text open: the thread is re-read, and Save
+	 * tries again on the revision now shown.
 	 */
 	async function editMessage(threadId: string, messageId: string, body: string): Promise<boolean> {
 		if (!canReply.value || !body.trim()) return false
-		const ok = await mutate(threadId, 'edit', revision => send(`/api/reviews/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}`, 'PUT', { expectedRevision: revision, body }), t('comments.errors.editFailed'))
+		const ok = await mutate(threadId, 'edit', revision => send(`/api/reviews/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}`, 'PUT', { expectedRevision: revision, body }), t('comments.errors.editFailed'), undefined, editBase.get(threadId))
+		if (!ok && conflict.value === threadId) editBase.pin(threadId)
 		if (ok) {
 			editingMessage.value = undefined
 			announce(t('comments.announce.edited'))
@@ -532,15 +544,15 @@ function createReviewInbox() {
 		if (!composeState.value.posting) composeState.value = { posting: false }
 	}
 
-	async function reopen(threadId: string, reason?: string): Promise<boolean> {
+	async function reopen(threadId: string, reason?: string, expectedRevision?: string): Promise<boolean> {
 		if (!canSubmit.value) return false
-		const ok = await mutate(threadId, 'reopen', revision => post(path(threadId, 'reopen'), { expectedRevision: revision, ...(reason?.trim() ? { reason: reason.trim() } : {}) }), t('comments.errors.reopenFailed'))
+		const ok = await mutate(threadId, 'reopen', revision => post(path(threadId, 'reopen'), { expectedRevision: revision, ...(reason?.trim() ? { reason: reason.trim() } : {}) }), t('comments.errors.reopenFailed'), undefined, expectedRevision)
 		if (ok) announce(t('comments.announce.reopened'))
 		return ok
 	}
 
 	/** A human submission to `ready-for-review` (secondary, desktop-first): domains plus Evidence refs. */
-	async function submit(threadId: string, draft: ReviewSubmissionDraft): Promise<boolean> {
+	async function submit(threadId: string, draft: ReviewSubmissionDraft, expectedRevision?: string): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		const viewId = item?.viewId
 		if (!item || !viewId || !canSubmit.value || item.status !== 'open') return false
@@ -548,7 +560,7 @@ function createReviewInbox() {
 			const view = await uiux.readResource<ViewRead>('view', viewId)
 			if (!view) throw new Error(t('inbox.errors.viewMissing'))
 			return await post(path(threadId, 'ready'), submissionBody(draft, view, revision))
-		}, t('submit.failed'))
+		}, t('submit.failed'), undefined, expectedRevision)
 		if (ok) announce(t('submit.announce'))
 		return ok
 	}
@@ -558,7 +570,7 @@ function createReviewInbox() {
 	 * 01a11544-611c-73e0-990b-c094b48b3eb6): the thread is re-read here and the View on the next
 	 * confirm, which only the user sends; nothing is retried automatically.
 	 */
-	async function promote(threadId: string, form: Readonly<{ question: string; summary: string; rationale: string }>): Promise<boolean> {
+	async function promote(threadId: string, form: Readonly<{ question: string; summary: string; rationale: string }>, expectedRevision?: string): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		const viewId = item?.viewId
 		if (!item || !viewId || !canPromote.value) return false
@@ -572,7 +584,7 @@ function createReviewInbox() {
 				question: form.question.trim(),
 				outcome: { summary: form.summary.trim(), rationale: form.rationale.trim() || form.summary.trim() },
 			})
-		}, t('comments.errors.promoteFailed'), (details) => { promoteConflict.value = { threadId, moved: promoteMovedOf(details) } })
+		}, t('comments.errors.promoteFailed'), (details) => { promoteConflict.value = { threadId, moved: promoteMovedOf(details) } }, expectedRevision)
 	}
 
 	// -------------------------------------------------------------------------------------------

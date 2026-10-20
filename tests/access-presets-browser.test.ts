@@ -309,6 +309,34 @@ describe('a concurrent change', () => {
 		finally { await context.close() }
 	}, 60_000)
 
+	it('keeps the presets the editor opened on under live refresh, so a change made elsewhere meanwhile is refused, not overwritten', async () => {
+		await setPresets(BUILT_IN)
+		const { context, page } = await open()
+		try {
+			const editor = await editPreset(page, 'viewer')
+			await checkbox(editor, 'flows.write').click()
+			// Another manager reorders the presets, and the change event reaches this page (issue #69):
+			// live refresh must not move the open editor onto the newer presets.
+			await setPresets([BUILT_IN[1]!, BUILT_IN[0]!, BUILT_IN[2]!, BUILT_IN[3]!])
+			await page.waitForTimeout(1500)
+			const saved = page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname === '/api/access-presets')
+			await editor.locator('[data-preset-editor-save]').click()
+			expect((await saved).status()).toBe(409)
+			await editor.locator('[data-preset-editor-error]').waitFor()
+			expect((await readPresets()).resource!.presets).toEqual([BUILT_IN[1], BUILT_IN[0], BUILT_IN[2], BUILT_IN[3]])
+			// The user acts again, now on the newer presets.
+			await editor.locator('[data-preset-editor-save]').click()
+			await editor.waitFor({ state: 'detached' })
+			const presets = (await readPresets()).resource!.presets
+			expect(presets.map(preset => preset.id)).toEqual(['reviewer', 'viewer', 'editor', 'owner'])
+			expect(presets[1]!.keys).toEqual(orderedKeys([...VIEWER, 'flows.write']))
+			// Once the editor closed, the page follows live refresh again.
+			await setPresets(BUILT_IN)
+			await expect.poll(() => names(page), { timeout: 10_000 }).toEqual(BUILT_IN.map(preset => preset.name))
+		}
+		finally { await context.close() }
+	}, 60_000)
+
 	it('counts the holders of the old keys against the roster as it is when saving', async () => {
 		const old = [...VIEWER, 'views.write'] as PermissionKey[]
 		await setPresets([...BUILT_IN, { id: 'qa', name: 'QA', keys: old }])

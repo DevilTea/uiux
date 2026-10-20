@@ -31,7 +31,7 @@ import { renderContextDiffers, type PinRenderContext } from '../../src/preview/p
 import { createThreadBody, reanchorThreadBody } from '../utils/canvas-comment-requests'
 import { recordedContextParts, recordedContextText } from '../utils/thread-render-context'
 import { useRecordedRenderContext } from './useRecordedRenderContext'
-import { useReplyBases } from './useReplyBases'
+import { createRevisionPin, useReplyBases } from './useReplyBases'
 import { threadState, type ReplyConflict } from '../utils/reply-conflict'
 import { promoteMovedOf, type PromoteConflict } from '../utils/promote-conflict'
 
@@ -505,13 +505,17 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	/** Each reply draft is sent against the revision it was started on (live refresh moves the thread under it). */
 	const replyBases = useReplyBases(replyDrafts, threadId => threadById.value.get(threadId))
 
-	async function mutate(threadId: string, action: string, run: (revision: string) => Promise<unknown>, fallback: string, onConflict?: (details: FetchErrorDetails) => void | Promise<void>): Promise<boolean> {
+	/**
+	 * Runs one write on a thread against `expectedRevision`, the revision an open step was pinned
+	 * to (Rule 01a11485-f451-72eb-81ad-686aeec7b3eb), or else the thread's revision as shown now.
+	 */
+	async function mutate(threadId: string, action: string, run: (revision: string) => Promise<unknown>, fallback: string, onConflict?: (details: FetchErrorDetails) => void | Promise<void>, expectedRevision?: string): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		if (!item || busy.value) return false
 		busy.value = action
 		conflict.value = undefined
 		try {
-			await run(item.revision)
+			await run(expectedRevision ?? item.revision)
 			await refreshReviews()
 			return true
 		}
@@ -556,7 +560,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	 * Resolve: `answered` by default on an open thread (decision 10), `verified` with the active
 	 * submission on a ready one, or a chosen non-verified kind. `duplicate` needs a reason.
 	 */
-	async function resolve(threadId: string, resolution: ReviewResolution, reason?: string): Promise<boolean> {
+	async function resolve(threadId: string, resolution: ReviewResolution, reason?: string, expectedRevision?: string): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		if (!item || !canResolve.value) return false
 		const submission = item.detail?.submissions.at(-1)
@@ -567,7 +571,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 			resolution,
 			...(resolution === 'verified' && submission ? { submissionId: submission.id } : {}),
 			...(reason?.trim() ? { reason: reason.trim() } : {}),
-		}), t('comments.errors.resolveFailed'))
+		}), t('comments.errors.resolveFailed'), undefined, expectedRevision)
 		if (ok) {
 			announce(t(isDismissal(resolution) ? 'comments.announce.dismissed' : 'comments.announce.resolved'))
 			// A dismissed thread has no pin, so its bubble closes even when resolved threads are shown.
@@ -578,12 +582,22 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 
 	/** The message being edited inline in the bubble; one at a time. */
 	const editingMessage = ref<Readonly<{ threadId: string; messageId: string }>>()
+	/** The edit is aimed at the thread as it was when editing started (live refresh re-reads it meanwhile). */
+	const editBase = createRevisionPin(threadId => threadById.value.get(threadId)?.revision)
+	watch(editingMessage, (editing) => {
+		if (editing) editBase.pin(editing.threadId)
+		else editBase.release()
+	}, { flush: 'sync' })
 
-	/** Edit the viewer's own message (scope/edit decisions 11–15); a conflict keeps the editor open. */
+	/**
+	 * Edit the viewer's own message (scope/edit decisions 11–15), against the revision the edit
+	 * started on; a conflict keeps the editor open, and Save tries again on the revision now shown.
+	 */
 	async function editMessage(threadId: string, messageId: string, body: string): Promise<boolean> {
 		if (!canComment.value || !body.trim()) return false
 		lastError.value = undefined
-		const ok = await mutate(threadId, 'edit', revision => $fetch<MutationResponse>(`/api/reviews/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}`, { method: 'PUT', body: { expectedRevision: revision, body } }), t('comments.errors.editFailed'))
+		const ok = await mutate(threadId, 'edit', revision => $fetch<MutationResponse>(`/api/reviews/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}`, { method: 'PUT', body: { expectedRevision: revision, body } }), t('comments.errors.editFailed'), undefined, editBase.get(threadId))
+		if (!ok && conflict.value === threadId) editBase.pin(threadId)
 		if (ok) {
 			editingMessage.value = undefined
 			announce(t('comments.announce.edited'))
@@ -631,7 +645,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	}
 
 	/** A human submission to `ready-for-review` (secondary, desktop-first): domains plus Evidence refs. */
-	async function submit(threadId: string, draft: ReviewSubmissionDraft): Promise<boolean> {
+	async function submit(threadId: string, draft: ReviewSubmissionDraft, expectedRevision?: string): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		const viewId = item?.anchor.viewId
 		if (!item || !viewId || !canSubmit.value || item.status !== 'open') return false
@@ -640,14 +654,14 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 			const view = await uiux.readResource<ViewRead>('view', viewId)
 			if (!view) throw new Error(t('inbox.errors.viewMissing'))
 			return await post(`/api/reviews/${encodeURIComponent(threadId)}/ready`, submissionBody(draft, view, revision))
-		}, t('submit.failed'))
+		}, t('submit.failed'), undefined, expectedRevision)
 		if (ok) announce(t('submit.announce'))
 		return ok
 	}
 
-	async function reopen(threadId: string, reason?: string): Promise<boolean> {
+	async function reopen(threadId: string, reason?: string, expectedRevision?: string): Promise<boolean> {
 		lastError.value = undefined
-		const ok = await mutate(threadId, 'reopen', revision => post(`/api/reviews/${encodeURIComponent(threadId)}/reopen`, { expectedRevision: revision, ...(reason?.trim() ? { reason: reason.trim() } : {}) }), t('comments.errors.reopenFailed'))
+		const ok = await mutate(threadId, 'reopen', revision => post(`/api/reviews/${encodeURIComponent(threadId)}/reopen`, { expectedRevision: revision, ...(reason?.trim() ? { reason: reason.trim() } : {}) }), t('comments.errors.reopenFailed'), undefined, expectedRevision)
 		if (ok) announce(t('comments.announce.reopened'))
 		return ok
 	}
@@ -692,7 +706,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	 * 01a11544-611c-73e0-990b-c094b48b3eb6) and re-reads it, the thread and, when it moved, the View;
 	 * the next confirm is the user's, never an automatic retry.
 	 */
-	async function promote(threadId: string, form: Readonly<{ question: string; summary: string; rationale: string }>): Promise<boolean> {
+	async function promote(threadId: string, form: Readonly<{ question: string; summary: string; rationale: string }>, expectedRevision?: string): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		const view = selectedView.value
 		if (!item || !view) return false
@@ -707,7 +721,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 			const moved = promoteMovedOf(details)
 			promoteConflict.value = { threadId, moved }
 			if (moved.includes('view')) await workbench.loadSelectedView(preview.notifyIframeContext)
-		})
+		}, expectedRevision)
 	}
 
 	// -------------------------------------------------------------------------------------------

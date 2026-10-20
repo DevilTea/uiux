@@ -15,7 +15,12 @@ import { getCurrentScope, onScopeDispose, readonly, shallowRef } from 'vue'
  * - When the stream cannot connect (no `EventSource`, refused, or dropped), the state is `fallback`
  *   and subscribers get a `resync` every `FALLBACK_POLL_MS` while the page is visible (Rule
  *   01a11485-f3d9-7663-b344-a60c2a949e5e). A dropped stream reconnects by itself; a refused one
- *   (401, 403, the 429 stream cap) is retried after `REFUSED_RETRY_MS`.
+ *   (401, 403, the 429 stream limit) is retried after `REFUSED_RETRY_MS`.
+ * - Liveness (Discussion #241, https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19070362):
+ *   a stream that sends no `hello` within `HELLO_TIMEOUT_MS` of connecting, or nothing (an event or
+ *   the `heartbeat` the server sends about every 20 seconds) for `SILENCE_TIMEOUT_MS`, is closed and
+ *   opened again; after `LIVENESS_FAILURES_BEFORE_FALLBACK` such failures in a row the Workbench
+ *   polls, and tries the stream again after `REFUSED_RETRY_MS`. The next `hello` resyncs.
  */
 export type LiveState = 'idle' | 'connecting' | 'open' | 'fallback'
 
@@ -28,6 +33,14 @@ export const LIVE_EVENTS_PATH = '/api/events'
 export const LIVE_BATCH_MS = 150
 export const FALLBACK_POLL_MS = 15_000
 export const REFUSED_RETRY_MS = 60_000
+/** The server's heartbeat interval (Clause 01a114ec-e839-7b11-957c-41c88b692e12). */
+export const SERVER_HEARTBEAT_MS = 20_000
+/** How long a new stream may take to send `hello`. */
+export const HELLO_TIMEOUT_MS = 10_000
+/** How long an open stream may stay silent: two and a half heartbeat intervals. */
+export const SILENCE_TIMEOUT_MS = SERVER_HEARTBEAT_MS * 5 / 2
+/** Liveness failures in a row after which the Workbench polls instead of reopening the stream at once. */
+export const LIVENESS_FAILURES_BEFORE_FALLBACK = 3
 
 const state = shallowRef<LiveState>('idle')
 const resourceListeners = new Set<(batch: LiveBatch) => void>()
@@ -46,6 +59,10 @@ let pendingAccess = false
 let flushTimer: ReturnType<typeof setTimeout> | undefined
 let fallbackTimer: ReturnType<typeof setInterval> | undefined
 let retryTimer: ReturnType<typeof setTimeout> | undefined
+/** Fires when the stream sent no `hello` in time, or went silent. */
+let livenessTimer: ReturnType<typeof setTimeout> | undefined
+/** Liveness failures since the last `hello`. */
+let livenessFailures = 0
 
 function call(listeners: ReadonlySet<() => void>): void {
 	for (const listener of [...listeners]) {
@@ -111,6 +128,42 @@ function stopFallback(): void {
 	fallbackTimer = undefined
 }
 
+function clearLiveness(): void {
+	if (livenessTimer) clearTimeout(livenessTimer)
+	livenessTimer = undefined
+}
+
+/** (Re)arms the liveness watchdog of `stream`: `hello` is due within `ms`, or the next sign of life. */
+function armLiveness(stream: EventSource, ms: number): void {
+	clearLiveness()
+	livenessTimer = setTimeout(() => {
+		livenessTimer = undefined
+		if (source === stream) stale(stream)
+	}, ms)
+}
+
+function scheduleRetry(): void {
+	retryTimer ??= setTimeout(() => {
+		retryTimer = undefined
+		connect()
+	}, REFUSED_RETRY_MS)
+}
+
+/** The stream sent no `hello` in time, or went silent: drop it and open it again, or poll after repeated failures. */
+function stale(stream: EventSource): void {
+	stream.close()
+	source = undefined
+	livenessFailures += 1
+	// Whatever was sent meanwhile is lost: the next `hello` resyncs.
+	connectedBefore = true
+	if (livenessFailures >= LIVENESS_FAILURES_BEFORE_FALLBACK) {
+		startFallback()
+		scheduleRetry()
+		return
+	}
+	connect()
+}
+
 function connect(): void {
 	if (!started || source) return
 	if (typeof EventSource === 'undefined') {
@@ -120,38 +173,54 @@ function connect(): void {
 	if (state.value !== 'fallback') state.value = 'connecting'
 	const stream = new EventSource(LIVE_EVENTS_PATH)
 	source = stream
+	armLiveness(stream, HELLO_TIMEOUT_MS)
+	/** Any event is a sign of life once `hello` arrived. */
+	const alive = () => { if (state.value === 'open' && source === stream) armLiveness(stream, SILENCE_TIMEOUT_MS) }
 	stream.addEventListener('hello', (event) => {
 		const id = parse(event as MessageEvent)?.serverInstanceId
 		const restarted = serverInstanceId !== undefined && typeof id === 'string' && id !== serverInstanceId
 		const reconnected = connectedBefore || state.value === 'fallback'
 		if (typeof id === 'string') serverInstanceId = id
 		connectedBefore = true
+		livenessFailures = 0
 		stopFallback()
 		state.value = 'open'
+		armLiveness(stream, SILENCE_TIMEOUT_MS)
 		// Whatever changed while no stream was open was not sent and is not replayed.
 		if (restarted || reconnected) queueResync()
 	})
-	stream.addEventListener('resource.changed', event => queueResource(event as MessageEvent, false))
-	stream.addEventListener('resource.removed', event => queueResource(event as MessageEvent, true))
+	stream.addEventListener('heartbeat', alive)
+	stream.addEventListener('resource.changed', (event) => {
+		alive()
+		queueResource(event as MessageEvent, false)
+	})
+	stream.addEventListener('resource.removed', (event) => {
+		alive()
+		queueResource(event as MessageEvent, true)
+	})
 	stream.addEventListener('lock.changed', () => {
+		alive()
 		pendingLocks = true
 		schedule()
 	})
 	stream.addEventListener('access.changed', () => {
+		alive()
 		pendingAccess = true
 		schedule()
 	})
 	stream.onerror = () => {
 		if (source !== stream) return
 		startFallback()
-		if (stream.readyState !== EventSource.CLOSED) return
+		if (stream.readyState !== EventSource.CLOSED) {
+			// EventSource reconnects by itself: the new connection owes a `hello` in time.
+			armLiveness(stream, HELLO_TIMEOUT_MS)
+			return
+		}
 		// Refused (a non-2xx answer) or not an event stream: EventSource gives up, so retry later.
+		clearLiveness()
 		stream.close()
 		source = undefined
-		retryTimer ??= setTimeout(() => {
-			retryTimer = undefined
-			connect()
-		}, REFUSED_RETRY_MS)
+		scheduleRetry()
 	}
 }
 
@@ -170,6 +239,8 @@ function stop(): void {
 	stopFallback()
 	if (retryTimer) clearTimeout(retryTimer)
 	retryTimer = undefined
+	clearLiveness()
+	livenessFailures = 0
 	if (flushTimer) clearTimeout(flushTimer)
 	flushTimer = undefined
 	pendingChanges = new Map()
