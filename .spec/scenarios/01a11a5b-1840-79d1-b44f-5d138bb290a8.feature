@@ -1,7 +1,7 @@
 Feature: Adapter selection and resolution
   # Source: Discussion #130 (Part 12, Adapter contract amendments), decision 5, R22–R23 https://github.com/DevilTea/uiux/discussions/130; accepted in full 2026-10-08 https://github.com/DevilTea/uiux/discussions/130#discussioncomment-18807264.
-  # Status: not built as of cf3b984; see the Implementation gaps entry of 01a11a5a-515e-7c1d-9990-82e883c33243 in its owner.
-  # Note: No test exists yet.
+  # Test: code@24cb31a `tests/preview-adapter-providers.test.ts#L333` "renders differently for two configuration values, each in its own bundle (Scenario 01a11a5b-183f-79b7-944c-eb7ab182cee0)". https://github.com/DevilTea/uiux/blob/24cb31acb666f4d348fb6473f817fde0f750638c/tests/preview-adapter-providers.test.ts#L333
+  # Status: built as of 24cb31a.
   @spec:id:01a11a5b-183f-79b7-944c-eb7ab182cee0
   @spec:demonstrates:01a11a5a-515e-7c1d-9990-82e883c33243
   Scenario: A provider receives its Adapter entry's validated configuration
