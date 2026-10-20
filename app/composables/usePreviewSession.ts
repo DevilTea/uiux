@@ -313,6 +313,14 @@ export function createPreviewSession(state: WorkbenchState) {
 		state.selectedWidgetId.value = id
 	}
 
+	/** A Checks navigation failed (its View is gone): the previous highlight is hidden; the selection stays. */
+	function hideSelectionHighlight(): void {
+		selectionTarget = undefined
+		selectionGeometry.value = undefined
+		selectionVisibility.value = 'none'
+		updateGeometryDemand()
+	}
+
 	function currentVariantId(): string | undefined {
 		return state.contextOptions.value.variants.selected || undefined
 	}
@@ -835,6 +843,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		pinPlacements,
 		geometryStreams,
 		selectWidget,
+		hideSelectionHighlight,
 		retry,
 		exitCommentMode,
 		onCommentTarget,
