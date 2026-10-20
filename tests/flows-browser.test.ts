@@ -195,6 +195,8 @@ describe('UX Flow graph editor (R11)', () => {
 			const reread = page.waitForResponse(response => new URL(response.url()).pathname === `/api/resources/flow/${flowId}`)
 			releaseReread()
 			await reread
+			// Wait until the app has applied or dropped the response before saving.
+			await page.locator('[data-flow-save]').waitFor()
 			await page.locator('[data-flow-save]').click()
 			await page.locator('[data-flow-conflict]').waitFor()
 			expect(writes).toHaveLength(2)
@@ -203,6 +205,29 @@ describe('UX Flow graph editor (R11)', () => {
 			expect((await readFlow(flowId)).resource.name).toBe('Checkout recovery (agent)')
 			await page.getByRole('button', { name: 'Reload theirs' }).click()
 			await expect.poll(() => page.getByRole('textbox', { name: /^Name/ }).inputValue()).toBe('Checkout recovery (agent)')
+
+			// Same race, but the human discards: the dropped re-read leaves a newer Flow unread, and
+			// Discard must show it instead of the stale saved copy.
+			const latest = await readFlow(flowId)
+			let releaseSecond!: () => void
+			const secondHeld = new Promise<void>((resolve) => { releaseSecond = resolve })
+			let secondStarted!: () => void
+			const secondSeen = new Promise<void>((resolve) => { secondStarted = resolve })
+			await page.route(url => url.pathname === `/api/resources/flow/${flowId}`, async (route) => {
+				secondStarted()
+				await secondHeld
+				await route.continue()
+			}, { times: 1 })
+			const agent2 = await api('PUT', `/api/flows/${flowId}`, { expectedRevision: latest.revision, name: 'Checkout recovery (agent 2)', entryStepId: latest.resource.entryStepId, steps: latest.resource.steps })
+			expect(agent2.status).toBe(200)
+			await secondSeen
+			await page.getByRole('textbox', { name: /^Name/ }).fill('Human draft')
+			const secondReread = page.waitForResponse(response => new URL(response.url()).pathname === `/api/resources/flow/${flowId}`)
+			releaseSecond()
+			await secondReread
+			await page.locator('[data-flow-save]').waitFor()
+			await page.getByRole('button', { name: 'Discard' }).click()
+			await expect.poll(() => page.getByRole('textbox', { name: /^Name/ }).inputValue()).toBe('Checkout recovery (agent 2)')
 		}
 		finally { await context.close() }
 	}, 90_000)

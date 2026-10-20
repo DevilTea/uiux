@@ -317,6 +317,9 @@ export function useFlowEditor(flowId: Ref<string>) {
 		if (saved.value) draft.value = cloneDraft(saved.value)
 		saveError.value = undefined
 		locked.value = undefined
+		// A live re-read dropped while the draft was dirty leaves a newer Flow unread: fetch it now.
+		const live = workbench.flows.value.find(flow => flow.key === flowId.value)?.revision
+		if (read.value && live && live !== read.value.revision) void load({ quiet: true })
 	}
 
 	/** One atomic `update_flow` with the revision this draft started from. A 409 keeps the draft. */
