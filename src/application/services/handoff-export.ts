@@ -693,39 +693,10 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		}
 
 		// 8. Adapters & Widget Implementation References
-		const neededWidgetTypes = new Set([...usedWidgetTypes].filter(t => t !== 'RootShell'))
-		const rawAdapters = workspaceAdapters
-		const neededAdapterSelections: typeof rawAdapters = []
-		/** The Product Kit index of each needed selection, to name it in a diagnostic. */
-		const neededAdapterIndexes: number[] = []
-
-		if (neededWidgetTypes.size > 0 && rawAdapters.length > 0) {
-			for (let i = 0; i < rawAdapters.length; i++) {
-				const selection = rawAdapters[i]!
-				try {
-					const singleRes = await resolveWorkspaceAdapterSet({
-						workspaceRoot: persistence.root,
-						adapters: [selection],
-						resolver: adapterModuleResolver(),
-						loader: new NodeAdapterManifestLoader(extractProductAdapterManifest),
-						apiCompatibility: productAdapterApiCompatibility,
-						registryInspector: productAdapterRegistryInspector,
-					})
-					if (singleRes.state === 'valid' && singleRes.set.entries[0]) {
-						const entry = singleRes.set.entries[0]
-						const providesNeeded = entry.ownership.widgetTypes.some(t => neededWidgetTypes.has(t))
-						if (providesNeeded) {
-							neededAdapterSelections.push(selection)
-							neededAdapterIndexes.push(i)
-						}
-					}
-				}
-				catch {
-					// Ignore individual candidate errors here; resolving neededAdapterSelections will enforce contracts
-				}
-			}
-		}
-
+		// Rule 01a115cd-cc36-7160-a2b6-baadcf98e40b: the bundle records every active Adapter in Adapter-list
+		// order, including Adapters that provide no Widget type the closure uses, so the whole active set is
+		// resolved, as every other surface resolves it. An invalid set yields no partial set of sources or
+		// provenance (Rule 01a115cd-aef9-7b93-9619-96196f63cfde) and blocks, since the bundle cannot record it.
 		let adaptersResolution: AdapterSetResolutionResult = {
 			state: 'valid',
 			diagnostics: [],
@@ -734,15 +705,19 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 			themeSupport: allThemesSupported(),
 		}
 
-		if (neededAdapterSelections.length > 0) {
+		if (workspaceAdapters.length > 0) {
 			adaptersResolution = await resolveWorkspaceAdapterSet({
 				workspaceRoot: persistence.root,
-				adapters: neededAdapterSelections,
+				adapters: workspaceAdapters,
 				resolver: adapterModuleResolver(),
 				loader: new NodeAdapterManifestLoader(extractProductAdapterManifest),
 				apiCompatibility: productAdapterApiCompatibility,
 				registryInspector: productAdapterRegistryInspector,
 			})
+			if (adaptersResolution.state === 'invalid') {
+				closureValid = false
+				blockingDiagnostics.push(...adaptersResolution.diagnostics.map(diagnostic => ({ code: diagnostic.code, message: diagnostic.message, path: diagnostic.path, blocking: true })))
+			}
 		}
 
 		// The server-side runtime check of the Adapters (Clause 01a116f0-cae2-7c64-9c76-d472f252789a):
@@ -751,10 +726,9 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		// is a non-blocking note.
 		if (adaptersResolution.state === 'valid' && options.checkAdapterSet) {
 			const check = await options.checkAdapterSet(adaptersResolution.set)
-			const atWorkspaceIndex = (path: string) => path.replace(/^\/adapters\/(\d+)(?=\/|$)/u, (_, index: string) => `/adapters/${neededAdapterIndexes[Number(index)] ?? index}`)
 			if (check.state === 'invalid') {
 				closureValid = false
-				blockingDiagnostics.push(...check.diagnostics.map(diagnostic => ({ code: diagnostic.code, message: diagnostic.message, path: atWorkspaceIndex(diagnostic.path), blocking: true })))
+				blockingDiagnostics.push(...check.diagnostics.map(diagnostic => ({ code: diagnostic.code, message: diagnostic.message, path: diagnostic.path, blocking: true })))
 				adaptersResolution = { state: 'invalid', diagnostics: check.diagnostics, summaries: adaptersResolution.summaries }
 			}
 			else if (check.state === 'unchecked') {
@@ -767,6 +741,27 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 
 		if (adaptersResolution.state === 'valid') {
 			for (const entry of adaptersResolution.set.entries) {
+				// Clause 01a115cd-d7f6-74a1-ba9f-c20a24a31ae5: the content digest covers the Adapter's whole
+				// bundled module graph (its imports, stylesheets and assets), not only its entry module.
+				const contentDigest = await adapterGraphDigest({
+					workspaceRoot: persistence.root,
+					moduleBase: adapterResolutionBase(persistence.root, persistence.layout),
+					entry: entry.resolvedModule.resolvedPath,
+				})
+				// The same clause: the digest of the entry's validated configuration, absent when it has none.
+				const configDigest = await adapterConfigDigest(entry.selection.config)
+				// The same clause requires a package version or a content digest: an Adapter with neither has no
+				// verifiable identity to record, so the bundle cannot record it and the closure is invalid.
+				if (!entry.resolvedModule.packageVersion && !contentDigest) {
+					closureValid = false
+					blockingDiagnostics.push({
+						code: 'handoff.adapter_provenance_unverifiable',
+						message: `Adapter ${entry.manifest.id} has no package version, and its module graph could not be read to compute its content digest.`,
+						path: `/adapters/${entry.index}`,
+						blocking: true,
+					})
+					continue
+				}
 				try {
 					const modBytes = await fs.readFile(entry.resolvedModule.resolvedPath)
 					const moduleIdentity = await contentIdentity(modBytes, materialize)
@@ -779,15 +774,6 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 				catch {
 					// could not read local file
 				}
-				// Clause 01a115cd-d7f6-74a1-ba9f-c20a24a31ae5: the content digest covers the Adapter's whole
-				// bundled module graph (its imports, stylesheets and assets), not only its entry module.
-				const contentDigest = await adapterGraphDigest({
-					workspaceRoot: persistence.root,
-					moduleBase: adapterResolutionBase(persistence.root, persistence.layout),
-					entry: entry.resolvedModule.resolvedPath,
-				})
-				// The same clause: the digest of the entry's validated configuration, absent when it has none.
-				const configDigest = await adapterConfigDigest(entry.selection.config)
 
 				adapterProvenances.push({
 					moduleSpecifier: entry.selection.moduleSpecifier,
@@ -998,9 +984,6 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 
 		// Sort implementationReferences by widgetType
 		implementationReferences.sort((a, b) => a.widgetType.localeCompare(b.widgetType))
-
-		// Sort adapterProvenances by adapterId
-		adapterProvenances.sort((a, b) => a.adapterId.localeCompare(b.adapterId))
 
 		// Sort contextsInClosure
 		contextsInClosure.sort((a, b) => {
