@@ -8,6 +8,8 @@ import { flattenWidgetTree } from '../../../src/preview/widget-tree'
 import { useAccess } from '../../composables/useAccess'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { useReadiness } from '../../composables/useReadiness'
+import { useUiuxClient } from '../../composables/useUiuxClient'
+import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { reviewCoverageSummary, splitReadinessDiagnostics, type CaptureContext } from '../../utils/readiness'
 import { viewLocation } from '../../utils/workbench-routes'
@@ -33,6 +35,8 @@ const workbench = useWorkbench()
 const { selectedView, selectedViewId, reviews, widgetTreeResult, currentActiveContext, preview } = workbench
 const access = useAccess()
 const readiness = useReadiness()
+const uiux = useUiuxClient()
+const feedback = useWorkbenchFeedback()
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const atLeastTablet = useMediaQuery('(min-width: 768px)')
 
@@ -51,19 +55,43 @@ const findingsOpen = ref(true)
 
 /** Checks navigation defers while Comment mode is on; the latest request wins (Part 3). */
 const deferredWidget = ref<string>()
+/** The newest request wins: an older one still re-reading the View never selects. */
+let findingSequence = 0
+
+/**
+ * Selects a finding's Widget once its View is confirmed to still exist (Rule
+ * 01a11658-1fde-7b27-ba6d-6de27224b90c): the findings were read earlier and the View may be gone
+ * since. Then nothing is selected or opened, the previous Checks highlight is hidden and a
+ * non-blocking notice says navigation did not happen. A read that fails otherwise proceeds.
+ */
+async function followFinding(widgetId: string, openInspect: boolean): Promise<void> {
+	const sequence = ++findingSequence
+	const viewId = selectedViewId.value
+	const name = viewName.value
+	let exists = true
+	try { exists = !!viewId && !!await uiux.readResource('view', viewId) }
+	catch { /* unknown: follow the finding as before */ }
+	if (sequence !== findingSequence) return
+	if (!exists) {
+		preview.hideSelectionHighlight()
+		feedback.notice(t('checks.viewGone.title'), t('checks.viewGone.description', { name }))
+		return
+	}
+	workbench.selectWidget(widgetId)
+	if (openInspect) emit('openInspect')
+}
 function selectFinding(widgetId: string): void {
 	if (preview.isCommentMode.value) {
 		deferredWidget.value = widgetId
 		return
 	}
-	workbench.selectWidget(widgetId)
-	emit('openInspect')
+	void followFinding(widgetId, true)
 }
 watch(preview.isCommentMode, (on) => {
 	if (on || !deferredWidget.value) return
 	const widgetId = deferredWidget.value
 	deferredWidget.value = undefined
-	workbench.selectWidget(widgetId)
+	void followFinding(widgetId, false)
 })
 
 // ----- Evidence --------------------------------------------------------------------------------
