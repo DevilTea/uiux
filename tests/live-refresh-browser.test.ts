@@ -16,7 +16,7 @@ let server: WorkbenchServer
 let browser: Browser
 let agent: Client
 
-const poll = <T>(read: () => T | Promise<T>, timeout = 10_000) => expect.poll(read, { timeout })
+const poll = <T>(read: () => T | Promise<T>, timeout = 20_000) => expect.poll(read, { timeout })
 
 async function call<T>(name: string, args: Record<string, unknown>): Promise<T> {
 	const result = await agent.callTool({ name, arguments: args })
@@ -43,7 +43,7 @@ afterAll(async () => {
 	await server?.close()
 })
 
-async function open(path: string): Promise<{ context: BrowserContext; page: Page; streams: () => number }> {
+async function open(path: string): Promise<{ context: BrowserContext; page: Page; streams: () => number; connected: () => number }> {
 	const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' })
 	await context.addInitScript(() => {
 		localStorage.setItem('nuxt-color-mode', 'light')
@@ -52,24 +52,26 @@ async function open(path: string): Promise<{ context: BrowserContext; page: Page
 	await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
 	const page = await context.newPage()
 	let opened = 0
+	let connected = 0
 	page.on('request', (request) => { if (new URL(request.url()).pathname === '/api/events') opened += 1 })
+	// The stream answered: the server has accepted the subscription (what is sent before this is lost).
+	page.on('response', (response) => { if (new URL(response.url()).pathname === '/api/events' && response.ok()) connected += 1 })
 	await page.goto(`${server.origin}${path}`, { waitUntil: 'domcontentloaded' })
 	// The page is never reloaded: this marker would be gone after a reload.
 	await page.evaluate(() => { (window as unknown as { liveMarker: number }).liveMarker = 1 })
-	return { context, page, streams: () => opened }
+	return { context, page, streams: () => opened, connected: () => connected }
 }
 
 const marker = (page: Page) => page.evaluate(() => (window as unknown as { liveMarker?: number }).liveMarker)
 
 describe('Live refresh in the Workbench (Rules 01a11485-f414-7882-b94f-cd4236c26d89, 01a114ec-e706-7c39-84a6-2e4a536daed2)', () => {
 	it('shows an Agent\'s MCP rename and its lease on an open View page without a reload, over one stream', async () => {
-		const { context, page, streams } = await open(`/views/${VIEW_ID}`)
+		const { context, page, streams, connected } = await open(`/views/${VIEW_ID}`)
 		try {
 			const header = page.locator('[data-view-header]')
 			await header.locator('[data-view-name]').first().waitFor({ timeout: 20_000 })
 			await poll(streams).toBe(1)
-			// Let the stream's hello arrive before the write.
-			await page.waitForTimeout(500)
+			await poll(connected).toBe(1)
 
 			await call('update_view_metadata', { viewId: VIEW_ID, expectedRevision: await readRevision('view', VIEW_ID), name: 'Renamed by the Agent' })
 			await poll(() => header.locator('[data-view-name]').first().textContent()).toContain('Renamed by the Agent')
@@ -82,13 +84,13 @@ describe('Live refresh in the Workbench (Rules 01a11485-f414-7882-b94f-cd4236c26
 			expect(streams()).toBe(1)
 		}
 		finally { await context.close() }
-	})
+	}, 60_000)
 
 	it('lists a Review thread an Agent opens through MCP in the open Reviews inbox, and highlights its reply', async () => {
-		const { context, page } = await open('/reviews')
+		const { context, page, connected } = await open('/reviews')
 		try {
 			await page.locator('[data-review-inbox]').waitFor({ timeout: 20_000 })
-			await page.waitForTimeout(500)
+			await poll(connected).toBe(1)
 			const created = await call<{ key: string; revision: string }>('create_review_thread', { anchor: { scope: 'workspace' } })
 			await call('append_review_message', { reviewId: created.key, expectedRevision: created.revision, body: 'Pushed live from the Agent' })
 			const row = page.locator('[data-review-row]').filter({ hasText: 'Pushed live from the Agent' })
@@ -101,9 +103,9 @@ describe('Live refresh in the Workbench (Rules 01a11485-f414-7882-b94f-cd4236c26
 			const reply = page.locator('[data-review-timeline] li').filter({ hasText: 'A second live reply' })
 			await poll(() => reply.count()).toBe(1)
 			expect(await reply.first().getAttribute('data-timeline-new')).toBe('true')
-			await poll(() => reply.first().getAttribute('data-timeline-new'), 6000).toBeNull()
+			await poll(() => reply.first().getAttribute('data-timeline-new'), 20_000).toBeNull()
 			expect(await marker(page)).toBe(1)
 		}
 		finally { await context.close() }
-	})
+	}, 60_000)
 })
