@@ -8,6 +8,7 @@ import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { useAuthoringAccess } from '../../composables/useAuthoringAccess'
 import { useUnsavedGuard } from '../../composables/useUnsavedGuard'
 import { useKitBuild } from '../../composables/useKitBuild'
+import { touchesKinds, useLiveEvents } from '../../composables/useLiveEvents'
 import { createSettingsSection } from '../../composables/useSettingsSection'
 import { describeFetchError, isLockedError, type FetchErrorLock } from '../../utils/fetch-error'
 import { adapterRows, adapterSelections, productKitAdapterWrites, type AdapterRow } from '../../utils/workspace-authoring'
@@ -122,6 +123,12 @@ const stylesThemes = createSettingsSection<StylesThemesDraft, ProductKit>({
 watch(workspace, () => {
 	void loadProductKit()
 }, { immediate: true })
+// Live refresh: the Product Kit file changed elsewhere (its `product-kit` event, Clause
+// 01a114ec-e839-7b11-957c-41c88b692e12). The sections keep a draft and raise a conflict when the
+// change touched it (`createSettingsSection`). A resync re-reads the Workspace, which reads it too.
+useLiveEvents().onResources((batch) => {
+	if (!batch.resync && touchesKinds(batch, ['product-kit'])) void loadProductKit()
+})
 watch(productKit, (read) => {
 	kitAdapters.sync(read)
 	stylesThemes.sync(read)

@@ -3,6 +3,7 @@ import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch
 import type { TableColumn } from '@nuxt/ui'
 import { useI18n } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
+import { touchesKinds, useLiveEvents } from '../../composables/useLiveEvents'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { useAuthoringAccess } from '../../composables/useAuthoringAccess'
@@ -85,9 +86,12 @@ async function readLocale(key: string): Promise<LocaleRead | undefined> {
 	return await uiux.readResource<LocaleRead>('locale', key)
 }
 
-async function load(): Promise<void> {
-	loading.value = true
-	loadError.value = undefined
+/** `quiet`: a live refresh, which keeps the table on screen and the last list when the read fails. */
+async function load(options: Readonly<{ quiet?: boolean }> = {}): Promise<void> {
+	if (!options.quiet) {
+		loading.value = true
+		loadError.value = undefined
+	}
 	try {
 		const list = await uiux.listResources<LocaleSummary>(['locale'], { limit: 100 })
 		const reads = await Promise.all(list.items.map(item => readLocale(item.key)))
@@ -96,8 +100,9 @@ async function load(): Promise<void> {
 			if (!read) continue
 			const existing = byKey.value.get(read.key)
 			// Keep a draft across reloads; only a clean Locale adopts the newer file.
+			// A live refresh leaves a draft alone: its save meets the new revision as a conflict.
 			if (existing && countMessageChanges(existing.saved, existing.draft) > 0) {
-				if (existing.revision !== read.revision) {
+				if (existing.revision !== read.revision && !options.quiet) {
 					existing.conflict = true
 					existing.theirs = { revision: read.revision, messages: { ...read.resource } }
 				}
@@ -109,14 +114,18 @@ async function load(): Promise<void> {
 		states.value = next
 	}
 	catch (cause) {
-		loadError.value = describeFetchError(cause, t('locales.loadListFailed'))
+		if (!options.quiet) loadError.value = describeFetchError(cause, t('locales.loadListFailed'))
 	}
 	finally {
 		loading.value = false
 	}
 }
 
-onMounted(load)
+onMounted(() => { void load() })
+// Live refresh: a Locale changed elsewhere is re-read; a Locale with a draft keeps it (see `load`).
+useLiveEvents().onResources((batch) => {
+	if (touchesKinds(batch, ['locale'])) void load({ quiet: true })
+})
 
 // Filters
 type Filter = 'all' | 'reminders' | 'missing' | 'extra'

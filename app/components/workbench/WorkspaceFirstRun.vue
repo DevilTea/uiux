@@ -2,17 +2,16 @@
 import { computed } from 'vue'
 import { useI18n } from '#imports'
 import { useAccess } from '../../composables/useAccess'
-import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { copyText } from '../../utils/copy-text'
 
 /**
  * First run of a Workspace with no Views (brief h "Overview · No Views"; onboard). Views are
  * authored by an agent through MCP, so the path to value is: connect the agent, ask it for a
- * View, refresh. One primary action (copy the endpoint the agent needs), one secondary (refresh).
+ * View, review it. One action (copy the endpoint the agent needs); the View appears here on its
+ * own through the change-event stream (Feature "Live refresh").
  */
 const { t } = useI18n()
-const workbench = useWorkbench()
 const access = useAccess()
 const feedback = useWorkbenchFeedback()
 
@@ -126,14 +125,6 @@ async function copy(text: string): Promise<void> {
           <p class="text-sm text-muted">
             {{ t('firstRun.review.body') }}
           </p>
-          <UButton
-            size="sm"
-            icon="i-lucide-refresh-cw"
-            :loading="workbench.loading.value"
-            :label="t('common.refresh')"
-            data-first-run-refresh
-            @click="workbench.refreshAll()"
-          />
         </div>
       </li>
     </ol>

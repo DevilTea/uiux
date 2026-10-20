@@ -286,16 +286,6 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
           data-review-new-comment
           @click="emit('compose')"
         />
-        <UButton
-          color="neutral"
-          variant="ghost"
-          size="sm"
-          icon="i-lucide-refresh-cw"
-          :loading="inbox.loading.value"
-          :aria-label="t('common.refresh')"
-          data-review-refresh
-          @click="inbox.loadSummaries()"
-        />
       </div>
 
       <div class="flex min-w-0 items-center gap-2">

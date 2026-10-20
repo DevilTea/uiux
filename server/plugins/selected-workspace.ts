@@ -4,6 +4,7 @@ import { acquireServerHold, type AcquiredServerHold } from '../../src/persistenc
 import { checkWorkspaceSelection } from '../../src/persistence/workspace-selection'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../../src/product/workspace-schema'
 import { AccessError } from '../../src/server/access/roster'
+import { closeEventStreamsOnShutdown } from '../../src/server/event-stream'
 import { installLogRedaction, writeUnredacted } from '../../src/server/access/redaction'
 import { getServerNetwork } from '../../src/server/network-access'
 import {
@@ -28,6 +29,9 @@ export default defineNitroPlugin((nitroApp) => {
 		if (!import.meta.prerender) {
 			// Secrets never appear in logs (identity decision 3).
 			installLogRedaction()
+			// The graceful shutdown waits for open connections before the `close` hook runs, and an
+			// event stream never ends by itself: close the streams as soon as the signal arrives.
+			closeEventStreamsOnShutdown(runtime.eventStreams)
 			// Open (or create) this Workspace's host-local roster now: an unsafe or mismatched store
 			// stops the server instead of failing every request, and a roster without a human Owner
 			// bootstraps one and prints its one-time sign-in link (decision 8).

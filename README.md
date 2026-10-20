@@ -42,7 +42,7 @@ Sign in with the link `uiux dev` prints, then work from the sidebar (an icon rai
 
 ## Server surfaces
 
-Nitro serves `GET /api/health`, selected-Workspace point reads under `/api/resources/:kind/:key`, discovery endpoints under `/api/resources/list` and `/api/resources/search`, safe binary asset content delivery under `/api/assets/:id/content`, authoring endpoints under `/api/*`, and MCP at `/mcp`. The Workbench lists canonical resources, displays their content and diagnostics, and refreshes from the same selected-Workspace application facade used by HTTP and MCP.
+Nitro serves `GET /api/health`, selected-Workspace point reads under `/api/resources/:kind/:key`, discovery endpoints under `/api/resources/list` and `/api/resources/search`, safe binary asset content delivery under `/api/assets/:id/content`, authoring endpoints under `/api/*`, the change-event stream `GET /api/events` (server-sent events), and MCP at `/mcp`. The Workbench lists canonical resources, displays their content and diagnostics, and reads them through the same selected-Workspace application facade used by HTTP and MCP. Every committed write, from HTTP or MCP, emits a content-free `resource.changed` / `resource.removed` event (`lock.changed` for edit leases, `access.changed` for the roster), so an open Workbench re-reads what changed without a reload; edits made to Workspace files outside UIUX are not detected.
 
 MCP exposes compact read-only discovery plus domain-specific authoring operations with revision CAS:
 - Views: `create_view`, `update_view_spec`, `update_view_structure`, `update_view_metadata`
@@ -217,7 +217,7 @@ On a configured origin, members sign in and work as they do on loopback, with th
 
 **Plain HTTP on a network.** UIUX itself serves plain HTTP only. It refuses `NITRO_SSL_CERT` / `NITRO_SSL_KEY`, and it never reads `X-Forwarded-Proto` or other forwarding headers. An `https` origin is served by a front end that terminates TLS. On an `http` origin other than loopback, sign-in links, session cookies and Tokens cross the network in clear text, and anyone on that network can capture and reuse them. UIUX warns about each such origin at startup and on its sign-in page. Prefer an `https` origin behind a TLS-terminating reverse proxy; use a plain `http` LAN origin only on a network you trust.
 
-**Reverse proxy.** The proxy must forward the client's `Host` unchanged, with its port, and must not buffer the response streams (`/mcp` answers are server-sent events). For nginx:
+**Reverse proxy.** The proxy must forward the client's `Host` unchanged, with its port, and must not buffer the response streams (`/mcp` answers and `/api/events` are server-sent events). For nginx:
 
 ```nginx
 server {

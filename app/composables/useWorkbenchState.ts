@@ -6,6 +6,7 @@ import { describeFetchError } from '../utils/fetch-error'
 import { useUiuxClient } from './useUiuxClient'
 import type { PermissionKey } from '../../src/application/access/keys'
 import { useAccess } from './useAccess'
+import type { LiveBatch } from './useLiveEvents'
 import type {
 	Diagnostic,
 	EvidenceContextSelection,
@@ -16,6 +17,11 @@ import type {
 	ViewSummary,
 	WorkspaceRead,
 } from './workbench-types'
+
+/** The kinds whose lists the shell holds, re-read when an event names them. */
+const LIVE_LIST_KINDS = ['view', 'locale', 'asset', 'flow', 'review'] as const
+/** The list pages a live re-read follows (100 summaries each). */
+const LIVE_LIST_MAX_PAGES = 20
 
 /**
  * Workbench data and selection state: the selected Workspace, its Views, the
@@ -52,6 +58,7 @@ export function createWorkbenchState() {
 	const detailLoading = ref(false)
 	const error = ref<string>()
 	let viewLoadSequence = 0
+	const liveReadSequence = new Map<string, number>()
 
 	// Render context selections. Empty means "use the effective default" from contextOptions.
 	const selectedVariant = ref('')
@@ -171,7 +178,11 @@ export function createWorkbenchState() {
 		return undefined
 	}
 
-	async function loadSelectedView(onLoaded?: () => void): Promise<void> {
+	/**
+	 * Reads the selected View. `quiet` is a live refresh (Rule 01a11485-f414-7882-b94f-cd4236c26d89):
+	 * the View stays on screen while it is re-read, and a failed read keeps the last one shown.
+	 */
+	async function loadSelectedView(onLoaded?: () => void, options: Readonly<{ quiet?: boolean }> = {}): Promise<void> {
 		const requestSequence = ++viewLoadSequence
 		const id = selectedViewId.value
 		if (!id) {
@@ -179,7 +190,7 @@ export function createWorkbenchState() {
 			detailLoading.value = false
 			return
 		}
-		detailLoading.value = true
+		if (!options.quiet) detailLoading.value = true
 		try {
 			const nextView = await uiux.readResource<ViewRead>('view', id)
 			if (!nextView) throw new Error(t('workbench.errors.viewUnavailable'))
@@ -189,7 +200,7 @@ export function createWorkbenchState() {
 			onLoaded?.()
 		}
 		catch (cause) {
-			if (viewLoadSequence !== requestSequence || selectedViewId.value !== id) return
+			if (viewLoadSequence !== requestSequence || selectedViewId.value !== id || options.quiet) return
 			error.value = describeFetchError(cause, t('workbench.errors.viewLoadFailed')).message
 			selectedView.value = undefined
 		}
@@ -197,6 +208,61 @@ export function createWorkbenchState() {
 			if (viewLoadSequence === requestSequence)
 				detailLoading.value = false
 		}
+	}
+
+	/** Every summary of one kind, following the list cursor (the Reviews inbox shows them all). */
+	async function listAll<Summary>(kind: string): Promise<Summary[] | undefined> {
+		try {
+			const items: Summary[] = []
+			let cursor: string | undefined
+			for (let page = 0; page < LIVE_LIST_MAX_PAGES; page++) {
+				const result = await uiux.listResources<Summary>([kind], { limit: 100, ...(cursor ? { cursor } : {}) })
+				items.push(...result.items)
+				cursor = result.nextCursor
+				if (!cursor) break
+			}
+			return items
+		}
+		catch {
+			// A failed re-read keeps the last known list; the next event or resync reads again.
+			return undefined
+		}
+	}
+
+	/**
+	 * Applies one batch of change events (Feature "Live refresh"): re-reads, through the list and
+	 * point-read APIs, each list a changed kind appears in, the Workspace manifest when it changed,
+	 * and the open View when its revision moved. Nothing shown is cleared while it is re-read, and a
+	 * draft lives in its editor, which keeps it (Rule 01a11485-f414-7882-b94f-cd4236c26d89).
+	 */
+	async function applyLiveChanges(batch: LiveBatch, onViewLoaded?: () => void): Promise<void> {
+		const kinds = new Set(batch.resync ? [...LIVE_LIST_KINDS, 'workspace'] : batch.changes.map(change => change.kind))
+		const reads: Promise<void>[] = []
+		// Batches can overlap: only the newest read of a kind is applied.
+		const latest = (kind: string) => {
+			const sequence = (liveReadSequence.get(kind) ?? 0) + 1
+			liveReadSequence.set(kind, sequence)
+			return () => liveReadSequence.get(kind) === sequence
+		}
+		const read = <Value>(kind: string, load: () => Promise<Value | undefined>, apply: (value: Value) => void) => {
+			if (!kinds.has(kind)) return
+			const current = latest(kind)
+			reads.push(load().then((value) => { if (value !== undefined && current()) apply(value) }, () => undefined))
+		}
+		read('workspace', () => uiux.readResource<WorkspaceRead>('workspace', 'workspace'), (value) => { workspace.value = value })
+		read('view', () => listAll<ViewSummary>('view'), (items) => { views.value = items })
+		read('locale', () => listAll<LocaleSummary>('locale'), (items) => {
+			discoveredLocales.value = items.map(item => item.key)
+			localeRevisions.value = Object.fromEntries(items.map(item => [item.key, item.revision]))
+		})
+		read('asset', () => listAll<unknown>('asset'), (items) => { assetCount.value = items.length })
+		read('flow', () => listAll<FlowSummary>('flow'), (items) => { flows.value = items })
+		read('review', () => listAll<ReviewSummary>('review'), (items) => { reviews.value = items })
+		await Promise.all(reads)
+		const id = selectedViewId.value
+		const listed = views.value.find(view => view.key === id)
+		if (id && kinds.has('view') && listed && listed.revision !== selectedView.value?.revision)
+			await loadSelectedView(onViewLoaded, { quiet: true })
 	}
 
 	/** Re-reads only the section counts shown in the navigation badges. */
@@ -307,6 +373,7 @@ export function createWorkbenchState() {
 		selectedWidgetDiagnostics,
 		resolveWidgetIdFromDiagnostic,
 		loadSelectedView,
+		applyLiveChanges,
 		refresh,
 		refreshCounts,
 		refreshRenderContextKeys,

@@ -109,6 +109,8 @@ const ROLE_MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; 
 	readPreview: { min: 'viewer', system: true },
 	assessHandoffReadiness: { min: 'viewer' },
 	listLeases: { min: 'viewer' },
+	// Added with the change-event stream (issue #69): `workspace.read`, like the lease list.
+	subscribeEvents: { min: 'viewer' },
 	readProductKit: { min: 'viewer' },
 	readAccessPresets: { min: 'viewer' },
 	diffVersions: { min: 'viewer' },
@@ -208,8 +210,8 @@ describe('parity: role-derived keys decide as the role matrix did', () => {
 				if ((denied === undefined) !== before) changed.push(`${id}: ${before ? 'allowed' : 'refused'} → ${denied ? 'refused' : 'allowed'}`)
 			}
 		}
-		// 54 operations, 7 lease acquires and 6 restores, for 16 members and the system credential.
-		expect(compared).toBe(67 * 17)
+		// 55 operations, 7 lease acquires and 6 restores, for 16 members and the system credential.
+		expect(compared).toBe(68 * 17)
 		expect(changed.sort()).toEqual([...INTENDED_CHANGES].sort())
 	})
 

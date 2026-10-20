@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 
 import type { McpHttpHandler } from '@modelcontextprotocol/server'
 import { createLeaseManager, type LeaseManager } from '../application/access/leases'
+import { createChangeEventBus, publishCommits, publishLeaseChanges, type ChangeEventBus } from '../application/services/change-events'
 import { createHistoryRecorder, type HistoryRecorder } from '../application/services/history-recorder'
 import type { WorkspaceApplicationSession } from '../application/services/workspace-session'
 import { createWorkspaceApplicationSession } from '../application/services/workspace-session'
@@ -12,6 +13,7 @@ import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 import { AccessService } from './access/service'
 import { AccessStore, resolveUiuxHome } from './access/store'
 import { createWorkspaceAccessPresetsReader } from './access/workspace-presets'
+import { createEventStreamHub, type EventStreamHub } from './event-stream'
 import { createHistoryStoreFactory, type HistoryStoreFactory } from './history-stores'
 import { createKitBuildRunner, registerKitBuildRunner, type KitBuildRunner } from './kit-build'
 import { checkAdapterSetRuntime, getSelectedWorkspacePreviewBundle } from './workspace-adapters'
@@ -32,6 +34,12 @@ export type SelectedWorkspaceServerRuntime = Readonly<{
 	 */
 	historyRecorder: HistoryRecorder
 	mcp: McpHttpHandler
+	/**
+	 * The change events of every committed write, lease change and roster change (Feature "Live
+	 * refresh"), and the `GET /api/events` streams that carry them.
+	 */
+	events: ChangeEventBus
+	eventStreams: EventStreamHub
 	/**
 	 * The kit build runner (Feature 01a11bb1-8534-7f0f-b8d0-de7efabe31f7). The Nitro plugin starts it
 	 * under `uiux dev`; `close()` stops its process.
@@ -94,11 +102,30 @@ export function createSelectedWorkspaceServerRuntime(
 		// Handoff refuses an Adapter set the Preview refuses (Clause 01a116f0-cae2-7c64-9c76-d472f252789a).
 		checkAdapterSet: set => checkAdapterSetRuntime(selectedRoot, persistence.layout, set),
 	})
+	// Every committed write (HTTP and MCP alike) and every lease change becomes a change event.
+	const events = createChangeEventBus()
+	const stopCommitEvents = publishCommits(events, persistence)
+	const stopLeaseEvents = publishLeaseChanges(events, leases)
+	const eventStreams = createEventStreamHub({
+		bus: events,
+		credentialKeys: principal => accessService?.credentialKeys(principal),
+		// Leases end lazily, and the CLI edits the roster on disk: look at both on every heartbeat,
+		// so an expired lease and a roster change made outside this server still emit.
+		onHeartbeat: async () => {
+			leases.list()
+			await accessService?.refresh()
+		},
+	})
 	let pending: Promise<AccessService> | undefined
 	function access(): Promise<AccessService> {
 		pending ??= (async () => {
 			const store = (await AccessStore.open({ workspaceRoot: selectedRoot, home: options?.uiuxHome ?? resolveUiuxHome(), create: true }))!
 			accessService = new AccessService({ store, leases, presets: createWorkspaceAccessPresetsReader(selectedRoot, persistence.layout) })
+			// A roster change emits `access.changed`; any access change re-checks the open streams.
+			accessService.onChange((change) => {
+				if (change.roster) events.publish({ type: 'access.changed' })
+				eventStreams.revalidate()
+			})
 			return accessService
 		})()
 		return pending
@@ -114,8 +141,13 @@ export function createSelectedWorkspaceServerRuntime(
 		history,
 		historyRecorder,
 		mcp,
+		events,
+		eventStreams,
 		kitBuild,
 		async close() {
+			eventStreams.close()
+			stopCommitEvents()
+			stopLeaseEvents()
 			unregisterKitBuild()
 			await kitBuild.stop()
 			await historyRecorder.stop()

@@ -100,16 +100,16 @@ const actions = useThreadActions({
 	error: () => error.value,
 	retractRefused: () => !!thread.value && inbox.retractRefused.value === thread.value.id,
 	clearRetractRefused: () => { inbox.retractRefused.value = undefined },
-	async resolve(id, resolution, why) {
+	async resolve(id, resolution, why, expectedRevision) {
 		// The next thread comes from the queue before the resolve moves this one out of it.
 		const next = inbox.successor(id)
-		const ok = await inbox.resolve(id, resolution, why)
+		const ok = await inbox.resolve(id, resolution, why, expectedRevision)
 		if (ok) emit('resolved', id, next)
 		return ok
 	},
-	reopen: (id, why) => inbox.reopen(id, why),
-	promote: (id, form) => inbox.promote(id, form),
-	submit: (id, draft) => inbox.submit(id, draft),
+	reopen: (id, why, expectedRevision) => inbox.reopen(id, why, expectedRevision),
+	promote: (id, form, expectedRevision) => inbox.promote(id, form, expectedRevision),
+	submit: (id, draft, expectedRevision) => inbox.submit(id, draft, expectedRevision),
 	retract: id => inbox.retract(id),
 	reanchor: () => { if (thread.value) inbox.reanchorOnCanvas(thread.value) },
 	threadLink: id => inbox.threadLink(id),

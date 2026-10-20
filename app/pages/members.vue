@@ -5,6 +5,7 @@ import type { DropdownMenuItem, TableColumn } from '@nuxt/ui'
 import { keysOfPreset, missingRequirements } from '../../src/application/access/keys'
 import type { LabelPreset, MemberLabel } from '../../src/application/access/labels'
 import type { MemberKind } from '../../src/application/access/principal'
+import { useLiveEvents } from '../composables/useLiveEvents'
 import { useAccess } from '../composables/useAccess'
 import { useWorkbenchFeedback } from '../composables/useWorkbenchFeedback'
 import { useWorkbenchFormat } from '../composables/useWorkbenchFormat'
@@ -76,6 +77,8 @@ async function load(): Promise<void> {
 }
 
 onMounted(load)
+// Live refresh: the roster or its credentials changed elsewhere (another manager, the CLI).
+useLiveEvents().onAccess(() => { void load() })
 
 async function mutate(run: () => Promise<unknown>, success?: string): Promise<boolean> {
 	try {

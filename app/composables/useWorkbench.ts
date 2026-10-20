@@ -2,6 +2,7 @@ import { inject, provide, watch, type InjectionKey } from 'vue'
 import { applyEvidenceContextSelection, createWorkbenchState, type WorkbenchState } from './useWorkbenchState'
 import { createPreviewSession, type PreviewSession } from './usePreviewSession'
 import type { EvidenceContextSelection, ViewRouteContext } from './workbench-types'
+import type { LiveBatch } from './useLiveEvents'
 
 export type Workbench = WorkbenchState & Readonly<{
 	preview: PreviewSession
@@ -10,6 +11,13 @@ export type Workbench = WorkbenchState & Readonly<{
 	openView: (id: string, context: ViewRouteContext) => Promise<void>
 	selectWidget: (id: string) => void
 	refreshAll: () => Promise<void>
+	/**
+	 * Applies a batch of change events: re-reads what changed and, when what the canvas renders
+	 * changed (the View's Widget IR or Variants, a Locale it shows, the manifest's render settings,
+	 * the Product Kit file with the Adapters and their configuration), starts a fresh Preview
+	 * generation so the open page shows it without a reload.
+	 */
+	applyLiveChanges: (batch: LiveBatch) => Promise<void>
 	applyEvidenceContext: (context: EvidenceContextSelection) => Promise<void>
 	/** The View opened most recently in this browser, if any. */
 	lastViewId: () => string | undefined
@@ -65,6 +73,54 @@ export function provideWorkbench(): Workbench {
 		preview.notifyIframeContext()
 	})
 
+	/** What the Preview document of the open View renders from, as one comparable string. */
+	function renderSignature(): string {
+		const view = state.selectedView.value
+		if (!view) return ''
+		const manifest = state.workspace.value?.resource as Record<string, unknown> | undefined
+		const options = state.contextOptions.value
+		const locales = new Set([options.locales.selected, manifest && (manifest.i18n as { defaultLocale?: string } | undefined)?.defaultLocale].filter((code): code is string => !!code))
+		return JSON.stringify([
+			view.key,
+			(view.resource as { ir?: unknown }).ir,
+			(view.resource as { variants?: unknown }).variants,
+			manifest ? [manifest.i18n, manifest.viewports, manifest.themes, manifest.adapters] : null,
+			[...locales].sort().map(code => [code, state.localeRevisions.value[code] ?? null]),
+		])
+	}
+
+	/** The Product Kit file's revision the open Preview was last known to render from. */
+	let productKitRevision: string | undefined
+	/**
+	 * Whether the Product Kit file moved (Discussion #241 owner decision 2,
+	 * https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19070362): its `product-kit`
+	 * event names the new revision; after a resync, which names nothing, the file is read again. Only
+	 * while a View is open, since only the Preview renders from it.
+	 */
+	async function productKitMoved(batch: LiveBatch): Promise<boolean> {
+		if (!state.selectedView.value) return false
+		const named = batch.changes.find(change => change.kind === 'product-kit')
+		if (!batch.resync && !named) return false
+		let revision = named?.revision
+		if (revision === undefined) {
+			try { revision = (await ($fetch as unknown as (url: string) => Promise<{ revision?: string }>)('/api/product-kit')).revision }
+			catch { return false }
+		}
+		const known = productKitRevision
+		productKitRevision = revision
+		// Without a revision known yet, only an event that named a change counts.
+		return known === undefined ? named !== undefined : known !== revision
+	}
+
+	async function applyLiveChanges(batch: LiveBatch): Promise<void> {
+		const viewId = state.selectedView.value?.key
+		const before = renderSignature()
+		const [kitMoved] = await Promise.all([productKitMoved(batch), state.applyLiveChanges(batch)])
+		const after = renderSignature()
+		// Selecting another View meanwhile starts its own generation.
+		if (before && after && (before !== after || kitMoved) && state.selectedView.value?.key === viewId) preview.replaceGeneration()
+	}
+
 	const workbench: Workbench = {
 		...state,
 		preview,
@@ -72,6 +128,7 @@ export function provideWorkbench(): Workbench {
 		openView,
 		selectWidget: preview.selectWidget,
 		refreshAll: () => state.refresh(preview.notifyIframeContext),
+		applyLiveChanges,
 		applyEvidenceContext,
 		lastViewId: readLastView,
 	}

@@ -48,7 +48,7 @@ Figma comments sit on pixels of a drawing. Here, a Figma-like comment sits on a 
 - **Local, single process.** `uiux init` creates a Workspace at the current schema (`schemaVersion` 6), by default in `.uiux/` at the top of the Git repository, and `uiux dev` starts one Nitro process for the Workspace it is given (`--workspace <dir>`) or discovers from the current directory, on loopback only (`127.0.0.1`) unless the operator configures origins with `--origin`. It serves the Workbench SPA (`ssr: false`), `/api/*`, `/mcp` and the Preview host for one selected Workspace. There is no cloud and no network dependency. The Workspace may or may not be in Git.
 - **Access.** Every `/api/*` and `/mcp` request needs a credential: a Workbench session (from a one-time sign-in link) or a bearer token. Each Workspace has a host-local roster of members, tokens, invites and sessions under `$UIUX_HOME`, managed with `uiux member|token|invite|session ... [--workspace <dir>]` (`uiux access copy` carries a roster to a moved Workspace) or, for Owners, on the Workbench Members page. The first start of a Workspace creates its Owner and prints a sign-in link. Roles are cumulative: Viewer ⊂ Reviewer ⊂ Editor ⊂ Owner; agents are capped at Editor.
 - **One Workspace format.** UIUX reads only the current `schemaVersion` (6) and has no migration (Discussion #231). A Workspace at another version cannot be changed; `uiux init` starts a new one.
-- **Side by side with an agent session.** A developer usually has an agent authoring through MCP in another window. Reviewers return to the Workbench to inspect the result. Refresh is manual today; live push of agent edits is accepted but not built (issue #69).
+- **Side by side with an agent session.** A developer usually has an agent authoring through MCP in another window. An open Workbench follows the agent's writes on its own: the server pushes change notifications over `GET /api/events`, and the Workbench re-reads what changed (polling only when the stream cannot connect).
 - **Team sharing happens through one host's roster and the Workspace files** (typically Git). Several members can use the same server, each signed in with their own credential. Other machines reach it only through origins the operator configures (`uiux dev --origin`), typically an `https` origin behind the company's reverse proxy or an `http` origin on a trusted LAN.
 - **Devices.**
   - **Desktop** (FHD 1920×1080 is primary) gets everything: authoring, review, evidence, Handoff.
@@ -78,12 +78,13 @@ The normative domain behavior and external contracts live in `.spec/` (Stories, 
 - a Reviews inbox: `ready-for-review` before `open`, resolved and dismissed threads in their own tabs, filters by View (or Workspace), anchor state, Variant scope, change domain and author, one chronological timeline per thread, and reply, resolve or dismiss, reopen, re-anchor, promote to Decision, submit for review, edit own message and delete own new thread;
 - a node/edge UX Flow graph editor and a Prototype player;
 - Workspace pages for Settings (including Adapters), Locales and Assets, and a Members page for Owners;
+- live refresh: one change-event stream per Workbench session, so writes made elsewhere (an agent through MCP, another member) appear without a reload, with polling as the fallback;
 - a Preview session indicator, Workbench chrome i18n (en-US / zh-TW) and light/dark themes on Nuxt UI semantic color tokens.
 
 **Accepted in architecture, not yet built:**
 
 - the Component Catalog as a secondary area;
-- live change notifications when agents write, so the Workbench refreshes on its own (issue #69);
+- the "updated by others" notice above a composer whose resource changed while the user drafts (issue #80);
 - Review threads that record the render context they were written in and show it in the thread header (Discussion #7, Part 7: https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18797092). `schemaVersion` 4 already defines the thread's optional `renderContext`, but nothing writes or shows it yet (issue #144).
 
 **Binding constraints:**

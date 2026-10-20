@@ -100,6 +100,16 @@ export function useFlowEditor(flowId: Ref<string>) {
 
 	watch(flowId, () => { void load() }, { immediate: true })
 
+	// Live refresh (Rule 01a11485-f414-7882-b94f-cd4236c26d89): when the Flow changed elsewhere and
+	// nothing here is being edited or saved, re-read it. An unsaved draft is kept; its save then
+	// meets the new revision as a conflict, which never overwrites (Rule 01a11485-f451-72eb-81ad-686aeec7b3eb).
+	watch(() => workbench.flows.value.find(flow => flow.key === flowId.value)?.revision, (revision) => {
+		const current = read.value
+		if (!revision || !current || revision === current.revision || current.key !== flowId.value) return
+		if (dirty.value || saving.value || loading.value || conflict.value) return
+		void load()
+	})
+
 	// ---------------------------------------------------------------------------------------------
 	// Reference facts about target Views (name, Variants, Widgets), cached per View revision.
 	// ---------------------------------------------------------------------------------------------

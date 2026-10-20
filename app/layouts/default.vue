@@ -6,6 +6,8 @@ import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../composables/useMediaQue
 import { provideWorkbenchShell } from '../composables/useWorkbenchShell'
 import { useConnectivity } from '../composables/useConnectivity'
 import { useKitBuild } from '../composables/useKitBuild'
+import { useAccess } from '../composables/useAccess'
+import { useLiveEvents } from '../composables/useLiveEvents'
 import { PRODUCT_KIT_PATH } from '../utils/workbench-routes'
 import WorkbenchNavbar from '../components/workbench/WorkbenchNavbar.vue'
 import WorkbenchSidebar from '../components/workbench/WorkbenchSidebar.vue'
@@ -52,6 +54,19 @@ async function retryConnection(): Promise<void> {
 }
 const stopRecover = connectivity.onRecover(() => { void workbench.refreshAll() })
 
+// Live refresh (Feature 01a111e4-0315-7755-b867-e3c7b50d22e6): one change-event stream per signed-in
+// Workbench session. What changed elsewhere is re-read and re-rendered without asking; a reconnect
+// or a restarted server re-reads everything shown; without the stream the Workbench polls.
+const access = useAccess()
+const live = useLiveEvents()
+watch(() => !!access.session.value, (signedIn) => {
+	if (signedIn) live.start()
+	else live.stop()
+}, { immediate: true })
+live.onResources((batch) => { void workbench.applyLiveChanges(batch) })
+live.onLocks(() => { void access.refreshLocks() })
+live.onAccess(() => { void access.reload() })
+
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const isPhone = useMediaQuery(WORKBENCH_BREAKPOINTS.phone)
 const sidebarOpen = ref(false)
@@ -93,6 +108,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+	live.stop()
 	stopRecover()
 	stopKitBuild?.()
 	workbench.preview.unmount()

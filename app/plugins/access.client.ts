@@ -13,7 +13,7 @@ import { isRetryableRead, shouldRetryRead, transientRetryDelay } from '../utils/
  *   the page to come back to. The session probe itself (`GET /api/session`) and the sign-in
  *   request own their 401: for them it is the expected signed-out answer, handled by their callers.
  * - A request refused with `403` re-reads the session (`useAccess().reload()`), so changed keys
- *   apply to what the Workbench offers until the `/api/events` stream exists (issue #69).
+ *   apply to what the Workbench offers even before (or without) the stream's `access.changed`.
  * - A request that gets no response at all reports the server unreachable (brief h); any response
  *   reports it reachable again.
  * - A read answered `503` (`persistence.busy`: the Workspace was momentarily busy and nothing was

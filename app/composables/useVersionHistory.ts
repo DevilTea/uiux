@@ -8,13 +8,15 @@ import { forgetComparisonsAfterDeletion, refreshKeyChanged } from '../utils/comp
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
 import { comparisonEndpoints, CURRENT_COMPARE, diffRequestQuery, filterVersions, PARENT_COMPARE, versionListQuery, type ComparisonEndpoints, type HistoryResourceRef, type HistorySelection, type TimelineFilters } from '../utils/version-history'
 import { useWorkbench } from './useWorkbench'
+import { touchesKinds, useLiveEvents } from './useLiveEvents'
 
 /**
- * Reads the version timeline for the Workbench (issue #132, B8). There is no change feed
- * (`/api/events`, #69) and history adds no change-event kind (Rule
- * 01a11a5e-08c7-73c1-bc66-3af814a454d6), so a timeline re-reads itself when the Workbench re-reads
- * its resources, when the window regains focus, every `TIMELINE_POLL_MS` while it is visible, and
- * after this browser creates or deletes a Checkpoint. Comparisons are not polled.
+ * Reads the version timeline for the Workbench (issue #132, B8). History adds no change-event kind
+ * (Rule 01a11a5e-08c7-73c1-bc66-3af814a454d6), so a timeline re-reads itself on the change events of
+ * the versioned resources (and on a resync), when the Workbench re-reads its resources, when the
+ * window regains focus, after this browser creates or deletes a Checkpoint, and, only while the
+ * change-event stream is not open, every `TIMELINE_POLL_MS` while it is visible. Comparisons are
+ * not polled.
  */
 
 export const TIMELINE_POLL_MS = 30_000
@@ -67,6 +69,9 @@ export function useWorkbenchSignature() {
 	].join(','))
 }
 
+/** The change-event kinds whose commits record versions. */
+const VERSIONED_EVENT_KINDS = ['view', 'flow', 'locale', 'asset', 'workspace', 'access-presets'] as const
+
 /** A focus and a visibility change arrive together; one read serves both. */
 const MIN_REFRESH_GAP_MS = 2000
 
@@ -80,10 +85,17 @@ function useTimelineRefresh(load: () => Promise<void>, enabled: () => boolean): 
 		last = Date.now()
 		void load()
 	}
+	const live = useLiveEvents()
+	// Review threads are not versioned, so their events add no version.
+	live.onResources((batch) => {
+		if (enabled() && touchesKinds(batch, VERSIONED_EVENT_KINDS)) void load()
+	})
 	onMounted(() => {
 		window.addEventListener('focus', refresh)
 		document.addEventListener('visibilitychange', refresh)
-		timer = setInterval(refresh, TIMELINE_POLL_MS)
+		timer = setInterval(() => {
+			if (live.state.value !== 'open') refresh()
+		}, TIMELINE_POLL_MS)
 	})
 	onBeforeUnmount(() => {
 		window.removeEventListener('focus', refresh)
