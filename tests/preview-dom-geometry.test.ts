@@ -702,15 +702,63 @@ describe('Runtime geometry signals (animated occluder paint, #261)', () => {
 		expect(await producerWork(5)).toEqual({ frames: 0, pending: false })
 	})
 
-	it('returns to idle when an endless animation stops without an event reaching the document', async () => {
+	it('returns to idle when an endless animation is removed with its element (mutation path)', async () => {
 		// A loading spinner removed from the DOM ends its animation, but no animationcancel reaches
-		// the document's listeners, so the check runs again in every frame it measures.
+		// the document's listeners; the DOM mutation triggers the check that stops measuring.
 		await track('<style>@keyframes spin{to{rotate:360deg}}</style>'
 			+ cellPair('w', '<div data-probe="spinner" style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:50px;background:rgb(0,0,0);animation:spin 1s linear infinite"></div>', 0), ['w'])
 		expect((await producerWork(3)).frames).toBeGreaterThanOrEqual(2)
 		await page.evaluate(() => document.querySelector('[data-probe="spinner"]')!.remove())
 		await frames(3)
 		expect(await producerWork(5)).toEqual({ frames: 0, pending: false })
+	})
+
+	it('catches a script animation of an occluder that fires no event and no mutation, then returns to idle', async () => {
+		await track(cellPair('s', '<img alt="" data-probe="script" style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;box-shadow:0 0 0 0 rgb(0,0,0)">', 0), ['s'])
+		for (const [id, count] of Object.entries(await foreignPixels(await latestGeometry()))) expect(count, `${id} before`).toBe(0)
+		await page.evaluate(() => {
+			const element = document.querySelector('[data-probe="script"]') as HTMLElement
+			;(window as never as { __anim: Animation }).__anim = element.animate(
+				[{ boxShadow: '0 0 0 0 rgb(0,0,0)' }, { boxShadow: '0 0 0 40px rgb(0,0,0)' }],
+				{ duration: 1_000_000, fill: 'forwards' },
+			)
+		})
+		// The idle check runs every 250 ms: wait for it to enter continuous mode.
+		await page.waitForTimeout(700)
+		expect((await producerWork(3)).frames).toBeGreaterThanOrEqual(2)
+		await page.evaluate(() => {
+			const animation = (window as never as { __anim: Animation }).__anim
+			animation.currentTime = 500_000
+			animation.pause()
+		})
+		await frames(3)
+		const middle = await latestGeometry()
+		expect(middle.s!.regions.length, 'mid-animation').toBeGreaterThan(0)
+		expect(await foreignPixels(middle)).toEqual({ s: 0 })
+		// Finishing fires no event the listeners use; the 250 ms idle check or the per-frame decision notices it end.
+		await page.evaluate(() => (window as never as { __anim: Animation }).__anim.finish())
+		await page.waitForTimeout(700)
+		expect(await producerWork(5)).toEqual({ frames: 0, pending: false })
+	})
+
+	it('notices a script animation whose keyframes change from an inert property to a geometry-relevant one', async () => {
+		await track(cellPair('k', '<img alt="" data-probe="keyed" style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;box-shadow:0 0 0 0 rgb(0,0,0)">', 0), ['k'])
+		await page.evaluate(() => {
+			const element = document.querySelector('[data-probe="keyed"]') as HTMLElement
+			;(window as never as { __anim: Animation }).__anim = element.animate(
+				[{ outlineColor: 'rgb(0,0,0)' }, { outlineColor: 'rgb(255,0,0)' }],
+				{ duration: 1_000_000, fill: 'forwards' },
+			)
+		})
+		// Inert property: several idle checks pass and the producer stays idle.
+		await page.waitForTimeout(700)
+		expect(await producerWork(5)).toEqual({ frames: 0, pending: false })
+		await page.evaluate(() => {
+			const animation = (window as never as { __anim: Animation }).__anim
+			;(animation.effect as KeyframeEffect).setKeyframes([{ boxShadow: '0 0 0 0 rgb(0,0,0)' }, { boxShadow: '0 0 0 40px rgb(0,0,0)' }])
+		})
+		await page.waitForTimeout(700)
+		expect((await producerWork(3)).frames).toBeGreaterThanOrEqual(2)
 	})
 
 	it('keeps measuring only on events while an animation changes nothing the measurer reads', async () => {
