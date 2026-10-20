@@ -89,7 +89,7 @@ const buildsInFlight = new Map<string, Promise<PreviewBundleResult>>()
 
 /**
  * The input key of a bundle: the generated entry (the style entries, the Adapter modules and their
- * descriptors) and the build's roots, without reading any file.
+ * descriptors, each with its Adapter entry's configuration) and the build's roots, without reading any file.
  */
 function bundleInputKey(input: Readonly<{ workspaceRoot: string; moduleBase?: string; packageRoot: string; entrySource: string; pin?: string }>): string {
 	const hash = createHash('sha256')
@@ -437,12 +437,19 @@ function generateBundleEntrySource(browserRuntimePath: string, set: ValidatedAda
 		imports.push(`import * as adapter_${i} from ${JSON.stringify(entry.resolvedModule.resolvedPath)};`)
 	})
 
+	// Each entry's validated configuration is embedded in its descriptor (Rules
+	// 01a11a5a-515e-7c1d-9990-82e883c33243 and 01a11a5a-535f-73f2-96d0-6ccb02910f0b), so the entry
+	// source, and with it the bundle's input key and content hash, covers it (Rule
+	// 01a11a5a-52dd-7cb5-b12e-cef45b262a76). It is written as JSON text that `JSON.parse` reads back,
+	// member order included, rather than as an object literal, so every member, `__proto__` too,
+	// stays an own data property.
 	const descriptors = set.entries.map((entry, i) => `  {
     index: ${entry.index},
     id: ${JSON.stringify(entry.manifest.id)},
     apiVersion: ${JSON.stringify(entry.manifest.apiVersion)},
     widgetTypes: ${JSON.stringify(entry.ownership.widgetTypes)},
-    rendererKeys: ${JSON.stringify(entry.ownership.rendererKeys)},
+    rendererKeys: ${JSON.stringify(entry.ownership.rendererKeys)},${entry.selection.config === undefined ? '' : `
+    config: JSON.parse(${JSON.stringify(JSON.stringify(entry.selection.config))}),`}
     namespace: adapter_${i},
   }`).join(',\n')
 

@@ -11,6 +11,8 @@ import {
 	type ValidationResult,
 } from '../validation'
 import { derivedI18nPropertyNote, resolveI18nPropertyNames, validateI18nFieldMapping } from '../i18n/schema'
+import { sha256Identity } from '../artifacts/schema'
+import { canonicalJsonBytes } from '../canonical-json'
 import type {
 	AdapterAssetCapability,
 	AdapterCatalog,
@@ -146,6 +148,28 @@ function validateAdapterWidgetCatalogEntry(entry: Record<string, unknown>, path:
 	}
 }
 
+/**
+ * The shape of each `providers` entry (Clause 01a11a5a-4309-7ad5-8279-e1f60045017f): a Vue `Plugin`,
+ * an object with an `install` function or a function. Server-side Adapter resolution applies it, so a
+ * malformed entry makes the Adapter invalid on every surface (Rule 01a11a5a-4c2c-7330-8fac-11a6c970713a);
+ * the Preview bundle applies it again to the members it imported. It only reads the entry: no provider
+ * runs on the server (Rule 01a11a5a-4f4c-782a-8d6c-17150999333e). `path` is the manifest's path.
+ */
+export function validateAdapterProviders(manifest: AdapterManifest, path = ''): ValidationResult<readonly unknown[]> {
+	const v = new Validator()
+	manifest.providers.forEach((entry, index) => {
+		if (!isProviderEntry(entry))
+			v.issue('adapter.invalid_provider', `${path}/providers/${index}`, `Provider ${index} of Adapter ${manifest.id} must be a Vue plugin: an object with an install function, or a function.`)
+	})
+	return v.finish<readonly unknown[]>(manifest.providers)
+}
+
+/** A Vue `Plugin`: a function, or an object (a function too may carry `install`) with an `install` function. */
+export function isProviderEntry(entry: unknown): entry is ((...args: unknown[]) => unknown) | { install: (...args: unknown[]) => unknown } {
+	if (typeof entry === 'function') return true
+	return typeof entry === 'object' && entry !== null && typeof (entry as { install?: unknown }).install === 'function'
+}
+
 export function validateAdapterConfigSchema(
 	schema: JsonSchema2020_12 | undefined,
 ): ValidationResult<JsonSchema2020_12 | undefined> {
@@ -234,7 +258,17 @@ export type AdapterProvenance = Readonly<{
 	moduleIdentity: string
 	packageVersion?: string
 	contentDigest?: string
+	/** The `sha256:` identity of the canonical JSON of the Adapter entry's `config`; absent when the entry has none. */
+	configDigest?: string
 }>
+
+/**
+ * `configDigest` (Clause 01a115cd-d7f6-74a1-ba9f-c20a24a31ae5): the `sha256:` identity of the canonical
+ * JSON of an Adapter entry's `config`, `undefined` when the entry has none.
+ */
+export async function adapterConfigDigest(config: JsonValue | undefined): Promise<string | undefined> {
+	return config === undefined ? undefined : await sha256Identity(canonicalJsonBytes(config))
+}
 
 export function validateAdapterProvenance(input: unknown, path = ''): ValidationResult<AdapterProvenance> {
 	const v = new Validator()
@@ -245,6 +279,7 @@ export function validateAdapterProvenance(input: unknown, path = ''): Validation
 		v.string(provenance[key], `${path}/${key}`, true)
 	if (Object.hasOwn(provenance, 'packageVersion')) v.string(provenance.packageVersion, `${path}/packageVersion`, true)
 	if (Object.hasOwn(provenance, 'contentDigest')) validateDigest(provenance.contentDigest, `${path}/contentDigest`, v)
+	if (Object.hasOwn(provenance, 'configDigest')) validateDigest(provenance.configDigest, `${path}/configDigest`, v)
 	if (!Object.hasOwn(provenance, 'packageVersion') && !Object.hasOwn(provenance, 'contentDigest'))
 		v.issue('adapter.provenance_unverifiable', path, 'Adapter provenance requires a package version when available or a verifiable content digest for a local adapter.')
 	return v.finish<AdapterProvenance>(input)

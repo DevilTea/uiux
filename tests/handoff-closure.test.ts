@@ -1278,6 +1278,38 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		expect(exported.manifest?.provenance.adapters.map(adapter => adapter.adapterId)).toEqual(['my-counter'])
 	})
 
+	// Clause 01a115cd-d7f6-74a1-ba9f-c20a24a31ae5: `configDigest` is the `sha256:` identity of the
+	// canonical JSON of the Adapter entry's `config`, absent when the entry has none.
+	it('records each Adapter\'s configuration digest in the provenance, and none for an entry without configuration', async () => {
+		const config = { tone: 'warm', levels: [1, 2], label: 'Configured' }
+		const configured = makeCounterAdapterSource().replace('providers: [],', `providers: [],
+  configSchema: { $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object' },`)
+		const { root, persistence } = await createTestWorkspace([
+			{ moduleSpecifier: './adapters/counter.mjs', config },
+		])
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), configured)
+		const viewRev = await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'Counter View'))
+		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
+
+		const exported = await currentSchemaHandoff(persistence).exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(exported.status).toBe('exported')
+		const [adapter] = exported.manifest!.provenance.adapters
+		expect(adapter?.configDigest).toBe(`sha256:${createHash('sha256').update(canonicalJsonBytes(config)).digest('hex')}`)
+		// Member order does not change the canonical JSON, so it does not change the digest.
+		expect(adapter?.configDigest).toBe(`sha256:${createHash('sha256').update(canonicalJsonBytes({ label: 'Configured', levels: [1, 2], tone: 'warm' })).digest('hex')}`)
+
+		const unconfigured = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+		await mkdir(join(unconfigured.root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(unconfigured.root, 'kit', 'adapters', 'counter.mjs'), configured)
+		const otherRev = await unconfigured.persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'Counter View'))
+		await putFormalEvidence(unconfigured.persistence, VIEW_1_ID, otherRev, true)
+		const plain = await currentSchemaHandoff(unconfigured.persistence).exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(plain.status).toBe('exported')
+		expect(plain.manifest!.provenance.adapters).toHaveLength(1)
+		expect(Object.hasOwn(plain.manifest!.provenance.adapters[0]!, 'configDigest')).toBe(false)
+	})
+
 	it('proves end-to-end integration: real Playwright formal capture output directly satisfies handoff readiness and export', { timeout: 30_000 }, async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
 		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })

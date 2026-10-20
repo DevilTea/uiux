@@ -383,6 +383,12 @@ describe('derived evidence, render context, and handoff', () => {
 		}
 		const structural = validateHandoffManifest(manifest)
 		expect(structural.ok).toBe(true)
+		// Clause 01a115cd-d7f6-74a1-ba9f-c20a24a31ae5: an Adapter entry's optional `configDigest` is a `sha256:` identity.
+		const adapter = { moduleSpecifier: '@deviltea/base', adapterId: 'base', apiVersion: '1', moduleIdentity: 'file:///base.mjs', packageVersion: '1.0.0' }
+		const withAdapter = (entry: object) => validateHandoffManifest({ ...manifest, provenance: { ...manifest.provenance, adapters: [entry] } })
+		expect(withAdapter(adapter).ok).toBe(true)
+		expect(withAdapter({ ...adapter, configDigest: DIGEST }).ok).toBe(true)
+		expect(withAdapter({ ...adapter, configDigest: 'abc' }).diagnostics).toContainEqual(expect.objectContaining({ code: 'identity.invalid_sha256', path: '/provenance/adapters/0/configDigest' }))
 		expect(validateHandoffRoot({ type: 'feature', feature: 'checkout' }).ok).toBe(false)
 		expect(validateHandoffRoot({ type: 'workspace', viewId: VIEW_ID }).ok).toBe(false)
 		expect(validateHandoffManifest({ ...manifest, readiness: { ...manifest.readiness, blockingDiagnostics: [{ code: 'invalid', message: 'bad', blocking: true }] } }).ok).toBe(false)
