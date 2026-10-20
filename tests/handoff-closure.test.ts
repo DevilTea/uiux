@@ -1312,7 +1312,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		expect(manifest.readiness.implementationReady).toBe(false)
 		expect(manifest.readiness.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'handoff.adapter_provenance_unverifiable', path: '/adapters/0', blocking: true }))
 		expect(manifest.provenance.adapters.map(adapter => adapter.adapterId)).toEqual(['my-counter'])
-		expect(manifest.artifactRefs.filter(reference => reference.kind === 'adapter-module').map(reference => reference.context?.adapterId)).toEqual(['my-counter'])
+		// Its entry module is not stored either; the bundle names no Adapter it does not record.
+		expect(manifest.artifactRefs.some(reference => reference.context?.adapterId === 'zz-badge')).toBe(false)
 	})
 
 	it('refuses the sources of an Adapter whose Widget plugins come from its own widget-core copy, as the server-side check does (#123)', async () => {
