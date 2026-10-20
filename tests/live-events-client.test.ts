@@ -189,13 +189,15 @@ describe('useLiveEvents liveness (Discussion #241 owner decision 3)', () => {
 		live.start()
 		for (let attempt = 1; attempt < LIVENESS_FAILURES_BEFORE_FALLBACK; attempt++) {
 			vi.advanceTimersByTime(HELLO_TIMEOUT_MS)
-			expect(live.state.value).not.toBe('fallback')
+			expect(FakeEventSource.instances).toHaveLength(attempt + 1)
 		}
 		vi.advanceTimersByTime(HELLO_TIMEOUT_MS)
 		expect(live.state.value).toBe('fallback')
 		const opened = FakeEventSource.instances.length
 		expect(opened).toBe(LIVENESS_FAILURES_BEFORE_FALLBACK)
 		expect(FakeEventSource.instances.every(stream => stream.readyState === FakeEventSource.CLOSED)).toBe(true)
+		// The reopens polled already while they owed a hello.
+		batches.length = 0
 		vi.advanceTimersByTime(FALLBACK_POLL_MS + LIVE_BATCH_MS)
 		expect(batches).toEqual([{ resync: true, changes: [] }])
 		vi.advanceTimersByTime(REFUSED_RETRY_MS - FALLBACK_POLL_MS - LIVE_BATCH_MS)
@@ -204,6 +206,23 @@ describe('useLiveEvents liveness (Discussion #241 owner decision 3)', () => {
 		expect(live.state.value).toBe('open')
 		vi.advanceTimersByTime(LIVE_BATCH_MS)
 		expect(batches.at(-1)).toEqual({ resync: true, changes: [] })
+	})
+
+	it('polls while a stream reopened after silence owes its hello, and stops when the hello arrives', () => {
+		live.start()
+		current().emit('hello', { serverInstanceId: 'a' })
+		vi.advanceTimersByTime(SILENCE_TIMEOUT_MS)
+		expect(FakeEventSource.instances).toHaveLength(2)
+		expect(live.state.value).toBe('fallback')
+		batches.length = 0
+		vi.advanceTimersByTime(FALLBACK_POLL_MS + LIVE_BATCH_MS)
+		expect(batches).toEqual([{ resync: true, changes: [] }])
+		current().emit('hello', { serverInstanceId: 'a' })
+		expect(live.state.value).toBe('open')
+		batches.length = 0
+		vi.advanceTimersByTime(FALLBACK_POLL_MS * 2)
+		// Only the resync of the recovery, no more polling.
+		expect(batches).toEqual([{ resync: true, changes: [] }])
 	})
 
 	it('owes a hello again while EventSource reconnects by itself', () => {
