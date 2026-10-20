@@ -702,6 +702,17 @@ describe('Runtime geometry signals (animated occluder paint, #261)', () => {
 		expect(await producerWork(5)).toEqual({ frames: 0, pending: false })
 	})
 
+	it('returns to idle when an endless animation stops without an event reaching the document', async () => {
+		// A loading spinner removed from the DOM ends its animation, but no animationcancel reaches
+		// the document's listeners, so the check runs again in every frame it measures.
+		await track('<style>@keyframes spin{to{rotate:360deg}}</style>'
+			+ cellPair('w', '<div data-probe="spinner" style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:50px;background:rgb(0,0,0);animation:spin 1s linear infinite"></div>', 0), ['w'])
+		expect((await producerWork(3)).frames).toBeGreaterThanOrEqual(2)
+		await page.evaluate(() => document.querySelector('[data-probe="spinner"]')!.remove())
+		await frames(3)
+		expect(await producerWork(5)).toEqual({ frames: 0, pending: false })
+	})
+
 	it('keeps measuring only on events while an animation changes nothing the measurer reads', async () => {
 		await track(cellPair('w', '<div data-probe="o" style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;background:rgb(0,0,0);outline:2px solid rgb(0,0,0);transition:outline-color 1000s linear"></div>', 0), ['w'])
 		await page.evaluate(() => { (document.querySelector('[data-probe="o"]') as HTMLElement).style.outlineColor = 'rgb(255,0,0)' })

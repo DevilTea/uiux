@@ -25,8 +25,9 @@ const GEOMETRY_INERT_PROPERTIES = new Set([
  * no idle frame loop. A continuous per-frame recomputation runs only while a CSS transition or
  * animation that can change a tracked Widget's geometry is running (one on an ancestor-or-self of
  * a tracked Widget, or one animating anywhere a property outside `GEOMETRY_INERT_PROPERTIES`, an
- * occluder's paint included), and stops as soon as none is. Whether one runs is decided at
- * animation boundary events from `document.getAnimations()`, never by polling styles.
+ * occluder's paint included), and stops as soon as none is. Whether one runs is decided from
+ * `document.getAnimations()`, never by polling styles: after animation boundary events, DOM
+ * mutations and stream changes, and in every frame while the producer measures every frame.
  */
 export function attachGeometrySignals(
 	view: Window,
@@ -44,6 +45,7 @@ export function attachGeometrySignals(
 	const mutationObserver = new MutationObserver(() => {
 		invalidate()
 		refreshObservedWidgets()
+		scheduleAnimationCheck()
 	})
 	mutationObserver.observe(doc.documentElement, { subtree: true, childList: true, attributes: true, characterData: true })
 
@@ -59,30 +61,37 @@ export function attachGeometrySignals(
 		for (const element of next) observed.add(element)
 	}
 
-	let animationCheckScheduled = false
 	function animationsMayChangeGeometry(): boolean {
 		const animations = typeof doc.getAnimations === 'function' ? doc.getAnimations() : []
 		if (animations.length === 0) return false
-		const tracked = producer.trackedWidgetIds().map(widgetElement).filter((element): element is Element => !!element)
 		return animations.some((animation) => {
 			if (animation.playState !== 'running') return false
 			const effect = animation.effect as KeyframeEffect | null
 			const target = effect?.target
 			if (!target) return false
-			if (tracked.some(element => target === element || target.contains(element))) return true
+			for (const element of observed) if (target === element || target.contains(element)) return true
 			return animatedProperties(animation, effect).some(property => !GEOMETRY_INERT_PROPERTIES.has(property))
+		})
+	}
+
+	let animationCheck: number | undefined
+	let disposed = false
+	function scheduleAnimationCheck(): void {
+		if (disposed || animationCheck !== undefined) return
+		// Decide after the frame's style update, when started/ended animations are reflected.
+		animationCheck = view.requestAnimationFrame(() => {
+			animationCheck = undefined
+			const active = animationsMayChangeGeometry()
+			producer.setContinuous(active)
+			// While the producer measures every frame, check again every frame: an animation can stop
+			// without an event that reaches the document (its element removed, a script cancel).
+			if (active && producer.trackedWidgetIds().length > 0) scheduleAnimationCheck()
 		})
 	}
 
 	function onAnimationBoundary(): void {
 		invalidate()
-		if (animationCheckScheduled) return
-		animationCheckScheduled = true
-		// Decide after the frame's style update, when started/ended animations are reflected.
-		view.requestAnimationFrame(() => {
-			animationCheckScheduled = false
-			producer.setContinuous(animationsMayChangeGeometry())
-		})
+		scheduleAnimationCheck()
 	}
 
 	const windowEvents: ReadonlyArray<readonly [string, EventListener, AddEventListenerOptions | boolean]> = [
@@ -113,10 +122,18 @@ export function attachGeometrySignals(
 	void fonts?.ready?.then(invalidate, () => undefined)
 
 	refreshObservedWidgets()
+	scheduleAnimationCheck()
 
 	return Object.freeze({
-		refreshObservedWidgets,
+		/** Call after the stream set changed: also decides again whether to measure every frame. */
+		refreshObservedWidgets() {
+			refreshObservedWidgets()
+			scheduleAnimationCheck()
+		},
 		dispose() {
+			disposed = true
+			if (animationCheck !== undefined) view.cancelAnimationFrame(animationCheck)
+			animationCheck = undefined
 			resizeObserver.disconnect()
 			mutationObserver.disconnect()
 			for (const [type, listener, options] of windowEvents) view.removeEventListener(type, listener, options)
