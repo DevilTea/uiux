@@ -174,7 +174,8 @@ export type StandalonePreviewMountFactory = Readonly<{
 	mountPreviewRuntime(container: HTMLElement, options: PreviewRuntimeMountOptions): PreviewRuntimeBridge
 	/**
 	 * The declared Events of every adapter Widget type, read through `inspectPlugin` from the same
-	 * widget-core copy the bundle runs. Declaration metadata only: no Runtime is created.
+	 * widget-core copy the bundle runs. Declaration metadata only: no Runtime is created. The server
+	 * reads these in the same worker evaluation as `describeAdapterDiagnostics()`.
 	 */
 	describeDeclaredWidgetEvents(): DeclaredWidgetEvents
 	/**

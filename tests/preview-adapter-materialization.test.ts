@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Worker } from 'node:worker_threads'
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Window } from 'happy-dom'
 import { resolve as resolveImport } from 'import-meta-resolve'
@@ -16,10 +16,11 @@ import { emptyProductKit } from '../src/domain/product-kit/schema'
 import { V5_LAYOUT } from '../src/persistence/paths'
 import {
 	buildWorkspacePreviewBundle,
+	cachedPreviewBundle,
 	clearPreviewBundleCache,
 } from '../src/server/preview-bundler'
 import { readPreviewRuntimeFile } from '../src/server/preview-runtime-http'
-import { checkPreviewBundleAdapters } from '../src/server/preview-adapter-check'
+import { checkPreviewBundleAdapters, evaluatePreviewBundle } from '../src/server/preview-adapter-check'
 import { readSelectedWorkspaceDeclaredWidgetEvents } from '../src/server/declared-widget-events'
 import { bundleAdapterWithOwnWidgetCore } from './support/own-widget-core'
 import type { ViewResource } from '../src/domain/views/schema'
@@ -1012,6 +1013,125 @@ export const manifest = {
 		const other = await checkPreviewBundleAdapters({ bundleJs: 'throw new Error("see metadata:x and data:text/plain,y");\n' }, root)
 		const otherMessage = other.state === 'unchecked' ? other.warnings[0]?.message ?? '' : ''
 		expect(otherMessage).toContain('see metadata:x and data:text/plain,y')
+	})
+
+	/**
+	 * An Adapter whose declared Event description depends on a global its own module top level
+	 * touches: it counts how often it was evaluated in the current realm. Loading the manifest in the
+	 * server evaluates it once there, so a bundle evaluated in the server's realm would see 2.
+	 */
+	function makeEvaluationCountingAdapterSource(): string {
+		return `
+import { createWidgetPlugin } from '@deviltea/widget-core';
+import { defineComponent, h } from 'vue';
+
+const evaluation = (globalThis.__uiux249Evaluations = (globalThis.__uiux249Evaluations ?? 0) + 1);
+
+export const probePlugin = createWidgetPlugin('Probe')
+  .interfaces()
+  .events(events => events.seen({ description: 'evaluation ' + evaluation }))
+  .done();
+
+export const ProbeRenderer = defineComponent({ name: 'ProbeRenderer', setup: () => () => h('div', 'Probe') });
+
+export const manifest = {
+  id: 'my-probe',
+  apiVersion: '1',
+  widgetPlugins: [probePlugin],
+  catalog: { widgets: { Probe: {} } },
+  renderers: [{ type: 'Probe', component: ProbeRenderer }],
+  providers: [],
+};
+`
+	}
+
+	it('reads the declared Widget Events of a global-dependent Adapter from the worker evaluation, not the server realm (#249)', async () => {
+		const root = await createKitWorkspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
+		await linkHostPackages(join(root, 'kit'))
+		await writeFile(join(root, 'kit', 'adapter.mjs'), makeEvaluationCountingAdapterSource())
+		const counter = globalThis as { __uiux249Evaluations?: number }
+		try {
+			expect(await resolveSelectedWorkspaceAdapters(root)).toMatchObject({ state: 'valid' })
+			// Loading the manifest evaluated the Adapter module in the server realm.
+			const inServer = counter.__uiux249Evaluations
+			expect(inServer).toBeGreaterThanOrEqual(1)
+
+			const read = await readSelectedWorkspaceDeclaredWidgetEvents(root)
+			// The bundle ran with globals of its own: its Adapter module was evaluated there once.
+			expect(read).toEqual({ state: 'valid', widgets: { Probe: [{ name: 'seen', description: 'evaluation 1' }] } })
+			// The server realm never evaluated the bundle.
+			expect(counter.__uiux249Evaluations).toBe(inServer)
+		}
+		finally {
+			delete counter.__uiux249Evaluations
+		}
+	})
+
+	it('evaluates each bundle once for the Adapter check and the declared Widget Events (#249)', async () => {
+		const root = await createKitWorkspace(await temporaryRoot(), [{ moduleSpecifier: './adapter.mjs' }])
+		await linkHostPackages(join(root, 'kit'))
+		await writeFile(join(root, 'kit', 'adapter.mjs'), makeEvaluationCountingAdapterSource())
+		// An input written just now makes its graph racy, and the bundle is built again on the next
+		// request (a new bundle, evaluated again); an older file lets every request take the one bundle.
+		const past = new Date(Date.now() - 60_000)
+		await utimes(join(root, 'kit', 'adapter.mjs'), past, past)
+		const terminate = vi.spyOn(Worker.prototype, 'terminate')
+		try {
+			// Each evaluation ends its worker exactly once.
+			const bundle = await getSelectedWorkspacePreviewBundle(root)
+			expect(bundle).toMatchObject({ state: 'valid', adapterCheck: 'passed', declaredWidgetEvents: { state: 'valid' } })
+			if (bundle.state !== 'valid') return
+			expect(terminate).toHaveBeenCalledTimes(1)
+			expect(await readSelectedWorkspaceDeclaredWidgetEvents(root)).toEqual(bundle.declaredWidgetEvents)
+			expect((await readPreviewRuntimeFile(root, undefined, bundle.hash, 'runtime.js')).status).toBe(200)
+			const built = await cachedPreviewBundle(bundle.hash)
+			expect(built).toBeDefined()
+			expect(await checkPreviewBundleAdapters(built!, root)).toEqual({ state: 'valid' })
+			expect((await evaluatePreviewBundle(built!, root)).declaredWidgetEvents).toBe(bundle.declaredWidgetEvents)
+			expect(terminate).toHaveBeenCalledTimes(1)
+		}
+		finally {
+			terminate.mockRestore()
+			delete (globalThis as { __uiux249Evaluations?: number }).__uiux249Evaluations
+		}
+	})
+
+	it('reports the declared Widget Events only when the bundle ran in the worker and its Adapters passed (#249)', async () => {
+		const root = await temporaryRoot()
+		const events = '{ Tap: [{ name: "tap", description: "Tapped" }] }'
+		const evaluate = (bundleJs: string, timeoutMs?: number) => evaluatePreviewBundle({ bundleJs }, root, timeoutMs === undefined ? {} : { timeoutMs })
+
+		expect(await evaluate(`export const describeAdapterDiagnostics = () => [];\nexport const describeDeclaredWidgetEvents = () => (${events});\n`))
+			.toEqual({ check: { state: 'valid' }, declaredWidgetEvents: { state: 'valid', widgets: { Tap: [{ name: 'tap', description: 'Tapped' }] } } })
+		// The Adapters did not pass the check: the set is invalid, and its Events are not offered.
+		expect(await evaluate(`export const describeAdapterDiagnostics = () => [{ code: "adapter.x", path: "/adapters/0", message: "no" }];\nexport const describeDeclaredWidgetEvents = () => (${events});\n`))
+			.toMatchObject({ check: { state: 'invalid' }, declaredWidgetEvents: { state: 'unavailable' } })
+		// An Event description that throws, or reports another shape, leaves only the Events unknown.
+		expect(await evaluate('export const describeAdapterDiagnostics = () => [];\nexport const describeDeclaredWidgetEvents = () => { throw new Error("defect"); };\n'))
+			.toEqual({ check: { state: 'valid' }, declaredWidgetEvents: { state: 'unavailable' } })
+		expect(await evaluate('export const describeAdapterDiagnostics = () => [];\nexport const describeDeclaredWidgetEvents = () => ({ Tap: [{ name: 1 }] });\n'))
+			.toEqual({ check: { state: 'valid' }, declaredWidgetEvents: { state: 'unavailable' } })
+		// An evaluation that fails or does not report in time is `unchecked`, and the Events are unavailable.
+		expect(await evaluate('throw new Error("always");\n')).toMatchObject({ check: { state: 'unchecked' }, declaredWidgetEvents: { state: 'unavailable' } })
+		expect(await evaluate('await new Promise(() => {});\n', 300)).toMatchObject({ check: { state: 'unchecked' }, declaredWidgetEvents: { state: 'unavailable' } })
+	})
+
+	it('keeps every evaluation of a Preview bundle out of the server process (#249)', async () => {
+		// Only the worker source imports a bundle as a `data:` URL; no server module imports one itself.
+		const sources: string[] = []
+		for (const directory of ['src', 'server', 'bin']) {
+			for (const entry of await readdir(join(process.cwd(), directory), { recursive: true, withFileTypes: true })) {
+				if (entry.isFile() && /\.(?:[cm]?[jt]s)$/u.test(entry.name)) sources.push(join(entry.parentPath, entry.name))
+			}
+		}
+		const naming: string[] = []
+		for (const file of sources) {
+			if ((await readFile(file, 'utf8')).includes('data:text/javascript')) naming.push(relative(process.cwd(), file).split(sep).join('/'))
+		}
+		expect(naming).toEqual(['src/server/preview-adapter-check.ts'])
+		const check = await readFile(join(process.cwd(), 'src', 'server', 'preview-adapter-check.ts'), 'utf8')
+		expect(check.match(/\bimport\(/gu)).toHaveLength(1)
+		expect(check).toContain('import(workerData.url)')
 	})
 
 	it('falls back to kit/node_modules, never the root node_modules, for a bare import of an Adapter outside kit/', async () => {
