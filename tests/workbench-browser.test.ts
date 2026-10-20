@@ -42,7 +42,19 @@ afterAll(async () => {
 	await server?.close()
 })
 
-type ChromeSetup = Readonly<{ mode: 'light' | 'dark'; os?: 'light' | 'dark'; locale?: 'en-US' | 'zh-TW'; width?: number; height?: number; recordWire?: boolean; cookie?: Readonly<{ name: string; value: string }> }>
+type ChromeSetup = Readonly<{
+	mode: 'light' | 'dark'
+	os?: 'light' | 'dark'
+	locale?: 'en-US' | 'zh-TW'
+	width?: number
+	height?: number
+	recordWire?: boolean
+	cookie?: Readonly<{ name: string; value: string }>
+	/** Runs on the new page before it navigates (routes to hold, say). */
+	prepare?: (page: Page) => Promise<unknown>
+	/** `networkidle` by default; a page that holds a request never reaches it. */
+	waitUntil?: 'domcontentloaded' | 'networkidle'
+}>
 
 async function openWorkbench(path: string, setup: ChromeSetup): Promise<{ context: BrowserContext; page: Page }> {
 	const context = await browser.newContext({
@@ -56,7 +68,8 @@ async function openWorkbench(path: string, setup: ChromeSetup): Promise<{ contex
 	if (setup.recordWire) await context.addInitScript(PREVIEW_WIRE_RECORDER)
 	await context.addCookies([{ ...(setup.cookie ?? server.cookie), url: server.origin, httpOnly: true, sameSite: 'Strict' }])
 	const page = await context.newPage()
-	await page.goto(`${server.origin}${path}`, { waitUntil: 'networkidle' })
+	await setup.prepare?.(page)
+	await page.goto(`${server.origin}${path}`, { waitUntil: setup.waitUntil ?? 'networkidle' })
 	await page.waitForFunction(() => document.documentElement.classList.contains('light') || document.documentElement.classList.contains('dark'))
 	await page.locator('main').first().waitFor()
 	return { context, page }
@@ -953,6 +966,62 @@ describe('Canvas comments (R6 targeting and composer, R7a pins and bubble)', () 
 			await page.waitForSelector('[data-thread-bubble]', { timeout: 10_000 })
 			expect(await page.locator('[data-thread-placement]').textContent()).toContain('Scrolled out of view')
 			expect(await frame.evaluate(() => window.scrollY)).toBe(0)
+			const read = await api<{ revision: string }>(`/api/resources/review/${threadId}`)
+			await api(`/api/reviews/${threadId}/resolve`, { expectedRevision: read.revision, resolution: 'answered' })
+		}
+		finally { await context.close() }
+	}, 60_000)
+
+	it('keeps a deep-linked bubble still while it is pressed, so a press before its pin is drawn and a release after it still click (issue #266)', async () => {
+		const threadId = await seedThread('btn-run-checks', 'Should Run checks say what it checks?')
+		// Hold the Preview document: until it loads, the pin cannot be drawn and the bubble stands at the canvas corner.
+		let release = () => {}
+		const held = new Promise<void>((resolve) => { release = resolve })
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}?thread=${threadId}`, {
+			mode: 'light',
+			waitUntil: 'domcontentloaded',
+			prepare: page => page.route(url => url.pathname === '/preview', async (route) => {
+				await held
+				await route.continue()
+			}),
+		})
+		try {
+			const bubble = page.locator('[data-thread-bubble]')
+			await bubble.locator('[data-timeline-kind="message"]').first().waitFor({ timeout: 15_000 })
+			const pin = page.locator(`.pin-anchor:not([hidden]) [data-pin-thread="${threadId}"]`)
+			expect(await pin.count()).toBe(0)
+			const more = bubble.getByRole('button', { name: 'More', exact: true })
+			const pressed = (await more.boundingBox())!
+
+			// Press More, let the Preview draw the pin, and only then release.
+			await page.mouse.move(pressed.x + pressed.width / 2, pressed.y + pressed.height / 2)
+			await page.mouse.down()
+			release()
+			await waitForLivePreview(page)
+			await pin.waitFor({ timeout: 15_000 })
+			// The floating layer repositions per animation frame; a few frames let any move land.
+			await page.evaluate(() => new Promise<void>((resolve) => {
+				let frames = 4
+				const tick = () => (--frames ? requestAnimationFrame(tick) : resolve())
+				requestAnimationFrame(tick)
+			}))
+			expect(await more.boundingBox()).toEqual(pressed)
+			await page.mouse.up()
+			const menu = page.locator('[role="menu"]')
+			await menu.waitFor({ timeout: 5_000 })
+			expect(await menu.locator('[role="menuitem"]').allInnerTexts()).toEqual(expect.arrayContaining([expect.stringContaining('Copy link')]))
+			await page.keyboard.press('Escape')
+			await menu.waitFor({ state: 'detached' })
+
+			// After the release the bubble moves to its pin.
+			await expect.poll(async () => {
+				const now = (await more.boundingBox())!
+				return Math.hypot(now.x - pressed.x, now.y - pressed.y)
+			}, { timeout: 10_000 }).toBeGreaterThan(100)
+			const tip = await pinTip(page, threadId)
+			const box = (await bubble.boundingBox())!
+			expect(Math.min(Math.abs(box.x - tip.x), Math.abs(box.x + box.width - tip.x))).toBeLessThan(80)
+
 			const read = await api<{ revision: string }>(`/api/resources/review/${threadId}`)
 			await api(`/api/reviews/${threadId}/resolve`, { expectedRevision: read.revision, resolution: 'answered' })
 		}

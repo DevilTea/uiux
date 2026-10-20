@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, shallowRef, watch } from 'vue'
 import { useI18n } from '#imports'
 import { useCanvasComments, PENDING_PIN_ID } from '../../../composables/useCanvasComments'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
@@ -53,14 +53,83 @@ function findReference(): HTMLElement | undefined {
 		?? query('[data-comment-fallback]')
 }
 
+/**
+ * A control must not move under the pointer between press and release (issue #266). A
+ * deep-linked thread's bubble opens at the canvas corner and moves to its pin once the Preview
+ * draws it, and its content can change height meanwhile (the placement note goes away), which
+ * shifts a bubble held inside the window. A click whose press and release straddle such a move
+ * reaches a common ancestor instead of the control. So while a pointer is pressed on the bubble,
+ * a new reference waits and the floating layer keeps its position (`data-bubble-held`, below);
+ * once the click has landed, both catch up at once, without animation.
+ */
+let pressed = false
+let held: HTMLElement | undefined
+let releaseTimer: ReturnType<typeof setTimeout> | undefined
+
+function retarget(): void {
+	if (pressed) return
+	const next = findReference()
+	if (next !== reference.value) reference.value = next
+}
+
+function stopListening(): void {
+	window.removeEventListener('pointerup', onRelease, true)
+	window.removeEventListener('pointercancel', onRelease, true)
+	window.removeEventListener('blur', onRelease)
+	window.removeEventListener('contextmenu', onRelease, true)
+}
+
+function unhold(): void {
+	held?.removeAttribute('data-bubble-held')
+	held?.style.removeProperty('--bubble-held-transform')
+	held = undefined
+}
+
+function onRelease(): void {
+	stopListening()
+	clearTimeout(releaseTimer)
+	// `click` follows `pointerup` within the same input event; one task later it has landed.
+	releaseTimer = setTimeout(() => {
+		releaseTimer = undefined
+		pressed = false
+		unhold()
+		retarget()
+	})
+}
+
+function onBubblePointerdown(event: PointerEvent): void {
+	// Only the primary button holds; a right or middle press (or ctrl-click, the macOS context menu) never starts a drag.
+	if (!event.isPrimary || event.button !== 0 || (event.ctrlKey && /Mac/i.test(navigator.platform))) return
+	clearTimeout(releaseTimer)
+	releaseTimer = undefined
+	pressed = true
+	window.addEventListener('pointerup', onRelease, true)
+	window.addEventListener('pointercancel', onRelease, true)
+	window.addEventListener('blur', onRelease)
+	// A context menu may swallow the pointerup.
+	window.addEventListener('contextmenu', onRelease, true)
+	if (held) return
+	// The floating layer's wrapper, positioned by an inline transform the floating layer rewrites.
+	const wrapper = (event.currentTarget as HTMLElement).closest<HTMLElement>('[data-reka-popper-content-wrapper]')
+	if (!wrapper?.style.transform) return
+	held = wrapper
+	wrapper.style.setProperty('--bubble-held-transform', wrapper.style.transform)
+	wrapper.setAttribute('data-bubble-held', '')
+}
+
+onBeforeUnmount(() => {
+	stopListening()
+	clearTimeout(releaseTimer)
+	unhold()
+})
+
 // The reference changes only when a thread's canvas status does (drawn, behind an edge, hidden),
 // never per scrolled frame; the floating layer itself follows the moving pin.
 watch(
 	[() => composer.value?.sequence, threadId, () => comments.pinStatusById.value, () => comments.pinsHidden.value, () => comments.hoveredThreadId.value],
 	async () => {
 		await nextTick()
-		const next = findReference()
-		if (next !== reference.value) reference.value = next
+		retarget()
 	},
 	{ immediate: true, flush: 'post' },
 )
@@ -117,11 +186,24 @@ const contentProps = {
     :ui="{ content: 'rounded-xl shadow-overlay ring-0 max-h-[min(60vh,40rem)] overflow-y-auto' }"
   >
     <template #content>
-      <CommentComposer v-if="composer" />
-      <ThreadBubble
-        v-else-if="threadId"
-        :thread-id="threadId"
-      />
+      <div
+        class="contents"
+        @pointerdown.capture="onBubblePointerdown"
+      >
+        <CommentComposer v-if="composer" />
+        <ThreadBubble
+          v-else-if="threadId"
+          :thread-id="threadId"
+        />
+      </div>
     </template>
   </UPopover>
 </template>
+
+<style>
+/* While a pointer is pressed on the bubble, the floating layer keeps the position it had at the
+   press (issue #266); the inline transform it rewrites meanwhile applies on release. */
+[data-reka-popper-content-wrapper][data-bubble-held] {
+  transform: var(--bubble-held-transform) !important;
+}
+</style>
