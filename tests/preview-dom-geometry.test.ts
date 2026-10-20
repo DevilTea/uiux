@@ -3,8 +3,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { chromium, type Browser, type Page } from 'playwright'
 import { borderImageOutsets, boxShadowOutsets, filterOutsets, hasThreeDTransform, textShadowOutsets, trailingLength } from '../src/preview/dom-geometry'
-import type { WidgetGeometry } from '../src/preview/geometry-producer'
+import type { RuntimeGeometryProducer, WidgetGeometry } from '../src/preview/geometry-producer'
 import { validateGeometryMessage } from '../src/preview/protocol/schema'
+import type { GeometryPerfGlobal } from './support/geometry-perf-entry'
 
 /**
  * The runtime DOM measurer in a real browser (Part 4 visible regions, first-version subset):
@@ -606,6 +607,118 @@ describe('Runtime DOM measurer', () => {
 			</svg>`, ['in-svg'])
 		expect(result['in-svg']!.rect.width).toBeGreaterThan(0)
 		expect(result['in-svg']!.regions).toEqual([])
+	})
+})
+
+type SignalsWindow = Readonly<{ __signals: Readonly<{ latest: Record<string, WidgetGeometry>; producer: RuntimeGeometryProducer }> }>
+
+async function frames(count: number): Promise<void> {
+	await page.evaluate(async (count) => {
+		for (let index = 0; index < count; index++) await new Promise(resolve => requestAnimationFrame(resolve))
+	}, count)
+}
+
+/**
+ * Tracks Widgets as the Preview document does: the production producer, DOM measurer and
+ * invalidation signals, driven by real animation frames. Keeps each Widget's latest report.
+ */
+async function track(body: string, widgetIds: readonly string[]): Promise<void> {
+	await page.setContent(`<!doctype html><html><head><style>html,body{margin:0}*{box-sizing:border-box}</style></head><body>${body}</body></html>`)
+	await page.addScriptTag({ content: bundle })
+	await page.evaluate((ids) => {
+		const P = (globalThis as never as GeometryPerfGlobal).UiuxGeometryPerf
+		const viewId = '11111111-1111-4111-8111-111111111111'
+		const latest: Record<string, unknown> = {}
+		const producer = new P.RuntimeGeometryProducer({
+			send: (response) => { latest[response.context.widgetId] = response.payload },
+			measurer: P.createDomGeometryMeasurer({ document }),
+			requestFrame: callback => requestAnimationFrame(callback),
+			cancelFrame: handle => cancelAnimationFrame(handle),
+		})
+		producer.setContext({ viewId })
+		P.attachGeometrySignals(window, producer, id => document.querySelector(`[data-widget-id="${CSS.escape(id)}"]`))
+		for (const widgetId of ids)
+			producer.receive({ type: 'geometry.acquire.request', context: { previewSessionId: 's', runtimeGenerationId: 'g', viewId, navigationRequestId: 'n', widgetId }, payload: {} })
+		Object.assign(window, { __signals: { latest, producer } })
+	}, widgetIds)
+	await frames(3)
+}
+
+async function latestGeometry(): Promise<Record<string, WidgetGeometry>> {
+	return page.evaluate(() => JSON.parse(JSON.stringify((window as never as SignalsWindow).__signals.latest)))
+}
+
+/** Producer frames run over the next `count` animation frames, and whether one is still pending. */
+async function producerWork(count: number): Promise<Readonly<{ frames: number; pending: boolean }>> {
+	const before = await page.evaluate(() => (window as never as SignalsWindow).__signals.producer.stats().frames)
+	await frames(count)
+	return page.evaluate(before => ({
+		frames: (window as never as SignalsWindow).__signals.producer.stats().frames - before,
+		pending: (window as never as SignalsWindow).__signals.producer.hasPendingFrame(),
+	}), before)
+}
+
+describe('Runtime geometry signals (animated occluder paint, #261)', () => {
+	it('keeps every pixel an animating occluder paints out of the regions mid-animation, then returns to idle', async () => {
+		// Paint-only animations on occluders that are neither a tracked Widget nor its ancestor: a
+		// transitioned box-shadow spread, an animated blur filter and a transitioned scale, each
+		// starting with no paint beyond the occluder's box.
+		const cases = [
+			['shadow', '<img alt="" data-start="box-shadow:0 0 0 40px rgb(0,0,0)" style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;box-shadow:0 0 0 0 rgb(0,0,0);transition:box-shadow 1000s linear">'],
+			['blur', '<div data-start="animation:grow-blur 1000s linear forwards" style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;background:rgb(0,0,0);filter:blur(0px)"></div>'],
+			['scale', '<div data-start="scale:2" style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;background:rgb(0,0,0);mix-blend-mode:multiply;scale:1;transition:scale 1000s linear"></div>'],
+		] as const
+		const body = '<style>@keyframes grow-blur{from{filter:blur(0px)}to{filter:blur(20px)}}</style>'
+			+ cases.map(([id, html], index) => cellPair(id, html, index)).join('')
+		await track(body, cases.map(([id]) => id))
+		for (const [id, count] of Object.entries(await foreignPixels(await latestGeometry()))) expect(count, `${id} before`).toBe(0)
+
+		await page.evaluate(() => {
+			for (const element of Array.from(document.querySelectorAll<HTMLElement>('[data-start]'))) element.style.cssText += `;${element.dataset.start}`
+		})
+		await frames(3)
+		// Running animations of occluder paint keep the producer measuring every frame.
+		expect((await producerWork(3)).frames).toBeGreaterThanOrEqual(2)
+		// Halfway through, frozen so that the screenshot shows the paint the last report saw.
+		await page.evaluate(() => {
+			for (const animation of document.getAnimations()) {
+				animation.currentTime = 500_000
+				animation.pause()
+			}
+		})
+		await frames(3)
+		const middle = await latestGeometry()
+		for (const [id] of cases) expect(middle[id]!.regions.length, `${id} mid-animation`).toBeGreaterThan(0)
+		expect(await foreignPixels(middle)).toEqual({ shadow: 0, blur: 0, scale: 0 })
+
+		await page.evaluate(() => {
+			for (const animation of document.getAnimations()) animation.finish()
+		})
+		await frames(3)
+		expect(await page.evaluate(() => document.getAnimations().length)).toBe(1)
+		const end = await latestGeometry()
+		for (const [id, count] of Object.entries(await foreignPixels(end))) expect(count, `${id} after`).toBe(0)
+		// Every transition ended; the blur animation fills forwards but no longer runs.
+		expect(await producerWork(5)).toEqual({ frames: 0, pending: false })
+	})
+
+	it('returns to idle when an endless animation stops without an event reaching the document', async () => {
+		// A loading spinner removed from the DOM ends its animation, but no animationcancel reaches
+		// the document's listeners, so the check runs again in every frame it measures.
+		await track('<style>@keyframes spin{to{rotate:360deg}}</style>'
+			+ cellPair('w', '<div data-probe="spinner" style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:50px;background:rgb(0,0,0);animation:spin 1s linear infinite"></div>', 0), ['w'])
+		expect((await producerWork(3)).frames).toBeGreaterThanOrEqual(2)
+		await page.evaluate(() => document.querySelector('[data-probe="spinner"]')!.remove())
+		await frames(3)
+		expect(await producerWork(5)).toEqual({ frames: 0, pending: false })
+	})
+
+	it('keeps measuring only on events while an animation changes nothing the measurer reads', async () => {
+		await track(cellPair('w', '<div data-probe="o" style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;background:rgb(0,0,0);outline:2px solid rgb(0,0,0);transition:outline-color 1000s linear"></div>', 0), ['w'])
+		await page.evaluate(() => { (document.querySelector('[data-probe="o"]') as HTMLElement).style.outlineColor = 'rgb(255,0,0)' })
+		await frames(3)
+		expect(await page.evaluate(() => document.getAnimations().map(animation => animation.playState))).toEqual(['running'])
+		expect(await producerWork(5)).toEqual({ frames: 0, pending: false })
 	})
 })
 
