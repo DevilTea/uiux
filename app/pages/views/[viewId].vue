@@ -15,6 +15,7 @@ import ViewHeader from '../../components/workbench/ViewHeader.vue'
 import { provideCanvasComments } from '../../composables/useCanvasComments'
 import CommentsTab from '../../components/workbench/comments/CommentsTab.vue'
 import SpecDocument from '../../components/workbench/SpecDocument.vue'
+import ViewFlowUsage from '../../components/workbench/ViewFlowUsage.vue'
 import ViewHistoryPanel from '../../components/history/ViewHistoryPanel.vue'
 import VersionCanvas from '../../components/history/VersionCanvas.vue'
 import { useVersionCanvasAccess } from '../../composables/useVersionCanvasAccess'
@@ -61,15 +62,15 @@ const comments = provideCanvasComments(thread)
 // timeline and diffs are offered on every layout, Rule 01a11a5e-1b52-7f6f-8244-65bb038ef6f8). A
 // thread opens in a bottom sheet over the View, so opening one from the list or the Spec shows the
 // View tab.
-type PhoneTab = 'spec' | 'comments' | 'view' | 'history'
+type PhoneTab = 'spec' | 'comments' | 'view' | 'flows' | 'history'
 function phoneTabFor(panel: ViewPanelTab | undefined): PhoneTab {
-	return panel === 'comments' ? 'comments' : panel === 'history' ? 'history' : 'spec'
+	return panel === 'comments' ? 'comments' : panel === 'history' ? 'history' : panel === 'flows' ? 'flows' : 'spec'
 }
 const phoneTab = ref<PhoneTab>(thread.value ? 'view' : phoneTabFor(parseViewPanel(route.query)))
 // The history tab's selection rides in the address with `panel=history` on phones too.
 watch(phoneTab, (value) => {
-	if (value === 'history') panelTab.value = 'history'
-	else if (panelTab.value === 'history') panelTab.value = 'comments'
+	if (value === 'history' || value === 'flows') panelTab.value = value
+	else if (panelTab.value === 'history' || panelTab.value === 'flows') panelTab.value = 'comments'
 })
 watch(() => comments.openThreadId.value, (id) => {
 	if (id && isPhone.value) phoneTab.value = 'view'
@@ -82,6 +83,7 @@ const phoneTabs = computed(() => {
 		{ value: 'spec', slot: 'spec' as const, label: t('panel.spec') },
 		{ value: 'comments', slot: 'comments' as const, label: t('panel.comments'), badge: unresolved ? { label: String(unresolved), color: 'annotation' as const, variant: 'soft' as const, size: 'sm' as const } : undefined },
 		{ value: 'view', slot: 'view' as const, label: t('phone.viewTab') },
+		{ value: 'flows', slot: 'flows' as const, label: t('panel.flows') },
 		{ value: 'history', slot: 'history' as const, label: t('panel.history') },
 	]
 })
@@ -127,7 +129,7 @@ watch(() => [viewId.value, route.query] as const, ([id, query]) => {
 	void workbench.openView(id, parseViewRouteContext(query))
 	const nextTab = parseViewPanel(query)
 	if (nextTab) panelTab.value = nextTab
-	if (nextTab === 'history' && isPhone.value) phoneTab.value = 'history'
+	if ((nextTab === 'history' || nextTab === 'flows') && isPhone.value) phoneTab.value = nextTab
 	const nextHistory = parseHistoryAddress(query)
 	if (JSON.stringify(nextHistory) !== JSON.stringify(historyAddress.value)) historyAddress.value = nextHistory
 	const nextThread = parseThread(query)
@@ -248,6 +250,9 @@ onBeforeUnmount(() => {
             <p class="shrink-0 border-t border-default px-4 pt-2 pb-3 text-xs text-muted">
               {{ t('phone.viewHint') }}
             </p>
+          </template>
+          <template #flows>
+            <ViewFlowUsage />
           </template>
           <template #history>
             <ViewHistoryPanel :active="phoneTab === 'history'" />

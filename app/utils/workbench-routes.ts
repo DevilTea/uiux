@@ -8,7 +8,7 @@ import { historyQuery, type HistoryAddress } from './version-history'
  * Render context rides in the query so a link reproduces exactly what its author saw.
  * Workbench chrome language and theme never ride in the URL.
  */
-export const VIEW_PANEL_TABS: readonly ViewPanelTab[] = ['comments', 'inspect', 'spec', 'readiness', 'history']
+export const VIEW_PANEL_TABS: readonly ViewPanelTab[] = ['comments', 'inspect', 'spec', 'readiness', 'flows', 'history']
 
 /**
  * `history` is the history panel's selection (Clause 01a11e0d-d7f5-7ef8-ac22-e235d4a00a41):
@@ -27,6 +27,11 @@ export function viewPath(viewId: string): string {
 
 export function flowPath(flowId: string): string {
 	return `/flows/${encodeURIComponent(flowId)}`
+}
+
+/** A Flow's page, optionally with one step selected (`?step=`, read once when the Flow opens). */
+export function flowStepLocation(flowId: string, stepId?: string): { path: string; query?: { step: string } } {
+	return stepId ? { path: flowPath(flowId), query: { step: stepId } } : { path: flowPath(flowId) }
 }
 
 /** The one list of every View: the Overview's Views tab. */

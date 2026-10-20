@@ -898,8 +898,23 @@
     "inspect": "屬性",
     "spec": "Spec",
     "readiness": "就緒狀態",
+    "flows": "Flow",
     "label": "View 詳細資料",
     "history": "歷程"
+  },
+  "flowUsage": {
+    "title": "使用此 View 的 UX Flow",
+    "loading": "正在讀取 UX Flow…",
+    "empty": "沒有任何 UX Flow 使用此 View。",
+    "list": "經過此 View 的 UX Flow",
+    "steps": "{flow} 的步驟",
+    "step": "步驟 {n}",
+    "open": "開啟 {flow}，並選取步驟 {n}",
+    "invalid": "此 UX Flow 有問題。",
+    "unreadableTitle": "無法讀取的 UX Flow",
+    "unreadableHint": "無法得知這些 UX Flow 是否使用此 View。",
+    "unnamed": "未命名 Flow",
+    "openFlow": "開啟 {flow}"
   },
   "inspect": {
     "empty": {

@@ -898,8 +898,23 @@
     "inspect": "Inspect",
     "spec": "Spec",
     "readiness": "Readiness",
+    "flows": "Flows",
     "label": "View details",
     "history": "History"
+  },
+  "flowUsage": {
+    "title": "UX Flows that use this View",
+    "loading": "Reading UX Flows…",
+    "empty": "No UX Flow uses this View.",
+    "list": "UX Flows that step through this View",
+    "steps": "Steps in {flow}",
+    "step": "Step {n}",
+    "open": "Open {flow} at step {n}",
+    "invalid": "This UX Flow has problems.",
+    "unreadableTitle": "UX Flows that could not be read",
+    "unreadableHint": "Whether these UX Flows use this View is unknown.",
+    "unnamed": "Unnamed Flow",
+    "openFlow": "Open {flow}"
   },
   "inspect": {
     "empty": {

@@ -52,6 +52,18 @@ const selection = ref<FlowSelection>()
 const graph = ref<InstanceType<typeof FlowGraph>>()
 
 watch(flowId, () => { selection.value = undefined })
+
+// `?step=<stepId>` (the View page's Flow usage links here) selects that step once the Flow is read.
+let stepLinkHandled = ''
+watch([draft, () => route.query.step], ([current, step]) => {
+	const stepId = typeof step === 'string' ? step : ''
+	const marker = `${flowId.value}:${stepId}`
+	if (!current || !stepId || stepLinkHandled === marker) return
+	stepLinkHandled = marker
+	if (!current.steps[stepId]) return
+	activate(stepId)
+	void graph.value?.focusStep(stepId)
+})
 watch(draft, (current) => {
 	const selected = selection.value
 	if (!selected || !current) return
