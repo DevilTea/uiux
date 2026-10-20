@@ -100,8 +100,9 @@ async function load(options: Readonly<{ quiet?: boolean }> = {}): Promise<void> 
 			if (!read) continue
 			const existing = byKey.value.get(read.key)
 			// Keep a draft across reloads; only a clean Locale adopts the newer file.
+			// A live refresh leaves a draft alone: its save meets the new revision as a conflict.
 			if (existing && countMessageChanges(existing.saved, existing.draft) > 0) {
-				if (existing.revision !== read.revision) {
+				if (existing.revision !== read.revision && !options.quiet) {
 					existing.conflict = true
 					existing.theirs = { revision: read.revision, messages: { ...read.resource } }
 				}

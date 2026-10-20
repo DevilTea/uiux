@@ -58,6 +58,7 @@ export function createWorkbenchState() {
 	const detailLoading = ref(false)
 	const error = ref<string>()
 	let viewLoadSequence = 0
+	const liveReadSequence = new Map<string, number>()
 
 	// Render context selections. Empty means "use the effective default" from contextOptions.
 	const selectedVariant = ref('')
@@ -237,22 +238,26 @@ export function createWorkbenchState() {
 	async function applyLiveChanges(batch: LiveBatch, onViewLoaded?: () => void): Promise<void> {
 		const kinds = new Set(batch.resync ? [...LIVE_LIST_KINDS, 'workspace'] : batch.changes.map(change => change.kind))
 		const reads: Promise<void>[] = []
-		if (kinds.has('workspace')) {
-			reads.push(uiux.readResource<WorkspaceRead>('workspace', 'workspace').then((read) => {
-				if (read) workspace.value = read
-			}, () => undefined))
+		// Batches can overlap: only the newest read of a kind is applied.
+		const latest = (kind: string) => {
+			const sequence = (liveReadSequence.get(kind) ?? 0) + 1
+			liveReadSequence.set(kind, sequence)
+			return () => liveReadSequence.get(kind) === sequence
 		}
-		if (kinds.has('view')) reads.push(listAll<ViewSummary>('view').then((items) => { if (items) views.value = items }))
-		if (kinds.has('locale')) {
-			reads.push(listAll<LocaleSummary>('locale').then((items) => {
-				if (!items) return
-				discoveredLocales.value = items.map(item => item.key)
-				localeRevisions.value = Object.fromEntries(items.map(item => [item.key, item.revision]))
-			}))
+		const read = <Value>(kind: string, load: () => Promise<Value | undefined>, apply: (value: Value) => void) => {
+			if (!kinds.has(kind)) return
+			const current = latest(kind)
+			reads.push(load().then((value) => { if (value !== undefined && current()) apply(value) }, () => undefined))
 		}
-		if (kinds.has('asset')) reads.push(listAll<unknown>('asset').then((items) => { if (items) assetCount.value = items.length }))
-		if (kinds.has('flow')) reads.push(listAll<FlowSummary>('flow').then((items) => { if (items) flows.value = items }))
-		if (kinds.has('review')) reads.push(listAll<ReviewSummary>('review').then((items) => { if (items) reviews.value = items }))
+		read('workspace', () => uiux.readResource<WorkspaceRead>('workspace', 'workspace'), (value) => { workspace.value = value })
+		read('view', () => listAll<ViewSummary>('view'), (items) => { views.value = items })
+		read('locale', () => listAll<LocaleSummary>('locale'), (items) => {
+			discoveredLocales.value = items.map(item => item.key)
+			localeRevisions.value = Object.fromEntries(items.map(item => [item.key, item.revision]))
+		})
+		read('asset', () => listAll<unknown>('asset'), (items) => { assetCount.value = items.length })
+		read('flow', () => listAll<FlowSummary>('flow'), (items) => { flows.value = items })
+		read('review', () => listAll<ReviewSummary>('review'), (items) => { reviews.value = items })
 		await Promise.all(reads)
 		const id = selectedViewId.value
 		const listed = views.value.find(view => view.key === id)

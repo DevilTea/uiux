@@ -24,6 +24,7 @@ import {
 } from '../utils/review-inbox'
 import { parseThread, viewLocation } from '../utils/workbench-routes'
 import { submissionBody, type ReviewSubmissionDraft } from '../utils/review-submission'
+import { useReplyBases } from './useReplyBases'
 import { threadState, type ReplyConflict } from '../utils/reply-conflict'
 import { promoteMovedOf, type PromoteConflict } from '../utils/promote-conflict'
 import { useAccess } from './useAccess'
@@ -248,6 +249,8 @@ function createReviewInbox() {
 		return buildInboxThread(review, read?.resource, viewInfo.value)
 	}))
 	const threadById = computed(() => new Map(threads.value.map(item => [item.id, item])))
+	/** Each reply draft is sent against the revision it was started on (live refresh moves the thread under it). */
+	const replyBases = useReplyBases(replyDrafts, threadId => threadById.value.get(threadId))
 
 	// -------------------------------------------------------------------------------------------
 	// Identity: "mine" and "updated since you last looked" (per browser, per member)
@@ -396,8 +399,12 @@ function createReviewInbox() {
 		const body = replyDrafts.value[threadId]?.trim()
 		const item = threadById.value.get(threadId)
 		if (!body || !item || !canReply.value) return false
-		const before = threadState(item)
-		const ok = await mutate(threadId, 'reply', revision => post(path(threadId, 'messages'), { expectedRevision: revision, body }), t('comments.errors.replyFailed'), () => { replyConflict.value = { threadId, before } })
+		const base = replyBases.get(threadId)
+		const before = base?.state ?? threadState(item)
+		const ok = await mutate(threadId, 'reply', revision => post(path(threadId, 'messages'), { expectedRevision: base?.revision ?? revision, body }), t('comments.errors.replyFailed'), () => {
+			replyBases.release(threadId)
+			replyConflict.value = { threadId, before }
+		})
 		if (ok) {
 			replyDrafts.value = { ...replyDrafts.value, [threadId]: '' }
 			announce(t('inbox.announce.replied'))

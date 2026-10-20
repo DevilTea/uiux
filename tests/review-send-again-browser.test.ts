@@ -86,10 +86,14 @@ async function driveConflict(page: Page, threadId: string, surface: Surface): Pr
 	page.on('request', (request) => { if (isReply(request)) sent++ })
 	page.on('response', (response) => { if (isReply(response.request())) posts.push(response.status()) })
 	const settled = () => expect.poll(() => sent - posts.length, { timeout: 10_000 }).toBe(0)
+	// The reply is written against the thread as it was; two replies land elsewhere meanwhile. Live
+	// refresh shows them while the draft stays, and the reply still goes out against the revision it
+	// was written on (issue #69), so it is refused.
+	await scope.locator(surface.reply).fill(REPLY)
 	await replyElsewhere(threadId, 'First reply from elsewhere.')
 	await replyElsewhere(threadId, 'Second reply from elsewhere.')
-
-	await scope.locator(surface.reply).fill(REPLY)
+	await expect.poll(() => messages.count(), { timeout: 10_000 }).toBe(3)
+	expect(await scope.locator(surface.reply).inputValue()).toBe(REPLY)
 	await scope.locator(surface.send).click()
 
 	const alert = scope.locator('[data-reply-conflict]')

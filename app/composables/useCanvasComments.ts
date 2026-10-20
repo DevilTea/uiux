@@ -31,6 +31,7 @@ import { renderContextDiffers, type PinRenderContext } from '../../src/preview/p
 import { createThreadBody, reanchorThreadBody } from '../utils/canvas-comment-requests'
 import { recordedContextParts, recordedContextText } from '../utils/thread-render-context'
 import { useRecordedRenderContext } from './useRecordedRenderContext'
+import { useReplyBases } from './useReplyBases'
 import { threadState, type ReplyConflict } from '../utils/reply-conflict'
 import { promoteMovedOf, type PromoteConflict } from '../utils/promote-conflict'
 
@@ -501,6 +502,8 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	watch(conflict, (id) => { if (promoteConflict.value && promoteConflict.value.threadId !== id) promoteConflict.value = undefined }, { flush: 'sync' })
 	const busy = ref<string>()
 	const replyDrafts = ref<Record<string, string>>({})
+	/** Each reply draft is sent against the revision it was started on (live refresh moves the thread under it). */
+	const replyBases = useReplyBases(replyDrafts, threadId => threadById.value.get(threadId))
 
 	async function mutate(threadId: string, action: string, run: (revision: string) => Promise<unknown>, fallback: string, onConflict?: (details: FetchErrorDetails) => void | Promise<void>): Promise<boolean> {
 		const item = threadById.value.get(threadId)
@@ -539,8 +542,12 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		const item = threadById.value.get(threadId)
 		if (!body || !item) return false
 		lastError.value = undefined
-		const before = threadState(item)
-		const ok = await mutate(threadId, 'reply', revision => postMessage(threadId, revision, body), t('comments.errors.replyFailed'), () => { replyConflict.value = { threadId, before } })
+		const base = replyBases.get(threadId)
+		const before = base?.state ?? threadState(item)
+		const ok = await mutate(threadId, 'reply', revision => postMessage(threadId, base?.revision ?? revision, body), t('comments.errors.replyFailed'), () => {
+			replyBases.release(threadId)
+			replyConflict.value = { threadId, before }
+		})
 		if (ok) replyDrafts.value = { ...replyDrafts.value, [threadId]: '' }
 		return ok
 	}
