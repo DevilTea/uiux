@@ -32,10 +32,13 @@ export function createProductKitTracker(readRevision: () => Promise<string | und
 	async function moved(batch: LiveBatch): Promise<boolean> {
 		const named = batch.changes.find(change => change.kind === 'product-kit')
 		if (!batch.resync && !named) return false
+		const mine = generation
 		let next = named?.revision
 		if (next === undefined) {
 			try { next = await readRevision() }
 			catch { return false }
+			// A Preview started meanwhile; this read belongs to the superseded one.
+			if (mine !== generation) return false
 		}
 		const known = revision
 		revision = next

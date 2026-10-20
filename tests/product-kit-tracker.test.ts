@@ -46,4 +46,19 @@ describe('createProductKitTracker (Product Kit follow of the open Preview)', () 
 		await Promise.all([second, third])
 		expect(await tracker.moved(named('r3'))).toBe(false)
 	})
+
+	it('does not let a slow resync read of a superseded Preview overwrite the new baseline', async () => {
+		const reads: ((revision: string) => void)[] = []
+		const tracker = createProductKitTracker(() => new Promise<string>(resolve => reads.push(resolve)))
+		const first = tracker.startPreview()
+		reads[0]!('r1')
+		await first
+		const slowResync = tracker.moved(resync)
+		const second = tracker.startPreview()
+		reads[2]!('r2')
+		await second
+		reads[1]!('r1')
+		expect(await slowResync).toBe(false)
+		expect(await tracker.moved(named('r2'))).toBe(false)
+	})
 })
