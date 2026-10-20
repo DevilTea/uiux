@@ -10,6 +10,7 @@ import CommentsTab from './comments/CommentsTab.vue'
 import ReadinessTab from '../readiness/ReadinessTab.vue'
 import WidgetInspector from './WidgetInspector.vue'
 import SpecDocument from './SpecDocument.vue'
+import ViewFlowUsage from './ViewFlowUsage.vue'
 import ViewHistoryPanel from '../history/ViewHistoryPanel.vue'
 
 /**
@@ -34,6 +35,7 @@ const items = computed<TabsItem[]>(() => [
 	{ value: 'inspect', slot: 'inspect' as const, label: t('panel.inspect') },
 	{ value: 'spec', slot: 'spec' as const, label: t('panel.spec') },
 	{ value: 'readiness', slot: 'readiness' as const, label: t('panel.readiness'), badge: findingsHere.value ? { label: String(findingsHere.value), color: 'warning', variant: 'soft', size: 'sm' } : undefined },
+	{ value: 'flows', slot: 'flows' as const, label: t('panel.flows') },
 	{ value: 'history', slot: 'history' as const, label: t('panel.history') },
 ])
 
@@ -88,6 +90,9 @@ function commentOn(widgetId: string): void {
         @open-comments="tab = 'comments'"
         @open-inspect="tab = 'inspect'"
       />
+    </template>
+    <template #flows>
+      <ViewFlowUsage />
     </template>
     <template #history>
       <ViewHistoryPanel :active="tab === 'history'" />

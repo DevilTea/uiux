@@ -384,3 +384,43 @@ describe('Prototype player (R11, Discussion #6 item 6)', () => {
 		finally { await context.close() }
 	}, 120_000)
 })
+
+describe('View page: UX Flow usage (issue #115)', () => {
+	it('lists the Flows through the View with the Variant, follows a rename live and links to the step', async () => {
+		const { context, page } = await open(`/views/${paymentViewId}?panel=flows`)
+		try {
+			const usage = page.locator('[data-view-flow-usage]').first()
+			const flow = usage.locator('[data-flow-usage-flow]').filter({ hasText: 'Checkout recovery' })
+			await flow.waitFor()
+			expect(await usage.locator('[data-flow-usage-flow]').count()).toBe(1)
+			const step = flow.locator('[data-flow-usage-step]')
+			expect(await step.count()).toBe(1)
+			expect(await step.textContent()).toContain('Step 2')
+			expect(await step.textContent()).toContain('error')
+
+			// A rename elsewhere shows without a reload (live refresh of the Flow list).
+			const current = await readFlow(flowId)
+			const renamed = await api('PUT', `/api/flows/${flowId}`, { expectedRevision: current.revision, name: 'Usage live rename', entryStepId: current.resource.entryStepId, steps: current.resource.steps })
+			expect(renamed.status).toBe(200)
+			await usage.locator('[data-flow-usage-flow]').filter({ hasText: 'Usage live rename' }).waitFor({ timeout: 20_000 })
+
+			await usage.locator('[data-flow-usage-step]').click()
+			await page.waitForURL(url => url.pathname === `/flows/${flowId}` && url.searchParams.get('step') === steps.payment)
+			await page.waitForSelector(`[data-flow-node][data-step-id="${steps.payment}"][aria-pressed="true"]`)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('says so when no Flow uses the View', async () => {
+		const spec = { intent: 'Unused.', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [] }
+		const unused = await api<{ key: string }>('POST', '/api/views', { name: 'Unused View', spec })
+		expect(unused.status).toBe(201)
+		const { context, page } = await open(`/views/${unused.body.key}?panel=flows`)
+		try {
+			await page.locator('[data-flow-usage-empty]').first().waitFor()
+			expect(await page.locator('[data-flow-usage-empty]').first().textContent()).toContain('No UX Flow uses this View.')
+			expect(await page.locator('[data-flow-usage-flow]').count()).toBe(0)
+		}
+		finally { await context.close() }
+	}, 60_000)
+})
