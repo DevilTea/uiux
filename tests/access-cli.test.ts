@@ -11,12 +11,14 @@ import { HUMAN_ONLY_PERMISSION_KEYS, PERMISSION_KEYS } from '../src/application/
 import { createLeaseManager } from '../src/application/access/leases'
 import { runAccessCommand } from '../src/cli/access'
 import type { HostVersionRecord } from '../src/domain/history/schema'
+import { FileNativePersistence } from '../src/persistence/file-native'
 import { blobDigest, HostHistoryStore } from '../src/persistence/history/host-store'
 import { acquireServerHold } from '../src/persistence/server-hold'
 import { verifyCredential } from '../src/server/access/roster'
 import { AccessService, agentAccessOption } from '../src/server/access/service'
 import { AccessStore, accessStorePaths, copyHostHistory, hostHistoryPaths, planHostHistoryCopy } from '../src/server/access/store'
 import { presetKeys } from './support/access'
+import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { CURRENT_TEST_LAYOUT, writeCurrentWorkspace } from './support/workspace-layout'
 
 const CLI = join(fileURLToPath(new URL('..', import.meta.url)), 'bin', 'uiux.mjs')
@@ -396,9 +398,9 @@ describe('uiux access commands', () => {
 		// A source writer stores the blob after it was listed: the copy raced it, so it is refused and removed.
 		await expect(copyHostHistory(plan, {
 			replace: false,
-			async blobAvailableElsewhere() {
+			async readBlobElsewhere() {
 				await sourceHost.putBlob(bytes)
-				return false
+				return undefined
 			},
 		})).rejects.toThrow('changed while it was copied')
 		expect(await lstat(plan.target.dir).catch(() => undefined)).toBeUndefined()
@@ -423,7 +425,7 @@ describe('uiux access commands', () => {
 		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
 		const copied = await run('access', 'copy', '--from', workspace, '--workspace', other)
 		expect(copied.code).toBe(0)
-		expect(copied.err).toContain('1 blob(s) that copied versions name are missing from the source host history too')
+		expect(copied.err).toContain('1 blob(s) that copied versions name are missing from the source host history and from this Workspace\'s artifact store')
 	})
 
 	it('checks the blobs the open autosave\'s events name too, not only the versions\'', async () => {
@@ -441,9 +443,9 @@ describe('uiux access commands', () => {
 		// No version names the blob; only the open autosave's event does. A source writer stores it after it was listed.
 		await expect(copyHostHistory(plan, {
 			replace: false,
-			async blobAvailableElsewhere() {
+			async readBlobElsewhere() {
 				await sourceHost.putBlob(bytes)
-				return false
+				return undefined
 			},
 		})).rejects.toThrow('changed while it was copied')
 		expect(await lstat(plan.target.dir).catch(() => undefined)).toBeUndefined()
@@ -452,6 +454,45 @@ describe('uiux access commands', () => {
 		await sourceHost.appendOpenEntry({ type: 'event', event: event('r_b'), files: { 'views/11111111-1111-4111-8111-111111111111.view.json': missing } })
 		expect(await copyHostHistory(plan, { replace: false })).toMatchObject({ missingBlobs: [missing] })
 		expect(await lstat(join(plan.target.dir, 'objects', 'sha256', digest.slice(7, 9), digest.slice(7)))).toBeDefined()
+	})
+
+	it('copies a blob that only the target\'s artifact store keeps into the copied host history (Clause 01a11a5e-1e65, issue #253)', async () => {
+		const { base, workspace, home, run } = await setup()
+		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
+		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
+		// A host version recorded on a Checkpoint before host history kept every blob its versions name.
+		const bytes = new TextEncoder().encode('{"view":"only in the artifact store"}\n')
+		const digest = blobDigest(bytes)
+		await sourceHost.writeVersion(hostVersion({ 'views/11111111-1111-4111-8111-111111111111.view.json': digest }))
+		const worktree = await initWorkspace(base, 'worktree')
+		await new FileNativePersistence({ root: worktree, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).artifacts.put(bytes)
+
+		const copied = await run('access', 'copy', '--from', workspace, '--workspace', worktree)
+		expect(copied.code, copied.err).toBe(0)
+		expect(copied.out).toContain(`Copied 1 blob(s) that copied versions name from the artifact store of ${worktree} into its host history.`)
+		expect(copied.err).not.toContain('missing')
+		const target = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, worktree), create: false }))!
+		expect(await target.readBlob(digest)).toEqual(bytes)
+		// With the roster's permissions, like every copied file.
+		const tree = await historyTree(target.paths.dir)
+		const hex = digest.slice('sha256:'.length)
+		expect(tree[join('objects', 'sha256', hex.slice(0, 2), hex)]).toMatchObject({ directory: false, mode: 0o600 })
+		for (const directory of [join('objects'), join('objects', 'sha256'), join('objects', 'sha256', hex.slice(0, 2))])
+			expect(tree[directory]).toMatchObject({ directory: true, mode: 0o700 })
+		// The source is unchanged: only the copy owns the blob.
+		expect(await sourceHost.hasBlob(digest)).toBe(false)
+	})
+
+	it('reports, rather than stores, bytes from elsewhere that do not match the digest a copied version names', async () => {
+		const { base, workspace, home } = await setup()
+		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
+		const digest = blobDigest(new TextEncoder().encode('{"view":"expected"}\n'))
+		await sourceHost.writeVersion(hostVersion({ 'views/11111111-1111-4111-8111-111111111111.view.json': digest }))
+		const worktree = await initWorkspace(base, 'worktree')
+		const plan = await planHostHistoryCopy(home, workspace, worktree)
+		expect(await copyHostHistory(plan, { replace: false, readBlobElsewhere: async () => new TextEncoder().encode('{"view":"other"}\n') })).toMatchObject({ missingBlobs: [digest], filledBlobs: [] })
+		const hex = digest.slice('sha256:'.length)
+		expect(await lstat(join(plan.target.dir, 'objects', 'sha256', hex.slice(0, 2), hex)).catch(() => undefined)).toBeUndefined()
 	})
 
 	it('dispatches the access commands from the installed CLI and lists them in --help', async () => {

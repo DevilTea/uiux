@@ -468,10 +468,12 @@ export type HostHistoryCopyOptions = Readonly<{
 	/** Runs right before the target's history changes; throwing refuses the copy, leaving the target unchanged. */
 	beforeSwap?: () => Promise<void>
 	/**
-	 * Whether a blob the copied versions name, but the copy lacks, is stored outside host history
-	 * for the target (a Checkpoint blob in the target Workspace's artifact store).
+	 * The bytes of a blob the copied versions name, but the copy lacks, from outside host history
+	 * for the target (a Checkpoint blob in the target Workspace's artifact store); `undefined` when
+	 * it is not there. The copy then stores it, so the copied history holds every blob it names
+	 * (Clause 01a11a5e-1e65-7deb-a89e-6ad021248fe0, issue #253).
 	 */
-	blobAvailableElsewhere?: (digest: string) => Promise<boolean>
+	readBlobElsewhere?: (digest: string) => Promise<Uint8Array | undefined>
 }>
 
 export type HostHistoryCopyResult = Readonly<{
@@ -481,6 +483,8 @@ export type HostHistoryCopyResult = Readonly<{
 	discardedVersions: number
 	/** Blobs the copied versions or open-autosave events name that the source did not have either. */
 	missingBlobs: readonly string[]
+	/** Blobs the source lacked that `readBlobElsewhere` supplied, which the copy stores in host history. */
+	filledBlobs: readonly string[]
 }>
 
 /**
@@ -491,9 +495,10 @@ export type HostHistoryCopyResult = Readonly<{
  * not copied, and a file removed between listing and reading (pruned) is skipped.
  *
  * The copy is assembled beside the target and checked before it replaces anything: every blob a
- * copied version or open-autosave event names must be in the copy (or available elsewhere for the
- * target). A blob the
- * copy lacks while the source has it means the copy raced a writer of the source: the copy is
+ * copied version or open-autosave event names must be in the copy. One the copy lacks is taken
+ * from `readBlobElsewhere` when it has it (a host version recorded on a Checkpoint before host
+ * history kept every blob its versions name), so the copied history holds its own blobs. A blob the
+ * copy still lacks while the source has it means the copy raced a writer of the source: the copy is
  * refused and removed, so the target is unchanged and a rerun copies a consistent state. A blob the
  * source lacks too is reported in `missingBlobs` and does not refuse the copy: the source history
  * was already incomplete, the copy is faithful to it, and refusing would make it uncopyable.
@@ -516,6 +521,7 @@ export async function copyHostHistory(plan: HostHistoryCopyPlan, options: HostHi
 	let files = 0
 	let discardedVersions = 0
 	let missingBlobs: string[] = []
+	const filledBlobs: string[] = []
 	try {
 		await mkdir(staging, { mode: 0o700 })
 		await chmod(staging, 0o700)
@@ -544,7 +550,12 @@ export async function copyHostHistory(plan: HostHistoryCopyPlan, options: HostHi
 		const raced: string[] = []
 		for (const digest of await referencedBlobDigests(staging)) {
 			if (await lstatOrUndefined(join(staging, blobRelativePath(digest)))) continue
-			if (await options.blobAvailableElsewhere?.(digest)) continue
+			const bytes = await options.readBlobElsewhere?.(digest)
+			if (bytes && `sha256:${createHash('sha256').update(bytes).digest('hex')}` === digest) {
+				await writeStagedBlob(staging, blobRelativePath(digest), bytes)
+				filledBlobs.push(digest)
+				continue
+			}
 			if (await lstatOrUndefined(join(plan.source.dir, blobRelativePath(digest)))) raced.push(digest)
 			else missingBlobs.push(digest)
 		}
@@ -578,7 +589,30 @@ export async function copyHostHistory(plan: HostHistoryCopyPlan, options: HostHi
 		if (createdWorkspaceDir) await rmdir(plan.target.workspaceDir).catch(() => undefined)
 		throw error
 	}
-	return { files, discardedVersions, missingBlobs }
+	return { files, discardedVersions, missingBlobs, filledBlobs: filledBlobs.sort() }
+}
+
+/** Stores one blob in the staged copy with the roster's permissions: directories 0700, the file 0600, each fsynced. */
+async function writeStagedBlob(staging: string, relativePath: string, bytes: Uint8Array): Promise<void> {
+	const directories: string[] = []
+	let directory = staging
+	for (const part of dirname(relativePath).split(sep)) {
+		directory = join(directory, part)
+		directories.push(directory)
+		if (await lstatOrUndefined(directory)) continue
+		await mkdir(directory, { mode: 0o700 })
+		await chmod(directory, 0o700)
+	}
+	const handle = await open(join(staging, relativePath), constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
+	try {
+		await handle.writeFile(bytes)
+		await handle.sync()
+	}
+	finally {
+		await handle.close()
+	}
+	for (const path of directories.reverse()) await syncDirectory(path)
+	await syncDirectory(staging)
 }
 
 /** A blob's path under a host history directory (Clause 01a11a5e-1e65-7deb-a89e-6ad021248fe0). */

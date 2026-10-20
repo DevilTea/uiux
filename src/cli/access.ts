@@ -7,6 +7,7 @@ import { memberLabel, memberLabelName, type LabelPreset } from '../application/a
 import { presetNameKey } from '../domain/access-presets/schema'
 import { isMemberKind, type MemberKind } from '../application/access/principal'
 import { FileNativePersistence } from '../persistence/file-native'
+import { readArtifactBlobUnlocked } from '../persistence/history/version-blobs'
 import { resolveLayoutDirectory, resolveWorkspacePath, V5_LAYOUT, type WorkspaceLayout } from '../persistence/paths'
 import type { WorkspaceSchemaPolicy } from '../persistence/schema-policy'
 import { checkWorkspaceSelection, selectWorkspace } from '../persistence/workspace-selection'
@@ -544,7 +545,10 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 							replace,
 							// A server may have started since the check above.
 							beforeSwap: () => refuseWhileServed(context.workspaceRoot),
-							blobAvailableElsewhere: digest => isRegularFile(resolveWorkspacePath(context.workspaceRoot, persistence.layout.artifactRelativePath(digest))),
+							// Issue #253: a blob only the target's artifact store keeps is copied into its host
+							// history, so the copied versions do not depend on a Checkpoint's blobs. One that
+							// cannot be read there is reported as missing like any other.
+							readBlobElsewhere: digest => readArtifactBlobUnlocked(persistence, digest).catch(() => undefined),
 						})))
 					}
 					catch (error) {
@@ -574,8 +578,10 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 					context.out(`Copied the host history (${copied.files} file(s)) from ${history.source.dir} to ${history.target.dir}.`)
 					if (history.targetExists)
 						context.out(`--replace discarded the target's own host history: ${copied.discardedVersions} version(s).`)
+					if (copied.filledBlobs.length > 0)
+						context.out(`Copied ${copied.filledBlobs.length} blob(s) that copied versions name from the artifact store of ${context.workspaceRoot} into its host history.`)
 					if (copied.missingBlobs.length > 0)
-						context.err(`uiux: warning: ${copied.missingBlobs.length} blob(s) that copied versions name are missing from the source host history too; those versions cannot be compared or restored.`)
+						context.err(`uiux: warning: ${copied.missingBlobs.length} blob(s) that copied versions name are missing from the source host history and from this Workspace's artifact store; those versions cannot be compared or restored.`)
 				}
 				else {
 					context.out(`No host history recorded for ${sourceRoot}; none copied.`)
@@ -611,10 +617,6 @@ async function refuseWhileServed(workspaceRoot: string): Promise<void> {
 	const hold = await readActiveServerHold(workspaceRoot, await workspaceLayout())
 	if (hold)
 		throw new AccessError('access.lock_busy', `A UIUX server (pid ${hold.pid} on ${hold.hostname}) is serving ${workspaceRoot}. Stop that server, then run uiux access copy again to copy the host history.`)
-}
-
-async function isRegularFile(path: string): Promise<boolean> {
-	return lstat(path).then(stats => stats.isFile(), () => false)
 }
 
 /**
