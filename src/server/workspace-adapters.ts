@@ -17,7 +17,7 @@ import { canonicalJsonStringify } from '../domain/canonical-json'
 import type { Diagnostic } from '../domain/validation'
 import type { WorkspaceAdapterSelection } from '../domain/workspace/schema'
 import { kitBuildRunnerFor } from './kit-build'
-import { checkPreviewBundleAdapters, type PreviewAdapterCheck } from './preview-adapter-check'
+import { checkPreviewBundleAdapters, evaluatePreviewBundle, type DeclaredWidgetEventsResult, type PreviewAdapterCheck } from './preview-adapter-check'
 import {
 	extractProductAdapterManifest,
 	productAdapterApiCompatibility,
@@ -225,10 +225,11 @@ export type PreviewThemes = Readonly<Record<string, Readonly<Record<string, stri
  * The selected Workspace's Preview bundle with the result of the server-side Adapter check (Clause
  * 01a116f0-cae2-7c64-9c76-d472f252789a): `adapterCheck` is `passed` when the evaluated bundle
  * reported no mismatch, `unchecked` when it could not be evaluated in Node; then `warnings` says so
- * and the Preview's own guard decides in the browser.
+ * and the Preview's own guard decides in the browser. `declaredWidgetEvents` comes from the same
+ * evaluation and is `unavailable` unless the check passed.
  */
 export type SelectedWorkspacePreviewBundle =
-	| (PreviewBundleResult & { state: 'valid'; themes: PreviewThemes; adapterCheck: 'passed' | 'unchecked'; warnings: readonly Diagnostic[] })
+	| (PreviewBundleResult & { state: 'valid'; themes: PreviewThemes; adapterCheck: 'passed' | 'unchecked'; warnings: readonly Diagnostic[]; declaredWidgetEvents: DeclaredWidgetEventsResult })
 	| { state: 'invalid'; diagnostics: readonly Diagnostic[] }
 
 export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, givenLayout?: WorkspaceLayout): Promise<SelectedWorkspacePreviewBundle> {
@@ -271,7 +272,8 @@ export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, g
 	// The one server-side check of the Adapters' runtime members, plugin authenticity among them
 	// (Clause 01a116f0-cae2-7c64-9c76-d472f252789a): a set the Preview would refuse is invalid here.
 	// A bundle that cannot run in Node stays valid with a warning (owner decision during review of #248).
-	const check = await checkPreviewBundleAdapters(bundle, workspaceRoot)
+	// The same one evaluation also yields the declared Widget Events (#249).
+	const { check, declaredWidgetEvents } = await evaluatePreviewBundle(bundle, workspaceRoot)
 	if (check.state === 'invalid') return { state: 'invalid', diagnostics: check.diagnostics }
 	return {
 		state: 'valid',
@@ -279,6 +281,7 @@ export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, g
 		themes: productKit?.themes ?? {},
 		adapterCheck: check.state === 'valid' ? 'passed' : 'unchecked',
 		warnings: check.state === 'unchecked' ? check.warnings : [],
+		declaredWidgetEvents,
 	}
 }
 

@@ -4,6 +4,7 @@ import { Worker } from 'node:worker_threads'
 
 import { maskHostPaths } from '../adapters/host-paths'
 import type { Diagnostic } from '../domain/validation'
+import type { DeclaredWidgetEvent, DeclaredWidgetEvents } from '../preview/browser-runtime'
 import type { PreviewBundleResult } from './preview-bundler'
 
 /**
@@ -19,10 +20,21 @@ export type PreviewAdapterCheck =
 	| Readonly<{ state: 'invalid'; diagnostics: readonly Diagnostic[] }>
 	| Readonly<{ state: 'unchecked'; warnings: readonly Diagnostic[] }>
 
+/**
+ * Each adapter Widget type's declared Events, for the Flow editor's Event picker: `valid` only when
+ * the bundle ran in the server's worker and its Adapters passed the check, otherwise `unavailable`.
+ */
+export type DeclaredWidgetEventsResult =
+	| Readonly<{ state: 'valid'; widgets: DeclaredWidgetEvents }>
+	| Readonly<{ state: 'unavailable' }>
+
+/** What the one evaluation of a bundle yields: the Adapter check and the declared Widget Events. */
+export type PreviewBundleEvaluation = Readonly<{ check: PreviewAdapterCheck; declaredWidgetEvents: DeclaredWidgetEventsResult }>
+
 type PreviewBundle = Pick<PreviewBundleResult, 'bundleJs'>
 
 type WorkerReport =
-	| Readonly<{ ok: true; reported: unknown }>
+	| Readonly<{ ok: true; reported: unknown; events: unknown }>
 	| Readonly<{ ok: false; message: string; transient?: true }>
 
 /**
@@ -35,24 +47,38 @@ export const PREVIEW_ADAPTER_CHECK_TIMEOUT_MS = 30_000
 /** The worker's heap bound: a bundle that exhausts it ends the worker, and the check counts as not run. */
 const WORKER_RESOURCE_LIMITS = { maxOldGenerationSizeMb: 512 } as const
 
+type Evaluation = Readonly<{ evaluation: Promise<PreviewBundleEvaluation>; check: Promise<PreviewAdapterCheck> }>
+
 /**
- * Per built bundle, its check, so each bundle is checked once. A deterministic result is kept, among
- * them a failed evaluation (a bundle's content never changes, so evaluating it again would fail
- * again). A transient failure, a timeout or an exhausted worker heap, is dropped, so a later
- * request evaluates the bundle again.
+ * Per built bundle, its one evaluation, which serves both the Adapter check and the declared Widget
+ * Events, so each bundle is evaluated once. A deterministic result is kept, among them a failed
+ * evaluation (a bundle's content never changes, so evaluating it again would fail again). A
+ * transient failure, a timeout or an exhausted worker heap, is dropped, so a later request
+ * evaluates the bundle again.
  */
-const checks = new WeakMap<PreviewBundle, Promise<PreviewAdapterCheck>>()
+const evaluations = new WeakMap<PreviewBundle, Evaluation>()
 
 /**
  * Evaluates the bundle module given as a `data:` URL and posts what its
- * `describeAdapterDiagnostics()` reports. It runs in a worker thread, so the bundle evaluates with
- * globals of its own, as in a Preview document, not with those of the server, which has already
- * evaluated the Adapter modules once to resolve them.
+ * `describeAdapterDiagnostics()` and `describeDeclaredWidgetEvents()` report. It runs in a worker
+ * thread, so the bundle evaluates with globals of its own, as in a Preview document, not with those
+ * of the server, which has already evaluated the Adapter modules once to resolve them; the module
+ * goes with the worker. This is the only place the server evaluates a Preview bundle (#249). An
+ * Event description that throws leaves only the Events unknown, not the Adapter check.
  */
 const WORKER_SOURCE = `
 const { parentPort, workerData } = require('node:worker_threads')
 import(workerData.url).then(
-  (module) => parentPort.postMessage({ ok: true, reported: typeof module.describeAdapterDiagnostics === 'function' ? module.describeAdapterDiagnostics() : undefined }),
+  (module) => {
+    const reported = typeof module.describeAdapterDiagnostics === 'function' ? module.describeAdapterDiagnostics() : undefined
+    let events
+    try { events = typeof module.describeDeclaredWidgetEvents === 'function' ? module.describeDeclaredWidgetEvents() : undefined }
+    catch { events = undefined }
+    // Events that cannot be cloned to the server are as unknown as ones that throw.
+    try { events = events === undefined ? undefined : structuredClone(events) }
+    catch { events = undefined }
+    parentPort.postMessage({ ok: true, reported, events })
+  },
   (error) => parentPort.postMessage({ ok: false, message: error instanceof Error ? error.message : String(error) }),
 )
 `
@@ -81,21 +107,52 @@ export function checkPreviewBundleAdapters(
 	workspaceRoot: string,
 	options: Readonly<{ timeoutMs?: number }> = {},
 ): Promise<PreviewAdapterCheck> {
-	let check = checks.get(bundle)
-	if (!check) {
-		const started: Promise<PreviewAdapterCheck> = runCheck(bundle, workspaceRoot, options.timeoutMs ?? PREVIEW_ADAPTER_CHECK_TIMEOUT_MS, () => {
-			if (checks.get(bundle) === started) checks.delete(bundle)
-		})
-		check = started
-		checks.set(bundle, check)
-	}
-	return check
+	return evaluationOf(bundle, workspaceRoot, options).check
 }
 
-async function runCheck(bundle: PreviewBundle, workspaceRoot: string, timeoutMs: number, onTransient: () => void): Promise<PreviewAdapterCheck> {
-	const roots = async () => [resolve(workspaceRoot), await realpath(workspaceRoot).catch(() => resolve(workspaceRoot))]
+/**
+ * The one evaluation of the bundle in the server's worker, which `checkPreviewBundleAdapters` shares:
+ * the Adapter check and, when it passed, each adapter Widget type's declared Events
+ * (`inspectPlugin(plugin).events`, declaration metadata only), for the Flow editor's Event read. A
+ * bundle whose check did not pass, `invalid` or `unchecked`, has its Events `unavailable` (owner
+ * decision during review of #248).
+ */
+export function evaluatePreviewBundle(
+	bundle: PreviewBundle,
+	workspaceRoot: string,
+	options: Readonly<{ timeoutMs?: number }> = {},
+): Promise<PreviewBundleEvaluation> {
+	return evaluationOf(bundle, workspaceRoot, options).evaluation
+}
+
+function evaluationOf(bundle: PreviewBundle, workspaceRoot: string, options: Readonly<{ timeoutMs?: number }>): Evaluation {
+	const kept = evaluations.get(bundle)
+	if (kept) return kept
+	const evaluation = runEvaluation(bundle, workspaceRoot, options.timeoutMs ?? PREVIEW_ADAPTER_CHECK_TIMEOUT_MS, () => {
+		if (evaluations.get(bundle) === entry) evaluations.delete(bundle)
+	})
+	const entry: Evaluation = { evaluation, check: evaluation.then(result => result.check) }
+	evaluations.set(bundle, entry)
+	return entry
+}
+
+const UNAVAILABLE: DeclaredWidgetEventsResult = Object.freeze({ state: 'unavailable' })
+
+async function runEvaluation(bundle: PreviewBundle, workspaceRoot: string, timeoutMs: number, onTransient: () => void): Promise<PreviewBundleEvaluation> {
 	const report = await evaluateInWorker(bundle.bundleJs, timeoutMs)
 	if (!report.ok && report.transient) onTransient()
+	const check = await checkOf(report, workspaceRoot)
+	const events = report.ok ? report.events : undefined
+	return Object.freeze({
+		check,
+		declaredWidgetEvents: check.state === 'valid' && isDeclaredWidgetEvents(events)
+			? Object.freeze({ state: 'valid' as const, widgets: events })
+			: UNAVAILABLE,
+	})
+}
+
+async function checkOf(report: WorkerReport, workspaceRoot: string): Promise<PreviewAdapterCheck> {
+	const roots = async () => [resolve(workspaceRoot), await realpath(workspaceRoot).catch(() => resolve(workspaceRoot))]
 	if (!report.ok) return unchecked(maskHostPaths(withoutBundleUrl(report.message), await roots()))
 	const reported = report.reported
 	if (!Array.isArray(reported) || !reported.every(isDiagnostic))
@@ -162,4 +219,15 @@ function isDiagnostic(value: unknown): value is Diagnostic {
 		&& typeof (value as Diagnostic).code === 'string'
 		&& typeof (value as Diagnostic).path === 'string'
 		&& typeof (value as Diagnostic).message === 'string'
+}
+
+function isDeclaredWidgetEvents(value: unknown): value is DeclaredWidgetEvents {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+	return Object.values(value).every(list => Array.isArray(list) && list.every(isDeclaredEvent))
+}
+
+function isDeclaredEvent(value: unknown): value is DeclaredWidgetEvent {
+	return !!value && typeof value === 'object'
+		&& typeof (value as DeclaredWidgetEvent).name === 'string'
+		&& typeof (value as DeclaredWidgetEvent).description === 'string'
 }
