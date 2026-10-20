@@ -10,6 +10,9 @@ export type GeometrySignalSubscription = Readonly<{ dispose(): void; refreshObse
  * (`opacity`, `background-color`, `color` through `currentcolor` borders, ...) between two frames,
  * so a region measured at the animation's start could include paint the occluder covers (#261).
  */
+/** Period of the idle animation check that notices script animations, which fire no event (#271). */
+const IDLE_ANIMATION_CHECK_MS = 250
+
 const GEOMETRY_INERT_PROPERTIES = new Set([
 	'outline-color', 'text-decoration-color', 'caret-color', 'accent-color', 'fill', 'stroke',
 ])
@@ -27,7 +30,9 @@ const GEOMETRY_INERT_PROPERTIES = new Set([
  * a tracked Widget, or one animating anywhere a property outside `GEOMETRY_INERT_PROPERTIES`, an
  * occluder's paint included), and stops as soon as none is. Whether one runs is decided from
  * `document.getAnimations()`, never by polling styles: after animation boundary events, DOM
- * mutations and stream changes, and in every frame while the producer measures every frame.
+ * mutations and stream changes, in every frame while the producer measures every frame, and every
+ * `IDLE_ANIMATION_CHECK_MS` while a stream is open and the producer is idle (script animations fire
+ * no event).
  */
 export function attachGeometrySignals(
 	view: Window,
@@ -75,18 +80,39 @@ export function attachGeometrySignals(
 	}
 
 	let animationCheck: number | undefined
+	let idleCheck: ReturnType<typeof setTimeout> | undefined
 	let disposed = false
 	function scheduleAnimationCheck(): void {
 		if (disposed || animationCheck !== undefined) return
+		if (idleCheck !== undefined) {
+			clearTimeout(idleCheck)
+			idleCheck = undefined
+		}
 		// Decide after the frame's style update, when started/ended animations are reflected.
 		animationCheck = view.requestAnimationFrame(() => {
 			animationCheck = undefined
-			const active = animationsMayChangeGeometry()
-			producer.setContinuous(active)
-			// While the producer measures every frame, check again every frame: an animation can stop
-			// without an event that reaches the document (its element removed, a script cancel).
-			if (active && producer.trackedWidgetIds().length > 0) scheduleAnimationCheck()
+			decideContinuous()
 		})
+	}
+
+	function decideContinuous(): void {
+		if (disposed) return
+		const active = animationsMayChangeGeometry()
+		producer.setContinuous(active)
+		if (producer.trackedWidgetIds().length === 0) return
+		// While the producer measures every frame, check again every frame: an animation can stop
+		// without an event that reaches the document (its element removed, a script cancel).
+		if (active) scheduleAnimationCheck()
+		// A script animation (`element.animate()`) fires no animation event and may start without a
+		// DOM mutation, so while a stream is open and the producer is idle, look again at a low rate
+		// (#271): one `getAnimations()` pass per `IDLE_ANIMATION_CHECK_MS` straight from the timer, so
+		// an idle page schedules no animation frame.
+		else if (idleCheck === undefined) {
+			idleCheck = setTimeout(() => {
+				idleCheck = undefined
+				decideContinuous()
+			}, IDLE_ANIMATION_CHECK_MS)
+		}
 	}
 
 	function onAnimationBoundary(): void {
@@ -134,6 +160,8 @@ export function attachGeometrySignals(
 			disposed = true
 			if (animationCheck !== undefined) view.cancelAnimationFrame(animationCheck)
 			animationCheck = undefined
+			if (idleCheck !== undefined) clearTimeout(idleCheck)
+			idleCheck = undefined
 			resizeObserver.disconnect()
 			mutationObserver.disconnect()
 			for (const [type, listener, options] of windowEvents) view.removeEventListener(type, listener, options)
@@ -144,7 +172,17 @@ export function attachGeometrySignals(
 	})
 }
 
+const animatedPropertyCache = new WeakMap<Animation, string[]>()
+
 function animatedProperties(animation: Animation, effect: KeyframeEffect): string[] {
+	const cached = animatedPropertyCache.get(animation)
+	if (cached) return cached
+	const properties = readAnimatedProperties(effect, animation)
+	animatedPropertyCache.set(animation, properties)
+	return properties
+}
+
+function readAnimatedProperties(effect: KeyframeEffect, animation: Animation): string[] {
 	const transition = (animation as Animation & { transitionProperty?: string }).transitionProperty
 	if (transition) return [transition]
 	try {
