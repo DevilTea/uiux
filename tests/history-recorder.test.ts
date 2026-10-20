@@ -7,19 +7,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { MemberPrincipal } from '../src/application/access/principal'
 import type { ResourceRevision } from '../src/application/dto/revisions'
+import { createHistoryDiffService } from '../src/application/services/history-diff'
 import { createHistoryRecorder, type HistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
+import { createHistoryRestoreService } from '../src/application/services/history-restore'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
+import { runArtifactsCommand } from '../src/cli/artifacts'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { AUTOSAVE_IDLE_MS, AUTOSAVE_MAX_EVENTS, AUTOSAVE_MAX_SPAN_MS, HOST_PRUNE_INTERVAL_MS, HOST_RETENTION_MAX_AGE_MS, HOST_RETENTION_MIN_KEPT } from '../src/domain/history/constants'
 import type { HostVersionRecord, VersionRecord } from '../src/domain/history/schema'
 import { FileNativePersistence, localeRelativePath, viewRelativePath, type PersistenceFaultHook } from '../src/persistence'
 import {
+	blobDigest,
 	CheckpointStore,
 	HostHistoryStore,
 	currentDesignWriteContext,
 	readMergedTimeline,
+	referencedDigests,
 	runWithDesignWriteContext,
 	versionResourcesFromSnapshot,
+	writeSnapshotCheckpointUnlocked,
 	type DesignWriteContext,
 } from '../src/persistence/history'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
@@ -959,5 +965,117 @@ describe('transports', () => {
 		await runtime.close()
 		const stores = (await runtime.history.open())!
 		expect((await stores.host.listVersions()).records.map(version => version.type)).toEqual(['autosave'])
+	})
+})
+
+describe('host history owns the blobs its versions name (Clause 01a11a5e-1e65, issue #253)', () => {
+	/**
+	 * A Checkpoint of a View that this host never recorded, as one pulled through Git from another
+	 * clone: its blobs are in the artifact store only.
+	 */
+	async function pulledCheckpoint(ctx: Fixture) {
+		const created = await ctx.app.createView({ id: OTHER_VIEW_ID, name: 'Receipt', spec: spec('Show the receipt') })
+		expect(created.status).toBe('created')
+		const record = await ctx.persistence.withLock(() => writeSnapshotCheckpointUnlocked({
+			persistence: ctx.persistence,
+			checkpoints: ctx.checkpoints,
+			at: new Date(START + 1_000).toISOString(),
+			actor: actorOf(HUMAN),
+			name: 'From the other clone',
+			source: 'workbench',
+		}))
+		const pulledView = Object.values(record.resources.find(resource => resource.kind === 'view' && resource.key === OTHER_VIEW_ID)!.files)
+		for (const digest of pulledView) expect(await ctx.host.hasBlob(digest)).toBe(false)
+		return { record, pulledView }
+	}
+
+	function restartedRecorder(ctx: Fixture): Fixture {
+		return { ...ctx, recorder: createHistoryRecorder({ persistence: ctx.persistence, stores: async () => ({ host: ctx.host, checkpoints: ctx.checkpoints }), clock: ctx.clock, log: line => ctx.logs.push(line) }) }
+	}
+
+	it('keeps an autosave on a Checkpoint base comparable and restorable after that Checkpoint is deleted and artifact cleanup runs on another host', async () => {
+		const first = await fixture()
+		await first.recorder.start()
+		await first.recorder.stop()
+		const { record: pulled, pulledView } = await pulledCheckpoint(first)
+		const ctx = restartedRecorder(first)
+		expect((await ctx.recorder.start()).boundary).toEqual({ reason: 'start' })
+		const hostedBefore = new Set(await ctx.host.listBlobDigests())
+
+		await editView(ctx, AGENT, 'Pay, after the pull')
+		await ctx.recorder.closeOpenAutosave('checkpoint')
+		const autosave = (await ctx.hostVersions()).at(-1)!
+		expect(autosave.type).toBe('autosave')
+		const named = referencedDigests(autosave.resources)
+		for (const digest of named) expect(await ctx.host.hasBlob(digest), digest).toBe(true)
+		// Only what host history lacked was added: the agent's write and the pulled View's blobs.
+		const added = (await ctx.host.listBlobDigests()).filter(digest => !hostedBefore.has(digest))
+		expect(added).toEqual(expect.arrayContaining(pulledView))
+		for (const digest of added) expect(named.has(digest), digest).toBe(true)
+
+		// A later autosave on a host version base copies nothing but its own write's blobs.
+		const put = vi.spyOn(ctx.host, 'putBlob')
+		await editView(ctx, AGENT, 'Pay, once more')
+		await ctx.recorder.closeOpenAutosave('checkpoint')
+		const next = (await ctx.hostVersions()).at(-1)!
+		const changed = new Set(Object.values(next.resources.find(resource => resource.kind === 'view' && resource.key === VIEW_ID)!.files))
+		expect(put.mock.calls.map(([bytes]) => blobDigest(bytes)).every(digest => changed.has(digest))).toBe(true)
+		put.mockRestore()
+
+		// Another host, whose history is not a root here, deletes the Checkpoint and cleans up: the
+		// pulled View's blobs leave the artifact store.
+		await rm(join(checkpointsPath(ctx.root), `${pulled.id}.json`))
+		const stdout: string[] = []
+		const stderr: string[] = []
+		const otherHome = join(await tempDir('uiux-recorder-other-home-'), 'home')
+		expect(await runArtifactsCommand({ argv: ['gc', '--workspace', ctx.root], cwd: ctx.root, home: otherHome, stdout: line => stdout.push(line), stderr: line => stderr.push(line) }), stderr.join('\n')).toBe(0)
+		for (const digest of pulledView) expect(stdout).toContain(digest)
+
+		// This host still compares and restores the autosave.
+		await scoped(ctx.app, HUMAN, { history: ctx.recorder }).updateViewSpec({ key: OTHER_VIEW_ID, expectedRevision: (await ctx.persistence.views.readRevision(OTHER_VIEW_ID))!, spec: spec('Show a changed receipt') })
+		const history = { open: async () => ({ host: ctx.host, checkpoints: ctx.checkpoints }) }
+		const diff = await createHistoryDiffService(ctx.persistence, history).diffVersions({ from: autosave.id, to: 'current', resources: [{ kind: 'view', key: OTHER_VIEW_ID }], detail: 'semantic' })
+		expect(diff).toMatchObject({ status: 'compared', summary: expect.arrayContaining([expect.objectContaining({ kind: 'view', key: OTHER_VIEW_ID, status: 'modified' })]) })
+		const restored = await createHistoryRestoreService(ctx.persistence, history).restoreResourceVersion({ versionId: autosave.id, resource: { kind: 'view', key: OTHER_VIEW_ID }, expectedRevision: (await ctx.persistence.views.readRevision(OTHER_VIEW_ID))! })
+		expect(restored).toMatchObject({ status: 'updated', restoredFrom: autosave.id, revision: revisionOf(autosave, 'view', OTHER_VIEW_ID) })
+		await ctx.recorder.stop()
+	})
+
+	it('copies every blob an external version on a Checkpoint base names, unchanged resources included', async () => {
+		const first = await fixture()
+		await first.recorder.start()
+		await first.recorder.stop()
+		const { pulledView } = await pulledCheckpoint(first)
+		await externalViewEdit(first, 'Edited after the pull')
+		const ctx = restartedRecorder(first)
+		const report = await ctx.recorder.start()
+		expect(report.boundary?.external).toBeDefined()
+		const external = (await ctx.hostVersions()).find(version => version.id === report.boundary!.external)!
+		for (const digest of referencedDigests(external.resources)) expect(await ctx.host.hasBlob(digest), digest).toBe(true)
+		for (const digest of pulledView) expect(await ctx.host.hasBlob(digest)).toBe(true)
+		await ctx.recorder.stop()
+	})
+
+	it('copies, at start, the blobs that host versions recorded earlier name and only the artifact store keeps', async () => {
+		const first = await fixture()
+		await first.recorder.start()
+		await first.recorder.stop()
+		const { record: pulled, pulledView } = await pulledCheckpoint(first)
+		const version = (at: string, resources: HostVersionRecord['resources']): HostVersionRecord => ({ historySchemaVersion: 1, id: randomUUID(), type: 'external', actor: { type: 'external' }, at, workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, resources, startedAt: at, netChange: true, events: [] })
+		// One version names a blob that no store has.
+		const missing = `sha256:${'e'.repeat(64)}`
+		const broken = pulled.resources.map(resource => resource.kind === 'view' && resource.key === OTHER_VIEW_ID ? { ...resource, files: Object.fromEntries(Object.keys(resource.files).map(path => [path, missing])) } : resource)
+		await first.host.writeVersion(version(new Date(START + 1_500).toISOString(), broken))
+		// The latest, which an earlier build recorded on that Checkpoint without copying its blobs.
+		await first.host.writeVersion(version(new Date(START + 2_000).toISOString(), pulled.resources))
+		const ctx = restartedRecorder(first)
+		const report = await ctx.recorder.start()
+		expect(report).toMatchObject({ enabled: true, boundary: { reason: 'start' } })
+		expect(report.boundary).not.toHaveProperty('external')
+		for (const digest of pulledView) expect(await ctx.host.hasBlob(digest)).toBe(true)
+		expect(ctx.logs).toContainEqual(expect.stringContaining(`history copied ${pulledView.length} blob(s) that earlier host versions name from the artifact store into host history`))
+		// A blob no store has is only reported; recording starts anyway.
+		expect(ctx.logs).toContainEqual(expect.stringContaining(`could not copy 1 blob(s) that earlier host versions name into host history (${missing}`))
+		await ctx.recorder.stop()
 	})
 })
