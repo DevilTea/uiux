@@ -24,6 +24,7 @@ import {
 	validateAdapterConfig,
 	validateAdapterConfigSchema,
 	validateAdapterManifest,
+	validateAdapterProviders,
 	validateResolvedAdapterSet,
 	type AdapterManifest,
 	type ResolvedAdapterRegistries,
@@ -364,6 +365,13 @@ export async function resolveWorkspaceAdapterSet(input: ResolveWorkspaceAdapterS
 				path: `${basePath}/manifest/apiVersion`,
 				message: `Adapter ${manifest.id} declares a malformed or unsupported UIUX adapter API version.`,
 			})
+			continue
+		}
+
+		// Each provider entry's shape (Rule 01a11a5a-4c2c-7330-8fac-11a6c970713a); no provider runs here.
+		const providersValidation = validateAdapterProviders(manifest)
+		if (!providersValidation.ok) {
+			diagnostics.push(...prefixDiagnostics(providersValidation.diagnostics, `${basePath}/manifest`))
 			continue
 		}
 

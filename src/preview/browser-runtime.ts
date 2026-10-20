@@ -3,11 +3,12 @@ import type { AnyWidgetPlugin, WidgetSystemRuntime } from '@deviltea/widget-core
 import { inspectPlugin, WidgetInspectionError } from '@deviltea/widget-core/inspection'
 import { createWidgetVueRenderer } from '@deviltea/widget-vue'
 
-import type { Diagnostic } from '../domain/validation'
+import type { AdapterProviderContext } from '../adapter-entry'
+import type { Diagnostic, JsonValue } from '../domain/validation'
 import type { ResolvedRenderContext } from '../domain/render-context/schema'
 import type { ViewResource } from '../domain/views/schema'
 import type { I18nResource } from '../domain/i18n/schema'
-import { validateAdapterManifest, type AdapterManifest } from '../domain/adapters/schema'
+import { validateAdapterManifest, validateAdapterProviders, type AdapterManifest } from '../domain/adapters/schema'
 import { isAllowedThemeAttributeName } from '../domain/product-kit/theme-attributes'
 import { createTranslationRuntime, missingDefaultLocaleDiagnostic, type TranslationRuntime } from '../i18n'
 import {
@@ -36,6 +37,12 @@ export type StandaloneAdapterDescriptor = Readonly<{
 	apiVersion: string
 	widgetTypes: readonly string[]
 	rendererKeys: readonly string[]
+	/**
+	 * The Adapter entry's configuration that passed server-side validation, embedded in the bundle;
+	 * absent when the entry has none (Rules 01a11a5a-515e-7c1d-9990-82e883c33243 and
+	 * 01a11a5a-535f-73f2-96d0-6ccb02910f0b).
+	 */
+	config?: JsonValue
 	namespace: Readonly<Record<string, unknown>>
 }>
 
@@ -111,6 +118,39 @@ export function stylesheetLoadFailedDiagnostic(href: string): Diagnostic {
 		path: '/product-kit',
 		message: `The Product Kit stylesheet ${href} failed to load, so the Preview cannot be constructed.`,
 	}
+}
+
+/**
+ * The diagnostic of a provider entry that failed a construction, naming the Adapter, the member and
+ * the entry index (Rule 01a11a5a-5059-716e-b0a5-d178395be034): its install threw, or returned a
+ * promise (Rule 01a11a5a-4ecd-7edb-a9e2-5918f01880e7). `adapterIndex` is the Product Kit index.
+ */
+export function providerInstallFailedDiagnostic(input: Readonly<{ adapterIndex: number; adapterId: string; entryIndex: number; cause?: unknown; returnedPromise?: boolean }>): Diagnostic {
+	const subject = `Provider ${input.entryIndex} of Adapter ${input.adapterId} (providers/${input.entryIndex})`
+	return input.returnedPromise
+		? {
+				code: 'adapter.provider_install_async',
+				path: `/adapters/${input.adapterIndex}/manifest/providers/${input.entryIndex}`,
+				message: `${subject} returned a promise from its install; a provider installs synchronously, so the Preview cannot be constructed.`,
+			}
+		: {
+				code: 'adapter.provider_install_failed',
+				path: `/adapters/${input.adapterIndex}/manifest/providers/${input.entryIndex}`,
+				message: `${subject} failed to install, so the Preview cannot be constructed: ${input.cause instanceof Error ? input.cause.message : String(input.cause)}`,
+			}
+}
+
+/** A deep-frozen copy of a JSON value: what a provider receives as its configuration. */
+function deepFrozenCopy(value: JsonValue): JsonValue {
+	return deepFreeze(structuredClone(value))
+}
+
+function deepFreeze<T>(value: T): T {
+	if (typeof value === 'object' && value !== null) {
+		for (const member of Object.values(value)) deepFreeze(member)
+		Object.freeze(value)
+	}
+	return value
 }
 
 /** Marks the Product Kit stylesheet link a construction inserts. */
@@ -208,6 +248,9 @@ export function createStandalonePreviewMount(input: Readonly<{
 		/** The `widgetPlugins` member path of each entry of `decodedPlugins`. */
 		decodedPluginPaths: readonly string[]
 		decodedRenderers: ReadonlyMap<string, Component>
+		/** The `providers` entries, in entry order, and the validated configuration they receive. */
+		providers: readonly unknown[]
+		config: JsonValue | undefined
 	}> = []
 
 	for (const desc of input.adapterDescriptors) {
@@ -251,6 +294,9 @@ export function createStandalonePreviewMount(input: Readonly<{
 				message: `Imported adapter apiVersion '${manifest.apiVersion}' does not match expected '${desc.apiVersion}'.`,
 			})
 		}
+
+		// The provider entries' shape, as server-side resolution checks it (Rule 01a11a5a-4c2c-7330-8fac-11a6c970713a).
+		for (const diag of validateAdapterProviders(manifest, `${basePath}/manifest`).diagnostics) buildDiagnostics.push(diag)
 
 		const decodedPlugins: AnyWidgetPlugin[] = []
 		const decodedPluginPaths: string[] = []
@@ -322,6 +368,8 @@ export function createStandalonePreviewMount(input: Readonly<{
 			decodedPlugins,
 			decodedPluginPaths,
 			decodedRenderers,
+			providers: manifest.providers,
+			config: desc.config,
 		})
 	}
 
@@ -512,7 +560,8 @@ export function createStandalonePreviewMount(input: Readonly<{
 		let disposed = false
 		/**
 		 * `linking` until the Product Kit stylesheet has loaded (the first render waits for it),
-		 * `mounted` from the first render, `failed` once the stylesheet failed to load.
+		 * `mounted` from the first render, `failed` once the stylesheet failed to load or a provider
+		 * failed to install.
 		 */
 		let phase: 'linking' | 'mounted' | 'failed' = 'mounted'
 		/** The latest status an update reported while linking, reported at the first render instead of `ready`. */
@@ -547,7 +596,94 @@ export function createStandalonePreviewMount(input: Readonly<{
 		let appliedThemeId = currentContext.themeId
 		rootAttributes.apply(appliedThemeId)
 
+		let stylesheetLink: HTMLLinkElement | undefined
+		/** The cleanups the providers registered through `app.onUnmount`, for a construction that fails before it mounts. */
+		const providerCleanups: Array<() => unknown> = []
+
+		/**
+		 * Installs every provider on the Preview's Vue app, in Adapter-list order and then entry order,
+		 * once per construction and before its first render (Rules 01a11a5a-4d38-7f2c-98be-755d8c404d98
+		 * and 01a115cd-ae6b-7a85-be8e-0a42517daf17). An Adapter's providers receive, as the `app.use`
+		 * options, one frozen install context `{ adapterId, config }` whose `config` is a deep-frozen copy
+		 * of the configuration that passed validation, or `undefined` (Clause
+		 * 01a11a5a-4309-7ad5-8279-e1f60045017f, Rule 01a11a5a-515e-7c1d-9990-82e883c33243); this is the
+		 * only way Adapter code reaches its configuration (Rule 01a11a5a-51dc-743c-993c-d4b3079beec7).
+		 *
+		 * Each entry is installed as Vue's `app.use(entry, context)` installs it (an `install` function is
+		 * called with the entry as `this`, otherwise the entry itself, and an entry already installed on
+		 * this app is skipped), but called here directly so that what the install returns is seen: a
+		 * promise fails the construction (Rule 01a11a5a-4ecd-7edb-a9e2-5918f01880e7), as a throw does.
+		 * Returns the diagnostic of the entry that failed, if any.
+		 */
+		function installProviders(): Diagnostic | undefined {
+			const registerUnmountCleanup = app.onUnmount
+			app.onUnmount = (cleanup) => {
+				providerCleanups.push(cleanup)
+				registerUnmountCleanup(cleanup)
+			}
+			const installed = new WeakSet<object>()
+			try {
+				for (const entry of validatedEntries) {
+					const context: AdapterProviderContext = Object.freeze({
+						adapterId: entry.manifest.id,
+						config: entry.config === undefined ? undefined : deepFrozenCopy(entry.config),
+					})
+					for (const [entryIndex, provider] of entry.providers.entries()) {
+						const plugin = provider as ((...args: unknown[]) => unknown) & { install?: (...args: unknown[]) => unknown }
+						if (installed.has(plugin)) continue
+						installed.add(plugin)
+						let result: unknown
+						let returnedPromise: boolean
+						try {
+							result = typeof plugin.install === 'function' ? plugin.install(app, context) : plugin(app, context)
+							returnedPromise = isThenable(result)
+						}
+						catch (cause) {
+							return providerInstallFailedDiagnostic({ adapterIndex: entry.index, adapterId: entry.manifest.id, entryIndex, cause })
+						}
+						if (returnedPromise) {
+							// The construction has failed; a later rejection of the promise is not reported again.
+							Promise.resolve(result).catch(() => {})
+							return providerInstallFailedDiagnostic({ adapterIndex: entry.index, adapterId: entry.manifest.id, entryIndex, returnedPromise: true })
+						}
+					}
+				}
+				return undefined
+			}
+			finally {
+				app.onUnmount = registerUnmountCleanup
+			}
+		}
+
+		/**
+		 * Fails the whole construction and keeps nothing of it (Rules 01a115cd-ae3e-7ef7-8a53-5ccd86e143bf
+		 * and 01a11a5a-4e44-77e0-bdf6-49ab11f5f3a5): the stylesheet link, the root attributes, the Runtime
+		 * and, since the app never mounted and so never unmounts, the cleanups its providers registered.
+		 */
+		function failConstruction(diagnostic: Diagnostic): void {
+			phase = 'failed'
+			stylesheetLink?.remove()
+			rootAttributes.restore()
+			eventObserver.dispose()
+			activeController.dispose()
+			for (const cleanup of providerCleanups.splice(0)) {
+				try {
+					cleanup()
+				}
+				catch {
+					// One provider's failing cleanup does not keep the others from running.
+				}
+			}
+			options.onStatusChange?.({ status: 'invalid', diagnostics: [diagnostic] })
+		}
+
 		function firstRender(): void {
+			const failure = installProviders()
+			if (failure) {
+				failConstruction(failure)
+				return
+			}
+			providerCleanups.length = 0
 			phase = 'mounted'
 			container.innerHTML = ''
 			app.mount(container)
@@ -560,7 +696,8 @@ export function createStandalonePreviewMount(input: Readonly<{
 
 		// The Product Kit stylesheet is linked first, after UIUX's own stylesheets in the head, and the
 		// first render waits for it; a load error fails the whole construction and keeps nothing of it.
-		let stylesheetLink: HTMLLinkElement | undefined
+		// The providers install once it has loaded, right before the first render, so a construction
+		// disposed while linking has installed none and has nothing of theirs to undo.
 		if (options.stylesheetHref) {
 			const href = options.stylesheetHref
 			phase = 'linking'
@@ -573,12 +710,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 			}, { once: true })
 			link.addEventListener('error', () => {
 				if (disposed || phase !== 'linking') return
-				phase = 'failed'
-				link.remove()
-				rootAttributes.restore()
-				eventObserver.dispose()
-				activeController.dispose()
-				options.onStatusChange?.({ status: 'invalid', diagnostics: [stylesheetLoadFailedDiagnostic(href)] })
+				failConstruction(stylesheetLoadFailedDiagnostic(href))
 			}, { once: true })
 			stylesheetLink = link
 			ownerDocument.head.append(link)
@@ -755,6 +887,10 @@ function createNoopBridge(): PreviewRuntimeBridge {
 		armWidgetEvents() {},
 		dispose() {},
 	}
+}
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+	return (typeof value === 'object' || typeof value === 'function') && value !== null && typeof (value as { then?: unknown }).then === 'function'
 }
 
 function sameSet(actual: readonly string[], expected: readonly string[]): boolean {

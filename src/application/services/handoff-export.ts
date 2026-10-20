@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import packageJson from '../../../package.json' with { type: 'json' }
 import { canonicalJsonBytes } from '../../domain/canonical-json'
 import { sha256Identity } from '../../domain/artifacts/schema'
-import type { AdapterProvenance, AdapterWidgetCatalogEntry } from '../../domain/adapters/schema'
+import { adapterConfigDigest, type AdapterProvenance, type AdapterWidgetCatalogEntry } from '../../domain/adapters/schema'
 import { validateAssetBinding } from '../../domain/assets/schema'
 import {
 	validateFormalEvidenceRecord,
@@ -784,6 +784,8 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 					moduleBase: adapterResolutionBase(persistence.root, persistence.layout),
 					entry: entry.resolvedModule.resolvedPath,
 				})
+				// The same clause: the digest of the entry's validated configuration, absent when it has none.
+				const configDigest = await adapterConfigDigest(entry.selection.config)
 
 				adapterProvenances.push({
 					moduleSpecifier: entry.selection.moduleSpecifier,
@@ -792,6 +794,7 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 					moduleIdentity: entry.resolvedModule.moduleIdentity,
 					...(entry.resolvedModule.packageVersion ? { packageVersion: entry.resolvedModule.packageVersion } : {}),
 					...(contentDigest ? { contentDigest } : {}),
+					...(configDigest ? { configDigest } : {}),
 				})
 			}
 		}
