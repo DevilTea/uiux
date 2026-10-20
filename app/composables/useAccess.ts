@@ -4,6 +4,7 @@ import type { PermissionKey } from '../../src/application/access/keys'
 import type { MemberLabel } from '../../src/application/access/labels'
 import type { MemberKind } from '../../src/application/access/principal'
 import type { LockableKind, PublicLease } from '../../src/application/access/leases'
+import { useLiveEvents } from './useLiveEvents'
 
 /**
  * The signed-in member of this Workbench session, as `GET /api/session` returns it (Clause
@@ -28,7 +29,11 @@ let loading: Promise<AccessSession | undefined> | undefined
 const locks = shallowRef<readonly PublicLease[]>([])
 let lockTimer: ReturnType<typeof setInterval> | undefined
 let lockSubscribers = 0
-/** No `/api/events` stream exists yet, so the Workbench polls the lease list. */
+/**
+ * The shell re-reads the lease list on every `lock.changed` event (`layouts/default.vue`); only
+ * while the change-event stream is not open does the Workbench poll it, every `LOCK_POLL_MS`
+ * (Rule 01a11485-f3d9-7663-b344-a60c2a949e5e).
+ */
 export const LOCK_POLL_MS = 5000
 
 /**
@@ -102,6 +107,7 @@ function expire(): void {
 }
 
 const heldKeys = computed(() => new Set(session.value?.member.keys ?? []))
+const live = useLiveEvents()
 
 /**
  * Whether the signed-in member holds `key` on this session (Discussion #140, decision 12:
@@ -114,8 +120,8 @@ function can(key: PermissionKey): boolean {
 
 /**
  * Re-reads the session, so a change to the member's keys applies to what the Workbench offers
- * (Rule 01a116f0-963f-7222-95fa-ae80ce735859). Without the `/api/events` stream (issue #69), the
- * Workbench calls it when the server refuses a request for a missing key (`plugins/access.client.ts`).
+ * (Rule 01a116f0-963f-7222-95fa-ae80ce735859): on every `access.changed` event (`layouts/default.vue`),
+ * and when the server refuses a request for a missing key (`plugins/access.client.ts`).
  */
 async function reloadSession(): Promise<AccessSession | undefined> {
 	if (!loaded.value || !session.value) return session.value
@@ -150,7 +156,9 @@ export function useAccess() {
 		lockSubscribers += 1
 		if (lockSubscribers === 1) {
 			void refreshLocks()
-			lockTimer = setInterval(() => { void refreshLocks() }, LOCK_POLL_MS)
+			lockTimer = setInterval(() => {
+				if (live.state.value !== 'open') void refreshLocks()
+			}, LOCK_POLL_MS)
 		}
 		let stopped = false
 		return () => {

@@ -6,6 +6,7 @@ import { BUILT_IN_ACCESS_PRESETS, isHumanOnlyKey } from '../../../src/applicatio
 import type { MemberLabel } from '../../../src/application/access/labels'
 import type { MemberKind } from '../../../src/application/access/principal'
 import { ACCESS_PRESETS_FILENAME, labelPresetsOf, presetNameKey, type AccessPreset } from '../../../src/domain/access-presets/schema'
+import { touchesKinds, useLiveEvents } from '../../composables/useLiveEvents'
 import { useAccess } from '../../composables/useAccess'
 import { useAuthoringAccess } from '../../composables/useAuthoringAccess'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
@@ -111,6 +112,12 @@ async function loadMembers(): Promise<void> {
 
 const loading = computed(() => state.value === 'loading')
 onMounted(() => { void Promise.all([loadPresets(), loadMembers()]) })
+// Live refresh: the presets file changed elsewhere, or the roster did (the label counts).
+const live = useLiveEvents()
+live.onResources((batch) => {
+	if (touchesKinds(batch, ['access-presets']) && !writing.value) void loadPresets()
+})
+live.onAccess(() => { void loadMembers() })
 
 /** The members on this host that a preset labels now (Rule 01a11c09-cd38-72c0-9af6-4598454bdcfc). */
 function labeledCount(preset: AccessPreset): number | undefined {

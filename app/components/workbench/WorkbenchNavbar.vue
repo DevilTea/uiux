@@ -14,7 +14,7 @@ const { t } = useI18n()
 const route = useRoute()
 const workbench = useWorkbench()
 const shell = useWorkbenchShell()
-const { selectedView, views, flows, loading } = workbench
+const { selectedView, views, flows } = workbench
 
 const WORKSPACE_PAGES: Record<string, string> = {
 	'/workspace/settings': 'nav.settings',
@@ -112,16 +112,6 @@ const breadcrumb = computed<BreadcrumbItem[]>(() => {
       />
       <MemberChip />
       <WorkbenchPreferences />
-      <UTooltip :text="t('common.refresh')">
-        <UButton
-          color="neutral"
-          variant="ghost"
-          icon="i-lucide-refresh-cw"
-          :loading="loading"
-          :aria-label="t('common.refresh')"
-          @click="workbench.refreshAll()"
-        />
-      </UTooltip>
     </div>
   </header>
 </template>

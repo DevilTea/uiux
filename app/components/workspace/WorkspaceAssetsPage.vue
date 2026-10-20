@@ -3,6 +3,7 @@ import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
 import { useI18n } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
+import { touchesKinds, useLiveEvents } from '../../composables/useLiveEvents'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
@@ -71,9 +72,12 @@ async function loadUsage(): Promise<void> {
 	usage.value = map
 }
 
-async function load(): Promise<void> {
-	loading.value = true
-	loadError.value = undefined
+/** `quiet`: a live refresh, which keeps the list on screen and the last one when the read fails. */
+async function load(options: Readonly<{ quiet?: boolean }> = {}): Promise<void> {
+	if (!options.quiet) {
+		loading.value = true
+		loadError.value = undefined
+	}
 	try {
 		const [list] = await Promise.all([
 			uiux.listResources<AssetSummary>(['asset'], { limit: 100 }),
@@ -85,7 +89,7 @@ async function load(): Promise<void> {
 			.filter((entry): entry is AssetEntry => !!entry)
 	}
 	catch (cause) {
-		loadError.value = describeFetchError(cause, t('assets.loadListFailed'))
+		if (!options.quiet) loadError.value = describeFetchError(cause, t('assets.loadListFailed'))
 	}
 	finally {
 		loading.value = false
@@ -97,8 +101,13 @@ async function reread(key: string): Promise<AssetEntry | undefined> {
 	return toEntry(undefined, read, usage.value.get(key) ?? [])
 }
 
-onMounted(load)
-watch(() => views.value.map(view => view.key).join(), () => { void loadUsage().then(() => {
+onMounted(() => { void load() })
+// Live refresh: an Asset changed elsewhere is re-read with the list.
+useLiveEvents().onResources((batch) => {
+	if (touchesKinds(batch, ['asset'])) void load({ quiet: true })
+})
+// A View's new revision can add or drop an Asset reference.
+watch(() => views.value.map(view => `${view.key}@${view.revision}`).join(), () => { void loadUsage().then(() => {
 	entries.value = entries.value.map(entry => ({ ...entry, usedBy: usage.value.get(entry.key) ?? [] }))
 }) })
 

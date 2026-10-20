@@ -492,10 +492,12 @@ async function evaluateRuntime() {
 }
 
 /**
- * A blocked Preview (Rule 01a115cd-b30b-706e-b8a2-46e62259156e) has no mounted runtime, and no
- * `/api/events` stream tells it when the default-Locale file appears (another tab or an Agent may
- * create it). While blocked, the current Preview re-reads that file and renders once it exists; a
- * version frame's Locales never change, so it does not.
+ * A blocked Preview (Rule 01a115cd-b30b-706e-b8a2-46e62259156e) has no mounted runtime. The
+ * Preview document opens no change-event stream of its own (the Workbench holds the one stream and
+ * starts a fresh Preview generation when the default Locale changes), so while blocked the current
+ * Preview also re-reads that file itself and renders once it exists: a Preview opened on its own,
+ * or one whose Workbench has no stream, still recovers. A version frame's Locales never change, so
+ * it does not.
  */
 const BLOCKED_RECHECK_MS = 2000
 let blockedRecheckTimer: ReturnType<typeof setInterval> | undefined

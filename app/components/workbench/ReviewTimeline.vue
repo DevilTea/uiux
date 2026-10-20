@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, shallowRef, watch } from 'vue'
 import { useI18n } from '#imports'
 import { anchorViewId, isWorkspaceAnchor, type ReviewActor, type ReviewAnchor, type ReviewResolution, type ReviewThread } from '../../../src/domain/reviews/schema'
 import { buildReviewTimeline } from '../../utils/review-timeline'
@@ -35,6 +35,38 @@ const fmt = useWorkbenchFormat()
 const feedback = useWorkbenchFeedback()
 
 const items = computed(() => buildReviewTimeline(props.thread))
+
+/**
+ * Live refresh (Rule 01a11485-f414-7882-b94f-cd4236c26d89): entries that appear while the thread
+ * is open, written by someone else, are highlighted briefly. The first render of a thread, and the
+ * reader's own entries, are not.
+ */
+const HIGHLIGHT_MS = 2500
+const itemKey = (item: { kind: string; id: string }) => `${item.kind}-${item.id}`
+const fresh = shallowRef<ReadonlySet<string>>(new Set())
+let known: { threadId: string; keys: Set<string> } | undefined
+const timers = new Set<ReturnType<typeof setTimeout>>()
+watch(items, (list) => {
+	const keys = new Set(list.map(itemKey))
+	if (!known || known.threadId !== props.thread.id) {
+		known = { threadId: props.thread.id, keys }
+		fresh.value = new Set()
+		return
+	}
+	const seen = known.keys
+	const added = list.filter(item => !seen.has(itemKey(item)) && item.actor?.id !== props.me).map(itemKey)
+	known.keys = keys
+	if (added.length === 0) return
+	fresh.value = new Set([...fresh.value, ...added])
+	const timer = setTimeout(() => {
+		timers.delete(timer)
+		fresh.value = new Set([...fresh.value].filter(key => !added.includes(key)))
+	}, HIGHLIGHT_MS)
+	timers.add(timer)
+}, { immediate: true })
+onBeforeUnmount(() => {
+	for (const timer of timers) clearTimeout(timer)
+})
 
 function actorName(actor: ReviewActor | undefined): string {
 	return actor?.displayName ?? actor?.id ?? t('comments.unknownAuthor')
@@ -80,8 +112,10 @@ const readiness = computed(() => {
     <li
       v-for="item in items"
       :key="`${item.kind}-${item.id}`"
-      class="grid grid-cols-[28px_minmax(0,1fr)] gap-x-3"
+      class="grid grid-cols-[28px_minmax(0,1fr)] gap-x-3 rounded-md transition-colors duration-700 motion-reduce:transition-none"
+      :class="fresh.has(itemKey(item)) ? 'bg-primary/10' : undefined"
       :data-timeline-kind="item.kind"
+      :data-timeline-new="fresh.has(itemKey(item)) || undefined"
     >
       <template v-if="item.kind === 'message'">
         <ReviewMessage

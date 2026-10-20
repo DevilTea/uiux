@@ -1963,8 +1963,8 @@
       "body": "For example: \"Create a View for the checkout payment step with {tool}.\""
     },
     "review": {
-      "title": "Refresh and review",
-      "body": "New Views appear here and in Views. Open one to comment on its canvas."
+      "title": "Open it and comment",
+      "body": "New Views appear here and in Views as your agent writes them. Open one to comment on its canvas."
     }
   },
   "submit": {
@@ -2271,6 +2271,9 @@
       "execution_failed": "The capture did not finish.",
       "kit_build_not_ready": "Formal capture waits until the kit build is ready. Fix a failed build, then restart it."
     },
+    "events": {
+      "stream_limit": "This browser already has the most live-update connections allowed. This tab checks for changes regularly instead."
+    },
     "evidence": {
       "invalid_coverage": "The Evidence coverage record is not valid.",
       "missing_uiux_version": "The Evidence does not record its UIUX version.",
@@ -2519,6 +2522,7 @@
     "capture": "The capture did not finish.",
     "decision": "There is a problem with this Decision.",
     "discovery": "The search request is not valid.",
+    "events": "Live updates are not available right now.",
     "evidence": "There is a problem with this Evidence.",
     "flow": "There is a problem with this Flow.",
     "handoff": "Something blocks the Handoff.",
