@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type { LeaseManager } from '../access/leases'
 import type { ResourceRevision } from '../dto/revisions'
 import { ACCESS_PRESETS_RESOURCE_KIND } from '../../domain/access-presets/schema'
+import { PRODUCT_KIT_RESOURCE_KIND } from '../../domain/product-kit/schema'
 import type { CommittedResourceChange } from '../../persistence/file-native'
 
 /**
@@ -20,10 +21,11 @@ export type ChangeEvent =
 
 /**
  * The resources whose commits emit (Rule 01a11485-f365-70ce-82d9-43ea3f5ea5bb, with the Access
- * presets of Clause 01a114ec-e839-7b11-957c-41c88b692e12). History adds no kind (Rule
- * 01a11a5e-08c7-73c1-bc66-3af814a454d6).
+ * presets and the Product Kit file of Clause 01a114ec-e839-7b11-957c-41c88b692e12; Discussion #241,
+ * https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19070362). History adds no kind
+ * (Rule 01a11a5e-08c7-73c1-bc66-3af814a454d6).
  */
-export const CHANGE_EVENT_RESOURCE_KINDS = ['view', 'flow', 'locale', 'review', 'asset', 'workspace', ACCESS_PRESETS_RESOURCE_KIND] as const
+export const CHANGE_EVENT_RESOURCE_KINDS = ['view', 'flow', 'locale', 'review', 'asset', 'workspace', ACCESS_PRESETS_RESOURCE_KIND, PRODUCT_KIT_RESOURCE_KIND] as const
 export type ChangeEventResourceKind = typeof CHANGE_EVENT_RESOURCE_KINDS[number]
 
 export function isChangeEventResourceKind(kind: string): kind is ChangeEventResourceKind {
@@ -61,7 +63,7 @@ export function createChangeEventBus(options: Readonly<{ serverInstanceId?: stri
 	}
 }
 
-/** The events for the resources of one committed write; other kinds (the Product Kit file) emit none. */
+/** The events for the resources of one committed write; a file of no listed kind emits none. */
 export function changeEventsForCommit(changes: readonly CommittedResourceChange[]): readonly ChangeEvent[] {
 	const events: ChangeEvent[] = []
 	for (const change of changes) {

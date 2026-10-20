@@ -14,19 +14,20 @@ import { denyUnlessAllowed, requestPrincipal } from './access/http'
  *
  * - On connect: a `retry` hint and `hello { serverInstanceId }`. Events carry no `id`, so nothing
  *   is replayed and `Last-Event-ID` is never read (Rule 01a11485-f39f-7464-9f8f-608335ed9800).
- * - Then every bus event as `event: <name>` with its content-free JSON `data`, and a heartbeat
- *   comment every `heartbeatMs` (about 20 seconds).
- * - The server caps the open streams per credential (each Workbench session or Token) and in all;
- *   a request over a cap is refused with 429, which a browser `EventSource` does not retry, so the
- *   Workbench falls back to polling (Rule 01a11485-f3d9-7663-b344-a60c2a949e5e).
+ * - Then every bus event as `event: <name>` with its content-free JSON `data`, and a `heartbeat`
+ *   event (`{}`) every `heartbeatMs` (about 20 seconds), which the Workbench watches to notice a
+ *   stream that went silent.
+ * - The stream limits are those of Clause 01a1593c-77e1-7c8c-9b2d-e3c460fddda1 (in the Mutation
+ *   Contract): at most four open streams per credential (each Workbench session or Token) and 256 in
+ *   all; a request over a limit is refused with 429 `events.stream_limit` and `Retry-After`, which
+ *   a browser `EventSource` does not retry, so the Workbench falls back to polling (Rule
+ *   01a11485-f3d9-7663-b344-a60c2a949e5e).
  * - Each heartbeat, and each access change, re-checks every stream's credential: an ended
  *   session or Token, a removed member or a lost `workspace.read` closes the stream (Rule
  *   01a11485-f3f6-72df-b43a-91905eb4970c).
- * - A client that stops reading is cut off once its unsent data passes `maxBufferedBytes`; it
- *   reconnects and resynchronizes like after any other drop.
- *
- * The cap values, the 429 code and the buffer bound are implementation choices (there is no HTTP
- * Contract).
+ * - A client that stops reading is disconnected once its unsent data passes `maxBufferedBytes`
+ *   (1 MiB); it reconnects and resynchronizes like after any other drop.
+ * - Server shutdown closes every stream at once (`close`), so a graceful shutdown does not wait on them.
  */
 export const EVENT_STREAM_HEARTBEAT_MS = 20_000
 export const MAX_EVENT_STREAMS_PER_CREDENTIAL = 4
@@ -52,7 +53,10 @@ export interface EventStreamHub {
 	serve(event: H3Event): Promise<unknown>
 	/** Re-checks every open stream's credential and closes the ones that ended. */
 	revalidate(): void
-	/** Closes every open stream (server shutdown). */
+	/**
+	 * Closes every open stream and drops its connection (server shutdown): a graceful shutdown waits
+	 * for open connections, and a stream never ends by itself.
+	 */
 	close(): void
 	readonly size: number
 }
@@ -60,7 +64,8 @@ export interface EventStreamHub {
 type OpenStream = {
 	readonly principal: MemberPrincipal
 	readonly res: ServerResponse
-	end(): void
+	/** Ends the stream; `destroy` drops the connection instead of flushing what is still buffered. */
+	end(destroy?: boolean): void
 }
 
 export function createEventStreamHub(options: EventStreamHubOptions): EventStreamHub {
@@ -75,7 +80,8 @@ export function createEventStreamHub(options: EventStreamHubOptions): EventStrea
 	function write(stream: OpenStream, chunk: string): void {
 		if (stream.res.writableEnded || stream.res.destroyed) return stream.end()
 		stream.res.write(chunk)
-		if (stream.res.writableLength > maxBuffered) stream.end()
+		// A client that stops reading would keep this data, and its socket, forever: drop it.
+		if (stream.res.writableLength > maxBuffered) stream.end(true)
 	}
 
 	function revalidate(): void {
@@ -94,7 +100,7 @@ export function createEventStreamHub(options: EventStreamHubOptions): EventStrea
 			try { await options.onHeartbeat?.() }
 			catch (error) { console.warn(`uiux: the event stream heartbeat work failed: ${error instanceof Error ? error.message : String(error)}`) }
 			revalidate()
-			for (const stream of [...streams]) write(stream, ': heartbeat\n\n')
+			for (const stream of [...streams]) write(stream, eventFrame('heartbeat', {}))
 		}
 		finally {
 			beating = false
@@ -150,20 +156,23 @@ export function createEventStreamHub(options: EventStreamHubOptions): EventStrea
 		const stream: OpenStream = {
 			principal,
 			res,
-			end() {
+			end(destroy = false) {
 				if (ended) return
 				ended = true
 				subscription.stop?.()
 				streams.delete(stream)
 				stopTimerWhenIdle()
-				if (!res.writableEnded) res.end()
+				if (destroy) res.destroy()
+				else if (!res.writableEnded) res.end()
 				resolveClosed()
 			},
 		}
 		streams.add(stream)
 		req.once('close', () => stream.end())
 		res.once('close', () => stream.end())
-		res.once('error', () => stream.end())
+		// `on`, not `once`: a socket can emit more than one error, and an unhandled one would crash the process.
+		req.on('error', () => stream.end(true))
+		res.on('error', () => stream.end(true))
 		write(stream, `retry: ${EVENT_STREAM_RETRY_MS}\n\n${eventFrame('hello', { serverInstanceId: options.bus.serverInstanceId })}`)
 		subscription.stop = options.bus.subscribe(change => write(stream, changeEventFrame(change)))
 		startTimer()
@@ -175,7 +184,7 @@ export function createEventStreamHub(options: EventStreamHubOptions): EventStrea
 		serve,
 		revalidate,
 		close() {
-			for (const stream of [...streams]) stream.end()
+			for (const stream of [...streams]) stream.end(true)
 		},
 		get size() {
 			return streams.size
@@ -194,5 +203,27 @@ export function changeEventFrame(change: ChangeEvent): string {
 		case 'resource.removed': return eventFrame(change.type, { kind: change.kind, key: change.key })
 		case 'lock.changed': return eventFrame(change.type, { kind: change.kind, key: change.key })
 		case 'access.changed': return eventFrame(change.type, {})
+	}
+}
+
+/**
+ * Closes every open stream of `hub` as soon as a shutdown signal arrives. Nitro's graceful shutdown
+ * (the signals of `NITRO_SHUTDOWN_SIGNALS`, by default `SIGTERM` and `SIGINT`) first waits up to
+ * `NITRO_SHUTDOWN_TIMEOUT` (30 s) for open connections to end, and only then runs the `close` hook,
+ * while an event stream never ends by itself; `uiux dev` forwards the signals it receives to the
+ * server, so its Ctrl+C takes the same path. With `NITRO_SHUTDOWN_DISABLED` nothing is installed, so
+ * the process keeps its default signal handling. Returns the removal of the listeners.
+ */
+export function closeEventStreamsOnShutdown(
+	hub: Pick<EventStreamHub, 'close'>,
+	env: Readonly<Record<string, string | undefined>> = process.env,
+	target: Pick<NodeJS.Process, 'on' | 'off'> = process,
+): () => void {
+	if (env.NITRO_SHUTDOWN_DISABLED) return () => {}
+	const signals = (env.NITRO_SHUTDOWN_SIGNALS || 'SIGTERM SIGINT').split(' ').map(signal => signal.trim()).filter(signal => signal.length > 0) as NodeJS.Signals[]
+	const close = () => hub.close()
+	for (const signal of signals) target.on(signal, close)
+	return () => {
+		for (const signal of signals) target.off(signal, close)
 	}
 }

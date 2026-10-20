@@ -21,6 +21,8 @@ import lockDeleteRoute from '../server/api/locks/[kind]/[key].delete'
 import memberPatchRoute from '../server/api/access/members/[id].patch'
 import accessPresetsGetRoute from '../server/api/access-presets/index.get'
 import accessPresetsPutRoute from '../server/api/access-presets/index.put'
+import productKitGetRoute from '../server/api/product-kit/index.get'
+import productKitSettingsRoute from '../server/api/product-kit/settings.put'
 import { createAccessGuardHandler } from '../src/server/access/http'
 import { parseCredential } from '../src/server/access/credentials'
 import { removeMember, revokeToken } from '../src/server/access/roster'
@@ -69,6 +71,8 @@ beforeAll(async () => {
 	router.patch('/api/access/members/:id', memberPatchRoute)
 	router.get('/api/access-presets', accessPresetsGetRoute)
 	router.put('/api/access-presets', accessPresetsPutRoute)
+	router.get('/api/product-kit', productKitGetRoute)
+	router.put('/api/product-kit/settings', productKitSettingsRoute)
 	app.use(router)
 	server = createServer(toNodeListener(app))
 	await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -308,6 +312,20 @@ describe('change events after commits (Rules 01a11485-f365-70ce-82d9-43ea3f5ea5b
 		finally { stream.close() }
 	})
 
+	it('sends resource.changed for the Product Kit file (Discussion #241 owner decision 2)', async () => {
+		const stream = await openStream({ cookie: ownerCookie })
+		try {
+			await stream.next(isEvent('hello'))
+			const read = await (await fetch(`${origin}/api/product-kit`, { headers: { cookie: ownerCookie } })).json() as { revision: string }
+			const written = await fetch(`${origin}/api/product-kit/settings`, json('PUT', { expectedRevision: read.revision, adapters: [], styles: ['./dist/kit.css'], themes: {} }, { cookie: ownerCookie }))
+			expect(written.status).toBe(200)
+			const result = await written.json() as { revision: string }
+			expect((await stream.next(isEvent('resource.changed', { kind: 'product-kit' }))).data).toEqual({ kind: 'product-kit', key: 'product-kit', revision: result.revision })
+			expect(((await (await fetch(`${origin}/api/product-kit`, { headers: { cookie: ownerCookie } })).json()) as { revision: string }).revision).toBe(result.revision)
+		}
+		finally { stream.close() }
+	})
+
 	it('sends lock.changed when the Owner force-releases a lease', async () => {
 		const runtime = getSelectedWorkspaceServerRuntime()
 		const claude = (await AccessStore.open({ workspaceRoot: root }))!.data.members.find(member => member.nickname === 'claude')!
@@ -390,6 +408,7 @@ describe('access changes and stream lifetime (Rules 01a114ec-e706-7c39-84a6-2e4a
 			}
 			const refused = await fetch(`${origin}/api/events`, { headers: bearer(token) })
 			expect(refused.status).toBe(429)
+			expect(Number(refused.headers.get('retry-after'))).toBeGreaterThan(0)
 			expect(await refused.json()).toMatchObject({ code: 'events.stream_limit' })
 			// Another credential is not affected.
 			const other = await openStream({ cookie: ownerCookie })

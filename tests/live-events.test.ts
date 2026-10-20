@@ -14,7 +14,7 @@ import { createWorkspaceApplicationSession } from '../src/application/services/w
 import { FileNativePersistence } from '../src/persistence'
 import type { CommittedResourceChange } from '../src/persistence/file-native'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
-import { changeEventFrame, createEventStreamHub, type EventStreamHub } from '../src/server/event-stream'
+import { changeEventFrame, closeEventStreamsOnShutdown, createEventStreamHub, EVENT_STREAM_RETRY_MS, type EventStreamHub } from '../src/server/event-stream'
 import { testMember } from './support/access'
 import { createCurrentWorkspace } from './support/workspace-layout'
 
@@ -69,7 +69,7 @@ describe('commits become change events (Rules 01a11485-f365-70ce-82d9-43ea3f5ea5
 		expect(ctx.events).toEqual([{ type: 'resource.changed', kind: 'asset', key: ASSET_ID, revision: read!.revision }])
 	})
 
-	it('emits nothing for a refused write, and nothing for the Product Kit file, which the stream does not name', async () => {
+	it('emits nothing for a refused write, and resource.changed for the Product Kit file (Discussion #241 owner decision 2)', async () => {
 		const ctx = await fixture()
 		const view = await ctx.app.createView({ id: VIEW_ID, name: 'A', spec })
 		ctx.events.length = 0
@@ -80,7 +80,8 @@ describe('commits become change events (Rules 01a11485-f365-70ce-82d9-43ea3f5ea5
 		const updated = await ctx.app.updateProductKit({ expectedRevision: kit!.revision, adapters: [], styles: ['./dist/kit.css'], themes: {} })
 		expect(updated.status).toBe('updated')
 		expect(ctx.commits.map(changes => changes.map(change => change.kind))).toEqual([['product-kit']])
-		expect(ctx.events).toEqual([])
+		expect(ctx.events).toEqual([{ type: 'resource.changed', kind: 'product-kit', key: 'product-kit', revision: (updated as { revision: string }).revision }])
+		expect((await ctx.app.readProductKit())!.revision).toBe((updated as { revision: string }).revision)
 		expect(view.status).toBe('created')
 	})
 
@@ -97,7 +98,7 @@ describe('commits become change events (Rules 01a11485-f365-70ce-82d9-43ea3f5ea5
 })
 
 describe('the stream hub (Clause 01a114ec-e839-7b11-957c-41c88b692e12)', () => {
-	async function serveHub(options: Readonly<{ principal?: MemberPrincipal; heartbeatMs?: number; onHeartbeat?: () => void; keys?: () => readonly string[] | undefined; maxStreams?: number }> = {}) {
+	async function serveHub(options: Readonly<{ principal?: MemberPrincipal; heartbeatMs?: number; onHeartbeat?: () => void; keys?: () => readonly string[] | undefined; maxStreams?: number; maxBufferedBytes?: number }> = {}) {
 		const bus = createChangeEventBus()
 		const principal = options.principal ?? testMember({ nickname: 'lead', kind: 'human', preset: 'viewer', credential: 'session' })
 		const hub: EventStreamHub = createEventStreamHub({
@@ -106,6 +107,7 @@ describe('the stream hub (Clause 01a114ec-e839-7b11-957c-41c88b692e12)', () => {
 			...(options.onHeartbeat ? { onHeartbeat: options.onHeartbeat } : {}),
 			heartbeatMs: options.heartbeatMs ?? 60_000,
 			...(options.maxStreams ? { maxStreams: options.maxStreams } : {}),
+			...(options.maxBufferedBytes ? { maxBufferedBytes: options.maxBufferedBytes } : {}),
 		})
 		const app = createApp()
 		app.use(defineEventHandler((event) => {
@@ -145,14 +147,68 @@ describe('the stream hub (Clause 01a114ec-e839-7b11-957c-41c88b692e12)', () => {
 		return text
 	}
 
-	it('sends a heartbeat comment on every heartbeat, after the heartbeat work', async () => {
+	it('sends retry: 3000 and hello first, then a named heartbeat event with {} on every heartbeat, after the heartbeat work', async () => {
 		let beats = 0
-		const { url } = await serveHub({ heartbeatMs: 40, onHeartbeat: () => { beats += 1 } })
-		const text = await read(url, value => value.split(': heartbeat\n\n').length > 2)
-		expect(text.startsWith('retry: ')).toBe(true)
-		expect(text).toContain('event: hello\n')
-		expect(text.split(': heartbeat\n\n').length).toBeGreaterThan(2)
+		const { url, bus } = await serveHub({ heartbeatMs: 40, onHeartbeat: () => { beats += 1 } })
+		const frame = 'event: heartbeat\ndata: {}\n\n'
+		const text = await read(url, value => value.split(frame).length > 2)
+		expect(EVENT_STREAM_RETRY_MS).toBe(3000)
+		expect(text.startsWith(`retry: 3000\n\nevent: hello\ndata: {"serverInstanceId":"${bus.serverInstanceId}"}\n\n`)).toBe(true)
+		expect(text.split(frame).length).toBeGreaterThan(2)
+		expect(text).not.toMatch(/^: heartbeat/mu)
 		expect(beats).toBeGreaterThan(1)
+	})
+
+	it('disconnects a client that stops reading once its buffered data passes the bound', async () => {
+		const { url, bus, hub } = await serveHub({ maxBufferedBytes: 4096 })
+		const controller = new AbortController()
+		const response = await fetch(url, { signal: controller.signal })
+		expect(response.status).toBe(200)
+		// The client never reads the body; the server keeps writing until the socket buffers fill.
+		for (let attempt = 0; attempt < 200 && hub.size > 0; attempt++) {
+			for (let index = 0; index < 2000; index++) bus.publish({ type: 'resource.changed', kind: 'view', key: `${VIEW_ID}-${index}`, revision: 'r_x' as never })
+			await new Promise(resolve => setTimeout(resolve, 5))
+		}
+		expect(hub.size).toBe(0)
+		expect(bus.subscriberCount).toBe(0)
+		// The connection was dropped, not ended after the backlog: reading on fails instead of finishing.
+		await expect(response.text()).rejects.toThrow()
+		controller.abort()
+	})
+
+	it('drops every open stream on close(), so a graceful shutdown does not wait on them', async () => {
+		const { url, hub } = await serveHub()
+		const controller = new AbortController()
+		const response = await fetch(url, { signal: controller.signal })
+		const reader = response.body!.getReader()
+		await reader.read()
+		expect(hub.size).toBe(1)
+		hub.close()
+		expect(hub.size).toBe(0)
+		// The client sees the connection end (a clean end or a reset, either way not a hanging read).
+		const ended = await (async () => {
+			try { for (;;) if ((await reader.read()).done) return 'done' }
+			catch { return 'reset' }
+		})()
+		expect(['done', 'reset']).toContain(ended)
+		controller.abort()
+	})
+
+	it('closes the streams on the shutdown signals Nitro handles, and installs nothing when its shutdown is disabled', () => {
+		const handlers = new Map<string, () => void>()
+		const target = { on: (signal: string, handler: () => void) => { handlers.set(signal, handler); return target }, off: (signal: string) => { handlers.delete(signal); return target } }
+		let closed = 0
+		const remove = closeEventStreamsOnShutdown({ close: () => { closed += 1 } }, {}, target as never)
+		expect([...handlers.keys()].sort()).toEqual(['SIGINT', 'SIGTERM'])
+		handlers.get('SIGTERM')!()
+		expect(closed).toBe(1)
+		remove()
+		expect(handlers.size).toBe(0)
+		closeEventStreamsOnShutdown({ close: () => {} }, { NITRO_SHUTDOWN_SIGNALS: 'SIGHUP' }, target as never)
+		expect([...handlers.keys()]).toEqual(['SIGHUP'])
+		handlers.clear()
+		closeEventStreamsOnShutdown({ close: () => {} }, { NITRO_SHUTDOWN_DISABLED: '1' }, target as never)
+		expect(handlers.size).toBe(0)
 	})
 
 	it('emits lock.changed for a lease that expired, found by the heartbeat sweep (Rule 01a114ec-e706-7c39-84a6-2e4a536daed2)', async () => {
@@ -189,6 +245,7 @@ describe('the stream hub (Clause 01a114ec-e839-7b11-957c-41c88b692e12)', () => {
 		expect(first.status).toBe(200)
 		const second = await fetch(url)
 		expect(second.status).toBe(429)
+		expect(Number(second.headers.get('retry-after'))).toBeGreaterThan(0)
 		expect(await second.json()).toMatchObject({ code: 'events.stream_limit' })
 		controller.abort()
 	})
