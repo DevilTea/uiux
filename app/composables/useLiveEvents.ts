@@ -9,9 +9,10 @@ import { getCurrentScope, onScopeDispose, readonly, shallowRef } from 'vue'
  *
  * - Events arriving close together are delivered as one batch, deduplicated per resource, so an
  *   Agent's burst of writes costs one re-read.
- * - Nothing is replayed (Rule 01a11485-f39f-7464-9f8f-608335ed9800): after a reconnect, or when
- *   `hello` names a different server instance (a restart), subscribers get `resync` and re-read
- *   everything they show.
+ * - Nothing is replayed (Rule 01a11485-f39f-7464-9f8f-608335ed9800): every `hello` (the first of a
+ *   session, a reconnect, or a restarted server) gives subscribers a `resync` to re-read everything
+ *   they show, because a write between a page's first reads and the server accepting its stream is
+ *   never sent (#281).
  * - When the stream cannot connect (no `EventSource`, refused, or dropped), the state is `fallback`
  *   and subscribers get a `resync` every `FALLBACK_POLL_MS` while the page is visible (Rule
  *   01a11485-f3d9-7663-b344-a60c2a949e5e). A dropped stream reconnects by itself; a refused one
@@ -49,9 +50,6 @@ const accessListeners = new Set<() => void>()
 
 let source: EventSource | undefined
 let started = false
-let serverInstanceId: string | undefined
-/** A `hello` was received on an earlier connection, so the next one is a reconnect. */
-let connectedBefore = false
 let pendingChanges = new Map<string, LiveResourceChange>()
 let pendingResync = false
 let pendingLocks = false
@@ -155,7 +153,6 @@ function stale(stream: EventSource): void {
 	source = undefined
 	livenessFailures += 1
 	// Whatever was sent meanwhile is lost: the next `hello` resyncs.
-	connectedBefore = true
 	// Poll while the reopened stream owes its `hello`; that `hello` stops it.
 	startFallback()
 	if (livenessFailures >= LIVENESS_FAILURES_BEFORE_FALLBACK) {
@@ -177,18 +174,15 @@ function connect(): void {
 	armLiveness(stream, HELLO_TIMEOUT_MS)
 	/** Any event is a sign of life once `hello` arrived. */
 	const alive = () => { if (state.value === 'open' && source === stream) armLiveness(stream, SILENCE_TIMEOUT_MS) }
-	stream.addEventListener('hello', (event) => {
-		const id = parse(event as MessageEvent)?.serverInstanceId
-		const restarted = serverInstanceId !== undefined && typeof id === 'string' && id !== serverInstanceId
-		const reconnected = connectedBefore || state.value === 'fallback'
-		if (typeof id === 'string') serverInstanceId = id
-		connectedBefore = true
+	stream.addEventListener('hello', () => {
 		livenessFailures = 0
 		stopFallback()
 		state.value = 'open'
 		armLiveness(stream, SILENCE_TIMEOUT_MS)
-		// Whatever changed while no stream was open was not sent and is not replayed.
-		if (restarted || reconnected) queueResync()
+		// Whatever changed while no stream was open was not sent and is not replayed. That includes the
+		// gap between a page's first reads and the server accepting its stream, so the first `hello`
+		// resyncs too (one extra quiet re-read per session start, #281).
+		queueResync()
 	})
 	stream.addEventListener('heartbeat', alive)
 	stream.addEventListener('resource.changed', (event) => {
@@ -246,7 +240,6 @@ function stop(): void {
 	flushTimer = undefined
 	pendingChanges = new Map()
 	pendingResync = pendingLocks = pendingAccess = false
-	connectedBefore = false
 	state.value = 'idle'
 }
 
