@@ -2324,6 +2324,7 @@
       "outcome_not_current": "結論已過時。"
     },
     "handoff": {
+      "adapter_provenance_unverifiable": "無法驗證 Handoff 套件的 Adapter 來源：有 Adapter 沒有套件版本，也無法讀取其模組相依關係來計算內容摘要。",
       "asset_content_digest_missing": "Handoff 中有 Asset 缺少內容摘要。",
       "component_unavailable": "有 Widget 類型對應到檔案無法讀取的 Product Kit Component，因此 Handoff 不會為它指名 Component。",
       "duplicate_artifact": "Handoff 中有檔案重複出現。",

@@ -97,6 +97,41 @@ export const manifest = {
 `
 }
 
+/** An Adapter `zz-badge` providing `Badge`, which no sample View uses; its label comes from `./badge-label.mjs`. */
+function makeBadgeAdapterSource(): string {
+	return `
+import { createWidgetPlugin } from '@deviltea/widget-core';
+import { defineComponent, h } from 'vue';
+import { BADGE_LABEL } from './badge-label.mjs';
+
+export const badgePlugin = createWidgetPlugin('Badge')
+  .interfaces()
+  .done();
+
+export const BadgeRenderer = defineComponent({
+  name: 'BadgeRenderer',
+  setup() {
+    return () => h('span', { class: 'badge' }, BADGE_LABEL);
+  }
+});
+
+export const manifest = {
+  id: 'zz-badge',
+  apiVersion: '1',
+  widgetPlugins: [badgePlugin],
+  catalog: { widgets: { Badge: {} } },
+  renderers: [{ type: 'Badge', component: BadgeRenderer }],
+  providers: [],
+};
+`
+}
+
+async function writeBadgeAdapter(root: string, label = 'New'): Promise<void> {
+	await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+	await writeFile(join(root, 'kit', 'adapters', 'badge.mjs'), makeBadgeAdapterSource())
+	await writeFile(join(root, 'kit', 'adapters', 'badge-label.mjs'), `export const BADGE_LABEL = ${JSON.stringify(label)};\n`)
+}
+
 async function createTestWorkspace(adapters: Array<{ moduleSpecifier: string; config?: unknown }> = []): Promise<{ root: string; persistence: FileNativePersistence }> {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-handoff-test-'))
 	temporaryRoots.push(root)
@@ -1187,10 +1222,10 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		expect(evidenceList[0]?.digest).toBe(validDigest)
 	})
 
-	it('ensures unrelated broken adapter in workspace does not block closure readiness or export', async () => {
-		// Workspace defines two adapters:
-		// 1. Valid counter adapter (used by view)
-		// 2. Broken adapter with syntax error or broken manifest (not used by view)
+	// Rule 01a115cd-cc36-7160-a2b6-baadcf98e40b: a bundle records every active Adapter, so an Adapter set
+	// that is invalid anywhere, even in an Adapter that provides no Widget type the closure uses, cannot
+	// be recorded: it blocks, and no partial set of Adapters is recorded (Rule 01a115cd-aef9-7b93-9619-96196f63cfde).
+	it('blocks readiness when an Adapter of the active set cannot load, even one no closure Widget uses, and records no partial set', async () => {
 		const { root, persistence } = await createTestWorkspace([
 			{ moduleSpecifier: './adapters/counter.mjs' },
 			{ moduleSpecifier: './adapters/broken.mjs' },
@@ -1205,30 +1240,89 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 
 		const handoff = currentSchemaHandoff(persistence)
 
-		// Assessment must succeed because View only uses Counter, not the broken adapter
 		const assess = await handoff.assessReadiness({
 			roots: [{ type: 'view', viewId: VIEW_1_ID }],
 		})
-		expect(assess.readiness?.implementationReady).toBe(true)
+		expect(assess.readiness?.implementationReady).toBe(false)
+		expect(assess.readiness?.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'adapter.manifest_load_failed', path: '/adapters/1/moduleSpecifier', blocking: true }))
 
-		// Export must succeed and materialize the needed adapter cleanly
+		// The bundle is still exported, as a diagnostic snapshot.
 		const exportRes = await handoff.exportHandoff({
 			roots: [{ type: 'view', viewId: VIEW_1_ID }],
 		})
 		expect(exportRes.status).toBe('exported')
-		if (exportRes.status === 'exported') {
-			expect(exportRes.manifest?.provenance.adapters).toHaveLength(1)
-			expect(exportRes.manifest?.provenance.adapters[0]?.adapterId).toBe('my-counter')
-		}
+		const manifest = exportRes.manifest!
+		expect(manifest.readiness.implementationReady).toBe(false)
+		expect(manifest.readiness.coverage.validation.complete).toBe(false)
+		expect(manifest.provenance.adapters).toEqual([])
+		expect(manifest.implementationReferences.find(reference => reference.widgetType === 'Counter')?.semanticSource.availability).toBe('unavailable')
+	})
+
+	it('records every active Adapter in Adapter-list order, including one that provides no Widget type the closure uses (#92)', async () => {
+		// The list order is the reverse of the Adapter IDs' sort order: `zz-badge` before `my-counter`.
+		const { root, persistence } = await createTestWorkspace([
+			{ moduleSpecifier: './adapters/badge.mjs' },
+			{ moduleSpecifier: './adapters/counter.mjs' },
+		])
+		await writeBadgeAdapter(root)
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		const viewRev = await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'Counter View'))
+		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
+		const handoff = currentSchemaHandoff(persistence, { checkAdapterSet: set => checkAdapterSetRuntime(root, persistence.layout, set) })
+
+		const exported = await handoff.exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(exported.status).toBe('exported')
+		const manifest = exported.manifest!
+		expect(manifest.readiness.implementationReady).toBe(true)
+		expect(manifest.provenance.adapters.map(adapter => [adapter.moduleSpecifier, adapter.adapterId])).toEqual([
+			['./adapters/badge.mjs', 'zz-badge'],
+			['./adapters/counter.mjs', 'my-counter'],
+		])
+		for (const adapter of manifest.provenance.adapters) expect(adapter.contentDigest).toMatch(/^sha256:[0-9a-f]{64}$/u)
+		// Only the used Widget types get implementation references; the unused Adapter adds provenance only.
+		expect(manifest.implementationReferences.map(reference => reference.widgetType)).toEqual(['Counter', 'RootShell'])
+		expect(validateHandoffManifest(manifest).ok).toBe(true)
+
+		// Clause 01a115cd-d7f6-74a1-ba9f-c20a24a31ae5: the unused Adapter's `contentDigest` covers the module
+		// it imports, not only its entry module.
+		const badgeDigest = manifest.provenance.adapters[0]!.contentDigest
+		await writeBadgeAdapter(root, 'Changed')
+		const again = await handoff.exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(again.manifest!.provenance.adapters.map(adapter => adapter.adapterId)).toEqual(['zz-badge', 'my-counter'])
+		expect(again.manifest!.provenance.adapters[0]!.contentDigest).not.toBe(badgeDigest)
+		expect(again.manifest!.provenance.adapters[1]!.contentDigest).toBe(manifest.provenance.adapters[1]!.contentDigest)
+	})
+
+	// Clause 01a115cd-d7f6-74a1-ba9f-c20a24a31ae5: an entry needs a `packageVersion` or a `contentDigest`.
+	it('blocks, rather than failing the export, when a local Adapter\'s module graph cannot be read for its content digest', async () => {
+		const { root, persistence } = await createTestWorkspace([
+			{ moduleSpecifier: './adapters/counter.mjs' },
+			{ moduleSpecifier: './adapters/badge.mjs' },
+		])
+		await writeBadgeAdapter(root)
+		// The unverifiable Adapter sits at Workspace Adapter-list index 1 (the recorded set has one entry), so the path proves it names the list index.
+		// Node loads it, but the browser-platform bundle the digest is computed from cannot resolve a Node built-in.
+		await writeFile(join(root, 'kit', 'adapters', 'badge.mjs'), `import 'node:fs';\n${makeBadgeAdapterSource()}`)
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		const viewRev = await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'Counter View'))
+		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
+
+		const exported = await currentSchemaHandoff(persistence).exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(exported.status).toBe('exported')
+		const manifest = exported.manifest!
+		expect(manifest.readiness.implementationReady).toBe(false)
+		expect(manifest.readiness.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'handoff.adapter_provenance_unverifiable', path: '/adapters/1', blocking: true }))
+		expect(manifest.provenance.adapters.map(adapter => adapter.adapterId)).toEqual(['my-counter'])
+		// Its entry module is not stored either; the bundle names no Adapter it does not record.
+		expect(manifest.artifactRefs.some(reference => reference.context?.adapterId === 'zz-badge')).toBe(false)
 	})
 
 	it('refuses the sources of an Adapter whose Widget plugins come from its own widget-core copy, as the server-side check does (#123)', async () => {
 		const { root, persistence } = await createTestWorkspace([
-			{ moduleSpecifier: './adapters/broken.mjs' },
+			{ moduleSpecifier: './adapters/badge.mjs' },
 			{ moduleSpecifier: './adapters/counter.mjs' },
 		])
-		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
-		await writeFile(join(root, 'kit', 'adapters', 'broken.mjs'), 'export const broken = syntax error !@#$;')
+		await writeBadgeAdapter(root)
 		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), await bundleAdapterWithOwnWidgetCore({ source: makeCounterAdapterSource(), resolveDir: join(root, 'kit') }))
 		const viewRev = await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'Counter View'))
 		await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
@@ -1237,7 +1331,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 
 		const assess = await handoff.assessReadiness({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
 		expect(assess.readiness?.implementationReady).toBe(false)
-		// The diagnostic names the Adapter by its Product Kit index, past the unrelated broken one.
+		// The diagnostic names the Adapter by its Product Kit index, past the Adapter before it.
 		expect(assess.readiness?.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: '/adapters/1/manifest/widgetPlugins/0', blocking: true }))
 
 		const exported = await handoff.exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
