@@ -67,6 +67,7 @@ import {
 } from './asset-authoring'
 import {
 	createFormalCaptureService,
+	type AdapterThemeSupportSource,
 	type CaptureFormalEvidenceCommand,
 	type CaptureFormalEvidenceResult,
 	type FormalEvidenceItem,
@@ -224,6 +225,8 @@ export function createWorkspaceApplicationSession(
 		kitBuild?: KitBuildControl
 		/** The server-side Adapter check Handoff applies to the Adapters it materializes (Clause 01a116f0-cae2-7c64-9c76-d472f252789a). */
 		checkAdapterSet?: AdapterSetRuntimeCheck
+		/** The theme support of the current Adapter resolution, which formal capture applies (Rule 01a11add-f46d-7e92-8f5a-9d10dba6473d). */
+		adapterThemeSupport?: AdapterThemeSupportSource
 	},
 ): WorkspaceApplicationSession {
 	const viewAuthoring = createViewAuthoringService(persistence)
@@ -232,7 +235,12 @@ export function createWorkspaceApplicationSession(
 	const flowAuthoring = createFlowAuthoringService(persistence)
 	const reviewAuthoring = createReviewAuthoringService(persistence)
 	const assetAuthoring = createAssetAuthoringService(persistence)
-	const formalCapture = createFormalCaptureService(persistence, { serverOrigin: options?.serverOrigin, captureCookie: options?.captureCookie, ...(options?.kitBuild ? { kitBuild: () => options.kitBuild!.status() } : {}) })
+	const formalCapture = createFormalCaptureService(persistence, {
+		serverOrigin: options?.serverOrigin,
+		captureCookie: options?.captureCookie,
+		...(options?.kitBuild ? { kitBuild: () => options.kitBuild!.status() } : {}),
+		...(options?.adapterThemeSupport ? { themeSupport: options.adapterThemeSupport } : {}),
+	})
 	const handoffExport = createHandoffExportService(persistence, options?.checkAdapterSet ? { checkAdapterSet: options.checkAdapterSet } : {})
 	const historyDiff = createHistoryDiffService(persistence, options?.history)
 	const historyService = createHistoryService(persistence, options?.history, options?.historyBoundary ? { boundary: options.historyBoundary } : {})

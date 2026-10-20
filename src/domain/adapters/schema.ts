@@ -6,6 +6,7 @@ import {
 	validateDigest,
 	validateJsonValue,
 	Validator,
+	type Diagnostic,
 	type JsonObject,
 	type JsonValue,
 	type ValidationResult,
@@ -162,6 +163,91 @@ export function validateAdapterProviders(manifest: AdapterManifest, path = ''): 
 			v.issue('adapter.invalid_provider', `${path}/providers/${index}`, `Provider ${index} of Adapter ${manifest.id} must be a Vue plugin: an object with an install function, or a function.`)
 	})
 	return v.finish<readonly unknown[]>(manifest.providers)
+}
+
+/**
+ * The shape of `themeSupport` (Clause 01a11a5a-448c-76ba-94d4-6766435b9e2b): when present, an object
+ * whose `supports` is a function. Server-side Adapter resolution applies it, so a malformed member makes
+ * the Adapter invalid on every surface (Rule 01a11a5a-4c2c-7330-8fac-11a6c970713a). It only reads the
+ * member; asking the predicate is `evaluateAdapterThemeSupport`. `path` is the manifest's path.
+ */
+export function validateAdapterThemeSupport(manifest: AdapterManifest, path = ''): ValidationResult<AdapterManifest['themeSupport']> {
+	const v = new Validator()
+	if (Object.hasOwn(manifest, 'themeSupport')) {
+		const member: unknown = manifest.themeSupport
+		if (typeof member !== 'object' || member === null || typeof (member as { supports?: unknown }).supports !== 'function')
+			v.issue('adapter.invalid_theme_support', `${path}/themeSupport`, `themeSupport of Adapter ${manifest.id} must be an object whose supports is a function.`)
+	}
+	return v.finish<AdapterManifest['themeSupport']>(manifest.themeSupport)
+}
+
+/** What asking one Adapter's theme-support predicate about every Workspace theme found. */
+export type AdapterThemeSupportEvaluation = Readonly<{
+	/** The theme IDs the predicate rejected, or could not answer for, in the order asked. */
+	unsupportedThemeIds: readonly string[]
+	/** One Adapter diagnostic per theme whose predicate threw or returned a non-boolean. */
+	diagnostics: readonly Diagnostic[]
+}>
+
+/**
+ * Asks a validated `themeSupport` predicate about each Workspace theme ID (Rules
+ * 01a11a5a-5464-7797-82d3-f8ece37457e5, 01a11a5a-54e2-7216-a5a1-0de226971850 and
+ * 01a11a5a-555f-7b4c-8fcc-311c31a99b7a): without the member every theme is supported; `false` makes a
+ * theme unsupported, and a predicate that throws or returns a non-boolean (a promise included) is an
+ * Adapter diagnostic and makes that theme unsupported too (fail closed). `config` is the Adapter
+ * entry's validated configuration, passed deep-frozen so a predicate cannot change what the Preview
+ * receives. `path` is the manifest's path.
+ */
+export function evaluateAdapterThemeSupport(
+	manifest: AdapterManifest,
+	config: JsonValue | undefined,
+	themeIds: readonly string[],
+	path = '',
+): AdapterThemeSupportEvaluation {
+	const themeSupport = manifest.themeSupport
+	if (!themeSupport) return { unsupportedThemeIds: [], diagnostics: [] }
+	const context = Object.freeze({ config: config === undefined ? undefined : deepFrozenCopy(config) })
+	const unsupportedThemeIds: string[] = []
+	const diagnostics: Diagnostic[] = []
+	for (const themeId of themeIds) {
+		let answer: unknown
+		try {
+			answer = themeSupport.supports(themeId, context)
+		}
+		catch (cause) {
+			unsupportedThemeIds.push(themeId)
+			diagnostics.push({
+				code: 'adapter.theme_support_failed',
+				path: `${path}/themeSupport`,
+				message: `themeSupport.supports of Adapter ${manifest.id} threw for the theme ${themeId}, so that theme counts as unsupported: ${cause instanceof Error ? cause.message : String(cause)}`,
+			})
+			continue
+		}
+		if (typeof answer !== 'boolean') {
+			// A returned promise is never awaited; its rejection must not surface as an unhandled one.
+			if (typeof (answer as { then?: unknown } | null)?.then === 'function') Promise.resolve(answer).catch(() => undefined)
+			unsupportedThemeIds.push(themeId)
+			diagnostics.push({
+				code: 'adapter.theme_support_failed',
+				path: `${path}/themeSupport`,
+				message: `themeSupport.supports of Adapter ${manifest.id} returned a non-boolean for the theme ${themeId}, so that theme counts as unsupported; the predicate is synchronous and returns a boolean.`,
+			})
+			continue
+		}
+		if (!answer) unsupportedThemeIds.push(themeId)
+	}
+	return { unsupportedThemeIds, diagnostics }
+}
+
+function deepFrozenCopy(value: JsonValue): JsonValue {
+	const copy = structuredClone(value)
+	const freeze = (member: unknown): void => {
+		if (typeof member !== 'object' || member === null || Object.isFrozen(member)) return
+		Object.freeze(member)
+		for (const child of Object.values(member)) freeze(child)
+	}
+	freeze(copy)
+	return copy
 }
 
 /** A Vue `Plugin`: a function, or an object (a function too may carry `install`) with an `install` function. */

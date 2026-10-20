@@ -3,6 +3,7 @@ import {
 	isCanonicalLocaleTag,
 	validateUuid,
 	Validator,
+	type Diagnostic,
 	type ValidationResult,
 } from '../validation'
 
@@ -21,6 +22,7 @@ export type RenderContextRegistries = Readonly<{
 	viewports: Readonly<Record<string, ViewportDimensions>>
 	themes: ReadonlySet<string>
 	variantsByView?: ReadonlyMap<string, ReadonlySet<string>>
+	/** Whether the current Adapter resolution supports a theme (Rule 01a11add-f46d-7e92-8f5a-9d10dba6473d); omitted, every theme is. */
 	themeIsCompatible?: (themeId: string) => boolean
 }>
 
@@ -66,7 +68,7 @@ export function validateRenderContextSelection(
 		if (!registries.themes.has(context.themeId))
 			v.issue('render_context.unknown_theme', `${path}/themeId`, 'Theme identity does not exist; no fallback is selected.')
 		else if (registries.themeIsCompatible && !registries.themeIsCompatible(context.themeId))
-			v.issue('render_context.incompatible_theme', `${path}/themeId`, 'Selected theme is incompatible with the active Adapter set.')
+			v.diagnostics.push(incompatibleThemeDiagnostic(context.themeId, `${path}/themeId`))
 		if (context.variantName !== undefined) {
 			const variants = registries.variantsByView?.get(context.viewId)
 			if (!variants?.has(context.variantName))
@@ -74,6 +76,21 @@ export function validateRenderContextSelection(
 		}
 	})
 	return v.finish<readonly ResolvedRenderContext[]>(input)
+}
+
+/**
+ * The render-context diagnostic of a context whose theme the active Adapters do not support (Rule
+ * 01a115cd-c27d-78ba-b95d-bf1aa50adec7): live Preview shows it in place of that context and formal
+ * capture refuses the context with it, never substituting another theme (Rule
+ * 01a11a5a-566b-70b1-b000-2918519c0d19). Support is set-level, not narrowed to the View (Rule
+ * 01a11a5a-55ee-737a-9970-cb9228a2de30).
+ */
+export function incompatibleThemeDiagnostic(themeId: string, path = '/themeId'): Diagnostic {
+	return {
+		code: 'render_context.incompatible_theme',
+		path,
+		message: `The active Adapters do not support the theme ${themeId}, so this context is not rendered and no other theme stands in for it.`,
+	}
 }
 
 function validateCanonicalLocale(value: unknown, path: string, v: Validator): void {

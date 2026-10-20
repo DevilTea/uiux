@@ -6,11 +6,13 @@ import { readDeclaredKitBuildDeclaration, readKitBuildDeclaration, specifierInBu
 import { containedRealPath } from '../adapters/kit-registry'
 import {
 	adapterResolutionBase,
+	allThemesSupported,
 	NodeAdapterManifestLoader,
 	NodeWorkspaceAdapterModuleResolver,
 	realDirectoryIdentity,
 	resolveWorkspaceAdapterSet,
 	type AdapterSetResolutionResult,
+	type AdapterSetThemeSupport,
 	type ValidatedAdapterSet,
 } from '../adapters/resolution'
 import { canonicalJsonStringify } from '../domain/canonical-json'
@@ -90,7 +92,9 @@ export async function resolveSelectedWorkspaceAdapters(workspaceRoot: string, gi
 		}
 	}
 	const adapters = productKit.adapters
-	const build = await kitBuildPin(workspaceRoot, layout.codeDir, adapters)
+	// Every theme of the Workspace registry is asked about once per resolution (Rule 01a11a5a-5464-7797-82d3-f8ece37457e5).
+	const themeIds = Object.keys(manifest.themes)
+	const build = await kitBuildPin(workspaceRoot, layout.codeDir, adapters, themeIds)
 	if (build.state === 'invalid') return { state: 'invalid', diagnostics: build.diagnostics, summaries: [] }
 	const pin: KitOutputPin | undefined = build.pin
 	if (pin?.resolution) return pin.resolution
@@ -103,6 +107,7 @@ export async function resolveSelectedWorkspaceAdapters(workspaceRoot: string, gi
 			diagnostics: [],
 			summaries: [],
 			set: emptySet,
+			themeSupport: allThemesSupported(themeIds),
 		}
 	}
 
@@ -113,9 +118,20 @@ export async function resolveSelectedWorkspaceAdapters(workspaceRoot: string, gi
 		loader: new NodeAdapterManifestLoader(extractProductAdapterManifest, pin ? { version: pin.version, versionScope: pin.kitDirectory } : {}),
 		apiCompatibility: productAdapterApiCompatibility,
 		registryInspector: productAdapterRegistryInspector,
+		themeIds,
 	})
 	pin?.remember(resolution)
 	return await resolution
+}
+
+/**
+ * The theme support of the selected Workspace's current Adapter resolution (Rule
+ * 01a11add-f46d-7e92-8f5a-9d10dba6473d), for formal capture; `undefined` when the set is invalid or
+ * cannot be resolved, where the Preview refuses every context itself.
+ */
+export async function selectedWorkspaceThemeSupport(workspaceRoot: string, givenLayout?: WorkspaceLayout): Promise<AdapterSetThemeSupport | undefined> {
+	const resolution = await resolveSelectedWorkspaceAdapters(workspaceRoot, givenLayout).catch(() => undefined)
+	return resolution?.state === 'valid' ? resolution.themeSupport : undefined
 }
 
 type KitOutputPin = Readonly<{
@@ -150,7 +166,7 @@ const pinnedResolutions = new Map<string, PinnedResolution>()
  *
  * A malformed declaration also makes the set invalid: what the kit's output is cannot be known.
  */
-async function kitBuildPin(workspaceRoot: string, codeDir: string, adapters: readonly WorkspaceAdapterSelection[]): Promise<
+async function kitBuildPin(workspaceRoot: string, codeDir: string, adapters: readonly WorkspaceAdapterSelection[], themeIds: readonly string[]): Promise<
 	| Readonly<{ state: 'valid'; pin?: KitOutputPin }>
 	| Readonly<{ state: 'invalid'; diagnostics: readonly Diagnostic[] }>
 > {
@@ -170,7 +186,8 @@ async function kitBuildPin(workspaceRoot: string, codeDir: string, adapters: rea
 		})) }
 	}
 	const version = kitBuildRunnerFor(root)?.outputVersion()
-	const key = canonicalJsonStringify(adapters)
+	// The theme support a resolution evaluated is part of it, so another theme registry resolves anew.
+	const key = canonicalJsonStringify({ adapters, themeIds })
 	const pinned = pinnedResolutions.get(root)
 	if (version !== undefined && pinned && pinned.version === version && pinned.adapters === key)
 		return { state: 'valid', pin: { version, resolution: pinned.resolution, remember: () => {} } }

@@ -533,6 +533,10 @@
       "title": "無法預覽",
       "description": "{locale} 是主要 Locale，但沒有檔案，因此無法預覽或擷取。請到「Workspace › Locale」建立。"
     },
+    "themeUnsupported": {
+      "title": "不支援此主題",
+      "description": "啟用中的 Adapter 不支援主題 {theme}，因此不會以此主題預覽或擷取此 View，也不會改用其他主題。請選擇其他主題，或查看「Product Kit › Adapter」。"
+    },
     "emptySlotTitle": "尚無 Widget",
     "emptySlotDescription": "在 {slot} Slot 中加入子 Widget，即可透過 {core} 渲染。",
     "errors": {
@@ -1288,6 +1292,8 @@
     "package": "套件",
     "version": "版本",
     "apiVersion": "API",
+    "unsupportedThemes": "不支援的主題",
+    "noUnsupportedThemes": "無",
     "config": "組態",
     "configLabel": "{name} 的組態",
     "configHelp": "JSON 格式，儲存時以 Adapter 自身的 Schema 驗證。留白表示不設定。",
@@ -2173,6 +2179,7 @@
       "invalid_config_schema": "Adapter 的設定規則無效。",
       "invalid_provider": "Adapter 的提供者不是 Vue 外掛。",
       "invalid_registry_identity": "Adapter 登錄的鍵無效。",
+      "invalid_theme_support": "Adapter 的 themeSupport 必須是物件，且要提供判斷主題支援與否的函式。",
       "manifest_load_failed": "無法載入 Adapter。",
       "materialization_unavailable": "預覽目前還無法載入這個外部 Adapter。",
       "provenance_unverifiable": "無法驗證 Adapter 的來源。",
@@ -2194,6 +2201,7 @@
       "runtime_renderer_decode_failed": "無法載入 Adapter 中的渲染器。",
       "runtime_renderer_ownership_mismatch": "Adapter 的渲染器與其宣告的不一致。",
       "runtime_widget_core_incompatible": "Adapter 中有 Widget 不是由 UIUX 執行的 widget-core 建立：可能來自另一份 widget-core 副本，或不是完整建立的 Widget。請勿將 widget-core 打包進 Adapter。",
+      "theme_support_failed": "Adapter 無法判斷是否支援某個主題，因此該主題視為不支援。",
       "unsupported_config_schema_dialect": "Adapter 的設定規則使用了不支援的格式。",
       "vue_renderer_registry_invalid": "Adapter 的 Vue 渲染器無效。"
     },
@@ -2260,7 +2268,7 @@
     },
     "render_context": {
       "empty_selection": "請至少選擇一個要擷取的情境。",
-      "incompatible_theme": "這個主題不適用於此 View。",
+      "incompatible_theme": "啟用中的 Adapter 不支援這個主題。",
       "invalid_locale": "Locale 不是有效的語言標籤。",
       "unknown_locale": "Workspace 中沒有這個 Locale。",
       "unknown_theme": "Workspace 中沒有這個主題。",

@@ -24,7 +24,9 @@ import {
 	validateAdapterConfig,
 	validateAdapterConfigSchema,
 	validateAdapterManifest,
+	evaluateAdapterThemeSupport,
 	validateAdapterProviders,
+	validateAdapterThemeSupport,
 	validateResolvedAdapterSet,
 	type AdapterManifest,
 	type ResolvedAdapterRegistries,
@@ -46,7 +48,33 @@ export type AdapterResolutionSummary = Readonly<{
 	resolvedModule?: ResolvedAdapterModule
 	adapterId?: string
 	apiVersion?: string
+	/**
+	 * For an Adapter that declares `themeSupport`, in a valid set: the Workspace theme IDs it does not
+	 * support, in registry order (Rule 01a11a5a-5769-721b-ad33-d068c7edeb41).
+	 */
+	unsupportedThemeIds?: readonly string[]
 }>
+
+/**
+ * The theme support of a valid Adapter set, evaluated once per resolution for every theme in the
+ * Workspace registry (Rules 01a11a5a-5464-7797-82d3-f8ece37457e5 and 01a11add-f46d-7e92-8f5a-9d10dba6473d).
+ * It is set-level: a theme is unsupported as soon as any Adapter rejects it (Rule
+ * 01a11a5a-55ee-737a-9970-cb9228a2de30). An unsupported theme leaves the set valid (Rule
+ * 01a11a5a-56e8-71c8-905a-62ed0476fd8f); `diagnostics` are the non-blocking Adapter diagnostics of
+ * predicates that threw or returned a non-boolean (Rule 01a11a5a-555f-7b4c-8fcc-311c31a99b7a).
+ */
+export type AdapterSetThemeSupport = Readonly<{
+	/** The Workspace theme IDs asked about. */
+	themeIds: readonly string[]
+	/** The theme IDs some Adapter of the set does not support, in registry order. */
+	unsupportedThemeIds: readonly string[]
+	diagnostics: readonly Diagnostic[]
+}>
+
+/** The theme support of a set that rejects no theme, such as an empty one. */
+export function allThemesSupported(themeIds: readonly string[] = []): AdapterSetThemeSupport {
+	return { themeIds: [...themeIds], unsupportedThemeIds: [], diagnostics: [] }
+}
 
 export interface AdapterModuleResolver {
 	resolve(workspaceRoot: string, moduleSpecifier: string): Promise<ResolvedAdapterModule>
@@ -118,7 +146,7 @@ export type ValidatedAdapterSet = Readonly<{
 }>
 
 export type AdapterSetResolutionResult =
-	| Readonly<{ state: 'valid'; diagnostics: readonly []; summaries: readonly AdapterResolutionSummary[]; set: ValidatedAdapterSet }>
+	| Readonly<{ state: 'valid'; diagnostics: readonly []; summaries: readonly AdapterResolutionSummary[]; set: ValidatedAdapterSet; themeSupport: AdapterSetThemeSupport }>
 	| Readonly<{ state: 'invalid'; diagnostics: readonly Diagnostic[]; summaries: readonly AdapterResolutionSummary[] }>
 
 export type ResolveWorkspaceAdapterSetInput = Readonly<{
@@ -128,6 +156,11 @@ export type ResolveWorkspaceAdapterSetInput = Readonly<{
 	loader: AdapterManifestLoader
 	apiCompatibility: AdapterApiCompatibilityPolicy
 	registryInspector: AdapterRegistryInspector
+	/**
+	 * The Workspace theme registry's IDs, each asked about by every Adapter's theme-support predicate
+	 * (Rule 01a11a5a-5464-7797-82d3-f8ece37457e5); omitted, no theme is asked about.
+	 */
+	themeIds?: readonly string[]
 }>
 
 export interface AdapterSetInstaller<Result> {
@@ -375,6 +408,13 @@ export async function resolveWorkspaceAdapterSet(input: ResolveWorkspaceAdapterS
 			continue
 		}
 
+		// The shape of `themeSupport` (Rule 01a11a5a-4c2c-7330-8fac-11a6c970713a); it is asked once the set is valid.
+		const themeSupportValidation = validateAdapterThemeSupport(manifest)
+		if (!themeSupportValidation.ok) {
+			diagnostics.push(...prefixDiagnostics(themeSupportValidation.diagnostics, `${basePath}/manifest`))
+			continue
+		}
+
 		const configSchemaValidation = validateAdapterConfigSchema(manifest.configSchema)
 		if (!configSchemaValidation.ok) {
 			diagnostics.push(...prefixDiagnostics(configSchemaValidation.diagnostics, `${basePath}/manifest`))
@@ -426,7 +466,37 @@ export async function resolveWorkspaceAdapterSet(input: ResolveWorkspaceAdapterS
 		entries: Object.freeze([...entries]),
 		[validatedAdapterSetBrand]: true as const,
 	})
-	return { state: 'valid', diagnostics: [], summaries, set }
+	const themeSupport = evaluateSetThemeSupport(entries, input.themeIds ?? [])
+	const evaluatedSummaries = summaries.map((summary) => {
+		const unsupported = themeSupport.byAdapterIndex.get(summary.index)
+		return unsupported ? { ...summary, unsupportedThemeIds: unsupported } : summary
+	})
+	return { state: 'valid', diagnostics: [], summaries: evaluatedSummaries, set, themeSupport: themeSupport.result }
+}
+
+/**
+ * Asks every Adapter of a valid set that declares `themeSupport` about every Workspace theme ID, once
+ * (Rule 01a11a5a-5464-7797-82d3-f8ece37457e5), with the entry's validated configuration. Diagnostic
+ * paths name the Product Kit index.
+ */
+function evaluateSetThemeSupport(entries: readonly ValidatedAdapterEntry[], themeIds: readonly string[]): Readonly<{
+	result: AdapterSetThemeSupport
+	byAdapterIndex: ReadonlyMap<number, readonly string[]>
+}> {
+	const unsupported = new Set<string>()
+	const diagnostics: Diagnostic[] = []
+	const byAdapterIndex = new Map<number, readonly string[]>()
+	for (const entry of entries) {
+		if (!entry.manifest.themeSupport) continue
+		const evaluation = evaluateAdapterThemeSupport(entry.manifest, entry.selection.config, themeIds, `/adapters/${entry.index}/manifest`)
+		byAdapterIndex.set(entry.index, evaluation.unsupportedThemeIds)
+		for (const themeId of evaluation.unsupportedThemeIds) unsupported.add(themeId)
+		diagnostics.push(...evaluation.diagnostics)
+	}
+	return {
+		result: { themeIds: [...themeIds], unsupportedThemeIds: themeIds.filter(themeId => unsupported.has(themeId)), diagnostics },
+		byAdapterIndex,
+	}
 }
 
 export async function installValidatedAdapterSet<Result>(

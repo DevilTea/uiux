@@ -36,6 +36,13 @@ export default defineEventHandler(async (event) => {
 		...(bundle.stylesheet ? { stylesheetUrl: previewRuntimeFileUrl(bundle.hash, bundle.stylesheet) } : {}),
 		// The Product Kit themes' root attributes (Rule 01a11bb1-ada4-7dd7-b3da-733de7a85df4).
 		themes: bundle.themes,
+		// The theme support of this resolution: the Preview shows `render_context.incompatible_theme` in
+		// place of a context whose theme is listed (Rules 01a11a5a-566b-70b1-b000-2918519c0d19 and
+		// 01a11add-f46d-7e92-8f5a-9d10dba6473d); each summary lists its own Adapter's unsupported themes.
+		themeSupport: {
+			unsupportedThemeIds: resolution.themeSupport.unsupportedThemeIds,
+			diagnostics: resolution.themeSupport.diagnostics,
+		},
 		// The server-side Adapter check could not run on the bundle; the Preview's guard decides (Clause 01a116f0-cae2-7c64-9c76-d472f252789a).
 		...(bundle.warnings.length > 0 ? { warnings: bundle.warnings } : {}),
 	}

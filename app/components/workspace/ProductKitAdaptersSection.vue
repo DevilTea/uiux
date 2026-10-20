@@ -33,7 +33,14 @@ export type AdapterResolution = Readonly<{
 		adapterId?: string
 		apiVersion?: string
 		resolvedModule?: Readonly<{ packageName?: string; packageVersion?: string }>
+		/** For an Adapter that declares theme support: the Workspace themes it does not support. */
+		unsupportedThemeIds?: readonly string[]
 	}>[]
+	/**
+	 * The theme support of a valid set (Rule 01a11add-f46d-7e92-8f5a-9d10dba6473d); `diagnostics` are the
+	 * predicates that could not answer, which leave the set valid.
+	 */
+	themeSupport?: Readonly<{ unsupportedThemeIds: readonly string[]; diagnostics: readonly Diagnostic[] }>
 }>
 
 /**
@@ -86,6 +93,24 @@ const hasIssues = computed(() => rows.value.some(row => !isPortableAdapterModule
 function rowDiagnostics(row: AdapterRow): readonly Diagnostic[] {
 	if (row.savedIndex === undefined || !props.resolution) return []
 	return props.resolution.diagnostics.filter(item => adapterIndexOf(item.path) === row.savedIndex)
+}
+
+/**
+ * The theme-support predicate failures of one saved Adapter (Rule 01a11a5a-555f-7b4c-8fcc-311c31a99b7a):
+ * non-blocking, each making its theme unsupported.
+ */
+function rowThemeSupportDiagnostics(row: AdapterRow): readonly Diagnostic[] {
+	if (row.savedIndex === undefined || statusOf(row) !== 'loaded') return []
+	return (props.resolution?.themeSupport?.diagnostics ?? []).filter(item => adapterIndexOf(item.path) === row.savedIndex)
+}
+
+/**
+ * The Workspace themes a saved Adapter does not support (Rule 01a11a5a-5769-721b-ad33-d068c7edeb41),
+ * or `undefined` for an Adapter that declares no theme support, which supports every theme.
+ */
+function unsupportedThemesOf(row: AdapterRow): readonly string[] | undefined {
+	if (statusOf(row) !== 'loaded') return undefined
+	return summaryOf(row)?.unsupportedThemeIds
 }
 
 function summaryOf(row: AdapterRow) {
@@ -460,7 +485,45 @@ defineExpose({ save })
                 {{ summaryOf(row)?.apiVersion }}
               </dd>
             </div>
+            <div
+              v-if="unsupportedThemesOf(row)"
+              class="flex gap-1"
+              data-adapter-unsupported-themes
+            >
+              <dt>{{ t('adapters.unsupportedThemes') }}</dt>
+              <dd
+                v-if="unsupportedThemesOf(row)?.length"
+                class="font-mono text-warning"
+                translate="no"
+              >
+                {{ unsupportedThemesOf(row)?.join(', ') }}
+              </dd>
+              <dd
+                v-else
+                class="text-default"
+              >
+                {{ t('adapters.noUnsupportedThemes') }}
+              </dd>
+            </div>
           </dl>
+
+          <ul
+            v-if="rowThemeSupportDiagnostics(row).length"
+            class="flex flex-col gap-1 text-xs text-warning"
+            data-adapter-theme-support-warnings
+          >
+            <li
+              v-for="(diagnostic, diagnosticIndex) in rowThemeSupportDiagnostics(row)"
+              :key="diagnostic.code + diagnosticIndex"
+              class="flex items-start gap-1 break-words"
+            >
+              <UIcon
+                name="i-lucide-triangle-alert"
+                class="mt-0.5 size-3.5 shrink-0"
+              />
+              <span><code class="me-1 font-mono">{{ diagnostic.code }}</code>{{ diagnosticText(diagnostic) }}</span>
+            </li>
+          </ul>
 
           <ul
             v-if="rowDiagnostics(row).length"

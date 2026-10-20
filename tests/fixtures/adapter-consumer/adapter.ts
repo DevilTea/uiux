@@ -60,6 +60,14 @@ export const manifest: AdapterManifest = {
 	renderers: [{ type: 'Label', component: LabelRenderer }],
 	providers: [{ install(_app, context: AdapterProviderContext) { void context.adapterId } }],
 	configSchema,
+	// The Adapter maps Workspace theme IDs through its own configuration (Clause 01a11a5a-448c-76ba-94d4-6766435b9e2b).
+	themeSupport: {
+		supports(themeId, context) {
+			const config = context.config
+			const themeMap = typeof config === 'object' && config !== null && !Array.isArray(config) ? (config as { themeMap?: unknown }).themeMap : undefined
+			return themeId === 'light' || (typeof themeMap === 'object' && themeMap !== null && Object.hasOwn(themeMap, themeId))
+		},
+	},
 }
 
 export function describeWarning(warning: TranslationWarning): string {
@@ -79,6 +87,8 @@ export const wrongVersion: AdapterApiVersion = '2'
 export const noConfigField: I18nFieldMapping = { resultProperty: 'labelResult' }
 // @ts-expect-error -- the warning union is closed.
 export const otherWarning: TranslationWarning = { code: 'other', key: 'k', requestedLocale: 'en-US' }
+// @ts-expect-error -- the theme-support predicate is synchronous and returns a boolean.
+export const asyncThemeSupport: AdapterManifest['themeSupport'] = { supports: async () => true }
 // @ts-expect-error -- the entry exports only the types its Clause lists.
 import type { ReadonlyJsonValue } from '@deviltea/uiux/adapter'
 export type NotExported = ReadonlyJsonValue

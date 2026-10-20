@@ -19,6 +19,11 @@ type PreviewAdaptersResponse =
 		themes: Readonly<Record<string, Readonly<Record<string, string>>>>
 		/** The server-side Adapter check could not run on the bundle; the Preview's own guard decides. */
 		warnings?: readonly { code: string; path: string; message: string }[]
+		/**
+		 * The theme support of the resolution: the Workspace themes the active Adapters do not support, and
+		 * the predicates that could not answer (Rule 01a11add-f46d-7e92-8f5a-9d10dba6473d).
+		 */
+		themeSupport: Readonly<{ unsupportedThemeIds: readonly string[]; diagnostics: readonly { code: string; path: string; message: string }[] }>
 	}
 	| { state: 'invalid'; diagnostics: readonly { code: string; path: string; message: string }[]; summaries: readonly unknown[] }
 

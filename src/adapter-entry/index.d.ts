@@ -98,6 +98,16 @@ export type AdapterManifest<
 	providers: readonly Provider[]
 	/** A JSON Schema Draft 2020-12 schema: a boolean, or an object whose `$schema` names that dialect. */
 	configSchema?: Readonly<{ [key: string]: ReadonlyJsonValue }> | boolean
+	/**
+	 * Which Workspace themes the Adapter supports (Clause 01a11a5a-448c-76ba-94d4-6766435b9e2b): a
+	 * synchronous pure predicate, asked on the server once per Adapter resolution for every theme in the
+	 * Workspace registry. `themeId` is a Workspace theme ID, opaque to the Adapter, which may map it
+	 * through its own configuration; `context.config` is the Adapter entry's validated configuration,
+	 * deep-frozen, or `undefined` when the entry has none. An Adapter without it supports every theme.
+	 */
+	themeSupport?: Readonly<{
+		supports: (themeId: string, context: Readonly<{ config: ReadonlyJsonValue | undefined }>) => boolean
+	}>
 }>
 
 /** A warning of RootShell's `t`; the union is closed, and another code needs a contract extension. */

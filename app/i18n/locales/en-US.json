@@ -533,6 +533,10 @@
       "title": "Preview is blocked",
       "description": "{locale} is the primary Locale but has no file, so nothing is previewed or captured. Create it in Workspace › Locales."
     },
+    "themeUnsupported": {
+      "title": "Theme not supported",
+      "description": "The active Adapters don't support the theme {theme}, so this View isn't previewed or captured with it, and no other theme stands in. Pick another theme, or see Product Kit › Adapters."
+    },
     "emptySlotTitle": "No Widgets yet",
     "emptySlotDescription": "Add child Widgets to the {slot} slot to render them with {core}.",
     "errors": {
@@ -1288,6 +1292,8 @@
     "package": "Package",
     "version": "Version",
     "apiVersion": "API",
+    "unsupportedThemes": "Unsupported themes",
+    "noUnsupportedThemes": "None",
     "config": "Config",
     "configLabel": "Config for {name}",
     "configHelp": "JSON. The Adapter's own schema validates it on save. Leave it empty for none.",
@@ -2173,6 +2179,7 @@
       "invalid_config_schema": "The Adapter’s config rules are not valid.",
       "invalid_provider": "An Adapter provider is not a Vue plugin.",
       "invalid_registry_identity": "An Adapter registry key is not valid.",
+      "invalid_theme_support": "The Adapter’s themeSupport must be an object with a supports function.",
       "manifest_load_failed": "The Adapter could not be loaded.",
       "materialization_unavailable": "The preview cannot load this external Adapter yet.",
       "provenance_unverifiable": "The Adapter’s origin cannot be verified.",
@@ -2194,6 +2201,7 @@
       "runtime_renderer_decode_failed": "A renderer in the Adapter could not be loaded.",
       "runtime_renderer_ownership_mismatch": "The Adapter’s renderers do not match what it declared.",
       "runtime_widget_core_incompatible": "A Widget in the Adapter was not created by the widget-core that UIUX runs: it comes from another widget-core copy, or it is not a completed Widget. Do not bundle widget-core into the Adapter.",
+      "theme_support_failed": "The Adapter couldn’t say whether it supports a theme, so that theme counts as unsupported.",
       "unsupported_config_schema_dialect": "The Adapter’s config rules use an unsupported format.",
       "vue_renderer_registry_invalid": "The Adapter’s Vue renderers are not valid."
     },
@@ -2260,7 +2268,7 @@
     },
     "render_context": {
       "empty_selection": "Choose at least one context to capture.",
-      "incompatible_theme": "This theme does not apply to this View.",
+      "incompatible_theme": "The active Adapters don’t support this theme.",
       "invalid_locale": "The Locale is not a valid language tag.",
       "unknown_locale": "This Locale does not exist in the Workspace.",
       "unknown_theme": "This theme does not exist in the Workspace.",
