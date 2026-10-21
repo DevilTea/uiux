@@ -7,6 +7,7 @@ import { containedRealPath, maskHostPaths } from '../adapters/kit-registry'
 import { readKitBuildDeclaration, type KitBuildDeclaration } from '../adapters/kit-build-declaration'
 import { realDirectoryIdentity } from '../adapters/resolution'
 import type { KitBuildControl, KitBuildRestart, KitBuildStatus } from '../application/ports/kit-build'
+import { diagnostics } from '../logging/diagnostics'
 
 /**
  * The kit build runner (Feature 01a11bb1-8534-7f0f-b8d0-de7efabe31f7). Under `uiux dev` it runs the
@@ -240,7 +241,7 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 	const settleMs = options.settleMs ?? KIT_BUILD_SETTLE_MS
 	const pollMs = options.pollMs ?? DEFAULT_POLL_MS
 	const killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS
-	const print = options.print ?? ((line: string) => console.log(line))
+	const print = options.print ?? ((line: string) => diagnostics.info(line))
 	const detached = process.platform !== 'win32'
 	const log = new KitBuildLog()
 	let status: KitBuildStatus = { state: 'none' }

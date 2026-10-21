@@ -7,6 +7,7 @@ import { emptyProductKit } from '../domain/product-kit/schema'
 import { V5_LAYOUT, WORKSPACE_DATA_DIRECTORY } from '../persistence/paths'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, WORKSPACE_GITIGNORE_RULES } from '../product/workspace-schema'
 import { isSameOrInside, realFuturePath, resolveUiuxHome } from '../server/access/store'
+import { writeStderrLine, writeStdoutLine } from './output'
 
 export type InitCommandOptions = Readonly<{
 	/** `--workspace <dir>` as given; omitted, the default location is used. */
@@ -40,8 +41,8 @@ export type InitCommandOptions = Readonly<{
  * before the first write. Returns 0 on success, 2 when refused.
  */
 export async function runInitCommand(options: InitCommandOptions = {}): Promise<number> {
-	const out = options.stdout ?? (line => console.log(line))
-	const err = options.stderr ?? (line => console.error(line))
+	const out = options.stdout ?? writeStdoutLine
+	const err = options.stderr ?? writeStderrLine
 	const cwd = resolve(options.cwd ?? process.cwd())
 	const root = options.workspace === undefined
 		? join((options.gitToplevel ?? gitToplevel)(cwd) ?? cwd, WORKSPACE_DATA_DIRECTORY.workspaceMeta)

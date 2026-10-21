@@ -6,6 +6,7 @@ import type { PermissionKey } from '../application/access/keys'
 import type { MemberPrincipal } from '../application/access/principal'
 import type { ChangeEvent, ChangeEventBus } from '../application/services/change-events'
 import { denyUnlessAllowed, requestPrincipal } from './access/http'
+import { diagnostics } from '../logging/diagnostics'
 
 /**
  * `GET /api/events`, the change-event stream (Clause 01a114ec-e839-7b11-957c-41c88b692e12) of the
@@ -98,7 +99,7 @@ export function createEventStreamHub(options: EventStreamHubOptions): EventStrea
 		beating = true
 		try {
 			try { await options.onHeartbeat?.() }
-			catch (error) { console.warn(`uiux: the event stream heartbeat work failed: ${error instanceof Error ? error.message : String(error)}`) }
+			catch (error) { diagnostics.warn(`uiux: the event stream heartbeat work failed: ${error instanceof Error ? error.message : String(error)}`) }
 			revalidate()
 			for (const stream of [...streams]) write(stream, eventFrame('heartbeat', {}))
 		}

@@ -22,6 +22,7 @@ import { writeSnapshotCheckpointUnlocked } from '../../persistence/history/snaps
 import { mergeTimeline } from '../../persistence/history/timeline'
 import { copyVersionBlobsToHostUnlocked } from '../../persistence/history/version-blobs'
 import { outsideDesignWriteContext, type DesignWriteContext } from '../../persistence/history/write-context'
+import { diagnostics } from '../../logging/diagnostics'
 
 /**
  * The autosave recorder of the Workspace version timeline (Feature 01a11a5d-fc56-7e10-9d16-9d333aa2995c).
@@ -216,7 +217,7 @@ class AutosaveRecorder implements HistoryRecorder {
 		this.openStores = options.stores
 		this.clock = options.clock ?? SYSTEM_CLOCK
 		this.operationTimeout = options.operationTimeoutMilliseconds ?? DEFAULT_OPERATION_TIMEOUT_MS
-		this.log = options.log ?? (message => console.error(message))
+		this.log = options.log ?? (message => diagnostics.error(message))
 		this.observer = Object.freeze({
 			beforeCanonicalWrite: (context: DesignWriteContext, resources: readonly CanonicalResourceBefore[], signal?: AbortSignal) => this.hook(signal, abandoned => this.beforeWrite(context, resources, abandoned)),
 			afterCanonicalCommit: (context: DesignWriteContext, changes: readonly CanonicalResourceChange[], signal?: AbortSignal) => this.hook(signal, abandoned => this.afterCommit(context, changes, abandoned)),

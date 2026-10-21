@@ -5,6 +5,7 @@ import type { ResourceRevision } from '../dto/revisions'
 import { ACCESS_PRESETS_RESOURCE_KIND } from '../../domain/access-presets/schema'
 import { PRODUCT_KIT_RESOURCE_KIND } from '../../domain/product-kit/schema'
 import type { CommittedResourceChange } from '../../persistence/file-native'
+import { diagnostics } from '../../logging/diagnostics'
 
 /**
  * The change events the server pushes to open Workbenches (Feature "Live refresh",
@@ -50,7 +51,7 @@ export function createChangeEventBus(options: Readonly<{ serverInstanceId?: stri
 		publish(event) {
 			for (const listener of [...listeners]) {
 				try { listener(event) }
-				catch (error) { console.error(`uiux: a change-event listener failed: ${error instanceof Error ? error.message : String(error)}`) }
+				catch (error) { diagnostics.error(`uiux: a change-event listener failed: ${error instanceof Error ? error.message : String(error)}`) }
 			}
 		},
 		subscribe(listener) {

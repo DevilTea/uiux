@@ -36,6 +36,7 @@ import {
 	type StoredMember,
 } from '../server/access/roster'
 import { AccessStore, assertHomeOutsideWorkspace, assertReplacementKeepsManager, copyHostHistory, planHostHistoryCopy, realFuturePath, resolveUiuxHome, rosterExists, workspaceRealRoot, writeNewRoster, type HostHistoryCopyResult } from '../server/access/store'
+import { writeStderrLine, writeStdoutLine } from './output'
 
 /**
  * `uiux member | token | invite | session | access copy` (accepted identity decision 9). Every
@@ -178,8 +179,8 @@ function presetNotes(preset: LabelPreset, kind: MemberKind): string[] {
 const when = (value: string | null) => value ? value.replace('T', ' ').slice(0, 16) : '-'
 
 export async function runAccessCommand(options: AccessCommandOptions): Promise<number> {
-	const out = options.stdout ?? (line => console.log(line))
-	const err = options.stderr ?? (line => console.error(line))
+	const out = options.stdout ?? writeStdoutLine
+	const err = options.stderr ?? writeStderrLine
 	const cwd = options.cwd ?? process.cwd()
 	const env = options.env ?? process.env
 	const now = options.now ?? (() => new Date())

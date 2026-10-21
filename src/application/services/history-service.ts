@@ -10,6 +10,7 @@ import { writeSnapshotCheckpointUnlocked } from '../../persistence/history/snaps
 import { mergeTimeline, pageTimeline, readMergedTimeline, TimelineCursorError, type MergedTimeline, type TimelineVersion } from '../../persistence/history/timeline'
 import type { HistoryStoreSource } from './history-diff'
 import type { HistoryRecorder } from './history-recorder'
+import { diagnostics } from '../../logging/diagnostics'
 
 /**
  * Named Checkpoints and the version listing (Features 01a11a5d-fcb9-72b3-a52d-52c0fbd74401 and
@@ -131,7 +132,7 @@ export function createHistoryService(
 	history: HistoryStoreSource | undefined,
 	options: Readonly<{ boundary?: () => CheckpointBoundary | undefined; log?: (message: string) => void }> = {},
 ): HistoryService {
-	const log = options.log ?? ((message: string) => console.warn(message))
+	const log = options.log ?? ((message: string) => diagnostics.warn(message))
 
 	async function openStores(): Promise<Awaited<ReturnType<HistoryStoreSource['open']>> | HistoryRefusal> {
 		try {
