@@ -2,6 +2,7 @@ import { configureServerNetwork, createLoopbackGuardHandler } from '../../src/se
 import { createAccessGuardHandler } from '../../src/server/access/http'
 import { setServerNetwork, startupLines } from '../../src/server/network-access'
 import { getSelectedWorkspaceServerRuntime, resolveInternalServerOrigin } from '../../src/server/selected-workspace'
+import { diagnostics } from '../../src/logging/diagnostics'
 
 /**
  * The bind and origin policy of the live server (Feature 01a12500-a0a0-74c0-b83b-3dbb628689e4).
@@ -27,11 +28,11 @@ export default defineNitroPlugin((nitroApp) => {
 	if (!import.meta.dev) {
 		const network = configureServerNetwork(process.env, { localSocket: unixSocket })
 		if (!network.ok) {
-			console.error(`uiux: ${network.message}`)
+			diagnostics.error(`uiux: ${network.message}`)
 			process.exit(2)
 		}
 		setServerNetwork(network.value)
-		if (!unixSocket) console.log(startupLines(resolveInternalServerOrigin(), network.value).join('\n'))
+		if (!unixSocket) diagnostics.info(startupLines(resolveInternalServerOrigin(), network.value).join('\n'))
 	}
 
 	nitroApp.h3App.stack.unshift(

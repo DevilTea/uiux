@@ -39,6 +39,7 @@ import {
 	type WorkspaceInspection,
 	type WorkspaceSchemaPolicy,
 } from './schema-policy'
+import { diagnostics } from '../logging/diagnostics'
 
 export type PersistenceFaultPoint =
 	| 'file.before_rename'
@@ -2007,13 +2008,13 @@ async function notifyCommitListeners(persistence: FileNativePersistence, changes
 		}
 	}
 	catch (error) {
-		console.error(`uiux: could not describe a committed write for the change events: ${error instanceof Error ? error.message : String(error)}`)
+		diagnostics.error(`uiux: could not describe a committed write for the change events: ${error instanceof Error ? error.message : String(error)}`)
 		return
 	}
 	if (committed.length === 0) return
 	for (const listener of listeners) {
 		try { listener(committed) }
-		catch (error) { console.error(`uiux: a commit listener failed: ${error instanceof Error ? error.message : String(error)}`) }
+		catch (error) { diagnostics.error(`uiux: a commit listener failed: ${error instanceof Error ? error.message : String(error)}`) }
 	}
 }
 
@@ -2124,7 +2125,7 @@ async function invokeObserver(persistence: FileNativePersistence, state: Observe
 		})
 		if (await Promise.race([pending.then(() => 'settled' as const), timedOut]) === 'timeout') {
 			abandon.abort()
-			pending.catch((error: unknown) => console.error(`uiux: abandoned history ${hook} failed later: ${error instanceof Error ? error.message : String(error)}`))
+			pending.catch((error: unknown) => diagnostics.error(`uiux: abandoned history ${hook} failed later: ${error instanceof Error ? error.message : String(error)}`))
 			reportObserverFailure(state, `${hook} did not finish within ${state.timeoutMilliseconds} ms and was abandoned`, undefined)
 			return false
 		}
@@ -2144,7 +2145,7 @@ async function invokeObserver(persistence: FileNativePersistence, state: Observe
 function reportObserverFailure(state: ObserverState, what: string, error: unknown): void {
 	state.recordingGap = true
 	const detail = error === undefined ? '' : `: ${error instanceof Error ? error.message : String(error)}`
-	console.error(`uiux: history ${what}; the write was kept and the gap is recorded at the next history boundary${detail}`)
+	diagnostics.error(`uiux: history ${what}; the write was kept and the gap is recorded at the next history boundary${detail}`)
 }
 
 function compareCodeUnits(left: string, right: string): number {

@@ -38,6 +38,7 @@ import {
 	type StoredToken,
 } from './roster'
 import type { AccessStore } from './store'
+import { diagnostics } from '../../logging/diagnostics'
 
 /**
  * The live server's view of its Workspace roster: authentication of every request, sign-in,
@@ -144,7 +145,7 @@ export class AccessService {
 		this.rosterSignature = signature
 		for (const listener of [...this.changeListeners]) {
 			try { listener(change) }
-			catch (error) { console.error(`uiux: an access change listener failed: ${error instanceof Error ? error.message : String(error)}`) }
+			catch (error) { diagnostics.error(`uiux: an access change listener failed: ${error instanceof Error ? error.message : String(error)}`) }
 		}
 	}
 
@@ -344,7 +345,7 @@ export class AccessService {
 		const tokens = new Map(this.tokenUsage)
 		const sessions = new Map(this.sessionUsage)
 		this.flushing = this.store.update(file => ({ file: applyUsage(file, { tokens, sessions }), result: undefined }))
-			.catch((error: unknown) => { console.warn(`uiux: could not record credential usage: ${error instanceof Error ? error.message : String(error)}`) })
+			.catch((error: unknown) => { diagnostics.warn(`uiux: could not record credential usage: ${error instanceof Error ? error.message : String(error)}`) })
 			.finally(() => { this.flushing = undefined })
 		return this.flushing
 	}

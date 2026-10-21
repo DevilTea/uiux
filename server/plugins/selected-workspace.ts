@@ -12,6 +12,7 @@ import {
 	getSelectedWorkspaceServerRuntime,
 	resolveInternalServerOrigin,
 } from '../../src/server/selected-workspace'
+import { diagnostics } from '../../src/logging/diagnostics'
 
 export default defineNitroPlugin((nitroApp) => {
 	let pendingHold: Promise<AcquiredServerHold | undefined> | undefined
@@ -20,7 +21,7 @@ export default defineNitroPlugin((nitroApp) => {
 		// The layout entry check runs before the runtime opens anything: no lock, hold or recovery yet.
 		const selection = checkWorkspaceSelection(resolve(process.env.UIUX_WORKSPACE_ROOT), PRODUCT_WORKSPACE_SCHEMA_POLICY)
 		if (!selection.ok) {
-			console.error(`uiux: ${selection.message}`)
+			diagnostics.error(`uiux: ${selection.message}`)
 			process.exit(2)
 		}
 		const runtime = getSelectedWorkspaceServerRuntime()
@@ -40,17 +41,17 @@ export default defineNitroPlugin((nitroApp) => {
 				.then(async (access) => {
 					const banner = await access.bootstrap([resolveInternalServerOrigin(), ...getServerNetwork().origins.map(origin => origin.origin)])
 					if (banner) writeUnredacted(banner)
-					if (access.store.paths) console.log(`uiux: access roster ${access.hint} for ${access.workspaceRoot} (${access.store.paths.file}).`)
+					if (access.store.paths) diagnostics.info(`uiux: access roster ${access.hint} for ${access.workspaceRoot} (${access.store.paths.file}).`)
 				})
 				.catch((error: unknown) => {
-					console.error(`uiux: ${error instanceof AccessError ? error.message : `could not open the access store: ${error instanceof Error ? error.message : String(error)}`}`)
+					diagnostics.error(`uiux: ${error instanceof AccessError ? error.message : `could not open the access store: ${error instanceof Error ? error.message : String(error)}`}`)
 					process.exit(2)
 				})
 			// Version history: close a leftover autosave, record changes made while no server ran,
 			// write the Baseline on a host without history, prune, then record design writes. A
 			// failure here is logged and never stops the server.
 			void runtime.historyRecorder.start().then((report) => {
-				if (report.baseline) console.log(`uiux: history recorded the Baseline Checkpoint ${report.baseline} for ${runtime.root}.`)
+				if (report.baseline) diagnostics.info(`uiux: history recorded the Baseline Checkpoint ${report.baseline} for ${runtime.root}.`)
 			})
 			pendingHold = acquireServerHold(resolve(process.env.UIUX_WORKSPACE_ROOT), { origin: resolveInternalServerOrigin(), layout: runtime.persistence.layout })
 				.then((hold) => {
@@ -58,14 +59,14 @@ export default defineNitroPlugin((nitroApp) => {
 					return hold
 				})
 				.catch((error: unknown) => {
-					console.warn(`uiux: could not record the Workspace server hold: ${error instanceof Error ? error.message : String(error)}`)
+					diagnostics.warn(`uiux: could not record the Workspace server hold: ${error instanceof Error ? error.message : String(error)}`)
 					return undefined
 				})
 			process.once('exit', () => acquiredHold?.releaseSync())
 			// The kit build (Rule 01a11bb1-9d90-79c0-a51d-44382359bb6b): one process for the Workspace, the
 			// declared watch command or else the build command once. Its argument array is printed first.
 			void runtime.kitBuild.start().catch((error: unknown) => {
-				console.warn(`uiux: could not start the kit build: ${error instanceof Error ? error.message : String(error)}`)
+				diagnostics.warn(`uiux: could not start the kit build: ${error instanceof Error ? error.message : String(error)}`)
 			})
 			process.once('exit', () => runtime.kitBuild.stopSync())
 		}

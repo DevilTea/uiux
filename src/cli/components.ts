@@ -28,6 +28,7 @@ import { validateProductKit, type ProductKit } from '../domain/product-kit/schem
 import { isSafeRelativePath } from '../domain/validation'
 import { isSameOrInside, realFuturePath } from '../server/access/store'
 import { selectCliWorkspace } from './workspace-selection'
+import { writeStderrLine, writeStdoutLine } from './output'
 
 /** The CLI reads kit source files of any size: the 8 MiB limit is the MCP and Workbench reads' (Clause 01a13d3e-c4b5-…). */
 const KIT_READ: KitFileReadOptions = { maxBytes: Number.POSITIVE_INFINITY }
@@ -84,8 +85,8 @@ type Context = Readonly<{
 }>
 
 export async function runComponentsCommand(options: ComponentsCommandOptions): Promise<number> {
-	const out = options.stdout ?? (line => console.log(line))
-	const err = options.stderr ?? (line => console.error(line))
+	const out = options.stdout ?? writeStdoutLine
+	const err = options.stderr ?? writeStderrLine
 	const context: Context = {
 		cwd: resolve(options.cwd ?? process.cwd()),
 		out,

@@ -21,6 +21,7 @@ import {
 	type KitFileDigestOutcome,
 	type KitTreeScan,
 } from './kit-source-files'
+import { diagnostics } from '../logging/diagnostics'
 
 /**
  * The most kit files one digest of Product Kit provenance covers. A kit with more has no provenance
@@ -309,7 +310,7 @@ export async function workspaceProductKitProvenanceUnlocked(persistence: Product
 	// outlasts the budget, and with it the lock, reads nothing the lock guards.
 	const provenance = await withinBudget(computeProductKitProvenance({ root: persistence.root, codeDirectoryName: codeDir, productKit: parsed as JsonObject }), budgetMilliseconds)
 	if (provenance !== EXPIRED) return provenance
-	const log = options.log ?? (message => console.error(message))
+	const log = options.log ?? (message => diagnostics.error(message))
 	log(provenanceBudgetMessage(budgetMilliseconds))
 	return undefined
 }

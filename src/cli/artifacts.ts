@@ -8,6 +8,7 @@ import type { WorkspaceSchemaPolicy } from '../persistence/schema-policy'
 import { selectWorkspace } from '../persistence/workspace-selection'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
 import { assertHomeOutsideWorkspace, hostHistoryPaths, resolveUiuxHome, workspaceRealRoot } from '../server/access/store'
+import { writeStderrLine, writeStdoutLine } from './output'
 
 export const ARTIFACTS_USAGE = 'artifacts gc [--workspace <dir>] [--dry-run]'
 
@@ -35,8 +36,8 @@ export type ArtifactsCommandOptions = Readonly<{
  * refuses before any lock, server hold, recovery, read or write.
  */
 export async function runArtifactsCommand(options: ArtifactsCommandOptions): Promise<number> {
-	const out = options.stdout ?? (line => console.log(line))
-	const err = options.stderr ?? (line => console.error(line))
+	const out = options.stdout ?? writeStdoutLine
+	const err = options.stderr ?? writeStderrLine
 	const cwd = options.cwd ?? process.cwd()
 	const schemaPolicy = options.schemaPolicy ?? PRODUCT_WORKSPACE_SCHEMA_POLICY
 	const usage = (message: string): number => {
