@@ -832,7 +832,7 @@ export const labelPlugin = createWidgetPlugin('Label')
   .interfaces()
   .config({
     schema: { type: 'object', properties: { titleKey: { type: 'string' } }, additionalProperties: false },
-    validate: (input) => input === undefined || (typeof input === 'object' && input !== null),
+    validate: (input) => input === null || (typeof input === 'object' && !Array.isArray(input)),
     resolve: (raw) => ({ titleKey: raw?.titleKey ?? null }),
   })
   .properties(p => p

@@ -185,7 +185,9 @@ function configSchema(properties: Record<string, WidgetConfigJsonSchema>): Widge
 	}
 }
 
-const isConfigObject = (input: unknown): boolean => typeof input === 'object' && input !== null && !Array.isArray(input)
+// widget-core validates an omitted Config as `null` (0.0.5+), so every Config here accepts `null` and its
+// `raw` type includes it: a Widget may omit its Config and resolves to the defaults.
+const isConfigOrOmitted = (input: unknown): boolean => input === null || (typeof input === 'object' && !Array.isArray(input))
 const isBoolean = (v: unknown): v is boolean => typeof v === 'boolean'
 
 function splitResponsive<T extends object>(raw: (T & { responsive?: Responsive<T> }) | null): { base: T; responsive?: Responsive<T> } {
@@ -344,7 +346,7 @@ export interface StackLayout {
 
 export interface StackInterfaces {
 	config: {
-		raw: StackLayout & { responsive?: Responsive<StackLayout> }
+		raw: (StackLayout & { responsive?: Responsive<StackLayout> }) | null
 		resolved: { base: StackLayout; responsive?: Responsive<StackLayout> }
 	}
 	slots: 'content'
@@ -396,7 +398,7 @@ export const stackPlugin = createWidgetPlugin('Stack')
 			background: { type: 'string' },
 			radius: { type: ['number', 'string'] },
 		}),
-		validate: (c): c is StackInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is StackInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: raw => splitResponsive<StackLayout>(raw),
 	})
 	.slots({ content: { description: 'Nested child widgets' } })
@@ -500,12 +502,12 @@ type PanelVariant = 'default' | 'surface' | 'sidebar' | 'canvas' | 'card' | 'dia
 
 export interface PanelInterfaces {
 	config: {
-		raw: PanelLayout & {
+		raw: (PanelLayout & {
 			title?: string
 			titleKey?: string
 			variant?: PanelVariant
 			responsive?: Responsive<PanelLayout>
-		}
+		}) | null
 		resolved: {
 			title: string
 			titleKey: string | null
@@ -546,7 +548,7 @@ export const panelPlugin = createWidgetPlugin('Panel')
 			hidden: { type: 'boolean' },
 			visible: { type: 'boolean' },
 		}),
-		validate: (c): c is PanelInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is PanelInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { title, titleKey, variant, ...layout } = raw ?? {}
 			const split = splitResponsive<PanelLayout>(layout)
@@ -645,7 +647,7 @@ export interface TextPresentation {
 
 export interface TextInterfaces {
 	config: {
-		raw: TextPresentation & {
+		raw: (TextPresentation & {
 			text?: string
 			textKey?: string
 			/** Interpolated into a translated template as `{value}`. */
@@ -656,7 +658,7 @@ export interface TextInterfaces {
 			/** Semantic heading level for the rendered element, independent of the visual variant. */
 			level?: 1 | 2 | 3 | 4
 			responsive?: Responsive<TextPresentation>
-		}
+		}) | null
 		resolved: {
 			text: string
 			textKey: string | null
@@ -701,7 +703,7 @@ export const textPlugin = createWidgetPlugin('Text')
 			align: { enum: ['start', 'center', 'end'] },
 			hidden: { type: 'boolean' },
 		}),
-		validate: (c): c is TextInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is TextInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { text, textKey, value, weight, tone, mono, level, ...presentation } = raw ?? {}
 			return {
@@ -807,7 +809,7 @@ type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'outline' | 'danger' | 
 
 export interface ButtonInterfaces {
 	config: {
-		raw: ButtonPresentation & {
+		raw: (ButtonPresentation & {
 			label?: string
 			labelKey?: string
 			variant?: ButtonVariant
@@ -816,7 +818,7 @@ export interface ButtonInterfaces {
 			trailingIcon?: string
 			kbd?: string
 			responsive?: Responsive<ButtonPresentation>
-		}
+		}) | null
 		resolved: {
 			label: string
 			labelKey: string | null
@@ -865,7 +867,7 @@ export const buttonPlugin = createWidgetPlugin('Button')
 			hidden: { type: 'boolean' },
 			hideKbd: { type: 'boolean' },
 		}),
-		validate: (c): c is ButtonInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is ButtonInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { label, labelKey, variant, disabled, icon, trailingIcon, kbd, ...presentation } = raw ?? {}
 			return {
@@ -965,7 +967,7 @@ type BadgeTone = 'neutral' | 'primary' | 'annotation' | 'success' | 'warning' | 
 
 export interface BadgeInterfaces {
 	config: {
-		raw: BadgePresentation & {
+		raw: (BadgePresentation & {
 			label?: string
 			labelKey?: string
 			/** Interpolated into a translated template as `{value}`. */
@@ -974,7 +976,7 @@ export interface BadgeInterfaces {
 			variant?: 'subtle' | 'soft' | 'solid' | 'outline' | 'mono' | 'count'
 			icon?: string
 			responsive?: Responsive<BadgePresentation>
-		}
+		}) | null
 		resolved: {
 			label: string
 			labelKey: string | null
@@ -1016,7 +1018,7 @@ export const badgePlugin = createWidgetPlugin('Badge')
 			icon: { type: 'string' },
 			hidden: { type: 'boolean' },
 		}),
-		validate: (c): c is BadgeInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is BadgeInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { label, labelKey, value, tone, variant, icon, ...presentation } = raw ?? {}
 			return {
@@ -1119,7 +1121,7 @@ export interface TextInputPresentation {
 
 export interface TextInputInterfaces {
 	config: {
-		raw: TextInputPresentation & {
+		raw: (TextInputPresentation & {
 			value?: string
 			placeholder?: string
 			placeholderKey?: string
@@ -1137,7 +1139,7 @@ export interface TextInputInterfaces {
 			/** Renders a textarea with this many rows. */
 			rows?: number
 			responsive?: Responsive<TextInputPresentation>
-		}
+		}) | null
 		resolved: {
 			value: string
 			placeholder: string
@@ -1201,7 +1203,7 @@ export const textInputPlugin = createWidgetPlugin('TextInput')
 			hidden: { type: 'boolean' },
 			hideKbd: { type: 'boolean' },
 		}),
-		validate: (c): c is TextInputInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is TextInputInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { value, placeholder, placeholderKey, readOnly, label, labelKey, help, helpKey, error, errorKey, invalid, icon, kbd, mono, rows, ...presentation } = raw ?? {}
 			return {
@@ -1330,7 +1332,7 @@ export interface NavItemPresentation {
 
 export interface NavItemInterfaces {
 	config: {
-		raw: NavItemPresentation & {
+		raw: (NavItemPresentation & {
 			label?: string
 			labelKey?: string
 			icon?: string
@@ -1341,7 +1343,7 @@ export interface NavItemInterfaces {
 			badgeTone?: 'neutral' | 'annotation'
 			selected?: boolean
 			responsive?: Responsive<NavItemPresentation>
-		}
+		}) | null
 		resolved: {
 			label: string
 			labelKey: string | null
@@ -1395,7 +1397,7 @@ export const navItemPlugin = createWidgetPlugin('NavItem')
 			hideMeta: { type: 'boolean' },
 			hidden: { type: 'boolean' },
 		}),
-		validate: (c): c is NavItemInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is NavItemInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { label, labelKey, icon, meta, metaKey, badge, badgeKey, badgeTone, selected, ...presentation } = raw ?? {}
 			return {
@@ -1507,7 +1509,7 @@ export interface DividerPresentation {
 
 export interface DividerInterfaces {
 	config: {
-		raw: DividerPresentation & { responsive?: Responsive<DividerPresentation> }
+		raw: (DividerPresentation & { responsive?: Responsive<DividerPresentation> }) | null
 		resolved: { base: DividerPresentation; responsive?: Responsive<DividerPresentation> }
 	}
 	properties: {
@@ -1526,7 +1528,7 @@ export const dividerPlugin = createWidgetPlugin('Divider')
 			spacing: { type: ['number', 'string'] },
 			hidden: { type: 'boolean' },
 		}),
-		validate: (c): c is DividerInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is DividerInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: raw => splitResponsive<DividerPresentation>(raw),
 	})
 	.properties(p => p
@@ -1591,14 +1593,14 @@ export interface AvatarPresentation {
 
 export interface AvatarInterfaces {
 	config: {
-		raw: AvatarPresentation & {
+		raw: (AvatarPresentation & {
 			initials?: string
 			actor?: ActorKind
 			tone?: 'neutral' | 'annotation' | 'primary'
 			label?: string
 			labelKey?: string
 			responsive?: Responsive<AvatarPresentation>
-		}
+		}) | null
 		resolved: { initials: string; actor: ActorKind; tone: string; label: string; labelKey: string | null; base: AvatarPresentation; responsive?: Responsive<AvatarPresentation> }
 	}
 	properties: {
@@ -1623,7 +1625,7 @@ export const avatarPlugin = createWidgetPlugin('Avatar')
 			size: { type: 'number' },
 			hidden: { type: 'boolean' },
 		}),
-		validate: (c): c is AvatarInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is AvatarInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { initials, actor, tone, label, labelKey, ...presentation } = raw ?? {}
 			return {
@@ -1676,7 +1678,7 @@ export const AvatarRenderer = defineComponent({
 // ---------------------------------------------------------------------------
 export interface KbdInterfaces {
 	config: {
-		raw: { keys?: string; hidden?: boolean; responsive?: Responsive<{ hidden?: boolean }> }
+		raw: ({ keys?: string; hidden?: boolean; responsive?: Responsive<{ hidden?: boolean }> }) | null
 		resolved: { keys: string; base: { hidden?: boolean }; responsive?: Responsive<{ hidden?: boolean }> }
 	}
 	properties: { keys: string; hidden: boolean; theme: string }
@@ -1688,7 +1690,7 @@ export const kbdPlugin = createWidgetPlugin('Kbd')
 	.config({
 		description: 'Kbd configuration. `keys` is a literal such as "⌘K", "C" or "Esc".',
 		schema: configSchema({ keys: { type: 'string' }, hidden: { type: 'boolean' } }),
-		validate: (c): c is KbdInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is KbdInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { keys, ...presentation } = raw ?? {}
 			return { keys: stringOr(keys, ''), ...splitResponsive<{ hidden?: boolean }>(presentation) }
@@ -1734,7 +1736,7 @@ export interface PinPlacement {
 
 export interface PinInterfaces {
 	config: {
-		raw: PinPlacement & {
+		raw: (PinPlacement & {
 			initials?: string
 			actor?: ActorKind
 			status?: PinStatus
@@ -1742,7 +1744,7 @@ export interface PinInterfaces {
 			label?: string
 			labelKey?: string
 			responsive?: Responsive<PinPlacement>
-		}
+		}) | null
 		resolved: { initials: string; actor: ActorKind; status: PinStatus; selected: boolean; label: string; labelKey: string | null; base: PinPlacement; responsive?: Responsive<PinPlacement> }
 	}
 	state: { status: PinStatus; selected: boolean; visible: boolean }
@@ -1772,7 +1774,7 @@ export const pinPlugin = createWidgetPlugin('Pin')
 			y: { type: 'string' },
 			hidden: { type: 'boolean' },
 		}),
-		validate: (c): c is PinInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is PinInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { initials, actor, status, selected, label, labelKey, ...placement } = raw ?? {}
 			return {
@@ -1855,7 +1857,7 @@ export interface BubbleLayout {
 
 export interface BubbleInterfaces {
 	config: {
-		raw: BubbleLayout & {
+		raw: (BubbleLayout & {
 			title?: string
 			titleKey?: string
 			statusLabel?: string
@@ -1868,7 +1870,7 @@ export interface BubbleInterfaces {
 			closeLabel?: string
 			closeLabelKey?: string
 			responsive?: Responsive<BubbleLayout>
-		}
+		}) | null
 		resolved: {
 			title: string
 			titleKey: string | null
@@ -1929,7 +1931,7 @@ export const bubblePlugin = createWidgetPlugin('Bubble')
 			placement: { enum: ['anchored', 'sheet', 'inline'] },
 			hidden: { type: 'boolean' },
 		}),
-		validate: (c): c is BubbleInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is BubbleInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { title, titleKey, statusLabel, statusLabelKey, status, target, context, contextKey, open, closeLabel, closeLabelKey, ...layout } = raw ?? {}
 			return {
@@ -2050,7 +2052,7 @@ export interface CanvasLayout {
 
 export interface CanvasStageInterfaces {
 	config: {
-		raw: CanvasLayout & { mode?: CanvasMode; label?: string; labelKey?: string; responsive?: Responsive<CanvasLayout> }
+		raw: (CanvasLayout & { mode?: CanvasMode; label?: string; labelKey?: string; responsive?: Responsive<CanvasLayout> }) | null
 		resolved: { mode: CanvasMode; label: string; labelKey: string | null; base: CanvasLayout; responsive?: Responsive<CanvasLayout> }
 	}
 	slots: 'frame' | 'overlay' | 'hint' | 'palette' | 'tray'
@@ -2080,7 +2082,7 @@ export const canvasStagePlugin = createWidgetPlugin('CanvasStage')
 			hidden: { type: 'boolean' },
 			frameFollowsTheme: { type: 'boolean' },
 		}),
-		validate: (c): c is CanvasStageInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is CanvasStageInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { mode, label, labelKey, ...layout } = raw ?? {}
 			return {
@@ -2171,7 +2173,7 @@ export interface SegmentedLayout { fullWidth?: boolean; hidden?: boolean }
 
 export interface SegmentedControlInterfaces {
 	config: {
-		raw: SegmentedLayout & { appearance?: SegmentAppearance; label?: string; labelKey?: string; responsive?: Responsive<SegmentedLayout> }
+		raw: (SegmentedLayout & { appearance?: SegmentAppearance; label?: string; labelKey?: string; responsive?: Responsive<SegmentedLayout> }) | null
 		resolved: { appearance: SegmentAppearance; label: string; labelKey: string | null; base: SegmentedLayout; responsive?: Responsive<SegmentedLayout> }
 	}
 	slots: 'content'
@@ -2195,7 +2197,7 @@ export const segmentedControlPlugin = createWidgetPlugin('SegmentedControl')
 			fullWidth: { type: 'boolean' },
 			hidden: { type: 'boolean' },
 		}),
-		validate: (c): c is SegmentedControlInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is SegmentedControlInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { appearance, label, labelKey, ...layout } = raw ?? {}
 			return { appearance: oneOf(appearance, SEGMENT_APPEARANCES, 'segment'), label: stringOr(label, ''), labelKey: optionalString(labelKey), ...splitResponsive<SegmentedLayout>(layout) }
@@ -2238,7 +2240,7 @@ export interface SegmentPresentation { iconOnly?: boolean; hidden?: boolean }
 
 export interface SegmentInterfaces {
 	config: {
-		raw: SegmentPresentation & {
+		raw: (SegmentPresentation & {
 			label?: string
 			labelKey?: string
 			icon?: string
@@ -2249,7 +2251,7 @@ export interface SegmentInterfaces {
 			activeTone?: 'primary' | 'annotation'
 			selected?: boolean
 			responsive?: Responsive<SegmentPresentation>
-		}
+		}) | null
 		resolved: {
 			label: string
 			labelKey: string | null
@@ -2292,7 +2294,7 @@ export const segmentPlugin = createWidgetPlugin('Segment')
 			iconOnly: { type: 'boolean' },
 			hidden: { type: 'boolean' },
 		}),
-		validate: (c): c is SegmentInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is SegmentInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { label, labelKey, icon, kbd, count, countTone, appearance, activeTone, selected, ...presentation } = raw ?? {}
 			return {
@@ -2381,7 +2383,7 @@ export const SegmentRenderer = defineComponent({
 // ---------------------------------------------------------------------------
 export interface TabBarInterfaces {
 	config: {
-		raw: { label?: string; labelKey?: string; showOn?: 'compact' | 'always' }
+		raw: ({ label?: string; labelKey?: string; showOn?: 'compact' | 'always' }) | null
 		resolved: { label: string; labelKey: string | null; showOn: 'compact' | 'always' }
 	}
 	slots: 'content'
@@ -2394,7 +2396,7 @@ export const tabBarPlugin = createWidgetPlugin('TabBar')
 	.config({
 		description: 'TabBar configuration. `label` (navigation landmark name) accepts an `$i18n` binding (lowered to `labelKey`).',
 		schema: configSchema({ label: { type: 'string' }, labelKey: { type: 'string' }, showOn: { enum: ['compact', 'always'] } }),
-		validate: (c): c is TabBarInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is TabBarInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: raw => ({ label: stringOr(raw?.label, ''), labelKey: optionalString(raw?.labelKey), showOn: raw?.showOn === 'always' ? 'always' : 'compact' }),
 	})
 	.slots({ content: { description: 'TabBarItem widgets' } })
@@ -2424,7 +2426,7 @@ export const TabBarRenderer = defineComponent({
 
 export interface TabBarItemInterfaces {
 	config: {
-		raw: { label?: string; labelKey?: string; icon?: string; badge?: string | number; badgeTone?: 'neutral' | 'annotation'; selected?: boolean }
+		raw: ({ label?: string; labelKey?: string; icon?: string; badge?: string | number; badgeTone?: 'neutral' | 'annotation'; selected?: boolean }) | null
 		resolved: { label: string; labelKey: string | null; icon: string; badge: string; badgeTone: string; selected: boolean }
 	}
 	state: { selected: boolean }
@@ -2441,7 +2443,7 @@ export const tabBarItemPlugin = createWidgetPlugin('TabBarItem')
 			label: { type: 'string' }, labelKey: { type: 'string' }, icon: { type: 'string' },
 			badge: { type: ['string', 'number'] }, badgeTone: { enum: ['neutral', 'annotation'] }, selected: { type: 'boolean' },
 		}),
-		validate: (c): c is TabBarItemInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is TabBarItemInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: raw => ({
 			label: stringOr(raw?.label, ''),
 			labelKey: optionalString(raw?.labelKey),
@@ -2496,7 +2498,7 @@ export interface RailLayout { width?: string; collapsed?: boolean; hidden?: bool
 
 export interface RailInterfaces {
 	config: {
-		raw: RailLayout & { label?: string; labelKey?: string; responsive?: Responsive<RailLayout> }
+		raw: (RailLayout & { label?: string; labelKey?: string; responsive?: Responsive<RailLayout> }) | null
 		resolved: { label: string; labelKey: string | null; base: RailLayout; responsive?: Responsive<RailLayout> }
 	}
 	slots: 'header' | 'content' | 'footer'
@@ -2509,7 +2511,7 @@ export const railPlugin = createWidgetPlugin('Rail')
 	.config({
 		description: 'Rail configuration. `label` (navigation landmark name) accepts an `$i18n` binding (lowered to `labelKey`).',
 		schema: configSchema({ label: { type: 'string' }, labelKey: { type: 'string' }, width: { type: 'string' }, collapsed: { type: 'boolean' }, hidden: { type: 'boolean' } }),
-		validate: (c): c is RailInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is RailInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { label, labelKey, ...layout } = raw ?? {}
 			const split = splitResponsive<RailLayout>(layout)
@@ -2566,7 +2568,7 @@ export const RailRenderer = defineComponent({
 // ---------------------------------------------------------------------------
 export interface ContextBarInterfaces {
 	config: {
-		raw: { label?: string; labelKey?: string; hidden?: boolean; responsive?: Responsive<{ hidden?: boolean }> }
+		raw: ({ label?: string; labelKey?: string; hidden?: boolean; responsive?: Responsive<{ hidden?: boolean }> }) | null
 		resolved: { label: string; labelKey: string | null; base: { hidden?: boolean }; responsive?: Responsive<{ hidden?: boolean }> }
 	}
 	slots: 'start' | 'end'
@@ -2579,7 +2581,7 @@ export const contextBarPlugin = createWidgetPlugin('ContextBar')
 	.config({
 		description: 'ContextBar configuration. `label` (toolbar accessible name) accepts an `$i18n` binding (lowered to `labelKey`).',
 		schema: configSchema({ label: { type: 'string' }, labelKey: { type: 'string' }, hidden: { type: 'boolean' } }),
-		validate: (c): c is ContextBarInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is ContextBarInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { label, labelKey, ...presentation } = raw ?? {}
 			return { label: stringOr(label, ''), labelKey: optionalString(labelKey), ...splitResponsive<{ hidden?: boolean }>(presentation) }
@@ -2618,7 +2620,7 @@ export interface ContextChipPresentation { hideLabel?: boolean; hidden?: boolean
 
 export interface ContextChipInterfaces {
 	config: {
-		raw: ContextChipPresentation & {
+		raw: (ContextChipPresentation & {
 			icon?: string
 			label?: string
 			labelKey?: string
@@ -2627,7 +2629,7 @@ export interface ContextChipInterfaces {
 			mono?: boolean
 			chevron?: boolean
 			responsive?: Responsive<ContextChipPresentation>
-		}
+		}) | null
 		resolved: { icon: string; label: string; labelKey: string | null; value: string; valueKey: string | null; mono: boolean; chevron: boolean; base: ContextChipPresentation; responsive?: Responsive<ContextChipPresentation> }
 	}
 	events: { click: readonly [] }
@@ -2655,7 +2657,7 @@ export const contextChipPlugin = createWidgetPlugin('ContextChip')
 			value: { type: 'string' }, valueKey: { type: 'string' }, mono: { type: 'boolean' }, chevron: { type: 'boolean' },
 			hideLabel: { type: 'boolean' }, hidden: { type: 'boolean' },
 		}),
-		validate: (c): c is ContextChipInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is ContextChipInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { icon, label, labelKey, value, valueKey, mono, chevron, ...presentation } = raw ?? {}
 			return {
@@ -2748,7 +2750,7 @@ export const ContextChipRenderer = defineComponent({
 // ---------------------------------------------------------------------------
 export interface TimelineItemInterfaces {
 	config: {
-		raw: {
+		raw: ({
 			kind?: 'message' | 'event'
 			actor?: ActorKind
 			initials?: string
@@ -2761,7 +2763,7 @@ export interface TimelineItemInterfaces {
 			bodyKey?: string
 			icon?: string
 			tone?: 'neutral' | 'success' | 'info' | 'annotation'
-		}
+		}) | null
 		resolved: {
 			kind: 'message' | 'event'
 			actor: ActorKind
@@ -2804,7 +2806,7 @@ export const timelineItemPlugin = createWidgetPlugin('TimelineItem')
 			icon: { type: 'string' },
 			tone: { enum: ['neutral', 'success', 'info', 'annotation'] },
 		}),
-		validate: (c): c is TimelineItemInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is TimelineItemInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: raw => ({
 			kind: raw?.kind === 'event' ? 'event' : 'message',
 			actor: oneOf(raw?.actor, ACTOR_KINDS, 'human'),
@@ -2875,7 +2877,7 @@ const THREAD_STATUS_ICON: Record<ThreadStatus, string> = { open: 'circle-dot', r
 
 export interface ThreadRowInterfaces {
 	config: {
-		raw: {
+		raw: ({
 			title?: string
 			titleKey?: string
 			meta?: string
@@ -2892,7 +2894,7 @@ export interface ThreadRowInterfaces {
 			unread?: boolean
 			hidden?: boolean
 			responsive?: Responsive<{ hidden?: boolean }>
-		}
+		}) | null
 		resolved: {
 			title: string
 			titleKey: string | null
@@ -2945,7 +2947,7 @@ export const threadRowPlugin = createWidgetPlugin('ThreadRow')
 			unread: { type: 'boolean' },
 			hidden: { type: 'boolean' },
 		}),
-		validate: (c): c is ThreadRowInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is ThreadRowInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
 			const { title, titleKey, meta, metaKey, time, timeKey, anchor, chips, count, initials, actor, status, selected, unread, ...presentation } = raw ?? {}
 			return {
@@ -3044,7 +3046,7 @@ const ALERT_ICON: Record<AlertTone, string> = { info: 'info', success: 'circle-c
 
 export interface AlertInterfaces {
 	config: {
-		raw: { tone?: AlertTone; icon?: string; title?: string; titleKey?: string; description?: string; descriptionKey?: string; toast?: boolean; visible?: boolean }
+		raw: ({ tone?: AlertTone; icon?: string; title?: string; titleKey?: string; description?: string; descriptionKey?: string; toast?: boolean; visible?: boolean }) | null
 		resolved: { tone: AlertTone; icon: string; title: string; titleKey: string | null; description: string; descriptionKey: string | null; toast: boolean; visible: boolean }
 	}
 	slots: 'actions'
@@ -3072,7 +3074,7 @@ export const alertPlugin = createWidgetPlugin('Alert')
 			toast: { type: 'boolean' },
 			visible: { type: 'boolean' },
 		}),
-		validate: (c): c is AlertInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is AlertInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: raw => ({
 			tone: oneOf(raw?.tone, ['info', 'success', 'warning', 'danger', 'annotation'] as const, 'info'),
 			icon: stringOr(raw?.icon, ''),
@@ -3125,7 +3127,7 @@ export const AlertRenderer = defineComponent({
 // ---------------------------------------------------------------------------
 export interface EmptyStateInterfaces {
 	config: {
-		raw: { icon?: string; title?: string; titleKey?: string; description?: string; descriptionKey?: string; dashed?: boolean; visible?: boolean }
+		raw: ({ icon?: string; title?: string; titleKey?: string; description?: string; descriptionKey?: string; dashed?: boolean; visible?: boolean }) | null
 		resolved: { icon: string; title: string; titleKey: string | null; description: string; descriptionKey: string | null; dashed: boolean; visible: boolean }
 	}
 	slots: 'actions'
@@ -3152,7 +3154,7 @@ export const emptyStatePlugin = createWidgetPlugin('EmptyState')
 			dashed: { type: 'boolean' },
 			visible: { type: 'boolean' },
 		}),
-		validate: (c): c is EmptyStateInterfaces['config']['raw'] => isConfigObject(c),
+		validate: (c): c is EmptyStateInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: raw => ({
 			icon: stringOr(raw?.icon, ''),
 			title: stringOr(raw?.title, ''),

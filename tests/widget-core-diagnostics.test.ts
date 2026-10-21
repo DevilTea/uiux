@@ -9,7 +9,7 @@ import type { ViewResource } from '../src/domain/views/schema'
 import { createAdapterWidgetSystem } from '../src/runtime/widget-core-diagnostics'
 
 /**
- * widget-core 0.0.4's coded registration errors (`WidgetSystemConfigurationError`) become
+ * widget-core 0.0.6's coded registration errors (`WidgetSystemConfigurationError`) become
  * `adapter.*` diagnostics instead of exceptions. A structural look-alike stands in for a Plugin
  * from another widget-core copy: widget-core documents both as the same `foreign-plugin` case.
  */

@@ -11,7 +11,7 @@ import { createAdapterWidgetSystem } from '../src/runtime/widget-core-diagnostic
 /**
  * UIUX maps only widget-core's documented coded errors (`WidgetSystemConfigurationError` with a
  * known code, `WidgetInspectionError`) to diagnostics or "nothing to report". Any other exception is
- * a defect and must propagate. widget-core 0.0.4 never throws those, so the entries are wrapped
+ * a defect and must propagate. widget-core 0.0.6 never throws those, so the entries are wrapped
  * here: each delegates to the real implementation unless a test installs a replacement.
  */
 

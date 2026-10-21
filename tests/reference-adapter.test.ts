@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Window } from 'happy-dom'
 import { defineComponent, h } from 'vue'
-import { createWidgetPlugin } from '@deviltea/widget-core'
+import { createWidgetPlugin, createWidgetSystem, type AnyWidgetPlugin } from '@deviltea/widget-core'
 
 import { resolveWorkspaceAdapterSet } from '../src/adapters'
 import {
@@ -63,6 +63,18 @@ describe('UIUX Reference Adapter', () => {
 		expect(ownership.rendererKeys).toEqual(expect.arrayContaining(expectedWidgets))
 		expect(ownership.widgetTypes).not.toContain('RootShell')
 		expect(ownership.rendererKeys).not.toContain('RootShell')
+	})
+
+	it('accepts a Widget that omits its Config, for every reference Widget type', async () => {
+		// widget-core 0.0.5+ validates an omitted Config as `null` instead of skipping `config.validate`.
+		const manifest = extractProductAdapterManifest(await importReferenceAdapter())
+		const plugins = manifest.widgetPlugins as readonly AnyWidgetPlugin[]
+		const system = createWidgetSystem({ plugins })
+		const rejected = plugins.flatMap(plugin => system.createBlueprint({ type: plugin.type, id: 'w' }).diagnostics
+			.filter(diagnostic => diagnostic.code === 'invalid-widget-config')
+			.map(() => plugin.type))
+		expect(plugins.length).toBeGreaterThan(0)
+		expect(rejected).toEqual([])
 	})
 
 	it('omits every i18n Property name, and each derived name passes the strict check against its Widget plugin', async () => {
