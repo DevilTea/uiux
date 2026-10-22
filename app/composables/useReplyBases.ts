@@ -57,8 +57,6 @@ export function useReplyBases(
 		updated(threadId: string): ReplyConflictChange | undefined {
 			const base = bases.get(threadId)
 			const item = base ? thread(threadId) : undefined
-			const own = pending.get(threadId)
-			if (base && item && own && own.from === base.revision && item.revision === own.to) return undefined
 			return base && item && item.revision !== base.revision ? replyConflictChange(base.state, threadState(item)) : undefined
 		},
 		/** The user acknowledged the notice: the draft is now aimed at the thread as shown. */

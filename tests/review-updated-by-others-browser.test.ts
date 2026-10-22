@@ -22,6 +22,7 @@ let server: WorkbenchServer
 let browser: Browser
 let agent: string
 let mcp: Client
+let abortedStreams = 0
 
 async function api<T>(path: string, body?: unknown, headers: Record<string, string> = server.headers): Promise<T> {
 	const response = await fetch(`${server.origin}${path}`, {
@@ -68,7 +69,7 @@ async function open(path: string, streamUnavailable = false): Promise<{ context:
 	})
 	await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
 	// Without the change-event stream the Workbench polls instead (Feature "Live refresh").
-	if (streamUnavailable) await context.route('**/api/events', route => route.abort())
+	if (streamUnavailable) await context.route('**/api/events', (route) => { abortedStreams++; return route.abort() })
 	const page = await context.newPage()
 	await page.goto(`${server.origin}${path}`, { waitUntil: 'networkidle' })
 	return { context, page }
@@ -167,6 +168,8 @@ describe('"Updated by others" while drafting a reply (issue #80)', () => {
 		const surface = SURFACES['the Reviews detail']!
 		const { context, notice, scope } = await draftWhileAgentReplies(surface, true)
 		try {
+			// The stream was refused, so the notice came from polling.
+			expect(abortedStreams).toBeGreaterThanOrEqual(1)
 			expect(await notice.innerText()).toContain('Updated by others')
 			expect(await scope.locator(surface.reply).inputValue()).toBe(REPLY)
 		}
