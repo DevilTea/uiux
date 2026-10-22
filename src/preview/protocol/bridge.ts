@@ -65,8 +65,7 @@ export class WorkbenchPreviewProtocolBridge {
 	/**
 	 * The runtime mints every generation ID (Clause 01a1161c-4119-712d-8785-7d8155c0ceee): the
 	 * Workbench admits a generation when its first declaration arrives, and a declaration naming an
-	 * unseen ID replaces the current generation. `admitGeneration` remains for callers that already
-	 * know the runtime's ID.
+	 * unseen ID replaces the current generation.
 	 */
 	constructor(
 		previewSessionId: string,
@@ -80,12 +79,17 @@ export class WorkbenchPreviewProtocolBridge {
 		this.hooks = hooks
 	}
 
+	/**
+	 * Test-only: admits a generation whose ID the caller already knows, with an explicit cause, ahead
+	 * of its declaration. The Workbench itself never calls it; it admits from the declaration.
+	 */
 	admitGeneration(generationId: string, cause: GenerationAdmissionCause): GenerationAdmissionResult {
 		const result = this.session.beginGeneration(generationId, cause)
 		if (result.status === 'admitted') this.ackDispatchedGenerationId = undefined
 		return result
 	}
 
+	/** Test-only, like `admitGeneration`: replaces the current generation with a known ID. */
 	replaceGenerationForLifecycle(generationId: string, cause: 'reload' | 'restart'): GenerationAdmissionResult {
 		const result = this.session.replaceGenerationForLifecycle(generationId, cause)
 		this.ackDispatchedGenerationId = undefined
@@ -410,6 +414,11 @@ function isGeometryResponse(message: GeometryMessage): message is GeometryRespon
 	return message.type === 'geometry.acquire.response'
 		|| message.type === 'contour.full.response'
 		|| message.type === 'contour.partial.response'
+}
+
+/** Whether an envelope, before any decode, is a `capability.declare`. */
+export function isCapabilityDeclaration(input: unknown): boolean {
+	return messageType(input) === 'capability.declare'
 }
 
 function messageType(input: unknown): string | undefined {

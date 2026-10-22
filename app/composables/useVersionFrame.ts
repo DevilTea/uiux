@@ -1,5 +1,5 @@
 import { onBeforeUnmount, onMounted, ref, shallowRef, toValue, watch, type MaybeRefOrGetter } from 'vue'
-import { WorkbenchPreviewProtocolBridge } from '../../src/preview/protocol/bridge'
+import { isCapabilityDeclaration, WorkbenchPreviewProtocolBridge } from '../../src/preview/protocol/bridge'
 import { GeometryStreamCoordinator, type GeometryReport } from '../../src/preview/geometry-streams'
 import { MULTI_TARGET_GEOMETRY_FEATURE } from '../../src/preview/protocol/schema'
 import { createPreviewWirePost, readPreviewWirePost } from '../../src/preview/protocol/transport'
@@ -72,7 +72,24 @@ export function useVersionFrame(options: Readonly<{
 	}
 	watch(() => toValue(options.widgets).join('\n'), syncDemand, { immediate: true })
 
+	/**
+	 * Whether the committed document is the one this frame requested (owner ruling 1 of 2026-10-23,
+	 * Discussion #241): the frame's window outlives a navigation, so only the committed URL tells
+	 * the requested document from the one before it.
+	 */
+	function requestedDocumentIsCommitted(): boolean {
+		try {
+			const element = iframe.value
+			const location = element?.contentWindow?.location.href
+			return !!element && !!location && !!element.src && location === element.src
+		}
+		catch {
+			return false
+		}
+	}
+
 	function receive(input: unknown): void {
+		if (isCapabilityDeclaration(input) && !requestedDocumentIsCommitted()) return
 		const result = bridge.receive(input)
 		if (result.status === 'ack-dispatched') {
 			const features = (input as { payload?: { features?: unknown } }).payload?.features

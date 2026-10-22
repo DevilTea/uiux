@@ -904,6 +904,7 @@
     "chipLabel": "預覽工作階段：{status}",
     "sessionId": "工作階段",
     "generation": "Runtime 世代",
+    "generationPending": "等待預覽宣告世代",
     "retry": "重試"
   },
   "canvas": {

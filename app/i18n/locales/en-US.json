@@ -904,6 +904,7 @@
     "chipLabel": "Preview session: {status}",
     "sessionId": "Session",
     "generation": "Runtime generation",
+    "generationPending": "Waiting for the preview to declare one",
     "retry": "Retry"
   },
   "canvas": {

@@ -1,7 +1,7 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { useI18n } from '#imports'
 import { describeFetchError } from '../utils/fetch-error'
-import { WorkbenchPreviewProtocolBridge } from '../../src/preview/protocol/bridge'
+import { isCapabilityDeclaration, WorkbenchPreviewProtocolBridge } from '../../src/preview/protocol/bridge'
 import { PreviewNavigationState, type PreviewNavigationTarget } from '../../src/preview/navigation-state'
 import { PreviewTargetingState } from '../../src/preview/targeting-state'
 import { GeometryStreamCoordinator, type GeometryDemand, type GeometryReport } from '../../src/preview/geometry-streams'
@@ -238,7 +238,11 @@ export function createPreviewSession(state: WorkbenchState) {
 	// (the Workspace manifest may still be loading when the generation starts). After the
 	// handshake it is frozen, and changes travel over the context channel instead.
 	watch(() => state.contextOptions.value, () => {
-		if (handshakePhase.value !== 'open' && iframeSourceContext.value && contextDiffersFromSource()) captureIframeSourceContext()
+		if (handshakePhase.value !== 'open' && iframeSourceContext.value && contextDiffersFromSource()) {
+			// A new source is a new requested document: the one it replaces may no longer declare.
+			documentSequence.value++
+			captureIframeSourceContext()
+		}
 	})
 
 	function contextDiffersFromSource(): boolean {
@@ -768,8 +772,25 @@ export function createPreviewSession(state: WorkbenchState) {
 		if (messages) for (const message of messages) receiveWire(message)
 	}
 
+	/**
+	 * Whether the committed iframe document is the one the Workbench last requested. A navigating
+	 * iframe keeps its window, so the source check alone cannot tell a replaced document from the
+	 * requested one (owner ruling 1 of 2026-10-23, Discussion #241). A self-reload keeps its URL.
+	 */
+	function requestedDocumentIsCommitted(): boolean {
+		try {
+			const location = previewIframe.value?.contentWindow?.location.href
+			return !!location && new URL(location).searchParams.get('document') === String(documentSequence.value)
+		}
+		catch {
+			return false
+		}
+	}
+
 	function receiveWire(input: unknown): void {
 		if (!workbenchBridge) return
+		// A declaration from a replaced document never admits a generation; it is dropped without effect.
+		if (isCapabilityDeclaration(input) && !requestedDocumentIsCommitted()) return
 		const result = workbenchBridge.receive(input)
 		if (result.status === 'ack-dispatched') {
 			const features = (input as { payload?: { features?: unknown } }).payload?.features
