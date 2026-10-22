@@ -35,6 +35,10 @@ const props = defineProps<{
 	threadId?: string
 	/** Mouse drag moves the pin within its Widget (the hint mutation is the caller's). */
 	draggable?: boolean
+	/** The pin is in keyboard move mode (M, arrows, Enter, Escape; the caller owns the state). */
+	moving?: boolean
+	/** Id of the element that describes the keyboard move (draggable pins only). */
+	moveHintId?: string
 }>()
 const emit = defineEmits<{
 	/** `keyboard`: Enter or Space (a click with no pointer detail). */
@@ -42,6 +46,8 @@ const emit = defineEmits<{
 	(e: 'dragMove', point: Readonly<{ clientX: number; clientY: number }>): void
 	(e: 'dragEnd', point: Readonly<{ clientX: number; clientY: number }>): void
 	(e: 'dragCancel'): void
+	/** The keyboard move; `step` carries a signed direction (Shift asks for a coarse step). */
+	(e: 'moveKey', action: 'start' | 'step' | 'commit' | 'cancel', step?: Readonly<{ dx: number; dy: number; coarse: boolean }>): void
 }>()
 
 const DRAG_THRESHOLD = 3
@@ -49,6 +55,8 @@ let start: { x: number; y: number; id: number } | undefined
 const dragging = ref(false)
 
 function onPointerDown(event: PointerEvent): void {
+	// A pointer drag ends a keyboard move first.
+	if (props.moving) emit('moveKey', 'cancel')
 	if (!props.draggable || event.button !== 0 || event.pointerType !== 'mouse') return
 	start = { x: event.clientX, y: event.clientY, id: event.pointerId }
 	;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
@@ -77,7 +85,50 @@ function onPointerCancel(): void {
 	dragging.value = false
 }
 
+const ARROWS: Record<string, { dx: number; dy: number }> = {
+	ArrowLeft: { dx: -1, dy: 0 }, ArrowRight: { dx: 1, dy: 0 }, ArrowUp: { dx: 0, dy: -1 }, ArrowDown: { dx: 0, dy: 1 },
+}
+
+/** Keyboard move (issue #118): M starts, arrows move, Enter commits, Escape cancels. */
+function onKeydown(event: KeyboardEvent): void {
+	if (!props.draggable || event.target !== event.currentTarget || event.metaKey || event.ctrlKey || event.altKey) return
+	if (!props.moving) {
+		if (event.key.toLowerCase() === 'm' && !event.shiftKey) {
+			event.preventDefault()
+			emit('moveKey', 'start')
+		}
+		return
+	}
+	// The move owns these keys: no bubble toggle, no page scroll, no global Escape.
+	const arrow = ARROWS[event.key]
+	if (arrow) emit('moveKey', 'step', { ...arrow, coarse: event.shiftKey })
+	else if (event.key === 'Enter' || event.key === ' ') {
+		swallowCommit = true
+		emit('moveKey', 'commit')
+	}
+	else if (event.key === 'Escape') emit('moveKey', 'cancel')
+	else return
+	event.preventDefault()
+	event.stopPropagation()
+}
+
+function onBlur(): void {
+	if (props.moving) emit('moveKey', 'cancel')
+}
+
+/**
+ * Enter or Space that committed a keyboard move must not also activate the pin: Firefox fires a
+ * click on the Space keyup even when the keydown was prevented, so the keyup and its click are swallowed.
+ */
+let swallowCommit = false
+function onKeyup(event: KeyboardEvent): void {
+	if (!swallowCommit || (event.key !== ' ' && event.key !== 'Enter')) return
+	event.preventDefault()
+	setTimeout(() => { swallowCommit = false })
+}
+
 function onClick(event: MouseEvent): void {
+	if (swallowCommit) return
 	if (!dragging.value) emit('activate', event.detail === 0)
 }
 
@@ -96,12 +147,15 @@ const isMuted = computed(() => props.muted || props.context !== undefined)
     class="comment-pin"
     :class="[
       variant ? `is-${variant}` : '',
-      { 'is-open': open, 'is-lift': lift, 'is-fresh': fresh, 'is-dim': dim, 'is-muted': isMuted, 'is-dragging': dragging },
+      { 'is-open': open, 'is-lift': lift, 'is-fresh': fresh, 'is-dim': dim, 'is-muted': isMuted, 'is-dragging': dragging, 'is-moving': moving },
     ]"
     :aria-label="label"
     :aria-expanded="variant === 'pending' ? undefined : open"
     :aria-haspopup="variant === 'cluster' ? 'menu' : 'dialog'"
     :tabindex="dim ? -1 : 0"
+    :aria-describedby="draggable ? moveHintId : undefined"
+    :aria-keyshortcuts="draggable ? 'M' : undefined"
+    :data-pin-moving="moving ? '' : undefined"
     :data-pin-thread="threadId"
     :data-pin-variant="variant ?? 'default'"
     :data-pin-muted="isMuted ? '' : undefined"
@@ -110,6 +164,9 @@ const isMuted = computed(() => props.muted || props.context !== undefined)
     @pointerup="onPointerUp"
     @pointercancel="onPointerCancel"
     @lostpointercapture="onPointerCancel"
+    @keydown="onKeydown"
+    @keyup="onKeyup"
+    @blur="onBlur"
     @click="onClick"
   >
     <UIcon
@@ -200,6 +257,7 @@ const isMuted = computed(() => props.muted || props.context !== undefined)
 }
 .comment-pin.is-dim { opacity: 0.4; pointer-events: none; }
 .comment-pin.is-dragging { cursor: grabbing; transition: none; }
+.comment-pin.is-moving { box-shadow: 0 0 0 2px var(--ui-bg), 0 0 0 4px var(--ui-primary), var(--wb-shadow-pin-drop); transition: none; }
 .comment-pin.is-fresh { animation: pin-drop 180ms var(--ease-out-quiet); }
 .comment-pin-badge {
   position: absolute;

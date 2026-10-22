@@ -7,6 +7,7 @@ import { aggregateEdgeIndicators, type PinEdgeSide } from '../../../../src/previ
 import { mapPointAffine, type AffineOuterMapping } from '../../../../src/preview/outer-precision'
 import type { Point } from '../../../../src/preview/protocol/schema'
 import { layoutPins, mutedItemKeys } from '../../../utils/pin-layout'
+import { nudgePinHint } from '../../../utils/pin-move'
 import CommentPin from './CommentPin.vue'
 import CommentPinMenu from './CommentPinMenu.vue'
 import CommentThreadPin from './CommentThreadPin.vue'
@@ -49,20 +50,37 @@ function invert(point: Point, mapping: AffineOuterMapping): Point | undefined {
 	return { x: (mapping.d * dx - mapping.c * dy) / det, y: (-mapping.b * dx + mapping.a * dy) / det }
 }
 
-function dragTo(threadId: string, clientX: number, clientY: number): void {
-	const mapping = props.mapping
+/** The thread's Widget rectangle (inner px) when it can be measured and the overlay mapped. */
+function widgetRect(threadId: string) {
 	const item = comments.threadById.value.get(threadId)
 	const rect = item ? preview.geometryStreams.report(item.anchor.widgetId)?.rect : undefined
+	return props.mapping && rect && rect.width > 0 && rect.height > 0 ? rect : undefined
+}
+
+/** Draws the pin at `hint` (clamped to the Widget) without writing it; the write is the caller's. */
+function showAt(threadId: string, hint: Readonly<{ x: number; y: number }>): { x: number; y: number } | undefined {
+	const mapping = props.mapping
+	const rect = widgetRect(threadId)
+	if (!mapping || !rect) return undefined
+	const clamped = { x: Math.min(1, Math.max(0, hint.x)), y: Math.min(1, Math.max(0, hint.y)) }
+	const tip = mapPointAffine({ x: rect.x + clamped.x * rect.width, y: rect.y + clamped.y * rect.height }, mapping)
+	drag.value = { threadId, x: tip.x, y: tip.y, hint: clamped }
+	return clamped
+}
+
+/** The hint under an overlay-layer point, or `undefined` when it cannot be measured. */
+function hintAtOverlay(threadId: string, point: Point): { x: number; y: number } | undefined {
+	const mapping = props.mapping
+	const rect = widgetRect(threadId)
+	const inner = mapping && rect ? invert(point, mapping) : undefined
+	if (!rect || !inner) return undefined
+	return { x: (inner.x - rect.x) / rect.width, y: (inner.y - rect.y) / rect.height }
+}
+
+function dragTo(threadId: string, clientX: number, clientY: number): void {
 	const bounds = layer.value?.getBoundingClientRect()
-	if (!mapping || !rect || !bounds || !(rect.width > 0) || !(rect.height > 0)) return
-	const inner = invert({ x: clientX - bounds.left, y: clientY - bounds.top }, mapping)
-	if (!inner) return
-	const hint = {
-		x: Math.min(1, Math.max(0, (inner.x - rect.x) / rect.width)),
-		y: Math.min(1, Math.max(0, (inner.y - rect.y) / rect.height)),
-	}
-	const tip = mapPointAffine({ x: rect.x + hint.x * rect.width, y: rect.y + hint.y * rect.height }, mapping)
-	drag.value = { threadId, x: tip.x, y: tip.y, hint }
+	const hint = bounds ? hintAtOverlay(threadId, { x: clientX - bounds.left, y: clientY - bounds.top }) : undefined
+	if (hint) showAt(threadId, hint)
 }
 
 async function dropAt(threadId: string, clientX: number, clientY: number): Promise<void> {
@@ -71,6 +89,99 @@ async function dropAt(threadId: string, clientX: number, clientY: number): Promi
 	if (current?.threadId === threadId) await comments.moveHint(threadId, current.hint)
 	drag.value = undefined
 }
+
+// ---------------------------------------------------------------------------------------------
+// Keyboard move (issue #118): M on a focused pin starts, arrows move, Enter commits, Escape cancels
+// ---------------------------------------------------------------------------------------------
+
+const MOVE_HINT_ID = 'pin-move-hint'
+const keyMoving = ref<string>()
+/** The hint the move started from, so a commit that changed nothing writes nothing. */
+let keyOrigin: { x: number; y: number } | undefined
+/** A commit's write is in flight: no second move starts until it settles. */
+const writing = ref(false)
+
+/** Step announcements go at most every 500 ms (like the hover chip); the last position always follows. */
+const STEP_ANNOUNCE_MS = 500
+let lastStepAnnounce = 0
+let stepTimer: ReturnType<typeof setTimeout> | undefined
+function announceStep(text: string): void {
+	clearTimeout(stepTimer)
+	const wait = lastStepAnnounce + STEP_ANNOUNCE_MS - Date.now()
+	const send = () => {
+		lastStepAnnounce = Date.now()
+		comments.announce(text)
+	}
+	if (wait <= 0) send()
+	else stepTimer = setTimeout(send, wait)
+}
+function announceNow(text: string): void {
+	clearTimeout(stepTimer)
+	lastStepAnnounce = Date.now()
+	comments.announce(text)
+}
+onBeforeUnmount(() => clearTimeout(stepTimer))
+
+const percent = (value: number) => Math.round(value * 100)
+function announcePosition(hint: Readonly<{ x: number; y: number }>): string {
+	return t('pins.move.position', { x: percent(hint.x), y: percent(hint.y) })
+}
+
+/** Steps are physical (ArrowLeft is toward the Widget's left edge), also in a right-to-left Locale. */
+function onPinKey(threadId: string, action: 'start' | 'step' | 'commit' | 'cancel', step?: Readonly<{ dx: number; dy: number; coarse: boolean }>): void {
+	if (action === 'start') {
+		const point = comments.placements.value.find(placement => placement.threadId === threadId && placement.state === 'visible')?.point
+		const start = point ? hintAtOverlay(threadId, point) : undefined
+		const shown = start ? showAt(threadId, start) : undefined
+		if (!shown || writing.value) return
+		keyMoving.value = threadId
+		keyOrigin = shown
+		announceNow(`${t('pins.move.started')} ${announcePosition(shown)}`)
+	}
+	else if (keyMoving.value !== threadId) return
+	else if (action === 'step' && step && drag.value?.threadId === threadId) {
+		const shown = showAt(threadId, nudgePinHint(drag.value.hint, step))
+		if (shown) announceStep(announcePosition(shown))
+	}
+	else if (action === 'commit') {
+		const hint = drag.value?.threadId === threadId ? drag.value.hint : undefined
+		keyMoving.value = undefined
+		if (!hint) return
+		// The start point is measured, not stored: within 0.1 % of the Widget counts as unchanged.
+		if (keyOrigin && Math.abs(hint.x - keyOrigin.x) < 1e-3 && Math.abs(hint.y - keyOrigin.y) < 1e-3) {
+			drag.value = undefined
+			announceNow(t('pins.move.unchanged'))
+			return
+		}
+		// One write, as for a drop; the pin stays where it was drawn until the thread refreshes.
+		writing.value = true
+		void comments.moveHint(threadId, hint).then((ok) => {
+			writing.value = false
+			if (drag.value?.threadId === threadId) drag.value = undefined
+			announceNow(ok ? `${t('pins.move.done')} ${announcePosition(hint)}` : t('pins.move.failed'))
+		})
+	}
+	else if (action === 'cancel') {
+		endKeyMove()
+	}
+}
+
+function endKeyMove(): void {
+	keyMoving.value = undefined
+	if (drag.value?.threadId) drag.value = undefined
+	announceNow(t('pins.move.canceled'))
+}
+
+// The move ends when its pin can no longer be moved: the thread is gone, resolved or off the canvas.
+const moveStillValid = computed(() => {
+	const id = keyMoving.value
+	if (!id) return true
+	return !!props.mapping && comments.canComment.value && comments.pinMeta.value.get(id)?.resolved === false
+		&& comments.placements.value.some(placement => placement.threadId === id && placement.state === 'visible')
+})
+watch(moveStillValid, (valid) => {
+	if (!valid && keyMoving.value) endKeyMove()
+})
 
 /** A muted pin switches the Preview to its thread's recorded context first (Rule 01a1170f-c1f7). */
 function toggle(threadId: string): void {
@@ -264,7 +375,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         v-else
         :thread-id="item.threadId"
         :draggable-on-canvas="!!mapping"
+        :moving="keyMoving === item.threadId"
+        :move-hint-id="MOVE_HINT_ID"
         @pin="onPin"
+        @pin-key="onPinKey"
       />
     </span>
 
@@ -297,6 +411,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         tabindex="-1"
       />
     </span>
+
+    <p
+      :id="MOVE_HINT_ID"
+      class="sr-only"
+    >
+      {{ t('pins.move.hint') }}
+    </p>
 
     <span
       hidden
