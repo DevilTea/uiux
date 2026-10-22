@@ -7,9 +7,11 @@
  *   computed here from the resource's canonical content before and after the commit, never from
  *   caller-supplied text.
  * - Clause 01a164f0-c0fe-7c86-9c50-cc9354e49fe8: `path` is a JSON Pointer from the resource root, at
- *   most {@link CHANGE_SUMMARY_MAX_DEPTH} segments; a deeper difference folds into its prefix as
- *   `replace`. An array whose elements all carry a unique string `id` is diffed by that id, which is
- *   the element's path segment; any other array is reported whole as `replace`.
+ *   most {@link CHANGE_SUMMARY_MAX_DEPTH} segments (so a Widget change reads
+ *   `/ir/slots/<slot>/<widgetId>`); a deeper difference folds into its prefix as `replace`. An array
+ *   whose elements are all objects with a unique string `id` is diffed by that id, which is the
+ *   element's path segment, unless the elements it keeps change order; any other array is reported
+ *   whole as `replace`.
  * - Clause 01a164f0-c2a5-74dc-805d-c05ce25697d8: entries sorted by `path` in code unit order, at most
  *   {@link CHANGE_SUMMARY_MAX_CHANGES}; `truncated` counts the omitted ones.
  * - Clause 01a164f0-c44e-7d21-811d-93cbf7750dba: a created resource lists each top-level member as
@@ -17,13 +19,16 @@
  * - Clause 01a164f0-c5fc-7b97-b21a-d127e423a157: the other resources one mutation writes go in
  *   `related`, sorted by `kind` then `key`, each capped like the primary.
  *
- * Interpretation recorded in the PR for issue #77: when the elements an id-addressed array keeps
- * change their order, the array is reported whole as `replace`, since no per-element entry can
- * express a move.
+ * The follow-up owner rulings of 2026-10-23
+ * (https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19134586) set the depth to 4
+ * and fix the array and multi-resource details.
+ *
+ * Members are read as own properties only, so a member named like an `Object.prototype` property
+ * (`constructor`, `toString`, a JSON `__proto__`) is diffed like any other.
  *
  * Pure and deterministic: the same before and after content always give the same summary.
  */
-export const CHANGE_SUMMARY_MAX_DEPTH = 3
+export const CHANGE_SUMMARY_MAX_DEPTH = 4
 export const CHANGE_SUMMARY_MAX_CHANGES = 50
 
 export type ChangeOp = 'add' | 'remove' | 'replace'
@@ -74,7 +79,7 @@ export function diffResource(before: unknown, after: unknown): ResourceChange[] 
 	if (before === undefined && after === undefined) return []
 	if (before === undefined) {
 		if (!isPlainObject(after)) return [{ path: '', op: 'add' }]
-		return Object.keys(after).filter(key => after[key] !== undefined).map(key => ({ path: pointer([key]), op: 'add' }))
+		return Object.keys(after).filter(key => member(after, key) !== undefined).map(key => ({ path: pointer([key]), op: 'add' }))
 	}
 	if (after === undefined) return [{ path: '', op: 'remove' }]
 	const changes: ResourceChange[] = []
@@ -93,8 +98,8 @@ function diffValue(before: unknown, after: unknown, segments: readonly string[],
 	if (segments.length < CHANGE_SUMMARY_MAX_DEPTH) {
 		if (isPlainObject(before) && isPlainObject(after)) {
 			for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
-				const from = before[key]
-				const to = after[key]
+				const from = member(before, key)
+				const to = member(after, key)
 				if (from === undefined && to === undefined) continue
 				const path = [...segments, key]
 				if (from === undefined) out.push({ path: pointer(path), op: 'add' })
@@ -124,8 +129,9 @@ function diffValue(before: unknown, after: unknown, segments: readonly string[],
 function indexById(values: readonly unknown[]): Map<string, unknown> | undefined {
 	const index = new Map<string, unknown>()
 	for (const value of values) {
-		if (!isPlainObject(value) || typeof value.id !== 'string' || index.has(value.id)) return undefined
-		index.set(value.id, value)
+		const id = isPlainObject(value) ? member(value, 'id') : undefined
+		if (typeof id !== 'string' || index.has(id)) return undefined
+		index.set(id, value)
 	}
 	return index
 }
@@ -152,11 +158,16 @@ function equalValues(left: unknown, right: unknown): boolean {
 	if (isPlainObject(left) && isPlainObject(right)) {
 		const keys = new Set([...Object.keys(left), ...Object.keys(right)])
 		for (const key of keys) {
-			if (!equalValues(left[key], right[key])) return false
+			if (!equalValues(member(left, key), member(right, key))) return false
 		}
 		return true
 	}
 	return false
+}
+
+/** An own member, or `undefined`: an inherited property such as `constructor` is no member. */
+function member(object: Readonly<Record<string, unknown>>, key: string): unknown {
+	return Object.hasOwn(object, key) ? object[key] : undefined
 }
 
 function isPlainObject(value: unknown): value is Readonly<Record<string, unknown>> {

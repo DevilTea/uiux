@@ -905,8 +905,9 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 				targetView: { key: command.viewId, revision: view.revision, resourceUri: `uiux://view/${command.viewId}` },
 				decision: existingDecision,
 				diagnostics: inspected?.diagnostics ?? [],
-				// An idempotent replay writes nothing: the thread and its View report no changes.
-				changeSummary: summarizeChange(review.resource, review.resource, [{ kind: 'view', key: command.viewId, revision: view.revision, before: view.resource, after: view.resource }]),
+				// An idempotent replay writes nothing, so it reports no changes and no related resource
+				// (owner ruling 3 of https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19134586).
+				changeSummary: summarizeChange(review.resource, review.resource),
 			}
 		}
 

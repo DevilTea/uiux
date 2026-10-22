@@ -86,11 +86,32 @@ describe('summarizeChange', () => {
 		] })
 	})
 
-	it('folds a difference deeper than 3 segments into its 3-segment prefix', () => {
+	it('folds a difference deeper than 4 segments into its 4-segment prefix, so a Widget change reads /ir/slots/<slot>/<widgetId>', () => {
 		expect(summarizeChange(
-			{ ir: { slots: { content: [{ id: 'a' }] } }, variants: { wide: { state: { x: { y: 1 } } } } },
-			{ ir: { slots: { content: [{ id: 'a' }, { id: 'b' }] } }, variants: { wide: { state: { x: { y: 2 } } } } },
-		)).toEqual({ changes: [{ path: '/ir/slots/content', op: 'replace' }, { path: '/variants/wide/state', op: 'replace' }] })
+			{ ir: { slots: { content: [{ id: 'a', config: { label: 'x' } }] } }, variants: { wide: { state: { x: { y: 1 } } } } },
+			{ ir: { slots: { content: [{ id: 'a', config: { label: 'y' } }, { id: 'b' }] } }, variants: { wide: { state: { x: { y: 2 } } } } },
+		)).toEqual({ changes: [
+			{ path: '/ir/slots/content/a', op: 'replace' },
+			{ path: '/ir/slots/content/b', op: 'add' },
+			{ path: '/variants/wide/state/x', op: 'replace' },
+		] })
+	})
+
+	it('reads own members only, so members named like Object.prototype properties are added and removed like others', () => {
+		expect(summarizeChange({ greeting: 'a' }, { greeting: 'a', constructor: 'b', toString: 'c' }))
+			.toEqual({ changes: [{ path: '/constructor', op: 'add' }, { path: '/toString', op: 'add' }] })
+		expect(summarizeChange({ greeting: 'a', constructor: 'b' }, { greeting: 'a' }))
+			.toEqual({ changes: [{ path: '/constructor', op: 'remove' }] })
+		expect(summarizeChange({ hasOwnProperty: 'x' }, { hasOwnProperty: 'x' })).toEqual({ changes: [] })
+		// JSON.parse makes `__proto__` an own member, which is diffed, not the prototype.
+		expect(summarizeChange(JSON.parse('{"a":1}'), JSON.parse('{"a":1,"__proto__":{"x":1}}')))
+			.toEqual({ changes: [{ path: '/__proto__', op: 'add' }] })
+		expect(summarizeChange(JSON.parse('{"__proto__":{"x":1}}'), JSON.parse('{"__proto__":{"x":2}}')))
+			.toEqual({ changes: [{ path: '/__proto__/x', op: 'replace' }] })
+		expect(summarizeChange(undefined, JSON.parse('{"__proto__":1,"constructor":2}')))
+			.toEqual({ changes: [{ path: '/__proto__', op: 'add' }, { path: '/constructor', op: 'add' }] })
+		// An element whose only id is inherited has none, so the array is reported whole.
+		expect(summarizeChange({ list: [Object.create({ id: 'a' })] }, { list: [{ id: 'a' }] })).toEqual({ changes: [{ path: '/list', op: 'replace' }] })
 	})
 
 	it('addresses id-bearing array elements by id and reports other arrays whole', () => {
@@ -251,7 +272,7 @@ async function run(transport: Transport): Promise<Map<string, Result>> {
 		const flow = await call('create_flow', 'create_flow', { id: FLOW_ID, name: 'Buy', entryStepId: STEP_1, steps: { [STEP_1]: step(VIEW_ID) } })
 		await call('update_flow', 'update_flow', { flowId: FLOW_ID, expectedRevision: flow.revision, name: 'Buy now', entryStepId: STEP_1, steps: { [STEP_1]: { ...step(VIEW_ID), transitions: [{ trigger: { widgetId: 'pay', event: 'activate' }, targetStepId: STEP_2 }] }, [STEP_2]: step(VIEW_ID) } })
 
-		const locale = await call('create_locale', 'create_locale', { locale: 'fr-FR', messages: { greeting: 'Bonjour' } })
+		const locale = await call('create_locale', 'create_locale', { locale: 'fr-FR', messages: { greeting: 'Bonjour', constructor: 'Constructeur' } })
 		const many = Object.fromEntries(Array.from({ length: 60 }, (_, index) => [`k${String(index).padStart(2, '0')}`, `v${index}`]))
 		await call('update_locale', 'update_locale', { locale: 'fr-FR', expectedRevision: locale.revision, messages: { greeting: 'Salut', ...many } })
 
@@ -262,7 +283,9 @@ async function run(transport: Transport): Promise<Map<string, Result>> {
 
 		let thread = await call('create_review_thread', 'create_review_thread', { id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'pay' } })
 		thread = await call('append_review_message', 'append_review_message', { reviewId: REVIEW_ID, expectedRevision: thread.revision, id: MESSAGE_ID, at: '2026-10-23T00:00:00.000Z', body: 'Make it bigger.' })
-		await call('promote_review_to_decision', 'promote_review_to_decision', { reviewId: REVIEW_ID, expectedReviewRevision: thread.revision, viewId: VIEW_ID, expectedViewRevision: view.revision, question: 'Bigger button?', decisionId: DECISION_ID })
+		const promote = { reviewId: REVIEW_ID, expectedReviewRevision: thread.revision, viewId: VIEW_ID, expectedViewRevision: view.revision, question: 'Bigger button?', decisionId: DECISION_ID }
+		await call('promote_review_to_decision', 'promote_review_to_decision', promote)
+		await call('promote_review_to_decision (replay)', 'promote_review_to_decision', promote)
 
 		const empty = await call('create_review_thread (empty)', 'create_review_thread', { id: EMPTY_REVIEW_ID, anchor: { scope: 'workspace' } })
 		await call('retract_review_thread', 'retract_review_thread', { reviewId: EMPTY_REVIEW_ID, expectedRevision: empty.revision })
@@ -277,21 +300,24 @@ describe('change summaries over HTTP and MCP', { timeout: HEAVY_SERVER_SUITE_TIM
 		const expected: Record<string, ChangeSummary> = {
 			'create_view': { changes: ['/id', '/ir', '/name', '/spec', '/variants'].map(path => ({ path, op: 'add' })) },
 			'update_view_metadata': { changes: [{ path: '/name', op: 'replace' }] },
-			'update_view_structure': { changes: [{ path: '/ir/slots/content', op: 'replace' }] },
+			'update_view_structure': { changes: [{ path: '/ir/slots/content/pay', op: 'add' }] },
 			'update_view_spec (unchanged)': { changes: [] },
 			'create_flow': { changes: ['/entryStepId', '/id', '/name', '/steps'].map(path => ({ path, op: 'add' })) },
 			// Transitions carry no `id`, so the changed array is reported whole.
 			'update_flow': { changes: [{ path: '/name', op: 'replace' }, { path: `/steps/${STEP_1}/transitions`, op: 'replace' }, { path: `/steps/${STEP_2}`, op: 'add' }] },
-			'create_locale': { changes: [{ path: '/greeting', op: 'add' }] },
+			// A message key named like an Object.prototype property is a member like any other.
+			'create_locale': { changes: [{ path: '/constructor', op: 'add' }, { path: '/greeting', op: 'add' }] },
 			'update_locale': {
-				changes: [{ path: '/greeting', op: 'replace' }, ...Array.from({ length: 49 }, (_, index) => ({ path: `/k${String(index).padStart(2, '0')}`, op: 'add' as const }))],
-				truncated: 11,
+				changes: [{ path: '/constructor', op: 'remove' }, { path: '/greeting', op: 'replace' }, ...Array.from({ length: 48 }, (_, index) => ({ path: `/k${String(index).padStart(2, '0')}`, op: 'add' as const }))],
+				truncated: 12,
 			},
 			'create_asset': { changes: [{ path: '/content', op: 'add' }, { path: '/metadata', op: 'add' }] },
 			'replace_asset': { changes: [{ path: '/content', op: 'replace' }, { path: '/metadata/name', op: 'replace' }] },
 			'update_workspace_settings': { changes: [{ path: '/viewports/mobile', op: 'add' }] },
 			'create_review_thread': { changes: ['/anchor', '/history', '/id', '/messages', '/status', '/submissions', '/variantNames'].map(path => ({ path, op: 'add' })) },
 			'append_review_message': { changes: [{ path: `/messages/${MESSAGE_ID}`, op: 'add' }] },
+			// An idempotent replay writes nothing: no changes and no related resource.
+			'promote_review_to_decision (replay)': { changes: [] },
 			'retract_review_thread': { changes: [{ path: '', op: 'remove' }] },
 		}
 

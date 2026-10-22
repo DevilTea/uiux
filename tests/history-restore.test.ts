@@ -208,7 +208,7 @@ describe('restoring a View (Scenario 01a11a5e-9106-73c2-b51b-107557aa88e8)', { t
 		const outcome = await restore(ctx, EDITOR, { versionId: earlier, resource: { kind: 'view', key: VIEW_ID }, expectedRevision: before.revision })
 		expect(outcome, JSON.stringify(outcome)).toMatchObject({ status: 'updated', kind: 'view', key: VIEW_ID, restoredFrom: earlier, impacts: [] })
 		// Clause 01a11485-f578-…: what the restore changed, the kept Decisions not among it; a restore writes no other resource.
-		expect((outcome as { changeSummary: unknown }).changeSummary).toEqual({ changes: [{ path: '/ir/slots/content', op: 'replace' }, { path: '/spec/intent', op: 'replace' }] })
+		expect((outcome as { changeSummary: unknown }).changeSummary).toEqual({ changes: [{ path: '/ir/slots/content/note', op: 'remove' }, { path: '/ir/slots/content/pay', op: 'replace' }, { path: '/spec/intent', op: 'replace' }] })
 		const after = (await ctx.persistence.views.read(VIEW_ID))!
 		expect((outcome as { revision: string }).revision).toBe(after.revision)
 		expect(after.resource.ir).toEqual(earlierView.ir)
@@ -720,7 +720,7 @@ describe('MCP restore_resource_version (Clause 01a11a5e-2768-76ad-b02a-e15f50f91
 			expect(written.isError).not.toBe(true)
 			const { resourceUri, ...body } = written.structuredContent as Record<string, unknown>
 			expect(resourceUri).toBe(`uiux://view/${VIEW_ID}`)
-			expect(body).toMatchObject({ status: 'updated', kind: 'view', key: VIEW_ID, restoredFrom: earlier, changeSummary: { changes: [{ path: '/ir/slots/content', op: 'replace' }] } })
+			expect(body).toMatchObject({ status: 'updated', kind: 'view', key: VIEW_ID, restoredFrom: earlier, changeSummary: { changes: [{ path: '/ir/slots/content/note', op: 'remove' }] } })
 
 			// The same request again is now a conflict over both transports, with the same body.
 			const conflictMcp = await mcp.client.callTool({ name: 'restore_resource_version', arguments: { ...args, acknowledgeImpact: true } })
