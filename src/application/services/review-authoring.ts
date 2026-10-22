@@ -1058,7 +1058,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		const freeze = isMessageFrozen(current.resource, message.id)
 		if (freeze.frozen) {
 			const text = `This message can't be edited: a later ${freeze.by === 'submission' ? `ready-for-review submission (${freeze.id})` : `resolution (${freeze.id})`} answered the conversation as it stood. Reply instead.`
-			return { status: 'blocked', key: command.reviewId, code: 'review.message_edit_after_formal_act', message: text, diagnostics: [{ code: 'review.message_edit_after_formal_act', path: '/messageId', message: text }] }
+			return { status: 'blocked', key: command.reviewId, code: 'review.message_frozen', message: text, diagnostics: [{ code: 'review.message_frozen', path: '/messageId', message: text }] }
 		}
 		if (typeof command.body !== 'string' || command.body.trim().length === 0)
 			return { status: 'invalid', key: command.reviewId, diagnostics: [{ code: 'review.message_body_empty', path: '/body', message: 'An edit must leave non-empty text; editing never deletes a message.' }] }

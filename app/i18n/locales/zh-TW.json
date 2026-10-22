@@ -2428,6 +2428,7 @@
       "message_edit_not_author": "只有作者可以編輯這則訊息。",
       "message_edit_out_of_order": "編輯歷程的順序不正確。",
       "message_edits_empty": "編輯歷程是空的。",
+      "message_frozen": "這則訊息已無法編輯：之後已有提交或解決。",
       "missing_change_domains": "請說明變更了哪些部分。",
       "change_domain_unknown": "請選擇已知的變更範圍。",
       "missing_evidence": "請為這次提交選擇 Evidence。",

@@ -313,11 +313,11 @@ describe('editing a message (decisions 10–16)', { timeout: 30_000 }, () => {
 		expect(submitted.status).toBe(200)
 		const frozen = await edit(MEI, 'Changed after the submission', body(submitted).revision!)
 		expect(frozen.status).toBe(422)
-		expect(body(frozen)).toMatchObject({ status: 'blocked', code: 'review.message_edit_after_formal_act' })
+		expect(body(frozen)).toMatchObject({ status: 'blocked', code: 'review.message_frozen', diagnostics: [{ code: 'review.message_frozen', path: '/messageId', message: expect.stringContaining('ready-for-review submission (') }] })
 		const reopened = await ctx.app.reopenReviewThread({ reviewId: REVIEW_ID, expectedRevision: body(submitted).revision!, actor: principalActor(RUI) })
 		expect(reopened.status).toBe('updated')
 		const stillFrozen = await edit(MEI, 'Changed after reopening', (reopened as { revision: string }).revision)
-		expect(body(stillFrozen).code).toBe('review.message_edit_after_formal_act')
+		expect(body(stillFrozen).code).toBe('review.message_frozen')
 		// A message posted after the formal act stays editable.
 		const reply = await appendReviewMessageForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: (reopened as { revision: string }).revision, body: 'Follow-up' })
 		const replyId = (await read(ctx)).resource.messages[1]!.id
@@ -355,6 +355,35 @@ describe('editing a message (decisions 10–16)', { timeout: 30_000 }, () => {
 			expect(refused.structuredContent).toMatchObject({ status: 'blocked', code: 'review.message_edit_not_author' })
 			const tool = (await mcp.client.listTools()).tools.find(item => item.name === 'edit_review_message')!
 			expect(tool.description).toContain('Replace the text of your own Review message')
+		}
+		finally {
+			await mcp.close()
+		}
+	})
+
+	it('refuses an edit of a message frozen by a resolution with review.message_frozen on HTTP and MCP, naming the resolution', async () => {
+		const ctx = await session()
+		const mcp = await connectMcp(ctx.app)
+		try {
+			const created = await mcp.client.callTool({ name: 'create_review_thread', arguments: { id: REVIEW_ID, anchor: { scope: 'workspace' } } })
+			const posted = await mcp.client.callTool({ name: 'append_review_message', arguments: { reviewId: REVIEW_ID, expectedRevision: (created.structuredContent as { revision: string }).revision, body: 'Fix widget #submit.' } })
+			const messageId = (await read(ctx)).resource.messages[0]!.id
+			const resolved = await resolveReviewThreadForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: (posted.structuredContent as { revision: string }).revision, resolution: 'answered' })
+			expect(resolved.status).toBe(200)
+			const revision = body(resolved).revision!
+
+			const viaHttp = await editReviewMessageForHttp(scoped(ctx.app, AGENT_EDITOR), REVIEW_ID, messageId, { expectedRevision: revision, body: 'Fix widget #pay.' })
+			expect(viaHttp.status).toBe(422)
+			expect(body(viaHttp)).toMatchObject({ status: 'blocked', code: 'review.message_frozen', diagnostics: [{ code: 'review.message_frozen', path: '/messageId', message: expect.stringContaining('resolution (') }] })
+
+			const viaMcp = await mcp.client.callTool({ name: 'edit_review_message', arguments: { reviewId: REVIEW_ID, expectedRevision: revision, messageId, body: 'Fix widget #pay.' } })
+			expect(viaMcp.isError).toBe(true)
+			expect(viaMcp.structuredContent).toMatchObject({ status: 'blocked', code: 'review.message_frozen', diagnostics: [{ code: 'review.message_frozen', message: expect.stringContaining('resolution (') }] })
+			const tool = (await mcp.client.listTools()).tools.find(item => item.name === 'edit_review_message')!
+			expect(tool.description).toContain('review.message_frozen')
+			// Authorship is checked first: someone else's frozen message stays a not-author refusal.
+			const notAuthor = await editReviewMessageForHttp(scoped(ctx.app, RUI), REVIEW_ID, messageId, { expectedRevision: revision, body: 'x' })
+			expect(body(notAuthor)).toMatchObject({ code: 'review.message_edit_not_author' })
 		}
 		finally {
 			await mcp.close()

@@ -2428,6 +2428,7 @@
       "message_edit_not_author": "Only the author can edit this message.",
       "message_edit_out_of_order": "The edit history is out of order.",
       "message_edits_empty": "The edit history is empty.",
+      "message_frozen": "This message can no longer be edited: it was submitted or resolved after it.",
       "missing_change_domains": "Say what changed.",
       "change_domain_unknown": "Pick a known change domain.",
       "missing_evidence": "Choose the Evidence for this submission.",
