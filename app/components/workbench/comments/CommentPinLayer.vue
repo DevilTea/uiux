@@ -94,45 +94,94 @@ async function dropAt(threadId: string, clientX: number, clientY: number): Promi
 // Keyboard move (issue #118): M on a focused pin starts, arrows move, Enter commits, Escape cancels
 // ---------------------------------------------------------------------------------------------
 
-/** Steps are physical (ArrowLeft is toward the Widget's left edge), also in a right-to-left Locale. */
 const MOVE_HINT_ID = 'pin-move-hint'
 const keyMoving = ref<string>()
+/** The hint the move started from, so a commit that changed nothing writes nothing. */
+let keyOrigin: { x: number; y: number } | undefined
+/** A commit's write is in flight: no second move starts until it settles. */
+const writing = ref(false)
+
+/** Step announcements go at most every 500 ms (like the hover chip); the last position always follows. */
+const STEP_ANNOUNCE_MS = 500
+let lastStepAnnounce = 0
+let stepTimer: ReturnType<typeof setTimeout> | undefined
+function announceStep(text: string): void {
+	clearTimeout(stepTimer)
+	const wait = lastStepAnnounce + STEP_ANNOUNCE_MS - Date.now()
+	const send = () => {
+		lastStepAnnounce = Date.now()
+		comments.announce(text)
+	}
+	if (wait <= 0) send()
+	else stepTimer = setTimeout(send, wait)
+}
+function announceNow(text: string): void {
+	clearTimeout(stepTimer)
+	lastStepAnnounce = Date.now()
+	comments.announce(text)
+}
+onBeforeUnmount(() => clearTimeout(stepTimer))
 
 const percent = (value: number) => Math.round(value * 100)
 function announcePosition(hint: Readonly<{ x: number; y: number }>): string {
 	return t('pins.move.position', { x: percent(hint.x), y: percent(hint.y) })
 }
 
+/** Steps are physical (ArrowLeft is toward the Widget's left edge), also in a right-to-left Locale. */
 function onPinKey(threadId: string, action: 'start' | 'step' | 'commit' | 'cancel', step?: Readonly<{ dx: number; dy: number; coarse: boolean }>): void {
 	if (action === 'start') {
 		const point = comments.placements.value.find(placement => placement.threadId === threadId && placement.state === 'visible')?.point
 		const start = point ? hintAtOverlay(threadId, point) : undefined
 		const shown = start ? showAt(threadId, start) : undefined
-		if (!shown) return
+		if (!shown || writing.value) return
 		keyMoving.value = threadId
-		comments.announce(`${t('pins.move.started')} ${announcePosition(shown)}`)
+		keyOrigin = shown
+		announceNow(`${t('pins.move.started')} ${announcePosition(shown)}`)
 	}
 	else if (keyMoving.value !== threadId) return
 	else if (action === 'step' && step && drag.value?.threadId === threadId) {
 		const shown = showAt(threadId, nudgePinHint(drag.value.hint, step))
-		if (shown) comments.announce(announcePosition(shown))
+		if (shown) announceStep(announcePosition(shown))
 	}
 	else if (action === 'commit') {
 		const hint = drag.value?.threadId === threadId ? drag.value.hint : undefined
 		keyMoving.value = undefined
 		if (!hint) return
+		// The start point is measured, not stored: within 0.1 % of the Widget counts as unchanged.
+		if (keyOrigin && Math.abs(hint.x - keyOrigin.x) < 1e-3 && Math.abs(hint.y - keyOrigin.y) < 1e-3) {
+			drag.value = undefined
+			announceNow(t('pins.move.unchanged'))
+			return
+		}
 		// One write, as for a drop; the pin stays where it was drawn until the thread refreshes.
+		writing.value = true
 		void comments.moveHint(threadId, hint).then((ok) => {
+			writing.value = false
 			if (drag.value?.threadId === threadId) drag.value = undefined
-			if (ok) comments.announce(`${t('pins.move.done')} ${announcePosition(hint)}`)
+			announceNow(ok ? `${t('pins.move.done')} ${announcePosition(hint)}` : t('pins.move.failed'))
 		})
 	}
 	else if (action === 'cancel') {
-		keyMoving.value = undefined
-		drag.value = undefined
-		comments.announce(t('pins.move.canceled'))
+		endKeyMove()
 	}
 }
+
+function endKeyMove(): void {
+	keyMoving.value = undefined
+	if (drag.value?.threadId) drag.value = undefined
+	announceNow(t('pins.move.canceled'))
+}
+
+// The move ends when its pin can no longer be moved: the thread is gone, resolved or off the canvas.
+const moveStillValid = computed(() => {
+	const id = keyMoving.value
+	if (!id) return true
+	return !!props.mapping && comments.canComment.value && comments.pinMeta.value.get(id)?.resolved === false
+		&& comments.placements.value.some(placement => placement.threadId === id && placement.state === 'visible')
+})
+watch(moveStillValid, (valid) => {
+	if (!valid && keyMoving.value) endKeyMove()
+})
 
 /** A muted pin switches the Preview to its thread's recorded context first (Rule 01a1170f-c1f7). */
 function toggle(threadId: string): void {

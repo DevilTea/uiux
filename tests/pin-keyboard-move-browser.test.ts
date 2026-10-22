@@ -116,6 +116,36 @@ describe('Keyboard pin move (issue #118)', () => {
 		finally { await context.close() }
 	}, 90_000)
 
+	it('commits with Space without opening the thread, and writes nothing when the pin did not move', async () => {
+		const { viewId, threadId } = await seed()
+		const { context, page } = await open(`/views/${viewId}`)
+		try {
+			const pin = page.locator(`[data-comment-pins] [data-pin-thread="${threadId}"]`)
+			await pin.waitFor({ timeout: 15_000 })
+			const writes: string[] = []
+			page.on('request', (request) => { if (request.url().includes('/display-hint')) writes.push(request.method()) })
+			await pin.focus()
+
+			await page.keyboard.press('m')
+			await page.keyboard.press('ArrowLeft')
+			await page.keyboard.press('Space')
+			await expect.poll(() => hintOf(threadId)).toEqual({ x: 0.49, y: 0.5 })
+			await page.waitForTimeout(300)
+			expect(await page.locator('[data-thread-bubble]').count()).toBe(0)
+			expect(writes).toHaveLength(1)
+
+			// Back to where it started: Enter saves nothing and says so.
+			await expect.poll(() => liveText(page)).toContain('Pin moved.')
+			await page.keyboard.press('m')
+			await page.keyboard.press('ArrowRight')
+			await page.keyboard.press('ArrowLeft')
+			await page.keyboard.press('Enter')
+			await expect.poll(() => liveText(page)).toContain('Pin not moved.')
+			expect(writes).toHaveLength(1)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
 	it('cancels with Escape or by leaving the pin, without a write and without closing anything else', async () => {
 		const { viewId, threadId } = await seed()
 		const { context, page } = await open(`/views/${viewId}`)

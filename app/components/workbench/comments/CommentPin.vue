@@ -55,6 +55,8 @@ let start: { x: number; y: number; id: number } | undefined
 const dragging = ref(false)
 
 function onPointerDown(event: PointerEvent): void {
+	// A pointer drag ends a keyboard move first.
+	if (props.moving) emit('moveKey', 'cancel')
 	if (!props.draggable || event.button !== 0 || event.pointerType !== 'mouse') return
 	start = { x: event.clientX, y: event.clientY, id: event.pointerId }
 	;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
@@ -100,7 +102,10 @@ function onKeydown(event: KeyboardEvent): void {
 	// The move owns these keys: no bubble toggle, no page scroll, no global Escape.
 	const arrow = ARROWS[event.key]
 	if (arrow) emit('moveKey', 'step', { ...arrow, coarse: event.shiftKey })
-	else if (event.key === 'Enter' || event.key === ' ') emit('moveKey', 'commit')
+	else if (event.key === 'Enter' || event.key === ' ') {
+		swallowCommit = true
+		emit('moveKey', 'commit')
+	}
 	else if (event.key === 'Escape') emit('moveKey', 'cancel')
 	else return
 	event.preventDefault()
@@ -111,7 +116,19 @@ function onBlur(): void {
 	if (props.moving) emit('moveKey', 'cancel')
 }
 
+/**
+ * Enter or Space that committed a keyboard move must not also activate the pin: Firefox fires a
+ * click on the Space keyup even when the keydown was prevented, so the keyup and its click are swallowed.
+ */
+let swallowCommit = false
+function onKeyup(event: KeyboardEvent): void {
+	if (!swallowCommit || (event.key !== ' ' && event.key !== 'Enter')) return
+	event.preventDefault()
+	setTimeout(() => { swallowCommit = false })
+}
+
 function onClick(event: MouseEvent): void {
+	if (swallowCommit) return
 	if (!dragging.value) emit('activate', event.detail === 0)
 }
 
@@ -148,6 +165,7 @@ const isMuted = computed(() => props.muted || props.context !== undefined)
     @pointercancel="onPointerCancel"
     @lostpointercapture="onPointerCancel"
     @keydown="onKeydown"
+    @keyup="onKeyup"
     @blur="onBlur"
     @click="onClick"
   >

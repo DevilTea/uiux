@@ -1367,11 +1367,13 @@
     "overCapHint": "The canvas tracks up to {cap} Widgets at once. Narrow the pin filter to show these.",
     "singleStreamHint": "This preview runtime tracks one Widget at a time. Open a thread to show its pin.",
     "move": {
-      "hint": "Press M to move this pin with the arrow keys. Shift moves in larger steps. Enter saves the position, Escape cancels.",
+      "hint": "Press M to move this pin with the arrow keys. Shift moves in larger steps. Enter saves the position. Escape or moving focus away cancels.",
       "started": "Moving the pin. Arrow keys move it, Shift for larger steps, Enter saves, Escape cancels.",
       "position": "{x}% across, {y}% down the Widget.",
       "done": "Pin moved.",
-      "canceled": "Pin move canceled."
+      "canceled": "Pin move canceled.",
+      "unchanged": "Pin not moved.",
+      "failed": "Couldn't move the pin."
     },
     "toggle": "Show pins",
     "show": "Show pins",
