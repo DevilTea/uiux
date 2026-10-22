@@ -22,6 +22,18 @@ import {
 	type InboxViewInfo,
 	type SeenMarks,
 } from '../utils/review-inbox'
+import {
+	cleanSavedFilterName,
+	MAX_SAVED_FILTERS,
+	parseSavedFilters,
+	resolveSavedFilter,
+	sameInboxFilter,
+	sameNameKey,
+	savedFilterQuery,
+	savedFiltersKey,
+	serializeSavedFilters,
+	type SavedInboxFilter,
+} from '../utils/saved-inbox-filters'
 import { parseThread, viewLocation } from '../utils/workbench-routes'
 import { submissionBody, type ReviewSubmissionDraft } from '../utils/review-submission'
 import { createRevisionPin, useReplyBases } from './useReplyBases'
@@ -48,6 +60,8 @@ type ListPage = Readonly<{ items: readonly ReviewSummary[]; nextCursor?: string 
 
 const SEEN_STORAGE_PREFIX = 'uiux.reviews.seen:'
 const MAX_PAGES = 20
+/** The Workbench lists Views one page of this size; a full page may be truncated. */
+const VIEW_LIST_LIMIT = 100
 const READ_BATCH = 8
 
 type MutationResponse = Readonly<{ status?: string; key?: string; revision?: string }>
@@ -73,6 +87,11 @@ function readSeen(key: string): SeenMarks {
 		return value && typeof value === 'object' && !Array.isArray(value) ? value as SeenMarks : {}
 	}
 	catch { return {} }
+}
+
+function readSavedFilters(key: string): SavedInboxFilter[] {
+	try { return parseSavedFilters(globalThis.localStorage?.getItem(key)) }
+	catch { return [] }
 }
 
 function createReviewInbox() {
@@ -282,6 +301,70 @@ function createReviewInbox() {
 		seen.value = kept
 		try { globalThis.localStorage?.setItem(seenKey.value, JSON.stringify(kept)) }
 		catch { /* storage unavailable */ }
+	}
+
+	// -------------------------------------------------------------------------------------------
+	// Saved filters (issue #62): per browser, Workspace and member; never Workspace data
+	// -------------------------------------------------------------------------------------------
+
+	const savedKey = computed(() => savedFiltersKey(access.session.value?.workspaceRoot, member.value?.id))
+	const savedFilters = ref<readonly SavedInboxFilter[]>(readSavedFilters(savedKey.value))
+	watch(savedKey, (key) => { savedFilters.value = readSavedFilters(key) })
+	function writeSaved(next: readonly SavedInboxFilter[]): void {
+		savedFilters.value = next
+		try { globalThis.localStorage?.setItem(savedKey.value, serializeSavedFilters(next)) }
+		catch { /* storage unavailable: the saved filters last for this tab only */ }
+	}
+
+	/** Existing View ids; undefined while the View list is loading, failed or may be truncated (one page), so nothing is dropped on a guess. */
+	const knownViewIds = computed(() => workbench.loading.value || workbench.error.value || !workbench.workspace.value || views.value.length >= VIEW_LIST_LIMIT ? undefined : new Set(views.value.map(view => view.key)))
+	/** Saved filters need both the Workspace and the member known; before the session loads the key is a placeholder. */
+	const canSaveFilters = computed(() => !!access.session.value?.workspaceRoot && !!member.value?.id)
+	/** Each saved filter as it applies now (facets that no longer resolve dropped). */
+	const resolvedSaved = computed(() => savedFilters.value.map(saved => ({ saved, ...resolveSavedFilter(saved, knownViewIds.value) })))
+	/** The saved filter the current filter equals, if any. */
+	const activeSavedId = computed(() => resolvedSaved.value.find(item => !item.droppedViews && sameInboxFilter(item.filter, filter.value))?.saved.id)
+	/** Set when applying a saved filter dropped facets; shown while that filter stays applied. */
+	const savedChanged = ref<Readonly<{ id: string; name: string; dropped: number }>>()
+	const savedNotice = computed(() => savedChanged.value && resolvedSaved.value.some(item => item.saved.id === savedChanged.value?.id && sameInboxFilter(item.filter, filter.value)) ? savedChanged.value : undefined)
+
+	type SavedRefusal = 'empty' | 'duplicate' | 'limit' | 'unavailable'
+	function nameRefusal(name: string, exceptId?: string): SavedRefusal | undefined {
+		if (!name) return 'empty'
+		const lower = sameNameKey(name)
+		return savedFilters.value.some(item => item.id !== exceptId && sameNameKey(item.name) === lower) ? 'duplicate' : undefined
+	}
+	/** Saves the current filter under a name; returns why it was refused, if it was. */
+	function saveCurrentFilter(rawName: string): SavedRefusal | undefined {
+		const name = cleanSavedFilterName(rawName)
+		const refusal = nameRefusal(name) ?? (savedFilters.value.length >= MAX_SAVED_FILTERS ? 'limit' : undefined)
+		if (refusal) return refusal
+		if (!canSaveFilters.value) return 'unavailable'
+		writeSaved([...savedFilters.value, { id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`, name, query: savedFilterQuery(filter.value) }])
+		savedChanged.value = undefined
+		announce(t('inbox.saved.announce.saved', { name }))
+		return undefined
+	}
+	function renameSavedFilter(id: string, rawName: string): SavedRefusal | undefined {
+		const name = cleanSavedFilterName(rawName)
+		const refusal = nameRefusal(name, id)
+		if (refusal) return refusal
+		writeSaved(savedFilters.value.map(item => item.id === id ? { ...item, name } : item))
+		announce(t('inbox.saved.announce.renamed', { name }))
+		return undefined
+	}
+	function deleteSavedFilter(id: string): void {
+		const gone = savedFilters.value.find(item => item.id === id)
+		if (!gone) return
+		writeSaved(savedFilters.value.filter(item => item.id !== id))
+		announce(t('inbox.saved.announce.deleted', { name: gone.name }))
+	}
+	function applySavedFilter(id: string): void {
+		const item = resolvedSaved.value.find(entry => entry.saved.id === id)
+		if (!item) return
+		replaceQuery(item.filter, selectedId.value)
+		savedChanged.value = item.droppedViews ? { id, name: item.saved.name, dropped: item.droppedViews } : undefined
+		announce(item.droppedViews ? t('inbox.saved.announce.appliedChanged', { name: item.saved.name, n: item.droppedViews }) : t('inbox.saved.announce.applied', { name: item.saved.name }))
 	}
 
 	// -------------------------------------------------------------------------------------------
@@ -677,6 +760,14 @@ function createReviewInbox() {
 		filter,
 		setFilter,
 		clearFilters,
+		savedFilters,
+		canSaveFilters,
+		activeSavedId,
+		savedNotice,
+		saveCurrentFilter,
+		renameSavedFilter,
+		deleteSavedFilter,
+		applySavedFilter,
 		selectedId,
 		select,
 		selected,

@@ -727,6 +727,36 @@
     },
     "waiting": "沒有待處理 | {n} 則待處理 | {n} 則待處理",
     "filtersActive": "篩選，{n} 項啟用中",
+    "saved": {
+      "menu": "已儲存的篩選",
+      "menuNamed": "已儲存的篩選：{name}",
+      "list": "此瀏覽器中已儲存的篩選",
+      "empty": "還沒有已儲存的篩選。先設定好篩選條件，再儲存在這裡。",
+      "browserOnly": "只保存在此瀏覽器。",
+      "saveCurrent": "儲存目前的篩選…",
+      "nameLabel": "名稱",
+      "namePlaceholder": "例如：我的 View 中過時的錨點",
+      "save": "儲存",
+      "rename": "重新命名",
+      "renameNamed": "重新命名 {name}",
+      "deleteNamed": "刪除 {name}",
+      "cancel": "取消",
+      "apply": "套用已儲存的篩選 {name}",
+      "errors": {
+        "empty": "請輸入名稱。",
+        "duplicate": "已有同名的已儲存篩選。",
+        "limit": "最多只能保留 {n} 個已儲存的篩選，請先刪除一個。",
+        "unavailable": "登入後才能儲存篩選。"
+      },
+      "changed": "「{name}」已變更：已略過 {n} 個不存在的 View。 | 「{name}」已變更：已略過 {n} 個不存在的 View。",
+      "announce": {
+        "saved": "已儲存篩選「{name}」。",
+        "renamed": "已重新命名為「{name}」。",
+        "deleted": "已刪除已儲存的篩選「{name}」。",
+        "applied": "已套用篩選「{name}」。",
+        "appliedChanged": "已套用篩選「{name}」，並略過 {n} 個不存在的 View。 | 已套用篩選「{name}」，並略過 {n} 個不存在的 View。"
+      }
+    },
     "quickFilters": "快速篩選",
     "mine": "我的",
     "mineHint": "你發起或參與的討論串",
