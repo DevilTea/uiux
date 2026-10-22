@@ -371,9 +371,11 @@ function createReviewInbox() {
 		const sent = expectedRevision ?? item.revision
 		try {
 			const response = await run(sent) as MutationResponse | undefined
-			await loadSummaries()
-			// The member's own change is not "updated by others": a reply draft pinned on it follows.
+			// The member's own change is not "updated by others": a reply draft pinned on it follows,
+			// moving with the re-read that applies the new revision.
 			replyBases.follow(threadId, sent, response?.revision)
+			try { await loadSummaries() }
+			finally { replyBases.settle(threadId) }
 			return true
 		}
 		catch (cause) {

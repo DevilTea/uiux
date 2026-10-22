@@ -26,6 +26,18 @@ export function useReplyBases(
 		const item = thread(threadId)
 		if (item) bases.set(threadId, { revision: item.revision, state: threadState(item) })
 	}
+	/** Own writes whose re-read has not applied yet: the pin moves in the same tick the new revision shows. */
+	const pending = shallowReactive(new Map<string, Readonly<{ from: string; to: string }>>())
+	const settleOwn = (threadId: string): void => {
+		const move = pending.get(threadId)
+		const shown = thread(threadId)?.revision
+		if (!move || shown === move.from) return
+		pending.delete(threadId)
+		if (shown === move.to && bases.get(threadId)?.revision === move.from) pinNow(threadId)
+	}
+	watch(() => [...pending.keys()].map(id => thread(id)?.revision), () => {
+		for (const threadId of [...pending.keys()]) settleOwn(threadId)
+	}, { flush: 'sync' })
 	watch(drafts, (current) => {
 		for (const threadId of [...bases.keys()]) if (!current[threadId]?.trim()) bases.delete(threadId)
 		for (const [threadId, text] of Object.entries(current)) {
@@ -45,6 +57,8 @@ export function useReplyBases(
 		updated(threadId: string): ReplyConflictChange | undefined {
 			const base = bases.get(threadId)
 			const item = base ? thread(threadId) : undefined
+			const own = pending.get(threadId)
+			if (base && item && own && own.from === base.revision && item.revision === own.to) return undefined
 			return base && item && item.revision !== base.revision ? replyConflictChange(base.state, threadState(item)) : undefined
 		},
 		/** The user acknowledged the notice: the draft is now aimed at the thread as shown. */
@@ -53,11 +67,16 @@ export function useReplyBases(
 		},
 		/**
 		 * The member's own write moved the thread from `from` to `to` while a draft was pinned on
-		 * `from`: not a change by others, so the pin follows it once the thread shown is at `to`.
+		 * `from`: not a change by others, so the pin follows it. Call it before the re-read: the pin
+		 * moves as the thread shown reaches `to`, so no notice shows in between.
 		 */
 		follow(threadId: string, from: string, to: string | undefined): void {
-			if (to !== undefined && bases.get(threadId)?.revision === from && thread(threadId)?.revision === to) pinNow(threadId)
+			if (to === undefined || bases.get(threadId)?.revision !== from) return
+			pending.set(threadId, { from, to })
+			settleOwn(threadId)
 		},
+		/** The re-read is over: a move that never showed (the re-read failed) is dropped. */
+		settle(threadId: string): void { pending.delete(threadId) },
 	}
 }
 

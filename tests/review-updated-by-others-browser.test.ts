@@ -60,13 +60,15 @@ afterAll(async () => {
 	await server?.close()
 })
 
-async function open(path: string): Promise<{ context: BrowserContext; page: Page }> {
+async function open(path: string, streamUnavailable = false): Promise<{ context: BrowserContext; page: Page }> {
 	const context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, colorScheme: 'light' })
 	await context.addInitScript(() => {
 		localStorage.setItem('nuxt-color-mode', 'light')
 		localStorage.setItem('uiux.workbench.locale', 'en-US')
 	})
 	await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
+	// Without the change-event stream the Workbench polls instead (Feature "Live refresh").
+	if (streamUnavailable) await context.route('**/api/events', route => route.abort())
 	const page = await context.newPage()
 	await page.goto(`${server.origin}${path}`, { waitUntil: 'networkidle' })
 	return { context, page }
@@ -80,9 +82,9 @@ const SURFACES: Readonly<Record<string, Surface>> = {
 }
 
 /** Opens the thread, drafts the reply, and lets the Agent reply; returns once the notice is shown. */
-async function draftWhileAgentReplies(surface: Surface): Promise<{ context: BrowserContext; page: Page; id: string; scope: Locator; notice: Locator; posts: number[]; sent: () => number }> {
+async function draftWhileAgentReplies(surface: Surface, streamUnavailable = false): Promise<{ context: BrowserContext; page: Page; id: string; scope: Locator; notice: Locator; posts: number[]; sent: () => number }> {
 	const id = await seedThread()
-	const { context, page } = await open(surface.path(id))
+	const { context, page } = await open(surface.path(id), streamUnavailable)
 	const scope = page.locator(surface.scope(id))
 	await scope.waitFor({ timeout: 15_000 })
 	const messages = scope.locator('[data-timeline-kind="message"]')
@@ -98,9 +100,15 @@ async function draftWhileAgentReplies(surface: Surface): Promise<{ context: Brow
 	const notice = scope.locator('[data-reply-updated]')
 	expect(await notice.count()).toBe(0)
 	await agentReplies(id)
-	await expect.poll(() => messages.count(), { timeout: 10_000 }).toBe(2)
-	await notice.waitFor({ timeout: 10_000 })
-	expect(await notice.getAttribute('role')).toBe('status')
+	// Polling reads every 15 s, so allow for one full interval.
+	const wait = streamUnavailable ? 40_000 : 10_000
+	await expect.poll(() => messages.count(), { timeout: wait }).toBe(2)
+	await notice.waitFor({ timeout: wait })
+	// The live region is always mounted, so the notice is announced as it appears.
+	const region = scope.locator('[data-reply-updated-region]')
+	expect(await region.getAttribute('role')).toBe('status')
+	expect(await region.getAttribute('aria-live')).toBe('polite')
+	expect(await region.locator('[data-reply-updated]').count()).toBe(1)
 	expect(await notice.getAttribute('data-new-replies')).toBe('1')
 	expect(await notice.innerText()).toContain('Updated by others — 1 new reply')
 	// The notice sits above the composer, and the draft is kept.
@@ -154,4 +162,14 @@ describe('"Updated by others" while drafting a reply (issue #80)', () => {
 			finally { await context.close() }
 		}, 90_000)
 	}
+
+	it('shows the notice when the change-event stream is unavailable and the page polls', async () => {
+		const surface = SURFACES['the Reviews detail']!
+		const { context, notice, scope } = await draftWhileAgentReplies(surface, true)
+		try {
+			expect(await notice.innerText()).toContain('Updated by others')
+			expect(await scope.locator(surface.reply).inputValue()).toBe(REPLY)
+		}
+		finally { await context.close() }
+	}, 120_000)
 })
