@@ -13,6 +13,7 @@ import ThreadReasonPrompt from './ThreadReasonPrompt.vue'
 import WbErrorDescription from './WbErrorDescription.vue'
 import RecordedContextLabel from './RecordedContextLabel.vue'
 import ReplyConflictAlert from './ReplyConflictAlert.vue'
+import ReplyUpdatedNotice from './ReplyUpdatedNotice.vue'
 import { threadState } from '../../utils/reply-conflict'
 import { promoteConflictTitleKey } from '../../utils/promote-conflict'
 import { latestEditableMessageId } from '../../utils/review-message-actions'
@@ -77,6 +78,8 @@ const conflictTitle = computed(() => {
 	const key = promoteConflictTitleKey(promoteMoved.value)
 	return key ? t(key) : t('conflict.thread')
 })
+/** The thread changed elsewhere while the reply is drafted (Rule 01a11485-f434): the notice above the composer. */
+const replyUpdated = computed(() => thread.value ? inbox.replyUpdated(thread.value.id) : undefined)
 const canSendAgain = computed(() => inbox.canReply.value && thread.value?.status !== 'resolved' && !!reply.value.trim())
 const error = computed(() => thread.value && inbox.lastError.value?.threadId === thread.value.id ? inbox.lastError.value.error : undefined)
 
@@ -133,6 +136,11 @@ async function resolvePrimary(): Promise<void> {
 
 async function sendReply(): Promise<void> {
 	if (thread.value) await inbox.reply(thread.value.id)
+}
+/** Acknowledging aims the draft at the thread as shown now; the notice that held focus gives it to the reply box. */
+function acknowledgeReplyUpdate(): void {
+	if (thread.value) inbox.acknowledgeReplyUpdate(thread.value.id)
+	void nextTick(() => replyArea.value?.textareaRef?.focus())
 }
 /** Send again removes the alert that held focus; focus returns to the reply box. */
 async function sendAgain(): Promise<void> {
@@ -446,6 +454,11 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
         :compact="compact"
         @cancel="confirmingDelete = false"
         @confirm="confirmDelete"
+      />
+      <ReplyUpdatedNotice
+        v-if="replyUpdated && thread.status !== 'resolved' && !confirmingDelete"
+        :change="replyUpdated"
+        @acknowledge="acknowledgeReplyUpdate"
       />
       <div
         v-if="thread.status !== 'resolved' && !confirmingDelete"
