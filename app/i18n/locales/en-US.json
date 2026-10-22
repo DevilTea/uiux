@@ -1881,6 +1881,7 @@
     },
     "staleWord": "Variant missing",
     "unknownAuthor": "Unknown author",
+    "removedMember": "{name} (removed)",
     "pinLabel": "Comment by {name} on {type} {id}, {status}, {n} message | Comment by {name} on {type} {id}, {status}, {n} messages",
     "clusterLabel": "{n} comment here | {n} comments here",
     "scopeLabel": "Variant scope",

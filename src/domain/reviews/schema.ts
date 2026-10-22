@@ -31,7 +31,8 @@ export type ReviewDisplayHint = Readonly<{ pin: ReviewPinHint }>
 export type ReviewRenderContext = Readonly<{ locale?: string; viewportId?: string; themeId?: string }>
 /** Decoding context: the file name the thread's id must match, when known. Every Review file is decoded in its current shape. */
 export type ReviewDecodeContext = Readonly<{ filename?: string }>
-export type ReviewActor = Readonly<{ type: string; id?: string; displayName?: string }>
+/** `removed` is never stored: Review reads add it to a member actor that is no longer on the roster. */
+export type ReviewActor = Readonly<{ type: string; id?: string; displayName?: string; removed?: true }>
 /** The Widget arm (untagged): a thread about one Widget of one View. */
 export type ReviewWidgetAnchor = Readonly<{ viewId: string; widgetId: string }>
 /** The Workspace arm: a thread about the product as a whole. */

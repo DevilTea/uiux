@@ -1881,6 +1881,7 @@
     },
     "staleWord": "找不到 Variant",
     "unknownAuthor": "未知的作者",
+    "removedMember": "{name}（已移除）",
     "pinLabel": "{name} 在 {type} {id} 的留言，{status}，{n} 則訊息 | {name} 在 {type} {id} 的留言，{status}，{n} 則訊息",
     "clusterLabel": "這裡有 {n} 則留言 | 這裡有 {n} 則留言",
     "scopeLabel": "Variant 範圍",

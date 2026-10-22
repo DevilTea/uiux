@@ -26,6 +26,9 @@ const session = shallowRef<AccessSession>()
 const loaded = shallowRef(false)
 let loading: Promise<AccessSession | undefined> | undefined
 
+/** Counts `access.changed` events, so a reader of Review data can re-read what a roster change affects. */
+export const accessEpoch = shallowRef(0)
+
 const locks = shallowRef<readonly PublicLease[]>([])
 let lockTimer: ReturnType<typeof setInterval> | undefined
 let lockSubscribers = 0

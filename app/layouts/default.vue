@@ -6,7 +6,7 @@ import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../composables/useMediaQue
 import { provideWorkbenchShell } from '../composables/useWorkbenchShell'
 import { useConnectivity } from '../composables/useConnectivity'
 import { useKitBuild } from '../composables/useKitBuild'
-import { useAccess } from '../composables/useAccess'
+import { accessEpoch, useAccess } from '../composables/useAccess'
 import { useLiveEvents } from '../composables/useLiveEvents'
 import { PRODUCT_KIT_PATH } from '../utils/workbench-routes'
 import WorkbenchNavbar from '../components/workbench/WorkbenchNavbar.vue'
@@ -65,7 +65,10 @@ watch(() => !!access.session.value, (signedIn) => {
 }, { immediate: true })
 live.onResources((batch) => { void workbench.applyLiveChanges(batch) })
 live.onLocks(() => { void access.refreshLocks() })
-live.onAccess(() => { void access.reload() })
+live.onAccess(() => {
+	accessEpoch.value += 1
+	void access.reload()
+})
 
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const isPhone = useMediaQuery(WORKBENCH_BREAKPOINTS.phone)

@@ -56,7 +56,10 @@ const statusIcon = computed(() => {
 
 const when = computed(() => props.item.latestActivityAt ? relativeTime(props.item.latestActivityAt, locale.value) : '')
 // Cached, so a row that re-renders for its canvas glyph does no message formatting.
-const authorName = computed(() => props.item.author?.displayName ?? t('comments.unknownAuthor'))
+const authorName = computed(() => {
+	const name = props.item.author?.displayName ?? t('comments.unknownAuthor')
+	return props.item.author?.removed ? t('comments.removedMember', { name }) : name
+})
 const messageCountLabel = computed(() => t('reviews.messageCount', props.item.messageCount))
 /** A thread on the View as a whole (RootShell) reads "Whole View", not "RootShell · #root". */
 const onView = computed(() => props.item.anchor.widgetId === VIEW_ANCHOR_WIDGET_ID)

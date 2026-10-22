@@ -8,6 +8,7 @@ import { relativeTime } from '../../utils/widget-inspection'
 import { copyText } from '../../utils/copy-text'
 import { viewLocation } from '../../utils/workbench-routes'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
+import { useActorName } from '../../composables/useActorName'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import ReviewMessage from './ReviewMessage.vue'
 
@@ -68,9 +69,7 @@ onBeforeUnmount(() => {
 	for (const timer of timers) clearTimeout(timer)
 })
 
-function actorName(actor: ReviewActor | undefined): string {
-	return actor?.displayName ?? actor?.id ?? t('comments.unknownAuthor')
-}
+const actorName = useActorName()
 function isAgent(actor: ReviewActor): boolean {
 	return actor.type === 'agent'
 }

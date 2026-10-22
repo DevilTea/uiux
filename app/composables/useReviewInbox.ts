@@ -27,7 +27,7 @@ import { submissionBody, type ReviewSubmissionDraft } from '../utils/review-subm
 import { createRevisionPin, useReplyBases } from './useReplyBases'
 import { threadState, type ReplyConflict } from '../utils/reply-conflict'
 import { promoteMovedOf, type PromoteConflict } from '../utils/promote-conflict'
-import { useAccess } from './useAccess'
+import { accessEpoch, useAccess } from './useAccess'
 import { useUiuxClient } from './useUiuxClient'
 import { useWorkbench } from './useWorkbench'
 import { useRecordedRenderContext } from './useRecordedRenderContext'
@@ -185,8 +185,8 @@ function createReviewInbox() {
 	const detailErrors = shallowRef<ReadonlyMap<string, FetchErrorDetails>>(new Map())
 	let detailSequence = 0
 
-	async function loadDetails(): Promise<void> {
-		const wanted = reviews.value.filter(review => details.value.get(review.key)?.revision !== review.revision)
+	async function loadDetails(force = false): Promise<void> {
+		const wanted = reviews.value.filter(review => force || details.value.get(review.key)?.revision !== review.revision)
 		if (!wanted.length) return
 		const sequence = ++detailSequence
 		const next = new Map(details.value)
@@ -214,6 +214,8 @@ function createReviewInbox() {
 		}
 	}
 	watch(() => reviews.value.map(review => `${review.key}@${review.revision}`).join(','), () => { void loadDetails() }, { immediate: true })
+	// A roster change does not change a Review's revision, but it changes which actors read as removed (Rule 01a11485-f185-7c23-8f2a-e045a279cd27).
+	watch(accessEpoch, () => { void loadDetails(true) })
 
 	const viewIr = shallowRef<ReadonlyMap<string, ViewIrInfo>>(new Map())
 	async function loadViews(): Promise<void> {

@@ -16,7 +16,7 @@ import type { Point } from '../../src/preview/protocol/schema'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
 import { actorInitials } from '../utils/widget-inspection'
 import { flattenWidgetTree } from '../../src/preview/widget-tree'
-import { useAccess } from './useAccess'
+import { accessEpoch, useAccess } from './useAccess'
 import { useUiuxClient } from './useUiuxClient'
 import { useWorkbench } from './useWorkbench'
 import { usePinPlacements, type PinPlacement, type PinThreadInput } from './usePinPlacements'
@@ -206,8 +206,8 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 
 	/** Point reads for every thread of the View whose revision changed (timeline, author, title). */
 	let detailSequence = 0
-	async function loadDetails(): Promise<void> {
-		const wanted = viewSummaries.value.filter(review => details.value.get(review.key)?.revision !== review.revision)
+	async function loadDetails(force = false): Promise<void> {
+		const wanted = viewSummaries.value.filter(review => force || details.value.get(review.key)?.revision !== review.revision)
 		if (!wanted.length) return
 		const sequence = ++detailSequence
 		loadingDetails.value = true
@@ -223,6 +223,8 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		}
 	}
 	watch(() => viewSummaries.value.map(review => `${review.key}@${review.revision}`).join(','), () => { void loadDetails() }, { immediate: true })
+	// A roster change leaves a Review's revision alone but changes which actors read as removed.
+	watch(accessEpoch, () => { void loadDetails(true) })
 
 	/** Re-reads the Review summaries after a mutation (the nav badges follow the same list). */
 	async function refreshReviews(): Promise<void> {
@@ -785,7 +787,8 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	const pinMeta = computed(() => {
 		const meta = new Map<string, PinMeta>()
 		for (const item of threads.value) {
-			const name = item.author?.displayName ?? t('comments.unknownAuthor')
+			const recorded = item.author?.displayName ?? t('comments.unknownAuthor')
+			const name = item.author?.removed ? t('comments.removedMember', { name: recorded }) : recorded
 			const status = t(`thread.status.${statusKey(item.status)}`)
 			const type = widgetTypeById.value.get(item.anchor.widgetId) ?? 'Widget'
 			const onView = item.anchor.widgetId === VIEW_ANCHOR_WIDGET_ID
