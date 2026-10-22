@@ -548,7 +548,6 @@ watch(() => props.threadId, () => {
 
     <template v-else-if="comments.canComment.value && thread.status !== 'resolved'">
       <ReplyUpdatedNotice
-        v-if="replyUpdated"
         :change="replyUpdated"
         @acknowledge="acknowledgeReplyUpdate"
       />

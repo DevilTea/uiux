@@ -456,8 +456,7 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
         @confirm="confirmDelete"
       />
       <ReplyUpdatedNotice
-        v-if="replyUpdated && thread.status !== 'resolved' && !confirmingDelete"
-        :change="replyUpdated"
+        :change="thread.status !== 'resolved' && !confirmingDelete ? replyUpdated : undefined"
         @acknowledge="acknowledgeReplyUpdate"
       />
       <div
