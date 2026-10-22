@@ -23,6 +23,7 @@ import {
 	type InboxThread,
 } from '../../utils/review-inbox'
 import ReviewInboxFilters from './ReviewInboxFilters.vue'
+import ReviewSavedFilters from './ReviewSavedFilters.vue'
 import WbErrorDescription from './WbErrorDescription.vue'
 
 /**
@@ -399,6 +400,7 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
             @click="inbox.setFilter({ unread: !inbox.filter.value.unread })"
           />
         </UTooltip>
+        <ReviewSavedFilters />
         <template v-if="chips.length">
           <span
             class="mx-1 h-4 w-px bg-accented"
