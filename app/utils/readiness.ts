@@ -1,5 +1,5 @@
 import type { FormalEvidenceRecord } from '../../src/domain/evidence/schema'
-import { evaluateEvidenceStaleness, PRODUCT_KIT_CHANGED_REASON, PRODUCT_KIT_PROVENANCE_UNAVAILABLE_REASON, RENDER_INPUT_CHANGED_REASON, RENDER_INPUT_DIGEST_MISSING_REASON, type EvidenceStalenessContext } from '../../src/domain/evidence/staleness'
+import { ADAPTER_CHANGED_REASON, ADAPTER_PROVENANCE_MISSING_REASON, ADAPTER_PROVENANCE_UNAVAILABLE_REASON, evaluateEvidenceStaleness, PRODUCT_KIT_CHANGED_REASON, PRODUCT_KIT_PROVENANCE_UNAVAILABLE_REASON, RENDER_INPUT_CHANGED_REASON, RENDER_INPUT_DIGEST_MISSING_REASON, type EvidenceStalenessContext } from '../../src/domain/evidence/staleness'
 import type { HandoffBlockingDiagnostic, HandoffReadiness } from '../../src/domain/handoff/schema'
 import type { ResolvedRenderContext } from '../../src/domain/render-context/schema'
 import { REVIEW_RESOLUTIONS, type ReviewResolution } from '../../src/domain/reviews/schema'
@@ -96,6 +96,9 @@ export type EvidenceFreshnessReason =
 	| 'productKitChanged'
 	| 'noProductKit'
 	| 'productKitUnavailable'
+	| 'adapterChanged'
+	| 'noAdapters'
+	| 'adaptersUnavailable'
 	| 'other'
 
 export type EvidenceFreshness = Readonly<{
@@ -129,16 +132,24 @@ export function evidenceFreshness(record: FormalEvidenceRecord, context: Evidenc
 		return { state: 'unknown', reason: 'noLocaleRevision', subject: locale }
 
 	const assessed = evaluateEvidenceStaleness(record, context)
-	// Rule 01a1161b-ff68-…: a capture without Product Kit provenance, or judged while the current one
-	// cannot be computed, is unknown, not fresh.
-	if (assessed.unknown) return { state: 'unknown', reason: assessed.reason === PRODUCT_KIT_PROVENANCE_UNAVAILABLE_REASON ? 'productKitUnavailable' : 'noProductKit' }
+	// Rule 01a1161b-ff68-…: a capture without Adapter or Product Kit provenance, or judged while the
+	// current one cannot be computed, is unknown, not fresh.
+	if (assessed.unknown) return { state: 'unknown', reason: unknownReason(assessed.reason) }
 	if (assessed.isStale) return { state: 'stale', ...staleReason(assessed.reason) }
 	if (record.coverage?.complete !== true) return { state: 'stale', reason: 'incomplete' }
 	return { state: 'fresh' }
 }
 
+function unknownReason(reason: string | undefined): EvidenceFreshnessReason {
+	if (reason === ADAPTER_PROVENANCE_MISSING_REASON) return 'noAdapters'
+	if (reason === ADAPTER_PROVENANCE_UNAVAILABLE_REASON) return 'adaptersUnavailable'
+	if (reason === PRODUCT_KIT_PROVENANCE_UNAVAILABLE_REASON) return 'productKitUnavailable'
+	return 'noProductKit'
+}
+
 function staleReason(reason: string | undefined): Pick<EvidenceFreshness, 'reason' | 'subject'> {
 	if (!reason) return { reason: 'other' }
+	if (reason === ADAPTER_CHANGED_REASON) return { reason: 'adapterChanged' }
 	if (reason === RENDER_INPUT_CHANGED_REASON) return { reason: 'viewChanged' }
 	if (reason === RENDER_INPUT_DIGEST_MISSING_REASON) return { reason: 'noRenderInputDigest' }
 	if (reason === 'View no longer exists') return { reason: 'viewMissing' }

@@ -29,7 +29,11 @@ import type { Decision, DecisionActor, DecisionHistoryEntry, DecisionOutcome, De
 import type { ViewResource } from '../../domain/views/schema'
 import { validateFormalEvidenceRecord } from '../../domain/evidence/schema'
 import { renderInputDigest } from '../../domain/evidence/render-input-digest'
-import { isCompleteEvidenceForRenderInput } from '../../domain/evidence/staleness'
+import { isCompleteEvidenceForRenderInput, unknownProvenanceFreshness, type EvidenceStalenessContext } from '../../domain/evidence/staleness'
+import { adapterFreshnessContext } from '../../domain/evidence/adapter-provenance'
+import { productKitFreshnessContext } from '../../domain/product-kit/provenance'
+import { readCurrentAdapterProvenance } from './adapter-provenance'
+import { readCurrentProductKitProvenance } from './product-kit-provenance'
 import { unknownChangeDomainDiagnostics } from '../../domain/reviews/change-domains'
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
@@ -468,6 +472,10 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		const currentViewDigests = targets.views
 
 		const evidenceDiagnostics: Diagnostic[] = []
+		// The current Adapter and Product Kit provenance, read once and only when a formal capture is cited.
+		let currentProvenance: Promise<Pick<EvidenceStalenessContext, 'adapters' | 'adaptersUnavailable' | 'productKit' | 'productKitUnavailable'>> | undefined
+		const provenanceContext = () => currentProvenance ??= Promise.all([readCurrentAdapterProvenance(persistence), readCurrentProductKitProvenance(persistence)])
+			.then(([adapters, productKit]) => ({ ...adapterFreshnessContext(adapters), ...productKitFreshnessContext(productKit) }))
 		for (const [index, ref] of command.evidenceRefs.entries()) {
 			const path = `/evidenceRefs/${index}`
 			const validation = validateReviewEvidenceRef(ref, path)
@@ -519,6 +527,18 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 							message: targets.workspace
 								? `Formal evidence ${validation.value.evidence} must be complete for the current render input (IR and Variants) of the View it captured, and that View must be named in resources.`
 								: `Formal evidence ${validation.value.evidence} must be complete for the current render input (IR and Variants) of target View ${[...currentViewDigests.keys()][0]}.`,
+						})
+						continue
+					}
+					// Rule 01a11686-8d71-79f5-bb10-0c74649586ea: a capture whose freshness is unknown (it records
+					// no Adapter or no Product Kit provenance, or the current one cannot be computed) never
+					// satisfies a submission, so marking ready is refused until it is recaptured.
+					const unknown = unknownProvenanceFreshness(record.value, await provenanceContext())
+					if (unknown) {
+						evidenceDiagnostics.push({
+							code: 'review.formal_evidence_freshness_unknown',
+							path: `${path}/evidence`,
+							message: `Formal evidence ${validation.value.evidence} has unknown freshness, so it cannot be cited: ${unknown.reason}.`,
 						})
 					}
 				}

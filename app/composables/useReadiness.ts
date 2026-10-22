@@ -1,5 +1,6 @@
 import { computed, shallowRef, triggerRef, watch } from 'vue'
 import { useI18n } from '#imports'
+import type { EvidenceAdapterProvenance } from '../../src/domain/evidence/adapter-provenance'
 import type { FormalEvidenceRecord } from '../../src/domain/evidence/schema'
 import type { HandoffManifest, HandoffReadiness, HandoffReadinessAssessment, HandoffRoot } from '../../src/domain/handoff/schema'
 import type { ProductKitProvenance } from '../../src/domain/product-kit/provenance'
@@ -73,6 +74,11 @@ const evidenceItems = shallowRef<readonly EvidenceItem[]>([])
  * `productKitUnavailable` when it cannot be computed.
  */
 const currentProductKit = shallowRef<Readonly<{ productKit?: ProductKitProvenance; productKitUnavailable?: boolean }>>({})
+/**
+ * The current Adapter provenance, read with the Evidence list: `adapters`, every Adapter of the
+ * active set in Adapter-list order, or `adaptersUnavailable` when it cannot be computed.
+ */
+const currentAdapters = shallowRef<Readonly<{ adapters?: readonly EvidenceAdapterProvenance[]; adaptersUnavailable?: boolean }>>({})
 /**
  * Each View's current render-input digest, read with the Evidence list, by View key (Rule
  * 01a115cd-c5a5-…: the View condition compares it, not the View revision).
@@ -153,8 +159,9 @@ export function useReadiness() {
 		evidenceLoading.value = true
 		const startedWith = viewSignature()
 		const run = uiux.listEvidenceForFreshness<EvidenceItem, ProductKitProvenance>()
-			.then(({ items, views: inputs, productKit, productKitUnavailable }) => {
+			.then(({ items, views: inputs, productKit, productKitUnavailable, adapters, adaptersUnavailable }) => {
 				currentProductKit.value = { ...(productKit ? { productKit } : {}), ...(productKitUnavailable === true ? { productKitUnavailable } : {}) }
+				currentAdapters.value = { ...(adapters ? { adapters } : {}), ...(adaptersUnavailable === true ? { adaptersUnavailable } : {}) }
 				viewRenderInputs.value = new Map((inputs ?? []).map(input => [input.key, input]))
 				evidenceItems.value = (items ?? []).filter(item => item?.record?.kind === 'formal_capture')
 				evidenceError.value = undefined
@@ -198,6 +205,7 @@ export function useReadiness() {
 			discoveredLocales: discoveredLocales.value,
 			localeRevisions: localeRevisions.value,
 			...currentProductKit.value,
+			...currentAdapters.value,
 		}
 		return evidenceItems.value.map((item) => {
 			const context = contextFromRecord(item.record)

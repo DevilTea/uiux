@@ -227,6 +227,9 @@
       "productKitChanged": "擷取後 Product Kit 已變更。",
       "noProductKit": "這筆紀錄沒有記錄擷取時的 Product Kit，因此無法判斷是否最新。請重新擷取。",
       "productKitUnavailable": "目前的 Product Kit 無法完整讀取，因此無法判斷這筆擷取是否最新。",
+      "adapterChanged": "擷取後 Adapter 已變更：清單、順序、程式碼或設定有所不同。",
+      "noAdapters": "這筆紀錄沒有記錄擷取時的 Adapter，因此無法判斷是否最新。請重新擷取。",
+      "adaptersUnavailable": "目前的 Adapter 無法完整解析，因此無法判斷這筆擷取是否最新。",
       "other": "已與目前的 Workspace 不一致。"
     },
     "thumbAlt": "{view} 的擷取畫面，{context}",

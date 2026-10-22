@@ -1,3 +1,4 @@
+import type { EvidenceAdapterProvenance } from '../../src/domain/evidence/adapter-provenance'
 import type { HandoffRoot } from '../../src/domain/handoff/schema'
 
 export type VersionResourceRead<T> = Readonly<{ versionId: string; kind: string; key: string; revision: string; workspaceSchemaVersion: number; resource: T }>
@@ -85,10 +86,11 @@ export function useUiuxClient() {
 	/**
 	 * The formal Evidence with what its freshness is judged against: each View's current
 	 * render-input digest (`views`), and the current Product Kit provenance, `productKit`, or
-	 * `productKitUnavailable` when it cannot be computed.
+	 * `productKitUnavailable` when it cannot be computed, and the current Adapter provenance,
+	 * `adapters`, or `adaptersUnavailable` likewise.
 	 */
-	async function listEvidenceForFreshness<T, P>(): Promise<Readonly<{ items: readonly T[]; views?: readonly EvidenceViewRenderInput[]; productKit?: P; productKitUnavailable?: boolean }>> {
-		return await $fetch<{ items: T[]; views?: EvidenceViewRenderInput[]; productKit?: P; productKitUnavailable?: boolean }>('/api/evidence/list')
+	async function listEvidenceForFreshness<T, P>(): Promise<Readonly<{ items: readonly T[]; views?: readonly EvidenceViewRenderInput[]; productKit?: P; productKitUnavailable?: boolean; adapters?: readonly EvidenceAdapterProvenance[]; adaptersUnavailable?: boolean }>> {
+		return await $fetch<{ items: T[]; views?: EvidenceViewRenderInput[]; productKit?: P; productKitUnavailable?: boolean; adapters?: EvidenceAdapterProvenance[]; adaptersUnavailable?: boolean }>('/api/evidence/list')
 	}
 
 	async function assessHandoff<T>(roots: readonly HandoffRoot[]): Promise<T> {

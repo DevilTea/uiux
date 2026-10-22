@@ -361,14 +361,24 @@ export function validateAdapterProvenance(input: unknown, path = ''): Validation
 	const provenance = v.object(input, path)
 	if (!provenance)
 		return v.finish<AdapterProvenance>(input)
-	for (const key of ['moduleSpecifier', 'adapterId', 'apiVersion', 'moduleIdentity'] as const)
+	v.string(provenance.moduleIdentity, `${path}/moduleIdentity`, true)
+	validateAdapterProvenanceMembers(provenance, path, v)
+	return v.finish<AdapterProvenance>(input)
+}
+
+/**
+ * The members a Handoff Adapter provenance entry shares with the one a formal capture records
+ * (Clauses 01a115cd-d7f6-74a1-ba9f-c20a24a31ae5 and 01a1161c-008a-746d-8d53-a8301b23588f): all but
+ * the host-specific `moduleIdentity`, with a package version or a content digest.
+ */
+export function validateAdapterProvenanceMembers(provenance: Readonly<Record<string, unknown>>, path: string, v: Validator): void {
+	for (const key of ['moduleSpecifier', 'adapterId', 'apiVersion'] as const)
 		v.string(provenance[key], `${path}/${key}`, true)
 	if (Object.hasOwn(provenance, 'packageVersion')) v.string(provenance.packageVersion, `${path}/packageVersion`, true)
 	if (Object.hasOwn(provenance, 'contentDigest')) validateDigest(provenance.contentDigest, `${path}/contentDigest`, v)
 	if (Object.hasOwn(provenance, 'configDigest')) validateDigest(provenance.configDigest, `${path}/configDigest`, v)
 	if (!Object.hasOwn(provenance, 'packageVersion') && !Object.hasOwn(provenance, 'contentDigest'))
 		v.issue('adapter.provenance_unverifiable', path, 'Adapter provenance requires a package version when available or a verifiable content digest for a local adapter.')
-	return v.finish<AdapterProvenance>(input)
 }
 
 function validateStringArray(value: unknown, path: string, v: Validator): boolean {

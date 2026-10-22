@@ -19,6 +19,7 @@ import type { KitBuildStatus } from '../ports/kit-build'
 import { captureHarnessScreenshot, openHarnessPreview, type HarnessPreview } from './capture-harness'
 import { missingDefaultLocaleError } from './default-locale-gate'
 import { readWorkspaceProductKitProvenance } from './product-kit-provenance'
+import { readCurrentAdapterProvenance } from './adapter-provenance'
 
 export type FormalContextCaptureResult = Readonly<{
 	context: ResolvedRenderContext
@@ -274,6 +275,10 @@ export function createFormalCaptureService(
 		// Clause 01a11bb1-8fc4-7b7d-87da-d3fc5d457d98: each record carries the Product Kit provenance
 		// of the Workspace at capture time, taken once for the run.
 		const productKit = await readWorkspaceProductKitProvenance(persistence)
+		// Clause 01a1161c-008a-746d-8d53-a8301b23588f: and the provenance of every Adapter of the active
+		// set, in Adapter-list order, also taken once. A capture taken while it cannot be computed records
+		// none, so its freshness is unknown (Rule 01a1161b-ff68-…).
+		const adapters = await readCurrentAdapterProvenance(persistence)
 
 		let browser: Browser | undefined
 		try {
@@ -372,6 +377,7 @@ export function createFormalCaptureService(
 								uiux: packageJson.version,
 							},
 							...(productKit ? { productKit } : {}),
+							...(adapters.state === 'available' ? { adapters: adapters.adapters } : {}),
 							...(viewRenderInputDigest ? { renderInputDigest: viewRenderInputDigest } : {}),
 						},
 						artifactRefs: [screenshotDigest],

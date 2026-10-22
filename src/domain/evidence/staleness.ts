@@ -1,4 +1,5 @@
 import { productKitChanged, type ProductKitProvenance } from '../product-kit/provenance'
+import { adapterProvenanceChanged, type EvidenceAdapterProvenance } from './adapter-provenance'
 import type { FormalEvidenceRecord } from './schema'
 
 /**
@@ -27,18 +28,37 @@ export type EvidenceStalenessContext = Readonly<{
 	 * (`productKitFreshnessContext`): every capture's freshness is then unknown, never fresh.
 	 */
 	productKitUnavailable?: boolean
+	/**
+	 * The Workspace's current Adapter provenance, every Adapter of the active set in Adapter-list
+	 * order (`adapterFreshnessContext`). Absent when it is unavailable.
+	 */
+	adapters?: readonly EvidenceAdapterProvenance[]
+	/**
+	 * True when the current Adapter provenance cannot be computed (`adapterFreshnessContext`): every
+	 * capture's freshness is then unknown, never fresh.
+	 */
+	adaptersUnavailable?: boolean
 }>
 
 export type EvidenceStalenessAssessment = Readonly<{
 	isStale: boolean
 	reason?: string
 	/**
-	 * Rule 01a1161b-ff68-76af-8237-dbc8ef2c27d1: the capture records no Product Kit provenance, or the
-	 * current one cannot be computed, so its freshness is unknown, which counts as not fresh
-	 * (`isStale` is true).
+	 * Rule 01a1161b-ff68-76af-8237-dbc8ef2c27d1: the capture records no Adapter or no Product Kit
+	 * provenance, or the current one cannot be computed, so its freshness is unknown, which counts as
+	 * not fresh (`isStale` is true).
 	 */
 	unknown?: true
 }>
+
+/** The reason a capture is stale once the active Adapter set changed (Rule 01a115cd-c6de-7744-be27-715bec2e7fef). */
+export const ADAPTER_CHANGED_REASON = 'Adapter changed since capture'
+
+/** The reason a capture without Adapter provenance is not fresh (Rule 01a1161b-ff68-76af-8237-dbc8ef2c27d1). */
+export const ADAPTER_PROVENANCE_MISSING_REASON = 'Capture records no Adapter provenance; capture it again'
+
+/** The reason no capture is fresh while the current Adapter provenance cannot be computed (Rule 01a1161b-ff68-76af-8237-dbc8ef2c27d1). */
+export const ADAPTER_PROVENANCE_UNAVAILABLE_REASON = 'Current Adapter provenance cannot be computed'
 
 /** The reason a capture is stale once the Product Kit changed (Rule 01a11bb1-be4a-7f9b-9fd6-a6e71241113c). */
 export const PRODUCT_KIT_CHANGED_REASON = 'Product Kit changed since capture'
@@ -155,14 +175,63 @@ export function evaluateEvidenceStaleness(
 		}
 	}
 
+	return provenanceFreshness(record, context) ?? { isStale: false }
+}
+
+/**
+ * The Adapter and Product Kit conditions alone (Rules 01a115cd-c6de-…, 01a11bb1-be4a-… and
+ * 01a1161b-ff68-…): `undefined` when both hold. A recorded provenance that differs from the current
+ * one is stale, and outranks a provenance whose comparison is unknown. A condition whose current
+ * provenance the context does not carry is not judged.
+ */
+export function provenanceFreshness(
+	record: FormalEvidenceRecord,
+	context: Pick<EvidenceStalenessContext, 'adapters' | 'adaptersUnavailable' | 'productKit' | 'productKitUnavailable'>,
+): EvidenceStalenessAssessment | undefined {
+	const adapters = adapterFreshness(record, context)
+	const productKit = productKitFreshness(record, context)
+	if (adapters && !adapters.unknown) return adapters
+	if (productKit && !productKit.unknown) return productKit
+	return adapters ?? productKit
+}
+
+/**
+ * Rule 01a1161b-ff68-76af-8237-dbc8ef2c27d1 alone: the unknown assessment of the Adapter or Product
+ * Kit condition, whatever else holds, or `undefined` when neither is unknown. Submit for review
+ * refuses such a capture (Rule 01a11686-8d71-79f5-bb10-0c74649586ea).
+ */
+export function unknownProvenanceFreshness(
+	record: FormalEvidenceRecord,
+	context: Pick<EvidenceStalenessContext, 'adapters' | 'adaptersUnavailable' | 'productKit' | 'productKitUnavailable'>,
+): EvidenceStalenessAssessment | undefined {
+	return [adapterFreshness(record, context), productKitFreshness(record, context)].find(assessment => assessment?.unknown)
+}
+
+function adapterFreshness(
+	record: FormalEvidenceRecord,
+	context: Pick<EvidenceStalenessContext, 'adapters' | 'adaptersUnavailable'>,
+): EvidenceStalenessAssessment | undefined {
+	// Rule 01a1161b-ff68-…: while the current Adapter provenance cannot be computed, nothing tells
+	// whether the capture still matches the active set, so its freshness is unknown.
+	if (context.adaptersUnavailable) return { isStale: true, unknown: true, reason: ADAPTER_PROVENANCE_UNAVAILABLE_REASON }
+	if (!context.adapters) return undefined
+	const recorded = record.provenance.adapters
+	if (!recorded) return { isStale: true, unknown: true, reason: ADAPTER_PROVENANCE_MISSING_REASON }
+	// Rule 01a115cd-c6de-…: selection, order, content or configuration differs.
+	if (adapterProvenanceChanged(recorded, context.adapters)) return { isStale: true, reason: ADAPTER_CHANGED_REASON }
+	return undefined
+}
+
+function productKitFreshness(
+	record: FormalEvidenceRecord,
+	context: Pick<EvidenceStalenessContext, 'productKit' | 'productKitUnavailable'>,
+): EvidenceStalenessAssessment | undefined {
 	// Rules 01a1161b-ff68-… and 01a11bb1-be4a-…: with a Product Kit whose current provenance cannot be
 	// computed, nothing tells whether the capture still matches it, so its freshness is unknown.
 	if (context.productKitUnavailable) return { isStale: true, unknown: true, reason: PRODUCT_KIT_PROVENANCE_UNAVAILABLE_REASON }
-	if (context.productKit) {
-		const recorded = record.provenance.productKit
-		if (!recorded) return { isStale: true, unknown: true, reason: PRODUCT_KIT_PROVENANCE_MISSING_REASON }
-		if (productKitChanged(recorded, context.productKit)) return { isStale: true, reason: PRODUCT_KIT_CHANGED_REASON }
-	}
-
-	return { isStale: false }
+	if (!context.productKit) return undefined
+	const recorded = record.provenance.productKit
+	if (!recorded) return { isStale: true, unknown: true, reason: PRODUCT_KIT_PROVENANCE_MISSING_REASON }
+	if (productKitChanged(recorded, context.productKit)) return { isStale: true, reason: PRODUCT_KIT_CHANGED_REASON }
+	return undefined
 }
