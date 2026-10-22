@@ -22,6 +22,7 @@ import { mergeTimeline } from '../../persistence/history/timeline'
 import { readVersionBlobUnlocked } from '../../persistence/history/version-blobs'
 import { assetMetadataRelativePath, REVIEW_FILE_SUFFIX, WORKSPACE_DATA_DIRECTORY, type WorkspaceLayout } from '../../persistence/paths'
 import type { ResourceRevision } from '../dto/revisions'
+import { summarizeChange, type ChangeSummary } from '../dto/change-summary'
 import type { HistoryStoreSource } from './history-diff'
 
 /**
@@ -74,6 +75,8 @@ export type RestoreWritten = Readonly<{
 	/** The impact the caller acknowledged; empty when there was none. */
 	impacts: readonly ImpactItem[]
 	diagnostics: readonly Diagnostic[]
+	/** What the restore changed in the resource (Clause 01a11485-f578-79a7-9d01-4bc233f2c1cb); a restore writes no other canonical resource. */
+	changeSummary: ChangeSummary
 }>
 
 export type RestoreConflict = Readonly<{ status: 'conflict'; kind: string; key: string; currentRevision: ResourceRevision | null }>
@@ -181,7 +184,7 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 		if (impacts.length > 0 && !parsed.acknowledgeImpact)
 			return { status: 'impact_acknowledgement_required', kind: target.kind, key: target.key, impacts }
 
-		return write(parsed, next, impacts)
+		return write(parsed, next, impacts, contentBefore(target, currentFiles))
 	}
 
 	async function checkRestoredProductKit(target: Target, next: ProductKit, current: unknown): Promise<RestoreRefusal | undefined> {
@@ -260,7 +263,7 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 	}
 
 	/** The compare-and-swap (or, for `expectedRevision: null`, the create) through the authoring repositories. */
-	async function write(command: ParsedCommand, next: RestoredResource, impacts: readonly ImpactItem[]): Promise<RestoreResourceVersionOutcome> {
+	async function write(command: ParsedCommand, next: RestoredResource, impacts: readonly ImpactItem[], before: unknown): Promise<RestoreResourceVersionOutcome> {
 		const { target, expectedRevision } = command
 		const conflict = async (): Promise<RestoreConflict> => ({ status: 'conflict', kind: target.kind, key: target.key, currentRevision: (await currentRevisionOf(target)) ?? null })
 		try {
@@ -298,6 +301,7 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 				restoredFrom: command.versionId,
 				impacts,
 				diagnostics: await diagnosticsAfter(target),
+				changeSummary: summarizeChange(before, next),
 			}
 		}
 		catch (error) {
@@ -398,6 +402,17 @@ function filesOf(snapshot: ReadonlyMap<string, Uint8Array>, layout: WorkspaceLay
 }
 
 type Decoded = Readonly<{ value: unknown }>
+
+/**
+ * The target's current content in the repository's resource shape, for the change summary:
+ * `undefined` when it does not exist, and `null` when its files cannot be decoded, so the whole
+ * resource reads as replaced.
+ */
+function contentBefore(target: Target, currentFiles: ReadonlyMap<string, Uint8Array>): unknown {
+	if (currentFiles.size === 0) return undefined
+	const decoded = decodeRestored(target, currentFiles)
+	return 'status' in decoded ? null : decoded.value
+}
 
 /** The restored content as the repository's resource shape: parsed JSON, or an Asset's metadata and bytes. */
 function decodeRestored(target: Target, files: ReadonlyMap<string, Uint8Array>): Decoded | RestoreRefusal {

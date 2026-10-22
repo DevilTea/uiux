@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { ResourceRevision } from '../dto/revisions'
+import { summarizeChange, type ChangeSummary } from '../dto/change-summary'
 import { validateResourceRevision } from '../dto/revisions'
 import { isFullUuid, type Diagnostic, type JsonObject } from '../../domain/validation'
 import { validateFlowResource, type FlowResource, type FlowStep } from '../../domain/flows/schema'
@@ -24,7 +25,7 @@ export type UpdateFlowCommand = Readonly<{
 }>
 
 export type FlowAuthoringResult =
-	| Readonly<{ status: 'created' | 'updated'; key: string; revision: ResourceRevision; diagnostics: readonly Diagnostic[] }>
+	| Readonly<{ status: 'created' | 'updated'; key: string; revision: ResourceRevision; diagnostics: readonly Diagnostic[]; changeSummary: ChangeSummary }>
 	| Readonly<{ status: 'already_exists'; key: string; currentRevision?: ResourceRevision }>
 	| Readonly<{ status: 'not_found'; key: string }>
 	| Readonly<{ status: 'conflict'; key: string; currentRevision: ResourceRevision }>
@@ -53,7 +54,7 @@ export function createFlowAuthoringService(persistence: FileNativePersistence): 
 		try {
 			const revision = await persistence.flows.create(id, resource)
 			const inspected = await persistence.flows.readInspected(id)
-			return { status: 'created', key: id, revision, diagnostics: inspected?.diagnostics ?? [] }
+			return { status: 'created', key: id, revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(undefined, resource) }
 		}
 		catch (error) {
 			if (!(error instanceof PersistenceError) || error.code !== 'persistence.resource_exists') throw error
@@ -98,7 +99,7 @@ export function createFlowAuthoringService(persistence: FileNativePersistence): 
 		if (!commit.ok)
 			return { status: 'conflict', key: command.flowId, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.flows.readInspected(command.flowId)
-		return { status: 'updated', key: command.flowId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
+		return { status: 'updated', key: command.flowId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 	}
 
 	return { createFlow, updateFlow }

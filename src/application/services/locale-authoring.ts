@@ -1,4 +1,5 @@
 import type { ResourceRevision } from '../dto/revisions'
+import { summarizeChange, type ChangeSummary } from '../dto/change-summary'
 import { validateResourceRevision } from '../dto/revisions'
 import { isCanonicalLocaleTag, type Diagnostic } from '../../domain/validation'
 import { validateI18nResource, type I18nResource } from '../../domain/i18n/schema'
@@ -17,7 +18,7 @@ export type UpdateLocaleCommand = Readonly<{
 }>
 
 export type LocaleAuthoringResult =
-	| Readonly<{ status: 'created' | 'updated'; key: string; revision: ResourceRevision; diagnostics: readonly Diagnostic[] }>
+	| Readonly<{ status: 'created' | 'updated'; key: string; revision: ResourceRevision; diagnostics: readonly Diagnostic[]; changeSummary: ChangeSummary }>
 	| Readonly<{ status: 'already_exists'; key: string; currentRevision?: ResourceRevision }>
 	| Readonly<{ status: 'not_found'; key: string }>
 	| Readonly<{ status: 'conflict'; key: string; currentRevision: ResourceRevision }>
@@ -45,7 +46,7 @@ export function createLocaleAuthoringService(persistence: FileNativePersistence)
 		try {
 			const revision = await persistence.locales.create(command.locale, command.messages)
 			const inspected = await persistence.locales.readInspected(command.locale)
-			return { status: 'created', key: command.locale, revision, diagnostics: inspected?.diagnostics ?? [] }
+			return { status: 'created', key: command.locale, revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(undefined, command.messages) }
 		}
 		catch (error) {
 			// A case-variant file (for example `zh-tw.json`) holding this locale's path on a
@@ -87,7 +88,7 @@ export function createLocaleAuthoringService(persistence: FileNativePersistence)
 		if (!commit.ok)
 			return { status: 'conflict', key: command.locale, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.locales.readInspected(command.locale)
-		return { status: 'updated', key: command.locale, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
+		return { status: 'updated', key: command.locale, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, command.messages) }
 	}
 
 	return { createLocale, updateLocale }

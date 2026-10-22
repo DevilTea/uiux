@@ -167,6 +167,8 @@ describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01
 		]
 		const updated = await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: await revision(ctx.app), presets })
 		expect(updated).toMatchObject({ status: 200, body: { status: 'updated', key: 'access-presets', diagnostics: [] } })
+		// Clause 01a164f0-c0fe-7c86-9c50-cc9354e49fe8: presets carry an `id`, so each is addressed by it.
+		expect((updated.body as { changeSummary: unknown }).changeSummary).toEqual({ changes: [{ path: '/presets/lead', op: 'add' }, { path: '/presets/owner', op: 'remove' }] })
 		const stored = JSON.parse(await readFile(ctx.presetsPath, 'utf8')) as { presets: AccessPreset[] }
 		expect(stored.presets.map(preset => preset.id)).toEqual(['lead', 'viewer', 'reviewer', 'editor'])
 		expect(stored.presets[0]!.keys).toEqual(['workspace.read', 'history.read', 'views.write'])
@@ -238,6 +240,8 @@ describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01
 		const renamed = { ...future, name: 'Later' }
 		const updated = await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: await revision(ctx.app), presets: [renamed, ...builtIns()] })
 		expect(updated).toMatchObject({ status: 200, body: { status: 'updated', diagnostics: [expect.objectContaining({ code: 'access.unknown_key' })] } })
+		// The kept presets change order, so the array is reported whole.
+		expect((updated.body as { changeSummary: unknown }).changeSummary).toEqual({ changes: [{ path: '/presets', op: 'replace' }] })
 		expect((JSON.parse(await readFile(ctx.presetsPath, 'utf8')) as { presets: AccessPreset[] }).presets[0]).toEqual(renamed)
 	})
 

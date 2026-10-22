@@ -14,6 +14,7 @@ import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
 import { workspaceRefusalMessage } from '../../persistence/schema-policy'
 import type { ResourceRevision } from '../dto/revisions'
+import { summarizeChange, type ChangeSummary } from '../dto/change-summary'
 import { validateResourceRevision } from '../dto/revisions'
 
 /**
@@ -52,7 +53,7 @@ export type UpdateAccessPresetsCommand = Readonly<{
 type Key = typeof ACCESS_PRESETS_RESOURCE_KEY
 
 export type AccessPresetsAuthoringResult =
-	| Readonly<{ status: 'updated' | 'created'; key: Key; revision: ResourceRevision; diagnostics: readonly Diagnostic[] }>
+	| Readonly<{ status: 'updated' | 'created'; key: Key; revision: ResourceRevision; diagnostics: readonly Diagnostic[]; changeSummary: ChangeSummary }>
 	| Readonly<{ status: 'not_found'; key: Key }>
 	| Readonly<{ status: 'conflict'; key: Key; currentRevision: ResourceRevision }>
 	| Readonly<{ status: 'invalid_expected_revision'; key: Key; diagnostics: readonly Diagnostic[] }>
@@ -164,12 +165,12 @@ export function createAccessPresetsAuthoringService(persistence: FileNativePersi
 
 			if (!current) {
 				const revision = await persistence.accessPresets.create(next as AccessPresetsFile)
-				return { status: 'created', key: KEY, revision, diagnostics: (await persistence.accessPresets.readInspected())?.diagnostics ?? [] }
+				return { status: 'created', key: KEY, revision, diagnostics: (await persistence.accessPresets.readInspected())?.diagnostics ?? [], changeSummary: summarizeChange(undefined, next) }
 			}
 			const commit = await persistence.accessPresets.compareAndSwap({ key: KEY, expectedRevision: current.revision, resource: next as AccessPresetsFile })
 			if (!commit.ok) return { status: 'conflict', key: KEY, currentRevision: commit.conflict.currentRevision }
 			const after = await persistence.accessPresets.readInspected()
-			return { status: 'updated', key: KEY, revision: commit.revision, diagnostics: after?.diagnostics ?? [] }
+			return { status: 'updated', key: KEY, revision: commit.revision, diagnostics: after?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 		}
 		catch (error) {
 			if (!(error instanceof PersistenceError)) throw error

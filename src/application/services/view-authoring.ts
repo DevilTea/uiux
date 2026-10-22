@@ -1,4 +1,5 @@
 import type { ResourceRevision } from '../dto/revisions'
+import { summarizeChange, type ChangeSummary } from '../dto/change-summary'
 import { validateResourceRevision } from '../dto/revisions'
 import type { Reference, ViewSpec } from '../../domain/spec/schema'
 import { isFullUuid, type Diagnostic } from '../../domain/validation'
@@ -47,7 +48,7 @@ export type UpdateViewMetadataCommand = Readonly<{
 }>
 
 export type ViewAuthoringResult =
-	| Readonly<{ status: 'created' | 'updated'; key: string; revision: ResourceRevision; diagnostics: readonly Diagnostic[] }>
+	| Readonly<{ status: 'created' | 'updated'; key: string; revision: ResourceRevision; diagnostics: readonly Diagnostic[]; changeSummary: ChangeSummary }>
 	| Readonly<{ status: 'already_exists'; key: string; currentRevision?: ResourceRevision }>
 	| Readonly<{ status: 'not_found'; key: string }>
 	| Readonly<{ status: 'conflict'; key: string; currentRevision: ResourceRevision }>
@@ -78,7 +79,7 @@ export function createViewAuthoringService(persistence: FileNativePersistence): 
 		try {
 			const revision = await persistence.views.create(command.id, resource)
 			const inspected = await persistence.views.readInspected(command.id)
-			return { status: 'created', key: command.id, revision, diagnostics: inspected?.diagnostics ?? [] }
+			return { status: 'created', key: command.id, revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(undefined, resource) }
 		}
 		catch (error) {
 			if (!(error instanceof PersistenceError) || error.code !== 'persistence.resource_exists') throw error
@@ -118,7 +119,7 @@ export function createViewAuthoringService(persistence: FileNativePersistence): 
 		if (!commit.ok)
 			return { status: 'conflict', key: command.key, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.views.readInspected(command.key)
-		return { status: 'updated', key: command.key, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
+		return { status: 'updated', key: command.key, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 	}
 
 	async function updateViewStructure(command: UpdateViewStructureCommand): Promise<ViewAuthoringResult> {
@@ -153,7 +154,7 @@ export function createViewAuthoringService(persistence: FileNativePersistence): 
 		if (!commit.ok)
 			return { status: 'conflict', key: command.key, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.views.readInspected(command.key)
-		return { status: 'updated', key: command.key, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
+		return { status: 'updated', key: command.key, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 	}
 
 	/**
@@ -201,7 +202,7 @@ export function createViewAuthoringService(persistence: FileNativePersistence): 
 		if (!commit.ok)
 			return { status: 'conflict', key: command.key, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.views.readInspected(command.key)
-		return { status: 'updated', key: command.key, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
+		return { status: 'updated', key: command.key, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 	}
 
 	return { createView, updateViewSpec, updateViewStructure, updateViewMetadata }

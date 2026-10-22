@@ -83,7 +83,7 @@ describe('retract eligibility (E1–E6)', { timeout: 30_000 }, () => {
 		const moved = await setReviewDisplayHintForHttp(scoped(ctx.app, RUI), REVIEW_ID, { expectedRevision: body(edited).revision!, displayHint: { pin: { x: 0.4, y: 0.4 } } })
 		const retracted = await retractReviewThreadForHttp(scoped(ctx.app, MEI), REVIEW_ID, { expectedRevision: body(moved).revision! })
 		expect(retracted.status).toBe(200)
-		expect(retracted.body).toEqual({ status: 'deleted', key: REVIEW_ID })
+		expect(retracted.body).toEqual({ status: 'deleted', key: REVIEW_ID, changeSummary: { changes: [{ path: '', op: 'remove' }] } })
 		expect(await exists(ctx)).toBe(false)
 		expect(await readdir(join(ctx.root, 'reviews'))).toEqual([])
 		expect(await readdir(metadataPath(ctx.root)).then(entries => entries.filter(name => name.startsWith('.transactions')))).toEqual([])
@@ -152,7 +152,7 @@ describe('retract eligibility (E1–E6)', { timeout: 30_000 }, () => {
 		const ctx = await session()
 		const created = await createReviewThreadForHttp(scoped(ctx.app, MEI), { id: REVIEW_ID, anchor: { scope: 'workspace' } })
 		const byOther = await retractReviewThreadForHttp(scoped(ctx.app, RUI), REVIEW_ID, { expectedRevision: body(created).revision! })
-		expect(body(byOther)).toEqual({ status: 'deleted', key: REVIEW_ID })
+		expect(body(byOther)).toEqual({ status: 'deleted', key: REVIEW_ID, changeSummary: { changes: [{ path: '', op: 'remove' }] } })
 		expect(await exists(ctx)).toBe(false)
 
 		const ctx2 = await session()
@@ -183,7 +183,7 @@ describe('retract over MCP and persistence faults', { timeout: 30_000 }, () => {
 			const posted = await mcp.client.callTool({ name: 'append_review_message', arguments: { reviewId: REVIEW_ID, expectedRevision: (created.structuredContent as { revision: string }).revision, body: 'Oops' } })
 			const retracted = await mcp.client.callTool({ name: 'retract_review_thread', arguments: { reviewId: REVIEW_ID, expectedRevision: (posted.structuredContent as { revision: string }).revision } })
 			expect(retracted.isError).toBeFalsy()
-			expect(retracted.structuredContent).toEqual({ status: 'deleted', key: REVIEW_ID })
+			expect(retracted.structuredContent).toEqual({ status: 'deleted', key: REVIEW_ID, changeSummary: { changes: [{ path: '', op: 'remove' }] } })
 			expect(await exists(ctx)).toBe(false)
 
 			const human = await thread(ctx, MEI)

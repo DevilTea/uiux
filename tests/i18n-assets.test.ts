@@ -244,9 +244,9 @@ describe('authored Asset application and execution semantics', () => {
 			key: ASSET_ID,
 			expectedRevision: current!.revision,
 			mutate: resource => ({ ...resource, metadata: { ...resource.metadata, name: 'Replaced', contentFilename: 'replaced.png' }, content: pngBytes(2) }),
-			changeSummary: ['metadata', 'content'],
 		})
 		expect(replaced.status).toBe('updated')
+		expect(replaced.status === 'updated' ? replaced.changeSummary : undefined).toEqual({ changes: [{ path: '/content', op: 'replace' }, { path: '/metadata/contentFilename', op: 'replace' }, { path: '/metadata/name', op: 'replace' }] })
 		const after = await persistence.assets.read(ASSET_ID)
 		expect(after?.resource.metadata.id).toBe(ASSET_ID)
 		expect(after?.resource.metadata.name).toBe('Replaced')
@@ -256,7 +256,6 @@ describe('authored Asset application and execution semantics', () => {
 			key: ASSET_ID,
 			expectedRevision: current!.revision,
 			mutate: resource => ({ ...resource, metadata: { ...resource.metadata, name: 'Stale overwrite' } }),
-			changeSummary: ['metadata.name'],
 		})
 		expect(stale).toEqual({ status: 'conflict', key: ASSET_ID, currentRevision: after!.revision })
 	})
@@ -281,7 +280,6 @@ describe('authored Asset application and execution semantics', () => {
 		await expect(service.mutateAsset({
 			key: ASSET_ID, expectedRevision: current!.revision,
 			mutate: resource => ({ ...resource, metadata: { ...resource.metadata, contentFilename: 'next.png' }, content: pngBytes(3) }),
-			changeSummary: ['content'],
 		})).rejects.toThrow(/asset/i)
 		expect(await readFile(join(root, 'assets', ASSET_ID, 'asset.json'))).toEqual(oldMetadata)
 		expect(await readFile(join(root, 'assets', ASSET_ID, 'original.png'))).toEqual(oldContent)
@@ -353,7 +351,7 @@ describe('authored Asset application and execution semantics', () => {
 			impact: noImpact,
 		})
 		const mutation = await serviceResult.mutateAsset({
-			key: ASSET_ID, expectedRevision: 'r1' as never, mutate: resource => resource, changeSummary: ['noop'],
+			key: ASSET_ID, expectedRevision: 'r1' as never, mutate: resource => resource,
 		})
 		expect(mutation.status).toBe('invalid')
 		await expect(persistence.assets.create(ASSET_ID, invalid)).rejects.toThrow(/contentFilename|filename|path/i)

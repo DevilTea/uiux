@@ -1,3 +1,4 @@
+import { summarizeChange, type ChangeSummary } from '../dto/change-summary'
 import { validateResourceRevision, type ResourceRevision } from '../dto/revisions'
 import type {
 	MutableResourceRepository,
@@ -18,12 +19,11 @@ export type ResourceMutationCommand<Key, Resource> = Readonly<{
 	key: Key
 	expectedRevision: ResourceRevision
 	mutate(current: Resource): Resource
-	changeSummary: readonly string[]
 	acknowledgeImpact?: boolean
 }>
 
 export type ResourceMutationResult<Key, Impact = never> =
-	| Readonly<{ status: 'updated'; key: Key; revision: ResourceRevision; diagnostics: readonly Diagnostic[]; changeSummary: readonly string[] }>
+	| Readonly<{ status: 'updated'; key: Key; revision: ResourceRevision; diagnostics: readonly Diagnostic[]; changeSummary: ChangeSummary }>
 	| Readonly<{ status: 'not_found'; key: Key }>
 	| Readonly<{ status: 'invalid_expected_revision'; key: Key; diagnostics: readonly Diagnostic[] }>
 	| Readonly<{ status: 'conflict'; key: Key; currentRevision: ResourceRevision }>
@@ -91,7 +91,7 @@ export function createResourceService<Key, Resource, Impact>(input: Readonly<{
 			key: command.key,
 			revision: commit.revision,
 			diagnostics: candidateDiagnostics,
-			changeSummary: command.changeSummary,
+			changeSummary: summarizeChange(current.resource, next),
 		}
 	}
 

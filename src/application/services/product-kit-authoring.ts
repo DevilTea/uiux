@@ -16,6 +16,7 @@ import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
 import { workspaceRefusalMessage } from '../../persistence/schema-policy'
 import type { ResourceRevision } from '../dto/revisions'
+import { summarizeChange, type ChangeSummary } from '../dto/change-summary'
 import type { KitBuildState, KitBuildStatus } from '../ports/kit-build'
 import { validateResourceRevision } from '../dto/revisions'
 
@@ -65,7 +66,7 @@ export type UpdateComponentRegistryCommand = Readonly<{
 type Key = typeof PRODUCT_KIT_RESOURCE_KEY
 
 export type ProductKitAuthoringResult =
-	| Readonly<{ status: 'updated'; key: Key; revision: ResourceRevision; diagnostics: readonly Diagnostic[]; findings: readonly Diagnostic[] }>
+	| Readonly<{ status: 'updated'; key: Key; revision: ResourceRevision; diagnostics: readonly Diagnostic[]; findings: readonly Diagnostic[]; changeSummary: ChangeSummary }>
 	| Readonly<{ status: 'not_found'; key: Key }>
 	| Readonly<{ status: 'conflict'; key: Key; currentRevision: ResourceRevision }>
 	| Readonly<{ status: 'invalid_expected_revision'; key: Key; diagnostics: readonly Diagnostic[] }>
@@ -160,7 +161,7 @@ export function createProductKitAuthoringService(persistence: FileNativePersiste
 			const commit = await persistence.productKit.compareAndSwap({ key: KEY, expectedRevision: expectedRevision.value, resource: next })
 			if (!commit.ok) return { status: 'conflict', key: KEY, currentRevision: commit.conflict.currentRevision }
 			const after = await persistence.productKit.readInspected()
-			return { status: 'updated', key: KEY, revision: commit.revision, diagnostics: after?.diagnostics ?? [], findings: checked.findings }
+			return { status: 'updated', key: KEY, revision: commit.revision, diagnostics: after?.diagnostics ?? [], findings: checked.findings, changeSummary: summarizeChange(current.resource, next) }
 		}
 		catch (error) {
 			if (!(error instanceof PersistenceError)) throw error

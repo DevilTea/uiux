@@ -666,7 +666,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'compose_product_kit',
 		{
 			title: 'Compose the UIUX Product Kit',
-			description: `Set the Product Kit's external Design System packages (designSystems) and its Adapter specifiers and order. Needs product-kit.compose. Writes only the Product Kit file, with revision CAS; specifiers are checked against kit/ before anything is stored. Returns { status: "updated", revision, diagnostics, findings }. ${productKitRefusals}`,
+			description: `Set the Product Kit's external Design System packages (designSystems) and its Adapter specifiers and order. Needs product-kit.compose. Writes only the Product Kit file, with revision CAS; specifiers are checked against kit/ before anything is stored. Returns { status: "updated", revision, diagnostics, findings, changeSummary }. ${productKitRefusals}`,
 			inputSchema: composeProductKitSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
@@ -677,7 +677,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'update_product_kit',
 		{
 			title: 'Update the UIUX Product Kit settings',
-			description: `Set the Adapters' config, the style entries (styles) and the theme root attributes (themes) of the Product Kit. Needs product-kit.write; the Adapter specifiers and order stay as they are (compose_product_kit changes them). Writes only the Product Kit file, with revision CAS. Returns { status: "updated", revision, diagnostics, findings }. ${productKitRefusals}`,
+			description: `Set the Adapters' config, the style entries (styles) and the theme root attributes (themes) of the Product Kit. Needs product-kit.write; the Adapter specifiers and order stay as they are (compose_product_kit changes them). Writes only the Product Kit file, with revision CAS. Returns { status: "updated", revision, diagnostics, findings, changeSummary }. ${productKitRefusals}`,
 			inputSchema: updateProductKitSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
@@ -693,7 +693,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'update_component_registry',
 		{
 			title: 'Update the UIUX component registry',
-			description: `Set the Product Kit's component registry (components) and component table (widgets). Needs product-kit.write. Every declared file must exist under kit/src/ and none may be a wrapper entry; each component's packages must be declared in kit/package.json; an entry that fails is refused with kit.component_invalid. A best-effort import scan returns findings (kit.component_invalid) for undeclared imports and unimported files without refusing. Writes only the Product Kit file, with revision CAS. Returns { status: "updated", revision, diagnostics, findings }. ${productKitRefusals}`,
+			description: `Set the Product Kit's component registry (components) and component table (widgets). Needs product-kit.write. Every declared file must exist under kit/src/ and none may be a wrapper entry; each component's packages must be declared in kit/package.json; an entry that fails is refused with kit.component_invalid. A best-effort import scan returns findings (kit.component_invalid) for undeclared imports and unimported files without refusing. Writes only the Product Kit file, with revision CAS. Returns { status: "updated", revision, diagnostics, findings, changeSummary }. ${productKitRefusals}`,
 			inputSchema: updateComponentRegistrySchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
@@ -1023,7 +1023,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'retract_review_thread',
 		{
 			title: 'Retract UIUX Review Thread',
-			description: 'Permanently delete your own brand-new Review thread: it must be open and contain only your one message, with no replies, history, submissions or promoted Decision. An empty thread with no messages may be retracted by any Reviewer. Once anyone has engaged, this always refuses (review.retract_engaged with a reason); the thread can then only be dismissed by a human. Returns { status: "deleted" }.',
+			description: 'Permanently delete your own brand-new Review thread: it must be open and contain only your one message, with no replies, history, submissions or promoted Decision. An empty thread with no messages may be retracted by any Reviewer. Once anyone has engaged, this always refuses (review.retract_engaged with a reason); the thread can then only be dismissed by a human. Returns { status: "deleted", changeSummary }.',
 			inputSchema: retractReviewThreadSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
@@ -1180,7 +1180,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'restore_resource_version',
 		{
 			title: 'Restore a UIUX resource from a version',
-			description: 'Write one design resource (a View, Flow, Locale, Asset, the Workspace settings or the Product Kit) back to its content in an earlier version, as a new current revision; history is never rewritten and there is no whole-version revert. It is a write of that resource: your edit lease is checked or taken, and expectedRevision is the resource\'s current revision (null to re-create a removed one). A View keeps its current Decisions; the settings keep the current schemaVersion. The content is validated like an authoring write. Before writing, the impact is analyzed (Review threads whose Widget anchor would become invalid or valid again, dangling $i18n and $asset references, UX Flow steps whose Widgets would disappear, ready-for-review submissions whose revision would stop or start being current, and for the settings removed viewport and theme keys and formal Evidence that would become stale); when it is not empty nothing is written and the result is impact_acknowledgement_required with impacts: call again with acknowledgeImpact true to write. The restore is recorded as its own version naming restoredFrom. Returns { status: "updated" | "created", kind, key, revision, restoredFrom, impacts, diagnostics }. Refusals: conflict (with currentRevision, null when the resource does not exist), locked, invalid (history.invalid_restore, history.restore_unsupported_kind, history.restore_invalid_content), impact_acknowledgement_required, not_found (history.record_missing, history.resource_not_in_version), blocked (workspace.schema_unsupported).',
+			description: 'Write one design resource (a View, Flow, Locale, Asset, the Workspace settings or the Product Kit) back to its content in an earlier version, as a new current revision; history is never rewritten and there is no whole-version revert. It is a write of that resource: your edit lease is checked or taken, and expectedRevision is the resource\'s current revision (null to re-create a removed one). A View keeps its current Decisions; the settings keep the current schemaVersion. The content is validated like an authoring write. Before writing, the impact is analyzed (Review threads whose Widget anchor would become invalid or valid again, dangling $i18n and $asset references, UX Flow steps whose Widgets would disappear, ready-for-review submissions whose revision would stop or start being current, and for the settings removed viewport and theme keys and formal Evidence that would become stale); when it is not empty nothing is written and the result is impact_acknowledgement_required with impacts: call again with acknowledgeImpact true to write. The restore is recorded as its own version naming restoredFrom. Returns { status: "updated" | "created", kind, key, revision, restoredFrom, impacts, diagnostics, changeSummary }. Refusals: conflict (with currentRevision, null when the resource does not exist), locked, invalid (history.invalid_restore, history.restore_unsupported_kind, history.restore_invalid_content), impact_acknowledgement_required, not_found (history.record_missing, history.resource_not_in_version), blocked (workspace.schema_unsupported).',
 			inputSchema: restoreResourceVersionSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},

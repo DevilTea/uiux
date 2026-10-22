@@ -103,7 +103,6 @@ describe('shared application/domain foundation', () => {
 				mutationCalls++
 				return { ...current, name: 'Changed' }
 			},
-			changeSummary: ['name'],
 		})
 
 		expect(result).toEqual({ status: 'conflict', key: VIEW_ID, currentRevision: revision('r2') })
@@ -121,7 +120,6 @@ describe('shared application/domain foundation', () => {
 			key: VIEW_ID,
 			expectedRevision: revision('r1'),
 			mutate: current => ({ ...current, name: '' }),
-			changeSummary: ['name'],
 		})
 
 		expect(result.status).toBe('invalid')
@@ -146,7 +144,6 @@ describe('shared application/domain foundation', () => {
 			key: VIEW_ID,
 			expectedRevision: revision('r1'),
 			mutate: current => ({ ...current, name: 'Checkout revised' }),
-			changeSummary: ['name'],
 		})
 
 		expect(result).toEqual({
@@ -154,7 +151,7 @@ describe('shared application/domain foundation', () => {
 			key: VIEW_ID,
 			revision: revision('r-next'),
 			diagnostics: [],
-			changeSummary: ['name'],
+			changeSummary: { changes: [{ path: '/name', op: 'replace' }] },
 		})
 		expect(repository.commitCalls).toBe(1)
 		expect(repository.successfulWrites).toBe(1)
@@ -175,7 +172,6 @@ describe('shared application/domain foundation', () => {
 			key: VIEW_ID,
 			expectedRevision: revision('r1'),
 			mutate: current => ({ ...current, name: 'Candidate' }),
-			changeSummary: ['name'],
 		})).rejects.toThrow('diagnostics unavailable')
 		expect(repository.commitCalls).toBe(0)
 		expect(repository.snapshot().resource.name).toBe('Checkout')
@@ -190,7 +186,6 @@ describe('shared application/domain foundation', () => {
 			key: VIEW_ID,
 			expectedRevision: revision('r1'),
 			mutate: current => ({ ...current, name: 'Raced' }),
-			changeSummary: ['name'],
 		})
 
 		expect(result).toEqual({ status: 'conflict', key: VIEW_ID, currentRevision: revision('r2') })
@@ -207,7 +202,6 @@ describe('shared application/domain foundation', () => {
 			key: VIEW_ID,
 			expectedRevision: revision('r1'),
 			mutate: resource => ({ ...resource, id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }),
-			changeSummary: ['id'],
 		})
 
 		expect(result.status).toBe('invalid')
@@ -240,7 +234,6 @@ describe('shared application/domain foundation', () => {
 			key: VIEW_ID,
 			expectedRevision: revision('r1'),
 			mutate: renameVariant,
-			changeSummary: ['variant rename desktop -> wide'],
 		})
 		expect(blocked.status).toBe('impact_acknowledgement_required')
 		expect(blocked.status === 'impact_acknowledgement_required' ? blocked.impacts : []).toEqual([
@@ -253,10 +246,10 @@ describe('shared application/domain foundation', () => {
 			key: VIEW_ID,
 			expectedRevision: revision('r1'),
 			mutate: renameVariant,
-			changeSummary: ['variant rename desktop -> wide'],
 			acknowledgeImpact: true,
 		})
 		expect(accepted.status).toBe('updated')
+		expect(accepted.status === 'updated' ? accepted.changeSummary : undefined).toEqual({ changes: [{ path: '/variants/desktop', op: 'remove' }, { path: '/variants/wide', op: 'add' }] })
 		expect(repository.commitCalls).toBe(1)
 		expect(repository.successfulWrites).toBe(1)
 		expect(analysisCalls).toBe(2)
@@ -293,11 +286,11 @@ describe('shared application/domain foundation', () => {
 		const flowService = createFlowService({ repository: flowRepository, impact: noImpact })
 
 		const viewResult = await viewService.mutateView({
-			key: VIEW_ID, expectedRevision: revision('stale'), changeSummary: ['name'],
+			key: VIEW_ID, expectedRevision: revision('stale'),
 			mutate: current => ({ ...current, name: 'No write' }),
 		})
 		const flowResult = await flowService.mutateFlow({
-			key: FLOW_ID, expectedRevision: revision('stale'), changeSummary: ['name'],
+			key: FLOW_ID, expectedRevision: revision('stale'),
 			mutate: current => ({ ...current, name: 'No write' }),
 		})
 		expect(viewResult.status).toBe('conflict')
@@ -315,7 +308,7 @@ describe('shared application/domain foundation', () => {
 		const httpFacade = { mutateView: (command: Parameters<typeof sharedUseCase.mutateView>[0]) => sharedUseCase.mutateView(command) }
 		const mcpFacade = { mutateView: (command: Parameters<typeof sharedUseCase.mutateView>[0]) => sharedUseCase.mutateView(command) }
 		const transportCommand = {
-			key: VIEW_ID, expectedRevision: revision('stale'), changeSummary: ['name'],
+			key: VIEW_ID, expectedRevision: revision('stale'),
 			mutate: (current: ViewResource) => ({ ...current, name: 'Still no write' }),
 		}
 		expect((await httpFacade.mutateView(transportCommand)).status).toBe('conflict')
