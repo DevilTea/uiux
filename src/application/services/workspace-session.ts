@@ -272,7 +272,11 @@ export function createWorkspaceApplicationSession(
 		...(options?.kitBuild ? { kitBuild: () => options.kitBuild!.status() } : {}),
 	})
 
-	const rosterOnce = (): Promise<ReadonlySet<string> | undefined> => options?.memberIds?.() ?? Promise.resolve(undefined)
+	// Best effort: an unreadable roster leaves the actors unflagged; it never fails a Review read.
+	const rosterOnce = async (): Promise<ReadonlySet<string> | undefined> => {
+		try { return await options?.memberIds?.() }
+		catch { return undefined }
+	}
 
 	async function readPointResource(kind: PointResourceKind, key: string, roster?: () => Promise<ReadonlySet<string> | undefined>): Promise<PointResourceRead | undefined> {
 		if (!isValidPointResourceAddress({ kind, key })) return undefined

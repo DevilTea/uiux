@@ -154,6 +154,17 @@ describe('removed members in Review reads (Rule 01a11485-f185-7c23-8f2a-e045a279
 		expect(JSON.stringify((result.body as unknown as Read).resource)).not.toContain('"removed"')
 	})
 
+	it('reads Reviews unflagged, and not as unreadable, when the roster cannot be read', async () => {
+		const { app } = await session(async () => { throw new Error('access.store_invalid') })
+		const result = await readPointResourceForHttp(app, 'review', THREAD)
+		expect(result.status).toBe(200)
+		expect(JSON.stringify((result.body as unknown as Read).resource)).not.toContain('"removed"')
+		const listed = await listResourcesForHttp(app, { kinds: ['review'], limit: 10 })
+		if (listed.status !== 200) throw new Error(JSON.stringify(listed.body))
+		expect(listed.body.items.map(item => item.key)).toEqual([THREAD])
+		expect(latestActor(listed.body.items)).toEqual(GONE)
+	})
+
 	it('marks by member ID only', () => {
 		expect(markRemovedActor({ type: 'human', id: 'user:someone' }, ROSTER)).toEqual({ type: 'human', id: 'user:someone' })
 		expect(markRemovedActor({ type: 'human', displayName: 'No id' }, ROSTER)).toEqual({ type: 'human', displayName: 'No id' })
