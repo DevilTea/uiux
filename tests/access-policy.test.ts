@@ -35,6 +35,7 @@ import { FileNativePersistence } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { appendReviewMessageForHttp, createViewForHttp, resolveReviewThreadForHttp, submitReadyForReviewForHttp, updateViewSpecForHttp } from '../src/server/authoring-http'
 import { connectMcp, presetKeys, scoped, testMember } from './support/access'
+import { putEvidenceRecord } from './support/evidence-record'
 import { createCurrentWorkspace } from './support/workspace-layout'
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
@@ -546,7 +547,7 @@ describe('server-side actor and time stamping', () => {
 describe('resolve requires reviews.resolve on a human member\'s Workbench cookie session', () => {
 	it('refuses bearer tokens with review.resolve_requires_workbench and agent sessions with review.resolve_requires_human', async () => {
 		const ctx = await fixture()
-		const evidence = await ctx.persistence.artifacts.put(new TextEncoder().encode('evidence'))
+		const evidence = { identity: await putEvidenceRecord(ctx.persistence, 'screenshot') }
 		const ready = await submitReadyForReviewForHttp(scoped(ctx.app, testMember({ kind: 'agent', preset: 'editor', credential: 'token' })), REVIEW_ID, {
 			expectedRevision: ctx.reviewRevision,
 			changeDomains: ['ir'],

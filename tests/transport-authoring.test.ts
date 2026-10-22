@@ -15,6 +15,7 @@ import { reviewRelativePath } from '../src/persistence/paths'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { isCaseSensitiveDirectory } from './support/filesystem'
 import { AGENT_EDITOR, HUMAN_OWNER, connectMcp, scoped } from './support/access'
+import { putEvidenceRecord } from './support/evidence-record'
 import type { MemberPrincipal } from '../src/application/access/principal'
 import {
 	appendReviewMessageForHttp,
@@ -1048,7 +1049,41 @@ describe('Review thread domain authoring', () => {
 			const stillOpen = await app.readPointResource('review', REVIEW_ID)
 			expect(stillOpen?.kind === 'review' ? stillOpen.resource.status : undefined).toBe('open')
 
-			const evidenceArtifact = await persistence.artifacts.put(new TextEncoder().encode('review-evidence'))
+			// Rule 01a11544-55b0-…: a declared kind that differs from the record's kind, and an artifact that is
+			// not an Evidence record, are diagnosed for every kind; nothing is coerced.
+			const plainBlob = await persistence.artifacts.put(new TextEncoder().encode('review-evidence'))
+			const screenshotRecord = await putEvidenceRecord(persistence, 'screenshot', 'transport')
+			const captureRecord = await putEvidenceRecord(persistence, 'formal_capture', 'transport')
+			const refused = async (evidenceRefs: { kind: string, evidence: string }[]) => client.callTool({
+				name: 'submit_ready_for_review',
+				arguments: {
+					reviewId: REVIEW_ID,
+					expectedRevision: reanchorRev,
+					actor: { type: 'agent', displayName: 'CoderAgent' },
+					changeDomains: ['ir'],
+					resources: [{ identity: { type: 'view', id: VIEW_ID }, revision: createdView.revision }],
+					evidenceRefs,
+				},
+			})
+			for (const [evidenceRefs, code, path] of [
+				[[{ kind: 'formal_capture', evidence: screenshotRecord }], 'review.evidence_kind_mismatch', '/evidenceRefs/0/kind'],
+				[[{ kind: 'screenshot', evidence: captureRecord }], 'review.evidence_kind_mismatch', '/evidenceRefs/0/kind'],
+				[[{ kind: 'visual', evidence: screenshotRecord }], 'review.evidence_kind_mismatch', '/evidenceRefs/0/kind'],
+				[[{ kind: 'screenshot', evidence: plainBlob.identity }], 'review.evidence_not_record', '/evidenceRefs/0/evidence'],
+				[[{ kind: 'formal_capture', evidence: plainBlob.identity }], 'review.evidence_not_record', '/evidenceRefs/0/evidence'],
+				[[{ kind: 'screenshot', evidence: screenshotRecord }, { kind: 'screenshot', evidence: plainBlob.identity }], 'review.evidence_not_record', '/evidenceRefs/1/evidence'],
+			] as const) {
+				const result = await refused([...evidenceRefs])
+				expect(result.isError).toBe(true)
+				expect(result.structuredContent).toMatchObject({
+					status: 'invalid',
+					diagnostics: [expect.objectContaining({ code, path })],
+				})
+			}
+			const stillOpenAfterMismatch = await app.readPointResource('review', REVIEW_ID)
+			expect(stillOpenAfterMismatch?.kind === 'review' ? stillOpenAfterMismatch.resource.status : undefined).toBe('open')
+
+			const evidenceArtifact = { identity: screenshotRecord }
 			const submitResult = await client.callTool({
 				name: 'submit_ready_for_review',
 				arguments: {
@@ -1129,7 +1164,7 @@ describe('Review thread domain authoring', () => {
 			expect(read6?.kind === 'review' ? read6.resource.status : undefined).toBe('open')
 		}
 		finally { await close() }
-	})
+	}, 20_000)
 
 	it('promotes review to decision atomically, updating target View with Decision provenance and returning Review and View URIs, and handles idempotency', async () => {
 		const { app } = await emptySession()

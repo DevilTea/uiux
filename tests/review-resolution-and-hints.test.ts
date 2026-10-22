@@ -20,6 +20,7 @@ import {
 } from '../src/server/authoring-http'
 import { startWorkbenchServer } from './support/workbench-server'
 import { AGENT_EDITOR, connectMcp, scoped, testMember } from './support/access'
+import { putEvidenceRecord } from './support/evidence-record'
 import { principalActor, type MemberPrincipal } from '../src/application/access/principal'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 import { createCurrentWorkspace, CURRENT_TEST_LAYOUT } from './support/workspace-layout'
@@ -73,7 +74,7 @@ function codesOf(result: { body: unknown }): string[] {
 }
 
 async function submitReady(ctx: Awaited<ReturnType<typeof session>>, key: string, expectedRevision: string) {
-	const evidence = await ctx.persistence.artifacts.put(new TextEncoder().encode(`evidence-${expectedRevision}`))
+	const evidence = { identity: await putEvidenceRecord(ctx.persistence, 'screenshot', expectedRevision) }
 	const result = await submitReadyForReviewForHttp(scoped(ctx.app, AGENT_EDITOR), key, {
 		expectedRevision,
 		actor: agent,
