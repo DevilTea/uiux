@@ -23,7 +23,7 @@ export type SnapshotCheckpointInput = Readonly<{
 	name: string
 	note?: string
 	source: HistorySource
-	/** Where a Checkpoint left without Product Kit provenance for its time budget is logged; `console.error` when omitted. */
+	/** Where a Checkpoint left without Product Kit provenance for its time budget is logged; `diagnostics.error` when omitted. */
 	log?: (message: string) => void
 }>
 

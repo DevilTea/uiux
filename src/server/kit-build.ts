@@ -86,7 +86,7 @@ export type KitBuildRunnerOptions = Readonly<{
 	restartIntervalMs?: number
 	/** The output generation past which a warning is printed once; `KIT_BUILD_GENERATION_WARNING` by default. */
 	generationWarning?: number
-	/** Where the argument array and failures are printed; `console.log` by default. */
+	/** Where the argument array and failures are printed; `diagnostics.info` by default. */
 	print?: (line: string) => void
 	/**
 	 * Resolves the Adapters and builds the Preview bundle of the current output generation, which
