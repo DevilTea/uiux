@@ -103,6 +103,12 @@ export function createSelectedWorkspaceServerRuntime(
 		checkAdapterSet: set => checkAdapterSetRuntime(selectedRoot, persistence.layout, set),
 		// Formal capture refuses a theme the current Adapter resolution does not support (Rule 01a11add-f46d-7e92-8f5a-9d10dba6473d).
 		adapterThemeSupport: () => selectedWorkspaceThemeSupport(selectedRoot, persistence.layout),
+		// Review reads mark an actor whose member left the roster (Rule 01a11485-f185-7c23-8f2a-e045a279cd27).
+		memberIds: async () => {
+			const service = await access()
+			await service.refresh()
+			return new Set(service.roster().members.map(member => member.id))
+		},
 	})
 	// Every committed write (HTTP and MCP alike) and every lease change becomes a change event.
 	const events = createChangeEventBus()

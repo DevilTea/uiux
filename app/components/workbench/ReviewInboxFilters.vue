@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from '#imports'
 import { useReviewInbox } from '../../composables/useReviewInbox'
-import { useMemberRoster } from '../../composables/useMemberRoster'
+import { useActorName } from '../../composables/useActorName'
 import { actorKey, ANCHOR_STATES, VIEW_WIDE_SCOPE, WORKSPACE_VIEW_TOKEN, type AnchorState, type InboxFilter } from '../../utils/review-inbox'
 
 /**
@@ -34,7 +34,7 @@ const scopeOptions = computed<Option[]>(() => {
 	return [{ label: t('inbox.filter.viewWide'), value: VIEW_WIDE_SCOPE }, ...[...names].sort().map(name => ({ label: name, value: name, icon: 'i-lucide-layers' }))]
 })
 
-const { actorName } = useMemberRoster()
+const actorName = useActorName()
 const authorOptions = computed<Option[]>(() => {
 	const seen = new Map<string, Option>()
 	for (const item of inbox.threads.value) {

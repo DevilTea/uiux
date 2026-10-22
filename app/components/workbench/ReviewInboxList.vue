@@ -5,7 +5,7 @@ import type { TabsItem } from '@nuxt/ui'
 import type { ReviewResolution } from '../../../src/domain/reviews/schema'
 import { useReviewInbox } from '../../composables/useReviewInbox'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
-import { useMemberRoster } from '../../composables/useMemberRoster'
+import { useActorName } from '../../composables/useActorName'
 import { relativeTime } from '../../utils/widget-inspection'
 import { memberInitials } from '../../utils/member-initials'
 import { VIEWS_LOCATION } from '../../utils/workbench-routes'
@@ -168,7 +168,7 @@ function placeText(item: InboxThread): string {
 	return item.scope === 'workspace' ? t('inbox.workspaceRow') : item.viewName ?? t('inbox.viewMissing')
 }
 
-const { actorName } = useMemberRoster()
+const actorName = useActorName()
 function authorName(item: InboxThread): string {
 	return actorName(item.author)
 }

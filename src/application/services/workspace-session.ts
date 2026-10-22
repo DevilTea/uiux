@@ -4,6 +4,7 @@ import type { FlowResource } from '../../domain/flows/schema'
 import type { I18nResource } from '../../domain/i18n/schema'
 import { reviewAnchorState, type ReviewAnchorState, type ReviewAnchorTarget } from '../../domain/reviews/anchor-state'
 import type { ChangeDomain } from '../../domain/reviews/change-domains'
+import { markRemovedActors } from '../../domain/reviews/removed-actors'
 import { deriveReviewResolution, isWidgetAnchor, isWorkspaceAnchor, type ReviewResolution, type ReviewThread } from '../../domain/reviews/schema'
 import { deriveWidgetTree, flattenWidgetTree } from '../../preview/widget-tree'
 import type { Diagnostic } from '../../domain/validation'
@@ -236,6 +237,11 @@ export function createWorkspaceApplicationSession(
 		checkAdapterSet?: AdapterSetRuntimeCheck
 		/** The theme support of the current Adapter resolution, which formal capture applies (Rule 01a11add-f46d-7e92-8f5a-9d10dba6473d). */
 		adapterThemeSupport?: AdapterThemeSupportSource
+		/**
+		 * The member IDs on this host's roster now. Review reads mark an actor of kind member that is
+		 * not in it with `removed: true` (Rule 01a11485-f185-7c23-8f2a-e045a279cd27); without it nothing is marked.
+		 */
+		memberIds?: () => Promise<ReadonlySet<string>>
 	},
 ): WorkspaceApplicationSession {
 	const viewAuthoring = createViewAuthoringService(persistence)
@@ -266,7 +272,9 @@ export function createWorkspaceApplicationSession(
 		...(options?.kitBuild ? { kitBuild: () => options.kitBuild!.status() } : {}),
 	})
 
-	async function readPointResource(kind: PointResourceKind, key: string): Promise<PointResourceRead | undefined> {
+	const rosterOnce = (): Promise<ReadonlySet<string> | undefined> => options?.memberIds?.() ?? Promise.resolve(undefined)
+
+	async function readPointResource(kind: PointResourceKind, key: string, roster?: () => Promise<ReadonlySet<string> | undefined>): Promise<PointResourceRead | undefined> {
 		if (!isValidPointResourceAddress({ kind, key })) return undefined
 		switch (kind) {
 			case 'workspace': {
@@ -289,7 +297,8 @@ export function createWorkspaceApplicationSession(
 			}
 			case 'review': {
 				const read = await persistence.reviews.readInspected(key)
-				return read && { kind, key, resource: read.resource, revision: read.revision, diagnostics: read.diagnostics }
+				const ids = read && await (roster ?? rosterOnce)()
+				return read && { kind, key, resource: ids ? markRemovedActors(read.resource, ids) : read.resource, revision: read.revision, diagnostics: read.diagnostics }
 			}
 			case 'asset': {
 				const read = await persistence.assets.readInspected(key)
@@ -326,6 +335,9 @@ export function createWorkspaceApplicationSession(
 		if (request.cursor !== undefined && after === undefined)
 			return { status: 'invalid', diagnostics: [{ code: 'discovery.invalid_cursor', path: '/cursor', message: 'Discovery cursor is invalid or belongs to a different query scope.' }] }
 
+		// One roster read per request.
+		let roster: Promise<ReadonlySet<string> | undefined> | undefined
+		const requestRoster = () => roster ??= rosterOnce()
 		const items: ResourceDiscoveryItem[] = []
 		const anchorTargets = new Map<string, Promise<ReviewAnchorTarget>>()
 		const anchorTarget = (viewId: string): Promise<ReviewAnchorTarget> => {
@@ -338,7 +350,7 @@ export function createWorkspaceApplicationSession(
 				let item: ResourceDiscoveryItem | undefined
 				let thread: ReviewThread | undefined
 				try {
-					const read = await readPointResource(kind, key)
+					const read = await readPointResource(kind, key, requestRoster)
 					if (!read || read.kind === 'workspace') continue
 					item = summarize(read)
 					if (read.kind === 'review') thread = read.resource

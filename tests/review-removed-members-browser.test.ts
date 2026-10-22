@@ -5,11 +5,12 @@ import { bearer, provisionToken, sessionCookieFor } from './support/access'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
- * Review history from removed members (issue #79, Rule 01a11485-f185-7c23-8f2a-e045a279cd27): a
+ * Review history from removed members (issue #79, owner decision https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19128072, Rule 01a11485-f185-7c23-8f2a-e045a279cd27): a
  * record whose `member:<uuid>` is no longer on the roster keeps its recorded display name and the
  * Workbench marks it "(removed)", in the thread messages, the timeline, the inbox row and the
- * author filter. A current member is never marked. Only a holder of `members.manage` can read the
- * roster, so any other viewer sees the recorded name unmarked.
+ * author filter. A current member is never marked. The server flags the actor on every Review read
+ * (Clause 01a16474-3cc8-7882-ae19-d213221ddbda), so every role sees it, not only a holder of
+ * `members.manage`.
  */
 
 const VIEW_ID = '7f3d7780-3cb9-4e57-8f0b-2e8d569905c1'
@@ -110,12 +111,12 @@ describe('Review history from a removed member', () => {
 		finally { await context.close() }
 	}, 60_000)
 
-	it('shows the recorded name unmarked to a member without `members.manage`, who cannot read the roster', async () => {
+	it('marks it for a member without `members.manage` too, who cannot read the roster', async () => {
 		const token = await provisionToken(server.workspaceRoot, { nickname: `viewer-${unique()}`, kind: 'human', preset: 'viewer' })
 		const { context, page } = await open(await sessionCookieFor(server.origin, token))
 		try {
-			await detail(page).getByText(gone).first().waitFor({ timeout: 15_000 })
-			expect(await page.getByText('(removed)').count()).toBe(0)
+			await detail(page).getByText(`${gone} (removed)`).first().waitFor({ timeout: 15_000 })
+			expect(await detail(page).getByText(`${stays} (removed)`).count()).toBe(0)
 		}
 		finally { await context.close() }
 	}, 60_000)

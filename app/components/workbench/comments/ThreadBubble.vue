@@ -5,7 +5,7 @@ import { useWorkbench } from '../../../composables/useWorkbench'
 import { relativeTime } from '../../../utils/widget-inspection'
 import { statusKey, useCanvasComments } from '../../../composables/useCanvasComments'
 import { useThreadActions } from '../../../composables/useThreadActions'
-import { useMemberRoster } from '../../../composables/useMemberRoster'
+import { useActorName } from '../../../composables/useActorName'
 import { isWorkspaceAnchor, type ReviewAnchor, type ReviewResolution } from '../../../../src/domain/reviews/schema'
 import { flattenWidgetTree } from '../../../../src/preview/widget-tree'
 import { buildReviewTimeline, type ReviewTimelineItem } from '../../../utils/review-timeline'
@@ -54,7 +54,7 @@ const STATUS_ICON = { open: 'i-lucide-circle-dot', ready: 'i-lucide-eye', resolv
 const STATUS_COLOR = { open: 'annotation', ready: 'info', resolved: 'success', dismissed: 'neutral' } as const
 const STATUS_LABEL = { open: 'thread.status.open', ready: 'thread.status.ready', resolved: 'thread.status.resolved', dismissed: 'inbox.group.dismissed' } as const
 
-const { actorName } = useMemberRoster()
+const actorName = useActorName()
 function shortId(id: string | undefined): string {
 	return id ? `${id.slice(0, 4)}…${id.slice(-4)}` : ''
 }
