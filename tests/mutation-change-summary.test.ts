@@ -32,6 +32,7 @@ import {
 	updateWorkspaceSettingsForHttp,
 } from '../src/server/authoring-http'
 import { AGENT_EDITOR, connectMcp, scoped } from './support/access'
+import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 import { createCurrentWorkspace } from './support/workspace-layout'
 
 /**
@@ -270,7 +271,8 @@ async function run(transport: Transport): Promise<Map<string, Result>> {
 	return results
 }
 
-describe('change summaries over HTTP and MCP', () => {
+// Two Workspaces each take about 15 writes; under a loaded full run that exceeds the default 5 s.
+describe('change summaries over HTTP and MCP', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 	it('carries the same summary for every authoring kind on both transports', async () => {
 		const expected: Record<string, ChangeSummary> = {
 			'create_view': { changes: ['/id', '/ir', '/name', '/spec', '/variants'].map(path => ({ path, op: 'add' })) },
