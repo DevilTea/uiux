@@ -4,7 +4,8 @@ import { McpServer, ProtocolError, ProtocolErrorCode, ResourceNotFoundError, Res
 import packageJson from '../../package.json' with { type: 'json' }
 import { z } from 'zod'
 
-import { DISCOVERABLE_RESOURCE_KINDS, MAX_RESOURCE_DISCOVERY_LIMIT, REVIEW_ANCHOR_SCOPES } from '../application/dto/resource-discovery'
+import { DISCOVERABLE_RESOURCE_KINDS, MAX_RESOURCE_DISCOVERY_LIMIT, REVIEW_ANCHOR_SCOPES, REVIEW_DISCOVERY_STATUSES } from '../application/dto/resource-discovery'
+import { REVIEW_ANCHOR_STATES } from '../domain/reviews/anchor-state'
 import type { PointResourceKind } from '../application/dto/point-resources'
 import type { WorkspaceApplicationSession } from '../application/services/workspace-session'
 import { LOCKABLE_KINDS, MAX_ACQUIRE_RESOURCES, type LeaseManager } from '../application/access/leases'
@@ -34,9 +35,20 @@ const dynamicKinds = ['view', 'flow', 'locale', 'review', 'asset'] as const sati
 const discoveryKindsSchema = z.array(z.enum(DISCOVERABLE_RESOURCE_KINDS)).optional()
 const discoveryBaseShape = {
 	kinds: discoveryKindsSchema,
-	resolution: z.array(z.enum(REVIEW_RESOLUTIONS)).min(1).optional(),
+	resolution: z.array(z.enum(REVIEW_RESOLUTIONS)).min(1).optional()
+		.describe('Review threads only: resolved threads whose current resolution is listed.'),
 	anchorScope: z.array(z.enum(REVIEW_ANCHOR_SCOPES)).min(1).optional()
 		.describe('Review threads only: "workspace" selects Workspace-scoped threads, "view" every thread anchored to a View or Widget.'),
+	status: z.array(z.enum(REVIEW_DISCOVERY_STATUSES)).min(1).optional()
+		.describe('Review threads only: "resolved" is resolved as verified or answered, "dismissed" resolved as wont-fix, duplicate or obsolete.'),
+	viewId: z.array(z.string().min(1)).min(1).optional()
+		.describe('Review threads only: View IDs, or "workspace" for Workspace-scoped threads.'),
+	variant: z.array(z.string().min(1)).min(1).optional()
+		.describe('Review threads only: Variant names in the thread\'s Variant scope, or "*" for View-wide threads; never matches a Workspace thread.'),
+	anchor: z.array(z.enum(REVIEW_ANCHOR_STATES)).min(1).optional()
+		.describe('Review threads only: "missing" when the anchored View or Widget no longer exists, "stale" when only a named Variant no longer exists, "valid" otherwise.'),
+	changeDomain: z.array(z.enum(CHANGE_DOMAINS)).min(1).optional()
+		.describe('Review threads only: threads with any submission naming a listed change domain.'),
 	cursor: z.string().min(1).optional(),
 	limit: z.number().int().min(1).max(MAX_RESOURCE_DISCOVERY_LIMIT),
 }
@@ -550,7 +562,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'list_resources',
 		{
 			title: 'List UIUX resources',
-			description: 'List compact canonical resource summaries with stable point-resource URIs.',
+			description: 'List compact canonical resource summaries with stable point-resource URIs. Review filters (resolution, anchorScope, status, viewId, variant, anchor, changeDomain) each match any listed value, combine with AND, and return Review threads only. A Review summary carries latestMessage (id, actor, at, a 200-grapheme excerpt, edited) and, while ready for review or resolved, currentSubmission (id, at, changeDomains).',
 			inputSchema: listResourcesSchema,
 			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
@@ -561,7 +573,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'search_resources',
 		{
 			title: 'Search UIUX resources',
-			description: 'Search compact canonical resource summaries without returning full resource bodies.',
+			description: 'Search compact canonical resource summaries without returning full resource bodies. Takes the same kind and Review filters as list_resources.',
 			inputSchema: searchResourcesSchema,
 			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
