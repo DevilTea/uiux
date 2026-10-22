@@ -366,9 +366,12 @@ function createReviewInbox() {
 		busy.value = action
 		conflict.value = undefined
 		lastError.value = undefined
+		const sent = expectedRevision ?? item.revision
 		try {
-			await run(expectedRevision ?? item.revision)
+			const response = await run(sent) as MutationResponse | undefined
 			await loadSummaries()
+			// The member's own change is not "updated by others": a reply draft pinned on it follows.
+			replyBases.follow(threadId, sent, response?.revision)
 			return true
 		}
 		catch (cause) {
@@ -405,7 +408,13 @@ function createReviewInbox() {
 		if (!body || !item || !canReply.value) return false
 		const base = replyBases.get(threadId)
 		const before = base?.state ?? threadState(item)
-		const ok = await mutate(threadId, 'reply', revision => post(path(threadId, 'messages'), { expectedRevision: base?.revision ?? revision, body }), t('comments.errors.replyFailed'), () => {
+		/** A reply that landed drops its pin before the re-read, so no "updated by others" notice flashes for it. */
+		const posted = async (request: Promise<MutationResponse>): Promise<MutationResponse> => {
+			const response = await request
+			replyBases.release(threadId)
+			return response
+		}
+		const ok = await mutate(threadId, 'reply', revision => posted(post(path(threadId, 'messages'), { expectedRevision: base?.revision ?? revision, body })), t('comments.errors.replyFailed'), () => {
 			replyBases.release(threadId)
 			replyConflict.value = { threadId, before }
 		})
@@ -693,6 +702,9 @@ function createReviewInbox() {
 		busy,
 		conflict,
 		replyConflict,
+		/** What changed elsewhere since a reply draft was pinned, and its acknowledgement (Rule 01a11485-f434). */
+		replyUpdated: replyBases.updated,
+		acknowledgeReplyUpdate: replyBases.acknowledge,
 		promoteConflict,
 		lastError,
 		replyDrafts,

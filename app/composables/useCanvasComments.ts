@@ -514,9 +514,12 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		if (!item || busy.value) return false
 		busy.value = action
 		conflict.value = undefined
+		const sent = expectedRevision ?? item.revision
 		try {
-			await run(expectedRevision ?? item.revision)
+			const response = await run(sent) as MutationResponse | undefined
 			await refreshReviews()
+			// The member's own change is not "updated by others": a reply draft pinned on it follows.
+			replyBases.follow(threadId, sent, response?.revision)
 			return true
 		}
 		catch (cause) {
@@ -548,7 +551,13 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		lastError.value = undefined
 		const base = replyBases.get(threadId)
 		const before = base?.state ?? threadState(item)
-		const ok = await mutate(threadId, 'reply', revision => postMessage(threadId, base?.revision ?? revision, body), t('comments.errors.replyFailed'), () => {
+		/** A reply that landed drops its pin before the re-read, so no "updated by others" notice flashes for it. */
+		const posted = async (request: Promise<MutationResponse>): Promise<MutationResponse> => {
+			const response = await request
+			replyBases.release(threadId)
+			return response
+		}
+		const ok = await mutate(threadId, 'reply', revision => posted(postMessage(threadId, base?.revision ?? revision, body)), t('comments.errors.replyFailed'), () => {
 			replyBases.release(threadId)
 			replyConflict.value = { threadId, before }
 		})
@@ -1120,6 +1129,9 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 		replyDrafts,
 		conflict,
 		replyConflict,
+		/** What changed elsewhere since a reply draft was pinned, and its acknowledgement (Rule 01a11485-f434). */
+		replyUpdated: replyBases.updated,
+		acknowledgeReplyUpdate: replyBases.acknowledge,
 		promoteConflict,
 		lastError,
 		busy,

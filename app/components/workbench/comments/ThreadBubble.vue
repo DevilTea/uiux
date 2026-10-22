@@ -21,6 +21,7 @@ import ThreadReasonPrompt from '../ThreadReasonPrompt.vue'
 import WbErrorDescription from '../WbErrorDescription.vue'
 import RecordedContextLabel from '../RecordedContextLabel.vue'
 import ReplyConflictAlert from '../ReplyConflictAlert.vue'
+import ReplyUpdatedNotice from '../ReplyUpdatedNotice.vue'
 import { threadState } from '../../../utils/reply-conflict'
 import { promoteConflictTitleKey } from '../../../utils/promote-conflict'
 import { effectiveRenderContext } from '../../../../src/preview/render-context-options'
@@ -108,6 +109,13 @@ const conflictTitle = computed(() => {
 	const key = promoteConflictTitleKey(promoteMoved.value)
 	return key ? t(key) : t('comments.conflict')
 })
+/** The thread changed elsewhere while the reply is drafted (Rule 01a11485-f434): the notice above the composer. */
+const replyUpdated = computed(() => comments.replyUpdated(props.threadId))
+/** Acknowledging aims the draft at the thread as shown now; the notice that held focus gives it to the reply box. */
+function acknowledgeReplyUpdate(): void {
+	comments.acknowledgeReplyUpdate(props.threadId)
+	void nextTick(() => replyArea.value?.textareaRef?.focus())
+}
 const canSendAgain = computed(() => comments.canComment.value && thread.value?.status !== 'resolved' && !!reply.value.trim())
 const error = computed(() => comments.lastError.value?.threadId === props.threadId ? comments.lastError.value.error : undefined)
 
@@ -540,6 +548,11 @@ watch(() => props.threadId, () => {
     />
 
     <template v-else-if="comments.canComment.value && thread.status !== 'resolved'">
+      <ReplyUpdatedNotice
+        v-if="replyUpdated"
+        :change="replyUpdated"
+        @acknowledge="acknowledgeReplyUpdate"
+      />
       <UTextarea
         ref="replyArea"
         v-model="reply"

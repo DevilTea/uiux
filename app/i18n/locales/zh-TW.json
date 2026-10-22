@@ -1913,6 +1913,14 @@
       "keptResolved": "你的回覆尚未送出。重新開啟討論串後即可送出。",
       "sendAgain": "再次送出"
     },
+    "replyUpdated": {
+      "title": "其他人已更新",
+      "titleWith": "其他人已更新：{changes}",
+      "newReplies": "1 則新回覆 | {n} 則新回覆",
+      "status": "狀態變為「{status}」",
+      "hint": "你的草稿已保留，目前仍回覆先前的版本。確認後改為回覆最新版本。",
+      "acknowledge": "確認"
+    },
     "timeline": "討論串紀錄",
     "agent": "Agent",
     "submitted": "已提交 Review",

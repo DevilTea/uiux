@@ -1913,6 +1913,14 @@
       "keptResolved": "Your reply wasn't sent. Reopen the thread to send it.",
       "sendAgain": "Send again"
     },
+    "replyUpdated": {
+      "title": "Updated by others",
+      "titleWith": "Updated by others — {changes}",
+      "newReplies": "1 new reply | {n} new replies",
+      "status": "now {status}",
+      "hint": "Your draft is kept and still replies to the thread as it was. Acknowledge to reply to the latest.",
+      "acknowledge": "Acknowledge"
+    },
     "timeline": "Thread history",
     "agent": "agent",
     "submitted": "Submitted for review",
