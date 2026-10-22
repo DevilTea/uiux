@@ -1,12 +1,32 @@
-import { REVIEW_RESOLUTIONS, type ReviewAnchor, type ReviewDisplayHint, type ReviewRenderContext, type ReviewResolution, type ReviewStatus } from '../../domain/reviews/schema'
-import { jsonPointer, rejectUnknownKeys, Validator, type Diagnostic } from '../../domain/validation'
+import { CHANGE_DOMAINS, type ChangeDomain } from '../../domain/reviews/change-domains'
+import { REVIEW_ANCHOR_STATES, type ReviewAnchorState } from '../../domain/reviews/anchor-state'
+import { REVIEW_RESOLUTIONS, type ReviewActor, type ReviewAnchor, type ReviewDisplayHint, type ReviewRenderContext, type ReviewResolution, type ReviewStatus } from '../../domain/reviews/schema'
+import { isFullUuid, jsonPointer, rejectUnknownKeys, Validator, type Diagnostic } from '../../domain/validation'
 import type { ResourceRevision } from './revisions'
 
 export const DISCOVERABLE_RESOURCE_KINDS = ['view', 'flow', 'locale', 'review', 'asset'] as const
 /** Review anchor arms for the `anchorScope` filter: `view` is every Widget-anchored thread (including View roots). */
 export const REVIEW_ANCHOR_SCOPES = ['workspace', 'view'] as const
 export type ReviewAnchorScope = typeof REVIEW_ANCHOR_SCOPES[number]
+/**
+ * Values of the Review `status` filter (Clause 01a163a5-7110-79e8-94ac-887c8eddde6a), in the Workbench
+ * inbox vocabulary: `resolved` is resolved as `verified` or `answered`, `dismissed` resolved as
+ * `wont-fix`, `duplicate` or `obsolete`.
+ */
+export const REVIEW_DISCOVERY_STATUSES = ['ready-for-review', 'open', 'resolved', 'dismissed'] as const
+export type ReviewDiscoveryStatus = typeof REVIEW_DISCOVERY_STATUSES[number]
+export const REVIEW_DISMISSAL_RESOLUTIONS: readonly ReviewResolution[] = ['wont-fix', 'duplicate', 'obsolete']
+/** The `viewId` filter value for Workspace threads (View IDs are UUIDs, so it cannot collide). */
+export const REVIEW_WORKSPACE_VIEW_TOKEN = 'workspace'
+/** The `variant` filter value for View-wide threads (`variantNames: []`). */
+export const REVIEW_VIEW_WIDE_VARIANT = '*'
+/** Length of `latestMessage.excerpt` in grapheme clusters (Clause 01a163a5-719e-789d-a0fb-fc08646ed1d8). */
+export const REVIEW_MESSAGE_EXCERPT_GRAPHEMES = 200
 export const MAX_RESOURCE_DISCOVERY_LIMIT = 100
+
+/** Every Review filter; any of them excludes other resource kinds (Clause 01a11544-6d38-7c63-958a-e0133b131fd3). */
+export const REVIEW_DISCOVERY_FILTERS = ['resolution', 'anchorScope', 'status', 'viewId', 'variant', 'anchor', 'changeDomain'] as const
+export type ReviewDiscoveryFilter = typeof REVIEW_DISCOVERY_FILTERS[number]
 
 export type DiscoverableResourceKind = typeof DISCOVERABLE_RESOURCE_KINDS[number]
 export type ResourceDiscoveryRequest = Readonly<{
@@ -16,6 +36,12 @@ export type ResourceDiscoveryRequest = Readonly<{
 	resolution?: readonly ReviewResolution[]
 	/** Structured Review filter by anchor arm; other kinds ignore it, as with `resolution`. */
 	anchorScope?: readonly ReviewAnchorScope[]
+	/** Review filters of Clauses 01a11544-6d38-7c63-958a-e0133b131fd3 and 01a163a5-7110-79e8-94ac-887c8eddde6a. */
+	status?: readonly ReviewDiscoveryStatus[]
+	viewId?: readonly string[]
+	variant?: readonly string[]
+	anchor?: readonly ReviewAnchorState[]
+	changeDomain?: readonly ChangeDomain[]
 	cursor?: string
 	limit: number
 }>
@@ -41,7 +67,15 @@ export type ReviewDiscoverySummary = Readonly<{
 	messageCount?: number
 	/** Latest canonical activity (newest message, submission or history event), ISO 8601. */
 	latestActivityAt?: string
+	/** The last message, with only an excerpt of its current body; absent while the thread has no message. */
+	latestMessage?: ReviewLatestMessageSummary
+	/** The latest submission while ready for review or resolved and not reopened since. */
+	currentSubmission?: ReviewCurrentSubmissionSummary
 }>
+
+/** Clause 01a163a5-719e-789d-a0fb-fc08646ed1d8: `excerpt` is the first 200 grapheme clusters of `body`. */
+export type ReviewLatestMessageSummary = Readonly<{ id: string; actor: ReviewActor; at: string; excerpt: string; edited: boolean }>
+export type ReviewCurrentSubmissionSummary = Readonly<{ id: string; at: string; changeDomains: readonly string[] }>
 
 export type ResourceDiscoveryPage = Readonly<{ items: readonly ResourceDiscoveryItem[]; nextCursor?: string }>
 export type ResourceDiscoveryOutcome =
@@ -56,7 +90,7 @@ export function validateResourceDiscoveryRequest(input: unknown, mode: 'list' | 
 	const v = new Validator()
 	const value = v.object(input, '')
 	if (!value) return { status: 'invalid', diagnostics: v.diagnostics }
-	rejectUnknownKeys(value, ['kinds', 'query', 'resolution', 'anchorScope', 'cursor', 'limit'], '', v)
+	rejectUnknownKeys(value, ['kinds', 'query', ...REVIEW_DISCOVERY_FILTERS, 'cursor', 'limit'], '', v)
 
 	if (Object.hasOwn(value, 'kinds')) {
 		const kinds = v.array(value.kinds, '/kinds')
@@ -71,35 +105,20 @@ export function validateResourceDiscoveryRequest(input: unknown, mode: 'list' | 
 		})
 	}
 
-	if (Object.hasOwn(value, 'resolution')) {
-		const resolutions = v.array(value.resolution, '/resolution')
-		if (resolutions && resolutions.length === 0)
-			v.issue('discovery.empty_resolution_filter', '/resolution', 'A resolution filter must list at least one resolution.')
-		const seen = new Set<string>()
-		resolutions?.forEach((resolution, index) => {
-			const path = jsonPointer('/resolution', index)
-			if (typeof resolution !== 'string' || !(REVIEW_RESOLUTIONS as readonly string[]).includes(resolution))
-				v.issue('discovery.invalid_resolution', path, 'Resolution filter values must be verified, answered, wont-fix, duplicate, or obsolete.')
-			else if (seen.has(resolution))
-				v.issue('discovery.duplicate_resolution', path, 'Resolution filter values must not repeat.')
-			else seen.add(resolution)
-		})
-	}
-
-	if (Object.hasOwn(value, 'anchorScope')) {
-		const scopes = v.array(value.anchorScope, '/anchorScope')
-		if (scopes && scopes.length === 0)
-			v.issue('discovery.empty_anchor_scope_filter', '/anchorScope', 'An anchorScope filter must list at least one scope.')
-		const seen = new Set<string>()
-		scopes?.forEach((scope, index) => {
-			const path = jsonPointer('/anchorScope', index)
-			if (typeof scope !== 'string' || !(REVIEW_ANCHOR_SCOPES as readonly string[]).includes(scope))
-				v.issue('discovery.invalid_anchor_scope', path, 'anchorScope values must be workspace or view.')
-			else if (seen.has(scope))
-				v.issue('discovery.duplicate_anchor_scope', path, 'anchorScope values must not repeat.')
-			else seen.add(scope)
-		})
-	}
+	validateFilterList(value, v, 'resolution', 'resolution', value => (REVIEW_RESOLUTIONS as readonly string[]).includes(value),
+		'A resolution filter must list at least one resolution.', 'Resolution filter values must be verified, answered, wont-fix, duplicate, or obsolete.', 'Resolution filter values must not repeat.')
+	validateFilterList(value, v, 'anchorScope', 'anchor_scope', value => (REVIEW_ANCHOR_SCOPES as readonly string[]).includes(value),
+		'An anchorScope filter must list at least one scope.', 'anchorScope values must be workspace or view.', 'anchorScope values must not repeat.')
+	validateFilterList(value, v, 'status', 'status', value => (REVIEW_DISCOVERY_STATUSES as readonly string[]).includes(value),
+		'A status filter must list at least one status.', 'status values must be ready-for-review, open, resolved, or dismissed.', 'status values must not repeat.')
+	validateFilterList(value, v, 'viewId', 'view_id', value => value === REVIEW_WORKSPACE_VIEW_TOKEN || isFullUuid(value),
+		'A viewId filter must list at least one View.', 'viewId values must be View IDs (full UUIDs) or workspace.', 'viewId values must not repeat.')
+	validateFilterList(value, v, 'variant', 'variant', value => value.length > 0,
+		'A variant filter must list at least one Variant.', 'variant values must be non-empty Variant names or * for View-wide threads.', 'variant values must not repeat.')
+	validateFilterList(value, v, 'anchor', 'anchor', value => (REVIEW_ANCHOR_STATES as readonly string[]).includes(value),
+		'An anchor filter must list at least one anchor state.', 'anchor values must be valid, stale, or missing.', 'anchor values must not repeat.')
+	validateFilterList(value, v, 'changeDomain', 'change_domain', value => (CHANGE_DOMAINS as readonly string[]).includes(value),
+		'A changeDomain filter must list at least one change domain.', `changeDomain values must be known change domains: ${CHANGE_DOMAINS.join(', ')}.`, 'changeDomain values must not repeat.')
 
 	const query = Object.hasOwn(value, 'query') ? v.string(value.query, '/query') : undefined
 	if (mode === 'search' && (query === undefined || query.trim().length === 0))
@@ -113,4 +132,34 @@ export function validateResourceDiscoveryRequest(input: unknown, mode: 'list' | 
 
 	if (v.diagnostics.length > 0) return { status: 'invalid', diagnostics: v.diagnostics }
 	return { status: 'valid', request: input as ResourceDiscoveryRequest }
+}
+
+/**
+ * A Review filter is a non-empty array of unique allowed strings. Codes follow the existing discovery
+ * family: `discovery.empty_<filter>_filter`, `discovery.invalid_<filter>`, `discovery.duplicate_<filter>`.
+ */
+function validateFilterList(
+	value: Readonly<Record<string, unknown>>,
+	v: Validator,
+	key: ReviewDiscoveryFilter,
+	code: string,
+	allowed: (value: string) => boolean,
+	emptyMessage: string,
+	invalidMessage: string,
+	duplicateMessage: string,
+): void {
+	if (!Object.hasOwn(value, key)) return
+	const path = `/${key}`
+	const entries = v.array(value[key], path)
+	if (entries && entries.length === 0)
+		v.issue(`discovery.empty_${code}_filter`, path, emptyMessage)
+	const seen = new Set<string>()
+	entries?.forEach((entry, index) => {
+		const entryPath = jsonPointer(path, index)
+		if (typeof entry !== 'string' || !allowed(entry))
+			v.issue(`discovery.invalid_${code}`, entryPath, invalidMessage)
+		else if (seen.has(entry))
+			v.issue(`discovery.duplicate_${code}`, entryPath, duplicateMessage)
+		else seen.add(entry)
+	})
 }

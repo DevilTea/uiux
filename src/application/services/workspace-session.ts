@@ -2,7 +2,10 @@ import { sha256Identity } from '../../domain/artifacts/schema'
 import type { AuthoredAsset } from '../../domain/assets/schema'
 import type { FlowResource } from '../../domain/flows/schema'
 import type { I18nResource } from '../../domain/i18n/schema'
-import { deriveReviewResolution, isWorkspaceAnchor, type ReviewResolution, type ReviewThread } from '../../domain/reviews/schema'
+import { reviewAnchorState, type ReviewAnchorState, type ReviewAnchorTarget } from '../../domain/reviews/anchor-state'
+import type { ChangeDomain } from '../../domain/reviews/change-domains'
+import { deriveReviewResolution, isWidgetAnchor, isWorkspaceAnchor, type ReviewResolution, type ReviewThread } from '../../domain/reviews/schema'
+import { deriveWidgetTree, flattenWidgetTree } from '../../preview/widget-tree'
 import type { Diagnostic } from '../../domain/validation'
 import type { ViewResource } from '../../domain/views/schema'
 import type { WorkspaceManifest } from '../../domain/workspace/schema'
@@ -10,12 +13,18 @@ import type { FileNativePersistence, WorkspaceInspection } from '../../persisten
 import { PersistenceError } from '../../persistence/errors'
 import {
 	DISCOVERABLE_RESOURCE_KINDS,
+	REVIEW_DISMISSAL_RESOLUTIONS,
+	REVIEW_MESSAGE_EXCERPT_GRAPHEMES,
+	REVIEW_VIEW_WIDE_VARIANT,
+	REVIEW_WORKSPACE_VIEW_TOKEN,
 	validateResourceDiscoveryRequest,
 	type DiscoverableResourceKind,
 	type ResourceDiscoveryItem,
 	type ReviewAnchorScope,
 	type ResourceDiscoveryOutcome,
 	type ResourceDiscoveryRequest,
+	type ReviewDiscoveryStatus,
+	type ReviewDiscoverySummary,
 } from '../dto/resource-discovery'
 import type { ResourceRevision } from '../dto/revisions'
 import { isValidPointResourceAddress, type PointResourceKind } from '../dto/point-resources'
@@ -318,21 +327,28 @@ export function createWorkspaceApplicationSession(
 			return { status: 'invalid', diagnostics: [{ code: 'discovery.invalid_cursor', path: '/cursor', message: 'Discovery cursor is invalid or belongs to a different query scope.' }] }
 
 		const items: ResourceDiscoveryItem[] = []
+		const anchorTargets = new Map<string, Promise<ReviewAnchorTarget>>()
+		const anchorTarget = (viewId: string): Promise<ReviewAnchorTarget> => {
+			let target = anchorTargets.get(viewId)
+			if (!target) anchorTargets.set(viewId, target = readAnchorTarget(viewId))
+			return target
+		}
 		for (const kind of request.kinds ?? DISCOVERABLE_RESOURCE_KINDS) {
 			for (const key of await discoverKeys(kind)) {
 				let item: ResourceDiscoveryItem | undefined
+				let thread: ReviewThread | undefined
 				try {
 					const read = await readPointResource(kind, key)
 					if (!read || read.kind === 'workspace') continue
 					item = summarize(read)
+					if (read.kind === 'review') thread = read.resource
 				}
 				catch (error) {
 					item = await summarizeUnreadable(kind, key, error)
 					if (!item) continue
 				}
 				if (request.query !== undefined && !matchesQuery(item, request.query)) continue
-				if (request.resolution !== undefined && !matchesResolution(item, request.resolution)) continue
-				if (request.anchorScope !== undefined && !matchesAnchorScope(item, request.anchorScope)) continue
+				if (!await matchesReviewFilters(item, thread, request, anchorTarget)) continue
 				items.push(item)
 			}
 		}
@@ -346,6 +362,24 @@ export function createWorkspaceApplicationSession(
 				items: pageItems,
 				...(end < items.length && pageItems.length > 0 ? { nextCursor: encodeCursor(sortKey(pageItems.at(-1)!), scope) } : {}),
 			},
+		}
+	}
+
+	/** The anchored View as the `anchor` filter sees it: `null` when it does not exist. */
+	async function readAnchorTarget(viewId: string): Promise<ReviewAnchorTarget> {
+		let read: Awaited<ReturnType<typeof persistence.views.readInspected>>
+		try { read = await persistence.views.readInspected(viewId) }
+		catch (error) {
+			// An unreadable View still exists; its Widgets and Variants are unknown.
+			if (error instanceof PersistenceError && error.code === 'persistence.invalid_json') return {}
+			throw error
+		}
+		if (!read) return null
+		const tree = deriveWidgetTree(read.resource.ir)
+		const variants = read.resource.variants
+		return {
+			...(tree.status === 'valid' ? { widgetIds: new Set(flattenWidgetTree(tree.root).map(node => node.id)) } : {}),
+			...(variants && typeof variants === 'object' && !Array.isArray(variants) ? { variantNames: new Set(Object.keys(variants)) } : {}),
 		}
 	}
 
@@ -437,6 +471,11 @@ type NormalizedDiscoveryRequest = Readonly<{
 	query?: string
 	resolution?: readonly ReviewResolution[]
 	anchorScope?: readonly ReviewAnchorScope[]
+	status?: readonly ReviewDiscoveryStatus[]
+	viewId?: readonly string[]
+	variant?: readonly string[]
+	anchor?: readonly ReviewAnchorState[]
+	changeDomain?: readonly ChangeDomain[]
 	cursor?: string
 	limit: number
 }>
@@ -449,6 +488,11 @@ function normalizeDiscoveryRequest(request: ResourceDiscoveryRequest, mode: 'lis
 		...(mode === 'search' ? { query: request.query!.trim().toLowerCase() } : {}),
 		...(request.resolution !== undefined ? { resolution: [...request.resolution].sort() } : {}),
 		...(request.anchorScope !== undefined ? { anchorScope: [...request.anchorScope].sort() } : {}),
+		...(request.status !== undefined ? { status: [...request.status].sort() } : {}),
+		...(request.viewId !== undefined ? { viewId: [...request.viewId].sort() } : {}),
+		...(request.variant !== undefined ? { variant: [...request.variant].sort() } : {}),
+		...(request.anchor !== undefined ? { anchor: [...request.anchor].sort() } : {}),
+		...(request.changeDomain !== undefined ? { changeDomain: [...request.changeDomain].sort() } : {}),
 		...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
 		limit: request.limit,
 	}
@@ -490,7 +534,7 @@ function summarize(read: Exclude<PointResourceRead, { kind: 'workspace' }>): Res
  * `variantNames` is the accepted anchor/Variant scope; `resolution` is derived from the final
  * lifecycle event while resolved.
  */
-function reviewSummary(thread: ReviewThread): Extract<ResourceDiscoveryItem, { kind: 'review' }>['summary'] {
+function reviewSummary(thread: ReviewThread): ReviewDiscoverySummary {
 	const resolution = deriveReviewResolution(thread)
 	return {
 		anchor: thread.anchor,
@@ -501,7 +545,46 @@ function reviewSummary(thread: ReviewThread): Extract<ResourceDiscoveryItem, { k
 		...(resolution ? { resolution } : {}),
 		messageCount: thread.messages?.length ?? 0,
 		...latestActivity(thread),
+		...latestMessageSummary(thread),
+		...currentSubmissionSummary(thread),
 	}
+}
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+
+/** Clause 01a163a5-719e-789d-a0fb-fc08646ed1d8: the last message, with only the first 200 grapheme clusters of its body. */
+function latestMessageSummary(thread: ReviewThread): Pick<ReviewDiscoverySummary, 'latestMessage'> {
+	const message = Array.isArray(thread.messages) ? thread.messages.at(-1) : undefined
+	if (!message) return {}
+	return { latestMessage: { id: message.id, actor: message.actor, at: message.at, excerpt: graphemeExcerpt(message.body, REVIEW_MESSAGE_EXCERPT_GRAPHEMES), edited: Array.isArray(message.edits) && message.edits.length > 0 } }
+}
+
+function graphemeExcerpt(text: string, limit: number): string {
+	let end = 0
+	let count = 0
+	for (const { segment } of graphemes.segment(text)) {
+		if (count === limit) break
+		end += segment.length
+		count += 1
+	}
+	return text.slice(0, end)
+}
+
+/**
+ * Clause 01a163a5-719e-789d-a0fb-fc08646ed1d8: the latest submission while the thread is ready for
+ * review or resolved, unless a lifecycle event entering `open` appears later in `history` (a reopen).
+ */
+function currentSubmissionSummary(thread: ReviewThread): Pick<ReviewDiscoverySummary, 'currentSubmission'> {
+	if (thread.status !== 'ready-for-review' && thread.status !== 'resolved') return {}
+	const submission = Array.isArray(thread.submissions) ? thread.submissions.at(-1) : undefined
+	if (!submission) return {}
+	// Position, not time: a reopen recorded later in `history` than the submission's lifecycle entry
+	// supersedes it even with an equal `at`. Without that entry, any reopen counts.
+	const history = Array.isArray(thread.history) ? thread.history : []
+	const entry = history.findIndex(event => event.kind === 'lifecycle' && event.to === 'ready-for-review' && event.submissionId === submission.id)
+	const reopened = history.some((event, index) => index > entry && event.kind === 'lifecycle' && event.to === 'open')
+	if (reopened) return {}
+	return { currentSubmission: { id: submission.id, at: submission.at, changeDomains: submission.changeDomains } }
 }
 
 /**
@@ -521,6 +604,46 @@ function latestActivity(thread: ReviewThread): { latestActivityAt?: string } {
 		}
 	}
 	return latest ? { latestActivityAt: latest } : {}
+}
+
+/**
+ * The Review filters (Clauses 01a11544-6d38-7c63-958a-e0133b131fd3 and 01a163a5-7110-79e8-94ac-887c8eddde6a):
+ * each matches one listed value, every given filter must match, and any of them excludes other kinds
+ * and unreadable threads.
+ */
+async function matchesReviewFilters(
+	item: ResourceDiscoveryItem,
+	thread: ReviewThread | undefined,
+	request: NormalizedDiscoveryRequest,
+	anchorTarget: (viewId: string) => Promise<ReviewAnchorTarget>,
+): Promise<boolean> {
+	if (request.resolution !== undefined && !matchesResolution(item, request.resolution)) return false
+	if (request.anchorScope !== undefined && !matchesAnchorScope(item, request.anchorScope)) return false
+	const filtered = request.status ?? request.viewId ?? request.variant ?? request.anchor ?? request.changeDomain
+	if (filtered === undefined) return true
+	if (item.kind !== 'review' || !thread || !item.summary.anchor || !item.summary.status) return false
+	const { anchor, status, resolution } = item.summary
+	const variantNames = item.summary.variantNames ?? []
+	if (request.status !== undefined) {
+		const listed: ReviewDiscoveryStatus = status === 'resolved' && resolution && REVIEW_DISMISSAL_RESOLUTIONS.includes(resolution) ? 'dismissed' : status
+		if (!request.status.includes(listed)) return false
+	}
+	if (request.viewId !== undefined && !request.viewId.includes(isWorkspaceAnchor(anchor) ? REVIEW_WORKSPACE_VIEW_TOKEN : anchor.viewId)) return false
+	if (request.variant !== undefined) {
+		// A Workspace thread has no Variant scope, so a variant filter never matches it.
+		if (isWorkspaceAnchor(anchor)) return false
+		const scopes = variantNames.length ? variantNames : [REVIEW_VIEW_WIDE_VARIANT]
+		if (!scopes.some(scope => request.variant!.includes(scope))) return false
+	}
+	if (request.changeDomain !== undefined) {
+		const domains = (thread.submissions ?? []).flatMap(submission => submission.changeDomains ?? [])
+		if (!domains.some(domain => (request.changeDomain as readonly string[]).includes(domain))) return false
+	}
+	if (request.anchor !== undefined) {
+		const state = reviewAnchorState(anchor, variantNames, isWidgetAnchor(anchor) ? await anchorTarget(anchor.viewId) : {})
+		if (!request.anchor.includes(state)) return false
+	}
+	return true
 }
 
 /** An anchorScope filter selects Review threads by anchor arm: `workspace` or `view` (any Widget anchor). */
@@ -563,6 +686,11 @@ function discoveryScope(request: NormalizedDiscoveryRequest): string {
 		query: request.query ?? null,
 		...(request.resolution ? { resolution: request.resolution } : {}),
 		...(request.anchorScope ? { anchorScope: request.anchorScope } : {}),
+		...(request.status ? { status: request.status } : {}),
+		...(request.viewId ? { viewId: request.viewId } : {}),
+		...(request.variant ? { variant: request.variant } : {}),
+		...(request.anchor ? { anchor: request.anchor } : {}),
+		...(request.changeDomain ? { changeDomain: request.changeDomain } : {}),
 	})
 }
 

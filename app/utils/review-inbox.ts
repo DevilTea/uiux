@@ -9,6 +9,7 @@ import {
 	type ReviewStatus,
 	type ReviewThread,
 } from '../../src/domain/reviews/schema'
+import { REVIEW_ANCHOR_STATES, reviewAnchorState, type ReviewAnchorState } from '../../src/domain/reviews/anchor-state'
 import { buildReviewTimeline, latestTimelineActor } from './review-timeline'
 import type { ViewLinkOptions } from './workbench-routes'
 import { resolveRecordedContext, type MissingRenderContextKey, type RenderContextKeys } from '../../src/preview/render-context-options'
@@ -52,8 +53,8 @@ export function inboxStatusOf(status: ReviewStatus, resolution: ReviewResolution
 	return status === 'resolved' && isDismissal(resolution) ? 'dismissed' : status
 }
 
-export type AnchorState = 'valid' | 'stale' | 'missing'
-export const ANCHOR_STATES: readonly AnchorState[] = ['valid', 'stale', 'missing']
+export type AnchorState = ReviewAnchorState
+export const ANCHOR_STATES: readonly AnchorState[] = REVIEW_ANCHOR_STATES
 
 export type InboxFilter = Readonly<{
 	/** Statuses shown (`dismissed` is the UI pseudo-status); empty means every status. */
@@ -178,18 +179,11 @@ export function buildInboxThread(
 	const status = summary.summary.status ?? detail?.status ?? 'open'
 	const renderContext = widgetAnchor ? summary.summary.renderContext ?? detail?.renderContext : undefined
 	if (widgetAnchor && views) {
-		const anchor = widgetAnchor
-		if (!view) anchorState = 'missing'
-		else {
-			if (view.widgetTypes) {
-				widgetType = view.widgetTypes.get(anchor.widgetId)
-				if (anchor.widgetId !== 'root' && !view.widgetTypes.has(anchor.widgetId)) anchorState = 'missing'
-			}
-			if (view.variants) {
-				missingVariants = variantNames.filter(name => !view.variants!.has(name))
-				if (anchorState === 'valid' && missingVariants.length) anchorState = 'stale'
-			}
+		if (view) {
+			widgetType = view.widgetTypes?.get(widgetAnchor.widgetId)
+			if (view.variants) missingVariants = variantNames.filter(name => !view.variants!.has(name))
 		}
+		anchorState = reviewAnchorState(widgetAnchor, variantNames, view ? { ...(view.widgetTypes ? { widgetIds: view.widgetTypes } : {}), ...(view.variants ? { variantNames: view.variants } : {}) } : null)
 	}
 	return Object.freeze({
 		id: summary.key,
