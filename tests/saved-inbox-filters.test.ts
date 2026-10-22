@@ -6,6 +6,7 @@ import {
 	MAX_SAVED_FILTERS,
 	parseSavedFilters,
 	resolveSavedFilter,
+	sameNameKey,
 	sameInboxFilter,
 	savedFilterQuery,
 	savedFiltersKey,
@@ -60,6 +61,19 @@ describe('saved inbox filters (issue #62)', () => {
 		expect(parseSavedFilters(JSON.stringify(many))).toHaveLength(MAX_SAVED_FILTERS)
 		expect(cleanSavedFilterName('x'.repeat(MAX_SAVED_FILTER_NAME + 20))).toHaveLength(MAX_SAVED_FILTER_NAME)
 		expect(parseSavedFilters(JSON.stringify([{ id: 'a', name: 'y'.repeat(500), query: {} }]))[0]?.name).toHaveLength(MAX_SAVED_FILTER_NAME)
+	})
+
+	it('cuts names by code points and compares them Unicode-normalized, case-folded', () => {
+		const cut = cleanSavedFilterName('😀'.repeat(MAX_SAVED_FILTER_NAME + 5))
+		expect(Array.from(cut)).toHaveLength(MAX_SAVED_FILTER_NAME)
+		expect(cut.endsWith('😀')).toBe(true)
+		expect(sameNameKey('Caf\u00e9')).toBe(sameNameKey('CAFE\u0301'))
+		expect(sameNameKey('A')).not.toBe(sameNameKey('B'))
+	})
+
+	it('re-reads another list when the member changes', () => {
+		expect(savedFiltersKey('/w', 'mei')).not.toBe(savedFiltersKey('/w', 'jun'))
+		expect(savedFiltersKey('/w', 'mei')).not.toBe(savedFiltersKey('/v', 'mei'))
 	})
 
 	it('compares filters ignoring list order and search padding', () => {

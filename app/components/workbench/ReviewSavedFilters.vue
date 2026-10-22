@@ -24,6 +24,7 @@ const saveButton = ref<{ $el?: HTMLElement }>()
 const active = computed(() => inbox.savedFilters.value.find(item => item.id === inbox.activeSavedId.value))
 const triggerLabel = computed(() => active.value ? t('inbox.saved.menuNamed', { name: active.value.name }) : t('inbox.saved.menu'))
 
+watch(name, () => { error.value = undefined })
 watch(open, (value) => {
 	if (!value) cancel()
 })
@@ -196,6 +197,7 @@ function apply(id: string): void {
             variant="outline"
             icon="i-lucide-bookmark-plus"
             :label="t('inbox.saved.saveCurrent')"
+            :disabled="!inbox.canSaveFilters.value"
             block
             class="pointer-coarse:min-h-11"
             data-review-saved-save

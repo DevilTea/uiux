@@ -736,15 +736,14 @@
       "save": "Save",
       "rename": "Rename",
       "renameNamed": "Rename {name}",
-      "delete": "Delete",
       "deleteNamed": "Delete {name}",
       "cancel": "Cancel",
       "apply": "Apply saved filter {name}",
-      "active": "applied",
       "errors": {
         "empty": "Enter a name.",
         "duplicate": "A saved filter already has this name.",
-        "limit": "You can keep up to {n} saved filters. Delete one first."
+        "limit": "You can keep up to {n} saved filters. Delete one first.",
+        "unavailable": "Sign in to save filters."
       },
       "changed": "\"{name}\" changed: {n} View that no longer exists was left out. | \"{name}\" changed: {n} Views that no longer exist were left out.",
       "announce": {

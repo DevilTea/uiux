@@ -81,6 +81,24 @@ describe('Reviews inbox saved filters (#62)', () => {
 			await page.keyboard.press('Enter')
 			expect(await page.locator('[data-review-saved-form]').textContent()).toContain('already has this name')
 			await page.keyboard.press('Escape')
+			// Escape cancels the form: the save button is back and no second filter exists.
+			await page.locator('[data-review-saved-save]').waitFor()
+			expect(await items(page)).toEqual(['Open in my View'])
+			// A second filter, then renaming it to the first one's name (differently cased) is refused.
+			await page.locator('[data-review-saved-save]').click()
+			await page.locator('[data-review-saved-name]').fill('Second')
+			await page.keyboard.press('Enter')
+			await poll(() => items(page)).toEqual(['Open in my View', 'Second'])
+			await page.locator('[data-review-saved-rename]').nth(1).click()
+			await page.locator('[data-review-saved-name]').fill('OPEN IN MY VIEW')
+			await page.keyboard.press('Enter')
+			expect(await page.locator('[data-review-saved-form]').textContent()).toContain('already has this name')
+			// Typing clears the error.
+			await page.locator('[data-review-saved-name]').fill('Second!')
+			expect(await page.locator('[data-review-saved-form]').textContent()).not.toContain('already has this name')
+			await page.keyboard.press('Escape')
+			await page.locator('[data-review-saved-delete]').nth(1).click()
+			await poll(() => items(page)).toEqual(['Open in my View'])
 		}
 		finally { await page.close() }
 
@@ -149,6 +167,8 @@ describe('Reviews inbox saved filters (#62)', () => {
 			await poll(() => search(reloaded.page)).toEqual({ status: 'open', anchor: 'stale' })
 			await reloaded.page.locator('[data-review-saved-changed]').waitFor()
 			expect(await reloaded.page.locator('[data-review-saved-changed]').textContent()).toContain('1 View that no longer exists')
+			// A filter that lost a facet is not shown as the active one: it no longer equals what was saved.
+			expect(await reloaded.page.locator('[data-review-saved-trigger]').textContent()).not.toContain('Gone view')
 			// The notice goes away once the filter is changed by hand.
 			await reloaded.page.locator('[data-review-toggle="unread"]').click()
 			await poll(() => reloaded.page.locator('[data-review-saved-changed]').count()).toBe(0)
@@ -172,7 +192,7 @@ describe('Reviews inbox saved filters (#62)', () => {
 			await page.locator('[data-review-saved-name]').fill('只在此分頁')
 			await page.keyboard.press('Enter')
 			await poll(() => items(page)).toEqual(['只在此分頁'])
-			await openMenu(page).catch(() => undefined)
+			await page.locator('[data-review-saved]').waitFor()
 			for (const selector of ['[data-review-saved-apply]', '[data-review-saved-rename]', '[data-review-saved-delete]', '[data-review-saved-save]']) {
 				const box = await page.locator(selector).first().boundingBox()
 				expect(box?.height, selector).toBeGreaterThanOrEqual(44)

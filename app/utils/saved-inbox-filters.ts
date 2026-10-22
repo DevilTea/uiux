@@ -19,8 +19,14 @@ export function savedFiltersKey(workspace: string | undefined, memberId: string 
 	return `${SAVED_FILTERS_STORAGE_PREFIX}${workspace ?? 'unknown'}:${memberId ?? 'anonymous'}`
 }
 
+/** Trimmed, whitespace collapsed, cut to `MAX_SAVED_FILTER_NAME` code points (never inside a surrogate pair). */
 export function cleanSavedFilterName(name: string): string {
-	return name.replace(/\s+/g, ' ').trim().slice(0, MAX_SAVED_FILTER_NAME).trim()
+	return Array.from(name.replace(/\s+/g, ' ').trim()).slice(0, MAX_SAVED_FILTER_NAME).join('').trim()
+}
+
+/** What makes two names the same: Unicode-normalized and case-folded. */
+export function sameNameKey(name: string): string {
+	return name.normalize('NFC').toLowerCase()
 }
 
 /** The filter as a flat string query (no `thread`), the shape that is stored. */

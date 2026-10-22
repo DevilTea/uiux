@@ -736,15 +736,14 @@
       "save": "儲存",
       "rename": "重新命名",
       "renameNamed": "重新命名 {name}",
-      "delete": "刪除",
       "deleteNamed": "刪除 {name}",
       "cancel": "取消",
       "apply": "套用已儲存的篩選 {name}",
-      "active": "已套用",
       "errors": {
         "empty": "請輸入名稱。",
         "duplicate": "已有同名的已儲存篩選。",
-        "limit": "最多只能保留 {n} 個已儲存的篩選，請先刪除一個。"
+        "limit": "最多只能保留 {n} 個已儲存的篩選，請先刪除一個。",
+        "unavailable": "登入後才能儲存篩選。"
       },
       "changed": "「{name}」已變更：已略過 {n} 個不存在的 View。 | 「{name}」已變更：已略過 {n} 個不存在的 View。",
       "announce": {

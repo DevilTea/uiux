@@ -28,6 +28,7 @@ import {
 	parseSavedFilters,
 	resolveSavedFilter,
 	sameInboxFilter,
+	sameNameKey,
 	savedFilterQuery,
 	savedFiltersKey,
 	serializeSavedFilters,
@@ -59,6 +60,8 @@ type ListPage = Readonly<{ items: readonly ReviewSummary[]; nextCursor?: string 
 
 const SEEN_STORAGE_PREFIX = 'uiux.reviews.seen:'
 const MAX_PAGES = 20
+/** The Workbench lists Views one page of this size; a full page may be truncated. */
+const VIEW_LIST_LIMIT = 100
 const READ_BATCH = 8
 
 type MutationResponse = Readonly<{ status?: string; key?: string; revision?: string }>
@@ -313,27 +316,30 @@ function createReviewInbox() {
 		catch { /* storage unavailable: the saved filters last for this tab only */ }
 	}
 
-	/** Existing View ids; undefined until the View list arrived, so nothing is dropped early. */
-	const knownViewIds = computed(() => workbench.loading.value && !views.value.length ? undefined : new Set(views.value.map(view => view.key)))
+	/** Existing View ids; undefined while the View list is loading, failed or may be truncated (one page), so nothing is dropped on a guess. */
+	const knownViewIds = computed(() => workbench.loading.value || workbench.error.value || !workbench.workspace.value || views.value.length >= VIEW_LIST_LIMIT ? undefined : new Set(views.value.map(view => view.key)))
+	/** Saved filters need both the Workspace and the member known; before the session loads the key is a placeholder. */
+	const canSaveFilters = computed(() => !!access.session.value?.workspaceRoot && !!member.value?.id)
 	/** Each saved filter as it applies now (facets that no longer resolve dropped). */
 	const resolvedSaved = computed(() => savedFilters.value.map(saved => ({ saved, ...resolveSavedFilter(saved, knownViewIds.value) })))
 	/** The saved filter the current filter equals, if any. */
-	const activeSavedId = computed(() => resolvedSaved.value.find(item => sameInboxFilter(item.filter, filter.value))?.saved.id)
+	const activeSavedId = computed(() => resolvedSaved.value.find(item => !item.droppedViews && sameInboxFilter(item.filter, filter.value))?.saved.id)
 	/** Set when applying a saved filter dropped facets; shown while that filter stays applied. */
 	const savedChanged = ref<Readonly<{ id: string; name: string; dropped: number }>>()
-	const savedNotice = computed(() => savedChanged.value && activeSavedId.value === savedChanged.value.id ? savedChanged.value : undefined)
+	const savedNotice = computed(() => savedChanged.value && resolvedSaved.value.some(item => item.saved.id === savedChanged.value?.id && sameInboxFilter(item.filter, filter.value)) ? savedChanged.value : undefined)
 
-	type SavedRefusal = 'empty' | 'duplicate' | 'limit'
+	type SavedRefusal = 'empty' | 'duplicate' | 'limit' | 'unavailable'
 	function nameRefusal(name: string, exceptId?: string): SavedRefusal | undefined {
 		if (!name) return 'empty'
-		const lower = name.toLocaleLowerCase()
-		return savedFilters.value.some(item => item.id !== exceptId && item.name.toLocaleLowerCase() === lower) ? 'duplicate' : undefined
+		const lower = sameNameKey(name)
+		return savedFilters.value.some(item => item.id !== exceptId && sameNameKey(item.name) === lower) ? 'duplicate' : undefined
 	}
 	/** Saves the current filter under a name; returns why it was refused, if it was. */
 	function saveCurrentFilter(rawName: string): SavedRefusal | undefined {
 		const name = cleanSavedFilterName(rawName)
 		const refusal = nameRefusal(name) ?? (savedFilters.value.length >= MAX_SAVED_FILTERS ? 'limit' : undefined)
 		if (refusal) return refusal
+		if (!canSaveFilters.value) return 'unavailable'
 		writeSaved([...savedFilters.value, { id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`, name, query: savedFilterQuery(filter.value) }])
 		savedChanged.value = undefined
 		announce(t('inbox.saved.announce.saved', { name }))
@@ -755,6 +761,7 @@ function createReviewInbox() {
 		setFilter,
 		clearFilters,
 		savedFilters,
+		canSaveFilters,
 		activeSavedId,
 		savedNotice,
 		saveCurrentFilter,
