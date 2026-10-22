@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 import { bearer, provisionToken } from './support/access'
+import { putEvidenceRecordInWorkspace } from './support/evidence-record'
 
 /**
  * The Reviews inbox (brief d; roadmap R8) against the built Workbench and a private copy of the
@@ -12,7 +13,7 @@ import { bearer, provisionToken } from './support/access'
 const VIEW_ID = '7f3d7780-3cb9-4e57-8f0b-2e8d569905c1'
 /** The dogfood thread: resolved (verified) by legacy actors before identity existed. */
 const DOGFOOD_THREAD = '140f4e87-cc50-4768-a82b-56b663609321'
-const EVIDENCE = 'sha256:db5e9c30b897238d4541488ed363d4ecf65e113a9c71133c479cc871ab95a3f7'
+let EVIDENCE = ''
 
 let server: WorkbenchServer
 let browser: Browser
@@ -47,7 +48,7 @@ async function submit(id: string): Promise<void> {
 		expectedRevision: await revision(id),
 		changeDomains: ['ir', 'i18n'],
 		resources: [{ identity: { kind: 'view', key: VIEW_ID }, revision: view.revision }],
-		evidenceRefs: [{ kind: 'visual', evidence: EVIDENCE }],
+		evidenceRefs: [{ kind: 'screenshot', evidence: EVIDENCE }],
 	})
 	await pause(15)
 }
@@ -58,6 +59,7 @@ async function resolve(id: string, resolution: string, reason?: string): Promise
 
 beforeAll(async () => {
 	server = await startWorkbenchServer()
+	EVIDENCE = await putEvidenceRecordInWorkspace(server.workspaceRoot, 'screenshot')
 	browser = await chromium.launch({ headless: true })
 	for (const nickname of ['mei', 'jun', 'ana']) tokens[nickname] = await provisionToken(server.workspaceRoot, { nickname, kind: 'human', preset: 'reviewer' })
 	tokens.claude = await provisionToken(server.workspaceRoot, { nickname: 'claude', kind: 'agent', preset: 'editor' })
@@ -148,7 +150,7 @@ describe('Reviews inbox (R8)', () => {
 			expect(await detail.locator('[data-timeline-kind="resolved"]').textContent()).toContain('We keep the authoring order.')
 			// Submissions expand to their evidence references.
 			await detail.locator('[data-submission-evidence-toggle]').click()
-			await poll(() => detail.locator('[data-timeline-kind="submission"]').textContent()).toContain('sha256:db5e…a3f7')
+			await poll(() => detail.locator('[data-timeline-kind="submission"]').textContent()).toContain(`${EVIDENCE.slice(0, 11)}…${EVIDENCE.slice(-4)}`)
 
 			// The dogfood thread: two verified submissions, a reopen between them, all in time order.
 			await page.goto(`${server.origin}/reviews?status=resolved&thread=${DOGFOOD_THREAD}`, { waitUntil: 'networkidle' })

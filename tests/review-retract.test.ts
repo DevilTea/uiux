@@ -22,6 +22,7 @@ import {
 	submitReadyForReviewForHttp,
 } from '../src/server/authoring-http'
 import { AGENT_EDITOR, connectMcp, scoped, testMember } from './support/access'
+import { putEvidenceRecord } from './support/evidence-record'
 import { createCurrentWorkspace, metadataPath } from './support/workspace-layout'
 
 /**
@@ -109,7 +110,7 @@ describe('retract eligibility (E1–E6)', { timeout: 30_000 }, () => {
 			['history', async (ctx, revision) => body(await reanchorReviewThreadForHttp(scoped(ctx.app, RUI), REVIEW_ID, { expectedRevision: revision, anchor: { viewId: VIEW_ID, widgetId: 'root' } })).revision!],
 			['status', async (ctx, revision) => body(await resolveReviewThreadForHttp(scoped(ctx.app, RUI), REVIEW_ID, { expectedRevision: revision, resolution: 'obsolete' })).revision!],
 			['status', async (ctx, revision) => {
-				const evidence = await ctx.persistence.artifacts.put(new TextEncoder().encode('evidence'))
+				const evidence = { identity: await putEvidenceRecord(ctx.persistence, 'screenshot') }
 				return body(await submitReadyForReviewForHttp(scoped(ctx.app, AGENT_EDITOR), REVIEW_ID, {
 					expectedRevision: revision,
 					changeDomains: ['ir'],

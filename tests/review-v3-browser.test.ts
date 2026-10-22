@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 import { bearer, provisionToken } from './support/access'
+import { putEvidenceRecordInWorkspace } from './support/evidence-record'
 
 /**
  * The accepted Part 7 groups in the built Workbench, against a private (migrated) copy of the
@@ -14,7 +15,7 @@ import { bearer, provisionToken } from './support/access'
  */
 
 const VIEW_ID = '7f3d7780-3cb9-4e57-8f0b-2e8d569905c1'
-const EVIDENCE = 'sha256:db5e9c30b897238d4541488ed363d4ecf65e113a9c71133c479cc871ab95a3f7'
+let EVIDENCE = ''
 
 let server: WorkbenchServer
 let browser: Browser
@@ -49,6 +50,7 @@ async function reply(who: string, id: string, body: string): Promise<void> {
 
 beforeAll(async () => {
 	server = await startWorkbenchServer()
+	EVIDENCE = await putEvidenceRecordInWorkspace(server.workspaceRoot, 'screenshot')
 	browser = await chromium.launch({ headless: true })
 	tokens.mei = await provisionToken(server.workspaceRoot, { nickname: 'mei', kind: 'human', preset: 'reviewer' })
 	tokens.claude = await provisionToken(server.workspaceRoot, { nickname: 'claude', kind: 'agent', preset: 'editor' })
@@ -189,7 +191,7 @@ describe('Editing a message (scope/edit decisions 11–16)', () => {
 			expectedRevision: (await read(id)).revision,
 			changeDomains: ['ir'],
 			resources: [{ identity: { kind: 'view', key: VIEW_ID }, revision: view.revision }],
-			evidenceRefs: [{ kind: 'visual', evidence: EVIDENCE }],
+			evidenceRefs: [{ kind: 'screenshot', evidence: EVIDENCE }],
 		})
 		const { context, page } = await open(`/reviews?thread=${id}`)
 		try {

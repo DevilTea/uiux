@@ -25,6 +25,7 @@ import {
 } from '../src/server/authoring-http'
 import { listResourcesForHttp, searchResourcesForHttp, type ResourceDiscoveryHttpResult } from '../src/server/resource-discovery'
 import { AGENT_EDITOR, connectMcp, scoped, testMember } from './support/access'
+import { putEvidenceRecord } from './support/evidence-record'
 import { createCurrentWorkspace } from './support/workspace-layout'
 
 /**
@@ -121,7 +122,7 @@ async function workspaceRevision(ctx: Ctx) {
 }
 
 async function screenshot(ctx: Ctx, seed: string) {
-	return (await ctx.persistence.artifacts.put(new TextEncoder().encode(`evidence-${seed}`))).identity
+	return putEvidenceRecord(ctx.persistence, 'screenshot', seed)
 }
 
 describe('Workspace-scoped threads: create, re-anchor, hint, promote', { timeout: 30_000 }, () => {

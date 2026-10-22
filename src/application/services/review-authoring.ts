@@ -485,15 +485,34 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 					})
 					continue
 				}
+				// Rule 01a11544-55b0-…: the declared kind must equal the referenced record's kind, for every
+				// kind; a reference that is not a readable Evidence record is diagnosed, never accepted on
+				// existence alone, and nothing is coerced. The two codes are non-normative (batch 4 ruling).
+				const candidate = await persistence.artifacts.readCandidateJson(validation.value.evidence)
+				const record = validateFormalEvidenceRecord(candidate)
+				if (!record.ok) {
+					evidenceDiagnostics.push({
+						code: 'review.evidence_not_record',
+						path: `${path}/evidence`,
+						message: `Referenced artifact ${validation.value.evidence} is not a readable Evidence record, so it cannot be cited as ${validation.value.kind} evidence.`,
+					})
+					continue
+				}
+				if (record.value.kind !== validation.value.kind) {
+					evidenceDiagnostics.push({
+						code: 'review.evidence_kind_mismatch',
+						path: `${path}/kind`,
+						message: `Evidence reference declares kind ${validation.value.kind} but the referenced record ${validation.value.evidence} is of kind ${record.value.kind}.`,
+					})
+					continue
+				}
 				if (validation.value.kind === 'formal_capture') {
-					const candidate = await persistence.artifacts.readCandidateJson(validation.value.evidence)
-					const formal = validateFormalEvidenceRecord(candidate)
-					const capturedViewId = formal.ok ? (formal.value.executionContext as Record<string, unknown>).viewId : undefined
+					const capturedViewId = (record.value.executionContext as Record<string, unknown>).viewId
 					// Rule 01a11544-558b-… and Clause 01a115cd-3769-…: matched to the View's current
 					// render-input digest, so a capture taken before a Spec-only edit still counts.
 					const currentDigest = typeof capturedViewId === 'string' ? currentViewDigests.get(capturedViewId) : undefined
-					if (!formal.ok || formal.value.kind !== 'formal_capture' || typeof capturedViewId !== 'string' || currentDigest === undefined
-						|| !isCompleteEvidenceForRenderInput(formal.value, capturedViewId, currentDigest)) {
+					if (typeof capturedViewId !== 'string' || currentDigest === undefined
+						|| !isCompleteEvidenceForRenderInput(record.value, capturedViewId, currentDigest)) {
 						evidenceDiagnostics.push({
 							code: 'review.formal_evidence_not_current',
 							path: `${path}/evidence`,
