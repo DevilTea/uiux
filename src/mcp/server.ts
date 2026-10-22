@@ -992,7 +992,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'edit_review_message',
 		{
 			title: 'Edit UIUX Review Message',
-			description: 'Replace the text of your own Review message. The previous text is kept in the message\'s edit history. A message cannot be edited after a later ready-for-review submission or resolution; reply instead. Refusals: review.message_edit_not_author, review.message_edit_after_formal_act, review.message_body_empty, review.message_edit_noop, review.unknown_message.',
+			description: 'Replace the text of your own Review message. The previous text is kept in the message\'s edit history. A message cannot be edited after a later ready-for-review submission or resolution; reply instead. Refusals: review.message_edit_not_author, review.message_frozen, review.message_body_empty, review.message_edit_noop, review.unknown_message.',
 			inputSchema: editReviewMessageSchema,
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},
