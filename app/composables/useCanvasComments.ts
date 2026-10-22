@@ -32,6 +32,7 @@ import { createThreadBody, reanchorThreadBody } from '../utils/canvas-comment-re
 import { recordedContextParts, recordedContextText } from '../utils/thread-render-context'
 import { useRecordedRenderContext } from './useRecordedRenderContext'
 import { createRevisionPin, useReplyBases } from './useReplyBases'
+import { isRemovedActor } from './useMemberRoster'
 import { threadState, type ReplyConflict } from '../utils/reply-conflict'
 import { promoteMovedOf, type PromoteConflict } from '../utils/promote-conflict'
 
@@ -785,7 +786,8 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	const pinMeta = computed(() => {
 		const meta = new Map<string, PinMeta>()
 		for (const item of threads.value) {
-			const name = item.author?.displayName ?? t('comments.unknownAuthor')
+			const recorded = item.author?.displayName ?? t('comments.unknownAuthor')
+			const name = isRemovedActor(item.author) ? t('comments.removedMember', { name: recorded }) : recorded
 			const status = t(`thread.status.${statusKey(item.status)}`)
 			const type = widgetTypeById.value.get(item.anchor.widgetId) ?? 'Widget'
 			const onView = item.anchor.widgetId === VIEW_ANCHOR_WIDGET_ID

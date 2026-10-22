@@ -8,6 +8,7 @@ import { messageEditState } from '../../utils/review-message-actions'
 import { relativeTime } from '../../utils/widget-inspection'
 import { memberInitials } from '../../utils/member-initials'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
+import { useMemberRoster } from '../../composables/useMemberRoster'
 
 /**
  * One Review message in a timeline (Part 7 10b; scope/edit decision 16), shared by the inbox
@@ -43,7 +44,10 @@ const { t, locale } = useI18n()
 const fmt = useWorkbenchFormat()
 
 const actor = computed(() => props.item.actor)
+const roster = useMemberRoster()
 const name = computed(() => actor.value.displayName ?? actor.value.id ?? t('comments.unknownAuthor'))
+/** The recorded name, marked "(removed)" when the member left the roster. */
+const shownName = computed(() => roster.actorName(actor.value))
 const agent = computed(() => actor.value.type === 'agent')
 const human = computed(() => actor.value.type === 'human')
 
@@ -134,7 +138,7 @@ const editedTime = computed(() => props.item.editedAt ? fmt.dateTime(props.item.
       class="flex min-h-6 flex-wrap items-center gap-x-1.5 gap-y-0.5"
       :class="compact ? 'text-xs text-muted' : 'text-sm'"
     >
-      <b class="font-semibold text-highlighted text-sm">{{ name }}</b>
+      <b class="font-semibold text-highlighted text-sm">{{ shownName }}</b>
       <UBadge
         v-if="agent"
         color="neutral"

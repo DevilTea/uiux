@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from '#imports'
 import { relativeTime } from '../../../utils/widget-inspection'
 import { threadAuthorInitials, useCanvasComments, VIEW_ANCHOR_WIDGET_ID, type CommentThread } from '../../../composables/useCanvasComments'
+import { isRemovedActor } from '../../../composables/useMemberRoster'
 
 /**
  * One row of the Comments tab. It is its own component so that a thread whose pin scrolls in or out
@@ -56,7 +57,10 @@ const statusIcon = computed(() => {
 
 const when = computed(() => props.item.latestActivityAt ? relativeTime(props.item.latestActivityAt, locale.value) : '')
 // Cached, so a row that re-renders for its canvas glyph does no message formatting.
-const authorName = computed(() => props.item.author?.displayName ?? t('comments.unknownAuthor'))
+const authorName = computed(() => {
+	const name = props.item.author?.displayName ?? t('comments.unknownAuthor')
+	return isRemovedActor(props.item.author) ? t('comments.removedMember', { name }) : name
+})
 const messageCountLabel = computed(() => t('reviews.messageCount', props.item.messageCount))
 /** A thread on the View as a whole (RootShell) reads "Whole View", not "RootShell · #root". */
 const onView = computed(() => props.item.anchor.widgetId === VIEW_ANCHOR_WIDGET_ID)

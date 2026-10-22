@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { navigateTo, useI18n, useRoute } from '#imports'
 import { provideWorkbench } from '../composables/useWorkbench'
+import { clearMemberRoster, refreshMemberRoster } from '../composables/useMemberRoster'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../composables/useMediaQuery'
 import { provideWorkbenchShell } from '../composables/useWorkbenchShell'
 import { useConnectivity } from '../composables/useConnectivity'
@@ -65,7 +66,15 @@ watch(() => !!access.session.value, (signedIn) => {
 }, { immediate: true })
 live.onResources((batch) => { void workbench.applyLiveChanges(batch) })
 live.onLocks(() => { void access.refreshLocks() })
-live.onAccess(() => { void access.reload() })
+// The roster's member IDs label Review records of removed members (Rule 01a11485-f185-7c23-8f2a-e045a279cd27);
+// only a holder of `members.manage` can read it, and it is re-read when access changes.
+watch(() => access.can('members.manage'), (manage) => {
+	if (manage) void refreshMemberRoster()
+	else clearMemberRoster()
+}, { immediate: true })
+live.onAccess(() => {
+	void access.reload().then(() => { if (access.can('members.manage')) return refreshMemberRoster() })
+})
 
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const isPhone = useMediaQuery(WORKBENCH_BREAKPOINTS.phone)

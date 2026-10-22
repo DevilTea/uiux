@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from '#imports'
 import { useReviewInbox } from '../../composables/useReviewInbox'
+import { useMemberRoster } from '../../composables/useMemberRoster'
 import { actorKey, ANCHOR_STATES, VIEW_WIDE_SCOPE, WORKSPACE_VIEW_TOKEN, type AnchorState, type InboxFilter } from '../../utils/review-inbox'
 
 /**
@@ -33,13 +34,14 @@ const scopeOptions = computed<Option[]>(() => {
 	return [{ label: t('inbox.filter.viewWide'), value: VIEW_WIDE_SCOPE }, ...[...names].sort().map(name => ({ label: name, value: name, icon: 'i-lucide-layers' }))]
 })
 
+const { actorName } = useMemberRoster()
 const authorOptions = computed<Option[]>(() => {
 	const seen = new Map<string, Option>()
 	for (const item of inbox.threads.value) {
 		if (!item.author) continue
 		const key = actorKey(item.author)
 		if (seen.has(key)) continue
-		const name = item.author.displayName ?? item.author.id ?? t('comments.unknownAuthor')
+		const name = actorName(item.author)
 		seen.set(key, { label: item.author.type === 'agent' ? `${name} (${t('comments.agent')})` : name, value: key, icon: item.author.type === 'agent' ? 'i-lucide-bot' : 'i-lucide-user' })
 	}
 	return [...seen.values()].sort(byLabel)
