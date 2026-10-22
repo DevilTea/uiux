@@ -1,6 +1,6 @@
 Feature: Mutation results
   # Source: Discussion #241 comment (2026-10-23), "Owner rulings 2026-10-23 (#77 change summary in mutation results)", rulings 1 and 3 https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19130600; #1 c164 d4 https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18671287.
-  # Test: code@14ce69a `tests/mutation-change-summary.test.ts#L276` "carries the same summary for every authoring kind on both transports". https://github.com/DevilTea/uiux/blob/14ce69adf02ec93fda04856ac2c0bf7374732797/tests/mutation-change-summary.test.ts#L276
+  # Test: code@5ecc1bb `tests/mutation-change-summary.test.ts#L299` "carries the same summary for every authoring kind on both transports". https://github.com/DevilTea/uiux/blob/5ecc1bb756c55b45f2857d01cd8267431cfd5141/tests/mutation-change-summary.test.ts#L299
   # Status: built as of be236ef.
   @spec:id:01a164f1-33da-7dec-a52e-a2bd59a4b6e9
   @spec:demonstrates:01a11485-f578-79a7-9d01-4bc233f2c1cb
