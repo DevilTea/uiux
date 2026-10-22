@@ -566,6 +566,34 @@ describe('mark ready follows the render-input digest and the known change domain
 		expect(thread.resource.status).toBe('open')
 	})
 
+	// Rules 01a11686-8d71-… and 01a1161b-ff68-…: while the current Adapter set does not resolve, no
+	// capture's freshness can be judged, so even one that records Adapter provenance is refused.
+	it('refuses a capture while the current Adapter set cannot be resolved', async () => {
+		const ctx = await session()
+		const revision = await widgetThread(ctx)
+		const captured = await formal(ctx, VIEW_ID, ctx.viewRevision)
+		const kit = (await ctx.persistence.productKit.read())!
+		const swapped = await ctx.persistence.productKit.compareAndSwap({ key: 'product-kit', expectedRevision: kit.revision, resource: { ...kit.resource, adapters: [{ moduleSpecifier: './adapters/missing.mjs' }] } })
+		expect(swapped.ok).toBe(true)
+		const refused = await markReady(ctx, revision, ctx.viewRevision, captured)
+		expect(refused.status).toBe(400)
+		expect(body(refused).diagnostics?.map(item => [item.code, item.path])).toEqual([['review.formal_evidence_freshness_unknown', '/evidenceRefs/0/evidence']])
+	})
+
+	// Pins current behavior: Rule 01a11544-558b-… asks only for the current render-input digest, so a
+	// capture made stale by an Adapter change (Rule 01a115cd-c6de-…) still satisfies Submit for review.
+	// Whether Submit should refuse it is left to its own proposal (PR #301 review).
+	it('accepts a capture whose Adapters changed while its render-input digest still matches', async () => {
+		const ctx = await session()
+		const revision = await widgetThread(ctx)
+		const current = await currentCaptureProvenance(ctx.persistence)
+		expect(current.adapters).toEqual([])
+		const otherAdapter = { moduleSpecifier: './adapters/removed.mjs', adapterId: 'removed', apiVersion: '1', contentDigest: `sha256:${'a'.repeat(64)}` }
+		const captured = await formal(ctx, VIEW_ID, ctx.viewRevision, undefined, { ...current, adapters: [otherAdapter] })
+		const ready = await markReady(ctx, revision, ctx.viewRevision, captured)
+		expect(ready.status, JSON.stringify(ready.body)).toBe(200)
+	})
+
 	// Clause 01a14e57-637f-…: an unknown value is refused when written, naming each one.
 	it('refuses an unknown change domain with review.change_domain_unknown and writes nothing', async () => {
 		const ctx = await session()
