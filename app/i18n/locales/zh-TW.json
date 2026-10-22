@@ -1366,6 +1366,13 @@
     "notOnCanvasGroup": "未顯示在畫布上",
     "overCapHint": "畫布最多同時追蹤 {cap} 個 Widget。縮小圖釘篩選範圍即可顯示這些留言。",
     "singleStreamHint": "此預覽 Runtime 一次只能追蹤一個 Widget。開啟討論串即可顯示它的圖釘。",
+    "move": {
+      "hint": "按 M 以方向鍵移動此圖釘。Shift 以較大步幅移動，Enter 儲存位置，Escape 取消。",
+      "started": "正在移動圖釘。方向鍵移動，Shift 加大步幅，Enter 儲存，Escape 取消。",
+      "position": "位於 Widget 水平 {x}%、垂直 {y}%。",
+      "done": "已移動圖釘。",
+      "canceled": "已取消移動圖釘。"
+    },
     "toggle": "顯示圖釘",
     "show": "顯示圖釘",
     "hide": "隱藏圖釘",

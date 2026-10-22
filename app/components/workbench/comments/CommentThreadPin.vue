@@ -14,9 +14,10 @@ import CommentPin from './CommentPin.vue'
  * context as a visible label, and its accessible name says it, so the state never depends on
  * color alone (Rule 01a1170f-c352).
  */
-const props = defineProps<{ threadId: string; draggableOnCanvas: boolean }>()
+const props = defineProps<{ threadId: string; draggableOnCanvas: boolean; moving?: boolean; moveHintId?: string }>()
 const emit = defineEmits<{
 	(e: 'pin', threadId: string, action: 'activate' | 'enter' | 'move' | 'drop' | 'cancel', point?: Readonly<{ clientX: number; clientY: number }>): void
+	(e: 'pinKey', threadId: string, action: 'start' | 'step' | 'commit' | 'cancel', step?: Readonly<{ dx: number; dy: number; coarse: boolean }>): void
 }>()
 
 const { t } = useI18n()
@@ -50,10 +51,13 @@ const draggable = computed(() => props.draggableOnCanvas && comments.canComment.
     :dim="dim"
     :context="mutedContext"
     :draggable="draggable"
+    :moving="moving"
+    :move-hint-id="moveHintId"
     :thread-id="threadId"
     @activate="keyboard => emit('pin', threadId, keyboard ? 'enter' : 'activate')"
     @drag-move="point => emit('pin', threadId, 'move', point)"
     @drag-end="point => emit('pin', threadId, 'drop', point)"
     @drag-cancel="emit('pin', threadId, 'cancel')"
+    @move-key="(action, step) => emit('pinKey', threadId, action, step)"
   />
 </template>
