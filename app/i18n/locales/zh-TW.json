@@ -2312,6 +2312,7 @@
       "stream_limit": "這個瀏覽器的即時更新連線數已達上限。此分頁改為定期檢查變更。"
     },
     "evidence": {
+      "duplicate_adapter": "Evidence 重複記錄了同一個 Adapter。",
       "invalid_coverage": "Evidence 的涵蓋範圍紀錄無效。",
       "missing_uiux_version": "Evidence 沒有記錄 UIUX 版本。",
       "parallel_identity_forbidden": "Evidence 只能以內容摘要識別。"
@@ -2427,6 +2428,7 @@
       "evidence_not_found": "所選的 Evidence 不存在。",
       "evidence_not_record": "所選的項目不是 Evidence 紀錄。",
       "evidence_unreadable": "無法讀取所選的 Evidence。",
+      "formal_evidence_freshness_unknown": "無法判斷所選的 Evidence 是否最新，請重新擷取。",
       "formal_evidence_not_current": "所選的 Evidence 已過時，請重新擷取。",
       "history_status_mismatch": "Review 的狀態與其歷程不一致。",
       "invalid_anchor_scope": "留言必須位於 View 或 Workspace 上。",
