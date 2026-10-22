@@ -16,6 +16,12 @@ import {
 } from '../src/application/services/handoff-export'
 import { createFormalCaptureService } from '../src/application/services/formal-capture'
 import { readWorkspaceProductKitProvenance } from '../src/application/services/product-kit-provenance'
+import { readCurrentAdapterProvenance } from '../src/application/services/adapter-provenance'
+import { readCurrentProductKitProvenance } from '../src/application/services/product-kit-provenance'
+import { adapterFreshnessContext } from '../src/domain/evidence/adapter-provenance'
+import { ADAPTER_CHANGED_REASON, ADAPTER_PROVENANCE_MISSING_REASON, ADAPTER_PROVENANCE_UNAVAILABLE_REASON, provenanceFreshness } from '../src/domain/evidence/staleness'
+import { productKitFreshnessContext } from '../src/domain/product-kit/provenance'
+import type { WorkspaceAdapterSelection } from '../src/domain/workspace/schema'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
 import { createLeaseManager } from '../src/application/access/leases'
@@ -298,6 +304,7 @@ async function putFormalEvidence(
 	viewRevision: string,
 	complete = true,
 	withProductKit = true,
+	withAdapters = true,
 ): Promise<string> {
 	const dummyScreenshotBytes = new TextEncoder().encode(`screenshot-bytes-for-${viewId}`)
 	const screenshotPut = await persistence.artifacts.put(dummyScreenshotBytes)
@@ -307,6 +314,8 @@ async function putFormalEvidence(
 	// A capture without Product Kit provenance has unknown freshness (Rule 01a1161b-ff68-…), so the
 	// fixture records the current one, as formal capture does.
 	const productKit = withProductKit ? await readWorkspaceProductKitProvenance(persistence) : undefined
+	// Likewise the Adapter provenance (Clause 01a1161c-008a-…), as formal capture records it.
+	const adapters = withAdapters ? await readCurrentAdapterProvenance(persistence) : undefined
 	// The View's render-input digest as it is stored now (Clause 01a14e30-2d4a-…), as formal capture records it.
 	const viewRead = await persistence.views.readInspected(viewId)
 	const viewRenderInput = viewRead?.resource ? renderInputDigest(viewRead.resource) : undefined
@@ -331,6 +340,7 @@ async function putFormalEvidence(
 			],
 			versions: { uiux: '0.1.0' },
 			...(productKit ? { productKit } : {}),
+			...(adapters?.state === 'available' ? { adapters: adapters.adapters } : {}),
 			...(viewRenderInput ? { renderInputDigest: viewRenderInput } : {}),
 		},
 		artifactRefs: [screenshotPut.identity],
@@ -1431,6 +1441,10 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		expect(captureBatch.status).toBe('ok')
 		const realEvidenceDigest = captureBatch.results[0]?.evidenceDigest
 		expect(realEvidenceDigest).toBeDefined()
+		// Clause 01a1161c-008a-…: the capture records the active Adapter set, with no host path.
+		const captured = await persistence.artifacts.readCandidateJson(realEvidenceDigest!) as FormalEvidenceRecord
+		expect(captured.provenance.adapters).toEqual([expect.objectContaining({ moduleSpecifier: './adapters/counter.mjs', adapterId: 'my-counter', apiVersion: '1', contentDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/) })])
+		expect(JSON.stringify(captured)).not.toContain(root)
 
 		// 2. Assess readiness using the real formal capture
 		const handoff = currentSchemaHandoff(persistence)
@@ -1615,4 +1629,99 @@ describe('Handoff Product Kit references (Feature 01a111e4-0272-…)', { timeout
 			expect(manifest.implementationReferences.find(reference => reference.widgetType === 'ProductCard')?.component).toMatchObject({ package: '@acme/ds', version: '2.3.4' })
 		})
 	}
+})
+
+// Issue #57: formal capture records the active Adapter set (Clause 01a1161c-008a-…), and a capture is
+// stale once that set differs in selection, order, content or configuration (Rule 01a115cd-c6de-…);
+// one that records none has unknown freshness (Rule 01a1161b-ff68-…). Handoff readiness and the bundle
+// accept only fresh captures (Rules 01a115cd-ca1a-… and 01a115cd-ca50-…).
+describe('Adapter-driven Evidence freshness (issue #57)', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
+	const COUNTER = './adapters/counter.mjs'
+	const BADGE = './adapters/badge.mjs'
+	const CONFIGURABLE_COUNTER = makeCounterAdapterSource().replace('providers: [],', `providers: [],
+  configSchema: { $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object' },`)
+
+	async function adapterWorkspace(adapters: WorkspaceAdapterSelection[] = [{ moduleSpecifier: COUNTER }]): Promise<{ root: string; persistence: FileNativePersistence; evidence: string }> {
+		const { root, persistence } = await createTestWorkspace(adapters)
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), CONFIGURABLE_COUNTER)
+		await writeFile(join(root, 'kit', 'adapters', 'badge.mjs'), makeCounterAdapterSource().replaceAll('Counter', 'Badge').replace('\'my-counter\'', '\'my-badge\''))
+		const viewRevision = await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'Counter View'))
+		return { root, persistence, evidence: await putFormalEvidence(persistence, VIEW_1_ID, viewRevision, true) }
+	}
+
+	/** The Adapter and Product Kit conditions of the stored capture against the current Workspace; `undefined` when both hold. */
+	async function provenanceCondition(persistence: FileNativePersistence, evidence: string) {
+		const record = await persistence.artifacts.readCandidateJson(evidence) as FormalEvidenceRecord
+		return provenanceFreshness(record, {
+			...adapterFreshnessContext(await readCurrentAdapterProvenance(persistence)),
+			...productKitFreshnessContext(await readCurrentProductKitProvenance(persistence)),
+		})
+	}
+
+	async function staleInHandoff(persistence: FileNativePersistence): Promise<boolean> {
+		const assessed = await currentSchemaHandoff(persistence).assessReadiness({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		return assessed.readiness!.blockingDiagnostics.some(diagnostic => diagnostic.code === 'handoff.stale_view_evidence')
+	}
+
+	async function setAdapters(persistence: FileNativePersistence, adapters: WorkspaceAdapterSelection[]): Promise<void> {
+		const current = (await persistence.productKit.read())!
+		const swapped = await persistence.productKit.compareAndSwap({ key: 'product-kit', expectedRevision: current.revision, resource: { ...current.resource, adapters } })
+		expect(swapped.ok).toBe(true)
+	}
+
+	it('records every active Adapter in Adapter-list order without a host path, and keeps the capture fresh while nothing changes', async () => {
+		const { root, persistence, evidence } = await adapterWorkspace([{ moduleSpecifier: COUNTER, config: { tone: 'warm' } }, { moduleSpecifier: BADGE }])
+		const record = await persistence.artifacts.readCandidateJson(evidence) as FormalEvidenceRecord
+		expect(record.provenance.adapters?.map(adapter => [adapter.moduleSpecifier, adapter.adapterId, adapter.apiVersion])).toEqual([[COUNTER, 'my-counter', '1'], [BADGE, 'my-badge', '1']])
+		for (const adapter of record.provenance.adapters ?? []) expect(adapter.contentDigest).toMatch(/^sha256:[0-9a-f]{64}$/)
+		expect(record.provenance.adapters?.[0]?.configDigest).toMatch(/^sha256:/)
+		expect(Object.hasOwn(record.provenance.adapters?.[1] ?? {}, 'configDigest')).toBe(false)
+		expect(JSON.stringify(record.provenance)).not.toContain(root)
+		expect(await provenanceCondition(persistence, evidence)).toBeUndefined()
+		expect(await staleInHandoff(persistence)).toBe(false)
+	})
+
+	it('stales the capture once an Adapter module changes', async () => {
+		const { root, persistence, evidence } = await adapterWorkspace()
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), `${CONFIGURABLE_COUNTER}\n// The renderer changed.\n`)
+		expect(await provenanceCondition(persistence, evidence)).toEqual({ isStale: true, reason: ADAPTER_CHANGED_REASON })
+		expect(await staleInHandoff(persistence)).toBe(true)
+		// Restoring the module restores freshness: the comparison is by content, not by time.
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), CONFIGURABLE_COUNTER)
+		expect(await provenanceCondition(persistence, evidence)).toBeUndefined()
+	})
+
+	it('stales the capture once an Adapter\'s configuration changes', async () => {
+		const { persistence, evidence } = await adapterWorkspace([{ moduleSpecifier: COUNTER, config: { tone: 'warm' } }])
+		await setAdapters(persistence, [{ moduleSpecifier: COUNTER, config: { tone: 'cool' } }])
+		expect(await provenanceCondition(persistence, evidence)).toEqual({ isStale: true, reason: ADAPTER_CHANGED_REASON })
+		expect(await staleInHandoff(persistence)).toBe(true)
+	})
+
+	it('stales the capture once the Adapter list gains, loses or reorders an Adapter', async () => {
+		const { persistence, evidence } = await adapterWorkspace([{ moduleSpecifier: COUNTER }, { moduleSpecifier: BADGE }])
+		for (const adapters of [[{ moduleSpecifier: BADGE }, { moduleSpecifier: COUNTER }], [{ moduleSpecifier: COUNTER }], []]) {
+			await setAdapters(persistence, adapters)
+			expect(await provenanceCondition(persistence, evidence), JSON.stringify(adapters)).toEqual({ isStale: true, reason: ADAPTER_CHANGED_REASON })
+		}
+		await setAdapters(persistence, [{ moduleSpecifier: COUNTER }, { moduleSpecifier: BADGE }])
+		expect(await provenanceCondition(persistence, evidence)).toBeUndefined()
+		expect(await staleInHandoff(persistence)).toBe(false)
+	})
+
+	it('gives a capture that records no Adapter provenance unknown freshness, which Handoff does not accept', async () => {
+		const { persistence } = await adapterWorkspace()
+		const legacy = await putFormalEvidence(persistence, VIEW_1_ID, (await persistence.views.readRevision(VIEW_1_ID))!, true, true, false)
+		expect(await provenanceCondition(persistence, legacy)).toEqual({ isStale: true, unknown: true, reason: ADAPTER_PROVENANCE_MISSING_REASON })
+		const exported = await currentSchemaHandoff(persistence).exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(exported.manifest?.evidenceRefs.map(ref => ref.evidence)).not.toContain(legacy)
+	})
+
+	it('gives every capture unknown freshness while the current Adapter set does not resolve', async () => {
+		const { persistence, evidence } = await adapterWorkspace()
+		await setAdapters(persistence, [{ moduleSpecifier: './adapters/missing.mjs' }])
+		expect(await readCurrentAdapterProvenance(persistence)).toEqual({ state: 'unavailable' })
+		expect(await provenanceCondition(persistence, evidence)).toEqual({ isStale: true, unknown: true, reason: ADAPTER_PROVENANCE_UNAVAILABLE_REASON })
+	})
 })

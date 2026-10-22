@@ -25,7 +25,7 @@ import {
 } from '../src/server/authoring-http'
 import { listResourcesForHttp, searchResourcesForHttp, type ResourceDiscoveryHttpResult } from '../src/server/resource-discovery'
 import { AGENT_EDITOR, connectMcp, scoped, testMember } from './support/access'
-import { putEvidenceRecord } from './support/evidence-record'
+import { currentCaptureProvenance, putEvidenceRecord } from './support/evidence-record'
 import { createCurrentWorkspace } from './support/workspace-layout'
 
 /**
@@ -67,16 +67,20 @@ type Ctx = Awaited<ReturnType<typeof session>>
 
 /**
  * A complete formal capture of `viewId` recorded at `viewRevision`, with `digest` as its
- * render-input digest (the View's current one by default; `null` records none).
+ * render-input digest (the View's current one by default; `null` records none), and `provenance`
+ * as its Adapter and Product Kit provenance (the current ones by default).
  */
-async function formal(ctx: Ctx, viewId: string, viewRevision: string, digest?: string | null): Promise<string> {
+async function formal(ctx: Ctx, viewId: string, viewRevision: string, digest?: string | null, provenance?: Awaited<ReturnType<typeof currentCaptureProvenance>>): Promise<string> {
 	const recorded = digest === undefined ? renderInputDigest((await ctx.persistence.views.readInspected(viewId))!.resource) : digest
+	// The Adapter and Product Kit provenance as formal capture records it: without it the capture's
+	// freshness is unknown, which marking ready refuses (Rule 01a11686-8d71-…).
+	const current = provenance ?? await currentCaptureProvenance(ctx.persistence)
 	return (await ctx.persistence.artifacts.put(new TextEncoder().encode(JSON.stringify({
 		schemaVersion: 1,
 		kind: 'formal_capture',
 		executionContext: { viewId },
 		coverage: { complete: true },
-		provenance: { workspaceSchemaVersion: 3, resources: [{ identity: { type: 'view', id: viewId }, revision: viewRevision }], versions: { uiux: '0.1.0' }, ...(recorded === null ? {} : { renderInputDigest: recorded }) },
+		provenance: { workspaceSchemaVersion: 3, resources: [{ identity: { type: 'view', id: viewId }, revision: viewRevision }], versions: { uiux: '0.1.0' }, ...current, ...(recorded === null ? {} : { renderInputDigest: recorded }) },
 		artifactRefs: [],
 	})))).identity
 }
@@ -543,6 +547,23 @@ describe('mark ready follows the render-input digest and the known change domain
 		const revision = await widgetThread(ctx)
 		const legacy = await formal(ctx, VIEW_ID, ctx.viewRevision, null)
 		expect(codes(await markReady(ctx, revision, ctx.viewRevision, legacy))).toEqual(['review.formal_evidence_not_current'])
+	})
+
+	// Rule 01a11686-8d71-…: a capture of unknown freshness, here one that records no Adapter or no
+	// Product Kit provenance (Rule 01a1161b-ff68-…), is refused until it is recaptured.
+	it('refuses a capture whose freshness is unknown and keeps the thread open', async () => {
+		const ctx = await session()
+		const revision = await widgetThread(ctx)
+		const current = await currentCaptureProvenance(ctx.persistence)
+		for (const recorded of [{ productKit: current.productKit }, { adapters: current.adapters }]) {
+			const legacy = await formal(ctx, VIEW_ID, ctx.viewRevision, undefined, recorded)
+			const refused = await markReady(ctx, revision, ctx.viewRevision, legacy)
+			expect(refused.status).toBe(400)
+			expect(body(refused).diagnostics?.map(item => [item.code, item.path])).toEqual([['review.formal_evidence_freshness_unknown', '/evidenceRefs/0/evidence']])
+		}
+		const thread = await read(ctx, WIDGET_REVIEW_ID)
+		expect(thread.revision).toBe(revision)
+		expect(thread.resource.status).toBe('open')
 	})
 
 	// Clause 01a14e57-637f-…: an unknown value is refused when written, naming each one.
