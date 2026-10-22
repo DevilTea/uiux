@@ -43,6 +43,7 @@ export default tseslint.config(
 				{ selector: 'Identifier[name=\'console\']', message: 'Write diagnostics through src/logging/diagnostics.ts (redacted) or the CLI writers in src/cli/output.ts.' },
 				{ selector: 'MemberExpression[property.name=\'console\'][object.name=/^(globalThis|global)$/]', message: 'Raw console access is restricted to the sanctioned writer modules.' },
 				{ selector: 'MemberExpression[object.name=\'process\'][property.name=/^(stdout|stderr)$/]', message: 'Raw stdio writes are restricted to the sanctioned writer modules (src/server/access/redaction.ts).' },
+				{ selector: 'MemberExpression[object.name=\'process\'][computed=true][property.value=/^(stdout|stderr)$/]', message: 'Raw stdio writes are restricted to the sanctioned writer modules (src/server/access/redaction.ts).' },
 				{ selector: 'MemberExpression[object.name=/^(globalThis|global)$/][property.name=\'process\']', message: 'Raw stdio access through globalThis.process is restricted to the sanctioned writer modules.' },
 			],
 		},

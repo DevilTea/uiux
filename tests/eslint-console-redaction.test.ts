@@ -22,6 +22,10 @@ describe('raw console and stdio restriction', () => {
 		['src/server/example.ts', 'process.stdout.write(\'x\')\n'],
 		['src/server/example.ts', 'process.stderr.write(\'x\')\n'],
 		['src/server/example.ts', 'globalThis.console.table([])\n'],
+		['src/server/example.ts', 'globalThis.process.stdout.write(\'x\')\n'],
+		['src/server/example.ts', 'global.console.log(\'x\')\n'],
+		['src/server/example.ts', 'process[\'stdout\'].write(\'x\')\n'],
+		['src/server/example.ts', 'process["stderr"].write(\'x\')\n'],
 		['src/persistence/example.ts', 'const { log } = console\nlog(\'x\')\n'],
 		['bin/example.mjs', 'console.error(\'x\')\n'],
 	])('rejects %s: %s', async (file, code) => {
@@ -36,6 +40,10 @@ describe('raw console and stdio restriction', () => {
 		'bin/uiux.mjs',
 	])('allows the sanctioned writer %s', async (file) => {
 		expect(await lint(file, 'console.log(\'x\')\nprocess.stdout.write(\'x\')\n')).toEqual([])
+	})
+
+	it('does not reject process.stdin or process.exitCode', async () => {
+		expect(await lint('src/server/example.ts', 'process.stdin.setEncoding(\'utf8\')\nprocess.exitCode = 1\n')).toEqual([])
 	})
 
 	it('leaves tests and scripts unrestricted', async () => {
