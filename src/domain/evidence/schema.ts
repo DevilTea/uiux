@@ -11,6 +11,8 @@ import {
 } from '../validation'
 import { validateI18nOccurrence, validateI18nWarning, type I18nOccurrence, type I18nWarning } from '../i18n/schema'
 import { validateProductKitProvenance, type ProductKitProvenance } from '../product-kit/provenance'
+import { validateAdapterProvenanceMembers } from '../adapters/schema'
+import type { EvidenceAdapterProvenance } from './adapter-provenance'
 
 export type EvidenceKind = string
 export type EvidenceReference = Readonly<{ kind: EvidenceKind; evidence: string }>
@@ -21,6 +23,12 @@ export type EvidenceProvenance = Readonly<{
 	versions: Readonly<Record<string, string>>
 	/** Clause 01a11bb1-8fc4-7b7d-87da-d3fc5d457d98: the Product Kit provenance at capture time; absent on a capture recorded without it. */
 	productKit?: ProductKitProvenance
+	/**
+	 * Clause 01a1161c-008a-746d-8d53-a8301b23588f: every Adapter of the active set at capture time, in
+	 * Adapter-list order; absent on a capture recorded without it, whose freshness is unknown (Rule
+	 * 01a1161b-ff68-…).
+	 */
+	adapters?: readonly EvidenceAdapterProvenance[]
 	/**
 	 * Clause 01a14e30-2d4a-7ce9-ad68-58db56f36f47: the render-input digest of the captured View at
 	 * capture time; absent on a capture recorded without it, which is stale (Rule 01a115cd-c53c-…).
@@ -109,8 +117,30 @@ function validateEvidenceProvenance(input: unknown, path: string, v: Validator):
 			v.string(value, jsonPointer(`${path}/versions`, key), true)
 	}
 	if (Object.hasOwn(provenance, 'productKit')) validateProductKitProvenance(provenance.productKit, `${path}/productKit`, v)
+	if (Object.hasOwn(provenance, 'adapters')) validateEvidenceAdapters(provenance.adapters, `${path}/adapters`, v)
 	if (Object.hasOwn(provenance, 'renderInputDigest')) validateDigest(provenance.renderInputDigest, `${path}/renderInputDigest`, v)
 	if (Object.hasOwn(provenance, 'gitCommit')) v.string(provenance.gitCommit, `${path}/gitCommit`, true)
+}
+
+/**
+ * Clause 01a1161c-008a-746d-8d53-a8301b23588f: each entry has the Handoff entry's members but
+ * `moduleIdentity` (`EvidenceAdapterProvenance`), and each Adapter ID appears once.
+ */
+function validateEvidenceAdapters(input: unknown, path: string, v: Validator): void {
+	const adapters = v.array(input, path)
+	if (!adapters) return
+	const seen = new Set<string>()
+	adapters.forEach((value, index) => {
+		const entryPath = jsonPointer(path, index)
+		const entry = v.object(value, entryPath)
+		if (!entry) return
+		rejectUnknownKeys(entry, ['moduleSpecifier', 'adapterId', 'apiVersion', 'packageVersion', 'contentDigest', 'configDigest'], entryPath, v)
+		validateAdapterProvenanceMembers(entry, entryPath, v)
+		if (typeof entry.adapterId !== 'string') return
+		if (seen.has(entry.adapterId))
+			v.issue('evidence.duplicate_adapter', `${entryPath}/adapterId`, `Adapter ${entry.adapterId} is recorded more than once.`)
+		seen.add(entry.adapterId)
+	})
 }
 
 function positiveInteger(value: unknown, path: string, v: Validator): void {

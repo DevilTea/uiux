@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import packageJson from '../../../package.json' with { type: 'json' }
 import { canonicalJsonBytes } from '../../domain/canonical-json'
 import { sha256Identity } from '../../domain/artifacts/schema'
-import { adapterConfigDigest, type AdapterProvenance, type AdapterWidgetCatalogEntry } from '../../domain/adapters/schema'
+import { type AdapterProvenance, type AdapterWidgetCatalogEntry } from '../../domain/adapters/schema'
 import { validateAssetBinding } from '../../domain/assets/schema'
 import {
 	validateFormalEvidenceRecord,
@@ -33,15 +33,12 @@ import type { Diagnostic, JsonObject } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
 import { workspaceRefusalMessage } from '../../persistence/schema-policy'
 import {
-	adapterResolutionBase,
 	allThemesSupported,
-	NodeAdapterManifestLoader,
-	NodeWorkspaceAdapterModuleResolver,
-	resolveWorkspaceAdapterSet,
 	type AdapterSetResolutionResult,
 	type ValidatedAdapterSet,
 } from '../../adapters/resolution'
-import { adapterGraphDigest } from '../../adapters/adapter-graph-digest'
+import { adapterFreshnessContext } from '../../domain/evidence/adapter-provenance'
+import { adapterEntryProvenance, adapterSetEvidenceProvenance, resolveProductKitAdapterSet, type AdapterGraphDigestCache } from './adapter-provenance'
 import { bareSpecifierPackageName } from '../../adapters/kit-dependencies'
 import { resolveKitPackage } from '../../adapters/kit-packages'
 import { locateKitProject, type KitProject } from '../../adapters/kit-registry'
@@ -50,11 +47,6 @@ import { componentDigest } from '../../domain/product-kit/digest'
 import { PRODUCT_KIT_RESOURCE_KEY, PRODUCT_KIT_RESOURCE_KIND, validateProductKit, type ProductKit } from '../../domain/product-kit/schema'
 import { productKitFreshnessContext, type ProductKitProvenance } from '../../domain/product-kit/provenance'
 import { readCurrentProductKitProvenance } from './product-kit-provenance'
-import {
-	extractProductAdapterManifest,
-	productAdapterApiCompatibility,
-	productAdapterRegistryInspector,
-} from '../../adapters/product-integration'
 import { collectWidgetTypesFromIr } from '../../preview/preview-runtime'
 import { deriveReviewResolution, isWorkspaceAnchor, REVIEW_RESOLUTIONS, type ReviewResolution } from '../../domain/reviews/schema'
 
@@ -248,7 +240,6 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		// The Adapter list is the Product Kit file's, and a `./` Adapter resolves from `kit/` (Clauses
 		// 01a1144e-538e-705f-afdc-841028c410e4 and 01a115cd-d109-76d3-9622-85d0080c60b6).
 		const workspaceAdapters = (await persistence.productKit.read())?.resource.adapters ?? []
-		const adapterModuleResolver = () => new NodeWorkspaceAdapterModuleResolver({ layout: persistence.layout })
 
 		const viewsToInclude = new Set<string>()
 		const flowsToInclude = new Set<string>()
@@ -387,14 +378,7 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		if (nonRootWidgetTypes.size > 0 && rawAdaptersForAssetDiscovery.length > 0) {
 			for (const selection of rawAdaptersForAssetDiscovery) {
 				try {
-					const single = await resolveWorkspaceAdapterSet({
-						workspaceRoot: persistence.root,
-						adapters: [selection],
-						resolver: adapterModuleResolver(),
-						loader: new NodeAdapterManifestLoader(extractProductAdapterManifest),
-						apiCompatibility: productAdapterApiCompatibility,
-						registryInspector: productAdapterRegistryInspector,
-					})
+					const single = await resolveProductKitAdapterSet(persistence, [selection])
 					if (single.state !== 'valid' || !single.set.entries[0]) continue
 					const entry = single.set.entries[0]
 					for (const widgetType of entry.ownership.widgetTypes) {
@@ -577,6 +561,18 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 			const localeRead = await persistence.locales.readInspected(locale)
 			if (localeRead?.resource) currentLocaleRevisions[locale] = localeRead.revision
 		}
+		// The active Adapter set, resolved once: Evidence freshness compares its provenance (Rule
+		// 01a115cd-c6de-…), and step 8 records it. Each Adapter's module graph is digested once.
+		let adaptersResolution: AdapterSetResolutionResult = {
+			state: 'valid',
+			diagnostics: [],
+			summaries: [],
+			set: Object.freeze({ entries: Object.freeze([]), [Symbol.for('ValidatedAdapterSet')]: true }) as never,
+			themeSupport: allThemesSupported(),
+		}
+		if (workspaceAdapters.length > 0) adaptersResolution = await resolveProductKitAdapterSet(persistence, workspaceAdapters)
+		const adapterDigests: AdapterGraphDigestCache = new Map()
+		const currentAdapters = await adapterSetEvidenceProvenance(persistence, adaptersResolution, adapterDigests)
 		// 7. Evidence Records in closure
 		const evidenceRefs: EvidenceReference[] = []
 		const contextsInClosure: ResolvedRenderContext[] = []
@@ -601,6 +597,7 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 					discoveredLocales: Object.keys(currentLocaleRevisions),
 					localeRevisions: currentLocaleRevisions,
 					...productKitFreshnessContext(currentProductKit),
+					...adapterFreshnessContext(currentAdapters),
 				})
 
 				if (!staleness.isStale) {
@@ -697,27 +694,10 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		// order, including Adapters that provide no Widget type the closure uses, so the whole active set is
 		// resolved, as every other surface resolves it. An invalid set yields no partial set of sources or
 		// provenance (Rule 01a115cd-aef9-7b93-9619-96196f63cfde) and blocks, since the bundle cannot record it.
-		let adaptersResolution: AdapterSetResolutionResult = {
-			state: 'valid',
-			diagnostics: [],
-			summaries: [],
-			set: Object.freeze({ entries: Object.freeze([]), [Symbol.for('ValidatedAdapterSet')]: true }) as never,
-			themeSupport: allThemesSupported(),
-		}
-
-		if (workspaceAdapters.length > 0) {
-			adaptersResolution = await resolveWorkspaceAdapterSet({
-				workspaceRoot: persistence.root,
-				adapters: workspaceAdapters,
-				resolver: adapterModuleResolver(),
-				loader: new NodeAdapterManifestLoader(extractProductAdapterManifest),
-				apiCompatibility: productAdapterApiCompatibility,
-				registryInspector: productAdapterRegistryInspector,
-			})
-			if (adaptersResolution.state === 'invalid') {
-				closureValid = false
-				blockingDiagnostics.push(...adaptersResolution.diagnostics.map(diagnostic => ({ code: diagnostic.code, message: diagnostic.message, path: diagnostic.path, blocking: true })))
-			}
+		// The set was resolved before step 7.
+		if (adaptersResolution.state === 'invalid') {
+			closureValid = false
+			blockingDiagnostics.push(...adaptersResolution.diagnostics.map(diagnostic => ({ code: diagnostic.code, message: diagnostic.message, path: diagnostic.path, blocking: true })))
 		}
 
 		// The server-side runtime check of the Adapters (Clause 01a116f0-cae2-7c64-9c76-d472f252789a):
@@ -742,17 +722,12 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		if (adaptersResolution.state === 'valid') {
 			for (const entry of adaptersResolution.set.entries) {
 				// Clause 01a115cd-d7f6-74a1-ba9f-c20a24a31ae5: the content digest covers the Adapter's whole
-				// bundled module graph (its imports, stylesheets and assets), not only its entry module.
-				const contentDigest = await adapterGraphDigest({
-					workspaceRoot: persistence.root,
-					moduleBase: adapterResolutionBase(persistence.root, persistence.layout),
-					entry: entry.resolvedModule.resolvedPath,
-				})
-				// The same clause: the digest of the entry's validated configuration, absent when it has none.
-				const configDigest = await adapterConfigDigest(entry.selection.config)
+				// bundled module graph (its imports, stylesheets and assets), not only its entry module, and the
+				// configuration digest the entry's validated configuration.
+				const provenance = await adapterEntryProvenance(persistence, entry, adapterDigests)
 				// The same clause requires a package version or a content digest: an Adapter with neither has no
 				// verifiable identity to record, so the bundle cannot record it and the closure is invalid.
-				if (!entry.resolvedModule.packageVersion && !contentDigest) {
+				if (!provenance) {
 					closureValid = false
 					blockingDiagnostics.push({
 						code: 'handoff.adapter_provenance_unverifiable',
@@ -775,15 +750,7 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 					// could not read local file
 				}
 
-				adapterProvenances.push({
-					moduleSpecifier: entry.selection.moduleSpecifier,
-					adapterId: entry.manifest.id,
-					apiVersion: entry.manifest.apiVersion,
-					moduleIdentity: entry.resolvedModule.moduleIdentity,
-					...(entry.resolvedModule.packageVersion ? { packageVersion: entry.resolvedModule.packageVersion } : {}),
-					...(contentDigest ? { contentDigest } : {}),
-					...(configDigest ? { configDigest } : {}),
-				})
+				adapterProvenances.push(provenance)
 			}
 		}
 

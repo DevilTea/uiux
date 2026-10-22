@@ -227,6 +227,9 @@
       "productKitChanged": "擷取後 Product Kit 已變更。",
       "noProductKit": "這筆紀錄沒有記錄擷取時的 Product Kit，因此無法判斷是否最新。請重新擷取。",
       "productKitUnavailable": "目前的 Product Kit 無法完整讀取，因此無法判斷這筆擷取是否最新。",
+      "adapterChanged": "擷取後 Adapter 已變更：清單、順序、程式碼或設定有所不同。",
+      "noAdapters": "這筆紀錄沒有記錄擷取時的 Adapter，因此無法判斷是否最新。請重新擷取。",
+      "adaptersUnavailable": "目前的 Adapter 無法完整解析，因此無法判斷這筆擷取是否最新。",
       "other": "已與目前的 Workspace 不一致。"
     },
     "thumbAlt": "{view} 的擷取畫面，{context}",
@@ -2319,6 +2322,7 @@
       "stream_limit": "這個瀏覽器的即時更新連線數已達上限。此分頁改為定期檢查變更。"
     },
     "evidence": {
+      "duplicate_adapter": "Evidence 重複記錄了同一個 Adapter。",
       "invalid_coverage": "Evidence 的涵蓋範圍紀錄無效。",
       "missing_uiux_version": "Evidence 沒有記錄 UIUX 版本。",
       "parallel_identity_forbidden": "Evidence 只能以內容摘要識別。"
@@ -2434,6 +2438,7 @@
       "evidence_not_found": "所選的 Evidence 不存在。",
       "evidence_not_record": "所選的項目不是 Evidence 紀錄。",
       "evidence_unreadable": "無法讀取所選的 Evidence。",
+      "formal_evidence_freshness_unknown": "無法判斷所選的 Evidence 是否最新，請重新擷取。",
       "formal_evidence_not_current": "所選的 Evidence 已過時，請重新擷取。",
       "history_status_mismatch": "Review 的狀態與其歷程不一致。",
       "invalid_anchor_scope": "留言必須位於 View 或 Workspace 上。",

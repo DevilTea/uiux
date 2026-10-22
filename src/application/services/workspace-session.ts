@@ -86,6 +86,8 @@ import {
 import { createProductKitChecksService, type ProductKitChecksResult } from './product-kit-checks'
 import { readCurrentProductKitProvenance } from './product-kit-provenance'
 import type { CurrentProductKitProvenance } from '../../domain/product-kit/provenance'
+import { readCurrentAdapterProvenance } from './adapter-provenance'
+import type { CurrentAdapterProvenance } from '../../domain/evidence/adapter-provenance'
 import {
 	createHandoffExportService,
 	type AdapterSetRuntimeCheck,
@@ -202,6 +204,8 @@ export interface WorkspaceApplicationSession {
 	runProductKitChecks(command?: Readonly<{ readSource?: boolean }>): Promise<ProductKitChecksResult>
 	/** The current Product Kit provenance, against which Evidence freshness is judged (Rules 01a11bb1-be4a-… and 01a1161b-ff68-…). */
 	productKitProvenance(): Promise<CurrentProductKitProvenance>
+	/** The current Adapter provenance, against which Evidence freshness is judged (Rules 01a115cd-c6de-… and 01a1161b-ff68-…). */
+	adapterProvenance(): Promise<CurrentAdapterProvenance>
 	assessHandoffReadiness(command: AssessHandoffReadinessCommand): Promise<AssessHandoffReadinessResult>
 	exportHandoff(command: ExportHandoffCommand): Promise<ExportHandoffResult>
 	readArtifact(identity: string): Promise<Uint8Array | undefined>
@@ -468,6 +472,7 @@ export function createWorkspaceApplicationSession(
 		viewRenderInputs: formalCapture.viewRenderInputs,
 		runProductKitChecks: command => productKitChecks.run({ ...(command?.readSource === false ? { readSource: false } : {}) }),
 		productKitProvenance: () => readCurrentProductKitProvenance(persistence),
+		adapterProvenance: () => readCurrentAdapterProvenance(persistence),
 		assessHandoffReadiness: handoffExport.assessReadiness,
 		exportHandoff: handoffExport.exportHandoff,
 		readArtifact: identity => persistence.artifacts.read(identity),

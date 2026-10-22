@@ -112,6 +112,15 @@ describe('Evidence freshness (R9 acceptance 5)', () => {
 	it('never calls an incomplete run fresh', () => {
 		expect(evidenceFreshness(record({ complete: false }), CURRENT)).toEqual({ state: 'stale', reason: 'incomplete' })
 	})
+
+	it('names an Adapter change as stale, and missing or unavailable Adapter provenance as unknown (issue #57)', () => {
+		const adapter = { moduleSpecifier: './adapters/a.mjs', adapterId: 'a', apiVersion: '1', contentDigest: `sha256:${'a'.repeat(64)}` }
+		const captured: FormalEvidenceRecord = { ...record(), provenance: { ...record().provenance, adapters: [adapter] } }
+		expect(evidenceFreshness(captured, { ...CURRENT, adapters: [adapter] })).toEqual({ state: 'fresh' })
+		expect(evidenceFreshness(captured, { ...CURRENT, adapters: [{ ...adapter, contentDigest: `sha256:${'b'.repeat(64)}` }] })).toEqual({ state: 'stale', reason: 'adapterChanged' })
+		expect(evidenceFreshness(record(), { ...CURRENT, adapters: [adapter] })).toEqual({ state: 'unknown', reason: 'noAdapters' })
+		expect(evidenceFreshness(captured, { ...CURRENT, adaptersUnavailable: true })).toEqual({ state: 'unknown', reason: 'adaptersUnavailable' })
+	})
 })
 
 describe('Explicit capture lists (Part 10)', () => {

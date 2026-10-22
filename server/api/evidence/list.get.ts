@@ -1,4 +1,5 @@
 import { defineEventHandler, getQuery } from 'h3'
+import { adapterFreshnessContext } from '../../../src/domain/evidence/adapter-provenance'
 import { productKitFreshnessContext } from '../../../src/domain/product-kit/provenance'
 import { denyUnlessAllowed } from '../../../src/server/access/http'
 import { requestSession } from '../../../src/server/request-session'
@@ -18,5 +19,8 @@ export default defineEventHandler(async (event) => {
 	// `views`: each View's current render-input digest, with the revision it was read at, so the
 	// Workbench judges the View condition by the digest, not the revision (Rule 01a115cd-c5a5-…).
 	const views = await session.viewRenderInputs()
-	return { items, views, ...productKitFreshnessContext(await session.productKitProvenance()) }
+	// The current Adapter provenance, likewise (Rules 01a115cd-c6de-… and 01a1161b-ff68-…): `adapters`,
+	// every Adapter of the active set in Adapter-list order, or `adaptersUnavailable` when it cannot be computed.
+	const [productKit, adapters] = await Promise.all([session.productKitProvenance(), session.adapterProvenance()])
+	return { items, views, ...productKitFreshnessContext(productKit), ...adapterFreshnessContext(adapters) }
 })

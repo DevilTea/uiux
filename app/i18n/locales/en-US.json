@@ -227,6 +227,9 @@
       "productKitChanged": "The Product Kit changed after capture.",
       "noProductKit": "This record doesn't carry the Product Kit it was captured with, so its freshness can't be judged. Capture it again.",
       "productKitUnavailable": "The current Product Kit can't be read in full, so this capture's freshness can't be judged.",
+      "adapterChanged": "The Adapters changed after capture: their list, order, code or configuration.",
+      "noAdapters": "This record doesn't carry the Adapters it was captured with, so its freshness can't be judged. Capture it again.",
+      "adaptersUnavailable": "The current Adapters can't be resolved in full, so this capture's freshness can't be judged.",
       "other": "It no longer matches the current Workspace."
     },
     "thumbAlt": "Capture of {view}, {context}",
@@ -2319,6 +2322,7 @@
       "stream_limit": "This browser already has the most live-update connections allowed. This tab checks for changes regularly instead."
     },
     "evidence": {
+      "duplicate_adapter": "The Evidence records the same Adapter more than once.",
       "invalid_coverage": "The Evidence coverage record is not valid.",
       "missing_uiux_version": "The Evidence does not record its UIUX version.",
       "parallel_identity_forbidden": "Evidence is identified by its content digest only."
@@ -2434,6 +2438,7 @@
       "evidence_not_found": "The chosen Evidence does not exist.",
       "evidence_not_record": "The chosen item is not an Evidence record.",
       "evidence_unreadable": "The chosen Evidence could not be read.",
+      "formal_evidence_freshness_unknown": "It can't be judged whether the chosen Evidence is current. Capture it again.",
       "formal_evidence_not_current": "The chosen Evidence is out of date. Capture it again.",
       "history_status_mismatch": "The Review status does not match its history.",
       "invalid_anchor_scope": "A comment is on a View or on the Workspace.",

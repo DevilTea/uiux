@@ -100,6 +100,9 @@ describe('GET /api/evidence/list', () => {
 			const parsed = JSON.parse(body) as Record<string, unknown>
 			expect(parsed).toMatchObject({ items: [], productKit: { dataDigest: expect.stringMatching(/^sha256:/), sourceDigest: expect.stringMatching(/^sha256:/), outputDigest: expect.stringMatching(/^sha256:/), designSystems: [] } })
 			expect(parsed.productKitUnavailable).toBeUndefined()
+			// The current Adapter provenance too (Rule 01a115cd-c6de-…): this Workspace's active set is empty.
+			expect(parsed.adapters).toEqual([])
+			expect(parsed.adaptersUnavailable).toBeUndefined()
 		}
 		// Each kit file was read once (41 files), whatever the number of requests.
 		expect(hashed.length).toBe(41)
