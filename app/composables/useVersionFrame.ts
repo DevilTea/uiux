@@ -26,7 +26,8 @@ export function useVersionFrame(options: Readonly<{
 }>) {
 	const sequence = ++frameSequence
 	const previewSessionId = `version-frame-${sequence}-${Date.now()}`
-	const runtimeGenerationId = `gen-${sequence}-${Date.now()}`
+	/** The admitted generation: the frame's runtime names it in its declaration (issue #102). */
+	const runtimeGenerationId = ref<string>()
 	const iframe = ref<HTMLIFrameElement>()
 	const phase = ref<'initiating' | 'open' | 'failed'>('initiating')
 	/** Bumps when a report arrives or goes, so computed consumers re-read `report`. */
@@ -41,14 +42,21 @@ export function useVersionFrame(options: Readonly<{
 			},
 		},
 		declaration => declaration.protocolVersion === 1 ? { ok: true } : { ok: false, reason: 'capability.unsupported_protocol_version' },
+		{
+			// The first document's generation, or a new one after the frame's document reloaded: every
+			// stream of the previous generation is void until the new one's ACK.
+			onGenerationAdmitted(generationId) {
+				runtimeGenerationId.value = generationId
+				phase.value = 'initiating'
+				geometry.setContext({ previewSessionId, runtimeGenerationId: generationId, viewId: options.viewId, ...(options.variantId ? { variantId: options.variantId } : {}) })
+			},
+		},
 	)
-	bridge.admitGeneration(runtimeGenerationId, 'initial')
 	const geometry = new GeometryStreamCoordinator({
 		send: message => { bridge.sendGeometry(message) },
 		requestFrame: callback => requestAnimationFrame(callback),
 		cancelFrame: handle => cancelAnimationFrame(handle),
 	})
-	geometry.setContext({ previewSessionId, runtimeGenerationId, viewId: options.viewId, ...(options.variantId ? { variantId: options.variantId } : {}) })
 	let frame: number | undefined
 	geometry.subscribe(() => {
 		frame ??= requestAnimationFrame(() => {
@@ -74,7 +82,7 @@ export function useVersionFrame(options: Readonly<{
 			syncDemand()
 		}
 		else if (result.status === 'accepted' && result.message.type === 'geometry.acquire.response') geometry.accept(result.message)
-		else if (result.status === 'capability-failure') phase.value = 'failed'
+		else if (result.status === 'capability-failure' || result.status === 'generation-refused') phase.value = 'failed'
 		else if (result.status === 'invalid' && phase.value !== 'open') phase.value = 'failed'
 	}
 

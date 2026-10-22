@@ -107,7 +107,16 @@ export function createPreviewSession(state: WorkbenchState) {
 
 	const previewIframe = ref<HTMLIFrameElement>()
 	const previewSessionId = ref(`session-${Date.now()}`)
-	const runtimeGenerationId = ref(`gen-${Date.now()}`)
+	/**
+	 * The admitted runtime generation. The runtime mints its ID and names it in its first
+	 * declaration; until one is admitted there is none (Clause 01a1161c-4119-712d-8785-7d8155c0ceee).
+	 */
+	const runtimeGenerationId = ref<string>()
+	/**
+	 * Bumps for every Preview document the Workbench requests, and is part of the document URL, so a
+	 * request for the same View still loads a new document. It never names the generation.
+	 */
+	const documentSequence = ref(0)
 	const handshakePhase = ref<Exclude<SessionPhase, 'idle'>>('initiating')
 	/** True once any generation of this session completed its handshake: a later loss reads "Reconnecting". */
 	const hasConnected = ref(false)
@@ -149,7 +158,6 @@ export function createPreviewSession(state: WorkbenchState) {
 	let commentEscapeHandler: (() => boolean) | undefined
 	/** The Checks/selection highlight request; its reports may update the selection overlay. */
 	let selectionTarget: PreviewNavigationTarget | undefined
-	let generationSequence = 0
 	let interactionSequence = 0
 	const targeting = new PreviewTargetingState<{ widgetId: string }>()
 	let armSequence = 0
@@ -158,7 +166,7 @@ export function createPreviewSession(state: WorkbenchState) {
 	 * while no targeting interaction is active, so it shares `targetingInteractionId` (decision 6).
 	 */
 	const widgetEvents = new WidgetEventArming({
-		generation: () => runtimeGenerationId.value,
+		generation: () => runtimeGenerationId.value ?? '',
 		open: () => handshakePhase.value === 'open',
 		features: () => runtimeFeatures.value,
 		targetingActive: () => !!targetingInteractionId.value,
@@ -201,9 +209,9 @@ export function createPreviewSession(state: WorkbenchState) {
 	const pinEngine = new PinPlacementEngine()
 
 	/**
-	 * The iframe document is created once per runtime generation. Locale, viewport, theme and
-	 * Variant changes are presentation or state changes sent over the context channel, so they
-	 * never reload the document and never reuse a generation for a new document (Parts 1 and 10).
+	 * The iframe document is one runtime generation. Locale, viewport, theme and Variant changes are
+	 * presentation or state changes sent over the context channel, so they never reload the document,
+	 * and a new document always brings a generation of its own (Parts 1 and 10).
 	 */
 	const iframeSourceContext = shallowRef<IframeSourceContext>()
 
@@ -254,7 +262,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		if (state.loading.value && !state.workspace.value) return ''
 		const params = new URLSearchParams({
 			session: previewSessionId.value,
-			generation: runtimeGenerationId.value,
+			document: String(documentSequence.value),
 			viewId: source.viewId,
 			locale: source.locale,
 			viewportId: source.viewportId,
@@ -274,11 +282,12 @@ export function createPreviewSession(state: WorkbenchState) {
 
 	function targetingContext(): TargetingContext | undefined {
 		const viewId = state.selectedViewId.value
-		if (!viewId) return undefined
+		const generation = runtimeGenerationId.value
+		if (!viewId || !generation) return undefined
 		const variantId = currentVariantId()
 		return {
 			previewSessionId: previewSessionId.value,
-			runtimeGenerationId: runtimeGenerationId.value,
+			runtimeGenerationId: generation,
 			viewId,
 			...(variantId ? { variantId } : {}),
 		}
@@ -328,11 +337,12 @@ export function createPreviewSession(state: WorkbenchState) {
 	/** Keeps the coordinator's runtime context equal to the mounted View, Variant and generation. */
 	function syncGeometryContext(): void {
 		const viewId = state.selectedViewId.value
+		const generation = runtimeGenerationId.value
 		const variantId = currentVariantId()
-		geometryStreams.setContext(viewId
+		geometryStreams.setContext(viewId && generation
 			? {
 					previewSessionId: previewSessionId.value,
-					runtimeGenerationId: runtimeGenerationId.value,
+					runtimeGenerationId: generation,
 					viewId,
 					...(variantId ? { variantId } : {}),
 				}
@@ -596,24 +606,45 @@ export function createPreviewSession(state: WorkbenchState) {
 		return Object.freeze({ widgetId, purpose, ...(geometry ? { geometry } : {}) })
 	})
 
-	/** Starts a fresh runtime generation, e.g. after another View is selected. */
-	function replaceGeneration(): void {
+	/** Ends every per-generation state of the current runtime generation, if any. */
+	function endGeneration(): void {
 		const previousGeneration = runtimeGenerationId.value
-		runtimeGenerationId.value = `gen-${Date.now()}-${++generationSequence}`
-		captureIframeSourceContext()
+		runtimeGenerationId.value = undefined
 		runtimeFeatures.value = []
 		widgetEvents.onGenerationBoundary()
-		targeting.onGenerationTeardown(previousGeneration)
+		if (previousGeneration) targeting.onGenerationTeardown(previousGeneration)
 		hoverWidgetId.value = undefined
 		hoverPurpose.value = undefined
 		navigationCoordinator?.onRuntimeGenerationBoundary()
 		resetSelectionGeometry()
 		// Generation boundary: every stream is void until the new generation's capability ACK.
 		syncGeometryContext()
+	}
+
+	/**
+	 * Starts a fresh runtime generation, e.g. after another View is selected: the Workbench retires
+	 * the current one and loads a new document, whose runtime names the new generation.
+	 */
+	function replaceGeneration(): void {
+		documentSequence.value++
+		captureIframeSourceContext()
+		endGeneration()
 		if (workbenchBridge) {
-			workbenchBridge.replaceGenerationForLifecycle(runtimeGenerationId.value, 'reload')
+			workbenchBridge.retireGeneration()
 			handshakePhase.value = 'initiating'
 		}
+	}
+
+	/**
+	 * The runtime's declaration named a generation the session never saw, and the bridge admitted
+	 * it. When a generation is still current, the document reloaded or its runtime restarted on its
+	 * own: that generation is retired, and nothing of it carries over (issue #102).
+	 */
+	function onGenerationAdmitted(generationId: string): void {
+		if (runtimeGenerationId.value) endGeneration()
+		runtimeGenerationId.value = generationId
+		syncGeometryContext()
+		handshakePhase.value = 'initiating'
 	}
 
 	/** "Retry" on a stopped or stuck session: a fresh runtime generation and iframe document. */
@@ -637,8 +668,8 @@ export function createPreviewSession(state: WorkbenchState) {
 				declaration => declaration.protocolVersion === 1
 					? { ok: true }
 					: { ok: false, reason: 'capability.unsupported_protocol_version' },
+				{ onGenerationAdmitted },
 			)
-			workbenchBridge.admitGeneration(runtimeGenerationId.value, 'initial')
 			navigationCoordinator = new PreviewNavigationState({
 				viewId: state.selectedViewId.value || '',
 				selectedWidgetId: state.selectedWidgetId.value,
@@ -659,7 +690,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		if (contextDiffersFromSource()) notifyIframeContext()
 		syncGeometryContext()
 		geometryStreams.setMultiTarget(features.includes(MULTI_TARGET_GEOMETRY_FEATURE))
-		targeting.markGenerationReady(runtimeGenerationId.value)
+		if (runtimeGenerationId.value) targeting.markGenerationReady(runtimeGenerationId.value)
 		// The new document knows no targeting interaction yet: enter a fresh one for the current tool.
 		applyToolInteraction()
 		// Declare the selection first so its own request identity opens the Widget's stream once.
@@ -750,6 +781,11 @@ export function createPreviewSession(state: WorkbenchState) {
 			else if (message.type === 'targeting.hover' || message.type === 'targeting.select' || message.type === 'targeting.escape') receiveTargeting(message)
 			else if (message.type === 'widget.event.occurrence') widgetEvents.receive(message)
 		}
+		else if (result.status === 'generation-refused') {
+			// Recovery is exhausted: the new document's generation is retired unacknowledged.
+			if (runtimeGenerationId.value) endGeneration()
+			handshakePhase.value = 'failed'
+		}
 		else if (result.status === 'capability-failure') handshakePhase.value = 'failed'
 		else if (result.status === 'invalid' && handshakePhase.value !== 'open') handshakePhase.value = 'failed'
 	}
@@ -826,6 +862,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		previewIframeSrc,
 		previewSessionId,
 		runtimeGenerationId,
+		documentSequence,
 		sessionPhase,
 		sessionStatus,
 		runtimeFeatures,

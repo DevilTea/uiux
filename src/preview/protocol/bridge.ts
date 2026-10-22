@@ -38,7 +38,17 @@ export type BridgeReceiveResult =
 	| Readonly<{ status: 'ack-dispatched'; acknowledgement: CapabilityAckMessage }>
 	| Readonly<{ status: 'capability-failure'; reason: `capability.${string}` }>
 	| Readonly<{ status: 'capability-conflict' | 'gated' | 'stale-session' | 'stale-generation' | 'wrong-direction' }>
+	| Readonly<{ status: 'generation-refused'; generationId: string }>
 	| Readonly<{ status: 'invalid'; diagnostics: readonly Diagnostic[] }>
+
+export type WorkbenchBridgeHooks = Readonly<{
+	/**
+	 * A declaration named a generation this session never saw, and the Workbench admitted it: the
+	 * runtime started a new Preview document or restarted. Called before the declaration is judged
+	 * and acknowledged, so the caller ends every per-generation state of the previous one first.
+	 */
+	onGenerationAdmitted?(generationId: string): void
+}>
 
 export type BridgeSendResult =
 	| Readonly<{ status: 'sent' }>
@@ -49,16 +59,25 @@ export class WorkbenchPreviewProtocolBridge {
 	private readonly session: PreviewProtocolSession
 	private readonly transport: PreviewProtocolTransport
 	private readonly evaluateCapabilities: (declaration: CapabilityDeclareMessage['payload']) => CapabilityCompatibility
+	private readonly hooks: WorkbenchBridgeHooks
 	private ackDispatchedGenerationId?: string
 
+	/**
+	 * The runtime mints every generation ID (Clause 01a1161c-4119-712d-8785-7d8155c0ceee): the
+	 * Workbench admits a generation when its first declaration arrives, and a declaration naming an
+	 * unseen ID replaces the current generation. `admitGeneration` remains for callers that already
+	 * know the runtime's ID.
+	 */
 	constructor(
 		previewSessionId: string,
 		transport: PreviewProtocolTransport,
 		evaluateCapabilities: (declaration: CapabilityDeclareMessage['payload']) => CapabilityCompatibility,
+		hooks: WorkbenchBridgeHooks = {},
 	) {
 		this.session = new PreviewProtocolSession(previewSessionId)
 		this.transport = transport
 		this.evaluateCapabilities = evaluateCapabilities
+		this.hooks = hooks
 	}
 
 	admitGeneration(generationId: string, cause: GenerationAdmissionCause): GenerationAdmissionResult {
@@ -73,12 +92,22 @@ export class WorkbenchPreviewProtocolBridge {
 		return result
 	}
 
+	/**
+	 * The Workbench replaces the Preview document: the current generation ends and its ID is retired
+	 * for the rest of the session, so nothing of it is ever acknowledged or accepted again.
+	 */
+	retireGeneration(): void {
+		this.session.retireCurrentGeneration()
+		this.ackDispatchedGenerationId = undefined
+	}
+
 	receive(input: unknown): BridgeReceiveResult {
 		const type = messageType(input)
 		if (type === 'capability.ack') return { status: 'wrong-direction' }
 		// Correlation before the full decode: a stale envelope is discarded whatever its type or
 		// payload, so an undecodable message of a retired generation never fails the current one.
-		const stale = this.staleCorrelation(input)
+		// A declaration may name a generation not seen yet; only a retired one is stale.
+		const stale = type === 'capability.declare' ? this.staleDeclaration(input) : this.staleCorrelation(input)
 		if (stale) return { status: stale }
 		if (type === 'capability.declare') return this.receiveCapabilityDeclaration(input)
 		if (isTargetingMessageType(type)) {
@@ -155,6 +184,17 @@ export class WorkbenchPreviewProtocolBridge {
 		if (decoded.value.type !== 'capability.declare') return { status: 'wrong-direction' }
 		if (decoded.value.context.previewSessionId !== this.session.previewSessionId) return { status: 'stale-session' }
 
+		const generationId = decoded.value.context.runtimeGenerationId
+		const known = this.session.classifyGeneration(generationId)
+		// A retired generation is never revived (Clause 01a1161c-4154-7de9-9dc5-622d21438a47).
+		if (known === 'retired') return { status: 'stale-generation' }
+		if (known === 'unseen') {
+			const admission = this.session.admitDeclaredGeneration(generationId)
+			this.ackDispatchedGenerationId = undefined
+			if (admission.status !== 'admitted') return { status: 'generation-refused', generationId }
+			this.hooks.onGenerationAdmitted?.(generationId)
+		}
+
 		const result = this.session.receiveCapabilityDeclaration(
 			decoded.value.context.runtimeGenerationId,
 			decoded.value.payload,
@@ -184,6 +224,15 @@ export class WorkbenchPreviewProtocolBridge {
 			throw new Error('Capability ACK dispatch must commit the matching Workbench handshake state.')
 		this.ackDispatchedGenerationId = decoded.value.context.runtimeGenerationId
 		return { status: 'ack-dispatched', acknowledgement }
+	}
+
+	/** A declaration is stale when its session is not this one or its generation is retired. */
+	private staleDeclaration(input: unknown): 'stale-session' | 'stale-generation' | undefined {
+		const correlation = envelopeCorrelation(input)
+		if (!correlation) return undefined
+		if (correlation.previewSessionId !== this.session.previewSessionId) return 'stale-session'
+		if (correlation.runtimeGenerationId === undefined) return undefined
+		return this.session.classifyGeneration(correlation.runtimeGenerationId) === 'retired' ? 'stale-generation' : undefined
 	}
 
 	private staleCorrelation(input: unknown): 'stale-session' | 'stale-generation' | undefined {

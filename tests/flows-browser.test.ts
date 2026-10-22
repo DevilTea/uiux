@@ -95,13 +95,19 @@ async function open(path: string, size: { width: number; height: number } = { wi
 	return { context, page }
 }
 
+/** The generation the Workbench admitted from the current document's declaration; '' while there is none. */
 async function generation(page: Page): Promise<string> {
+	return await page.locator('iframe[src*="/preview"]').getAttribute('data-runtime-generation') ?? ''
+}
+
+/** The Workbench's request number of the current Preview document (it never names the generation). */
+async function documentNumber(page: Page): Promise<string> {
 	const src = await page.locator('iframe[src*="/preview"]').getAttribute('src')
-	return new URL(src ?? '', server.origin).searchParams.get('generation') ?? ''
+	return new URL(src ?? '', server.origin).searchParams.get('document') ?? ''
 }
 
 async function waitForGenerationChange(page: Page, previous: string): Promise<string> {
-	await expect.poll(() => generation(page), { timeout: 15_000 }).not.toBe(previous)
+	await expect.poll(async () => { const current = await generation(page); return !!current && current !== previous }, { timeout: 15_000 }).toBe(true)
 	const frame = await (await page.waitForSelector('iframe[src*="/preview"]')).contentFrame()
 	await frame?.waitForSelector('[data-preview-ready="true"]', { state: 'attached', timeout: 15_000 })
 	return generation(page)
@@ -338,7 +344,8 @@ describe('Prototype player (R11, Discussion #6 item 6)', () => {
 			await page.waitForSelector('[data-session-status][data-status="live"]', { timeout: 15_000 })
 			const src = new URL(await page.locator('iframe[src*="/preview"]').getAttribute('src') ?? '', server.origin)
 			const previewSessionId = src.searchParams.get('session') ?? ''
-			const replacedFrame = page.frames().find(frame => frame.url().includes(`generation=${replaced}`))
+			const replacedDocument = await documentNumber(page)
+			const replacedFrame = page.frames().find(frame => frame.url().includes('/preview') && new URL(frame.url()).searchParams.get('document') === replacedDocument)
 			if (!replacedFrame) throw new Error('The acknowledged generation has no Preview frame.')
 
 			// Hold the next document, so the replaced one stays in the iframe during the new handshake.
@@ -346,7 +353,7 @@ describe('Prototype player (R11, Discussion #6 item 6)', () => {
 			const held = new Promise<void>((resolve) => { release = resolve })
 			let requested = () => {}
 			const nextRequested = new Promise<void>((resolve) => { requested = resolve })
-			await page.route(url => url.pathname === '/preview' && url.searchParams.get('generation') !== replaced, async (route) => {
+			await page.route(url => url.pathname === '/preview' && url.searchParams.get('document') !== replacedDocument, async (route) => {
 				requested()
 				await held
 				await route.continue()

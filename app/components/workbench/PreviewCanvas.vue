@@ -719,6 +719,7 @@ function switchToBase(): void {
               <iframe
                 :ref="(element) => { preview.previewIframe.value = (element as HTMLIFrameElement | null) ?? undefined }"
                 :src="preview.previewIframeSrc.value"
+                :data-runtime-generation="preview.runtimeGenerationId.value"
                 class="block border-0 bg-transparent"
                 :style="{ width: `${dims.width}px`, height: `${dims.height}px` }"
                 :title="iframeTitle"

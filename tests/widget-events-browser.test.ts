@@ -94,9 +94,9 @@ async function open(path: string, options: Readonly<{ width?: number; height?: n
 	return { context, page }
 }
 
+/** The generation the Workbench admitted from the current document's declaration; '' while there is none. */
 async function generation(page: Page): Promise<string> {
-	const src = await page.locator('iframe[src*="/preview"]').getAttribute('src')
-	return new URL(src ?? '', server.origin).searchParams.get('generation') ?? ''
+	return await page.locator('iframe[src*="/preview"]').getAttribute('data-runtime-generation') ?? ''
 }
 
 async function frameOf(page: Page): Promise<Frame> {
@@ -108,7 +108,7 @@ async function frameOf(page: Page): Promise<Frame> {
 }
 
 async function waitForGenerationChange(page: Page, previous: string): Promise<string> {
-	await expect.poll(() => generation(page), { timeout: 15_000 }).not.toBe(previous)
+	await expect.poll(async () => { const current = await generation(page); return !!current && current !== previous }, { timeout: 15_000 }).toBe(true)
 	await frameOf(page)
 	return generation(page)
 }
