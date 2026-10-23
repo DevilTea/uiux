@@ -64,6 +64,8 @@ watch(() => !!access.session.value, (signedIn) => {
 	else live.stop()
 }, { immediate: true })
 live.onResources((batch) => { void workbench.applyLiveChanges(batch) })
+// A restarted server ends the Preview session: the canvas starts a new one before geometry resumes.
+live.onServerRestart(() => { workbench.preview.renewSession() })
 live.onLocks(() => { void access.refreshLocks() })
 live.onAccess(() => {
 	accessEpoch.value += 1

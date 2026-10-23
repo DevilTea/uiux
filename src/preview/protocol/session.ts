@@ -28,6 +28,7 @@ export type CapabilityAcknowledgementResult =
 
 export type RetryAuthorizationResult = 'authorized' | 'coalesced' | 'ignored-active-bootstrap' | 'not-eligible'
 export type RetryRevocationResult = 'revoked' | 'none'
+export type AutomaticRecoveryResult = 'started' | 'not-eligible'
 export type TrafficGateResult = 'open' | 'gated' | 'stale-session' | 'stale-generation'
 
 export type PreviewProtocolSessionSnapshot = Readonly<{
@@ -38,6 +39,8 @@ export type PreviewProtocolSessionSnapshot = Readonly<{
 	automaticRecoveryUsed: boolean
 	recoveryNeeded: boolean
 	recoveryExhausted: boolean
+	/** The Workbench started the automatic recovery attempt and no generation of it is admitted yet. */
+	automaticRecoveryPending: boolean
 	retryAuthorizationPending: boolean
 }>
 
@@ -62,6 +65,7 @@ export class PreviewProtocolSession {
 	private automaticRecoveryUsed = false
 	private recoveryNeeded = false
 	private recoveryExhausted = false
+	private automaticRecoveryPending = false
 	private retryAuthorizationPending = false
 
 	constructor(previewSessionId: string) {
@@ -88,10 +92,14 @@ export class PreviewProtocolSession {
 				return { status: 'invalid_state', generationId }
 		}
 		else if (cause === 'automatic-recovery') {
-			if (!this.recoveryNeeded || this.automaticRecoveryUsed || this.recoveryExhausted)
-				return { status: 'invalid_state', generationId }
-			this.automaticRecoveryUsed = true
-			this.recoveryNeeded = false
+			// The attempt the Workbench started already spent the allowance.
+			if (this.automaticRecoveryPending) this.automaticRecoveryPending = false
+			else {
+				if (!this.recoveryNeeded || this.automaticRecoveryUsed || this.recoveryExhausted)
+					return { status: 'invalid_state', generationId }
+				this.automaticRecoveryUsed = true
+				this.recoveryNeeded = false
+			}
 			recoveryAttempt = 'automatic'
 		}
 		else if (cause === 'explicit-retry') {
@@ -102,6 +110,10 @@ export class PreviewProtocolSession {
 			this.retryAuthorizationPending = false
 			this.recoveryNeeded = false
 			recoveryAttempt = 'explicit'
+		}
+		else if (this.automaticRecoveryPending) {
+			this.automaticRecoveryPending = false
+			recoveryAttempt = 'automatic'
 		}
 		else if (this.recoveryNeeded) {
 			if (this.automaticRecoveryUsed) {
@@ -137,10 +149,12 @@ export class PreviewProtocolSession {
 	 * 01a1161c-4339-7614-ba65-6f21e37cd1a0). The first generation of the session is `initial`.
 	 * While no generation is current and an explicit retry is authorized, the next declared
 	 * generation is that retry and spends the authorization (Rules 01a1161c-3cf8-7859-9de8-2b99d22ce8aa
-	 * and 01a1161c-3d31-7a69-9d64-cad14a8071bb).
+	 * and 01a1161c-3d31-7a69-9d64-cad14a8071bb). While the automatic recovery attempt the Workbench
+	 * started is pending, the next declared generation is that attempt (Rule 01a1161c-3bd4-7a91-b50e-d01a857521e5).
 	 */
 	admitDeclaredGeneration(generationId: string): GenerationAdmissionResult {
 		if (this.classifyGeneration(generationId) !== 'unseen') return { status: 'identity_reuse', generationId }
+		if (!this.current && this.automaticRecoveryPending) return this.beginGeneration(generationId, 'automatic-recovery')
 		if (!this.current && this.retiredGenerationIds.size === 0) return this.beginGeneration(generationId, 'initial')
 		if (!this.current && this.retryAuthorizationPending) return this.beginGeneration(generationId, 'explicit-retry')
 		return this.replaceGenerationForLifecycle(generationId, 'reload')
@@ -202,8 +216,54 @@ export class PreviewProtocolSession {
 		return this.current.phase === 'open' ? 'open' : 'gated'
 	}
 
+	/**
+	 * The Workbench starts the one automatic recovery attempt after a protocol-invalid generation
+	 * (Rules 01a1161c-3bd4-7a91-b50e-d01a857521e5 and 01a1161c-3c0e-7274-8112-db507455e0f4). Starting
+	 * it spends the allowance, so a fresh document that fails before any generation of it is admitted
+	 * exhausts recovery as well; the next declared generation is the attempt.
+	 */
+	beginAutomaticRecovery(): AutomaticRecoveryResult {
+		if (this.current || !this.recoveryNeeded || this.automaticRecoveryUsed || this.recoveryExhausted || this.automaticRecoveryPending)
+			return 'not-eligible'
+		this.automaticRecoveryUsed = true
+		this.recoveryNeeded = false
+		this.automaticRecoveryPending = true
+		return 'started'
+	}
+
+	/**
+	 * The Workbench found the Preview document it requested protocol-invalid without the session
+	 * having judged it (an undecodable message before the handshake opened, or a declaration reusing a
+	 * retired generation ID). The current generation, if any, fails as protocol-invalid; when none is
+	 * admitted the failure still counts against the document's runtime, and during the pending
+	 * automatic attempt it exhausts recovery.
+	 */
+	failRequestedDocument(): void {
+		if (this.current) {
+			this.failCurrentGeneration('protocol-invalid')
+			return
+		}
+		if (this.recoveryExhausted) return
+		if (this.automaticRecoveryPending) {
+			this.automaticRecoveryPending = false
+			this.recoveryExhausted = true
+			return
+		}
+		this.recoveryNeeded = true
+	}
+
+	/**
+	 * An explicit retry trigger. While the automatic attempt is pending with no generation of it
+	 * admitted (its document stalled), the trigger abandons that attempt, which exhausts recovery, and
+	 * authorizes an explicit retry instead, so activating Retry Preview is always an explicit retry
+	 * (Rule 01a11687-386c-764f-98fd-cf19dc3d0013).
+	 */
 	authorizeRetry(): RetryAuthorizationResult {
 		if (this.current && this.current.phase !== 'open') return 'ignored-active-bootstrap'
+		if (!this.current && this.automaticRecoveryPending) {
+			this.automaticRecoveryPending = false
+			this.recoveryExhausted = true
+		}
 		if (!this.recoveryExhausted || this.current) return 'not-eligible'
 		if (this.retryAuthorizationPending) return 'coalesced'
 		this.retryAuthorizationPending = true
@@ -231,6 +291,7 @@ export class PreviewProtocolSession {
 			automaticRecoveryUsed: this.automaticRecoveryUsed,
 			recoveryNeeded: this.recoveryNeeded,
 			recoveryExhausted: this.recoveryExhausted,
+			automaticRecoveryPending: this.automaticRecoveryPending,
 			retryAuthorizationPending: this.retryAuthorizationPending,
 		})
 	}
@@ -288,7 +349,29 @@ export class PreviewSessionRegistry {
 		if (!this.active.delete(previewSessionId)) return
 		this.retired.add(previewSessionId)
 	}
+
+	/**
+	 * Opens a Preview session under a fresh ID from `mint`: a candidate that is active or retired is
+	 * never activated, it is discarded and another is minted before the session begins (Rule
+	 * 01a1161c-3b15-7913-acfb-136f0bd365b6). A minter that keeps repeating itself is a Workbench bug.
+	 */
+	openFresh(mint: () => string): PreviewProtocolSession {
+		for (let attempt = 0; attempt < MAX_SESSION_ID_ATTEMPTS; attempt++) {
+			const opened = this.open(mint())
+			if (opened.status === 'opened') return opened.session
+		}
+		throw new Error('Could not mint a Preview session ID that was never used in this Workbench.')
+	}
 }
+
+const MAX_SESSION_ID_ATTEMPTS = 16
+
+/**
+ * The Preview session registry of this Workbench page. Cross-iframe protocol traffic only ever
+ * flows between one Workbench page and its own Preview documents, so the page is the process whose
+ * delayed traffic a reused session ID could be confused with (Discussion #1 c128, c129).
+ */
+export const workbenchPreviewSessions = new PreviewSessionRegistry()
 
 function cloneDeclaration(value: CapabilityDeclareMessage['payload']): CapabilityDeclareMessage['payload'] {
 	return Object.freeze({ protocolVersion: value.protocolVersion, features: Object.freeze([...value.features].sort()) })
