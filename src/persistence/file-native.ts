@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import * as fs from 'node:fs/promises'
+import { hostname } from 'node:os'
 import { basename, dirname, resolve } from 'node:path'
 
 import type { ResourceRevision, RevisionedResourceRead, RevisionConflict } from '../application/dto/revisions'
@@ -15,6 +16,7 @@ import { isCanonicalLocaleFilename, isFullUuid, isJsonValue, isRecord, type Diag
 import { validateReviewThread, type ReviewThread } from '../domain/reviews/schema'
 import { validateViewResource, type ViewResource } from '../domain/views/schema'
 import { validateWorkspaceManifest, type WorkspaceManifest } from '../domain/workspace/schema'
+import { currentBootId, isFromEarlierBoot, recordedOnAnotherHost } from './boot-staleness'
 import { PersistenceError } from './errors'
 import { currentDesignWriteContext, type DesignWriteContext } from './history/write-context'
 import {
@@ -395,10 +397,12 @@ export class FileNativePersistence {
 	 */
 	async withLock<Result>(operation: () => Promise<Result>): Promise<Result> {
 		assertOutsideObserver(this)
+		// Read before the wait budget starts: the first read of a process may take a moment.
+		const bootId = await currentBootId()
 		const deadline = Date.now() + this.lockWaitMilliseconds
 		const leave = await this.gate.enter('exclusive', deadline)
 		try {
-			const release = await this.acquireLock(deadline)
+			const release = await this.acquireLock(deadline, bootId)
 			try {
 				await this.recoverPendingTransactionsUnlocked()
 				return await operation()
@@ -421,11 +425,13 @@ export class FileNativePersistence {
 	 */
 	async withReadLock<Result>(operation: () => Promise<Result>): Promise<Result> {
 		assertOutsideObserver(this)
+		// Read before the wait budget starts: the first read of a process may take a moment.
+		const bootId = await currentBootId()
 		const deadline = Date.now() + this.lockWaitMilliseconds
 		const leave = await this.gate.enter('shared', deadline)
 		let hold: SharedLockHold | undefined
 		try {
-			hold = await this.joinSharedHold(deadline)
+			hold = await this.joinSharedHold(deadline, bootId)
 			return await operation()
 		}
 		finally {
@@ -438,7 +444,7 @@ export class FileNativePersistence {
 		}
 	}
 
-	private async joinSharedHold(deadline: number): Promise<SharedLockHold> {
+	private async joinSharedHold(deadline: number, bootId: string | undefined): Promise<SharedLockHold> {
 		let hold = this.sharedHold
 		if (!hold) {
 			const previousRelease = this.sharedReleasing
@@ -446,7 +452,7 @@ export class FileNativePersistence {
 				holders: 0,
 				ready: (async () => {
 					await previousRelease
-					const release = await this.acquireLock(deadline)
+					const release = await this.acquireLock(deadline, bootId)
 					try {
 						await this.recoverPendingTransactionsUnlocked()
 					}
@@ -1014,17 +1020,36 @@ export class FileNativePersistence {
 		await fs.rm(tombstoneAbsolute, { recursive: true, force: true })
 	}
 
-	private async acquireLock(deadline: number): Promise<() => Promise<void>> {
+	/**
+	 * Takes the cross-process persistence lock: the owner record `{ pid, hostname, token, bootId? }`
+	 * (`bootId` where this process has the host's boot session identifier) is written to a unique
+	 * candidate file and published with an atomic `link` to the lock path, which fails while another
+	 * owner holds it; the returned release removes the lock only while it still names this token.
+	 *
+	 * The lock is a mutual-exclusion marker, not data, so nothing about it is fsynced (issue #321;
+	 * owner ruling 2026-10-23, https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19145490).
+	 * A lock lost in a crash is released, which is right because its owner died in the crash. A lock
+	 * file that does survive a crash, complete, empty or partial, is from an earlier boot, and
+	 * `removeStaleLock` clears it whatever pid it records (see `boot-staleness.ts`). Canonical
+	 * writes and transactions keep all their fsyncs.
+	 *
+	 * The trade-off of the unsynced bytes: after a power loss the lock can survive empty, with no
+	 * boot identifier to compare. It is then judged by its modification time, and if the clock is
+	 * behind at boot (a lagging real-time clock) that time does not lie before the computed boot, so
+	 * the lock is refused as unreadable (`persistence.lock_busy`) until the clock is corrected and it
+	 * falls before the boot time, or someone removes it.
+	 */
+	private async acquireLock(deadline: number, bootId: string | undefined): Promise<() => Promise<void>> {
 		await ensureSafeDirectory(this.root, this.layout.metadataDir)
 		const lockAbsolute = resolveWorkspacePath(this.root, this.layout.lockPath)
-		const lockParent = dirname(lockAbsolute)
 		const token = randomUUID()
+		const record = Buffer.from(JSON.stringify({ pid: process.pid, hostname: hostname(), token, ...(bootId ? { bootId } : {}) }), 'utf8')
 		while (true) {
 			const candidateRelative = this.layout.metadataFilePath(`.persistence-lock-${token}-${randomUUID()}.tmp`)
 			const candidateAbsolute = resolveWorkspacePath(this.root, candidateRelative)
 			let published = false
 			try {
-				await writeSyncedFile(candidateAbsolute, Buffer.from(JSON.stringify({ pid: process.pid, token }), 'utf8'), true)
+				await writeLockCandidate(candidateAbsolute, record)
 				try {
 					await fs.link(candidateAbsolute, lockAbsolute)
 					published = true
@@ -1032,14 +1057,13 @@ export class FileNativePersistence {
 				catch (error) {
 					if (!isAlreadyExists(error)) throw error
 					await fs.rm(candidateAbsolute, { force: true }).catch(() => undefined)
-					if (await this.removeStaleLock(lockAbsolute))
+					if (await this.removeStaleLock(lockAbsolute, bootId))
 						continue
 					if (Date.now() >= deadline)
 						throw lockBusyError()
 					await delay(10)
 					continue
 				}
-				await syncDirectory(lockParent)
 				await fs.rm(candidateAbsolute, { force: true }).catch(() => undefined)
 				return async () => {
 					let owner: { token?: unknown }
@@ -1054,7 +1078,6 @@ export class FileNativePersistence {
 					}
 					if (owner.token !== token) return
 					await fs.rm(lockAbsolute, { force: true })
-					await syncDirectory(lockParent)
 				}
 			}
 			catch (error) {
@@ -1064,7 +1087,6 @@ export class FileNativePersistence {
 						const owner = JSON.parse(await fs.readFile(lockAbsolute, 'utf8')) as { token?: unknown }
 						if (owner.token === token) {
 							await fs.rm(lockAbsolute, { force: true })
-							await syncDirectory(lockParent)
 						}
 					}
 					catch { /* preserve the original acquisition failure */ }
@@ -1074,7 +1096,7 @@ export class FileNativePersistence {
 		}
 	}
 
-	private async removeStaleLock(lockAbsolute: string): Promise<boolean> {
+	private async removeStaleLock(lockAbsolute: string, bootId: string | undefined): Promise<boolean> {
 		let stat: import('node:fs').Stats
 		try { stat = await fs.lstat(lockAbsolute) }
 		catch (error) {
@@ -1083,12 +1105,34 @@ export class FileNativePersistence {
 		}
 		if (!stat.isFile() || stat.isSymbolicLink())
 			throw pathRejected('Persistence lock must be a regular file and must not be a symbolic link.')
-		let owner: { pid?: unknown; token?: unknown }
-		try { owner = JSON.parse(await fs.readFile(lockAbsolute, 'utf8')) as { pid?: unknown; token?: unknown } }
+		// The record and the modification time come from one open file, never following a link.
+		let bytes: string
+		let written: import('node:fs').Stats
+		try {
+			const handle = await fs.open(lockAbsolute, constants.O_RDONLY | constants.O_NOFOLLOW)
+			try {
+				written = await handle.stat()
+				bytes = await handle.readFile('utf8')
+			}
+			finally { await handle.close() }
+		}
 		catch (cause) {
 			if (isNotFound(cause)) return true
 			throw new PersistenceError('persistence.lock_busy', 'Persistence lock owner record is unreadable; refusing to remove it automatically.', { cause })
 		}
+		let owner: { pid?: unknown; token?: unknown } | undefined
+		let unparsable: unknown
+		try { owner = JSON.parse(bytes) as { pid?: unknown; token?: unknown } }
+		catch (cause) { unparsable = cause }
+		// Neither the boot nor the pid of another host can be checked here: its lock stays held.
+		if (recordedOnAnotherHost(owner)) return false
+		// No process from an earlier boot still runs, so its lock is stale whatever pid or bytes it records.
+		if (isFromEarlierBoot(owner, written, bootId)) {
+			await fs.rm(lockAbsolute, { force: true })
+			return true
+		}
+		if (owner === undefined || typeof owner !== 'object' || owner === null)
+			throw new PersistenceError('persistence.lock_busy', 'Persistence lock owner record is unreadable; refusing to remove it automatically.', { cause: unparsable })
 		if (typeof owner.pid !== 'number' || !Number.isInteger(owner.pid) || typeof owner.token !== 'string' || !isFullUuid(owner.token))
 			throw new PersistenceError('persistence.lock_busy', 'Persistence lock owner record is invalid; refusing to remove it automatically.')
 		try {
@@ -1098,7 +1142,6 @@ export class FileNativePersistence {
 		catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return false
 			await fs.rm(lockAbsolute, { force: true })
-			await syncDirectory(dirname(lockAbsolute))
 			return true
 		}
 	}
@@ -2362,6 +2405,21 @@ async function makeDirectorySynced(absoluteDirectory: string): Promise<void> {
 		const parent = dirname(directory)
 		await syncDirectory(parent)
 		if (parent === top || parent === directory) break
+	}
+}
+
+/**
+ * Writes a persistence lock candidate exclusively, like {@link writeSyncedFile} but with no fsync of
+ * the file or its directory (see `acquireLock`). A missing Workspace root is still created durably.
+ */
+async function writeLockCandidate(absolutePath: string, bytes: Uint8Array): Promise<void> {
+	await makeDirectorySynced(dirname(absolutePath))
+	const handle = await fs.open(absolutePath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
+	try {
+		await handle.writeFile(bytes)
+	}
+	finally {
+		await handle.close()
 	}
 }
 

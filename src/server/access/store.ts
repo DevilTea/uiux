@@ -1,9 +1,10 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { constants, realpathSync, type Stats } from 'node:fs'
 import { chmod, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { homedir, hostname } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
+import { currentBootId, isFromEarlierBoot, recordedOnAnotherHost } from '../../persistence/boot-staleness'
 import type { HostHistoryPaths } from '../../persistence/history/host-store'
 import { generateHint } from './credentials'
 import {
@@ -183,12 +184,15 @@ async function writeAtomically(path: string, contents: string): Promise<void> {
 }
 
 async function acquireLock(lockPath: string, waitMs: number = LOCK_WAIT_MS): Promise<() => Promise<void>> {
+	// Read before the wait budget starts: the first read of a process may take a moment.
+	const bootId = await currentBootId()
 	const started = Date.now()
 	const token = randomBytes(8).toString('hex')
+	const record = JSON.stringify({ pid: process.pid, hostname: hostname(), token, ...(bootId ? { bootId } : {}) })
 	for (;;) {
 		try {
 			const handle = await open(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
-			try { await handle.writeFile(JSON.stringify({ pid: process.pid, token }), 'utf8') }
+			try { await handle.writeFile(record, 'utf8') }
 			finally { await handle.close() }
 			return async () => {
 				try {
@@ -201,26 +205,50 @@ async function acquireLock(lockPath: string, waitMs: number = LOCK_WAIT_MS): Pro
 		catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
 		}
-		if (await removeStaleLock(lockPath)) continue
+		if (await removeStaleLock(lockPath, bootId)) continue
 		if (Date.now() - started > waitMs)
 			throw new AccessError('access.lock_busy', `Timed out waiting for another UIUX process holding ${lockPath}.`)
 		await new Promise(resolveDelay => setTimeout(resolveDelay, 15))
 	}
 }
 
-async function removeStaleLock(lockPath: string): Promise<boolean> {
-	let owner: { pid?: unknown }
+/**
+ * Whether the roster lock is stale, removing it if so. A lock of another host stays held. A lock of
+ * an earlier boot is stale (see `boot-staleness.ts`); an empty lock of this boot is one being written,
+ * held, unless a power loss left it empty, in which case it stays held until its modification time
+ * falls before the computed boot (a clock that lagged at boot delays that) or someone removes it.
+ */
+async function removeStaleLock(lockPath: string, bootId: string | undefined): Promise<boolean> {
+	let owner: { pid?: unknown } | undefined
 	try {
 		const stats = await lstat(lockPath)
 		if (stats.isSymbolicLink() || !stats.isFile()) throw unsafe(lockPath, 'the lock is not a regular file')
-		owner = JSON.parse(await readFile(lockPath, 'utf8')) as { pid?: unknown }
+		// The record and the modification time come from one open file, never following a link.
+		const handle = await open(lockPath, constants.O_RDONLY | constants.O_NOFOLLOW)
+		let written: Stats
+		let bytes: string
+		try {
+			written = await handle.stat()
+			bytes = await handle.readFile('utf8')
+		}
+		finally { await handle.close() }
+		try { owner = JSON.parse(bytes) as { pid?: unknown } }
+		catch { owner = undefined }
+		// Neither the boot nor the pid of another host can be checked here: its lock stays held.
+		if (recordedOnAnotherHost(owner)) return false
+		// No process from an earlier boot still runs, so its lock is stale whatever pid or bytes it records.
+		if (isFromEarlierBoot(owner, written, bootId)) {
+			await rm(lockPath, { force: true })
+			return true
+		}
 	}
 	catch (error) {
 		if (isNotFound(error)) return true
 		if (error instanceof AccessError) throw error
-		// A lock being written right now has no content yet; treat it as held.
 		return false
 	}
+	// A lock being written right now has no content yet; treat it as held.
+	if (typeof owner !== 'object' || owner === null) return false
 	if (typeof owner.pid !== 'number' || !Number.isInteger(owner.pid)) return false
 	try {
 		process.kill(owner.pid, 0)
