@@ -526,7 +526,9 @@ export function createKitBuildRunner(options: KitBuildRunnerOptions): KitBuildRu
 	}
 
 	return Object.freeze({
-		status: () => status,
+		// The settled output's version rides on the state (Clause 01a11bb1-8856-737f-945c-e44c596f7782), so a client that
+		// misses a short `building` still sees that the output changed.
+		status: () => generation === undefined ? status : { ...status, outputVersion: `${instance}.${generation}` },
 		log: () => mask(log.text()),
 		outputGeneration: () => generation,
 		outputVersion: () => generation === undefined ? undefined : `${instance}.${generation}`,

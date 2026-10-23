@@ -5,7 +5,7 @@ import type { EvidenceContextSelection, ViewRouteContext } from './workbench-typ
 import type { LiveBatch } from './useLiveEvents'
 import { createProductKitTracker } from './product-kit-tracker'
 import { bindsChangedAsset } from '../../src/assets/bindings'
-import { useKitBuild } from './useKitBuild'
+import { kitBuildSettledOutput, useKitBuild } from './useKitBuild'
 
 export type Workbench = WorkbenchState & Readonly<{
 	preview: PreviewSession
@@ -83,8 +83,8 @@ export function provideWorkbench(): Workbench {
 	// checked against (Rule 01a167f4-472f-7ae9-8ebb-3075216ad94c): the View list and the open View are read
 	// again. The layout polls the build state; this only follows it.
 	const kitBuild = useKitBuild()
-	watch(() => kitBuild.build.value.state, (next, previous) => {
-		if (next !== 'ready' || (previous !== 'building' && previous !== 'failed')) return
+	watch(() => kitBuild.build.value, (next, previous) => {
+		if (!kitBuildSettledOutput(previous, next)) return
 		void state.refreshCounts()
 		if (state.selectedViewId.value) void state.loadSelectedView(undefined, { quiet: true })
 	})

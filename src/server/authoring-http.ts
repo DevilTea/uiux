@@ -745,12 +745,22 @@ export function formatContentDisposition(filename: string): string {
 	return `inline; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`
 }
 
+/** RFC 9110 §13.1.2 `If-None-Match`: `*`, or any listed entity tag equal to `etag` under weak comparison (a `W/` prefix is ignored). */
+export function ifNoneMatchMatches(header: string | undefined, etag: string): boolean {
+	if (header === undefined) return false
+	const strip = (tag: string) => tag.trim().replace(/^W\//, '')
+	return header.split(',').some(candidate => strip(candidate) === '*' || strip(candidate) === etag)
+}
+
 /**
  * `GET /api/assets/:id/content[?digest=<digest>]`. With `digest`, the content is served only while the
  * Asset's current source content has that digest: other content answers 409, so a Preview never shows
  * content other than what its binding was resolved and checked with (Clause 01a167f4-41f2-70a1-a200-a005d47b12b5).
+ * `Content-Type` and `Content-Disposition` come from the Asset's metadata, which the digest does not cover, so a
+ * response is revalidated (`no-cache`) against the strong ETag, the Asset revision over metadata and content;
+ * `ifNoneMatch` matching it answers 304 after the digest check.
  */
-export async function readAssetContentForHttp(persistence: FileNativePersistence, assetId: string, digest?: string): Promise<AuthoringHttpResult> {
+export async function readAssetContentForHttp(persistence: FileNativePersistence, assetId: string, digest?: string, ifNoneMatch?: string): Promise<AuthoringHttpResult> {
 	if (!isFullUuid(assetId))
 		return { status: 400, body: { code: 'invalid_resource_address', message: 'Asset id must be a valid UUID.' } }
 	if (digest !== undefined && !isSha256Digest(digest))
@@ -792,18 +802,24 @@ export async function readAssetContentForHttp(persistence: FileNativePersistence
 		}
 	}
 
+	const etag = `"${read.revision}"`
+	const cacheControl = digest === undefined ? 'no-store' : 'private, no-cache'
+	if (ifNoneMatchMatches(ifNoneMatch, etag))
+		return { status: 304, body: new Uint8Array(), headers: { 'ETag': etag, 'Cache-Control': cacheControl } }
+
 	return {
 		status: 200,
 		body: contentBytes,
 		headers: {
 			'Content-Type': mediaType,
 			'Content-Length': String(contentBytes.byteLength),
-			'ETag': `"${read.revision}"`,
+			'ETag': etag,
 			'X-Content-Type-Options': 'nosniff',
 			'Content-Disposition': formatContentDisposition(declaredFilename),
-			// Content addressed by its digest never changes at that URL (a change answers 409), so it is cached;
-			// the plain URL follows replacements, so it is not.
-			'Cache-Control': digest === undefined ? 'no-store' : 'private, max-age=31536000, immutable',
+			// The bytes at a digest never change (a change answers 409) but the headers come from metadata that can,
+			// so the digest URL is revalidated by ETag rather than cached as immutable; the plain URL follows
+			// replacements, so it is not stored.
+			'Cache-Control': cacheControl,
 			...storedContentSecurityHeaders(mediaType, contentBytes),
 		},
 	}

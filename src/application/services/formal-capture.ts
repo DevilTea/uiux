@@ -16,7 +16,7 @@ import type { Diagnostic, JsonObject } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
 import type { KitBuildStatus } from '../ports/kit-build'
-import { ASSET_LOAD_FAILED_STATUS, captureHarnessScreenshot, openHarnessPreview, type HarnessPreview } from './capture-harness'
+import { ASSET_LOAD_FAILED_DIAGNOSTIC, ASSET_LOAD_FAILED_STATUS, captureHarnessScreenshot, openHarnessPreview, type HarnessPreview } from './capture-harness'
 import { missingDefaultLocaleError } from './default-locale-gate'
 import { createViewAssetBindingCheck, type AssetCatalog } from './asset-bindings'
 import { readWorkspaceProductKitProvenance } from './product-kit-provenance'
@@ -352,7 +352,7 @@ export function createFormalCaptureService(
 							diagnostics: [status === ASSET_LOAD_FAILED_STATUS
 								// A bound Asset image did not decode (its content changed since it was resolved, or its bytes
 								// are not an image); nothing is captured in its place (Rule 01a115cd-c106-71d6-b1f8-4d59cab22ad2).
-								? { code: 'capture.asset_load_failed', path: '/preview', message: 'An image of a bound Asset did not load or decode in the Preview, so the context was not captured.' }
+								? ASSET_LOAD_FAILED_DIAGNOSTIC
 								: {
 										code: isUnavailable ? 'adapter.materialization_unavailable' : 'preview.runtime_failed',
 										path: '/preview',
@@ -364,6 +364,11 @@ export function createFormalCaptureService(
 
 					// Capture deterministic PNG bytes
 					const screenshotBytes = await captureHarnessScreenshot(preview.page)
+					// A bound Asset request that failed up to the screenshot (of any element or style) fails the context.
+					if (preview.assetLoadFailures() > 0) {
+						results[index] = { context, status: 'failed', diagnostics: [ASSET_LOAD_FAILED_DIAGNOSTIC] }
+						continue
+					}
 
 					// Store screenshot in ImmutableArtifactStore
 					const { identity: screenshotDigest } = await persistence.artifacts.put(screenshotBytes)

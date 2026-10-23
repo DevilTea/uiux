@@ -278,6 +278,20 @@ describe('Product Kit Checks', () => {
 		expect((await fast.run({ baseUrl: server.origin })).status).toBe('incomplete')
 	}, 120_000)
 
+	it('reports a render context not checked when a bound Asset request failed before its screenshot (issue #323)', async () => {
+		const service = directService({
+			openPreview: async (browser, input) => {
+				const preview = await openHarnessPreview(browser, input)
+				return preview.status === 'ready' ? { ...preview, assetLoadFailures: () => 1 } : preview
+			},
+		})
+		const outcome = await service.run({ baseUrl: server.origin })
+		expect(outcome).toMatchObject({
+			status: 'incomplete',
+			checks: { repeat_capture: { state: 'incomplete', checked: 0, diagnostics: expect.arrayContaining([expect.objectContaining({ code: 'capture.asset_load_failed' })]) } },
+		})
+	}, 120_000)
+
 	it('abandons a render context still in flight at the run deadline, reports the rest not checked and releases the run', async () => {
 		const service = directService({ runDeadlineMs: 500, openPreview: () => new Promise(() => undefined) })
 		const outcome = await service.run({ baseUrl: server.origin })
