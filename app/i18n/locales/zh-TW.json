@@ -900,12 +900,11 @@
     "connectingHint": "預覽正在啟動，連線後即可使用工具。",
     "liveHint": "預覽正在執行，並回應畫布操作。",
     "reconnectingHint": "預覽已重新啟動，重新連線後會恢復選取。",
-    "stoppedHint": "預覽已停止回應。重試會啟動新的預覽。",
+    "stoppedHint": "預覽已停止回應。「重試預覽」會啟動新的預覽。",
     "chipLabel": "預覽工作階段：{status}",
     "sessionId": "工作階段",
     "generation": "Runtime 世代",
-    "generationPending": "等待預覽宣告世代",
-    "retry": "重試"
+    "generationPending": "等待預覽宣告世代"
   },
   "canvas": {
     "variantInvalid": "這個 Variant 無法執行。",
@@ -2954,6 +2953,48 @@
       },
       "unmatched": "這次比較無法依 ID 對應 Widget，因此沒有標示任何變更。",
       "overCap": "還有 {n} 項變更未標示 | 還有 {n} 項變更未標示"
+    }
+  },
+  "previewFailure": {
+    "retry": "重試預覽",
+    "retryPending": "正在啟動新的預覽…",
+    "retryStalled": "新的預覽尚未回應，可以再試一次。",
+    "details": "技術細節",
+    "reasonLabel": "原因",
+    "detailLabel": "細節",
+    "transport": {
+      "title": "與預覽的連線已中斷",
+      "body": "Workbench 已無法連到預覽，因此畫布上的標示與選取無法使用。「重試預覽」會啟動新的預覽。"
+    },
+    "protocol": {
+      "title": "預覽傳送了非預期的訊息",
+      "body": "Workbench 收到無法接受的訊息，已停止這個預覽，因此畫布上的標示與選取無法使用。「重試預覽」會啟動新的預覽。"
+    },
+    "runtime": {
+      "title": "預覽 Runtime 已停止",
+      "body": "預覽 Runtime 無法繼續執行，因此畫布上的標示與選取無法使用。「重試預覽」會啟動新的預覽。"
+    },
+    "capability": {
+      "title": "預覽不相容",
+      "body": "這個預覽無法與目前的 Workbench 搭配運作，因此畫布上的標示與選取無法使用。「重試預覽」會啟動新的預覽。"
+    },
+    "reasons": {
+      "transport": {
+        "channel_unavailable": "與預覽的連線已永久關閉，因此畫布上的標示與選取無法使用。「重試預覽」會啟動新的預覽。"
+      },
+      "runtime": {
+        "unavailable": "預覽 Runtime 或其背景工作已永久停止，因此畫布上的標示與選取無法使用。「重試預覽」會啟動新的預覽。"
+      },
+      "protocol": {
+        "invalid_message": "預覽傳送了 Workbench 無法讀取的訊息，因此畫布上的標示與選取無法使用。「重試預覽」會啟動新的預覽。",
+        "invalid_state": "預覽傳送訊息的順序不正確，因此畫布上的標示與選取無法使用。「重試預覽」會啟動新的預覽。",
+        "identity_reuse": "預覽重複使用了已結束 Runtime 的識別碼，因此畫布上的標示與選取無法使用。「重試預覽」會啟動新的預覽。",
+        "capability_conflict": "預覽在執行中變更了它支援的功能，因此畫布上的標示與選取無法使用。「重試預覽」會啟動新的預覽。"
+      },
+      "capability": {
+        "unsupported_protocol_version": "預覽使用的協定版本不受目前的 Workbench 支援，因此畫布上的標示與選取無法使用。「重試預覽」會啟動新的預覽；若再次失敗，請更新或重新啟動 UIUX 後重新載入。",
+        "missing_required_feature": "預覽缺少 Workbench 需要的功能，因此畫布上的標示與選取無法使用。「重試預覽」會啟動新的預覽；若再次失敗，請更新或重新啟動 UIUX 後重新載入。"
+      }
     }
   }
 }

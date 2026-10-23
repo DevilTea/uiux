@@ -165,6 +165,24 @@ describe('Preview protocol session/generation lineage', () => {
 		expect(session.snapshot().retiredGenerationIds).toContain('generation-c')
 	})
 
+	it('admits a declared generation as the explicit retry only while an authorization is pending (issue #111)', () => {
+		const session = new PreviewProtocolSession('session-a')
+		session.admitDeclaredGeneration('generation-a')
+		session.receiveCapabilityDeclaration('generation-a', { protocolVersion: 99, features: [] }, unsupported)
+		// Without an authorization, a declared generation is a reload and is refused while exhausted.
+		expect(session.admitDeclaredGeneration('generation-b')).toEqual({ status: 'unauthorized', generationId: 'generation-b' })
+		expect(session.authorizeRetry()).toBe('authorized')
+		expect(session.admitDeclaredGeneration('generation-c')).toEqual({ status: 'admitted', generationId: 'generation-c', cause: 'explicit-retry' })
+		expect(session.snapshot()).toMatchObject({ retryAuthorizationPending: false, currentGenerationPhase: 'bootstrap' })
+		// During that handshake a trigger creates nothing.
+		expect(session.authorizeRetry()).toBe('ignored-active-bootstrap')
+		// A revoked authorization admits nothing either.
+		session.receiveCapabilityDeclaration('generation-c', { protocolVersion: 99, features: [] }, unsupported)
+		expect(session.authorizeRetry()).toBe('authorized')
+		expect(session.revokeRetry()).toBe('revoked')
+		expect(session.admitDeclaredGeneration('generation-d').status).toBe('unauthorized')
+	})
+
 	it('treats ACK-before-declaration as protocol-invalid and retires that generation', () => {
 		const session = new PreviewProtocolSession('session-a')
 		session.beginGeneration('generation-a', 'initial')

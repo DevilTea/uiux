@@ -68,17 +68,20 @@ const pending = computed(() => preview.sessionStatus.value === 'connecting' || p
             {{ preview.runtimeGenerationId.value ?? t('session.generationPending') }}
           </dd>
         </dl>
+        <!-- The same Retry Preview action as the inline diagnostic (Rule 01a11687-386c-764f-98fd-cf19dc3d0013). -->
         <UButton
           v-if="preview.sessionStatus.value !== 'live'"
           color="neutral"
           variant="outline"
           size="sm"
-          icon="i-lucide-rotate-ccw"
+          :icon="preview.retryDisabled.value ? 'i-lucide-loader-circle' : 'i-lucide-rotate-ccw'"
           class="justify-self-start"
+          :class="preview.retryDisabled.value ? 'cursor-not-allowed opacity-75 [&_svg]:animate-spin motion-reduce:[&_svg]:animate-none' : ''"
+          :aria-disabled="preview.retryDisabled.value ? 'true' : undefined"
+          :label="t('previewFailure.retry')"
+          data-session-retry
           @click="preview.retry()"
-        >
-          {{ t('session.retry') }}
-        </UButton>
+        />
       </div>
     </template>
   </UPopover>

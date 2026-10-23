@@ -1,7 +1,13 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { useI18n } from '#imports'
 import { describeFetchError } from '../utils/fetch-error'
-import { isCapabilityDeclaration, WorkbenchPreviewProtocolBridge } from '../../src/preview/protocol/bridge'
+import {
+	envelopeGenerationId,
+	isCapabilityDeclaration,
+	WorkbenchPreviewProtocolBridge,
+	type BridgeReceiveResult,
+} from '../../src/preview/protocol/bridge'
+import { deriveWorkbenchFailure, recorrelatePreviewFailure, retryStallGraceMs } from '../../src/preview/failure-diagnostic'
 import { PreviewNavigationState, type PreviewNavigationTarget } from '../../src/preview/navigation-state'
 import { PreviewTargetingState } from '../../src/preview/targeting-state'
 import { GeometryStreamCoordinator, type GeometryDemand, type GeometryReport } from '../../src/preview/geometry-streams'
@@ -15,6 +21,7 @@ import type { AffineOuterMapping } from '../../src/preview/outer-precision'
 import {
 	MULTI_TARGET_GEOMETRY_FEATURE,
 	type GeometryAcquireResponse,
+	type PreviewFailureDiagnostic,
 	type VisibleRegion,
 	type WidgetRect,
 } from '../../src/preview/protocol/schema'
@@ -120,6 +127,28 @@ export function createPreviewSession(state: WorkbenchState) {
 	const handshakePhase = ref<Exclude<SessionPhase, 'idle'>>('initiating')
 	/** True once any generation of this session completed its handshake: a later loss reads "Reconnecting". */
 	const hasConnected = ref(false)
+	/**
+	 * The last non-recoverable failure the Workbench derived, kept until a generation completes its
+	 * handshake: a generation refused while recovery is exhausted shows it again (issue #111).
+	 */
+	let lastFailure: PreviewFailureDiagnostic | undefined
+	/** The diagnostic on screen; switching to another View clears it (owner ruling 4 of 2026-10-23). */
+	const shownFailure = shallowRef<PreviewFailureDiagnostic>()
+	/**
+	 * True from a Retry Preview activation until the outcome of the next declaration, on both paths:
+	 * the explicit retry and, after a capability conflict, the unused automatic recovery allowance
+	 * (owner ruling 2 of 2026-10-23, Discussion #241).
+	 */
+	const retryInFlight = ref(false)
+	/**
+	 * The in-flight retry's document loaded and declared nothing within the grace period, so Retry
+	 * Preview is offered again; pressing it reloads under the same pending authorization (owner
+	 * ruling 1 of 2026-10-23, Discussion #241).
+	 */
+	const retryStalled = ref(false)
+	let retryStallTimer: ReturnType<typeof setTimeout> | undefined
+	/** Read once per session; see `retryStallGraceMs`. */
+	const stallGraceMs = retryStallGraceMs(typeof window === 'undefined' ? undefined : window)
 	const targetingInteractionId = ref<string>()
 	const canvasTool = ref<CanvasTool>('select')
 	/** The tool Comment returns to when it is left (Select unless Interact was active). */
@@ -150,6 +179,16 @@ export function createPreviewSession(state: WorkbenchState) {
 			default: return 'idle'
 		}
 	})
+
+	/**
+	 * The inline Preview diagnostic (Rule 01a11687-375e-7667-b8f1-59389fdd9780): shown while Preview is
+	 * unavailable after a non-recoverable failure, and through the handshake of a retry, until a
+	 * generation recovers, another View replaces the context, or the View closes.
+	 */
+	const failureDiagnostic = computed<PreviewFailureDiagnostic | undefined>(() =>
+		state.selectedViewId.value ? shownFailure.value : undefined)
+	/** Retry Preview is disabled while a retry is in flight, unless its document stalled. */
+	const retryDisabled = computed(() => retryInFlight.value && !retryStalled.value)
 
 	let workbenchBridge: WorkbenchPreviewProtocolBridge | undefined
 	let navigationCoordinator: PreviewNavigationState | undefined
@@ -239,9 +278,12 @@ export function createPreviewSession(state: WorkbenchState) {
 	// handshake it is frozen, and changes travel over the context channel instead.
 	watch(() => state.contextOptions.value, () => {
 		if (handshakePhase.value !== 'open' && iframeSourceContext.value && contextDiffersFromSource()) {
-			// A new source is a new requested document: the one it replaces may no longer declare.
+			// A new source is a new requested document: the one it replaces may no longer declare. A
+			// retry in flight waits for the new document's load again, never for the replaced one's.
 			documentSequence.value++
 			captureIframeSourceContext()
+			clearRetryStallTimer()
+			retryStalled.value = false
 		}
 	})
 
@@ -651,10 +693,51 @@ export function createPreviewSession(state: WorkbenchState) {
 		handshakePhase.value = 'initiating'
 	}
 
-	/** "Retry" on a stopped or stuck session: a fresh runtime generation and iframe document. */
+	/**
+	 * Retry Preview, the one shared manual recovery action (Rule 01a11687-386c-764f-98fd-cf19dc3d0013)
+	 * and a fresh Preview document. While recovery is exhausted it authorizes one explicit retry,
+	 * which the next declared generation spends; a press while that retry is in flight joins it and
+	 * loads nothing (Rules 01a1161c-3dad-7ac1-b49b-a77fcb1e33f2 and 01a1161c-3e28-7dcf-a06e-a2c12c83919c).
+	 * After a capability conflict that left the automatic recovery allowance unused, it creates no
+	 * authorization: the fresh document's generation spends that allowance (owner ruling 2 of
+	 * 2026-10-23). If the in-flight document stalls, a press reloads it under the same pending
+	 * authorization, which the session reports as `coalesced` (owner ruling 1).
+	 */
 	function retry(): void {
-		if (!state.selectedViewId.value) return
+		if (!state.selectedViewId.value || !workbenchBridge || retryDisabled.value) return
+		if (workbenchBridge.authorizeRetry() === 'ignored-active-bootstrap') return
+		retryInFlight.value = true
+		retryStalled.value = false
+		clearRetryStallTimer()
 		replaceGeneration()
+	}
+
+	/**
+	 * The iframe loaded while a retry is in flight: wait the grace period for a declaration. A
+	 * readable document the Workbench no longer requests is ignored (its replacement's load follows);
+	 * an unreadable one, such as an error page when the server is down, starts the wait too, so
+	 * Retry Preview always comes back (owner ruling 1 of 2026-10-23).
+	 */
+	function onIframeLoad(): void {
+		if (!retryInFlight.value || committedDocument() === 'replaced') return
+		clearRetryStallTimer()
+		retryStalled.value = false
+		retryStallTimer = setTimeout(() => {
+			retryStallTimer = undefined
+			if (retryInFlight.value) retryStalled.value = true
+		}, stallGraceMs)
+	}
+
+	function clearRetryStallTimer(): void {
+		if (retryStallTimer !== undefined) clearTimeout(retryStallTimer)
+		retryStallTimer = undefined
+	}
+
+	/** The retry's declaration had its outcome, or the context was replaced: nothing is in flight. */
+	function endRetryInFlight(): void {
+		retryInFlight.value = false
+		retryStalled.value = false
+		clearRetryStallTimer()
 	}
 
 	function initBridge(): void {
@@ -689,6 +772,10 @@ export function createPreviewSession(state: WorkbenchState) {
 	function onCapabilityAcknowledged(features: readonly string[]): void {
 		handshakePhase.value = 'open'
 		hasConnected.value = true
+		// A generation completed its handshake: Preview recovered, and no retry is in flight any more.
+		lastFailure = undefined
+		shownFailure.value = undefined
+		endRetryInFlight()
 		runtimeFeatures.value = features
 		// The document may have missed context changes made while it loaded; re-send those, then reopen geometry.
 		if (contextDiffersFromSource()) notifyIframeContext()
@@ -778,19 +865,28 @@ export function createPreviewSession(state: WorkbenchState) {
 	 * requested one (owner ruling 1 of 2026-10-23, Discussion #241). A self-reload keeps its URL.
 	 */
 	function requestedDocumentIsCommitted(): boolean {
+		return committedDocument() === 'requested'
+	}
+
+	/** The committed iframe document: the requested one, another readable one, or one it cannot read. */
+	function committedDocument(): 'requested' | 'replaced' | 'unreadable' {
 		try {
 			const location = previewIframe.value?.contentWindow?.location.href
-			return !!location && new URL(location).searchParams.get('document') === String(documentSequence.value)
+			if (!location) return 'unreadable'
+			return new URL(location).searchParams.get('document') === String(documentSequence.value) ? 'requested' : 'replaced'
 		}
 		catch {
-			return false
+			return 'unreadable'
 		}
 	}
 
 	function receiveWire(input: unknown): void {
 		if (!workbenchBridge) return
+		const declaration = isCapabilityDeclaration(input)
 		// A declaration from a replaced document never admits a generation; it is dropped without effect.
-		if (isCapabilityDeclaration(input) && !requestedDocumentIsCommitted()) return
+		if (declaration && !requestedDocumentIsCommitted()) return
+		const phase = handshakePhase.value
+		const admittedGenerationId = runtimeGenerationId.value
 		const result = workbenchBridge.receive(input)
 		if (result.status === 'ack-dispatched') {
 			const features = (input as { payload?: { features?: unknown } }).payload?.features
@@ -802,13 +898,36 @@ export function createPreviewSession(state: WorkbenchState) {
 			else if (message.type === 'targeting.hover' || message.type === 'targeting.select' || message.type === 'targeting.escape') receiveTargeting(message)
 			else if (message.type === 'widget.event.occurrence') widgetEvents.receive(message)
 		}
-		else if (result.status === 'generation-refused') {
-			// Recovery is exhausted: the new document's generation is retired unacknowledged.
-			if (runtimeGenerationId.value) endGeneration()
-			handshakePhase.value = 'failed'
+		else {
+			const derived = deriveWorkbenchFailure({
+				result,
+				declaration,
+				envelopeGenerationId: envelopeGenerationId(input),
+				admittedGenerationId,
+				previewSessionId: previewSessionId.value,
+				phase,
+			})
+			if (derived.effect === 'fail') failPreview(result.status, derived.failure)
+			else if (derived.effect === 'refused')
+				failPreview(result.status, lastFailure && recorrelatePreviewFailure(lastFailure, previewSessionId.value, derived.generationId))
 		}
-		else if (result.status === 'capability-failure') handshakePhase.value = 'failed'
-		else if (result.status === 'invalid' && handshakePhase.value !== 'open') handshakePhase.value = 'failed'
+	}
+
+	/**
+	 * Preview is unavailable after a non-recoverable failure: the handshake fails, the retry in
+	 * flight (if any) has run its course, and the diagnostic shows `failure`. A generation refused
+	 * while recovery is exhausted passes the failure that exhausted it, under the refused generation.
+	 */
+	function failPreview(status: BridgeReceiveResult['status'], failure: PreviewFailureDiagnostic | undefined): void {
+		if (failure) {
+			if (status !== 'generation-refused') lastFailure = failure
+			shownFailure.value = failure
+		}
+		// The session already ended these generations: a refused one, or one whose declaration
+		// conflicted, which may have been open with live streams.
+		if ((status === 'generation-refused' || status === 'capability-conflict') && runtimeGenerationId.value) endGeneration()
+		handshakePhase.value = 'failed'
+		endRetryInFlight()
 	}
 
 	function onWindowKeydown(event: KeyboardEvent): void {
@@ -827,6 +946,7 @@ export function createPreviewSession(state: WorkbenchState) {
 	function unmount(): void {
 		window.removeEventListener('message', onWindowMessage)
 		window.removeEventListener('keydown', onWindowKeydown)
+		clearRetryStallTimer()
 	}
 
 	// Comment mode is meaningless without a mounted View.
@@ -842,12 +962,25 @@ export function createPreviewSession(state: WorkbenchState) {
 	// One iframe document is one runtime generation. A new View, or a new iframe element (the canvas
 	// was unmounted and mounted again), starts a fresh generation; the same document is never reused.
 	let generationElement: HTMLIFrameElement | undefined
-	watch(previewIframe, (element) => {
-		if (!element) return
+	watch(previewIframe, (element, previous) => {
+		previous?.removeEventListener('load', onIframeLoad)
+		if (!element) {
+			clearRetryStallTimer()
+			return
+		}
+		element.addEventListener('load', onIframeLoad)
 		if (generationElement && generationElement !== element) replaceGeneration()
 		generationElement = element
 	})
-	watch(() => state.selectedView.value?.key, (key) => {
+	watch(() => state.selectedView.value?.key, (key, previous) => {
+		// Another View replaces the context: its diagnostic and any retry in flight end here, even when
+		// a new iframe element already requested the new document. A pending authorization stays with
+		// the session, and a refusal of the new View's document shows the failure again (owner ruling 4
+		// of 2026-10-23, Discussion #241).
+		if (previous && key !== previous) {
+			shownFailure.value = undefined
+			endRetryInFlight()
+		}
 		if (key && key !== iframeSourceContext.value?.viewId) replaceGeneration()
 	})
 
@@ -902,6 +1035,9 @@ export function createPreviewSession(state: WorkbenchState) {
 		geometryStreams,
 		selectWidget,
 		hideSelectionHighlight,
+		failureDiagnostic,
+		retryInFlight,
+		retryDisabled,
 		retry,
 		exitCommentMode,
 		onCommentTarget,

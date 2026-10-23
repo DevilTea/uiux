@@ -27,6 +27,7 @@ import {
 import { findWidgetInTree, type WidgetTreeNode } from '../../../src/preview/widget-tree'
 import RenderContextControls from './RenderContextControls.vue'
 import SessionStatus from './SessionStatus.vue'
+import PreviewFailureDiagnostic from './PreviewFailureDiagnostic.vue'
 import CanvasZoomControls from './CanvasZoomControls.vue'
 import CanvasToolPill, { type CanvasToolId } from './CanvasToolPill.vue'
 import CanvasOverlay from './CanvasOverlay.vue'
@@ -671,6 +672,8 @@ function switchToBase(): void {
       class="rounded-none border-b border-default"
       :ui="{ description: 'text-xs' }"
     />
+
+    <PreviewFailureDiagnostic v-if="showFrame" />
 
     <div
       class="relative min-h-0 flex-1"

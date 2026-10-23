@@ -900,12 +900,11 @@
     "connectingHint": "The preview is starting. The tools work once it is live.",
     "liveHint": "The preview is running and answers the canvas.",
     "reconnectingHint": "The preview restarted. Selection comes back once it reconnects.",
-    "stoppedHint": "The preview stopped responding. Retry starts a fresh preview.",
+    "stoppedHint": "The preview stopped responding. Retry Preview starts a fresh preview.",
     "chipLabel": "Preview session: {status}",
     "sessionId": "Session",
     "generation": "Runtime generation",
-    "generationPending": "Waiting for the preview to declare one",
-    "retry": "Retry"
+    "generationPending": "Waiting for the preview to declare one"
   },
   "canvas": {
     "variantInvalid": "This Variant can't run.",
@@ -2954,6 +2953,48 @@
       },
       "unmatched": "Widgets can't be matched by ID in this comparison, so no change is outlined.",
       "overCap": "{n} more change isn't outlined | {n} more changes aren't outlined"
+    }
+  },
+  "previewFailure": {
+    "retry": "Retry Preview",
+    "retryPending": "Starting a fresh preview…",
+    "retryStalled": "The fresh preview has not answered yet. You can retry again.",
+    "details": "Technical details",
+    "reasonLabel": "Reason",
+    "detailLabel": "Detail",
+    "transport": {
+      "title": "Preview connection lost",
+      "body": "The Workbench can no longer reach the preview, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview."
+    },
+    "protocol": {
+      "title": "Preview sent an unexpected message",
+      "body": "The Workbench stopped this preview after a message it could not accept, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview."
+    },
+    "runtime": {
+      "title": "Preview runtime stopped",
+      "body": "The preview runtime cannot continue, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview."
+    },
+    "capability": {
+      "title": "Preview is not compatible",
+      "body": "This preview cannot work with this Workbench, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview."
+    },
+    "reasons": {
+      "transport": {
+        "channel_unavailable": "The connection to the preview closed for good, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview."
+      },
+      "runtime": {
+        "unavailable": "The preview runtime or one of its workers stopped for good, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview."
+      },
+      "protocol": {
+        "invalid_message": "The preview sent a message the Workbench cannot read, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview.",
+        "invalid_state": "The preview sent a message out of order, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview.",
+        "identity_reuse": "The preview reused the identity of a runtime that already ended, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview.",
+        "capability_conflict": "The preview changed what it supports while it was running, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview."
+      },
+      "capability": {
+        "unsupported_protocol_version": "The preview speaks a protocol version this Workbench does not support, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview; if it fails again, update or restart UIUX, then reload.",
+        "missing_required_feature": "The preview lacks a feature this Workbench needs, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview; if it fails again, update or restart UIUX, then reload."
+      }
     }
   }
 }
