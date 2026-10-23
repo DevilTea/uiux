@@ -62,7 +62,26 @@ export async function readRawProductKit(workspaceRoot: string, productKitPath: s
 	}
 }
 
-export async function resolveSelectedWorkspaceAdapters(workspaceRoot: string, givenLayout?: WorkspaceLayout): Promise<AdapterSetResolutionResult> {
+export function resolveSelectedWorkspaceAdapters(workspaceRoot: string, givenLayout?: WorkspaceLayout): Promise<AdapterSetResolutionResult> {
+	return resolveAdapters(workspaceRoot, givenLayout)
+}
+
+/**
+ * Resolves `adapters` as the Preview resolves the selected Workspace's Adapters, for formal capture,
+ * Evidence freshness and Handoff export (Rule 01a167bf-1f93-78b7-9045-6562c20f5a42): the Product
+ * Kit file's own list is the Preview's resolution itself, pinned to the last good kit build output
+ * ({@link resolveSelectedWorkspaceAdapters}). Another list, such as the one Adapter Handoff export
+ * resolves to read its catalog, resolves with the same output generation's module versions, asking
+ * no theme support predicate, and is not pinned, so it never replaces the Preview's resolution.
+ */
+export async function resolveSelectedWorkspaceAdapterList(workspaceRoot: string, givenLayout: WorkspaceLayout | undefined, adapters: readonly WorkspaceAdapterSelection[]): Promise<AdapterSetResolutionResult> {
+	const productKit = await readRawProductKit(workspaceRoot, selectedLayout(givenLayout).productKitPath)
+	if (productKit && canonicalJsonStringify(productKit.adapters) === canonicalJsonStringify(adapters)) return resolveAdapters(workspaceRoot, givenLayout)
+	return resolveAdapters(workspaceRoot, givenLayout, adapters)
+}
+
+/** The Product Kit file's Adapters, pinned per output generation; or `selection`, resolved with the current generation's module versions and not pinned. */
+async function resolveAdapters(workspaceRoot: string, givenLayout: WorkspaceLayout | undefined, selection?: readonly WorkspaceAdapterSelection[]): Promise<AdapterSetResolutionResult> {
 	const layout = selectedLayout(givenLayout)
 	const manifest = await readRawWorkspaceManifest(workspaceRoot, layout)
 	if (!manifest) {
@@ -91,13 +110,14 @@ export async function resolveSelectedWorkspaceAdapters(workspaceRoot: string, gi
 			summaries: [],
 		}
 	}
-	const adapters = productKit.adapters
-	// Every theme of the Workspace registry is asked about once per resolution (Rule 01a11a5a-5464-7797-82d3-f8ece37457e5).
-	const themeIds = Object.keys(manifest.themes)
+	const adapters = selection ?? productKit.adapters
+	// Every theme of the Workspace registry is asked about once per resolution (Rule 01a11a5a-5464-7797-82d3-f8ece37457e5);
+	// a selection other than the Product Kit file's asks none.
+	const themeIds = selection ? [] : Object.keys(manifest.themes)
 	const build = await kitBuildPin(workspaceRoot, layout.codeDir, adapters, themeIds)
 	if (build.state === 'invalid') return { state: 'invalid', diagnostics: build.diagnostics, summaries: [] }
 	const pin: KitOutputPin | undefined = build.pin
-	if (pin?.resolution) return pin.resolution
+	if (pin?.resolution && !selection) return pin.resolution
 	if (adapters.length === 0) {
 		const emptySet: ValidatedAdapterSet = Object.freeze({
 			entries: Object.freeze([]),
@@ -120,7 +140,7 @@ export async function resolveSelectedWorkspaceAdapters(workspaceRoot: string, gi
 		registryInspector: productAdapterRegistryInspector,
 		themeIds,
 	})
-	pin?.remember(resolution)
+	if (!selection) pin?.remember(resolution)
 	return await resolution
 }
 

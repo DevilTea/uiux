@@ -11,8 +11,8 @@ export type EvidenceAdapterProvenance = Omit<AdapterProvenance, 'moduleIdentity'
 /**
  * The Workspace's current Adapter provenance: every Adapter of the active set in Adapter-list order,
  * or `unavailable` when it cannot be computed now (the Product Kit file cannot be read, the Adapter
- * set is invalid, or an Adapter has neither a package version nor a content digest), so freshness
- * judged against it is unknown.
+ * set is invalid, an Adapter's content digest cannot be computed, even one with a package version,
+ * or a kit build is running or its last run failed), so freshness judged against it is unknown.
  */
 export type CurrentAdapterProvenance =
 	| Readonly<{ state: 'unavailable' }>

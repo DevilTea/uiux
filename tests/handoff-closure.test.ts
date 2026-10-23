@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -43,7 +43,7 @@ import type { ReviewThread } from '../src/domain/reviews/schema'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 import { writeCurrentWorkspace } from './support/workspace-layout'
 import { bundleAdapterWithOwnWidgetCore } from './support/own-widget-core'
-import { checkAdapterSetRuntime } from '../src/server/workspace-adapters'
+import { checkAdapterSetRuntime, resolveSelectedWorkspaceAdapterList } from '../src/server/workspace-adapters'
 
 const temporaryRoots: string[] = []
 const runningServers: ChildProcess[] = []
@@ -1723,5 +1723,67 @@ describe('Adapter-driven Evidence freshness (issue #57)', { timeout: HEAVY_SERVE
 		await setAdapters(persistence, [{ moduleSpecifier: './adapters/missing.mjs' }])
 		expect(await readCurrentAdapterProvenance(persistence)).toEqual({ state: 'unavailable' })
 		expect(await provenanceCondition(persistence, evidence)).toEqual({ isStale: true, unknown: true, reason: ADAPTER_PROVENANCE_UNAVAILABLE_REASON })
+	})
+
+	// Issue #304: provenance whose content digest cannot be computed, and provenance through the server's resolution.
+	describe('when an Adapter\'s provenance cannot be computed or comes from the server\'s resolution (issue #304)', () => {
+		/** A Workspace whose one Adapter is the package `acme-adapter` 1.0.0, so its provenance has a package version. */
+		async function packageAdapterWorkspace(): Promise<{ root: string; persistence: FileNativePersistence; evidence: string }> {
+			const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: 'acme-adapter' }])
+			await mkdir(join(root, 'kit', 'node_modules', 'acme-adapter'), { recursive: true })
+			await writeFile(join(root, 'kit', 'package.json'), JSON.stringify({ private: true, dependencies: { 'acme-adapter': '1.0.0' } }))
+			await writeFile(join(root, 'kit', 'node_modules', 'acme-adapter', 'package.json'), JSON.stringify({ name: 'acme-adapter', version: '1.0.0', type: 'module', main: './index.mjs' }))
+			await writeFile(join(root, 'kit', 'node_modules', 'acme-adapter', 'index.mjs'), `${CONFIGURABLE_COUNTER}\nimport './dep.mjs'\n`)
+			await writeFile(join(root, 'kit', 'node_modules', 'acme-adapter', 'dep.mjs'), 'export {}\n')
+			const viewRevision = await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'Counter View'))
+			return { root, persistence, evidence: await putFormalEvidence(persistence, VIEW_1_ID, viewRevision, true) }
+		}
+
+		it('gives a capture unknown freshness, never an Adapter change, while a package Adapter\'s content digest cannot be computed (Rule 01a164bc-4e09)', async () => {
+			// A file the bundle cannot read stands in for a transient failure; root reads it regardless.
+			if (process.getuid?.() === 0) return
+			const { root, persistence, evidence } = await packageAdapterWorkspace()
+			const record = await persistence.artifacts.readCandidateJson(evidence) as FormalEvidenceRecord
+			expect(record.provenance.adapters).toEqual([expect.objectContaining({ moduleSpecifier: 'acme-adapter', packageVersion: '1.0.0', contentDigest: expect.stringMatching(/^sha256:/) })])
+			expect(await provenanceCondition(persistence, evidence)).toBeUndefined()
+
+			// A transient failure to bundle the graph: a module of it cannot be read for a moment.
+			const dependency = join(root, 'kit', 'node_modules', 'acme-adapter', 'dep.mjs')
+			await chmod(dependency, 0o000)
+			expect(await readCurrentAdapterProvenance(persistence)).toEqual({ state: 'unavailable' })
+			expect(await provenanceCondition(persistence, evidence)).toEqual({ isStale: true, unknown: true, reason: ADAPTER_PROVENANCE_UNAVAILABLE_REASON })
+			expect(await staleInHandoff(persistence)).toBe(true)
+
+			// Once it recovers, the capture is fresh again.
+			await chmod(dependency, 0o644)
+			expect(await provenanceCondition(persistence, evidence)).toBeUndefined()
+			expect(await staleInHandoff(persistence)).toBe(false)
+		})
+
+		it('exports the same Handoff bundle, byte for byte, through the server\'s resolution as through the files on disk while no kit build runs', async () => {
+			const { root, persistence } = await adapterWorkspace([{ moduleSpecifier: COUNTER, config: { tone: 'warm' } }, { moduleSpecifier: BADGE }])
+			const exportBundle = async (options: Parameters<typeof createHandoffExportService>[1]) => {
+				const exported = await currentSchemaHandoff(persistence, options).exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+				expect(exported.status, JSON.stringify(exported.diagnostics)).toBe('exported')
+				return exported.manifest!
+			}
+			const fromDisk = await exportBundle({})
+			const resolve = vi.fn((adapters: readonly WorkspaceAdapterSelection[]) => resolveSelectedWorkspaceAdapterList(root, undefined, adapters))
+			const throughServer = await exportBundle({ adapterProvenance: { resolve } })
+			expect(resolve).toHaveBeenCalled()
+			expect(throughServer.bundleIdentity).toBe(fromDisk.bundleIdentity)
+			expect(canonicalJsonBytes({ ...throughServer, exportedAt: '' })).toEqual(canonicalJsonBytes({ ...fromDisk, exportedAt: '' }))
+			expect(fromDisk.evidenceRefs.length).toBeGreaterThan(0)
+		})
+
+		it('gives every capture unknown freshness in Handoff while a kit build is running or its last run failed (Rule 01a164bc-4e09)', async () => {
+			const { persistence } = await adapterWorkspace()
+			for (const state of ['building', 'failed'] as const) {
+				const assessed = await currentSchemaHandoff(persistence, { adapterProvenance: { kitBuild: () => ({ state }) } }).assessReadiness({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+				expect(assessed.readiness!.blockingDiagnostics.some(diagnostic => diagnostic.code === 'handoff.stale_view_evidence'), state).toBe(true)
+			}
+			const ready = await currentSchemaHandoff(persistence, { adapterProvenance: { kitBuild: () => ({ state: 'ready' }) } }).assessReadiness({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+			expect(ready.readiness!.blockingDiagnostics.some(diagnostic => diagnostic.code === 'handoff.stale_view_evidence')).toBe(false)
+		})
 	})
 })

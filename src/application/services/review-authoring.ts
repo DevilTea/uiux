@@ -33,7 +33,7 @@ import { renderInputDigest } from '../../domain/evidence/render-input-digest'
 import { isCompleteEvidenceForRenderInput, unknownProvenanceFreshness, type EvidenceStalenessContext } from '../../domain/evidence/staleness'
 import { adapterFreshnessContext } from '../../domain/evidence/adapter-provenance'
 import { productKitFreshnessContext } from '../../domain/product-kit/provenance'
-import { readCurrentAdapterProvenance } from './adapter-provenance'
+import { readCurrentAdapterProvenance, type AdapterProvenanceSource } from './adapter-provenance'
 import { readCurrentProductKitProvenance } from './product-kit-provenance'
 import { unknownChangeDomainDiagnostics } from '../../domain/reviews/change-domains'
 import type { FileNativePersistence } from '../../persistence'
@@ -218,7 +218,11 @@ function sameStampedActor(left: ReviewActor | undefined, right: ReviewActor | un
 	return !!left && !!right && isMemberActorId(left.id) && left.id === right.id && left.type === right.type
 }
 
-export function createReviewAuthoringService(persistence: FileNativePersistence): ReviewAuthoringService {
+/**
+ * `adapterProvenance`: where the current Adapter provenance a cited formal capture is judged against
+ * comes from (Rule 01a167bf-1f93-78b7-9045-6562c20f5a42); without it the Adapters resolve from disk.
+ */
+export function createReviewAuthoringService(persistence: FileNativePersistence, options: Readonly<{ adapterProvenance?: AdapterProvenanceSource }> = {}): ReviewAuthoringService {
 	/** Writes only ever happen at the policy currentVersion, whose shape every candidate has. */
 	function validateCandidate(resource: ReviewThread) {
 		return validateReviewThread(resource, {})
@@ -476,7 +480,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		const evidenceDiagnostics: Diagnostic[] = []
 		// The current Adapter and Product Kit provenance, read once and only when a formal capture is cited.
 		let currentProvenance: Promise<Pick<EvidenceStalenessContext, 'adapters' | 'adaptersUnavailable' | 'productKit' | 'productKitUnavailable'>> | undefined
-		const provenanceContext = () => currentProvenance ??= Promise.all([readCurrentAdapterProvenance(persistence), readCurrentProductKitProvenance(persistence)])
+		const provenanceContext = () => currentProvenance ??= Promise.all([readCurrentAdapterProvenance(persistence, options.adapterProvenance), readCurrentProductKitProvenance(persistence)])
 			.then(([adapters, productKit]) => ({ ...adapterFreshnessContext(adapters), ...productKitFreshnessContext(productKit) }))
 		for (const [index, ref] of command.evidenceRefs.entries()) {
 			const path = `/evidenceRefs/${index}`

@@ -15,7 +15,7 @@ import { canonicalJsonBytes, FileNativePersistence, V5_LAYOUT } from '../src/per
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { readKitBuildForHttp, readKitBuildLogForHttp, readProductKitForHttp, restartKitBuildForHttp } from '../src/server/authoring-http'
 import { createKitBuildRunner, KIT_BUILD_GENERATION_WARNING, KIT_BUILD_LOG_BYTES, KIT_BUILD_RESTART_INTERVAL_MS, KitBuildLog, kitBuildEnvironment, registerKitBuildRunner, type KitBuildRunner } from '../src/server/kit-build'
-import { getSelectedWorkspacePreviewBundle, resolveSelectedWorkspaceAdapters } from '../src/server/workspace-adapters'
+import { getSelectedWorkspacePreviewBundle, resolveSelectedWorkspaceAdapterList, resolveSelectedWorkspaceAdapters } from '../src/server/workspace-adapters'
 import { connectMcp, scoped, testMember } from './support/access'
 import { currentManifest, writeManifest } from './support/workspace-layout'
 
@@ -882,6 +882,75 @@ async function sessionWith(control: KitBuildControl | undefined) {
 const EDITOR_AGENT = testMember({ nickname: 'claude', kind: 'agent', preset: 'editor', credential: 'token' })
 const READER_AGENT = testMember({ nickname: 'reader', kind: 'agent', credential: 'token', keys: ['workspace.read', 'product-kit.source.read'] })
 const BARE_READER = testMember({ nickname: 'bare', kind: 'human', credential: 'session', keys: ['workspace.read'] })
+
+/** Writes the output once, then once more as soon as `trigger.txt` appears, and stays alive like a watcher. */
+const WATCH_ON_TRIGGER = `
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+mkdirSync('dist', { recursive: true })
+writeFileSync('dist/uiux.js', ${JSON.stringify(adapterModule('kit-trigger-1'))})
+let rebuilt = false
+setInterval(() => {
+	if (rebuilt || !existsSync('trigger.txt')) return
+	rebuilt = true
+	writeFileSync('dist/uiux.js', ${JSON.stringify(adapterModule('kit-trigger-2'))})
+}, 25)
+`
+
+describe('Adapter provenance and the kit build (Rules 01a167bf-1f93 and 01a164bc-4e09, issue #304)', () => {
+	/** The application session as the selected Workspace runtime makes it under `uiux dev`. */
+	function provenanceSession(root: string, build: KitBuildRunner) {
+		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		return createWorkspaceApplicationSession(persistence, {
+			kitBuild: build,
+			resolveAdapters: adapters => resolveSelectedWorkspaceAdapterList(root, V5_LAYOUT, adapters),
+		})
+	}
+
+	it('follows the Preview\'s resolution of each settled output, and a kit edit not yet built changes nothing', async () => {
+		const root = await kitWorkspace(nodeBuild('build.mjs', { watch: [process.execPath, 'watch.mjs'] }), { 'build.mjs': BUILD_OK, 'watch.mjs': WATCH_ON_TRIGGER })
+		const { build } = runner(root, { register: true, capture: true })
+		await build.start()
+		await waitFor(() => build.outputGeneration(), generation => generation === 1)
+		expect(await settledState(build)).toEqual({ state: 'ready' })
+		const session = provenanceSession(root, build)
+		const first = await session.adapterProvenance()
+		expect(first).toEqual({ state: 'available', adapters: [expect.objectContaining({ moduleSpecifier: './dist/uiux.js', adapterId: 'kit-trigger-1', contentDigest: expect.stringMatching(/^sha256:/) })] })
+		expect((await resolveSelectedWorkspaceAdapters(root, V5_LAYOUT)).summaries[0]?.adapterId).toBe('kit-trigger-1')
+
+		// A kit source edit the build has not turned into output yet.
+		await write(join(root, 'kit', 'src', 'later.ts'), 'export const later = 1\n')
+		expect(await session.adapterProvenance()).toEqual(first)
+
+		// The next settled output: the Preview and the provenance move to it together.
+		await writeFile(join(root, 'kit', 'trigger.txt'), 'rebuild\n')
+		await waitFor(() => build.outputGeneration(), generation => generation === 2)
+		await waitFor(() => build.status().state, state => state === 'ready')
+		expect((await resolveSelectedWorkspaceAdapters(root, V5_LAYOUT)).summaries[0]?.adapterId).toBe('kit-trigger-2')
+		const second = await session.adapterProvenance()
+		expect(second).toEqual({ state: 'available', adapters: [expect.objectContaining({ adapterId: 'kit-trigger-2' })] })
+		expect(second.state === 'available' && first.state === 'available' && second.adapters[0]!.contentDigest).not.toBe(first.state === 'available' && first.adapters[0]!.contentDigest)
+	}, 30_000)
+
+	it('cannot compute the current Adapter provenance while a build has failed or is running, though the Preview keeps the last good output', async () => {
+		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK, 'fail.mjs': BUILD_FAIL, 'hang.mjs': HANG })
+		const { build } = runner(root, { register: true, capture: true, restartIntervalMs: 0 })
+		await build.start()
+		expect(await settledState(build)).toEqual({ state: 'ready' })
+		const session = provenanceSession(root, build)
+		expect(await session.adapterProvenance()).toEqual({ state: 'available', adapters: [expect.objectContaining({ adapterId: 'kit-adapter-1' })] })
+
+		await replace(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', type: 'module', uiux: nodeBuild('fail.mjs') }))
+		await build.restart()
+		expect(await settledState(build)).toMatchObject({ state: 'failed' })
+		expect((await resolveSelectedWorkspaceAdapters(root, V5_LAYOUT)).summaries[0]?.adapterId).toBe('kit-adapter-1')
+		expect(await session.adapterProvenance()).toEqual({ state: 'unavailable' })
+
+		await replace(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', type: 'module', uiux: nodeBuild('hang.mjs') }))
+		await build.restart()
+		expect(build.status()).toEqual({ state: 'building' })
+		expect(await session.adapterProvenance()).toEqual({ state: 'unavailable' })
+	}, 30_000)
+})
 
 describe('restart_kit_build and the build state over MCP and HTTP (Clauses 01a11be8-5b64, 01a11bb1-b0f1, 01a11bb1-b35a and 01a11bb1-b3c2)', () => {
 	it('restarts with product-kit.write and refuses without it, naming the key and starting nothing', async () => {

@@ -38,7 +38,7 @@ import {
 	type ValidatedAdapterSet,
 } from '../../adapters/resolution'
 import { adapterFreshnessContext } from '../../domain/evidence/adapter-provenance'
-import { adapterEntryProvenance, adapterSetEvidenceProvenance, resolveProductKitAdapterSet, type AdapterGraphDigestCache } from './adapter-provenance'
+import { adapterEntryProvenance, adapterSetEvidenceProvenance, kitBuildAllowsAdapterProvenance, resolveProductKitAdapterSet, type AdapterGraphDigestCache, type AdapterProvenanceSource } from './adapter-provenance'
 import { bareSpecifierPackageName } from '../../adapters/kit-dependencies'
 import { resolveKitPackage } from '../../adapters/kit-packages'
 import { locateKitProject, type KitProject } from '../../adapters/kit-registry'
@@ -110,7 +110,13 @@ export interface HandoffExportService {
 	exportHandoff(command: ExportHandoffCommand): Promise<ExportHandoffResult>
 }
 
-export function createHandoffExportService(persistence: FileNativePersistence, options: Readonly<{ checkAdapterSet?: AdapterSetRuntimeCheck }> = {}): HandoffExportService {
+/**
+ * `adapterProvenance`: the server's Adapter resolution, the one the Preview renders with, and the kit
+ * build state, which the closure's Adapters and the Evidence freshness follow (Rules
+ * 01a167bf-1f93-78b7-9045-6562c20f5a42 and 01a164bc-4e09-78be-91fe-e7ecb3c42edb); without it the
+ * Adapters resolve from disk.
+ */
+export function createHandoffExportService(persistence: FileNativePersistence, options: Readonly<{ checkAdapterSet?: AdapterSetRuntimeCheck; adapterProvenance?: AdapterProvenanceSource }> = {}): HandoffExportService {
 	async function blockedForSchema(): Promise<HandoffSchemaBlocked | undefined> {
 		const { inspection } = await persistence.inspectWorkspace()
 		if (inspection.state === 'unsupported')
@@ -378,7 +384,7 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		if (nonRootWidgetTypes.size > 0 && rawAdaptersForAssetDiscovery.length > 0) {
 			for (const selection of rawAdaptersForAssetDiscovery) {
 				try {
-					const single = await resolveProductKitAdapterSet(persistence, [selection])
+					const single = await resolveProductKitAdapterSet(persistence, [selection], options.adapterProvenance)
 					if (single.state !== 'valid' || !single.set.entries[0]) continue
 					const entry = single.set.entries[0]
 					for (const widgetType of entry.ownership.widgetTypes) {
@@ -570,9 +576,13 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 			set: Object.freeze({ entries: Object.freeze([]), [Symbol.for('ValidatedAdapterSet')]: true }) as never,
 			themeSupport: allThemesSupported(),
 		}
-		if (workspaceAdapters.length > 0) adaptersResolution = await resolveProductKitAdapterSet(persistence, workspaceAdapters)
+		if (workspaceAdapters.length > 0) adaptersResolution = await resolveProductKitAdapterSet(persistence, workspaceAdapters, options.adapterProvenance)
 		const adapterDigests: AdapterGraphDigestCache = new Map()
-		const currentAdapters = await adapterSetEvidenceProvenance(persistence, adaptersResolution, adapterDigests)
+		// While a kit build is running or its last run failed, the current Adapter provenance cannot be
+		// computed, so every capture's freshness is unknown (Rule 01a164bc-4e09-…).
+		const currentAdapters = kitBuildAllowsAdapterProvenance(options.adapterProvenance)
+			? await adapterSetEvidenceProvenance(persistence, adaptersResolution, adapterDigests)
+			: { state: 'unavailable' as const }
 		// 7. Evidence Records in closure
 		const evidenceRefs: EvidenceReference[] = []
 		const contextsInClosure: ResolvedRenderContext[] = []

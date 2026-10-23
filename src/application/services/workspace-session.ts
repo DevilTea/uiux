@@ -90,7 +90,7 @@ import {
 import { createProductKitChecksService, type ProductKitChecksResult } from './product-kit-checks'
 import { readCurrentProductKitProvenance } from './product-kit-provenance'
 import type { CurrentProductKitProvenance } from '../../domain/product-kit/provenance'
-import { readCurrentAdapterProvenance } from './adapter-provenance'
+import { readCurrentAdapterProvenance, type AdapterProvenanceSource, type AdapterSetResolver } from './adapter-provenance'
 import type { CurrentAdapterProvenance } from '../../domain/evidence/adapter-provenance'
 import {
 	createHandoffExportService,
@@ -246,6 +246,12 @@ export function createWorkspaceApplicationSession(
 		/** The theme support of the current Adapter resolution, which formal capture applies (Rule 01a11add-f46d-7e92-8f5a-9d10dba6473d). */
 		adapterThemeSupport?: AdapterThemeSupportSource
 		/**
+		 * The server's Adapter resolution, the one the Preview renders with, which formal capture, Evidence
+		 * freshness and Handoff export follow (Rule 01a167bf-1f93-78b7-9045-6562c20f5a42); without it the
+		 * Adapters resolve from disk.
+		 */
+		resolveAdapters?: AdapterSetResolver
+		/**
 		 * The member IDs on this host's roster now. Review reads mark an actor of kind member that is
 		 * not in it with `removed: true` (Rule 01a11485-f185-7c23-8f2a-e045a279cd27); without it nothing is marked.
 		 */
@@ -256,15 +262,24 @@ export function createWorkspaceApplicationSession(
 	const workspaceAuthoring = createWorkspaceAuthoringService(persistence)
 	const localeAuthoring = createLocaleAuthoringService(persistence)
 	const flowAuthoring = createFlowAuthoringService(persistence)
-	const reviewAuthoring = createReviewAuthoringService(persistence)
+	// Where Adapter provenance comes from (Rules 01a167bf-1f93-… and 01a164bc-4e09-…).
+	const adapterProvenanceSource: AdapterProvenanceSource = {
+		...(options?.resolveAdapters ? { resolve: options.resolveAdapters } : {}),
+		...(options?.kitBuild ? { kitBuild: () => options.kitBuild!.status() } : {}),
+	}
+	const reviewAuthoring = createReviewAuthoringService(persistence, { adapterProvenance: adapterProvenanceSource })
 	const assetAuthoring = createAssetAuthoringService(persistence)
 	const formalCapture = createFormalCaptureService(persistence, {
 		serverOrigin: options?.serverOrigin,
 		captureCookie: options?.captureCookie,
 		...(options?.kitBuild ? { kitBuild: () => options.kitBuild!.status() } : {}),
 		...(options?.adapterThemeSupport ? { themeSupport: options.adapterThemeSupport } : {}),
+		...(options?.resolveAdapters ? { resolveAdapters: options.resolveAdapters } : {}),
 	})
-	const handoffExport = createHandoffExportService(persistence, options?.checkAdapterSet ? { checkAdapterSet: options.checkAdapterSet } : {})
+	const handoffExport = createHandoffExportService(persistence, {
+		...(options?.checkAdapterSet ? { checkAdapterSet: options.checkAdapterSet } : {}),
+		adapterProvenance: adapterProvenanceSource,
+	})
 	const historyDiff = createHistoryDiffService(persistence, options?.history)
 	const historyService = createHistoryService(persistence, options?.history, options?.historyBoundary ? { boundary: options.historyBoundary } : {})
 	const historyRestore = createHistoryRestoreService(persistence, options?.history)
@@ -498,7 +513,7 @@ export function createWorkspaceApplicationSession(
 		viewRenderInputs: formalCapture.viewRenderInputs,
 		runProductKitChecks: command => productKitChecks.run({ ...(command?.readSource === false ? { readSource: false } : {}) }),
 		productKitProvenance: () => readCurrentProductKitProvenance(persistence),
-		adapterProvenance: () => readCurrentAdapterProvenance(persistence),
+		adapterProvenance: () => readCurrentAdapterProvenance(persistence, adapterProvenanceSource),
 		assessHandoffReadiness: handoffExport.assessReadiness,
 		exportHandoff: handoffExport.exportHandoff,
 		readArtifact: identity => persistence.artifacts.read(identity),
