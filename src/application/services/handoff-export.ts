@@ -442,10 +442,10 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		const assetSnapshots = new Map<string, HandoffResourceSnapshot>()
 		const referencedArtifacts = new Map<string, HandoffArtifactReference>()
 
-		const assetIds = [...assetsToInclude]
-		const assetReads = await persistence.assets.readManyInspected(assetIds)
-		for (const [assetIndex, assetId] of assetIds.entries()) {
-			const assetRead = settledValue(assetReads[assetIndex]!)
+		// Assets stay one read (and one lock) each: a read loads the full content bytes, so a batch would
+		// hold every Asset in memory and keep a queued writer waiting for all of those reads.
+		for (const assetId of assetsToInclude) {
+			const assetRead = await persistence.assets.readInspected(assetId)
 			if (!assetRead?.resource) {
 				rootsReadable = false
 				blockingDiagnostics.push({

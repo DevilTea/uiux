@@ -91,6 +91,17 @@ describe('batched reads share one lock (issue #322)', () => {
 		expect(settledValue(reads[3]!)?.resource.id).toBe(uuid(2))
 	})
 
+	it('reads every Locale and every Review thread of a batch under one lock', async () => {
+		const persistence = await makeWorkspace()
+		const acquire = spyAcquire(persistence)
+		const locales = await persistence.locales.readManyInspected(['en-US', 'zh-TW', 'ja-JP'])
+		expect(locales).toHaveLength(3)
+		expect(acquire).toHaveBeenCalledTimes(1)
+		acquire.mockClear()
+		expect(await persistence.reviews.readAllInspected()).toEqual([])
+		expect(acquire).toHaveBeenCalledTimes(1)
+	})
+
 	it('acquires a Handoff readiness assessment\'s locks independently of the number of Views and Flows', async () => {
 		const small = await makeWorkspace()
 		await populate(small, 1, 1)

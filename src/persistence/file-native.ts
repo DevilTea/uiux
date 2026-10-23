@@ -1762,11 +1762,6 @@ export class AuthoredAssetFileRepository implements MutableResourceRepository<st
 		return this.persistence.withReadLock(async () => this.readAssetUnlocked(id))
 	}
 
-	/** Reads the given Assets under ONE shared lock, in the given order, each with its own outcome (issue #322). */
-	async readManyInspected(ids: readonly string[]): Promise<readonly SettledRead<AuthoredAssetInspection | undefined>[]> {
-		return this.persistence.withReadLock(async () => settleEach(ids, id => this.readAssetUnlocked(id)))
-	}
-
 	async create(id: string, resource: AuthoredAssetResource): Promise<ResourceRevision> {
 		return this.persistence.withLock(async () => {
 			await this.persistence.assertWritableUnlocked()
