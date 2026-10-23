@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { createPreviewSessionId } from '../src/preview/protocol/generation-id'
 import { PreviewProtocolSession, PreviewSessionRegistry } from '../src/preview/protocol/session'
 
 const compatible = { ok: true } as const
@@ -183,6 +184,65 @@ describe('Preview protocol session/generation lineage', () => {
 		expect(session.admitDeclaredGeneration('generation-d').status).toBe('unauthorized')
 	})
 
+	it('starts the one automatic recovery attempt on request and admits the next declared generation as it (issue #101)', () => {
+		const session = protocolInvalidSession()
+		expect(session.beginAutomaticRecovery()).toBe('started')
+		expect(session.snapshot()).toMatchObject({ automaticRecoveryUsed: true, automaticRecoveryPending: true, recoveryNeeded: false })
+		// The allowance is spent once: a second start is not eligible.
+		expect(session.beginAutomaticRecovery()).toBe('not-eligible')
+		expect(session.admitDeclaredGeneration('generation-b')).toEqual({ status: 'admitted', generationId: 'generation-b', cause: 'automatic-recovery' })
+		expect(session.snapshot()).toMatchObject({ automaticRecoveryPending: false })
+		// That attempt fails as well: recovery is exhausted until an explicit retry.
+		session.receiveCapabilityDeclaration('generation-b', { protocolVersion: 1, features: [] }, compatible)
+		session.receiveCapabilityDeclaration('generation-b', { protocolVersion: 2, features: [] }, compatible)
+		expect(session.snapshot()).toMatchObject({ recoveryExhausted: true, recoveryNeeded: false })
+		expect(session.beginAutomaticRecovery()).toBe('not-eligible')
+		expect(session.admitDeclaredGeneration('generation-c').status).toBe('unauthorized')
+	})
+
+	it('renews the automatic allowance when the attempt completes its handshake', () => {
+		const session = protocolInvalidSession()
+		session.beginAutomaticRecovery()
+		session.admitDeclaredGeneration('generation-b')
+		session.receiveCapabilityDeclaration('generation-b', { protocolVersion: 1, features: [] }, compatible)
+		expect(session.observeCapabilityAcknowledgement('generation-b').status).toBe('opened')
+		expect(session.snapshot()).toMatchObject({ automaticRecoveryUsed: false, automaticRecoveryPending: false, recoveryExhausted: false })
+	})
+
+	it('counts a protocol-invalid document with no admitted generation against the allowance', () => {
+		const session = new PreviewProtocolSession('session-a')
+		// The first document sends an undecodable message before any generation of it is admitted.
+		session.failRequestedDocument()
+		expect(session.snapshot()).toMatchObject({ recoveryNeeded: true })
+		expect(session.beginAutomaticRecovery()).toBe('started')
+		// The recovery document fails the same way: no generation was admitted, and recovery is exhausted.
+		session.failRequestedDocument()
+		expect(session.snapshot()).toMatchObject({ recoveryExhausted: true, automaticRecoveryPending: false })
+		expect(session.admitDeclaredGeneration('generation-a').status).toBe('unauthorized')
+		// Further findings while exhausted change nothing; an explicit retry is still possible.
+		session.failRequestedDocument()
+		expect(session.authorizeRetry()).toBe('authorized')
+		expect(session.admitDeclaredGeneration('generation-b')).toMatchObject({ status: 'admitted', cause: 'explicit-retry' })
+	})
+
+	it('fails an admitted generation as protocol-invalid when the Workbench finds its document invalid', () => {
+		const session = new PreviewProtocolSession('session-a')
+		session.admitDeclaredGeneration('generation-a')
+		session.failRequestedDocument()
+		expect(session.snapshot()).toMatchObject({ recoveryNeeded: true, retiredGenerationIds: ['generation-a'] })
+		expect('currentGenerationId' in session.snapshot()).toBe(false)
+	})
+
+	it('turns a retry trigger during a stalled automatic attempt into an explicit retry', () => {
+		const session = protocolInvalidSession()
+		session.beginAutomaticRecovery()
+		// The attempt's document never declared; Retry Preview abandons it for an explicit retry.
+		expect(session.authorizeRetry()).toBe('authorized')
+		expect(session.snapshot()).toMatchObject({ automaticRecoveryPending: false, recoveryExhausted: true, retryAuthorizationPending: true })
+		expect(session.authorizeRetry()).toBe('coalesced')
+		expect(session.admitDeclaredGeneration('generation-b')).toEqual({ status: 'admitted', generationId: 'generation-b', cause: 'explicit-retry' })
+	})
+
 	it('treats ACK-before-declaration as protocol-invalid and retires that generation', () => {
 		const session = new PreviewProtocolSession('session-a')
 		session.beginGeneration('generation-a', 'initial')
@@ -218,6 +278,32 @@ describe('Preview protocol session/generation lineage', () => {
 		expect(registry.open('session-a')).toEqual({ status: 'identity_reuse', previewSessionId: 'session-a' })
 		const other = registry.open('session-b')
 		expect(other.status).toBe('opened')
+	})
+
+	it('discards a minted session ID that is active or retired and mints another before the session begins (issue #101)', () => {
+		const registry = new PreviewSessionRegistry()
+		const first = registry.openFresh(() => 'session-a')
+		registry.close(first.previewSessionId)
+		const candidates = ['session-a', 'session-a', 'session-b']
+		const minted: string[] = []
+		const next = registry.openFresh(() => {
+			const candidate = candidates.shift()!
+			minted.push(candidate)
+			return candidate
+		})
+		expect(minted).toEqual(['session-a', 'session-a', 'session-b'])
+		expect(next.previewSessionId).toBe('session-b')
+		expect(registry.get('session-b')).toBe(next)
+		expect(registry.get('session-a')).toBeUndefined()
+		// A minter that only repeats a used ID never activates it.
+		expect(() => registry.openFresh(() => 'session-b')).toThrow(/never used/)
+	})
+
+	it('mints opaque random session IDs', () => {
+		const ids = new Set(Array.from({ length: 64 }, () => createPreviewSessionId()))
+		expect(ids.size).toBe(64)
+		for (const id of ids) expect(id).toMatch(/^session-[0-9a-f]{32}$/)
+		expect(createPreviewSessionId('version-frame')).toMatch(/^version-frame-[0-9a-f]{32}$/)
 	})
 })
 
