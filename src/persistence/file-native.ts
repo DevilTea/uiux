@@ -1014,17 +1014,29 @@ export class FileNativePersistence {
 		await fs.rm(tombstoneAbsolute, { recursive: true, force: true })
 	}
 
+	/**
+	 * Takes the cross-process persistence lock: the owner record `{ pid, token }` is written to a
+	 * unique candidate file and published with an atomic `link` to the lock path, which fails while
+	 * another owner holds it; the returned release removes the lock only while it still names this
+	 * token.
+	 *
+	 * The lock is a mutual-exclusion marker, not data, so its directory entries are never fsynced
+	 * (issue #321): a lock lost in a crash is released, which is right because its owner died in the
+	 * crash, and a removal lost in a crash leaves a record that `removeStaleLock` clears once its pid
+	 * is not a running process. Only the candidate's bytes are synced, before the `link`, so a lock
+	 * file that survives a crash is always a complete record, never one that `removeStaleLock`
+	 * refuses as unreadable. Canonical writes and transactions keep all their fsyncs.
+	 */
 	private async acquireLock(deadline: number): Promise<() => Promise<void>> {
 		await ensureSafeDirectory(this.root, this.layout.metadataDir)
 		const lockAbsolute = resolveWorkspacePath(this.root, this.layout.lockPath)
-		const lockParent = dirname(lockAbsolute)
 		const token = randomUUID()
 		while (true) {
 			const candidateRelative = this.layout.metadataFilePath(`.persistence-lock-${token}-${randomUUID()}.tmp`)
 			const candidateAbsolute = resolveWorkspacePath(this.root, candidateRelative)
 			let published = false
 			try {
-				await writeSyncedFile(candidateAbsolute, Buffer.from(JSON.stringify({ pid: process.pid, token }), 'utf8'), true)
+				await writeLockCandidate(candidateAbsolute, Buffer.from(JSON.stringify({ pid: process.pid, token }), 'utf8'))
 				try {
 					await fs.link(candidateAbsolute, lockAbsolute)
 					published = true
@@ -1039,7 +1051,6 @@ export class FileNativePersistence {
 					await delay(10)
 					continue
 				}
-				await syncDirectory(lockParent)
 				await fs.rm(candidateAbsolute, { force: true }).catch(() => undefined)
 				return async () => {
 					let owner: { token?: unknown }
@@ -1054,7 +1065,6 @@ export class FileNativePersistence {
 					}
 					if (owner.token !== token) return
 					await fs.rm(lockAbsolute, { force: true })
-					await syncDirectory(lockParent)
 				}
 			}
 			catch (error) {
@@ -1064,7 +1074,6 @@ export class FileNativePersistence {
 						const owner = JSON.parse(await fs.readFile(lockAbsolute, 'utf8')) as { token?: unknown }
 						if (owner.token === token) {
 							await fs.rm(lockAbsolute, { force: true })
-							await syncDirectory(lockParent)
 						}
 					}
 					catch { /* preserve the original acquisition failure */ }
@@ -1098,7 +1107,6 @@ export class FileNativePersistence {
 		catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return false
 			await fs.rm(lockAbsolute, { force: true })
-			await syncDirectory(dirname(lockAbsolute))
 			return true
 		}
 	}
@@ -2362,6 +2370,22 @@ async function makeDirectorySynced(absoluteDirectory: string): Promise<void> {
 		const parent = dirname(directory)
 		await syncDirectory(parent)
 		if (parent === top || parent === directory) break
+	}
+}
+
+/**
+ * Writes a persistence lock candidate like {@link writeSyncedFile}, but without its directory fsync:
+ * the candidate's bytes are synced, its directory entry is not (see `acquireLock`).
+ */
+async function writeLockCandidate(absolutePath: string, bytes: Uint8Array): Promise<void> {
+	await makeDirectorySynced(dirname(absolutePath))
+	const handle = await fs.open(absolutePath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
+	try {
+		await handle.writeFile(bytes)
+		await handle.sync()
+	}
+	finally {
+		await handle.close()
 	}
 }
 
