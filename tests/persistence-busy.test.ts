@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { link, mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
@@ -13,7 +13,7 @@ import { createWorkspaceApplicationSession } from '../src/application/services/w
 import { isFullUuid } from '../src/domain/validation'
 import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
 import { FileNativePersistence, PersistenceError, isPersistenceBusyError, persistenceBusyResult } from '../src/persistence'
-import { BOOT_STALENESS_TOLERANCE_MS, currentBootId, currentBootTimeMs } from '../src/persistence/boot-staleness'
+import { BOOT_STALENESS_TOLERANCE_MS, currentBootId, currentBootTimeMs, resetBootIdForTests } from '../src/persistence/boot-staleness'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { sendPersistenceBusyError } from '../src/server/persistence-busy'
 import { describeFetchError, isTransientError } from '../app/utils/fetch-error'
@@ -27,6 +27,7 @@ const ASSET_ID = '55555555-5555-4555-8555-555555555555'
 const roots: string[] = []
 
 afterEach(async () => {
+	resetBootIdForTests()
 	await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
@@ -163,6 +164,7 @@ describe('persistence lock file (issue #321)', () => {
 			const owner = JSON.parse(await readFile(lockPath, 'utf8')) as { pid: unknown; token: unknown; bootId?: unknown }
 			expect(owner.pid).toBe(process.pid)
 			expect(owner.bootId).toBe(BOOT_ID)
+			expect((owner as { hostname?: unknown }).hostname).toBe(hostname())
 			expect(typeof owner.token === 'string' && isFullUuid(owner.token)).toBe(true)
 			expect(await lockCandidates(root)).toEqual([])
 		})
@@ -206,10 +208,34 @@ describe('persistence lock file (issue #321)', () => {
 	})
 
 	// Owner ruling 2026-10-23 (Discussion #241): a lock from an earlier boot is stale whatever it records.
-	it('clears a lock that records another boot, even with a live pid and a fresh time', async () => {
+	it.skipIf(BOOT_ID === undefined)('clears a lock that records another boot, even with a live pid and a fresh time', async () => {
 		const root = await seedWorkspace(CURRENT_WORKSPACE_SCHEMA_VERSION)
 		const lockPath = join(root, '.persistence.lock')
 		await writeFile(lockPath, JSON.stringify({ pid: process.pid, token: randomUUID(), bootId: randomUUID() }))
+		expect((await open(root, 120).views.read(VIEW_ID))?.resource).toMatchObject({ id: VIEW_ID })
+		expect(await readFile(lockPath).catch(error => error.code)).toBe('ENOENT')
+	})
+
+	it('keeps the lock of another host, whatever boot or pid it records', async () => {
+		const root = await seedWorkspace(CURRENT_WORKSPACE_SCHEMA_VERSION)
+		const lockPath = join(root, '.persistence.lock')
+		const record = JSON.stringify({ pid: deadPid(), hostname: `${hostname()}-elsewhere`, token: randomUUID(), bootId: randomUUID() })
+		await writeFile(lockPath, record)
+		const beforeBoot = new Date(currentBootTimeMs() - 60_000)
+		await utimes(lockPath, beforeBoot, beforeBoot)
+		await expect(open(root, 120).views.read(VIEW_ID)).rejects.toMatchObject({ code: 'persistence.lock_busy' })
+		expect(await readFile(lockPath, 'utf8')).toBe(record)
+	})
+
+	it('judges a lock by its time when this process has no boot identifier, although the lock records one', async () => {
+		resetBootIdForTests({ read: async () => { throw new Error('sysctl unavailable') } })
+		const root = await seedWorkspace(CURRENT_WORKSPACE_SCHEMA_VERSION)
+		const lockPath = join(root, '.persistence.lock')
+		const record = JSON.stringify({ pid: process.pid, hostname: hostname(), token: randomUUID(), bootId: randomUUID() })
+		await writeFile(lockPath, record)
+		await expect(open(root, 120).views.read(VIEW_ID)).rejects.toMatchObject({ code: 'persistence.lock_busy' })
+		const beforeBoot = new Date(currentBootTimeMs() - 60_000)
+		await utimes(lockPath, beforeBoot, beforeBoot)
 		expect((await open(root, 120).views.read(VIEW_ID))?.resource).toMatchObject({ id: VIEW_ID })
 		expect(await readFile(lockPath).catch(error => error.code)).toBe('ENOENT')
 	})

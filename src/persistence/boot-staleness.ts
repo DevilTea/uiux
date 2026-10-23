@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
-import { uptime } from 'node:os'
+import { hostname, uptime } from 'node:os'
 
 /*
  * Boot-time staleness of the host locks and holds (owner ruling 2026-10-23,
@@ -9,11 +9,15 @@ import { uptime } from 'node:os'
  * records. This clears a lock whose recorded pid now belongs to another process and an empty or
  * partial lock left by a crash. The persistence lock, the roster lock and the server hold use it.
  *
- * The decision prefers the host's boot session identifier, which no clock change affects: a record
- * that carries one is from another boot exactly when it differs from the current one. Only a record
- * without one (empty, partial, written by an older build, or on a platform without an identifier),
- * or a process that cannot read the current one, falls back to comparing the file's modification
- * time with the boot time.
+ * Boot identity belongs to a kernel, so it only applies to a record of this host: a record naming
+ * another `hostname` (a Workspace bind-mounted into a container, or shared over NFS) is never stale
+ * by boot, and each lock treats it as its own other-host case.
+ *
+ * For a record of this host, the decision prefers the boot session identifier, which no clock
+ * change affects: when both the record and the checking process have one, the record is from
+ * another boot exactly when they differ. Otherwise (an empty, partial or older record, a platform
+ * without an identifier, or a process that could not read its own) it falls back to comparing the
+ * file's modification time with the boot time.
  */
 
 /**
@@ -23,24 +27,65 @@ import { uptime } from 'node:os'
  */
 export const BOOT_STALENESS_TOLERANCE_MS = 5_000
 
+/** How long a failed boot identifier read is remembered before the next call reads again. */
+export const BOOT_ID_RETRY_COOLDOWN_MS = 60_000
+
 const BOOT_ID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/iu
 
-let bootIdOnce: Promise<string | undefined> | undefined
+type BootIdSource = Readonly<{
+	read: () => Promise<string | undefined>
+	/** A monotonic clock in milliseconds, for the retry cooldown. */
+	now: () => number
+}>
+
+const DEFAULT_SOURCE: BootIdSource = { read: readPlatformBootId, now: () => performance.now() }
+let source: BootIdSource = DEFAULT_SOURCE
+let known: string | undefined
+let pending: Promise<string | undefined> | undefined
+let failedAt: number | undefined
+/** Bumped by a reset, so a read started before it never lands in the state after it. */
+let generation = 0
 
 /**
- * This host's boot session identifier, read once per process and cached: Linux's
- * `/proc/sys/kernel/random/boot_id`, macOS's `kern.bootsessionuuid` (one `sysctl` run), undefined
- * elsewhere or when it cannot be read.
+ * This host's boot session identifier: Linux's `/proc/sys/kernel/random/boot_id`, macOS's
+ * `kern.bootsessionuuid` (one `sysctl` run), undefined elsewhere or when it cannot be read. A
+ * successful read is kept for the process; a failed one is remembered for
+ * {@link BOOT_ID_RETRY_COOLDOWN_MS} and then read again.
  */
 export function currentBootId(): Promise<string | undefined> {
-	bootIdOnce ??= readBootId().then(value => {
-		const id = value?.trim().toLowerCase()
-		return id && BOOT_ID.test(id) ? id : undefined
-	}, () => undefined)
-	return bootIdOnce
+	if (known !== undefined) return Promise.resolve(known)
+	if (pending) return pending
+	if (failedAt !== undefined && source.now() - failedAt < BOOT_ID_RETRY_COOLDOWN_MS) return Promise.resolve(undefined)
+	const started = generation
+	const reading = source.read().then(normalizeBootId, () => undefined).then((id) => {
+		if (started !== generation) return id
+		pending = undefined
+		if (id === undefined) failedAt = source.now()
+		else known = id
+		return id
+	})
+	pending = reading
+	return reading
 }
 
-async function readBootId(): Promise<string | undefined> {
+/**
+ * Test-only: replaces how the boot identifier is read (and the cooldown's clock) and forgets what
+ * was read; without an argument it restores the platform reader.
+ */
+export function resetBootIdForTests(replacement?: Partial<BootIdSource>): void {
+	source = { ...DEFAULT_SOURCE, ...replacement }
+	generation += 1
+	known = undefined
+	pending = undefined
+	failedAt = undefined
+}
+
+function normalizeBootId(value: string | undefined): string | undefined {
+	const id = value?.trim().toLowerCase()
+	return id && BOOT_ID.test(id) ? id : undefined
+}
+
+async function readPlatformBootId(): Promise<string | undefined> {
 	if (process.platform === 'linux') return readFile('/proc/sys/kernel/random/boot_id', 'utf8')
 	if (process.platform === 'darwin') {
 		return new Promise(resolveId => {
@@ -72,10 +117,20 @@ export function predatesCurrentBoot(stats: Readonly<{ mtimeMs: number }>, bootTi
 }
 
 /**
+ * Whether a lock record names a host other than this one. A record without a `hostname` (empty,
+ * partial or older) does not.
+ */
+export function recordedOnAnotherHost(record: unknown, currentHost: string = hostname()): boolean {
+	if (typeof record !== 'object' || record === null) return false
+	const recorded = (record as { hostname?: unknown }).hostname
+	return typeof recorded === 'string' && recorded !== currentHost
+}
+
+/**
  * Whether a lock or hold record belongs to an earlier boot of this host. `record` is the parsed
  * record, or undefined when its bytes are empty or unreadable; `stats` is the file's, read from the
- * same open file. A record whose `bootId` equals `currentId` is never stale by boot, whatever its
- * modification time says.
+ * same open file. A record of another host is never from an earlier boot of this one, and a record
+ * whose `bootId` equals `currentId` is never stale by boot, whatever its modification time says.
  */
 export function isFromEarlierBoot(
 	record: unknown,
@@ -83,6 +138,7 @@ export function isFromEarlierBoot(
 	currentId: string | undefined,
 	bootTimeMs?: number,
 ): boolean {
+	if (recordedOnAnotherHost(record)) return false
 	const recorded = recordedBootId(record)
 	if (recorded !== undefined && currentId !== undefined) return recorded !== currentId
 	return predatesCurrentBoot(stats, bootTimeMs)

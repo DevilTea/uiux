@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { acquireServerHold, readActiveServerHold } from '../src/persistence'
-import { BOOT_STALENESS_TOLERANCE_MS, currentBootId, currentBootTimeMs, isFromEarlierBoot, predatesCurrentBoot } from '../src/persistence/boot-staleness'
+import { BOOT_ID_RETRY_COOLDOWN_MS, BOOT_STALENESS_TOLERANCE_MS, currentBootId, currentBootTimeMs, isFromEarlierBoot, predatesCurrentBoot, recordedOnAnotherHost, resetBootIdForTests } from '../src/persistence/boot-staleness'
 import { AccessStore, accessStorePaths } from '../src/server/access/store'
 import { CURRENT_TEST_LAYOUT } from './support/workspace-layout'
 
@@ -19,6 +19,7 @@ const BOOT_ID = await currentBootId()
 const cleanup: string[] = []
 
 afterEach(async () => {
+	resetBootIdForTests()
 	await Promise.all(cleanup.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
 
@@ -51,6 +52,46 @@ describe('predatesCurrentBoot', () => {
 	})
 })
 
+describe('currentBootId', () => {
+	it('keeps a successful read for the process', async () => {
+		let reads = 0
+		resetBootIdForTests({ read: async () => { reads += 1; return '7E8CCF7B-4C7E-4216-B79F-38117883D218\n' } })
+		expect(await Promise.all([currentBootId(), currentBootId()])).toEqual(['7e8ccf7b-4c7e-4216-b79f-38117883d218', '7e8ccf7b-4c7e-4216-b79f-38117883d218'])
+		expect(await currentBootId()).toBe('7e8ccf7b-4c7e-4216-b79f-38117883d218')
+		expect(reads).toBe(1)
+	})
+
+	it('answers undefined after a failed read, and reads again only after the cooldown', async () => {
+		let now = 1_000
+		let reads = 0
+		let answer: () => Promise<string | undefined> = async () => { throw new Error('sysctl timed out') }
+		resetBootIdForTests({ read: () => { reads += 1; return answer() }, now: () => now })
+		expect(await currentBootId()).toBeUndefined()
+		now += BOOT_ID_RETRY_COOLDOWN_MS - 1
+		expect(await currentBootId()).toBeUndefined()
+		expect(reads).toBe(1)
+		answer = async () => 'not a boot id'
+		now += 1
+		expect(await currentBootId()).toBeUndefined()
+		expect(reads).toBe(2)
+		answer = async () => '7e8ccf7b-4c7e-4216-b79f-38117883d218'
+		now += BOOT_ID_RETRY_COOLDOWN_MS
+		expect(await currentBootId()).toBe('7e8ccf7b-4c7e-4216-b79f-38117883d218')
+		now += 10 * BOOT_ID_RETRY_COOLDOWN_MS
+		expect(await currentBootId()).toBe('7e8ccf7b-4c7e-4216-b79f-38117883d218')
+		expect(reads).toBe(3)
+	})
+})
+
+describe('recordedOnAnotherHost', () => {
+	it('names another host only for a record whose hostname differs', () => {
+		expect(recordedOnAnotherHost({ hostname: 'elsewhere' }, 'here')).toBe(true)
+		expect(recordedOnAnotherHost({ hostname: 'here' }, 'here')).toBe(false)
+		for (const record of [undefined, null, '', 5, {}, { hostname: 7 }])
+			expect(recordedOnAnotherHost(record, 'here')).toBe(false)
+	})
+})
+
 describe('isFromEarlierBoot', () => {
 	const boot = 1_800_000_000_000
 	const current = '7e8ccf7b-4c7e-4216-b79f-38117883d218'
@@ -61,6 +102,13 @@ describe('isFromEarlierBoot', () => {
 		expect(isFromEarlierBoot({ bootId: current }, beforeBoot, current, boot)).toBe(false)
 		expect(isFromEarlierBoot({ bootId: current.toUpperCase() }, beforeBoot, current, boot)).toBe(false)
 		expect(isFromEarlierBoot({ bootId: randomUUID() }, sinceBoot, current, boot)).toBe(true)
+	})
+
+	it('never calls the record of another host stale by boot', () => {
+		const elsewhere = `${hostname()}-elsewhere`
+		expect(isFromEarlierBoot({ hostname: elsewhere, bootId: randomUUID() }, beforeBoot, current, boot)).toBe(false)
+		expect(isFromEarlierBoot({ hostname: elsewhere }, beforeBoot, current, boot)).toBe(false)
+		expect(isFromEarlierBoot({ hostname: hostname(), bootId: randomUUID() }, sinceBoot, current, boot)).toBe(true)
 	})
 
 	it('falls back to the modification time without a usable recorded or current identifier', () => {
@@ -107,7 +155,17 @@ describe('roster lock staleness by boot', () => {
 		expect(await readFile(paths.lock).catch(error => error.code)).toBe('ENOENT')
 	})
 
-	it('clears a roster lock that records another boot, even with a live pid and a fresh time', async () => {
+	it('keeps the roster lock of another host, whatever boot it records', async () => {
+		const { workspace, home, paths, leftover } = await rosterWithLeftover()
+		const record = JSON.stringify({ pid: process.pid, hostname: `${hostname()}-elsewhere`, token: 'held', bootId: randomUUID() })
+		await writeFile(paths.lock, record, { mode: 0o600 })
+		await setWrittenBeforeBoot(paths.lock)
+		await AccessStore.open({ workspaceRoot: workspace, home })
+		expect(await readdir(paths.dir)).toContain(leftover)
+		expect(await readFile(paths.lock, 'utf8')).toBe(record)
+	})
+
+	it.skipIf(BOOT_ID === undefined)('clears a roster lock that records another boot, even with a live pid and a fresh time', async () => {
 		const { workspace, home, paths, leftover } = await rosterWithLeftover()
 		await writeFile(paths.lock, JSON.stringify({ pid: process.pid, token: 'held', bootId: randomUUID() }), { mode: 0o600 })
 		await AccessStore.open({ workspaceRoot: workspace, home })
@@ -168,7 +226,7 @@ describe('server hold staleness by boot', () => {
 		finally { await acquired?.release() }
 	})
 
-	it('ignores a hold of this host that records another boot, even with a live pid and a fresh time', async () => {
+	it.skipIf(BOOT_ID === undefined)('ignores a hold of this host that records another boot, even with a live pid and a fresh time', async () => {
 		const { root } = await holdOf(process.pid, { bootId: randomUUID() })
 		expect(await readActiveServerHold(root, CURRENT_TEST_LAYOUT)).toBeUndefined()
 	})
