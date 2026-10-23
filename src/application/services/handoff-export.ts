@@ -7,11 +7,11 @@ import { sha256Identity } from '../../domain/artifacts/schema'
 import { type AdapterProvenance, type AdapterWidgetCatalogEntry } from '../../domain/adapters/schema'
 import { validateAssetBinding } from '../../domain/assets/schema'
 import {
-	validateFormalEvidenceRecord,
 	type EvidenceReference,
 	type FormalEvidenceRecord,
 } from '../../domain/evidence/schema'
 import { renderInputDigest } from '../../domain/evidence/render-input-digest'
+import { formalCaptureRecordOf } from './formal-capture'
 import { evaluateEvidenceStaleness } from '../../domain/evidence/staleness'
 import {
 	mayClaimImplementationReady,
@@ -591,18 +591,13 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		// 7. Evidence Records in closure
 		const evidenceRefs: EvidenceReference[] = []
 		const contextsInClosure: ResolvedRenderContext[] = []
-		const artifactIdentities = await persistence.artifacts.listIdentities()
+		const artifactCandidates = await persistence.artifacts.readAllCandidateJson<unknown, FormalEvidenceRecord>({ select: formalCaptureRecordOf })
 		// Rule 01a115cd-c5a5-…: each closure View's current render-input digest, taken once.
 		const stalenessViews = [...viewSnapshots.entries()].map(([key, snapshot]) => ({ key, renderInputDigest: renderInputDigest(snapshot.snapshot) }))
 		const viewEvidenceMap = new Map<string, FormalEvidenceRecord[]>()
 		const staleEvidenceByView = new Map<string, number>()
 
-		for (const identity of artifactIdentities) {
-			const parsed = await persistence.artifacts.readCandidateJson(identity)
-			if (!parsed) continue
-			const validation = validateFormalEvidenceRecord(parsed)
-			if (!validation.ok || validation.value.kind !== 'formal_capture') continue
-			const formalRec = validation.value
+		for (const { identity, value: formalRec } of artifactCandidates) {
 			const execCtx = formalRec.executionContext as Record<string, unknown> | undefined
 			const evViewId = execCtx?.viewId as string | undefined
 			if (evViewId && viewsToInclude.has(evViewId)) {

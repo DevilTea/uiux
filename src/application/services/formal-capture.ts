@@ -65,6 +65,12 @@ export interface FormalCaptureService {
 	viewRenderInputs(): Promise<readonly ViewRenderInput[]>
 }
 
+/** The formal capture record in a parsed artifact, if it is one; used to filter inside the read lock. */
+export function formalCaptureRecordOf(value: unknown): FormalEvidenceRecord | undefined {
+	const validation = validateFormalEvidenceRecord(value)
+	return validation.ok && validation.value.kind === 'formal_capture' ? validation.value : undefined
+}
+
 export function createFormalCaptureService(
 	persistence: FileNativePersistence,
 	options?: {
@@ -456,23 +462,16 @@ export function createFormalCaptureService(
 	}
 
 	async function listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]> {
-		const identities = await persistence.artifacts.listIdentities()
+		// One snapshot under one shared lock, not one lock acquisition per artifact (issue #318).
+		const candidates = await persistence.artifacts.readAllCandidateJson<unknown, FormalEvidenceRecord>({ select: formalCaptureRecordOf })
 		const items: FormalEvidenceItem[] = []
 
-		for (const identity of identities) {
-			const parsed = await persistence.artifacts.readCandidateJson(identity)
-			if (!parsed) continue
-			const validation = validateFormalEvidenceRecord(parsed)
-			if (validation.ok && validation.value.kind === 'formal_capture') {
-				if (viewId) {
-					const recContext = validation.value.executionContext as Record<string, unknown> | undefined
-					if (recContext?.viewId !== viewId) continue
-				}
-				items.push({
-					digest: identity,
-					record: validation.value,
-				})
+		for (const { identity, value: record } of candidates) {
+			if (viewId) {
+				const recContext = record.executionContext as Record<string, unknown> | undefined
+				if (recContext?.viewId !== viewId) continue
 			}
+			items.push({ digest: identity, record })
 		}
 
 		return items.sort((a, b) => a.digest.localeCompare(b.digest))
