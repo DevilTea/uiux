@@ -135,10 +135,14 @@ export class PreviewProtocolSession {
 	 * new Preview document or a restarted runtime, so it replaces any current generation as a
 	 * reload, subject to the recovery rules (Clauses 01a1161c-4119-712d-8785-7d8155c0ceee and
 	 * 01a1161c-4339-7614-ba65-6f21e37cd1a0). The first generation of the session is `initial`.
+	 * While no generation is current and an explicit retry is authorized, the next declared
+	 * generation is that retry and spends the authorization (Rules 01a1161c-3cf8-7859-9de8-2b99d22ce8aa
+	 * and 01a1161c-3d31-7a69-9d64-cad14a8071bb).
 	 */
 	admitDeclaredGeneration(generationId: string): GenerationAdmissionResult {
 		if (this.classifyGeneration(generationId) !== 'unseen') return { status: 'identity_reuse', generationId }
 		if (!this.current && this.retiredGenerationIds.size === 0) return this.beginGeneration(generationId, 'initial')
+		if (!this.current && this.retryAuthorizationPending) return this.beginGeneration(generationId, 'explicit-retry')
 		return this.replaceGenerationForLifecycle(generationId, 'reload')
 	}
 

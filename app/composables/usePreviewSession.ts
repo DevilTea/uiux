@@ -1,7 +1,13 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { useI18n } from '#imports'
 import { describeFetchError } from '../utils/fetch-error'
-import { isCapabilityDeclaration, WorkbenchPreviewProtocolBridge } from '../../src/preview/protocol/bridge'
+import {
+	envelopeGenerationId,
+	isCapabilityDeclaration,
+	WorkbenchPreviewProtocolBridge,
+	type BridgeReceiveResult,
+} from '../../src/preview/protocol/bridge'
+import { deriveWorkbenchFailure } from '../../src/preview/failure-diagnostic'
 import { PreviewNavigationState, type PreviewNavigationTarget } from '../../src/preview/navigation-state'
 import { PreviewTargetingState } from '../../src/preview/targeting-state'
 import { GeometryStreamCoordinator, type GeometryDemand, type GeometryReport } from '../../src/preview/geometry-streams'
@@ -15,6 +21,7 @@ import type { AffineOuterMapping } from '../../src/preview/outer-precision'
 import {
 	MULTI_TARGET_GEOMETRY_FEATURE,
 	type GeometryAcquireResponse,
+	type PreviewFailureDiagnostic,
 	type VisibleRegion,
 	type WidgetRect,
 } from '../../src/preview/protocol/schema'
@@ -120,6 +127,13 @@ export function createPreviewSession(state: WorkbenchState) {
 	const handshakePhase = ref<Exclude<SessionPhase, 'idle'>>('initiating')
 	/** True once any generation of this session completed its handshake: a later loss reads "Reconnecting". */
 	const hasConnected = ref(false)
+	/**
+	 * The last non-recoverable failure the Workbench derived, kept until a generation completes its
+	 * handshake: a generation refused while recovery is exhausted shows it again (issue #111).
+	 */
+	const previewFailure = shallowRef<PreviewFailureDiagnostic>()
+	/** True from a Retry Preview that authorized an explicit retry until that retry's handshake ends. */
+	const retryPending = ref(false)
 	const targetingInteractionId = ref<string>()
 	const canvasTool = ref<CanvasTool>('select')
 	/** The tool Comment returns to when it is left (Select unless Interact was active). */
@@ -150,6 +164,14 @@ export function createPreviewSession(state: WorkbenchState) {
 			default: return 'idle'
 		}
 	})
+
+	/**
+	 * The inline Preview diagnostic (Rule 01a11687-375e-7667-b8f1-59389fdd9780): shown while Preview is
+	 * unavailable after a non-recoverable failure, and through the handshake of the retry it
+	 * authorized, until a generation recovers, another document replaces the context, or the View closes.
+	 */
+	const failureDiagnostic = computed<PreviewFailureDiagnostic | undefined>(() =>
+		state.selectedViewId.value && (handshakePhase.value === 'failed' || retryPending.value) ? previewFailure.value : undefined)
 
 	let workbenchBridge: WorkbenchPreviewProtocolBridge | undefined
 	let navigationCoordinator: PreviewNavigationState | undefined
@@ -651,9 +673,21 @@ export function createPreviewSession(state: WorkbenchState) {
 		handshakePhase.value = 'initiating'
 	}
 
-	/** "Retry" on a stopped or stuck session: a fresh runtime generation and iframe document. */
+	/**
+	 * Retry Preview, the one shared manual recovery action (Rule 01a11687-386c-764f-98fd-cf19dc3d0013):
+	 * an explicit retry and a fresh Preview document. While recovery is exhausted it authorizes one
+	 * explicit retry, which the next declared generation spends; a press while that retry is pending
+	 * or in its handshake joins it and loads nothing (Rules 01a1161c-3dad-7ac1-b49b-a77fcb1e33f2 and
+	 * 01a1161c-3e28-7dcf-a06e-a2c12c83919c). Otherwise (a stuck start, or a failure that still has its
+	 * automatic recovery allowance) it only requests the fresh document.
+	 */
 	function retry(): void {
-		if (!state.selectedViewId.value) return
+		if (!state.selectedViewId.value || !workbenchBridge || retryPending.value) return
+		const authorization = workbenchBridge.authorizeRetry()
+		if (authorization === 'ignored-active-bootstrap') return
+		// `coalesced` here means an authorization outlived the attempt that should have spent it (its
+		// document never declared): the fresh document below spends it.
+		if (authorization === 'authorized' || authorization === 'coalesced') retryPending.value = true
 		replaceGeneration()
 	}
 
@@ -689,6 +723,9 @@ export function createPreviewSession(state: WorkbenchState) {
 	function onCapabilityAcknowledged(features: readonly string[]): void {
 		handshakePhase.value = 'open'
 		hasConnected.value = true
+		// A generation completed its handshake: Preview recovered, and no retry is pending any more.
+		previewFailure.value = undefined
+		retryPending.value = false
 		runtimeFeatures.value = features
 		// The document may have missed context changes made while it loaded; re-send those, then reopen geometry.
 		if (contextDiffersFromSource()) notifyIframeContext()
@@ -789,8 +826,11 @@ export function createPreviewSession(state: WorkbenchState) {
 
 	function receiveWire(input: unknown): void {
 		if (!workbenchBridge) return
+		const declaration = isCapabilityDeclaration(input)
 		// A declaration from a replaced document never admits a generation; it is dropped without effect.
-		if (isCapabilityDeclaration(input) && !requestedDocumentIsCommitted()) return
+		if (declaration && !requestedDocumentIsCommitted()) return
+		const phase = handshakePhase.value
+		const admittedGenerationId = runtimeGenerationId.value
 		const result = workbenchBridge.receive(input)
 		if (result.status === 'ack-dispatched') {
 			const features = (input as { payload?: { features?: unknown } }).payload?.features
@@ -802,13 +842,31 @@ export function createPreviewSession(state: WorkbenchState) {
 			else if (message.type === 'targeting.hover' || message.type === 'targeting.select' || message.type === 'targeting.escape') receiveTargeting(message)
 			else if (message.type === 'widget.event.occurrence') widgetEvents.receive(message)
 		}
-		else if (result.status === 'generation-refused') {
-			// Recovery is exhausted: the new document's generation is retired unacknowledged.
-			if (runtimeGenerationId.value) endGeneration()
-			handshakePhase.value = 'failed'
+		else {
+			const derived = deriveWorkbenchFailure({
+				result,
+				declaration,
+				envelopeGenerationId: envelopeGenerationId(input),
+				admittedGenerationId,
+				previewSessionId: previewSessionId.value,
+				phase,
+			})
+			if (derived.effect !== 'none') failPreview(result.status, derived.effect === 'fail' ? derived.failure : undefined)
 		}
-		else if (result.status === 'capability-failure') handshakePhase.value = 'failed'
-		else if (result.status === 'invalid' && handshakePhase.value !== 'open') handshakePhase.value = 'failed'
+	}
+
+	/**
+	 * Preview is unavailable after a non-recoverable failure: the handshake fails, the authorized
+	 * retry (if any) has run its course, and the diagnostic shows `failure`, or keeps the one shown
+	 * when the new generation was refused because recovery is exhausted.
+	 */
+	function failPreview(status: BridgeReceiveResult['status'], failure: PreviewFailureDiagnostic | undefined): void {
+		if (failure) previewFailure.value = failure
+		// The session already ended these generations: a refused one, or one whose declaration
+		// conflicted, which may have been open with live streams.
+		if ((status === 'generation-refused' || status === 'capability-conflict') && runtimeGenerationId.value) endGeneration()
+		handshakePhase.value = 'failed'
+		retryPending.value = false
 	}
 
 	function onWindowKeydown(event: KeyboardEvent): void {
@@ -902,6 +960,8 @@ export function createPreviewSession(state: WorkbenchState) {
 		geometryStreams,
 		selectWidget,
 		hideSelectionHighlight,
+		failureDiagnostic,
+		retryPending,
 		retry,
 		exitCommentMode,
 		onCommentTarget,

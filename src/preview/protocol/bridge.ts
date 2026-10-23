@@ -28,6 +28,7 @@ import {
 	type CapabilityCompatibility,
 	type GenerationAdmissionCause,
 	type GenerationAdmissionResult,
+	type RetryAuthorizationResult,
 } from './session'
 
 export type PreviewWireMessage = CapabilityDeclareMessage | CapabilityAckMessage | GeometryMessage | TargetingMessage | WidgetEventMessage
@@ -103,6 +104,16 @@ export class WorkbenchPreviewProtocolBridge {
 	retireGeneration(): void {
 		this.session.retireCurrentGeneration()
 		this.ackDispatchedGenerationId = undefined
+	}
+
+	/**
+	 * Retry Preview: authorizes one explicit retry while recovery is exhausted. The next generation
+	 * the runtime declares is that retry; a trigger while one is pending joins it, and a trigger
+	 * during a generation's handshake is ignored (Rules 01a1161c-3dad-7ac1-b49b-a77fcb1e33f2 and
+	 * 01a1161c-3e28-7dcf-a06e-a2c12c83919c).
+	 */
+	authorizeRetry(): RetryAuthorizationResult {
+		return this.session.authorizeRetry()
 	}
 
 	receive(input: unknown): BridgeReceiveResult {
@@ -419,6 +430,11 @@ function isGeometryResponse(message: GeometryMessage): message is GeometryRespon
 /** Whether an envelope, before any decode, is a `capability.declare`. */
 export function isCapabilityDeclaration(input: unknown): boolean {
 	return messageType(input) === 'capability.declare'
+}
+
+/** The `runtimeGenerationId` an envelope's context names, read without decoding the message. */
+export function envelopeGenerationId(input: unknown): string | undefined {
+	return envelopeCorrelation(input)?.runtimeGenerationId
 }
 
 function messageType(input: unknown): string | undefined {

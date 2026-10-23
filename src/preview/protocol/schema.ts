@@ -93,8 +93,10 @@ const KNOWN_CONTEXT_KEYS = new Set([
 ])
 const REQUIRED_BASE_CONTEXT = ['previewSessionId', 'runtimeGenerationId', 'viewId', 'widgetId'] as const
 const PAYLOAD_ONLY_IDENTITIES = new Set(['sequence', 'baseSnapshotVersion', 'snapshotVersion', 'regionId', 'regionIds', 'regions'])
-const FAILURE_CATEGORIES = new Set<ProtocolFailureCategory>(['transport', 'protocol', 'runtime', 'capability'])
-const INITIAL_REASON_CODES = new Set([
+export const PREVIEW_FAILURE_CATEGORIES: readonly ProtocolFailureCategory[] = Object.freeze(['transport', 'protocol', 'runtime', 'capability'])
+const FAILURE_CATEGORIES: ReadonlySet<ProtocolFailureCategory> = new Set(PREVIEW_FAILURE_CATEGORIES)
+/** The failure reason registry (Clause 01a11687-4114-728a-9d58-d69eaf786e5d); it only grows. */
+export const PREVIEW_FAILURE_REASON_CODES: ReadonlySet<string> = new Set([
 	'transport.channel_unavailable',
 	'runtime.unavailable',
 	'protocol.invalid_message',
@@ -404,7 +406,7 @@ export function validatePreviewFailureDiagnostic(input: unknown, path = ''): Val
 	const reason = v.string(diagnostic.reason, `${path}/reason`, true)
 	if (reason && !reason.startsWith(`${category}.`))
 		v.issue('protocol.failure_reason_category_mismatch', `${path}/reason`, 'Failure reason prefix must match its category.')
-	if (reason && !INITIAL_REASON_CODES.has(reason) && !/^(transport|protocol|runtime|capability)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*$/u.test(reason))
+	if (reason && !PREVIEW_FAILURE_REASON_CODES.has(reason) && !/^(transport|protocol|runtime|capability)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*$/u.test(reason))
 		v.issue('protocol.invalid_failure_reason', `${path}/reason`, 'Failure reason must be a stable category-prefixed identifier.')
 	if (Object.hasOwn(diagnostic, 'detail')) {
 		const detail = v.string(diagnostic.detail, `${path}/detail`)
