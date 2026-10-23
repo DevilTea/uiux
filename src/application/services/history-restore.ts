@@ -250,12 +250,10 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 		return reviews
 	}
 
-	/** The formal Evidence records, read as `listEvidence` reads them (each artifact under its own shared lock). */
+	/** The formal Evidence records, read as `listEvidence` reads them (all artifacts under one shared lock). */
 	async function readEvidence(): Promise<readonly ImpactEvidence[]> {
 		const evidence: ImpactEvidence[] = []
-		for (const digest of await persistence.artifacts.listIdentities()) {
-			const candidate = await persistence.artifacts.readCandidateJson(digest).catch(() => undefined)
-			if (candidate === undefined) continue
+		for (const { identity: digest, value: candidate } of await persistence.artifacts.readAllCandidateJson({ tolerateErrors: true })) {
 			const validation = validateFormalEvidenceRecord(candidate)
 			if (validation.ok && validation.value.kind === 'formal_capture') evidence.push({ digest, record: validation.value })
 		}

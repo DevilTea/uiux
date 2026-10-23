@@ -1847,89 +1847,117 @@ export class ImmutableArtifactStore {
 	}
 
 	async readCandidateJson<T = unknown>(identity: string, maxBytes = 512 * 1024): Promise<T | undefined> {
+		return this.persistence.withReadLock(async () => this.readCandidateJsonUnlocked<T>(identity, maxBytes))
+	}
+
+	/**
+	 * Every artifact that is a JSON object or array within `maxBytes`, read under ONE shared lock so
+	 * the listing is a single snapshot and the cross-process lock is taken once, not once per artifact
+	 * (issue #318). Sorted by identity. With `tolerateErrors`, an artifact that cannot be read is
+	 * skipped; otherwise its error is thrown, as `readCandidateJson` does.
+	 */
+	async readAllCandidateJson<T = unknown>(options: Readonly<{ maxBytes?: number; tolerateErrors?: boolean }> = {}): Promise<readonly Readonly<{ identity: string; value: T }>[]> {
 		return this.persistence.withReadLock(async () => {
-			const relativePath = this.persistence.layout.artifactRelativePath(identity)
-			const absolutePath = resolveWorkspacePath(this.persistence.root, relativePath)
-			let stats: import('node:fs').Stats
-			try {
-				stats = await fs.stat(absolutePath)
-			}
-			catch (error) {
-				if (isNotFound(error)) return undefined
-				throw error
-			}
-			if (stats.size === 0 || stats.size > maxBytes) {
-				return undefined
-			}
-			const bytes = await this.persistence.readOptionalBytesUnlocked(relativePath)
-			if (!bytes) return undefined
-			if (digestBytes(bytes) !== identity)
-				throw new PersistenceError('persistence.artifact_corrupt', `Existing immutable artifact ${identity} does not match its content identity.`)
-
-			// Quick binary magic / prefix check: JSON object/array must begin with whitespace or { / [
-			let firstNonWhitespace = -1
-			for (let i = 0; i < Math.min(bytes.length, 64); i++) {
-				const b = bytes[i]!
-				if (b !== 0x20 && b !== 0x09 && b !== 0x0A && b !== 0x0D) {
-					firstNonWhitespace = b
-					break
+			const found: { identity: string; value: T }[] = []
+			for (const identity of await this.listIdentitiesUnlocked()) {
+				let value: T | undefined
+				try {
+					value = await this.readCandidateJsonUnlocked<T>(identity, options.maxBytes ?? 512 * 1024)
 				}
+				catch (error) {
+					if (options.tolerateErrors) continue
+					throw error
+				}
+				if (value !== undefined && value !== null) found.push({ identity, value })
 			}
-			if (firstNonWhitespace !== 0x7B && firstNonWhitespace !== 0x5B) {
-				return undefined
-			}
-
-			let text: string
-			try {
-				const decoder = new TextDecoder('utf8', { fatal: true })
-				text = decoder.decode(bytes)
-			}
-			catch {
-				return undefined
-			}
-
-			try {
-				return JSON.parse(text) as T
-			}
-			catch {
-				return undefined
-			}
+			return found
 		})
 	}
 
+	private async readCandidateJsonUnlocked<T>(identity: string, maxBytes: number): Promise<T | undefined> {
+		const relativePath = this.persistence.layout.artifactRelativePath(identity)
+		const absolutePath = resolveWorkspacePath(this.persistence.root, relativePath)
+		let stats: import('node:fs').Stats
+		try {
+			stats = await fs.stat(absolutePath)
+		}
+		catch (error) {
+			if (isNotFound(error)) return undefined
+			throw error
+		}
+		if (stats.size === 0 || stats.size > maxBytes) {
+			return undefined
+		}
+		const bytes = await this.persistence.readOptionalBytesUnlocked(relativePath)
+		if (!bytes) return undefined
+		if (digestBytes(bytes) !== identity)
+			throw new PersistenceError('persistence.artifact_corrupt', `Existing immutable artifact ${identity} does not match its content identity.`)
+
+		// Quick binary magic / prefix check: JSON object/array must begin with whitespace or { / [
+		let firstNonWhitespace = -1
+		for (let i = 0; i < Math.min(bytes.length, 64); i++) {
+			const b = bytes[i]!
+			if (b !== 0x20 && b !== 0x09 && b !== 0x0A && b !== 0x0D) {
+				firstNonWhitespace = b
+				break
+			}
+		}
+		if (firstNonWhitespace !== 0x7B && firstNonWhitespace !== 0x5B) {
+			return undefined
+		}
+
+		let text: string
+		try {
+			const decoder = new TextDecoder('utf8', { fatal: true })
+			text = decoder.decode(bytes)
+		}
+		catch {
+			return undefined
+		}
+
+		try {
+			return JSON.parse(text) as T
+		}
+		catch {
+			return undefined
+		}
+	}
+
 	async listIdentities(): Promise<readonly string[]> {
-		return this.persistence.withReadLock(async () => {
-			const artifactsRelative = `${this.persistence.layout.artifactsDir}/sha256`
-			const artifactsAbsolute = resolveWorkspacePath(this.persistence.root, artifactsRelative)
-			let shards: import('node:fs').Dirent[]
+		return this.persistence.withReadLock(async () => this.listIdentitiesUnlocked())
+	}
+
+	private async listIdentitiesUnlocked(): Promise<readonly string[]> {
+		const artifactsRelative = `${this.persistence.layout.artifactsDir}/sha256`
+		const artifactsAbsolute = resolveWorkspacePath(this.persistence.root, artifactsRelative)
+		let shards: import('node:fs').Dirent[]
+		try {
+			await assertSafePath(this.persistence.root, `${artifactsRelative}/.placeholder`, true)
+			shards = await fs.readdir(artifactsAbsolute, { withFileTypes: true })
+		}
+		catch (error) {
+			if (isNotFound(error)) return []
+			throw error
+		}
+		const identities: string[] = []
+		for (const shard of shards) {
+			if (!shard.isDirectory() || shard.isSymbolicLink() || shard.name.length !== 2) continue
+			const shardRelative = `${artifactsRelative}/${shard.name}`
+			const shardAbsolute = resolveWorkspacePath(this.persistence.root, shardRelative)
+			let entries: import('node:fs').Dirent[]
 			try {
-				await assertSafePath(this.persistence.root, `${artifactsRelative}/.placeholder`, true)
-				shards = await fs.readdir(artifactsAbsolute, { withFileTypes: true })
+				entries = await fs.readdir(shardAbsolute, { withFileTypes: true })
 			}
 			catch (error) {
-				if (isNotFound(error)) return []
+				if (isNotFound(error)) continue
 				throw error
 			}
-			const identities: string[] = []
-			for (const shard of shards) {
-				if (!shard.isDirectory() || shard.isSymbolicLink() || shard.name.length !== 2) continue
-				const shardRelative = `${artifactsRelative}/${shard.name}`
-				const shardAbsolute = resolveWorkspacePath(this.persistence.root, shardRelative)
-				let entries: import('node:fs').Dirent[]
-				try {
-					entries = await fs.readdir(shardAbsolute, { withFileTypes: true })
-				}
-				catch (error) {
-					if (isNotFound(error)) continue
-					throw error
-				}
-				for (const entry of entries) {
-					if (!entry.isFile() || entry.isSymbolicLink() || entry.name.length !== 64) continue
-					identities.push(`sha256:${entry.name}`)
-				}
+			for (const entry of entries) {
+				if (!entry.isFile() || entry.isSymbolicLink() || entry.name.length !== 64) continue
+				identities.push(`sha256:${entry.name}`)
 			}
-			return identities.sort()
-		})
+		}
+		return identities.sort()
 	}
 }
 

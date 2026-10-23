@@ -591,15 +591,13 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		// 7. Evidence Records in closure
 		const evidenceRefs: EvidenceReference[] = []
 		const contextsInClosure: ResolvedRenderContext[] = []
-		const artifactIdentities = await persistence.artifacts.listIdentities()
+		const artifactCandidates = await persistence.artifacts.readAllCandidateJson()
 		// Rule 01a115cd-c5a5-…: each closure View's current render-input digest, taken once.
 		const stalenessViews = [...viewSnapshots.entries()].map(([key, snapshot]) => ({ key, renderInputDigest: renderInputDigest(snapshot.snapshot) }))
 		const viewEvidenceMap = new Map<string, FormalEvidenceRecord[]>()
 		const staleEvidenceByView = new Map<string, number>()
 
-		for (const identity of artifactIdentities) {
-			const parsed = await persistence.artifacts.readCandidateJson(identity)
-			if (!parsed) continue
+		for (const { identity, value: parsed } of artifactCandidates) {
 			const validation = validateFormalEvidenceRecord(parsed)
 			if (!validation.ok || validation.value.kind !== 'formal_capture') continue
 			const formalRec = validation.value

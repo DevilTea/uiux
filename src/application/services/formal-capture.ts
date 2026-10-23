@@ -456,12 +456,11 @@ export function createFormalCaptureService(
 	}
 
 	async function listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]> {
-		const identities = await persistence.artifacts.listIdentities()
+		// One snapshot under one shared lock, not one lock acquisition per artifact (issue #318).
+		const candidates = await persistence.artifacts.readAllCandidateJson()
 		const items: FormalEvidenceItem[] = []
 
-		for (const identity of identities) {
-			const parsed = await persistence.artifacts.readCandidateJson(identity)
-			if (!parsed) continue
+		for (const { identity, value: parsed } of candidates) {
 			const validation = validateFormalEvidenceRecord(parsed)
 			if (validation.ok && validation.value.kind === 'formal_capture') {
 				if (viewId) {
