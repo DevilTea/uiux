@@ -17,8 +17,10 @@ import { isFromEarlierBoot, recordedOnAnotherHost } from './boot-staleness'
  * moment in which a third process can publish L3, so L2's and L3's owners both hold the lock.
  *
  * Instead the removers of one judged file are serialized by a claim: an exclusive-create file whose
- * name is derived from the judged file's identity (device, inode, size, times and bytes). Only the
- * claim's owner re-reads the lock path and, if it still names the judged file, unlinks it. While
+ * name is derived from the judged file's bytes, size and modification time, which every process sees
+ * alike (a device number can differ between views of one file system). Only the claim's owner
+ * re-reads the lock path and, if it still names the judged file (the same device, inode, size, times
+ * and bytes), unlinks it. While
  * the judged file is at the lock path, nothing else changes that path: an acquirer's exclusive
  * create or `link` fails because the path exists, the judged file's owner is gone (that is what
  * stale means), and every other remover of the same file finds the claim taken. A remover that
@@ -26,13 +28,13 @@ import { isFromEarlierBoot, recordedOnAnotherHost } from './boot-staleness'
  *
  * A claim is never removed while its file could still be at the lock path, because removing a stale
  * claim by path would bring back the same race one level up. A claim whose owner is gone (a remover
- * killed mid-removal) is skipped instead: the next remover takes the claim at the next level. Claims
- * of a file are removed only once that file is no longer at the lock path, by the remover that
- * unlinked it or that found it gone.
+ * killed mid-removal) is skipped instead: the next remover takes the claim at the next level. Levels
+ * are not capped, since only a remover killed mid-removal adds one. Claims of a file are removed only
+ * once that file is no longer at the lock path, by the remover that unlinked it or that found it gone.
+ *
+ * Claims are published with a hard link, as the locks are, so the directory must support them; a
+ * claim that cannot be linked throws `HardLinkUnsupportedError`.
  */
-
-/** How many claims of removers that died mid-removal one stale lock may collect before it is left held. */
-const MAX_CLAIM_LEVELS = 8
 
 /** A lock file as one open file read it, never following a link: the record and its identity agree. */
 export type JudgedLock = Readonly<{
@@ -92,7 +94,7 @@ export async function removeJudgedLock(lockPath: string, judged: JudgedLock, rem
 async function removeWhileClaimed(lockPath: string, judged: JudgedLock, removal: StaleLockRemoval): Promise<boolean> {
 	const digest = identityDigest(judged)
 	const claims: string[] = []
-	for (let level = 0; level < MAX_CLAIM_LEVELS; level += 1) {
+	for (let level = 0; ; level += 1) {
 		const claim = removal.claimPath(`${digest}-${level}`)
 		claims.push(claim)
 		if (!await publishClaim(claim, removal)) {
@@ -115,18 +117,28 @@ async function removeWhileClaimed(lockPath: string, judged: JudgedLock, removal:
 		}
 		return true
 	}
-	return false
 }
 
-/** Publishes this process's claim with a `link` of a complete candidate, so a claim is never read half written. */
+/**
+ * Publishes this process's claim with a `link` of a complete candidate, so a claim is never read half
+ * written. Unlike the locks, the candidate is fsynced: a claim is rare, and one left empty by a power
+ * loss could not be judged until its modification time fell before the boot.
+ */
 async function publishClaim(claim: string, removal: StaleLockRemoval): Promise<boolean> {
 	const candidate = removal.claimPath(`${randomUUID()}.tmp`)
 	const record = JSON.stringify({ pid: process.pid, hostname: hostname(), token: randomUUID(), ...(removal.bootId ? { bootId: removal.bootId } : {}) })
 	try {
 		const handle = await fs.open(candidate, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
-		try { await handle.writeFile(record, 'utf8') }
+		try {
+			await handle.writeFile(record, 'utf8')
+			await handle.sync()
+		}
 		finally { await handle.close() }
-		await fs.link(candidate, claim)
+		try { await fs.link(candidate, claim) }
+		catch (error) {
+			if (isLinkUnsupported(error)) throw new HardLinkUnsupportedError(claim, error)
+			throw error
+		}
 		return true
 	}
 	catch (error) {
@@ -189,9 +201,30 @@ function sameIdentity(a: BigIntStats, b: BigIntStats): boolean {
 	return a.isFile() && a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeNs === b.mtimeNs && a.birthtimeNs === b.birthtimeNs
 }
 
+/** The claim name's part for a judged file: only what every view of the file reports alike. */
 function identityDigest(judged: JudgedLock): string {
-	const { dev, ino, size, mtimeNs, birthtimeNs } = judged.stats
-	return createHash('sha256').update(`${dev}:${ino}:${size}:${mtimeNs}:${birthtimeNs}:`).update(judged.bytes).digest('hex').slice(0, 32)
+	const { size, mtimeNs } = judged.stats
+	return createHash('sha256').update(`${size}:${mtimeNs}:`).update(judged.bytes).digest('hex').slice(0, 32)
+}
+
+const LINK_UNSUPPORTED = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV'])
+
+/** A claim could not be published because the file system of its directory has no hard links. */
+export class HardLinkUnsupportedError extends Error {
+	readonly path: string
+	constructor(path: string, cause: unknown) {
+		super(`Cannot create a hard link at ${path}: the file system does not support them (${(cause as NodeJS.ErrnoException).code}).`, { cause })
+		this.name = 'HardLinkUnsupportedError'
+		this.path = path
+	}
+}
+
+/**
+ * Whether an error of a `link` within one directory means the file system cannot make hard links
+ * (FAT, exFAT and some network or FUSE file systems), which the host locks and their claims need.
+ */
+export function isLinkUnsupported(error: unknown): boolean {
+	return LINK_UNSUPPORTED.has((error as NodeJS.ErrnoException | undefined)?.code ?? '')
 }
 
 /** `O_NONBLOCK`, so opening a FIFO put at the path never blocks; Windows has none. */

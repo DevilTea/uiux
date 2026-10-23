@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { link, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -139,6 +139,34 @@ describe('persistence lock: stale-lock removal race (issue #325)', () => {
 		expect(await first).toBe('first')
 		expect(await persistenceLockFiles(root)).toEqual([])
 	})
+
+	it('has no cap on the claims of dead removers: a lock with many of them is still removed', async () => {
+		const root = await persistenceRoot()
+		await plantDeadPersistenceLock(root)
+		const race = pauseFirstRemover('claimed')
+		const first = openPersistence(root).withLock(async () => 'first')
+		await race.paused
+		const [claim] = (await readdir(root)).filter(name => /^\.persistence-lock-break-[\da-f]{32}-0$/u.test(name))
+		const dead = JSON.stringify({ pid: deadPid(), token: randomUUID() })
+		for (let level = 0; level < 12; level += 1) await writeFile(join(root, claim!.replace(/-0$/u, `-${level}`)), dead)
+		expect(await openPersistence(root).withLock(async () => 'second')).toBe('second')
+		race.resume()
+		expect(await first).toBe('first')
+		expect(await persistenceLockFiles(root)).toEqual([])
+	})
+
+	it('still ends at the wait budget when every removal finds the lock replaced by another stale one', async () => {
+		const root = await persistenceRoot()
+		const lockPath = await plantDeadPersistenceLock(root)
+		setStaleLockHookForTests(async (stage) => {
+			if (stage === 'claimed') {
+				await rm(lockPath)
+				await writeFile(lockPath, JSON.stringify({ pid: deadPid(), token: randomUUID() }))
+			}
+		})
+		const waiting = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY, lockWaitMilliseconds: 120 })
+		await expect(waiting.withLock(async () => undefined)).rejects.toMatchObject({ code: 'persistence.lock_busy' })
+	})
 })
 
 describe('roster lock: stale-lock removal race (issue #325)', () => {
@@ -183,5 +211,49 @@ describe('roster lock: stale-lock removal race (issue #325)', () => {
 		race.resume()
 		await (await first)()
 		expect(await lockFiles()).toEqual([])
+	})
+
+	it('still ends at the wait budget when every removal finds the lock replaced by another stale one', async () => {
+		const { paths } = await rosterLock()
+		setStaleLockHookForTests(async (stage) => {
+			if (stage === 'claimed') {
+				await rm(paths.lock)
+				await writeFile(paths.lock, JSON.stringify({ pid: deadPid(), token: 'stale' }), { mode: 0o600 })
+			}
+		})
+		await expect(acquireLock(paths.lock, 120)).rejects.toMatchObject({ code: 'access.lock_busy' })
+	})
+})
+
+describe('roster lock publication (issue #325 review)', () => {
+	async function rosterDirectory() {
+		const base = await temporaryDirectory('uiux-roster-publish-')
+		const workspace = join(base, 'ws')
+		await mkdir(join(workspace, '.uiux'), { recursive: true })
+		await writeFile(join(workspace, '.uiux', 'workspace.json'), '{}\n')
+		const home = join(base, 'home')
+		await AccessStore.open({ workspaceRoot: workspace, home, create: true })
+		return accessStorePaths(home, workspace)
+	}
+
+	it('publishes the lock complete, so a holder killed before writing its record leaves no lock', async () => {
+		const paths = await rosterDirectory()
+		// What a process killed between creating its candidate and writing the record leaves on disk.
+		const leftover = join(paths.dir, `.access-lock-${randomUUID().replace(/-/gu, '').slice(0, 16)}-0123456789ab.tmp`)
+		await writeFile(leftover, '', { mode: 0o600 })
+		const release = await acquireLock(paths.lock, 120)
+		expect(JSON.parse(await readFile(paths.lock, 'utf8'))).toMatchObject({ pid: process.pid, token: expect.any(String) })
+		await release()
+		expect(await readFile(paths.lock).catch(error => error.code)).toBe('ENOENT')
+	})
+
+	it('clears the lock of a holder killed between publishing it and removing its candidate', async () => {
+		const paths = await rosterDirectory()
+		const candidate = join(paths.dir, '.access-lock-0123456789abcdef-0123456789ab.tmp')
+		await writeFile(candidate, JSON.stringify({ pid: deadPid(), token: '0123456789abcdef' }), { mode: 0o600 })
+		await link(candidate, paths.lock)
+		const release = await acquireLock(paths.lock, 500)
+		expect(JSON.parse(await readFile(paths.lock, 'utf8'))).toMatchObject({ pid: process.pid })
+		await release()
 	})
 })

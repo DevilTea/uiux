@@ -1045,6 +1045,7 @@ export class FileNativePersistence {
 		const lockAbsolute = resolveWorkspacePath(this.root, this.layout.lockPath)
 		const token = randomUUID()
 		const record = Buffer.from(JSON.stringify({ pid: process.pid, hostname: hostname(), token, ...(bootId ? { bootId } : {}) }), 'utf8')
+		let retriedPastDeadline = false
 		while (true) {
 			const candidateRelative = this.layout.metadataFilePath(`.persistence-lock-${token}-${randomUUID()}.tmp`)
 			const candidateAbsolute = resolveWorkspacePath(this.root, candidateRelative)
@@ -1058,8 +1059,15 @@ export class FileNativePersistence {
 				catch (error) {
 					if (!isAlreadyExists(error)) throw error
 					await fs.rm(candidateAbsolute, { force: true }).catch(() => undefined)
-					if (await this.removeStaleLock(lockAbsolute, bootId))
-						continue
+					if (await this.removeStaleLock(lockAbsolute, bootId)) {
+						// Try again at once after a stale lock went, but past the deadline only once, so a
+						// lock that keeps being replaced or re-judged cannot hold this loop forever.
+						if (Date.now() < deadline) continue
+						if (!retriedPastDeadline) {
+							retriedPastDeadline = true
+							continue
+						}
+					}
 					if (Date.now() >= deadline)
 						throw lockBusyError()
 					await delay(10)
