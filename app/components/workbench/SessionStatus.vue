@@ -74,10 +74,10 @@ const pending = computed(() => preview.sessionStatus.value === 'connecting' || p
           color="neutral"
           variant="outline"
           size="sm"
-          :icon="preview.retryPending.value ? 'i-lucide-loader-circle' : 'i-lucide-rotate-ccw'"
+          :icon="preview.retryDisabled.value ? 'i-lucide-loader-circle' : 'i-lucide-rotate-ccw'"
           class="justify-self-start"
-          :class="preview.retryPending.value ? 'cursor-not-allowed opacity-75 [&_svg]:animate-spin motion-reduce:[&_svg]:animate-none' : ''"
-          :aria-disabled="preview.retryPending.value ? 'true' : undefined"
+          :class="preview.retryDisabled.value ? 'cursor-not-allowed opacity-75 [&_svg]:animate-spin motion-reduce:[&_svg]:animate-none' : ''"
+          :aria-disabled="preview.retryDisabled.value ? 'true' : undefined"
           :label="t('previewFailure.retry')"
           data-session-retry
           @click="preview.retry()"

@@ -18,10 +18,11 @@ export type FailureDerivation =
 	/** Preview is unavailable after this non-recoverable failure. */
 	| Readonly<{ effect: 'fail'; failure: PreviewFailureDiagnostic }>
 	/**
-	 * Preview stays unavailable for the failure already shown: recovery is exhausted and the new
-	 * generation was refused, which is no failure of its own and has no reason code.
+	 * Recovery is exhausted and the new generation was refused, which is no failure of its own and
+	 * has no reason code: Preview stays unavailable for the failure that exhausted recovery, shown
+	 * again under the refused generation (owner ruling 4 of 2026-10-23, Discussion #241).
 	 */
-	| Readonly<{ effect: 'keep' }>
+	| Readonly<{ effect: 'refused'; generationId: string }>
 
 export type FailureObservation = Readonly<{
 	result: BridgeReceiveResult
@@ -35,6 +36,12 @@ export type FailureObservation = Readonly<{
 	/** The Workbench handshake phase before this envelope. */
 	phase: 'initiating' | 'open' | 'failed'
 }>
+
+/**
+ * How long Retry Preview waits after its document loaded for that document's declaration before it
+ * is offered again (owner ruling 1 of 2026-10-23, Discussion #241).
+ */
+export const RETRY_STALL_GRACE_MS = 5000
 
 /** Longest `detail` the Workbench writes; the detail is display-only and never drives control flow. */
 const MAX_DETAIL_LENGTH = 200
@@ -55,7 +62,7 @@ export function deriveWorkbenchFailure(observation: FailureObservation): Failure
 		case 'capability-conflict':
 			return fail(createPreviewFailure('protocol', 'protocol.capability_conflict', previewSessionId, observation.envelopeGenerationId))
 		case 'generation-refused':
-			return { effect: 'keep' }
+			return { effect: 'refused', generationId: result.generationId }
 		case 'invalid': {
 			if (observation.phase !== 'initiating') return { effect: 'none' }
 			const codes = [...new Set(result.diagnostics.map(diagnostic => diagnostic.code))].join(', ')
@@ -87,6 +94,11 @@ export function createPreviewFailure(
 		...(bounded ? { detail: bounded } : {}),
 		correlation: Object.freeze({ previewSessionId, ...(runtimeGenerationId ? { runtimeGenerationId } : {}) }),
 	})
+}
+
+/** The same failure correlated with another generation of the session (a refused one). */
+export function recorrelatePreviewFailure(failure: PreviewFailureDiagnostic, previewSessionId: string, runtimeGenerationId: string): PreviewFailureDiagnostic {
+	return createPreviewFailure(failure.category, failure.reason, previewSessionId, runtimeGenerationId, failure.detail)
 }
 
 /** Whether the Workbench has copy for this reason: a registry code of the diagnostic's own category. */

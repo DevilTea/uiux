@@ -5,6 +5,7 @@ import {
 	createPreviewFailure,
 	deriveWorkbenchFailure,
 	previewFailureCopyKeys,
+	recorrelatePreviewFailure,
 	type FailureObservation,
 } from '../src/preview/failure-diagnostic'
 import {
@@ -74,8 +75,14 @@ describe('Workbench-derived Preview failures', () => {
 		expect(deriveWorkbenchFailure(observe({ result: { status: 'stale-session' }, declaration: true }))).toEqual({ effect: 'none' })
 	})
 
-	it('keeps the diagnostic already shown when recovery is exhausted and a generation is refused', () => {
-		expect(deriveWorkbenchFailure(observe({ result: { status: 'generation-refused', generationId: 'generation-c' }, declaration: true }))).toEqual({ effect: 'keep' })
+	it('shows the failure that exhausted recovery again under a refused generation', () => {
+		expect(deriveWorkbenchFailure(observe({ result: { status: 'generation-refused', generationId: 'generation-c' }, declaration: true }))).toEqual({ effect: 'refused', generationId: 'generation-c' })
+		const exhausting = createPreviewFailure('capability', 'capability.unsupported_protocol_version', 'session-a', 'generation-a')
+		expect(recorrelatePreviewFailure(exhausting, 'session-a', 'generation-c')).toEqual({
+			category: 'capability',
+			reason: 'capability.unsupported_protocol_version',
+			correlation: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-c' },
+		})
 	})
 
 	it('derives nothing from accepted or gated traffic', () => {

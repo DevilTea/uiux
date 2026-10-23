@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { previewFailureCopyKeys } from '../../../src/preview/failure-diagnostic'
@@ -9,15 +9,29 @@ import { previewFailureCopyKeys } from '../../../src/preview/failure-diagnostic'
  * Preview is unavailable after a non-recoverable failure. The title comes from the failure
  * category and the body from the recognized reason (else the category's generic copy); the reason
  * code and the correlation identities stay in the collapsed technical details. Retry Preview is
- * the one shared recovery action, and it stays focusable but disabled while its retry is pending.
+ * the one shared recovery action, and it stays focusable but disabled while a retry is in flight.
+ * The alert is keyed on the failing generation, so a repeated failure is announced again; when
+ * Preview recovers with focus inside the diagnostic, focus moves to the canvas region.
  */
 const { t } = useI18n()
 const { preview } = useWorkbench()
 
 const failure = computed(() => preview.failureDiagnostic.value)
 const copy = computed(() => failure.value ? previewFailureCopyKeys(failure.value) : undefined)
-const pending = computed(() => preview.retryPending.value)
+const disabled = computed(() => preview.retryDisabled.value)
+const statusText = computed(() => {
+	if (disabled.value) return t('previewFailure.retryPending')
+	return preview.retryInFlight.value ? t('previewFailure.retryStalled') : ''
+})
+const alertKey = computed(() => failure.value ? `${failure.value.reason}\u0000${failure.value.correlation?.runtimeGenerationId ?? ''}` : '')
 const detailsOpen = ref(false)
+const root = ref<HTMLElement>()
+
+// Runs before the DOM update, while the diagnostic that held focus is still in the document.
+watch(failure, (next) => {
+	if (next || !root.value?.contains(document.activeElement)) return
+	void nextTick(() => document.querySelector<HTMLElement>('[data-canvas]')?.focus({ preventScroll: true }))
+}, { flush: 'pre' })
 
 const identities = computed(() => {
 	const correlation = failure.value?.correlation ?? {}
@@ -28,13 +42,14 @@ const identities = computed(() => {
 })
 
 function retry(): void {
-	if (!pending.value) preview.retry()
+	if (!disabled.value) preview.retry()
 }
 </script>
 
 <template>
   <div
     v-if="failure && copy"
+    ref="root"
     class="flex gap-3 border-b border-default bg-error/5 px-3 py-2.5"
     data-preview-failure
     :data-category="failure.category"
@@ -47,6 +62,7 @@ function retry(): void {
     />
     <div class="grid min-w-0 flex-1 gap-1.5">
       <div
+        :key="alertKey"
         role="alert"
         class="grid gap-0.5"
       >
@@ -68,18 +84,18 @@ function retry(): void {
           color="neutral"
           variant="outline"
           size="xs"
-          :icon="pending ? 'i-lucide-loader-circle' : 'i-lucide-rotate-ccw'"
-          :class="pending ? 'cursor-not-allowed opacity-75 [&_svg]:animate-spin motion-reduce:[&_svg]:animate-none' : ''"
-          :aria-disabled="pending ? 'true' : undefined"
+          :icon="disabled ? 'i-lucide-loader-circle' : 'i-lucide-rotate-ccw'"
+          :class="disabled ? 'cursor-not-allowed opacity-75 [&_svg]:animate-spin motion-reduce:[&_svg]:animate-none' : ''"
+          :aria-disabled="disabled ? 'true' : undefined"
           :label="t('previewFailure.retry')"
           data-preview-retry
           @click="retry"
         />
         <span
-          v-if="pending"
           role="status"
           class="text-xs text-muted"
-        >{{ t('previewFailure.retryPending') }}</span>
+          data-preview-retry-status
+        >{{ statusText }}</span>
       </div>
       <UCollapsible
         v-model:open="detailsOpen"

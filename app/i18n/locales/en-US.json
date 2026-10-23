@@ -2958,6 +2958,7 @@
   "previewFailure": {
     "retry": "Retry Preview",
     "retryPending": "Starting a fresh preview…",
+    "retryStalled": "The fresh preview has not answered yet. You can retry again.",
     "details": "Technical details",
     "reasonLabel": "Reason",
     "detailLabel": "Detail",
@@ -2991,8 +2992,8 @@
         "capability_conflict": "The preview changed what it supports while it was running, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview."
       },
       "capability": {
-        "unsupported_protocol_version": "The preview speaks a protocol version this Workbench does not support, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview; if it fails again, rebuild UIUX and reload.",
-        "missing_required_feature": "The preview lacks a feature this Workbench needs, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview; if it fails again, rebuild UIUX and reload."
+        "unsupported_protocol_version": "The preview speaks a protocol version this Workbench does not support, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview; if it fails again, update or restart UIUX, then reload.",
+        "missing_required_feature": "The preview lacks a feature this Workbench needs, so highlighting and selecting on the canvas are unavailable. Retry Preview starts a fresh preview; if it fails again, update or restart UIUX, then reload."
       }
     }
   }
