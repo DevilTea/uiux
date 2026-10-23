@@ -18,6 +18,7 @@ import { validateViewResource, type ViewResource } from '../domain/views/schema'
 import { validateWorkspaceManifest, type WorkspaceManifest } from '../domain/workspace/schema'
 import { currentBootId, isFromEarlierBoot, recordedOnAnotherHost } from './boot-staleness'
 import { PersistenceError } from './errors'
+import { readJudgedLock, removeJudgedLock, type JudgedLock } from './stale-lock'
 import { currentDesignWriteContext, type DesignWriteContext } from './history/write-context'
 import {
 	assetMetadataRelativePath,
@@ -1105,32 +1106,25 @@ export class FileNativePersistence {
 		}
 		if (!stat.isFile() || stat.isSymbolicLink())
 			throw pathRejected('Persistence lock must be a regular file and must not be a symbolic link.')
-		// The record and the modification time come from one open file, never following a link.
-		let bytes: string
-		let written: import('node:fs').Stats
-		try {
-			const handle = await fs.open(lockAbsolute, constants.O_RDONLY | constants.O_NOFOLLOW)
-			try {
-				written = await handle.stat()
-				bytes = await handle.readFile('utf8')
-			}
-			finally { await handle.close() }
-		}
+		// The record, the modification time and the identity of the removed file come from one open file.
+		let judged: JudgedLock
+		try { judged = await readJudgedLock(lockAbsolute) }
 		catch (cause) {
 			if (isNotFound(cause)) return true
 			throw new PersistenceError('persistence.lock_busy', 'Persistence lock owner record is unreadable; refusing to remove it automatically.', { cause })
 		}
+		const remove = () => removeJudgedLock(lockAbsolute, judged, {
+			bootId,
+			claimPath: suffix => resolveWorkspacePath(this.root, this.layout.metadataFilePath(`.persistence-lock-break-${suffix}`)),
+		})
 		let owner: { pid?: unknown; token?: unknown } | undefined
 		let unparsable: unknown
-		try { owner = JSON.parse(bytes) as { pid?: unknown; token?: unknown } }
+		try { owner = JSON.parse(judged.bytes.toString('utf8')) as { pid?: unknown; token?: unknown } }
 		catch (cause) { unparsable = cause }
 		// Neither the boot nor the pid of another host can be checked here: its lock stays held.
 		if (recordedOnAnotherHost(owner)) return false
 		// No process from an earlier boot still runs, so its lock is stale whatever pid or bytes it records.
-		if (isFromEarlierBoot(owner, written, bootId)) {
-			await fs.rm(lockAbsolute, { force: true })
-			return true
-		}
+		if (isFromEarlierBoot(owner, judged, bootId)) return remove()
 		if (owner === undefined || typeof owner !== 'object' || owner === null)
 			throw new PersistenceError('persistence.lock_busy', 'Persistence lock owner record is unreadable; refusing to remove it automatically.', { cause: unparsable })
 		if (typeof owner.pid !== 'number' || !Number.isInteger(owner.pid) || typeof owner.token !== 'string' || !isFullUuid(owner.token))
@@ -1141,8 +1135,7 @@ export class FileNativePersistence {
 		}
 		catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return false
-			await fs.rm(lockAbsolute, { force: true })
-			return true
+			return remove()
 		}
 	}
 

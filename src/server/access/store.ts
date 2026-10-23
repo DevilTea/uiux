@@ -5,6 +5,7 @@ import { homedir, hostname } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import { currentBootId, isFromEarlierBoot, recordedOnAnotherHost } from '../../persistence/boot-staleness'
+import { readJudgedLock, removeJudgedLock, type JudgedLock } from '../../persistence/stale-lock'
 import type { HostHistoryPaths } from '../../persistence/history/host-store'
 import { generateHint } from './credentials'
 import {
@@ -183,7 +184,8 @@ async function writeAtomically(path: string, contents: string): Promise<void> {
 	await syncDirectory(dirname(path))
 }
 
-async function acquireLock(lockPath: string, waitMs: number = LOCK_WAIT_MS): Promise<() => Promise<void>> {
+/** Takes the roster lock at `lockPath` and returns its release; exported for the lock tests. */
+export async function acquireLock(lockPath: string, waitMs: number = LOCK_WAIT_MS): Promise<() => Promise<void>> {
 	// Read before the wait budget starts: the first read of a process may take a moment.
 	const bootId = await currentBootId()
 	const started = Date.now()
@@ -219,28 +221,23 @@ async function acquireLock(lockPath: string, waitMs: number = LOCK_WAIT_MS): Pro
  * falls before the computed boot (a clock that lagged at boot delays that) or someone removes it.
  */
 async function removeStaleLock(lockPath: string, bootId: string | undefined): Promise<boolean> {
+	const remove = (judged: JudgedLock) => removeJudgedLock(lockPath, judged, {
+		bootId,
+		claimPath: suffix => join(dirname(lockPath), `.access-lock-break-${suffix}`),
+	})
+	let judged: JudgedLock
 	let owner: { pid?: unknown } | undefined
 	try {
 		const stats = await lstat(lockPath)
 		if (stats.isSymbolicLink() || !stats.isFile()) throw unsafe(lockPath, 'the lock is not a regular file')
-		// The record and the modification time come from one open file, never following a link.
-		const handle = await open(lockPath, constants.O_RDONLY | constants.O_NOFOLLOW)
-		let written: Stats
-		let bytes: string
-		try {
-			written = await handle.stat()
-			bytes = await handle.readFile('utf8')
-		}
-		finally { await handle.close() }
-		try { owner = JSON.parse(bytes) as { pid?: unknown } }
+		// The record, the modification time and the identity of the removed file come from one open file.
+		judged = await readJudgedLock(lockPath)
+		try { owner = JSON.parse(judged.bytes.toString('utf8')) as { pid?: unknown } }
 		catch { owner = undefined }
 		// Neither the boot nor the pid of another host can be checked here: its lock stays held.
 		if (recordedOnAnotherHost(owner)) return false
 		// No process from an earlier boot still runs, so its lock is stale whatever pid or bytes it records.
-		if (isFromEarlierBoot(owner, written, bootId)) {
-			await rm(lockPath, { force: true })
-			return true
-		}
+		if (isFromEarlierBoot(owner, judged, bootId)) return await remove(judged)
 	}
 	catch (error) {
 		if (isNotFound(error)) return true
@@ -256,9 +253,8 @@ async function removeStaleLock(lockPath: string, bootId: string | undefined): Pr
 	}
 	catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return false
-		await rm(lockPath, { force: true })
-		return true
 	}
+	return remove(judged)
 }
 
 type Fingerprint = Readonly<{ size: number; mtimeMs: number; ino: number }>
