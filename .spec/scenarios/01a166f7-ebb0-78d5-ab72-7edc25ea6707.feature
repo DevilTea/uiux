@@ -4,7 +4,7 @@ Feature: Retry Preview after a capability failure spends one explicit retry
   # Test: code@c15227e `tests/preview-failure-browser.test.ts#L201` "offers Retry Preview again when the retry stalls, even on an unreadable error page, and reloads under the same authorization". https://github.com/DevilTea/uiux/blob/c15227ed7777cda6a979a8b5f212b905aac5f255/tests/preview-failure-browser.test.ts#L201
   # Test: code@c15227e `tests/preview-protocol-bridge.test.ts#L380` "admits the next declared generation as the authorized retry and reopens Preview". https://github.com/DevilTea/uiux/blob/c15227ed7777cda6a979a8b5f212b905aac5f255/tests/preview-protocol-bridge.test.ts#L380
   # Test: code@c15227e `tests/preview-protocol-session.test.ts#L168` "admits a declared generation as the explicit retry only while an authorization is pending (issue #111)". https://github.com/DevilTea/uiux/blob/c15227ed7777cda6a979a8b5f212b905aac5f255/tests/preview-protocol-session.test.ts#L168
-  # Status: built as of c15227e; 01a11687-386c-764f-98fd-cf19dc3d0013 built as of d6b576c, once the Workbench drove the automatic recovery itself (issue #101).
+  # Status: built as of c15227e; 01a11687-386c-764f-98fd-cf19dc3d0013 built as of 99f9d0e, once the Workbench drove the automatic recovery itself (issue #101).
   @spec:id:01a166f7-ebb0-75cf-9307-982b0c025c6a
   @spec:demonstrates:01a1161c-3cf8-7859-9de8-2b99d22ce8aa
   @spec:demonstrates:01a1161c-3dad-7ac1-b49b-a77fcb1e33f2
