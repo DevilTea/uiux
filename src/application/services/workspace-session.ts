@@ -593,7 +593,7 @@ function reviewSummary(thread: ReviewThread): ReviewDiscoverySummary {
 		...(thread.renderContext ? { renderContext: thread.renderContext } : {}),
 		status: thread.status,
 		...(resolution ? { resolution } : {}),
-		messageCount: thread.messages?.length ?? 0,
+		messageCount: Array.isArray(thread.messages) ? thread.messages.length : 0,
 		...latestActivity(thread),
 		...latestMessageSummary(thread),
 		...currentSubmissionSummary(thread),
@@ -602,10 +602,14 @@ function reviewSummary(thread: ReviewThread): ReviewDiscoverySummary {
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
-/** Clause 01a163a5-719e-789d-a0fb-fc08646ed1d8: the last message, with only the first 200 grapheme clusters of its body. */
+/**
+ * Clause 01a163a5-719e-789d-a0fb-fc08646ed1d8: the last message, with only the first 200 grapheme clusters of its body.
+ * A thread read with diagnostics may hold a last message that is not a record or whose `body` is not a string: the
+ * item then goes without `latestMessage` and keeps the rest of its summary (issue #311).
+ */
 function latestMessageSummary(thread: ReviewThread): Pick<ReviewDiscoverySummary, 'latestMessage'> {
 	const message = Array.isArray(thread.messages) ? thread.messages.at(-1) : undefined
-	if (!message) return {}
+	if (typeof message !== 'object' || message === null || typeof message.body !== 'string') return {}
 	return { latestMessage: { id: message.id, actor: message.actor, at: message.at, excerpt: graphemeExcerpt(message.body, REVIEW_MESSAGE_EXCERPT_GRAPHEMES), edited: Array.isArray(message.edits) && message.edits.length > 0 } }
 }
 
@@ -632,12 +636,12 @@ function currentSubmissionSummary(thread: ReviewThread): Pick<ReviewDiscoverySum
 function currentSubmission(thread: ReviewThread): ReviewSubmission | undefined {
 	if (thread.status !== 'ready-for-review' && thread.status !== 'resolved') return undefined
 	const submission = Array.isArray(thread.submissions) ? thread.submissions.at(-1) : undefined
-	if (!submission) return undefined
+	if (typeof submission !== 'object' || submission === null) return undefined
 	// Position, not time: a reopen recorded later in `history` than the submission's lifecycle entry
 	// supersedes it even with an equal `at`. Without that entry, any reopen counts.
 	const history = Array.isArray(thread.history) ? thread.history : []
-	const entry = history.findIndex(event => event.kind === 'lifecycle' && event.to === 'ready-for-review' && event.submissionId === submission.id)
-	const reopened = history.some((event, index) => index > entry && event.kind === 'lifecycle' && event.to === 'open')
+	const entry = history.findIndex(event => isRecord(event) && event.kind === 'lifecycle' && event.to === 'ready-for-review' && event.submissionId === submission.id)
+	const reopened = history.some((event, index) => index > entry && isRecord(event) && event.kind === 'lifecycle' && event.to === 'open')
 	return reopened ? undefined : submission
 }
 
@@ -748,7 +752,10 @@ function latestActivity(thread: ReviewThread): { latestActivityAt?: string } {
 	let latestMs = Number.NEGATIVE_INFINITY
 	const messages = Array.isArray(thread.messages) ? thread.messages : []
 	const edits = messages.flatMap(message => Array.isArray(message?.edits) ? message.edits : [])
-	for (const entry of [...messages, ...edits, ...(thread.submissions ?? []), ...(thread.history ?? [])]) {
+	const submissions = Array.isArray(thread.submissions) ? thread.submissions : []
+	const history = Array.isArray(thread.history) ? thread.history : []
+	for (const entry of [...messages, ...edits, ...submissions, ...history]) {
+		if (!isRecord(entry) || typeof entry.at !== 'string') continue
 		const ms = Date.parse(entry.at)
 		if (Number.isFinite(ms) && ms > latestMs) {
 			latestMs = ms
@@ -788,7 +795,7 @@ async function matchesReviewFilters(
 		if (!scopes.some(scope => request.variant!.includes(scope))) return false
 	}
 	if (request.changeDomain !== undefined) {
-		const domains = (thread.submissions ?? []).flatMap(submission => submission.changeDomains ?? [])
+		const domains = (Array.isArray(thread.submissions) ? thread.submissions : []).flatMap(submission => isRecord(submission) && Array.isArray(submission.changeDomains) ? submission.changeDomains : [])
 		if (!domains.some(domain => (request.changeDomain as readonly string[]).includes(domain))) return false
 	}
 	if (request.anchor !== undefined) {
@@ -819,12 +826,12 @@ function matchesQuery(item: ResourceDiscoveryItem, query: string): boolean {
 				: item.kind === 'review'
 					? [item.key, ...reviewAnchorTerms(item.summary.anchor), item.summary.status]
 					: [item.key, item.summary.name, item.summary.mediaType, item.summary.contentFilename]
-	return fields.some(value => value?.toLowerCase().includes(query))
+	return fields.some(value => typeof value === 'string' && value.toLowerCase().includes(query))
 }
 
 /** Searchable anchor terms: the View and Widget ids, or `workspace` for a Workspace thread. */
 function reviewAnchorTerms(anchor: Extract<ResourceDiscoveryItem, { kind: 'review' }>['summary']['anchor']): (string | undefined)[] {
-	if (!anchor) return []
+	if (!isRecord(anchor)) return []
 	return isWorkspaceAnchor(anchor) ? ['workspace'] : [anchor.viewId, anchor.widgetId]
 }
 
