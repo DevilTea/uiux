@@ -13,8 +13,10 @@ import {
 	resolveWorkspaceAdapterSet,
 	type AdapterSetResolutionResult,
 	type AdapterSetThemeSupport,
+	type ValidatedAdapterEntry,
 	type ValidatedAdapterSet,
 } from '../adapters/resolution'
+import { adapterGraphDigest } from '../adapters/adapter-graph-digest'
 import { canonicalJsonStringify } from '../domain/canonical-json'
 import type { Diagnostic } from '../domain/validation'
 import type { WorkspaceAdapterSelection } from '../domain/workspace/schema'
@@ -74,13 +76,29 @@ export function resolveSelectedWorkspaceAdapters(workspaceRoot: string, givenLay
  * resolves to read its catalog, resolves with the same output generation's module versions, asking
  * no theme support predicate, and is not pinned, so it never replaces the Preview's resolution.
  */
-export async function resolveSelectedWorkspaceAdapterList(workspaceRoot: string, givenLayout: WorkspaceLayout | undefined, adapters: readonly WorkspaceAdapterSelection[]): Promise<AdapterSetResolutionResult> {
-	const productKit = await readRawProductKit(workspaceRoot, selectedLayout(givenLayout).productKitPath)
-	if (productKit && canonicalJsonStringify(productKit.adapters) === canonicalJsonStringify(adapters)) return resolveAdapters(workspaceRoot, givenLayout)
+export function resolveSelectedWorkspaceAdapterList(workspaceRoot: string, givenLayout: WorkspaceLayout | undefined, adapters: readonly WorkspaceAdapterSelection[]): Promise<AdapterSetResolutionResult> {
 	return resolveAdapters(workspaceRoot, givenLayout, adapters)
 }
 
-/** The Product Kit file's Adapters, pinned per output generation; or `selection`, resolved with the current generation's module versions and not pinned. */
+/**
+ * The content digest of each Adapter of a pinned resolution (Clause 01a115cd-d7f6-74a1-ba9f-c20a24a31ae5),
+ * computed as its kit build output generation is captured, alongside the Preview bundle, before a
+ * later build can change the files: the content of the output the Preview renders, whatever is on
+ * disk later (Rule 01a167bf-1f93-78b7-9045-6562c20f5a42). `undefined` when it could not be computed
+ * then; it is not computed again for that generation.
+ */
+const pinnedContentDigests = new WeakMap<ValidatedAdapterEntry, Promise<string | undefined>>()
+
+/** The content digest of `entry` taken with its pinned output generation, or `undefined` when `entry` belongs to no pinned resolution. */
+export function pinnedAdapterContentDigest(entry: ValidatedAdapterEntry): Promise<string | undefined> | undefined {
+	return pinnedContentDigests.get(entry)
+}
+
+/**
+ * The Product Kit file's Adapters, pinned per output generation with their content digests; or
+ * `selection` when it differs from that list (compared with the same Product Kit read), resolved
+ * with the current generation's module versions and not pinned.
+ */
 async function resolveAdapters(workspaceRoot: string, givenLayout: WorkspaceLayout | undefined, selection?: readonly WorkspaceAdapterSelection[]): Promise<AdapterSetResolutionResult> {
 	const layout = selectedLayout(givenLayout)
 	const manifest = await readRawWorkspaceManifest(workspaceRoot, layout)
@@ -110,14 +128,15 @@ async function resolveAdapters(workspaceRoot: string, givenLayout: WorkspaceLayo
 			summaries: [],
 		}
 	}
-	const adapters = selection ?? productKit.adapters
+	const other = selection !== undefined && canonicalJsonStringify(selection) !== canonicalJsonStringify(productKit.adapters) ? selection : undefined
+	const adapters = other ?? productKit.adapters
 	// Every theme of the Workspace registry is asked about once per resolution (Rule 01a11a5a-5464-7797-82d3-f8ece37457e5);
 	// a selection other than the Product Kit file's asks none.
-	const themeIds = selection ? [] : Object.keys(manifest.themes)
+	const themeIds = other ? [] : Object.keys(manifest.themes)
 	const build = await kitBuildPin(workspaceRoot, layout.codeDir, adapters, themeIds)
 	if (build.state === 'invalid') return { state: 'invalid', diagnostics: build.diagnostics, summaries: [] }
 	const pin: KitOutputPin | undefined = build.pin
-	if (pin?.resolution && !selection) return pin.resolution
+	if (pin?.resolution && !other) return pin.resolution
 	if (adapters.length === 0) {
 		const emptySet: ValidatedAdapterSet = Object.freeze({
 			entries: Object.freeze([]),
@@ -131,7 +150,7 @@ async function resolveAdapters(workspaceRoot: string, givenLayout: WorkspaceLayo
 		}
 	}
 
-	const resolution = resolveWorkspaceAdapterSet({
+	const resolved = resolveWorkspaceAdapterSet({
 		workspaceRoot,
 		adapters,
 		resolver: new NodeWorkspaceAdapterModuleResolver({ layout }),
@@ -140,7 +159,21 @@ async function resolveAdapters(workspaceRoot: string, givenLayout: WorkspaceLayo
 		registryInspector: productAdapterRegistryInspector,
 		themeIds,
 	})
-	if (!selection) pin?.remember(resolution)
+	if (other || !pin) return await resolved
+	// A pinned resolution settles once its Adapters are digested, so the capture of the output
+	// generation, which the next build waits for, covers the digests too.
+	const resolution = resolved.then(async (result) => {
+		if (result.state !== 'valid') return result
+		const moduleBase = adapterResolutionBase(workspaceRoot, layout)
+		const digests = result.set.entries.map((entry) => {
+			const digest = adapterGraphDigest({ workspaceRoot, moduleBase, entry: entry.resolvedModule.resolvedPath })
+			pinnedContentDigests.set(entry, digest)
+			return digest
+		})
+		await Promise.all(digests)
+		return result
+	})
+	pin.remember(resolution)
 	return await resolution
 }
 

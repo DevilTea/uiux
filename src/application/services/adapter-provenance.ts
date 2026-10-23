@@ -32,18 +32,39 @@ export type AdapterSetResolver = (adapters: readonly WorkspaceAdapterSelection[]
  * Where Adapter provenance comes from under `uiux dev` (Rule 01a167bf-1f93-78b7-9045-6562c20f5a42):
  * the server's resolution, the one the Preview renders with, pinned to the last good kit build
  * output; and the kit build state, while it is running or its last run failed the current Adapter
- * provenance cannot be computed (Rule 01a164bc-4e09-78be-91fe-e7ecb3c42edb). Without it (no server,
+ * provenance cannot be computed (Rule 01a167d8-acd9-727d-9ab8-7395a4843897). Without it (no server,
  * no build), the Adapters resolve from the files on disk.
  */
 export type AdapterProvenanceSource = Readonly<{
 	resolve?: AdapterSetResolver
+	/**
+	 * The content digest of an entry of a resolution pinned to a kit build output generation, taken
+	 * when that generation was captured (`pinnedAdapterContentDigest` in `src/server/`); `undefined`
+	 * for an entry of no pinned resolution, whose digest is computed from the files on disk.
+	 */
+	pinnedContentDigest?: (entry: ValidatedAdapterEntry) => Promise<string | undefined> | undefined
+	/** The identity of the kit build's last good output generation, if any. */
+	outputGeneration?: () => string | undefined
 	kitBuild?: () => KitBuildStatus
 }>
 
-/** Whether the current Adapter provenance can be computed as far as the kit build goes: not while it is running or its last run failed (Rule 01a164bc-4e09-…). */
+/** Whether the current Adapter provenance can be computed as far as the kit build goes: not while it is running or its last run failed (Rule 01a167d8-acd9-727d-9ab8-7395a4843897). */
 export function kitBuildAllowsAdapterProvenance(source: AdapterProvenanceSource | undefined): boolean {
 	const state = source?.kitBuild?.().state
 	return state !== 'building' && state !== 'failed'
+}
+
+/**
+ * Runs `compute` while the kit build allows Adapter provenance, and gives `unavailable` instead
+ * when it does not, before or after `compute` ran, or when a new output generation settled
+ * meanwhile, so a result never mixes two generations or outlives the state that allowed it.
+ */
+export async function withSettledKitBuild(source: AdapterProvenanceSource | undefined, compute: () => Promise<CurrentAdapterProvenance>): Promise<CurrentAdapterProvenance> {
+	if (!kitBuildAllowsAdapterProvenance(source)) return { state: 'unavailable' }
+	const generation = source?.outputGeneration?.()
+	const result = await compute()
+	if (!kitBuildAllowsAdapterProvenance(source) || source?.outputGeneration?.() !== generation) return { state: 'unavailable' }
+	return result
 }
 
 /**
@@ -75,11 +96,13 @@ export async function adapterEntryProvenance(
 	persistence: FileNativePersistence,
 	entry: ValidatedAdapterEntry,
 	digests?: AdapterGraphDigestCache,
+	source?: AdapterProvenanceSource,
 ): Promise<AdapterProvenance | undefined> {
 	const path = entry.resolvedModule.resolvedPath
 	let pending = digests?.get(path)
 	if (!pending) {
-		pending = adapterGraphDigest({
+		// The digest taken with the pinned output generation the entry was resolved from (Rule 01a167bf-1f93-…).
+		pending = source?.pinnedContentDigest?.(entry) ?? adapterGraphDigest({
 			workspaceRoot: persistence.root,
 			moduleBase: adapterResolutionBase(persistence.root, persistence.layout),
 			entry: path,
@@ -112,11 +135,12 @@ export async function adapterSetEvidenceProvenance(
 	persistence: FileNativePersistence,
 	resolution: AdapterSetResolutionResult,
 	digests?: AdapterGraphDigestCache,
+	source?: AdapterProvenanceSource,
 ): Promise<CurrentAdapterProvenance> {
 	if (resolution.state !== 'valid') return { state: 'unavailable' }
 	const adapters = []
 	for (const entry of resolution.set.entries) {
-		const provenance = await adapterEntryProvenance(persistence, entry, digests)
+		const provenance = await adapterEntryProvenance(persistence, entry, digests, source)
 		if (!provenance?.contentDigest) return { state: 'unavailable' }
 		adapters.push(evidenceAdapterProvenance(provenance))
 	}
@@ -127,17 +151,18 @@ export async function adapterSetEvidenceProvenance(
  * The Workspace's current Adapter provenance, which formal capture records and Evidence freshness is
  * judged against (Clause 01a1161c-008a-… and Rule 01a115cd-c6de-…): the active set is the Product Kit
  * file's Adapter list, resolved through `source` when given (Rule 01a167bf-1f93-…). `unavailable`
- * (Rule 01a164bc-4e09-…) while a kit build is running or its last run failed, or when that file
+ * (Rules 01a167d8-acd9-… and 01a164bc-4e09-…) while a kit build is running or its last run failed, or when that file
  * cannot be read, the set does not resolve, or an Adapter's content digest cannot be computed now.
  */
 export async function readCurrentAdapterProvenance(persistence: FileNativePersistence, source?: AdapterProvenanceSource): Promise<CurrentAdapterProvenance> {
 	try {
-		if (!kitBuildAllowsAdapterProvenance(source)) return { state: 'unavailable' }
-		const productKit = await persistence.productKit.read().catch(() => undefined)
-		if (!productKit) return { state: 'unavailable' }
-		const adapters = productKit.resource.adapters ?? []
-		if (adapters.length === 0) return { state: 'available', adapters: [] }
-		return await adapterSetEvidenceProvenance(persistence, await resolveProductKitAdapterSet(persistence, adapters, source))
+		return await withSettledKitBuild(source, async () => {
+			const productKit = await persistence.productKit.read().catch(() => undefined)
+			if (!productKit) return { state: 'unavailable' }
+			const adapters = productKit.resource.adapters ?? []
+			if (adapters.length === 0) return { state: 'available', adapters: [] }
+			return await adapterSetEvidenceProvenance(persistence, await resolveProductKitAdapterSet(persistence, adapters, source), undefined, source)
+		})
 	}
 	catch {
 		return { state: 'unavailable' }

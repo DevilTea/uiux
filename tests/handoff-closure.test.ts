@@ -1739,9 +1739,8 @@ describe('Adapter-driven Evidence freshness (issue #57)', { timeout: HEAVY_SERVE
 			return { root, persistence, evidence: await putFormalEvidence(persistence, VIEW_1_ID, viewRevision, true) }
 		}
 
-		it('gives a capture unknown freshness, never an Adapter change, while a package Adapter\'s content digest cannot be computed (Rule 01a164bc-4e09)', async () => {
-			// A file the bundle cannot read stands in for a transient failure; root reads it regardless.
-			if (process.getuid?.() === 0) return
+		// A file the bundle cannot read stands in for a transient failure; root reads it regardless.
+		it.skipIf(process.getuid?.() === 0)('gives a capture unknown freshness, never an Adapter change, while a package Adapter\'s content digest cannot be computed (Rule 01a164bc-4e09)', async () => {
 			const { root, persistence, evidence } = await packageAdapterWorkspace()
 			const record = await persistence.artifacts.readCandidateJson(evidence) as FormalEvidenceRecord
 			expect(record.provenance.adapters).toEqual([expect.objectContaining({ moduleSpecifier: 'acme-adapter', packageVersion: '1.0.0', contentDigest: expect.stringMatching(/^sha256:/) })])
@@ -1771,16 +1770,23 @@ describe('Adapter-driven Evidence freshness (issue #57)', { timeout: HEAVY_SERVE
 			const resolve = vi.fn((adapters: readonly WorkspaceAdapterSelection[]) => resolveSelectedWorkspaceAdapterList(root, undefined, adapters))
 			const throughServer = await exportBundle({ adapterProvenance: { resolve } })
 			expect(resolve).toHaveBeenCalled()
+			// The closure's Adapters, their catalogs included, come from the one resolution of the whole list.
+			for (const [adapters] of resolve.mock.calls) expect(adapters.map(adapter => adapter.moduleSpecifier)).toEqual([COUNTER, BADGE])
 			expect(throughServer.bundleIdentity).toBe(fromDisk.bundleIdentity)
 			expect(canonicalJsonBytes({ ...throughServer, exportedAt: '' })).toEqual(canonicalJsonBytes({ ...fromDisk, exportedAt: '' }))
 			expect(fromDisk.evidenceRefs.length).toBeGreaterThan(0)
 		})
 
-		it('gives every capture unknown freshness in Handoff while a kit build is running or its last run failed (Rule 01a164bc-4e09)', async () => {
+		it('gives every capture unknown freshness and records no Adapter provenance in Handoff while a kit build is running or its last run failed (Rule 01a167d8-acd9)', async () => {
 			const { persistence } = await adapterWorkspace()
 			for (const state of ['building', 'failed'] as const) {
-				const assessed = await currentSchemaHandoff(persistence, { adapterProvenance: { kitBuild: () => ({ state }) } }).assessReadiness({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+				const handoff = currentSchemaHandoff(persistence, { adapterProvenance: { kitBuild: () => ({ state }) } })
+				const assessed = await handoff.assessReadiness({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
 				expect(assessed.readiness!.blockingDiagnostics.some(diagnostic => diagnostic.code === 'handoff.stale_view_evidence'), state).toBe(true)
+				const exported = await handoff.exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+				expect(exported.manifest?.provenance.adapters, state).toEqual([])
+				expect(exported.manifest?.readiness.blockingDiagnostics, state).toContainEqual(expect.objectContaining({ code: 'handoff.adapter_provenance_unverifiable', path: '/adapters', blocking: true }))
+				expect(exported.manifest?.readiness.implementationReady, state).toBe(false)
 			}
 			const ready = await currentSchemaHandoff(persistence, { adapterProvenance: { kitBuild: () => ({ state: 'ready' }) } }).assessReadiness({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
 			expect(ready.readiness!.blockingDiagnostics.some(diagnostic => diagnostic.code === 'handoff.stale_view_evidence')).toBe(false)

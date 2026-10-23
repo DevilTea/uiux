@@ -19,7 +19,7 @@ import type { KitBuildStatus } from '../ports/kit-build'
 import { captureHarnessScreenshot, openHarnessPreview, type HarnessPreview } from './capture-harness'
 import { missingDefaultLocaleError } from './default-locale-gate'
 import { readWorkspaceProductKitProvenance } from './product-kit-provenance'
-import { readCurrentAdapterProvenance, type AdapterSetResolver } from './adapter-provenance'
+import { readCurrentAdapterProvenance, type AdapterProvenanceSource } from './adapter-provenance'
 
 export type FormalContextCaptureResult = Readonly<{
 	context: ResolvedRenderContext
@@ -80,10 +80,11 @@ export function createFormalCaptureService(
 		 */
 		themeSupport?: AdapterThemeSupportSource
 		/**
-		 * The server's Adapter resolution, the one the Preview renders with, which the recorded Adapter
-		 * provenance follows (Rule 01a167bf-1f93-78b7-9045-6562c20f5a42); without it the Adapters resolve from disk.
+		 * Where the recorded Adapter provenance comes from: the server's resolution, the one the Preview
+		 * renders with, and the kit build state (Rule 01a167bf-1f93-78b7-9045-6562c20f5a42); without it the
+		 * Adapters resolve from disk.
 		 */
-		resolveAdapters?: AdapterSetResolver
+		adapterProvenance?: AdapterProvenanceSource
 	},
 ): FormalCaptureService {
 	async function buildRegistries(contexts: readonly ResolvedRenderContext[]): Promise<
@@ -283,10 +284,7 @@ export function createFormalCaptureService(
 		// Clause 01a1161c-008a-746d-8d53-a8301b23588f: and the provenance of every Adapter of the active
 		// set, in Adapter-list order, also taken once. A capture taken while it cannot be computed records
 		// none, so its freshness is unknown (Rule 01a1161b-ff68-…).
-		const adapters = await readCurrentAdapterProvenance(persistence, {
-			...(options?.resolveAdapters ? { resolve: options.resolveAdapters } : {}),
-			...(options?.kitBuild ? { kitBuild: options.kitBuild } : {}),
-		})
+		const adapters = await readCurrentAdapterProvenance(persistence, options?.adapterProvenance ?? (options?.kitBuild ? { kitBuild: options.kitBuild } : undefined))
 
 		let browser: Browser | undefined
 		try {

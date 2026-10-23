@@ -90,7 +90,7 @@ import {
 import { createProductKitChecksService, type ProductKitChecksResult } from './product-kit-checks'
 import { readCurrentProductKitProvenance } from './product-kit-provenance'
 import type { CurrentProductKitProvenance } from '../../domain/product-kit/provenance'
-import { readCurrentAdapterProvenance, type AdapterProvenanceSource, type AdapterSetResolver } from './adapter-provenance'
+import { readCurrentAdapterProvenance, type AdapterProvenanceSource } from './adapter-provenance'
 import type { CurrentAdapterProvenance } from '../../domain/evidence/adapter-provenance'
 import {
 	createHandoffExportService,
@@ -246,11 +246,12 @@ export function createWorkspaceApplicationSession(
 		/** The theme support of the current Adapter resolution, which formal capture applies (Rule 01a11add-f46d-7e92-8f5a-9d10dba6473d). */
 		adapterThemeSupport?: AdapterThemeSupportSource
 		/**
-		 * The server's Adapter resolution, the one the Preview renders with, which formal capture, Evidence
-		 * freshness and Handoff export follow (Rule 01a167bf-1f93-78b7-9045-6562c20f5a42); without it the
-		 * Adapters resolve from disk.
+		 * The server's Adapter resolution, the one the Preview renders with, with the content digests
+		 * and the identity of its pinned output generation, which formal capture, Evidence freshness and
+		 * Handoff export follow (Rule 01a167bf-1f93-78b7-9045-6562c20f5a42); without it the Adapters
+		 * resolve from disk.
 		 */
-		resolveAdapters?: AdapterSetResolver
+		adapterResolution?: Omit<AdapterProvenanceSource, 'kitBuild'>
 		/**
 		 * The member IDs on this host's roster now. Review reads mark an actor of kind member that is
 		 * not in it with `removed: true` (Rule 01a11485-f185-7c23-8f2a-e045a279cd27); without it nothing is marked.
@@ -262,9 +263,9 @@ export function createWorkspaceApplicationSession(
 	const workspaceAuthoring = createWorkspaceAuthoringService(persistence)
 	const localeAuthoring = createLocaleAuthoringService(persistence)
 	const flowAuthoring = createFlowAuthoringService(persistence)
-	// Where Adapter provenance comes from (Rules 01a167bf-1f93-… and 01a164bc-4e09-…).
+	// Where Adapter provenance comes from (Rules 01a167bf-1f93-… and 01a167d8-acd9-…).
 	const adapterProvenanceSource: AdapterProvenanceSource = {
-		...(options?.resolveAdapters ? { resolve: options.resolveAdapters } : {}),
+		...options?.adapterResolution,
 		...(options?.kitBuild ? { kitBuild: () => options.kitBuild!.status() } : {}),
 	}
 	const reviewAuthoring = createReviewAuthoringService(persistence, { adapterProvenance: adapterProvenanceSource })
@@ -274,7 +275,7 @@ export function createWorkspaceApplicationSession(
 		captureCookie: options?.captureCookie,
 		...(options?.kitBuild ? { kitBuild: () => options.kitBuild!.status() } : {}),
 		...(options?.adapterThemeSupport ? { themeSupport: options.adapterThemeSupport } : {}),
-		...(options?.resolveAdapters ? { resolveAdapters: options.resolveAdapters } : {}),
+		adapterProvenance: adapterProvenanceSource,
 	})
 	const handoffExport = createHandoffExportService(persistence, {
 		...(options?.checkAdapterSet ? { checkAdapterSet: options.checkAdapterSet } : {}),

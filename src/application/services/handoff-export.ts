@@ -38,7 +38,7 @@ import {
 	type ValidatedAdapterSet,
 } from '../../adapters/resolution'
 import { adapterFreshnessContext } from '../../domain/evidence/adapter-provenance'
-import { adapterEntryProvenance, adapterSetEvidenceProvenance, kitBuildAllowsAdapterProvenance, resolveProductKitAdapterSet, type AdapterGraphDigestCache, type AdapterProvenanceSource } from './adapter-provenance'
+import { adapterEntryProvenance, adapterSetEvidenceProvenance, kitBuildAllowsAdapterProvenance, resolveProductKitAdapterSet, withSettledKitBuild, type AdapterGraphDigestCache, type AdapterProvenanceSource } from './adapter-provenance'
 import { bareSpecifierPackageName } from '../../adapters/kit-dependencies'
 import { resolveKitPackage } from '../../adapters/kit-packages'
 import { locateKitProject, type KitProject } from '../../adapters/kit-registry'
@@ -113,7 +113,7 @@ export interface HandoffExportService {
 /**
  * `adapterProvenance`: the server's Adapter resolution, the one the Preview renders with, and the kit
  * build state, which the closure's Adapters and the Evidence freshness follow (Rules
- * 01a167bf-1f93-78b7-9045-6562c20f5a42 and 01a164bc-4e09-78be-91fe-e7ecb3c42edb); without it the
+ * 01a167bf-1f93-78b7-9045-6562c20f5a42 and 01a167d8-acd9-727d-9ab8-7395a4843897); without it the
  * Adapters resolve from disk.
  */
 export function createHandoffExportService(persistence: FileNativePersistence, options: Readonly<{ checkAdapterSet?: AdapterSetRuntimeCheck; adapterProvenance?: AdapterProvenanceSource }> = {}): HandoffExportService {
@@ -379,14 +379,31 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		// canonical {$asset} bindings. Discover those references from View IR before
 		// materializing the Asset closure; do not guess from arbitrary strings.
 		const assetCatalogByWidgetType = new Map<string, AdapterWidgetCatalogEntry[]>()
+		// The active Adapter set, resolved once, through the Preview's resolution under `uiux dev` (Rule
+		// 01a167bf-1f93-…): the catalogs come from it, Evidence freshness compares its provenance (Rule
+		// 01a115cd-c6de-…), and step 8 records it. Each Adapter's module graph is digested once.
+		let adaptersResolution: AdapterSetResolutionResult = {
+			state: 'valid',
+			diagnostics: [],
+			summaries: [],
+			set: Object.freeze({ entries: Object.freeze([]), [Symbol.for('ValidatedAdapterSet')]: true }) as never,
+			themeSupport: allThemesSupported(),
+		}
+		if (workspaceAdapters.length > 0) adaptersResolution = await resolveProductKitAdapterSet(persistence, workspaceAdapters, options.adapterProvenance)
+		const resolvedEntries = adaptersResolution.state === 'valid' ? adaptersResolution.set.entries : undefined
 		const rawAdaptersForAssetDiscovery = workspaceAdapters
 		const nonRootWidgetTypes = new Set([...usedWidgetTypes].filter(type => type !== 'RootShell'))
 		if (nonRootWidgetTypes.size > 0 && rawAdaptersForAssetDiscovery.length > 0) {
-			for (const selection of rawAdaptersForAssetDiscovery) {
+			for (const [index, selection] of rawAdaptersForAssetDiscovery.entries()) {
 				try {
-					const single = await resolveProductKitAdapterSet(persistence, [selection], options.adapterProvenance)
-					if (single.state !== 'valid' || !single.set.entries[0]) continue
-					const entry = single.set.entries[0]
+					// The set's own entry while the set is valid; otherwise this Adapter alone, so one invalid
+					// Adapter does not hide the catalogs of the others.
+					let entry = resolvedEntries?.find(candidate => candidate.index === index)
+					if (!resolvedEntries) {
+						const single = await resolveProductKitAdapterSet(persistence, [selection], options.adapterProvenance)
+						entry = single.state === 'valid' ? single.set.entries[0] : undefined
+					}
+					if (!entry) continue
 					for (const widgetType of entry.ownership.widgetTypes) {
 						if (!nonRootWidgetTypes.has(widgetType)) continue
 						const catalog = entry.manifest.catalog.widgets[widgetType]
@@ -567,22 +584,10 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 			const localeRead = await persistence.locales.readInspected(locale)
 			if (localeRead?.resource) currentLocaleRevisions[locale] = localeRead.revision
 		}
-		// The active Adapter set, resolved once: Evidence freshness compares its provenance (Rule
-		// 01a115cd-c6de-…), and step 8 records it. Each Adapter's module graph is digested once.
-		let adaptersResolution: AdapterSetResolutionResult = {
-			state: 'valid',
-			diagnostics: [],
-			summaries: [],
-			set: Object.freeze({ entries: Object.freeze([]), [Symbol.for('ValidatedAdapterSet')]: true }) as never,
-			themeSupport: allThemesSupported(),
-		}
-		if (workspaceAdapters.length > 0) adaptersResolution = await resolveProductKitAdapterSet(persistence, workspaceAdapters, options.adapterProvenance)
 		const adapterDigests: AdapterGraphDigestCache = new Map()
 		// While a kit build is running or its last run failed, the current Adapter provenance cannot be
-		// computed, so every capture's freshness is unknown (Rule 01a164bc-4e09-…).
-		const currentAdapters = kitBuildAllowsAdapterProvenance(options.adapterProvenance)
-			? await adapterSetEvidenceProvenance(persistence, adaptersResolution, adapterDigests)
-			: { state: 'unavailable' as const }
+		// computed, so every capture's freshness is unknown (Rules 01a167d8-acd9-… and 01a164bc-4e09-…).
+		const currentAdapters = await withSettledKitBuild(options.adapterProvenance, () => adapterSetEvidenceProvenance(persistence, adaptersResolution, adapterDigests, options.adapterProvenance))
 		// 7. Evidence Records in closure
 		const evidenceRefs: EvidenceReference[] = []
 		const contextsInClosure: ResolvedRenderContext[] = []
@@ -729,12 +734,24 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		const adapterProvenances: AdapterProvenance[] = []
 		const implementationReferences: HandoffWidgetImplementationReference[] = []
 
-		if (adaptersResolution.state === 'valid') {
+		// While a kit build is running or its last run failed, no Adapter provenance can be recorded
+		// (Rule 01a167d8-acd9-727d-9ab8-7395a4843897): the closure is invalid rather than recording what is on disk.
+		const adapterProvenanceRecordable = kitBuildAllowsAdapterProvenance(options.adapterProvenance)
+		if (adaptersResolution.state === 'valid' && adaptersResolution.set.entries.length > 0 && !adapterProvenanceRecordable) {
+			closureValid = false
+			blockingDiagnostics.push({
+				code: 'handoff.adapter_provenance_unverifiable',
+				message: 'The Adapters\' provenance cannot be recorded while the kit build is running or its last run failed. Export again once the build state is ready.',
+				path: '/adapters',
+				blocking: true,
+			})
+		}
+		if (adaptersResolution.state === 'valid' && adapterProvenanceRecordable) {
 			for (const entry of adaptersResolution.set.entries) {
 				// Clause 01a115cd-d7f6-74a1-ba9f-c20a24a31ae5: the content digest covers the Adapter's whole
 				// bundled module graph (its imports, stylesheets and assets), not only its entry module, and the
 				// configuration digest the entry's validated configuration.
-				const provenance = await adapterEntryProvenance(persistence, entry, adapterDigests)
+				const provenance = await adapterEntryProvenance(persistence, entry, adapterDigests, options.adapterProvenance)
 				// The same clause requires a package version or a content digest: an Adapter with neither has no
 				// verifiable identity to record, so the bundle cannot record it and the closure is invalid.
 				if (!provenance) {

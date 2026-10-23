@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KIT_BUILD_DECLARATION_READ_ATTEMPTS, KIT_BUILD_DECLARATION_RETRY_DELAY_MS, parseKitBuildDeclaration, readDeclaredKitBuildDeclaration, readKitBuildDeclaration } from '../src/adapters/kit-build-declaration'
 import type { KitBuildControl, KitBuildStatus } from '../src/application/ports/kit-build'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
+import { withSettledKitBuild } from '../src/application/services/adapter-provenance'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
 import { ACCESS_PRESETS_FILENAME, builtInAccessPresetsFile } from '../src/domain/access-presets/schema'
 import { emptyProductKit, type ProductKit } from '../src/domain/product-kit/schema'
@@ -15,7 +16,7 @@ import { canonicalJsonBytes, FileNativePersistence, V5_LAYOUT } from '../src/per
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { readKitBuildForHttp, readKitBuildLogForHttp, readProductKitForHttp, restartKitBuildForHttp } from '../src/server/authoring-http'
 import { createKitBuildRunner, KIT_BUILD_GENERATION_WARNING, KIT_BUILD_LOG_BYTES, KIT_BUILD_RESTART_INTERVAL_MS, KitBuildLog, kitBuildEnvironment, registerKitBuildRunner, type KitBuildRunner } from '../src/server/kit-build'
-import { getSelectedWorkspacePreviewBundle, resolveSelectedWorkspaceAdapterList, resolveSelectedWorkspaceAdapters } from '../src/server/workspace-adapters'
+import { getSelectedWorkspacePreviewBundle, pinnedAdapterContentDigest, resolveSelectedWorkspaceAdapterList, resolveSelectedWorkspaceAdapters } from '../src/server/workspace-adapters'
 import { connectMcp, scoped, testMember } from './support/access'
 import { currentManifest, writeManifest } from './support/workspace-layout'
 
@@ -896,13 +897,17 @@ setInterval(() => {
 }, 25)
 `
 
-describe('Adapter provenance and the kit build (Rules 01a167bf-1f93 and 01a164bc-4e09, issue #304)', () => {
+describe('Adapter provenance and the kit build (Rules 01a167bf-1f93, 01a167d8-acd9 and 01a164bc-4e09, issue #304)', () => {
 	/** The application session as the selected Workspace runtime makes it under `uiux dev`. */
 	function provenanceSession(root: string, build: KitBuildRunner) {
 		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		return createWorkspaceApplicationSession(persistence, {
 			kitBuild: build,
-			resolveAdapters: adapters => resolveSelectedWorkspaceAdapterList(root, V5_LAYOUT, adapters),
+			adapterResolution: {
+				resolve: adapters => resolveSelectedWorkspaceAdapterList(root, V5_LAYOUT, adapters),
+				pinnedContentDigest: pinnedAdapterContentDigest,
+				outputGeneration: () => build.outputVersion(),
+			},
 		})
 	}
 
@@ -915,7 +920,10 @@ describe('Adapter provenance and the kit build (Rules 01a167bf-1f93 and 01a164bc
 		const session = provenanceSession(root, build)
 		const first = await session.adapterProvenance()
 		expect(first).toEqual({ state: 'available', adapters: [expect.objectContaining({ moduleSpecifier: './dist/uiux.js', adapterId: 'kit-trigger-1', contentDigest: expect.stringMatching(/^sha256:/) })] })
-		expect((await resolveSelectedWorkspaceAdapters(root, V5_LAYOUT)).summaries[0]?.adapterId).toBe('kit-trigger-1')
+		const previewResolution = await resolveSelectedWorkspaceAdapters(root, V5_LAYOUT)
+		expect(previewResolution.summaries[0]?.adapterId).toBe('kit-trigger-1')
+		// The Product Kit file's own list is the Preview's resolution itself.
+		expect(await resolveSelectedWorkspaceAdapterList(root, V5_LAYOUT, [{ moduleSpecifier: './dist/uiux.js' }])).toBe(previewResolution)
 
 		// A kit source edit the build has not turned into output yet.
 		await write(join(root, 'kit', 'src', 'later.ts'), 'export const later = 1\n')
@@ -931,13 +939,45 @@ describe('Adapter provenance and the kit build (Rules 01a167bf-1f93 and 01a164bc
 		expect(second.state === 'available' && first.state === 'available' && second.adapters[0]!.contentDigest).not.toBe(first.state === 'available' && first.adapters[0]!.contentDigest)
 	}, 30_000)
 
+	it('gives no provenance computed across a change of the build state or of the output generation', async () => {
+		let state: KitBuildStatus['state'] = 'ready'
+		let generation = '1'
+		const source = { kitBuild: () => ({ state }), outputGeneration: () => generation }
+		const available = { state: 'available' as const, adapters: [] }
+		expect(await withSettledKitBuild(source, async () => available)).toBe(available)
+		expect(await withSettledKitBuild(source, async () => {
+			generation = '2'
+			return available
+		})).toEqual({ state: 'unavailable' })
+		expect(await withSettledKitBuild(source, async () => {
+			state = 'building'
+			return available
+		})).toEqual({ state: 'unavailable' })
+		let ran = false
+		expect(await withSettledKitBuild(source, async () => {
+			ran = true
+			return available
+		})).toEqual({ state: 'unavailable' })
+		expect(ran).toBe(false)
+	})
+
 	it('cannot compute the current Adapter provenance while a build has failed or is running, though the Preview keeps the last good output', async () => {
 		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK, 'fail.mjs': BUILD_FAIL, 'hang.mjs': HANG })
 		const { build } = runner(root, { register: true, capture: true, restartIntervalMs: 0 })
 		await build.start()
 		expect(await settledState(build)).toEqual({ state: 'ready' })
 		const session = provenanceSession(root, build)
-		expect(await session.adapterProvenance()).toEqual({ state: 'available', adapters: [expect.objectContaining({ adapterId: 'kit-adapter-1' })] })
+		const good = await session.adapterProvenance()
+		expect(good).toEqual({ state: 'available', adapters: [expect.objectContaining({ adapterId: 'kit-adapter-1', contentDigest: expect.stringMatching(/^sha256:/) })] })
+
+		// The output overwritten by hand after the one-shot build exited: no new output generation
+		// settles, the Preview keeps its bundle, and the provenance keeps the digest of what it renders.
+		const bundle = await getSelectedWorkspacePreviewBundle(root, V5_LAYOUT)
+		const generation = build.outputGeneration()
+		await writeFile(join(root, 'kit', 'dist', 'uiux.js'), `${adapterModule('kit-adapter-1')}// edited by hand\n`)
+		expect(build.outputGeneration()).toBe(generation)
+		expect(await getSelectedWorkspacePreviewBundle(root, V5_LAYOUT)).toMatchObject({ state: 'valid', hash: (bundle as { hash: string }).hash })
+		expect(await session.adapterProvenance()).toEqual(good)
 
 		await replace(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', type: 'module', uiux: nodeBuild('fail.mjs') }))
 		await build.restart()
