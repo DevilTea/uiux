@@ -1,10 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { constants, realpathSync, type Stats } from 'node:fs'
-import { chmod, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir } from 'node:fs/promises'
+import { chmod, link, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir } from 'node:fs/promises'
 import { homedir, hostname } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import { currentBootId, isFromEarlierBoot, recordedOnAnotherHost } from '../../persistence/boot-staleness'
+import { HardLinkUnsupportedError, isLinkUnsupported, readJudgedLock, removeJudgedLock, type JudgedLock } from '../../persistence/stale-lock'
 import type { HostHistoryPaths } from '../../persistence/history/host-store'
 import { generateHint } from './credentials'
 import {
@@ -183,17 +184,22 @@ async function writeAtomically(path: string, contents: string): Promise<void> {
 	await syncDirectory(dirname(path))
 }
 
-async function acquireLock(lockPath: string, waitMs: number = LOCK_WAIT_MS): Promise<() => Promise<void>> {
+/**
+ * Takes the roster lock at `lockPath` and returns its release; exported for the lock tests. The owner
+ * record `{ pid, hostname, token, bootId? }` is written to a unique candidate file beside the lock and
+ * published with an atomic `link`, which fails while another owner holds it, so the lock is never
+ * seen empty or partial and an owner killed while taking it leaves at most a candidate. Like the
+ * persistence lock it is not fsynced (issue #321), and it needs a file system with hard links.
+ */
+export async function acquireLock(lockPath: string, waitMs: number = LOCK_WAIT_MS): Promise<() => Promise<void>> {
 	// Read before the wait budget starts: the first read of a process may take a moment.
 	const bootId = await currentBootId()
 	const started = Date.now()
 	const token = randomBytes(8).toString('hex')
 	const record = JSON.stringify({ pid: process.pid, hostname: hostname(), token, ...(bootId ? { bootId } : {}) })
+	let retriedPastDeadline = false
 	for (;;) {
-		try {
-			const handle = await open(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
-			try { await handle.writeFile(record, 'utf8') }
-			finally { await handle.close() }
+		if (await publishLock(lockPath, token, record)) {
 			return async () => {
 				try {
 					const owner = JSON.parse(await readFile(lockPath, 'utf8')) as { token?: unknown }
@@ -202,62 +208,91 @@ async function acquireLock(lockPath: string, waitMs: number = LOCK_WAIT_MS): Pro
 				catch { /* already gone */ }
 			}
 		}
-		catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+		if (await removeStaleLock(lockPath, bootId)) {
+			// Try again at once after a stale lock went, but past the wait only once, so a lock that
+			// keeps being replaced or re-judged cannot hold this loop forever.
+			if (Date.now() - started <= waitMs) continue
+			if (!retriedPastDeadline) {
+				retriedPastDeadline = true
+				continue
+			}
 		}
-		if (await removeStaleLock(lockPath, bootId)) continue
 		if (Date.now() - started > waitMs)
 			throw new AccessError('access.lock_busy', `Timed out waiting for another UIUX process holding ${lockPath}.`)
 		await new Promise(resolveDelay => setTimeout(resolveDelay, 15))
 	}
 }
 
+/** Publishes the roster lock from a complete candidate; false while another owner holds it. */
+async function publishLock(lockPath: string, token: string, record: string): Promise<boolean> {
+	const candidate = join(dirname(lockPath), `.access-lock-${token}-${randomBytes(6).toString('hex')}.tmp`)
+	try {
+		const handle = await open(candidate, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
+		try { await handle.writeFile(record, 'utf8') }
+		finally { await handle.close() }
+		try { await link(candidate, lockPath) }
+		catch (error) {
+			if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false
+			if (isLinkUnsupported(error)) throw hardLinksUnsupported(lockPath, error)
+			throw error
+		}
+		return true
+	}
+	finally { await rm(candidate, { force: true }).catch(() => undefined) }
+}
+
+/** The refusal of a roster directory whose file system cannot make the hard links the roster lock needs. */
+function hardLinksUnsupported(lockPath: string, error: unknown): AccessError {
+	const code = (error instanceof HardLinkUnsupportedError ? error.cause : error) as NodeJS.ErrnoException
+	return unsafe(dirname(lockPath), `its file system does not support hard links, which the roster lock needs (${code.code})`)
+}
+
 /**
  * Whether the roster lock is stale, removing it if so. A lock of another host stays held. A lock of
- * an earlier boot is stale (see `boot-staleness.ts`); an empty lock of this boot is one being written,
- * held, unless a power loss left it empty, in which case it stays held until its modification time
- * falls before the computed boot (a clock that lagged at boot delays that) or someone removes it.
+ * an earlier boot is stale (see `boot-staleness.ts`). A lock of this boot without a readable record
+ * (only a power loss leaves one, since the lock is published complete) stays held until its
+ * modification time falls before the computed boot (a clock that lagged at boot delays that) or
+ * someone removes it. A lock of this boot whose pid has exited is stale.
  */
 async function removeStaleLock(lockPath: string, bootId: string | undefined): Promise<boolean> {
-	let owner: { pid?: unknown } | undefined
+	let judged: JudgedLock
 	try {
 		const stats = await lstat(lockPath)
 		if (stats.isSymbolicLink() || !stats.isFile()) throw unsafe(lockPath, 'the lock is not a regular file')
-		// The record and the modification time come from one open file, never following a link.
-		const handle = await open(lockPath, constants.O_RDONLY | constants.O_NOFOLLOW)
-		let written: Stats
-		let bytes: string
-		try {
-			written = await handle.stat()
-			bytes = await handle.readFile('utf8')
-		}
-		finally { await handle.close() }
-		try { owner = JSON.parse(bytes) as { pid?: unknown } }
-		catch { owner = undefined }
-		// Neither the boot nor the pid of another host can be checked here: its lock stays held.
-		if (recordedOnAnotherHost(owner)) return false
-		// No process from an earlier boot still runs, so its lock is stale whatever pid or bytes it records.
-		if (isFromEarlierBoot(owner, written, bootId)) {
-			await rm(lockPath, { force: true })
-			return true
-		}
+		// The record, the modification time and the identity of the removed file come from one open file.
+		judged = await readJudgedLock(lockPath)
 	}
 	catch (error) {
 		if (isNotFound(error)) return true
 		if (error instanceof AccessError) throw error
 		return false
 	}
-	// A lock being written right now has no content yet; treat it as held.
-	if (typeof owner !== 'object' || owner === null) return false
-	if (typeof owner.pid !== 'number' || !Number.isInteger(owner.pid)) return false
+	let owner: { pid?: unknown } | undefined
+	try { owner = JSON.parse(judged.bytes.toString('utf8')) as { pid?: unknown } }
+	catch { owner = undefined }
+	// Neither the boot nor the pid of another host can be checked here: its lock stays held.
+	if (recordedOnAnotherHost(owner)) return false
+	// No process from an earlier boot still runs, so its lock is stale whatever pid or bytes it records.
+	if (!isFromEarlierBoot(owner, judged, bootId)) {
+		if (typeof owner !== 'object' || owner === null) return false
+		if (typeof owner.pid !== 'number' || !Number.isInteger(owner.pid)) return false
+		try {
+			process.kill(owner.pid, 0)
+			return false
+		}
+		catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return false
+		}
+	}
 	try {
-		process.kill(owner.pid, 0)
-		return false
+		return await removeJudgedLock(lockPath, judged, {
+			bootId,
+			claimPath: suffix => join(dirname(lockPath), `.access-lock-break-${suffix}`),
+		})
 	}
 	catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return false
-		await rm(lockPath, { force: true })
-		return true
+		if (error instanceof HardLinkUnsupportedError) throw hardLinksUnsupported(lockPath, error)
+		throw error
 	}
 }
 
