@@ -5,7 +5,7 @@ import type { I18nResource } from '../../domain/i18n/schema'
 import { reviewAnchorState, type ReviewAnchorState, type ReviewAnchorTarget } from '../../domain/reviews/anchor-state'
 import type { ChangeDomain } from '../../domain/reviews/change-domains'
 import { markRemovedActors } from '../../domain/reviews/removed-actors'
-import { deriveReviewResolution, isWidgetAnchor, isWorkspaceAnchor, type ReviewResolution, type ReviewThread } from '../../domain/reviews/schema'
+import { deriveReviewResolution, isWidgetAnchor, isWorkspaceAnchor, type ReviewActor, type ReviewResolution, type ReviewSubmission, type ReviewThread } from '../../domain/reviews/schema'
 import { deriveWidgetTree, flattenWidgetTree } from '../../preview/widget-tree'
 import type { Diagnostic } from '../../domain/validation'
 import type { ViewResource } from '../../domain/views/schema'
@@ -14,6 +14,7 @@ import type { FileNativePersistence, WorkspaceInspection } from '../../persisten
 import { PersistenceError } from '../../persistence/errors'
 import {
 	DISCOVERABLE_RESOURCE_KINDS,
+	DISCOVERY_DETAIL_EXCERPT_GRAPHEMES,
 	REVIEW_DISMISSAL_RESOLUTIONS,
 	REVIEW_MESSAGE_EXCERPT_GRAPHEMES,
 	REVIEW_VIEW_WIDE_VARIANT,
@@ -25,7 +26,9 @@ import {
 	type ResourceDiscoveryOutcome,
 	type ResourceDiscoveryRequest,
 	type ReviewDiscoveryStatus,
+	type ReviewDiscoveryDetail,
 	type ReviewDiscoverySummary,
+	type ViewDiscoveryDetail,
 } from '../dto/resource-discovery'
 import type { ResourceRevision } from '../dto/revisions'
 import { isValidPointResourceAddress, type PointResourceKind } from '../dto/point-resources'
@@ -347,6 +350,10 @@ export function createWorkspaceApplicationSession(
 		let roster: Promise<ReadonlySet<string> | undefined> | undefined
 		const requestRoster = () => roster ??= rosterOnce()
 		const items: ResourceDiscoveryItem[] = []
+		// Clause 01a166bd-ef89-7bdc-96a9-6eb86451932a: only `expanded` adds `detail`; the default result is unchanged.
+		const expanded = request.detail === 'expanded'
+		let defaultLocale: Promise<string | undefined> | undefined
+		const requestDefaultLocale = () => defaultLocale ??= readDefaultLocale()
 		const anchorTargets = new Map<string, Promise<ReviewAnchorTarget>>()
 		const anchorTarget = (viewId: string): Promise<ReviewAnchorTarget> => {
 			let target = anchorTargets.get(viewId)
@@ -362,10 +369,12 @@ export function createWorkspaceApplicationSession(
 					if (!read || read.kind === 'workspace') continue
 					item = summarize(read)
 					if (read.kind === 'review') thread = read.resource
+					if (expanded) item = { ...item, detail: await expandedDetail(read, requestDefaultLocale) } as ResourceDiscoveryItem
 				}
 				catch (error) {
 					item = await summarizeUnreadable(kind, key, error)
 					if (!item) continue
+					if (expanded) item = { ...item, detail: {} }
 				}
 				if (request.query !== undefined && !matchesQuery(item, request.query)) continue
 				if (!await matchesReviewFilters(item, thread, request, anchorTarget)) continue
@@ -382,6 +391,19 @@ export function createWorkspaceApplicationSession(
 				items: pageItems,
 				...(end < items.length && pageItems.length > 0 ? { nextCursor: encodeCursor(sortKey(pageItems.at(-1)!), scope) } : {}),
 			},
+		}
+	}
+
+	/** The Workspace's default Locale for the expanded Locale `isDefault`; unknown when the manifest is unreadable. */
+	async function readDefaultLocale(): Promise<string | undefined> {
+		try {
+			const read = await persistence.workspace.readInspected()
+			const locale = read.resource?.i18n?.defaultLocale
+			return typeof locale === 'string' ? locale : undefined
+		}
+		catch (error) {
+			if (error instanceof PersistenceError && error.code === 'persistence.invalid_json') return undefined
+			throw error
 		}
 	}
 
@@ -497,6 +519,7 @@ type NormalizedDiscoveryRequest = Readonly<{
 	variant?: readonly string[]
 	anchor?: readonly ReviewAnchorState[]
 	changeDomain?: readonly ChangeDomain[]
+	detail?: ResourceDiscoveryRequest['detail']
 	cursor?: string
 	limit: number
 }>
@@ -514,6 +537,8 @@ function normalizeDiscoveryRequest(request: ResourceDiscoveryRequest, mode: 'lis
 		...(request.variant !== undefined ? { variant: [...request.variant].sort() } : {}),
 		...(request.anchor !== undefined ? { anchor: [...request.anchor].sort() } : {}),
 		...(request.changeDomain !== undefined ? { changeDomain: [...request.changeDomain].sort() } : {}),
+		// Not part of the cursor scope: expansion never changes which items match or their order.
+		...(request.detail !== undefined ? { detail: request.detail } : {}),
 		...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
 		limit: request.limit,
 	}
@@ -596,16 +621,109 @@ function graphemeExcerpt(text: string, limit: number): string {
  * review or resolved, unless a lifecycle event entering `open` appears later in `history` (a reopen).
  */
 function currentSubmissionSummary(thread: ReviewThread): Pick<ReviewDiscoverySummary, 'currentSubmission'> {
-	if (thread.status !== 'ready-for-review' && thread.status !== 'resolved') return {}
+	const submission = currentSubmission(thread)
+	return submission ? { currentSubmission: { id: submission.id, at: submission.at, changeDomains: submission.changeDomains } } : {}
+}
+
+function currentSubmission(thread: ReviewThread): ReviewSubmission | undefined {
+	if (thread.status !== 'ready-for-review' && thread.status !== 'resolved') return undefined
 	const submission = Array.isArray(thread.submissions) ? thread.submissions.at(-1) : undefined
-	if (!submission) return {}
+	if (!submission) return undefined
 	// Position, not time: a reopen recorded later in `history` than the submission's lifecycle entry
 	// supersedes it even with an equal `at`. Without that entry, any reopen counts.
 	const history = Array.isArray(thread.history) ? thread.history : []
 	const entry = history.findIndex(event => event.kind === 'lifecycle' && event.to === 'ready-for-review' && event.submissionId === submission.id)
 	const reopened = history.some((event, index) => index > entry && event.kind === 'lifecycle' && event.to === 'open')
-	if (reopened) return {}
-	return { currentSubmission: { id: submission.id, at: submission.at, changeDomains: submission.changeDomains } }
+	return reopened ? undefined : submission
+}
+
+/**
+ * The expanded `detail` of a readable item (Clauses 01a166bd-f310-7e84-b1da-892a8b3c3873,
+ * 01a166bd-f4d9-7427-9b9a-881b61fe8b18 and 01a166bd-f6ac-71d8-86c1-3494875a3e14): bounded
+ * projections only. A resource read with diagnostics may be malformed, so every member is read
+ * defensively and left out when its source is not of the expected shape.
+ */
+async function expandedDetail(read: Exclude<PointResourceRead, { kind: 'workspace' }>, defaultLocale: () => Promise<string | undefined>): Promise<NonNullable<ResourceDiscoveryItem['detail']>> {
+	switch (read.kind) {
+		case 'view': return viewDetail(read.resource)
+		case 'flow': return flowDetail(read.resource)
+		case 'locale': {
+			const locale = await defaultLocale()
+			return locale === undefined ? {} : { isDefault: read.key === locale }
+		}
+		case 'review': return reviewDetail(read.resource)
+		case 'asset': return { byteSize: read.content.size, digest: read.content.digest }
+	}
+}
+
+const SPEC_LISTS = ['entryConditions', 'interactionRules', 'constraints', 'accessibility', 'references'] as const
+const DECISION_STATUSES = ['pending', 'deferred', 'decided'] as const
+
+function viewDetail(view: ViewResource): ViewDiscoveryDetail {
+	const variants = view.variants
+	const spec = isRecord(view.spec) ? view.spec : undefined
+	const decisions = Array.isArray(spec?.decisions) ? spec.decisions : undefined
+	return {
+		...(isRecord(variants) ? { variantNames: Object.keys(variants) } : {}),
+		...(typeof spec?.intent === 'string' ? { intentExcerpt: graphemeExcerpt(spec.intent, DISCOVERY_DETAIL_EXCERPT_GRAPHEMES) } : {}),
+		...(spec && SPEC_LISTS.every(list => Array.isArray(spec[list]))
+			? { specCounts: Object.fromEntries(SPEC_LISTS.map(list => [list, (spec[list] as readonly unknown[]).length])) as NonNullable<ViewDiscoveryDetail['specCounts']> }
+			: {}),
+		...(decisions
+			? { decisionCounts: Object.fromEntries(DECISION_STATUSES.map(status => [status, decisions.filter(decision => decision?.status === status).length])) as NonNullable<ViewDiscoveryDetail['decisionCounts']> }
+			: {}),
+	}
+}
+
+function flowDetail(flow: FlowResource): NonNullable<Extract<ResourceDiscoveryItem, { kind: 'flow' }>['detail']> {
+	const steps = isRecord(flow.steps) ? Object.values(flow.steps) : undefined
+	const viewIds: string[] = []
+	let transitionCount = 0
+	for (const step of steps ?? []) {
+		const viewId = isRecord(step) && isRecord(step.target) ? step.target.viewId : undefined
+		if (typeof viewId === 'string' && !viewIds.includes(viewId)) viewIds.push(viewId)
+		if (isRecord(step) && Array.isArray(step.transitions)) transitionCount += step.transitions.length
+	}
+	return {
+		...(typeof flow.entryStepId === 'string' ? { entryStepId: flow.entryStepId } : {}),
+		...(steps ? { stepCount: steps.length, transitionCount, viewIds } : {}),
+	}
+}
+
+function reviewDetail(thread: ReviewThread): ReviewDiscoveryDetail {
+	const messages = Array.isArray(thread.messages) ? thread.messages : []
+	const submissions = Array.isArray(thread.submissions) ? thread.submissions : []
+	const history = Array.isArray(thread.history) ? thread.history : []
+	const first = messages[0]
+	const evidenceRefs = currentSubmission(thread)?.evidenceRefs
+	return {
+		submissionCount: submissions.length,
+		historyCount: history.length,
+		participants: distinctActors([...messages, ...submissions, ...history].map(entry => entry?.actor)),
+		...(typeof first?.body === 'string' ? { firstMessageExcerpt: graphemeExcerpt(first.body, DISCOVERY_DETAIL_EXCERPT_GRAPHEMES) } : {}),
+		...(Array.isArray(evidenceRefs) ? { evidenceRefs } : {}),
+	}
+}
+
+/**
+ * Distinct actors in the order messages, submissions and history list them. An actor is the same
+ * when its `type` and `id` match, or, without an `id`, its `type` and `displayName`.
+ */
+function distinctActors(actors: readonly (ReviewActor | undefined)[]): ReviewActor[] {
+	const seen = new Set<string>()
+	const distinct: ReviewActor[] = []
+	for (const actor of actors) {
+		if (!isRecord(actor) || typeof actor.type !== 'string') continue
+		const identity = JSON.stringify(actor.id === undefined ? [actor.type, null, actor.displayName ?? null] : [actor.type, actor.id])
+		if (seen.has(identity)) continue
+		seen.add(identity)
+		distinct.push(actor)
+	}
+	return distinct
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /**

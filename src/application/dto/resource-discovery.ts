@@ -1,6 +1,7 @@
 import { CHANGE_DOMAINS, type ChangeDomain } from '../../domain/reviews/change-domains'
 import { REVIEW_ANCHOR_STATES, type ReviewAnchorState } from '../../domain/reviews/anchor-state'
-import { REVIEW_RESOLUTIONS, type ReviewActor, type ReviewAnchor, type ReviewDisplayHint, type ReviewRenderContext, type ReviewResolution, type ReviewStatus } from '../../domain/reviews/schema'
+import { REVIEW_RESOLUTIONS, type ReviewActor, type ReviewAnchor, type ReviewDisplayHint, type ReviewEvidenceRef, type ReviewRenderContext, type ReviewResolution, type ReviewStatus } from '../../domain/reviews/schema'
+import type { DecisionStatus } from '../../domain/spec/schema'
 import { isFullUuid, jsonPointer, rejectUnknownKeys, Validator, type Diagnostic } from '../../domain/validation'
 import type { ResourceRevision } from './revisions'
 
@@ -23,6 +24,14 @@ export const REVIEW_VIEW_WIDE_VARIANT = '*'
 /** Length of `latestMessage.excerpt` in grapheme clusters (Clause 01a163a5-719e-789d-a0fb-fc08646ed1d8). */
 export const REVIEW_MESSAGE_EXCERPT_GRAPHEMES = 200
 export const MAX_RESOURCE_DISCOVERY_LIMIT = 100
+/**
+ * Values of the `detail` selector (Clause 01a166bd-ef89-7bdc-96a9-6eb86451932a): `summary`, the
+ * default, keeps every item as compact as without it; `expanded` adds each item's `detail`.
+ */
+export const RESOURCE_DISCOVERY_DETAILS = ['summary', 'expanded'] as const
+export type ResourceDiscoveryDetail = typeof RESOURCE_DISCOVERY_DETAILS[number]
+/** Length of the expanded View `intentExcerpt` and Review `firstMessageExcerpt`, in grapheme clusters. */
+export const DISCOVERY_DETAIL_EXCERPT_GRAPHEMES = REVIEW_MESSAGE_EXCERPT_GRAPHEMES
 
 /** Every Review filter; any of them excludes other resource kinds (Clause 01a11544-6d38-7c63-958a-e0133b131fd3). */
 export const REVIEW_DISCOVERY_FILTERS = ['resolution', 'anchorScope', 'status', 'viewId', 'variant', 'anchor', 'changeDomain'] as const
@@ -42,16 +51,43 @@ export type ResourceDiscoveryRequest = Readonly<{
 	variant?: readonly string[]
 	anchor?: readonly ReviewAnchorState[]
 	changeDomain?: readonly ChangeDomain[]
+	/** `expanded` adds each item's `detail` (Clause 01a166bd-ef89-7bdc-96a9-6eb86451932a). */
+	detail?: ResourceDiscoveryDetail
 	cursor?: string
 	limit: number
 }>
 
 export type ResourceDiscoveryItem =
-	| Readonly<{ kind: 'view'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ name?: string; feature?: string }> }>
-	| Readonly<{ kind: 'flow'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ name?: string }> }>
-	| Readonly<{ kind: 'locale'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ messageCount?: number }> }>
-	| Readonly<{ kind: 'review'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: ReviewDiscoverySummary }>
-	| Readonly<{ kind: 'asset'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ name?: string; mediaType?: string; contentFilename?: string }> }>
+	| Readonly<{ kind: 'view'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ name?: string; feature?: string }>; detail?: ViewDiscoveryDetail }>
+	| Readonly<{ kind: 'flow'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ name?: string }>; detail?: FlowDiscoveryDetail }>
+	| Readonly<{ kind: 'locale'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ messageCount?: number }>; detail?: LocaleDiscoveryDetail }>
+	| Readonly<{ kind: 'review'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: ReviewDiscoverySummary; detail?: ReviewDiscoveryDetail }>
+	| Readonly<{ kind: 'asset'; key: string; revision: ResourceRevision; diagnosticCount: number; summary: Readonly<{ name?: string; mediaType?: string; contentFilename?: string }>; detail?: AssetDiscoveryDetail }>
+
+/*
+ * Expanded `detail` per kind: only bounded projections; IR, full message text, Locale messages and
+ * Asset content stay behind the Resource. A member is absent when an unreadable or malformed
+ * resource does not yield it, so an unreadable item carries an empty `detail`.
+ */
+/** Clause 01a166bd-f310-7e84-b1da-892a8b3c3873. */
+export type ViewDiscoveryDetail = Readonly<{
+	variantNames?: readonly string[]
+	intentExcerpt?: string
+	specCounts?: Readonly<{ entryConditions: number; interactionRules: number; constraints: number; accessibility: number; references: number }>
+	decisionCounts?: Readonly<Record<DecisionStatus, number>>
+}>
+/** Clause 01a166bd-f4d9-7427-9b9a-881b61fe8b18. */
+export type FlowDiscoveryDetail = Readonly<{ entryStepId?: string; stepCount?: number; transitionCount?: number; viewIds?: readonly string[] }>
+export type LocaleDiscoveryDetail = Readonly<{ isDefault?: boolean }>
+export type AssetDiscoveryDetail = Readonly<{ byteSize?: number; digest?: string }>
+/** Clause 01a166bd-f6ac-71d8-86c1-3494875a3e14. */
+export type ReviewDiscoveryDetail = Readonly<{
+	submissionCount?: number
+	historyCount?: number
+	participants?: readonly ReviewActor[]
+	firstMessageExcerpt?: string
+	evidenceRefs?: readonly ReviewEvidenceRef[]
+}>
 
 export type ReviewDiscoverySummary = Readonly<{
 	anchor?: ReviewAnchor
@@ -90,7 +126,7 @@ export function validateResourceDiscoveryRequest(input: unknown, mode: 'list' | 
 	const v = new Validator()
 	const value = v.object(input, '')
 	if (!value) return { status: 'invalid', diagnostics: v.diagnostics }
-	rejectUnknownKeys(value, ['kinds', 'query', ...REVIEW_DISCOVERY_FILTERS, 'cursor', 'limit'], '', v)
+	rejectUnknownKeys(value, ['kinds', 'query', ...REVIEW_DISCOVERY_FILTERS, 'detail', 'cursor', 'limit'], '', v)
 
 	if (Object.hasOwn(value, 'kinds')) {
 		const kinds = v.array(value.kinds, '/kinds')
@@ -125,6 +161,8 @@ export function validateResourceDiscoveryRequest(input: unknown, mode: 'list' | 
 		v.issue('discovery.query_required', '/query', 'Search requires a non-empty query after trimming whitespace.')
 	if (mode === 'list' && Object.hasOwn(value, 'query'))
 		v.issue('discovery.query_not_allowed', '/query', 'List discovery does not accept a search query.')
+	if (Object.hasOwn(value, 'detail') && !(RESOURCE_DISCOVERY_DETAILS as readonly unknown[]).includes(value.detail))
+		v.issue('discovery.invalid_detail', '/detail', 'Discovery detail must be summary or expanded.')
 	if (Object.hasOwn(value, 'cursor')) v.string(value.cursor, '/cursor', true)
 	const limit = v.finiteNumber(value.limit, '/limit')
 	if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > MAX_RESOURCE_DISCOVERY_LIMIT))

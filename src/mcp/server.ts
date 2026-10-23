@@ -4,7 +4,7 @@ import { McpServer, ProtocolError, ProtocolErrorCode, ResourceNotFoundError, Res
 import packageJson from '../../package.json' with { type: 'json' }
 import { z } from 'zod'
 
-import { DISCOVERABLE_RESOURCE_KINDS, MAX_RESOURCE_DISCOVERY_LIMIT, REVIEW_ANCHOR_SCOPES, REVIEW_DISCOVERY_STATUSES } from '../application/dto/resource-discovery'
+import { DISCOVERABLE_RESOURCE_KINDS, MAX_RESOURCE_DISCOVERY_LIMIT, RESOURCE_DISCOVERY_DETAILS, REVIEW_ANCHOR_SCOPES, REVIEW_DISCOVERY_STATUSES } from '../application/dto/resource-discovery'
 import { REVIEW_ANCHOR_STATES } from '../domain/reviews/anchor-state'
 import type { PointResourceKind } from '../application/dto/point-resources'
 import type { WorkspaceApplicationSession } from '../application/services/workspace-session'
@@ -49,6 +49,8 @@ const discoveryBaseShape = {
 		.describe('Review threads only: "missing" when the anchored View or Widget no longer exists, "stale" when only a named Variant no longer exists, "valid" otherwise.'),
 	changeDomain: z.array(z.enum(CHANGE_DOMAINS)).min(1).optional()
 		.describe('Review threads only: threads with any submission naming a listed change domain.'),
+	detail: z.enum(RESOURCE_DISCOVERY_DETAILS).optional()
+		.describe('"summary" (default) returns the compact items; "expanded" adds each item\'s bounded detail. Paging is the same either way.'),
 	cursor: z.string().min(1).optional(),
 	limit: z.number().int().min(1).max(MAX_RESOURCE_DISCOVERY_LIMIT),
 }
@@ -562,7 +564,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'list_resources',
 		{
 			title: 'List UIUX resources',
-			description: 'List compact canonical resource summaries with stable point-resource URIs. Review filters (resolution, anchorScope, status, viewId, variant, anchor, changeDomain) each match any listed value, combine with AND, and return Review threads only. A Review summary carries latestMessage (id, actor, at, a 200-grapheme excerpt, edited) and, while ready for review or resolved, currentSubmission (id, at, changeDomains).',
+			description: 'List compact canonical resource summaries with stable point-resource URIs. Review filters (resolution, anchorScope, status, viewId, variant, anchor, changeDomain) each match any listed value, combine with AND, and return Review threads only. A Review summary carries latestMessage (id, actor, at, a 200-grapheme excerpt, edited) and, while ready for review or resolved, currentSubmission (id, at, changeDomains). detail "expanded" adds a bounded detail member to each item: View variantNames, a 200-grapheme intentExcerpt, specCounts and decisionCounts; Flow entryStepId, stepCount, transitionCount and target viewIds; Locale isDefault; Review submissionCount, historyCount, participants, a 200-grapheme firstMessageExcerpt and the current submission\'s evidenceRefs; Asset byteSize and digest. Bodies, IR, Locale messages and Asset content stay behind each item\'s Resource.',
 			inputSchema: listResourcesSchema,
 			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
@@ -573,7 +575,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'search_resources',
 		{
 			title: 'Search UIUX resources',
-			description: 'Search compact canonical resource summaries without returning full resource bodies. Takes the same kind and Review filters as list_resources.',
+			description: 'Search compact canonical resource summaries without returning full resource bodies. Takes the same kind and Review filters and the same detail selector as list_resources.',
 			inputSchema: searchResourcesSchema,
 			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 		},
