@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { ResourceRevision } from '../dto/revisions'
+import { DELETED_CHANGE_SUMMARY, summarizeChange, type ChangeSummary } from '../dto/change-summary'
 import { validateResourceRevision } from '../dto/revisions'
 import { isFullUuid, type Diagnostic, type JsonObject } from '../../domain/validation'
 import {
@@ -174,10 +175,11 @@ export type ReviewAuthoringResult =
 			view?: Readonly<{ key: string; revision: ResourceRevision; resourceUri: string }>
 			targetView?: Readonly<{ key: string; revision: ResourceRevision; resourceUri: string }>
 			decision?: import('../../domain/spec/schema').Decision
+			changeSummary: ChangeSummary
 	  }>
 	| Readonly<{ status: 'already_exists'; key: string; currentRevision?: ResourceRevision }>
 	/** Retract only: the thread file was removed; no revision exists any more. */
-	| Readonly<{ status: 'deleted'; key: string }>
+	| Readonly<{ status: 'deleted'; key: string; changeSummary: ChangeSummary }>
 	| Readonly<{ status: 'not_found'; key: string }>
 	| Readonly<{
 			status: 'conflict'
@@ -309,7 +311,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		try {
 			const revision = await persistence.reviews.create(id, resource)
 			const inspected = await persistence.reviews.readInspected(id)
-			return { status: 'created', key: id, revision, diagnostics: inspected?.diagnostics ?? [] }
+			return { status: 'created', key: id, revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(undefined, resource) }
 		}
 		catch (error) {
 			if (!(error instanceof PersistenceError) || error.code !== 'persistence.resource_exists') throw error
@@ -360,7 +362,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		if (!commit.ok)
 			return 'gone' in commit ? { status: 'not_found', key: command.reviewId } : { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.reviews.readInspected(command.reviewId)
-		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
+		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 	}
 
 	async function reanchorReviewThread(command: ReanchorReviewThreadCommand): Promise<ReviewAuthoringResult> {
@@ -432,7 +434,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		if (!commit.ok)
 			return 'gone' in commit ? { status: 'not_found', key: command.reviewId } : { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.reviews.readInspected(command.reviewId)
-		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
+		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 	}
 
 	async function submitReadyForReview(command: SubmitReadyForReviewCommand): Promise<ReviewAuthoringResult> {
@@ -595,7 +597,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		if (!commit.ok)
 			return 'gone' in commit ? { status: 'not_found', key: command.reviewId } : { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.reviews.readInspected(command.reviewId)
-		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
+		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 	}
 
 	async function resolveReviewThread(command: ResolveReviewThreadCommand): Promise<ReviewAuthoringResult> {
@@ -705,7 +707,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		if (!commit.ok)
 			return 'gone' in commit ? { status: 'not_found', key: command.reviewId } : { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.reviews.readInspected(command.reviewId)
-		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
+		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 	}
 
 	async function reopenReviewThread(command: ReopenReviewThreadCommand): Promise<ReviewAuthoringResult> {
@@ -763,7 +765,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		if (!commit.ok)
 			return 'gone' in commit ? { status: 'not_found', key: command.reviewId } : { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.reviews.readInspected(command.reviewId)
-		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
+		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 	}
 
 	async function setReviewDisplayHint(command: SetReviewDisplayHintCommand): Promise<ReviewAuthoringResult> {
@@ -815,7 +817,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		if (!commit.ok)
 			return 'gone' in commit ? { status: 'not_found', key: command.reviewId } : { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.reviews.readInspected(command.reviewId)
-		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
+		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 	}
 
 	async function promoteReviewToDecision(command: PromoteReviewToDecisionCommand): Promise<ReviewAuthoringResult> {
@@ -903,6 +905,9 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 				targetView: { key: command.viewId, revision: view.revision, resourceUri: `uiux://view/${command.viewId}` },
 				decision: existingDecision,
 				diagnostics: inspected?.diagnostics ?? [],
+				// An idempotent replay writes nothing, so it reports no changes and no related resource
+				// (owner ruling 3 of https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19134586).
+				changeSummary: summarizeChange(review.resource, review.resource),
 			}
 		}
 
@@ -993,6 +998,8 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 			},
 			decision: newDecision,
 			diagnostics: inspected?.diagnostics ?? [],
+			// The thread is the primary resource; the View the Decision joins is the related one.
+			changeSummary: summarizeChange(review.resource, nextReview, [{ kind: 'view', key: command.viewId, revision: commit.viewRevision, before: view.resource, after: nextView }]),
 		}
 	}
 
@@ -1123,7 +1130,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 		if (!commit.ok)
 			return 'gone' in commit ? { status: 'not_found', key: command.reviewId } : { status: 'conflict', key: command.reviewId, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.reviews.readInspected(command.reviewId)
-		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
+		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 	}
 
 	async function retractReviewThread(command: RetractReviewThreadCommand): Promise<ReviewAuthoringResult> {
@@ -1158,7 +1165,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence)
 			},
 		})
 		switch (outcome.status) {
-			case 'deleted': return { status: 'deleted', key: command.reviewId }
+			case 'deleted': return { status: 'deleted', key: command.reviewId, changeSummary: DELETED_CHANGE_SUMMARY }
 			case 'not_found': return { status: 'not_found', key: command.reviewId }
 			case 'conflict': return { status: 'conflict', key: command.reviewId, currentRevision: outcome.currentRevision }
 			case 'refused': {

@@ -207,6 +207,8 @@ describe('restoring a View (Scenario 01a11a5e-9106-73c2-b51b-107557aa88e8)', { t
 
 		const outcome = await restore(ctx, EDITOR, { versionId: earlier, resource: { kind: 'view', key: VIEW_ID }, expectedRevision: before.revision })
 		expect(outcome, JSON.stringify(outcome)).toMatchObject({ status: 'updated', kind: 'view', key: VIEW_ID, restoredFrom: earlier, impacts: [] })
+		// Clause 01a11485-f578-…: what the restore changed, the kept Decisions not among it; a restore writes no other resource.
+		expect((outcome as { changeSummary: unknown }).changeSummary).toEqual({ changes: [{ path: '/ir/slots/content/note', op: 'remove' }, { path: '/ir/slots/content/pay', op: 'replace' }, { path: '/spec/intent', op: 'replace' }] })
 		const after = (await ctx.persistence.views.read(VIEW_ID))!
 		expect((outcome as { revision: string }).revision).toBe(after.revision)
 		expect(after.resource.ir).toEqual(earlierView.ir)
@@ -282,6 +284,7 @@ describe('restoring a View (Scenario 01a11a5e-9106-73c2-b51b-107557aa88e8)', { t
 		expect(stale).toEqual({ status: 'conflict', kind: 'view', key: VIEW_ID, currentRevision: null })
 		const created = await restore(ctx, EDITOR, { versionId: earlier, resource: { kind: 'view', key: VIEW_ID }, expectedRevision: null })
 		expect(created).toMatchObject({ status: 'created', kind: 'view', key: VIEW_ID, restoredFrom: earlier })
+		expect((created as { changeSummary: unknown }).changeSummary).toEqual({ changes: ['/id', '/ir', '/name', '/spec', '/variants'].map(path => ({ path, op: 'add' })) })
 		expect(await readFile(join(ctx.root, viewRelativePath(VIEW_ID)))).toEqual(original)
 
 		// null means "must not exist": once it exists again, null conflicts.
@@ -361,6 +364,7 @@ describe('restoring every other kind', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS 
 
 		const outcome = await restore(ctx, EDITOR, { versionId: earlier, resource: { kind: 'asset', key: ASSET_ID }, expectedRevision: (replaced as { revision: string }).revision })
 		expect(outcome).toMatchObject({ status: 'updated', kind: 'asset', key: ASSET_ID, revision: (first as { revision: string }).revision, diagnostics: [] })
+		expect((outcome as { changeSummary: unknown }).changeSummary).toEqual({ changes: [{ path: '/content', op: 'replace' }, { path: '/metadata/contentFilename', op: 'replace' }, { path: '/metadata/name', op: 'replace' }] })
 		// The replaced content file is gone: the directory holds exactly the restored pair.
 		expect((await readdir(join(ctx.root, 'assets', ASSET_ID))).sort()).toEqual(['asset.json', 'logo.png'])
 		const asset = (await ctx.persistence.assets.read(ASSET_ID))!
@@ -716,7 +720,7 @@ describe('MCP restore_resource_version (Clause 01a11a5e-2768-76ad-b02a-e15f50f91
 			expect(written.isError).not.toBe(true)
 			const { resourceUri, ...body } = written.structuredContent as Record<string, unknown>
 			expect(resourceUri).toBe(`uiux://view/${VIEW_ID}`)
-			expect(body).toMatchObject({ status: 'updated', kind: 'view', key: VIEW_ID, restoredFrom: earlier })
+			expect(body).toMatchObject({ status: 'updated', kind: 'view', key: VIEW_ID, restoredFrom: earlier, changeSummary: { changes: [{ path: '/ir/slots/content/note', op: 'remove' }] } })
 
 			// The same request again is now a conflict over both transports, with the same body.
 			const conflictMcp = await mcp.client.callTool({ name: 'restore_resource_version', arguments: { ...args, acknowledgeImpact: true } })
@@ -724,13 +728,22 @@ describe('MCP restore_resource_version (Clause 01a11a5e-2768-76ad-b02a-e15f50f91
 			expect(conflictHttp.status).toBe(409)
 			expect(conflictMcp.structuredContent).toEqual(conflictHttp.body)
 			expect(conflictHttp.body).toMatchObject({ status: 'conflict', currentRevision: body.revision })
+			expect(conflictHttp.body).not.toHaveProperty('changeSummary')
+
+			// The same write over HTTP, once the note is back, carries the same change summary.
+			const again = await setStructure(ctx, EDITOR, ir({ type: 'Button', id: 'pay' }, { type: 'Text', id: 'note' }))
+			const writtenHttp = await restoreResourceVersionForHttp(scoped(ctx.app, AGENT, { leases, transport: 'http' }), earlier, { resource: args.resource, expectedRevision: again, acknowledgeImpact: true })
+			expect(writtenHttp.status, JSON.stringify(writtenHttp.body)).toBe(200)
+			expect((writtenHttp.body as { changeSummary: unknown }).changeSummary).toEqual(body.changeSummary)
 		}
 		finally {
 			await mcp.close()
 		}
-		const restored = listed(await ctx.app.listVersions({})).versions.find(row => row.restoredFrom === earlier)
+		// Newest first: the HTTP restore, then the MCP one.
+		const [viaHttpRow, restored] = listed(await ctx.app.listVersions({})).versions.filter(row => row.restoredFrom === earlier)
 		expect(restored).toMatchObject({ actor: { type: 'agent', id: 'member:agent-1' } })
 		expect((await hostVersion(ctx, restored!.id)).events.map(event => event.source)).toEqual(['mcp'])
+		expect((await hostVersion(ctx, viaHttpRow!.id)).events.map(event => event.source)).toEqual(['workbench'])
 	})
 
 	it('validates the HTTP body', async () => {

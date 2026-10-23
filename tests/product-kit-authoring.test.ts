@@ -165,6 +165,41 @@ describe('compose_product_kit, update_product_kit and update_component_registry 
 		expect((fixed.body as { findings: unknown[] }).findings).toEqual([expect.objectContaining({ code: 'kit.component_invalid', path: '/components/lonely/files/1' })])
 	})
 
+	it('reports the same change summary for compose, update and the component registry over HTTP and MCP (Clause 01a164f0-c7a4-7ec9-aa1e-71dfb5f26b53)', async () => {
+		const compose = { designSystems: ['@acme/design-system'], adapters: ['@acme/uiux-adapter/uiux', './uiux.js'] }
+		const update = { adapters: [{ moduleSpecifier: '@acme/uiux-adapter/uiux' }, { moduleSpecifier: './uiux.js', config: { density: 'airy' } }], styles: ['./dist/kit.css'], themes: { dark: { 'data-theme': 'dark' } } }
+		const registry = { components: { button: { files: ['src/button.ts'], layer: 'design-system' } }, widgets: { Button: { component: 'button' } } }
+		const expected = [
+			// The Adapter entries carry no `id`, so the list is reported whole; designSystems is unchanged.
+			{ changes: [{ path: '/adapters', op: 'replace' }] },
+			{ changes: [{ path: '/adapters', op: 'replace' }, { path: '/styles', op: 'replace' }, { path: '/themes/dark', op: 'add' }] },
+			{ changes: [{ path: '/components/button', op: 'add' }, { path: '/widgets/Button', op: 'add' }] },
+		]
+
+		const viaHttp = await kitFixture()
+		const session = http(viaHttp.app, HUMAN_EDITOR)
+		const httpSummaries = []
+		for (const [write, body] of [[composeProductKitForHttp, compose], [updateProductKitForHttp, update], [updateComponentRegistryForHttp, registry]] as const) {
+			const result = await write(session, { expectedRevision: await revision(viaHttp.app), ...body })
+			expect(result.status, JSON.stringify(result.body)).toBe(200)
+			httpSummaries.push((result.body as { changeSummary: unknown }).changeSummary)
+		}
+		expect(httpSummaries).toEqual(expected)
+
+		const viaMcp = await kitFixture()
+		const mcp = await connectMcp(viaMcp.app, AGENT)
+		try {
+			const mcpSummaries = []
+			for (const [name, args] of [['compose_product_kit', compose], ['update_product_kit', update], ['update_component_registry', registry]] as const) {
+				const result = await mcp.client.callTool({ name, arguments: { expectedRevision: await revision(viaMcp.app), ...args } })
+				expect(result.isError, JSON.stringify(result.structuredContent)).not.toBe(true)
+				mcpSummaries.push((result.structuredContent as { changeSummary: unknown }).changeSummary)
+			}
+			expect(mcpSummaries).toEqual(expected)
+		}
+		finally { await mcp.close() }
+	})
+
 	it('refuses a registry entry that fails validation with kit.component_invalid, storing nothing (Rule 01a11bb1-a2ac)', async () => {
 		const ctx = await kitFixture({ ...KIT, adapters: [{ moduleSpecifier: './src/wrapper.js' }] })
 		await write(join(ctx.root, 'kit', 'src', 'wrapper.js'), 'export const adapter = {}\n')

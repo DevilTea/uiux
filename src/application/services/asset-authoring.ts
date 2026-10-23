@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { ResourceRevision } from '../dto/revisions'
+import { summarizeChange, type ChangeSummary } from '../dto/change-summary'
 import { validateResourceRevision } from '../dto/revisions'
 import { isFullUuid, type Diagnostic } from '../../domain/validation'
 import {
@@ -30,7 +31,7 @@ export type ReplaceAssetCommand = Readonly<{
 }>
 
 export type AssetAuthoringResult =
-	| Readonly<{ status: 'created' | 'updated'; key: string; revision: ResourceRevision; diagnostics: readonly Diagnostic[] }>
+	| Readonly<{ status: 'created' | 'updated'; key: string; revision: ResourceRevision; diagnostics: readonly Diagnostic[]; changeSummary: ChangeSummary }>
 	| Readonly<{ status: 'already_exists'; key: string; currentRevision?: ResourceRevision }>
 	| Readonly<{ status: 'not_found'; key: string }>
 	| Readonly<{ status: 'conflict'; key: string; currentRevision: ResourceRevision }>
@@ -82,7 +83,7 @@ export function createAssetAuthoringService(persistence: FileNativePersistence):
 		try {
 			const revision = await persistence.assets.create(id, resource)
 			const inspected = await persistence.assets.readInspected(id)
-			return { status: 'created', key: id, revision, diagnostics: inspected?.diagnostics ?? [] }
+			return { status: 'created', key: id, revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(undefined, resource) }
 		}
 		catch (error) {
 			if (!(error instanceof PersistenceError) || (error.code !== 'persistence.resource_exists' && error.code !== 'persistence.asset_shape_invalid')) throw error
@@ -141,7 +142,7 @@ export function createAssetAuthoringService(persistence: FileNativePersistence):
 		if (!commit.ok)
 			return { status: 'conflict', key: command.assetId, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.assets.readInspected(command.assetId)
-		return { status: 'updated', key: command.assetId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [] }
+		return { status: 'updated', key: command.assetId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 	}
 
 	return { createAsset, replaceAsset }
