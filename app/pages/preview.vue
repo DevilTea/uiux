@@ -9,6 +9,7 @@ import { missingDefaultLocaleDiagnostic } from '../../src/i18n/runtime'
 import { resolveFrameContext } from '../../src/preview/version-frame-context'
 import type { WorkspaceManifest } from '../../src/domain/workspace/schema'
 import { RuntimePreviewProtocolBridge } from '../../src/preview/protocol/bridge'
+import { createRuntimeGenerationId } from '../../src/preview/protocol/generation-id'
 import { MULTI_TARGET_GEOMETRY_FEATURE } from '../../src/preview/protocol/schema'
 import { RuntimeGeometryProducer } from '../../src/preview/geometry-producer'
 import { createDomGeometryMeasurer } from '../../src/preview/dom-geometry'
@@ -52,7 +53,9 @@ type ViewRead = Readonly<{
 }>
 
 const previewSessionId = ref<string>((route.query.session as string) || 'default-session')
-const runtimeGenerationId = ref<string>((route.query.generation as string) || 'default-generation')
+// The runtime mints its generation fresh for every document load; nothing in the URL fixes it, so a
+// reloaded document is a new generation and never revives the old one (issue #102).
+const runtimeGenerationId = createRuntimeGenerationId()
 const viewId = ref<string>((route.query.viewId as string) || '')
 // Locale and theme are resolved from the Workspace (same rules as the Workbench header) when not supplied.
 const locale = ref<string>((route.query.locale as string) || '')
@@ -145,7 +148,7 @@ function findTargetWidgetId(target: EventTarget | null): string {
 function targetingContext(): TargetingContext {
 	return {
 		previewSessionId: previewSessionId.value,
-		runtimeGenerationId: runtimeGenerationId.value,
+		runtimeGenerationId,
 		viewId: viewId.value,
 		...(variantName.value ? { variantId: variantName.value } : {}),
 	}
@@ -258,7 +261,7 @@ function reportWidgetEvent(report: WidgetEventReport) {
 		type: 'widget.event.occurrence',
 		context: {
 			previewSessionId: previewSessionId.value,
-			runtimeGenerationId: runtimeGenerationId.value,
+			runtimeGenerationId,
 			viewId: viewId.value,
 			...(variantName.value ? { variantId: variantName.value } : {}),
 			widgetId: report.widgetId,
@@ -272,7 +275,7 @@ function initBridge() {
 	try {
 		runtimeBridge = new RuntimePreviewProtocolBridge(
 			previewSessionId.value,
-			runtimeGenerationId.value,
+			runtimeGenerationId,
 			// `widget.events` ships with the mount factory (decision 10). A formal capture has no
 			// Workbench parent and is never armed, and a version frame is read-only: neither declares it.
 			{ protocolVersion: 1, features: harnessMode.value || versionId ? ['geometry', MULTI_TARGET_GEOMETRY_FEATURE] : ['geometry', MULTI_TARGET_GEOMETRY_FEATURE, WIDGET_EVENTS_FEATURE] },

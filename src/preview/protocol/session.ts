@@ -124,6 +124,32 @@ export class PreviewProtocolSession {
 		return this.beginGeneration(generationId, cause)
 	}
 
+	/** Whether `generationId` is the current generation, a retired one, or one this session never saw. */
+	classifyGeneration(generationId: string): 'current' | 'retired' | 'unseen' {
+		if (this.current?.id === generationId) return 'current'
+		return this.retiredGenerationIds.has(generationId) ? 'retired' : 'unseen'
+	}
+
+	/**
+	 * Admits the generation that a declaration with an unseen ID names: the runtime minted it for a
+	 * new Preview document or a restarted runtime, so it replaces any current generation as a
+	 * reload, subject to the recovery rules (Clauses 01a1161c-4119-712d-8785-7d8155c0ceee and
+	 * 01a1161c-4339-7614-ba65-6f21e37cd1a0). The first generation of the session is `initial`.
+	 */
+	admitDeclaredGeneration(generationId: string): GenerationAdmissionResult {
+		if (this.classifyGeneration(generationId) !== 'unseen') return { status: 'identity_reuse', generationId }
+		if (!this.current && this.retiredGenerationIds.size === 0) return this.beginGeneration(generationId, 'initial')
+		return this.replaceGenerationForLifecycle(generationId, 'reload')
+	}
+
+	/**
+	 * The Workbench ends the current generation because it replaces the Preview document: the ID is
+	 * retired, and the next declaration names the new generation.
+	 */
+	retireCurrentGeneration(): void {
+		this.retireCurrentForLifecycleReplacement()
+	}
+
 	receiveCapabilityDeclaration(
 		generationId: string,
 		declaration: CapabilityDeclareMessage['payload'],

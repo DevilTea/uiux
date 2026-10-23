@@ -6,6 +6,7 @@ import {
 	type PreviewProtocolTransport,
 	type PreviewWireMessage,
 } from '../src/preview/protocol/bridge'
+import { createRuntimeGenerationId } from '../src/preview/protocol/generation-id'
 import {
 	MAX_TRACKED_WIDGETS,
 	MULTI_TARGET_GEOMETRY_FEATURE,
@@ -259,6 +260,107 @@ describe('Preview protocol bridge', () => {
 		expect(workbench.snapshot().session).toMatchObject({
 			currentGenerationPhase: 'open', automaticRecoveryUsed: false, recoveryExhausted: false, recoveryNeeded: false,
 		})
+	})
+})
+
+// Issue #102: the runtime mints every generation ID (Clause 01a1161c-4119-712d-8785-7d8155c0ceee); a
+// reloaded document or restarted runtime is a new generation (Clause 01a1161c-4339-7614-ba65-6f21e37cd1a0),
+// and a retired one is never revived (Clause 01a1161c-4154-7de9-9dc5-622d21438a47).
+describe('Runtime-minted generation IDs', () => {
+	function workbenchWithHook(outbound: PreviewWireMessage[] = []) {
+		const admitted: string[] = []
+		const workbench = new WorkbenchPreviewProtocolBridge('session-a', collector(outbound), () => compatible, {
+			onGenerationAdmitted: generationId => admitted.push(generationId),
+		})
+		return { workbench, admitted, outbound }
+	}
+
+	it('mints a fresh opaque ID for every generation, from the given random source', () => {
+		const ids = new Set(Array.from({ length: 64 }, () => createRuntimeGenerationId()))
+		expect(ids.size).toBe(64)
+		for (const id of ids) expect(id).toMatch(/^gen-[0-9a-f]{32}$/)
+		const fixed = { getRandomValues: <T extends ArrayBufferView | null>(array: T): T => { (array as unknown as Uint8Array).fill(0xab); return array } }
+		expect(createRuntimeGenerationId(fixed)).toBe(`gen-${'ab'.repeat(16)}`)
+	})
+
+	it('admits the generation the first declaration names, without any allocation by the Workbench', () => {
+		const { workbench, admitted, outbound } = workbenchWithHook()
+		const runtime = new RuntimePreviewProtocolBridge('session-a', 'generation-a', declaration, collector([]))
+		expect(workbench.snapshot().session.currentGenerationId).toBeUndefined()
+		// Traffic of a generation before its declaration is not admitted.
+		expect(workbench.receive(acquireResponse())).toEqual({ status: 'stale-generation' })
+		expect(admitted).toEqual([])
+
+		expect(workbench.receive(runtime.declareCapabilities()).status).toBe('ack-dispatched')
+		expect(admitted).toEqual(['generation-a'])
+		expect(outbound).toEqual([expect.objectContaining({ type: 'capability.ack', context: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a' } })])
+		expect(workbench.snapshot().session).toMatchObject({ currentGenerationId: 'generation-a', currentGenerationPhase: 'open', retiredGenerationIds: [] })
+		// A resent identical declaration is a duplicate of the same generation, not a new one.
+		expect(workbench.receive(capabilityDeclaration('generation-a')).status).toBe('ack-dispatched')
+		expect(admitted).toEqual(['generation-a'])
+	})
+
+	it('treats a reloaded document as a new generation and retires the old one', () => {
+		const { workbench, admitted, outbound } = workbenchWithHook()
+		workbench.receive(capabilityDeclaration('generation-a'))
+		expect(workbench.receive(acquireResponse()).status).toBe('accepted')
+
+		// The document reloaded on its own: its runtime declares a generation the Workbench never saw.
+		expect(workbench.receive(capabilityDeclaration('generation-b')).status).toBe('ack-dispatched')
+		expect(admitted).toEqual(['generation-a', 'generation-b'])
+		expect(outbound.map(message => message.context.runtimeGenerationId)).toEqual(['generation-a', 'generation-b'])
+		expect(workbench.snapshot().session).toMatchObject({
+			currentGenerationId: 'generation-b', currentGenerationPhase: 'open', retiredGenerationIds: ['generation-a'], recoveryNeeded: false,
+		})
+		// Delayed traffic of the old generation is stale, never adopted by the new one.
+		expect(workbench.receive(acquireResponse())).toEqual({ status: 'stale-generation' })
+	})
+
+	it('never revives a retired generation, even when its declaration arrives again', () => {
+		const { workbench, admitted, outbound } = workbenchWithHook()
+		workbench.receive(capabilityDeclaration('generation-a'))
+		workbench.receive(capabilityDeclaration('generation-b'))
+		const acknowledgements = outbound.length
+
+		expect(workbench.receive(capabilityDeclaration('generation-a'))).toEqual({ status: 'stale-generation' })
+		expect(workbench.receive({ ...capabilityDeclaration('generation-a'), payload: { protocolVersion: 'one' } })).toEqual({ status: 'stale-generation' })
+		expect(outbound).toHaveLength(acknowledgements)
+		expect(admitted).toEqual(['generation-a', 'generation-b'])
+		expect(workbench.snapshot().session).toMatchObject({ currentGenerationId: 'generation-b', currentGenerationPhase: 'open' })
+	})
+
+	it('admits the next declared generation after the Workbench replaced the document itself', () => {
+		const { workbench, admitted } = workbenchWithHook()
+		workbench.receive(capabilityDeclaration('generation-a'))
+		workbench.retireGeneration()
+		expect(workbench.snapshot().session).toMatchObject({ retiredGenerationIds: ['generation-a'] })
+		expect(workbench.snapshot().session.currentGenerationId).toBeUndefined()
+		expect(workbench.receive(capabilityDeclaration('generation-a'))).toEqual({ status: 'stale-generation' })
+
+		expect(workbench.receive(capabilityDeclaration('generation-b')).status).toBe('ack-dispatched')
+		expect(admitted).toEqual(['generation-a', 'generation-b'])
+	})
+
+	it('admits nothing for a malformed declaration of an unseen generation', () => {
+		const { workbench, admitted } = workbenchWithHook()
+		expect(workbench.receive({ ...capabilityDeclaration('generation-a'), payload: { protocolVersion: 'one' } }).status).toBe('invalid')
+		expect(admitted).toEqual([])
+		expect(workbench.snapshot().session.currentGenerationId).toBeUndefined()
+	})
+
+	it('refuses and retires a new generation while recovery is exhausted', () => {
+		const admitted: string[] = []
+		const workbench = new WorkbenchPreviewProtocolBridge('session-a', collector([]), payload => payload.protocolVersion === 1
+			? compatible
+			: { ok: false, reason: 'capability.unsupported_protocol_version' }, { onGenerationAdmitted: generationId => admitted.push(generationId) })
+		// A capability failure leaves Preview unavailable until an explicit retry.
+		expect(workbench.receive({ ...capabilityDeclaration('generation-a'), payload: { protocolVersion: 2, features: ['geometry'] } }).status).toBe('capability-failure')
+		expect(workbench.snapshot().session).toMatchObject({ recoveryExhausted: true })
+
+		expect(workbench.receive(capabilityDeclaration('generation-c'))).toEqual({ status: 'generation-refused', generationId: 'generation-c' })
+		expect(admitted).toEqual(['generation-a'])
+		expect(workbench.snapshot().session.retiredGenerationIds).toContain('generation-c')
+		expect(workbench.receive(capabilityDeclaration('generation-c'))).toEqual({ status: 'stale-generation' })
 	})
 })
 

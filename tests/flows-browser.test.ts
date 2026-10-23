@@ -95,13 +95,19 @@ async function open(path: string, size: { width: number; height: number } = { wi
 	return { context, page }
 }
 
+/** The generation the Workbench admitted from the current document's declaration; '' while there is none. */
 async function generation(page: Page): Promise<string> {
+	return await page.locator('iframe[src*="/preview"]').getAttribute('data-runtime-generation') ?? ''
+}
+
+/** The Workbench's request number of the current Preview document (it never names the generation). */
+async function documentNumber(page: Page): Promise<string> {
 	const src = await page.locator('iframe[src*="/preview"]').getAttribute('src')
-	return new URL(src ?? '', server.origin).searchParams.get('generation') ?? ''
+	return new URL(src ?? '', server.origin).searchParams.get('document') ?? ''
 }
 
 async function waitForGenerationChange(page: Page, previous: string): Promise<string> {
-	await expect.poll(() => generation(page), { timeout: 15_000 }).not.toBe(previous)
+	await expect.poll(async () => { const current = await generation(page); return !!current && current !== previous }, { timeout: 15_000 }).toBe(true)
 	const frame = await (await page.waitForSelector('iframe[src*="/preview"]')).contentFrame()
 	await frame?.waitForSelector('[data-preview-ready="true"]', { state: 'attached', timeout: 15_000 })
 	return generation(page)
@@ -338,7 +344,8 @@ describe('Prototype player (R11, Discussion #6 item 6)', () => {
 			await page.waitForSelector('[data-session-status][data-status="live"]', { timeout: 15_000 })
 			const src = new URL(await page.locator('iframe[src*="/preview"]').getAttribute('src') ?? '', server.origin)
 			const previewSessionId = src.searchParams.get('session') ?? ''
-			const replacedFrame = page.frames().find(frame => frame.url().includes(`generation=${replaced}`))
+			const replacedDocument = await documentNumber(page)
+			const replacedFrame = page.frames().find(frame => frame.url().includes('/preview') && new URL(frame.url()).searchParams.get('document') === replacedDocument)
 			if (!replacedFrame) throw new Error('The acknowledged generation has no Preview frame.')
 
 			// Hold the next document, so the replaced one stays in the iframe during the new handshake.
@@ -346,7 +353,7 @@ describe('Prototype player (R11, Discussion #6 item 6)', () => {
 			const held = new Promise<void>((resolve) => { release = resolve })
 			let requested = () => {}
 			const nextRequested = new Promise<void>((resolve) => { requested = resolve })
-			await page.route(url => url.pathname === '/preview' && url.searchParams.get('generation') !== replaced, async (route) => {
+			await page.route(url => url.pathname === '/preview' && url.searchParams.get('document') !== replacedDocument, async (route) => {
 				requested()
 				await held
 				await route.continue()
@@ -380,6 +387,111 @@ describe('Prototype player (R11, Discussion #6 item 6)', () => {
 			release()
 			await page.waitForSelector('[data-session-status][data-status="live"]', { timeout: 15_000 })
 			expect(await page.evaluate(() => (window as unknown as { __statuses: string[] }).__statuses)).not.toContain('stopped')
+		}
+		finally { await context.close() }
+	}, 120_000)
+
+	// PR #307 review, owner ruling 1 of 2026-10-23 (Discussion #241): a navigating iframe keeps its
+	// window, so a declaration that the replaced document posted late must not admit its generation.
+	// Two fast Next presses: the first entry's document has not declared yet when the second entry
+	// requests the next document. The late declaration is dropped: nothing is acknowledged or armed in
+	// the replaced document, and a click there never advances the player.
+	it('never admits a late declaration of the document a fast second step entry replaced', async () => {
+		const { context, page } = await open(`/flows/${flowId}`)
+		try {
+			// Holds every capability declaration the Workbench receives while `__holdDeclarations` is set.
+			await page.addInitScript(() => {
+				if (window.top !== window) return
+				const probe = window as unknown as { __held: { data: unknown; origin: string; source: MessageEventSource | null }[]; __holdDeclarations: boolean; __releaseDeclarations: () => void }
+				probe.__held = []
+				probe.__holdDeclarations = false
+				window.addEventListener('message', (event) => {
+					if (!probe.__holdDeclarations || (event as MessageEvent & { __replayed?: boolean }).__replayed) return
+					const data = event.data as { channel?: string; message?: { type?: string }; messages?: { type?: string }[] } | null
+					if (data?.channel !== 'uiux:preview:wire') return
+					if (!(Array.isArray(data.messages) ? data.messages : [data.message]).some(message => message?.type === 'capability.declare')) return
+					event.stopImmediatePropagation()
+					probe.__held.push({ data, origin: event.origin, source: event.source })
+				}, true)
+				probe.__releaseDeclarations = () => {
+					probe.__holdDeclarations = false
+					for (const held of probe.__held.splice(0)) {
+						const replay = new MessageEvent('message', { data: held.data, origin: held.origin, source: held.source })
+						;(replay as MessageEvent & { __replayed?: boolean }).__replayed = true
+						window.dispatchEvent(replay)
+					}
+				}
+			})
+			await page.reload({ waitUntil: 'networkidle' })
+			await page.locator('main').first().waitFor()
+			await page.locator('[data-flow-play]').click()
+			await page.locator('[data-flow-player]').waitFor()
+			const entry = await waitForGenerationChange(page, '')
+			await page.locator('[data-flow-player-next]', { hasText: 'btn-run-checks' }).click()
+			await waitForGenerationChange(page, entry)
+			await page.waitForSelector('[data-session-status][data-status="live"]', { timeout: 15_000 })
+			const paymentDocument = await documentNumber(page)
+
+			// Entry 1 re-enters the payment step: its document loads, but its declaration is held.
+			await page.evaluate(() => { (window as unknown as { __holdDeclarations: boolean }).__holdDeclarations = true })
+			await page.locator('[data-flow-player-next]', { hasText: 'retry-button' }).click()
+			await expect.poll(() => documentNumber(page), { timeout: 15_000 }).not.toBe(paymentDocument)
+			const replacedDocument = await documentNumber(page)
+			await expect.poll(() => page.evaluate(() => (window as unknown as { __held: unknown[] }).__held.length), { timeout: 15_000 }).toBe(1)
+			const replacedFrame = page.frames().find(frame => frame.url().includes('/preview') && new URL(frame.url()).searchParams.get('document') === replacedDocument)
+			if (!replacedFrame) throw new Error('The first entry has no Preview frame.')
+			await replacedFrame.locator('[data-widget-id="retry-button"]').waitFor({ timeout: 15_000 })
+			await replacedFrame.evaluate(() => {
+				const probe = window as unknown as { __got: string[] }
+				probe.__got = []
+				window.addEventListener('message', (event) => {
+					const data = event.data as { channel?: string; message?: { type: string }; messages?: { type: string }[] } | null
+					if (data?.channel === 'uiux:preview:wire') for (const message of data.messages ?? [data.message!]) probe.__got.push(message.type)
+				})
+			})
+
+			// Hold the next document's HTML, so the first entry's document stays in the iframe.
+			let release = () => {}
+			const held = new Promise<void>((resolve) => { release = resolve })
+			let requested = () => {}
+			const nextRequested = new Promise<void>((resolve) => { requested = resolve })
+			await page.route(url => url.pathname === '/preview' && url.searchParams.get('document') !== replacedDocument, async (route) => {
+				requested()
+				await held
+				await route.continue()
+			})
+			// Entry 2 starts before the first entry's declaration is handled.
+			await page.locator('[data-flow-player-next]', { hasText: 'retry-button' }).click()
+			await nextRequested
+			const secondDocument = await documentNumber(page)
+			expect(secondDocument).not.toBe(replacedDocument)
+			const crumbs = await page.locator('[data-flow-player-crumb]').count()
+
+			// The late declaration arrives now, from the replaced document.
+			await page.evaluate(() => (window as unknown as { __releaseDeclarations: () => void }).__releaseDeclarations())
+			// The replay ran synchronously, so an ACK would already be queued for the replaced document: a
+			// message it posts to itself now arrives after it.
+			await replacedFrame.evaluate(() => new Promise<void>((resolve) => {
+				window.addEventListener('message', function onMarker(event) {
+					if ((event.data as { channel?: unknown } | null)?.channel !== 'test:marker') return
+					window.removeEventListener('message', onMarker)
+					resolve()
+				})
+				window.postMessage({ channel: 'test:marker' }, location.origin)
+			}))
+			expect(await generation(page)).toBe('')
+			expect(await replacedFrame.evaluate(() => (window as unknown as { __got: string[] }).__got)).toEqual([])
+
+			// A click in the replaced document on the second entry's trigger never advances the player.
+			await replacedFrame.locator('[data-widget-id="retry-button"]').click()
+			await page.waitForTimeout(500)
+			expect(await page.locator('[data-flow-player-crumb]').count()).toBe(crumbs)
+			expect(await documentNumber(page)).toBe(secondDocument)
+			expect(await replacedFrame.evaluate(() => (window as unknown as { __got: string[] }).__got)).toEqual([])
+
+			release()
+			await page.waitForSelector('[data-session-status][data-status="live"]', { timeout: 15_000 })
+			expect(await generation(page)).not.toBe('')
 		}
 		finally { await context.close() }
 	}, 120_000)

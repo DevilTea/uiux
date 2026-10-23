@@ -65,7 +65,7 @@ const pending = computed(() => preview.sessionStatus.value === 'connecting' || p
             {{ t('session.generation') }}
           </dt>
           <dd class="truncate font-mono text-toned">
-            {{ preview.runtimeGenerationId.value }}
+            {{ preview.runtimeGenerationId.value ?? t('session.generationPending') }}
           </dd>
         </dl>
         <UButton

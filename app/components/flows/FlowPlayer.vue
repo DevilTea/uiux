@@ -107,14 +107,25 @@ const crumbs = computed<(StepCrumb | EarlierCrumb)[]>(() => {
 })
 
 let entryToken = 0
-/** The open step entry and the runtime generation it is bound to; undefined in the transition window. */
-let boundEntry: Readonly<{ entry: number; runtimeGenerationId: string }> | undefined
+/**
+ * The open step entry and the runtime generation it is bound to; undefined in the transition
+ * window. The runtime names its generation in its declaration, so the entry has none until the
+ * Workbench admits the generation of the entry's document.
+ */
+let boundEntry: Readonly<{ entry: number; runtimeGenerationId?: string }> | undefined
 
 /** Arms the bound generation with the current step's outgoing triggers (a changed set re-arms). */
 function armCurrentEntry(): void {
 	const bound = boundEntry
-	if (!bound || bound.entry !== visit.value.entry) return
+	if (!bound || bound.entry !== visit.value.entry || !bound.runtimeGenerationId) return
 	preview.widgetEvents.arm(transitions.value.map(transition => transition.trigger), { runtimeGenerationId: bound.runtimeGenerationId })
+}
+
+/** Binds the open entry to the current generation: its own, or one that replaced it while it stays open. */
+function bindEntry(entry: number): void {
+	const generation = preview.runtimeGenerationId.value
+	boundEntry = Object.freeze({ entry, ...(generation ? { runtimeGenerationId: generation } : {}) })
+	armCurrentEntry()
 }
 
 async function enter(entered: PlayerVisit): Promise<void> {
@@ -123,7 +134,7 @@ async function enter(entered: PlayerVisit): Promise<void> {
 	preview.widgetEvents.retire()
 	const target = props.flow.steps[entered.stepId]?.target
 	if (!target) return
-	const generationBefore = preview.runtimeGenerationId.value
+	const documentBefore = preview.documentSequence.value
 	await workbench.openView(target.viewId, {
 		variant: target.variantName ?? '',
 		locale: workbench.selectedLocale.value,
@@ -136,14 +147,18 @@ async function enter(entered: PlayerVisit): Promise<void> {
 	workbench.selectedWidgetId.value = ''
 	await nextTick()
 	// Part 6 #6: a fresh View Runtime on every step entry, even when the View is already on screen.
-	if (preview.runtimeGenerationId.value === generationBefore) preview.replaceGeneration()
-	// One step entry is one runtime generation: bind it, and arm that generation after its ACK.
-	boundEntry = Object.freeze({ entry: entered.entry, runtimeGenerationId: preview.runtimeGenerationId.value })
-	armCurrentEntry()
+	if (preview.documentSequence.value === documentBefore) preview.replaceGeneration()
+	// One step entry is one runtime generation: bind it once admitted, and arm it after its ACK.
+	bindEntry(entered.entry)
 	announcement.value = t('flows.player.entered', { n: state.value.history.length, step: stepTitle(entered.stepId) })
 }
 
 watch(() => visit.value.entry, () => { void enter(visit.value) })
+// The entry's document declared its generation, or a reloaded document replaced it: bind and arm that one.
+watch(() => preview.runtimeGenerationId.value, () => {
+	const bound = boundEntry
+	if (bound && bound.entry === visit.value.entry) bindEntry(bound.entry)
+})
 // The Flow changed during playback: the outgoing set of the open entry is re-armed.
 watch(transitions, () => armCurrentEntry())
 
