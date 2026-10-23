@@ -15,7 +15,7 @@ import { isCanonicalLocaleFilename, isFullUuid, isJsonValue, isRecord, type Diag
 import { validateReviewThread, type ReviewThread } from '../domain/reviews/schema'
 import { validateViewResource, type ViewResource } from '../domain/views/schema'
 import { validateWorkspaceManifest, type WorkspaceManifest } from '../domain/workspace/schema'
-import { predatesCurrentBoot } from './boot-staleness'
+import { currentBootId, isFromEarlierBoot } from './boot-staleness'
 import { PersistenceError } from './errors'
 import { currentDesignWriteContext, type DesignWriteContext } from './history/write-context'
 import {
@@ -1016,28 +1016,30 @@ export class FileNativePersistence {
 	}
 
 	/**
-	 * Takes the cross-process persistence lock: the owner record `{ pid, token }` is written to a
-	 * unique candidate file and published with an atomic `link` to the lock path, which fails while
-	 * another owner holds it; the returned release removes the lock only while it still names this
-	 * token.
+	 * Takes the cross-process persistence lock: the owner record `{ pid, token, bootId? }` (`bootId`
+	 * where the host has a boot session identifier) is written to a unique candidate file and
+	 * published with an atomic `link` to the lock path, which fails while another owner holds it; the
+	 * returned release removes the lock only while it still names this token.
 	 *
 	 * The lock is a mutual-exclusion marker, not data, so nothing about it is fsynced (issue #321;
 	 * owner ruling 2026-10-23, https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19145490).
 	 * A lock lost in a crash is released, which is right because its owner died in the crash. A lock
-	 * file that does survive a crash, complete, empty or partial, was written before the current
-	 * boot, and `removeStaleLock` clears it whatever it records. Canonical writes and transactions
-	 * keep all their fsyncs.
+	 * file that does survive a crash, complete, empty or partial, is from an earlier boot, and
+	 * `removeStaleLock` clears it whatever pid it records (see `boot-staleness.ts`). Canonical
+	 * writes and transactions keep all their fsyncs.
 	 */
 	private async acquireLock(deadline: number): Promise<() => Promise<void>> {
 		await ensureSafeDirectory(this.root, this.layout.metadataDir)
 		const lockAbsolute = resolveWorkspacePath(this.root, this.layout.lockPath)
 		const token = randomUUID()
+		const bootId = await currentBootId()
+		const record = Buffer.from(JSON.stringify({ pid: process.pid, token, ...(bootId ? { bootId } : {}) }), 'utf8')
 		while (true) {
 			const candidateRelative = this.layout.metadataFilePath(`.persistence-lock-${token}-${randomUUID()}.tmp`)
 			const candidateAbsolute = resolveWorkspacePath(this.root, candidateRelative)
 			let published = false
 			try {
-				await writeLockCandidate(candidateAbsolute, Buffer.from(JSON.stringify({ pid: process.pid, token }), 'utf8'))
+				await writeLockCandidate(candidateAbsolute, record)
 				try {
 					await fs.link(candidateAbsolute, lockAbsolute)
 					published = true
@@ -1093,17 +1095,32 @@ export class FileNativePersistence {
 		}
 		if (!stat.isFile() || stat.isSymbolicLink())
 			throw pathRejected('Persistence lock must be a regular file and must not be a symbolic link.')
-		// No process from an earlier boot still runs, so its lock is stale whatever pid or bytes it records.
-		if (predatesCurrentBoot(stat)) {
-			await fs.rm(lockAbsolute, { force: true })
-			return true
+		// The record and the modification time come from one open file, never following a link.
+		let bytes: string
+		let written: import('node:fs').Stats
+		try {
+			const handle = await fs.open(lockAbsolute, constants.O_RDONLY | constants.O_NOFOLLOW)
+			try {
+				written = await handle.stat()
+				bytes = await handle.readFile('utf8')
+			}
+			finally { await handle.close() }
 		}
-		let owner: { pid?: unknown; token?: unknown }
-		try { owner = JSON.parse(await fs.readFile(lockAbsolute, 'utf8')) as { pid?: unknown; token?: unknown } }
 		catch (cause) {
 			if (isNotFound(cause)) return true
 			throw new PersistenceError('persistence.lock_busy', 'Persistence lock owner record is unreadable; refusing to remove it automatically.', { cause })
 		}
+		let owner: { pid?: unknown; token?: unknown } | undefined
+		let unparsable: unknown
+		try { owner = JSON.parse(bytes) as { pid?: unknown; token?: unknown } }
+		catch (cause) { unparsable = cause }
+		// No process from an earlier boot still runs, so its lock is stale whatever pid or bytes it records.
+		if (isFromEarlierBoot(owner, written, await currentBootId())) {
+			await fs.rm(lockAbsolute, { force: true })
+			return true
+		}
+		if (owner === undefined || typeof owner !== 'object' || owner === null)
+			throw new PersistenceError('persistence.lock_busy', 'Persistence lock owner record is unreadable; refusing to remove it automatically.', { cause: unparsable })
 		if (typeof owner.pid !== 'number' || !Number.isInteger(owner.pid) || typeof owner.token !== 'string' || !isFullUuid(owner.token))
 			throw new PersistenceError('persistence.lock_busy', 'Persistence lock owner record is invalid; refusing to remove it automatically.')
 		try {

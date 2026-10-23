@@ -13,7 +13,7 @@ import { createWorkspaceApplicationSession } from '../src/application/services/w
 import { isFullUuid } from '../src/domain/validation'
 import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
 import { FileNativePersistence, PersistenceError, isPersistenceBusyError, persistenceBusyResult } from '../src/persistence'
-import { BOOT_STALENESS_TOLERANCE_MS, currentBootTimeMs } from '../src/persistence/boot-staleness'
+import { BOOT_STALENESS_TOLERANCE_MS, currentBootId, currentBootTimeMs } from '../src/persistence/boot-staleness'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { sendPersistenceBusyError } from '../src/server/persistence-busy'
 import { describeFetchError, isTransientError } from '../app/utils/fetch-error'
@@ -21,6 +21,7 @@ import { isRetryableRead, shouldRetryRead, transientRetryDelay } from '../app/ut
 import { AGENT_EDITOR } from './support/access'
 import { writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
 
+const BOOT_ID = await currentBootId()
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const ASSET_ID = '55555555-5555-4555-8555-555555555555'
 const roots: string[] = []
@@ -159,8 +160,9 @@ describe('persistence lock file (issue #321)', () => {
 		const persistence = open(root)
 		const lockPath = join(root, persistence.layout.lockPath)
 		await persistence.withLock(async () => {
-			const owner = JSON.parse(await readFile(lockPath, 'utf8')) as { pid: unknown; token: unknown }
+			const owner = JSON.parse(await readFile(lockPath, 'utf8')) as { pid: unknown; token: unknown; bootId?: unknown }
 			expect(owner.pid).toBe(process.pid)
+			expect(owner.bootId).toBe(BOOT_ID)
 			expect(typeof owner.token === 'string' && isFullUuid(owner.token)).toBe(true)
 			expect(await lockCandidates(root)).toEqual([])
 		})
@@ -203,13 +205,32 @@ describe('persistence lock file (issue #321)', () => {
 		expect(await readFile(lockPath, 'utf8')).toBe('')
 	})
 
-	// Owner ruling 2026-10-23 (Discussion #241): a lock written before the current boot is stale whatever it records.
+	// Owner ruling 2026-10-23 (Discussion #241): a lock from an earlier boot is stale whatever it records.
+	it('clears a lock that records another boot, even with a live pid and a fresh time', async () => {
+		const root = await seedWorkspace(CURRENT_WORKSPACE_SCHEMA_VERSION)
+		const lockPath = join(root, '.persistence.lock')
+		await writeFile(lockPath, JSON.stringify({ pid: process.pid, token: randomUUID(), bootId: randomUUID() }))
+		expect((await open(root, 120).views.read(VIEW_ID))?.resource).toMatchObject({ id: VIEW_ID })
+		expect(await readFile(lockPath).catch(error => error.code)).toBe('ENOENT')
+	})
+
+	it.skipIf(BOOT_ID === undefined)('keeps a live lock that records the current boot although its time lies before boot (a clock step)', async () => {
+		const root = await seedWorkspace(CURRENT_WORKSPACE_SCHEMA_VERSION)
+		const lockPath = join(root, '.persistence.lock')
+		const record = JSON.stringify({ pid: process.pid, token: randomUUID(), bootId: BOOT_ID })
+		await writeFile(lockPath, record)
+		const beforeBoot = new Date(currentBootTimeMs() - 60_000)
+		await utimes(lockPath, beforeBoot, beforeBoot)
+		await expect(open(root, 120).views.read(VIEW_ID)).rejects.toMatchObject({ code: 'persistence.lock_busy' })
+		expect(await readFile(lockPath, 'utf8')).toBe(record)
+	})
+
 	it.each([
 		['the pid of this live process', () => JSON.stringify({ pid: process.pid, token: randomUUID() })],
 		['pid 1, which answers EPERM or is alive', () => JSON.stringify({ pid: 1, token: randomUUID() })],
 		['no bytes at all', () => ''],
 		['a partial record', () => '{"pid":'],
-	])('clears a lock written before the current boot that records %s', async (_label, record) => {
+	])('clears a lock without a boot identifier written before the current boot that records %s', async (_label, record) => {
 		const root = await seedWorkspace(CURRENT_WORKSPACE_SCHEMA_VERSION)
 		const lockPath = join(root, '.persistence.lock')
 		await writeFile(lockPath, record())

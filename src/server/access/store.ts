@@ -4,7 +4,7 @@ import { chmod, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir } from 
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
-import { predatesCurrentBoot } from '../../persistence/boot-staleness'
+import { currentBootId, isFromEarlierBoot } from '../../persistence/boot-staleness'
 import type { HostHistoryPaths } from '../../persistence/history/host-store'
 import { generateHint } from './credentials'
 import {
@@ -186,10 +186,12 @@ async function writeAtomically(path: string, contents: string): Promise<void> {
 async function acquireLock(lockPath: string, waitMs: number = LOCK_WAIT_MS): Promise<() => Promise<void>> {
 	const started = Date.now()
 	const token = randomBytes(8).toString('hex')
+	const bootId = await currentBootId()
+	const record = JSON.stringify({ pid: process.pid, token, ...(bootId ? { bootId } : {}) })
 	for (;;) {
 		try {
 			const handle = await open(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
-			try { await handle.writeFile(JSON.stringify({ pid: process.pid, token }), 'utf8') }
+			try { await handle.writeFile(record, 'utf8') }
 			finally { await handle.close() }
 			return async () => {
 				try {
@@ -210,23 +212,34 @@ async function acquireLock(lockPath: string, waitMs: number = LOCK_WAIT_MS): Pro
 }
 
 async function removeStaleLock(lockPath: string): Promise<boolean> {
-	let owner: { pid?: unknown }
+	let owner: { pid?: unknown } | undefined
 	try {
 		const stats = await lstat(lockPath)
 		if (stats.isSymbolicLink() || !stats.isFile()) throw unsafe(lockPath, 'the lock is not a regular file')
+		// The record and the modification time come from one open file, never following a link.
+		const handle = await open(lockPath, constants.O_RDONLY | constants.O_NOFOLLOW)
+		let written: Stats
+		let bytes: string
+		try {
+			written = await handle.stat()
+			bytes = await handle.readFile('utf8')
+		}
+		finally { await handle.close() }
+		try { owner = JSON.parse(bytes) as { pid?: unknown } }
+		catch { owner = undefined }
 		// No process from an earlier boot still runs, so its lock is stale whatever pid or bytes it records.
-		if (predatesCurrentBoot(stats)) {
+		if (isFromEarlierBoot(owner, written, await currentBootId())) {
 			await rm(lockPath, { force: true })
 			return true
 		}
-		owner = JSON.parse(await readFile(lockPath, 'utf8')) as { pid?: unknown }
 	}
 	catch (error) {
 		if (isNotFound(error)) return true
 		if (error instanceof AccessError) throw error
-		// A lock being written right now has no content yet; treat it as held.
 		return false
 	}
+	// A lock being written right now has no content yet; treat it as held.
+	if (typeof owner !== 'object' || owner === null) return false
 	if (typeof owner.pid !== 'number' || !Number.isInteger(owner.pid)) return false
 	try {
 		process.kill(owner.pid, 0)

@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises'
 import { hostname } from 'node:os'
 
 import { isRecord } from '../domain/validation'
-import { predatesCurrentBoot } from './boot-staleness'
+import { currentBootId, isFromEarlierBoot } from './boot-staleness'
 import { resolveWorkspacePath, type WorkspaceLayout } from './paths'
 
 /**
@@ -18,6 +18,8 @@ export type ServerHold = Readonly<{
 	hostname: string
 	startedAt: string
 	token: string
+	/** The host's boot session identifier when the server started, where the host has one. */
+	bootId?: string
 	/** The server's internal loopback origin, so host commands can name the server's port (`uiux invite create`). */
 	origin?: string
 }>
@@ -45,7 +47,8 @@ export async function acquireServerHold(root: string, options: Readonly<{ origin
 		if (isNotFound(error)) return undefined
 		throw error
 	}
-	const hold: ServerHold = { pid: process.pid, hostname: hostname(), startedAt: new Date().toISOString(), token: randomUUID(), ...(options.origin ? { origin: options.origin } : {}) }
+	const bootId = await currentBootId()
+	const hold: ServerHold = { pid: process.pid, hostname: hostname(), startedAt: new Date().toISOString(), token: randomUUID(), ...(bootId ? { bootId } : {}), ...(options.origin ? { origin: options.origin } : {}) }
 	const target = resolveWorkspacePath(root, layout.serverHoldPath)
 	const temporary = resolveWorkspacePath(root, layout.metadataFilePath(`.server-hold-${hold.token}.tmp`))
 	await fs.writeFile(temporary, `${JSON.stringify(hold)}\n`, { encoding: 'utf8', flag: 'wx' })
@@ -76,8 +79,8 @@ export async function acquireServerHold(root: string, options: Readonly<{ origin
 
 /**
  * Returns the hold of a server that is still running, or undefined when the Workspace is not held.
- * A hold of this host whose process no longer exists, or that was written before this host's
- * current boot, is stale and ignored. A hold recorded by another host cannot be checked and is
+ * A hold of this host whose process no longer exists, or that is from an earlier boot of this host
+ * (see `boot-staleness.ts`), is stale and ignored. A hold recorded by another host cannot be checked and is
  * treated as active.
  */
 export async function readActiveServerHold(root: string, layout: WorkspaceLayout): Promise<ServerHold | undefined> {
@@ -106,11 +109,12 @@ export async function readActiveServerHold(root: string, layout: WorkspaceLayout
 		hostname: parsed.hostname,
 		startedAt: parsed.startedAt,
 		token: parsed.token,
+		...(typeof parsed.bootId === 'string' ? { bootId: parsed.bootId } : {}),
 		...(typeof parsed.origin === 'string' ? { origin: parsed.origin } : {}),
 	}
 	if (hold.hostname !== hostname()) return hold
 	// No server from an earlier boot of this host still runs, whatever pid its hold records.
-	if (predatesCurrentBoot(writtenAt)) return undefined
+	if (isFromEarlierBoot(parsed, writtenAt, await currentBootId())) return undefined
 	return isProcessAlive(hold.pid) ? hold : undefined
 }
 
