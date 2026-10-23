@@ -143,9 +143,9 @@ export function createPreviewSession(state: WorkbenchState) {
 	/** The diagnostic on screen; switching to another View clears it (owner ruling 4 of 2026-10-23). */
 	const shownFailure = shallowRef<PreviewFailureDiagnostic>()
 	/**
-	 * True from a Retry Preview activation until the outcome of the next declaration, on both paths:
-	 * the explicit retry and, after a capability conflict, the unused automatic recovery allowance
-	 * (owner ruling 2 of 2026-10-23, Discussion #241).
+	 * True from the start of a recovery document until the outcome of its declaration: a Retry
+	 * Preview activation (an explicit retry) or the automatic recovery attempt the Workbench starts
+	 * after a protocol failure (owner ruling 2 of 2026-10-23, Discussion #241; issue #101).
 	 */
 	const retryInFlight = ref(false)
 	/**
@@ -907,7 +907,15 @@ export function createPreviewSession(state: WorkbenchState) {
 		// One envelope, or a transport batch from one runtime task: each envelope passes the bridge's
 		// gates on its own, in order, exactly as consecutive single posts would.
 		const messages = readPreviewWirePost(event.data)
-		if (messages) for (const message of messages) receiveWire(message)
+		if (!messages) return
+		for (const message of messages) {
+			// A document the Workbench already replaced (by a recovery, another View or a renewed
+			// session) is no peer any more: nothing it sends, not even a malformed envelope later in
+			// the same batch, can fail the requested document or spend its recovery (issue #101).
+			// Checked per envelope, because an envelope may replace the document mid-batch.
+			if (committedDocument() === 'replaced') return
+			receiveWire(message)
+		}
 	}
 
 	/**

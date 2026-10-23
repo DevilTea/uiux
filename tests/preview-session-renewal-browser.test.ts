@@ -50,6 +50,18 @@ describe('Preview session renewal after a server restart (issue #101)', () => {
 				localStorage.setItem('uiux.workbench.locale', 'en-US')
 			})
 			await context.addInitScript(PREVIEW_WIRE_RECORDER)
+			// Counts the `hello` events the page's change-event stream receives.
+			await context.addInitScript(() => {
+				const Native = window.EventSource
+				const scope = window as unknown as { __hellos: number }
+				scope.__hellos = 0
+				window.EventSource = class extends Native {
+					constructor(url: string | URL, init?: EventSourceInit) {
+						super(url, init)
+						this.addEventListener('hello', () => { scope.__hellos += 1 })
+					}
+				}
+			})
 			await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
 			const page = await context.newPage()
 			await page.goto(`${server.origin}/views/${VIEW_ID}?widget=${WIDGET_ID}`, { waitUntil: 'networkidle' })
@@ -57,13 +69,15 @@ describe('Preview session renewal after a server restart (issue #101)', () => {
 			const firstGeneration = await expectLive(page)
 			const firstSession = await sessionParam(page)
 			expect(firstSession).toMatch(/^session-[0-9a-f]{32}$/)
-			// Let the change-event stream deliver its first `hello`, so the next one names the restarted server.
-			await page.waitForTimeout(1_000)
+			// The change-event stream delivered its first `hello`, so the next one names the restarted server.
+			await page.waitForFunction(() => (window as unknown as { __hellos: number }).__hellos > 0, undefined, { timeout: 15_000 })
+			const hellos = await page.evaluate(() => (window as unknown as { __hellos: number }).__hellos)
 
 			await server.restart()
 
 			// The page reconnects and starts a new session under a fresh ID, with a fresh document.
 			await expect.poll(() => sessionParam(page), { timeout: 30_000 }).not.toBe(firstSession)
+			expect(await page.evaluate(() => (window as unknown as { __hellos: number }).__hellos)).toBeGreaterThan(hellos)
 			const renewedSession = await sessionParam(page)
 			expect(renewedSession).toMatch(/^session-[0-9a-f]{32}$/)
 			const renewedGeneration = await expectLive(page)

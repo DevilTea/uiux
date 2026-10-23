@@ -314,6 +314,30 @@ describe('Inline Preview diagnostic and Retry Preview (issue #111)', () => {
 		finally { await context.close() }
 	}, 90_000)
 
+	it('never charges the automatic attempt for a malformed envelope the failed document sends after its conflict (issue #101)', async () => {
+		const { context, page } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`, 0)
+		try {
+			const live = await expectLive(page)
+			const before = await documentParam(page)
+			const previewSessionId = new URL(await iframe(page).getAttribute('src') ?? '', server.origin).searchParams.get('session')
+			// One transport batch: the conflicting declaration, then an undecodable envelope. The
+			// conflict replaces the document, so the rest of the batch comes from a replaced document.
+			const frame = await (await iframe(page).elementHandle())!.contentFrame()
+			await frame!.evaluate(([session, generation]) => {
+				parent.postMessage({ channel: 'uiux:preview:wire', messages: [
+					{ type: 'capability.declare', context: { previewSessionId: session, runtimeGenerationId: generation }, payload: { protocolVersion: 1, features: ['geometry'] } },
+					{ type: 'bogus' },
+				] }, location.origin)
+			}, [previewSessionId, live] as const)
+
+			// The automatic attempt is not spent by the stray envelope: its document recovers Preview.
+			await expect.poll(() => documentParam(page), { timeout: 15_000 }).toBe(before + 1)
+			expect(await expectLive(page)).not.toBe(live)
+			expect(await documentParam(page)).toBe(before + 1)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
 	it('stops after the automatic attempt fails too: Preview stays unavailable with the selection kept, until Retry Preview (issue #101)', async () => {
 		const { context, page } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`, 0)
 		try {
