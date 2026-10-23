@@ -18,19 +18,24 @@ const VIEW_ID = '7f3d7780-3cb9-4e57-8f0b-2e8d569905c1'
 const OTHER_VIEW_ID = '7f3d7780-3cb9-4e57-8f0b-2e8d569905c2'
 const WIDGET_ID = 'btn-run-checks'
 
-type DeclarationShim = { incompatible: number; hold: boolean; held: unknown[]; rewritten: string[] }
+/**
+ * `incompatible` declarations are rewritten to an unsupported protocol version, then `invalid` ones
+ * to an undecodable payload (issue #101); `rewritten` lists the generations either touched.
+ */
+type DeclarationShim = { incompatible: number; invalid: number; hold: boolean; held: unknown[]; rewritten: string[] }
 type ShimWindow = Window & { __declarationShim: DeclarationShim; __releaseDeclarations: () => void }
 
 /**
  * Runs in the Workbench page before any of its scripts, ahead of the wire recorder: a capturing
  * listener sees each Preview post first. It replaces a declaration post with a rewritten copy, or
  * holds it, and stops the original from reaching the Workbench. A re-dispatched copy keeps the
- * Preview window as its source, so the Workbench's peer checks still apply to it.
+ * Preview window as its source, so the Workbench's peer checks still apply to it. A post marked
+ * `passThrough` (a message the test itself injects) goes on untouched.
  */
 function declarationShim(incompatible: number): string {
 	return `(() => {
 	if (window.top !== window) return
-	const shim = window.__declarationShim = { incompatible: ${incompatible}, hold: false, held: [], rewritten: [] }
+	const shim = window.__declarationShim = { incompatible: ${incompatible}, invalid: 0, hold: false, held: [], rewritten: [] }
 	const replayed = new WeakSet()
 	const replay = (data, origin, source) => {
 		const event = new MessageEvent('message', { data, origin, source })
@@ -43,15 +48,17 @@ function declarationShim(incompatible: number): string {
 	}
 	window.addEventListener('message', (event) => {
 		const data = event.data
-		if (replayed.has(event) || !data || data.channel !== 'uiux:preview:wire') return
+		if (replayed.has(event) || !data || data.channel !== 'uiux:preview:wire' || data.passThrough) return
 		const messages = Array.isArray(data.messages) ? data.messages : [data.message]
 		if (!messages.some(message => message && message.type === 'capability.declare')) return
 		event.stopImmediatePropagation()
 		if (shim.hold) shim.held.push({ data, origin: event.origin, source: event.source })
-		else if (shim.incompatible > 0) {
-			shim.incompatible--
+		else if (shim.incompatible > 0 || shim.invalid > 0) {
+			const payload = shim.incompatible > 0 ? { protocolVersion: 2 } : { protocolVersion: 'one' }
+			if (shim.incompatible > 0) shim.incompatible--
+			else shim.invalid--
 			const rewrite = message => message && message.type === 'capability.declare'
-				? (shim.rewritten.push(message.context.runtimeGenerationId), { ...message, payload: { ...message.payload, protocolVersion: 2 } })
+				? (shim.rewritten.push(message.context.runtimeGenerationId), { ...message, payload: { ...message.payload, ...payload } })
 				: message
 			replay(Array.isArray(data.messages) ? { ...data, messages: data.messages.map(rewrite) } : { ...data, message: rewrite(data.message) }, event.origin, event.source)
 		}
@@ -101,9 +108,22 @@ async function open(path: string, incompatible: number, graceMs = LONG_GRACE_MS)
 const iframe = (page: Page) => page.locator('iframe[src*="/preview"]')
 const documentParam = async (page: Page) => Number(new URL(await iframe(page).getAttribute('src') ?? '', server.origin).searchParams.get('document'))
 const shim = (page: Page) => page.evaluate(() => {
-	const { incompatible, hold, held, rewritten } = (window as unknown as ShimWindow).__declarationShim
-	return { incompatible, hold, held: held.length, rewritten: [...rewritten] }
+	const { incompatible, invalid, hold, held, rewritten } = (window as unknown as ShimWindow).__declarationShim
+	return { incompatible, invalid, hold, held: held.length, rewritten: [...rewritten] }
 })
+/** The open generation's runtime declares a different capability set: a capability conflict. */
+async function declareConflict(page: Page, runtimeGenerationId: string): Promise<void> {
+	const previewSessionId = new URL(await iframe(page).getAttribute('src') ?? '', server.origin).searchParams.get('session')
+	const frame = await (await iframe(page).elementHandle())!.contentFrame()
+	await frame!.evaluate(([session, generation]) => {
+		parent.postMessage({ channel: 'uiux:preview:wire', passThrough: true, message: {
+			type: 'capability.declare',
+			context: { previewSessionId: session, runtimeGenerationId: generation },
+			payload: { protocolVersion: 1, features: ['geometry'] },
+		} }, location.origin)
+	}, [previewSessionId, runtimeGenerationId] as const)
+}
+const setInvalid = (page: Page, count: number) => page.evaluate((value) => { (window as unknown as ShimWindow).__declarationShim.invalid = value }, count)
 const setHold = (page: Page, hold: boolean) => page.evaluate((value) => { (window as unknown as ShimWindow).__declarationShim.hold = value }, hold)
 /** Drops held declarations without delivering them: their document was replaced. */
 const dropHeld = (page: Page) => page.evaluate(() => { (window as unknown as ShimWindow).__declarationShim.held.length = 0 })
@@ -262,37 +282,26 @@ describe('Inline Preview diagnostic and Retry Preview (issue #111)', () => {
 		finally { await context.close() }
 	}, 90_000)
 
-	it('after a capability conflict, Retry Preview spends the automatic recovery allowance with the same in-flight state', async () => {
+	it('after a capability conflict, the Workbench starts one automatic recovery attempt with the in-flight state of Retry Preview (issue #101)', async () => {
 		const { context, page } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`, 0)
 		try {
 			const live = await expectLive(page)
-			const frame = await (await iframe(page).elementHandle())!.contentFrame()
-			// The runtime declares a different capability set for the same generation.
-			await frame!.evaluate(([previewSessionId, runtimeGenerationId]) => {
-				parent.postMessage({ channel: 'uiux:preview:wire', message: {
-					type: 'capability.declare',
-					context: { previewSessionId, runtimeGenerationId },
-					payload: { protocolVersion: 1, features: ['geometry'] },
-				} }, location.origin)
-			}, [new URL(await iframe(page).getAttribute('src') ?? '', server.origin).searchParams.get('session'), live] as const)
+			const before = await documentParam(page)
+			// The attempt's declaration is held, so the attempt stays in flight.
+			await setHold(page, true)
+			await declareConflict(page, live)
 
 			const diagnostic = page.locator('[data-preview-failure]')
 			await diagnostic.waitFor({ timeout: 15_000 })
 			expect(await diagnostic.getAttribute('data-category')).toBe('protocol')
 			expect(await diagnostic.getAttribute('data-reason')).toBe('protocol.capability_conflict')
 			expect(await diagnostic.getByRole('alert').locator('[data-preview-failure-title]').textContent()).toContain('Preview sent an unexpected message')
-			expect(await page.locator('[data-session-status]').getAttribute('data-status')).toBe('stopped')
 			await openDetails(diagnostic)
 			expect(await identity(diagnostic, 'runtimeGenerationId')).toBe(live)
 
-			// Retry Preview: in flight until the next declaration's outcome, exactly as on the explicit path.
-			await setHold(page, true)
-			const before = await documentParam(page)
-			const retry = diagnostic.getByRole('button', { name: 'Retry Preview' })
-			await retry.click()
+			// Nobody pressed anything: exactly one fresh document is requested in the same session.
 			await expect.poll(() => documentParam(page)).toBe(before + 1)
 			await expect.poll(async () => (await shim(page)).held, { timeout: 15_000 }).toBe(1)
-			await retry.click({ force: true })
 			await expectInFlight(page, diagnostic)
 			expect(await documentParam(page)).toBe(before + 1)
 
@@ -300,6 +309,87 @@ describe('Inline Preview diagnostic and Retry Preview (issue #111)', () => {
 			await release(page)
 			const recovered = await expectLive(page)
 			expect(recovered).not.toBe(live)
+			expect(await documentParam(page)).toBe(before + 1)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('never charges the automatic attempt for a malformed envelope the failed document sends after its conflict (issue #101)', async () => {
+		const { context, page } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`, 0)
+		try {
+			const live = await expectLive(page)
+			const before = await documentParam(page)
+			const previewSessionId = new URL(await iframe(page).getAttribute('src') ?? '', server.origin).searchParams.get('session')
+			// One transport batch: the conflicting declaration, then an undecodable envelope. The
+			// conflict replaces the document, so the rest of the batch comes from a replaced document.
+			const frame = await (await iframe(page).elementHandle())!.contentFrame()
+			await frame!.evaluate(([session, generation]) => {
+				parent.postMessage({ channel: 'uiux:preview:wire', messages: [
+					{ type: 'capability.declare', context: { previewSessionId: session, runtimeGenerationId: generation }, payload: { protocolVersion: 1, features: ['geometry'] } },
+					{ type: 'bogus' },
+				] }, location.origin)
+			}, [previewSessionId, live] as const)
+
+			// The automatic attempt is not spent by the stray envelope: its document recovers Preview.
+			await expect.poll(() => documentParam(page), { timeout: 15_000 }).toBe(before + 1)
+			expect(await expectLive(page)).not.toBe(live)
+			expect(await documentParam(page)).toBe(before + 1)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('stops after the automatic attempt fails too: Preview stays unavailable with the selection kept, until Retry Preview (issue #101)', async () => {
+		const { context, page } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`, 0)
+		try {
+			const live = await expectLive(page)
+			const before = await documentParam(page)
+			// The automatic attempt's document sends an undecodable declaration: a second protocol failure.
+			await setInvalid(page, 1)
+			await declareConflict(page, live)
+
+			const diagnostic = page.locator('[data-preview-failure]')
+			await expect.poll(async () => await diagnostic.getAttribute('data-reason'), { timeout: 15_000 }).toBe('protocol.invalid_message')
+			expect((await shim(page)).invalid).toBe(0)
+			const retry = diagnostic.getByRole('button', { name: 'Retry Preview' })
+			await expect.poll(async () => await retry.getAttribute('aria-disabled')).toBeNull()
+			expect(await page.locator('[data-session-status]').getAttribute('data-status')).toBe('stopped')
+			// The structural selection stays, and no further document starts on its own.
+			expect(new URL(page.url()).searchParams.get('widget')).toBe(WIDGET_ID)
+			await page.waitForTimeout(1_000)
+			expect(await documentParam(page)).toBe(before + 1)
+			// The live generation (declared twice, the second time conflicting) and the attempt's.
+			expect(new Set(await declaredGenerations(page)).size).toBe(2)
+
+			// Retry Preview is the explicit retry that admits the next generation.
+			await retry.click()
+			await expect.poll(() => documentParam(page)).toBe(before + 2)
+			expect(await expectLive(page)).not.toBe(live)
+			expect(new URL(page.url()).searchParams.get('widget')).toBe(WIDGET_ID)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('turns a press after a stalled automatic attempt into an explicit retry (issue #101)', async () => {
+		const { context, page } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`, 0, SHORT_GRACE_MS)
+		try {
+			const live = await expectLive(page)
+			const before = await documentParam(page)
+			await setHold(page, true)
+			await declareConflict(page, live)
+
+			// The attempt's document loads and never declares: Retry Preview is offered again.
+			const diagnostic = page.locator('[data-preview-failure]')
+			await diagnostic.waitFor({ timeout: 15_000 })
+			const retry = diagnostic.getByRole('button', { name: 'Retry Preview' })
+			await expect.poll(() => documentParam(page)).toBe(before + 1)
+			await expect.poll(async () => await retry.getAttribute('aria-disabled'), { timeout: 15_000 }).toBeNull()
+
+			// The press replaces the stalled document; its declaration is admitted as the explicit retry.
+			await dropHeld(page)
+			await setHold(page, false)
+			await retry.click()
+			await expect.poll(() => documentParam(page)).toBe(before + 2)
+			expect(await expectLive(page)).not.toBe(live)
 		}
 		finally { await context.close() }
 	}, 90_000)

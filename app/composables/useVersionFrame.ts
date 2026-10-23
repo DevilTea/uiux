@@ -3,8 +3,9 @@ import { isCapabilityDeclaration, WorkbenchPreviewProtocolBridge } from '../../s
 import { GeometryStreamCoordinator, type GeometryReport } from '../../src/preview/geometry-streams'
 import { MULTI_TARGET_GEOMETRY_FEATURE } from '../../src/preview/protocol/schema'
 import { createPreviewWirePost, readPreviewWirePost } from '../../src/preview/protocol/transport'
-
-let frameSequence = 0
+import { createPreviewSessionId } from '../../src/preview/protocol/generation-id'
+import { workbenchPreviewSessions } from '../../src/preview/protocol/session'
+import { useLiveEvents } from './useLiveEvents'
 
 /**
  * The Workbench side of one canvas comparison frame (issue #132, B9). The View page's own Preview
@@ -24,8 +25,9 @@ export function useVersionFrame(options: Readonly<{
 	/** The Widgets to outline; each gets a geometry stream while the frame is live. */
 	widgets: MaybeRefOrGetter<readonly string[]>
 }>) {
-	const sequence = ++frameSequence
-	const previewSessionId = `version-frame-${sequence}-${Date.now()}`
+	/** Opened through the page's registry, so a retired session ID is never activated again (Rule 01a1161c-3b15-7913-acfb-136f0bd365b6). */
+	let session = workbenchPreviewSessions.openFresh(() => createPreviewSessionId('version-frame'))
+	const previewSessionId = ref(session.previewSessionId)
 	/** The admitted generation: the frame's runtime names it in its declaration (issue #102). */
 	const runtimeGenerationId = ref<string>()
 	const iframe = ref<HTMLIFrameElement>()
@@ -34,24 +36,27 @@ export function useVersionFrame(options: Readonly<{
 	const geometryVersion = ref(0)
 	const overCap = shallowRef<readonly string[]>([])
 
-	const bridge = new WorkbenchPreviewProtocolBridge(
-		previewSessionId,
-		{
-			send(message) {
-				iframe.value?.contentWindow?.postMessage(createPreviewWirePost([message]), window.location.origin)
+	function createBridge(): WorkbenchPreviewProtocolBridge {
+		return new WorkbenchPreviewProtocolBridge(
+			session,
+			{
+				send(message) {
+					iframe.value?.contentWindow?.postMessage(createPreviewWirePost([message]), window.location.origin)
+				},
 			},
-		},
-		declaration => declaration.protocolVersion === 1 ? { ok: true } : { ok: false, reason: 'capability.unsupported_protocol_version' },
-		{
-			// The first document's generation, or a new one after the frame's document reloaded: every
-			// stream of the previous generation is void until the new one's ACK.
-			onGenerationAdmitted(generationId) {
-				runtimeGenerationId.value = generationId
-				phase.value = 'initiating'
-				geometry.setContext({ previewSessionId, runtimeGenerationId: generationId, viewId: options.viewId, ...(options.variantId ? { variantId: options.variantId } : {}) })
+			declaration => declaration.protocolVersion === 1 ? { ok: true } : { ok: false, reason: 'capability.unsupported_protocol_version' },
+			{
+				// The first document's generation, or a new one after the frame's document reloaded: every
+				// stream of the previous generation is void until the new one's ACK.
+				onGenerationAdmitted(generationId) {
+					runtimeGenerationId.value = generationId
+					phase.value = 'initiating'
+					geometry.setContext({ previewSessionId: previewSessionId.value, runtimeGenerationId: generationId, viewId: options.viewId, ...(options.variantId ? { variantId: options.variantId } : {}) })
+				},
 			},
-		},
-	)
+		)
+	}
+	let bridge = createBridge()
 	const geometry = new GeometryStreamCoordinator({
 		send: message => { bridge.sendGeometry(message) },
 		requestFrame: callback => requestAnimationFrame(callback),
@@ -110,9 +115,27 @@ export function useVersionFrame(options: Readonly<{
 		for (const message of readPreviewWirePost(event.data) ?? []) receive(message)
 	}
 
+	/**
+	 * The server restarted: the frame starts a new Preview session under a fresh ID, and the new ID
+	 * in its URL loads a fresh document, before any geometry traffic resumes (Rule
+	 * 01a1161c-3b51-7ebd-bff2-987863a7c1cb).
+	 */
+	function renewSession(): void {
+		workbenchPreviewSessions.close(session.previewSessionId)
+		session = workbenchPreviewSessions.openFresh(() => createPreviewSessionId('version-frame'))
+		bridge = createBridge()
+		runtimeGenerationId.value = undefined
+		phase.value = 'initiating'
+		geometry.setContext(undefined)
+		previewSessionId.value = session.previewSessionId
+	}
+	useLiveEvents().onServerRestart(renewSession)
+
 	onMounted(() => window.addEventListener('message', onMessage))
 	onBeforeUnmount(() => {
 		window.removeEventListener('message', onMessage)
+		// The frame's session ends with it; its ID stays retired.
+		workbenchPreviewSessions.close(session.previewSessionId)
 		if (frame !== undefined) cancelAnimationFrame(frame)
 		geometry.dispose()
 	})

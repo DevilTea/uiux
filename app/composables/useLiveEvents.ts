@@ -47,6 +47,12 @@ const state = shallowRef<LiveState>('idle')
 const resourceListeners = new Set<(batch: LiveBatch) => void>()
 const lockListeners = new Set<() => void>()
 const accessListeners = new Set<() => void>()
+const restartListeners = new Set<() => void>()
+/**
+ * The `serverInstanceId` of the last `hello` this page received. It outlives `stop()`, so a page
+ * that signs in again after the server restarted still tells the new instance apart.
+ */
+let serverInstanceId: string | undefined
 
 let source: EventSource | undefined
 let started = false
@@ -174,7 +180,15 @@ function connect(): void {
 	armLiveness(stream, HELLO_TIMEOUT_MS)
 	/** Any event is a sign of life once `hello` arrived. */
 	const alive = () => { if (state.value === 'open' && source === stream) armLiveness(stream, SILENCE_TIMEOUT_MS) }
-	stream.addEventListener('hello', () => {
+	stream.addEventListener('hello', (event) => {
+		// A `hello` naming another server instance than the last one: the server restarted, and every
+		// Preview session of the page starts over (Rule 01a1161c-3b51-7ebd-bff2-987863a7c1cb).
+		const instance = parse(event as MessageEvent)?.serverInstanceId
+		if (typeof instance === 'string' && instance) {
+			const restarted = serverInstanceId !== undefined && serverInstanceId !== instance
+			serverInstanceId = instance
+			if (restarted) call(restartListeners)
+		}
 		livenessFailures = 0
 		stopFallback()
 		state.value = 'open'
@@ -259,6 +273,11 @@ export function useLiveEvents() {
 		onResources: (listener: (batch: LiveBatch) => void) => subscribe(resourceListeners, listener),
 		/** A lease was acquired, released, ended or force-released, or a resync is due. */
 		onLocks: (listener: () => void) => subscribe(lockListeners, listener),
+		/**
+		 * A `hello` named a server instance other than the previous one: the server restarted. Called
+		 * at once, before the resync that `hello` also queues.
+		 */
+		onServerRestart: (listener: () => void) => subscribe(restartListeners, listener),
 		/** The roster or the member's keys changed, or a resync is due. */
 		onAccess: (listener: () => void) => subscribe(accessListeners, listener),
 	}

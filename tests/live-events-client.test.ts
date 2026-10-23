@@ -126,6 +126,39 @@ describe('useLiveEvents', () => {
 		expect(live.state.value).toBe('open')
 	})
 
+	it('reports a server restart once, when a hello names another server instance, before its resync (issue #101)', () => {
+		let restarts = 0
+		const order: string[] = []
+		live.start()
+		// The page module remembers the instance of earlier tests: settle on 'a' before listening.
+		current().emit('hello', { serverInstanceId: 'a' })
+		removers.push(live.onServerRestart(() => {
+			restarts += 1
+			order.push(`restart:${batches.length}`)
+		}))
+		// A reconnect to the same instance is no restart.
+		current().fail(FakeEventSource.CONNECTING)
+		current().emit('hello', { serverInstanceId: 'a' })
+		vi.advanceTimersByTime(LIVE_BATCH_MS)
+		expect(restarts).toBe(0)
+		batches.length = 0
+
+		current().emit('hello', { serverInstanceId: 'b' })
+		expect(restarts).toBe(1)
+		expect(order).toEqual(['restart:0'])
+		vi.advanceTimersByTime(LIVE_BATCH_MS)
+		expect(batches).toEqual([{ resync: true, changes: [] }])
+		// A hello without an instance ID changes nothing.
+		current().emit('hello', {})
+		expect(restarts).toBe(1)
+
+		// The known instance outlives sign-out: signing in again to a restarted server is told apart.
+		live.stop()
+		live.start()
+		current().emit('hello', { serverInstanceId: 'c' })
+		expect(restarts).toBe(2)
+	})
+
 	it('falls back to polling when the stream is refused, and tries the stream again later', () => {
 		live.start()
 		current().fail(FakeEventSource.CLOSED)

@@ -25,6 +25,7 @@ import {
 } from './widget-events'
 import {
 	PreviewProtocolSession,
+	type AutomaticRecoveryResult,
 	type CapabilityCompatibility,
 	type GenerationAdmissionCause,
 	type GenerationAdmissionResult,
@@ -69,12 +70,12 @@ export class WorkbenchPreviewProtocolBridge {
 	 * unseen ID replaces the current generation.
 	 */
 	constructor(
-		previewSessionId: string,
+		session: PreviewProtocolSession | string,
 		transport: PreviewProtocolTransport,
 		evaluateCapabilities: (declaration: CapabilityDeclareMessage['payload']) => CapabilityCompatibility,
 		hooks: WorkbenchBridgeHooks = {},
 	) {
-		this.session = new PreviewProtocolSession(previewSessionId)
+		this.session = typeof session === 'string' ? new PreviewProtocolSession(session) : session
 		this.transport = transport
 		this.evaluateCapabilities = evaluateCapabilities
 		this.hooks = hooks
@@ -114,6 +115,21 @@ export class WorkbenchPreviewProtocolBridge {
 	 */
 	authorizeRetry(): RetryAuthorizationResult {
 		return this.session.authorizeRetry()
+	}
+
+	/**
+	 * Starts the one automatic recovery attempt after a protocol-invalid generation; the caller then
+	 * requests a fresh Preview document, whose declared generation is that attempt (Rule
+	 * 01a1161c-3bd4-7a91-b50e-d01a857521e5).
+	 */
+	beginAutomaticRecovery(): AutomaticRecoveryResult {
+		return this.session.beginAutomaticRecovery()
+	}
+
+	/** The Workbench found its requested Preview document protocol-invalid (see the session). */
+	failRequestedDocument(): void {
+		this.session.failRequestedDocument()
+		this.ackDispatchedGenerationId = undefined
 	}
 
 	receive(input: unknown): BridgeReceiveResult {

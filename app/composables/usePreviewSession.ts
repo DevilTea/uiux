@@ -8,6 +8,8 @@ import {
 	type BridgeReceiveResult,
 } from '../../src/preview/protocol/bridge'
 import { deriveWorkbenchFailure, recorrelatePreviewFailure, retryStallGraceMs } from '../../src/preview/failure-diagnostic'
+import { createPreviewSessionId } from '../../src/preview/protocol/generation-id'
+import { workbenchPreviewSessions } from '../../src/preview/protocol/session'
 import { PreviewNavigationState, type PreviewNavigationTarget } from '../../src/preview/navigation-state'
 import { PreviewTargetingState } from '../../src/preview/targeting-state'
 import { GeometryStreamCoordinator, type GeometryDemand, type GeometryReport } from '../../src/preview/geometry-streams'
@@ -113,7 +115,13 @@ export function createPreviewSession(state: WorkbenchState) {
 	const { t } = useI18n()
 
 	const previewIframe = ref<HTMLIFrameElement>()
-	const previewSessionId = ref(`session-${Date.now()}`)
+	/**
+	 * The Preview session, opened through the page's registry so a retired session ID is never
+	 * activated again (Rule 01a1161c-3b15-7913-acfb-136f0bd365b6). It lasts as long as the page, until
+	 * the server restarts (`renewSession`).
+	 */
+	let protocolSession = workbenchPreviewSessions.openFresh(() => createPreviewSessionId())
+	const previewSessionId = ref(protocolSession.previewSessionId)
 	/**
 	 * The admitted runtime generation. The runtime mints its ID and names it in its first
 	 * declaration; until one is admitted there is none (Clause 01a1161c-4119-712d-8785-7d8155c0ceee).
@@ -135,9 +143,9 @@ export function createPreviewSession(state: WorkbenchState) {
 	/** The diagnostic on screen; switching to another View clears it (owner ruling 4 of 2026-10-23). */
 	const shownFailure = shallowRef<PreviewFailureDiagnostic>()
 	/**
-	 * True from a Retry Preview activation until the outcome of the next declaration, on both paths:
-	 * the explicit retry and, after a capability conflict, the unused automatic recovery allowance
-	 * (owner ruling 2 of 2026-10-23, Discussion #241).
+	 * True from the start of a recovery document until the outcome of its declaration: a Retry
+	 * Preview activation (an explicit retry) or the automatic recovery attempt the Workbench starts
+	 * after a protocol failure (owner ruling 2 of 2026-10-23, Discussion #241; issue #101).
 	 */
 	const retryInFlight = ref(false)
 	/**
@@ -695,21 +703,59 @@ export function createPreviewSession(state: WorkbenchState) {
 
 	/**
 	 * Retry Preview, the one shared manual recovery action (Rule 01a11687-386c-764f-98fd-cf19dc3d0013)
-	 * and a fresh Preview document. While recovery is exhausted it authorizes one explicit retry,
-	 * which the next declared generation spends; a press while that retry is in flight joins it and
-	 * loads nothing (Rules 01a1161c-3dad-7ac1-b49b-a77fcb1e33f2 and 01a1161c-3e28-7dcf-a06e-a2c12c83919c).
-	 * After a capability conflict that left the automatic recovery allowance unused, it creates no
-	 * authorization: the fresh document's generation spends that allowance (owner ruling 2 of
-	 * 2026-10-23). If the in-flight document stalls, a press reloads it under the same pending
-	 * authorization, which the session reports as `coalesced` (owner ruling 1).
+	 * and a fresh Preview document. It authorizes one explicit retry, which the next declared
+	 * generation spends; a press while that retry is in flight joins it and loads nothing (Rules
+	 * 01a1161c-3dad-7ac1-b49b-a77fcb1e33f2 and 01a1161c-3e28-7dcf-a06e-a2c12c83919c). If the in-flight
+	 * document stalls, a press reloads it under the same pending authorization, which the session
+	 * reports as `coalesced` (owner ruling 1 of 2026-10-23). A press after the automatic recovery
+	 * attempt stalled abandons that attempt and authorizes an explicit retry instead.
 	 */
 	function retry(): void {
 		if (!state.selectedViewId.value || !workbenchBridge || retryDisabled.value) return
 		if (workbenchBridge.authorizeRetry() === 'ignored-active-bootstrap') return
+		startRecoveryDocument()
+	}
+
+	/**
+	 * After a protocol-invalid generation, the Workbench starts the one automatic recovery attempt
+	 * itself: a fresh Preview document in the same session (Rules 01a1161c-3bd4-7a91-b50e-d01a857521e5
+	 * and 01a1161c-3c0e-7274-8112-db507455e0f4). It shares the in-flight state of Retry Preview: the
+	 * diagnostic stays shown and the action disabled until the next declaration's outcome (owner
+	 * ruling 2 of 2026-10-23). Once the attempt is spent, only Retry Preview starts another.
+	 */
+	function recoverAutomatically(): void {
+		if (!state.selectedViewId.value || !workbenchBridge) return
+		if (workbenchBridge.beginAutomaticRecovery() !== 'started') return
+		startRecoveryDocument()
+	}
+
+	/** Requests the fresh document of a recovery, which stays in flight until its declaration's outcome. */
+	function startRecoveryDocument(): void {
 		retryInFlight.value = true
 		retryStalled.value = false
 		clearRetryStallTimer()
 		replaceGeneration()
+	}
+
+	/**
+	 * The server restarted: a Preview session never outlives its server, so the page starts a new one
+	 * under a fresh ID, with a fresh document and generation, before any geometry traffic resumes
+	 * (Rule 01a1161c-3b51-7ebd-bff2-987863a7c1cb). The old session's ID is retired; every message of
+	 * its documents is stale from now on. The new session starts with an unspent automatic recovery
+	 * allowance, no unavailable state and no retry authorization (Rule 01a1161c-3e9d-7da7-b7d7-18caf1d8cf43).
+	 */
+	function renewSession(): void {
+		workbenchPreviewSessions.close(protocolSession.previewSessionId)
+		protocolSession = workbenchPreviewSessions.openFresh(() => createPreviewSessionId())
+		previewSessionId.value = protocolSession.previewSessionId
+		lastFailure = undefined
+		shownFailure.value = undefined
+		endRetryInFlight()
+		endGeneration()
+		createBridge()
+		documentSequence.value++
+		captureIframeSourceContext()
+		handshakePhase.value = 'initiating'
 	}
 
 	/**
@@ -740,23 +786,28 @@ export function createPreviewSession(state: WorkbenchState) {
 		clearRetryStallTimer()
 	}
 
+	/** The protocol bridge of the current Preview session. */
+	function createBridge(): void {
+		workbenchBridge = new WorkbenchPreviewProtocolBridge(
+			protocolSession,
+			{
+				// One envelope per post: Workbench sends stay in step with its context-channel posts.
+				send(message) {
+					const target = previewIframe.value?.contentWindow
+					if (target) target.postMessage(createPreviewWirePost([message]), window.location.origin)
+				},
+			},
+			// `geometry.multi-target` is optional: a runtime without it gets the single-stream fallback.
+			declaration => declaration.protocolVersion === 1
+				? { ok: true }
+				: { ok: false, reason: 'capability.unsupported_protocol_version' },
+			{ onGenerationAdmitted },
+		)
+	}
+
 	function initBridge(): void {
 		try {
-			workbenchBridge = new WorkbenchPreviewProtocolBridge(
-				previewSessionId.value,
-				{
-					// One envelope per post: Workbench sends stay in step with its context-channel posts.
-					send(message) {
-						const target = previewIframe.value?.contentWindow
-						if (target) target.postMessage(createPreviewWirePost([message]), window.location.origin)
-					},
-				},
-				// `geometry.multi-target` is optional: a runtime without it gets the single-stream fallback.
-				declaration => declaration.protocolVersion === 1
-					? { ok: true }
-					: { ok: false, reason: 'capability.unsupported_protocol_version' },
-				{ onGenerationAdmitted },
-			)
+			createBridge()
 			navigationCoordinator = new PreviewNavigationState({
 				viewId: state.selectedViewId.value || '',
 				selectedWidgetId: state.selectedWidgetId.value,
@@ -856,7 +907,15 @@ export function createPreviewSession(state: WorkbenchState) {
 		// One envelope, or a transport batch from one runtime task: each envelope passes the bridge's
 		// gates on its own, in order, exactly as consecutive single posts would.
 		const messages = readPreviewWirePost(event.data)
-		if (messages) for (const message of messages) receiveWire(message)
+		if (!messages) return
+		for (const message of messages) {
+			// A document the Workbench already replaced (by a recovery, another View or a renewed
+			// session) is no peer any more: nothing it sends, not even a malformed envelope later in
+			// the same batch, can fail the requested document or spend its recovery (issue #101).
+			// Checked per envelope, because an envelope may replace the document mid-batch.
+			if (committedDocument() === 'replaced') return
+			receiveWire(message)
+		}
 	}
 
 	/**
@@ -907,7 +966,13 @@ export function createPreviewSession(state: WorkbenchState) {
 				previewSessionId: previewSessionId.value,
 				phase,
 			})
-			if (derived.effect === 'fail') failPreview(result.status, derived.failure)
+			if (derived.effect === 'fail') {
+				// The session judged a conflicting declaration and a capability failure itself; an
+				// undecodable message or a reused generation ID fails the requested document here.
+				if (result.status === 'invalid' || result.status === 'stale-generation') workbenchBridge.failRequestedDocument()
+				failPreview(result.status, derived.failure)
+				recoverAutomatically()
+			}
 			else if (derived.effect === 'refused')
 				failPreview(result.status, lastFailure && recorrelatePreviewFailure(lastFailure, previewSessionId.value, derived.generationId))
 		}
@@ -925,7 +990,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		}
 		// The session already ended these generations: a refused one, or one whose declaration
 		// conflicted, which may have been open with live streams.
-		if ((status === 'generation-refused' || status === 'capability-conflict') && runtimeGenerationId.value) endGeneration()
+		if ((status === 'generation-refused' || status === 'capability-conflict' || status === 'invalid') && runtimeGenerationId.value) endGeneration()
 		handshakePhase.value = 'failed'
 		endRetryInFlight()
 	}
@@ -1039,6 +1104,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		retryInFlight,
 		retryDisabled,
 		retry,
+		renewSession,
 		exitCommentMode,
 		onCommentTarget,
 		onCommentEscape,

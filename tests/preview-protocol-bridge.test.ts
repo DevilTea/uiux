@@ -7,6 +7,7 @@ import {
 	type PreviewWireMessage,
 } from '../src/preview/protocol/bridge'
 import { createRuntimeGenerationId } from '../src/preview/protocol/generation-id'
+import { PreviewSessionRegistry } from '../src/preview/protocol/session'
 import {
 	MAX_TRACKED_WIDGETS,
 	MULTI_TARGET_GEOMETRY_FEATURE,
@@ -407,6 +408,37 @@ describe('Explicit retry through declared generations', () => {
 		expect(workbench.authorizeRetry()).toBe('authorized')
 		expect(workbench.receive(capabilityDeclaration('generation-d')).status).toBe('ack-dispatched')
 		expect(admitted).toEqual(['generation-a', 'generation-b', 'generation-d'])
+	})
+
+	it('admits the declared generation after a capability conflict as the automatic recovery the Workbench started (issue #101)', () => {
+		const { workbench, admitted } = versionGated()
+		expect(workbench.receive(capabilityDeclaration('generation-a')).status).toBe('ack-dispatched')
+		expect(workbench.receive({ ...capabilityDeclaration('generation-a'), payload: { protocolVersion: 1, features: [] } }).status).toBe('capability-conflict')
+		expect(workbench.beginAutomaticRecovery()).toBe('started')
+		expect(workbench.receive(capabilityDeclaration('generation-b')).status).toBe('ack-dispatched')
+		expect(admitted).toEqual(['generation-a', 'generation-b'])
+		expect(workbench.snapshot().session).toMatchObject({ currentGenerationPhase: 'open', automaticRecoveryUsed: false, recoveryExhausted: false })
+	})
+
+	it('exhausts recovery when the automatic attempt\'s document is found invalid before it declares', () => {
+		const { workbench } = versionGated()
+		expect(workbench.receive({ ...capabilityDeclaration('generation-a'), payload: { protocolVersion: 'one' } }).status).toBe('invalid')
+		workbench.failRequestedDocument()
+		expect(workbench.beginAutomaticRecovery()).toBe('started')
+		workbench.failRequestedDocument()
+		expect(workbench.snapshot().session).toMatchObject({ recoveryExhausted: true, automaticRecoveryPending: false })
+		expect(workbench.receive(capabilityDeclaration('generation-b'))).toEqual({ status: 'generation-refused', generationId: 'generation-b' })
+	})
+
+	it('runs on a session opened through the registry', () => {
+		const registry = new PreviewSessionRegistry()
+		const session = registry.openFresh(() => 'session-r')
+		const outbound: PreviewWireMessage[] = []
+		const workbench = new WorkbenchPreviewProtocolBridge(session, collector(outbound), () => compatible)
+		expect(workbench.receive({ ...capabilityDeclaration('generation-a'), context: { previewSessionId: 'session-r', runtimeGenerationId: 'generation-a' } }).status).toBe('ack-dispatched')
+		expect(session.snapshot().currentGenerationPhase).toBe('open')
+		// Traffic of another session is stale.
+		expect(workbench.receive(capabilityDeclaration('generation-b'))).toEqual({ status: 'stale-session' })
 	})
 
 	it('admits the retry only from an unseen generation, never by reviving a retired one', () => {

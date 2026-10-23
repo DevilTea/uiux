@@ -38,7 +38,7 @@ watch(() => session.overCap.value.length, count => emit('overCap', count), { imm
 
 const src = computed(() => {
 	const params = new URLSearchParams({
-		session: session.previewSessionId,
+		session: session.previewSessionId.value,
 		viewId: props.viewId,
 		locale: props.context.locale,
 		viewportId: props.context.viewportId,
