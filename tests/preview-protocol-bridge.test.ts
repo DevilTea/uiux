@@ -364,6 +364,60 @@ describe('Runtime-minted generation IDs', () => {
 	})
 })
 
+// Issue #111: Retry Preview spends the explicit retry authorization (Rules
+// 01a1161c-3cf8-7859-9de8-2b99d22ce8aa, 01a1161c-3d31-7a69-9d64-cad14a8071bb,
+// 01a1161c-3dad-7ac1-b49b-a77fcb1e33f2 and 01a1161c-3e28-7dcf-a06e-a2c12c83919c).
+describe('Explicit retry through declared generations', () => {
+	function versionGated(outbound: PreviewWireMessage[] = []) {
+		const admitted: string[] = []
+		const workbench = new WorkbenchPreviewProtocolBridge('session-a', collector(outbound), payload => payload.protocolVersion === 1
+			? compatible
+			: { ok: false, reason: 'capability.unsupported_protocol_version' }, { onGenerationAdmitted: generationId => admitted.push(generationId) })
+		return { workbench, admitted, outbound }
+	}
+	const incompatible = (runtimeGenerationId: string) => ({ ...capabilityDeclaration(runtimeGenerationId), payload: { protocolVersion: 2, features: ['geometry'] } })
+
+	it('admits the next declared generation as the authorized retry and reopens Preview', () => {
+		const { workbench, admitted, outbound } = versionGated()
+		expect(workbench.receive(incompatible('generation-a')).status).toBe('capability-failure')
+		// Duplicate triggers join one authorization; no retry credit accumulates.
+		expect(workbench.authorizeRetry()).toBe('authorized')
+		expect(workbench.authorizeRetry()).toBe('coalesced')
+		expect(workbench.snapshot().session).toMatchObject({ recoveryExhausted: true, retryAuthorizationPending: true })
+
+		expect(workbench.receive(capabilityDeclaration('generation-b')).status).toBe('ack-dispatched')
+		expect(admitted).toEqual(['generation-a', 'generation-b'])
+		expect(outbound).toEqual([expect.objectContaining({ type: 'capability.ack', context: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-b' } })])
+		expect(workbench.snapshot().session).toMatchObject({
+			currentGenerationId: 'generation-b', currentGenerationPhase: 'open', recoveryExhausted: false, retryAuthorizationPending: false,
+		})
+		// An open generation needs no retry.
+		expect(workbench.authorizeRetry()).toBe('not-eligible')
+	})
+
+	it('spends the authorization at admission, so a retry that fails again needs a new one', () => {
+		const { workbench, admitted } = versionGated()
+		workbench.receive(incompatible('generation-a'))
+		expect(workbench.authorizeRetry()).toBe('authorized')
+		expect(workbench.receive(incompatible('generation-b')).status).toBe('capability-failure')
+		expect(workbench.snapshot().session).toMatchObject({ recoveryExhausted: true, retryAuthorizationPending: false })
+
+		// Without a new authorization the next generation is refused.
+		expect(workbench.receive(capabilityDeclaration('generation-c'))).toEqual({ status: 'generation-refused', generationId: 'generation-c' })
+		expect(workbench.authorizeRetry()).toBe('authorized')
+		expect(workbench.receive(capabilityDeclaration('generation-d')).status).toBe('ack-dispatched')
+		expect(admitted).toEqual(['generation-a', 'generation-b', 'generation-d'])
+	})
+
+	it('admits the retry only from an unseen generation, never by reviving a retired one', () => {
+		const { workbench } = versionGated()
+		workbench.receive(incompatible('generation-a'))
+		expect(workbench.authorizeRetry()).toBe('authorized')
+		expect(workbench.receive(capabilityDeclaration('generation-a'))).toEqual({ status: 'stale-generation' })
+		expect(workbench.snapshot().session).toMatchObject({ retryAuthorizationPending: true })
+	})
+})
+
 function collector(messages: PreviewWireMessage[]): PreviewProtocolTransport {
 	return { send(message) { messages.push(message) } }
 }
