@@ -51,6 +51,13 @@ async function openMenu(page: Page): Promise<void> {
 	await trigger(page).click()
 	await page.locator('[data-review-saved]').waitFor()
 }
+// The popover content enters with Nuxt UI's `scale-in` (scale .95 to 1, 100ms, frame-driven), and
+// `boundingBox()` includes that transform: a target measured near the end of the animation reads
+// slightly under its layout size (43.86 px for a 44 px `min-h-11`). Wait for finite animations to end.
+// The animation runs on an ancestor of the content, so read the document timeline.
+const settled = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations()
+	.filter(animation => Number.isFinite(animation.effect?.getComputedTiming().endTime))
+	.map(animation => animation.finished.catch(() => undefined))))
 const stored = (page: Page) => page.evaluate((prefix) => {
 	const key = Object.keys(localStorage).find(item => item.startsWith(prefix))
 	return key ? { key, value: JSON.parse(localStorage.getItem(key)!) as { id: string; name: string; query: Record<string, string> }[] } : undefined
@@ -193,6 +200,7 @@ describe('Reviews inbox saved filters (#62)', () => {
 			await page.keyboard.press('Enter')
 			await poll(() => items(page)).toEqual(['只在此分頁'])
 			await page.locator('[data-review-saved]').waitFor()
+			await settled(page)
 			for (const selector of ['[data-review-saved-apply]', '[data-review-saved-rename]', '[data-review-saved-delete]', '[data-review-saved-save]']) {
 				const box = await page.locator(selector).first().boundingBox()
 				expect(box?.height, selector).toBeGreaterThanOrEqual(44)
