@@ -46,7 +46,17 @@ export const HARNESS_NORMALIZATION_CSS = `
 export type HarnessCookie = Readonly<{ name: string; value: string }>
 
 export type HarnessPreview =
-	| Readonly<{ status: 'ready'; page: Page; close: () => Promise<void> }>
+	| Readonly<{
+		status: 'ready'
+		page: Page
+		close: () => Promise<void>
+		/**
+		 * How many requests for a bound Asset's content (see `isBoundAssetPath`) failed since the page
+		 * opened: a non-2xx answer or a network failure, whatever element or style asked for it. The
+		 * caller fails the context when it is above zero after its screenshot.
+		 */
+		assetLoadFailures: () => number
+	}>
 	/** The Preview settled on another status (`invalid`, `adapter_unavailable`, …). */
 	| Readonly<{ status: 'not_ready'; previewStatus: string | null; close: () => Promise<void> }>
 
@@ -55,6 +65,43 @@ export type HarnessPreview =
  * decode, so it is not captured.
  */
 export const ASSET_LOAD_FAILED_STATUS = 'asset_load_failed'
+
+/** The diagnostic of a context that is not captured because a request for a bound Asset failed (Rule 01a115cd-c106-71d6-b1f8-4d59cab22ad2). */
+export const ASSET_LOAD_FAILED_DIAGNOSTIC = {
+	code: 'capture.asset_load_failed',
+	path: '/preview',
+	message: 'A bound Asset did not load in the Preview (a request for its content failed, or an image of it did not decode), so the context was not captured.',
+} as const
+
+/** Whether a same-origin URL path is a bound Asset's content, by the two forms of Clause 01a167f4-401d-7330-ac65-0a900adbccd6. */
+export function isBoundAssetPath(pathname: string): boolean {
+	return /^\/api\/assets\/[^/]+\/content$/.test(pathname) || pathname.startsWith('/api/history/blobs/')
+}
+
+/**
+ * Counts failed requests for bound Assets on `page` from now on, in every frame and for every
+ * kind of request (an `<img>`, a CSS background, a `<video>` poster, a shadow root, a late insertion).
+ */
+function trackBoundAssetFailures(page: Page, baseUrl: string): () => number {
+	const origin = new URL(baseUrl).origin
+	let failures = 0
+	const bound = (href: string): boolean => {
+		try {
+			const url = new URL(href)
+			return url.origin === origin && isBoundAssetPath(url.pathname)
+		}
+		catch {
+			return false
+		}
+	}
+	page.on('response', (response) => {
+		if (bound(response.url()) && !response.ok()) failures += 1
+	})
+	page.on('requestfailed', (request) => {
+		if (bound(request.url())) failures += 1
+	})
+	return () => failures
+}
 
 /**
  * Runs in the Preview page: decodes every `<img>` that shows a bound Asset, by the two URL forms of
@@ -117,6 +164,7 @@ export async function openHarnessPreview(browser: Browser, input: Readonly<{
 		if (input.cookie)
 			await browserContext.addCookies([{ name: input.cookie.name, value: input.cookie.value, url: input.baseUrl, httpOnly: true, sameSite: 'Strict' }])
 		const page = await browserContext.newPage()
+		const assetLoadFailures = trackBoundAssetFailures(page, input.baseUrl)
 		await page.goto(harnessPreviewUrl(input.baseUrl, input.context), { waitUntil: 'load', timeout })
 		await page.addStyleTag({ content: HARNESS_NORMALIZATION_CSS })
 		const statusElement = await page.waitForSelector('[data-preview-status]:not([data-preview-status="loading"])', { timeout })
@@ -125,11 +173,14 @@ export async function openHarnessPreview(browser: Browser, input: Readonly<{
 		// Bound Assets render from their resolved URLs (Clause 01a167f4-401d-7330-ac65-0a900adbccd6): every
 		// image showing one must decode before the screenshot, and one that does not (its content was
 		// replaced since, or its bytes do not decode) fails the context rather than being captured broken.
+		// Requests of any other kind (CSS, video, a shadow root, a late insertion) are watched on the network
+		// from the page's first request until the caller's screenshot; their bytes cannot be decode-checked.
+		await page.waitForLoadState('networkidle', { timeout }).catch(() => undefined)
 		const undecoded = await withStepTimeout(page.evaluate(decodeBoundAssetImages, { timeoutMs: timeout }), timeout * 2, 'The Asset image wait')
-		if (undecoded > 0) return { status: 'not_ready', previewStatus: ASSET_LOAD_FAILED_STATUS, close }
+		if (undecoded > 0 || assetLoadFailures() > 0) return { status: 'not_ready', previewStatus: ASSET_LOAD_FAILED_STATUS, close }
 		const fonts = page.evaluate(() => document.fonts?.ready).then(() => undefined)
 		await (input.fontsTimeoutMs === undefined ? fonts : withStepTimeout(fonts, input.fontsTimeoutMs, 'The web font wait'))
-		return { status: 'ready', page, close }
+		return { status: 'ready', page, close, assetLoadFailures }
 	}
 	catch (cause) {
 		await close()

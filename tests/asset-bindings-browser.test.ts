@@ -66,12 +66,35 @@ export const PictureRenderer = defineComponent({
   },
 });
 
+export const backdropPlugin = createWidgetPlugin('Backdrop')
+  .interfaces()
+  .config({
+    schema: { type: 'object', properties: { url: { type: 'string' } }, additionalProperties: false },
+    validate: (input) => input === null || (typeof input === 'object' && !Array.isArray(input)),
+    resolve: (raw) => ({ url: raw?.url ?? '' }),
+  })
+  .properties(p => p.url({ compute: ({ config }) => config.url }))
+  .done();
+
+export const BackdropRenderer = defineComponent({
+  name: 'BackdropRenderer',
+  setup() {
+    const { widgetId, useProperties } = useWidget(backdropPlugin);
+    const properties = useProperties();
+    return () => h('div', {
+      'data-widget-id': widgetId,
+      class: 'asset-backdrop',
+      style: { width: '64px', height: '64px', backgroundImage: 'url(' + properties.url.value + ')' },
+    });
+  },
+});
+
 export const manifest = {
   id: 'asset-picture',
   apiVersion: '1',
-  widgetPlugins: [picturePlugin],
+  widgetPlugins: [picturePlugin, backdropPlugin],
   catalog: { widgets: { Picture: { assetFields: { src: { acceptedCategories: ['image'] } } } } },
-  renderers: [{ type: 'Picture', component: PictureRenderer }],
+  renderers: [{ type: 'Picture', component: PictureRenderer }, { type: 'Backdrop', component: BackdropRenderer }],
   providers: [],
 };
 `
@@ -218,6 +241,28 @@ describe('a View that binds an Asset (issue #97)', () => {
 		expect(undecodable.status).toBe(422)
 		expect(await undecodable.json()).toMatchObject({ status: 'failed', results: [{ status: 'failed', diagnostics: [{ code: 'capture.asset_load_failed' }] }] })
 		const captured = await capture(boundViewId)
+		expect(captured.status, await captured.clone().text()).toBe(200)
+	}, 120_000)
+
+	it('refuses to capture a View whose CSS background request for a bound Asset fails, which no <img> decode check sees', async () => {
+		const created = await api('/api/views', { method: 'POST', body: JSON.stringify({ name: 'Stale backdrop', spec: SPEC }) })
+		expect(created.status, await created.clone().text()).toBe(201)
+		const { key, revision } = await created.json() as { key: string; revision: string }
+		const backdrop = (url: string) => ({ type: 'RootShell', id: 'root', slots: { content: [{ id: 'backdrop', type: 'Backdrop', config: { url } }] } })
+		const write = async (url: string, expectedRevision: string) => {
+			const structured = await api(`/api/views/${key}/structure`, { method: 'PUT', body: JSON.stringify({ expectedRevision, ir: backdrop(url), variants: {} }) })
+			expect(structured.status, await structured.clone().text()).toBe(200)
+			return ((await structured.json()) as { revision: string }).revision
+		}
+		// A request for a digest the Asset no longer has answers 409, and the background silently stays empty.
+		const stale = `/api/assets/${ASSET_ID}/content?digest=sha256:${'0'.repeat(64)}`
+		const revisionAfter = await write(stale, revision)
+		const failed = await capture(key)
+		expect(failed.status).toBe(422)
+		expect(await failed.json()).toMatchObject({ status: 'failed', results: [{ status: 'failed', diagnostics: [{ code: 'capture.asset_load_failed' }] }] })
+		// The same View with the current digest loads, and is captured.
+		await write(`/api/assets/${ASSET_ID}/content?digest=${await currentDigest()}`, revisionAfter)
+		const captured = await capture(key)
 		expect(captured.status, await captured.clone().text()).toBe(200)
 	}, 120_000)
 

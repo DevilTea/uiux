@@ -12,7 +12,7 @@ import { CAPTURE_HARNESS_GLOBAL, type CaptureHarnessHooks } from '../../preview/
 import { resolveDefaultLocale, resolveDefaultThemeId, resolveDefaultViewport } from '../../preview/render-context-options'
 import { deriveWidgetTree, flattenWidgetTree } from '../../preview/widget-tree'
 import type { KitBuildStatus } from '../ports/kit-build'
-import { captureHarnessScreenshot, HARNESS_LOAD_TIMEOUT_MS, openHarnessPreview, withStepTimeout, type HarnessCookie } from './capture-harness'
+import { ASSET_LOAD_FAILED_DIAGNOSTIC, captureHarnessScreenshot, HARNESS_LOAD_TIMEOUT_MS, openHarnessPreview, withStepTimeout, type HarnessCookie } from './capture-harness'
 import { missingDefaultLocaleError } from './default-locale-gate'
 import type { ProductKitRead } from './product-kit-authoring'
 
@@ -341,6 +341,8 @@ export function createProductKitChecksService(
 			// The in-page wait gives up after the step timeout; the outer bound only catches a stuck page.
 			await withStepTimeout(page.evaluate(settleImages, { timeoutMs: stepTimeoutMs }), stepTimeoutMs * 2, 'The image wait')
 			const bytes = await captureHarnessScreenshot(page)
+			if (preview.assetLoadFailures() > 0)
+				return { unavailable: { code: ASSET_LOAD_FAILED_DIAGNOSTIC.code, path, message: 'A bound Asset did not load in the Preview, so this render context was not checked.' } }
 			const widgets = await withStepTimeout(page.evaluate(snapshotWidgetMarkup, { limit: MAX_SNAPSHOT_WIDGETS }), stepTimeoutMs, 'The markup snapshot')
 			return { bytes, widgets }
 		}

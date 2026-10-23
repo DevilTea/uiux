@@ -215,9 +215,22 @@ describe('the server side', () => {
 
 	it('serves Asset content for its current digest only (Clause 01a167f4-41f2-70a1-a200-a005d47b12b5)', async () => {
 		const { persistence, digest } = await workspaceWithAsset()
-		// The plain URL follows replacements, so it is never cached; a digest-qualified one never changes.
+		// The plain URL follows replacements, so it is never stored; a digest-qualified one is revalidated by an ETag
+		// that covers the metadata its headers come from, so a metadata-only change is not served stale.
 		expect(await readAssetContentForHttp(persistence, ASSET_ID)).toMatchObject({ status: 200, body: PNG, headers: { 'Cache-Control': 'no-store' } })
-		expect(await readAssetContentForHttp(persistence, ASSET_ID, digest)).toMatchObject({ status: 200, body: PNG, headers: { 'Cache-Control': 'private, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' } })
+		expect(await readAssetContentForHttp(persistence, ASSET_ID, digest)).toMatchObject({ status: 200, body: PNG, headers: { 'Cache-Control': 'private, no-cache', 'X-Content-Type-Options': 'nosniff' } })
+		const etag = (await readAssetContentForHttp(persistence, ASSET_ID, digest)).headers?.ETag
+		expect(etag).toMatch(/^"r_/)
+		expect(await readAssetContentForHttp(persistence, ASSET_ID, digest, etag)).toMatchObject({ status: 304, headers: { 'Cache-Control': 'private, no-cache' } })
+		expect(await readAssetContentForHttp(persistence, ASSET_ID, digest, '"r_other"')).toMatchObject({ status: 200 })
+		// A metadata-only change keeps the digest URL but changes the ETag, so its new headers are fetched.
+		const cas = await persistence.assets.compareAndSwap({ key: ASSET_ID, expectedRevision: (await persistence.assets.readInspected(ASSET_ID))!.revision, resource: { metadata: { id: ASSET_ID, name: 'Logo', contentFilename: 'logo.png', mediaType: 'image/webp' }, content: PNG } })
+		expect(cas.ok).toBe(true)
+		const renamed = await readAssetContentForHttp(persistence, ASSET_ID, digest, etag)
+		expect(renamed).toMatchObject({ status: 200, headers: { 'Content-Type': 'image/webp' } })
+		expect(renamed.headers?.ETag).not.toBe(etag)
+		// A matching ETag never bypasses the digest check.
+		expect(await readAssetContentForHttp(persistence, ASSET_ID, DIGEST, renamed.headers?.ETag)).toMatchObject({ status: 409 })
 		expect(await readAssetContentForHttp(persistence, ASSET_ID, DIGEST)).toMatchObject({ status: 409, body: { code: 'asset_content_digest_mismatch' } })
 		expect(await readAssetContentForHttp(persistence, ASSET_ID, 'sha256:ABC')).toMatchObject({ status: 400, body: { code: 'invalid_asset_digest' } })
 		expect(await readAssetContentForHttp(persistence, ASSET_ID, '')).toMatchObject({ status: 400, body: { code: 'invalid_asset_digest' } })

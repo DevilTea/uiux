@@ -1,4 +1,4 @@
-import { defineEventHandler, getQuery, getRouterParam, setResponseStatus } from 'h3'
+import { defineEventHandler, getQuery, getRequestHeader, getRouterParam, setResponseStatus } from 'h3'
 import { getSelectedWorkspaceServerRuntime } from '../../../../src/server/selected-workspace'
 import { readAssetContentForHttp } from '../../../../src/server/authoring-http'
 import { denyUnlessAllowed } from '../../../../src/server/access/http'
@@ -12,10 +12,11 @@ export default defineEventHandler(async (event) => {
 	// `?digest=` pins the content a Preview resolved (Clause 01a167f4-41f2-70a1-a200-a005d47b12b5); a repeated parameter is no digest.
 	const digest = query.digest === undefined ? undefined : typeof query.digest === 'string' ? query.digest : ''
 	const runtime = getSelectedWorkspaceServerRuntime()
-	const result = await readAssetContentForHttp(runtime.persistence, id, digest)
+	const result = await readAssetContentForHttp(runtime.persistence, id, digest, getRequestHeader(event, 'if-none-match'))
 	setResponseStatus(event, result.status)
 	if (result.headers) setStoredContentHeaders(event, result.headers)
 	if (result.status === 200 && result.body instanceof Uint8Array)
 		return Buffer.from(result.body)
+	if (result.status === 304) return null
 	return result.body
 })
