@@ -43,6 +43,16 @@ export type FailureObservation = Readonly<{
  */
 export const RETRY_STALL_GRACE_MS = 5000
 
+/**
+ * The grace period in effect: `RETRY_STALL_GRACE_MS`, unless browser tests set a positive
+ * `__uiuxRetryStallGraceMs` on the Workbench window before it loads, so that in-flight and stall
+ * assertions do not race the real timer. Nothing in the product sets it.
+ */
+export function retryStallGraceMs(scope: unknown = globalThis): number {
+	const override = (scope as { __uiuxRetryStallGraceMs?: unknown } | undefined)?.__uiuxRetryStallGraceMs
+	return typeof override === 'number' && Number.isFinite(override) && override > 0 ? override : RETRY_STALL_GRACE_MS
+}
+
 /** Longest `detail` the Workbench writes; the detail is display-only and never drives control flow. */
 const MAX_DETAIL_LENGTH = 200
 

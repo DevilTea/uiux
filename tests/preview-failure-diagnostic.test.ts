@@ -6,6 +6,8 @@ import {
 	deriveWorkbenchFailure,
 	previewFailureCopyKeys,
 	recorrelatePreviewFailure,
+	RETRY_STALL_GRACE_MS,
+	retryStallGraceMs,
 	type FailureObservation,
 } from '../src/preview/failure-diagnostic'
 import {
@@ -98,6 +100,16 @@ describe('Workbench-derived Preview failures', () => {
 		for (const failure of derived) expect(validatePreviewFailureDiagnostic(failure)).toMatchObject({ ok: true })
 		expect(derived[1]!.detail).not.toMatch(/\p{Cc}/u)
 		expect(derived[1]!.detail!.length).toBeLessThanOrEqual(200)
+	})
+})
+
+describe('Retry Preview stall grace', () => {
+	it('uses the product default unless a test sets a positive override', () => {
+		expect(retryStallGraceMs({})).toBe(RETRY_STALL_GRACE_MS)
+		expect(retryStallGraceMs(undefined)).toBe(RETRY_STALL_GRACE_MS)
+		expect(retryStallGraceMs({ __uiuxRetryStallGraceMs: 300 })).toBe(300)
+		for (const invalid of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, '300'])
+			expect(retryStallGraceMs({ __uiuxRetryStallGraceMs: invalid })).toBe(RETRY_STALL_GRACE_MS)
 	})
 })
 

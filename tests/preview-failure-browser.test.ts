@@ -2,7 +2,6 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright'
-import { RETRY_STALL_GRACE_MS } from '../src/preview/failure-diagnostic'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 import { PREVIEW_WIRE_RECORDER, type WireRecorderWindow } from './support/preview-wire-recorder'
 
@@ -79,12 +78,17 @@ afterAll(async () => {
 	await server?.close()
 })
 
-async function open(path: string, incompatible: number): Promise<{ context: BrowserContext; page: Page }> {
+/** A grace period no in-flight assertion can outlast; the stall test sets a short one. */
+const LONG_GRACE_MS = 120_000
+const SHORT_GRACE_MS = 300
+
+async function open(path: string, incompatible: number, graceMs = LONG_GRACE_MS): Promise<{ context: BrowserContext; page: Page }> {
 	const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' })
 	await context.addInitScript(() => {
 		localStorage.setItem('nuxt-color-mode', 'light')
 		localStorage.setItem('uiux.workbench.locale', 'en-US')
 	})
+	await context.addInitScript((value) => { (window as unknown as { __uiuxRetryStallGraceMs: number }).__uiuxRetryStallGraceMs = value }, graceMs)
 	await context.addInitScript(declarationShim(incompatible))
 	await context.addInitScript(PREVIEW_WIRE_RECORDER)
 	await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
@@ -178,17 +182,9 @@ describe('Inline Preview diagnostic and Retry Preview (issue #111)', () => {
 			expect(await documentParam(page)).toBe(before + 1)
 			expect((await shim(page)).held).toBe(1)
 
-			// The document loaded and declared nothing: after the grace period Retry Preview is offered
-			// again (owner ruling 1), and pressing it reloads under the same pending authorization.
-			await expect.poll(async () => await retry.getAttribute('aria-disabled'), { timeout: RETRY_STALL_GRACE_MS + 10_000 }).toBeNull()
-			expect(await diagnostic.locator('[data-preview-retry-status]').textContent()).toContain('has not answered')
-			await dropHeld(page)
-			await setHold(page, false)
+			// The declaration arrives: recovery is exhausted, so only the pending explicit retry admits it.
 			await retry.focus()
-			await page.keyboard.press('Enter')
-			await expect.poll(() => documentParam(page)).toBe(before + 2)
-
-			// Recovery is exhausted, so only the pending explicit retry admits the new generation.
+			await release(page)
 			const recovered = await expectLive(page)
 			expect(recovered).toMatch(/^gen-[0-9a-f]{32}$/)
 			expect(recovered).not.toBe(failedGeneration)
@@ -198,6 +194,43 @@ describe('Inline Preview diagnostic and Retry Preview (issue #111)', () => {
 			const acks = (await frame!.evaluate(() => (window as unknown as WireRecorderWindow).__wire.messages))
 				.filter(message => message.type === 'capability.ack')
 			expect(acks.map(message => message.context.runtimeGenerationId)).toEqual([recovered])
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('offers Retry Preview again when the retry stalls, even on an unreadable error page, and reloads under the same authorization', async () => {
+		const { context, page } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`, 1, SHORT_GRACE_MS)
+		try {
+			const diagnostic = page.locator('[data-preview-failure]')
+			await diagnostic.waitFor({ timeout: 15_000 })
+			const retry = diagnostic.getByRole('button', { name: 'Retry Preview' })
+			const status = diagnostic.locator('[data-preview-retry-status]')
+			const before = await documentParam(page)
+
+			// The retry's document loads but its declaration never arrives (owner ruling 1).
+			await setHold(page, true)
+			await retry.click()
+			await expect.poll(() => documentParam(page)).toBe(before + 1)
+			await expect.poll(async () => await retry.getAttribute('aria-disabled'), { timeout: 15_000 }).toBeNull()
+			expect(await status.textContent()).toContain('has not answered')
+			expect(await page.locator('[data-session-status]').getAttribute('data-status')).not.toBe('live')
+
+			// Pressing again reloads; this time the document fails to load at all. The error page cannot
+			// be read, and Retry Preview still comes back.
+			await dropHeld(page)
+			await setHold(page, false)
+			await page.route(url => url.pathname === '/preview' && url.searchParams.get('document') === String(before + 2), route => route.abort())
+			await retry.click()
+			await expect.poll(() => documentParam(page)).toBe(before + 2)
+			await expect.poll(async () => await retry.getAttribute('aria-disabled'), { timeout: 15_000 }).toBeNull()
+			expect(await status.textContent()).toContain('has not answered')
+
+			// The next document loads and declares: the same pending authorization admits it.
+			await page.unrouteAll()
+			await retry.click()
+			await expect.poll(() => documentParam(page)).toBe(before + 3)
+			await expectLive(page)
+			expect(await declaredGenerations(page)).toHaveLength(2)
 		}
 		finally { await context.close() }
 	}, 90_000)

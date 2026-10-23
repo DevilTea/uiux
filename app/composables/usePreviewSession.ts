@@ -7,7 +7,7 @@ import {
 	WorkbenchPreviewProtocolBridge,
 	type BridgeReceiveResult,
 } from '../../src/preview/protocol/bridge'
-import { deriveWorkbenchFailure, recorrelatePreviewFailure, RETRY_STALL_GRACE_MS } from '../../src/preview/failure-diagnostic'
+import { deriveWorkbenchFailure, recorrelatePreviewFailure, retryStallGraceMs } from '../../src/preview/failure-diagnostic'
 import { PreviewNavigationState, type PreviewNavigationTarget } from '../../src/preview/navigation-state'
 import { PreviewTargetingState } from '../../src/preview/targeting-state'
 import { GeometryStreamCoordinator, type GeometryDemand, type GeometryReport } from '../../src/preview/geometry-streams'
@@ -147,6 +147,8 @@ export function createPreviewSession(state: WorkbenchState) {
 	 */
 	const retryStalled = ref(false)
 	let retryStallTimer: ReturnType<typeof setTimeout> | undefined
+	/** Read once per session; see `retryStallGraceMs`. */
+	const stallGraceMs = retryStallGraceMs(typeof window === 'undefined' ? undefined : window)
 	const targetingInteractionId = ref<string>()
 	const canvasTool = ref<CanvasTool>('select')
 	/** The tool Comment returns to when it is left (Select unless Interact was active). */
@@ -276,9 +278,12 @@ export function createPreviewSession(state: WorkbenchState) {
 	// handshake it is frozen, and changes travel over the context channel instead.
 	watch(() => state.contextOptions.value, () => {
 		if (handshakePhase.value !== 'open' && iframeSourceContext.value && contextDiffersFromSource()) {
-			// A new source is a new requested document: the one it replaces may no longer declare.
+			// A new source is a new requested document: the one it replaces may no longer declare. A
+			// retry in flight waits for the new document's load again, never for the replaced one's.
 			documentSequence.value++
 			captureIframeSourceContext()
+			clearRetryStallTimer()
+			retryStalled.value = false
 		}
 	})
 
@@ -707,14 +712,20 @@ export function createPreviewSession(state: WorkbenchState) {
 		replaceGeneration()
 	}
 
-	/** The in-flight retry's document loaded: wait the grace period for its declaration. */
+	/**
+	 * The iframe loaded while a retry is in flight: wait the grace period for a declaration. A
+	 * readable document the Workbench no longer requests is ignored (its replacement's load follows);
+	 * an unreadable one, such as an error page when the server is down, starts the wait too, so
+	 * Retry Preview always comes back (owner ruling 1 of 2026-10-23).
+	 */
 	function onIframeLoad(): void {
-		if (!retryInFlight.value || !requestedDocumentIsCommitted()) return
+		if (!retryInFlight.value || committedDocument() === 'replaced') return
 		clearRetryStallTimer()
+		retryStalled.value = false
 		retryStallTimer = setTimeout(() => {
 			retryStallTimer = undefined
 			if (retryInFlight.value) retryStalled.value = true
-		}, RETRY_STALL_GRACE_MS)
+		}, stallGraceMs)
 	}
 
 	function clearRetryStallTimer(): void {
@@ -854,12 +865,18 @@ export function createPreviewSession(state: WorkbenchState) {
 	 * requested one (owner ruling 1 of 2026-10-23, Discussion #241). A self-reload keeps its URL.
 	 */
 	function requestedDocumentIsCommitted(): boolean {
+		return committedDocument() === 'requested'
+	}
+
+	/** The committed iframe document: the requested one, another readable one, or one it cannot read. */
+	function committedDocument(): 'requested' | 'replaced' | 'unreadable' {
 		try {
 			const location = previewIframe.value?.contentWindow?.location.href
-			return !!location && new URL(location).searchParams.get('document') === String(documentSequence.value)
+			if (!location) return 'unreadable'
+			return new URL(location).searchParams.get('document') === String(documentSequence.value) ? 'requested' : 'replaced'
 		}
 		catch {
-			return false
+			return 'unreadable'
 		}
 	}
 
@@ -929,6 +946,7 @@ export function createPreviewSession(state: WorkbenchState) {
 	function unmount(): void {
 		window.removeEventListener('message', onWindowMessage)
 		window.removeEventListener('keydown', onWindowKeydown)
+		clearRetryStallTimer()
 	}
 
 	// Comment mode is meaningless without a mounted View.
@@ -946,7 +964,10 @@ export function createPreviewSession(state: WorkbenchState) {
 	let generationElement: HTMLIFrameElement | undefined
 	watch(previewIframe, (element, previous) => {
 		previous?.removeEventListener('load', onIframeLoad)
-		if (!element) return
+		if (!element) {
+			clearRetryStallTimer()
+			return
+		}
 		element.addEventListener('load', onIframeLoad)
 		if (generationElement && generationElement !== element) replaceGeneration()
 		generationElement = element
