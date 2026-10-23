@@ -13,6 +13,17 @@ let timer: ReturnType<typeof setInterval> | undefined
 let subscribers = 0
 export const KIT_BUILD_POLL_MS = 5000
 
+/**
+ * Whether `next` follows a build that settled a new output since `previous`: its `outputVersion` changed
+ * (so a build that started and finished between two polls counts), or it left `building` or `failed` for
+ * `ready` (a build that has no version).
+ */
+export function kitBuildSettledOutput(previous: KitBuildStatus | undefined, next: KitBuildStatus): boolean {
+	if (!previous || next.state !== 'ready') return false
+	if (previous.outputVersion !== undefined && next.outputVersion !== undefined && next.outputVersion !== previous.outputVersion) return true
+	return previous.state === 'building' || previous.state === 'failed'
+}
+
 async function refresh(): Promise<void> {
 	try {
 		const read = await $fetch<{ build: KitBuildStatus }>('/api/product-kit/build')

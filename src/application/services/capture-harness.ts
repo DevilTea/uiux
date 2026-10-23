@@ -82,7 +82,7 @@ export function isBoundAssetPath(pathname: string): boolean {
  * Counts failed requests for bound Assets on `page` from now on, in every frame and for every
  * kind of request (an `<img>`, a CSS background, a `<video>` poster, a shadow root, a late insertion).
  */
-function trackBoundAssetFailures(page: Page, baseUrl: string): () => number {
+export function trackBoundAssetFailures(page: Page, baseUrl: string): () => number {
 	const origin = new URL(baseUrl).origin
 	let failures = 0
 	const bound = (href: string): boolean => {
@@ -95,10 +95,11 @@ function trackBoundAssetFailures(page: Page, baseUrl: string): () => number {
 		}
 	}
 	page.on('response', (response) => {
-		if (bound(response.url()) && !response.ok()) failures += 1
+		if (bound(response.url()) && !(response.ok() || response.status() === 304)) failures += 1
 	})
 	page.on('requestfailed', (request) => {
-		if (bound(request.url())) failures += 1
+		// `net::ERR_ABORTED` is the browser cancelling a request itself (an element removed mid-load); an `<img>` that really did not load is caught by `decode()`.
+		if (bound(request.url()) && request.failure()?.errorText !== 'net::ERR_ABORTED') failures += 1
 	})
 	return () => failures
 }

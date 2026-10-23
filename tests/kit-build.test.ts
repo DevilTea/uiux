@@ -247,7 +247,7 @@ writeFileSync('dist/uiux.js', 'export {}\\n')
 		cleanups.push(() => { delete process.env.KIT_BUILD_TEST_SERVER_SECRET })
 		const { build } = runner(root, { env: { PATH: process.env.PATH, MY_API_KEY: 'sk-live-0123456789', db_password: 'hunter2hunter2', SHORT_TOKEN: 'abc1234', PLAIN_SETTING: 'visible-setting-value', UIUX_MCP_TOKEN: 'uiux_mcp_token_value' } })
 		await build.start()
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		const log = build.log()
 		expect(log).toContain('api key=<secret>')
 		expect(log).toContain('db password=<secret>')
@@ -273,7 +273,7 @@ writeFileSync('dist/uiux.js', 'export {}\\n')
 		// The real node is found on the inherited PATH, after kit/ and the Workspace root.
 		const { build } = runner(root, { env: { ...process.env, PATH: [dirname(process.execPath), process.env.PATH ?? ''].join(delimiter) } })
 		await build.start()
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		expect(existsSync(marker)).toBe(false)
 		const seen = JSON.parse(await readFile(join(root, 'kit', 'seen.json'), 'utf8'))
 		expect(seen.env.PATH.split(delimiter).slice(0, 3)).toEqual([join(root, 'kit', 'node_modules', '.bin'), join(root, 'node_modules', '.bin'), dirname(process.execPath)])
@@ -283,7 +283,7 @@ writeFileSync('dist/uiux.js', 'export {}\\n')
 		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK })
 		const { build } = runner(root, { env: { ...process.env, UIUX_INTERNAL_DEV_NETWORK: 'secret-handoff', UIUX_INTERNAL_OTHER: 'x', KIT_BUILD_TEST_KEEP: 'kept' } })
 		await build.start()
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		const seen = JSON.parse(await readFile(join(root, 'kit', 'seen.json'), 'utf8'))
 		expect(Object.keys(seen.env).filter((name: string) => name.startsWith('UIUX_INTERNAL_'))).toEqual([])
 		expect(JSON.stringify(seen.env)).not.toContain('secret-handoff')
@@ -302,7 +302,7 @@ describe('the kit build runner (Feature 01a11bb1-8534)', () => {
 		expect(started.state).toBe('building')
 		expect(printed[0]).toBe(`uiux: kit build: running ${JSON.stringify([process.execPath, 'build.mjs'])} in kit/`)
 		const startedAt = Date.now()
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		// Settled means 500 ms without a change in the output directory.
 		expect(Date.now() - startedAt).toBeGreaterThanOrEqual(500)
 		expect(build.outputGeneration()).toBe(1)
@@ -313,7 +313,7 @@ describe('the kit build runner (Feature 01a11bb1-8534)', () => {
 		const root = await kitWorkspace({ output: 'dist', build: { command: [process.execPath, 'build.mjs', '$(touch pwned)', ';touch x', '`touch y`', '&& touch z'] } }, { 'build.mjs': BUILD_OK })
 		const { build } = runner(root)
 		await build.start()
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		const seen = JSON.parse(await readFile(join(root, 'kit', 'seen.json'), 'utf8'))
 		expect(seen.argv).toEqual(['$(touch pwned)', ';touch x', '`touch y`', '&& touch z'])
 		for (const name of ['pwned', 'x', 'y', 'z', 'touch']) {
@@ -355,7 +355,7 @@ describe('the kit build runner (Feature 01a11bb1-8534)', () => {
 		const root = await kitWorkspace(nodeBuild('fail.mjs'), { 'fail.mjs': BUILD_FAIL })
 		const { build } = runner(root)
 		await build.start()
-		expect(await settledState(build)).toEqual({ state: 'failed', message: 'The build process exited with code 1.' })
+		expect(await settledState(build)).toMatchObject({ state: 'failed', message: 'The build process exited with code 1.' })
 		expect(build.outputGeneration()).toBeUndefined()
 		expect(build.log()).toContain('error TS2304')
 	})
@@ -372,7 +372,7 @@ describe('the kit build runner (Feature 01a11bb1-8534)', () => {
 		const { build } = runner(root)
 		await build.start()
 		const pid = Number(await waitFor(() => readFile(join(root, 'kit', 'hang.pid'), 'utf8').catch(() => ''), text => text !== ''))
-		expect(await settledState(build)).toEqual({ state: 'failed', message: 'The build timed out after 1 s and was stopped.' })
+		expect(await settledState(build)).toMatchObject({ state: 'failed', message: 'The build timed out after 1 s and was stopped.' })
 		await waitFor(() => processAlive(pid), alive => !alive)
 		await new Promise(resolveDelay => setTimeout(resolveDelay, 3500))
 		expect(existsSync(join(root, 'kit', 'late.txt'))).toBe(false)
@@ -390,10 +390,10 @@ setInterval(() => {}, 1000)
 		const root = await kitWorkspace(nodeBuild('build.mjs', { watch: [process.execPath, 'late-watch.mjs'], timeoutSeconds: 1 }), { 'build.mjs': BUILD_OK, 'late-watch.mjs': lateWatch })
 		const { build } = runner(root)
 		await build.start()
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready', outputVersion: expect.stringMatching(/^\d+\.\d+$/) })
 		// Well past the 1 s timeout, the watch process runs on and its output stays ready.
 		await new Promise(resolveDelay => setTimeout(resolveDelay, 1500))
-		expect(build.status()).toEqual({ state: 'ready' })
+		expect(build.status()).toMatchObject({ state: 'ready' })
 	})
 
 	it('makes a watch build ready only after its output changes, so an output left from before the start is not taken (Rule 01a12f9d-a14e)', async () => {
@@ -407,8 +407,8 @@ setInterval(() => {}, 1000)
 		await build.start()
 		// The stale output is quiet for well over 500 ms, yet the build is not ready; the timeout fails it.
 		await new Promise(resolveDelay => setTimeout(resolveDelay, 700))
-		expect(build.status()).toEqual({ state: 'building' })
-		expect(await settledState(build)).toEqual({ state: 'failed', message: 'The watch command produced no settled output within 1 s and was stopped.' })
+		expect(build.status()).toMatchObject({ state: 'building' })
+		expect(await settledState(build)).toMatchObject({ state: 'failed', message: 'The watch command produced no settled output within 1 s and was stopped.' })
 		const pid = Number(await readFile(join(root, 'kit', 'idle.pid'), 'utf8'))
 		await waitFor(() => processAlive(pid), alive => !alive)
 	})
@@ -419,7 +419,7 @@ setInterval(() => {}, 1000)
 		await build.start()
 		expect(printed[0]).toContain(JSON.stringify([process.execPath, 'watch.mjs']))
 		await waitFor(() => build.outputGeneration(), generation => generation === 2)
-		expect(build.status()).toEqual({ state: 'ready' })
+		expect(build.status()).toMatchObject({ state: 'ready' })
 		expect(existsSync(join(root, 'kit', 'seen.json'))).toBe(false)
 	})
 
@@ -460,7 +460,7 @@ writeFileSync('dist/uiux.js', 'export {}\\n')
 		const groupSignals = () => kill.mock.calls.filter(([pid]) => typeof pid === 'number' && pid < 0)
 		const { build } = runner(root)
 		await build.start()
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		const straggler = Number(await readFile(join(root, 'kit', 'straggler.pid'), 'utf8'))
 		// What the build left running dies with its group.
 		await waitFor(() => processAlive(straggler), alive => !alive)
@@ -495,7 +495,7 @@ writeFileSync('dist/uiux.js', 'export {}\\n')
 		expect(restarted).toEqual({ outcome: 'started', build: { state: 'building' } })
 		expect(processAlive(first)).toBe(false)
 		expect(printed.at(-1)).toContain(JSON.stringify([process.execPath, 'build.mjs']))
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		expect(await readFile(join(root, 'kit', 'dist', 'uiux.js'), 'utf8')).toContain('kit-adapter-7')
 	})
 
@@ -566,7 +566,7 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK, 'fail.mjs': BUILD_FAIL })
 		const { build } = runner(root, { register: true })
 		await build.start()
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		const good = await resolveSelectedWorkspaceAdapters(root, V5_LAYOUT)
 		expect(good.summaries[0]?.adapterId).toBe('kit-adapter-1')
 		const goodBundle = await getSelectedWorkspacePreviewBundle(root, V5_LAYOUT)
@@ -587,7 +587,7 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK, 'fail.mjs': BUILD_FAIL })
 		const { build } = runner(root, { register: true, capture: true })
 		await build.start()
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 
 		// No request resolves the good output before the failing build runs. The capture may still be
 		// reading kit/package.json, so the declaration is replaced at once.
@@ -619,7 +619,7 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		})
 		const { build } = runner(root, { register: true, captureOutput })
 		await build.start()
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		expect(captureOutput).toHaveBeenCalledTimes(1)
 		// The restart reads the declaration before it waits for the capture, so the replacement ends first.
 		await captureOutput.mock.results[0]!.value
@@ -648,7 +648,7 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		})
 		const { build } = runner(root, { register: true, captureOutput })
 		await build.start()
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		expect(captureOutput).toHaveBeenCalledTimes(1)
 		const captured = await captureOutput.mock.results[0]!.value
 		expect(captured.state, JSON.stringify(captured.diagnostics)).toBe('valid')
@@ -665,7 +665,7 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK, 'fail.mjs': BUILD_FAIL })
 		const before = runner(root, { register: true, capture: true })
 		await before.build.start()
-		expect(await settledState(before.build)).toEqual({ state: 'ready' })
+		expect(await settledState(before.build)).toMatchObject({ state: 'ready' })
 		// The server stops; the host breaks the kit; `uiux dev` starts again with a new runner.
 		await cleanups.pop()!()
 		await write(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', type: 'module', uiux: nodeBuild('fail.mjs') }))
@@ -701,13 +701,13 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		})
 		// The capture starts after the output is listed; from there to the spawn the run awaits only the capture.
 		await waitFor(() => captureOutput.mock.calls.length, calls => calls === 1)
-		expect(build.status()).toEqual({ state: 'building' })
+		expect(build.status()).toMatchObject({ state: 'building' })
 		expect(spawns()).toBe(0)
 		expect(begun).toBe(false)
 		finishCapture()
 		await started
 		expect(spawns()).toBe(1)
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		expect(build.outputGeneration()).toBe(1)
 	}, 30_000)
 
@@ -721,7 +721,7 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		// The capture still runs, but its generation is not the last good output.
 		expect(build.outputGeneration()).toBeUndefined()
 		expect(build.outputVersion()).toBeUndefined()
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		expect(build.outputGeneration()).toBe(1)
 		expect(captureOutput).toHaveBeenCalledTimes(2)
 	}, 30_000)
@@ -747,7 +747,7 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		const captureOutput = vi.fn(() => hang ? new Promise<void>(() => {}) : getSelectedWorkspacePreviewBundle(root, V5_LAYOUT))
 		const { build, printed } = runner(root, { register: true, captureOutput, captureWaitMs: 200, restartIntervalMs: 0 })
 		await build.start()
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		expect(build.outputGeneration()).toBe(1)
 		await captureOutput.mock.results[0]!.value
 		const good = await resolveSelectedWorkspaceAdapters(root, V5_LAYOUT)
@@ -757,7 +757,7 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		hang = true
 		await write(join(root, 'kit', 'version.txt'), '2')
 		expect(await build.restart()).toMatchObject({ outcome: 'started' })
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		expect(build.outputGeneration()).toBe(2)
 
 		// The next restart abandons that capture: generation 1 is the last good output again.
@@ -781,7 +781,7 @@ describe('settled output and the Adapters (Rules 01a11bb1-9df8, 01a11bb1-9e5e an
 		const { build, printed } = runner(root, { restartIntervalMs: 0 })
 		const spawns = () => printed.filter(line => line.includes('kit build: running')).length
 		await build.start()
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		const app = createWorkspaceApplicationSession(persistence, { kitBuild: build })
 
@@ -916,7 +916,7 @@ describe('Adapter provenance and the kit build (Rules 01a167bf-1f93, 01a167d8-ac
 		const { build } = runner(root, { register: true, capture: true })
 		await build.start()
 		await waitFor(() => build.outputGeneration(), generation => generation === 1)
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		const session = provenanceSession(root, build)
 		const first = await session.adapterProvenance()
 		expect(first).toEqual({ state: 'available', adapters: [expect.objectContaining({ moduleSpecifier: './dist/uiux.js', adapterId: 'kit-trigger-1', contentDigest: expect.stringMatching(/^sha256:/) })] })
@@ -965,7 +965,7 @@ describe('Adapter provenance and the kit build (Rules 01a167bf-1f93, 01a167d8-ac
 		const root = await kitWorkspace(nodeBuild('build.mjs'), { 'build.mjs': BUILD_OK, 'fail.mjs': BUILD_FAIL, 'hang.mjs': HANG })
 		const { build } = runner(root, { register: true, capture: true, restartIntervalMs: 0 })
 		await build.start()
-		expect(await settledState(build)).toEqual({ state: 'ready' })
+		expect(await settledState(build)).toMatchObject({ state: 'ready' })
 		const session = provenanceSession(root, build)
 		const good = await session.adapterProvenance()
 		expect(good).toEqual({ state: 'available', adapters: [expect.objectContaining({ adapterId: 'kit-adapter-1', contentDigest: expect.stringMatching(/^sha256:/) })] })
@@ -987,7 +987,7 @@ describe('Adapter provenance and the kit build (Rules 01a167bf-1f93, 01a167d8-ac
 
 		await replace(join(root, 'kit', 'package.json'), JSON.stringify({ name: 'kit', type: 'module', uiux: nodeBuild('hang.mjs') }))
 		await build.restart()
-		expect(build.status()).toEqual({ state: 'building' })
+		expect(build.status()).toMatchObject({ state: 'building' })
 		expect(await session.adapterProvenance()).toEqual({ state: 'unavailable' })
 	}, 30_000)
 })
@@ -1068,7 +1068,7 @@ describe('restart_kit_build and the build state over MCP and HTTP (Clauses 01a11
 		try {
 			const read = await mcp.client.readResource({ uri: 'uiux://product-kit' })
 			const content = read.contents[0]
-			expect(content && 'text' in content ? JSON.parse(content.text).build : undefined).toEqual({ state: 'failed', message: 'The build process exited with code 1.' })
+			expect(content && 'text' in content ? JSON.parse(content.text).build : undefined).toMatchObject({ state: 'failed', message: 'The build process exited with code 1.' })
 		}
 		finally { await mcp.close() }
 	})

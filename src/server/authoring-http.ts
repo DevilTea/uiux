@@ -745,6 +745,13 @@ export function formatContentDisposition(filename: string): string {
 	return `inline; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`
 }
 
+/** RFC 9110 §13.1.2 `If-None-Match`: `*`, or any listed entity tag equal to `etag` under weak comparison (a `W/` prefix is ignored). */
+export function ifNoneMatchMatches(header: string | undefined, etag: string): boolean {
+	if (header === undefined) return false
+	const strip = (tag: string) => tag.trim().replace(/^W\//, '')
+	return header.split(',').some(candidate => strip(candidate) === '*' || strip(candidate) === etag)
+}
+
 /**
  * `GET /api/assets/:id/content[?digest=<digest>]`. With `digest`, the content is served only while the
  * Asset's current source content has that digest: other content answers 409, so a Preview never shows
@@ -796,8 +803,9 @@ export async function readAssetContentForHttp(persistence: FileNativePersistence
 	}
 
 	const etag = `"${read.revision}"`
-	if (ifNoneMatch !== undefined && ifNoneMatch.split(',').some(candidate => candidate.trim() === etag))
-		return { status: 304, body: new Uint8Array(), headers: { 'ETag': etag, 'Cache-Control': 'private, no-cache' } }
+	const cacheControl = digest === undefined ? 'no-store' : 'private, no-cache'
+	if (ifNoneMatchMatches(ifNoneMatch, etag))
+		return { status: 304, body: new Uint8Array(), headers: { 'ETag': etag, 'Cache-Control': cacheControl } }
 
 	return {
 		status: 200,
@@ -811,7 +819,7 @@ export async function readAssetContentForHttp(persistence: FileNativePersistence
 			// The bytes at a digest never change (a change answers 409) but the headers come from metadata that can,
 			// so the digest URL is revalidated by ETag rather than cached as immutable; the plain URL follows
 			// replacements, so it is not stored.
-			'Cache-Control': digest === undefined ? 'no-store' : 'private, no-cache',
+			'Cache-Control': cacheControl,
 			...storedContentSecurityHeaders(mediaType, contentBytes),
 		},
 	}

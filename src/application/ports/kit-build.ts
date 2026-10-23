@@ -12,6 +12,12 @@ export type KitBuildStatus = Readonly<{
 	state: KitBuildState
 	/** Why the last run failed, naming no host path. */
 	message?: string
+	/**
+	 * The identity of the last good build output (the runner's settled output generation), present
+	 * once there is one. It changes whenever a build settles a new output, even between two reads
+	 * that both see `ready`.
+	 */
+	outputVersion?: string
 }>
 
 /**

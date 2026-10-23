@@ -223,6 +223,10 @@ describe('the server side', () => {
 		expect(etag).toMatch(/^"r_/)
 		expect(await readAssetContentForHttp(persistence, ASSET_ID, digest, etag)).toMatchObject({ status: 304, headers: { 'Cache-Control': 'private, no-cache' } })
 		expect(await readAssetContentForHttp(persistence, ASSET_ID, digest, '"r_other"')).toMatchObject({ status: 200 })
+		// `*` and a weak tag match (RFC 9110 weak comparison); the plain URL is never stored, even on a 304.
+		expect(await readAssetContentForHttp(persistence, ASSET_ID, digest, '*')).toMatchObject({ status: 304 })
+		expect(await readAssetContentForHttp(persistence, ASSET_ID, digest, `"r_x", W/${etag}`)).toMatchObject({ status: 304 })
+		expect(await readAssetContentForHttp(persistence, ASSET_ID, undefined, etag)).toMatchObject({ status: 304, headers: { 'Cache-Control': 'no-store' } })
 		// A metadata-only change keeps the digest URL but changes the ETag, so its new headers are fetched.
 		const cas = await persistence.assets.compareAndSwap({ key: ASSET_ID, expectedRevision: (await persistence.assets.readInspected(ASSET_ID))!.revision, resource: { metadata: { id: ASSET_ID, name: 'Logo', contentFilename: 'logo.png', mediaType: 'image/webp' }, content: PNG } })
 		expect(cas.ok).toBe(true)
