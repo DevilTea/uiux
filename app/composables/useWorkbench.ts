@@ -4,6 +4,8 @@ import { createPreviewSession, type PreviewSession } from './usePreviewSession'
 import type { EvidenceContextSelection, ViewRouteContext } from './workbench-types'
 import type { LiveBatch } from './useLiveEvents'
 import { createProductKitTracker } from './product-kit-tracker'
+import { bindsChangedAsset } from '../../src/assets/bindings'
+import { useKitBuild } from './useKitBuild'
 
 export type Workbench = WorkbenchState & Readonly<{
 	preview: PreviewSession
@@ -77,6 +79,16 @@ export function provideWorkbench(): Workbench {
 		preview.notifyIframeContext()
 	})
 
+	// A finished kit build may change the Adapters' Catalog, which a View's `$asset` binding diagnostics are
+	// checked against (Rule 01a167f4-472f-7ae9-8ebb-3075216ad94c): the View list and the open View are read
+	// again. The layout polls the build state; this only follows it.
+	const kitBuild = useKitBuild()
+	watch(() => kitBuild.build.value.state, (next, previous) => {
+		if (next !== 'ready' || (previous !== 'building' && previous !== 'failed')) return
+		void state.refreshCounts()
+		if (state.selectedViewId.value) void state.loadSelectedView(undefined, { quiet: true })
+	})
+
 	/** What the Preview document of the open View renders from, as one comparable string. */
 	function renderSignature(): string {
 		const view = state.selectedView.value
@@ -102,8 +114,10 @@ export function provideWorkbench(): Workbench {
 		const before = renderSignature()
 		const [kitMoved] = await Promise.all([productKitMoved(batch), state.applyLiveChanges(batch)])
 		const after = renderSignature()
+		// A replaced or deleted Asset the View binds is resolved again by a new generation (Rule 01a167f4-48f2-7460-8c12-dfc4cda35cd0).
+		const assetMoved = bindsChangedAsset((state.selectedView.value?.resource as { ir?: unknown } | undefined)?.ir, batch)
 		// Selecting another View meanwhile starts its own generation.
-		if (before && after && (before !== after || kitMoved) && state.selectedView.value?.key === viewId) preview.replaceGeneration()
+		if (before && after && (before !== after || kitMoved || assetMoved) && state.selectedView.value?.key === viewId) preview.replaceGeneration()
 	}
 
 	const workbench: Workbench = {

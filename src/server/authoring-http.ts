@@ -4,6 +4,7 @@ import { z } from 'zod'
 import type { ScopedWorkspaceSession } from '../application/access/scoped-session'
 import type { FileNativePersistence } from '../persistence'
 import { isFullUuid, isSha256Digest, type JsonObject, type JsonValue } from '../domain/validation'
+import { sha256Identity } from '../domain/artifacts/schema'
 import type { ViewSpecContent } from '../application/services/view-authoring'
 import type { VariantEntry } from '../domain/views/schema'
 import type { WorkspaceSettingsUpdate } from '../application/services/workspace-authoring'
@@ -744,9 +745,16 @@ export function formatContentDisposition(filename: string): string {
 	return `inline; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`
 }
 
-export async function readAssetContentForHttp(persistence: FileNativePersistence, assetId: string): Promise<AuthoringHttpResult> {
+/**
+ * `GET /api/assets/:id/content[?digest=<digest>]`. With `digest`, the content is served only while the
+ * Asset's current source content has that digest: other content answers 409, so a Preview never shows
+ * content other than what its binding was resolved and checked with (Clause 01a167f4-41f2-70a1-a200-a005d47b12b5).
+ */
+export async function readAssetContentForHttp(persistence: FileNativePersistence, assetId: string, digest?: string): Promise<AuthoringHttpResult> {
 	if (!isFullUuid(assetId))
 		return { status: 400, body: { code: 'invalid_resource_address', message: 'Asset id must be a valid UUID.' } }
+	if (digest !== undefined && !isSha256Digest(digest))
+		return { status: 400, body: { code: 'invalid_asset_digest', message: 'An Asset content digest is sha256:<64 lowercase hex characters>.' } }
 
 	const read = await persistence.assets.readInspected(assetId)
 	if (!read)
@@ -777,6 +785,12 @@ export async function readAssetContentForHttp(persistence: FileNativePersistence
 
 	const contentBytes = read.resource.content
 	const mediaType = read.resource.metadata?.mediaType ?? 'application/octet-stream'
+	if (digest !== undefined && await sha256Identity(contentBytes) !== digest) {
+		return {
+			status: 409,
+			body: { code: 'asset_content_digest_mismatch', message: `Asset ${assetId} no longer has the content digest ${digest}.` },
+		}
+	}
 
 	return {
 		status: 200,
@@ -787,6 +801,9 @@ export async function readAssetContentForHttp(persistence: FileNativePersistence
 			'ETag': `"${read.revision}"`,
 			'X-Content-Type-Options': 'nosniff',
 			'Content-Disposition': formatContentDisposition(declaredFilename),
+			// Content addressed by its digest never changes at that URL (a change answers 409), so it is cached;
+			// the plain URL follows replacements, so it is not.
+			'Cache-Control': digest === undefined ? 'no-store' : 'private, max-age=31536000, immutable',
 			...storedContentSecurityHeaders(mediaType, contentBytes),
 		},
 	}

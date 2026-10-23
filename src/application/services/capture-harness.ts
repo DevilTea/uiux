@@ -50,6 +50,34 @@ export type HarnessPreview =
 	/** The Preview settled on another status (`invalid`, `adapter_unavailable`, …). */
 	| Readonly<{ status: 'not_ready'; previewStatus: string | null; close: () => Promise<void> }>
 
+/**
+ * The `previewStatus` of a Preview that reported ready but showed a bound Asset image that did not
+ * decode, so it is not captured.
+ */
+export const ASSET_LOAD_FAILED_STATUS = 'asset_load_failed'
+
+/**
+ * Runs in the Preview page: decodes every `<img>` that shows a bound Asset, by the two URL forms of
+ * Clause 01a167f4-401d-7330-ac65-0a900adbccd6, within `timeoutMs`, and returns how many did not decode.
+ * A lazy one is loaded now, since the screenshot shows it. Other images are left alone.
+ */
+export async function decodeBoundAssetImages(input: Readonly<{ timeoutMs: number }>): Promise<number> {
+	const prefixes = ['/api/assets/', '/api/history/blobs/']
+	const bound = Array.from(document.images).filter((image) => {
+		const source = image.currentSrc || image.src
+		if (!source) return false
+		const url = new URL(source, document.baseURI)
+		return url.origin === location.origin && prefixes.some(prefix => url.pathname.startsWith(prefix))
+	})
+	const results = await Promise.all(bound.map(async (image) => {
+		if (image.loading === 'lazy') image.loading = 'eager'
+		const decoded = image.decode().then(() => true, () => false)
+		const timedOut = new Promise<boolean>(resolve => setTimeout(() => resolve(false), input.timeoutMs))
+		return await Promise.race([decoded, timedOut])
+	}))
+	return results.filter(decoded => !decoded).length
+}
+
 /** The Preview page URL of one render context in harness mode. */
 export function harnessPreviewUrl(baseUrl: string, context: ResolvedRenderContext): string {
 	const url = new URL(`${baseUrl}/preview`)
@@ -94,6 +122,11 @@ export async function openHarnessPreview(browser: Browser, input: Readonly<{
 		const statusElement = await page.waitForSelector('[data-preview-status]:not([data-preview-status="loading"])', { timeout })
 		const previewStatus = await statusElement?.getAttribute('data-preview-status') ?? null
 		if (previewStatus !== 'ready') return { status: 'not_ready', previewStatus, close }
+		// Bound Assets render from their resolved URLs (Clause 01a167f4-401d-7330-ac65-0a900adbccd6): every
+		// image showing one must decode before the screenshot, and one that does not (its content was
+		// replaced since, or its bytes do not decode) fails the context rather than being captured broken.
+		const undecoded = await withStepTimeout(page.evaluate(decodeBoundAssetImages, { timeoutMs: timeout }), timeout * 2, 'The Asset image wait')
+		if (undecoded > 0) return { status: 'not_ready', previewStatus: ASSET_LOAD_FAILED_STATUS, close }
 		const fonts = page.evaluate(() => document.fonts?.ready).then(() => undefined)
 		await (input.fontsTimeoutMs === undefined ? fonts : withStepTimeout(fonts, input.fontsTimeoutMs, 'The web font wait'))
 		return { status: 'ready', page, close }

@@ -549,6 +549,7 @@
       "bundleInvalid": "The preview runtime is incomplete. Rebuild UIUX, then reload.",
       "bundleLoadFailed": "Could not load the preview runtime.",
       "localeLoadFailed": "Could not load the primary Locale.",
+      "assetsLoadFailed": "Could not load the Assets this View uses.",
       "viewNotInVersion": "This View doesn't exist in this version."
     }
   },
@@ -2286,7 +2287,8 @@
       "invalid_media_type": "Use a media type such as image/png.",
       "missing_reference": "This references an Asset that does not exist.",
       "signature_extension_mismatch": "The file content does not match its extension.",
-      "signature_media_type_mismatch": "The file content does not match its media type."
+      "signature_media_type_mismatch": "The file content does not match its media type.",
+      "unresolved_reference": "The Asset this references could not be loaded for this render."
     },
     "i18n": {
       "config_field_conflict": "A translated config field is also set directly.",
@@ -2344,6 +2346,7 @@
       "viewport_snapshot_mismatch": "The viewport size changed since it was chosen."
     },
     "capture": {
+      "asset_load_failed": "An image of a bound Asset did not load, so this context was not captured.",
       "browser_launch_failed": "The capture browser could not start. Check that Playwright is installed.",
       "execution_failed": "The capture did not finish.",
       "kit_build_not_ready": "Formal capture waits until the kit build is ready. Fix a failed build, then restart it."
@@ -2423,6 +2426,7 @@
       "duplicate_file": "The version lists the same file under more than one resource.",
       "invalid_resource_kind": "The resource kind in the version is not valid.",
       "invalid_resource_key": "The resource key in the version is not valid.",
+      "resource_invalid": "A file this version records for the resource could not be read.",
       "invalid_actor_type": "The author type of the version is not valid.",
       "unstamped_actor": "The version does not record who made the change.",
       "invalid_system_actor": "The system author of the version is not valid.",

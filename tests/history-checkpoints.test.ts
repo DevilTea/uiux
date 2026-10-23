@@ -666,7 +666,7 @@ describe('/api/history/* over HTTP', () => {
 })
 
 describe('the /api/history route tree', () => {
-	it('holds exactly the eight history routes, none of which changes a Checkpoint (Rule 01a11a5e-09bb-755c-9253-3cbff9f65da9)', async () => {
+	it('holds exactly the nine history routes, none of which changes a Checkpoint (Rule 01a11a5e-09bb-755c-9253-3cbff9f65da9)', async () => {
 		const directory = join(import.meta.dirname, '..', 'server', 'api', 'history')
 		const entries = await readdir(directory, { recursive: true, withFileTypes: true })
 		const files = entries.filter(entry => entry.isFile()).map(entry => relative(directory, join(entry.parentPath, entry.name)).split('\\').join('/')).sort()
@@ -678,6 +678,8 @@ describe('the /api/history route tree', () => {
 			'diff.get.ts',
 			'versions.get.ts',
 			'versions/[id].get.ts',
+			// A version frame's bound Assets (issue #97).
+			'versions/[id]/assets.get.ts',
 			'versions/[id]/resources/[kind]/[key].get.ts',
 			// Restore writes a design resource, never a version (Rule 01a11a5e-1428-70eb-9d75-b54ba25015cb).
 			'versions/[id]/restore.post.ts',

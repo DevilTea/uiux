@@ -4,11 +4,13 @@ import type { AccessRefusal, LockedRefusal, ScopedWorkspaceSession } from '../ap
 import { isFullUuid } from '../domain/validation'
 import { VERSION_DIFF_DETAILS, type DiffVersionsCommand, type VersionDiffOutcome } from '../application/services/history-diff'
 import type { RestoreResourceVersionOutcome } from '../application/services/history-restore'
-import type { ReadVersionBlobOutcome, ReadVersionResourceOutcome } from '../application/services/history-preview'
+import type { ReadVersionBlobOutcome, ReadVersionResourceOutcome, ResolveVersionAssetsOutcome } from '../application/services/history-preview'
 import type { CreateCheckpointOutcome, DeleteCheckpointOutcome, ListVersionsOutcome, ReadVersionOutcome } from '../application/services/history-service'
 import type { HistoryVersionType } from '../domain/history/constants'
 import type { AuthoringHttpResult } from './authoring-http'
 import { storedContentSecurityHeaders } from './stored-content-headers'
+import { detectSignatureMediaType } from '../domain/assets/schema'
+import { parsePreviewAssetIds } from './preview-assets-http'
 
 /**
  * `GET /api/history/diff` (named by Clause 01a11485-fa00-72da-bc46-98302a3c106e; there is no HTTP
@@ -124,19 +126,33 @@ export async function readVersionResourceForHttp(session: ScopedWorkspaceSession
 }
 
 /**
+ * `GET /api/history/versions/:id/assets?ids=<id>,…`, a version read for Preview: the Assets a version
+ * frame's View binds, as that version records them, each resolved to its runtime value or blocked
+ * (Rule 01a167f4-472f-7ae9-8ebb-3075216ad94c). `ids` reads as for the live route.
+ */
+export async function resolveVersionAssetsForHttp(session: ScopedWorkspaceSession, id: string, idsQuery: unknown): Promise<AuthoringHttpResult<ResolveVersionAssetsOutcome | AccessRefusal | Readonly<{ code: string; message: string }>>> {
+	const ids = parsePreviewAssetIds(idsQuery)
+	if (!Array.isArray(ids)) return { status: 400, body: ids as Readonly<{ code: string; message: string }> }
+	return historyHttpResult(await session.resolveVersionAssets(id, ids))
+}
+
+/**
  * `GET /api/history/blobs/:digest`: the bytes a version names, by content digest, from the host
  * history store first, then the artifact store (Rule 01a11a5e-10df-795e-8fbc-a99de09694a5). The body
- * is `application/octet-stream`: the reader knows the recorded media type. Content never changes
+ * is `application/octet-stream`, or the image type its byte signature shows: the reader knows the recorded media type. Content never changes
  * for a digest, but access does, so the answer is cached privately only.
  */
 export async function readVersionBlobForHttp(session: ScopedWorkspaceSession, digest: string): Promise<AuthoringHttpResult<Uint8Array | Exclude<ReadVersionBlobOutcome, { status: 'found' }> | AccessRefusal>> {
 	const outcome = await session.readVersionBlob(digest)
 	if (outcome.status !== 'found') return historyHttpResult(outcome)
+	// An image, known by its byte signature, is served as that image so a version frame can show a bound
+	// Asset from it (Clause 01a167f4-401d-7330-ac65-0a900adbccd6), an SVG included; it stays sandboxed.
+	const detected = detectSignatureMediaType(outcome.bytes)
 	return {
 		status: 200,
 		body: outcome.bytes,
 		headers: {
-			'Content-Type': 'application/octet-stream',
+			'Content-Type': detected?.startsWith('image/') ? detected : 'application/octet-stream',
 			'Content-Length': String(outcome.bytes.byteLength),
 			'ETag': `"${outcome.digest}"`,
 			'X-Content-Type-Options': 'nosniff',

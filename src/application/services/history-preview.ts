@@ -1,3 +1,5 @@
+import { resolveAssetTarget, versionAssetContentUrl, type AssetResolutionTable, type AssetTargetResolution } from '../../assets/bindings'
+import { validateAssetContentFiles, validateAssetMetadata, type AuthoredAsset } from '../../domain/assets/schema'
 import type { HistoryResourceEntry, VersionRecord } from '../../domain/history/schema'
 import { isFullUuid, isSha256Digest, type Diagnostic, type JsonValue } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence/file-native'
@@ -44,10 +46,18 @@ export type VersionPreviewRefusal = Readonly<{
 
 export type ReadVersionResourceOutcome = VersionResourceRead | VersionPreviewRefusal
 export type ReadVersionBlobOutcome = VersionBlobRead | VersionPreviewRefusal
+export type VersionAssetsRead = Readonly<{ status: 'found'; versionId: string; assets: AssetResolutionTable }>
+export type ResolveVersionAssetsOutcome = VersionAssetsRead | VersionPreviewRefusal
 
 export type HistoryPreviewService = Readonly<{
 	readVersionResource(id: string, kind: string, key: string): Promise<ReadVersionResourceOutcome>
 	readVersionBlob(digest: string): Promise<ReadVersionBlobOutcome>
+	/**
+	 * A version frame's Asset resolution: each Asset as the version records it, resolved to its runtime
+	 * value with the version blob of its content as `url` (Clause 01a167f4-401d-7330-ac65-0a900adbccd6), or
+	 * blocked when the version holds no such Asset or holds it invalid.
+	 */
+	resolveVersionAssets(id: string, assetIds: readonly string[]): Promise<ResolveVersionAssetsOutcome>
 }>
 
 export function createHistoryPreviewService(persistence: FileNativePersistence, history: HistoryStoreSource | undefined): HistoryPreviewService {
@@ -132,7 +142,75 @@ export function createHistoryPreviewService(persistence: FileNativePersistence, 
 		})
 	}
 
-	return Object.freeze({ readVersionResource, readVersionBlob })
+	async function resolveVersionAssets(id: string, assetIds: readonly string[]): Promise<ResolveVersionAssetsOutcome> {
+		if (!isFullUuid(id)) return refusal('not_found', 'history.record_missing', '/id', `Version ${String(id)} does not exist.`)
+		if (!assetIds.every(assetId => isFullUuid(assetId)))
+			return refusal('invalid', 'history.invalid_resource', '/ids', 'Every Asset ID must be a UUID.')
+		const stores = await openStores()
+		if (stores && 'status' in stores) return stores
+		const loaded = await persistence.withReadLock(async (): Promise<ReadonlyMap<string, AssetTargetResolution> | VersionPreviewRefusal> => {
+			try {
+				const timeline = mergeTimeline(await stores?.host?.listVersions(), await stores?.checkpoints?.listUnlocked())
+				const version = timeline.versions.find(item => item.version.id === id)?.version
+				if (!version) return refusal('not_found', 'history.record_missing', '/id', `Version ${id} does not exist.`)
+				if (version.workspaceSchemaVersion !== policy.currentVersion)
+					return refusal('blocked', 'workspace.schema_unsupported', '/id', `Version ${id} was recorded under Workspace schemaVersion ${version.workspaceSchemaVersion} and cannot be previewed: this UIUX reads only schemaVersion ${policy.currentVersion}.`)
+				const resolved = new Map<string, AssetTargetResolution>()
+				for (const assetId of assetIds) {
+					const entry = version.resources.find(resource => resource.kind === 'asset' && resource.key === assetId)
+					const files = new Map<string, Uint8Array>()
+					for (const [path, digest] of Object.entries(entry?.files ?? {})) {
+						const blob = await readVersionBlobUnlocked(persistence, stores?.host, digest)
+						if (blob) files.set(path, blob)
+					}
+					resolved.set(assetId, await resolveAssetTarget({
+						assetId,
+						lookup: { read: async () => entry ? versionAsset(assetId, entry, files) : undefined },
+						url: (_assetId, contentDigest) => versionAssetContentUrl(contentDigest),
+					}))
+				}
+				return resolved
+			}
+			catch (error) {
+				if (error instanceof HostHistoryError) return failed(error)
+				throw error
+			}
+		})
+		if ('status' in loaded) return loaded
+		return { status: 'found', versionId: id, assets: Object.fromEntries(loaded) }
+	}
+
+	return Object.freeze({ readVersionResource, readVersionBlob, resolveVersionAssets })
+}
+
+/**
+ * An Asset as a version records it, with the diagnostics its files carry: `asset.json` and the one
+ * source-content file it names, as the current Asset is inspected (`AuthoredAssetFileRepository`). A
+ * file whose blob is no longer stored counts as missing.
+ */
+function versionAsset(assetId: string, entry: HistoryResourceEntry, files: ReadonlyMap<string, Uint8Array>): Readonly<{ resource: { metadata: AuthoredAsset; content: Uint8Array }; diagnostics: readonly Diagnostic[] }> {
+	const diagnostics: Diagnostic[] = []
+	const named = new Map<string, Uint8Array | undefined>()
+	for (const path of Object.keys(entry.files)) named.set(path.slice(path.lastIndexOf('/') + 1), files.get(path))
+	const metadataBytes = named.get('asset.json')
+	let metadataValue: unknown
+	try {
+		metadataValue = metadataBytes ? JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(metadataBytes)) : undefined
+	}
+	catch {
+		diagnostics.push({ code: 'history.resource_invalid', path: `/assets/${assetId}/asset.json`, message: `The asset.json that this version records for Asset ${assetId} is not valid JSON.` })
+	}
+	if (metadataBytes === undefined)
+		diagnostics.push({ code: 'history.blob_missing', path: `/assets/${assetId}/asset.json`, message: `The asset.json of Asset ${assetId} in this version is no longer stored.` })
+	diagnostics.push(...validateAssetMetadata(metadataValue, assetId).diagnostics)
+	const metadata = metadataValue as AuthoredAsset
+	const contentNames = [...named.keys()].filter(name => name !== 'asset.json').sort()
+	if (typeof metadataValue === 'object' && metadataValue !== null)
+		diagnostics.push(...validateAssetContentFiles(metadata, contentNames).diagnostics)
+	const content = typeof metadata?.contentFilename === 'string' ? named.get(metadata.contentFilename) : undefined
+	if (content === undefined && contentNames.length === 1 && named.has(contentNames[0]!))
+		diagnostics.push({ code: 'history.blob_missing', path: `/assets/${assetId}/${contentNames[0]}`, message: `The content of Asset ${assetId} in this version is no longer stored.` })
+	return { resource: { metadata, content: content ?? new Uint8Array() }, diagnostics }
 }
 
 function refusal(status: VersionPreviewRefusal['status'], code: string, path: string, message: string): VersionPreviewRefusal {

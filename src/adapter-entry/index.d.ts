@@ -31,6 +31,19 @@ export type AdapterAssetCapability = Readonly<{
 }>
 
 /**
+ * What a Widget's Config holds in an asset-capable field in place of the authored `{ "$asset": "<assetId>" }`
+ * binding, under the same field name, frozen (Clause 01a167f4-3e4e-7af1-b328-30fb52f7f4c5). `url` is an opaque
+ * same-origin relative URL to render the content from, which an Adapter does not parse (Clause
+ * 01a167f4-401d-7330-ac65-0a900adbccd6); `mediaType` is the Asset's declared media type and `contentDigest`
+ * `sha256:<hex>` of its source content. A field's Config schema accepts this shape.
+ */
+export type AdapterAssetValue = Readonly<{
+	url: string
+	mediaType: string
+	contentDigest: string
+}>
+
+/**
  * `catalog.widgets.<widgetType>.i18n.fields.<authorField>`, keyed by the translatable authoring field.
  * An omitted `textProperty` is `<authorField>` and an omitted `resultProperty` is `<authorField>Result`
  * (Clause 01a14e30-3676-7212-8cee-1ef84da6316c); UIUX validates a derived name as it validates a declared one.

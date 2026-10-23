@@ -16,8 +16,9 @@ import type { Diagnostic, JsonObject } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
 import type { KitBuildStatus } from '../ports/kit-build'
-import { captureHarnessScreenshot, openHarnessPreview, type HarnessPreview } from './capture-harness'
+import { ASSET_LOAD_FAILED_STATUS, captureHarnessScreenshot, openHarnessPreview, type HarnessPreview } from './capture-harness'
 import { missingDefaultLocaleError } from './default-locale-gate'
+import { createViewAssetBindingCheck, type AssetCatalog } from './asset-bindings'
 import { readWorkspaceProductKitProvenance } from './product-kit-provenance'
 import { readCurrentAdapterProvenance, type AdapterProvenanceSource } from './adapter-provenance'
 
@@ -93,6 +94,10 @@ export function createFormalCaptureService(
 		adapterProvenance?: AdapterProvenanceSource
 	},
 ): FormalCaptureService {
+	// A View whose `$asset` bindings do not resolve is never captured (Rules 01a115cd-c0d2-7427-8a95-927b2b3518c9
+	// and 01a167f4-472f-7ae9-8ebb-3075216ad94c): its contexts fail with the binding diagnostics before a browser runs.
+	const viewAssetBindings = createViewAssetBindingCheck(persistence, options?.adapterProvenance)
+
 	async function buildRegistries(contexts: readonly ResolvedRenderContext[]): Promise<
 		| { ok: true; registries: RenderContextRegistries; workspaceInspection: unknown; workspaceRevision: string }
 		| { ok: false; diagnostics: readonly Diagnostic[] }
@@ -232,6 +237,9 @@ export function createFormalCaptureService(
 
 		const results: FormalContextCaptureResult[] = new Array(contexts.length)
 		const validContexts: Array<{ context: ResolvedRenderContext; index: number }> = []
+		const bindingDiagnosticsByView = new Map<string, readonly Diagnostic[]>()
+		let bindingCatalog: Promise<AssetCatalog> | undefined
+		const sharedBindingCatalog = () => bindingCatalog ??= viewAssetBindings.catalog()
 
 		// 1. Strict validation per context against Workspace registries
 		for (let i = 0; i < contexts.length; i++) {
@@ -258,6 +266,16 @@ export function createFormalCaptureService(
 						message: `View ${context.viewId} was not found in the selected Workspace.`,
 					}],
 				}
+				continue
+			}
+
+			let bindingDiagnostics = bindingDiagnosticsByView.get(context.viewId)
+			if (!bindingDiagnostics) {
+				bindingDiagnostics = await viewAssetBindings.check(viewRead.resource.ir, sharedBindingCatalog)
+				bindingDiagnosticsByView.set(context.viewId, bindingDiagnostics)
+			}
+			if (bindingDiagnostics.length > 0) {
+				results[i] = { context, status: 'failed', diagnostics: bindingDiagnostics }
 				continue
 			}
 
@@ -331,11 +349,15 @@ export function createFormalCaptureService(
 						results[index] = {
 							context,
 							status: 'failed',
-							diagnostics: [{
-								code: isUnavailable ? 'adapter.materialization_unavailable' : 'preview.runtime_failed',
-								path: '/preview',
-								message: `Preview runtime status reported '${status}'.`,
-							}],
+							diagnostics: [status === ASSET_LOAD_FAILED_STATUS
+								// A bound Asset image did not decode (its content changed since it was resolved, or its bytes
+								// are not an image); nothing is captured in its place (Rule 01a115cd-c106-71d6-b1f8-4d59cab22ad2).
+								? { code: 'capture.asset_load_failed', path: '/preview', message: 'An image of a bound Asset did not load or decode in the Preview, so the context was not captured.' }
+								: {
+										code: isUnavailable ? 'adapter.materialization_unavailable' : 'preview.runtime_failed',
+										path: '/preview',
+										message: `Preview runtime status reported '${status}'.`,
+									}],
 						}
 						continue
 					}

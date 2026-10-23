@@ -33,6 +33,7 @@ import { CAPTURE_HARNESS_GLOBAL, type CaptureHarnessHooks } from '../../src/prev
 import type { ViewResource } from '../../src/domain/views/schema'
 import { incompatibleThemeDiagnostic, type ResolvedRenderContext } from '../../src/domain/render-context/schema'
 import type { I18nResource } from '../../src/domain/i18n/schema'
+import { collectBoundAssetIds, type AssetResolutionTable } from '../../src/assets/bindings'
 
 // The Preview document has no Workbench shell and never follows the Workbench color mode: pin
 // the document to light and scope the host's own status chrome to the Workspace theme rendered.
@@ -489,13 +490,28 @@ async function evaluateRuntime() {
 			}
 		}
 
+		// The server resolves the Assets the View binds: the current ones, or the version's in a version
+		// frame (Rule 01a167f4-472f-7ae9-8ebb-3075216ad94c). A bound Asset it blocks keeps the View from rendering.
+		const view = viewData.value.resource
+		let assets: AssetResolutionTable
+		try {
+			assets = await uiux.previewAssets(collectBoundAssetIds(view.ir), versionId)
+		}
+		catch (cause) {
+			if (superseded()) return
+			materializationResult.value = undefined
+			error.value = describeFetchError(cause, t('preview.errors.assetsLoadFailed')).message
+			return
+		}
+
 		await nextTick()
 		if (superseded() || !previewHostElement.value || themeDiagnostic.value) return
 
 		activeBridge = mount(previewHostElement.value, {
-			view: viewData.value.resource,
+			view,
 			context: activeContext.value,
 			locales: localesMap,
+			assets,
 			...(workspaceDefaultLocale.value ? { defaultLocale: workspaceDefaultLocale.value } : {}),
 			// The construction links the Product Kit stylesheet and renders once it has loaded, and sets
 			// the active theme's root attributes on this document (Rules 01a11a5a-4d38, 01a11bb1-ad41, 01a11bb1-ada4).

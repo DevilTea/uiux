@@ -1,5 +1,6 @@
 import type { EvidenceAdapterProvenance } from '../../src/domain/evidence/adapter-provenance'
 import type { HandoffRoot } from '../../src/domain/handoff/schema'
+import type { AssetResolutionTable } from '../../src/assets/bindings'
 
 export type VersionResourceRead<T> = Readonly<{ versionId: string; kind: string; key: string; revision: string; workspaceSchemaVersion: number; resource: T }>
 
@@ -104,6 +105,16 @@ export function useUiuxClient() {
 		return await $fetch<PreviewAdaptersResponse>('/api/preview/adapters')
 	}
 
+	/**
+	 * The server's resolution of the Assets a Preview's View binds (Rule 01a167f4-472f-7ae9-8ebb-3075216ad94c):
+	 * the current Assets, or with `versionId` the Assets as that version records them. No ID asks nothing.
+	 */
+	async function previewAssets(assetIds: readonly string[], versionId?: string): Promise<AssetResolutionTable> {
+		if (assetIds.length === 0) return {}
+		const url = versionId ? `/api/history/versions/${encodeURIComponent(versionId)}/assets` : '/api/preview/assets'
+		return (await $fetch<{ assets: AssetResolutionTable }>(url, { query: { ids: assetIds.join(',') }, cache: 'no-store' })).assets
+	}
+
 	function assetUrl(assetId: string): string {
 		return `/api/assets/${encodeURIComponent(assetId)}/content`
 	}
@@ -125,6 +136,7 @@ export function useUiuxClient() {
 		listEvidenceForFreshness,
 		assessHandoff,
 		previewAdapters,
+		previewAssets,
 		assetUrl,
 		artifactUrl,
 		routeUrl,
