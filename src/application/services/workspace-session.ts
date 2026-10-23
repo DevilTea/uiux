@@ -5,7 +5,8 @@ import type { I18nResource } from '../../domain/i18n/schema'
 import { reviewAnchorState, type ReviewAnchorState, type ReviewAnchorTarget } from '../../domain/reviews/anchor-state'
 import type { ChangeDomain } from '../../domain/reviews/change-domains'
 import { markRemovedActors } from '../../domain/reviews/removed-actors'
-import { deriveReviewResolution, isWidgetAnchor, isWorkspaceAnchor, type ReviewActor, type ReviewResolution, type ReviewSubmission, type ReviewThread } from '../../domain/reviews/schema'
+import { deriveReviewResolution, isWidgetAnchor, isWorkspaceAnchor, type ReviewActor, type ReviewEvidenceRef, type ReviewResolution, type ReviewSubmission, type ReviewThread } from '../../domain/reviews/schema'
+import type { DecisionStatus } from '../../domain/spec/schema'
 import { deriveWidgetTree, flattenWidgetTree } from '../../preview/widget-tree'
 import type { Diagnostic } from '../../domain/validation'
 import type { ViewResource } from '../../domain/views/schema'
@@ -364,18 +365,21 @@ export function createWorkspaceApplicationSession(
 			for (const key of await discoverKeys(kind)) {
 				let item: ResourceDiscoveryItem | undefined
 				let thread: ReviewThread | undefined
+				let read: Exclude<PointResourceRead, { kind: 'workspace' }> | undefined
 				try {
-					const read = await readPointResource(kind, key, requestRoster)
-					if (!read || read.kind === 'workspace') continue
-					item = summarize(read)
-					if (read.kind === 'review') thread = read.resource
-					if (expanded) item = { ...item, detail: await expandedDetail(read, requestDefaultLocale) } as ResourceDiscoveryItem
+					const pointRead = await readPointResource(kind, key, requestRoster)
+					if (!pointRead || pointRead.kind === 'workspace') continue
+					item = summarize(pointRead)
+					read = pointRead
+					if (pointRead.kind === 'review') thread = pointRead.resource
 				}
 				catch (error) {
+					read = undefined
 					item = await summarizeUnreadable(kind, key, error)
 					if (!item) continue
-					if (expanded) item = { ...item, detail: {} }
 				}
+				// Expansion never costs an item its summary: it fails on its own, to an empty `detail`.
+				if (expanded) item = { ...item, detail: read ? await expandedDetail(read, requestDefaultLocale).catch(() => ({})) : {} } as ResourceDiscoveryItem
 				if (request.query !== undefined && !matchesQuery(item, request.query)) continue
 				if (!await matchesReviewFilters(item, thread, request, anchorTarget)) continue
 				items.push(item)
@@ -394,17 +398,17 @@ export function createWorkspaceApplicationSession(
 		}
 	}
 
-	/** The Workspace's default Locale for the expanded Locale `isDefault`; unknown when the manifest is unreadable. */
+	/**
+	 * The Workspace's default Locale for the expanded Locale `isDefault`. Best effort, like the roster:
+	 * unknown, so `isDefault` is left out, whenever the manifest cannot be read.
+	 */
 	async function readDefaultLocale(): Promise<string | undefined> {
 		try {
 			const read = await persistence.workspace.readInspected()
 			const locale = read.resource?.i18n?.defaultLocale
 			return typeof locale === 'string' ? locale : undefined
 		}
-		catch (error) {
-			if (error instanceof PersistenceError && error.code === 'persistence.invalid_json') return undefined
-			throw error
-		}
+		catch { return undefined }
 	}
 
 	/** The anchored View as the `anchor` filter sees it: `null` when it does not exist. */
@@ -657,7 +661,8 @@ async function expandedDetail(read: Exclude<PointResourceRead, { kind: 'workspac
 }
 
 const SPEC_LISTS = ['entryConditions', 'interactionRules', 'constraints', 'accessibility', 'references'] as const
-const DECISION_STATUSES = ['pending', 'deferred', 'decided'] as const
+/** Every Decision status; the `Record` makes adding a status to `DecisionStatus` a type error here. */
+const DECISION_STATUSES = Object.keys({ pending: true, deferred: true, decided: true } satisfies Record<DecisionStatus, true>) as DecisionStatus[]
 
 function viewDetail(view: ViewResource): ViewDiscoveryDetail {
 	const variants = view.variants
@@ -695,14 +700,22 @@ function reviewDetail(thread: ReviewThread): ReviewDiscoveryDetail {
 	const submissions = Array.isArray(thread.submissions) ? thread.submissions : []
 	const history = Array.isArray(thread.history) ? thread.history : []
 	const first = messages[0]
-	const evidenceRefs = currentSubmission(thread)?.evidenceRefs
+	const evidenceRefs = evidenceRefsOf(currentSubmission(thread))
 	return {
 		submissionCount: submissions.length,
 		historyCount: history.length,
 		participants: distinctActors([...messages, ...submissions, ...history].map(entry => entry?.actor)),
 		...(typeof first?.body === 'string' ? { firstMessageExcerpt: graphemeExcerpt(first.body, DISCOVERY_DETAIL_EXCERPT_GRAPHEMES) } : {}),
-		...(Array.isArray(evidenceRefs) ? { evidenceRefs } : {}),
+		...(evidenceRefs ? { evidenceRefs } : {}),
 	}
+}
+
+/** The submission's evidence refs as `{ kind, evidence }` only, without any entry of another shape. */
+function evidenceRefsOf(submission: ReviewSubmission | undefined): ReviewEvidenceRef[] | undefined {
+	if (!Array.isArray(submission?.evidenceRefs)) return undefined
+	return submission.evidenceRefs.flatMap((ref: unknown) => isRecord(ref) && typeof ref.kind === 'string' && typeof ref.evidence === 'string'
+		? [{ kind: ref.kind, evidence: ref.evidence }]
+		: [])
 }
 
 /**

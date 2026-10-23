@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ResourceDiscoveryItem } from '../src/application/dto/resource-discovery'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
@@ -44,6 +44,8 @@ const ID = (prefix: string, n: number) => `${prefix.repeat(8)}-${prefix.repeat(4
 const AGENT = { type: 'agent', id: 'member:33333333-3333-4333-8333-333333333331', displayName: 'Ada' }
 const OTHER_AGENT = { type: 'agent', id: 'member:33333333-3333-4333-8333-333333333332', displayName: 'Ada' }
 const HUMAN = { type: 'human', displayName: 'Mei' }
+/** Another id-less actor: id-less actors are told apart by `displayName`. */
+const OTHER_HUMAN = { type: 'human', displayName: 'Lin' }
 const EVIDENCE = [{ kind: 'screenshot', evidence: `sha256:${'d'.repeat(64)}` }]
 /** 250 grapheme clusters of two code units each, so a code-unit cut would differ from a grapheme cut. */
 const LONG_TEXT = 'é'.repeat(200) + 'TAIL-NOT-IN-EXCERPT' + 'é'.repeat(31)
@@ -122,6 +124,7 @@ function threads(): ReviewThread[] {
 				{ id: ID('c', 2), actor: AGENT, at: '2026-10-01T09:00:00Z', body: 'Fixed.' },
 				{ id: ID('c', 3), actor: HUMAN, at: '2026-10-01T09:30:00Z', body: 'Thanks.' },
 				{ id: ID('c', 4), actor: OTHER_AGENT, at: '2026-10-01T09:40:00Z', body: 'Also checked.' },
+				{ id: ID('c', 6), actor: OTHER_HUMAN, at: '2026-10-01T09:50:00Z', body: 'Looks right.' },
 			],
 			submissions: [submission(1, '2026-10-01T10:00:00Z')],
 			history: [lifecycle(1, '2026-10-01T10:00:00Z', 'open', 'ready-for-review', AGENT, { submissionId: ID('f', 1) })],
@@ -151,7 +154,7 @@ function threads(): ReviewThread[] {
 	return fixtures as ReviewThread[]
 }
 
-async function session() {
+async function session(options: Parameters<typeof createWorkspaceApplicationSession>[1] = {}) {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-discovery-detail-'))
 	roots.push(root)
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
@@ -164,10 +167,10 @@ async function session() {
 	await persistence.assets.create(ASSET, { metadata: { id: ASSET, name: 'Logo', contentFilename: 'logo.bin', mediaType: 'application/octet-stream' }, content: ASSET_BYTES })
 	for (const thread of threads())
 		await persistence.reviews.create(thread.id, thread)
-	const app = createWorkspaceApplicationSession(persistence)
+	const app = createWorkspaceApplicationSession(persistence, options)
 	for (const item of page(await listResourcesForHttp(app, { limit: 100 })).items)
 		expect(item.diagnosticCount, `${item.kind} ${item.key}`).toBe(0)
-	return app
+	return Object.assign(app, { root, persistence })
 }
 
 type App = Awaited<ReturnType<typeof session>>
@@ -262,7 +265,7 @@ describe('discovery detail selector (Clause 01a166bd-ef89)', { timeout: 30_000 }
 		expect(detailOf(items, READY)).toEqual({
 			submissionCount: 1,
 			historyCount: 1,
-			participants: [HUMAN, AGENT, OTHER_AGENT],
+			participants: [HUMAN, AGENT, OTHER_AGENT, OTHER_HUMAN],
 			firstMessageExcerpt: 'é'.repeat(200),
 			evidenceRefs: EVIDENCE,
 		})
@@ -325,5 +328,50 @@ describe('discovery detail selector (Clause 01a166bd-ef89)', { timeout: 30_000 }
 		finally {
 			await mcp.close()
 		}
+	})
+
+	it('marks a participant removed from the roster as removed, like other Review reads', async () => {
+		// Only the other agent is still on the roster.
+		const app = await session({ memberIds: async () => new Set([OTHER_AGENT.id.slice('member:'.length)]) })
+		const items = page(await listResourcesForHttp(app, { kinds: ['review'], limit: 100, detail: 'expanded' })).items
+		expect((detailOf(items, READY) as { participants: unknown }).participants).toEqual([HUMAN, { ...AGENT, removed: true }, OTHER_AGENT, OTHER_HUMAN])
+	})
+
+	it('gives an unreadable item an empty detail and leaves out the members a malformed resource does not hold', async () => {
+		const app = await session()
+		const unreadable = '77777777-7777-4777-8777-777777777771'
+		const malformedView = '77777777-7777-4777-8777-777777777772'
+		const malformedThread = '22222222-2222-4222-8222-000000000009'
+		await writeFile(join(app.root, 'views', `${unreadable}.view.json`), '{broken-json')
+		await writeFile(join(app.root, 'views', `${malformedView}.view.json`), `${JSON.stringify({ id: malformedView, name: 'Broken', ir: { type: 'RootShell', id: 'root', slots: { content: [] } }, variants: { only: { state: {} } }, spec: { intent: 42, decisions: 'none' } })}\n`)
+		await writeFile(join(app.root, 'reviews', `${malformedThread}.review.json`), `${JSON.stringify({
+			id: malformedThread,
+			anchor: { scope: 'workspace' },
+			variantNames: [],
+			status: 'ready-for-review',
+			messages: [{ id: ID('c', 9), actor: 'not-an-actor', at: '2026-10-04T08:00:00Z', body: 'Hi' }],
+			submissions: [{ ...submission(9, '2026-10-04T09:00:00Z'), evidenceRefs: [{ ...EVIDENCE[0], payload: 'inline-bytes' }, 'not-a-ref', { kind: 'screenshot' }] }],
+			history: [lifecycle(9, '2026-10-04T09:00:00Z', 'open', 'ready-for-review', AGENT, { submissionId: ID('f', 9) })],
+		})}\n`)
+		const items = page(await listResourcesForHttp(app, { kinds: ['view', 'review'], limit: 100, detail: 'expanded' })).items
+		const plain = page(await listResourcesForHttp(app, { kinds: ['view', 'review'], limit: 100 })).items
+		expect(items.find(item => item.key === unreadable)).toMatchObject({ summary: {}, detail: {} })
+		expect(items.find(item => item.key === malformedView)?.diagnosticCount).toBeGreaterThan(0)
+		expect(detailOf(items, malformedView)).toEqual({ variantNames: ['only'] })
+		expect(items.find(item => item.key === malformedThread)?.diagnosticCount).toBeGreaterThan(0)
+		// Evidence refs keep only `{ kind, evidence }`, and drop entries of another shape.
+		expect(detailOf(items, malformedThread)).toEqual({ submissionCount: 1, historyCount: 1, participants: [AGENT], firstMessageExcerpt: 'Hi', evidenceRefs: EVIDENCE })
+		for (const [index, item] of items.entries())
+			expect(JSON.stringify({ ...item, detail: undefined })).toBe(JSON.stringify(plain[index]))
+	})
+
+	it('leaves out isDefault, and keeps every Locale summary, when the Workspace manifest cannot be read', async () => {
+		const app = await session()
+		const plain = page(await listResourcesForHttp(app, { kinds: ['locale'], limit: 100 })).items
+		vi.spyOn(app.persistence.workspace, 'readInspected').mockRejectedValue(new Error('manifest unavailable'))
+		const items = page(await listResourcesForHttp(app, { kinds: ['locale'], limit: 100, detail: 'expanded' })).items
+		expect(items.map(item => item.detail)).toEqual([{}, {}])
+		expect(items.map(item => ({ ...item, detail: undefined }))).toEqual(plain.map(item => ({ ...item, detail: undefined })))
+		expect(plain.map(item => item.summary)).toEqual([{ messageCount: 2 }, { messageCount: 1 }])
 	})
 })
