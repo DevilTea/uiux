@@ -375,3 +375,85 @@ describe('discovery detail selector (Clause 01a166bd-ef89)', { timeout: 30_000 }
 		expect(plain.map(item => item.summary)).toEqual([{ messageCount: 2 }, { messageCount: 1 }])
 	})
 })
+
+/** Issue #311: a Review thread read with malformed members degrades only its own summary. */
+describe('discovery of a Review thread with malformed members', () => {
+	const BAD_BODY = '22222222-2222-4222-8222-0000000000b1'
+	const BAD_ENTRIES = '22222222-2222-4222-8222-0000000000b2'
+
+	async function sessionWithMalformedThreads() {
+		const app = await session()
+		await writeFile(join(app.root, 'reviews', `${BAD_BODY}.review.json`), `${JSON.stringify({
+			id: BAD_BODY,
+			anchor: { scope: 'workspace' },
+			variantNames: [],
+			status: 'open',
+			messages: [
+				{ id: ID('c', 7), actor: HUMAN, at: '2026-10-05T08:00:00Z', body: 'Fine.' },
+				{ id: ID('c', 8), actor: HUMAN, at: '2026-10-05T09:00:00Z', body: 42 },
+			],
+			submissions: [],
+			history: [],
+		})}\n`)
+		await writeFile(join(app.root, 'reviews', `${BAD_ENTRIES}.review.json`), `${JSON.stringify({
+			id: BAD_ENTRIES,
+			anchor: { scope: 'workspace' },
+			variantNames: [],
+			status: 'ready-for-review',
+			messages: [null, 'not-a-message'],
+			submissions: [null],
+			history: [null, 7],
+		})}\n`)
+		return app
+	}
+
+	function summaryOf(items: readonly ResourceDiscoveryItem[], key: string) {
+		const item = items.find(candidate => candidate.key === key)
+		return item?.kind === 'review' ? item : undefined
+	}
+
+	function expectDegraded(items: readonly ResourceDiscoveryItem[]) {
+		const bad = summaryOf(items, BAD_BODY)
+		expect(bad?.diagnosticCount).toBeGreaterThan(0)
+		expect(bad?.summary).toMatchObject({ messageCount: 2, latestActivityAt: '2026-10-05T09:00:00Z' })
+		expect(bad?.summary).not.toHaveProperty('latestMessage')
+		const entries = summaryOf(items, BAD_ENTRIES)
+		expect(entries?.summary).not.toHaveProperty('latestMessage')
+		expect(entries?.summary).not.toHaveProperty('currentSubmission')
+		// The rest of the page is unchanged: a healthy thread still carries its latest message.
+		expect(summaryOf(items, READY)?.summary.latestMessage?.excerpt).toBe('Looks right.')
+	}
+
+	it('omits latestMessage for the item and keeps the rest of the page over HTTP', async () => {
+		const app = await sessionWithMalformedThreads()
+		for (const detail of [undefined, 'expanded'] as const) {
+			const args = { kinds: ['review'], limit: 100, ...(detail ? { detail } : {}) }
+			const listed = await listResourcesForHttp(app, args)
+			expect(listed.status, String(detail)).toBe(200)
+			expectDegraded(page(listed).items)
+			// Every Review key contains the query `22222222`, so search returns the same items.
+			const searched = await searchResourcesForHttp(app, { ...args, query: '22222222' })
+			expect(searched.status, String(detail)).toBe(200)
+			expectDegraded(page(searched).items)
+		}
+	})
+
+	it('omits latestMessage for the item and keeps the rest of the page over MCP', async () => {
+		const app = await sessionWithMalformedThreads()
+		const mcp = await connectMcp(app)
+		try {
+			for (const detail of [undefined, 'expanded']) {
+				const args = { kinds: ['review'], limit: 100, ...(detail ? { detail } : {}) }
+				const listed = await mcp.client.callTool({ name: 'list_resources', arguments: args })
+				expect(listed.isError, String(detail)).toBeFalsy()
+				expectDegraded((listed.structuredContent as { items: ResourceDiscoveryItem[] }).items)
+				const searched = await mcp.client.callTool({ name: 'search_resources', arguments: { ...args, query: '22222222' } })
+				expect(searched.isError, String(detail)).toBeFalsy()
+				expectDegraded((searched.structuredContent as { items: ResourceDiscoveryItem[] }).items)
+			}
+		}
+		finally {
+			await mcp.close()
+		}
+	})
+})
