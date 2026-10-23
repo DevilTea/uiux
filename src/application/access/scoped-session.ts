@@ -14,7 +14,7 @@ import type { CaptureFormalEvidenceCommand, CaptureFormalEvidenceResult, FormalE
 import type { ProductKitChecksResult } from '../services/product-kit-checks'
 import type { AssessHandoffReadinessCommand, AssessHandoffReadinessResult, ExportHandoffCommand, ExportHandoffResult } from '../services/handoff-export'
 import type { DiffVersionsCommand, VersionDiffOutcome } from '../services/history-diff'
-import type { ReadVersionBlobOutcome, ReadVersionResourceOutcome } from '../services/history-preview'
+import type { ReadVersionBlobOutcome, ReadVersionResourceOutcome, ResolveVersionAssetsOutcome } from '../services/history-preview'
 import type { RestoreGuard, RestoreResourceVersionCommand, RestoreResourceVersionOutcome } from '../services/history-restore'
 import type { CreateCheckpointOutcome, DeleteCheckpointOutcome, ListVersionsOutcome, ListVersionsQuery, ReadVersionOutcome } from '../services/history-service'
 import type { CreateLocaleCommand, LocaleAuthoringResult, UpdateLocaleCommand } from '../services/locale-authoring'
@@ -152,6 +152,8 @@ export interface ScopedWorkspaceSession {
 	/** The version reads for Preview (`history.read`; never a system credential, Clause 01a11485-f978-767a-b977-33028aee7ae7). */
 	readVersionResource(id: string, kind: string, key: string): Promise<ReadVersionResourceOutcome | AccessRefusal>
 	readVersionBlob(digest: string): Promise<ReadVersionBlobOutcome | AccessRefusal>
+	/** A version frame's Asset resolution, one of the version reads for Preview (`history.read`). */
+	resolveVersionAssets(id: string, assetIds: readonly string[]): Promise<ResolveVersionAssetsOutcome | AccessRefusal>
 	/** Stamps the member actor and the transport's source; needs no edit lease (Rule 01a11a5e-0a0c-7d65-8d09-9a71a730ec61). */
 	createCheckpoint(command: Readonly<{ name: string; note?: string }>): Promise<CreateCheckpointOutcome | AccessRefusal>
 	deleteCheckpoint(id: string): Promise<DeleteCheckpointOutcome | AccessRefusal>
@@ -494,6 +496,10 @@ export function createScopedWorkspaceSession(
 		async readVersionBlob(digest) {
 			const denied = authorizeOperation(principal, 'readVersionForPreview')
 			return denied ? refusalFromScope(digest, denied) : app.readVersionBlob(digest)
+		},
+		async resolveVersionAssets(id, assetIds) {
+			const denied = authorizeOperation(principal, 'readVersionForPreview')
+			return denied ? refusalFromScope(id, denied) : app.resolveVersionAssets(id, assetIds)
 		},
 		async createCheckpoint(command) {
 			const denied = authorizeOperation(principal, 'createCheckpoint')

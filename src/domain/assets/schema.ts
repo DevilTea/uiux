@@ -108,9 +108,13 @@ export function validateAssetBinding(input: unknown, path = ''): ValidationResul
 	return v.finish<AssetBinding>(input)
 }
 
+/**
+ * Whether an asset-capable Catalog field accepts an Asset of `mediaType`: a listed media type, or a listed
+ * category, which is the top-level type of the media type (`image` for `image/png`, Clause
+ * 01a167f4-43a6-772b-9304-410708912c4e). Without a capability the field is not asset-capable at all.
+ */
 export function validateAssetBindingCompatibility(
 	mediaType: string,
-	category: string | undefined,
 	capability: AssetCapability | undefined,
 	path = '',
 ): ValidationResult<void> {
@@ -119,11 +123,18 @@ export function validateAssetBindingCompatibility(
 		v.issue('asset.field_not_capable', path, 'Only Adapter Catalog fields explicitly marked asset-capable accept $asset bindings.')
 		return v.finish<void>(undefined)
 	}
-	const mediaTypes = capability.acceptedMediaTypes ?? []
-	const categories = capability.acceptedCategories ?? []
-	if (!mediaTypes.includes(mediaType) && (category === undefined || !categories.includes(category)))
-		v.issue('asset.incompatible_media_type', path, 'Asset media type/category is outside this Catalog field’s accepted set.')
+	const essence = mediaTypeEssence(mediaType)
+	const category = assetMediaTypeCategory(mediaType)
+	const mediaTypes = (capability.acceptedMediaTypes ?? []).map(mediaTypeEssence)
+	const categories = (capability.acceptedCategories ?? []).map(entry => entry.trim().toLowerCase())
+	if (!mediaTypes.includes(essence) && !categories.includes(category))
+		v.issue('asset.incompatible_media_type', path, `Asset media type ${essence} (category ${category}) is outside this Catalog field’s accepted media types and categories.`)
 	return v.finish<void>(undefined)
+}
+
+/** An Asset's category: the top-level type of its media type, lowercased (`image` for `image/png`). */
+export function assetMediaTypeCategory(mediaType: string): string {
+	return mediaTypeEssence(mediaType).split('/', 1)[0]!
 }
 
 function mediaTypeEssence(mediaType: string): string {

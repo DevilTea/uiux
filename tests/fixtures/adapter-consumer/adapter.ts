@@ -10,6 +10,7 @@ import {
 	WIDGET_ID_ATTRIBUTE,
 	type AdapterApiVersion,
 	type AdapterAssetCapability,
+	type AdapterAssetValue,
 	type AdapterCatalog,
 	type AdapterManifest,
 	type AdapterProviderContext,
@@ -45,6 +46,8 @@ const mapping: I18nFieldMapping = { configField: 'label', resultProperty: 'label
 // The two Property names may be omitted; UIUX derives them from the authoring field.
 export const derivedMapping: I18nFieldMapping = { configField: 'captionKey' }
 const asset: AdapterAssetCapability = { acceptedMediaTypes: ['image/png'] }
+// What the Config field `icon` holds once UIUX has resolved its `$asset` binding.
+export const iconSource = (value: AdapterAssetValue): string => value.url
 const entry: AdapterWidgetCatalogEntry = { i18n: { fields: { label: mapping } }, assetFields: { icon: asset } }
 const catalog: AdapterCatalog = { widgets: { Label: entry } }
 const version: AdapterApiVersion = '1.0'

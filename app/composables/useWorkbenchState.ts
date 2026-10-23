@@ -244,8 +244,11 @@ export function createWorkbenchState() {
 			liveReadSequence.set(kind, sequence)
 			return () => liveReadSequence.get(kind) === sequence
 		}
+		// A View's diagnostics include its `$asset` bindings, checked against the Assets and the Adapters'
+		// Catalog (Rule 01a167f4-472f-7ae9-8ebb-3075216ad94c): an Asset or Product Kit change re-reads them.
+		const bindingInputsMoved = kinds.has('asset') || kinds.has('product-kit')
 		const read = <Value>(kind: string, load: () => Promise<Value | undefined>, apply: (value: Value) => void) => {
-			if (!kinds.has(kind)) return
+			if (!kinds.has(kind) && !(kind === 'view' && bindingInputsMoved)) return
 			const current = latest(kind)
 			reads.push(load().then((value) => { if (value !== undefined && current()) apply(value) }, () => undefined))
 		}
@@ -261,7 +264,7 @@ export function createWorkbenchState() {
 		await Promise.all(reads)
 		const id = selectedViewId.value
 		const listed = views.value.find(view => view.key === id)
-		if (id && kinds.has('view') && listed && listed.revision !== selectedView.value?.revision)
+		if (id && listed && ((kinds.has('view') && listed.revision !== selectedView.value?.revision) || bindingInputsMoved))
 			await loadSelectedView(onViewLoaded, { quiet: true })
 	}
 

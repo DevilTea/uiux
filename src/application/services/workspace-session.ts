@@ -107,7 +107,8 @@ import {
 	type VersionDiffOutcome,
 } from './history-diff'
 import { createHistoryRestoreService, type RestoreGuard, type RestoreResourceVersionCommand, type RestoreResourceVersionOutcome } from './history-restore'
-import { createHistoryPreviewService, type ReadVersionBlobOutcome, type ReadVersionResourceOutcome } from './history-preview'
+import { createViewAssetBindingCheck, type AssetCatalog } from './asset-bindings'
+import { createHistoryPreviewService, type ReadVersionBlobOutcome, type ReadVersionResourceOutcome, type ResolveVersionAssetsOutcome } from './history-preview'
 import {
 	createHistoryService,
 	type CheckpointBoundary,
@@ -220,6 +221,7 @@ export interface WorkspaceApplicationSession {
 	readVersion(id: string): Promise<ReadVersionOutcome>
 	readVersionResource(id: string, kind: string, key: string): Promise<ReadVersionResourceOutcome>
 	readVersionBlob(digest: string): Promise<ReadVersionBlobOutcome>
+	resolveVersionAssets(id: string, assetIds: readonly string[]): Promise<ResolveVersionAssetsOutcome>
 	restoreResourceVersion<R = never>(command: RestoreResourceVersionCommand, guard?: RestoreGuard<R>): Promise<RestoreResourceVersionOutcome | R>
 }
 
@@ -269,6 +271,8 @@ export function createWorkspaceApplicationSession(
 		...(options?.kitBuild ? { kitBuild: () => options.kitBuild!.status() } : {}),
 	}
 	const reviewAuthoring = createReviewAuthoringService(persistence, { adapterProvenance: adapterProvenanceSource })
+	// A View's diagnostics include those of its `$asset` bindings (Rule 01a167f4-472f-7ae9-8ebb-3075216ad94c).
+	const viewAssetBindings = createViewAssetBindingCheck(persistence, adapterProvenanceSource)
 	const assetAuthoring = createAssetAuthoringService(persistence)
 	const formalCapture = createFormalCaptureService(persistence, {
 		serverOrigin: options?.serverOrigin,
@@ -302,7 +306,7 @@ export function createWorkspaceApplicationSession(
 		catch { return undefined }
 	}
 
-	async function readPointResource(kind: PointResourceKind, key: string, roster?: () => Promise<ReadonlySet<string> | undefined>): Promise<PointResourceRead | undefined> {
+	async function readPointResource(kind: PointResourceKind, key: string, roster?: () => Promise<ReadonlySet<string> | undefined>, assetCatalog?: () => Promise<AssetCatalog>): Promise<PointResourceRead | undefined> {
 		if (!isValidPointResourceAddress({ kind, key })) return undefined
 		switch (kind) {
 			case 'workspace': {
@@ -313,7 +317,9 @@ export function createWorkspaceApplicationSession(
 			}
 			case 'view': {
 				const read = await persistence.views.readInspected(key)
-				return read && { kind, key, resource: read.resource, revision: read.revision, diagnostics: read.diagnostics }
+				if (!read) return undefined
+				const bindingDiagnostics = await viewAssetBindings.check(read.resource?.ir, assetCatalog)
+				return { kind, key, resource: read.resource, revision: read.revision, diagnostics: bindingDiagnostics.length > 0 ? [...read.diagnostics, ...bindingDiagnostics] : read.diagnostics }
 			}
 			case 'flow': {
 				const read = await persistence.flows.readInspected(key)
@@ -371,6 +377,9 @@ export function createWorkspaceApplicationSession(
 		const expanded = request.detail === 'expanded'
 		let defaultLocale: Promise<string | undefined> | undefined
 		const requestDefaultLocale = () => defaultLocale ??= readDefaultLocale()
+		// One Catalog read serves every View the listing checks (Rule 01a167f4-472f-7ae9-8ebb-3075216ad94c).
+		let assetCatalog: Promise<AssetCatalog> | undefined
+		const requestAssetCatalog = () => assetCatalog ??= viewAssetBindings.catalog()
 		const anchorTargets = new Map<string, Promise<ReviewAnchorTarget>>()
 		const anchorTarget = (viewId: string): Promise<ReviewAnchorTarget> => {
 			let target = anchorTargets.get(viewId)
@@ -383,7 +392,7 @@ export function createWorkspaceApplicationSession(
 				let thread: ReviewThread | undefined
 				let read: Exclude<PointResourceRead, { kind: 'workspace' }> | undefined
 				try {
-					const pointRead = await readPointResource(kind, key, requestRoster)
+					const pointRead = await readPointResource(kind, key, requestRoster, requestAssetCatalog)
 					if (!pointRead || pointRead.kind === 'workspace') continue
 					item = summarize(pointRead)
 					read = pointRead
@@ -525,6 +534,7 @@ export function createWorkspaceApplicationSession(
 		readVersion: historyService.readVersion,
 		readVersionResource: historyPreview.readVersionResource,
 		readVersionBlob: historyPreview.readVersionBlob,
+		resolveVersionAssets: historyPreview.resolveVersionAssets,
 		restoreResourceVersion: historyRestore.restoreResourceVersion,
 	}
 }

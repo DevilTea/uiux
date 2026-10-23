@@ -549,6 +549,7 @@
       "bundleInvalid": "預覽 Runtime 不完整。請重新建置 UIUX 後重新載入。",
       "bundleLoadFailed": "無法載入預覽 Runtime。",
       "localeLoadFailed": "無法載入主要 Locale。",
+      "assetsLoadFailed": "無法載入這個 View 使用的 Asset。",
       "viewNotInVersion": "這個版本中沒有這個 View。"
     }
   },
@@ -2286,7 +2287,8 @@
       "invalid_media_type": "請使用像 image/png 這樣的媒體類型。",
       "missing_reference": "參照了不存在的 Asset。",
       "signature_extension_mismatch": "檔案內容與副檔名不一致。",
-      "signature_media_type_mismatch": "檔案內容與媒體類型不一致。"
+      "signature_media_type_mismatch": "檔案內容與媒體類型不一致。",
+      "unresolved_reference": "無法為這次渲染載入所參照的 Asset。"
     },
     "i18n": {
       "config_field_conflict": "有設定欄位同時使用翻譯與直接設定的值。",
@@ -2344,6 +2346,7 @@
       "viewport_snapshot_mismatch": "檢視區尺寸在選擇後已變更。"
     },
     "capture": {
+      "asset_load_failed": "綁定的 Asset 圖片未能載入，因此沒有擷取這個情境。",
       "browser_launch_failed": "無法啟動擷取用的瀏覽器，請確認已安裝 Playwright。",
       "execution_failed": "擷取未完成。",
       "kit_build_not_ready": "正式擷取會等到 kit 建置就緒。若建置失敗，請先修正再重新啟動建置。"
@@ -2423,6 +2426,7 @@
       "duplicate_file": "版本把同一個檔案列在多項資源之下。",
       "invalid_resource_kind": "版本中的資源類型無效。",
       "invalid_resource_key": "版本中的資源識別碼無效。",
+      "resource_invalid": "無法讀取這個版本為此資源記錄的檔案。",
       "invalid_actor_type": "版本的作者類型無效。",
       "unstamped_actor": "版本沒有記錄是誰做的變更。",
       "invalid_system_actor": "版本的系統作者無效。",

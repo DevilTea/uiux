@@ -4,6 +4,7 @@ import { inspectPlugin, WidgetInspectionError } from '@deviltea/widget-core/insp
 import { createWidgetVueRenderer } from '@deviltea/widget-vue'
 
 import type { AdapterProviderContext } from '../adapter-entry'
+import type { AssetResolutionTable } from '../assets/bindings'
 import type { Diagnostic, JsonValue } from '../domain/validation'
 import type { ResolvedRenderContext } from '../domain/render-context/schema'
 import type { ViewResource } from '../domain/views/schema'
@@ -67,7 +68,8 @@ export type PreviewRuntimeStatus =
 	}>
 
 export interface PreviewRuntimeBridge {
-	updateView(view: ViewResource): void
+	/** A new View; `assets`, when given, replaces the resolution of the Assets it binds. */
+	updateView(view: ViewResource, assets?: AssetResolutionTable): void
 	updateContext(context: ResolvedRenderContext): void
 	updateLocales?(locales: ReadonlyMap<string, I18nResource> | Record<string, I18nResource>): void
 	/**
@@ -89,6 +91,11 @@ export interface PreviewRuntimeMountOptions {
 	context: ResolvedRenderContext
 	onStatusChange?: (status: PreviewRuntimeStatus) => void
 	locales?: ReadonlyMap<string, I18nResource> | Record<string, I18nResource>
+	/**
+	 * The server's resolution of every Asset the View binds (Clause 01a167f4-3e4e-7af1-b328-30fb52f7f4c5):
+	 * a bound Asset missing from it, or blocked in it, keeps the View from rendering.
+	 */
+	assets?: AssetResolutionTable
 	/** The Workspace `i18n.defaultLocale`: the fallback for keys missing from the requested locale. */
 	defaultLocale?: string
 	/** Receives at most one report per Widget Event arm; never any Event argument. */
@@ -519,6 +526,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 		const supportedTypes = new Set(bundle.pluginsByType.keys())
 		let currentView = options.view
 		let currentContext = options.context
+		let currentAssets: AssetResolutionTable = options.assets ?? {}
 
 		function checkViewSupport(view: ViewResource): readonly string[] {
 			const allTypes = collectWidgetTypesFromIr(view.ir)
@@ -545,6 +553,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 			view: currentView,
 			adapters: bundle,
 			context: currentContext,
+			assets: currentAssets,
 		})
 
 		if (!(controllerResult instanceof LiveViewRuntimeController)) {
@@ -720,10 +729,11 @@ export function createStandalonePreviewMount(input: Readonly<{
 		}
 
 		return {
-			updateView(newView: ViewResource) {
+			updateView(newView: ViewResource, assets?: AssetResolutionTable) {
 				if (disposed || phase === 'failed') return
 				if (newView.id !== currentView.id) eventObserver.clearArm()
 				currentView = newView
+				if (assets) currentAssets = assets
 				const nextUnsupported = checkViewSupport(currentView)
 				if (nextUnsupported.length > 0) {
 					reportStatus({
@@ -746,6 +756,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 					view: currentView,
 					adapters: bundle,
 					context: currentContext,
+					assets: currentAssets,
 				})
 
 				if (!(nextController instanceof LiveViewRuntimeController)) {
@@ -819,6 +830,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 					view: currentView,
 					adapters: bundle,
 					context: currentContext,
+					assets: currentAssets,
 				})
 				if (nextController instanceof LiveViewRuntimeController) {
 					activeController = nextController

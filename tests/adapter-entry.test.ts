@@ -125,6 +125,7 @@ describe('the public Adapter authoring entry @deviltea/uiux/adapter', () => {
 		expect(exported.map(symbol => symbol.name).sort()).toEqual([
 			'AdapterApiVersion',
 			'AdapterAssetCapability',
+			'AdapterAssetValue',
 			'AdapterCatalog',
 			'AdapterManifest',
 			'AdapterProviderContext',

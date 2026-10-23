@@ -1,6 +1,7 @@
 import type { WidgetSystemRuntime, WidgetSystemRuntimeDiagnostic } from '@deviltea/widget-core'
 import { inspectBlueprint } from '@deviltea/widget-core/inspection'
 
+import type { AssetResolutionTable } from '../assets/bindings'
 import type { Diagnostic } from '../domain/validation'
 import { validateResolvedRenderContext, type ResolvedRenderContext } from '../domain/render-context/schema'
 import type { VariantEntry, ViewResource } from '../domain/views/schema'
@@ -21,6 +22,7 @@ export class LiveViewRuntimeController {
 	private constructor(
 		private readonly view: ViewResource,
 		private readonly adapters: RuntimeAdapterBundle,
+		private readonly assets: AssetResolutionTable,
 		initial: Readonly<{ runtime: WidgetSystemRuntime; context: ResolvedRenderContext }>,
 	) {
 		this.currentRuntime = initial.runtime
@@ -31,10 +33,12 @@ export class LiveViewRuntimeController {
 		view: ViewResource
 		adapters: RuntimeAdapterBundle
 		context: ResolvedRenderContext
+		/** The server's resolution of the Assets the View binds (Clause 01a167f4-3e4e-7af1-b328-30fb52f7f4c5). */
+		assets?: AssetResolutionTable
 	}>): ViewRuntimeBuildResult | LiveViewRuntimeController {
 		const initial = buildViewRuntime(input)
 		if (initial.state === 'invalid') return initial
-		return new LiveViewRuntimeController(input.view, input.adapters, initial)
+		return new LiveViewRuntimeController(input.view, input.adapters, input.assets ?? {}, initial)
 	}
 
 	get runtime(): WidgetSystemRuntime { this.assertActive(); return this.currentRuntime }
@@ -79,7 +83,7 @@ export class LiveViewRuntimeController {
 		const nextContext: ResolvedRenderContext = variantName === undefined
 			? withoutVariant(this.currentContext)
 			: { ...this.currentContext, variantName }
-		const next = buildViewRuntime({ view: this.view, adapters: this.adapters, context: nextContext })
+		const next = buildViewRuntime({ view: this.view, adapters: this.adapters, assets: this.assets, context: nextContext })
 		if (next.state === 'invalid') return next
 		const previous = this.currentRuntime
 		this.currentRuntime = next.runtime
@@ -100,7 +104,7 @@ export class LiveViewRuntimeController {
 		if (this.currentContext.variantName !== undefined)
 			return [{ code: 'variant.live_apply_needs_base', path: '/variantName', message: 'A Variant is applied live only over the base state.' }]
 		const nextContext: ResolvedRenderContext = { ...this.currentContext, variantName }
-		const probe = buildViewRuntime({ view: this.view, adapters: this.adapters, context: nextContext })
+		const probe = buildViewRuntime({ view: this.view, adapters: this.adapters, assets: this.assets, context: nextContext })
 		if (probe.state === 'invalid') return probe.diagnostics
 		probe.runtime.dispose()
 		const variant = this.view.variants[variantName]!
@@ -144,6 +148,7 @@ export function buildViewRuntime(input: Readonly<{
 	view: ViewResource
 	adapters: RuntimeAdapterBundle
 	context: ResolvedRenderContext
+	assets?: AssetResolutionTable
 }>): ViewRuntimeBuildResult {
 	const viewValidation = validateViewResource(input.view)
 	if (!viewValidation.ok) return { state: 'invalid', diagnostics: viewValidation.diagnostics }
@@ -152,7 +157,7 @@ export function buildViewRuntime(input: Readonly<{
 	if (input.context.viewId !== input.view.id)
 		return { state: 'invalid', diagnostics: [{ code: 'render_context.view_mismatch', path: '/viewId', message: 'Render context viewId must match the View being executed.' }] }
 
-	const effectiveSource = buildEffectiveViewSource(input.view.ir, input.adapters.catalogByType)
+	const effectiveSource = buildEffectiveViewSource(input.view.ir, input.adapters.catalogByType, input.assets)
 	if (effectiveSource.state === 'invalid') return effectiveSource
 	const blueprint = input.adapters.system.createBlueprint(effectiveSource.source)
 	if (blueprint.status !== 'valid') return { state: 'invalid', diagnostics: blueprintDiagnostics(blueprint.diagnostics) }

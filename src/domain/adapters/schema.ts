@@ -16,13 +16,14 @@ import { sha256Identity } from '../artifacts/schema'
 import { canonicalJsonBytes } from '../canonical-json'
 import type {
 	AdapterAssetCapability,
+	AdapterAssetValue,
 	AdapterCatalog,
 	AdapterManifest as AuthoredAdapterManifest,
 	AdapterWidgetCatalogEntry,
 } from '../../adapter-entry'
 
 // The manifest and Catalog types are defined once, by the public Adapter authoring entry.
-export type { AdapterAssetCapability, AdapterCatalog, AdapterWidgetCatalogEntry }
+export type { AdapterAssetCapability, AdapterAssetValue, AdapterCatalog, AdapterWidgetCatalogEntry }
 
 /** Draft 2020-12 schemas may be objects or the standard boolean schemas. */
 export type JsonSchema2020_12 = JsonObject | boolean
