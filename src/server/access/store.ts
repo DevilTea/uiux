@@ -4,6 +4,7 @@ import { chmod, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir } from 
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
+import { predatesCurrentBoot } from '../../persistence/boot-staleness'
 import type { HostHistoryPaths } from '../../persistence/history/host-store'
 import { generateHint } from './credentials'
 import {
@@ -213,6 +214,11 @@ async function removeStaleLock(lockPath: string): Promise<boolean> {
 	try {
 		const stats = await lstat(lockPath)
 		if (stats.isSymbolicLink() || !stats.isFile()) throw unsafe(lockPath, 'the lock is not a regular file')
+		// No process from an earlier boot still runs, so its lock is stale whatever pid or bytes it records.
+		if (predatesCurrentBoot(stats)) {
+			await rm(lockPath, { force: true })
+			return true
+		}
 		owner = JSON.parse(await readFile(lockPath, 'utf8')) as { pid?: unknown }
 	}
 	catch (error) {

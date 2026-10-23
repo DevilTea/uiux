@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { link, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { link, mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -13,6 +13,7 @@ import { createWorkspaceApplicationSession } from '../src/application/services/w
 import { isFullUuid } from '../src/domain/validation'
 import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
 import { FileNativePersistence, PersistenceError, isPersistenceBusyError, persistenceBusyResult } from '../src/persistence'
+import { BOOT_STALENESS_TOLERANCE_MS, currentBootTimeMs } from '../src/persistence/boot-staleness'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { sendPersistenceBusyError } from '../src/server/persistence-busy'
 import { describeFetchError, isTransientError } from '../app/utils/fetch-error'
@@ -194,12 +195,38 @@ describe('persistence lock file (issue #321)', () => {
 		expect((await open(root, 120).views.read(VIEW_ID))?.resource).toMatchObject({ id: VIEW_ID })
 	})
 
-	it('refuses, and keeps, a lock whose owner record is unreadable', async () => {
+	it('refuses, and keeps, a lock written since boot whose owner record is unreadable', async () => {
 		const root = await seedWorkspace(CURRENT_WORKSPACE_SCHEMA_VERSION)
 		const lockPath = join(root, '.persistence.lock')
 		await writeFile(lockPath, '')
 		await expect(open(root, 120).views.read(VIEW_ID)).rejects.toMatchObject({ code: 'persistence.lock_busy', message: expect.stringContaining('unreadable') })
 		expect(await readFile(lockPath, 'utf8')).toBe('')
+	})
+
+	// Owner ruling 2026-10-23 (Discussion #241): a lock written before the current boot is stale whatever it records.
+	it.each([
+		['the pid of this live process', () => JSON.stringify({ pid: process.pid, token: randomUUID() })],
+		['pid 1, which answers EPERM or is alive', () => JSON.stringify({ pid: 1, token: randomUUID() })],
+		['no bytes at all', () => ''],
+		['a partial record', () => '{"pid":'],
+	])('clears a lock written before the current boot that records %s', async (_label, record) => {
+		const root = await seedWorkspace(CURRENT_WORKSPACE_SCHEMA_VERSION)
+		const lockPath = join(root, '.persistence.lock')
+		await writeFile(lockPath, record())
+		const beforeBoot = new Date(currentBootTimeMs() - 60_000)
+		await utimes(lockPath, beforeBoot, beforeBoot)
+		expect((await open(root, 120).views.read(VIEW_ID))?.resource).toMatchObject({ id: VIEW_ID })
+		expect(await readFile(lockPath).catch(error => error.code)).toBe('ENOENT')
+	})
+
+	it('keeps a live lock whose time lies within the tolerance before boot', async () => {
+		const root = await seedWorkspace(CURRENT_WORKSPACE_SCHEMA_VERSION)
+		const lockPath = join(root, '.persistence.lock')
+		await writeFile(lockPath, JSON.stringify({ pid: process.pid, token: randomUUID() }))
+		const nearBoot = new Date(currentBootTimeMs() - BOOT_STALENESS_TOLERANCE_MS / 2)
+		await utimes(lockPath, nearBoot, nearBoot)
+		await expect(open(root, 120).views.read(VIEW_ID)).rejects.toMatchObject({ code: 'persistence.lock_busy' })
+		expect((await stat(lockPath)).isFile()).toBe(true)
 	})
 })
 

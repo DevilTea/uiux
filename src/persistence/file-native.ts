@@ -15,6 +15,7 @@ import { isCanonicalLocaleFilename, isFullUuid, isJsonValue, isRecord, type Diag
 import { validateReviewThread, type ReviewThread } from '../domain/reviews/schema'
 import { validateViewResource, type ViewResource } from '../domain/views/schema'
 import { validateWorkspaceManifest, type WorkspaceManifest } from '../domain/workspace/schema'
+import { predatesCurrentBoot } from './boot-staleness'
 import { PersistenceError } from './errors'
 import { currentDesignWriteContext, type DesignWriteContext } from './history/write-context'
 import {
@@ -1020,12 +1021,12 @@ export class FileNativePersistence {
 	 * another owner holds it; the returned release removes the lock only while it still names this
 	 * token.
 	 *
-	 * The lock is a mutual-exclusion marker, not data, so its directory entries are never fsynced
-	 * (issue #321): a lock lost in a crash is released, which is right because its owner died in the
-	 * crash, and a removal lost in a crash leaves a record that `removeStaleLock` clears once its pid
-	 * is not a running process. Only the candidate's bytes are synced, before the `link`, so a lock
-	 * file that survives a crash is always a complete record, never one that `removeStaleLock`
-	 * refuses as unreadable. Canonical writes and transactions keep all their fsyncs.
+	 * The lock is a mutual-exclusion marker, not data, so nothing about it is fsynced (issue #321;
+	 * owner ruling 2026-10-23, https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19145490).
+	 * A lock lost in a crash is released, which is right because its owner died in the crash. A lock
+	 * file that does survive a crash, complete, empty or partial, was written before the current
+	 * boot, and `removeStaleLock` clears it whatever it records. Canonical writes and transactions
+	 * keep all their fsyncs.
 	 */
 	private async acquireLock(deadline: number): Promise<() => Promise<void>> {
 		await ensureSafeDirectory(this.root, this.layout.metadataDir)
@@ -1092,6 +1093,11 @@ export class FileNativePersistence {
 		}
 		if (!stat.isFile() || stat.isSymbolicLink())
 			throw pathRejected('Persistence lock must be a regular file and must not be a symbolic link.')
+		// No process from an earlier boot still runs, so its lock is stale whatever pid or bytes it records.
+		if (predatesCurrentBoot(stat)) {
+			await fs.rm(lockAbsolute, { force: true })
+			return true
+		}
 		let owner: { pid?: unknown; token?: unknown }
 		try { owner = JSON.parse(await fs.readFile(lockAbsolute, 'utf8')) as { pid?: unknown; token?: unknown } }
 		catch (cause) {
@@ -2374,15 +2380,14 @@ async function makeDirectorySynced(absoluteDirectory: string): Promise<void> {
 }
 
 /**
- * Writes a persistence lock candidate like {@link writeSyncedFile}, but without its directory fsync:
- * the candidate's bytes are synced, its directory entry is not (see `acquireLock`).
+ * Writes a persistence lock candidate exclusively, like {@link writeSyncedFile} but with no fsync of
+ * the file or its directory (see `acquireLock`). A missing Workspace root is still created durably.
  */
 async function writeLockCandidate(absolutePath: string, bytes: Uint8Array): Promise<void> {
 	await makeDirectorySynced(dirname(absolutePath))
 	const handle = await fs.open(absolutePath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
 	try {
 		await handle.writeFile(bytes)
-		await handle.sync()
 	}
 	finally {
 		await handle.close()

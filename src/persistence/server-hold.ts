@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises'
 import { hostname } from 'node:os'
 
 import { isRecord } from '../domain/validation'
+import { predatesCurrentBoot } from './boot-staleness'
 import { resolveWorkspacePath, type WorkspaceLayout } from './paths'
 
 /**
@@ -75,12 +76,21 @@ export async function acquireServerHold(root: string, options: Readonly<{ origin
 
 /**
  * Returns the hold of a server that is still running, or undefined when the Workspace is not held.
- * A hold whose process no longer exists on this host is stale and ignored. A hold recorded by
- * another host cannot be checked and is treated as active.
+ * A hold of this host whose process no longer exists, or that was written before this host's
+ * current boot, is stale and ignored. A hold recorded by another host cannot be checked and is
+ * treated as active.
  */
 export async function readActiveServerHold(root: string, layout: WorkspaceLayout): Promise<ServerHold | undefined> {
 	let text: string
-	try { text = await fs.readFile(resolveWorkspacePath(root, layout.serverHoldPath), 'utf8') }
+	let writtenAt: Readonly<{ mtimeMs: number }>
+	try {
+		const handle = await fs.open(resolveWorkspacePath(root, layout.serverHoldPath), 'r')
+		try {
+			writtenAt = await handle.stat()
+			text = await handle.readFile('utf8')
+		}
+		finally { await handle.close() }
+	}
 	catch (error) {
 		if (isNotFound(error)) return undefined
 		throw error
@@ -99,6 +109,8 @@ export async function readActiveServerHold(root: string, layout: WorkspaceLayout
 		...(typeof parsed.origin === 'string' ? { origin: parsed.origin } : {}),
 	}
 	if (hold.hostname !== hostname()) return hold
+	// No server from an earlier boot of this host still runs, whatever pid its hold records.
+	if (predatesCurrentBoot(writtenAt)) return undefined
 	return isProcessAlive(hold.pid) ? hold : undefined
 }
 
