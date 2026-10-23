@@ -8,6 +8,7 @@ import type { ResolvedRenderContext } from '../../domain/render-context/schema'
 import type { Diagnostic } from '../../domain/validation'
 import type { ViewResource } from '../../domain/views/schema'
 import type { FileNativePersistence } from '../../persistence'
+import { settledValue } from '../../persistence/file-native'
 import { CAPTURE_HARNESS_GLOBAL, type CaptureHarnessHooks } from '../../preview/capture-harness-hooks'
 import { resolveDefaultLocale, resolveDefaultThemeId, resolveDefaultViewport } from '../../preview/render-context-options'
 import { deriveWidgetTree, flattenWidgetTree } from '../../preview/widget-tree'
@@ -270,8 +271,9 @@ export function createProductKitChecksService(
 		const themeId = resolveDefaultThemeId(manifest)
 		const viewport = resolveDefaultViewport(manifest)
 		const contexts: CheckContext[] = []
-		for (const viewId of [...await persistence.views.discoverKeys()].sort()) {
-			const read = await persistence.views.readInspected(viewId)
+		// Every View is read under ONE shared lock (issue #322); readAllInspected yields them in key order.
+		for (const { key: viewId, read: settledView } of await persistence.views.readAllInspected()) {
+			const read = settledValue(settledView)
 			const view = read?.resource
 			if (!view) continue
 			const tree = deriveWidgetTree(view.ir)
