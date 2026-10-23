@@ -31,6 +31,7 @@ import {
 import type { ResolvedRenderContext } from '../../domain/render-context/schema'
 import type { Diagnostic, JsonObject } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
+import { settledValue } from '../../persistence/file-native'
 import { workspaceRefusalMessage } from '../../persistence/schema-policy'
 import {
 	allThemesSupported,
@@ -283,8 +284,11 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 
 		// 1. Process Flows -> transitively add target Views
 		const flowSnapshots = new Map<string, HandoffResourceSnapshot>()
-		for (const flowId of flowsToInclude) {
-			const flowRead = await persistence.flows.readInspected(flowId)
+		// Each kind is read under ONE shared lock, not one lock per resource (issue #322).
+		const flowIds = [...flowsToInclude]
+		const flowReads = await persistence.flows.readManyInspected(flowIds)
+		for (const [flowIndex, flowId] of flowIds.entries()) {
+			const flowRead = settledValue(flowReads[flowIndex]!)
 			if (!flowRead?.resource) {
 				rootsReadable = false
 				blockingDiagnostics.push({
@@ -324,8 +328,10 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		const usedWidgetTypes = new Set<string>()
 		const viewIrSources: unknown[] = []
 
-		for (const viewId of viewsToInclude) {
-			const viewRead = await persistence.views.readInspected(viewId)
+		const viewIds = [...viewsToInclude]
+		const viewReads = await persistence.views.readManyInspected(viewIds)
+		for (const [viewIndex, viewId] of viewIds.entries()) {
+			const viewRead = settledValue(viewReads[viewIndex]!)
 			if (!viewRead?.resource) {
 				rootsReadable = false
 				blockingDiagnostics.push({
@@ -436,8 +442,10 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		const assetSnapshots = new Map<string, HandoffResourceSnapshot>()
 		const referencedArtifacts = new Map<string, HandoffArtifactReference>()
 
-		for (const assetId of assetsToInclude) {
-			const assetRead = await persistence.assets.readInspected(assetId)
+		const assetIds = [...assetsToInclude]
+		const assetReads = await persistence.assets.readManyInspected(assetIds)
+		for (const [assetIndex, assetId] of assetIds.entries()) {
+			const assetRead = settledValue(assetReads[assetIndex]!)
 			if (!assetRead?.resource) {
 				rootsReadable = false
 				blockingDiagnostics.push({
@@ -478,8 +486,10 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 
 		// 4. Process Locales in closure
 		const localeSnapshots = new Map<string, HandoffResourceSnapshot>()
-		for (const locale of localesToInclude) {
-			const locRead = await persistence.locales.readInspected(locale)
+		const localeIds = [...localesToInclude]
+		const localeReads = await persistence.locales.readManyInspected(localeIds)
+		for (const [localeIndex, locale] of localeIds.entries()) {
+			const locRead = settledValue(localeReads[localeIndex]!)
 			if (locRead?.resource) {
 				if (locRead.diagnostics.length > 0) {
 					closureValid = false
@@ -525,7 +535,7 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		// Workspace-scoped thread (owner decision O1: the Workspace manifest is in every bundle, so a
 		// thread about the Workspace is in the closure of every export and never silently skipped).
 		const reviewSnapshots = new Map<string, HandoffResourceSnapshot>()
-		const allReviewIds = await persistence.reviews.discoverKeys()
+		const allReviews = await persistence.reviews.readAllInspected()
 		let reviewCoverageComplete = true
 		let reviewThreadCount = 0
 		let workspaceThreadCount = 0
@@ -533,8 +543,8 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		// every other kind is closed without a verified change and never counts as verified.
 		const resolvedReviewCounts = Object.fromEntries(REVIEW_RESOLUTIONS.map(kind => [kind, 0])) as Record<ReviewResolution, number>
 
-		for (const revId of allReviewIds) {
-			const revRead = await persistence.reviews.readInspected(revId)
+		for (const { key: revId, read: settledReview } of allReviews) {
+			const revRead = settledValue(settledReview)
 			if (!revRead?.resource) continue
 			const anchor = revRead.resource.anchor
 			const workspaceScoped = isWorkspaceAnchor(anchor)
@@ -580,8 +590,10 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		// Discover locale revisions independently of closure roots so a non-default
 		// capture locale can be validated before it is admitted into the closure.
 		const currentLocaleRevisions: Record<string, string> = {}
-		for (const locale of await persistence.locales.discover()) {
-			const localeRead = await persistence.locales.readInspected(locale)
+		const discoveredLocales = await persistence.locales.discover()
+		const discoveredLocaleReads = await persistence.locales.readManyInspected(discoveredLocales)
+		for (const [localeIndex, locale] of discoveredLocales.entries()) {
+			const localeRead = settledValue(discoveredLocaleReads[localeIndex]!)
 			if (localeRead?.resource) currentLocaleRevisions[locale] = localeRead.revision
 		}
 		const adapterDigests: AdapterGraphDigestCache = new Map()

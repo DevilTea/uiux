@@ -15,6 +15,7 @@ import {
 import type { Diagnostic, JsonObject } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
+import { settledValue } from '../../persistence/file-native'
 import type { KitBuildStatus } from '../ports/kit-build'
 import { ASSET_LOAD_FAILED_DIAGNOSTIC, ASSET_LOAD_FAILED_STATUS, captureHarnessScreenshot, openHarnessPreview, type HarnessPreview } from './capture-harness'
 import { missingDefaultLocaleError } from './default-locale-gate'
@@ -137,8 +138,10 @@ export function createFormalCaptureService(
 
 		const variantsByView = new Map<string, ReadonlySet<string>>()
 		const requestedViewIds = new Set(contexts.map(c => c.viewId))
-		for (const vId of requestedViewIds) {
-			const viewRead = await persistence.views.readInspected(vId)
+		const requestedIds = [...requestedViewIds]
+		const requestedReads = await persistence.views.readManyInspected(requestedIds)
+		for (const [index, vId] of requestedIds.entries()) {
+			const viewRead = settledValue(requestedReads[index]!)
 			if (viewRead?.resource) {
 				const variants = new Set(Object.keys(viewRead.resource.variants ?? {}))
 				variantsByView.set(vId, variants)
@@ -506,13 +509,16 @@ export function createFormalCaptureService(
 
 	async function viewRenderInputs(): Promise<readonly ViewRenderInput[]> {
 		const inputs: ViewRenderInput[] = []
-		for (const key of await persistence.views.discoverKeys()) {
+		// Every View is read under ONE shared lock (issue #322), not one lock per View.
+		for (const { key, read: settled } of await persistence.views.readAllInspected()) {
 			// A View file that is not valid JSON has no render input: skip it (as View discovery does) so
 			// the other Views and the Evidence list still load; its Evidence then reads as stale (View missing).
-			const read = await persistence.views.readInspected(key).catch((error: unknown) => {
-				if (error instanceof PersistenceError && error.code === 'persistence.invalid_json') return undefined
+			let read: Awaited<ReturnType<typeof persistence.views.readInspected>>
+			try { read = settledValue(settled) }
+			catch (error: unknown) {
+				if (error instanceof PersistenceError && error.code === 'persistence.invalid_json') continue
 				throw error
-			})
+			}
 			if (!read?.resource || !read.revision) continue
 			inputs.push({ key, revision: read.revision, renderInputDigest: renderInputDigest(read.resource) })
 		}

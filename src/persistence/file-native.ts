@@ -1228,6 +1228,25 @@ class ProcessLockGate {
 	}
 }
 
+/** The outcome of one read in a batch: its value, or the error that read threw. */
+export type SettledRead<Value> = Readonly<{ ok: true; value: Value } | { ok: false; error: unknown }>
+
+/** Runs the reads one after another (the order of the files read stays that of the keys) and captures each outcome. */
+async function settleEach<Key, Value>(keys: readonly Key[], read: (key: Key) => Promise<Value>): Promise<SettledRead<Value>[]> {
+	const settled: SettledRead<Value>[] = []
+	for (const key of keys) {
+		try { settled.push({ ok: true, value: await read(key) }) }
+		catch (error) { settled.push({ ok: false, error }) }
+	}
+	return settled
+}
+
+/** The value of a batched read, or the error that read threw (what a separate read would have thrown). */
+export function settledValue<Value>(settled: SettledRead<Value>): Value {
+	if (!settled.ok) throw settled.error
+	return settled.value
+}
+
 export class JsonResourceRepository<Key extends string, Resource> implements MutableResourceRepository<Key, Resource> {
 	constructor(
 		private readonly persistence: FileNativePersistence,
@@ -1238,18 +1257,20 @@ export class JsonResourceRepository<Key extends string, Resource> implements Mut
 	) {}
 
 	async discoverKeys(): Promise<readonly Key[]> {
-		return this.persistence.withReadLock(async () => {
-			const absolute = resolveWorkspacePath(this.persistence.root, this.discovery.directory)
-			await assertSafePath(this.persistence.root, `${this.discovery.directory}/.placeholder`, true)
-			let entries: import('node:fs').Dirent[]
-			try { entries = await fs.readdir(absolute, { withFileTypes: true }) }
-			catch (error) { if (isNotFound(error)) return []; throw error }
-			return entries
-				.filter(entry => entry.isFile() && entry.name.endsWith(this.discovery.suffix))
-				.map(entry => entry.name.slice(0, -this.discovery.suffix.length))
-				.filter(isFullUuid)
-				.sort() as Key[]
-		})
+		return this.persistence.withReadLock(async () => this.discoverKeysUnlocked())
+	}
+
+	private async discoverKeysUnlocked(): Promise<readonly Key[]> {
+		const absolute = resolveWorkspacePath(this.persistence.root, this.discovery.directory)
+		await assertSafePath(this.persistence.root, `${this.discovery.directory}/.placeholder`, true)
+		let entries: import('node:fs').Dirent[]
+		try { entries = await fs.readdir(absolute, { withFileTypes: true }) }
+		catch (error) { if (isNotFound(error)) return []; throw error }
+		return entries
+			.filter(entry => entry.isFile() && entry.name.endsWith(this.discovery.suffix))
+			.map(entry => entry.name.slice(0, -this.discovery.suffix.length))
+			.filter(isFullUuid)
+			.sort() as Key[]
 	}
 
 	async read(key: Key): Promise<RevisionedResourceRead<Resource> | undefined> {
@@ -1266,13 +1287,33 @@ export class JsonResourceRepository<Key extends string, Resource> implements Mut
 
 
 	async readInspected(key: Key): Promise<InspectedResource<Resource> | undefined> {
+		return this.persistence.withReadLock(async () => this.readInspectedUnlocked(key))
+	}
+
+	/**
+	 * Reads the given keys under ONE shared lock, in the given order (issue #322): one lock acquisition
+	 * instead of one per key. A key whose read throws (for example invalid JSON) is reported in its own
+	 * entry, so the caller decides per key what an error means, exactly as a separate `readInspected` did.
+	 */
+	async readManyInspected(keys: readonly Key[]): Promise<readonly SettledRead<InspectedResource<Resource> | undefined>[]> {
+		return this.persistence.withReadLock(async () => settleEach(keys, key => this.readInspectedUnlocked(key)))
+	}
+
+	/** Discovers every key and reads each, under ONE shared lock, in key order (see {@link readManyInspected}). */
+	async readAllInspected(): Promise<readonly Readonly<{ key: Key; read: SettledRead<InspectedResource<Resource> | undefined> }>[]> {
 		return this.persistence.withReadLock(async () => {
-			const path = this.pathFor(key)
-			const bytes = await this.persistence.readOptionalBytesUnlocked(path)
-			if (!bytes) return undefined
-			const resource = parseJsonBytes(bytes, path)
-			return { resource: resource as Resource, revision: revisionForBytes(bytes), diagnostics: this.validate(resource, basename(path)) }
+			const keys = await this.discoverKeysUnlocked()
+			const reads = await settleEach(keys, key => this.readInspectedUnlocked(key))
+			return keys.map((key, index) => ({ key, read: reads[index]! }))
 		})
+	}
+
+	private async readInspectedUnlocked(key: Key): Promise<InspectedResource<Resource> | undefined> {
+		const path = this.pathFor(key)
+		const bytes = await this.persistence.readOptionalBytesUnlocked(path)
+		if (!bytes) return undefined
+		const resource = parseJsonBytes(bytes, path)
+		return { resource: resource as Resource, revision: revisionForBytes(bytes), diagnostics: this.validate(resource, basename(path)) }
 	}
 
 	async create(key: Key, resource: Resource): Promise<ResourceRevision> {
@@ -1549,13 +1590,20 @@ export class LocaleFileRepository implements MutableResourceRepository<string, I
 
 
 	async readInspected(locale: string): Promise<InspectedResource<I18nResource> | undefined> {
-		return this.persistence.withReadLock(async () => {
-			const path = localeRelativePath(locale)
-			const bytes = await this.readExactBytesUnlocked(locale)
-			if (!bytes) return undefined
-			const resource = parseJsonBytes(bytes, path)
-			return { resource: resource as I18nResource, revision: revisionForBytes(bytes), diagnostics: validateI18nResource(resource, basename(path)).diagnostics }
-		})
+		return this.persistence.withReadLock(async () => this.readInspectedUnlocked(locale))
+	}
+
+	/** Reads the given Locales under ONE shared lock, in the given order, each with its own outcome (issue #322). */
+	async readManyInspected(locales: readonly string[]): Promise<readonly SettledRead<InspectedResource<I18nResource> | undefined>[]> {
+		return this.persistence.withReadLock(async () => settleEach(locales, locale => this.readInspectedUnlocked(locale)))
+	}
+
+	private async readInspectedUnlocked(locale: string): Promise<InspectedResource<I18nResource> | undefined> {
+		const path = localeRelativePath(locale)
+		const bytes = await this.readExactBytesUnlocked(locale)
+		if (!bytes) return undefined
+		const resource = parseJsonBytes(bytes, path)
+		return { resource: resource as I18nResource, revision: revisionForBytes(bytes), diagnostics: validateI18nResource(resource, basename(path)).diagnostics }
 	}
 
 	async discover(): Promise<readonly string[]> {
@@ -1712,6 +1760,11 @@ export class AuthoredAssetFileRepository implements MutableResourceRepository<st
 
 	async readInspected(id: string): Promise<AuthoredAssetInspection | undefined> {
 		return this.persistence.withReadLock(async () => this.readAssetUnlocked(id))
+	}
+
+	/** Reads the given Assets under ONE shared lock, in the given order, each with its own outcome (issue #322). */
+	async readManyInspected(ids: readonly string[]): Promise<readonly SettledRead<AuthoredAssetInspection | undefined>[]> {
+		return this.persistence.withReadLock(async () => settleEach(ids, id => this.readAssetUnlocked(id)))
 	}
 
 	async create(id: string, resource: AuthoredAssetResource): Promise<ResourceRevision> {
