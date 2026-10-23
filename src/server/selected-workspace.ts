@@ -16,7 +16,7 @@ import { createWorkspaceAccessPresetsReader } from './access/workspace-presets'
 import { createEventStreamHub, type EventStreamHub } from './event-stream'
 import { createHistoryStoreFactory, type HistoryStoreFactory } from './history-stores'
 import { createKitBuildRunner, registerKitBuildRunner, type KitBuildRunner } from './kit-build'
-import { checkAdapterSetRuntime, getSelectedWorkspacePreviewBundle, selectedWorkspaceThemeSupport } from './workspace-adapters'
+import { checkAdapterSetRuntime, getSelectedWorkspacePreviewBundle, pinnedAdapterContentDigest, resolveSelectedWorkspaceAdapterList, selectedWorkspaceThemeSupport } from './workspace-adapters'
 
 export type SelectedWorkspaceServerRuntime = Readonly<{
 	root: string
@@ -103,6 +103,12 @@ export function createSelectedWorkspaceServerRuntime(
 		checkAdapterSet: set => checkAdapterSetRuntime(selectedRoot, persistence.layout, set),
 		// Formal capture refuses a theme the current Adapter resolution does not support (Rule 01a11add-f46d-7e92-8f5a-9d10dba6473d).
 		adapterThemeSupport: () => selectedWorkspaceThemeSupport(selectedRoot, persistence.layout),
+		// Formal capture, Evidence freshness and Handoff export resolve the Adapters as the Preview does (Rule 01a167bf-1f93-78b7-9045-6562c20f5a42).
+		adapterResolution: {
+			resolve: adapters => resolveSelectedWorkspaceAdapterList(selectedRoot, persistence.layout, adapters),
+			pinnedContentDigest: pinnedAdapterContentDigest,
+			outputGeneration: () => kitBuild.outputVersion(),
+		},
 		// Review reads mark an actor whose member left the roster (Rule 01a11485-f185-7c23-8f2a-e045a279cd27).
 		memberIds: async () => {
 			const service = await access()
