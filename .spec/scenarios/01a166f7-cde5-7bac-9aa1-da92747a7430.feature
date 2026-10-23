@@ -1,9 +1,9 @@
 Feature: A capability failure shows the inline Preview diagnostic
   # Source: issue #111 (https://github.com/DevilTea/uiux/issues/111). Decisions behind the demonstrated Rules: #2 c15 d1, d3 https://github.com/DevilTea/uiux/discussions/2#discussioncomment-18654094; #2 c32 d1 https://github.com/DevilTea/uiux/discussions/2#discussioncomment-18655698.
-  # Test: code@1b1b64c `tests/preview-failure-browser.test.ts#L134` "shows a capability failure inline, and Retry Preview recovers through one explicit retry", whose first part forces the capability failure and reads the diagnostic and its details. https://github.com/DevilTea/uiux/blob/1b1b64c95211a1aaee8ca0c5433f311e4f9f2624/tests/preview-failure-browser.test.ts#L134
-  # Test: code@1b1b64c `tests/preview-failure-diagnostic.test.ts#L32` "keeps the reason of a capability failure, correlated with the session and the failed generation". https://github.com/DevilTea/uiux/blob/1b1b64c95211a1aaee8ca0c5433f311e4f9f2624/tests/preview-failure-diagnostic.test.ts#L32
-  # Test: code@1b1b64c `tests/preview-failure-diagnostic.test.ts#L105` "takes the title from the category and the body from a recognized reason". https://github.com/DevilTea/uiux/blob/1b1b64c95211a1aaee8ca0c5433f311e4f9f2624/tests/preview-failure-diagnostic.test.ts#L105
-  # Status: built as of 1b1b64c for the failures the Workbench derives; see the Implementation gaps entry of 01a11687-375e-7667-b8f1-59389fdd9780 in its owner.
+  # Test: code@c15227e `tests/preview-failure-browser.test.ts#L138` "shows a capability failure inline, and Retry Preview recovers through one explicit retry", whose first part forces the capability failure and reads the diagnostic and its details. https://github.com/DevilTea/uiux/blob/c15227ed7777cda6a979a8b5f212b905aac5f255/tests/preview-failure-browser.test.ts#L138
+  # Test: code@c15227e `tests/preview-failure-diagnostic.test.ts#L34` "keeps the reason of a capability failure, correlated with the session and the failed generation". https://github.com/DevilTea/uiux/blob/c15227ed7777cda6a979a8b5f212b905aac5f255/tests/preview-failure-diagnostic.test.ts#L34
+  # Test: code@c15227e `tests/preview-failure-diagnostic.test.ts#L117` "takes the title from the category and the body from a recognized reason". https://github.com/DevilTea/uiux/blob/c15227ed7777cda6a979a8b5f212b905aac5f255/tests/preview-failure-diagnostic.test.ts#L117
+  # Status: built as of c15227e for the failures the Workbench derives; see the Implementation gaps entry of 01a11687-375e-7667-b8f1-59389fdd9780 in its owner.
   @spec:id:01a166f7-cde5-76e1-9565-e94c6094f4d7
   @spec:demonstrates:01a11687-375e-7667-b8f1-59389fdd9780
   @spec:demonstrates:01a11687-37a0-77bb-a857-5f7804b7c306
