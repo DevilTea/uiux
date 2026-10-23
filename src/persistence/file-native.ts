@@ -1853,16 +1853,17 @@ export class ImmutableArtifactStore {
 	/**
 	 * Every artifact that is a JSON object or array within `maxBytes`, read under ONE shared lock so
 	 * the listing is a single snapshot and the cross-process lock is taken once, not once per artifact
-	 * (issue #318). Sorted by identity. With `tolerateErrors`, an artifact that cannot be read is
+	 * (issue #318). Sorted by identity. `select` maps each parsed value to what the caller keeps (`undefined` drops it), so unwanted artifacts, such as Checkpoint version blobs, are not held until the loop ends. With `tolerateErrors`, an artifact that cannot be read is
 	 * skipped; otherwise its error is thrown, as `readCandidateJson` does.
 	 */
-	async readAllCandidateJson<T = unknown>(options: Readonly<{ maxBytes?: number; tolerateErrors?: boolean }> = {}): Promise<readonly Readonly<{ identity: string; value: T }>[]> {
+	async readAllCandidateJson<T = unknown, R = T>(options: Readonly<{ maxBytes?: number; tolerateErrors?: boolean; select?: (value: T) => R | undefined }> = {}): Promise<readonly Readonly<{ identity: string; value: R }>[]> {
 		return this.persistence.withReadLock(async () => {
-			const found: { identity: string; value: T }[] = []
+			const found: { identity: string; value: R }[] = []
 			for (const identity of await this.listIdentitiesUnlocked()) {
-				let value: T | undefined
+				let value: R | undefined
 				try {
-					value = await this.readCandidateJsonUnlocked<T>(identity, options.maxBytes ?? 512 * 1024)
+					const parsed = await this.readCandidateJsonUnlocked<T>(identity, options.maxBytes ?? 512 * 1024)
+					value = parsed === undefined || parsed === null ? undefined : options.select ? options.select(parsed) : parsed as unknown as R
 				}
 				catch (error) {
 					if (options.tolerateErrors) continue

@@ -1,7 +1,7 @@
 import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import { createFormalCaptureService } from '../src/application/services/formal-capture'
@@ -10,9 +10,9 @@ import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } fro
 import { createCurrentWorkspace } from './support/workspace-layout'
 
 /**
- * The Evidence list (issue #318) reads every artifact under one shared persistence lock, so one
- * listing is a single snapshot: a multi-artifact write that starts after the listing began is not
- * seen half applied (or at all), and a write that finished before it is seen whole.
+ * The Evidence list (issue #318) reads every artifact under ONE shared persistence lock. The first test
+ * is the regression guard for the cost (one cross-process lock acquisition per listing, not one per
+ * artifact); the others check the snapshot behavior, which the per-artifact locking also satisfied.
  */
 const roots: string[] = []
 
@@ -52,8 +52,23 @@ async function writeBatch(persistence: FileNativePersistence, viewId: string, co
 	})
 }
 
-describe('Evidence list snapshot', () => {
-	it('lists only formal captures, sorted by digest, skipping blobs', async () => {
+describe('Evidence list locking and snapshot', () => {
+	it('acquires the cross-process lock once for a listing, whatever the number of artifacts', async () => {
+		const persistence = await makeWorkspace()
+		await writeBatch(persistence, 'v1', 12)
+		const acquire = vi.spyOn(persistence as unknown as { acquireLock: (deadline: number) => Promise<() => Promise<void>> }, 'acquireLock')
+		const service = createFormalCaptureService(persistence)
+
+		expect(await service.listEvidence()).toHaveLength(12)
+		expect(acquire).toHaveBeenCalledTimes(1)
+
+		acquire.mockClear()
+		const kept = await persistence.artifacts.readAllCandidateJson<{ kind?: string }, string>({ select: value => value.kind })
+		expect(kept).toHaveLength(12)
+		expect(acquire).toHaveBeenCalledTimes(1)
+	})
+
+	it('lists only formal captures (select filters inside the read), sorted by digest, skipping blobs', async () => {
 		const persistence = await makeWorkspace()
 		await writeBatch(persistence, 'v1', 3)
 		const items = await createFormalCaptureService(persistence).listEvidence()

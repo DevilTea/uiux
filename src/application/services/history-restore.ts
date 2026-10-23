@@ -1,5 +1,6 @@
 import { validateAssetContentFiles, validateAssetContentMetadata, validateAssetMetadata, type AuthoredAsset, type AuthoredAssetResource } from '../../domain/assets/schema'
-import { validateFormalEvidenceRecord } from '../../domain/evidence/schema'
+import type { FormalEvidenceRecord } from '../../domain/evidence/schema'
+import { formalCaptureRecordOf } from './formal-capture'
 import { validateFlowResource, type FlowResource } from '../../domain/flows/schema'
 import { isRestorableResourceKind, RESTORABLE_RESOURCE_KINDS, type RestorableResourceKind } from '../../domain/history/constants'
 import { isDiffableResourceKind } from '../../domain/history/diff'
@@ -253,9 +254,8 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 	/** The formal Evidence records, read as `listEvidence` reads them (all artifacts under one shared lock). */
 	async function readEvidence(): Promise<readonly ImpactEvidence[]> {
 		const evidence: ImpactEvidence[] = []
-		for (const { identity: digest, value: candidate } of await persistence.artifacts.readAllCandidateJson({ tolerateErrors: true })) {
-			const validation = validateFormalEvidenceRecord(candidate)
-			if (validation.ok && validation.value.kind === 'formal_capture') evidence.push({ digest, record: validation.value })
+		for (const { identity: digest, value: record } of await persistence.artifacts.readAllCandidateJson<unknown, FormalEvidenceRecord>({ tolerateErrors: true, select: formalCaptureRecordOf })) {
+			evidence.push({ digest, record })
 		}
 		return evidence
 	}
