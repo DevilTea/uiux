@@ -298,6 +298,7 @@ export function createWorkspaceApplicationSession(
 		serverOrigin: options?.serverOrigin,
 		captureCookie: options?.captureCookie,
 		...(options?.kitBuild ? { kitBuild: () => options.kitBuild!.status() } : {}),
+		...(options?.adapterThemeSupport ? { themeSupport: options.adapterThemeSupport } : {}),
 	})
 
 	// Best effort: an unreadable roster leaves the actors unflagged; it never fails a Review read.
