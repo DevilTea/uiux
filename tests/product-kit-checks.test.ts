@@ -316,6 +316,35 @@ describe('Product Kit Checks', () => {
 		})
 	}, 60_000)
 
+	it('reports every render context not checked with render_context.incompatible_theme when the default theme is unsupported (issue #283)', async () => {
+		let opened = 0
+		const outcome = await directService({
+			// The fixture Workspace's registry holds light and dark, so its default theme is one of them.
+			themeSupport: async () => ({ unsupportedThemeIds: ['dark', 'light'] }),
+			openPreview: async (...args) => {
+				opened += 1
+				return openHarnessPreview(...args)
+			},
+		}).run({ baseUrl: server.origin })
+		expect(opened).toBe(0)
+		expect(outcome).toMatchObject({
+			status: 'incomplete',
+			checks: {
+				repeat_capture: { state: 'incomplete', checked: 0, unchecked: 6, diagnostics: [{ code: 'render_context.incompatible_theme' }] },
+				live_versus_fresh: { state: 'incomplete', checked: 0, unchecked: 2, diagnostics: [{ code: 'render_context.incompatible_theme' }] },
+				props_emits: { state: 'completed' },
+			},
+		})
+		expect((outcome as typeof result).findings.filter(finding => finding.check === 'repeat_capture' || finding.check === 'live_versus_fresh')).toEqual([])
+	}, 60_000)
+
+	it('renders the render contexts as before when the default theme is supported (issue #283)', async () => {
+		const outcome = await directService({ themeSupport: async () => ({ unsupportedThemeIds: ['no-such-theme'] }), maxCheckedContexts: 1 }).run({ baseUrl: server.origin })
+		expect(outcome).toMatchObject({
+			checks: { repeat_capture: { checked: 1, unchecked: 5, diagnostics: [{ code: 'checks.limit_reached' }] } },
+		})
+	}, 60_000)
+
 	it('leaves the props and emits check incomplete for a caller without product-kit.source.read', async () => {
 		const outcome = await directService({ now: lateClock() }).run({ baseUrl: server.origin, readSource: false })
 		expect(outcome).toMatchObject({ checks: { props_emits: { state: 'incomplete', checked: 0, unchecked: 6, diagnostics: [{ code: 'auth.scope_denied', path: '/components' }] } } })

@@ -4,7 +4,7 @@ import { locateKitProject, type KitProject } from '../../adapters/kit-registry'
 import { readKitSourceFile } from '../../adapters/kit-source-files'
 import { declaredInterface, INTERFACE_SCRIPT_EXTENSIONS } from '../../domain/product-kit/component-interface'
 import { validateProductKit, type ProductKit } from '../../domain/product-kit/schema'
-import type { ResolvedRenderContext } from '../../domain/render-context/schema'
+import { incompatibleThemeDiagnostic, type ResolvedRenderContext } from '../../domain/render-context/schema'
 import type { Diagnostic } from '../../domain/validation'
 import type { ViewResource } from '../../domain/views/schema'
 import type { FileNativePersistence } from '../../persistence'
@@ -15,6 +15,7 @@ import { deriveWidgetTree, flattenWidgetTree } from '../../preview/widget-tree'
 import type { KitBuildStatus } from '../ports/kit-build'
 import { ASSET_LOAD_FAILED_DIAGNOSTIC, captureHarnessScreenshot, HARNESS_LOAD_TIMEOUT_MS, openHarnessPreview, withStepTimeout, type HarnessCookie } from './capture-harness'
 import { missingDefaultLocaleError } from './default-locale-gate'
+import type { AdapterThemeSupportSource } from './formal-capture'
 import type { ProductKitRead } from './product-kit-authoring'
 
 /**
@@ -195,6 +196,8 @@ export function createProductKitChecksService(
 		serverOrigin?: string
 		captureCookie?: () => HarnessCookie | undefined
 		kitBuild?: () => KitBuildStatus
+		/** The active Adapter set's theme support, the check Settings, live Preview and formal capture use; absent means every theme is supported. */
+		themeSupport?: AdapterThemeSupportSource
 		/** Test seam: the clock the run deadline reads before each render context. */
 		now?: () => number
 		/** Test seam: {@link RUN_DEADLINE_MS}. */
@@ -386,7 +389,23 @@ export function createProductKitChecksService(
 			}
 			return
 		}
-		const contexts = await renderContexts()
+		const allContexts = await renderContexts()
+		// Rule 01a11a5a-566b-70b1-b000-2918519c0d19: a context whose theme the active Adapters do not
+		// support is reported not checked (`render_context.incompatible_theme`), never rendered.
+		const unsupportedThemes = new Set((await options.themeSupport?.())?.unsupportedThemeIds ?? [])
+		const contexts = allContexts.filter(target => !unsupportedThemes.has(target.context.themeId))
+		const skipped = allContexts.length - contexts.length
+		if (skipped > 0) {
+			// One diagnostic per check, the same for every context: they all render at the default theme.
+			const diagnostic = incompatibleThemeDiagnostic(allContexts.find(target => unsupportedThemes.has(target.context.themeId))!.context.themeId)
+			c1.unchecked += skipped
+			c1.diagnostics.push(diagnostic)
+			const skippedVariants = allContexts.filter(target => unsupportedThemes.has(target.context.themeId) && target.context.variantName !== undefined).length
+			if (skippedVariants > 0) {
+				c2.unchecked += skippedVariants
+				c2.diagnostics.push(diagnostic)
+			}
+		}
 		if (contexts.length === 0) return
 		let browser: Browser
 		try {
