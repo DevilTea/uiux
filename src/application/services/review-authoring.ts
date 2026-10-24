@@ -30,7 +30,7 @@ import type { Decision, DecisionActor, DecisionHistoryEntry, DecisionOutcome, De
 import type { ViewResource } from '../../domain/views/schema'
 import { validateFormalEvidenceRecord } from '../../domain/evidence/schema'
 import { renderInputDigest } from '../../domain/evidence/render-input-digest'
-import { isCompleteEvidenceForRenderInput, unknownProvenanceFreshness, type EvidenceStalenessContext } from '../../domain/evidence/staleness'
+import { isCompleteEvidenceForRenderInput, provenanceFreshness, type EvidenceStalenessContext } from '../../domain/evidence/staleness'
 import { adapterFreshnessContext } from '../../domain/evidence/adapter-provenance'
 import { productKitFreshnessContext } from '../../domain/product-kit/provenance'
 import { readCurrentAdapterProvenance, type AdapterProvenanceSource } from './adapter-provenance'
@@ -536,15 +536,23 @@ export function createReviewAuthoringService(persistence: FileNativePersistence,
 						})
 						continue
 					}
-					// Rule 01a11686-8d71-79f5-bb10-0c74649586ea: a capture whose freshness is unknown (it records
-					// no Adapter or no Product Kit provenance, or the current one cannot be computed) never
-					// satisfies a submission, so marking ready is refused until it is recaptured.
-					const unknown = unknownProvenanceFreshness(record.value, await provenanceContext())
-					if (unknown) {
+					// Rules 01a11686-8d71-… and 01a11544-558b-… (Discussion #241 ruling 4): a capture stale because an
+					// Adapter or the Product Kit changed since capture is not current, and one of unknown freshness
+					// (no recorded provenance, or the current one cannot be computed) never satisfies a submission;
+					// both are refused until recaptured. The two codes are non-normative.
+					const provenance = provenanceFreshness(record.value, await provenanceContext())
+					if (provenance?.unknown) {
 						evidenceDiagnostics.push({
 							code: 'review.formal_evidence_freshness_unknown',
 							path: `${path}/evidence`,
-							message: `Formal evidence ${validation.value.evidence} has unknown freshness, so it cannot be cited: ${unknown.reason}.`,
+							message: `Formal evidence ${validation.value.evidence} has unknown freshness, so it cannot be cited: ${provenance.reason}.`,
+						})
+					}
+					else if (provenance) {
+						evidenceDiagnostics.push({
+							code: 'review.formal_evidence_not_current',
+							path: `${path}/evidence`,
+							message: `Formal evidence ${validation.value.evidence} is stale and cannot be cited: ${provenance.reason}.`,
 						})
 					}
 				}

@@ -580,17 +580,25 @@ describe('mark ready follows the render-input digest and the known change domain
 		expect(body(refused).diagnostics?.map(item => [item.code, item.path])).toEqual([['review.formal_evidence_freshness_unknown', '/evidenceRefs/0/evidence']])
 	})
 
-	// Pins current behavior: Rule 01a11544-558b-… asks only for the current render-input digest, so a
-	// capture made stale by an Adapter change (Rule 01a115cd-c6de-…) still satisfies Submit for review.
-	// Whether Submit should refuse it is left to its own proposal (PR #301 review).
-	it('accepts a capture whose Adapters changed while its render-input digest still matches', async () => {
+	// Rule 01a11544-558b-… (Discussion #241 ruling 4): a capture made stale because an Adapter or the
+	// Product Kit changed since capture is refused even while its render-input digest still matches.
+	it('refuses a capture whose Adapters or Product Kit changed since capture, and accepts a fresh one', async () => {
 		const ctx = await session()
 		const revision = await widgetThread(ctx)
 		const current = await currentCaptureProvenance(ctx.persistence)
 		expect(current.adapters).toEqual([])
+		expect(current.productKit).toBeDefined()
 		const otherAdapter = { moduleSpecifier: './adapters/removed.mjs', adapterId: 'removed', apiVersion: '1', contentDigest: `sha256:${'a'.repeat(64)}` }
-		const captured = await formal(ctx, VIEW_ID, ctx.viewRevision, undefined, { ...current, adapters: [otherAdapter] })
-		const ready = await markReady(ctx, revision, ctx.viewRevision, captured)
+		const staleKit = { ...current.productKit!, dataDigest: `sha256:${'b'.repeat(64)}` }
+		for (const stale of [{ ...current, adapters: [otherAdapter] }, { ...current, productKit: staleKit }]) {
+			const captured = await formal(ctx, VIEW_ID, ctx.viewRevision, undefined, stale)
+			const refused = await markReady(ctx, revision, ctx.viewRevision, captured)
+			expect(refused.status).toBe(400)
+			expect(body(refused).diagnostics?.map(item => [item.code, item.path])).toEqual([['review.formal_evidence_not_current', '/evidenceRefs/0/evidence']])
+		}
+		expect((await read(ctx, WIDGET_REVIEW_ID)).resource.submissions).toEqual([])
+		const fresh = await formal(ctx, VIEW_ID, ctx.viewRevision)
+		const ready = await markReady(ctx, revision, ctx.viewRevision, fresh)
 		expect(ready.status, JSON.stringify(ready.body)).toBe(200)
 	})
 
