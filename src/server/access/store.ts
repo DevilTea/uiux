@@ -2,10 +2,10 @@ import { createHash, randomBytes } from 'node:crypto'
 import { constants, realpathSync, type Stats } from 'node:fs'
 import { chmod, link, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir } from 'node:fs/promises'
 import { homedir, hostname } from 'node:os'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import { currentBootId, isFromEarlierBoot, recordedOnAnotherHost } from '../../persistence/boot-staleness'
-import { HardLinkUnsupportedError, isLinkUnsupported, readJudgedLock, removeJudgedLock, type JudgedLock } from '../../persistence/stale-lock'
+import { HardLinkUnsupportedError, isLinkUnsupported, readJudgedLock, removeJudgedLock, sweepLockLeftoversOccasionally, type JudgedLock } from '../../persistence/stale-lock'
 import type { HostHistoryPaths } from '../../persistence/history/host-store'
 import { generateHint } from './credentials'
 import {
@@ -200,6 +200,7 @@ export async function acquireLock(lockPath: string, waitMs: number = LOCK_WAIT_M
 	let retriedPastDeadline = false
 	for (;;) {
 		if (await publishLock(lockPath, token, record)) {
+			await sweepLockLeftoversOccasionally({ directory: dirname(lockPath), lockName: basename(lockPath), prefix: '.access-lock-', bootId })
 			return async () => {
 				try {
 					const owner = JSON.parse(await readFile(lockPath, 'utf8')) as { token?: unknown }

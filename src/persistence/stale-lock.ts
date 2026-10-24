@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { constants, type BigIntStats } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import { hostname } from 'node:os'
+import { join } from 'node:path'
 
 import { isFromEarlierBoot, recordedOnAnotherHost } from './boot-staleness'
 
@@ -202,7 +203,7 @@ function sameIdentity(a: BigIntStats, b: BigIntStats): boolean {
 }
 
 /** The claim name's part for a judged file: only what every view of the file reports alike. */
-function identityDigest(judged: JudgedLock): string {
+export function identityDigest(judged: JudgedLock): string {
 	const { size, mtimeNs } = judged.stats
 	return createHash('sha256').update(`${size}:${mtimeNs}:`).update(judged.bytes).digest('hex').slice(0, 32)
 }
@@ -230,4 +231,116 @@ export function isLinkUnsupported(error: unknown): boolean {
 /** `O_NONBLOCK`, so opening a FIFO put at the path never blocks; Windows has none. */
 function nonBlocking(): number {
 	return constants.O_NONBLOCK ?? 0
+}
+
+/*
+ * Leftovers of killed processes (issue #328). A process killed while taking a lock leaves its
+ * candidate (`<prefix><token>-<x>.tmp`), one killed while removing a stale lock leaves its claim
+ * candidate (`<prefix>break-<uuid>.tmp`) or its claim (`<prefix>break-<digest>-<level>`). They are
+ * never judged as the lock, so they only accumulate; the holder of the lock sweeps them.
+ *
+ * Every candidate and claim holds its creator's record `{ pid, hostname, token, bootId? }`, so a
+ * leftover is swept only when its creator is gone: a record of another host is kept, one of an
+ * earlier boot goes, and one of this boot goes when its pid has exited. A file whose record cannot
+ * be read is kept until it is older than `UNREADABLE_LEFTOVER_MS`, which no live writer takes.
+ *
+ * A claim is also swept only while its judged file cannot be at the lock path. The sweeper holds the
+ * lock, so the lock path names its own file, and a claim of any other digest belongs to a file that
+ * is gone for good (a lock's bytes carry a unique token); the claim of the file now at the path is
+ * kept, as are all claims when that file cannot be read.
+ */
+
+/** How old a leftover with an unreadable record must be before it is swept. */
+export const UNREADABLE_LEFTOVER_MS = 10 * 60_000
+/** At most this many leftovers are removed by one sweep, so a lock holder never spends long on it. */
+export const SWEEP_LIMIT = 32
+/** How often one lock's directory is swept by one process. */
+export const SWEEP_INTERVAL_MS = 60_000
+
+export type LockLeftoverSweep = Readonly<{
+	/** The directory of the lock. */
+	directory: string
+	/** The lock's file name, such as `.access.lock`. */
+	lockName: string
+	/** The shared start of candidate and claim names, such as `.access-lock-`. */
+	prefix: string
+	bootId: string | undefined
+	/** Defaults to `SWEEP_LIMIT`. */
+	limit?: number
+}>
+
+const CLAIM_NAME = /^break-([\da-f]{32})-\d+$/u
+
+/**
+ * Removes leftover lock candidates and claims whose creator is gone, at most `limit` of them. The
+ * caller must hold the lock. Returns the names removed. It never throws: a failed sweep is retried.
+ */
+export async function sweepLockLeftovers(sweep: LockLeftoverSweep): Promise<string[]> {
+	const removed: string[] = []
+	try {
+		const names = (await fs.readdir(sweep.directory)).filter(name => name.startsWith(sweep.prefix))
+		if (names.length === 0) return removed
+		// The digest of the file at the lock path, whose claims are never swept.
+		let held: string | undefined
+		try { held = identityDigest(await readJudgedLock(join(sweep.directory, sweep.lockName))) }
+		catch { held = undefined }
+		const limit = sweep.limit ?? SWEEP_LIMIT
+		for (const name of names) {
+			if (removed.length >= limit) break
+			const claim = CLAIM_NAME.exec(name.slice(sweep.prefix.length))
+			if (claim) { if (held === undefined || claim[1] === held) continue }
+			else if (!name.endsWith('.tmp')) continue
+			const path = join(sweep.directory, name)
+			try {
+				if (await creatorGone(path, sweep.bootId)) {
+					await fs.rm(path, { force: true })
+					removed.push(name)
+				}
+			}
+			catch { /* kept; the next sweep judges it again */ }
+		}
+	}
+	catch { /* best effort */ }
+	return removed
+}
+
+const lastSweep = new Map<string, number>()
+
+/** `sweepLockLeftovers` at most once per `SWEEP_INTERVAL_MS` for one lock of this process. */
+export async function sweepLockLeftoversOccasionally(sweep: LockLeftoverSweep): Promise<void> {
+	const key = join(sweep.directory, sweep.lockName)
+	const now = performance.now()
+	const last = lastSweep.get(key)
+	if (last !== undefined && now - last < SWEEP_INTERVAL_MS) return
+	lastSweep.set(key, now)
+	await sweepLockLeftovers(sweep)
+}
+
+/** Test-only: forgets when each lock was last swept. */
+export function resetLockSweepThrottleForTests(): void {
+	lastSweep.clear()
+}
+
+async function creatorGone(path: string, bootId: string | undefined): Promise<boolean> {
+	let read: JudgedLock
+	try { read = await readJudgedLock(path) }
+	catch (error) {
+		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+		throw error
+	}
+	if (!read.stats.isFile()) return false
+	let record: { pid?: unknown } | undefined
+	try { record = JSON.parse(read.bytes.toString('utf8')) as { pid?: unknown } }
+	catch { record = undefined }
+	if (recordedOnAnotherHost(record)) return false
+	if (isFromEarlierBoot(record, read, bootId)) return true
+	if (typeof record !== 'object' || record === null || typeof record.pid !== 'number' || !Number.isInteger(record.pid) || record.pid < 1)
+		return Date.now() - read.mtimeMs > UNREADABLE_LEFTOVER_MS
+	try {
+		process.kill(record.pid, 0)
+		return false
+	}
+	catch (error) {
+		return (error as NodeJS.ErrnoException).code === 'ESRCH'
+	}
 }
