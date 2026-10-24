@@ -261,7 +261,23 @@ export type ProductKitProvenanceSource = Readonly<{
 export type ProvenanceLog = (message: string) => void
 
 /** What a caller that holds the persistence lock passes: the wait for the kit digests, and where a record left without them is logged. */
-export type InLockProvenanceOptions = Readonly<{ budgetMilliseconds?: number; log?: ProvenanceLog }>
+export type InLockProvenanceOptions = Readonly<{
+	budgetMilliseconds?: number
+	/** One absolute deadline (`Date.now()` milliseconds, {@link inLockProvenanceDeadline}) shared by every in-lock step of one record; it replaces `budgetMilliseconds`. */
+	deadlineAt?: number
+	log?: ProvenanceLog
+}>
+
+/** The deadline of one record's in-lock provenance steps, `budgetMilliseconds` from now, shared so the steps never stack their budgets under the persistence lock. */
+export function inLockProvenanceDeadline(budgetMilliseconds: number = IN_LOCK_PROVENANCE_BUDGET_MS): number {
+	return Date.now() + budgetMilliseconds
+}
+
+/** What is left of the in-lock budget: until `deadlineAt` when one is shared, otherwise `budgetMilliseconds` or the default. */
+export function remainingInLockBudget(options: InLockProvenanceOptions, defaultMilliseconds: number = IN_LOCK_PROVENANCE_BUDGET_MS): number {
+	if (options.deadlineAt !== undefined) return Math.max(0, options.deadlineAt - Date.now())
+	return options.budgetMilliseconds ?? defaultMilliseconds
+}
 
 /** The log line of a record left without `productKit` because its digests outlasted the budget. It names no host path. */
 export function provenanceBudgetMessage(milliseconds: number): string {
@@ -293,7 +309,7 @@ export async function withinBudget<Result>(work: Promise<Result>, milliseconds: 
  * the history recorder logs), so the missing `productKit` does not go unnoticed (issue #211).
  */
 export async function workspaceProductKitProvenanceUnlocked(persistence: ProductKitProvenanceSource, options: InLockProvenanceOptions = {}): Promise<ProductKitProvenance | undefined> {
-	const budgetMilliseconds = options.budgetMilliseconds ?? IN_LOCK_PROVENANCE_BUDGET_MS
+	const budgetMilliseconds = remainingInLockBudget(options)
 	const { productKitPath, codeDir } = persistence.layout
 	if (!productKitPath || !codeDir) return undefined
 	const bytes = await persistence.readOptionalBytesUnlocked(productKitPath)

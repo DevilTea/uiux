@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import { productKitRecordFieldUnlocked } from '../../adapters/kit-provenance'
+import { inLockProvenanceDeadline, productKitRecordFieldUnlocked } from '../../adapters/kit-provenance'
 
 import type { HistorySource } from '../../domain/history/constants'
 import { HISTORY_SCHEMA_VERSION } from '../../domain/history/constants'
@@ -27,7 +27,7 @@ export type SnapshotCheckpointInput = Readonly<{
 	/** Where a Checkpoint left without Product Kit provenance for its time budget is logged; `diagnostics.error` when omitted. */
 	log?: (message: string) => void
 	/** The Adapter provenance of the record (Clause 01a11a5e-201a-7532-8192-517b439c6c0c), taken under the caller's lock; `{}` when it is not known. */
-	adapterRecordField?: () => Promise<Readonly<{ adapters?: JsonObject[] }>>
+	adapterRecordField?: (deadlineAt: number) => Promise<Readonly<{ adapters?: JsonObject[] }>>
 }>
 
 /**
@@ -40,6 +40,8 @@ export type SnapshotCheckpointInput = Readonly<{
 export async function writeSnapshotCheckpointUnlocked(input: SnapshotCheckpointInput): Promise<CheckpointRecord> {
 	const snapshot = versionResourcesFromSnapshot(await input.persistence.scanVersionedSnapshotUnlocked(), input.persistence.layout)
 	const parentCheckpoint = (await input.checkpoints.listUnlocked()).records.at(-1)?.id
+	// One deadline for the Product Kit and the Adapter provenance, so their budgets do not stack under the lock.
+	const deadlineAt = inLockProvenanceDeadline()
 	const record: CheckpointRecord = {
 		historySchemaVersion: HISTORY_SCHEMA_VERSION,
 		id: randomUUID(),
@@ -49,8 +51,8 @@ export async function writeSnapshotCheckpointUnlocked(input: SnapshotCheckpointI
 		workspaceSchemaVersion: await input.persistence.readRecordSchemaVersionUnlocked(),
 		resources: snapshot.resources,
 		// Clause 01a11bb1-b6ae-7cf7-9838-9628757d1190: the Product Kit provenance when it was taken.
-		...await productKitRecordFieldUnlocked(input.persistence, input.log ? { log: input.log } : {}),
-		...(input.adapterRecordField ? await input.adapterRecordField() : {}),
+		...await productKitRecordFieldUnlocked(input.persistence, { deadlineAt, ...(input.log ? { log: input.log } : {}) }),
+		...(input.adapterRecordField ? await input.adapterRecordField(deadlineAt) : {}),
 		name: input.name,
 		...(input.note !== undefined ? { note: input.note } : {}),
 		source: input.source,

@@ -209,7 +209,7 @@ export function createHistoryService(
 				...(command.note === undefined || command.note === '' ? {} : { note: command.note }),
 				source: command.source,
 				log,
-				adapterRecordField: () => adapterRecordFieldUnlocked(persistence, options.adapterProvenance, { log }),
+				adapterRecordField: deadlineAt => adapterRecordFieldUnlocked(persistence, options.adapterProvenance, { deadlineAt, log }),
 			})
 			return { status: 'created', versionId: record.id, at: record.at, resources: record.resources.length }
 		})
