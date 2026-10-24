@@ -327,7 +327,7 @@ export async function workspaceProductKitProvenanceUnlocked(persistence: Product
 	const provenance = await withinBudget(computeProductKitProvenance({ root: persistence.root, codeDirectoryName: codeDir, productKit: parsed as JsonObject }), budgetMilliseconds)
 	if (provenance !== EXPIRED) return provenance
 	const log = options.log ?? (message => diagnostics.error(message))
-	log(provenanceBudgetMessage(budgetMilliseconds))
+	log(provenanceBudgetMessage(options.budgetMilliseconds ?? IN_LOCK_PROVENANCE_BUDGET_MS))
 	return undefined
 }
 
