@@ -18,7 +18,7 @@ import { validateViewResource, type ViewResource } from '../domain/views/schema'
 import { validateWorkspaceManifest, type WorkspaceManifest } from '../domain/workspace/schema'
 import { currentBootId, isFromEarlierBoot, recordedOnAnotherHost } from './boot-staleness'
 import { PersistenceError } from './errors'
-import { readJudgedLock, removeJudgedLock, type JudgedLock } from './stale-lock'
+import { readJudgedLock, removeJudgedLock, sweepLockLeftoversOccasionally, type JudgedLock } from './stale-lock'
 import { currentDesignWriteContext, type DesignWriteContext } from './history/write-context'
 import {
 	assetMetadataRelativePath,
@@ -1074,6 +1074,12 @@ export class FileNativePersistence {
 					continue
 				}
 				await fs.rm(candidateAbsolute, { force: true }).catch(() => undefined)
+				await sweepLockLeftoversOccasionally({
+					directory: dirname(lockAbsolute),
+					lockName: basename(lockAbsolute),
+					prefix: '.persistence-lock-',
+					bootId,
+				})
 				return async () => {
 					let owner: { token?: unknown }
 					try {
