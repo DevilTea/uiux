@@ -5,7 +5,7 @@ import { checkWorkspaceSelection } from '../../src/persistence/workspace-selecti
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../../src/product/workspace-schema'
 import { AccessError } from '../../src/server/access/roster'
 import { closeEventStreamsOnShutdown } from '../../src/server/event-stream'
-import { installLogRedaction, writeUnredacted } from '../../src/server/access/redaction'
+import { writeUnredacted } from '../../src/server/access/redaction'
 import { getServerNetwork } from '../../src/server/network-access'
 import {
 	closeSelectedWorkspaceServerRuntime,
@@ -28,8 +28,6 @@ export default defineNitroPlugin((nitroApp) => {
 		// A live server holds its selected Workspace so `uiux access copy` refuses to copy host history
 		// underneath it, and `uiux invite create` can name its port.
 		if (!import.meta.prerender) {
-			// Secrets never appear in logs (identity decision 3).
-			installLogRedaction()
 			// The graceful shutdown waits for open connections before the `close` hook runs, and an
 			// event stream never ends by itself: close the streams as soon as the signal arrives.
 			// `nuxt dev` has no graceful shutdown, and a signal listener there would suppress Node's default exit.
