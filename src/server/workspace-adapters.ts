@@ -89,6 +89,14 @@ export function resolveSelectedWorkspaceAdapterList(workspaceRoot: string, given
  */
 const pinnedContentDigests = new WeakMap<ValidatedAdapterEntry, Promise<string | undefined>>()
 
+/** Entries of a resolution of a selection that differs from the Product Kit file's list: not the Preview's resolution, so not pinned. */
+const selectionOnlyEntries = new WeakSet<ValidatedAdapterEntry>()
+
+/** Whether `entry` was resolved for a selection other than the Product Kit file's list, whose digest would be computed from the files on disk (issue #336). */
+export function isSelectionOnlyAdapterEntry(entry: ValidatedAdapterEntry): boolean {
+	return selectionOnlyEntries.has(entry)
+}
+
 /** The content digest of `entry` taken with its pinned output generation, or `undefined` when `entry` belongs to no pinned resolution. */
 export function pinnedAdapterContentDigest(entry: ValidatedAdapterEntry): Promise<string | undefined> | undefined {
 	return pinnedContentDigests.get(entry)
@@ -159,7 +167,12 @@ async function resolveAdapters(workspaceRoot: string, givenLayout: WorkspaceLayo
 		registryInspector: productAdapterRegistryInspector,
 		themeIds,
 	})
-	if (other || !pin) return await resolved
+	if (other) {
+		const result = await resolved
+		if (result.state === 'valid') for (const entry of result.set.entries) selectionOnlyEntries.add(entry)
+		return result
+	}
+	if (!pin) return await resolved
 	// A pinned resolution settles once its Adapters are digested, so the capture of the output
 	// generation, which the next build waits for, covers the digests too.
 	const resolution = resolved.then(async (result) => {

@@ -47,6 +47,12 @@ export type AdapterProvenanceSource = Readonly<{
 	 * for an entry of no pinned resolution, whose digest is computed from the files on disk.
 	 */
 	pinnedContentDigest?: (entry: ValidatedAdapterEntry) => Promise<string | undefined> | undefined
+	/**
+	 * Whether an entry was resolved for a selection other than the Product Kit file's list, which
+	 * the Preview does not render and whose digest would be bundled from the files on disk
+	 * (`isSelectionOnlyAdapterEntry` in `src/server/`).
+	 */
+	isSelectionOnly?: (entry: ValidatedAdapterEntry) => boolean
 	/** The identity of the kit build's last good output generation, if any. */
 	outputGeneration?: () => string | undefined
 	kitBuild?: () => KitBuildStatus
@@ -173,10 +179,10 @@ export async function readCurrentAdapterProvenance(persistence: FileNativePersis
 	}
 }
 
-/** Whether every entry of a valid resolution carries a content digest taken with its pinned output generation; always so without a pinning `source` (no server), whose Adapters resolve from the files on disk. */
+/** Whether no entry of a valid resolution is of a selection other than the Product Kit file's list (see `isSelectionOnly`); without a server, the Adapters resolve from the files on disk as before. */
 function resolutionIsPinned(resolution: AdapterSetResolutionResult, source: AdapterProvenanceSource | undefined): boolean {
-	if (resolution.state !== 'valid' || !source?.pinnedContentDigest) return true
-	return resolution.set.entries.every(entry => source.pinnedContentDigest!(entry) !== undefined)
+	if (resolution.state !== 'valid' || !source?.isSelectionOnly) return true
+	return !resolution.set.entries.some(entry => source.isSelectionOnly!(entry))
 }
 
 /** The longest a version or Checkpoint record, which holds the persistence lock, waits for the Adapter provenance (as for the Product Kit provenance, `IN_LOCK_PROVENANCE_BUDGET_MS`). */

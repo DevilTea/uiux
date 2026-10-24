@@ -172,7 +172,7 @@ describe('the in-lock Adapter provenance is bounded (issue #336)', () => {
 	it('omits `adapters` for an unpinned resolution without bundling', async () => {
 		const ctx = await workspace([SELECTION('a')], stubSource())
 		const resolve = vi.fn(stubSource().resolve!)
-		const unpinned: AdapterProvenanceSource = { resolve, pinnedContentDigest: () => undefined }
+		const unpinned: AdapterProvenanceSource = { resolve, pinnedContentDigest: () => undefined, isSelectionOnly: () => true }
 		vi.mocked(adapterGraphDigest).mockClear()
 		expect(await adapterRecordFieldUnlocked(ctx.persistence, unpinned, { log: () => undefined })).toEqual({})
 		expect(resolve).toHaveBeenCalledTimes(1)
