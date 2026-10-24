@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { productKitRecordFieldUnlocked, warmProductKitProvenance } from '../../adapters/kit-provenance'
+import { adapterRecordFieldUnlocked, type AdapterProvenanceSource } from './adapter-provenance'
 
 import {
 	AUTOSAVE_IDLE_MS,
@@ -130,6 +131,8 @@ export type HistoryRecorderOptions = Readonly<{
 	/** Bound on the lock-holding work the recorder starts itself (timers, release, shutdown). */
 	operationTimeoutMilliseconds?: number
 	log?: (message: string) => void
+	/** Where the Adapter provenance of a record comes from (Rule 01a167bf-1f93-78b7-9045-6562c20f5a42); read at each record, so it can be set up after the recorder. */
+	adapterProvenance?: () => AdapterProvenanceSource | undefined
 }>
 
 /** How long a timer close that could not take the lock waits before it tries again. */
@@ -194,6 +197,7 @@ class AutosaveRecorder implements HistoryRecorder {
 	private readonly clock: HistoryRecorderClock
 	private readonly operationTimeout: number
 	private readonly log: (message: string) => void
+	private readonly adapterSource: () => AdapterProvenanceSource | undefined
 
 	private phase: 'idle' | 'starting' | 'recording' | 'disabled' | 'stopped' = 'idle'
 	private stopping = false
@@ -218,6 +222,7 @@ class AutosaveRecorder implements HistoryRecorder {
 		this.clock = options.clock ?? SYSTEM_CLOCK
 		this.operationTimeout = options.operationTimeoutMilliseconds ?? DEFAULT_OPERATION_TIMEOUT_MS
 		this.log = options.log ?? (message => diagnostics.error(message))
+		this.adapterSource = options.adapterProvenance ?? (() => undefined)
 		this.observer = Object.freeze({
 			beforeCanonicalWrite: (context: DesignWriteContext, resources: readonly CanonicalResourceBefore[], signal?: AbortSignal) => this.hook(signal, abandoned => this.beforeWrite(context, resources, abandoned)),
 			afterCanonicalCommit: (context: DesignWriteContext, changes: readonly CanonicalResourceChange[], signal?: AbortSignal) => this.hook(signal, abandoned => this.afterCommit(context, changes, abandoned)),
@@ -459,6 +464,7 @@ class AutosaveRecorder implements HistoryRecorder {
 			name: BASELINE_CHECKPOINT_NAME,
 			source: 'cli',
 			log: this.log,
+			adapterRecordField: () => adapterRecordFieldUnlocked(this.persistence, this.adapterSource(), { log: this.log }),
 		})
 		this.expected = resourceMap(record.resources)
 		return record.id
@@ -606,6 +612,7 @@ class AutosaveRecorder implements HistoryRecorder {
 			const resources = sortedResources(this.expected ?? new Map())
 			const workspaceSchemaVersion = await this.persistence.readRecordSchemaVersionUnlocked()
 			const productKit = await productKitRecordFieldUnlocked(this.persistence, { log: this.log })
+			const adapters = await adapterRecordFieldUnlocked(this.persistence, this.adapterSource(), { log: this.log })
 			assertHeld(signal)
 			// The events' blobs are already in host history; the resources they left unchanged may name
 			// blobs that only a Checkpoint base put in the artifact store.
@@ -620,6 +627,7 @@ class AutosaveRecorder implements HistoryRecorder {
 				workspaceSchemaVersion,
 				resources,
 				...productKit,
+				...adapters,
 				startedAt: open.startedAt,
 				// Rule 01a11a5e-020b-7716-aa2b-a6e403c59c85: recorded even when nothing changed on net.
 				netChange: !sameResources(open.base, this.expected ?? new Map()),
@@ -673,6 +681,7 @@ class AutosaveRecorder implements HistoryRecorder {
 		await this.ownBlobsUnlocked(id, actual.resources, signal, actual.blobs)
 		assertHeld(signal)
 		const productKit = await productKitRecordFieldUnlocked(this.persistence, { log: this.log })
+		const adapters = await adapterRecordFieldUnlocked(this.persistence, this.adapterSource(), { log: this.log })
 		assertHeld(signal)
 		const windowStart = this.lastAtMs > 0 ? new Date(this.lastAtMs).toISOString() : undefined
 		const at = this.stamp()
@@ -685,6 +694,7 @@ class AutosaveRecorder implements HistoryRecorder {
 			workspaceSchemaVersion,
 			resources: actual.resources,
 			...productKit,
+			...adapters,
 			// The earliest the change can have happened: the previous version.
 			startedAt: windowStart ?? at,
 			netChange: true,

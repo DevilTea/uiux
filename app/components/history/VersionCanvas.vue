@@ -5,6 +5,8 @@ import { useI18n, useRoute } from '#imports'
 import type { ViewDiff } from '../../../src/domain/history/diff/view'
 import type { ViewResource } from '../../../src/domain/views/schema'
 import type { WorkspaceManifest } from '../../../src/domain/workspace/schema'
+import { adaptersChangedCaveat } from '../../../src/domain/history/adapter-caveat'
+import type { EvidenceAdapterProvenance } from '../../../src/domain/evidence/adapter-provenance'
 import type { VersionRecord } from '../../../src/domain/history/schema'
 import { resolveFrameContext, type FrameContext, type FrameContextNotice, type FrameContextSelection, type FrameSide } from '../../../src/preview/version-frame-context'
 import { useWorkbench } from '../../composables/useWorkbench'
@@ -29,8 +31,9 @@ import VersionFrame from './VersionFrame.vue'
  * - Both frames render the View in the canvas's current Variant, Locale, viewport and theme, chosen
  *   with the same render-context bar; a key one side lacks renders that side's default, with a notice.
  * - Historical frames are Preview's read-only version mode: that version's manifest, View and
- *   Locales with the current Widget runtime and Adapters, so the Adapters-changed caveat is always
- *   shown (versions record no Adapter provenance yet, issues #57 and #92). No pins, no tools.
+ *   Locales with the current Widget runtime and Adapters, so the Adapters-changed caveat is shown
+ *   when a version's recorded Adapter provenance is absent or differs from the current active set
+ *   (Rule 01a11a5e-1385-7484-baf3-93d865fd97a5). No pins, no tools.
  * - The two frames sit on one stage at one scale: panning, zooming and scrolling the stage move both
  *   together, while each frame's own content scrolls alone.
  * - `highlight` outlines what the View's semantic diff names: added, modified and moved Widgets on
@@ -132,6 +135,36 @@ function sideData(id: string | undefined): SideData {
 	if (id === CURRENT_COMPARE) return currentSide.value
 	return versionData.value.get(id) ?? { status: 'loading' }
 }
+
+/**
+ * The current Adapter provenance (Evidence list context): `adapters`, or `adaptersUnavailable` when it
+ * cannot be computed; `undefined` until it is read. Read again when the Workbench's resources change.
+ */
+const currentAdapters = shallowRef<Readonly<{ adapters?: readonly EvidenceAdapterProvenance[]; adaptersUnavailable?: boolean }>>()
+async function loadCurrentAdapters(): Promise<void> {
+	try {
+		const { adapters, adaptersUnavailable } = await uiux.listEvidenceForFreshness<unknown, unknown>()
+		currentAdapters.value = { ...(adapters ? { adapters } : {}), ...(adaptersUnavailable === true ? { adaptersUnavailable } : {}) }
+	}
+	catch {
+		// The current provenance is unknown: the caveat shows.
+		currentAdapters.value = { adaptersUnavailable: true }
+	}
+}
+watch(signature, () => { void loadCurrentAdapters() }, { immediate: true })
+
+/** Rule 01a11a5e-1385-7484-baf3-93d865fd97a5: a historical frame whose version's recorded Adapters are absent or differ from the current set (or cannot be told apart from them) shows the caveat. */
+const showAdaptersCaveat = computed(() => {
+	const current = currentAdapters.value
+	if (!current || !sides.value) return false
+	return [sides.value.before, sides.value.after].some((id) => {
+		if (!id || id === CURRENT_COMPARE) return false
+		const data = versionData.value.get(id)
+		if (!data || data.status === 'loading') return false
+		const recorded = 'record' in data ? data.record?.adapters : undefined
+		return adaptersChangedCaveat(recorded, current.adapters ? { state: 'available', adapters: current.adapters } : { state: 'unavailable' })
+	})
+})
 
 /** The canvas's current selection (Rule 01a11a5e-1331-7e9e-a98d-5ff9b265b0e8). */
 const canvasSelection = computed<FrameContextSelection>(() => {
@@ -366,6 +399,7 @@ function canvasTo(next: HistoryCanvasMode | undefined) {
 
     <div class="space-y-px border-b border-default">
       <UAlert
+        v-if="showAdaptersCaveat"
         color="warning"
         variant="subtle"
         icon="i-lucide-puzzle"

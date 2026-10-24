@@ -2942,7 +2942,7 @@
       "viewMissing": "這個版本中沒有這個 View。",
       "loadFailed": "無法載入這個版本的 View。",
       "caveatTitle": "以目前的 Widget Runtime 與 Adapter 呈現",
-      "caveat": "版本不會記錄當時使用的 Adapter，因此較早的版本在這裡看起來可能與儲存當時不同。",
+      "caveat": "自此版本儲存後 Adapter 已有變動，或此版本未記錄當時啟用的 Adapter，因此在這裡看起來可能與儲存當時不同。",
       "notice": {
         "variant": "{side}：這裡沒有 Variant {requested}，因此顯示基本狀態。",
         "locale": "{side}：這個版本沒有 Locale {requested}，因此顯示 {used}。",

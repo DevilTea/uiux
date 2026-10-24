@@ -268,10 +268,10 @@ export function provenanceBudgetMessage(milliseconds: number): string {
 	return `uiux: the Product Kit provenance was not computed within ${milliseconds} ms under the persistence lock; this history record goes without productKit, and the kit digests finish outside the lock for the next record.`
 }
 
-const EXPIRED: unique symbol = Symbol('expired')
+export const EXPIRED: unique symbol = Symbol('expired')
 
 /** `work`'s result (`undefined` when it fails), or {@link EXPIRED} once `milliseconds` pass first; `work` then goes on, and a later failure of it is dropped. */
-async function withinBudget<Result>(work: Promise<Result>, milliseconds: number): Promise<Result | undefined | typeof EXPIRED> {
+export async function withinBudget<Result>(work: Promise<Result>, milliseconds: number): Promise<Result | undefined | typeof EXPIRED> {
 	let timer: ReturnType<typeof setTimeout> | undefined
 	const expired = new Promise<typeof EXPIRED>((resolve) => {
 		timer = setTimeout(resolve, milliseconds, EXPIRED)

@@ -1,3 +1,4 @@
+import type { CurrentAdapterProvenance } from '../evidence/adapter-provenance'
 import type { FormalEvidenceRecord } from '../evidence/schema'
 import { resourceIdentityKey } from '../history/summary'
 
@@ -29,6 +30,12 @@ export type ImpactWorkspace = Readonly<{
 	 * staleness (it reads every artifact), so no Evidence impact is reported.
 	 */
 	evidence?: readonly ImpactEvidence[]
+	/**
+	 * The Adapter provenance of the active set in this picture, which the Evidence Adapter condition
+	 * is judged against (Rule 01a115cd-c6de-7744-be27-715bec2e7fef). Absent when the caller does not
+	 * evaluate it, so no Evidence impact follows from the Adapters.
+	 */
+	adapters?: CurrentAdapterProvenance
 }>
 
 export type ImpactEvidence = Readonly<{ digest: string; record: FormalEvidenceRecord }>
