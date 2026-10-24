@@ -17,7 +17,7 @@ import { evidenceAdapterProvenance, type CurrentAdapterProvenance } from '../../
 import type { WorkspaceAdapterSelection } from '../../domain/workspace/schema'
 import type { FileNativePersistence } from '../../persistence'
 import type { KitBuildStatus } from '../ports/kit-build'
-import { EXPIRED, IN_LOCK_PROVENANCE_BUDGET_MS, withinBudget } from '../../adapters/kit-provenance'
+import { EXPIRED, IN_LOCK_PROVENANCE_BUDGET_MS, remainingInLockBudget, withinBudget, type InLockProvenanceOptions } from '../../adapters/kit-provenance'
 import { validateProductKit } from '../../domain/product-kit/schema'
 import type { JsonObject } from '../../domain/validation'
 import { diagnostics } from '../../logging/diagnostics'
@@ -47,6 +47,12 @@ export type AdapterProvenanceSource = Readonly<{
 	 * for an entry of no pinned resolution, whose digest is computed from the files on disk.
 	 */
 	pinnedContentDigest?: (entry: ValidatedAdapterEntry) => Promise<string | undefined> | undefined
+	/**
+	 * Whether an entry was resolved for a selection other than the Product Kit file's list, which
+	 * the Preview does not render and whose digest would be bundled from the files on disk
+	 * (`isSelectionOnlyAdapterEntry` in `src/server/`).
+	 */
+	isSelectionOnly?: (entry: ValidatedAdapterEntry) => boolean
 	/** The identity of the kit build's last good output generation, if any. */
 	outputGeneration?: () => string | undefined
 	kitBuild?: () => KitBuildStatus
@@ -173,6 +179,12 @@ export async function readCurrentAdapterProvenance(persistence: FileNativePersis
 	}
 }
 
+/** Whether no entry of a valid resolution is of a selection other than the Product Kit file's list (see `isSelectionOnly`); without a server, the Adapters resolve from the files on disk as before. */
+function resolutionIsPinned(resolution: AdapterSetResolutionResult, source: AdapterProvenanceSource | undefined): boolean {
+	if (resolution.state !== 'valid' || !source?.isSelectionOnly) return true
+	return !resolution.set.entries.some(entry => source.isSelectionOnly!(entry))
+}
+
 /** The longest a version or Checkpoint record, which holds the persistence lock, waits for the Adapter provenance (as for the Product Kit provenance, `IN_LOCK_PROVENANCE_BUDGET_MS`). */
 export const IN_LOCK_ADAPTER_PROVENANCE_BUDGET_MS = IN_LOCK_PROVENANCE_BUDGET_MS
 
@@ -188,7 +200,7 @@ export const IN_LOCK_ADAPTER_PROVENANCE_BUDGET_MS = IN_LOCK_PROVENANCE_BUDGET_MS
 export async function adapterRecordFieldUnlocked(
 	persistence: FileNativePersistence,
 	source: AdapterProvenanceSource | undefined,
-	options: Readonly<{ budgetMilliseconds?: number; log?: (message: string) => void }> = {},
+	options: InLockProvenanceOptions = {},
 ): Promise<Readonly<{ adapters?: JsonObject[] }>> {
 	try {
 		if (!kitBuildAllowsAdapterProvenance(source)) return {}
@@ -206,11 +218,16 @@ export async function adapterRecordFieldUnlocked(
 		if (!validated.ok) return {}
 		const selections = validated.value.adapters
 		if (selections.length === 0) return { adapters: [] }
-		const budget = options.budgetMilliseconds ?? IN_LOCK_ADAPTER_PROVENANCE_BUDGET_MS
-		const current = await withinBudget(
-			withSettledKitBuild(source, async () => adapterSetEvidenceProvenance(persistence, await resolveProductKitAdapterSet(persistence, selections, source), undefined, source)),
-			budget,
-		)
+		const budget = remainingInLockBudget(options, IN_LOCK_ADAPTER_PROVENANCE_BUDGET_MS)
+		// A resolution not pinned to the kit build output (the selection differs from the Product Kit
+		// file read again meanwhile) would bundle each Adapter's module graph here, work an expired
+		// budget abandons without cancelling: the record goes without `adapters` instead (issue #336).
+		const compute = async (): Promise<CurrentAdapterProvenance> => {
+			const resolution = await resolveProductKitAdapterSet(persistence, selections, source)
+			if (!resolutionIsPinned(resolution, source)) return { state: 'unavailable' }
+			return adapterSetEvidenceProvenance(persistence, resolution, undefined, source)
+		}
+		const current = await withinBudget(withSettledKitBuild(source, compute), budget)
 		if (current === EXPIRED) {
 			const log = options.log ?? (message => diagnostics.error(message))
 			log(`uiux: the Adapter provenance was not computed within ${budget} ms under the persistence lock; this history record goes without adapters.`)

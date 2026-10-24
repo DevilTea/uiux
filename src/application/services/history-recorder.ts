@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import { productKitRecordFieldUnlocked, warmProductKitProvenance } from '../../adapters/kit-provenance'
+import { inLockProvenanceDeadline, productKitRecordFieldUnlocked, warmProductKitProvenance } from '../../adapters/kit-provenance'
 import { adapterRecordFieldUnlocked, type AdapterProvenanceSource } from './adapter-provenance'
 
 import {
@@ -464,7 +464,7 @@ class AutosaveRecorder implements HistoryRecorder {
 			name: BASELINE_CHECKPOINT_NAME,
 			source: 'cli',
 			log: this.log,
-			adapterRecordField: () => adapterRecordFieldUnlocked(this.persistence, this.adapterSource(), { log: this.log }),
+			adapterRecordField: deadlineAt => adapterRecordFieldUnlocked(this.persistence, this.adapterSource(), { deadlineAt, log: this.log }),
 		})
 		this.expected = resourceMap(record.resources)
 		return record.id
@@ -611,8 +611,9 @@ class AutosaveRecorder implements HistoryRecorder {
 		else if (open) {
 			const resources = sortedResources(this.expected ?? new Map())
 			const workspaceSchemaVersion = await this.persistence.readRecordSchemaVersionUnlocked()
-			const productKit = await productKitRecordFieldUnlocked(this.persistence, { log: this.log })
-			const adapters = await adapterRecordFieldUnlocked(this.persistence, this.adapterSource(), { log: this.log })
+			const deadlineAt = inLockProvenanceDeadline()
+			const productKit = await productKitRecordFieldUnlocked(this.persistence, { deadlineAt, log: this.log })
+			const adapters = await adapterRecordFieldUnlocked(this.persistence, this.adapterSource(), { deadlineAt, log: this.log })
 			assertHeld(signal)
 			// The events' blobs are already in host history; the resources they left unchanged may name
 			// blobs that only a Checkpoint base put in the artifact store.
@@ -680,8 +681,9 @@ class AutosaveRecorder implements HistoryRecorder {
 		// Every resource's blobs, unchanged ones included: the scan holds all their bytes.
 		await this.ownBlobsUnlocked(id, actual.resources, signal, actual.blobs)
 		assertHeld(signal)
-		const productKit = await productKitRecordFieldUnlocked(this.persistence, { log: this.log })
-		const adapters = await adapterRecordFieldUnlocked(this.persistence, this.adapterSource(), { log: this.log })
+		const deadlineAt = inLockProvenanceDeadline()
+		const productKit = await productKitRecordFieldUnlocked(this.persistence, { deadlineAt, log: this.log })
+		const adapters = await adapterRecordFieldUnlocked(this.persistence, this.adapterSource(), { deadlineAt, log: this.log })
 		assertHeld(signal)
 		const windowStart = this.lastAtMs > 0 ? new Date(this.lastAtMs).toISOString() : undefined
 		const at = this.stamp()

@@ -17,7 +17,7 @@ import { createWorkspaceAccessPresetsReader } from './access/workspace-presets'
 import { createEventStreamHub, type EventStreamHub } from './event-stream'
 import { createHistoryStoreFactory, type HistoryStoreFactory } from './history-stores'
 import { createKitBuildRunner, registerKitBuildRunner, type KitBuildRunner } from './kit-build'
-import { checkAdapterSetRuntime, getSelectedWorkspacePreviewBundle, pinnedAdapterContentDigest, resolveSelectedWorkspaceAdapterList, selectedWorkspaceThemeSupport } from './workspace-adapters'
+import { checkAdapterSetRuntime, getSelectedWorkspacePreviewBundle, isSelectionOnlyAdapterEntry, pinnedAdapterContentDigest, resolveSelectedWorkspaceAdapterList, selectedWorkspaceThemeSupport } from './workspace-adapters'
 
 export type SelectedWorkspaceServerRuntime = Readonly<{
 	root: string
@@ -97,6 +97,7 @@ export function createSelectedWorkspaceServerRuntime(
 	const adapterResolution = {
 		resolve: (adapters: Parameters<typeof resolveSelectedWorkspaceAdapterList>[2]) => resolveSelectedWorkspaceAdapterList(selectedRoot, persistence.layout, adapters),
 		pinnedContentDigest: pinnedAdapterContentDigest,
+		isSelectionOnly: isSelectionOnlyAdapterEntry,
 		outputGeneration: () => kitBuild.outputVersion(),
 	}
 	adapterProvenanceHolder.source = { ...adapterResolution, kitBuild: () => kitBuild.status() }

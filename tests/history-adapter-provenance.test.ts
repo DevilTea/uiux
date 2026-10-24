@@ -2,13 +2,14 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createLeaseManager } from '../src/application/access/leases'
 import { adapterRecordFieldUnlocked, readCurrentAdapterProvenance, type AdapterProvenanceSource } from '../src/application/services/adapter-provenance'
 import { createHistoryRecorder, type HistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { ValidatedAdapterEntry, AdapterSetResolutionResult } from '../src/adapters/resolution'
+import { adapterGraphDigest } from '../src/adapters/adapter-graph-digest'
 import { adaptersChangedCaveat } from '../src/domain/history/adapter-caveat'
 import { ADAPTER_CHANGED_REASON } from '../src/domain/evidence/staleness'
 import type { CurrentAdapterProvenance, EvidenceAdapterProvenance } from '../src/domain/evidence/adapter-provenance'
@@ -21,6 +22,11 @@ import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } fro
 import { createHistoryStoreFactory } from '../src/server/history-stores'
 import { scoped, testMember } from './support/access'
 import { createCurrentWorkspace } from './support/workspace-layout'
+
+vi.mock('../src/adapters/adapter-graph-digest', async (importOriginal) => {
+	const original = await importOriginal<typeof import('../src/adapters/adapter-graph-digest')>()
+	return { ...original, adapterGraphDigest: vi.fn(original.adapterGraphDigest) }
+})
 
 /**
  * Adapter provenance in version history (issue #300): Rule 01a11a5e-06fb-79c5-8396-d50d08780a6d and
@@ -146,6 +152,39 @@ describe('version records carry the Adapter provenance (Rule 01a11a5e-06fb, Clau
 		const logs: string[] = []
 		expect(await adapterRecordFieldUnlocked(ctx.persistence, slow, { budgetMilliseconds: 20, log: line => logs.push(line) })).toEqual({})
 		expect(logs).toHaveLength(1)
+	})
+})
+
+describe('the in-lock Adapter provenance is bounded (issue #336)', () => {
+	it('shares one deadline with the Product Kit step: a budget the first step used up leaves none for the second', async () => {
+		const ctx = await workspace([SELECTION('a')], stubSource())
+		const delayed: AdapterProvenanceSource = { ...stubSource(), pinnedContentDigest: () => new Promise(resolve => setTimeout(resolve, 30, DIGEST)) }
+		const logs: string[] = []
+		const deadlineAt = Date.now() + 60
+		await new Promise(resolve => setTimeout(resolve, 80))
+		expect(await adapterRecordFieldUnlocked(ctx.persistence, delayed, { deadlineAt, log: line => logs.push(line) })).toEqual({})
+		expect(logs).toHaveLength(1)
+		// The same work within a budget that is left is recorded.
+		const recorded = await adapterRecordFieldUnlocked(ctx.persistence, delayed, { deadlineAt: Date.now() + 5_000, log: line => logs.push(line) })
+		expect(recorded.adapters).toHaveLength(1)
+	})
+
+	it('omits `adapters` for an unpinned resolution without bundling', async () => {
+		const ctx = await workspace([SELECTION('a')], stubSource())
+		const resolve = vi.fn(stubSource().resolve!)
+		const unpinned: AdapterProvenanceSource = { resolve, pinnedContentDigest: () => undefined, isSelectionOnly: () => true }
+		vi.mocked(adapterGraphDigest).mockClear()
+		expect(await adapterRecordFieldUnlocked(ctx.persistence, unpinned, { log: () => undefined })).toEqual({})
+		expect(resolve).toHaveBeenCalledTimes(1)
+		expect(adapterGraphDigest).not.toHaveBeenCalled()
+	})
+
+	it('omits `adapters` while the kit build failed, resolving nothing', async () => {
+		const ctx = await workspace([SELECTION('a')], stubSource())
+		const resolve = vi.fn(stubSource().resolve!)
+		const failed: AdapterProvenanceSource = { ...stubSource(() => ({ state: 'failed' }) as never), resolve }
+		expect(await adapterRecordFieldUnlocked(ctx.persistence, failed, { log: () => undefined })).toEqual({})
+		expect(resolve).not.toHaveBeenCalled()
 	})
 })
 
