@@ -14,7 +14,7 @@ import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-
  *   stage whose scrolling moves both while a frame's own content scrolls alone (Rule 01a11e45-6bbc);
  * - `canvas=highlight` outlines added, modified and moved Widgets on the after frame and removed ones
  *   on the before frame (Rule 01a11a5e-12dc);
- * - the Adapters-changed caveat always shows (Rule 01a11a5e-1385, owner ruling 5 of 2026-10-09);
+ * - the Adapters-changed caveat shows only when a version's recorded Adapter provenance is absent or differs from the current set, so not here, where both are the same empty set (Rule 01a11a5e-1385);
  * - the canvas comparison is offered on desktop and tablet, never on a phone (Rule 01a11a5e-1ba5),
  *   and its `canvas` key round-trips through the address (Clause 01a11e0d-d7f5).
  *
@@ -179,7 +179,7 @@ describe('Preview read-only version mode', () => {
 })
 
 describe('canvas comparison', () => {
-	it('opens side by side from the View diff, shares the render context, shows the caveat and no pins, and round-trips the address', async () => {
+	it('opens side by side from the View diff, shares the render context, shows no caveat for an unchanged Adapter set and no pins, and round-trips the address', async () => {
 		const seeded = await seedStructureChange()
 		const thread = await api<{ key: string; revision: string }>('/api/reviews', { anchor: { viewId: VIEW_ID, widgetId: 'app-title' } })
 		await api(`/api/reviews/${thread.key}/messages`, { expectedRevision: thread.revision, body: 'Check the title on both versions.' })
@@ -222,8 +222,8 @@ describe('canvas comparison', () => {
 			await expect.poll(async () => (await contexts()).every(value => value?.includes('|zh-TW|'))).toBe(true)
 			await expect.poll(() => query(page)).toMatchObject({ locale: 'zh-TW', canvas: 'side' })
 
-			// The Adapters-changed caveat always shows; there are no pins and no canvas tools.
-			await canvas.locator('[data-adapters-caveat]').getByText('Shown with today\'s Widget Runtime and Adapters').waitFor()
+			// Versions recorded the (empty) current Adapter set, so the caveat stays hidden; there are no pins and no canvas tools.
+			expect(await canvas.locator('[data-adapters-caveat]').count()).toBe(0)
 			expect(await page.locator('[data-pin-thread]').count()).toBe(0)
 			expect(await page.locator('[data-tool]').count()).toBe(0)
 
@@ -309,7 +309,7 @@ describe('canvas comparison', () => {
 			expect(Math.abs(box!.x + box!.width / 2 - (widget!.x + widget!.width / 2))).toBeLessThan(3)
 			expect(Math.abs(box!.y + box!.height / 2 - (widget!.y + widget!.height / 2))).toBeLessThan(3)
 			await page.locator('[data-highlight-legend]').getByText('Moved', { exact: true }).waitFor()
-			await page.locator('[data-adapters-caveat]').waitFor()
+			expect(await page.locator('[data-adapters-caveat]').count()).toBe(0)
 		}
 		finally { await context.close() }
 	}, 120_000)
@@ -367,7 +367,7 @@ describe('device tiers', () => {
 		const tablet = await open(path, 'tablet')
 		try {
 			await tablet.page.locator('[data-version-canvas] [data-version-frame="after"]').waitFor({ timeout: 20_000 })
-			await tablet.page.locator('[data-adapters-caveat]').waitFor()
+			expect(await tablet.page.locator('[data-adapters-caveat]').count()).toBe(0)
 		}
 		finally { await tablet.context.close() }
 

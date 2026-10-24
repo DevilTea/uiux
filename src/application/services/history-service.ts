@@ -6,6 +6,7 @@ import { PersistenceError } from '../../persistence/errors'
 import type { FileNativePersistence } from '../../persistence/file-native'
 import { HostHistoryError } from '../../persistence/history/host-store'
 import { compareVersionOrder } from '../../persistence/history/order'
+import { adapterRecordFieldUnlocked, type AdapterProvenanceSource } from './adapter-provenance'
 import { writeSnapshotCheckpointUnlocked } from '../../persistence/history/snapshot-checkpoint'
 import { mergeTimeline, pageTimeline, readMergedTimeline, TimelineCursorError, type MergedTimeline, type TimelineVersion } from '../../persistence/history/timeline'
 import type { HistoryStoreSource } from './history-diff'
@@ -130,7 +131,7 @@ const BOUNDARY_RETRY_AFTER_SECONDS = 1
 export function createHistoryService(
 	persistence: FileNativePersistence,
 	history: HistoryStoreSource | undefined,
-	options: Readonly<{ boundary?: () => CheckpointBoundary | undefined; log?: (message: string) => void }> = {},
+	options: Readonly<{ boundary?: () => CheckpointBoundary | undefined; log?: (message: string) => void; adapterProvenance?: AdapterProvenanceSource }> = {},
 ): HistoryService {
 	const log = options.log ?? ((message: string) => diagnostics.warn(message))
 
@@ -208,6 +209,7 @@ export function createHistoryService(
 				...(command.note === undefined || command.note === '' ? {} : { note: command.note }),
 				source: command.source,
 				log,
+				adapterRecordField: () => adapterRecordFieldUnlocked(persistence, options.adapterProvenance, { log }),
 			})
 			return { status: 'created', versionId: record.id, at: record.at, resources: record.resources.length }
 		})

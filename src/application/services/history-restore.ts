@@ -11,6 +11,9 @@ import { analyzeImpact, withResource, type ImpactEvidence, type ImpactItem, type
 import { isCanonicalLocaleTag, isFullUuid, isRecord, type Diagnostic, type ValidationResult } from '../../domain/validation'
 import { validateViewResource, type ViewResource } from '../../domain/views/schema'
 import { validateWorkspaceManifest, type WorkspaceManifest } from '../../domain/workspace/schema'
+import { adapterSetEvidenceProvenance, readCurrentAdapterProvenance, resolveProductKitAdapterSet, withSettledKitBuild, type AdapterProvenanceSource } from './adapter-provenance'
+import type { CurrentAdapterProvenance } from '../../domain/evidence/adapter-provenance'
+import type { WorkspaceAdapterSelection } from '../../domain/workspace/schema'
 import { validateProductKit, type ProductKit } from '../../domain/product-kit/schema'
 import type { AccessPresetsFile } from '../../domain/access-presets/schema'
 import { accessPresetsWriteDiagnostics } from './access-presets-authoring'
@@ -122,7 +125,11 @@ type Loaded = Readonly<{
 	reviews: readonly unknown[]
 }>
 
-export function createHistoryRestoreService(persistence: FileNativePersistence, history: HistoryStoreSource | undefined): HistoryRestoreService {
+export function createHistoryRestoreService(
+	persistence: FileNativePersistence,
+	history: HistoryStoreSource | undefined,
+	options: Readonly<{ adapterProvenance?: AdapterProvenanceSource }> = {},
+): HistoryRestoreService {
 	const policy = persistence.schemaPolicy
 
 	async function restoreResourceVersion<R = never>(command: RestoreResourceVersionCommand, guard?: RestoreGuard<R>): Promise<RestoreResourceVersionOutcome | R> {
@@ -179,13 +186,32 @@ export function createHistoryRestoreService(persistence: FileNativePersistence, 
 			if (kitRefusal) return kitRefusal
 		}
 
-		const before = impactWorkspace(loaded.current, persistence.layout, loaded.reviews, target.kind === 'workspace' ? await readEvidence() : undefined)
-		const after = withResource(before, target, target.kind === 'asset' ? (next as AuthoredAssetResource).metadata : next, nextRevision(target, next))
+		// The Adapter list lives in the Product Kit file (Clause 01a1144e-5336-73e7-84a0-3bcd0cb454f6), so only a
+		// Product Kit restore changes the active Adapter set, which the Evidence Adapter condition follows (Rule 01a11a5e-17a0-7c21-9e23-dd56ef12c9a9).
+		const adapterImpact = target.kind === 'product-kit'
+		const evidence = target.kind === 'workspace' || adapterImpact ? await readEvidence() : undefined
+		const baseline = impactWorkspace(loaded.current, persistence.layout, loaded.reviews, evidence)
+		const before = adapterImpact ? { ...baseline, adapters: await readCurrentAdapterProvenance(persistence, options.adapterProvenance) } : baseline
+		const restoredPicture = withResource(before, target, target.kind === 'asset' ? (next as AuthoredAssetResource).metadata : next, nextRevision(target, next))
+		const after = adapterImpact ? { ...restoredPicture, adapters: await restoredAdapterProvenance((next as ProductKit).adapters) } : restoredPicture
 		const impacts = analyzeImpact(before, after)
 		if (impacts.length > 0 && !parsed.acknowledgeImpact)
 			return { status: 'impact_acknowledgement_required', kind: target.kind, key: target.key, impacts }
 
 		return write(parsed, next, impacts, contentBefore(target, currentFiles))
+	}
+
+	/** The Adapter provenance the Workspace would have with the restored Adapter list, as the current one is computed. */
+	async function restoredAdapterProvenance(selections: readonly WorkspaceAdapterSelection[]): Promise<CurrentAdapterProvenance> {
+		const source = options.adapterProvenance
+		try {
+			return await withSettledKitBuild(source, async () => selections.length === 0
+				? { state: 'available', adapters: [] }
+				: await adapterSetEvidenceProvenance(persistence, await resolveProductKitAdapterSet(persistence, selections, source), undefined, source))
+		}
+		catch {
+			return { state: 'unavailable' }
+		}
 	}
 
 	async function checkRestoredProductKit(target: Target, next: ProductKit, current: unknown): Promise<RestoreRefusal | undefined> {

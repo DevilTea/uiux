@@ -1,4 +1,5 @@
 import { renderInputDigest } from '../evidence/render-input-digest'
+import { adapterFreshnessContext } from '../evidence/adapter-provenance'
 import { evaluateEvidenceStaleness, type EvidenceStalenessContext } from '../evidence/staleness'
 import { resourceIdentityKey } from '../history/summary'
 import type { ImpactWorkspace } from './model'
@@ -26,9 +27,8 @@ import type { ImpactWorkspace } from './model'
  *   with the threads whose render context names it, for information: a stale key never invalidates
  *   a thread.
  * - `evidence_stale`: formal Evidence that is fresh before and would be stale after, by the
- *   freshness rules this build evaluates. Adapter provenance is not evaluated until it is recorded
- *   (issues #57 and #92; owner ruling 5 of the same comment), so a changed `adapters` selection,
- *   order or configuration is not reported yet.
+ *   freshness rules this build evaluates, the Adapter condition included when the pictures carry
+ *   their Adapter provenance (a changed `adapters` selection, order or configuration).
  */
 export type ImpactWidgetAnchor = Readonly<{ viewId: string; widgetId: string }>
 export type ImpactResourceIdentity = Readonly<{ kind: string; key: string }>
@@ -319,6 +319,7 @@ function stalenessContext(workspace: ImpactWorkspace): EvidenceStalenessContext 
 		workspace: { resource: (asRecord(workspace.manifest) ?? undefined) as NonNullable<EvidenceStalenessContext['workspace']>['resource'] },
 		discoveredLocales: sortedKeys(workspace.locales),
 		localeRevisions,
+		...(workspace.adapters ? adapterFreshnessContext(workspace.adapters) : {}),
 	}
 }
 

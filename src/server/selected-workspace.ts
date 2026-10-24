@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import type { McpHttpHandler } from '@modelcontextprotocol/server'
 import { createLeaseManager, type LeaseManager } from '../application/access/leases'
 import { createChangeEventBus, publishCommits, publishLeaseChanges, type ChangeEventBus } from '../application/services/change-events'
+import type { AdapterProvenanceSource } from '../application/services/adapter-provenance'
 import { createHistoryRecorder, type HistoryRecorder } from '../application/services/history-recorder'
 import type { WorkspaceApplicationSession } from '../application/services/workspace-session'
 import { createWorkspaceApplicationSession } from '../application/services/workspace-session'
@@ -82,7 +83,9 @@ export function createSelectedWorkspaceServerRuntime(
 		persistence,
 		home: () => options?.uiuxHome ?? resolveUiuxHome(),
 	})
-	const historyRecorder = createHistoryRecorder({ persistence, stores: () => history.open() })
+	// The Adapter provenance of a version or Checkpoint record follows the server's resolution and kit build (Rule 01a167bf-1f93-78b7-9045-6562c20f5a42); set once the kit build runner exists.
+	const adapterProvenanceHolder: { source?: AdapterProvenanceSource } = {}
+	const historyRecorder = createHistoryRecorder({ persistence, stores: () => history.open(), adapterProvenance: () => adapterProvenanceHolder.source })
 	const kitBuild = createKitBuildRunner({
 		root: selectedRoot,
 		codeDirectoryName: persistence.layout.codeDir,
@@ -91,6 +94,12 @@ export function createSelectedWorkspaceServerRuntime(
 		captureOutput: () => getSelectedWorkspacePreviewBundle(selectedRoot, persistence.layout),
 	})
 	const unregisterKitBuild = registerKitBuildRunner(selectedRoot, kitBuild)
+	const adapterResolution = {
+		resolve: (adapters: Parameters<typeof resolveSelectedWorkspaceAdapterList>[2]) => resolveSelectedWorkspaceAdapterList(selectedRoot, persistence.layout, adapters),
+		pinnedContentDigest: pinnedAdapterContentDigest,
+		outputGeneration: () => kitBuild.outputVersion(),
+	}
+	adapterProvenanceHolder.source = { ...adapterResolution, kitBuild: () => kitBuild.status() }
 	const app = createWorkspaceApplicationSession(persistence, {
 		serverOrigin,
 		// Formal capture loads Preview as the in-memory `system:capture` principal (cookie-scoped to the internal origin).
@@ -104,11 +113,7 @@ export function createSelectedWorkspaceServerRuntime(
 		// Formal capture refuses a theme the current Adapter resolution does not support (Rule 01a11add-f46d-7e92-8f5a-9d10dba6473d).
 		adapterThemeSupport: () => selectedWorkspaceThemeSupport(selectedRoot, persistence.layout),
 		// Formal capture, Evidence freshness and Handoff export resolve the Adapters as the Preview does (Rule 01a167bf-1f93-78b7-9045-6562c20f5a42).
-		adapterResolution: {
-			resolve: adapters => resolveSelectedWorkspaceAdapterList(selectedRoot, persistence.layout, adapters),
-			pinnedContentDigest: pinnedAdapterContentDigest,
-			outputGeneration: () => kitBuild.outputVersion(),
-		},
+		adapterResolution,
 		// Review reads mark an actor whose member left the roster (Rule 01a11485-f185-7c23-8f2a-e045a279cd27).
 		memberIds: async () => {
 			const service = await access()

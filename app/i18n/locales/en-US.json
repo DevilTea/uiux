@@ -2942,7 +2942,7 @@
       "viewMissing": "This View doesn't exist in this version.",
       "loadFailed": "Couldn't load this version of the View.",
       "caveatTitle": "Shown with today's Widget Runtime and Adapters",
-      "caveat": "Versions don't record which Adapters they were made with, so an earlier version may look different here from how it looked when it was saved.",
+      "caveat": "The Adapters have changed since this version was saved, or it didn't record which Adapters were active, so it may look different here from how it looked when it was saved.",
       "notice": {
         "variant": "{side}: Variant {requested} doesn't exist here, so the base state is shown.",
         "locale": "{side}: Locale {requested} isn't in this version, so {used} is shown.",

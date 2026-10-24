@@ -286,8 +286,8 @@ export function createWorkspaceApplicationSession(
 		adapterProvenance: adapterProvenanceSource,
 	})
 	const historyDiff = createHistoryDiffService(persistence, options?.history)
-	const historyService = createHistoryService(persistence, options?.history, options?.historyBoundary ? { boundary: options.historyBoundary } : {})
-	const historyRestore = createHistoryRestoreService(persistence, options?.history)
+	const historyService = createHistoryService(persistence, options?.history, { ...(options?.historyBoundary ? { boundary: options.historyBoundary } : {}), adapterProvenance: adapterProvenanceSource })
+	const historyRestore = createHistoryRestoreService(persistence, options?.history, { adapterProvenance: adapterProvenanceSource })
 	const historyPreview = createHistoryPreviewService(persistence, options?.history)
 	const productKitAuthoring = createProductKitAuthoringService(persistence, options?.kitBuild ? { buildStatus: () => options.kitBuild!.status() } : {})
 	const accessPresetsAuthoring = createAccessPresetsAuthoringService(persistence)
