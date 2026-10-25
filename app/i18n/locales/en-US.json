@@ -2363,6 +2363,9 @@
       "forbidden_transition_identity": "A transition takes its source from its step.",
       "immutable_id_changed": "A Flow’s identity cannot change.",
       "invalid_scenario_ref": "The scenario reference is not valid.",
+      "missing_variant": "A step points to a Variant that its View does not have.",
+      "missing_view": "A step points to a View that does not exist.",
+      "missing_widget": "A transition is triggered by a Widget that its View does not have.",
       "unreachable_step": "A step cannot be reached from the start step."
     },
     "view": {
