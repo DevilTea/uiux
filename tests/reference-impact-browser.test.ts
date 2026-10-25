@@ -114,7 +114,7 @@ describe('deleting a View from its page', () => {
 			await expect.poll(() => page.locator('[data-delete-confirm]').isEnabled(), { timeout: 10_000 }).toBe(true)
 			// Someone else saves the View after the dialog opened: the delete conflicts.
 			const read = await api<{ revision: string; resource: { spec: Record<string, unknown> } }>(`/api/resources/view/${viewId}`)
-			const spec = { ...read.resource.spec, intent: 'Changed meanwhile' }
+			const spec: Record<string, unknown> = { ...read.resource.spec, intent: 'Changed meanwhile' }
 			delete spec.decisions
 			await api(`/api/views/${viewId}/spec`, { expectedRevision: read.revision, spec }, 'PUT')
 			await page.locator('[data-delete-confirm]').click()
