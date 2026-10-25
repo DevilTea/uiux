@@ -1102,21 +1102,43 @@ export const manifest = {
 		const evaluate = (bundleJs: string, timeoutMs?: number) => evaluatePreviewBundle({ bundleJs }, root, timeoutMs === undefined ? {} : { timeoutMs })
 
 		expect(await evaluate(`export const describeAdapterDiagnostics = () => [];\nexport const describeDeclaredWidgetEvents = () => (${events});\n`))
-			.toEqual({ check: { state: 'valid' }, declaredWidgetEvents: { state: 'valid', widgets: { Tap: [{ name: 'tap', description: 'Tapped' }] } } })
+			.toMatchObject({ check: { state: 'valid' }, declaredWidgetEvents: { state: 'valid', widgets: { Tap: [{ name: 'tap', description: 'Tapped' }] } } })
 		// The Adapters did not pass the check: the set is invalid, and its Events are not offered.
 		expect(await evaluate(`export const describeAdapterDiagnostics = () => [{ code: "adapter.x", path: "/adapters/0", message: "no" }];\nexport const describeDeclaredWidgetEvents = () => (${events});\n`))
 			.toMatchObject({ check: { state: 'invalid' }, declaredWidgetEvents: { state: 'unavailable' } })
 		// An Event description that throws, or reports another shape, leaves only the Events unknown.
 		expect(await evaluate('export const describeAdapterDiagnostics = () => [];\nexport const describeDeclaredWidgetEvents = () => { throw new Error("defect"); };\n'))
-			.toEqual({ check: { state: 'valid' }, declaredWidgetEvents: { state: 'unavailable' } })
+			.toMatchObject({ check: { state: 'valid' }, declaredWidgetEvents: { state: 'unavailable' } })
 		expect(await evaluate('export const describeAdapterDiagnostics = () => [];\nexport const describeDeclaredWidgetEvents = () => ({ Tap: [{ name: 1 }] });\n'))
-			.toEqual({ check: { state: 'valid' }, declaredWidgetEvents: { state: 'unavailable' } })
+			.toMatchObject({ check: { state: 'valid' }, declaredWidgetEvents: { state: 'unavailable' } })
 		// An Events value that cannot be cloned to the server (a function) leaves only the Events unknown too.
 		expect(await evaluate('export const describeAdapterDiagnostics = () => [];\nexport const describeDeclaredWidgetEvents = () => ({ Tap: [{ name: "tap", description: "Tapped", f() {} }] });\n'))
-			.toEqual({ check: { state: 'valid' }, declaredWidgetEvents: { state: 'unavailable' } })
+			.toMatchObject({ check: { state: 'valid' }, declaredWidgetEvents: { state: 'unavailable' } })
 		// An evaluation that fails or does not report in time is `unchecked`, and the Events are unavailable.
 		expect(await evaluate('throw new Error("always");\n')).toMatchObject({ check: { state: 'unchecked' }, declaredWidgetEvents: { state: 'unavailable' } })
 		expect(await evaluate('await new Promise(() => {});\n', 300)).toMatchObject({ check: { state: 'unchecked' }, declaredWidgetEvents: { state: 'unavailable' } })
+	})
+
+	it('reports the Widget Catalog whenever the bundle ran and reported it, also for a set whose check found problems (#116)', async () => {
+		const root = await temporaryRoot()
+		const rows = '[{ adapterIndex: 0, adapterId: "acme", type: "Tap", description: "A tap target", config: null, properties: [], state: [], events: [], i18n: [], assetFields: [] }]'
+		const evaluate = (bundleJs: string) => evaluatePreviewBundle({ bundleJs }, root)
+
+		expect(await evaluate(`export const describeAdapterDiagnostics = () => [];\nexport const describeWidgetCatalog = () => (${rows});\n`))
+			.toMatchObject({ check: { state: 'valid' }, widgetCatalog: { state: 'valid', entries: [{ adapterId: 'acme', type: 'Tap' }] } })
+		// A set invalid only by its checks still lists its entries, so each problem shows against its entry.
+		expect(await evaluate(`export const describeAdapterDiagnostics = () => [{ code: "adapter.x", path: "/adapters/0", message: "no" }];\nexport const describeWidgetCatalog = () => (${rows});\n`))
+			.toMatchObject({ check: { state: 'invalid' }, widgetCatalog: { state: 'valid' } })
+		// A description that throws, reports another shape or cannot be cloned leaves only the Catalog unknown.
+		expect(await evaluate('export const describeAdapterDiagnostics = () => [];\nexport const describeWidgetCatalog = () => { throw new Error("defect"); };\n'))
+			.toMatchObject({ check: { state: 'valid' }, widgetCatalog: { state: 'unavailable' } })
+		expect(await evaluate('export const describeAdapterDiagnostics = () => [];\nexport const describeWidgetCatalog = () => ([{ type: 1 }]);\n'))
+			.toMatchObject({ check: { state: 'valid' }, widgetCatalog: { state: 'unavailable' } })
+		expect(await evaluate('export const describeAdapterDiagnostics = () => [];\nexport const describeWidgetCatalog = () => ([{ f() {} }]);\n'))
+			.toMatchObject({ check: { state: 'valid' }, widgetCatalog: { state: 'unavailable' } })
+		// A bundle without the description, or one that does not evaluate, has no Catalog.
+		expect(await evaluate('export const describeAdapterDiagnostics = () => [];\n')).toMatchObject({ widgetCatalog: { state: 'unavailable' } })
+		expect(await evaluate('throw new Error("always");\n')).toMatchObject({ check: { state: 'unchecked' }, widgetCatalog: { state: 'unavailable' } })
 	})
 
 	it('keeps every evaluation of a Preview bundle out of the server process (#249)', async () => {

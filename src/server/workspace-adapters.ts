@@ -21,7 +21,7 @@ import { canonicalJsonStringify } from '../domain/canonical-json'
 import type { Diagnostic } from '../domain/validation'
 import type { WorkspaceAdapterSelection } from '../domain/workspace/schema'
 import { kitBuildRunnerFor } from './kit-build'
-import { checkPreviewBundleAdapters, evaluatePreviewBundle, type DeclaredWidgetEventsResult, type PreviewAdapterCheck } from './preview-adapter-check'
+import { checkPreviewBundleAdapters, evaluatePreviewBundle, type DeclaredWidgetEventsResult, type PreviewAdapterCheck, type WidgetCatalogResult } from './preview-adapter-check'
 import {
 	extractProductAdapterManifest,
 	productAdapterApiCompatibility,
@@ -312,8 +312,8 @@ export type PreviewThemes = Readonly<Record<string, Readonly<Record<string, stri
  * evaluation and is `unavailable` unless the check passed.
  */
 export type SelectedWorkspacePreviewBundle =
-	| (PreviewBundleResult & { state: 'valid'; themes: PreviewThemes; adapterCheck: 'passed' | 'unchecked'; warnings: readonly Diagnostic[]; declaredWidgetEvents: DeclaredWidgetEventsResult })
-	| { state: 'invalid'; diagnostics: readonly Diagnostic[] }
+	| (PreviewBundleResult & { state: 'valid'; themes: PreviewThemes; adapterCheck: 'passed' | 'unchecked'; warnings: readonly Diagnostic[]; declaredWidgetEvents: DeclaredWidgetEventsResult; widgetCatalog: WidgetCatalogResult })
+	| { state: 'invalid'; diagnostics: readonly Diagnostic[]; widgetCatalog?: WidgetCatalogResult }
 
 export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, givenLayout?: WorkspaceLayout): Promise<SelectedWorkspacePreviewBundle> {
 	const layout = selectedLayout(givenLayout)
@@ -356,8 +356,8 @@ export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, g
 	// (Clause 01a116f0-cae2-7c64-9c76-d472f252789a): a set the Preview would refuse is invalid here.
 	// A bundle that cannot run in Node stays valid with a warning (owner decision during review of #248).
 	// The same one evaluation also yields the declared Widget Events (#249).
-	const { check, declaredWidgetEvents } = await evaluatePreviewBundle(bundle, workspaceRoot)
-	if (check.state === 'invalid') return { state: 'invalid', diagnostics: check.diagnostics }
+	const { check, declaredWidgetEvents, widgetCatalog } = await evaluatePreviewBundle(bundle, workspaceRoot)
+	if (check.state === 'invalid') return { state: 'invalid', diagnostics: check.diagnostics, widgetCatalog }
 	return {
 		state: 'valid',
 		...bundle,
@@ -365,6 +365,7 @@ export async function getSelectedWorkspacePreviewBundle(workspaceRoot: string, g
 		adapterCheck: check.state === 'valid' ? 'passed' : 'unchecked',
 		warnings: check.state === 'unchecked' ? check.warnings : [],
 		declaredWidgetEvents,
+		widgetCatalog,
 	}
 }
 

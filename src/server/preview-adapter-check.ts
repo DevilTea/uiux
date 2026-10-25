@@ -5,6 +5,7 @@ import { Worker } from 'node:worker_threads'
 import { maskHostPaths } from '../adapters/host-paths'
 import type { Diagnostic } from '../domain/validation'
 import type { DeclaredWidgetEvent, DeclaredWidgetEvents } from '../preview/browser-runtime'
+import { isDescribedWidgetCatalog, type DescribedWidgetCatalog } from '../preview/widget-catalog'
 import type { PreviewBundleResult } from './preview-bundler'
 
 /**
@@ -28,13 +29,23 @@ export type DeclaredWidgetEventsResult =
 	| Readonly<{ state: 'valid'; widgets: DeclaredWidgetEvents }>
 	| Readonly<{ state: 'unavailable' }>
 
-/** What the one evaluation of a bundle yields: the Adapter check and the declared Widget Events. */
-export type PreviewBundleEvaluation = Readonly<{ check: PreviewAdapterCheck; declaredWidgetEvents: DeclaredWidgetEventsResult }>
+/**
+ * Each Widget type of the active Adapters with what its plugin declares and its Catalog entry, for the
+ * Workbench's Catalog view: `valid` whenever the bundle ran in the server's worker and reported them,
+ * also for a set whose check found problems (the view shows those against their entries), otherwise
+ * `unavailable`.
+ */
+export type WidgetCatalogResult =
+	| Readonly<{ state: 'valid'; entries: DescribedWidgetCatalog }>
+	| Readonly<{ state: 'unavailable' }>
+
+/** What the one evaluation of a bundle yields: the Adapter check, the declared Widget Events and the Widget Catalog. */
+export type PreviewBundleEvaluation = Readonly<{ check: PreviewAdapterCheck; declaredWidgetEvents: DeclaredWidgetEventsResult; widgetCatalog: WidgetCatalogResult }>
 
 type PreviewBundle = Pick<PreviewBundleResult, 'bundleJs'>
 
 type WorkerReport =
-	| Readonly<{ ok: true; reported: unknown; events: unknown }>
+	| Readonly<{ ok: true; reported: unknown; events: unknown; catalog: unknown }>
 	| Readonly<{ ok: false; message: string; transient?: true }>
 
 /**
@@ -77,7 +88,11 @@ import(workerData.url).then(
     // Events that cannot be cloned to the server are as unknown as ones that throw.
     try { events = events === undefined ? undefined : structuredClone(events) }
     catch { events = undefined }
-    parentPort.postMessage({ ok: true, reported, events })
+    // The Catalog rows are read the same way: one that throws or cannot be cloned is as unknown as the Events.
+    let catalog
+    try { catalog = typeof module.describeWidgetCatalog === 'function' ? structuredClone(module.describeWidgetCatalog()) : undefined }
+    catch { catalog = undefined }
+    parentPort.postMessage({ ok: true, reported, events, catalog })
   },
   (error) => parentPort.postMessage({ ok: false, message: error instanceof Error ? error.message : String(error) }),
 )
@@ -137,6 +152,7 @@ function evaluationOf(bundle: PreviewBundle, workspaceRoot: string, options: Rea
 }
 
 const UNAVAILABLE: DeclaredWidgetEventsResult = Object.freeze({ state: 'unavailable' })
+const CATALOG_UNAVAILABLE: WidgetCatalogResult = Object.freeze({ state: 'unavailable' })
 
 async function runEvaluation(bundle: PreviewBundle, workspaceRoot: string, timeoutMs: number, onTransient: () => void): Promise<PreviewBundleEvaluation> {
 	const report = await evaluateInWorker(bundle.bundleJs, timeoutMs)
@@ -148,6 +164,9 @@ async function runEvaluation(bundle: PreviewBundle, workspaceRoot: string, timeo
 		declaredWidgetEvents: check.state === 'valid' && isDeclaredWidgetEvents(events)
 			? Object.freeze({ state: 'valid' as const, widgets: events })
 			: UNAVAILABLE,
+		widgetCatalog: report.ok && isDescribedWidgetCatalog(report.catalog)
+			? Object.freeze({ state: 'valid' as const, entries: report.catalog })
+			: CATALOG_UNAVAILABLE,
 	})
 }
 

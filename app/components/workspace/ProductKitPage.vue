@@ -345,7 +345,7 @@ function reveal(target: Readonly<{ hash: string; section?: string }>, moveFocus:
 		const top = block.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 24
 		const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 		container.scrollTo({ top: Math.max(0, top), behavior: moveFocus && !reduced ? 'smooth' : 'auto' })
-		if (moveFocus) block.querySelector<HTMLElement>('h2')?.focus({ preventScroll: true })
+		if (moveFocus) block.querySelector<HTMLElement>('h2, h3')?.focus({ preventScroll: true })
 	}
 	else if (target.section) {
 		container.scrollTo({ top: 0 })

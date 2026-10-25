@@ -6,6 +6,7 @@ import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-er
 import { componentDeclarations } from '../../utils/component-interface'
 import { componentAddCommand, componentSourceCall, DEFAULT_COMPONENT_TARGET } from '../../utils/component-commands'
 import { copyText } from '../../utils/copy-text'
+import ProductKitCatalogBlock from './ProductKitCatalogBlock.vue'
 
 /**
  * The Components section of the Product Kit page (Rule 01a11bb1-b918-7cb5-b581-a3fd3f647f09): the
@@ -18,7 +19,7 @@ import { copyText } from '../../utils/copy-text'
  * The registry and the component table read with `workspace.read`, as the Product Kit file does. Browsing reads the
  * component's files through `POST /api/product-kit/components/source`, which needs
  * `product-kit.source.read` (`canBrowse`); the server enforces it. Source text is shown as text only.
- * The Catalog part of the section waits on issue #116.
+ * The Catalog block closes the section (Rule 01a17443-6b37-797e-963c-282f2ec400a7, issue #116).
  */
 const props = defineProps<{
 	components: Readonly<Record<string, ProductKitComponent>>
@@ -564,5 +565,7 @@ const emitsDeclarations = computed(() => declarations.value.filter(item => item.
         </table>
       </div>
     </section>
+
+    <ProductKitCatalogBlock />
   </section>
 </template>
