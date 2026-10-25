@@ -131,6 +131,9 @@ describe('shared HTTP/MCP point-resource reads', { timeout: HEAVY_SERVER_SUITE_T
 				'create_view',
 				'decide_decision',
 				'defer_decision',
+				'delete_asset',
+				'delete_flow',
+				'delete_view',
 				'edit_review_message',
 				'export_handoff',
 				'get_component_source',
@@ -168,6 +171,8 @@ describe('shared HTTP/MCP point-resource reads', { timeout: HEAVY_SERVER_SUITE_T
 			expect(tools.tools.find(tool => tool.name === 'update_view_spec')?.annotations?.destructiveHint).toBe(true)
 			expect(tools.tools.find(tool => tool.name === 'update_view_structure')?.annotations?.destructiveHint).toBe(true)
 			expect(tools.tools.find(tool => tool.name === 'update_view_metadata')?.annotations?.destructiveHint).toBe(true)
+			for (const name of ['delete_view', 'delete_flow', 'delete_asset'])
+				expect(tools.tools.find(tool => tool.name === name)?.annotations?.destructiveHint, name).toBe(true)
 			expect(tools.tools.some(tool => /write|patch|filesystem/iu.test(tool.name))).toBe(false)
 		}
 		finally {
