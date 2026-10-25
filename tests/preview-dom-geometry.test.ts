@@ -407,6 +407,35 @@ describe('Runtime DOM measurer', () => {
 		}
 	})
 
+	it('clips a rounded Widget by a rounded overflow clip and by a clip path on an ancestor (#112)', async () => {
+		await page.setViewportSize({ width: 800, height: 600 })
+		const result = await measure(`
+			<svg width="0" height="0" style="position:absolute"><clipPath id="ancestor-clip"><circle cx="150" cy="50" r="48"></circle></clipPath></svg>
+			<div style="position:absolute;left:0;top:0;width:300px;height:100px;border-radius:40px;overflow:hidden;background:#fff">
+				<div data-widget-id="two-rounded" style="width:300px;height:100px;border-radius:20px;background:#eee"></div>
+			</div>
+			<div style="position:absolute;left:400px;top:0;width:300px;height:100px;clip-path:circle(48px at 50% 50%)">
+				<div data-widget-id="ancestor-circle" style="width:300px;height:100px;background:#eee"></div>
+			</div>
+			<div style="position:absolute;left:0;top:200px;width:300px;height:100px;clip-path:url(#ancestor-clip)">
+				<div data-widget-id="ancestor-svg" style="width:300px;height:100px;background:#eee"></div>
+			</div>`, ['two-rounded', 'ancestor-circle', 'ancestor-svg'])
+		const audit = await auditPixels(result, 1, true)
+		for (const id of ['two-rounded', 'ancestor-circle', 'ancestor-svg']) {
+			expect(result[id]!.regions.length, id).toBe(1)
+			expect(valid(result[id]!), id).toBe(true)
+			// No page background (white) from outside the clip, and little of the Widget given up.
+			expect(audit[id]!.foreign, id).toBe(0)
+			expect(result[id]!.regions[0]!.maxError, id).toBeGreaterThan(0)
+		}
+		expect(audit['two-rounded']!.lost).toBeLessThan(120)
+		expect(audit['ancestor-circle']!.lost).toBeLessThan(300)
+		expect(audit['ancestor-svg']!.lost).toBeLessThan(300)
+		// The circle of radius 48 about the Widget's centre: the area is that of the disc, from inside.
+		expect(area(result['ancestor-circle']!)).toBeLessThan(Math.PI * 48 * 48)
+		expect(area(result['ancestor-circle']!)).toBeGreaterThan(Math.PI * 48 * 48 - 2 * Math.PI * 48 * 0.5)
+	})
+
 	it('keeps failing closed for a mask, an underivable clip path and two curved clips on the Widget\'s own chain (#112)', async () => {
 		const result = await measure(`
 			<svg width="0" height="0" style="position:absolute"><clipPath id="path-clip"><path d="M0 0 L50 0 L50 100 Z"></path></clipPath></svg>
@@ -419,6 +448,84 @@ describe('Runtime DOM measurer', () => {
 		for (const id of ['mask', 'path', 'svg-path', 'missing', 'crossing', 'radial']) {
 			expect(result[id]!.rect.width, id).toBeGreaterThan(0)
 			expect(result[id]!.regions, id).toEqual([])
+		}
+	})
+
+	it('cuts the paint of an exactly cut occluder that lies beyond its box: shadows, outlines, generated content, overflowing text, markers (#112)', async () => {
+		const cases = [
+			['shadow', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;background:#000;box-shadow:0 0 0 15px #000"></div>'],
+			['outline', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;background:#000;outline:12px solid #000"></div>'],
+			['before', '<style>.pb::before{content:"";position:absolute;left:-30px;top:0;width:30px;height:100%;background:#000}</style><div class="pb" style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;background:#000"></div>'],
+			['overflowing-text', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:20px;height:100px;background:#000;color:#fff;font:16px/20px sans-serif;white-space:nowrap">Overflowing text</div>'],
+			['marker', '<ul style="position:absolute;left:0;top:0;margin:0;padding:0;list-style:none"><li style="position:absolute;left:calc(LEFTpx + 30px);top:TOPpx;display:list-item;list-style:disc outside;width:20px;height:100px;background:#000;color:#000;font:16px sans-serif">x</li></ul>'],
+			['border-without-fill', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:60px;height:100px;border:6px solid #000"></div>'],
+			['text-over-edge', '<div style="position:absolute;left:LEFTpx;top:TOPpx;margin-top:-6px;color:#000;font:16px/20px sans-serif">Overlay</div>'],
+			['gradient', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;background:linear-gradient(#000, #000)"></div>'],
+		] as const
+		const result = await measureGrid(cases)
+		const audit = await auditPixels(result)
+		for (const [id] of cases) {
+			expect(result[id]!.regions.length, id).toBeGreaterThan(0)
+			expect(valid(result[id]!), id).toBe(true)
+			expect(audit[id]!.foreign, id).toBe(0)
+		}
+		// The ring of an opaque border is cut, the interior it frames stays: a piece of its own.
+		const pieces = bounds(result['border-without-fill']!).sort((a, b) => a.left - b.left)
+		expect(pieces).toHaveLength(3)
+		const { left, top } = cell(cases.findIndex(([id]) => id === 'border-without-fill'))
+		expect(pieces[1]).toMatchObject({ left: left + 100 + 6, top: top + 6, right: left + 100 + 54, bottom: top + 94 })
+	})
+
+	it('keeps what a translucent fill and a translucent border let show, and cuts a solid border and text over it (#112)', async () => {
+		const result = await measureGrid([
+			['translucent-border', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:60px;height:100px;background:rgba(0,0,0,0.3);border:6px solid rgba(0,0,0,0.5)"></div>'],
+			['solid-border-on-translucent', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:60px;height:100px;background:rgba(0,0,0,0.3);border:6px solid rgb(0,0,0)"></div>'],
+			['dashed-border', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:60px;height:100px;border:6px dashed rgb(0,0,0)"></div>'],
+			['faded', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:60px;height:100px;opacity:0.5;border:6px solid rgb(0,0,0);color:#000;font:16px sans-serif">Faded</div>'],
+		])
+		expect(area(result['translucent-border']!)).toBe(300 * 100)
+		expect(area(result.faded!)).toBe(300 * 100)
+		// A solid opaque border is four exact strips: the two 6px sides split off the 48 × 88 interior it frames.
+		expect(result['solid-border-on-translucent']!.regions).toHaveLength(3)
+		expect(area(result['solid-border-on-translucent']!)).toBeCloseTo(300 * 100 - (2 * 6 * 100 + 2 * 6 * 48), 6)
+		// A dashed border is only bounded: its box is cut, not its dashes.
+		expect(bounds(result['dashed-border']!).map(piece => [piece.left, piece.right]).sort((a, b) => a[0]! - b[0]!)).toEqual([[0, 100], [160, 300]])
+		expect(Object.values(result).every(geometry => valid(geometry))).toBe(true)
+	})
+
+	it('fails closed for text whose combining marks have no bound (#112)', async () => {
+		const result = await measure(`
+			<div data-widget-id="marks" style="position:absolute;left:0;top:0;width:300px;height:100px;background:#eee"></div>
+			<div style="position:absolute;left:100px;top:0;font:16px sans-serif;color:#000">á́́́ b</div>`, ['marks'])
+		expect(result.marks!.rect.width).toBe(300)
+		expect(result.marks!.regions).toEqual([])
+	})
+
+	it('selects paint without a finite bound wherever its clips allow, not only where its border box is (#112)', async () => {
+		const unbounded = async (occluder: string) => (await measure(`
+			<svg width="0" height="0" style="position:absolute"><filter id="f"><feGaussianBlur stdDeviation="4"></feGaussianBlur></filter></svg>
+			<div data-widget-id="w" style="position:absolute;left:0;top:200px;width:300px;height:100px;background:#eee"></div>
+			${occluder}`, ['w'])).w!
+		// An SVG filter and a 3D transform paint anywhere: no region of a Widget they might reach.
+		expect((await unbounded('<div style="position:absolute;left:0;top:500px;width:20px;height:20px;background:#000;filter:url(#f)"></div>')).regions).toEqual([])
+		expect((await unbounded('<div style="position:absolute;left:400px;top:500px;width:20px;height:20px;background:#000;transform:perspective(40px) rotateY(80deg)"></div>')).regions).toEqual([])
+		// A clip that does not reach the Widget bounds that paint; a finite filter bounds itself.
+		expect(bounds(await unbounded('<div style="position:absolute;left:0;top:420px;width:300px;height:40px;overflow:hidden"><div style="width:20px;height:20px;background:#000;filter:url(#f)"></div></div>'))).toEqual([{ left: 0, top: 200, right: 300, bottom: 300, maxError: 0 }])
+		expect(bounds(await unbounded('<div style="position:absolute;left:400px;top:500px;width:20px;height:20px;background:#000;filter:blur(3px)"></div>'))).toEqual([{ left: 0, top: 200, right: 300, bottom: 300, maxError: 0 }])
+	})
+
+	it('reaches the paint of an element whose text, generated content or marker leaves a box that does not overlap the Widget (#112)', async () => {
+		const cases = [
+			['text', '<div style="position:absolute;left:calc(LEFTpx - 150px);top:calc(TOPpx + 20px);width:20px;height:20px;color:#000;font:16px/20px sans-serif;white-space:nowrap">Text running far out of a tiny box</div>'],
+			['decoration', '<span style="position:absolute;left:LEFTpx;top:calc(TOPpx - 70px);text-decoration:underline;text-decoration-thickness:6px;text-underline-offset:60px;color:#000;font:16px/20px sans-serif"><span>decorated</span></span>'],
+			['pseudo', '<style>.pa::after{content:"";position:absolute;left:0;top:110px;width:60px;height:12px;background:#000}</style><div class="pa" style="position:absolute;left:LEFTpx;top:calc(TOPpx - 100px);width:20px;height:20px"></div>'],
+		] as const
+		const result = await measureGrid(cases)
+		const audit = await auditPixels(result)
+		for (const [id] of cases) {
+			expect(valid(result[id]!), id).toBe(true)
+			expect(audit[id]!.foreign, id).toBe(0)
+			expect(result[id]!.regions.length, id).toBeGreaterThan(0)
 		}
 	})
 

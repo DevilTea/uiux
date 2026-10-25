@@ -12,53 +12,58 @@ import type { RoundedRectRadii } from './rounded-contour'
  *
  * For one Widget element it reports the full rendered border box (`rect`) and the regions of it
  * that are reliably visible: the part surviving the content viewport, every ancestor overflow or
- * paint-containment clip on its containing-block chain, minus proven opaque occluders and minus the
- * finite paint bound of every occluder whose exact covering shape is unproven. It never guesses.
- * Whenever the visible set cannot be proven inside the subset below, it reports `regions: []`
- * ("no reliably visible region", Part 4) instead of a bounding box.
+ * paint-containment clip on its containing-block chain and every clip path on its chain, minus
+ * proven opaque occluders and minus the finite paint bound of every occluder whose exact covering
+ * shape is unproven. It never guesses. Whenever the visible set cannot be proven inside the subset
+ * below, it reports `regions: []` ("no reliably visible region", Part 4) instead of a bounding box.
  *
  * Exact subset:
  * - Widget boxes whose transform chain is translation plus uniform positive scale. Rotation, skew,
  *   flips, nonuniform scale, 3D and motion paths fail closed. The chain follows the flat tree
  *   (assigned slot, parent element, shadow host), and an SVG ancestor fails closed. A filter, blend
- *   mode, mask or clip path on the Widget's own chain fails closed too.
- * - Rectangular clips are exact. One rounded shape may take part (the Widget's own border radius,
- *   or one rounded overflow clip whose corners reach the visible area): its contour is the
- *   `approximateRoundedRectContour` polygon clipped by the exact rectangle, with that contour's
- *   `maxError`. Two rounded shapes at once, or a rounded shape plus any cut, fail closed.
+ *   mode or mask on the Widget's own chain fails closed too.
+ * - Rectangular clips are exact. Rounded shapes (the Widget's own border radius, rounded overflow
+ *   clips whose corners reach the visible area) and clip paths on the Widget's chain (`inset()`,
+ *   `circle()`, `ellipse()`, simple `polygon()` and geometric SVG `<clipPath>` references; see
+ *   `clip-shapes.ts`) take part as polygons that lie inside the true shape, so the Widget keeps
+ *   at most what it truly shows. Any number may combine, with the largest approximation error as
+ *   the region's `maxError`.
  * - Occluders are elements that paint above the Widget, determined from the CSS painting order
  *   (stacking contexts, z-index, positioned layers, tree order). An undecided order (overlap
  *   between two in-flow boxes, whose backgrounds and inline content interleave) is taken as above.
- *   An element is examined when its paint extent overlaps the visible area: its border box grown
- *   by its own outline, outer shadows, border-image outset and replaced-content clip margin and by
- *   the filter extent of it and every ancestor (Discussion #241 owner decision 2).
+ *   An element is examined when its paint reaches the visible area: its border box grown by its own
+ *   outline, outer shadows, border-image outset, replaced-content clip margin, generated content,
+ *   list marker, overflowing text and the filter extent of it and every ancestor (Discussion #241
+ *   owner decision 2). Paint without a finite bound is examined wherever its clips allow.
  *   - Opaque (subtracted exactly): order proven above, opacity 1 along the chain, an opaque
- *     background colour, no filter, blend mode, mask or clip-path, a uniform transform chain,
- *     square corners where they meet the Widget, painted area clipped by the occluder's own clips.
- *   - Translucent (kept, Part 4): a background with alpha below 1, borders or text only.
+ *     background colour, no filter, blend mode or mask, a uniform transform chain, painted area
+ *     clipped by the occluder's own clips. Rounded corners, rounded clips, clip paths and SVG clip
+ *     paths reaching the Widget make the cut a polygon that contains the true covered area.
+ *   - Translucent (kept, Part 4): a background colour with alpha below 1 and no image, borders with
+ *     alpha below 1, or anything under an opacity below 1. Solid opaque borders cut four exact
+ *     strips.
  *   - Bounded (Discussion #241 R6; subtracted by an over-approximation): replaced content (images,
- *     SVG, canvas, video, frames, native controls), filters, blend modes, masks, clip paths,
- *     rounded opaque corners over the Widget, transforms outside the uniform subset, rounded or
- *     unsupported clips of the occluder, and an undecided paint order. The cut is the occluder's
- *     paint extent united with its own text (inline boxes grown by one em of glyph ink, its
- *     decoration, stroke and text shadows), with the engine's pixel snapping under transforms,
- *     clipped by its clip chain only when no filter grows it and its chain is uniform, and rounded
- *     outward to whole device pixels. Outsets scale by the exact uniform chain scale (transforms
- *     and zoom), otherwise by a bound from the snapped layout size. Subtracting more than the
- *     occluder paints only shrinks what is reported visible. A bounded cut lying wholly inside the
- *     visible area would leave only an unreported interior hole, so the Widget gets no precise
- *     region (Discussion #241 owner decision 1); exact cuts may still leave such holes.
+ *     SVG, canvas, video, frames, native controls), filters, blend modes, masks, clip paths that
+ *     cannot be derived, transforms outside the uniform subset, an undecided paint order, a fill
+ *     that is an image or gradient, other borders, and paint beyond the exact cut: box shadows,
+ *     outlines, border images, text and generated content that are not wholly under it. The cut is
+ *     the occluder's paint extent united with its own text (inline boxes grown by one em of glyph
+ *     ink, its decoration, including one propagated from an ancestor, stroke and text shadows),
+ *     its positioned pseudo-elements and its list marker, with the engine's pixel snapping under
+ *     transforms, clipped by its clip chain only when no filter grows it and its chain is uniform,
+ *     and rounded outward to whole device pixels. Outsets scale by the exact uniform chain scale
+ *     (transforms and zoom), otherwise by a bound from the snapped layout size. Subtracting more
+ *     than the occluder paints only shrinks what is reported visible. A bounded cut lying wholly
+ *     inside the visible area would leave only an unreported interior hole, so the Widget gets no
+ *     precise region (Discussion #241 owner decision 1); exact cuts may still leave such holes.
  *   - Unbounded (fail closed): a filter other than the CSS shorthand functions (such as `url()`),
  *     a 3D transform or `-webkit-box-reflect` on the occluder's chain, replaced content whose
- *     overflow is visible, an unparsed shadow, outline, outset or text style, or an outset that a
- *     transform without a measurable box makes unscalable.
+ *     overflow is visible, an unparsed shadow, outline, outset or text style, text with combining
+ *     marks, a transformed, floated, shadowed or offset pseudo-element, a list marker of unknown
+ *     width, or an outset that a transform without a measurable box makes unscalable.
  *
- * Not modelled (issue #112): generated content (`::before`/`::after`, list markers); box shadows,
- * outlines and overflowing text of exact or translucent occluders; the text of an element whose
- * paint extent does not reach the Widget; paint without a finite bound of an element whose border
- * box does not overlap the Widget; glyph ink farther than one em from its inline boxes (such as
- * stacked combining marks) and decorations propagated from an ancestor. They are treated as not
- * covering.
+ * Glyph ink is taken to stay within one em of the inline boxes of its text in a bound, and within
+ * those boxes when the text lies under an exact cut.
  */
 
 export type DomGeometryMeasurerOptions = Readonly<{
@@ -77,6 +82,14 @@ function isPolygonCut(shape: CutShape): shape is PolygonShape {
 }
 type ClipChain = Readonly<{ box: Box; rounded: readonly RoundedShape[] }> | 'unsupported'
 type PaintKey = Readonly<{ element: Element; flow: boolean; z: number }>
+/**
+ * What an element's generated content (`::before`, `::after`, a list marker) can paint beyond its own
+ * text: `flow` when some of it sits in the element's content flow (so it stays within the scrollable
+ * overflow), and the page-space boxes of the rest. `unbounded` when no finite bound is provable.
+ */
+type GeneratedContent = Readonly<{ flow: boolean; boxes: readonly Box[] }> | 'unbounded'
+/** The client box of an element's own text nodes, and whether the text has combining marks (ink without a bound). */
+type OwnText = Readonly<{ box: Box; marks: boolean }>
 
 /**
  * The computed-style values the measurer reads, snapshotted once per element per style epoch.
@@ -94,6 +107,7 @@ const STYLE_KEYS = [
 	'backgroundColor', 'backgroundImage', 'backgroundClip', 'boxShadow', 'outlineStyle', 'outlineWidth', 'outlineOffset', 'appearance',
 	'borderImageSource', 'borderImageOutset', 'zoom',
 	'textShadow', 'fontSize', 'textDecorationLine', 'textUnderlineOffset', 'textDecorationThickness',
+	'direction', 'writingMode', 'textIndent', 'listStyleType', 'listStylePosition', 'listStyleImage',
 ] as const
 type StyleKey = typeof STYLE_KEYS[number] | 'webkitMaskImage' | 'webkitAppearance' | 'webkitBoxReflect' | 'webkitTextStrokeWidth'
 type StyleFacts = Readonly<Record<StyleKey, string>>
@@ -129,11 +143,15 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	let widgets: Map<string, Element> | undefined
 	let candidateElements: Element[] | undefined
 	let reaches = new Map<Element, boolean>()
+	let generators = new Map<Element, boolean>()
+	let texts = new Map<Element, boolean>()
 	let filteredChains = new Map<Element, boolean>()
 	// Per-pass caches: layout is read once per element per animation frame.
 	let rects = new Map<Element, DOMRect>()
 	let candidates: { elements: Element[]; boxes: Float64Array } | undefined
 	let paintBounds = new Map<Element, Box | 'unbounded' | 'empty'>()
+	let generatedContents = new Map<Element, GeneratedContent>()
+	let ownTexts = new Map<Element, OwnText | undefined>()
 	let viewport: Box | undefined
 
 	function rectOf(element: Element): DOMRect {
@@ -194,9 +212,15 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		const boxes = new Float64Array(elements.length * 4)
 		elements.forEach((element, index) => {
 			let box: Box = rectOf(element)
-			if (mayPaintOutside(element)) {
+			if (mayPaintOutside(element) || textMayEscape(element)) {
 				const extent = paintExtent(element, false)
-				if (extent !== 'unbounded') box = union(box, extent)
+				// Paint without a finite bound can reach any pixel its clips allow: it is selected everywhere
+				// they do, never only where its border box is (Rule 01a11687-3214).
+				if (extent === 'unbounded') {
+					const clips = clipChainOf(element, true)
+					box = union(box, clips === 'unsupported' ? viewportBox() : clips.box)
+				}
+				else box = union(box, extent)
 			}
 			boxes[index * 4] = box.left
 			boxes[index * 4 + 1] = box.top
@@ -217,14 +241,57 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		let value = reaches.get(element)
 		if (value === undefined) {
 			const style = view.getComputedStyle(element)
+			const chain = chainOf(element)
 			value = filteredChain(element)
+				|| !chain.planar
+				|| chain.reflect
 				|| style.boxShadow !== 'none'
 				|| style.outlineStyle !== 'none'
 				|| style.borderImageSource !== 'none'
 				|| (CLIPPED_REPLACED_TAGS.has(element.tagName.toUpperCase()) && trailingLength(style.overflowClipMargin) !== 0)
+				|| generatesContent(element)
 			reaches.set(element, value)
 		}
 		return value
+	}
+
+	/** Whether the element has a `::before`, a `::after` or a list marker, judged from computed values only (per style epoch). */
+	function generatesContent(element: Element): boolean {
+		let value = generators.get(element)
+		if (value === undefined) {
+			const style = styleOf(element)
+			value = (/(?:^|\s)list-item(?:\s|$)/.test(style.display) && (style.listStyleType !== 'none' || style.listStyleImage !== 'none'))
+				|| pseudoGenerates(view.getComputedStyle(element, '::before'))
+				|| pseudoGenerates(view.getComputedStyle(element, '::after'))
+			generators.set(element, value)
+		}
+		return value
+	}
+
+	/** Whether the element has a text node child with something to paint (per style epoch). */
+	function hasText(element: Element): boolean {
+		let value = texts.get(element)
+		if (value === undefined) {
+			value = hasOwnText(element)
+			texts.set(element, value)
+		}
+		return value
+	}
+
+	/**
+	 * Whether an element's own text can paint beyond its border box, judged cheaply: it overflows its
+	 * box, is laid out outside the horizontal left-to-right flow or indented backwards, or has a
+	 * shadow, a stroke or a decoration that reaches past the glyphs. Evaluated in every pass: overflow
+	 * is layout, not style.
+	 */
+	function textMayEscape(element: Element): boolean {
+		const style = styleOf(element)
+		if (!hasText(element)) return false
+		if (style.textShadow !== 'none' || (style.webkitTextStrokeWidth !== '' && px(style.webkitTextStrokeWidth) !== 0) || decorationOf(element) !== undefined) return true
+		if (isInlineDisplay(style) || clipsOwnContent(element, style)) return false
+		if (style.direction !== 'ltr' || style.writingMode !== 'horizontal-tb' || (style.textIndent.startsWith('-') && px(style.textIndent) !== 0)) return true
+		const html = element as HTMLElement
+		return typeof html.scrollWidth === 'number' && (html.scrollWidth > html.clientWidth || html.scrollHeight > html.clientHeight)
 	}
 
 	function filteredChain(element: Element): boolean {
@@ -625,7 +692,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		}
 	}
 
-	/** Classifies every element whose box overlaps the visible area and is not the Widget's own. */
+	/** Classifies every element whose paint can reach the visible area and is not the Widget's own. */
 	function occlusionEvidence(target: Element, visible: Box): OcclusionEvidence<CutShape>[] | 'unsupported' {
 		const { elements, boxes } = candidateBoxes()
 		const evidence: OcclusionEvidence<CutShape>[] = []
@@ -637,37 +704,90 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 			if (!(right > left) || !(bottom > top)) continue
 			const candidate = elements[index]!
 			if (candidate === target || candidate.contains(target) || target.contains(candidate)) continue
-			const item = classifyCandidate(candidate, target, visible)
-			if (item === 'unsupported') return 'unsupported'
-			if (item) evidence.push(item)
+			const items = classifyCandidate(candidate, target, visible)
+			if (items === 'unsupported') return 'unsupported'
+			evidence.push(...items)
 		}
 		return evidence
 	}
 
-	function classifyCandidate(candidate: Element, target: Element, visible: Box): OcclusionEvidence<CutShape> | 'unsupported' | undefined {
+	type Evidence = OcclusionEvidence<CutShape>
+	const TRANSLUCENT: Evidence = Object.freeze({ classification: 'translucent', targetContribution: 'proven-nonzero' })
+
+	/**
+	 * The evidence of one element, for every pixel it paints (its children are candidates of their
+	 * own): an opaque fill is subtracted exactly, a translucent fill keeps what it covers, and any paint
+	 * beyond that, such as borders, shadows, outlines, text, generated content and markers, is neither
+	 * ignored nor assumed translucent: it is cut by its finite paint bound, or is unbounded (Rule
+	 * 01a11687-3214).
+	 */
+	function classifyCandidate(candidate: Element, target: Element, visible: Box): Evidence[] | 'unsupported' {
 		const style = styleOf(candidate)
-		if (style.visibility !== 'visible') return undefined
+		if (style.visibility !== 'visible') return []
 		const chain = chainOf(candidate)
-		if (chain.opacity === 0) return undefined
-		const paint = paintedContent(candidate, style)
-		if (paint === 'nothing') return undefined
+		if (chain.opacity === 0) return []
+		const replaced = isReplacedPaint(candidate, style)
+		const fill = replaced ? 'unknown' : fillKind(style)
+		if (!replaced && fill === 'none' && !paintsBesidesFill(candidate, style)) return []
 		// An undecided order is taken as above: covering paint that is really below only cuts more.
 		const order = paintOrder(candidate, target)
-		if (order === 'below') return undefined
-		if (paint === 'replaced' || chain.compositing || chain.mask || !chain.transformOk || chain.reflect) return boundedCut(candidate)
-		if (paint === 'translucent' || chain.opacity < 1) return chain.clipPath ? boundedCut(candidate) : { classification: 'translucent', targetContribution: 'proven-nonzero' }
-		if (order === 'unknown') return boundedCut(candidate)
+		if (order === 'below') return []
+		const bounded = (): Evidence[] | 'unsupported' => {
+			const cut = boundedCut(candidate)
+			return cut === 'unsupported' ? cut : cut ? [cut] : []
+		}
+		if (replaced || chain.compositing || chain.mask || !chain.transformOk || chain.reflect) return bounded()
+		// Under an opacity below 1 everything the element paints, text and borders included, lets the Widget show.
+		if (chain.opacity < 1) return chain.clipPath ? bounded() : [TRANSLUCENT]
+		if (fill === 'unknown') return bounded()
 
-		// Opaque background: the covered area is the background painting area, clipped by the
-		// occluder's own clip chain. Rounded corners, clip paths and SVG clip paths that reach the
-		// Widget make the covered area a polygon that contains the true shape (Rules 01a11687-3109,
-		// 01a11687-3297); one that cannot be derived exactly falls back to the finite paint bound.
+		const evidence: Evidence[] = []
+		if (fill === 'translucent') {
+			if (chain.clipPath) return bounded()
+			evidence.push(TRANSLUCENT)
+		}
+		let exact: ExactCut | undefined
+		if (fill === 'opaque') {
+			if (order === 'unknown') return bounded()
+			const result = exactOpaqueCut(candidate, style, chain, visible)
+			if (result === 'bounded') return bounded()
+			exact = result
+		}
+		const extra = extraPaint(candidate, style, exact)
+		if (extra === 'unbounded') return 'unsupported'
+		if (extra === 'bounded') {
+			const cut = boundedCut(candidate)
+			if (cut === 'unsupported') return cut
+			// The paint bound contains the exact cut: it replaces it.
+			return cut ? [...evidence, cut] : evidence
+		}
+		// A border an opaque fill does not lie under (a fill clipped to the padding or content box).
+		if (!(fill === 'opaque' && (style.backgroundClip === 'border-box' || style.backgroundClip === ''))) {
+			const borders = borderEvidence(candidate, style)
+			if (borders === 'bounded') return bounded()
+			evidence.push(...borders)
+		}
+		if (exact) evidence.push(exact.evidence)
+		return evidence
+	}
+
+	/** The exact cut of an opaque fill, and the rectangle it is when it is one (for the paint that must lie under it). */
+	type ExactCut = Readonly<{ evidence: Evidence; rect: Box | undefined; clip: Box }>
+
+	/**
+	 * Opaque background: the covered area is the background painting area, clipped by the occluder's
+	 * own clip chain. Rounded corners, clip paths and SVG clip paths that reach the Widget make the
+	 * covered area a polygon that contains the true shape (Rules 01a11687-3109, 01a11687-3297); one that
+	 * cannot be derived exactly falls back to the finite paint bound (`bounded`). Undefined: it covers
+	 * nothing the Widget can show.
+	 */
+	function exactOpaqueCut(candidate: Element, style: StyleFacts, chain: ChainFlags, visible: Box): ExactCut | 'bounded' | undefined {
 		const bounds = rectOf(candidate)
 		const scale = scaleOf(candidate)
 		const inset = backgroundInset(style, scale)
 		const covered = { left: bounds.left + inset.left, top: bounds.top + inset.top, right: bounds.right - inset.right, bottom: bounds.bottom - inset.bottom }
 		const clips = clipChainOf(candidate)
-		if (clips === 'unsupported') return boundedCut(candidate)
+		if (clips === 'unsupported') return 'bounded'
 		const painted = intersect(covered, clips.box)
 		if (!painted) return undefined
 		const reach = intersect(painted, visible) ?? painted
@@ -679,7 +799,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 			const shape: RoundedShape = { rect: rectOfBox(covered), radii }
 			if (cornersReach(shape, reach)) {
 				const approximated = exactScaleOf(candidate) === undefined ? undefined : roundedRectShape(shape.rect, shape.radii, 'cover', roundedTargetMaxError)
-				if (!approximated) return boundedCut(candidate)
+				if (!approximated) return 'bounded'
 				covers.push(approximated)
 				kind = 'rounded-box'
 			}
@@ -687,22 +807,105 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		for (const shape of clips.rounded) {
 			if (!cornersReach(shape, reach)) continue
 			const approximated = roundedRectShape(shape.rect, shape.radii, 'cover', roundedTargetMaxError)
-			if (!approximated) return boundedCut(candidate)
+			if (!approximated) return 'bounded'
 			covers.push(approximated)
 			kind = 'rounded-box'
 		}
 		if (chain.clipPath) {
 			const shapes = chainClipShapes(candidate, 'cover')
-			if (shapes === 'unsupported') return boundedCut(candidate)
+			if (shapes === 'unsupported') return 'bounded'
 			covers.push(...shapes)
 			kind = clipShapeKind(candidate)
 		}
-		if (covers.length === 0) return { classification: 'opaque', targetContribution: 'proven-zero', shape: { kind: 'rectangle', shape: rectOfBox(painted) } }
+		if (covers.length === 0) return { evidence: { classification: 'opaque', targetContribution: 'proven-zero', shape: { kind: 'rectangle', shape: rectOfBox(painted) } }, rect: painted, clip: clips.box }
 		const shape = intersectShapes(rectangleShape(painted.left, painted.top, painted.right, painted.bottom), covers)
-		if (!shape) return boundedCut(candidate)
+		if (!shape) return 'bounded'
 		// Nothing of the occluder lies where it clips: it covers nothing.
 		if (shape.polygons.length === 0) return undefined
-		return { classification: 'opaque', targetContribution: 'proven-zero', shape: { kind, shape } }
+		return { evidence: { classification: 'opaque', targetContribution: 'proven-zero', shape: { kind, shape } }, rect: undefined, clip: clips.box }
+	}
+
+	/**
+	 * What an element paints beyond its exact opaque fill, if it has one: its outlines and outer
+	 * shadows, its text, its generated content and marker, each only when it is not wholly under the
+	 * exact rectangle. `bounded`: cut by the paint bound; `unbounded`: no finite bound is provable.
+	 */
+	function extraPaint(element: Element, style: StyleFacts, exact: ExactCut | undefined): 'none' | 'bounded' | 'unbounded' {
+		const outsets = ownPaintOutsets(element, style)
+		if (!outsets) return 'unbounded'
+		if (!isZeroOutsets(outsets)) return 'bounded'
+		// Paint that lies under the exact rectangle, after the element's clips, is covered already.
+		const under = (box: Box) => {
+			if (!exact?.rect) return false
+			const shown = intersect(box, exact.clip)
+			return shown === undefined || contains(exact.rect, shown)
+		}
+		const content = generatedContent(element)
+		if (content === 'unbounded') return 'unbounded'
+		if (content.boxes.some(box => !under(box))) return 'bounded'
+		if (content.flow) {
+			const overflow = flowOverflowBox(element, style)
+			if (overflow === 'unbounded') return 'unbounded'
+			if (overflow || !under(rectOf(element))) return 'bounded'
+		}
+		const text = ownTextBound(element, style, false)
+		if (text === 'unbounded') return 'unbounded'
+		if (text && !under(text)) return 'bounded'
+		return 'none'
+	}
+
+	/**
+	 * Evidence for an element's borders: a solid opaque border without rounded corners is four exact
+	 * rectangles, a translucent one keeps what it covers, and any other border (dashed, double,
+	 * rounded, an image) is `bounded`.
+	 */
+	function borderEvidence(element: Element, style: StyleFacts): Evidence[] | 'bounded' {
+		const sides = (['Top', 'Right', 'Bottom', 'Left'] as const).filter((side) => {
+			const lineStyle = style[`border${side}Style`]
+			return px(style[`border${side}Width`]) > 0 && lineStyle !== 'none' && lineStyle !== 'hidden' && colorAlpha(style[`border${side}Color`]) !== 0
+		})
+		if (sides.length === 0) return []
+		if (style.borderImageSource !== 'none' && style.borderImageSource !== '') return 'bounded'
+		const evidence: Evidence[] = []
+		let opaque = false
+		for (const side of sides) {
+			const alpha = colorAlpha(style[`border${side}Color`])
+			if (alpha === undefined) return 'bounded'
+			if (alpha < 1) {
+				if (!evidence.includes(TRANSLUCENT)) evidence.push(TRANSLUCENT)
+				continue
+			}
+			if (style[`border${side}Style`] !== 'solid') return 'bounded'
+			opaque = true
+		}
+		if (!opaque) return evidence
+		const bounds = rectOf(element)
+		const outer = radiiOf(element, { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height })
+		const clips = clipChainOf(element)
+		if (outer || clips === 'unsupported' || clips.rounded.length > 0 || chainOf(element).clipPath) return 'bounded'
+		const scale = scaleOf(element)
+		// Each strip spans the whole side, corners included: where two solid opaque sides meet, that is exactly what they paint.
+		const strips: Readonly<Record<typeof sides[number], Box>> = {
+			Top: { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.top + px(style.borderTopWidth) * scale },
+			Bottom: { left: bounds.left, top: bounds.bottom - px(style.borderBottomWidth) * scale, right: bounds.right, bottom: bounds.bottom },
+			Left: { left: bounds.left, top: bounds.top, right: bounds.left + px(style.borderLeftWidth) * scale, bottom: bounds.bottom },
+			Right: { left: bounds.right - px(style.borderRightWidth) * scale, top: bounds.top, right: bounds.right, bottom: bounds.bottom },
+		}
+		for (const side of sides) {
+			if (colorAlpha(style[`border${side}Color`]) !== 1) continue
+			const shown = intersect(strips[side], clips.box)
+			if (shown) evidence.push({ classification: 'opaque', targetContribution: 'proven-zero', shape: { kind: 'rectangle', shape: rectOfBox(shown) } })
+		}
+		return evidence
+	}
+
+	/** Whether the element paints anything besides its background colour: borders, outlines, shadows, text, generated content. */
+	function paintsBesidesFill(element: Element, style: StyleFacts): boolean {
+		if (hasVisibleBorder(style) || hasText(element)) return true
+		const outsets = ownPaintOutsets(element, style)
+		if (!outsets || !isZeroOutsets(outsets) || style.boxShadow !== 'none' || (style.outlineStyle !== 'none' && px(style.outlineWidth) > 0)) return true
+		const content = generatedContent(element)
+		return content === 'unbounded' || content.flow || content.boxes.length > 0
 	}
 
 	/** The kind of the nearest clip path on the element's flat-tree chain. */
@@ -750,7 +953,10 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		if (bound === undefined) {
 			const extent = paintExtent(element, true)
 			bound = extent
-			if (extent !== 'unbounded' && !extent.filtered && chainOf(element).transformOk) {
+			// A positioned pseudo-element escapes the clips between its element and its containing block.
+			const content = generatedContent(element)
+			const escapes = content !== 'unbounded' && content.boxes.length > 0
+			if (extent !== 'unbounded' && !extent.filtered && !escapes && chainOf(element).transformOk) {
 				const clips = clipChainOf(element, true)
 				bound = clips === 'unsupported' ? extent : intersect(extent, clips.box) ?? 'empty'
 			}
@@ -777,10 +983,17 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		const own = chain.transformed ? { left: outsets.left + 1, top: outsets.top + 1, right: outsets.right + 1, bottom: outsets.bottom + 1 } : outsets
 		const rect = rectOf(element)
 		let box: Box | undefined = growBox({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }, element, own)
-		if (box && text) {
-			const glyphs = ownTextBound(element, style)
-			if (glyphs === 'unbounded') return 'unbounded'
-			if (glyphs) box = union(box, glyphs)
+		if (box) {
+			// Generated content and list markers outside the box; the overflow of what sits in its flow.
+			const content = contentBoxes(element, style)
+			if (content === 'unbounded') return 'unbounded'
+			for (const part of content) box = union(box, part)
+			// Its own text: always for a bound, and for the selection when it can leave the box.
+			if (text || textMayEscape(element)) {
+				const glyphs = ownTextBound(element, style, true)
+				if (glyphs === 'unbounded') return 'unbounded'
+				if (glyphs) box = union(box, glyphs)
+			}
 		}
 		let filtered = false
 		for (let node: Element | null = element; node && box; node = flatTreeParent(node)) {
@@ -803,13 +1016,140 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	}
 
 	/**
-	 * The client box of the element's own text nodes, grown by how far their glyphs, decorations,
-	 * strokes and text shadows can paint beyond the text's inline boxes; undefined without rendered
-	 * text. Glyph ink is taken to stay within one em of the inline boxes, a decoration within its
-	 * offset plus its thickness (one em when automatic) beyond that.
+	 * The page-space boxes, beyond the border box, in which an element's generated content, list marker
+	 * and the overflow of its in-flow content can paint; `unbounded` when no finite bound is provable.
 	 */
-	function ownTextBound(element: Element, style: StyleFacts): Box | undefined | 'unbounded' {
+	function contentBoxes(element: Element, style: StyleFacts): Box[] | 'unbounded' {
+		const content = generatedContent(element)
+		if (content === 'unbounded') return 'unbounded'
+		const boxes = [...content.boxes]
+		if (content.flow) {
+			const overflow = flowOverflowBox(element, style)
+			if (overflow === 'unbounded') return 'unbounded'
+			if (overflow) boxes.push(overflow)
+		}
+		return boxes
+	}
+
+	function generatedContent(element: Element): GeneratedContent {
+		let content = generatedContents.get(element)
+		if (!content) {
+			content = computeGeneratedContent(element)
+			generatedContents.set(element, content)
+		}
+		return content
+	}
+
+	/**
+	 * The generated content of an element: its `::before`, `::after` and list marker. In-flow content
+	 * stays inside the element's scrollable overflow. A positioned pseudo-element is bounded by its
+	 * resolved box (and the text it can overflow it by); one that is transformed, floated, offset, or
+	 * paints a shadow, outline, filter or blend has no bound here.
+	 */
+	function computeGeneratedContent(element: Element): GeneratedContent {
+		if (!generatesContent(element)) return NO_GENERATED_CONTENT
+		const style = styleOf(element)
+		const boxes: Box[] = []
+		let flow = false
+		const em = lengthPx(style.fontSize)
+		const scale = uniformScaleOf(element)
+		for (const pseudo of ['::before', '::after'] as const) {
+			const facts = view.getComputedStyle(element, pseudo)
+			if (!pseudoGenerates(facts)) continue
+			if (em === undefined || scale === undefined || pseudoMovesPaint(facts)) return 'unbounded'
+			const position = facts.position
+			if (position === 'absolute' || position === 'fixed') {
+				const box = absolutePseudoBox(element, facts, position, scale)
+				if (!box) return 'unbounded'
+				boxes.push(box)
+				continue
+			}
+			if (facts.float !== 'none') return 'unbounded'
+			if ([facts.marginTop, facts.marginRight, facts.marginBottom, facts.marginLeft].some(margin => px(margin) < 0)) return 'unbounded'
+			if ((position === 'relative' || position === 'sticky') && [facts.top, facts.right, facts.bottom, facts.left].some(offset => offset !== 'auto' && px(offset) !== 0)) return 'unbounded'
+			if (style.textIndent.startsWith('-') && px(style.textIndent) !== 0) return 'unbounded'
+			flow = true
+		}
+		if (/(?:^|\s)list-item(?:\s|$)/.test(style.display) && (style.listStyleType !== 'none' || style.listStyleImage !== 'none')) {
+			if (style.listStylePosition === 'inside') flow = true
+			else {
+				const reach = markerReach(element, style)
+				if (reach === undefined || em === undefined || scale === undefined) return 'unbounded'
+				const rect = rectOf(element)
+				boxes.push({ left: rect.left - reach * scale, top: rect.top - em * scale, right: rect.right + reach * scale, bottom: rect.bottom + em * scale })
+			}
+		}
+		return { flow, boxes }
+	}
+
+	/** The overflow of an element's in-flow content past its padding box, grown by the integer rounding of the scroll sizes. */
+	function flowOverflowBox(element: Element, style: StyleFacts): Box | undefined | 'unbounded' {
+		if (isInlineDisplay(style) || clipsOwnContent(element, style)) return undefined
+		const html = element as HTMLElement
+		if (typeof html.scrollWidth !== 'number') return undefined
+		const dx = Math.max(0, html.scrollWidth - html.clientWidth)
+		const dy = Math.max(0, html.scrollHeight - html.clientHeight)
+		if (dx === 0 && dy === 0) return undefined
+		const scale = uniformScaleOf(element)
+		if (scale === undefined) return 'unbounded'
+		const rect = rectOf(element)
+		return { left: rect.left - (dx + 1) * scale, top: rect.top - (dy + 1) * scale, right: rect.right + (dx + 1) * scale, bottom: rect.bottom + (dy + 1) * scale }
+	}
+
+	/**
+	 * The box of an absolutely positioned or fixed pseudo-element from its resolved style: the padding
+	 * box of its containing block plus its resolved offset and margin, its resolved size, and the text
+	 * that can overflow that size (one em of glyph ink per character of its string content).
+	 */
+	function absolutePseudoBox(element: Element, facts: CSSStyleDeclaration, position: 'absolute' | 'fixed', scale: number): Box | undefined {
+		const block = containingBlockBox(element, position)
+		if (!block) return undefined
+		const resolved = (value: string) => /^[+-]?(?:\d+\.?\d*|\.\d+)px$/i.test(value.trim()) ? px(value) : undefined
+		const left = resolved(facts.left)
+		const top = resolved(facts.top)
+		const width = resolved(facts.width)
+		const height = resolved(facts.height)
+		const marginLeft = resolved(facts.marginLeft)
+		const marginTop = resolved(facts.marginTop)
+		const em = resolved(facts.fontSize)
+		if (left === undefined || top === undefined || width === undefined || height === undefined || marginLeft === undefined || marginTop === undefined || em === undefined) return undefined
+		const frame = facts.boxSizing === 'border-box'
+			? { width: 0, height: 0 }
+			: { width: px(facts.paddingLeft) + px(facts.paddingRight) + px(facts.borderLeftWidth) + px(facts.borderRightWidth), height: px(facts.paddingTop) + px(facts.paddingBottom) + px(facts.borderTopWidth) + px(facts.borderBottomWidth) }
+		const x = block.box.left + (left + marginLeft) * block.scale
+		const y = block.box.top + (top + marginTop) * block.scale
+		const reach = facts.overflowX === 'visible' ? pseudoTextLength(facts.content) * em * scale : 0
+		const ink = facts.overflowY === 'visible' ? em * scale : 0
+		return {
+			left: x - reach - 1,
+			top: y - ink - 1,
+			right: x + (width + frame.width) * scale + reach + 1,
+			bottom: y + (height + frame.height) * scale + ink + 1,
+		}
+	}
+
+	/** The padding box of the containing block of an absolutely positioned or fixed box generated by `element`, in page px. */
+	function containingBlockBox(element: Element, mode: 'absolute' | 'fixed'): Readonly<{ box: Box; scale: number }> | undefined {
+		for (let node: Element | null = element; node && node !== doc.documentElement; node = node.parentElement) {
+			const style = styleOf(node)
+			const contains = mode === 'absolute' ? style.position !== 'static' || containsFixedDescendants(style) : containsFixedDescendants(style)
+			if (!contains) continue
+			const scale = uniformScaleOf(node)
+			if (scale === undefined) return undefined
+			const rect = rectOf(node)
+			return { scale, box: { left: rect.left + px(style.borderLeftWidth) * scale, top: rect.top + px(style.borderTopWidth) * scale, right: rect.right - px(style.borderRightWidth) * scale, bottom: rect.bottom - px(style.borderBottomWidth) * scale } }
+		}
+		const root = doc.documentElement
+		const x = mode === 'absolute' ? -view.scrollX : 0
+		const y = mode === 'absolute' ? -view.scrollY : 0
+		return { scale: 1, box: { left: x, top: y, right: x + root.clientWidth, bottom: y + root.clientHeight } }
+	}
+
+	/** The client box of the element's own text nodes, measured once per pass; undefined without rendered text. */
+	function ownTextOf(element: Element): OwnText | undefined {
+		if (ownTexts.has(element)) return ownTexts.get(element)
 		let box: Box | undefined
+		let marks = false
 		for (const node of Array.from(element.childNodes)) {
 			if (node.nodeType !== 3 || !node.textContent) continue
 			const range = doc.createRange()
@@ -817,22 +1157,62 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 			const rect = range.getBoundingClientRect()
 			if (!(rect.width > 0) && !(rect.height > 0)) continue
 			box = box ? union(box, rect) : { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }
+			// Stacked combining marks paint as far from the line as the text stacks them: no bound.
+			if (COMBINING_MARK.test(node.textContent)) marks = true
 		}
-		if (!box) return undefined
+		const text = box ? { box, marks } : undefined
+		ownTexts.set(element, text)
+		return text
+	}
+
+	/**
+	 * The element's own text as paint: the client box of its text nodes grown by how far their
+	 * decorations (its own and those propagated from an ancestor), strokes and text shadows can paint
+	 * beyond the inline boxes, and with `ink` by one em of glyph ink; undefined without rendered text.
+	 * Text with combining marks has no bound. A decoration reaches its offset plus its thickness (one
+	 * em when automatic).
+	 */
+	function ownTextBound(element: Element, style: StyleFacts, ink: boolean): Box | undefined | 'unbounded' {
+		const text = ownTextOf(element)
+		if (!text) return undefined
+		if (text.marks) return 'unbounded'
 		const shadow = shadowOutsets(style.textShadow, false)
 		const em = lengthPx(style.fontSize)
 		const stroke = style.webkitTextStrokeWidth === '' ? 0 : lengthPx(style.webkitTextStrokeWidth)
 		if (!shadow || em === undefined || stroke === undefined) return 'unbounded'
-		let decoration = 0
-		if (style.textDecorationLine !== '' && style.textDecorationLine !== 'none') {
-			const offset = style.textUnderlineOffset === 'auto' || style.textUnderlineOffset === '' ? 0 : lengthPx(style.textUnderlineOffset)
-			const thickness = /^(?:auto|from-font)?$/.test(style.textDecorationThickness) ? em : lengthPx(style.textDecorationThickness)
-			if (offset === undefined || thickness === undefined) return 'unbounded'
-			decoration = Math.abs(offset) + Math.abs(thickness)
-		}
-		const reach = em + Math.abs(stroke) + decoration
-		const grown = growBox(box, element, { left: reach + shadow.left, top: reach + shadow.top, right: reach + shadow.right, bottom: reach + shadow.bottom })
+		const decoration = decorationReach(element, em)
+		if (decoration === undefined) return 'unbounded'
+		const reach = (ink ? em : 0) + Math.abs(stroke) + decoration
+		const grown = growBox(text.box, element, { left: reach + shadow.left, top: reach + shadow.top, right: reach + shadow.right, bottom: reach + shadow.bottom })
 		return grown ?? 'unbounded'
+	}
+
+	/**
+	 * How far the text decorations that apply to an element's text reach beyond its inline boxes: the
+	 * largest of the element's own and every ancestor's (a decoration propagates to descendant text),
+	 * 0 without any, undefined when a value is not understood.
+	 */
+	function decorationReach(element: Element, em: number): number | undefined {
+		let reach = 0
+		for (let node: Element | null = element; node; node = flatTreeParent(node)) {
+			const style = styleOf(node)
+			if (style.textDecorationLine === '' || style.textDecorationLine === 'none') continue
+			const nodeEm = Math.max(em, lengthPx(style.fontSize) ?? em)
+			const offset = style.textUnderlineOffset === 'auto' || style.textUnderlineOffset === '' ? 0 : lengthPx(style.textUnderlineOffset)
+			const thickness = /^(?:auto|from-font)?$/.test(style.textDecorationThickness) ? nodeEm : lengthPx(style.textDecorationThickness)
+			if (offset === undefined || thickness === undefined) return undefined
+			reach = Math.max(reach, Math.abs(offset) + Math.abs(thickness))
+		}
+		return reach
+	}
+
+	/** Whether an element or an ancestor has a text decoration (which propagates to the element's text). */
+	function decorationOf(element: Element): true | undefined {
+		for (let node: Element | null = element; node; node = flatTreeParent(node)) {
+			const line = styleOf(node).textDecorationLine
+			if (line !== '' && line !== 'none') return true
+		}
+		return undefined
 	}
 
 	/**
@@ -860,23 +1240,6 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		const x = extent * (rect.width / width + rect.width / height)
 		const y = extent * (rect.height / width + rect.height / height)
 		return { left: box.left - x, top: box.top - y, right: box.right + x, bottom: box.bottom + y }
-	}
-
-	/** What an element paints itself, children excluded (they are candidates of their own). */
-	function paintedContent(element: Element, style: StyleFacts): 'nothing' | 'translucent' | 'opaque' | 'replaced' {
-		const tag = element.tagName.toUpperCase()
-		if (REPLACED_TAGS.has(tag)) return 'replaced'
-		if (NATIVE_CONTROL_TAGS.has(tag) && style.appearance !== 'none' && style.webkitAppearance !== 'none') return 'replaced'
-		const background = colorAlpha(style.backgroundColor)
-		if (background === undefined) return 'replaced'
-		if (background === 1 && style.backgroundClip !== 'text') return 'opaque'
-		const marks = background > 0
-			|| style.backgroundImage !== 'none'
-			|| style.boxShadow !== 'none'
-			|| (style.outlineStyle !== 'none' && px(style.outlineWidth) > 0)
-			|| hasVisibleBorder(style)
-			|| hasOwnText(element)
-		return marks ? 'translucent' : 'nothing'
 	}
 
 	/**
@@ -988,6 +1351,8 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	function resetPass(): void {
 		rects = new Map()
 		paintBounds = new Map()
+		generatedContents = new Map()
+		ownTexts = new Map()
 		candidates = undefined
 		viewport = undefined
 	}
@@ -1005,9 +1370,97 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 			widgets = undefined
 			candidateElements = undefined
 			reaches = new Map()
+			generators = new Map()
+			texts = new Map()
 			filteredChains = new Map()
 		},
 	})
+}
+
+/** Any combining mark: stacked marks paint arbitrarily far from the line they sit on. */
+const COMBINING_MARK = /\p{M}/u
+const NO_GENERATED_CONTENT: GeneratedContent = Object.freeze({ flow: false, boxes: Object.freeze([]) })
+
+/** Whether the resolved style of a `::before` or `::after` belongs to a generated box. */
+function pseudoGenerates(facts: CSSStyleDeclaration): boolean {
+	const content = facts.content
+	return content !== '' && content !== 'none' && content !== 'normal' && facts.display !== 'none'
+}
+
+/** Whether a generated box paints outside the box it is laid out in: transformed, filtered, blended, shadowed or outlined. */
+function pseudoMovesPaint(facts: CSSStyleDeclaration): boolean {
+	const set = (value: string | undefined) => value !== undefined && value !== '' && value !== 'none'
+	return set(facts.transform) || set(facts.translate) || set(facts.rotate) || set(facts.scale) || set(facts.offsetPath)
+		|| set(facts.filter) || (facts.mixBlendMode !== '' && facts.mixBlendMode !== 'normal')
+		|| set(facts.boxShadow) || set(facts.textShadow) || set(facts.borderImageSource)
+		|| (facts.outlineStyle !== 'none' && px(facts.outlineWidth) > 0)
+		|| set(facts.getPropertyValue('-webkit-box-reflect'))
+}
+
+/** The number of characters a generated box's string content paints (a counter or other function counts as 16). */
+function pseudoTextLength(content: string): number {
+	let length = 0
+	const strings = content.matchAll(/"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'/g)
+	let rest = content
+	for (const match of strings) {
+		length += (match[1] ?? match[2] ?? '').length
+		rest = rest.replace(match[0], '')
+	}
+	if (/(?:counters?|attr|image-set|element)\(/.test(rest)) length += 16
+	return length
+}
+
+/**
+ * How far an outside list marker reaches beyond the box of its item, in the item's local CSS px: the
+ * widest marker the list style can produce, or undefined when it has no bound (an image, a custom
+ * string, a counter style with no known width).
+ */
+function markerReach(element: Element, style: StyleFacts): number | undefined {
+	const em = lengthPx(style.fontSize)
+	if (em === undefined || (style.listStyleImage !== 'none' && style.listStyleImage !== '')) return undefined
+	const type = style.listStyleType.trim()
+	if (type === 'none') return 0
+	if (/^(?:disc|circle|square|disclosure-open|disclosure-closed)$/.test(type)) return 2 * em
+	if (/^(?:decimal|decimal-leading-zero|lower-roman|upper-roman|lower-alpha|upper-alpha|lower-latin|upper-latin)$/.test(type)) {
+		const ordinal = (element as HTMLLIElement).value
+		if (typeof ordinal !== 'number' || !Number.isFinite(ordinal)) return undefined
+		// A roman numeral up to 3999 has at most 15 letters, an alphabetic counter fewer than the digits of the value.
+		const characters = /roman/.test(type) ? Math.max(15, String(Math.abs(ordinal)).length) : String(Math.abs(ordinal)).length + 1
+		return (characters + 2) * em
+	}
+	return undefined
+}
+
+/** Whether the element clips its own in-flow content on both axes (so none of it paints outside its padding box). */
+function clipsOwnContent(element: Element, style: StyleFacts): boolean {
+	if (!overflowApplies(element, style, true)) return false
+	return (style.overflowX !== 'visible' && style.overflowY !== 'visible') || containsPaint(style)
+}
+
+/** Whether the element paints replaced content: an image, SVG, canvas, video, frame, native control, or a fill that is not understood. */
+function isReplacedPaint(element: Element, style: StyleFacts): boolean {
+	const tag = element.tagName.toUpperCase()
+	if (REPLACED_TAGS.has(tag)) return true
+	if (NATIVE_CONTROL_TAGS.has(tag) && style.appearance !== 'none' && style.webkitAppearance !== 'none') return true
+	return colorAlpha(style.backgroundColor) === undefined
+}
+
+/**
+ * What the background colour and image of a box paint: `opaque` (an opaque colour below the clip
+ * to the box, whatever an image adds), `translucent` (a colour with alpha below 1 and no image),
+ * `none`, or `unknown` (an image over a not opaque colour, or text-clipped: it may be opaque anywhere).
+ */
+function fillKind(style: StyleFacts): 'none' | 'translucent' | 'opaque' | 'unknown' {
+	const alpha = colorAlpha(style.backgroundColor) ?? 0
+	const textClip = style.backgroundClip === 'text'
+	if (alpha === 1 && !textClip) return 'opaque'
+	if (textClip || style.backgroundImage !== 'none') return 'unknown'
+	return alpha > 0 ? 'translucent' : 'none'
+}
+
+/** Whether `outer` contains `inner`, allowing for floating-point noise. */
+function contains(outer: Box, inner: Box): boolean {
+	return outer.left <= inner.left + 1e-6 && outer.top <= inner.top + 1e-6 && outer.right >= inner.right - 1e-6 && outer.bottom >= inner.bottom - 1e-6
 }
 
 function layerOf(key: PaintKey): number {
