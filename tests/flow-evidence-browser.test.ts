@@ -11,6 +11,7 @@ import type { FlowResource } from '../src/domain/flows/schema'
 import type { ViewResource } from '../src/domain/views/schema'
 import { FileNativePersistence } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { assertSameScreenshot } from './support/screenshot-diff'
 import { provisionToken, sessionCookieFor } from './support/access'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 import { writeCurrentWorkspace } from './support/workspace-layout'
@@ -133,13 +134,15 @@ describe('formal UX Flow Evidence over a real capture', { timeout: HEAVY_SERVER_
 			expect(await persistence.artifacts.read(capture.screenshotDigest)).toBeDefined()
 		}
 
-		// The stored recipe replays to a trace of the same steps (a screenshot of a page may differ in bytes between runs, so the captures' identities are not compared).
+		// The stored recipe replays to the same trace: formal captures are deterministic (issue #344), so the captures' identities and the trace's own identity match.
 		const again = await app.captureFlowEvidence({ flowId: FLOW_ID, renderContext, recipe: record.data.recipe })
 		expect(again.status).toBe('captured')
 		if (again.status === 'captured') {
 			expect(again.evidence.data?.recipe).toEqual(record.data.recipe)
-			const withoutCaptures = (steps: Array<Record<string, unknown>>) => steps.map(step => Object.fromEntries(Object.entries(step).filter(([key]) => key !== 'captureRef')))
-			expect(withoutCaptures(again.evidence.data?.steps as Array<Record<string, unknown>>)).toEqual(withoutCaptures(record.data.steps))
+			for (const [index, capture] of again.captures.entries()) await assertSameScreenshot(`flow-replay-${index}`, digest => persistence.artifacts.read(digest), outcome.captures[index]!, capture)
+			expect(again.evidence.data?.steps).toEqual(record.data.steps)
+			expect(again.captures).toEqual(outcome.captures)
+			expect(again.evidenceDigest).toBe(outcome.evidenceDigest)
 		}
 		const narrower = await app.captureFlowEvidence({ flowId: FLOW_ID, renderContext, recipe: { actions: [record.data.recipe.actions[0]] } })
 		expect(narrower).toMatchObject({ status: 'captured' })

@@ -18,7 +18,7 @@ import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
 import { settledValue } from '../../persistence/file-native'
 import type { KitBuildStatus } from '../ports/kit-build'
-import { ASSET_LOAD_FAILED_DIAGNOSTIC, ASSET_LOAD_FAILED_STATUS, captureHarnessScreenshot, evaluateHarnessTranslations, openHarnessPreview, type HarnessPreview } from './capture-harness'
+import { ASSET_LOAD_FAILED_DIAGNOSTIC, ASSET_LOAD_FAILED_STATUS, captureHarnessScreenshot, HARNESS_LAUNCH_ARGS, evaluateHarnessTranslations, openHarnessPreview, type HarnessPreview } from './capture-harness'
 import { missingDefaultLocaleError } from './default-locale-gate'
 import { createViewAssetBindingCheck, type AssetCatalog } from './asset-bindings'
 import { readWorkspaceProductKitProvenance } from './product-kit-provenance'
@@ -316,7 +316,7 @@ export function createFormalCaptureService(
 
 		let browser: Browser | undefined
 		try {
-			browser = await chromium.launch({ headless: true })
+			browser = await chromium.launch({ headless: true, args: [...HARNESS_LAUNCH_ARGS] })
 		}
 		catch (cause) {
 			const launchError = cause instanceof Error ? cause.message : String(cause)
