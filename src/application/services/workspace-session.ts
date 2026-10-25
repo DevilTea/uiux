@@ -8,7 +8,6 @@ import type { ChangeDomain } from '../../domain/reviews/change-domains'
 import { markRemovedActors } from '../../domain/reviews/removed-actors'
 import { deriveReviewResolution, isWidgetAnchor, isWorkspaceAnchor, type ReviewActor, type ReviewEvidenceRef, type ReviewResolution, type ReviewSubmission, type ReviewThread } from '../../domain/reviews/schema'
 import type { DecisionStatus } from '../../domain/spec/schema'
-import { deriveWidgetTree, flattenWidgetTree } from '../../preview/widget-tree'
 import type { Diagnostic } from '../../domain/validation'
 import type { ViewResource } from '../../domain/views/schema'
 import type { WorkspaceManifest } from '../../domain/workspace/schema'
@@ -114,6 +113,8 @@ import {
 	type VersionDiffOutcome,
 } from './history-diff'
 import { createHistoryRestoreService, type RestoreGuard, type RestoreResourceVersionCommand, type RestoreResourceVersionOutcome } from './history-restore'
+import { readViewReferenceTarget } from './flow-references'
+import { createFlowEvidenceService, type CaptureFlowEvidenceCommand, type CaptureFlowEvidenceResult } from './flow-evidence'
 import { createViewAssetBindingCheck, type AssetCatalog } from './asset-bindings'
 import { createHistoryPreviewService, type ReadVersionBlobOutcome, type ReadVersionResourceOutcome, type ResolveVersionAssetsOutcome } from './history-preview'
 import {
@@ -170,6 +171,10 @@ export type PointResourceRead =
 	| Readonly<{ kind: 'review'; key: string; resource: ReviewThread; revision: ResourceRevision; diagnostics: readonly Diagnostic[] }>
 	| AssetPointResourceRead
 
+export type ValidateFlowResult =
+	| Readonly<{ flowId: string; revision: ResourceRevision; valid: boolean; diagnostics: readonly Diagnostic[] }>
+	| Readonly<{ status: 'not_found'; flowId: string }>
+
 export interface WorkspaceApplicationSession {
 	readPointResource(kind: PointResourceKind, key: string): Promise<PointResourceRead | undefined>
 	listPointResources(input: unknown): Promise<ResourceDiscoveryOutcome>
@@ -216,6 +221,10 @@ export interface WorkspaceApplicationSession {
 	replaceAsset(command: ReplaceAssetCommand): Promise<AssetAuthoringResult>
 	deleteAsset(command: DeleteAssetCommand): Promise<AssetAuthoringResult>
 	captureFormalEvidence(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult>
+	/** Clause 01a172cc-de18-79ea-a611-c8ea5a34e250: a Flow's structural and reference diagnostics, read-only. */
+	validateFlow(flowId: string): Promise<ValidateFlowResult>
+	/** Clause 01a172cc-e195-711b-bfa9-5de6c1c8ff87: formal UX Flow Evidence. */
+	captureFlowEvidence(command: CaptureFlowEvidenceCommand): Promise<CaptureFlowEvidenceResult>
 	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
 	/** Every readable View's current render-input digest (Rule 01a115cd-c5a5-…). */
 	viewRenderInputs(): Promise<readonly ViewRenderInput[]>
@@ -294,6 +303,13 @@ export function createWorkspaceApplicationSession(
 		...(options?.kitBuild ? { kitBuild: () => options.kitBuild!.status() } : {}),
 		...(options?.adapterThemeSupport ? { themeSupport: options.adapterThemeSupport } : {}),
 		adapterProvenance: adapterProvenanceSource,
+	})
+	const flowEvidence = createFlowEvidenceService(persistence, {
+		readFlow: async (flowId) => {
+			const read = await readPointResource('flow', flowId)
+			return read?.kind === 'flow' ? read : undefined
+		},
+		captureFormal: command => formalCapture.capture(command),
 	})
 	const handoffExport = createHandoffExportService(persistence, {
 		...(options?.checkAdapterSet ? { checkAdapterSet: options.checkAdapterSet } : {}),
@@ -378,6 +394,23 @@ export function createWorkspaceApplicationSession(
 		}
 	}
 
+	/**
+	 * Clause 01a172cc-de18-79ea-a611-c8ea5a34e250. A Flow file that is not valid JSON is reported with its
+	 * parse diagnostics, as the discovery listing reports it, rather than thrown.
+	 */
+	async function validateFlow(flowId: string): Promise<ValidateFlowResult> {
+		let read: Awaited<ReturnType<typeof readPointResource>>
+		try { read = await readPointResource('flow', flowId) }
+		catch (error) {
+			if (!(error instanceof PersistenceError) || error.code !== 'persistence.invalid_json') throw error
+			const revision = await persistence.flows.readRevision(flowId)
+			if (!revision) return { status: 'not_found', flowId }
+			return { flowId, revision, valid: false, diagnostics: error.diagnostics.length > 0 ? error.diagnostics : [{ code: error.code, path: '', message: error.message }] }
+		}
+		if (read?.kind !== 'flow') return { status: 'not_found', flowId }
+		return { flowId, revision: read.revision, valid: read.diagnostics.length === 0, diagnostics: read.diagnostics }
+	}
+
 	async function discover(input: unknown, mode: 'list' | 'search'): Promise<ResourceDiscoveryOutcome> {
 		const validation = validateResourceDiscoveryRequest(input, mode)
 		if (validation.status === 'invalid') return validation
@@ -455,22 +488,7 @@ export function createWorkspaceApplicationSession(
 	}
 
 	/** The anchored View as the `anchor` filter sees it: `null` when it does not exist. */
-	async function readAnchorTarget(viewId: string): Promise<ReviewAnchorTarget> {
-		let read: Awaited<ReturnType<typeof persistence.views.readInspected>>
-		try { read = await persistence.views.readInspected(viewId) }
-		catch (error) {
-			// An unreadable View still exists; its Widgets and Variants are unknown.
-			if (error instanceof PersistenceError && error.code === 'persistence.invalid_json') return {}
-			throw error
-		}
-		if (!read) return null
-		const tree = deriveWidgetTree(read.resource.ir)
-		const variants = read.resource.variants
-		return {
-			...(tree.status === 'valid' ? { widgetIds: new Set(flattenWidgetTree(tree.root).map(node => node.id)) } : {}),
-			...(variants && typeof variants === 'object' && !Array.isArray(variants) ? { variantNames: new Set(Object.keys(variants)) } : {}),
-		}
-	}
+	const readAnchorTarget = (viewId: string): Promise<ReviewAnchorTarget> => readViewReferenceTarget(persistence, viewId)
 
 	async function discoverKeys(kind: DiscoverableResourceKind): Promise<readonly string[]> {
 		switch (kind) {
@@ -544,6 +562,8 @@ export function createWorkspaceApplicationSession(
 		replaceAsset: assetAuthoring.replaceAsset,
 		deleteAsset: assetAuthoring.deleteAsset,
 		captureFormalEvidence: formalCapture.capture,
+		validateFlow,
+		captureFlowEvidence: flowEvidence.capture,
 		listEvidence: formalCapture.listEvidence,
 		viewRenderInputs: formalCapture.viewRenderInputs,
 		runProductKitChecks: command => productKitChecks.run({ ...(command?.readSource === false ? { readSource: false } : {}) }),

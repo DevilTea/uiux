@@ -119,6 +119,7 @@ describe('shared HTTP/MCP point-resource reads', { timeout: HEAVY_SERVER_SUITE_T
 				'acquire_lock',
 				'append_review_message',
 				'assess_handoff_readiness',
+				'capture_flow_evidence',
 				'capture_formal_evidence',
 				'compare_component_copies',
 				'compose_product_kit',
@@ -162,6 +163,7 @@ describe('shared HTTP/MCP point-resource reads', { timeout: HEAVY_SERVER_SUITE_T
 				'update_view_spec',
 				'update_view_structure',
 				'update_workspace_settings',
+				'validate_flow',
 			])
 			expect(tools.tools.find(tool => tool.name === 'list_resources')?.annotations?.readOnlyHint).toBe(true)
 			expect(tools.tools.find(tool => tool.name === 'search_resources')?.annotations?.readOnlyHint).toBe(true)

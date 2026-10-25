@@ -33,7 +33,8 @@ import type {
 	SubmitReadyForReviewCommand,
 } from '../services/review-authoring'
 import type { CreateViewCommand, DecideDecisionCommand, DecisionLifecycleCommand, DeleteViewCommand, UpdateViewMetadataCommand, UpdateViewSpecCommand, UpdateViewStructureCommand, ViewAuthoringResult } from '../services/view-authoring'
-import type { PointResourceRead, WorkspaceApplicationSession } from '../services/workspace-session'
+import type { PointResourceRead, ValidateFlowResult, WorkspaceApplicationSession } from '../services/workspace-session'
+import type { CaptureFlowEvidenceCommand, CaptureFlowEvidenceResult } from '../services/flow-evidence'
 import type { UpdateWorkspaceSettingsCommand, WorkspaceAuthoringResult } from '../services/workspace-authoring'
 import type {
 	ComposeProductKitCommand,
@@ -226,6 +227,8 @@ export interface ScopedWorkspaceSession {
 	editReviewMessage(command: Unstamped<EditReviewMessageCommand>): Promise<Scoped<ReviewAuthoringResult>>
 	retractReviewThread(command: Unstamped<RetractReviewThreadCommand>): Promise<Scoped<ReviewAuthoringResult>>
 	captureFormalEvidence(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult | AccessRefusal>
+	captureFlowEvidence(command: CaptureFlowEvidenceCommand): Promise<CaptureFlowEvidenceResult | AccessRefusal>
+	validateFlow(flowId: string): Promise<ValidateFlowResult>
 	/** Run Checks' Product Kit part: a Workbench session with `evidence.capture`; its props and emits check also needs `product-kit.source.read`. */
 	runProductKitChecks(): Promise<ProductKitChecksResult | AccessRefusal>
 	exportHandoff(command: ExportHandoffCommand): Promise<ExportHandoffResult | AccessRefusal>
@@ -665,6 +668,11 @@ export function createScopedWorkspaceSession(
 			const denied = authorizeOperation(principal, 'captureFormalEvidence')
 			return denied ? refusalFromScope('evidence', denied) : app.captureFormalEvidence(command)
 		},
+		async captureFlowEvidence(command) {
+			const denied = authorizeOperation(principal, 'captureFlowEvidence')
+			return denied ? refusalFromScope('evidence', denied) : app.captureFlowEvidence(command)
+		},
+		async validateFlow(flowId) { assert('validateFlow'); return app.validateFlow(flowId) },
 		async runProductKitChecks() {
 			const denied = authorizeOperation(principal, 'runProductKitChecks')
 			if (denied) return refusalFromScope('evidence', denied)

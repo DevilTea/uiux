@@ -15,6 +15,9 @@ import { validateAdapterProvenanceMembers } from '../adapters/schema'
 import type { EvidenceAdapterProvenance } from './adapter-provenance'
 
 export type EvidenceKind = string
+
+/** Clause 01a172cc-d382-7cd3-b140-6320d2065edc: the kind of a formal UX Flow Evidence record. */
+export const FLOW_TRACE_KIND = 'flow_trace'
 export type EvidenceReference = Readonly<{ kind: EvidenceKind; evidence: string }>
 export type EvidenceResourceRevision = Readonly<{ identity: JsonObject; revision: string }>
 export type EvidenceProvenance = Readonly<{
@@ -96,6 +99,7 @@ export function validateFormalEvidenceRecord(input: unknown, path = ''): Validat
 		if (data) validateJsonValue(data, `${path}/data`, v)
 	}
 	if (record.kind === 'formal_capture') validateFormalTranslationEvidence(record, path, v)
+	if (record.kind === FLOW_TRACE_KIND) validateFlowTraceEvidence(record, path, v)
 	if (Object.hasOwn(record, 'id'))
 		v.issue('evidence.parallel_identity_forbidden', `${path}/id`, 'Formal evidence identity is the SHA-256 digest of its immutable serialized bytes.')
 	return v.finish<FormalEvidenceRecord>(input)
@@ -139,6 +143,73 @@ function validateFormalTranslationEvidence(record: Readonly<Record<string, unkno
 	if (missing.length === 0)
 		v.issue('evidence.invalid_translation_coverage', `${translationsPath}/missing`, 'Incomplete translation coverage lists at least one missing Property.')
 	missing.forEach((item, index) => v.diagnostics.push(...validateTranslationMissingOccurrence(item, jsonPointer(`${translationsPath}/missing`, index)).diagnostics))
+}
+
+/**
+ * Clauses 01a172cc-d382-7cd3-b140-6320d2065edc, 01a172cc-d6f0-714d-b2fb-bd66e13c73a5 and
+ * 01a172cc-daa6-7a0e-960e-fa996e0a58c5: a `flow_trace` record. Whether its recipe matches a Flow is not
+ * judged here (the record is immutable and the Flow may have changed); only its own shape and the
+ * agreement of its steps, capture references and Evidence references.
+ */
+function validateFlowTraceEvidence(record: Readonly<Record<string, unknown>>, path: string, v: Validator): void {
+	if (record.schemaVersion !== 1) v.issue('evidence.invalid_flow_trace', `${path}/schemaVersion`, 'A flow_trace record has schemaVersion 1.')
+	const context = isPlainObject(record.executionContext) ? record.executionContext : undefined
+	if (context) {
+		rejectUnknownKeys(context, ['flowId', 'locale', 'viewportId', 'themeId'], `${path}/executionContext`, v)
+		validateUuid(context.flowId, `${path}/executionContext/flowId`, v, 'Flow identity')
+		for (const key of ['locale', 'viewportId', 'themeId'] as const) v.string(context[key], `${path}/executionContext/${key}`, true)
+	}
+	if (Array.isArray(record.artifactRefs) && record.artifactRefs.length > 0)
+		v.issue('evidence.invalid_flow_trace', `${path}/artifactRefs`, 'A flow_trace record references its captures through evidenceRefs, not artifactRefs.')
+	const data = v.object(record.data, `${path}/data`)
+	if (!data) return
+	rejectUnknownKeys(data, ['recipe', 'steps'], `${path}/data`, v)
+	const recipe = v.object(data.recipe, `${path}/data/recipe`)
+	let enters = 0
+	if (recipe) {
+		rejectUnknownKeys(recipe, ['actions'], `${path}/data/recipe`, v)
+		const actions = v.array(recipe.actions, `${path}/data/recipe/actions`)
+		if (actions?.length === 0) v.issue('evidence.invalid_flow_trace', `${path}/data/recipe/actions`, 'A recipe has at least one action.')
+		actions?.forEach((action, index) => {
+			const actionPath = jsonPointer(`${path}/data/recipe/actions`, index)
+			const item = v.object(action, actionPath)
+			if (!item) return
+			if (item.type === 'enter') enters += 1
+			else if (item.type !== 'trigger') v.issue('evidence.invalid_flow_trace', `${actionPath}/type`, 'A recipe action is an enter or a trigger.')
+			validateUuid(item.stepId, `${actionPath}/stepId`, v, 'Flow step identity')
+		})
+	}
+	const steps = v.array(data.steps, `${path}/data/steps`)
+	if (!steps) return
+	if (recipe && Array.isArray(recipe.actions) && steps.length !== enters)
+		v.issue('evidence.flow_trace_mismatch', `${path}/data/steps`, 'A trace has one step entry for each enter action of its recipe.')
+	const captureRefs = new Set<string>()
+	steps.forEach((value, index) => {
+		const stepPath = jsonPointer(`${path}/data/steps`, index)
+		const step = v.object(value, stepPath)
+		if (!step) return
+		rejectUnknownKeys(step, ['stepId', 'viewId', 'variantName', 'trigger', 'resultStepId', 'valid', 'captureRef'], stepPath, v)
+		validateUuid(step.stepId, `${stepPath}/stepId`, v, 'Flow step identity')
+		validateUuid(step.viewId, `${stepPath}/viewId`, v, 'View identity')
+		if (Object.hasOwn(step, 'variantName')) v.string(step.variantName, `${stepPath}/variantName`, true)
+		if (Object.hasOwn(step, 'trigger') !== Object.hasOwn(step, 'resultStepId'))
+			v.issue('evidence.invalid_flow_trace', stepPath, 'A step entry has its trigger and resultStepId together or neither.')
+		if (Object.hasOwn(step, 'trigger')) {
+			const trigger = v.object(step.trigger, `${stepPath}/trigger`)
+			if (trigger) {
+				rejectUnknownKeys(trigger, ['widgetId', 'event'], `${stepPath}/trigger`, v)
+				v.string(trigger.widgetId, `${stepPath}/trigger/widgetId`, true)
+				v.string(trigger.event, `${stepPath}/trigger/event`, true)
+			}
+			validateUuid(step.resultStepId, `${stepPath}/resultStepId`, v, 'Flow step identity')
+		}
+		if (typeof step.valid !== 'boolean') v.issue('evidence.invalid_flow_trace', `${stepPath}/valid`, 'A step entry states whether its assertions held.')
+		if (validateDigest(step.captureRef, `${stepPath}/captureRef`, v) && typeof step.captureRef === 'string') captureRefs.add(step.captureRef)
+	})
+	const refs = Array.isArray(record.evidenceRefs) ? record.evidenceRefs : []
+	const listed = new Set(refs.filter(isPlainObject).filter(ref => ref.kind === 'formal_capture' && typeof ref.evidence === 'string').map(ref => ref.evidence as string))
+	if (refs.length !== listed.size || listed.size !== captureRefs.size || [...captureRefs].some(ref => !listed.has(ref)))
+		v.issue('evidence.flow_trace_mismatch', `${path}/evidenceRefs`, 'evidenceRefs lists each distinct captureRef of the steps as a formal_capture reference.')
 }
 
 function isPlainObject(value: unknown): value is Readonly<Record<string, unknown>> {
