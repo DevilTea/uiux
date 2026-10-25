@@ -492,6 +492,20 @@ describe('Runtime DOM measurer', () => {
 		expect(pieces[1]).toMatchObject({ left: left + 100 + 6, top: top + 6, right: left + 100 + 54, bottom: top + 94 })
 	})
 
+	it('keeps an opaque occluder an exact cut when its text is clipped by its own overflow or lies under it (#112)', async () => {
+		const result = await measureGrid([
+			['clipped-text', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;background:#000;color:#fff;overflow:hidden;white-space:nowrap;font:16px sans-serif">Text that overflows its own clipped box</div>'],
+			['inner-text', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px;background:#000;color:#fff;font:16px sans-serif">Hi</div>'],
+		])
+		for (const id of ['clipped-text', 'inner-text']) {
+			const { left, top } = cell(id === 'clipped-text' ? 0 : 1)
+			expect(bounds(result[id]!).sort((a, b) => a.left - b.left), id).toEqual([
+				{ left, top, right: left + 100, bottom: top + 100, maxError: 0 },
+				{ left: left + 150, top, right: left + 300, bottom: top + 100, maxError: 0 },
+			])
+		}
+	})
+
 	it('keeps what a translucent fill and a translucent border let show, and cuts a solid border and text over it (#112)', async () => {
 		const result = await measureGrid([
 			['translucent-border', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:60px;height:100px;background:rgba(0,0,0,0.3);border:6px solid rgba(0,0,0,0.5)"></div>'],

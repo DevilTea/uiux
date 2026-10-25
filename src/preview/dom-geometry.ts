@@ -896,7 +896,15 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		}
 		const text = ownTextBound(element, style, false)
 		if (text === 'unbounded') return 'unbounded'
-		if (text && !under(text)) return 'bounded'
+		if (text) {
+			// Text the element clips itself (overflow, containment) never leaves its padding box.
+			const scale = uniformScaleOf(element)
+			const rect = rectOf(element)
+			const clipped = clipsOwnContent(element, style) && scale !== undefined
+				? intersect(text, { left: rect.left + px(style.borderLeftWidth) * scale, top: rect.top + px(style.borderTopWidth) * scale, right: rect.right - px(style.borderRightWidth) * scale, bottom: rect.bottom - px(style.borderBottomWidth) * scale })
+				: text
+			if (clipped && !under(clipped)) return 'bounded'
+		}
 		return 'none'
 	}
 
