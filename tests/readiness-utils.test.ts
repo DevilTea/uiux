@@ -6,14 +6,12 @@ import {
 	contextKey,
 	evidenceFreshness,
 	expandContexts,
-	groupFindings,
 	handoffDiagnosticSubject,
 	reviewCoverageSummary,
 	splitReadinessDiagnostics,
 	unchangedSinceCapture,
 	updatedSince,
 	type CaptureContext,
-	type Finding,
 } from '../app/utils/readiness'
 
 const VIEW = '7f3d7780-3cb9-4e57-8f0b-2e8d569905c1'
@@ -147,22 +145,6 @@ describe('Explicit capture lists (Part 10)', () => {
 		expect(variants[1]?.variantName).toBe('compact')
 		const viewports = expandContexts([base], 'viewports', options)
 		expect(viewports[1]).toMatchObject({ viewportId: 'mobile', viewport: { width: 390, height: 844 } })
-	})
-})
-
-describe('Checks grouping (Part 5)', () => {
-	it('groups findings problem → resource, keeping first-seen order', () => {
-		const view = { kind: 'view' as const, key: VIEW, name: 'Checkout' }
-		const workspace = { kind: 'workspace' as const, key: 'workspace', name: 'Workspace' }
-		const findings: Finding[] = [
-			{ code: 'schema.unknown_prop', message: 'Unknown property', path: '/ir/slots/content/0', resource: view, widgetId: 'promo' },
-			{ code: 'i18n.whitespace', message: 'Whitespace', path: '/messages/a', resource: workspace },
-			{ code: 'schema.unknown_prop', message: 'Unknown property 2', path: '/ir/slots/content/1', resource: view, widgetId: 'cta' },
-		]
-		const groups = groupFindings(findings)
-		expect(groups.map(group => [group.code, group.category, group.count])).toEqual([['schema.unknown_prop', 'schema', 2], ['i18n.whitespace', 'i18n', 1]])
-		expect(groups[0]!.resources).toHaveLength(1)
-		expect(groups[0]!.resources[0]!.findings.map(item => item.widgetId)).toEqual(['promo', 'cta'])
 	})
 })
 

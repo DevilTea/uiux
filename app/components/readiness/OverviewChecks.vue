@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef } from 'vue'
+import { computed, ref, shallowRef, watch, type Ref } from 'vue'
 import { navigateTo, useI18n } from '#imports'
 import type { TreeItem } from '@nuxt/ui'
 import { resolveDiagnosticWidgetTarget } from '../../../src/preview/checks-navigation'
@@ -11,8 +11,29 @@ import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import type { Diagnostic } from '../../composables/workbench-types'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
-import { groupFindings, type Finding, type FindingResource } from '../../utils/readiness'
-import { flowPath, viewLocation } from '../../utils/workbench-routes'
+import {
+	catalogProblems,
+	categoryOf,
+	combineStates,
+	filterFindings,
+	FINDING_SEVERITIES,
+	FINDING_SOURCES,
+	GROUP_BYS,
+	groupFindings,
+	sectionFindings,
+	translationReminders,
+	unsettledSources,
+	type CheckState,
+	type Finding,
+	type FindingFilters,
+	type FindingResource,
+	type FindingSeverity,
+	type FindingSource,
+	type GroupBy,
+	type ViewUsage,
+} from '../../utils/checks'
+import { flowPath, localeCellLocation, viewLocation } from '../../utils/workbench-routes'
+import type { I18nResource } from '../../../src/domain/i18n/schema'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 import { diagnosticText } from '../../utils/diagnostic-copy'
 import { missingDefaultLocaleDiagnostic } from '../../../src/i18n/runtime'
@@ -29,45 +50,99 @@ import { missingDefaultLocaleDiagnostic } from '../../../src/i18n/runtime'
  * 01a11bb1-a88c-7d78-8633-1c3b55588910): nothing here gates Preview, capture or Handoff. They need
  * `evidence.capture`, and their props and emits check `product-kit.source.read` (Clause
  * 01a11485-fa44-7b6a-99f8-de4e1e8edcfc): without the first, Run Checks never asks for them.
+ *
+ * Every finding keeps its origin (`source`), scope, check state and original severity (issue #95,
+ * Rules 01a115cd-bb64-75c2-a7df-2c8dd338453d and 01a115cd-bb96-7131-99d9-a3882829590c). Each source
+ * has a state of its own, so a source that was not run, is running or did not finish is never read
+ * as zero findings. The findings are built here from reads the Workbench already makes (the
+ * resource reads, `GET /api/preview/adapters` and the Product Kit checks); they are not a wire shape.
  */
 const { t } = useI18n()
 const access = useAccess()
 const uiux = useUiuxClient()
 const fmt = useWorkbenchFormat()
 const feedback = useWorkbenchFeedback()
-const { views, flows, workspaceFindingCount, missingDefaultLocale } = useWorkbench()
+const { views, flows, workspace, workspaceFindingCount, missingDefaultLocale } = useWorkbench()
 
 type ResourceRead = Readonly<{ key: string; revision: string; diagnostics?: readonly Diagnostic[]; resource?: Record<string, unknown> }>
 
 const running = ref(false)
 const lastRun = ref<Date>()
 const resourceFindings = shallowRef<readonly Finding[]>([])
+const translationFindings = shallowRef<readonly Finding[]>([])
+const catalogFindings = shallowRef<readonly Finding[]>([])
 const failures = shallowRef<readonly Readonly<{ name: string; error: FetchErrorDetails }>[]>([])
-const category = ref('all')
+
+/** The sources this page reads itself; the Product Kit's state comes from its own checks. */
+type ReadSource = 'validation' | 'translation' | 'catalog'
+const readStates = ref<Record<ReadSource, CheckState>>({ validation: 'not_checked', translation: 'not_checked', catalog: 'not_checked' })
+/** Catalog problems of the Adapter set or of entries no View uses: they stay on the Product Kit page. */
+const catalogElsewhere = ref(0)
+const catalogError = shallowRef<FetchErrorDetails>()
+
+// Filters and grouping: Workbench presentation (Rule 01a115cd-bd13-778b-8a0a-b4d43cd98aa7).
+const ALL = 'all'
+const filterSource = ref<string>(ALL)
+const filterCategory = ref<string>(ALL)
+const filterSeverity = ref<string>(ALL)
+const filterView = ref<string>(ALL)
+const filterVariant = ref<string>(ALL)
+const groupBy = ref<GroupBy>('problem')
 
 async function read(kind: string, key: string): Promise<ResourceRead | undefined> {
 	return uiux.readResource<ResourceRead>(kind, key)
+}
+
+const MAX_LIST_PAGES = 50
+
+/** Every summary of one kind, following the list cursor; `complete` is false when the pages ran out first. */
+async function listAll<T>(kind: string): Promise<Readonly<{ items: readonly T[]; complete: boolean }> | undefined> {
+	try {
+		const items: T[] = []
+		let cursor: string | undefined
+		for (let page = 0; page < MAX_LIST_PAGES; page++) {
+			const result = await uiux.listResources<T>([kind], { limit: 100, ...(cursor ? { cursor } : {}) })
+			items.push(...result.items)
+			cursor = result.nextCursor
+			if (!cursor) return { items, complete: true }
+		}
+		return { items, complete: false }
+	}
+	catch {
+		return undefined
+	}
 }
 
 /** Reads each resource once, in small batches, and keeps every finding it reports. */
 async function runChecks(): Promise<void> {
 	if (running.value) return
 	running.value = true
+	readStates.value = { validation: 'checking', translation: 'checking', catalog: 'checking' }
+	catalogError.value = undefined
 	if (!kitRunning.value && canRunKitChecks.value) void runKitChecks()
 	const collected: Finding[] = []
+	const localeResources = new Map<string, I18nResource>()
+	const localeStates: CheckState[] = []
+	const usage: ViewUsage[] = []
+	let usageComplete = true
 	const failed: { name: string; error: FetchErrorDetails }[] = []
+	// A resource read's diagnostics are structural and schema findings: each one stops that resource from
+	// being used as authored, so they are errors. The missing default Locale is the same kind of error.
 	const push = (resource: FindingResource, diagnostics: readonly Diagnostic[] | undefined, widgetFor?: (diagnostic: Diagnostic) => string | undefined, types?: ReadonlyMap<string, string>) => {
 		for (const diagnostic of diagnostics ?? []) {
 			const widgetId = widgetFor?.(diagnostic)
 			const widgetType = widgetId ? types?.get(widgetId) : undefined
-			collected.push({ code: diagnostic.code, message: diagnostic.message, path: diagnostic.path, resource, ...(widgetId ? { widgetId } : {}), ...(widgetType ? { widgetType } : {}) })
+			collected.push({ code: diagnostic.code, message: diagnostic.message, path: diagnostic.path, resource, source: 'validation', severity: 'error', checkState: 'completed', ...(widgetId ? { widgetId } : {}), ...(widgetType ? { widgetType } : {}) })
 		}
 	}
 	type Job = Readonly<{ kind: FindingResource['kind']; key: string; name: string }>
-	const [localePage, assets] = await Promise.all([
-		uiux.listResources<{ key: string }>(['locale'], { limit: 100 }).catch(() => undefined),
-		uiux.listResources<{ key: string; summary?: { name?: string } }>(['asset'], { limit: 100 }).then(page => page.items).catch(() => []),
+	const [localePage, assetPage] = await Promise.all([
+		listAll<{ key: string }>('locale'),
+		listAll<{ key: string; summary?: { name?: string } }>('asset'),
 	])
+	const assets = assetPage?.items ?? []
+	const assetsListed = !!assetPage?.complete
+	const localesListed = !!localePage?.complete
 	const locales = localePage?.items ?? []
 	const jobs: Job[] = [
 		{ kind: 'workspace', key: 'workspace', name: t('checks.resource.workspace') },
@@ -85,23 +160,61 @@ async function runChecks(): Promise<void> {
 				// Rule 01a115cd-b2ad-7989-8faa-07d48bc8ee30: a default Locale without its Locale file is a
 				// Workspace error, listed on that Locale. Only a Locale list that was read can show it missing.
 				const defaultLocale = job.kind === 'workspace' ? (result.resource?.i18n as { defaultLocale?: unknown } | undefined)?.defaultLocale : undefined
-				if (localePage && typeof defaultLocale === 'string' && !locales.some(locale => locale.key === defaultLocale))
+				if (localesListed && typeof defaultLocale === 'string' && !locales.some(locale => locale.key === defaultLocale))
 					push({ kind: 'locale', key: defaultLocale, name: defaultLocale }, [missingDefaultLocaleDiagnostic(defaultLocale)])
+				if (job.kind === 'locale') {
+					// A Locale file with schema diagnostics is not a translation source: its reminders are not read.
+					if (result.diagnostics?.length || !result.resource) localeStates.push('incomplete')
+					else { localeResources.set(job.key, result.resource as I18nResource); localeStates.push('completed') }
+				}
 				if (job.kind !== 'view') {
 					push(resource, result.diagnostics)
 					return
 				}
 				const ir = result.resource?.ir
 				const tree = ir ? deriveWidgetTree(ir) : undefined
-				const types = new Map(tree?.status === 'valid' ? flattenWidgetTree(tree.root).map(widget => [widget.id, widget.type] as const) : [])
+				const flat = tree?.status === 'valid' ? flattenWidgetTree(tree.root) : []
+				const types = new Map(flat.map(widget => [widget.id, widget.type] as const))
+				// A View whose Widgets cannot be derived cannot be said to use or not use a Catalog entry.
+				if (tree?.status === 'valid') usage.push({ resource, widgets: flat.map(widget => ({ id: widget.id, type: widget.type })) })
+				else usageComplete = false
 				push(resource, result.diagnostics, diagnostic => resolveDiagnosticWidgetTarget(diagnostic, ir, new Set(types.keys())), types)
 			}
 			catch (cause) {
 				failed.push({ name: job.name, error: describeFetchError(cause, t('checks.readFailed')) })
+				if (job.kind === 'locale') localeStates.push('failed')
+				if (job.kind === 'view') usageComplete = false
 			}
 		}))
 	}
-	resourceFindings.value = collected
+	const readState: CheckState = failed.length === 0 && localesListed && assetsListed ? 'completed' : failed.length === jobs.length ? 'failed' : 'incomplete'
+	const validationFindings = collected.map(finding => ({ ...finding, checkState: readState }))
+
+	// Translation reminders: the empty and whitespace-only values of the Locale files that were read.
+	const translationState: CheckState = !localePage ? 'failed' : combineStates([...localeStates, localePage.complete ? 'completed' : 'incomplete'])
+	const reminders = translationReminders(localeResources, workspace.value?.resource?.i18n?.defaultLocale ?? '', translationState)
+
+	// Catalog problems of entries a View uses: the Adapter set's own report, attributed through the Views read above.
+	let catalogState: CheckState = 'failed'
+	let catalog: readonly Finding[] = []
+	let elsewhere = 0
+	try {
+		const response = await api<{ state: 'valid' | 'invalid'; diagnostics: readonly Diagnostic[]; warnings?: readonly Diagnostic[] }>('/api/preview/adapters')
+		// A valid set whose server-side check could not run is not a clean result: the Preview checks it when it loads.
+		catalogState = usageComplete && !response.warnings?.length ? 'completed' : 'incomplete'
+		const problems = catalogProblems(response.diagnostics ?? [], usage, catalogState)
+		catalog = problems.findings
+		elsewhere = problems.elsewhere
+	}
+	catch (cause) {
+		catalogError.value = describeFetchError(cause, t('checks.catalog.failed'))
+	}
+
+	resourceFindings.value = validationFindings
+	translationFindings.value = reminders
+	catalogFindings.value = catalog
+	catalogElsewhere.value = elsewhere
+	readStates.value = { validation: readState, translation: translationState, catalog: catalogState }
 	failures.value = failed
 	lastRun.value = new Date()
 	running.value = false
@@ -145,11 +258,16 @@ function kitFinding(finding: KitFinding): Finding {
 	const resource: FindingResource = finding.viewId
 		? { kind: 'view', key: finding.viewId, name: view?.summary.name || finding.viewId }
 		: { kind: 'product-kit', key: finding.component ?? 'product-kit', name: finding.component ?? t('checks.kit.resource') }
+	const summary = kitResult.value && 'checks' in kitResult.value ? kitResult.value.checks[finding.check] : undefined
 	return {
 		code: finding.code ?? '',
 		message: finding.message,
 		path: finding.path,
 		resource,
+		// Product Kit findings are non-blocking (Rule 01a11bb1-a88c-7d78-8633-1c3b55588910).
+		source: 'product-kit',
+		severity: 'warning',
+		checkState: summary?.state ?? 'completed',
 		...(finding.widgetId ? { widgetId: finding.widgetId } : {}),
 		...(finding.widgetType ? { widgetType: finding.widgetType } : {}),
 		...(finding.variantName ? { variantName: finding.variantName } : {}),
@@ -163,7 +281,7 @@ function kitFinding(finding: KitFinding): Finding {
 
 const findings = computed<readonly Finding[]>(() => {
 	const kit = kitResult.value && 'findings' in kitResult.value ? kitResult.value.findings.map(kitFinding) : []
-	return [...resourceFindings.value, ...kit]
+	return [...resourceFindings.value, ...translationFindings.value, ...catalogFindings.value, ...kit]
 })
 
 /**
@@ -191,12 +309,101 @@ const KIT_STATE_ICON: Record<string, string> = {
 	not_run: 'i-lucide-circle',
 }
 
-const categories = computed(() => {
-	const set = new Set(groupFindings(findings.value).map(group => group.category))
-	return [{ label: t('checks.allCategories'), value: 'all' }, ...[...set].sort().map(value => ({ label: value, value }))]
+// ---- Sources and their check states ------------------------------------------------------------
+
+/** The sources the page lists, with what each one reports. The Preview's translation warnings and Runtime errors are not gathered yet. */
+type SourceId = FindingSource | 'preview-translation' | 'runtime'
+type SourceRow = Readonly<{ id: SourceId; state: CheckState; count: number; note?: string; requiredKey?: string }>
+
+const SOURCE_STATE_ICON: Record<CheckState, string> = {
+	not_checked: 'i-lucide-circle',
+	checking: 'i-lucide-loader-circle',
+	completed: 'i-lucide-circle-check',
+	incomplete: 'i-lucide-circle-dashed',
+	failed: 'i-lucide-circle-x',
+}
+
+/** The Product Kit source as one state: its checks' own states, or why they did not run. */
+const kitState = computed<CheckState>(() => {
+	if (kitRunning.value) return 'checking'
+	const result = kitResult.value
+	if (result && 'checks' in result) return result.status
+	if (result?.status === 'not_applicable') return 'completed'
+	return kitError.value ? 'failed' : 'not_checked'
 })
 
-const groups = computed(() => groupFindings(findings.value).filter(group => category.value === 'all' || group.category === category.value))
+const sourceRows = computed<readonly SourceRow[]>(() => {
+	const countOf = (source: FindingSource): number => findings.value.filter(finding => finding.source === source).length
+	const read = readStates.value
+	const failedCatalog = catalogError.value?.message
+	return [
+		{ id: 'validation', state: read.validation, count: countOf('validation') },
+		{ id: 'translation', state: read.translation, count: countOf('translation') },
+		{
+			id: 'catalog',
+			state: read.catalog,
+			count: countOf('catalog'),
+			...(failedCatalog ? { note: failedCatalog } : catalogElsewhere.value ? { note: t('checks.sources.catalogElsewhere', catalogElsewhere.value) } : {}),
+		},
+		{ id: 'product-kit', state: kitState.value, count: countOf('product-kit'), ...(!canRunKitChecks.value ? { requiredKey: 'evidence.capture' } : {}) },
+		{ id: 'preview-translation', state: 'not_checked', count: 0, note: t('checks.sources.notGathered') },
+		{ id: 'runtime', state: 'not_checked', count: 0, note: t('checks.sources.notGathered') },
+	]
+})
+
+/**
+ * The sources that have not completed: failed, incomplete, still checking or not checked. A run
+ * never reads as clean while one is listed (Rule 01a115cd-bb96-7131-99d9-a3882829590c).
+ */
+const unsettled = computed(() => unsettledSources(Object.fromEntries(sourceRows.value.map(row => [row.id, row.state]))))
+/** The page's own sources that did not settle; the Preview sources stay not checked until they are gathered. */
+const unfinished = computed(() => !!lastRun.value && unsettled.value.some(id => id !== 'preview-translation' && id !== 'runtime'))
+const unsettledNames = computed(() => unsettled.value.map(id => t(`checks.source.${id}`)).join(t('common.listSeparator')))
+
+// ---- Filters, grouping and order -------------------------------------------------------------
+
+const filters = computed<FindingFilters>(() => ({
+	...(filterSource.value !== ALL ? { source: filterSource.value as FindingSource } : {}),
+	...(filterCategory.value !== ALL ? { category: filterCategory.value } : {}),
+	...(filterSeverity.value !== ALL ? { severity: filterSeverity.value as FindingSeverity } : {}),
+	...(filterView.value !== ALL ? { view: filterView.value } : {}),
+	...(filterVariant.value !== ALL ? { variant: filterVariant.value } : {}),
+}))
+const filtered = computed(() => filterFindings(findings.value, filters.value))
+const filterActive = computed(() => Object.keys(filters.value).length > 0)
+
+function options(label: string, values: readonly string[], text: (value: string) => string = value => value) {
+	return [{ label, value: ALL }, ...values.map(value => ({ label: text(value), value }))]
+}
+const sourceOptions = computed(() => options(t('checks.allSources'), FINDING_SOURCES.filter(source => findings.value.some(finding => finding.source === source)), source => t(`checks.source.${source}`)))
+const categoryOptions = computed(() => options(t('checks.allCategories'), [...new Set(findings.value.map(categoryOf))].sort()))
+const severityOptions = computed(() => options(t('checks.allSeverities'), FINDING_SEVERITIES.filter(severity => findings.value.some(finding => finding.severity === severity)), severity => t(`checks.severity.${severity}`)))
+const viewOptions = computed(() => {
+	const viewsWithFindings = new Map(findings.value.filter(finding => finding.resource.kind === 'view').map(finding => [finding.resource.key, finding.resource.name]))
+	return [{ label: t('checks.allViews'), value: ALL }, ...[...viewsWithFindings].sort(([, a], [, b]) => a.localeCompare(b)).map(([value, label]) => ({ label, value }))]
+})
+const variantOptions = computed(() => options(t('checks.allVariants'), [...new Set(findings.value.flatMap(finding => finding.variantName ? [finding.variantName] : []))].sort()))
+const groupByOptions = computed(() => GROUP_BYS.map(value => ({ label: t(`checks.groupBy.${value}`), value })))
+
+/** A filter whose value no longer appears in its options (after another run) goes back to all. */
+watch([sourceOptions, categoryOptions, severityOptions, viewOptions, variantOptions], () => {
+	const prune = (current: Ref<string>, list: readonly { value: string }[]) => {
+		if (current.value !== ALL && !list.some(item => item.value === current.value)) current.value = ALL
+	}
+	prune(filterSource, sourceOptions.value)
+	prune(filterCategory, categoryOptions.value)
+	prune(filterSeverity, severityOptions.value)
+	prune(filterView, viewOptions.value)
+	prune(filterVariant, variantOptions.value)
+})
+
+function clearFilters(): void {
+	filterSource.value = ALL
+	filterCategory.value = ALL
+	filterSeverity.value = ALL
+	filterView.value = ALL
+	filterVariant.value = ALL
+}
 
 const RESOURCE_ICON: Record<FindingResource['kind'], string> = {
 	'product-kit': 'i-lucide-package',
@@ -207,7 +414,19 @@ const RESOURCE_ICON: Record<FindingResource['kind'], string> = {
 	asset: 'i-lucide-image',
 }
 
-type CheckTreeItem = TreeItem & { id: string; level: 'problem' | 'resource' | 'finding'; code?: string; count?: number; detail?: string; mono?: boolean; action?: string; children?: CheckTreeItem[] }
+type CheckTreeItem = TreeItem & {
+	id: string
+	level: 'section' | 'problem' | 'resource' | 'finding'
+	code?: string
+	severity?: FindingSeverity
+	count?: number
+	countKey?: string
+	detail?: string
+	meta?: Readonly<{ severity: FindingSeverity; source: FindingSource; state: CheckState; scope: string }>
+	mono?: boolean
+	action?: string
+	children?: CheckTreeItem[]
+}
 
 /** The newest finding opened; an older request still checking its View never navigates. */
 let openSequence = 0
@@ -216,7 +435,8 @@ let openSequence = 0
  * Follows a finding. A View finding first re-reads its View: the findings were read when Checks
  * ran, and the View may be gone since. Then Checks stays where it is and says so in a non-blocking
  * notice instead of opening a missing View (Rule 01a11658-1fde-7b27-ba6d-6de27224b90c). A read that
- * fails otherwise leaves the decision to the View page, as a deep link does.
+ * fails otherwise leaves the decision to the View page, as a deep link does. A translation reminder
+ * opens its cell in the translation table (Rule 01a115cd-bdb2-7de2-abb9-54f592539471).
  */
 async function open(finding: Finding): Promise<void> {
 	const { resource } = finding
@@ -234,7 +454,7 @@ async function open(finding: Finding): Promise<void> {
 	}
 	else if (resource.kind === 'product-kit') void navigateTo('/workspace/product-kit')
 	else if (resource.kind === 'flow') void navigateTo(flowPath(resource.key))
-	else if (resource.kind === 'locale') void navigateTo('/workspace/locales')
+	else if (resource.kind === 'locale') void navigateTo(finding.translationKey !== undefined ? localeCellLocation(resource.key, finding.translationKey) : '/workspace/locales')
 	else if (resource.kind === 'asset') void navigateTo('/workspace/assets')
 	else void navigateTo('/workspace/settings')
 }
@@ -248,32 +468,74 @@ function findingDetail(finding: Finding): string {
 	return parts.length ? parts.join(' · ') : diagnosticText(finding)
 }
 
-const items = computed<CheckTreeItem[]>(() => groups.value.map(group => ({
-	id: `problem:${group.key}`,
-	level: 'problem',
-	label: group.title ?? diagnosticText(group),
-	code: group.code,
-	count: group.resources.length,
-	icon: 'i-lucide-triangle-alert',
-	defaultExpanded: true,
-	children: group.resources.map(({ resource, findings: list }) => ({
-		id: `resource:${group.key}:${resource.kind}:${resource.key}`,
-		level: 'resource',
-		label: resource.name,
-		icon: RESOURCE_ICON[resource.kind],
+/** What a finding concerns: its resource kind, and its Variant when it names one. */
+function findingScope(finding: Finding): string {
+	const kind = t(`checks.scope.${finding.resource.kind}`)
+	return finding.variantName ? `${kind} · ${t('checks.kit.variant', { name: finding.variantName })}` : kind
+}
+
+function findingLabel(finding: Finding, group: ReturnType<typeof groupFindings>[number]): string {
+	if (finding.translationKey !== undefined) return finding.translationKey
+	if (finding.widgetId) return `${finding.widgetType ? `${finding.widgetType} · ` : ''}#${finding.widgetId}`
+	return group.code ? diagnosticText(finding) : finding.message
+}
+
+function problemItems(list: readonly Finding[], prefix: string): CheckTreeItem[] {
+	return groupFindings(list).map((group) => {
+		const catalog = group.first.source === 'catalog'
+		const text = group.title ?? diagnosticText(group)
+		return {
+			id: `${prefix}problem:${group.key.replaceAll('\u0000', '|')}`,
+			level: 'problem',
+			label: catalog && group.first.widgetType ? t('checks.catalog.entry', { type: group.first.widgetType, text }) : text,
+			code: group.code,
+			severity: group.severity,
+			count: group.resources.length,
+			countKey: catalog ? 'checks.viewCount' : 'checks.resourceCount',
+			icon: 'i-lucide-triangle-alert',
+			defaultExpanded: true,
+			children: group.resources.map(({ resource, findings: members }) => ({
+				id: `${prefix}resource:${group.key.replaceAll('\u0000', '|')}:${resource.kind}:${resource.key}`,
+				level: 'resource',
+				label: resource.name,
+				count: members.length,
+				countKey: catalog ? 'checks.widgetCount' : 'checks.findingCount',
+				icon: RESOURCE_ICON[resource.kind],
+				defaultExpanded: true,
+				children: members.map((finding, index) => ({
+					id: `${prefix}finding:${group.key.replaceAll('\u0000', '|')}:${resource.kind}:${resource.key}:${index}`,
+					level: 'finding',
+					label: findingLabel(finding, group),
+					mono: !!finding.widgetId || finding.translationKey !== undefined,
+					detail: finding.widgetId ? findingDetail(finding) : finding.translationKey !== undefined ? diagnosticText(finding) : finding.path,
+					meta: { severity: finding.severity, source: finding.source, state: finding.checkState, scope: findingScope(finding) },
+					action: finding.translationKey !== undefined ? t('checks.openCell') : finding.widgetId ? t('checks.openWidget') : t('checks.open'),
+					icon: finding.translationKey !== undefined ? 'i-lucide-table-cells-merge' : finding.widgetId ? 'i-lucide-crosshair' : 'i-lucide-arrow-up-right',
+					onSelect: () => { void open(finding) },
+				})),
+			})),
+		}
+	})
+}
+
+const items = computed<CheckTreeItem[]>(() => sectionFindings(filtered.value, groupBy.value).flatMap((section) => {
+	if (groupBy.value === 'problem') return problemItems(section.findings, '')
+	const label = groupBy.value === 'source'
+		? t(`checks.source.${section.value}`)
+		: groupBy.value === 'severity'
+			? t(`checks.severity.${section.value}`)
+			: section.value ? section.findings[0]!.resource.name : t('checks.noView')
+	return [{
+		id: `section:${section.key}`,
+		level: 'section' as const,
+		label,
+		count: section.findings.length,
+		countKey: 'checks.findingCount',
+		icon: groupBy.value === 'view' ? 'i-lucide-app-window' : groupBy.value === 'source' ? 'i-lucide-layers' : 'i-lucide-gauge',
 		defaultExpanded: true,
-		children: list.map((finding, index) => ({
-			id: `finding:${group.key}:${resource.kind}:${resource.key}:${index}`,
-			level: 'finding',
-			label: finding.widgetId ? `${finding.widgetType ? `${finding.widgetType} · ` : ''}#${finding.widgetId}` : group.code ? diagnosticText(finding) : finding.message,
-			mono: !!finding.widgetId,
-			detail: finding.widgetId ? findingDetail(finding) : finding.path,
-			action: finding.widgetId ? t('checks.openWidget') : t('checks.open'),
-			icon: finding.widgetId ? 'i-lucide-crosshair' : 'i-lucide-arrow-up-right',
-			onSelect: () => { void open(finding) },
-		})),
-	})),
-})))
+		children: problemItems(section.findings, `${section.key}:`),
+	}]
+}))
 </script>
 
 <template>
@@ -297,16 +559,114 @@ const items = computed<CheckTreeItem[]>(() => groups.value.map(group => ({
         role="status"
       >
         <template v-if="running">{{ t('checks.running') }}</template>
+        <template v-else-if="lastRun && unfinished">{{ t('checks.lastRunUnfinished', { time: fmt.time(lastRun), n: findings.length }, findings.length) }}</template>
         <template v-else-if="lastRun">{{ t('checks.lastRun', { time: fmt.time(lastRun), n: findings.length }, findings.length) }}</template>
         <template v-else>{{ t('checks.notRun', workspaceFindingCount) }}</template>
       </span>
+    </div>
+
+    <section
+      class="rounded-lg border border-default p-3"
+      data-check-sources
+      :aria-label="t('checks.sources.title')"
+    >
+      <h3 class="text-sm font-medium text-highlighted">
+        {{ t('checks.sources.title') }}
+      </h3>
+      <p class="mt-0.5 text-xs text-muted">
+        {{ t('checks.sources.description') }}
+      </p>
+      <ul class="mt-2 space-y-1.5">
+        <li
+          v-for="row in sourceRows"
+          :key="row.id"
+          class="flex flex-wrap items-start gap-x-2 text-sm"
+          :data-check-source="row.id"
+          :data-check-source-state="row.state"
+        >
+          <UIcon
+            :name="SOURCE_STATE_ICON[row.state]"
+            class="mt-0.5 size-4 shrink-0"
+            :class="[row.state === 'failed' ? 'text-error' : row.state === 'completed' ? 'text-success' : 'text-muted', row.state === 'checking' ? 'animate-spin' : '']"
+          />
+          <span class="text-default">{{ t(`checks.source.${row.id}`) }}</span>
+          <span class="text-xs text-muted">{{ t(`checks.state.${row.state}`) }}</span>
+          <span
+            v-if="row.state === 'completed' || row.state === 'incomplete'"
+            class="text-xs text-muted tabular-nums"
+            data-check-source-count
+          >{{ t('checks.findingCount', row.count) }}</span>
+          <span
+            v-if="row.note"
+            class="text-xs text-muted"
+          >{{ row.note }}</span>
+          <span
+            v-if="row.requiredKey && row.state === 'not_checked'"
+            class="text-xs text-muted"
+          >{{ t('access.requiresKey', { key: row.requiredKey }) }}</span>
+        </li>
+      </ul>
+    </section>
+
+    <div
+      v-if="lastRun && findings.length"
+      class="flex flex-wrap items-center gap-2"
+      data-check-filters
+    >
       <USelect
-        v-if="lastRun && findings.length"
-        v-model="category"
-        :items="categories"
-        :aria-label="t('checks.category')"
-        class="ms-auto w-44"
+        v-model="groupBy"
+        :items="groupByOptions"
+        :aria-label="t('checks.groupBy.label')"
+        class="w-40"
+        data-check-group-by
       />
+      <USelect
+        v-model="filterSource"
+        :items="sourceOptions"
+        :aria-label="t('checks.sourceFilter')"
+        class="w-40"
+        data-check-filter="source"
+      />
+      <USelect
+        v-model="filterCategory"
+        :items="categoryOptions"
+        :aria-label="t('checks.category')"
+        class="w-40"
+        data-check-filter="category"
+      />
+      <USelect
+        v-model="filterSeverity"
+        :items="severityOptions"
+        :aria-label="t('checks.severityFilter')"
+        class="w-40"
+        data-check-filter="severity"
+      />
+      <USelect
+        v-model="filterView"
+        :items="viewOptions"
+        :aria-label="t('checks.viewFilter')"
+        class="w-48"
+        data-check-filter="view"
+      />
+      <USelect
+        v-if="variantOptions.length > 1"
+        v-model="filterVariant"
+        :items="variantOptions"
+        :aria-label="t('checks.variantFilter')"
+        class="w-40"
+        data-check-filter="variant"
+      />
+      <UButton
+        v-if="filterActive"
+        color="neutral"
+        variant="ghost"
+        size="sm"
+        icon="i-lucide-filter-x"
+        data-check-clear-filters
+        @click="clearFilters"
+      >
+        {{ t('checks.clearFilters') }}
+      </UButton>
     </div>
 
     <UAlert
@@ -424,6 +784,15 @@ const items = computed<CheckTreeItem[]>(() => groups.value.map(group => ({
     />
 
     <UEmpty
+      v-else-if="!findings.length && unsettled.length"
+      icon="i-lucide-circle-dashed"
+      variant="naked"
+      :title="t('checks.unfinishedTitle')"
+      :description="t('checks.unfinishedDescription', { sources: unsettledNames })"
+      data-checks-unfinished
+    />
+
+    <UEmpty
       v-else-if="!findings.length"
       icon="i-lucide-circle-check"
       variant="naked"
@@ -431,8 +800,19 @@ const items = computed<CheckTreeItem[]>(() => groups.value.map(group => ({
       :description="t('checks.cleanDescription')"
     />
 
+    <UEmpty
+      v-else-if="!items.length"
+      icon="i-lucide-filter-x"
+      variant="naked"
+      :title="t('checks.noMatches')"
+      :description="t('checks.noMatchesDescription')"
+      :actions="[{ label: t('checks.clearFilters'), color: 'neutral', variant: 'outline', onClick: clearFilters }]"
+      data-checks-no-matches
+    />
+
     <UTree
       v-else
+      :key="`${groupBy}:${lastRun?.getTime()}`"
       :items="items"
       :get-key="item => item.id"
       :aria-label="t('checks.treeLabel')"
@@ -444,21 +824,30 @@ const items = computed<CheckTreeItem[]>(() => groups.value.map(group => ({
         <UIcon
           :name="item.icon!"
           class="mt-0.5 size-4 shrink-0"
-          :class="(item as CheckTreeItem).level === 'problem' ? 'text-warning' : 'text-muted'"
+          :class="(item as CheckTreeItem).level === 'problem' ? ((item as CheckTreeItem).severity === 'error' ? 'text-error' : 'text-warning') : 'text-muted'"
         />
       </template>
       <template #item-label="{ item }">
         <span
           v-if="(item as CheckTreeItem).level === 'problem'"
           class="flex min-w-0 flex-wrap items-baseline gap-x-2"
+          :data-check-problem="(item as CheckTreeItem).code"
+          :data-check-severity="(item as CheckTreeItem).severity"
         >
-          <span class="font-mono text-xs text-warning">{{ (item as CheckTreeItem).code }}</span>
+          <span
+            class="font-mono text-xs"
+            :class="(item as CheckTreeItem).severity === 'error' ? 'text-error' : 'text-warning'"
+          >{{ (item as CheckTreeItem).code }}</span>
           <span class="text-highlighted">{{ item.label }}</span>
+          <span class="text-xs text-muted">{{ t(`checks.severity.${(item as CheckTreeItem).severity}`) }}</span>
         </span>
         <span
           v-else-if="(item as CheckTreeItem).level === 'finding'"
           class="flex min-w-0 flex-col items-start text-start"
           :data-check-finding="item.id"
+          :data-finding-source="(item as CheckTreeItem).meta?.source"
+          :data-finding-severity="(item as CheckTreeItem).meta?.severity"
+          :data-finding-state="(item as CheckTreeItem).meta?.state"
         >
           <span :class="(item as CheckTreeItem).mono ? 'font-mono text-xs text-highlighted' : 'text-default'">{{ item.label }}</span>
           <span
@@ -466,6 +855,11 @@ const items = computed<CheckTreeItem[]>(() => groups.value.map(group => ({
             class="truncate text-xs text-muted"
             :class="(item as CheckTreeItem).mono ? '' : 'font-mono'"
           >{{ (item as CheckTreeItem).detail }}</span>
+          <span
+            v-if="(item as CheckTreeItem).meta"
+            class="text-xs text-muted"
+            data-check-finding-meta
+          >{{ [t(`checks.severity.${(item as CheckTreeItem).meta!.severity}`), t(`checks.source.${(item as CheckTreeItem).meta!.source}`), (item as CheckTreeItem).meta!.scope, t(`checks.state.${(item as CheckTreeItem).meta!.state}`)].join(' · ') }}</span>
         </span>
         <span
           v-else
@@ -474,17 +868,18 @@ const items = computed<CheckTreeItem[]>(() => groups.value.map(group => ({
       </template>
       <template #item-trailing="{ item, expanded }">
         <span
-          v-if="(item as CheckTreeItem).level === 'problem'"
+          v-if="(item as CheckTreeItem).level !== 'finding'"
           class="ms-auto shrink-0 text-xs text-muted tabular-nums"
-        >{{ t('checks.resourceCount', (item as CheckTreeItem).count ?? 0) }}</span>
+          data-check-count
+        >{{ t((item as CheckTreeItem).countKey!, (item as CheckTreeItem).count ?? 0) }}</span>
         <UIcon
           v-if="(item as CheckTreeItem).level !== 'finding'"
           name="i-lucide-chevron-down"
           class="size-4 shrink-0 text-dimmed transition-transform"
-          :class="[(item as CheckTreeItem).level === 'resource' ? 'ms-auto' : '', expanded ? 'rotate-180' : '']"
+          :class="expanded ? 'rotate-180' : ''"
         />
         <span
-          v-else-if="(item as CheckTreeItem).level === 'finding'"
+          v-else
           class="ms-auto inline-flex shrink-0 items-center gap-0.5 text-xs text-muted"
         >{{ (item as CheckTreeItem).action }}<UIcon
           name="i-lucide-chevron-right"
