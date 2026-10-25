@@ -9,7 +9,7 @@ import {
 	type JsonValue,
 	type ValidationResult,
 } from '../validation'
-import { validateI18nOccurrence, validateI18nWarning, type I18nOccurrence, type I18nWarning } from '../i18n/schema'
+import { validateI18nOccurrenceLocator, validateI18nWarning, type I18nOccurrenceLocator, type I18nWarning } from '../i18n/schema'
 import { validateProductKitProvenance, type ProductKitProvenance } from '../product-kit/provenance'
 import { validateAdapterProvenanceMembers } from '../adapters/schema'
 import type { EvidenceAdapterProvenance } from './adapter-provenance'
@@ -51,11 +51,15 @@ export type FormalEvidenceRecord = Readonly<{
 	data?: JsonObject
 }>
 
+/** Clause 01a115cd-cf78-7bfa-b606-b196496d0389: one evaluated translation-result Property of a formal capture. */
 export type TranslationEvidenceOccurrence = Readonly<{
-	occurrence: I18nOccurrence
+	occurrence: I18nOccurrenceLocator
 	evaluatedText: string
 	warnings: readonly I18nWarning[]
 }>
+
+/** Clause 01a17245-062a-7971-b541-6780119bbcfa: a declared translation-result Property that could not be evaluated. */
+export type TranslationMissingOccurrence = Readonly<I18nOccurrenceLocator & { reason: string }>
 
 export function validateEvidenceReference(input: unknown, path = ''): ValidationResult<EvidenceReference> {
 	const v = new Validator()
@@ -91,9 +95,54 @@ export function validateFormalEvidenceRecord(input: unknown, path = ''): Validat
 		const data = v.object(record.data, `${path}/data`)
 		if (data) validateJsonValue(data, `${path}/data`, v)
 	}
+	if (record.kind === 'formal_capture') validateFormalTranslationEvidence(record, path, v)
 	if (Object.hasOwn(record, 'id'))
 		v.issue('evidence.parallel_identity_forbidden', `${path}/id`, 'Formal evidence identity is the SHA-256 digest of its immutable serialized bytes.')
 	return v.finish<FormalEvidenceRecord>(input)
+}
+
+/**
+ * Clauses 01a17245-0527-7911-adbe-7af2e8962e18 (`data.translations`), 01a17245-05a6-7541-8d2a-0f30f310919b and
+ * 01a17245-062a-7971-b541-6780119bbcfa (`coverage.translations`): both members are optional (a capture recorded
+ * before them has neither), and a translation gap always makes the record's own coverage incomplete.
+ */
+function validateFormalTranslationEvidence(record: Readonly<Record<string, unknown>>, path: string, v: Validator): void {
+	const data = isPlainObject(record.data) ? record.data : undefined
+	const coverage = isPlainObject(record.coverage) ? record.coverage : undefined
+	let entryCount: number | undefined
+	if (data && Object.hasOwn(data, 'translations')) {
+		const entries = v.array(data.translations, `${path}/data/translations`)
+		entries?.forEach((entry, index) => v.diagnostics.push(...validateTranslationEvidenceOccurrence(entry, jsonPointer(`${path}/data/translations`, index)).diagnostics))
+		entryCount = entries?.length
+	}
+	if (!coverage || !Object.hasOwn(coverage, 'translations')) return
+	const translationsPath = `${path}/coverage/translations`
+	const translations = v.object(coverage.translations, translationsPath)
+	if (!translations) return
+	if (typeof translations.complete !== 'boolean') {
+		v.issue('evidence.invalid_translation_coverage', `${translationsPath}/complete`, 'Translation coverage must state whether every declared translation-result Property was evaluated.')
+		return
+	}
+	if (translations.complete) {
+		rejectUnknownKeys(translations, ['complete', 'evaluated'], translationsPath, v)
+		if (typeof translations.evaluated !== 'number' || !Number.isInteger(translations.evaluated) || translations.evaluated < 0)
+			v.issue('evidence.invalid_translation_coverage', `${translationsPath}/evaluated`, 'Complete translation coverage records how many Properties were evaluated, a non-negative integer.')
+		else if (entryCount !== translations.evaluated)
+			v.issue('evidence.translation_coverage_mismatch', `${translationsPath}/evaluated`, 'Complete translation coverage must count exactly the entries of data.translations.')
+		return
+	}
+	rejectUnknownKeys(translations, ['complete', 'missing'], translationsPath, v)
+	if (coverage.complete !== false)
+		v.issue('evidence.translation_coverage_mismatch', `${path}/coverage/complete`, 'A record with a translation-result Property that could not be evaluated is not complete.')
+	const missing = v.array(translations.missing, `${translationsPath}/missing`)
+	if (!missing) return
+	if (missing.length === 0)
+		v.issue('evidence.invalid_translation_coverage', `${translationsPath}/missing`, 'Incomplete translation coverage lists at least one missing Property.')
+	missing.forEach((item, index) => v.diagnostics.push(...validateTranslationMissingOccurrence(item, jsonPointer(`${translationsPath}/missing`, index)).diagnostics))
+}
+
+function isPlainObject(value: unknown): value is Readonly<Record<string, unknown>> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function validateEvidenceProvenance(input: unknown, path: string, v: Validator): void {
@@ -158,11 +207,21 @@ export function validateTranslationEvidenceOccurrence(input: unknown, path = '')
 	const occurrence = v.object(input, path)
 	if (!occurrence) return v.finish<TranslationEvidenceOccurrence>(input)
 	rejectUnknownKeys(occurrence, ['occurrence', 'evaluatedText', 'warnings'], path, v)
-	v.diagnostics.push(...validateI18nOccurrence(occurrence.occurrence, `${path}/occurrence`).diagnostics)
+	v.diagnostics.push(...validateI18nOccurrenceLocator(occurrence.occurrence, `${path}/occurrence`).diagnostics)
 	v.string(occurrence.evaluatedText, `${path}/evaluatedText`)
 	const warnings = v.array(occurrence.warnings, `${path}/warnings`)
 	warnings?.forEach((warning, index) => v.diagnostics.push(...validateI18nWarning(warning, jsonPointer(`${path}/warnings`, index)).diagnostics))
 	return v.finish<TranslationEvidenceOccurrence>(input)
+}
+
+export function validateTranslationMissingOccurrence(input: unknown, path = ''): ValidationResult<TranslationMissingOccurrence> {
+	const v = new Validator()
+	const missing = v.object(input, path)
+	if (!missing) return v.finish<TranslationMissingOccurrence>(input)
+	const { reason, ...locator } = missing
+	v.diagnostics.push(...validateI18nOccurrenceLocator(locator, path).diagnostics)
+	v.string(reason, `${path}/reason`, true)
+	return v.finish<TranslationMissingOccurrence>(input)
 }
 
 export function validateEvidenceViewIdentity(value: unknown, path: string, v: Validator): void {

@@ -1,6 +1,8 @@
 import type { Browser, Page } from 'playwright'
 
 import type { ResolvedRenderContext } from '../../domain/render-context/schema'
+import { CAPTURE_HARNESS_GLOBAL, type CaptureHarnessHooks } from '../../preview/capture-harness-hooks'
+import type { TranslationEvaluation } from '../../preview/translation-evaluation'
 
 /**
  * The formal capture harness: one render context loaded into the Preview page (`?harness=formal`)
@@ -192,4 +194,18 @@ export async function openHarnessPreview(browser: Browser, input: Readonly<{
 /** The viewport's PNG bytes, as formal capture stores them. */
 export async function captureHarnessScreenshot(page: Page): Promise<Uint8Array> {
 	return await page.screenshot({ type: 'png', fullPage: false, animations: 'disabled' })
+}
+
+/**
+ * Evaluates every Catalog-declared translation-result Property of the mounted View and Variant through
+ * the Preview's harness hook (Rule 01a115cd-ba68-7c73-a157-08ef34be1e54), bounded by `timeoutMs`. It
+ * rejects when the hook is missing, the Runtime is not mounted or the evaluation does not finish; the
+ * caller then fails the context, since a record never claims coverage without the evaluation.
+ */
+export async function evaluateHarnessTranslations(page: Page, timeoutMs: number = HARNESS_LOAD_TIMEOUT_MS): Promise<TranslationEvaluation> {
+	return await withStepTimeout(page.evaluate(async (global) => {
+		const hooks = (window as unknown as Record<string, CaptureHarnessHooks | undefined>)[global]
+		if (!hooks?.evaluateTranslations) throw new Error('The capture harness hooks are missing.')
+		return await hooks.evaluateTranslations()
+	}, CAPTURE_HARNESS_GLOBAL), timeoutMs, 'The translation evaluation')
 }

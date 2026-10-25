@@ -704,6 +704,11 @@ function installCaptureHarnessHooks() {
 			await new Promise<void>(resolve => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())))
 			return diagnostics
 		},
+		async evaluateTranslations() {
+			const bridge = activeBridge
+			if (!bridge?.evaluateTranslations) throw new Error('The Preview runtime is not mounted.')
+			return bridge.evaluateTranslations()
+		},
 	})
 	Object.defineProperty(window, CAPTURE_HARNESS_GLOBAL, { value: hooks, configurable: true })
 }

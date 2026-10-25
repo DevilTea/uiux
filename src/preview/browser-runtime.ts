@@ -29,6 +29,7 @@ import {
 } from '../adapters/product-integration'
 import { collectWidgetTypesFromIr } from './preview-runtime'
 import { FALLBACK_LOCALE } from './render-context-options'
+import { evaluateTranslationProperties, type TranslationEvaluation } from './translation-evaluation'
 import { WidgetEventObserver, type WidgetEventReport } from './widget-event-observer'
 import type { WidgetEventTrigger } from './protocol/widget-events'
 
@@ -83,6 +84,13 @@ export interface PreviewRuntimeBridge {
 	 * returns the diagnostics of that write. Only the formal capture harness calls it.
 	 */
 	applyVariantStateLive?(variantName: string): readonly Diagnostic[]
+	/**
+	 * The capture harness's translation evaluation (Rule 01a115cd-ba68-7c73-a157-08ef34be1e54): reads every
+	 * Catalog-declared translation-result Property of the mounted View and Variant, hidden Widgets included,
+	 * and returns the results and the Properties that could not be evaluated. It throws while the Runtime
+	 * is not mounted. Only the formal capture harness calls it.
+	 */
+	evaluateTranslations?(): TranslationEvaluation
 	dispose(): void
 }
 
@@ -847,6 +855,16 @@ export function createStandalonePreviewMount(input: Readonly<{
 				const diagnostics = activeController.applyVariantStateLive(variantName)
 				currentContext = activeController.context
 				return diagnostics
+			},
+
+			evaluateTranslations(): TranslationEvaluation {
+				if (disposed || phase !== 'mounted') throw new Error('The Preview runtime is not mounted.')
+				return evaluateTranslationProperties({
+					view: currentView,
+					runtime: activeController.runtime,
+					catalogByType: bundle.catalogByType,
+					variantName: activeController.context.variantName,
+				})
 			},
 
 			dispose() {
