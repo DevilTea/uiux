@@ -388,9 +388,19 @@ export function createWorkspaceApplicationSession(
 		}
 	}
 
-	/** Clause 01a172cc-de18-79ea-a611-c8ea5a34e250. A Flow that is not valid JSON propagates as the point read does. */
+	/**
+	 * Clause 01a172cc-de18-79ea-a611-c8ea5a34e250. A Flow file that is not valid JSON is reported with its
+	 * parse diagnostics, as the discovery listing reports it, rather than thrown.
+	 */
 	async function validateFlow(flowId: string): Promise<ValidateFlowResult> {
-		const read = await readPointResource('flow', flowId)
+		let read: Awaited<ReturnType<typeof readPointResource>>
+		try { read = await readPointResource('flow', flowId) }
+		catch (error) {
+			if (!(error instanceof PersistenceError) || error.code !== 'persistence.invalid_json') throw error
+			const revision = await persistence.flows.readRevision(flowId)
+			if (!revision) return { status: 'not_found', flowId }
+			return { flowId, revision, valid: false, diagnostics: error.diagnostics.length > 0 ? error.diagnostics : [{ code: error.code, path: '', message: error.message }] }
+		}
 		if (read?.kind !== 'flow') return { status: 'not_found', flowId }
 		return { flowId, revision: read.revision, valid: read.diagnostics.length === 0, diagnostics: read.diagnostics }
 	}

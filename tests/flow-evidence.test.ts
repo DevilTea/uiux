@@ -1,10 +1,11 @@
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createLeaseManager } from '../src/application/access/leases'
+import { createFlowEvidenceService } from '../src/application/services/flow-evidence'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { canonicalJsonBytes } from '../src/domain/canonical-json'
 import { validateFormalEvidenceRecord } from '../src/domain/evidence/schema'
@@ -15,7 +16,7 @@ import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
 import { FileNativePersistence } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { captureFlowEvidenceForHttp, validateFlowForHttp } from '../src/server/flows-http'
-import { AGENT_EDITOR } from './support/access'
+import { AGENT_EDITOR, scoped, testMember } from './support/access'
 import { createCurrentWorkspace } from './support/workspace-layout'
 
 const VIEW_A = '11111111-1111-4111-8111-111111111111'
@@ -157,8 +158,9 @@ describe('validate_flow and capture_flow_evidence refusals', () => {
 
 	it('refuses to capture a Flow with a reference diagnostic, before any browser runs, and records nothing', async () => {
 		const flow = { ...twoStepFlow(), steps: { ...twoStepFlow().steps, [STEP_A]: { target: { viewId: VIEW_A, variantName: 'gone' }, transitions: [{ trigger: { widgetId: 'ghost', event: 'press' }, targetStepId: STEP_B }] } } }
-		const { app, root } = await seededSession(flow)
+		const { app, persistence } = await seededSession(flow)
 		const renderContext = { locale: 'en-US', viewportId: 'desktop', themeId: 'light' }
+		const before = await persistence.artifacts.listIdentities()
 		const refused = await app.captureFlowEvidence({ flowId: FLOW_ID, renderContext })
 		expect(refused.status).toBe('invalid')
 		if (refused.status !== 'invalid') return
@@ -169,8 +171,52 @@ describe('validate_flow and capture_flow_evidence refusals', () => {
 			expect(result.isError).toBe(true)
 			expect(result.structuredContent).toMatchObject({ status: 'invalid', flowId: FLOW_ID })
 		})
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
-		expect(await persistence.artifacts.readAllCandidateJson({ select: () => undefined })).toEqual([])
+		// The store is compared by identity, so a stored record of any kind would show.
+		expect(await persistence.artifacts.listIdentities()).toEqual(before)
+	})
+
+	it('keeps the formal captures a failed run already recorded, and records no trace', async () => {
+		const { persistence } = await seededSession(twoStepFlow())
+		const before = await persistence.artifacts.listIdentities()
+		const first = await persistence.artifacts.put(new TextEncoder().encode('a formal capture recorded before the failure'))
+		const service = createFlowEvidenceService(persistence, {
+			readFlow: async () => ({ resource: twoStepFlow(), revision: 'r_flow', diagnostics: [] }),
+			captureFormal: async ({ contexts }) => ({
+				status: 'incomplete',
+				executedAt: new Date().toISOString(),
+				summary: { total: contexts.length, captured: 1, failed: 1 },
+				results: [
+					{ context: contexts[0]!, status: 'captured', evidenceDigest: first.identity, screenshotDigest: first.identity, evidence: { schemaVersion: 1, kind: 'formal_capture', executionContext: {}, coverage: { complete: true }, provenance: { workspaceSchemaVersion: 6, resources: [], versions: { uiux: '0.1.0' } }, artifactRefs: [] } },
+					{ context: contexts[1]!, status: 'failed', diagnostics: [{ code: 'preview.runtime_failed', path: '/preview', message: 'The Preview failed.' }] },
+				],
+			}),
+		})
+		expect(await service.capture({ flowId: FLOW_ID, renderContext: { locale: 'en-US', viewportId: 'desktop', themeId: 'light' } }))
+			.toMatchObject({ status: 'failed', flowId: FLOW_ID, diagnostics: [{ code: 'preview.runtime_failed' }] })
+		// Only what the capture itself stored remains; no flow_trace was written.
+		expect(await persistence.artifacts.listIdentities()).toEqual([...before, first.identity].sort())
+	})
+
+	it('writes nothing for a member without evidence.capture', async () => {
+		const { app, persistence } = await seededSession(twoStepFlow())
+		const before = await persistence.artifacts.listIdentities()
+		const viewer = scoped(app, testMember({ nickname: 'vera', preset: 'viewer' }))
+		expect(await viewer.captureFlowEvidence({ flowId: FLOW_ID, renderContext: { locale: 'en-US', viewportId: 'desktop', themeId: 'light' } }))
+			.toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['evidence.capture'] })
+		expect(await persistence.artifacts.listIdentities()).toEqual(before)
+		expect(await viewer.validateFlow(FLOW_ID)).toMatchObject({ flowId: FLOW_ID, valid: true })
+	})
+
+	it('reports a Flow file that is not valid JSON with its parse diagnostics instead of throwing', async () => {
+		const { app, root } = await seededSession(twoStepFlow())
+		await writeFile(join(root, 'flows', `${FLOW_ID}.flow.json`), '{corrupt')
+		const result = await app.validateFlow(FLOW_ID)
+		expect(result).toMatchObject({ flowId: FLOW_ID, valid: false })
+		if ('status' in result) throw new Error('expected a diagnostic result')
+		expect(result.revision).toMatch(/^r_/u)
+		expect(result.diagnostics.length).toBeGreaterThan(0)
+		expect(await validateFlowForHttp(app, FLOW_ID)).toMatchObject({ status: 200 })
+		expect(await app.captureFlowEvidence({ flowId: FLOW_ID, renderContext: { locale: 'en-US', viewportId: 'desktop', themeId: 'light' } })).toMatchObject({ status: 'invalid' })
 	})
 
 	it('refuses an unknown Flow, a render context or recipe the Flow does not match, and an unknown viewport', async () => {
