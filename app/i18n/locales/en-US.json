@@ -2363,6 +2363,7 @@
       "invalid_provider": "An Adapter provider is not a Vue plugin.",
       "invalid_registry_identity": "An Adapter registry key is not valid.",
       "invalid_theme_support": "The Adapter’s themeSupport must be an object with a supports function.",
+      "invalid_sources": "The Adapter’s sources must map the Widget types it owns to file or URL sources.",
       "manifest_load_failed": "The Adapter could not be loaded.",
       "materialization_unavailable": "The preview cannot load this external Adapter yet.",
       "provenance_unverifiable": "The Adapter’s origin cannot be verified.",
