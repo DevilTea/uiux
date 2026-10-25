@@ -99,6 +99,10 @@ export const ACCESS_OPERATIONS = {
 	// compare_component_copies, and their Workbench mirrors.
 	readKitSource: { requiredKeys: ['product-kit.source.read'] },
 	captureFormalEvidence: { requiredKeys: ['evidence.capture'] },
+	// Clause 01a172cc-e195-711b-bfa9-5de6c1c8ff87: formal UX Flow Evidence is captured like formal capture.
+	captureFlowEvidence: { requiredKeys: ['evidence.capture'] },
+	// Clause 01a172cc-de18-79ea-a611-c8ea5a34e250: validating a Flow only reads it.
+	validateFlow: { requiredKeys: ['workspace.read'] },
 	// Run Checks' Product Kit part (Discussion #139 decision 7) in the Workbench, so Workbench sessions
 	// only. It launches the capture browser, so it needs `evidence.capture` as formal capture does
 	// (Clause 01a11485-fa44-7b6a-99f8-de4e1e8edcfc; owner ruling 1 of
