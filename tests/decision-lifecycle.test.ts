@@ -118,7 +118,7 @@ describe('the lifecycle service (Rules 01a11544-5e99, 01a11544-5ec3 and 01a11544
 		const human = scoped(ctx.app, OWNER)
 		const actor = { type: 'human', id: `member:${OWNER.memberId}`, displayName: 'mei' }
 
-		let revision = (await readView(ctx)).revision
+		let revision: string = (await readView(ctx)).revision
 		const deferred = await human.deferDecision({ key: VIEW_ID, decisionId: DECISION_ID, expectedRevision: revision })
 		expect(deferred).toMatchObject({ status: 'updated', key: VIEW_ID, decision: { id: DECISION_ID, status: 'deferred' } })
 		revision = (deferred as { revision: string }).revision
@@ -188,7 +188,7 @@ describe('the lifecycle service (Rules 01a11544-5e99, 01a11544-5ec3 and 01a11544
 	it('describes the change under /spec/decisions/<id> in the change summary', async () => {
 		const ctx = await fixture()
 		const result = await scoped(ctx.app, OWNER).deferDecision({ key: VIEW_ID, decisionId: DECISION_ID, expectedRevision: (await readView(ctx)).revision })
-		const paths = (result as { changeSummary: { changes: { path: string }[] } }).changeSummary.changes.map(change => change.path)
+		const paths = (result as unknown as { changeSummary: { changes: { path: string }[] } }).changeSummary.changes.map(change => change.path)
 		expect(paths.length).toBeGreaterThan(0)
 		for (const path of paths) expect(path.startsWith(`/spec/decisions/${DECISION_ID}`), path).toBe(true)
 	})
@@ -244,7 +244,7 @@ describe('the lifecycle over MCP and HTTP', { timeout: HEAVY_SERVER_SUITE_TIMEOU
 			expect(Object.keys(tools.find(tool => tool.name === 'defer_decision')!.inputSchema.properties ?? {}).sort()).toEqual(['decisionId', 'expectedRevision', 'viewId'])
 			expect(Object.keys(tools.find(tool => tool.name === 'decide_decision')!.inputSchema.properties ?? {}).sort()).toEqual(['decisionId', 'expectedRevision', 'outcome', 'viewId'])
 
-			let revision = (await readView(ctx)).revision
+			let revision: string = (await readView(ctx)).revision
 			const deferred = await mcp.client.callTool({ name: 'defer_decision', arguments: { viewId: VIEW_ID, decisionId: DECISION_ID, expectedRevision: revision } })
 			expect(deferred.isError).not.toBe(true)
 			expect(deferred.structuredContent).toMatchObject({ status: 'updated', key: VIEW_ID, resourceUri: `uiux://view/${VIEW_ID}`, decision: { status: 'deferred' } })
