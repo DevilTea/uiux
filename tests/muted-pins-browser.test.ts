@@ -68,7 +68,7 @@ async function seedThread(viewId: string, seed: Seed): Promise<string> {
 async function setViewports(edit: (viewports: Record<string, unknown>) => Record<string, unknown>): Promise<void> {
 	const workspace = await api<WorkspaceRead>('/api/resources/workspace/workspace')
 	const { i18n, adapters, themes } = workspace.resource
-	await api('/api/workspace/settings', { expectedRevision: workspace.revision, settings: { i18n, adapters, viewports: edit(workspace.resource.viewports), themes } }, 'PUT')
+	await api('/api/workspace/settings', { expectedRevision: workspace.revision, settings: { i18n, adapters, viewports: edit(workspace.resource.viewports), themes }, acknowledgeImpact: true }, 'PUT')
 }
 
 beforeAll(async () => {
