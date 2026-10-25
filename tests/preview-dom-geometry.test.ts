@@ -436,6 +436,22 @@ describe('Runtime DOM measurer', () => {
 		expect(area(result['ancestor-circle']!)).toBeGreaterThan(Math.PI * 48 * 48 - 2 * Math.PI * 48 * 0.5)
 	})
 
+	it('accounts for the backdrop of a modal dialog over a Widget outside it (#112)', async () => {
+		const page = (style: string) => `<style>${style}</style>
+			<div data-widget-id="behind" style="position:absolute;left:0;top:0;width:300px;height:100px;background:#eee"></div>
+			<dialog id="d" style="width:100px;height:60px;margin:0;left:450px;top:300px;padding:0;border:0"><div data-widget-id="inside" style="width:100px;height:60px;background:#eee"></div></dialog>
+			<script>document.getElementById('d').showModal()</script>`
+		// The default backdrop is translucent: what is behind it stays, as the Widget inside the dialog does.
+		const translucent = await measure(page(''), ['behind', 'inside'])
+		expect(bounds(translucent.behind!)).toEqual([{ left: 0, top: 0, right: 300, bottom: 100, maxError: 0 }])
+		expect(bounds(translucent.inside!)).toEqual([{ left: 450, top: 300, right: 550, bottom: 360, maxError: 0 }])
+		// An opaque backdrop covers a Widget outside the dialog, but never one inside it, which paints above it.
+		const opaque = await measure(page('dialog::backdrop{background:#000}'), ['behind', 'inside'])
+		expect(opaque.behind!.regions).toEqual([])
+		expect(bounds(opaque.inside!)).toEqual([{ left: 450, top: 300, right: 550, bottom: 360, maxError: 0 }])
+		expect((await measure(page('dialog::backdrop{background:rgba(0,0,0,0.5);backdrop-filter:blur(4px)}'), ['behind'])).behind!.regions).toEqual([])
+	})
+
 	it('keeps failing closed for a mask, an underivable clip path and two curved clips on the Widget\'s own chain (#112)', async () => {
 		const result = await measure(`
 			<svg width="0" height="0" style="position:absolute"><clipPath id="path-clip"><path d="M0 0 L50 0 L50 100 Z"></path></clipPath></svg>

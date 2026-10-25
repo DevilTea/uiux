@@ -61,6 +61,8 @@ import type { RoundedRectRadii } from './rounded-contour'
  *     overflow is visible, an unparsed shadow, outline, outset or text style, text with combining
  *     marks, a transformed, floated, shadowed or offset pseudo-element, a list marker of unknown
  *     width, or an outset that a transform without a measurable box makes unscalable.
+ * - The `::backdrop` of a top-layer element paints over the viewport: translucent when its fill and
+ *   opacity prove it (kept), unsupported when it is opaque, an image, filtered, blended or bordered.
  *
  * Glyph ink is taken to stay within one em of the inline boxes of its text in a bound, and within
  * those boxes when the text lies under an exact cut.
@@ -152,6 +154,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	let paintBounds = new Map<Element, Box | 'unbounded' | 'empty'>()
 	let generatedContents = new Map<Element, GeneratedContent>()
 	let ownTexts = new Map<Element, OwnText | undefined>()
+	let topLayer: readonly Element[] | undefined
 	let viewport: Box | undefined
 
 	function rectOf(element: Element): DOMRect {
@@ -708,7 +711,50 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 			if (items === 'unsupported') return 'unsupported'
 			evidence.push(...items)
 		}
+		// The `::backdrop` of a top-layer element paints over the whole viewport, wherever the element is.
+		for (const root of topLayerRoots()) {
+			if (root === target || root.contains(target)) continue
+			const items = backdropEvidence(root)
+			if (items === 'unsupported') return 'unsupported'
+			evidence.push(...items)
+		}
 		return evidence
+	}
+
+	/** The elements in the top layer (modal dialogs, open popovers, the fullscreen element), found once per pass. */
+	function topLayerRoots(): readonly Element[] {
+		if (!topLayer) {
+			try {
+				topLayer = Array.from(doc.querySelectorAll(':modal, :popover-open, :fullscreen'))
+			}
+			catch {
+				// Engines without these pseudo-classes have no top layer content of that kind.
+				topLayer = []
+			}
+		}
+		return topLayer
+	}
+
+	/**
+	 * What a top-layer element's `::backdrop` paints: nothing, something translucent (kept), or
+	 * paint that is not proven translucent (an opaque or image fill, a filter, a blend, a border or
+	 * shadow): its box is the viewport only by default, so that is unsupported, not a cut.
+	 */
+	function backdropEvidence(root: Element): Evidence[] | 'unsupported' {
+		const facts = view.getComputedStyle(root, '::backdrop')
+		const alpha = colorAlpha(facts.backgroundColor)
+		if (alpha === undefined) return 'unsupported'
+		const opacity = Number.parseFloat(facts.opacity)
+		const image = facts.backgroundImage !== '' && facts.backgroundImage !== 'none'
+		const set = (value: string | undefined) => value !== undefined && value !== '' && value !== 'none'
+		const border = (['Top', 'Right', 'Bottom', 'Left'] as const).some(side => px(facts.getPropertyValue(`border-${side.toLowerCase()}-width`)) > 0 && facts.getPropertyValue(`border-${side.toLowerCase()}-style`) !== 'none')
+		const marks = alpha > 0 || image || border || set(facts.boxShadow) || (facts.outlineStyle !== 'none' && px(facts.outlineWidth) > 0)
+		if (!marks || opacity === 0) return []
+		if (facts.visibility === 'hidden') return []
+		if (set(facts.filter) || set(facts.backdropFilter) || (facts.mixBlendMode !== '' && facts.mixBlendMode !== 'normal')) return 'unsupported'
+		if (opacity < 1) return [TRANSLUCENT]
+		if (alpha === 1 || image || border || set(facts.boxShadow) || (facts.outlineStyle !== 'none' && px(facts.outlineWidth) > 0)) return 'unsupported'
+		return [TRANSLUCENT]
 	}
 
 	type Evidence = OcclusionEvidence<CutShape>
@@ -1353,6 +1399,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		paintBounds = new Map()
 		generatedContents = new Map()
 		ownTexts = new Map()
+		topLayer = undefined
 		candidates = undefined
 		viewport = undefined
 	}
