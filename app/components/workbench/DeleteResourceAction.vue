@@ -24,8 +24,6 @@ const props = defineProps<{
 	resourceKey: string
 	/** The resource's display name. */
 	name: string
-	/** The compact icon-only form. */
-	compact?: boolean
 }>()
 const emit = defineEmits<{ deleted: [] }>()
 
@@ -166,7 +164,7 @@ async function remove(acknowledgeImpact: boolean): Promise<void> {
       color="error"
       variant="ghost"
       icon="i-lucide-trash-2"
-      :label="compact ? undefined : t('deleteResource.action')"
+      :label="t('deleteResource.action')"
       :aria-label="t('deleteResource.actionNamed', { name })"
       aria-haspopup="dialog"
       class="pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:justify-center"

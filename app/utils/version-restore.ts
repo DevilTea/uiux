@@ -95,7 +95,7 @@ export function productKitComposes(changes: readonly Readonly<{ path: string }>[
 }
 
 /** The impact list's groups, in the order the confirmation shows them (Rules 01a11a5e-174b-… and 17a0-…). */
-export const IMPACT_GROUPS = ['anchors', 'references', 'flowSteps', 'submissions', 'renderKeys', 'evidence', 'other'] as const
+export const IMPACT_GROUPS = ['anchors', 'references', 'flowSteps', 'decisions', 'submissions', 'renderKeys', 'evidence', 'other'] as const
 export type ImpactGroup = typeof IMPACT_GROUPS[number]
 
 const GROUP_OF: Readonly<Record<ImpactCategory, ImpactGroup>> = {
@@ -107,6 +107,7 @@ const GROUP_OF: Readonly<Record<ImpactCategory, ImpactGroup>> = {
 	flow_step_target_missing: 'flowSteps',
 	review_variant_stale: 'anchors',
 	view_reference_dangling: 'references',
+	view_decision_removed: 'decisions',
 	submission_revision_not_current: 'submissions',
 	submission_revision_current: 'submissions',
 	render_key_removed: 'renderKeys',

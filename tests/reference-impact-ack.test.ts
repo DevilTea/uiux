@@ -489,3 +489,197 @@ describe('deleting an Asset is atomic', () => {
 		expect((await persistence.assets.read(ASSET_ID))?.revision).toBe((created as { revision: string }).revision)
 	})
 })
+
+describe('Decisions are part of a View delete (owner ruling 2 of discussioncomment-19180530)', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
+	it('lists every Decision of the View, whatever its status, and deletes only once acknowledged', async () => {
+		const ctx = await fixture()
+		const lonely = '99999999-9999-4999-8999-999999999999'
+		const created = await session(ctx, OWNER).createView({ id: lonely, name: 'Decided', spec: spec('Has Decisions') })
+		const read = (await ctx.persistence.views.read(lonely))!
+		const decisions = [
+			{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', question: 'Pending one?', status: 'pending', history: [] },
+			{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', question: 'Deferred one?', status: 'deferred', history: [] },
+			{ id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', question: 'Decided one?', status: 'decided', outcome: { summary: 'Yes', rationale: 'Because.' }, history: [] },
+		]
+		const written = await ctx.persistence.views.compareAndSwap({ key: lonely, expectedRevision: read.revision, resource: { ...read.resource, spec: { ...read.resource.spec, decisions } } as never })
+		expect(created.status).toBe('created')
+		expect(written.ok).toBe(true)
+		const revision = (written as { revision: string }).revision
+
+		const refused = await session(ctx, AGENT).deleteView({ key: lonely, expectedRevision: revision })
+		expect(refused).toEqual({
+			status: 'impact_acknowledgement_required',
+			key: lonely,
+			impacts: decisions.map(decision => ({ category: 'view_decision_removed', viewId: lonely, decisionId: decision.id, status: decision.status, question: decision.question })),
+		})
+		const http = await deleteViewForHttp(session(ctx, OWNER), lonely, { expectedRevision: revision })
+		expect(http.status).toBe(409)
+		expect(await exists(join(ctx.root, viewRelativePath(lonely)))).toBe(true)
+		const deleted = await session(ctx, AGENT).deleteView({ key: lonely, expectedRevision: revision, acknowledgeImpact: true })
+		expect(deleted).toMatchObject({ status: 'deleted', impacts: [{ category: 'view_decision_removed' }, { category: 'view_decision_removed' }, { category: 'view_decision_removed' }] })
+	})
+})
+
+describe('the impact is checked again inside the lock', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
+	it('refuses an unacknowledged View delete when a reference appeared after the first look, and deletes nothing', async () => {
+		const ctx = await fixture()
+		const lonely = '99999999-9999-4999-8999-999999999999'
+		const created = await session(ctx, OWNER).createView({ id: lonely, name: 'Lonely', spec: spec('Nothing names me yet') })
+		const revision = (created as { revision: string }).revision
+		const repository = ctx.persistence.views
+		const original = repository.deleteIfRevision.bind(repository)
+		let raced = false
+		repository.deleteIfRevision = (async (input: Parameters<typeof original>[0]) => {
+			if (!raced) {
+				raced = true
+				// A Review thread anchors in the View between the caller's read and the delete.
+				expect(await session(ctx, REVIEWER).createReviewThread({ anchor: { viewId: lonely, widgetId: 'root' } })).toMatchObject({ status: 'created' })
+			}
+			return original(input)
+		}) as typeof original
+		const refused = await session(ctx, OWNER).deleteView({ key: lonely, expectedRevision: revision })
+		expect(refused).toMatchObject({ status: 'impact_acknowledgement_required', key: lonely, impacts: [{ category: 'review_anchor_invalidated' }] })
+		expect(await exists(join(ctx.root, viewRelativePath(lonely)))).toBe(true)
+		// The caller resends with the acknowledgement it was shown.
+		expect(await session(ctx, OWNER).deleteView({ key: lonely, expectedRevision: revision, acknowledgeImpact: true })).toMatchObject({ status: 'deleted' })
+	})
+
+	it('does the same for a UX Flow and an Asset', async () => {
+		const ctx = await fixture()
+		const loose = '88888888-8888-4888-8888-888888888888'
+		const asset = await session(ctx, OWNER).createAsset({ id: loose, name: 'Loose', contentFilename: 'loose.png', mediaType: 'image/png', contentBase64: PNG })
+		const assetRevision = (asset as { revision: string }).revision
+		const originalAsset = ctx.persistence.assets.deleteIfRevision.bind(ctx.persistence.assets)
+		let racedAsset = false
+		ctx.persistence.assets.deleteIfRevision = (async (input: Parameters<typeof originalAsset>[0]) => {
+			if (!racedAsset) {
+				racedAsset = true
+				// A View binds the Asset between the caller's read and the delete.
+				const view = (await ctx.persistence.views.read(VIEW_ID))!
+				const widget = { type: 'Button', id: 'logo', config: { icon: { $asset: loose } } }
+				const ir = { type: 'RootShell', id: 'root', slots: { content: [widget] } }
+				expect(await session(ctx, OWNER).updateViewStructure({ key: VIEW_ID, expectedRevision: view.revision, ir, variants: view.resource.variants } as never)).toMatchObject({ status: 'updated' })
+			}
+			return originalAsset(input)
+		}) as typeof originalAsset
+		const refusedAsset = await session(ctx, OWNER).deleteAsset({ assetId: loose, expectedRevision: assetRevision })
+		expect(refusedAsset).toMatchObject({ status: 'impact_acknowledgement_required', impacts: [{ category: 'asset_reference_dangling', assetId: loose }] })
+		expect(await exists(join(ctx.root, assetMetadataRelativePath(loose)))).toBe(true)
+
+		const second = '55555555-5555-4555-8555-555555555555'
+		const flow = await session(ctx, OWNER).createFlow({ id: second, name: 'Second', entryStepId: STEP_ID, steps: { [STEP_ID]: { target: { viewId: VIEW_ID }, transitions: [] } } })
+		const flowRevision = (flow as { revision: string }).revision
+		const originalFlow = ctx.persistence.flows.deleteIfRevision.bind(ctx.persistence.flows)
+		let racedFlow = false
+		ctx.persistence.flows.deleteIfRevision = (async (input: Parameters<typeof originalFlow>[0]) => {
+			if (!racedFlow) {
+				racedFlow = true
+				const submitted = await session(ctx, REVIEWER).submitReadyForReview({
+					reviewId: REVIEW_ID,
+					expectedRevision: (await ctx.persistence.reviews.read(REVIEW_ID))!.revision,
+					resources: [{ identity: { type: 'view', id: VIEW_ID }, revision: (await viewRead(ctx)).revision }, { identity: { type: 'flow', id: second }, revision: flowRevision }],
+					actor: { type: 'human', displayName: 'Rui' },
+					changeDomains: ['metadata'],
+					evidenceRefs: [{ kind: 'screenshot', evidence: await putEvidenceRecord(ctx.persistence, 'screenshot', 'race') }],
+					reason: 'Check the Flow.',
+				} as never)
+				expect(submitted.status, JSON.stringify(submitted)).toBe('updated')
+			}
+			return originalFlow(input)
+		}) as typeof originalFlow
+		const refusedFlow = await session(ctx, OWNER).deleteFlow({ flowId: second, expectedRevision: flowRevision })
+		expect(refusedFlow).toMatchObject({ status: 'impact_acknowledgement_required', impacts: [{ category: 'submission_revision_not_current' }] })
+		expect(await exists(join(ctx.root, flowRelativePath(second)))).toBe(true)
+	})
+})
+
+describe('a delete is a history boundary (owner ruling 1 of discussioncomment-19180530)', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
+	async function autosaves(ctx: Fixture) {
+		await ctx.recorder.closeOpenAutosave('shutdown')
+		const listed = await ctx.app.listVersions({ types: ['autosave'] })
+		const rows = (listed as { versions: readonly { id: string }[] }).versions
+		return Promise.all(rows.map(async (row) => {
+			const read = await ctx.app.readVersion(row.id)
+			return { id: row.id, operations: (read as { version: HostVersionRecord }).version.events.map(event => event.operation) }
+		}))
+	}
+
+	it('restores a View created and deleted within one autosave window', async () => {
+		const ctx = await fixture()
+		await ctx.recorder.closeOpenAutosave('shutdown')
+		const key = '99999999-9999-4999-8999-999999999999'
+		const created = await session(ctx, OWNER).createView({ id: key, name: 'Short lived', spec: spec('Created, then deleted at once') })
+		const before = (await ctx.persistence.views.read(key))!
+		expect(await session(ctx, OWNER).deleteView({ key, expectedRevision: (created as { revision: string }).revision })).toMatchObject({ status: 'deleted' })
+
+		const rows = await autosaves(ctx)
+		// Newest first: the delete alone, then the autosave that holds the create.
+		expect(rows.map(row => row.operations)).toEqual([['deleteView'], ['createView']])
+		const restored = await session(ctx, OWNER).restoreResourceVersion({ versionId: rows[1]!.id, resource: { kind: 'view', key }, expectedRevision: null })
+		expect(restored).toMatchObject({ status: 'created', kind: 'view', key })
+		expect((await ctx.persistence.views.read(key))!.resource).toEqual(before.resource)
+	})
+
+	it('restores a View edited and then deleted by the same actor to the state just before the delete', async () => {
+		const ctx = await fixture()
+		await ctx.recorder.closeOpenAutosave('shutdown')
+		const key = '99999999-9999-4999-8999-999999999999'
+		const created = await session(ctx, OWNER).createView({ id: key, name: 'Edited', spec: spec('First') })
+		const edited = await session(ctx, OWNER).updateViewSpec({ key, expectedRevision: (created as { revision: string }).revision, spec: spec('Second') })
+		const before = (await ctx.persistence.views.read(key))!
+		expect(await session(ctx, OWNER).deleteView({ key, expectedRevision: (edited as { revision: string }).revision })).toMatchObject({ status: 'deleted' })
+
+		const rows = await autosaves(ctx)
+		expect(rows.map(row => row.operations)).toEqual([['deleteView'], ['createView', 'updateViewSpec']])
+		await session(ctx, OWNER).restoreResourceVersion({ versionId: rows[1]!.id, resource: { kind: 'view', key }, expectedRevision: null })
+		expect((await ctx.persistence.views.read(key))!.resource).toEqual(before.resource)
+	})
+
+	it('restores a deleted Asset and a deleted UX Flow the same way', async () => {
+		const ctx = await fixture()
+		await ctx.recorder.closeOpenAutosave('shutdown')
+		const assetKey = '88888888-8888-4888-8888-888888888888'
+		const flowKey = '55555555-5555-4555-8555-555555555555'
+		const asset = await session(ctx, OWNER).createAsset({ id: assetKey, name: 'Loose', contentFilename: 'loose.png', mediaType: 'image/png', contentBase64: PNG })
+		const flow = await session(ctx, OWNER).createFlow({ id: flowKey, name: 'Second', entryStepId: STEP_ID, steps: { [STEP_ID]: { target: { viewId: VIEW_ID }, transitions: [] } } })
+		const assetBefore = (await ctx.persistence.assets.read(assetKey))!
+		const flowBefore = (await ctx.persistence.flows.read(flowKey))!
+		expect(await session(ctx, OWNER).deleteAsset({ assetId: assetKey, expectedRevision: (asset as { revision: string }).revision })).toMatchObject({ status: 'deleted' })
+		expect(await session(ctx, OWNER).deleteFlow({ flowId: flowKey, expectedRevision: (flow as { revision: string }).revision })).toMatchObject({ status: 'deleted' })
+
+		const rows = await autosaves(ctx)
+		// Every delete closes the autosave before it, so each stands alone after the one that holds the creates.
+		expect(rows.map(row => [...row.operations].sort())).toEqual([['deleteFlow'], ['deleteAsset'], ['createAsset', 'createFlow']])
+		const versionId = rows[2]!.id
+		expect(await session(ctx, OWNER).restoreResourceVersion({ versionId, resource: { kind: 'asset', key: assetKey }, expectedRevision: null })).toMatchObject({ status: 'created' })
+		expect(await session(ctx, OWNER).restoreResourceVersion({ versionId, resource: { kind: 'flow', key: flowKey }, expectedRevision: null })).toMatchObject({ status: 'created' })
+		expect((await ctx.persistence.assets.read(assetKey))!.revision).toBe(assetBefore.revision)
+		expect((await ctx.persistence.flows.read(flowKey))!.resource).toEqual(flowBefore.resource)
+	})
+})
+
+describe('create_flow and update_flow results carry the reference diagnostics (Clause 01a172e8-906d-779b-8305-870bf5f09e75)', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
+	it('lists the missing View, Variant and Widget after the structural diagnostics, and still saves', async () => {
+		const ctx = await fixture()
+		const missingView = '77777777-7777-4777-8777-777777777777'
+		const OTHER_STEP = '99999999-0000-4999-8999-999999999999'
+		const second = '55555555-5555-4555-8555-555555555555'
+		const steps = {
+			[STEP_ID]: { target: { viewId: VIEW_ID, variantName: 'gone' }, transitions: [{ trigger: { widgetId: 'nope', event: 'click' }, targetStepId: OTHER_STEP }] },
+			[OTHER_STEP]: { target: { viewId: missingView }, transitions: [] },
+		}
+		const created = await session(ctx, OWNER).createFlow({ id: second, name: 'Dangling', entryStepId: STEP_ID, steps: steps as never })
+		expect(created, JSON.stringify(created)).toMatchObject({ status: 'created' })
+		const codes = (created as unknown as { diagnostics: { code: string }[] }).diagnostics.map(item => item.code)
+		expect(codes).toEqual(expect.arrayContaining(['flow.missing_variant', 'flow.missing_view', 'flow.missing_widget']))
+		const updated = await session(ctx, OWNER).updateFlow({ flowId: second, expectedRevision: (created as { revision: string }).revision, name: 'Dangling 2', entryStepId: STEP_ID, steps: steps as never })
+		expect(updated).toMatchObject({ status: 'updated' })
+		expect((updated as unknown as { diagnostics: { code: string }[] }).diagnostics.map(item => item.code)).toEqual(codes)
+		// The Flow read reports the same.
+		const read = await ctx.app.readPointResource('flow', second)
+		expect(read?.diagnostics.map(item => item.code)).toEqual(codes)
+		// A Flow without a dangling reference carries none.
+		const clean = await session(ctx, OWNER).createFlow({ id: '66666666-0000-4666-8666-666666666666', name: 'Clean', entryStepId: STEP_ID, steps: { [STEP_ID]: { target: { viewId: VIEW_ID }, transitions: [] } } })
+		expect((clean as unknown as { diagnostics: unknown[] }).diagnostics).toEqual([])
+	})
+})

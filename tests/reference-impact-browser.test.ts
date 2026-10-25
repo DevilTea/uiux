@@ -132,6 +132,26 @@ describe('deleting a View from its page', () => {
 	}, 90_000)
 })
 
+describe('deleting a UX Flow from its page', () => {
+	it('deletes a Flow after one confirmation and returns to the Flow list', async () => {
+		const viewId = await seedView(`Flow target ${unique()}`)
+		const step = randomUUID()
+		const flow = await api<{ key: string }>('/api/flows', { name: `Doomed flow ${unique()}`, entryStepId: step, steps: { [step]: { target: { viewId }, transitions: [] } } })
+		const { context, page } = await open(`/flows/${flow.key}`)
+		try {
+			await page.locator('[data-delete-resource]').click()
+			await expect.poll(() => page.locator('[data-delete-confirm]').isEnabled(), { timeout: 10_000 }).toBe(true)
+			await page.locator('[data-delete-confirm]').click()
+			await deleteDialog(page).waitFor({ state: 'detached' })
+			await expect.poll(() => status(`/api/resources/flow/${flow.key}`)).toBe(404)
+			await expect.poll(() => new URL(page.url()).pathname).toBe('/flows')
+			// The View it targeted is untouched.
+			expect(await status(`/api/resources/view/${viewId}`)).toBe(200)
+		}
+		finally { await context.close() }
+	}, 90_000)
+})
+
 describe('deleting an Asset from its detail', () => {
 	it('deletes an Asset no View binds after one confirmation', async () => {
 		const name = `Loose ${unique()}`

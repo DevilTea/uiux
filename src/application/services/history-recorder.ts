@@ -7,6 +7,7 @@ import {
 	AUTOSAVE_IDLE_MS,
 	AUTOSAVE_MAX_EVENTS,
 	AUTOSAVE_MAX_SPAN_MS,
+	HISTORY_DELETE_OPERATIONS,
 	BASELINE_CHECKPOINT_NAME,
 	HISTORY_SCHEMA_VERSION,
 	HOST_PRUNE_INTERVAL_MS,
@@ -38,6 +39,8 @@ import { diagnostics } from '../../logging/diagnostics'
  * - the writing Agent's `release_lock` with no arguments ({@link HistoryRecorder.agentReleased}, Rule 01a11a5e-0068-…);
  * - the start of a Checkpoint or a restore ({@link HistoryRecorder.closeOpenAutosave}; a write whose
  *   context names `restoredFrom` is closed before and after, so the restore stands alone, Rule 01a11a5e-00b9-…);
+ * - a write that deletes a whole resource (`deleteView`, `deleteFlow`, `deleteAsset`), closed before it so the
+ *   state just before the delete is a restorable version, a resource created in the same window included;
  * - server shutdown (best-effort) or else the next server start (Rule 01a11a5e-010b-…).
  *
  * Every boundary then rescans the versioned files under the lock and records what the events do
@@ -72,6 +75,7 @@ export type AutosaveCloseReason =
 	| 'agent_release'
 	| 'checkpoint'
 	| 'restore'
+	| 'delete'
 	| 'shutdown'
 	| 'leftover'
 	| 'start'
@@ -511,6 +515,7 @@ class AutosaveRecorder implements HistoryRecorder {
 		if (open) {
 			if (!sameActor(open.actor, context.actor)) return 'actor_change'
 			if (context.restoredFrom !== undefined) return 'restore'
+			if (HISTORY_DELETE_OPERATIONS.includes(context.operation)) return 'delete'
 			if (now - open.startedAtMs >= AUTOSAVE_MAX_SPAN_MS) return 'max_span'
 			// The idle timer may not have fired yet (a busy lock, a late timer).
 			if (now - open.lastEventAtMs >= AUTOSAVE_IDLE_MS) return 'idle'

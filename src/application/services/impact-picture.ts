@@ -78,6 +78,15 @@ export async function readImpactWorkspace(persistence: FileNativePersistence, op
 	return impactWorkspaceFromSnapshot(snapshot, persistence.layout, reviews, evidence)
 }
 
+/**
+ * The current Workspace as the analysis sees it, read while the caller already holds the persistence
+ * lock (a delete guard re-checks the impact inside the exclusive lock, so a reference added since the
+ * first look is never missed). It reads no Evidence.
+ */
+export async function readImpactWorkspaceUnlocked(persistence: FileNativePersistence): Promise<ImpactWorkspace> {
+	return impactWorkspaceFromSnapshot(await persistence.scanVersionedSnapshotUnlocked(), persistence.layout, await readImpactReviewsUnlocked(persistence), undefined)
+}
+
 /** The revision a single-file resource (a View, a Flow or the Workspace settings) has once `next` is written. */
 export function nextSingleFileRevision(kind: 'view' | 'flow' | 'workspace', next: unknown): string | undefined {
 	return revisionForResourceFiles(kind, new Map([[kind, canonicalJsonBytes(next)]]))

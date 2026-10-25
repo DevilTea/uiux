@@ -2957,6 +2957,7 @@
           "anchors": "Review threads whose Widget anchor or Variant changes",
           "references": "References that would have nothing to point to",
           "flowSteps": "Flow steps that would lose their target or Widgets",
+          "decisions": "Decisions that would be removed with their View",
           "submissions": "Ready-for-review submissions",
           "renderKeys": "Removed viewport and theme keys",
           "evidence": "Evidence that would become stale",
@@ -2981,7 +2982,12 @@
           "flowTargetVariant": "Flow {flow}, step {step} targets Variant {variant} of View {view}, which would no longer exist.",
           "flowTargetView": "Flow {flow}, step {step} targets View {view}, which would no longer exist.",
           "referenceVariant": "View {view} refers to Variant {variant} of View {target}, which would no longer exist.",
-          "referenceView": "View {view} refers to View {target}, which would no longer exist."
+          "referenceView": "View {view} refers to View {target}, which would no longer exist.",
+          "decision": {
+            "pending": "Pending Decision “{question}” of View {view} would be removed.",
+            "deferred": "Deferred Decision “{question}” of View {view} would be removed.",
+            "decided": "Decided Decision “{question}” of View {view} would be removed."
+          }
         }
       },
       "conflict": {

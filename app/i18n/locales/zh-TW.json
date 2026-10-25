@@ -2957,6 +2957,7 @@
           "anchors": "Widget 錨點或 Variant 會改變的 Review 討論串",
           "references": "會找不到目標的參照",
           "flowSteps": "會失去目標或 Widget 的 Flow 步驟",
+          "decisions": "會隨 View 一併移除的 Decision",
           "submissions": "待審核的 Review 提交",
           "renderKeys": "會移除的檢視區與主題鍵",
           "evidence": "會變成過時的 Evidence",
@@ -2981,7 +2982,12 @@
           "flowTargetVariant": "Flow {flow} 的步驟 {step} 指向 View {view} 的 Variant {variant}，該 Variant 將不再存在。",
           "flowTargetView": "Flow {flow} 的步驟 {step} 指向 View {view}，該 View 將不再存在。",
           "referenceVariant": "View {view} 參照 View {target} 的 Variant {variant}，該 Variant 將不再存在。",
-          "referenceView": "View {view} 參照 View {target}，該 View 將不再存在。"
+          "referenceView": "View {view} 參照 View {target}，該 View 將不再存在。",
+          "decision": {
+            "pending": "View {view} 待決的 Decision「{question}」將被移除。",
+            "deferred": "View {view} 已延後的 Decision「{question}」將被移除。",
+            "decided": "View {view} 已決定的 Decision「{question}」將被移除。"
+          }
         }
       },
       "conflict": {

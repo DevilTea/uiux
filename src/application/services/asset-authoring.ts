@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { ResourceRevision } from '../dto/revisions'
 import { summarizeChange, type ChangeSummary } from '../dto/change-summary'
 import { analyzeImpact, withResource, type ImpactItem } from '../../domain/impact'
-import { readImpactWorkspace } from './impact-picture'
+import { readImpactWorkspaceUnlocked } from './impact-picture'
 import { validateResourceRevision } from '../dto/revisions'
 import { isFullUuid, type Diagnostic } from '../../domain/validation'
 import {
@@ -178,13 +178,15 @@ export function createAssetAuthoringService(persistence: FileNativePersistence):
 		if (current.revision !== expectedRevision.value)
 			return { status: 'conflict', key: command.assetId, currentRevision: current.revision }
 
-		const before = await readImpactWorkspace(persistence)
-		const impacts = analyzeImpact(before, withResource(before, { kind: 'asset', key: command.assetId }, undefined, undefined))
-		if (impacts.length > 0 && command.acknowledgeImpact !== true)
-			return { status: 'impact_acknowledgement_required', key: command.assetId, impacts }
-
-		const deleted = await persistence.assets.deleteIfRevision({ key: command.assetId, expectedRevision: expectedRevision.value })
+		let impacts: readonly ImpactItem[] = []
+		const deleted = await persistence.assets.deleteIfRevision<{ impacts: readonly ImpactItem[] }>({ key: command.assetId, expectedRevision: expectedRevision.value, guard: async () => {
+				// Inside the exclusive lock, so a reference added since the first look is never missed.
+				const before = await readImpactWorkspaceUnlocked(persistence)
+				impacts = analyzeImpact(before, withResource(before, { kind: 'asset', key: command.assetId }, undefined, undefined))
+				return impacts.length > 0 && command.acknowledgeImpact !== true ? { impacts } : undefined
+			} })
 		switch (deleted.status) {
+			case 'refused': return { status: 'impact_acknowledgement_required', key: command.assetId, impacts: deleted.refusal.impacts }
 			case 'conflict': return { status: 'conflict', key: command.assetId, currentRevision: deleted.currentRevision }
 			case 'deleted': return { status: 'deleted', key: command.assetId, changeSummary: summarizeChange(current.resource, undefined), ...(impacts.length > 0 ? { impacts } : {}) }
 			default: return { status: 'not_found', key: command.assetId }

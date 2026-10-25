@@ -54,6 +54,8 @@ function describeImpact(item: ReceivedImpact): string {
 			return value.missing === 'variant'
 				? t('history.restore.impact.item.referenceVariant', { view: viewName(value.viewId), variant: text(value.variantName), target: viewName(value.targetViewId) })
 				: t('history.restore.impact.item.referenceView', { view: viewName(value.viewId), target: viewName(value.targetViewId) })
+		case 'view_decision_removed':
+			return t(`history.restore.impact.item.decision.${text(value.status)}`, { question: text(value.question), view: viewName(value.viewId) })
 		case 'submission_revision_not_current':
 		case 'submission_revision_current': {
 			const resource = (value.resource ?? {}) as Readonly<Record<string, unknown>>

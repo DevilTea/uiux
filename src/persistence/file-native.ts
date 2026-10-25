@@ -1839,12 +1839,19 @@ export class AuthoredAssetFileRepository implements MutableResourceRepository<st
 	 * holds anything else (an invalid entry) loses only its regular files, and the directory is removed
 	 * when that leaves it empty.
 	 */
-	async deleteIfRevision(input: Readonly<{ key: string; expectedRevision: ResourceRevision }>): Promise<DeleteIfRevisionResult<never>> {
+	async deleteIfRevision<Refusal>(input: Readonly<{
+		key: string
+		expectedRevision: ResourceRevision
+		/** Runs inside the exclusive lock after the revision check; a returned refusal is answered and nothing is deleted. */
+		guard?: () => Refusal | undefined | Promise<Refusal | undefined>
+	}>): Promise<DeleteIfRevisionResult<Refusal>> {
 		return this.persistence.withLock(async () => {
 			await this.persistence.assertWritableUnlocked()
 			const current = await this.readAssetUnlocked(input.key)
 			if (!current) return { status: 'not_found' }
 			if (input.expectedRevision !== current.revision) return { status: 'conflict', currentRevision: current.revision }
+			const refusal = await input.guard?.()
+			if (refusal !== undefined) return { status: 'refused', refusal }
 			const directory = assetDirectoryRelativePath(input.key)
 			const changes: FileChange[] = [{ path: assetMetadataRelativePath(input.key) }]
 			for (const filename of current.actualContentFilenames) changes.push({ path: `${directory}/${filename}` })

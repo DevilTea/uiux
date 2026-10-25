@@ -26,6 +26,8 @@ import type { ImpactWorkspace } from './model'
  * - `flow_step_target_missing`: a UX Flow step whose target View would stop existing, or whose named Variant
  *   would stop existing in a View that stays.
  * - `view_reference_dangling`: a View Spec `{ type: "view" }` reference whose View, or named Variant, would stop existing.
+ * - `view_decision_removed`: a Decision (pending, deferred or decided) of a View that would stop existing, one
+ *   item per Decision (owner ruling 2 of https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19180530).
  * - `submission_revision_not_current` / `submission_revision_current`: a ready-for-review thread's
  *   current submission names a resource at a revision that would stop or start being current.
  * - `render_key_removed`: a viewport or theme key the change removes (a rename removes the old key),
@@ -46,6 +48,7 @@ export type ImpactItem =
 	| Readonly<{ category: 'review_variant_stale'; reviewId: string; reviewStatus?: string; viewId: string; variantNames: readonly string[] }>
 	| Readonly<{ category: 'flow_step_target_missing'; flowId: string; stepId: string; viewId: string; missing: 'view' | 'variant'; variantName?: string }>
 	| Readonly<{ category: 'view_reference_dangling'; viewId: string; targetViewId: string; missing: 'view' | 'variant'; variantName?: string; pointer: string }>
+	| Readonly<{ category: 'view_decision_removed'; viewId: string; decisionId: string; status: string; question?: string }>
 	| Readonly<{ category: 'submission_revision_not_current' | 'submission_revision_current'; reviewId: string; submissionId: string; resource: ImpactResourceIdentity; revision: string }>
 	| Readonly<{ category: 'render_key_removed'; dimension: 'viewport' | 'theme'; key: string; reviewIds: readonly string[] }>
 	| Readonly<{ category: 'evidence_stale'; evidence: string; viewId?: string; reason: string }>
@@ -62,6 +65,7 @@ export const IMPACT_CATEGORIES: readonly ImpactCategory[] = Object.freeze([
 	'review_variant_stale',
 	'flow_step_target_missing',
 	'view_reference_dangling',
+	'view_decision_removed',
 	'submission_revision_not_current',
 	'submission_revision_current',
 	'render_key_removed',
@@ -80,6 +84,7 @@ export function analyzeImpact(before: ImpactWorkspace, after: ImpactWorkspace): 
 		...bindingImpact(before, after),
 		...flowImpact(before, after),
 		...variantImpact(before, after),
+		...decisionImpact(before, after),
 		...submissionImpact(before, after),
 		...renderKeyImpact(before, after),
 		...evidenceImpact(before, after),
@@ -228,8 +233,6 @@ function missingTriggers(workspace: ImpactWorkspace): Map<string, FlowTrigger> {
 
 // ── Variants and View references ────────────────────────────────────────────────
 
-/** The categories a Variant removal (issue #75) can produce. */
-export const VARIANT_IMPACT_CATEGORIES: readonly ImpactCategory[] = Object.freeze(['review_variant_stale', 'flow_step_target_missing', 'view_reference_dangling'])
 
 /**
  * What a change does to the Variants and Views other resources name: Review threads naming a Variant,
@@ -292,6 +295,22 @@ export function variantImpact(before: ImpactWorkspace, after: ImpactWorkspace): 
 		})
 	}
 	return [...stale, ...targets, ...references]
+}
+
+/** The Decisions of every View the change removes, in View then Decision order. */
+function decisionImpact(before: ImpactWorkspace, after: ImpactWorkspace): ImpactItem[] {
+	const items: ImpactItem[] = []
+	for (const viewId of sortedKeys(before.views)) {
+		if (after.views.has(viewId)) continue
+		const decisions = asRecord(asRecord(before.views.get(viewId))?.spec)?.decisions
+		if (!Array.isArray(decisions)) continue
+		for (const entry of decisions) {
+			const decision = asRecord(entry)
+			if (typeof decision?.id !== 'string') continue
+			items.push({ category: 'view_decision_removed', viewId, decisionId: decision.id, status: typeof decision.status === 'string' ? decision.status : 'pending', ...(typeof decision.question === 'string' ? { question: decision.question } : {}) })
+		}
+	}
+	return items
 }
 
 // ── Ready-for-review submissions ───────────────────────────────────────────────

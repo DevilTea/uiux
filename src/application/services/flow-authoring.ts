@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto'
 import type { ResourceRevision } from '../dto/revisions'
 import { summarizeChange, type ChangeSummary } from '../dto/change-summary'
 import { analyzeImpact, withResource, type ImpactItem } from '../../domain/impact'
-import { readImpactWorkspace } from './impact-picture'
+import { flowReferenceDiagnostics } from '../../domain/flows/references'
+import { readViewReferenceTarget } from './flow-references'
+import { readImpactWorkspaceUnlocked } from './impact-picture'
 import { validateResourceRevision } from '../dto/revisions'
 import { isFullUuid, type Diagnostic, type JsonObject } from '../../domain/validation'
 import { validateFlowResource, type FlowResource, type FlowStep } from '../../domain/flows/schema'
@@ -50,6 +52,16 @@ export type FlowAuthoringService = Readonly<{
 }>
 
 export function createFlowAuthoringService(persistence: FileNativePersistence): FlowAuthoringService {
+	/**
+	 * Clause 01a172e8-906d-779b-8305-870bf5f09e75: a result's diagnostics are the Flow's structural
+	 * diagnostics followed by its reference diagnostics, as `validate_flow` reports them. A reference
+	 * that dangles never refuses a save (Rule 01a1144e-5101-78bb-9748-5bdabb1c013b).
+	 */
+	async function withReferenceDiagnostics(flow: FlowResource, structural: readonly Diagnostic[]): Promise<readonly Diagnostic[]> {
+		const references = await flowReferenceDiagnostics(flow, viewId => readViewReferenceTarget(persistence, viewId))
+		return references.length > 0 ? [...structural, ...references] : structural
+	}
+
 	async function createFlow(command: CreateFlowCommand): Promise<FlowAuthoringResult> {
 		const id = command.id ?? randomUUID()
 		const resource: FlowResource = {
@@ -66,7 +78,7 @@ export function createFlowAuthoringService(persistence: FileNativePersistence): 
 		try {
 			const revision = await persistence.flows.create(id, resource)
 			const inspected = await persistence.flows.readInspected(id)
-			return { status: 'created', key: id, revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(undefined, resource) }
+			return { status: 'created', key: id, revision, diagnostics: await withReferenceDiagnostics(resource, inspected?.diagnostics ?? []), changeSummary: summarizeChange(undefined, resource) }
 		}
 		catch (error) {
 			if (!(error instanceof PersistenceError) || error.code !== 'persistence.resource_exists') throw error
@@ -111,7 +123,7 @@ export function createFlowAuthoringService(persistence: FileNativePersistence): 
 		if (!commit.ok)
 			return { status: 'conflict', key: command.flowId, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.flows.readInspected(command.flowId)
-		return { status: 'updated', key: command.flowId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
+		return { status: 'updated', key: command.flowId, revision: commit.revision, diagnostics: await withReferenceDiagnostics(next, inspected?.diagnostics ?? []), changeSummary: summarizeChange(current.resource, next) }
 	}
 
 	/**
@@ -133,13 +145,15 @@ export function createFlowAuthoringService(persistence: FileNativePersistence): 
 		if (current.revision !== expectedRevision.value)
 			return { status: 'conflict', key: command.flowId, currentRevision: current.revision }
 
-		const before = await readImpactWorkspace(persistence)
-		const impacts = analyzeImpact(before, withResource(before, { kind: 'flow', key: command.flowId }, undefined, undefined))
-		if (impacts.length > 0 && command.acknowledgeImpact !== true)
-			return { status: 'impact_acknowledgement_required', key: command.flowId, impacts }
-
-		const deleted = await persistence.flows.deleteIfRevision({ key: command.flowId, expectedRevision: expectedRevision.value })
+		let impacts: readonly ImpactItem[] = []
+		const deleted = await persistence.flows.deleteIfRevision<{ impacts: readonly ImpactItem[] }>({ key: command.flowId, expectedRevision: expectedRevision.value, guard: async () => {
+				// Inside the exclusive lock, so a reference added since the first look is never missed.
+				const before = await readImpactWorkspaceUnlocked(persistence)
+				impacts = analyzeImpact(before, withResource(before, { kind: 'flow', key: command.flowId }, undefined, undefined))
+				return impacts.length > 0 && command.acknowledgeImpact !== true ? { impacts } : undefined
+			} })
 		switch (deleted.status) {
+			case 'refused': return { status: 'impact_acknowledgement_required', key: command.flowId, impacts: deleted.refusal.impacts }
 			case 'conflict': return { status: 'conflict', key: command.flowId, currentRevision: deleted.currentRevision }
 			case 'deleted': return { status: 'deleted', key: command.flowId, changeSummary: summarizeChange(current.resource, undefined), ...(impacts.length > 0 ? { impacts } : {}) }
 			default: return { status: 'not_found', key: command.flowId }

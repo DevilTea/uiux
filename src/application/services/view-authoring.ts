@@ -1,7 +1,7 @@
 import type { ResourceRevision } from '../dto/revisions'
 import { summarizeChange, type ChangeSummary } from '../dto/change-summary'
 import { analyzeImpact, variantImpact, withResource, type ImpactItem } from '../../domain/impact'
-import { nextSingleFileRevision, readImpactWorkspace } from './impact-picture'
+import { nextSingleFileRevision, readImpactWorkspace, readImpactWorkspaceUnlocked } from './impact-picture'
 import { validateResourceRevision } from '../dto/revisions'
 import { transitionDecision, type Decision, type DecisionActor, type DecisionOutcome, type DecisionStatus, type Reference, type ViewSpec } from '../../domain/spec/schema'
 import { isFullUuid, type Diagnostic } from '../../domain/validation'
@@ -217,13 +217,15 @@ export function createViewAuthoringService(persistence: FileNativePersistence): 
 		if (current.revision !== expectedRevision.value)
 			return { status: 'conflict', key: command.key, currentRevision: current.revision }
 
-		const before = await readImpactWorkspace(persistence)
-		const impacts = analyzeImpact(before, withResource(before, { kind: 'view', key: command.key }, undefined, undefined))
-		if (impacts.length > 0 && command.acknowledgeImpact !== true)
-			return { status: 'impact_acknowledgement_required', key: command.key, impacts }
-
-		const deleted = await persistence.views.deleteIfRevision({ key: command.key, expectedRevision: expectedRevision.value })
+		let impacts: readonly ImpactItem[] = []
+		const deleted = await persistence.views.deleteIfRevision<{ impacts: readonly ImpactItem[] }>({ key: command.key, expectedRevision: expectedRevision.value, guard: async () => {
+				// Inside the exclusive lock, so a reference added since the first look is never missed.
+				const before = await readImpactWorkspaceUnlocked(persistence)
+				impacts = analyzeImpact(before, withResource(before, { kind: 'view', key: command.key }, undefined, undefined))
+				return impacts.length > 0 && command.acknowledgeImpact !== true ? { impacts } : undefined
+			} })
 		switch (deleted.status) {
+			case 'refused': return { status: 'impact_acknowledgement_required', key: command.key, impacts: deleted.refusal.impacts }
 			case 'conflict': return { status: 'conflict', key: command.key, currentRevision: deleted.currentRevision }
 			case 'deleted': return { status: 'deleted', key: command.key, changeSummary: summarizeChange(current.resource, undefined), ...(impacts.length > 0 ? { impacts } : {}) }
 			default: return { status: 'not_found', key: command.key }
