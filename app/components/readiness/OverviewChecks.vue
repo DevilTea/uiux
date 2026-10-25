@@ -771,6 +771,7 @@ const items = computed<CheckTreeItem[]>(() => sectionFindings(filtered.value, gr
 
     <UTree
       v-else
+      :key="`${groupBy}:${lastRun?.getTime()}`"
       :items="items"
       :get-key="item => item.id"
       :aria-label="t('checks.treeLabel')"
