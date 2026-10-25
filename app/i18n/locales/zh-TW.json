@@ -891,7 +891,7 @@
       "conflictHint": "已載入最新版本。請確認 Decision 的狀態後再試一次。",
       "locked": "{name} 正在編輯這個 View，請稍後再試。"
     },
-    "pending": {
+    "pendingList": {
       "title": "待定的 Decision",
       "count": "沒有待定的 Decision | {n} 個待定的 Decision | {n} 個待定的 Decision",
       "empty": "沒有等待處理的 Decision。已延後與已決定的 Decision 仍保留在各 View 的 Spec 中。",
@@ -2414,6 +2414,7 @@
       "history_missing_provenance": "歷程中有紀錄沒有記錄作者。",
       "history_stale_outcome": "歷程中有紀錄參照了舊的結論。",
       "history_state_mismatch": "Decision 的狀態與其歷程不一致。",
+      "id_in_use": "這個 Decision 識別碼已屬於另一個討論串的 Decision。",
       "invalid_actor": "變更必須記錄作者。",
       "invalid_history_outcome": "只有已決定的 Decision 可以記錄結論變更。",
       "invalid_history_transition": "Decision 無法變更為該狀態。",

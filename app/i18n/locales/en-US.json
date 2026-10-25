@@ -891,7 +891,7 @@
       "conflictHint": "The latest version is loaded. Check the Decision, then try again.",
       "locked": "{name} is editing this View. Try again when they are done."
     },
-    "pending": {
+    "pendingList": {
       "title": "Pending Decisions",
       "count": "No pending Decisions | {n} pending Decision | {n} pending Decisions",
       "empty": "No Decisions are waiting. Deferred and decided Decisions stay in each View's Spec.",
@@ -2414,6 +2414,7 @@
       "history_missing_provenance": "A history entry does not record who made it.",
       "history_stale_outcome": "A history entry refers to an older outcome.",
       "history_state_mismatch": "The Decision status does not match its history.",
+      "id_in_use": "That Decision id already belongs to a Decision from another thread.",
       "invalid_actor": "The change must record who made it.",
       "invalid_history_outcome": "Only a decided Decision can record an outcome change.",
       "invalid_history_transition": "The Decision cannot move to that status.",

@@ -28,12 +28,12 @@ function to(row: PendingDecisionRow) {
         id="pending-decisions-heading"
         class="text-title font-semibold text-highlighted"
       >
-        {{ t('decision.pending.title') }}
+        {{ t('decision.pendingList.title') }}
       </h2>
       <span
         class="text-sm text-muted tabular-nums"
         role="status"
-      >{{ loading ? t('decision.pending.loading') : t('decision.pending.count', rows.length) }}</span>
+      >{{ loading ? t('decision.pendingList.loading') : t('decision.pendingList.count', rows.length) }}</span>
     </div>
 
     <ul
@@ -49,11 +49,11 @@ function to(row: PendingDecisionRow) {
         <ULink
           :to="to(row)"
           class="grid gap-0.5 px-3 py-2.5 hover:bg-elevated focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary pointer-coarse:min-h-11"
-          :aria-label="t('decision.pending.open', { question: row.decision.question, view: row.viewName || t('common.unnamed') })"
+          :aria-label="t('decision.pendingList.open', { question: row.decision.question, view: row.viewName || t('common.unnamed') })"
         >
           <span class="font-medium text-highlighted">{{ row.decision.question }}</span>
           <span class="flex flex-wrap items-center gap-x-2 text-xs text-muted">
-            <span>{{ t('decision.pending.inView', { view: row.viewName || t('common.unnamed') }) }}</span>
+            <span>{{ t('decision.pendingList.inView', { view: row.viewName || t('common.unnamed') }) }}</span>
             <UBadge
               v-if="row.target.variant"
               color="neutral"
@@ -77,7 +77,7 @@ function to(row: PendingDecisionRow) {
       class="rounded-md border border-dashed border-accented px-3 py-2 text-sm text-muted"
       data-pending-decisions-empty
     >
-      {{ t('decision.pending.empty') }}
+      {{ t('decision.pendingList.empty') }}
     </p>
   </section>
 </template>
