@@ -231,6 +231,24 @@ export class PreviewProtocolSession {
 		return 'started'
 	}
 
+	/** Whether `generationId` is the current generation and its declaration named `feature`. */
+	currentGenerationDeclares(generationId: string, feature: string): boolean {
+		return this.current?.id === generationId && (this.current.declaration?.features.includes(feature) ?? false)
+	}
+
+	/**
+	 * The current generation reported its own failure (a generation-scoped `failure.report`): it
+	 * ends and its ID is retired. A `protocol` report makes it protocol-invalid, which leaves the
+	 * automatic recovery allowance to use (Clause 01a11a59-def9-797a-8d08-5e4b02ecd900); a
+	 * `runtime` report exhausts recovery at once, so only an explicit retry starts the next
+	 * generation (Rule 01a11a59-eecb-7aff-983b-972148c714e1).
+	 */
+	failGenerationFromReport(generationId: string, category: 'protocol' | 'runtime'): boolean {
+		if (this.current?.id !== generationId) return false
+		this.failCurrentGeneration(category === 'protocol' ? 'protocol-invalid' : 'runtime-failure')
+		return true
+	}
+
 	/**
 	 * The Workbench found the Preview document it requested protocol-invalid without the session
 	 * having judged it (an undecodable message before the handshake opened, or a declaration reusing a
@@ -308,13 +326,13 @@ export class PreviewProtocolSession {
 		}
 	}
 
-	private failCurrentGeneration(disposition: 'protocol-invalid' | 'capability-unavailable'): void {
+	private failCurrentGeneration(disposition: 'protocol-invalid' | 'capability-unavailable' | 'runtime-failure'): void {
 		const failed = this.current
 		if (!failed) return
 		this.retiredGenerationIds.add(failed.id)
 		this.current = undefined
 		this.retryAuthorizationPending = false
-		if (failed.recoveryAttempt !== 'none' || disposition === 'capability-unavailable') {
+		if (failed.recoveryAttempt !== 'none' || disposition !== 'protocol-invalid') {
 			this.recoveryNeeded = false
 			this.recoveryExhausted = true
 			return

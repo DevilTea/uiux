@@ -93,6 +93,8 @@ const KNOWN_CONTEXT_KEYS = new Set([
 ])
 const REQUIRED_BASE_CONTEXT = ['previewSessionId', 'runtimeGenerationId', 'viewId', 'widgetId'] as const
 const PAYLOAD_ONLY_IDENTITIES = new Set(['sequence', 'baseSnapshotVersion', 'snapshotVersion', 'regionId', 'regionIds', 'regions'])
+/** Longest failure `detail` a decoder accepts (non-normative: owner ruling 2026-10-07, code authoritative). */
+export const FAILURE_DETAIL_MAX_LENGTH = 500
 export const PREVIEW_FAILURE_CATEGORIES: readonly ProtocolFailureCategory[] = Object.freeze(['transport', 'protocol', 'runtime', 'capability'])
 const FAILURE_CATEGORIES: ReadonlySet<ProtocolFailureCategory> = new Set(PREVIEW_FAILURE_CATEGORIES)
 /** The failure reason registry (Clause 01a11687-4114-728a-9d58-d69eaf786e5d); it only grows. */
@@ -410,7 +412,7 @@ export function validatePreviewFailureDiagnostic(input: unknown, path = ''): Val
 		v.issue('protocol.invalid_failure_reason', `${path}/reason`, 'Failure reason must be a stable category-prefixed identifier.')
 	if (Object.hasOwn(diagnostic, 'detail')) {
 		const detail = v.string(diagnostic.detail, `${path}/detail`)
-		if (detail !== undefined && (detail.length > 500 || containsProtocolControl(detail)))
+		if (detail !== undefined && (detail.length > FAILURE_DETAIL_MAX_LENGTH || containsProtocolControl(detail)))
 			v.issue('protocol.unsafe_failure_detail', `${path}/detail`, 'Failure detail must be bounded and display-safe.')
 	}
 	if (Object.hasOwn(diagnostic, 'correlation')) {
@@ -430,7 +432,7 @@ export function validatePreviewFailureDiagnostic(input: unknown, path = ''): Val
 	return v.finish<PreviewFailureDiagnostic>(input)
 }
 
-function containsProtocolControl(value: string): boolean {
+export function containsProtocolControl(value: string): boolean {
 	return [...value].some(character => {
 		const code = character.charCodeAt(0)
 		return (code >= 0 && code <= 8) || code === 11 || code === 12 || (code >= 14 && code <= 31) || code === 127

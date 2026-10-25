@@ -422,3 +422,193 @@ describe('Inline Preview diagnostic and Retry Preview (issue #111)', () => {
 		finally { await context.close() }
 	}, 90_000)
 })
+
+/**
+ * Runtime-reported failures (issue #312): `failure.report` under the `failure.reports` feature,
+ * Scenario 01a11a5b-61a6-74d4-a9a5-ae54f38cded7 and Clauses 01a11a59-dd69-78ed-9181-d8beb5f4cb7b,
+ * 01a11a59-def9-797a-8d08-5e4b02ecd900 and 01a11a70-4261-7155-8aed-28bed7a89064. The Preview
+ * document's runtime declares the feature itself; a report is posted from inside its frame, like the
+ * conflicting declaration above, and an invalid Workbench envelope is posted into it from the page.
+ */
+describe('Runtime-reported Preview failures (issue #312)', () => {
+	const sessionOf = async (page: Page) => new URL(await iframe(page).getAttribute('src') ?? '', server.origin).searchParams.get('session')!
+	/** The runtime frame sends one `failure.report` for `generation`, with this payload. */
+	async function report(page: Page, generation: string, payload: Record<string, unknown>): Promise<void> {
+		const session = await sessionOf(page)
+		const frame = await (await iframe(page).elementHandle())!.contentFrame()
+		await frame!.evaluate(([previewSessionId, runtimeGenerationId, body]) => {
+			parent.postMessage({ channel: 'uiux:preview:wire', message: {
+				type: 'failure.report',
+				context: { previewSessionId, runtimeGenerationId },
+				payload: body,
+			} }, location.origin)
+		}, [session, generation, payload] as const)
+	}
+	/** The Workbench page sends one envelope into the runtime frame. */
+	const sendIntoRuntime = (page: Page, message: Record<string, unknown>) => page.evaluate((body) => {
+		const frame = document.querySelector<HTMLIFrameElement>('iframe[src*="/preview"]')!
+		frame.contentWindow!.postMessage({ channel: 'uiux:preview:wire', message: body }, location.origin)
+	}, message)
+	const failureReports = async (page: Page) => (await page.evaluate(() => (window as unknown as WireRecorderWindow).__wire.messages))
+		.filter(message => message.type === 'failure.report')
+	const RUNTIME_UNAVAILABLE = { category: 'runtime', reason: 'runtime.unavailable', detail: 'The geometry worker stopped.' }
+	const NEVER_ADMITTED = 'gen-00000000000000000000000000000000'
+
+	it('ends the generation for a generation-scoped runtime failure, starts no recovery, and Retry Preview recovers (Scenario 01a11a5b-61a6-74d4-a9a5-ae54f38cded7)', async () => {
+		const { context, page } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`, 0)
+		try {
+			const live = await expectLive(page)
+			const before = await documentParam(page)
+
+			await report(page, live, RUNTIME_UNAVAILABLE)
+			const diagnostic = page.locator('[data-preview-failure]')
+			await diagnostic.waitFor({ timeout: 15_000 })
+			expect(await diagnostic.getAttribute('data-category')).toBe('runtime')
+			expect(await diagnostic.getAttribute('data-reason')).toBe('runtime.unavailable')
+			expect(await diagnostic.getByRole('alert').locator('[data-preview-failure-title]').textContent()).toContain('Preview runtime stopped')
+			expect(await page.locator('[data-session-status]').getAttribute('data-status')).toBe('stopped')
+			await openDetails(diagnostic)
+			expect(await identity(diagnostic, 'runtimeGenerationId')).toBe(live)
+			expect(await diagnostic.textContent()).toContain('The geometry worker stopped.')
+
+			// No automatic recovery: no new document, no new generation, and Retry Preview is ready.
+			await page.waitForTimeout(1_500)
+			expect(await documentParam(page)).toBe(before)
+			expect(await declaredGenerations(page)).toEqual([live])
+			const retry = diagnostic.getByRole('button', { name: 'Retry Preview' })
+			expect(await retry.getAttribute('aria-disabled')).toBeNull()
+			expect(await diagnostic.locator('[data-preview-retry-status]').textContent()).not.toContain('Starting a fresh preview')
+
+			// The explicit retry starts the next generation.
+			await retry.click()
+			await expect.poll(() => documentParam(page)).toBe(before + 1)
+			expect(await expectLive(page)).not.toBe(live)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('ignores a report naming a retired or never-admitted generation, and still ends the current one', async () => {
+		const { context, page } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`, 0)
+		try {
+			const first = await expectLive(page)
+			await report(page, first, RUNTIME_UNAVAILABLE)
+			const diagnostic = page.locator('[data-preview-failure]')
+			await diagnostic.waitFor({ timeout: 15_000 })
+			await diagnostic.getByRole('button', { name: 'Retry Preview' }).click()
+			const current = await expectLive(page)
+			expect(current).not.toBe(first)
+			const before = await documentParam(page)
+
+			// Late reports of the retired generation, and one of a generation that was never admitted.
+			await report(page, first, { category: 'protocol', reason: 'protocol.invalid_message' })
+			await report(page, first, RUNTIME_UNAVAILABLE)
+			await report(page, NEVER_ADMITTED, RUNTIME_UNAVAILABLE)
+			await page.waitForTimeout(1_500)
+			expect(await diagnostic.count()).toBe(0)
+			expect(await page.locator('[data-session-status]').getAttribute('data-status')).toBe('live')
+			expect(await iframe(page).getAttribute('data-runtime-generation')).toBe(current)
+			expect(await documentParam(page)).toBe(before)
+
+			// The same report for the current generation does end it.
+			await report(page, current, RUNTIME_UNAVAILABLE)
+			await diagnostic.waitFor({ timeout: 15_000 })
+			expect(await diagnostic.getAttribute('data-reason')).toBe('runtime.unavailable')
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('uses the automatic recovery allowance for a protocol report, which a runtime failure never does', async () => {
+		const { context, page } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`, 0)
+		try {
+			const live = await expectLive(page)
+			const before = await documentParam(page)
+			await setHold(page, true)
+			await report(page, live, { category: 'protocol', reason: 'protocol.invalid_state' })
+			const diagnostic = page.locator('[data-preview-failure]')
+			await diagnostic.waitFor({ timeout: 15_000 })
+			expect(await diagnostic.getAttribute('data-category')).toBe('protocol')
+			expect(await diagnostic.getAttribute('data-reason')).toBe('protocol.invalid_state')
+
+			// Nobody pressed anything: one fresh document is requested and stays in flight until it declares.
+			await expect.poll(() => documentParam(page)).toBe(before + 1)
+			await expect.poll(async () => (await shim(page)).held, { timeout: 15_000 }).toBe(1)
+			await expectInFlight(page, diagnostic)
+			await release(page)
+			expect(await expectLive(page)).not.toBe(live)
+			expect(await documentParam(page)).toBe(before + 1)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('drops a report of a category or reason a runtime may not report, or with an oversized detail', async () => {
+		const { context, page } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`, 0)
+		try {
+			const live = await expectLive(page)
+			await report(page, live, { category: 'transport', reason: 'transport.channel_unavailable' })
+			await report(page, live, { category: 'protocol', reason: 'protocol.identity_reuse' })
+			await report(page, live, { category: 'runtime', reason: 'runtime.unavailable', detail: 'x'.repeat(501) })
+			await page.waitForTimeout(1_000)
+			expect(await page.locator('[data-preview-failure]').count()).toBe(0)
+			expect(await page.locator('[data-session-status]').getAttribute('data-status')).toBe('live')
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('keeps the generation live when the Workbench sends an unknown additive message type after the ACK', async () => {
+		const { context, page } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`, 0)
+		try {
+			const live = await expectLive(page)
+			const before = await documentParam(page)
+			const session = await sessionOf(page)
+			await sendIntoRuntime(page, { type: 'geometry.reveal', context: { previewSessionId: session, runtimeGenerationId: live, viewId: VIEW_ID, widgetId: WIDGET_ID }, payload: {} })
+			await page.waitForTimeout(1_500)
+			expect(await failureReports(page)).toEqual([])
+			expect(await page.locator('[data-preview-failure]').count()).toBe(0)
+			expect(await page.locator('[data-session-status]').getAttribute('data-status')).toBe('live')
+			expect(await iframe(page).getAttribute('data-runtime-generation')).toBe(live)
+			expect(await documentParam(page)).toBe(before)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('has the runtime report an invalid Workbench envelope of its own generation once, never one of stale traffic', async () => {
+		const { context, page } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`, 0)
+		try {
+			const live = await expectLive(page)
+			const before = await documentParam(page)
+			const session = await sessionOf(page)
+			const invalid = (generation: string) => ({
+				type: 'geometry.acquire.request',
+				context: { previewSessionId: session, runtimeGenerationId: generation, viewId: VIEW_ID },
+				payload: { secret: 'token-123' },
+			})
+
+			// Stale traffic (another generation) is discarded without a report.
+			await sendIntoRuntime(page, invalid(NEVER_ADMITTED))
+			await page.waitForTimeout(1_000)
+			expect(await failureReports(page)).toEqual([])
+			expect(await page.locator('[data-session-status]').getAttribute('data-status')).toBe('live')
+
+			// An established violation in the current generation's traffic ends it with one report.
+			await setHold(page, true)
+			await sendIntoRuntime(page, invalid(live))
+			const diagnostic = page.locator('[data-preview-failure]')
+			await diagnostic.waitFor({ timeout: 15_000 })
+			expect(await diagnostic.getAttribute('data-reason')).toBe('protocol.invalid_message')
+			const reports = await failureReports(page)
+			expect(reports).toHaveLength(1)
+			expect(reports[0]).toMatchObject({ context: { previewSessionId: session, runtimeGenerationId: live }, payload: { category: 'protocol', reason: 'protocol.invalid_message' } })
+			expect(Object.keys(reports[0]!.context).sort()).toEqual(['previewSessionId', 'runtimeGenerationId'])
+			expect(JSON.stringify(reports[0])).not.toContain('token-123')
+			await openDetails(diagnostic)
+			expect(await diagnostic.textContent()).toContain('protocol.missing_context_identity')
+
+			// A protocol report uses the automatic recovery attempt.
+			await expect.poll(() => documentParam(page)).toBe(before + 1)
+			await expect.poll(async () => (await shim(page)).held, { timeout: 15_000 }).toBe(1)
+			await release(page)
+			expect(await expectLive(page)).not.toBe(live)
+		}
+		finally { await context.close() }
+	}, 90_000)
+})

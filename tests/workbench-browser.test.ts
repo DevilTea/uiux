@@ -693,7 +693,7 @@ describe('Runtime geometry producer (multi-target streams)', () => {
 			await page.waitForSelector('[data-blueprint="type"]')
 			const declaration = await page.evaluate(() => (window as unknown as WireRecorderWindow).__wire.messages.find((message: WireRecord) => message.type === 'capability.declare'))
 			// `widget.events` ships with the mount factory (Widget Event reporting, decision 10); protocolVersion stays 1.
-			expect(declaration?.payload).toEqual({ protocolVersion: 1, features: ['geometry', 'geometry.multi-target', 'widget.events'] })
+			expect(declaration?.payload).toEqual({ protocolVersion: 1, features: ['geometry', 'geometry.multi-target', 'widget.events', 'failure.reports'] })
 			await page.locator('[data-widget-row="mock-hero-title"]').scrollIntoViewIfNeeded()
 			await page.locator('[data-widget-row="mock-hero-title"]').click()
 			await page.waitForFunction(() => document.querySelector('[data-blueprint="type"]')?.textContent?.includes('#mock-hero-title'))

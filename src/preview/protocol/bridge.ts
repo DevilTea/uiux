@@ -9,6 +9,13 @@ import {
 	type GeometryResponseMessage,
 } from './schema'
 import {
+	FAILURE_REPORTS_FEATURE,
+	failureReportScope,
+	isFailureReportMessageType,
+	validateFailureReportMessage,
+	type FailureReportMessage,
+} from './failure-report'
+import {
 	isTargetingMessageType,
 	isTargetingRuntimeMessage,
 	validateTargetingMessage,
@@ -32,7 +39,7 @@ import {
 	type RetryAuthorizationResult,
 } from './session'
 
-export type PreviewWireMessage = CapabilityDeclareMessage | CapabilityAckMessage | GeometryMessage | TargetingMessage | WidgetEventMessage
+export type PreviewWireMessage = CapabilityDeclareMessage | CapabilityAckMessage | GeometryMessage | TargetingMessage | WidgetEventMessage | FailureReportMessage
 export type PreviewProtocolTransport = Readonly<{ send(message: PreviewWireMessage): void }>
 
 export type BridgeReceiveResult =
@@ -41,6 +48,12 @@ export type BridgeReceiveResult =
 	| Readonly<{ status: 'capability-failure'; reason: `capability.${string}` }>
 	| Readonly<{ status: 'capability-conflict' | 'gated' | 'stale-session' | 'stale-generation' | 'wrong-direction' }>
 	| Readonly<{ status: 'generation-refused'; generationId: string }>
+	/**
+	 * The current generation reported its own failure (a generation-scoped `failure.report`): the
+	 * session ended and retired it. The caller ends its per-generation state and applies the effect
+	 * of the report's category.
+	 */
+	| Readonly<{ status: 'generation-failed'; message: FailureReportMessage }>
 	| Readonly<{ status: 'invalid'; diagnostics: readonly Diagnostic[] }>
 
 export type WorkbenchBridgeHooks = Readonly<{
@@ -54,7 +67,8 @@ export type WorkbenchBridgeHooks = Readonly<{
 
 export type BridgeSendResult =
 	| Readonly<{ status: 'sent' }>
-	| Readonly<{ status: 'gated' | 'stale-session' | 'stale-generation' | 'wrong-direction' }>
+	/** The sender may not send this message now: its feature is not declared, or its once-only report is spent. */
+	| Readonly<{ status: 'gated' | 'stale-session' | 'stale-generation' | 'wrong-direction' | 'not-permitted' }>
 	| Readonly<{ status: 'invalid'; diagnostics: readonly Diagnostic[] }>
 
 export class WorkbenchPreviewProtocolBridge {
@@ -149,6 +163,7 @@ export class WorkbenchPreviewProtocolBridge {
 			if (gate) return { status: gate }
 			return { status: 'accepted', message: targeting.value }
 		}
+		if (isFailureReportMessageType(type)) return this.receiveFailureReport(input)
 		if (isWidgetEventMessageType(type)) {
 			// Workbench accepts only occurrences inbound; the decoded copy carries known members only.
 			const decoded = validateWidgetEventMessage(input)
@@ -257,6 +272,29 @@ export class WorkbenchPreviewProtocolBridge {
 		return { status: 'ack-dispatched', acknowledgement }
 	}
 
+	/**
+	 * A runtime-reported failure. It is traffic of an open generation that declared `failure.reports`
+	 * (Clauses 01a1161c-4283-70b7-b487-e81bc28ce875 and 01a11a59-dd69-78ed-9181-d8beb5f4cb7b); the
+	 * correlation check before the decode already dropped a report of another generation. A
+	 * generation-scoped report is its generation's last envelope, so the session ends and retires
+	 * that generation here; a work-scoped one is handed to the caller and leaves the generation alone
+	 * (Clause 01a11a59-def9-797a-8d08-5e4b02ecd900).
+	 */
+	private receiveFailureReport(input: unknown): BridgeReceiveResult {
+		const decoded = validateFailureReportMessage(input)
+		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
+		const message = decoded.value
+		const { previewSessionId, runtimeGenerationId } = message.context
+		const gate = this.classify(previewSessionId, runtimeGenerationId)
+		if (gate) return { status: gate }
+		if (!this.session.currentGenerationDeclares(runtimeGenerationId, FAILURE_REPORTS_FEATURE))
+			return { status: 'invalid', diagnostics: [{ code: 'protocol.feature_not_declared', path: '/type', message: 'failure.report needs the generation to declare failure.reports.' }] }
+		if (failureReportScope(message) === 'work') return { status: 'accepted', message }
+		this.session.failGenerationFromReport(runtimeGenerationId, message.payload.category)
+		this.ackDispatchedGenerationId = undefined
+		return { status: 'generation-failed', message }
+	}
+
 	/** A declaration is stale when its session is not this one or its generation is retired. */
 	private staleDeclaration(input: unknown): 'stale-session' | 'stale-generation' | undefined {
 		const correlation = envelopeCorrelation(input)
@@ -302,6 +340,9 @@ export class RuntimePreviewProtocolBridge {
 	private readonly declaration: CapabilityDeclareMessage['payload']
 	private readonly transport: PreviewProtocolTransport
 	private ackObserved = false
+	/** A generation-scoped `failure.report` was sent: it is the generation's last envelope. */
+	private generationEnded = false
+	private readonly reportedWorkSequences = new Set<number>()
 
 	constructor(
 		previewSessionId: string,
@@ -350,6 +391,7 @@ export class RuntimePreviewProtocolBridge {
 			if (gate) return { status: gate }
 			return { status: 'accepted', message: targeting.value }
 		}
+		if (isFailureReportMessageType(type)) return { status: 'wrong-direction' }
 		if (isWidgetEventMessageType(type)) {
 			// The runtime accepts only arms inbound.
 			const decoded = validateWidgetEventMessage(input)
@@ -393,6 +435,52 @@ export class RuntimePreviewProtocolBridge {
 		return { status: 'sent' }
 	}
 
+	/**
+	 * Sends one `failure.report`; nothing crosses before the capability ACK, and only a generation
+	 * that declared `failure.reports` may send one. At most one generation-scoped report goes out
+	 * per generation, after which nothing else does, and one work-scoped report per `sequence`
+	 * (Clause 01a11a70-4261-7155-8aed-28bed7a89064). The decoder admits only the categories and
+	 * reasons a runtime may report.
+	 */
+	sendFailureReport(message: FailureReportMessage): BridgeSendResult {
+		const decoded = validateFailureReportMessage(message)
+		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
+		const gate = this.runtimeGate(decoded.value)
+		if (gate) return { status: gate }
+		if (!this.declaration.features.includes(FAILURE_REPORTS_FEATURE)) return { status: 'not-permitted' }
+		const sequence = decoded.value.payload.sequence
+		if (failureReportScope(decoded.value) === 'work') {
+			if (sequence === undefined || this.reportedWorkSequences.has(sequence)) return { status: 'not-permitted' }
+			this.reportedWorkSequences.add(sequence)
+		}
+		else this.generationEnded = true
+		this.transport.send(decoded.value)
+		return { status: 'sent' }
+	}
+
+	/**
+	 * Reports an established violation in the Workbench's traffic as a generation-scoped
+	 * `protocol.invalid_message`: an envelope of this session and generation, which therefore is no
+	 * stale traffic (Clause 01a11a70-4261-7155-8aed-28bed7a89064), that failed to decode. The detail
+	 * names the decoder's diagnostic codes only, never the payload.
+	 */
+	reportInvalidTraffic(input: unknown, diagnostics: readonly Diagnostic[]): BridgeSendResult {
+		const correlation = envelopeCorrelation(input)
+		if (correlation?.previewSessionId !== this.previewSessionId || correlation.runtimeGenerationId !== this.runtimeGenerationId)
+			return { status: 'not-permitted' }
+		// An unknown message type is an additive one the runtime does not know: it is dropped without
+		// effect and never fails the generation (Rule 01a11a59-d728-751f-bbac-287a77b75610).
+		// Its other diagnostics (a context the known types would require) are artifacts of the guess.
+		if (diagnostics.some(diagnostic => diagnostic.code === 'protocol.unknown_message_type'))
+			return { status: 'not-permitted' }
+		const detail = [...new Set(diagnostics.map(diagnostic => diagnostic.code))].join(', ').slice(0, 200)
+		return this.sendFailureReport({
+			type: 'failure.report',
+			context: { previewSessionId: this.previewSessionId, runtimeGenerationId: this.runtimeGenerationId },
+			payload: { category: 'protocol', reason: 'protocol.invalid_message', ...(detail ? { detail } : {}) },
+		})
+	}
+
 	sendGeometry(message: GeometryResponseMessage): BridgeSendResult {
 		const decoded = validateGeometryMessage(message)
 		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
@@ -421,10 +509,10 @@ export class RuntimePreviewProtocolBridge {
 		return { status: 'accepted', message: decoded.value }
 	}
 
-	private runtimeGate(message: GeometryMessage | TargetingMessage | WidgetEventMessage): 'gated' | 'stale-session' | 'stale-generation' | undefined {
+	private runtimeGate(message: GeometryMessage | TargetingMessage | WidgetEventMessage | FailureReportMessage): 'gated' | 'stale-session' | 'stale-generation' | undefined {
 		if (message.context.previewSessionId !== this.previewSessionId) return 'stale-session'
 		if (message.context.runtimeGenerationId !== this.runtimeGenerationId) return 'stale-generation'
-		if (!this.ackObserved) return 'gated'
+		if (!this.ackObserved || this.generationEnded) return 'gated'
 		return undefined
 	}
 }
@@ -446,6 +534,11 @@ function isGeometryResponse(message: GeometryMessage): message is GeometryRespon
 /** Whether an envelope, before any decode, is a `capability.declare`. */
 export function isCapabilityDeclaration(input: unknown): boolean {
 	return messageType(input) === 'capability.declare'
+}
+
+/** Whether an envelope, before any decode, is a `failure.report`. */
+export function isFailureReport(input: unknown): boolean {
+	return messageType(input) === 'failure.report'
 }
 
 /** The `runtimeGenerationId` an envelope's context names, read without decoding the message. */

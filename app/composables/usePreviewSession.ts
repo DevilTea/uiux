@@ -4,10 +4,12 @@ import { describeFetchError } from '../utils/fetch-error'
 import {
 	envelopeGenerationId,
 	isCapabilityDeclaration,
+	isFailureReport,
 	WorkbenchPreviewProtocolBridge,
 	type BridgeReceiveResult,
 } from '../../src/preview/protocol/bridge'
 import { deriveWorkbenchFailure, recorrelatePreviewFailure, retryStallGraceMs } from '../../src/preview/failure-diagnostic'
+import { failureReportDiagnostic } from '../../src/preview/protocol/failure-report'
 import { createPreviewSessionId } from '../../src/preview/protocol/generation-id'
 import { workbenchPreviewSessions } from '../../src/preview/protocol/session'
 import { PreviewNavigationState, type PreviewNavigationTarget } from '../../src/preview/navigation-state'
@@ -944,6 +946,9 @@ export function createPreviewSession(state: WorkbenchState) {
 		const declaration = isCapabilityDeclaration(input)
 		// A declaration from a replaced document never admits a generation; it is dropped without effect.
 		if (declaration && !requestedDocumentIsCommitted()) return
+		// So is a runtime-reported failure: it ends a generation, which only the requested document's
+		// runtime may do (issue #312, on top of the generation check of the bridge).
+		if (isFailureReport(input) && !requestedDocumentIsCommitted()) return
 		const phase = handshakePhase.value
 		const admittedGenerationId = runtimeGenerationId.value
 		const result = workbenchBridge.receive(input)
@@ -956,6 +961,16 @@ export function createPreviewSession(state: WorkbenchState) {
 			if (message.type === 'geometry.acquire.response') receiveGeometryReport(message)
 			else if (message.type === 'targeting.hover' || message.type === 'targeting.select' || message.type === 'targeting.escape') receiveTargeting(message)
 			else if (message.type === 'widget.event.occurrence') widgetEvents.receive(message)
+			// A work-scoped failure report ends one contour work and leaves its generation alone; the
+			// Workbench sends no contour work yet, so there is none to end (issue #110).
+		}
+		else if (result.status === 'generation-failed') {
+			// The runtime reported its generation's failure: the session ended and retired it. A `protocol`
+			// report made it protocol-invalid, so the one automatic recovery attempt follows; a `runtime`
+			// one exhausted recovery, so only Retry Preview starts the next generation (Rule
+			// 01a11a59-eecb-7aff-983b-972148c714e1).
+			failPreview(result.status, failureReportDiagnostic(result.message))
+			if (result.message.payload.category === 'protocol') recoverAutomatically()
 		}
 		else {
 			const derived = deriveWorkbenchFailure({
@@ -990,7 +1005,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		}
 		// The session already ended these generations: a refused one, or one whose declaration
 		// conflicted, which may have been open with live streams.
-		if ((status === 'generation-refused' || status === 'capability-conflict' || status === 'invalid') && runtimeGenerationId.value) endGeneration()
+		if ((status === 'generation-refused' || status === 'capability-conflict' || status === 'invalid' || status === 'generation-failed') && runtimeGenerationId.value) endGeneration()
 		handshakePhase.value = 'failed'
 		endRetryInFlight()
 	}
