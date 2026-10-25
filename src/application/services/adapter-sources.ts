@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises'
+import { constants } from 'node:fs'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { sha256Identity } from '../../domain/artifacts/schema'
 import type { AdapterManifest } from '../../domain/adapters/schema'
@@ -47,7 +48,8 @@ async function nearestPackageRoot(path: string): Promise<PackageRoot | undefined
 	let directory = dirname(path)
 	while (true) {
 		const fields = await readPackageFields(directory)
-		if (fields) return { directory, ...fields }
+		// A `package.json` without a name (a nested `{ "type": "module" }` marker) is no package root.
+		if (fields?.name) return { directory, ...fields }
 		const parent = dirname(directory)
 		if (parent === directory) return undefined
 		directory = parent
@@ -64,6 +66,40 @@ async function findInstalledPackage(base: string, name: string): Promise<Package
 		const parent = dirname(directory)
 		if (parent === directory) return undefined
 		directory = parent
+	}
+}
+
+/** The size above which a mapped file is not embedded: it is marked unavailable instead. */
+export const MAX_EMBEDDED_SOURCE_BYTES = 2 * 1024 * 1024
+
+type ContainedRead = Readonly<{ state: 'read'; bytes: Uint8Array } | { state: 'unavailable' | 'too-large' }>
+
+/**
+ * Reads `path` under `root` only when it is a regular file whose real path stays inside `root`. The file
+ * is opened without following a final link and checked on the opened descriptor (regular file, size cap,
+ * same file as the contained real path), then read through that descriptor, so a swap after the
+ * containment check cannot redirect the read.
+ */
+async function readContainedFile(root: string, path: string): Promise<ContainedRead> {
+	let handle: fs.FileHandle | undefined
+	try {
+		const real = await fs.realpath(join(root, ...path.split('/')))
+		if (!isInside(root, real)) return { state: 'unavailable' }
+		handle = await fs.open(real, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0))
+		const opened = await handle.stat()
+		if (!opened.isFile()) return { state: 'unavailable' }
+		if (opened.size > MAX_EMBEDDED_SOURCE_BYTES) return { state: 'too-large' }
+		const again = await fs.lstat(await fs.realpath(real))
+		if (again.dev !== opened.dev || again.ino !== opened.ino) return { state: 'unavailable' }
+		const bytes = await handle.readFile()
+		if (bytes.length > MAX_EMBEDDED_SOURCE_BYTES) return { state: 'too-large' }
+		return { state: 'read', bytes }
+	}
+	catch {
+		return { state: 'unavailable' }
+	}
+	finally {
+		await handle?.close().catch(() => undefined)
 	}
 }
 
@@ -87,7 +123,7 @@ export function createAdapterSourceResolver(kitRoot: string) {
 		if (!root) {
 			root = entry.selection.moduleSpecifier.startsWith('./')
 				? fs.realpath(kitRoot).then(directory => ({ directory }), () => undefined)
-				: nearestPackageRoot(entry.resolvedModule.resolvedPath)
+				: nearestPackageRoot(entry.resolvedModule.resolvedPath).then(async found => found && { ...found, directory: await fs.realpath(found.directory).catch(() => found.directory) })
 			adapterRoots.set(key, root)
 		}
 		return root
@@ -104,18 +140,11 @@ export function createAdapterSourceResolver(kitRoot: string) {
 			const named: JsonObject = { package: origin, path: ref.path, ...(root?.version ? { revision: root.version } : {}) }
 			if (!root) return { availability: 'unavailable', provenance: named }
 			if (ref.embed === false) return { availability: 'provenance-only', provenance: named }
-			let bytes: Uint8Array
-			try {
-				const file = await fs.realpath(join(root.directory, ...ref.path.split('/')))
-				// A link out of the root is no file of that root; its target is not described or read.
-				if (!isInside(root.directory, file)) return { availability: 'unavailable', provenance: named }
-				bytes = await fs.readFile(file)
-			}
-			catch {
-				return { availability: 'unavailable', provenance: named }
-			}
-			const identity = await sha256Identity(bytes)
-			return { availability: 'materialized', provenance: { ...named, revision: root.version ?? identity }, bytes }
-		},
-	}
+				const read = await readContainedFile(root.directory, ref.path)
+				if (read.state === 'too-large') return { availability: 'unavailable', provenance: { ...named, reason: 'too-large', maxBytes: MAX_EMBEDDED_SOURCE_BYTES } }
+				if (read.state !== 'read') return { availability: 'unavailable', provenance: named }
+				const identity = await sha256Identity(read.bytes)
+				return { availability: 'materialized', provenance: { ...named, revision: root.version ?? identity }, bytes: read.bytes }
+			},
+		}
 }

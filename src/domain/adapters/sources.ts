@@ -6,11 +6,11 @@ const SOURCE_PACKAGE_NAME = /^(?:@[a-z0-9~][a-z0-9._~-]*\/)?[a-z0-9~][a-z0-9._~-
 
 /**
  * Whether a file reference's `path` is relative and stays inside its root as written (Clause
- * 01a11a5a-45a7-7139-ac1c-d3881976eb71): non-empty, no leading separator or drive, no backslash, no NUL,
+ * 01a11a5a-45a7-7139-ac1c-d3881976eb71): non-empty, no leading separator or drive, no backslash, no NUL, no percent-encoded dot or separator,
  * and no empty, `.` or `..` segment. Whether the file's real path stays inside is judged when Handoff reads it.
  */
 export function isContainedSourcePath(path: string): boolean {
-	if (path.length === 0 || path.includes('\0') || path.includes('\\') || path.startsWith('/') || /^[a-z]:/iu.test(path)) return false
+	if (path.length === 0 || path.includes('\0') || path.includes('\\') || /%(?:2e|2f|5c)/iu.test(path) || path.startsWith('/') || /^[a-z]:/iu.test(path)) return false
 	return path.split('/').every(segment => segment !== '' && segment !== '.' && segment !== '..')
 }
 
