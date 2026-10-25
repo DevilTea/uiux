@@ -10,7 +10,7 @@ import type { PendingDecisionRow } from '../../utils/decisions'
  * Variant and Widget the source thread is anchored to when they are known.
  */
 const { t } = useI18n()
-const { rows, loading, failed } = usePendingDecisions()
+const { rows, loading, failed, reload } = usePendingDecisions()
 
 function to(row: PendingDecisionRow) {
 	return viewLocation(row.viewId, { panel: 'spec', ...(row.target.variant ? { variant: row.target.variant } : {}), ...(row.target.widgetId ? { widget: row.target.widgetId } : {}) })
@@ -36,8 +36,19 @@ function to(row: PendingDecisionRow) {
       >{{ loading ? t('decision.pendingList.loading') : t('decision.pendingList.count', rows.length) }}</span>
     </div>
 
+    <UAlert
+      v-if="failed"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-circle-alert"
+      role="alert"
+      :title="t('decision.pendingList.failed')"
+      :actions="[{ label: t('decision.pendingList.retry'), color: 'neutral', variant: 'outline', onClick: () => { void reload() } }]"
+      data-pending-decisions-error
+    />
+
     <ul
-      v-if="rows.length"
+      v-else-if="rows.length"
       class="divide-y divide-default rounded-md border border-default"
     >
       <li
@@ -73,7 +84,7 @@ function to(row: PendingDecisionRow) {
       </li>
     </ul>
     <p
-      v-else-if="!loading && !failed"
+      v-else-if="!loading"
       class="rounded-md border border-dashed border-accented px-3 py-2 text-sm text-muted"
       data-pending-decisions-empty
     >

@@ -882,7 +882,7 @@
     },
     "feedback": {
       "defer": "Decision deferred.",
-      "decide": "Decision decided.",
+      "decide": "Decision recorded.",
       "reopen": "Decision reopened."
     },
     "errors": {
@@ -897,6 +897,8 @@
       "empty": "No Decisions are waiting. Deferred and decided Decisions stay in each View's Spec.",
       "loading": "Loading Decisions",
       "open": "Open {question} in {view}",
+      "failed": "Could not load the pending Decisions.",
+      "retry": "Try again",
       "inView": "In {view}"
     }
   },

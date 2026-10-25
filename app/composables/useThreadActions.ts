@@ -38,8 +38,8 @@ export type ThreadActionsOptions = Readonly<{
 	canReanchor: () => boolean
 	canPromote: () => boolean
 	/**
-	 * Whether the thread already has a Decision: `false` hides "Create another Decision" (the View is
-	 * known to hold none), `true` or `undefined` (the View is not loaded) offers it.
+	 * Whether the thread already has a Decision: only `true` offers "Create another Decision"; `false`
+	 * (the View holds none) and `undefined` (not known yet, the View is not loaded) do not.
 	 */
 	promoted?: () => boolean | undefined
 	canSubmit: () => boolean
@@ -256,7 +256,7 @@ export function useThreadActions(options: ThreadActionsOptions) {
 			...(options.canSubmit() ? [{ label: t('thread.submit'), icon: 'i-lucide-eye', onSelect: () => { submitOpen.value = true } }] : []),
 			...(options.canReanchor() ? [{ label: options.reanchorLabel(), icon: 'i-lucide-crosshair', onSelect: options.reanchor }] : []),
 			...(options.canPromote() ? [{ label: t('thread.promote'), icon: 'i-lucide-signpost', onSelect: () => { promoteOpen.value = true } }] : []),
-			...(options.canPromote() && options.promoted?.() !== false ? [{ label: t('thread.promoteAnother'), icon: 'i-lucide-signpost', onSelect: openPromoteAnother }] : []),
+			...(options.canPromote() && options.promoted?.() === true ? [{ label: t('thread.promoteAnother'), icon: 'i-lucide-signpost', onSelect: openPromoteAnother }] : []),
 			...(options.extraOverflow?.() ?? []),
 			{ label: t('comments.copyThreadId'), icon: 'i-lucide-copy', onSelect: () => { void copy(current.id, t('comments.copiedId')) } },
 		]]

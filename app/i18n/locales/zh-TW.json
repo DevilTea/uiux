@@ -882,7 +882,7 @@
     },
     "feedback": {
       "defer": "已延後 Decision。",
-      "decide": "已決定 Decision。",
+      "decide": "已記錄 Decision 的決定。",
       "reopen": "已重新開啟 Decision。"
     },
     "errors": {
@@ -897,6 +897,8 @@
       "empty": "沒有等待處理的 Decision。已延後與已決定的 Decision 仍保留在各 View 的 Spec 中。",
       "loading": "正在載入 Decision",
       "open": "在 {view} 中開啟 {question}",
+      "failed": "無法載入待定的 Decision。",
+      "retry": "再試一次",
       "inView": "位於 {view}"
     }
   },

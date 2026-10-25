@@ -27,6 +27,7 @@ export function usePendingDecisions() {
 
 	async function load(): Promise<void> {
 		const mine = ++sequence
+		loading.value = true
 		const current = workbench.views.value
 		if (!current.length) {
 			reads.value = new Map()
@@ -55,7 +56,8 @@ export function usePendingDecisions() {
 			failed.value = false
 		}
 		catch {
-			if (mine === sequence) failed.value = true
+			// Stale rows are not shown as if they were current.
+			if (mine === sequence) { failed.value = true; reads.value = new Map() }
 		}
 		finally {
 			if (mine === sequence) loading.value = false

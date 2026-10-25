@@ -122,6 +122,32 @@ describe('Decision lifecycle in the Workbench', () => {
 		finally { await context.close() }
 	}, 90_000)
 
+	it('shows an error with Try again, not an empty list, when the pending Decisions cannot be loaded', async () => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' })
+		await context.addInitScript(() => {
+			localStorage.setItem('nuxt-color-mode', 'light')
+			localStorage.setItem('uiux.workbench.locale', 'en-US')
+		})
+		await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
+		const page = await context.newPage()
+		try {
+			// The expanded listing the pending list reads fails; the Views themselves still load.
+			await page.route('**/api/resources/list', async (route) => {
+				if ((route.request().postData() ?? '').includes('expanded')) await route.abort()
+				else await route.continue()
+			})
+			await page.goto(`${server.origin}/?tab=decisions`, { waitUntil: 'networkidle' })
+			await page.locator('[data-pending-decisions-error]').waitFor({ timeout: 20_000 })
+			expect(await page.locator('[data-pending-decisions-empty]').count()).toBe(0)
+			expect(await page.locator('[data-pending-decision]').count()).toBe(0)
+			await page.unroute('**/api/resources/list')
+			await page.getByRole('button', { name: 'Try again' }).click()
+			await page.locator('[data-pending-decision]').filter({ hasText: QUESTION }).waitFor({ timeout: 20_000 })
+			expect(await page.locator('[data-pending-decisions-error]').count()).toBe(0)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
 	it('offers Decide only to a member whose session holds decisions.decide', async () => {
 		const token = await provisionToken(server.workspaceRoot, { nickname: 'edith', kind: 'human', preset: 'editor' })
 		const cookie = await sessionCookieFor(server.origin, token)

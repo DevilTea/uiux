@@ -345,6 +345,10 @@ describe('another Decision from the same thread (Rule 01a11544-6084 and Clause 0
 		const retry = await scoped(ctx.app, REVIEWER).createDecisionFromReview(command)
 		expect(retry).toMatchObject({ status: 'updated', decision: { id: SECOND_DECISION_ID }, changeSummary: { changes: [] } })
 		expect(await scoped(ctx.app, REVIEWER).createDecisionFromReview({ ...command, question: 'Different text', expectedViewRevision: 'r_stale' })).toMatchObject({ status: 'updated', decision: { id: SECOND_DECISION_ID, question: 'Second question?' } })
+		// A retry also ignores a different outcome, and an earlier Decision of the same thread is returned by its id.
+		expect(await scoped(ctx.app, REVIEWER).createDecisionFromReview({ ...command, outcome: OUTCOME })).toMatchObject({ status: 'updated', decision: { id: SECOND_DECISION_ID, status: 'pending' } })
+		const firstId = (await readView(ctx)).resource.spec.decisions!.find(item => item.question === 'First question?')!.id
+		expect(await scoped(ctx.app, REVIEWER).createDecisionFromReview({ ...command, decisionId: firstId, question: 'Ignored' })).toMatchObject({ status: 'updated', decision: { id: firstId, question: 'First question?' } })
 		expect((await readView(ctx)).revision).toBe(written.revision)
 		expect((await readView(ctx)).resource.spec.decisions).toHaveLength(3)
 	})

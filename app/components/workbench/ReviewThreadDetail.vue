@@ -3,6 +3,8 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import { useReviewInbox } from '../../composables/useReviewInbox'
 import { useWorkbench } from '../../composables/useWorkbench'
+import { useUiuxClient } from '../../composables/useUiuxClient'
+import type { ViewRead } from '../../composables/workbench-types'
 import { useThreadActions } from '../../composables/useThreadActions'
 import type { InboxThread } from '../../utils/review-inbox'
 import ReviewTimeline from './ReviewTimeline.vue'
@@ -93,6 +95,21 @@ const error = computed(() => thread.value && inbox.lastError.value?.threadId ===
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const canSubmit = computed(() => !!thread.value && thread.value.status === 'open' && inbox.canSubmit.value && viewExists.value && isDesktop.value && !compact.value)
 
+/**
+ * Whether the thread already has a Decision, from its View: the open View when it is the thread's,
+ * else the View read here. Unknown (`undefined`) until read, so "Create another Decision" waits.
+ */
+const uiux = useUiuxClient()
+const promotedState = ref<boolean>()
+watch(() => [thread.value?.id, thread.value?.viewId, workbench.selectedView.value?.revision, thread.value?.revision] as const, async ([id, viewId]) => {
+	promotedState.value = undefined
+	if (!id || !viewId) return
+	const known = promotedIn(workbench.selectedView.value, thread.value)
+	if (known !== undefined) { promotedState.value = known; return }
+	const view = await uiux.readResource<ViewRead>('view', viewId).catch(() => undefined)
+	if (thread.value?.id === id && view) promotedState.value = promotedIn(view, thread.value)
+}, { immediate: true })
+
 const actions = useThreadActions({
 	thread: () => thread.value,
 	detail: () => detail.value,
@@ -101,7 +118,7 @@ const actions = useThreadActions({
 	canReanchor: () => inbox.canReply.value && viewExists.value && !compact.value,
 	// Workspace threads have no Decision home (O3): re-anchor to a View's root first.
 	canPromote: () => inbox.canPromote.value && viewExists.value && !compact.value,
-	promoted: () => promotedIn(workbench.selectedView.value, thread.value),
+	promoted: () => promotedState.value,
 	canSubmit: () => canSubmit.value,
 	conflict: () => conflict.value,
 	error: () => error.value,

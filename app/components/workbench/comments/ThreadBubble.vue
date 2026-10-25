@@ -143,7 +143,7 @@ const actions = useThreadActions({
 	canWrite: () => comments.canComment.value,
 	canReanchor: () => comments.canComment.value && !isPhone.value,
 	canPromote: () => comments.canPromote.value && !isPhone.value,
-	promoted: () => promotedIn(workbench.selectedView.value, thread.value),
+	promoted: () => promotedIn(workbench.selectedView.value, thread.value) === true,
 	canSubmit: () => canSubmit.value,
 	conflict: () => conflict.value,
 	error: () => error.value,
