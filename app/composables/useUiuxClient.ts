@@ -1,6 +1,7 @@
 import type { EvidenceAdapterProvenance } from '../../src/domain/evidence/adapter-provenance'
 import type { HandoffRoot } from '../../src/domain/handoff/schema'
 import type { AssetResolutionTable } from '../../src/assets/bindings'
+import type { DescribedWidgetCatalog } from '../../src/preview/widget-catalog'
 
 export type VersionResourceRead<T> = Readonly<{ versionId: string; kind: string; key: string; revision: string; workspaceSchemaVersion: number; resource: T }>
 
@@ -8,6 +9,11 @@ type ResourceListPage<T> = Readonly<{ items: readonly T[]; nextCursor?: string }
 
 /** A View's current render-input digest (Clause 01a14e30-2d4a-…) and the revision it was read at. */
 export type EvidenceViewRenderInput = Readonly<{ key: string; revision: string; renderInputDigest: string }>
+
+/** The active Adapters' Widget types with their declarations and Catalog entries (`GET /api/preview/catalog`). */
+export type PreviewCatalogResponse =
+	| Readonly<{ state: 'valid'; entries: DescribedWidgetCatalog }>
+	| Readonly<{ state: 'unavailable' }>
 
 type PreviewAdaptersResponse =
 	| {
@@ -102,6 +108,10 @@ export function useUiuxClient() {
 		}) as unknown as T
 	}
 
+	async function previewCatalog(): Promise<PreviewCatalogResponse> {
+		return await $fetch<PreviewCatalogResponse>('/api/preview/catalog')
+	}
+
 	async function previewAdapters(): Promise<PreviewAdaptersResponse> {
 		return await $fetch<PreviewAdaptersResponse>('/api/preview/adapters')
 	}
@@ -137,6 +147,7 @@ export function useUiuxClient() {
 		listEvidenceForFreshness,
 		assessHandoff,
 		previewAdapters,
+		previewCatalog,
 		previewAssets,
 		assetUrl,
 		artifactUrl,

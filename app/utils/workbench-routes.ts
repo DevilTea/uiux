@@ -65,6 +65,15 @@ export const ADAPTERS_HASH = '#product-kit-adapters'
  */
 export const ADAPTERS_LOCATION = { path: PRODUCT_KIT_PATH, query: { section: 'overview' }, hash: ADAPTERS_HASH } as const
 
+/** The fragment of the Catalog block, inside the Components section of the Product Kit page. */
+export const CATALOG_HASH = '#product-kit-catalog'
+
+/**
+ * Catalog: the Components section of the Product Kit page (Rules 01a11bb1-b918-7cb5-b581-a3fd3f647f09 and
+ * 01a17443-8e49-7ae2-905c-e13b9dcdddca), scrolled to the Catalog block; no navigation entry of its own.
+ */
+export const CATALOG_LOCATION = { path: PRODUCT_KIT_PATH, query: { section: 'components' }, hash: CATALOG_HASH } as const
+
 /** Builds the query for a View deep link; empty values mean "the effective default" and are omitted. */
 export function viewQuery(options: ViewLinkOptions): LocationQueryRaw {
 	const query: LocationQueryRaw = {}

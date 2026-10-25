@@ -78,12 +78,12 @@ The normative domain behavior and external contracts live in `.spec/` (Stories, 
 - a Reviews inbox: `ready-for-review` before `open`, resolved and dismissed threads in their own tabs, filters by View (or Workspace), anchor state, Variant scope, change domain and author, one chronological timeline per thread, and reply, resolve or dismiss, reopen, re-anchor, promote to Decision, submit for review, edit own message and delete own new thread;
 - a node/edge UX Flow graph editor and a Prototype player;
 - Workspace pages for Settings (including Adapters), Locales and Assets, and a Members page for Owners;
+- the Component Catalog as a secondary, read-only block of the Product Kit page's Components section (one row per Widget type of the active Adapters, the Views that use each, and the Catalog problems of entries no View uses), reached from the `⌘K` palette;
 - live refresh: one change-event stream per Workbench session, so writes made elsewhere (an agent through MCP, another member) appear without a reload, with polling as the fallback;
 - a Preview session indicator, Workbench chrome i18n (en-US / zh-TW) and light/dark themes on Nuxt UI semantic color tokens.
 
 **Accepted in architecture, not yet built:**
 
-- the Component Catalog as a secondary area;
 - the "updated by others" notice above a composer whose resource changed while the user drafts (issue #80);
 - Review threads that record the render context they were written in and show it in the thread header (Discussion #7, Part 7: https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18797092). `schemaVersion` 4 already defines the thread's optional `renderContext`, but nothing writes or shows it yet (issue #144).
 

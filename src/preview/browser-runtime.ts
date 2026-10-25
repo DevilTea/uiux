@@ -30,6 +30,7 @@ import {
 import { collectWidgetTypesFromIr } from './preview-runtime'
 import { FALLBACK_LOCALE } from './render-context-options'
 import { evaluateTranslationProperties, type TranslationEvaluation } from './translation-evaluation'
+import { describeWidgetCatalogEntry, type DescribedWidgetCatalog } from './widget-catalog'
 import { WidgetEventObserver, type WidgetEventReport } from './widget-event-observer'
 import type { WidgetEventTrigger } from './protocol/widget-events'
 
@@ -243,6 +244,11 @@ export type StandalonePreviewMountFactory = Readonly<{
 	 * every surface reports what the Preview itself refuses.
 	 */
 	describeAdapterDiagnostics(): readonly Diagnostic[]
+	/**
+	 * One row per Widget type of the Adapters this bundle decoded, with the plugin's declarations and the
+	 * Catalog entry (`src/preview/widget-catalog.ts`), for the Workbench's Catalog view. Metadata only.
+	 */
+	describeWidgetCatalog(): DescribedWidgetCatalog
 }>
 
 /**
@@ -907,7 +913,16 @@ export function createStandalonePreviewMount(input: Readonly<{
 		return Object.freeze([...buildDiagnostics])
 	}
 
-	return { mountPreviewRuntime, describeDeclaredWidgetEvents, describeAdapterDiagnostics }
+	function describeWidgetCatalog(): DescribedWidgetCatalog {
+		return Object.freeze(validatedEntries.flatMap(entry => entry.decodedPlugins.map(plugin => describeWidgetCatalogEntry({
+			adapterIndex: entry.index,
+			adapterId: entry.manifest.id,
+			plugin,
+			catalog: Object.hasOwn(entry.manifest.catalog.widgets, plugin.type) ? entry.manifest.catalog.widgets[plugin.type] : undefined,
+		}))))
+	}
+
+	return { mountPreviewRuntime, describeDeclaredWidgetEvents, describeAdapterDiagnostics, describeWidgetCatalog }
 }
 
 function createNoopBridge(): PreviewRuntimeBridge {

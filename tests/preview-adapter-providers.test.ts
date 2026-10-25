@@ -383,7 +383,7 @@ describe('Adapter providers in a Preview Runtime construction', () => {
 		const bundle = await validBundle(root)
 		const origin = await serveRuntime(root)
 		const { window, module } = await previewDocument(root, origin, bundle.bundleJs)
-		expect(Object.keys(module).sort()).toEqual(['describeAdapterDiagnostics', 'describeDeclaredWidgetEvents', 'mountPreviewRuntime'])
+		expect(Object.keys(module).sort()).toEqual(['describeAdapterDiagnostics', 'describeDeclaredWidgetEvents', 'describeWidgetCatalog', 'mountPreviewRuntime'])
 		expect(Object.keys((window as unknown as { __UIUX_PREVIEW_RUNTIME__: object }).__UIUX_PREVIEW_RUNTIME__)).toEqual(['mountPreviewRuntime'])
 	})
 

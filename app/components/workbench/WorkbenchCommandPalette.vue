@@ -6,7 +6,7 @@ import { isWidgetAnchor, isWorkspaceAnchor } from '../../../src/domain/reviews/s
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
 import { useCheckpointAccess } from '../../composables/useCheckpointAccess'
-import { ADAPTERS_LOCATION, flowPath, PRODUCT_KIT_PATH, viewLocation, VIEWS_LOCATION } from '../../utils/workbench-routes'
+import { ADAPTERS_LOCATION, CATALOG_LOCATION, flowPath, PRODUCT_KIT_PATH, viewLocation, VIEWS_LOCATION } from '../../utils/workbench-routes'
 
 /** ⌘K: go to an area, a View, a Flow or a thread, or run a Workbench action (brief a). */
 const { t } = useI18n()
@@ -39,6 +39,7 @@ const groups = computed<CommandPaletteGroup<CommandPaletteItem>[]>(() => {
 				{ label: t('nav.locales'), icon: 'i-lucide-globe', to: '/workspace/locales' },
 				{ label: t('nav.assets'), icon: 'i-lucide-image', to: '/workspace/assets' },
 				{ label: t('nav.adapters'), icon: 'i-lucide-puzzle', to: ADAPTERS_LOCATION },
+				{ label: t('nav.catalog'), icon: 'i-lucide-library', to: CATALOG_LOCATION },
 			],
 		},
 		{
