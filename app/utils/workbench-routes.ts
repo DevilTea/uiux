@@ -110,3 +110,21 @@ export function sameQuery(a: LocationQueryRaw | LocationQuery, b: LocationQueryR
 		.sort(([left], [right]) => left.localeCompare(right))
 	return JSON.stringify(normalize(a)) === JSON.stringify(normalize(b))
 }
+
+/** The translation table of the Workspace Locales page. */
+export const LOCALES_PATH = '/workspace/locales'
+
+/**
+ * One cell of the translation table (Rule 01a115cd-bdb2-7de2-abb9-54f592539471): the page scrolls to
+ * the key's row and focuses the Locale's cell, once, when it opens.
+ */
+export function localeCellLocation(locale: string, key: string) {
+	return { path: LOCALES_PATH, query: { locale, key } }
+}
+
+/** The cell a Locales page address names, when it names both a Locale and a key. */
+export function parseLocaleCell(query: LocationQuery): Readonly<{ locale: string; key: string }> | undefined {
+	const locale = single(query.locale)
+	const key = single(query.key)
+	return locale && key ? { locale, key } : undefined
+}

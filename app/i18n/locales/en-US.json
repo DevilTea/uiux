@@ -131,6 +131,69 @@
         "not_permitted": "Not run",
         "not_run": "Not run yet"
       }
+    },
+    "lastRunUnfinished": "Ran at {time}. Some checks did not finish; no findings listed. | Ran at {time}. Some checks did not finish; {n} finding listed. | Ran at {time}. Some checks did not finish; {n} findings listed.",
+    "unfinishedTitle": "No findings listed, but some checks did not finish",
+    "unfinishedDescription": "A check that failed or stopped early has not shown the Workspace is clean. See the sources above.",
+    "allSources": "All sources",
+    "sourceFilter": "Source",
+    "allSeverities": "All severities",
+    "severityFilter": "Severity",
+    "allViews": "All Views",
+    "viewFilter": "View",
+    "allVariants": "All Variants",
+    "variantFilter": "Variant",
+    "clearFilters": "Clear filters",
+    "noMatches": "No findings match these filters",
+    "noMatchesDescription": "Clear a filter to see the other findings.",
+    "noView": "Not on a View",
+    "openCell": "Open cell",
+    "viewCount": "{n} View | {n} Views",
+    "widgetCount": "{n} Widget | {n} Widgets",
+    "findingCount": "{n} finding | {n} findings",
+    "groupBy": {
+      "label": "Group by",
+      "problem": "Problem",
+      "source": "Source",
+      "severity": "Severity",
+      "view": "View"
+    },
+    "severity": {
+      "error": "Error",
+      "warning": "Warning"
+    },
+    "source": {
+      "validation": "Structure and schema",
+      "translation": "Translation reminders",
+      "catalog": "Catalog",
+      "product-kit": "Product Kit",
+      "preview-translation": "Preview translation warnings",
+      "runtime": "Runtime errors"
+    },
+    "state": {
+      "not_checked": "Not checked",
+      "checking": "Checking…",
+      "completed": "Completed",
+      "incomplete": "Incomplete",
+      "failed": "Failed"
+    },
+    "scope": {
+      "workspace": "Workspace",
+      "view": "View",
+      "flow": "Flow",
+      "locale": "Locale",
+      "asset": "Asset",
+      "product-kit": "Product Kit"
+    },
+    "sources": {
+      "title": "Sources",
+      "description": "Each source has its own state. A source that has not run, is running or did not finish is never zero findings.",
+      "notGathered": "The Preview does not report to Checks yet.",
+      "catalogElsewhere": "{n} Catalog problem is outside the entries Views use; see the Product Kit page. | {n} Catalog problems are outside the entries Views use; see the Product Kit page."
+    },
+    "catalog": {
+      "entry": "{type}: {text}",
+      "failed": "Couldn't read the Catalog problems."
     }
   },
   "app": {

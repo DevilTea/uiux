@@ -131,6 +131,69 @@
         "not_permitted": "未執行",
         "not_run": "尚未執行"
       }
+    },
+    "lastRunUnfinished": "於 {time} 執行，部分檢查未完成，沒有列出問題。 | 於 {time} 執行，部分檢查未完成，列出 {n} 個問題。 | 於 {time} 執行，部分檢查未完成，列出 {n} 個問題。",
+    "unfinishedTitle": "沒有列出問題，但部分檢查未完成",
+    "unfinishedDescription": "失敗或提前中止的檢查，不能證明這個 Workspace 沒有問題。請看上方各來源的狀態。",
+    "allSources": "所有來源",
+    "sourceFilter": "來源",
+    "allSeverities": "所有嚴重程度",
+    "severityFilter": "嚴重程度",
+    "allViews": "所有 View",
+    "viewFilter": "View",
+    "allVariants": "所有 Variant",
+    "variantFilter": "Variant",
+    "clearFilters": "清除篩選",
+    "noMatches": "沒有符合篩選條件的問題",
+    "noMatchesDescription": "清除篩選即可看到其他問題。",
+    "noView": "不屬於任何 View",
+    "openCell": "開啟儲存格",
+    "viewCount": "{n} 個 View | {n} 個 View",
+    "widgetCount": "{n} 個 Widget | {n} 個 Widget",
+    "findingCount": "{n} 個問題 | {n} 個問題",
+    "groupBy": {
+      "label": "分組方式",
+      "problem": "問題",
+      "source": "來源",
+      "severity": "嚴重程度",
+      "view": "View"
+    },
+    "severity": {
+      "error": "錯誤",
+      "warning": "警告"
+    },
+    "source": {
+      "validation": "結構與 Schema",
+      "translation": "翻譯提醒",
+      "catalog": "型錄",
+      "product-kit": "Product Kit",
+      "preview-translation": "預覽翻譯警告",
+      "runtime": "Runtime 錯誤"
+    },
+    "state": {
+      "not_checked": "尚未檢查",
+      "checking": "正在檢查…",
+      "completed": "已完成",
+      "incomplete": "未完成",
+      "failed": "失敗"
+    },
+    "scope": {
+      "workspace": "Workspace",
+      "view": "View",
+      "flow": "Flow",
+      "locale": "Locale",
+      "asset": "Asset",
+      "product-kit": "Product Kit"
+    },
+    "sources": {
+      "title": "來源",
+      "description": "每個來源各有自己的狀態。尚未執行、正在執行或未完成的來源，絕不代表沒有問題。",
+      "notGathered": "預覽尚未向檢查回報。",
+      "catalogElsewhere": "有 {n} 個型錄問題不在 View 使用的項目中，請見 Product Kit 頁面。 | 有 {n} 個型錄問題不在 View 使用的項目中，請見 Product Kit 頁面。"
+    },
+    "catalog": {
+      "entry": "{type}：{text}",
+      "failed": "無法讀取型錄問題。"
     }
   },
   "app": {

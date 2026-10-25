@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
-import { useI18n } from '#imports'
+import { useI18n, useRoute } from '#imports'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { touchesKinds, useLiveEvents } from '../../composables/useLiveEvents'
 import { useUiuxClient } from '../../composables/useUiuxClient'
@@ -32,6 +32,7 @@ import NewLocaleModal from './NewLocaleModal.vue'
 import UnsavedLeaveModal from './UnsavedLeaveModal.vue'
 import { focusFirstProblem } from '../../utils/focus-problem'
 import { diagnosticText } from '../../utils/diagnostic-copy'
+import { parseLocaleCell } from '../../utils/workbench-routes'
 
 /**
  * Locales as a key × Locale table (brief g). Every key of every Locale is one row; the primary
@@ -121,7 +122,33 @@ async function load(options: Readonly<{ quiet?: boolean }> = {}): Promise<void> 
 	}
 }
 
-onMounted(() => { void load() })
+onMounted(() => { void load().then(reveal) })
+
+/**
+ * A Checks reminder opens its cell (Rule 01a115cd-bdb2-7de2-abb9-54f592539471): `?locale=&key=` clears
+ * the filter and the search, scrolls to the key's row and focuses the Locale's cell (on a narrow
+ * screen, the key's card). An address that names a Locale or key this Workspace lacks leaves the
+ * table as it is.
+ */
+const route = useRoute()
+const revealed = ref<{ locale: string; key: string }>()
+async function reveal(): Promise<void> {
+	const cell = parseLocaleCell(route.query)
+	if (!cell || !byKey.value.get(cell.locale) || !allKeys.value.includes(cell.key)) return
+	filter.value = 'all'
+	query.value = ''
+	await nextTick()
+	const target = [...document.querySelectorAll<HTMLElement>('[data-locale-cell-key]')]
+		.find(element => element.dataset.localeCellKey === cell.key && (element.dataset.locale === cell.locale || element.dataset.localeCard !== undefined))
+	if (!target) return
+	revealed.value = cell
+	target.scrollIntoView({ block: 'center' })
+	target.focus({ preventScroll: true })
+}
+watch(() => [route.query.locale, route.query.key], () => { if (!loading.value) void reveal() })
+function isRevealed(locale: string, key: string): boolean {
+	return revealed.value?.locale === locale && revealed.value.key === key
+}
 // Live refresh: a Locale changed elsewhere is re-read; a Locale with a draft keeps it (see `load`).
 useLiveEvents().onResources((batch) => {
 	if (touchesKinds(batch, ['locale'])) void load({ quiet: true })
@@ -206,6 +233,7 @@ function startEdit(key: string, locale: string): void {
 	if (!canEditLocale(locale)) return
 	const state = byKey.value.get(locale)
 	if (!state || state.saving) return
+	revealed.value = undefined
 	editing.value = { key, locale, value: state.draft[key] ?? '' }
 	void nextTick(() => document.querySelector<HTMLTextAreaElement>('[data-locale-editor] textarea')?.focus())
 }
@@ -730,7 +758,11 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
         <li
           v-for="row in rows"
           :key="row.key"
-          class="flex flex-col gap-1.5 py-3"
+          class="flex flex-col gap-1.5 py-3 outline-none"
+          :class="revealed?.key === row.key ? 'bg-elevated ring-2 ring-primary ring-inset' : ''"
+          :data-locale-cell-key="row.key"
+          data-locale-card
+          tabindex="-1"
         >
           <span class="flex items-center gap-2">
             <code class="min-w-0 truncate font-mono text-xs text-highlighted">{{ row.key }}</code>
@@ -866,9 +898,12 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
             v-else
             :type="canEditLocale(locale) ? 'button' : undefined"
             class="flex min-h-10 w-full items-start gap-2 px-4 py-2 text-start"
-            :class="canEditLocale(locale) ? 'hover:bg-muted' : ''"
+            :class="[canEditLocale(locale) ? 'hover:bg-muted' : '', isRevealed(locale, row.original.key) ? 'bg-elevated ring-2 ring-primary ring-inset' : '']"
             :data-locale-cell="canEditLocale(locale) ? cellId(row.index, localeKeys.indexOf(locale)) : undefined"
             :data-locale="locale"
+            :data-locale-cell-key="row.original.key"
+            :data-locale-cell-revealed="isRevealed(locale, row.original.key) || undefined"
+            :tabindex="canEditLocale(locale) ? undefined : -1"
             :aria-label="canEditLocale(locale) ? t('locales.editCell', { key: row.original.key, locale }) : undefined"
             @click="startEdit(row.original.key, locale)"
             @keydown="canEditLocale(locale) && onCellKeydown($event, row.original.key, locale)"
