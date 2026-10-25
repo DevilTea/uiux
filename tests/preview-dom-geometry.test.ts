@@ -80,9 +80,17 @@ function area(geometry: WidgetGeometry): number {
  * `ratio` is the page's device pixel ratio.
  */
 async function foreignPixels(geometries: Readonly<Record<string, WidgetGeometry>>, ratio = 1): Promise<Record<string, number>> {
+	return Object.fromEntries(Object.entries(await auditPixels(geometries, ratio)).map(([id, audit]) => [id, audit.foreign]))
+}
+
+/**
+ * Per Widget: `foreign`, as `foreignPixels`; and `lost`, the pixels of the Widget's rect that still
+ * show its `#eee` but lie outside every reported region, that is, visible area the report gave up.
+ */
+async function auditPixels(geometries: Readonly<Record<string, WidgetGeometry>>, ratio = 1, antialias = false): Promise<Record<string, { foreign: number; lost: number }>> {
 	const png = (await page.screenshot({ type: 'png', fullPage: true })).toString('base64')
-	const polygons = Object.fromEntries(Object.entries(geometries).map(([id, geometry]) => [id, geometry.regions.map(region => region.contour.commands.flatMap(command => 'x' in command ? [[command.x, command.y] as const] : []))]))
-	return page.evaluate(async ({ png, polygons, ratio }) => {
+	const polygons = Object.fromEntries(Object.entries(geometries).map(([id, geometry]) => [id, { rect: geometry.rect, regions: geometry.regions.map(region => region.contour.commands.flatMap(command => 'x' in command ? [[command.x, command.y] as const] : [])) }]))
+	return page.evaluate(async ({ png, polygons, ratio, antialias }) => {
 		const image = new Image()
 		image.src = `data:image/png;base64,${png}`
 		await image.decode()
@@ -101,22 +109,36 @@ async function foreignPixels(geometries: Readonly<Record<string, WidgetGeometry>
 			}
 			return odd
 		}
-		return Object.fromEntries(Object.entries(polygons).map(([id, regions]) => {
-			let count = 0
+		const isWidgetColor = (x: number, y: number) => {
+			const index = (y * canvas.width + x) * 4
+			return pixels[index] === 238 && pixels[index + 1] === 238 && pixels[index + 2] === 238
+		}
+		// With `antialias`, only a pixel more than three quarters covered counts as paint: a curved edge is antialiased.
+		const isPaint = (x: number, y: number) => {
+			if (!antialias) return !isWidgetColor(x, y)
+			const index = (y * canvas.width + x) * 4
+			return pixels[index]! < 60 || pixels[index + 1]! < 60 || pixels[index + 2]! < 60
+		}
+		return Object.fromEntries(Object.entries(polygons).map(([id, { rect, regions }]) => {
+			let foreign = 0
+			let lost = 0
 			for (const polygon of regions) {
 				const xs = polygon.map(([x]) => x)
 				const ys = polygon.map(([, y]) => y)
 				for (let y = Math.max(0, Math.floor(Math.min(...ys) * ratio)); y < Math.min(canvas.height, Math.ceil(Math.max(...ys) * ratio)); y++) {
 					for (let x = Math.max(0, Math.floor(Math.min(...xs) * ratio)); x < Math.min(canvas.width, Math.ceil(Math.max(...xs) * ratio)); x++) {
-						if (!inside(polygon, (x + 0.5) / ratio, (y + 0.5) / ratio)) continue
-						const index = (y * canvas.width + x) * 4
-						if (pixels[index] !== 238 || pixels[index + 1] !== 238 || pixels[index + 2] !== 238) count++
+						if (inside(polygon, (x + 0.5) / ratio, (y + 0.5) / ratio) && isPaint(x, y)) foreign++
 					}
 				}
 			}
-			return [id, count]
+			for (let y = Math.max(0, Math.floor(rect.y * ratio)); y < Math.min(canvas.height, Math.ceil((rect.y + rect.height) * ratio)); y++) {
+				for (let x = Math.max(0, Math.floor(rect.x * ratio)); x < Math.min(canvas.width, Math.ceil((rect.x + rect.width) * ratio)); x++) {
+					if (isWidgetColor(x, y) && !regions.some(polygon => inside(polygon, (x + 0.5) / ratio, (y + 0.5) / ratio))) lost++
+				}
+			}
+			return [id, { foreign, lost }]
 		}))
-	}, { png, polygons, ratio })
+	}, { png, polygons, ratio, antialias })
 }
 
 /**
@@ -286,19 +308,19 @@ describe('Runtime DOM measurer', () => {
 		expect(valid(result.flow!) && valid(result['under-image']!)).toBe(true)
 	})
 
-	it('cuts occluders of unproven shape by their box: rounded corners, clip paths, SVG clip paths, masks, blend modes, SVG and native controls', async () => {
+	it('cuts occluders of unproven shape by their box: masks, blend modes, SVG and native controls', async () => {
 		const occluders = [
-			['rounded', 'div', 'border-radius:20px;background:rgb(0,0,0)'],
-			['clip-circle', 'div', 'clip-path:circle(50%);background:rgb(0,0,0)'],
-			['clip-inset-round', 'div', 'clip-path:inset(0 round 10px);background:rgb(0,0,0)'],
-			['svg-clip-path', 'div', 'clip-path:url(#clip);background:rgb(0,0,0)'],
 			['mask', 'div', 'mask-image:linear-gradient(black, transparent);-webkit-mask-image:linear-gradient(black, transparent);background:rgb(0,0,0)'],
 			['blend', 'div', 'mix-blend-mode:multiply;background:rgb(0,0,0)'],
 			['svg', 'svg', ''],
 			['button', 'button', ''],
+			['path-clip', 'div', 'clip-path:path(\'M0 0 L50 0 L50 100 Z\');background:rgb(0,0,0)'],
+			['missing-clip', 'div', 'clip-path:url(#nothing);background:rgb(0,0,0)'],
+			['svg-path-clip', 'div', 'clip-path:url(#path-clip);background:rgb(0,0,0)'],
+			['crossing-polygon', 'div', 'clip-path:polygon(0 0, 100% 100%, 100% 0, 0 100%);background:rgb(0,0,0)'],
 		] as const
 		const at = (index: number) => ({ left: (index % 2) * 400, top: Math.floor(index / 2) * 110 })
-		const body = `<svg width="0" height="0" style="position:absolute"><clipPath id="clip"><circle cx="25" cy="50" r="20"></circle></clipPath></svg>` + occluders.map(([id, tag, style], index) => `
+		const body = `<svg width="0" height="0" style="position:absolute"><clipPath id="path-clip"><path d="M0 0 L50 0 L50 100 Z"></path></clipPath></svg>` + occluders.map(([id, tag, style], index) => `
 			<div data-widget-id="${id}" style="position:absolute;left:${at(index).left}px;top:${at(index).top}px;width:300px;height:100px;background:#eee"></div>
 			<${tag} style="position:absolute;left:${at(index).left + 100}px;top:${at(index).top}px;width:50px;height:100px;margin:0;padding:0;border:0;${style}"></${tag}>`).join('')
 		const result = await measure(body, occluders.map(([id]) => id))
@@ -310,6 +332,94 @@ describe('Runtime DOM measurer', () => {
 			])
 			expect(valid(result[id]!), id).toBe(true)
 		})
+	})
+
+	it('cuts rounded, clip-path and SVG clip-path occluders by their actual shape (#112)', async () => {
+		const shapes = [
+			['rounded', 'border-radius:40px'],
+			['rounded-elliptical', 'border-radius:50px / 25px'],
+			['clip-circle', 'clip-path:circle(50%)'],
+			['clip-ellipse', 'clip-path:ellipse(30% 60% at 50% 50%)'],
+			['clip-inset-round', 'clip-path:inset(10px round 20px)'],
+			['clip-polygon', 'clip-path:polygon(0 0, 100% 50%, 0 100%)'],
+			['clip-padding-box', 'border:10px solid rgb(0,0,0);padding:10px;clip-path:inset(0 round 30px) padding-box'],
+			['svg-clip', 'clip-path:url(#user)'],
+			['svg-clip-bbox', 'clip-path:url(#bbox)'],
+		] as const
+		const at = (index: number) => ({ left: (index % 2) * 400, top: 20 + Math.floor(index / 2) * 170 })
+		const body = `<svg width="0" height="0" style="position:absolute">
+			<clipPath id="user"><circle cx="50" cy="50" r="40"></circle><rect x="0" y="0" width="30" height="20"></rect></clipPath>
+			<clipPath id="bbox" clipPathUnits="objectBoundingBox"><ellipse cx="0.5" cy="0.5" rx="0.45" ry="0.4"></ellipse></clipPath>
+		</svg>` + shapes.map(([id, style], index) => `
+			<div data-widget-id="${id}" style="position:absolute;left:${at(index).left}px;top:${at(index).top}px;width:300px;height:100px;background:#eee"></div>
+			<div style="position:absolute;left:${at(index).left + 100}px;top:${at(index).top - 20}px;width:100px;height:140px;margin:0;background:rgb(0,0,0);${style}"></div>`).join('')
+		await page.setViewportSize({ width: 800, height: Math.max(600, 20 + Math.ceil(shapes.length / 2) * 170) })
+		const result = await measure(body, shapes.map(([id]) => id))
+		const audit = await auditPixels(result, 1, true)
+		for (const [id] of shapes) {
+			const geometry = result[id]!
+			expect(geometry.regions.length, id).toBeGreaterThan(0)
+			expect(valid(geometry), id).toBe(true)
+			// Never a pixel the occluder paints, and no more given up than the curve approximation and antialiasing cost.
+			expect(audit[id]!.foreign, id).toBe(0)
+			expect(audit[id]!.lost, id).toBeLessThan(450)
+			for (const region of geometry.regions) expect(region.maxError, id).toBeLessThanOrEqual(0.5)
+		}
+		// A curve is approximated and says so; a straight-edged clip is exact.
+		expect(result.rounded!.regions[0]!.maxError).toBeGreaterThan(0)
+		expect(result['clip-polygon']!.regions[0]!.maxError).toBe(0)
+		// The triangle (0 0, 100% 50%, 0 100%) of the 100 × 140 box covers 7000 minus two 28.57 × 20 / 2 corners of the Widget's 100px band.
+		expect(Math.abs(area(result['clip-polygon']!) - (300 * 100 - (7000 - 2 * 0.5 * 20 * (20 * 100 / 70))))).toBeLessThan(0.01)
+		expect(area(result.rounded!)).toBeGreaterThan(300 * 100 - 100 * 100)
+	})
+
+	it('leaves the corners of a rounded occluder box visible (#112)', async () => {
+		const result = await measure(`
+			<div data-widget-id="w" style="position:absolute;left:0;top:0;width:300px;height:100px;background:#eee"></div>
+			<div style="position:absolute;left:100px;top:0;width:100px;height:100px;border-radius:50px;background:rgb(0,0,0)"></div>`, ['w'])
+		// The disc touches the Widget's top and bottom edges and leaves the four corners of its box visible.
+		expect(result.w!.regions).toHaveLength(2)
+		expect(area(result.w!)).toBeGreaterThan(300 * 100 - Math.PI * 50 * 50 - 100)
+		expect(area(result.w!)).toBeLessThan(300 * 100 - Math.PI * 50 * 50 + 100)
+	})
+
+	it('combines a rounded Widget, rounded clips and cuts, and clips the Widget by its own clip path (#112)', async () => {
+		const cases = [
+			['rounded-with-cut', `<div style="position:absolute;left:LEFTpx;top:TOPpx;width:60px;height:100px;background:rgb(0,0,0)"></div>`, 'border-radius:30px'],
+			['rounded-under-rounded', `<div style="position:absolute;left:LEFTpx;top:TOPpx;width:60px;height:100px;border-radius:20px;background:rgb(0,0,0)"></div>`, 'border-radius:30px'],
+			['clip-path-widget', `<div style="position:absolute;left:LEFTpx;top:TOPpx;width:60px;height:100px;background:rgb(0,0,0)"></div>`, 'clip-path:circle(50% at 40% 50%)'],
+			['clip-path-widget-svg', `<div style="position:absolute;left:LEFTpx;top:TOPpx;width:60px;height:100px;background:rgb(0,0,0)"></div>`, 'clip-path:url(#widget-clip)'],
+		] as const
+		const body = `<svg width="0" height="0" style="position:absolute"><clipPath id="widget-clip"><circle cx="100" cy="50" r="45"></circle></clipPath></svg>` + cases.map(([id, occluder, style], index) => {
+			const { left, top } = cell(index)
+			return `
+			<div data-widget-id="${id}" style="position:absolute;left:${left}px;top:${top}px;width:300px;height:100px;background:#eee;${style}"></div>
+			${occluder.replaceAll('LEFT', String(left + 90)).replaceAll('TOP', String(top))}`
+		}).join('')
+		await page.setViewportSize({ width: 800, height: 600 })
+		const result = await measure(body, cases.map(([id]) => id))
+		const audit = await auditPixels(result, 1, true)
+		for (const [id] of cases) {
+			expect(result[id]!.regions.length, id).toBeGreaterThan(0)
+			expect(valid(result[id]!), id).toBe(true)
+			expect(audit[id]!.foreign, id).toBe(0)
+			expect(audit[id]!.lost, id).toBeLessThan(500)
+		}
+	})
+
+	it('keeps failing closed for a mask, an underivable clip path and two curved clips on the Widget\'s own chain (#112)', async () => {
+		const result = await measure(`
+			<svg width="0" height="0" style="position:absolute"><clipPath id="path-clip"><path d="M0 0 L50 0 L50 100 Z"></path></clipPath></svg>
+			<div data-widget-id="mask" style="position:absolute;left:0;top:0;width:100px;height:100px;background:#eee;mask-image:linear-gradient(black, transparent);-webkit-mask-image:linear-gradient(black, transparent)"></div>
+			<div data-widget-id="path" style="position:absolute;left:200px;top:0;width:100px;height:100px;background:#eee;clip-path:path('M0 0 L50 0 L50 100 Z')"></div>
+			<div data-widget-id="svg-path" style="position:absolute;left:400px;top:0;width:100px;height:100px;background:#eee;clip-path:url(#path-clip)"></div>
+			<div data-widget-id="missing" style="position:absolute;left:600px;top:0;width:100px;height:100px;background:#eee;clip-path:url(#nothing)"></div>
+			<div data-widget-id="crossing" style="position:absolute;left:0;top:200px;width:100px;height:100px;background:#eee;clip-path:polygon(0 0, 100% 100%, 100% 0, 0 100%)"></div>
+			<div data-widget-id="radial" style="position:absolute;left:200px;top:200px;width:100px;height:100px;background:#eee;clip-path:circle(calc(10px + 20%))"></div>`, ['mask', 'path', 'svg-path', 'missing', 'crossing', 'radial'])
+		for (const id of ['mask', 'path', 'svg-path', 'missing', 'crossing', 'radial']) {
+			expect(result[id]!.rect.width, id).toBeGreaterThan(0)
+			expect(result[id]!.regions, id).toEqual([])
+		}
 	})
 
 	it('grows the cut by filter extents, outer shadows and outlines, its own and its ancestors\'', async () => {

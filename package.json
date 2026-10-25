@@ -78,6 +78,7 @@
 		"motion-utils": "13.3.0",
 		"nuxt": "4.5.2",
 		"playwright": "1.63.0",
+		"polygon-clipping": "0.15.7",
 		"vue": "3.5.43",
 		"zod": "4.6.5"
 	},

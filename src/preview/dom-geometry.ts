@@ -1,9 +1,11 @@
 import { flatTreeParent, isSvgElement } from './axis-aligned-content-quad'
 import type { WidgetGeometry, WidgetMeasurer } from './geometry-producer'
-import { planOcclusion, type OcclusionEvidence } from './occlusion-proof'
+import { planOcclusion, type OcclusionEvidence, type ProvenOccluderShapeKind } from './occlusion-proof'
 import type { ContourCommand, Point, VisibleRegion, WidgetRect } from './protocol/schema'
 import { subtractAxisAlignedRectangularOcclusion } from './rectangular-occlusion'
-import { approximateRoundedRectContour, type RoundedRectRadii } from './rounded-contour'
+import { basicShapePolygon, EMPTY_SHAPE, parseClipPath, roundedRectShape, svgPrimitiveShape, type ClipSide, type SvgPrimitive } from './clip-shapes'
+import { intersectShapes, outerRings, rectangleShape, subtractShapes, unionShapes, type PolygonShape } from './polygon-occlusion'
+import type { RoundedRectRadii } from './rounded-contour'
 
 /**
  * DOM measurement for the runtime geometry producer (Part 4 visible regions, first version).
@@ -67,6 +69,12 @@ export type DomGeometryMeasurerOptions = Readonly<{
 
 type Box = Readonly<{ left: number; top: number; right: number; bottom: number }>
 type RoundedShape = Readonly<{ rect: WidgetRect; radii: RoundedRectRadii }>
+/** What an occluder removes: a rectangle, or polygons containing its true shape (a curve, a clip). */
+type CutShape = WidgetRect | PolygonShape
+
+function isPolygonCut(shape: CutShape): shape is PolygonShape {
+	return 'polygons' in shape
+}
 type ClipChain = Readonly<{ box: Box; rounded: readonly RoundedShape[] }> | 'unsupported'
 type PaintKey = Readonly<{ element: Element; flow: boolean; z: number }>
 
@@ -238,7 +246,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	 * above 1, transformable or not, which bounds the rendered scale from above whichever transforms
 	 * the engine applies. `transformed`: a transform on the chain.
 	 */
-	type ChainFlags = Readonly<{ opacity: number; transformOk: boolean; compositing: boolean; shapeClip: boolean; hidden: boolean; planar: boolean; reflect: boolean; scale: number; ceiling: number; transformed: boolean }>
+	type ChainFlags = Readonly<{ opacity: number; transformOk: boolean; compositing: boolean; clipPath: boolean; mask: boolean; hidden: boolean; planar: boolean; reflect: boolean; scale: number; ceiling: number; transformed: boolean }>
 
 	/** Aggregated style facts of an element and all its flat-tree ancestors. */
 	function chainOf(element: Element): ChainFlags {
@@ -246,7 +254,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		if (cached) return cached
 		const style = styleOf(element)
 		const parent = flatTreeParent(element)
-		const inherited: ChainFlags = parent ? chainOf(parent) : { opacity: 1, transformOk: true, compositing: false, shapeClip: false, hidden: false, planar: true, reflect: false, scale: 1, ceiling: 1, transformed: false }
+		const inherited: ChainFlags = parent ? chainOf(parent) : { opacity: 1, transformOk: true, compositing: false, clipPath: false, mask: false, hidden: false, planar: true, reflect: false, scale: 1, ceiling: 1, transformed: false }
 		const opacity = Number.parseFloat(style.opacity)
 		const transformOk = inherited.transformOk && !(parent && isSvgElement(parent)) && transformIsUniform(style)
 		// The engine ignores the transform of a box that is not transformable, though it is computed.
@@ -256,7 +264,8 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 			opacity: inherited.opacity * (Number.isFinite(opacity) ? opacity : 1),
 			transformOk,
 			compositing: inherited.compositing || hasCompositing(style),
-			shapeClip: inherited.shapeClip || (style.clipPath !== '' && style.clipPath !== 'none') || hasMask(style),
+			clipPath: inherited.clipPath || (style.clipPath !== '' && style.clipPath !== 'none'),
+			mask: inherited.mask || hasMask(style),
 			hidden: false,
 			planar: inherited.planar && !hasThreeDTransform(style),
 			reflect: inherited.reflect || (style.webkitBoxReflect !== '' && style.webkitBoxReflect !== 'none'),
@@ -300,14 +309,13 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 
 	function radiiOf(element: Element, rect: WidgetRect): RoundedRectRadii | undefined {
 		const style = styleOf(element)
-		const html = element as HTMLElement
-		const width = typeof html.offsetWidth === 'number' ? html.offsetWidth : rect.width
-		const height = typeof html.offsetHeight === 'number' ? html.offsetHeight : rect.height
 		const scale = scaleOf(element)
+		// A percentage resolves against the rendered border box, which is exact under the uniform chain.
+		const resolve = (value: string | undefined, basis: number) => value?.endsWith('%') ? (Number.parseFloat(value) / 100) * basis : px(value) * scale
 		const corner = (value: string) => {
 			const [first, second] = value.trim().split(/\s+/)
-			const rx = length(first, width) * scale
-			const ry = length(second ?? first, height) * scale
+			const rx = resolve(first, rect.width)
+			const ry = resolve(second ?? first, rect.height)
 			return { rx: rx > 0 && ry > 0 ? rx : 0, ry: rx > 0 && ry > 0 ? ry : 0 }
 		}
 		const radii = {
@@ -419,50 +427,208 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		const style = styleOf(element)
 		if (style.visibility !== 'visible') return []
 		const chain = chainOf(element)
-		if (chain.opacity === 0 || !chain.transformOk || chain.compositing || chain.shapeClip) return []
+		if (chain.opacity === 0 || !chain.transformOk || chain.compositing || chain.mask) return []
 
 		const clips = clipChainOf(element, false, true)
 		if (clips === 'unsupported') return []
 		const visible = intersect(boxOfRect(rect), clips.box)
 		if (!visible) return []
 
-		// At most one rounded shape may reach the visible area (see the module comment).
-		const rounded: RoundedShape[] = []
+		// Shapes the Widget stays inside, each approximated from inside: its own rounded corners and
+		// those of a rounded overflow clip whose corners reach the visible area, then every clip path.
+		const contained: PolygonShape[] = []
 		const own = radiiOf(element, rect)
-		if (own && cornersReach({ rect, radii: own }, visible)) rounded.push({ rect, radii: own })
-		for (const shape of clips.rounded) if (cornersReach(shape, visible)) rounded.push(shape)
-		if (rounded.length > 1) return []
+		const roundedClips: RoundedShape[] = []
+		if (own && cornersReach({ rect, radii: own }, visible)) roundedClips.push({ rect, radii: own })
+		for (const shape of clips.rounded) if (cornersReach(shape, visible)) roundedClips.push(shape)
+		for (const shape of roundedClips) {
+			const approximated = roundedRectShape(shape.rect, shape.radii, 'contain', roundedTargetMaxError)
+			if (!approximated) return []
+			contained.push(approximated)
+		}
+		if (chain.clipPath) {
+			const shapes = chainClipShapes(element, 'contain')
+			if (shapes === 'unsupported') return []
+			contained.push(...shapes)
+		}
 
 		const occlusion = occlusionEvidence(element, visible)
 		if (occlusion === 'unsupported') return []
 		const plan = planOcclusion(occlusion)
 		if (plan.status !== 'precise') return []
 
-		if (rounded.length === 1) {
-			if (plan.subtract.length > 0) return []
-			const approximated = approximateRoundedRectContour(rounded[0]!.rect, rounded[0]!.radii, roundedTargetMaxError)
-			if (!approximated) return []
-			const polygon = clipPolygonToBox(contourVertices(approximated.contour.commands), visible)
-			if (!polygon) return []
-			return [Object.freeze({ regionId: 'r0', maxError: approximated.maxError, contour: Object.freeze({ commands: Object.freeze(polygonCommands(polygon)) }) })]
-		}
-
 		// A bounded cut lying wholly inside the visible area would leave only an interior hole, which
 		// is never reported (Rule 01a11687-3037): no precise region (Discussion #241 owner decision 1).
 		for (const cut of plan.subtract) {
 			if (cut.kind !== 'paint-bound') continue
-			const { x, y, width, height } = cut.shape
+			const { x, y, width, height } = cut.shape as WidgetRect
 			if (x > visible.left && y > visible.top && x + width < visible.right && y + height < visible.bottom) return []
 		}
-		const contours = subtractAxisAlignedRectangularOcclusion(rectOfBox(visible), plan.subtract.map(item => item.shape))
-		if (!contours) return []
-		return contours.map((contour, index) => Object.freeze({ regionId: `r${index}`, maxError: 0, contour }))
+
+		const curved = contained.length > 0 || plan.subtract.some(cut => isPolygonCut(cut.shape))
+		if (!curved) {
+			const contours = subtractAxisAlignedRectangularOcclusion(rectOfBox(visible), plan.subtract.map(item => item.shape as WidgetRect))
+			if (!contours) return []
+			return contours.map((contour, index) => Object.freeze({ regionId: `r${index}`, maxError: 0, contour }))
+		}
+
+		// Curved shapes on either side: polygons, with the largest approximation error they carry.
+		let base: PolygonShape | undefined = rectangleShape(visible.left, visible.top, visible.right, visible.bottom)
+		if (contained.length > 0) base = intersectShapes(base, contained)
+		if (!base) return []
+		const result = subtractShapes(base, plan.subtract.map(cut => isPolygonCut(cut.shape) ? cut.shape : rectangleShape(cut.shape.x, cut.shape.y, cut.shape.x + cut.shape.width, cut.shape.y + cut.shape.height)))
+		if (!result) return []
+		const rings = outerRings(result)
+		if (!rings) return []
+		return rings.map((ring, index) => Object.freeze({
+			regionId: `r${index}`,
+			maxError: result.maxError,
+			contour: Object.freeze({ commands: Object.freeze(polygonCommands(ring.map(([x, y]) => ({ x, y })))) }),
+		}))
+	}
+
+	/**
+	 * Every clip path on the element's flat-tree chain as a polygon shape on the given side, or
+	 * `unsupported` when one cannot be derived: a mask, a path, URL or reference form this module does
+	 * not model, a box without a measurable scale, an SVG element.
+	 */
+	function chainClipShapes(element: Element, side: ClipSide): PolygonShape[] | 'unsupported' {
+		const shapes: PolygonShape[] = []
+		for (let node: Element | null = element; node; node = flatTreeParent(node)) {
+			const style = styleOf(node)
+			if (hasMask(style)) return 'unsupported'
+			if (style.clipPath === '' || style.clipPath === 'none') continue
+			const shape = clipPathShape(node, style, side)
+			if (!shape) return 'unsupported'
+			shapes.push(shape)
+		}
+		return shapes
+	}
+
+	/**
+	 * The scale of an element's local CSS px to page px, only when it is proven exact: the uniform
+	 * chain's scale, agreeing with the rendered rect to within the pixel snapping of the integer layout
+	 * size. Undefined otherwise: a shape derived from it could not be called exact.
+	 */
+	function exactScaleOf(element: Element): number | undefined {
+		const { scale } = chainOf(element)
+		if (!(scale > 0) || !Number.isFinite(scale)) return undefined
+		const html = element as HTMLElement
+		if (typeof html.offsetWidth !== 'number' || typeof html.offsetHeight !== 'number' || html.offsetWidth <= 1 || html.offsetHeight <= 1) return undefined
+		const rect = rectOf(element)
+		const agrees = (rendered: number, snapped: number) => Math.abs(rendered - scale * snapped) <= scale + 1e-3
+		return agrees(rect.width, html.offsetWidth) && agrees(rect.height, html.offsetHeight) ? scale : undefined
+	}
+
+	/** The reference box of a `clip-path` in page px, for the geometry boxes of an HTML box. */
+	function referenceBoxOf(element: Element, style: StyleFacts, box: 'border-box' | 'padding-box' | 'content-box', scale: number): Box | undefined {
+		if (isSvgElement(element) || !isBoxed(style)) return undefined
+		const rect = rectOf(element)
+		if (!(rect.width > 0) || !(rect.height > 0)) return undefined
+		const border = { left: px(style.borderLeftWidth) * scale, top: px(style.borderTopWidth) * scale, right: px(style.borderRightWidth) * scale, bottom: px(style.borderBottomWidth) * scale }
+		const padding = { left: px(style.paddingLeft) * scale, top: px(style.paddingTop) * scale, right: px(style.paddingRight) * scale, bottom: px(style.paddingBottom) * scale }
+		const inset = box === 'border-box' ? { left: 0, top: 0, right: 0, bottom: 0 }
+			: box === 'padding-box' ? border
+				: { left: border.left + padding.left, top: border.top + padding.top, right: border.right + padding.right, bottom: border.bottom + padding.bottom }
+		return { left: rect.left + inset.left, top: rect.top + inset.top, right: rect.right - inset.right, bottom: rect.bottom - inset.bottom }
+	}
+
+	/** The shape of one element's own `clip-path` (a basic shape or an SVG `<clipPath>` reference). */
+	function clipPathShape(element: Element, style: StyleFacts, side: ClipSide): PolygonShape | undefined {
+		const parsed = parseClipPath(style.clipPath)
+		if (!parsed || parsed.kind === 'none') return undefined
+		const scale = exactScaleOf(element)
+		if (scale === undefined) return undefined
+		if (parsed.kind === 'shape') {
+			const box = referenceBoxOf(element, style, parsed.box, scale)
+			return box ? basicShapePolygon(parsed.shape, box, scale, side, roundedTargetMaxError) : undefined
+		}
+		const rect = rectOf(element)
+		if (isSvgElement(element) || !isBoxed(style) || !(rect.width > 0) || !(rect.height > 0)) return undefined
+		return svgClipPathShape(element, parsed.id, { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }, scale, side)
+	}
+
+	/**
+	 * The shape of a geometric SVG `<clipPath>` (`rect`, `circle`, `ellipse` and `polygon` children
+	 * without transforms or clips of their own) referenced by an HTML element: the union of its
+	 * children. User space has its origin at the border box's top-left corner and one local CSS px per
+	 * user unit; `objectBoundingBox` units are fractions of the border box.
+	 */
+	function svgClipPathShape(element: Element, id: string, border: Box, scale: number, side: ClipSide): PolygonShape | undefined {
+		const root = element.getRootNode() as Partial<Document>
+		const target = typeof root.getElementById === 'function' ? root.getElementById(id) : null
+		if (!target || target.localName !== 'clipPath' || target.namespaceURI !== 'http://www.w3.org/2000/svg') return undefined
+		if (target.hasAttribute('transform') || target.hasAttribute('clip-path')) return undefined
+		const own = view.getComputedStyle(target)
+		if (own.clipPath !== 'none' && own.clipPath !== '') return undefined
+		const units = target.getAttribute('clipPathUnits') ?? 'userSpaceOnUse'
+		if (units !== 'userSpaceOnUse' && units !== 'objectBoundingBox') return undefined
+		const bounding = units === 'objectBoundingBox'
+		const mapping = bounding
+			? { x: border.left, y: border.top, sx: border.right - border.left, sy: border.bottom - border.top }
+			: { x: border.left, y: border.top, sx: scale, sy: scale }
+		const shapes: PolygonShape[] = []
+		for (const child of Array.from(target.children)) {
+			const style = view.getComputedStyle(child)
+			if (style.display === 'none') continue
+			if (child.hasAttribute('transform') || child.hasAttribute('clip-path') || (style.transform !== 'none' && style.transform !== '') || (style.clipPath !== 'none' && style.clipPath !== '')) return undefined
+			if (style.visibility !== 'visible') return undefined
+			const primitive = svgPrimitiveOf(child, style)
+			if (!primitive) return undefined
+			const shape = svgPrimitiveShape(primitive, mapping, side, roundedTargetMaxError)
+			if (!shape) return undefined
+			shapes.push(shape)
+		}
+		if (shapes.length === 0) return EMPTY_SHAPE
+		return unionShapes(shapes)
+	}
+
+	function svgPrimitiveOf(child: Element, style: CSSStyleDeclaration): SvgPrimitive | undefined {
+		const user = (value: string | undefined): number | undefined => {
+			const text = (value ?? '').trim()
+			if (text === '' || text === 'auto') return 0
+			const match = /^([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(px)?$/i.exec(text)
+			// A percentage or relative length has no exact value here; `px` and a bare number are user units (fractions of the box under `objectBoundingBox`).
+			return match ? Number(match[1]) : undefined
+		}
+		switch (child.localName) {
+			case 'rect': {
+				const [x, y, width, height] = [user(style.x), user(style.y), user(style.width), user(style.height)]
+				const radiusX = style.rx.trim() === 'auto' ? undefined : user(style.rx)
+				const radiusY = style.ry.trim() === 'auto' ? undefined : user(style.ry)
+				if (x === undefined || y === undefined || width === undefined || height === undefined) return undefined
+				if ((style.rx.trim() !== 'auto' && radiusX === undefined) || (style.ry.trim() !== 'auto' && radiusY === undefined)) return undefined
+				if (style.width.trim() === 'auto' || style.height.trim() === 'auto') return undefined
+				return { kind: 'rect', x, y, width, height, rx: radiusX ?? radiusY ?? 0, ry: radiusY ?? radiusX ?? 0 }
+			}
+			case 'circle': {
+				const [cx, cy, r] = [user(style.cx), user(style.cy), user(style.r)]
+				return cx === undefined || cy === undefined || r === undefined ? undefined : { kind: 'circle', cx, cy, r }
+			}
+			case 'ellipse': {
+				const [cx, cy] = [user(style.cx), user(style.cy)]
+				const radiusX = style.rx.trim() === 'auto' ? undefined : user(style.rx)
+				const radiusY = style.ry.trim() === 'auto' ? undefined : user(style.ry)
+				if (cx === undefined || cy === undefined || (radiusX === undefined && radiusY === undefined)) return undefined
+				if ((style.rx.trim() !== 'auto' && radiusX === undefined) || (style.ry.trim() !== 'auto' && radiusY === undefined)) return undefined
+				return { kind: 'ellipse', cx, cy, rx: radiusX ?? radiusY!, ry: radiusY ?? radiusX! }
+			}
+			case 'polygon': {
+				const numbers = (child.getAttribute('points') ?? '').trim().split(/[\s,]+/).filter(Boolean).map(Number)
+				if (numbers.length < 6 || numbers.length % 2 !== 0 || !numbers.every(Number.isFinite)) return undefined
+				const points: Array<readonly [number, number]> = []
+				for (let index = 0; index < numbers.length; index += 2) points.push([numbers[index]!, numbers[index + 1]!])
+				return { kind: 'polygon', points }
+			}
+			default:
+				return undefined
+		}
 	}
 
 	/** Classifies every element whose box overlaps the visible area and is not the Widget's own. */
-	function occlusionEvidence(target: Element, visible: Box): OcclusionEvidence<WidgetRect>[] | 'unsupported' {
+	function occlusionEvidence(target: Element, visible: Box): OcclusionEvidence<CutShape>[] | 'unsupported' {
 		const { elements, boxes } = candidateBoxes()
-		const evidence: OcclusionEvidence<WidgetRect>[] = []
+		const evidence: OcclusionEvidence<CutShape>[] = []
 		for (let index = 0; index < elements.length; index++) {
 			const left = Math.max(visible.left, boxes[index * 4]!)
 			const top = Math.max(visible.top, boxes[index * 4 + 1]!)
@@ -478,7 +644,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		return evidence
 	}
 
-	function classifyCandidate(candidate: Element, target: Element, visible: Box): OcclusionEvidence<WidgetRect> | 'unsupported' | undefined {
+	function classifyCandidate(candidate: Element, target: Element, visible: Box): OcclusionEvidence<CutShape> | 'unsupported' | undefined {
 		const style = styleOf(candidate)
 		if (style.visibility !== 'visible') return undefined
 		const chain = chainOf(candidate)
@@ -488,31 +654,73 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		// An undecided order is taken as above: covering paint that is really below only cuts more.
 		const order = paintOrder(candidate, target)
 		if (order === 'below') return undefined
-		if (paint === 'replaced' || chain.compositing || chain.shapeClip || !chain.transformOk || chain.reflect) return boundedCut(candidate)
-		if (paint === 'translucent' || chain.opacity < 1) return { classification: 'translucent', targetContribution: 'proven-nonzero' }
+		if (paint === 'replaced' || chain.compositing || chain.mask || !chain.transformOk || chain.reflect) return boundedCut(candidate)
+		if (paint === 'translucent' || chain.opacity < 1) return chain.clipPath ? boundedCut(candidate) : { classification: 'translucent', targetContribution: 'proven-nonzero' }
 		if (order === 'unknown') return boundedCut(candidate)
 
 		// Opaque background: the covered area is the background painting area, clipped by the
-		// occluder's own clip chain. Rounded corners that reach the Widget are outside the exact subset.
+		// occluder's own clip chain. Rounded corners, clip paths and SVG clip paths that reach the
+		// Widget make the covered area a polygon that contains the true shape (Rules 01a11687-3109,
+		// 01a11687-3297); one that cannot be derived exactly falls back to the finite paint bound.
 		const bounds = rectOf(candidate)
 		const scale = scaleOf(candidate)
 		const inset = backgroundInset(style, scale)
 		const covered = { left: bounds.left + inset.left, top: bounds.top + inset.top, right: bounds.right - inset.right, bottom: bounds.bottom - inset.bottom }
-		const radii = radiiOf(candidate, { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height })
-		if (radii && cornersReach({ rect: { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height }, radii }, visible)) return boundedCut(candidate)
 		const clips = clipChainOf(candidate)
 		if (clips === 'unsupported') return boundedCut(candidate)
 		const painted = intersect(covered, clips.box)
 		if (!painted) return undefined
-		if (clips.rounded.some(shape => cornersReach(shape, intersect(painted, visible) ?? painted))) return boundedCut(candidate)
-		return { classification: 'opaque', targetContribution: 'proven-zero', shape: { kind: 'rectangle', shape: rectOfBox(painted) } }
+		const reach = intersect(painted, visible) ?? painted
+		const covers: PolygonShape[] = []
+		let kind: ProvenOccluderShapeKind = 'rectangle'
+		const outer = radiiOf(candidate, { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height })
+		if (outer) {
+			const radii = insetRadii(outer, inset)
+			const shape: RoundedShape = { rect: rectOfBox(covered), radii }
+			if (cornersReach(shape, reach)) {
+				const approximated = exactScaleOf(candidate) === undefined ? undefined : roundedRectShape(shape.rect, shape.radii, 'cover', roundedTargetMaxError)
+				if (!approximated) return boundedCut(candidate)
+				covers.push(approximated)
+				kind = 'rounded-box'
+			}
+		}
+		for (const shape of clips.rounded) {
+			if (!cornersReach(shape, reach)) continue
+			const approximated = roundedRectShape(shape.rect, shape.radii, 'cover', roundedTargetMaxError)
+			if (!approximated) return boundedCut(candidate)
+			covers.push(approximated)
+			kind = 'rounded-box'
+		}
+		if (chain.clipPath) {
+			const shapes = chainClipShapes(candidate, 'cover')
+			if (shapes === 'unsupported') return boundedCut(candidate)
+			covers.push(...shapes)
+			kind = clipShapeKind(candidate)
+		}
+		if (covers.length === 0) return { classification: 'opaque', targetContribution: 'proven-zero', shape: { kind: 'rectangle', shape: rectOfBox(painted) } }
+		const shape = intersectShapes(rectangleShape(painted.left, painted.top, painted.right, painted.bottom), covers)
+		if (!shape) return boundedCut(candidate)
+		// Nothing of the occluder lies where it clips: it covers nothing.
+		if (shape.polygons.length === 0) return undefined
+		return { classification: 'opaque', targetContribution: 'proven-zero', shape: { kind, shape } }
+	}
+
+	/** The kind of the nearest clip path on the element's flat-tree chain. */
+	function clipShapeKind(element: Element): ProvenOccluderShapeKind {
+		for (let node: Element | null = element; node; node = flatTreeParent(node)) {
+			const parsed = parseClipPath(styleOf(node).clipPath)
+			if (!parsed || parsed.kind === 'none') continue
+			if (parsed.kind === 'url') return 'svg-clip-path'
+			return parsed.shape.kind === 'inset' ? 'clip-inset' : parsed.shape.kind === 'circle' ? 'clip-circle' : parsed.shape.kind === 'ellipse' ? 'clip-ellipse' : 'clip-polygon'
+		}
+		return 'rectangle'
 	}
 
 	/**
 	 * Evidence for an occluder whose exact covering shape or paint order is unproven: its finite
 	 * paint bound (Discussion #241 R6), or `unsupported` when no finite bound is provable.
 	 */
-	function boundedCut(candidate: Element): OcclusionEvidence<WidgetRect> | 'unsupported' | undefined {
+	function boundedCut(candidate: Element): OcclusionEvidence<CutShape> | 'unsupported' | undefined {
 		const bound = paintBound(candidate)
 		if (bound === 'unbounded') return 'unsupported'
 		if (bound === 'empty') return undefined
@@ -1200,12 +1408,6 @@ function px(value: string | undefined): number {
 	return Number.isFinite(parsed) ? parsed : 0
 }
 
-function length(value: string | undefined, basis: number): number {
-	if (!value) return 0
-	if (value.endsWith('%')) return (Number.parseFloat(value) / 100) * basis
-	return px(value)
-}
-
 function boxOfRect(rect: WidgetRect): Box {
 	return { left: rect.x, top: rect.y, right: rect.x + rect.width, bottom: rect.y + rect.height }
 }
@@ -1239,52 +1441,25 @@ function cornersReach(shape: RoundedShape, area: Box): boolean {
 	return corners.some(corner => corner.right > corner.left && corner.bottom > corner.top && intersect(corner, area) !== undefined)
 }
 
-/** Vertices of a contour made of lines and line-equivalent cubic chords (rounded-contour output). */
-function contourVertices(commands: readonly ContourCommand[]): Point[] {
-	const points: Point[] = []
-	for (const command of commands) if (command.op !== 'close') points.push({ x: command.x, y: command.y })
-	return points
+/** The radii of a box inset on each side: each corner radius shrinks by the inset beside it (CSS inner radius). */
+function insetRadii(radii: RoundedRectRadii, inset: Box): RoundedRectRadii {
+	const shrink = (radius: { rx: number; ry: number }, horizontal: number, vertical: number) => {
+		const rx = Math.max(0, radius.rx - horizontal)
+		const ry = Math.max(0, radius.ry - vertical)
+		return rx > 0 && ry > 0 ? { rx, ry } : { rx: 0, ry: 0 }
+	}
+	return {
+		topLeft: shrink(radii.topLeft, inset.left, inset.top),
+		topRight: shrink(radii.topRight, inset.right, inset.top),
+		bottomRight: shrink(radii.bottomRight, inset.right, inset.bottom),
+		bottomLeft: shrink(radii.bottomLeft, inset.left, inset.bottom),
+	}
 }
 
-/** Sutherland–Hodgman clipping of a convex polygon by an exact axis-aligned box. */
-function clipPolygonToBox(points: readonly Point[], box: Box): Point[] | undefined {
-	let output = [...points]
-	const edges: ReadonlyArray<Readonly<{ inside: (p: Point) => boolean; cut: (a: Point, b: Point) => Point }>> = [
-		{ inside: p => p.x >= box.left, cut: (a, b) => ({ x: box.left, y: a.y + (b.y - a.y) * (box.left - a.x) / (b.x - a.x) }) },
-		{ inside: p => p.x <= box.right, cut: (a, b) => ({ x: box.right, y: a.y + (b.y - a.y) * (box.right - a.x) / (b.x - a.x) }) },
-		{ inside: p => p.y >= box.top, cut: (a, b) => ({ x: a.x + (b.x - a.x) * (box.top - a.y) / (b.y - a.y), y: box.top }) },
-		{ inside: p => p.y <= box.bottom, cut: (a, b) => ({ x: a.x + (b.x - a.x) * (box.bottom - a.y) / (b.y - a.y), y: box.bottom }) },
-	]
-	for (const edge of edges) {
-		const input = output
-		output = []
-		for (let index = 0; index < input.length; index++) {
-			const current = input[index]!
-			const previous = input[(index + input.length - 1) % input.length]!
-			const currentInside = edge.inside(current)
-			const previousInside = edge.inside(previous)
-			if (currentInside) {
-				if (!previousInside) output.push(edge.cut(previous, current))
-				output.push(current)
-			}
-			else if (previousInside) output.push(edge.cut(previous, current))
-		}
-		if (output.length === 0) return undefined
-	}
-	const deduplicated: Point[] = []
-	for (const point of output) {
-		const last = deduplicated[deduplicated.length - 1]
-		if (!last || last.x !== point.x || last.y !== point.y) deduplicated.push(point)
-	}
-	while (deduplicated.length > 1 && deduplicated[0]!.x === deduplicated[deduplicated.length - 1]!.x && deduplicated[0]!.y === deduplicated[deduplicated.length - 1]!.y) deduplicated.pop()
-	if (deduplicated.length < 3) return undefined
-	let area = 0
-	for (let index = 0; index < deduplicated.length; index++) {
-		const a = deduplicated[index]!
-		const b = deduplicated[(index + 1) % deduplicated.length]!
-		area += a.x * b.y - b.x * a.y
-	}
-	return area !== 0 ? deduplicated : undefined
+/** Whether the element generates a box a reference box can be taken from (not inline, `contents` or `none`). */
+function isBoxed(style: StyleFacts): boolean {
+	const display = style.display.trim()
+	return display !== 'contents' && display !== 'none' && !isInlineDisplay(style)
 }
 
 function polygonCommands(points: readonly Point[]): ContourCommand[] {
