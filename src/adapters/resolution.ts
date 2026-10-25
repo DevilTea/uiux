@@ -32,6 +32,7 @@ import {
 	type ResolvedAdapterRegistries,
 } from '../domain/adapters/schema'
 import type { Diagnostic } from '../domain/validation'
+import { validateAdapterSources } from '../domain/adapters/sources'
 import { isPortableAdapterModuleSpecifier, type WorkspaceAdapterSelection } from '../domain/workspace/schema'
 
 export type ResolvedAdapterModule = Readonly<{
@@ -448,6 +449,13 @@ export async function resolveWorkspaceAdapterSet(input: ResolveWorkspaceAdapterS
 		const localRegistryValidation = validateResolvedAdapterSet([registryRecord])
 		if (!localRegistryValidation.ok) {
 			diagnostics.push(...prefixDiagnostics(localRegistryValidation.diagnostics, `${basePath}/registries`))
+			continue
+		}
+
+		// The shape and ownership of `sources` (Rule 01a11a5a-4c2c-7330-8fac-11a6c970713a); only Handoff reads it.
+		const sourcesValidation = validateAdapterSources(manifest, registryOwnership.widgetTypes)
+		if (!sourcesValidation.ok) {
+			diagnostics.push(...prefixDiagnostics(sourcesValidation.diagnostics, `${basePath}/manifest`))
 			continue
 		}
 

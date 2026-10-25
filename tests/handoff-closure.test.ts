@@ -1070,6 +1070,124 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 		expect(Buffer.from(stored!)).toEqual(declarations)
 	})
 
+	// Scenario 01a11a5b-1c07-79b5-89fc-dc04afdde464 and Rules 01a115cd-cbcc-…, 01a11a5a-58c6-… and 01a11add-f389-… (issue #93).
+	describe('Adapter-mapped implementation sources', () => {
+		const counterWithSources = (sources: string) => makeCounterAdapterSource().replace('providers: [],\n};', `providers: [],\n  sources: ${sources},\n};`)
+
+		async function exportCounterView(root: string, persistence: FileNativePersistence, adapterSource: string) {
+			await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+			await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), adapterSource)
+			const viewRev = await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'Counter View'))
+			await putFormalEvidence(persistence, VIEW_1_ID, viewRev, true)
+			const exported = await currentSchemaHandoff(persistence).exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+			if (exported.status !== 'exported') throw new Error('Expected an exported bundle.')
+			return exported
+		}
+
+		const sha = (bytes: string | Buffer) => 'sha256:' + createHash('sha256').update(bytes).digest('hex')
+
+		it('snapshots mapped files with their package, revision and path, and marks the others provenance-only or unavailable without blocking', async () => {
+			const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+			await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+			await mkdir(join(root, 'kit', 'node_modules', '@acme', 'ds', 'src'), { recursive: true })
+			await writeFile(join(root, 'kit', 'node_modules', '@acme', 'ds', 'package.json'), JSON.stringify({ name: '@acme/ds', version: '2.1.0' }))
+			await writeFile(join(root, 'kit', 'node_modules', '@acme', 'ds', 'src', 'Counter.vue'), '<template>ds counter</template>')
+			await writeFile(join(root, 'kit', 'adapters', 'counter-renderer.txt'), 'renderer integration')
+			await writeFile(join(root, 'kit', 'adapters', 'private.txt'), 'private')
+			const exported = await exportCounterView(root, persistence, counterWithSources(JSON.stringify({
+				Counter: {
+					semantic: { path: 'adapters/counter.mjs' },
+					renderer: { path: 'adapters/counter-renderer.txt' },
+					designSystem: { package: '@acme/ds', path: 'src/Counter.vue' },
+					supporting: [
+						{ path: 'adapters/missing.md' },
+						{ url: 'https://example.com/docs/counter' },
+						{ path: 'adapters/private.txt', embed: false },
+						{ package: '@acme/absent', path: 'x.ts' },
+					],
+				},
+			})))
+			const reference = exported.manifest!.implementationReferences.find(r => r.widgetType === 'Counter')!
+			const adapterBytes = await readFile(join(root, 'kit', 'adapters', 'counter.mjs'))
+			expect(reference.semanticSource).toEqual({
+				availability: 'materialized',
+				provenance: { package: '@workspace', path: 'adapters/counter.mjs', revision: sha(adapterBytes), selection: 'adapter-mapping' },
+				contentDigest: sha(adapterBytes),
+			})
+			expect(reference.rendererSource).toEqual({
+				availability: 'materialized',
+				provenance: { package: '@workspace', path: 'adapters/counter-renderer.txt', revision: sha('renderer integration'), selection: 'adapter-mapping' },
+				contentDigest: sha('renderer integration'),
+			})
+			expect(reference.designSystemSource).toEqual({
+				availability: 'materialized',
+				provenance: { package: '@acme/ds', path: 'src/Counter.vue', revision: '2.1.0', selection: 'adapter-mapping' },
+				contentDigest: sha('<template>ds counter</template>'),
+			})
+			expect(reference.supportingSources).toEqual([
+				{ availability: 'unavailable', provenance: { package: '@workspace', path: 'adapters/missing.md', selection: 'adapter-mapping' } },
+				{ availability: 'provenance-only', provenance: { url: 'https://example.com/docs/counter', selection: 'adapter-mapping' } },
+				{ availability: 'provenance-only', provenance: { package: '@workspace', path: 'adapters/private.txt', selection: 'adapter-mapping' } },
+				{ availability: 'unavailable', provenance: { package: '@acme/absent', path: 'x.ts', selection: 'adapter-mapping' } },
+			])
+			const stored = await persistence.artifacts.read(reference.designSystemSource!.contentDigest!)
+			expect(new TextDecoder().decode(stored!)).toBe('<template>ds counter</template>')
+			expect(exported.manifest!.artifactRefs).toContainEqual({ kind: 'widget-source', artifact: sha('<template>ds counter</template>'), context: { widgetType: 'Counter' } })
+			// A provenance-only or unavailable mapped source never blocks the readiness claim.
+			expect(exported.manifest!.readiness.blockingDiagnostics.filter(d => d.blocking)).toEqual([])
+			expect(exported.manifest!.readiness.implementationReady).toBe(true)
+		})
+
+		it('marks a mapped path that leaves its root through a link unavailable', async () => {
+			const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+			const outside = await mkdtemp(join(tmpdir(), 'uiux-handoff-outside-'))
+			temporaryRoots.push(outside)
+			await writeFile(join(outside, 'secret.txt'), 'outside the root')
+			await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+			await symlink(outside, join(root, 'kit', 'adapters', 'linked'))
+			const exported = await exportCounterView(root, persistence, counterWithSources(JSON.stringify({
+				Counter: { semantic: { path: 'adapters/linked/secret.txt' }, renderer: { path: 'adapters/counter.mjs' } },
+			})))
+			const reference = exported.manifest!.implementationReferences.find(r => r.widgetType === 'Counter')!
+			expect(reference.semanticSource.availability).toBe('unavailable')
+			expect(reference.semanticSource.contentDigest).toBeUndefined()
+			expect(exported.manifest!.artifactRefs.some(ref => ref.artifact === sha('outside the root'))).toBe(false)
+		})
+
+		it('records the entry-module fallback for an Adapter without source mappings', async () => {
+			const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+			const exported = await exportCounterView(root, persistence, makeCounterAdapterSource())
+			const reference = exported.manifest!.implementationReferences.find(r => r.widgetType === 'Counter')!
+			const digest = sha(await readFile(join(root, 'kit', 'adapters', 'counter.mjs')))
+			const expected = {
+				availability: 'materialized',
+				provenance: { package: '@workspace', path: './adapters/counter.mjs', revision: digest, selection: 'entry-module-fallback' },
+				contentDigest: digest,
+			}
+			expect(reference.semanticSource).toEqual(expected)
+			expect(reference.rendererSource).toEqual(expected)
+			expect(reference.designSystemSource).toBeUndefined()
+			// UIUX's own RootShell reference carries no selection.
+			expect(exported.manifest!.implementationReferences.find(r => r.widgetType === 'RootShell')!.semanticSource.provenance).not.toHaveProperty('selection')
+		})
+
+		it('exports an identical bundle identity for unchanged mapped sources and a new one when a mapped file changes', async () => {
+			const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+			await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+			await writeFile(join(root, 'kit', 'adapters', 'notes.md'), 'v1')
+			const mapped = counterWithSources(JSON.stringify({ Counter: { semantic: { path: 'adapters/counter.mjs' }, renderer: { path: 'adapters/notes.md' }, supporting: [{ url: 'https://example.com/a' }] } }))
+			const first = await exportCounterView(root, persistence, mapped)
+			const again = await currentSchemaHandoff(persistence).exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+			if (again.status !== 'exported') throw new Error('Expected an exported bundle.')
+			expect(again.manifest!.implementationReferences).toEqual(first.manifest!.implementationReferences)
+			expect(again.manifest!.bundleIdentity).toBe(first.manifest!.bundleIdentity)
+			await writeFile(join(root, 'kit', 'adapters', 'notes.md'), 'v2')
+			const changed = await currentSchemaHandoff(persistence).exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+			if (changed.status !== 'exported') throw new Error('Expected an exported bundle.')
+			expect(changed.manifest!.bundleIdentity).not.toBe(first.manifest!.bundleIdentity)
+		})
+	})
+
 	// Scenario 01a14e30-3071-774a-bdc4-61ff3c92e303 (Rules 01a115cd-c5a5-… and 01a115cd-c749-…).
 	it('keeps evidence fresh in readiness and export after a Spec-only or metadata edit of its View', async () => {
 		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])

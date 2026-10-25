@@ -287,6 +287,12 @@ describe('Formal capture service & fresh-runtime proof', () => {
 			expect(evidenceRecord.schemaVersion).toBe(1)
 			expect(evidenceRecord.kind).toBe('formal_capture')
 			expect(evidenceRecord.artifactRefs).toContain(item1.screenshotDigest)
+			// Clause 01a115cd-cecb-747b-b28d-aa083893bff2: the record names the engine that produced the capture.
+			expect(evidenceRecord.provenance.versions).toEqual({
+				uiux: expect.any(String),
+				playwright: (await import('playwright/package.json', { with: { type: 'json' } })).default.version,
+				chromium: browser.version(),
+			})
 			expect(evidenceRecord.provenance.resources).toEqual(
 				expect.arrayContaining([
 					expect.objectContaining({ identity: { type: 'view', id: VIEW_COUNTER_ID } }),

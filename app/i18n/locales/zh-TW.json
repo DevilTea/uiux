@@ -2418,6 +2418,7 @@
       "invalid_provider": "Adapter 的提供者不是 Vue 外掛。",
       "invalid_registry_identity": "Adapter 登錄的鍵無效。",
       "invalid_theme_support": "Adapter 的 themeSupport 必須是物件，且要提供判斷主題支援與否的函式。",
+      "invalid_sources": "Adapter 的實作來源對應必須將其擁有的 Widget 類型對應到檔案或網址來源。",
       "manifest_load_failed": "無法載入 Adapter。",
       "materialization_unavailable": "預覽目前還無法載入這個外部 Adapter。",
       "provenance_unverifiable": "無法驗證 Adapter 的來源。",
