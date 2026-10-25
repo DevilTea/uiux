@@ -1,5 +1,6 @@
 import { sha256Identity } from '../../domain/artifacts/schema'
 import type { AuthoredAsset } from '../../domain/assets/schema'
+import { flowReferenceDiagnostics } from '../../domain/flows/references'
 import type { FlowResource } from '../../domain/flows/schema'
 import type { I18nResource } from '../../domain/i18n/schema'
 import { reviewAnchorState, type ReviewAnchorState, type ReviewAnchorTarget } from '../../domain/reviews/anchor-state'
@@ -314,7 +315,7 @@ export function createWorkspaceApplicationSession(
 		catch { return undefined }
 	}
 
-	async function readPointResource(kind: PointResourceKind, key: string, roster?: () => Promise<ReadonlySet<string> | undefined>, assetCatalog?: () => Promise<AssetCatalog>): Promise<PointResourceRead | undefined> {
+	async function readPointResource(kind: PointResourceKind, key: string, roster?: () => Promise<ReadonlySet<string> | undefined>, assetCatalog?: () => Promise<AssetCatalog>, viewTarget?: (viewId: string) => Promise<ReviewAnchorTarget>): Promise<PointResourceRead | undefined> {
 		if (!isValidPointResourceAddress({ kind, key })) return undefined
 		switch (kind) {
 			case 'workspace': {
@@ -331,7 +332,10 @@ export function createWorkspaceApplicationSession(
 			}
 			case 'flow': {
 				const read = await persistence.flows.readInspected(key)
-				return read && { kind, key, resource: read.resource, revision: read.revision, diagnostics: read.diagnostics }
+				if (!read) return undefined
+				// Rule 01a11544-629c-7dbf-8e41-36c8e37537b3: invalid View, Variant and Widget references, kept as authored.
+				const referenceDiagnostics = await flowReferenceDiagnostics(read.resource, viewTarget ?? readAnchorTarget)
+				return { kind, key, resource: read.resource, revision: read.revision, diagnostics: referenceDiagnostics.length > 0 ? [...read.diagnostics, ...referenceDiagnostics] : read.diagnostics }
 			}
 			case 'locale': {
 				const read = await persistence.locales.readInspected(key)
@@ -400,7 +404,7 @@ export function createWorkspaceApplicationSession(
 				let thread: ReviewThread | undefined
 				let read: Exclude<PointResourceRead, { kind: 'workspace' }> | undefined
 				try {
-					const pointRead = await readPointResource(kind, key, requestRoster, requestAssetCatalog)
+					const pointRead = await readPointResource(kind, key, requestRoster, requestAssetCatalog, anchorTarget)
 					if (!pointRead || pointRead.kind === 'workspace') continue
 					item = summarize(pointRead)
 					read = pointRead
