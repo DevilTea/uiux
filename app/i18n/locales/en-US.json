@@ -133,8 +133,8 @@
       }
     },
     "lastRunUnfinished": "Ran at {time}. Some checks did not finish; no findings listed. | Ran at {time}. Some checks did not finish; {n} finding listed. | Ran at {time}. Some checks did not finish; {n} findings listed.",
-    "unfinishedTitle": "No findings listed, but some checks did not finish",
-    "unfinishedDescription": "A check that failed or stopped early has not shown the Workspace is clean. See the sources above.",
+    "unfinishedTitle": "No findings from the sources that completed",
+    "unfinishedDescription": "Not checked or not finished: {sources}. This is not a clean result.",
     "allSources": "All sources",
     "sourceFilter": "Source",
     "allSeverities": "All severities",

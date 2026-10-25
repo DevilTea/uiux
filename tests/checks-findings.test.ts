@@ -8,6 +8,7 @@ import {
 	filterFindings,
 	groupFindings,
 	sectionFindings,
+	unsettledSources,
 	translationReminders,
 	type Finding,
 	type FindingResource,
@@ -148,6 +149,14 @@ describe('check states (Rule 01a115cd-bb96-7131-99d9-a3882829590c)', () => {
 	})
 })
 
+describe('unsettled sources (Rule 01a115cd-bb96-7131-99d9-a3882829590c)', () => {
+	it('lists every source that is not completed, so none reads as clean while it is unchecked or still running', () => {
+		expect(unsettledSources({ validation: 'completed', translation: 'completed' })).toEqual([])
+		expect(unsettledSources({ validation: 'completed', 'product-kit': 'checking', catalog: 'failed', runtime: 'not_checked', translation: 'incomplete' }))
+			.toEqual(['product-kit', 'catalog', 'runtime', 'translation'])
+	})
+})
+
 describe('translation reminders (Rule 01a115cd-bdb2-7de2-abb9-54f592539471)', () => {
 	const resources = new Map<string, Record<string, string>>([
 		['en-US', { greeting: 'Hello', blank: '', 'a/b': ' \t', fine: 'x' }],
@@ -229,5 +238,18 @@ describe('Catalog problems of used entries (Rules 01a115cd-be51-740b-8472-c08dc7
 		const diagnostics = [{ code: 'adapter.x', path: path('Button'), message: 'a' }]
 		expect(catalogProblems(diagnostics, usage).findings).toHaveLength(3)
 		expect(catalogProblems(diagnostics, [{ resource: checkout, widgets: [{ id: 'root', type: 'RootShell' }] }]).findings).toEqual([])
+	})
+
+	it("never attributes a problem of one Adapter's entry to Widgets of the same type that another Adapter owns", () => {
+		const diagnostics = [
+			{ code: 'adapter.x', path: path('Button'), message: 'adapter 0' },
+			{ code: 'adapter.x', path: '/adapters/1/manifest/catalog/widgets/Button', message: 'adapter 1' },
+		]
+		// Without the owner, the type is ambiguous: neither problem is attributed to a Widget.
+		expect(catalogProblems(diagnostics, usage)).toMatchObject({ findings: [], elsewhere: 2 })
+		// With the owner, only the owner's problem reaches the Widgets.
+		const owned = catalogProblems(diagnostics, usage, 'completed', new Map([['Button', 1]]))
+		expect(owned.elsewhere).toBe(1)
+		expect(new Set(owned.findings.map(item => item.path))).toEqual(new Set(['/adapters/1/manifest/catalog/widgets/Button']))
 	})
 })

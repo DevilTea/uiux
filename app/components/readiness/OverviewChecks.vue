@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef } from 'vue'
+import { computed, ref, shallowRef, watch, type Ref } from 'vue'
 import { navigateTo, useI18n } from '#imports'
 import type { TreeItem } from '@nuxt/ui'
 import { resolveDiagnosticWidgetTarget } from '../../../src/preview/checks-navigation'
@@ -22,6 +22,7 @@ import {
 	groupFindings,
 	sectionFindings,
 	translationReminders,
+	unsettledSources,
 	type CheckState,
 	type Finding,
 	type FindingFilters,
@@ -92,6 +93,26 @@ async function read(kind: string, key: string): Promise<ResourceRead | undefined
 	return uiux.readResource<ResourceRead>(kind, key)
 }
 
+const MAX_LIST_PAGES = 50
+
+/** Every summary of one kind, following the list cursor; `complete` is false when the pages ran out first. */
+async function listAll<T>(kind: string): Promise<Readonly<{ items: readonly T[]; complete: boolean }> | undefined> {
+	try {
+		const items: T[] = []
+		let cursor: string | undefined
+		for (let page = 0; page < MAX_LIST_PAGES; page++) {
+			const result = await uiux.listResources<T>([kind], { limit: 100, ...(cursor ? { cursor } : {}) })
+			items.push(...result.items)
+			cursor = result.nextCursor
+			if (!cursor) return { items, complete: true }
+		}
+		return { items, complete: false }
+	}
+	catch {
+		return undefined
+	}
+}
+
 /** Reads each resource once, in small batches, and keeps every finding it reports. */
 async function runChecks(): Promise<void> {
 	if (running.value) return
@@ -115,11 +136,13 @@ async function runChecks(): Promise<void> {
 		}
 	}
 	type Job = Readonly<{ kind: FindingResource['kind']; key: string; name: string }>
-	let assetsListed = true
-	const [localePage, assets] = await Promise.all([
-		uiux.listResources<{ key: string }>(['locale'], { limit: 100 }).catch(() => undefined),
-		uiux.listResources<{ key: string; summary?: { name?: string } }>(['asset'], { limit: 100 }).then(page => page.items).catch(() => { assetsListed = false; return [] }),
+	const [localePage, assetPage] = await Promise.all([
+		listAll<{ key: string }>('locale'),
+		listAll<{ key: string; summary?: { name?: string } }>('asset'),
 	])
+	const assets = assetPage?.items ?? []
+	const assetsListed = !!assetPage?.complete
+	const localesListed = !!localePage?.complete
 	const locales = localePage?.items ?? []
 	const jobs: Job[] = [
 		{ kind: 'workspace', key: 'workspace', name: t('checks.resource.workspace') },
@@ -137,7 +160,7 @@ async function runChecks(): Promise<void> {
 				// Rule 01a115cd-b2ad-7989-8faa-07d48bc8ee30: a default Locale without its Locale file is a
 				// Workspace error, listed on that Locale. Only a Locale list that was read can show it missing.
 				const defaultLocale = job.kind === 'workspace' ? (result.resource?.i18n as { defaultLocale?: unknown } | undefined)?.defaultLocale : undefined
-				if (localePage && typeof defaultLocale === 'string' && !locales.some(locale => locale.key === defaultLocale))
+				if (localesListed && typeof defaultLocale === 'string' && !locales.some(locale => locale.key === defaultLocale))
 					push({ kind: 'locale', key: defaultLocale, name: defaultLocale }, [missingDefaultLocaleDiagnostic(defaultLocale)])
 				if (job.kind === 'locale') {
 					// A Locale file with schema diagnostics is not a translation source: its reminders are not read.
@@ -164,11 +187,11 @@ async function runChecks(): Promise<void> {
 			}
 		}))
 	}
-	const readState: CheckState = failed.length === 0 && localePage && assetsListed ? 'completed' : failed.length === jobs.length ? 'failed' : 'incomplete'
+	const readState: CheckState = failed.length === 0 && localesListed && assetsListed ? 'completed' : failed.length === jobs.length ? 'failed' : 'incomplete'
 	const validationFindings = collected.map(finding => ({ ...finding, checkState: readState }))
 
 	// Translation reminders: the empty and whitespace-only values of the Locale files that were read.
-	const translationState: CheckState = !localePage ? 'failed' : localeStates.length ? combineStates(localeStates) : 'completed'
+	const translationState: CheckState = !localePage ? 'failed' : combineStates([...localeStates, localePage.complete ? 'completed' : 'incomplete'])
 	const reminders = translationReminders(localeResources, workspace.value?.resource?.i18n?.defaultLocale ?? '', translationState)
 
 	// Catalog problems of entries a View uses: the Adapter set's own report, attributed through the Views read above.
@@ -328,8 +351,14 @@ const sourceRows = computed<readonly SourceRow[]>(() => {
 	]
 })
 
-/** A run that left a source failed or incomplete never reads as a clean one. */
-const unfinished = computed(() => lastRun.value && sourceRows.value.some(row => row.state === 'failed' || row.state === 'incomplete'))
+/**
+ * The sources that have not completed: failed, incomplete, still checking or not checked. A run
+ * never reads as clean while one is listed (Rule 01a115cd-bb96-7131-99d9-a3882829590c).
+ */
+const unsettled = computed(() => unsettledSources(Object.fromEntries(sourceRows.value.map(row => [row.id, row.state]))))
+/** The page's own sources that did not settle; the Preview sources stay not checked until they are gathered. */
+const unfinished = computed(() => !!lastRun.value && unsettled.value.some(id => id !== 'preview-translation' && id !== 'runtime'))
+const unsettledNames = computed(() => unsettled.value.map(id => t(`checks.source.${id}`)).join(t('common.listSeparator')))
 
 // ---- Filters, grouping and order -------------------------------------------------------------
 
@@ -355,6 +384,18 @@ const viewOptions = computed(() => {
 })
 const variantOptions = computed(() => options(t('checks.allVariants'), [...new Set(findings.value.flatMap(finding => finding.variantName ? [finding.variantName] : []))].sort()))
 const groupByOptions = computed(() => GROUP_BYS.map(value => ({ label: t(`checks.groupBy.${value}`), value })))
+
+/** A filter whose value no longer appears in its options (after another run) goes back to all. */
+watch([sourceOptions, categoryOptions, severityOptions, viewOptions, variantOptions], () => {
+	const prune = (current: Ref<string>, list: readonly { value: string }[]) => {
+		if (current.value !== ALL && !list.some(item => item.value === current.value)) current.value = ALL
+	}
+	prune(filterSource, sourceOptions.value)
+	prune(filterCategory, categoryOptions.value)
+	prune(filterSeverity, severityOptions.value)
+	prune(filterView, viewOptions.value)
+	prune(filterVariant, variantOptions.value)
+})
 
 function clearFilters(): void {
 	filterSource.value = ALL
@@ -743,11 +784,11 @@ const items = computed<CheckTreeItem[]>(() => sectionFindings(filtered.value, gr
     />
 
     <UEmpty
-      v-else-if="!findings.length && unfinished"
+      v-else-if="!findings.length && unsettled.length"
       icon="i-lucide-circle-dashed"
       variant="naked"
       :title="t('checks.unfinishedTitle')"
-      :description="t('checks.unfinishedDescription')"
+      :description="t('checks.unfinishedDescription', { sources: unsettledNames })"
       data-checks-unfinished
     />
 

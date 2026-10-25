@@ -133,8 +133,8 @@
       }
     },
     "lastRunUnfinished": "於 {time} 執行，部分檢查未完成，沒有列出問題。 | 於 {time} 執行，部分檢查未完成，列出 {n} 個問題。 | 於 {time} 執行，部分檢查未完成，列出 {n} 個問題。",
-    "unfinishedTitle": "沒有列出問題，但部分檢查未完成",
-    "unfinishedDescription": "失敗或提前中止的檢查，不能證明這個 Workspace 沒有問題。請看上方各來源的狀態。",
+    "unfinishedTitle": "已完成的來源沒有問題",
+    "unfinishedDescription": "尚未檢查或未完成：{sources}。這不代表沒有問題。",
     "allSources": "所有來源",
     "sourceFilter": "來源",
     "allSeverities": "所有嚴重程度",

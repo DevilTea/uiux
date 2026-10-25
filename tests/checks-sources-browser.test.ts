@@ -76,6 +76,33 @@ async function choose(page: Page, filter: string, option: string): Promise<void>
 	await page.getByRole('option', { name: option, exact: true }).click()
 }
 
+describe('Checks never reads as clean while a source is unsettled (issue #95)', () => {
+	it('names the sources that are not checked when no finding is listed', async () => {
+		const clean = await startWorkbenchServer()
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' })
+		try {
+			await context.addInitScript(() => { localStorage.setItem('uiux.workbench.locale', 'en-US') })
+			await context.addCookies([{ ...clean.cookie, url: clean.origin, httpOnly: true, sameSite: 'Strict' }])
+			const page = await context.newPage()
+			await page.route(url => url.pathname === '/api/preview/adapters', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'valid', diagnostics: [], summaries: [] }) }))
+			await page.goto(`${clean.origin}/?tab=checks`, { waitUntil: 'networkidle' })
+			await page.locator('[data-run-checks]').click()
+			const empty = page.locator('[data-checks-unfinished]')
+			await empty.waitFor({ timeout: 30_000 })
+			const text = await empty.textContent()
+			expect(text).toContain('Not checked or not finished')
+			expect(text).toContain('Preview translation warnings')
+			expect(text).toContain('Runtime errors')
+			expect(text).not.toContain('No findings\n')
+			expect(await page.getByText('Every resource in this Workspace validates.').count()).toBe(0)
+		}
+		finally {
+			await context.close()
+			await clean.close()
+		}
+	}, 120_000)
+})
+
 describe('Checks sources and check states (issue #95)', () => {
 	it('shows every source as not checked before Run Checks, never as zero findings', async () => {
 		const { context, page } = await openChecks({})

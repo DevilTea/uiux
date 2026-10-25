@@ -208,7 +208,9 @@ export function sectionFindings(findings: readonly Finding[], by: GroupBy): Find
 	const sections = new Map<string, Finding[]>()
 	for (const finding of findings) {
 		const key = keyOf(finding)
-		sections.set(key, [...(sections.get(key) ?? []), finding])
+		const list = sections.get(key)
+		if (list) list.push(finding)
+		else sections.set(key, [finding])
 	}
 	const rank = (value: string): number => by === 'source' ? FINDING_SOURCES.indexOf(value as FindingSource) : by === 'severity' ? SEVERITY_RANK[value as FindingSeverity] : 0
 	return [...sections.entries()]
@@ -237,6 +239,11 @@ export function combineStates(states: readonly CheckState[]): CheckState {
 	if (states.every(state => state === 'completed')) return 'completed'
 	if (states.every(state => state === 'failed')) return 'failed'
 	return 'incomplete'
+}
+
+/** The sources whose state is not completed (failed, incomplete, checking or not checked), in the order given. */
+export function unsettledSources(states: Readonly<Record<string, CheckState>>): string[] {
+	return Object.entries(states).filter(([, state]) => state !== 'completed').map(([id]) => id)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -309,12 +316,27 @@ export type CatalogProblems = Readonly<{
  * group expands to each distinct View and then each distinct Widget. The Views and Widgets come
  * from the Views as they are now, without revalidating the Catalog.
  */
-export function catalogProblems(diagnostics: readonly Readonly<{ code: string; path: string; message: string }>[], usage: readonly ViewUsage[], checkState: CheckState = 'completed'): CatalogProblems {
+export function catalogProblems(
+	diagnostics: readonly Readonly<{ code: string; path: string; message: string }>[],
+	usage: readonly ViewUsage[],
+	checkState: CheckState = 'completed',
+	/** Which Adapter owns each Widget type, when known: a problem of another Adapter's entry never reaches its Widgets. */
+	owners?: ReadonlyMap<string, number>,
+): CatalogProblems {
 	const findings: Finding[] = []
 	let elsewhere = 0
+	// A type whose entries have problems in more than one Adapter cannot be attributed to a Widget without
+	// the owner: the Widget resolves to one of them, and the diagnostic does not say which.
+	const adaptersOfType = new Map<string, Set<number>>()
 	for (const diagnostic of diagnostics) {
 		const entry = catalogEntryOf(diagnostic.path)
-		const used = entry ? usage.filter(view => view.widgets.some(widget => widget.type === entry.widgetType)) : []
+		if (entry) adaptersOfType.set(entry.widgetType, (adaptersOfType.get(entry.widgetType) ?? new Set()).add(entry.adapterIndex))
+	}
+	for (const diagnostic of diagnostics) {
+		const entry = catalogEntryOf(diagnostic.path)
+		const owner = entry ? owners?.get(entry.widgetType) : undefined
+		const attributable = !!entry && (owner !== undefined ? owner === entry.adapterIndex : (adaptersOfType.get(entry.widgetType)?.size ?? 0) <= 1)
+		const used = entry && attributable ? usage.filter(view => view.widgets.some(widget => widget.type === entry.widgetType)) : []
 		if (!entry || !used.length) { elsewhere += 1; continue }
 		for (const view of used) {
 			for (const widget of view.widgets.filter(item => item.type === entry.widgetType)) {
