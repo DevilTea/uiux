@@ -193,7 +193,7 @@ export async function openHarnessPreview(browser: Browser, input: Readonly<{
 
 /** The viewport's PNG bytes, as formal capture stores them. */
 export async function captureHarnessScreenshot(page: Page): Promise<Uint8Array> {
-	return await page.screenshot({ type: 'png', fullPage: false, animations: 'disabled' })
+	return await page.screenshot({ type: 'png', fullPage: false, animations: 'disabled', caret: 'hide' })
 }
 
 /**
