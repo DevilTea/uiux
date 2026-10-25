@@ -67,7 +67,7 @@ const labelCatalog: AdapterWidgetCatalogEntry = {
 	i18n: { fields: { title: { configField: 'titleKey', resultProperty: 'titleResult', textProperty: 'label' } } },
 }
 
-const RESOURCES = new Map([
+const RESOURCES = new Map<string, Readonly<Record<string, string>>>([
 	['en-US', { greeting: 'Hello', farewell: 'Goodbye', onlyEnglish: 'Only in English' }],
 	['zh-TW', { greeting: '哈囉', farewell: '再見' }],
 ])
