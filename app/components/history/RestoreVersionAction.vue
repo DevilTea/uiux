@@ -8,7 +8,8 @@ import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { CURRENT_COMPARE, type HistoryResourceRef } from '../../utils/version-history'
-import { classifyRestoreAnswer, groupImpacts, matchesCurrent, restoreExtraKeys, shortId, type ImpactGroup, type ReceivedImpact } from '../../utils/version-restore'
+import { classifyRestoreAnswer, matchesCurrent, restoreExtraKeys, type ReceivedImpact } from '../../utils/version-restore'
+import ImpactList from '../workbench/ImpactList.vue'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 
 /**
@@ -102,7 +103,6 @@ const summaryText = computed(() => {
 	if (props.afterChange) return versionTime.value ? t('history.restore.bodyAfterChange', params) : t('history.restore.bodyAfterChangeNoTime', params)
 	return versionTime.value ? t('history.restore.body', params) : t('history.restore.bodyNoTime', params)
 })
-const groups = computed(() => groupImpacts(impacts.value))
 const dialogTitle = computed(() => stage.value === 'impact' ? t('history.restore.impact.title') : t('history.restore.title'))
 
 /** Focus starts on Cancel, the safe choice; the dialog's own autofocus would land on its close button. */
@@ -219,70 +219,6 @@ const lockUntil = computed(() => {
 		: '–'
 })
 
-// ----- Impact items -----------------------------------------------------------------------------
-
-function viewName(id: unknown): string {
-	return typeof id === 'string' ? labels.resourceName({ kind: 'view', key: id }) : '?'
-}
-function flowName(id: unknown): string {
-	return typeof id === 'string' ? labels.resourceName({ kind: 'flow', key: id }) : '?'
-}
-function text(value: unknown): string {
-	return typeof value === 'string' ? value : '?'
-}
-function threads(ids: unknown): string {
-	return Array.isArray(ids) ? ids.map(id => shortId(String(id))).join(t('common.listSeparator')) : ''
-}
-
-/** One impact item as a sentence; IDs are shortened, the full value is in the item's `title`. */
-function describeImpact(item: ReceivedImpact): string {
-	const value = item as Readonly<Record<string, unknown>>
-	const anchor = (value.anchor ?? {}) as Readonly<Record<string, unknown>>
-	switch (item.category) {
-		case 'review_anchor_invalidated':
-			return t('history.restore.impact.item.anchorInvalidated', { thread: shortId(text(value.reviewId)), widget: text(anchor.widgetId), view: viewName(anchor.viewId) })
-		case 'review_anchor_revalidated':
-			return t('history.restore.impact.item.anchorRevalidated', { thread: shortId(text(value.reviewId)), widget: text(anchor.widgetId), view: viewName(anchor.viewId) })
-		case 'i18n_reference_dangling':
-			return t('history.restore.impact.item.textKey', { key: text(value.i18nKey), view: viewName(value.viewId) })
-		case 'asset_reference_dangling':
-			return t('history.restore.impact.item.asset', { asset: labels.resourceName({ kind: 'asset', key: text(value.assetId) }), view: viewName(value.viewId) })
-		case 'flow_step_widget_missing':
-			return t('history.restore.impact.item.flowStep', { flow: flowName(value.flowId), step: text(value.stepId), widgets: Array.isArray(value.widgetIds) ? value.widgetIds.join(t('common.listSeparator')) : '', view: viewName(value.viewId) })
-		case 'submission_revision_not_current':
-		case 'submission_revision_current': {
-			const resource = (value.resource ?? {}) as Readonly<Record<string, unknown>>
-			const named = { kind: text(resource.kind), key: text(resource.key) }
-			return t(item.category === 'submission_revision_current' ? 'history.restore.impact.item.submissionCurrent' : 'history.restore.impact.item.submissionNotCurrent', {
-				thread: shortId(text(value.reviewId)),
-				kind: labels.kindLabel(named.kind),
-				resource: labels.resourceName(named),
-			})
-		}
-		case 'render_key_removed': {
-			const ids = Array.isArray(value.reviewIds) ? value.reviewIds : []
-			const key = value.dimension === 'theme' ? 'history.restore.impact.item.themeRemoved' : 'history.restore.impact.item.viewportRemoved'
-			return `${t(key, { key: text(value.key) })} ${ids.length ? t('history.restore.impact.item.namedBy', { threads: threads(ids) }, ids.length) : t('history.restore.impact.item.namedByNone')}`
-		}
-		case 'evidence_stale':
-			return typeof value.viewId === 'string'
-				? t('history.restore.impact.item.evidenceForView', { evidence: shortId(text(value.evidence)), view: viewName(value.viewId) })
-				: t('history.restore.impact.item.evidence', { evidence: shortId(text(value.evidence)) })
-		default:
-			return t('history.restore.impact.item.other', { category: item.category })
-	}
-}
-
-/** The full identifiers an item names, for its tooltip. */
-function impactIds(item: ReceivedImpact): string | undefined {
-	const value = item as Readonly<Record<string, unknown>>
-	const ids = [value.reviewId, value.evidence, ...(Array.isArray(value.reviewIds) ? value.reviewIds : [])].filter((id): id is string => typeof id === 'string')
-	return ids.length ? ids.join(', ') : undefined
-}
-
-function groupLabel(group: ImpactGroup): string {
-	return t(`history.restore.impact.group.${group}`)
-}
 </script>
 
 <template>
@@ -383,28 +319,7 @@ function groupLabel(group: ImpactGroup): string {
               <p class="text-xs font-medium text-muted">
                 {{ t('history.restore.impact.count', impacts.length) }}
               </p>
-              <section
-                v-for="entry in groups"
-                :key="entry.group"
-                class="space-y-1"
-                :data-impact-group="entry.group"
-              >
-                <h3 class="text-xs font-medium text-highlighted">
-                  {{ groupLabel(entry.group) }}
-                </h3>
-                <ul class="space-y-1">
-                  <li
-                    v-for="(item, index) in entry.items"
-                    :key="index"
-                    class="rounded-md border border-default px-2 py-1.5 text-xs text-default"
-                    :title="impactIds(item)"
-                    data-impact-item
-                    :data-category="item.category"
-                  >
-                    {{ describeImpact(item) }}
-                  </li>
-                </ul>
-              </section>
+              <ImpactList :impacts="impacts" />
             </template>
 
             <UAlert
