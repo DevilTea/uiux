@@ -45,6 +45,18 @@ export const HARNESS_NORMALIZATION_CSS = `
 	}
 `
 
+/**
+ * Chromium launch arguments for formal capture. `--disable-partial-raster` is what makes two captures of
+ * the same render context byte-identical (issue #344): with partial raster Chromium re-rasterizes only an
+ * invalidated rectangle of a tile, and the anti-aliasing at rounded border corners then differs from run
+ * to run (measured: 7 pixels, up to 11 levels, in about 80% of Flow replays; 0 of 18 with the flag).
+ * `--force-color-profile` pins the output to sRGB whatever the host's display profile is.
+ */
+export const HARNESS_LAUNCH_ARGS: readonly string[] = [
+	'--disable-partial-raster',
+	'--force-color-profile=srgb',
+]
+
 export type HarnessCookie = Readonly<{ name: string; value: string }>
 
 export type HarnessPreview =

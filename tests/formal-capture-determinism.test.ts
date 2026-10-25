@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { FileNativePersistence } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { assertSameScreenshot } from './support/screenshot-diff'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
@@ -36,6 +37,7 @@ describe('formal capture determinism (issue #344)', { timeout: HEAVY_SERVER_SUIT
 			if (captured?.status !== 'captured') return
 			identities.push({ evidenceDigest: String(captured.evidenceDigest), screenshotDigest: String(captured.screenshotDigest) })
 		}
+		for (const [index, identity] of identities.entries()) await assertSameScreenshot(`formal-${index}`, digest => persistence.artifacts.read(digest), identities[0]!, identity)
 		expect(new Set(identities.map(identity => identity.screenshotDigest)).size).toBe(1)
 		expect(new Set(identities.map(identity => identity.evidenceDigest)).size).toBe(1)
 	})

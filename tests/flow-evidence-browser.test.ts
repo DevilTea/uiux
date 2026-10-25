@@ -11,6 +11,7 @@ import type { FlowResource } from '../src/domain/flows/schema'
 import type { ViewResource } from '../src/domain/views/schema'
 import { FileNativePersistence } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { assertSameScreenshot } from './support/screenshot-diff'
 import { provisionToken, sessionCookieFor } from './support/access'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 import { writeCurrentWorkspace } from './support/workspace-layout'
@@ -138,6 +139,7 @@ describe('formal UX Flow Evidence over a real capture', { timeout: HEAVY_SERVER_
 		expect(again.status).toBe('captured')
 		if (again.status === 'captured') {
 			expect(again.evidence.data?.recipe).toEqual(record.data.recipe)
+			for (const [index, capture] of again.captures.entries()) await assertSameScreenshot(`flow-replay-${index}`, digest => persistence.artifacts.read(digest), outcome.captures[index]!, capture)
 			expect(again.evidence.data?.steps).toEqual(record.data.steps)
 			expect(again.captures).toEqual(outcome.captures)
 			expect(again.evidenceDigest).toBe(outcome.evidenceDigest)
