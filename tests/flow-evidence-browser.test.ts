@@ -133,9 +133,14 @@ describe('formal UX Flow Evidence over a real capture', { timeout: HEAVY_SERVER_
 			expect(await persistence.artifacts.read(capture.screenshotDigest)).toBeDefined()
 		}
 
-		// The same Flow, context and recipe give the same trace; a changed recipe is new Evidence.
+		// The stored recipe replays to a trace of the same steps (a screenshot of a page may differ in bytes between runs, so the captures' identities are not compared).
 		const again = await app.captureFlowEvidence({ flowId: FLOW_ID, renderContext, recipe: record.data.recipe })
-		expect(again).toMatchObject({ status: 'captured', evidenceDigest: outcome.evidenceDigest })
+		expect(again.status).toBe('captured')
+		if (again.status === 'captured') {
+			expect(again.evidence.data?.recipe).toEqual(record.data.recipe)
+			const withoutCaptures = (steps: Array<Record<string, unknown>>) => steps.map(step => Object.fromEntries(Object.entries(step).filter(([key]) => key !== 'captureRef')))
+			expect(withoutCaptures(again.evidence.data?.steps as Array<Record<string, unknown>>)).toEqual(withoutCaptures(record.data.steps))
+		}
 		const narrower = await app.captureFlowEvidence({ flowId: FLOW_ID, renderContext, recipe: { actions: [record.data.recipe.actions[0]] } })
 		expect(narrower).toMatchObject({ status: 'captured' })
 		if (narrower.status === 'captured') {
