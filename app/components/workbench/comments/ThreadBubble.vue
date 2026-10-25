@@ -25,6 +25,7 @@ import ReplyConflictAlert from '../ReplyConflictAlert.vue'
 import ReplyUpdatedNotice from '../ReplyUpdatedNotice.vue'
 import { threadState } from '../../../utils/reply-conflict'
 import { promoteConflictTitleKey } from '../../../utils/promote-conflict'
+import { promotedIn } from '../../../utils/decisions'
 import { effectiveRenderContext } from '../../../../src/preview/render-context-options'
 
 /**
@@ -142,6 +143,7 @@ const actions = useThreadActions({
 	canWrite: () => comments.canComment.value,
 	canReanchor: () => comments.canComment.value && !isPhone.value,
 	canPromote: () => comments.canPromote.value && !isPhone.value,
+	promoted: () => promotedIn(workbench.selectedView.value, thread.value) === true,
 	canSubmit: () => canSubmit.value,
 	conflict: () => conflict.value,
 	error: () => error.value,
@@ -150,7 +152,7 @@ const actions = useThreadActions({
 	resolve: (id, resolution, reason, expectedRevision) => comments.resolve(id, resolution, reason, expectedRevision),
 	reopen: (id, reason, expectedRevision) => comments.reopen(id, reason, expectedRevision),
 	// The canvas store sends the rationale as typed; an empty one repeats the summary.
-	promote: (id, form, expectedRevision) => comments.promote(id, { ...form, rationale: form.rationale || form.summary }, expectedRevision),
+	promote: (id, form, expectedRevision, decisionId) => comments.promote(id, { ...form, rationale: form.rationale || form.summary }, expectedRevision, decisionId),
 	submit: (id, draft, expectedRevision) => comments.submit(id, draft, expectedRevision),
 	retract: id => comments.retract(id),
 	reanchor: startReanchor,
@@ -163,7 +165,7 @@ const {
 	activeSubmission, primaryResolution, resolveAs, resolveMenu,
 	pendingAction, reason, reasonInput, ask, confirmPending,
 	confirmingDelete, deleteRefused, retractConfirm, keepConfirmFocus, confirmDelete,
-	promoteOpen, submitPromote,
+	promoteOpen, promoteAnotherId, submitPromote,
 	submitOpen, submitError, submitConflict, submitForReview,
 	overflow,
 } = actions
@@ -689,6 +691,7 @@ watch(() => props.threadId, () => {
       :error="error"
       :conflict="conflict"
       :moved="promoteMoved"
+      :another="!!promoteAnotherId"
       :submit="submitPromote"
     />
   </div>

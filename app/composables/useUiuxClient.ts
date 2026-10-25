@@ -64,7 +64,7 @@ export function useUiuxClient() {
 
 	async function listResources<T>(
 		kinds: readonly string[],
-		options: Readonly<{ query?: string; limit?: number; cursor?: string }> = {},
+		options: Readonly<{ query?: string; limit?: number; cursor?: string; detail?: 'summary' | 'expanded' }> = {},
 	): Promise<ResourceListPage<T>> {
 		return await $fetch<ResourceListPage<T>>(options.query ? '/api/resources/search' : '/api/resources/list', {
 			method: 'POST',
@@ -72,6 +72,7 @@ export function useUiuxClient() {
 				kinds,
 				...(options.query ? { query: options.query } : {}),
 				...(options.cursor ? { cursor: options.cursor } : {}),
+				...(options.detail ? { detail: options.detail } : {}),
 				limit: options.limit ?? 100,
 			},
 		})

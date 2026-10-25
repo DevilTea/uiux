@@ -166,6 +166,12 @@ export type PromoteReviewToDecisionCommand = Readonly<{
 	decisionId?: string
 }>
 
+/**
+ * Clause 01a17226-fca4-7a13-b38e-c51ffeb47c44: another Decision from a thread that already has one;
+ * `decisionId` is caller-supplied and makes a retry return the Decision it created.
+ */
+export type CreateDecisionFromReviewCommand = Readonly<Omit<PromoteReviewToDecisionCommand, 'decisionId'> & { decisionId: string }>
+
 export type ReviewAuthoringResult =
 	| Readonly<{
 			status: 'created' | 'updated'
@@ -205,6 +211,7 @@ export type ReviewAuthoringService = Readonly<{
 	reopenReviewThread(command: ReopenReviewThreadCommand): Promise<ReviewAuthoringResult>
 	setReviewDisplayHint(command: SetReviewDisplayHintCommand): Promise<ReviewAuthoringResult>
 	promoteReviewToDecision(command: PromoteReviewToDecisionCommand): Promise<ReviewAuthoringResult>
+	createDecisionFromReview(command: CreateDecisionFromReviewCommand): Promise<ReviewAuthoringResult>
 	editReviewMessage(command: EditReviewMessageCommand): Promise<ReviewAuthoringResult>
 	retractReviewThread(command: RetractReviewThreadCommand): Promise<ReviewAuthoringResult>
 }>
@@ -780,6 +787,9 @@ export function createReviewAuthoringService(persistence: FileNativePersistence,
 		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 	}
 
+	const promoteReviewToDecision = (command: PromoteReviewToDecisionCommand) => promoteReviewToDecisionCore(command, false)
+	const createDecisionFromReview = (command: CreateDecisionFromReviewCommand) => promoteReviewToDecisionCore(command, true)
+
 	async function setReviewDisplayHint(command: SetReviewDisplayHintCommand): Promise<ReviewAuthoringResult> {
 		if (!isFullUuid(command.reviewId))
 			return {
@@ -832,7 +842,8 @@ export function createReviewAuthoringService(persistence: FileNativePersistence,
 		return { status: 'updated', key: command.reviewId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 	}
 
-	async function promoteReviewToDecision(command: PromoteReviewToDecisionCommand): Promise<ReviewAuthoringResult> {
+	/** `another` is `create_decision_from_review`: it matches an earlier Decision by `decisionId` only. */
+	async function promoteReviewToDecisionCore(command: PromoteReviewToDecisionCommand, another: boolean): Promise<ReviewAuthoringResult> {
 		if (!isFullUuid(command.reviewId))
 			return {
 				status: 'invalid',
@@ -861,7 +872,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence,
 				diagnostics: [{ code: 'decision.empty_question', path: '/question', message: 'Decision question must be a non-empty string.' }],
 			}
 		}
-		if (command.decisionId && !isFullUuid(command.decisionId)) {
+		if ((command.decisionId || another) && !isFullUuid(command.decisionId)) {
 			return {
 				status: 'invalid',
 				key: command.reviewId,
@@ -902,11 +913,20 @@ export function createReviewAuthoringService(persistence: FileNativePersistence,
 
 		// Idempotency precedes revision conflicts: retrying an already-committed promotion
 		// with the original expected revisions returns the existing Decision instead of 409.
-		const existingDecision = view.resource.spec.decisions?.find(d =>
-			d.provenance?.reviewId === command.reviewId
-			|| d.provenance?.sourceReviewThreadId === command.reviewId
-			|| (command.decisionId && d.id === command.decisionId),
+		const existingDecision = view.resource.spec.decisions?.find(d => another
+			? d.id === command.decisionId
+			: d.provenance?.reviewId === command.reviewId
+				|| d.provenance?.sourceReviewThreadId === command.reviewId
+				|| (command.decisionId && d.id === command.decisionId),
 		)
+		// A retry returns only the Decision this thread created; the id of another thread's Decision is taken.
+		if (another && existingDecision && existingDecision.provenance?.reviewId !== command.reviewId) {
+			return {
+				status: 'invalid',
+				key: command.reviewId,
+				diagnostics: [{ code: 'decision.id_in_use', path: '/decisionId', message: `Decision id ${command.decisionId} already names a Decision that did not come from this thread.` }],
+			}
+		}
 		if (existingDecision) {
 			const inspected = await persistence.views.readInspected(command.viewId)
 			return {
@@ -1207,6 +1227,7 @@ export function createReviewAuthoringService(persistence: FileNativePersistence,
 		reopenReviewThread,
 		setReviewDisplayHint,
 		promoteReviewToDecision,
+		createDecisionFromReview,
 		editReviewMessage,
 		retractReviewThread,
 	}

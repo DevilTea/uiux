@@ -37,6 +37,11 @@ export type ThreadActionsOptions = Readonly<{
 	canWrite: () => boolean
 	canReanchor: () => boolean
 	canPromote: () => boolean
+	/**
+	 * Whether the thread already has a Decision: only `true` offers "Create another Decision"; `false`
+	 * (the View holds none) and `undefined` (not known yet, the View is not loaded) do not.
+	 */
+	promoted?: () => boolean | undefined
 	canSubmit: () => boolean
 	/** Did the last write to this thread conflict or fail? */
 	conflict: () => boolean
@@ -47,7 +52,8 @@ export type ThreadActionsOptions = Readonly<{
 	/** `expectedRevision`, when given, is the pinned revision the step was opened on; else the thread's current one. */
 	resolve: (id: string, resolution: ReviewResolution, reason?: string, expectedRevision?: string) => Promise<boolean>
 	reopen: (id: string, reason: string, expectedRevision?: string) => Promise<boolean>
-	promote: (id: string, form: Readonly<PromoteForm>, expectedRevision?: string) => Promise<boolean>
+	/** With `decisionId`, creates another Decision from the thread (`create_decision_from_review`) instead of promoting it. */
+	promote: (id: string, form: Readonly<PromoteForm>, expectedRevision?: string, decisionId?: string) => Promise<boolean>
 	submit: (id: string, draft: ReviewSubmissionDraft, expectedRevision?: string) => Promise<boolean>
 	retract: (id: string) => Promise<boolean>
 	reanchor: () => void
@@ -178,17 +184,27 @@ export function useThreadActions(options: ThreadActionsOptions) {
 
 	/** The dialog itself (`ThreadPromoteModal`) owns the form and shows a refusal inside. */
 	const promoteOpen = ref(false)
+	/**
+	 * Set while the dialog creates another Decision from the thread. Its `decisionId` is chosen once per
+	 * opening, so a resubmit after a refusal or a lost response returns the Decision it created.
+	 */
+	const promoteAnotherId = ref<string>()
 	watch(promoteOpen, (open) => {
 		if (open) promoteBase.pin(options.thread()?.id)
-		else promoteBase.release()
+		else { promoteBase.release(); promoteAnotherId.value = undefined }
 	}, { flush: 'sync' })
+	function openPromoteAnother(): void {
+		promoteAnotherId.value = crypto.randomUUID()
+		promoteOpen.value = true
+	}
 
 	async function submitPromote(form: Readonly<PromoteForm>): Promise<boolean> {
 		const id = options.thread()?.id
 		if (!id) return false
-		const ok = await options.promote(id, form, promoteBase.get(id))
+		const another = promoteAnotherId.value
+		const ok = await options.promote(id, form, promoteBase.get(id), another)
 		if (ok) {
-			feedback.success(t('reviews.feedback.promoted'))
+			feedback.success(t(another ? 'reviews.feedback.anotherDecision' : 'reviews.feedback.promoted'))
 			await options.afterPromote?.()
 		}
 		else afterRefusal(promoteBase, id)
@@ -240,6 +256,7 @@ export function useThreadActions(options: ThreadActionsOptions) {
 			...(options.canSubmit() ? [{ label: t('thread.submit'), icon: 'i-lucide-eye', onSelect: () => { submitOpen.value = true } }] : []),
 			...(options.canReanchor() ? [{ label: options.reanchorLabel(), icon: 'i-lucide-crosshair', onSelect: options.reanchor }] : []),
 			...(options.canPromote() ? [{ label: t('thread.promote'), icon: 'i-lucide-signpost', onSelect: () => { promoteOpen.value = true } }] : []),
+			...(options.canPromote() && options.promoted?.() === true ? [{ label: t('thread.promoteAnother'), icon: 'i-lucide-signpost', onSelect: openPromoteAnother }] : []),
 			...(options.extraOverflow?.() ?? []),
 			{ label: t('comments.copyThreadId'), icon: 'i-lucide-copy', onSelect: () => { void copy(current.id, t('comments.copiedId')) } },
 		]]
@@ -274,6 +291,7 @@ export function useThreadActions(options: ThreadActionsOptions) {
 		askDelete,
 		confirmDelete,
 		promoteOpen,
+		promoteAnotherId,
 		submitPromote,
 		submitOpen,
 		submitError,

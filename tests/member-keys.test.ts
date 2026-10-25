@@ -11,7 +11,7 @@ const VIEWER = presetKeys('viewer')
 describe('the key checklist', () => {
 	it('groups the catalog by domain, in catalog order (Rule 01a11c09-ba80)', () => {
 		const groups = catalogByDomain()
-		expect(groups.map(group => group.domain)).toEqual(['workspace', 'history', 'product-kit', 'reviews', 'views', 'flows', 'locales', 'assets', 'settings', 'evidence', 'handoff', 'checkpoints', 'locks', 'presets', 'members'])
+		expect(groups.map(group => group.domain)).toEqual(['workspace', 'history', 'product-kit', 'reviews', 'decisions', 'views', 'flows', 'locales', 'assets', 'settings', 'evidence', 'handoff', 'checkpoints', 'locks', 'presets', 'members'])
 		for (const group of groups) {
 			expect(group.keys.every(key => keyDomain(key) === group.domain)).toBe(true)
 			expect(group.keys).toEqual(PERMISSION_KEYS.filter(key => group.keys.includes(key)))
@@ -39,7 +39,7 @@ describe('the key checklist', () => {
 		const agent = applyPreset(OWNER, VIEWER, 'agent')
 		expect(agent.keys).toEqual(presetKeys('owner', 'agent'))
 		expect(agent.keys.some(key => (HUMAN_ONLY_PERMISSION_KEYS as readonly string[]).includes(key))).toBe(false)
-		expect(agent.dropped).toEqual(['reviews.resolve', 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'])
+		expect(agent.dropped).toEqual(['reviews.resolve', 'decisions.decide', 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'])
 	})
 
 	it('keeps the unknown keys the member holds when a preset is applied (owner ruling of 2026-10-11 on PR #189)', () => {
@@ -69,7 +69,7 @@ describe('the notice of keys no person holds (Rule 01a11c09-bbc9)', () => {
 		expect(keysNoHumanHolds([
 			{ kind: 'human', keys: presetKeys('editor') },
 			{ kind: 'agent', keys: [...presetKeys('editor', 'agent'), 'future.capability'] },
-		])).toEqual(['checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'])
+		])).toEqual(['decisions.decide', 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'])
 		expect(keysNoHumanHolds([])).toEqual([...PERMISSION_KEYS])
 	})
 })

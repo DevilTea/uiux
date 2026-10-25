@@ -666,14 +666,16 @@ function createReviewInbox() {
 	 * 01a11544-611c-73e0-990b-c094b48b3eb6): the thread is re-read here and the View on the next
 	 * confirm, which only the user sends; nothing is retried automatically.
 	 */
-	async function promote(threadId: string, form: Readonly<{ question: string; summary: string; rationale: string }>, expectedRevision?: string): Promise<boolean> {
+	async function promote(threadId: string, form: Readonly<{ question: string; summary: string; rationale: string }>, expectedRevision?: string, decisionId?: string): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		const viewId = item?.viewId
 		if (!item || !viewId || !canPromote.value) return false
 		return await mutate(threadId, 'promote', async (revision) => {
 			const view = await uiux.readResource<ViewRead>('view', viewId)
 			if (!view) throw new Error(t('inbox.errors.viewMissing'))
-			return await post(path(threadId, 'promote'), {
+			// With `decisionId`: another Decision from the thread (`POST /api/reviews/:id/decisions`).
+			return await post(decisionId ? path(threadId, 'decisions') : path(threadId, 'promote'), {
+				...(decisionId ? { decisionId } : {}),
 				expectedReviewRevision: revision,
 				viewId,
 				expectedViewRevision: view.revision,

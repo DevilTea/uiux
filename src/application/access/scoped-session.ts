@@ -22,6 +22,7 @@ import type {
 	AppendReviewMessageCommand,
 	CreateReviewThreadCommand,
 	EditReviewMessageCommand,
+	CreateDecisionFromReviewCommand,
 	PromoteReviewToDecisionCommand,
 	ReanchorReviewThreadCommand,
 	ReopenReviewThreadCommand,
@@ -31,7 +32,7 @@ import type {
 	SetReviewDisplayHintCommand,
 	SubmitReadyForReviewCommand,
 } from '../services/review-authoring'
-import type { CreateViewCommand, UpdateViewMetadataCommand, UpdateViewSpecCommand, UpdateViewStructureCommand, ViewAuthoringResult } from '../services/view-authoring'
+import type { CreateViewCommand, DecideDecisionCommand, DecisionLifecycleCommand, UpdateViewMetadataCommand, UpdateViewSpecCommand, UpdateViewStructureCommand, ViewAuthoringResult } from '../services/view-authoring'
 import type { PointResourceRead, WorkspaceApplicationSession } from '../services/workspace-session'
 import type { UpdateWorkspaceSettingsCommand, WorkspaceAuthoringResult } from '../services/workspace-authoring'
 import type {
@@ -168,6 +169,10 @@ export interface ScopedWorkspaceSession {
 	updateViewStructure(command: UpdateViewStructureCommand): Promise<Scoped<ViewAuthoringResult>>
 	/** Renames a View or sets or clears its `feature` tag; `views.write` and the View's edit lease (Clause 01a15379-d8f7-7c0c-9b9a-05c07c64cc85). */
 	updateViewMetadata(command: UpdateViewMetadataCommand): Promise<Scoped<ViewAuthoringResult>>
+	/** Decision lifecycle (Clause 01a17226-fafc-7691-99ff-aa3b20f5836f): defer and reopen need `views.write`, decide the `humanOnly` `decisions.decide`; each checks the View's lease and stamps the actor. */
+	deferDecision(command: Unstamped<DecisionLifecycleCommand>): Promise<Scoped<ViewAuthoringResult>>
+	decideDecision(command: Unstamped<DecideDecisionCommand>): Promise<Scoped<ViewAuthoringResult>>
+	reopenDecision(command: Unstamped<DecisionLifecycleCommand>): Promise<Scoped<ViewAuthoringResult>>
 	updateWorkspaceSettings(command: UpdateWorkspaceSettingsCommand): Promise<Scoped<WorkspaceAuthoringResult>>
 	/** The Product Kit Resource; `workspace.read` only (Clause 01a11bb1-b3c2-7937-96fb-e139c5e566f5). */
 	readProductKit(): Promise<ProductKitRead | undefined>
@@ -213,6 +218,8 @@ export interface ScopedWorkspaceSession {
 	reopenReviewThread(command: Unstamped<ReopenReviewThreadCommand>): Promise<Scoped<ReviewAuthoringResult>>
 	setReviewDisplayHint(command: SetReviewDisplayHintCommand): Promise<Scoped<ReviewAuthoringResult>>
 	promoteReviewToDecision(command: Unstamped<PromoteReviewToDecisionCommand>): Promise<Scoped<ReviewAuthoringResult>>
+	/** Another Decision from a promoted thread (`reviews.promote`; checks and, for an Agent, takes the View's lease like a promotion). */
+	createDecisionFromReview(command: Unstamped<CreateDecisionFromReviewCommand>): Promise<Scoped<ReviewAuthoringResult>>
 	editReviewMessage(command: Unstamped<EditReviewMessageCommand>): Promise<Scoped<ReviewAuthoringResult>>
 	retractReviewThread(command: Unstamped<RetractReviewThreadCommand>): Promise<Scoped<ReviewAuthoringResult>>
 	captureFormalEvidence(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult | AccessRefusal>
@@ -421,7 +428,7 @@ export function createScopedWorkspaceSession(
 			throw error
 		}
 		if (SUCCESS.has(result.status)) {
-			if (target && result.key !== target.key && target.kind !== 'workspace' && operation !== 'promoteReviewToDecision') ticket?.rekey(result.key)
+			if (target && result.key !== target.key && target.kind !== 'workspace' && operation !== 'promoteReviewToDecision' && operation !== 'createDecisionFromReview') ticket?.rekey(result.key)
 			ticket?.commit()
 		}
 		else {
@@ -439,6 +446,18 @@ export function createScopedWorkspaceSession(
 		if (denied || principal.type !== 'member') return Promise.resolve(refusalFromScope(command.reviewId, denied ?? authorizeOperation(principal, operation)!))
 		const stamped = stamp(command, { at: true })
 		return write(operation, command.reviewId, undefined, () => run(stamped.command), stamped.warnings)
+	}
+
+	/** A Decision lifecycle action: authorize, stamp the actor and time, then write the View under its lease. */
+	function decisionLifecycle<C extends Readonly<{ key: string; actor?: unknown; at?: unknown }>, R extends { status: string; key: string }>(
+		operation: AccessOperation,
+		command: C,
+		run: (stamped: Omit<C, 'actor' | 'at'> & { actor: StampedActor; at?: string }) => Promise<R>,
+	): Promise<Scoped<R>> {
+		const denied = authorizeOperation(principal, operation)
+		if (denied || principal.type !== 'member') return Promise.resolve(refusalFromScope(command.key, denied ?? authorizeOperation(principal, operation)!))
+		const stamped = stamp(command, { at: true })
+		return write(operation, command.key, { kind: 'view', key: command.key }, () => run(stamped.command), stamped.warnings)
 	}
 
 	function parseAddresses(input: unknown, required: boolean): { ok: true; addresses: LeaseAddress[] | undefined } | { ok: false; diagnostics: Diagnostic[] } {
@@ -546,6 +565,9 @@ export function createScopedWorkspaceSession(
 		updateViewSpec: command => write('updateViewSpec', command.key, { kind: 'view', key: command.key }, () => app.updateViewSpec(command)),
 		updateViewStructure: command => write('updateViewStructure', command.key, { kind: 'view', key: command.key }, () => app.updateViewStructure(command)),
 		updateViewMetadata: command => write('updateViewMetadata', command.key, { kind: 'view', key: command.key }, () => app.updateViewMetadata(command)),
+		deferDecision: command => decisionLifecycle('deferDecision', command, stamped => app.deferDecision(stamped)),
+		decideDecision: command => decisionLifecycle('decideDecision', command, stamped => app.decideDecision(stamped)),
+		reopenDecision: command => decisionLifecycle('reopenDecision', command, stamped => app.reopenDecision(stamped)),
 		updateWorkspaceSettings: command => write('updateWorkspaceSettings', 'workspace', { kind: 'workspace', key: 'workspace' }, () => app.updateWorkspaceSettings(command)),
 		async readProductKit() { assert('readProductKit'); return app.readProductKit() },
 		composeProductKit: command => write('composeProductKit', PRODUCT_KIT_KEY, PRODUCT_KIT_LEASE, () => app.composeProductKit(command, productKitGuard('composeProductKit'))),
@@ -577,6 +599,12 @@ export function createScopedWorkspaceSession(
 			if (refused) return refused
 			const stamped = stamp(command, { at: true })
 			return write('resolveReviewThread', command.reviewId, undefined, () => app.resolveReviewThread(stamped.command), stamped.warnings)
+		},
+		async createDecisionFromReview(command) {
+			const denied = authorizeOperation(principal, 'createDecisionFromReview')
+			if (denied || principal.type !== 'member') return refusalFromScope(command.reviewId, denied ?? authorizeOperation(principal, 'createDecisionFromReview')!)
+			const stamped = stamp(command, { at: false })
+			return write('createDecisionFromReview', command.reviewId, { kind: 'view', key: command.viewId }, () => app.createDecisionFromReview(stamped.command), stamped.warnings)
 		},
 		async promoteReviewToDecision(command) {
 			const denied = authorizeOperation(principal, 'promoteReviewToDecision')

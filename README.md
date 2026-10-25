@@ -49,7 +49,8 @@ MCP exposes compact read-only discovery plus domain-specific authoring operation
 - Workspace settings: `update_workspace_settings`
 - Locales: `create_locale`, `update_locale`
 - UX Flows: `create_flow`, `update_flow`
-- Reviews: `create_review_thread`, `append_review_message`, `edit_review_message`, `reanchor_review_thread`, `set_review_display_hint`, `submit_ready_for_review`, `resolve_review_thread`, `reopen_review_thread`, `promote_review_to_decision`, `retract_review_thread`
+- Reviews: `create_review_thread`, `append_review_message`, `edit_review_message`, `reanchor_review_thread`, `set_review_display_hint`, `submit_ready_for_review`, `resolve_review_thread`, `reopen_review_thread`, `promote_review_to_decision`, `create_decision_from_review`, `retract_review_thread`
+- Decisions: `defer_decision`, `decide_decision` (needs the human-only key `decisions.decide`, so a Workbench session), `reopen_decision`
 - Authored Assets: `create_asset`, `replace_asset`
 - Agent edit leases: `acquire_lock`, `release_lock`
 - Version history: `list_versions`, `get_version_diff`, `create_checkpoint`, `restore_resource_version`, plus the read-only Resource `uiux://version/{id}`
@@ -75,6 +76,8 @@ Authors, humans and agents alike, have two more operations on their own words, o
 ### Members, roles and tokens
 
 Every `/api/*` and `/mcp` request needs a credential. Each Workspace has its own roster of members on this host, at `$UIUX_HOME/workspaces/<sha256(realpath)>/access.json` (`UIUX_HOME` defaults to `~/.uiux`). The roster never lives in the Workspace or in Git, and it stores only hashes of secrets. A member has a nickname, a kind (`human` or `agent`, fixed at creation) and a set of permission keys, such as `views.write` or `members.manage`. The roster stores each member's keys, and a member's label names the built-in preset (Viewer, Reviewer, Editor or Owner) whose keys match, or Custom. Keys for people only, such as `reviews.resolve` and `members.manage`, are never stored on an Agent, and at least one human member always keeps `members.manage`. `uiux member add` takes `--preset <name>` (Viewer, Reviewer, Editor or Owner), which copies that preset's keys, `--keys <k,…>` or `--all-keys`; `uiux member set` takes `--preset`, `--grant <k,…>` and `--revoke <k,…>`. An Agent given a preset or `--all-keys` gets the keys without the ones for people only. A key this version does not know is refused.
+
+Deciding a Decision needs the human-only key `decisions.decide`, which only the Owner preset has. Members store their keys in the roster, so an existing Owner does not gain it from this version, and `--preset owner` in an older Workspace uses that Workspace's old Owner preset: grant it with `uiux member set <nick> --grant decisions.decide --workspace <dir>`.
 
 The first `uiux dev` of a Workspace with no human holder of `members.manage` creates one with every key, named after your OS user, and prints a single-use sign-in link (valid for 24 hours). Open it in the browser to sign in. The session lasts 14 days idle and 30 days at most, and it survives restarts. Lost the link? Run `uiux invite create --workspace <dir> --member <nick>` for a new one.
 

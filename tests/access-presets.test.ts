@@ -506,7 +506,7 @@ describe('labels and --preset from the Workspace\'s presets (Rules 01a11c09-c724
 		const lead = { id: 'lead', name: 'Lead', keys: ['workspace.read', 'history.read', 'views.write', 'future.capability'] }
 		await writeFile(join(root, ACCESS_PRESETS_FILENAME), JSON.stringify({ presets: [...builtIns().filter(preset => preset.id !== 'reviewer'), lead] }))
 
-		expect(await run('member', 'add', 'deviltea', '--preset', 'owner', '--workspace', root)).toMatchObject({ code: 0, out: expect.stringContaining('(Owner, 22 keys)') })
+		expect(await run('member', 'add', 'deviltea', '--preset', 'owner', '--workspace', root)).toMatchObject({ code: 0, out: expect.stringContaining('(Owner, 23 keys)') })
 		expect(await run('member', 'add', 'mei', '--preset', 'Reviewer', '--workspace', root)).toMatchObject({ code: 1, err: expect.stringContaining('The presets are Viewer, Editor, Owner, Lead.') })
 		// A preset key this version does not know is never applied; the member is then Custom.
 		const added = await run('member', 'add', 'lee', '--preset', 'Lead', '--workspace', root)

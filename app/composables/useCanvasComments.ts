@@ -719,12 +719,13 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	 * 01a11544-611c-73e0-990b-c094b48b3eb6) and re-reads it, the thread and, when it moved, the View;
 	 * the next confirm is the user's, never an automatic retry.
 	 */
-	async function promote(threadId: string, form: Readonly<{ question: string; summary: string; rationale: string }>, expectedRevision?: string): Promise<boolean> {
+	async function promote(threadId: string, form: Readonly<{ question: string; summary: string; rationale: string }>, expectedRevision?: string, decisionId?: string): Promise<boolean> {
 		const item = threadById.value.get(threadId)
 		const view = selectedView.value
 		if (!item || !view) return false
 		lastError.value = undefined
-		return await mutate(threadId, 'promote', revision => post(`/api/reviews/${encodeURIComponent(threadId)}/promote`, {
+		return await mutate(threadId, 'promote', revision => post(`/api/reviews/${encodeURIComponent(threadId)}/${decisionId ? 'decisions' : 'promote'}`, {
+			...(decisionId ? { decisionId } : {}),
 			expectedReviewRevision: revision,
 			viewId: item.anchor.viewId,
 			expectedViewRevision: view.revision,

@@ -36,6 +36,8 @@ import { isValidPointResourceAddress, type PointResourceKind } from '../dto/poin
 import {
 	createViewAuthoringService,
 	type CreateViewCommand,
+	type DecideDecisionCommand,
+	type DecisionLifecycleCommand,
 	type UpdateViewMetadataCommand,
 	type UpdateViewSpecCommand,
 	type UpdateViewStructureCommand,
@@ -64,6 +66,7 @@ import {
 	type AppendReviewMessageCommand,
 	type CreateReviewThreadCommand,
 	type EditReviewMessageCommand,
+	type CreateDecisionFromReviewCommand,
 	type PromoteReviewToDecisionCommand,
 	type ReanchorReviewThreadCommand,
 	type ReopenReviewThreadCommand,
@@ -171,6 +174,9 @@ export interface WorkspaceApplicationSession {
 	updateViewSpec(command: UpdateViewSpecCommand): Promise<ViewAuthoringResult>
 	updateViewStructure(command: UpdateViewStructureCommand): Promise<ViewAuthoringResult>
 	updateViewMetadata(command: UpdateViewMetadataCommand): Promise<ViewAuthoringResult>
+	deferDecision(command: DecisionLifecycleCommand): Promise<ViewAuthoringResult>
+	decideDecision(command: DecideDecisionCommand): Promise<ViewAuthoringResult>
+	reopenDecision(command: DecisionLifecycleCommand): Promise<ViewAuthoringResult>
 	updateWorkspaceSettings<R = never>(command: UpdateWorkspaceSettingsCommand, guard?: WorkspaceSettingsGuard<R>): Promise<WorkspaceAuthoringResult | R>
 	readProductKit(): Promise<ProductKitRead | undefined>
 	composeProductKit<R = never>(command: ComposeProductKitCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
@@ -197,6 +203,7 @@ export interface WorkspaceApplicationSession {
 	reopenReviewThread(command: ReopenReviewThreadCommand): Promise<ReviewAuthoringResult>
 	setReviewDisplayHint(command: SetReviewDisplayHintCommand): Promise<ReviewAuthoringResult>
 	promoteReviewToDecision(command: PromoteReviewToDecisionCommand): Promise<ReviewAuthoringResult>
+	createDecisionFromReview(command: CreateDecisionFromReviewCommand): Promise<ReviewAuthoringResult>
 	editReviewMessage(command: EditReviewMessageCommand): Promise<ReviewAuthoringResult>
 	retractReviewThread(command: RetractReviewThreadCommand): Promise<ReviewAuthoringResult>
 	createAsset(command: CreateAssetCommand): Promise<AssetAuthoringResult>
@@ -489,6 +496,9 @@ export function createWorkspaceApplicationSession(
 		updateViewSpec: viewAuthoring.updateViewSpec,
 		updateViewStructure: viewAuthoring.updateViewStructure,
 		updateViewMetadata: viewAuthoring.updateViewMetadata,
+		deferDecision: viewAuthoring.deferDecision,
+		decideDecision: viewAuthoring.decideDecision,
+		reopenDecision: viewAuthoring.reopenDecision,
 		updateWorkspaceSettings: workspaceAuthoring.updateWorkspaceSettings,
 		readProductKit: productKitAuthoring.readProductKit,
 		composeProductKit: productKitAuthoring.composeProductKit,
@@ -515,6 +525,7 @@ export function createWorkspaceApplicationSession(
 		reopenReviewThread: reviewAuthoring.reopenReviewThread,
 		setReviewDisplayHint: reviewAuthoring.setReviewDisplayHint,
 		promoteReviewToDecision: reviewAuthoring.promoteReviewToDecision,
+		createDecisionFromReview: reviewAuthoring.createDecisionFromReview,
 		editReviewMessage: reviewAuthoring.editReviewMessage,
 		retractReviewThread: reviewAuthoring.retractReviewThread,
 		createAsset: assetAuthoring.createAsset,

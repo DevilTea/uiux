@@ -16,6 +16,8 @@ const props = defineProps<{
 	busy?: boolean
 	error?: FetchErrorDetails
 	conflict?: boolean
+	/** Creating another Decision from a thread that already has one (`create_decision_from_review`). */
+	another?: boolean
 	/** The resources the conflict named, when the server listed them. */
 	moved?: readonly PromoteMoved[]
 	submit: (form: Readonly<PromoteForm>) => Promise<boolean>
@@ -53,8 +55,8 @@ async function onSubmit(): Promise<void> {
 <template>
   <UModal
     v-model:open="open"
-    :title="t('reviews.promote.title')"
-    :description="t('reviews.promote.description')"
+    :title="another ? t('reviews.promote.anotherTitle') : t('reviews.promote.title')"
+    :description="another ? t('reviews.promote.anotherDescription') : t('reviews.promote.description')"
   >
     <template #body>
       <form
@@ -114,7 +116,7 @@ async function onSubmit(): Promise<void> {
             variant="solid"
             :loading="busy"
             :disabled="!form.question.trim() || !form.summary.trim()"
-            :label="t('reviews.promote.submit')"
+            :label="another ? t('reviews.promote.anotherSubmit') : t('reviews.promote.submit')"
           />
         </div>
       </form>

@@ -68,7 +68,7 @@ describe('Overview and readiness (R9)', () => {
 			const nav = (await page.locator('[data-landmark="navigation"]').first().innerText()).toLowerCase()
 			for (const word of ['checks', 'evidence', 'handoff']) expect(nav).not.toContain(word)
 			const tabs = await page.locator('[role="tablist"] [role="tab"]').allInnerTexts()
-			expect(tabs.map(text => text.trim().replace(/\s+\d+$/, ''))).toEqual(['Views', 'Checks', 'Activity'])
+			expect(tabs.map(text => text.trim().replace(/\s+\d+$/, ''))).toEqual(['Views', 'Checks', 'Decisions', 'Activity'])
 			await page.locator('[data-views-table] [data-readiness]').first().waitFor()
 		}
 		finally { await context.close() }

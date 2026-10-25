@@ -12,6 +12,7 @@ import { viewLocation } from '../utils/workbench-routes'
 import WorkbenchPage from '../components/workbench/WorkbenchPage.vue'
 import OverviewChecks from '../components/readiness/OverviewChecks.vue'
 import OverviewActivity from '../components/readiness/OverviewActivity.vue'
+import PendingDecisionsList from '../components/workbench/PendingDecisionsList.vue'
 import HandoffExportModal from '../components/readiness/HandoffExportModal.vue'
 import WorkspaceFirstRun from '../components/workbench/WorkspaceFirstRun.vue'
 
@@ -136,7 +137,7 @@ const attention = computed<AttentionPart[]>(() => ([
  * Views, and switching back to Views drops the query, so a bare `/` stays bare (a phone cold load of
  * `/` opens Reviews, see the default layout). Nothing writes the query on load.
  */
-const TAB_VALUES = ['views', 'checks', 'activity'] as const
+const TAB_VALUES = ['views', 'checks', 'decisions', 'activity'] as const
 function isTab(value: unknown): value is typeof TAB_VALUES[number] {
 	return typeof value === 'string' && (TAB_VALUES as readonly string[]).includes(value)
 }
@@ -159,6 +160,7 @@ const tab = computed<string>({
 const tabs = computed<TabsItem[]>(() => [
 	{ value: 'views', slot: 'views' as const, label: t('overview.tab.views') },
 	{ value: 'checks', slot: 'checks' as const, label: t('overview.tab.checks'), badge: workspaceFindingCount.value ? { label: String(workspaceFindingCount.value), color: 'neutral', variant: 'soft', size: 'sm' } : undefined },
+	{ value: 'decisions', slot: 'decisions' as const, label: t('overview.tab.decisions') },
 	{ value: 'activity', slot: 'activity' as const, label: t('overview.tab.activity') },
 ])
 
@@ -493,6 +495,9 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
           <OverviewChecks />
         </template>
 
+        <template #decisions>
+          <PendingDecisionsList />
+        </template>
         <template #activity>
           <OverviewActivity />
         </template>

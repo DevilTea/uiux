@@ -8,12 +8,15 @@ import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { useSpecEditor } from '../../composables/useSpecEditor'
 import { useAccess } from '../../composables/useAccess'
+import { useDecisionActions } from '../../composables/useDecisionActions'
+import { decisionActionsFor, type DecisionAction } from '../../utils/decisions'
 import type { DecisionRead, ReferenceRead } from '../../composables/workbench-types'
 import { flattenWidgetTree } from '../../../src/preview/widget-tree'
 import { viewLocation } from '../../utils/workbench-routes'
 import { decisionChangedAt, decisionSourceThread, type SpecSectionKey } from '../../utils/widget-inspection'
 import SpecMentionText from './SpecMentionText.vue'
 import SpecSectionEditor from './SpecSectionEditor.vue'
+import DecisionDecideModal from './DecisionDecideModal.vue'
 
 /**
  * The Spec tab (brief e): the View's Spec as a document. Mono section markers, 14px prose at a
@@ -29,6 +32,33 @@ const shell = useWorkbenchShell()
 const { selectedView, selectedViewId, views, workspace, widgetTreeResult } = workbench
 const access = useAccess()
 const editor = useSpecEditor(workbench)
+const decisionActions = useDecisionActions()
+
+/**
+ * Defer, decide and reopen work on every device tier: they edit no prose, only a Decision's status.
+ * They wait while someone else holds the View's edit lease (the server refuses them with 423 too);
+ * deciding needs the human-only `decisions.decide`, so it is not offered without it.
+ */
+const viewHeld = computed(() => !!access.lockFor('view', selectedViewId.value))
+function offeredActions(status: DecisionRead['status']): readonly DecisionAction[] {
+	return decisionActionsFor(status).filter(action => decisionActions.can(action))
+}
+const deciding = ref<DecisionRead>()
+const decideOpen = ref(false)
+async function submitDecide(form: Readonly<{ summary: string; rationale: string }>): Promise<boolean> {
+	const decision = deciding.value
+	return !!decision && await decisionActions.decide(decision.id, form)
+}
+function actionLabel(action: DecisionAction): string {
+	return t(`decision.action.${action}`)
+}
+function actionAria(action: DecisionAction, decision: DecisionRead): string {
+	return t(`decision.action.${action}Named`, { question: decision.question })
+}
+function runAction(action: DecisionAction, decision: DecisionRead): void {
+	if (action === 'decide') { deciding.value = decision; decideOpen.value = true }
+	else void (action === 'defer' ? decisionActions.defer(decision.id) : decisionActions.reopen(decision.id))
+}
 
 const isDesktop = useMediaQuery(WORKBENCH_BREAKPOINTS.desktop)
 const notMobile = useMediaQuery('(min-width: 768px)')
@@ -328,6 +358,28 @@ function isHttp(uri: string): boolean {
               >
                 <span class="sr-only">{{ `${t('spec.rationale')} ` }}</span>{{ decision.outcome.rationale }}
               </p>
+              <div
+                v-if="offeredActions(decision.status).length"
+                role="group"
+                :aria-label="t('decision.action.group')"
+                class="flex flex-wrap gap-1.5"
+                data-decision-actions
+              >
+                <UButton
+                  v-for="action in offeredActions(decision.status)"
+                  :key="action"
+                  color="neutral"
+                  variant="outline"
+                  size="sm"
+                  class="pointer-coarse:min-h-11"
+                  :label="actionLabel(action)"
+                  :aria-label="actionAria(action, decision)"
+                  :loading="decisionActions.busy.value === decision.id"
+                  :disabled="viewHeld || (!!decisionActions.busy.value && decisionActions.busy.value !== decision.id)"
+                  :data-decision-action="action"
+                  @click="runAction(action, decision)"
+                />
+              </div>
               <p class="flex flex-wrap items-center gap-x-2 text-xs text-dimmed">
                 <time
                   v-if="decisionChangedAt(decision)"
@@ -436,6 +488,14 @@ function isHttp(uri: string): boolean {
           </ul>
         </div>
       </section>
+
+      <DecisionDecideModal
+        v-model:open="decideOpen"
+        :question="deciding?.question ?? ''"
+        :busy="!!deciding && decisionActions.busy.value === deciding.id"
+        :lang="authoredLang"
+        :submit="submitDecide"
+      />
     </template>
 
     <UEmpty

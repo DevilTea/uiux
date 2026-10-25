@@ -570,6 +570,9 @@
       "rationaleLabel": "理由",
       "rationalePlaceholder": "討論得出此結論的原因…",
       "submit": "升級",
+      "anotherTitle": "建立另一個 Decision",
+      "anotherDescription": "從這個討論串另外記錄一個獨立的 Decision，先前的 Decision 維持不變。",
+      "anotherSubmit": "建立 Decision",
       "conflict": {
         "review": "升級期間這個討論串已有變更。",
         "view": "升級期間這個 View 已有變更。",
@@ -578,7 +581,8 @@
       }
     },
     "feedback": {
-      "promoted": "已升級為 Decision。"
+      "promoted": "已升級為 Decision。",
+      "anotherDecision": "已建立另一個 Decision。"
     }
   },
   "workbench": {
@@ -856,7 +860,47 @@
   "decision": {
     "pending": "待定",
     "decided": "已決定",
-    "deferred": "延後"
+    "deferred": "延後",
+    "action": {
+      "defer": "延後",
+      "decide": "決定…",
+      "reopen": "重新開啟",
+      "deferNamed": "延後：{question}",
+      "decideNamed": "決定：{question}",
+      "reopenNamed": "重新開啟：{question}",
+      "group": "此 Decision 的操作"
+    },
+    "decide": {
+      "title": "做出決定",
+      "description": "將這個 Decision 的結論記錄在 View Spec 中。",
+      "questionLabel": "問題",
+      "summaryLabel": "結論",
+      "summaryPlaceholder": "例如：核准，側邊面板改為可收合",
+      "rationaleLabel": "理由",
+      "rationalePlaceholder": "得出此結論的原因…",
+      "submit": "決定"
+    },
+    "feedback": {
+      "defer": "已延後 Decision。",
+      "decide": "已記錄 Decision 的決定。",
+      "reopen": "已重新開啟 Decision。"
+    },
+    "errors": {
+      "failed": "無法變更 Decision。",
+      "conflict": "你開啟後，這個 View 已有變更。",
+      "conflictHint": "已載入最新版本。請確認 Decision 的狀態後再試一次。",
+      "locked": "{name} 正在編輯這個 View，請稍後再試。"
+    },
+    "pendingList": {
+      "title": "待定的 Decision",
+      "count": "沒有待定的 Decision | {n} 個待定的 Decision | {n} 個待定的 Decision",
+      "empty": "沒有等待處理的 Decision。已延後與已決定的 Decision 仍保留在各 View 的 Spec 中。",
+      "loading": "正在載入 Decision",
+      "open": "在 {view} 中開啟 {question}",
+      "failed": "無法載入待定的 Decision。",
+      "retry": "再試一次",
+      "inView": "位於 {view}"
+    }
   },
   "conflict": {
     "thread": "開啟後這個討論串已有變更。"
@@ -1389,7 +1433,8 @@
     },
     "copyLink": "複製連結",
     "reanchor": "重新錨定",
-    "promote": "升級為 Decision"
+    "promote": "升級為 Decision",
+    "promoteAnother": "建立另一個 Decision"
   },
   "pins": {
     "unplaced": "{n} 則留言無法定位 | {n} 則留言無法定位",
@@ -1443,6 +1488,7 @@
     "tab": {
       "views": "Views",
       "checks": "檢查",
+      "decisions": "Decision",
       "activity": "動態"
     },
     "updated": "自你上次查看後已更新",
@@ -1830,6 +1876,7 @@
         "history": "歷程",
         "product_kit": "Product Kit",
         "reviews": "Review",
+        "decisions": "Decision",
         "views": "View",
         "flows": "UX Flow",
         "locales": "Locale",
@@ -1850,6 +1897,7 @@
         "reviews_submit": "將 Review 討論串送出為待審核，並重新開啟討論串。",
         "reviews_promote": "將 Review 提升為 Decision。",
         "reviews_resolve": "在 Workbench 中將 Review 討論串標記為已解決。",
+        "decisions_decide": "在 Workbench 中對 View Spec 內的 Decision 做出決定。",
         "views_write": "建立與編輯 View。",
         "flows_write": "建立與編輯 UX Flow。",
         "locales_write": "建立與編輯 Locale。",
@@ -2368,6 +2416,7 @@
       "history_missing_provenance": "歷程中有紀錄沒有記錄作者。",
       "history_stale_outcome": "歷程中有紀錄參照了舊的結論。",
       "history_state_mismatch": "Decision 的狀態與其歷程不一致。",
+      "id_in_use": "這個 Decision 識別碼已屬於另一個討論串的 Decision。",
       "invalid_actor": "變更必須記錄作者。",
       "invalid_history_outcome": "只有已決定的 Decision 可以記錄結論變更。",
       "invalid_history_transition": "Decision 無法變更為該狀態。",
@@ -2702,6 +2751,10 @@
       "createAsset": "新增了 Asset",
       "replaceAsset": "取代了 Asset",
       "promoteReviewToDecision": "將 Review 升級為 Decision",
+      "createDecisionFromReview": "從 Review 建立另一個 Decision",
+      "deferDecision": "延後了 Decision",
+      "decideDecision": "決定了 Decision",
+      "reopenDecision": "重新開啟了 Decision",
       "restoreResourceVersion": "還原了較早的版本"
     },
     "row": {
