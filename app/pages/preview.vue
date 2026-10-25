@@ -23,6 +23,7 @@ import {
 	type PreviewTargetingPurpose,
 } from '../../src/preview/protocol/transport'
 import type { TargetingContext, TargetingRuntimeMessage } from '../../src/preview/protocol/targeting'
+import { FAILURE_REPORTS_FEATURE } from '../../src/preview/protocol/failure-report'
 import { WIDGET_EVENTS_FEATURE, type WidgetEventArmMessage } from '../../src/preview/protocol/widget-events'
 import type { WidgetEventReport } from '../../src/preview/widget-event-observer'
 import type {
@@ -271,6 +272,17 @@ function reportWidgetEvent(report: WidgetEventReport) {
 	})
 }
 
+/**
+ * The capability features this runtime generation declares. `widget.events` and `failure.reports`
+ * belong to a Workbench Preview (decision 10; issue #312): a formal capture has no Workbench parent
+ * to arm it or to read a report, and a version frame is read-only with no recovery of its own.
+ */
+function declaredFeatures(): string[] {
+	const features = ['geometry', MULTI_TARGET_GEOMETRY_FEATURE]
+	if (!harnessMode.value && !versionId) features.push(WIDGET_EVENTS_FEATURE, FAILURE_REPORTS_FEATURE)
+	return features
+}
+
 function initBridge() {
 	if (typeof window === 'undefined') return
 	try {
@@ -279,7 +291,7 @@ function initBridge() {
 			runtimeGenerationId,
 			// `widget.events` ships with the mount factory (decision 10). A formal capture has no
 			// Workbench parent and is never armed, and a version frame is read-only: neither declares it.
-			{ protocolVersion: 1, features: harnessMode.value || versionId ? ['geometry', MULTI_TARGET_GEOMETRY_FEATURE] : ['geometry', MULTI_TARGET_GEOMETRY_FEATURE, WIDGET_EVENTS_FEATURE] },
+			{ protocolVersion: 1, features: declaredFeatures() },
 			// Transport-level batching (see `PreviewWireBatchEnvelope`): every envelope of one task (a
 			// frame's geometry reports, a Widget Event occurrence) leaves in one post, in order.
 			createBatchingWireSender((post) => {
@@ -578,6 +590,10 @@ watch(() => materializationResult.value?.status === 'blocked', (blocked) => {
 function receiveWire(input: unknown) {
 	if (!runtimeBridge) return
 	const bridgeResult = runtimeBridge.receive(input)
+	// An envelope of this session and generation that does not decode is an established violation
+	// in the Workbench's traffic: the generation ends with one `protocol.invalid_message` report
+	// (Clause 01a11a70-4261-7155-8aed-28bed7a89064). The bridge reports nothing for stale traffic.
+	if (bridgeResult.status === 'invalid') runtimeBridge.reportInvalidTraffic(input, bridgeResult.diagnostics)
 	if (bridgeResult.status !== 'accepted') return
 	const message = bridgeResult.message
 	if (message.type === 'capability.ack') handshakeStatus.value = 'open'

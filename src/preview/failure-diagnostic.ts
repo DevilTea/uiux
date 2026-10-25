@@ -7,8 +7,9 @@ import {
 
 /**
  * Preview failure diagnostics the Workbench derives itself (issue #111). A failure the runtime
- * detects would arrive as `failure.report`, which is not built yet (issue #312); every diagnostic
- * here comes from what the Workbench's own bridge observed (Clause 01a11687-415c-79d5-9978-62683f35e9e2).
+ * detects arrives as `failure.report` and is turned into its diagnostic by `failureReportDiagnostic`
+ * (issue #312); every diagnostic here comes from what the Workbench's own bridge observed (Clause
+ * 01a11687-415c-79d5-9978-62683f35e9e2).
  */
 
 /** What one received envelope did to the Workbench's view of the handshake. */
