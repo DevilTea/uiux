@@ -42,6 +42,8 @@ import {
 } from '../../adapters/resolution'
 import { adapterFreshnessContext } from '../../domain/evidence/adapter-provenance'
 import { adapterEntryProvenance, adapterSetEvidenceProvenance, kitBuildAllowsAdapterProvenance, resolveProductKitAdapterSet, withSettledKitBuild, type AdapterGraphDigestCache, type AdapterProvenanceSource } from './adapter-provenance'
+import { adapterResolutionBase } from '../../adapters/resolution'
+import { createAdapterSourceResolver, type AdapterSourceRef } from './adapter-sources'
 import { bareSpecifierPackageName } from '../../adapters/kit-dependencies'
 import { resolveKitPackage } from '../../adapters/kit-packages'
 import { locateKitProject, type KitProject } from '../../adapters/kit-registry'
@@ -798,6 +800,7 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 			}
 		}
 
+		const sourceResolver = createAdapterSourceResolver(adapterResolutionBase(persistence.root, persistence.layout))
 		for (const widgetType of usedWidgetTypes) {
 			if (widgetType === 'RootShell') {
 				// RootShell's source and the public Adapter authoring entry's declarations, which define the
@@ -877,12 +880,33 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 				: undefined
 
 			if (matchingEntry) {
+				// Rules 01a115cd-cbcc-7ae2-856e-b0fe1248c1ac and 01a11a5a-5845-7fc4-99b8-b0fe62039460: the
+				// Adapter's own mapping selects the curated sources; without one, its entry module stands in for
+				// both, and the reference says so.
+				const sources = matchingEntry.manifest.sources
+				const mapping = sources && Object.hasOwn(sources, widgetType) ? sources[widgetType] : undefined
+				if (mapping) {
+					const mappedSource = async (ref: AdapterSourceRef): Promise<HandoffSourceReference> => {
+						const resolved = await sourceResolver.resolve(matchingEntry, ref)
+						const provenance = { ...resolved.provenance, selection: 'adapter-mapping' }
+						if (resolved.availability !== 'materialized' || !resolved.bytes) return { availability: resolved.availability, provenance }
+						const identity = await contentIdentity(resolved.bytes, materialize)
+						referencedArtifacts.set(identity, { kind: 'widget-source', artifact: identity, context: { widgetType } })
+						return { availability: 'materialized', provenance, contentDigest: identity }
+					}
+					implementationReferences.push({
+						widgetType,
+						semanticSource: await mappedSource(mapping.semantic),
+						rendererSource: await mappedSource(mapping.renderer),
+						...(mapping.designSystem ? { designSystemSource: await mappedSource(mapping.designSystem) } : {}),
+						...(mapping.supporting && mapping.supporting.length > 0 ? { supportingSources: await Promise.all(mapping.supporting.map(mappedSource)) } : {}),
+					})
+					continue
+				}
 				let contentDigest: string | undefined
-				let availability: 'materialized' | 'provenance-only' = 'provenance-only'
 				try {
 					const modBytes = await fs.readFile(matchingEntry.resolvedModule.resolvedPath)
 					contentDigest = await contentIdentity(modBytes, materialize)
-					availability = 'materialized'
 					referencedArtifacts.set(contentDigest, {
 						kind: 'widget-source',
 						artifact: contentDigest,
@@ -892,37 +916,20 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 				catch {
 					// Fall back to provenance-only
 				}
-
-				if (availability === 'materialized' && contentDigest) {
-					const sourceRef = {
-						availability: 'materialized' as const,
-						provenance: {
-							package: matchingEntry.resolvedModule.packageName || '@workspace',
-							path: matchingEntry.selection.moduleSpecifier,
-							revision: matchingEntry.resolvedModule.packageVersion || contentDigest,
-						},
-						contentDigest,
-					}
-					implementationReferences.push({
-						widgetType,
-						semanticSource: sourceRef,
-						rendererSource: sourceRef,
-					})
+				const fallbackProvenance = {
+					package: matchingEntry.resolvedModule.packageName || '@workspace',
+					path: matchingEntry.selection.moduleSpecifier,
+					...(contentDigest ? { revision: matchingEntry.resolvedModule.packageVersion || contentDigest } : {}),
+					selection: 'entry-module-fallback',
 				}
-				else {
-					const sourceRef = {
-						availability: 'provenance-only' as const,
-						provenance: {
-							package: matchingEntry.resolvedModule.packageName || '@workspace',
-							path: matchingEntry.selection.moduleSpecifier,
-						},
-					}
-					implementationReferences.push({
-						widgetType,
-						semanticSource: sourceRef,
-						rendererSource: sourceRef,
-					})
-				}
+				const sourceRef: HandoffSourceReference = contentDigest
+					? { availability: 'materialized', provenance: fallbackProvenance, contentDigest }
+					: { availability: 'provenance-only', provenance: fallbackProvenance }
+				implementationReferences.push({
+					widgetType,
+					semanticSource: sourceRef,
+					rendererSource: sourceRef,
+				})
 			}
 			else {
 				closureValid = false

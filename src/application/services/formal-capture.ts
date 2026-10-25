@@ -1,5 +1,6 @@
 import { chromium, type Browser } from 'playwright'
 import packageJson from '../../../package.json' with { type: 'json' }
+import playwrightPackage from 'playwright/package.json' with { type: 'json' }
 import { canonicalJsonBytes } from '../../domain/canonical-json'
 import { renderInputDigest } from '../../domain/evidence/render-input-digest'
 import {
@@ -438,6 +439,9 @@ export function createFormalCaptureService(
 							resources: provenanceResources,
 							versions: {
 								uiux: packageJson.version,
+								// Clause 01a115cd-cecb-747b-b28d-aa083893bff2: the engine that produced this capture.
+								playwright: playwrightPackage.version,
+								chromium: browser.version(),
 							},
 							...(productKit ? { productKit } : {}),
 							...(adapters.state === 'available' ? { adapters: adapters.adapters } : {}),

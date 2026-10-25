@@ -121,7 +121,27 @@ export type AdapterManifest<
 	themeSupport?: Readonly<{
 		supports: (themeId: string, context: Readonly<{ config: ReadonlyJsonValue | undefined }>) => boolean
 	}>
+	/**
+	 * The implementation sources Handoff records per Widget type this Adapter owns (Clause
+	 * 01a11a5a-4511-72d3-9269-cc112056f743): the Widget plugin's `semantic` source, its `renderer`
+	 * integration, optionally the `designSystem` component source and `supporting` files. Read only on the
+	 * server, for Handoff; the Preview bundle never receives it. A used Widget type without an entry is
+	 * traced to the Adapter's entry module.
+	 */
+	sources?: Readonly<Record<string, Readonly<{
+		semantic: AdapterSourceRef
+		renderer: AdapterSourceRef
+		designSystem?: AdapterSourceRef
+		supporting?: readonly AdapterSourceRef[]
+	}>>>
 }>
+
+/**
+ * One implementation source of a Widget type (Clause 01a11a5a-4511-72d3-9269-cc112056f743): a file, whose
+ * `path` is relative to its root (the Adapter's package root, `kit/` for a `./` Adapter, or the root of
+ * `package`) and which Handoff snapshots unless `embed` is `false`, or a provenance-only `url`.
+ */
+type AdapterSourceRef = Readonly<{ path: string; package?: string; embed?: boolean }> | Readonly<{ url: string }>
 
 /** A warning of RootShell's `t`; the union is closed, and another code needs a contract extension. */
 export type TranslationWarning =
