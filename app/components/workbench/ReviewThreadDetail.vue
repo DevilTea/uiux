@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import { useReviewInbox } from '../../composables/useReviewInbox'
+import { useWorkbench } from '../../composables/useWorkbench'
 import { useThreadActions } from '../../composables/useThreadActions'
 import type { InboxThread } from '../../utils/review-inbox'
 import ReviewTimeline from './ReviewTimeline.vue'
@@ -16,6 +17,7 @@ import ReplyConflictAlert from './ReplyConflictAlert.vue'
 import ReplyUpdatedNotice from './ReplyUpdatedNotice.vue'
 import { threadState } from '../../utils/reply-conflict'
 import { promoteConflictTitleKey } from '../../utils/promote-conflict'
+import { promotedIn } from '../../utils/decisions'
 import { latestEditableMessageId } from '../../utils/review-message-actions'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { isLockedError } from '../../utils/fetch-error'
@@ -36,6 +38,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const inbox = useReviewInbox()
+const workbench = useWorkbench()
 
 const thread = computed<InboxThread | undefined>(() => inbox.selected.value)
 const detail = computed(() => thread.value?.detail)
@@ -98,6 +101,7 @@ const actions = useThreadActions({
 	canReanchor: () => inbox.canReply.value && viewExists.value && !compact.value,
 	// Workspace threads have no Decision home (O3): re-anchor to a View's root first.
 	canPromote: () => inbox.canPromote.value && viewExists.value && !compact.value,
+	promoted: () => promotedIn(workbench.selectedView.value, thread.value),
 	canSubmit: () => canSubmit.value,
 	conflict: () => conflict.value,
 	error: () => error.value,
@@ -111,7 +115,7 @@ const actions = useThreadActions({
 		return ok
 	},
 	reopen: (id, why, expectedRevision) => inbox.reopen(id, why, expectedRevision),
-	promote: (id, form, expectedRevision) => inbox.promote(id, form, expectedRevision),
+	promote: (id, form, expectedRevision, decisionId) => inbox.promote(id, form, expectedRevision, decisionId),
 	submit: (id, draft, expectedRevision) => inbox.submit(id, draft, expectedRevision),
 	retract: id => inbox.retract(id),
 	reanchor: () => { if (thread.value) inbox.reanchorOnCanvas(thread.value) },
@@ -122,7 +126,7 @@ const {
 	activeSubmission, primaryResolution, resolveAs, resolveMenu,
 	pendingAction, reason, reasonInput, ask, confirmPending,
 	confirmingDelete, deleteRefused, retractConfirm, keepConfirmFocus, confirmDelete,
-	promoteOpen, submitPromote,
+	promoteOpen, promoteAnotherId, submitPromote,
 	submitOpen, submitError, submitConflict, submitForReview,
 	overflow,
 } = actions
@@ -627,6 +631,7 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
       :error="error"
       :conflict="conflict"
       :moved="promoteMoved"
+      :another="!!promoteAnotherId"
       :submit="submitPromote"
     />
   </div>

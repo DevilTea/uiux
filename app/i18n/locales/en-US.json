@@ -570,6 +570,9 @@
       "rationaleLabel": "Rationale",
       "rationalePlaceholder": "Why the discussion landed here…",
       "submit": "Promote",
+      "anotherTitle": "Create another Decision",
+      "anotherDescription": "Record a separate Decision from this thread. The earlier Decision stays as it is.",
+      "anotherSubmit": "Create Decision",
       "conflict": {
         "review": "This thread changed while you were promoting it.",
         "view": "This View changed while you were promoting the thread.",
@@ -578,7 +581,8 @@
       }
     },
     "feedback": {
-      "promoted": "Promoted to Decision."
+      "promoted": "Promoted to Decision.",
+      "anotherDecision": "Created another Decision."
     }
   },
   "workbench": {
@@ -856,7 +860,45 @@
   "decision": {
     "pending": "Pending",
     "decided": "Decided",
-    "deferred": "Deferred"
+    "deferred": "Deferred",
+    "action": {
+      "defer": "Defer",
+      "decide": "Decide…",
+      "reopen": "Reopen",
+      "deferNamed": "Defer: {question}",
+      "decideNamed": "Decide: {question}",
+      "reopenNamed": "Reopen: {question}",
+      "group": "Actions for this Decision"
+    },
+    "decide": {
+      "title": "Decide",
+      "description": "Record the outcome of this Decision in the View Spec.",
+      "questionLabel": "Question",
+      "summaryLabel": "Outcome",
+      "summaryPlaceholder": "e.g. Approved with collapsible side panels",
+      "rationaleLabel": "Rationale",
+      "rationalePlaceholder": "Why this is the outcome…",
+      "submit": "Decide"
+    },
+    "feedback": {
+      "defer": "Decision deferred.",
+      "decide": "Decision decided.",
+      "reopen": "Decision reopened."
+    },
+    "errors": {
+      "failed": "Could not change the Decision.",
+      "conflict": "The View changed since you opened it.",
+      "conflictHint": "The latest version is loaded. Check the Decision, then try again.",
+      "locked": "{name} is editing this View. Try again when they are done."
+    },
+    "pending": {
+      "title": "Pending Decisions",
+      "count": "No pending Decisions | {n} pending Decision | {n} pending Decisions",
+      "empty": "No Decisions are waiting. Deferred and decided Decisions stay in each View's Spec.",
+      "loading": "Loading Decisions",
+      "open": "Open {question} in {view}",
+      "inView": "In {view}"
+    }
   },
   "conflict": {
     "thread": "This thread changed since you opened it."
@@ -1389,7 +1431,8 @@
     },
     "copyLink": "Copy link",
     "reanchor": "Re-anchor",
-    "promote": "Promote to Decision"
+    "promote": "Promote to Decision",
+    "promoteAnother": "Create another Decision"
   },
   "pins": {
     "unplaced": "{n} comment can't be placed | {n} comments can't be placed",
@@ -1443,6 +1486,7 @@
     "tab": {
       "views": "Views",
       "checks": "Checks",
+      "decisions": "Decisions",
       "activity": "Activity"
     },
     "updated": "Updated since you last looked",
