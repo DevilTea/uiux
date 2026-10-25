@@ -139,6 +139,10 @@ const ROLE_MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; 
 	createView: { min: 'editor' },
 	updateViewSpec: { min: 'editor' },
 	updateViewStructure: { min: 'editor' },
+	// Added with the reference-impact acknowledgement (issue #75): the kind's write key, an Agent included.
+	deleteView: { min: 'editor' },
+	deleteFlow: { min: 'editor' },
+	deleteAsset: { min: 'editor' },
 	// Added with the View metadata operation (issue #56): `views.write`, like the other View writes.
 	updateViewMetadata: { min: 'editor' },
 	updateWorkspaceSettings: { min: 'editor' },
@@ -216,8 +220,8 @@ describe('parity: role-derived keys decide as the role matrix did', () => {
 				if ((denied === undefined) !== before) changed.push(`${id}: ${before ? 'allowed' : 'refused'} → ${denied ? 'refused' : 'allowed'}`)
 			}
 		}
-		// 59 operations, 7 lease acquires and 6 restores, for 16 members and the system credential.
-		expect(compared).toBe(72 * 17)
+		// 62 operations, 7 lease acquires and 6 restores, for 16 members and the system credential.
+		expect(compared).toBe(75 * 17)
 		expect(changed.sort()).toEqual([...INTENDED_CHANGES].sort())
 	})
 

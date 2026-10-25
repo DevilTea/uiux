@@ -86,6 +86,7 @@ describe('history constants', () => {
 			'updateViewSpec',
 			'updateViewStructure',
 			'updateViewMetadata',
+			'deleteView',
 			'updateWorkspaceSettings',
 			'composeProductKit',
 			'updateProductKit',
@@ -95,8 +96,10 @@ describe('history constants', () => {
 			'updateLocale',
 			'createFlow',
 			'updateFlow',
+			'deleteFlow',
 			'createAsset',
 			'replaceAsset',
+			'deleteAsset',
 			'promoteReviewToDecision',
 			'createDecisionFromReview',
 			'deferDecision',
@@ -202,7 +205,7 @@ describe('version record validators', () => {
 		expect(codes(validateHistoryActor({ ...HUMAN, role: 'owner' }))).toEqual(['schema.unknown_field'])
 
 		expect(codes(validateCheckpointRecord(checkpoint({ source: 'http' })))).toEqual(['history.invalid_source'])
-		expect(codes(validateWriteEvent(writeEvent({ operation: 'deleteView' })))).toEqual(['history.invalid_operation'])
+		expect(codes(validateWriteEvent(writeEvent({ operation: 'deleteResource' })))).toEqual(['history.invalid_operation'])
 		expect(codes(validateWriteEvent(writeEvent({ beforeRevision: null })))).toEqual([])
 		const { afterRevision: _omitted, ...missing } = writeEvent()
 		void _omitted

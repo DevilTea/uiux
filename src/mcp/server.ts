@@ -79,11 +79,34 @@ const updateViewSpecSchema = z.object({
 	spec: viewSpecContentSchema,
 }).strict()
 
+// Clause 01a172ce-bdef-7cf6-bf8c-770dc9dd5e34: restore-shaped acknowledgement of the reference impact.
+const ACKNOWLEDGE_IMPACT_DESCRIPTION = 'Set true to write after reviewing the impacts an earlier call returned with impact_acknowledgement_required.'
+
 const updateViewStructureSchema = z.object({
 	viewId: z.string(),
 	expectedRevision: z.string(),
 	ir: z.record(z.string(), z.unknown()),
 	variants: z.record(z.string(), z.unknown()),
+	acknowledgeImpact: z.boolean().optional().describe(ACKNOWLEDGE_IMPACT_DESCRIPTION),
+}).strict()
+
+// Clause 01a172ce-ebcc-7a79-8103-ff5339409948.
+const deleteViewSchema = z.object({
+	viewId: z.string(),
+	expectedRevision: z.string(),
+	acknowledgeImpact: z.boolean().optional().describe(ACKNOWLEDGE_IMPACT_DESCRIPTION),
+}).strict()
+
+const deleteFlowSchema = z.object({
+	flowId: z.string(),
+	expectedRevision: z.string(),
+	acknowledgeImpact: z.boolean().optional().describe(ACKNOWLEDGE_IMPACT_DESCRIPTION),
+}).strict()
+
+const deleteAssetSchema = z.object({
+	assetId: z.string(),
+	expectedRevision: z.string(),
+	acknowledgeImpact: z.boolean().optional().describe(ACKNOWLEDGE_IMPACT_DESCRIPTION),
 }).strict()
 
 // Clause 01a15379-d8f7-7c0c-9b9a-05c07c64cc85: the service refuses a call that gives neither name nor feature as invalid.
@@ -125,6 +148,7 @@ const updateWorkspaceSettingsSchema = z.object({
 		}).catchall(z.unknown())),
 		themes: z.record(z.string(), z.record(z.string(), z.unknown())),
 	}).strict(),
+	acknowledgeImpact: z.boolean().optional().describe(ACKNOWLEDGE_IMPACT_DESCRIPTION),
 }).strict()
 
 // Clause 01a11bb1-b15c-734e-8968-c378db1444ca: the Product Kit operations; the domain validator reports member shapes.
@@ -649,7 +673,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'update_view_structure',
 		{
 			title: 'Update UIUX View Structure',
-			description: 'Replace the canonical View IR and Variants together while preserving View identity, name, feature, and View Spec. Requires the revision previously read by the caller. A Variant varies presentation only through author-writable State: each variants entry is exactly { state }, where state maps Widget IDs to State member overrides; any other entry key (config, id, name) is refused.',
+			description: 'Replace the canonical View IR and Variants together while preserving View identity, name, feature, and View Spec. Requires the revision previously read by the caller. A Variant varies presentation only through author-writable State: each variants entry is exactly { state }, where state maps Widget IDs to State member overrides; any other entry key (config, id, name) is refused. A Variant name the View has now and the new Variants lack counts as renamed or removed: when Review threads name it, or UX Flow steps or View Spec references target it, nothing is written and the result is impact_acknowledgement_required with impacts; call again with acknowledgeImpact true to write (nothing referencing it is changed). A Variant nothing references is removed without acknowledgement.',
 			inputSchema: updateViewStructureSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
@@ -658,6 +682,22 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			expectedRevision: input.expectedRevision,
 			ir: input.ir as ViewResource['ir'],
 			variants: input.variants as ViewResource['variants'],
+			...(input.acknowledgeImpact === undefined ? {} : { acknowledgeImpact: input.acknowledgeImpact }),
+		})),
+	)
+
+	server.registerTool(
+		'delete_view',
+		{
+			title: 'Delete UIUX View',
+			description: 'Delete a whole View (its IR, Variants and Spec with its Decisions); nothing else changes: Review threads, UX Flow steps and View Spec references that name it keep their target and report as dangling. Needs views.write and the revision previously read by the caller; subject to the View\'s edit lease. Before deleting, the impact is analyzed (Review threads anchored in it, UX Flow steps targeting it, View Spec references to it, ready-for-review submissions naming it); when it is not empty nothing is deleted and the result is impact_acknowledgement_required with impacts: call again with acknowledgeImpact true to delete. Returns { status: "deleted", key, changeSummary, impacts? }. Refusals: conflict (re-read the View), locked, not_found, invalid_expected_revision, invalid, blocked (auth.scope_denied, workspace.schema_unsupported), impact_acknowledgement_required.',
+			inputSchema: deleteViewSchema,
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async input => authoringToolResult('view', await app.deleteView({
+			key: input.viewId,
+			expectedRevision: input.expectedRevision,
+			...(input.acknowledgeImpact === undefined ? {} : { acknowledgeImpact: input.acknowledgeImpact }),
 		})),
 	)
 
@@ -714,7 +754,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'update_workspace_settings',
 		{
 			title: 'Update UIUX Workspace Settings',
-			description: 'Update manifest-owned Workspace settings (i18n.defaultLocale, viewports, themes) with revision CAS while preserving schemaVersion. The Adapters are the Product Kit\'s (compose_product_kit, update_product_kit).',
+			description: 'Update manifest-owned Workspace settings (i18n.defaultLocale, viewports, themes) with revision CAS while preserving schemaVersion. The Adapters are the Product Kit\'s (compose_product_kit, update_product_kit). Removing or renaming a viewport or theme key changes its identity: nothing is written and the result is impact_acknowledgement_required with impacts (the threads whose render context names the key, formal Evidence that would become stale and the other impacts a restore of the settings lists); call again with acknowledgeImpact true to write.',
 			inputSchema: updateWorkspaceSettingsSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
@@ -725,6 +765,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 				viewports: input.settings.viewports as Record<string, ViewportPreset>,
 				themes: input.settings.themes as Record<string, ThemeEntry>,
 			},
+			...(input.acknowledgeImpact === undefined ? {} : { acknowledgeImpact: input.acknowledgeImpact }),
 		})),
 	)
 
@@ -894,6 +935,21 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			...(input.scenarioRef ? { scenarioRef: input.scenarioRef as JsonObject } : {}),
 			entryStepId: input.entryStepId,
 			steps: input.steps as Record<string, FlowStep>,
+		})),
+	)
+
+	server.registerTool(
+		'delete_flow',
+		{
+			title: 'Delete UIUX Flow',
+			description: 'Delete a whole UX Flow; nothing else changes. Needs flows.write and the revision previously read by the caller; subject to the Flow\'s edit lease. A non-empty reference impact (such as a ready-for-review submission naming the Flow) is written only with acknowledgeImpact true after an impact_acknowledgement_required result. Returns { status: "deleted", key, changeSummary, impacts? }. Refusals: conflict, locked, not_found, invalid_expected_revision, invalid, blocked, impact_acknowledgement_required.',
+			inputSchema: deleteFlowSchema,
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async input => authoringToolResult('flow', await app.deleteFlow({
+			flowId: input.flowId,
+			expectedRevision: input.expectedRevision,
+			...(input.acknowledgeImpact === undefined ? {} : { acknowledgeImpact: input.acknowledgeImpact }),
 		})),
 	)
 
@@ -1167,6 +1223,21 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			contentFilename: input.contentFilename,
 			mediaType: input.mediaType,
 			contentBase64: input.contentBase64,
+		})),
+	)
+
+	server.registerTool(
+		'delete_asset',
+		{
+			title: 'Delete UIUX Asset',
+			description: 'Delete a whole authored Asset (metadata and content); nothing else changes: the $asset bindings that name it keep their target and report as dangling. Needs assets.write and the revision previously read by the caller; subject to the Asset\'s edit lease. Before deleting, the impact is analyzed (the $asset bindings that would dangle, ready-for-review submissions naming it); when it is not empty nothing is deleted and the result is impact_acknowledgement_required with impacts: call again with acknowledgeImpact true to delete. Returns { status: "deleted", key, changeSummary, impacts? }. Refusals: conflict, locked, not_found, invalid_expected_revision, invalid, blocked, impact_acknowledgement_required.',
+			inputSchema: deleteAssetSchema,
+			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+		},
+		async input => authoringToolResult('asset', await app.deleteAsset({
+			assetId: input.assetId,
+			expectedRevision: input.expectedRevision,
+			...(input.acknowledgeImpact === undefined ? {} : { acknowledgeImpact: input.acknowledgeImpact }),
 		})),
 	)
 

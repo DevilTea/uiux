@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type { ResourceRevision } from '../dto/revisions'
 import { summarizeChange, type ChangeSummary } from '../dto/change-summary'
+import { analyzeImpact, withResource, type ImpactItem } from '../../domain/impact'
+import { readImpactWorkspace } from './impact-picture'
 import { validateResourceRevision } from '../dto/revisions'
 import { isFullUuid, type Diagnostic } from '../../domain/validation'
 import {
@@ -30,8 +32,17 @@ export type ReplaceAssetCommand = Readonly<{
 	contentBase64: string
 }>
 
+/** Deletes the whole authored Asset (Clause 01a172ce-ebcc-7a79-8103-ff5339409948). */
+export type DeleteAssetCommand = Readonly<{
+	assetId: string
+	expectedRevision: string
+	acknowledgeImpact?: boolean
+}>
+
 export type AssetAuthoringResult =
 	| Readonly<{ status: 'created' | 'updated'; key: string; revision: ResourceRevision; diagnostics: readonly Diagnostic[]; changeSummary: ChangeSummary }>
+	| Readonly<{ status: 'deleted'; key: string; changeSummary: ChangeSummary; impacts?: readonly ImpactItem[] }>
+	| Readonly<{ status: 'impact_acknowledgement_required'; key: string; impacts: readonly ImpactItem[] }>
 	| Readonly<{ status: 'already_exists'; key: string; currentRevision?: ResourceRevision }>
 	| Readonly<{ status: 'not_found'; key: string }>
 	| Readonly<{ status: 'conflict'; key: string; currentRevision: ResourceRevision }>
@@ -41,6 +52,7 @@ export type AssetAuthoringResult =
 export type AssetAuthoringService = Readonly<{
 	createAsset(command: CreateAssetCommand): Promise<AssetAuthoringResult>
 	replaceAsset(command: ReplaceAssetCommand): Promise<AssetAuthoringResult>
+	deleteAsset(command: DeleteAssetCommand): Promise<AssetAuthoringResult>
 }>
 
 export function createAssetAuthoringService(persistence: FileNativePersistence): AssetAuthoringService {
@@ -145,5 +157,39 @@ export function createAssetAuthoringService(persistence: FileNativePersistence):
 		return { status: 'updated', key: command.assetId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 	}
 
-	return { createAsset, replaceAsset }
+	/**
+	 * Clause 01a172ce-ebcc-7a79-8103-ff5339409948: deletes the whole Asset (metadata and content) and
+	 * nothing else; the `$asset` bindings that name it keep their target identity and report as
+	 * dangling (Rule 01a1144e-5101-78bb-9748-5bdabb1c013b), and a non-empty impact is deleted only
+	 * when acknowledged.
+	 */
+	async function deleteAsset(command: DeleteAssetCommand): Promise<AssetAuthoringResult> {
+		if (!isFullUuid(command.assetId))
+			return {
+				status: 'invalid',
+				key: command.assetId,
+				diagnostics: [{ code: 'identity.invalid_uuid', path: '/assetId', message: 'Asset id must be a full UUID.' }],
+			}
+		const expectedRevision = validateResourceRevision(command.expectedRevision, '/expectedRevision')
+		if (!expectedRevision.ok)
+			return { status: 'invalid_expected_revision', key: command.assetId, diagnostics: expectedRevision.diagnostics }
+		const current = await persistence.assets.read(command.assetId)
+		if (!current) return { status: 'not_found', key: command.assetId }
+		if (current.revision !== expectedRevision.value)
+			return { status: 'conflict', key: command.assetId, currentRevision: current.revision }
+
+		const before = await readImpactWorkspace(persistence)
+		const impacts = analyzeImpact(before, withResource(before, { kind: 'asset', key: command.assetId }, undefined, undefined))
+		if (impacts.length > 0 && command.acknowledgeImpact !== true)
+			return { status: 'impact_acknowledgement_required', key: command.assetId, impacts }
+
+		const deleted = await persistence.assets.deleteIfRevision({ key: command.assetId, expectedRevision: expectedRevision.value })
+		switch (deleted.status) {
+			case 'conflict': return { status: 'conflict', key: command.assetId, currentRevision: deleted.currentRevision }
+			case 'deleted': return { status: 'deleted', key: command.assetId, changeSummary: summarizeChange(current.resource, undefined), ...(impacts.length > 0 ? { impacts } : {}) }
+			default: return { status: 'not_found', key: command.assetId }
+		}
+	}
+
+	return { createAsset, replaceAsset, deleteAsset }
 }

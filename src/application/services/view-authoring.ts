@@ -1,5 +1,7 @@
 import type { ResourceRevision } from '../dto/revisions'
 import { summarizeChange, type ChangeSummary } from '../dto/change-summary'
+import { analyzeImpact, variantImpact, withResource, type ImpactItem } from '../../domain/impact'
+import { nextSingleFileRevision, readImpactWorkspace } from './impact-picture'
 import { validateResourceRevision } from '../dto/revisions'
 import { transitionDecision, type Decision, type DecisionActor, type DecisionOutcome, type DecisionStatus, type Reference, type ViewSpec } from '../../domain/spec/schema'
 import { isFullUuid, type Diagnostic } from '../../domain/validation'
@@ -34,6 +36,15 @@ export type UpdateViewStructureCommand = Readonly<{
 	expectedRevision: string
 	ir: ViewResource['ir']
 	variants: ViewResource['variants']
+	/** Acknowledges the impact of removing a Variant name (Clause 01a172ce-bdef-7cf6-bf8c-770dc9dd5e34). */
+	acknowledgeImpact?: boolean
+}>
+
+/** Deletes the whole View (Clause 01a172ce-ebcc-7a79-8103-ff5339409948). */
+export type DeleteViewCommand = Readonly<{
+	key: string
+	expectedRevision: string
+	acknowledgeImpact?: boolean
 }>
 
 /**
@@ -61,7 +72,9 @@ export type DecisionLifecycleCommand = Readonly<{
 export type DecideDecisionCommand = DecisionLifecycleCommand & Readonly<{ outcome: DecisionOutcome }>
 
 export type ViewAuthoringResult =
-	| Readonly<{ status: 'created' | 'updated'; key: string; revision: ResourceRevision; diagnostics: readonly Diagnostic[]; changeSummary: ChangeSummary; decision?: Decision }>
+	| Readonly<{ status: 'created' | 'updated'; key: string; revision: ResourceRevision; diagnostics: readonly Diagnostic[]; changeSummary: ChangeSummary; decision?: Decision; impacts?: readonly ImpactItem[] }>
+	| Readonly<{ status: 'deleted'; key: string; changeSummary: ChangeSummary; impacts?: readonly ImpactItem[] }>
+	| Readonly<{ status: 'impact_acknowledgement_required'; key: string; impacts: readonly ImpactItem[] }>
 	| Readonly<{ status: 'already_exists'; key: string; currentRevision?: ResourceRevision }>
 	| Readonly<{ status: 'not_found'; key: string }>
 	| Readonly<{ status: 'conflict'; key: string; currentRevision: ResourceRevision }>
@@ -72,6 +85,7 @@ export type ViewAuthoringService = Readonly<{
 	createView(command: CreateViewCommand): Promise<ViewAuthoringResult>
 	updateViewSpec(command: UpdateViewSpecCommand): Promise<ViewAuthoringResult>
 	updateViewStructure(command: UpdateViewStructureCommand): Promise<ViewAuthoringResult>
+	deleteView(command: DeleteViewCommand): Promise<ViewAuthoringResult>
 	updateViewMetadata(command: UpdateViewMetadataCommand): Promise<ViewAuthoringResult>
 	deferDecision(command: DecisionLifecycleCommand): Promise<ViewAuthoringResult>
 	decideDecision(command: DecideDecisionCommand): Promise<ViewAuthoringResult>
@@ -162,6 +176,16 @@ export function createViewAuthoringService(persistence: FileNativePersistence): 
 		if (!validation.ok)
 			return { status: 'invalid', key: command.key, diagnostics: validation.diagnostics }
 
+		// Rule 01a172ce-2b4d-70dc-ab08-bd22c71fd1c7: a Variant name present before and absent after is
+		// renamed or removed, and what names it needs the caller's acknowledgement.
+		let impacts: readonly ImpactItem[] = []
+		if (removesVariantName(current.resource, next)) {
+			const before = await readImpactWorkspace(persistence)
+			impacts = variantImpact(before, withResource(before, { kind: 'view', key: command.key }, next, nextSingleFileRevision('view', next)))
+			if (impacts.length > 0 && command.acknowledgeImpact !== true)
+				return { status: 'impact_acknowledgement_required', key: command.key, impacts }
+		}
+
 		const commit = await persistence.views.compareAndSwap({
 			key: command.key,
 			expectedRevision: expectedRevision.value,
@@ -170,7 +194,40 @@ export function createViewAuthoringService(persistence: FileNativePersistence): 
 		if (!commit.ok)
 			return { status: 'conflict', key: command.key, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.views.readInspected(command.key)
-		return { status: 'updated', key: command.key, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
+		return { status: 'updated', key: command.key, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next), ...(impacts.length > 0 ? { impacts } : {}) }
+	}
+
+	/**
+	 * Clause 01a172ce-ebcc-7a79-8103-ff5339409948: deletes the whole View and nothing else. The impact on
+	 * what names the View (Rule 01a172ce-280b-7cec-9ca5-ec189b313ebe) is analyzed first; a non-empty one
+	 * is deleted only when acknowledged, and no referencing resource is cascaded, rebound or rewritten.
+	 */
+	async function deleteView(command: DeleteViewCommand): Promise<ViewAuthoringResult> {
+		if (!isFullUuid(command.key))
+			return {
+				status: 'invalid',
+				key: command.key,
+				diagnostics: [{ code: 'identity.invalid_uuid', path: '/viewId', message: 'View id must be a full UUID.' }],
+			}
+		const expectedRevision = validateResourceRevision(command.expectedRevision, '/expectedRevision')
+		if (!expectedRevision.ok)
+			return { status: 'invalid_expected_revision', key: command.key, diagnostics: expectedRevision.diagnostics }
+		const current = await persistence.views.read(command.key)
+		if (!current) return { status: 'not_found', key: command.key }
+		if (current.revision !== expectedRevision.value)
+			return { status: 'conflict', key: command.key, currentRevision: current.revision }
+
+		const before = await readImpactWorkspace(persistence)
+		const impacts = analyzeImpact(before, withResource(before, { kind: 'view', key: command.key }, undefined, undefined))
+		if (impacts.length > 0 && command.acknowledgeImpact !== true)
+			return { status: 'impact_acknowledgement_required', key: command.key, impacts }
+
+		const deleted = await persistence.views.deleteIfRevision({ key: command.key, expectedRevision: expectedRevision.value })
+		switch (deleted.status) {
+			case 'conflict': return { status: 'conflict', key: command.key, currentRevision: deleted.currentRevision }
+			case 'deleted': return { status: 'deleted', key: command.key, changeSummary: summarizeChange(current.resource, undefined), ...(impacts.length > 0 ? { impacts } : {}) }
+			default: return { status: 'not_found', key: command.key }
+		}
 	}
 
 	/**
@@ -282,11 +339,18 @@ export function createViewAuthoringService(persistence: FileNativePersistence): 
 		createView,
 		updateViewSpec,
 		updateViewStructure,
+		deleteView,
 		updateViewMetadata,
 		deferDecision: command => transition(command, 'deferred'),
 		decideDecision: command => transition(command, 'decided', command.outcome),
 		reopenDecision: command => transition(command, 'pending'),
 	}
+}
+
+/** Whether the write drops a Variant name the View has now. */
+function removesVariantName(current: ViewResource, next: ViewResource): boolean {
+	const kept = new Set(Object.keys(next.variants ?? {}))
+	return Object.keys(current.variants ?? {}).some(name => !kept.has(name))
 }
 
 /** A non-string is passed through so the View validator reports it. */

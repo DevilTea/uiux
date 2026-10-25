@@ -21,6 +21,11 @@ import type { ImpactWorkspace } from './model'
  * - `asset_reference_dangling`: a `$asset` binding in a View whose Asset would not exist.
  * - `flow_step_widget_missing`: a UX Flow step whose transition-trigger Widgets would no longer
  *   exist in the step's target View.
+ * - `review_variant_stale`: a Review thread with a Widget anchor in a View that still exists names a Variant
+ *   that exists before and not after (a Variant removed or renamed, issue #75).
+ * - `flow_step_target_missing`: a UX Flow step whose target View would stop existing, or whose named Variant
+ *   would stop existing in a View that stays.
+ * - `view_reference_dangling`: a View Spec `{ type: "view" }` reference whose View, or named Variant, would stop existing.
  * - `submission_revision_not_current` / `submission_revision_current`: a ready-for-review thread's
  *   current submission names a resource at a revision that would stop or start being current.
  * - `render_key_removed`: a viewport or theme key the change removes (a rename removes the old key),
@@ -38,6 +43,9 @@ export type ImpactItem =
 	| Readonly<{ category: 'i18n_reference_dangling'; viewId: string; i18nKey: string; pointers: readonly string[] }>
 	| Readonly<{ category: 'asset_reference_dangling'; viewId: string; assetId: string; pointers: readonly string[] }>
 	| Readonly<{ category: 'flow_step_widget_missing'; flowId: string; stepId: string; viewId: string; widgetIds: readonly string[] }>
+	| Readonly<{ category: 'review_variant_stale'; reviewId: string; reviewStatus?: string; viewId: string; variantNames: readonly string[] }>
+	| Readonly<{ category: 'flow_step_target_missing'; flowId: string; stepId: string; viewId: string; missing: 'view' | 'variant'; variantName?: string }>
+	| Readonly<{ category: 'view_reference_dangling'; viewId: string; targetViewId: string; missing: 'view' | 'variant'; variantName?: string; pointer: string }>
 	| Readonly<{ category: 'submission_revision_not_current' | 'submission_revision_current'; reviewId: string; submissionId: string; resource: ImpactResourceIdentity; revision: string }>
 	| Readonly<{ category: 'render_key_removed'; dimension: 'viewport' | 'theme'; key: string; reviewIds: readonly string[] }>
 	| Readonly<{ category: 'evidence_stale'; evidence: string; viewId?: string; reason: string }>
@@ -51,6 +59,9 @@ export const IMPACT_CATEGORIES: readonly ImpactCategory[] = Object.freeze([
 	'i18n_reference_dangling',
 	'asset_reference_dangling',
 	'flow_step_widget_missing',
+	'review_variant_stale',
+	'flow_step_target_missing',
+	'view_reference_dangling',
 	'submission_revision_not_current',
 	'submission_revision_current',
 	'render_key_removed',
@@ -68,6 +79,7 @@ export function analyzeImpact(before: ImpactWorkspace, after: ImpactWorkspace): 
 		...reviewAnchorImpact(before, after),
 		...bindingImpact(before, after),
 		...flowImpact(before, after),
+		...variantImpact(before, after),
 		...submissionImpact(before, after),
 		...renderKeyImpact(before, after),
 		...evidenceImpact(before, after),
@@ -212,6 +224,74 @@ function missingTriggers(workspace: ImpactWorkspace): Map<string, FlowTrigger> {
 		}
 	}
 	return missing
+}
+
+// ── Variants and View references ────────────────────────────────────────────────
+
+/** The categories a Variant removal (issue #75) can produce. */
+export const VARIANT_IMPACT_CATEGORIES: readonly ImpactCategory[] = Object.freeze(['review_variant_stale', 'flow_step_target_missing', 'view_reference_dangling'])
+
+/**
+ * What a change does to the Variants and Views other resources name: Review threads naming a Variant,
+ * UX Flow step targets and View Spec references. Only what was resolvable before and is not after
+ * is listed, so a reference that already dangled is never reported again.
+ */
+export function variantImpact(before: ImpactWorkspace, after: ImpactWorkspace): ImpactItem[] {
+	const stale: ImpactItem[] = []
+	const targets: ImpactItem[] = []
+	const references: ImpactItem[] = []
+	const variantNames = (workspace: ImpactWorkspace, viewId: string): ReadonlySet<string> | undefined => {
+		const view = workspace.views.get(viewId)
+		if (view === undefined) return undefined
+		const variants = asRecord(asRecord(view)?.variants)
+		return new Set(variants ? Object.keys(variants) : [])
+	}
+	/** 'view' when the target View existed before and does not now, 'variant' when its named Variant went, else undefined. */
+	const lost = (viewId: string, variantName: string | undefined): 'view' | 'variant' | undefined => {
+		const was = variantNames(before, viewId)
+		if (was === undefined) return undefined
+		const now = variantNames(after, viewId)
+		if (now === undefined) return 'view'
+		return variantName !== undefined && variantName !== '' && was.has(variantName) && !now.has(variantName) ? 'variant' : undefined
+	}
+
+	for (const thread of sortedThreads(after.reviews)) {
+		const anchor = widgetAnchor(thread.anchor)
+		if (!anchor) continue
+		const was = variantNames(before, anchor.viewId)
+		const now = variantNames(after, anchor.viewId)
+		if (was === undefined || now === undefined) continue
+		const names = (Array.isArray(asRecord(thread)?.variantNames) ? (asRecord(thread)!.variantNames as unknown[]) : [])
+			.filter((name): name is string => typeof name === 'string' && was.has(name) && !now.has(name))
+		if (names.length === 0) continue
+		stale.push({ category: 'review_variant_stale', reviewId: thread.id, ...(typeof thread.status === 'string' ? { reviewStatus: thread.status } : {}), viewId: anchor.viewId, variantNames: [...new Set(names)].sort(compare) })
+	}
+
+	for (const flowId of sortedKeys(after.flows)) {
+		const steps = asRecord(asRecord(after.flows.get(flowId))?.steps)
+		if (!steps) continue
+		for (const stepId of Object.keys(steps).sort(compare)) {
+			const target = asRecord(asRecord(steps[stepId])?.target)
+			const viewId = target?.viewId
+			if (typeof viewId !== 'string') continue
+			const variantName = typeof target?.variantName === 'string' ? target.variantName : undefined
+			const missing = lost(viewId, variantName)
+			if (missing) targets.push({ category: 'flow_step_target_missing', flowId, stepId, viewId, missing, ...(missing === 'variant' && variantName !== undefined ? { variantName } : {}) })
+		}
+	}
+
+	for (const viewId of sortedKeys(after.views)) {
+		const list = asRecord(asRecord(after.views.get(viewId))?.spec)?.references
+		if (!Array.isArray(list)) continue
+		list.forEach((entry, index) => {
+			const reference = asRecord(entry)
+			if (reference?.type !== 'view' || typeof reference.viewId !== 'string') return
+			const variantName = typeof reference.variantName === 'string' ? reference.variantName : undefined
+			const missing = lost(reference.viewId, variantName)
+			if (missing) references.push({ category: 'view_reference_dangling', viewId, targetViewId: reference.viewId, missing, ...(missing === 'variant' && variantName !== undefined ? { variantName } : {}), pointer: `/spec/references/${index}` })
+		})
+	}
+	return [...stale, ...targets, ...references]
 }
 
 // ── Ready-for-review submissions ───────────────────────────────────────────────

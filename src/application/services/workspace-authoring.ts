@@ -1,5 +1,7 @@
 import type { ResourceRevision } from '../dto/revisions'
 import { summarizeChange, type ChangeSummary } from '../dto/change-summary'
+import { analyzeImpact, withResource, type ImpactItem } from '../../domain/impact'
+import { nextSingleFileRevision, readImpactWorkspace } from './impact-picture'
 import { validateResourceRevision } from '../dto/revisions'
 import type { Diagnostic } from '../../domain/validation'
 import {
@@ -20,10 +22,13 @@ export type WorkspaceSettingsUpdate = Readonly<{
 export type UpdateWorkspaceSettingsCommand = Readonly<{
 	expectedRevision: string
 	settings: WorkspaceSettingsUpdate
+	/** Acknowledges the impact of removing or renaming a viewport or theme key (Clause 01a172ce-bdef-7cf6-bf8c-770dc9dd5e34). */
+	acknowledgeImpact?: boolean
 }>
 
 export type WorkspaceAuthoringResult =
-	| Readonly<{ status: 'updated'; key: 'workspace'; revision: ResourceRevision; diagnostics: readonly Diagnostic[]; changeSummary: ChangeSummary }>
+	| Readonly<{ status: 'updated'; key: 'workspace'; revision: ResourceRevision; diagnostics: readonly Diagnostic[]; changeSummary: ChangeSummary; impacts?: readonly ImpactItem[] }>
+	| Readonly<{ status: 'impact_acknowledgement_required'; key: 'workspace'; impacts: readonly ImpactItem[] }>
 	| Readonly<{ status: 'not_found'; key: 'workspace' }>
 	| Readonly<{ status: 'conflict'; key: 'workspace'; currentRevision: ResourceRevision }>
 	| Readonly<{ status: 'invalid_expected_revision'; key: 'workspace'; diagnostics: readonly Diagnostic[] }>
@@ -78,6 +83,16 @@ export function createWorkspaceAuthoringService(persistence: FileNativePersisten
 		const refused = guard?.({ current: current.resource, next })
 		if (refused !== undefined) return refused
 
+		// Rule 01a172ce-2e97-7d83-b175-f0d15f846768: removing or renaming a viewport or theme key needs
+		// the caller to acknowledge the impact a restore of the settings would list.
+		let impacts: readonly ImpactItem[] = []
+		if (removesRenderKey(current.resource, next)) {
+			const before = await readImpactWorkspace(persistence, { evidence: true })
+			impacts = analyzeImpact(before, withResource(before, { kind: 'workspace', key: 'workspace' }, next, nextSingleFileRevision('workspace', next)))
+			if (impacts.length > 0 && command.acknowledgeImpact !== true)
+				return { status: 'impact_acknowledgement_required', key: 'workspace', impacts }
+		}
+
 		try {
 			const commit = await persistence.workspace.compareAndSwap({
 				key: 'workspace',
@@ -87,7 +102,7 @@ export function createWorkspaceAuthoringService(persistence: FileNativePersisten
 			if (!commit.ok)
 				return { status: 'conflict', key: 'workspace', currentRevision: commit.conflict.currentRevision }
 			const inspected = await persistence.workspace.readInspected()
-			return { status: 'updated', key: 'workspace', revision: commit.revision, diagnostics: inspected.diagnostics, changeSummary: summarizeChange(current.resource, next) }
+			return { status: 'updated', key: 'workspace', revision: commit.revision, diagnostics: inspected.diagnostics, changeSummary: summarizeChange(current.resource, next), ...(impacts.length > 0 ? { impacts } : {}) }
 		}
 		catch (error) {
 			if (error instanceof PersistenceError) {
@@ -99,4 +114,10 @@ export function createWorkspaceAuthoringService(persistence: FileNativePersisten
 	}
 
 	return { updateWorkspaceSettings }
+}
+
+/** Whether the change drops a viewport or theme key the manifest has now (a rename drops the old key). */
+function removesRenderKey(current: WorkspaceManifest, next: WorkspaceManifest): boolean {
+	const dropped = (was: Readonly<Record<string, unknown>> | undefined, now: Readonly<Record<string, unknown>> | undefined) => Object.keys(was ?? {}).some(key => !Object.hasOwn(now ?? {}, key))
+	return dropped(current.viewports, next.viewports) || dropped(current.themes, next.themes)
 }

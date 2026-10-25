@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type { ResourceRevision } from '../dto/revisions'
 import { summarizeChange, type ChangeSummary } from '../dto/change-summary'
+import { analyzeImpact, withResource, type ImpactItem } from '../../domain/impact'
+import { readImpactWorkspace } from './impact-picture'
 import { validateResourceRevision } from '../dto/revisions'
 import { isFullUuid, type Diagnostic, type JsonObject } from '../../domain/validation'
 import { validateFlowResource, type FlowResource, type FlowStep } from '../../domain/flows/schema'
@@ -24,8 +26,17 @@ export type UpdateFlowCommand = Readonly<{
 	steps: Readonly<Record<string, FlowStep>>
 }>
 
+/** Deletes the whole UX Flow (Clause 01a172ce-ebcc-7a79-8103-ff5339409948). */
+export type DeleteFlowCommand = Readonly<{
+	flowId: string
+	expectedRevision: string
+	acknowledgeImpact?: boolean
+}>
+
 export type FlowAuthoringResult =
 	| Readonly<{ status: 'created' | 'updated'; key: string; revision: ResourceRevision; diagnostics: readonly Diagnostic[]; changeSummary: ChangeSummary }>
+	| Readonly<{ status: 'deleted'; key: string; changeSummary: ChangeSummary; impacts?: readonly ImpactItem[] }>
+	| Readonly<{ status: 'impact_acknowledgement_required'; key: string; impacts: readonly ImpactItem[] }>
 	| Readonly<{ status: 'already_exists'; key: string; currentRevision?: ResourceRevision }>
 	| Readonly<{ status: 'not_found'; key: string }>
 	| Readonly<{ status: 'conflict'; key: string; currentRevision: ResourceRevision }>
@@ -35,6 +46,7 @@ export type FlowAuthoringResult =
 export type FlowAuthoringService = Readonly<{
 	createFlow(command: CreateFlowCommand): Promise<FlowAuthoringResult>
 	updateFlow(command: UpdateFlowCommand): Promise<FlowAuthoringResult>
+	deleteFlow(command: DeleteFlowCommand): Promise<FlowAuthoringResult>
 }>
 
 export function createFlowAuthoringService(persistence: FileNativePersistence): FlowAuthoringService {
@@ -102,5 +114,37 @@ export function createFlowAuthoringService(persistence: FileNativePersistence): 
 		return { status: 'updated', key: command.flowId, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
 	}
 
-	return { createFlow, updateFlow }
+	/**
+	 * Clause 01a172ce-ebcc-7a79-8103-ff5339409948: deletes the whole Flow and nothing else; a non-empty
+	 * reference impact is deleted only when acknowledged (Clause 01a172ce-bdef-7cf6-bf8c-770dc9dd5e34).
+	 */
+	async function deleteFlow(command: DeleteFlowCommand): Promise<FlowAuthoringResult> {
+		if (!isFullUuid(command.flowId))
+			return {
+				status: 'invalid',
+				key: command.flowId,
+				diagnostics: [{ code: 'identity.invalid_uuid', path: '/flowId', message: 'Flow id must be a full UUID.' }],
+			}
+		const expectedRevision = validateResourceRevision(command.expectedRevision, '/expectedRevision')
+		if (!expectedRevision.ok)
+			return { status: 'invalid_expected_revision', key: command.flowId, diagnostics: expectedRevision.diagnostics }
+		const current = await persistence.flows.read(command.flowId)
+		if (!current) return { status: 'not_found', key: command.flowId }
+		if (current.revision !== expectedRevision.value)
+			return { status: 'conflict', key: command.flowId, currentRevision: current.revision }
+
+		const before = await readImpactWorkspace(persistence)
+		const impacts = analyzeImpact(before, withResource(before, { kind: 'flow', key: command.flowId }, undefined, undefined))
+		if (impacts.length > 0 && command.acknowledgeImpact !== true)
+			return { status: 'impact_acknowledgement_required', key: command.flowId, impacts }
+
+		const deleted = await persistence.flows.deleteIfRevision({ key: command.flowId, expectedRevision: expectedRevision.value })
+		switch (deleted.status) {
+			case 'conflict': return { status: 'conflict', key: command.flowId, currentRevision: deleted.currentRevision }
+			case 'deleted': return { status: 'deleted', key: command.flowId, changeSummary: summarizeChange(current.resource, undefined), ...(impacts.length > 0 ? { impacts } : {}) }
+			default: return { status: 'not_found', key: command.flowId }
+		}
+	}
+
+	return { createFlow, updateFlow, deleteFlow }
 }
