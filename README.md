@@ -49,7 +49,8 @@ MCP exposes compact read-only discovery plus domain-specific authoring operation
 - Workspace settings: `update_workspace_settings`
 - Locales: `create_locale`, `update_locale`
 - UX Flows: `create_flow`, `update_flow`
-- Reviews: `create_review_thread`, `append_review_message`, `edit_review_message`, `reanchor_review_thread`, `set_review_display_hint`, `submit_ready_for_review`, `resolve_review_thread`, `reopen_review_thread`, `promote_review_to_decision`, `retract_review_thread`
+- Reviews: `create_review_thread`, `append_review_message`, `edit_review_message`, `reanchor_review_thread`, `set_review_display_hint`, `submit_ready_for_review`, `resolve_review_thread`, `reopen_review_thread`, `promote_review_to_decision`, `create_decision_from_review`, `retract_review_thread`
+- Decisions: `defer_decision`, `decide_decision` (needs the human-only key `decisions.decide`, so a Workbench session), `reopen_decision`
 - Authored Assets: `create_asset`, `replace_asset`
 - Agent edit leases: `acquire_lock`, `release_lock`
 - Version history: `list_versions`, `get_version_diff`, `create_checkpoint`, `restore_resource_version`, plus the read-only Resource `uiux://version/{id}`

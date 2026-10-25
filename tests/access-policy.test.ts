@@ -127,6 +127,11 @@ const ROLE_MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; 
 	reopenReviewThread: { min: 'reviewer' },
 	setReviewDisplayHint: { min: 'reviewer' },
 	promoteReviewToDecision: { min: 'reviewer' },
+	// Added with the Decision lifecycle (issue #86): `reviews.promote`, `views.write` and the human-only `decisions.decide`.
+	createDecisionFromReview: { min: 'reviewer' },
+	deferDecision: { min: 'editor' },
+	reopenDecision: { min: 'editor' },
+	decideDecision: { min: 'owner', H: true, S: true },
 	editReviewMessage: { min: 'reviewer' },
 	retractReviewThread: { min: 'reviewer' },
 	resolveReviewThread: { min: 'reviewer', H: true, S: true },
@@ -211,8 +216,8 @@ describe('parity: role-derived keys decide as the role matrix did', () => {
 				if ((denied === undefined) !== before) changed.push(`${id}: ${before ? 'allowed' : 'refused'} → ${denied ? 'refused' : 'allowed'}`)
 			}
 		}
-		// 55 operations, 7 lease acquires and 6 restores, for 16 members and the system credential.
-		expect(compared).toBe(68 * 17)
+		// 59 operations, 7 lease acquires and 6 restores, for 16 members and the system credential.
+		expect(compared).toBe(72 * 17)
 		expect(changed.sort()).toEqual([...INTENDED_CHANGES].sort())
 	})
 
@@ -241,7 +246,7 @@ const PRESET_STEPS: readonly Readonly<{ id: AccessRole; name: string; adds: read
 	{ id: 'viewer', name: 'Viewer', adds: ['workspace.read', 'history.read', 'product-kit.source.read'] },
 	{ id: 'reviewer', name: 'Reviewer', adds: ['reviews.write', 'reviews.submit', 'reviews.promote', 'reviews.resolve', 'checkpoints.create'] },
 	{ id: 'editor', name: 'Editor', adds: ['views.write', 'flows.write', 'locales.write', 'assets.write', 'settings.write', 'product-kit.write', 'product-kit.compose', 'evidence.capture', 'handoff.export', 'history.restore'] },
-	{ id: 'owner', name: 'Owner', adds: ['checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'] },
+	{ id: 'owner', name: 'Owner', adds: ['decisions.decide', 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'] },
 ]
 
 describe('the permission key catalog (Clauses 01a11c09-a26e, 01a11c09-a200, 01a11c09-a2db, 01a11c09-a930, 01a11c09-a42a)', () => {
@@ -254,6 +259,7 @@ describe('the permission key catalog (Clauses 01a11c09-a26e, 01a11c09-a200, 01a1
 			'reviews.submit',
 			'reviews.promote',
 			'reviews.resolve',
+			'decisions.decide',
 			'views.write',
 			'flows.write',
 			'locales.write',
@@ -270,7 +276,7 @@ describe('the permission key catalog (Clauses 01a11c09-a26e, 01a11c09-a200, 01a1
 			'presets.manage',
 			'members.manage',
 		])
-		expect(HUMAN_ONLY_PERMISSION_KEYS).toEqual(['reviews.resolve', 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'])
+		expect(HUMAN_ONLY_PERMISSION_KEYS).toEqual(['reviews.resolve', 'decisions.decide', 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'])
 	})
 
 	it('accepts only `<domain>.<capability>` key names, every segment starting with a lowercase letter', () => {
@@ -291,6 +297,7 @@ describe('the permission key catalog (Clauses 01a11c09-a26e, 01a11c09-a200, 01a1
 			'reviews.submit': ['reviews.write'],
 			'reviews.promote': ['reviews.write'],
 			'reviews.resolve': ['reviews.write'],
+			'decisions.decide': ['workspace.read'],
 			'views.write': ['workspace.read'],
 			'flows.write': ['workspace.read'],
 			'locales.write': ['workspace.read'],

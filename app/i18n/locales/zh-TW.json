@@ -1830,6 +1830,7 @@
         "history": "歷程",
         "product_kit": "Product Kit",
         "reviews": "Review",
+        "decisions": "Decision",
         "views": "View",
         "flows": "UX Flow",
         "locales": "Locale",
@@ -1850,6 +1851,7 @@
         "reviews_submit": "將 Review 討論串送出為待審核，並重新開啟討論串。",
         "reviews_promote": "將 Review 提升為 Decision。",
         "reviews_resolve": "在 Workbench 中將 Review 討論串標記為已解決。",
+        "decisions_decide": "在 Workbench 中對 View Spec 內的 Decision 做出決定。",
         "views_write": "建立與編輯 View。",
         "flows_write": "建立與編輯 UX Flow。",
         "locales_write": "建立與編輯 Locale。",
@@ -2702,6 +2704,10 @@
       "createAsset": "新增了 Asset",
       "replaceAsset": "取代了 Asset",
       "promoteReviewToDecision": "將 Review 升級為 Decision",
+      "createDecisionFromReview": "從 Review 建立另一個 Decision",
+      "deferDecision": "延後了 Decision",
+      "decideDecision": "決定了 Decision",
+      "reopenDecision": "重新開啟了 Decision",
       "restoreResourceVersion": "還原了較早的版本"
     },
     "row": {

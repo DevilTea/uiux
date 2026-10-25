@@ -1830,6 +1830,7 @@
         "history": "History",
         "product_kit": "Product Kit",
         "reviews": "Reviews",
+        "decisions": "Decisions",
         "views": "Views",
         "flows": "UX Flows",
         "locales": "Locales",
@@ -1850,6 +1851,7 @@
         "reviews_submit": "Submit Review threads for review and reopen them.",
         "reviews_promote": "Promote a Review to a Decision.",
         "reviews_resolve": "Resolve Review threads in the Workbench.",
+        "decisions_decide": "Decide, in the Workbench, the Decisions in a View’s Spec.",
         "views_write": "Create and edit Views.",
         "flows_write": "Create and edit UX Flows.",
         "locales_write": "Create and edit Locales.",
@@ -2702,6 +2704,10 @@
       "createAsset": "Added the Asset",
       "replaceAsset": "Replaced the Asset",
       "promoteReviewToDecision": "Promoted a Review to a Decision",
+      "createDecisionFromReview": "Created another Decision from a Review",
+      "deferDecision": "Deferred a Decision",
+      "decideDecision": "Decided a Decision",
+      "reopenDecision": "Reopened a Decision",
       "restoreResourceVersion": "Restored an earlier version"
     },
     "row": {

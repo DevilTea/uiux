@@ -98,6 +98,10 @@ describe('history constants', () => {
 			'createAsset',
 			'replaceAsset',
 			'promoteReviewToDecision',
+			'createDecisionFromReview',
+			'deferDecision',
+			'decideDecision',
+			'reopenDecision',
 			'restoreResourceVersion',
 		])
 		expect(BASELINE_CHECKPOINT_NAME).toBe('Baseline')

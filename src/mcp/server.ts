@@ -94,6 +94,23 @@ const updateViewMetadataSchema = z.object({
 	feature: z.string().nullable().optional().describe('The new feature tag (a non-empty string), or null to remove the tag.'),
 }).strict()
 
+// Clause 01a17226-fafc-7691-99ff-aa3b20f5836f.
+const deferDecisionSchema = z.object({
+	viewId: z.string(),
+	decisionId: z.string(),
+	expectedRevision: z.string().describe('The View\'s revision previously read by the caller.'),
+}).strict()
+
+const decideDecisionSchema = z.object({
+	viewId: z.string(),
+	decisionId: z.string(),
+	expectedRevision: z.string().describe('The View\'s revision previously read by the caller.'),
+	outcome: z.object({
+		summary: z.string().describe('Non-empty after trimming.'),
+		rationale: z.string(),
+	}).strict(),
+}).strict()
+
 const updateWorkspaceSettingsSchema = z.object({
 	expectedRevision: z.string(),
 	settings: z.object({
@@ -334,6 +351,21 @@ const promoteReviewToDecisionSchema = z.object({
 	}).strict().optional(),
 	actor: reviewActorSchema.optional().describe(ACTOR_IGNORED_DESCRIPTION),
 	decisionId: z.string().optional(),
+}).strict()
+
+// Clause 01a17226-fca4-7a13-b38e-c51ffeb47c44.
+const createDecisionFromReviewSchema = z.object({
+	reviewId: z.string(),
+	viewId: z.string(),
+	decisionId: z.string().describe('A UUID you choose; a retry with the same decisionId returns the Decision it created instead of creating another.'),
+	expectedReviewRevision: z.string(),
+	expectedViewRevision: z.string(),
+	question: z.string(),
+	outcome: z.object({
+		summary: z.string(),
+		rationale: z.string(),
+	}).strict().optional(),
+	actor: reviewActorSchema.optional().describe(ACTOR_IGNORED_DESCRIPTION),
 }).strict()
 
 const createAssetSchema = z.object({
@@ -643,6 +675,39 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			...(input.name === undefined ? {} : { name: input.name }),
 			...(input.feature === undefined ? {} : { feature: input.feature }),
 		})),
+	)
+
+	server.registerTool(
+		'defer_decision',
+		{
+			title: 'Defer UIUX Decision',
+			description: 'Defer a pending Decision in a View\'s Spec (pending to deferred), appending a history entry with the stamped actor. Needs views.write and the View\'s revision previously read by the caller; subject to the View\'s edit lease. Refusals: conflict (re-read the View), locked, not_found (the View or the Decision), invalid_expected_revision, invalid (decision.invalid_transition when the Decision\'s status does not allow it).',
+			inputSchema: deferDecisionSchema,
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async input => authoringToolResult('view', await app.deferDecision({ key: input.viewId, decisionId: input.decisionId, expectedRevision: input.expectedRevision })),
+	)
+
+	server.registerTool(
+		'decide_decision',
+		{
+			title: 'Decide UIUX Decision',
+			description: 'Decide a pending or deferred Decision in a View\'s Spec with an outcome { summary, rationale }. Needs the humanOnly permission key decisions.decide, which only a human member\'s signed-in Workbench session holds: a bearer Token (this tool) is refused with auth.scope_denied. Otherwise like defer_decision: the View\'s revision, its edit lease and the same refusals.',
+			inputSchema: decideDecisionSchema,
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async input => authoringToolResult('view', await app.decideDecision({ key: input.viewId, decisionId: input.decisionId, expectedRevision: input.expectedRevision, outcome: input.outcome })),
+	)
+
+	server.registerTool(
+		'reopen_decision',
+		{
+			title: 'Reopen UIUX Decision',
+			description: 'Reopen a decided or deferred Decision in a View\'s Spec (back to pending): a decided Decision\'s current outcome is cleared and survives only in its history. Needs views.write; otherwise like defer_decision.',
+			inputSchema: deferDecisionSchema,
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+		},
+		async input => authoringToolResult('view', await app.reopenDecision({ key: input.viewId, decisionId: input.decisionId, expectedRevision: input.expectedRevision })),
 	)
 
 	server.registerTool(
@@ -999,6 +1064,41 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 				structuredContent: outcome,
 				isError: true,
 			}
+		},
+	)
+
+	server.registerTool(
+		'create_decision_from_review',
+		{
+			title: 'Create Another UIUX Decision From a Review',
+			description: 'Create another, independent Decision from a Review thread that already has one (promote_review_to_decision returns the existing Decision instead). Needs reviews.promote. You supply decisionId (a UUID): a retry with the same decisionId returns the Decision it created. Workspace-scoped threads refuse (review.decision_target_unavailable).',
+			inputSchema: createDecisionFromReviewSchema,
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async (input) => {
+			const outcome = await app.createDecisionFromReview({
+				reviewId: input.reviewId,
+				expectedReviewRevision: input.expectedReviewRevision,
+				viewId: input.viewId,
+				expectedViewRevision: input.expectedViewRevision,
+				decisionId: input.decisionId,
+				question: input.question,
+				...(input.outcome ? { outcome: input.outcome } : {}),
+				...(input.actor !== undefined ? { actor: input.actor } : {}),
+			})
+			if (outcome.status === 'created' || outcome.status === 'updated') {
+				const output = {
+					...outcome,
+					resourceUri: pointResourceUri({ kind: 'review', key: outcome.key }),
+					targetView: {
+						key: input.viewId,
+						revision: outcome.view?.revision ?? input.expectedViewRevision,
+						resourceUri: pointResourceUri({ kind: 'view', key: input.viewId }),
+					},
+				}
+				return { content: [{ type: 'text' as const, text: JSON.stringify(output) }], structuredContent: output }
+			}
+			return { content: [{ type: 'text' as const, text: JSON.stringify(outcome) }], structuredContent: outcome, isError: true }
 		},
 	)
 

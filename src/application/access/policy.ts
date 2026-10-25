@@ -64,6 +64,12 @@ export const ACCESS_OPERATIONS = {
 	submitReadyForReview: { requiredKeys: ['reviews.submit'] },
 	reopenReviewThread: { requiredKeys: ['reviews.submit'] },
 	promoteReviewToDecision: { requiredKeys: ['reviews.promote'] },
+	// Clause 01a11485-fa21-7b77-8ae5-1d7d0618e8a3: another Decision from a promoted thread.
+	createDecisionFromReview: { requiredKeys: ['reviews.promote'] },
+	// Clauses 01a11485-fa44-7b6a-99f8-de4e1e8edcfc (defer, reopen) and the `decisions.decide` Clause of the Access Contract (decide, `humanOnly`).
+	deferDecision: { requiredKeys: ['views.write'] },
+	reopenDecision: { requiredKeys: ['views.write'] },
+	decideDecision: { requiredKeys: ['decisions.decide'] },
 	// Clause 01a11485-fa87-7cf8-8ec1-275793457228; the HTTP refusal order is `resolutionRefusal`.
 	resolveReviewThread: { requiredKeys: ['reviews.resolve'] },
 	// `checkpoints.create`: humans and Agents, no lease.

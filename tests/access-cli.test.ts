@@ -627,7 +627,7 @@ describe('uiux member on permission keys and Access presets (issue #142)', () =>
 		expect(await run('member', 'set', 'mei', '--grant', 'reviews.write,future.capability', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('Updated mei: human, Custom, 5 keys.') })
 		expect((await storedMembers(home, workspace))[1]!.keys).toEqual([...presetKeys('viewer'), 'reviews.write', 'future.capability'])
 		const list = await run('member', 'list', '--workspace', workspace)
-		expect(list.out).toMatch(/deviltea\s+human\s+Owner\s+0\s+0\s+22$/mu)
+		expect(list.out).toMatch(/deviltea\s+human\s+Owner\s+0\s+0\s+23$/mu)
 		expect(list.out).toMatch(/mei\s+human\s+Custom\s+0\s+0\s+5$/mu)
 		const full = await run('member', 'list', '--keys', '--workspace', workspace)
 		expect(full.out).toMatch(/mei\s+human\s+Custom\s+0\s+0\s+workspace\.read, history\.read, product-kit\.source\.read, reviews\.write, future\.capability \(unknown\)$/mu)

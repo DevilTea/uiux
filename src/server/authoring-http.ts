@@ -87,6 +87,18 @@ const updateViewMetadataHttpSchema = z.object({
 	feature: z.string().nullable().optional(),
 }).strict()
 
+const decisionLifecycleHttpSchema = z.object({
+	expectedRevision: z.string(),
+}).strict()
+
+const decideDecisionHttpSchema = z.object({
+	expectedRevision: z.string(),
+	outcome: z.object({
+		summary: z.string(),
+		rationale: z.string(),
+	}).strict(),
+}).strict()
+
 const updateWorkspaceSettingsHttpSchema = z.object({
 	expectedRevision: z.string(),
 	settings: z.object({
@@ -294,6 +306,19 @@ const promoteReviewToDecisionHttpSchema = z.object({
 	decisionId: z.string().min(1).optional(),
 }).strict()
 
+const createDecisionFromReviewHttpSchema = z.object({
+	expectedReviewRevision: z.string(),
+	viewId: z.string(),
+	expectedViewRevision: z.string(),
+	decisionId: z.string(),
+	question: z.string(),
+	outcome: z.object({
+		summary: z.string(),
+		rationale: z.string(),
+	}).strict().optional(),
+	actor: reviewActorSchema.optional(),
+}).strict()
+
 const createAssetHttpSchema = z.object({
 	id: z.string().min(1).optional(),
 	name: z.string(),
@@ -409,6 +434,23 @@ export async function updateViewMetadataForHttp(app: ScopedWorkspaceSession, vie
 		...(data.name === undefined ? {} : { name: data.name }),
 		...(data.feature === undefined ? {} : { feature: data.feature }),
 	})
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
+}
+
+/** `POST /api/views/:id/decisions/:decisionId/defer` and `/reopen` (Clause 01a17226-fafc-7691-99ff-aa3b20f5836f). */
+export async function transitionDecisionForHttp(app: ScopedWorkspaceSession, action: 'defer' | 'reopen', viewId: string, decisionId: string, body: unknown): Promise<AuthoringHttpResult> {
+	const parsed = parseHttpPayload(decisionLifecycleHttpSchema, body)
+	if (!parsed.ok) return parsed.result
+	const command = { key: viewId, decisionId, expectedRevision: parsed.data.expectedRevision }
+	const result = action === 'defer' ? await app.deferDecision(command) : await app.reopenDecision(command)
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
+}
+
+/** `POST /api/views/:id/decisions/:decisionId/decide`: needs the `humanOnly` `decisions.decide`. */
+export async function decideDecisionForHttp(app: ScopedWorkspaceSession, viewId: string, decisionId: string, body: unknown): Promise<AuthoringHttpResult> {
+	const parsed = parseHttpPayload(decideDecisionHttpSchema, body)
+	if (!parsed.ok) return parsed.result
+	const result = await app.decideDecision({ key: viewId, decisionId, expectedRevision: parsed.data.expectedRevision, outcome: parsed.data.outcome })
 	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
@@ -705,6 +747,24 @@ export async function promoteReviewToDecisionForHttp(app: ScopedWorkspaceSession
 		...(data.outcome ? { outcome: data.outcome as DecisionOutcome } : {}),
 		...(data.actor !== undefined ? { actor: data.actor } : {}),
 		...(data.decisionId ? { decisionId: data.decisionId } : {}),
+	})
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
+}
+
+/** `POST /api/reviews/:id/decisions` (Clause 01a17226-fca4-7a13-b38e-c51ffeb47c44): another Decision from the thread. */
+export async function createDecisionFromReviewForHttp(app: ScopedWorkspaceSession, reviewId: string, body: unknown): Promise<AuthoringHttpResult> {
+	const parsed = parseHttpPayload(createDecisionFromReviewHttpSchema, body)
+	if (!parsed.ok) return parsed.result
+	const data = parsed.data
+	const result = await app.createDecisionFromReview({
+		reviewId,
+		expectedReviewRevision: data.expectedReviewRevision,
+		viewId: data.viewId,
+		expectedViewRevision: data.expectedViewRevision,
+		decisionId: data.decisionId,
+		question: data.question,
+		...(data.outcome ? { outcome: data.outcome as DecisionOutcome } : {}),
+		...(data.actor !== undefined ? { actor: data.actor } : {}),
 	})
 	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }

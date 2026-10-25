@@ -328,7 +328,7 @@ describe('a roster file edited by hand never grants more than the rules allow', 
 		await writeRoster(workspace, home, v2Roster(workspace, [v2Member('deviltea', 'human', presetKeys('owner')), v2Member('claude', 'agent', presetKeys('owner'))]))
 		const opened = AccessStore.open({ workspaceRoot: workspace, home })
 		await expect(opened).rejects.toMatchObject({ code: 'access.store_invalid' })
-		await expect(AccessStore.open({ workspaceRoot: workspace, home })).rejects.toThrow(/Agent member "claude" holds the humanOnly keys reviews\.resolve, checkpoints\.delete, locks\.force-release, presets\.manage, members\.manage/u)
+		await expect(AccessStore.open({ workspaceRoot: workspace, home })).rejects.toThrow(/Agent member "claude" holds the humanOnly keys reviews\.resolve, decisions\.decide, checkpoints\.delete, locks\.force-release, presets\.manage, members\.manage/u)
 	})
 
 	it('refuses malformed key lists at load: not key names, repeated keys, a missing list, or a version 2 member carrying only a role', async () => {

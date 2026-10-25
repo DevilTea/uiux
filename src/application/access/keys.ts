@@ -16,6 +16,7 @@ export const PERMISSION_KEYS = Object.freeze([
 	'reviews.submit',
 	'reviews.promote',
 	'reviews.resolve',
+	'decisions.decide',
 	'views.write',
 	'flows.write',
 	'locales.write',
@@ -38,7 +39,7 @@ export type PermissionKey = typeof PERMISSION_KEYS[number]
  * The catalog's `humanOnly` keys (same Clause). A `humanOnly` key takes effect only on a human
  * member's Workbench cookie session (Rule 01a11c09-bec8-7dee-971a-4c10eaf83eef).
  */
-export const HUMAN_ONLY_PERMISSION_KEYS: readonly PermissionKey[] = Object.freeze(['reviews.resolve', 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'])
+export const HUMAN_ONLY_PERMISSION_KEYS: readonly PermissionKey[] = Object.freeze(['reviews.resolve', 'decisions.decide', 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'])
 
 /**
  * Clause 01a11c09-a2db-74bb-abb3-1b8e24682221: the keys each key requires. `workspace.read`
@@ -124,7 +125,7 @@ const EDITOR_KEYS: readonly PermissionKey[] = [
 	'handoff.export',
 	'history.restore',
 ]
-const OWNER_KEYS: readonly PermissionKey[] = [...EDITOR_KEYS, 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage']
+const OWNER_KEYS: readonly PermissionKey[] = [...EDITOR_KEYS, 'decisions.decide', 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage']
 
 /** Clause 01a11c09-a930-7e31-bb0a-9e2bee79490c: the built-in Access presets, in order, keys in catalog order. */
 export const BUILT_IN_ACCESS_PRESETS: readonly BuiltInAccessPreset[] = Object.freeze([

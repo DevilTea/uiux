@@ -59,6 +59,10 @@ export const HISTORY_WRITE_OPERATIONS = Object.freeze([
 	'createAsset',
 	'replaceAsset',
 	'promoteReviewToDecision',
+	'createDecisionFromReview',
+	'deferDecision',
+	'decideDecision',
+	'reopenDecision',
 	'restoreResourceVersion',
 ] as const)
 export type HistoryWriteOperation = typeof HISTORY_WRITE_OPERATIONS[number]
