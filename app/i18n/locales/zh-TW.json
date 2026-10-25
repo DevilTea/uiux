@@ -2355,6 +2355,12 @@
       "whitespace_only_translation": "這個翻譯只有空白字元。"
     },
     "flow": {
+      "invalid_render_context": "請為 Flow Evidence 選擇 Locale、檢視區和主題。",
+      "recipe_assertion_failed": "配方斷言了 Flow 並不成立的內容。",
+      "recipe_invalid_shape": "配方的格式不正確。",
+      "recipe_orphan_trigger": "觸發必須緊接在同一步驟的進入動作之後。",
+      "recipe_unknown_step": "配方指名了 Flow 沒有的步驟。",
+      "recipe_unknown_trigger": "配方指名了該步驟沒有的觸發。",
       "ambiguous_trigger": "這個步驟有兩個轉場使用相同的觸發條件。",
       "dangling_entry_step": "起始步驟不存在。",
       "dangling_target_step": "有轉場指向不存在的步驟。",
@@ -2407,6 +2413,8 @@
       "stream_limit": "這個瀏覽器的即時更新連線數已達上限。此分頁改為定期檢查變更。"
     },
     "evidence": {
+      "flow_trace_mismatch": "Flow 軌跡與其配方和擷取內容不一致。",
+      "invalid_flow_trace": "Flow 軌跡紀錄無效。",
       "duplicate_adapter": "Evidence 重複記錄了同一個 Adapter。",
       "invalid_coverage": "Evidence 的涵蓋範圍紀錄無效。",
       "invalid_translation_coverage": "Evidence 的翻譯涵蓋範圍紀錄無效。",

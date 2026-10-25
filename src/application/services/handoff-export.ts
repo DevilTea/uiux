@@ -1,4 +1,6 @@
 import * as fs from 'node:fs/promises'
+import { flowReferenceDiagnostics } from '../../domain/flows/references'
+import { readViewReferenceTarget } from './flow-references'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import packageJson from '../../../package.json' with { type: 'json' }
@@ -284,6 +286,12 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 
 		// 1. Process Flows -> transitively add target Views
 		const flowSnapshots = new Map<string, HandoffResourceSnapshot>()
+		const viewTargets = new Map<string, ReturnType<typeof readViewReferenceTarget>>()
+		const viewReferenceTarget = (viewId: string) => {
+			let target = viewTargets.get(viewId)
+			if (!target) viewTargets.set(viewId, target = readViewReferenceTarget(persistence, viewId))
+			return target
+		}
 		// Each kind is read under ONE shared lock, not one lock per resource (issue #322).
 		const flowIds = [...flowsToInclude]
 		const flowReads = await persistence.flows.readManyInspected(flowIds)
@@ -299,9 +307,11 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 				})
 				continue
 			}
-			if (flowRead.diagnostics.length > 0) {
+			// Clause 01a172cc-e51b-78a2-b96b-d7788a02a823: reference diagnostics block like structural ones.
+			const flowDiagnostics = [...flowRead.diagnostics, ...await flowReferenceDiagnostics(flowRead.resource, viewReferenceTarget)]
+			if (flowDiagnostics.length > 0) {
 				closureValid = false
-				flowRead.diagnostics.forEach(d => {
+				flowDiagnostics.forEach(d => {
 					blockingDiagnostics.push({
 						code: d.code,
 						message: d.message,

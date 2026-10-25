@@ -2355,6 +2355,12 @@
       "whitespace_only_translation": "This translation contains only spaces."
     },
     "flow": {
+      "invalid_render_context": "Choose a Locale, viewport and theme for the Flow Evidence.",
+      "recipe_assertion_failed": "The recipe asserts something the Flow does not hold.",
+      "recipe_invalid_shape": "The recipe is not in the expected shape.",
+      "recipe_orphan_trigger": "A trigger must directly follow an enter of the same step.",
+      "recipe_unknown_step": "The recipe names a step the Flow does not have.",
+      "recipe_unknown_trigger": "The recipe names a trigger the step does not have.",
       "ambiguous_trigger": "Two transitions from this step use the same trigger.",
       "dangling_entry_step": "The start step does not exist.",
       "dangling_target_step": "A transition leads to a step that does not exist.",
@@ -2407,6 +2413,8 @@
       "stream_limit": "This browser already has the most live-update connections allowed. This tab checks for changes regularly instead."
     },
     "evidence": {
+      "flow_trace_mismatch": "The Flow trace does not agree with its recipe and captures.",
+      "invalid_flow_trace": "The Flow trace record is not valid.",
       "duplicate_adapter": "The Evidence records the same Adapter more than once.",
       "invalid_coverage": "The Evidence coverage record is not valid.",
       "invalid_translation_coverage": "The Evidence translation coverage record is not valid.",

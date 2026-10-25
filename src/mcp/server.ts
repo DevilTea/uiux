@@ -396,6 +396,21 @@ const captureFormalEvidenceSchema = z.object({
 	})).min(1),
 }).strict()
 
+const validateFlowSchema = z.object({ flowId: z.string() }).strict()
+
+const flowRecipeSchema = z.object({
+	actions: z.array(z.discriminatedUnion('type', [
+		z.object({ type: z.literal('enter'), stepId: z.string(), expect: z.object({ viewId: z.string(), variantName: z.string().optional() }).strict() }).strict(),
+		z.object({ type: z.literal('trigger'), stepId: z.string(), trigger: z.object({ widgetId: z.string(), event: z.string() }).strict(), expect: z.object({ resultStepId: z.string() }).strict() }).strict(),
+	])),
+}).strict()
+
+const captureFlowEvidenceSchema = z.object({
+	flowId: z.string(),
+	renderContext: z.object({ locale: z.string(), viewportId: z.string(), themeId: z.string() }).strict(),
+	recipe: flowRecipeSchema.optional(),
+}).strict()
+
 const handoffRootSchema = z.discriminatedUnion('type', [
 	z.object({ type: z.literal('workspace') }).strict(),
 	z.object({ type: z.literal('view'), viewId: z.string() }).strict(),
@@ -1186,6 +1201,46 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
 				structuredContent: outcome,
 				...(outcome.status === 'failed' || outcome.status === 'blocked' ? { isError: true } : {}),
+			}
+		},
+	)
+
+	server.registerTool(
+		'validate_flow',
+		{
+			title: 'Validate a UX Flow',
+			description: 'Validate a UX Flow without changing it. Returns { flowId, revision, valid, diagnostics }: the Flow\'s structural diagnostics (an unreachable step, an ambiguous trigger, a dangling step) followed by its reference diagnostics (a step\'s View, Variant or trigger Widget that the Workspace does not have, flow.missing_view, flow.missing_variant, flow.missing_widget), each at the path of the problem, or { status: "not_found", flowId }. References are reported, never rebound. A Flow with any diagnostic cannot be captured as formal Flow Evidence or exported as an implementation-ready Handoff.',
+			inputSchema: validateFlowSchema,
+			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async input => {
+			const outcome = await app.validateFlow(input.flowId)
+			return {
+				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
+				structuredContent: outcome,
+				...('status' in outcome ? { isError: true } : {}),
+			}
+		},
+	)
+
+	server.registerTool(
+		'capture_flow_evidence',
+		{
+			title: 'Capture formal UX Flow Evidence',
+			description: 'Capture formal UX Flow Evidence: a replayable trace of the Flow with a formal capture of every View and Variant its recipe enters, in one render context ({ locale, viewportId, themeId }). The recipe is { actions }: { type: "enter", stepId, expect: { viewId, variantName? } } enters a step and asserts its target; { type: "trigger", stepId, trigger: { widgetId, event }, expect: { resultStepId } } immediately follows an enter of that step and asserts the step the transition leads to. Omit it to have the server derive one that enters every step and takes every transition. Returns { status: "captured", flowId, evidenceDigest, evidence, captures }, or { status: "invalid", flowId, diagnostics } (the Flow has a diagnostic, structural or reference, or the render context or recipe does not match), { status: "not_found", flowId } or { status: "failed", flowId, diagnostics }; a refusal records nothing.',
+			inputSchema: captureFlowEvidenceSchema,
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async input => {
+			const outcome = await app.captureFlowEvidence({
+				flowId: input.flowId,
+				renderContext: input.renderContext,
+				...(input.recipe ? { recipe: input.recipe } : {}),
+			})
+			return {
+				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
+				structuredContent: outcome,
+				...(outcome.status === 'captured' ? {} : { isError: true }),
 			}
 		},
 	)
