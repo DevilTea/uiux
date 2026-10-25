@@ -56,6 +56,8 @@ export type FailureReportScope = 'generation' | 'work'
 const WORK_CONTEXT_KEYS = ['viewId', 'variantId', 'runtimeContextVersion', 'navigationRequestId', 'widgetId', 'geometryRevision'] as const
 /** Identities that sit in a payload, never in shared context. */
 const PAYLOAD_ONLY_IDENTITIES = ['sequence', 'baseSnapshotVersion', 'snapshotVersion', 'regionId', 'regionIds', 'regions', 'category', 'reason', 'detail'] as const
+/** Longest `reason` a decoder accepts, so a report stays bounded and display-safe. */
+const MAX_REASON_LENGTH = 100
 const RUNTIME_REASON_PATTERN = /^runtime\.[a-z0-9_]+(?:\.[a-z0-9_]+)*$/u
 
 export function isFailureReportMessageType(type: unknown): type is FailureReportMessage['type'] {
@@ -103,7 +105,9 @@ export function validateFailureReportMessage(input: unknown): ValidationResult<F
 		v.issue('protocol.invalid_failure_category', '/payload/category', 'A runtime reports only the runtime and protocol categories.')
 	const reason = v.string(payload.reason, '/payload/reason', true)
 	if (reason !== undefined && (category === 'runtime' || category === 'protocol')) {
-		const reportable = category === 'runtime' ? RUNTIME_REASON_PATTERN.test(reason) : REPORTABLE_PROTOCOL_REASONS.has(reason)
+		const reportable = category === 'runtime'
+			? reason.length <= MAX_REASON_LENGTH && RUNTIME_REASON_PATTERN.test(reason)
+			: REPORTABLE_PROTOCOL_REASONS.has(reason)
 		if (!reportable) v.issue('protocol.failure_reason_not_reportable', '/payload/reason', 'A runtime reports runtime reasons, protocol.invalid_message and protocol.invalid_state only.')
 	}
 	if (Object.hasOwn(payload, 'detail')) {

@@ -292,6 +292,25 @@ describe('Runtime bridge: sending failure.report', () => {
 		expect(runtimeOutbound).toHaveLength(count)
 	})
 
+	it('never reports an unknown additive message type of its own generation, which is dropped without effect', () => {
+		const { runtime, runtimeOutbound } = openGeneration()
+		const count = runtimeOutbound.length
+		const unknown = { type: 'geometry.reveal', context: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a', viewId: VIEW_ID, widgetId: 'widget-a' }, payload: {} }
+		const result = runtime.receive(unknown)
+		expect(result.status).toBe('invalid')
+		expect(runtime.reportInvalidTraffic(unknown, result.status === 'invalid' ? result.diagnostics : [])).toEqual({ status: 'not-permitted' })
+		expect(runtimeOutbound).toHaveLength(count)
+		// The generation is still free to report a real violation afterwards.
+		const malformed = { type: 'geometry.acquire.request', context: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a', viewId: VIEW_ID }, payload: {} }
+		const bad = runtime.receive(malformed)
+		expect(runtime.reportInvalidTraffic(malformed, bad.status === 'invalid' ? bad.diagnostics : [])).toEqual({ status: 'sent' })
+	})
+
+	it('caps the reason length of a runtime report', () => {
+		expect(issues(generationReport('generation-a', { reason: `runtime.${'a'.repeat(92)}` }))).toEqual([])
+		expect(issues(generationReport('generation-a', { reason: `runtime.${'a'.repeat(93)}` }))).toContain('protocol.failure_reason_not_reportable')
+	})
+
 	it('rejects a failure.report arriving at the runtime as traffic in the wrong direction', () => {
 		const { runtime } = openGeneration()
 		expect(runtime.receive(generationReport())).toEqual({ status: 'wrong-direction' })

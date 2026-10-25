@@ -468,6 +468,11 @@ export class RuntimePreviewProtocolBridge {
 		const correlation = envelopeCorrelation(input)
 		if (correlation?.previewSessionId !== this.previewSessionId || correlation.runtimeGenerationId !== this.runtimeGenerationId)
 			return { status: 'not-permitted' }
+		// An unknown message type is an additive one the runtime does not know: it is dropped without
+		// effect and never fails the generation (Rule 01a11a59-d728-751f-bbac-287a77b75610).
+		// Its other diagnostics (a context the known types would require) are artifacts of the guess.
+		if (diagnostics.some(diagnostic => diagnostic.code === 'protocol.unknown_message_type'))
+			return { status: 'not-permitted' }
 		const detail = [...new Set(diagnostics.map(diagnostic => diagnostic.code))].join(', ').slice(0, 200)
 		return this.sendFailureReport({
 			type: 'failure.report',

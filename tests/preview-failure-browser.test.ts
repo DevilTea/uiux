@@ -554,6 +554,23 @@ describe('Runtime-reported Preview failures (issue #312)', () => {
 		finally { await context.close() }
 	}, 90_000)
 
+	it('keeps the generation live when the Workbench sends an unknown additive message type after the ACK', async () => {
+		const { context, page } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`, 0)
+		try {
+			const live = await expectLive(page)
+			const before = await documentParam(page)
+			const session = await sessionOf(page)
+			await sendIntoRuntime(page, { type: 'geometry.reveal', context: { previewSessionId: session, runtimeGenerationId: live, viewId: VIEW_ID, widgetId: WIDGET_ID }, payload: {} })
+			await page.waitForTimeout(1_500)
+			expect(await failureReports(page)).toEqual([])
+			expect(await page.locator('[data-preview-failure]').count()).toBe(0)
+			expect(await page.locator('[data-session-status]').getAttribute('data-status')).toBe('live')
+			expect(await iframe(page).getAttribute('data-runtime-generation')).toBe(live)
+			expect(await documentParam(page)).toBe(before)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
 	it('has the runtime report an invalid Workbench envelope of its own generation once, never one of stale traffic', async () => {
 		const { context, page } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`, 0)
 		try {
