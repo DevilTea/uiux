@@ -118,6 +118,12 @@ export function validateI18nFieldMapping(input: unknown, path = ''): ValidationR
 	return v.finish<I18nFieldMapping>(input)
 }
 
+/**
+ * The locator of one translation-result Property occurrence (Clause 01a17245-0499-7f66-beea-fcc300b5d6b5):
+ * the Workbench occurrence without its `warning`.
+ */
+export type I18nOccurrenceLocator = Omit<I18nOccurrence, 'warning'>
+
 export function validateI18nWarning(input: unknown, path = ''): ValidationResult<I18nWarning> {
 	const v = new Validator()
 	const warning = v.object(input, path)
@@ -157,17 +163,33 @@ export function validateTranslationResult(input: unknown, path = ''): Validation
 	return v.finish<TranslationResult>(input)
 }
 
+const OCCURRENCE_LOCATOR_KEYS = ['viewId', 'variantName', 'widgetId', 'resultProperty', 'catalogField'] as const
+
+function validateOccurrenceLocatorMembers(occurrence: Readonly<Record<string, unknown>>, path: string, v: Validator): void {
+	validateUuid(occurrence.viewId, `${path}/viewId`, v, 'View identity')
+	for (const key of ['widgetId', 'resultProperty', 'catalogField'] as const) v.string(occurrence[key], `${path}/${key}`, true)
+	if (Object.hasOwn(occurrence, 'variantName')) v.string(occurrence.variantName, `${path}/variantName`, true)
+}
+
 export function validateI18nOccurrence(input: unknown, path = ''): ValidationResult<I18nOccurrence> {
 	const v = new Validator()
 	const occurrence = v.object(input, path)
 	if (!occurrence)
 		return v.finish<I18nOccurrence>(input)
-	rejectUnknownKeys(occurrence, ['warning', 'viewId', 'variantName', 'widgetId', 'resultProperty', 'catalogField'], path, v)
+	rejectUnknownKeys(occurrence, ['warning', ...OCCURRENCE_LOCATOR_KEYS], path, v)
 	v.diagnostics.push(...validateI18nWarning(occurrence.warning, `${path}/warning`).diagnostics)
-	validateUuid(occurrence.viewId, `${path}/viewId`, v, 'View identity')
-	for (const key of ['widgetId', 'resultProperty', 'catalogField'] as const) v.string(occurrence[key], `${path}/${key}`, true)
-	if (Object.hasOwn(occurrence, 'variantName')) v.string(occurrence.variantName, `${path}/variantName`, true)
+	validateOccurrenceLocatorMembers(occurrence, path, v)
 	return v.finish<I18nOccurrence>(input)
+}
+
+export function validateI18nOccurrenceLocator(input: unknown, path = ''): ValidationResult<I18nOccurrenceLocator> {
+	const v = new Validator()
+	const locator = v.object(input, path)
+	if (!locator)
+		return v.finish<I18nOccurrenceLocator>(input)
+	rejectUnknownKeys(locator, OCCURRENCE_LOCATOR_KEYS, path, v)
+	validateOccurrenceLocatorMembers(locator, path, v)
+	return v.finish<I18nOccurrenceLocator>(input)
 }
 
 /** Handoff keeps locale JSON byte-semantics: empty and whitespace strings survive unchanged. */

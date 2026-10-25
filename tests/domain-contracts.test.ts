@@ -356,10 +356,13 @@ describe('derived evidence, render context, and handoff', () => {
 		expect(validateFormalEvidenceRecord(record).ok).toBe(true)
 		expect(validateFormalEvidenceRecord({ ...record, id: REVIEW_ID }).ok).toBe(false)
 		const warningOccurrence = {
-			occurrence: { warning: { code: 'unresolved-key', key: 'missing', requestedLocale: 'en-US' }, viewId: VIEW_ID, widgetId: 'title', resultProperty: 'titleResult', catalogField: 'title' },
+			occurrence: { viewId: VIEW_ID, widgetId: 'title', resultProperty: 'titleResult', catalogField: 'title' },
 			evaluatedText: '⟦missing:missing⟧', warnings: [{ code: 'unresolved-key', key: 'missing', requestedLocale: 'en-US' }],
 		}
 		expect(validateTranslationEvidenceOccurrence(warningOccurrence).ok).toBe(true)
+		// Clause 01a17245-0499-…: the occurrence is a locator; the warning lives in `warnings` only.
+		const withWarningMember = { ...warningOccurrence, occurrence: { ...warningOccurrence.occurrence, warning: warningOccurrence.warnings[0] } }
+		expect(validateTranslationEvidenceOccurrence(withWarningMember).ok).toBe(false)
 	})
 
 	it('requires an explicit, fully resolved render-context list with no fallback', () => {

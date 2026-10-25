@@ -1,4 +1,5 @@
 import type { Diagnostic } from '../domain/validation'
+import type { TranslationEvaluation } from './translation-evaluation'
 
 /**
  * The hooks the Preview page installs on `window` in formal capture harness mode only
@@ -11,4 +12,10 @@ export const CAPTURE_HARNESS_GLOBAL = '__UIUX_CAPTURE_HARNESS__'
 export type CaptureHarnessHooks = Readonly<{
 	/** Resolves after the write has rendered (a Vue tick and two animation frames), with its diagnostics. */
 	applyVariantStateLive(variantName: string): Promise<readonly Diagnostic[]>
+	/**
+	 * Formal capture's translation evaluation (Rule 01a115cd-ba68-7c73-a157-08ef34be1e54): evaluates every
+	 * Catalog-declared translation-result Property of the mounted View and Variant and rejects when the
+	 * Runtime is not mounted.
+	 */
+	evaluateTranslations(): Promise<TranslationEvaluation>
 }>

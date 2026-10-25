@@ -2397,7 +2397,8 @@
       "asset_load_failed": "An image of a bound Asset did not load, so this context was not captured.",
       "browser_launch_failed": "The capture browser could not start. Check that Playwright is installed.",
       "execution_failed": "The capture did not finish.",
-      "kit_build_not_ready": "Formal capture waits until the kit build is ready. Fix a failed build, then restart it."
+      "kit_build_not_ready": "Formal capture waits until the kit build is ready. Fix a failed build, then restart it.",
+      "translation_evaluation_failed": "The translations of this View could not be evaluated, so this context was not captured."
     },
     "events": {
       "stream_limit": "This browser already has the most live-update connections allowed. This tab checks for changes regularly instead."
@@ -2405,8 +2406,10 @@
     "evidence": {
       "duplicate_adapter": "The Evidence records the same Adapter more than once.",
       "invalid_coverage": "The Evidence coverage record is not valid.",
+      "invalid_translation_coverage": "The Evidence translation coverage record is not valid.",
       "missing_uiux_version": "The Evidence does not record its UIUX version.",
-      "parallel_identity_forbidden": "Evidence is identified by its content digest only."
+      "parallel_identity_forbidden": "Evidence is identified by its content digest only.",
+      "translation_coverage_mismatch": "The translation coverage does not match the translations the Evidence records."
     },
     "decision": {
       "discontinuous_history": "The Decision history has a gap.",

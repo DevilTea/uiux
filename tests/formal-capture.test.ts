@@ -11,6 +11,7 @@ import { FileNativePersistence } from '../src/persistence'
 import { CheckpointStore, referencedDigests } from '../src/persistence/history'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createFormalCaptureService } from '../src/application/services/formal-capture'
+import { isCompleteEvidenceForRenderInput } from '../src/domain/evidence/staleness'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { createUiuxMcpHttpHandler, principalAuthInfo } from '../src/mcp/server'
 import { createLeaseManager } from '../src/application/access/leases'
@@ -659,5 +660,203 @@ describe('Formal capture service & fresh-runtime proof', () => {
 		finally {
 			attackerServer.close()
 		}
+	})
+})
+
+/**
+ * Two Widget types whose Catalog maps the authoring field `title` to the result Property `titleResult`.
+ * `Label` shows its text; `Hidden` renders nothing, so nothing ever reads its Properties while it is
+ * on screen. A title key of `boom` makes the result Property throw, like an Adapter whose `t` fails.
+ */
+function makeTranslationAdapterSource(): string {
+	return `
+import { createWidgetPlugin, createWidgetValueContract } from '@deviltea/widget-core';
+import { defineComponent, h } from 'vue';
+import { useWidget } from '@deviltea/widget-vue';
+
+const TRANSLATION_RESULT = createWidgetValueContract('deviltea.uiux/translation-result@1');
+const STRING = createWidgetValueContract('deviltea.uiux/string@1');
+
+function createPlugin(type) {
+  return createWidgetPlugin(type)
+    .interfaces()
+    .config({
+      schema: { type: 'object', properties: { titleKey: { type: 'string' } }, additionalProperties: false },
+      validate: (input) => input === undefined || input === null || (typeof input === 'object' && !Array.isArray(input)),
+      resolve: (raw) => ({ titleKey: raw?.titleKey ?? null }),
+    })
+    .properties(p => p
+      .titleResult({
+        valueContract: TRANSLATION_RESULT,
+        registerDeps: ({ dep }) => ({ t: dep.root.methods.invoke('t').validate((value) => typeof value === 'object' && value !== null && typeof value.text === 'string') }),
+        compute: ({ config, deps }) => {
+          if (config.titleKey === null) return { text: '', warnings: [] };
+          if (config.titleKey === 'boom') throw new Error('the Adapter t exploded');
+          const translated = deps.t(config.titleKey, {});
+          return translated.ok && translated.value ? translated.value : { text: '', warnings: [] };
+        },
+      })
+      .title({
+        valueContract: STRING,
+        registerDeps: ({ dep }) => ({ result: dep.self.properties.get('titleResult') }),
+        compute: ({ deps }) => {
+          const result = deps.result();
+          return result.ok && result.value ? result.value.text : '';
+        },
+      }))
+    .done();
+}
+
+export const labelPlugin = createPlugin('Label');
+export const hiddenPlugin = createPlugin('Hidden');
+
+export const LabelRenderer = defineComponent({
+  name: 'LabelRenderer',
+  setup() {
+    const { useProperties } = useWidget(labelPlugin);
+    const properties = useProperties();
+    return () => h('span', { class: 'translated-label' }, String(properties.title.value));
+  },
+});
+
+export const HiddenRenderer = defineComponent({
+  name: 'HiddenRenderer',
+  setup() {
+    return () => h('div', { style: 'display: none' });
+  },
+});
+
+const fields = { title: { configField: 'titleKey', resultProperty: 'titleResult', textProperty: 'title' } };
+
+export const manifest = {
+  id: 'translation-fixture',
+  apiVersion: '1',
+  widgetPlugins: [labelPlugin, hiddenPlugin],
+  catalog: { widgets: { Label: { i18n: { fields } }, Hidden: { i18n: { fields } } } },
+  renderers: [
+    { type: 'Label', component: LabelRenderer },
+    { type: 'Hidden', component: HiddenRenderer },
+  ],
+  providers: [],
+};
+`
+}
+
+const VIEW_TRANSLATED_ID = '22222222-2222-4222-8222-222222222222'
+
+function createTranslatedView(children: ReadonlyArray<{ id: string; type: 'Label' | 'Hidden'; key: string }>): ViewResource {
+	return {
+		...createCounterView(),
+		id: VIEW_TRANSLATED_ID,
+		name: 'Translated View',
+		ir: {
+			type: 'RootShell',
+			id: 'root',
+			slots: { content: children.map(child => ({ id: child.id, type: child.type, config: { title: { $i18n: child.key } } })) },
+		} as never,
+		variants: {},
+	}
+}
+
+function translatedContext(locale: string): ResolvedRenderContext {
+	return { viewId: VIEW_TRANSLATED_ID, locale, viewportId: 'desktop', viewport: { width: 1280, height: 800 }, themeId: 'light' }
+}
+
+const translatedLocator = (widgetId: string) => ({ viewId: VIEW_TRANSLATED_ID, widgetId, resultProperty: 'titleResult', catalogField: 'title' })
+
+describe('Formal capture records its translation Evidence (#96)', () => {
+	async function translatedWorkspace(children: Parameters<typeof createTranslatedView>[0]) {
+		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/translation.mjs' }])
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'translation.mjs'), makeTranslationAdapterSource())
+		// `createTestWorkspace` wrote an empty default Locale file; fill it.
+		const defaultRevision = await persistence.locales.readRevision('en-US')
+		const filled = await persistence.locales.compareAndSwap({ key: 'en-US', expectedRevision: defaultRevision!, resource: { greeting: 'Hello', farewell: 'Goodbye', onlyEnglish: 'Only in English' } })
+		expect(filled.ok).toBe(true)
+		await persistence.locales.create('zh-TW', { greeting: '哈囉', farewell: '再見' })
+		await persistence.views.create(VIEW_TRANSLATED_ID, createTranslatedView(children))
+		const server = await startTestServer(root)
+		const service = createFormalCaptureService(persistence, { captureCookie: () => server.cookie })
+		return { persistence, server, service }
+	}
+
+	it('evaluates every declared Property of a View, a hidden Widget and warnings included, in en-US and zh-TW', { timeout: 60_000 }, async () => {
+		const { persistence, server, service } = await translatedWorkspace([
+			{ id: 'a-greeting', type: 'Label', key: 'greeting' },
+			{ id: 'b-hidden', type: 'Hidden', key: 'farewell' },
+			{ id: 'c-english', type: 'Label', key: 'onlyEnglish' },
+			{ id: 'd-unknown', type: 'Label', key: 'nowhere' },
+		])
+		const outcome = await service.capture({ contexts: [translatedContext('en-US'), translatedContext('zh-TW')], baseUrl: server.url })
+		expect(outcome.status).toBe('ok')
+
+		const records = await Promise.all(outcome.results.map(async (result) => {
+			expect(result.status).toBe('captured')
+			return JSON.parse(Buffer.from((await persistence.artifacts.read(result.evidenceDigest!))!).toString('utf8')) as {
+				coverage: unknown
+				data: { translations: unknown[] }
+			}
+		}))
+		const [english, chinese] = records as [typeof records[number], typeof records[number]]
+
+		// The hidden Widget's Property was read although nothing renders it, and a warning-free entry is recorded.
+		expect(english.data.translations).toEqual([
+			{ occurrence: translatedLocator('a-greeting'), evaluatedText: 'Hello', warnings: [] },
+			{ occurrence: translatedLocator('b-hidden'), evaluatedText: 'Goodbye', warnings: [] },
+			{ occurrence: translatedLocator('c-english'), evaluatedText: 'Only in English', warnings: [] },
+			{
+				occurrence: translatedLocator('d-unknown'),
+				evaluatedText: '⟦missing:nowhere⟧',
+				warnings: [{ code: 'unresolved-key', key: 'nowhere', requestedLocale: 'en-US' }],
+			},
+		])
+		// Warnings are data: the coverage stays complete, so the capture still satisfies a submission.
+		expect(english.coverage).toEqual({ complete: true, translations: { complete: true, evaluated: 4 } })
+
+		expect(chinese.data.translations).toEqual([
+			{ occurrence: translatedLocator('a-greeting'), evaluatedText: '哈囉', warnings: [] },
+			{ occurrence: translatedLocator('b-hidden'), evaluatedText: '再見', warnings: [] },
+			{
+				occurrence: translatedLocator('c-english'),
+				evaluatedText: 'Only in English',
+				warnings: [{ code: 'missing-translation', key: 'onlyEnglish', requestedLocale: 'zh-TW', fallbackLocale: 'en-US' }],
+			},
+			{
+				occurrence: translatedLocator('d-unknown'),
+				evaluatedText: '⟦missing:nowhere⟧',
+				warnings: [{ code: 'unresolved-key', key: 'nowhere', requestedLocale: 'zh-TW' }],
+			},
+		])
+		expect(chinese.coverage).toEqual({ complete: true, translations: { complete: true, evaluated: 4 } })
+
+		const listed = await service.listEvidence(VIEW_TRANSLATED_ID)
+		const views = await service.viewRenderInputs()
+		const digest = views.find(view => view.key === VIEW_TRANSLATED_ID)!.renderInputDigest
+		for (const item of listed) expect(isCompleteEvidenceForRenderInput(item.record, VIEW_TRANSLATED_ID, digest)).toBe(true)
+	})
+
+	it('records incomplete coverage with the missing Property when an Adapter t throws, and keeps the other entries', { timeout: 60_000 }, async () => {
+		const { persistence, server, service } = await translatedWorkspace([
+			{ id: 'a-greeting', type: 'Label', key: 'greeting' },
+			{ id: 'b-broken', type: 'Hidden', key: 'boom' },
+		])
+		const outcome = await service.capture({ contexts: [translatedContext('en-US')], baseUrl: server.url })
+		const result = outcome.results[0]!
+		expect(result.status).toBe('captured')
+		const record = JSON.parse(Buffer.from((await persistence.artifacts.read(result.evidenceDigest!))!).toString('utf8')) as {
+			coverage: { complete: boolean; translations: { complete: boolean; missing: Array<{ reason: string }> } }
+			data: { translations: Array<{ occurrence: { widgetId: string } }> }
+		}
+		expect(record.data.translations.map(entry => entry.occurrence.widgetId)).toEqual(['a-greeting'])
+		expect(record.coverage).toEqual({
+			complete: false,
+			translations: { complete: false, missing: [{ ...translatedLocator('b-broken'), reason: expect.stringContaining('the Adapter t exploded') }] },
+		})
+
+		// An incomplete record never satisfies a submission.
+		const views = await service.viewRenderInputs()
+		const digest = views.find(view => view.key === VIEW_TRANSLATED_ID)!.renderInputDigest
+		const [item] = await service.listEvidence(VIEW_TRANSLATED_ID)
+		expect(isCompleteEvidenceForRenderInput(item!.record, VIEW_TRANSLATED_ID, digest)).toBe(false)
 	})
 })

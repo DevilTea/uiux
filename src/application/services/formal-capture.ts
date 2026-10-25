@@ -12,12 +12,13 @@ import {
 	type ResolvedRenderContext,
 	type ViewportDimensions,
 } from '../../domain/render-context/schema'
-import type { Diagnostic, JsonObject } from '../../domain/validation'
+import type { Diagnostic, JsonObject, JsonValue } from '../../domain/validation'
+import type { TranslationEvaluation } from '../../preview/translation-evaluation'
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
 import { settledValue } from '../../persistence/file-native'
 import type { KitBuildStatus } from '../ports/kit-build'
-import { ASSET_LOAD_FAILED_DIAGNOSTIC, ASSET_LOAD_FAILED_STATUS, captureHarnessScreenshot, openHarnessPreview, type HarnessPreview } from './capture-harness'
+import { ASSET_LOAD_FAILED_DIAGNOSTIC, ASSET_LOAD_FAILED_STATUS, captureHarnessScreenshot, evaluateHarnessTranslations, openHarnessPreview, type HarnessPreview } from './capture-harness'
 import { missingDefaultLocaleError } from './default-locale-gate'
 import { createViewAssetBindingCheck, type AssetCatalog } from './asset-bindings'
 import { readWorkspaceProductKitProvenance } from './product-kit-provenance'
@@ -373,6 +374,24 @@ export function createFormalCaptureService(
 						continue
 					}
 
+					// Rule 01a115cd-ba68-7c73-a157-08ef34be1e54: every Catalog-declared translation-result Property of
+					// this View and Variant is evaluated, hidden Widgets included. A context whose evaluation cannot
+					// run at all is not captured: a record never claims coverage without it (Rule 01a115cd-ba9b-…).
+					let translations: TranslationEvaluation
+					try {
+						translations = await evaluateHarnessTranslations(preview.page)
+					}
+					catch (cause) {
+						const reason = cause instanceof Error ? cause.message : String(cause)
+						results[index] = {
+							context,
+							status: 'failed',
+							error: reason,
+							diagnostics: [{ code: 'capture.translation_evaluation_failed', path: '/preview', message: `The translation Properties could not be evaluated: ${reason}` }],
+						}
+						continue
+					}
+
 					// Store screenshot in ImmutableArtifactStore
 					const { identity: screenshotDigest } = await persistence.artifacts.put(screenshotBytes)
 
@@ -409,9 +428,11 @@ export function createFormalCaptureService(
 							viewportId: context.viewportId,
 							...(context.variantName ? { variantName: context.variantName } : {}),
 						},
-						coverage: {
-							complete: true,
-						},
+						// Clauses 01a17245-05a6-… and 01a17245-062a-…: complete only when every declared translation-result
+						// Property was evaluated; warnings are data and never a gap (Rule 01a17245-0819-…).
+						coverage: translations.missing.length === 0
+							? { complete: true, translations: { complete: true, evaluated: translations.entries.length } }
+							: { complete: false, translations: { complete: false, missing: translations.missing as unknown as JsonValue[] } },
 						provenance: {
 							workspaceSchemaVersion: wsSchemaVersion,
 							resources: provenanceResources,
@@ -427,6 +448,7 @@ export function createFormalCaptureService(
 							format: 'png',
 							width: context.viewport.width,
 							height: context.viewport.height,
+							translations: translations.entries as unknown as JsonValue[],
 						},
 					}
 
