@@ -78,6 +78,8 @@ export const ACCESS_OPERATIONS = {
 	createView: { requiredKeys: ['views.write'] },
 	updateViewSpec: { requiredKeys: ['views.write'] },
 	updateViewStructure: { requiredKeys: ['views.write'] },
+	// Clause 01a11485-fa44-7b6a-99f8-de4e1e8edcfc: the delete operations need the kind's write key; an Agent may delete, but acknowledges a non-empty impact like anyone.
+	deleteView: { requiredKeys: ['views.write'] },
 	// Clause 01a11485-fa44-7b6a-99f8-de4e1e8edcfc: `update_view_metadata` and `PUT /api/views/:id/metadata`.
 	updateViewMetadata: { requiredKeys: ['views.write'] },
 	updateWorkspaceSettings: { requiredKeys: ['settings.write'] },
@@ -85,8 +87,10 @@ export const ACCESS_OPERATIONS = {
 	updateLocale: { requiredKeys: ['locales.write'] },
 	createFlow: { requiredKeys: ['flows.write'] },
 	updateFlow: { requiredKeys: ['flows.write'] },
+	deleteFlow: { requiredKeys: ['flows.write'] },
 	createAsset: { requiredKeys: ['assets.write'] },
 	replaceAsset: { requiredKeys: ['assets.write'] },
+	deleteAsset: { requiredKeys: ['assets.write'] },
 	// Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa. Each also needs the keys of what its change touches,
 	// decided on the Product Kit file it replaces: see `productKitChangeKeys`.
 	composeProductKit: { requiredKeys: ['product-kit.compose'] },

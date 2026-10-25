@@ -41,6 +41,8 @@ export function mapAuthoringResultToHttpStatus(status: string, code?: string): n
 		case 'deleted': return 200
 		case 'not_found': return 404
 		case 'conflict': return 409
+		// Clause 01a172ce-bdef-7cf6-bf8c-770dc9dd5e34: the caller must review the impact and resend with `acknowledgeImpact: true`.
+		case 'impact_acknowledgement_required': return 409
 		case 'already_exists': return 409
 		case 'invalid':
 		case 'invalid_expected_revision': return 400
@@ -79,6 +81,13 @@ const updateViewStructureHttpSchema = z.object({
 	expectedRevision: z.string(),
 	ir: z.record(z.string(), z.unknown()),
 	variants: z.record(z.string(), z.unknown()),
+	acknowledgeImpact: z.boolean().optional(),
+}).strict()
+
+/** The members of `DELETE /api/views|flows|assets/:id` (Clause 01a172ce-ebcc-7a79-8103-ff5339409948). */
+const deleteResourceHttpSchema = z.object({
+	expectedRevision: z.string(),
+	acknowledgeImpact: z.boolean().optional(),
 }).strict()
 
 const updateViewMetadataHttpSchema = z.object({
@@ -113,6 +122,7 @@ const updateWorkspaceSettingsHttpSchema = z.object({
 		}).catchall(z.unknown())),
 		themes: z.record(z.string(), z.record(z.string(), z.unknown())),
 	}).strict(),
+	acknowledgeImpact: z.boolean().optional(),
 }).strict()
 
 // The Product Kit operations (Clause 01a11bb1-b15c-734e-8968-c378db1444ca); the domain validator reports member shapes.
@@ -419,7 +429,32 @@ export async function updateViewStructureForHttp(app: ScopedWorkspaceSession, vi
 		expectedRevision: data.expectedRevision,
 		ir: data.ir as JsonValue,
 		variants: data.variants as Record<string, VariantEntry>,
+		...(data.acknowledgeImpact === undefined ? {} : { acknowledgeImpact: data.acknowledgeImpact }),
 	})
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
+}
+
+/** `DELETE /api/views/:id` with a JSON body `{ expectedRevision, acknowledgeImpact? }` (Clause 01a172ce-ebcc-7a79-8103-ff5339409948). */
+export async function deleteViewForHttp(app: ScopedWorkspaceSession, viewId: string, body: unknown): Promise<AuthoringHttpResult> {
+	const parsed = parseHttpPayload(deleteResourceHttpSchema, body)
+	if (!parsed.ok) return parsed.result
+	const result = await app.deleteView({ key: viewId, expectedRevision: parsed.data.expectedRevision, ...(parsed.data.acknowledgeImpact === undefined ? {} : { acknowledgeImpact: parsed.data.acknowledgeImpact }) })
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
+}
+
+/** `DELETE /api/flows/:id`, as `deleteViewForHttp`. */
+export async function deleteFlowForHttp(app: ScopedWorkspaceSession, flowId: string, body: unknown): Promise<AuthoringHttpResult> {
+	const parsed = parseHttpPayload(deleteResourceHttpSchema, body)
+	if (!parsed.ok) return parsed.result
+	const result = await app.deleteFlow({ flowId, expectedRevision: parsed.data.expectedRevision, ...(parsed.data.acknowledgeImpact === undefined ? {} : { acknowledgeImpact: parsed.data.acknowledgeImpact }) })
+	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
+}
+
+/** `DELETE /api/assets/:id`, as `deleteViewForHttp`. */
+export async function deleteAssetForHttp(app: ScopedWorkspaceSession, assetId: string, body: unknown): Promise<AuthoringHttpResult> {
+	const parsed = parseHttpPayload(deleteResourceHttpSchema, body)
+	if (!parsed.ok) return parsed.result
+	const result = await app.deleteAsset({ assetId, expectedRevision: parsed.data.expectedRevision, ...(parsed.data.acknowledgeImpact === undefined ? {} : { acknowledgeImpact: parsed.data.acknowledgeImpact }) })
 	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
@@ -461,6 +496,7 @@ export async function updateWorkspaceSettingsForHttp(app: ScopedWorkspaceSession
 	const result = await app.updateWorkspaceSettings({
 		expectedRevision: data.expectedRevision,
 		settings: data.settings as WorkspaceSettingsUpdate,
+		...(data.acknowledgeImpact === undefined ? {} : { acknowledgeImpact: data.acknowledgeImpact }),
 	})
 	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { createAssetService } from '../src/application/services/canonical-resources'
+import { createAssetAuthoringService } from '../src/application/services/asset-authoring'
 import { assetLookupFromInspectedSource, resolveAssetBindingForExecution } from '../src/assets'
 import type { AuthoredAssetResource } from '../src/domain/assets/schema'
 import { validateAdapterManifest } from '../src/domain/adapters/schema'
@@ -238,12 +238,15 @@ describe('authored Asset application and execution semantics', () => {
 		const original = asset('original.png', 'Original', pngBytes(1))
 		await persistence.assets.create(ASSET_ID, original)
 		const current = await persistence.assets.read(ASSET_ID)
-		const service = createAssetService({ repository: persistence.assets, impact: noImpact })
+		const service = createAssetAuthoringService(persistence)
 
-		const replaced = await service.mutateAsset({
-			key: ASSET_ID,
+		const replaced = await service.replaceAsset({
+			assetId: ASSET_ID,
 			expectedRevision: current!.revision,
-			mutate: resource => ({ ...resource, metadata: { ...resource.metadata, name: 'Replaced', contentFilename: 'replaced.png' }, content: pngBytes(2) }),
+			name: 'Replaced',
+			contentFilename: 'replaced.png',
+			mediaType: 'image/png',
+			contentBase64: Buffer.from(pngBytes(2)).toString('base64'),
 		})
 		expect(replaced.status).toBe('updated')
 		expect(replaced.status === 'updated' ? replaced.changeSummary : undefined).toEqual({ changes: [{ path: '/content', op: 'replace' }, { path: '/metadata/contentFilename', op: 'replace' }, { path: '/metadata/name', op: 'replace' }] })
@@ -252,10 +255,13 @@ describe('authored Asset application and execution semantics', () => {
 		expect(after?.resource.metadata.name).toBe('Replaced')
 		expect(after?.revision).not.toBe(current?.revision)
 
-		const stale = await service.mutateAsset({
-			key: ASSET_ID,
+		const stale = await service.replaceAsset({
+			assetId: ASSET_ID,
 			expectedRevision: current!.revision,
-			mutate: resource => ({ ...resource, metadata: { ...resource.metadata, name: 'Stale overwrite' } }),
+			name: 'Stale overwrite',
+			contentFilename: 'replaced.png',
+			mediaType: 'image/png',
+			contentBase64: Buffer.from(pngBytes(2)).toString('base64'),
 		})
 		expect(stale).toEqual({ status: 'conflict', key: ASSET_ID, currentRevision: after!.revision })
 	})
@@ -275,11 +281,11 @@ describe('authored Asset application and execution semantics', () => {
 		const current = await persistence.assets.read(ASSET_ID)
 		const oldMetadata = await readFile(join(root, 'assets', ASSET_ID, 'asset.json'))
 		const oldContent = await readFile(join(root, 'assets', ASSET_ID, 'original.png'))
-		const service = createAssetService({ repository: persistence.assets, impact: noImpact })
+		const service = createAssetAuthoringService(persistence)
 		armed = true
-		await expect(service.mutateAsset({
-			key: ASSET_ID, expectedRevision: current!.revision,
-			mutate: resource => ({ ...resource, metadata: { ...resource.metadata, contentFilename: 'next.png' }, content: pngBytes(3) }),
+		await expect(service.replaceAsset({
+			assetId: ASSET_ID, expectedRevision: current!.revision,
+			name: 'Original', contentFilename: 'next.png', mediaType: 'image/png', contentBase64: Buffer.from(pngBytes(3)).toString('base64'),
 		})).rejects.toThrow(/asset/i)
 		expect(await readFile(join(root, 'assets', ASSET_ID, 'asset.json'))).toEqual(oldMetadata)
 		expect(await readFile(join(root, 'assets', ASSET_ID, 'original.png'))).toEqual(oldContent)
@@ -343,18 +349,15 @@ describe('authored Asset application and execution semantics', () => {
 	it('rejects asset.json as source content filename before persistence can overwrite metadata', async () => {
 		const { persistence } = await newWorkspace()
 		const invalid = asset('asset.json', 'Collision', pngBytes(1))
-		const serviceResult = createAssetService({
-			repository: {
-				async read() { return { resource: invalid, revision: 'r1' as never } },
-				async compareAndSwap() { throw new Error('must not commit') },
-			},
-			impact: noImpact,
-		})
-		const mutation = await serviceResult.mutateAsset({
-			key: ASSET_ID, expectedRevision: 'r1' as never, mutate: resource => resource,
+		await expect(persistence.assets.create(ASSET_ID, invalid)).rejects.toThrow(/contentFilename|filename|path/i)
+		await persistence.assets.create(ASSET_ID, asset('original.png', 'Original', pngBytes(1)))
+		const current = await persistence.assets.read(ASSET_ID)
+		const mutation = await createAssetAuthoringService(persistence).replaceAsset({
+			assetId: ASSET_ID, expectedRevision: current!.revision,
+			name: 'Collision', contentFilename: 'asset.json', mediaType: 'image/png', contentBase64: Buffer.from(pngBytes(1)).toString('base64'),
 		})
 		expect(mutation.status).toBe('invalid')
-		await expect(persistence.assets.create(ASSET_ID, invalid)).rejects.toThrow(/contentFilename|filename|path/i)
+		expect((await persistence.assets.read(ASSET_ID))?.revision).toBe(current!.revision)
 	})
 
 	it('blocks corrupt/inconsistent referenced assets and returns a content identity only for valid executable bindings', async () => {
@@ -379,9 +382,6 @@ describe('authored Asset application and execution semantics', () => {
 		expect(corrupt.state).toBe('blocked')
 	})
 })
-
-const noImpact = { async analyze() { return [] as const } }
-
 
 function asset(filename: string, name: string, content: Uint8Array): AuthoredAssetResource {
 	return { metadata: { id: ASSET_ID, name, contentFilename: filename, mediaType: 'image/png' }, content }

@@ -9,6 +9,8 @@ import { useAuthoringAccess } from '../../composables/useAuthoringAccess'
 import { useUnsavedGuard } from '../../composables/useUnsavedGuard'
 import { createSettingsSection } from '../../composables/useSettingsSection'
 import { describeFetchError, isLockedError, type FetchErrorLock } from '../../utils/fetch-error'
+import { classifyAcknowledgedWriteAnswer, failureOf } from '../../utils/impact-acknowledge'
+import type { ReceivedImpact } from '../../utils/version-restore'
 import {
 	buildSettingsPayload,
 	cloneJson,
@@ -23,6 +25,7 @@ import AuthoringAccessNotice from './AuthoringAccessNotice.vue'
 import LockBadge from '../workbench/LockBadge.vue'
 import LockedSaveAlert from '../workbench/LockedSaveAlert.vue'
 import UnsavedLeaveModal from './UnsavedLeaveModal.vue'
+import ImpactAcknowledgeModal from '../workbench/ImpactAcknowledgeModal.vue'
 import SettingsGeneralSection from './SettingsGeneralSection.vue'
 import SettingsRegistrySection from './SettingsRegistrySection.vue'
 import { focusFirstProblem } from '../../utils/focus-problem'
@@ -32,6 +35,11 @@ import { focusFirstProblem } from '../../utils/focus-problem'
  * General, Viewports and Themes separated by hairlines. Each section saves on its own through
  * `update_workspace_settings` (`PUT /api/workspace/settings`, a full replace) with its own
  * `expectedRevision`, so a concurrent write surfaces as a conflict, never as a silent overwrite.
+ *
+ * A save that removes or renames a viewport or theme key changes its identity: the server writes
+ * nothing and lists the impact (`impact_acknowledgement_required`, Rule
+ * 01a172ce-2e97-7d83-b175-f0d15f846768), and the save is resent with `acknowledgeImpact: true` only after
+ * the person confirms the listed impact (Rule 01a172ce-31eb-7b81-afd6-ddd6855cc30e).
  *
  * Adapters are not a section here: they live in the Overview section of the Product Kit page
  * (Rule 01a116f0-8a46-76bc-a29f-affaa302c44c).
@@ -95,7 +103,11 @@ function countEvidence(field: 'viewportId' | 'themeId') {
 	}
 }
 
-async function save(id: SettingsSectionId): Promise<void> {
+/** The impact a save was refused with, and the section whose save it is. */
+const pendingImpact = shallowRef<Readonly<{ id: SettingsSectionId; impacts: readonly ReceivedImpact[] }>>()
+const impactOpen = ref(false)
+
+async function save(id: SettingsSectionId, acknowledgeImpact = false): Promise<void> {
 	const section = sections[id]
 	const read = workspace.value
 	if (!canEdit.value || !read?.resource || !section.base || section.conflict || section.saving || !section.dirty) return
@@ -108,13 +120,24 @@ async function save(id: SettingsSectionId): Promise<void> {
 			body: {
 				expectedRevision: section.base.revision,
 				settings: buildSettingsPayload(read.resource, id, section.draftPayload),
+				...(acknowledgeImpact ? { acknowledgeImpact: true } : {}),
 			},
 		})
+		impactOpen.value = false
+		pendingImpact.value = undefined
 		feedback.success(t('settings.saved'))
 		evidence = undefined
 		await workbench.refreshAll()
 	}
 	catch (cause) {
+		const { status, body } = failureOf(cause)
+		const answer = classifyAcknowledgedWriteAnswer(status ?? 0, body)
+		if (answer.state === 'impact') {
+			pendingImpact.value = { id, impacts: answer.impacts }
+			impactOpen.value = true
+			return
+		}
+		impactOpen.value = false
 		const details = describeFetchError(cause, t('settings.saveFailed'))
 		if (details.statusCode === 409 || details.status === 'conflict') {
 			section.conflict = true
@@ -133,6 +156,11 @@ async function save(id: SettingsSectionId): Promise<void> {
 	finally {
 		section.saving = false
 	}
+}
+
+function confirmImpact(): void {
+	const pending = pendingImpact.value
+	if (pending) void save(pending.id, true)
 }
 
 function discard(id: SettingsSectionId): void {
@@ -383,6 +411,16 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
         </div>
       </div>
     </div>
+
+    <ImpactAcknowledgeModal
+      v-model:open="impactOpen"
+      :title="t('settings.impact.title')"
+      :body="t('settings.impact.body')"
+      :impacts="pendingImpact?.impacts ?? []"
+      :confirm-label="t('settings.impact.confirm')"
+      :submitting="!!pendingImpact && sections[pendingImpact.id].saving"
+      @confirm="confirmImpact"
+    />
 
     <UnsavedLeaveModal
       v-model:open="guard.open.value"

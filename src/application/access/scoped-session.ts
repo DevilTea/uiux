@@ -8,8 +8,8 @@ import type { CurrentProductKitProvenance } from '../../domain/product-kit/prove
 import type { CurrentAdapterProvenance } from '../../domain/evidence/adapter-provenance'
 import type { PointResourceKind } from '../dto/point-resources'
 import type { ResourceDiscoveryOutcome } from '../dto/resource-discovery'
-import type { AssetAuthoringResult, CreateAssetCommand, ReplaceAssetCommand } from '../services/asset-authoring'
-import type { CreateFlowCommand, FlowAuthoringResult, UpdateFlowCommand } from '../services/flow-authoring'
+import type { AssetAuthoringResult, CreateAssetCommand, DeleteAssetCommand, ReplaceAssetCommand } from '../services/asset-authoring'
+import type { CreateFlowCommand, DeleteFlowCommand, FlowAuthoringResult, UpdateFlowCommand } from '../services/flow-authoring'
 import type { CaptureFormalEvidenceCommand, CaptureFormalEvidenceResult, FormalEvidenceItem, ViewRenderInput } from '../services/formal-capture'
 import type { ProductKitChecksResult } from '../services/product-kit-checks'
 import type { AssessHandoffReadinessCommand, AssessHandoffReadinessResult, ExportHandoffCommand, ExportHandoffResult } from '../services/handoff-export'
@@ -32,7 +32,7 @@ import type {
 	SetReviewDisplayHintCommand,
 	SubmitReadyForReviewCommand,
 } from '../services/review-authoring'
-import type { CreateViewCommand, DecideDecisionCommand, DecisionLifecycleCommand, UpdateViewMetadataCommand, UpdateViewSpecCommand, UpdateViewStructureCommand, ViewAuthoringResult } from '../services/view-authoring'
+import type { CreateViewCommand, DecideDecisionCommand, DecisionLifecycleCommand, DeleteViewCommand, UpdateViewMetadataCommand, UpdateViewSpecCommand, UpdateViewStructureCommand, ViewAuthoringResult } from '../services/view-authoring'
 import type { PointResourceRead, ValidateFlowResult, WorkspaceApplicationSession } from '../services/workspace-session'
 import type { CaptureFlowEvidenceCommand, CaptureFlowEvidenceResult } from '../services/flow-evidence'
 import type { UpdateWorkspaceSettingsCommand, WorkspaceAuthoringResult } from '../services/workspace-authoring'
@@ -168,6 +168,7 @@ export interface ScopedWorkspaceSession {
 	createView(command: CreateViewCommand): Promise<Scoped<ViewAuthoringResult>>
 	updateViewSpec(command: UpdateViewSpecCommand): Promise<Scoped<ViewAuthoringResult>>
 	updateViewStructure(command: UpdateViewStructureCommand): Promise<Scoped<ViewAuthoringResult>>
+	deleteView(command: DeleteViewCommand): Promise<Scoped<ViewAuthoringResult>>
 	/** Renames a View or sets or clears its `feature` tag; `views.write` and the View's edit lease (Clause 01a15379-d8f7-7c0c-9b9a-05c07c64cc85). */
 	updateViewMetadata(command: UpdateViewMetadataCommand): Promise<Scoped<ViewAuthoringResult>>
 	/** Decision lifecycle (Clause 01a17226-fafc-7691-99ff-aa3b20f5836f): defer and reopen need `views.write`, decide the `humanOnly` `decisions.decide`; each checks the View's lease and stamps the actor. */
@@ -209,8 +210,10 @@ export interface ScopedWorkspaceSession {
 	updateLocale(command: UpdateLocaleCommand): Promise<Scoped<LocaleAuthoringResult>>
 	createFlow(command: CreateFlowCommand): Promise<Scoped<FlowAuthoringResult>>
 	updateFlow(command: UpdateFlowCommand): Promise<Scoped<FlowAuthoringResult>>
+	deleteFlow(command: DeleteFlowCommand): Promise<Scoped<FlowAuthoringResult>>
 	createAsset(command: CreateAssetCommand): Promise<Scoped<AssetAuthoringResult>>
 	replaceAsset(command: ReplaceAssetCommand): Promise<Scoped<AssetAuthoringResult>>
+	deleteAsset(command: DeleteAssetCommand): Promise<Scoped<AssetAuthoringResult>>
 	createReviewThread(command: CreateReviewThreadCommand): Promise<Scoped<ReviewAuthoringResult>>
 	appendReviewMessage(command: Unstamped<AppendReviewMessageCommand>): Promise<Scoped<ReviewAuthoringResult>>
 	reanchorReviewThread(command: Unstamped<ReanchorReviewThreadCommand>): Promise<Scoped<ReviewAuthoringResult>>
@@ -253,7 +256,7 @@ export type ScopedSessionOptions = Readonly<{
 	history?: Readonly<{ agentReleased(actor: StampedActor): Promise<void> }>
 }>
 
-const SUCCESS = new Set(['created', 'updated'])
+const SUCCESS = new Set(['created', 'updated', 'deleted'])
 
 /** The Product Kit file's key, and its one edit lease (Rule 01a11485-efb6-7a68-a726-0f1875b8d015). */
 const PRODUCT_KIT_KEY = 'product-kit'
@@ -433,6 +436,8 @@ export function createScopedWorkspaceSession(
 		if (SUCCESS.has(result.status)) {
 			if (target && result.key !== target.key && target.kind !== 'workspace' && operation !== 'promoteReviewToDecision' && operation !== 'createDecisionFromReview') ticket?.rekey(result.key)
 			ticket?.commit()
+			// A deleted resource has nothing left to lease: the Agent's reservation ends with it.
+			if (result.status === 'deleted' && target && holder) leases.release(holder, [target])
 		}
 		else {
 			ticket?.abort()
@@ -567,6 +572,7 @@ export function createScopedWorkspaceSession(
 		createView: command => write('createView', command.id, { kind: 'view', key: command.id }, () => app.createView(command)),
 		updateViewSpec: command => write('updateViewSpec', command.key, { kind: 'view', key: command.key }, () => app.updateViewSpec(command)),
 		updateViewStructure: command => write('updateViewStructure', command.key, { kind: 'view', key: command.key }, () => app.updateViewStructure(command)),
+		deleteView: command => write('deleteView', command.key, { kind: 'view', key: command.key }, () => app.deleteView(command)),
 		updateViewMetadata: command => write('updateViewMetadata', command.key, { kind: 'view', key: command.key }, () => app.updateViewMetadata(command)),
 		deferDecision: command => decisionLifecycle('deferDecision', command, stamped => app.deferDecision(stamped)),
 		decideDecision: command => decisionLifecycle('decideDecision', command, stamped => app.decideDecision(stamped)),
@@ -585,11 +591,13 @@ export function createScopedWorkspaceSession(
 			return write('createFlow', id, { kind: 'flow', key: id }, () => app.createFlow({ ...command, id }))
 		},
 		updateFlow: command => write('updateFlow', command.flowId, { kind: 'flow', key: command.flowId }, () => app.updateFlow(command)),
+		deleteFlow: command => write('deleteFlow', command.flowId, { kind: 'flow', key: command.flowId }, () => app.deleteFlow(command)),
 		createAsset: (command) => {
 			const id = command.id ?? randomUUID()
 			return write('createAsset', id, { kind: 'asset', key: id }, () => app.createAsset({ ...command, id }))
 		},
 		replaceAsset: command => write('replaceAsset', command.assetId, { kind: 'asset', key: command.assetId }, () => app.replaceAsset(command)),
+		deleteAsset: command => write('deleteAsset', command.assetId, { kind: 'asset', key: command.assetId }, () => app.deleteAsset(command)),
 
 		createReviewThread: command => write('createReviewThread', command.id ?? 'review', undefined, () => app.createReviewThread(command)),
 		appendReviewMessage: command => reviewer('appendReviewMessage', command, stamped => app.appendReviewMessage(stamped)),

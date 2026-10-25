@@ -12,6 +12,7 @@ import FlowStepList from '../../components/flows/FlowStepList.vue'
 import FlowInspector from '../../components/flows/FlowInspector.vue'
 import FlowAddStepModal from '../../components/flows/FlowAddStepModal.vue'
 import FlowPlayer from '../../components/flows/FlowPlayer.vue'
+import DeleteResourceAction from '../../components/workbench/DeleteResourceAction.vue'
 import LockBadge from '../../components/workbench/LockBadge.vue'
 import LockedSaveAlert from '../../components/workbench/LockedSaveAlert.vue'
 import WbDiagnosticList from '../../components/workbench/WbDiagnosticList.vue'
@@ -311,6 +312,13 @@ const stepCount = computed(() => Object.keys(draft.value?.steps ?? {}).length)
                     @click="addStepOpen = true"
                   />
                 </UTooltip>
+                <DeleteResourceAction
+                  v-if="canEdit && !dirty && saved"
+                  kind="flow"
+                  :resource-key="flowId"
+                  :name="draft.name"
+                  @deleted="router.push('/flows')"
+                />
                 <UTooltip :text="playBlockedReason ?? t('flows.play')">
                   <UButton
                     :color="dirty && canEdit ? 'neutral' : 'primary'"

@@ -38,6 +38,7 @@ import {
 	type CreateViewCommand,
 	type DecideDecisionCommand,
 	type DecisionLifecycleCommand,
+	type DeleteViewCommand,
 	type UpdateViewMetadataCommand,
 	type UpdateViewSpecCommand,
 	type UpdateViewStructureCommand,
@@ -58,6 +59,7 @@ import {
 import {
 	createFlowAuthoringService,
 	type CreateFlowCommand,
+	type DeleteFlowCommand,
 	type FlowAuthoringResult,
 	type UpdateFlowCommand,
 } from './flow-authoring'
@@ -80,6 +82,7 @@ import {
 	createAssetAuthoringService,
 	type AssetAuthoringResult,
 	type CreateAssetCommand,
+	type DeleteAssetCommand,
 	type ReplaceAssetCommand,
 } from './asset-authoring'
 import {
@@ -179,6 +182,7 @@ export interface WorkspaceApplicationSession {
 	createView(command: CreateViewCommand): Promise<ViewAuthoringResult>
 	updateViewSpec(command: UpdateViewSpecCommand): Promise<ViewAuthoringResult>
 	updateViewStructure(command: UpdateViewStructureCommand): Promise<ViewAuthoringResult>
+	deleteView(command: DeleteViewCommand): Promise<ViewAuthoringResult>
 	updateViewMetadata(command: UpdateViewMetadataCommand): Promise<ViewAuthoringResult>
 	deferDecision(command: DecisionLifecycleCommand): Promise<ViewAuthoringResult>
 	decideDecision(command: DecideDecisionCommand): Promise<ViewAuthoringResult>
@@ -201,6 +205,7 @@ export interface WorkspaceApplicationSession {
 	updateLocale(command: UpdateLocaleCommand): Promise<LocaleAuthoringResult>
 	createFlow(command: CreateFlowCommand): Promise<FlowAuthoringResult>
 	updateFlow(command: UpdateFlowCommand): Promise<FlowAuthoringResult>
+	deleteFlow(command: DeleteFlowCommand): Promise<FlowAuthoringResult>
 	createReviewThread(command: CreateReviewThreadCommand): Promise<ReviewAuthoringResult>
 	appendReviewMessage(command: AppendReviewMessageCommand): Promise<ReviewAuthoringResult>
 	reanchorReviewThread(command: ReanchorReviewThreadCommand): Promise<ReviewAuthoringResult>
@@ -214,6 +219,7 @@ export interface WorkspaceApplicationSession {
 	retractReviewThread(command: RetractReviewThreadCommand): Promise<ReviewAuthoringResult>
 	createAsset(command: CreateAssetCommand): Promise<AssetAuthoringResult>
 	replaceAsset(command: ReplaceAssetCommand): Promise<AssetAuthoringResult>
+	deleteAsset(command: DeleteAssetCommand): Promise<AssetAuthoringResult>
 	captureFormalEvidence(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult>
 	/** Clause 01a172cc-de18-79ea-a611-c8ea5a34e250: a Flow's structural and reference diagnostics, read-only. */
 	validateFlow(flowId: string): Promise<ValidateFlowResult>
@@ -517,6 +523,7 @@ export function createWorkspaceApplicationSession(
 		createView: viewAuthoring.createView,
 		updateViewSpec: viewAuthoring.updateViewSpec,
 		updateViewStructure: viewAuthoring.updateViewStructure,
+		deleteView: viewAuthoring.deleteView,
 		updateViewMetadata: viewAuthoring.updateViewMetadata,
 		deferDecision: viewAuthoring.deferDecision,
 		decideDecision: viewAuthoring.decideDecision,
@@ -539,6 +546,7 @@ export function createWorkspaceApplicationSession(
 		updateLocale: localeAuthoring.updateLocale,
 		createFlow: flowAuthoring.createFlow,
 		updateFlow: flowAuthoring.updateFlow,
+		deleteFlow: flowAuthoring.deleteFlow,
 		createReviewThread: reviewAuthoring.createReviewThread,
 		appendReviewMessage: reviewAuthoring.appendReviewMessage,
 		reanchorReviewThread: reviewAuthoring.reanchorReviewThread,
@@ -552,6 +560,7 @@ export function createWorkspaceApplicationSession(
 		retractReviewThread: reviewAuthoring.retractReviewThread,
 		createAsset: assetAuthoring.createAsset,
 		replaceAsset: assetAuthoring.replaceAsset,
+		deleteAsset: assetAuthoring.deleteAsset,
 		captureFormalEvidence: formalCapture.capture,
 		validateFlow,
 		captureFlowEvidence: flowEvidence.capture,

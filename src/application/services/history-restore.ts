@@ -1,13 +1,11 @@
 import { validateAssetContentFiles, validateAssetContentMetadata, validateAssetMetadata, type AuthoredAsset, type AuthoredAssetResource } from '../../domain/assets/schema'
-import type { FormalEvidenceRecord } from '../../domain/evidence/schema'
-import { formalCaptureRecordOf } from './formal-capture'
 import { validateFlowResource, type FlowResource } from '../../domain/flows/schema'
 import { isRestorableResourceKind, RESTORABLE_RESOURCE_KINDS, type RestorableResourceKind } from '../../domain/history/constants'
 import { isDiffableResourceKind } from '../../domain/history/diff'
 import type { HistoryResourceIdentity, VersionRecord } from '../../domain/history/schema'
 import { resourceIdentityKey } from '../../domain/history/summary'
 import { validateI18nResource, type I18nResource } from '../../domain/i18n/schema'
-import { analyzeImpact, withResource, type ImpactEvidence, type ImpactItem, type ImpactWorkspace } from '../../domain/impact'
+import { analyzeImpact, withResource, type ImpactItem } from '../../domain/impact'
 import { isCanonicalLocaleTag, isFullUuid, isRecord, type Diagnostic, type ValidationResult } from '../../domain/validation'
 import { validateViewResource, type ViewResource } from '../../domain/views/schema'
 import { validateWorkspaceManifest, type WorkspaceManifest } from '../../domain/workspace/schema'
@@ -21,13 +19,13 @@ import { checkProductKitAgainstKit } from '../../adapters/kit-registry'
 import { PersistenceError } from '../../persistence/errors'
 import { canonicalJsonBytes, revisionForResourceFiles, type FileNativePersistence } from '../../persistence/file-native'
 import { HostHistoryError } from '../../persistence/history/host-store'
-import { versionResourcesFromSnapshot } from '../../persistence/history/snapshot'
 import { mergeTimeline } from '../../persistence/history/timeline'
 import { readVersionBlobUnlocked } from '../../persistence/history/version-blobs'
-import { assetMetadataRelativePath, REVIEW_FILE_SUFFIX, WORKSPACE_DATA_DIRECTORY, type WorkspaceLayout } from '../../persistence/paths'
+import { assetMetadataRelativePath, type WorkspaceLayout } from '../../persistence/paths'
 import type { ResourceRevision } from '../dto/revisions'
 import { summarizeChange, type ChangeSummary } from '../dto/change-summary'
 import type { HistoryStoreSource } from './history-diff'
+import { impactWorkspaceFromSnapshot, parseJsonBytes, readImpactEvidence, readImpactReviewsUnlocked } from './impact-picture'
 
 /**
  * Single-resource restore (Feature 01a11a5d-fd6b-7f9d-be15-2bc2bc3adc13, issue #132 B6), shared by
@@ -174,7 +172,7 @@ export function createHistoryRestoreService(
 		if (diagnostics.length > 0)
 			return { status: 'invalid', kind: target.kind, key: target.key, code: 'history.restore_invalid_content', message: `The ${target.kind} content of version ${parsed.versionId} is not valid for this UIUX build, so it cannot be restored.`, diagnostics }
 
-		const current = target.kind === 'asset' || currentFiles.size !== 1 ? undefined : parseJson([...currentFiles.values()][0]!)
+		const current = target.kind === 'asset' || currentFiles.size !== 1 ? undefined : parseJsonBytes([...currentFiles.values()][0]!)
 		// The key check runs before the checks against the kit project, so a caller without the keys
 		// causes no kit project I/O.
 		const refused = guard?.({ kind: target.kind, key: target.key, current, next })
@@ -189,8 +187,8 @@ export function createHistoryRestoreService(
 		// The Adapter list lives in the Product Kit file (Clause 01a1144e-5336-73e7-84a0-3bcd0cb454f6), so only a
 		// Product Kit restore changes the active Adapter set, which the Evidence Adapter condition follows (Rule 01a11a5e-17a0-7c21-9e23-dd56ef12c9a9).
 		const adapterImpact = target.kind === 'product-kit'
-		const evidence = target.kind === 'workspace' || adapterImpact ? await readEvidence() : undefined
-		const baseline = impactWorkspace(loaded.current, persistence.layout, loaded.reviews, evidence)
+		const evidence = target.kind === 'workspace' || adapterImpact ? await readImpactEvidence(persistence) : undefined
+		const baseline = impactWorkspaceFromSnapshot(loaded.current, persistence.layout, loaded.reviews, evidence)
 		const before = adapterImpact ? { ...baseline, adapters: await readCurrentAdapterProvenance(persistence, options.adapterProvenance) } : baseline
 		const restoredPicture = withResource(before, target, target.kind === 'asset' ? (next as AuthoredAssetResource).metadata : next, nextRevision(target, next))
 		const after = adapterImpact ? { ...restoredPicture, adapters: await restoredAdapterProvenance((next as ProductKit).adapters) } : restoredPicture
@@ -261,29 +259,7 @@ export function createHistoryRestoreService(
 			}
 		}
 		const restoredFiles = filesOf(snapshot, persistence.layout, target)
-		return { version, restoredFiles, current: await persistence.scanVersionedSnapshotUnlocked(), reviews: await readReviewsUnlocked() }
-	}
-
-	/** Every Review thread file, decoded leniently: the analysis only follows what it can read. */
-	async function readReviewsUnlocked(): Promise<readonly unknown[]> {
-		const entries = await persistence.listDirectoryUnlocked(WORKSPACE_DATA_DIRECTORY.reviews)
-		const reviews: unknown[] = []
-		for (const entry of entries ?? []) {
-			if (!entry.isFile() || !entry.name.endsWith(REVIEW_FILE_SUFFIX)) continue
-			const bytes = await persistence.readOptionalBytesUnlocked(`${WORKSPACE_DATA_DIRECTORY.reviews}/${entry.name}`)
-			const value = bytes ? parseJson(bytes) : undefined
-			if (value !== undefined) reviews.push(value)
-		}
-		return reviews
-	}
-
-	/** The formal Evidence records, read as `listEvidence` reads them (all artifacts under one shared lock). */
-	async function readEvidence(): Promise<readonly ImpactEvidence[]> {
-		const evidence: ImpactEvidence[] = []
-		for (const { identity: digest, value: record } of await persistence.artifacts.readAllCandidateJson<unknown, FormalEvidenceRecord>({ tolerateErrors: true, select: formalCaptureRecordOf })) {
-			evidence.push({ digest, record })
-		}
-		return evidence
+		return { version, restoredFiles, current: await persistence.scanVersionedSnapshotUnlocked(), reviews: await readImpactReviewsUnlocked(persistence) }
 	}
 
 	/** The compare-and-swap (or, for `expectedRevision: null`, the create) through the authoring repositories. */
@@ -445,7 +421,7 @@ function decodeRestored(target: Target, files: ReadonlyMap<string, Uint8Array>):
 	if (target.kind === 'asset') {
 		const metadataPath = assetMetadataRelativePath(target.key)
 		const metadataBytes = files.get(metadataPath)
-		const metadata = metadataBytes ? parseJson(metadataBytes) : undefined
+		const metadata = metadataBytes ? parseJsonBytes(metadataBytes) : undefined
 		if (metadata === undefined) return unreadable(`The recorded asset.json of Asset ${target.key} is not readable JSON.`)
 		const content = [...files].filter(([path]) => path !== metadataPath)
 		const contentFilenames = content.map(([path]) => path.slice(path.lastIndexOf('/') + 1))
@@ -454,7 +430,7 @@ function decodeRestored(target: Target, files: ReadonlyMap<string, Uint8Array>):
 		return { value: { metadata, content: Uint8Array.from(content[0]![1]) } }
 	}
 	const bytes = files.size === 1 ? [...files.values()][0] : undefined
-	const value = bytes ? parseJson(bytes) : undefined
+	const value = bytes ? parseJsonBytes(bytes) : undefined
 	if (value === undefined) return unreadable(`The recorded ${target.kind} ${target.key} is not readable JSON.`)
 	return { value }
 }
@@ -462,7 +438,7 @@ function decodeRestored(target: Target, files: ReadonlyMap<string, Uint8Array>):
 /** Rules 01a11a5e-1645-… and 01a11a5e-15e9-…: what a View and a settings restore keep from the current resource. */
 function compose(target: Target, restored: unknown, currentFiles: ReadonlyMap<string, Uint8Array>): RestoredResource {
 	const exists = currentFiles.size > 0
-	const current = target.kind === 'asset' || currentFiles.size !== 1 ? undefined : parseJson([...currentFiles.values()][0]!)
+	const current = target.kind === 'asset' || currentFiles.size !== 1 ? undefined : parseJsonBytes([...currentFiles.values()][0]!)
 	if (target.kind === 'view' && isRecord(restored) && isRecord(restored.spec) && exists) {
 		// An existing View keeps its current Decisions, none when its file has none or cannot be
 		// read. Only a re-created View (owner ruling 1 of
@@ -486,7 +462,7 @@ function validateNext(target: Target, next: RestoredResource, currentFiles: Read
 		case 'workspace': return failed(validateWorkspaceManifest(next))
 		case 'product-kit': return failed(validateProductKit(next))
 		// `update_access_presets`'s checks: a key outside the catalog is kept only when the current file holds it.
-		case 'access-presets': return accessPresetsWriteDiagnostics(next, currentFiles.size === 1 ? parseJson([...currentFiles.values()][0]!) : undefined)
+		case 'access-presets': return accessPresetsWriteDiagnostics(next, currentFiles.size === 1 ? parseJsonBytes([...currentFiles.values()][0]!) : undefined)
 		case 'asset': {
 			const { metadata, content } = next as AuthoredAssetResource
 			const metadataValidation = validateAssetMetadata(metadata, target.key)
@@ -504,37 +480,6 @@ function nextRevision(target: Target, next: RestoredResource): string | undefine
 		return revisionForResourceFiles('asset', new Map([[path, canonicalJsonBytes(metadata)], [`${path.slice(0, path.lastIndexOf('/'))}/${metadata.contentFilename}`, content]]))
 	}
 	return revisionForResourceFiles(target.kind, new Map([[target.kind, canonicalJsonBytes(next)]]))
-}
-
-/** The analysis picture of the current Workspace: the versioned files, the Reviews and, when asked, the formal Evidence. */
-function impactWorkspace(snapshot: ReadonlyMap<string, Uint8Array>, layout: WorkspaceLayout, reviews: readonly unknown[], evidence: readonly ImpactEvidence[] | undefined): ImpactWorkspace {
-	const revisions = new Map<string, string>()
-	for (const resource of versionResourcesFromSnapshot(snapshot, layout).resources) revisions.set(resourceIdentityKey(resource), resource.revision)
-	const views = new Map<string, unknown>()
-	const flows = new Map<string, unknown>()
-	const locales = new Map<string, unknown>()
-	const assets = new Set<string>()
-	let manifest: unknown
-	for (const [path, bytes] of snapshot) {
-		const identity = layout.classifyVersionedPath(path)
-		if (!identity) continue
-		if (identity.kind === 'asset') {
-			if (revisions.has(resourceIdentityKey(identity))) assets.add(identity.key)
-			continue
-		}
-		const value = parseJson(bytes)
-		if (value === undefined) continue
-		if (identity.kind === 'workspace') manifest = value
-		else if (identity.kind === 'view') views.set(identity.key, value)
-		else if (identity.kind === 'flow') flows.set(identity.key, value)
-		else if (identity.kind === 'locale') locales.set(identity.key, value)
-	}
-	return { manifest, views, flows, locales, assets, reviews, revisions, ...(evidence ? { evidence } : {}) }
-}
-
-function parseJson(bytes: Uint8Array): unknown {
-	try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown }
-	catch { return undefined }
 }
 
 function refusal(status: RestoreRefusal['status'], target: Target, code: string, path: string, message: string): RestoreRefusal {

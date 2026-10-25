@@ -47,6 +47,7 @@ export const HISTORY_WRITE_OPERATIONS = Object.freeze([
 	'updateViewSpec',
 	'updateViewStructure',
 	'updateViewMetadata',
+	'deleteView',
 	'updateWorkspaceSettings',
 	'composeProductKit',
 	'updateProductKit',
@@ -56,8 +57,10 @@ export const HISTORY_WRITE_OPERATIONS = Object.freeze([
 	'updateLocale',
 	'createFlow',
 	'updateFlow',
+	'deleteFlow',
 	'createAsset',
 	'replaceAsset',
+	'deleteAsset',
 	'promoteReviewToDecision',
 	'createDecisionFromReview',
 	'deferDecision',
@@ -66,6 +69,13 @@ export const HISTORY_WRITE_OPERATIONS = Object.freeze([
 	'restoreResourceVersion',
 ] as const)
 export type HistoryWriteOperation = typeof HISTORY_WRITE_OPERATIONS[number]
+
+/**
+ * The operations that delete a whole resource (owner ruling 1 of
+ * https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19180530): each is a boundary,
+ * so the state just before the delete is always a restorable version.
+ */
+export const HISTORY_DELETE_OPERATIONS: readonly HistoryWriteOperation[] = Object.freeze(['deleteView', 'deleteFlow', 'deleteAsset'])
 
 /** Clause 01a11a5e-21c4-79f7-b6f9-4128d842c278: actor types and system actor ids. */
 export const HISTORY_ACTOR_TYPES = Object.freeze(['human', 'agent', 'system', 'external'] as const)

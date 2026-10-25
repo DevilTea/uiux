@@ -45,17 +45,19 @@ Sign in with the link `uiux dev` prints, then work from the sidebar (an icon rai
 Nitro serves `GET /api/health`, selected-Workspace point reads under `/api/resources/:kind/:key`, discovery endpoints under `/api/resources/list` and `/api/resources/search`, safe binary asset content delivery under `/api/assets/:id/content`, authoring endpoints under `/api/*`, the change-event stream `GET /api/events` (server-sent events), and MCP at `/mcp`. The Workbench lists canonical resources, displays their content and diagnostics, and reads them through the same selected-Workspace application facade used by HTTP and MCP. Every committed write, from HTTP or MCP, emits a content-free `resource.changed` / `resource.removed` event (`lock.changed` for edit leases, `access.changed` for the roster), so an open Workbench re-reads what changed without a reload; edits made to Workspace files outside UIUX are not detected.
 
 MCP exposes compact read-only discovery plus domain-specific authoring operations with revision CAS:
-- Views: `create_view`, `update_view_spec`, `update_view_structure`, `update_view_metadata`
+- Views: `create_view`, `update_view_spec`, `update_view_structure`, `update_view_metadata`, `delete_view`
 - Workspace settings: `update_workspace_settings`
 - Locales: `create_locale`, `update_locale`
-- UX Flows: `create_flow`, `update_flow`
+- UX Flows: `create_flow`, `update_flow`, `delete_flow`
 - Reviews: `create_review_thread`, `append_review_message`, `edit_review_message`, `reanchor_review_thread`, `set_review_display_hint`, `submit_ready_for_review`, `resolve_review_thread`, `reopen_review_thread`, `promote_review_to_decision`, `create_decision_from_review`, `retract_review_thread`
 - Decisions: `defer_decision`, `decide_decision` (needs the human-only key `decisions.decide`, so a Workbench session), `reopen_decision`
-- Authored Assets: `create_asset`, `replace_asset`
+- Authored Assets: `create_asset`, `replace_asset`, `delete_asset`
 - Agent edit leases: `acquire_lock`, `release_lock`
 - Version history: `list_versions`, `get_version_diff`, `create_checkpoint`, `restore_resource_version`, plus the read-only Resource `uiux://version/{id}`
 
 These are domain-specific operations rather than generic Resource writes or JSON Patch surfaces.
+
+Deleting a View, UX Flow or Asset, removing a Variant name with `update_view_structure`, and removing or renaming a viewport or theme key with `update_workspace_settings` change what other resources refer to. Each analyzes the reference impact first (Review threads, UX Flow steps, View Spec references, `$asset` bindings and render contexts) and, when it is not empty, writes nothing and answers `impact_acknowledgement_required` (HTTP 409) with `impacts`; call again with `acknowledgeImpact: true` to write. Nothing that refers to the changed resource is rewritten: its references keep their target and are reported as dangling diagnostics. The same applies on HTTP (`DELETE /api/views|flows|assets/:id` with `{ expectedRevision, acknowledgeImpact? }`), where the Workbench lists the impact and asks for confirmation.
 
 When the Workspace is momentarily busy (another UIUX operation holds the persistence lock past its wait budget), `/api/*` answers `503` with `Retry-After` and the retryable code `persistence.busy`; on `/mcp` a tool returns the same code as an error result and a resource read as a JSON-RPC error. Nothing was read or written, so the same request can be retried. The Workbench retries reads once on its own. Handoff assessment, Handoff export and formal capture on a Workspace at another `schemaVersion` return `422` `blocked` with `workspace.schema_unsupported`.
 

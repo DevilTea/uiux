@@ -8,6 +8,7 @@ import { viewPath } from '../../utils/workbench-routes'
 import { blobToBase64, isImageMediaType } from '../../utils/workspace-authoring'
 import type { AssetEntry } from './asset-types'
 import AuthoringConflictAlert from './AuthoringConflictAlert.vue'
+import DeleteResourceAction from '../workbench/DeleteResourceAction.vue'
 import LockBadge from '../workbench/LockBadge.vue'
 import LockedSaveAlert from '../workbench/LockedSaveAlert.vue'
 import AuthoringErrorAlert from './AuthoringErrorAlert.vue'
@@ -20,7 +21,9 @@ import { copyText } from '../../utils/copy-text'
  * One Asset (brief g): preview, metadata, "Replace content…", the Views that bind it, and its
  * diagnostics. Both metadata edits and content replacement go through the Asset replace
  * operation (`PUT /api/assets/:id`) with the Asset's `expectedRevision`; a metadata-only edit
- * resends the current bytes unchanged. Unused Assets are listed, never removed (Part 9 #6).
+ * resends the current bytes unchanged. An Asset is never removed automatically (Rule
+ * 01a115cd-c13a-7769-b289-2e13417438e5); "Delete" removes it on request, after the `$asset`
+ * bindings that would dangle are listed and acknowledged (Rule 01a1144e-50dd-7b92-aa5e-e175e34bf424).
  */
 const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{
@@ -121,6 +124,11 @@ async function save(): Promise<void> {
 	finally {
 		saving.value = false
 	}
+}
+
+function onDeleted(): void {
+	open.value = false
+	emit('changed', props.entry.key)
 }
 
 async function reloadTheirs(): Promise<void> {
@@ -397,8 +405,16 @@ const details = computed(() => [
         />
         <div
           v-else
-          class="flex justify-end"
+          class="flex items-center justify-between gap-2"
         >
+          <DeleteResourceAction
+            v-if="canEdit"
+            kind="asset"
+            :resource-key="entry.key"
+            :name="entry.name"
+            @deleted="onDeleted"
+          />
+          <span v-else />
           <UButton
             v-if="contentUrl"
             :to="contentUrl"

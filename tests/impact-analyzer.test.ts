@@ -4,7 +4,7 @@ import { renderInputDigest } from '../src/domain/evidence/render-input-digest'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import { RENDER_INPUT_CHANGED_REASON } from '../src/domain/evidence/staleness'
 import { resourceIdentityKey } from '../src/domain/history/summary'
-import { analyzeImpact, bindingReferences, withResource, widgetIds, type ImpactWorkspace } from '../src/domain/impact'
+import { analyzeImpact, bindingReferences, variantImpact, withResource, widgetIds, type ImpactWorkspace } from '../src/domain/impact'
 
 /**
  * The standalone reference-impact analyzer (issue #132 B6, reusable by issue #75): one case per
@@ -48,6 +48,56 @@ function workspace(overrides: Partial<ImpactWorkspace> = {}): ImpactWorkspace {
 function thread(id: string, anchor: unknown, extra: Readonly<Record<string, unknown>> = {}) {
 	return { id, anchor, variantNames: [], status: 'open', messages: [], history: [], submissions: [], ...extra }
 }
+
+describe('Variants and View references (issue #75)', () => {
+	const withVariants = (names: readonly string[], spec: unknown = { decisions: [] }) => view([{ type: 'Button', id: 'pay' }], { variants: Object.fromEntries(names.map(name => [name, { state: {} }])), spec })
+	function picture(overrides: Partial<ImpactWorkspace> = {}): ImpactWorkspace {
+		return workspace({
+			views: new Map<string, unknown>([[VIEW, withVariants(['dark', 'compact'])], [OTHER_VIEW, { ...withVariants([]), id: OTHER_VIEW, spec: { decisions: [], references: [{ type: 'view', viewId: VIEW, variantName: 'dark' }, { type: 'view', viewId: VIEW }, { type: 'external', uri: 'https://example.com' }] } }]]),
+			flows: new Map<string, unknown>([[FLOW, { id: FLOW, steps: { [STEP]: { target: { viewId: VIEW, variantName: 'dark' } }, other: { target: { viewId: VIEW } } } }]]),
+			reviews: [thread(THREAD, { viewId: VIEW, widgetId: 'pay' }, { variantNames: ['dark', 'compact'], status: 'ready-for-review' }), thread(OTHER_THREAD, { viewId: VIEW, widgetId: 'pay' }, { variantNames: ['compact'] }), thread('55555555-5555-4555-8555-555555555555', { scope: 'workspace' }, { variantNames: ['dark'] })],
+			...overrides,
+		})
+	}
+
+	it('lists the threads, Flow steps and View references that name a Variant that is removed', () => {
+		const before = picture()
+		const after = withResource(before, { kind: 'view', key: VIEW }, withVariants(['compact']), 'r_view_2')
+		expect(variantImpact(before, after)).toEqual([
+			{ category: 'review_variant_stale', reviewId: THREAD, reviewStatus: 'ready-for-review', viewId: VIEW, variantNames: ['dark'] },
+			{ category: 'flow_step_target_missing', flowId: FLOW, stepId: STEP, viewId: VIEW, missing: 'variant', variantName: 'dark' },
+			{ category: 'view_reference_dangling', viewId: OTHER_VIEW, targetViewId: VIEW, missing: 'variant', variantName: 'dark', pointer: '/spec/references/0' },
+		])
+		expect(analyzeImpact(before, after).filter(item => item.category === 'review_variant_stale')).toHaveLength(1)
+	})
+
+	it('lists a rename as the old name removed and says nothing about a Variant nobody names', () => {
+		const before = picture()
+		const renamed = withResource(before, { kind: 'view', key: VIEW }, withVariants(['night', 'compact']), 'r_view_2')
+		expect(variantImpact(before, renamed).map(item => item.category)).toEqual(['review_variant_stale', 'flow_step_target_missing', 'view_reference_dangling'])
+		const unnamed = picture({ reviews: [], flows: new Map(), views: new Map<string, unknown>([[VIEW, withVariants(['dark', 'spare'])]]) })
+		expect(variantImpact(unnamed, withResource(unnamed, { kind: 'view', key: VIEW }, withVariants(['dark']), 'r_view_2'))).toEqual([])
+	})
+
+	it('lists what names a View that is deleted, and skips what already dangled or never resolved', () => {
+		const before = picture()
+		const after = withResource(before, { kind: 'view', key: VIEW }, undefined, undefined)
+		const items = variantImpact(before, after)
+		expect(items.filter(item => item.category === 'flow_step_target_missing')).toEqual([
+			{ category: 'flow_step_target_missing', flowId: FLOW, stepId: STEP, viewId: VIEW, missing: 'view' },
+			{ category: 'flow_step_target_missing', flowId: FLOW, stepId: 'other', viewId: VIEW, missing: 'view' },
+		])
+		expect(items.filter(item => item.category === 'view_reference_dangling')).toEqual([
+			{ category: 'view_reference_dangling', viewId: OTHER_VIEW, targetViewId: VIEW, missing: 'view', pointer: '/spec/references/0' },
+			{ category: 'view_reference_dangling', viewId: OTHER_VIEW, targetViewId: VIEW, missing: 'view', pointer: '/spec/references/1' },
+		])
+		// A thread anchored in the deleted View is reported by its anchor, not as a stale Variant.
+		expect(items.some(item => item.category === 'review_variant_stale')).toBe(false)
+		expect(analyzeImpact(before, after).filter(item => item.category === 'review_anchor_invalidated')).toHaveLength(2)
+		// A dangling reference stays unreported: the View was already gone before.
+		expect(variantImpact(after, after)).toEqual([])
+	})
+})
 
 describe('helpers', () => {
 	it('collects Widget ids through slots, the RootShell included', () => {

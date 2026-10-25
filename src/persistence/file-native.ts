@@ -1833,6 +1833,34 @@ export class AuthoredAssetFileRepository implements MutableResourceRepository<st
 		})
 	}
 
+	/**
+	 * Deletes the whole authored Asset (issue #75): its `asset.json` and its content file, in one
+	 * journaled transaction under the exclusive lock, after the revision check. An Asset whose directory
+	 * holds anything else (an invalid entry) loses only its regular files, and the directory is removed
+	 * when that leaves it empty.
+	 */
+	async deleteIfRevision<Refusal>(input: Readonly<{
+		key: string
+		expectedRevision: ResourceRevision
+		/** Runs inside the exclusive lock after the revision check; a returned refusal is answered and nothing is deleted. */
+		guard?: () => Refusal | undefined | Promise<Refusal | undefined>
+	}>): Promise<DeleteIfRevisionResult<Refusal>> {
+		return this.persistence.withLock(async () => {
+			await this.persistence.assertWritableUnlocked()
+			const current = await this.readAssetUnlocked(input.key)
+			if (!current) return { status: 'not_found' }
+			if (input.expectedRevision !== current.revision) return { status: 'conflict', currentRevision: current.revision }
+			const refusal = await input.guard?.()
+			if (refusal !== undefined) return { status: 'refused', refusal }
+			const directory = assetDirectoryRelativePath(input.key)
+			const changes: FileChange[] = [{ path: assetMetadataRelativePath(input.key) }]
+			for (const filename of current.actualContentFilenames) changes.push({ path: `${directory}/${filename}` })
+			await commitCanonicalWrite(this.persistence, changes, () => this.persistence.applyFileTransaction(changes, 'asset'))
+			await fs.rmdir(resolveWorkspacePath(this.persistence.root, directory)).catch(() => undefined)
+			return { status: 'deleted' }
+		})
+	}
+
 	private prepareCandidate(id: string, resource: AuthoredAssetResource): Readonly<{ metadataBytes: Buffer }> {
 		assetDirectoryRelativePath(id)
 		if (!isRecord(resource) || !isRecord(resource.metadata) || resource.metadata.id !== id)

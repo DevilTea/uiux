@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import { useI18n } from '#imports'
+import { useI18n, useRouter } from '#imports'
+import { useAuthoringAccess } from '../../composables/useAuthoringAccess'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useViewMetadataEditor } from '../../composables/useViewMetadataEditor'
 import { diagnosticText } from '../../utils/diagnostic-copy'
+import DeleteResourceAction from './DeleteResourceAction.vue'
 import LockBadge from './LockBadge.vue'
 import LockedSaveAlert from './LockedSaveAlert.vue'
 
@@ -11,14 +13,19 @@ import LockedSaveAlert from './LockedSaveAlert.vue'
  * The View page header: the View's name as the page heading, its `feature` tag, and the edit lease
  * badge. A member with `views.write` renames the View and sets or clears its tag in place, on every
  * device tier (Rule 01a1537a-333f-7246-b39c-5feca6f4b3c7; renaming is not structural editing, so the
- * tablet and phone read-only Rules 01a116f0-9059 and 01a116f0-909c leave it out).
+ * tablet and phone read-only Rules 01a116f0-9059 and 01a116f0-909c leave it out). Deleting the View is
+ * structural: it is offered on a desktop window to a member with `views.write` (Rule
+ * 01a1144e-50dd-7b92-aa5e-e175e34bf424), after the impact is shown and acknowledged.
  */
 const props = defineProps<{ viewId: string }>()
 
 const { t } = useI18n()
+const router = useRouter()
 const { selectedView } = useWorkbench()
 const editor = useViewMetadataEditor()
 const { editing, draft, saving, conflict, locked, invalid, nameError, canRename, heldByOther } = editor
+
+const { canEdit: canDelete } = useAuthoringAccess('views.write', () => ({ kind: 'view', key: props.viewId }))
 
 const root = ref<HTMLElement>()
 const view = computed(() => selectedView.value?.key === props.viewId ? selectedView.value : undefined)
@@ -113,11 +120,19 @@ const conflictActions = computed(() => [
           />
         </span>
       </UTooltip>
-      <LockBadge
-        kind="view"
-        :resource-key="viewId"
-        class="ms-auto"
-      />
+      <div class="ms-auto flex items-center gap-1">
+        <DeleteResourceAction
+          v-if="canDelete && view"
+          kind="view"
+          :resource-key="viewId"
+          :name="name"
+          @deleted="router.push('/')"
+        />
+        <LockBadge
+          kind="view"
+          :resource-key="viewId"
+        />
+      </div>
     </div>
 
     <template v-else>
