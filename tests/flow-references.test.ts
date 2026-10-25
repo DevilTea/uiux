@@ -38,9 +38,9 @@ describe('Flow reference diagnostics (Rule 01a11544-629c-7dbf-8e41-36c8e37537b3)
 		}
 		const diagnostics = await flowReferenceDiagnostics(flow, async id => id === VIEW_ID ? view(['empty'], ['root', 'go']) : null)
 		expect(diagnostics.map(d => [d.code, d.path])).toEqual([
-			['reference.missing_variant', `/steps/${ENTRY}/target/variantName`],
-			['reference.missing_widget', `/steps/${ENTRY}/transitions/0/trigger/widgetId`],
-			['reference.missing_view', `/steps/${SECOND}/target/viewId`],
+			['flow.missing_variant', `/steps/${ENTRY}/target/variantName`],
+			['flow.missing_widget', `/steps/${ENTRY}/transitions/0/trigger/widgetId`],
+			['flow.missing_view', `/steps/${SECOND}/target/viewId`],
 		])
 		expect(flow.steps[ENTRY].target.variantName).toBe('loading')
 	})
@@ -74,7 +74,7 @@ describe('Flow reads report reference diagnostics', () => {
 		await persistence.flows.create(FLOW_ID, flow)
 
 		const read = await app.readPointResource('flow', FLOW_ID)
-		expect(read?.diagnostics.map(d => d.code).sort()).toEqual(['reference.missing_variant', 'reference.missing_view', 'reference.missing_widget'])
+		expect(read?.diagnostics.map(d => d.code).sort()).toEqual(['flow.missing_variant', 'flow.missing_view', 'flow.missing_widget'])
 		expect(read?.resource).toEqual(flow)
 
 		const listed = await app.listPointResources({ kinds: ['flow'], limit: 10 })

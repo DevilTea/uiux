@@ -2363,6 +2363,9 @@
       "forbidden_transition_identity": "轉場的來源取自所屬的步驟。",
       "immutable_id_changed": "Flow 的識別碼無法變更。",
       "invalid_scenario_ref": "情境參照無效。",
+      "missing_variant": "有步驟指向其 View 沒有的 Variant。",
+      "missing_view": "有步驟指向不存在的 View。",
+      "missing_widget": "有轉場由其 View 沒有的 Widget 觸發。",
       "unreachable_step": "有步驟無法從起始步驟抵達。"
     },
     "view": {

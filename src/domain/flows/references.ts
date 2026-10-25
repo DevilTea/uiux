@@ -4,8 +4,8 @@ import { isFullUuid, isRecord, jsonPointer, type Diagnostic } from '../validatio
 /**
  * Rule 01a11544-629c-7dbf-8e41-36c8e37537b3: the structured diagnostics of a Flow's invalid View, Variant
  * and Widget references. The authored reference is never rebound or rewritten; it is only reported, at
- * the path of the reference. The codes are the Workbench's reference-check codes (`app/utils/flow-graph.ts`)
- * and, like the `flow.*` codes, are not part of any Contract.
+ * the path of the reference. Like the other `flow.*` codes, they are not part of any Contract
+ * (owner ruling 2026-10-07).
  *
  * `target` answers what the Workspace holds for a View: `null` when it does not exist, otherwise the
  * Variant names and Widget IDs it knows (a member is left out while unknown, such as for a View that
@@ -27,16 +27,16 @@ export async function flowReferenceDiagnostics(
 		const known = await target(viewId)
 		const stepPath = jsonPointer('/steps', stepId)
 		if (known === null) {
-			diagnostics.push({ code: 'reference.missing_view', path: `${stepPath}/target/viewId`, message: `The step targets View ${viewId}, which does not exist in this Workspace.` })
+			diagnostics.push({ code: 'flow.missing_view', path: `${stepPath}/target/viewId`, message: `The step targets View ${viewId}, which does not exist in this Workspace.` })
 			continue
 		}
 		if (typeof variantName === 'string' && variantName !== '' && known.variantNames && !known.variantNames.has(variantName))
-			diagnostics.push({ code: 'reference.missing_variant', path: `${stepPath}/target/variantName`, message: `The step targets Variant "${variantName}", which View ${viewId} does not have.` })
+			diagnostics.push({ code: 'flow.missing_variant', path: `${stepPath}/target/variantName`, message: `The step targets Variant "${variantName}", which View ${viewId} does not have.` })
 		if (!known.widgetIds || !Array.isArray(step.transitions)) continue
 		step.transitions.forEach((transition, index) => {
 			const widgetId = isRecord(transition) && isRecord(transition.trigger) ? transition.trigger.widgetId : undefined
 			if (typeof widgetId !== 'string' || widgetId === '' || known.widgetIds!.has(widgetId)) return
-			diagnostics.push({ code: 'reference.missing_widget', path: `${jsonPointer(`${stepPath}/transitions`, index)}/trigger/widgetId`, message: `The transition is triggered by Widget ${widgetId}, which View ${viewId} does not have.` })
+			diagnostics.push({ code: 'flow.missing_widget', path: `${jsonPointer(`${stepPath}/transitions`, index)}/trigger/widgetId`, message: `The transition is triggered by Widget ${widgetId}, which View ${viewId} does not have.` })
 		})
 	}
 	return diagnostics
