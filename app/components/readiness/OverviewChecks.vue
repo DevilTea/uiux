@@ -20,6 +20,8 @@ import {
 	FINDING_SOURCES,
 	GROUP_BYS,
 	groupFindings,
+	previewReportTruncated,
+	previewSourceStates,
 	previewTranslationFindings,
 	runtimeErrorFindings,
 	sectionFindings,
@@ -35,6 +37,7 @@ import {
 	type FindingSource,
 	type GroupBy,
 	type PreviewFindingText,
+	unevaluatedCount,
 	type ViewUsage,
 } from '../../utils/checks'
 import { flowPath, localeCellLocation, viewLocation } from '../../utils/workbench-routes'
@@ -480,8 +483,11 @@ const previewFindings = computed<readonly Finding[]>(() => {
 	const widgetTypes = selectedViewId.value === report.viewId && widgetTreeResult.value?.status === 'valid'
 		? new Map(flattenWidgetTree(widgetTreeResult.value.root).map(widget => [widget.id, widget.type] as const))
 		: undefined
-	const input = { resource: { kind: 'view', key: view.key, name: view.name } satisfies FindingResource, ...(widgetTypes ? { widgetTypes } : {}), text: previewText, checkState: previewState.value }
-	return [...previewTranslationFindings(report, input), ...runtimeErrorFindings(report, input)]
+	const input = { resource: { kind: 'view', key: view.key, name: view.name } satisfies FindingResource, ...(widgetTypes ? { widgetTypes } : {}), text: previewText }
+	return [
+		...previewTranslationFindings(report, { ...input, checkState: previewStates.value.translation }),
+		...runtimeErrorFindings(report, { ...input, checkState: previewStates.value.runtime }),
+	]
 })
 
 const findings = computed<readonly Finding[]>(() => {
@@ -536,11 +542,11 @@ const kitState = computed<CheckState>(() => {
 	return kitError.value ? 'failed' : 'not_checked'
 })
 
-/** The check state of the Preview's sources: a report of a Preview that is gone is incomplete, never completed. */
-const previewState = computed<CheckState>(() => {
-	const live = preview.liveChecks.value
-	return live.state === 'stale' ? 'incomplete' : live.state
-})
+/**
+ * The check states of the Preview's sources: failed when it could not evaluate, incomplete when its
+ * report says declared Properties were not evaluated (or the Preview is gone), completed otherwise.
+ */
+const previewStates = computed(() => previewSourceStates(preview.liveChecks.value))
 
 /** What the Preview's rows say about their scope: where they come from, or why nothing is known. */
 const previewNote = computed(() => {
@@ -554,6 +560,15 @@ const previewNote = computed(() => {
 		locale: live.locale ?? '—',
 		time: fmt.time(live.receivedAt),
 	})
+})
+
+/** What the Preview's translation row adds: how many declared Properties its Runtime did not evaluate, whose warnings are unknown. */
+const previewCoverageNote = computed(() => {
+	const report = preview.liveChecks.value.report
+	const n = unevaluatedCount(report)
+	if (n === 0) return undefined
+	// A cut report names only some of them: the count is a lower bound.
+	return t(previewReportTruncated(report) ? 'checks.sources.previewUnevaluatedAtLeast' : 'checks.sources.previewUnevaluated', { n }, n)
 })
 
 const sourceRows = computed<readonly SourceRow[]>(() => {
@@ -571,8 +586,8 @@ const sourceRows = computed<readonly SourceRow[]>(() => {
 		},
 		{ id: 'product-kit', state: kitState.value, count: countOf('product-kit'), ...(!canRunKitChecks.value ? { requiredKey: 'evidence.capture' } : {}) },
 		// The Preview's sources follow the live Preview, not Run Checks: no Preview reporting means not checked.
-		{ id: 'preview-translation', state: previewState.value, count: countOf('preview-translation'), note: previewNote.value },
-		{ id: 'runtime', state: previewState.value, count: countOf('runtime'), note: previewNote.value },
+		{ id: 'preview-translation', state: previewStates.value.translation, count: countOf('preview-translation'), note: [previewNote.value, previewCoverageNote.value].filter(Boolean).join(' ') || undefined },
+		{ id: 'runtime', state: previewStates.value.runtime, count: countOf('runtime'), note: previewNote.value },
 	]
 })
 
