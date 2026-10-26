@@ -62,6 +62,12 @@ export type BridgeReceiveResult =
 	 */
 	| Readonly<{ status: 'generation-failed'; message: FailureReportMessage }>
 	| Readonly<{ status: 'invalid'; diagnostics: readonly Diagnostic[] }>
+	/**
+	 * Only a runtime returns it: Workbench traffic of its own session and generation that violates
+	 * the generation's state (Clause 01a11a70-4261-7155-8aed-28bed7a89064). `detail` is display-safe
+	 * text for `reportInvalidState`, never the payload.
+	 */
+	| Readonly<{ status: 'invalid-state'; detail: string }>
 
 export type WorkbenchBridgeHooks = Readonly<{
 	/**
@@ -375,6 +381,8 @@ export class RuntimePreviewProtocolBridge {
 	private ackObserved = false
 	/** A generation-scoped `failure.report` was sent: it is the generation's last envelope. */
 	private generationEnded = false
+	/** A generation-scoped report decided before the acknowledgement, sent when it arrives. */
+	private heldReport?: FailureReportMessage
 	private readonly reportedWorkSequences = new Set<number>()
 	/** The highest `checks.report` `sequence` sent: each report of a generation carries a higher one. */
 	private lastChecksSequence?: number
@@ -411,9 +419,15 @@ export class RuntimePreviewProtocolBridge {
 
 	receive(input: unknown): BridgeReceiveResult {
 		const type = messageType(input)
-		if (type === 'capability.declare') return { status: 'wrong-direction' }
 		// Correlation before the full decode, as on the Workbench side.
 		const correlation = envelopeCorrelation(input)
+		if (type === 'capability.declare') {
+			// Only the runtime declares. Once its generation is acknowledged, a declaration of that
+			// generation from the Workbench is a handshake opened again: an established violation.
+			if (this.ackObserved && correlation?.previewSessionId === this.previewSessionId && correlation.runtimeGenerationId === this.runtimeGenerationId)
+				return { status: 'invalid-state', detail: 'capability.declare after capability.ack' }
+			return { status: 'wrong-direction' }
+		}
 		if (correlation && correlation.previewSessionId !== this.previewSessionId) return { status: 'stale-session' }
 		if (correlation?.runtimeGenerationId !== undefined && correlation.runtimeGenerationId !== this.runtimeGenerationId)
 			return { status: 'stale-generation' }
@@ -423,7 +437,7 @@ export class RuntimePreviewProtocolBridge {
 			if (!targeting.ok) return { status: 'invalid', diagnostics: targeting.diagnostics }
 			if (isTargetingRuntimeMessage(targeting.value)) return { status: 'wrong-direction' }
 			const gate = this.runtimeGate(targeting.value)
-			if (gate) return { status: gate }
+			if (gate) return this.gated(gate, targeting.value.type)
 			return { status: 'accepted', message: targeting.value }
 		}
 		if (isFailureReportMessageType(type) || isChecksReportMessageType(type)) return { status: 'wrong-direction' }
@@ -433,7 +447,7 @@ export class RuntimePreviewProtocolBridge {
 			if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
 			if (decoded.value.type !== 'widget.event.arm') return { status: 'wrong-direction' }
 			const gate = this.runtimeGate(decoded.value)
-			if (gate) return { status: gate }
+			if (gate) return this.gated(gate, decoded.value.type)
 			return { status: 'accepted', message: decoded.value }
 		}
 
@@ -441,7 +455,7 @@ export class RuntimePreviewProtocolBridge {
 		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
 		if (!isGeometryRequest(decoded.value)) return { status: 'wrong-direction' }
 		const gate = this.runtimeGate(decoded.value)
-		if (gate) return { status: gate }
+		if (gate) return this.gated(gate, decoded.value.type)
 		// A runtime that did not declare `geometry.reveal` does not know the command: it drops it without
 		// effect, as it drops any unknown type of an acknowledged generation (Clause 01a11a59-d728-751f-bbac-287a77b75610).
 		if (decoded.value.type === 'geometry.reveal' && !this.declaration.features.includes(REVEAL_GEOMETRY_FEATURE)) return { status: 'gated' }
@@ -538,6 +552,25 @@ export class RuntimePreviewProtocolBridge {
 		})
 	}
 
+	/**
+	 * Reports an established violation of the generation's state in the Workbench's traffic, as a
+	 * generation-scoped `protocol.invalid_state` (Clause 01a11a70-4261-7155-8aed-28bed7a89064): what
+	 * `receive` returned as `invalid-state`. A report before the acknowledgement is held and sent
+	 * once it arrives, because the runtime completes the handshake first.
+	 */
+	reportInvalidState(detail: string): BridgeSendResult {
+		return this.reportGenerationFailure('protocol', 'protocol.invalid_state', detail)
+	}
+
+	/**
+	 * Reports that the runtime itself failed for good, as a generation-scoped `runtime.unavailable`
+	 * (Clause 01a11a70-4261-7155-8aed-28bed7a89064). The detail names a kind of failure, never an
+	 * exception's message or stack.
+	 */
+	reportRuntimeUnavailable(detail?: string): BridgeSendResult {
+		return this.reportGenerationFailure('runtime', 'runtime.unavailable', detail)
+	}
+
 	sendGeometry(message: GeometryResponseMessage): BridgeSendResult {
 		const decoded = validateGeometryMessage(message)
 		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
@@ -563,7 +596,33 @@ export class RuntimePreviewProtocolBridge {
 		if (decoded.value.context.previewSessionId !== this.previewSessionId) return { status: 'stale-session' }
 		if (decoded.value.context.runtimeGenerationId !== this.runtimeGenerationId) return { status: 'stale-generation' }
 		this.ackObserved = true
+		const held = this.heldReport
+		this.heldReport = undefined
+		if (held) this.sendFailureReport(held)
 		return { status: 'accepted', message: decoded.value }
+	}
+
+	/** A generation-scoped report; the one a generation sends is held until its acknowledgement when it comes before. */
+	private reportGenerationFailure(category: 'runtime' | 'protocol', reason: string, detail?: string): BridgeSendResult {
+		const bounded = detail?.slice(0, 200)
+		const message: FailureReportMessage = {
+			type: 'failure.report',
+			context: { previewSessionId: this.previewSessionId, runtimeGenerationId: this.runtimeGenerationId },
+			payload: { category, reason, ...(bounded ? { detail: bounded } : {}) },
+		}
+		if (!this.ackObserved && !this.generationEnded && !this.heldReport && this.declaration.features.includes(FAILURE_REPORTS_FEATURE)) {
+			const decoded = validateFailureReportMessage(message)
+			if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
+			this.heldReport = decoded.value
+			return { status: 'gated' }
+		}
+		return this.sendFailureReport(message)
+	}
+
+	/** A traffic result for a message that the runtime gate refused: before the acknowledgement it is out of order, an established violation. */
+	private gated(gate: 'gated' | 'stale-session' | 'stale-generation', type: string): BridgeReceiveResult {
+		if (gate === 'gated' && !this.ackObserved) return { status: 'invalid-state', detail: `${type} before capability.ack` }
+		return { status: gate }
 	}
 
 	private runtimeGate(message: GeometryMessage | TargetingMessage | WidgetEventMessage | FailureReportMessage | ChecksReportMessage): 'gated' | 'stale-session' | 'stale-generation' | undefined {

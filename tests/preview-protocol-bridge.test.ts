@@ -72,7 +72,8 @@ describe('Preview protocol bridge', () => {
 
 		workbench.receive(runtime.declareCapabilities())
 		expect(workbench.sendGeometry(request)).toEqual({ status: 'sent' })
-		expect(runtime.receive(request)).toEqual({ status: 'gated' })
+		// Traffic of its own generation before the ACK is out of order: an established violation (issue #339).
+		expect(runtime.receive(request)).toEqual({ status: 'invalid-state', detail: 'geometry.acquire.request before capability.ack' })
 		expect(runtime.receive(workbenchOutbound[0])).toMatchObject({ status: 'accepted' })
 		expect(runtime.receive(request)).toMatchObject({ status: 'accepted', message: request })
 	})

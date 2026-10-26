@@ -386,6 +386,9 @@ function initBridge() {
 					},
 				})
 			},
+			// A frame pass that threw ends the producer for good: the generation reports itself unavailable
+			// (Clause 01a11a70-4261-7155-8aed-28bed7a89064, issue #339).
+			reportFailure: (detail) => { bridge.reportRuntimeUnavailable(`geometry producer failed: ${detail}`) },
 			// `regionStatus` goes in a report only when this runtime declared `geometry.region-status`.
 			regionStatus: declaredFeatures().includes(REGION_STATUS_GEOMETRY_FEATURE),
 			measurer: createDomGeometryMeasurer({ document }),
@@ -700,6 +703,9 @@ function receiveWire(input: unknown) {
 	// in the Workbench's traffic: the generation ends with one `protocol.invalid_message` report
 	// (Clause 01a11a70-4261-7155-8aed-28bed7a89064). The bridge reports nothing for stale traffic.
 	if (bridgeResult.status === 'invalid') runtimeBridge.reportInvalidTraffic(input, bridgeResult.diagnostics)
+	// Traffic of this generation out of order (before its acknowledgement, or a declaration after it) is an
+	// established violation of the generation's state: one `protocol.invalid_state` report.
+	if (bridgeResult.status === 'invalid-state') runtimeBridge.reportInvalidState(bridgeResult.detail)
 	if (bridgeResult.status !== 'accepted') return
 	const message = bridgeResult.message
 	if (message.type === 'capability.ack') handshakeStatus.value = 'open'
