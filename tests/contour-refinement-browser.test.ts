@@ -135,7 +135,7 @@ function reportWorkFailure(frame: Frame, request: WireRecord): Promise<void> {
 			context: work.context,
 			payload: {
 				category: 'runtime',
-				reason: 'runtime.contour_work_failed',
+				reason: 'runtime.unavailable',
 				sequence: work.payload.sequence,
 				...(work.payload.baseSnapshotVersion !== undefined ? { baseSnapshotVersion: work.payload.baseSnapshotVersion } : {}),
 			},
@@ -244,7 +244,7 @@ describe('Contour precision and refinement in the Workbench', () => {
 			const diagnostic = page.locator('[data-preview-failure]')
 			await diagnostic.waitFor({ timeout: 10_000 })
 			expect(await diagnostic.getAttribute('data-category')).toBe('runtime')
-			expect(await diagnostic.getAttribute('data-reason')).toBe('runtime.contour_work_failed')
+			expect(await diagnostic.getAttribute('data-reason')).toBe('runtime.unavailable')
 			await page.waitForSelector('[data-precision-unavailable]')
 			expect(await page.locator('[data-overlay-selection]').count()).toBe(0)
 			expect(new URL(page.url()).searchParams.get('widget')).toBe(WIDGET_ID)
@@ -272,6 +272,26 @@ describe('Contour precision and refinement in the Workbench', () => {
 			await zoomTo(page, '200%')
 			await page.waitForSelector('[data-overlay-selection]', { timeout: 15_000 })
 			expect((await requestsOf(frame)).length).toBeGreaterThan(requests.length)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('clears the latch with an explicit Retry Preview, which starts a new generation', async () => {
+		const { context, page, frame } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`)
+		try {
+			await page.waitForSelector('[data-blueprint="type"]', { timeout: 15_000 })
+			await setMode(page, 'hold')
+			await zoomTo(page, '200%')
+			const work = (await settledRequests(frame)).at(-1)!
+			await reportWorkFailure(frame, work)
+			const diagnostic = page.locator('[data-preview-failure]')
+			await diagnostic.waitFor({ timeout: 10_000 })
+			const declarations = (await received(page, 'capability.declare')).length
+			await page.locator('[data-preview-retry]').click()
+			await expect.poll(async () => (await received(page, 'capability.declare')).length, { timeout: 15_000 }).toBeGreaterThan(declarations)
+			await expect.poll(() => diagnostic.count(), { timeout: 15_000 }).toBe(0)
+			await setMode(page, 'pass')
+			await page.waitForSelector('[data-overlay-selection]', { timeout: 15_000 })
 		}
 		finally { await context.close() }
 	}, 90_000)

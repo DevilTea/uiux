@@ -71,7 +71,7 @@ function failureReport(request: FullContourRequest | PartialContourRequest, over
 		context: { ...request.context },
 		payload: {
 			category: 'runtime',
-			reason: 'runtime.contour_work_failed',
+			reason: 'runtime.unavailable',
 			sequence: overrides.sequence ?? request.payload.sequence,
 			...(request.type === 'contour.partial.request' ? { baseSnapshotVersion: request.payload.baseSnapshotVersion } : {}),
 		},

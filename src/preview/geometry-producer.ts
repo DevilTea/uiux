@@ -339,7 +339,9 @@ export class RuntimeGeometryProducer {
 					context: { ...workContext(stream, request.context.geometryRevision) },
 					sequence: request.payload.sequence,
 					...(request.type === 'contour.partial.request' ? { baseSnapshotVersion: request.payload.baseSnapshotVersion } : {}),
-					reason: 'runtime.contour_work_failed',
+					// No new reason code (Discussion #131 decision 10): with work-scope correlation,
+					// `runtime.unavailable` means that this refinement is permanently unavailable.
+					reason: 'runtime.unavailable',
 					detail: cause instanceof Error ? cause.name : 'Error',
 				})
 				continue

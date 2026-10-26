@@ -215,7 +215,7 @@ describe('Runtime contour work', () => {
 			context: contextOf(1),
 			sequence: 4,
 			baseSnapshotVersion: 6,
-			reason: 'runtime.contour_work_failed',
+			reason: 'runtime.unavailable',
 			detail: 'Error',
 		}])
 	})
