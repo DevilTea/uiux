@@ -62,6 +62,11 @@ export type RegionStatus = 'translucent' | 'unavailable'
 export const REGION_STATUSES: readonly RegionStatus[] = Object.freeze(['translucent', 'unavailable'])
 /** Open geometry streams per runtime generation, counting every consumer (decision 6). */
 export const MAX_TRACKED_WIDGETS = 64
+/**
+ * How long the Workbench waits for the response of one `contour.partial.request`: a request still
+ * unanswered then is an interrupted one (Clause 01a178bc-6de6-7baa-8e4a-a00a0c73f378).
+ */
+export const PARTIAL_CONTOUR_RESPONSE_TIMEOUT_MS = 5000
 export type ProtocolEnvelope<
 	Payload extends Readonly<Record<string, unknown>> = JsonObject,
 	Context extends ProtocolContext = ProtocolContext,

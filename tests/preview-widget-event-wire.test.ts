@@ -149,7 +149,8 @@ describe('widget.event.* through the protocol bridges', () => {
 		expect(parts.workbench.receive(declaration).status).toBe('ack-dispatched')
 		// The Workbench may arm once the ACK is dispatched; the runtime may report once it saw it.
 		expect(parts.workbench.sendWidgetEventArm(arm)).toEqual({ status: 'sent' })
-		expect(parts.runtime.receive(arm)).toEqual({ status: 'gated' })
+		// An arm of its own generation before the ACK is out of order (issue #339).
+		expect(parts.runtime.receive(arm)).toEqual({ status: 'invalid-state', detail: 'widget.event.arm before capability.ack' })
 		expect(parts.runtime.receive(parts.workbenchOut[0])).toMatchObject({ status: 'accepted' })
 		expect(parts.runtime.receive(arm)).toEqual({ status: 'accepted', message: arm })
 		expect(parts.runtime.sendWidgetEventOccurrence(occurrence)).toEqual({ status: 'sent' })

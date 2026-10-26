@@ -1,4 +1,4 @@
-import { computed, ref, shallowRef, watch } from 'vue'
+import { computed, onScopeDispose, ref, shallowRef, watch } from 'vue'
 import { useI18n } from '#imports'
 import { describeFetchError } from '../utils/fetch-error'
 import {
@@ -354,6 +354,8 @@ export function createPreviewSession(state: WorkbenchState) {
 			latchFailure = undefined
 		}
 	})
+	// The wait limit of a partial request is a timer: it ends with the scope.
+	onScopeDispose(() => refinement.dispose())
 	// The canvas publishes its measured mapping; a scale that makes a contour miss the display tolerance asks for finer ones.
 	watch(canvasMapping, state => refinement.setMapping(state.mapping), { immediate: true })
 	const NO_PRECISION: HighlightPrecision = Object.freeze({ status: 'none' })

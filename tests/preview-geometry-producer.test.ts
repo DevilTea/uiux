@@ -345,6 +345,51 @@ describe('Runtime geometry producer (multi-target streams)', () => {
 		expect(f.frames).toHaveLength(0)
 	})
 
+	// Clause 01a11a70-4261-7155-8aed-28bed7a89064 (issue #339): the runtime's own permanent failure.
+	it('stops for good and reports itself unavailable once when a frame pass throws', () => {
+		const frames: Array<() => void> = []
+		const failures: string[] = []
+		let broken = false
+		const producer = new RuntimeGeometryProducer({
+			send: () => {},
+			reportFailure: detail => failures.push(detail),
+			measurer: {
+				beginPass: () => {},
+				measure() {
+					if (broken) throw new TypeError('measure exploded')
+					return { rect: { x: 0, y: 0, width: 4, height: 4 }, regions: [] }
+				},
+				endPass: () => {},
+			},
+			requestFrame: (callback) => { frames.push(callback); return frames.length },
+			cancelFrame: () => {},
+		})
+		producer.setContext({ viewId })
+		producer.receive(acquire('a', 'n1'))
+		broken = true
+		producer.flush()
+		expect(failures).toEqual(['TypeError'])
+		// Nothing more runs: the producer is disposed, so no second report follows.
+		producer.flush()
+		expect(failures).toHaveLength(1)
+		expect(() => producer.receive(acquire('a', 'n2'))).toThrow()
+	})
+
+	it('lets a frame exception propagate when nothing is there to report it', () => {
+		const producer = new RuntimeGeometryProducer({
+			send: () => {},
+			measurer: { beginPass: () => {}, measure() { throw new TypeError('measure exploded') }, endPass: () => {} },
+			requestFrame: () => 1,
+			cancelFrame: () => {},
+		})
+		producer.setContext({ viewId })
+		producer.receive(acquire('a', 'n1'))
+		expect(() => producer.flush()).toThrow('measure exploded')
+		// Without failure.reports (a version frame, a harness) the producer is not disposed: it keeps serving.
+		expect(() => producer.receive(acquire('b', 'n2'))).not.toThrow()
+		expect(() => producer.flush()).toThrow('measure exploded')
+	})
+
 	it('stops all work on dispose', () => {
 		const f = fixture()
 		f.producer.receive(acquire('a', 'n1'))
